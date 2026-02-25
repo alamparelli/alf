@@ -56,17 +56,6 @@ func RunRestart() {
 	PrintCheck("ALF restarted")
 }
 
-func RunUpdate() {
-	dir := alfDir()
-	PrintInfo("Pulling latest image...")
-	dockerCompose(dir, "pull")
-	PrintCheck("Image updated")
-
-	PrintInfo("Restarting ALF...")
-	dockerCompose(dir, "up", "-d")
-	PrintCheck("ALF updated and running")
-}
-
 func RunLogs() {
 	dir := alfDir()
 	dockerCompose(dir, "logs", "-f")

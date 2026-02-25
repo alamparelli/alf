@@ -25,8 +25,8 @@ func main() {
 		cli.RunStop()
 	case "restart":
 		cli.RunRestart()
-	case "update":
-		cli.RunUpdate()
+	case "upgrade", "update":
+		cli.RunUpgrade(version)
 	case "logs":
 		cli.RunLogs()
 	case "status":
@@ -67,7 +67,7 @@ func printUsage() {
 	fmt.Println("  start     Start ALF (docker compose up)")
 	fmt.Println("  stop      Stop ALF (docker compose down)")
 	fmt.Println("  restart   Restart ALF")
-	fmt.Println("  update    Pull latest image and restart")
+	fmt.Println("  upgrade   Update CLI binary and Docker image")
 	fmt.Println("  logs      Follow ALF logs")
 	fmt.Println("  status    Show ALF status and versions")
 	fmt.Println("  secret    Manage secrets (list/set/remove)")

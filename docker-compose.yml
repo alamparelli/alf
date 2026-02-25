@@ -1,0 +1,18 @@
+services:
+  alf:
+    build: .
+    # image: ghcr.io/alamparelli/alf:latest  # uncomment for prod
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    env_file: .env
+    volumes:
+      - ./user-space:/home/alf/user-space:rw
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

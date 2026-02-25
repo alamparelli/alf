@@ -1,0 +1,23 @@
+# Binaries
+alf
+alf-daemon
+*.exe
+
+# Environment
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# User space (runtime data)
+user-space/

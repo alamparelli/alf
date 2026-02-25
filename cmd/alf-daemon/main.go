@@ -137,11 +137,24 @@ func askClaude(prompt, model string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%v: %s", err, stderr.String())
+	err := cmd.Run()
+
+	// Claude CLI may write output to stdout or stderr.
+	out := strings.TrimSpace(stdout.String())
+	if out == "" {
+		out = strings.TrimSpace(stderr.String())
 	}
 
-	return strings.TrimSpace(stdout.String()), nil
+	// If we got output, treat it as a valid response regardless of exit code.
+	if out != "" {
+		return out, nil
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("claude failed: %v", err)
+	}
+
+	return "", fmt.Errorf("claude returned empty response")
 }
 
 func readSecret(envVar string) string {

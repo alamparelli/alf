@@ -21,3 +21,4 @@ vendor/
 
 # User space (runtime data)
 user-space/
+.plans/

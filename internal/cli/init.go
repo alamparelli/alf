@@ -244,7 +244,7 @@ func claudeLogin(dir string) {
 	fmt.Println("\n  ALF uses Claude Code inside the container.")
 	fmt.Println("  You need to authenticate with your Anthropic account.")
 	fmt.Println()
-	fmt.Println("  Launching Claude Code... Authenticate, then type /exit to continue.")
+	fmt.Println("  Launching Claude Code... Authenticate, then choose 'Exit' to continue.")
 	fmt.Println()
 
 	// Try launching the full claude TUI via docker exec.
@@ -259,7 +259,7 @@ func claudeLogin(dir string) {
 		fmt.Println("    ssh node@localhost -p 2222")
 		fmt.Println("    Password: alf2026")
 		fmt.Println("    Then run: claude")
-		fmt.Println("    After authenticating, type /exit and disconnect.")
+		fmt.Println("    After authenticating, choose 'Exit' and disconnect.")
 		fmt.Println()
 		return
 	}

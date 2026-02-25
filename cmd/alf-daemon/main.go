@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -18,6 +19,11 @@ func main() {
 
 	if token == "" || chatID == "" {
 		log.Fatal("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
+	}
+
+	// Verify claude CLI is available
+	if _, err := exec.LookPath("claude"); err != nil {
+		log.Fatal("claude CLI not found in PATH")
 	}
 
 	log.Println("alf-daemon starting...")
@@ -42,11 +48,34 @@ func main() {
 
 			log.Printf("← %s: %s", u.Message.From.Username, u.Message.Text)
 
-			if strings.EqualFold(strings.TrimSpace(u.Message.Text), "ping") {
-				sendMessage(client, token, u.Message.Chat.ID, "pong")
+			reply, err := askClaude(u.Message.Text)
+			if err != nil {
+				log.Printf("claude error: %v", err)
+				reply = fmt.Sprintf("Error: %v", err)
 			}
+
+			sendMessage(client, token, u.Message.Chat.ID, reply)
 		}
 	}
+}
+
+func askClaude(prompt string) (string, error) {
+	cmd := exec.Command("claude",
+		"-p", prompt,
+		"--model", "sonnet",
+		"--output-format", "text",
+		"--dangerously-skip-permissions",
+	)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%v: %s", err, stderr.String())
+	}
+
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 func readSecret(envVar string) string {
@@ -113,5 +142,5 @@ func sendMessage(client *http.Client, token string, chatID int64, text string) {
 		return
 	}
 	defer resp.Body.Close()
-	log.Printf("→ pong (chat %d)", chatID)
+	log.Printf("→ reply sent (chat %d)", chatID)
 }

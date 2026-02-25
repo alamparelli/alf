@@ -47,6 +47,10 @@ func RunInit() {
 	// Step 6: Pull & Start
 	PrintStep(6, "Starting ALF")
 	pullAndStart(dir, botName)
+
+	// Step 7: Claude authentication
+	PrintStep(7, "Claude authentication")
+	claudeLogin(dir)
 }
 
 func checkPrerequisites() {
@@ -234,4 +238,33 @@ func pullAndStart(dir, botName string) {
 	}
 
 	PrintWarning("ALF started but health check inconclusive. Check with: alf status")
+}
+
+func claudeLogin(dir string) {
+	fmt.Println("\n  ALF uses Claude Code inside the container.")
+	fmt.Println("  You need to authenticate with your Anthropic account.")
+	fmt.Println()
+
+	runClaudeInContainer("auth", "login")
+}
+
+// RunLogin allows re-authenticating Claude from the CLI.
+func RunLogin() {
+	dir := alfDir()
+	_ = dir
+	PrintInfo("Opening Claude authentication...")
+	runClaudeInContainer("auth", "login")
+}
+
+func runClaudeInContainer(args ...string) {
+	cmdArgs := append([]string{"exec", "-it", "alf", "claude"}, args...)
+	cmd := exec.Command("docker", cmdArgs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		PrintWarning(fmt.Sprintf("Claude auth failed: %v. You can retry with: alf login", err))
+		return
+	}
+	PrintCheck("Claude authenticated")
 }

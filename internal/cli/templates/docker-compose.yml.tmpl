@@ -7,14 +7,17 @@ services:
     restart: unless-stopped
     ports:
       - "2222:22"
+      - "127.0.0.1:8080:8080"
     environment:
       - TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
       - TELEGRAM_CHAT_ID_FILE=/run/secrets/telegram_chat_id
+      - CC_AUTH_TOKEN_FILE=/run/secrets/cc_auth_token
     secrets:
       - telegram_bot_token
       - telegram_chat_id
+      - cc_auth_token
     volumes:
-      - ./config.yaml:/home/node/config.yaml:ro
+      - ./config.json:/home/node/data/config.json
       - ./data:/home/node/data
       - ./tools:/home/node/tools:ro
       - ./skills:/home/node/skills:ro
@@ -27,3 +30,5 @@ secrets:
     file: ./secrets/telegram_bot_token
   telegram_chat_id:
     file: ./secrets/telegram_chat_id
+  cc_auth_token:
+    file: ./secrets/cc_auth_token

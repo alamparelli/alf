@@ -1,4 +1,4 @@
-name: Build & Push
+name: Build & Release
 
 on:
   push:
@@ -10,7 +10,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
+  # Build and push Docker image (all pushes to main + tags)
+  docker:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,3 +51,34 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Build CLI binaries and create GitHub Release (tags only)
+  cli:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build CLI binaries
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+
+          GOOS=linux  GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/alf-linux-amd64  ./cmd/alf
+          GOOS=linux  GOARCH=arm64 go build -ldflags="$LDFLAGS" -o dist/alf-linux-arm64  ./cmd/alf
+          GOOS=darwin GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/alf-darwin-amd64 ./cmd/alf
+          GOOS=darwin GOARCH=arm64 go build -ldflags="$LDFLAGS" -o dist/alf-darwin-arm64 ./cmd/alf
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/alf-*

@@ -1,0 +1,29 @@
+services:
+  alf:
+    image: ghcr.io/alamparelli/alf:latest
+    container_name: alf
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
+      - TELEGRAM_CHAT_ID_FILE=/run/secrets/telegram_chat_id
+    secrets:
+      - telegram_bot_token
+      - telegram_chat_id
+    volumes:
+      - ./config.yaml:/home/alf/config.yaml:ro
+      - ./data:/home/alf/data
+      - ./tools:/home/alf/tools:ro
+      - ./skills:/home/alf/skills:ro
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M
+    mem_limit: 256m
+    cpus: "0.5"
+
+secrets:
+  telegram_bot_token:
+    file: ./secrets/telegram_bot_token
+  telegram_chat_id:
+    file: ./secrets/telegram_chat_id

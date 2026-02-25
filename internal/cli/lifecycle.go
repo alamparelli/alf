@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -59,6 +60,48 @@ func RunRestart() {
 func RunLogs() {
 	dir := alfDir()
 	dockerCompose(dir, "logs", "-f")
+}
+
+func RunUninstall() {
+	dir := alfDir()
+
+	fmt.Println()
+	PrintWarning("This will remove ALF completely:")
+	fmt.Println("  - Stop and remove containers")
+	fmt.Println("  - Delete all data in " + dir)
+	fmt.Println("  - Remove the alf binary")
+	fmt.Println()
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("  Type 'yes' to confirm: ")
+	answer, _ := reader.ReadString('\n')
+	if strings.TrimSpace(answer) != "yes" {
+		PrintInfo("Uninstall cancelled.")
+		return
+	}
+
+	// Stop and remove containers + volumes
+	PrintInfo("Stopping containers...")
+	cmd := exec.Command("docker", "compose", "down", "-v")
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
+
+	// Remove data directory
+	PrintInfo("Removing " + dir + "...")
+	if err := os.RemoveAll(dir); err != nil {
+		PrintWarning(fmt.Sprintf("Could not remove %s: %v", dir, err))
+	}
+
+	// Remove binary
+	binPath, _ := os.Executable()
+	PrintInfo("Removing " + binPath + "...")
+	if err := os.Remove(binPath); err != nil {
+		PrintWarning(fmt.Sprintf("Could not remove binary: %v. Run: sudo rm %s", err, binPath))
+	}
+
+	PrintCheck("ALF uninstalled")
 }
 
 func RunStatus() {

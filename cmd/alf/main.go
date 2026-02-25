@@ -50,6 +50,8 @@ func main() {
 		}
 	case "login":
 		cli.RunLogin()
+	case "uninstall":
+		cli.RunUninstall()
 	case "version":
 		fmt.Printf("alf %s\n", version)
 	case "help", "--help", "-h":
@@ -74,5 +76,6 @@ func printUsage() {
 	fmt.Println("  status    Show ALF status and versions")
 	fmt.Println("  login     Authenticate Claude inside the container")
 	fmt.Println("  secret    Manage secrets (list/set/remove)")
+	fmt.Println("  uninstall Remove ALF completely")
 	fmt.Println("  version   Print CLI version")
 }

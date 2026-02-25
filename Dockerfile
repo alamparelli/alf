@@ -40,5 +40,5 @@ RUN mkdir -p /home/alf/.claude && chown -R alf:alf /home/alf
 
 WORKDIR /home/alf
 
-# Start SSH, then run daemon as alf user
-CMD /usr/sbin/sshd && su - alf -c "/opt/alf/alf-daemon"
+# Start SSH, then run daemon as alf user (no dash to preserve env vars)
+CMD /usr/sbin/sshd && su alf -c "/opt/alf/alf-daemon"

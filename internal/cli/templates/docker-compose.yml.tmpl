@@ -5,6 +5,8 @@ services:
     image: ghcr.io/alamparelli/alf:latest
     container_name: alf
     restart: unless-stopped
+    ports:
+      - "2222:22"
     environment:
       - TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
       - TELEGRAM_CHAT_ID_FILE=/run/secrets/telegram_chat_id
@@ -12,17 +14,12 @@ services:
       - telegram_bot_token
       - telegram_chat_id
     volumes:
-      - ./config.yaml:/home/node/config.yaml:ro
-      - ./data:/home/node/data
-      - ./tools:/home/node/tools:ro
-      - ./skills:/home/node/skills:ro
-      - ./claude-session:/home/node/.claude
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:size=64M
-    mem_limit: 256m
+      - ./config.yaml:/home/alf/config.yaml:ro
+      - ./data:/home/alf/data
+      - ./tools:/home/alf/tools:ro
+      - ./skills:/home/alf/skills:ro
+      - ./claude-session:/home/alf/.claude
+    mem_limit: 512m
     cpus: "0.5"
 
 secrets:

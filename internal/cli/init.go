@@ -38,7 +38,7 @@ func RunInit() {
 
 	// Step 4: Telegram Chat ID
 	PrintStep(4, "Telegram Chat ID")
-	chatID := promptChatID(reader)
+	chatID := promptChatID(reader, botToken)
 
 	// Step 5: Generate files
 	PrintStep(5, "Generating configuration files")
@@ -154,10 +154,11 @@ func validateBotToken(token string) (string, error) {
 	return result.Result.Username, nil
 }
 
-func promptChatID(reader *bufio.Reader) string {
+func promptChatID(reader *bufio.Reader, botToken string) string {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", botToken)
 	fmt.Println("\n  To find your chat ID:")
 	fmt.Println("    1. Send any message to your bot on Telegram")
-	fmt.Println("    2. Open: https://api.telegram.org/bot<TOKEN>/getUpdates")
+	fmt.Printf("    2. Open: %s\n", url)
 	fmt.Println("    3. Look for \"chat\":{\"id\":YOUR_CHAT_ID}")
 
 	for {

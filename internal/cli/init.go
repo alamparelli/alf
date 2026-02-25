@@ -244,30 +244,37 @@ func claudeLogin(dir string) {
 	fmt.Println("\n  ALF uses Claude Code inside the container.")
 	fmt.Println("  You need to authenticate with your Anthropic account.")
 	fmt.Println()
+	fmt.Println("  Connect via SSH and launch Claude to authenticate:")
+	fmt.Println()
+	fmt.Println("    ssh node@localhost -p 2222")
+	fmt.Println("    Password: alf2026")
+	fmt.Println()
+	fmt.Println("  Once connected, run: claude")
+	fmt.Println("  After authenticating, type /exit and disconnect.")
+	fmt.Println()
 
-	runClaudeAuth()
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("  Press Enter once done...")
+	reader.ReadString('\n')
+
+	// Verify auth succeeded
+	out, _ := exec.Command("docker", "exec", "alf", "claude", "auth", "status").CombinedOutput()
+	if len(strings.TrimSpace(string(out))) == 0 {
+		PrintWarning("Claude auth not detected. You can retry with: alf login")
+		return
+	}
+	PrintCheck("Claude authenticated")
 }
 
 // RunLogin allows re-authenticating Claude from the CLI.
 func RunLogin() {
-	PrintInfo("Authenticating Claude...")
-	runClaudeAuth()
-}
-
-func runClaudeAuth() {
-	// Try docker exec -it into the running container first.
-	cmd := exec.Command("docker", "exec", "-it", "alf", "claude", "auth", "login")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		PrintWarning("Auto auth failed. Try manually via SSH:")
-		fmt.Println()
-		fmt.Println("    ssh node@localhost -p 2222")
-		fmt.Println("    Password: alf2026")
-		fmt.Println("    Then run: claude auth login")
-		fmt.Println()
-		return
-	}
-	PrintCheck("Claude authenticated")
+	fmt.Println()
+	PrintInfo("Connect via SSH to authenticate Claude:")
+	fmt.Println()
+	fmt.Println("    ssh node@localhost -p 2222")
+	fmt.Println("    Password: alf2026")
+	fmt.Println()
+	fmt.Println("  Once connected, run: claude")
+	fmt.Println("  After authenticating, type /exit and disconnect.")
+	fmt.Println()
 }

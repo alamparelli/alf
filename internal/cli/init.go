@@ -245,36 +245,28 @@ func claudeLogin(dir string) {
 	fmt.Println("  You need to authenticate with your Anthropic account.")
 	fmt.Println()
 
-	runClaudeAuth(dir)
+	runClaudeAuth()
 }
 
 // RunLogin allows re-authenticating Claude from the CLI.
 func RunLogin() {
-	dir := alfDir()
-	PrintInfo("Opening Claude authentication...")
-	runClaudeAuth(dir)
+	PrintInfo("Authenticating Claude...")
+	runClaudeAuth()
 }
 
-func runClaudeAuth(dir string) {
-	// Use docker run with the same image and volume to authenticate.
-	// This works even if the main container is stopped/crashed.
-	sessionDir := filepath.Join(dir, "claude-session")
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		PrintWarning(fmt.Sprintf("Failed to create claude-session dir: %v", err))
-		return
-	}
-
-	cmd := exec.Command("docker", "run", "--rm", "-it",
-		"-v", sessionDir+":/home/node/.claude",
-		"--entrypoint", "claude",
-		"ghcr.io/alamparelli/alf:latest",
-		"auth", "login",
-	)
+func runClaudeAuth() {
+	// Try docker exec -it into the running container first.
+	cmd := exec.Command("docker", "exec", "-it", "alf", "claude", "auth", "login")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		PrintWarning(fmt.Sprintf("Claude auth failed: %v. You can retry with: alf login", err))
+		PrintWarning("Auto auth failed. Try manually via SSH:")
+		fmt.Println()
+		fmt.Println("    ssh alf@localhost -p 2222")
+		fmt.Println("    Password: alf2026")
+		fmt.Println("    Then run: claude auth login")
+		fmt.Println()
 		return
 	}
 	PrintCheck("Claude authenticated")

@@ -10,16 +10,35 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon
 
 # Stage 2: Runtime with Claude Code CLI
-FROM node:22-alpine
+FROM node:22-slim
 
-# Reuse node user (uid/gid 1000 already exists in node:22-alpine)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    openssh-server \
+    sudo \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir /var/run/sshd
+
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
+
+# Create alf user with SSH access
+RUN useradd -m -s /bin/bash alf \
+    && echo 'alf:alf2026' | chpasswd \
+    && usermod -aG sudo alf \
+    && echo 'alf ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# SSH config
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config \
+    && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+EXPOSE 22
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 
-RUN mkdir -p /home/node/.claude && chown -R node:node /home/node
+RUN mkdir -p /home/alf/.claude && chown -R alf:alf /home/alf
 
-USER node
-WORKDIR /home/node
+WORKDIR /home/alf
 
-ENTRYPOINT ["/opt/alf/alf-daemon"]
+# Start SSH, then run daemon as alf user
+CMD /usr/sbin/sshd && su - alf -c "/opt/alf/alf-daemon"

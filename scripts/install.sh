@@ -54,13 +54,24 @@ main() {
 
     rm -rf "$tmpdir"
 
-    # Check if in PATH
+    # Add to PATH if needed
     case ":$PATH:" in
         *":${INSTALL_DIR}:"*) ;;
         *)
-            echo ""
-            echo "Add this to your shell profile:"
-            echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+            # Detect shell profile
+            if [ -f "$HOME/.zshrc" ]; then
+                profile="$HOME/.zshrc"
+            elif [ -f "$HOME/.bashrc" ]; then
+                profile="$HOME/.bashrc"
+            elif [ -f "$HOME/.profile" ]; then
+                profile="$HOME/.profile"
+            else
+                profile="$HOME/.profile"
+            fi
+
+            echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$profile"
+            export PATH="${INSTALL_DIR}:$PATH"
+            echo "Added ${INSTALL_DIR} to PATH in ${profile}"
             ;;
     esac
 

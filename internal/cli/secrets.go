@@ -19,6 +19,7 @@ type Secret struct {
 var SecretRegistry = []Secret{
 	{Name: "telegram_bot_token", Description: "Telegram bot token from @BotFather", Required: true},
 	{Name: "telegram_chat_id", Description: "Your Telegram chat ID", Required: true},
+	{Name: "cc_auth_token", Description: "Control Center auth token (auto-generated)", Required: false},
 }
 
 func secretsDir(baseDir string) string {

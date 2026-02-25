@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -192,15 +194,33 @@ func generateFiles(dir, botToken, chatID string) {
 	}
 	PrintCheck("secrets/telegram_chat_id")
 
+	// Generate Control Center auth token.
+	ccToken, err := generateAuthToken()
+	if err != nil {
+		Fatal(fmt.Sprintf("Failed to generate auth token: %v", err))
+	}
+	if err := SetSecret(dir, "cc_auth_token", ccToken); err != nil {
+		Fatal(fmt.Sprintf("Failed to write secret: %v", err))
+	}
+	PrintCheck("secrets/cc_auth_token")
+
 	if err := RenderDockerCompose(dir); err != nil {
 		Fatal(fmt.Sprintf("Failed to write docker-compose.yml: %v", err))
 	}
 	PrintCheck("docker-compose.yml")
 
 	if err := RenderConfig(dir); err != nil {
-		Fatal(fmt.Sprintf("Failed to write config.yaml: %v", err))
+		Fatal(fmt.Sprintf("Failed to write config.json: %v", err))
 	}
-	PrintCheck("config.yaml")
+	PrintCheck("config.json")
+}
+
+func generateAuthToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func pullAndStart(dir, botName string) {

@@ -33,11 +33,11 @@ RUN usermod -s /bin/bash node \
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config \
     && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
-EXPOSE 22
+EXPOSE 22 8080
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 
-RUN mkdir -p /home/node/.claude && chown -R node:node /home/node
+RUN mkdir -p /home/node/.claude /home/node/data/logs && chown -R node:node /home/node
 
 WORKDIR /home/node
 

@@ -263,7 +263,7 @@ func runClaudeAuth() {
 	if err := cmd.Run(); err != nil {
 		PrintWarning("Auto auth failed. Try manually via SSH:")
 		fmt.Println()
-		fmt.Println("    ssh alf@localhost -p 2222")
+		fmt.Println("    ssh node@localhost -p 2222")
 		fmt.Println("    Password: alf2026")
 		fmt.Println("    Then run: claude auth login")
 		fmt.Println()

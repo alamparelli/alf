@@ -14,11 +14,11 @@ services:
       - telegram_bot_token
       - telegram_chat_id
     volumes:
-      - ./config.yaml:/home/alf/config.yaml:ro
-      - ./data:/home/alf/data
-      - ./tools:/home/alf/tools:ro
-      - ./skills:/home/alf/skills:ro
-      - ./claude-session:/home/alf/.claude
+      - ./config.yaml:/home/node/config.yaml:ro
+      - ./data:/home/node/data
+      - ./tools:/home/node/tools:ro
+      - ./skills:/home/node/skills:ro
+      - ./claude-session:/home/node/.claude
     mem_limit: 512m
     cpus: "0.5"
 

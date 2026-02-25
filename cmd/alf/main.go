@@ -48,6 +48,8 @@ func main() {
 			fmt.Println("Usage: alf secret [list|set|remove]")
 			os.Exit(1)
 		}
+	case "login":
+		cli.RunLogin()
 	case "version":
 		fmt.Printf("alf %s\n", version)
 	case "help", "--help", "-h":
@@ -70,6 +72,7 @@ func printUsage() {
 	fmt.Println("  upgrade   Update CLI binary and Docker image")
 	fmt.Println("  logs      Follow ALF logs")
 	fmt.Println("  status    Show ALF status and versions")
+	fmt.Println("  login     Authenticate Claude inside the container")
 	fmt.Println("  secret    Manage secrets (list/set/remove)")
 	fmt.Println("  version   Print CLI version")
 }

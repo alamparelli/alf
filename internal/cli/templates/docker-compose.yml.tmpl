@@ -16,6 +16,7 @@ services:
       - ./data:/home/alf/data
       - ./tools:/home/alf/tools:ro
       - ./skills:/home/alf/skills:ro
+      - ./claude-session:/home/alf/.claude
     security_opt:
       - no-new-privileges:true
     read_only: true

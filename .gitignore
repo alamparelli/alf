@@ -22,3 +22,8 @@ vendor/
 # User space (runtime data)
 user-space/
 .plans/
+
+# Local dev (docker compose build+up)
+dev-secrets/
+dev-data/
+dev-claude-session/

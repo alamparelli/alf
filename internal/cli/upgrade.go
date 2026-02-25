@@ -18,6 +18,11 @@ func RunUpgrade(currentVersion string) {
 	PrintInfo("Checking for CLI updates...")
 	upgraded := selfUpdate(currentVersion)
 
+	if !upgraded {
+		PrintSuccess("Already up to date.")
+		return
+	}
+
 	// Step 2: Pull latest Docker image + restart
 	dir := alfDir()
 	PrintInfo("Pulling latest image...")
@@ -28,11 +33,7 @@ func RunUpgrade(currentVersion string) {
 	dockerCompose(dir, "up", "-d")
 	PrintCheck("ALF restarted")
 
-	if upgraded {
-		PrintSuccess("ALF fully upgraded (CLI + image).")
-	} else {
-		PrintSuccess("Docker image updated. CLI was already at latest.")
-	}
+	PrintSuccess("ALF upgraded to latest.")
 }
 
 func selfUpdate(currentVersion string) bool {

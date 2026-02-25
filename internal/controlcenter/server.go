@@ -55,7 +55,7 @@ func New(dataDir string, stats *Stats, version string, authToken string, reloadC
 		WebFS:          webSub,
 	})
 
-	addr := "127.0.0.1:8080"
+	addr := "0.0.0.0:8080"
 	return &Server{
 		httpServer: &http.Server{
 			Addr:         addr,

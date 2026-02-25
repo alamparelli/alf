@@ -1,6 +1,6 @@
-# Binaries
-alf
-alf-daemon
+# Binaries (root only)
+/alf
+/alf-daemon
 *.exe
 
 # Environment

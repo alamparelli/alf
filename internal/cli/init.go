@@ -244,23 +244,23 @@ func claudeLogin(dir string) {
 	fmt.Println("\n  ALF uses Claude Code inside the container.")
 	fmt.Println("  You need to authenticate with your Anthropic account.")
 	fmt.Println()
-	fmt.Println("  Connect via SSH and launch Claude to authenticate:")
-	fmt.Println()
-	fmt.Println("    ssh node@localhost -p 2222")
-	fmt.Println("    Password: alf2026")
-	fmt.Println()
-	fmt.Println("  Once connected, run: claude")
-	fmt.Println("  After authenticating, type /exit and disconnect.")
+	fmt.Println("  Launching Claude Code... Authenticate, then type /exit to continue.")
 	fmt.Println()
 
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("  Press Enter once done...")
-	reader.ReadString('\n')
-
-	// Verify auth succeeded
-	out, _ := exec.Command("docker", "exec", "alf", "claude", "auth", "status").CombinedOutput()
-	if len(strings.TrimSpace(string(out))) == 0 {
-		PrintWarning("Claude auth not detected. You can retry with: alf login")
+	// Try launching the full claude TUI via docker exec.
+	// The TUI handles auth inline during first launch.
+	cmd := exec.Command("docker", "exec", "-it", "alf", "claude")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		PrintWarning("Could not launch Claude directly. Try via SSH:")
+		fmt.Println()
+		fmt.Println("    ssh node@localhost -p 2222")
+		fmt.Println("    Password: alf2026")
+		fmt.Println("    Then run: claude")
+		fmt.Println("    After authenticating, type /exit and disconnect.")
+		fmt.Println()
 		return
 	}
 	PrintCheck("Claude authenticated")
@@ -268,13 +268,18 @@ func claudeLogin(dir string) {
 
 // RunLogin allows re-authenticating Claude from the CLI.
 func RunLogin() {
+	PrintInfo("Launching Claude Code for authentication...")
 	fmt.Println()
-	PrintInfo("Connect via SSH to authenticate Claude:")
-	fmt.Println()
-	fmt.Println("    ssh node@localhost -p 2222")
-	fmt.Println("    Password: alf2026")
-	fmt.Println()
-	fmt.Println("  Once connected, run: claude")
-	fmt.Println("  After authenticating, type /exit and disconnect.")
-	fmt.Println()
+	cmd := exec.Command("docker", "exec", "-it", "alf", "claude")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		PrintWarning("Could not launch Claude directly. Try via SSH:")
+		fmt.Println()
+		fmt.Println("    ssh node@localhost -p 2222")
+		fmt.Println("    Password: alf2026")
+		fmt.Println("    Then run: claude")
+		fmt.Println()
+	}
 }

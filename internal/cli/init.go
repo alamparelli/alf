@@ -245,20 +245,31 @@ func claudeLogin(dir string) {
 	fmt.Println("  You need to authenticate with your Anthropic account.")
 	fmt.Println()
 
-	runClaudeInContainer("auth", "login")
+	runClaudeAuth(dir)
 }
 
 // RunLogin allows re-authenticating Claude from the CLI.
 func RunLogin() {
 	dir := alfDir()
-	_ = dir
 	PrintInfo("Opening Claude authentication...")
-	runClaudeInContainer("auth", "login")
+	runClaudeAuth(dir)
 }
 
-func runClaudeInContainer(args ...string) {
-	cmdArgs := append([]string{"exec", "-it", "alf", "claude"}, args...)
-	cmd := exec.Command("docker", cmdArgs...)
+func runClaudeAuth(dir string) {
+	// Use docker run with the same image and volume to authenticate.
+	// This works even if the main container is stopped/crashed.
+	sessionDir := filepath.Join(dir, "claude-session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		PrintWarning(fmt.Sprintf("Failed to create claude-session dir: %v", err))
+		return
+	}
+
+	cmd := exec.Command("docker", "run", "--rm", "-it",
+		"-v", sessionDir+":/home/node/.claude",
+		"--entrypoint", "claude",
+		"ghcr.io/alamparelli/alf:latest",
+		"auth", "login",
+	)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -12,16 +12,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /alf-daemon ./cmd/alf-
 # Stage 2: Runtime with Claude Code CLI
 FROM node:22-alpine
 
-RUN addgroup -g 1000 alf && adduser -u 1000 -G alf -D alf
-
-# Install Claude Code CLI globally
+# Reuse node user (uid/gid 1000 already exists in node:22-alpine)
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 
-RUN mkdir -p /home/alf/user-space /home/alf/.claude && chown -R alf:alf /home/alf
+RUN mkdir -p /home/node/.claude && chown -R node:node /home/node
 
-USER alf
-WORKDIR /home/alf
+USER node
+WORKDIR /home/node
 
 ENTRYPOINT ["/opt/alf/alf-daemon"]

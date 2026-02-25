@@ -1,18 +1,30 @@
+name: alf-dev
+
 services:
   alf:
     build: .
-    # image: ghcr.io/alamparelli/alf:latest  # uncomment for prod
-    read_only: true
-    tmpfs:
-      - /tmp
-    user: "1000:1000"
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    env_file: .env
-    volumes:
-      - ./user-space:/home/alf/user-space:rw
+    container_name: alf
     ports:
-      - "8080:8080"
-    restart: unless-stopped
+      - "2222:22"
+      - "127.0.0.1:8080:8080"
+    environment:
+      - TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
+      - TELEGRAM_CHAT_ID_FILE=/run/secrets/telegram_chat_id
+      - CC_AUTH_TOKEN_FILE=/run/secrets/cc_auth_token
+    secrets:
+      - telegram_bot_token
+      - telegram_chat_id
+      - cc_auth_token
+    volumes:
+      - ./dev-data:/home/node/data
+      - ./dev-claude-session:/home/node/.claude
+    mem_limit: 512m
+    cpus: "0.5"
+
+secrets:
+  telegram_bot_token:
+    file: ./dev-secrets/telegram_bot_token
+  telegram_chat_id:
+    file: ./dev-secrets/telegram_chat_id
+  cc_auth_token:
+    file: ./dev-secrets/cc_auth_token

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -42,16 +43,20 @@ func RunInit() {
 	PrintStep(4, "Telegram Chat ID")
 	chatID := promptChatID(reader, botToken)
 
-	// Step 5: Generate files
-	PrintStep(5, "Generating configuration files")
-	generateFiles(dir, botToken, chatID)
+	// Step 5: Dashboard port
+	PrintStep(5, "Dashboard port")
+	ccPort := promptPort(reader)
 
-	// Step 6: Pull & Start
-	PrintStep(6, "Starting ALF")
+	// Step 6: Generate files
+	PrintStep(6, "Generating configuration files")
+	generateFiles(dir, botToken, chatID, ccPort)
+
+	// Step 7: Pull & Start
+	PrintStep(7, "Starting ALF")
 	pullAndStart(dir, botName)
 
-	// Step 7: Claude authentication
-	PrintStep(7, "Claude authentication")
+	// Step 8: Claude authentication
+	PrintStep(8, "Claude authentication")
 	claudeLogin(dir)
 }
 
@@ -182,7 +187,54 @@ func promptChatID(reader *bufio.Reader, botToken string) string {
 	}
 }
 
-func generateFiles(dir, botToken, chatID string) {
+func isPortAvailable(port string) bool {
+	ln, err := net.Listen("tcp", "127.0.0.1:"+port)
+	if err != nil {
+		return false
+	}
+	ln.Close()
+	return true
+}
+
+func promptPort(reader *bufio.Reader) string {
+	defaultPort := "8080"
+
+	if isPortAvailable(defaultPort) {
+		fmt.Printf("\n  Dashboard port [%s]: ", defaultPort)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input == "" {
+			PrintCheck(fmt.Sprintf("Port: %s", defaultPort))
+			return defaultPort
+		}
+		if !isPortAvailable(input) {
+			PrintWarning(fmt.Sprintf("Port %s is already in use.", input))
+		} else {
+			PrintCheck(fmt.Sprintf("Port: %s", input))
+			return input
+		}
+	} else {
+		PrintWarning(fmt.Sprintf("Port %s is already in use.", defaultPort))
+	}
+
+	// Port unavailable — ask for alternative
+	for {
+		fmt.Print("  Enter an available port: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input == "" {
+			continue
+		}
+		if !isPortAvailable(input) {
+			PrintWarning(fmt.Sprintf("Port %s is also in use. Try another.", input))
+			continue
+		}
+		PrintCheck(fmt.Sprintf("Port: %s", input))
+		return input
+	}
+}
+
+func generateFiles(dir, botToken, chatID, ccPort string) {
 	// Store secrets as files (chmod 600, used via Docker Compose secrets)
 	if err := SetSecret(dir, "telegram_bot_token", botToken); err != nil {
 		Fatal(fmt.Sprintf("Failed to write secret: %v", err))
@@ -204,7 +256,7 @@ func generateFiles(dir, botToken, chatID string) {
 	}
 	PrintCheck("secrets/cc_auth_token")
 
-	if err := RenderDockerCompose(dir); err != nil {
+	if err := RenderDockerCompose(dir, ComposeData{CCPort: ccPort}); err != nil {
 		Fatal(fmt.Sprintf("Failed to write docker-compose.yml: %v", err))
 	}
 	PrintCheck("docker-compose.yml")

@@ -16,9 +16,6 @@ func TestFileConfigStore_LoadDefault(t *testing.T) {
 	if cfg.LogLevel != "info" {
 		t.Errorf("expected default log_level 'info', got %q", cfg.LogLevel)
 	}
-	if cfg.Model != "sonnet" {
-		t.Errorf("expected default model 'sonnet', got %q", cfg.Model)
-	}
 }
 
 func TestFileConfigStore_LoadFromFile(t *testing.T) {
@@ -28,7 +25,6 @@ func TestFileConfigStore_LoadFromFile(t *testing.T) {
 	// Write config directly to disk (simulating user/CLI edit).
 	writeJSON(t, path, &Config{
 		LogLevel:       "debug",
-		Model:          "opus",
 		AllowedChatIDs: []int64{123, 456},
 		SystemPrompt:   "test prompt",
 		QuietHours:     QuietHours{Start: 22, End: 7},
@@ -42,9 +38,6 @@ func TestFileConfigStore_LoadFromFile(t *testing.T) {
 
 	if loaded.LogLevel != "debug" {
 		t.Errorf("log_level: got %q, want 'debug'", loaded.LogLevel)
-	}
-	if loaded.Model != "opus" {
-		t.Errorf("model: got %q, want 'opus'", loaded.Model)
 	}
 	if len(loaded.AllowedChatIDs) != 2 {
 		t.Errorf("allowed_chat_ids: got %d items, want 2", len(loaded.AllowedChatIDs))
@@ -61,7 +54,6 @@ func TestFileConfigStore_SaveAndLoad(t *testing.T) {
 
 	cfg := &Config{
 		LogLevel:         "debug",
-		Model:            "opus",
 		AllowedChatIDs:   []int64{42},
 		SystemPrompt:     "be helpful",
 		QuietHours:       QuietHours{Start: 22, End: 7},
@@ -79,9 +71,6 @@ func TestFileConfigStore_SaveAndLoad(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
-	if loaded.Model != "opus" {
-		t.Errorf("model: got %q, want 'opus'", loaded.Model)
-	}
 	if loaded.GitTrack != true {
 		t.Error("git_track should be true")
 	}
@@ -108,7 +97,7 @@ func TestFileConfigStore_SaveCreatesDir(t *testing.T) {
 	store := NewFileConfigStore(path)
 
 	cfg := DefaultConfig()
-	cfg.Model = "opus"
+	cfg.LogLevel = "warn"
 	if err := store.Save(cfg); err != nil {
 		t.Fatalf("Save() should create parent dir: %v", err)
 	}
@@ -117,8 +106,8 @@ func TestFileConfigStore_SaveCreatesDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() after Save: %v", err)
 	}
-	if loaded.Model != "opus" {
-		t.Errorf("model: got %q, want 'opus'", loaded.Model)
+	if loaded.LogLevel != "warn" {
+		t.Errorf("log_level: got %q, want 'warn'", loaded.LogLevel)
 	}
 }
 

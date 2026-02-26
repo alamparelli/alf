@@ -1,7 +1,6 @@
 package controlcenter
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -51,7 +50,7 @@ func TestConfigHandler_PUT_Valid(t *testing.T) {
 	notifier := &mockNotifier{}
 	h := &ConfigHandler{Store: store, Notifier: notifier, Event: ReloadConfig}
 
-	body := `{"log_level":"debug","model":"opus","allowed_chat_ids":[],"system_prompt":"","quiet_hours":{"start":0,"end":0},"session_timeout":30,"git_track":true,"git_sweep_interval":5}`
+	body := `{"log_level":"debug","allowed_chat_ids":[],"system_prompt":"","quiet_hours":{"start":0,"end":0},"session_timeout":30,"git_track":true,"git_sweep_interval":5}`
 	req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -63,30 +62,8 @@ func TestConfigHandler_PUT_Valid(t *testing.T) {
 	if store.saved == nil {
 		t.Fatal("expected Save to be called")
 	}
-	if store.saved.Model != "opus" {
-		t.Errorf("saved model: got %q, want 'opus'", store.saved.Model)
-	}
 	if len(notifier.events) != 1 || notifier.events[0] != ReloadConfig {
 		t.Errorf("expected ReloadConfig notification, got %v", notifier.events)
-	}
-}
-
-func TestConfigHandler_PUT_InvalidModel(t *testing.T) {
-	h := &ConfigHandler{Store: &mockConfigStore{}}
-
-	body := `{"model":"gpt4","log_level":"info"}`
-	req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
-
-	var resp map[string]string
-	json.Unmarshal(rec.Body.Bytes(), &resp)
-	if !strings.Contains(resp["error"], "invalid model") {
-		t.Errorf("error should mention invalid model, got: %s", resp["error"])
 	}
 }
 

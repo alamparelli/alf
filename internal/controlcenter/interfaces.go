@@ -5,9 +5,10 @@ type ConfigStore interface {
 	Load() (*Config, error)
 }
 
-// TierStore manages routing tiers with hot-reload support (read-only from CC).
+// TierStore manages routing tiers with hot-reload support.
 type TierStore interface {
 	Load() (*TiersConfig, error)
+	Save(cfg *TiersConfig) error
 	Current() *TiersConfig // in-memory snapshot, no disk I/O
 	Reload() error
 }

@@ -61,63 +61,16 @@
       </div>
     </div>
 
-    <!-- Memories Card -->
-    <div class="card">
-      <h2>Memories</h2>
-      <div class="resource-list" id="memoriesList">Loading...</div>
-      <div class="resource-editor" id="memoriesEditor" style="display:none">
-        <div class="form-row">
-          <label for="memoriesName">Name</label>
-          <input type="text" id="memoriesName" placeholder="my-memory">
-        </div>
-        <textarea class="json-editor" id="memoriesContent" placeholder="Markdown content..."></textarea>
-        <div class="btn-row" style="gap:8px">
-          <button class="btn btn-secondary" onclick="closeEditor('memories')">Cancel</button>
-          <button class="btn" id="saveMemoryBtn">Save</button>
-        </div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-secondary" onclick="newResource('memories')">+ New Memory</button>
-      </div>
-    </div>
-
-    <!-- Tools Card -->
-    <div class="card">
-      <h2>Tools</h2>
-      <div class="resource-list" id="toolsList">Loading...</div>
-      <div class="resource-editor" id="toolsEditor" style="display:none">
-        <div class="form-row">
-          <label for="toolsName">Name</label>
-          <input type="text" id="toolsName" placeholder="my-tool">
-        </div>
-        <textarea class="json-editor" id="toolsContent" placeholder="JSON content..."></textarea>
-        <div class="btn-row" style="gap:8px">
-          <button class="btn btn-secondary" onclick="closeEditor('tools')">Cancel</button>
-          <button class="btn" id="saveToolBtn">Save</button>
-        </div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-secondary" onclick="newResource('tools')">+ New Tool</button>
-      </div>
-    </div>
-
-    <!-- Skills Card -->
-    <div class="card">
-      <h2>Skills</h2>
-      <div class="resource-list" id="skillsList">Loading...</div>
-      <div class="resource-editor" id="skillsEditor" style="display:none">
-        <div class="form-row">
-          <label for="skillsName">Name</label>
-          <input type="text" id="skillsName" placeholder="my-skill">
-        </div>
-        <textarea class="json-editor" id="skillsContent" placeholder="JSON content..."></textarea>
-        <div class="btn-row" style="gap:8px">
-          <button class="btn btn-secondary" onclick="closeEditor('skills')">Cancel</button>
-          <button class="btn" id="saveSkillBtn">Save</button>
-        </div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-secondary" onclick="newResource('skills')">+ New Skill</button>
+    <!-- Tiers Card (editable) -->
+    <div class="card" id="tiersCard">
+      <h2>Routing Tiers</h2>
+      <table class="tier-table">
+        <thead><tr><th>Name</th><th>Model</th><th>Priority</th><th>Enabled</th><th></th></tr></thead>
+        <tbody id="tiersBody"></tbody>
+      </table>
+      <div class="btn-row" style="gap:8px;margin-top:8px">
+        <button class="btn btn-secondary" id="addTierBtn">+ Add Tier</button>
+        <button class="btn" id="saveTiersBtn">Save</button>
       </div>
     </div>
 
@@ -131,15 +84,6 @@
     <div class="card advanced" id="rawConfigCard">
       <h2>Raw Config (JSON) <span class="badge">read-only</span></h2>
       <pre class="json-display" id="rawConfigDisplay"></pre>
-    </div>
-
-    <!-- Advanced: Tiers (read-only) -->
-    <div class="card advanced" id="tiersCard">
-      <h2>Tiers <span class="badge">read-only</span></h2>
-      <table class="tier-table">
-        <thead><tr><th>Name</th><th>Model</th><th>Priority</th><th>Enabled</th></tr></thead>
-        <tbody id="tiersBody"></tbody>
-      </table>
     </div>
 
     <!-- Advanced: Full Log Viewer -->

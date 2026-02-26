@@ -46,6 +46,27 @@ func (s *fileTierStore) Current() *TiersConfig {
 	return s.current.Load()
 }
 
+func (s *fileTierStore) Save(cfg *TiersConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal tiers: %w", err)
+	}
+
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write tiers tmp: %w", err)
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		return fmt.Errorf("rename tiers: %w", err)
+	}
+
+	s.current.Store(cfg)
+	return nil
+}
+
 func (s *fileTierStore) Reload() error {
 	tiers, err := s.Load()
 	if err != nil {

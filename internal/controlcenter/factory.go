@@ -48,7 +48,9 @@ func HandlerFactory(deps Deps) http.Handler {
 		Store: deps.ConfigStore,
 	})
 	mux.Handle("/api/tiers", &TiersHandler{
-		Store: deps.TierStore,
+		Store:    deps.TierStore,
+		Notifier: deps.Notifier,
+		Event:    ReloadTiers,
 	})
 	mux.Handle("/api/status", &StatusHandler{
 		Provider: deps.StatusProvider,

@@ -10,6 +10,7 @@ import (
 type mockTierStore struct {
 	tiers   *TiersConfig
 	current *TiersConfig
+	saved   *TiersConfig
 }
 
 func (m *mockTierStore) Load() (*TiersConfig, error) {
@@ -17,6 +18,13 @@ func (m *mockTierStore) Load() (*TiersConfig, error) {
 		return DefaultTiersConfig(), nil
 	}
 	return m.tiers, nil
+}
+
+func (m *mockTierStore) Save(cfg *TiersConfig) error {
+	m.saved = cfg
+	m.tiers = cfg
+	m.current = cfg
+	return nil
 }
 
 func (m *mockTierStore) Current() *TiersConfig {
@@ -47,15 +55,69 @@ func TestTiersHandler_GET(t *testing.T) {
 	}
 }
 
-func TestTiersHandler_PUT_NotAllowed(t *testing.T) {
-	h := &TiersHandler{Store: &mockTierStore{}}
+func TestTiersHandler_PUT_Valid(t *testing.T) {
+	store := &mockTierStore{}
+	notifier := &mockNotifier{}
+	h := &TiersHandler{Store: store, Notifier: notifier, Event: ReloadTiers}
 
-	req := httptest.NewRequest("PUT", "/api/tiers", strings.NewReader(`{}`))
+	body := `{"tiers":[{"name":"fast","model":"haiku","priority":1,"enabled":true}]}`
+	req := httptest.NewRequest("PUT", "/api/tiers", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.saved == nil {
+		t.Fatal("expected tiers to be saved")
+	}
+	if len(store.saved.Tiers) != 1 || store.saved.Tiers[0].Name != "fast" {
+		t.Errorf("unexpected saved tiers: %+v", store.saved.Tiers)
+	}
+	if len(notifier.events) != 1 || notifier.events[0] != ReloadTiers {
+		t.Errorf("expected ReloadTiers event, got %v", notifier.events)
+	}
+}
+
+func TestTiersHandler_PUT_EmptyTiers(t *testing.T) {
+	h := &TiersHandler{Store: &mockTierStore{}}
+
+	body := `{"tiers":[]}`
+	req := httptest.NewRequest("PUT", "/api/tiers", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestTiersHandler_PUT_InvalidModel(t *testing.T) {
+	h := &TiersHandler{Store: &mockTierStore{}}
+
+	body := `{"tiers":[{"name":"bad","model":"gpt-4","priority":0,"enabled":true}]}`
+	req := httptest.NewRequest("PUT", "/api/tiers", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid model") {
+		t.Errorf("expected invalid model error, got: %s", rec.Body.String())
+	}
+}
+
+func TestTiersHandler_PUT_MissingName(t *testing.T) {
+	h := &TiersHandler{Store: &mockTierStore{}}
+
+	body := `{"tiers":[{"name":"","model":"sonnet","priority":0,"enabled":true}]}`
+	req := httptest.NewRequest("PUT", "/api/tiers", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
 	}
 }
 

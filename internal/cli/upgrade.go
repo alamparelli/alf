@@ -109,25 +109,46 @@ func selfUpdate(currentVersion string) bool {
 }
 
 func fixVolumePermissions(dir string) {
-	// Map directories to their container UIDs.
-	// data/ → node (1000), claude-session/ → claude (1001).
-	ownership := map[string]string{
-		"data":           "1000:1000",
-		"claude-session": "1001:1001",
-	}
-	for d, uid := range ownership {
-		p := filepath.Join(dir, d)
+	chown := func(rel, owner string) {
+		p := filepath.Join(dir, rel)
 		if _, err := os.Stat(p); err != nil {
-			continue
+			return
 		}
-		cmd := exec.Command("sudo", "chown", "-R", uid, p)
+		cmd := exec.Command("sudo", "chown", "-R", owner, p)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			// Try without sudo (might already be owned correctly).
-			cmd2 := exec.Command("chown", "-R", uid, p)
+			cmd2 := exec.Command("chown", "-R", owner, p)
 			cmd2.Run()
 		}
+	}
+
+	chmod := func(rel, mode string) {
+		p := filepath.Join(dir, rel)
+		if _, err := os.Stat(p); err != nil {
+			return
+		}
+		cmd := exec.Command("sudo", "chmod", mode, p)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			cmd2 := exec.Command("chmod", mode, p)
+			cmd2.Run()
+		}
+	}
+
+	// Node-owned directories.
+	chown("data", "1000:1000")
+	chown("config.d", "1000:1000")
+
+	// Claude-private (.claude/ for auth tokens).
+	chown("data/.claude", "1001:1001")
+	chmod("data/.claude", "700")
+
+	// Alf-managed dirs: claude:alf (1001:1002), mode 775.
+	for _, d := range []string{"data/config", "data/tools", "data/skills"} {
+		chown(d, "1001:1002")
+		chmod(d, "775")
 	}
 }
 

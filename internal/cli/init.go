@@ -112,7 +112,11 @@ func promptDirectory(reader *bufio.Reader) string {
 		dir = input
 	}
 
-	subdirs := []string{"tools", "skills", "data/logs", "data/memory", "data/state", "claude-session"}
+	subdirs := []string{
+		"config.d", "tools.d", "skills.d",
+		"data/.claude", "data/config", "data/tools", "data/skills",
+		"data/logs", "data/memory", "data/state",
+	}
 	for _, sub := range subdirs {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			Fatal(fmt.Sprintf("Failed to create %s: %v", sub, err))
@@ -359,16 +363,15 @@ func claudeLogin(dir string) {
 
 	// Try launching the full claude TUI via docker exec.
 	// The TUI handles auth inline during first launch.
-	// Must run as node user — daemon runs as node, so credentials must match.
-	// Run as claude user (UID 1001) so auth credentials go to /home/claude/.claude.
-	cmd := exec.Command("docker", "exec", "-it", "-u", "claude", "-e", "HOME=/home/claude", "alf", "claude")
+	// Run as claude user (UID 1001) with HOME pointing to data/ where .claude/ lives.
+	cmd := exec.Command("docker", "exec", "-it", "-u", "claude", "-e", "HOME=/home/node/data", "alf", "claude")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		PrintWarning("Could not launch Claude directly. Try manually:")
 		fmt.Println()
-		fmt.Println("    docker exec -it -u claude -e HOME=/home/claude alf claude")
+		fmt.Println("    docker exec -it -u claude -e HOME=/home/node/data alf claude")
 		fmt.Println()
 		return
 	}
@@ -380,14 +383,14 @@ func RunLogin() {
 	PrintInfo("Launching Claude Code for authentication...")
 	fmt.Println("  Type " + colorBold + "/login" + colorReset + " inside Claude to authenticate, then " + colorBold + "/exit" + colorReset + " when done.")
 	fmt.Println()
-	cmd := exec.Command("docker", "exec", "-it", "-u", "claude", "-e", "HOME=/home/claude", "alf", "claude")
+	cmd := exec.Command("docker", "exec", "-it", "-u", "claude", "-e", "HOME=/home/node/data", "alf", "claude")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		PrintWarning("Could not launch Claude directly. Try manually:")
 		fmt.Println()
-		fmt.Println("    docker exec -it -u claude -e HOME=/home/claude alf claude")
+		fmt.Println("    docker exec -it -u claude -e HOME=/home/node/data alf claude")
 		fmt.Println()
 	}
 }

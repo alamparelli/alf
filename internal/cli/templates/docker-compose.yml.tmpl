@@ -18,9 +18,9 @@ services:
       - cc_auth_token
     volumes:
       - ./data:/home/node/data
-      - ./tools:/home/node/tools:ro
-      - ./skills:/home/node/skills:ro
-      - ./claude-session:/home/claude/.claude
+      - ./config.d:/home/node/data/config.d:ro
+      - ./tools.d:/home/node/data/tools.d:ro
+      - ./skills.d:/home/node/data/skills.d:ro
     mem_limit: 512m
     cpus: "0.5"
 

@@ -55,8 +55,12 @@ func (s *fileTierStore) Save(cfg *TiersConfig) error {
 		return fmt.Errorf("marshal tiers: %w", err)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return fmt.Errorf("create tiers dir: %w", err)
+	}
+
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return fmt.Errorf("write tiers tmp: %w", err)
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
@@ -78,5 +82,5 @@ func (s *fileTierStore) Reload() error {
 
 // TiersPath returns the standard tiers.json path for a data directory.
 func TiersPath(dataDir string) string {
-	return filepath.Join(dataDir, "tiers.json")
+	return filepath.Join(dataDir, "config.d", "tiers.json")
 }

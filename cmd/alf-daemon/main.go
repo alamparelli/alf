@@ -103,8 +103,12 @@ func main() {
 	}
 
 	// Ensure data subdirectories exist.
-	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o700)
-	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o700)
+	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
+	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
+	// Alf-managed dirs (claude:alf, mode 775) — created by Dockerfile but ensure on upgrade.
+	for _, sub := range []string{"config", "tools", "skills"} {
+		os.MkdirAll(filepath.Join(dataDir, sub), 0o775)
+	}
 
 	// Session store for Claude --resume support.
 	sessionTimeout := time.Duration(cfg.SessionTimeout) * time.Minute
@@ -321,12 +325,17 @@ func askClaude(prompt, model, resumeID string) (*claudeResult, error) {
 		args = append(args, "--resume", resumeID)
 	}
 
+	dataDir := "/home/node/data"
+	if d := os.Getenv("ALF_DATA_DIR"); d != "" {
+		dataDir = d
+	}
+
 	cmd := exec.Command("claude", args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: 1001, Gid: 1001},
 	}
-	cmd.Dir = "/home/claude"
-	cmd.Env = append(os.Environ(), "HOME=/home/claude")
+	cmd.Dir = dataDir
+	cmd.Env = append(os.Environ(), "HOME="+dataDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -21,7 +21,7 @@ services:
       - SETGID
     volumes:
       - ./data:/home/node/data
-      - ./config.d:/home/node/data/config.d:ro
+      - ./config.d:/home/node/data/config.d
       - ./tools.d:/home/node/data/tools.d:ro
       - ./skills.d:/home/node/data/skills.d:ro
     mem_limit: 512m

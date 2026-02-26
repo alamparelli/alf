@@ -40,7 +40,6 @@ RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
     && chmod 700 /home/node/data/.claude
 
 WORKDIR /home/node
-USER node
 
 EXPOSE 8080
 

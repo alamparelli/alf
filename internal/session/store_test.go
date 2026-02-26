@@ -6,76 +6,57 @@ import (
 	"time"
 )
 
-func TestGetOrCreate_NewSession(t *testing.T) {
+func TestGet_Empty(t *testing.T) {
 	s := New(t.TempDir(), 30*time.Minute)
-
-	id, isNew := s.GetOrCreate(123)
-	if !isNew {
-		t.Error("expected isNew=true for first call")
-	}
-	if id == "" {
-		t.Error("expected non-empty session ID")
+	if id := s.Get(123); id != "" {
+		t.Errorf("expected empty, got %q", id)
 	}
 }
 
-func TestGetOrCreate_ExistingSession(t *testing.T) {
+func TestSet_ThenGet(t *testing.T) {
 	s := New(t.TempDir(), 30*time.Minute)
 
-	id1, _ := s.GetOrCreate(123)
-	id2, isNew := s.GetOrCreate(123)
-
-	if isNew {
-		t.Error("expected isNew=false for second call")
-	}
-	if id1 != id2 {
-		t.Errorf("session IDs should match: %q != %q", id1, id2)
+	s.Set(123, "uuid-from-claude")
+	id := s.Get(123)
+	if id != "uuid-from-claude" {
+		t.Errorf("expected 'uuid-from-claude', got %q", id)
 	}
 }
 
-func TestGetOrCreate_TimeoutExpiry(t *testing.T) {
+func TestGet_TimeoutExpiry(t *testing.T) {
 	s := New(t.TempDir(), 1*time.Millisecond)
 
-	id1, _ := s.GetOrCreate(123)
+	s.Set(123, "uuid-1")
 	time.Sleep(5 * time.Millisecond)
-	id2, isNew := s.GetOrCreate(123)
 
-	if !isNew {
-		t.Error("expected isNew=true after timeout")
-	}
-	if id1 == id2 {
-		t.Error("expired session should get a new ID")
+	if id := s.Get(123); id != "" {
+		t.Errorf("expected empty after timeout, got %q", id)
 	}
 }
 
 func TestTouch_ExtendsSession(t *testing.T) {
 	s := New(t.TempDir(), 50*time.Millisecond)
 
-	s.GetOrCreate(123)
+	s.Set(123, "uuid-1")
 	time.Sleep(30 * time.Millisecond)
 	s.Touch(123)
 	time.Sleep(30 * time.Millisecond)
 
-	_, isNew := s.GetOrCreate(123)
-	if isNew {
-		t.Error("touch should have extended the session")
+	if id := s.Get(123); id != "uuid-1" {
+		t.Errorf("touch should have extended session, got %q", id)
 	}
 }
 
 func TestArchive(t *testing.T) {
 	s := New(t.TempDir(), 30*time.Minute)
 
-	id1, _ := s.GetOrCreate(123)
+	s.Set(123, "uuid-1")
 	old := s.Archive(123)
-	if old != id1 {
-		t.Errorf("Archive should return old ID: %q != %q", old, id1)
+	if old != "uuid-1" {
+		t.Errorf("Archive should return old ID: got %q", old)
 	}
-
-	id2, isNew := s.GetOrCreate(123)
-	if !isNew {
-		t.Error("expected isNew=true after archive")
-	}
-	if id1 == id2 {
-		t.Error("archived session should get a new ID")
+	if id := s.Get(123); id != "" {
+		t.Errorf("expected empty after archive, got %q", id)
 	}
 }
 
@@ -89,13 +70,12 @@ func TestArchive_Empty(t *testing.T) {
 func TestSetTimeout(t *testing.T) {
 	s := New(t.TempDir(), 1*time.Hour)
 
-	s.GetOrCreate(123)
+	s.Set(123, "uuid-1")
 	s.SetTimeout(1 * time.Millisecond)
 	time.Sleep(5 * time.Millisecond)
 
-	_, isNew := s.GetOrCreate(123)
-	if !isNew {
-		t.Error("expected new session after timeout changed to 1ms")
+	if id := s.Get(123); id != "" {
+		t.Errorf("expected empty after timeout change, got %q", id)
 	}
 }
 
@@ -103,34 +83,40 @@ func TestPersistence(t *testing.T) {
 	dir := t.TempDir()
 
 	s1 := New(dir, 30*time.Minute)
-	id1, _ := s1.GetOrCreate(42)
+	s1.Set(42, "uuid-persisted")
 
-	// Create a second store from same dir — should load persisted data.
+	// Second store from same dir should load persisted data.
 	s2 := New(dir, 30*time.Minute)
-	id2, isNew := s2.GetOrCreate(42)
-
-	if isNew {
-		t.Error("expected session to be loaded from disk")
-	}
-	if id1 != id2 {
-		t.Errorf("persisted session ID mismatch: %q != %q", id1, id2)
+	if id := s2.Get(42); id != "uuid-persisted" {
+		t.Errorf("expected persisted ID, got %q", id)
 	}
 }
 
 func TestDifferentChats(t *testing.T) {
 	s := New(t.TempDir(), 30*time.Minute)
 
-	id1, _ := s.GetOrCreate(1)
-	id2, _ := s.GetOrCreate(2)
+	s.Set(1, "uuid-a")
+	s.Set(2, "uuid-b")
 
-	if id1 == id2 {
-		t.Error("different chats should get different session IDs")
+	if s.Get(1) != "uuid-a" || s.Get(2) != "uuid-b" {
+		t.Error("different chats should have independent sessions")
+	}
+}
+
+func TestSet_Overwrites(t *testing.T) {
+	s := New(t.TempDir(), 30*time.Minute)
+
+	s.Set(1, "old-uuid")
+	s.Set(1, "new-uuid")
+
+	if id := s.Get(1); id != "new-uuid" {
+		t.Errorf("expected overwritten ID 'new-uuid', got %q", id)
 	}
 }
 
 func TestSessionDir_Created(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "data")
 	s := New(dir, 30*time.Minute)
-	s.GetOrCreate(1)
+	s.Set(1, "x")
 	// If we got here without panic, the dir was created.
 }

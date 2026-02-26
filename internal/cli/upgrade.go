@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 )
@@ -23,6 +25,9 @@ func RunUpgrade(currentVersion string) {
 	PrintInfo("Pulling latest image...")
 	dockerCompose(dir, "pull")
 	PrintCheck("Image updated")
+
+	// Fix volume ownership — previous versions ran as root, now runs as node (uid 1000).
+	fixVolumePermissions(dir)
 
 	PrintInfo("Restarting ALF...")
 	dockerCompose(dir, "up", "-d")
@@ -101,6 +106,25 @@ func selfUpdate(currentVersion string) bool {
 
 	PrintCheck(fmt.Sprintf("CLI updated to %s", latest))
 	return true
+}
+
+func fixVolumePermissions(dir string) {
+	dirs := []string{"claude-session", "data"}
+	for _, d := range dirs {
+		p := filepath.Join(dir, d)
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		// chown to uid 1000 (node user inside container).
+		cmd := exec.Command("sudo", "chown", "-R", "1000:1000", p)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			// Try without sudo (might already be owned correctly).
+			cmd2 := exec.Command("chown", "-R", "1000:1000", p)
+			cmd2.Run()
+		}
+	}
 }
 
 func fetchLatestTag() (string, error) {

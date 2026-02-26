@@ -302,7 +302,7 @@ func generateFiles(dir, botToken, chatID, ccPort, ccExternalURL string) {
 	}
 	PrintCheck("docker-compose.yml")
 
-	if err := RenderConfig(dir); err != nil {
+	if err := RenderConfig(dir, ConfigData{ChatID: chatID}); err != nil {
 		Fatal(fmt.Sprintf("Failed to write config.json: %v", err))
 	}
 	PrintCheck("config.json")

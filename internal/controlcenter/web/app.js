@@ -80,7 +80,6 @@ function loadStatus() {
 // --- Config (read-only) ---
 function loadConfig() {
   api('/api/config').then(cfg => {
-    document.getElementById('cfgModel').textContent = cfg.model || 'sonnet';
     document.getElementById('cfgLogLevel').textContent = cfg.log_level || 'info';
     const qs = cfg.quiet_hours?.start || 0;
     const qe = cfg.quiet_hours?.end || 0;

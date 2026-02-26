@@ -130,8 +130,17 @@ func (t *Tracker) git(args ...string) error {
 func (t *Tracker) writeGitignore() error {
 	content := `*
 !.gitignore
-!config.json
-!tiers.json
+!.claude/
+!.claude/**
+!config.d/
+!config.d/config.json
+!config.d/tiers.json
+!config/
+!config/**
+!tools/
+!tools/**
+!skills/
+!skills/**
 !logs/
 !logs/events/
 !logs/events/*.jsonl

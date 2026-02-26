@@ -53,11 +53,6 @@ func (h *ConfigHandler) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if cfg.Model != "" && !AllowedModels[cfg.Model] {
-		http.Error(w, jsonErr(fmt.Sprintf("invalid model %q", cfg.Model)), http.StatusBadRequest)
-		return
-	}
-
 	if cfg.LogLevel != "" {
 		allowed := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 		if !allowed[cfg.LogLevel] {
@@ -81,8 +76,8 @@ func (h *ConfigHandler) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if cfg.AutoUpdateInterval < 0 {
-		http.Error(w, jsonErr("auto_update_interval must be >= 0"), http.StatusBadRequest)
+	if cfg.AutoUpdateCheckInterval < 0 {
+		http.Error(w, jsonErr("auto_update_check_interval must be >= 0"), http.StatusBadRequest)
 		return
 	}
 

@@ -93,6 +93,35 @@ func TestFileConfigStore_SaveAndLoad(t *testing.T) {
 	}
 }
 
+func TestConfigPath(t *testing.T) {
+	got := ConfigPath("/home/node/data")
+	want := "/home/node/data/config.d/config.json"
+	if got != want {
+		t.Errorf("ConfigPath() = %q, want %q", got, want)
+	}
+}
+
+func TestFileConfigStore_SaveCreatesDir(t *testing.T) {
+	dir := t.TempDir()
+	// Path inside a non-existent subdirectory.
+	path := filepath.Join(dir, "config.d", "config.json")
+	store := NewFileConfigStore(path)
+
+	cfg := DefaultConfig()
+	cfg.Model = "opus"
+	if err := store.Save(cfg); err != nil {
+		t.Fatalf("Save() should create parent dir: %v", err)
+	}
+
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() after Save: %v", err)
+	}
+	if loaded.Model != "opus" {
+		t.Errorf("model: got %q, want 'opus'", loaded.Model)
+	}
+}
+
 func TestFileConfigStore_ConcurrentRead(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

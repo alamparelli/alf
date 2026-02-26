@@ -47,8 +47,12 @@ func (s *fileConfigStore) Save(cfg *Config) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
@@ -60,5 +64,5 @@ func (s *fileConfigStore) Save(cfg *Config) error {
 
 // ConfigPath returns the standard config.json path for a data directory.
 func ConfigPath(dataDir string) string {
-	return filepath.Join(dataDir, "config.json")
+	return filepath.Join(dataDir, "config.d", "config.json")
 }

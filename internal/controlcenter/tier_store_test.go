@@ -69,6 +69,35 @@ func TestFileTierStore_Reload(t *testing.T) {
 	}
 }
 
+func TestTiersPath(t *testing.T) {
+	got := TiersPath("/home/node/data")
+	want := "/home/node/data/config.d/tiers.json"
+	if got != want {
+		t.Errorf("TiersPath() = %q, want %q", got, want)
+	}
+}
+
+func TestFileTierStore_SaveCreatesDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.d", "tiers.json")
+	store := NewFileTierStore(path)
+
+	cfg := &TiersConfig{
+		Tiers: []Tier{{Name: "test", Model: "sonnet", Priority: 0, Enabled: true}},
+	}
+	if err := store.Save(cfg); err != nil {
+		t.Fatalf("Save() should create parent dir: %v", err)
+	}
+
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() after Save: %v", err)
+	}
+	if len(loaded.Tiers) != 1 || loaded.Tiers[0].Name != "test" {
+		t.Errorf("unexpected tiers after save: %+v", loaded.Tiers)
+	}
+}
+
 func TestFileTierStore_Save(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tiers.json")

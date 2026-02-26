@@ -59,7 +59,17 @@ func RunInit() {
 
 	// Step 8: Claude authentication
 	PrintStep(8, "Claude authentication")
-	claudeLogin(dir)
+	fmt.Println("\n  ALF needs Claude Code authentication.")
+	fmt.Println("  Run this command now (in another terminal if needed):")
+	fmt.Println()
+	fmt.Printf("    docker exec -it -e HOME=/home/node/data alf claude\n")
+	fmt.Println()
+	fmt.Println("  Inside Claude: type " + colorBold + "/login" + colorReset + ", authenticate, then " + colorBold + "/exit" + colorReset + ".")
+	fmt.Println()
+	fmt.Print("  Press Enter when done...")
+	reader.ReadString('\n')
+	fixClaudeOwnership()
+	verifyClaudeAuth()
 
 	// Summary (Claude TUI clears the screen, so reprint everything useful)
 	fmt.Println()
@@ -353,41 +363,23 @@ func pullAndStart(dir, botName string) {
 	PrintWarning("ALF started but health check inconclusive. Check with: alf status")
 }
 
-func claudeLogin(dir string) {
-	fmt.Println("\n  ALF uses Claude Code inside the container.")
-	fmt.Println("  You need to authenticate with your Anthropic account.")
-	fmt.Println()
-	fmt.Println("  Launching Claude Code...")
-	fmt.Println("  Type " + colorBold + "/login" + colorReset + " inside Claude, authenticate, then " + colorBold + "/exit" + colorReset + " to continue.")
-	fmt.Println()
-
-	// Launch Claude TUI for authentication. Runs as root (PID 1 user) so
-	// the TUI can write to data/.claude/. We chown to claude user afterwards.
-	cmd := exec.Command("docker", "exec", "-it", "-e", "HOME=/home/node/data", "alf", "claude")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	loginErr := cmd.Run()
-	if loginErr != nil {
-		PrintWarning("Claude TUI exited with an error. If you authenticated, that's OK.")
-	}
-
-	// Always fix ownership: auth files created as root, claude subprocess needs them.
+func fixClaudeOwnership() {
 	fix := exec.Command("docker", "exec", "alf",
 		"sh", "-c", "chown -R 1001:1001 /home/node/data/.claude /home/node/data/.claude.json 2>/dev/null; true")
 	fix.Run()
+}
 
-	// Verify auth by running a quick test.
+func verifyClaudeAuth() {
 	verify := exec.Command("docker", "exec", "-u", "claude", "-e", "HOME=/home/node/data",
 		"alf", "claude", "-p", "ping", "--output-format", "json", "--max-turns", "1")
 	out, _ := verify.Output()
 	if len(out) > 0 && strings.Contains(string(out), `"is_error":false`) {
 		PrintCheck("Claude authenticated")
 	} else {
-		PrintWarning("Claude may not be authenticated. Try manually:")
+		PrintWarning("Claude not authenticated yet. Run:")
 		fmt.Println()
 		fmt.Println("    docker exec -it -e HOME=/home/node/data alf claude")
-		fmt.Println("    docker exec alf chown -R 1001:1001 /home/node/data/.claude /home/node/data/.claude.json")
+		fmt.Println("    Then: alf login")
 		fmt.Println()
 	}
 }
@@ -403,9 +395,6 @@ func RunLogin() {
 	cmd.Stderr = os.Stderr
 	cmd.Run()
 
-	// Always fix ownership.
-	fix := exec.Command("docker", "exec", "alf",
-		"sh", "-c", "chown -R 1001:1001 /home/node/data/.claude /home/node/data/.claude.json 2>/dev/null; true")
-	fix.Run()
-	PrintCheck("Ownership fixed")
+	fixClaudeOwnership()
+	verifyClaudeAuth()
 }

@@ -18,7 +18,8 @@ func newTestAuthHandler() (*AuthHandler, *MagicStore, *SessionStore) {
 func TestAuthHandler_ValidCode(t *testing.T) {
 	h, magic, sessions := newTestAuthHandler()
 
-	code, _ := magic.Issue(123)
+	ttl := 7 * 24 * time.Hour
+	code, _ := magic.Issue(123, ttl)
 	req := httptest.NewRequest("GET", "/auth?code="+code, nil)
 	rec := httptest.NewRecorder()
 
@@ -42,6 +43,9 @@ func TestAuthHandler_ValidCode(t *testing.T) {
 	}
 	if !cookie.HttpOnly {
 		t.Error("cookie should be HttpOnly")
+	}
+	if expected := int(ttl.Seconds()); cookie.MaxAge != expected {
+		t.Errorf("expected MaxAge %d, got %d", expected, cookie.MaxAge)
 	}
 	if !sessions.Valid(cookie.Value) {
 		t.Error("session should be valid")
@@ -74,13 +78,42 @@ func TestAuthHandler_InvalidCode(t *testing.T) {
 	}
 }
 
+func TestAuthHandler_CookieMaxAgeMatchesTTL(t *testing.T) {
+	h, magic, _ := newTestAuthHandler()
+
+	for _, tc := range []struct {
+		name string
+		ttl  time.Duration
+	}{
+		{"24h", 24 * time.Hour},
+		{"7d", 7 * 24 * time.Hour},
+		{"30d", 30 * 24 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _ := magic.Issue(123, tc.ttl)
+			req := httptest.NewRequest("GET", "/auth?code="+code, nil)
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			cookies := rec.Result().Cookies()
+			if len(cookies) == 0 {
+				t.Fatal("expected session cookie")
+			}
+			if got, want := cookies[0].MaxAge, int(tc.ttl.Seconds()); got != want {
+				t.Errorf("MaxAge = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
 func TestAuthHandler_ExpiredCode(t *testing.T) {
 	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	magic := NewMagicStore(func() time.Time { return now })
 	sessions := NewSessionStore(func() time.Time { return now })
 	h := &AuthHandler{Magic: magic, Sessions: sessions}
 
-	code, _ := magic.Issue(100)
+	code, _ := magic.Issue(100, 24*time.Hour)
 
 	// Expire the code.
 	expired := now.Add(magicCodeTTL + time.Second)
@@ -99,7 +132,7 @@ func TestAuthHandler_ExpiredCode(t *testing.T) {
 func TestAuthHandler_DoubleConsume(t *testing.T) {
 	h, magic, _ := newTestAuthHandler()
 
-	code, _ := magic.Issue(100)
+	code, _ := magic.Issue(100, 24*time.Hour)
 
 	// First consume — should succeed.
 	req1 := httptest.NewRequest("GET", "/auth?code="+code, nil)

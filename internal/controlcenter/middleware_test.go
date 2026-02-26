@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func okHandler() http.Handler {
@@ -125,7 +126,7 @@ func TestRateLimiter_DifferentIPs(t *testing.T) {
 
 func TestAuthMiddleware_ValidCookie(t *testing.T) {
 	ss := NewSessionStore(nil)
-	id, _ := ss.Issue(100)
+	id, _ := ss.Issue(100, 24*time.Hour)
 	handler := authMiddleware("test-token", ss, nil)(okHandler())
 
 	req := httptest.NewRequest("GET", "/api/status", nil)

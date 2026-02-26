@@ -55,7 +55,7 @@ advBtn.onclick = () => {
   adv = !adv;
   advBtn.classList.toggle('active', adv);
   document.querySelectorAll('.advanced').forEach(el => el.classList.toggle('visible', adv));
-  if (adv) { loadRawConfig(); loadTiers(); loadLogFiles(); }
+  if (adv) { loadRawConfig(); loadLogFiles(); }
 };
 
 // --- Status ---
@@ -96,23 +96,80 @@ function loadRawConfig() {
   }).catch(() => {});
 }
 
-// --- Tiers (read-only) ---
+// --- Tiers (editable) ---
+const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
+let tiersData = [];
+
 function loadTiers() {
   api('/api/tiers').then(t => {
-    const body = document.getElementById('tiersBody');
-    body.innerHTML = '';
-    (t.tiers || []).forEach(tier => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${esc(tier.name)}</td>
-        <td>${esc(tier.model)}</td>
-        <td>${tier.priority}</td>
-        <td>${tier.enabled ? 'Yes' : 'No'}</td>
-      `;
-      body.appendChild(tr);
-    });
+    tiersData = (t.tiers || []).map(tier => ({ ...tier }));
+    renderTiers();
   }).catch(() => {});
 }
+
+function renderTiers() {
+  const body = document.getElementById('tiersBody');
+  body.innerHTML = '';
+  tiersData.forEach((tier, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" value="${esc(tier.name)}" data-idx="${i}" data-field="name" class="tier-input"></td>
+      <td>
+        <select data-idx="${i}" data-field="model" class="tier-input">
+          ${ALLOWED_MODELS.map(m => `<option value="${m}"${m === tier.model ? ' selected' : ''}>${m}</option>`).join('')}
+        </select>
+      </td>
+      <td><input type="number" value="${tier.priority}" data-idx="${i}" data-field="priority" class="tier-input" style="width:60px"></td>
+      <td><input type="checkbox" ${tier.enabled ? 'checked' : ''} data-idx="${i}" data-field="enabled" class="tier-input"></td>
+      <td><button class="btn-sm btn-danger" data-idx="${i}" class="tier-delete">✕</button></td>
+    `;
+    body.appendChild(tr);
+  });
+
+  // Bind change events
+  body.querySelectorAll('.tier-input').forEach(el => {
+    el.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      const field = e.target.dataset.field;
+      if (field === 'enabled') {
+        tiersData[idx][field] = e.target.checked;
+      } else if (field === 'priority') {
+        tiersData[idx][field] = parseInt(e.target.value) || 0;
+      } else {
+        tiersData[idx][field] = e.target.value;
+      }
+    });
+  });
+
+  // Bind delete buttons
+  body.querySelectorAll('.btn-danger').forEach(el => {
+    el.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      if (tiersData.length <= 1) { toast('At least one tier is required', 'error'); return; }
+      tiersData.splice(idx, 1);
+      renderTiers();
+    });
+  });
+}
+
+document.getElementById('addTierBtn').addEventListener('click', () => {
+  tiersData.push({ name: '', model: 'sonnet', priority: 0, enabled: true });
+  renderTiers();
+});
+
+document.getElementById('saveTiersBtn').addEventListener('click', () => {
+  for (const t of tiersData) {
+    if (!t.name.trim()) { toast('All tiers must have a name', 'error'); return; }
+  }
+  api('/api/tiers', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tiers: tiersData }),
+  }).then(r => {
+    if (r.ok) toast('Tiers saved');
+    else toast(r.error || 'Save failed', 'error');
+  }).catch(e => toast(e.error || 'Save failed', 'error'));
+});
 
 function esc(s) {
   const d = document.createElement('div');
@@ -154,116 +211,10 @@ document.getElementById('fetchLogsBtn').onclick = () => {
   }).catch(() => toast('Failed to fetch logs', 'error'));
 };
 
-// --- Generic Resource CRUD ---
-function resourceAPI(type_) {
-  return {
-    list: () => api('/api/' + type_ + '/'),
-    get: (name) => api('/api/' + type_ + '/' + encodeURIComponent(name)),
-    put: (name, content) => api('/api/' + type_ + '/' + encodeURIComponent(name), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-    }),
-    del: (name) => api('/api/' + type_ + '/' + encodeURIComponent(name), { method: 'DELETE' }),
-  };
-}
-
-const resourceTypes = {
-  memories: { api: resourceAPI('memories'), label: 'memory' },
-  tools:    { api: resourceAPI('tools'),    label: 'tool' },
-  skills:   { api: resourceAPI('skills'),   label: 'skill' },
-};
-
-function loadResourceList(type_) {
-  const rt = resourceTypes[type_];
-  rt.api.list().then(r => {
-    const el = document.getElementById(type_ + 'List');
-    const items = r.items || [];
-    if (items.length === 0) {
-      el.innerHTML = '<div class="resource-empty">No ' + type_ + ' yet</div>';
-      return;
-    }
-    el.innerHTML = items.map(item => `
-      <div class="resource-item">
-        <span class="resource-name">${esc(item.name)}</span>
-        <span class="resource-meta">${formatSize(item.size)}</span>
-        <button class="btn-sm" onclick="editResource('${type_}','${esc(item.name)}')">Edit</button>
-        <button class="btn-sm btn-danger" onclick="deleteResource('${type_}','${esc(item.name)}')">Delete</button>
-      </div>
-    `).join('');
-  }).catch(() => {
-    document.getElementById(type_ + 'List').textContent = 'Failed to load';
-  });
-}
-
-function formatSize(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  return (bytes / 1024).toFixed(1) + ' KB';
-}
-
-function newResource(type_) {
-  const editor = document.getElementById(type_ + 'Editor');
-  document.getElementById(type_ + 'Name').value = '';
-  document.getElementById(type_ + 'Name').disabled = false;
-  document.getElementById(type_ + 'Content').value = '';
-  editor.style.display = 'block';
-}
-
-function editResource(type_, name) {
-  const rt = resourceTypes[type_];
-  rt.api.get(name).then(r => {
-    const editor = document.getElementById(type_ + 'Editor');
-    document.getElementById(type_ + 'Name').value = r.name;
-    document.getElementById(type_ + 'Name').disabled = true;
-    document.getElementById(type_ + 'Content').value = r.content;
-    editor.style.display = 'block';
-  }).catch(e => toast(e.error || 'Failed to load', 'error'));
-}
-
-function closeEditor(type_) {
-  document.getElementById(type_ + 'Editor').style.display = 'none';
-}
-
-function saveResource(type_) {
-  const name = document.getElementById(type_ + 'Name').value.trim();
-  const content = document.getElementById(type_ + 'Content').value;
-  if (!name) { toast('Name is required', 'error'); return; }
-  const rt = resourceTypes[type_];
-  rt.api.put(name, content).then(r => {
-    if (r.ok) {
-      toast(rt.label + ' saved');
-      closeEditor(type_);
-      loadResourceList(type_);
-    } else {
-      toast(r.error || 'Save failed', 'error');
-    }
-  }).catch(e => toast(e.error || 'Save failed', 'error'));
-}
-
-function deleteResource(type_, name) {
-  if (!confirm('Delete "' + name + '"?')) return;
-  const rt = resourceTypes[type_];
-  rt.api.del(name).then(r => {
-    if (r.ok) {
-      toast(rt.label + ' deleted');
-      loadResourceList(type_);
-    } else {
-      toast(r.error || 'Delete failed', 'error');
-    }
-  }).catch(e => toast(e.error || 'Delete failed', 'error'));
-}
-
-// Wire save buttons
-document.getElementById('saveMemoryBtn').onclick = () => saveResource('memories');
-document.getElementById('saveToolBtn').onclick = () => saveResource('tools');
-document.getElementById('saveSkillBtn').onclick = () => saveResource('skills');
-
 // --- Init ---
 loadStatus();
 loadConfig();
+loadTiers();
 loadRecentLogs();
-loadResourceList('memories');
-loadResourceList('tools');
-loadResourceList('skills');
 setInterval(loadStatus, 30000);
 setInterval(loadRecentLogs, 10000);

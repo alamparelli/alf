@@ -62,3 +62,38 @@ func TestFileTierStore_Reload(t *testing.T) {
 		t.Errorf("Current() after second Reload: got %q, want 'v2'", store.Current().Tiers[0].Name)
 	}
 }
+
+func TestFileTierStore_Save(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tiers.json")
+	store := NewFileTierStore(path)
+
+	cfg := &TiersConfig{
+		Tiers: []Tier{
+			{Name: "fast", Model: "haiku", Priority: 1, Enabled: true},
+			{Name: "smart", Model: "opus", Priority: 2, Enabled: false},
+		},
+	}
+
+	if err := store.Save(cfg); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	// Current() should reflect saved data immediately.
+	cur := store.Current()
+	if len(cur.Tiers) != 2 {
+		t.Fatalf("expected 2 tiers, got %d", len(cur.Tiers))
+	}
+	if cur.Tiers[0].Name != "fast" || cur.Tiers[1].Name != "smart" {
+		t.Errorf("unexpected tier names: %+v", cur.Tiers)
+	}
+
+	// Load() from disk should match.
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() after Save error: %v", err)
+	}
+	if len(loaded.Tiers) != 2 || loaded.Tiers[0].Model != "haiku" {
+		t.Errorf("Load() after Save mismatch: %+v", loaded.Tiers)
+	}
+}

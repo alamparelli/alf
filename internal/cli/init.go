@@ -112,12 +112,15 @@ func promptDirectory(reader *bufio.Reader) string {
 		dir = input
 	}
 
-	subdirs := []string{"tools", "skills", "data/logs", "data/memory", "data/state"}
+	subdirs := []string{"tools", "skills", "data/logs", "data/memory", "data/state", "claude-session"}
 	for _, sub := range subdirs {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			Fatal(fmt.Sprintf("Failed to create %s: %v", sub, err))
 		}
 	}
+
+	// Ensure volume directories are owned by uid 1000 (node user inside container).
+	fixVolumePermissions(dir)
 	PrintCheck(fmt.Sprintf("Directory ready: %s", dir))
 	return dir
 }
@@ -350,7 +353,8 @@ func claudeLogin(dir string) {
 	fmt.Println("\n  ALF uses Claude Code inside the container.")
 	fmt.Println("  You need to authenticate with your Anthropic account.")
 	fmt.Println()
-	fmt.Println("  Launching Claude Code... Authenticate, then choose '"+colorBold+"Exit"+colorReset+"' to continue.")
+	fmt.Println("  Launching Claude Code...")
+	fmt.Println("  Type " + colorBold + "/login" + colorReset + " inside Claude, authenticate, then " + colorBold + "/exit" + colorReset + " to continue.")
 	fmt.Println()
 
 	// Try launching the full claude TUI via docker exec.
@@ -373,6 +377,7 @@ func claudeLogin(dir string) {
 // RunLogin allows re-authenticating Claude from the CLI.
 func RunLogin() {
 	PrintInfo("Launching Claude Code for authentication...")
+	fmt.Println("  Type " + colorBold + "/login" + colorReset + " inside Claude to authenticate, then " + colorBold + "/exit" + colorReset + " when done.")
 	fmt.Println()
 	cmd := exec.Command("docker", "exec", "-it", "alf", "claude")
 	cmd.Stdin = os.Stdin

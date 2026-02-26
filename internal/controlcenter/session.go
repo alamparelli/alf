@@ -16,8 +16,9 @@ const (
 
 // magicEntry is a pending magic link code.
 type magicEntry struct {
-	chatID    int64
-	expiresAt time.Time
+	chatID     int64
+	sessionTTL time.Duration
+	expiresAt  time.Time
 }
 
 // MagicStore manages short-lived magic link codes for authentication.
@@ -39,7 +40,9 @@ func NewMagicStore(nowFn func() time.Time) *MagicStore {
 }
 
 // Issue creates a new magic code for the given chat ID.
-func (ms *MagicStore) Issue(chatID int64) (string, error) {
+// The sessionTTL is carried through and returned on Consume so the auth handler
+// can create a session with the correct duration.
+func (ms *MagicStore) Issue(chatID int64, sessTTL time.Duration) (string, error) {
 	code, err := randomHex(magicCodeLen)
 	if err != nil {
 		return "", err
@@ -47,8 +50,9 @@ func (ms *MagicStore) Issue(chatID int64) (string, error) {
 
 	ms.mu.Lock()
 	ms.entries[code] = &magicEntry{
-		chatID:    chatID,
-		expiresAt: ms.nowFn().Add(magicCodeTTL),
+		chatID:     chatID,
+		sessionTTL: sessTTL,
+		expiresAt:  ms.nowFn().Add(magicCodeTTL),
 	}
 	ms.mu.Unlock()
 
@@ -56,22 +60,22 @@ func (ms *MagicStore) Issue(chatID int64) (string, error) {
 }
 
 // Consume atomically retrieves and deletes a magic code.
-// Returns the associated chat ID and true if the code was valid and not expired.
-func (ms *MagicStore) Consume(code string) (int64, bool) {
+// Returns the associated chat ID, the requested session TTL, and true if the code was valid and not expired.
+func (ms *MagicStore) Consume(code string) (int64, time.Duration, bool) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
 	entry, ok := ms.entries[code]
 	if !ok {
-		return 0, false
+		return 0, 0, false
 	}
 	delete(ms.entries, code)
 
 	if ms.nowFn().After(entry.expiresAt) {
-		return 0, false
+		return 0, 0, false
 	}
 
-	return entry.chatID, true
+	return entry.chatID, entry.sessionTTL, true
 }
 
 // StartCleanup runs a background goroutine that sweeps expired entries every minute.
@@ -115,8 +119,13 @@ func NewSessionStore(nowFn func() time.Time) *SessionStore {
 	}
 }
 
-// Issue creates a new session for the given chat ID and returns the session ID.
-func (ss *SessionStore) Issue(chatID int64) (string, error) {
+// Issue creates a new session for the given chat ID with the specified TTL.
+// If ttl is 0, the default sessionTTL (24h) is used.
+func (ss *SessionStore) Issue(chatID int64, ttl time.Duration) (string, error) {
+	if ttl <= 0 {
+		ttl = sessionTTL
+	}
+
 	id, err := randomHex(sessionIDLen)
 	if err != nil {
 		return "", err
@@ -125,7 +134,7 @@ func (ss *SessionStore) Issue(chatID int64) (string, error) {
 	ss.mu.Lock()
 	ss.sessions[id] = &session{
 		chatID:    chatID,
-		expiresAt: ss.nowFn().Add(sessionTTL),
+		expiresAt: ss.nowFn().Add(ttl),
 	}
 	ss.mu.Unlock()
 

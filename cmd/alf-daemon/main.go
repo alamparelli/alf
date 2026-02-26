@@ -132,6 +132,12 @@ func main() {
 		for _, u := range updates {
 			offset = u.UpdateID + 1
 
+			// Handle callback queries (inline keyboard button presses).
+			if u.CallbackQuery != nil {
+				handleCallbackQuery(client, token, u.CallbackQuery, magic, ccExternalURL, allowedChatIDs)
+				continue
+			}
+
 			if u.Message == nil || u.Message.Text == "" {
 				continue
 			}
@@ -211,8 +217,9 @@ func readSecret(envVar string) string {
 }
 
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query"`
 }
 
 type Message struct {
@@ -221,11 +228,23 @@ type Message struct {
 	Text string `json:"text"`
 }
 
+type CallbackQuery struct {
+	ID   string  `json:"id"`
+	From User    `json:"from"`
+	Data string  `json:"data"`
+	Message *CBMessage `json:"message"`
+}
+
+type CBMessage struct {
+	Chat Chat `json:"chat"`
+}
+
 type Chat struct {
 	ID int64 `json:"id"`
 }
 
 type User struct {
+	ID       int64  `json:"id"`
 	Username string `json:"username"`
 }
 
@@ -276,7 +295,6 @@ func handleCommand(client *http.Client, token string, msg *Message, magic *cc.Ma
 func handleLogin(client *http.Client, token string, msg *Message, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) {
 	chatID := msg.Chat.ID
 
-	// If no allowed chat IDs configured, nobody can login.
 	if len(allowedChatIDs) == 0 {
 		sendMessage(client, token, chatID, "Login is not configured. Set ALLOWED_CHAT_IDS to enable it.")
 		return
@@ -287,7 +305,72 @@ func handleLogin(client *http.Client, token string, msg *Message, magic *cc.Magi
 		return
 	}
 
-	code, err := magic.Issue(chatID)
+	// Send inline keyboard with session duration options.
+	sendLoginKeyboard(client, token, chatID)
+}
+
+func sendLoginKeyboard(client *http.Client, token string, chatID int64) {
+	keyboard := map[string]any{
+		"inline_keyboard": [][]map[string]string{
+			{
+				{"text": "24 hours", "callback_data": "login:24h"},
+				{"text": "7 days", "callback_data": "login:7d"},
+				{"text": "30 days", "callback_data": "login:30d"},
+			},
+		},
+	}
+
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
+	payload, _ := json.Marshal(map[string]any{
+		"chat_id":      chatID,
+		"text":         "Choose session duration:",
+		"reply_markup": keyboard,
+	})
+	resp, err := http.Post(url, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("sendLoginKeyboard error: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+}
+
+func handleCallbackQuery(client *http.Client, token string, cb *CallbackQuery, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) {
+	// Always answer callback to remove the loading indicator.
+	defer answerCallbackQuery(client, token, cb.ID)
+
+	if cb.Message == nil {
+		return
+	}
+
+	chatID := cb.Message.Chat.ID
+
+	if !strings.HasPrefix(cb.Data, "login:") {
+		return
+	}
+
+	if !allowedChatIDs[chatID] {
+		sendMessage(client, token, chatID, "You are not authorized to access the Control Center.")
+		return
+	}
+
+	var ttl time.Duration
+	var label string
+	switch cb.Data {
+	case "login:24h":
+		ttl = 24 * time.Hour
+		label = "24 hours"
+	case "login:7d":
+		ttl = 7 * 24 * time.Hour
+		label = "7 days"
+	case "login:30d":
+		ttl = 30 * 24 * time.Hour
+		label = "30 days"
+	default:
+		sendMessage(client, token, chatID, "Unknown duration. Send /login to try again.")
+		return
+	}
+
+	code, err := magic.Issue(chatID, ttl)
 	if err != nil {
 		log.Printf("magic issue error: %v", err)
 		sendMessage(client, token, chatID, "Failed to generate login link. Try again.")
@@ -295,7 +378,20 @@ func handleLogin(client *http.Client, token string, msg *Message, magic *cc.Magi
 	}
 
 	link := fmt.Sprintf("%s/auth?code=%s", strings.TrimRight(ccExternalURL, "/"), code)
-	sendMessage(client, token, chatID, fmt.Sprintf("Click to login (expires in 5 min):\n%s", link))
+	sendMessage(client, token, chatID, fmt.Sprintf("Session: %s · Expires in 5 min\n%s", label, link))
+}
+
+func answerCallbackQuery(client *http.Client, token string, callbackID string) {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/answerCallbackQuery", token)
+	payload, _ := json.Marshal(map[string]any{
+		"callback_query_id": callbackID,
+	})
+	resp, err := http.Post(url, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("answerCallbackQuery error: %v", err)
+		return
+	}
+	defer resp.Body.Close()
 }
 
 func parseAllowedChatIDs(s string) map[int64]bool {

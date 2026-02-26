@@ -24,13 +24,13 @@ func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chatID, ok := h.Magic.Consume(code)
+	chatID, ttl, ok := h.Magic.Consume(code)
 	if !ok {
 		h.renderError(w, "Invalid or expired link. Send /login to get a new one.")
 		return
 	}
 
-	sessionID, err := h.Sessions.Issue(chatID)
+	sessionID, err := h.Sessions.Issue(chatID, ttl)
 	if err != nil {
 		h.renderError(w, "Internal error creating session.")
 		return
@@ -40,7 +40,7 @@ func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Name:     "cc_session",
 		Value:    sessionID,
 		Path:     "/",
-		MaxAge:   86400, // 24h
+		MaxAge:   int(ttl.Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})

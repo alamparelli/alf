@@ -12,6 +12,7 @@ type Config struct {
 	AllowedChatIDs []int64    `json:"allowed_chat_ids"`
 	SystemPrompt   string     `json:"system_prompt"`
 	QuietHours     QuietHours `json:"quiet_hours"`
+	SessionTimeout int        `json:"session_timeout"` // minutes, 0 = use default (30)
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -28,15 +29,22 @@ func DefaultConfig() *Config {
 		AllowedChatIDs: []int64{},
 		SystemPrompt:   "",
 		QuietHours:     QuietHours{Start: 0, End: 0},
+		SessionTimeout: 30,
 	}
 }
 
 // Tier defines a routing tier for message processing.
 type Tier struct {
-	Name     string `json:"name"`
-	Model    string `json:"model"`
-	Priority int    `json:"priority"`
-	Enabled  bool   `json:"enabled"`
+	Name         string   `json:"name"`
+	Model        string   `json:"model"`
+	Priority     int      `json:"priority"`
+	Enabled      bool     `json:"enabled"`
+	Routable     bool     `json:"routable"`
+	RouterLabel  string   `json:"router_label,omitempty"`
+	WriteCapable bool     `json:"write_capable"`
+	Tools        []string `json:"tools,omitempty"`
+	Effort       string   `json:"effort,omitempty"`
+	ForceCommand bool     `json:"force_command"`
 }
 
 // TiersConfig wraps a list of tiers.
@@ -44,11 +52,14 @@ type TiersConfig struct {
 	Tiers []Tier `json:"tiers"`
 }
 
-// DefaultTiersConfig returns a TiersConfig with one default tier.
+// DefaultTiersConfig returns a TiersConfig with starter tiers.
 func DefaultTiersConfig() *TiersConfig {
 	return &TiersConfig{
 		Tiers: []Tier{
-			{Name: "default", Model: "sonnet", Priority: 0, Enabled: true},
+			{Name: "instant", Model: "haiku", Priority: 0, Enabled: true, Routable: true, RouterLabel: "Quick greetings, acknowledgments, yes/no", Effort: "low"},
+			{Name: "analyze", Model: "sonnet", Priority: 1, Enabled: true, Routable: true, RouterLabel: "Analysis, reasoning, explanations", Effort: "medium"},
+			{Name: "heavy", Model: "sonnet", Priority: 2, Enabled: true, Routable: true, RouterLabel: "Tasks requiring file changes", WriteCapable: true, ForceCommand: true, Effort: "medium"},
+			{Name: "deep", Model: "opus", Priority: 3, Enabled: true, Routable: true, RouterLabel: "Complex architecture and deep reasoning", WriteCapable: true, ForceCommand: true, Effort: "high"},
 		},
 	}
 }
@@ -58,6 +69,14 @@ var AllowedModels = map[string]bool{
 	"haiku":  true,
 	"sonnet": true,
 	"opus":   true,
+}
+
+// AllowedEfforts defines valid effort levels (empty string = unset).
+var AllowedEfforts = map[string]bool{
+	"":       true,
+	"low":    true,
+	"medium": true,
+	"high":   true,
 }
 
 // ReloadEvent signals what changed.

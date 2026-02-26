@@ -61,6 +61,10 @@ func (h *TiersHandler) put(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, jsonErr(fmt.Sprintf("tier %q: invalid model %q", t.Name, t.Model)), http.StatusBadRequest)
 			return
 		}
+		if !AllowedEfforts[t.Effort] {
+			http.Error(w, jsonErr(fmt.Sprintf("tier %q: invalid effort %q (allowed: low, medium, high)", t.Name, t.Effort)), http.StatusBadRequest)
+			return
+		}
 	}
 
 	if err := h.Store.Save(&cfg); err != nil {

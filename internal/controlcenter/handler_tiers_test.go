@@ -50,8 +50,8 @@ func TestTiersHandler_GET(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "default") {
-		t.Error("response should contain default tier")
+	if !strings.Contains(rec.Body.String(), "instant") {
+		t.Error("response should contain instant tier")
 	}
 }
 
@@ -118,6 +118,46 @@ func TestTiersHandler_PUT_MissingName(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestTiersHandler_PUT_InvalidEffort(t *testing.T) {
+	h := &TiersHandler{Store: &mockTierStore{}}
+
+	body := `{"tiers":[{"name":"bad","model":"sonnet","priority":0,"enabled":true,"effort":"extreme"}]}`
+	req := httptest.NewRequest("PUT", "/api/tiers", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid effort") {
+		t.Errorf("expected invalid effort error, got: %s", rec.Body.String())
+	}
+}
+
+func TestTiersHandler_PUT_WithNewFields(t *testing.T) {
+	store := &mockTierStore{}
+	h := &TiersHandler{Store: store}
+
+	body := `{"tiers":[{"name":"heavy","model":"sonnet","priority":2,"enabled":true,"routable":true,"router_label":"File changes","write_capable":true,"effort":"medium","force_command":true}]}`
+	req := httptest.NewRequest("PUT", "/api/tiers", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.saved == nil {
+		t.Fatal("expected tiers to be saved")
+	}
+	tier := store.saved.Tiers[0]
+	if !tier.Routable || !tier.WriteCapable || !tier.ForceCommand {
+		t.Errorf("new fields not saved: routable=%v write=%v force=%v", tier.Routable, tier.WriteCapable, tier.ForceCommand)
+	}
+	if tier.Effort != "medium" {
+		t.Errorf("expected effort 'medium', got %q", tier.Effort)
 	}
 }
 

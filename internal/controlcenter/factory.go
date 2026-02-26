@@ -10,19 +10,27 @@ import (
 type Deps struct {
 	ConfigStore    ConfigStore
 	TierStore      TierStore
+	MemoryStore    ResourceStore
+	ToolStore      ResourceStore
+	SkillStore     ResourceStore
 	LogReader      LogReader
 	StatusProvider StatusProvider
 	Notifier       Notifier
+	Magic          *MagicStore
+	Sessions       *SessionStore
 	AuthToken      string
 	DashboardHTML  string
 	WebFS          fs.FS // embedded web assets (style.css, app.js)
 }
 
 // StoreFactory creates concrete store implementations from a data directory.
-func StoreFactory(dataDir string) (ConfigStore, TierStore) {
+func StoreFactory(dataDir string) (ConfigStore, TierStore, ResourceStore, ResourceStore, ResourceStore) {
 	cs := NewFileConfigStore(ConfigPath(dataDir))
 	ts := NewFileTierStore(TiersPath(dataDir))
-	return cs, ts
+	ms := NewFileResourceStore(filepath.Join(dataDir, "memories"), ".md")
+	tools := NewFileResourceStore(filepath.Join(dataDir, "tools"), ".json")
+	skills := NewFileResourceStore(filepath.Join(dataDir, "skills"), ".json")
+	return cs, ts, ms, tools, skills
 }
 
 // LogReaderFactory creates a LogReader from a data directory.
@@ -35,14 +43,12 @@ func LogReaderFactory(dataDir string) LogReader {
 func HandlerFactory(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
-	// API routes.
+	// Read-only API routes.
 	mux.Handle("/api/config", &ConfigHandler{
-		Store:    deps.ConfigStore,
-		Notifier: deps.Notifier,
+		Store: deps.ConfigStore,
 	})
 	mux.Handle("/api/tiers", &TiersHandler{
-		Store:    deps.TierStore,
-		Notifier: deps.Notifier,
+		Store: deps.TierStore,
 	})
 	mux.Handle("/api/status", &StatusHandler{
 		Provider: deps.StatusProvider,
@@ -51,8 +57,31 @@ func HandlerFactory(deps Deps) http.Handler {
 		Reader: deps.LogReader,
 	})
 
+	// Resource CRUD routes.
+	mux.Handle("/api/memories/", &ResourceHandler{
+		Store: deps.MemoryStore,
+	})
+	mux.Handle("/api/tools/", &ResourceHandler{
+		Store:    deps.ToolStore,
+		Notifier: deps.Notifier,
+		Event:    ReloadTools,
+	})
+	mux.Handle("/api/skills/", &ResourceHandler{
+		Store:    deps.SkillStore,
+		Notifier: deps.Notifier,
+		Event:    ReloadSkills,
+	})
+
 	// Health (exempt from auth).
 	mux.Handle("/health", &HealthHandler{})
+
+	// Magic link auth (exempt from auth — does its own validation).
+	if deps.Magic != nil && deps.Sessions != nil {
+		mux.Handle("/auth", &AuthHandler{
+			Magic:    deps.Magic,
+			Sessions: deps.Sessions,
+		})
+	}
 
 	// Static assets (CSS, JS) — served from embedded web/ directory.
 	if deps.WebFS != nil {
@@ -66,10 +95,10 @@ func HandlerFactory(deps Deps) http.Handler {
 	})
 
 	// Apply middleware stack (outermost first).
-	exempt := map[string]bool{"/health": true}
+	exempt := map[string]bool{"/health": true, "/auth": true}
 	var handler http.Handler = mux
 	handler = jsonMiddleware(handler)
-	handler = authMiddleware(deps.AuthToken, exempt)(handler)
+	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
 	handler = corsMiddleware(handler)
 	handler = newRateLimiter(60).middleware(handler)
 	handler = loggingMiddleware(handler)

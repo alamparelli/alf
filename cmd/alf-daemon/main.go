@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,15 +38,30 @@ func main() {
 		dataDir = d
 	}
 
+	// Parse allowed chat IDs for login authorization.
+	allowedChatIDs := parseAllowedChatIDs(readSecret("ALLOWED_CHAT_IDS"))
+
 	// Shared stats for CC status endpoint.
 	stats := cc.NewStats()
 
 	// Reload channel: CC writes, daemon reads.
 	reloadCh := make(chan cc.ReloadEvent, 4)
 
+	// Magic link auth stores (shared between CC and daemon).
+	magic := cc.NewMagicStore(nil)
+	magic.StartCleanup()
+	sessions := cc.NewSessionStore(nil)
+	sessions.StartCleanup()
+
+	// CC external URL for magic link generation.
+	ccExternalURL := os.Getenv("CC_EXTERNAL_URL")
+	if ccExternalURL == "" {
+		ccExternalURL = "http://localhost:8080"
+	}
+
 	// Start Control Center HTTP server.
-	if authToken != "" {
-		server, err := cc.New(dataDir, stats, version, authToken, reloadCh)
+	if authToken != "" || len(allowedChatIDs) > 0 {
+		server, err := cc.New(dataDir, stats, version, authToken, reloadCh, magic, sessions)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -57,7 +73,7 @@ func main() {
 			log.Println("Control Center started on :8080")
 		}
 	} else {
-		log.Println("CC_AUTH_TOKEN not set — Control Center disabled")
+		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set — Control Center disabled")
 	}
 
 	log.Printf("alf-daemon %s starting...", version)
@@ -93,6 +109,10 @@ func main() {
 				}
 			case cc.ReloadTiers:
 				log.Println("tiers reloaded")
+			case cc.ReloadTools:
+				log.Println("tools reloaded")
+			case cc.ReloadSkills:
+				log.Println("skills reloaded")
 			}
 		default:
 		}
@@ -113,6 +133,14 @@ func main() {
 
 			log.Printf("← %s: %s", u.Message.From.Username, u.Message.Text)
 			stats.RecordMessage()
+
+			// Command routing: handle /commands before passing to Claude.
+			if strings.HasPrefix(u.Message.Text, "/") {
+				if handleCommand(client, token, u.Message, magic, ccExternalURL, allowedChatIDs) {
+					continue
+				}
+				// Unknown /commands fall through to Claude.
+			}
 
 			reply, err := askClaude(u.Message.Text, model)
 			if err != nil {
@@ -207,6 +235,59 @@ func getUpdates(client *http.Client, token string, offset int64) ([]Update, erro
 		return nil, fmt.Errorf("telegram API error: %s", string(body))
 	}
 	return result.Result, nil
+}
+
+// handleCommand processes known /commands. Returns true if handled.
+func handleCommand(client *http.Client, token string, msg *Message, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) bool {
+	cmd := strings.SplitN(msg.Text, " ", 2)[0]
+	switch cmd {
+	case "/login":
+		handleLogin(client, token, msg, magic, ccExternalURL, allowedChatIDs)
+		return true
+	case "/start":
+		sendMessage(client, token, msg.Chat.ID, "Hello! I'm ALF, your AI assistant. Send me a message and I'll respond using Claude.")
+		return true
+	}
+	return false
+}
+
+func handleLogin(client *http.Client, token string, msg *Message, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) {
+	chatID := msg.Chat.ID
+
+	// If no allowed chat IDs configured, nobody can login.
+	if len(allowedChatIDs) == 0 {
+		sendMessage(client, token, chatID, "Login is not configured. Set ALLOWED_CHAT_IDS to enable it.")
+		return
+	}
+
+	if !allowedChatIDs[chatID] {
+		sendMessage(client, token, chatID, "You are not authorized to access the Control Center.")
+		return
+	}
+
+	code, err := magic.Issue(chatID)
+	if err != nil {
+		log.Printf("magic issue error: %v", err)
+		sendMessage(client, token, chatID, "Failed to generate login link. Try again.")
+		return
+	}
+
+	link := fmt.Sprintf("%s/auth?code=%s", strings.TrimRight(ccExternalURL, "/"), code)
+	sendMessage(client, token, chatID, fmt.Sprintf("Click to login (expires in 5 min):\n%s", link))
+}
+
+func parseAllowedChatIDs(s string) map[int64]bool {
+	result := make(map[int64]bool)
+	if s == "" {
+		return result
+	}
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
+			result[id] = true
+		}
+	}
+	return result
 }
 
 func sendMessage(client *http.Client, token string, chatID int64, text string) {

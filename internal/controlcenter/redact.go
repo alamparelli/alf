@@ -26,30 +26,3 @@ func RedactJSON(data []byte) ([]byte, error) {
 
 	return json.MarshalIndent(raw, "", "  ")
 }
-
-// RestoreRedacted takes incoming JSON and restores any "***" values
-// from the on-disk original.
-func RestoreRedacted(incoming, ondisk []byte) ([]byte, error) {
-	var inc map[string]json.RawMessage
-	if err := json.Unmarshal(incoming, &inc); err != nil {
-		return nil, err
-	}
-
-	var orig map[string]json.RawMessage
-	if err := json.Unmarshal(ondisk, &orig); err != nil {
-		return nil, err
-	}
-
-	for key := range inc {
-		if sensitiveKeys[key] {
-			var val string
-			if err := json.Unmarshal(inc[key], &val); err == nil && val == redactedValue {
-				if origVal, ok := orig[key]; ok {
-					inc[key] = origVal
-				}
-			}
-		}
-	}
-
-	return json.MarshalIndent(inc, "", "  ")
-}

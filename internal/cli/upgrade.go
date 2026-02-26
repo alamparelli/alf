@@ -16,12 +16,7 @@ const githubRepo = "alamparelli/alf"
 func RunUpgrade(currentVersion string) {
 	// Step 1: Self-update CLI binary
 	PrintInfo("Checking for CLI updates...")
-	upgraded := selfUpdate(currentVersion)
-
-	if !upgraded {
-		PrintSuccess("Already up to date.")
-		return
-	}
+	selfUpdate(currentVersion)
 
 	// Step 2: Pull latest Docker image + restart
 	dir := alfDir()

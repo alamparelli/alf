@@ -14,7 +14,7 @@ func okHandler() http.Handler {
 }
 
 func TestAuthMiddleware_ValidBearer(t *testing.T) {
-	handler := authMiddleware("test-token", nil)(okHandler())
+	handler := authMiddleware("test-token", nil, nil)(okHandler())
 	req := httptest.NewRequest("GET", "/api/status", nil)
 	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
@@ -27,7 +27,7 @@ func TestAuthMiddleware_ValidBearer(t *testing.T) {
 }
 
 func TestAuthMiddleware_InvalidBearer(t *testing.T) {
-	handler := authMiddleware("test-token", nil)(okHandler())
+	handler := authMiddleware("test-token", nil, nil)(okHandler())
 	req := httptest.NewRequest("GET", "/api/status", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	rec := httptest.NewRecorder()
@@ -40,7 +40,7 @@ func TestAuthMiddleware_InvalidBearer(t *testing.T) {
 }
 
 func TestAuthMiddleware_NoAuth(t *testing.T) {
-	handler := authMiddleware("test-token", nil)(okHandler())
+	handler := authMiddleware("test-token", nil, nil)(okHandler())
 	req := httptest.NewRequest("GET", "/api/status", nil)
 	rec := httptest.NewRecorder()
 
@@ -53,7 +53,7 @@ func TestAuthMiddleware_NoAuth(t *testing.T) {
 
 func TestAuthMiddleware_ExemptPath(t *testing.T) {
 	exempt := map[string]bool{"/health": true}
-	handler := authMiddleware("test-token", exempt)(okHandler())
+	handler := authMiddleware("test-token", nil, exempt)(okHandler())
 	req := httptest.NewRequest("GET", "/health", nil)
 	rec := httptest.NewRecorder()
 
@@ -65,7 +65,7 @@ func TestAuthMiddleware_ExemptPath(t *testing.T) {
 }
 
 func TestAuthMiddleware_QueryParam(t *testing.T) {
-	handler := authMiddleware("test-token", nil)(okHandler())
+	handler := authMiddleware("test-token", nil, nil)(okHandler())
 	req := httptest.NewRequest("GET", "/api/status?token=test-token", nil)
 	rec := httptest.NewRecorder()
 
@@ -120,6 +120,86 @@ func TestRateLimiter_DifferentIPs(t *testing.T) {
 	handler.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Errorf("IP2 first request: expected 200, got %d", rec2.Code)
+	}
+}
+
+func TestAuthMiddleware_ValidCookie(t *testing.T) {
+	ss := NewSessionStore(nil)
+	id, _ := ss.Issue(100)
+	handler := authMiddleware("test-token", ss, nil)(okHandler())
+
+	req := httptest.NewRequest("GET", "/api/status", nil)
+	req.AddCookie(&http.Cookie{Name: "cc_session", Value: id})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for cookie auth, got %d", rec.Code)
+	}
+}
+
+func TestAuthMiddleware_InvalidCookie(t *testing.T) {
+	ss := NewSessionStore(nil)
+	handler := authMiddleware("test-token", ss, nil)(okHandler())
+
+	req := httptest.NewRequest("GET", "/api/status", nil)
+	req.AddCookie(&http.Cookie{Name: "cc_session", Value: "bad"})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for invalid cookie, got %d", rec.Code)
+	}
+}
+
+func TestAuthMiddleware_LoginPage(t *testing.T) {
+	handler := authMiddleware("test-token", nil, nil)(okHandler())
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 login page, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("expected text/html content type, got %q", ct)
+	}
+	body := rec.Body.String()
+	if !contains(body, "/login") {
+		t.Error("login page should mention /login command")
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAuthMiddleware_LoginPage_NotForAPI(t *testing.T) {
+	handler := authMiddleware("test-token", nil, nil)(okHandler())
+
+	req := httptest.NewRequest("GET", "/api/status", nil)
+	req.Header.Set("Accept", "text/html")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// API path should get 401, not login page.
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for API path, got %d", rec.Code)
 	}
 }
 

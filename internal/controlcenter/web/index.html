@@ -40,34 +40,84 @@
       </div>
     </div>
 
-    <!-- Quick Config Card -->
+    <!-- Config Card (read-only) -->
     <div class="card">
-      <h2>Configuration</h2>
+      <h2>Configuration <span class="badge">read-only</span></h2>
       <div class="form-row">
-        <label for="cfgModel">Model</label>
-        <select id="cfgModel">
-          <option value="haiku">Haiku</option>
-          <option value="sonnet" selected>Sonnet</option>
-          <option value="opus">Opus</option>
-        </select>
+        <label>Model</label>
+        <span class="ro-value" id="cfgModel">--</span>
       </div>
       <div class="form-row">
-        <label for="cfgLogLevel">Log Level</label>
-        <select id="cfgLogLevel">
-          <option value="debug">Debug</option>
-          <option value="info" selected>Info</option>
-          <option value="warn">Warn</option>
-          <option value="error">Error</option>
-        </select>
+        <label>Log Level</label>
+        <span class="ro-value" id="cfgLogLevel">--</span>
       </div>
       <div class="form-row">
-        <label for="cfgQuietStart">Quiet Hours</label>
-        <input type="number" id="cfgQuietStart" min="0" max="23" value="0" style="width:60px">
-        <span style="color:var(--text-dim)">to</span>
-        <input type="number" id="cfgQuietEnd" min="0" max="23" value="0" style="width:60px">
+        <label>Quiet Hours</label>
+        <span class="ro-value" id="cfgQuietHours">--</span>
+      </div>
+      <div class="form-row">
+        <label>System Prompt</label>
+        <span class="ro-value" id="cfgSystemPrompt">--</span>
+      </div>
+    </div>
+
+    <!-- Memories Card -->
+    <div class="card">
+      <h2>Memories</h2>
+      <div class="resource-list" id="memoriesList">Loading...</div>
+      <div class="resource-editor" id="memoriesEditor" style="display:none">
+        <div class="form-row">
+          <label for="memoriesName">Name</label>
+          <input type="text" id="memoriesName" placeholder="my-memory">
+        </div>
+        <textarea class="json-editor" id="memoriesContent" placeholder="Markdown content..."></textarea>
+        <div class="btn-row" style="gap:8px">
+          <button class="btn btn-secondary" onclick="closeEditor('memories')">Cancel</button>
+          <button class="btn" id="saveMemoryBtn">Save</button>
+        </div>
       </div>
       <div class="btn-row">
-        <button class="btn" id="saveConfigBtn">Save</button>
+        <button class="btn btn-secondary" onclick="newResource('memories')">+ New Memory</button>
+      </div>
+    </div>
+
+    <!-- Tools Card -->
+    <div class="card">
+      <h2>Tools</h2>
+      <div class="resource-list" id="toolsList">Loading...</div>
+      <div class="resource-editor" id="toolsEditor" style="display:none">
+        <div class="form-row">
+          <label for="toolsName">Name</label>
+          <input type="text" id="toolsName" placeholder="my-tool">
+        </div>
+        <textarea class="json-editor" id="toolsContent" placeholder="JSON content..."></textarea>
+        <div class="btn-row" style="gap:8px">
+          <button class="btn btn-secondary" onclick="closeEditor('tools')">Cancel</button>
+          <button class="btn" id="saveToolBtn">Save</button>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="newResource('tools')">+ New Tool</button>
+      </div>
+    </div>
+
+    <!-- Skills Card -->
+    <div class="card">
+      <h2>Skills</h2>
+      <div class="resource-list" id="skillsList">Loading...</div>
+      <div class="resource-editor" id="skillsEditor" style="display:none">
+        <div class="form-row">
+          <label for="skillsName">Name</label>
+          <input type="text" id="skillsName" placeholder="my-skill">
+        </div>
+        <textarea class="json-editor" id="skillsContent" placeholder="JSON content..."></textarea>
+        <div class="btn-row" style="gap:8px">
+          <button class="btn btn-secondary" onclick="closeEditor('skills')">Cancel</button>
+          <button class="btn" id="saveSkillBtn">Save</button>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="newResource('skills')">+ New Skill</button>
       </div>
     </div>
 
@@ -77,26 +127,19 @@
       <div class="log-box" id="logBox">Loading...</div>
     </div>
 
-    <!-- Advanced: Raw Config Editor -->
+    <!-- Advanced: Raw Config (read-only) -->
     <div class="card advanced" id="rawConfigCard">
-      <h2>Raw Config (JSON)</h2>
-      <textarea class="json-editor" id="rawConfigEditor"></textarea>
-      <div class="btn-row">
-        <button class="btn" id="saveRawConfigBtn">Save Raw Config</button>
-      </div>
+      <h2>Raw Config (JSON) <span class="badge">read-only</span></h2>
+      <pre class="json-display" id="rawConfigDisplay"></pre>
     </div>
 
-    <!-- Advanced: Tiers Editor -->
+    <!-- Advanced: Tiers (read-only) -->
     <div class="card advanced" id="tiersCard">
-      <h2>Tiers</h2>
+      <h2>Tiers <span class="badge">read-only</span></h2>
       <table class="tier-table">
         <thead><tr><th>Name</th><th>Model</th><th>Priority</th><th>Enabled</th></tr></thead>
         <tbody id="tiersBody"></tbody>
       </table>
-      <div class="btn-row" style="gap:8px">
-        <button class="btn" id="addTierBtn" style="background:var(--border);color:var(--text)">+ Add Tier</button>
-        <button class="btn" id="saveTiersBtn">Save Tiers</button>
-      </div>
     </div>
 
     <!-- Advanced: Full Log Viewer -->

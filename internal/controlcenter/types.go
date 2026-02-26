@@ -66,6 +66,8 @@ type ReloadEvent int
 const (
 	ReloadConfig ReloadEvent = iota
 	ReloadTiers
+	ReloadTools
+	ReloadSkills
 )
 
 // Stats tracks daemon runtime metrics. Safe for concurrent use.

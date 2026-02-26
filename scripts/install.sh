@@ -70,8 +70,14 @@ main() {
             fi
 
             echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$profile"
-            export PATH="${INSTALL_DIR}:$PATH"
             echo "Added ${INSTALL_DIR} to PATH in ${profile}"
+            echo ""
+            echo "To start using alf, first reload your shell:"
+            echo ""
+            echo "  source ${profile}"
+            echo ""
+            echo "Then run 'alf init' to get started."
+            return
             ;;
     esac
 

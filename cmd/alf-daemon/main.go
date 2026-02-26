@@ -150,11 +150,12 @@ func main() {
 			reply, err := askClaude(u.Message.Text, model)
 			if err != nil {
 				log.Printf("claude error: %v", err)
-				reply = "Execution error"
+				reply = fmt.Sprintf("Error: %v", err)
 			}
 
 			// Detect Claude not logged in.
-			if strings.Contains(strings.ToLower(reply), "not logged in") {
+			lower := strings.ToLower(reply)
+			if strings.Contains(lower, "not logged in") || strings.Contains(lower, "authenticate") || strings.Contains(lower, "login required") {
 				reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
 			}
 
@@ -188,7 +189,11 @@ func askClaude(prompt, model string) (string, error) {
 		return out, nil
 	}
 
+	errOut := strings.TrimSpace(stderr.String())
 	if err != nil {
+		if errOut != "" {
+			return "", fmt.Errorf("claude: %s", errOut)
+		}
 		return "", fmt.Errorf("claude failed: %v", err)
 	}
 

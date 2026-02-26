@@ -20,11 +20,11 @@ echo "Current: ${latest}"
 echo "Next:    ${next}"
 echo ""
 
-# Tag and push everything in one go
+# Tag and push
 branch=$(git branch --show-current)
 echo "Tagging ${next} and pushing ${branch}..."
 git tag "$next"
-git push origin "$branch" --follow-tags
+git push origin "$branch" "$next"
 
 echo ""
 echo "Released ${next}"

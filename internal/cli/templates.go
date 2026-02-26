@@ -34,9 +34,18 @@ func RenderDockerCompose(dir string, data ComposeData) error {
 	return os.WriteFile(filepath.Join(dir, "docker-compose.yml"), buf.Bytes(), 0o644)
 }
 
+// ConfigData holds values for the config.json template.
+type ConfigData struct {
+	ChatID string
+}
+
 // RenderConfig writes config.json inside the config.d directory.
-func RenderConfig(dir string) error {
+func RenderConfig(dir string, data ConfigData) error {
 	src, err := templateFS.ReadFile("templates/config.json.tmpl")
+	if err != nil {
+		return err
+	}
+	tmpl, err := template.New("config").Parse(string(src))
 	if err != nil {
 		return err
 	}
@@ -44,5 +53,9 @@ func RenderConfig(dir string) error {
 	if err := os.MkdirAll(configD, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(configD, "config.json"), src, 0o644)
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(configD, "config.json"), buf.Bytes(), 0o644)
 }

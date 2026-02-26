@@ -97,11 +97,6 @@ func main() {
 		log.Printf("warning: failed to load config: %v", err)
 		cfg = cc.DefaultConfig()
 	}
-	model := cfg.Model
-	if model == "" {
-		model = "sonnet"
-	}
-
 	// Ensure data subdirectories exist.
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
@@ -146,7 +141,7 @@ func main() {
 	tg.HTTP = client
 
 	// Auto-update checker.
-	if cfg.AutoUpdate {
+	if cfg.AutoUpdateCheck {
 		image := os.Getenv("ALF_IMAGE")
 		if image == "" {
 			image = "ghcr.io/alamparelli/alf"
@@ -160,9 +155,9 @@ func main() {
 				}
 			}
 		}
-		updateInterval := time.Duration(cfg.AutoUpdateInterval) * time.Hour
+		updateInterval := time.Duration(cfg.AutoUpdateCheckInterval) * time.Second
 		if updateInterval <= 0 {
-			updateInterval = 6 * time.Hour
+			updateInterval = 21600 * time.Second
 		}
 		uc := updater.New(image, version, updateInterval, notifyFn)
 		uc.Start()
@@ -177,14 +172,10 @@ func main() {
 			case cc.ReloadConfig:
 				if newCfg, err := configStore.Load(); err == nil {
 					cfg = newCfg
-					model = cfg.Model
-					if model == "" {
-						model = "sonnet"
-					}
 					if cfg.SessionTimeout > 0 {
 						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
 					}
-					log.Printf("config reloaded: model=%s log_level=%s session_timeout=%dm", model, cfg.LogLevel, cfg.SessionTimeout)
+					log.Printf("config reloaded: log_level=%s session_timeout=%dm", cfg.LogLevel, cfg.SessionTimeout)
 				}
 				if git != nil {
 					git.Commit("config updated via CC")
@@ -253,7 +244,7 @@ func main() {
 			resumeID := chatSessions.Get(chatID)
 
 			start := time.Now()
-			result, err := askClaude(u.Message.Text, model, resumeID)
+			result, err := askClaude(u.Message.Text, resumeID)
 			duration := time.Since(start)
 
 			if err != nil {
@@ -296,7 +287,7 @@ func main() {
 
 			eventLog.Log("message_out", map[string]any{
 				"chat_id":     chatID,
-				"model":       model,
+				"model":       "sonnet",
 				"duration_ms": duration.Milliseconds(),
 				"text_length": len(reply),
 				"session_id":  result.SessionID,
@@ -313,10 +304,10 @@ type claudeResult struct {
 	Text      string
 }
 
-func askClaude(prompt, model, resumeID string) (*claudeResult, error) {
+func askClaude(prompt, resumeID string) (*claudeResult, error) {
 	args := []string{
 		"-p", prompt,
-		"--model", model,
+		"--model", "sonnet",
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 	}

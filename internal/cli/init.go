@@ -60,18 +60,9 @@ func RunInit() {
 	// Step 8: Claude authentication
 	PrintStep(8, "Claude authentication")
 	fmt.Println("\n  ALF needs Claude Code authentication.")
-	fmt.Println("  Run this command now (in another terminal if needed):")
-	fmt.Println()
-	fmt.Printf("    docker exec -it -e HOME=/home/node/data alf claude\n")
-	fmt.Println()
-	fmt.Println("  Inside Claude: type " + colorBold + "/login" + colorReset + ", authenticate, then " + colorBold + "/exit" + colorReset + ".")
-	fmt.Println()
-	fmt.Print("  Press Enter when done...")
-	reader.ReadString('\n')
-	fixClaudeOwnership()
-	verifyClaudeAuth()
+	fmt.Println("  Run " + colorBold + "alf login" + colorReset + " to authenticate.")
 
-	// Summary (Claude TUI clears the screen, so reprint everything useful)
+	// Summary
 	fmt.Println()
 	PrintBanner()
 	fmt.Println("  Setup complete!")
@@ -80,7 +71,7 @@ func RunInit() {
 	PrintCheck(fmt.Sprintf("Bot: @%s", botName))
 	PrintCheck(fmt.Sprintf("Dashboard: %s", ccExternalURL))
 	fmt.Println()
-	PrintSuccess(fmt.Sprintf("Send a message to @%s on Telegram to get started.", botName))
+	PrintSuccess("Run " + colorBold + "alf login" + colorReset + " to authenticate Claude, then message @" + botName + " on Telegram.")
 	fmt.Println()
 }
 

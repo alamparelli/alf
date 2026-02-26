@@ -184,33 +184,44 @@ func main() {
 				// Unknown /commands fall through to Claude.
 			}
 
-			sessionID, isNew := chatSessions.GetOrCreate(u.Message.Chat.ID)
-			if isNew {
-				reason := "timeout"
-				if sessionID != "" {
-					reason = "first"
-				}
-				eventLog.Log("session_new", map[string]any{
-					"chat_id":    u.Message.Chat.ID,
-					"session_id": sessionID,
-					"reason":     reason,
-				})
-			}
+			chatID := u.Message.Chat.ID
+			resumeID := chatSessions.Get(chatID)
 
 			start := time.Now()
-			reply, err := askClaude(u.Message.Text, model, sessionID, isNew)
+			result, err := askClaude(u.Message.Text, model, resumeID)
 			duration := time.Since(start)
+
 			if err != nil {
 				log.Printf("claude error: %v", err)
-				reply = fmt.Sprintf("Error: %v", err)
+				reply := fmt.Sprintf("Error: %v", err)
 				eventLog.Log("bot_error", map[string]any{
 					"context": "askClaude",
 					"error":   err.Error(),
-					"chat_id": u.Message.Chat.ID,
+					"chat_id": chatID,
 				})
+				sendMessage(client, token, chatID, reply)
+				continue
 			}
 
-			chatSessions.Touch(u.Message.Chat.ID)
+			// Store the session ID returned by Claude for future --resume.
+			if result.SessionID != "" {
+				isNew := resumeID == ""
+				chatSessions.Set(chatID, result.SessionID)
+				if isNew {
+					reason := "first"
+					if resumeID == "" && len(chatSessions.Get(chatID)) > 0 {
+						reason = "timeout"
+					}
+					eventLog.Log("session_new", map[string]any{
+						"chat_id":    chatID,
+						"session_id": result.SessionID,
+						"reason":     reason,
+					})
+				}
+			}
+			chatSessions.Touch(chatID)
+
+			reply := result.Text
 
 			// Detect Claude not logged in.
 			lower := strings.ToLower(reply)
@@ -219,30 +230,34 @@ func main() {
 			}
 
 			eventLog.Log("message_out", map[string]any{
-				"chat_id":     u.Message.Chat.ID,
+				"chat_id":     chatID,
 				"model":       model,
 				"duration_ms": duration.Milliseconds(),
 				"text_length": len(reply),
-				"session_id":  sessionID,
+				"session_id":  result.SessionID,
 			})
 
-			sendMessage(client, token, u.Message.Chat.ID, reply)
+			sendMessage(client, token, chatID, reply)
 		}
 	}
 }
 
-func askClaude(prompt, model, sessionID string, isNew bool) (string, error) {
+// claudeResult holds parsed output from Claude CLI JSON response.
+type claudeResult struct {
+	SessionID string
+	Text      string
+}
+
+func askClaude(prompt, model, resumeID string) (*claudeResult, error) {
 	args := []string{
 		"-p", prompt,
 		"--model", model,
-		"--output-format", "text",
+		"--output-format", "json",
 		"--dangerously-skip-permissions",
 	}
 
-	if isNew {
-		args = append(args, "--session-id", sessionID)
-	} else {
-		args = append(args, "--resume", sessionID)
+	if resumeID != "" {
+		args = append(args, "--resume", resumeID)
 	}
 
 	cmd := exec.Command("claude", args...)
@@ -253,26 +268,38 @@ func askClaude(prompt, model, sessionID string, isNew bool) (string, error) {
 
 	err := cmd.Run()
 
-	// Claude CLI may write output to stdout or stderr.
 	out := strings.TrimSpace(stdout.String())
-	if out == "" {
-		out = strings.TrimSpace(stderr.String())
-	}
 
-	// If we got output, treat it as a valid response regardless of exit code.
+	// Try to parse JSON output for session_id and result.
 	if out != "" {
-		return out, nil
+		var parsed struct {
+			SessionID string `json:"session_id"`
+			Result    string `json:"result"`
+		}
+		if jsonErr := json.Unmarshal([]byte(out), &parsed); jsonErr == nil {
+			text := parsed.Result
+			if text == "" {
+				text = out // fallback to raw output
+			}
+			return &claudeResult{
+				SessionID: parsed.SessionID,
+				Text:      text,
+			}, nil
+		}
+		// JSON parse failed — treat raw output as text response.
+		return &claudeResult{Text: out}, nil
 	}
 
+	// No stdout — check stderr.
 	errOut := strings.TrimSpace(stderr.String())
 	if err != nil {
 		if errOut != "" {
-			return "", fmt.Errorf("claude: %s", errOut)
+			return nil, fmt.Errorf("claude: %s", errOut)
 		}
-		return "", fmt.Errorf("claude failed: %v", err)
+		return nil, fmt.Errorf("claude failed: %v", err)
 	}
 
-	return "", fmt.Errorf("claude returned empty response")
+	return nil, fmt.Errorf("claude returned empty response")
 }
 
 func readSecret(envVar string) string {

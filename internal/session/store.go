@@ -1,10 +1,7 @@
 package session
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -20,6 +17,7 @@ type Entry struct {
 }
 
 // Store manages per-chat Claude session IDs with timeout-based expiry.
+// Session IDs come from the Claude CLI — this store only persists them.
 type Store struct {
 	dir     string
 	timeout time.Duration
@@ -40,28 +38,36 @@ func New(dataDir string, timeout time.Duration) *Store {
 	return s
 }
 
-// GetOrCreate returns a session ID for the chat. If the session is expired
-// or missing, a new one is created. Returns (sessionID, isNew).
-func (s *Store) GetOrCreate(chatID int64) (string, bool) {
+// Get returns the active session ID for a chat, or "" if none/expired.
+func (s *Store) Get(chatID int64) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if e, ok := s.entries[chatID]; ok {
-		if time.Since(e.LastActive) < s.timeout {
-			return e.SessionID, false
-		}
+	e, ok := s.entries[chatID]
+	if !ok {
+		return ""
 	}
+	if time.Since(e.LastActive) >= s.timeout {
+		delete(s.entries, chatID)
+		s.persist()
+		return ""
+	}
+	return e.SessionID
+}
 
-	id := newSessionID()
+// Set stores a session ID returned by Claude CLI for this chat.
+func (s *Store) Set(chatID int64, sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	now := time.Now()
 	s.entries[chatID] = &Entry{
-		SessionID:  id,
+		SessionID:  sessionID,
 		ChatID:     chatID,
 		CreatedAt:  now,
 		LastActive: now,
 	}
 	s.persist()
-	return id, true
 }
 
 // Touch updates the last active time for a chat's session.
@@ -130,16 +136,4 @@ func (s *Store) persist() {
 		return
 	}
 	os.Rename(tmp, s.mapPath())
-}
-
-func newSessionID() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("00000000-0000-4000-8000-%012d", time.Now().UnixNano()%1e12)
-	}
-	// Set UUID v4 variant bits.
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // variant 1
-	h := hex.EncodeToString(b)
-	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }

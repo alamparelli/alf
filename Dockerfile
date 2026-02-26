@@ -16,30 +16,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
     curl \
-    openssh-server \
-    sudo \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir /var/run/sshd
+    && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
-
-# Configure existing node user (uid 1000) for SSH access
-RUN usermod -s /bin/bash node \
-    && echo 'node:alf2026' | chpasswd \
-    && usermod -aG sudo node \
-    && echo 'node ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-
-# SSH config
-RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config \
-    && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-
-EXPOSE 22 8080
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 
 RUN mkdir -p /home/node/.claude /home/node/data/logs && chown -R node:node /home/node
 
 WORKDIR /home/node
+USER node
 
-# Start SSH, then run daemon as node user (no dash to preserve env vars)
-CMD /usr/sbin/sshd && su node -c "/opt/alf/alf-daemon"
+EXPOSE 8080
+
+CMD ["/opt/alf/alf-daemon"]

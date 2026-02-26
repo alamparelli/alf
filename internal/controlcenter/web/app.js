@@ -113,14 +113,14 @@ function renderTiers() {
   tiersData.forEach((tier, i) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><input type="text" value="${esc(tier.name)}" data-idx="${i}" data-field="name" class="tier-input"></td>
-      <td>
+      <td data-label="Name"><input type="text" value="${esc(tier.name)}" data-idx="${i}" data-field="name" class="tier-input"></td>
+      <td data-label="Model">
         <select data-idx="${i}" data-field="model" class="tier-input">
           ${ALLOWED_MODELS.map(m => `<option value="${m}"${m === tier.model ? ' selected' : ''}>${m}</option>`).join('')}
         </select>
       </td>
-      <td><input type="number" value="${tier.priority}" data-idx="${i}" data-field="priority" class="tier-input" style="width:60px"></td>
-      <td><input type="checkbox" ${tier.enabled ? 'checked' : ''} data-idx="${i}" data-field="enabled" class="tier-input"></td>
+      <td data-label="Priority"><input type="number" value="${tier.priority}" data-idx="${i}" data-field="priority" class="tier-input" style="width:60px"></td>
+      <td data-label="Enabled"><input type="checkbox" ${tier.enabled ? 'checked' : ''} data-idx="${i}" data-field="enabled" class="tier-input"></td>
       <td><button class="btn-sm btn-danger" data-idx="${i}" class="tier-delete">✕</button></td>
     `;
     body.appendChild(tr);

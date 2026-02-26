@@ -58,6 +58,18 @@ func RunInit() {
 	// Step 8: Claude authentication
 	PrintStep(8, "Claude authentication")
 	claudeLogin(dir)
+
+	// Summary (Claude TUI clears the screen, so reprint everything useful)
+	fmt.Println()
+	PrintBanner()
+	fmt.Println("  Setup complete!")
+	fmt.Println()
+	PrintCheck(fmt.Sprintf("Install directory: %s", dir))
+	PrintCheck(fmt.Sprintf("Bot: @%s", botName))
+	PrintCheck(fmt.Sprintf("Dashboard: http://localhost:%s", ccPort))
+	fmt.Println()
+	PrintSuccess(fmt.Sprintf("Send a message to @%s on Telegram to get started.", botName))
+	fmt.Println()
 }
 
 func checkPrerequisites() {

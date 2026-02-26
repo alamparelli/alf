@@ -355,7 +355,8 @@ func claudeLogin(dir string) {
 
 	// Try launching the full claude TUI via docker exec.
 	// The TUI handles auth inline during first launch.
-	cmd := exec.Command("docker", "exec", "-it", "alf", "claude")
+	// Must run as node user — daemon runs as node, so credentials must match.
+	cmd := exec.Command("docker", "exec", "-it", "-u", "node", "alf", "claude")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -376,7 +377,7 @@ func claudeLogin(dir string) {
 func RunLogin() {
 	PrintInfo("Launching Claude Code for authentication...")
 	fmt.Println()
-	cmd := exec.Command("docker", "exec", "-it", "alf", "claude")
+	cmd := exec.Command("docker", "exec", "-it", "-u", "node", "alf", "claude")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

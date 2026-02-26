@@ -34,11 +34,15 @@ func RenderDockerCompose(dir string, data ComposeData) error {
 	return os.WriteFile(filepath.Join(dir, "docker-compose.yml"), buf.Bytes(), 0o644)
 }
 
-// RenderConfig writes config.json.
+// RenderConfig writes config.json inside the data directory.
 func RenderConfig(dir string) error {
 	src, err := templateFS.ReadFile("templates/config.json.tmpl")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "config.json"), src, 0o644)
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dataDir, "config.json"), src, 0o644)
 }

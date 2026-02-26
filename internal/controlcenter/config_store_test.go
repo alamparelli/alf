@@ -54,6 +54,45 @@ func TestFileConfigStore_LoadFromFile(t *testing.T) {
 	}
 }
 
+func TestFileConfigStore_SaveAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	store := NewFileConfigStore(path)
+
+	cfg := &Config{
+		LogLevel:         "debug",
+		Model:            "opus",
+		AllowedChatIDs:   []int64{42},
+		SystemPrompt:     "be helpful",
+		QuietHours:       QuietHours{Start: 22, End: 7},
+		SessionTimeout:   60,
+		GitTrack:         true,
+		GitSweepInterval: 10,
+	}
+
+	if err := store.Save(cfg); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if loaded.Model != "opus" {
+		t.Errorf("model: got %q, want 'opus'", loaded.Model)
+	}
+	if loaded.GitTrack != true {
+		t.Error("git_track should be true")
+	}
+	if loaded.GitSweepInterval != 10 {
+		t.Errorf("git_sweep_interval: got %d, want 10", loaded.GitSweepInterval)
+	}
+	if loaded.SessionTimeout != 60 {
+		t.Errorf("session_timeout: got %d, want 60", loaded.SessionTimeout)
+	}
+}
+
 func TestFileConfigStore_ConcurrentRead(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

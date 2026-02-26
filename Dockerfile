@@ -16,13 +16,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 
-RUN mkdir -p /home/node/.claude /home/node/data/logs && chown -R node:node /home/node
+# Create claude user for sandboxed subprocess (UID 1001).
+RUN useradd -m -u 1001 -s /bin/bash claude
+
+# Directories with proper ownership.
+RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
+    && mkdir -p /home/claude/.claude \
+    && chown -R node:node /home/node \
+    && chown -R claude:claude /home/claude
 
 WORKDIR /home/node
 USER node

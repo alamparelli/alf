@@ -43,9 +43,11 @@ func LogReaderFactory(dataDir string) LogReader {
 func HandlerFactory(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
-	// Read-only API routes.
+	// API routes.
 	mux.Handle("/api/config", &ConfigHandler{
-		Store: deps.ConfigStore,
+		Store:    deps.ConfigStore,
+		Notifier: deps.Notifier,
+		Event:    ReloadConfig,
 	})
 	mux.Handle("/api/tiers", &TiersHandler{
 		Store:    deps.TierStore,

@@ -1,8 +1,9 @@
 package controlcenter
 
-// ConfigStore loads runtime configuration (read-only from CC).
+// ConfigStore loads and saves runtime configuration.
 type ConfigStore interface {
 	Load() (*Config, error)
+	Save(cfg *Config) error
 }
 
 // TierStore manages routing tiers with hot-reload support.

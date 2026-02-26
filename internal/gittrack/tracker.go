@@ -32,6 +32,8 @@ func (t *Tracker) Init() error {
 	defer t.mu.Unlock()
 
 	gitDir := filepath.Join(t.dir, ".git")
+	// Always mark directory as safe (required when daemon runs as root but dir is owned by another user).
+	_ = t.git("config", "--global", "--add", "safe.directory", t.dir)
 	if _, err := os.Stat(gitDir); err == nil {
 		return nil // already initialized
 	}

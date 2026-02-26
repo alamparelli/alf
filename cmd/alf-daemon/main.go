@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -245,6 +246,12 @@ func main() {
 
 			start := time.Now()
 			result, err := askClaude(u.Message.Text, resumeID)
+			// Retry without resume if session not found.
+			if err != nil && resumeID != "" && strings.Contains(err.Error(), "No conversation found") {
+				log.Printf("session %s expired, starting fresh", resumeID)
+				chatSessions.Archive(chatID)
+				result, err = askClaude(u.Message.Text, "")
+			}
 			duration := time.Since(start)
 
 			if err != nil {
@@ -321,7 +328,10 @@ func askClaude(prompt, resumeID string) (*claudeResult, error) {
 		dataDir = d
 	}
 
-	cmd := exec.Command("claude", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: 1001, Gid: 1001},
 	}
@@ -333,6 +343,9 @@ func askClaude(prompt, resumeID string) (*claudeResult, error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("claude timed out after 5 minutes")
+	}
 
 	out := strings.TrimSpace(stdout.String())
 
@@ -341,11 +354,16 @@ func askClaude(prompt, resumeID string) (*claudeResult, error) {
 		var parsed struct {
 			SessionID string `json:"session_id"`
 			Result    string `json:"result"`
+			IsError   bool   `json:"is_error"`
 		}
 		if jsonErr := json.Unmarshal([]byte(out), &parsed); jsonErr == nil {
 			text := parsed.Result
 			if text == "" {
 				text = out // fallback to raw output
+			}
+			// If Claude returned an error result, propagate as error for retry logic.
+			if parsed.IsError && strings.Contains(text, "No conversation found") {
+				return nil, fmt.Errorf("claude: %s", text)
 			}
 			return &claudeResult{
 				SessionID: parsed.SessionID,

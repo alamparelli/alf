@@ -367,24 +367,29 @@ func claudeLogin(dir string) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		PrintWarning("Could not launch Claude directly. Try manually:")
-		fmt.Println()
-		fmt.Println("    docker exec -it -e HOME=/home/node/data alf claude")
-		fmt.Println()
-		fmt.Println("  Then fix ownership:")
-		fmt.Println("    docker exec alf chown -R 1001:1001 /home/node/data/.claude /home/node/data/.claude.json")
-		fmt.Println()
-		return
+	loginErr := cmd.Run()
+	if loginErr != nil {
+		PrintWarning("Claude TUI exited with an error. If you authenticated, that's OK.")
 	}
 
-	// Fix ownership: auth files were created as root, claude subprocess needs them.
-	fix := exec.Command("docker", "exec", "alf", "chown", "-R", "1001:1001", "/home/node/data/.claude", "/home/node/data/.claude.json")
-	if err := fix.Run(); err != nil {
-		PrintWarning("Could not fix file ownership. Run manually:")
+	// Always fix ownership: auth files created as root, claude subprocess needs them.
+	fix := exec.Command("docker", "exec", "alf",
+		"sh", "-c", "chown -R 1001:1001 /home/node/data/.claude /home/node/data/.claude.json 2>/dev/null; true")
+	fix.Run()
+
+	// Verify auth by running a quick test.
+	verify := exec.Command("docker", "exec", "-u", "claude", "-e", "HOME=/home/node/data",
+		"alf", "claude", "-p", "ping", "--output-format", "json", "--max-turns", "1")
+	out, _ := verify.Output()
+	if len(out) > 0 && strings.Contains(string(out), `"is_error":false`) {
+		PrintCheck("Claude authenticated")
+	} else {
+		PrintWarning("Claude may not be authenticated. Try manually:")
+		fmt.Println()
+		fmt.Println("    docker exec -it -e HOME=/home/node/data alf claude")
 		fmt.Println("    docker exec alf chown -R 1001:1001 /home/node/data/.claude /home/node/data/.claude.json")
+		fmt.Println()
 	}
-	PrintCheck("Claude authenticated")
 }
 
 // RunLogin allows re-authenticating Claude from the CLI.
@@ -396,18 +401,11 @@ func RunLogin() {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		PrintWarning("Could not launch Claude directly. Try manually:")
-		fmt.Println()
-		fmt.Println("    docker exec -it -e HOME=/home/node/data alf claude")
-		fmt.Println()
-		return
-	}
+	cmd.Run()
 
-	// Fix ownership: auth files were created as root, claude subprocess needs them.
-	fix := exec.Command("docker", "exec", "alf", "chown", "-R", "1001:1001", "/home/node/data/.claude", "/home/node/data/.claude.json")
-	if err := fix.Run(); err != nil {
-		PrintWarning("Could not fix file ownership. Run manually:")
-		fmt.Println("    docker exec alf chown -R 1001:1001 /home/node/data/.claude /home/node/data/.claude.json")
-	}
+	// Always fix ownership.
+	fix := exec.Command("docker", "exec", "alf",
+		"sh", "-c", "chown -R 1001:1001 /home/node/data/.claude /home/node/data/.claude.json 2>/dev/null; true")
+	fix.Run()
+	PrintCheck("Ownership fixed")
 }

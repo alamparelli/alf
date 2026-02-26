@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
+	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/session"
 )
 
 var version = "dev"
@@ -95,6 +98,21 @@ func main() {
 		model = "sonnet"
 	}
 
+	// Ensure data subdirectories exist.
+	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
+	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
+
+	// Session store for Claude --resume support.
+	sessionTimeout := time.Duration(cfg.SessionTimeout) * time.Minute
+	if sessionTimeout <= 0 {
+		sessionTimeout = 30 * time.Minute
+	}
+	chatSessions := session.New(dataDir, sessionTimeout)
+
+	// JSONL event logger.
+	eventLog := eventlog.New(dataDir)
+	defer eventLog.Close()
+
 	var offset int64
 	client := &http.Client{Timeout: 35 * time.Second}
 
@@ -110,7 +128,10 @@ func main() {
 					if model == "" {
 						model = "sonnet"
 					}
-					log.Printf("config reloaded: model=%s log_level=%s", model, cfg.LogLevel)
+					if cfg.SessionTimeout > 0 {
+						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
+					}
+					log.Printf("config reloaded: model=%s log_level=%s session_timeout=%dm", model, cfg.LogLevel, cfg.SessionTimeout)
 				}
 			case cc.ReloadTiers:
 				log.Println("tiers reloaded")
@@ -145,19 +166,51 @@ func main() {
 			log.Printf("← %s: %s", u.Message.From.Username, u.Message.Text)
 			stats.RecordMessage()
 
+			truncated := u.Message.Text
+			if len(truncated) > 200 {
+				truncated = truncated[:200]
+			}
+			eventLog.Log("message_in", map[string]any{
+				"chat_id":  u.Message.Chat.ID,
+				"username": u.Message.From.Username,
+				"text":     truncated,
+			})
+
 			// Command routing: handle /commands before passing to Claude.
 			if strings.HasPrefix(u.Message.Text, "/") {
-				if handleCommand(client, token, u.Message, magic, ccExternalURL, allowedChatIDs) {
+				if handleCommand(client, token, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs) {
 					continue
 				}
 				// Unknown /commands fall through to Claude.
 			}
 
-			reply, err := askClaude(u.Message.Text, model)
+			sessionID, isNew := chatSessions.GetOrCreate(u.Message.Chat.ID)
+			if isNew {
+				reason := "timeout"
+				if sessionID != "" {
+					reason = "first"
+				}
+				eventLog.Log("session_new", map[string]any{
+					"chat_id":    u.Message.Chat.ID,
+					"session_id": sessionID,
+					"reason":     reason,
+				})
+			}
+
+			start := time.Now()
+			reply, err := askClaude(u.Message.Text, model, sessionID, isNew)
+			duration := time.Since(start)
 			if err != nil {
 				log.Printf("claude error: %v", err)
 				reply = fmt.Sprintf("Error: %v", err)
+				eventLog.Log("bot_error", map[string]any{
+					"context": "askClaude",
+					"error":   err.Error(),
+					"chat_id": u.Message.Chat.ID,
+				})
 			}
+
+			chatSessions.Touch(u.Message.Chat.ID)
 
 			// Detect Claude not logged in.
 			lower := strings.ToLower(reply)
@@ -165,18 +218,34 @@ func main() {
 				reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
 			}
 
+			eventLog.Log("message_out", map[string]any{
+				"chat_id":     u.Message.Chat.ID,
+				"model":       model,
+				"duration_ms": duration.Milliseconds(),
+				"text_length": len(reply),
+				"session_id":  sessionID,
+			})
+
 			sendMessage(client, token, u.Message.Chat.ID, reply)
 		}
 	}
 }
 
-func askClaude(prompt, model string) (string, error) {
-	cmd := exec.Command("claude",
+func askClaude(prompt, model, sessionID string, isNew bool) (string, error) {
+	args := []string{
 		"-p", prompt,
 		"--model", model,
 		"--output-format", "text",
 		"--dangerously-skip-permissions",
-	)
+	}
+
+	if isNew {
+		args = append(args, "--session-id", sessionID)
+	} else {
+		args = append(args, "--resume", sessionID)
+	}
+
+	cmd := exec.Command("claude", args...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -272,11 +341,23 @@ func getUpdates(client *http.Client, token string, offset int64) ([]Update, erro
 }
 
 // handleCommand processes known /commands. Returns true if handled.
-func handleCommand(client *http.Client, token string, msg *Message, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) bool {
+func handleCommand(client *http.Client, token string, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) bool {
 	cmd := strings.SplitN(msg.Text, " ", 2)[0]
 	switch cmd {
 	case "/login":
 		handleLogin(client, token, msg, magic, ccExternalURL, allowedChatIDs)
+		return true
+	case "/new":
+		old := chatSessions.Archive(msg.Chat.ID)
+		reply := "New session started."
+		if old != "" {
+			reply = "Previous session archived. New session started."
+			eventLog.Log("session_archived", map[string]any{
+				"chat_id":        msg.Chat.ID,
+				"old_session_id": old,
+			})
+		}
+		sendMessage(client, token, msg.Chat.ID, reply)
 		return true
 	case "/start":
 		sendMessage(client, token, msg.Chat.ID, "Hello! I'm ALF, your AI assistant. Send me a message and I'll respond using Claude.")
@@ -284,6 +365,7 @@ func handleCommand(client *http.Client, token string, msg *Message, magic *cc.Ma
 	case "/help":
 		help := "Available commands:\n" +
 			"/help — Show this message\n" +
+			"/new — Start a new conversation session\n" +
 			"/login — Get a login link for the Control Center\n" +
 			"/start — Welcome message"
 		sendMessage(client, token, msg.Chat.ID, help)

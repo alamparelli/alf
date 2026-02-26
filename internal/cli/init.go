@@ -43,13 +43,15 @@ func RunInit() {
 	PrintStep(4, "Telegram Chat ID")
 	chatID := promptChatID(reader, botToken)
 
-	// Step 5: Dashboard port
-	PrintStep(5, "Dashboard port")
+	// Step 5: Dashboard access
+	PrintStep(5, "Dashboard access")
 	ccPort := promptPort(reader)
+	ccHost := promptHost(reader)
+	ccExternalURL := fmt.Sprintf("http://%s:%s", ccHost, ccPort)
 
 	// Step 6: Generate files
 	PrintStep(6, "Generating configuration files")
-	generateFiles(dir, botToken, chatID, ccPort)
+	generateFiles(dir, botToken, chatID, ccPort, ccExternalURL)
 
 	// Step 7: Pull & Start
 	PrintStep(7, "Starting ALF")
@@ -66,7 +68,7 @@ func RunInit() {
 	fmt.Println()
 	PrintCheck(fmt.Sprintf("Install directory: %s", dir))
 	PrintCheck(fmt.Sprintf("Bot: @%s", botName))
-	PrintCheck(fmt.Sprintf("Dashboard: http://localhost:%s", ccPort))
+	PrintCheck(fmt.Sprintf("Dashboard: %s", ccExternalURL))
 	fmt.Println()
 	PrintSuccess(fmt.Sprintf("Send a message to @%s on Telegram to get started.", botName))
 	fmt.Println()
@@ -246,7 +248,27 @@ func promptPort(reader *bufio.Reader) string {
 	}
 }
 
-func generateFiles(dir, botToken, chatID, ccPort string) {
+func promptHost(reader *bufio.Reader) string {
+	// Try to detect the hostname.
+	hostname, _ := os.Hostname()
+	defaultHost := "localhost"
+	if hostname != "" {
+		defaultHost = hostname
+	}
+
+	fmt.Printf("  Server address [%s]: ", defaultHost)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+
+	if input == "" {
+		PrintCheck(fmt.Sprintf("Host: %s", defaultHost))
+		return defaultHost
+	}
+	PrintCheck(fmt.Sprintf("Host: %s", input))
+	return input
+}
+
+func generateFiles(dir, botToken, chatID, ccPort, ccExternalURL string) {
 	// Store secrets as files (chmod 600, used via Docker Compose secrets)
 	if err := SetSecret(dir, "telegram_bot_token", botToken); err != nil {
 		Fatal(fmt.Sprintf("Failed to write secret: %v", err))
@@ -268,7 +290,7 @@ func generateFiles(dir, botToken, chatID, ccPort string) {
 	}
 	PrintCheck("secrets/cc_auth_token")
 
-	if err := RenderDockerCompose(dir, ComposeData{CCPort: ccPort}); err != nil {
+	if err := RenderDockerCompose(dir, ComposeData{CCPort: ccPort, CCExternalURL: ccExternalURL}); err != nil {
 		Fatal(fmt.Sprintf("Failed to write docker-compose.yml: %v", err))
 	}
 	PrintCheck("docker-compose.yml")

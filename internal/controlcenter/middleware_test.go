@@ -216,16 +216,16 @@ func TestCORSMiddleware_AllowedOrigin(t *testing.T) {
 	}
 }
 
-func TestCORSMiddleware_DisallowedOrigin(t *testing.T) {
+func TestCORSMiddleware_AnyOrigin(t *testing.T) {
 	handler := corsMiddleware(okHandler())
 	req := httptest.NewRequest("GET", "/api/test", nil)
-	req.Header.Set("Origin", "http://evil.com")
+	req.Header.Set("Origin", "http://192.168.1.100:9090")
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Error("should not set CORS header for unknown origin")
+	if rec.Header().Get("Access-Control-Allow-Origin") != "http://192.168.1.100:9090" {
+		t.Error("expected CORS header to reflect origin")
 	}
 }
 

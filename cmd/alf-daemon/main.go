@@ -39,7 +39,12 @@ func main() {
 	}
 
 	// Parse allowed chat IDs for login authorization.
-	allowedChatIDs := parseAllowedChatIDs(readSecret("ALLOWED_CHAT_IDS"))
+	// Default to TELEGRAM_CHAT_ID if ALLOWED_CHAT_IDS not explicitly set.
+	allowedRaw := readSecret("ALLOWED_CHAT_IDS")
+	if allowedRaw == "" {
+		allowedRaw = chatID
+	}
+	allowedChatIDs := parseAllowedChatIDs(allowedRaw)
 
 	// Shared stats for CC status endpoint.
 	stats := cc.NewStats()
@@ -70,7 +75,7 @@ func main() {
 					log.Printf("Control Center error: %v", err)
 				}
 			}()
-			log.Println("Control Center started on :8080")
+			log.Printf("Control Center started on :8080 (allowed_chat_ids=%d, external_url=%s)", len(allowedChatIDs), ccExternalURL)
 		}
 	} else {
 		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set — Control Center disabled")
@@ -145,7 +150,12 @@ func main() {
 			reply, err := askClaude(u.Message.Text, model)
 			if err != nil {
 				log.Printf("claude error: %v", err)
-				reply = fmt.Sprintf("Error: %v", err)
+				reply = "Execution error"
+			}
+
+			// Detect Claude not logged in.
+			if strings.Contains(strings.ToLower(reply), "not logged in") {
+				reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
 			}
 
 			sendMessage(client, token, u.Message.Chat.ID, reply)
@@ -246,6 +256,13 @@ func handleCommand(client *http.Client, token string, msg *Message, magic *cc.Ma
 		return true
 	case "/start":
 		sendMessage(client, token, msg.Chat.ID, "Hello! I'm ALF, your AI assistant. Send me a message and I'll respond using Claude.")
+		return true
+	case "/help":
+		help := "Available commands:\n" +
+			"/help — Show this message\n" +
+			"/login — Get a login link for the Control Center\n" +
+			"/start — Welcome message"
+		sendMessage(client, token, msg.Chat.ID, help)
 		return true
 	}
 	return false

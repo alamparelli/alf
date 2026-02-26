@@ -67,14 +67,16 @@ p{color:#aaa;line-height:1.6}</style></head>
 </div></body></html>`))
 }
 
-// corsMiddleware restricts origins to localhost:8080.
+// corsMiddleware reflects the request origin for authenticated endpoints.
+// Auth is enforced by authMiddleware, so CORS just needs to allow the caller's origin.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin == "http://localhost:8080" || origin == "http://127.0.0.1:8080" {
+		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
 
 		if r.Method == http.MethodOptions {

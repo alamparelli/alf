@@ -13,7 +13,8 @@ var templateFS embed.FS
 
 // ComposeData holds values for the docker-compose template.
 type ComposeData struct {
-	CCPort string
+	CCPort        string
+	CCExternalURL string
 }
 
 // RenderDockerCompose writes docker-compose.yml with the given port.

@@ -55,7 +55,7 @@ advBtn.onclick = () => {
   adv = !adv;
   advBtn.classList.toggle('active', adv);
   document.querySelectorAll('.advanced').forEach(el => el.classList.toggle('visible', adv));
-  if (adv) { loadRawConfig(); loadLogFiles(); }
+  if (adv) { loadLogFiles(); }
 };
 
 // --- Status ---
@@ -89,12 +89,35 @@ function loadConfig() {
   }).catch(() => {});
 }
 
-// --- Raw Config (read-only) ---
+// --- Raw Config (editable) ---
 function loadRawConfig() {
   api('/api/config').then(cfg => {
-    document.getElementById('rawConfigDisplay').textContent = JSON.stringify(cfg, null, 2);
+    document.getElementById('rawConfigEditor').value = JSON.stringify(cfg, null, 2);
   }).catch(() => {});
 }
+
+document.getElementById('saveConfigBtn').addEventListener('click', () => {
+  const editor = document.getElementById('rawConfigEditor');
+  let parsed;
+  try {
+    parsed = JSON.parse(editor.value);
+  } catch (e) {
+    toast('Invalid JSON: ' + e.message, 'error');
+    return;
+  }
+  api('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(parsed),
+  }).then(r => {
+    if (r.ok) {
+      toast('Config saved');
+      loadConfig();
+    } else {
+      toast(r.error || 'Save failed', 'error');
+    }
+  }).catch(e => toast(e.error || 'Save failed', 'error'));
+});
 
 // --- Tiers (editable) ---
 const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
@@ -214,6 +237,7 @@ document.getElementById('fetchLogsBtn').onclick = () => {
 // --- Init ---
 loadStatus();
 loadConfig();
+loadRawConfig();
 loadTiers();
 loadRecentLogs();
 setInterval(loadStatus, 30000);

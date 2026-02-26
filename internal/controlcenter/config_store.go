@@ -38,6 +38,26 @@ func (s *fileConfigStore) Load() (*Config, error) {
 	return &cfg, nil
 }
 
+func (s *fileConfigStore) Save(cfg *Config) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename config: %w", err)
+	}
+	return nil
+}
+
 // ConfigPath returns the standard config.json path for a data directory.
 func ConfigPath(dataDir string) string {
 	return filepath.Join(dataDir, "config.json")

@@ -109,19 +109,23 @@ func selfUpdate(currentVersion string) bool {
 }
 
 func fixVolumePermissions(dir string) {
-	dirs := []string{"claude-session", "data"}
-	for _, d := range dirs {
+	// Map directories to their container UIDs.
+	// data/ → node (1000), claude-session/ → claude (1001).
+	ownership := map[string]string{
+		"data":           "1000:1000",
+		"claude-session": "1001:1001",
+	}
+	for d, uid := range ownership {
 		p := filepath.Join(dir, d)
 		if _, err := os.Stat(p); err != nil {
 			continue
 		}
-		// chown to uid 1000 (node user inside container).
-		cmd := exec.Command("sudo", "chown", "-R", "1000:1000", p)
+		cmd := exec.Command("sudo", "chown", "-R", uid, p)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			// Try without sudo (might already be owned correctly).
-			cmd2 := exec.Command("chown", "-R", "1000:1000", p)
+			cmd2 := exec.Command("chown", "-R", uid, p)
 			cmd2.Run()
 		}
 	}

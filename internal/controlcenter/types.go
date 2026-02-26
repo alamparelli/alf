@@ -12,7 +12,12 @@ type Config struct {
 	AllowedChatIDs []int64    `json:"allowed_chat_ids"`
 	SystemPrompt   string     `json:"system_prompt"`
 	QuietHours     QuietHours `json:"quiet_hours"`
-	SessionTimeout int        `json:"session_timeout"` // minutes, 0 = use default (30)
+	SessionTimeout   int        `json:"session_timeout"`    // minutes, 0 = use default (30)
+	GitTrack         bool       `json:"git_track"`          // enable git tracking of data dir
+	GitSweepInterval int        `json:"git_sweep_interval"` // minutes between auto-commits, 0 = disabled
+	AutoUpdate         bool       `json:"auto_update"`          // check for Docker image updates periodically
+	AutoUpdateInterval int        `json:"auto_update_interval"` // hours between update checks, 0 = use default (6)
+	AutoUpdateNotify   bool       `json:"auto_update_notify"`   // send Telegram notification when update available
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -24,12 +29,17 @@ type QuietHours struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		LogLevel:       "info",
-		Model:          "sonnet",
-		AllowedChatIDs: []int64{},
-		SystemPrompt:   "",
-		QuietHours:     QuietHours{Start: 0, End: 0},
-		SessionTimeout: 30,
+		LogLevel:         "info",
+		Model:            "sonnet",
+		AllowedChatIDs:   []int64{},
+		SystemPrompt:     "",
+		QuietHours:       QuietHours{Start: 0, End: 0},
+		SessionTimeout:   30,
+		GitTrack:         true,
+		GitSweepInterval: 5,
+		AutoUpdate:         true,
+		AutoUpdateInterval: 6,
+		AutoUpdateNotify:   true,
 	}
 }
 

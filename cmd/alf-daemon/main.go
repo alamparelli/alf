@@ -12,11 +12,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/gittrack"
 	"github.com/alamparelli/alf/internal/session"
+	tgclient "github.com/alamparelli/alf/internal/telegram"
+	"github.com/alamparelli/alf/internal/updater"
 )
 
 var version = "dev"
@@ -99,8 +103,8 @@ func main() {
 	}
 
 	// Ensure data subdirectories exist.
-	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
-	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
+	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o700)
+	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o700)
 
 	// Session store for Claude --resume support.
 	sessionTimeout := time.Duration(cfg.SessionTimeout) * time.Minute
@@ -113,8 +117,53 @@ func main() {
 	eventLog := eventlog.New(dataDir)
 	defer eventLog.Close()
 
+	// Git tracker for data directory version history.
+	var git *gittrack.Tracker
+	if cfg.GitTrack {
+		git = gittrack.New(dataDir)
+		if err := git.Init(); err != nil {
+			log.Printf("warning: git tracker init failed: %v", err)
+			git = nil
+		} else {
+			if cfg.GitSweepInterval > 0 {
+				git.SetInterval(time.Duration(cfg.GitSweepInterval) * time.Minute)
+				git.StartSweep()
+			}
+			defer git.Stop()
+			log.Printf("git tracker started (sweep=%dm)", cfg.GitSweepInterval)
+		}
+	}
+
 	var offset int64
 	client := &http.Client{Timeout: 35 * time.Second}
+
+	// Telegram client for sending formatted messages.
+	tg := tgclient.NewClient(token)
+	tg.HTTP = client
+
+	// Auto-update checker.
+	if cfg.AutoUpdate {
+		image := os.Getenv("ALF_IMAGE")
+		if image == "" {
+			image = "ghcr.io/alamparelli/alf"
+		}
+		notifyFn := func(current, latest string) {
+			log.Printf("update available: %s → %s", current, latest)
+			if cfg.AutoUpdateNotify && token != "" && chatID != "" {
+				cid, _ := strconv.ParseInt(chatID, 10, 64)
+				if cid != 0 {
+					tg.SendHTML(cid, fmt.Sprintf("Update available: %s → %s\nRun <code>alf upgrade</code> on the host to update.", current, latest))
+				}
+			}
+		}
+		updateInterval := time.Duration(cfg.AutoUpdateInterval) * time.Hour
+		if updateInterval <= 0 {
+			updateInterval = 6 * time.Hour
+		}
+		uc := updater.New(image, version, updateInterval, notifyFn)
+		uc.Start()
+		defer uc.Stop()
+	}
 
 	for {
 		// Check for reload events (non-blocking).
@@ -133,12 +182,24 @@ func main() {
 					}
 					log.Printf("config reloaded: model=%s log_level=%s session_timeout=%dm", model, cfg.LogLevel, cfg.SessionTimeout)
 				}
+				if git != nil {
+					git.Commit("config updated via CC")
+				}
 			case cc.ReloadTiers:
 				log.Println("tiers reloaded")
+				if git != nil {
+					git.Commit("tiers updated via CC")
+				}
 			case cc.ReloadTools:
 				log.Println("tools reloaded")
+				if git != nil {
+					git.Commit("tools updated via CC")
+				}
 			case cc.ReloadSkills:
 				log.Println("skills reloaded")
+				if git != nil {
+					git.Commit("skills updated via CC")
+				}
 			}
 		default:
 		}
@@ -155,7 +216,7 @@ func main() {
 
 			// Handle callback queries (inline keyboard button presses).
 			if u.CallbackQuery != nil {
-				handleCallbackQuery(client, token, u.CallbackQuery, magic, ccExternalURL, allowedChatIDs)
+				handleCallbackQuery(tg, client, token, u.CallbackQuery, magic, ccExternalURL, allowedChatIDs)
 				continue
 			}
 
@@ -178,7 +239,7 @@ func main() {
 
 			// Command routing: handle /commands before passing to Claude.
 			if strings.HasPrefix(u.Message.Text, "/") {
-				if handleCommand(client, token, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs) {
+				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs) {
 					continue
 				}
 				// Unknown /commands fall through to Claude.
@@ -199,7 +260,7 @@ func main() {
 					"error":   err.Error(),
 					"chat_id": chatID,
 				})
-				sendMessage(client, token, chatID, reply)
+				tg.SendHTML(chatID, reply)
 				continue
 			}
 
@@ -237,7 +298,7 @@ func main() {
 				"session_id":  result.SessionID,
 			})
 
-			sendMessage(client, token, chatID, reply)
+			tg.SendMessage(chatID, reply)
 		}
 	}
 }
@@ -261,6 +322,11 @@ func askClaude(prompt, model, resumeID string) (*claudeResult, error) {
 	}
 
 	cmd := exec.Command("claude", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: 1001, Gid: 1001},
+	}
+	cmd.Dir = "/home/claude"
+	cmd.Env = append(os.Environ(), "HOME=/home/claude")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -368,11 +434,11 @@ func getUpdates(client *http.Client, token string, offset int64) ([]Update, erro
 }
 
 // handleCommand processes known /commands. Returns true if handled.
-func handleCommand(client *http.Client, token string, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) bool {
+func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) bool {
 	cmd := strings.SplitN(msg.Text, " ", 2)[0]
 	switch cmd {
 	case "/login":
-		handleLogin(client, token, msg, magic, ccExternalURL, allowedChatIDs)
+		handleLogin(tg, msg, magic, ccExternalURL, allowedChatIDs)
 		return true
 	case "/new":
 		old := chatSessions.Archive(msg.Chat.ID)
@@ -384,41 +450,37 @@ func handleCommand(client *http.Client, token string, msg *Message, chatSessions
 				"old_session_id": old,
 			})
 		}
-		sendMessage(client, token, msg.Chat.ID, reply)
+		tg.SendHTML(msg.Chat.ID, reply)
 		return true
 	case "/start":
-		sendMessage(client, token, msg.Chat.ID, "Hello! I'm ALF, your AI assistant. Send me a message and I'll respond using Claude.")
+		tg.SendHTML(msg.Chat.ID, "Hello! I'm ALF, your AI assistant. Send me a message and I'll respond using Claude.")
 		return true
 	case "/help":
-		help := "Available commands:\n" +
+		help := "<b>Available commands:</b>\n" +
 			"/help — Show this message\n" +
 			"/new — Start a new conversation session\n" +
 			"/login — Get a login link for the Control Center\n" +
 			"/start — Welcome message"
-		sendMessage(client, token, msg.Chat.ID, help)
+		tg.SendHTML(msg.Chat.ID, help)
 		return true
 	}
 	return false
 }
 
-func handleLogin(client *http.Client, token string, msg *Message, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) {
+func handleLogin(tg *tgclient.Client, msg *Message, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) {
 	chatID := msg.Chat.ID
 
 	if len(allowedChatIDs) == 0 {
-		sendMessage(client, token, chatID, "Login is not configured. Set ALLOWED_CHAT_IDS to enable it.")
+		tg.SendHTML(chatID, "Login is not configured. Set ALLOWED_CHAT_IDS to enable it.")
 		return
 	}
 
 	if !allowedChatIDs[chatID] {
-		sendMessage(client, token, chatID, "You are not authorized to access the Control Center.")
+		tg.SendHTML(chatID, "You are not authorized to access the Control Center.")
 		return
 	}
 
 	// Send inline keyboard with session duration options.
-	sendLoginKeyboard(client, token, chatID)
-}
-
-func sendLoginKeyboard(client *http.Client, token string, chatID int64) {
 	keyboard := map[string]any{
 		"inline_keyboard": [][]map[string]string{
 			{
@@ -428,22 +490,10 @@ func sendLoginKeyboard(client *http.Client, token string, chatID int64) {
 			},
 		},
 	}
-
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
-	payload, _ := json.Marshal(map[string]any{
-		"chat_id":      chatID,
-		"text":         "Choose session duration:",
-		"reply_markup": keyboard,
-	})
-	resp, err := http.Post(url, "application/json", bytes.NewReader(payload))
-	if err != nil {
-		log.Printf("sendLoginKeyboard error: %v", err)
-		return
-	}
-	defer resp.Body.Close()
+	tg.SendKeyboard(chatID, "Choose session duration:", keyboard)
 }
 
-func handleCallbackQuery(client *http.Client, token string, cb *CallbackQuery, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) {
+func handleCallbackQuery(tg *tgclient.Client, client *http.Client, token string, cb *CallbackQuery, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) {
 	// Always answer callback to remove the loading indicator.
 	defer answerCallbackQuery(client, token, cb.ID)
 
@@ -458,7 +508,7 @@ func handleCallbackQuery(client *http.Client, token string, cb *CallbackQuery, m
 	}
 
 	if !allowedChatIDs[chatID] {
-		sendMessage(client, token, chatID, "You are not authorized to access the Control Center.")
+		tg.SendHTML(chatID, "You are not authorized to access the Control Center.")
 		return
 	}
 
@@ -475,19 +525,19 @@ func handleCallbackQuery(client *http.Client, token string, cb *CallbackQuery, m
 		ttl = 30 * 24 * time.Hour
 		label = "30 days"
 	default:
-		sendMessage(client, token, chatID, "Unknown duration. Send /login to try again.")
+		tg.SendHTML(chatID, "Unknown duration. Send /login to try again.")
 		return
 	}
 
 	code, err := magic.Issue(chatID, ttl)
 	if err != nil {
 		log.Printf("magic issue error: %v", err)
-		sendMessage(client, token, chatID, "Failed to generate login link. Try again.")
+		tg.SendHTML(chatID, "Failed to generate login link. Try again.")
 		return
 	}
 
 	link := fmt.Sprintf("%s/auth?code=%s", strings.TrimRight(ccExternalURL, "/"), code)
-	sendMessage(client, token, chatID, fmt.Sprintf("Session: %s · Expires in 5 min\n%s", label, link))
+	tg.SendHTML(chatID, fmt.Sprintf("Session: %s · Expires in 5 min\n%s", label, link))
 }
 
 func answerCallbackQuery(client *http.Client, token string, callbackID string) {
@@ -517,17 +567,3 @@ func parseAllowedChatIDs(s string) map[int64]bool {
 	return result
 }
 
-func sendMessage(client *http.Client, token string, chatID int64, text string) {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
-	payload, _ := json.Marshal(map[string]any{
-		"chat_id": chatID,
-		"text":    text,
-	})
-	resp, err := http.Post(url, "application/json", bytes.NewReader(payload))
-	if err != nil {
-		log.Printf("sendMessage error: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-	log.Printf("→ reply sent (chat %d)", chatID)
-}

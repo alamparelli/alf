@@ -40,9 +40,9 @@
       </div>
     </div>
 
-    <!-- Config Card (read-only) -->
+    <!-- Config Card -->
     <div class="card">
-      <h2>Configuration <span class="badge">read-only</span></h2>
+      <h2>Configuration</h2>
       <div class="form-row">
         <label>Model</label>
         <span class="ro-value" id="cfgModel">--</span>
@@ -80,10 +80,13 @@
       <div class="log-box" id="logBox">Loading...</div>
     </div>
 
-    <!-- Advanced: Raw Config (read-only) -->
-    <div class="card advanced" id="rawConfigCard">
-      <h2>Raw Config (JSON) <span class="badge">read-only</span></h2>
-      <pre class="json-display" id="rawConfigDisplay"></pre>
+    <!-- Raw Config Editor -->
+    <div class="card" id="rawConfigCard">
+      <h2>Raw Config (JSON)</h2>
+      <textarea class="json-editor" id="rawConfigEditor" rows="12"></textarea>
+      <div class="btn-row" style="gap:8px;margin-top:8px">
+        <button class="btn" id="saveConfigBtn">Save Config</button>
+      </div>
     </div>
 
     <!-- Advanced: Full Log Viewer -->

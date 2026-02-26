@@ -17,11 +17,10 @@ services:
       - telegram_chat_id
       - cc_auth_token
     volumes:
-      - ./config.json:/home/node/data/config.json
       - ./data:/home/node/data
       - ./tools:/home/node/tools:ro
       - ./skills:/home/node/skills:ro
-      - ./claude-session:/home/node/.claude
+      - ./claude-session:/home/claude/.claude
     mem_limit: 512m
     cpus: "0.5"
 

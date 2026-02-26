@@ -160,7 +160,41 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 
 /* Responsive */
 @media (max-width: 600px) {
-  .form-row { flex-direction: column; align-items: flex-start; gap: 4px; }
-  .form-row label { min-width: auto; }
-  .status-grid { grid-template-columns: repeat(2, 1fr); }
+  .container { padding: 12px 10px; }
+  header { flex-direction: column; gap: 12px; align-items: flex-start; margin-bottom: 16px; padding-bottom: 12px; }
+  header h1 { font-size: 1.2rem; }
+
+  .card { padding: 14px; margin-bottom: 12px; }
+  .card h2 { font-size: 0.8rem; margin-bottom: 8px; }
+
+  .status-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat-value { font-size: 1.2rem; }
+
+  .form-row { flex-direction: column; align-items: stretch; gap: 6px; }
+  .form-row label { min-width: auto; font-size: 0.8rem; }
+  .form-row select, .form-row input[type="number"], .form-row input[type="text"] { width: 100%; }
+
+  /* Tiers: card layout instead of table */
+  .tier-table thead { display: none; }
+  .tier-table, .tier-table tbody, .tier-table tr, .tier-table td { display: block; width: 100%; }
+  .tier-table tr {
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center;
+  }
+  .tier-table td { padding: 2px 0; border: none; }
+  .tier-table td::before {
+    content: attr(data-label);
+    display: block; font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase;
+  }
+  .tier-table td:last-child { grid-column: 1 / -1; text-align: right; }
+  .tier-table td:last-child::before { display: none; }
+  .tier-table td input[type="text"], .tier-table td select { width: 100%; }
+  .tier-table td input[type="number"] { width: 100%; }
+
+  .btn-row { flex-direction: column; gap: 8px; }
+  .btn-row .btn, .btn-row .btn-secondary { width: 100%; text-align: center; }
+
+  .log-box { max-height: 200px; font-size: 0.72rem; padding: 8px; }
+
+  .toast { left: 12px; right: 12px; bottom: 12px; text-align: center; }
 }

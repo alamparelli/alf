@@ -6,7 +6,6 @@ services:
     container_name: alf
     restart: unless-stopped
     ports:
-      - "2222:22"
       - "0.0.0.0:{{.CCPort}}:8080"
     environment:
       - TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token

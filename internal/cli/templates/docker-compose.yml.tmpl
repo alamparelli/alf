@@ -18,7 +18,7 @@ services:
       - cc_auth_token
     volumes:
       - ./data:/home/node/data
-      - ./config.d:/home/node/data/config.d
+      - ./config.d:/home/node/data/config.d:ro
       - ./tools.d:/home/node/data/tools.d:ro
       - ./skills.d:/home/node/data/skills.d:ro
     mem_limit: 512m

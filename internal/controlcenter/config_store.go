@@ -64,5 +64,5 @@ func (s *fileConfigStore) Save(cfg *Config) error {
 
 // ConfigPath returns the standard config.json path for a data directory.
 func ConfigPath(dataDir string) string {
-	return filepath.Join(dataDir, "config.d", "config.json")
+	return filepath.Join(dataDir, "config", "config.json")
 }

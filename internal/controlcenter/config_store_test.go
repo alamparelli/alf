@@ -84,7 +84,7 @@ func TestFileConfigStore_SaveAndLoad(t *testing.T) {
 
 func TestConfigPath(t *testing.T) {
 	got := ConfigPath("/home/node/data")
-	want := "/home/node/data/config.d/config.json"
+	want := "/home/node/data/config/config.json"
 	if got != want {
 		t.Errorf("ConfigPath() = %q, want %q", got, want)
 	}

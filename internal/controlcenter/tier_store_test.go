@@ -71,7 +71,7 @@ func TestFileTierStore_Reload(t *testing.T) {
 
 func TestTiersPath(t *testing.T) {
 	got := TiersPath("/home/node/data")
-	want := "/home/node/data/config.d/tiers.json"
+	want := "/home/node/data/config/tiers.json"
 	if got != want {
 		t.Errorf("TiersPath() = %q, want %q", got, want)
 	}

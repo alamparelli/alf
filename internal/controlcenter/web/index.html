@@ -70,12 +70,29 @@
       </div>
     </div>
 
-    <!-- Memory Index -->
-    <div class="card" id="memoryCard">
-      <h2>Memory <span class="badge">appended to system prompt</span></h2>
-      <textarea class="json-editor" id="memoryEditor" rows="10" placeholder="Write context that ALF should always remember..."></textarea>
-      <div class="btn-row" style="gap:8px;margin-top:8px">
-        <button class="btn" id="saveMemoryBtn">Save</button>
+    <!-- File Explorer -->
+    <div class="card" id="explorerCard">
+      <h2>Files <span class="badge">injected into system prompt</span></h2>
+      <div class="explorer-tabs">
+        <button class="explorer-tab active" data-type="memories">Memories</button>
+        <button class="explorer-tab" data-type="tools">Tools</button>
+        <button class="explorer-tab" data-type="skills">Skills</button>
+      </div>
+      <div class="explorer-split">
+        <div class="explorer-sidebar">
+          <div class="explorer-file-list" id="explorerFileList"></div>
+          <div class="explorer-sidebar-actions">
+            <button class="btn btn-secondary btn-sm" id="newFileBtn">+ New</button>
+            <button class="btn btn-secondary btn-sm btn-danger" id="deleteFileBtn" disabled>Delete</button>
+          </div>
+        </div>
+        <div class="explorer-editor">
+          <div class="explorer-editor-header">
+            <span class="explorer-filename" id="explorerFileName">Select a file</span>
+            <button class="btn" id="saveFileBtn" disabled>Save</button>
+          </div>
+          <textarea class="json-editor" id="explorerEditor" rows="12" placeholder="Select a file to edit..." disabled></textarea>
+        </div>
       </div>
     </div>
 

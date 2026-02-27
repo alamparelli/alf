@@ -8,10 +8,12 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 // Result holds the classification output from the router.
@@ -25,7 +27,7 @@ type Result struct {
 // Uses the router model (default haiku) with a 15s timeout, no tools, max 1 turn.
 func Classify(message string, tiers *cc.TiersConfig, dataDir string) Result {
 	valid := validTierSet(tiers)
-	prompt := buildPrompt(message, tiers, valid)
+	prompt := buildPrompt(message, tiers, valid, dataDir)
 
 	model := ResolveModel(tiers.RouterModel)
 	if model == "" {
@@ -110,8 +112,15 @@ func ResolveModel(short string) string {
 // buildPrompt constructs the classification prompt listing routable tiers.
 // The router tries to answer directly when possible, only routing to another
 // tier when the task requires tools, file access, or deeper reasoning.
-func buildPrompt(message string, tiers *cc.TiersConfig, valid map[string]bool) string {
+func buildPrompt(message string, tiers *cc.TiersConfig, valid map[string]bool, dataDir string) string {
 	var b strings.Builder
+
+	// Inject personality (soul.md + mood.md) so direct responses match ALF's voice.
+	personality := memory.CollectInline(filepath.Join(dataDir, "memories"))
+	if personality != "" {
+		b.WriteString(personality)
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString("You are a smart message router AND responder. Your job:\n")
 	b.WriteString("1. If you can fully answer the message yourself, respond directly.\n")

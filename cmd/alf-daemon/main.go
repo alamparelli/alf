@@ -31,7 +31,29 @@ func main() {
 	authToken := readSecret("CC_AUTH_TOKEN")
 
 	if token == "" || chatID == "" {
-		log.Fatal("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
+		// Log diagnostic info to help users debug secrets issues.
+		log.Println("ERROR: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
+		for _, name := range []string{"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"} {
+			filePath := os.Getenv(name + "_FILE")
+			if filePath == "" {
+				log.Printf("  %s_FILE env var: not set", name)
+			} else if _, err := os.Stat(filePath); err != nil {
+				log.Printf("  %s_FILE=%s: file not found", name, filePath)
+			} else {
+				data, _ := os.ReadFile(filePath)
+				if strings.TrimSpace(string(data)) == "" {
+					log.Printf("  %s_FILE=%s: file exists but is empty", name, filePath)
+				} else {
+					log.Printf("  %s_FILE=%s: file exists with content", name, filePath)
+				}
+			}
+			if v := os.Getenv(name); v != "" {
+				log.Printf("  %s env var: set", name)
+			} else {
+				log.Printf("  %s env var: not set", name)
+			}
+		}
+		log.Fatal("Exiting. Ensure secrets are configured — see https://github.com/alamparelli/alf#secrets")
 	}
 
 	// Verify claude CLI is available.

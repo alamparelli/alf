@@ -18,6 +18,7 @@ import (
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/gittrack"
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
@@ -132,6 +133,9 @@ func main() {
 	for _, sub := range []string{"config", "tools", "skills", "memories"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
+
+	// Bootstrap default memory files (soul.md, mood.md, index.md).
+	memory.Bootstrap(filepath.Join(dataDir, "memories"))
 
 	// Session store for Claude --resume support.
 	sessionTimeout := time.Duration(cfg.SessionTimeout) * time.Minute
@@ -414,11 +418,8 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 		dataDir = d
 	}
 
-	// Inject memory index as appended system prompt if it exists.
-	memoryFile := filepath.Join(dataDir, "memories", "index.md")
-	if info, err := os.Stat(memoryFile); err == nil && info.Size() > 0 {
-		args = append(args, "--append-system-prompt-file", memoryFile)
-	}
+	// Inject all memory files as appended system prompts.
+	args = append(args, memory.CollectPrompts(filepath.Join(dataDir, "memories"))...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()

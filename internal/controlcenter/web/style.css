@@ -181,6 +181,54 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .tool-check span { user-select: none; }
 
+/* File Explorer */
+.explorer-tabs {
+  display: flex; gap: 0; margin-bottom: 12px; border-bottom: 1px solid var(--border);
+}
+.explorer-tab {
+  background: none; border: none; color: var(--text-dim); padding: 8px 16px;
+  cursor: pointer; font-size: 0.85rem; border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+}
+.explorer-tab:hover { color: var(--text); }
+.explorer-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.explorer-split { display: flex; gap: 12px; min-height: 280px; }
+
+.explorer-sidebar {
+  width: 180px; min-width: 140px; display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-input);
+}
+.explorer-file-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.explorer-file-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 10px; cursor: pointer; font-size: 0.82rem;
+  border-left: 2px solid transparent; transition: background 0.15s;
+}
+.explorer-file-item:hover { background: var(--border); }
+.explorer-file-item.active {
+  background: var(--border); border-left-color: var(--accent);
+}
+.explorer-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.explorer-file-size { color: var(--text-dim); font-size: 0.7rem; flex-shrink: 0; margin-left: 8px; }
+.explorer-empty { padding: 12px; color: var(--text-dim); font-size: 0.82rem; text-align: center; }
+
+.explorer-sidebar-actions {
+  display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--border);
+}
+.explorer-sidebar-actions .btn-sm { flex: 1; text-align: center; padding: 4px 8px; }
+
+.explorer-editor { flex: 1; display: flex; flex-direction: column; }
+.explorer-editor-header {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+}
+.explorer-filename {
+  font-size: 0.85rem; font-weight: 500; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.explorer-editor .json-editor { flex: 1; min-height: 240px; resize: vertical; }
+
 /* Responsive */
 @media (max-width: 600px) {
   .container { padding: 12px 10px; }
@@ -220,4 +268,8 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   .log-box { max-height: 200px; font-size: 0.72rem; padding: 8px; }
 
   .toast { left: 12px; right: 12px; bottom: 12px; text-align: center; }
+
+  .explorer-split { flex-direction: column; min-height: auto; }
+  .explorer-sidebar { width: 100%; min-width: auto; max-height: 150px; }
+  .explorer-editor .json-editor { min-height: 180px; }
 }

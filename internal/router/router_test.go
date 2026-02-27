@@ -85,7 +85,7 @@ func TestParseResponse_InvalidTierInJSON(t *testing.T) {
 func TestBuildPrompt_IncludesRoutableTiers(t *testing.T) {
 	tiers := defaultTiers()
 	valid := validTierSet(tiers)
-	prompt := buildPrompt("hello", tiers, valid)
+	prompt := buildPrompt("hello", tiers, valid, t.TempDir())
 
 	for _, name := range []string{"instant", "analyze", "heavy", "deep"} {
 		if !strings.Contains(prompt, name) {
@@ -98,7 +98,7 @@ func TestBuildPrompt_ExcludesDisabledTiers(t *testing.T) {
 	tiers := defaultTiers()
 	tiers.Tiers[3].Enabled = false // disable "deep"
 	valid := validTierSet(tiers)
-	prompt := buildPrompt("hello", tiers, valid)
+	prompt := buildPrompt("hello", tiers, valid, t.TempDir())
 
 	// "deep" should not appear as a listed tier (though it might appear in distinctions text)
 	lines := strings.Split(prompt, "\n")
@@ -112,7 +112,7 @@ func TestBuildPrompt_ExcludesDisabledTiers(t *testing.T) {
 func TestBuildPrompt_WriteGuard(t *testing.T) {
 	tiers := defaultTiers()
 	valid := validTierSet(tiers)
-	prompt := buildPrompt("hello", tiers, valid)
+	prompt := buildPrompt("hello", tiers, valid, t.TempDir())
 
 	if !strings.Contains(prompt, "write-capable") {
 		t.Error("prompt should contain write guard warning")
@@ -123,7 +123,7 @@ func TestBuildPrompt_TruncatesLongMessage(t *testing.T) {
 	tiers := defaultTiers()
 	valid := validTierSet(tiers)
 	longMsg := strings.Repeat("a", 500)
-	prompt := buildPrompt(longMsg, tiers, valid)
+	prompt := buildPrompt(longMsg, tiers, valid, t.TempDir())
 
 	if strings.Contains(prompt, strings.Repeat("a", 500)) {
 		t.Error("prompt should truncate long messages")
@@ -136,7 +136,7 @@ func TestBuildPrompt_TruncatesLongMessage(t *testing.T) {
 func TestBuildPrompt_IncludesDistinctions(t *testing.T) {
 	tiers := defaultTiers()
 	valid := validTierSet(tiers)
-	prompt := buildPrompt("hello", tiers, valid)
+	prompt := buildPrompt("hello", tiers, valid, t.TempDir())
 
 	if !strings.Contains(prompt, tiers.RouterDistinctions) {
 		t.Error("prompt should include router distinctions")

@@ -10,6 +10,7 @@ import (
 type Deps struct {
 	ConfigStore    ConfigStore
 	TierStore      TierStore
+	TierFS         TierFSProvider
 	MemoryStore    ResourceStore
 	ToolStore      ResourceStore
 	SkillStore     ResourceStore
@@ -19,6 +20,7 @@ type Deps struct {
 	Magic          *MagicStore
 	Sessions       *SessionStore
 	AuthToken      string
+	DataDir        string
 	DashboardHTML  string
 	WebFS          fs.FS // embedded web assets (style.css, app.js)
 }
@@ -51,8 +53,19 @@ func HandlerFactory(deps Deps) http.Handler {
 	})
 	mux.Handle("/api/tiers", &TiersHandler{
 		Store:    deps.TierStore,
+		TierFS:   deps.TierFS,
 		Notifier: deps.Notifier,
 		Event:    ReloadTiers,
+	})
+	if deps.TierFS != nil {
+		mux.Handle("/api/tiers/", &TierFilesHandler{
+			TierFS:   deps.TierFS,
+			Notifier: deps.Notifier,
+		})
+	}
+	mux.Handle("/api/router-prompt", &RouterPromptHandler{
+		DataDir:  deps.DataDir,
+		Notifier: deps.Notifier,
 	})
 	mux.Handle("/api/status", &StatusHandler{
 		Provider: deps.StatusProvider,

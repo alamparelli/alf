@@ -9,6 +9,7 @@ import (
 // TiersHandler handles GET and PUT /api/tiers.
 type TiersHandler struct {
 	Store    TierStore
+	TierFS   TierFSProvider // optional: sync tier directories on save
 	Notifier Notifier
 	Event    ReloadEvent
 }
@@ -70,6 +71,13 @@ func (h *TiersHandler) put(w http.ResponseWriter, r *http.Request) {
 	if err := h.Store.Save(&cfg); err != nil {
 		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
 		return
+	}
+
+	// Ensure tier directories exist for new tiers (no auto-delete).
+	if h.TierFS != nil {
+		for _, t := range cfg.Tiers {
+			h.TierFS.EnsureDir(t.Name)
+		}
 	}
 
 	if h.Notifier != nil {

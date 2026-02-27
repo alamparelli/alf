@@ -23,7 +23,7 @@ type Server struct {
 // dataDir is the path to config/tiers/logs directory.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir string, stats *Stats, version string, authToken string, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore) (*Server, error) {
+func New(dataDir string, stats *Stats, version string, authToken string, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, tierFS TierFSProvider) (*Server, error) {
 	configStore, tierStore, memoryStore, toolStore, skillStore := StoreFactory(dataDir)
 	logReader := LogReaderFactory(dataDir)
 	statusProvider := NewStatusProvider(stats, version)
@@ -48,6 +48,7 @@ func New(dataDir string, stats *Stats, version string, authToken string, reloadC
 	handler := HandlerFactory(Deps{
 		ConfigStore:    configStore,
 		TierStore:      tierStore,
+		TierFS:         tierFS,
 		MemoryStore:    memoryStore,
 		ToolStore:      toolStore,
 		SkillStore:     skillStore,
@@ -57,6 +58,7 @@ func New(dataDir string, stats *Stats, version string, authToken string, reloadC
 		Magic:          magic,
 		Sessions:       sessions,
 		AuthToken:      authToken,
+		DataDir:        dataDir,
 		DashboardHTML:  string(htmlBytes),
 		WebFS:          webSub,
 	})

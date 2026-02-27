@@ -126,6 +126,17 @@ func fixVolumePermissions(dir string) {
 	// Everything owned by node (1000:1000).
 	chown("data", "1000:1000")
 	chown("config.d", "1000:1000")
+
+	// Secrets must be readable by the node user inside the container.
+	// Docker Compose (non-Swarm) bind-mounts secrets preserving host permissions.
+	secretsDir := filepath.Join(dir, "secrets")
+	if entries, err := os.ReadDir(secretsDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				os.Chmod(filepath.Join(secretsDir, e.Name()), 0o644)
+			}
+		}
+	}
 }
 
 func fetchLatestTag() (string, error) {

@@ -267,25 +267,114 @@ function esc(s) {
   return d.innerHTML;
 }
 
-// --- Memory Index ---
-function loadMemory() {
-  api('/api/memories/index').then(r => {
-    document.getElementById('memoryEditor').value = r.content || '';
+// --- File Explorer ---
+let explorerType = 'memories';
+let explorerFile = null;  // currently selected filename
+
+function loadExplorer(type) {
+  explorerType = type || explorerType;
+  explorerFile = null;
+  document.getElementById('explorerEditor').value = '';
+  document.getElementById('explorerEditor').disabled = true;
+  document.getElementById('explorerFileName').textContent = 'Select a file';
+  document.getElementById('saveFileBtn').disabled = true;
+  document.getElementById('deleteFileBtn').disabled = true;
+
+  // Update active tab.
+  document.querySelectorAll('.explorer-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.type === explorerType);
+  });
+
+  api('/api/' + explorerType + '/').then(r => {
+    const list = document.getElementById('explorerFileList');
+    const items = r.items || [];
+    if (items.length === 0) {
+      list.innerHTML = '<div class="explorer-empty">No files</div>';
+      return;
+    }
+    list.innerHTML = items.map(f =>
+      '<div class="explorer-file-item" data-name="' + esc(f.name) + '">' +
+        '<span class="explorer-file-name">' + esc(f.name) + '</span>' +
+        '<span class="explorer-file-size">' + formatSize(f.size) + '</span>' +
+      '</div>'
+    ).join('');
+    // Bind click handlers.
+    list.querySelectorAll('.explorer-file-item').forEach(el => {
+      el.addEventListener('click', () => selectFile(explorerType, el.dataset.name));
+    });
   }).catch(() => {
-    document.getElementById('memoryEditor').value = '';
+    document.getElementById('explorerFileList').innerHTML = '<div class="explorer-empty">Failed to load</div>';
   });
 }
 
-document.getElementById('saveMemoryBtn').addEventListener('click', () => {
-  const content = document.getElementById('memoryEditor').value;
-  api('/api/memories/index', {
+function selectFile(type, name) {
+  explorerFile = name;
+  document.getElementById('explorerFileName').textContent = name;
+  document.getElementById('saveFileBtn').disabled = false;
+  document.getElementById('deleteFileBtn').disabled = false;
+
+  // Highlight active file.
+  document.querySelectorAll('.explorer-file-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.name === name);
+  });
+
+  api('/api/' + type + '/' + encodeURIComponent(name)).then(r => {
+    const editor = document.getElementById('explorerEditor');
+    editor.value = r.content || '';
+    editor.disabled = false;
+  }).catch(() => {
+    toast('Failed to load file', 'error');
+  });
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  return (bytes / 1024).toFixed(1) + ' KB';
+}
+
+document.getElementById('saveFileBtn').addEventListener('click', () => {
+  if (!explorerFile) return;
+  const content = document.getElementById('explorerEditor').value;
+  api('/api/' + explorerType + '/' + encodeURIComponent(explorerFile), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),
   }).then(r => {
-    if (r.ok) toast('Memory saved');
+    if (r.ok) { toast('Saved'); loadExplorer(); }
     else toast(r.error || 'Save failed', 'error');
   }).catch(e => toast(e.error || 'Save failed', 'error'));
+});
+
+document.getElementById('newFileBtn').addEventListener('click', () => {
+  const name = prompt('File name (e.g. notes.md):');
+  if (!name || !name.trim()) return;
+  api('/api/' + explorerType + '/' + encodeURIComponent(name.trim()), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: '' }),
+  }).then(r => {
+    if (r.ok) {
+      toast('Created');
+      loadExplorer();
+      setTimeout(() => selectFile(explorerType, name.trim()), 300);
+    } else toast(r.error || 'Create failed', 'error');
+  }).catch(e => toast(e.error || 'Create failed', 'error'));
+});
+
+document.getElementById('deleteFileBtn').addEventListener('click', () => {
+  if (!explorerFile) return;
+  if (!confirm('Delete ' + explorerFile + '?')) return;
+  api('/api/' + explorerType + '/' + encodeURIComponent(explorerFile), {
+    method: 'DELETE',
+  }).then(r => {
+    if (r.ok) { toast('Deleted'); loadExplorer(); }
+    else toast(r.error || 'Delete failed', 'error');
+  }).catch(e => toast(e.error || 'Delete failed', 'error'));
+});
+
+// Tab click handlers.
+document.querySelectorAll('.explorer-tab').forEach(tab => {
+  tab.addEventListener('click', () => loadExplorer(tab.dataset.type));
 });
 
 // --- Logs ---
@@ -327,7 +416,7 @@ loadStatus();
 loadConfig();
 loadRawConfig();
 loadTiers();
-loadMemory();
+loadExplorer('memories');
 loadRecentLogs();
 setInterval(loadStatus, 30000);
 setInterval(loadRecentLogs, 10000);

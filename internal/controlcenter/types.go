@@ -50,10 +50,20 @@ type Tier struct {
 	Routable     bool     `json:"routable"`
 	Instant      bool     `json:"instant"`
 	RouterLabel  string   `json:"router_label,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	MaxTurns     int      `json:"max_turns,omitempty"`
 	WriteCapable bool     `json:"write_capable"`
 	Tools        []string `json:"tools,omitempty"`
 	Effort       string   `json:"effort,omitempty"`
 	ForceCommand bool     `json:"force_command"`
+}
+
+// RouterDescription returns Description if set, otherwise falls back to RouterLabel.
+func (t Tier) RouterDescription() string {
+	if t.Description != "" {
+		return t.Description
+	}
+	return t.RouterLabel
 }
 
 // TiersConfig wraps a list of tiers plus router-level settings.
@@ -104,6 +114,7 @@ const (
 	ReloadTiers
 	ReloadTools
 	ReloadSkills
+	ReloadTierFiles
 )
 
 // Stats tracks daemon runtime metrics. Safe for concurrent use.

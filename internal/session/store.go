@@ -10,10 +10,12 @@ import (
 
 // Entry tracks one Claude session per chat.
 type Entry struct {
-	SessionID  string    `json:"session_id"`
-	ChatID     int64     `json:"chat_id"`
-	CreatedAt  time.Time `json:"created_at"`
-	LastActive time.Time `json:"last_active"`
+	SessionID    string    `json:"session_id"`
+	ChatID       int64     `json:"chat_id"`
+	CreatedAt    time.Time `json:"created_at"`
+	LastActive   time.Time `json:"last_active"`
+	LastTier     string    `json:"last_tier,omitempty"`
+	MessageCount int       `json:"message_count,omitempty"`
 }
 
 // Store manages per-chat Claude session IDs with timeout-based expiry.
@@ -79,6 +81,42 @@ func (s *Store) Touch(chatID int64) {
 		e.LastActive = time.Now()
 		s.persist()
 	}
+}
+
+// SetWithContext stores the session ID and updates routing context (last tier, message count).
+func (s *Store) SetWithContext(chatID int64, sessionID, tierName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	e, ok := s.entries[chatID]
+	if !ok {
+		e = &Entry{
+			ChatID:    chatID,
+			CreatedAt: now,
+		}
+		s.entries[chatID] = e
+	}
+	e.SessionID = sessionID
+	e.LastActive = now
+	e.LastTier = tierName
+	e.MessageCount++
+	s.persist()
+}
+
+// Context returns the routing context for a chat (last tier, message count).
+func (s *Store) Context(chatID int64) (lastTier string, msgCount int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.entries[chatID]
+	if !ok {
+		return "", 0
+	}
+	if time.Since(e.LastActive) >= s.timeout {
+		return "", 0
+	}
+	return e.LastTier, e.MessageCount
 }
 
 // Archive clears the session for a chat and returns the old session ID.

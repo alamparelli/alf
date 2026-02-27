@@ -22,6 +22,7 @@ import (
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
+	"github.com/alamparelli/alf/internal/tierfs"
 	"github.com/alamparelli/alf/internal/updater"
 )
 
@@ -95,23 +96,6 @@ func main() {
 		ccExternalURL = "http://localhost:8080"
 	}
 
-	// Start Control Center HTTP server.
-	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, stats, version, authToken, reloadCh, magic, sessions)
-		if err != nil {
-			log.Printf("warning: failed to start Control Center: %v", err)
-		} else {
-			go func() {
-				if err := server.Start(); err != nil && err != http.ErrServerClosed {
-					log.Printf("Control Center error: %v", err)
-				}
-			}()
-			log.Printf("Control Center started on :8080 (allowed_chat_ids=%d, external_url=%s)", len(allowedChatIDs), ccExternalURL)
-		}
-	} else {
-		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set — Control Center disabled")
-	}
-
 	log.Printf("alf-daemon %s starting...", version)
 
 	// Load initial config.
@@ -136,6 +120,31 @@ func main() {
 
 	// Bootstrap default memory files (soul.md, mood.md, index.md).
 	memory.Bootstrap(filepath.Join(dataDir, "memories"))
+
+	// TierFS for per-tier system prompts and skills.
+	tierFS := tierfs.New(dataDir)
+	for _, t := range tierStore.Current().Tiers {
+		if err := tierFS.EnsureDir(t.Name); err != nil {
+			log.Printf("warning: failed to create tier dir %q: %v", t.Name, err)
+		}
+	}
+
+	// Start Control Center HTTP server.
+	if authToken != "" || len(allowedChatIDs) > 0 {
+		server, err := cc.New(dataDir, stats, version, authToken, reloadCh, magic, sessions, tierFS)
+		if err != nil {
+			log.Printf("warning: failed to start Control Center: %v", err)
+		} else {
+			go func() {
+				if err := server.Start(); err != nil && err != http.ErrServerClosed {
+					log.Printf("Control Center error: %v", err)
+				}
+			}()
+			log.Printf("Control Center started on :8080 (allowed_chat_ids=%d, external_url=%s)", len(allowedChatIDs), ccExternalURL)
+		}
+	} else {
+		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set — Control Center disabled")
+	}
 
 	// Session store for Claude --resume support.
 	sessionTimeout := time.Duration(cfg.SessionTimeout) * time.Minute
@@ -227,6 +236,11 @@ func main() {
 				if git != nil {
 					git.Commit("skills updated via CC")
 				}
+			case cc.ReloadTierFiles:
+				log.Println("tier files reloaded")
+				if git != nil {
+					git.Commit("tier files updated via CC")
+				}
 			}
 		default:
 		}
@@ -275,9 +289,18 @@ func main() {
 			chatID := u.Message.Chat.ID
 			resumeID := chatSessions.Get(chatID)
 
+			// Get conversation context for routing.
+			lastTier, msgCount := chatSessions.Context(chatID)
+
 			// Route message to appropriate tier.
 			var tp tierParams
-			routeResult := router.Classify(u.Message.Text, tierStore.Current(), dataDir)
+			routeResult := router.Classify(router.ClassifyInput{
+				Message:      u.Message.Text,
+				Tiers:        tierStore.Current(),
+				DataDir:      dataDir,
+				LastTier:     lastTier,
+				MessageCount: msgCount,
+			})
 
 			// Router answered directly — no second LLM call needed.
 			if routeResult.Response != "" && routeResult.Tier == "" {
@@ -291,7 +314,7 @@ func main() {
 			}
 
 			// Resolve tier to params.
-			tp = resolveTierParams(routeResult.Tier, tierStore.Current())
+			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), tierFS)
 
 			eventLog.Log("router_classify", map[string]any{
 				"chat_id": chatID,
@@ -325,7 +348,7 @@ func main() {
 			// Store the session ID returned by Claude for future --resume.
 			if result.SessionID != "" {
 				isNew := resumeID == ""
-				chatSessions.Set(chatID, result.SessionID)
+				chatSessions.SetWithContext(chatID, result.SessionID, routeResult.Tier)
 				if isNew {
 					reason := "first"
 					if resumeID == "" && len(chatSessions.Get(chatID)) > 0 {
@@ -378,10 +401,11 @@ type claudeResult struct {
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
-	Model    string   // full model name, e.g. "claude-sonnet-4-5"
-	MaxTurns int      // 0 = default (3)
-	Tools    []string // nil = omit flag
-	Effort   string   // "" = omit flag
+	Model          string   // full model name, e.g. "claude-sonnet-4-5"
+	MaxTurns       int      // 0 = default (3)
+	Tools          []string // nil = omit flag
+	Effort         string   // "" = omit flag
+	TierPromptArgs []string // --append-system-prompt pairs from tier system-prompt.md + skills
 }
 
 func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
@@ -420,6 +444,9 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 
 	// Inject all memory files as appended system prompts.
 	args = append(args, memory.CollectPrompts(filepath.Join(dataDir, "memories"))...)
+
+	// Inject tier-specific system prompt and skills.
+	args = append(args, tp.TierPromptArgs...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -698,13 +725,15 @@ func isInstantTier(tierName string, tiers *cc.TiersConfig) bool {
 	return false
 }
 
-func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
+func resolveTierParams(tierName string, tiers *cc.TiersConfig, tfs *tierfs.TierFS) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			return tierParams{
-				Model:  router.ResolveModel(t.Model),
-				Tools:  t.Tools,
-				Effort: t.Effort,
+				Model:          router.ResolveModel(t.Model),
+				MaxTurns:       t.MaxTurns,
+				Tools:          t.Tools,
+				Effort:         t.Effort,
+				TierPromptArgs: tfs.CollectPromptArgs(tierName),
 			}
 		}
 	}

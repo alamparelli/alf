@@ -13,12 +13,19 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /al
 # Stage 2: Runtime with Claude Code CLI
 FROM node:22-slim
 
+ARG TARGETARCH
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Go for Claude agent to build CLI tools
+RUN curl -fsSL "https://go.dev/dl/go1.24.1.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
+ENV PATH="/usr/local/go/bin:/home/node/go/bin:${PATH}"
+ENV GOPATH="/home/node/go"
 
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
 

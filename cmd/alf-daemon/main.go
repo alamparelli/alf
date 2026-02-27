@@ -18,6 +18,7 @@ import (
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/gittrack"
+	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/updater"
@@ -119,10 +120,16 @@ func main() {
 		log.Printf("warning: failed to load config: %v", err)
 		cfg = cc.DefaultConfig()
 	}
+	// Load initial tiers config.
+	tierStore := cc.NewFileTierStore(cc.TiersPath(dataDir))
+	if err := tierStore.Reload(); err != nil {
+		log.Printf("warning: failed to load tiers: %v", err)
+	}
+
 	// Ensure data subdirectories exist.
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
-	for _, sub := range []string{"config", "tools", "skills"} {
+	for _, sub := range []string{"config", "tools", "skills", "memories"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
 
@@ -264,13 +271,38 @@ func main() {
 			chatID := u.Message.Chat.ID
 			resumeID := chatSessions.Get(chatID)
 
+			// Route message to appropriate tier.
+			var tp tierParams
+			routeResult := router.Classify(u.Message.Text, tierStore.Current(), dataDir)
+
+			// Router answered directly — no second LLM call needed.
+			if routeResult.Response != "" && routeResult.Tier == "" {
+				log.Printf("→ router direct response")
+				eventLog.Log("router_direct", map[string]any{
+					"chat_id": chatID,
+					"reason":  routeResult.Reason,
+				})
+				tg.SendMessage(chatID, routeResult.Response)
+				continue
+			}
+
+			// Resolve tier to params.
+			tp = resolveTierParams(routeResult.Tier, tierStore.Current())
+
+			eventLog.Log("router_classify", map[string]any{
+				"chat_id": chatID,
+				"tier":    routeResult.Tier,
+				"reason":  routeResult.Reason,
+				"model":   tp.Model,
+			})
+
 			start := time.Now()
-			result, err := askClaude(u.Message.Text, resumeID)
+			result, err := askClaude(u.Message.Text, resumeID, tp)
 			// Retry without resume if session not found.
 			if err != nil && resumeID != "" && strings.Contains(err.Error(), "No conversation found") {
 				log.Printf("session %s expired, starting fresh", resumeID)
 				chatSessions.Archive(chatID)
-				result, err = askClaude(u.Message.Text, "")
+				result, err = askClaude(u.Message.Text, "", tp)
 			}
 			duration := time.Since(start)
 
@@ -340,13 +372,37 @@ type claudeResult struct {
 	CostUSD   float64
 }
 
-func askClaude(prompt, resumeID string) (*claudeResult, error) {
+// tierParams holds per-tier Claude CLI arguments.
+type tierParams struct {
+	Model    string   // full model name, e.g. "claude-sonnet-4-5"
+	MaxTurns int      // 0 = default (3)
+	Tools    []string // nil = omit flag
+	Effort   string   // "" = omit flag
+}
+
+func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
+	model := tp.Model
+	if model == "" {
+		model = "claude-haiku-4-5"
+	}
+	maxTurns := tp.MaxTurns
+	if maxTurns <= 0 {
+		maxTurns = 3
+	}
+
 	args := []string{
 		"-p", prompt,
-		"--model", "claude-haiku-4-5",
+		"--model", model,
 		"--output-format", "json",
-		"--max-turns", "3",
+		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--dangerously-skip-permissions",
+	}
+
+	for _, tool := range tp.Tools {
+		args = append(args, "--allowedTools", tool)
+	}
+	if tp.Effort != "" {
+		args = append(args, "--effort", tp.Effort)
 	}
 
 	if resumeID != "" {
@@ -356,6 +412,12 @@ func askClaude(prompt, resumeID string) (*claudeResult, error) {
 	dataDir := "/home/node/data"
 	if d := os.Getenv("ALF_DATA_DIR"); d != "" {
 		dataDir = d
+	}
+
+	// Inject memory index as appended system prompt if it exists.
+	memoryFile := filepath.Join(dataDir, "memories", "index.md")
+	if info, err := os.Stat(memoryFile); err == nil && info.Size() > 0 {
+		args = append(args, "--append-system-prompt-file", memoryFile)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -519,10 +581,19 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 	case "/start":
 		tg.SendHTML(msg.Chat.ID, "Hello! I'm ALF, your AI assistant. Send me a message and I'll respond using Claude.")
 		return true
+	case "/restart":
+		tg.SendHTML(msg.Chat.ID, "Restarting ALF daemon...")
+		log.Println("restart requested via /restart command")
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			os.Exit(0)
+		}()
+		return true
 	case "/help":
 		help := "<b>Available commands:</b>\n" +
 			"/help — Show this message\n" +
 			"/new — Start a new conversation session\n" +
+			"/restart — Restart the ALF daemon\n" +
 			"/login — Get a login link for the Control Center\n" +
 			"/start — Welcome message"
 		tg.SendHTML(msg.Chat.ID, help)
@@ -615,6 +686,29 @@ func answerCallbackQuery(client *http.Client, token string, callbackID string) {
 		return
 	}
 	defer resp.Body.Close()
+}
+
+func isInstantTier(tierName string, tiers *cc.TiersConfig) bool {
+	for _, t := range tiers.Tiers {
+		if t.Name == tierName {
+			return t.Instant
+		}
+	}
+	return false
+}
+
+func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
+	for _, t := range tiers.Tiers {
+		if t.Name == tierName {
+			return tierParams{
+				Model:  router.ResolveModel(t.Model),
+				Tools:  t.Tools,
+				Effort: t.Effort,
+			}
+		}
+	}
+	// Tier not found — use defaults.
+	return tierParams{Model: "claude-haiku-4-5"}
 }
 
 func parseAllowedChatIDs(s string) map[int64]bool {

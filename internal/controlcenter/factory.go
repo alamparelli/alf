@@ -76,6 +76,9 @@ func HandlerFactory(deps Deps) http.Handler {
 		Event:    ReloadSkills,
 	})
 
+	// Restart.
+	mux.Handle("/api/restart", &RestartHandler{})
+
 	// Health (exempt from auth).
 	mux.Handle("/health", &HealthHandler{})
 

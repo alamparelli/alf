@@ -48,6 +48,7 @@ type Tier struct {
 	Priority     int      `json:"priority"`
 	Enabled      bool     `json:"enabled"`
 	Routable     bool     `json:"routable"`
+	Instant      bool     `json:"instant"`
 	RouterLabel  string   `json:"router_label,omitempty"`
 	WriteCapable bool     `json:"write_capable"`
 	Tools        []string `json:"tools,omitempty"`
@@ -55,16 +56,24 @@ type Tier struct {
 	ForceCommand bool     `json:"force_command"`
 }
 
-// TiersConfig wraps a list of tiers.
+// TiersConfig wraps a list of tiers plus router-level settings.
 type TiersConfig struct {
-	Tiers []Tier `json:"tiers"`
+	Tiers              []Tier `json:"tiers"`
+	RouterModel        string `json:"router_model,omitempty"`
+	DefaultFallback    string `json:"default_fallback,omitempty"`
+	RouterInstantLabel string `json:"router_instant_label,omitempty"`
+	RouterDistinctions string `json:"router_distinctions,omitempty"`
 }
 
 // DefaultTiersConfig returns a TiersConfig with starter tiers.
 func DefaultTiersConfig() *TiersConfig {
 	return &TiersConfig{
+		RouterModel:        "haiku",
+		DefaultFallback:    "analyze",
+		RouterInstantLabel: "Quick greetings, thank-yous, acknowledgments, simple yes/no",
+		RouterDistinctions: "Use 'instant' only for trivial messages that need no reasoning. Use 'heavy' or 'deep' only when the user explicitly asks to modify files or build something.",
 		Tiers: []Tier{
-			{Name: "instant", Model: "haiku", Priority: 0, Enabled: true, Routable: true, RouterLabel: "Quick greetings, acknowledgments, yes/no", Effort: "low"},
+			{Name: "instant", Model: "haiku", Priority: 0, Enabled: true, Routable: true, Instant: true, RouterLabel: "Quick greetings, acknowledgments, yes/no", Effort: "low"},
 			{Name: "analyze", Model: "sonnet", Priority: 1, Enabled: true, Routable: true, RouterLabel: "Analysis, reasoning, explanations", Effort: "medium"},
 			{Name: "heavy", Model: "sonnet", Priority: 2, Enabled: true, Routable: true, RouterLabel: "Tasks requiring file changes", WriteCapable: true, ForceCommand: true, Effort: "medium"},
 			{Name: "deep", Model: "opus", Priority: 3, Enabled: true, Routable: true, RouterLabel: "Complex architecture and deep reasoning", WriteCapable: true, ForceCommand: true, Effort: "high"},

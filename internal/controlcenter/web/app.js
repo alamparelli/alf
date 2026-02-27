@@ -120,11 +120,14 @@ document.getElementById('saveConfigBtn').addEventListener('click', () => {
 
 // --- Tiers (editable) ---
 const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
-let tiersData = [];
+let tiersConfig = {};  // full TiersConfig (router_model, default_fallback, etc.)
+let tiersData = [];    // shortcut to tiersConfig.tiers
 
 function loadTiers() {
   api('/api/tiers').then(t => {
+    tiersConfig = { ...t };
     tiersData = (t.tiers || []).map(tier => ({ ...tier }));
+    tiersConfig.tiers = tiersData;
     renderTiers();
   }).catch(() => {});
 }
@@ -132,7 +135,9 @@ function loadTiers() {
 function renderTiers() {
   const body = document.getElementById('tiersBody');
   body.innerHTML = '';
+  const routerModel = tiersConfig.router_model || 'haiku';
   tiersData.forEach((tier, i) => {
+    const isRouter = tier.model === routerModel;
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td data-label="Name"><input type="text" value="${esc(tier.name)}" data-idx="${i}" data-field="name" class="tier-input"></td>
@@ -143,6 +148,9 @@ function renderTiers() {
       </td>
       <td data-label="Priority"><input type="number" value="${tier.priority}" data-idx="${i}" data-field="priority" class="tier-input" style="width:60px"></td>
       <td data-label="Enabled"><input type="checkbox" ${tier.enabled ? 'checked' : ''} data-idx="${i}" data-field="enabled" class="tier-input"></td>
+      <td data-label="Routable"><input type="checkbox" ${tier.routable ? 'checked' : ''} data-idx="${i}" data-field="routable" class="tier-input"></td>
+      <td data-label="Router"><input type="radio" name="routerTier" ${isRouter ? 'checked' : ''} data-idx="${i}" class="router-radio"></td>
+      <td><button class="btn-sm" data-idx="${i}" onclick="openTierModal(${i})">Edit</button></td>
       <td><button class="btn-sm btn-danger" data-idx="${i}" class="tier-delete">✕</button></td>
     `;
     body.appendChild(tr);
@@ -153,13 +161,21 @@ function renderTiers() {
     el.addEventListener('change', (e) => {
       const idx = parseInt(e.target.dataset.idx);
       const field = e.target.dataset.field;
-      if (field === 'enabled') {
+      if (field === 'enabled' || field === 'routable') {
         tiersData[idx][field] = e.target.checked;
       } else if (field === 'priority') {
         tiersData[idx][field] = parseInt(e.target.value) || 0;
       } else {
         tiersData[idx][field] = e.target.value;
       }
+    });
+  });
+
+  // Bind router radio
+  body.querySelectorAll('.router-radio').forEach(el => {
+    el.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      tiersConfig.router_model = tiersData[idx].model;
     });
   });
 
@@ -175,7 +191,7 @@ function renderTiers() {
 }
 
 document.getElementById('addTierBtn').addEventListener('click', () => {
-  tiersData.push({ name: '', model: 'sonnet', priority: 0, enabled: true });
+  tiersData.push({ name: '', model: 'sonnet', priority: 0, enabled: true, routable: true, instant: false, router_label: '', write_capable: false, tools: [], effort: '', force_command: false });
   renderTiers();
 });
 
@@ -183,21 +199,94 @@ document.getElementById('saveTiersBtn').addEventListener('click', () => {
   for (const t of tiersData) {
     if (!t.name.trim()) { toast('All tiers must have a name', 'error'); return; }
   }
+  tiersConfig.tiers = tiersData;
   api('/api/tiers', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tiers: tiersData }),
+    body: JSON.stringify(tiersConfig),
   }).then(r => {
     if (r.ok) toast('Tiers saved');
     else toast(r.error || 'Save failed', 'error');
   }).catch(e => toast(e.error || 'Save failed', 'error'));
 });
 
+// --- Tier Detail Modal ---
+const CLAUDE_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'MCP'];
+let modalIdx = -1;
+
+function renderToolGrid(selected) {
+  const grid = document.getElementById('tmTools');
+  grid.innerHTML = CLAUDE_TOOLS.map(tool => {
+    const checked = selected.includes(tool) ? ' checked' : '';
+    return `<label class="tool-check"><input type="checkbox" value="${tool}"${checked}><span>${tool}</span></label>`;
+  }).join('');
+}
+
+function getSelectedTools() {
+  return Array.from(document.querySelectorAll('#tmTools input:checked')).map(el => el.value);
+}
+
+function openTierModal(idx) {
+  modalIdx = idx;
+  const t = tiersData[idx];
+  document.getElementById('tierModalTitle').textContent = 'Edit: ' + (t.name || 'Tier');
+  document.getElementById('tmRouterLabel').value = t.router_label || '';
+  document.getElementById('tmEffort').value = t.effort || '';
+  document.getElementById('tmWriteCapable').checked = !!t.write_capable;
+  document.getElementById('tmForceCommand').checked = !!t.force_command;
+  document.getElementById('tmInstant').checked = !!t.instant;
+  renderToolGrid(t.tools || []);
+  document.getElementById('tierModal').classList.add('open');
+}
+
+function closeTierModal() {
+  document.getElementById('tierModal').classList.remove('open');
+  modalIdx = -1;
+}
+
+document.getElementById('applyTierModal').onclick = () => {
+  if (modalIdx < 0) return;
+  const t = tiersData[modalIdx];
+  t.router_label = document.getElementById('tmRouterLabel').value;
+  t.effort = document.getElementById('tmEffort').value;
+  t.write_capable = document.getElementById('tmWriteCapable').checked;
+  t.force_command = document.getElementById('tmForceCommand').checked;
+  t.instant = document.getElementById('tmInstant').checked;
+  t.tools = getSelectedTools();
+  closeTierModal();
+};
+
+document.getElementById('closeTierModal').onclick = closeTierModal;
+document.getElementById('tierModal').onclick = (e) => {
+  if (e.target.id === 'tierModal') closeTierModal();
+};
+
 function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
 }
+
+// --- Memory Index ---
+function loadMemory() {
+  api('/api/memories/index').then(r => {
+    document.getElementById('memoryEditor').value = r.content || '';
+  }).catch(() => {
+    document.getElementById('memoryEditor').value = '';
+  });
+}
+
+document.getElementById('saveMemoryBtn').addEventListener('click', () => {
+  const content = document.getElementById('memoryEditor').value;
+  api('/api/memories/index', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  }).then(r => {
+    if (r.ok) toast('Memory saved');
+    else toast(r.error || 'Save failed', 'error');
+  }).catch(e => toast(e.error || 'Save failed', 'error'));
+});
 
 // --- Logs ---
 function loadRecentLogs() {
@@ -238,6 +327,7 @@ loadStatus();
 loadConfig();
 loadRawConfig();
 loadTiers();
+loadMemory();
 loadRecentLogs();
 setInterval(loadStatus, 30000);
 setInterval(loadRecentLogs, 10000);

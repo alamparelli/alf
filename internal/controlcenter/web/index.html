@@ -61,12 +61,21 @@
     <div class="card" id="tiersCard">
       <h2>Routing Tiers</h2>
       <table class="tier-table">
-        <thead><tr><th>Name</th><th>Model</th><th>Priority</th><th>Enabled</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Model</th><th>Priority</th><th>Enabled</th><th>Routable</th><th>Router</th><th></th><th></th></tr></thead>
         <tbody id="tiersBody"></tbody>
       </table>
       <div class="btn-row" style="gap:8px;margin-top:8px">
         <button class="btn btn-secondary" id="addTierBtn">+ Add Tier</button>
         <button class="btn" id="saveTiersBtn">Save</button>
+      </div>
+    </div>
+
+    <!-- Memory Index -->
+    <div class="card" id="memoryCard">
+      <h2>Memory <span class="badge">appended to system prompt</span></h2>
+      <textarea class="json-editor" id="memoryEditor" rows="10" placeholder="Write context that ALF should always remember..."></textarea>
+      <div class="btn-row" style="gap:8px;margin-top:8px">
+        <button class="btn" id="saveMemoryBtn">Save</button>
       </div>
     </div>
 
@@ -102,6 +111,31 @@
     <div class="card advanced" id="sysInfoCard">
       <h2>System Info</h2>
       <div id="sysInfo" style="font-size:0.85rem;color:var(--text-dim)">Loading...</div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="tierModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="tierModalTitle">Edit Tier</h3>
+        <button class="btn-sm" id="closeTierModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row"><label>Router Label</label><input type="text" id="tmRouterLabel"></div>
+        <div class="form-row"><label>Effort</label>
+          <select id="tmEffort"><option value="">—</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
+        </div>
+        <div class="form-row"><label>Write Capable</label><input type="checkbox" id="tmWriteCapable"></div>
+        <div class="form-row"><label>Force Command</label><input type="checkbox" id="tmForceCommand"></div>
+        <div class="form-row"><label>Instant</label><input type="checkbox" id="tmInstant"> <span style="color:var(--text-dim);font-size:0.75rem">Router responds directly, skips second LLM call</span></div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch">
+          <label>Allowed Tools <span style="color:var(--text-dim);font-size:0.75rem">(empty = all)</span></label>
+          <div id="tmTools" class="tool-grid"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="applyTierModal">Apply</button>
+      </div>
     </div>
   </div>
 

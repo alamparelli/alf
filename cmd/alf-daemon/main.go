@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
@@ -101,9 +100,8 @@ func main() {
 	// Ensure data subdirectories exist.
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
-	// Alf-managed dirs (claude:alf, mode 775) — created by Dockerfile but ensure on upgrade.
 	for _, sub := range []string{"config", "tools", "skills"} {
-		os.MkdirAll(filepath.Join(dataDir, sub), 0o775)
+		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
 
 	// Session store for Claude --resume support.
@@ -292,10 +290,13 @@ func main() {
 				reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
 			}
 
+			log.Printf("→ %s %dms $%.4f", result.Model, duration.Milliseconds(), result.CostUSD)
+
 			eventLog.Log("message_out", map[string]any{
 				"chat_id":     chatID,
-				"model":       "sonnet",
+				"model":       result.Model,
 				"duration_ms": duration.Milliseconds(),
+				"cost_usd":    result.CostUSD,
 				"text_length": len(reply),
 				"session_id":  result.SessionID,
 			})
@@ -305,17 +306,24 @@ func main() {
 	}
 }
 
+type jsonModel struct {
+	CostUSD float64 `json:"costUSD"`
+}
+
 // claudeResult holds parsed output from Claude CLI JSON response.
 type claudeResult struct {
 	SessionID string
 	Text      string
+	Model     string
+	CostUSD   float64
 }
 
 func askClaude(prompt, resumeID string) (*claudeResult, error) {
 	args := []string{
 		"-p", prompt,
-		"--model", "sonnet",
+		"--model", "claude-haiku-4-5",
 		"--output-format", "json",
+		"--max-turns", "3",
 		"--dangerously-skip-permissions",
 	}
 
@@ -332,11 +340,17 @@ func askClaude(prompt, resumeID string) (*claudeResult, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: 1001, Gid: 1001},
-	}
 	cmd.Dir = dataDir
-	cmd.Env = append(os.Environ(), "HOME="+dataDir)
+	// Filter out existing HOME to avoid duplicates (first value wins on Linux).
+	env := make([]string, 0, len(os.Environ()))
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "HOME=") {
+			env = append(env, e)
+		}
+	}
+	cmd.Env = append(env, "HOME="+dataDir)
+
+	log.Printf("askClaude: starting (resume=%q)", resumeID)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -352,9 +366,11 @@ func askClaude(prompt, resumeID string) (*claudeResult, error) {
 	// Try to parse JSON output for session_id and result.
 	if out != "" {
 		var parsed struct {
-			SessionID string `json:"session_id"`
-			Result    string `json:"result"`
-			IsError   bool   `json:"is_error"`
+			SessionID    string             `json:"session_id"`
+			Result       string             `json:"result"`
+			IsError      bool               `json:"is_error"`
+			TotalCostUSD float64            `json:"total_cost_usd"`
+			ModelUsage   map[string]jsonModel `json:"modelUsage"`
 		}
 		if jsonErr := json.Unmarshal([]byte(out), &parsed); jsonErr == nil {
 			text := parsed.Result
@@ -365,9 +381,17 @@ func askClaude(prompt, resumeID string) (*claudeResult, error) {
 			if parsed.IsError && strings.Contains(text, "No conversation found") {
 				return nil, fmt.Errorf("claude: %s", text)
 			}
+			// Extract model name from usage.
+			model := "unknown"
+			for m := range parsed.ModelUsage {
+				model = m
+				break
+			}
 			return &claudeResult{
 				SessionID: parsed.SessionID,
 				Text:      text,
+				Model:     model,
+				CostUSD:   parsed.TotalCostUSD,
 			}, nil
 		}
 		// JSON parse failed — treat raw output as text response.

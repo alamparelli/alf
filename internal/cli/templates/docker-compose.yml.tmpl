@@ -16,9 +16,6 @@ services:
       - telegram_bot_token
       - telegram_chat_id
       - cc_auth_token
-    cap_add:
-      - SETUID
-      - SETGID
     volumes:
       - ./data:/home/node/data
       - ./config.d:/home/node/data/config.d

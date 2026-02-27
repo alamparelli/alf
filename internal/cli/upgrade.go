@@ -123,33 +123,9 @@ func fixVolumePermissions(dir string) {
 		}
 	}
 
-	chmod := func(rel, mode string) {
-		p := filepath.Join(dir, rel)
-		if _, err := os.Stat(p); err != nil {
-			return
-		}
-		cmd := exec.Command("sudo", "chmod", mode, p)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			cmd2 := exec.Command("chmod", mode, p)
-			cmd2.Run()
-		}
-	}
-
-	// Node-owned directories.
+	// Everything owned by node (1000:1000).
 	chown("data", "1000:1000")
 	chown("config.d", "1000:1000")
-
-	// Claude-private (.claude/ for auth tokens).
-	chown("data/.claude", "1001:1001")
-	chmod("data/.claude", "700")
-
-	// Alf-managed dirs: claude:alf (1001:1002), mode 775.
-	for _, d := range []string{"data/config", "data/tools", "data/skills"} {
-		chown(d, "1001:1002")
-		chmod(d, "775")
-	}
 }
 
 func fetchLatestTag() (string, error) {

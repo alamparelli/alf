@@ -21,7 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     trash-cli \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install faster-whisper for voice transcription
+RUN pip3 install --break-system-packages faster-whisper
 
 # Install Go for Claude agent to build CLI tools
 RUN curl -fsSL "https://go.dev/dl/go1.24.1.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
@@ -31,6 +36,7 @@ ENV GOPATH="/home/node/go"
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
+COPY scripts/transcribe.py /opt/alf/transcribe.py
 
 # Directories with proper ownership — single user model (node).
 RUN mkdir -p /home/node/data/logs /home/node/data/sessions \

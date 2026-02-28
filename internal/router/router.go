@@ -85,8 +85,13 @@ func Classify(input ClassifyInput) Result {
 
 	result := parseResponse(raw, valid)
 
-	// Router answered directly (JSON with response field).
+	// Router answered directly — reroute to instant tier so the response
+	// goes through askClaude with --resume and full memory injection.
 	if result.Response != "" && result.Tier == "" {
+		if instant := instantTierName(input.Tiers); instant != "" {
+			log.Printf("router: %s → %s (rerouted from direct)", truncate(input.Message, 60), instant)
+			return Result{Tier: instant, Reason: "rerouted-direct"}
+		}
 		log.Printf("router: %s → direct response (%s)", truncate(input.Message, 60), result.Reason)
 		return result
 	}
@@ -97,9 +102,12 @@ func Classify(input ClassifyInput) Result {
 		return result
 	}
 
-	// Parse failed but router produced non-empty text — treat as direct response.
-	// This handles models that answer directly without JSON wrapping.
+	// Parse failed but router produced non-empty text — reroute to instant tier.
 	if raw != "" && !strings.HasPrefix(raw, "Error:") {
+		if instant := instantTierName(input.Tiers); instant != "" {
+			log.Printf("router: %s → %s (rerouted from plain text)", truncate(input.Message, 60), instant)
+			return Result{Tier: instant, Reason: "rerouted-plain"}
+		}
 		log.Printf("router: %s → direct response (plain text)", truncate(input.Message, 60))
 		return Result{Response: raw, Reason: "plain-text direct"}
 	}
@@ -161,6 +169,7 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	}
 
 	b.WriteString("\nIMPORTANT: Only route to a write-capable tier if the user explicitly asks to create, modify, or delete files/code.\n")
+	b.WriteString("IMPORTANT: If the message references conversation history (\"what did we talk about\", \"earlier\", \"before\", \"you said\", \"continue\"), you MUST route to a tier — never respond directly, because you have no conversation memory.\n")
 
 	// 4. Conversation context.
 	if input.MessageCount > 0 && input.LastTier != "" {
@@ -223,6 +232,16 @@ func parseResponse(raw string, valid map[string]bool) Result {
 	}
 
 	return Result{}
+}
+
+// instantTierName returns the name of the first enabled instant tier, or "".
+func instantTierName(tiers *cc.TiersConfig) string {
+	for _, t := range tiers.Tiers {
+		if t.Enabled && t.Instant {
+			return t.Name
+		}
+	}
+	return ""
 }
 
 func validTierSet(tiers *cc.TiersConfig) map[string]bool {

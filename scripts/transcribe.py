@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Whisper transcription subprocess for ALF daemon.
+"""Whisper transcription server for ALF daemon.
 
-Usage: transcribe.py <audio_file> [--model small] [--models-dir /path/to/models]
+Runs as a persistent process. Loads model once, accepts requests via stdin (JSON lines).
+Each line: {"audio_file": "/path/to/file.ogg"}
+Each response: {"text": "...", "duration_s": 1.5, "language": "en", "language_probability": 0.95}
 
-Outputs JSON to stdout: {"text": "transcribed text", "duration_s": 3.5}
-On error, exits with non-zero code and prints error to stderr.
+Also supports one-shot mode: transcribe.py <audio_file> [--model small] [--models-dir /path]
 """
 
 import json
@@ -12,21 +13,9 @@ import sys
 import os
 import time
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("audio_file", help="Path to audio file (OGG, WAV, etc)")
-    parser.add_argument("--model", default="small", help="Whisper model name")
-    parser.add_argument("--models-dir", default="/home/node/data/models", help="Directory to store models")
-    args = parser.parse_args()
 
-    if not os.path.exists(args.audio_file):
-        print(f"File not found: {args.audio_file}", file=sys.stderr)
-        sys.exit(1)
-
-    # Ensure models directory exists
-    os.makedirs(args.models_dir, exist_ok=True)
-
+def load_model(model_name, models_dir):
+    """Load the faster-whisper model."""
     try:
         from faster_whisper import WhisperModel
     except ImportError:
@@ -38,29 +27,94 @@ def main():
         ], stdout=sys.stderr, stderr=sys.stderr)
         from faster_whisper import WhisperModel
 
-    # Load model (downloads on first use)
+    os.makedirs(models_dir, exist_ok=True)
+
+    start = time.time()
+    print(f"Loading model {model_name!r} from {models_dir}...", file=sys.stderr)
     model = WhisperModel(
-        args.model,
+        model_name,
         device="cpu",
         compute_type="int8",
-        download_root=args.models_dir,
+        download_root=models_dir,
     )
+    elapsed = time.time() - start
+    print(f"Model loaded in {elapsed:.1f}s", file=sys.stderr)
+    return model
 
-    # Transcribe
+
+def transcribe(model, audio_file):
+    """Transcribe an audio file and return result dict."""
     start = time.time()
-    segments, info = model.transcribe(args.audio_file)
+    segments, info = model.transcribe(audio_file)
     text = " ".join(seg.text for seg in segments).strip()
     elapsed = time.time() - start
 
-    # Output result as JSON
-    result = {
+    return {
         "text": text,
         "duration_s": round(elapsed, 2),
         "language": info.language if info else "",
         "language_probability": round(info.language_probability, 2) if info else 0,
     }
+
+
+def run_server(model_name, models_dir):
+    """Run as persistent server, reading JSON lines from stdin."""
+    model = load_model(model_name, models_dir)
+
+    # Signal readiness
+    ready_msg = json.dumps({"status": "ready", "model": model_name})
+    sys.stdout.write(ready_msg + "\n")
+    sys.stdout.flush()
+
+    # Process requests from stdin
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+
+        try:
+            req = json.loads(line)
+            audio_file = req.get("audio_file", "")
+
+            if not audio_file or not os.path.exists(audio_file):
+                result = {"error": f"File not found: {audio_file}"}
+            else:
+                result = transcribe(model, audio_file)
+        except json.JSONDecodeError as e:
+            result = {"error": f"Invalid JSON: {e}"}
+        except Exception as e:
+            result = {"error": str(e)}
+
+        sys.stdout.write(json.dumps(result) + "\n")
+        sys.stdout.flush()
+
+
+def run_oneshot(audio_file, model_name, models_dir):
+    """One-shot mode: load model, transcribe, exit."""
+    model = load_model(model_name, models_dir)
+
+    if not os.path.exists(audio_file):
+        print(f"File not found: {audio_file}", file=sys.stderr)
+        sys.exit(1)
+
+    result = transcribe(model, audio_file)
     json.dump(result, sys.stdout)
     sys.stdout.write("\n")
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("audio_file", nargs="?", help="Path to audio file (one-shot mode)")
+    parser.add_argument("--model", default="small", help="Whisper model name")
+    parser.add_argument("--models-dir", default="/home/node/data/models", help="Directory to store models")
+    parser.add_argument("--server", action="store_true", help="Run as persistent server (stdin/stdout JSON lines)")
+    args = parser.parse_args()
+
+    if args.server or args.audio_file is None:
+        run_server(args.model, args.models_dir)
+    else:
+        run_oneshot(args.audio_file, args.model, args.models_dir)
 
 
 if __name__ == "__main__":

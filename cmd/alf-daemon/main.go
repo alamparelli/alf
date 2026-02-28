@@ -20,6 +20,7 @@ import (
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/gittrack"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
@@ -414,6 +415,79 @@ func main() {
 				continue
 			}
 
+			// Handle image/document messages: download and save for Claude to read.
+			var mediaCleanup func()
+			if hasMedia && !hasVoice {
+				var fileID, fileName string
+				if len(u.Message.Photo) > 0 {
+					// Use largest photo (last element in array).
+					fileID = u.Message.Photo[len(u.Message.Photo)-1].FileID
+					fileName = "photo.jpg"
+				} else if u.Message.Document != nil {
+					fileID = u.Message.Document.FileID
+					fileName = u.Message.Document.FileName
+					if fileName == "" {
+						fileName = "document"
+					}
+				}
+
+				if fileID != "" {
+					tg.SendChatAction(u.Message.Chat.ID, "typing")
+					data, err := media.DownloadFile(client, token, fileID)
+					if err != nil {
+						log.Printf("media download failed: %v", err)
+					} else {
+						mimeType := media.DetectMimeType(data, fileName)
+						ext := extFromMime(mimeType, fileName)
+						tmpFile, err := os.CreateTemp("", "alf-media-*"+ext)
+						if err != nil {
+							log.Printf("media temp file failed: %v", err)
+						} else {
+							tmpFile.Write(data)
+							tmpFile.Close()
+							tmpPath := tmpFile.Name()
+							mediaCleanup = func() { os.Remove(tmpPath) }
+
+							caption := u.Message.Caption
+							if caption == "" {
+								caption = u.Message.Text
+							}
+
+							if media.IsImageContent(mimeType) {
+								if caption != "" {
+									u.Message.Text = fmt.Sprintf("[PHOTO from Telegram chat — use Read tool to view: %s]\n%s", tmpPath, caption)
+								} else {
+									u.Message.Text = fmt.Sprintf("[PHOTO from Telegram chat — use Read tool to view: %s]\nThe user shared this photo in chat. React naturally as you would in a personal conversation — comment on what you see, the mood, the context. This is NOT a code review.", tmpPath)
+								}
+							} else if media.IsTextContent(mimeType) {
+								textContent := media.ExtractTextFromDocument(data, mimeType)
+								if caption != "" {
+									u.Message.Text = fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s\n\n%s", fileName, textContent, caption)
+								} else {
+									u.Message.Text = fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s", fileName, textContent)
+								}
+							} else {
+								if caption != "" {
+									u.Message.Text = fmt.Sprintf("[FILE from Telegram chat: %s — use Read tool to view: %s]\n%s", fileName, tmpPath, caption)
+								} else {
+									u.Message.Text = fmt.Sprintf("[FILE from Telegram chat: %s — use Read tool to view: %s]\nThe user shared this file. Analyze and respond.", fileName, tmpPath)
+								}
+							}
+
+							log.Printf("media: saved %s (%s, %d bytes) → %s", fileName, mimeType, len(data), tmpPath)
+							eventLog.Log("media_in", map[string]any{
+								"chat_id":   u.Message.Chat.ID,
+								"username":  u.Message.From.Username,
+								"file_name": fileName,
+								"mime_type": mimeType,
+								"size":      len(data),
+								"tmp_path":  tmpPath,
+							})
+						}
+					}
+				}
+			}
+
 			// Command routing: handle /commands before passing to Claude.
 			if strings.HasPrefix(u.Message.Text, "/") {
 				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs) {
@@ -441,17 +515,43 @@ func main() {
 
 			// Route message to appropriate tier.
 			var tp tierParams
-			routeResult := router.Classify(router.ClassifyInput{
-				Message:      msgWithReplyContext,
-				Tiers:        tierStore.Current(),
-				DataDir:      dataDir,
-				ConfigDir:    configDir,
-				LastTier:     lastTier,
-				MessageCount: msgCount,
-			})
+			var routeResult router.Result
+
+			// Media messages bypass the router — they need a full Claude Code
+			// session with Read tool access to view images/files.
+			if hasMedia {
+				routingAnim.Stop()
+				if routingMsgID != 0 {
+					tg.DeleteMessage(chatID, routingMsgID)
+				}
+				// Pick the first non-instant tier, or fallback to the first tier.
+				tierName := ""
+				for _, t := range tierStore.Current().Tiers {
+					if !t.Instant {
+						tierName = t.Name
+						break
+					}
+				}
+				if tierName == "" && len(tierStore.Current().Tiers) > 0 {
+					tierName = tierStore.Current().Tiers[0].Name
+				}
+				routeResult = router.Result{Tier: tierName, Reason: "media bypass"}
+				log.Printf("→ media detected, bypassing router → tier %q", tierName)
+			} else {
+				routeResult = router.Classify(router.ClassifyInput{
+					Message:      msgWithReplyContext,
+					Tiers:        tierStore.Current(),
+					DataDir:      dataDir,
+					ConfigDir:    configDir,
+					LastTier:     lastTier,
+					MessageCount: msgCount,
+				})
+			}
 
 			// Router answered directly — no second LLM call needed.
-			routingAnim.Stop()
+			if !hasMedia {
+				routingAnim.Stop()
+			}
 			if routeResult.Response != "" && routeResult.Tier == "" {
 				log.Printf("→ router direct response")
 				// Delete routing status message.
@@ -564,6 +664,16 @@ func main() {
 				}
 			}
 			chatSessions.Touch(chatID)
+
+			// Schedule temp media cleanup after a delay so follow-up messages
+			// in the same session can still reference the file.
+			if mediaCleanup != nil {
+				cleanup := mediaCleanup
+				go func() {
+					time.Sleep(10 * time.Minute)
+					cleanup()
+				}()
+			}
 
 			// Extract inline reaction suggestion from Claude's response.
 			suggestedEmoji, cleanText := extractReaction(result.Text)
@@ -987,11 +1097,37 @@ func buildMessageContent(msg *Message) string {
 		}
 	}
 
+	// Quote-reply without text: provide a meaningful prompt so Claude responds to the quoted content.
+	if content == "" && msg.ReplyToMessage != nil {
+		quoted := extractReplyContext(msg)
+		if quoted != "" {
+			return fmt.Sprintf("[En réponse à : \"%s\"]\nThe user quoted this message without adding text. Respond to the quoted content.", quoted)
+		}
+	}
+
 	// Apply reply context if present
 	return prependReplyContext(&Message{
 		Text:           content,
 		ReplyToMessage: msg.ReplyToMessage,
 	})
+}
+
+// extFromMime returns a file extension for a MIME type, falling back to the original filename extension.
+func extFromMime(mimeType, fileName string) string {
+	mimeToExt := map[string]string{
+		"image/jpeg": ".jpg",
+		"image/png":  ".png",
+		"image/gif":  ".gif",
+		"image/webp": ".webp",
+		"application/pdf": ".pdf",
+	}
+	if ext, ok := mimeToExt[mimeType]; ok {
+		return ext
+	}
+	if ext := filepath.Ext(fileName); ext != "" {
+		return ext
+	}
+	return ""
 }
 
 // hasMedia checks if message contains any media attachments

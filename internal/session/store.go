@@ -104,6 +104,27 @@ func (s *Store) SetWithContext(chatID int64, sessionID, tierName string) {
 	s.persist()
 }
 
+// TouchContext updates the routing context without changing the session ID.
+// Used for router direct responses that don't go through askClaude.
+func (s *Store) TouchContext(chatID int64, tierName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	e, ok := s.entries[chatID]
+	if !ok {
+		e = &Entry{
+			ChatID:    chatID,
+			CreatedAt: now,
+		}
+		s.entries[chatID] = e
+	}
+	e.LastActive = now
+	e.LastTier = tierName
+	e.MessageCount++
+	s.persist()
+}
+
 // Context returns the routing context for a chat (last tier, message count).
 func (s *Store) Context(chatID int64) (lastTier string, msgCount int) {
 	s.mu.Lock()

@@ -317,6 +317,7 @@ func main() {
 					"chat_id": chatID,
 					"reason":  routeResult.Reason,
 				})
+				chatSessions.TouchContext(chatID, "router")
 				tg.SendMessage(chatID, routeResult.Response)
 				continue
 			}

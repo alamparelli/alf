@@ -1,24 +1,28 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/gittrack"
 	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
@@ -133,7 +137,11 @@ func main() {
 	migrateConfig(dataDir, configDir)
 
 	// Bootstrap default memory files (soul.md, mood.md, index.md).
-	memory.Bootstrap(filepath.Join(dataDir, "memories"))
+	memoriesDir := filepath.Join(dataDir, "memories")
+	memory.Bootstrap(memoriesDir)
+
+	// Generate daily mood (overwrites mood.md if date changed).
+	mood.GenerateDaily(memoriesDir)
 
 	// TierFS for per-tier system prompts and skills (inside configDir).
 	tierFS := tierfs.New(configDir)
@@ -187,6 +195,9 @@ func main() {
 			log.Printf("git tracker started (sweep=%dm)", cfg.GitSweepInterval)
 		}
 	}
+
+	// Ring buffer tracking Alf's sent message IDs for reaction matching.
+	alfMsgIDs := newRingBuffer(200)
 
 	var offset int64
 	client := &http.Client{Timeout: 35 * time.Second}
@@ -275,6 +286,21 @@ func main() {
 				continue
 			}
 
+			// Handle emoji reactions on Alf's messages.
+			if u.MessageReaction != nil {
+				mr := u.MessageReaction
+				if len(mr.NewReaction) == 0 {
+					continue
+				}
+				emoji := mr.NewReaction[0].Emoji
+				isAlf := alfMsgIDs.Contains(mr.MessageID)
+				log.Printf("← reaction %s on msg %d (alf=%v, buffer_size=%d)", emoji, mr.MessageID, isAlf, alfMsgIDs.Size())
+				if isAlf {
+					go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, memoriesDir, dataDir, chatSessions, tierStore, tierFS, alfMsgIDs, eventLog)
+				}
+				continue
+			}
+
 			if u.Message == nil || u.Message.Text == "" {
 				continue
 			}
@@ -292,6 +318,23 @@ func main() {
 				"text":     truncated,
 			})
 
+			// Spontaneous greeting reaction.
+			if mood.Greetings[strings.ToLower(strings.TrimSpace(u.Message.Text))] {
+				state := mood.GetCurrentState(memoriesDir)
+				shouldReact := mood.ShouldReact(state)
+				log.Printf("greeting detected: %q state=%s should_react=%v", u.Message.Text, state, shouldReact)
+				if shouldReact {
+					msgID := u.Message.MessageID
+					go func() {
+						// Human-like delay before reacting to a greeting.
+						time.Sleep(time.Duration(1500+rand.Intn(3000)) * time.Millisecond)
+						emoji := mood.ChooseSpontaneous(state)
+						log.Printf("→ spontaneous reaction %s on greeting msg %d", emoji, msgID)
+						tg.SetMessageReaction(u.Message.Chat.ID, msgID, emoji)
+					}()
+				}
+			}
+
 			// Command routing: handle /commands before passing to Claude.
 			if strings.HasPrefix(u.Message.Text, "/") {
 				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs) {
@@ -306,6 +349,31 @@ func main() {
 			// Get conversation context for routing.
 			lastTier, msgCount := chatSessions.Context(chatID)
 
+			// Show routing status immediately (silent, will be deleted).
+			tg.SendChatAction(chatID, "typing")
+			routingBase := pickRandom(statusRouting)
+			routingMsgID, _ := tg.SendMessageGetID(chatID, routingBase+".")
+
+			// Animate dots on routing message while classifying.
+			routingDone := make(chan struct{})
+			go func() {
+				rdi := 1
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-routingDone:
+						return
+					case <-ticker.C:
+						if routingMsgID != 0 {
+							tg.EditMessage(chatID, routingMsgID, routingBase+dotFrames[rdi%len(dotFrames)])
+							rdi++
+							tg.SendChatAction(chatID, "typing")
+						}
+					}
+				}
+			}()
+
 			// Route message to appropriate tier.
 			var tp tierParams
 			routeResult := router.Classify(router.ClassifyInput{
@@ -318,14 +386,22 @@ func main() {
 			})
 
 			// Router answered directly — no second LLM call needed.
+			close(routingDone)
 			if routeResult.Response != "" && routeResult.Tier == "" {
 				log.Printf("→ router direct response")
+				// Delete routing status message.
+				if routingMsgID != 0 {
+					tg.DeleteMessage(chatID, routingMsgID)
+				}
 				eventLog.Log("router_direct", map[string]any{
 					"chat_id": chatID,
 					"reason":  routeResult.Reason,
 				})
 				chatSessions.TouchContext(chatID, "router")
-				tg.SendMessage(chatID, routeResult.Response)
+				if mid, err := tg.SendMessageReturnID(chatID, routeResult.Response); err == nil && mid != 0 {
+					alfMsgIDs.Add(mid)
+					log.Printf("tracking alf msg %d (buffer=%d)", mid, alfMsgIDs.Size())
+				}
 				continue
 			}
 
@@ -339,15 +415,125 @@ func main() {
 				"model":   tp.Model,
 			})
 
+			// Transition routing message into processing status message.
+			var statusMsgID int64
+			var statusMu sync.Mutex
+			statusSent := false
+			lastEdit := time.Time{}
+			dotIdx := 0         // cycles through ".", "..", "..."
+			statusBase := ""    // current status text without dots
+
+			if routingMsgID != 0 {
+				// Reuse the routing message as the processing status message.
+				statusBase = pickRandom(statusThinking)
+				tg.EditMessage(chatID, routingMsgID, statusBase+dotFrames[0])
+				dotIdx = 1
+				statusMu.Lock()
+				statusMsgID = routingMsgID
+				statusSent = true
+				lastEdit = time.Now()
+				statusMu.Unlock()
+			}
+
+			// Current chat action tracks the phase for the keepalive goroutine.
+			currentAction := "choose_sticker" // thinking phase
+			var actionMu sync.Mutex
+
+			// Launch keepalive goroutine — sends the phase-appropriate chat action every 4s.
+			typingDone := make(chan struct{})
+			go func() {
+				ticker := time.NewTicker(4 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-typingDone:
+						return
+					case <-ticker.C:
+						actionMu.Lock()
+						action := currentAction
+						actionMu.Unlock()
+						tg.SendChatAction(chatID, action)
+					}
+				}
+			}()
+
+			lastPhase := ""
+
+			onProgress := func(event, detail string) {
+				// Update chat action to match the current phase.
+				actionMu.Lock()
+				switch event {
+				case "thinking":
+					currentAction = "choose_sticker"
+				case "tool_use":
+					currentAction = "upload_document"
+				case "text":
+					currentAction = "typing"
+				}
+				actionMu.Unlock()
+
+				// Send the new action immediately (don't wait for ticker).
+				actionMu.Lock()
+				action := currentAction
+				actionMu.Unlock()
+				tg.SendChatAction(chatID, action)
+
+				// Edit status message text with animated dots.
+				statusMu.Lock()
+				defer statusMu.Unlock()
+				if !statusSent || statusMsgID == 0 {
+					return
+				}
+				// Throttle edits to max 1 every 1s.
+				if time.Since(lastEdit) < 1*time.Second {
+					return
+				}
+
+				// Pick new base text on phase change, otherwise just cycle dots.
+				if event != lastPhase {
+					lastPhase = event
+					switch event {
+					case "thinking":
+						statusBase = pickRandom(statusThinking)
+					case "tool_use":
+						statusBase = pickRandom(statusToolUse)
+					case "text":
+						statusBase = pickRandom(statusWriting)
+					default:
+						return
+					}
+					dotIdx = 0
+				}
+
+				text := statusBase + dotFrames[dotIdx%len(dotFrames)]
+				dotIdx++
+				tg.EditMessage(chatID, statusMsgID, text)
+				lastEdit = time.Now()
+
+				// Re-send chat action after edit (edit clears the indicator).
+				actionMu.Lock()
+				postAction := currentAction
+				actionMu.Unlock()
+				go tg.SendChatAction(chatID, postAction)
+			}
+
 			start := time.Now()
-			result, err := askClaude(u.Message.Text, resumeID, tp)
+			result, err := askClaude(u.Message.Text, resumeID, tp, onProgress)
 			// Retry without resume if session not found.
 			if err != nil && resumeID != "" && strings.Contains(err.Error(), "No conversation found") {
 				log.Printf("session %s expired, starting fresh", resumeID)
 				chatSessions.Archive(chatID)
-				result, err = askClaude(u.Message.Text, "", tp)
+				result, err = askClaude(u.Message.Text, "", tp, onProgress)
 			}
 			duration := time.Since(start)
+
+			// Cleanup: stop typing, delete status msg.
+			close(typingDone)
+			statusMu.Lock()
+			if statusSent && statusMsgID != 0 {
+				tg.DeleteMessage(chatID, statusMsgID)
+			}
+			statusMu.Unlock()
 
 			if err != nil {
 				log.Printf("claude error: %v", err)
@@ -398,7 +584,10 @@ func main() {
 				"session_id":  result.SessionID,
 			})
 
-			tg.SendMessage(chatID, reply)
+			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {
+				alfMsgIDs.Add(msgID)
+				log.Printf("tracking alf msg %d (buffer=%d)", msgID, alfMsgIDs.Size())
+			}
 		}
 	}
 }
@@ -424,7 +613,11 @@ type tierParams struct {
 	TierPromptArgs []string // --append-system-prompt pairs from tier system-prompt.md + skills
 }
 
-func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
+// progressFn is called with stream events as Claude processes.
+// event: "thinking", "tool_use", "text"; detail: tool name or empty.
+type progressFn func(event string, detail string)
+
+func askClaude(prompt, resumeID string, tp tierParams, onProgress progressFn) (*claudeResult, error) {
 	model := tp.Model
 	if model == "" {
 		model = "claude-haiku-4-5"
@@ -432,7 +625,8 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 	args := []string{
 		"-p", prompt,
 		"--model", model,
-		"--output-format", "json",
+		"--output-format", "stream-json",
+		"--verbose",
 		"--dangerously-skip-permissions",
 	}
 
@@ -463,7 +657,6 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = dataDir
-	// Filter out existing HOME to avoid duplicates (first value wins on Linux).
 	env := make([]string, 0, len(os.Environ()))
 	for _, e := range os.Environ() {
 		if !strings.HasPrefix(e, "HOME=") {
@@ -472,22 +665,82 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 	}
 	cmd.Env = append(env, "HOME="+dataDir)
 
-	log.Printf("askClaude: starting (resume=%q)", resumeID)
+	log.Printf("askClaude: starting (resume=%q, model=%s)", resumeID, model)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start claude: %w", err)
+	}
+
+	// Parse stream-json events.
+	var (
+		resultText   strings.Builder
+		lastEvent    json.RawMessage
+		sentThinking bool
+	)
+
+	scanner := bufio.NewScanner(stdoutPipe)
+	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		lastEvent = make(json.RawMessage, len(line))
+		copy(lastEvent, line)
+
+		// Quick parse to detect event type.
+		var event struct {
+			Type  string `json:"type"`
+			Event struct {
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+				ContentBlock struct {
+					Type string `json:"type"`
+					Name string `json:"name"`
+				} `json:"content_block"`
+			} `json:"event"`
+		}
+		if json.Unmarshal(line, &event) != nil {
+			continue
+		}
+
+		if onProgress != nil {
+			switch {
+			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "thinking" && !sentThinking:
+				onProgress("thinking", "")
+				sentThinking = true
+			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "tool_use":
+				onProgress("tool_use", event.Event.ContentBlock.Name)
+			case event.Type == "stream_event" && event.Event.Delta.Type == "text_delta":
+				onProgress("text", "")
+			}
+		}
+
+		// Accumulate text deltas for the response.
+		if event.Type == "stream_event" && event.Event.Delta.Type == "text_delta" {
+			resultText.WriteString(event.Event.Delta.Text)
+		}
+	}
+
+	waitErr := cmd.Wait()
 	if ctx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("claude timed out after 5 minutes")
 	}
 
-	out := strings.TrimSpace(stdout.String())
-
-	// Try to parse JSON output for session_id and result.
-	if out != "" {
+	// Try to parse the last event as the result message (contains metadata).
+	if lastEvent != nil {
 		var parsed struct {
+			Type         string               `json:"type"`
 			SessionID    string               `json:"session_id"`
 			Subtype      string               `json:"subtype"`
 			Result       string               `json:"result"`
@@ -496,10 +749,13 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 			TotalCostUSD float64              `json:"total_cost_usd"`
 			ModelUsage   map[string]jsonModel `json:"modelUsage"`
 		}
-		if jsonErr := json.Unmarshal([]byte(out), &parsed); jsonErr == nil {
+		if json.Unmarshal(lastEvent, &parsed) == nil && parsed.Type == "result" {
 			text := parsed.Result
 			if text == "" {
-				// Handle empty result with a human-readable message.
+				// Use accumulated stream text if result field is empty.
+				text = resultText.String()
+			}
+			if text == "" {
 				switch parsed.Subtype {
 				case "error_max_turns":
 					text = "Turn limit reached — try breaking this into smaller steps."
@@ -512,11 +768,9 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 				}
 				log.Printf("askClaude: empty result (subtype=%q, is_error=%v)", parsed.Subtype, parsed.IsError)
 			}
-			// If Claude returned an error result, propagate as error for retry logic.
 			if parsed.IsError && strings.Contains(text, "No conversation found") {
 				return nil, fmt.Errorf("claude: %s", text)
 			}
-			// Extract model name from usage.
 			model := "unknown"
 			for m := range parsed.ModelUsage {
 				model = m
@@ -530,17 +784,21 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 				NumTurns:  parsed.NumTurns,
 			}, nil
 		}
-		// JSON parse failed — treat raw output as text response.
-		return &claudeResult{Text: out}, nil
 	}
 
-	// No stdout — check stderr.
+	// Fallback: use accumulated text.
+	accumulated := strings.TrimSpace(resultText.String())
+	if accumulated != "" {
+		return &claudeResult{Text: accumulated}, nil
+	}
+
+	// No output — check stderr.
 	errOut := strings.TrimSpace(stderr.String())
-	if err != nil {
+	if waitErr != nil {
 		if errOut != "" {
 			return nil, fmt.Errorf("claude: %s", errOut)
 		}
-		return nil, fmt.Errorf("claude failed: %v", err)
+		return nil, fmt.Errorf("claude failed: %v", waitErr)
 	}
 
 	return nil, fmt.Errorf("claude returned empty response")
@@ -557,15 +815,29 @@ func readSecret(envVar string) string {
 }
 
 type Update struct {
-	UpdateID      int64          `json:"update_id"`
-	Message       *Message       `json:"message"`
-	CallbackQuery *CallbackQuery `json:"callback_query"`
+	UpdateID        int64                   `json:"update_id"`
+	Message         *Message                `json:"message"`
+	CallbackQuery   *CallbackQuery          `json:"callback_query"`
+	MessageReaction *MessageReactionUpdated `json:"message_reaction"`
 }
 
 type Message struct {
-	Chat Chat   `json:"chat"`
-	From User   `json:"from"`
-	Text string `json:"text"`
+	MessageID int64  `json:"message_id"`
+	Chat      Chat   `json:"chat"`
+	From      User   `json:"from"`
+	Text      string `json:"text"`
+}
+
+type MessageReactionUpdated struct {
+	Chat        Chat           `json:"chat"`
+	MessageID   int64          `json:"message_id"`
+	User        *User          `json:"user"`
+	NewReaction []ReactionType `json:"new_reaction"`
+}
+
+type ReactionType struct {
+	Type  string `json:"type"`
+	Emoji string `json:"emoji"`
 }
 
 type CallbackQuery struct {
@@ -589,7 +861,7 @@ type User struct {
 }
 
 func getUpdates(client *http.Client, token string, offset int64) ([]Update, error) {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30", token, offset)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30&allowed_updates=%s", token, offset, `["message","callback_query","message_reaction"]`)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, err
@@ -631,7 +903,26 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 		tg.SendHTML(msg.Chat.ID, reply)
 		return true
 	case "/start":
-		tg.SendHTML(msg.Chat.ID, "Hello! I'm ALF, your AI assistant. Send me a message and I'll respond using Claude.")
+		welcome := `Hey, I'm <b>Alf</b> — your personal AI assistant powered by Claude.
+
+<b>Getting started:</b>
+1. Just send me a message — I'll respond naturally
+2. Use the <b>Control Center</b> to customize my personality, tiers, and tools → /login
+3. Edit <b>memories/index.md</b> via the dashboard to teach me about your projects, preferences, and context
+
+<b>Good to know:</b>
+• I react to your emoji — positive reactions make me bolder, negative ones make me more careful
+• My mood changes daily and adapts to your feedback in real-time
+• Use /new to start a fresh conversation when switching topics
+
+<b>Commands:</b>
+/new — Fresh conversation
+/login — Access the Control Center
+/restart — Restart the daemon
+/help — Show all commands
+
+Ask me anything to get started.`
+		tg.SendHTML(msg.Chat.ID, welcome)
 		return true
 	case "/restart":
 		tg.SendHTML(msg.Chat.ID, "Restarting ALF daemon...")
@@ -830,6 +1121,181 @@ func migrateConfig(dataDir, configDir string) {
 				log.Printf("migrate: removed orphan %s/", orphan)
 			}
 		}
+	}
+}
+
+// Status message pools for natural, varied progress indicators.
+// Status message pools — no trailing dots (animated separately).
+var statusRouting = []string{
+	"Let me think",
+	"On it",
+	"Hmm",
+	"One sec",
+	"Looking into it",
+	"Give me a moment",
+	"Processing",
+	"Checking",
+}
+
+var statusThinking = []string{
+	"Thinking",
+	"Analyzing",
+	"Digging in",
+	"Reasoning",
+	"Working it out",
+	"Considering",
+}
+
+var statusToolUse = []string{
+	"Reading files",
+	"Looking things up",
+	"Checking the code",
+	"Investigating",
+	"Doing some research",
+	"Gathering context",
+}
+
+var statusWriting = []string{
+	"Writing",
+	"Drafting",
+	"Putting it together",
+	"Almost there",
+	"Wrapping up",
+}
+
+// dotCycle returns animated dots: ".", "..", "...", "." cycling on each call.
+var dotFrames = []string{".", "..", "..."}
+
+func pickRandom(pool []string) string {
+	return pool[rand.Intn(len(pool))]
+}
+
+// ringBuffer is a fixed-capacity ring buffer for tracking message IDs.
+type ringBuffer struct {
+	mu   sync.Mutex
+	data []int64
+	pos  int
+	full bool
+}
+
+func newRingBuffer(capacity int) *ringBuffer {
+	return &ringBuffer{data: make([]int64, capacity)}
+}
+
+func (r *ringBuffer) Add(id int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.data[r.pos] = id
+	r.pos = (r.pos + 1) % len(r.data)
+	if r.pos == 0 {
+		r.full = true
+	}
+}
+
+func (r *ringBuffer) Contains(id int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	limit := len(r.data)
+	if !r.full {
+		limit = r.pos
+	}
+	for i := 0; i < limit; i++ {
+		if r.data[i] == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *ringBuffer) Size() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.full {
+		return len(r.data)
+	}
+	return r.pos
+}
+
+// handleReaction processes an emoji reaction on an Alf message.
+func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, memoriesDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, tierFS *tierfs.TierFS, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger) {
+	// Log the reaction and update live feedback.
+	mood.LogReaction(dataDir, emoji, messageID)
+	mood.UpdateLiveFeedback(memoriesDir, dataDir)
+
+	score, state := mood.GetTodayScore(dataDir)
+	log.Printf("reaction scored: emoji=%s score=%d state=%s", emoji, score, state)
+
+	// Mirror reaction.
+	shouldReact := mood.ShouldReact(state)
+	log.Printf("reaction decision: should_react=%v (state=%s)", shouldReact, state)
+	if shouldReact {
+		mirror := mood.ChooseMirror(emoji, state)
+		log.Printf("reaction mirror: %s → %s (state=%s)", emoji, mirror, state)
+		if mirror != "" {
+			// Human-like delay before mirror reacting (1.5–4.5s).
+			delay := time.Duration(1500+rand.Intn(3000)) * time.Millisecond
+			time.Sleep(delay)
+
+			if err := tg.SetMessageReaction(chatID, messageID, mirror); err != nil {
+				log.Printf("mirror reaction error: %v", err)
+			} else {
+				log.Printf("→ mirror reaction sent: %s on msg %d", mirror, messageID)
+			}
+		}
+	}
+
+	// Negative reaction follow-up: ask what went wrong.
+	if !mood.IsNegative(emoji) {
+		return
+	}
+
+	// Strong negative → always follow up. Mild negative → 50% chance.
+	if !mood.IsStrongNegative(emoji) && rand.Float64() > 0.5 {
+		log.Printf("mild negative %s — skipping follow-up (coin flip)", emoji)
+		return
+	}
+
+	log.Printf("negative reaction %s — triggering follow-up", emoji)
+
+	// Small delay so mirror reaction lands first.
+	time.Sleep(2 * time.Second)
+	tg.SendChatAction(chatID, "typing")
+
+	var prompt string
+	if mood.IsStrongNegative(emoji) {
+		prompt = fmt.Sprintf("The user just reacted with %s to your last message (strong negative). Something is clearly wrong. Acknowledge the negative feedback briefly, identify what likely went wrong in your previous response, and ask a short direct question to understand what they expected. Keep it to 2-3 sentences max. Don't be defensive.", emoji)
+	} else {
+		prompt = fmt.Sprintf("The user just reacted with %s to your last message (mild negative). Briefly acknowledge the feedback and ask a short question to understand what could be improved. One or two sentences max. Stay casual.", emoji)
+	}
+
+	resumeID := chatSessions.Get(chatID)
+	// Use the instant tier for fast follow-up.
+	tp := tierParams{Model: "claude-haiku-4-5"}
+	for _, t := range tierStore.Current().Tiers {
+		if t.Instant {
+			tp = resolveTierParams(t.Name, tierStore.Current(), tierFS)
+			break
+		}
+	}
+
+	result, err := askClaude(prompt, resumeID, tp, nil)
+	if err != nil {
+		log.Printf("negative follow-up error: %v", err)
+		return
+	}
+
+	if result.SessionID != "" {
+		chatSessions.SetWithContext(chatID, result.SessionID, "follow-up")
+	}
+
+	eventLog.Log("negative_followup", map[string]any{
+		"chat_id": chatID,
+		"emoji":   emoji,
+		"model":   result.Model,
+	})
+
+	if msgID, err := tg.SendMessageReturnID(chatID, result.Text); err == nil && msgID != 0 {
+		alfMsgIDs.Add(msgID)
 	}
 }
 

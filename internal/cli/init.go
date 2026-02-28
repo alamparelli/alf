@@ -115,8 +115,8 @@ func promptDirectory(reader *bufio.Reader) string {
 
 	subdirs := []string{
 		"config.d", "tools.d", "skills.d",
-		"data/.claude", "data/config", "data/tools", "data/skills",
-		"data/logs", "data/memory", "data/state",
+		"data/.claude", "data/tools", "data/skills",
+		"data/logs", "data/memories",
 	}
 	for _, sub := range subdirs {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {

@@ -135,14 +135,13 @@ func (t *Tracker) writeGitignore() error {
 !.claude/
 !.claude/**
 !config.d/
-!config.d/config.json
-!config.d/tiers.json
-!config/
-!config/**
+!config.d/**
 !tools/
 !tools/**
 !skills/
 !skills/**
+!memories/
+!memories/**
 !logs/
 !logs/events/
 !logs/events/*.jsonl

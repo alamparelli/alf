@@ -104,6 +104,20 @@ func main() {
 
 	log.Printf("alf-daemon %s starting...", version)
 
+	// Write version file so Claude -p can read it.
+	os.WriteFile(filepath.Join(dataDir, ".version"), []byte(version), 0o644)
+
+	// Ensure directories exist.
+	os.MkdirAll(configDir, 0o755)
+	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
+	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
+	for _, sub := range []string{"tools", "skills", "memories"} {
+		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
+	}
+
+	// Migrate config from old data/config/ to configDir (before loading).
+	migrateConfig(dataDir, configDir)
+
 	// Load initial config.
 	configStore := cc.NewFileConfigStore(cc.ConfigPath(configDir))
 	cfg, err := configStore.Load()
@@ -116,14 +130,7 @@ func main() {
 	if err := tierStore.Reload(); err != nil {
 		log.Printf("warning: failed to load tiers: %v", err)
 	}
-
-	// Ensure directories exist.
-	os.MkdirAll(configDir, 0o755)
-	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
-	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
-	for _, sub := range []string{"tools", "skills", "memories"} {
-		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
-	}
+	migrateConfig(dataDir, configDir)
 
 	// Bootstrap default memory files (soul.md, mood.md, index.md).
 	memory.Bootstrap(filepath.Join(dataDir, "memories"))
@@ -487,16 +494,28 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 	// Try to parse JSON output for session_id and result.
 	if out != "" {
 		var parsed struct {
-			SessionID    string             `json:"session_id"`
-			Result       string             `json:"result"`
-			IsError      bool               `json:"is_error"`
-			TotalCostUSD float64            `json:"total_cost_usd"`
+			SessionID    string               `json:"session_id"`
+			Subtype      string               `json:"subtype"`
+			Result       string               `json:"result"`
+			IsError      bool                 `json:"is_error"`
+			TotalCostUSD float64              `json:"total_cost_usd"`
 			ModelUsage   map[string]jsonModel `json:"modelUsage"`
 		}
 		if jsonErr := json.Unmarshal([]byte(out), &parsed); jsonErr == nil {
 			text := parsed.Result
 			if text == "" {
-				text = out // fallback to raw output
+				// Handle empty result with a human-readable message.
+				switch parsed.Subtype {
+				case "error_max_turns":
+					text = "Turn limit reached — try breaking this into smaller steps."
+				default:
+					if parsed.IsError {
+						text = "An error occurred processing your request."
+					} else {
+						text = "Done (no text output)."
+					}
+				}
+				log.Printf("askClaude: empty result (subtype=%q, is_error=%v)", parsed.Subtype, parsed.IsError)
 			}
 			// If Claude returned an error result, propagate as error for retry logic.
 			if parsed.IsError && strings.Contains(text, "No conversation found") {
@@ -748,6 +767,75 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, tfs *tierfs.TierF
 	}
 	// Tier not found — use defaults.
 	return tierParams{Model: "claude-haiku-4-5"}
+}
+
+// migrateConfig copies config files from old data/config/ to configDir on first run.
+func migrateConfig(dataDir, configDir string) {
+	oldConfigDir := filepath.Join(dataDir, "config")
+
+	// Config files: copy if missing in configDir.
+	for _, name := range []string{"config.json", "tiers.json", "router-prompt.md"} {
+		dst := filepath.Join(configDir, name)
+		if _, err := os.Stat(dst); err == nil {
+			continue // already exists
+		}
+		src := filepath.Join(oldConfigDir, name)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue // no old file
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			log.Printf("migrate: failed to copy %s: %v", name, err)
+			continue
+		}
+		log.Printf("migrate: %s → %s", src, dst)
+	}
+
+	// Tier directories: copy from data/tiers/ to configDir/tiers/ if needed.
+	oldTiersDir := filepath.Join(dataDir, "tiers")
+	newTiersDir := filepath.Join(configDir, "tiers")
+	entries, err := os.ReadDir(oldTiersDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dst := filepath.Join(newTiersDir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue // already exists
+		}
+		src := filepath.Join(oldTiersDir, e.Name())
+		filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, _ := filepath.Rel(src, path)
+			target := filepath.Join(dst, rel)
+			if info.IsDir() {
+				return os.MkdirAll(target, 0o755)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(target, data, info.Mode())
+		})
+		log.Printf("migrate: tier %s → %s", e.Name(), newTiersDir)
+	}
+
+	// Clean up orphan directories from old layout.
+	for _, orphan := range []string{"tiers", "memory", "state"} {
+		p := filepath.Join(dataDir, orphan)
+		if _, err := os.Stat(p); err == nil {
+			if err := os.RemoveAll(p); err != nil {
+				log.Printf("migrate: failed to remove old %s: %v", orphan, err)
+			} else {
+				log.Printf("migrate: removed orphan %s/", orphan)
+			}
+		}
+	}
 }
 
 func parseAllowedChatIDs(s string) map[int64]bool {

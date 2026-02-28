@@ -202,10 +202,14 @@ func main() {
 	if p := os.Getenv("ALF_TRANSCRIBE_SCRIPT"); p != "" {
 		transcriptScriptPath = p
 	}
+	whisperModel := "small"
+	if m := os.Getenv("WHISPER_MODEL"); m != "" {
+		whisperModel = m
+	}
 	var transcriber *voice.Transcriber
 	if voice.IsAvailable(transcriptScriptPath) {
 		var err error
-		transcriber, err = voice.New(transcriptScriptPath, "small", filepath.Join(dataDir, "models"), 120*time.Second)
+		transcriber, err = voice.New(transcriptScriptPath, whisperModel, filepath.Join(dataDir, "models"), 120*time.Second)
 		if err != nil {
 			log.Printf("voice transcription disabled: %v", err)
 		} else {

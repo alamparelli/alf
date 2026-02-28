@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
+    trash-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Go for Claude agent to build CLI tools

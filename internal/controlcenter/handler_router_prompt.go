@@ -11,12 +11,12 @@ import (
 
 // RouterPromptHandler handles GET/PUT /api/router-prompt.
 type RouterPromptHandler struct {
-	DataDir  string
-	Notifier Notifier
+	ConfigDir string
+	Notifier  Notifier
 }
 
 func (h *RouterPromptHandler) path() string {
-	return filepath.Join(h.DataDir, "config", "router-prompt.md")
+	return filepath.Join(h.ConfigDir, "router-prompt.md")
 }
 
 func (h *RouterPromptHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

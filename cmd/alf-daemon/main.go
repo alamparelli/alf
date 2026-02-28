@@ -64,10 +64,16 @@ func main() {
 		log.Fatal("claude CLI not found in PATH")
 	}
 
-	// Data directory for config, tiers, logs.
+	// Data directory for logs, sessions, memories, etc.
 	dataDir := "/home/node/data"
 	if d := os.Getenv("ALF_DATA_DIR"); d != "" {
 		dataDir = d
+	}
+
+	// Config directory (RW for CC, separate from data volume).
+	configDir := "/opt/alf/config"
+	if d := os.Getenv("ALF_CONFIG_DIR"); d != "" {
+		configDir = d
 	}
 
 	// Parse allowed chat IDs for login authorization.
@@ -99,30 +105,31 @@ func main() {
 	log.Printf("alf-daemon %s starting...", version)
 
 	// Load initial config.
-	configStore := cc.NewFileConfigStore(cc.ConfigPath(dataDir))
+	configStore := cc.NewFileConfigStore(cc.ConfigPath(configDir))
 	cfg, err := configStore.Load()
 	if err != nil {
 		log.Printf("warning: failed to load config: %v", err)
 		cfg = cc.DefaultConfig()
 	}
 	// Load initial tiers config.
-	tierStore := cc.NewFileTierStore(cc.TiersPath(dataDir))
+	tierStore := cc.NewFileTierStore(cc.TiersPath(configDir))
 	if err := tierStore.Reload(); err != nil {
 		log.Printf("warning: failed to load tiers: %v", err)
 	}
 
-	// Ensure data subdirectories exist.
+	// Ensure directories exist.
+	os.MkdirAll(configDir, 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
-	for _, sub := range []string{"config", "tools", "skills", "memories"} {
+	for _, sub := range []string{"tools", "skills", "memories"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
 
 	// Bootstrap default memory files (soul.md, mood.md, index.md).
 	memory.Bootstrap(filepath.Join(dataDir, "memories"))
 
-	// TierFS for per-tier system prompts and skills.
-	tierFS := tierfs.New(dataDir)
+	// TierFS for per-tier system prompts and skills (inside configDir).
+	tierFS := tierfs.New(configDir)
 	for _, t := range tierStore.Current().Tiers {
 		if err := tierFS.EnsureDir(t.Name); err != nil {
 			log.Printf("warning: failed to create tier dir %q: %v", t.Name, err)
@@ -131,7 +138,7 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, stats, version, authToken, reloadCh, magic, sessions, tierFS)
+		server, err := cc.New(dataDir, configDir, stats, version, authToken, reloadCh, magic, sessions, tierFS)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -298,6 +305,7 @@ func main() {
 				Message:      u.Message.Text,
 				Tiers:        tierStore.Current(),
 				DataDir:      dataDir,
+				ConfigDir:    configDir,
 				LastTier:     lastTier,
 				MessageCount: msgCount,
 			})

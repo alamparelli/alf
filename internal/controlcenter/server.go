@@ -20,11 +20,11 @@ type Server struct {
 }
 
 // New creates a Control Center server.
-// dataDir is the path to config/tiers/logs directory.
+// dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir string, stats *Stats, version string, authToken string, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, tierFS TierFSProvider) (*Server, error) {
-	configStore, tierStore, memoryStore, toolStore, skillStore := StoreFactory(dataDir)
+func New(dataDir, configDir string, stats *Stats, version string, authToken string, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, tierFS TierFSProvider) (*Server, error) {
+	configStore, tierStore, memoryStore, toolStore, skillStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	statusProvider := NewStatusProvider(stats, version)
 	notifier := NewChannelNotifier(reloadCh)
@@ -59,6 +59,7 @@ func New(dataDir string, stats *Stats, version string, authToken string, reloadC
 		Sessions:       sessions,
 		AuthToken:      authToken,
 		DataDir:        dataDir,
+		ConfigDir:      configDir,
 		DashboardHTML:  string(htmlBytes),
 		WebFS:          webSub,
 	})

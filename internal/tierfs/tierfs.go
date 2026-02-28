@@ -15,9 +15,9 @@ type TierFS struct {
 	baseDir string // e.g. /home/node/data/tiers
 }
 
-// New creates a TierFS rooted at dataDir/tiers.
-func New(dataDir string) *TierFS {
-	base := filepath.Join(dataDir, "tiers")
+// New creates a TierFS rooted at configDir/tiers.
+func New(configDir string) *TierFS {
+	base := filepath.Join(configDir, "tiers")
 	os.MkdirAll(base, 0o755)
 	return &TierFS{baseDir: base}
 }

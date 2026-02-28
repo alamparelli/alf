@@ -97,7 +97,7 @@ func main() {
 	// Magic link auth stores (shared between CC and daemon).
 	magic := cc.NewMagicStore(nil)
 	magic.StartCleanup()
-	sessions := cc.NewSessionStore(nil)
+	sessions := cc.NewFileSessionStore(filepath.Join(dataDir, "sessions.json"), nil)
 	sessions.StartCleanup()
 
 	// CC external URL for magic link generation.
@@ -286,18 +286,15 @@ func main() {
 				continue
 			}
 
-			// Handle emoji reactions on Alf's messages.
+			// Handle emoji reactions (always process in private chats).
 			if u.MessageReaction != nil {
 				mr := u.MessageReaction
 				if len(mr.NewReaction) == 0 {
 					continue
 				}
 				emoji := mr.NewReaction[0].Emoji
-				isAlf := alfMsgIDs.Contains(mr.MessageID)
-				log.Printf("← reaction %s on msg %d (alf=%v, buffer_size=%d)", emoji, mr.MessageID, isAlf, alfMsgIDs.Size())
-				if isAlf {
-					go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, memoriesDir, dataDir, chatSessions, tierStore, tierFS, alfMsgIDs, eventLog)
-				}
+				log.Printf("← reaction %s on msg %d", emoji, mr.MessageID)
+				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, memoriesDir, dataDir, chatSessions, tierStore, tierFS, alfMsgIDs, eventLog)
 				continue
 			}
 
@@ -317,23 +314,6 @@ func main() {
 				"username": u.Message.From.Username,
 				"text":     truncated,
 			})
-
-			// Spontaneous greeting reaction.
-			if mood.Greetings[strings.ToLower(strings.TrimSpace(u.Message.Text))] {
-				state := mood.GetCurrentState(memoriesDir)
-				shouldReact := mood.ShouldReact(state)
-				log.Printf("greeting detected: %q state=%s should_react=%v", u.Message.Text, state, shouldReact)
-				if shouldReact {
-					msgID := u.Message.MessageID
-					go func() {
-						// Human-like delay before reacting to a greeting.
-						time.Sleep(time.Duration(1500+rand.Intn(3000)) * time.Millisecond)
-						emoji := mood.ChooseSpontaneous(state)
-						log.Printf("→ spontaneous reaction %s on greeting msg %d", emoji, msgID)
-						tg.SetMessageReaction(u.Message.Chat.ID, msgID, emoji)
-					}()
-				}
-			}
 
 			// Command routing: handle /commands before passing to Claude.
 			if strings.HasPrefix(u.Message.Text, "/") {
@@ -355,24 +335,7 @@ func main() {
 			routingMsgID, _ := tg.SendMessageGetID(chatID, routingBase+".")
 
 			// Animate dots on routing message while classifying.
-			routingDone := make(chan struct{})
-			go func() {
-				rdi := 1
-				ticker := time.NewTicker(1 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-routingDone:
-						return
-					case <-ticker.C:
-						if routingMsgID != 0 {
-							tg.EditMessage(chatID, routingMsgID, routingBase+dotFrames[rdi%len(dotFrames)])
-							rdi++
-							tg.SendChatAction(chatID, "typing")
-						}
-					}
-				}
-			}()
+			routingAnim := newDotAnimator(tg, chatID, routingMsgID, routingBase, "typing")
 
 			// Route message to appropriate tier.
 			var tp tierParams
@@ -386,7 +349,7 @@ func main() {
 			})
 
 			// Router answered directly — no second LLM call needed.
-			close(routingDone)
+			routingAnim.Stop()
 			if routeResult.Response != "" && routeResult.Tier == "" {
 				log.Printf("→ router direct response")
 				// Delete routing status message.
@@ -398,6 +361,8 @@ func main() {
 					"reason":  routeResult.Reason,
 				})
 				chatSessions.TouchContext(chatID, "router")
+				// React to the user's message before sending the reply (more natural).
+				maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, routeResult.React, memoriesDir)
 				if mid, err := tg.SendMessageReturnID(chatID, routeResult.Response); err == nil && mid != 0 {
 					alfMsgIDs.Add(mid)
 					log.Printf("tracking alf msg %d (buffer=%d)", mid, alfMsgIDs.Size())
@@ -416,105 +381,30 @@ func main() {
 			})
 
 			// Transition routing message into processing status message.
-			var statusMsgID int64
-			var statusMu sync.Mutex
-			statusSent := false
-			lastEdit := time.Time{}
-			dotIdx := 0         // cycles through ".", "..", "..."
-			statusBase := ""    // current status text without dots
-
+			var statusAnim *dotAnimator
 			if routingMsgID != 0 {
-				// Reuse the routing message as the processing status message.
-				statusBase = pickRandom(statusThinking)
-				tg.EditMessage(chatID, routingMsgID, statusBase+dotFrames[0])
-				dotIdx = 1
-				statusMu.Lock()
-				statusMsgID = routingMsgID
-				statusSent = true
-				lastEdit = time.Now()
-				statusMu.Unlock()
+				thinkBase := pickRandom(statusThinking)
+				tg.EditMessage(chatID, routingMsgID, thinkBase+dotFrames[0])
+				statusAnim = newDotAnimator(tg, chatID, routingMsgID, thinkBase, "choose_sticker")
 			}
 
-			// Current chat action tracks the phase for the keepalive goroutine.
-			currentAction := "choose_sticker" // thinking phase
-			var actionMu sync.Mutex
-
-			// Launch keepalive goroutine — sends the phase-appropriate chat action every 4s.
-			typingDone := make(chan struct{})
-			go func() {
-				ticker := time.NewTicker(4 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-typingDone:
-						return
-					case <-ticker.C:
-						actionMu.Lock()
-						action := currentAction
-						actionMu.Unlock()
-						tg.SendChatAction(chatID, action)
-					}
-				}
-			}()
-
 			lastPhase := ""
-
 			onProgress := func(event, detail string) {
-				// Update chat action to match the current phase.
-				actionMu.Lock()
+				if statusAnim == nil {
+					return
+				}
+				if event == lastPhase {
+					return
+				}
+				lastPhase = event
 				switch event {
 				case "thinking":
-					currentAction = "choose_sticker"
+					statusAnim.SetPhase(pickRandom(statusThinking), "choose_sticker")
 				case "tool_use":
-					currentAction = "upload_document"
+					statusAnim.SetPhase(pickRandom(statusToolUse), "upload_document")
 				case "text":
-					currentAction = "typing"
+					statusAnim.SetPhase(pickRandom(statusWriting), "typing")
 				}
-				actionMu.Unlock()
-
-				// Send the new action immediately (don't wait for ticker).
-				actionMu.Lock()
-				action := currentAction
-				actionMu.Unlock()
-				tg.SendChatAction(chatID, action)
-
-				// Edit status message text with animated dots.
-				statusMu.Lock()
-				defer statusMu.Unlock()
-				if !statusSent || statusMsgID == 0 {
-					return
-				}
-				// Throttle edits to max 1 every 1s.
-				if time.Since(lastEdit) < 1*time.Second {
-					return
-				}
-
-				// Pick new base text on phase change, otherwise just cycle dots.
-				if event != lastPhase {
-					lastPhase = event
-					switch event {
-					case "thinking":
-						statusBase = pickRandom(statusThinking)
-					case "tool_use":
-						statusBase = pickRandom(statusToolUse)
-					case "text":
-						statusBase = pickRandom(statusWriting)
-					default:
-						return
-					}
-					dotIdx = 0
-				}
-
-				text := statusBase + dotFrames[dotIdx%len(dotFrames)]
-				dotIdx++
-				tg.EditMessage(chatID, statusMsgID, text)
-				lastEdit = time.Now()
-
-				// Re-send chat action after edit (edit clears the indicator).
-				actionMu.Lock()
-				postAction := currentAction
-				actionMu.Unlock()
-				go tg.SendChatAction(chatID, postAction)
 			}
 
 			start := time.Now()
@@ -527,13 +417,11 @@ func main() {
 			}
 			duration := time.Since(start)
 
-			// Cleanup: stop typing, delete status msg.
-			close(typingDone)
-			statusMu.Lock()
-			if statusSent && statusMsgID != 0 {
-				tg.DeleteMessage(chatID, statusMsgID)
+			// Cleanup: stop animation, delete status msg.
+			if statusAnim != nil {
+				statusAnim.Stop()
+				tg.DeleteMessage(chatID, routingMsgID)
 			}
-			statusMu.Unlock()
 
 			if err != nil {
 				log.Printf("claude error: %v", err)
@@ -565,7 +453,9 @@ func main() {
 			}
 			chatSessions.Touch(chatID)
 
-			reply := result.Text
+			// Extract inline reaction suggestion from Claude's response.
+			suggestedEmoji, cleanText := extractReaction(result.Text)
+			reply := cleanText
 
 			// Detect Claude not logged in.
 			lower := strings.ToLower(reply)
@@ -583,6 +473,9 @@ func main() {
 				"text_length": len(reply),
 				"session_id":  result.SessionID,
 			})
+
+			// React to the user's message before sending the reply (more natural).
+			maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, suggestedEmoji, memoriesDir)
 
 			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {
 				alfMsgIDs.Add(msgID)
@@ -604,6 +497,11 @@ type claudeResult struct {
 	CostUSD   float64
 	NumTurns  int
 }
+
+// reactionSystemPromptTmpl is the template for the reaction instruction injected into askClaude.
+// The %s placeholder is filled with mood.AllowedReactionList().
+const reactionSystemPromptTmpl = `You may optionally suggest a single emoji reaction for the user's message by starting your response with [[react:EMOJI]]. Pick an emoji that shows you understood the message — not generic thumbs up. Use [[react:none]] or omit the tag if no reaction fits. The tag will be stripped before the user sees your response.
+IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
@@ -651,6 +549,9 @@ func askClaude(prompt, resumeID string, tp tierParams, onProgress progressFn) (*
 
 	// Inject tier-specific system prompt and skills.
 	args = append(args, tp.TierPromptArgs...)
+
+	// Reaction suggestion instruction (non-editable, always injected).
+	args = append(args, "--append-system-prompt", fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -1170,6 +1071,120 @@ func pickRandom(pool []string) string {
 	return pool[rand.Intn(len(pool))]
 }
 
+// dotAnimator animates a Telegram status message with cycling dots and chat actions.
+type dotAnimator struct {
+	tg       *tgclient.Client
+	chatID   int64
+	msgID    int64
+	base     string // current text prefix (e.g. "Thinking")
+	dotIdx   int
+	lastEdit time.Time
+	mu       sync.Mutex
+	done     chan struct{}
+	action   string // current chat action (e.g. "typing")
+}
+
+// newDotAnimator creates and starts a dot animator that ticks every second.
+func newDotAnimator(tg *tgclient.Client, chatID, msgID int64, base, action string) *dotAnimator {
+	da := &dotAnimator{
+		tg:       tg,
+		chatID:   chatID,
+		msgID:    msgID,
+		base:     base,
+		dotIdx:   1, // 0th frame already shown by caller
+		lastEdit: time.Now(),
+		done:     make(chan struct{}),
+		action:   action,
+	}
+	go da.run()
+	return da
+}
+
+func (da *dotAnimator) run() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-da.done:
+			return
+		case <-ticker.C:
+			da.tick()
+		}
+	}
+}
+
+func (da *dotAnimator) tick() {
+	da.mu.Lock()
+	defer da.mu.Unlock()
+	if da.msgID == 0 {
+		return
+	}
+	da.tg.EditMessage(da.chatID, da.msgID, da.base+dotFrames[da.dotIdx%len(dotFrames)])
+	da.dotIdx++
+	da.lastEdit = time.Now()
+	da.tg.SendChatAction(da.chatID, da.action)
+}
+
+// SetPhase changes the status text and chat action (e.g. on progress events).
+func (da *dotAnimator) SetPhase(base, action string) {
+	da.mu.Lock()
+	defer da.mu.Unlock()
+	da.base = base
+	da.action = action
+	da.dotIdx = 0
+}
+
+// SetAction changes only the chat action without resetting the text.
+func (da *dotAnimator) SetAction(action string) {
+	da.mu.Lock()
+	defer da.mu.Unlock()
+	da.action = action
+}
+
+// Stop halts the animation.
+func (da *dotAnimator) Stop() {
+	select {
+	case <-da.done:
+	default:
+		close(da.done)
+	}
+}
+
+// maybeSpontaneousReact validates an emoji (with fallback), applies mood-gate probability,
+// and sends the reaction. Runs synchronously so the reaction lands before the reply.
+func maybeSpontaneousReact(tg *tgclient.Client, chatID, msgID int64, emoji, memoriesDir string) {
+	emoji = mood.ValidateOrFallback(emoji)
+	if emoji == "" {
+		return
+	}
+	state := mood.GetCurrentState(memoriesDir)
+	if !mood.ShouldReact(state) {
+		log.Printf("reaction %s suggested but skipped (state=%s)", emoji, state)
+		return
+	}
+	log.Printf("→ spontaneous reaction %s on msg %d (state=%s)", emoji, msgID, state)
+	tg.SetMessageReaction(chatID, msgID, emoji)
+}
+
+// extractReaction parses a [[react:EMOJI]] marker from the start of text.
+// Returns the emoji (or "") and the cleaned text with the marker stripped.
+func extractReaction(text string) (string, string) {
+	trimmed := strings.TrimLeft(text, " \n\r\t")
+	if !strings.HasPrefix(trimmed, "[[react:") {
+		return "", text
+	}
+	end := strings.Index(trimmed, "]]")
+	if end == -1 {
+		return "", text
+	}
+	emoji := trimmed[len("[[react:"):end]
+	rest := strings.TrimLeft(trimmed[end+2:], " \n\r\t")
+	if emoji == "none" || emoji == "" {
+		return "", rest
+	}
+	return emoji, rest
+}
+
 // ringBuffer is a fixed-capacity ring buffer for tracking message IDs.
 type ringBuffer struct {
 	mu   sync.Mutex
@@ -1262,10 +1277,11 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, memorie
 	tg.SendChatAction(chatID, "typing")
 
 	var prompt string
+	langNote := "IMPORTANT: Reply in the same language the user has been using in this conversation."
 	if mood.IsStrongNegative(emoji) {
-		prompt = fmt.Sprintf("The user just reacted with %s to your last message (strong negative). Something is clearly wrong. Acknowledge the negative feedback briefly, identify what likely went wrong in your previous response, and ask a short direct question to understand what they expected. Keep it to 2-3 sentences max. Don't be defensive.", emoji)
+		prompt = fmt.Sprintf("The user just reacted with %s to your last message (strong negative). Something is clearly wrong. Acknowledge the negative feedback briefly, identify what likely went wrong in your previous response, and ask a short direct question to understand what they expected. Keep it to 2-3 sentences max. Don't be defensive. %s", emoji, langNote)
 	} else {
-		prompt = fmt.Sprintf("The user just reacted with %s to your last message (mild negative). Briefly acknowledge the feedback and ask a short question to understand what could be improved. One or two sentences max. Stay casual.", emoji)
+		prompt = fmt.Sprintf("The user just reacted with %s to your last message (mild negative). Briefly acknowledge the feedback and ask a short question to understand what could be improved. One or two sentences max. Stay casual. %s", emoji, langNote)
 	}
 
 	resumeID := chatSessions.Get(chatID)

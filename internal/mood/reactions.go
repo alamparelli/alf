@@ -2,6 +2,7 @@ package mood
 
 import (
 	"math/rand"
+	"strings"
 )
 
 // WeightedEmoji pairs an emoji with a selection weight.
@@ -105,6 +106,69 @@ var SpontaneousReactions = map[string][]WeightedEmoji{
 	"sarcastic":    {{"🗿", 30}, {"🤨", 25}, {"😈", 20}, {"🤡", 15}, {"👏", 10}},
 	"cautious":     {{"👏", 50}, {"👍", 30}, {"👀", 20}},
 	"neutral":      {{"👏", 50}, {"👍", 30}, {"😁", 20}},
+}
+
+// AllowedReactionEmoji is the set of emoji that Telegram allows bots to use with setMessageReaction.
+// Extracted from Telegram Bot API documentation.
+var AllowedReactionEmoji = map[string]bool{
+	"👍": true, "👎": true, "❤": true, "🔥": true, "🥰": true,
+	"👏": true, "😁": true, "🤔": true, "🤯": true, "😱": true,
+	"🤬": true, "😢": true, "🎉": true, "🤩": true, "🤮": true,
+	"💩": true, "🙏": true, "👌": true, "🕊": true, "🤡": true,
+	"🥱": true, "🥴": true, "😍": true, "🐳": true, "❤\u200d🔥": true,
+	"🌚": true, "🌭": true, "💯": true, "🤣": true, "⚡": true,
+	"🍌": true, "🏆": true, "💔": true, "🤨": true, "😐": true,
+	"🍓": true, "🍾": true, "💋": true, "🖕": true, "😈": true,
+	"😴": true, "😭": true, "🤓": true, "👻": true, "👨\u200d💻": true,
+	"👀": true, "🎃": true, "🙈": true, "😇": true, "😨": true,
+	"🤝": true, "✍": true, "🤗": true, "🫡": true, "🎅": true,
+	"🎄": true, "☃": true, "💅": true, "🤪": true, "🗿": true,
+	"🆒": true, "💘": true, "🙉": true, "🦄": true, "😘": true,
+	"💊": true, "🙊": true, "😎": true, "👾": true, "🤷": true,
+	"🤷\u200d♂": true, "🤷\u200d♀": true, "😡": true,
+}
+
+// IsAllowedReaction checks if an emoji is in Telegram's allowed reaction set.
+func IsAllowedReaction(emoji string) bool {
+	return AllowedReactionEmoji[emoji]
+}
+
+// Sentiment fallback pools for invalid emoji — safe subset of AllowedReactionEmoji.
+var sentimentFallbacks = map[string][]string{
+	"positive": {"🔥", "👏", "😁", "🎉", "💯", "🤩", "👌", "❤"},
+	"neutral":  {"👀", "🤔", "😐", "🤓", "👨\u200d💻"},
+	"negative": {"😢", "💔", "😨", "😭"},
+}
+
+// ValidateOrFallback returns the emoji if allowed, otherwise picks a random
+// fallback from the same sentiment category. Returns "" only if emoji was "".
+func ValidateOrFallback(emoji string) string {
+	if emoji == "" {
+		return ""
+	}
+	if AllowedReactionEmoji[emoji] {
+		return emoji
+	}
+	// Determine sentiment from EmojiWeights if known, otherwise guess from Unicode category.
+	cat := "neutral"
+	if w, ok := EmojiWeights[emoji]; ok {
+		if w > 0 {
+			cat = "positive"
+		} else if w < 0 {
+			cat = "negative"
+		}
+	}
+	pool := sentimentFallbacks[cat]
+	return pool[rand.Intn(len(pool))]
+}
+
+// AllowedReactionList returns a space-separated string of all allowed emoji for prompt injection.
+func AllowedReactionList() string {
+	emojis := make([]string, 0, len(AllowedReactionEmoji))
+	for e := range AllowedReactionEmoji {
+		emojis = append(emojis, e)
+	}
+	return strings.Join(emojis, " ")
 }
 
 // Greetings recognized for spontaneous reactions.

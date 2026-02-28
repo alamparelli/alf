@@ -3,6 +3,11 @@ package controlcenter
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -101,11 +106,19 @@ type session struct {
 	expiresAt time.Time
 }
 
+// persistedSession is the JSON-serializable form of session.
+type persistedSession struct {
+	ChatID    int64     `json:"chat_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 // SessionStore manages authenticated sessions.
+// When path is set, sessions are persisted to disk and survive restarts.
 type SessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 	nowFn    func() time.Time
+	path     string // empty = in-memory only
 }
 
 // NewSessionStore creates a SessionStore. Pass nil for nowFn to use time.Now.
@@ -117,6 +130,23 @@ func NewSessionStore(nowFn func() time.Time) *SessionStore {
 		sessions: make(map[string]*session),
 		nowFn:    nowFn,
 	}
+}
+
+// NewFileSessionStore creates a SessionStore backed by a JSON file.
+// Existing sessions are loaded from disk, expired ones are pruned.
+func NewFileSessionStore(path string, nowFn func() time.Time) *SessionStore {
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	ss := &SessionStore{
+		sessions: make(map[string]*session),
+		nowFn:    nowFn,
+		path:     path,
+	}
+	if err := ss.load(); err != nil {
+		log.Printf("warning: could not load sessions from %s: %v", path, err)
+	}
+	return ss
 }
 
 // Issue creates a new session for the given chat ID with the specified TTL.
@@ -136,6 +166,7 @@ func (ss *SessionStore) Issue(chatID int64, ttl time.Duration) (string, error) {
 		chatID:    chatID,
 		expiresAt: ss.nowFn().Add(ttl),
 	}
+	ss.saveLocked()
 	ss.mu.Unlock()
 
 	return id, nil
@@ -160,14 +191,89 @@ func (ss *SessionStore) StartCleanup() {
 			time.Sleep(15 * time.Minute)
 			ss.mu.Lock()
 			now := ss.nowFn()
+			changed := false
 			for id, s := range ss.sessions {
 				if now.After(s.expiresAt) {
 					delete(ss.sessions, id)
+					changed = true
 				}
+			}
+			if changed {
+				ss.saveLocked()
 			}
 			ss.mu.Unlock()
 		}
 	}()
+}
+
+// load reads sessions from disk. Caller must NOT hold mu.
+func (ss *SessionStore) load() error {
+	if ss.path == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(ss.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read sessions: %w", err)
+	}
+
+	var persisted map[string]*persistedSession
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		return fmt.Errorf("parse sessions: %w", err)
+	}
+
+	now := ss.nowFn()
+	for id, ps := range persisted {
+		if now.After(ps.ExpiresAt) {
+			continue // prune expired
+		}
+		ss.sessions[id] = &session{
+			chatID:    ps.ChatID,
+			expiresAt: ps.ExpiresAt,
+		}
+	}
+
+	log.Printf("loaded %d active sessions from disk", len(ss.sessions))
+	return nil
+}
+
+// saveLocked writes sessions to disk. Caller MUST hold mu.
+func (ss *SessionStore) saveLocked() {
+	if ss.path == "" {
+		return
+	}
+
+	persisted := make(map[string]*persistedSession, len(ss.sessions))
+	for id, s := range ss.sessions {
+		persisted[id] = &persistedSession{
+			ChatID:    s.chatID,
+			ExpiresAt: s.expiresAt,
+		}
+	}
+
+	data, err := json.MarshalIndent(persisted, "", "  ")
+	if err != nil {
+		log.Printf("warning: marshal sessions: %v", err)
+		return
+	}
+
+	if err := os.MkdirAll(filepath.Dir(ss.path), 0o755); err != nil {
+		log.Printf("warning: create sessions dir: %v", err)
+		return
+	}
+
+	tmp := ss.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		log.Printf("warning: write sessions: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, ss.path); err != nil {
+		os.Remove(tmp)
+		log.Printf("warning: rename sessions: %v", err)
+	}
 }
 
 func randomHex(nBytes int) (string, error) {

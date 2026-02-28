@@ -197,24 +197,24 @@ func main() {
 		}
 	}
 
-	// Voice transcriber (faster-whisper via Python subprocess).
+	// Voice transcriber (persistent faster-whisper Python process).
 	transcriptScriptPath := "/opt/alf/transcribe.py"
 	if p := os.Getenv("ALF_TRANSCRIBE_SCRIPT"); p != "" {
 		transcriptScriptPath = p
 	}
-	whisperModel := "small"
-	whisperModelsDir := filepath.Join(dataDir, "models")
 	var transcriber *voice.Transcriber
-	var voiceReady *voice.ReadyState
 	if voice.IsAvailable(transcriptScriptPath) {
 		var err error
-		transcriber, err = voice.New(transcriptScriptPath, whisperModel, whisperModelsDir, 120*time.Second)
+		transcriber, err = voice.New(transcriptScriptPath, "small", filepath.Join(dataDir, "models"), 120*time.Second)
 		if err != nil {
 			log.Printf("voice transcription disabled: %v", err)
 		} else {
-			log.Println("voice transcription enabled (faster-whisper)")
-			// Start background model download
-			voiceReady = voice.WarmUp(transcriptScriptPath, whisperModel, whisperModelsDir)
+			// Start persistent process in background (model loads once).
+			go func() {
+				if err := transcriber.Start(); err != nil {
+					log.Printf("voice: failed to start whisper server: %v", err)
+				}
+			}()
 		}
 	} else {
 		log.Println("voice transcription disabled (transcribe.py not found)")
@@ -363,7 +363,7 @@ func main() {
 			})
 
 			// Handle voice messages: transcribe and treat as text.
-			if hasVoice && transcriber != nil && voiceReady != nil && !voiceReady.IsReady() {
+			if hasVoice && transcriber != nil && !transcriber.IsReady() {
 				tg.SendHTML(u.Message.Chat.ID, "Voice model is still loading. Please try again in a moment.")
 				continue
 			}

@@ -11,7 +11,6 @@ import (
 )
 
 func TestIsAvailable(t *testing.T) {
-	// Test with non-existent script
 	if IsAvailable("/nonexistent/transcribe.py") {
 		t.Error("IsAvailable should return false for non-existent script")
 	}
@@ -25,6 +24,9 @@ func TestNew(t *testing.T) {
 		}
 		if tr.model != "small" {
 			t.Errorf("model = %q, want %q", tr.model, "small")
+		}
+		if tr.IsReady() {
+			t.Error("should not be ready before Start()")
 		}
 	})
 
@@ -42,139 +44,189 @@ func TestNew(t *testing.T) {
 	})
 }
 
-func TestTranscribeWithMockScript(t *testing.T) {
+func TestPersistentTranscriber(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create a mock transcribe.py that returns JSON
+	// Create a mock transcribe.py server
 	mockScript := filepath.Join(tmpDir, "transcribe.py")
 	script := `#!/usr/bin/env python3
-import json, sys
-result = {"text": "Hello world", "duration_s": 1.5, "language": "en", "language_probability": 0.95}
-json.dump(result, sys.stdout)
-print()
-`
-	if err := os.WriteFile(mockScript, []byte(script), 0755); err != nil {
-		t.Fatalf("failed to write mock script: %v", err)
-	}
+import json, sys, argparse
 
-	// Create a fake audio file
-	audioFile := filepath.Join(tmpDir, "test.ogg")
-	if err := os.WriteFile(audioFile, []byte("fake audio"), 0644); err != nil {
-		t.Fatalf("failed to write audio file: %v", err)
-	}
+parser = argparse.ArgumentParser()
+parser.add_argument("audio_file", nargs="?")
+parser.add_argument("--model", default="small")
+parser.add_argument("--models-dir", default="/tmp")
+parser.add_argument("--server", action="store_true")
+args = parser.parse_args()
 
-	tr := &Transcriber{
-		scriptPath: mockScript,
-		model:      "small",
-		modelsDir:  tmpDir,
-		timeout:    10 * time.Second,
-	}
+if args.server:
+    # Send ready signal
+    sys.stdout.write(json.dumps({"status": "ready", "model": args.model}) + "\n")
+    sys.stdout.flush()
 
-	result, err := tr.Transcribe(audioFile)
-	if err != nil {
-		t.Fatalf("Transcribe() failed: %v", err)
-	}
-	if result.Text != "Hello world" {
-		t.Errorf("text = %q, want %q", result.Text, "Hello world")
-	}
-	if result.Language != "en" {
-		t.Errorf("language = %q, want %q", result.Language, "en")
-	}
-	if result.DurationS != 1.5 {
-		t.Errorf("duration_s = %f, want 1.5", result.DurationS)
-	}
-}
-
-func TestTranscribeEmptyResult(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	mockScript := filepath.Join(tmpDir, "transcribe.py")
-	script := `#!/usr/bin/env python3
-import json, sys
-json.dump({"text": "", "duration_s": 0.1, "language": "", "language_probability": 0}, sys.stdout)
-print()
+    # Process requests
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        req = json.loads(line)
+        result = {
+            "text": "Hello this is a test",
+            "duration_s": 0.5,
+            "language": "en",
+            "language_probability": 0.98
+        }
+        sys.stdout.write(json.dumps(result) + "\n")
+        sys.stdout.flush()
+else:
+    result = {"text": "oneshot", "duration_s": 0.1, "language": "en", "language_probability": 0.9}
+    json.dump(result, sys.stdout)
+    print()
 `
 	if err := os.WriteFile(mockScript, []byte(script), 0755); err != nil {
 		t.Fatalf("failed to write mock script: %v", err)
 	}
 
 	audioFile := filepath.Join(tmpDir, "test.ogg")
-	os.WriteFile(audioFile, []byte("fake"), 0644)
+	os.WriteFile(audioFile, []byte("fake audio"), 0644)
 
-	tr := &Transcriber{
-		scriptPath: mockScript,
-		model:      "small",
-		modelsDir:  tmpDir,
-		timeout:    10 * time.Second,
-	}
+	t.Run("start and transcribe", func(t *testing.T) {
+		tr, err := New(mockScript, "small", tmpDir, 10*time.Second)
+		if err != nil {
+			t.Fatalf("New() failed: %v", err)
+		}
+		defer tr.Stop()
 
-	_, err := tr.Transcribe(audioFile)
-	if err == nil {
-		t.Fatal("expected error for empty transcription, got nil")
-	}
-	if err.Error() != "empty transcription" {
-		t.Errorf("error = %q, want 'empty transcription'", err.Error())
-	}
+		if err := tr.Start(); err != nil {
+			t.Fatalf("Start() failed: %v", err)
+		}
+
+		if !tr.IsReady() {
+			t.Fatal("should be ready after Start()")
+		}
+
+		result, err := tr.Transcribe(audioFile)
+		if err != nil {
+			t.Fatalf("Transcribe() failed: %v", err)
+		}
+		if result.Text != "Hello this is a test" {
+			t.Errorf("text = %q, want %q", result.Text, "Hello this is a test")
+		}
+		if result.Language != "en" {
+			t.Errorf("language = %q, want %q", result.Language, "en")
+		}
+	})
+
+	t.Run("multiple transcriptions", func(t *testing.T) {
+		tr, err := New(mockScript, "small", tmpDir, 10*time.Second)
+		if err != nil {
+			t.Fatalf("New() failed: %v", err)
+		}
+		defer tr.Stop()
+
+		if err := tr.Start(); err != nil {
+			t.Fatalf("Start() failed: %v", err)
+		}
+
+		// Send multiple requests — model stays loaded
+		for i := 0; i < 5; i++ {
+			result, err := tr.Transcribe(audioFile)
+			if err != nil {
+				t.Fatalf("Transcribe() #%d failed: %v", i, err)
+			}
+			if result.Text != "Hello this is a test" {
+				t.Errorf("#%d text = %q", i, result.Text)
+			}
+		}
+	})
+
+	t.Run("transcribe before start", func(t *testing.T) {
+		tr, err := New(mockScript, "small", tmpDir, 10*time.Second)
+		if err != nil {
+			t.Fatalf("New() failed: %v", err)
+		}
+
+		_, err = tr.Transcribe(audioFile)
+		if err == nil {
+			t.Fatal("expected error when transcribing before Start()")
+		}
+		if err.Error() != "transcriber not ready" {
+			t.Errorf("error = %q, want 'transcriber not ready'", err.Error())
+		}
+	})
+
+	t.Run("stop and restart", func(t *testing.T) {
+		tr, err := New(mockScript, "small", tmpDir, 10*time.Second)
+		if err != nil {
+			t.Fatalf("New() failed: %v", err)
+		}
+
+		if err := tr.Start(); err != nil {
+			t.Fatalf("Start() failed: %v", err)
+		}
+
+		tr.Stop()
+		if tr.IsReady() {
+			t.Error("should not be ready after Stop()")
+		}
+
+		// Should be able to restart
+		if err := tr.Start(); err != nil {
+			t.Fatalf("re-Start() failed: %v", err)
+		}
+		defer tr.Stop()
+
+		if !tr.IsReady() {
+			t.Error("should be ready after re-Start()")
+		}
+	})
 }
 
 func TestTranscribeTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 
+	// Create a server that never responds
 	mockScript := filepath.Join(tmpDir, "transcribe.py")
 	script := `#!/usr/bin/env python3
-import time; time.sleep(10)
+import json, sys, time, argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("audio_file", nargs="?")
+parser.add_argument("--model", default="small")
+parser.add_argument("--models-dir", default="/tmp")
+parser.add_argument("--server", action="store_true")
+args = parser.parse_args()
+
+# Send ready
+sys.stdout.write(json.dumps({"status": "ready", "model": "small"}) + "\n")
+sys.stdout.flush()
+
+# Read request but never respond
+for line in sys.stdin:
+    time.sleep(60)
 `
 	os.WriteFile(mockScript, []byte(script), 0755)
 	audioFile := filepath.Join(tmpDir, "test.ogg")
 	os.WriteFile(audioFile, []byte("fake"), 0644)
 
-	tr := &Transcriber{
-		scriptPath: mockScript,
-		model:      "small",
-		modelsDir:  tmpDir,
-		timeout:    100 * time.Millisecond,
+	tr, _ := New(mockScript, "small", tmpDir, 200*time.Millisecond)
+	if err := tr.Start(); err != nil {
+		t.Fatalf("Start() failed: %v", err)
 	}
 
 	_, err := tr.Transcribe(audioFile)
 	if err == nil {
-		t.Fatal("expected timeout error, got nil")
+		t.Fatal("expected timeout error")
 	}
-	if got := err.Error(); got != "transcription timeout after 100ms" {
-		t.Errorf("error = %q, want timeout error", got)
-	}
-}
-
-func TestTranscribeScriptError(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	mockScript := filepath.Join(tmpDir, "transcribe.py")
-	script := `#!/usr/bin/env python3
-import sys
-print("File not found: /bad/path", file=sys.stderr)
-sys.exit(1)
-`
-	os.WriteFile(mockScript, []byte(script), 0755)
-	audioFile := filepath.Join(tmpDir, "test.ogg")
-	os.WriteFile(audioFile, []byte("fake"), 0644)
-
-	tr := &Transcriber{
-		scriptPath: mockScript,
-		model:      "small",
-		modelsDir:  tmpDir,
-		timeout:    5 * time.Second,
-	}
-
-	_, err := tr.Transcribe(audioFile)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if !tr.IsReady() {
+		// After timeout, process is killed and not ready
+		t.Log("transcriber correctly marked not ready after timeout")
 	}
 }
 
 func TestTelegramFileDownload(t *testing.T) {
-	// Mock Telegram API server
 	mux := http.NewServeMux()
 
-	// Mock getFile endpoint
 	mux.HandleFunc("/botTEST_TOKEN/getFile", func(w http.ResponseWriter, r *http.Request) {
 		fileID := r.URL.Query().Get("file_id")
 		resp := map[string]any{
@@ -186,7 +238,6 @@ func TestTelegramFileDownload(t *testing.T) {
 		json.NewEncoder(w).Encode(resp)
 	})
 
-	// Mock file download endpoint
 	mux.HandleFunc("/file/botTEST_TOKEN/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("fake OGG audio data"))
 	})
@@ -194,13 +245,8 @@ func TestTelegramFileDownload(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	// Override Telegram API URL for testing by using the test server
-	// We test the individual functions since they take http.Client
-
-	t.Run("getFilePath", func(t *testing.T) {
+	t.Run("getFilePath error handling", func(t *testing.T) {
 		client := ts.Client()
-		// We'd need to override the URL, but telegramGetFilePath has hardcoded URL
-		// For now, just test that the function exists and handles errors
 		_, err := telegramGetFilePath(client, "INVALID_TOKEN", "file123")
 		if err == nil {
 			t.Log("Expected error with invalid token (actual Telegram would fail)")

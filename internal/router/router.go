@@ -21,6 +21,7 @@ type Result struct {
 	Tier     string // tier name (e.g. "instant", "analyze", "heavy")
 	Response string // non-empty only for direct router responses
 	Reason   string // classifier reasoning
+	React    string // optional emoji reaction suggestion for the user's message
 }
 
 // ClassifyInput holds all inputs for the router classifier.
@@ -76,7 +77,7 @@ func Classify(input ClassifyInput) Result {
 
 	if err != nil || raw == "" {
 		if ctx.Err() == context.DeadlineExceeded {
-			log.Printf("router: timeout after 30s, falling back to %s", input.Tiers.DefaultFallback)
+			log.Printf("router: timeout after 30s, falling back to %s (stderr: %s)", input.Tiers.DefaultFallback, strings.TrimSpace(stderr.String()))
 		} else {
 			log.Printf("router: classify error: %v (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 		}
@@ -193,8 +194,9 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 
 	// 7. Response format.
 	b.WriteString("\nRespond with ONLY a JSON object:")
-	b.WriteString("\n- If you can answer: {\"response\": \"<your answer>\", \"reason\": \"direct\"}")
+	b.WriteString("\n- If you can answer: {\"response\": \"<your answer>\", \"reason\": \"direct\", \"react\": \"EMOJI_or_empty\"}")
 	b.WriteString("\n- If you need to route: {\"tier\": \"<name>\", \"reason\": \"<brief reason>\"}")
+	b.WriteString("\nThe optional \"react\" field suggests a single emoji reaction for the user's message (shows you understood it). Omit or leave empty if no reaction fits. Pick contextually relevant emojis, not generic thumbs up.")
 
 	return b.String()
 }
@@ -207,12 +209,14 @@ func parseResponse(raw string, valid map[string]bool) Result {
 		Tier     string `json:"tier"`
 		Response string `json:"response"`
 		Reason   string `json:"reason"`
+		React    string `json:"react"`
 	}
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err == nil {
 		if parsed.Response != "" && parsed.Tier == "" {
 			return Result{
 				Response: parsed.Response,
 				Reason:   parsed.Reason,
+				React:    parsed.React,
 			}
 		}
 		if valid[parsed.Tier] {
@@ -220,6 +224,7 @@ func parseResponse(raw string, valid map[string]bool) Result {
 				Tier:     parsed.Tier,
 				Response: parsed.Response,
 				Reason:   parsed.Reason,
+				React:    parsed.React,
 			}
 		}
 	}

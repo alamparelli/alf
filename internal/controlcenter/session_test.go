@@ -171,3 +171,42 @@ func TestSessionStore_UnknownID(t *testing.T) {
 		t.Error("unknown session should be invalid")
 	}
 }
+
+func TestFileSessionStore_PersistAcrossRestarts(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/sessions.json"
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Create store, issue a session.
+	ss1 := NewFileSessionStore(path, func() time.Time { return now })
+	id, err := ss1.Issue(12345, 7*24*time.Hour)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !ss1.Valid(id) {
+		t.Fatal("session should be valid in first store")
+	}
+
+	// Simulate restart: create a new store from same file.
+	ss2 := NewFileSessionStore(path, func() time.Time { return now })
+	if !ss2.Valid(id) {
+		t.Error("session should survive restart and be valid in second store")
+	}
+}
+
+func TestFileSessionStore_PrunesExpiredOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/sessions.json"
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Issue with short TTL.
+	ss1 := NewFileSessionStore(path, func() time.Time { return t1 })
+	id, _ := ss1.Issue(100, 1*time.Hour)
+
+	// Reload after expiration.
+	t2 := t1.Add(2 * time.Hour)
+	ss2 := NewFileSessionStore(path, func() time.Time { return t2 })
+	if ss2.Valid(id) {
+		t.Error("expired session should be pruned on load")
+	}
+}

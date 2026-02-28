@@ -298,21 +298,44 @@ func main() {
 				continue
 			}
 
-			if u.Message == nil || u.Message.Text == "" {
+			// Check for message with text or media
+			if u.Message == nil {
+				continue
+			}
+
+			// Check for message content: text, media, or voice
+			hasText := u.Message.Text != ""
+			hasMedia := len(u.Message.Photo) > 0 || u.Message.Document != nil
+			hasVoice := u.Message.Voice != nil || u.Message.Audio != nil
+
+			if !hasText && !hasMedia && !hasVoice {
 				continue
 			}
 
 			log.Printf("← %s: %s", u.Message.From.Username, u.Message.Text)
 			stats.RecordMessage()
 
+			// Extract reply context if this is a quoted reply.
+			isReply := u.Message.ReplyToMessage != nil
+			repliedToID := int64(0)
+			if isReply {
+				repliedToID = u.Message.ReplyToMessage.MessageID
+			}
+
+			// Note: hasText, hasMedia, hasVoice already determined above
+
 			truncated := u.Message.Text
 			if len(truncated) > 200 {
 				truncated = truncated[:200]
 			}
 			eventLog.Log("message_in", map[string]any{
-				"chat_id":  u.Message.Chat.ID,
-				"username": u.Message.From.Username,
-				"text":     truncated,
+				"chat_id":       u.Message.Chat.ID,
+				"username":      u.Message.From.Username,
+				"text":          truncated,
+				"is_reply":      isReply,
+				"replied_to_id": repliedToID,
+				"has_media":     hasMedia,
+				"has_voice":     hasVoice,
 			})
 
 			// Command routing: handle /commands before passing to Claude.
@@ -337,10 +360,13 @@ func main() {
 			// Animate dots on routing message while classifying.
 			routingAnim := newDotAnimator(tg, chatID, routingMsgID, routingBase, "typing")
 
+			// Build complete message content including media captions and reply context.
+			msgWithReplyContext := buildMessageContent(u.Message)
+
 			// Route message to appropriate tier.
 			var tp tierParams
 			routeResult := router.Classify(router.ClassifyInput{
-				Message:      u.Message.Text,
+				Message:      msgWithReplyContext,
 				Tiers:        tierStore.Current(),
 				DataDir:      dataDir,
 				ConfigDir:    configDir,
@@ -357,8 +383,9 @@ func main() {
 					tg.DeleteMessage(chatID, routingMsgID)
 				}
 				eventLog.Log("router_direct", map[string]any{
-					"chat_id": chatID,
-					"reason":  routeResult.Reason,
+					"chat_id":          chatID,
+					"reason":           routeResult.Reason,
+					"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
 				})
 				chatSessions.TouchContext(chatID, "router")
 				// React to the user's message before sending the reply (more natural).
@@ -366,6 +393,14 @@ func main() {
 				if mid, err := tg.SendMessageReturnID(chatID, routeResult.Response); err == nil && mid != 0 {
 					alfMsgIDs.Add(mid)
 					log.Printf("tracking alf msg %d (buffer=%d)", mid, alfMsgIDs.Size())
+					// Log outgoing message
+					eventLog.Log("message_out", map[string]any{
+						"chat_id":          chatID,
+						"route":            "router_direct",
+						"text_length":      len(routeResult.Response),
+						"message_id":       mid,
+						"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
+					})
 				}
 				continue
 			}
@@ -374,10 +409,11 @@ func main() {
 			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), tierFS)
 
 			eventLog.Log("router_classify", map[string]any{
-				"chat_id": chatID,
-				"tier":    routeResult.Tier,
-				"reason":  routeResult.Reason,
-				"model":   tp.Model,
+				"chat_id":          chatID,
+				"tier":             routeResult.Tier,
+				"reason":           routeResult.Reason,
+				"model":            tp.Model,
+				"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
 			})
 
 			// Transition routing message into processing status message.
@@ -408,12 +444,12 @@ func main() {
 			}
 
 			start := time.Now()
-			result, err := askClaude(u.Message.Text, resumeID, tp, onProgress)
+			result, err := askClaude(msgWithReplyContext, resumeID, tp, onProgress)
 			// Retry without resume if session not found.
 			if err != nil && resumeID != "" && strings.Contains(err.Error(), "No conversation found") {
 				log.Printf("session %s expired, starting fresh", resumeID)
 				chatSessions.Archive(chatID)
-				result, err = askClaude(u.Message.Text, "", tp, onProgress)
+				result, err = askClaude(msgWithReplyContext, "", tp, onProgress)
 			}
 			duration := time.Since(start)
 
@@ -466,12 +502,14 @@ func main() {
 			log.Printf("→ %s %dms %dt $%.4f", result.Model, duration.Milliseconds(), result.NumTurns, result.CostUSD)
 
 			eventLog.Log("message_out", map[string]any{
-				"chat_id":     chatID,
-				"model":       result.Model,
-				"duration_ms": duration.Milliseconds(),
-				"cost_usd":    result.CostUSD,
-				"text_length": len(reply),
-				"session_id":  result.SessionID,
+				"chat_id":          chatID,
+				"model":            result.Model,
+				"duration_ms":      duration.Milliseconds(),
+				"cost_usd":         result.CostUSD,
+				"text_length":      len(reply),
+				"session_id":       result.SessionID,
+				"tier":             routeResult.Tier,
+				"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
 			})
 
 			// React to the user's message before sending the reply (more natural).
@@ -480,6 +518,13 @@ func main() {
 			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {
 				alfMsgIDs.Add(msgID)
 				log.Printf("tracking alf msg %d (buffer=%d)", msgID, alfMsgIDs.Size())
+				// Log sent message ID
+				eventLog.Log("message_sent", map[string]any{
+					"chat_id":         chatID,
+					"message_id":      msgID,
+					"session_id":      result.SessionID,
+					"project_context": filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
+				})
 			}
 		}
 	}
@@ -723,10 +768,58 @@ type Update struct {
 }
 
 type Message struct {
-	MessageID int64  `json:"message_id"`
-	Chat      Chat   `json:"chat"`
-	From      User   `json:"from"`
-	Text      string `json:"text"`
+	MessageID       int64      `json:"message_id"`
+	Chat            Chat       `json:"chat"`
+	From            User       `json:"from"`
+	Text            string     `json:"text"`
+	ReplyToMessage  *Message   `json:"reply_to_message"`
+	Photo           []*Photo   `json:"photo"`
+	Document        *Document  `json:"document"`
+	Video           *Video     `json:"video"`
+	Audio           *Audio     `json:"audio"`
+	Voice           *Voice     `json:"voice"`
+	VideoNote       *VideoNote `json:"video_note"`
+	Caption         string     `json:"caption"`
+}
+
+type Photo struct {
+	FileID   string `json:"file_id"`
+	FileSize int64  `json:"file_size"`
+}
+
+type Document struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
+}
+
+type Video struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
+	Duration int    `json:"duration"`
+}
+
+type Audio struct {
+	FileID   string `json:"file_id"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
+	Duration int    `json:"duration"`
+}
+
+type Voice struct {
+	FileID   string `json:"file_id"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
+	Duration int    `json:"duration"`
+}
+
+type VideoNote struct {
+	FileID   string `json:"file_id"`
+	FileSize int64  `json:"file_size"`
+	Duration int    `json:"duration"`
 }
 
 type MessageReactionUpdated struct {
@@ -782,6 +875,53 @@ func getUpdates(client *http.Client, token string, offset int64) ([]Update, erro
 		return nil, fmt.Errorf("telegram API error: %s", string(body))
 	}
 	return result.Result, nil
+}
+
+// extractReplyContext extracts the quoted message text from a reply, capped at 500 chars.
+func extractReplyContext(msg *Message) string {
+	if msg == nil || msg.ReplyToMessage == nil {
+		return ""
+	}
+	quoted := msg.ReplyToMessage.Text
+	if len(quoted) > 500 {
+		quoted = quoted[:500]
+	}
+	return quoted
+}
+
+// prependReplyContext adds quoted message context to the user's message.
+func prependReplyContext(msg *Message) string {
+	quoted := extractReplyContext(msg)
+	if quoted == "" {
+		return msg.Text
+	}
+	return fmt.Sprintf("[En réponse à : \"%s\"]\n%s", quoted, msg.Text)
+}
+
+// buildMessageContent builds the complete message content including media captions
+func buildMessageContent(msg *Message) string {
+	content := msg.Text
+
+	// Include caption for photo/document messages
+	if msg.Caption != "" {
+		if content != "" {
+			content = msg.Caption + "\n" + content
+		} else {
+			content = msg.Caption
+		}
+	}
+
+	// Apply reply context if present
+	return prependReplyContext(&Message{
+		Text:           content,
+		ReplyToMessage: msg.ReplyToMessage,
+	})
+}
+
+// hasMedia checks if message contains any media attachments
+func hasMedia(msg *Message) bool {
+	return len(msg.Photo) > 0 || msg.Document != nil || msg.Video != nil ||
+		msg.Audio != nil || msg.Voice != nil || msg.VideoNote != nil
 }
 
 // handleCommand processes known /commands. Returns true if handled.

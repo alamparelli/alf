@@ -22,8 +22,8 @@ services:
       - ./config.d:/home/node/data/config.d:ro
       - ./tools.d:/home/node/data/tools.d:ro
       - ./skills.d:/home/node/data/skills.d:ro
-    mem_limit: 512m
-    cpus: "0.5"
+    mem_limit: 2g
+    cpus: "2.0"
 
 secrets:
   telegram_bot_token:

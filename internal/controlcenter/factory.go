@@ -21,14 +21,15 @@ type Deps struct {
 	Sessions       *SessionStore
 	AuthToken      string
 	DataDir        string
+	ConfigDir      string
 	DashboardHTML  string
 	WebFS          fs.FS // embedded web assets (style.css, app.js)
 }
 
-// StoreFactory creates concrete store implementations from a data directory.
-func StoreFactory(dataDir string) (ConfigStore, TierStore, ResourceStore, ResourceStore, ResourceStore) {
-	cs := NewFileConfigStore(ConfigPath(dataDir))
-	ts := NewFileTierStore(TiersPath(dataDir))
+// StoreFactory creates concrete store implementations from data and config directories.
+func StoreFactory(dataDir, configDir string) (ConfigStore, TierStore, ResourceStore, ResourceStore, ResourceStore) {
+	cs := NewFileConfigStore(ConfigPath(configDir))
+	ts := NewFileTierStore(TiersPath(configDir))
 	ms := NewFileResourceStore(filepath.Join(dataDir, "memories"), ".md")
 	tools := NewFileResourceStore(filepath.Join(dataDir, "tools"), ".json")
 	skills := NewFileResourceStore(filepath.Join(dataDir, "skills"), ".json")
@@ -64,8 +65,8 @@ func HandlerFactory(deps Deps) http.Handler {
 		})
 	}
 	mux.Handle("/api/router-prompt", &RouterPromptHandler{
-		DataDir:  deps.DataDir,
-		Notifier: deps.Notifier,
+		ConfigDir: deps.ConfigDir,
+		Notifier:  deps.Notifier,
 	})
 	mux.Handle("/api/status", &StatusHandler{
 		Provider: deps.StatusProvider,

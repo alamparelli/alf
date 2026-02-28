@@ -28,6 +28,7 @@ type ClassifyInput struct {
 	Message      string
 	Tiers        *cc.TiersConfig
 	DataDir      string
+	ConfigDir    string // RO config path (for router-prompt.md)
 	LastTier     string // from session store
 	MessageCount int    // from session store
 }
@@ -168,7 +169,7 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	}
 
 	// 5. Custom router prompt from file.
-	routerPromptPath := filepath.Join(input.DataDir, "config", "router-prompt.md")
+	routerPromptPath := filepath.Join(input.ConfigDir, "router-prompt.md")
 	if data, err := os.ReadFile(routerPromptPath); err == nil {
 		custom := strings.TrimSpace(string(data))
 		if custom != "" {

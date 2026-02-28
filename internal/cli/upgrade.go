@@ -26,6 +26,9 @@ func RunUpgrade(currentVersion string) {
 	dockerCompose(dir, "pull")
 	PrintCheck("Image updated")
 
+	// Migrate config from data/config/ to config.d/ if needed.
+	migrateConfigDir(dir)
+
 	// Fix volume ownership — previous versions ran as root, now runs as node (uid 1000).
 	fixVolumePermissions(dir)
 
@@ -137,6 +140,81 @@ func fixVolumePermissions(dir string) {
 			}
 		}
 	}
+}
+
+// migrateConfigDir copies config files from data/config/ to config.d/ if config.d is empty.
+// This handles upgrades from versions that stored config inside the data volume.
+func migrateConfigDir(dir string) {
+	configD := filepath.Join(dir, "config.d")
+	oldConfigDir := filepath.Join(dir, "data", "config")
+
+	// Check if config.d already has config.json — no migration needed.
+	if _, err := os.Stat(filepath.Join(configD, "config.json")); err == nil {
+		return
+	}
+
+	// Check if old config directory exists with files to migrate.
+	if _, err := os.Stat(oldConfigDir); err != nil {
+		return
+	}
+
+	os.MkdirAll(configD, 0o755)
+
+	for _, name := range []string{"config.json", "tiers.json", "router-prompt.md"} {
+		src := filepath.Join(oldConfigDir, name)
+		dst := filepath.Join(configD, name)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			PrintWarning(fmt.Sprintf("Failed to migrate %s: %v", name, err))
+			continue
+		}
+		PrintCheck(fmt.Sprintf("Migrated %s → config.d/", name))
+	}
+
+	// Migrate per-tier directories from data/tiers/ to config.d/tiers/.
+	oldTiersDir := filepath.Join(dir, "data", "tiers")
+	newTiersDir := filepath.Join(configD, "tiers")
+	if _, err := os.Stat(newTiersDir); err == nil {
+		return // already migrated
+	}
+	entries, err := os.ReadDir(oldTiersDir)
+	if err != nil {
+		return // no old tiers
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		src := filepath.Join(oldTiersDir, e.Name())
+		dst := filepath.Join(newTiersDir, e.Name())
+		if err := copyDir(src, dst); err != nil {
+			PrintWarning(fmt.Sprintf("Failed to migrate tier %s: %v", e.Name(), err))
+			continue
+		}
+		PrintCheck(fmt.Sprintf("Migrated tier %s → config.d/tiers/", e.Name()))
+	}
+}
+
+// copyDir recursively copies a directory tree.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	})
 }
 
 func fetchLatestTag() (string, error) {

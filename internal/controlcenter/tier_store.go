@@ -80,7 +80,7 @@ func (s *fileTierStore) Reload() error {
 	return nil
 }
 
-// TiersPath returns the standard tiers.json path for a data directory.
-func TiersPath(dataDir string) string {
-	return filepath.Join(dataDir, "config", "tiers.json")
+// TiersPath returns the standard tiers.json path for a config directory.
+func TiersPath(configDir string) string {
+	return filepath.Join(configDir, "tiers.json")
 }

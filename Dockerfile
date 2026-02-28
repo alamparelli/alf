@@ -33,9 +33,11 @@ COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 
 # Directories with proper ownership — single user model (node).
 RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
-    && mkdir -p /home/node/data/config /home/node/data/tools /home/node/data/skills \
+    && mkdir -p /home/node/data/tools /home/node/data/skills \
     && mkdir -p /home/node/data/.claude \
-    && chown -R node:node /home/node
+    && mkdir -p /opt/alf/config \
+    && chown -R node:node /home/node \
+    && chown -R node:node /opt/alf
 
 WORKDIR /home/node
 USER node

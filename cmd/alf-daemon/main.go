@@ -387,7 +387,7 @@ func main() {
 				reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
 			}
 
-			log.Printf("→ %s %dms $%.4f", result.Model, duration.Milliseconds(), result.CostUSD)
+			log.Printf("→ %s %dms %dt $%.4f", result.Model, duration.Milliseconds(), result.NumTurns, result.CostUSD)
 
 			eventLog.Log("message_out", map[string]any{
 				"chat_id":     chatID,
@@ -413,12 +413,12 @@ type claudeResult struct {
 	Text      string
 	Model     string
 	CostUSD   float64
+	NumTurns  int
 }
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
 	Model          string   // full model name, e.g. "claude-sonnet-4-5"
-	MaxTurns       int      // 0 = default (3)
 	Tools          []string // nil = omit flag
 	Effort         string   // "" = omit flag
 	TierPromptArgs []string // --append-system-prompt pairs from tier system-prompt.md + skills
@@ -429,16 +429,10 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 	if model == "" {
 		model = "claude-haiku-4-5"
 	}
-	maxTurns := tp.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = 3
-	}
-
 	args := []string{
 		"-p", prompt,
 		"--model", model,
 		"--output-format", "json",
-		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--dangerously-skip-permissions",
 	}
 
@@ -498,6 +492,7 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 			Subtype      string               `json:"subtype"`
 			Result       string               `json:"result"`
 			IsError      bool                 `json:"is_error"`
+			NumTurns     int                  `json:"num_turns"`
 			TotalCostUSD float64              `json:"total_cost_usd"`
 			ModelUsage   map[string]jsonModel `json:"modelUsage"`
 		}
@@ -532,6 +527,7 @@ func askClaude(prompt, resumeID string, tp tierParams) (*claudeResult, error) {
 				Text:      text,
 				Model:     model,
 				CostUSD:   parsed.TotalCostUSD,
+				NumTurns:  parsed.NumTurns,
 			}, nil
 		}
 		// JSON parse failed — treat raw output as text response.
@@ -758,7 +754,6 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, tfs *tierfs.TierF
 		if t.Name == tierName {
 			return tierParams{
 				Model:          router.ResolveModel(t.Model),
-				MaxTurns:       t.MaxTurns,
 				Tools:          t.Tools,
 				Effort:         t.Effort,
 				TierPromptArgs: tfs.CollectPromptArgs(tierName),

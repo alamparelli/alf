@@ -23,10 +23,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     trash-cli \
     python3 \
     python3-pip \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install faster-whisper for voice transcription
+# Install faster-whisper for voice transcription.
+# libgomp1 is required for OpenMP parallel CPU execution in ctranslate2.
 RUN pip3 install --break-system-packages faster-whisper
+
+# Enable OpenMP threading for ctranslate2 (faster-whisper backend).
+ENV OMP_NUM_THREADS=4
 
 # Install Go for Claude agent to build CLI tools
 RUN curl -fsSL "https://go.dev/dl/go1.24.1.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz

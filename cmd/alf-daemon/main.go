@@ -28,6 +28,7 @@ import (
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/tierfs"
 	"github.com/alamparelli/alf/internal/updater"
+	"github.com/alamparelli/alf/internal/voice"
 )
 
 var version = "dev"
@@ -196,6 +197,29 @@ func main() {
 		}
 	}
 
+	// Voice transcriber (faster-whisper via Python subprocess).
+	transcriptScriptPath := "/opt/alf/transcribe.py"
+	if p := os.Getenv("ALF_TRANSCRIBE_SCRIPT"); p != "" {
+		transcriptScriptPath = p
+	}
+	whisperModel := "small"
+	whisperModelsDir := filepath.Join(dataDir, "models")
+	var transcriber *voice.Transcriber
+	var voiceReady *voice.ReadyState
+	if voice.IsAvailable(transcriptScriptPath) {
+		var err error
+		transcriber, err = voice.New(transcriptScriptPath, whisperModel, whisperModelsDir, 120*time.Second)
+		if err != nil {
+			log.Printf("voice transcription disabled: %v", err)
+		} else {
+			log.Println("voice transcription enabled (faster-whisper)")
+			// Start background model download
+			voiceReady = voice.WarmUp(transcriptScriptPath, whisperModel, whisperModelsDir)
+		}
+	} else {
+		log.Println("voice transcription disabled (transcribe.py not found)")
+	}
+
 	// Ring buffer tracking Alf's sent message IDs for reaction matching.
 	alfMsgIDs := newRingBuffer(200)
 
@@ -337,6 +361,54 @@ func main() {
 				"has_media":     hasMedia,
 				"has_voice":     hasVoice,
 			})
+
+			// Handle voice messages: transcribe and treat as text.
+			if hasVoice && transcriber != nil && voiceReady != nil && !voiceReady.IsReady() {
+				tg.SendHTML(u.Message.Chat.ID, "Voice model is still loading. Please try again in a moment.")
+				continue
+			}
+			if hasVoice && transcriber != nil {
+				fileID := ""
+				duration := 0
+				if u.Message.Voice != nil {
+					fileID = u.Message.Voice.FileID
+					duration = u.Message.Voice.Duration
+				} else if u.Message.Audio != nil {
+					fileID = u.Message.Audio.FileID
+					duration = u.Message.Audio.Duration
+				}
+
+				if fileID != "" {
+					log.Printf("voice: transcribing %s (%ds)", fileID, duration)
+					tg.SendChatAction(u.Message.Chat.ID, "typing")
+
+					result, err := transcriber.DownloadAndTranscribe(client, token, fileID)
+					if err != nil {
+						log.Printf("voice transcription failed: %v", err)
+						tg.SendHTML(u.Message.Chat.ID, "Could not transcribe voice message.")
+						eventLog.Log("voice_error", map[string]any{
+							"chat_id":    u.Message.Chat.ID,
+							"error":      err.Error(),
+							"duration_s": duration,
+						})
+						continue
+					}
+
+					// Inject transcription as message text
+					u.Message.Text = result.Text
+					eventLog.Log("voice_in", map[string]any{
+						"chat_id":    u.Message.Chat.ID,
+						"username":   u.Message.From.Username,
+						"transcript": result.Text,
+						"duration_s": duration,
+						"language":   result.Language,
+					})
+					log.Printf("voice: %q (%s)", result.Text, result.Language)
+				}
+			} else if hasVoice && transcriber == nil {
+				tg.SendHTML(u.Message.Chat.ID, "Voice messages are not supported yet. Please send text.")
+				continue
+			}
 
 			// Command routing: handle /commands before passing to Claude.
 			if strings.HasPrefix(u.Message.Text, "/") {

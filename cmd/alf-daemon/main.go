@@ -21,9 +21,10 @@ import (
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
-	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/gittrack"
+	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/session"
@@ -215,6 +216,41 @@ func main() {
 		}
 	} else {
 		log.Println("voice transcription disabled (transcribe.py not found)")
+	}
+
+	// Embedding sidecar (persistent sentence-transformers Python process).
+	embedScriptPath := "/opt/alf/embed.py"
+	if p := os.Getenv("ALF_EMBED_SCRIPT"); p != "" {
+		embedScriptPath = p
+	}
+	var memDB *memstore.Store
+	if memstore.IsAvailable(embedScriptPath) {
+		embedder, err := memstore.NewEmbedder(embedScriptPath, "", filepath.Join(dataDir, "models"), 30*time.Second)
+		if err != nil {
+			log.Printf("memstore: embedder disabled: %v", err)
+		} else {
+			go func() {
+				if err := embedder.Start(); err != nil {
+					log.Printf("memstore: embedder start failed: %v", err)
+				}
+			}()
+
+			memDB, err = memstore.New(filepath.Join(dataDir, "memory.db"), embedder)
+			if err != nil {
+				log.Printf("warning: memory store init failed: %v", err)
+			} else {
+				defer memDB.Close()
+				sockPath := filepath.Join(dataDir, "memstore.sock")
+				go memDB.ServeUnix(sockPath)
+
+				// Periodic memory extraction (every 3h).
+				extractor := memstore.NewExtractor(memDB, dataDir, 3*time.Hour)
+				extractor.Start()
+				defer extractor.Stop()
+			}
+		}
+	} else {
+		log.Println("memstore: embedding sidecar disabled (embed.py not found)")
 	}
 
 	// Ring buffer tracking Alf's sent message IDs for reaction matching.

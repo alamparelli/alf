@@ -5,6 +5,9 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Alert,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import type { ChatMessage, PendingMedia, StreamingState, SSEEvent } from '../types';
 import { sendMessage, fetchHistory, sendReaction } from '../services/api';
@@ -23,44 +26,74 @@ export default function ChatScreen() {
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const [reactionTarget, setReactionTarget] = useState<string | null>(null);
+  const [failedMsgIds, setFailedMsgIds] = useState<Set<string>>(new Set());
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
   // Load history on mount.
   useEffect(() => {
     fetchHistory(50)
-      .then((msgs) => setMessages(msgs))
-      .catch(console.error);
+      .then((msgs) => {
+        setMessages(msgs);
+        setHasMore(msgs.length >= 50);
+      })
+      .catch((e) => Alert.alert('Connection Error', e.message));
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || messages.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldest = messages[0];
+      const older = await fetchHistory(50, oldest.ts);
+      if (older.length === 0) {
+        setHasMore(false);
+      } else {
+        setMessages((prev) => [...older, ...prev]);
+        if (older.length < 50) setHasMore(false);
+      }
+    } catch (e) {
+      console.error('Load more error:', e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, messages]);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
   }, []);
 
-  const handleSend = useCallback(
-    async (text: string) => {
-      if (!text.trim() && pendingMedia.length === 0) return;
+  const doSend = useCallback(
+    async (text: string, mediaIds: string[], replyId?: string, retryMsgId?: string) => {
+      const msgId = retryMsgId || `temp-${Date.now()}`;
 
-      const mediaIds = pendingMedia.map((m) => m.upload_id);
-      setPendingMedia([]);
-      setReplyTo(null);
-
-      // Optimistic user message.
-      const userMsg: ChatMessage = {
-        id: `temp-${Date.now()}`,
-        role: 'user',
-        text: text.trim(),
-        ts: new Date().toISOString(),
-        reply_to: replyTo?.id,
-        media: pendingMedia.map((m) => ({
-          upload_id: m.upload_id,
-          type: m.mime_type.startsWith('image/') ? 'photo' as const : 'document' as const,
-          file_name: m.file_name,
-          mime_type: m.mime_type,
-          url: m.uri,
-        })),
-      };
-      setMessages((prev) => [...prev, userMsg]);
-      scrollToBottom();
+      if (!retryMsgId) {
+        // Optimistic user message.
+        const userMsg: ChatMessage = {
+          id: msgId,
+          role: 'user',
+          text: text.trim(),
+          ts: new Date().toISOString(),
+          reply_to: replyId,
+          media: pendingMedia.map((m) => ({
+            upload_id: m.upload_id,
+            type: m.mime_type.startsWith('image/') ? 'photo' as const : 'document' as const,
+            file_name: m.file_name,
+            mime_type: m.mime_type,
+            url: m.uri,
+          })),
+        };
+        setMessages((prev) => [...prev, userMsg]);
+        scrollToBottom();
+      } else {
+        // Retrying: clear error state.
+        setFailedMsgIds((prev) => {
+          const next = new Set(prev);
+          next.delete(retryMsgId);
+          return next;
+        });
+      }
 
       setStreaming({ isStreaming: true, phase: 'thinking', accumulatedText: '' });
 
@@ -69,7 +102,7 @@ export default function ChatScreen() {
         await sendMessage(
           text.trim(),
           {
-            reply_to: replyTo?.id,
+            reply_to: replyId,
             media_ids: mediaIds.length > 0 ? mediaIds : undefined,
           },
           (event: SSEEvent) => {
@@ -93,13 +126,12 @@ export default function ChatScreen() {
                 }));
                 scrollToBottom();
                 break;
-              case 'reaction':
-                // ALF's reaction on the user message.
+              case 'reaction': {
                 const emoji = event.data?.emoji;
                 if (emoji) {
                   setMessages((prev) =>
                     prev.map((m) =>
-                      m.id === userMsg.id
+                      m.id === msgId
                         ? {
                             ...m,
                             reactions: [...(m.reactions || []), { emoji, from: 'alf' as const }],
@@ -109,6 +141,7 @@ export default function ChatScreen() {
                   );
                 }
                 break;
+              }
               case 'done': {
                 const data = event.data;
                 const assistantMsg: ChatMessage = {
@@ -143,9 +176,32 @@ export default function ChatScreen() {
       } catch (e: any) {
         console.error('Send error:', e);
         setStreaming({ isStreaming: false, phase: 'idle', accumulatedText: '' });
+        setFailedMsgIds((prev) => new Set(prev).add(msgId));
+        Alert.alert('Send Failed', e.message || 'Could not reach ALF');
       }
     },
-    [replyTo, pendingMedia, scrollToBottom],
+    [pendingMedia, scrollToBottom],
+  );
+
+  const handleSend = useCallback(
+    async (text: string) => {
+      if (!text.trim() && pendingMedia.length === 0) return;
+
+      const mediaIds = pendingMedia.map((m) => m.upload_id);
+      const replyId = replyTo?.id;
+      setPendingMedia([]);
+      setReplyTo(null);
+
+      await doSend(text, mediaIds, replyId);
+    },
+    [replyTo, pendingMedia, doSend],
+  );
+
+  const handleRetry = useCallback(
+    (msg: ChatMessage) => {
+      doSend(msg.text, msg.media?.map((m) => m.upload_id) || [], msg.reply_to, msg.id);
+    },
+    [doSend],
   );
 
   const handleReaction = useCallback(
@@ -187,6 +243,15 @@ export default function ChatScreen() {
     setReplyTo(msg);
   }, []);
 
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (event.nativeEvent.contentOffset.y < 100) {
+        loadMore();
+      }
+    },
+    [loadMore],
+  );
+
   const handleLongPress = useCallback((msgId: string) => {
     setReactionTarget(msgId);
   }, []);
@@ -197,9 +262,11 @@ export default function ChatScreen() {
         message={item}
         onLongPress={() => handleLongPress(item.id)}
         onSwipeRight={() => handleSwipeReply(item)}
+        showError={failedMsgIds.has(item.id)}
+        onRetry={() => handleRetry(item)}
       />
     ),
-    [handleLongPress, handleSwipeReply],
+    [handleLongPress, handleSwipeReply, failedMsgIds, handleRetry],
   );
 
   return (
@@ -216,6 +283,8 @@ export default function ChatScreen() {
         style={styles.list}
         contentContainerStyle={styles.listContent}
         onContentSizeChange={scrollToBottom}
+        onScroll={handleScroll}
+        scrollEventThrottle={200}
         ListFooterComponent={
           streaming.isStreaming ? (
             <MessageBubble

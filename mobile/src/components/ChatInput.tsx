@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ScrollView,
   Image,
+  Alert,
 } from 'react-native';
 import { Audio } from 'expo-av';
 import type { PendingMedia } from '../types';
@@ -43,8 +44,17 @@ export default function ChatInput({
     try {
       const media = await pickPhoto();
       if (media) onMediaAttached(media);
-    } catch (e) {
-      console.error('Photo pick error:', e);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to pick photo');
+    }
+  };
+
+  const handlePickVideo = async () => {
+    try {
+      const media = await pickVideo();
+      if (media) onMediaAttached(media);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to pick video');
     }
   };
 
@@ -52,8 +62,8 @@ export default function ChatInput({
     try {
       const media = await pickDocument();
       if (media) onMediaAttached(media);
-    } catch (e) {
-      console.error('Document pick error:', e);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to pick document');
     }
   };
 
@@ -72,8 +82,8 @@ export default function ChatInput({
       );
       recordingRef.current = recording;
       setIsRecording(true);
-    } catch (e) {
-      console.error('Recording start error:', e);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to start recording');
     }
   };
 
@@ -88,13 +98,21 @@ export default function ChatInput({
 
       if (uri) {
         const result = await uploadVoice(uri);
-        // Auto-send voice transcript as message.
-        if (result.transcript) {
-          onSend(`[Voice] ${result.transcript}`);
-        }
+        // Attach as media so it appears in the message, then auto-send with transcript text.
+        onMediaAttached({
+          upload_id: result.upload_id,
+          file_name: result.file_name,
+          mime_type: result.mime_type,
+          uri,
+        });
+        // Auto-send with transcript or a fallback label.
+        const label = result.transcript
+          ? result.transcript
+          : '[Voice message]';
+        onSend(label);
       }
-    } catch (e) {
-      console.error('Recording stop error:', e);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to process recording');
     }
   };
 
@@ -131,6 +149,14 @@ export default function ChatInput({
           disabled={disabled}
         >
           <Text style={styles.iconText}>📷</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={handlePickVideo}
+          disabled={disabled}
+        >
+          <Text style={styles.iconText}>🎬</Text>
         </TouchableOpacity>
 
         <TouchableOpacity

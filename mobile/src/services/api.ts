@@ -140,7 +140,7 @@ export async function fetchHistory(
   const params = new URLSearchParams({ limit: String(limit) });
   if (before) params.set('before', before);
 
-  const response = await fetch(`${url}/api/chat/history?${params}`, {
+  const response = await fetch(`${url}/api/chat?${params}`, {
     headers: h,
   });
 

@@ -678,6 +678,7 @@ func main() {
 					eventLog.Log("message_out", map[string]any{
 						"chat_id":          chatID,
 						"route":            "router_direct",
+						"text":             routeResult.Response,
 						"text_length":      len(routeResult.Response),
 						"message_id":       mid,
 						"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
@@ -797,8 +798,10 @@ func main() {
 				"model":            result.Model,
 				"duration_ms":      duration.Milliseconds(),
 				"cost_usd":         result.CostUSD,
+				"text":             reply,
 				"text_length":      len(reply),
 				"session_id":       result.SessionID,
+				"session_path":     filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID), "sessions", result.SessionID+".json"),
 				"tier":             routeResult.Tier,
 				"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
 			})
@@ -856,8 +859,14 @@ func askClaude(prompt, resumeID string, tp tierParams, onProgress progressFn) (*
 	if model == "" {
 		model = "claude-haiku-4-5"
 	}
+	// Prefix prompt with a zero-width space if it starts with '-' to prevent
+	// the Claude CLI from parsing it as a flag.
+	safePrompt := prompt
+	if strings.HasPrefix(prompt, "-") {
+		safePrompt = "\u200B" + prompt
+	}
 	args := []string{
-		"-p", prompt,
+		"-p", safePrompt,
 		"--model", model,
 		"--output-format", "stream-json",
 		"--verbose",

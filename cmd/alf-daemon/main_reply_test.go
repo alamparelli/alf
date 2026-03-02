@@ -32,10 +32,10 @@ func TestExtractReplyContext(t *testing.T) {
 			msg: &Message{
 				Text: "hello",
 				ReplyToMessage: &Message{
-					Text: "a" + string(make([]byte, 600)), // 601 chars
+					Text: "a" + string(make([]byte, 600)), // 601 chars — no longer truncated
 				},
 			},
-			want: "a" + string(make([]byte, 499)), // capped at 500
+			want: "a" + string(make([]byte, 600)), // extractReplyContext returns full text
 		},
 		{
 			name: "nil message",
@@ -83,17 +83,17 @@ func TestPrependReplyContext(t *testing.T) {
 					Text: "original question",
 				},
 			},
-			want: "[En réponse à : \"original question\"]\nmy response",
+			want: "[The user is replying to this previous message:\n---\noriginal question\n---\n]\nmy response",
 		},
 		{
-			name: "reply with capped text",
+			name: "reply with long text",
 			msg: &Message{
 				Text: "response",
 				ReplyToMessage: &Message{
 					Text: "a" + string(make([]byte, 600)), // 601 chars
 				},
 			},
-			want: "[En réponse à : \"" + "a" + string(make([]byte, 499)) + "\"]\nresponse",
+			want: "[The user is replying to this previous message:\n---\n" + "a" + string(make([]byte, 600)) + "\n---\n]\nresponse",
 		},
 	}
 

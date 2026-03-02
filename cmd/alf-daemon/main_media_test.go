@@ -42,7 +42,7 @@ func TestBuildMessageContent(t *testing.T) {
 					Text: "original",
 				},
 			},
-			want: "[En réponse à : \"original\"]\nresponse",
+			want: "[The user is replying to this previous message:\n---\noriginal\n---\n]\nresponse",
 		},
 		{
 			name: "reply with photo caption",
@@ -53,7 +53,7 @@ func TestBuildMessageContent(t *testing.T) {
 					Text: "asked about this",
 				},
 			},
-			want: "[En réponse à : \"asked about this\"]\nmy photo",
+			want: "[The user is replying to this previous message:\n---\nasked about this\n---\n]\nmy photo",
 		},
 	}
 

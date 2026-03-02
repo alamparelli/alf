@@ -8,7 +8,8 @@ COPY go.mod ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /extract-video ./cmd/extract-video
 
 # Stage 2: Runtime with Claude Code CLI
 FROM node:22-slim
@@ -19,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
     curl \
+    ffmpeg \
     git \
     trash-cli \
     python3 \
@@ -35,24 +37,36 @@ ENV OMP_NUM_THREADS=4
 
 # Install Go for Claude agent to build CLI tools
 RUN curl -fsSL "https://go.dev/dl/go1.24.1.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
-ENV PATH="/usr/local/go/bin:/home/node/go/bin:${PATH}"
+ENV PATH="/opt/alf/tools:/usr/local/go/bin:/home/node/go/bin:${PATH}"
 ENV GOPATH="/home/node/go"
 
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
+COPY --from=builder /extract-video /opt/alf/tools/extract-video
 COPY scripts/transcribe.py /opt/alf/transcribe.py
 
-# Directories with proper ownership — single user model (node).
+# Create 'claude' user for subprocess isolation (same group as node).
+# node=1000:1000, claude=1001:1000 — shares 'node' group for data access.
+RUN useradd -u 1001 -g node -s /bin/bash -M claude \
+    && mkdir -p /home/claude && chown claude:node /home/claude
+
+# Two-user privilege model:
+#   Daemon runs as root — starts CC, spawns Claude subprocesses.
+#   Claude -p runs as 'claude' (uid 1001, gid node/1000).
+#   /home/node/data — root:node, group-writable (claude writes via group).
+#   /opt/alf/config — root:root, 755 (only daemon/CC can write).
 RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
     && mkdir -p /home/node/data/tools /home/node/data/skills \
     && mkdir -p /home/node/data/.claude \
     && mkdir -p /opt/alf/config \
-    && chown -R node:node /home/node \
-    && chown -R node:node /opt/alf
+    && chown -R root:node /home/node/data \
+    && chmod -R g+ws /home/node/data \
+    && chown -R root:root /opt/alf/config \
+    && chmod 755 /opt/alf/config \
+    && chmod -R 755 /opt/alf/tools
 
 WORKDIR /home/node
-USER node
 
 EXPOSE 8080
 

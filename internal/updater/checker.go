@@ -110,6 +110,9 @@ func (c *Checker) latestTag() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			return "", nil // private repo, skip silently
+		}
 		return "", fmt.Errorf("tags API returned %d", resp.StatusCode)
 	}
 

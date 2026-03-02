@@ -98,14 +98,37 @@ func jsonMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// loggingMiddleware logs each request.
+// Polling endpoints excluded from logging to reduce noise.
+var quietPaths = map[string]bool{
+	"/api/logs":   true,
+	"/api/status": true,
+	"/health":     true,
+}
+
+// loggingMiddleware logs each request, skipping high-frequency polling and
+// static asset requests that succeed.
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(sw, r)
+		if sw.status < 400 && isQuietRequest(r) {
+			return
+		}
 		log.Printf("[CC] %s %s %d %s", r.Method, r.URL.Path, sw.status, time.Since(start).Round(time.Millisecond))
 	})
+}
+
+// isQuietRequest returns true for requests that should not be logged on success.
+func isQuietRequest(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	p := r.URL.Path
+	return quietPaths[p] ||
+		strings.HasPrefix(p, "/static/") ||
+		p == "/" ||
+		p == "/favicon.ico"
 }
 
 type statusWriter struct {

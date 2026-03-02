@@ -90,17 +90,26 @@ func (c *Checker) check() {
 
 // latestTag queries the GHCR API for the latest tag.
 func (c *Checker) latestTag() (string, error) {
-	// For GHCR, use the OCI distribution API to list tags.
 	// Image format: ghcr.io/OWNER/REPO
 	parts := strings.SplitN(c.image, "/", 3)
 	if len(parts) < 3 {
 		return "", fmt.Errorf("invalid image format: %s", c.image)
 	}
+	registry, repo := parts[0], parts[1]+"/"+parts[2]
 
-	url := fmt.Sprintf("https://%s/v2/%s/%s/tags/list", parts[0], parts[1], parts[2])
+	// GHCR requires token auth even for public repos (OCI distribution spec).
+	token, err := c.fetchToken(registry, repo)
+	if err != nil {
+		return "", fmt.Errorf("auth token: %w", err)
+	}
+
+	url := fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repo)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.client.Do(req)
@@ -110,9 +119,6 @@ func (c *Checker) latestTag() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		if resp.StatusCode == 401 || resp.StatusCode == 403 {
-			return "", nil // private repo, skip silently
-		}
 		return "", fmt.Errorf("tags API returned %d", resp.StatusCode)
 	}
 
@@ -131,4 +137,26 @@ func (c *Checker) latestTag() (string, error) {
 		}
 	}
 	return latest, nil
+}
+
+// fetchToken gets an anonymous bearer token from the registry's token service.
+func (c *Checker) fetchToken(registry, repo string) (string, error) {
+	url := fmt.Sprintf("https://%s/token?service=%s&scope=repository:%s:pull", registry, registry, repo)
+	resp, err := c.client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("token endpoint returned %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result.Token, nil
 }

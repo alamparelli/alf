@@ -89,6 +89,20 @@ func IsTextContent(mimeType string) bool {
 		mimeType == "application/x-shellscript"
 }
 
+// IsVideoContent checks if a file is video by MIME type or extension.
+// Catches videos sent as documents (e.g., .mov files with application/octet-stream).
+func IsVideoContent(mimeType, fileName string) bool {
+	if strings.HasPrefix(mimeType, "video/") {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(fileName))
+	switch ext {
+	case ".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".3gp", ".wmv":
+		return true
+	}
+	return false
+}
+
 // IsImageContent checks if MIME type is an image
 func IsImageContent(mimeType string) bool {
 	return strings.HasPrefix(mimeType, "image/")

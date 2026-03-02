@@ -46,7 +46,18 @@ def transcribe(model, audio_file):
     """Transcribe an audio file and return result dict."""
     start = time.time()
     segments, info = model.transcribe(audio_file)
-    text = " ".join(seg.text for seg in segments).strip()
+
+    # Filter out hallucinated segments (silence/music misdetected as speech).
+    # High no_speech_prob or low avg_log_prob → likely hallucination.
+    good_segments = []
+    for seg in segments:
+        if seg.no_speech_prob > 0.6:
+            continue
+        if seg.avg_log_prob < -1.0:
+            continue
+        good_segments.append(seg.text)
+
+    text = " ".join(good_segments).strip()
     elapsed = time.time() - start
 
     return {

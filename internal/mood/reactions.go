@@ -21,12 +21,13 @@ var MoodAliases = map[string]string{
 }
 
 // MoodProbabilities defines the probability of reacting per state.
+// Good states always react; bad states skip.
 var MoodProbabilities = map[string]float64{
-	"on_fire":   0.95,
-	"flowing":   0.75,
-	"neutral":   0.50,
-	"careful":   0.20,
-	"off_track": 0.10,
+	"on_fire":   1.0,
+	"flowing":   1.0,
+	"neutral":   0.60,
+	"careful":   0.0,
+	"off_track": 0.0,
 }
 
 // ReactionMap defines mirror reactions: user emoji → mood alias → weighted emoji pool.

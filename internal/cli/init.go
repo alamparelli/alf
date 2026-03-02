@@ -114,7 +114,7 @@ func promptDirectory(reader *bufio.Reader) string {
 	}
 
 	subdirs := []string{
-		"config.d", "tools.d", "skills.d",
+		"config.d", "skills.d",
 		"data/.claude", "data/tools", "data/skills",
 		"data/logs", "data/memories",
 	}

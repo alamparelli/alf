@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
@@ -59,6 +60,10 @@ func Classify(input ClassifyInput) Result {
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = input.DataDir
+	// Run as 'claude' user (uid 1001, gid 1000) — daemon runs as root.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
+	}
 
 	env := make([]string, 0, len(os.Environ()))
 	for _, e := range os.Environ() {
@@ -104,7 +109,7 @@ func Classify(input ClassifyInput) Result {
 	}
 
 	// Parse failed but router produced non-empty text — reroute to instant tier.
-	if raw != "" && !strings.HasPrefix(raw, "Error:") {
+	if raw != "" && !strings.HasPrefix(raw, "Error:") && !strings.EqualFold(raw, "Execution error") {
 		if instant := instantTierName(input.Tiers); instant != "" {
 			log.Printf("router: %s → %s (rerouted from plain text)", truncate(input.Message, 60), instant)
 			return Result{Tier: instant, Reason: "rerouted-plain"}

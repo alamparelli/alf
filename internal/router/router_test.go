@@ -12,12 +12,12 @@ func defaultTiers() *cc.TiersConfig {
 }
 
 func TestParseResponse_ValidJSON(t *testing.T) {
-	valid := map[string]bool{"instant": true, "analyze": true, "heavy": true}
-	raw := `{"tier": "analyze", "reason": "needs explanation"}`
+	valid := map[string]bool{"instant": true, "sonnet_r": true, "sonnet_rw": true}
+	raw := `{"tier": "sonnet_r", "reason": "needs explanation"}`
 
 	r := parseResponse(raw, valid)
-	if r.Tier != "analyze" {
-		t.Errorf("expected tier=analyze, got %q", r.Tier)
+	if r.Tier != "sonnet_r" {
+		t.Errorf("expected tier=sonnet_r, got %q", r.Tier)
 	}
 	if r.Reason != "needs explanation" {
 		t.Errorf("expected reason='needs explanation', got %q", r.Reason)
@@ -25,7 +25,7 @@ func TestParseResponse_ValidJSON(t *testing.T) {
 }
 
 func TestParseResponse_InstantWithResponse(t *testing.T) {
-	valid := map[string]bool{"instant": true, "analyze": true}
+	valid := map[string]bool{"instant": true, "sonnet_r": true}
 	raw := `{"tier": "instant", "reason": "greeting", "response": "Hey there!"}`
 
 	r := parseResponse(raw, valid)
@@ -38,22 +38,22 @@ func TestParseResponse_InstantWithResponse(t *testing.T) {
 }
 
 func TestParseResponse_MarkdownFences(t *testing.T) {
-	valid := map[string]bool{"heavy": true, "analyze": true}
-	raw := "```json\n{\"tier\": \"heavy\", \"reason\": \"file changes\"}\n```"
+	valid := map[string]bool{"sonnet_rw": true, "sonnet_r": true}
+	raw := "```json\n{\"tier\": \"sonnet_rw\", \"reason\": \"file changes\"}\n```"
 
 	r := parseResponse(raw, valid)
-	if r.Tier != "heavy" {
-		t.Errorf("expected tier=heavy, got %q", r.Tier)
+	if r.Tier != "sonnet_rw" {
+		t.Errorf("expected tier=sonnet_rw, got %q", r.Tier)
 	}
 }
 
 func TestParseResponse_RawTextFallback(t *testing.T) {
-	valid := map[string]bool{"instant": true, "analyze": true, "heavy": true}
-	raw := "I think this should be classified as analyze because it needs reasoning."
+	valid := map[string]bool{"instant": true, "sonnet_r": true, "sonnet_rw": true}
+	raw := "I think this should be classified as sonnet_r because it needs reasoning."
 
 	r := parseResponse(raw, valid)
-	if r.Tier != "analyze" {
-		t.Errorf("expected tier=analyze from text scan, got %q", r.Tier)
+	if r.Tier != "sonnet_r" {
+		t.Errorf("expected tier=sonnet_r from text scan, got %q", r.Tier)
 	}
 	if r.Reason != "text-scan fallback" {
 		t.Errorf("expected reason='text-scan fallback', got %q", r.Reason)
@@ -71,7 +71,7 @@ func TestParseResponse_Garbage(t *testing.T) {
 }
 
 func TestParseResponse_InvalidTierInJSON(t *testing.T) {
-	valid := map[string]bool{"instant": true, "analyze": true}
+	valid := map[string]bool{"instant": true, "sonnet_r": true}
 	raw := `{"tier": "nonexistent", "reason": "test"}`
 
 	r := parseResponse(raw, valid)
@@ -87,7 +87,7 @@ func TestBuildPrompt_IncludesRoutableTiers(t *testing.T) {
 	valid := validTierSet(tiers)
 	prompt := buildPrompt(ClassifyInput{Message: "hello", Tiers: tiers, DataDir: t.TempDir(), ConfigDir: t.TempDir()}, valid)
 
-	for _, name := range []string{"instant", "analyze", "heavy", "deep"} {
+	for _, name := range []string{"instant", "haiku_r", "sonnet_r", "sonnet_rw", "opus_r", "opus_rw"} {
 		if !strings.Contains(prompt, name) {
 			t.Errorf("prompt should contain tier %q", name)
 		}
@@ -96,15 +96,15 @@ func TestBuildPrompt_IncludesRoutableTiers(t *testing.T) {
 
 func TestBuildPrompt_ExcludesDisabledTiers(t *testing.T) {
 	tiers := defaultTiers()
-	tiers.Tiers[3].Enabled = false // disable "deep"
+	tiers.Tiers[5].Enabled = false // disable "opus_rw"
 	valid := validTierSet(tiers)
 	prompt := buildPrompt(ClassifyInput{Message: "hello", Tiers: tiers, DataDir: t.TempDir(), ConfigDir: t.TempDir()}, valid)
 
-	// "deep" should not appear as a listed tier (though it might appear in distinctions text)
+	// "opus_rw" should not appear as a listed tier (though it might appear in distinctions text)
 	lines := strings.Split(prompt, "\n")
 	for _, line := range lines {
-		if strings.HasPrefix(line, "- deep") {
-			t.Error("disabled tier 'deep' should not be listed")
+		if strings.HasPrefix(line, "- opus_rw") {
+			t.Error("disabled tier 'opus_rw' should not be listed")
 		}
 	}
 }
@@ -147,7 +147,7 @@ func TestValidTierSet_Default(t *testing.T) {
 	tiers := defaultTiers()
 	valid := validTierSet(tiers)
 
-	expected := []string{"instant", "analyze", "heavy", "deep"}
+	expected := []string{"instant", "haiku_r", "sonnet_r", "sonnet_rw", "opus_r", "opus_rw"}
 	for _, name := range expected {
 		if !valid[name] {
 			t.Errorf("expected %q in valid set", name)
@@ -191,9 +191,9 @@ func TestStripMarkdownFences(t *testing.T) {
 		input string
 		want  string
 	}{
-		{`{"tier": "analyze"}`, `{"tier": "analyze"}`},
-		{"```json\n{\"tier\": \"analyze\"}\n```", `{"tier": "analyze"}`},
-		{"```\n{\"tier\": \"analyze\"}\n```", `{"tier": "analyze"}`},
+		{`{"tier": "sonnet_r"}`, `{"tier": "sonnet_r"}`},
+		{"```json\n{\"tier\": \"sonnet_r\"}\n```", `{"tier": "sonnet_r"}`},
+		{"```\n{\"tier\": \"sonnet_r\"}\n```", `{"tier": "sonnet_r"}`},
 	}
 
 	for _, tt := range tests {
@@ -206,14 +206,16 @@ func TestStripMarkdownFences(t *testing.T) {
 
 func TestFallbackResult(t *testing.T) {
 	tiers := defaultTiers()
+	// fallbackResult picks lowest-priority enabled non-instant tier → haiku_r (priority 1)
 	r := fallbackResult(tiers)
-	if r.Tier != "analyze" {
-		t.Errorf("expected fallback tier=analyze, got %q", r.Tier)
+	if r.Tier != "haiku_r" {
+		t.Errorf("expected fallback tier=haiku_r, got %q", r.Tier)
 	}
 
-	tiers.DefaultFallback = "heavy"
+	// Disable haiku_r → next lowest is sonnet_r (priority 2)
+	tiers.Tiers[1].Enabled = false
 	r = fallbackResult(tiers)
-	if r.Tier != "heavy" {
-		t.Errorf("expected fallback tier=heavy, got %q", r.Tier)
+	if r.Tier != "sonnet_r" {
+		t.Errorf("expected fallback tier=sonnet_r, got %q", r.Tier)
 	}
 }

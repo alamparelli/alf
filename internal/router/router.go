@@ -55,7 +55,7 @@ func Classify(input ClassifyInput) Result {
 		"--dangerously-skip-permissions",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
@@ -81,23 +81,19 @@ func Classify(input ClassifyInput) Result {
 	raw := strings.TrimSpace(stdout.String())
 
 	if err != nil || raw == "" {
+		fb := fallbackResult(input.Tiers)
 		if ctx.Err() == context.DeadlineExceeded {
-			log.Printf("router: timeout after 30s, falling back to %s (stderr: %s)", input.Tiers.DefaultFallback, strings.TrimSpace(stderr.String()))
+			log.Printf("router: timeout after 60s, falling back to %s (stderr: %s)", fb.Tier, strings.TrimSpace(stderr.String()))
 		} else {
-			log.Printf("router: classify error: %v (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+			log.Printf("router: classify error: %v, falling back to %s (stderr: %s)", err, fb.Tier, strings.TrimSpace(stderr.String()))
 		}
-		return fallbackResult(input.Tiers)
+		return fb
 	}
 
 	result := parseResponse(raw, valid)
 
-	// Router answered directly — reroute to instant tier so the response
-	// goes through askClaude with --resume and full memory injection.
+	// Router answered directly — use as-is (no second LLM call).
 	if result.Response != "" && result.Tier == "" {
-		if instant := instantTierName(input.Tiers); instant != "" {
-			log.Printf("router: %s → %s (rerouted from direct)", truncate(input.Message, 60), instant)
-			return Result{Tier: instant, Reason: "rerouted-direct"}
-		}
 		log.Printf("router: %s → direct response (%s)", truncate(input.Message, 60), result.Reason)
 		return result
 	}
@@ -108,12 +104,8 @@ func Classify(input ClassifyInput) Result {
 		return result
 	}
 
-	// Parse failed but router produced non-empty text — reroute to instant tier.
+	// Parse failed but router produced non-empty text — use as direct response.
 	if raw != "" && !strings.HasPrefix(raw, "Error:") && !strings.EqualFold(raw, "Execution error") {
-		if instant := instantTierName(input.Tiers); instant != "" {
-			log.Printf("router: %s → %s (rerouted from plain text)", truncate(input.Message, 60), instant)
-			return Result{Tier: instant, Reason: "rerouted-plain"}
-		}
 		log.Printf("router: %s → direct response (plain text)", truncate(input.Message, 60))
 		return Result{Response: raw, Reason: "plain-text direct"}
 	}
@@ -174,13 +166,13 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 		b.WriteString(fmt.Sprintf("\nKey distinctions: %s\n", input.Tiers.RouterDistinctions))
 	}
 
-	b.WriteString("\nIMPORTANT: Only route to a write-capable tier if the user explicitly asks to create, modify, or delete files/code.\n")
+	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, or edit ANYTHING (files, tasks, settings, status, etc.).\n")
 	b.WriteString("IMPORTANT: If the message references conversation history (\"what did we talk about\", \"earlier\", \"before\", \"you said\", \"continue\"), you MUST route to a tier — never respond directly, because you have no conversation memory.\n")
 
 	// 4. Conversation context.
 	if input.MessageCount > 0 && input.LastTier != "" {
 		b.WriteString(fmt.Sprintf("\nConversation context: Message #%d in session. Previous message handled by %q.\n", input.MessageCount+1, input.LastTier))
-		b.WriteString("Prefer routing to same tier unless user intent clearly changed.\n")
+		b.WriteString("If the message is a short reply (\"oui\", \"non\", \"ok\", \"yes\", \"no\", \"continue\") that clearly answers or continues the previous exchange, route to the same tier (\"" + input.LastTier + "\"). But if it's a new greeting or new topic, route normally.\n")
 	}
 
 	// 5. Custom router prompt from file.
@@ -197,10 +189,25 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	// 6. User message (truncated to 500 chars).
 	b.WriteString(fmt.Sprintf("\nUser message: %s\n", truncate(input.Message, 500)))
 
-	// 7. Response format.
+	// 7. Valid tier names for response format.
+	b.WriteString("\nValid tier names: ")
+	first := true
+	for _, t := range input.Tiers.Tiers {
+		if t.Enabled && t.Routable {
+			if !first {
+				b.WriteString(", ")
+			}
+			b.WriteString("\"" + t.Name + "\"")
+			first = false
+		}
+	}
+	b.WriteString("\n")
+
+	// 8. Response format.
 	b.WriteString("\nRespond with ONLY a JSON object:")
 	b.WriteString("\n- If you can answer: {\"response\": \"<your answer>\", \"reason\": \"direct\", \"react\": \"EMOJI_or_empty\"}")
-	b.WriteString("\n- If you need to route: {\"tier\": \"<name>\", \"reason\": \"<brief reason>\"}")
+	b.WriteString("\n- If you need to route: {\"tier\": \"<EXACT tier name from list above>\", \"reason\": \"<brief reason>\"}")
+	b.WriteString("\nThe \"tier\" value MUST be one of the valid tier names listed above. Do NOT invent tier names.")
 	b.WriteString("\nThe optional \"react\" field suggests a single emoji reaction for the user's message (shows you understood it). Omit or leave empty if no reaction fits. Pick contextually relevant emojis, not generic thumbs up.")
 
 	return b.String()
@@ -265,19 +272,19 @@ func validTierSet(tiers *cc.TiersConfig) map[string]bool {
 }
 
 func fallbackResult(tiers *cc.TiersConfig) Result {
-	fb := tiers.DefaultFallback
-	if fb != "" {
-		for _, t := range tiers.Tiers {
-			if t.Name == fb && t.Enabled {
-				return Result{Tier: fb, Reason: "fallback"}
-			}
-		}
-	}
+	// Pick the lowest-priority enabled non-instant tier.
+	best := ""
+	bestPriority := int(^uint(0) >> 1)
 	for _, t := range tiers.Tiers {
-		if t.Enabled && !t.Instant {
-			return Result{Tier: t.Name, Reason: "fallback"}
+		if t.Enabled && !t.Instant && t.Priority < bestPriority {
+			best = t.Name
+			bestPriority = t.Priority
 		}
 	}
+	if best != "" {
+		return Result{Tier: best, Reason: "fallback"}
+	}
+	// All tiers are instant or disabled — pick any enabled tier.
 	for _, t := range tiers.Tiers {
 		if t.Enabled {
 			return Result{Tier: t.Name, Reason: "fallback"}

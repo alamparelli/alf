@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 )
+
+// validTierName matches safe tier names: alphanumeric, dashes, underscores.
+var validTierName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // TiersHandler handles GET and PUT /api/tiers.
 type TiersHandler struct {
@@ -56,6 +60,10 @@ func (h *TiersHandler) put(w http.ResponseWriter, r *http.Request) {
 	for i, t := range cfg.Tiers {
 		if t.Name == "" {
 			http.Error(w, jsonErr(fmt.Sprintf("tier %d: name is required", i)), http.StatusBadRequest)
+			return
+		}
+		if !validTierName.MatchString(t.Name) {
+			http.Error(w, jsonErr(fmt.Sprintf("tier %q: name must match [a-zA-Z0-9_-]", t.Name)), http.StatusBadRequest)
 			return
 		}
 		if !AllowedModels[t.Model] {

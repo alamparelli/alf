@@ -23,7 +23,7 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir string, stats *Stats, version string, authToken string, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, tierFS TierFSProvider) (*Server, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService) (*Server, error) {
 	configStore, tierStore, memoryStore, toolStore, skillStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	statusProvider := NewStatusProvider(stats, version)
@@ -48,7 +48,6 @@ func New(dataDir, configDir string, stats *Stats, version string, authToken stri
 	handler := HandlerFactory(Deps{
 		ConfigStore:    configStore,
 		TierStore:      tierStore,
-		TierFS:         tierFS,
 		MemoryStore:    memoryStore,
 		ToolStore:      toolStore,
 		SkillStore:     skillStore,
@@ -57,9 +56,11 @@ func New(dataDir, configDir string, stats *Stats, version string, authToken stri
 		Notifier:       notifier,
 		Magic:          magic,
 		Sessions:       sessions,
+		ChatService:    chatService,
 		AuthToken:      authToken,
 		DataDir:        dataDir,
 		ConfigDir:      configDir,
+		SkillsDir:      skillsDir,
 		DashboardHTML:  string(htmlBytes),
 		WebFS:          webSub,
 	})
@@ -69,8 +70,8 @@ func New(dataDir, configDir string, stats *Stats, version string, authToken stri
 		httpServer: &http.Server{
 			Addr:         addr,
 			Handler:      handler,
-			ReadTimeout:  10 * time.Second,
-			WriteTimeout: 10 * time.Second,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 10 * time.Minute, // long for SSE streaming
 		},
 		addr: addr,
 	}, nil

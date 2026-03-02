@@ -53,8 +53,8 @@ func (h *TierFilesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tierName := rest[:slashIdx]
 	subPath := rest[slashIdx+1:] // "system-prompt" or "skills/" or "skills/{skill}"
 
-	if tierName == "" {
-		http.Error(w, `{"error":"tier name required"}`, http.StatusBadRequest)
+	if tierName == "" || !validTierName.MatchString(tierName) {
+		http.Error(w, `{"error":"invalid tier name"}`, http.StatusBadRequest)
 		return
 	}
 

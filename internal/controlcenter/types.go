@@ -117,7 +117,6 @@ const (
 	ReloadTiers
 	ReloadTools
 	ReloadSkills
-	ReloadTierFiles
 )
 
 // Stats tracks daemon runtime metrics. Safe for concurrent use.

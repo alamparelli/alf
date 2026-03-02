@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "ALF",
+    "slug": "alf-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "alf",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#1a1a2e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.alf.mobile"
+    },
+    "android": {
+      "package": "com.alf.mobile"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

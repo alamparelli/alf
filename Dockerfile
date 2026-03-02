@@ -1,15 +1,17 @@
-# Stage 1: Build Go daemon
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+# Stage 1: Build Go daemon (debian for CGo — sqlite-vec requires CGO_ENABLED=1)
+FROM --platform=$BUILDPLATFORM golang:1.24.13 AS builder
 ARG TARGETARCH
 
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /src
-COPY go.mod ./
-# COPY go.sum ./ (uncomment when dependencies exist)
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /extract-video ./cmd/extract-video
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=$TARGETARCH go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
+    && CGO_ENABLED=1 GOOS=linux GOARCH=$TARGETARCH go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /memory-tools ./cmd/memory-tools
 
 # Stage 2: Runtime with Claude Code CLI
 FROM node:22-slim
@@ -33,11 +35,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # libgomp1 is required for OpenMP parallel CPU execution in ctranslate2.
 RUN pip3 install --break-system-packages faster-whisper
 
+# Install sentence-transformers for semantic memory embeddings.
+RUN pip3 install --break-system-packages sentence-transformers
+
+# Pre-download embedding model to avoid first-run delay.
+RUN python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
+# Audit Python dependencies for known CVEs (fails build on vulnerabilities).
+RUN pip3 install --break-system-packages pip-audit \
+    && pip-audit --desc --skip-editable
+
 # Enable OpenMP threading for ctranslate2 (faster-whisper backend).
 ENV OMP_NUM_THREADS=4
 
 # Install Go for Claude agent to build CLI tools
-RUN curl -fsSL "https://go.dev/dl/go1.24.1.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
+RUN curl -fsSL "https://go.dev/dl/go1.24.13.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
 ENV PATH="/opt/alf/tools:/usr/local/go/bin:/home/node/go/bin:${PATH}"
 ENV GOPATH="/home/node/go"
 
@@ -45,7 +57,13 @@ RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 COPY --from=builder /extract-video /opt/alf/tools/extract-video
+COPY --from=builder /memory-tools /opt/alf/tools/memory-tools
 COPY scripts/transcribe.py /opt/alf/transcribe.py
+COPY scripts/embed.py /opt/alf/embed.py
+
+# Create memory tool symlinks (memory-search, memory-store → memory-tools).
+RUN ln -s /opt/alf/tools/memory-tools /opt/alf/tools/memory-search \
+    && ln -s /opt/alf/tools/memory-tools /opt/alf/tools/memory-store
 
 # Create 'claude' user for subprocess isolation (same group as node).
 # node=1000:1000, claude=1001:1000 — shares 'node' group for data access.

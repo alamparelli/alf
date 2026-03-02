@@ -75,6 +75,37 @@ func orderedFiles(dir string) []string {
 	return result
 }
 
+// memorySystemContent is the system prompt for the semantic memory tools.
+const memorySystemContent = `# Memory System
+
+You have a persistent long-term memory that survives across sessions.
+Memories are auto-extracted every 3 hours from your conversations.
+
+## Tools
+- memory-search "query" [--limit 5] — Search your memory (semantic + keyword)
+- memory-store "text" --type fact|preference|decision — Manually save something important (use sparingly — most memories are auto-extracted)
+
+## When to search
+BEFORE answering any question that involves:
+- Past decisions ("what did we decide about X?")
+- User preferences ("how do I like X?")
+- Project context from previous sessions
+- Anything where "remember" or past tense appears
+
+Search FIRST, then answer. Don't guess from general knowledge when your memory might have the specific answer.
+
+## When to manually store
+Only when something is time-sensitive and can't wait for the next extraction cycle:
+- Critical corrections ("actually, the API key changed to X")
+- Urgent preferences ("from now on, always use Y")
+
+Most information is auto-extracted — don't duplicate what the extraction job will capture.
+
+## Daily logs
+Raw conversations: logs/events/YYYY-MM-DD.jsonl
+For exact quotes or detailed history, read the log file directly.
+`
+
 // DefaultFiles maps filename -> default content for bootstrap.
 var DefaultFiles = map[string]string{
 	"soul.md": `# Soul
@@ -147,4 +178,6 @@ func Bootstrap(memoriesDir string) {
 			os.WriteFile(path, []byte(content), 0o644)
 		}
 	}
+	// Always overwrite memory-system.md (non-editable system file).
+	os.WriteFile(filepath.Join(memoriesDir, "memory-system.md"), []byte(memorySystemContent), 0o644)
 }

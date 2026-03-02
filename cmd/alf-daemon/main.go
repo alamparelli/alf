@@ -327,9 +327,12 @@ func main() {
 				continue
 			}
 
-			// Handle emoji reactions (always process in private chats).
+			// Handle emoji reactions.
 			if u.MessageReaction != nil {
 				mr := u.MessageReaction
+				if len(allowedChatIDs) > 0 && !allowedChatIDs[mr.Chat.ID] {
+					continue
+				}
 				if len(mr.NewReaction) == 0 {
 					continue
 				}
@@ -341,6 +344,12 @@ func main() {
 
 			// Check for message with text or media
 			if u.Message == nil {
+				continue
+			}
+
+			// Authorize sender — reject anyone not in allowedChatIDs.
+			if len(allowedChatIDs) > 0 && !allowedChatIDs[u.Message.Chat.ID] {
+				log.Printf("unauthorized message from chat_id=%d user=%s — dropped", u.Message.Chat.ID, u.Message.From.Username)
 				continue
 			}
 
@@ -1339,6 +1348,9 @@ Ask me anything to get started.`
 		tg.SendHTML(msg.Chat.ID, welcome)
 		return true
 	case "/restart":
+		if !allowedChatIDs[msg.Chat.ID] {
+			return true
+		}
 		tg.SendHTML(msg.Chat.ID, "Restarting ALF daemon...")
 		log.Println("restart requested via /restart command")
 		go func() {

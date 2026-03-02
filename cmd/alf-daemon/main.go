@@ -36,6 +36,9 @@ import (
 var version = "dev"
 
 func main() {
+	// Ensure daemon-created files are group-writable (umask 002 = rwxrwxr-x).
+	syscall.Umask(0o002)
+
 	token := readSecret("TELEGRAM_BOT_TOKEN")
 	chatID := readSecret("TELEGRAM_CHAT_ID")
 	authToken := readSecret("CC_AUTH_TOKEN")
@@ -127,9 +130,9 @@ func main() {
 	// so we link individual tools at runtime instead.
 	linkSystemTools(filepath.Join(dataDir, "tools.d"), "/opt/alf/tools")
 
-	// Fix .claude/ permissions so the claude subprocess (uid 1001, gid 1000)
-	// can read credentials and config created by the node user (uid 1000).
-	fixClaudePermissions(dataDir)
+	// Fix data directory permissions so the claude subprocess (uid 1001, gid 1000)
+	// can read/write files created before the permission refactoring.
+	fixDataPermissions(dataDir)
 
 	// Migrate config from old data/config/ to configDir (before loading).
 	migrateConfig(dataDir, configDir)
@@ -1430,34 +1433,32 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, tfs *tierfs.TierF
 }
 
 // migrateConfig copies config files from old data/config/ to configDir on first run.
-// fixClaudePermissions ensures the .claude/ directory inside dataDir is
-// group-readable so the claude subprocess (uid 1001, gid node/1000) can
-// access credentials and config created by the node user (uid 1000).
-// The daemon runs as root so it can always fix these permissions.
-func fixClaudePermissions(dataDir string) {
-	claudeDir := filepath.Join(dataDir, ".claude")
-	if _, err := os.Stat(claudeDir); err != nil {
-		return
-	}
-	filepath.Walk(claudeDir, func(path string, info os.FileInfo, err error) error {
+// fixDataPermissions ensures all files and directories under dataDir are
+// group-readable/writable so the claude subprocess (uid 1001, gid node/1000)
+// can access files created by root or node before the permission refactoring.
+func fixDataPermissions(dataDir string) {
+	fixed := 0
+	filepath.Walk(dataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
 		mode := info.Mode()
 		if info.IsDir() {
-			// Directories need g+rwx for traversal and file creation.
 			if mode.Perm()&0o070 != 0o070 {
 				os.Chmod(path, mode.Perm()|0o070)
+				fixed++
 			}
 		} else {
-			// Files need g+rw so claude subprocess can refresh tokens.
 			if mode.Perm()&0o060 != 0o060 {
 				os.Chmod(path, mode.Perm()|0o060)
+				fixed++
 			}
 		}
 		return nil
 	})
-	log.Println("fixed .claude/ permissions for subprocess access")
+	if fixed > 0 {
+		log.Printf("fixed group permissions on %d files/dirs in data/", fixed)
+	}
 }
 
 // linkSystemTools creates symlinks in toolsDir for each binary in srcDir.

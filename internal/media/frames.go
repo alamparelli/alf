@@ -9,16 +9,16 @@ import (
 	"strings"
 )
 
-// ExtractFrames extracts evenly-spaced JPEG frames from a video or GIF.
-// Returns paths to temporary frame files. Caller is responsible for cleanup.
+// ExtractFrames extracts evenly-spaced JPEG frames from a video or GIF,
+// then concatenates them into a single contact sheet image.
+// Returns a single-element slice with the contact sheet path. Caller cleans up.
 func ExtractFrames(videoPath string, maxFrames int) ([]string, error) {
 	if maxFrames <= 0 {
-		maxFrames = 5
+		maxFrames = 8
 	}
 
 	duration, err := probeDuration(videoPath)
 	if err != nil {
-		// Fallback: extract first frame only (works for GIFs and broken metadata).
 		return extractSingleFrame(videoPath)
 	}
 
@@ -29,7 +29,7 @@ func ExtractFrames(videoPath string, maxFrames int) ([]string, error) {
 	case duration < 3:
 		maxFrames = min(maxFrames, 2)
 	case duration < 5:
-		maxFrames = min(maxFrames, 3)
+		maxFrames = min(maxFrames, 4)
 	}
 
 	if maxFrames == 1 {
@@ -43,8 +43,6 @@ func ExtractFrames(videoPath string, maxFrames int) ([]string, error) {
 		timestamps[i] = interval * float64(i+1)
 	}
 
-	// Build select filter: select frames closest to target timestamps.
-	// Using the select filter with between() for each target time.
 	selectParts := make([]string, len(timestamps))
 	for i, ts := range timestamps {
 		selectParts[i] = fmt.Sprintf("between(t,%.2f,%.2f)", ts-0.1, ts+0.1)
@@ -67,12 +65,97 @@ func ExtractFrames(videoPath string, maxFrames int) ([]string, error) {
 		return nil, fmt.Errorf("ffmpeg extract failed: %w\n%s", err, string(out))
 	}
 
-	// Collect output files and make them world-readable for claude subprocess.
 	paths, err := collectFrameFiles(outPattern, maxFrames)
-	for _, p := range paths {
-		os.Chmod(p, 0o644)
+	if err != nil {
+		return nil, err
 	}
-	return paths, err
+
+	// Concatenate frames into a single contact sheet.
+	sheet, err := buildContactSheet(paths, duration)
+	if err != nil {
+		// Fallback: return individual frames.
+		for _, p := range paths {
+			os.Chmod(p, 0o644)
+		}
+		return paths, nil
+	}
+
+	// Clean up individual frames, return only the sheet.
+	for _, p := range paths {
+		os.Remove(p)
+	}
+	os.Chmod(sheet, 0o644)
+	return []string{sheet}, nil
+}
+
+// buildContactSheet concatenates frame images into a single grid image using ffmpeg.
+// Layout: 2 columns for ≤4 frames, 3 columns for 5-9, 4 columns for 10+.
+func buildContactSheet(framePaths []string, duration float64) (string, error) {
+	n := len(framePaths)
+	if n <= 1 {
+		return framePaths[0], nil
+	}
+
+	// Determine grid columns.
+	cols := 2
+	switch {
+	case n >= 10:
+		cols = 4
+	case n >= 5:
+		cols = 3
+	}
+	rows := (n + cols - 1) / cols
+
+	// Build ffmpeg input args and xstack layout.
+	var args []string
+	for _, p := range framePaths {
+		args = append(args, "-i", p)
+	}
+
+	// Pad to fill the grid if needed (use last frame as filler).
+	total := rows * cols
+	for i := n; i < total; i++ {
+		args = append(args, "-i", framePaths[n-1])
+	}
+
+	// Use xstack filter for grid layout.
+	// First scale all inputs to the same size, then tile them.
+	var filterParts []string
+	for i := 0; i < total; i++ {
+		filterParts = append(filterParts, fmt.Sprintf("[%d:v]scale=640:-1:force_original_aspect_ratio=decrease,pad=640:ih:(ow-iw)/2:0[v%d]", i, i))
+	}
+
+	// Build xstack layout string.
+	var inputs []string
+	var layout []string
+	for i := 0; i < total; i++ {
+		inputs = append(inputs, fmt.Sprintf("[v%d]", i))
+		col := i % cols
+		row := i / cols
+		layout = append(layout, fmt.Sprintf("%d*w0|%d*h0", col, row))
+	}
+
+	filter := strings.Join(filterParts, ";") + ";" +
+		strings.Join(inputs, "") +
+		fmt.Sprintf("xstack=inputs=%d:layout=%s[out]", total, strings.Join(layout, "|"))
+
+	outPath := filepath.Join(os.TempDir(), fmt.Sprintf("alf-sheet-%d.jpg", os.Getpid()))
+	args = append(args,
+		"-filter_complex", filter,
+		"-map", "[out]",
+		"-q:v", "3",
+		"-y", outPath,
+	)
+
+	cmd := exec.Command("ffmpeg", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("ffmpeg contact sheet failed: %w\n%s", err, string(out))
+	}
+
+	if _, err := os.Stat(outPath); err != nil {
+		return "", fmt.Errorf("contact sheet not created")
+	}
+	return outPath, nil
 }
 
 // probeDuration returns video duration in seconds using ffprobe.

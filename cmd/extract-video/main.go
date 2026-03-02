@@ -38,7 +38,7 @@ type output struct {
 }
 
 func main() {
-	maxFrames := flag.Int("frames", 5, "maximum number of frames to extract")
+	maxFrames := flag.Int("frames", 8, "maximum number of frames to extract")
 	noAudio := flag.Bool("no-audio", false, "skip audio transcription")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: extract-video <video-path> [--frames N] [--no-audio]\n\n")

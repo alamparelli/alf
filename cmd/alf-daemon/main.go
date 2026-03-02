@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
@@ -117,9 +118,18 @@ func main() {
 	os.MkdirAll(configDir, 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
-	for _, sub := range []string{"tools", "skills", "memories"} {
+	for _, sub := range []string{"config", "tools", "skills", "memories"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
+
+	// Populate tools.d/ with symlinks to each system tool in /opt/alf/tools/.
+	// The host volume mount overwrites any Dockerfile-created symlinks,
+	// so we link individual tools at runtime instead.
+	linkSystemTools(filepath.Join(dataDir, "tools.d"), "/opt/alf/tools")
+
+	// Fix .claude/ permissions so the claude subprocess (uid 1001, gid 1000)
+	// can read credentials and config created by the node user (uid 1000).
+	fixClaudePermissions(dataDir)
 
 	// Migrate config from old data/config/ to configDir (before loading).
 	migrateConfig(dataDir, configDir)
@@ -136,7 +146,6 @@ func main() {
 	if err := tierStore.Reload(); err != nil {
 		log.Printf("warning: failed to load tiers: %v", err)
 	}
-	migrateConfig(dataDir, configDir)
 
 	// Bootstrap default memory files (soul.md, mood.md, index.md).
 	memoriesDir := filepath.Join(dataDir, "memories")
@@ -334,8 +343,9 @@ func main() {
 
 			// Check for message content: text, media, or voice
 			hasText := u.Message.Text != ""
-			hasMedia := len(u.Message.Photo) > 0 || u.Message.Document != nil
 			hasVoice := u.Message.Voice != nil || u.Message.Audio != nil
+			hasVideo := u.Message.Video != nil || u.Message.VideoNote != nil || u.Message.Animation != nil
+			hasMedia := len(u.Message.Photo) > 0 || u.Message.Document != nil || hasVideo
 
 			if !hasText && !hasMedia && !hasVoice {
 				continue
@@ -415,12 +425,12 @@ func main() {
 				continue
 			}
 
-			// Handle image/document messages: download and save for Claude to read.
+			// Handle media messages: download and save for Claude to read.
 			var mediaCleanup func()
 			if hasMedia && !hasVoice {
 				var fileID, fileName string
+				var duration int
 				if len(u.Message.Photo) > 0 {
-					// Use largest photo (last element in array).
 					fileID = u.Message.Photo[len(u.Message.Photo)-1].FileID
 					fileName = "photo.jpg"
 				} else if u.Message.Document != nil {
@@ -429,6 +439,24 @@ func main() {
 					if fileName == "" {
 						fileName = "document"
 					}
+				} else if u.Message.Video != nil {
+					fileID = u.Message.Video.FileID
+					fileName = u.Message.Video.FileName
+					if fileName == "" {
+						fileName = "video.mp4"
+					}
+					duration = u.Message.Video.Duration
+				} else if u.Message.Animation != nil {
+					fileID = u.Message.Animation.FileID
+					fileName = u.Message.Animation.FileName
+					if fileName == "" {
+						fileName = "animation.gif"
+					}
+					duration = u.Message.Animation.Duration
+				} else if u.Message.VideoNote != nil {
+					fileID = u.Message.VideoNote.FileID
+					fileName = "videonote.mp4"
+					duration = u.Message.VideoNote.Duration
 				}
 
 				if fileID != "" {
@@ -445,15 +473,79 @@ func main() {
 						} else {
 							tmpFile.Write(data)
 							tmpFile.Close()
+							os.Chmod(tmpFile.Name(), 0o644) // world-readable for claude subprocess
 							tmpPath := tmpFile.Name()
-							mediaCleanup = func() { os.Remove(tmpPath) }
+
+							// Track all temp files for delayed cleanup.
+							var cleanupPaths []string
+							cleanupPaths = append(cleanupPaths, tmpPath)
 
 							caption := u.Message.Caption
 							if caption == "" {
 								caption = u.Message.Text
 							}
 
-							if media.IsImageContent(mimeType) {
+							// Video/GIF/VideoNote/video documents: extract frames + audio transcript.
+							isVideoDoc := !hasVideo && media.IsVideoContent(mimeType, fileName)
+							if hasVideo || isVideoDoc {
+								mediaType := "VIDEO"
+								if u.Message.Animation != nil {
+									mediaType = "GIF/Animation"
+								} else if u.Message.VideoNote != nil {
+									mediaType = "VIDEO NOTE (round video)"
+								}
+
+								maxFrames := 5
+								if u.Message.Animation != nil {
+									maxFrames = 3
+								}
+
+								frames, err := media.ExtractFrames(tmpPath, maxFrames)
+								if err != nil {
+									log.Printf("frame extraction failed: %v", err)
+									// Fallback: tell Claude the file is a video it can't view.
+									if caption != "" {
+										u.Message.Text = fmt.Sprintf("[%s from Telegram, %ds — frame extraction failed]\n%s", mediaType, duration, caption)
+									} else {
+										u.Message.Text = fmt.Sprintf("[%s from Telegram, %ds — frame extraction failed. Ask the user what it's about.]", mediaType, duration)
+									}
+								} else {
+									cleanupPaths = append(cleanupPaths, frames...)
+									framePaths := strings.Join(frames, ", ")
+
+									// Try to extract and transcribe audio from videos (not GIFs).
+									var transcript string
+									if u.Message.Animation == nil && transcriber != nil && transcriber.IsReady() {
+										audioPath, err := media.ExtractAudio(tmpPath)
+										if err != nil {
+											log.Printf("video audio extraction failed: %v", err)
+										} else if audioPath != "" {
+											cleanupPaths = append(cleanupPaths, audioPath)
+											result, err := transcriber.Transcribe(audioPath)
+											if err != nil {
+												log.Printf("video audio transcription failed: %v", err)
+											} else if result.Text != "" {
+												transcript = result.Text
+												log.Printf("video audio: %q (%s)", transcript, result.Language)
+											}
+										}
+									}
+
+									var parts []string
+									parts = append(parts, fmt.Sprintf("[%s from Telegram (%ds) — %d frames extracted. Use Read tool to view: %s]", mediaType, duration, len(frames), framePaths))
+									if transcript != "" {
+										parts = append(parts, fmt.Sprintf("[Audio transcript: %s]", transcript))
+									}
+									if caption != "" {
+										parts = append(parts, caption)
+									} else {
+										parts = append(parts, "The user shared this video in chat. Describe what you see in the frames and the audio context. React naturally.")
+									}
+									u.Message.Text = strings.Join(parts, "\n")
+								}
+
+								log.Printf("media: video %s (%ds) → %d frames", fileName, duration, len(cleanupPaths)-1)
+							} else if media.IsImageContent(mimeType) {
 								if caption != "" {
 									u.Message.Text = fmt.Sprintf("[PHOTO from Telegram chat — use Read tool to view: %s]\n%s", tmpPath, caption)
 								} else {
@@ -474,6 +566,12 @@ func main() {
 								}
 							}
 
+							mediaCleanup = func() {
+								for _, p := range cleanupPaths {
+									os.Remove(p)
+								}
+							}
+
 							log.Printf("media: saved %s (%s, %d bytes) → %s", fileName, mimeType, len(data), tmpPath)
 							eventLog.Log("media_in", map[string]any{
 								"chat_id":   u.Message.Chat.ID,
@@ -482,6 +580,8 @@ func main() {
 								"mime_type": mimeType,
 								"size":      len(data),
 								"tmp_path":  tmpPath,
+								"is_video":  hasVideo,
+								"duration":  duration,
 							})
 						}
 					}
@@ -789,6 +889,12 @@ func askClaude(prompt, resumeID string, tp tierParams, onProgress progressFn) (*
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = dataDir
+	// Run Claude subprocess as 'claude' user (uid 1001, gid 1000/node).
+	// Daemon runs as root, so SysProcAttr.Credential works.
+	// This prevents Claude from writing to /opt/alf/config (root:root, 755).
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
+	}
 	env := make([]string, 0, len(os.Environ()))
 	for _, e := range os.Environ() {
 		if !strings.HasPrefix(e, "HOME=") {
@@ -962,6 +1068,7 @@ type Message struct {
 	Photo           []*Photo   `json:"photo"`
 	Document        *Document  `json:"document"`
 	Video           *Video     `json:"video"`
+	Animation       *Animation `json:"animation"`
 	Audio           *Audio     `json:"audio"`
 	Voice           *Voice     `json:"voice"`
 	VideoNote       *VideoNote `json:"video_note"`
@@ -1004,6 +1111,14 @@ type Voice struct {
 
 type VideoNote struct {
 	FileID   string `json:"file_id"`
+	FileSize int64  `json:"file_size"`
+	Duration int    `json:"duration"`
+}
+
+type Animation struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
 	FileSize int64  `json:"file_size"`
 	Duration int    `json:"duration"`
 }
@@ -1115,11 +1230,15 @@ func buildMessageContent(msg *Message) string {
 // extFromMime returns a file extension for a MIME type, falling back to the original filename extension.
 func extFromMime(mimeType, fileName string) string {
 	mimeToExt := map[string]string{
-		"image/jpeg": ".jpg",
-		"image/png":  ".png",
-		"image/gif":  ".gif",
-		"image/webp": ".webp",
+		"image/jpeg":      ".jpg",
+		"image/png":       ".png",
+		"image/gif":       ".gif",
+		"image/webp":      ".webp",
 		"application/pdf": ".pdf",
+		"video/mp4":       ".mp4",
+		"video/quicktime": ".mov",
+		"video/webm":      ".webm",
+		"video/x-matroska": ".mkv",
 	}
 	if ext, ok := mimeToExt[mimeType]; ok {
 		return ext
@@ -1133,7 +1252,7 @@ func extFromMime(mimeType, fileName string) string {
 // hasMedia checks if message contains any media attachments
 func hasMedia(msg *Message) bool {
 	return len(msg.Photo) > 0 || msg.Document != nil || msg.Video != nil ||
-		msg.Audio != nil || msg.Voice != nil || msg.VideoNote != nil
+		msg.Animation != nil || msg.Audio != nil || msg.Voice != nil || msg.VideoNote != nil
 }
 
 // handleCommand processes known /commands. Returns true if handled.
@@ -1309,6 +1428,60 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, tfs *tierfs.TierF
 }
 
 // migrateConfig copies config files from old data/config/ to configDir on first run.
+// fixClaudePermissions ensures the .claude/ directory inside dataDir is
+// group-readable so the claude subprocess (uid 1001, gid node/1000) can
+// access credentials and config created by the node user (uid 1000).
+// The daemon runs as root so it can always fix these permissions.
+func fixClaudePermissions(dataDir string) {
+	claudeDir := filepath.Join(dataDir, ".claude")
+	if _, err := os.Stat(claudeDir); err != nil {
+		return
+	}
+	filepath.Walk(claudeDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		mode := info.Mode()
+		if info.IsDir() {
+			// Directories need g+rwx for traversal and file creation.
+			if mode.Perm()&0o070 != 0o070 {
+				os.Chmod(path, mode.Perm()|0o070)
+			}
+		} else {
+			// Files need g+rw so claude subprocess can refresh tokens.
+			if mode.Perm()&0o060 != 0o060 {
+				os.Chmod(path, mode.Perm()|0o060)
+			}
+		}
+		return nil
+	})
+	log.Println("fixed .claude/ permissions for subprocess access")
+}
+
+// linkSystemTools creates symlinks in toolsDir for each binary in srcDir.
+func linkSystemTools(toolsDir, srcDir string) {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return
+	}
+	os.MkdirAll(toolsDir, 0o755)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		link := filepath.Join(toolsDir, e.Name())
+		target := filepath.Join(srcDir, e.Name())
+		// Skip if already a correct symlink.
+		if existing, err := os.Readlink(link); err == nil && existing == target {
+			continue
+		}
+		os.Remove(link) // remove stale symlink or file
+		if err := os.Symlink(target, link); err == nil {
+			log.Printf("linked tools.d/%s → %s", e.Name(), target)
+		}
+	}
+}
+
 func migrateConfig(dataDir, configDir string) {
 	oldConfigDir := filepath.Join(dataDir, "config")
 

@@ -2,11 +2,16 @@ package media
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
 )
 
 // TelegramFile represents a file response from Telegram
@@ -89,21 +94,57 @@ func BuildDocumentVisionBlock(data []byte, filename string, mimeType string) Vis
 	}
 }
 
-// ExtractTextFromDocument extracts text content from text files
-// For PDFs and DOCX, this is a simple placeholder; real implementation would use libraries
+// ExtractTextFromDocument extracts text content from text files.
+// For PDFs, uses pdftotext (poppler-utils). For plain text, returns as-is.
 func ExtractTextFromDocument(data []byte, mimeType string) string {
 	if IsTextContent(mimeType) {
-		// Try to decode as UTF-8, fallback to lossy conversion
 		if utf8Valid(data) {
 			return string(data)
 		}
-		// Replace invalid UTF-8 with replacement character
 		return makeValidUTF8(data)
 	}
 
-	// For binary formats, return a placeholder
-	// Real implementation would use libraries like fitz (PDF) or zipexplorer (DOCX)
+	if mimeType == "application/pdf" {
+		return extractPDFText(data)
+	}
+
 	return fmt.Sprintf("[Binary document: %s (%d bytes)]", mimeType, len(data))
+}
+
+// extractPDFText shells out to pdftotext (poppler-utils) to extract text from PDF data.
+func extractPDFText(data []byte) string {
+	tmpFile, err := os.CreateTemp("", "alf-pdf-*.pdf")
+	if err != nil {
+		return "[PDF: failed to create temp file]"
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Write(data)
+	tmpFile.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "pdftotext", "-layout", tmpFile.Name(), "-")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Sprintf("[PDF: text extraction failed: %v]", err)
+	}
+
+	text := strings.TrimSpace(stdout.String())
+	if text == "" {
+		return "[PDF: no extractable text (scanned/image-based document)]"
+	}
+
+	// Cap at 100KB to avoid prompt bloat.
+	const maxPDFText = 100 * 1024
+	if len(text) > maxPDFText {
+		text = text[:maxPDFText] + "\n\n[... truncated, PDF text exceeds 100KB ...]"
+	}
+
+	return text
 }
 
 // utf8Valid checks if data is valid UTF-8

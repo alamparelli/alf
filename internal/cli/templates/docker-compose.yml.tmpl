@@ -1,12 +1,44 @@
 name: alf-go
 
 services:
+{{- if .EnableHTTPS}}
+  traefik:
+    image: traefik:v3.3
+    container_name: alf-traefik
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email={{.AcmeEmail}}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+{{- end}}
+
   alf:
     image: ghcr.io/alamparelli/alf:latest
     container_name: alf
     restart: unless-stopped
+{{- if .EnableHTTPS}}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.alf.rule=Host(`{{.Domain}}`)"
+      - "traefik.http.routers.alf.entrypoints=websecure"
+      - "traefik.http.routers.alf.tls.certresolver=letsencrypt"
+      - "traefik.http.services.alf.loadbalancer.server.port=8080"
+{{- else}}
     ports:
       - "0.0.0.0:{{.CCPort}}:8080"
+{{- end}}
     environment:
       - TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
       - TELEGRAM_CHAT_ID_FILE=/run/secrets/telegram_chat_id
@@ -20,6 +52,7 @@ services:
       - ./data:/home/node/data
       - ./config.d:/opt/alf/config
       - ./config.d:/home/node/data/config.d:ro
+      - ./skills.d:/opt/alf/skills
       - ./skills.d:/home/node/data/skills.d:ro
     mem_limit: 2g
     cpus: "2.0"

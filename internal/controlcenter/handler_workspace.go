@@ -1,0 +1,349 @@
+package controlcenter
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"unicode/utf8"
+)
+
+const maxFileSize = 1 << 20 // 1 MB
+
+// editableExts lists file extensions that can be written via PUT.
+var editableExts = map[string]bool{
+	".md": true, ".json": true, ".txt": true,
+	".yaml": true, ".yml": true, ".toml": true,
+	".sh": true, ".py": true, ".js": true,
+}
+
+// WorkspaceHandler serves the data directory as a browsable workspace.
+// Files under config.d/ are read via the :ro bind mount in DataDir but
+// written through ConfigDir (the rw mount at /opt/alf/config).
+//
+//	GET    /api/workspace?path=         → list directory
+//	GET    /api/workspace?path=foo.md   → read file
+//	PUT    /api/workspace?path=foo.md   → save file (editable extensions only)
+//	DELETE /api/workspace?path=foo.md   → delete file
+type WorkspaceHandler struct {
+	DataDir   string
+	ConfigDir string // rw path for config.d writes (e.g. /opt/alf/config)
+	SkillsDir string // rw path for skills.d writes (e.g. /opt/alf/skills)
+	Notifier  Notifier
+}
+
+type wsEntry struct {
+	Name  string `json:"name"`
+	IsDir bool   `json:"is_dir"`
+	Size  int64  `json:"size"`
+}
+
+func (h *WorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	relPath := r.URL.Query().Get("path")
+
+	absPath, err := h.resolve(relPath)
+	if err != nil {
+		http.Error(w, jsonErr("invalid path"), http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		h.get(w, absPath, relPath)
+	case http.MethodPut:
+		writePath := h.resolveWrite(relPath, absPath)
+		h.put(w, r, writePath, relPath)
+	case http.MethodDelete:
+		writePath := h.resolveWrite(relPath, absPath)
+		h.del(w, writePath, relPath)
+	default:
+		http.Error(w, jsonErr("method not allowed"), http.StatusMethodNotAllowed)
+	}
+}
+
+// resolve validates and resolves a relative path within DataDir.
+// Returns the absolute path or an error if the path escapes DataDir.
+func (h *WorkspaceHandler) resolve(rel string) (string, error) {
+	cleaned := filepath.Clean(filepath.Join(h.DataDir, rel))
+
+	// Evaluate symlinks so we catch escapes through symlink targets.
+	resolved, err := filepath.EvalSymlinks(cleaned)
+	if err != nil {
+		// If the path doesn't exist yet (for PUT), check the parent.
+		parent := filepath.Dir(cleaned)
+		resolvedParent, perr := filepath.EvalSymlinks(parent)
+		if perr != nil {
+			return "", perr
+		}
+		if !strings.HasPrefix(resolvedParent, h.realDataDir()) {
+			return "", os.ErrPermission
+		}
+		return cleaned, nil
+	}
+
+	if !strings.HasPrefix(resolved, h.realDataDir()) {
+		return "", os.ErrPermission
+	}
+	return resolved, nil
+}
+
+// resolveWrite returns the writable path for a given relPath.
+// For config.d/ paths, writes go through ConfigDir (rw mount) instead of
+// the :ro bind mount visible in DataDir.
+func (h *WorkspaceHandler) resolveWrite(relPath, absPath string) string {
+	if h.ConfigDir != "" && (relPath == "config.d" || strings.HasPrefix(relPath, "config.d/")) {
+		sub := strings.TrimPrefix(relPath, "config.d")
+		sub = strings.TrimPrefix(sub, "/")
+		return filepath.Join(h.ConfigDir, sub)
+	}
+	if h.SkillsDir != "" && (relPath == "skills.d" || strings.HasPrefix(relPath, "skills.d/")) {
+		sub := strings.TrimPrefix(relPath, "skills.d")
+		sub = strings.TrimPrefix(sub, "/")
+		return filepath.Join(h.SkillsDir, sub)
+	}
+	return absPath
+}
+
+// realDataDir returns the symlink-resolved DataDir (cached on first call would
+// be nice but keeping it simple).
+func (h *WorkspaceHandler) realDataDir() string {
+	resolved, err := filepath.EvalSymlinks(h.DataDir)
+	if err != nil {
+		return h.DataDir
+	}
+	return resolved
+}
+
+func (h *WorkspaceHandler) get(w http.ResponseWriter, absPath, relPath string) {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, jsonErr("not found"), http.StatusNotFound)
+		} else {
+			http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if info.IsDir() {
+		h.listDir(w, absPath, relPath)
+	} else {
+		h.readFile(w, absPath, info)
+	}
+}
+
+func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath string) {
+	entries, err := os.ReadDir(absPath)
+	if err != nil {
+		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	var dirs, files []wsEntry
+	for _, e := range entries {
+		name := e.Name()
+		// Hide .git directory.
+		if name == ".git" {
+			continue
+		}
+		// Hide hidden files at root only (dotfiles like .claude).
+		if strings.HasPrefix(name, ".") && relPath == "" {
+			continue
+		}
+
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		entry := wsEntry{Name: name, IsDir: e.IsDir(), Size: info.Size()}
+		if e.IsDir() {
+			dirs = append(dirs, entry)
+		} else {
+			files = append(files, entry)
+		}
+	}
+
+	// Sort: dirs first, then files, alphabetical within each group.
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+
+	all := append(dirs, files...)
+	if all == nil {
+		all = []wsEntry{}
+	}
+
+	data, _ := json.Marshal(map[string]any{
+		"type":    "directory",
+		"path":    relPath,
+		"entries": all,
+	})
+	w.Write(data)
+}
+
+func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath string, info os.FileInfo) {
+	ext := strings.ToLower(filepath.Ext(absPath))
+	editable := editableExts[ext]
+
+	if info.Size() > maxFileSize {
+		data, _ := json.Marshal(map[string]any{
+			"type":     "file",
+			"name":     info.Name(),
+			"size":     info.Size(),
+			"editable": false,
+			"message":  "File too large to display (max 1 MB)",
+		})
+		w.Write(data)
+		return
+	}
+
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	if isBinary(content) {
+		data, _ := json.Marshal(map[string]any{
+			"type":     "file",
+			"name":     info.Name(),
+			"size":     info.Size(),
+			"editable": false,
+			"message":  "Binary file — cannot display",
+		})
+		w.Write(data)
+		return
+	}
+
+	data, _ := json.Marshal(map[string]any{
+		"type":     "file",
+		"name":     info.Name(),
+		"size":     info.Size(),
+		"editable": editable,
+		"content":  string(content),
+	})
+	w.Write(data)
+}
+
+func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, relPath string) {
+	if relPath == "" {
+		http.Error(w, jsonErr("cannot write to root directory"), http.StatusBadRequest)
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(absPath))
+	if !editableExts[ext] {
+		http.Error(w, jsonErr("file type not editable: "+ext), http.StatusForbidden)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxFileSize+1024))
+	if err != nil {
+		http.Error(w, jsonErr("failed to read body"), http.StatusBadRequest)
+		return
+	}
+
+	var payload struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		http.Error(w, jsonErr("invalid JSON: "+err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	if len(payload.Content) > maxFileSize {
+		http.Error(w, jsonErr("content too large (max 1 MB)"), http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	// Atomic write: tmp file + rename.
+	dir := filepath.Dir(absPath)
+	tmp, err := os.CreateTemp(dir, ".ws-*.tmp")
+	if err != nil {
+		http.Error(w, jsonErr("write failed: "+err.Error()), http.StatusInternalServerError)
+		return
+	}
+	tmpName := tmp.Name()
+
+	if _, err := tmp.WriteString(payload.Content); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		http.Error(w, jsonErr("write failed"), http.StatusInternalServerError)
+		return
+	}
+	tmp.Close()
+
+	if err := os.Rename(tmpName, absPath); err != nil {
+		os.Remove(tmpName)
+		http.Error(w, jsonErr("write failed: "+err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	h.notifyChange(relPath)
+	w.Write([]byte(`{"ok":true}`))
+}
+
+func (h *WorkspaceHandler) del(w http.ResponseWriter, absPath, relPath string) {
+	if relPath == "" {
+		http.Error(w, jsonErr("cannot delete root"), http.StatusBadRequest)
+		return
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, jsonErr("not found"), http.StatusNotFound)
+		} else {
+			http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if info.IsDir() {
+		http.Error(w, jsonErr("cannot delete directories"), http.StatusForbidden)
+		return
+	}
+
+	if err := os.Remove(absPath); err != nil {
+		http.Error(w, jsonErr("delete failed: "+err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	h.notifyChange(relPath)
+	w.Write([]byte(`{"ok":true}`))
+}
+
+// notifyChange sends reload events based on which file was modified.
+func (h *WorkspaceHandler) notifyChange(relPath string) {
+	if h.Notifier == nil {
+		return
+	}
+	switch {
+	case relPath == "config.d/config.json":
+		h.Notifier.Notify(ReloadConfig)
+	case relPath == "config.d/tiers.json":
+		h.Notifier.Notify(ReloadTiers)
+	case strings.HasPrefix(relPath, "tools"):
+		h.Notifier.Notify(ReloadTools)
+	case strings.HasPrefix(relPath, "skills") || strings.HasPrefix(relPath, "skills.d"):
+		h.Notifier.Notify(ReloadSkills)
+	}
+}
+
+// isBinary checks if content is likely binary by looking for null bytes
+// and checking UTF-8 validity.
+func isBinary(data []byte) bool {
+	// Check first 8KB for null bytes.
+	check := data
+	if len(check) > 8192 {
+		check = check[:8192]
+	}
+	for _, b := range check {
+		if b == 0 {
+			return true
+		}
+	}
+	return !utf8.Valid(check)
+}

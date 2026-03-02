@@ -624,12 +624,14 @@ func main() {
 				if routingMsgID != 0 {
 					tg.DeleteMessage(chatID, routingMsgID)
 				}
-				// Pick the first non-instant tier, or fallback to the first tier.
+				// Pick the lowest-priority enabled tier for media processing.
 				tierName := ""
+				bestPriority := int(^uint(0) >> 1) // max int
 				for _, t := range tierStore.Current().Tiers {
-					if !t.Instant {
+					log.Printf("media tier scan: %s priority=%d enabled=%v instant=%v", t.Name, t.Priority, t.Enabled, t.Instant)
+					if t.Enabled && t.Priority < bestPriority {
 						tierName = t.Name
-						break
+						bestPriority = t.Priority
 					}
 				}
 				if tierName == "" && len(tierStore.Current().Tiers) > 0 {

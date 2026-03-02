@@ -17,7 +17,58 @@ import (
 )
 
 var tokenRegex = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
+
+const configReadme = `# ALF Configuration
+
+Edit these files via the Control Center workspace explorer.
+Changes are applied immediately after saving.
+
+## config.json
+
+Main daemon configuration.
+
+| Field | Description |
+|-------|-------------|
+| log_level | "info", "debug", or "warn" |
+| quiet_hours | { "start": 22, "end": 7 } — suppress notifications |
+| session_timeout | Minutes of inactivity before session reset |
+| system_prompt | Custom system prompt injected into all Claude calls |
+| git_track | Enable git tracking of data directory |
+
+## tiers.json
+
+Routing tier configuration. The router classifies each message and routes it to the appropriate tier.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| router_model | string | Model for classification: "haiku", "sonnet", "opus" |
+| default_fallback | string | Tier name to use when classification fails |
+| tiers[] | array | List of tier definitions |
+
+### Tier fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| name | string | required | Unique identifier (alphanumeric, dashes, underscores) |
+| model | string | required | "haiku", "sonnet", or "opus" |
+| priority | int | 0 | Lower = tried first by router |
+| enabled | bool | true | Whether the tier is active |
+| routable | bool | true | Whether the router can select this tier |
+| router_label | string | "" | Short label shown to router for classification |
+| description | string | "" | Rich description for router (overrides label) |
+| max_turns | int | 0 | Max agentic turns (0 = default 3) |
+| effort | string | "" | "low", "medium", or "high" |
+| write_capable | bool | false | Whether this tier can write files |
+| instant | bool | false | Router responds directly, skips second LLM call |
+| tools | []string | [] | Allowed tools (empty = all) |
+
+## sessions.json
+
+Active Control Center login sessions. Managed automatically.
+`
 var chatIDRegex = regexp.MustCompile(`^-?\d+$`)
+var domainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
+var emailRegex = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
 func RunInit() {
 	reader := bufio.NewReader(os.Stdin)
@@ -45,17 +96,37 @@ func RunInit() {
 
 	// Step 5: Dashboard access
 	PrintStep(5, "Dashboard access")
-	ccPort := promptPort(reader)
-	ccHost := promptHost(reader)
-	ccExternalURL := fmt.Sprintf("http://%s:%s", ccHost, ccPort)
+	var composeData ComposeData
+	if promptHTTPS(reader) {
+		domain := promptDomain(reader)
+		acmeEmail := promptAcmeEmail(reader)
+		checkPortsForHTTPS()
+		composeData = ComposeData{
+			EnableHTTPS:   true,
+			Domain:        domain,
+			AcmeEmail:     acmeEmail,
+			CCExternalURL: fmt.Sprintf("https://%s", domain),
+		}
+		// Create letsencrypt directory for ACME certificates
+		if err := os.MkdirAll(filepath.Join(dir, "letsencrypt"), 0o755); err != nil {
+			Fatal(fmt.Sprintf("Failed to create letsencrypt/: %v", err))
+		}
+	} else {
+		ccPort := promptPort(reader)
+		ccHost := promptHost(reader)
+		composeData = ComposeData{
+			CCPort:        ccPort,
+			CCExternalURL: fmt.Sprintf("http://%s:%s", ccHost, ccPort),
+		}
+	}
 
 	// Step 6: Generate files
 	PrintStep(6, "Generating configuration files")
-	generateFiles(dir, botToken, chatID, ccPort, ccExternalURL)
+	generateFiles(dir, botToken, chatID, composeData)
 
 	// Step 7: Pull & Start
 	PrintStep(7, "Starting ALF")
-	pullAndStart(dir, botName)
+	pullAndStart(dir, botName, composeData.EnableHTTPS)
 
 	// Step 8: Claude authentication
 	PrintStep(8, "Claude authentication")
@@ -69,7 +140,7 @@ func RunInit() {
 	fmt.Println()
 	PrintCheck(fmt.Sprintf("Install directory: %s", dir))
 	PrintCheck(fmt.Sprintf("Bot: @%s", botName))
-	PrintCheck(fmt.Sprintf("Dashboard: %s", ccExternalURL))
+	PrintCheck(fmt.Sprintf("Dashboard: %s", composeData.CCExternalURL))
 	fmt.Println()
 	PrintSuccess("Run " + colorBold + "alf login" + colorReset + " to authenticate Claude, then message @" + botName + " on Telegram.")
 	fmt.Println()
@@ -276,7 +347,56 @@ func promptHost(reader *bufio.Reader) string {
 	return input
 }
 
-func generateFiles(dir, botToken, chatID, ccPort, ccExternalURL string) {
+func promptHTTPS(reader *bufio.Reader) bool {
+	fmt.Println("\n  If you have a public domain pointing to this server,")
+	fmt.Println("  ALF can set up automatic HTTPS with Let's Encrypt.")
+	fmt.Print("\n  Enable HTTPS with Let's Encrypt? [y/N]: ")
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+	return input == "y" || input == "yes"
+}
+
+func promptDomain(reader *bufio.Reader) string {
+	for {
+		fmt.Print("\n  Domain name (e.g. alf.example.com): ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+
+		if !domainRegex.MatchString(input) {
+			PrintError("Invalid domain format. Expected: alf.example.com")
+			continue
+		}
+
+		PrintCheck(fmt.Sprintf("Domain: %s", input))
+		return input
+	}
+}
+
+func promptAcmeEmail(reader *bufio.Reader) string {
+	for {
+		fmt.Print("  Email for Let's Encrypt notifications: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+
+		if !emailRegex.MatchString(input) {
+			PrintError("Invalid email format.")
+			continue
+		}
+
+		PrintCheck(fmt.Sprintf("Email: %s", input))
+		return input
+	}
+}
+
+func checkPortsForHTTPS() {
+	for _, port := range []string{"80", "443"} {
+		if !isPortAvailable(port) {
+			PrintWarning(fmt.Sprintf("Port %s is in use. Traefik needs ports 80 and 443 to be free.", port))
+		}
+	}
+}
+
+func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	// Store secrets as files (chmod 600, used via Docker Compose secrets)
 	if err := SetSecret(dir, "telegram_bot_token", botToken); err != nil {
 		Fatal(fmt.Sprintf("Failed to write secret: %v", err))
@@ -298,7 +418,7 @@ func generateFiles(dir, botToken, chatID, ccPort, ccExternalURL string) {
 	}
 	PrintCheck("secrets/cc_auth_token")
 
-	if err := RenderDockerCompose(dir, ComposeData{CCPort: ccPort, CCExternalURL: ccExternalURL}); err != nil {
+	if err := RenderDockerCompose(dir, compose); err != nil {
 		Fatal(fmt.Sprintf("Failed to write docker-compose.yml: %v", err))
 	}
 	PrintCheck("docker-compose.yml")
@@ -307,6 +427,12 @@ func generateFiles(dir, botToken, chatID, ccPort, ccExternalURL string) {
 		Fatal(fmt.Sprintf("Failed to write config.json: %v", err))
 	}
 	PrintCheck("config.json")
+
+	// Write config README if it doesn't exist.
+	readmePath := filepath.Join(dir, "config.d", "README.md")
+	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
+		os.WriteFile(readmePath, []byte(configReadme), 0o644)
+	}
 }
 
 func generateAuthToken() (string, error) {
@@ -317,7 +443,7 @@ func generateAuthToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func pullAndStart(dir, botName string) {
+func pullAndStart(dir, botName string, httpsEnabled bool) {
 	fmt.Println()
 	PrintInfo("Pulling ALF image...")
 	pull := exec.Command("docker", "compose", "pull")
@@ -339,15 +465,25 @@ func pullAndStart(dir, botName string) {
 	}
 
 	// Health check with retries
+	expectedContainers := 1
+	if httpsEnabled {
+		expectedContainers = 2
+	}
 	for i := 0; i < 5; i++ {
 		time.Sleep(2 * time.Second)
 		check := exec.Command("docker", "compose", "ps", "--format", "{{.Status}}")
 		check.Dir = dir
 		out, err := check.Output()
-		if err == nil && strings.Contains(string(out), "Up") {
-			PrintCheck("ALF is running")
-			PrintSuccess(fmt.Sprintf("Setup complete! Send a message to @%s on Telegram.", botName))
-			return
+		if err == nil {
+			upCount := strings.Count(string(out), "Up")
+			if upCount >= expectedContainers {
+				PrintCheck("ALF is running")
+				if httpsEnabled {
+					PrintCheck("Traefik is running")
+				}
+				PrintSuccess(fmt.Sprintf("Setup complete! Send a message to @%s on Telegram.", botName))
+				return
+			}
 		}
 	}
 

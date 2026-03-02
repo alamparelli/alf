@@ -10,7 +10,6 @@ import (
 type Deps struct {
 	ConfigStore    ConfigStore
 	TierStore      TierStore
-	TierFS         TierFSProvider
 	MemoryStore    ResourceStore
 	ToolStore      ResourceStore
 	SkillStore     ResourceStore
@@ -19,9 +18,11 @@ type Deps struct {
 	Notifier       Notifier
 	Magic          *MagicStore
 	Sessions       *SessionStore
+	ChatService    *ChatService // nil if chat API disabled
 	AuthToken      string
 	DataDir        string
 	ConfigDir      string
+	SkillsDir      string
 	DashboardHTML  string
 	WebFS          fs.FS // embedded web assets (style.css, app.js)
 }
@@ -52,20 +53,10 @@ func HandlerFactory(deps Deps) http.Handler {
 		Notifier: deps.Notifier,
 		Event:    ReloadConfig,
 	})
-	mux.Handle("/api/tiers", &TiersHandler{
-		Store:    deps.TierStore,
-		TierFS:   deps.TierFS,
-		Notifier: deps.Notifier,
-		Event:    ReloadTiers,
-	})
-	if deps.TierFS != nil {
-		mux.Handle("/api/tiers/", &TierFilesHandler{
-			TierFS:   deps.TierFS,
-			Notifier: deps.Notifier,
-		})
-	}
-	mux.Handle("/api/router-prompt", &RouterPromptHandler{
+	mux.Handle("/api/workspace", &WorkspaceHandler{
+		DataDir:   deps.DataDir,
 		ConfigDir: deps.ConfigDir,
+		SkillsDir: deps.SkillsDir,
 		Notifier:  deps.Notifier,
 	})
 	mux.Handle("/api/status", &StatusHandler{
@@ -89,6 +80,14 @@ func HandlerFactory(deps Deps) http.Handler {
 		Notifier: deps.Notifier,
 		Event:    ReloadSkills,
 	})
+
+	// Chat API (mobile app).
+	if deps.ChatService != nil {
+		mux.Handle("/api/chat", &ChatHandler{Service: deps.ChatService})
+		mux.Handle("/api/chat/upload", &ChatMediaHandler{Service: deps.ChatService})
+		mux.Handle("/api/chat/media/", &ChatMediaHandler{Service: deps.ChatService})
+		mux.Handle("/api/chat/react", &ChatReactHandler{Service: deps.ChatService})
+	}
 
 	// Restart.
 	mux.Handle("/api/restart", &RestartHandler{})

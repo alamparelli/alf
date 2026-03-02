@@ -15,6 +15,9 @@ var templateFS embed.FS
 type ComposeData struct {
 	CCPort        string
 	CCExternalURL string
+	EnableHTTPS   bool
+	Domain        string
+	AcmeEmail     string
 }
 
 // RenderDockerCompose writes docker-compose.yml with the given port.

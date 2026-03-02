@@ -28,7 +28,6 @@ import (
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
-	"github.com/alamparelli/alf/internal/tierfs"
 	"github.com/alamparelli/alf/internal/updater"
 	"github.com/alamparelli/alf/internal/voice"
 )
@@ -86,6 +85,12 @@ func main() {
 		configDir = d
 	}
 
+	// Skills directory (RW for CC, separate from data volume).
+	skillsDir := "/opt/alf/skills"
+	if d := os.Getenv("ALF_SKILLS_DIR"); d != "" {
+		skillsDir = d
+	}
+
 	// Parse allowed chat IDs for login authorization.
 	// Default to TELEGRAM_CHAT_ID if ALLOWED_CHAT_IDS not explicitly set.
 	allowedRaw := readSecret("ALLOWED_CHAT_IDS")
@@ -103,7 +108,7 @@ func main() {
 	// Magic link auth stores (shared between CC and daemon).
 	magic := cc.NewMagicStore(nil)
 	magic.StartCleanup()
-	sessions := cc.NewFileSessionStore(filepath.Join(dataDir, "sessions.json"), nil)
+	sessions := cc.NewFileSessionStore(filepath.Join(configDir, "sessions.json"), nil)
 	sessions.StartCleanup()
 
 	// CC external URL for magic link generation.
@@ -156,31 +161,6 @@ func main() {
 
 	// Generate daily mood (overwrites mood.md if date changed).
 	mood.GenerateDaily(memoriesDir)
-
-	// TierFS for per-tier system prompts and skills (inside configDir).
-	tierFS := tierfs.New(configDir)
-	for _, t := range tierStore.Current().Tiers {
-		if err := tierFS.EnsureDir(t.Name); err != nil {
-			log.Printf("warning: failed to create tier dir %q: %v", t.Name, err)
-		}
-	}
-
-	// Start Control Center HTTP server.
-	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, configDir, stats, version, authToken, reloadCh, magic, sessions, tierFS)
-		if err != nil {
-			log.Printf("warning: failed to start Control Center: %v", err)
-		} else {
-			go func() {
-				if err := server.Start(); err != nil && err != http.ErrServerClosed {
-					log.Printf("Control Center error: %v", err)
-				}
-			}()
-			log.Printf("Control Center started on :8080 (allowed_chat_ids=%d, external_url=%s)", len(allowedChatIDs), ccExternalURL)
-		}
-	} else {
-		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set — Control Center disabled")
-	}
 
 	// Session store for Claude --resume support.
 	sessionTimeout := time.Duration(cfg.SessionTimeout) * time.Minute
@@ -239,6 +219,45 @@ func main() {
 
 	// Ring buffer tracking Alf's sent message IDs for reaction matching.
 	alfMsgIDs := newRingBuffer(200)
+
+	// Chat message store for mobile app API.
+	chatStore := cc.NewChatStore(dataDir)
+
+	// Chat service for mobile app API (shares Claude invocation with Telegram bot).
+	classifyFn := func(message, lastTier string, msgCount int) cc.RouteResult {
+		rr := router.Classify(router.ClassifyInput{
+			Message:      message,
+			Tiers:        tierStore.Current(),
+			DataDir:      dataDir,
+			ConfigDir:    configDir,
+			LastTier:     lastTier,
+			MessageCount: msgCount,
+		})
+		return cc.RouteResult{
+			Tier:     rr.Tier,
+			Response: rr.Response,
+			Reason:   rr.Reason,
+			React:    rr.React,
+		}
+	}
+	chatService := cc.NewChatService(dataDir, configDir, memoriesDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel)
+
+	// Start Control Center HTTP server.
+	if authToken != "" || len(allowedChatIDs) > 0 {
+		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, reloadCh, magic, sessions, chatService)
+		if err != nil {
+			log.Printf("warning: failed to start Control Center: %v", err)
+		} else {
+			go func() {
+				if err := server.Start(); err != nil && err != http.ErrServerClosed {
+					log.Printf("Control Center error: %v", err)
+				}
+			}()
+			log.Printf("Control Center started on :8080 (allowed_chat_ids=%d, external_url=%s)", len(allowedChatIDs), ccExternalURL)
+		}
+	} else {
+		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set — Control Center disabled")
+	}
 
 	var offset int64
 	client := &http.Client{Timeout: 35 * time.Second}
@@ -302,11 +321,6 @@ func main() {
 				if git != nil {
 					git.Commit("skills updated via CC")
 				}
-			case cc.ReloadTierFiles:
-				log.Println("tier files reloaded")
-				if git != nil {
-					git.Commit("tier files updated via CC")
-				}
 			}
 		default:
 		}
@@ -338,7 +352,7 @@ func main() {
 				}
 				emoji := mr.NewReaction[0].Emoji
 				log.Printf("← reaction %s on msg %d", emoji, mr.MessageID)
-				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, memoriesDir, dataDir, chatSessions, tierStore, tierFS, alfMsgIDs, eventLog)
+				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, memoriesDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog)
 				continue
 			}
 
@@ -568,7 +582,7 @@ func main() {
 								} else {
 									u.Message.Text = fmt.Sprintf("[PHOTO from Telegram chat — use Read tool to view: %s]\nThe user shared this photo in chat. React naturally as you would in a personal conversation — comment on what you see, the mood, the context. This is NOT a code review.", tmpPath)
 								}
-							} else if media.IsTextContent(mimeType) {
+							} else if media.IsTextContent(mimeType) || mimeType == "application/pdf" {
 								textContent := media.ExtractTextFromDocument(data, mimeType)
 								if caption != "" {
 									u.Message.Text = fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s\n\n%s", fileName, textContent, caption)
@@ -704,7 +718,7 @@ func main() {
 			}
 
 			// Resolve tier to params.
-			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), tierFS)
+			tp = resolveTierParams(routeResult.Tier, tierStore.Current())
 
 			eventLog.Log("router_classify", map[string]any{
 				"chat_id":          chatID,
@@ -860,10 +874,9 @@ IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
-	Model          string   // full model name, e.g. "claude-sonnet-4-5"
-	Tools          []string // nil = omit flag
-	Effort         string   // "" = omit flag
-	TierPromptArgs []string // --append-system-prompt pairs from tier system-prompt.md + skills
+	Model  string   // full model name, e.g. "claude-sonnet-4-5"
+	Tools  []string // nil = omit flag
+	Effort string   // "" = omit flag
 }
 
 // progressFn is called with stream events as Claude processes.
@@ -907,9 +920,6 @@ func askClaude(prompt, resumeID string, tp tierParams, onProgress progressFn) (*
 
 	// Inject all memory files as appended system prompts.
 	args = append(args, memory.CollectPrompts(filepath.Join(dataDir, "memories"))...)
-
-	// Inject tier-specific system prompt and skills.
-	args = append(args, tp.TierPromptArgs...)
 
 	// Reaction suggestion instruction (non-editable, always injected).
 	args = append(args, "--append-system-prompt", fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
@@ -1466,14 +1476,13 @@ func isInstantTier(tierName string, tiers *cc.TiersConfig) bool {
 	return false
 }
 
-func resolveTierParams(tierName string, tiers *cc.TiersConfig, tfs *tierfs.TierFS) tierParams {
+func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			return tierParams{
-				Model:          router.ResolveModel(t.Model),
-				Tools:          t.Tools,
-				Effort:         t.Effort,
-				TierPromptArgs: tfs.CollectPromptArgs(tierName),
+				Model:  router.ResolveModel(t.Model),
+				Tools:  t.Tools,
+				Effort: t.Effort,
 			}
 		}
 	}
@@ -1553,40 +1562,6 @@ func migrateConfig(dataDir, configDir string) {
 			continue
 		}
 		log.Printf("migrate: %s → %s", src, dst)
-	}
-
-	// Tier directories: copy from data/tiers/ to configDir/tiers/ if needed.
-	oldTiersDir := filepath.Join(dataDir, "tiers")
-	newTiersDir := filepath.Join(configDir, "tiers")
-	entries, err := os.ReadDir(oldTiersDir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		dst := filepath.Join(newTiersDir, e.Name())
-		if _, err := os.Stat(dst); err == nil {
-			continue // already exists
-		}
-		src := filepath.Join(oldTiersDir, e.Name())
-		filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, _ := filepath.Rel(src, path)
-			target := filepath.Join(dst, rel)
-			if info.IsDir() {
-				return os.MkdirAll(target, 0o755)
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			return os.WriteFile(target, data, info.Mode())
-		})
-		log.Printf("migrate: tier %s → %s", e.Name(), newTiersDir)
 	}
 
 	// Clean up orphan directories from old layout.
@@ -1809,7 +1784,7 @@ func (r *ringBuffer) Size() int {
 }
 
 // handleReaction processes an emoji reaction on an Alf message.
-func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, memoriesDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, tierFS *tierfs.TierFS, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger) {
+func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, memoriesDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger) {
 	// Log the reaction and update live feedback.
 	mood.LogReaction(dataDir, emoji, messageID)
 	mood.UpdateLiveFeedback(memoriesDir, dataDir)
@@ -1866,7 +1841,7 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, memorie
 	tp := tierParams{Model: "claude-haiku-4-5"}
 	for _, t := range tierStore.Current().Tiers {
 		if t.Instant {
-			tp = resolveTierParams(t.Name, tierStore.Current(), tierFS)
+			tp = resolveTierParams(t.Name, tierStore.Current())
 			break
 		}
 	}

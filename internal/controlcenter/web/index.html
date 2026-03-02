@@ -6,13 +6,13 @@
   <meta name="auth-token" content="{{AUTH_TOKEN}}">
   <title>ALF Control Center</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
   <div class="container">
     <header>
       <h1><span>ALF</span> Control Center</h1>
       <div class="header-controls">
-        <button class="toggle-btn" id="advancedToggle">Advanced</button>
         <button class="toggle-btn" id="themeToggle">Light</button>
       </div>
     </header>
@@ -57,160 +57,28 @@
       </div>
     </div>
 
-    <!-- Tiers Card (editable) -->
-    <div class="card" id="tiersCard">
-      <h2>Routing Tiers</h2>
-      <div class="form-row" style="margin-bottom:12px">
-        <label>Router Model</label>
-        <select id="routerModelSelect">
-          <option value="haiku">haiku</option>
-          <option value="sonnet">sonnet</option>
-          <option value="opus">opus</option>
-        </select>
-        <span style="color:var(--text-dim);font-size:0.75rem">Model used for message classification</span>
-      </div>
-      <table class="tier-table">
-        <thead><tr><th>Name</th><th>Model</th><th>Priority</th><th>Enabled</th><th>Routable</th><th></th><th></th></tr></thead>
-        <tbody id="tiersBody"></tbody>
-      </table>
-      <div class="btn-row" style="gap:8px;margin-top:8px">
-        <button class="btn btn-secondary" id="addTierBtn">+ Add Tier</button>
-        <button class="btn" id="saveTiersBtn">Save</button>
-      </div>
-    </div>
-
-    <!-- File Explorer -->
-    <div class="card" id="explorerCard">
-      <h2>Files <span class="badge">injected into system prompt</span></h2>
-      <div class="explorer-tabs">
-        <button class="explorer-tab active" data-type="memories">Memories</button>
-        <button class="explorer-tab" data-type="tools">Tools</button>
-        <button class="explorer-tab" data-type="skills">Skills</button>
-      </div>
+    <!-- Workspace Explorer -->
+    <div class="card" id="workspaceCard">
+      <h2>Workspace</h2>
+      <div class="ws-breadcrumb" id="wsBreadcrumb"></div>
       <div class="explorer-split">
         <div class="explorer-sidebar">
-          <div class="explorer-file-list" id="explorerFileList"></div>
-          <div class="explorer-sidebar-actions">
-            <button class="btn btn-secondary btn-sm" id="newFileBtn">+ New</button>
-            <button class="btn btn-secondary btn-sm btn-danger" id="deleteFileBtn" disabled>Delete</button>
-          </div>
+          <div class="explorer-file-list" id="wsFileList"></div>
         </div>
         <div class="explorer-editor">
           <div class="explorer-editor-header">
-            <span class="explorer-filename" id="explorerFileName">Select a file</span>
-            <button class="btn" id="saveFileBtn" disabled>Save</button>
-          </div>
-          <textarea class="json-editor" id="explorerEditor" rows="12" placeholder="Select a file to edit..." disabled></textarea>
-        </div>
-      </div>
-    </div>
-
-    <!-- Router Prompt -->
-    <div class="card" id="routerPromptCard">
-      <h2>Router Prompt <span class="badge">custom section appended to router</span></h2>
-      <textarea class="json-editor" id="routerPromptEditor" rows="6" placeholder="Add custom instructions for the router here..."></textarea>
-      <div class="btn-row" style="margin-top:8px">
-        <button class="btn" id="saveRouterPromptBtn">Save</button>
-      </div>
-    </div>
-
-    <!-- Recent Logs -->
-    <div class="card">
-      <h2>Recent Logs</h2>
-      <div class="log-box" id="logBox">Loading...</div>
-    </div>
-
-    <!-- Raw Config Editor -->
-    <div class="card" id="rawConfigCard">
-      <h2>Raw Config (JSON)</h2>
-      <textarea class="json-editor" id="rawConfigEditor" rows="12"></textarea>
-      <div class="btn-row" style="gap:8px;margin-top:8px">
-        <button class="btn" id="saveConfigBtn">Save Config</button>
-      </div>
-    </div>
-
-    <!-- Advanced: Full Log Viewer -->
-    <div class="card advanced" id="fullLogsCard">
-      <h2>Full Log Viewer</h2>
-      <div class="form-row">
-        <label for="logFileName">File</label>
-        <select id="logFileName"></select>
-        <label for="logLines">Lines</label>
-        <input type="number" id="logLines" value="200" min="1" max="1000" style="width:80px">
-        <button class="btn" id="fetchLogsBtn">Fetch</button>
-      </div>
-      <div class="log-box" id="fullLogBox" style="max-height:500px"></div>
-    </div>
-
-    <!-- Advanced: System Info -->
-    <div class="card advanced" id="sysInfoCard">
-      <h2>System Info</h2>
-      <div id="sysInfo" style="font-size:0.85rem;color:var(--text-dim)">Loading...</div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="tierModal">
-    <div class="modal modal-lg">
-      <div class="modal-header">
-        <h3 id="tierModalTitle">Edit Tier</h3>
-        <button class="btn-sm" id="closeTierModal">&times;</button>
-      </div>
-      <div class="modal-tabs">
-        <button class="modal-tab active" data-tab="general">General</button>
-        <button class="modal-tab" data-tab="sysprompt">System Prompt</button>
-        <button class="modal-tab" data-tab="skills">Skills</button>
-      </div>
-      <div class="modal-body">
-        <!-- General Tab -->
-        <div class="modal-tab-content active" id="tab-general">
-          <div class="form-row"><label>Router Label</label><input type="text" id="tmRouterLabel"></div>
-          <div class="form-row" style="flex-direction:column;align-items:stretch">
-            <label>Description <span style="color:var(--text-dim);font-size:0.75rem">(rich description for router, overrides label)</span></label>
-            <textarea id="tmDescription" rows="3" class="json-editor" style="min-height:60px"></textarea>
-          </div>
-          <div class="form-row"><label>Max Turns</label><input type="number" id="tmMaxTurns" min="0" max="50" style="width:80px"> <span style="color:var(--text-dim);font-size:0.75rem">0 = default (3)</span></div>
-          <div class="form-row"><label>Effort</label>
-            <select id="tmEffort"><option value="">—</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
-          </div>
-          <div class="form-row"><label>Write Capable</label><input type="checkbox" id="tmWriteCapable"></div>
-          <div class="form-row"><label>Force Command</label><input type="checkbox" id="tmForceCommand"></div>
-          <div class="form-row"><label>Instant</label><input type="checkbox" id="tmInstant"> <span style="color:var(--text-dim);font-size:0.75rem">Router responds directly, skips second LLM call</span></div>
-          <div class="form-row" style="flex-direction:column;align-items:stretch">
-            <label>Allowed Tools <span style="color:var(--text-dim);font-size:0.75rem">(empty = all)</span></label>
-            <div id="tmTools" class="tool-grid"></div>
-          </div>
-        </div>
-        <!-- System Prompt Tab -->
-        <div class="modal-tab-content" id="tab-sysprompt">
-          <p style="font-size:0.82rem;color:var(--text-dim);margin-bottom:8px">Custom system prompt injected for this tier's Claude calls.</p>
-          <textarea id="tmSystemPrompt" class="json-editor" rows="12" style="min-height:200px" placeholder="Write a custom system prompt for this tier..."></textarea>
-          <div class="btn-row" style="margin-top:8px"><button class="btn" id="saveTierSysPrompt">Save Prompt</button></div>
-        </div>
-        <!-- Skills Tab -->
-        <div class="modal-tab-content" id="tab-skills">
-          <p style="font-size:0.82rem;color:var(--text-dim);margin-bottom:8px">Markdown skills injected into this tier's system prompt.</p>
-          <div class="explorer-split" style="min-height:220px">
-            <div class="explorer-sidebar">
-              <div class="explorer-file-list" id="tierSkillList"></div>
-              <div class="explorer-sidebar-actions">
-                <button class="btn btn-secondary btn-sm" id="newTierSkillBtn">+ New</button>
-                <button class="btn btn-secondary btn-sm btn-danger" id="deleteTierSkillBtn" disabled>Delete</button>
-              </div>
-            </div>
-            <div class="explorer-editor">
-              <div class="explorer-editor-header">
-                <span class="explorer-filename" id="tierSkillName">Select a skill</span>
-                <button class="btn" id="saveTierSkillBtn" disabled>Save</button>
-              </div>
-              <textarea class="json-editor" id="tierSkillEditor" rows="8" placeholder="Select a skill to edit..." disabled></textarea>
+            <span class="explorer-filename" id="wsFileName">Select a file</span>
+            <div class="ws-editor-actions">
+              <button class="btn btn-icon btn-danger-icon" id="wsDeleteBtn" disabled title="Delete file"><i data-lucide="trash-2"></i></button>
+              <button class="btn" id="wsSaveBtn" disabled>Save</button>
             </div>
           </div>
+          <div class="ws-message" id="wsMessage" style="display:none"></div>
+          <textarea class="json-editor" id="wsEditor" rows="12" placeholder="Select a file to view..." disabled style="display:none"></textarea>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn" id="applyTierModal">Apply</button>
-      </div>
     </div>
+
   </div>
 
   <div class="toast" id="toast"></div>

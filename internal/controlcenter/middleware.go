@@ -126,6 +126,7 @@ func isQuietRequest(r *http.Request) bool {
 	}
 	p := r.URL.Path
 	return quietPaths[p] ||
+		strings.HasPrefix(p, "/api/") ||
 		strings.HasPrefix(p, "/static/") ||
 		p == "/" ||
 		p == "/favicon.ico"

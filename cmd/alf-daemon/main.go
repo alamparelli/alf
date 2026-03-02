@@ -498,9 +498,9 @@ func main() {
 									mediaType = "VIDEO NOTE (round video)"
 								}
 
-								maxFrames := 5
+								maxFrames := 8
 								if u.Message.Animation != nil {
-									maxFrames = 3
+									maxFrames = 4
 								}
 
 								frames, err := media.ExtractFrames(tmpPath, maxFrames)
@@ -514,7 +514,6 @@ func main() {
 									}
 								} else {
 									cleanupPaths = append(cleanupPaths, frames...)
-									framePaths := strings.Join(frames, ", ")
 
 									// Try to extract and transcribe audio from videos (not GIFs).
 									var transcript string
@@ -535,12 +534,18 @@ func main() {
 									}
 
 									var parts []string
-									parts = append(parts, fmt.Sprintf("[%s from Telegram (%ds) — %d frames extracted. Use Read tool to view: %s]", mediaType, duration, len(frames), framePaths))
+									if len(frames) == 1 {
+										parts = append(parts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) — contact sheet with key frames. Use Read tool to view: %s]", mediaType, fileName, duration, frames[0]))
+									} else {
+										parts = append(parts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) — %d frames extracted. Use Read tool to view: %s]", mediaType, fileName, duration, len(frames), strings.Join(frames, ", ")))
+									}
 									if transcript != "" {
 										parts = append(parts, fmt.Sprintf("[Audio transcript: %s]", transcript))
 									}
 									if caption != "" {
 										parts = append(parts, caption)
+									} else if u.Message.Animation != nil {
+										parts = append(parts, "The user sent this GIF as a reaction to the conversation. GIFs express emotions, humor, or reactions — don't describe the GIF literally. Instead, understand the feeling/mood it conveys and respond to that emotion naturally, matching the vibe. Keep it short.")
 									} else {
 										parts = append(parts, "The user shared this video in chat. Describe what you see in the frames and the audio context. React naturally.")
 									}
@@ -615,6 +620,8 @@ func main() {
 
 			// Build complete message content including media captions and reply context.
 			msgWithReplyContext := buildMessageContent(u.Message)
+			// Build a short version for the router (user text + brief quote hint, no full quoted text).
+			routerMsg := buildRouterMessage(u.Message)
 
 			// Route message to appropriate tier.
 			var tp tierParams
@@ -644,7 +651,7 @@ func main() {
 				log.Printf("→ media detected, bypassing router → tier %q", tierName)
 			} else {
 				routeResult = router.Classify(router.ClassifyInput{
-					Message:      msgWithReplyContext,
+					Message:      routerMsg,
 					Tiers:        tierStore.Current(),
 					DataDir:      dataDir,
 					ConfigDir:    configDir,
@@ -1192,16 +1199,12 @@ func getUpdates(client *http.Client, token string, offset int64) ([]Update, erro
 	return result.Result, nil
 }
 
-// extractReplyContext extracts the quoted message text from a reply, capped at 500 chars.
+// extractReplyContext extracts the full quoted message text from a reply.
 func extractReplyContext(msg *Message) string {
 	if msg == nil || msg.ReplyToMessage == nil {
 		return ""
 	}
-	quoted := msg.ReplyToMessage.Text
-	if len(quoted) > 500 {
-		quoted = quoted[:500]
-	}
-	return quoted
+	return msg.ReplyToMessage.Text
 }
 
 // prependReplyContext adds quoted message context to the user's message.
@@ -1210,7 +1213,7 @@ func prependReplyContext(msg *Message) string {
 	if quoted == "" {
 		return msg.Text
 	}
-	return fmt.Sprintf("[En réponse à : \"%s\"]\n%s", quoted, msg.Text)
+	return fmt.Sprintf("[The user is replying to this previous message:\n---\n%s\n---\n]\n%s", quoted, msg.Text)
 }
 
 // buildMessageContent builds the complete message content including media captions
@@ -1230,7 +1233,7 @@ func buildMessageContent(msg *Message) string {
 	if content == "" && msg.ReplyToMessage != nil {
 		quoted := extractReplyContext(msg)
 		if quoted != "" {
-			return fmt.Sprintf("[En réponse à : \"%s\"]\nThe user quoted this message without adding text. Respond to the quoted content.", quoted)
+			return fmt.Sprintf("[The user is replying to this previous message:\n---\n%s\n---\n]\nThe user quoted this message without adding text. Respond to the quoted content.", quoted)
 		}
 	}
 
@@ -1239,6 +1242,31 @@ func buildMessageContent(msg *Message) string {
 		Text:           content,
 		ReplyToMessage: msg.ReplyToMessage,
 	})
+}
+
+// buildRouterMessage builds a short message for the router classifier.
+// Includes the user's text with a brief quote hint (not the full quoted text)
+// to keep the router prompt small and focused on classification.
+func buildRouterMessage(msg *Message) string {
+	text := msg.Text
+	if msg.Caption != "" {
+		if text != "" {
+			text = msg.Caption + "\n" + text
+		} else {
+			text = msg.Caption
+		}
+	}
+	if msg.ReplyToMessage != nil {
+		quoted := msg.ReplyToMessage.Text
+		if len(quoted) > 100 {
+			quoted = quoted[:100] + "..."
+		}
+		if text == "" {
+			return fmt.Sprintf("[Replying to: \"%s\"] (no additional text)", quoted)
+		}
+		return fmt.Sprintf("[Replying to: \"%s\"]\n%s", quoted, text)
+	}
+	return text
 }
 
 // extFromMime returns a file extension for a MIME type, falling back to the original filename extension.

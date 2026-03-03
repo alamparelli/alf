@@ -197,6 +197,17 @@ ALF runs as root inside the container to manage subprocess isolation. Claude run
 - **Disk**: ~800 MB for the Docker image + ~600 MB on first voice message (Whisper model)
 - **Network**: outbound HTTPS to Telegram API and Claude API
 
+## Contributing
+
+```sh
+go build -tags fts5 ./...    # Build all
+go test -tags fts5 ./...     # Run tests
+./scripts/dev-deploy.sh      # Deploy to homelab
+./scripts/release.sh         # Tag + push release
+```
+
+PRs welcome. Keep changes focused — one feature or fix per PR.
+
 ## License
 
 [MIT](LICENSE)

@@ -43,6 +43,19 @@ func (c *Client) SendHTML(chatID int64, html string) error {
 	return c.sendChunks(chatID, chunks, "HTML")
 }
 
+// SendHTMLNoPreview sends HTML with link preview disabled.
+// Use for messages containing one-time links (e.g., magic login links)
+// to prevent Telegram's preview bot from consuming them.
+func (c *Client) SendHTMLNoPreview(chatID int64, html string) error {
+	payload, _ := json.Marshal(map[string]any{
+		"chat_id":                  chatID,
+		"text":                     html,
+		"parse_mode":               "HTML",
+		"disable_web_page_preview": true,
+	})
+	return c.post("sendMessage", payload)
+}
+
 // SendKeyboard sends a message with an inline keyboard.
 func (c *Client) SendKeyboard(chatID int64, text string, keyboard any) error {
 	payload, _ := json.Marshal(map[string]any{

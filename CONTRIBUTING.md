@@ -53,7 +53,7 @@ docker compose up --build
 ### Go style
 
 - Standard `gofmt` formatting
-- No external dependencies unless absolutely necessary (the project has two: sqlite-vec and go-sqlite3)
+- No external dependencies unless absolutely necessary (the project has three: sqlite-vec, go-sqlite3, onnxruntime_go)
 - Interfaces at package boundaries, concrete types internally
 - Factory pattern for complex object creation (`internal/controlcenter/factory.go`)
 - Error messages are lowercase, no punctuation
@@ -61,7 +61,8 @@ docker compose up --build
 ### Architecture patterns
 
 - **Provider interface** — all LLM interaction goes through `provider.Provider` and `provider.Classifier`
-- **Persistent subprocesses** — long-lived processes (Whisper, classifier, embedder) follow the same pattern: mutex, stdin/stdout JSON lines, auto-restart on crash, idle timeout
+- **Persistent subprocesses** — long-lived processes (Whisper, classifier) follow the same pattern: mutex, stdin/stdout JSON lines, auto-restart on crash, idle timeout
+- **Go-native inference** — ONNX embeddings run in-process via `onnxruntime_go` (no sidecar)
 - **Router is pure logic** — `internal/router/` builds prompts and parses responses, never spawns processes
 - **Unix user isolation** — Claude runs as uid 1001, config is read-only, tools are rx-only
 

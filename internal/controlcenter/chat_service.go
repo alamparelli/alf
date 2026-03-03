@@ -673,8 +673,7 @@ func (cs *ChatService) Upload(file io.Reader, fileName, mediaType string) (*Uplo
 		}
 
 	case media.IsVideoContent(mimeType, fileName):
-		maxFrames := 8
-		frames, err := media.ExtractFrames(tmpFile.Name(), maxFrames)
+		frames, err := media.ExtractFrames(tmpFile.Name(), 16)
 		if err != nil {
 			log.Printf("[chat-api] frame extraction failed: %v", err)
 		} else {

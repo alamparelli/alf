@@ -640,12 +640,7 @@ func main() {
 									mediaType = "VIDEO NOTE (round video)"
 								}
 
-								maxFrames := 8
-								if u.Message.Animation != nil {
-									maxFrames = 4
-								}
-
-								frames, err := media.ExtractFrames(tmpPath, maxFrames)
+								frames, err := media.ExtractFrames(tmpPath, 16)
 								if err != nil {
 									log.Printf("frame extraction failed: %v", err)
 									// Fallback: tell Claude the file is a video it can't view.

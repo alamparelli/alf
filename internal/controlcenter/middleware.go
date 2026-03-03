@@ -27,6 +27,12 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				return
 			}
 
+			// Debug: log auth failure details for API calls.
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				log.Printf("[CC] auth fail: method=%s path=%s has_auth=%v auth_len=%d token_len=%d",
+					r.Method, r.URL.Path, auth != "", len(auth), len(token))
+			}
+
 			// Check query param (for dashboard initial load).
 			if token != "" && r.URL.Query().Get("token") == token {
 				next.ServeHTTP(w, r)
@@ -74,7 +80,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
@@ -140,6 +146,13 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// Flush implements http.Flusher so SSE streaming works through the logging middleware.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // rateLimitMiddleware limits requests per IP per minute.

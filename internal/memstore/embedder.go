@@ -12,13 +12,12 @@ import (
 	"time"
 )
 
-// Embedder manages a persistent sentence-transformers Python process.
+// Embedder manages a persistent ONNX Runtime Python process.
 // The model is loaded once and kept in memory for fast embedding generation.
 type Embedder struct {
 	mu         sync.Mutex
 	scriptPath string
-	model      string
-	modelsDir  string
+	modelDir   string
 	timeout    time.Duration
 	dims       int
 
@@ -42,22 +41,18 @@ type embedResponse struct {
 }
 
 // NewEmbedder creates a new Embedder. Does NOT start the process — call Start().
-func NewEmbedder(scriptPath, model, modelsDir string, timeout time.Duration) (*Embedder, error) {
+func NewEmbedder(scriptPath, modelDir string, timeout time.Duration) (*Embedder, error) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		return nil, fmt.Errorf("python3 not found in PATH: %w", err)
 	}
 
-	if model == "" {
-		model = "all-MiniLM-L6-v2"
-	}
-	if modelsDir == "" {
-		modelsDir = "/home/node/data/models"
+	if modelDir == "" {
+		modelDir = "/opt/alf/models/all-MiniLM-L6-v2"
 	}
 
 	return &Embedder{
 		scriptPath: scriptPath,
-		model:      model,
-		modelsDir:  modelsDir,
+		modelDir:   modelDir,
 		timeout:    timeout,
 	}, nil
 }
@@ -73,8 +68,7 @@ func (e *Embedder) Start() error {
 
 	cmd := exec.Command("python3", e.scriptPath,
 		"--server",
-		"--model", e.model,
-		"--models-dir", e.modelsDir,
+		"--model-dir", e.modelDir,
 	)
 	cmd.Stderr = os.Stderr
 
@@ -118,7 +112,7 @@ func (e *Embedder) Start() error {
 	e.ready = true
 	e.dims = status.Dims
 
-	log.Printf("memstore: embedder ready (model=%s, dims=%d, pid=%d)", e.model, e.dims, cmd.Process.Pid)
+	log.Printf("memstore: embedder ready (model-dir=%s, dims=%d, pid=%d)", e.modelDir, e.dims, cmd.Process.Pid)
 	return nil
 }
 

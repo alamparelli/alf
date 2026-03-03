@@ -1,17 +1,12 @@
 package router
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
-	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/memory"
@@ -35,86 +30,6 @@ type ClassifyInput struct {
 	MessageCount int    // from session store
 }
 
-// Classify routes a message to a tier by calling the Claude CLI as a fast classifier.
-func Classify(input ClassifyInput) Result {
-	valid := validTierSet(input.Tiers)
-	prompt := buildPrompt(input, valid)
-
-	model := ResolveModel(input.Tiers.RouterModel)
-	if model == "" {
-		model = ResolveModel("haiku")
-	}
-	log.Printf("router: using model %s for classification", model)
-
-	args := []string{
-		"-p", prompt,
-		"--model", model,
-		"--output-format", "text",
-		"--max-turns", "2",
-		"--allowedTools", "",
-		"--dangerously-skip-permissions",
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "claude", args...)
-	cmd.Dir = input.DataDir
-	// Run as 'claude' user (uid 1001, gid 1000) — daemon runs as root.
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
-	}
-
-	env := make([]string, 0, len(os.Environ()))
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "HOME=") {
-			env = append(env, e)
-		}
-	}
-	cmd.Env = append(env, "HOME="+input.DataDir)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	raw := strings.TrimSpace(stdout.String())
-
-	if err != nil || raw == "" {
-		fb := fallbackResult(input.Tiers)
-		if ctx.Err() == context.DeadlineExceeded {
-			log.Printf("router: timeout after 60s, falling back to %s (stderr: %s)", fb.Tier, strings.TrimSpace(stderr.String()))
-		} else {
-			log.Printf("router: classify error: %v, falling back to %s (stderr: %s)", err, fb.Tier, strings.TrimSpace(stderr.String()))
-		}
-		return fb
-	}
-
-	result := parseResponse(raw, valid)
-
-	// Router answered directly — use as-is (no second LLM call).
-	if result.Response != "" && result.Tier == "" {
-		log.Printf("router: %s → direct response (%s)", truncate(input.Message, 60), result.Reason)
-		return result
-	}
-
-	// Router routed to a valid tier.
-	if result.Tier != "" {
-		log.Printf("router: %s → %s (%s)", truncate(input.Message, 60), result.Tier, result.Reason)
-		return result
-	}
-
-	// Parse failed but router produced non-empty text — use as direct response.
-	if raw != "" && !strings.HasPrefix(raw, "Error:") && !strings.EqualFold(raw, "Execution error") {
-		log.Printf("router: %s → direct response (plain text)", truncate(input.Message, 60))
-		return Result{Response: raw, Reason: "plain-text direct"}
-	}
-
-	fb := fallbackResult(input.Tiers)
-	log.Printf("router: parse failed (%s), falling back to %s", truncate(raw, 100), fb.Tier)
-	return fb
-}
-
 // ResolveModel maps short model names to full Claude model identifiers.
 func ResolveModel(short string) string {
 	switch strings.ToLower(short) {
@@ -132,12 +47,14 @@ func ResolveModel(short string) string {
 	}
 }
 
-// buildPrompt constructs the classification prompt.
-func buildPrompt(input ClassifyInput, valid map[string]bool) string {
+// BuildSystemPrompt constructs the one-time system prompt for the persistent
+// classifier process. Includes personality, tier catalog, rules, and response format.
+// This is sent once at process start; per-message user text goes via stdin.
+func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string {
 	var b strings.Builder
 
 	// 1. Personality (soul.md + mood.md) so direct responses match ALF's voice.
-	personality := memory.CollectInline(filepath.Join(input.DataDir, "memories"))
+	personality := memory.CollectInline(filepath.Join(dataDir, "memories"))
 	if personality != "" {
 		b.WriteString(personality)
 		b.WriteString("\n\n")
@@ -148,7 +65,168 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	b.WriteString("1. If you can fully answer the message yourself, respond directly.\n")
 	b.WriteString("2. If the message needs tools, file access, code changes, or deep reasoning, route it to the appropriate tier.\n\n")
 
-	// 3. Tier catalog using Description (fallback to RouterLabel).
+	// 3. Tier catalog.
+	b.WriteString("Available tiers (only route when YOU cannot handle it):\n")
+	for _, t := range tiers.Tiers {
+		if !t.Enabled || !t.Routable {
+			continue
+		}
+		access := "read-only"
+		if t.WriteCapable {
+			access = "read-write"
+		}
+		desc := t.RouterDescription()
+		b.WriteString(fmt.Sprintf("- %s (%s): %s\n", t.Name, access, desc))
+	}
+
+	if tiers.RouterDistinctions != "" {
+		b.WriteString(fmt.Sprintf("\nKey distinctions: %s\n", tiers.RouterDistinctions))
+	}
+
+	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, or edit ANYTHING (files, tasks, settings, status, etc.).\n")
+	b.WriteString("IMPORTANT: If the message references conversation history (\"what did we talk about\", \"earlier\", \"before\", \"you said\", \"continue\"), you MUST route to a tier — never respond directly, because you have no conversation memory.\n")
+
+	// 4. Custom router prompt from file.
+	routerPromptPath := filepath.Join(configDir, "router-prompt.md")
+	if data, err := os.ReadFile(routerPromptPath); err == nil {
+		custom := strings.TrimSpace(string(data))
+		if custom != "" {
+			b.WriteString("\n")
+			b.WriteString(custom)
+			b.WriteString("\n")
+		}
+	}
+
+	// 5. Valid tier names.
+	b.WriteString("\nValid tier names: ")
+	first := true
+	for _, t := range tiers.Tiers {
+		if t.Enabled && t.Routable {
+			if !first {
+				b.WriteString(", ")
+			}
+			b.WriteString("\"" + t.Name + "\"")
+			first = false
+		}
+	}
+	b.WriteString("\n")
+
+	// 6. Conversation context instruction.
+	b.WriteString("\nYou maintain conversation context across messages. After each tier response, you'll receive a summary like:\n")
+	b.WriteString("[tierName (access) responded: brief summary]\n")
+	b.WriteString("Use this to track what happened and make better routing decisions for follow-up messages.\n")
+
+	// 7. Response format.
+	b.WriteString("\nRespond with ONLY a JSON object:")
+	b.WriteString("\n- If you can answer: {\"response\": \"<your answer>\", \"reason\": \"direct\", \"react\": \"EMOJI_or_empty\"}")
+	b.WriteString("\n- If you need to route: {\"tier\": \"<EXACT tier name from list above>\", \"reason\": \"<brief reason>\"}")
+	b.WriteString("\nThe \"tier\" value MUST be one of the valid tier names listed above. Do NOT invent tier names.")
+	b.WriteString("\nThe optional \"react\" field suggests a single emoji reaction for the user's message (shows you understood it). Omit or leave empty if no reaction fits. Pick contextually relevant emojis, not generic thumbs up.")
+
+	return b.String()
+}
+
+// BuildClassifyPrompt constructs the full single-shot classification prompt.
+// Used as fallback when the persistent classifier is not available.
+func BuildClassifyPrompt(input ClassifyInput) string {
+	valid := ValidTierSet(input.Tiers)
+	return buildPrompt(input, valid)
+}
+
+// ParseResponse extracts a Result from the classifier's raw text output.
+func ParseResponse(raw string, tiers *cc.TiersConfig) Result {
+	valid := ValidTierSet(tiers)
+	return parseResponse(raw, valid)
+}
+
+// InterpretRaw applies the full interpretation logic to raw classifier output:
+// parse JSON, handle direct responses, fallback on text scan, fallback tier.
+func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
+	valid := ValidTierSet(tiers)
+	result := parseResponse(raw, valid)
+
+	// Router answered directly.
+	if result.Response != "" && result.Tier == "" {
+		log.Printf("router: %s → direct response (%s)", truncate(message, 60), result.Reason)
+		return result
+	}
+
+	// Router routed to a valid tier.
+	if result.Tier != "" {
+		log.Printf("router: %s → %s (%s)", truncate(message, 60), result.Tier, result.Reason)
+		return result
+	}
+
+	// Parse failed but non-empty text — use as direct response.
+	if raw != "" && !strings.HasPrefix(raw, "Error:") && !strings.EqualFold(raw, "Execution error") {
+		log.Printf("router: %s → direct response (plain text)", truncate(message, 60))
+		return Result{Response: raw, Reason: "plain-text direct"}
+	}
+
+	fb := FallbackResult(tiers)
+	log.Printf("router: parse failed (%s), falling back to %s", truncate(raw, 100), fb.Tier)
+	return fb
+}
+
+// ValidTierSet returns the set of enabled, routable tier names.
+func ValidTierSet(tiers *cc.TiersConfig) map[string]bool {
+	set := make(map[string]bool)
+	for _, t := range tiers.Tiers {
+		if t.Enabled && t.Routable {
+			set[t.Name] = true
+		}
+	}
+	return set
+}
+
+// FallbackResult returns a fallback tier when classification fails.
+func FallbackResult(tiers *cc.TiersConfig) Result {
+	// Pick the lowest-priority enabled non-instant tier.
+	best := ""
+	bestPriority := int(^uint(0) >> 1)
+	for _, t := range tiers.Tiers {
+		if t.Enabled && !t.Instant && t.Priority < bestPriority {
+			best = t.Name
+			bestPriority = t.Priority
+		}
+	}
+	if best != "" {
+		return Result{Tier: best, Reason: "fallback"}
+	}
+	for _, t := range tiers.Tiers {
+		if t.Enabled {
+			return Result{Tier: t.Name, Reason: "fallback"}
+		}
+	}
+	return Result{Tier: "instant", Reason: "fallback (no tiers)"}
+}
+
+// TierAccess returns "read-write" or "read-only" for a tier name.
+func TierAccess(tierName string, tiers *cc.TiersConfig) string {
+	for _, t := range tiers.Tiers {
+		if t.Name == tierName && t.WriteCapable {
+			return "read-write"
+		}
+	}
+	return "read-only"
+}
+
+// --- internal helpers (keep unexported for tests) ---
+
+// buildPrompt constructs the full single-shot classification prompt.
+func buildPrompt(input ClassifyInput, valid map[string]bool) string {
+	var b strings.Builder
+
+	personality := memory.CollectInline(filepath.Join(input.DataDir, "memories"))
+	if personality != "" {
+		b.WriteString(personality)
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("You are a smart message router AND responder. Your job:\n")
+	b.WriteString("1. If you can fully answer the message yourself, respond directly.\n")
+	b.WriteString("2. If the message needs tools, file access, code changes, or deep reasoning, route it to the appropriate tier.\n\n")
+
 	b.WriteString("Available tiers (only route when YOU cannot handle it):\n")
 	for _, t := range input.Tiers.Tiers {
 		if !t.Enabled || !t.Routable {
@@ -169,13 +247,11 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, or edit ANYTHING (files, tasks, settings, status, etc.).\n")
 	b.WriteString("IMPORTANT: If the message references conversation history (\"what did we talk about\", \"earlier\", \"before\", \"you said\", \"continue\"), you MUST route to a tier — never respond directly, because you have no conversation memory.\n")
 
-	// 4. Conversation context.
 	if input.MessageCount > 0 && input.LastTier != "" {
 		b.WriteString(fmt.Sprintf("\nConversation context: Message #%d in session. Previous message handled by %q.\n", input.MessageCount+1, input.LastTier))
 		b.WriteString("If the message is a short reply (\"oui\", \"non\", \"ok\", \"yes\", \"no\", \"continue\") that clearly answers or continues the previous exchange, route to the same tier (\"" + input.LastTier + "\"). But if it's a new greeting or new topic, route normally.\n")
 	}
 
-	// 5. Custom router prompt from file.
 	routerPromptPath := filepath.Join(input.ConfigDir, "router-prompt.md")
 	if data, err := os.ReadFile(routerPromptPath); err == nil {
 		custom := strings.TrimSpace(string(data))
@@ -186,10 +262,8 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 		}
 	}
 
-	// 6. User message (truncated to 500 chars).
 	b.WriteString(fmt.Sprintf("\nUser message: %s\n", truncate(input.Message, 500)))
 
-	// 7. Valid tier names for response format.
 	b.WriteString("\nValid tier names: ")
 	first := true
 	for _, t := range input.Tiers.Tiers {
@@ -203,7 +277,6 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	}
 	b.WriteString("\n")
 
-	// 8. Response format.
 	b.WriteString("\nRespond with ONLY a JSON object:")
 	b.WriteString("\n- If you can answer: {\"response\": \"<your answer>\", \"reason\": \"direct\", \"react\": \"EMOJI_or_empty\"}")
 	b.WriteString("\n- If you need to route: {\"tier\": \"<EXACT tier name from list above>\", \"reason\": \"<brief reason>\"}")
@@ -213,7 +286,6 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	return b.String()
 }
 
-// parseResponse extracts a Result from the classifier's raw text output.
 func parseResponse(raw string, valid map[string]bool) Result {
 	cleaned := stripMarkdownFences(raw)
 
@@ -251,46 +323,12 @@ func parseResponse(raw string, valid map[string]bool) Result {
 	return Result{}
 }
 
-// instantTierName returns the name of the first enabled instant tier, or "".
-func instantTierName(tiers *cc.TiersConfig) string {
-	for _, t := range tiers.Tiers {
-		if t.Enabled && t.Instant {
-			return t.Name
-		}
-	}
-	return ""
-}
-
 func validTierSet(tiers *cc.TiersConfig) map[string]bool {
-	set := make(map[string]bool)
-	for _, t := range tiers.Tiers {
-		if t.Enabled && t.Routable {
-			set[t.Name] = true
-		}
-	}
-	return set
+	return ValidTierSet(tiers)
 }
 
 func fallbackResult(tiers *cc.TiersConfig) Result {
-	// Pick the lowest-priority enabled non-instant tier.
-	best := ""
-	bestPriority := int(^uint(0) >> 1)
-	for _, t := range tiers.Tiers {
-		if t.Enabled && !t.Instant && t.Priority < bestPriority {
-			best = t.Name
-			bestPriority = t.Priority
-		}
-	}
-	if best != "" {
-		return Result{Tier: best, Reason: "fallback"}
-	}
-	// All tiers are instant or disabled — pick any enabled tier.
-	for _, t := range tiers.Tiers {
-		if t.Enabled {
-			return Result{Tier: t.Name, Reason: "fallback"}
-		}
-	}
-	return Result{Tier: "instant", Reason: "fallback (no tiers)"}
+	return FallbackResult(tiers)
 }
 
 func stripMarkdownFences(s string) string {

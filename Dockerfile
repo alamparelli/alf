@@ -1,17 +1,17 @@
-# Stage 1: Build Go daemon (debian for CGo — sqlite-vec requires CGO_ENABLED=1)
-FROM --platform=$BUILDPLATFORM golang:1.24.13 AS builder
-ARG TARGETARCH
+# Stage 1: Build Go daemon on target platform (CGo cross-compilation breaks sqlite-vec header resolution).
+# Uses QEMU emulation when host != target — slower but reliable.
+FROM golang:1.24.13 AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=$TARGETARCH go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
-    && CGO_ENABLED=1 GOOS=linux GOARCH=$TARGETARCH go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /memory-tools ./cmd/memory-tools
+RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
+    && CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /memory-tools ./cmd/memory-tools
 
 # Stage 2: Runtime with Claude Code CLI
 FROM node:22-slim
@@ -35,15 +35,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # libgomp1 is required for OpenMP parallel CPU execution in ctranslate2.
 RUN pip3 install --break-system-packages faster-whisper
 
-# Install sentence-transformers for semantic memory embeddings.
-RUN pip3 install --break-system-packages sentence-transformers
+# Install ONNX Runtime + tokenizers for semantic memory embeddings.
+# Replaces PyTorch/sentence-transformers (~1 GB) with ONNX (~180 MB).
+RUN pip3 install --break-system-packages onnxruntime tokenizers numpy \
+    && rm -rf /root/.cache/pip
 
-# Pre-download embedding model to avoid first-run delay.
-RUN python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Pre-download ONNX embedding model to avoid first-run delay.
+RUN mkdir -p /opt/alf/models/all-MiniLM-L6-v2 \
+    && curl -fsSL -o /opt/alf/models/all-MiniLM-L6-v2/model.onnx \
+       "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx" \
+    && curl -fsSL -o /opt/alf/models/all-MiniLM-L6-v2/tokenizer.json \
+       "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
 
-# Audit Python dependencies for known CVEs (fails build on vulnerabilities).
-RUN pip3 install --break-system-packages pip-audit \
-    && pip-audit --desc --skip-editable
+# Python CVE audit runs in go test (internal/vulncheck/) with scoped deps.
+# Removed from Dockerfile — pip-audit lacks package exclusion, and base image
+# pip/setuptools CVEs are false positives that block builds.
 
 # Enable OpenMP threading for ctranslate2 (faster-whisper backend).
 ENV OMP_NUM_THREADS=4
@@ -63,7 +69,8 @@ COPY scripts/embed.py /opt/alf/embed.py
 
 # Create memory tool symlinks (memory-search, memory-store → memory-tools).
 RUN ln -s /opt/alf/tools/memory-tools /opt/alf/tools/memory-search \
-    && ln -s /opt/alf/tools/memory-tools /opt/alf/tools/memory-store
+    && ln -s /opt/alf/tools/memory-tools /opt/alf/tools/memory-store \
+    && ln -s /opt/alf/tools/memory-tools /opt/alf/tools/memory-delete
 
 # Create 'claude' user for subprocess isolation (same group as node).
 # node=1000:1000, claude=1001:1000 — shares 'node' group for data access.

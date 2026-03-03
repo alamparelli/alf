@@ -8,6 +8,7 @@
 ## System Overview
 
 Two layers: a **host CLI** manages the lifecycle, a **container daemon** runs the bot.
+A **mobile app** (React Native / Expo) connects to the daemon's HTTP API.
 
 ```
 Host machine                         Docker container (Debian node:22-slim)
@@ -20,17 +21,23 @@ Host machine                         Docker container (Debian node:22-slim)
 │  - start     │                     │  │ poller    │  │ :8080           │ │
 │  - stop      │                     │  └─────┬────┘  └────────┬────────┘ │
 │  - upgrade   │                     │        │                │          │
-│  - login     │                     │        ▼                │          │
+│  - login     │                     │        ▼                ▲          │
 │  - secrets   │                     │  ┌──────────┐           │          │
 │              │                     │  │ Claude    │  reloadCh │          │
 │              │                     │  │ subprocess│◄──────────┘          │
 │              │                     │  │ (uid:1001)│                      │
 │              │                     │  └──────────┘                      │
-│              │                     │  ┌──────────┐                      │
-│              │                     │  │ Whisper   │                      │
-│              │                     │  │ (python3) │                      │
-│              │                     │  └──────────┘                      │
+│              │                     │  ┌──────────┐  ┌──────────┐       │
+│              │                     │  │ Whisper   │  │ Chat API │       │
+│              │                     │  │ (python3) │  │ (mobile) │       │
+│              │                     │  └──────────┘  └──────────┘       │
 └──────────────┘                     └─────────────────────────────────────┘
+                                              ▲
+Mobile app (React Native / Expo)              │
+┌──────────────────────┐          HTTP / SSE  │
+│  Chat, CC WebView,   │ ────────────────────►│
+│  Settings            │          :8080       │
+└──────────────────────┘
 ```
 
 ---
@@ -53,21 +60,20 @@ Claude is spawned via `SysProcAttr.Credential{Uid:1001, Gid:1000}` with `HOME=/h
 | Package | Role |
 |---------|------|
 | `cmd/alf/` | Host CLI router (init, start, stop, upgrade, login, secret, uninstall) |
-| `cmd/alf-daemon/` | Container entry point — Telegram loop, command routing, Claude invocation |
+| `cmd/alf-daemon/` | Container entry point — Telegram loop, command routing, Claude invocation, chat API backend |
 | `cmd/extract-video/` | System tool — extract frames + audio transcript from videos |
-| `internal/cli/` | All CLI command implementations + embedded templates |
-| `internal/controlcenter/` | HTTP dashboard, auth, config/tiers/resource CRUD, stores, middleware |
-| `internal/media/` | File download, MIME detection, frame extraction, audio extraction |
+| `internal/cli/` | All CLI command implementations + embedded templates (`docker-compose.yml.tmpl`, `config.json.tmpl`) |
+| `internal/controlcenter/` | HTTP dashboard, auth, config/tiers/workspace/chat CRUD, stores, middleware, notifier |
+| `internal/media/` | File download, MIME detection, frame/audio extraction, PDF text extraction |
 | `internal/voice/` | Persistent faster-whisper transcription subprocess |
-| `internal/router/` | Message classification + tier routing |
-| `internal/telegram/` | Markdown→HTML formatting, chunking, Telegram API client |
-| `internal/session/` | Claude session persistence (--resume support) |
-| `internal/mood/` | Reaction scoring, emoji sentiment, allowed reaction whitelist |
-| `internal/memory/` | Memory index collection for system prompts |
+| `internal/router/` | LLM-based message classification + tier routing, `ResolveModel()` for short→full model IDs |
+| `internal/telegram/` | Markdown→HTML formatting, chunking, Telegram API client (send, react, edit, delete) |
+| `internal/session/` | Claude session persistence (`--resume` support), backed by JSON file |
+| `internal/mood/` | Daily mood generation, live feedback updater, reaction scoring, emoji sentiment, allowed reaction whitelist |
+| `internal/memory/` | Memory index collection for system prompts, `Bootstrap()` seeds defaults |
 | `internal/eventlog/` | JSONL event logger (daily rotation) |
 | `internal/gittrack/` | Git version history for data directory |
-| `internal/tierfs/` | Per-tier filesystem (system prompts, skills) |
-| `internal/updater/` | GHCR tag polling for new image versions |
+| `internal/updater/` | GHCR tag polling for new image versions (OCI token auth) |
 
 ---
 
@@ -79,11 +85,14 @@ Claude is spawned via `SysProcAttr.Credential{Uid:1001, Gid:1000}` with `HOME=/h
 Telegram message
   → daemon: getUpdates() long-poll
   → eventlog: log message_in
-  → command routing (/login, /new, /help) OR:
-  → router.Classify() → tier selection (runs as uid 1001)
+  → command routing (/login, /reset, /status) OR:
+  → router.Classify() → tier selection or direct response (runs as uid 1001)
   → askClaude(prompt, model, resumeID) (runs as uid 1001)
+    → injects: memory --context files, --append-system-prompt (reaction tag)
+    → supports: --resume, --model, --allowedTools, --effort
   → session store: persist session_id
   → telegram.SendMessage() → markdown→HTML → chunk → send
+  → reaction: mood.ShouldReact() → tg.SetMessageReaction()
   → eventlog: log message_out
 ```
 
@@ -93,7 +102,8 @@ Telegram message
 Telegram message (has photo/document)
   → download via media.DownloadFile()
   → detect MIME, save to /tmp
-  → inject file path into prompt: [PHOTO — use Read tool: /tmp/alf-media-*.jpg]
+  → PDF: pdftotext extraction → inject text content
+  → other: inject file path into prompt: [PHOTO — use Read tool: /tmp/alf-media-*.jpg]
   → bypass router → route to non-instant tier (needs Read tool)
   → askClaude(prompt) → Claude uses Read tool on file
   → cleanup: delete temp file after 10 minutes
@@ -104,14 +114,15 @@ Telegram message (has photo/document)
 ```
 Telegram message (has video/animation/video_note)
   → download via media.DownloadFile() → /tmp/alf-media-*.mp4
-  → media.ExtractFrames() → ffmpeg → /tmp/alf-frame-*.jpg (3-5 frames)
+  → media.ExtractFrames() → ffmpeg → contact sheet thumbnail grid
   → media.ExtractAudio() → ffmpeg → /tmp/alf-audio-*.wav
   → transcriber.Transcribe() → faster-whisper → text + language
+  → GIF: emotion-specific prompt (reaction/meme context)
   → inject into prompt:
-    [VIDEO (mp4, 15s) — 5 frames extracted. Use Read tool: /tmp/frame-001.jpg, ...]
+    [VIDEO (mp4, 15s) — contact sheet. Use Read tool: /tmp/contact-sheet-*.jpg]
     [Audio transcript: Hello world...]
   → bypass router → non-instant tier
-  → askClaude(prompt) → Claude reads frame images
+  → askClaude(prompt) → Claude reads contact sheet image
   → cleanup: delete video + frames + audio after 10 minutes
 ```
 
@@ -123,6 +134,34 @@ Telegram message (has voice/audio)
   → faster-whisper → text + language
   → inject transcription as message text
   → normal text routing (router.Classify → askClaude)
+```
+
+### Reply Context
+
+```
+Telegram message (reply to another message)
+  → extract ReplyToMessage metadata
+  → format reply context: quoted text, sender, media type
+  → inject into router classification and Claude prompt
+  → enables contextual follow-up responses
+```
+
+### Chat API (Mobile App)
+
+```
+Mobile app → POST /api/chat (SSE stream)
+  → ChatService.Send() → router.Classify() → askClaude()
+  → SSE events: {type: "chunk", content: "..."} streamed to client
+  → ChatStore persists message history (JSON file)
+  → session tracking via apiChatID constant (isolated from Telegram sessions)
+
+Mobile app → POST /api/chat/upload (multipart)
+  → ChatMediaHandler validates file type/size
+  → stores in data/chat-uploads/ with UUID filename
+  → returns upload ID for embedding in messages
+
+Mobile app → POST /api/chat/react
+  → ChatReactHandler stores emoji reaction on message
 ```
 
 ---
@@ -143,6 +182,9 @@ alf/
 │   ├── config.json             CC-managed config
 │   ├── tiers.json              CC-managed tiers
 │   └── router-prompt.md        Router classification prompt
+├── skills.d/                   → /opt/alf/skills (rw)
+│   │                           → /home/node/data/skills.d (ro for Claude)
+│   └── ...                     user skill drop-ins
 ├── data/                       → /home/node/data (rw)
 │   ├── .claude/                CLI auth + session cache
 │   ├── config/                 Claude's own config space (rw)
@@ -154,8 +196,9 @@ alf/
 │   ├── logs/events/            JSONL per day
 │   ├── sessions/               session persistence
 │   ├── memories/               index.md + memory files
+│   ├── chat-uploads/           mobile app uploaded media
 │   └── .git/                   gittrack repo (if enabled)
-└── skills.d/                   → /home/node/data/skills.d (ro mount)
+└── ...
 ```
 
 ### Docker mounts (docker-compose.yml)
@@ -165,8 +208,11 @@ volumes:
   - ./data:/home/node/data
   - ./config.d:/opt/alf/config          # CC reads/writes
   - ./config.d:/home/node/data/config.d:ro  # Claude reads only
-  - ./skills.d:/home/node/data/skills.d:ro  # User skills (read-only)
+  - ./skills.d:/opt/alf/skills          # Daemon reads/writes
+  - ./skills.d:/home/node/data/skills.d:ro  # Claude reads only
 ```
+
+Optional Traefik service (when `EnableHTTPS=true`) with Let's Encrypt ACME via HTTP challenge.
 
 **Note:** `tools.d` is NOT a host mount. The daemon creates per-tool symlinks at startup (e.g., `tools.d/extract-video → /opt/alf/tools/extract-video`). This avoids issues with host volume mounts overwriting image-time symlinks.
 
@@ -194,6 +240,7 @@ volumes:
 | `data/logs/` | root:node | g+ws | read/write | read/write |
 | `data/sessions/` | root:node | g+ws | read/write | read/write |
 | `data/skills.d/` | (ro mount) | — | read-only | **read-only** |
+| `data/chat-uploads/` | root:node | g+ws | read/write | read/write |
 
 ---
 
@@ -207,6 +254,10 @@ Two mechanisms (either works):
 1. **Token**: `CC_AUTH_TOKEN` in header/cookie — for API/automation
 2. **Magic link**: Telegram `/login` → inline keyboard (24h/7d/30d) → one-time code → session cookie
 
+### Middleware stack
+
+Outermost first: `loggingMiddleware` → `rateLimiter` (60 req/min per IP) → `corsMiddleware` → `authMiddleware` (Bearer token or session cookie) → `jsonMiddleware` (Content-Type on API responses)
+
 ### Routes
 
 | Route | Auth | Method | Purpose |
@@ -214,14 +265,19 @@ Two mechanisms (either works):
 | `/health` | no | GET | Health check |
 | `/auth?code=` | no | GET | Magic link consumption |
 | `/` | yes | GET | Dashboard (embedded HTML/JS) |
-| `/api/config` | yes | GET/POST | Config CRUD |
-| `/api/tiers` | yes | GET/POST | Tier definitions |
-| `/api/status` | yes | GET | Daemon stats |
-| `/api/logs/{name}` | yes | GET | Tail log files |
-| `/api/router-prompt` | yes | GET/PUT | Router prompt editor |
+| `/static/` | yes | GET | Embedded web assets (CSS, JS) |
+| `/api/config` | yes | GET/PUT | Config CRUD |
+| `/api/workspace` | yes | GET/PUT/DELETE | File browser over data/ and config.d/ |
+| `/api/status` | yes | GET | Daemon stats (uptime, message count, version) |
+| `/api/logs` | yes | GET | Tail event log files |
 | `/api/memories/*` | yes | CRUD | Memory index files |
-| `/api/{tools,skills}/*` | yes | CRUD | Resource management |
-| `/api/restart` | yes | POST | Daemon restart signal |
+| `/api/tools/*` | yes | CRUD | Resource management, triggers ReloadTools |
+| `/api/skills/*` | yes | CRUD | Resource management, triggers ReloadSkills |
+| `/api/chat` | yes | POST/GET | POST: SSE stream chat; GET: message history |
+| `/api/chat/upload` | yes | POST | Multipart media upload |
+| `/api/chat/media/{id}` | yes | GET | Serve uploaded media by ID |
+| `/api/chat/react` | yes | POST | Register emoji reaction on message |
+| `/api/restart` | yes | POST | Send SIGTERM to PID 1 (container restart) |
 
 ### Logging
 
@@ -238,6 +294,56 @@ Same pattern for tiers, tools, skills.
 
 ---
 
+## Mobile App
+
+React Native app (Expo ~52, React Native 0.76.9) in `mobile/`.
+
+### Structure
+
+```
+mobile/
+  App.tsx                     — root: bottom-tab navigator (Chat, CC, Settings)
+  app.json                    — Expo config (bundle: com.alamparelli.alf)
+  eas.json                    — EAS Build config (development + preview profiles)
+  ios/                        — native iOS project (generated by expo run:ios)
+  src/
+    screens/
+      ChatScreen.tsx          — main chat UI with SSE streaming
+      CCScreen.tsx            — WebView embedding the CC dashboard
+      SettingsScreen.tsx      — disconnect & reconfigure credentials
+      SetupScreen.tsx         — first-run setup (server URL + auth token)
+    components/
+      ChatInput.tsx           — text + media attachment input bar
+      MessageBubble.tsx       — message rendering with markdown
+      ReactionPicker.tsx      — emoji reaction selector
+      ReplyBar.tsx            — quoted-reply UI strip
+    services/
+      api.ts                  — CC API calls (sendMessage SSE, upload, react, history, status)
+      auth.ts                 — SecureStore-backed server URL + token persistence
+      media.ts                — image/document picker helpers
+    theme.ts                  — design tokens
+    types.ts                  — shared TypeScript types
+```
+
+### API integration
+
+All requests go to `{serverUrl}/api/*` with `Authorization: Bearer {token}`.
+
+| Endpoint | Usage |
+|----------|-------|
+| `POST /api/chat` | SSE stream — sends message, receives chunked response |
+| `GET /api/chat?limit=&before=` | Paginated message history |
+| `POST /api/chat/upload` | Multipart file upload → returns upload ID |
+| `GET /api/chat/media/{id}` | Fetch uploaded media |
+| `POST /api/chat/react` | Emoji reaction on message |
+| `GET /api/status` | Daemon status for CC WebView |
+
+### Key dependencies
+
+`expo-image-picker`, `expo-document-picker`, `expo-av`, `expo-secure-store`, `react-native-markdown-display`, `react-native-webview`, `@react-navigation/bottom-tabs`
+
+---
+
 ## Media Handling
 
 ### Supported Telegram types
@@ -245,19 +351,19 @@ Same pattern for tiers, tools, skills.
 | Type | Detection | Processing |
 |------|-----------|------------|
 | Photo | `msg.Photo != nil` | Download → save to /tmp → inject path in prompt |
-| Document | `msg.Document != nil` | Download → detect MIME → text extract or path inject |
-| Video | `msg.Video != nil` | Download → frame extraction + audio transcript |
-| Animation (GIF) | `msg.Animation != nil` | Download → frame extraction (no audio) |
-| VideoNote | `msg.VideoNote != nil` | Download → frame extraction + audio transcript |
+| Document | `msg.Document != nil` | Download → detect MIME → PDF text extract or path inject |
+| Video | `msg.Video != nil` | Download → contact sheet extraction + audio transcript |
+| Animation (GIF) | `msg.Animation != nil` | Download → contact sheet (no audio), emotion-specific prompt |
+| VideoNote | `msg.VideoNote != nil` | Download → contact sheet extraction + audio transcript |
 | Voice | `msg.Voice != nil` | Download → whisper transcription → inject as text |
 | Audio | `msg.Audio != nil` | Download → whisper transcription → inject as text |
 
 ### Frame extraction strategy
 
-- Default: 5 frames evenly spaced across duration
+- Default: 5 frames evenly spaced across duration → assembled into contact sheet grid
 - Short videos (<3s): 2 frames
 - Very short (<1s) / GIFs: 1-3 frames
-- Output: JPEG, max 1280px wide, quality 85
+- Output: JPEG contact sheet thumbnail, max 1280px wide, quality 85
 - Tool: `ffmpeg` with `select` filter for precise timestamps
 
 ### System tool: `extract-video`
@@ -272,15 +378,32 @@ extract-video /tmp/video.mp4 --frames 5
 
 ---
 
-## Daemon Startup Tasks
+## Daemon Startup Sequence
 
 Run before any message processing begins:
 
-1. **`fixClaudePermissions()`** — Sets `g+rw` on files and `g+rwx` on dirs inside `data/.claude/` so the claude subprocess (uid 1001) can read credentials and refresh OAuth tokens
-2. **`linkSystemTools()`** — Creates per-tool symlinks in `data/tools.d/` pointing to `/opt/alf/tools/*` (host volume mount overwrites image-time symlinks)
-3. **`migrateConfig()`** — Copies config files from old `data/config/` layout to `/opt/alf/config/`, cleans up orphan dirs (`tiers/`, `memory/`, `state/`)
-4. **`memory.Bootstrap()`** — Seeds default memory files (soul.md, mood.md, index.md) if missing
-5. **`mood.GenerateDaily()`** — Generates daily mood variation
+1. **`syscall.Umask(0o002)`** — Ensures all created files are group-writable
+2. **Read secrets** — `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `CC_AUTH_TOKEN`
+3. **Verify `claude` CLI** — checks PATH availability
+4. **Resolve directories** — `dataDir`, `configDir`, `skillsDir` (env overrides available)
+5. **Parse `allowedChatIDs`** — defaults to `TELEGRAM_CHAT_ID`
+6. **Init shared state** — `Stats`, `reloadCh`, `MagicStore` (with cleanup goroutine), `FileSessionStore` (with cleanup goroutine)
+7. **Write `.version` file** — stamps current version in data dir
+8. **`os.MkdirAll`** — creates `logs/events/`, `sessions/`, `config/`, `tools/`, `skills/`, `memories/`
+9. **`linkSystemTools()`** — symlinks `/opt/alf/tools/*` into `data/tools.d/`
+10. **`fixDataPermissions()`** — chmod/chown correction for pre-refactor files
+11. **`migrateConfig()`** — moves config from old `data/config/` layout to `configDir`
+12. **Load stores** — `FileConfigStore` + `FileTierStore`
+13. **`memory.Bootstrap()`** — seeds `soul.md`, `mood.md`, `index.md` if missing
+14. **`mood.GenerateDaily()`** — overwrites `mood.md` if date changed
+15. **Init `session.Store`** — Claude `--resume` tracking (file-backed)
+16. **Init `eventlog.Logger`** — JSONL, daily rotation
+17. **Init `gittrack.Tracker`** — `git init`, optional `StartSweep()` goroutine (if `cfg.GitTrack`)
+18. **Start `voice.Transcriber`** — persistent faster-whisper Python process
+19. **Create `ChatStore` + `ChatService`** — mobile app chat API backend
+20. **Start CC HTTP server** — `:8080` as goroutine
+21. **Init `updater.Checker`** — polls GHCR every 6h (if `cfg.AutoUpdateCheck`)
+22. **Enter Telegram polling loop**
 
 ---
 
@@ -288,7 +411,7 @@ Run before any message processing begins:
 
 | System | Trigger | Configurable | Purpose |
 |--------|---------|--------------|---------|
-| **Telegram poller** | 30s long-poll loop | no | Core message ingestion |
+| **Telegram poller** | 35s long-poll loop | no | Core message ingestion |
 | **Event logger** | every message in/out | no | JSONL audit trail, daily rotation |
 | **Session store** | every Claude response | `session_timeout` (min) | `--resume` for conversation continuity |
 | **Git tracker** | config/tier changes + periodic sweep | `git_track`, `git_sweep_interval` (min) | Version history for data/ |
@@ -296,6 +419,7 @@ Run before any message processing begins:
 | **Magic link cleanup** | background goroutine | no | Expire unused codes |
 | **Session cookie cleanup** | background goroutine | no | Expire old CC sessions |
 | **Whisper transcriber** | started at daemon boot | `WHISPER_MODEL` env | Persistent python3 process, model loaded once |
+| **Chat service** | HTTP requests from mobile app | no | SSE streaming, message persistence, media uploads |
 
 ---
 
@@ -333,6 +457,24 @@ Docker Compose secrets mechanism. Daemon reads via `readSecret()` — checks `{V
 
 ---
 
+## Docker Image
+
+**Builder:** `golang:1.24-alpine` — builds `alf-daemon` + `extract-video`
+
+**Runtime:** `node:22-slim` — system packages: `bash`, `ca-certificates`, `curl`, `ffmpeg`, `git`, `trash-cli`, `python3`, `python3-pip`, `libgomp1`, `poppler-utils`
+
+**Python:** `faster-whisper` (pip3)
+
+**Go:** `go1.24.1` available at runtime for Claude to build tools
+
+**Node:** `@anthropic-ai/claude-code` (global npm install)
+
+**ENV:** `OMP_NUM_THREADS=4`, PATH includes `/opt/alf/tools` and Go bin dirs
+
+**Exposed port:** `8080`
+
+---
+
 ## Immutable vs Mutable
 
 ### Immutable (set at build/deploy time)
@@ -350,6 +492,7 @@ Docker Compose secrets mechanism. Daemon reads via `readSecret()` — checks `{V
 - `/opt/alf/config/router-prompt.md` — via CC
 - `data/logs/events/*.jsonl` — event logger
 - `data/sessions/` — session store
+- `data/chat-uploads/` — mobile app media
 - `data/.git/` — gittrack commits
 
 ### Mutable by Claude subprocess (via node group)

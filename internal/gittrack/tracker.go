@@ -140,8 +140,8 @@ func (t *Tracker) writeGitignore() error {
 !tools/**
 !skills/
 !skills/**
-!memories/
-!memories/**
+!context/
+!context/**
 !logs/
 !logs/events/
 !logs/events/*.jsonl

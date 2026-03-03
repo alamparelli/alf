@@ -10,7 +10,7 @@ import (
 type Deps struct {
 	ConfigStore    ConfigStore
 	TierStore      TierStore
-	MemoryStore    ResourceStore
+	ContextStore    ResourceStore
 	ToolStore      ResourceStore
 	SkillStore     ResourceStore
 	LogReader      LogReader
@@ -31,7 +31,7 @@ type Deps struct {
 func StoreFactory(dataDir, configDir string) (ConfigStore, TierStore, ResourceStore, ResourceStore, ResourceStore) {
 	cs := NewFileConfigStore(ConfigPath(configDir))
 	ts := NewFileTierStore(TiersPath(configDir))
-	ms := NewFileResourceStore(filepath.Join(dataDir, "memories"), ".md")
+	ms := NewFileResourceStore(filepath.Join(dataDir, "context"), ".md")
 	tools := NewFileResourceStore(filepath.Join(dataDir, "tools"), ".json")
 	skills := NewFileResourceStore(filepath.Join(dataDir, "skills"), ".json")
 	return cs, ts, ms, tools, skills
@@ -67,8 +67,8 @@ func HandlerFactory(deps Deps) http.Handler {
 	})
 
 	// Resource CRUD routes.
-	mux.Handle("/api/memories/", &ResourceHandler{
-		Store: deps.MemoryStore,
+	mux.Handle("/api/context/", &ResourceHandler{
+		Store: deps.ContextStore,
 	})
 	mux.Handle("/api/tools/", &ResourceHandler{
 		Store:    deps.ToolStore,

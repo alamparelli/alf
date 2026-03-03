@@ -25,7 +25,7 @@ type Params struct {
 	Model         string
 	Tools         []string
 	Effort        string
-	SystemPrompts []string // appended system prompts (memories, reactions)
+	SystemPrompts []string // appended system prompts (context files, reactions)
 	MaxTurns      int
 	ResumeID      string
 	DataDir       string // working directory for Claude subprocess

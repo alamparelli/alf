@@ -54,7 +54,7 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string 
 	var b strings.Builder
 
 	// 1. Personality (soul.md + mood.md) so direct responses match ALF's voice.
-	personality := memory.CollectInline(filepath.Join(dataDir, "memories"))
+	personality := memory.CollectInline(filepath.Join(dataDir, "context"))
 	if personality != "" {
 		b.WriteString(personality)
 		b.WriteString("\n\n")
@@ -217,7 +217,7 @@ func TierAccess(tierName string, tiers *cc.TiersConfig) string {
 func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	var b strings.Builder
 
-	personality := memory.CollectInline(filepath.Join(input.DataDir, "memories"))
+	personality := memory.CollectInline(filepath.Join(input.DataDir, "context"))
 	if personality != "" {
 		b.WriteString(personality)
 		b.WriteString("\n\n")

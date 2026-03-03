@@ -17,8 +17,9 @@ type Config struct {
 	AutoUpdateCheck         bool `json:"auto_update_check"`          // check for Docker image updates periodically
 	AutoUpdateCheckInterval int  `json:"auto_update_check_interval"` // seconds between update checks, 0 = use default (21600)
 	AutoUpdateNotify        bool `json:"auto_update_notify"`         // send Telegram notification when update available
-	AuthBanThreshold        int  `json:"auth_ban_threshold"`         // failed /auth attempts before IP ban, 0 = use default (10)
-	AuthBanDuration         int  `json:"auth_ban_duration"`          // IP ban duration in minutes, 0 = use default (15)
+	AuthBanThreshold        int    `json:"auth_ban_threshold"`         // failed /auth attempts before IP ban, 0 = use default (10)
+	AuthBanDuration         int    `json:"auth_ban_duration"`          // IP ban duration in minutes, 0 = use default (15)
+	Timezone                string `json:"timezone"`                   // IANA timezone (e.g. "Europe/Brussels"), empty = TZ env or UTC
 }
 
 // QuietHours defines a time window where the bot won't respond.

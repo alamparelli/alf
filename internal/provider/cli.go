@@ -92,16 +92,10 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		}
 	}
 
-	// Set HOME to dataDir for Claude's config resolution.
-	// Also set ALF_DATA_DIR so memory tools find the correct socket path
-	// even if Claude Code or Bash overrides HOME.
-	env := make([]string, 0, len(os.Environ()))
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "HOME=") && !strings.HasPrefix(e, "ALF_DATA_DIR=") {
-			env = append(env, e)
-		}
-	}
-	cmd.Env = append(env, "HOME="+dataDir, "ALF_DATA_DIR="+dataDir)
+	// Build a safe environment for the subprocess (allowlist, not blocklist).
+	// Prevents leaking secrets (TELEGRAM_BOT_TOKEN, CC_AUTH_TOKEN, etc.)
+	// to Claude which runs with --dangerously-skip-permissions.
+	cmd.Env = safeEnv(dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
 
 	log.Printf("provider: invoke starting (resume=%q, model=%s)", params.ResumeID, model)
@@ -239,4 +233,35 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 
 type jsonModelEntry struct {
 	CostUSD float64 `json:"costUSD"`
+}
+
+// safeEnvPrefixes are environment variable prefixes safe for the Claude subprocess.
+// Everything else (secrets, tokens, internal config) is excluded.
+var safeEnvPrefixes = []string{
+	"PATH=",
+	"TERM=",
+	"LANG=",
+	"LC_",
+	"TZ=",
+	"TMPDIR=",
+	"XDG_",
+	"OMP_NUM_THREADS=",
+	"ANTHROPIC_",    // Claude API keys (needed for claude CLI)
+	"CLAUDE_",       // Claude Code config
+	"DISABLE_PROMPT", // Claude Code prompt settings
+}
+
+// safeEnv builds a subprocess environment with only safe variables plus HOME/ALF_DATA_DIR.
+func safeEnv(dataDir string) []string {
+	env := make([]string, 0, 16)
+	for _, e := range os.Environ() {
+		for _, prefix := range safeEnvPrefixes {
+			if strings.HasPrefix(e, prefix) {
+				env = append(env, e)
+				break
+			}
+		}
+	}
+	env = append(env, "HOME="+dataDir, "ALF_DATA_DIR="+dataDir)
+	return env
 }

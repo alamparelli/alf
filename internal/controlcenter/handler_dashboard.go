@@ -2,13 +2,11 @@ package controlcenter
 
 import (
 	"net/http"
-	"strings"
 )
 
 // DashboardHandler serves the embedded HTML dashboard.
 type DashboardHandler struct {
-	HTML  string // Raw HTML content from embedded file
-	Token string // Auth token to inject
+	HTML string // Raw HTML content from embedded file
 }
 
 func (h *DashboardHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -17,8 +15,6 @@ func (h *DashboardHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	html := strings.Replace(h.HTML, "{{AUTH_TOKEN}}", h.Token, 1)
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(html))
+	w.Write([]byte(h.HTML))
 }

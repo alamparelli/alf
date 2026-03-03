@@ -84,38 +84,6 @@ func orderedFiles(dir string) []string {
 	return result
 }
 
-// memorySystemContent is the system prompt for the semantic memory tools.
-const memorySystemContent = `# Memory System
-
-You have a persistent long-term memory that survives across sessions.
-Memories are auto-extracted every 3 hours from your conversations.
-
-## Tools
-- recall "query" [--limit 5] — Search your memory (semantic + keyword)
-- recall --status — Show last/next extraction time and total memory count
-- remember "text" --type fact|preference|decision — Manually save something important (use sparingly — most memories are auto-extracted)
-
-## When to search
-MANDATORY: You MUST run recall BEFORE answering when the user:
-- Asks about themselves, their life, preferences, pets, family, habits
-- References something from a past conversation
-- Uses words like "remember", "you know", "we decided", "my", "I told you"
-- Asks "do you know X about me" or anything personal
-
-NEVER say "I don't know" about the user without searching first. Run recall, THEN answer based on results.
-
-## When to manually store
-Only when something is time-sensitive and can't wait for the next extraction cycle:
-- Critical corrections ("actually, the API key changed to X")
-- Urgent preferences ("from now on, always use Y")
-
-Most information is auto-extracted — don't duplicate what the extraction job will capture.
-
-## Daily logs
-Raw conversations: logs/events/YYYY-MM-DD.jsonl
-For exact quotes or detailed history, read the log file directly.
-`
-
 // DefaultFiles maps filename -> default content for bootstrap.
 var DefaultFiles = map[string]string{
 	"soul.md": `# Soul
@@ -204,14 +172,14 @@ func Bootstrap(contextDir string) {
 func GenerateToolbox(contextDir, dataDir string) {
 	var sb strings.Builder
 	sb.WriteString("# Toolbox\n\n")
-	sb.WriteString("All CLI tools available to you. Run via Bash tool.\n\n")
+	sb.WriteString("CLI tools on PATH. Run via Bash.\n\n")
 
 	// Scan system tools (tools.d/).
 	systemTools := scanTools(filepath.Join(dataDir, "tools.d"))
 	if len(systemTools) > 0 {
 		sb.WriteString("## System Tools (tools.d/)\n\n")
 		for _, t := range systemTools {
-			sb.WriteString(fmt.Sprintf("- `%s` — run `%s --help` for usage\n", t, t))
+			sb.WriteString(fmt.Sprintf("- `%s`\n", t))
 		}
 		sb.WriteString("\n")
 	}
@@ -221,19 +189,16 @@ func GenerateToolbox(contextDir, dataDir string) {
 	if len(userTools) > 0 {
 		sb.WriteString("## User Tools (tools/)\n\n")
 		for _, t := range userTools {
-			sb.WriteString(fmt.Sprintf("- `%s` — run `tools/%s --help` for usage\n", t, t))
+			sb.WriteString(fmt.Sprintf("- `%s`\n", t))
 		}
 		sb.WriteString("\n")
 	}
-
-	// Append memory tool documentation (always present).
-	sb.WriteString(memorySystemContent)
 
 	os.WriteFile(filepath.Join(contextDir, "toolbox.md"), []byte(sb.String()), 0o644)
 }
 
 // scanTools returns sorted unique tool names from a directory,
-// excluding the multi-call binary (recall-tools).
+// excluding multi-call binaries (*-tools) — users call symlinks directly.
 func scanTools(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -245,8 +210,7 @@ func scanTools(dir string) []string {
 			continue
 		}
 		name := e.Name()
-		// Skip the multi-call binary — users call recall/remember/forget directly.
-		if name == "recall-tools" {
+		if strings.HasSuffix(name, "-tools") {
 			continue
 		}
 		names = append(names, name)

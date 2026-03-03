@@ -1,30 +1,14 @@
-// Auth token management.
-let TOKEN = '';
-(function initAuth() {
-  const params = new URLSearchParams(location.search);
-  if (params.get('token')) {
-    TOKEN = params.get('token');
-    sessionStorage.setItem('cc_token', TOKEN);
-    history.replaceState(null, '', location.pathname);
-  } else {
-    TOKEN = sessionStorage.getItem('cc_token') || '';
-  }
-  if (!TOKEN) {
-    const meta = document.querySelector('meta[name="auth-token"]');
-    if (meta && meta.content && meta.content !== '{{AUTH_TOKEN}}') {
-      TOKEN = meta.content;
-      sessionStorage.setItem('cc_token', TOKEN);
-    }
-  }
-})();
+// Auth: session cookie set by magic link flow (/auth endpoint).
+// No tokens in URL, meta tags, or sessionStorage.
+sessionStorage.removeItem('cc_token'); // cleanup legacy token
 
 function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
-  if (TOKEN) {
-    headers['Authorization'] = 'Bearer ' + TOKEN;
-  }
   return fetch(path, { ...opts, headers, credentials: 'same-origin' }).then(r => {
-    if (r.status === 401) { toast('Unauthorized — invalid token', 'error'); throw new Error('401'); }
+    if (r.status === 401) {
+      toast('Session expired — send /login to your bot', 'error');
+      throw new Error('401');
+    }
     if (!r.ok && r.status !== 200) {
       return r.json().then(j => { throw j; });
     }

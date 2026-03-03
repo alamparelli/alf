@@ -65,15 +65,16 @@ func TestAuthMiddleware_ExemptPath(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_QueryParam(t *testing.T) {
+func TestAuthMiddleware_QueryParam_Rejected(t *testing.T) {
+	// Query param auth was removed for security (token leaks via Referer, browser history).
 	handler := authMiddleware("test-token", nil, nil)(okHandler())
 	req := httptest.NewRequest("GET", "/api/status?token=test-token", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 for query param auth, got %d", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 (query param auth removed), got %d", rec.Code)
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -95,14 +94,8 @@ func (c *CLIClassifier) startLocked() error {
 		}
 	}
 
-	// Set HOME to DataDir.
-	env := make([]string, 0, len(os.Environ()))
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "HOME=") {
-			env = append(env, e)
-		}
-	}
-	cmd.Env = append(env, "HOME="+c.cfg.DataDir)
+	// Build a safe environment (same allowlist as CLIProvider).
+	cmd.Env = safeEnv(c.cfg.DataDir)
 
 	// Capture stderr to log any Claude CLI errors.
 	stderrPipe, err := cmd.StderrPipe()

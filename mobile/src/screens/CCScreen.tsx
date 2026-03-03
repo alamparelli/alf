@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { getServerUrl, getToken } from '../services/auth';
+import { colors } from '../theme';
 
 export default function CCScreen() {
   const [url, setUrl] = useState<string | null>(null);
@@ -19,7 +20,7 @@ export default function CCScreen() {
   if (!url) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#6c63ff" />
+        <ActivityIndicator size="small" color={colors.textSecondary} />
       </View>
     );
   }
@@ -34,7 +35,7 @@ export default function CCScreen() {
         startInLoadingState
         renderLoading={() => (
           <View style={styles.loading}>
-            <ActivityIndicator size="large" color="#6c63ff" />
+            <ActivityIndicator size="small" color={colors.textSecondary} />
           </View>
         )}
       />
@@ -45,7 +46,7 @@ export default function CCScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: colors.bg,
   },
   webview: {
     flex: 1,
@@ -54,6 +55,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: colors.bg,
   },
 });

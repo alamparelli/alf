@@ -19,6 +19,7 @@ type socketRequest struct {
 	Type   string `json:"type,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
 	Days   int    `json:"days,omitempty"`
+	ID     int64  `json:"id,omitempty"`
 }
 
 type memory struct {
@@ -51,6 +52,8 @@ func main() {
 		doSearch(sockPath)
 	case "memory-store":
 		doStore(sockPath)
+	case "memory-delete":
+		doDelete(sockPath)
 	default:
 		// Fallback: check first argument.
 		if len(os.Args) >= 2 {
@@ -63,9 +66,13 @@ func main() {
 				os.Args = append(os.Args[:1], os.Args[2:]...)
 				doStore(sockPath)
 				return
+			case "delete":
+				os.Args = append(os.Args[:1], os.Args[2:]...)
+				doDelete(sockPath)
+				return
 			}
 		}
-		fmt.Fprintf(os.Stderr, "Usage: memory-search <query> [--limit N]\n       memory-store <text> [--type fact|preference|decision]\n")
+		fmt.Fprintf(os.Stderr, "Usage: memory-search <query> [--limit N]\n       memory-store <text> [--type fact|preference|decision]\n       memory-delete <id>\n")
 		os.Exit(1)
 	}
 }
@@ -103,13 +110,13 @@ func doSearch(sockPath string) {
 	}
 
 	fmt.Printf("Found %d memories:\n\n", len(resp.Results))
-	for i, m := range resp.Results {
+	for _, m := range resp.Results {
 		date := parseDate(m.CreatedAt)
 		distInfo := ""
 		if m.Distance > 0 {
 			distInfo = fmt.Sprintf(", dist=%.3f", m.Distance)
 		}
-		fmt.Printf("[%d] (%s, %s%s) %s\n", i+1, m.Type, date, distInfo, m.Text)
+		fmt.Printf("[#%d] (%s, %s%s) %s\n", m.ID, m.Type, date, distInfo, m.Text)
 	}
 }
 
@@ -141,6 +148,31 @@ func doStore(sockPath string) {
 	}
 
 	fmt.Printf("Stored memory #%d\n", resp.ID)
+}
+
+func doDelete(sockPath string) {
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: memory-delete <id>\n")
+		os.Exit(1)
+	}
+
+	id, err := strconv.ParseInt(os.Args[1], 10, 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid id %q\n", os.Args[1])
+		os.Exit(1)
+	}
+
+	resp := socketCall(sockPath, socketRequest{
+		Action: "delete",
+		ID:     id,
+	})
+
+	if resp.Error != "" {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Deleted memory #%d\n", id)
 }
 
 func socketCall(sockPath string, req socketRequest) socketResponse {

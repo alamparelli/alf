@@ -14,7 +14,33 @@ async function headers(): Promise<Record<string, string>> {
   };
 }
 
-/** Send a chat message and stream SSE events. */
+/** Parse SSE lines from a text chunk, returns unconsumed remainder. */
+function parseSSEChunk(
+  text: string,
+  onEvent: (event: SSEEvent) => void,
+): string {
+  const lines = text.split('\n');
+  const remainder = lines.pop() || '';
+
+  let currentEventType = '';
+  for (const line of lines) {
+    if (line.startsWith('event: ')) {
+      currentEventType = line.slice(7).trim();
+    } else if (line.startsWith('data: ') && currentEventType) {
+      try {
+        const data = JSON.parse(line.slice(6));
+        onEvent({ type: currentEventType as SSEEvent['type'], data });
+      } catch {
+        // Skip malformed JSON.
+      }
+      currentEventType = '';
+    }
+  }
+
+  return remainder;
+}
+
+/** Send a chat message and stream SSE events via XMLHttpRequest (RN compatible). */
 export async function sendMessage(
   message: string,
   options: {
@@ -34,48 +60,47 @@ export async function sendMessage(
     model: options.model,
   });
 
-  const response = await fetch(`${url}/api/chat`, {
-    method: 'POST',
-    headers: { ...h, 'Content-Type': 'application/json' },
-    body,
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Chat error: ${response.status} ${text}`);
-  }
-
-  if (!response.body) {
-    throw new Error('No response body for SSE');
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    let currentEventType = '';
-    for (const line of lines) {
-      if (line.startsWith('event: ')) {
-        currentEventType = line.slice(7).trim();
-      } else if (line.startsWith('data: ') && currentEventType) {
-        try {
-          const data = JSON.parse(line.slice(6));
-          onEvent({ type: currentEventType as SSEEvent['type'], data });
-        } catch {
-          // Skip malformed JSON.
-        }
-        currentEventType = '';
-      }
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${url}/api/chat`);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    for (const [key, value] of Object.entries(h)) {
+      xhr.setRequestHeader(key, value);
     }
-  }
+
+    let lastIndex = 0;
+    let buffer = '';
+
+    xhr.onprogress = () => {
+      const newText = xhr.responseText.slice(lastIndex);
+      lastIndex = xhr.responseText.length;
+      buffer += newText;
+      buffer = parseSSEChunk(buffer, onEvent);
+    };
+
+    xhr.onload = () => {
+      if (xhr.status !== 200) {
+        reject(new Error(`Chat error: ${xhr.status} ${xhr.responseText}`));
+        return;
+      }
+      // Parse any remaining buffered data.
+      if (buffer) {
+        parseSSEChunk(buffer + '\n', onEvent);
+      }
+      resolve();
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Network error'));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new Error('Request timed out'));
+    };
+
+    xhr.timeout = 300000; // 5 min for long Claude responses
+    xhr.send(body);
+  });
 }
 
 /** Upload a media file. */
@@ -159,14 +184,14 @@ export async function mediaUrl(uploadId: string): Promise<string> {
   return `${url}/api/chat/media/${uploadId}?token=${token}`;
 }
 
-/** Check if the server is reachable and auth is valid. */
+/** Check if the server is reachable and auth is valid. Throws with details on failure. */
 export async function healthCheck(): Promise<boolean> {
-  try {
-    const url = await baseUrl();
-    const h = await headers();
-    const response = await fetch(`${url}/api/status`, { headers: h });
-    return response.ok;
-  } catch {
-    return false;
+  const url = await baseUrl();
+  const h = await headers();
+  const response = await fetch(`${url}/api/status`, { headers: h });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`${response.status}: ${text || response.statusText}`);
   }
+  return true;
 }

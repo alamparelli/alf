@@ -13,13 +13,21 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.alf.mobile"
+      "bundleIdentifier": "com.alamparelli.alf",
+      "appleTeamId": "L9CT9YQ48T"
     },
     "android": {
-      "package": "com.alf.mobile"
+      "package": "com.alamparelli.alf"
     },
     "plugins": [
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      "expo-asset",
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6e741f18-a67a-45f2-a180-d634e44624d7"
+      }
+    }
   }
 }

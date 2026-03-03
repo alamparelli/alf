@@ -15,6 +15,7 @@ import MessageBubble from '../components/MessageBubble';
 import ChatInput from '../components/ChatInput';
 import ReplyBar from '../components/ReplyBar';
 import ReactionPicker from '../components/ReactionPicker';
+import { colors, spacing } from '../theme';
 
 export default function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -31,7 +32,6 @@ export default function ChatScreen() {
   const [hasMore, setHasMore] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
-  // Load history on mount.
   useEffect(() => {
     fetchHistory(50)
       .then((msgs) => {
@@ -69,7 +69,6 @@ export default function ChatScreen() {
       const msgId = retryMsgId || `temp-${Date.now()}`;
 
       if (!retryMsgId) {
-        // Optimistic user message.
         const userMsg: ChatMessage = {
           id: msgId,
           role: 'user',
@@ -87,7 +86,6 @@ export default function ChatScreen() {
         setMessages((prev) => [...prev, userMsg]);
         scrollToBottom();
       } else {
-        // Retrying: clear error state.
         setFailedMsgIds((prev) => {
           const next = new Set(prev);
           next.delete(retryMsgId);
@@ -207,7 +205,6 @@ export default function ChatScreen() {
   const handleReaction = useCallback(
     async (msgId: string, emoji: string) => {
       setReactionTarget(null);
-      // Optimistic update.
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msgId
@@ -329,13 +326,14 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f0f1e',
+    backgroundColor: colors.bg,
   },
   list: {
     flex: 1,
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
   },
 });

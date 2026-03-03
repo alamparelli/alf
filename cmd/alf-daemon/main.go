@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -26,6 +25,7 @@ import (
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/mood"
+	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
@@ -218,14 +218,14 @@ func main() {
 		log.Println("voice transcription disabled (transcribe.py not found)")
 	}
 
-	// Embedding sidecar (persistent sentence-transformers Python process).
+	// Embedding sidecar (persistent ONNX Runtime Python process).
 	embedScriptPath := "/opt/alf/embed.py"
 	if p := os.Getenv("ALF_EMBED_SCRIPT"); p != "" {
 		embedScriptPath = p
 	}
 	var memDB *memstore.Store
 	if memstore.IsAvailable(embedScriptPath) {
-		embedder, err := memstore.NewEmbedder(embedScriptPath, "", filepath.Join(dataDir, "models"), 30*time.Second)
+		embedder, err := memstore.NewEmbedder(embedScriptPath, "", 30*time.Second)
 		if err != nil {
 			log.Printf("memstore: embedder disabled: %v", err)
 		} else {
@@ -244,7 +244,11 @@ func main() {
 				go memDB.ServeUnix(sockPath)
 
 				// Periodic memory extraction (every 3h).
-				extractor := memstore.NewExtractor(memDB, dataDir, 3*time.Hour)
+				extractor := memstore.NewExtractor(memDB, dataDir, 3*time.Hour, func(cmd *exec.Cmd) {
+					cmd.SysProcAttr = &syscall.SysProcAttr{
+						Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
+					}
+				})
 				extractor.Start()
 				defer extractor.Stop()
 			}
@@ -259,16 +263,69 @@ func main() {
 	// Chat message store for mobile app API.
 	chatStore := cc.NewChatStore(dataDir)
 
+	// Claude subprocess credential (run as claude user uid 1001, gid 1000/node).
+	claudeCred := &syscall.Credential{Uid: 1001, Gid: 1000}
+
+	// Provider: spawn-per-call Claude CLI for responses.
+	cliProvider := provider.NewCLIProvider(dataDir, 5*time.Minute, claudeCred)
+
+	// Classifier: persistent Claude CLI process for fast routing.
+	routerModel := router.ResolveModel(tierStore.Current().RouterModel)
+	if routerModel == "" {
+		routerModel = router.ResolveModel("haiku")
+	}
+	classifier := provider.NewCLIClassifier(provider.ClassifierConfig{
+		Model:        routerModel,
+		SystemPrompt: router.BuildSystemPrompt(tierStore.Current(), dataDir, configDir),
+		DataDir:      dataDir,
+		Credential:   claudeCred,
+		IdleTimeout:  sessionTimeout,
+	})
+	// Start classifier in background (may take a few seconds for initial prompt).
+	go func() {
+		if err := classifier.Start(); err != nil {
+			log.Printf("classifier: failed to start persistent process: %v (falling back to spawn-per-call)", err)
+		}
+	}()
+
+	// classifyMessage uses the persistent classifier if ready, otherwise falls back
+	// to spawn-per-call classification.
+	classifyMessage := func(message string, tiers *cc.TiersConfig) router.Result {
+		if classifier.IsReady() {
+			start := time.Now()
+			cr, err := classifier.Classify(context.Background(), message)
+			if err != nil {
+				log.Printf("classifier: error: %v, falling back to spawn-per-call", err)
+			} else {
+				log.Printf("classifier: classify took %dms", time.Since(start).Milliseconds())
+				result := router.InterpretRaw(cr.Response, tiers, message)
+				return result
+			}
+		}
+		// Fallback: build full prompt and spawn a process.
+		log.Printf("classifier: using spawn-per-call fallback")
+		prompt := router.BuildClassifyPrompt(router.ClassifyInput{
+			Message:   message,
+			Tiers:     tiers,
+			DataDir:   dataDir,
+			ConfigDir: configDir,
+		})
+		params := provider.Params{
+			Model:    routerModel,
+			MaxTurns: 2,
+			DataDir:  dataDir,
+		}
+		result, err := cliProvider.Invoke(context.Background(), prompt, params, nil)
+		if err != nil {
+			log.Printf("classifier fallback: error: %v", err)
+			return router.FallbackResult(tiers)
+		}
+		return router.InterpretRaw(result.Text, tiers, message)
+	}
+
 	// Chat service for mobile app API (shares Claude invocation with Telegram bot).
 	classifyFn := func(message, lastTier string, msgCount int) cc.RouteResult {
-		rr := router.Classify(router.ClassifyInput{
-			Message:      message,
-			Tiers:        tierStore.Current(),
-			DataDir:      dataDir,
-			ConfigDir:    configDir,
-			LastTier:     lastTier,
-			MessageCount: msgCount,
-		})
+		rr := classifyMessage(message, tierStore.Current())
 		return cc.RouteResult{
 			Tier:     rr.Tier,
 			Response: rr.Response,
@@ -276,7 +333,7 @@ func main() {
 			React:    rr.React,
 		}
 	}
-	chatService := cc.NewChatService(dataDir, configDir, memoriesDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel)
+	chatService := cc.NewChatService(dataDir, configDir, memoriesDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
@@ -344,6 +401,17 @@ func main() {
 				}
 			case cc.ReloadTiers:
 				log.Println("tiers reloaded")
+				// Hot-reload classifier with updated tiers.
+				newModel := router.ResolveModel(tierStore.Current().RouterModel)
+				if newModel == "" {
+					newModel = router.ResolveModel("haiku")
+				}
+				routerModel = newModel
+				newPrompt := router.BuildSystemPrompt(tierStore.Current(), dataDir, configDir)
+				go func() {
+					classifier.UpdateSystemPrompt(newPrompt)
+					classifier.UpdateModel(routerModel)
+				}()
 				if git != nil {
 					git.Commit("tiers updated via CC")
 				}
@@ -388,7 +456,7 @@ func main() {
 				}
 				emoji := mr.NewReaction[0].Emoji
 				log.Printf("← reaction %s on msg %d", emoji, mr.MessageID)
-				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, memoriesDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog)
+				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, memoriesDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider)
 				continue
 			}
 
@@ -666,9 +734,6 @@ func main() {
 			chatID := u.Message.Chat.ID
 			resumeID := chatSessions.Get(chatID)
 
-			// Get conversation context for routing.
-			lastTier, msgCount := chatSessions.Context(chatID)
-
 			// Show routing status immediately (silent, will be deleted).
 			tg.SendChatAction(chatID, "typing")
 			routingBase := pickRandom(statusRouting)
@@ -709,14 +774,7 @@ func main() {
 				routeResult = router.Result{Tier: tierName, Reason: "media bypass"}
 				log.Printf("→ media detected, bypassing router → tier %q", tierName)
 			} else {
-				routeResult = router.Classify(router.ClassifyInput{
-					Message:      routerMsg,
-					Tiers:        tierStore.Current(),
-					DataDir:      dataDir,
-					ConfigDir:    configDir,
-					LastTier:     lastTier,
-					MessageCount: msgCount,
-				})
+				routeResult = classifyMessage(routerMsg, tierStore.Current())
 			}
 
 			// Router answered directly — no second LLM call needed.
@@ -773,15 +831,15 @@ func main() {
 			}
 
 			lastPhase := ""
-			onProgress := func(event, detail string) {
+			onProgress := func(event provider.StreamEvent) {
 				if statusAnim == nil {
 					return
 				}
-				if event == lastPhase {
+				if event.Type == lastPhase {
 					return
 				}
-				lastPhase = event
-				switch event {
+				lastPhase = event.Type
+				switch event.Type {
 				case "thinking":
 					statusAnim.SetPhase(pickRandom(statusThinking), "choose_sticker")
 				case "tool_use":
@@ -791,13 +849,33 @@ func main() {
 				}
 			}
 
+			// Build system prompts (memories + reaction instruction).
+			sysPrompts := memory.CollectPrompts(memoriesDir)
+			var sysPromptTexts []string
+			for i := 0; i < len(sysPrompts)-1; i += 2 {
+				if sysPrompts[i] == "--append-system-prompt" {
+					sysPromptTexts = append(sysPromptTexts, sysPrompts[i+1])
+				}
+			}
+			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
+
+			invokeParams := provider.Params{
+				Model:         tp.Model,
+				Tools:         tp.Tools,
+				Effort:        tp.Effort,
+				SystemPrompts: sysPromptTexts,
+				ResumeID:      resumeID,
+				DataDir:       dataDir,
+			}
+
 			start := time.Now()
-			result, err := askClaude(msgWithReplyContext, resumeID, tp, onProgress)
+			result, err := cliProvider.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
 			// Retry without resume if session not found.
 			if err != nil && resumeID != "" && strings.Contains(err.Error(), "No conversation found") {
 				log.Printf("session %s expired, starting fresh", resumeID)
 				chatSessions.Archive(chatID)
-				result, err = askClaude(msgWithReplyContext, "", tp, onProgress)
+				invokeParams.ResumeID = ""
+				result, err = cliProvider.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
 			}
 			duration := time.Since(start)
 
@@ -847,6 +925,16 @@ func main() {
 				}()
 			}
 
+			// Inject response context into classifier for conversation tracking.
+			if classifier.IsReady() {
+				access := router.TierAccess(routeResult.Tier, tierStore.Current())
+				summary := result.Text
+				if len(summary) > 120 {
+					summary = summary[:120]
+				}
+				go classifier.InjectContext(routeResult.Tier, access, summary)
+			}
+
 			// Extract inline reaction suggestion from Claude's response.
 			suggestedEmoji, cleanText := extractReaction(result.Text)
 			reply := cleanText
@@ -890,20 +978,7 @@ func main() {
 	}
 }
 
-type jsonModel struct {
-	CostUSD float64 `json:"costUSD"`
-}
-
-// claudeResult holds parsed output from Claude CLI JSON response.
-type claudeResult struct {
-	SessionID string
-	Text      string
-	Model     string
-	CostUSD   float64
-	NumTurns  int
-}
-
-// reactionSystemPromptTmpl is the template for the reaction instruction injected into askClaude.
+// reactionSystemPromptTmpl is the template for the reaction instruction injected into Claude calls.
 // The %s placeholder is filled with mood.AllowedReactionList().
 const reactionSystemPromptTmpl = `You may optionally suggest a single emoji reaction for the user's message by starting your response with [[react:EMOJI]]. Pick an emoji that shows you understood the message — not generic thumbs up. Use [[react:none]] or omit the tag if no reaction fits. The tag will be stripped before the user sees your response.
 IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
@@ -913,209 +988,6 @@ type tierParams struct {
 	Model  string   // full model name, e.g. "claude-sonnet-4-5"
 	Tools  []string // nil = omit flag
 	Effort string   // "" = omit flag
-}
-
-// progressFn is called with stream events as Claude processes.
-// event: "thinking", "tool_use", "text"; detail: tool name or empty.
-type progressFn func(event string, detail string)
-
-func askClaude(prompt, resumeID string, tp tierParams, onProgress progressFn) (*claudeResult, error) {
-	model := tp.Model
-	if model == "" {
-		model = "claude-haiku-4-5"
-	}
-	// Prefix prompt with a zero-width space if it starts with '-' to prevent
-	// the Claude CLI from parsing it as a flag.
-	safePrompt := prompt
-	if strings.HasPrefix(prompt, "-") {
-		safePrompt = "\u200B" + prompt
-	}
-	args := []string{
-		"-p", safePrompt,
-		"--model", model,
-		"--output-format", "stream-json",
-		"--verbose",
-		"--dangerously-skip-permissions",
-	}
-
-	for _, tool := range tp.Tools {
-		args = append(args, "--allowedTools", tool)
-	}
-	if tp.Effort != "" {
-		args = append(args, "--effort", tp.Effort)
-	}
-
-	if resumeID != "" {
-		args = append(args, "--resume", resumeID)
-	}
-
-	dataDir := "/home/node/data"
-	if d := os.Getenv("ALF_DATA_DIR"); d != "" {
-		dataDir = d
-	}
-
-	// Inject all memory files as appended system prompts.
-	args = append(args, memory.CollectPrompts(filepath.Join(dataDir, "memories"))...)
-
-	// Reaction suggestion instruction (non-editable, always injected).
-	args = append(args, "--append-system-prompt", fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "claude", args...)
-	cmd.Dir = dataDir
-	// Run Claude subprocess as 'claude' user (uid 1001, gid 1000/node).
-	// Daemon runs as root, so SysProcAttr.Credential works.
-	// This prevents Claude from writing to /opt/alf/config (root:root, 755).
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
-	}
-	env := make([]string, 0, len(os.Environ()))
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "HOME=") {
-			env = append(env, e)
-		}
-	}
-	cmd.Env = append(env, "HOME="+dataDir)
-
-	log.Printf("askClaude: starting (resume=%q, model=%s)", resumeID, model)
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start claude: %w", err)
-	}
-
-	// Parse stream-json events.
-	var (
-		resultText   strings.Builder
-		lastEvent    json.RawMessage
-		sentThinking bool
-	)
-
-	scanner := bufio.NewScanner(stdoutPipe)
-	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		lastEvent = make(json.RawMessage, len(line))
-		copy(lastEvent, line)
-
-		// Quick parse to detect event type.
-		var event struct {
-			Type  string `json:"type"`
-			Event struct {
-				Delta struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"delta"`
-				ContentBlock struct {
-					Type string `json:"type"`
-					Name string `json:"name"`
-				} `json:"content_block"`
-			} `json:"event"`
-		}
-		if json.Unmarshal(line, &event) != nil {
-			continue
-		}
-
-		if onProgress != nil {
-			switch {
-			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "thinking" && !sentThinking:
-				onProgress("thinking", "")
-				sentThinking = true
-			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "tool_use":
-				onProgress("tool_use", event.Event.ContentBlock.Name)
-			case event.Type == "stream_event" && event.Event.Delta.Type == "text_delta":
-				onProgress("text", "")
-			}
-		}
-
-		// Accumulate text deltas for the response.
-		if event.Type == "stream_event" && event.Event.Delta.Type == "text_delta" {
-			resultText.WriteString(event.Event.Delta.Text)
-		}
-	}
-
-	waitErr := cmd.Wait()
-	if ctx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("claude timed out after 5 minutes")
-	}
-
-	// Try to parse the last event as the result message (contains metadata).
-	if lastEvent != nil {
-		var parsed struct {
-			Type         string               `json:"type"`
-			SessionID    string               `json:"session_id"`
-			Subtype      string               `json:"subtype"`
-			Result       string               `json:"result"`
-			IsError      bool                 `json:"is_error"`
-			NumTurns     int                  `json:"num_turns"`
-			TotalCostUSD float64              `json:"total_cost_usd"`
-			ModelUsage   map[string]jsonModel `json:"modelUsage"`
-		}
-		if json.Unmarshal(lastEvent, &parsed) == nil && parsed.Type == "result" {
-			text := parsed.Result
-			if text == "" {
-				// Use accumulated stream text if result field is empty.
-				text = resultText.String()
-			}
-			if text == "" {
-				switch parsed.Subtype {
-				case "error_max_turns":
-					text = "Turn limit reached — try breaking this into smaller steps."
-				default:
-					if parsed.IsError {
-						text = "An error occurred processing your request."
-					} else {
-						text = "Done (no text output)."
-					}
-				}
-				log.Printf("askClaude: empty result (subtype=%q, is_error=%v)", parsed.Subtype, parsed.IsError)
-			}
-			if parsed.IsError && strings.Contains(text, "No conversation found") {
-				return nil, fmt.Errorf("claude: %s", text)
-			}
-			model := "unknown"
-			for m := range parsed.ModelUsage {
-				model = m
-				break
-			}
-			return &claudeResult{
-				SessionID: parsed.SessionID,
-				Text:      text,
-				Model:     model,
-				CostUSD:   parsed.TotalCostUSD,
-				NumTurns:  parsed.NumTurns,
-			}, nil
-		}
-	}
-
-	// Fallback: use accumulated text.
-	accumulated := strings.TrimSpace(resultText.String())
-	if accumulated != "" {
-		return &claudeResult{Text: accumulated}, nil
-	}
-
-	// No output — check stderr.
-	errOut := strings.TrimSpace(stderr.String())
-	if waitErr != nil {
-		if errOut != "" {
-			return nil, fmt.Errorf("claude: %s", errOut)
-		}
-		return nil, fmt.Errorf("claude failed: %v", waitErr)
-	}
-
-	return nil, fmt.Errorf("claude returned empty response")
 }
 
 func readSecret(envVar string) string {
@@ -1503,15 +1375,6 @@ func answerCallbackQuery(client *http.Client, token string, callbackID string) {
 	defer resp.Body.Close()
 }
 
-func isInstantTier(tierName string, tiers *cc.TiersConfig) bool {
-	for _, t := range tiers.Tiers {
-		if t.Name == tierName {
-			return t.Instant
-		}
-	}
-	return false
-}
-
 func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
@@ -1820,7 +1683,7 @@ func (r *ringBuffer) Size() int {
 }
 
 // handleReaction processes an emoji reaction on an Alf message.
-func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, memoriesDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger) {
+func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, memoriesDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider) {
 	// Log the reaction and update live feedback.
 	mood.LogReaction(dataDir, emoji, messageID)
 	mood.UpdateLiveFeedback(memoriesDir, dataDir)
@@ -1874,15 +1737,22 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, memorie
 
 	resumeID := chatSessions.Get(chatID)
 	// Use the instant tier for fast follow-up.
-	tp := tierParams{Model: "claude-haiku-4-5"}
+	model := "claude-haiku-4-5"
 	for _, t := range tierStore.Current().Tiers {
 		if t.Instant {
-			tp = resolveTierParams(t.Name, tierStore.Current())
+			m := router.ResolveModel(t.Model)
+			if m != "" {
+				model = m
+			}
 			break
 		}
 	}
 
-	result, err := askClaude(prompt, resumeID, tp, nil)
+	result, err := prov.Invoke(context.Background(), prompt, provider.Params{
+		Model:    model,
+		ResumeID: resumeID,
+		DataDir:  dataDir,
+	}, nil)
 	if err != nil {
 		log.Printf("negative follow-up error: %v", err)
 		return

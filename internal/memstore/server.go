@@ -11,12 +11,13 @@ import (
 
 // socketRequest is the JSON protocol for tool → daemon communication.
 type socketRequest struct {
-	Action string `json:"action"` // "search", "store", "recent"
+	Action string `json:"action"` // "search", "store", "recent", "delete"
 	Query  string `json:"query,omitempty"`
 	Text   string `json:"text,omitempty"`
 	Type   string `json:"type,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
 	Days   int    `json:"days,omitempty"`
+	ID     int64  `json:"id,omitempty"`
 }
 
 // socketResponse is sent back to the tool.
@@ -111,6 +112,15 @@ func (s *Store) handleConn(conn net.Conn) {
 		} else {
 			resp.Results = results
 			resp.Count = len(results)
+		}
+
+	case "delete":
+		if req.ID <= 0 {
+			resp.Error = "id required for delete"
+		} else if err := s.Delete(req.ID); err != nil {
+			resp.Error = err.Error()
+		} else {
+			resp.ID = req.ID
 		}
 
 	default:

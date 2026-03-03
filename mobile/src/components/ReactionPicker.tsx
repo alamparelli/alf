@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Pressable,
 } from 'react-native';
+import { colors, spacing, radius } from '../theme';
 
 const REACTIONS = ['👍', '👎', '🔥', '❤️', '😂', '🤔', '👏', '💯', '😢', '🎉'];
 
@@ -25,6 +26,7 @@ export default function ReactionPicker({ onSelect, onClose }: Props) {
               key={emoji}
               style={styles.emojiBtn}
               onPress={() => onSelect(emoji)}
+              activeOpacity={0.6}
             >
               <Text style={styles.emoji}>{emoji}</Text>
             </TouchableOpacity>
@@ -40,27 +42,30 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.overlay,
   },
   picker: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    backgroundColor: '#2a2a4e',
-    borderRadius: 16,
-    padding: 12,
-    maxWidth: 300,
-    gap: 8,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.xs,
+    // Subtle shadow for depth
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 8,
   },
   emojiBtn: {
-    width: 48,
-    height: 48,
+    width: 40,
+    height: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: radius.sm,
   },
   emoji: {
-    fontSize: 28,
+    fontSize: 24,
   },
 });

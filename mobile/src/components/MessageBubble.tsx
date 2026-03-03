@@ -13,8 +13,10 @@ import {
   PanGestureHandler,
   State,
 } from 'react-native-gesture-handler';
+import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import type { ChatMessage } from '../types';
+import { colors, spacing, radius, typography } from '../theme';
 
 interface Props {
   message: ChatMessage;
@@ -66,11 +68,16 @@ export default function MessageBubble({
 
   const renderStatus = () => {
     if (!isStreaming) return null;
-    if (!message.text && streamingPhase === 'thinking') {
-      return <Text style={styles.status}>Thinking...</Text>;
-    }
-    if (!message.text && streamingPhase === 'tool_use') {
-      return <Text style={styles.status}>Using {toolName || 'tool'}...</Text>;
+    if (!message.text && (streamingPhase === 'thinking' || streamingPhase === 'tool_use')) {
+      const label = streamingPhase === 'thinking'
+        ? 'Thinking'
+        : `Using ${toolName || 'tool'}`;
+      return (
+        <View style={styles.statusRow}>
+          <View style={styles.statusDot} />
+          <Text style={styles.statusText}>{label}</Text>
+        </View>
+      );
     }
     return null;
   };
@@ -92,7 +99,17 @@ export default function MessageBubble({
           }
           return (
             <View key={m.upload_id} style={styles.fileChip}>
-              <Text style={styles.fileChipText}>{m.file_name}</Text>
+              <Ionicons
+                name="document-outline"
+                size={14}
+                color={isUser ? 'rgba(255,255,255,0.7)' : colors.textSecondary}
+              />
+              <Text
+                style={[styles.fileChipText, isUser && styles.fileChipTextUser]}
+                numberOfLines={1}
+              >
+                {m.file_name}
+              </Text>
             </View>
           );
         })}
@@ -103,11 +120,11 @@ export default function MessageBubble({
   const renderReactions = () => {
     if (!message.reactions?.length) return null;
     return (
-      <View style={styles.reactions}>
+      <View style={[styles.reactions, isUser ? styles.reactionsUser : styles.reactionsAssistant]}>
         {message.reactions.map((r, i) => (
-          <Text key={i} style={styles.reactionEmoji}>
-            {r.emoji}
-          </Text>
+          <View key={i} style={styles.reactionBadge}>
+            <Text style={styles.reactionEmoji}>{r.emoji}</Text>
+          </View>
         ))}
       </View>
     );
@@ -115,7 +132,7 @@ export default function MessageBubble({
 
   const bubbleContent = (
     <TouchableOpacity
-      activeOpacity={0.8}
+      activeOpacity={0.7}
       onLongPress={onLongPress}
       delayLongPress={300}
       style={[styles.row, isUser ? styles.rowUser : styles.rowAssistant]}
@@ -131,7 +148,7 @@ export default function MessageBubble({
         {renderStatus()}
         {message.text ? (
           isUser ? (
-            <Text style={[styles.text, styles.userText]}>{message.text}</Text>
+            <Text style={styles.userText}>{message.text}</Text>
           ) : (
             <Markdown style={markdownStyles}>{message.text}</Markdown>
           )
@@ -142,13 +159,14 @@ export default function MessageBubble({
             {message.cost_usd ? ` · $${message.cost_usd.toFixed(4)}` : ''}
           </Text>
         )}
-        {renderReactions()}
         {showError && (
-          <TouchableOpacity onPress={onRetry} style={styles.retryBtn}>
-            <Text style={styles.retryText}>Failed to send. Tap to retry.</Text>
+          <TouchableOpacity onPress={onRetry} style={styles.retryRow}>
+            <Ionicons name="refresh" size={12} color={colors.destructive} />
+            <Text style={styles.retryText}>Tap to retry</Text>
           </TouchableOpacity>
         )}
       </View>
+      {renderReactions()}
     </TouchableOpacity>
   );
 
@@ -184,136 +202,200 @@ export default function MessageBubble({
 
 const styles = StyleSheet.create({
   row: {
-    marginVertical: 4,
-    flexDirection: 'row',
+    marginVertical: 2,
+    flexDirection: 'column',
   },
   rowUser: {
-    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
   },
   rowAssistant: {
-    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
   },
   bubble: {
-    maxWidth: '80%',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    maxWidth: '82%',
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
   },
   userBubble: {
-    backgroundColor: '#6c63ff',
-    borderBottomRightRadius: 4,
+    backgroundColor: colors.userBubble,
+    borderBottomRightRadius: spacing.xs,
   },
   assistantBubble: {
-    backgroundColor: '#2a2a4e',
-    borderBottomLeftRadius: 4,
+    backgroundColor: colors.assistantBubble,
+    borderBottomLeftRadius: spacing.xs,
   },
   errorBubble: {
-    borderColor: '#ff4444',
+    borderColor: colors.destructive,
     borderWidth: 1,
   },
-  text: {
-    fontSize: 16,
+  userText: {
+    ...typography.body,
+    color: '#FFFFFF',
     lineHeight: 22,
   },
-  userText: {
-    color: '#fff',
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: 2,
   },
-  assistantText: {
-    color: '#e0e0e0',
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.accent,
+    opacity: 0.8,
   },
-  status: {
-    color: '#999',
-    fontSize: 14,
+  statusText: {
+    ...typography.subhead,
+    color: colors.textSecondary,
     fontStyle: 'italic',
-    marginBottom: 4,
   },
   meta: {
-    color: '#666',
-    fontSize: 11,
-    marginTop: 6,
+    ...typography.caption,
+    marginTop: spacing.sm,
   },
   mediaContainer: {
-    marginBottom: 8,
+    marginBottom: spacing.sm,
+    gap: spacing.xs,
   },
   mediaImage: {
     width: '100%',
     height: 200,
-    borderRadius: 8,
-    marginBottom: 4,
+    borderRadius: radius.md,
   },
   fileChip: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   fileChipText: {
-    color: '#ccc',
-    fontSize: 13,
+    ...typography.footnote,
+    color: colors.textSecondary,
+    flexShrink: 1,
+  },
+  fileChipTextUser: {
+    color: 'rgba(255,255,255,0.7)',
   },
   reactions: {
     flexDirection: 'row',
-    marginTop: 6,
-    gap: 4,
+    marginTop: -4,
+    gap: 2,
+    paddingHorizontal: spacing.sm,
+  },
+  reactionsUser: {
+    justifyContent: 'flex-end',
+  },
+  reactionsAssistant: {
+    justifyContent: 'flex-start',
+  },
+  reactionBadge: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.full,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 0.5,
+    borderColor: colors.separator,
   },
   reactionEmoji: {
-    fontSize: 18,
+    fontSize: 14,
   },
-  retryBtn: {
-    marginTop: 6,
+  retryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
   },
   retryText: {
-    color: '#ff6666',
-    fontSize: 12,
+    ...typography.caption,
+    color: colors.destructive,
   },
 });
 
 const markdownStyles = {
-  body: { color: '#e0e0e0', fontSize: 16, lineHeight: 22 },
-  heading1: { color: '#fff', fontSize: 22, fontWeight: '700' as const, marginVertical: 6 },
-  heading2: { color: '#fff', fontSize: 19, fontWeight: '700' as const, marginVertical: 5 },
-  heading3: { color: '#fff', fontSize: 17, fontWeight: '600' as const, marginVertical: 4 },
-  strong: { color: '#fff', fontWeight: '700' as const },
-  em: { color: '#ccc', fontStyle: 'italic' as const },
-  link: { color: '#8b85ff' },
+  body: {
+    color: colors.textPrimary,
+    fontSize: 17,
+    lineHeight: 24,
+    letterSpacing: -0.41,
+  },
+  heading1: {
+    color: colors.textPrimary,
+    fontSize: 22,
+    fontWeight: '700' as const,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    letterSpacing: 0.35,
+  },
+  heading2: {
+    color: colors.textPrimary,
+    fontSize: 19,
+    fontWeight: '700' as const,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+    letterSpacing: -0.41,
+  },
+  heading3: {
+    color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '600' as const,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  strong: {
+    color: colors.textPrimary,
+    fontWeight: '600' as const,
+  },
+  em: {
+    color: 'rgba(255,255,255,0.8)',
+    fontStyle: 'italic' as const,
+  },
+  link: {
+    color: colors.accent,
+    textDecorationLine: 'none' as const,
+  },
   blockquote: {
-    borderLeftWidth: 3,
-    borderLeftColor: '#6c63ff',
-    paddingLeft: 10,
-    marginVertical: 6,
-    backgroundColor: 'rgba(108,99,255,0.08)',
-    borderRadius: 4,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.textTertiary,
+    paddingLeft: spacing.md,
+    marginVertical: spacing.sm,
+    opacity: 0.85,
   },
   code_inline: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    color: '#ffa657',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    color: '#FF9F0A',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 14,
-    paddingHorizontal: 4,
-    borderRadius: 3,
+    fontSize: 15,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
   },
   code_block: {
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    color: '#e0e0e0',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    color: '#E5E5EA',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 13,
-    padding: 10,
-    borderRadius: 8,
-    marginVertical: 6,
+    fontSize: 14,
+    padding: spacing.md,
+    borderRadius: radius.sm,
+    marginVertical: spacing.sm,
   },
   fence: {
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    color: '#e0e0e0',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    color: '#E5E5EA',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 13,
-    padding: 10,
-    borderRadius: 8,
-    marginVertical: 6,
+    fontSize: 14,
+    padding: spacing.md,
+    borderRadius: radius.sm,
+    marginVertical: spacing.sm,
   },
-  bullet_list: { marginVertical: 4 },
-  ordered_list: { marginVertical: 4 },
-  list_item: { color: '#e0e0e0', marginVertical: 2 },
-  hr: { backgroundColor: '#444', height: 1, marginVertical: 8 },
+  bullet_list: { marginVertical: spacing.xs },
+  ordered_list: { marginVertical: spacing.xs },
+  list_item: { color: colors.textPrimary, marginVertical: 1 },
+  hr: { backgroundColor: colors.separator, height: 0.5, marginVertical: spacing.md },
   paragraph: { marginVertical: 2 },
 };

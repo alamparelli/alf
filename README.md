@@ -199,14 +199,7 @@ ALF runs as root inside the container to manage subprocess isolation. Claude run
 
 ## Contributing
 
-```sh
-go build -tags fts5 ./...    # Build all
-go test -tags fts5 ./...     # Run tests
-./scripts/dev-deploy.sh      # Deploy to homelab
-./scripts/release.sh         # Tag + push release
-```
-
-PRs welcome. Keep changes focused — one feature or fix per PR.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code conventions, and guidelines.
 
 ## License
 

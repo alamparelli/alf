@@ -25,7 +25,7 @@ services:
 {{- end}}
 
   alf:
-    image: ghcr.io/alamparelli/alf:latest
+    image: {{.Image}}
     container_name: alf
     restart: unless-stopped
 {{- if .EnableHTTPS}}

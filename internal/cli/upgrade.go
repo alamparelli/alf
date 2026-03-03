@@ -112,6 +112,11 @@ func selfUpdate(currentVersion string) bool {
 }
 
 func fixVolumePermissions(dir string) {
+	// macOS Docker Desktop uses VirtioFS — handles permission mapping automatically.
+	if runtime.GOOS != "linux" {
+		return
+	}
+
 	chown := func(rel, owner string) {
 		p := filepath.Join(dir, rel)
 		if _, err := os.Stat(p); err != nil {

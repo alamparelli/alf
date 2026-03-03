@@ -13,6 +13,7 @@ var templateFS embed.FS
 
 // ComposeData holds values for the docker-compose template.
 type ComposeData struct {
+	Image         string // Docker image (default: ghcr.io/alamparelli/alf:latest)
 	CCPort        string
 	CCExternalURL string
 	EnableHTTPS   bool

@@ -32,3 +32,4 @@ dev-claude-session/
 .claude/
 mobile/
 scripts/dev-deploy.sh
+scripts/dev-local.sh

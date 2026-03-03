@@ -105,6 +105,7 @@ RUN groupadd --gid 1000 node \
 RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
     && mkdir -p /home/node/data/tools /home/node/data/skills \
     && mkdir -p /home/node/data/.claude \
+    && mkdir -p /home/node/data/config.d /home/node/data/skills.d \
     && mkdir -p /opt/alf/config \
     && chown -R root:node /home/node/data \
     && chmod -R g+ws /home/node/data \

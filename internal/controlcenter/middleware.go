@@ -33,12 +33,6 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 					r.Method, r.URL.Path, auth != "", len(auth), len(token))
 			}
 
-			// Check query param (for dashboard initial load).
-			if token != "" && r.URL.Query().Get("token") == token {
-				next.ServeHTTP(w, r)
-				return
-			}
-
 			// Check session cookie.
 			if sessions != nil {
 				if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
@@ -47,8 +41,8 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				}
 			}
 
-			// For browser requests, show login page instead of JSON 401.
-			if strings.Contains(r.Header.Get("Accept"), "text/html") {
+			// For browser requests (not API), show login page instead of JSON 401.
+			if !strings.HasPrefix(r.URL.Path, "/api/") && strings.Contains(r.Header.Get("Accept"), "text/html") {
 				renderLoginPage(w)
 				return
 			}

@@ -26,9 +26,10 @@ import (
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/signal"
 	"github.com/alamparelli/alf/internal/router"
+	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/session"
+	"github.com/alamparelli/alf/internal/signal"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/updater"
 	"github.com/alamparelli/alf/internal/voice"
@@ -186,12 +187,8 @@ func main() {
 			log.Printf("warning: git tracker init failed: %v", err)
 			git = nil
 		} else {
-			if cfg.GitSweepInterval > 0 {
-				git.SetInterval(time.Duration(cfg.GitSweepInterval) * time.Minute)
-				git.StartSweep()
-			}
 			defer git.Stop()
-			log.Printf("git tracker started (sweep=%dm)", cfg.GitSweepInterval)
+			log.Printf("git tracker initialized")
 		}
 	}
 
@@ -244,15 +241,6 @@ func main() {
 				sockPath := filepath.Join(contextDir, "memstore.sock")
 				go memDB.ServeUnix(sockPath)
 				log.Printf("memstore: ready (db=%s, socket=%s)", filepath.Join(contextDir, "memory.db"), sockPath)
-
-				// Periodic memory extraction (every 3h).
-				extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, func(cmd *exec.Cmd) {
-					cmd.SysProcAttr = &syscall.SysProcAttr{
-						Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
-					}
-				})
-				extractor.Start()
-				defer extractor.Stop()
 			}
 		}
 	} else {
@@ -339,7 +327,8 @@ func main() {
 	tg := tgclient.NewClient(token)
 	tg.HTTP = client
 
-	// Auto-update checker.
+	// Auto-update checker (initialized here, scheduled via unified scheduler below).
+	var uc *updater.Checker
 	if cfg.AutoUpdateCheck {
 		image := os.Getenv("ALF_IMAGE")
 		if image == "" {
@@ -358,10 +347,58 @@ func main() {
 		if updateInterval <= 0 {
 			updateInterval = 21600 * time.Second
 		}
-		uc := updater.New(image, version, updateInterval, notifyFn)
-		uc.Start()
-		defer uc.Stop()
+		uc = updater.New(image, version, updateInterval, notifyFn)
 	}
+
+	// --- Unified Scheduler ---
+	parsedChatID, _ := strconv.ParseInt(chatID, 10, 64)
+	schedLocation := resolveTimezone(cfg.Timezone)
+
+	sched := scheduler.New(scheduler.Config{
+		DataDir:    dataDir,
+		ContextDir: contextDir,
+		ChatID:     parsedChatID,
+		TG:         tg,
+		Provider:   &schedulerProvider{p: cliProvider},
+		TierStore:  &schedulerTierStore{ts: tierStore},
+		ChatLogger: &schedulerChatLogger{store: chatStore},
+		CronPath:   filepath.Join(contextDir, "cron.json"),
+		Location:   schedLocation,
+	})
+
+	// Register system jobs (replaces individual goroutine patterns).
+	if git != nil && cfg.GitSweepInterval > 0 {
+		sched.RegisterSystem("git-sweep", "Git Sweep",
+			fmt.Sprintf("@every %dm", cfg.GitSweepInterval),
+			func() error { return git.Commit("auto: periodic sweep") },
+		)
+	}
+	if uc != nil {
+		updateInterval := cfg.AutoUpdateCheckInterval
+		if updateInterval <= 0 {
+			updateInterval = 21600
+		}
+		sched.RegisterSystem("update-check", "Update Check",
+			fmt.Sprintf("@every %ds", updateInterval),
+			uc.CheckOnce,
+		)
+	}
+	if memDB != nil {
+		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, func(cmd *exec.Cmd) {
+			cmd.SysProcAttr = &syscall.SysProcAttr{
+				Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
+			}
+		})
+		sched.RegisterSystem("mem-extract", "Memory Extraction", "@every 3h", func() error {
+			state := extractor.LoadState()
+			return extractor.RunOnce(state.LastRun)
+		})
+	}
+
+	if err := sched.Start(filepath.Join(contextDir, "scheduler.sock")); err != nil {
+		log.Printf("warning: scheduler start failed: %v", err)
+	}
+	defer sched.Stop()
 
 	for {
 		// Check for reload events (non-blocking).
@@ -370,11 +407,15 @@ func main() {
 			switch event {
 			case cc.ReloadConfig:
 				if newCfg, err := configStore.Load(); err == nil {
+					oldTZ := cfg.Timezone
 					cfg = newCfg
 					if cfg.SessionTimeout > 0 {
 						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
 					}
-					log.Printf("config reloaded: log_level=%s session_timeout=%dm", cfg.LogLevel, cfg.SessionTimeout)
+					if cfg.Timezone != oldTZ {
+						log.Printf("config: timezone changed to %q — restart required for scheduler to pick up new timezone", cfg.Timezone)
+					}
+					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone)
 				}
 				if git != nil {
 					git.Commit("config updated via CC")
@@ -739,12 +780,13 @@ func main() {
 				if routingMsgID != 0 {
 					tg.DeleteMessage(chatID, routingMsgID)
 				}
-				// Pick the lowest-priority enabled tier for media processing.
+				// Pick the lowest-priority enabled non-instant tier for media.
+				// Instant tiers (haiku) can't meaningfully respond to images/GIFs.
 				tierName := ""
 				bestPriority := int(^uint(0) >> 1) // max int
 				for _, t := range tierStore.Current().Tiers {
 					log.Printf("media tier scan: %s priority=%d enabled=%v instant=%v", t.Name, t.Priority, t.Enabled, t.Instant)
-					if t.Enabled && t.Priority < bestPriority {
+					if t.Enabled && !t.Instant && t.Priority < bestPriority {
 						tierName = t.Name
 						bestPriority = t.Priority
 					}
@@ -959,6 +1001,12 @@ func main() {
 
 			// React to the user's message before sending the reply (more natural).
 			maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, suggestedEmoji, contextDir)
+
+			// Suppress internal fallback messages that aren't useful to the user.
+			if reply == "Done (no text output)." {
+				log.Printf("suppressing empty response for chat %d", chatID)
+				continue
+			}
 
 			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {
 				alfMsgIDs.Add(msgID)
@@ -1767,6 +1815,9 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 		"model":   result.Model,
 	})
 
+	if result.Text == "Done (no text output)." {
+		return
+	}
 	if msgID, err := tg.SendMessageReturnID(chatID, result.Text); err == nil && msgID != 0 {
 		alfMsgIDs.Add(msgID)
 	}
@@ -1840,5 +1891,88 @@ func (r *memStoreRecaller) Search(query string, limit int) ([]cc.MemoryResult, e
 		out[i] = cc.MemoryResult{Text: m.Text, Type: m.Type, Distance: m.Distance}
 	}
 	return out, nil
+}
+
+// schedulerProvider adapts provider.CLIProvider to the scheduler.ProviderInvoker interface.
+type schedulerProvider struct {
+	p *provider.CLIProvider
+}
+
+func (s *schedulerProvider) Invoke(ctx context.Context, prompt string, params scheduler.ProviderParams, onProgress interface{}) (*scheduler.ProviderResult, error) {
+	pp := provider.Params{
+		Model:         params.Model,
+		Tools:         params.Tools,
+		Effort:        params.Effort,
+		SystemPrompts: params.SystemPrompts,
+		MaxTurns:      params.MaxTurns,
+		DataDir:       params.DataDir,
+	}
+	result, err := s.p.Invoke(ctx, prompt, pp, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &scheduler.ProviderResult{
+		SessionID: result.SessionID,
+		Text:      result.Text,
+		Model:     result.Model,
+		CostUSD:   result.CostUSD,
+		NumTurns:  result.NumTurns,
+	}, nil
+}
+
+// schedulerTierStore adapts cc.TierStore to the scheduler.TierStoreReader interface.
+type schedulerTierStore struct {
+	ts cc.TierStore
+}
+
+func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
+	tc := s.ts.Current()
+	if tc == nil {
+		return nil
+	}
+	snap := &scheduler.TiersSnapshot{
+		Tiers: make([]scheduler.TierInfo, len(tc.Tiers)),
+	}
+	for i, t := range tc.Tiers {
+		snap.Tiers[i] = scheduler.TierInfo{
+			Name:     t.Name,
+			Model:    router.ResolveModel(t.Model),
+			Tools:    t.Tools,
+			Effort:   t.Effort,
+			MaxTurns: t.MaxTurns,
+		}
+	}
+	return snap
+}
+
+// schedulerChatLogger adapts cc.ChatStore to the scheduler.ChatLogger interface.
+type schedulerChatLogger struct {
+	store *cc.ChatStore
+}
+
+func (l *schedulerChatLogger) LogScheduledMessage(text, tier, jobName string) {
+	l.store.Append(cc.ChatMessage{
+		ID:        cc.NewMessageID(),
+		Role:      "assistant",
+		Text:      text,
+		Tier:      tier,
+		Timestamp: time.Now(),
+		SessionID: "scheduled:" + jobName,
+	})
+}
+
+// resolveTimezone loads an IANA timezone from config, falling back to TZ env then UTC.
+func resolveTimezone(tz string) *time.Location {
+	if tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err != nil {
+			log.Printf("warning: invalid timezone %q, falling back to TZ env or UTC: %v", tz, err)
+		} else {
+			log.Printf("scheduler: using timezone %s", tz)
+			return loc
+		}
+	}
+	// time.Local already respects the TZ environment variable.
+	return time.Local
 }
 

@@ -119,8 +119,7 @@ func HandlerFactory(deps Deps) http.Handler {
 
 	// Dashboard.
 	mux.Handle("/", &DashboardHandler{
-		HTML:  deps.DashboardHTML,
-		Token: deps.AuthToken,
+		HTML: deps.DashboardHTML,
 	})
 
 	// Apply middleware stack (outermost first).

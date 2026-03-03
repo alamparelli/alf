@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,10 +14,10 @@ import (
 // NotifyFunc is called when a new image version is available.
 type NotifyFunc func(currentVersion, latestTag string)
 
-// Checker periodically checks for new Docker image versions.
+// Checker periodically checks for new versions via GitHub Releases API.
 type Checker struct {
-	image    string // e.g. "ghcr.io/user/alf"
-	current  string // current running version tag
+	repo     string // GitHub "owner/repo" (extracted from image name)
+	current  string // current running version tag (e.g. "v0.6.14")
 	interval time.Duration
 	notify   NotifyFunc
 	client   *http.Client
@@ -28,10 +29,15 @@ type Checker struct {
 
 // New creates an update checker.
 // image is the full image name (e.g. "ghcr.io/alamparelli/alf").
-// current is the running version (e.g. "v0.1.30").
+// current is the running version (e.g. "v0.6.14").
 func New(image, current string, interval time.Duration, notify NotifyFunc) *Checker {
+	// Extract "owner/repo" from "ghcr.io/owner/repo".
+	repo := image
+	if parts := strings.SplitN(image, "/", 3); len(parts) == 3 {
+		repo = parts[1] + "/" + parts[2]
+	}
 	return &Checker{
-		image:    image,
+		repo:     repo,
 		current:  current,
 		interval: interval,
 		notify:   notify,
@@ -66,6 +72,12 @@ func (c *Checker) Start() {
 	}()
 }
 
+// CheckOnce runs a single update check immediately.
+func (c *Checker) CheckOnce() error {
+	c.check()
+	return nil
+}
+
 // Stop halts the periodic checker.
 func (c *Checker) Stop() {
 	c.mu.Lock()
@@ -83,80 +95,65 @@ func (c *Checker) check() {
 		return
 	}
 
-	if latest != "" && latest != c.current && c.notify != nil {
+	if latest == "" {
+		return
+	}
+	// Normalize: compare without "v" prefix.
+	cur := strings.TrimPrefix(c.current, "v")
+	lat := strings.TrimPrefix(latest, "v")
+	if cur != lat && compareSemver(lat, cur) > 0 && c.notify != nil {
 		c.notify(c.current, latest)
 	}
 }
 
-// latestTag queries the GHCR API for the latest tag.
+// latestTag queries the GitHub Releases API for the latest release tag.
+// Uses the public API (no auth needed for public repos, 60 req/hour).
 func (c *Checker) latestTag() (string, error) {
-	// Image format: ghcr.io/OWNER/REPO
-	parts := strings.SplitN(c.image, "/", 3)
-	if len(parts) < 3 {
-		return "", fmt.Errorf("invalid image format: %s", c.image)
-	}
-	registry, repo := parts[0], parts[1]+"/"+parts[2]
-
-	// GHCR requires token auth even for public repos (OCI distribution spec).
-	token, err := c.fetchToken(registry, repo)
-	if err != nil {
-		return "", fmt.Errorf("auth token: %w", err)
-	}
-
-	url := fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repo)
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", c.repo)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	req.Header.Set("Accept", "application/vnd.github+json")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch tags: %w", err)
+		return "", fmt.Errorf("fetch latest release: %w", err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 404 {
+		return "", nil // no releases yet
+	}
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("tags API returned %d", resp.StatusCode)
+		return "", fmt.Errorf("releases API returned %d", resp.StatusCode)
 	}
 
 	var result struct {
-		Tags []string `json:"tags"`
+		TagName string `json:"tag_name"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("parse tags: %w", err)
+		return "", fmt.Errorf("parse release: %w", err)
 	}
-
-	// Find the latest semver tag (v*).
-	var latest string
-	for _, tag := range result.Tags {
-		if strings.HasPrefix(tag, "v") && tag > latest {
-			latest = tag
-		}
-	}
-	return latest, nil
+	return result.TagName, nil
 }
 
-// fetchToken gets an anonymous bearer token from the registry's token service.
-func (c *Checker) fetchToken(registry, repo string) (string, error) {
-	url := fmt.Sprintf("https://%s/token?service=%s&scope=repository:%s:pull", registry, registry, repo)
-	resp, err := c.client.Get(url)
-	if err != nil {
-		return "", err
+// compareSemver compares two semver strings (without "v" prefix).
+// Returns >0 if a > b, <0 if a < b, 0 if equal.
+func compareSemver(a, b string) int {
+	ap := strings.SplitN(a, ".", 3)
+	bp := strings.SplitN(b, ".", 3)
+	for i := 0; i < 3; i++ {
+		var av, bv int
+		if i < len(ap) {
+			av, _ = strconv.Atoi(ap[i])
+		}
+		if i < len(bp) {
+			bv, _ = strconv.Atoi(bp[i])
+		}
+		if av != bv {
+			return av - bv
+		}
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("token endpoint returned %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
-	}
-	return result.Token, nil
+	return 0
 }

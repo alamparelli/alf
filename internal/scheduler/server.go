@@ -1,0 +1,147 @@
+package scheduler
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"strings"
+)
+
+// socketRequest is the JSON protocol for schedule tool → daemon communication.
+type socketRequest struct {
+	Action   string            `json:"action"` // "create", "list", "delete", "update"
+	Name     string            `json:"name,omitempty"`
+	Schedule string            `json:"schedule,omitempty"`
+	Tier     string            `json:"tier,omitempty"`
+	Prompt   string            `json:"prompt,omitempty"`
+	Output   string            `json:"output,omitempty"`
+	ID       string            `json:"id,omitempty"`
+	Fields   map[string]string `json:"fields,omitempty"`
+	UserOnly bool              `json:"user_only,omitempty"`
+}
+
+// socketResponse is sent back to the tool.
+type socketResponse struct {
+	Jobs  []*Job `json:"jobs,omitempty"`
+	Job   *Job   `json:"job,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// Server handles Unix socket connections for the schedule tool.
+type Server struct {
+	engine   *Engine
+	listener net.Listener
+	sockPath string
+}
+
+// NewServer creates a socket server for the scheduler.
+func NewServer(engine *Engine, sockPath string) *Server {
+	return &Server{
+		engine:   engine,
+		sockPath: sockPath,
+	}
+}
+
+// Serve starts listening. Blocks until closed.
+func (s *Server) Serve() error {
+	os.Remove(s.sockPath)
+
+	ln, err := net.Listen("unix", s.sockPath)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", s.sockPath, err)
+	}
+	s.listener = ln
+
+	// Make socket accessible to claude subprocess (uid 1001, gid 1000 = node group).
+	os.Chmod(s.sockPath, 0660)
+	os.Chown(s.sockPath, 1001, 1000)
+
+	log.Printf("scheduler: socket server listening on %s", s.sockPath)
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if strings.Contains(err.Error(), "use of closed") {
+				return nil
+			}
+			log.Printf("scheduler: accept error: %v", err)
+			continue
+		}
+		go s.handleConn(conn)
+	}
+}
+
+// Close stops the listener.
+func (s *Server) Close() {
+	if s.listener != nil {
+		s.listener.Close()
+	}
+}
+
+func (s *Server) handleConn(conn net.Conn) {
+	defer conn.Close()
+
+	dec := json.NewDecoder(conn)
+	enc := json.NewEncoder(conn)
+
+	var req socketRequest
+	if err := dec.Decode(&req); err != nil {
+		enc.Encode(socketResponse{Error: fmt.Sprintf("decode: %v", err)})
+		return
+	}
+
+	var resp socketResponse
+
+	switch req.Action {
+	case "create":
+		if req.Name == "" || req.Schedule == "" || req.Prompt == "" {
+			resp.Error = "name, schedule, and prompt are required"
+			break
+		}
+		tier := req.Tier
+		if tier == "" {
+			tier = "direct"
+		}
+		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Output)
+		if err != nil {
+			resp.Error = err.Error()
+		} else {
+			resp.Job = job
+		}
+
+	case "list":
+		resp.Jobs = s.engine.List(req.UserOnly)
+
+	case "delete":
+		if req.ID == "" {
+			resp.Error = "id required"
+			break
+		}
+		if err := s.engine.Delete(req.ID); err != nil {
+			resp.Error = err.Error()
+		}
+
+	case "update":
+		if req.ID == "" {
+			resp.Error = "id required"
+			break
+		}
+		if len(req.Fields) == 0 {
+			resp.Error = "no fields to update"
+			break
+		}
+		job, err := s.engine.Update(req.ID, req.Fields)
+		if err != nil {
+			resp.Error = err.Error()
+		} else {
+			resp.Job = job
+		}
+
+	default:
+		resp.Error = fmt.Sprintf("unknown action: %s", req.Action)
+	}
+
+	enc.Encode(resp)
+}

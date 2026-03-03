@@ -28,9 +28,13 @@ type Extractor struct {
 	cmdSetup   CmdSetup
 }
 
-type extractorState struct {
+// ExtractorState holds the persisted state of the extractor.
+type ExtractorState struct {
 	LastRun time.Time `json:"last_run"`
 }
+
+// Keep unexported alias for internal use.
+type extractorState = ExtractorState
 
 type extractedFact struct {
 	Text string `json:"text"`
@@ -274,6 +278,11 @@ Conversations:
 	}
 
 	return facts, nil
+}
+
+// LoadState returns the current extractor state (last run time).
+func (e *Extractor) LoadState() extractorState {
+	return e.loadState()
 }
 
 func (e *Extractor) loadState() extractorState {

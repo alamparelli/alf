@@ -237,8 +237,6 @@ func promptDirectory(reader *bufio.Reader) string {
 		}
 	}
 
-	// Ensure volume directories are owned by uid 1000 (node user inside container).
-	fixVolumePermissions(dir)
 	PrintCheck(fmt.Sprintf("Directory ready: %s", dir))
 	return dir
 }
@@ -475,6 +473,10 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
 		os.WriteFile(readmePath, []byte(configReadme), 0o644)
 	}
+
+	// Fix volume permissions last — after all files are written.
+	// chown to uid 1000 (node user inside container) so Docker volumes work.
+	fixVolumePermissions(dir)
 }
 
 func generateAuthToken() (string, error) {

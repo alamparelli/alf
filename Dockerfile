@@ -13,8 +13,8 @@ RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-
     && CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools
 
-# Stage 2: Runtime with Claude Code CLI
-FROM node:22-slim
+# Stage 2: Runtime — minimal Debian with Claude Code native binary (no Node.js).
+FROM debian:bookworm-slim
 
 ARG TARGETARCH
 
@@ -22,23 +22,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
     curl \
-    ffmpeg \
     git \
     trash-cli \
     python3 \
     python3-pip \
     libgomp1 \
     poppler-utils \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install faster-whisper for voice transcription.
-# libgomp1 is required for OpenMP parallel CPU execution in ctranslate2.
-RUN pip3 install --break-system-packages faster-whisper
+# Static ffmpeg+ffprobe (~80 MB unpacked vs ~400 MB Debian packages).
+RUN if [ "${TARGETARCH}" = "arm64" ]; then FFARCH="arm64"; else FFARCH="amd64"; fi \
+    && curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFARCH}-static.tar.xz" \
+       | tar xJ --strip-components=1 --wildcards -C /usr/local/bin '*/ffmpeg' '*/ffprobe' \
+    && ffmpeg -version > /dev/null
 
-# Install ONNX Runtime + tokenizers for semantic memory embeddings.
-# Replaces PyTorch/sentence-transformers (~1 GB) with ONNX (~180 MB).
-RUN pip3 install --break-system-packages onnxruntime tokenizers numpy \
-    && rm -rf /root/.cache/pip
+# faster-whisper is installed on first voice message (auto-install in transcribe.py).
+# libgomp1 is required for OpenMP parallel CPU execution in ctranslate2.
+
+# Download ONNX Runtime shared library (CPU-only, ~20 MB).
+# Embeddings run in Go via onnxruntime_go — no Python needed.
+RUN if [ "${TARGETARCH}" = "amd64" ]; then ARCH="x64"; \
+    elif [ "${TARGETARCH}" = "arm64" ]; then ARCH="aarch64"; \
+    else ARCH="${TARGETARCH}"; fi \
+    && curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-linux-${ARCH}-1.24.2.tgz" \
+       | tar xz --strip-components=2 -C /usr/local/lib \
+         "onnxruntime-linux-${ARCH}-1.24.2/lib/libonnxruntime.so.1.24.2" \
+         "onnxruntime-linux-${ARCH}-1.24.2/lib/libonnxruntime.so.1" \
+         "onnxruntime-linux-${ARCH}-1.24.2/lib/libonnxruntime.so" \
+    && ldconfig
 
 # Pre-download ONNX embedding model to avoid first-run delay.
 RUN mkdir -p /opt/alf/models/all-MiniLM-L6-v2 \
@@ -47,34 +59,35 @@ RUN mkdir -p /opt/alf/models/all-MiniLM-L6-v2 \
     && curl -fsSL -o /opt/alf/models/all-MiniLM-L6-v2/tokenizer.json \
        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
 
-# Python CVE audit runs in go test (internal/vulncheck/) with scoped deps.
-# Removed from Dockerfile — pip-audit lacks package exclusion, and base image
-# pip/setuptools CVEs are false positives that block builds.
-
 # Enable OpenMP threading for ctranslate2 (faster-whisper backend).
 ENV OMP_NUM_THREADS=4
 
-# Install Go for Claude agent to build CLI tools
-RUN curl -fsSL "https://go.dev/dl/go1.24.13.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
-ENV PATH="/opt/alf/tools:/usr/local/go/bin:/home/node/go/bin:${PATH}"
-ENV GOPATH="/home/node/go"
+# Claude Code native binary (standalone, no Node.js required).
+# Uses official installer which handles URL resolution and checksum verification.
+# Installer puts binary at ~/.local/share/claude/versions/<ver> with symlink at ~/.local/bin/claude.
+# We copy the actual binary to /usr/local/bin so it's accessible to all users.
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && cp "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
+    && rm -rf /root/.local/share/claude /root/.local/bin/claude /root/.claude \
+    && claude --version
 
-RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
+ENV PATH="/opt/alf/tools:${PATH}"
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 COPY --from=builder /extract-video /opt/alf/tools/extract-video
 COPY --from=builder /recall-tools /opt/alf/tools/recall-tools
 COPY scripts/transcribe.py /opt/alf/transcribe.py
-COPY scripts/embed.py /opt/alf/embed.py
 
 # Create memory tool symlinks (recall, remember, forget → recall-tools).
 RUN ln -s /opt/alf/tools/recall-tools /opt/alf/tools/recall \
     && ln -s /opt/alf/tools/recall-tools /opt/alf/tools/remember \
     && ln -s /opt/alf/tools/recall-tools /opt/alf/tools/forget
 
-# Create 'claude' user for subprocess isolation (same group as node).
-# node=1000:1000, claude=1001:1000 — shares 'node' group for data access.
-RUN useradd -u 1001 -g node -s /bin/bash -M claude \
+# Create users for two-user privilege model.
+# node=1000:1000 (legacy name, kept for volume compatibility), claude=1001:1000.
+RUN groupadd --gid 1000 node \
+    && useradd --uid 1000 --gid node --shell /bin/bash --create-home node \
+    && useradd -u 1001 -g node -s /bin/bash -M claude \
     && mkdir -p /home/claude && chown claude:node /home/claude
 
 # Two-user privilege model:

@@ -47,8 +47,8 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				}
 			}
 
-			// For browser GET / requests, show login page instead of 401.
-			if r.Method == http.MethodGet && r.URL.Path == "/" && strings.Contains(r.Header.Get("Accept"), "text/html") {
+			// For browser requests, show login page instead of JSON 401.
+			if strings.Contains(r.Header.Get("Accept"), "text/html") {
 				renderLoginPage(w)
 				return
 			}
@@ -153,6 +153,93 @@ func (w *statusWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// ipBan tracks failed attempts and bans IPs that exceed the threshold.
+type ipBan struct {
+	mu        sync.Mutex
+	failures  map[string]int       // IP → failure count
+	banned    map[string]time.Time // IP → ban expiry
+	threshold int                  // failures before ban
+	duration  time.Duration        // ban duration
+}
+
+func newIPBan(threshold int, duration time.Duration) *ipBan {
+	if threshold <= 0 {
+		threshold = 10
+	}
+	if duration <= 0 {
+		duration = 15 * time.Minute
+	}
+	return &ipBan{
+		failures:  make(map[string]int),
+		banned:    make(map[string]time.Time),
+		threshold: threshold,
+		duration:  duration,
+	}
+}
+
+func (b *ipBan) extractIP(r *http.Request) string {
+	ip := r.RemoteAddr
+	if i := strings.LastIndex(ip, ":"); i != -1 {
+		ip = ip[:i]
+	}
+	return ip
+}
+
+// isBanned returns true if the IP is currently banned.
+func (b *ipBan) isBanned(ip string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	expiry, ok := b.banned[ip]
+	if !ok {
+		return false
+	}
+	if time.Now().After(expiry) {
+		delete(b.banned, ip)
+		delete(b.failures, ip)
+		return false
+	}
+	return true
+}
+
+// recordFailure increments the failure count and bans the IP if threshold is exceeded.
+func (b *ipBan) recordFailure(ip string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.failures[ip]++
+	if b.failures[ip] >= b.threshold {
+		b.banned[ip] = time.Now().Add(b.duration)
+		log.Printf("[CC] IP banned: %s (duration=%s)", ip, b.duration)
+	}
+}
+
+// recordSuccess clears the failure count for an IP.
+func (b *ipBan) recordSuccess(ip string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.failures, ip)
+}
+
+// middleware wraps a handler with IP ban enforcement and failure tracking.
+// It checks the response status: 400 = failure (invalid/expired code), 303 = success.
+func (b *ipBan) middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := b.extractIP(r)
+		if b.isBanned(ip) {
+			http.Error(w, `{"error":"too many failed attempts, try again later"}`, http.StatusForbidden)
+			return
+		}
+
+		sw := &statusWriter{ResponseWriter: w, status: 200}
+		next.ServeHTTP(sw, r)
+
+		if sw.status == http.StatusBadRequest {
+			b.recordFailure(ip)
+		} else if sw.status == http.StatusSeeOther {
+			b.recordSuccess(ip)
+		}
+	})
 }
 
 // rateLimitMiddleware limits requests per IP per minute.

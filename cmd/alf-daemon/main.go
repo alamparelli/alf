@@ -221,22 +221,18 @@ func main() {
 		log.Println("voice transcription disabled (transcribe.py not found)")
 	}
 
-	// Embedding sidecar (persistent ONNX Runtime Python process).
-	embedScriptPath := "/opt/alf/embed.py"
-	if p := os.Getenv("ALF_EMBED_SCRIPT"); p != "" {
-		embedScriptPath = p
-	}
+	// ONNX embedding engine (Go native, no Python sidecar).
+	modelDir := "/opt/alf/models/all-MiniLM-L6-v2"
 	var memDB *memstore.Store
-	if memstore.IsAvailable(embedScriptPath) {
-		embedder, err := memstore.NewEmbedder(embedScriptPath, "", 30*time.Second)
+	if memstore.IsAvailable(modelDir) {
+		embedder, err := memstore.NewEmbedder(modelDir)
 		if err != nil {
 			log.Printf("memstore: embedder disabled: %v", err)
 		} else {
-			// Start synchronously — wait for model load before proceeding.
-			// This avoids a race where Search falls back to FTS5 because
-			// the embedder isn't ready yet.
 			if err := embedder.Start(); err != nil {
 				log.Printf("memstore: embedder start failed: %v", err)
+			} else {
+				defer embedder.Stop()
 			}
 
 			memDB, err = memstore.New(filepath.Join(contextDir, "memory.db"), embedder)
@@ -259,7 +255,7 @@ func main() {
 			}
 		}
 	} else {
-		log.Println("memstore: embedding sidecar disabled (embed.py not found)")
+		log.Println("memstore: embedder disabled (model files not found)")
 	}
 
 	// Ring buffer tracking Alf's sent message IDs for reaction matching.
@@ -320,7 +316,7 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, reloadCh, magic, sessions, chatService)
+		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -1349,7 +1345,7 @@ func handleCallbackQuery(tg *tgclient.Client, client *http.Client, token string,
 	}
 
 	link := fmt.Sprintf("%s/auth?code=%s", strings.TrimRight(ccExternalURL, "/"), code)
-	tg.SendHTML(chatID, fmt.Sprintf("Session: %s · Expires in 5 min\n%s", label, link))
+	tg.SendHTMLNoPreview(chatID, fmt.Sprintf("Session: %s · Expires in 5 min\n%s", label, link))
 }
 
 func answerCallbackQuery(client *http.Client, token string, callbackID string) {

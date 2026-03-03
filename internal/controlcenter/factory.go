@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path/filepath"
+	"time"
 )
 
 // Deps holds all dependencies needed to build the control center.
@@ -19,9 +20,11 @@ type Deps struct {
 	Magic          *MagicStore
 	Sessions       *SessionStore
 	ChatService    *ChatService // nil if chat API disabled
-	AuthToken      string
-	SecureCookies  bool // true when CC is behind HTTPS
-	DataDir        string
+	AuthToken        string
+	SecureCookies    bool // true when CC is behind HTTPS
+	AuthBanThreshold int  // failed /auth attempts before IP ban (0 = default 10)
+	AuthBanDuration  int  // IP ban duration in minutes (0 = default 15)
+	DataDir          string
 	ConfigDir      string
 	SkillsDir      string
 	DashboardHTML  string
@@ -97,12 +100,16 @@ func HandlerFactory(deps Deps) http.Handler {
 	mux.Handle("/health", &HealthHandler{})
 
 	// Magic link auth (exempt from auth — does its own validation).
+	// Strict rate limit (5/min per IP) + IP ban after repeated failures.
 	if deps.Magic != nil && deps.Sessions != nil {
-		mux.Handle("/auth", &AuthHandler{
+		authRL := newRateLimiter(5)
+		authBan := newIPBan(deps.AuthBanThreshold, time.Duration(deps.AuthBanDuration)*time.Minute)
+		authHandler := authBan.middleware(authRL.middleware(&AuthHandler{
 			Magic:    deps.Magic,
 			Sessions: deps.Sessions,
 			Secure:   deps.SecureCookies,
-		})
+		}))
+		mux.Handle("/auth", authHandler)
 	}
 
 	// Static assets (CSS, JS) — served from embedded web/ directory.

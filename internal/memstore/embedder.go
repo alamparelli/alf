@@ -1,63 +1,50 @@
 package memstore
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
+	"math"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"sync"
-	"time"
+
+	ort "github.com/yalue/onnxruntime_go"
 )
 
-// Embedder manages a persistent ONNX Runtime Python process.
+// Embedder manages ONNX Runtime inference for semantic embeddings.
 // The model is loaded once and kept in memory for fast embedding generation.
 type Embedder struct {
-	mu         sync.Mutex
-	scriptPath string
-	modelDir   string
-	timeout    time.Duration
-	dims       int
-
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	reader *bufio.Reader
-	ready  bool
+	mu        sync.Mutex
+	modelDir  string
+	dims      int
+	maxLen    int
+	tokenizer *Tokenizer
+	session   *ort.DynamicAdvancedSession
+	ready     bool
 }
 
-// embedRequest is sent to the Python sidecar.
-type embedRequest struct {
-	ID    string   `json:"id"`
-	Texts []string `json:"texts"`
-}
-
-// embedResponse is received from the Python sidecar.
-type embedResponse struct {
-	ID         string      `json:"id"`
-	Embeddings [][]float32 `json:"embeddings"`
-	Error      string      `json:"error,omitempty"`
-}
-
-// NewEmbedder creates a new Embedder. Does NOT start the process — call Start().
-func NewEmbedder(scriptPath, modelDir string, timeout time.Duration) (*Embedder, error) {
-	if _, err := exec.LookPath("python3"); err != nil {
-		return nil, fmt.Errorf("python3 not found in PATH: %w", err)
-	}
-
+// NewEmbedder creates a new Embedder. Call Start() to load the model.
+func NewEmbedder(modelDir string) (*Embedder, error) {
 	if modelDir == "" {
 		modelDir = "/opt/alf/models/all-MiniLM-L6-v2"
 	}
 
+	modelPath := filepath.Join(modelDir, "model.onnx")
+	tokenizerPath := filepath.Join(modelDir, "tokenizer.json")
+
+	for _, p := range []string{modelPath, tokenizerPath} {
+		if _, err := os.Stat(p); err != nil {
+			return nil, fmt.Errorf("missing model file: %s", p)
+		}
+	}
+
 	return &Embedder{
-		scriptPath: scriptPath,
-		modelDir:   modelDir,
-		timeout:    timeout,
+		modelDir: modelDir,
+		maxLen:   256,
 	}, nil
 }
 
-// Start launches the persistent Python process and waits for model load.
+// Start initialises ONNX Runtime, loads the model, and runs a warmup inference.
 func (e *Embedder) Start() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -66,66 +53,104 @@ func (e *Embedder) Start() error {
 		return nil
 	}
 
-	cmd := exec.Command("python3", e.scriptPath,
-		"--server",
-		"--model-dir", e.modelDir,
+	// Load tokenizer.
+	tokPath := filepath.Join(e.modelDir, "tokenizer.json")
+	tok, err := NewTokenizer(tokPath, e.maxLen)
+	if err != nil {
+		return fmt.Errorf("load tokenizer: %w", err)
+	}
+	e.tokenizer = tok
+
+	// Initialise ONNX Runtime (idempotent across the process).
+	libPath := os.Getenv("ONNXRUNTIME_LIB")
+	if libPath == "" {
+		libPath = "/usr/local/lib/libonnxruntime.so"
+	}
+	ort.SetSharedLibraryPath(libPath)
+	if err := ort.InitializeEnvironment(); err != nil {
+		// Already initialised is OK.
+		if err.Error() != "The ONNX runtime has already been initialized" {
+			return fmt.Errorf("init onnxruntime: %w", err)
+		}
+	}
+
+	// Create session.
+	modelPath := filepath.Join(e.modelDir, "model.onnx")
+	session, err := ort.NewDynamicAdvancedSession(
+		modelPath,
+		[]string{"input_ids", "attention_mask", "token_type_ids"},
+		[]string{"last_hidden_state"},
+		nil,
 	)
-	cmd.Stderr = os.Stderr
-
-	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("stdin pipe: %w", err)
+		return fmt.Errorf("create session: %w", err)
 	}
+	e.session = session
 
-	stdout, err := cmd.StdoutPipe()
+	// Warmup to infer dims.
+	dims, err := e.warmup()
 	if err != nil {
-		stdin.Close()
-		return fmt.Errorf("stdout pipe: %w", err)
+		session.Destroy()
+		return fmt.Errorf("warmup: %w", err)
 	}
-
-	if err := cmd.Start(); err != nil {
-		stdin.Close()
-		return fmt.Errorf("start process: %w", err)
-	}
-
-	reader := bufio.NewReader(stdout)
-
-	// Wait for the "ready" message.
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		cmd.Process.Kill()
-		return fmt.Errorf("waiting for ready signal: %w", err)
-	}
-
-	var status struct {
-		Status string `json:"status"`
-		Dims   int    `json:"dims"`
-	}
-	if err := json.Unmarshal([]byte(line), &status); err != nil || status.Status != "ready" {
-		cmd.Process.Kill()
-		return fmt.Errorf("unexpected ready signal: %s", line)
-	}
-
-	e.cmd = cmd
-	e.stdin = stdin
-	e.reader = reader
+	e.dims = dims
 	e.ready = true
-	e.dims = status.Dims
 
-	log.Printf("memstore: embedder ready (model-dir=%s, dims=%d, pid=%d)", e.modelDir, e.dims, cmd.Process.Pid)
+	log.Printf("memstore: embedder ready (model-dir=%s, dims=%d)", e.modelDir, e.dims)
 	return nil
 }
 
-// Stop kills the persistent process.
+// warmup runs a single dummy inference to determine output dimensions.
+func (e *Embedder) warmup() (int, error) {
+	ids, mask, types := e.tokenizer.Encode("hello")
+
+	inputIDs, err := ort.NewTensor(ort.NewShape(1, int64(e.maxLen)), ids)
+	if err != nil {
+		return 0, err
+	}
+	defer inputIDs.Destroy()
+
+	attentionMask, err := ort.NewTensor(ort.NewShape(1, int64(e.maxLen)), mask)
+	if err != nil {
+		return 0, err
+	}
+	defer attentionMask.Destroy()
+
+	tokenTypeIDs, err := ort.NewTensor(ort.NewShape(1, int64(e.maxLen)), types)
+	if err != nil {
+		return 0, err
+	}
+	defer tokenTypeIDs.Destroy()
+
+	output, err := ort.NewEmptyTensor[float32](ort.NewShape(1, int64(e.maxLen), 384))
+	if err != nil {
+		return 0, err
+	}
+	defer output.Destroy()
+
+	err = e.session.Run(
+		[]ort.Value{inputIDs, attentionMask, tokenTypeIDs},
+		[]ort.Value{output},
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	shape := output.GetShape()
+	if len(shape) < 3 {
+		return 0, fmt.Errorf("unexpected output shape: %v", shape)
+	}
+	return int(shape[2]), nil
+}
+
+// Stop releases all ONNX resources.
 func (e *Embedder) Stop() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if e.cmd != nil && e.cmd.Process != nil {
-		e.stdin.Close()
-		e.cmd.Process.Kill()
-		e.cmd.Wait()
-		e.cmd = nil
+	if e.session != nil {
+		e.session.Destroy()
+		e.session = nil
 		e.ready = false
 		log.Println("memstore: embedder stopped")
 	}
@@ -161,58 +186,107 @@ func (e *Embedder) EmbedBatch(texts []string) ([][]float32, error) {
 		return nil, fmt.Errorf("embedder not ready")
 	}
 
-	req := embedRequest{
-		ID:    fmt.Sprintf("%d", time.Now().UnixNano()),
-		Texts: texts,
-	}
-	reqBytes, _ := json.Marshal(req)
-	reqBytes = append(reqBytes, '\n')
+	batch := int64(len(texts))
+	seqLen := int64(e.maxLen)
 
-	if _, err := e.stdin.Write(reqBytes); err != nil {
-		e.ready = false
-		return nil, fmt.Errorf("write to embedder: %w", err)
+	// Tokenize all texts into flat slices.
+	allIDs, allMask, allTypes := e.tokenizer.EncodeBatch(texts)
+
+	// Create input tensors.
+	inputIDs, err := ort.NewTensor(ort.NewShape(batch, seqLen), allIDs)
+	if err != nil {
+		return nil, fmt.Errorf("create input_ids tensor: %w", err)
+	}
+	defer inputIDs.Destroy()
+
+	attentionMask, err := ort.NewTensor(ort.NewShape(batch, seqLen), allMask)
+	if err != nil {
+		return nil, fmt.Errorf("create attention_mask tensor: %w", err)
+	}
+	defer attentionMask.Destroy()
+
+	tokenTypeIDs, err := ort.NewTensor(ort.NewShape(batch, seqLen), allTypes)
+	if err != nil {
+		return nil, fmt.Errorf("create token_type_ids tensor: %w", err)
+	}
+	defer tokenTypeIDs.Destroy()
+
+	// Create output tensor: (batch, seqLen, dims).
+	output, err := ort.NewEmptyTensor[float32](ort.NewShape(batch, seqLen, int64(e.dims)))
+	if err != nil {
+		return nil, fmt.Errorf("create output tensor: %w", err)
+	}
+	defer output.Destroy()
+
+	// Run inference.
+	err = e.session.Run(
+		[]ort.Value{inputIDs, attentionMask, tokenTypeIDs},
+		[]ort.Value{output},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("run inference: %w", err)
 	}
 
-	// Read response with timeout.
-	type readResult struct {
-		line string
-		err  error
-	}
-	ch := make(chan readResult, 1)
-	go func() {
-		line, err := e.reader.ReadString('\n')
-		ch <- readResult{line, err}
-	}()
-
-	select {
-	case res := <-ch:
-		if res.err != nil {
-			e.ready = false
-			return nil, fmt.Errorf("read from embedder: %w", res.err)
-		}
-		var resp embedResponse
-		if err := json.Unmarshal([]byte(res.line), &resp); err != nil {
-			return nil, fmt.Errorf("parse response: %w (raw: %s)", err, res.line)
-		}
-		if resp.Error != "" {
-			return nil, fmt.Errorf("embedder: %s", resp.Error)
-		}
-		return resp.Embeddings, nil
-
-	case <-time.After(e.timeout):
-		e.ready = false
-		e.cmd.Process.Kill()
-		return nil, fmt.Errorf("embedding timeout after %v", e.timeout)
-	}
+	// Mean pooling + L2 normalize.
+	raw := output.GetData()
+	return meanPoolNormalize(raw, allMask, int(batch), int(seqLen), e.dims), nil
 }
 
-// IsAvailable checks if python3 and the embedding script exist.
-func IsAvailable(scriptPath string) bool {
-	if _, err := exec.LookPath("python3"); err != nil {
-		return false
+// meanPoolNormalize applies attention-masked mean pooling and L2 normalization.
+func meanPoolNormalize(embeddings []float32, mask []int64, batch, seqLen, dims int) [][]float32 {
+	results := make([][]float32, batch)
+
+	for b := 0; b < batch; b++ {
+		pooled := make([]float32, dims)
+		var count float32
+
+		for s := 0; s < seqLen; s++ {
+			m := float32(mask[b*seqLen+s])
+			if m == 0 {
+				continue
+			}
+			count += m
+			offset := (b*seqLen + s) * dims
+			for d := 0; d < dims; d++ {
+				pooled[d] += embeddings[offset+d] * m
+			}
+		}
+
+		if count < 1e-9 {
+			count = 1e-9
+		}
+
+		// Mean.
+		var norm float64
+		for d := 0; d < dims; d++ {
+			pooled[d] /= count
+			norm += float64(pooled[d]) * float64(pooled[d])
+		}
+
+		// L2 normalize.
+		norm = math.Sqrt(norm)
+		if norm < 1e-12 {
+			norm = 1e-12
+		}
+		for d := 0; d < dims; d++ {
+			pooled[d] = float32(float64(pooled[d]) / norm)
+		}
+
+		results[b] = pooled
 	}
-	if _, err := os.Stat(scriptPath); err != nil {
-		return false
+
+	return results
+}
+
+// IsAvailable checks if the ONNX model files exist at the given directory.
+func IsAvailable(modelDir string) bool {
+	if modelDir == "" {
+		modelDir = "/opt/alf/models/all-MiniLM-L6-v2"
+	}
+	for _, name := range []string{"model.onnx", "tokenizer.json"} {
+		if _, err := os.Stat(filepath.Join(modelDir, name)); err != nil {
+			return false
+		}
 	}
 	return true
 }

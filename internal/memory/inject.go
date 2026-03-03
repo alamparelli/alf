@@ -6,19 +6,28 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // priorityFiles defines the injection order for well-known memory files.
 var priorityFiles = []string{"soul.md", "mood.md", "index.md"}
 
-// CollectPrompts reads all .md files from memoriesDir and returns
+// CollectPrompts reads all .md files from contextDir and returns
 // them as CLI arg pairs: ["--append-system-prompt", "<content>", ...].
 // Order: soul.md -> mood.md -> index.md -> rest (alphabetical).
-func CollectPrompts(memoriesDir string) []string {
-	files := orderedFiles(memoriesDir)
+func CollectPrompts(contextDir string) []string {
+	files := orderedFiles(contextDir)
 	var args []string
+
+	// Inject current date/time so the model always knows "now".
+	now := time.Now()
+	clock := fmt.Sprintf("Current date: %s %d %s %d\nTime: %s",
+		now.Format("Monday"), now.Day(), now.Format("January"), now.Year(),
+		now.Format("15:04"))
+	args = append(args, "--append-system-prompt", clock)
+
 	for _, f := range files {
-		content, err := os.ReadFile(filepath.Join(memoriesDir, f))
+		content, err := os.ReadFile(filepath.Join(contextDir, f))
 		if err != nil || len(strings.TrimSpace(string(content))) == 0 {
 			continue
 		}
@@ -30,10 +39,10 @@ func CollectPrompts(memoriesDir string) []string {
 
 // CollectInline reads soul.md + mood.md and returns their content
 // concatenated with separators, for use as a router prompt prefix.
-func CollectInline(memoriesDir string) string {
+func CollectInline(contextDir string) string {
 	var parts []string
 	for _, f := range []string{"soul.md", "mood.md"} {
-		content, err := os.ReadFile(filepath.Join(memoriesDir, f))
+		content, err := os.ReadFile(filepath.Join(contextDir, f))
 		if err != nil || len(strings.TrimSpace(string(content))) == 0 {
 			continue
 		}
@@ -82,17 +91,18 @@ You have a persistent long-term memory that survives across sessions.
 Memories are auto-extracted every 3 hours from your conversations.
 
 ## Tools
-- memory-search "query" [--limit 5] — Search your memory (semantic + keyword)
-- memory-store "text" --type fact|preference|decision — Manually save something important (use sparingly — most memories are auto-extracted)
+- recall "query" [--limit 5] — Search your memory (semantic + keyword)
+- recall --status — Show last/next extraction time and total memory count
+- remember "text" --type fact|preference|decision — Manually save something important (use sparingly — most memories are auto-extracted)
 
 ## When to search
-MANDATORY: You MUST run memory-search BEFORE answering when the user:
+MANDATORY: You MUST run recall BEFORE answering when the user:
 - Asks about themselves, their life, preferences, pets, family, habits
 - References something from a past conversation
 - Uses words like "remember", "you know", "we decided", "my", "I told you"
 - Asks "do you know X about me" or anything personal
 
-NEVER say "I don't know" about the user without searching first. Run memory-search, THEN answer based on results.
+NEVER say "I don't know" about the user without searching first. Run recall, THEN answer based on results.
 
 ## When to manually store
 Only when something is time-sensitive and can't wait for the next extraction cycle:
@@ -154,21 +164,14 @@ This file is injected into every conversation. Add persistent context below.
 
 You run inside a Docker container (Linux). Working directory: /home/node/data
 
-### Tools
-Your tools are in tools.d/. Run ` + "`ls tools.d/`" + ` to discover them.
-Each tool supports --help. When you encounter a tool you haven't used before, run it with --help to learn its interface.
-
 ### Filesystem
 - data/ — your working directory (read/write)
-- data/memories/ — your persistent memory files (this file, soul.md, mood.md)
+- data/context/ — your persistent context files (this file, soul.md, mood.md, toolbox.md)
 - data/logs/events/ — daily conversation logs (YYYY-MM-DD.jsonl)
-- data/tools.d/ — available CLI tools (symlinks)
+- data/tools.d/ — system CLI tools (see toolbox.md for full list)
+- data/tools/ — user-installed CLI tools
 - data/config/ — user configuration (read-only for you)
 - data/skills/ — skill definitions
-
-### On startup
-At the start of each session, you wake up fresh. Read your memory files to restore context.
-If you notice new tools in tools.d/ you haven't seen before, explore them with --help.
 
 ## User Preferences
 - (add your preferences here)
@@ -182,15 +185,72 @@ If you notice new tools in tools.d/ you haven't seen before, explore them with -
 }
 
 // Bootstrap creates default memory files if they don't exist.
-func Bootstrap(memoriesDir string) {
-	os.MkdirAll(memoriesDir, 0o755)
+func Bootstrap(contextDir string) {
+	os.MkdirAll(contextDir, 0o755)
 	for name, content := range DefaultFiles {
-		path := filepath.Join(memoriesDir, name)
+		path := filepath.Join(contextDir, name)
 		data, err := os.ReadFile(path)
 		if err != nil || len(strings.TrimSpace(string(data))) == 0 {
 			os.WriteFile(path, []byte(content), 0o644)
 		}
 	}
-	// Always overwrite memory-system.md (non-editable system file).
-	os.WriteFile(filepath.Join(memoriesDir, "memory-system.md"), []byte(memorySystemContent), 0o644)
+	// Remove legacy memory-system.md (now merged into toolbox.md).
+	os.Remove(filepath.Join(contextDir, "memory-system.md"))
+}
+
+// GenerateToolbox scans tools.d/ and tools/ directories and writes a
+// toolbox.md to contextDir listing every available CLI tool.
+// Regenerated at every boot so it's always accurate.
+func GenerateToolbox(contextDir, dataDir string) {
+	var sb strings.Builder
+	sb.WriteString("# Toolbox\n\n")
+	sb.WriteString("All CLI tools available to you. Run via Bash tool.\n\n")
+
+	// Scan system tools (tools.d/).
+	systemTools := scanTools(filepath.Join(dataDir, "tools.d"))
+	if len(systemTools) > 0 {
+		sb.WriteString("## System Tools (tools.d/)\n\n")
+		for _, t := range systemTools {
+			sb.WriteString(fmt.Sprintf("- `%s` — run `%s --help` for usage\n", t, t))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Scan user tools (tools/).
+	userTools := scanTools(filepath.Join(dataDir, "tools"))
+	if len(userTools) > 0 {
+		sb.WriteString("## User Tools (tools/)\n\n")
+		for _, t := range userTools {
+			sb.WriteString(fmt.Sprintf("- `%s` — run `tools/%s --help` for usage\n", t, t))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Append memory tool documentation (always present).
+	sb.WriteString(memorySystemContent)
+
+	os.WriteFile(filepath.Join(contextDir, "toolbox.md"), []byte(sb.String()), 0o644)
+}
+
+// scanTools returns sorted unique tool names from a directory,
+// excluding the multi-call binary (recall-tools).
+func scanTools(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Skip the multi-call binary — users call recall/remember/forget directly.
+		if name == "recall-tools" {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

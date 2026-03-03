@@ -70,7 +70,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		args = append(args, "--max-turns", fmt.Sprintf("%d", params.MaxTurns))
 	}
 
-	// Append system prompts (memories, reaction instructions, etc.)
+	// Append system prompts (context files, reaction instructions, etc.)
 	for _, sp := range params.SystemPrompts {
 		args = append(args, "--append-system-prompt", sp)
 	}
@@ -93,13 +93,15 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	}
 
 	// Set HOME to dataDir for Claude's config resolution.
+	// Also set ALF_DATA_DIR so memory tools find the correct socket path
+	// even if Claude Code or Bash overrides HOME.
 	env := make([]string, 0, len(os.Environ()))
 	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "HOME=") {
+		if !strings.HasPrefix(e, "HOME=") && !strings.HasPrefix(e, "ALF_DATA_DIR=") {
 			env = append(env, e)
 		}
 	}
-	cmd.Env = append(env, "HOME="+dataDir)
+	cmd.Env = append(env, "HOME="+dataDir, "ALF_DATA_DIR="+dataDir)
 
 	log.Printf("provider: invoke starting (resume=%q, model=%s)", params.ResumeID, model)
 

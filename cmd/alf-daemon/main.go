@@ -74,7 +74,7 @@ func main() {
 		log.Fatal("claude CLI not found in PATH")
 	}
 
-	// Data directory for logs, sessions, memories, etc.
+	// Data directory for logs, sessions, context, etc.
 	dataDir := "/home/node/data"
 	if d := os.Getenv("ALF_DATA_DIR"); d != "" {
 		dataDir = d
@@ -127,7 +127,7 @@ func main() {
 	os.MkdirAll(configDir, 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
-	for _, sub := range []string{"config", "tools", "skills", "memories"} {
+	for _, sub := range []string{"config", "tools", "skills", "context"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
 
@@ -157,11 +157,14 @@ func main() {
 	}
 
 	// Bootstrap default memory files (soul.md, mood.md, index.md).
-	memoriesDir := filepath.Join(dataDir, "memories")
-	memory.Bootstrap(memoriesDir)
+	contextDir := filepath.Join(dataDir, "context")
+	memory.Bootstrap(contextDir)
+
+	// Generate toolbox.md — explicit list of all available CLI tools.
+	memory.GenerateToolbox(contextDir, dataDir)
 
 	// Generate daily mood (overwrites mood.md if date changed).
-	mood.GenerateDaily(memoriesDir)
+	mood.GenerateDaily(contextDir)
 
 	// Session store for Claude --resume support.
 	sessionTimeout := time.Duration(cfg.SessionTimeout) * time.Minute
@@ -229,22 +232,24 @@ func main() {
 		if err != nil {
 			log.Printf("memstore: embedder disabled: %v", err)
 		} else {
-			go func() {
-				if err := embedder.Start(); err != nil {
-					log.Printf("memstore: embedder start failed: %v", err)
-				}
-			}()
+			// Start synchronously — wait for model load before proceeding.
+			// This avoids a race where Search falls back to FTS5 because
+			// the embedder isn't ready yet.
+			if err := embedder.Start(); err != nil {
+				log.Printf("memstore: embedder start failed: %v", err)
+			}
 
-			memDB, err = memstore.New(filepath.Join(dataDir, "memory.db"), embedder)
+			memDB, err = memstore.New(filepath.Join(contextDir, "memory.db"), embedder)
 			if err != nil {
 				log.Printf("warning: memory store init failed: %v", err)
 			} else {
 				defer memDB.Close()
-				sockPath := filepath.Join(dataDir, "memstore.sock")
+				sockPath := filepath.Join(contextDir, "memstore.sock")
 				go memDB.ServeUnix(sockPath)
+				log.Printf("memstore: ready (db=%s, socket=%s)", filepath.Join(contextDir, "memory.db"), sockPath)
 
 				// Periodic memory extraction (every 3h).
-				extractor := memstore.NewExtractor(memDB, dataDir, 3*time.Hour, func(cmd *exec.Cmd) {
+				extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, func(cmd *exec.Cmd) {
 					cmd.SysProcAttr = &syscall.SysProcAttr{
 						Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
 					}
@@ -269,41 +274,14 @@ func main() {
 	// Provider: spawn-per-call Claude CLI for responses.
 	cliProvider := provider.NewCLIProvider(dataDir, 5*time.Minute, claudeCred)
 
-	// Classifier: persistent Claude CLI process for fast routing.
+	// Router model for message classification.
 	routerModel := router.ResolveModel(tierStore.Current().RouterModel)
 	if routerModel == "" {
 		routerModel = router.ResolveModel("haiku")
 	}
-	classifier := provider.NewCLIClassifier(provider.ClassifierConfig{
-		Model:        routerModel,
-		SystemPrompt: router.BuildSystemPrompt(tierStore.Current(), dataDir, configDir),
-		DataDir:      dataDir,
-		Credential:   claudeCred,
-		IdleTimeout:  sessionTimeout,
-	})
-	// Start classifier in background (may take a few seconds for initial prompt).
-	go func() {
-		if err := classifier.Start(); err != nil {
-			log.Printf("classifier: failed to start persistent process: %v (falling back to spawn-per-call)", err)
-		}
-	}()
 
-	// classifyMessage uses the persistent classifier if ready, otherwise falls back
-	// to spawn-per-call classification.
+	// classifyMessage spawns a Claude CLI process per classification.
 	classifyMessage := func(message string, tiers *cc.TiersConfig) router.Result {
-		if classifier.IsReady() {
-			start := time.Now()
-			cr, err := classifier.Classify(context.Background(), message)
-			if err != nil {
-				log.Printf("classifier: error: %v, falling back to spawn-per-call", err)
-			} else {
-				log.Printf("classifier: classify took %dms", time.Since(start).Milliseconds())
-				result := router.InterpretRaw(cr.Response, tiers, message)
-				return result
-			}
-		}
-		// Fallback: build full prompt and spawn a process.
-		log.Printf("classifier: using spawn-per-call fallback")
 		prompt := router.BuildClassifyPrompt(router.ClassifyInput{
 			Message:   message,
 			Tiers:     tiers,
@@ -315,11 +293,13 @@ func main() {
 			MaxTurns: 2,
 			DataDir:  dataDir,
 		}
+		start := time.Now()
 		result, err := cliProvider.Invoke(context.Background(), prompt, params, nil)
 		if err != nil {
-			log.Printf("classifier fallback: error: %v", err)
+			log.Printf("router: classify error: %v", err)
 			return router.FallbackResult(tiers)
 		}
+		log.Printf("router: classify took %dms", time.Since(start).Milliseconds())
 		return router.InterpretRaw(result.Text, tiers, message)
 	}
 
@@ -333,7 +313,10 @@ func main() {
 			React:    rr.React,
 		}
 	}
-	chatService := cc.NewChatService(dataDir, configDir, memoriesDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
+	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
+	if memDB != nil {
+		chatService.Recaller = &memStoreRecaller{store: memDB}
+	}
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
@@ -401,17 +384,11 @@ func main() {
 				}
 			case cc.ReloadTiers:
 				log.Println("tiers reloaded")
-				// Hot-reload classifier with updated tiers.
 				newModel := router.ResolveModel(tierStore.Current().RouterModel)
 				if newModel == "" {
 					newModel = router.ResolveModel("haiku")
 				}
 				routerModel = newModel
-				newPrompt := router.BuildSystemPrompt(tierStore.Current(), dataDir, configDir)
-				go func() {
-					classifier.UpdateSystemPrompt(newPrompt)
-					classifier.UpdateModel(routerModel)
-				}()
 				if git != nil {
 					git.Commit("tiers updated via CC")
 				}
@@ -456,7 +433,7 @@ func main() {
 				}
 				emoji := mr.NewReaction[0].Emoji
 				log.Printf("← reaction %s on msg %d", emoji, mr.MessageID)
-				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, memoriesDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider)
+				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, contextDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider)
 				continue
 			}
 
@@ -747,6 +724,13 @@ func main() {
 			// Build a short version for the router (user text + brief quote hint, no full quoted text).
 			routerMsg := buildRouterMessage(u.Message)
 
+			// Pre-route memory recall: check long-term store BEFORE routing
+			// so instant-tier responses also have personal context.
+			var preRecallBlock string
+			if memDB != nil {
+				preRecallBlock = autoRecall(memDB, u.Message.Text)
+			}
+
 			// Route message to appropriate tier.
 			var tp tierParams
 			var routeResult router.Result
@@ -781,6 +765,16 @@ func main() {
 			if !hasMedia {
 				routingAnim.Stop()
 			}
+			// If memories were recalled, override instant responses — the user
+			// is asking about something personal that needs memory context.
+			if preRecallBlock != "" && routeResult.Response != "" && routeResult.Tier == "" {
+				log.Printf("→ memory override: instant response upgraded to tier (recalled memories found)")
+				fallback := tierStore.Current().DefaultFallback
+				if fallback == "" {
+					fallback = "haiku_r"
+				}
+				routeResult = router.Result{Tier: fallback, Reason: "memory-override: instant→" + fallback}
+			}
 			if routeResult.Response != "" && routeResult.Tier == "" {
 				log.Printf("→ router direct response")
 				// Delete routing status message.
@@ -794,7 +788,7 @@ func main() {
 				})
 				chatSessions.TouchContext(chatID, "router")
 				// React to the user's message before sending the reply (more natural).
-				maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, routeResult.React, memoriesDir)
+				maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, routeResult.React, contextDir)
 				if mid, err := tg.SendMessageReturnID(chatID, routeResult.Response); err == nil && mid != 0 {
 					alfMsgIDs.Add(mid)
 					log.Printf("tracking alf msg %d (buffer=%d)", mid, alfMsgIDs.Size())
@@ -849,13 +843,17 @@ func main() {
 				}
 			}
 
-			// Build system prompts (memories + reaction instruction).
-			sysPrompts := memory.CollectPrompts(memoriesDir)
+			// Build system prompts (context files + reaction instruction).
+			sysPrompts := memory.CollectPrompts(contextDir)
 			var sysPromptTexts []string
 			for i := 0; i < len(sysPrompts)-1; i += 2 {
 				if sysPrompts[i] == "--append-system-prompt" {
 					sysPromptTexts = append(sysPromptTexts, sysPrompts[i+1])
 				}
+			}
+			// Inject pre-recalled memories (computed before routing).
+			if preRecallBlock != "" {
+				sysPromptTexts = append(sysPromptTexts, preRecallBlock)
 			}
 			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
 
@@ -863,6 +861,7 @@ func main() {
 				Model:         tp.Model,
 				Tools:         tp.Tools,
 				Effort:        tp.Effort,
+				MaxTurns:      tp.MaxTurns,
 				SystemPrompts: sysPromptTexts,
 				ResumeID:      resumeID,
 				DataDir:       dataDir,
@@ -925,16 +924,6 @@ func main() {
 				}()
 			}
 
-			// Inject response context into classifier for conversation tracking.
-			if classifier.IsReady() {
-				access := router.TierAccess(routeResult.Tier, tierStore.Current())
-				summary := result.Text
-				if len(summary) > 120 {
-					summary = summary[:120]
-				}
-				go classifier.InjectContext(routeResult.Tier, access, summary)
-			}
-
 			// Extract inline reaction suggestion from Claude's response.
 			suggestedEmoji, cleanText := extractReaction(result.Text)
 			reply := cleanText
@@ -961,7 +950,7 @@ func main() {
 			})
 
 			// React to the user's message before sending the reply (more natural).
-			maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, suggestedEmoji, memoriesDir)
+			maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, suggestedEmoji, contextDir)
 
 			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {
 				alfMsgIDs.Add(msgID)
@@ -985,9 +974,10 @@ IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
-	Model  string   // full model name, e.g. "claude-sonnet-4-5"
-	Tools  []string // nil = omit flag
-	Effort string   // "" = omit flag
+	Model    string   // full model name, e.g. "claude-sonnet-4-5"
+	Tools    []string // nil = omit flag
+	Effort   string   // "" = omit flag
+	MaxTurns int      // 0 = omit flag (use Claude default)
 }
 
 func readSecret(envVar string) string {
@@ -1249,7 +1239,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 <b>Getting started:</b>
 1. Just send me a message — I'll respond naturally
 2. Use the <b>Control Center</b> to customize my personality, tiers, and tools → /login
-3. Edit <b>memories/index.md</b> via the dashboard to teach me about your projects, preferences, and context
+3. Edit <b>context/index.md</b> via the dashboard to teach me about your projects, preferences, and context
 
 <b>Good to know:</b>
 • I react to your emoji — positive reactions make me bolder, negative ones make me more careful
@@ -1379,9 +1369,10 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			return tierParams{
-				Model:  router.ResolveModel(t.Model),
-				Tools:  t.Tools,
-				Effort: t.Effort,
+				Model:    router.ResolveModel(t.Model),
+				Tools:    t.Tools,
+				Effort:   t.Effort,
+				MaxTurns: t.MaxTurns,
 			}
 		}
 	}
@@ -1603,12 +1594,12 @@ func (da *dotAnimator) Stop() {
 
 // maybeSpontaneousReact validates an emoji (with fallback), applies mood-gate probability,
 // and sends the reaction. Runs synchronously so the reaction lands before the reply.
-func maybeSpontaneousReact(tg *tgclient.Client, chatID, msgID int64, emoji, memoriesDir string) {
+func maybeSpontaneousReact(tg *tgclient.Client, chatID, msgID int64, emoji, contextDir string) {
 	emoji = mood.ValidateOrFallback(emoji)
 	if emoji == "" {
 		return
 	}
-	state := mood.GetCurrentState(memoriesDir)
+	state := mood.GetCurrentState(contextDir)
 	if !mood.ShouldReact(state) {
 		log.Printf("reaction %s suggested but skipped (state=%s)", emoji, state)
 		return
@@ -1683,10 +1674,10 @@ func (r *ringBuffer) Size() int {
 }
 
 // handleReaction processes an emoji reaction on an Alf message.
-func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, memoriesDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider) {
+func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, contextDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider) {
 	// Log the reaction and update live feedback.
 	mood.LogReaction(dataDir, emoji, messageID)
-	mood.UpdateLiveFeedback(memoriesDir, dataDir)
+	mood.UpdateLiveFeedback(contextDir, dataDir)
 
 	score, state := mood.GetTodayScore(dataDir)
 	log.Printf("reaction scored: emoji=%s score=%d state=%s", emoji, score, state)
@@ -1785,5 +1776,61 @@ func parseAllowedChatIDs(s string) map[int64]bool {
 		}
 	}
 	return result
+}
+
+// autoRecall searches the memory store for relevant context and returns
+// a formatted system prompt block. Returns "" if nothing relevant.
+func autoRecall(store *memstore.Store, message string) string {
+	if len(message) < 5 {
+		return ""
+	}
+	q := message
+	if len(q) > 60 {
+		q = q[:60] + "..."
+	}
+	results, err := store.Search(message, 3)
+	if err != nil {
+		log.Printf("auto-recall: search error for %q: %v", q, err)
+		return ""
+	}
+	if len(results) == 0 {
+		log.Printf("auto-recall: no results for %q", q)
+		return ""
+	}
+	var sb strings.Builder
+	filtered := 0
+	for _, r := range results {
+		if r.Distance >= 1.2 {
+			filtered++
+			continue
+		}
+		if sb.Len() == 0 {
+			sb.WriteString("=== [auto-recall] ===\nRelevant memories about the user (auto-retrieved):\n")
+		}
+		sb.WriteString(fmt.Sprintf("- [%s] %s\n", r.Type, r.Text))
+	}
+	if sb.Len() > 0 {
+		log.Printf("auto-recall: injected %d memories for %q (filtered %d by distance)", strings.Count(sb.String(), "\n- "), q, filtered)
+	} else {
+		log.Printf("auto-recall: %d results for %q but all filtered by distance (>=0.8)", len(results), q)
+	}
+	return sb.String()
+}
+
+// memStoreRecaller adapts memstore.Store to the cc.MemoryRecaller interface.
+type memStoreRecaller struct {
+	store *memstore.Store
+}
+
+func (r *memStoreRecaller) Search(query string, limit int) ([]cc.MemoryResult, error) {
+	results, err := r.store.Search(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]cc.MemoryResult, len(results))
+	for i, m := range results {
+		out[i] = cc.MemoryResult{Text: m.Text, Type: m.Type, Distance: m.Distance}
+	}
+	return out, nil
 }
 

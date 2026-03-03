@@ -38,20 +38,33 @@ type ResolveModelFunc func(short string) string
 // with Telegram IDs (always positive for users/groups).
 const apiChatID int64 = -1
 
+// MemoryRecaller searches long-term memory by semantic similarity.
+type MemoryRecaller interface {
+	Search(query string, limit int) ([]MemoryResult, error)
+}
+
+// MemoryResult is a single memory search hit.
+type MemoryResult struct {
+	Text     string
+	Type     string
+	Distance float64
+}
+
 // ChatService encapsulates the core chat logic: routing, Claude invocation, media handling.
 type ChatService struct {
 	DataDir      string
 	ConfigDir    string
-	MemoriesDir  string
+	ContextDir   string
 	TierStore    TierStore
 	Sessions     *chatsession.Store
 	EventLog     *eventlog.Logger
 	ChatStore    *ChatStore
-	Transcriber  *voice.Transcriber // may be nil
-	Classify     ClassifyFunc       // injected router
-	ResolveModel ResolveModelFunc   // injected model resolver
-	Provider     provider.Provider  // injected Claude provider
-	mu           sync.Mutex         // serialize Claude calls (single user v1)
+	Transcriber  *voice.Transcriber  // may be nil
+	Classify     ClassifyFunc        // injected router
+	ResolveModel ResolveModelFunc    // injected model resolver
+	Provider     provider.Provider   // injected Claude provider
+	Recaller     MemoryRecaller      // may be nil — auto-injects relevant memories
+	mu           sync.Mutex          // serialize Claude calls (single user v1)
 
 	// Upload registry: upload_id → UploadEntry
 	uploads   map[string]*UploadEntry
@@ -121,11 +134,11 @@ const reactionSystemPromptTmpl = `You may optionally suggest a single emoji reac
 IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
 
 // NewChatService creates a new ChatService.
-func NewChatService(dataDir, configDir, memoriesDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatStore *ChatStore, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
+func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatStore *ChatStore, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
 	cs := &ChatService{
 		DataDir:      dataDir,
 		ConfigDir:    configDir,
-		MemoriesDir:  memoriesDir,
+		ContextDir:  contextDir,
 		TierStore:    tierStore,
 		Sessions:     sessions,
 		EventLog:     eventLog,
@@ -250,13 +263,17 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	})
 
 	// Build system prompts.
-	systemPrompts := memory.CollectPrompts(cs.MemoriesDir)
+	systemPrompts := memory.CollectPrompts(cs.ContextDir)
 	// Convert --append-system-prompt flags to flat strings.
 	var sysPromptTexts []string
 	for i := 0; i < len(systemPrompts)-1; i += 2 {
 		if systemPrompts[i] == "--append-system-prompt" {
 			sysPromptTexts = append(sysPromptTexts, systemPrompts[i+1])
 		}
+	}
+	// Auto-inject relevant memories from long-term store.
+	if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {
+		sysPromptTexts = append(sysPromptTexts, recallBlock)
 	}
 	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
 
@@ -310,7 +327,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	}
 
 	// Maybe spontaneous react via mood system.
-	state := mood.GetCurrentState(cs.MemoriesDir)
+	state := mood.GetCurrentState(cs.ContextDir)
 	if mood.ShouldReact(state) {
 		spontaneous := mood.ChooseSpontaneous(state)
 		if spontaneous != "" {
@@ -362,7 +379,7 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 	}
 
 	mood.LogReaction(cs.DataDir, emoji, 0)
-	mood.UpdateLiveFeedback(cs.MemoriesDir, cs.DataDir)
+	mood.UpdateLiveFeedback(cs.ContextDir, cs.DataDir)
 
 	cs.ChatStore.AddReaction(req.MsgID, Reaction{Emoji: emoji, From: "user"})
 
@@ -712,4 +729,45 @@ func extFromMimeMap(mimeType, fileName string) string {
 		return ext
 	}
 	return ""
+}
+
+// recallMemories searches long-term memory for relevant context.
+// Returns a formatted system prompt block, or "" if nothing relevant.
+const recallDistanceThreshold = 1.2
+const recallLimit = 3
+
+func recallMemories(recaller MemoryRecaller, message string) string {
+	if recaller == nil || len(message) < 5 {
+		return ""
+	}
+	q := message
+	if len(q) > 60 {
+		q = q[:60] + "..."
+	}
+	results, err := recaller.Search(message, recallLimit)
+	if err != nil {
+		log.Printf("[chat-api] recall search error for %q: %v", q, err)
+		return ""
+	}
+	if len(results) == 0 {
+		log.Printf("[chat-api] recall: no results for %q", q)
+		return ""
+	}
+	var relevant []MemoryResult
+	for _, r := range results {
+		if r.Distance < recallDistanceThreshold {
+			relevant = append(relevant, r)
+		}
+	}
+	if len(relevant) == 0 {
+		log.Printf("[chat-api] recall: %d results for %q but all filtered (dist>=%.1f)", len(results), q, recallDistanceThreshold)
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("=== [auto-recall] ===\nRelevant memories about the user (auto-retrieved):\n")
+	for _, r := range relevant {
+		sb.WriteString(fmt.Sprintf("- [%s] %s\n", r.Type, r.Text))
+	}
+	log.Printf("[chat-api] recall: injected %d memories for %q", len(relevant), q)
+	return sb.String()
 }

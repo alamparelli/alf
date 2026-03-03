@@ -132,9 +132,7 @@ EOF
 chmod +x /path/to/alf/data/tools/my-tool
 ```
 
-You can also upload tools via the Control Center workspace UI under `tools/`.
-
-User tools are auto-discovered at boot and listed in Claude's toolbox. Claude runs them via the Bash tool. They execute as the `claude` user (uid 1001) — they can read config but not write it.
+User tools are auto-discovered at boot and listed in Claude's toolbox. Claude runs them via the Bash tool.
 
 ### System tools (image rebuild)
 

@@ -2,6 +2,7 @@ package media
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,12 +10,17 @@ import (
 	"strings"
 )
 
+const (
+	thumbWidth  = 320 // px per thumbnail — smaller = more frames fit
+	thumbHeight = 240 // px per thumbnail — 4:3 aspect ratio
+)
+
 // ExtractFrames extracts evenly-spaced JPEG frames from a video or GIF,
-// then concatenates them into a single contact sheet image.
+// then concatenates them into a single contact sheet with timestamp overlays.
 // Returns a single-element slice with the contact sheet path. Caller cleans up.
 func ExtractFrames(videoPath string, maxFrames int) ([]string, error) {
 	if maxFrames <= 0 {
-		maxFrames = 8
+		maxFrames = 12
 	}
 
 	duration, err := probeDuration(videoPath)
@@ -22,15 +28,8 @@ func ExtractFrames(videoPath string, maxFrames int) ([]string, error) {
 		return extractSingleFrame(videoPath)
 	}
 
-	// Adjust frame count for short videos.
-	switch {
-	case duration < 1:
-		maxFrames = 1
-	case duration < 3:
-		maxFrames = min(maxFrames, 2)
-	case duration < 5:
-		maxFrames = min(maxFrames, 4)
-	}
+	// Scale frame count to duration for better coverage.
+	maxFrames = adaptFrameCount(duration, maxFrames)
 
 	if maxFrames == 1 {
 		return extractSingleFrame(videoPath)
@@ -53,9 +52,9 @@ func ExtractFrames(videoPath string, maxFrames int) ([]string, error) {
 
 	args := []string{
 		"-i", videoPath,
-		"-vf", fmt.Sprintf("select='%s',scale='min(1280,iw)':-1", selectFilter),
+		"-vf", fmt.Sprintf("select='%s',scale='min(%d,iw)':-1", selectFilter, thumbWidth),
 		"-vsync", "vfr",
-		"-q:v", "2",
+		"-q:v", "3",
 		"-frames:v", strconv.Itoa(maxFrames),
 		outPattern,
 	}
@@ -70,8 +69,8 @@ func ExtractFrames(videoPath string, maxFrames int) ([]string, error) {
 		return nil, err
 	}
 
-	// Concatenate frames into a single contact sheet.
-	sheet, err := buildContactSheet(paths, duration)
+	// Concatenate frames into a single contact sheet with timestamps.
+	sheet, err := buildContactSheet(paths, timestamps)
 	if err != nil {
 		// Fallback: return individual frames.
 		for _, p := range paths {
@@ -88,41 +87,71 @@ func ExtractFrames(videoPath string, maxFrames int) ([]string, error) {
 	return []string{sheet}, nil
 }
 
-// buildContactSheet concatenates frame images into a single grid image using ffmpeg.
-// Layout: 2 columns for ≤4 frames, 3 columns for 5-9, 4 columns for 10+.
-func buildContactSheet(framePaths []string, duration float64) (string, error) {
+// adaptFrameCount adjusts the number of frames based on content duration.
+func adaptFrameCount(duration float64, maxFrames int) int {
+	switch {
+	case duration < 0.5:
+		return 1
+	case duration < 2:
+		return min(maxFrames, 4)
+	case duration < 5:
+		return min(maxFrames, 8)
+	case duration < 15:
+		return min(maxFrames, 12)
+	case duration < 60:
+		return min(maxFrames, 16)
+	default:
+		// Long videos: ~1 frame per 5 seconds, capped at maxFrames.
+		n := int(math.Ceil(duration / 5))
+		return min(n, maxFrames)
+	}
+}
+
+// buildContactSheet concatenates frame images into a grid with timestamp overlays.
+// Layout: 4 columns (standard), 3 for ≤6 frames, 2 for ≤4.
+func buildContactSheet(framePaths []string, timestamps []float64) (string, error) {
 	n := len(framePaths)
 	if n <= 1 {
 		return framePaths[0], nil
 	}
 
 	// Determine grid columns.
-	cols := 2
+	cols := 4
 	switch {
-	case n >= 10:
-		cols = 4
-	case n >= 5:
+	case n <= 4:
+		cols = 2
+	case n <= 6:
 		cols = 3
 	}
 	rows := (n + cols - 1) / cols
 
-	// Build ffmpeg input args and xstack layout.
+	// Build ffmpeg input args.
 	var args []string
 	for _, p := range framePaths {
 		args = append(args, "-i", p)
 	}
 
-	// Pad to fill the grid if needed (use last frame as filler).
+	// Pad to fill the grid (use last frame as filler).
 	total := rows * cols
 	for i := n; i < total; i++ {
 		args = append(args, "-i", framePaths[n-1])
 	}
 
-	// Use xstack filter for grid layout.
-	// First scale all inputs to the same size, then tile them.
+	// Build filter: scale + timestamp overlay + xstack.
 	var filterParts []string
 	for i := 0; i < total; i++ {
-		filterParts = append(filterParts, fmt.Sprintf("[%d:v]scale=640:-1:force_original_aspect_ratio=decrease,pad=640:ih:(ow-iw)/2:0[v%d]", i, i))
+		ts := ""
+		if i < len(timestamps) {
+			ts = formatTimestamp(timestamps[i])
+		}
+		// Scale to uniform size, overlay timestamp in top-left corner.
+		// Use pad with fixed height (240px for 320px width at 4:3) so xstack gets uniform tiles.
+		scale := fmt.Sprintf("[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2", i, thumbWidth, thumbHeight, thumbWidth, thumbHeight)
+		if ts != "" {
+			// White text with dark background box for readability.
+			scale += fmt.Sprintf(",drawtext=text='%s':fontsize=14:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=3:x=4:y=4", ts)
+		}
+		filterParts = append(filterParts, scale+fmt.Sprintf("[v%d]", i))
 	}
 
 	// Build xstack layout string.
@@ -132,7 +161,7 @@ func buildContactSheet(framePaths []string, duration float64) (string, error) {
 		inputs = append(inputs, fmt.Sprintf("[v%d]", i))
 		col := i % cols
 		row := i / cols
-		layout = append(layout, fmt.Sprintf("%d*w0|%d*h0", col, row))
+		layout = append(layout, fmt.Sprintf("%d*w0_%d*h0", col, row))
 	}
 
 	filter := strings.Join(filterParts, ";") + ";" +
@@ -143,12 +172,13 @@ func buildContactSheet(framePaths []string, duration float64) (string, error) {
 	args = append(args,
 		"-filter_complex", filter,
 		"-map", "[out]",
-		"-q:v", "3",
+		"-q:v", "4",
 		"-y", outPath,
 	)
 
 	cmd := exec.Command("ffmpeg", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		return "", fmt.Errorf("ffmpeg contact sheet failed: %w\n%s", err, string(out))
 	}
 
@@ -156,6 +186,16 @@ func buildContactSheet(framePaths []string, duration float64) (string, error) {
 		return "", fmt.Errorf("contact sheet not created")
 	}
 	return outPath, nil
+}
+
+// formatTimestamp converts seconds to a human-readable timestamp.
+func formatTimestamp(seconds float64) string {
+	if seconds < 60 {
+		return fmt.Sprintf("%.1fs", seconds)
+	}
+	m := int(seconds) / 60
+	s := seconds - float64(m*60)
+	return fmt.Sprintf("%d:%04.1f", m, s)
 }
 
 // probeDuration returns video duration in seconds using ffprobe.
@@ -178,9 +218,9 @@ func extractSingleFrame(videoPath string) ([]string, error) {
 	outPath := filepath.Join(os.TempDir(), fmt.Sprintf("alf-frame-%d-001.jpg", os.Getpid()))
 	cmd := exec.Command("ffmpeg",
 		"-i", videoPath,
-		"-vf", "scale='min(1280,iw)':-1",
+		"-vf", fmt.Sprintf("scale='min(%d,iw)':-1", thumbWidth),
 		"-frames:v", "1",
-		"-q:v", "2",
+		"-q:v", "3",
 		"-y",
 		outPath,
 	)
@@ -198,9 +238,7 @@ func extractSingleFrame(videoPath string) ([]string, error) {
 func collectFrameFiles(pattern string, maxFrames int) ([]string, error) {
 	var paths []string
 	for i := 1; i <= maxFrames; i++ {
-		p := fmt.Sprintf(strings.Replace(pattern, "%03d", "%03d", 1), i)
-		// Re-format with the actual index.
-		p = filepath.Join(os.TempDir(), fmt.Sprintf("alf-frame-%d-%03d.jpg", os.Getpid(), i))
+		p := filepath.Join(os.TempDir(), fmt.Sprintf("alf-frame-%d-%03d.jpg", os.Getpid(), i))
 		if _, err := os.Stat(p); err == nil {
 			paths = append(paths, p)
 		}
@@ -263,4 +301,3 @@ func HasAudioStream(videoPath string) bool {
 	out, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) != ""
 }
-

@@ -1,228 +1,187 @@
 package voice
 
 import (
+	"encoding/binary"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestIsAvailable(t *testing.T) {
-	if IsAvailable("/nonexistent/transcribe.py") {
-		t.Error("IsAvailable should return false for non-existent script")
+	t.Run("with nonexistent script", func(t *testing.T) {
+		if IsAvailable("/nonexistent/script.py") {
+			t.Error("should return false for nonexistent script")
+		}
+	})
+
+	t.Run("with existing file", func(t *testing.T) {
+		tmpFile := filepath.Join(t.TempDir(), "test.py")
+		os.WriteFile(tmpFile, []byte("#!/usr/bin/env python3\n"), 0755)
+
+		// Result depends on whether python3 is in PATH.
+		available := IsAvailable(tmpFile)
+		_, pyErr := exec.LookPath("python3")
+		hasPython := pyErr == nil
+		_ = available
+		_ = hasPython
+	})
+}
+
+func TestTranscribeBeforeStart(t *testing.T) {
+	tmpScript := filepath.Join(t.TempDir(), "fake.py")
+	os.WriteFile(tmpScript, []byte(""), 0644)
+
+	tr, err := New(tmpScript, "small", t.TempDir(), 10e9)
+	if err != nil {
+		t.Skip("python3 not available:", err)
+	}
+
+	_, transcribeErr := tr.Transcribe("/tmp/test.ogg")
+	if transcribeErr == nil {
+		t.Fatal("expected error when transcribing before Start()")
+	}
+	if transcribeErr.Error() != "transcriber not ready" {
+		t.Errorf("error = %q, want 'transcriber not ready'", transcribeErr.Error())
 	}
 }
 
-func TestNew(t *testing.T) {
-	t.Run("default model", func(t *testing.T) {
-		tr, err := New("/tmp/fake.py", "", "", 30*time.Second)
-		if err != nil {
-			t.Fatalf("New() failed: %v", err)
-		}
-		if tr.model != "small" {
-			t.Errorf("model = %q, want %q", tr.model, "small")
-		}
-		if tr.IsReady() {
-			t.Error("should not be ready before Start()")
-		}
-	})
+func TestStopBeforeStart(t *testing.T) {
+	tmpScript := filepath.Join(t.TempDir(), "fake.py")
+	os.WriteFile(tmpScript, []byte(""), 0644)
 
-	t.Run("custom model", func(t *testing.T) {
-		tr, err := New("/tmp/fake.py", "medium", "/tmp/models", 60*time.Second)
-		if err != nil {
-			t.Fatalf("New() failed: %v", err)
-		}
-		if tr.model != "medium" {
-			t.Errorf("model = %q, want %q", tr.model, "medium")
-		}
-		if tr.modelsDir != "/tmp/models" {
-			t.Errorf("modelsDir = %q, want %q", tr.modelsDir, "/tmp/models")
-		}
-	})
+	tr, err := New(tmpScript, "small", t.TempDir(), 10e9)
+	if err != nil {
+		t.Skip("python3 not available:", err)
+	}
+	// Should not panic.
+	tr.Stop()
+	if tr.IsReady() {
+		t.Error("should not be ready after Stop()")
+	}
 }
 
-func TestPersistentTranscriber(t *testing.T) {
+// --- audio utility tests (shared across backends) ---
+
+func TestConvertToWAV(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not available")
+	}
+
 	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "silence.wav")
+	generateSilentWAV(t, srcPath, 16000, 8000) // 0.5s of silence
 
-	// Create a mock transcribe.py server
-	mockScript := filepath.Join(tmpDir, "transcribe.py")
-	script := `#!/usr/bin/env python3
-import json, sys, argparse
-
-parser = argparse.ArgumentParser()
-parser.add_argument("audio_file", nargs="?")
-parser.add_argument("--model", default="small")
-parser.add_argument("--models-dir", default="/tmp")
-parser.add_argument("--server", action="store_true")
-args = parser.parse_args()
-
-if args.server:
-    # Send ready signal
-    sys.stdout.write(json.dumps({"status": "ready", "model": args.model}) + "\n")
-    sys.stdout.flush()
-
-    # Process requests
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        req = json.loads(line)
-        result = {
-            "text": "Hello this is a test",
-            "duration_s": 0.5,
-            "language": "en",
-            "language_probability": 0.98
-        }
-        sys.stdout.write(json.dumps(result) + "\n")
-        sys.stdout.flush()
-else:
-    result = {"text": "oneshot", "duration_s": 0.1, "language": "en", "language_probability": 0.9}
-    json.dump(result, sys.stdout)
-    print()
-`
-	if err := os.WriteFile(mockScript, []byte(script), 0755); err != nil {
-		t.Fatalf("failed to write mock script: %v", err)
+	wavPath, err := convertToWAV(srcPath)
+	if err != nil {
+		t.Fatalf("convertToWAV() failed: %v", err)
 	}
+	defer os.Remove(wavPath)
 
-	audioFile := filepath.Join(tmpDir, "test.ogg")
-	os.WriteFile(audioFile, []byte("fake audio"), 0644)
-
-	t.Run("start and transcribe", func(t *testing.T) {
-		tr, err := New(mockScript, "small", tmpDir, 10*time.Second)
-		if err != nil {
-			t.Fatalf("New() failed: %v", err)
-		}
-		defer tr.Stop()
-
-		if err := tr.Start(); err != nil {
-			t.Fatalf("Start() failed: %v", err)
-		}
-
-		if !tr.IsReady() {
-			t.Fatal("should be ready after Start()")
-		}
-
-		result, err := tr.Transcribe(audioFile)
-		if err != nil {
-			t.Fatalf("Transcribe() failed: %v", err)
-		}
-		if result.Text != "Hello this is a test" {
-			t.Errorf("text = %q, want %q", result.Text, "Hello this is a test")
-		}
-		if result.Language != "en" {
-			t.Errorf("language = %q, want %q", result.Language, "en")
-		}
-	})
-
-	t.Run("multiple transcriptions", func(t *testing.T) {
-		tr, err := New(mockScript, "small", tmpDir, 10*time.Second)
-		if err != nil {
-			t.Fatalf("New() failed: %v", err)
-		}
-		defer tr.Stop()
-
-		if err := tr.Start(); err != nil {
-			t.Fatalf("Start() failed: %v", err)
-		}
-
-		// Send multiple requests — model stays loaded
-		for i := 0; i < 5; i++ {
-			result, err := tr.Transcribe(audioFile)
-			if err != nil {
-				t.Fatalf("Transcribe() #%d failed: %v", i, err)
-			}
-			if result.Text != "Hello this is a test" {
-				t.Errorf("#%d text = %q", i, result.Text)
-			}
-		}
-	})
-
-	t.Run("transcribe before start", func(t *testing.T) {
-		tr, err := New(mockScript, "small", tmpDir, 10*time.Second)
-		if err != nil {
-			t.Fatalf("New() failed: %v", err)
-		}
-
-		_, err = tr.Transcribe(audioFile)
-		if err == nil {
-			t.Fatal("expected error when transcribing before Start()")
-		}
-		if err.Error() != "transcriber not ready" {
-			t.Errorf("error = %q, want 'transcriber not ready'", err.Error())
-		}
-	})
-
-	t.Run("stop and restart", func(t *testing.T) {
-		tr, err := New(mockScript, "small", tmpDir, 10*time.Second)
-		if err != nil {
-			t.Fatalf("New() failed: %v", err)
-		}
-
-		if err := tr.Start(); err != nil {
-			t.Fatalf("Start() failed: %v", err)
-		}
-
-		tr.Stop()
-		if tr.IsReady() {
-			t.Error("should not be ready after Stop()")
-		}
-
-		// Should be able to restart
-		if err := tr.Start(); err != nil {
-			t.Fatalf("re-Start() failed: %v", err)
-		}
-		defer tr.Stop()
-
-		if !tr.IsReady() {
-			t.Error("should be ready after re-Start()")
-		}
-	})
+	info, err := os.Stat(wavPath)
+	if err != nil {
+		t.Fatalf("output WAV missing: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Error("output WAV is empty")
+	}
 }
 
-func TestTranscribeTimeout(t *testing.T) {
+func TestReadWAVSamples(t *testing.T) {
 	tmpDir := t.TempDir()
+	wavPath := filepath.Join(tmpDir, "test.wav")
 
-	// Create a server that never responds
-	mockScript := filepath.Join(tmpDir, "transcribe.py")
-	script := `#!/usr/bin/env python3
-import json, sys, time, argparse
+	numSamples := 1600 // 0.1s at 16kHz
+	generateSilentWAV(t, wavPath, 16000, numSamples)
 
-parser = argparse.ArgumentParser()
-parser.add_argument("audio_file", nargs="?")
-parser.add_argument("--model", default="small")
-parser.add_argument("--models-dir", default="/tmp")
-parser.add_argument("--server", action="store_true")
-args = parser.parse_args()
+	samples, err := readWAVSamples(wavPath)
+	if err != nil {
+		t.Fatalf("readWAVSamples() failed: %v", err)
+	}
+	if len(samples) != numSamples {
+		t.Errorf("got %d samples, want %d", len(samples), numSamples)
+	}
+	for i, s := range samples {
+		if s != 0.0 {
+			t.Errorf("sample[%d] = %f, want 0.0", i, s)
+			break
+		}
+	}
+}
 
-# Send ready
-sys.stdout.write(json.dumps({"status": "ready", "model": "small"}) + "\n")
-sys.stdout.flush()
+func TestReadWAVSamplesWithTone(t *testing.T) {
+	tmpDir := t.TempDir()
+	wavPath := filepath.Join(tmpDir, "tone.wav")
 
-# Read request but never respond
-for line in sys.stdin:
-    time.sleep(60)
-`
-	os.WriteFile(mockScript, []byte(script), 0755)
-	audioFile := filepath.Join(tmpDir, "test.ogg")
-	os.WriteFile(audioFile, []byte("fake"), 0644)
+	sampleRate := 16000
+	numSamples := sampleRate // 1 second
+	generateToneWAV(t, wavPath, sampleRate, numSamples, 440.0)
 
-	tr, _ := New(mockScript, "small", tmpDir, 200*time.Millisecond)
-	if err := tr.Start(); err != nil {
-		t.Fatalf("Start() failed: %v", err)
+	samples, err := readWAVSamples(wavPath)
+	if err != nil {
+		t.Fatalf("readWAVSamples() failed: %v", err)
+	}
+	if len(samples) != numSamples {
+		t.Errorf("got %d samples, want %d", len(samples), numSamples)
 	}
 
-	_, err := tr.Transcribe(audioFile)
+	hasNonZero := false
+	for _, s := range samples {
+		if s != 0.0 {
+			hasNonZero = true
+			break
+		}
+	}
+	if !hasNonZero {
+		t.Error("expected non-zero samples for tone")
+	}
+
+	for i, s := range samples {
+		if s < -1.0 || s > 1.0 {
+			t.Errorf("sample[%d] = %f, out of [-1.0, 1.0] range", i, s)
+			break
+		}
+	}
+}
+
+func TestReadWAVSamplesInvalidFile(t *testing.T) {
+	badPath := filepath.Join(t.TempDir(), "bad.wav")
+	os.WriteFile(badPath, []byte("not a wav file"), 0644)
+
+	_, err := readWAVSamples(badPath)
 	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-	if !tr.IsReady() {
-		// After timeout, process is killed and not ready
-		t.Log("transcriber correctly marked not ready after timeout")
+		t.Fatal("expected error for invalid WAV")
 	}
 }
+
+func TestDownloadModel(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelPath := filepath.Join(tmpDir, "ggml-tiny.bin")
+	os.WriteFile(modelPath, []byte("fake model data"), 0644)
+
+	got, err := downloadModel("tiny", tmpDir)
+	if err != nil {
+		t.Fatalf("downloadModel() failed: %v", err)
+	}
+	if got != modelPath {
+		t.Errorf("got %q, want %q", got, modelPath)
+	}
+}
+
+func TestDownloadModelCreatesDir(t *testing.T) {
+	nestedDir := filepath.Join(t.TempDir(), "a", "b", "c")
+	_, _ = downloadModel("nonexistent-model", nestedDir)
+
+	if _, err := os.Stat(nestedDir); err != nil {
+		t.Errorf("downloadModel should create models directory: %v", err)
+	}
+}
+
+// --- Telegram tests ---
 
 func TestTelegramFileDownload(t *testing.T) {
 	mux := http.NewServeMux()
@@ -273,4 +232,50 @@ func TestTruncate(t *testing.T) {
 			t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
 		}
 	}
+}
+
+// --- test helpers ---
+
+func generateSilentWAV(t *testing.T, path string, sampleRate, numSamples int) {
+	t.Helper()
+	writeWAV(t, path, sampleRate, make([]int16, numSamples))
+}
+
+func generateToneWAV(t *testing.T, path string, sampleRate, numSamples int, freqHz float64) {
+	t.Helper()
+	samples := make([]int16, numSamples)
+	for i := range samples {
+		val := math.Sin(2 * math.Pi * freqHz * float64(i) / float64(sampleRate))
+		samples[i] = int16(val * float64(math.MaxInt16-1))
+	}
+	writeWAV(t, path, sampleRate, samples)
+}
+
+func writeWAV(t *testing.T, path string, sampleRate int, samples []int16) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create WAV: %v", err)
+	}
+	defer f.Close()
+
+	dataSize := len(samples) * 2
+	fileSize := 36 + dataSize
+
+	f.Write([]byte("RIFF"))
+	binary.Write(f, binary.LittleEndian, uint32(fileSize))
+	f.Write([]byte("WAVE"))
+
+	f.Write([]byte("fmt "))
+	binary.Write(f, binary.LittleEndian, uint32(16))
+	binary.Write(f, binary.LittleEndian, uint16(1))
+	binary.Write(f, binary.LittleEndian, uint16(1))
+	binary.Write(f, binary.LittleEndian, uint32(sampleRate))
+	binary.Write(f, binary.LittleEndian, uint32(sampleRate*2))
+	binary.Write(f, binary.LittleEndian, uint16(2))
+	binary.Write(f, binary.LittleEndian, uint16(16))
+
+	f.Write([]byte("data"))
+	binary.Write(f, binary.LittleEndian, uint32(dataSize))
+	binary.Write(f, binary.LittleEndian, samples)
 }

@@ -1,36 +1,64 @@
-# Stage 1: Build Go daemon on target platform (CGo cross-compilation breaks sqlite-vec header resolution).
-# Uses QEMU emulation when host != target — slower but reliable.
-FROM golang:1.24.13 AS builder
+# Stage 1: Build Go binaries with CGO (sqlite-vec, whisper.cpp on arm64).
+FROM golang:1.24-bookworm AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+ARG TARGETARCH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ libc6-dev libsqlite3-dev cmake make && rm -rf /var/lib/apt/lists/*
+
+# Build whisper.cpp static library (arm64 only — faster-whisper doesn't work on ARM).
+WORKDIR /whisper
+RUN if [ "${TARGETARCH}" = "arm64" ]; then \
+      git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git . \
+      && cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+         -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF \
+         -DGGML_CPU=ON -DGGML_NATIVE=OFF \
+      && cmake --build build -j$(nproc) \
+      && cmake --install build --prefix /usr/local; \
+    fi
 
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
-    && CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
+
+# Build Go binaries.
+# arm64: link whisper.cpp for native transcription.
+# amd64: no whisper.cpp needed (uses faster-whisper Python subprocess).
+RUN if [ "${TARGETARCH}" = "arm64" ]; then \
+      export CGO_CFLAGS="-I/usr/local/include" && \
+      export CGO_LDFLAGS="-L/usr/local/lib -lwhisper -lggml -lggml-base -lggml-cpu -lstdc++ -lm -lpthread" && \
+      CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon && \
+      CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video; \
+    else \
+      CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon && \
+      CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video; \
+    fi \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /telegram-tools ./cmd/signal \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /schedule-tools ./cmd/schedule-tools
 
-# Stage 2: Runtime — minimal Debian with Claude Code native binary (no Node.js).
+# Stage 2: Runtime.
 FROM debian:bookworm-slim
 
 ARG TARGETARCH
 
+# Base packages. python3-pip only on amd64 (for faster-whisper).
+# libgomp1 only on arm64 (for whisper.cpp/ggml OpenMP).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
     curl \
     git \
     trash-cli \
-    python3 \
-    python3-pip \
-    libgomp1 \
     poppler-utils \
     xz-utils \
+    && if [ "${TARGETARCH}" = "arm64" ]; then \
+         apt-get install -y --no-install-recommends libgomp1; \
+       else \
+         apt-get install -y --no-install-recommends python3-pip; \
+       fi \
     && rm -rf /var/lib/apt/lists/*
 
 # Static ffmpeg+ffprobe (~80 MB unpacked vs ~400 MB Debian packages).
@@ -39,11 +67,7 @@ RUN if [ "${TARGETARCH}" = "arm64" ]; then FFARCH="arm64"; else FFARCH="amd64"; 
        | tar xJ --strip-components=1 --wildcards -C /usr/local/bin '*/ffmpeg' '*/ffprobe' \
     && ffmpeg -version > /dev/null
 
-# faster-whisper is installed on first voice message (auto-install in transcribe.py).
-# libgomp1 is required for OpenMP parallel CPU execution in ctranslate2.
-
 # Download ONNX Runtime shared library (CPU-only, ~20 MB).
-# Embeddings run in Go via onnxruntime_go — no Python needed.
 RUN if [ "${TARGETARCH}" = "amd64" ]; then ARCH="x64"; \
     elif [ "${TARGETARCH}" = "arm64" ]; then ARCH="aarch64"; \
     else ARCH="${TARGETARCH}"; fi \
@@ -61,13 +85,7 @@ RUN mkdir -p /opt/alf/models/all-MiniLM-L6-v2 \
     && curl -fsSL -o /opt/alf/models/all-MiniLM-L6-v2/tokenizer.json \
        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
 
-# Enable OpenMP threading for ctranslate2 (faster-whisper backend).
-ENV OMP_NUM_THREADS=4
-
-# Claude Code native binary (standalone, no Node.js required).
-# Uses official installer which handles URL resolution and checksum verification.
-# Installer puts binary at ~/.local/share/claude/versions/<ver> with symlink at ~/.local/bin/claude.
-# We copy the actual binary to /usr/local/bin so it's accessible to all users.
+# Claude Code native binary.
 RUN curl -fsSL https://claude.ai/install.sh | bash \
     && cp "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
     && rm -rf /root/.local/share/claude /root/.local/bin/claude /root/.claude \
@@ -80,6 +98,8 @@ COPY --from=builder /extract-video /opt/alf/tools/extract-video
 COPY --from=builder /recall-tools /opt/alf/tools/recall-tools
 COPY --from=builder /telegram-tools /opt/alf/tools/telegram-tools
 COPY --from=builder /schedule-tools /opt/alf/tools/schedule-tools
+
+# Transcription script (used on amd64 with faster-whisper, ignored on arm64).
 COPY scripts/transcribe.py /opt/alf/transcribe.py
 
 # Create memory tool symlinks (recall, remember, forget → recall-tools).
@@ -91,17 +111,12 @@ RUN ln -s /opt/alf/tools/recall-tools /opt/alf/tools/recall \
     && ln -s /opt/alf/tools/schedule-tools /opt/alf/tools/schedule
 
 # Create users for two-user privilege model.
-# node=1000:1000 (legacy name, kept for volume compatibility), claude=1001:1000.
 RUN groupadd --gid 1000 node \
     && useradd --uid 1000 --gid node --shell /bin/bash --create-home node \
     && useradd -u 1001 -g node -s /bin/bash -M claude \
     && mkdir -p /home/claude && chown claude:node /home/claude
 
-# Two-user privilege model:
-#   Daemon runs as root — starts CC, spawns Claude subprocesses.
-#   Claude -p runs as 'claude' (uid 1001, gid node/1000).
-#   /home/node/data — root:node, group-writable (claude writes via group).
-#   /opt/alf/config — root:root, 755 (only daemon/CC can write).
+# Directory structure for volumes.
 RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
     && mkdir -p /home/node/data/tools /home/node/data/skills \
     && mkdir -p /home/node/data/.claude \

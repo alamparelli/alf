@@ -15,7 +15,7 @@
 //	}
 //
 // The caller is responsible for cleaning up the frame files.
-// Requires: ffmpeg, ffprobe. Optional: python3 + faster-whisper (for audio).
+// Requires: ffmpeg, ffprobe. Optional: whisper (faster-whisper on amd64, whisper.cpp on arm64).
 package main
 
 import (
@@ -27,6 +27,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/alamparelli/alf/internal/voice"
 )
 
 type output struct {
@@ -188,6 +191,11 @@ func collectFiles(prefix string, n int) ([]string, error) {
 // --- audio transcription ---
 
 func transcribeAudio(videoPath string) (string, string) {
+	scriptPath := envOr("ALF_TRANSCRIBE_SCRIPT", "/opt/alf/transcribe.py")
+	if !voice.IsAvailable(scriptPath) {
+		return "", ""
+	}
+
 	// Check for audio stream.
 	probe, err := exec.Command("ffprobe",
 		"-v", "quiet",
@@ -219,28 +227,24 @@ func transcribeAudio(videoPath string) (string, string) {
 		return "", ""
 	}
 
-	// Call transcribe.py one-shot mode.
-	scriptPath := envOr("ALF_TRANSCRIBE_SCRIPT", "/opt/alf/transcribe.py")
-	if _, err := os.Stat(scriptPath); err != nil {
-		return "", ""
-	}
-
 	model := envOr("WHISPER_MODEL", "small")
 	modelsDir := envOr("ALF_MODELS_DIR", filepath.Join(os.Getenv("HOME"), "data", "models"))
 
-	whisperOut, err := exec.Command("python3", scriptPath, audioPath,
-		"--model", model, "--models-dir", modelsDir,
-	).Output()
+	t, err := voice.New(scriptPath, model, modelsDir, 120*time.Second)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "voice init failed: %v\n", err)
 		return "", ""
 	}
-
-	var result struct {
-		Text     string `json:"text"`
-		Language string `json:"language"`
+	if err := t.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "voice start failed: %v\n", err)
+		return "", ""
 	}
-	if err := json.Unmarshal(whisperOut, &result); err != nil {
-		return strings.TrimSpace(string(whisperOut)), ""
+	defer t.Stop()
+
+	result, err := t.Transcribe(audioPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "transcription failed: %v\n", err)
+		return "", ""
 	}
 	return result.Text, result.Language
 }

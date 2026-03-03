@@ -192,7 +192,7 @@ func main() {
 		}
 	}
 
-	// Voice transcriber (persistent faster-whisper Python process).
+	// Voice transcriber (faster-whisper on amd64, whisper.cpp on arm64).
 	transcriptScriptPath := "/opt/alf/transcribe.py"
 	if p := os.Getenv("ALF_TRANSCRIBE_SCRIPT"); p != "" {
 		transcriptScriptPath = p
@@ -208,15 +208,14 @@ func main() {
 		if err != nil {
 			log.Printf("voice transcription disabled: %v", err)
 		} else {
-			// Start persistent process in background (model loads once).
 			go func() {
 				if err := transcriber.Start(); err != nil {
-					log.Printf("voice: failed to start whisper server: %v", err)
+					log.Printf("voice: failed to start: %v", err)
 				}
 			}()
 		}
 	} else {
-		log.Println("voice transcription disabled (transcribe.py not found)")
+		log.Println("voice transcription disabled (prerequisites not found)")
 	}
 
 	// ONNX embedding engine (Go native, no Python sidecar).

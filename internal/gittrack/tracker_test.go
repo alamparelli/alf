@@ -53,9 +53,9 @@ func TestCommit_AfterFileWrite(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// Write a tracked file inside memories/.
-	os.MkdirAll(filepath.Join(dir, "memories"), 0o755)
-	os.WriteFile(filepath.Join(dir, "memories", "soul.md"), []byte(`# Soul`), 0o644)
+	// Write a tracked file inside context/.
+	os.MkdirAll(filepath.Join(dir, "context"), 0o755)
+	os.WriteFile(filepath.Join(dir, "context", "soul.md"), []byte(`# Soul`), 0o644)
 
 	if err := tr.Commit("update config"); err != nil {
 		t.Fatalf("Commit: %v", err)
@@ -104,7 +104,7 @@ func TestGitignore_Content(t *testing.T) {
 	}
 
 	content := string(data)
-	for _, expected := range []string{"!config.d/", "!config.d/**", "!memories/", "!memories/**", "!logs/events/*.jsonl", "!.claude/", "!tools/", "!skills/"} {
+	for _, expected := range []string{"!config.d/", "!config.d/**", "!context/", "!context/**", "!logs/events/*.jsonl", "!.claude/", "!tools/", "!skills/"} {
 		if !strings.Contains(content, expected) {
 			t.Errorf(".gitignore should contain %q", expected)
 		}

@@ -19,12 +19,13 @@ type CmdSetup func(cmd *exec.Cmd)
 
 // Extractor periodically extracts facts from event logs and stores them.
 type Extractor struct {
-	store    *Store
-	dataDir  string
-	interval time.Duration
-	statePath string
-	stop     chan struct{}
-	cmdSetup CmdSetup
+	store      *Store
+	dataDir    string // root data dir (for logs, claude working dir)
+	stateDir   string // where to store state file (context dir)
+	interval   time.Duration
+	statePath  string
+	stop       chan struct{}
+	cmdSetup   CmdSetup
 }
 
 type extractorState struct {
@@ -39,15 +40,16 @@ type extractedFact struct {
 // NewExtractor creates a new periodic extraction job.
 // cmdSetup (optional) is called on the Claude subprocess before execution —
 // use it to set SysProcAttr credentials for user isolation.
-func NewExtractor(store *Store, dataDir string, interval time.Duration, cmdSetup CmdSetup) *Extractor {
+func NewExtractor(store *Store, dataDir, contextDir string, interval time.Duration, cmdSetup CmdSetup) *Extractor {
 	if interval <= 0 {
 		interval = 3 * time.Hour
 	}
 	return &Extractor{
 		store:     store,
 		dataDir:   dataDir,
+		stateDir:  contextDir,
 		interval:  interval,
-		statePath: filepath.Join(dataDir, "memory_extractor_state.json"),
+		statePath: filepath.Join(contextDir, "memory_extractor_state.json"),
 		stop:      make(chan struct{}),
 		cmdSetup:  cmdSetup,
 	}
@@ -64,7 +66,15 @@ func (e *Extractor) Stop() {
 }
 
 func (e *Extractor) loop() {
-	// Run immediately if overdue.
+	// Delay first extraction to avoid competing with classifier for memory
+	// at boot time. Both spawn Claude CLI processes — running them
+	// simultaneously can OOM on constrained hosts.
+	select {
+	case <-time.After(3 * time.Minute):
+	case <-e.stop:
+		return
+	}
+
 	state := e.loadState()
 	if time.Since(state.LastRun) >= e.interval {
 		if err := e.RunOnce(state.LastRun); err != nil {
@@ -98,8 +108,7 @@ func (e *Extractor) RunOnce(since time.Time) error {
 	}
 
 	if len(conversations) < 3 {
-		log.Printf("memstore: skipping extraction — only %d message pairs", len(conversations))
-		e.saveState()
+		log.Printf("memstore: skipping extraction — only %d message pairs (will retry next cycle)", len(conversations))
 		return nil
 	}
 
@@ -236,7 +245,8 @@ Conversations:
 	cmd := exec.CommandContext(ctx, "claude", "-p", prompt,
 		"--model", "claude-haiku-4-5",
 		"--output-format", "text",
-		"--dangerously-skip-permissions",
+		"--max-turns", "1",
+		"--allowedTools", "",
 	)
 	cmd.Dir = e.dataDir
 	if e.cmdSetup != nil {

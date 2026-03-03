@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// CmdSetup is called on exec.Cmd before Run to configure credentials, env, etc.
+type CmdSetup func(cmd *exec.Cmd)
+
 // Extractor periodically extracts facts from event logs and stores them.
 type Extractor struct {
 	store    *Store
@@ -21,6 +24,7 @@ type Extractor struct {
 	interval time.Duration
 	statePath string
 	stop     chan struct{}
+	cmdSetup CmdSetup
 }
 
 type extractorState struct {
@@ -33,7 +37,9 @@ type extractedFact struct {
 }
 
 // NewExtractor creates a new periodic extraction job.
-func NewExtractor(store *Store, dataDir string, interval time.Duration) *Extractor {
+// cmdSetup (optional) is called on the Claude subprocess before execution —
+// use it to set SysProcAttr credentials for user isolation.
+func NewExtractor(store *Store, dataDir string, interval time.Duration, cmdSetup CmdSetup) *Extractor {
 	if interval <= 0 {
 		interval = 3 * time.Hour
 	}
@@ -43,6 +49,7 @@ func NewExtractor(store *Store, dataDir string, interval time.Duration) *Extract
 		interval:  interval,
 		statePath: filepath.Join(dataDir, "memory_extractor_state.json"),
 		stop:      make(chan struct{}),
+		cmdSetup:  cmdSetup,
 	}
 }
 
@@ -232,6 +239,9 @@ Conversations:
 		"--dangerously-skip-permissions",
 	)
 	cmd.Dir = e.dataDir
+	if e.cmdSetup != nil {
+		e.cmdSetup(cmd)
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

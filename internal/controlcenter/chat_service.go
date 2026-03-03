@@ -1,25 +1,21 @@
 package controlcenter
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
+	"github.com/alamparelli/alf/internal/provider"
 	chatsession "github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/voice"
 )
@@ -54,6 +50,7 @@ type ChatService struct {
 	Transcriber  *voice.Transcriber // may be nil
 	Classify     ClassifyFunc       // injected router
 	ResolveModel ResolveModelFunc   // injected model resolver
+	Provider     provider.Provider  // injected Claude provider
 	mu           sync.Mutex         // serialize Claude calls (single user v1)
 
 	// Upload registry: upload_id → UploadEntry
@@ -86,16 +83,16 @@ type ChatDoneData struct {
 
 // UploadEntry tracks an uploaded file.
 type UploadEntry struct {
-	ID         string    `json:"upload_id"`
-	FileName   string    `json:"file_name"`
-	MimeType   string    `json:"mime_type"`
-	Size       int64     `json:"size"`
-	TempPath   string    `json:"-"`
-	MediaType  string    `json:"type"` // photo, document, video, voice
-	Transcript string    `json:"transcript,omitempty"`
-	TextContent string   `json:"text_content,omitempty"` // extracted text for PDFs
-	FramePaths []string  `json:"-"`                       // contact sheet paths for videos
-	CreatedAt  time.Time `json:"-"`
+	ID          string    `json:"upload_id"`
+	FileName    string    `json:"file_name"`
+	MimeType    string    `json:"mime_type"`
+	Size        int64     `json:"size"`
+	TempPath    string    `json:"-"`
+	MediaType   string    `json:"type"` // photo, document, video, voice
+	Transcript  string    `json:"transcript,omitempty"`
+	TextContent string    `json:"text_content,omitempty"` // extracted text for PDFs
+	FramePaths  []string  `json:"-"`                      // contact sheet paths for videos
+	CreatedAt   time.Time `json:"-"`
 }
 
 // UploadResult is returned to the client after upload.
@@ -119,8 +116,12 @@ type ReactResult struct {
 	Mirror string `json:"mirror,omitempty"`
 }
 
+// reactionSystemPromptTmpl is the reaction instruction injected into every Claude call.
+const reactionSystemPromptTmpl = `You may optionally suggest a single emoji reaction for the user's message by starting your response with [[react:EMOJI]]. Pick an emoji that shows you understood the message — not generic thumbs up. Use [[react:none]] or omit the tag if no reaction fits. The tag will be stripped before the user sees your response.
+IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
+
 // NewChatService creates a new ChatService.
-func NewChatService(dataDir, configDir, memoriesDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatStore *ChatStore, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc) *ChatService {
+func NewChatService(dataDir, configDir, memoriesDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatStore *ChatStore, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
 	cs := &ChatService{
 		DataDir:      dataDir,
 		ConfigDir:    configDir,
@@ -132,6 +133,7 @@ func NewChatService(dataDir, configDir, memoriesDir string, tierStore TierStore,
 		Transcriber:  transcriber,
 		Classify:     classify,
 		ResolveModel: resolveModel,
+		Provider:     prov,
 		uploads:      make(map[string]*UploadEntry),
 	}
 	// Start upload cleanup goroutine.
@@ -181,11 +183,9 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	var routeResult RouteResult
 
 	if req.Model != "" {
-		// Force specific model — find matching tier or use raw model.
 		tierName = req.Model
 		routeResult = RouteResult{Tier: tierName, Reason: "forced"}
 	} else if hasMedia {
-		// Media bypass router — pick lowest-priority enabled tier.
 		tiers := cs.TierStore.Current()
 		bestPriority := int(^uint(0) >> 1)
 		for _, t := range tiers.Tiers {
@@ -199,7 +199,6 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		}
 		routeResult = RouteResult{Tier: tierName, Reason: "media bypass"}
 	} else {
-		// Router classify.
 		routerMsg := req.Message
 		if req.ReplyTo != "" {
 			if orig := cs.ChatStore.Get(req.ReplyTo); orig != nil {
@@ -211,7 +210,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			}
 		}
 
-		lastTier, msgCount := cs.Sessions.Context(apiChatID) // chatID 0 for API
+		lastTier, msgCount := cs.Sessions.Context(apiChatID)
 		rr := cs.Classify(routerMsg, lastTier, msgCount)
 		routeResult = rr
 	}
@@ -250,24 +249,46 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		"source": "api",
 	})
 
-	// Invoke Claude via CLI.
+	// Build system prompts.
+	systemPrompts := memory.CollectPrompts(cs.MemoriesDir)
+	// Convert --append-system-prompt flags to flat strings.
+	var sysPromptTexts []string
+	for i := 0; i < len(systemPrompts)-1; i += 2 {
+		if systemPrompts[i] == "--append-system-prompt" {
+			sysPromptTexts = append(sysPromptTexts, systemPrompts[i+1])
+		}
+	}
+	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
+
+	// Invoke Claude via Provider.
 	resumeID := cs.Sessions.Get(apiChatID)
-	result, err := cs.askClaude(ctx, prompt, resumeID, tp, func(event, detail string) {
-		switch event {
+	params := provider.Params{
+		Model:         tp.Model,
+		Tools:         tp.Tools,
+		Effort:        tp.Effort,
+		SystemPrompts: sysPromptTexts,
+		ResumeID:      resumeID,
+		DataDir:       cs.DataDir,
+	}
+
+	var progressFn provider.OnProgress
+	progressFn = func(event provider.StreamEvent) {
+		switch event.Type {
 		case "thinking":
 			onEvent(ChatEvent{Type: "thinking", Data: struct{}{}})
 		case "tool_use":
-			onEvent(ChatEvent{Type: "tool_use", Data: map[string]string{"name": detail}})
-		case "text":
-			// text events are accumulated and sent per-delta below
+			onEvent(ChatEvent{Type: "tool_use", Data: map[string]string{"name": event.Detail}})
 		}
-	})
+	}
+
+	result, err := cs.Provider.Invoke(ctx, prompt, params, progressFn)
 
 	// Retry without resume if session not found.
 	if err != nil && resumeID != "" && strings.Contains(err.Error(), "No conversation found") {
 		log.Printf("[chat-api] session %s expired, starting fresh", resumeID)
 		cs.Sessions.Archive(apiChatID)
-		result, err = cs.askClaude(ctx, prompt, "", tp, nil)
+		params.ResumeID = ""
+		result, err = cs.Provider.Invoke(ctx, prompt, params, nil)
 	}
 
 	if err != nil {
@@ -477,207 +498,6 @@ type tierParams struct {
 	Effort string
 }
 
-// claudeResult holds parsed output from Claude CLI.
-type claudeResult struct {
-	SessionID string
-	Text      string
-	Model     string
-	CostUSD   float64
-	NumTurns  int
-}
-
-type jsonModel struct {
-	CostUSD float64 `json:"costUSD"`
-}
-
-// reactionSystemPromptTmpl is the reaction instruction injected into every Claude call.
-const reactionSystemPromptTmpl = `You may optionally suggest a single emoji reaction for the user's message by starting your response with [[react:EMOJI]]. Pick an emoji that shows you understood the message — not generic thumbs up. Use [[react:none]] or omit the tag if no reaction fits. The tag will be stripped before the user sees your response.
-IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
-
-// askClaude invokes the Claude CLI as a subprocess with stream-json output.
-func (cs *ChatService) askClaude(ctx context.Context, prompt, resumeID string, tp tierParams, onProgress func(event, detail string)) (*claudeResult, error) {
-	model := tp.Model
-	if model == "" {
-		model = "claude-haiku-4-5"
-	}
-
-	safePrompt := prompt
-	if strings.HasPrefix(prompt, "-") {
-		safePrompt = "\u200B" + prompt
-	}
-
-	args := []string{
-		"-p", safePrompt,
-		"--model", model,
-		"--output-format", "stream-json",
-		"--verbose",
-		"--dangerously-skip-permissions",
-	}
-
-	for _, tool := range tp.Tools {
-		args = append(args, "--allowedTools", tool)
-	}
-	if tp.Effort != "" {
-		args = append(args, "--effort", tp.Effort)
-	}
-	if resumeID != "" {
-		args = append(args, "--resume", resumeID)
-	}
-
-	// Inject memory files.
-	args = append(args, memory.CollectPrompts(cs.MemoriesDir)...)
-
-	// Reaction instruction.
-	args = append(args, "--append-system-prompt", fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
-
-	timeout := 5 * time.Minute
-	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(cmdCtx, "claude", args...)
-	cmd.Dir = cs.DataDir
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
-	}
-	env := make([]string, 0, len(os.Environ()))
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "HOME=") {
-			env = append(env, e)
-		}
-	}
-	cmd.Env = append(env, "HOME="+cs.DataDir)
-
-	log.Printf("[chat-api] askClaude: starting (resume=%q, model=%s)", resumeID, model)
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start claude: %w", err)
-	}
-
-	var (
-		resultText   strings.Builder
-		lastEvent    json.RawMessage
-		sentThinking bool
-	)
-
-	scanner := bufio.NewScanner(stdoutPipe)
-	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		lastEvent = make(json.RawMessage, len(line))
-		copy(lastEvent, line)
-
-		var event struct {
-			Type  string `json:"type"`
-			Event struct {
-				Delta struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"delta"`
-				ContentBlock struct {
-					Type string `json:"type"`
-					Name string `json:"name"`
-				} `json:"content_block"`
-			} `json:"event"`
-		}
-		if json.Unmarshal(line, &event) != nil {
-			continue
-		}
-
-		if onProgress != nil {
-			switch {
-			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "thinking" && !sentThinking:
-				onProgress("thinking", "")
-				sentThinking = true
-			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "tool_use":
-				onProgress("tool_use", event.Event.ContentBlock.Name)
-			case event.Type == "stream_event" && event.Event.Delta.Type == "text_delta":
-				onProgress("text", "")
-			}
-		}
-
-		if event.Type == "stream_event" && event.Event.Delta.Type == "text_delta" {
-			resultText.WriteString(event.Event.Delta.Text)
-		}
-	}
-
-	waitErr := cmd.Wait()
-	if cmdCtx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("claude timed out after 5 minutes")
-	}
-
-	if lastEvent != nil {
-		var parsed struct {
-			Type         string               `json:"type"`
-			SessionID    string               `json:"session_id"`
-			Subtype      string               `json:"subtype"`
-			Result       string               `json:"result"`
-			IsError      bool                 `json:"is_error"`
-			NumTurns     int                  `json:"num_turns"`
-			TotalCostUSD float64              `json:"total_cost_usd"`
-			ModelUsage   map[string]jsonModel `json:"modelUsage"`
-		}
-		if json.Unmarshal(lastEvent, &parsed) == nil && parsed.Type == "result" {
-			text := parsed.Result
-			if text == "" {
-				text = resultText.String()
-			}
-			if text == "" {
-				switch parsed.Subtype {
-				case "error_max_turns":
-					text = "Turn limit reached — try breaking this into smaller steps."
-				default:
-					if parsed.IsError {
-						text = "An error occurred processing your request."
-					} else {
-						text = "Done (no text output)."
-					}
-				}
-			}
-			if parsed.IsError && strings.Contains(text, "No conversation found") {
-				return nil, fmt.Errorf("claude: %s", text)
-			}
-			usedModel := "unknown"
-			for m := range parsed.ModelUsage {
-				usedModel = m
-				break
-			}
-			return &claudeResult{
-				SessionID: parsed.SessionID,
-				Text:      text,
-				Model:     usedModel,
-				CostUSD:   parsed.TotalCostUSD,
-				NumTurns:  parsed.NumTurns,
-			}, nil
-		}
-	}
-
-	accumulated := strings.TrimSpace(resultText.String())
-	if accumulated != "" {
-		return &claudeResult{Text: accumulated}, nil
-	}
-
-	errOut := strings.TrimSpace(stderr.String())
-	if waitErr != nil {
-		if errOut != "" {
-			return nil, fmt.Errorf("claude: %s", errOut)
-		}
-		return nil, fmt.Errorf("claude failed: %v", waitErr)
-	}
-
-	return nil, fmt.Errorf("claude returned empty response")
-}
-
 // extractReactionTag parses [[react:EMOJI]] from the start of text.
 func extractReactionTag(text string) (string, string) {
 	trimmed := strings.TrimLeft(text, " \n\r\t")
@@ -720,7 +540,13 @@ func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 		}
 	}
 
-	result, err := cs.askClaude(context.Background(), prompt, resumeID, tp, nil)
+	params := provider.Params{
+		Model:    tp.Model,
+		ResumeID: resumeID,
+		DataDir:  cs.DataDir,
+	}
+
+	result, err := cs.Provider.Invoke(context.Background(), prompt, params, nil)
 	if err != nil {
 		log.Printf("[chat-api] negative follow-up error: %v", err)
 		return
@@ -867,17 +693,17 @@ func (cs *ChatService) Upload(file io.Reader, fileName, mediaType string) (*Uplo
 // extFromMimeMap returns a file extension for a MIME type.
 func extFromMimeMap(mimeType, fileName string) string {
 	mimeToExt := map[string]string{
-		"image/jpeg":       ".jpg",
-		"image/png":        ".png",
-		"image/gif":        ".gif",
-		"image/webp":       ".webp",
-		"application/pdf":  ".pdf",
-		"video/mp4":        ".mp4",
-		"video/quicktime":  ".mov",
-		"video/webm":       ".webm",
-		"audio/ogg":        ".ogg",
-		"audio/mpeg":       ".mp3",
-		"audio/wav":        ".wav",
+		"image/jpeg":      ".jpg",
+		"image/png":       ".png",
+		"image/gif":       ".gif",
+		"image/webp":      ".webp",
+		"application/pdf": ".pdf",
+		"video/mp4":       ".mp4",
+		"video/quicktime": ".mov",
+		"video/webm":      ".webm",
+		"audio/ogg":       ".ogg",
+		"audio/mpeg":      ".mp3",
+		"audio/wav":       ".wav",
 	}
 	if ext, ok := mimeToExt[mimeType]; ok {
 		return ext

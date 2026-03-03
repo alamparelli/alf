@@ -1,6 +1,7 @@
 package controlcenter
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,8 +9,16 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/provider"
 	chatsession "github.com/alamparelli/alf/internal/session"
 )
+
+// mockProvider is a no-op provider for tests that don't invoke Claude.
+type mockProvider struct{}
+
+func (m *mockProvider) Invoke(_ context.Context, _ string, _ provider.Params, _ provider.OnProgress) (*provider.Result, error) {
+	return &provider.Result{Text: "mock response", Model: "mock"}, nil
+}
 
 // newTestChatService creates a ChatService with real stores backed by temp dirs.
 // No Claude CLI, router, or transcriber — tests that need those should mock them.
@@ -50,6 +59,7 @@ func newTestChatService(t *testing.T) *ChatService {
 				return short
 			}
 		},
+		&mockProvider{},
 	)
 }
 

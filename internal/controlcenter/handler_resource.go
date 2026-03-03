@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// ResourceHandler handles CRUD for a resource type (memories, tools, skills).
+// ResourceHandler handles CRUD for a resource type (context, tools, skills).
 // Routes:
 //
 //	GET  /api/{type}/        → list
@@ -22,7 +22,7 @@ type ResourceHandler struct {
 
 func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Extract resource name from path suffix.
-	// The handler is registered at e.g. "/api/memories/" so
+	// The handler is registered at e.g. "/api/context/" so
 	// the remaining path after the prefix is the resource name.
 	name := ""
 	if i := strings.LastIndex(r.URL.Path, "/"); i >= 0 {

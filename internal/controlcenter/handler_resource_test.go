@@ -17,7 +17,7 @@ func newTestResourceHandler(t *testing.T) (*ResourceHandler, string) {
 func TestResourceHandler_ListEmpty(t *testing.T) {
 	h, _ := newTestResourceHandler(t)
 
-	req := httptest.NewRequest("GET", "/api/memories/", nil)
+	req := httptest.NewRequest("GET", "/api/context/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -34,7 +34,7 @@ func TestResourceHandler_PutAndGet(t *testing.T) {
 
 	// PUT
 	payload := `{"content":"# Test\nHello"}`
-	req := httptest.NewRequest("PUT", "/api/memories/test-note", strings.NewReader(payload))
+	req := httptest.NewRequest("PUT", "/api/context/test-note", strings.NewReader(payload))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -43,7 +43,7 @@ func TestResourceHandler_PutAndGet(t *testing.T) {
 	}
 
 	// GET
-	req = httptest.NewRequest("GET", "/api/memories/test-note", nil)
+	req = httptest.NewRequest("GET", "/api/context/test-note", nil)
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -65,7 +65,7 @@ func TestResourceHandler_Delete(t *testing.T) {
 	// Create then delete
 	h.Store.Put("to-delete", []byte("data"))
 
-	req := httptest.NewRequest("DELETE", "/api/memories/to-delete", nil)
+	req := httptest.NewRequest("DELETE", "/api/context/to-delete", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -74,7 +74,7 @@ func TestResourceHandler_Delete(t *testing.T) {
 	}
 
 	// Verify gone
-	req = httptest.NewRequest("GET", "/api/memories/to-delete", nil)
+	req = httptest.NewRequest("GET", "/api/context/to-delete", nil)
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -86,7 +86,7 @@ func TestResourceHandler_Delete(t *testing.T) {
 func TestResourceHandler_DeleteNotFound(t *testing.T) {
 	h, _ := newTestResourceHandler(t)
 
-	req := httptest.NewRequest("DELETE", "/api/memories/nonexistent", nil)
+	req := httptest.NewRequest("DELETE", "/api/context/nonexistent", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -98,7 +98,7 @@ func TestResourceHandler_DeleteNotFound(t *testing.T) {
 func TestResourceHandler_InvalidName(t *testing.T) {
 	h, _ := newTestResourceHandler(t)
 
-	req := httptest.NewRequest("PUT", "/api/memories/bad..name", strings.NewReader(`{"content":"x"}`))
+	req := httptest.NewRequest("PUT", "/api/context/bad..name", strings.NewReader(`{"content":"x"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -110,7 +110,7 @@ func TestResourceHandler_InvalidName(t *testing.T) {
 func TestResourceHandler_MethodNotAllowed(t *testing.T) {
 	h, _ := newTestResourceHandler(t)
 
-	req := httptest.NewRequest("PATCH", "/api/memories/test", nil)
+	req := httptest.NewRequest("PATCH", "/api/context/test", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -122,7 +122,7 @@ func TestResourceHandler_MethodNotAllowed(t *testing.T) {
 func TestResourceHandler_PutNoName(t *testing.T) {
 	h, _ := newTestResourceHandler(t)
 
-	req := httptest.NewRequest("PUT", "/api/memories/", strings.NewReader(`{"content":"x"}`))
+	req := httptest.NewRequest("PUT", "/api/context/", strings.NewReader(`{"content":"x"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -162,7 +162,7 @@ func TestResourceHandler_ListAfterPut(t *testing.T) {
 	h.Store.Put("alpha", []byte("a"))
 	h.Store.Put("beta", []byte("b"))
 
-	req := httptest.NewRequest("GET", "/api/memories/", nil)
+	req := httptest.NewRequest("GET", "/api/context/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 

@@ -10,8 +10,8 @@ import (
 
 // UpdateLiveFeedback rewrites the ## Live Feedback section in mood.md
 // with the current score, state, and behavioral instruction.
-func UpdateLiveFeedback(memoriesDir, dataDir string) {
-	path := filepath.Join(memoriesDir, "mood.md")
+func UpdateLiveFeedback(contextDir, dataDir string) {
+	path := filepath.Join(contextDir, "mood.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return

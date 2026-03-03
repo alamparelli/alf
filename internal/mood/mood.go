@@ -38,8 +38,8 @@ var moods = []Mood{
 
 // GenerateDaily writes mood.md if the date has changed.
 // Preserves any existing ## Live Feedback section.
-func GenerateDaily(memoriesDir string) {
-	path := filepath.Join(memoriesDir, "mood.md")
+func GenerateDaily(contextDir string) {
+	path := filepath.Join(contextDir, "mood.md")
 	today := time.Now().Format("2006-01-02")
 
 	existing, _ := os.ReadFile(path)
@@ -86,8 +86,8 @@ func GenerateDaily(memoriesDir string) {
 
 // GetCurrentState parses mood.md and returns the behavioral state name
 // based on the live feedback score. Falls back to "neutral".
-func GetCurrentState(memoriesDir string) string {
-	path := filepath.Join(memoriesDir, "mood.md")
+func GetCurrentState(contextDir string) string {
+	path := filepath.Join(contextDir, "mood.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "neutral"

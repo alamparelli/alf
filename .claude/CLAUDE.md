@@ -95,9 +95,9 @@ Via Control Center:
 3. Edit tiers in dashboard
 4. Save → triggers daemon reload
 
-### Add Memory Context
+### Add Context
 
-Edit `/home/node/data/memories/index.md` via CC or host filesystem.
+Edit `/home/node/data/context/index.md` via CC or host filesystem.
 
 Auto-injected into every Claude prompt.
 

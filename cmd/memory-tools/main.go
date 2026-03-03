@@ -45,14 +45,14 @@ func main() {
 	if d := os.Getenv("ALF_DATA_DIR"); d != "" {
 		dataDir = d
 	}
-	sockPath := filepath.Join(dataDir, "memstore.sock")
+	sockPath := filepath.Join(dataDir, "context", "memstore.sock")
 
 	switch cmd {
-	case "memory-search":
+	case "recall":
 		doSearch(sockPath)
-	case "memory-store":
+	case "remember":
 		doStore(sockPath)
-	case "memory-delete":
+	case "forget":
 		doDelete(sockPath)
 	default:
 		// Fallback: check first argument.
@@ -72,14 +72,19 @@ func main() {
 				return
 			}
 		}
-		fmt.Fprintf(os.Stderr, "Usage: memory-search <query> [--limit N]\n       memory-store <text> [--type fact|preference|decision]\n       memory-delete <id>\n")
+		fmt.Fprintf(os.Stderr, "Usage: recall <query> [--limit N]\n       remember <text> [--type fact|preference|decision]\n       forget <id>\n")
 		os.Exit(1)
 	}
 }
 
 func doSearch(sockPath string) {
+	if len(os.Args) >= 2 && os.Args[1] == "--status" {
+		doStatus(sockPath)
+		return
+	}
+
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: memory-search <query> [--limit N]\n")
+		fmt.Fprintf(os.Stderr, "Usage: recall <query> [--limit N]\n       recall --status\n")
 		os.Exit(1)
 	}
 
@@ -105,11 +110,11 @@ func doSearch(sockPath string) {
 	}
 
 	if len(resp.Results) == 0 {
-		fmt.Println("No memories found.")
+		fmt.Println("Nothing found.")
 		return
 	}
 
-	fmt.Printf("Found %d memories:\n\n", len(resp.Results))
+	fmt.Printf("Found %d results:\n\n", len(resp.Results))
 	for _, m := range resp.Results {
 		date := parseDate(m.CreatedAt)
 		distInfo := ""
@@ -122,7 +127,7 @@ func doSearch(sockPath string) {
 
 func doStore(sockPath string) {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: memory-store <text> [--type fact|preference|decision]\n")
+		fmt.Fprintf(os.Stderr, "Usage: remember <text> [--type fact|preference|decision]\n")
 		os.Exit(1)
 	}
 
@@ -147,12 +152,12 @@ func doStore(sockPath string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Stored memory #%d\n", resp.ID)
+	fmt.Printf("Remembered #%d\n", resp.ID)
 }
 
 func doDelete(sockPath string) {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: memory-delete <id>\n")
+		fmt.Fprintf(os.Stderr, "Usage: forget <id>\n")
 		os.Exit(1)
 	}
 
@@ -172,7 +177,43 @@ func doDelete(sockPath string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Deleted memory #%d\n", id)
+	fmt.Printf("Forgotten #%d\n", id)
+}
+
+const extractionInterval = 3 * time.Hour
+
+func doStatus(sockPath string) {
+	// Read state file (sibling of socket).
+	stateFile := filepath.Join(filepath.Dir(sockPath), "memory_extractor_state.json")
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		fmt.Println("Extraction has not run yet.")
+		return
+	}
+
+	var state struct {
+		LastRun time.Time `json:"last_run"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		fmt.Println("Extraction has not run yet.")
+		return
+	}
+
+	nextRun := state.LastRun.Add(extractionInterval)
+	now := time.Now()
+
+	fmt.Printf("Last extraction: %s\n", state.LastRun.Format("2006-01-02 15:04"))
+	if now.Before(nextRun) {
+		fmt.Printf("Next extraction: %s (in %s)\n", nextRun.Format("15:04"), nextRun.Sub(now).Round(time.Minute))
+	} else {
+		fmt.Printf("Next extraction: overdue (expected %s)\n", nextRun.Format("15:04"))
+	}
+
+	// Also show total count via socket.
+	resp := socketCall(sockPath, socketRequest{Action: "recent", Limit: 0, Days: 9999})
+	if resp.Error == "" {
+		fmt.Printf("Total memories: %d\n", resp.Count)
+	}
 }
 
 func socketCall(sockPath string, req socketRequest) socketResponse {

@@ -26,8 +26,8 @@ func newTestChatService(t *testing.T) *ChatService {
 	t.Helper()
 	dataDir := t.TempDir()
 	configDir := t.TempDir()
-	memoriesDir := filepath.Join(dataDir, "memories")
-	os.MkdirAll(memoriesDir, 0o755)
+	contextDir := filepath.Join(dataDir, "context")
+	os.MkdirAll(contextDir, 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "logs"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 
@@ -39,7 +39,7 @@ func newTestChatService(t *testing.T) *ChatService {
 	chatStore := NewChatStore(dataDir)
 
 	return NewChatService(
-		dataDir, configDir, memoriesDir,
+		dataDir, configDir, contextDir,
 		tierStore, sessions, eventLog, chatStore,
 		nil, // no transcriber
 		func(msg, lastTier string, msgCount int) RouteResult {

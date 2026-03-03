@@ -11,7 +11,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
     && CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
-    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /memory-tools ./cmd/memory-tools
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools
 
 # Stage 2: Runtime with Claude Code CLI
 FROM node:22-slim
@@ -63,14 +63,14 @@ RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 COPY --from=builder /extract-video /opt/alf/tools/extract-video
-COPY --from=builder /memory-tools /opt/alf/tools/memory-tools
+COPY --from=builder /recall-tools /opt/alf/tools/recall-tools
 COPY scripts/transcribe.py /opt/alf/transcribe.py
 COPY scripts/embed.py /opt/alf/embed.py
 
-# Create memory tool symlinks (memory-search, memory-store → memory-tools).
-RUN ln -s /opt/alf/tools/memory-tools /opt/alf/tools/memory-search \
-    && ln -s /opt/alf/tools/memory-tools /opt/alf/tools/memory-store \
-    && ln -s /opt/alf/tools/memory-tools /opt/alf/tools/memory-delete
+# Create memory tool symlinks (recall, remember, forget → recall-tools).
+RUN ln -s /opt/alf/tools/recall-tools /opt/alf/tools/recall \
+    && ln -s /opt/alf/tools/recall-tools /opt/alf/tools/remember \
+    && ln -s /opt/alf/tools/recall-tools /opt/alf/tools/forget
 
 # Create 'claude' user for subprocess isolation (same group as node).
 # node=1000:1000, claude=1001:1000 — shares 'node' group for data access.

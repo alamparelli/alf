@@ -13,10 +13,13 @@ func alfDir() string {
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, "alf")
 
-	// Check current directory first — if it has a docker-compose.yml, use it
+	// Check current directory first — if it has a docker-compose.yml, use it.
+	// But never use a git repository (source code) as install dir.
 	if _, err := os.Stat("docker-compose.yml"); err == nil {
-		dir, _ = os.Getwd()
-		return dir
+		cwd, _ := os.Getwd()
+		if _, gitErr := os.Stat(filepath.Join(cwd, ".git")); gitErr != nil {
+			return cwd
+		}
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, "docker-compose.yml")); err != nil {
@@ -64,6 +67,14 @@ func RunLogs() {
 
 func RunUninstall() {
 	dir := alfDir()
+
+	// Safety: never delete a git repository or the source code directory.
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		Fatal("Refusing to uninstall: " + dir + " is a git repository.")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		Fatal("Refusing to uninstall: " + dir + " appears to be a source code directory.")
+	}
 
 	fmt.Println()
 	PrintWarning("This will remove ALF completely:")

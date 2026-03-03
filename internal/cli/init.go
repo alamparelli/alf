@@ -121,6 +121,12 @@ func RunInit() {
 		}
 	}
 
+	// Set default image, allow override via ALF_IMAGE env var.
+	composeData.Image = "ghcr.io/alamparelli/alf:latest"
+	if img := os.Getenv("ALF_IMAGE"); img != "" {
+		composeData.Image = img
+	}
+
 	// Step 6: Generate files
 	PrintStep(6, "Generating configuration files")
 	generateFiles(dir, botToken, chatID, composeData)
@@ -437,6 +443,19 @@ func checkPortsForHTTPS() {
 }
 
 func generateFiles(dir, botToken, chatID string, compose ComposeData) {
+	// Reclaim ownership of directories that fixVolumePermissions may have
+	// changed to uid 1000 on a previous run, so the host user can write.
+	if runtime.GOOS == "linux" {
+		uid := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+		for _, sub := range []string{"config.d", "data"} {
+			p := filepath.Join(dir, sub)
+			if _, err := os.Stat(p); err == nil {
+				cmd := exec.Command("sudo", "chown", "-R", uid, p)
+				cmd.Run()
+			}
+		}
+	}
+
 	// Store secrets as files (chmod 600, used via Docker Compose secrets)
 	if err := SetSecret(dir, "telegram_bot_token", botToken); err != nil {
 		Fatal(fmt.Sprintf("Failed to write secret: %v", err))
@@ -489,15 +508,19 @@ func generateAuthToken() (string, error) {
 
 func pullAndStart(dir, botName string, httpsEnabled bool) {
 	fmt.Println()
-	PrintInfo("Pulling ALF image...")
-	pull := exec.Command("docker", "compose", "pull")
-	pull.Dir = dir
-	pull.Stdout = os.Stdout
-	pull.Stderr = os.Stderr
-	if err := pull.Run(); err != nil {
-		Fatal(fmt.Sprintf("Failed to pull image: %v", err))
+	if img := os.Getenv("ALF_IMAGE"); img != "" {
+		PrintInfo(fmt.Sprintf("Using local image: %s", img))
+	} else {
+		PrintInfo("Pulling ALF image...")
+		pull := exec.Command("docker", "compose", "pull")
+		pull.Dir = dir
+		pull.Stdout = os.Stdout
+		pull.Stderr = os.Stderr
+		if err := pull.Run(); err != nil {
+			Fatal(fmt.Sprintf("Failed to pull image: %v", err))
+		}
+		PrintCheck("Image pulled")
 	}
-	PrintCheck("Image pulled")
 
 	PrintInfo("Starting ALF...")
 	up := exec.Command("docker", "compose", "up", "-d")

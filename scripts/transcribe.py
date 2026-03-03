@@ -48,12 +48,11 @@ def transcribe(model, audio_file):
     segments, info = model.transcribe(audio_file)
 
     # Filter out hallucinated segments (silence/music misdetected as speech).
-    # High no_speech_prob or low avg_log_prob → likely hallucination.
     good_segments = []
     for seg in segments:
-        if seg.no_speech_prob > 0.6:
+        if hasattr(seg, 'no_speech_prob') and seg.no_speech_prob > 0.6:
             continue
-        if seg.avg_log_prob < -1.0:
+        if hasattr(seg, 'avg_logprob') and seg.avg_logprob < -1.0:
             continue
         good_segments.append(seg.text)
 

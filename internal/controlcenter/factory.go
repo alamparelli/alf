@@ -20,6 +20,7 @@ type Deps struct {
 	Sessions       *SessionStore
 	ChatService    *ChatService // nil if chat API disabled
 	AuthToken      string
+	SecureCookies  bool // true when CC is behind HTTPS
 	DataDir        string
 	ConfigDir      string
 	SkillsDir      string
@@ -100,6 +101,7 @@ func HandlerFactory(deps Deps) http.Handler {
 		mux.Handle("/auth", &AuthHandler{
 			Magic:    deps.Magic,
 			Sessions: deps.Sessions,
+			Secure:   deps.SecureCookies,
 		})
 	}
 

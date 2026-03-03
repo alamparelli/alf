@@ -10,6 +10,7 @@ import (
 type AuthHandler struct {
 	Magic    *MagicStore
 	Sessions *SessionStore
+	Secure   bool // set cookie with Secure flag (HTTPS)
 }
 
 func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +43,7 @@ func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   int(ttl.Seconds()),
 		HttpOnly: true,
+		Secure:   h.Secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 

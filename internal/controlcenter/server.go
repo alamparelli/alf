@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -23,7 +24,7 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService) (*Server, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService) (*Server, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	statusProvider := NewStatusProvider(stats, version)
@@ -58,6 +59,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		Sessions:       sessions,
 		ChatService:    chatService,
 		AuthToken:      authToken,
+		SecureCookies:  strings.HasPrefix(externalURL, "https://"),
 		DataDir:        dataDir,
 		ConfigDir:      configDir,
 		SkillsDir:      skillsDir,

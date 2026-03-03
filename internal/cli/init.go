@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -147,25 +148,66 @@ func RunInit() {
 }
 
 func checkPrerequisites() {
-	if _, err := exec.LookPath("docker"); err != nil {
-		PrintError("Docker is not installed.")
-		fmt.Println("\n  Install Docker:")
-		fmt.Println("    Linux:  curl -fsSL https://get.docker.com | sh")
-		fmt.Println("    macOS:  brew install --cask docker")
-		fmt.Println("    Windows: https://docs.docker.com/desktop/install/windows-install/")
-		os.Exit(1)
-	}
-	PrintCheck("Docker found")
+	reader := bufio.NewReader(os.Stdin)
+	isLinux := strings.Contains(strings.ToLower(runtime.GOOS), "linux")
 
+	if _, err := exec.LookPath("docker"); err != nil {
+		if isLinux {
+			fmt.Println("\n  Docker is not installed.")
+			fmt.Print("  Install Docker now? [Y/n]: ")
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(strings.ToLower(input))
+			if input == "" || input == "y" || input == "yes" {
+				PrintInfo("Installing Docker...")
+				install := exec.Command("sh", "-c", "curl -fsSL https://get.docker.com | sh")
+				install.Stdout = os.Stdout
+				install.Stderr = os.Stderr
+				if err := install.Run(); err != nil {
+					Fatal(fmt.Sprintf("Docker installation failed: %v", err))
+				}
+				PrintCheck("Docker installed")
+			} else {
+				Fatal("Docker is required. Install it and re-run alf init.")
+			}
+		} else {
+			PrintError("Docker is not installed.")
+			fmt.Println("\n  Install Docker:")
+			fmt.Println("    macOS:  brew install --cask docker")
+			fmt.Println("    Windows: https://docs.docker.com/desktop/install/windows-install/")
+			os.Exit(1)
+		}
+	} else {
+		PrintCheck("Docker found")
+	}
+
+	// Check Docker Compose plugin.
 	cmd := exec.Command("docker", "compose", "version")
 	if err := cmd.Run(); err != nil {
-		PrintError("'docker compose' is not available.")
-		fmt.Println("\n  Docker Compose v2 is required. It comes bundled with Docker Desktop.")
-		fmt.Println("  If using Docker Engine on Linux, install the compose plugin:")
-		fmt.Println("    sudo apt install docker-compose-plugin")
-		os.Exit(1)
+		if isLinux {
+			fmt.Println("\n  Docker Compose plugin is not installed.")
+			fmt.Print("  Install it now? [Y/n]: ")
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(strings.ToLower(input))
+			if input == "" || input == "y" || input == "yes" {
+				PrintInfo("Installing Docker Compose plugin...")
+				install := exec.Command("sh", "-c", "apt-get update -qq && apt-get install -y -qq docker-compose-plugin")
+				install.Stdout = os.Stdout
+				install.Stderr = os.Stderr
+				if err := install.Run(); err != nil {
+					Fatal(fmt.Sprintf("Docker Compose installation failed: %v", err))
+				}
+				PrintCheck("Docker Compose installed")
+			} else {
+				Fatal("Docker Compose is required. Install it and re-run alf init.")
+			}
+		} else {
+			PrintError("'docker compose' is not available.")
+			fmt.Println("\n  Docker Compose v2 is required. It comes bundled with Docker Desktop.")
+			os.Exit(1)
+		}
+	} else {
+		PrintCheck("Docker Compose found")
 	}
-	PrintCheck("Docker Compose found")
 }
 
 func promptDirectory(reader *bufio.Reader) string {

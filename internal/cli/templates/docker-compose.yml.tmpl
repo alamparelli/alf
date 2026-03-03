@@ -3,7 +3,7 @@ name: alf-go
 services:
 {{- if .EnableHTTPS}}
   traefik:
-    image: traefik:v3.3
+    image: traefik:v3.6
     container_name: alf-traefik
     restart: unless-stopped
     command:

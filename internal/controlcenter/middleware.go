@@ -41,8 +41,8 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				}
 			}
 
-			// For browser requests (not API), show login page instead of JSON 401.
-			if !strings.HasPrefix(r.URL.Path, "/api/") && strings.Contains(r.Header.Get("Accept"), "text/html") {
+			// Show login page only for root path — all other unauthenticated paths get 401.
+			if r.URL.Path == "/" && strings.Contains(r.Header.Get("Accept"), "text/html") {
 				renderLoginPage(w)
 				return
 			}

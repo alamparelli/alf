@@ -115,9 +115,30 @@ ALF currently supports Telegram. To add a new platform:
 3. Wire messages through the existing router — the classification and tier system is platform-agnostic
 4. Add platform-specific formatting in the new package (the router returns plain text)
 
-## Adding a new system tool
+## Adding a new tool
 
-System tools are binaries available to Claude inside the container:
+There are two ways to add tools — one requires rebuilding the image, the other doesn't.
+
+### User tools (no rebuild)
+
+Drop any executable (script, binary) into the `data/tools/` directory on your host. It's a mounted volume, so changes are immediate — no Docker rebuild needed.
+
+```sh
+# Example: add a shell script tool
+cat > /path/to/alf/data/tools/my-tool << 'EOF'
+#!/bin/bash
+echo "Hello from my tool"
+EOF
+chmod +x /path/to/alf/data/tools/my-tool
+```
+
+You can also upload tools via the Control Center workspace UI under `tools/`.
+
+User tools are auto-discovered at boot and listed in Claude's toolbox. Claude runs them via the Bash tool. They execute as the `claude` user (uid 1001) — they can read config but not write it.
+
+### System tools (image rebuild)
+
+System tools are Go binaries baked into the Docker image at `/opt/alf/tools/`. Use this path when contributing a tool to the ALF project itself:
 
 1. Create `cmd/<tool>/main.go`
 2. Add build step in `Dockerfile`:
@@ -128,7 +149,7 @@ System tools are binaries available to Claude inside the container:
    ```dockerfile
    COPY --from=builder /<tool> /opt/alf/tools/<tool>
    ```
-4. The tool is automatically discovered at `/home/node/data/tools.d/<tool>`
+4. The daemon symlinks system tools into `data/tools.d/` at startup
 
 ## Questions
 

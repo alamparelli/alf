@@ -115,8 +115,27 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		if sw.status < 400 && isQuietRequest(r) {
 			return
 		}
-		log.Printf("[CC] %s %s %d %s", r.Method, r.URL.Path, sw.status, time.Since(start).Round(time.Millisecond))
+		log.Printf("[CC] %s %s %s %d %s", clientIP(r), r.Method, r.URL.Path, sw.status, time.Since(start).Round(time.Millisecond))
 	})
+}
+
+// clientIP extracts the client IP, preferring X-Forwarded-For/X-Real-IP from reverse proxies.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// X-Forwarded-For may contain multiple IPs; first is the client.
+		if i := strings.Index(xff, ","); i != -1 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return xff
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	ip := r.RemoteAddr
+	if i := strings.LastIndex(ip, ":"); i != -1 {
+		ip = ip[:i]
+	}
+	return ip
 }
 
 // isQuietRequest returns true for requests that should not be logged on success.

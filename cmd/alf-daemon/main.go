@@ -26,6 +26,7 @@ import (
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
+	"github.com/alamparelli/alf/internal/signal"
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
@@ -861,6 +862,17 @@ func main() {
 				SystemPrompts: sysPromptTexts,
 				ResumeID:      resumeID,
 				DataDir:       dataDir,
+			}
+
+			// Signal server: per-invocation socket for react/status from Claude subprocess.
+			sigSockPath := filepath.Join(dataDir, fmt.Sprintf("signal-%d.sock", u.Message.MessageID))
+			sigServer := &signal.Server{TG: tg, ChatID: chatID, MessageID: u.Message.MessageID}
+			if sigLn, err := sigServer.ListenUnix(sigSockPath); err != nil {
+				log.Printf("signal: listen error: %v", err)
+			} else {
+				go sigServer.Serve(sigLn)
+				defer func() { sigLn.Close(); os.Remove(sigSockPath) }()
+				invokeParams.Env = append(invokeParams.Env, "ALF_SIGNAL_SOCK="+sigSockPath)
 			}
 
 			start := time.Now()

@@ -11,7 +11,8 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
     && CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
-    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools \
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /telegram-tools ./cmd/signal
 
 # Stage 2: Runtime — minimal Debian with Claude Code native binary (no Node.js).
 FROM debian:bookworm-slim
@@ -76,12 +77,15 @@ ENV PATH="/opt/alf/tools:${PATH}"
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 COPY --from=builder /extract-video /opt/alf/tools/extract-video
 COPY --from=builder /recall-tools /opt/alf/tools/recall-tools
+COPY --from=builder /telegram-tools /opt/alf/tools/telegram-tools
 COPY scripts/transcribe.py /opt/alf/transcribe.py
 
 # Create memory tool symlinks (recall, remember, forget → recall-tools).
 RUN ln -s /opt/alf/tools/recall-tools /opt/alf/tools/recall \
     && ln -s /opt/alf/tools/recall-tools /opt/alf/tools/remember \
-    && ln -s /opt/alf/tools/recall-tools /opt/alf/tools/forget
+    && ln -s /opt/alf/tools/recall-tools /opt/alf/tools/forget \
+    && ln -s /opt/alf/tools/telegram-tools /opt/alf/tools/react \
+    && ln -s /opt/alf/tools/telegram-tools /opt/alf/tools/status
 
 # Create users for two-user privilege model.
 # node=1000:1000 (legacy name, kept for volume compatibility), claude=1001:1000.

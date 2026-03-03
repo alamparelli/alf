@@ -28,7 +28,8 @@ type Params struct {
 	SystemPrompts []string // appended system prompts (context files, reactions)
 	MaxTurns      int
 	ResumeID      string
-	DataDir       string // working directory for Claude subprocess
+	DataDir       string   // working directory for Claude subprocess
+	Env           []string // additional env vars for subprocess (e.g. ALF_SIGNAL_SOCK)
 }
 
 // Provider invokes Claude and returns a result.

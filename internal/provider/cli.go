@@ -102,6 +102,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		}
 	}
 	cmd.Env = append(env, "HOME="+dataDir, "ALF_DATA_DIR="+dataDir)
+	cmd.Env = append(cmd.Env, params.Env...)
 
 	log.Printf("provider: invoke starting (resume=%q, model=%s)", params.ResumeID, model)
 

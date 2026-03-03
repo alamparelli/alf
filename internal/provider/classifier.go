@@ -76,12 +76,11 @@ func (c *CLIClassifier) startLocked() error {
 	}
 
 	args := []string{
-		"-p", "ready",
 		"--system-prompt", c.cfg.SystemPrompt,
 		"--model", model,
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
-		"--max-turns", "2",
+		"--max-turns", "3",
 		"--allowedTools", "",
 		"--dangerously-skip-permissions",
 		"--no-session-persistence",
@@ -141,14 +140,33 @@ func (c *CLIClassifier) startLocked() error {
 	c.cmd = cmd
 	c.stdin = stdin
 	c.reader = reader
-	c.ready = true
 	c.lastUsed = time.Now()
 	c.retries = 0
+
+	// Send a warmup message to trigger the init event + first response.
+	// Claude CLI with --input-format stream-json only starts producing output
+	// after receiving input on stdin.
+	warmup := `{"type":"user","message":{"role":"user","content":"ready"}}` + "\n"
+	if _, err := stdin.Write([]byte(warmup)); err != nil {
+		c.killLocked()
+		return fmt.Errorf("write warmup: %w", err)
+	}
+
+	// Drain init event + warmup response.
+	initCtx, initCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer initCancel()
+	c.ready = true // temporarily set so readResponse works
+	_, err = c.readResponse(initCtx)
+	if err != nil {
+		c.ready = false
+		c.killLocked()
+		return fmt.Errorf("drain warmup response: %w", err)
+	}
 
 	// Start idle timer.
 	c.resetIdleTimer()
 
-	log.Printf("classifier: started (model=%s, pid=%d)", model, cmd.Process.Pid)
+	log.Printf("classifier: ready (model=%s, pid=%d)", model, cmd.Process.Pid)
 	return nil
 }
 
@@ -185,9 +203,7 @@ func (c *CLIClassifier) Classify(ctx context.Context, message string) (*Classify
 		return nil, fmt.Errorf("write to classifier: %w", err)
 	}
 
-	// Read the classification response.
-	// Note: with --input-format stream-json, the -p "ready" initial prompt and
-	// the stdin message produce a single combined result (not two separate results).
+	// Read the classification response (initial "ready" already drained at startup).
 	result, err := c.readResponse(ctx)
 	if err != nil {
 		c.ready = false
@@ -228,7 +244,9 @@ func (c *CLIClassifier) InjectContext(tierName, access, summary string) error {
 	}
 
 	// Drain the response (we don't need it).
-	_, err = c.readResponse(context.Background())
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer drainCancel()
+	_, err = c.readResponse(drainCtx)
 	if err != nil {
 		c.ready = false
 		return fmt.Errorf("drain context response: %w", err)
@@ -245,7 +263,6 @@ func (c *CLIClassifier) readResponse(ctx context.Context) (*ClassifyResult, erro
 	}
 
 	var resultText strings.Builder
-	timeout := 60 * time.Second
 
 	for {
 		ch := make(chan readResult, 1)
@@ -276,7 +293,8 @@ func (c *CLIClassifier) readResponse(ctx context.Context) (*ClassifyResult, erro
 				// Result-level fields.
 				ResultText string `json:"result"`
 			}
-			if json.Unmarshal([]byte(line), &event) != nil {
+			if err := json.Unmarshal([]byte(line), &event); err != nil {
+				log.Printf("classifier: unparseable line: %s", truncate(line, 200))
 				continue
 			}
 
@@ -291,14 +309,12 @@ func (c *CLIClassifier) readResponse(ctx context.Context) (*ClassifyResult, erro
 				if text == "" {
 					text = resultText.String()
 				}
+				log.Printf("classifier: result event (resultField=%q, accumulated=%q)", truncate(event.ResultText, 100), truncate(resultText.String(), 100))
 				return &ClassifyResult{Response: strings.TrimSpace(text)}, nil
 			}
 
-		case <-time.After(timeout):
-			return nil, fmt.Errorf("classifier response timeout after %v", timeout)
-
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("classifier response timeout: %v", ctx.Err())
 		}
 	}
 }

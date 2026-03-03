@@ -9,7 +9,7 @@ ALF connects Claude to your messaging, wraps it with semantic long-term memory, 
 Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies. ALF is different:
 
 - **Go binary, zero JS runtime** — single static binary, minimal attack surface, no `node_modules` supply chain
-- **Semantic memory** — sqlite-vec embeddings + FTS5 for real long-term recall, not just context window tricks
+- **Semantic memory** — Go-native ONNX embeddings (sqlite-vec + FTS5) for real long-term recall, not just context window tricks
 - **Persistent classifier** — a long-lived Claude process handles message routing in ~0ms instead of spawning a new process per message
 - **Tier system** — configurable response tiers (model, tools, effort, read/write access) routed by an LLM classifier
 - **Defense-in-depth security** — Unix user isolation (uid 1001), read-only config, restricted tool execution, not just a container boundary
@@ -87,7 +87,7 @@ Send a message to your bot on Telegram. That's it.
 
 ### Semantic memory
 
-ALF remembers things across conversations. The memory system uses sqlite-vec for vector similarity search and FTS5 for keyword matching, powered by an ONNX embedding model (all-MiniLM-L6-v2).
+ALF remembers things across conversations. The memory system uses sqlite-vec for vector similarity search and FTS5 for keyword matching, with Go-native ONNX Runtime inference (all-MiniLM-L6-v2) — no Python dependency for embeddings.
 
 Claude has three memory tools:
 - **recall** — hybrid semantic + keyword search over past memories
@@ -113,7 +113,7 @@ The LLM classifier reads your message and picks the right tier. Greetings get in
 
 ### Voice transcription
 
-Send a voice message on Telegram. ALF transcribes it with faster-whisper and processes the text as a regular message. The Whisper model runs locally inside the container.
+Send a voice message on Telegram. ALF transcribes it with faster-whisper and processes the text as a regular message. The Whisper model runs locally inside the container (auto-installed on first voice message).
 
 ### Media processing
 
@@ -188,13 +188,13 @@ ALF runs as root inside the container to manage subprocess isolation. Claude run
 - `/home/node/data/` — read + write (group-writable via umask)
 - Secrets via Docker secrets mechanism, never in environment variables
 - Rate limiting (60 req/min) + CORS on the Control Center API
-- Auth via magic link (time-limited) or bearer token
+- Auth via magic link (time-limited) or bearer token with IP ban after repeated failures
 
 ## Requirements
 
 - **OS**: Linux or macOS (Docker required)
 - **RAM**: 512 MB minimum (2 GB recommended for voice transcription)
-- **Disk**: ~3 GB for the Docker image (includes Whisper model + ONNX embeddings)
+- **Disk**: ~800 MB for the Docker image + ~600 MB on first voice message (Whisper model)
 - **Network**: outbound HTTPS to Telegram API and Claude API
 
 ## License

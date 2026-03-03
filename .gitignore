@@ -27,3 +27,8 @@ user-space/
 dev-secrets/
 dev-data/
 dev-claude-session/
+
+# Private (not for public repo)
+.claude/
+mobile/
+scripts/dev-deploy.sh

@@ -54,6 +54,12 @@ func (ms *MagicStore) Issue(chatID int64, sessTTL time.Duration) (string, error)
 	}
 
 	ms.mu.Lock()
+	// Invalidate any existing codes for this chat ID (one active link at a time).
+	for k, e := range ms.entries {
+		if e.chatID == chatID {
+			delete(ms.entries, k)
+		}
+	}
 	ms.entries[code] = &magicEntry{
 		chatID:     chatID,
 		sessionTTL: sessTTL,

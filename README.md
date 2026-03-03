@@ -21,17 +21,17 @@ Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies
 ```
 Host machine                         Docker container
 ┌──────────────┐                     ┌──────────────────────────────────┐
-│  alf CLI     │  docker compose     │  alf-daemon (PID 1)             │
+│  alf CLI     │  docker compose     │  alf-daemon (PID 1)              │
 │              │ ──────────────────► │                                  │
-│  init/start/ │                     │  ┌──────────┐ ┌──────────────┐  │
-│  stop/upgrade│                     │  │ Telegram  │ │Control Center│  │
-│              │                     │  │ poller    │ │ :8080        │  │
-│              │                     │  └────┬─────┘ └──────┬───────┘  │
-│              │                     │       ▼              ▼          │
-│              │                     │  ┌──────────┐  ┌──────────┐    │
-│              │                     │  │ Claude    │  │ Whisper  │    │
-│              │                     │  │ (uid 1001)│  │ (python) │    │
-│              │                     │  └──────────┘  └──────────┘    │
+│  init/start/ │                     │  ┌──────────┐ ┌──────────────┐   │
+│  stop/upgrade│                     │  │Telegram  │ │Control Center│   │
+│              │                     │  │poller    │ │ :8080        │   │
+│              │                     │  └────┬─────┘ └──────┬───────┘   │
+│              │                     │       ▼              ▼           │
+│              │                     │  ┌──────────┐  ┌──────────┐      │
+│              │                     │  │Claude    │  │ Whisper  │      │
+│              │                     │  │(uid 1001)│  │ (python) │      │
+│              │                     │  └──────────┘  └──────────┘      │
 └──────────────┘                     └──────────────────────────────────┘
 ```
 

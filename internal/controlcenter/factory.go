@@ -21,9 +21,10 @@ type Deps struct {
 	Sessions       *SessionStore
 	ChatService    *ChatService // nil if chat API disabled
 	AuthToken        string
-	SecureCookies    bool // true when CC is behind HTTPS
-	AuthBanThreshold int  // failed /auth attempts before IP ban (0 = default 10)
-	AuthBanDuration  int  // IP ban duration in minutes (0 = default 15)
+	AllowedOrigin    string // CORS origin allowlist (from externalURL)
+	SecureCookies    bool   // true when CC is behind HTTPS
+	AuthBanThreshold int    // failed /auth attempts before IP ban (0 = default 10)
+	AuthBanDuration  int    // IP ban duration in minutes (0 = default 15)
 	DataDir          string
 	ConfigDir      string
 	SkillsDir      string
@@ -127,7 +128,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	var handler http.Handler = mux
 	handler = jsonMiddleware(handler)
 	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
-	handler = corsMiddleware(handler)
+	handler = corsMiddleware(deps.AllowedOrigin)(handler)
 	handler = newRateLimiter(60).middleware(handler)
 	handler = loggingMiddleware(handler)
 

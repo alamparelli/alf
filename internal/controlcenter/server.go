@@ -59,6 +59,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		Sessions:       sessions,
 		ChatService:    chatService,
 		AuthToken:      authToken,
+		AllowedOrigin:    strings.TrimRight(externalURL, "/"),
 		SecureCookies:    strings.HasPrefix(externalURL, "https://"),
 		AuthBanThreshold: cfg.AuthBanThreshold,
 		AuthBanDuration:  cfg.AuthBanDuration,

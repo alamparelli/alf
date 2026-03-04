@@ -1179,7 +1179,11 @@ func getUpdates(client *http.Client, token string, offset int64) ([]Update, erro
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	const maxUpdatesBody = 10 * 1024 * 1024 // 10MB
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpdatesBody))
+	if err != nil {
+		return nil, fmt.Errorf("read getUpdates body: %w", err)
+	}
 
 	var result struct {
 		OK     bool     `json:"ok"`

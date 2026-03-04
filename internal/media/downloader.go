@@ -44,6 +44,11 @@ func DownloadFile(client *http.Client, botToken, fileID string) ([]byte, error) 
 		return nil, fmt.Errorf("telegram getFile failed")
 	}
 
+	const maxFileSize = 50 * 1024 * 1024 // 50MB
+	if tfResp.Result.FileSize > maxFileSize {
+		return nil, fmt.Errorf("file too large (%d bytes, max %d)", tfResp.Result.FileSize, maxFileSize)
+	}
+
 	// Download the actual file
 	downloadURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", botToken, tfResp.Result.FilePath)
 	resp, err = client.Get(downloadURL)
@@ -52,7 +57,7 @@ func DownloadFile(client *http.Client, botToken, fileID string) ([]byte, error) 
 	}
 	defer resp.Body.Close()
 
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, maxFileSize))
 }
 
 // VisionBlock represents a content block for Claude's vision API

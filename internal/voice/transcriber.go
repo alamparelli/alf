@@ -3,6 +3,7 @@ package voice
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -88,7 +89,8 @@ func downloadTelegramFile(client *http.Client, botToken, filePath string) (strin
 		return "", err
 	}
 
-	if _, err := tmpFile.ReadFrom(resp.Body); err != nil {
+	const maxVoiceFile = 50 * 1024 * 1024 // 50MB
+	if _, err := io.Copy(tmpFile, io.LimitReader(resp.Body, maxVoiceFile)); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpFile.Name())
 		return "", err

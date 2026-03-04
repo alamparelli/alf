@@ -62,7 +62,9 @@ docker compose up --build
 
 - **Provider interface** — all LLM interaction goes through `provider.Provider` and `provider.Classifier`
 - **Persistent subprocesses** — long-lived processes (Whisper, classifier) follow the same pattern: mutex, stdin/stdout JSON lines, auto-restart on crash, idle timeout
+- **Hybrid voice** — faster-whisper on x86, whisper.cpp (CGO) on arm64, auto-detected at build time
 - **Go-native inference** — ONNX embeddings run in-process via `onnxruntime_go` (no sidecar)
+- **Embedded core instructions** — `internal/memory/core.md` compiled into the binary via `go:embed`, injected first in every conversation
 - **Router is pure logic** — `internal/router/` builds prompts and parses responses, never spawns processes
 - **Unix user isolation** — Claude runs as uid 1001, config is read-only, tools are rx-only
 

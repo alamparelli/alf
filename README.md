@@ -94,7 +94,11 @@ Claude has three memory tools:
 - **remember** — store facts, preferences, decisions, summaries
 - **forget** — remove memories by ID
 
-Memories are automatically recalled when relevant to the current conversation.
+Memories are automatically recalled when relevant to the current conversation. A batch extractor periodically distills conversation logs into new memories.
+
+### Core instructions
+
+Operational knowledge (Docker environment, filesystem layout, tool discovery, Telegram formatting rules) is compiled into the binary via `go:embed` and injected into every conversation. User-editable files (`soul.md`, `index.md`) handle personality and preferences only — clean installs behave correctly out of the box.
 
 ### Configurable tiers
 
@@ -113,7 +117,7 @@ The LLM classifier reads your message and picks the right tier. Greetings get in
 
 ### Voice transcription
 
-Send a voice message on Telegram. ALF transcribes it with faster-whisper and processes the text as a regular message. The Whisper model runs locally inside the container (auto-installed on first voice message).
+Send a voice message on Telegram. ALF transcribes it locally and processes the text as a regular message. Uses faster-whisper on x86 and whisper.cpp on arm64 — auto-detected at startup, model downloaded on first voice message.
 
 ### Media processing
 
@@ -121,6 +125,14 @@ Send a voice message on Telegram. ALF transcribes it with faster-whisper and pro
 - **Videos/GIFs** — frame extraction into contact sheets + audio transcription
 - **PDFs** — text extraction via pdftotext
 - **Documents** — passed through to Claude with appropriate context
+
+### Skills & tools
+
+ALF discovers CLI tools and skills at boot. System tools live in `tools.d/` (read-only), user tools in `tools/`. Same pattern for skills (`skills.d/`, `skills/`). All tools support `--help` — ALF runs it before first use. Missing a capability? Drop an executable in `tools/` or a skill definition in `skills/`.
+
+### Scheduler
+
+Cron-based job scheduling with timezone support. System jobs (memory extraction) and user-defined jobs. Jobs execute as Claude conversations with configurable prompts.
 
 ### Control Center
 
@@ -131,7 +143,7 @@ Web dashboard at port 8080:
 - **Tiers** — configure response tiers in real-time
 - **Status** — container health, model usage, session stats
 
-Authentication via Telegram magic link (`/login` command) or bearer token.
+Authentication via Telegram magic link (`/login` command) with session cookies. IP ban after repeated auth failures.
 
 ### Daily mood
 
@@ -169,11 +181,12 @@ internal/
   router/          LLM-based message classification + tier routing
   memstore/        Semantic memory (SQLite + sqlite-vec + FTS5 + ONNX embedder)
   media/           Download, MIME detection, frame extraction, PDF parsing
-  voice/           Persistent faster-whisper subprocess
+  voice/           Hybrid transcription (faster-whisper x86 / whisper.cpp arm64)
+  scheduler/       Cron-based job scheduling with timezone support
   mood/            Daily mood rotation + live feedback
   session/         Claude session persistence (resume IDs)
   telegram/        Telegram Bot API client + Markdown→HTML
-  memory/          System prompt assembly (soul, mood, context files)
+  memory/          System prompt assembly (embedded core + soul, mood, context)
   gittrack/        Git versioning for data directory
   eventlog/        JSONL event logging with daily rotation
   updater/         GHCR image update checker
@@ -188,7 +201,7 @@ ALF runs as root inside the container to manage subprocess isolation. Claude run
 - `/home/node/data/` — read + write (group-writable via umask)
 - Secrets via Docker secrets mechanism, never in environment variables
 - Rate limiting (60 req/min) + CORS on the Control Center API
-- Auth via magic link (time-limited) or bearer token with IP ban after repeated failures
+- Auth via magic link (time-limited, rotating) with session cookies + IP ban after repeated failures
 
 ## Requirements
 

@@ -392,6 +392,18 @@ func main() {
 			state := extractor.LoadState()
 			return extractor.RunOnce(state.LastRun)
 		})
+		// Run initial extraction after a delay (avoids competing with other
+		// startup processes for resources on constrained hosts).
+		go func() {
+			time.Sleep(3 * time.Minute)
+			state := extractor.LoadState()
+			if time.Since(state.LastRun) >= 3*time.Hour {
+				log.Println("memstore: running initial extraction (overdue)")
+				if err := extractor.RunOnce(state.LastRun); err != nil {
+					log.Printf("memstore: initial extraction failed: %v", err)
+				}
+			}
+		}()
 	}
 
 	if err := sched.Start(filepath.Join(contextDir, "scheduler.sock")); err != nil {

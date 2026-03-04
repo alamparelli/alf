@@ -48,6 +48,13 @@ docker compose up --build
 ./scripts/dev-deploy.sh
 ```
 
+### Local development (Docker, no remote deploy)
+
+```sh
+# Builds Docker image locally and restarts with ALF_IMAGE override
+./scripts/dev-local.sh
+```
+
 ## Code conventions
 
 ### Go style
@@ -66,14 +73,15 @@ docker compose up --build
 - **Go-native inference** — ONNX embeddings run in-process via `onnxruntime_go` (no sidecar)
 - **Embedded core instructions** — `internal/memory/core.md` compiled into the binary via `go:embed`, injected first in every conversation
 - **Router is pure logic** — `internal/router/` builds prompts and parses responses, never spawns processes
+- **Signal system** — `internal/signal/` provides a Unix-socket server for Claude sessions to send Telegram messages/reactions. System tools (`cmd/signal`, `cmd/schedule-tools`) use this socket
 - **Unix user isolation** — Claude runs as uid 1001, config is read-only, tools are rx-only
 
 ### File organization
 
-- `cmd/` — entry points only, minimal logic
+- `cmd/` — entry points only, minimal logic (includes system tools: `schedule-tools`, `signal`)
 - `internal/` — all business logic, one package per domain
-- `scripts/` — deployment and release automation
-- `static/` — embedded web assets for Control Center
+- `scripts/` — deployment, release, and local dev automation (`dev-deploy.sh`, `dev-local.sh`, `release.sh`)
+- `internal/controlcenter/web/` — embedded web assets for Control Center (HTML, JS, CSS)
 
 ### Testing
 
@@ -150,6 +158,8 @@ System tools are Go binaries baked into the Docker image at `/opt/alf/tools/`. U
    COPY --from=builder /<tool> /opt/alf/tools/<tool>
    ```
 4. The daemon symlinks system tools into `data/tools.d/` at startup
+
+Existing system tools: `extract-video` (media processing), `memory-tools` (semantic memory), `schedule-tools` (cron jobs), `signal` (Telegram messaging from Claude sessions).
 
 ## Questions
 

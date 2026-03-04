@@ -397,11 +397,7 @@ func main() {
 		)
 	}
 	if memDB != nil {
-		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, tiersTimeout, func(cmd *exec.Cmd) {
-			cmd.SysProcAttr = &syscall.SysProcAttr{
-				Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
-			}
-		})
+		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, tiersTimeout, &extractorAdapter{prov: cliProvider})
 		sched.RegisterSystem("mem-extract", "Memory Extraction", "@every 3h", func() error {
 			state := extractor.LoadState()
 			return extractor.RunOnce(state.LastRun)
@@ -878,9 +874,10 @@ func main() {
 			})
 
 			// Transition routing message into processing status message.
+			tierTag := "[" + routeResult.Tier + "] "
 			var statusAnim *dotAnimator
 			if routingMsgID != 0 {
-				thinkBase := pickRandom(statusThinking)
+				thinkBase := tierTag + pickRandom(statusThinking)
 				tg.EditMessage(chatID, routingMsgID, thinkBase+dotFrames[0])
 				statusAnim = newDotAnimator(tg, chatID, routingMsgID, thinkBase, "choose_sticker")
 			}
@@ -896,11 +893,11 @@ func main() {
 				lastPhase = event.Type
 				switch event.Type {
 				case "thinking":
-					statusAnim.SetPhase(pickRandom(statusThinking), "choose_sticker")
+					statusAnim.SetPhase(tierTag+pickRandom(statusThinking), "choose_sticker")
 				case "tool_use":
-					statusAnim.SetPhase(pickRandom(statusToolUse), "upload_document")
+					statusAnim.SetPhase(tierTag+pickRandom(statusToolUse), "upload_document")
 				case "text":
-					statusAnim.SetPhase(pickRandom(statusWriting), "typing")
+					statusAnim.SetPhase(tierTag+pickRandom(statusWriting), "typing")
 				}
 			}
 
@@ -1611,29 +1608,29 @@ var statusRouting = []string{
 }
 
 var statusThinking = []string{
-	"Thinking",
-	"Analyzing",
-	"Digging in",
-	"Reasoning",
-	"Working it out",
-	"Considering",
+	"🧠 Thinking",
+	"🔍 Analyzing",
+	"⛏ Digging in",
+	"💭 Reasoning",
+	"🧩 Working it out",
+	"🤔 Considering",
 }
 
 var statusToolUse = []string{
-	"Reading files",
-	"Looking things up",
-	"Checking the code",
-	"Investigating",
-	"Doing some research",
-	"Gathering context",
+	"📂 Reading files",
+	"🔎 Looking things up",
+	"📝 Checking the code",
+	"🕵️ Investigating",
+	"📚 Doing some research",
+	"🗂 Gathering context",
 }
 
 var statusWriting = []string{
-	"Writing",
-	"Drafting",
-	"Putting it together",
-	"Almost there",
-	"Wrapping up",
+	"✍️ Writing",
+	"📝 Drafting",
+	"🔧 Putting it together",
+	"⏳ Almost there",
+	"🎁 Wrapping up",
 }
 
 // dotCycle returns animated dots: ".", "..", "...", "." cycling on each call.
@@ -1641,6 +1638,24 @@ var dotFrames = []string{".", "..", "..."}
 
 func pickRandom(pool []string) string {
 	return pool[rand.Intn(len(pool))]
+}
+
+// extractorAdapter bridges provider.CLIProvider to memstore.ExtractorProvider.
+type extractorAdapter struct {
+	prov *provider.CLIProvider
+}
+
+func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params memstore.ExtractorParams) (string, error) {
+	result, err := a.prov.Invoke(ctx, prompt, provider.Params{
+		Model:    params.Model,
+		MaxTurns: params.MaxTurns,
+		DataDir:  params.DataDir,
+		Tools:    []string{""}, // explicit empty to disable all tools
+	}, nil)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
 }
 
 // dotAnimator animates a Telegram status message with cycling dots and chat actions.

@@ -206,6 +206,78 @@ func TestEscapeHTML(t *testing.T) {
 	}
 }
 
+func TestMarkdownToHTML_Table(t *testing.T) {
+	input := `Here is a table:
+
+| # | Source | Medium |
+|---|--------|--------|
+| 1 | x | dm |
+| 2 | reddit | post |
+
+End of table.`
+
+	got := MarkdownToHTML(input)
+	if !strings.Contains(got, "<pre>") {
+		t.Fatalf("expected table in <pre> block, got: %s", got)
+	}
+	// Should contain data cells.
+	if !strings.Contains(got, "reddit") || !strings.Contains(got, "dm") {
+		t.Errorf("expected table data preserved, got: %s", got)
+	}
+	// Separator line with box-drawing chars.
+	if !strings.Contains(got, "─") {
+		t.Errorf("expected box-drawing separator, got: %s", got)
+	}
+	// Should NOT contain the markdown separator row.
+	if strings.Contains(got, "|---|") {
+		t.Errorf("markdown separator should be stripped, got: %s", got)
+	}
+	// Surrounding text should remain.
+	if !strings.Contains(got, "Here is a table:") || !strings.Contains(got, "End of table.") {
+		t.Errorf("surrounding text lost, got: %s", got)
+	}
+}
+
+func TestMarkdownToHTML_TableColumnAlignment(t *testing.T) {
+	input := `| Name | Age |
+|------|-----|
+| Alice | 30 |
+| Bob | 7 |`
+
+	got := MarkdownToHTML(input)
+	if !strings.Contains(got, "<pre>") {
+		t.Fatalf("expected <pre>, got: %s", got)
+	}
+	// Column separator should use │
+	if !strings.Contains(got, "│") {
+		t.Errorf("expected │ column separator, got: %s", got)
+	}
+}
+
+func TestMarkdownToHTML_TableWithSpecialChars(t *testing.T) {
+	input := `| URL | Note |
+|-----|------|
+| https://example.com?a=1&b=2 | ok |`
+
+	got := MarkdownToHTML(input)
+	// & should be escaped inside <pre>.
+	if !strings.Contains(got, "&amp;") {
+		t.Errorf("expected & escaped in table, got: %s", got)
+	}
+	if !strings.Contains(got, "example.com") {
+		t.Errorf("expected URL preserved, got: %s", got)
+	}
+}
+
+func TestMarkdownToHTML_NotATable(t *testing.T) {
+	// Single pipe line shouldn't be treated as table.
+	input := "This | is not | a table"
+	got := MarkdownToHTML(input)
+	if strings.Contains(got, "<pre>") {
+		t.Errorf("should not wrap non-table in <pre>, got: %s", got)
+	}
+}
+
 func TestChunkHTML_AllContentPreserved(t *testing.T) {
 	// Verify no content is lost during chunking
 	words := make([]string, 100)

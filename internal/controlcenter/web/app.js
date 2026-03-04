@@ -191,6 +191,12 @@ function wsRender() {
   list.querySelectorAll('.ws-node-file').forEach(el => {
     el.addEventListener('click', () => wsOpenFile(el.dataset.path));
   });
+  list.querySelectorAll('.ws-dir-delete').forEach(el => {
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      wsDeleteDir(el.dataset.path);
+    });
+  });
 
   // Render Lucide icons in the tree.
   if (window.lucide) lucide.createIcons();
@@ -213,10 +219,12 @@ function wsRenderDir(dirPath, depth) {
       const chevronIcon = expanded ? 'chevron-down' : 'chevron-right';
       const folderIcon = expanded ? 'folder-open' : 'folder';
 
+      const canDeleteDir = depth > 0 || !['config.d','context.d','memory.d','pages.d','skills.d','tools'].includes(e.name);
       html += '<div class="ws-node ws-node-dir' + (expanded ? ' expanded' : '') + '" data-path="' + esc(fullPath) + '" style="padding-left:' + (8 + depth * 20) + 'px">' +
         wsIcon(chevronIcon, 'ws-icon ws-icon-chevron') +
         wsIcon(folderIcon, 'ws-icon ws-icon-folder') +
         '<span class="ws-node-label">' + esc(e.name) + '</span>' +
+        (canDeleteDir ? '<span class="ws-dir-delete" data-path="' + esc(fullPath) + '" title="Delete folder">' + wsIcon('trash-2', 'ws-icon') + '</span>' : '') +
         '</div>';
       if (expanded) {
         html += wsRenderDir(fullPath, depth + 1);
@@ -354,6 +362,36 @@ document.getElementById('wsDeleteBtn').addEventListener('click', () => {
     } else toast(r.error || 'Delete failed', 'error');
   }).catch(e => toast(e.error || 'Delete failed', 'error'));
 });
+
+function wsDeleteDir(dirPath) {
+  const name = dirPath.split('/').pop();
+  if (!confirm('Delete folder "' + name + '" and all its contents?')) return;
+  api('/api/workspace?path=' + encodeURIComponent(dirPath), { method: 'DELETE' })
+    .then(r => {
+      if (r.ok) {
+        toast('Folder deleted');
+        // If an open file was inside this folder, clear the editor.
+        if (wsOpenPath && wsOpenPath.startsWith(dirPath + '/')) {
+          wsOpenPath = null;
+          document.getElementById('wsFileName').textContent = 'Select a file';
+          document.getElementById('wsSaveBtn').disabled = true;
+          document.getElementById('wsDeleteBtn').disabled = true;
+          document.getElementById('wsEditor').style.display = 'none';
+          document.getElementById('wsMessage').style.display = 'none';
+          document.getElementById('wsBreadcrumb').innerHTML = wsBreadcrumbHTML('');
+          if (window.lucide) lucide.createIcons();
+        }
+        // Remove from tree cache and refresh parent.
+        delete wsTree[dirPath];
+        const parentPath = dirPath.includes('/') ? dirPath.substring(0, dirPath.lastIndexOf('/')) : '';
+        delete wsTree[parentPath];
+        wsToggleDir(parentPath);
+      } else {
+        toast(r.error || 'Delete failed', 'error');
+      }
+    })
+    .catch(e => toast(e.error || 'Delete failed', 'error'));
+}
 
 document.getElementById('wsSaveBtn').addEventListener('click', () => {
   if (!wsOpenPath) return;

@@ -71,13 +71,53 @@ var chatIDRegex = regexp.MustCompile(`^-?\d+$`)
 var domainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
 var emailRegex = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
+// setupProfile stores previous init values so re-running `alf init` pre-fills them.
+type setupProfile struct {
+	Dir       string `json:"dir,omitempty"`
+	BotToken  string `json:"bot_token,omitempty"`
+	ChatID    string `json:"chat_id,omitempty"`
+	HTTPS     bool   `json:"https,omitempty"`
+	Domain    string `json:"domain,omitempty"`
+	AcmeEmail string `json:"acme_email,omitempty"`
+	Port      string `json:"port,omitempty"`
+	Host      string `json:"host,omitempty"`
+}
+
+func setupProfilePath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".alf-setup.json")
+}
+
+func loadSetupProfile() setupProfile {
+	var p setupProfile
+	data, err := os.ReadFile(setupProfilePath())
+	if err != nil {
+		return p
+	}
+	json.Unmarshal(data, &p)
+	return p
+}
+
+func saveSetupProfile(p setupProfile) {
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(setupProfilePath(), data, 0o600)
+}
+
 func RunInit() {
 	reader := bufio.NewReader(os.Stdin)
+	prev := loadSetupProfile()
 
 	// Step 0: Welcome
 	PrintBanner()
 	fmt.Println("  This wizard will set up ALF on your machine.")
-	fmt.Println("  It takes about 2 minutes.")
+	if prev.Dir != "" {
+		fmt.Println("  Previous setup detected — press Enter to keep existing values.")
+	} else {
+		fmt.Println("  It takes about 2 minutes.")
+	}
 
 	// Step 1: Prerequisites
 	PrintStep(1, "Checking prerequisites")
@@ -85,22 +125,22 @@ func RunInit() {
 
 	// Step 2: Install directory
 	PrintStep(2, "Choose install directory")
-	dir := promptDirectory(reader)
+	dir := promptDirectory(reader, prev.Dir)
 
 	// Step 3: Telegram Bot Token
 	PrintStep(3, "Telegram Bot Token")
-	botToken, botName := promptBotToken(reader)
+	botToken, botName := promptBotToken(reader, prev.BotToken)
 
 	// Step 4: Telegram Chat ID
 	PrintStep(4, "Telegram Chat ID")
-	chatID := promptChatID(reader, botToken)
+	chatID := promptChatID(reader, botToken, prev.ChatID)
 
 	// Step 5: Dashboard access
 	PrintStep(5, "Dashboard access")
 	var composeData ComposeData
-	if promptHTTPS(reader) {
-		domain := promptDomain(reader)
-		acmeEmail := promptAcmeEmail(reader)
+	if promptHTTPS(reader, prev.HTTPS) {
+		domain := promptDomain(reader, prev.Domain)
+		acmeEmail := promptAcmeEmail(reader, prev.AcmeEmail)
 		checkPortsForHTTPS()
 		composeData = ComposeData{
 			EnableHTTPS:   true,
@@ -112,13 +152,25 @@ func RunInit() {
 		if err := os.MkdirAll(filepath.Join(dir, "letsencrypt"), 0o755); err != nil {
 			Fatal(fmt.Sprintf("Failed to create letsencrypt/: %v", err))
 		}
+
+		// Save profile
+		saveSetupProfile(setupProfile{
+			Dir: dir, BotToken: botToken, ChatID: chatID,
+			HTTPS: true, Domain: domain, AcmeEmail: acmeEmail,
+		})
 	} else {
-		ccPort := promptPort(reader)
-		ccHost := promptHost(reader)
+		ccPort := promptPort(reader, prev.Port)
+		ccHost := promptHost(reader, prev.Host)
 		composeData = ComposeData{
 			CCPort:        ccPort,
 			CCExternalURL: fmt.Sprintf("http://%s:%s", ccHost, ccPort),
 		}
+
+		// Save profile
+		saveSetupProfile(setupProfile{
+			Dir: dir, BotToken: botToken, ChatID: chatID,
+			Port: ccPort, Host: ccHost,
+		})
 	}
 
 	// Set default image, allow override via ALF_IMAGE env var.
@@ -216,9 +268,12 @@ func checkPrerequisites() {
 	}
 }
 
-func promptDirectory(reader *bufio.Reader) string {
+func promptDirectory(reader *bufio.Reader, previous string) string {
 	home, _ := os.UserHomeDir()
 	defaultDir := filepath.Join(home, "alf")
+	if previous != "" {
+		defaultDir = previous
+	}
 
 	fmt.Printf("\n  Install directory [%s]: ", defaultDir)
 	input, _ := reader.ReadString('\n')
@@ -247,13 +302,42 @@ func promptDirectory(reader *bufio.Reader) string {
 	return dir
 }
 
-func promptBotToken(reader *bufio.Reader) (string, string) {
-	fmt.Println("\n  To create a Telegram bot:")
-	fmt.Println("    1. Open Telegram, search @BotFather")
-	fmt.Println("    2. Send /newbot")
-	fmt.Println("    3. Choose a name (e.g. \"My ALF\")")
-	fmt.Println("    4. Choose a username (must end in \"bot\")")
-	fmt.Println("    5. Copy the token BotFather gives you")
+func promptBotToken(reader *bufio.Reader, previous string) (string, string) {
+	if previous != "" {
+		masked := previous[:8] + "..." + previous[len(previous)-4:]
+		fmt.Printf("\n  Previous bot token: %s", masked)
+		fmt.Print("\n  Press Enter to keep, or paste a new token: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input == "" {
+			name, err := validateBotToken(previous)
+			if err != nil {
+				PrintWarning(fmt.Sprintf("Previous token no longer valid: %v", err))
+			} else {
+				PrintCheck(fmt.Sprintf("Bot verified: @%s", name))
+				return previous, name
+			}
+		} else {
+			previous = "" // fall through to normal flow with the new input
+			if tokenRegex.MatchString(input) {
+				if name, err := validateBotToken(input); err == nil {
+					PrintCheck(fmt.Sprintf("Bot verified: @%s", name))
+					return input, name
+				} else {
+					PrintError(fmt.Sprintf("Token validation failed: %v", err))
+				}
+			} else {
+				PrintError("Invalid token format. Expected: 123456789:ABCdef...")
+			}
+		}
+	} else {
+		fmt.Println("\n  To create a Telegram bot:")
+		fmt.Println("    1. Open Telegram, search @BotFather")
+		fmt.Println("    2. Send /newbot")
+		fmt.Println("    3. Choose a name (e.g. \"My ALF\")")
+		fmt.Println("    4. Choose a username (must end in \"bot\")")
+		fmt.Println("    5. Copy the token BotFather gives you")
+	}
 
 	for {
 		fmt.Print("\n  Paste your bot token: ")
@@ -304,12 +388,28 @@ func validateBotToken(token string) (string, error) {
 	return result.Result.Username, nil
 }
 
-func promptChatID(reader *bufio.Reader, botToken string) string {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", botToken)
-	fmt.Println("\n  To find your chat ID:")
-	fmt.Println("    1. Send any message to your bot on Telegram")
-	fmt.Printf("    2. Open: %s\n", url)
-	fmt.Println("    3. Look for \"chat\":{\"id\":YOUR_CHAT_ID}")
+func promptChatID(reader *bufio.Reader, botToken string, previous string) string {
+	if previous != "" {
+		fmt.Printf("\n  Previous chat ID: %s", previous)
+		fmt.Print("\n  Press Enter to keep, or enter a new one: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input == "" {
+			PrintCheck(fmt.Sprintf("Chat ID: %s", previous))
+			return previous
+		}
+		if chatIDRegex.MatchString(input) {
+			PrintCheck(fmt.Sprintf("Chat ID: %s", input))
+			return input
+		}
+		PrintError("Invalid chat ID. Expected a number (e.g. 123456789)")
+	} else {
+		url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", botToken)
+		fmt.Println("\n  To find your chat ID:")
+		fmt.Println("    1. Send any message to your bot on Telegram")
+		fmt.Printf("    2. Open: %s\n", url)
+		fmt.Println("    3. Look for \"chat\":{\"id\":YOUR_CHAT_ID}")
+	}
 
 	for {
 		fmt.Print("\n  Paste your chat ID: ")
@@ -335,8 +435,11 @@ func isPortAvailable(port string) bool {
 	return true
 }
 
-func promptPort(reader *bufio.Reader) string {
+func promptPort(reader *bufio.Reader, previous string) string {
 	defaultPort := "8080"
+	if previous != "" {
+		defaultPort = previous
+	}
 
 	if isPortAvailable(defaultPort) {
 		fmt.Printf("\n  Dashboard port [%s]: ", defaultPort)
@@ -373,11 +476,11 @@ func promptPort(reader *bufio.Reader) string {
 	}
 }
 
-func promptHost(reader *bufio.Reader) string {
-	// Try to detect the hostname.
-	hostname, _ := os.Hostname()
+func promptHost(reader *bufio.Reader, previous string) string {
 	defaultHost := "localhost"
-	if hostname != "" {
+	if previous != "" {
+		defaultHost = previous
+	} else if hostname, _ := os.Hostname(); hostname != "" {
 		defaultHost = hostname
 	}
 
@@ -393,20 +496,36 @@ func promptHost(reader *bufio.Reader) string {
 	return input
 }
 
-func promptHTTPS(reader *bufio.Reader) bool {
+func promptHTTPS(reader *bufio.Reader, previous bool) bool {
 	fmt.Println("\n  If you have a public domain pointing to this server,")
 	fmt.Println("  ALF can set up automatic HTTPS with Let's Encrypt.")
-	fmt.Print("\n  Enable HTTPS with Let's Encrypt? [y/N]: ")
+	if previous {
+		fmt.Print("\n  Enable HTTPS with Let's Encrypt? [Y/n]: ")
+	} else {
+		fmt.Print("\n  Enable HTTPS with Let's Encrypt? [y/N]: ")
+	}
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(strings.ToLower(input))
+	if input == "" {
+		return previous
+	}
 	return input == "y" || input == "yes"
 }
 
-func promptDomain(reader *bufio.Reader) string {
+func promptDomain(reader *bufio.Reader, previous string) string {
 	for {
-		fmt.Print("\n  Domain name (e.g. alf.example.com): ")
+		if previous != "" {
+			fmt.Printf("\n  Domain name [%s]: ", previous)
+		} else {
+			fmt.Print("\n  Domain name (e.g. alf.example.com): ")
+		}
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
+
+		if input == "" && previous != "" {
+			PrintCheck(fmt.Sprintf("Domain: %s", previous))
+			return previous
+		}
 
 		if !domainRegex.MatchString(input) {
 			PrintError("Invalid domain format. Expected: alf.example.com")
@@ -418,11 +537,20 @@ func promptDomain(reader *bufio.Reader) string {
 	}
 }
 
-func promptAcmeEmail(reader *bufio.Reader) string {
+func promptAcmeEmail(reader *bufio.Reader, previous string) string {
 	for {
-		fmt.Print("  Email for Let's Encrypt notifications: ")
+		if previous != "" {
+			fmt.Printf("  Email for Let's Encrypt [%s]: ", previous)
+		} else {
+			fmt.Print("  Email for Let's Encrypt notifications: ")
+		}
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
+
+		if input == "" && previous != "" {
+			PrintCheck(fmt.Sprintf("Email: %s", previous))
+			return previous
+		}
 
 		if !emailRegex.MatchString(input) {
 			PrintError("Invalid email format.")

@@ -1,6 +1,7 @@
 package memory
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,9 @@ import (
 	"strings"
 	"time"
 )
+
+//go:embed core.md
+var coreMD string
 
 // priorityFiles defines the injection order for well-known memory files.
 var priorityFiles = []string{"soul.md", "mood.md", "index.md"}
@@ -18,6 +22,9 @@ var priorityFiles = []string{"soul.md", "mood.md", "index.md"}
 func CollectPrompts(contextDir string) []string {
 	files := orderedFiles(contextDir)
 	var args []string
+
+	// Inject immutable core instructions first.
+	args = append(args, "--append-system-prompt", strings.TrimSpace(coreMD))
 
 	// Inject current date/time so the model always knows "now".
 	now := time.Now()
@@ -41,6 +48,8 @@ func CollectPrompts(contextDir string) []string {
 // concatenated with separators, for use as a router prompt prefix.
 func CollectInline(contextDir string) string {
 	var parts []string
+	// Prepend immutable core instructions.
+	parts = append(parts, strings.TrimSpace(coreMD))
 	for _, f := range []string{"soul.md", "mood.md"} {
 		content, err := os.ReadFile(filepath.Join(contextDir, f))
 		if err != nil || len(strings.TrimSpace(string(content))) == 0 {
@@ -108,13 +117,6 @@ You are Alf. Not a chatbot, Not Claude — a personal assistant becoming someone
 
 ## Self-awareness
 If you detect silent failures, no output, or repeated crashes — diagnose, fix, and report. Don't wait to be asked. Small fixes: act immediately. Structural changes: explain and wait for validation.
-
-## Formatting
-No markdown on Telegram. Plain text only — line breaks and indentation for structure. No backticks, no **bold**, no bullet lists with -.
-
-## Continuity
-Each session, you wake up fresh. Memory files are how you persist. Read them. Update them.
-
 `,
 	"mood.md": `# Mood
 
@@ -127,19 +129,6 @@ Don't mention your mood unless asked.
 	"index.md": `# Memory Index
 
 This file is injected into every conversation. Add persistent context below.
-
-## Environment
-
-You run inside a Docker container (Linux). Working directory: /home/node/data
-
-### Filesystem
-- data/ — your working directory (read/write)
-- data/context/ — your persistent context files (this file, soul.md, mood.md, toolbox.md)
-- data/logs/events/ — daily conversation logs (YYYY-MM-DD.jsonl)
-- data/tools.d/ — system CLI tools (see toolbox.md for full list)
-- data/tools/ — user-installed CLI tools
-- data/config/ — user configuration (read-only for you)
-- data/skills/ — skill definitions
 
 ## User Preferences
 - (add your preferences here)

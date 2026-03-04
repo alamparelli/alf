@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"embed"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -10,6 +11,9 @@ import (
 
 //go:embed templates/*
 var templateFS embed.FS
+
+//go:embed bundled_skills/*
+var bundledSkillsFS embed.FS
 
 // ComposeData holds values for the docker-compose template.
 type ComposeData struct {
@@ -64,4 +68,36 @@ func RenderConfig(dir string, data ConfigData) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(configD, "config.json"), buf.Bytes(), 0o644)
+}
+
+// SeedBundledSkills copies embedded skills into the skills.d directory.
+// Existing files are not overwritten (preserves user modifications).
+func SeedBundledSkills(dir string) error {
+	skillsDir := filepath.Join(dir, "skills.d")
+	return fs.WalkDir(bundledSkillsFS, "bundled_skills", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// Strip the "bundled_skills/" prefix.
+		rel, _ := filepath.Rel("bundled_skills", path)
+		if rel == "." {
+			return nil
+		}
+		dest := filepath.Join(skillsDir, rel)
+
+		if d.IsDir() {
+			return os.MkdirAll(dest, 0o755)
+		}
+
+		// Skip if file already exists.
+		if _, err := os.Stat(dest); err == nil {
+			return nil
+		}
+
+		data, err := bundledSkillsFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dest, data, 0o644)
+	})
 }

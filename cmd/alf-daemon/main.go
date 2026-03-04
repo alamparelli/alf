@@ -170,7 +170,8 @@ func main() {
 	}
 
 	// Load skill catalog (system dir + user dir).
-	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills"))
+	// skills.d contains SKILL.md-based skills; legacy "skills/" is JSON-based.
+	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills.d"))
 
 	// Set process-wide timezone from config so log timestamps are correct.
 	time.Local = resolveTimezone(cfg.Timezone)
@@ -427,21 +428,18 @@ func main() {
 	}
 	defer sched.Stop()
 
-	// Seed security audit job if the skill exists and job not already created.
+	// Seed security audit job if the skill exists (managed = protected from tool modifications).
 	if _, ok := skillStore.Get("security-audit"); ok {
-		if existing := sched.GetByName("Security Audit"); existing == nil {
-			if _, err := sched.Create(
-				"Security Audit",
-				"0 0 9 * * *", // daily at 09:00
-				"haiku_r",
-				"Run a full security audit. Read all files in /home/node/data/skills.d/, /home/node/data/skills/, /home/node/data/tools.d/, and /home/node/data/tools/. Follow the security-audit skill instructions to produce a structured report.",
-				"telegram",
-				[]string{"security-audit"},
-			); err != nil {
-				log.Printf("warning: failed to seed security-audit job: %v", err)
-			} else {
-				log.Println("scheduler: seeded daily security-audit job")
-			}
+		if _, err := sched.EnsureManaged(
+			"security-audit",
+			"Security Audit",
+			"0 0 9 * * *", // daily at 09:00
+			"haiku_r",
+			"Run a full security audit. Read all files in /home/node/data/skills.d/, /home/node/data/skills/, /home/node/data/tools.d/, and /home/node/data/tools/. Follow the security-audit skill instructions to produce a structured report.",
+			"telegram",
+			[]string{"security-audit"},
+		); err != nil {
+			log.Printf("warning: failed to seed security-audit job: %v", err)
 		}
 	}
 

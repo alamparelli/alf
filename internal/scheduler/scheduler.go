@@ -231,6 +231,9 @@ func (e *Engine) Delete(id string) error {
 	if j.System {
 		return fmt.Errorf("cannot delete system job %s", id)
 	}
+	if j.Managed {
+		return fmt.Errorf("cannot delete managed job %s", id)
+	}
 
 	e.mu.Lock()
 	if eid, ok := e.entries[id]; ok {
@@ -252,6 +255,9 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 	}
 	if j.System {
 		return nil, fmt.Errorf("cannot modify system job %s", id)
+	}
+	if j.Managed {
+		return nil, fmt.Errorf("cannot modify managed job %s", id)
 	}
 
 	// Validate before applying.
@@ -320,14 +326,36 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 	return j, nil
 }
 
-// GetByName returns the first job matching the given name, or nil.
-func (e *Engine) GetByName(name string) *Job {
-	for _, j := range e.store.All() {
-		if j.Name == name {
-			return j
-		}
+// EnsureManaged creates a managed job with a fixed ID if it doesn't already exist.
+// Managed jobs are persisted in cron.json but cannot be modified/deleted via the schedule tool.
+// If a job with the given ID already exists (managed or not), it is returned as-is.
+func (e *Engine) EnsureManaged(id, name, schedule, tier, prompt, output string, skills []string) (*Job, error) {
+	if existing := e.store.Get(id); existing != nil {
+		return existing, nil
 	}
-	return nil
+
+	j := &Job{
+		ID:        id,
+		Name:      name,
+		Schedule:  schedule,
+		Tier:      tier,
+		Prompt:    prompt,
+		Output:    output,
+		Skills:    skills,
+		Managed:   true,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+	}
+
+	if err := e.scheduleJob(j); err != nil {
+		return nil, fmt.Errorf("invalid schedule: %w", err)
+	}
+	if err := e.store.Add(j); err != nil {
+		return nil, err
+	}
+
+	log.Printf("scheduler: seeded managed job %s (%s)", id, name)
+	return j, nil
 }
 
 // List returns all jobs (system + user).

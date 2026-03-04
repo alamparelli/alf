@@ -260,6 +260,154 @@ func TestEngineListUserOnly(t *testing.T) {
 	}
 }
 
+func TestManagedJobCannotBeDeleted(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	_, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit", "telegram", nil)
+	if err != nil {
+		t.Fatalf("EnsureManaged: %v", err)
+	}
+
+	if err := e.Delete("sec-audit"); err == nil {
+		t.Fatal("expected error deleting managed job")
+	}
+}
+
+func TestManagedJobCannotBeUpdated(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	_, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit", "telegram", nil)
+	if err != nil {
+		t.Fatalf("EnsureManaged: %v", err)
+	}
+
+	if _, err := e.Update("sec-audit", map[string]string{"prompt": "new"}); err == nil {
+		t.Fatal("expected error updating managed job")
+	}
+}
+
+func TestEnsureManagedIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	j1, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit v1", "telegram", nil)
+	if err != nil {
+		t.Fatalf("EnsureManaged first call: %v", err)
+	}
+
+	j2, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 2h", "haiku_r", "audit v2", "telegram", nil)
+	if err != nil {
+		t.Fatalf("EnsureManaged second call: %v", err)
+	}
+
+	if j1.ID != j2.ID {
+		t.Fatalf("expected same job ID, got %s and %s", j1.ID, j2.ID)
+	}
+	if j2.Prompt != "audit v1" {
+		t.Fatalf("expected original prompt preserved, got %s", j2.Prompt)
+	}
+
+	// Should be only one job.
+	count := 0
+	for _, j := range e.List(false) {
+		if j.ID == "sec-audit" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 managed job, got %d", count)
+	}
+}
+
+func TestManagedJobPersistedInCronJSON(t *testing.T) {
+	dir := t.TempDir()
+	cronPath := filepath.Join(dir, "cron.json")
+
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   cronPath,
+	})
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	_, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit", "telegram", nil)
+	if err != nil {
+		t.Fatalf("EnsureManaged: %v", err)
+	}
+
+	// Load in a fresh store — managed job should be present.
+	s2 := NewStore(cronPath)
+	if err := s2.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	j := s2.Get("sec-audit")
+	if j == nil {
+		t.Fatal("managed job not found after reload")
+	}
+	if !j.Managed {
+		t.Fatal("expected Managed=true after reload")
+	}
+}
+
+func TestManagedJobVisibleInList(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit", "telegram", nil)
+	e.Create("user-job", "@every 2h", "direct", "hello", "silent", nil)
+
+	all := e.List(false)
+	found := false
+	for _, j := range all {
+		if j.ID == "sec-audit" && j.Managed {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("managed job not found in List(false)")
+	}
+
+	// userOnly=true should still include managed jobs (they're not system).
+	userJobs := e.List(true)
+	found = false
+	for _, j := range userJobs {
+		if j.ID == "sec-audit" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("managed job should appear in List(true) since it's not a system job")
+	}
+}
+
 func TestSystemJobsSurviveStart(t *testing.T) {
 	dir := t.TempDir()
 	sockPath := filepath.Join(dir, "test.sock")

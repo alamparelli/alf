@@ -35,6 +35,11 @@ func RunUpgrade(currentVersion string) {
 	// Fix secret file permissions — previous versions wrote 0o644 (world-readable).
 	HardenSecrets(dir)
 
+	// Seed any new bundled skills.
+	if err := SeedBundledSkills(dir); err != nil {
+		PrintInfo(fmt.Sprintf("Warning: failed to seed bundled skills: %v", err))
+	}
+
 	PrintInfo("Restarting ALF...")
 	dockerCompose(dir, "up", "-d")
 	PrintCheck("ALF restarted")

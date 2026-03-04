@@ -30,7 +30,73 @@ themeBtn.onclick = () => {
   dark = !dark;
   document.body.classList.toggle('light', !dark);
   themeBtn.textContent = dark ? 'Light' : 'Dark';
+  syncIframeTheme();
 };
+
+function syncIframeTheme() {
+  const frame = document.getElementById('pageFrame');
+  try {
+    const doc = frame.contentDocument;
+    if (!doc || !doc.documentElement) return;
+
+    // Toggle light class on the iframe's html element.
+    doc.documentElement.classList.toggle('light', !dark);
+
+    // Inject theme.css if not already present.
+    if (!doc.getElementById('alf-theme')) {
+      const link = doc.createElement('link');
+      link.id = 'alf-theme';
+      link.rel = 'stylesheet';
+      link.href = '/static/theme.css';
+      doc.head.appendChild(link);
+    }
+  } catch (_) { /* cross-origin or not loaded */ }
+}
+
+// Sync theme when iframe loads a new page.
+document.getElementById('pageFrame').addEventListener('load', syncIframeTheme);
+
+// --- Sidebar navigation ---
+const sidebar = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
+const hamburgerBtn = document.getElementById('hamburgerBtn');
+
+hamburgerBtn.addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+  sidebarOverlay.classList.toggle('open');
+});
+sidebarOverlay.addEventListener('click', () => {
+  sidebar.classList.remove('open');
+  sidebarOverlay.classList.remove('open');
+});
+
+function navigateTo(view) {
+  const homeView = document.getElementById('homeView');
+  const pageFrame = document.getElementById('pageFrame');
+
+  // Update active nav item
+  document.querySelectorAll('#sidebarNav .nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.view === view);
+  });
+
+  if (view === 'home') {
+    homeView.style.display = '';
+    pageFrame.style.display = 'none';
+    pageFrame.src = '';
+  } else if (view.startsWith('page:')) {
+    const name = view.slice(5);
+    homeView.style.display = 'none';
+    pageFrame.style.display = '';
+    pageFrame.src = '/pages/' + encodeURIComponent(name);
+  }
+
+  // Close sidebar on mobile
+  sidebar.classList.remove('open');
+  sidebarOverlay.classList.remove('open');
+}
+
+// Bind Home nav
+document.querySelector('#sidebarNav .nav-item[data-view="home"]').addEventListener('click', () => navigateTo('home'));
 
 // --- Status ---
 function loadStatus() {
@@ -447,26 +513,36 @@ teachSubmit.addEventListener('click', () => {
   });
 });
 
-// --- Pages ---
+// --- Pages (sidebar nav) ---
+function capitalizeName(name) {
+  return name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function loadPages() {
   api('/api/pages/').then(r => {
-    const card = document.getElementById('pagesCard');
-    const list = document.getElementById('pagesList');
+    const nav = document.getElementById('sidebarNav');
     const items = r.items || [];
-    if (!items.length) {
-      card.style.display = 'none';
-      return;
+
+    // Remove existing page nav items (keep Home)
+    nav.querySelectorAll('.nav-item[data-view^="page:"]').forEach(el => el.remove());
+
+    items.forEach(p => {
+      const a = document.createElement('a');
+      a.className = 'nav-item';
+      a.dataset.view = 'page:' + p.name;
+      a.innerHTML = '<i data-lucide="file-code"></i> ' + esc(capitalizeName(p.name));
+      a.addEventListener('click', () => navigateTo(a.dataset.view));
+      nav.appendChild(a);
+    });
+
+    // Restore active state
+    const activeView = document.querySelector('#sidebarNav .nav-item.active');
+    if (activeView) {
+      nav.querySelectorAll('.nav-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.view === activeView.dataset.view);
+      });
     }
-    card.style.display = '';
-    list.innerHTML = items.map(p => {
-      const date = new Date(p.mod_time);
-      const size = formatSize(p.size);
-      return '<a class="page-link" href="/pages/' + esc(p.name) + '" target="_blank">' +
-        '<i data-lucide="file-code" class="ws-icon"></i>' +
-        '<span class="page-name">' + esc(p.name) + '</span>' +
-        '<span class="page-meta">' + size + ' · ' + date.toLocaleDateString() + '</span>' +
-        '</a>';
-    }).join('');
+
     if (window.lucide) lucide.createIcons();
   }).catch(() => {});
 }

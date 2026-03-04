@@ -27,8 +27,8 @@ func TestPageHandler_ServesHTML(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
-	if xfo := rec.Header().Get("X-Frame-Options"); xfo != "DENY" {
-		t.Errorf("X-Frame-Options = %q, want DENY", xfo)
+	if csp := rec.Header().Get("Content-Security-Policy"); csp != "frame-ancestors 'self'" {
+		t.Errorf("Content-Security-Policy = %q, want frame-ancestors 'self'", csp)
 	}
 	if rec.Body.String() != "<html><body>Hello</body></html>" {
 		t.Errorf("unexpected body: %s", rec.Body.String())

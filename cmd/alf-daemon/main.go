@@ -122,6 +122,7 @@ func main() {
 	magic.StartCleanup()
 	sessions := cc.NewFileSessionStore(filepath.Join(configDir, "sessions.json"), nil)
 	sessions.StartCleanup()
+	magic.SetSessionStore(sessions)
 
 	// CC external URL for magic link generation.
 	ccExternalURL := os.Getenv("CC_EXTERNAL_URL")

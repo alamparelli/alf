@@ -1,0 +1,29 @@
+/* ALF CC Theme Variables — link this from Alf pages to match the CC theme.
+   Usage: <link rel="stylesheet" href="/static/theme.css">
+   The parent CC will add class="light" to the <html> of the iframe when light mode is active.
+*/
+:root {
+  --bg: #000000;
+  --bg-card: #1C1C1E;
+  --bg-input: #1C1C1E;
+  --text: #FFFFFF;
+  --text-dim: #8E8E93;
+  --accent: #0A84FF;
+  --green: #30D158;
+  --red: #FF453A;
+  --yellow: #FF9F0A;
+  --border: #38383A;
+  --radius: 12px;
+}
+.light {
+  --bg: #F2F2F7;
+  --bg-card: #FFFFFF;
+  --bg-input: #F2F2F7;
+  --text: #000000;
+  --text-dim: #8E8E93;
+  --accent: #007AFF;
+  --green: #34C759;
+  --red: #FF3B30;
+  --yellow: #FF9500;
+  --border: #D1D1D6;
+}

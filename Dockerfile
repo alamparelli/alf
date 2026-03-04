@@ -94,21 +94,23 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 ENV PATH="/opt/alf/tools:${PATH}"
 
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
-COPY --from=builder /extract-video /opt/alf/tools/extract-video
-COPY --from=builder /recall-tools /opt/alf/tools/recall-tools
-COPY --from=builder /telegram-tools /opt/alf/tools/telegram-tools
-COPY --from=builder /schedule-tools /opt/alf/tools/schedule-tools
+COPY --from=builder /extract-video /opt/alf/bin/extract-video
+COPY --from=builder /recall-tools /opt/alf/bin/recall-tools
+COPY --from=builder /telegram-tools /opt/alf/bin/telegram-tools
+COPY --from=builder /schedule-tools /opt/alf/bin/schedule-tools
 
 # Transcription script (used on amd64 with faster-whisper, ignored on arm64).
 COPY scripts/transcribe.py /opt/alf/transcribe.py
 
-# Create memory tool symlinks (recall, remember, forget → recall-tools).
-RUN ln -s /opt/alf/tools/recall-tools /opt/alf/tools/recall \
-    && ln -s /opt/alf/tools/recall-tools /opt/alf/tools/remember \
-    && ln -s /opt/alf/tools/recall-tools /opt/alf/tools/forget \
-    && ln -s /opt/alf/tools/telegram-tools /opt/alf/tools/react \
-    && ln -s /opt/alf/tools/telegram-tools /opt/alf/tools/status \
-    && ln -s /opt/alf/tools/schedule-tools /opt/alf/tools/schedule
+# Tool symlinks: clean names only, pointing to binaries in /opt/alf/bin/.
+RUN mkdir -p /opt/alf/tools \
+    && ln -s /opt/alf/bin/extract-video /opt/alf/tools/extract-video \
+    && ln -s /opt/alf/bin/recall-tools /opt/alf/tools/recall \
+    && ln -s /opt/alf/bin/recall-tools /opt/alf/tools/remember \
+    && ln -s /opt/alf/bin/recall-tools /opt/alf/tools/forget \
+    && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools/react \
+    && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools/status \
+    && ln -s /opt/alf/bin/schedule-tools /opt/alf/tools/schedule
 
 # Create users for two-user privilege model.
 RUN groupadd --gid 1000 node \
@@ -126,7 +128,8 @@ RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
     && chmod -R g+ws /home/node/data \
     && chown -R root:root /opt/alf/config \
     && chmod 755 /opt/alf/config \
-    && chmod -R 755 /opt/alf/tools
+    && chmod -R 755 /opt/alf/tools \
+    && chmod -R 755 /opt/alf/bin
 
 WORKDIR /home/node
 

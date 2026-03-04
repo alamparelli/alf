@@ -32,6 +32,9 @@ func RunUpgrade(currentVersion string) {
 	// Fix volume ownership — previous versions ran as root, now runs as node (uid 1000).
 	fixVolumePermissions(dir)
 
+	// Fix secret file permissions — previous versions wrote 0o644 (world-readable).
+	HardenSecrets(dir)
+
 	PrintInfo("Restarting ALF...")
 	dockerCompose(dir, "up", "-d")
 	PrintCheck("ALF restarted")
@@ -135,16 +138,9 @@ func fixVolumePermissions(dir string) {
 	chown("data", "1000:1000")
 	chown("config.d", "1000:1000")
 
-	// Secrets must be readable by the node user inside the container.
-	// Docker Compose (non-Swarm) bind-mounts secrets preserving host permissions.
-	secretsDir := filepath.Join(dir, "secrets")
-	if entries, err := os.ReadDir(secretsDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				os.Chmod(filepath.Join(secretsDir, e.Name()), 0o644)
-			}
-		}
-	}
+	// Secrets: readable by owner only. Docker Compose (non-Swarm) bind-mounts
+	// secrets preserving host permissions; container runs as same uid.
+	HardenSecrets(dir)
 }
 
 // migrateConfigDir copies config files from data/config/ to config.d/ if config.d is empty.

@@ -94,6 +94,14 @@ func main() {
 		skillsDir = d
 	}
 
+	// Clean up stale signal sockets from previous runs (e.g. killed during redeploy).
+	if matches, _ := filepath.Glob(filepath.Join(dataDir, "signal-*.sock")); len(matches) > 0 {
+		for _, s := range matches {
+			os.Remove(s)
+		}
+		log.Printf("cleaned up %d stale signal sockets", len(matches))
+	}
+
 	// Parse allowed chat IDs for login authorization.
 	// Default to TELEGRAM_CHAT_ID if ALLOWED_CHAT_IDS not explicitly set.
 	allowedRaw := readSecret("ALLOWED_CHAT_IDS")
@@ -1471,24 +1479,32 @@ func fixDataPermissions(dataDir string) {
 	}
 }
 
-// linkSystemTools creates symlinks in toolsDir for each binary in srcDir.
+// linkSystemTools recreates symlinks in toolsDir for each binary in srcDir.
+// Removes all existing symlinks first to clean up tools removed after an upgrade.
 func linkSystemTools(toolsDir, srcDir string) {
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
 		return
 	}
 	os.MkdirAll(toolsDir, 0o755)
+
+	// Remove all existing symlinks (stale ones from previous versions).
+	if existing, err := os.ReadDir(toolsDir); err == nil {
+		for _, e := range existing {
+			p := filepath.Join(toolsDir, e.Name())
+			if info, err := os.Lstat(p); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				os.Remove(p)
+			}
+		}
+	}
+
+	// Recreate symlinks for current tools.
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
 		link := filepath.Join(toolsDir, e.Name())
 		target := filepath.Join(srcDir, e.Name())
-		// Skip if already a correct symlink.
-		if existing, err := os.Readlink(link); err == nil && existing == target {
-			continue
-		}
-		os.Remove(link) // remove stale symlink or file
 		if err := os.Symlink(target, link); err == nil {
 			log.Printf("linked tools.d/%s → %s", e.Name(), target)
 		}

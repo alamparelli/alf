@@ -35,17 +35,33 @@ func secretExists(baseDir, name string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// SetSecret writes a secret file with mode 600.
+// SetSecret writes a secret file with mode 600 (owner-only).
 func SetSecret(baseDir, name, value string) error {
 	dir := secretsDir(baseDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	path := secretPath(baseDir, name)
-	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o600); err != nil {
 		return err
 	}
 	return nil
+}
+
+// HardenSecrets fixes permissions on existing secret files (0o600) and the secrets dir (0o700).
+// Call during upgrade to fix installs that used 0o644.
+func HardenSecrets(baseDir string) {
+	dir := secretsDir(baseDir)
+	os.Chmod(dir, 0o700)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			os.Chmod(filepath.Join(dir, e.Name()), 0o600)
+		}
+	}
 }
 
 // GetSecret reads a secret value. Returns empty string if not set.

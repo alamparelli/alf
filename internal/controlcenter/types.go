@@ -20,6 +20,7 @@ type Config struct {
 	AuthBanThreshold        int    `json:"auth_ban_threshold"`         // failed /auth attempts before IP ban, 0 = use default (10)
 	AuthBanDuration         int    `json:"auth_ban_duration"`          // IP ban duration in minutes, 0 = use default (15)
 	Timezone                string `json:"timezone"`                   // IANA timezone (e.g. "Europe/Brussels"), empty = TZ env or UTC
+	TiersTimeout            int    `json:"tiers_timeout"`              // seconds for Claude tier invocations, 0 = default (300)
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -43,6 +44,7 @@ func DefaultConfig() *Config {
 		AutoUpdateNotify:        true,
 		AuthBanThreshold:        10,
 		AuthBanDuration:         15,
+		TiersTimeout:            300,
 	}
 }
 

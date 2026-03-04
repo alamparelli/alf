@@ -120,6 +120,30 @@ func TestFileResourceStore_AtomicWrite(t *testing.T) {
 	}
 }
 
+func TestFileResourceStore_CustomSizeLimit(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "pages")
+	limit := 2048
+	store := NewFileResourceStoreWithLimit(dir, ".html", limit)
+
+	// Within limit should succeed.
+	small := make([]byte, limit-1)
+	if err := store.Put("small", small); err != nil {
+		t.Fatalf("Put() should accept data within limit: %v", err)
+	}
+
+	// Over limit should fail.
+	big := make([]byte, limit+1)
+	if err := store.Put("big", big); err == nil {
+		t.Error("Put() should reject data exceeding custom limit")
+	}
+
+	// Default store should accept the same size (it's well under 1MB).
+	defaultStore := NewFileResourceStore(filepath.Join(t.TempDir(), "default"), ".md")
+	if err := defaultStore.Put("ok", big); err != nil {
+		t.Fatalf("default store should accept %d bytes: %v", len(big), err)
+	}
+}
+
 func TestFileResourceStore_SkipsSubdirs(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "resources")
 	store := NewFileResourceStore(dir, ".md")

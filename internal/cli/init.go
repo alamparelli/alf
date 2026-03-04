@@ -81,6 +81,7 @@ type setupProfile struct {
 	AcmeEmail string `json:"acme_email,omitempty"`
 	Port      string `json:"port,omitempty"`
 	Host      string `json:"host,omitempty"`
+	Timezone  string `json:"timezone,omitempty"`
 }
 
 func setupProfilePath() string {
@@ -172,6 +173,15 @@ func RunInit() {
 			Port: ccPort, Host: ccHost,
 		})
 	}
+
+	// Step 5b: Timezone
+	tz := promptTimezone(reader, prev.Timezone)
+	composeData.Timezone = tz
+
+	// Update saved profile with timezone.
+	profile := loadSetupProfile()
+	profile.Timezone = tz
+	saveSetupProfile(profile)
 
 	// Set default image, allow override via ALF_IMAGE env var.
 	composeData.Image = "ghcr.io/alamparelli/alf:latest"
@@ -562,6 +572,39 @@ func promptAcmeEmail(reader *bufio.Reader, previous string) string {
 	}
 }
 
+func promptTimezone(reader *bufio.Reader, previous string) string {
+	// Auto-detect from system.
+	detected := ""
+	if tz, err := time.LoadLocation("Local"); err == nil && tz.String() != "Local" && tz.String() != "UTC" {
+		detected = tz.String()
+	}
+
+	hint := "UTC"
+	if previous != "" {
+		hint = previous
+	} else if detected != "" {
+		hint = detected
+	}
+
+	fmt.Printf("  Timezone [%s]: ", hint)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+
+	if input == "" {
+		PrintCheck(fmt.Sprintf("Timezone: %s", hint))
+		return hint
+	}
+
+	if _, err := time.LoadLocation(input); err != nil {
+		PrintWarning(fmt.Sprintf("Invalid timezone %q, using %s", input, hint))
+		PrintCheck(fmt.Sprintf("Timezone: %s", hint))
+		return hint
+	}
+
+	PrintCheck(fmt.Sprintf("Timezone: %s", input))
+	return input
+}
+
 func checkPortsForHTTPS() {
 	for _, port := range []string{"80", "443"} {
 		if !isPortAvailable(port) {
@@ -610,7 +653,7 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	}
 	PrintCheck("docker-compose.yml")
 
-	if err := RenderConfig(dir, ConfigData{ChatID: chatID}); err != nil {
+	if err := RenderConfig(dir, ConfigData{ChatID: chatID, Timezone: compose.Timezone}); err != nil {
 		Fatal(fmt.Sprintf("Failed to write config.json: %v", err))
 	}
 	PrintCheck("config.json")

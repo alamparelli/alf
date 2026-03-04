@@ -20,7 +20,7 @@ var protectedContextFiles = map[string]bool{
 	"soul": true, "mood": true, "index": true, "toolbox": true,
 }
 
-const maxIngestContentBytes = 200 * 1024 // 200KB
+const maxIngestContentBytes = 50 * 1024 // 50KB
 
 // allowedInstructions restricts extraction instructions to known presets.
 // Custom instructions are passed through but capped to prevent prompt abuse.
@@ -29,6 +29,7 @@ var allowedInstructions = map[string]bool{
 	"extract preferences": true,
 	"extract decisions":   true,
 	"store-as-is":         true,
+	"summarize":           true,
 }
 
 const maxCustomInstructionLen = 200
@@ -89,7 +90,7 @@ func (h *MemoryIngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	contentSize := len(req.Content)
 	if contentSize > maxIngestContentBytes {
 		respondJSON(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("Content exceeds 200KB limit (current: %dKB)", contentSize/1024),
+			"error": fmt.Sprintf("Content exceeds 50KB limit (current: %dKB)", contentSize/1024),
 		})
 		return
 	}
@@ -316,39 +317,26 @@ func (h *MemoryIngestHandler) saveToContext(content, instruction, fileName, tier
 	if strings.EqualFold(instruction, "store-as-is") {
 		body = content
 	} else {
-		// Claude extraction → markdown bullet list.
-		if instruction == "" {
-			instruction = "Extract key facts"
-		}
-
-		prompt := fmt.Sprintf(`Extract structured items from this content.
-Instruction: %s
+		// Summarize: Claude distills content into clean markdown.
+		prompt := fmt.Sprintf(`Summarize the following content into concise, well-structured markdown.
+Use bullet points for key items. Keep only important information. No preamble or explanation — output ONLY the markdown summary.
 
 Content:
 ---
 %s
----
-
-Return ONLY a JSON array: [{"text": "...", "type": "fact|preference|decision"}]
-Rules: self-contained items, concise, skip trivial info.`, instruction, content)
+---`, content)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 
 		params := provider.Params{
 			Model:    "claude-haiku-4-5",
-			MaxTurns: 3,
+			MaxTurns: 1,
 			Tools:    []string{""},
 		}
 		if tier := h.resolveTier(tierName); tier != nil {
 			if tier.Model != "" {
 				params.Model = tier.Model
-			}
-			if tier.MaxTurns > 0 {
-				params.MaxTurns = tier.MaxTurns
-			}
-			if len(tier.Tools) > 0 {
-				params.Tools = tier.Tools
 			}
 			if tier.Effort != "" {
 				params.Effort = tier.Effort
@@ -357,34 +345,10 @@ Rules: self-contained items, concise, skip trivial info.`, instruction, content)
 
 		result, err := h.Provider.Invoke(ctx, prompt, params, nil)
 		if err != nil {
-			return nil, fmt.Errorf("claude extraction failed: %w", err)
+			return nil, fmt.Errorf("summarization failed: %w", err)
 		}
 
-		raw := strings.TrimSpace(result.Text)
-		raw = strings.TrimPrefix(raw, "```json")
-		raw = strings.TrimPrefix(raw, "```")
-		raw = strings.TrimSuffix(raw, "```")
-		raw = strings.TrimSpace(raw)
-
-		if start := strings.Index(raw, "["); start >= 0 {
-			if end := strings.LastIndex(raw, "]"); end > start {
-				raw = raw[start : end+1]
-			}
-		}
-
-		var facts []ingestMemory
-		if err := json.Unmarshal([]byte(raw), &facts); err != nil {
-			return nil, fmt.Errorf("failed to parse extraction result: %w (raw: %.200s)", err, result.Text)
-		}
-
-		var lines []string
-		for _, f := range facts {
-			text := strings.TrimSpace(f.Text)
-			if text != "" {
-				lines = append(lines, "- "+text)
-			}
-		}
-		body = strings.Join(lines, "\n") + "\n"
+		body = strings.TrimSpace(result.Text) + "\n"
 	}
 
 	if err := h.ContextStore.Put(fileName, []byte(body)); err != nil {

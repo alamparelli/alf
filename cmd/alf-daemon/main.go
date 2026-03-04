@@ -138,7 +138,7 @@ func main() {
 	os.MkdirAll(configDir, 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
-	for _, sub := range []string{"config", "tools", "skills", "context"} {
+	for _, sub := range []string{"config", "tools", "skills", "context", "pages"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
 
@@ -166,6 +166,9 @@ func main() {
 	if err := tierStore.Reload(); err != nil {
 		log.Printf("warning: failed to load tiers: %v", err)
 	}
+
+	// Set process-wide timezone from config so log timestamps are correct.
+	time.Local = resolveTimezone(cfg.Timezone)
 
 	// Bootstrap default memory files (soul.md, mood.md, index.md).
 	contextDir := filepath.Join(dataDir, "context")
@@ -265,7 +268,8 @@ func main() {
 	claudeCred := &syscall.Credential{Uid: 1001, Gid: 1000}
 
 	// Provider: spawn-per-call Claude CLI for responses.
-	cliProvider := provider.NewCLIProvider(dataDir, 5*time.Minute, claudeCred)
+	tiersTimeout := time.Duration(cfg.TiersTimeout) * time.Second // 0 → default 5m inside NewCLIProvider
+	cliProvider := provider.NewCLIProvider(dataDir, tiersTimeout, claudeCred)
 
 	// Router model for message classification.
 	routerModel := router.ResolveModel(tierStore.Current().RouterModel)
@@ -370,7 +374,7 @@ func main() {
 		Provider:   &schedulerProvider{p: cliProvider},
 		TierStore:  &schedulerTierStore{ts: tierStore},
 		ChatLogger: &schedulerChatLogger{store: chatStore},
-		CronPath:   filepath.Join(contextDir, "cron.json"),
+		CronPath:   filepath.Join(configDir, "cron.json"),
 		Location:   schedLocation,
 	})
 
@@ -392,7 +396,7 @@ func main() {
 		)
 	}
 	if memDB != nil {
-		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, func(cmd *exec.Cmd) {
+		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, tiersTimeout, func(cmd *exec.Cmd) {
 			cmd.SysProcAttr = &syscall.SysProcAttr{
 				Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
 			}
@@ -404,7 +408,7 @@ func main() {
 		// Run initial extraction after a delay (avoids competing with other
 		// startup processes for resources on constrained hosts).
 		go func() {
-			time.Sleep(3 * time.Minute)
+			time.Sleep(10 * time.Minute)
 			state := extractor.LoadState()
 			if time.Since(state.LastRun) >= 3*time.Hour {
 				log.Println("memstore: running initial extraction (overdue)")
@@ -433,7 +437,8 @@ func main() {
 						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
 					}
 					if cfg.Timezone != oldTZ {
-						log.Printf("config: timezone changed to %q — restart required for scheduler to pick up new timezone", cfg.Timezone)
+						time.Local = resolveTimezone(cfg.Timezone)
+						log.Printf("config: timezone changed to %q (logs updated, scheduler needs restart)", cfg.Timezone)
 					}
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone)
 				}
@@ -755,7 +760,7 @@ func main() {
 
 			// Command routing: handle /commands before passing to Claude.
 			if strings.HasPrefix(u.Message.Text, "/") {
-				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs) {
+				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir) {
 					continue
 				}
 				// Unknown /commands fall through to Claude.
@@ -780,8 +785,9 @@ func main() {
 			// Pre-route memory recall: check long-term store BEFORE routing
 			// so instant-tier responses also have personal context.
 			var preRecallBlock string
+			recallBestDist := 2.0
 			if memDB != nil {
-				preRecallBlock = autoRecall(memDB, u.Message.Text)
+				preRecallBlock, recallBestDist = autoRecall(memDB, u.Message.Text)
 			}
 
 			// Route message to appropriate tier.
@@ -819,10 +825,10 @@ func main() {
 			if !hasMedia {
 				routingAnim.Stop()
 			}
-			// If memories were recalled, override instant responses — the user
-			// is asking about something personal that needs memory context.
-			if preRecallBlock != "" && routeResult.Response != "" && routeResult.Tier == "" {
-				log.Printf("→ memory override: instant response upgraded to tier (recalled memories found)")
+			// If highly relevant memories were recalled (distance < 0.6), override
+			// instant responses — the user is asking about something personal.
+			if preRecallBlock != "" && recallBestDist < 0.6 && routeResult.Response != "" && routeResult.Tier == "" {
+				log.Printf("→ memory override: instant response upgraded to tier (best_dist=%.2f)", recallBestDist)
 				fallback := tierStore.Current().DefaultFallback
 				if fallback == "" {
 					fallback = "haiku_r"
@@ -909,6 +915,11 @@ func main() {
 			if preRecallBlock != "" {
 				sysPromptTexts = append(sysPromptTexts, preRecallBlock)
 			}
+			// Inject onboarding prompt on first use.
+			onboarding := memory.OnboardingPrompt(contextDir)
+			if onboarding != "" {
+				sysPromptTexts = append(sysPromptTexts, onboarding)
+			}
 			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
 
 			invokeParams := provider.Params{
@@ -966,6 +977,11 @@ func main() {
 				})
 				tg.SendHTML(chatID, reply)
 				continue
+			}
+
+			// Clear onboarding flag after first successful response.
+			if onboarding != "" {
+				memory.ClearOnboarding(contextDir)
 			}
 
 			// Store the session ID returned by Claude for future --resume.
@@ -1297,7 +1313,7 @@ func hasMedia(msg *Message) bool {
 }
 
 // handleCommand processes known /commands. Returns true if handled.
-func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) bool {
+func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string) bool {
 	cmd := strings.SplitN(msg.Text, " ", 2)[0]
 	switch cmd {
 	case "/login":
@@ -1316,25 +1332,16 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 		tg.SendHTML(msg.Chat.ID, reply)
 		return true
 	case "/start":
+		memory.SetOnboarding(contextDir)
+		chatSessions.Archive(msg.Chat.ID) // fresh session so onboarding prompt takes effect
 		welcome := `Hey, I'm <b>Alf</b> — your personal AI assistant powered by Claude.
 
-<b>Getting started:</b>
-1. Just send me a message — I'll respond naturally
-2. Use the <b>Control Center</b> to customize my personality, tiers, and tools → /login
-3. Edit <b>context/index.md</b> via the dashboard to teach me about your projects, preferences, and context
-
-<b>Good to know:</b>
-• I react to your emoji — positive reactions make me bolder, negative ones make me more careful
-• My mood changes daily and adapts to your feedback in real-time
-• Use /new to start a fresh conversation when switching topics
+Send me a message to get started — I'll introduce myself and we'll get to know each other.
 
 <b>Commands:</b>
 /new — Fresh conversation
 /login — Access the Control Center
-/restart — Restart the daemon
-/help — Show all commands
-
-Ask me anything to get started.`
+/help — Show all commands`
 		tg.SendHTML(msg.Chat.ID, welcome)
 		return true
 	case "/restart":
@@ -1354,7 +1361,7 @@ Ask me anything to get started.`
 			"/new — Start a new conversation session\n" +
 			"/restart — Restart the ALF daemon\n" +
 			"/login — Get a login link for the Control Center\n" +
-			"/start — Welcome message"
+			"/start — Re-run onboarding (get to know each other)"
 		tg.SendHTML(msg.Chat.ID, help)
 		return true
 	}
@@ -1467,6 +1474,15 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 // group-readable/writable so the claude subprocess (uid 1001, gid node/1000)
 // can access files created by root or node before the permission refactoring.
 func fixDataPermissions(dataDir string) {
+	// Determine the expected uid:gid from the data dir itself.
+	var targetUID, targetGID int
+	if stat, err := os.Stat(dataDir); err == nil {
+		if sys, ok := stat.Sys().(*syscall.Stat_t); ok {
+			targetUID = int(sys.Uid)
+			targetGID = int(sys.Gid)
+		}
+	}
+
 	fixed := 0
 	filepath.Walk(dataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -1484,10 +1500,19 @@ func fixDataPermissions(dataDir string) {
 				fixed++
 			}
 		}
+		// Fix ownership to match the data dir's owner.
+		if targetUID > 0 {
+			if sys, ok := info.Sys().(*syscall.Stat_t); ok {
+				if int(sys.Uid) != targetUID || int(sys.Gid) != targetGID {
+					os.Chown(path, targetUID, targetGID)
+					fixed++
+				}
+			}
+		}
 		return nil
 	})
 	if fixed > 0 {
-		log.Printf("fixed group permissions on %d files/dirs in data/", fixed)
+		log.Printf("fixed permissions on %d files/dirs in data/", fixed)
 	}
 }
 
@@ -1542,6 +1567,20 @@ func migrateConfig(dataDir, configDir string) {
 			continue
 		}
 		log.Printf("migrate: %s → %s", src, dst)
+	}
+
+	// Migrate cron.json from context/ to config/ (was exposed to Claude's context injection).
+	oldCron := filepath.Join(dataDir, "context", "cron.json")
+	newCron := filepath.Join(configDir, "cron.json")
+	if _, err := os.Stat(newCron); os.IsNotExist(err) {
+		if data, err := os.ReadFile(oldCron); err == nil {
+			if err := os.WriteFile(newCron, data, 0o644); err == nil {
+				os.Remove(oldCron)
+				log.Printf("migrate: cron.json → %s", newCron)
+			}
+		}
+	} else {
+		os.Remove(oldCron) // clean up old location even if new exists
 	}
 
 	// Clean up orphan directories from old layout.
@@ -1872,10 +1911,11 @@ func parseAllowedChatIDs(s string) map[int64]bool {
 }
 
 // autoRecall searches the memory store for relevant context and returns
-// a formatted system prompt block. Returns "" if nothing relevant.
-func autoRecall(store *memstore.Store, message string) string {
+// a formatted system prompt block plus the best (lowest) distance score.
+// Returns ("", 2.0) if nothing relevant.
+func autoRecall(store *memstore.Store, message string) (string, float64) {
 	if len(message) < 5 {
-		return ""
+		return "", 2.0
 	}
 	q := message
 	if len(q) > 60 {
@@ -1884,18 +1924,22 @@ func autoRecall(store *memstore.Store, message string) string {
 	results, err := store.Search(message, 3)
 	if err != nil {
 		log.Printf("auto-recall: search error for %q: %v", q, err)
-		return ""
+		return "", 2.0
 	}
 	if len(results) == 0 {
 		log.Printf("auto-recall: no results for %q", q)
-		return ""
+		return "", 2.0
 	}
 	var sb strings.Builder
+	bestDist := 2.0
 	filtered := 0
 	for _, r := range results {
 		if r.Distance >= 1.2 {
 			filtered++
 			continue
+		}
+		if r.Distance < bestDist {
+			bestDist = r.Distance
 		}
 		if sb.Len() == 0 {
 			sb.WriteString("=== [auto-recall] ===\nRelevant memories about the user (auto-retrieved):\n")
@@ -1903,11 +1947,11 @@ func autoRecall(store *memstore.Store, message string) string {
 		sb.WriteString(fmt.Sprintf("- [%s] %s\n", r.Type, r.Text))
 	}
 	if sb.Len() > 0 {
-		log.Printf("auto-recall: injected %d memories for %q (filtered %d by distance)", strings.Count(sb.String(), "\n- "), q, filtered)
+		log.Printf("auto-recall: injected %d memories for %q (best=%.2f, filtered %d by distance)", strings.Count(sb.String(), "\n- "), q, bestDist, filtered)
 	} else {
-		log.Printf("auto-recall: %d results for %q but all filtered by distance (>=0.8)", len(results), q)
+		log.Printf("auto-recall: %d results for %q but all filtered by distance (>=1.2)", len(results), q)
 	}
-	return sb.String()
+	return sb.String(), bestDist
 }
 
 // memStoreRecaller adapts memstore.Store to the cc.MemoryRecaller interface.

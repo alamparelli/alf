@@ -319,3 +319,16 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   .explorer-sidebar { width: 100%; min-width: auto; max-height: 150px; }
   .explorer-editor .json-editor { min-height: 180px; }
 }
+
+/* Pages */
+.pages-list { display: flex; flex-direction: column; gap: 6px; }
+.page-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 8px;
+  background: var(--bg-input); color: var(--text);
+  text-decoration: none; transition: background 0.15s;
+}
+.page-link:hover { background: var(--border); }
+.page-link .ws-icon { flex-shrink: 0; width: 18px; height: 18px; color: var(--accent); }
+.page-name { flex: 1; font-weight: 500; }
+.page-meta { font-size: 0.8rem; color: var(--text-dim); white-space: nowrap; }

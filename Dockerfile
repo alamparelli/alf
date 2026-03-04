@@ -121,6 +121,7 @@ RUN groupadd --gid 1000 node \
 # Directory structure for volumes.
 RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
     && mkdir -p /home/node/data/tools /home/node/data/skills \
+    && mkdir -p /home/node/data/pages \
     && mkdir -p /home/node/data/.claude \
     && mkdir -p /home/node/data/config.d /home/node/data/skills.d \
     && mkdir -p /opt/alf/config \

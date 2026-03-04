@@ -174,8 +174,8 @@ func TestIngest_ClaudeMalformedJSON(t *testing.T) {
 		t.Errorf("expected 500, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "parse") {
-		t.Errorf("expected parse error, got: %s", body)
+	if !strings.Contains(body, "extraction failed") {
+		t.Errorf("expected generic error, got: %s", body)
 	}
 }
 

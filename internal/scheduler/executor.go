@@ -69,10 +69,10 @@ func (e *Engine) executeJob(j *Job) {
 		return
 	}
 	j.running = true
+	start := time.Now()
 	defer func() { j.running = false }()
 
-	now := time.Now()
-	j.LastRun = &now
+	j.LastRun = &start
 
 	var text string
 	var err error
@@ -85,7 +85,7 @@ func (e *Engine) executeJob(j *Job) {
 
 	if err != nil {
 		j.LastError = err.Error()
-		log.Printf("scheduler: job %s (%s) failed: %v", j.ID, j.Name, err)
+		log.Printf("scheduler: [%s] %q failed (%s): %v", j.ID, j.Name, time.Since(start).Round(time.Millisecond), err)
 		// Notify on failure if output includes telegram.
 		if j.Output == "telegram" || j.Output == "both" {
 			if e.cfg.TG != nil && e.cfg.ChatID != 0 {
@@ -96,6 +96,7 @@ func (e *Engine) executeJob(j *Job) {
 	}
 
 	j.LastError = ""
+	log.Printf("scheduler: [%s] %q ok (%s)", j.ID, j.Name, time.Since(start).Round(time.Millisecond))
 
 	// Suppress internal fallback messages.
 	if text == "Done (no text output)." {

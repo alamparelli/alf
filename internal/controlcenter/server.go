@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/alamparelli/alf/internal/provider"
 )
 
 //go:embed web/*
@@ -24,7 +26,7 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService) (*Server, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider) (*Server, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	statusProvider := NewStatusProvider(stats, version)
@@ -58,6 +60,8 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		Magic:          magic,
 		Sessions:       sessions,
 		ChatService:    chatService,
+		MemStore:       memStore,
+		MemProvider:    memProvider,
 		AuthToken:      authToken,
 		AllowedOrigin:    strings.TrimRight(externalURL, "/"),
 		SecureCookies:    strings.HasPrefix(externalURL, "https://"),

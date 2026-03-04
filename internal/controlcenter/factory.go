@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"path/filepath"
 	"time"
+
+	"github.com/alamparelli/alf/internal/provider"
 )
 
 // Deps holds all dependencies needed to build the control center.
@@ -20,6 +22,8 @@ type Deps struct {
 	Magic          *MagicStore
 	Sessions       *SessionStore
 	ChatService    *ChatService // nil if chat API disabled
+	MemStore       MemoryStorer       // nil if memory unavailable
+	MemProvider    provider.Provider  // nil if memory unavailable
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS
@@ -92,6 +96,19 @@ func HandlerFactory(deps Deps) http.Handler {
 		mux.Handle("/api/chat/upload", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/media/", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/react", &ChatReactHandler{Service: deps.ChatService})
+	}
+
+	// Memory ingest (Teach).
+	if deps.MemStore != nil && deps.MemProvider != nil {
+		mux.Handle("/api/memory/ingest", &MemoryIngestHandler{
+			Store:        deps.MemStore,
+			Provider:     deps.MemProvider,
+			TierStore:    deps.TierStore,
+			ContextStore: deps.ContextStore,
+		})
+		mux.Handle("/api/memory/tiers", &MemoryTiersHandler{
+			TierStore: deps.TierStore,
+		})
 	}
 
 	// Restart.

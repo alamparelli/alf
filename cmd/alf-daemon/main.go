@@ -313,7 +313,7 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService)
+		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {

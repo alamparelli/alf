@@ -56,6 +56,53 @@
       </div>
     </div>
 
+    <!-- Teach Card -->
+    <div class="card" id="teachCard">
+      <h2>Teach</h2>
+      <div class="form-row">
+        <label>Destination</label>
+        <div class="segmented-control" id="teachDestination">
+          <button class="seg-btn active" data-value="memory">Memory</button>
+          <button class="seg-btn" data-value="context">Context file</button>
+        </div>
+      </div>
+      <div class="form-row" id="teachFileNameRow" style="display:none">
+        <label>File name</label>
+        <div class="input-suffix-wrap">
+          <input type="text" id="teachFileName" placeholder="e.g. project-notes">
+          <span class="input-suffix">.md</span>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Instruction</label>
+        <select id="teachPreset">
+          <option value="Extract key facts">Extract key facts</option>
+          <option value="Extract preferences">Extract preferences</option>
+          <option value="Extract decisions">Extract decisions</option>
+          <option value="store-as-is">Store as-is (one per line)</option>
+          <option value="custom">Custom...</option>
+        </select>
+      </div>
+      <div class="form-row" id="teachCustomRow" style="display:none">
+        <label>Custom instruction</label>
+        <input type="text" id="teachCustomInput" placeholder="e.g. Extract action items">
+      </div>
+      <div class="form-row" id="teachTierRow">
+        <label>Tier</label>
+        <select id="teachTier">
+          <option value="">Loading...</option>
+        </select>
+      </div>
+      <div style="position:relative">
+        <textarea class="json-editor" id="teachContent" rows="8" placeholder="Paste content here (meeting notes, docs, preferences...)"></textarea>
+        <div class="teach-counter" id="teachCounter">0 / 200KB</div>
+      </div>
+      <div class="teach-actions">
+        <button class="btn" id="teachSubmit">Import</button>
+        <span class="teach-result" id="teachResult"></span>
+      </div>
+    </div>
+
     <!-- Workspace Explorer -->
     <div class="card" id="workspaceCard">
       <h2>Workspace</h2>

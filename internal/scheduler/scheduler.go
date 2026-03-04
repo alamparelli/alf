@@ -202,9 +202,9 @@ func (e *Engine) Create(name, schedule, tier, prompt, output string) (*Job, erro
 		CreatedAt: time.Now(),
 	}
 
-	// Check if it's a one-shot (RFC3339).
+	// One-shot jobs (RFC3339) auto-delete after execution by default.
 	if _, err := time.Parse(time.RFC3339, schedule); err == nil {
-		j.AutoDelete = false // keep record, just disable after run
+		j.AutoDelete = true
 	}
 
 	if err := e.scheduleJob(j); err != nil {

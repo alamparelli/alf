@@ -15,6 +15,7 @@
       </div>
       <nav class="sidebar-nav" id="sidebarNav">
         <a class="nav-item active" data-view="home"><i data-lucide="home"></i> Home</a>
+        <a class="nav-item" data-view="chat"><i data-lucide="message-circle"></i> Chat</a>
       </nav>
     </aside>
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -135,6 +136,15 @@
               <textarea class="json-editor" id="wsEditor" rows="12" placeholder="Select a file to view..." disabled style="display:none"></textarea>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div id="chatView" class="chat-view" style="display:none">
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="chat-status" id="chatStatus"></div>
+        <div class="chat-input-bar">
+          <textarea id="chatInput" placeholder="Message ALF..." rows="1"></textarea>
+          <button class="btn chat-send-btn" id="chatSendBtn"><i data-lucide="send"></i></button>
         </div>
       </div>
 

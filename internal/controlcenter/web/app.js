@@ -72,6 +72,7 @@ sidebarOverlay.addEventListener('click', () => {
 
 function navigateTo(view) {
   const homeView = document.getElementById('homeView');
+  const chatView = document.getElementById('chatView');
   const pageFrame = document.getElementById('pageFrame');
 
   // Update active nav item
@@ -79,13 +80,19 @@ function navigateTo(view) {
     el.classList.toggle('active', el.dataset.view === view);
   });
 
+  homeView.style.display = 'none';
+  chatView.style.display = 'none';
+  pageFrame.style.display = 'none';
+
   if (view === 'home') {
     homeView.style.display = '';
-    pageFrame.style.display = 'none';
     pageFrame.src = '';
+  } else if (view === 'chat') {
+    chatView.style.display = '';
+    pageFrame.src = '';
+    chatLoadHistory();
   } else if (view.startsWith('page:')) {
     const name = view.slice(5);
-    homeView.style.display = 'none';
     pageFrame.style.display = '';
     pageFrame.src = '/pages/' + encodeURIComponent(name);
   }
@@ -95,8 +102,9 @@ function navigateTo(view) {
   sidebarOverlay.classList.remove('open');
 }
 
-// Bind Home nav
+// Bind Home + Chat nav
 document.querySelector('#sidebarNav .nav-item[data-view="home"]').addEventListener('click', () => navigateTo('home'));
+document.querySelector('#sidebarNav .nav-item[data-view="chat"]').addEventListener('click', () => navigateTo('chat'));
 
 // --- Status ---
 function loadStatus() {
@@ -549,6 +557,452 @@ teachSubmit.addEventListener('click', () => {
     teachSubmit.disabled = false;
     teachSubmit.textContent = isContext ? 'Save' : 'Import';
   });
+});
+
+// --- Chat ---
+let chatHistoryLoaded = false;
+let chatSending = false;
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const chatSendBtn = document.getElementById('chatSendBtn');
+const chatStatus = document.getElementById('chatStatus');
+
+function chatLoadHistory() {
+  if (chatHistoryLoaded) return;
+  chatHistoryLoaded = true;
+  fetch('/api/chat?limit=50', { credentials: 'same-origin' })
+    .then(r => {
+      if (r.status === 401) { toast('Session expired', 'error'); throw new Error('401'); }
+      return r.json();
+    })
+    .then(msgs => {
+      if (!msgs || !msgs.length) return;
+      chatMessages.innerHTML = '';
+      msgs.forEach(m => chatAppendBubble(m.role, m.text, m));
+      chatScrollBottom();
+    })
+    .catch(() => {});
+}
+
+const QUICK_REACTIONS = ['👍', '❤', '🔥', '😁', '🤔', '👎'];
+
+function chatAppendBubble(role, text, meta) {
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble ' + role;
+  if (meta && meta.id) bubble.dataset.msgId = meta.id;
+  bubble.innerHTML = role === 'user' ? esc(text) : chatRenderMd(text);
+
+  const metaEl = document.createElement('div');
+  metaEl.className = 'chat-bubble-meta';
+  const ts = meta && meta.ts ? new Date(meta.ts).toLocaleTimeString() : new Date().toLocaleTimeString();
+  let metaText = ts;
+  if (role === 'assistant' && meta) {
+    if (meta.tier) metaText += ' · ' + meta.tier;
+    if (meta.model) metaText += ' · ' + meta.model;
+  }
+  metaEl.textContent = metaText;
+
+  // Reactions container
+  const reactionsEl = document.createElement('span');
+  reactionsEl.className = 'chat-reactions';
+  if (meta && meta.reactions && meta.reactions.length) {
+    meta.reactions.forEach(r => {
+      const span = document.createElement('span');
+      span.className = 'chat-bubble-reaction';
+      span.textContent = r.emoji;
+      reactionsEl.appendChild(span);
+    });
+  }
+  metaEl.appendChild(reactionsEl);
+
+  bubble.appendChild(metaEl);
+
+  // React button for assistant bubbles
+  if (role === 'assistant' && meta && meta.id) {
+    const reactBtn = document.createElement('button');
+    reactBtn.className = 'chat-react-btn';
+    reactBtn.textContent = '😊';
+    reactBtn.title = 'React';
+    reactBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      chatShowReactPicker(bubble, meta.id, reactBtn);
+    });
+    bubble.appendChild(reactBtn);
+  }
+
+  chatMessages.appendChild(bubble);
+  return bubble;
+}
+
+function chatShowReactPicker(bubble, msgId, anchor) {
+  // Remove existing picker
+  document.querySelectorAll('.chat-react-picker').forEach(p => p.remove());
+
+  const picker = document.createElement('div');
+  picker.className = 'chat-react-picker';
+  QUICK_REACTIONS.forEach(emoji => {
+    const btn = document.createElement('button');
+    btn.textContent = emoji;
+    btn.addEventListener('click', () => {
+      picker.remove();
+      chatSendReaction(bubble, msgId, emoji);
+    });
+    picker.appendChild(btn);
+  });
+  bubble.appendChild(picker);
+
+  // Dismiss on outside click
+  const dismiss = (e) => {
+    if (!picker.contains(e.target) && e.target !== anchor) {
+      picker.remove();
+      document.removeEventListener('click', dismiss);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', dismiss), 0);
+}
+
+function chatSendReaction(bubble, msgId, emoji) {
+  fetch('/api/chat/react', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ msg_id: msgId, emoji: emoji }),
+  }).then(r => r.json()).then(result => {
+    if (!result.ok) return;
+    const reactionsEl = bubble.querySelector('.chat-reactions');
+    if (reactionsEl) {
+      const span = document.createElement('span');
+      span.className = 'chat-bubble-reaction';
+      span.textContent = emoji;
+      reactionsEl.appendChild(span);
+      // Mirror reaction from ALF
+      if (result.mirror) {
+        const mirrorSpan = document.createElement('span');
+        mirrorSpan.className = 'chat-bubble-reaction';
+        mirrorSpan.textContent = result.mirror;
+        reactionsEl.appendChild(mirrorSpan);
+      }
+    }
+  }).catch(() => {});
+}
+
+function chatScrollBottom() {
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function chatSetStatus(html) {
+  chatStatus.innerHTML = html;
+}
+
+function chatClearStatus() {
+  chatStatus.innerHTML = '';
+}
+
+function chatRenderMd(text) {
+  if (!text) return '';
+  let html = esc(text);
+  // Code blocks
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+    '<pre><code>' + code + '</code></pre>'
+  );
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Line breaks → paragraphs
+  html = html.replace(/\n\n+/g, '</p><p>');
+  html = '<p>' + html + '</p>';
+  html = html.replace(/\n/g, '<br>');
+  // Clean empty paragraphs around pre blocks
+  html = html.replace(/<p>\s*<pre>/g, '<pre>');
+  html = html.replace(/<\/pre>\s*<\/p>/g, '</pre>');
+  return html;
+}
+
+async function chatSend() {
+  const text = chatInput.value.trim();
+  if (!text || chatSending) return;
+
+  chatSending = true;
+  chatSendBtn.disabled = true;
+  chatInput.value = '';
+  chatInput.style.height = '';
+
+  chatAppendBubble('user', text, {});
+  chatScrollBottom();
+  chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
+
+  let assistantBubble = null;
+  let fullText = '';
+  let doneData = null;
+  let reaction = null;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ message: text }),
+    });
+
+    if (res.status === 401) {
+      toast('Session expired', 'error');
+      chatClearStatus();
+      chatSending = false;
+      chatSendBtn.disabled = false;
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        const lines = part.split('\n');
+        let eventType = '';
+        let eventData = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) eventType = line.slice(7);
+          else if (line.startsWith('data: ')) eventData = line.slice(6);
+        }
+        if (!eventType) continue;
+
+        let data;
+        try { data = JSON.parse(eventData); } catch { continue; }
+
+        switch (eventType) {
+          case 'thinking':
+            chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
+            break;
+          case 'tool_use':
+            chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Using ' + esc(data.name || 'tool') + '...');
+            break;
+          case 'text':
+            fullText = data.text || '';
+            assistantBubble = chatAppendBubble('assistant', fullText, {});
+            chatScrollBottom();
+            break;
+          case 'reaction':
+            reaction = data.emoji;
+            break;
+          case 'done':
+            doneData = data;
+            break;
+          case 'error':
+            toast(data.error || 'Chat error', 'error');
+            break;
+        }
+      }
+    }
+
+    // Update assistant bubble meta with done data
+    if (assistantBubble && doneData) {
+      assistantBubble.dataset.msgId = doneData.msg_id;
+      const metaEl = assistantBubble.querySelector('.chat-bubble-meta');
+      if (metaEl) {
+        // Rebuild meta text (keep reactions container)
+        const reactionsEl = metaEl.querySelector('.chat-reactions');
+        let parts = [new Date().toLocaleTimeString()];
+        if (doneData.tier) parts.push(doneData.tier);
+        if (doneData.model) parts.push(doneData.model);
+        metaEl.textContent = parts.join(' · ');
+        // Re-add reactions container
+        if (reactionsEl) {
+          metaEl.appendChild(reactionsEl);
+        } else {
+          const newReactionsEl = document.createElement('span');
+          newReactionsEl.className = 'chat-reactions';
+          metaEl.appendChild(newReactionsEl);
+        }
+        if (reaction) {
+          const rEl = metaEl.querySelector('.chat-reactions');
+          const span = document.createElement('span');
+          span.className = 'chat-bubble-reaction';
+          span.textContent = reaction;
+          if (rEl) rEl.appendChild(span);
+        }
+      }
+      // Add react button
+      const reactBtn = document.createElement('button');
+      reactBtn.className = 'chat-react-btn';
+      reactBtn.textContent = '😊';
+      reactBtn.title = 'React';
+      reactBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        chatShowReactPicker(assistantBubble, doneData.msg_id, reactBtn);
+      });
+      assistantBubble.appendChild(reactBtn);
+    }
+
+  } catch (e) {
+    toast('Failed to send message', 'error');
+  }
+
+  chatClearStatus();
+  chatSending = false;
+  chatSendBtn.disabled = false;
+  chatInput.focus();
+}
+
+// --- Chat Commands ---
+const CHAT_COMMANDS = [
+  { name: '/new', description: 'Start a new conversation', icon: 'refresh-cw' },
+  { name: '/start', description: 'Re-run onboarding', icon: 'play' },
+  { name: '/restart', description: 'Restart ALF daemon', icon: 'power' },
+  { name: '/help', description: 'Show available commands', icon: 'help-circle' },
+];
+
+let cmdPickerEl = null;
+let cmdSelectedIdx = 0;
+
+function chatShowCommands(filter) {
+  chatDismissCommands();
+  const matches = CHAT_COMMANDS.filter(c => c.name.startsWith(filter));
+  if (!matches.length) return;
+
+  cmdPickerEl = document.createElement('div');
+  cmdPickerEl.className = 'chat-cmd-picker';
+  cmdSelectedIdx = 0;
+
+  matches.forEach((cmd, i) => {
+    const item = document.createElement('div');
+    item.className = 'chat-cmd-item' + (i === 0 ? ' selected' : '');
+    item.innerHTML = '<span class="chat-cmd-name">' + esc(cmd.name) + '</span><span class="chat-cmd-desc">' + esc(cmd.description) + '</span>';
+    item.addEventListener('click', () => {
+      chatDismissCommands();
+      chatExecCommand(cmd.name);
+    });
+    item.addEventListener('mouseenter', () => {
+      cmdPickerEl.querySelectorAll('.chat-cmd-item').forEach(el => el.classList.remove('selected'));
+      item.classList.add('selected');
+      cmdSelectedIdx = i;
+    });
+    cmdPickerEl.appendChild(item);
+  });
+
+  document.getElementById('chatView').insertBefore(cmdPickerEl, document.querySelector('.chat-input-bar'));
+}
+
+function chatDismissCommands() {
+  if (cmdPickerEl) {
+    cmdPickerEl.remove();
+    cmdPickerEl = null;
+  }
+}
+
+function chatExecCommand(cmd) {
+  chatInput.value = '';
+  chatInput.style.height = '';
+
+  switch (cmd) {
+    case '/help':
+      chatAppendBubble('assistant', 'Available commands:\n' + CHAT_COMMANDS.map(c => '**' + c.name + '** — ' + c.description).join('\n'), { tier: 'system' });
+      chatScrollBottom();
+      break;
+    case '/new':
+      fetch('/api/chat', { method: 'DELETE', credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(r => {
+          chatAppendBubble('assistant', r.ok ? 'New session started.' : 'Failed to start new session.', { tier: 'system' });
+          chatScrollBottom();
+        })
+        .catch(() => { chatAppendBubble('assistant', 'Failed to start new session.', { tier: 'system' }); chatScrollBottom(); });
+      break;
+    case '/start':
+      fetch('/api/chat?onboard=1', { method: 'DELETE', credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(r => {
+          chatAppendBubble('assistant', r.ok ? 'Onboarding active — send a message to begin.' : 'Failed.', { tier: 'system' });
+          chatScrollBottom();
+        })
+        .catch(() => { chatAppendBubble('assistant', 'Failed.', { tier: 'system' }); chatScrollBottom(); });
+      break;
+    case '/restart':
+      if (!confirm('Restart ALF daemon?')) return;
+      fetch('/api/restart', { method: 'POST', credentials: 'same-origin' })
+        .then(() => { chatAppendBubble('assistant', 'Restart signal sent.', { tier: 'system' }); chatScrollBottom(); })
+        .catch(() => { chatAppendBubble('assistant', 'Restart failed.', { tier: 'system' }); chatScrollBottom(); });
+      break;
+  }
+}
+
+function chatAppendSystemMessage(text) {
+  const el = document.createElement('div');
+  el.className = 'chat-system-msg';
+  el.textContent = text;
+  chatMessages.appendChild(el);
+}
+
+chatSendBtn.addEventListener('click', chatSend);
+chatInput.addEventListener('keydown', (e) => {
+  // Command picker navigation
+  if (cmdPickerEl) {
+    const items = cmdPickerEl.querySelectorAll('.chat-cmd-item');
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      cmdSelectedIdx = (cmdSelectedIdx - 1 + items.length) % items.length;
+      items.forEach((el, i) => el.classList.toggle('selected', i === cmdSelectedIdx));
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      cmdSelectedIdx = (cmdSelectedIdx + 1) % items.length;
+      items.forEach((el, i) => el.classList.toggle('selected', i === cmdSelectedIdx));
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      const selected = items[cmdSelectedIdx];
+      if (selected) {
+        const cmdName = selected.querySelector('.chat-cmd-name').textContent;
+        chatDismissCommands();
+        chatExecCommand(cmdName);
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      chatDismissCommands();
+      return;
+    }
+  }
+
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    // Check if it's a command
+    if (text.startsWith('/')) {
+      const cmd = CHAT_COMMANDS.find(c => c.name === text.split(' ')[0]);
+      if (cmd) {
+        chatDismissCommands();
+        chatExecCommand(cmd.name);
+        return;
+      }
+    }
+    chatSend();
+  }
+});
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = '';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+
+  const val = chatInput.value;
+  if (val.startsWith('/') && !val.includes(' ')) {
+    chatShowCommands(val);
+  } else {
+    chatDismissCommands();
+  }
 });
 
 // --- Pages (sidebar nav) ---

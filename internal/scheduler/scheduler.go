@@ -17,6 +17,7 @@ type Config struct {
 	TG         TelegramSender
 	Provider   ProviderInvoker
 	TierStore  TierStoreReader
+	SkillStore SkillStoreReader // optional — injects skill prompts into jobs
 	ChatLogger ChatLogger
 	CronPath   string
 	Location   *time.Location
@@ -167,7 +168,7 @@ var validOutputs = map[string]bool{
 }
 
 // Create adds a new user job.
-func (e *Engine) Create(name, schedule, tier, prompt, output string) (*Job, error) {
+func (e *Engine) Create(name, schedule, tier, prompt, output string, skills []string) (*Job, error) {
 	if output == "" {
 		output = "telegram"
 	}
@@ -199,6 +200,7 @@ func (e *Engine) Create(name, schedule, tier, prompt, output string) (*Job, erro
 		Tier:      tier,
 		Prompt:    prompt,
 		Output:    output,
+		Skills:    skills,
 		Enabled:   true,
 		CreatedAt: time.Now(),
 	}
@@ -316,6 +318,16 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 
 	log.Printf("scheduler: updated job %s", id)
 	return j, nil
+}
+
+// GetByName returns the first job matching the given name, or nil.
+func (e *Engine) GetByName(name string) *Job {
+	for _, j := range e.store.All() {
+		if j.Name == name {
+			return j
+		}
+	}
+	return nil
 }
 
 // List returns all jobs (system + user).

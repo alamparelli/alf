@@ -18,6 +18,7 @@ type socketRequest struct {
 	Prompt   string            `json:"prompt,omitempty"`
 	Output   string            `json:"output,omitempty"`
 	ID       string            `json:"id,omitempty"`
+	Skills   []string          `json:"skills,omitempty"`
 	Fields   map[string]string `json:"fields,omitempty"`
 	UserOnly bool              `json:"user_only,omitempty"`
 }
@@ -104,7 +105,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		if tier == "" {
 			tier = "direct"
 		}
-		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Output)
+		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Output, req.Skills)
 		if err != nil {
 			resp.Error = err.Error()
 		} else {

@@ -31,6 +31,7 @@ import (
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/signal"
+	"github.com/alamparelli/alf/internal/skills"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/updater"
 	"github.com/alamparelli/alf/internal/voice"
@@ -167,6 +168,9 @@ func main() {
 	if err := tierStore.Reload(); err != nil {
 		log.Printf("warning: failed to load tiers: %v", err)
 	}
+
+	// Load skill catalog (system dir + user dir).
+	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills"))
 
 	// Set process-wide timezone from config so log timestamps are correct.
 	time.Local = resolveTimezone(cfg.Timezone)
@@ -312,6 +316,7 @@ func main() {
 		}
 	}
 	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
+	chatService.SkillStore = skillStore
 	if memDB != nil {
 		chatService.Recaller = &memStoreRecaller{store: memDB}
 	}
@@ -374,6 +379,7 @@ func main() {
 		TG:         tg,
 		Provider:   &schedulerProvider{p: cliProvider},
 		TierStore:  &schedulerTierStore{ts: tierStore},
+		SkillStore: &schedulerSkillStore{s: skillStore},
 		ChatLogger: &schedulerChatLogger{store: chatStore},
 		CronPath:   filepath.Join(configDir, "cron.json"),
 		Location:   schedLocation,
@@ -421,6 +427,24 @@ func main() {
 	}
 	defer sched.Stop()
 
+	// Seed security audit job if the skill exists and job not already created.
+	if _, ok := skillStore.Get("security-audit"); ok {
+		if existing := sched.GetByName("Security Audit"); existing == nil {
+			if _, err := sched.Create(
+				"Security Audit",
+				"0 0 9 * * *", // daily at 09:00
+				"haiku_r",
+				"Run a full security audit. Read all files in /home/node/data/skills.d/, /home/node/data/skills/, /home/node/data/tools.d/, and /home/node/data/tools/. Follow the security-audit skill instructions to produce a structured report.",
+				"telegram",
+				[]string{"security-audit"},
+			); err != nil {
+				log.Printf("warning: failed to seed security-audit job: %v", err)
+			} else {
+				log.Println("scheduler: seeded daily security-audit job")
+			}
+		}
+	}
+
 	for {
 		// Check for reload events (non-blocking).
 		select {
@@ -458,7 +482,11 @@ func main() {
 					git.Commit("tools updated via CC")
 				}
 			case cc.ReloadSkills:
-				log.Println("skills reloaded")
+				if err := skillStore.Reload(); err != nil {
+					log.Printf("skills reload error: %v", err)
+				} else {
+					log.Println("skills reloaded")
+				}
 				if git != nil {
 					git.Commit("skills updated via CC")
 				}
@@ -917,6 +945,10 @@ func main() {
 			onboarding := memory.OnboardingPrompt(contextDir)
 			if onboarding != "" {
 				sysPromptTexts = append(sysPromptTexts, onboarding)
+			}
+			// Inject skill catalog so the model knows available skills.
+			if catalog := skills.BuildCatalog(skillStore); catalog != "" {
+				sysPromptTexts = append(sysPromptTexts, catalog)
 			}
 			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
 
@@ -2053,6 +2085,19 @@ func (l *schedulerChatLogger) LogScheduledMessage(text, tier, jobName string) {
 		Timestamp: time.Now(),
 		SessionID: "scheduled:" + jobName,
 	})
+}
+
+// schedulerSkillStore adapts skills.Store for the scheduler's SkillStoreReader interface.
+type schedulerSkillStore struct {
+	s skills.Store
+}
+
+func (a *schedulerSkillStore) Get(name string) (*scheduler.SkillInfo, bool) {
+	sk, ok := a.s.Get(name)
+	if !ok {
+		return nil, false
+	}
+	return &scheduler.SkillInfo{Name: sk.Name, Prompt: sk.Prompt}, true
 }
 
 // resolveTimezone loads an IANA timezone from config, falling back to TZ env then UTC.

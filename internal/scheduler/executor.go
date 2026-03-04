@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -46,6 +47,17 @@ type ChatLogger interface {
 // TierStoreReader reads tier configuration.
 type TierStoreReader interface {
 	Current() *TiersSnapshot
+}
+
+// SkillStoreReader provides skill prompts for injection into scheduler jobs.
+type SkillStoreReader interface {
+	Get(name string) (*SkillInfo, bool)
+}
+
+// SkillInfo holds the fields the executor needs from a skill.
+type SkillInfo struct {
+	Name   string
+	Prompt string
 }
 
 // TiersSnapshot is a minimal view of tier config needed by the executor.
@@ -166,6 +178,13 @@ func (e *Engine) invokeLLM(j *Job) (string, error) {
 		}
 	}
 
+	// Inject flattened skill prompts for non-interactive context.
+	if len(j.Skills) > 0 && e.cfg.SkillStore != nil {
+		if block := buildSkillBlock(e.cfg.SkillStore, j.Skills); block != "" {
+			params.SystemPrompts = append(params.SystemPrompts, block)
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -221,5 +240,25 @@ func (e *Engine) writeFile(j *Job, text string) {
 	f.WriteString(header)
 	f.WriteString(text)
 	f.WriteString("\n")
+}
+
+// buildSkillBlock resolves skill names and returns flattened prompts for injection.
+func buildSkillBlock(store SkillStoreReader, names []string) string {
+	var blocks []string
+	for _, name := range names {
+		sk, ok := store.Get(name)
+		if !ok {
+			log.Printf("scheduler: skill %q not found, skipping", name)
+			continue
+		}
+		if sk.Prompt == "" {
+			continue
+		}
+		blocks = append(blocks, fmt.Sprintf("--- %s ---\n%s", sk.Name, sk.Prompt))
+	}
+	if len(blocks) == 0 {
+		return ""
+	}
+	return strings.Join(blocks, "\n\n")
 }
 

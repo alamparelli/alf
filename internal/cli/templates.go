@@ -19,6 +19,7 @@ type ComposeData struct {
 	EnableHTTPS   bool
 	Domain        string
 	AcmeEmail     string
+	Timezone      string // IANA timezone (e.g. "Europe/Brussels")
 }
 
 // RenderDockerCompose writes docker-compose.yml with the given port.
@@ -40,7 +41,8 @@ func RenderDockerCompose(dir string, data ComposeData) error {
 
 // ConfigData holds values for the config.json template.
 type ConfigData struct {
-	ChatID string
+	ChatID   string
+	Timezone string
 }
 
 // RenderConfig writes config.json inside the config.d directory.

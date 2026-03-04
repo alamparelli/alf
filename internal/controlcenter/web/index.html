@@ -95,7 +95,7 @@
       </div>
       <div style="position:relative">
         <textarea class="json-editor" id="teachContent" rows="8" placeholder="Paste content here (meeting notes, docs, preferences...)"></textarea>
-        <div class="teach-counter" id="teachCounter">0 / 200KB</div>
+        <div class="teach-counter" id="teachCounter">0 / 50KB</div>
       </div>
       <div class="teach-actions">
         <button class="btn" id="teachSubmit">Import</button>
@@ -123,6 +123,12 @@
           <textarea class="json-editor" id="wsEditor" rows="12" placeholder="Select a file to view..." disabled style="display:none"></textarea>
         </div>
       </div>
+    </div>
+
+    <!-- Pages Card -->
+    <div class="card" id="pagesCard" style="display:none">
+      <h2>Pages</h2>
+      <div id="pagesList" class="pages-list"></div>
     </div>
 
   </div>

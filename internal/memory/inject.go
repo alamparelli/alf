@@ -13,14 +13,14 @@ import (
 //go:embed core.md
 var coreMD string
 
-// priorityFiles defines the injection order for well-known memory files.
-var priorityFiles = []string{"soul.md", "mood.md", "index.md"}
+// injectedFiles are the only files injected into every conversation.
+// All other context/*.md files must be read on-demand by the model.
+var injectedFiles = []string{"soul.md", "mood.md", "index.md", "toolbox.md"}
 
-// CollectPrompts reads all .md files from contextDir and returns
-// them as CLI arg pairs: ["--append-system-prompt", "<content>", ...].
-// Order: soul.md -> mood.md -> index.md -> rest (alphabetical).
+// CollectPrompts returns CLI arg pairs for system prompt injection.
+// Only core instructions + system files (soul, mood, index, toolbox) are injected.
+// User-created context files are NOT injected — the model reads them on-demand.
 func CollectPrompts(contextDir string) []string {
-	files := orderedFiles(contextDir)
 	var args []string
 
 	// Inject immutable core instructions first.
@@ -33,7 +33,8 @@ func CollectPrompts(contextDir string) []string {
 		now.Format("15:04"))
 	args = append(args, "--append-system-prompt", clock)
 
-	for _, f := range files {
+	// Inject only system files.
+	for _, f := range injectedFiles {
 		content, err := os.ReadFile(filepath.Join(contextDir, f))
 		if err != nil || len(strings.TrimSpace(string(content))) == 0 {
 			continue
@@ -60,38 +61,6 @@ func CollectInline(contextDir string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// orderedFiles returns .md filenames in injection order:
-// priority files first, then remaining alphabetically.
-func orderedFiles(dir string) []string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-
-	have := make(map[string]bool)
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-			have[e.Name()] = true
-		}
-	}
-
-	var result []string
-	// Priority files first (if they exist).
-	for _, f := range priorityFiles {
-		if have[f] {
-			result = append(result, f)
-			delete(have, f)
-		}
-	}
-	// Remaining files alphabetically.
-	var rest []string
-	for f := range have {
-		rest = append(rest, f)
-	}
-	sort.Strings(rest)
-	result = append(result, rest...)
-	return result
-}
 
 // DefaultFiles maps filename -> default content for bootstrap.
 var DefaultFiles = map[string]string{
@@ -153,6 +122,46 @@ func Bootstrap(contextDir string) {
 	}
 	// Remove legacy memory-system.md (now merged into toolbox.md).
 	os.Remove(filepath.Join(contextDir, "memory-system.md"))
+
+	// Create onboarding flag on first install (not on every restart).
+	onboardPath := filepath.Join(contextDir, ".onboarding")
+	indexPath := filepath.Join(contextDir, "index.md")
+	if data, err := os.ReadFile(indexPath); err == nil {
+		// If index.md still has the placeholder content, this is a fresh install.
+		if strings.Contains(string(data), "(add your preferences here)") {
+			os.WriteFile(onboardPath, []byte("1"), 0o644)
+		}
+	}
+}
+
+const onboardingPrompt = `## Onboarding Mode (FIRST USE)
+This is the user's first interaction. Your goals:
+1. Introduce yourself warmly — you're Alf, their personal assistant
+2. Ask about them: what they do, what projects they work on, what they'd like help with
+3. Explain that you'll remember what they tell you across conversations
+4. Mention they can customize your personality (soul.md), teach you things via the Control Center (/login), and that you have CLI tools
+5. Keep it conversational, not a wall of text. One question at a time.
+6. After learning about them, update context/index.md with what you learned
+
+This prompt will not appear again after this conversation.`
+
+// OnboardingPrompt returns the onboarding instruction if the flag exists, empty string otherwise.
+func OnboardingPrompt(contextDir string) string {
+	path := filepath.Join(contextDir, ".onboarding")
+	if _, err := os.Stat(path); err == nil {
+		return onboardingPrompt
+	}
+	return ""
+}
+
+// ClearOnboarding removes the onboarding flag.
+func ClearOnboarding(contextDir string) {
+	os.Remove(filepath.Join(contextDir, ".onboarding"))
+}
+
+// SetOnboarding creates the onboarding flag (used by /start command).
+func SetOnboarding(contextDir string) {
+	os.WriteFile(filepath.Join(contextDir, ".onboarding"), []byte("1"), 0o644)
 }
 
 // GenerateToolbox scans tools.d/ and tools/ directories and writes a

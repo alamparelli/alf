@@ -44,6 +44,9 @@ services:
       - TELEGRAM_CHAT_ID_FILE=/run/secrets/telegram_chat_id
       - CC_AUTH_TOKEN_FILE=/run/secrets/cc_auth_token
       - CC_EXTERNAL_URL={{.CCExternalURL}}
+{{- if .Timezone}}
+      - TZ={{.Timezone}}
+{{- end}}
     secrets:
       - telegram_bot_token
       - telegram_chat_id

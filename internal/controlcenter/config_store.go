@@ -21,9 +21,9 @@ func NewFileConfigStore(path string) ConfigStore {
 
 func (s *fileConfigStore) Load() (*Config, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	data, err := os.ReadFile(s.path)
+	s.mu.RUnlock()
+
 	if err != nil {
 		if os.IsNotExist(err) {
 			return DefaultConfig(), nil
@@ -31,10 +31,17 @@ func (s *fileConfigStore) Load() (*Config, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	var cfg Config
+	cfg := *DefaultConfig() // start with defaults so new fields get sane values
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+
+	// Write back if file is missing new fields (auto-migrate on load).
+	merged, _ := json.MarshalIndent(&cfg, "", "  ")
+	if string(merged) != string(data) {
+		_ = s.Save(&cfg)
+	}
+
 	return &cfg, nil
 }
 

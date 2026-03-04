@@ -23,6 +23,7 @@ type Extractor struct {
 	dataDir    string // root data dir (for logs, claude working dir)
 	stateDir   string // where to store state file (context dir)
 	interval   time.Duration
+	timeout    time.Duration // timeout for Claude extraction call
 	statePath  string
 	stop       chan struct{}
 	cmdSetup   CmdSetup
@@ -44,15 +45,20 @@ type extractedFact struct {
 // NewExtractor creates a new periodic extraction job.
 // cmdSetup (optional) is called on the Claude subprocess before execution —
 // use it to set SysProcAttr credentials for user isolation.
-func NewExtractor(store *Store, dataDir, contextDir string, interval time.Duration, cmdSetup CmdSetup) *Extractor {
+// timeout sets the max duration for each Claude extraction call (0 = default 5m).
+func NewExtractor(store *Store, dataDir, contextDir string, interval, timeout time.Duration, cmdSetup CmdSetup) *Extractor {
 	if interval <= 0 {
 		interval = 3 * time.Hour
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
 	}
 	return &Extractor{
 		store:     store,
 		dataDir:   dataDir,
 		stateDir:  contextDir,
 		interval:  interval,
+		timeout:   timeout,
 		statePath: filepath.Join(contextDir, "memory_extractor_state.json"),
 		stop:      make(chan struct{}),
 		cmdSetup:  cmdSetup,
@@ -104,7 +110,7 @@ func (e *Extractor) loop() {
 
 // RunOnce extracts facts from event logs since the given time.
 func (e *Extractor) RunOnce(since time.Time) error {
-	log.Printf("memstore: starting extraction (since=%s)", since.Format(time.RFC3339))
+	log.Printf("memstore: starting extraction (since=%s, timeout=%s)", since.Format(time.RFC3339), e.timeout)
 
 	conversations, err := e.collectConversations(since)
 	if err != nil {
@@ -121,11 +127,17 @@ func (e *Extractor) RunOnce(since time.Time) error {
 	for _, c := range conversations {
 		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", c.ts, c.role, c.text))
 	}
+	promptText := sb.String()
+	log.Printf("memstore: extracting from %d messages (%d bytes prompt)", len(conversations), len(promptText))
 
-	facts, err := e.extractFacts(sb.String())
+	start := time.Now()
+	facts, err := e.extractFacts(promptText)
+	elapsed := time.Since(start)
 	if err != nil {
+		log.Printf("memstore: extraction failed after %s", elapsed.Round(time.Millisecond))
 		return fmt.Errorf("extract facts: %w", err)
 	}
+	log.Printf("memstore: claude responded in %s", elapsed.Round(time.Millisecond))
 
 	stored := 0
 	for _, fact := range facts {
@@ -243,7 +255,7 @@ Rules:
 Conversations:
 ` + conversationText
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "claude", "-p", prompt,
@@ -262,7 +274,13 @@ Conversations:
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("claude extraction: %w (stderr: %s)", err, stderr.String())
+		cause := "unknown"
+		if ctx.Err() == context.DeadlineExceeded {
+			cause = "timeout"
+		} else if strings.Contains(err.Error(), "killed") {
+			cause = "OOM-likely"
+		}
+		return nil, fmt.Errorf("claude extraction: %w (cause=%s, stderr=%s)", err, cause, truncateText(stderr.String(), 200))
 	}
 
 	// Parse JSON array from response. Claude may wrap it in markdown code blocks.

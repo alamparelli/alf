@@ -32,16 +32,23 @@ var validName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // fileResourceStore implements ResourceStore backed by a directory.
 type fileResourceStore struct {
-	dir string
-	ext string // e.g. ".md" or ".json"
-	mu  sync.RWMutex
+	dir     string
+	ext     string // e.g. ".md" or ".json"
+	maxSize int    // max file size in bytes (0 = use default maxResourceSize)
+	mu      sync.RWMutex
 }
 
 // NewFileResourceStore creates a ResourceStore in dir with the given file extension.
 // The directory is created if it doesn't exist.
 func NewFileResourceStore(dir, ext string) ResourceStore {
-	os.MkdirAll(dir, 0o755)
+	os.MkdirAll(dir, 0o775)
 	return &fileResourceStore{dir: dir, ext: ext}
+}
+
+// NewFileResourceStoreWithLimit creates a ResourceStore with a custom max file size.
+func NewFileResourceStoreWithLimit(dir, ext string, maxSize int) ResourceStore {
+	os.MkdirAll(dir, 0o775)
+	return &fileResourceStore{dir: dir, ext: ext, maxSize: maxSize}
 }
 
 func (s *fileResourceStore) validateName(name string) error {
@@ -108,8 +115,12 @@ func (s *fileResourceStore) Put(name string, data []byte) error {
 	if err := s.validateName(name); err != nil {
 		return err
 	}
-	if len(data) > maxResourceSize {
-		return fmt.Errorf("resource too large: %d bytes (max %d)", len(data), maxResourceSize)
+	limit := maxResourceSize
+	if s.maxSize > 0 {
+		limit = s.maxSize
+	}
+	if len(data) > limit {
+		return fmt.Errorf("resource too large: %d bytes (max %d)", len(data), limit)
 	}
 
 	s.mu.Lock()
@@ -118,7 +129,7 @@ func (s *fileResourceStore) Put(name string, data []byte) error {
 	// Atomic write.
 	p := s.path(name)
 	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o664); err != nil {
 		return fmt.Errorf("write resource tmp: %w", err)
 	}
 	if err := os.Rename(tmp, p); err != nil {

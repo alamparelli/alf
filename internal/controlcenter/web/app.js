@@ -320,9 +320,33 @@ const teachSubmit = document.getElementById('teachSubmit');
 const teachResult = document.getElementById('teachResult');
 const teachFileNameRow = document.getElementById('teachFileNameRow');
 const teachFileName = document.getElementById('teachFileName');
-const TEACH_MAX = 200 * 1024;
+const TEACH_MAX = 50 * 1024;
 
 let teachDest = 'memory';
+
+const memoryPresets = [
+  { value: 'Extract key facts', label: 'Extract key facts' },
+  { value: 'Extract preferences', label: 'Extract preferences' },
+  { value: 'Extract decisions', label: 'Extract decisions' },
+  { value: 'store-as-is', label: 'Store as-is (one per line)' },
+  { value: 'custom', label: 'Custom...' },
+];
+const contextPresets = [
+  { value: 'store-as-is', label: 'Store as-is' },
+  { value: 'summarize', label: 'Summarize' },
+];
+
+function setPresetOptions(presets) {
+  teachPreset.innerHTML = '';
+  presets.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.value;
+    opt.textContent = p.label;
+    teachPreset.appendChild(opt);
+  });
+  teachPreset.dispatchEvent(new Event('change'));
+}
+
 document.querySelectorAll('#teachDestination .seg-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('#teachDestination .seg-btn').forEach(b => b.classList.remove('active'));
@@ -330,6 +354,7 @@ document.querySelectorAll('#teachDestination .seg-btn').forEach(btn => {
     teachDest = btn.dataset.value;
     teachFileNameRow.style.display = teachDest === 'context' ? '' : 'none';
     teachSubmit.textContent = teachDest === 'context' ? 'Save' : 'Import';
+    setPresetOptions(teachDest === 'context' ? contextPresets : memoryPresets);
   });
 });
 
@@ -363,7 +388,7 @@ teachPreset.onchange = () => {
 teachContent.addEventListener('input', () => {
   const len = new Blob([teachContent.value]).size;
   const kb = (len / 1024).toFixed(1);
-  teachCounter.textContent = kb + 'KB / 200KB';
+  teachCounter.textContent = kb + 'KB / 50KB';
   teachCounter.className = 'teach-counter' + (len > TEACH_MAX ? ' over' : len > TEACH_MAX * 0.9 ? ' warn' : '');
   teachSubmit.disabled = len > TEACH_MAX;
 });
@@ -422,9 +447,35 @@ teachSubmit.addEventListener('click', () => {
   });
 });
 
+// --- Pages ---
+function loadPages() {
+  api('/api/pages/').then(r => {
+    const card = document.getElementById('pagesCard');
+    const list = document.getElementById('pagesList');
+    const items = r.items || [];
+    if (!items.length) {
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+    list.innerHTML = items.map(p => {
+      const date = new Date(p.mod_time);
+      const size = formatSize(p.size);
+      return '<a class="page-link" href="/pages/' + esc(p.name) + '" target="_blank">' +
+        '<i data-lucide="file-code" class="ws-icon"></i>' +
+        '<span class="page-name">' + esc(p.name) + '</span>' +
+        '<span class="page-meta">' + size + ' · ' + date.toLocaleDateString() + '</span>' +
+        '</a>';
+    }).join('');
+    if (window.lucide) lucide.createIcons();
+  }).catch(() => {});
+}
+
 // --- Init ---
 loadStatus();
 loadConfig();
 loadTeachTiers();
+loadPages();
 wsInit();
 setInterval(loadStatus, 30000);
+setInterval(loadPages, 30000);

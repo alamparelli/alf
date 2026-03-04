@@ -27,7 +27,7 @@ type Server struct {
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
 func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider) (*Server, error) {
-	configStore, tierStore, contextStore, toolStore, skillStore := StoreFactory(dataDir, configDir)
+	configStore, tierStore, contextStore, toolStore, skillStore, pageStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	statusProvider := NewStatusProvider(stats, version)
 	notifier := NewChannelNotifier(reloadCh)
@@ -54,6 +54,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		ContextStore:    contextStore,
 		ToolStore:      toolStore,
 		SkillStore:     skillStore,
+		PageStore:      pageStore,
 		LogReader:      logReader,
 		StatusProvider: statusProvider,
 		Notifier:       notifier,

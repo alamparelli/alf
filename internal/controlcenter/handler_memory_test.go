@@ -84,13 +84,13 @@ func TestIngest_EmptyContent(t *testing.T) {
 
 func TestIngest_ContentTooLarge(t *testing.T) {
 	h, _, _ := newIngestHandler()
-	big := strings.Repeat("x", 201*1024)
+	big := strings.Repeat("x", 51*1024)
 	rec := doIngest(h, `{"content":"`+big+`","instruction":"store-as-is"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "200KB") {
+	if !strings.Contains(body, "50KB") {
 		t.Errorf("expected size in error, got: %s", body)
 	}
 }
@@ -329,11 +329,11 @@ func TestIngest_Context_StoreAsIs(t *testing.T) {
 	}
 }
 
-func TestIngest_Context_Extraction(t *testing.T) {
+func TestIngest_Context_Summarize(t *testing.T) {
 	h, cs, mp := newContextIngestHandler()
-	mp.response = `[{"text":"Go is used","type":"fact"},{"text":"Deploy on Friday","type":"decision"}]`
+	mp.response = "- Go is used\n- Deploy on Friday"
 
-	rec := doIngest(h, `{"content":"project notes","instruction":"Extract key facts","destination":"context","file_name":"project"}`)
+	rec := doIngest(h, `{"content":"project notes","instruction":"summarize","destination":"context","file_name":"project"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}

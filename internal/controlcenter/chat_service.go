@@ -17,6 +17,7 @@ import (
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
 	chatsession "github.com/alamparelli/alf/internal/session"
+	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/voice"
 )
 
@@ -64,6 +65,7 @@ type ChatService struct {
 	ResolveModel ResolveModelFunc    // injected model resolver
 	Provider     provider.Provider   // injected Claude provider
 	Recaller     MemoryRecaller      // may be nil — auto-injects relevant memories
+	SkillStore   skills.Store        // may be nil — injects skill catalog into system prompts
 	mu           sync.Mutex          // serialize Claude calls (single user v1)
 
 	// Upload registry: upload_id → UploadEntry
@@ -275,6 +277,12 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {
 		sysPromptTexts = append(sysPromptTexts, recallBlock)
 	}
+	// Inject skill catalog so the model knows available skills.
+	if cs.SkillStore != nil {
+		if catalog := skills.BuildCatalog(cs.SkillStore); catalog != "" {
+			sysPromptTexts = append(sysPromptTexts, catalog)
+		}
+	}
 	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
 
 	// Invoke Claude via Provider.
@@ -400,6 +408,15 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 	}
 
 	return result, nil
+}
+
+// NewSession archives the current API chat session and optionally triggers onboarding.
+func (cs *ChatService) NewSession(onboard bool) string {
+	old := cs.Sessions.Archive(apiChatID)
+	if onboard {
+		memory.SetOnboarding(cs.ContextDir)
+	}
+	return old
 }
 
 // History returns paginated chat history.

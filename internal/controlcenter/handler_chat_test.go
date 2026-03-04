@@ -35,9 +35,28 @@ func TestChatHandler_PostInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestChatHandler_MethodNotAllowed(t *testing.T) {
+func TestChatHandler_DeleteNewSession(t *testing.T) {
 	h := &ChatHandler{Service: newTestChatService(t)}
 	req := httptest.NewRequest("DELETE", "/api/chat", nil)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("JSON decode error: %v", err)
+	}
+	if result["ok"] != true {
+		t.Errorf("expected ok=true, got %v", result["ok"])
+	}
+}
+
+func TestChatHandler_MethodNotAllowed(t *testing.T) {
+	h := &ChatHandler{Service: newTestChatService(t)}
+	req := httptest.NewRequest("PATCH", "/api/chat", nil)
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)

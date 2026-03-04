@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// ChatHandler handles POST /api/chat and GET /api/chat/history.
+// ChatHandler handles POST /api/chat, GET /api/chat (history), DELETE /api/chat (new session).
 type ChatHandler struct {
 	Service *ChatService
 }
@@ -20,6 +20,8 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.sendMessage(w, r)
 	case http.MethodGet:
 		h.history(w, r)
+	case http.MethodDelete:
+		h.newSession(w, r)
 	default:
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 	}
@@ -66,6 +68,13 @@ func (h *ChatHandler) sendMessage(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		log.Printf("[chat-api] error: %v", err)
 	}
+}
+
+func (h *ChatHandler) newSession(w http.ResponseWriter, r *http.Request) {
+	onboard := r.URL.Query().Get("onboard") == "1"
+	old := h.Service.NewSession(onboard)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "previous_session": old})
 }
 
 func (h *ChatHandler) history(w http.ResponseWriter, r *http.Request) {

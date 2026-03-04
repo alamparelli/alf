@@ -158,7 +158,7 @@ func TestEngineCreateDelete(t *testing.T) {
 	defer e.cron.Stop()
 
 	// Create a job.
-	j, err := e.Create("test", "@every 1h", "direct", "hello", "silent")
+	j, err := e.Create("test", "@every 1h", "direct", "hello", "silent", nil)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestEngineUpdate(t *testing.T) {
 	e.cron.Start()
 	defer e.cron.Stop()
 
-	j, _ := e.Create("test", "@every 1h", "direct", "hello", "telegram")
+	j, _ := e.Create("test", "@every 1h", "direct", "hello", "telegram", nil)
 
 	updated, err := e.Update(j.ID, map[string]string{
 		"name":   "renamed",
@@ -244,7 +244,7 @@ func TestEngineListUserOnly(t *testing.T) {
 	defer e.cron.Stop()
 
 	e.RegisterSystem("sys1", "System", "@every 1m", func() error { return nil })
-	e.Create("user1", "@every 2h", "direct", "hello", "silent")
+	e.Create("user1", "@every 2h", "direct", "hello", "silent", nil)
 
 	all := e.List(false)
 	if len(all) != 2 {

@@ -21,6 +21,7 @@ type Job struct {
 	Enabled    bool       `json:"enabled"`
 	System     bool       `json:"system"`
 	AutoDelete bool       `json:"auto_delete"`
+	Skills     []string   `json:"skills,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	LastRun    *time.Time `json:"last_run"`
 	NextRun    *time.Time `json:"next_run"`

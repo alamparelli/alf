@@ -20,6 +20,7 @@ type Job struct {
 	Output     string     `json:"output"`
 	Enabled    bool       `json:"enabled"`
 	System     bool       `json:"system"`
+	Managed    bool       `json:"managed,omitempty"`
 	AutoDelete bool       `json:"auto_delete"`
 	Skills     []string   `json:"skills,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`

@@ -31,6 +31,7 @@ type job struct {
 	Output    string     `json:"output"`
 	Enabled   bool       `json:"enabled"`
 	System    bool       `json:"system"`
+	Managed   bool       `json:"managed"`
 	CreatedAt time.Time  `json:"created_at"`
 	LastRun   *time.Time `json:"last_run"`
 	NextRun   *time.Time `json:"next_run"`
@@ -150,12 +151,14 @@ func doList(sockPath string) {
 		return
 	}
 
-	fmt.Printf("%-10s %-6s %-25s %-20s %-10s %-10s %-8s %s\n", "ID", "Type", "Name", "Schedule", "Tier", "Output", "Enabled", "Next Run")
-	fmt.Println(strings.Repeat("-", 110))
+	fmt.Printf("%-10s %-8s %-25s %-20s %-10s %-10s %-8s %s\n", "ID", "Type", "Name", "Schedule", "Tier", "Output", "Enabled", "Next Run")
+	fmt.Println(strings.Repeat("-", 112))
 	for _, j := range resp.Jobs {
 		typ := "user"
 		if j.System {
 			typ = "system"
+		} else if j.Managed {
+			typ = "managed"
 		}
 		enabled := "yes"
 		if !j.Enabled {
@@ -177,7 +180,7 @@ func doList(sockPath string) {
 		if tier == "" {
 			tier = "-"
 		}
-		fmt.Printf("%-10s %-6s %-25s %-20s %-10s %-10s %-8s %s\n", j.ID, typ, name, sched, tier, j.Output, enabled, nextRun)
+		fmt.Printf("%-10s %-8s %-25s %-20s %-10s %-10s %-8s %s\n", j.ID, typ, name, sched, tier, j.Output, enabled, nextRun)
 
 		if j.LastError != "" {
 			fmt.Printf("  -> last error: %s\n", j.LastError)

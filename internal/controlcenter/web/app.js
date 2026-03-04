@@ -25,11 +25,14 @@ function toast(msg, type = 'success') {
 
 // --- Theme toggle ---
 const themeBtn = document.getElementById('themeToggle');
-let dark = true;
+let dark = localStorage.getItem('alf-theme') !== 'light';
+document.body.classList.toggle('light', !dark);
+themeBtn.textContent = dark ? 'Light' : 'Dark';
 themeBtn.onclick = () => {
   dark = !dark;
   document.body.classList.toggle('light', !dark);
   themeBtn.textContent = dark ? 'Light' : 'Dark';
+  localStorage.setItem('alf-theme', dark ? 'dark' : 'light');
   syncIframeTheme();
 };
 

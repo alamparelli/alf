@@ -308,6 +308,11 @@ func promptDirectory(reader *bufio.Reader, previous string) string {
 		}
 	}
 
+	// Seed bundled skills (e.g. security-audit).
+	if err := SeedBundledSkills(dir); err != nil {
+		fmt.Printf("  Warning: failed to seed bundled skills: %v\n", err)
+	}
+
 	PrintCheck(fmt.Sprintf("Directory ready: %s", dir))
 	return dir
 }

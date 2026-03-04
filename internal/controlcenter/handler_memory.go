@@ -22,6 +22,17 @@ var protectedContextFiles = map[string]bool{
 
 const maxIngestContentBytes = 200 * 1024 // 200KB
 
+// allowedInstructions restricts extraction instructions to known presets.
+// Custom instructions are passed through but capped to prevent prompt abuse.
+var allowedInstructions = map[string]bool{
+	"extract key facts":   true,
+	"extract preferences": true,
+	"extract decisions":   true,
+	"store-as-is":         true,
+}
+
+const maxCustomInstructionLen = 200
+
 // MemoryStorer is the subset of memstore.Store used by the ingest handler.
 type MemoryStorer interface {
 	Store(text, memType, source string, meta map[string]any) (int64, error)
@@ -60,9 +71,12 @@ func (h *MemoryIngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Limit request body to prevent memory exhaustion (content limit + JSON overhead).
+	r.Body = http.MaxBytesReader(w, r.Body, maxIngestContentBytes+4096)
+
 	var req ingestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "request too large or invalid JSON"})
 		return
 	}
 
@@ -76,6 +90,14 @@ func (h *MemoryIngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	if contentSize > maxIngestContentBytes {
 		respondJSON(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("Content exceeds 200KB limit (current: %dKB)", contentSize/1024),
+		})
+		return
+	}
+
+	// Validate instruction: allow known presets or cap custom instructions.
+	if !allowedInstructions[strings.ToLower(req.Instruction)] && len(req.Instruction) > maxCustomInstructionLen {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("custom instruction too long (max %d chars)", maxCustomInstructionLen),
 		})
 		return
 	}
@@ -97,7 +119,7 @@ func (h *MemoryIngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	resp, err := h.extractAndStore(req.Content, req.Instruction, req.Tier)
 	if err != nil {
 		log.Printf("[CC] memory ingest error: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "extraction failed — check server logs"})
 		return
 	}
 
@@ -282,7 +304,7 @@ func (h *MemoryIngestHandler) handleContextDestination(w http.ResponseWriter, re
 	resp, err := h.saveToContext(req.Content, req.Instruction, name, req.Tier)
 	if err != nil {
 		log.Printf("[CC] context save error: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "save failed — check server logs"})
 		return
 	}
 	respondJSON(w, http.StatusOK, resp)

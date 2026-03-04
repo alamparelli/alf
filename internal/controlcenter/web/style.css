@@ -250,6 +250,48 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .explorer-editor .json-editor { flex: 1; min-height: 240px; resize: vertical; }
 
+/* Teach */
+.teach-counter {
+  position: absolute; bottom: 8px; right: 12px;
+  font-size: 0.75rem; color: var(--text-dim);
+}
+.teach-counter.warn { color: var(--yellow); }
+.teach-counter.over { color: var(--red); }
+.teach-actions {
+  display: flex; align-items: center; gap: 12px; margin-top: 10px;
+}
+.teach-result { font-size: 0.85rem; color: var(--text-dim); }
+.teach-result.ok { color: var(--green); }
+.teach-result.err { color: var(--red); }
+#teachContent { width: 100%; }
+
+/* Segmented control */
+.segmented-control {
+  display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.seg-btn {
+  padding: 6px 16px; border: none; background: transparent; color: var(--text-dim);
+  font-size: 0.85rem; cursor: pointer; transition: all 0.15s;
+}
+.seg-btn.active {
+  background: var(--accent); color: #fff;
+}
+.seg-btn:not(.active):hover {
+  background: var(--border);
+}
+
+/* Input with suffix */
+.input-suffix-wrap {
+  display: flex; align-items: center; gap: 0;
+}
+.input-suffix-wrap input {
+  border-top-right-radius: 0; border-bottom-right-radius: 0; flex: 1;
+}
+.input-suffix {
+  padding: 8px 10px; background: var(--border); color: var(--text-dim);
+  font-size: 0.85rem; border-radius: 0 8px 8px 0; white-space: nowrap;
+}
+
 /* Responsive */
 @media (max-width: 600px) {
   .container { padding: 12px 10px; }

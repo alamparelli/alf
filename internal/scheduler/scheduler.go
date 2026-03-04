@@ -71,15 +71,16 @@ func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error) {
 			return
 		}
 		job.running = true
+		start := time.Now()
 		defer func() { job.running = false }()
 
-		now := time.Now()
-		job.LastRun = &now
+		job.LastRun = &start
 		if err := fn(); err != nil {
 			job.LastError = err.Error()
-			log.Printf("scheduler: system job %s failed: %v", id, err)
+			log.Printf("scheduler: [%s] failed (%s): %v", id, time.Since(start).Round(time.Millisecond), err)
 		} else {
 			job.LastError = ""
+			log.Printf("scheduler: [%s] ok (%s)", id, time.Since(start).Round(time.Millisecond))
 		}
 	})
 	if err != nil {

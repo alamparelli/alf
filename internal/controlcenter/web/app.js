@@ -308,8 +308,123 @@ function formatSize(bytes) {
 }
 
 
+// --- Teach ---
+const teachPreset = document.getElementById('teachPreset');
+const teachCustomRow = document.getElementById('teachCustomRow');
+const teachCustomInput = document.getElementById('teachCustomInput');
+const teachTier = document.getElementById('teachTier');
+const teachTierRow = document.getElementById('teachTierRow');
+const teachContent = document.getElementById('teachContent');
+const teachCounter = document.getElementById('teachCounter');
+const teachSubmit = document.getElementById('teachSubmit');
+const teachResult = document.getElementById('teachResult');
+const teachFileNameRow = document.getElementById('teachFileNameRow');
+const teachFileName = document.getElementById('teachFileName');
+const TEACH_MAX = 200 * 1024;
+
+let teachDest = 'memory';
+document.querySelectorAll('#teachDestination .seg-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#teachDestination .seg-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    teachDest = btn.dataset.value;
+    teachFileNameRow.style.display = teachDest === 'context' ? '' : 'none';
+    teachSubmit.textContent = teachDest === 'context' ? 'Save' : 'Import';
+  });
+});
+
+function loadTeachTiers() {
+  api('/api/memory/tiers').then(tiers => {
+    teachTier.innerHTML = '';
+    if (!tiers.length) {
+      teachTier.innerHTML = '<option value="">No tiers</option>';
+      return;
+    }
+    // Default: first tier with tools
+    let defaultSet = false;
+    tiers.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.name;
+      opt.textContent = t.name + ' (' + t.model + ')';
+      if (t.tools && !defaultSet) { opt.selected = true; defaultSet = true; }
+      teachTier.appendChild(opt);
+    });
+  }).catch(() => {
+    teachTier.innerHTML = '<option value="">Unavailable</option>';
+  });
+}
+
+teachPreset.onchange = () => {
+  teachCustomRow.style.display = teachPreset.value === 'custom' ? '' : 'none';
+  // Hide tier selector for store-as-is (no Claude call needed)
+  teachTierRow.style.display = teachPreset.value === 'store-as-is' ? 'none' : '';
+};
+
+teachContent.addEventListener('input', () => {
+  const len = new Blob([teachContent.value]).size;
+  const kb = (len / 1024).toFixed(1);
+  teachCounter.textContent = kb + 'KB / 200KB';
+  teachCounter.className = 'teach-counter' + (len > TEACH_MAX ? ' over' : len > TEACH_MAX * 0.9 ? ' warn' : '');
+  teachSubmit.disabled = len > TEACH_MAX;
+});
+
+teachSubmit.addEventListener('click', () => {
+  const content = teachContent.value.trim();
+  if (!content) { toast('Paste some content first', 'error'); return; }
+
+  let instruction = teachPreset.value;
+  if (instruction === 'custom') {
+    instruction = teachCustomInput.value.trim();
+    if (!instruction) { toast('Enter a custom instruction', 'error'); return; }
+  }
+
+  // Context destination validation.
+  if (teachDest === 'context') {
+    const fn = teachFileName.value.trim();
+    if (!fn) { toast('Enter a file name', 'error'); return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(fn)) { toast('File name: only letters, numbers, dashes, underscores', 'error'); return; }
+  }
+
+  const tier = instruction === 'store-as-is' ? '' : teachTier.value;
+
+  const payload = { content, instruction, tier };
+  if (teachDest === 'context') {
+    payload.destination = 'context';
+    payload.file_name = teachFileName.value.trim();
+  }
+
+  teachSubmit.disabled = true;
+  const isContext = teachDest === 'context';
+  teachSubmit.textContent = instruction === 'store-as-is' ? 'Storing...' : 'Extracting...';
+  if (isContext) teachSubmit.textContent = 'Saving...';
+  teachResult.textContent = '';
+  teachResult.className = 'teach-result';
+
+  api('/api/memory/ingest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).then(r => {
+    if (isContext) {
+      teachResult.textContent = 'Saved to context/' + r.file_name;
+    } else {
+      teachResult.textContent = r.imported + ' imported, ' + (r.skipped || 0) + ' skipped';
+    }
+    teachResult.className = 'teach-result ok';
+    if (r.imported > 0) teachContent.value = '';
+    teachContent.dispatchEvent(new Event('input'));
+  }).catch(e => {
+    teachResult.textContent = e.error || 'Import failed';
+    teachResult.className = 'teach-result err';
+  }).finally(() => {
+    teachSubmit.disabled = false;
+    teachSubmit.textContent = isContext ? 'Save' : 'Import';
+  });
+});
+
 // --- Init ---
 loadStatus();
 loadConfig();
+loadTeachTiers();
 wsInit();
 setInterval(loadStatus, 30000);

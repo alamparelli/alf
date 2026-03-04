@@ -1,6 +1,7 @@
 package controlcenter
 
 import (
+	"crypto/subtle"
 	"log"
 	"net/http"
 	"strings"
@@ -22,15 +23,15 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 
 			// Check Authorization header.
 			auth := r.Header.Get("Authorization")
-			if token != "" && strings.HasPrefix(auth, "Bearer ") && auth[7:] == token {
+			if token != "" && strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(token)) == 1 {
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			// Debug: log auth failure details for API calls.
 			if strings.HasPrefix(r.URL.Path, "/api/") {
-				log.Printf("[CC] auth fail: method=%s path=%s has_auth=%v auth_len=%d token_len=%d",
-					r.Method, r.URL.Path, auth != "", len(auth), len(token))
+				log.Printf("[CC] auth fail: ip=%s method=%s path=%s has_auth=%v auth_len=%d token_len=%d",
+					clientIP(r), r.Method, r.URL.Path, auth != "", len(auth), len(token))
 			}
 
 			// Check session cookie.
@@ -67,25 +68,28 @@ p{color:#aaa;line-height:1.6}</style></head>
 </div></body></html>`))
 }
 
-// corsMiddleware reflects the request origin for authenticated endpoints.
-// Auth is enforced by authMiddleware, so CORS just needs to allow the caller's origin.
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-		}
+// corsMiddleware only allows CORS from the configured origin (derived from externalURL).
+// If allowedOrigin is empty, no CORS headers are set (same-origin only).
+func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
+	allowedOrigin = strings.TrimRight(allowedOrigin, "/")
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := strings.TrimRight(r.Header.Get("Origin"), "/")
+			if origin != "" && allowedOrigin != "" && origin == allowedOrigin {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
 
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // jsonMiddleware sets Content-Type: application/json for /api/ paths.
@@ -193,11 +197,7 @@ func newIPBan(threshold int, duration time.Duration) *ipBan {
 }
 
 func (b *ipBan) extractIP(r *http.Request) string {
-	ip := r.RemoteAddr
-	if i := strings.LastIndex(ip, ":"); i != -1 {
-		ip = ip[:i]
-	}
-	return ip
+	return clientIP(r)
 }
 
 // isBanned returns true if the IP is currently banned.
@@ -280,10 +280,7 @@ func newRateLimiter(limit int) *rateLimiter {
 
 func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr
-		if i := strings.LastIndex(ip, ":"); i != -1 {
-			ip = ip[:i]
-		}
+		ip := clientIP(r)
 
 		rl.mu.Lock()
 		rl.counters[ip]++

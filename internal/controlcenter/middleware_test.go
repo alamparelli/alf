@@ -206,7 +206,7 @@ func TestAuthMiddleware_LoginPage_NotForAPI(t *testing.T) {
 }
 
 func TestCORSMiddleware_AllowedOrigin(t *testing.T) {
-	handler := corsMiddleware(okHandler())
+	handler := corsMiddleware("http://localhost:8080")(okHandler())
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	req.Header.Set("Origin", "http://localhost:8080")
 	rec := httptest.NewRecorder()
@@ -218,21 +218,47 @@ func TestCORSMiddleware_AllowedOrigin(t *testing.T) {
 	}
 }
 
-func TestCORSMiddleware_AnyOrigin(t *testing.T) {
-	handler := corsMiddleware(okHandler())
+func TestCORSMiddleware_RejectsUnknownOrigin(t *testing.T) {
+	handler := corsMiddleware("http://localhost:8080")(okHandler())
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.Header.Set("Origin", "http://evil.com")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Error("expected no CORS header for unknown origin")
+	}
+}
+
+func TestCORSMiddleware_EmptyAllowedOrigin(t *testing.T) {
+	handler := corsMiddleware("")(okHandler())
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	req.Header.Set("Origin", "http://192.168.1.100:9090")
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Header().Get("Access-Control-Allow-Origin") != "http://192.168.1.100:9090" {
-		t.Error("expected CORS header to reflect origin")
+	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Error("expected no CORS header when allowedOrigin is empty")
+	}
+}
+
+func TestCORSMiddleware_TrailingSlashNormalization(t *testing.T) {
+	handler := corsMiddleware("http://localhost:8080/")(okHandler())
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.Header.Set("Origin", "http://localhost:8080")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Origin") != "http://localhost:8080" {
+		t.Error("expected CORS header after trailing slash normalization")
 	}
 }
 
 func TestCORSMiddleware_Preflight(t *testing.T) {
-	handler := corsMiddleware(okHandler())
+	handler := corsMiddleware("http://localhost:8080")(okHandler())
 	req := httptest.NewRequest("OPTIONS", "/api/test", nil)
 	req.Header.Set("Origin", "http://localhost:8080")
 	rec := httptest.NewRecorder()

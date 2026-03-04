@@ -2,6 +2,7 @@ package controlcenter
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 )
 
@@ -58,5 +59,5 @@ func (h *AuthHandler) renderError(w http.ResponseWriter, msg string) {
 <style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
 .box{text-align:center;padding:2rem;border:1px solid #333;border-radius:8px;max-width:400px}
 h2{color:#ff6b6b}p{color:#aaa}</style></head>
-<body><div class="box"><h2>Login Failed</h2><p>%s</p></div></body></html>`, msg)
+<body><div class="box"><h2>Login Failed</h2><p>%s</p></div></body></html>`, html.EscapeString(msg))
 }

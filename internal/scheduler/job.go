@@ -63,16 +63,30 @@ func (s *Store) Load() error {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return fmt.Errorf("parse cron.json: %w", err)
 	}
-	s.jobs = file.Jobs
+	// Filter out any system jobs that leaked into cron.json (legacy bug).
+	var userJobs []*Job
+	for _, j := range file.Jobs {
+		if !j.System {
+			userJobs = append(userJobs, j)
+		}
+	}
+	s.jobs = userJobs
 	return nil
 }
 
-// Save writes jobs to disk using atomic rename.
+// Save writes non-system jobs to disk using atomic rename.
+// System jobs are transient — re-registered at every boot via RegisterSystem.
 func (s *Store) Save() error {
 	s.mu.RLock()
+	var userJobs []*Job
+	for _, j := range s.jobs {
+		if !j.System {
+			userJobs = append(userJobs, j)
+		}
+	}
 	data, err := json.MarshalIndent(struct {
 		Jobs []*Job `json:"jobs"`
-	}{Jobs: s.jobs}, "", "  ")
+	}{Jobs: userJobs}, "", "  ")
 	s.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("marshal cron.json: %w", err)

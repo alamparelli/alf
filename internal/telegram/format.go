@@ -41,6 +41,9 @@ func MarkdownToHTML(text string) string {
 		return placeholder("<pre>" + content + "</pre>")
 	})
 
+	// Step 1b: markdown tables → <pre> placeholder
+	text = convertTables(text, placeholder)
+
 	// Step 2: inline code (`...`) → <code> placeholder
 	inlineCodeRe := regexp.MustCompile("`([^`]+?)`")
 	text = inlineCodeRe.ReplaceAllStringFunc(text, func(m string) string {
@@ -112,6 +115,124 @@ func MarkdownToHTML(text string) string {
 	}
 
 	return text
+}
+
+// convertTables detects markdown tables and converts them to <pre> blocks.
+// A table is a sequence of lines where each line starts and ends with |.
+// The separator row (|---|---|) is stripped and column widths are auto-padded.
+func convertTables(text string, placeholder func(string) string) string {
+	lines := strings.Split(text, "\n")
+	var result []string
+	i := 0
+
+	for i < len(lines) {
+		// Detect table start: line with | that looks like a header row.
+		if isTableRow(lines[i]) && i+1 < len(lines) && isTableSeparator(lines[i+1]) {
+			// Collect all contiguous table rows.
+			var tableLines []string
+			tableLines = append(tableLines, lines[i])
+			j := i + 1
+			for j < len(lines) && (isTableRow(lines[j]) || isTableSeparator(lines[j])) {
+				if !isTableSeparator(lines[j]) {
+					tableLines = append(tableLines, lines[j])
+				}
+				j++
+			}
+			// Parse cells.
+			var rows [][]string
+			maxCols := 0
+			for _, line := range tableLines {
+				cells := parseTableRow(line)
+				if len(cells) > maxCols {
+					maxCols = len(cells)
+				}
+				rows = append(rows, cells)
+			}
+
+			// Calculate column widths.
+			widths := make([]int, maxCols)
+			for _, row := range rows {
+				for c, cell := range row {
+					if len(cell) > widths[c] {
+						widths[c] = len(cell)
+					}
+				}
+			}
+
+			// Build formatted table.
+			var sb strings.Builder
+			for r, row := range rows {
+				for c := 0; c < maxCols; c++ {
+					cell := ""
+					if c < len(row) {
+						cell = row[c]
+					}
+					if c > 0 {
+						sb.WriteString(" │ ")
+					}
+					sb.WriteString(cell)
+					// Pad to column width.
+					for pad := len(cell); pad < widths[c]; pad++ {
+						sb.WriteByte(' ')
+					}
+				}
+				sb.WriteByte('\n')
+				// Add separator after header.
+				if r == 0 {
+					for c := 0; c < maxCols; c++ {
+						if c > 0 {
+							sb.WriteString("─┼─")
+						}
+						sb.WriteString(strings.Repeat("─", widths[c]))
+					}
+					sb.WriteByte('\n')
+				}
+			}
+
+			pre := "<pre>" + escapeHTMLEntities(strings.TrimRight(sb.String(), "\n")) + "</pre>"
+			result = append(result, placeholder(pre))
+			i = j
+		} else {
+			result = append(result, lines[i])
+			i++
+		}
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// isTableRow checks if a line looks like a markdown table row (has | separators).
+func isTableRow(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|") && strings.Count(trimmed, "|") >= 3
+}
+
+// isTableSeparator checks for |---|---| style separator rows.
+func isTableSeparator(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "|") {
+		return false
+	}
+	// Remove pipes and spaces, check if only dashes and colons remain.
+	inner := strings.ReplaceAll(trimmed, "|", "")
+	inner = strings.ReplaceAll(inner, "-", "")
+	inner = strings.ReplaceAll(inner, ":", "")
+	inner = strings.TrimSpace(inner)
+	return inner == ""
+}
+
+// parseTableRow splits a | delimited row into trimmed cells.
+func parseTableRow(line string) []string {
+	trimmed := strings.TrimSpace(line)
+	// Remove leading and trailing |
+	trimmed = strings.TrimPrefix(trimmed, "|")
+	trimmed = strings.TrimSuffix(trimmed, "|")
+	parts := strings.Split(trimmed, "|")
+	cells := make([]string, len(parts))
+	for i, p := range parts {
+		cells[i] = strings.TrimSpace(p)
+	}
+	return cells
 }
 
 // ValidateHTML checks that html has balanced Telegram-supported tags.

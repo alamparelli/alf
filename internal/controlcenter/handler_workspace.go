@@ -285,6 +285,16 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 	w.Write([]byte(`{"ok":true}`))
 }
 
+// protectedTopDirs are top-level directories that cannot be deleted.
+var protectedTopDirs = map[string]bool{
+	"config.d":  true,
+	"context.d": true,
+	"memory.d":  true,
+	"pages.d":   true,
+	"skills.d":  true,
+	"tools":     true,
+}
+
 func (h *WorkspaceHandler) del(w http.ResponseWriter, absPath, relPath string) {
 	if relPath == "" {
 		http.Error(w, jsonErr("cannot delete root"), http.StatusBadRequest)
@@ -302,13 +312,20 @@ func (h *WorkspaceHandler) del(w http.ResponseWriter, absPath, relPath string) {
 	}
 
 	if info.IsDir() {
-		http.Error(w, jsonErr("cannot delete directories"), http.StatusForbidden)
-		return
-	}
-
-	if err := os.Remove(absPath); err != nil {
-		http.Error(w, jsonErr("delete failed: "+err.Error()), http.StatusInternalServerError)
-		return
+		// Protect top-level system directories.
+		if protectedTopDirs[relPath] {
+			http.Error(w, jsonErr("cannot delete system directory"), http.StatusForbidden)
+			return
+		}
+		if err := os.RemoveAll(absPath); err != nil {
+			http.Error(w, jsonErr("delete failed: "+err.Error()), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if err := os.Remove(absPath); err != nil {
+			http.Error(w, jsonErr("delete failed: "+err.Error()), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	h.notifyChange(relPath)

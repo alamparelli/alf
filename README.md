@@ -132,18 +132,25 @@ ALF discovers CLI tools and skills at boot. System tools live in `tools.d/` (rea
 
 ### Scheduler
 
-Cron-based job scheduling with timezone support. System jobs (memory extraction) and user-defined jobs. Jobs execute as Claude conversations with configurable prompts.
+Cron-based job scheduling with timezone support. System jobs (memory extraction) and user-defined jobs. Jobs execute as Claude conversations with configurable prompts. Execution logs are written to `data/logs/scheduler/` and recorded in conversation history.
 
 ### Control Center
 
-Web dashboard at port 8080:
+Web dashboard at port 8080 with sidebar navigation:
 
-- **Chat** — web-based chat with SSE streaming
-- **Workspace** — browse and edit configuration files, context, skills
+- **Chat** — web-based chat with SSE streaming, media upload, reactions
+- **Workspace** — browse, edit, and delete files and folders in the data directory
 - **Tiers** — configure response tiers in real-time
+- **Teach** — ingest raw text or files into memory/context via LLM extraction with configurable tiers
+- **Pages** — dynamic HTML dashboards served from `data/pages/`, auto-discovered in the sidebar
+- **Logs** — view and tail daemon log files
 - **Status** — container health, model usage, session stats
 
-Authentication via Telegram magic link (`/login` command) with session cookies. IP ban after repeated auth failures.
+Authentication via Telegram magic link (`/login` command) with session cookies. Issuing a new magic link revokes all previous sessions. IP ban after repeated auth failures (configurable threshold and duration).
+
+### Onboarding
+
+First-time users get an automatic onboarding prompt injected into their first conversation. The `/start` Telegram command re-triggers it. Re-running `alf init` pre-fills previous configuration values (install dir, port, timezone) from a saved setup profile.
 
 ### Daily mood
 
@@ -173,20 +180,23 @@ cmd/
   alf-daemon/      Container daemon (Telegram bot + Control Center + Claude management)
   extract-video/   System tool: video frame extraction + audio transcription
   memory-tools/    System tool: recall, remember, forget (semantic memory)
+  schedule-tools/  System tool: create, list, delete, update scheduled jobs
+  signal/          System tool: send Telegram messages and reactions from Claude sessions
 
 internal/
   cli/             CLI command implementations + embedded templates
-  controlcenter/   HTTP server, auth, config CRUD, chat API, workspace
+  controlcenter/   HTTP server, auth, config CRUD, chat API, workspace, pages, teach
   provider/        Provider/Classifier interfaces + Claude CLI implementations
   router/          LLM-based message classification + tier routing
   memstore/        Semantic memory (SQLite + sqlite-vec + FTS5 + ONNX embedder)
-  media/           Download, MIME detection, frame extraction, PDF parsing
+  media/           Download, MIME detection, frame extraction, contact sheets, PDF parsing
   voice/           Hybrid transcription (faster-whisper x86 / whisper.cpp arm64)
-  scheduler/       Cron-based job scheduling with timezone support
+  scheduler/       Cron-based job scheduling with timezone support + execution logging
   mood/            Daily mood rotation + live feedback
   session/         Claude session persistence (resume IDs)
   telegram/        Telegram Bot API client + Markdown→HTML
-  memory/          System prompt assembly (embedded core + soul, mood, context)
+  memory/          System prompt assembly (embedded core + soul, mood, context, onboarding)
+  signal/          Unix-socket server for Claude→Telegram message delivery
   gittrack/        Git versioning for data directory
   eventlog/        JSONL event logging with daily rotation
   updater/         GHCR image update checker
@@ -200,8 +210,10 @@ ALF runs as root inside the container to manage subprocess isolation. Claude run
 - `/opt/alf/tools/` — read + execute only
 - `/home/node/data/` — read + write (group-writable via umask)
 - Secrets via Docker secrets mechanism, never in environment variables
-- Rate limiting (60 req/min) + CORS on the Control Center API
-- Auth via magic link (time-limited, rotating) with session cookies + IP ban after repeated failures
+- Rate limiting (60 req/min global, 5 req/min on auth) + CORS on the Control Center API
+- Auth via magic link (time-limited, rotating) with session cookies
+- Session revocation — new magic link invalidates all previous sessions
+- IP ban after repeated auth failures (configurable threshold and duration)
 
 ## Requirements
 

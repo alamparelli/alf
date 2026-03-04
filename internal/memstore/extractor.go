@@ -2,31 +2,38 @@ package memstore
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-// CmdSetup is called on exec.Cmd before Run to configure credentials, env, etc.
-type CmdSetup func(cmd *exec.Cmd)
+// ExtractorProvider invokes Claude and returns text output.
+type ExtractorProvider interface {
+	Invoke(ctx context.Context, prompt string, params ExtractorParams) (string, error)
+}
+
+// ExtractorParams mirrors the subset of provider params needed for extraction.
+type ExtractorParams struct {
+	Model    string
+	MaxTurns int
+	DataDir  string
+}
 
 // Extractor periodically extracts facts from event logs and stores them.
 type Extractor struct {
-	store      *Store
-	dataDir    string // root data dir (for logs, claude working dir)
-	stateDir   string // where to store state file (context dir)
-	interval   time.Duration
-	timeout    time.Duration // timeout for Claude extraction call
-	statePath  string
-	stop       chan struct{}
-	cmdSetup   CmdSetup
+	store     *Store
+	dataDir   string         // root data dir (for logs, claude working dir)
+	stateDir  string         // where to store state file (context dir)
+	interval  time.Duration
+	timeout   time.Duration  // timeout for Claude extraction call
+	statePath string
+	stop      chan struct{}
+	provider  ExtractorProvider
 }
 
 // ExtractorState holds the persisted state of the extractor.
@@ -43,10 +50,9 @@ type extractedFact struct {
 }
 
 // NewExtractor creates a new periodic extraction job.
-// cmdSetup (optional) is called on the Claude subprocess before execution —
-// use it to set SysProcAttr credentials for user isolation.
+// provider is used to invoke Claude for fact extraction.
 // timeout sets the max duration for each Claude extraction call (0 = default 5m).
-func NewExtractor(store *Store, dataDir, contextDir string, interval, timeout time.Duration, cmdSetup CmdSetup) *Extractor {
+func NewExtractor(store *Store, dataDir, contextDir string, interval, timeout time.Duration, prov ExtractorProvider) *Extractor {
 	if interval <= 0 {
 		interval = 3 * time.Hour
 	}
@@ -61,7 +67,7 @@ func NewExtractor(store *Store, dataDir, contextDir string, interval, timeout ti
 		timeout:   timeout,
 		statePath: filepath.Join(contextDir, "memory_extractor_state.json"),
 		stop:      make(chan struct{}),
-		cmdSetup:  cmdSetup,
+		provider:  prov,
 	}
 }
 
@@ -238,8 +244,7 @@ func (e *Extractor) readDayEvents(path string, since time.Time) ([]conversationL
 	return lines, scanner.Err()
 }
 
-func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, error) {
-	prompt := `Extract important information from these conversations.
+const extractionPrompt = `Extract important information from these conversations.
 Return ONLY a JSON array, no other text:
 [{"text": "specific fact or decision", "type": "fact|preference|decision"}]
 
@@ -253,38 +258,25 @@ Rules:
 - Be concise but precise
 
 Conversations:
-` + conversationText
+`
+
+func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, error) {
+	prompt := extractionPrompt + conversationText
 
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "claude", "-p", prompt,
-		"--model", "claude-haiku-4-5",
-		"--output-format", "text",
-		"--max-turns", "1",
-		"--allowedTools", "",
-	)
-	cmd.Dir = e.dataDir
-	if e.cmdSetup != nil {
-		e.cmdSetup(cmd)
-	}
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		cause := "unknown"
-		if ctx.Err() == context.DeadlineExceeded {
-			cause = "timeout"
-		} else if strings.Contains(err.Error(), "killed") {
-			cause = "OOM-likely"
-		}
-		return nil, fmt.Errorf("claude extraction: %w (cause=%s, stderr=%s)", err, cause, truncateText(stderr.String(), 200))
+	raw, err := e.provider.Invoke(ctx, prompt, ExtractorParams{
+		Model:    "claude-haiku-4-5",
+		MaxTurns: 1,
+		DataDir:  e.dataDir,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude extraction: %w", err)
 	}
 
 	// Parse JSON array from response. Claude may wrap it in markdown code blocks.
-	raw := strings.TrimSpace(stdout.String())
+	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")

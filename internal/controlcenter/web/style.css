@@ -210,6 +210,15 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .ws-node-dir:hover .ws-icon-chevron { color: var(--accent); }
 .ws-icon-folder { color: var(--accent); }
 
+/* Directory delete button (hover-reveal) */
+.ws-dir-delete {
+  margin-left: auto; opacity: 0; transition: opacity 0.15s;
+  display: flex; align-items: center; color: var(--text-dim); flex-shrink: 0;
+}
+.ws-dir-delete .ws-icon { width: 14px; height: 14px; }
+.ws-node-dir:hover .ws-dir-delete { opacity: 0.6; }
+.ws-dir-delete:hover { opacity: 1 !important; color: var(--danger, #e55); }
+
 /* File nodes */
 .ws-node-file { color: var(--text); font-weight: 400; }
 .ws-node-file.active { background: var(--border); }

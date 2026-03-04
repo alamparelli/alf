@@ -28,9 +28,10 @@ type magicEntry struct {
 
 // MagicStore manages short-lived magic link codes for authentication.
 type MagicStore struct {
-	mu      sync.Mutex
-	entries map[string]*magicEntry
-	nowFn   func() time.Time
+	mu       sync.Mutex
+	entries  map[string]*magicEntry
+	nowFn    func() time.Time
+	sessions *SessionStore // if set, revoke sessions on new magic link
 }
 
 // NewMagicStore creates a MagicStore. Pass nil for nowFn to use time.Now.
@@ -42,6 +43,12 @@ func NewMagicStore(nowFn func() time.Time) *MagicStore {
 		entries: make(map[string]*magicEntry),
 		nowFn:   nowFn,
 	}
+}
+
+// SetSessionStore links a SessionStore so that issuing a new magic link
+// revokes all existing sessions for that chat ID.
+func (ms *MagicStore) SetSessionStore(ss *SessionStore) {
+	ms.sessions = ss
 }
 
 // Issue creates a new magic code for the given chat ID.
@@ -59,6 +66,10 @@ func (ms *MagicStore) Issue(chatID int64, sessTTL time.Duration) (string, error)
 		if e.chatID == chatID {
 			delete(ms.entries, k)
 		}
+	}
+	// Revoke all existing sessions for this chat ID.
+	if ms.sessions != nil {
+		ms.sessions.RevokeChat(chatID)
 	}
 	ms.entries[code] = &magicEntry{
 		chatID:     chatID,
@@ -168,6 +179,12 @@ func (ss *SessionStore) Issue(chatID int64, ttl time.Duration) (string, error) {
 	}
 
 	ss.mu.Lock()
+	// Revoke any existing sessions for this chat ID (one active session at a time).
+	for k, s := range ss.sessions {
+		if s.chatID == chatID {
+			delete(ss.sessions, k)
+		}
+	}
 	ss.sessions[id] = &session{
 		chatID:    chatID,
 		expiresAt: ss.nowFn().Add(ttl),
@@ -176,6 +193,22 @@ func (ss *SessionStore) Issue(chatID int64, ttl time.Duration) (string, error) {
 	ss.mu.Unlock()
 
 	return id, nil
+}
+
+// RevokeChat removes all sessions for the given chat ID.
+func (ss *SessionStore) RevokeChat(chatID int64) {
+	ss.mu.Lock()
+	changed := false
+	for id, s := range ss.sessions {
+		if s.chatID == chatID {
+			delete(ss.sessions, id)
+			changed = true
+		}
+	}
+	if changed {
+		ss.saveLocked()
+	}
+	ss.mu.Unlock()
 }
 
 // Valid returns true if the session ID exists and has not expired.

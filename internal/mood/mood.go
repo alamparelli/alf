@@ -37,7 +37,7 @@ var moods = []Mood{
 }
 
 // GenerateDaily writes mood.md if the date has changed.
-// Preserves any existing ## Live Feedback section.
+// Resets Live Feedback state — score starts fresh each day.
 func GenerateDaily(contextDir string) {
 	path := filepath.Join(contextDir, "mood.md")
 	today := time.Now().Format("2006-01-02")
@@ -48,12 +48,6 @@ func GenerateDaily(contextDir string) {
 	// Check if already generated today.
 	if strings.Contains(content, "Generated: "+today) {
 		return
-	}
-
-	// Preserve Live Feedback section if it exists.
-	var liveFeedback string
-	if idx := strings.Index(content, "## Live Feedback"); idx >= 0 {
-		liveFeedback = strings.TrimSpace(content[idx:])
 	}
 
 	// Seed from date hash + small jitter.
@@ -74,12 +68,6 @@ func GenerateDaily(contextDir string) {
 	sb.WriteString(fmt.Sprintf("Tone: %s\n", m.Tone))
 	sb.WriteString("\nLet this mood color your tone, word choices, and energy level.\n")
 	sb.WriteString("Don't mention your mood unless asked.\n")
-
-	if liveFeedback != "" {
-		sb.WriteString("\n")
-		sb.WriteString(liveFeedback)
-		sb.WriteString("\n")
-	}
 
 	os.WriteFile(path, []byte(sb.String()), 0o644)
 }

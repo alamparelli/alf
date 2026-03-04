@@ -8,129 +8,138 @@
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1><span>ALF</span> Control Center</h1>
-      <div class="header-controls">
-        <button class="toggle-btn" id="themeToggle">Light</button>
+  <div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h1><span>ALF</span> CC</h1>
       </div>
-    </header>
+      <nav class="sidebar-nav" id="sidebarNav">
+        <a class="nav-item active" data-view="home"><i data-lucide="home"></i> Home</a>
+      </nav>
+    </aside>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
-    <!-- Status Card -->
-    <div class="card" id="statusCard">
-      <h2>Status</h2>
-      <div class="status-grid">
-        <div class="stat">
-          <div class="stat-value"><span class="dot green" id="statusDot"></span><span id="statusText">--</span></div>
-          <div class="stat-label">Status</div>
-        </div>
-        <div class="stat">
-          <div class="stat-value" id="uptimeValue">--</div>
-          <div class="stat-label">Uptime</div>
-        </div>
-        <div class="stat">
-          <div class="stat-value" id="msgCount">0</div>
-          <div class="stat-label">Messages</div>
-        </div>
-        <div class="stat">
-          <div class="stat-value" id="lastMsg">--</div>
-          <div class="stat-label">Last Message</div>
+    <div class="main-content">
+      <div class="main-header">
+        <button class="hamburger" id="hamburgerBtn"><i data-lucide="menu"></i></button>
+        <div class="header-controls">
+          <button class="toggle-btn" id="themeToggle">Light</button>
         </div>
       </div>
-    </div>
 
-    <!-- Config Card -->
-    <div class="card">
-      <h2>Configuration</h2>
-      <div class="form-row">
-        <label>Log Level</label>
-        <span class="ro-value" id="cfgLogLevel">--</span>
-      </div>
-      <div class="form-row">
-        <label>Quiet Hours</label>
-        <span class="ro-value" id="cfgQuietHours">--</span>
-      </div>
-      <div class="form-row">
-        <label>System Prompt</label>
-        <span class="ro-value" id="cfgSystemPrompt">--</span>
-      </div>
-    </div>
-
-    <!-- Teach Card -->
-    <div class="card" id="teachCard">
-      <h2>Teach</h2>
-      <div class="form-row">
-        <label>Destination</label>
-        <div class="segmented-control" id="teachDestination">
-          <button class="seg-btn active" data-value="memory">Memory</button>
-          <button class="seg-btn" data-value="context">Context file</button>
-        </div>
-      </div>
-      <div class="form-row" id="teachFileNameRow" style="display:none">
-        <label>File name</label>
-        <div class="input-suffix-wrap">
-          <input type="text" id="teachFileName" placeholder="e.g. project-notes">
-          <span class="input-suffix">.md</span>
-        </div>
-      </div>
-      <div class="form-row">
-        <label>Instruction</label>
-        <select id="teachPreset">
-          <option value="Extract key facts">Extract key facts</option>
-          <option value="Extract preferences">Extract preferences</option>
-          <option value="Extract decisions">Extract decisions</option>
-          <option value="store-as-is">Store as-is (one per line)</option>
-          <option value="custom">Custom...</option>
-        </select>
-      </div>
-      <div class="form-row" id="teachCustomRow" style="display:none">
-        <label>Custom instruction</label>
-        <input type="text" id="teachCustomInput" placeholder="e.g. Extract action items">
-      </div>
-      <div class="form-row" id="teachTierRow">
-        <label>Tier</label>
-        <select id="teachTier">
-          <option value="">Loading...</option>
-        </select>
-      </div>
-      <div style="position:relative">
-        <textarea class="json-editor" id="teachContent" rows="8" placeholder="Paste content here (meeting notes, docs, preferences...)"></textarea>
-        <div class="teach-counter" id="teachCounter">0 / 50KB</div>
-      </div>
-      <div class="teach-actions">
-        <button class="btn" id="teachSubmit">Import</button>
-        <span class="teach-result" id="teachResult"></span>
-      </div>
-    </div>
-
-    <!-- Workspace Explorer -->
-    <div class="card" id="workspaceCard">
-      <h2>Workspace</h2>
-      <div class="ws-breadcrumb" id="wsBreadcrumb"></div>
-      <div class="explorer-split">
-        <div class="explorer-sidebar">
-          <div class="explorer-file-list" id="wsFileList"></div>
-        </div>
-        <div class="explorer-editor">
-          <div class="explorer-editor-header">
-            <span class="explorer-filename" id="wsFileName">Select a file</span>
-            <div class="ws-editor-actions">
-              <button class="btn btn-icon btn-danger-icon" id="wsDeleteBtn" disabled title="Delete file"><i data-lucide="trash-2"></i></button>
-              <button class="btn" id="wsSaveBtn" disabled>Save</button>
+      <div id="homeView">
+        <!-- Status Card -->
+        <div class="card" id="statusCard">
+          <h2>Status</h2>
+          <div class="status-grid">
+            <div class="stat">
+              <div class="stat-value"><span class="dot green" id="statusDot"></span><span id="statusText">--</span></div>
+              <div class="stat-label">Status</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" id="uptimeValue">--</div>
+              <div class="stat-label">Uptime</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" id="msgCount">0</div>
+              <div class="stat-label">Messages</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" id="lastMsg">--</div>
+              <div class="stat-label">Last Message</div>
             </div>
           </div>
-          <div class="ws-message" id="wsMessage" style="display:none"></div>
-          <textarea class="json-editor" id="wsEditor" rows="12" placeholder="Select a file to view..." disabled style="display:none"></textarea>
+        </div>
+
+        <!-- Config Card -->
+        <div class="card">
+          <h2>Configuration</h2>
+          <div class="form-row">
+            <label>Log Level</label>
+            <span class="ro-value" id="cfgLogLevel">--</span>
+          </div>
+          <div class="form-row">
+            <label>Quiet Hours</label>
+            <span class="ro-value" id="cfgQuietHours">--</span>
+          </div>
+          <div class="form-row">
+            <label>System Prompt</label>
+            <span class="ro-value" id="cfgSystemPrompt">--</span>
+          </div>
+        </div>
+
+        <!-- Teach Card -->
+        <div class="card" id="teachCard">
+          <h2>Teach</h2>
+          <div class="form-row">
+            <label>Destination</label>
+            <div class="segmented-control" id="teachDestination">
+              <button class="seg-btn active" data-value="memory">Memory</button>
+              <button class="seg-btn" data-value="context">Context file</button>
+            </div>
+          </div>
+          <div class="form-row" id="teachFileNameRow" style="display:none">
+            <label>File name</label>
+            <div class="input-suffix-wrap">
+              <input type="text" id="teachFileName" placeholder="e.g. project-notes">
+              <span class="input-suffix">.md</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>Instruction</label>
+            <select id="teachPreset">
+              <option value="Extract key facts">Extract key facts</option>
+              <option value="Extract preferences">Extract preferences</option>
+              <option value="Extract decisions">Extract decisions</option>
+              <option value="store-as-is">Store as-is (one per line)</option>
+              <option value="custom">Custom...</option>
+            </select>
+          </div>
+          <div class="form-row" id="teachCustomRow" style="display:none">
+            <label>Custom instruction</label>
+            <input type="text" id="teachCustomInput" placeholder="e.g. Extract action items">
+          </div>
+          <div class="form-row" id="teachTierRow">
+            <label>Tier</label>
+            <select id="teachTier">
+              <option value="">Loading...</option>
+            </select>
+          </div>
+          <div style="position:relative">
+            <textarea class="json-editor" id="teachContent" rows="8" placeholder="Paste content here (meeting notes, docs, preferences...)"></textarea>
+            <div class="teach-counter" id="teachCounter">0 / 50KB</div>
+          </div>
+          <div class="teach-actions">
+            <button class="btn" id="teachSubmit">Import</button>
+            <span class="teach-result" id="teachResult"></span>
+          </div>
+        </div>
+
+        <!-- Workspace Explorer -->
+        <div class="card" id="workspaceCard">
+          <h2>Workspace</h2>
+          <div class="ws-breadcrumb" id="wsBreadcrumb"></div>
+          <div class="explorer-split">
+            <div class="explorer-sidebar">
+              <div class="explorer-file-list" id="wsFileList"></div>
+            </div>
+            <div class="explorer-editor">
+              <div class="explorer-editor-header">
+                <span class="explorer-filename" id="wsFileName">Select a file</span>
+                <div class="ws-editor-actions">
+                  <button class="btn btn-icon btn-danger-icon" id="wsDeleteBtn" disabled title="Delete file"><i data-lucide="trash-2"></i></button>
+                  <button class="btn" id="wsSaveBtn" disabled>Save</button>
+                </div>
+              </div>
+              <div class="ws-message" id="wsMessage" style="display:none"></div>
+              <textarea class="json-editor" id="wsEditor" rows="12" placeholder="Select a file to view..." disabled style="display:none"></textarea>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Pages Card -->
-    <div class="card" id="pagesCard" style="display:none">
-      <h2>Pages</h2>
-      <div id="pagesList" class="pages-list"></div>
+      <iframe id="pageFrame" class="page-frame" style="display:none"></iframe>
     </div>
-
   </div>
 
   <div class="toast" id="toast"></div>

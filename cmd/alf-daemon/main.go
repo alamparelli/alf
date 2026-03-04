@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -923,11 +924,12 @@ func main() {
 			// Signal server: per-invocation socket for react/status from Claude subprocess.
 			sigSockPath := filepath.Join(dataDir, fmt.Sprintf("signal-%d.sock", u.Message.MessageID))
 			sigServer := &signal.Server{TG: tg, ChatID: chatID, MessageID: u.Message.MessageID}
-			if sigLn, err := sigServer.ListenUnix(sigSockPath); err != nil {
+			var sigLn net.Listener
+			if ln, err := sigServer.ListenUnix(sigSockPath); err != nil {
 				log.Printf("signal: listen error: %v", err)
 			} else {
+				sigLn = ln
 				go sigServer.Serve(sigLn)
-				defer func() { sigLn.Close(); os.Remove(sigSockPath) }()
 				invokeParams.Env = append(invokeParams.Env, "ALF_SIGNAL_SOCK="+sigSockPath)
 			}
 
@@ -941,6 +943,12 @@ func main() {
 				result, err = cliProvider.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
 			}
 			duration := time.Since(start)
+
+			// Cleanup signal socket immediately (defer won't fire in this loop).
+			if sigLn != nil {
+				sigLn.Close()
+				os.Remove(sigSockPath)
+			}
 
 			// Cleanup: stop animation, delete status msg.
 			if statusAnim != nil {

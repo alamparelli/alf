@@ -28,18 +28,18 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				return
 			}
 
-			// Debug: log auth failure details for API calls.
-			if strings.HasPrefix(r.URL.Path, "/api/") {
-				log.Printf("[CC] auth fail: ip=%s method=%s path=%s has_auth=%v auth_len=%d token_len=%d",
-					clientIP(r), r.Method, r.URL.Path, auth != "", len(auth), len(token))
-			}
-
 			// Check session cookie.
 			if sessions != nil {
 				if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
 					next.ServeHTTP(w, r)
 					return
 				}
+			}
+
+			// Log after both auth methods failed.
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				log.Printf("[CC] auth fail: ip=%s method=%s path=%s has_auth=%v auth_len=%d token_len=%d",
+					clientIP(r), r.Method, r.URL.Path, auth != "", len(auth), len(token))
 			}
 
 			// Show login page only for root path — all other unauthenticated paths get 401.

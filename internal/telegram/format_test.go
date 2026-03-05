@@ -270,11 +270,29 @@ func TestMarkdownToHTML_TableWithSpecialChars(t *testing.T) {
 }
 
 func TestMarkdownToHTML_NotATable(t *testing.T) {
-	// Single pipe line shouldn't be treated as table.
+	// Single pipe line without separator shouldn't be treated as table.
 	input := "This | is not | a table"
 	got := MarkdownToHTML(input)
 	if strings.Contains(got, "<pre>") {
 		t.Errorf("should not wrap non-table in <pre>, got: %s", got)
+	}
+}
+
+func TestMarkdownToHTML_UnenclosedTable(t *testing.T) {
+	input := `Besoin | Outil dispo | Ce qu'il donne
+-------|-------------|---------------
+Mots-clés | gsc | Queries réelles
+Trafic | ga | Sessions`
+
+	got := MarkdownToHTML(input)
+	if !strings.Contains(got, "<pre>") {
+		t.Fatalf("expected unenclosed table in <pre> block, got: %s", got)
+	}
+	if !strings.Contains(got, "Mots-cl") {
+		t.Errorf("expected table data preserved, got: %s", got)
+	}
+	if !strings.Contains(got, "─") {
+		t.Errorf("expected box-drawing separator, got: %s", got)
 	}
 }
 

@@ -782,8 +782,27 @@ func main() {
 			}
 
 			// Command routing: handle /commands before passing to Claude.
+			var forcedTierName string
 			if strings.HasPrefix(u.Message.Text, "/") {
 				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir) {
+					continue
+				}
+				// Check for force command: /<tier_name> <message>
+				parts := strings.SplitN(u.Message.Text, " ", 2)
+				cmdName := strings.TrimPrefix(parts[0], "/")
+				for _, t := range tierStore.Current().Tiers {
+					if t.Enabled && t.ForceCommand && t.Name == cmdName {
+						if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+							tg.SendHTML(u.Message.Chat.ID, fmt.Sprintf("Usage: <code>/%s &lt;message&gt;</code>", t.Name))
+							forcedTierName = "_skip" // signal to skip this update
+						} else {
+							forcedTierName = t.Name
+							u.Message.Text = strings.TrimSpace(parts[1])
+						}
+						break
+					}
+				}
+				if forcedTierName == "_skip" {
 					continue
 				}
 				// Unknown /commands fall through to Claude.
@@ -817,9 +836,17 @@ func main() {
 			var tp tierParams
 			var routeResult router.Result
 
+			// Force command bypasses routing entirely.
+			if forcedTierName != "" {
+				routingAnim.Stop()
+				if routingMsgID != 0 {
+					tg.DeleteMessage(chatID, routingMsgID)
+				}
+				routeResult = router.Result{Tier: forcedTierName, Reason: "force_command"}
+				log.Printf("→ force command → tier %q", forcedTierName)
+			} else if hasMedia {
 			// Media messages bypass the router — they need a full Claude Code
 			// session with Read tool access to view images/files.
-			if hasMedia {
 				routingAnim.Stop()
 				if routingMsgID != 0 {
 					tg.DeleteMessage(chatID, routingMsgID)
@@ -845,7 +872,7 @@ func main() {
 			}
 
 			// Router answered directly — no second LLM call needed.
-			if !hasMedia {
+			if forcedTierName == "" && !hasMedia {
 				routingAnim.Stop()
 			}
 			// If highly relevant memories were recalled (distance < 0.6), override
@@ -953,6 +980,7 @@ func main() {
 			invokeParams := provider.Params{
 				Model:         tp.Model,
 				Tools:         tp.Tools,
+				WriteCapable:  tp.WriteCapable,
 				Effort:        tp.Effort,
 				MaxTurns:      tp.MaxTurns,
 				SystemPrompts: sysPromptTexts,
@@ -1096,10 +1124,11 @@ IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
-	Model    string   // full model name, e.g. "claude-sonnet-4-5"
-	Tools    []string // nil = omit flag
-	Effort   string   // "" = omit flag
-	MaxTurns int      // 0 = omit flag (use Claude default)
+	Model        string   // full model name, e.g. "claude-sonnet-4-5"
+	Tools        []string // nil = omit flag
+	WriteCapable bool     // if true, grants full tool access; if false, restricts to Tools whitelist
+	Effort       string   // "" = omit flag
+	MaxTurns     int      // 0 = omit flag (use Claude default)
 }
 
 func readSecret(envVar string) string {
@@ -1486,10 +1515,11 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			return tierParams{
-				Model:    router.ResolveModel(t.Model),
-				Tools:    t.Tools,
-				Effort:   t.Effort,
-				MaxTurns: t.MaxTurns,
+				Model:        router.ResolveModel(t.Model),
+				Tools:        t.Tools,
+				WriteCapable: t.WriteCapable,
+				Effort:       t.Effort,
+				MaxTurns:     t.MaxTurns,
 			}
 		}
 	}
@@ -2026,6 +2056,7 @@ func (s *schedulerProvider) Invoke(ctx context.Context, prompt string, params sc
 	pp := provider.Params{
 		Model:         params.Model,
 		Tools:         params.Tools,
+		WriteCapable:  params.WriteCapable,
 		Effort:        params.Effort,
 		SystemPrompts: params.SystemPrompts,
 		MaxTurns:      params.MaxTurns,
@@ -2059,11 +2090,12 @@ func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
 	}
 	for i, t := range tc.Tiers {
 		snap.Tiers[i] = scheduler.TierInfo{
-			Name:     t.Name,
-			Model:    router.ResolveModel(t.Model),
-			Tools:    t.Tools,
-			Effort:   t.Effort,
-			MaxTurns: t.MaxTurns,
+			Name:         t.Name,
+			Model:        router.ResolveModel(t.Model),
+			Tools:        t.Tools,
+			WriteCapable: t.WriteCapable,
+			Effort:       t.Effort,
+			MaxTurns:     t.MaxTurns,
 		}
 	}
 	return snap

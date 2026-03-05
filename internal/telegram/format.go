@@ -202,18 +202,37 @@ func convertTables(text string, placeholder func(string) string) string {
 }
 
 // isTableRow checks if a line looks like a markdown table row (has | separators).
+// Supports both |col|col| and col | col formats.
 func isTableRow(line string) bool {
 	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|") && strings.Count(trimmed, "|") >= 3
-}
-
-// isTableSeparator checks for |---|---| style separator rows.
-func isTableSeparator(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "|") {
+	if trimmed == "" {
 		return false
 	}
-	// Remove pipes and spaces, check if only dashes and colons remain.
+	// Classic format: |col|col|
+	if strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|") && strings.Count(trimmed, "|") >= 3 {
+		return true
+	}
+	// Unenclosed format: col | col | col (at least 2 pipes with content between)
+	if strings.Count(trimmed, "|") >= 2 {
+		parts := strings.Split(trimmed, "|")
+		// All parts must have non-empty content (not just whitespace).
+		for _, p := range parts {
+			if strings.TrimSpace(p) == "" {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// isTableSeparator checks for |---|---| or ---|--- style separator rows.
+func isTableSeparator(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.Contains(trimmed, "|") || !strings.Contains(trimmed, "-") {
+		return false
+	}
+	// Remove pipes, dashes, colons, and spaces — should leave nothing.
 	inner := strings.ReplaceAll(trimmed, "|", "")
 	inner = strings.ReplaceAll(inner, "-", "")
 	inner = strings.ReplaceAll(inner, ":", "")
@@ -222,9 +241,10 @@ func isTableSeparator(line string) bool {
 }
 
 // parseTableRow splits a | delimited row into trimmed cells.
+// Handles both |col|col| and col | col formats.
 func parseTableRow(line string) []string {
 	trimmed := strings.TrimSpace(line)
-	// Remove leading and trailing |
+	// Remove leading and trailing | if present.
 	trimmed = strings.TrimPrefix(trimmed, "|")
 	trimmed = strings.TrimSuffix(trimmed, "|")
 	parts := strings.Split(trimmed, "|")

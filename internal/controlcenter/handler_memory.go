@@ -373,9 +373,10 @@ func (h *MemoryTiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type tierInfo struct {
-		Name  string `json:"name"`
-		Model string `json:"model"`
-		Tools bool   `json:"tools"`
+		Name         string `json:"name"`
+		Model        string `json:"model"`
+		Tools        bool   `json:"tools"`
+		ForceCommand bool   `json:"force_command"`
 	}
 
 	var tiers []tierInfo
@@ -386,9 +387,10 @@ func (h *MemoryTiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				tiers = append(tiers, tierInfo{
-					Name:  t.Name,
-					Model: t.Model,
-					Tools: len(t.Tools) > 0,
+					Name:         t.Name,
+					Model:        t.Model,
+					Tools:        len(t.Tools) > 0,
+					ForceCommand: t.ForceCommand,
 				})
 			}
 		}

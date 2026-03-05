@@ -175,6 +175,22 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
+	// Detect force command: /<tier_name> <message> bypasses routing.
+	if strings.HasPrefix(req.Message, "/") && req.Model == "" {
+		parts := strings.SplitN(req.Message, " ", 2)
+		cmdName := strings.TrimPrefix(parts[0], "/")
+		for _, t := range cs.TierStore.Current().Tiers {
+			if t.Enabled && t.ForceCommand && t.Name == cmdName {
+				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+					return fmt.Errorf("Usage: /%s <message>", t.Name)
+				}
+				req.Model = t.Name
+				req.Message = strings.TrimSpace(parts[1])
+				break
+			}
+		}
+	}
+
 	// Build prompt from message + reply context + media.
 	prompt := cs.buildPrompt(req)
 	if prompt == "" {

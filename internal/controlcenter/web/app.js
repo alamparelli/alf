@@ -77,15 +77,18 @@ function navigateTo(view) {
   const homeView = document.getElementById('homeView');
   const chatView = document.getElementById('chatView');
   const pageFrame = document.getElementById('pageFrame');
+  const docsView = document.getElementById('docsView');
 
-  // Update active nav item
+  // Update active nav item — docs:id should highlight the docs nav item
+  const navView = view.startsWith('docs:') ? 'docs' : view;
   document.querySelectorAll('#sidebarNav .nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.view === view);
+    el.classList.toggle('active', el.dataset.view === navView);
   });
 
   homeView.style.display = 'none';
   chatView.style.display = 'none';
   pageFrame.style.display = 'none';
+  docsView.style.display = 'none';
 
   if (view === 'home') {
     homeView.style.display = '';
@@ -98,16 +101,27 @@ function navigateTo(view) {
     const name = view.slice(5);
     pageFrame.style.display = '';
     pageFrame.src = '/pages/' + encodeURIComponent(name);
+  } else if (view === 'docs') {
+    docsView.style.display = '';
+    pageFrame.src = '';
+    docsShowList();
+  } else if (view.startsWith('docs:')) {
+    docsView.style.display = '';
+    pageFrame.src = '';
+    docsShowArticle(view.slice(5));
   }
+
+  localStorage.setItem('alf-view', view);
 
   // Close sidebar on mobile
   sidebar.classList.remove('open');
   sidebarOverlay.classList.remove('open');
 }
 
-// Bind Home + Chat nav
+// Bind Home + Chat + Docs nav
 document.querySelector('#sidebarNav .nav-item[data-view="home"]').addEventListener('click', () => navigateTo('home'));
 document.querySelector('#sidebarNav .nav-item[data-view="chat"]').addEventListener('click', () => navigateTo('chat'));
+document.querySelector('#sidebarNav .nav-item[data-view="docs"]').addEventListener('click', () => navigateTo('docs'));
 
 // --- Status ---
 function loadStatus() {
@@ -867,6 +881,22 @@ const CHAT_COMMANDS = [
   { name: '/help', description: 'Show available commands', icon: 'help-circle' },
 ];
 
+// Load dynamic force-command tiers into CHAT_COMMANDS.
+(function loadForceCommands() {
+  api('/api/memory/tiers').then(tiers => {
+    tiers.forEach(t => {
+      if (t.force_command) {
+        CHAT_COMMANDS.push({
+          name: '/' + t.name,
+          description: 'Force ' + t.model + ' tier (' + t.name + ')',
+          icon: 'zap',
+          dynamic: true,
+        });
+      }
+    });
+  }).catch(() => {});
+})();
+
 let cmdPickerEl = null;
 let cmdSelectedIdx = 0;
 
@@ -885,6 +915,12 @@ function chatShowCommands(filter) {
     item.innerHTML = '<span class="chat-cmd-name">' + esc(cmd.name) + '</span><span class="chat-cmd-desc">' + esc(cmd.description) + '</span>';
     item.addEventListener('click', () => {
       chatDismissCommands();
+      if (cmd.dynamic) {
+        // Dynamic force commands: fill input with command prefix, let user type message
+        chatInput.value = cmd.name + ' ';
+        chatInput.focus();
+        return;
+      }
       chatExecCommand(cmd.name);
     });
     item.addEventListener('mouseenter', () => {
@@ -970,8 +1006,14 @@ chatInput.addEventListener('keydown', (e) => {
       const selected = items[cmdSelectedIdx];
       if (selected) {
         const cmdName = selected.querySelector('.chat-cmd-name').textContent;
+        const cmd = CHAT_COMMANDS.find(c => c.name === cmdName);
         chatDismissCommands();
-        chatExecCommand(cmdName);
+        if (cmd && cmd.dynamic) {
+          chatInput.value = cmdName + ' ';
+          chatInput.focus();
+        } else {
+          chatExecCommand(cmdName);
+        }
       }
       return;
     }
@@ -987,11 +1029,12 @@ chatInput.addEventListener('keydown', (e) => {
     // Check if it's a command
     if (text.startsWith('/')) {
       const cmd = CHAT_COMMANDS.find(c => c.name === text.split(' ')[0]);
-      if (cmd) {
+      if (cmd && !cmd.dynamic) {
         chatDismissCommands();
         chatExecCommand(cmd.name);
         return;
       }
+      // Dynamic commands (force tiers) are sent as regular messages — backend handles them.
     }
     chatSend();
   }
@@ -1014,20 +1057,21 @@ function capitalizeName(name) {
 }
 
 function loadPages() {
-  api('/api/pages/').then(r => {
+  return api('/api/pages/').then(r => {
     const nav = document.getElementById('sidebarNav');
     const items = r.items || [];
 
     // Remove existing page nav items (keep Home)
     nav.querySelectorAll('.nav-item[data-view^="page:"]').forEach(el => el.remove());
 
+    const spacer = document.getElementById('navSpacer');
     items.forEach(p => {
       const a = document.createElement('a');
       a.className = 'nav-item';
       a.dataset.view = 'page:' + p.name;
       a.innerHTML = '<i data-lucide="file-code"></i> ' + esc(capitalizeName(p.name));
       a.addEventListener('click', () => navigateTo(a.dataset.view));
-      nav.appendChild(a);
+      nav.insertBefore(a, spacer);
     });
 
     // Restore active state
@@ -1042,11 +1086,213 @@ function loadPages() {
   }).catch(() => {});
 }
 
+// --- Docs ---
+let docsCache = null;
+let docsActiveFilter = { text: '', category: '', tag: '' };
+
+function docsShowList() {
+  const content = document.getElementById('docsContent');
+  content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Loading...</div>';
+  api('/api/docs/').then(docs => {
+    docsCache = docs;
+    docsActiveFilter = { text: '', category: '', tag: '' };
+    if (!docs || !docs.length) {
+      content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">No documentation available.</div>';
+      return;
+    }
+    docsRenderListLayout(docs);
+  }).catch(() => {
+    content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Failed to load docs.</div>';
+  });
+}
+
+function docsRenderListLayout(docs) {
+  const content = document.getElementById('docsContent');
+
+  // Extract categories and tags
+  const categories = new Set();
+  const tags = new Set();
+  docs.forEach(d => {
+    if (d.category) categories.add(d.category);
+    (d.tags || []).forEach(t => tags.add(t));
+  });
+
+  let html = '<div class="docs-browse-layout">';
+
+  // Sidebar with categories and tags
+  if (categories.size > 0 || tags.size > 0) {
+    html += '<aside class="docs-sidebar">';
+    html += '<button class="docs-filter-item active" data-filter-type="all">All docs</button>';
+    if (categories.size > 0) {
+      html += '<div class="docs-filter-group">Categories</div>';
+      categories.forEach(c => {
+        const count = docs.filter(d => d.category === c).length;
+        html += '<button class="docs-filter-item" data-filter-type="category" data-filter-value="' + esc(c) + '">' + esc(c) + ' <span class="docs-filter-count">' + count + '</span></button>';
+      });
+    }
+    if (tags.size > 0) {
+      html += '<div class="docs-filter-group">Tags</div>';
+      html += '<div class="docs-tag-cloud">';
+      tags.forEach(t => {
+        html += '<button class="docs-tag-btn" data-filter-type="tag" data-filter-value="' + esc(t) + '">' + esc(t) + '</button>';
+      });
+      html += '</div>';
+    }
+    html += '</aside>';
+  }
+
+  // Main area: search + list
+  html += '<div class="docs-main">';
+  html += '<div class="docs-search"><input type="text" id="docsSearchInput" placeholder="Search docs..."><i data-lucide="search"></i></div>';
+  html += '<div id="docsListContainer" class="docs-list"></div>';
+  html += '</div></div>';
+
+  content.innerHTML = html;
+
+  // Bind search
+  document.getElementById('docsSearchInput').addEventListener('input', (e) => {
+    docsActiveFilter.text = e.target.value.trim().toLowerCase();
+    docsUpdateList();
+  });
+
+  // Bind filter buttons
+  content.querySelectorAll('[data-filter-type]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const type = btn.dataset.filterType;
+      const value = btn.dataset.filterValue || '';
+      if (type === 'all') {
+        docsActiveFilter.category = '';
+        docsActiveFilter.tag = '';
+      } else if (type === 'category') {
+        docsActiveFilter.category = docsActiveFilter.category === value ? '' : value;
+        docsActiveFilter.tag = '';
+      } else if (type === 'tag') {
+        docsActiveFilter.tag = docsActiveFilter.tag === value ? '' : value;
+        docsActiveFilter.category = '';
+      }
+      // Update active states
+      content.querySelectorAll('.docs-filter-item').forEach(el => {
+        el.classList.toggle('active',
+          (type === 'all' && !docsActiveFilter.category && !docsActiveFilter.tag && el.dataset.filterType === 'all') ||
+          (el.dataset.filterType === 'category' && el.dataset.filterValue === docsActiveFilter.category) ||
+          (!docsActiveFilter.category && !docsActiveFilter.tag && el.dataset.filterType === 'all')
+        );
+      });
+      content.querySelectorAll('.docs-tag-btn').forEach(el => {
+        el.classList.toggle('active', el.dataset.filterValue === docsActiveFilter.tag);
+      });
+      docsUpdateList();
+    });
+  });
+
+  if (window.lucide) lucide.createIcons();
+  docsUpdateList();
+}
+
+function docsUpdateList() {
+  const container = document.getElementById('docsListContainer');
+  if (!container || !docsCache) return;
+
+  let filtered = docsCache;
+  if (docsActiveFilter.category) {
+    filtered = filtered.filter(d => d.category === docsActiveFilter.category);
+  }
+  if (docsActiveFilter.tag) {
+    filtered = filtered.filter(d => (d.tags || []).includes(docsActiveFilter.tag));
+  }
+  if (docsActiveFilter.text) {
+    const q = docsActiveFilter.text;
+    filtered = filtered.filter(d =>
+      d.title.toLowerCase().includes(q) ||
+      (d.summary || '').toLowerCase().includes(q) ||
+      (d.tags || []).some(t => t.toLowerCase().includes(q))
+    );
+  }
+
+  let html = '';
+  if (!filtered.length) {
+    html = '<div style="color:var(--text-dim);font-size:0.85rem;padding:12px 0">No results.</div>';
+  }
+  filtered.forEach(d => {
+    html += '<div class="docs-list-item" data-doc-id="' + esc(d.id) + '">';
+    if (d.category) html += '<span class="docs-item-category">' + esc(d.category) + '</span>';
+    html += '<h3>' + esc(d.title) + '</h3>';
+    if (d.summary) html += '<p>' + esc(d.summary) + '</p>';
+    if (d.tags && d.tags.length) {
+      html += '<div class="docs-item-tags">';
+      d.tags.forEach(t => { html += '<span class="docs-item-tag">' + esc(t) + '</span>'; });
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+  container.innerHTML = html;
+  container.querySelectorAll('.docs-list-item').forEach(el => {
+    el.addEventListener('click', () => navigateTo('docs:' + el.dataset.docId));
+  });
+}
+
+function docsShowArticle(id) {
+  const content = document.getElementById('docsContent');
+  content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Loading...</div>';
+  api('/api/docs/' + encodeURIComponent(id)).then(doc => {
+    const rendered = marked.parse(doc.content, { breaks: false, gfm: true });
+
+    // Build TOC from headings
+    const tmp = document.createElement('div');
+    tmp.innerHTML = rendered;
+    const headings = tmp.querySelectorAll('h2, h3');
+    let tocHtml = '';
+    if (headings.length > 1) {
+      tocHtml = '<nav class="docs-toc"><div class="docs-toc-title">Contents</div>';
+      headings.forEach((h, i) => {
+        const anchorId = 'docs-heading-' + i;
+        h.id = anchorId;
+        const level = h.tagName === 'H3' ? ' docs-toc-sub' : '';
+        tocHtml += '<a class="docs-toc-item' + level + '" href="#' + anchorId + '">' + h.textContent + '</a>';
+      });
+      tocHtml += '</nav>';
+    }
+
+    let html = '<a class="docs-back" id="docsBackBtn"><i data-lucide="arrow-left"></i> Back to docs</a>';
+    html += '<div class="docs-article-layout">';
+    html += tocHtml;
+    html += '<div class="docs-article">' + tmp.innerHTML + '</div>';
+    html += '</div>';
+    content.innerHTML = html;
+
+    document.getElementById('docsBackBtn').addEventListener('click', () => navigateTo('docs'));
+    // Handle internal doc links (docs:id)
+    content.querySelectorAll('.docs-article a').forEach(a => {
+      const href = a.getAttribute('href');
+      if (href && href.startsWith('docs:')) {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          navigateTo(href);
+        });
+      }
+    });
+    // Smooth scroll for TOC links
+    content.querySelectorAll('.docs-toc-item').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const target = document.querySelector(a.getAttribute('href'));
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+    if (window.lucide) lucide.createIcons();
+  }).catch(() => {
+    content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Document not found.</div>';
+  });
+}
+
 // --- Init ---
 loadStatus();
 loadConfig();
 loadTeachTiers();
-loadPages();
+loadPages().then(() => {
+  const saved = localStorage.getItem('alf-view');
+  if (saved && saved !== 'home') navigateTo(saved);
+});
 wsInit();
 setInterval(loadStatus, 30000);
 setInterval(loadPages, 30000);

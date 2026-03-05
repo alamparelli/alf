@@ -628,6 +628,42 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   border: none; border-top: 1px solid var(--border); margin: 24px 0;
 }
 
+/* JSON Viewer */
+.ws-viewer {
+  flex: 1; min-height: 240px; overflow-y: auto; padding: 12px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius); font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.82rem; line-height: 1.6;
+}
+.jv-key { color: var(--accent); font-weight: 600; }
+.jv-string { color: #22863a; }
+.jv-number { color: #005cc5; }
+.jv-bool { color: #e36209; }
+.jv-null { color: var(--text-dim); font-style: italic; }
+.jv-bracket { color: var(--text-dim); }
+.jv-row { padding-left: calc(var(--depth, 0) * 16px); white-space: nowrap; }
+.jv-toggle {
+  cursor: pointer; user-select: none; display: inline-block; width: 14px;
+  text-align: center; color: var(--text-dim); font-size: 0.7rem;
+}
+.jv-toggle:hover { color: var(--accent); }
+.jv-children.collapsed { display: none; }
+.jsonl-entry {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 12px; margin-bottom: 8px; background: var(--bg-card);
+}
+.jsonl-badge {
+  display: inline-block; font-size: 0.68rem; font-weight: 600;
+  background: var(--border); color: var(--text-dim); padding: 1px 7px;
+  border-radius: 4px; margin-bottom: 6px;
+}
+body.light .jv-string { color: #22863a; }
+body.light .jv-number { color: #005cc5; }
+body.light .jv-bool { color: #e36209; }
+body:not(.light) .jv-string { color: #85e89d; }
+body:not(.light) .jv-number { color: #79b8ff; }
+body:not(.light) .jv-bool { color: #ffab70; }
+
 /* Responsive */
 @media (max-width: 600px) {
   .sidebar {

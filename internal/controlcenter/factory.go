@@ -126,6 +126,9 @@ func HandlerFactory(deps Deps) http.Handler {
 		})
 	}
 
+	// Docs (embedded markdown).
+	mux.Handle("/api/docs/", &DocsHandler{})
+
 	// Restart.
 	mux.Handle("/api/restart", &RestartHandler{})
 

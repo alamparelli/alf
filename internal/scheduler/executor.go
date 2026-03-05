@@ -24,6 +24,7 @@ type ProviderInvoker interface {
 type ProviderParams struct {
 	Model         string
 	Tools         []string
+	WriteCapable  bool
 	Effort        string
 	SystemPrompts []string
 	MaxTurns      int
@@ -67,11 +68,12 @@ type TiersSnapshot struct {
 
 // TierInfo holds the fields the executor needs from a tier.
 type TierInfo struct {
-	Name     string
-	Model    string
-	Tools    []string
-	Effort   string
-	MaxTurns int
+	Name         string
+	Model        string
+	Tools        []string
+	WriteCapable bool
+	Effort       string
+	MaxTurns     int
 }
 
 // executeJob runs a scheduled job with concurrency guard.
@@ -160,6 +162,7 @@ func (e *Engine) invokeLLM(j *Job) (string, error) {
 						params.Model = t.Model
 					}
 					params.Tools = t.Tools
+					params.WriteCapable = t.WriteCapable
 					params.Effort = t.Effort
 					if t.MaxTurns > 0 {
 						params.MaxTurns = t.MaxTurns

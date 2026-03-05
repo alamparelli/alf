@@ -24,6 +24,7 @@ type Result struct {
 type Params struct {
 	Model         string
 	Tools         []string
+	WriteCapable  bool     // if true, use --dangerously-skip-permissions; if false, restrict to Tools whitelist
 	Effort        string
 	SystemPrompts []string // appended system prompts (context files, reactions)
 	MaxTurns      int

@@ -244,8 +244,11 @@ func (e *Extractor) readDayEvents(path string, since time.Time) ([]conversationL
 	return lines, scanner.Err()
 }
 
-const extractionPrompt = `Extract important information from these conversations.
-Return ONLY a JSON array, no other text:
+const extractionPrompt = `You are a JSON extraction tool. Your ONLY job is to read conversation logs and output a JSON array.
+Do NOT reply to the conversations. Do NOT continue the conversation. Do NOT add any commentary.
+You MUST respond with ONLY a valid JSON array — nothing else.
+
+Output format (no other text allowed):
 [{"text": "specific fact or decision", "type": "fact|preference|decision"}]
 
 Rules:
@@ -255,13 +258,15 @@ Rules:
 - "decision" = architectural choices, tech decisions, agreed approaches
 - "fact" = everything else worth remembering (project details, names, context)
 - Each fact should be self-contained and understandable without conversation context
+- Always write facts in English regardless of conversation language
 - Be concise but precise
+- If no useful facts exist, return an empty array: []
 
-Conversations:
+<conversation_logs>
 `
 
 func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, error) {
-	prompt := extractionPrompt + conversationText
+	prompt := extractionPrompt + conversationText + "\n</conversation_logs>"
 
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
@@ -275,7 +280,8 @@ func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, erro
 		return nil, fmt.Errorf("claude extraction: %w", err)
 	}
 
-	// Parse JSON array from response. Claude may wrap it in markdown code blocks.
+	// Parse JSON array from response. Claude may wrap it in markdown code blocks
+	// or add surrounding text despite instructions.
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
@@ -284,6 +290,14 @@ func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, erro
 
 	var facts []extractedFact
 	if err := json.Unmarshal([]byte(raw), &facts); err != nil {
+		// Fallback: try to find a JSON array embedded in the response.
+		if start := strings.Index(raw, "["); start != -1 {
+			if end := strings.LastIndex(raw, "]"); end > start {
+				if err2 := json.Unmarshal([]byte(raw[start:end+1]), &facts); err2 == nil {
+					return facts, nil
+				}
+			}
+		}
 		return nil, fmt.Errorf("parse extraction response: %w (raw: %s)", err, truncateText(raw, 200))
 	}
 

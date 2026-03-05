@@ -16,6 +16,18 @@
       <nav class="sidebar-nav" id="sidebarNav">
         <a class="nav-item active" data-view="home"><i data-lucide="home"></i> Home</a>
         <a class="nav-item" data-view="chat"><i data-lucide="message-circle"></i> Chat</a>
+        <div class="nav-spacer" id="navSpacer"></div>
+        <a class="nav-item" data-view="docs"><i data-lucide="book-open"></i> Docs</a>
+        <div class="sidebar-footer">
+          <p>Made with ❤️ by <a href="https://x.com/a_lamparelli" target="_blank">@a_lamparelli</a></p>
+          <p><a href="https://github.com/alamparelli" target="_blank"><i data-lucide="github"></i></a></p>
+          <span class="sidebar-footer-label">Creator of:</span>
+          <div class="sidebar-footer-links">
+            <a href="https://dicta.to?utm_source=alf&amp;utm_medium=bio&amp;utm_campaign=generic" target="_blank">Dictato</a>
+            <a href="https://quickpoll.cc?utm_source=alf&amp;utm_medium=bio&amp;utm_campaign=generic" target="_blank">QuickPoll</a>
+            <a href="https://contacthive.app?utm_source=alf&amp;utm_medium=bio&amp;utm_campaign=generic" target="_blank">ContactHive</a>
+          </div>
+        </div>
       </nav>
     </aside>
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -149,10 +161,15 @@
       </div>
 
       <iframe id="pageFrame" class="page-frame" style="display:none"></iframe>
+
+      <div id="docsView" class="docs-view" style="display:none">
+        <div id="docsContent"></div>
+      </div>
     </div>
   </div>
 
   <div class="toast" id="toast"></div>
+  <script src="/static/marked.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

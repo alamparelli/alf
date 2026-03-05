@@ -83,20 +83,24 @@ type TiersConfig struct {
 }
 
 // DefaultTiersConfig returns a TiersConfig with starter tiers.
-// 6-tier layout: instant + read/write pairs per model (haiku, sonnet, opus).
+// 7-tier layout: instant + read/write pairs per model (haiku, sonnet, opus).
 func DefaultTiersConfig() *TiersConfig {
 	return &TiersConfig{
 		RouterModel:        "haiku",
-		DefaultFallback:    "sonnet_r",
-		RouterInstantLabel: "Quick greetings, thank-yous, acknowledgments, simple yes/no",
-		RouterDistinctions: "Read-only tiers (_r) for analysis and questions. Read-write tiers (_rw) ONLY when the user explicitly asks to create, modify, or delete files. Use haiku for simple tasks, sonnet for moderate, opus for complex.",
+		DefaultFallback:    "haiku_r",
+		RouterInstantLabel: "One-line replies: hi, thanks, ok, bye, thumbs up, simple yes/no answers",
+		RouterDistinctions: "haiku vs sonnet: If the answer requires reasoning, analysis, or structured output, use sonnet. If it is conversational, factual recall, or a short answer, use haiku. " +
+			"sonnet vs opus: Use opus only when the task involves system-wide thinking, multi-component architecture, or requires holding many constraints simultaneously. Most code tasks are sonnet. " +
+			"read vs write (_r vs _rw): Use _rw ONLY when the user explicitly requests to create, edit, delete, or modify files, run a tool, or execute a scheduled action. Questions about code or asking for suggestions stay in _r even if they mention files. " +
+			"When in doubt: Default to haiku_r. It is better to respond fast with a simpler model than to over-escalate.",
 		Tiers: []Tier{
-			{Name: "instant", Model: "haiku", Priority: 0, Enabled: true, Routable: true, Instant: true, RouterLabel: "Quick greetings, acknowledgments, yes/no", Effort: "low"},
-			{Name: "haiku_r", Model: "haiku", Priority: 1, Enabled: true, Routable: true, RouterLabel: "Simple file lookups, quick reads, basic questions", Effort: "low"},
-			{Name: "sonnet_r", Model: "sonnet", Priority: 2, Enabled: true, Routable: true, RouterLabel: "Analysis, reasoning, explanations, code review", Effort: "medium"},
-			{Name: "sonnet_rw", Model: "sonnet", Priority: 3, Enabled: true, Routable: true, RouterLabel: "Code edits, file modifications, small features", WriteCapable: true, ForceCommand: true, Effort: "medium"},
-			{Name: "opus_r", Model: "opus", Priority: 4, Enabled: true, Routable: true, RouterLabel: "Deep reasoning, architecture review, complex analysis", Effort: "high"},
-			{Name: "opus_rw", Model: "opus", Priority: 5, Enabled: true, Routable: true, RouterLabel: "Complex refactoring, multi-file changes, large features", WriteCapable: true, ForceCommand: true, Effort: "high"},
+			{Name: "instant", Model: "haiku", Priority: 0, Enabled: true, Routable: true, Instant: true, RouterLabel: "One-line replies: hi, thanks, ok, bye, thumbs up, simple yes/no answers", Effort: "low"},
+			{Name: "haiku_r", Model: "haiku", Priority: 1, Enabled: true, Routable: true, RouterLabel: "Casual conversation, simple factual questions, short summaries, translations, dictionary lookups, weather-style queries, small talk, jokes", Effort: "low"},
+			{Name: "haiku_rw", Model: "haiku", Priority: 2, Enabled: true, Routable: true, RouterLabel: "Running scheduled jobs, invoking tools (reminders, timers, web search), simple file creation, quick one-line edits, toggling settings", WriteCapable: true, ForceCommand: true, Effort: "low", MaxTurns: 5},
+			{Name: "sonnet_r", Model: "sonnet", Priority: 3, Enabled: true, Routable: true, RouterLabel: "Code review, debugging analysis, explaining complex concepts, comparing options, writing structured content (emails, docs), research synthesis, data interpretation", Effort: "medium"},
+			{Name: "sonnet_rw", Model: "sonnet", Priority: 4, Enabled: true, Routable: true, RouterLabel: "Editing code files, implementing features, fixing bugs in code, creating scripts, modifying configurations, writing tests, multi-file text changes", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 10},
+			{Name: "opus_r", Model: "opus", Priority: 5, Enabled: true, Routable: true, RouterLabel: "Architecture design, system-level reasoning, complex trade-off analysis, long-form strategic planning, reviewing entire codebases, deep technical research", Effort: "medium"},
+			{Name: "opus_rw", Model: "opus", Priority: 6, Enabled: true, Routable: true, RouterLabel: "Large-scale refactoring across multiple files, implementing complex features with many moving parts, redesigning system architecture, building new modules from scratch", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 20},
 		},
 	}
 }

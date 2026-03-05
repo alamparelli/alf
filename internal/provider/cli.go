@@ -54,11 +54,17 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		"--model", model,
 		"--output-format", "stream-json",
 		"--verbose",
-		"--dangerously-skip-permissions",
 	}
 
-	for _, tool := range params.Tools {
-		args = append(args, "--allowedTools", tool)
+	if params.WriteCapable {
+		// Full access — all tools auto-approved.
+		args = append(args, "--dangerously-skip-permissions")
+	} else {
+		// Read-only: whitelist specific tools, deny everything else.
+		// In non-interactive (-p) mode, non-allowed tools are auto-denied.
+		for _, tool := range params.Tools {
+			args = append(args, "--allowedTools", tool)
+		}
 	}
 	if params.Effort != "" {
 		args = append(args, "--effort", params.Effort)

@@ -3,6 +3,7 @@ package controlcenter
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -27,8 +28,14 @@ func TestPageHandler_ServesHTML(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
-	if csp := rec.Header().Get("Content-Security-Policy"); csp != "frame-ancestors 'self'" {
-		t.Errorf("Content-Security-Policy = %q, want frame-ancestors 'self'", csp)
+	csp := rec.Header().Get("Content-Security-Policy")
+	for _, directive := range []string{"frame-ancestors 'self'", "script-src 'self' 'unsafe-inline'", "object-src 'none'", "form-action 'self'", "base-uri 'self'"} {
+		if !strings.Contains(csp, directive) {
+			t.Errorf("CSP missing %q, got: %s", directive, csp)
+		}
+	}
+	if nosniff := rec.Header().Get("X-Content-Type-Options"); nosniff != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", nosniff)
 	}
 	if rec.Body.String() != "<html><body>Hello</body></html>" {
 		t.Errorf("unexpected body: %s", rec.Body.String())

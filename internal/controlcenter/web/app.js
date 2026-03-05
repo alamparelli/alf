@@ -268,6 +268,26 @@ function wsRenderDir(dirPath, depth) {
   return html;
 }
 
+let wsViewMode = false;
+
+function wsResetViewer() {
+  wsViewMode = false;
+  const viewBtn = document.getElementById('wsViewBtn');
+  const viewer = document.getElementById('wsViewer');
+  viewBtn.style.display = 'none';
+  viewer.style.display = 'none';
+  viewer.innerHTML = '';
+  // Reset icon to eye
+  viewBtn.innerHTML = '<i data-lucide="eye"></i>';
+  viewBtn.title = 'Pretty view';
+}
+
+function wsIsJsonFile(path) {
+  if (!path) return false;
+  const lower = path.toLowerCase();
+  return lower.endsWith('.json') || lower.endsWith('.jsonl');
+}
+
 function wsOpenFile(filePath) {
   wsOpenPath = filePath;
   const editor = document.getElementById('wsEditor');
@@ -276,6 +296,7 @@ function wsOpenFile(filePath) {
   const deleteBtn = document.getElementById('wsDeleteBtn');
 
   deleteBtn.disabled = true;
+  wsResetViewer();
 
   wsRender();
 
@@ -303,6 +324,12 @@ function wsOpenFile(filePath) {
     editor.disabled = !r.editable;
     saveBtn.disabled = !r.editable;
     deleteBtn.disabled = !r.editable;
+
+    // Show pretty-view toggle for JSON/JSONL files
+    if (wsIsJsonFile(filePath)) {
+      document.getElementById('wsViewBtn').style.display = '';
+      if (window.lucide) lucide.createIcons();
+    }
   }).catch(() => toast('Failed to load file', 'error'));
 }
 
@@ -330,6 +357,7 @@ function wsExpandTo(dirPath) {
     document.getElementById('wsSaveBtn').disabled = true;
     document.getElementById('wsEditor').style.display = 'none';
     document.getElementById('wsMessage').style.display = 'none';
+    wsResetViewer();
     document.getElementById('wsBreadcrumb').innerHTML = wsBreadcrumbHTML('');
     if (window.lucide) lucide.createIcons();
     return;
@@ -379,6 +407,7 @@ document.getElementById('wsDeleteBtn').addEventListener('click', () => {
       document.getElementById('wsDeleteBtn').disabled = true;
       document.getElementById('wsEditor').style.display = 'none';
       document.getElementById('wsMessage').style.display = 'none';
+      wsResetViewer();
       document.getElementById('wsBreadcrumb').innerHTML = wsBreadcrumbHTML('');
       if (window.lucide) lucide.createIcons();
       // Re-fetch parent dir to update tree.
@@ -403,6 +432,7 @@ function wsDeleteDir(dirPath) {
           document.getElementById('wsDeleteBtn').disabled = true;
           document.getElementById('wsEditor').style.display = 'none';
           document.getElementById('wsMessage').style.display = 'none';
+          wsResetViewer();
           document.getElementById('wsBreadcrumb').innerHTML = wsBreadcrumbHTML('');
           if (window.lucide) lucide.createIcons();
         }
@@ -430,6 +460,109 @@ document.getElementById('wsSaveBtn').addEventListener('click', () => {
     else toast(r.error || 'Save failed', 'error');
   }).catch(e => toast(e.error || 'Save failed', 'error'));
 });
+
+// --- JSON Pretty Viewer ---
+document.getElementById('wsViewBtn').addEventListener('click', () => {
+  wsViewMode = !wsViewMode;
+  const editor = document.getElementById('wsEditor');
+  const viewer = document.getElementById('wsViewer');
+  const btn = document.getElementById('wsViewBtn');
+
+  if (wsViewMode) {
+    editor.style.display = 'none';
+    viewer.style.display = '';
+    const content = editor.value;
+    if (wsOpenPath && wsOpenPath.toLowerCase().endsWith('.jsonl')) {
+      viewer.innerHTML = renderJsonl(content);
+    } else {
+      try {
+        const parsed = JSON.parse(content);
+        viewer.innerHTML = renderJsonValue(parsed, 0);
+      } catch (e) {
+        viewer.innerHTML = '<span class="jv-null">Invalid JSON: ' + esc(e.message) + '</span>';
+      }
+    }
+    btn.innerHTML = '<i data-lucide="eye-off"></i>';
+    btn.title = 'Edit mode';
+  } else {
+    viewer.style.display = 'none';
+    viewer.innerHTML = '';
+    editor.style.display = '';
+    btn.innerHTML = '<i data-lucide="eye"></i>';
+    btn.title = 'Pretty view';
+  }
+  if (window.lucide) lucide.createIcons();
+});
+
+function renderJsonValue(val, depth) {
+  if (val === null) return '<span class="jv-null">null</span>';
+  if (typeof val === 'string') return '<span class="jv-string">"' + esc(val) + '"</span>';
+  if (typeof val === 'number') return '<span class="jv-number">' + val + '</span>';
+  if (typeof val === 'boolean') return '<span class="jv-bool">' + val + '</span>';
+
+  if (Array.isArray(val)) {
+    if (val.length === 0) return '<span class="jv-bracket">[]</span>';
+    const id = 'jv-' + Math.random().toString(36).slice(2, 8);
+    let html = '<span class="jv-toggle" onclick="jvToggle(\'' + id + '\',this)">▼</span>';
+    html += '<span class="jv-bracket">[</span>';
+    html += '<div class="jv-children" id="' + id + '">';
+    val.forEach((item, i) => {
+      html += '<div class="jv-row" style="--depth:' + (depth + 1) + '">';
+      html += renderJsonValue(item, depth + 1);
+      if (i < val.length - 1) html += ',';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div class="jv-row" style="--depth:' + depth + '"><span class="jv-bracket">]</span></div>';
+    return html;
+  }
+
+  if (typeof val === 'object') {
+    const keys = Object.keys(val);
+    if (keys.length === 0) return '<span class="jv-bracket">{}</span>';
+    const id = 'jv-' + Math.random().toString(36).slice(2, 8);
+    let html = '<span class="jv-toggle" onclick="jvToggle(\'' + id + '\',this)">▼</span>';
+    html += '<span class="jv-bracket">{</span>';
+    html += '<div class="jv-children" id="' + id + '">';
+    keys.forEach((key, i) => {
+      html += '<div class="jv-row" style="--depth:' + (depth + 1) + '">';
+      html += '<span class="jv-key">"' + esc(key) + '"</span>: ';
+      html += renderJsonValue(val[key], depth + 1);
+      if (i < keys.length - 1) html += ',';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div class="jv-row" style="--depth:' + depth + '"><span class="jv-bracket">}</span></div>';
+    return html;
+  }
+
+  return esc(String(val));
+}
+
+function renderJsonl(content) {
+  const lines = content.split('\n').filter(l => l.trim());
+  if (lines.length === 0) return '<span class="jv-null">Empty file</span>';
+  let html = '';
+  lines.forEach((line, i) => {
+    html += '<div class="jsonl-entry">';
+    html += '<span class="jsonl-badge">Line ' + (i + 1) + '</span>';
+    try {
+      const parsed = JSON.parse(line);
+      html += renderJsonValue(parsed, 0);
+    } catch (e) {
+      html += '<span class="jv-null">Invalid JSON: ' + esc(e.message) + '</span>';
+    }
+    html += '</div>';
+  });
+  return html;
+}
+
+window.jvToggle = function(id, el) {
+  const children = document.getElementById(id);
+  if (!children) return;
+  children.classList.toggle('collapsed');
+  el.textContent = children.classList.contains('collapsed') ? '▶' : '▼';
+};
 
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';

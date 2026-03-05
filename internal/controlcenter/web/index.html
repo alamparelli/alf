@@ -140,12 +140,14 @@
               <div class="explorer-editor-header">
                 <span class="explorer-filename" id="wsFileName">Select a file</span>
                 <div class="ws-editor-actions">
+                  <button class="btn btn-icon" id="wsViewBtn" style="display:none" title="Pretty view"><i data-lucide="eye"></i></button>
                   <button class="btn btn-icon btn-danger-icon" id="wsDeleteBtn" disabled title="Delete file"><i data-lucide="trash-2"></i></button>
                   <button class="btn" id="wsSaveBtn" disabled>Save</button>
                 </div>
               </div>
               <div class="ws-message" id="wsMessage" style="display:none"></div>
               <textarea class="json-editor" id="wsEditor" rows="12" placeholder="Select a file to view..." disabled style="display:none"></textarea>
+              <div id="wsViewer" class="ws-viewer" style="display:none"></div>
             </div>
           </div>
         </div>

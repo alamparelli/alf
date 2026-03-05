@@ -266,7 +266,9 @@ Rules:
 `
 
 func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, error) {
-	prompt := extractionPrompt + conversationText + "\n</conversation_logs>"
+	// Sanitize XML boundary markers to prevent prompt injection via user messages.
+	sanitized := strings.ReplaceAll(conversationText, "</conversation_logs>", "")
+	prompt := extractionPrompt + sanitized + "\n</conversation_logs>"
 
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()

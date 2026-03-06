@@ -1,0 +1,31 @@
+{
+  "name": "starter",
+  "description": "General-purpose starter team for research, writing, and code review tasks",
+  "max_agents_per_request": 3,
+  "global_timeout_minutes": 15,
+  "agents": [
+    {
+      "name": "researcher",
+      "description": "Gathers and synthesizes information on any topic",
+      "model": "sonnet",
+      "system_prompt": "You are a research specialist. Gather relevant information, verify facts, and provide well-structured summaries. Always cite sources when available. Be thorough but concise.",
+      "tools": ["WebSearch"],
+      "max_turns": 3
+    },
+    {
+      "name": "writer",
+      "description": "Drafts and polishes text content",
+      "model": "sonnet",
+      "system_prompt": "You are a writing specialist. Produce clear, engaging content tailored to the audience. Respect the user's voice and style. Structure text with headings and short paragraphs.",
+      "write_capable": true,
+      "max_turns": 3
+    },
+    {
+      "name": "reviewer",
+      "description": "Reviews code or text for quality, bugs, and improvements",
+      "model": "sonnet",
+      "system_prompt": "You are a code and text reviewer. Identify bugs, security issues, style problems, and suggest concrete improvements. Be specific: reference line numbers or exact phrases. Prioritize issues by severity.",
+      "max_turns": 2
+    }
+  ]
+}

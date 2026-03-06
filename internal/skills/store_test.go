@@ -161,7 +161,7 @@ func TestFileSkillStore_MissingDir(t *testing.T) {
 }
 
 func TestParseFrontmatter_QuotedValues(t *testing.T) {
-	name, desc, ver, triggers, body := parseFrontmatter(`---
+	name, desc, ver, triggers, _, body := parseFrontmatter(`---
 name: "my-skill"
 description: 'A quoted description'
 version: "2"

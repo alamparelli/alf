@@ -3,6 +3,7 @@ package skills
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // BuildCatalog returns a system prompt block listing all skills with
@@ -48,7 +49,7 @@ func MatchTriggers(store Store, message string) []*Skill {
 			continue
 		}
 		for _, t := range sk.Triggers {
-			if strings.Contains(msg, t) {
+			if containsWord(msg, strings.ToLower(t)) {
 				matched = append(matched, sk)
 				seen[sk.Name] = true
 				break
@@ -56,6 +57,27 @@ func MatchTriggers(store Store, message string) []*Skill {
 		}
 	}
 	return matched
+}
+
+// containsWord checks if needle appears in haystack as a whole word/phrase,
+// i.e. surrounded by non-alphanumeric characters or string boundaries.
+func containsWord(haystack, needle string) bool {
+	for i := 0; ; {
+		idx := strings.Index(haystack[i:], needle)
+		if idx < 0 {
+			return false
+		}
+		start := i + idx
+		end := start + len(needle)
+
+		leftOK := start == 0 || !unicode.IsLetter(rune(haystack[start-1])) && !unicode.IsDigit(rune(haystack[start-1]))
+		rightOK := end == len(haystack) || !unicode.IsLetter(rune(haystack[end])) && !unicode.IsDigit(rune(haystack[end]))
+
+		if leftOK && rightOK {
+			return true
+		}
+		i = start + 1
+	}
 }
 
 // BuildInjection returns a system prompt block that tells Claude to read

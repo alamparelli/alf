@@ -15,6 +15,9 @@ var templateFS embed.FS
 //go:embed bundled_skills/*
 var bundledSkillsFS embed.FS
 
+//go:embed bundled_agents/*
+var bundledAgentsFS embed.FS
+
 // ComposeData holds values for the docker-compose template.
 type ComposeData struct {
 	Image         string // Docker image (default: ghcr.io/alamparelli/alf:latest)
@@ -74,16 +77,30 @@ func RenderConfig(dir string, data ConfigData) error {
 // Existing files are not overwritten (preserves user modifications).
 func SeedBundledSkills(dir string) error {
 	skillsDir := filepath.Join(dir, "skills.d")
-	return fs.WalkDir(bundledSkillsFS, "bundled_skills", func(path string, d fs.DirEntry, err error) error {
+	return seedEmbedded(bundledSkillsFS, "bundled_skills", skillsDir)
+}
+
+// SeedBundledAgents copies embedded agent teams into the agents directory.
+// Existing files are not overwritten (preserves user modifications).
+func SeedBundledAgents(dir string) error {
+	// Agents live inside config.d/ which is mounted as /opt/alf/config in the container.
+	agentsDir := filepath.Join(dir, "config.d", "agents")
+	return seedEmbedded(bundledAgentsFS, "bundled_agents", agentsDir)
+}
+
+func seedEmbedded(fsys embed.FS, root, destDir string) error {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+	return fs.WalkDir(fsys, root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		// Strip the "bundled_skills/" prefix.
-		rel, _ := filepath.Rel("bundled_skills", path)
+		rel, _ := filepath.Rel(root, path)
 		if rel == "." {
 			return nil
 		}
-		dest := filepath.Join(skillsDir, rel)
+		dest := filepath.Join(destDir, rel)
 
 		if d.IsDir() {
 			return os.MkdirAll(dest, 0o755)
@@ -94,7 +111,7 @@ func SeedBundledSkills(dir string) error {
 			return nil
 		}
 
-		data, err := bundledSkillsFS.ReadFile(path)
+		data, err := fsys.ReadFile(path)
 		if err != nil {
 			return err
 		}

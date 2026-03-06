@@ -44,7 +44,7 @@ You'll need:
 | **Telegram Bot Token** | Open Telegram, search for [@BotFather](https://t.me/BotFather), send `/newbot` |
 | **Your Chat ID** | Open Telegram, search for [@userinfobot](https://t.me/userinfobot), send any message |
 
-> The wizard also asks for a **data directory** (where ALF stores its files, default: `~/.alf`) and a **port** for the web dashboard (default: `3333`).
+> The wizard also asks for a **data directory** (where ALF stores its files, default: `~/.alf`) and a **port** for the web dashboard (default: `8080`).
 
 ### Step 3: Start
 
@@ -86,8 +86,10 @@ Want to customize tiers? See [Setting Up Tiers](docs:tier-setup).
 The Control Center (CC) is your web dashboard. Open it at:
 
 ```
-http://your-server:3333
+http://your-server:<port>
 ```
+
+The port is whatever you chose during `alf init` (default: `8080`).
 
 ### How to log in
 

@@ -168,7 +168,7 @@ var validOutputs = map[string]bool{
 }
 
 // Create adds a new user job.
-func (e *Engine) Create(name, schedule, tier, prompt, output string, skills []string) (*Job, error) {
+func (e *Engine) Create(name, schedule, tier, prompt, command, output string, skills []string) (*Job, error) {
 	if output == "" {
 		output = "telegram"
 	}
@@ -199,6 +199,7 @@ func (e *Engine) Create(name, schedule, tier, prompt, output string, skills []st
 		Schedule:  schedule,
 		Tier:      tier,
 		Prompt:    prompt,
+		Command:   command,
 		Output:    output,
 		Skills:    skills,
 		Enabled:   true,
@@ -294,6 +295,8 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 			j.Tier = v
 		case "prompt":
 			j.Prompt = v
+		case "command":
+			j.Command = v
 		case "output":
 			j.Output = v
 		case "enabled":

@@ -102,7 +102,7 @@ func parseSkill(skillDir string) (*Skill, error) {
 		return nil, err
 	}
 
-	name, description, version, body := parseFrontmatter(string(data))
+	name, description, version, triggers, body := parseFrontmatter(string(data))
 
 	// Default name from directory name.
 	if name == "" {
@@ -136,6 +136,7 @@ func parseSkill(skillDir string) (*Skill, error) {
 		Name:        name,
 		Description: description,
 		Version:     version,
+		Triggers:    triggers,
 		Prompt:      prompt,
 		Dir:         skillDir,
 	}, nil
@@ -150,10 +151,10 @@ func parseSkill(skillDir string) (*Skill, error) {
 //	version: value
 //	---
 //	body content
-func parseFrontmatter(content string) (name, description, version, body string) {
+func parseFrontmatter(content string) (name, description, version string, triggers []string, body string) {
 	content = strings.TrimLeft(content, "\xef\xbb\xbf") // strip BOM
 	if !strings.HasPrefix(strings.TrimSpace(content), "---") {
-		return "", "", "", strings.TrimSpace(content)
+		return "", "", "", nil, strings.TrimSpace(content)
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
@@ -171,7 +172,7 @@ func parseFrontmatter(content string) (name, description, version, body string) 
 	}
 	if !foundEnd {
 		// No closing ---, treat entire content as body.
-		return "", "", "", strings.TrimSpace(content)
+		return "", "", "", nil, strings.TrimSpace(content)
 	}
 
 	// Parse simple key: value pairs from frontmatter.
@@ -187,6 +188,8 @@ func parseFrontmatter(content string) (name, description, version, body string) 
 			description = val
 		case "version":
 			version = val
+		case "triggers":
+			triggers = parseList(val)
 		}
 	}
 
@@ -197,6 +200,26 @@ func parseFrontmatter(content string) (name, description, version, body string) 
 	}
 	body = strings.TrimSpace(strings.Join(bodyLines, "\n"))
 	return
+}
+
+// parseList splits a comma-separated or YAML-style list value.
+// Supports: "a, b, c" or "[a, b, c]".
+func parseList(val string) []string {
+	val = strings.TrimSpace(val)
+	val = strings.TrimPrefix(val, "[")
+	val = strings.TrimSuffix(val, "]")
+	var out []string
+	for _, s := range strings.Split(val, ",") {
+		s = strings.TrimSpace(s)
+		// Strip quotes.
+		if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
+			s = s[1 : len(s)-1]
+		}
+		if s != "" {
+			out = append(out, strings.ToLower(s))
+		}
+	}
+	return out
 }
 
 // parseKV extracts "key: value" from a line, stripping quotes.

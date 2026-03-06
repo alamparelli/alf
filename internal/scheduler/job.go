@@ -17,6 +17,7 @@ type Job struct {
 	Schedule   string     `json:"schedule"`
 	Tier       string     `json:"tier"`
 	Prompt     string     `json:"prompt"`
+	Command    string     `json:"command,omitempty"`
 	Output     string     `json:"output"`
 	Enabled    bool       `json:"enabled"`
 	System     bool       `json:"system"`

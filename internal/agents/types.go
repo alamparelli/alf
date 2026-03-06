@@ -1,0 +1,66 @@
+package agents
+
+import "time"
+
+// TeamConfig defines a group of specialized agents.
+type TeamConfig struct {
+	Name             string        `json:"name"`
+	Description      string        `json:"description"`
+	MaxAgentsPerReq  int           `json:"max_agents_per_request"`
+	GlobalTimeoutMin int           `json:"global_timeout_minutes"`
+	Agents           []AgentConfig `json:"agents"`
+}
+
+// AgentConfig defines a single sub-agent within a team.
+type AgentConfig struct {
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Model        string   `json:"model"`
+	SystemPrompt string   `json:"system_prompt"`
+	Tools        []string `json:"tools,omitempty"`
+	WriteCapable bool     `json:"write_capable"`
+	MaxTurns     int      `json:"max_turns,omitempty"`
+	Effort       string   `json:"effort,omitempty"`
+}
+
+// DelegateRequest is a single delegation instruction from the orchestrator.
+type DelegateRequest struct {
+	Agent string `json:"agent"` // "team/agent" format
+	Task  string `json:"task"`
+}
+
+// OrchestratorOutput is the JSON protocol the orchestrator produces.
+type OrchestratorOutput struct {
+	Delegates []DelegateRequest `json:"delegates,omitempty"`
+	Response  string            `json:"response,omitempty"`
+	Thinking  string            `json:"thinking,omitempty"`
+}
+
+// AgentResult holds the outcome of a single sub-agent invocation.
+type AgentResult struct {
+	Agent    string        `json:"agent"`
+	Text     string        `json:"text,omitempty"`
+	Error    string        `json:"error,omitempty"`
+	CostUSD  float64       `json:"cost_usd"`
+	Duration time.Duration `json:"-"`
+}
+
+// agentResultJSON is the JSON-friendly version sent back to the orchestrator.
+type agentResultJSON struct {
+	Agent      string  `json:"agent"`
+	Result     string  `json:"result,omitempty"`
+	Error      string  `json:"error,omitempty"`
+	CostUSD    float64 `json:"cost_usd"`
+	DurationMs int64   `json:"duration_ms"`
+}
+
+// TaskMeta tracks the lifecycle of an orchestration run.
+type TaskMeta struct {
+	ID          string        `json:"id"`
+	StartedAt   time.Time     `json:"started_at"`
+	CompletedAt *time.Time    `json:"completed_at,omitempty"`
+	Iterations  int           `json:"iterations"`
+	TotalCost   float64       `json:"total_cost_usd"`
+	AgentCalls  []AgentResult `json:"agent_calls"`
+	Status      string        `json:"status"` // running, completed, failed, timeout
+}

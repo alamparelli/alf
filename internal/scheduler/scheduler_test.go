@@ -158,7 +158,7 @@ func TestEngineCreateDelete(t *testing.T) {
 	defer e.cron.Stop()
 
 	// Create a job.
-	j, err := e.Create("test", "@every 1h", "direct", "hello", "silent", nil)
+	j, err := e.Create("test", "@every 1h", "direct", "", "echo hello", "silent", nil)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestEngineUpdate(t *testing.T) {
 	e.cron.Start()
 	defer e.cron.Stop()
 
-	j, _ := e.Create("test", "@every 1h", "direct", "hello", "telegram", nil)
+	j, _ := e.Create("test", "@every 1h", "direct", "", "echo hello", "telegram", nil)
 
 	updated, err := e.Update(j.ID, map[string]string{
 		"name":   "renamed",
@@ -244,7 +244,7 @@ func TestEngineListUserOnly(t *testing.T) {
 	defer e.cron.Stop()
 
 	e.RegisterSystem("sys1", "System", "@every 1m", func() error { return nil })
-	e.Create("user1", "@every 2h", "direct", "hello", "silent", nil)
+	e.Create("user1", "@every 2h", "direct", "", "echo hello", "silent", nil)
 
 	all := e.List(false)
 	if len(all) != 2 {
@@ -382,7 +382,7 @@ func TestManagedJobVisibleInList(t *testing.T) {
 	defer e.cron.Stop()
 
 	e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit", "telegram", nil)
-	e.Create("user-job", "@every 2h", "direct", "hello", "silent", nil)
+	e.Create("user-job", "@every 2h", "direct", "", "echo hello", "silent", nil)
 
 	all := e.List(false)
 	found := false

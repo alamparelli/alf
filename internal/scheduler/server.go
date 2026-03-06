@@ -16,6 +16,7 @@ type socketRequest struct {
 	Schedule string            `json:"schedule,omitempty"`
 	Tier     string            `json:"tier,omitempty"`
 	Prompt   string            `json:"prompt,omitempty"`
+	Command  string            `json:"command,omitempty"`
 	Output   string            `json:"output,omitempty"`
 	ID       string            `json:"id,omitempty"`
 	Skills   []string          `json:"skills,omitempty"`
@@ -97,15 +98,41 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	switch req.Action {
 	case "create":
-		if req.Name == "" || req.Schedule == "" || req.Prompt == "" {
-			resp.Error = "name, schedule, and prompt are required"
+		if req.Name == "" || req.Schedule == "" {
+			resp.Error = "name and schedule are required"
 			break
 		}
 		tier := req.Tier
-		if tier == "" {
+		// Auto-detect direct tier when command is provided without explicit tier.
+		if tier == "" && req.Command != "" {
 			tier = "direct"
 		}
-		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Output, req.Skills)
+		// Validate direct tier requires command, LLM tiers require prompt.
+		if tier == "direct" {
+			if req.Command == "" && req.Prompt != "" {
+				// Auto-convert: treat prompt as command for direct tier.
+				req.Command = req.Prompt
+				req.Prompt = ""
+			}
+			if req.Command == "" {
+				resp.Error = "direct tier requires --command (bash command to execute)"
+				break
+			}
+			if req.Prompt != "" {
+				resp.Error = "direct tier uses --command, not --prompt"
+				break
+			}
+		} else {
+			if req.Prompt == "" {
+				resp.Error = "LLM tiers require --prompt"
+				break
+			}
+			if req.Command != "" {
+				resp.Error = "--command is only for direct tier (deterministic bash jobs)"
+				break
+			}
+		}
+		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Command, req.Output, req.Skills)
 		if err != nil {
 			resp.Error = err.Error()
 		} else {

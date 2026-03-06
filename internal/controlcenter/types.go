@@ -95,12 +95,13 @@ func DefaultTiersConfig() *TiersConfig {
 			"When in doubt: Default to haiku_r. It is better to respond fast with a simpler model than to over-escalate.",
 		Tiers: []Tier{
 			{Name: "instant", Model: "haiku", Priority: 0, Enabled: true, Routable: true, Instant: true, RouterLabel: "One-line replies: hi, thanks, ok, bye, thumbs up, simple yes/no answers", Effort: "low"},
-			{Name: "haiku_r", Model: "haiku", Priority: 1, Enabled: true, Routable: true, RouterLabel: "Casual conversation, simple factual questions, short summaries, translations, dictionary lookups, weather-style queries, small talk, jokes", Effort: "low"},
+			{Name: "haiku_r", Model: "haiku", Priority: 1, Enabled: true, Routable: true, RouterLabel: "Casual conversation, simple factual questions, short summaries, translations, dictionary lookups, weather-style queries, small talk, jokes", Effort: "low", Tools: []string{"Read"}},
 			{Name: "haiku_rw", Model: "haiku", Priority: 2, Enabled: true, Routable: true, RouterLabel: "Running scheduled jobs, invoking tools (reminders, timers, web search), simple file creation, quick one-line edits, toggling settings", WriteCapable: true, ForceCommand: true, Effort: "low", MaxTurns: 5},
-			{Name: "sonnet_r", Model: "sonnet", Priority: 3, Enabled: true, Routable: true, RouterLabel: "Code review, debugging analysis, explaining complex concepts, comparing options, writing structured content (emails, docs), research synthesis, data interpretation", Effort: "medium"},
-			{Name: "sonnet_rw", Model: "sonnet", Priority: 4, Enabled: true, Routable: true, RouterLabel: "Editing code files, implementing features, fixing bugs in code, creating scripts, modifying configurations, writing tests, multi-file text changes", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 10},
-			{Name: "opus_r", Model: "opus", Priority: 5, Enabled: true, Routable: true, RouterLabel: "Architecture design, system-level reasoning, complex trade-off analysis, long-form strategic planning, reviewing entire codebases, deep technical research", Effort: "medium"},
-			{Name: "opus_rw", Model: "opus", Priority: 6, Enabled: true, Routable: true, RouterLabel: "Large-scale refactoring across multiple files, implementing complex features with many moving parts, redesigning system architecture, building new modules from scratch", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 20},
+			{Name: "sonnet_r", Model: "sonnet", Priority: 3, Enabled: true, Routable: true, RouterLabel: "Code review, debugging analysis, explaining complex concepts, comparing options, writing structured content (emails, docs), research synthesis, data interpretation", Effort: "medium", Tools: []string{"Read"}},
+			{Name: "sonnet_rw", Model: "sonnet", Priority: 4, Enabled: true, Routable: true, RouterLabel: "Editing code files, implementing features, fixing bugs in code, creating scripts, modifying configurations, writing tests, multi-file text changes", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 30},
+			{Name: "opus_r", Model: "opus", Priority: 5, Enabled: true, Routable: true, RouterLabel: "Architecture design, system-level reasoning, complex trade-off analysis, long-form strategic planning, reviewing entire codebases, deep technical research", Effort: "medium", Tools: []string{"Read"}},
+			{Name: "opus_rw", Model: "opus", Priority: 6, Enabled: true, Routable: true, RouterLabel: "Large-scale refactoring across multiple files, implementing complex features with many moving parts, redesigning system architecture, building new modules from scratch", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 40},
+			{Name: "orchestrator", Model: "opus", Priority: 7, Enabled: false, Routable: false, ForceCommand: true, WriteCapable: false, Effort: "high", MaxTurns: 5, Description: "Multi-agent orchestrator for complex multi-step tasks"},
 		},
 	}
 }
@@ -128,6 +129,7 @@ const (
 	ReloadTiers
 	ReloadTools
 	ReloadSkills
+	ReloadAgents
 )
 
 // Stats tracks daemon runtime metrics. Safe for concurrent use.

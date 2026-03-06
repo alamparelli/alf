@@ -10,6 +10,9 @@ import (
 //go:embed docs/*.md
 var docsFS embed.FS
 
+// DocsFS returns the embedded docs filesystem for external use (e.g. llms.txt generation).
+func DocsFS() embed.FS { return docsFS }
+
 type docMeta struct {
 	ID       string   `json:"id"`
 	Title    string   `json:"title"`

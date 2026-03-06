@@ -277,9 +277,9 @@ function wsResetViewer() {
   viewBtn.style.display = 'none';
   viewer.style.display = 'none';
   viewer.innerHTML = '';
-  // Reset icon to eye
-  viewBtn.innerHTML = '<i data-lucide="eye"></i>';
-  viewBtn.title = 'Pretty view';
+  jvLiveData = null;
+  viewBtn.innerHTML = '<i data-lucide="sliders"></i>';
+  viewBtn.title = 'Form view';
 }
 
 function wsIsJsonFile(path) {
@@ -471,29 +471,219 @@ document.getElementById('wsViewBtn').addEventListener('click', () => {
   if (wsViewMode) {
     editor.style.display = 'none';
     viewer.style.display = '';
+    viewer.innerHTML = '';
     const content = editor.value;
     if (wsOpenPath && wsOpenPath.toLowerCase().endsWith('.jsonl')) {
       viewer.innerHTML = renderJsonl(content);
     } else {
       try {
-        const parsed = JSON.parse(content);
-        viewer.innerHTML = renderJsonValue(parsed, 0);
+        jvLiveData = JSON.parse(content);
+        viewer.appendChild(renderJsonNode(jvLiveData, [], 0));
       } catch (e) {
+        jvLiveData = null;
         viewer.innerHTML = '<span class="jv-null">Invalid JSON: ' + esc(e.message) + '</span>';
       }
     }
-    btn.innerHTML = '<i data-lucide="eye-off"></i>';
-    btn.title = 'Edit mode';
+    btn.innerHTML = '<i data-lucide="code"></i>';
+    btn.title = 'Code mode';
   } else {
+    jvLiveData = null;
     viewer.style.display = 'none';
     viewer.innerHTML = '';
     editor.style.display = '';
-    btn.innerHTML = '<i data-lucide="eye"></i>';
-    btn.title = 'Pretty view';
+    btn.innerHTML = '<i data-lucide="sliders"></i>';
+    btn.title = 'Form view';
   }
   if (window.lucide) lucide.createIcons();
 });
 
+// --- JSON Interactive Editor ---
+// Stores the live data model; edits sync back to the text editor on change.
+let jvLiveData = null;
+
+function jvSyncToEditor() {
+  if (jvLiveData === null) return;
+  const editor = document.getElementById('wsEditor');
+  editor.value = JSON.stringify(jvLiveData, null, 2);
+}
+
+// Build an interactive DOM tree for a JSON value.
+// path is an array of keys/indices into jvLiveData.
+function renderJsonNode(val, path, depth) {
+  const el = document.createElement('div');
+  el.className = 'jv-node';
+  el.style.setProperty('--depth', depth);
+
+  if (val === null) {
+    el.innerHTML = '<span class="jv-null">null</span>';
+    return el;
+  }
+
+  if (typeof val === 'boolean') {
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = val;
+    cb.className = 'jv-input-bool';
+    cb.addEventListener('change', () => {
+      jvSetPath(path, cb.checked);
+      jvSyncToEditor();
+    });
+    el.appendChild(cb);
+    return el;
+  }
+
+  if (typeof val === 'number') {
+    const wrap = document.createElement('span');
+    wrap.className = 'jv-num-wrap';
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.className = 'jv-input-num';
+    inp.value = val;
+    inp.step = Number.isInteger(val) ? 1 : 0.1;
+    inp.addEventListener('change', () => {
+      const n = parseFloat(inp.value);
+      if (!isNaN(n)) { jvSetPath(path, n); jvSyncToEditor(); }
+    });
+    wrap.appendChild(inp);
+    el.appendChild(wrap);
+    return el;
+  }
+
+  if (typeof val === 'string') {
+    // Detect ISO 8601 / RFC 3339 datetime strings.
+    const dtMatch = val.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(:\d{2})?)/);
+    if (dtMatch) {
+      const wrap = document.createElement('span');
+      wrap.className = 'jv-dt-wrap';
+      const inp = document.createElement('input');
+      inp.type = 'datetime-local';
+      inp.className = 'jv-input-dt';
+      // datetime-local expects "YYYY-MM-DDTHH:MM:SS" without timezone.
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) {
+        // Format as local datetime for the picker.
+        const pad = n => String(n).padStart(2, '0');
+        inp.value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+          + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      } else {
+        inp.value = dtMatch[1] + 'T' + dtMatch[2];
+      }
+      inp.step = 1; // show seconds
+      inp.addEventListener('change', () => {
+        // Preserve original timezone suffix if present.
+        const tzMatch = val.match(/([+-]\d{2}:\d{2}|Z)$/);
+        const tz = tzMatch ? tzMatch[1] : '';
+        const newVal = inp.value.replace('T', 'T') + (tz || '');
+        jvSetPath(path, newVal);
+        jvSyncToEditor();
+      });
+      wrap.appendChild(inp);
+      el.appendChild(wrap);
+      return el;
+    }
+
+    // Multi-line strings get a textarea, short ones get input.
+    if (val.length > 80 || val.includes('\n')) {
+      const ta = document.createElement('textarea');
+      ta.className = 'jv-input-text jv-input-textarea';
+      ta.value = val;
+      ta.rows = Math.min(6, val.split('\n').length + 1);
+      ta.addEventListener('change', () => { jvSetPath(path, ta.value); jvSyncToEditor(); });
+      el.appendChild(ta);
+    } else {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.className = 'jv-input-text';
+      inp.value = val;
+      inp.addEventListener('change', () => { jvSetPath(path, inp.value); jvSyncToEditor(); });
+      el.appendChild(inp);
+    }
+    return el;
+  }
+
+  if (Array.isArray(val)) {
+    const header = document.createElement('div');
+    header.className = 'jv-section-header';
+    const toggle = document.createElement('span');
+    toggle.className = 'jv-toggle';
+    toggle.textContent = '▼';
+    const badge = document.createElement('span');
+    badge.className = 'jv-badge';
+    badge.textContent = val.length + ' item' + (val.length !== 1 ? 's' : '');
+    header.appendChild(toggle);
+    header.appendChild(badge);
+    el.appendChild(header);
+
+    const children = document.createElement('div');
+    children.className = 'jv-children';
+    val.forEach((item, i) => {
+      const row = document.createElement('div');
+      row.className = 'jv-field';
+      const label = document.createElement('span');
+      label.className = 'jv-index';
+      label.textContent = '[' + i + ']';
+      row.appendChild(label);
+      row.appendChild(renderJsonNode(item, path.concat(i), depth + 1));
+      children.appendChild(row);
+    });
+    el.appendChild(children);
+
+    toggle.addEventListener('click', () => {
+      children.classList.toggle('collapsed');
+      toggle.textContent = children.classList.contains('collapsed') ? '▶' : '▼';
+    });
+    return el;
+  }
+
+  if (typeof val === 'object') {
+    const keys = Object.keys(val);
+    const header = document.createElement('div');
+    header.className = 'jv-section-header';
+    const toggle = document.createElement('span');
+    toggle.className = 'jv-toggle';
+    toggle.textContent = '▼';
+    const badge = document.createElement('span');
+    badge.className = 'jv-badge';
+    badge.textContent = keys.length + ' field' + (keys.length !== 1 ? 's' : '');
+    header.appendChild(toggle);
+    header.appendChild(badge);
+    el.appendChild(header);
+
+    const children = document.createElement('div');
+    children.className = 'jv-children';
+    keys.forEach(key => {
+      const row = document.createElement('div');
+      row.className = 'jv-field';
+      const label = document.createElement('label');
+      label.className = 'jv-key';
+      label.textContent = key;
+      row.appendChild(label);
+      row.appendChild(renderJsonNode(val[key], path.concat(key), depth + 1));
+      children.appendChild(row);
+    });
+    el.appendChild(children);
+
+    toggle.addEventListener('click', () => {
+      children.classList.toggle('collapsed');
+      toggle.textContent = children.classList.contains('collapsed') ? '▶' : '▼';
+    });
+    return el;
+  }
+
+  el.textContent = String(val);
+  return el;
+}
+
+// Set a value deep in jvLiveData by path array.
+function jvSetPath(path, value) {
+  let obj = jvLiveData;
+  for (let i = 0; i < path.length - 1; i++) {
+    obj = obj[path[i]];
+  }
+  obj[path[path.length - 1]] = value;
+}
+
+// Legacy render for read-only contexts (JSONL lines).
 function renderJsonValue(val, depth) {
   if (val === null) return '<span class="jv-null">null</span>';
   if (typeof val === 'string') return '<span class="jv-string">"' + esc(val) + '"</span>';
@@ -538,6 +728,187 @@ function renderJsonValue(val, depth) {
 
   return esc(String(val));
 }
+
+// --- Drag & Drop Upload ---
+let wsPendingFiles = [];
+let wsDragCounter = 0;
+
+const wsCard = document.getElementById('workspaceCard');
+const wsOverlay = document.getElementById('wsDropOverlay');
+
+wsCard.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  wsDragCounter++;
+  wsOverlay.classList.add('active');
+});
+wsCard.addEventListener('dragover', (e) => e.preventDefault());
+wsCard.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  wsDragCounter--;
+  if (wsDragCounter <= 0) {
+    wsDragCounter = 0;
+    wsOverlay.classList.remove('active');
+  }
+});
+wsCard.addEventListener('drop', (e) => {
+  e.preventDefault();
+  wsDragCounter = 0;
+  wsOverlay.classList.remove('active');
+
+  const items = e.dataTransfer.items;
+  const files = [];
+  const paths = [];
+
+  // Try to get entries for folder structure preservation.
+  if (items && items.length > 0 && items[0].webkitGetAsEntry) {
+    const entries = [];
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i].webkitGetAsEntry();
+      if (entry) entries.push(entry);
+    }
+    wsReadEntries(entries, '').then(result => {
+      if (result.length === 0) return;
+      wsPendingFiles = result;
+      wsShowUploadModal();
+    });
+  } else {
+    // Fallback: flat file list.
+    for (const f of e.dataTransfer.files) {
+      files.push({ file: f, path: f.name });
+    }
+    if (files.length === 0) return;
+    wsPendingFiles = files;
+    wsShowUploadModal();
+  }
+});
+
+function wsReadEntries(entries, prefix) {
+  const results = [];
+  const promises = [];
+  for (const entry of entries) {
+    if (entry.isFile) {
+      promises.push(new Promise(resolve => {
+        entry.file(f => {
+          results.push({ file: f, path: prefix ? prefix + '/' + f.name : f.name });
+          resolve();
+        });
+      }));
+    } else if (entry.isDirectory) {
+      promises.push(new Promise(resolve => {
+        const reader = entry.createReader();
+        reader.readEntries(subEntries => {
+          const subPrefix = prefix ? prefix + '/' + entry.name : entry.name;
+          wsReadEntries(subEntries, subPrefix).then(sub => {
+            results.push(...sub);
+            resolve();
+          });
+        });
+      }));
+    }
+  }
+  return Promise.all(promises).then(() => results);
+}
+
+function wsShowUploadModal() {
+  const modal = document.getElementById('uploadModal');
+  const list = document.getElementById('uploadFileList');
+  const target = document.getElementById('uploadTarget');
+
+  // Populate file list.
+  list.innerHTML = wsPendingFiles.map(f =>
+    '<div class="upload-file-item"><span class="name">' + esc(f.path) + '</span><span class="size">' + formatSize(f.file.size) + '</span></div>'
+  ).join('');
+
+  // Populate target options from known directories.
+  const dirs = ['skills.d', 'tools', 'context.d', 'config.d', 'memory.d', 'pages.d'];
+  target.innerHTML = dirs.map(d => '<option value="' + d + '">' + d + '</option>').join('');
+  // Add custom option.
+  target.innerHTML += '<option value="__custom">Other...</option>';
+
+  // Pre-select skills.d since that's the primary use case.
+  target.value = 'skills.d';
+  document.getElementById('uploadCustomRow').style.display = 'none';
+  document.getElementById('uploadSubfolderRow').style.display = '';
+  document.getElementById('uploadSubfolder').value = '';
+
+  target.onchange = () => {
+    const isCustom = target.value === '__custom';
+    document.getElementById('uploadCustomRow').style.display = isCustom ? '' : 'none';
+    document.getElementById('uploadSubfolderRow').style.display = isCustom ? 'none' : '';
+  };
+
+  modal.style.display = '';
+  if (window.lucide) lucide.createIcons();
+}
+
+document.getElementById('uploadCancel').addEventListener('click', () => {
+  document.getElementById('uploadModal').style.display = 'none';
+  wsPendingFiles = [];
+});
+
+document.getElementById('uploadConfirm').addEventListener('click', async () => {
+  const targetSel = document.getElementById('uploadTarget');
+  let target = targetSel.value;
+  if (target === '__custom') {
+    const customPath = document.getElementById('uploadCustomPath').value.trim();
+    if (!customPath) { toast('Enter a destination path', 'error'); return; }
+    target = customPath;
+  } else {
+    const subfolder = document.getElementById('uploadSubfolder').value.trim();
+    if (subfolder) target = target + '/' + subfolder;
+  }
+
+  const progress = document.getElementById('uploadProgress');
+  const bar = document.getElementById('uploadProgressBar');
+  const confirmBtn = document.getElementById('uploadConfirm');
+
+  confirmBtn.disabled = true;
+  progress.style.display = '';
+  bar.style.width = '0%';
+
+  const formData = new FormData();
+  formData.append('target', target);
+  for (const f of wsPendingFiles) {
+    formData.append('files', f.file, f.file.name);
+    formData.append('paths', f.path);
+  }
+
+  try {
+    const resp = await fetch('/api/workspace/upload', {
+      method: 'POST',
+      body: formData,
+      credentials: 'same-origin',
+    });
+    bar.style.width = '100%';
+
+    if (resp.status === 401) {
+      toast('Session expired', 'error');
+      confirmBtn.disabled = false;
+      progress.style.display = 'none';
+      return;
+    }
+
+    const result = await resp.json();
+    if (result.ok) {
+      toast(wsPendingFiles.length + ' file(s) uploaded');
+      document.getElementById('uploadModal').style.display = 'none';
+      wsPendingFiles = [];
+
+      // Refresh the target directory in the tree.
+      const topDir = target.split('/')[0];
+      delete wsTree[topDir];
+      if (target !== topDir) delete wsTree[target];
+      wsExpandTo(target);
+    } else {
+      toast(result.error || 'Upload failed', 'error');
+    }
+  } catch (e) {
+    toast('Upload failed', 'error');
+  }
+
+  confirmBtn.disabled = false;
+  progress.style.display = 'none';
+});
 
 function renderJsonl(content) {
   const lines = content.split('\n').filter(l => l.trim());
@@ -736,6 +1107,18 @@ function chatLoadHistory() {
 
 const QUICK_REACTIONS = ['👍', '❤', '🔥', '😁', '🤔', '👎'];
 
+function chatAppendStep(type, label) {
+  const el = document.createElement('div');
+  el.className = 'chat-step ' + type;
+  if (type === 'thinking') {
+    el.innerHTML = '<span class="chat-step-icon">🧠</span> <span class="chat-step-label">' + esc(label) + '</span>';
+  } else {
+    el.innerHTML = '<span class="chat-step-icon">⚙️</span> <span class="chat-step-label">' + esc(label) + '</span>';
+  }
+  chatMessages.appendChild(el);
+  chatScrollBottom();
+}
+
 function chatAppendBubble(role, text, meta) {
   const bubble = document.createElement('div');
   bubble.className = 'chat-bubble ' + role;
@@ -877,6 +1260,52 @@ async function chatSend() {
   const text = chatInput.value.trim();
   if (!text || chatSending) return;
 
+  // Handle /bash command locally.
+  if (text.startsWith('/bash ')) {
+    const cmd = text.substring(6).trim();
+    if (!cmd) return;
+    chatInput.value = '';
+    chatInput.style.height = '';
+    chatDismissCommands();
+    chatAppendBubble('user', text, {});
+    chatScrollBottom();
+    chatSetStatus('Executing...');
+    chatSending = true;
+    chatSendBtn.disabled = true;
+    try {
+      const res = await fetch('/api/bash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ command: cmd }),
+      });
+      const data = await res.json();
+      let output = '';
+      if (data.output) output = '```\n' + data.output + '\n```';
+      if (data.error && data.exit_code !== 0) output += (output ? '\n' : '') + '**Exit ' + data.exit_code + ':** ' + data.error;
+      if (!output) output = '*Command completed (no output)*';
+      chatAppendBubble('assistant', output, { tier: 'direct' });
+    } catch (e) {
+      chatAppendBubble('assistant', '**Error:** ' + e.message, { tier: 'system' });
+    }
+    chatClearStatus();
+    chatSending = false;
+    chatSendBtn.disabled = false;
+    chatScrollBottom();
+    return;
+  }
+
+  // Handle other slash commands.
+  if (text.startsWith('/') && !text.startsWith('//')) {
+    const cmdName = text.split(' ')[0];
+    const isForceCmd = CHAT_COMMANDS.some(c => c.dynamic && c.name === cmdName);
+    if (!isForceCmd && CHAT_COMMANDS.some(c => c.name === cmdName)) {
+      chatDismissCommands();
+      chatExecCommand(cmdName);
+      return;
+    }
+  }
+
   chatSending = true;
   chatSendBtn.disabled = true;
   chatInput.value = '';
@@ -934,9 +1363,11 @@ async function chatSend() {
 
         switch (eventType) {
           case 'thinking':
+            chatAppendStep('thinking', 'Thinking...');
             chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
             break;
           case 'tool_use':
+            chatAppendStep('tool_use', data.name || 'tool');
             chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Using ' + esc(data.name || 'tool') + '...');
             break;
           case 'text':
@@ -1008,9 +1439,11 @@ async function chatSend() {
 
 // --- Chat Commands ---
 const CHAT_COMMANDS = [
+  { name: '/clear', description: 'Clear chat and start fresh', icon: 'trash-2' },
   { name: '/new', description: 'Start a new conversation', icon: 'refresh-cw' },
   { name: '/start', description: 'Re-run onboarding', icon: 'play' },
   { name: '/restart', description: 'Restart ALF daemon', icon: 'power' },
+  { name: '/bash', description: 'Execute a bash command', icon: 'terminal', dynamic: true },
   { name: '/help', description: 'Show available commands', icon: 'help-circle' },
 ];
 
@@ -1082,6 +1515,19 @@ function chatExecCommand(cmd) {
     case '/help':
       chatAppendBubble('assistant', 'Available commands:\n' + CHAT_COMMANDS.map(c => '**' + c.name + '** — ' + c.description).join('\n'), { tier: 'system' });
       chatScrollBottom();
+      break;
+    case '/clear':
+      fetch('/api/chat', { method: 'DELETE', credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(r => {
+          if (r.ok) {
+            chatMessages.innerHTML = '';
+          } else {
+            chatAppendBubble('assistant', 'Failed to clear chat.', { tier: 'system' });
+            chatScrollBottom();
+          }
+        })
+        .catch(() => { chatAppendBubble('assistant', 'Failed to clear chat.', { tier: 'system' }); chatScrollBottom(); });
       break;
     case '/new':
       fetch('/api/chat', { method: 'DELETE', credentials: 'same-origin' })

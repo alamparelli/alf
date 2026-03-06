@@ -290,6 +290,52 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .explorer-editor .json-editor { flex: 1; min-height: 240px; resize: vertical; }
 
+/* Drag & Drop */
+#workspaceCard { position: relative; }
+.ws-drop-overlay {
+  display: none; position: absolute; inset: 0; z-index: 10;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border: 2px dashed var(--accent); border-radius: var(--radius);
+  pointer-events: none;
+}
+.ws-drop-overlay.active { display: flex; align-items: center; justify-content: center; }
+.ws-drop-content {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: var(--accent); font-size: 1.1rem; font-weight: 600;
+}
+
+/* Upload Modal */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 20px; min-width: 360px; max-width: 480px; width: 90%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.modal h3 { margin: 0 0 16px; font-size: 1rem; }
+.upload-file-list {
+  max-height: 140px; overflow-y: auto; margin-bottom: 12px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px; font-size: 0.82rem;
+}
+.upload-file-item {
+  display: flex; justify-content: space-between; padding: 3px 0;
+  color: var(--text-dim);
+}
+.upload-file-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-file-item .size { flex-shrink: 0; margin-left: 8px; }
+.upload-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { opacity: 0.9; }
+.upload-progress {
+  margin-top: 12px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+}
+.upload-progress-bar {
+  height: 100%; background: var(--accent); width: 0%; transition: width 0.3s;
+}
+
 /* Teach */
 .teach-counter {
   position: absolute; bottom: 8px; right: 12px;
@@ -363,6 +409,18 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   display: flex; gap: 8px; align-items: center;
 }
 .chat-bubble.user .chat-bubble-meta { color: rgba(255,255,255,0.7); justify-content: flex-end; }
+
+/* Thinking / Tool Step Bubbles */
+.chat-step {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 12px; margin: 2px 16px;
+  font-size: 0.75rem; color: var(--text-dim);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.chat-step-icon { font-size: 0.9rem; flex-shrink: 0; }
+.chat-step-label { opacity: 0.85; }
+.chat-step.thinking .chat-step-label { color: #a78bfa; }
+.chat-step.tool_use .chat-step-label { color: #60a5fa; }
 .chat-bubble-reaction {
   display: inline-block; font-size: 1.1rem; margin-top: 2px;
 }
@@ -635,19 +693,74 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   border-radius: var(--radius); font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 0.82rem; line-height: 1.6;
 }
-.jv-key { color: var(--accent); font-weight: 600; }
-.jv-string { color: #22863a; }
-.jv-number { color: #005cc5; }
-.jv-bool { color: #e36209; }
-.jv-null { color: var(--text-dim); font-style: italic; }
-.jv-bracket { color: var(--text-dim); }
-.jv-row { padding-left: calc(var(--depth, 0) * 16px); white-space: nowrap; }
+/* JSON Interactive Editor */
+.jv-node { display: inline; }
+.jv-field {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 3px 0; padding-left: calc(var(--depth, 0) * 20px);
+}
+.jv-key {
+  color: var(--accent); font-weight: 600; font-size: 0.82rem;
+  min-width: 100px; flex-shrink: 0; padding-top: 5px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.jv-index {
+  color: var(--text-dim); font-size: 0.75rem; min-width: 36px;
+  flex-shrink: 0; padding-top: 5px; font-family: monospace;
+}
+.jv-input-text {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); padding: 4px 8px;
+  font-size: 0.82rem; font-family: 'SF Mono', 'Fira Code', monospace;
+  width: 100%; min-width: 0; flex: 1;
+}
+.jv-input-textarea {
+  resize: vertical; line-height: 1.5;
+}
+.jv-input-text:focus { border-color: var(--accent); outline: none; }
+.jv-input-num {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); padding: 4px 8px;
+  font-size: 0.82rem; font-family: 'SF Mono', 'Fira Code', monospace;
+  width: 120px;
+}
+.jv-input-num:focus { border-color: var(--accent); outline: none; }
+.jv-num-wrap { display: inline-flex; align-items: center; }
+.jv-dt-wrap { display: inline-flex; align-items: center; }
+.jv-input-dt {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); padding: 4px 8px;
+  font-size: 0.82rem; font-family: 'SF Mono', 'Fira Code', monospace;
+  color-scheme: dark;
+}
+body.light .jv-input-dt { color-scheme: light; }
+.jv-input-dt:focus { border-color: var(--accent); outline: none; }
+.jv-input-bool {
+  width: 16px; height: 16px; accent-color: var(--accent);
+  cursor: pointer; margin-top: 4px;
+}
+.jv-section-header {
+  display: flex; align-items: center; gap: 6px; padding: 4px 0;
+}
+.jv-badge {
+  font-size: 0.68rem; font-weight: 600; color: var(--text-dim);
+  background: var(--border); padding: 1px 7px; border-radius: 4px;
+}
 .jv-toggle {
   cursor: pointer; user-select: none; display: inline-block; width: 14px;
   text-align: center; color: var(--text-dim); font-size: 0.7rem;
 }
 .jv-toggle:hover { color: var(--accent); }
+.jv-children { padding-left: 4px; }
 .jv-children.collapsed { display: none; }
+.jv-null { color: var(--text-dim); font-style: italic; }
+
+/* Legacy JSON read-only (JSONL) */
+.jv-string { color: #22863a; }
+.jv-number { color: #005cc5; }
+.jv-bool { color: #e36209; }
+.jv-bracket { color: var(--text-dim); }
+.jv-row { padding-left: calc(var(--depth, 0) * 16px); white-space: nowrap; }
 .jsonl-entry {
   border: 1px solid var(--border); border-radius: var(--radius);
   padding: 10px 12px; margin-bottom: 8px; background: var(--bg-card);

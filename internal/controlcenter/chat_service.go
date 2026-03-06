@@ -309,7 +309,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			}
 		}
 
-		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchSysPrompts, onProgress)
+		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchSysPrompts, agents.RunConfig{}, onProgress)
 		if orchErr != nil {
 			return fmt.Errorf("orchestrator: %w", orchErr)
 		}

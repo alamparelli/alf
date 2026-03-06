@@ -54,9 +54,18 @@ type agentResultJSON struct {
 	DurationMs int64   `json:"duration_ms"`
 }
 
+// RunConfig holds tier-level settings for an orchestrator run.
+type RunConfig struct {
+	Model         string // full model name for the orchestrator brain
+	Effort        string // effort level (e.g. "high")
+	MaxIterations int    // max orchestrate→delegate cycles (0 = default 10)
+	MaxTurns      int    // max turns per orchestrator brain call (0 = default 1)
+}
+
 // TaskMeta tracks the lifecycle of an orchestration run.
 type TaskMeta struct {
 	ID          string        `json:"id"`
+	Prompt      string        `json:"prompt,omitempty"`
 	StartedAt   time.Time     `json:"started_at"`
 	CompletedAt *time.Time    `json:"completed_at,omitempty"`
 	Iterations  int           `json:"iterations"`

@@ -105,7 +105,8 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	cmd.Env = safeEnv(dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
 
-	log.Printf("provider: invoke starting (resume=%q, model=%s)", params.ResumeID, model)
+	log.Printf("provider: invoke starting (resume=%q, model=%s, max_turns=%d, effort=%s, sys_prompts=%d, tools=%v, write=%v)",
+		params.ResumeID, model, params.MaxTurns, params.Effort, len(params.SystemPrompts), params.Tools, params.WriteCapable)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -117,11 +118,14 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
+	invokeStart := time.Now()
 
 	var (
 		resultText   strings.Builder
 		lastEvent    json.RawMessage
 		sentThinking bool
+		eventCount   int
+		firstEvent   bool
 	)
 
 	scanner := bufio.NewScanner(stdoutPipe)
@@ -130,6 +134,12 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
+		}
+
+		eventCount++
+		if !firstEvent {
+			firstEvent = true
+			log.Printf("provider: first event after %dms", time.Since(invokeStart).Milliseconds())
 		}
 
 		lastEvent = make(json.RawMessage, len(line))
@@ -170,6 +180,9 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	}
 
 	waitErr := cmd.Wait()
+	invokeDur := time.Since(invokeStart)
+	log.Printf("provider: invoke done %dms events=%d text=%d bytes stderr=%q",
+		invokeDur.Milliseconds(), eventCount, resultText.Len(), truncStderr(stderr.String(), 200))
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("claude timed out after %v", timeout)
 	}
@@ -236,6 +249,14 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	}
 
 	return nil, fmt.Errorf("claude returned empty response")
+}
+
+func truncStderr(s string, maxLen int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 type jsonModelEntry struct {

@@ -2,18 +2,20 @@ package controlcenter
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
 // daemonStatusProvider implements StatusProvider using shared Stats.
 type daemonStatusProvider struct {
-	stats   *Stats
-	version string
+	stats     *Stats
+	version   string
+	chatStore *ChatStore
 }
 
 // NewStatusProvider creates a StatusProvider from shared stats.
-func NewStatusProvider(stats *Stats, version string) StatusProvider {
-	return &daemonStatusProvider{stats: stats, version: version}
+func NewStatusProvider(stats *Stats, version string, chatStore *ChatStore) StatusProvider {
+	return &daemonStatusProvider{stats: stats, version: version, chatStore: chatStore}
 }
 
 func (p *daemonStatusProvider) Status() DaemonStatus {
@@ -25,12 +27,61 @@ func (p *daemonStatusProvider) Status() DaemonStatus {
 		lastMsg = &s
 	}
 
-	return DaemonStatus{
+	ds := DaemonStatus{
 		Status:       "running",
 		Uptime:       formatDuration(uptime),
 		MessageCount: p.stats.MessageCount.Load(),
 		LastMessage:  lastMsg,
 		Version:      p.version,
+	}
+
+	// Compute current session stats from recent messages.
+	if p.chatStore != nil {
+		ds.Session = p.currentSession()
+	}
+
+	return ds
+}
+
+// currentSession scans recent messages to find the latest session and compute stats.
+func (p *daemonStatusProvider) currentSession() *SessionStatus {
+	msgs := p.chatStore.Recent(0) // all in ring buffer
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	// Find the latest interactive session ID (skip scheduled job sessions).
+	var sessionID string
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].SessionID != "" && !strings.HasPrefix(msgs[i].SessionID, "scheduled:") {
+			sessionID = msgs[i].SessionID
+			break
+		}
+	}
+	if sessionID == "" {
+		return nil
+	}
+
+	// Count messages and sum cost for this session.
+	var count int
+	var cost float64
+	for _, m := range msgs {
+		if m.SessionID == sessionID {
+			count++
+			cost += m.CostUSD
+		}
+	}
+
+	// Shorten session ID for display.
+	displayID := sessionID
+	if len(displayID) > 12 {
+		displayID = displayID[:12]
+	}
+
+	return &SessionStatus{
+		ID:           displayID,
+		MessageCount: count,
+		CostUSD:      cost,
 	}
 }
 

@@ -211,6 +211,9 @@ func main() {
 	// Load skill catalog: system → bundled copy → user (later overrides earlier).
 	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills.d"), filepath.Join(dataDir, "skills"))
 
+	// Watch config files for changes and auto-reload.
+	go watchConfigFiles(configDir, reloadCh)
+
 	// Load agent team configurations.
 	agentStore := agents.NewFileAgentStore(filepath.Join(configDir, "agents"))
 
@@ -419,16 +422,17 @@ func main() {
 	schedLocation := resolveTimezone(cfg.Timezone)
 
 	sched := scheduler.New(scheduler.Config{
-		DataDir:    dataDir,
-		ContextDir: contextDir,
-		ChatID:     parsedChatID,
-		TG:         tg,
-		Provider:   &schedulerProvider{p: cliProvider},
-		TierStore:  &schedulerTierStore{ts: tierStore},
-		SkillStore: &schedulerSkillStore{s: skillStore},
-		ChatLogger: &schedulerChatLogger{store: chatStore},
-		CronPath:   filepath.Join(configDir, "cron.json"),
-		Location:   schedLocation,
+		DataDir:      dataDir,
+		ContextDir:   contextDir,
+		ChatID:       parsedChatID,
+		TG:           tg,
+		Provider:     &schedulerProvider{p: cliProvider},
+		TierStore:    &schedulerTierStore{ts: tierStore},
+		SkillStore:   &schedulerSkillStore{s: skillStore},
+		Orchestrator: &schedulerOrchestrator{o: orch},
+		ChatLogger:   &schedulerChatLogger{store: chatStore},
+		CronPath:     filepath.Join(configDir, "cron.json"),
+		Location:     schedLocation,
 	})
 
 	// Register system jobs (replaces individual goroutine patterns).
@@ -479,7 +483,7 @@ func main() {
 			"security-audit",
 			"Security Audit",
 			"0 0 9 * * *", // daily at 09:00
-			"haiku_r",
+			firstFallbackTier(tierStore),
 			"Run a full security audit. Read all files in /home/node/data/skills.d/, /home/node/data/skills/, /home/node/data/tools.d/, and /home/node/data/tools/. Follow the security-audit skill instructions to produce a structured report.",
 			"telegram",
 			[]string{"security-audit"},
@@ -510,7 +514,11 @@ func main() {
 					git.Commit("config updated via CC")
 				}
 			case cc.ReloadTiers:
-				log.Println("tiers reloaded")
+				if err := tierStore.Reload(); err != nil {
+					log.Printf("tiers reload error: %v", err)
+				} else {
+					log.Println("tiers reloaded")
+				}
 				newModel := router.ResolveModel(tierStore.Current().RouterModel)
 				if newModel == "" {
 					newModel = router.ResolveModel("haiku")
@@ -887,14 +895,14 @@ func main() {
 			// Command routing: handle /commands before passing to Claude.
 			var forcedTierName string
 			if strings.HasPrefix(u.Message.Text, "/") {
-				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir) {
+				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir, orch) {
 					continue
 				}
 				// Check for force command: /<tier_name> <message>
 				parts := strings.SplitN(u.Message.Text, " ", 2)
 				cmdName := strings.TrimPrefix(parts[0], "/")
 				for _, t := range tierStore.Current().Tiers {
-					if t.Enabled && t.ForceCommand && t.Name == cmdName {
+					if t.ForceCommand && t.Name == cmdName {
 						if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
 							tg.SendHTML(u.Message.Chat.ID, fmt.Sprintf("Usage: <code>/%s &lt;message&gt;</code>", t.Name))
 							forcedTierName = "_skip" // signal to skip this update
@@ -986,20 +994,14 @@ func main() {
 				upgraded := false
 				if routeResult.Response != "" && routeResult.Tier == "" {
 					// Direct response → upgrade to tier.
-					fallback := tierStore.Current().DefaultFallback
-					if fallback == "" {
-						fallback = "haiku_r"
-					}
+					fallback := firstFallbackTier(tierStore)
 					routeResult = router.Result{Tier: fallback, Reason: "reply-upgrade: direct→" + fallback}
 					upgraded = true
 				} else if routeResult.Tier != "" {
 					// Check if routed to an instant tier → upgrade.
 					for _, t := range tierStore.Current().Tiers {
 						if t.Name == routeResult.Tier && t.Instant {
-							fallback := tierStore.Current().DefaultFallback
-							if fallback == "" {
-								fallback = "haiku_r"
-							}
+							fallback := firstFallbackTier(tierStore)
 							routeResult = router.Result{Tier: fallback, Reason: fmt.Sprintf("reply-upgrade: %s→%s", t.Name, fallback)}
 							upgraded = true
 							break
@@ -1015,10 +1017,7 @@ func main() {
 			// instant responses — the user is asking about something personal.
 			if preRecallBlock != "" && recallBestDist < 0.6 && routeResult.Response != "" && routeResult.Tier == "" {
 				log.Printf("→ memory override: instant response upgraded to tier (best_dist=%.2f)", recallBestDist)
-				fallback := tierStore.Current().DefaultFallback
-				if fallback == "" {
-					fallback = "haiku_r"
-				}
+				fallback := firstFallbackTier(tierStore)
 				routeResult = router.Result{Tier: fallback, Reason: "memory-override: instant→" + fallback}
 			}
 			// Register trigger-matched skills in the session BEFORE tier override,
@@ -1103,7 +1102,7 @@ func main() {
 				"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
 			})
 
-			// Orchestrator dispatch: delegate to multi-agent coordinator.
+			// Orchestrator dispatch: delegate to multi-agent coordinator (non-blocking).
 			if routeResult.Tier == "orchestrator" && len(agentStore.All()) > 0 {
 				// Build system prompts (same as normal path).
 				sysPrompts := memory.CollectPrompts(contextDir)
@@ -1120,67 +1119,83 @@ func main() {
 					orchSysPrompts = append(orchSysPrompts, catalog)
 				}
 
-				// Status animation for orchestrator.
-				orchTag := "[orchestrator] "
-				if routingMsgID != 0 {
-					tg.EditMessage(chatID, routingMsgID, orchTag+"Coordinating agents...")
+				// Capture loop variables for the goroutine.
+				orchChatID := chatID
+				orchMsg := msgWithReplyContext
+				orchRoutingMsgID := routingMsgID
+				orchMediaCleanup := mediaCleanup
+				orchRC := agents.RunConfig{
+					Model:    tp.Model,
+					Effort:   tp.Effort,
+					MaxTurns: tp.MaxTurns,
 				}
-				orchAnim := newDotAnimator(tg, chatID, routingMsgID, orchTag+"Coordinating agents", "choose_sticker")
 
-				orchProgress := func(phase, detail string) {
-					switch phase {
-					case "thinking":
-						orchAnim.SetPhase(orchTag+"Thinking", "choose_sticker")
-					case "agent":
-						orchAnim.SetPhase(orchTag+"Agent: "+detail, "upload_document")
+				go func() {
+					// Status animation for orchestrator.
+					orchTag := "[orchestrator] "
+					if orchRoutingMsgID != 0 {
+						tg.EditMessage(orchChatID, orchRoutingMsgID, orchTag+"Coordinating agents...")
 					}
-				}
+					orchAnim := newDotAnimator(tg, orchChatID, orchRoutingMsgID, orchTag+"Coordinating agents", "choose_sticker")
 
-				start := time.Now()
-				orchResult, orchMeta, orchErr := orch.Run(context.Background(), msgWithReplyContext, orchSysPrompts, orchProgress)
-				duration := time.Since(start)
+					orchProgress := func(phase, detail string) {
+						switch phase {
+						case "thinking":
+							orchAnim.SetPhase(orchTag+"🧠 Thinking", "choose_sticker")
+						case "planning":
+							orchAnim.SetPhase(orchTag+"📋 "+detail, "choose_sticker")
+						case "agent":
+							orchAnim.SetPhase(orchTag+"⚡ "+detail, "upload_document")
+						case "agent_done":
+							orchAnim.SetPhase(orchTag+"✓ "+detail, "upload_document")
+						case "synthesizing":
+							orchAnim.SetPhase(orchTag+"📝 Synthesizing results", "typing")
+						}
+					}
 
-				orchAnim.Stop()
-				if routingMsgID != 0 {
-					tg.DeleteMessage(chatID, routingMsgID)
-				}
+					start := time.Now()
+					orchResult, orchMeta, orchErr := orch.Run(context.Background(), orchMsg, orchSysPrompts, orchRC, orchProgress)
+					duration := time.Since(start)
 
-				if orchErr != nil {
-					log.Printf("orchestrator error: %v", orchErr)
-					tg.SendHTML(chatID, fmt.Sprintf("Orchestrator error: %v", orchErr))
-					eventLog.Log("orchestrator_error", map[string]any{
-						"chat_id":     chatID,
-						"error":       orchErr.Error(),
-						"iterations":  orchMeta.Iterations,
-						"total_cost":  orchMeta.TotalCost,
-						"duration_ms": duration.Milliseconds(),
+					orchAnim.Stop()
+					if orchRoutingMsgID != 0 {
+						tg.DeleteMessage(orchChatID, orchRoutingMsgID)
+					}
+
+					if orchErr != nil {
+						log.Printf("orchestrator error: %v", orchErr)
+						tg.SendHTML(orchChatID, fmt.Sprintf("Orchestrator error: %v", orchErr))
+						eventLog.Log("orchestrator_error", map[string]any{
+							"chat_id":     orchChatID,
+							"error":       orchErr.Error(),
+							"iterations":  orchMeta.Iterations,
+							"total_cost":  orchMeta.TotalCost,
+							"duration_ms": duration.Milliseconds(),
+						})
+						return
+					}
+
+					log.Printf("→ orchestrator %dms %d iterations $%.4f", duration.Milliseconds(), orchMeta.Iterations, orchMeta.TotalCost)
+
+					eventLog.Log("orchestrator_out", map[string]any{
+						"chat_id":      orchChatID,
+						"iterations":   orchMeta.Iterations,
+						"total_cost":   orchMeta.TotalCost,
+						"agent_calls":  len(orchMeta.AgentCalls),
+						"duration_ms":  duration.Milliseconds(),
+						"text_length":  len(orchResult),
+						"task_id":      orchMeta.ID,
 					})
-					continue
-				}
 
-				log.Printf("→ orchestrator %dms %d iterations $%.4f", duration.Milliseconds(), orchMeta.Iterations, orchMeta.TotalCost)
-
-				eventLog.Log("orchestrator_out", map[string]any{
-					"chat_id":      chatID,
-					"iterations":   orchMeta.Iterations,
-					"total_cost":   orchMeta.TotalCost,
-					"agent_calls":  len(orchMeta.AgentCalls),
-					"duration_ms":  duration.Milliseconds(),
-					"text_length":  len(orchResult),
-					"task_id":      orchMeta.ID,
-				})
-
-				if msgID, err := tg.SendMessageReturnID(chatID, orchResult); err == nil && msgID != 0 {
-					alfMsgIDs.Add(msgID)
-					chatHistory.Add(chatID, "alf", orchResult)
-				}
-				if mediaCleanup != nil {
-					cleanup := mediaCleanup
-					go func() {
+					if msgID, err := tg.SendMessageReturnID(orchChatID, orchResult); err == nil && msgID != 0 {
+						alfMsgIDs.Add(msgID)
+						chatHistory.Add(orchChatID, "alf", orchResult)
+					}
+					if orchMediaCleanup != nil {
 						time.Sleep(10 * time.Minute)
-						cleanup()
-					}()
-				}
+						orchMediaCleanup()
+					}
+				}()
 				continue
 			}
 
@@ -1662,7 +1677,7 @@ func hasMedia(msg *Message) bool {
 }
 
 // handleCommand processes known /commands. Returns true if handled.
-func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string) bool {
+func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string, orch *agents.Orchestrator) bool {
 	cmd := strings.SplitN(msg.Text, " ", 2)[0]
 	switch cmd {
 	case "/login":
@@ -1704,11 +1719,45 @@ Send me a message to get started — I'll introduce myself and we'll get to know
 			os.Exit(0)
 		}()
 		return true
+	case "/cancel":
+		if !allowedChatIDs[msg.Chat.ID] {
+			return true
+		}
+		running := orch.Running()
+		if len(running) == 0 {
+			tg.SendHTML(msg.Chat.ID, "No orchestrator jobs running.")
+			return true
+		}
+		n := orch.CancelAll()
+		tg.SendHTML(msg.Chat.ID, fmt.Sprintf("Cancelled %d orchestrator job(s).", n))
+		return true
+	case "/jobs":
+		if !allowedChatIDs[msg.Chat.ID] {
+			return true
+		}
+		running := orch.Running()
+		if len(running) == 0 {
+			tg.SendHTML(msg.Chat.ID, "No orchestrator jobs running.")
+			return true
+		}
+		var lines []string
+		for _, rt := range running {
+			elapsed := time.Since(rt.StartedAt).Truncate(time.Second)
+			iter := 0
+			if rt.Meta != nil {
+				iter = rt.Meta.Iterations
+			}
+			lines = append(lines, fmt.Sprintf("• <code>%s</code> — %s, iteration %d", rt.ID, elapsed, iter))
+		}
+		tg.SendHTML(msg.Chat.ID, "<b>Running orchestrator jobs:</b>\n"+strings.Join(lines, "\n"))
+		return true
 	case "/help":
 		help := "<b>Available commands:</b>\n" +
 			"/help — Show this message\n" +
 			"/new — Start a new conversation session\n" +
 			"/bash — Execute a bash command directly\n" +
+			"/jobs — List running orchestrator jobs\n" +
+			"/cancel — Cancel all running orchestrator jobs\n" +
 			"/restart — Restart the ALF daemon\n" +
 			"/login — Get a login link for the Control Center\n" +
 			"/start — Re-run onboarding (get to know each other)"
@@ -2545,6 +2594,34 @@ func (a *schedulerSkillStore) Get(name string) (*scheduler.SkillInfo, bool) {
 	return &scheduler.SkillInfo{Name: sk.Name, Prompt: sk.Prompt}, true
 }
 
+// schedulerOrchestrator adapts agents.Orchestrator to the scheduler.OrchestratorRunner interface.
+type schedulerOrchestrator struct {
+	o *agents.Orchestrator
+}
+
+func (s *schedulerOrchestrator) Run(ctx context.Context, userMessage string, systemPrompts []string, rc scheduler.RunConfig, onProgress scheduler.ProgressFunc) (string, *scheduler.TaskMeta, error) {
+	var agentProgress agents.ProgressFunc
+	if onProgress != nil {
+		agentProgress = agents.ProgressFunc(onProgress)
+	}
+
+	text, meta, err := s.o.Run(ctx, userMessage, systemPrompts, agents.RunConfig{
+		Model:         rc.Model,
+		Effort:        rc.Effort,
+		MaxIterations: rc.MaxIterations,
+		MaxTurns:      rc.MaxTurns,
+	}, agentProgress)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return text, &scheduler.TaskMeta{
+		Iterations: meta.Iterations,
+		TotalCost:  meta.TotalCost,
+		Status:     meta.Status,
+	}, nil
+}
+
 // resolveTimezone loads an IANA timezone from config, falling back to TZ env then UTC.
 func resolveTimezone(tz string) *time.Location {
 	if tz != "" {
@@ -2675,5 +2752,68 @@ func writeLLMSIndex(dataDir string) {
 	os.Chmod(llmsPath, 0o644) // make writable before overwrite
 	os.WriteFile(llmsPath, []byte(b.String()), 0o444)
 	log.Printf("docs: wrote llms.txt (%d docs)", len(entries))
+}
+
+// firstFallbackTier returns DefaultFallback from config, or the first enabled
+// non-instant tier, or the first tier overall. Never hardcodes a tier name.
+func firstFallbackTier(tierStore cc.TierStore) string {
+	cur := tierStore.Current()
+	if cur.DefaultFallback != "" {
+		return cur.DefaultFallback
+	}
+	for _, t := range cur.Tiers {
+		if t.Enabled && !t.Instant {
+			return t.Name
+		}
+	}
+	if len(cur.Tiers) > 0 {
+		return cur.Tiers[0].Name
+	}
+	return ""
+}
+
+// watchConfigFiles polls config files for changes and sends reload events.
+func watchConfigFiles(configDir string, reloadCh chan cc.ReloadEvent) {
+	type watchEntry struct {
+		path  string
+		event cc.ReloadEvent
+	}
+	entries := []watchEntry{
+		{cc.TiersPath(configDir), cc.ReloadTiers},
+		{filepath.Join(configDir, "config.json"), cc.ReloadConfig},
+	}
+
+	modTimes := make(map[string]time.Time)
+	for _, e := range entries {
+		if info, err := os.Stat(e.path); err == nil {
+			modTimes[e.path] = info.ModTime()
+		}
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		for _, e := range entries {
+			info, err := os.Stat(e.path)
+			if err != nil {
+				if prev, ok := modTimes[e.path]; ok && !prev.IsZero() {
+					delete(modTimes, e.path)
+				}
+				continue
+			}
+			prev := modTimes[e.path]
+			if !info.ModTime().Equal(prev) {
+				modTimes[e.path] = info.ModTime()
+				if !prev.IsZero() {
+					log.Printf("config watcher: %s changed, reloading", filepath.Base(e.path))
+					select {
+					case reloadCh <- e.event:
+					default:
+					}
+				}
+			}
+		}
+	}
 }
 

@@ -85,7 +85,7 @@ func TestDirectResponse(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, meta, err := orch.Run(context.Background(), "hello", nil, nil)
+	text, meta, err := orch.Run(context.Background(), "hello", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestSingleDelegation(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, meta, err := orch.Run(context.Background(), "research this", nil, nil)
+	text, meta, err := orch.Run(context.Background(), "research this", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestParallelDelegation(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, meta, err := orch.Run(context.Background(), "do everything", nil, nil)
+	text, meta, err := orch.Run(context.Background(), "do everything", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestMultiIteration(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, meta, err := orch.Run(context.Background(), "write article", nil, nil)
+	text, meta, err := orch.Run(context.Background(), "write article", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestAgentSessionResume(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	_, _, err := orch.Run(context.Background(), "test", nil, nil)
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestPlainTextFallback(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, _, err := orch.Run(context.Background(), "hi", nil, nil)
+	text, _, err := orch.Run(context.Background(), "hi", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestReDelegateOnBadResult(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, meta, err := orch.Run(context.Background(), "test", nil, nil)
+	text, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestSwitchAgentOnFailure(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, meta, err := orch.Run(context.Background(), "test", nil, nil)
+	text, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestPartialSuccess(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	_, meta, err := orch.Run(context.Background(), "test", nil, nil)
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestAgentErrorPassthrough(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, _, err := orch.Run(context.Background(), "test", nil, nil)
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestMaxIterationsExceeded(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	_, meta, err := orch.Run(context.Background(), "infinite", nil, nil)
+	_, meta, err := orch.Run(context.Background(), "infinite", nil, RunConfig{}, nil)
 	if err == nil {
 		t.Fatal("expected error for max iterations")
 	}
@@ -362,7 +362,7 @@ func TestGlobalTimeout(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	_, _, err := orch.Run(ctx, "test", nil, nil)
+	_, _, err := orch.Run(ctx, "test", nil, RunConfig{}, nil)
 	if err == nil {
 		// The orchestrator call itself may succeed on cancelled context
 		// depending on provider behavior. That's acceptable.
@@ -390,7 +390,7 @@ func TestMaxAgentsPerRequest(t *testing.T) {
 	store := testStore(team)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	_, meta, err := orch.Run(context.Background(), "test", nil, nil)
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestInvalidAgentName(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, meta, err := orch.Run(context.Background(), "test", nil, nil)
+	text, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +430,7 @@ func TestInvalidTeamName(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, _, err := orch.Run(context.Background(), "test", nil, nil)
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestEmptyDelegates(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, _, err := orch.Run(context.Background(), "test", nil, nil)
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +462,7 @@ func TestNoTeamsConfigured(t *testing.T) {
 	store := NewFileAgentStore(dir)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	_, _, err := orch.Run(context.Background(), "test", nil, nil)
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -478,7 +478,7 @@ func TestMalformedJSON(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	text, _, err := orch.Run(context.Background(), "test", nil, nil)
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestSessionExpired(t *testing.T) {
 
 	store := testStore(testTeam)
 	orch := NewOrchestrator(customProv, store, t.TempDir(), nil)
-	text, _, err := orch.Run(context.Background(), "test", nil, nil)
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ func TestTaskMetaTracking(t *testing.T) {
 	dataDir := t.TempDir()
 	orch := NewOrchestrator(mp, store, dataDir, nil)
 
-	_, meta, err := orch.Run(context.Background(), "test", nil, nil)
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +571,7 @@ func TestWorkingDirCreated(t *testing.T) {
 	dataDir := t.TempDir()
 	orch := NewOrchestrator(mp, store, dataDir, nil)
 
-	_, meta, err := orch.Run(context.Background(), "test", nil, nil)
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,7 +601,7 @@ func TestTimeoutDuringAgent(t *testing.T) {
 	store := testStore(testTeam)
 	orch := NewOrchestrator(blockProv, store, t.TempDir(), nil)
 
-	_, _, err := orch.Run(ctx, "test", nil, nil)
+	_, _, err := orch.Run(ctx, "test", nil, RunConfig{}, nil)
 	// Should error due to timeout.
 	if err == nil {
 		// If it somehow completes, that's also acceptable if the context was checked.
@@ -622,4 +622,330 @@ func (p *blockingProvider) Invoke(ctx context.Context, prompt string, params pro
 		return nil, ctx.Err()
 	}
 	return p.inner.Invoke(ctx, prompt, params, onProgress)
+}
+
+// --- RunConfig tests ---
+
+func TestRunConfigMaxTurnsPassedToBrain(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"response": "done"}`, CostUSD: 0.01},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{MaxTurns: 3}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The orchestrator brain call should have MaxTurns=3.
+	if len(mp.calls) == 0 {
+		t.Fatal("no calls recorded")
+	}
+	if mp.calls[0].Params.MaxTurns != 3 {
+		t.Errorf("expected MaxTurns=3 for brain, got %d", mp.calls[0].Params.MaxTurns)
+	}
+}
+
+func TestRunConfigMaxTurnsDefault(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"response": "done"}`, CostUSD: 0.01},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Default MaxTurns for the brain should be 1.
+	if mp.calls[0].Params.MaxTurns != 1 {
+		t.Errorf("expected default MaxTurns=1, got %d", mp.calls[0].Params.MaxTurns)
+	}
+}
+
+func TestRunConfigModelAndEffort(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"response": "done"}`, CostUSD: 0.01},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{
+		Model:  "claude-sonnet-4-6",
+		Effort: "low",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if mp.calls[0].Params.Model != "claude-sonnet-4-6" {
+		t.Errorf("expected model claude-sonnet-4-6, got %s", mp.calls[0].Params.Model)
+	}
+	if mp.calls[0].Params.Effort != "low" {
+		t.Errorf("expected effort low, got %s", mp.calls[0].Params.Effort)
+	}
+}
+
+func TestRunConfigMaxIterations(t *testing.T) {
+	// Provider always delegates, never returns a response — should stop at MaxIterations.
+	mp := newMockProvider(nil, nil) // falls through to fallback
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+
+	// Override fallback to always delegate.
+	delegateProvider := &alwaysDelegateProvider{}
+	orch.provider = delegateProvider
+
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{MaxIterations: 2}, nil)
+	if err == nil {
+		t.Fatal("expected max iterations error")
+	}
+	if !strings.Contains(err.Error(), "max iterations (2) exceeded") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if meta.Iterations != 2 {
+		t.Errorf("expected 2 iterations, got %d", meta.Iterations)
+	}
+}
+
+// alwaysDelegateProvider returns delegate JSON for orchestrator calls and results for agent calls.
+type alwaysDelegateProvider struct {
+	count atomic.Int32
+}
+
+func (p *alwaysDelegateProvider) Invoke(_ context.Context, _ string, params provider.Params, _ provider.OnProgress) (*provider.Result, error) {
+	n := int(p.count.Add(1))
+	// Odd calls = orchestrator brain, Even calls = agent.
+	if n%2 == 1 {
+		return &provider.Result{Text: `{"delegates": [{"agent": "content/researcher", "task": "do it"}]}`}, nil
+	}
+	return &provider.Result{Text: "agent result"}, nil
+}
+
+func TestRunNonBlocking(t *testing.T) {
+	// Verify the orchestrator can run concurrently (not blocking the caller).
+	slowProvider := &slowMockProvider{
+		delay: 50 * time.Millisecond,
+		result: &provider.Result{
+			Text:    `{"response": "done"}`,
+			CostUSD: 0.01,
+		},
+	}
+	store := testStore(testTeam)
+	orch := NewOrchestrator(slowProvider, store, t.TempDir(), nil)
+
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
+		close(done)
+	}()
+
+	// The goroutine should not block — we should be able to do other work.
+	select {
+	case <-done:
+		// Completed — good.
+	case <-time.After(5 * time.Second):
+		t.Fatal("orchestrator Run blocked for too long")
+	}
+}
+
+type slowMockProvider struct {
+	delay  time.Duration
+	result *provider.Result
+}
+
+func (p *slowMockProvider) Invoke(_ context.Context, _ string, _ provider.Params, _ provider.OnProgress) (*provider.Result, error) {
+	time.Sleep(p.delay)
+	return p.result, nil
+}
+
+func TestRunningTracksTask(t *testing.T) {
+	// Provider that blocks until cancelled.
+	blocker := make(chan struct{})
+	bp := &channelProvider{ch: blocker}
+	store := testStore(testTeam)
+	orch := NewOrchestrator(bp, store, t.TempDir(), nil)
+
+	// No running tasks initially.
+	if len(orch.Running()) != 0 {
+		t.Fatal("expected no running tasks")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		orch.Run(ctx, "test", nil, RunConfig{}, nil)
+		close(done)
+	}()
+
+	// Wait for the task to register.
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(orch.Running()) > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("task never appeared in Running()")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	running := orch.Running()
+	if len(running) != 1 {
+		t.Fatalf("expected 1 running task, got %d", len(running))
+	}
+	if running[0].ID == "" {
+		t.Error("running task has empty ID")
+	}
+
+	// Cancel and verify cleanup.
+	cancel()
+	<-done
+
+	if len(orch.Running()) != 0 {
+		t.Error("task still in Running() after completion")
+	}
+}
+
+func TestCancelStopsTask(t *testing.T) {
+	blocker := make(chan struct{})
+	bp := &channelProvider{ch: blocker}
+	store := testStore(testTeam)
+	orch := NewOrchestrator(bp, store, t.TempDir(), nil)
+
+	done := make(chan struct{})
+	go func() {
+		orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
+		close(done)
+	}()
+
+	// Wait for task to register.
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(orch.Running()) > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("task never appeared")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Cancel via the orchestrator API.
+	running := orch.Running()
+	ok := orch.Cancel(running[0].ID)
+	if !ok {
+		t.Fatal("Cancel returned false")
+	}
+
+	select {
+	case <-done:
+		// Good — task stopped.
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't stop after Cancel")
+	}
+}
+
+func TestCancelAllStopsTasks(t *testing.T) {
+	blocker := make(chan struct{})
+	bp := &channelProvider{ch: blocker}
+	store := testStore(testTeam)
+	orch := NewOrchestrator(bp, store, t.TempDir(), nil)
+
+	// Start two tasks.
+	done1 := make(chan struct{})
+	done2 := make(chan struct{})
+	go func() { orch.Run(context.Background(), "test1", nil, RunConfig{}, nil); close(done1) }()
+	go func() { orch.Run(context.Background(), "test2", nil, RunConfig{}, nil); close(done2) }()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(orch.Running()) >= 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected 2 running tasks, got %d", len(orch.Running()))
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	n := orch.CancelAll()
+	if n != 2 {
+		t.Errorf("expected CancelAll to return 2, got %d", n)
+	}
+
+	select {
+	case <-done1:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task 1 didn't stop")
+	}
+	select {
+	case <-done2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task 2 didn't stop")
+	}
+}
+
+// channelProvider blocks on Invoke until the channel is closed or context is cancelled.
+type channelProvider struct {
+	ch chan struct{}
+}
+
+func (p *channelProvider) Invoke(ctx context.Context, _ string, _ provider.Params, _ provider.OnProgress) (*provider.Result, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-p.ch:
+		return &provider.Result{Text: `{"response": "done"}`}, nil
+	}
+}
+
+func TestProgressCallbacks(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator: delegate
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+		// Agent: result
+		{Text: "found it", CostUSD: 0.005},
+		// Orchestrator: final
+		{Text: `{"response": "here you go"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+
+	var phases []string
+	progress := func(phase, detail string) {
+		phases = append(phases, phase)
+	}
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, progress)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have: thinking, planning, agent, agent_done, synthesizing, thinking
+	expected := map[string]bool{
+		"thinking":     false,
+		"planning":     false,
+		"agent":        false,
+		"agent_done":   false,
+		"synthesizing": false,
+	}
+	for _, p := range phases {
+		expected[p] = true
+	}
+	for phase, seen := range expected {
+		if !seen {
+			t.Errorf("missing progress phase: %s (got phases: %v)", phase, phases)
+		}
+	}
 }

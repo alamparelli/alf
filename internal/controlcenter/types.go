@@ -105,7 +105,7 @@ func DefaultTiersConfig() *TiersConfig {
 			{Name: "sonnet_rw", Model: "sonnet", Priority: 4, Enabled: true, Routable: true, RouterLabel: "Editing code files, implementing features, fixing bugs in code, creating scripts, modifying configurations, writing tests, multi-file text changes", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 30},
 			{Name: "opus_r", Model: "opus", Priority: 5, Enabled: true, Routable: true, RouterLabel: "Architecture design, system-level reasoning, complex trade-off analysis, long-form strategic planning, reviewing entire codebases, deep technical research", Effort: "medium", Tools: []string{"Read"}},
 			{Name: "opus_rw", Model: "opus", Priority: 6, Enabled: true, Routable: true, RouterLabel: "Large-scale refactoring across multiple files, implementing complex features with many moving parts, redesigning system architecture, building new modules from scratch", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 40},
-			{Name: "orchestrator", Model: "opus", Priority: 7, Enabled: false, Routable: false, ForceCommand: true, WriteCapable: false, Effort: "high", MaxTurns: 5, Description: "Multi-agent orchestrator for complex multi-step tasks"},
+			{Name: "orchestrator", Model: "opus", Priority: 7, Enabled: false, Routable: false, ForceCommand: true, WriteCapable: false, Effort: "high", MaxTurns: 1, Description: "Multi-agent orchestrator for complex multi-step tasks"},
 		},
 	}
 }
@@ -157,9 +157,17 @@ func (s *Stats) RecordMessage() {
 
 // DaemonStatus is a snapshot of daemon state for the API.
 type DaemonStatus struct {
-	Status       string  `json:"status"`
-	Uptime       string  `json:"uptime"`
-	MessageCount int64   `json:"message_count"`
-	LastMessage  *string `json:"last_message"`
-	Version      string  `json:"version"`
+	Status       string         `json:"status"`
+	Uptime       string         `json:"uptime"`
+	MessageCount int64          `json:"message_count"`
+	LastMessage  *string        `json:"last_message"`
+	Version      string         `json:"version"`
+	Session      *SessionStatus `json:"session,omitempty"`
+}
+
+// SessionStatus summarizes the current chat session.
+type SessionStatus struct {
+	ID           string  `json:"id"`
+	MessageCount int     `json:"message_count"`
+	CostUSD      float64 `json:"cost_usd"`
 }

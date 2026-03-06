@@ -65,7 +65,7 @@ func TestBuildPromptEmptyTeams(t *testing.T) {
 func TestBuildPromptGoalDriven(t *testing.T) {
 	teams := []*TeamConfig{{Name: "t", Agents: []AgentConfig{{Name: "a", Model: "h", SystemPrompt: "hi"}}}}
 	prompt := BuildOrchestratorPrompt(teams)
-	if !strings.Contains(prompt, "FULLY achieved") {
+	if !strings.Contains(prompt, "all work is done") {
 		t.Error("prompt should contain goal-driven instruction")
 	}
 }

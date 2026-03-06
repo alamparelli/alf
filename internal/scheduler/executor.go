@@ -52,6 +52,29 @@ type TierStoreReader interface {
 	Current() *TiersSnapshot
 }
 
+// OrchestratorRunner runs the multi-agent orchestrator.
+type OrchestratorRunner interface {
+	Run(ctx context.Context, userMessage string, systemPrompts []string, rc RunConfig, onProgress ProgressFunc) (string, *TaskMeta, error)
+}
+
+// ProgressFunc reports orchestrator status updates.
+type ProgressFunc func(phase, detail string)
+
+// RunConfig holds tier-level settings for an orchestrator run (mirrors agents.RunConfig).
+type RunConfig struct {
+	Model         string
+	Effort        string
+	MaxIterations int
+	MaxTurns      int
+}
+
+// TaskMeta tracks orchestration lifecycle (mirrors agents.TaskMeta).
+type TaskMeta struct {
+	Iterations int
+	TotalCost  float64
+	Status     string
+}
+
 // SkillStoreReader provides skill prompts for injection into scheduler jobs.
 type SkillStoreReader interface {
 	Get(name string) (*SkillInfo, bool)
@@ -101,6 +124,8 @@ func (e *Engine) executeJob(j *Job) {
 			log.Printf("scheduler: [%s] DEPRECATION: direct job using prompt instead of command — migrate to --command", j.ID)
 			text = j.Prompt
 		}
+	} else if j.Tier == "orchestrator" && e.cfg.Orchestrator != nil {
+		text, err = e.invokeOrchestrator(j)
 	} else {
 		text, err = e.invokeLLM(j)
 	}
@@ -284,6 +309,39 @@ func (e *Engine) writeFile(j *Job, text string) {
 	f.WriteString(header)
 	f.WriteString(text)
 	f.WriteString("\n")
+}
+
+// invokeOrchestrator delegates the job to the multi-agent orchestrator.
+func (e *Engine) invokeOrchestrator(j *Job) (string, error) {
+	if e.cfg.Orchestrator == nil {
+		return "", fmt.Errorf("orchestrator not configured")
+	}
+
+	// Build system prompts (same as invokeLLM).
+	var sysPrompts []string
+	if e.cfg.ContextDir != "" {
+		indexPath := filepath.Join(e.cfg.ContextDir, "index.md")
+		if data, err := os.ReadFile(indexPath); err == nil {
+			sysPrompts = append(sysPrompts, string(data))
+		}
+	}
+	if len(j.Skills) > 0 && e.cfg.SkillStore != nil {
+		if block := buildSkillBlock(e.cfg.SkillStore, j.Skills); block != "" {
+			sysPrompts = append(sysPrompts, block)
+		}
+	}
+
+	// Orchestrator jobs get a longer timeout (up to 30 minutes).
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	text, meta, err := e.cfg.Orchestrator.Run(ctx, j.Prompt, sysPrompts, RunConfig{}, nil)
+	if err != nil {
+		return "", err
+	}
+
+	log.Printf("scheduler: [%s] orchestrator done: %d iterations, $%.4f", j.ID, meta.Iterations, meta.TotalCost)
+	return text, nil
 }
 
 // buildSkillBlock resolves skill names and returns flattened prompts for injection.

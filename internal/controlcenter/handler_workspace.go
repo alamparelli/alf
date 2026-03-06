@@ -176,11 +176,21 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 		all = []wsEntry{}
 	}
 
-	data, _ := json.Marshal(map[string]any{
+	resp := map[string]any{
 		"type":    "directory",
 		"path":    relPath,
 		"entries": all,
-	})
+	}
+	// Include protected list on root listing so the frontend has a single source of truth.
+	if relPath == "" {
+		names := make([]string, 0, len(protectedTopDirs))
+		for k := range protectedTopDirs {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		resp["protected"] = names
+	}
+	data, _ := json.Marshal(resp)
 	w.Write(data)
 }
 

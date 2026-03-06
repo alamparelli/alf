@@ -13,8 +13,8 @@ func TestFileTierStore_LoadDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if len(tiers.Tiers) != 6 {
-		t.Fatalf("expected 6 default tiers, got %d", len(tiers.Tiers))
+	if len(tiers.Tiers) != 8 {
+		t.Fatalf("expected 8 default tiers, got %d", len(tiers.Tiers))
 	}
 	if tiers.Tiers[0].Name != "instant" {
 		t.Errorf("expected first tier 'instant', got %q", tiers.Tiers[0].Name)
@@ -34,7 +34,7 @@ func TestFileTierStore_Current(t *testing.T) {
 
 	// Before any file, Current returns default.
 	cur := store.Current()
-	if len(cur.Tiers) != 6 || cur.Tiers[0].Name != "instant" {
+	if len(cur.Tiers) != 8 || cur.Tiers[0].Name != "instant" {
 		t.Error("Current() should return default tiers before any file write")
 	}
 }

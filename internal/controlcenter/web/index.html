@@ -81,6 +81,63 @@
           </div>
         </div>
 
+        <!-- Workspace Explorer -->
+        <div class="card" id="workspaceCard">
+          <h2>Workspace</h2>
+          <div class="ws-breadcrumb" id="wsBreadcrumb"></div>
+          <div class="explorer-split">
+            <div class="explorer-sidebar">
+              <div class="explorer-file-list" id="wsFileList"></div>
+            </div>
+            <div class="explorer-editor">
+              <div class="explorer-editor-header">
+                <span class="explorer-filename" id="wsFileName">Select a file</span>
+                <div class="ws-editor-actions">
+                  <button class="btn btn-icon" id="wsViewBtn" style="display:none" title="Pretty view"><i data-lucide="eye"></i></button>
+                  <button class="btn btn-icon btn-danger-icon" id="wsDeleteBtn" disabled title="Delete file"><i data-lucide="trash-2"></i></button>
+                  <button class="btn" id="wsSaveBtn" disabled>Save</button>
+                </div>
+              </div>
+              <div class="ws-message" id="wsMessage" style="display:none"></div>
+              <textarea class="json-editor" id="wsEditor" rows="12" placeholder="Select a file to view..." disabled style="display:none"></textarea>
+              <div id="wsViewer" class="ws-viewer" style="display:none"></div>
+            </div>
+          </div>
+          <div class="ws-drop-overlay" id="wsDropOverlay">
+            <div class="ws-drop-content">
+              <i data-lucide="upload-cloud" style="width:48px;height:48px"></i>
+              <span>Drop files here</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upload Modal -->
+        <div class="modal-backdrop" id="uploadModal" style="display:none">
+          <div class="modal">
+            <h3>Upload files</h3>
+            <div class="upload-file-list" id="uploadFileList"></div>
+            <div class="form-row">
+              <label>Destination</label>
+              <select id="uploadTarget"></select>
+            </div>
+            <div class="form-row" id="uploadSubfolderRow">
+              <label>Subfolder (optional)</label>
+              <input type="text" id="uploadSubfolder" placeholder="e.g. my-skill">
+            </div>
+            <div class="form-row" id="uploadCustomRow" style="display:none">
+              <label>Custom path</label>
+              <input type="text" id="uploadCustomPath" placeholder="e.g. data/exports">
+            </div>
+            <div class="upload-actions">
+              <button class="btn" id="uploadCancel">Cancel</button>
+              <button class="btn btn-primary" id="uploadConfirm">Upload</button>
+            </div>
+            <div class="upload-progress" id="uploadProgress" style="display:none">
+              <div class="upload-progress-bar" id="uploadProgressBar"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Teach Card -->
         <div class="card" id="teachCard">
           <h2>Teach</h2>
@@ -125,30 +182,6 @@
           <div class="teach-actions">
             <button class="btn" id="teachSubmit">Import</button>
             <span class="teach-result" id="teachResult"></span>
-          </div>
-        </div>
-
-        <!-- Workspace Explorer -->
-        <div class="card" id="workspaceCard">
-          <h2>Workspace</h2>
-          <div class="ws-breadcrumb" id="wsBreadcrumb"></div>
-          <div class="explorer-split">
-            <div class="explorer-sidebar">
-              <div class="explorer-file-list" id="wsFileList"></div>
-            </div>
-            <div class="explorer-editor">
-              <div class="explorer-editor-header">
-                <span class="explorer-filename" id="wsFileName">Select a file</span>
-                <div class="ws-editor-actions">
-                  <button class="btn btn-icon" id="wsViewBtn" style="display:none" title="Pretty view"><i data-lucide="eye"></i></button>
-                  <button class="btn btn-icon btn-danger-icon" id="wsDeleteBtn" disabled title="Delete file"><i data-lucide="trash-2"></i></button>
-                  <button class="btn" id="wsSaveBtn" disabled>Save</button>
-                </div>
-              </div>
-              <div class="ws-message" id="wsMessage" style="display:none"></div>
-              <textarea class="json-editor" id="wsEditor" rows="12" placeholder="Select a file to view..." disabled style="display:none"></textarea>
-              <div id="wsViewer" class="ws-viewer" style="display:none"></div>
-            </div>
           </div>
         </div>
       </div>

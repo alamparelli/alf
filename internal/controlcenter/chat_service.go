@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/memory"
@@ -66,6 +67,7 @@ type ChatService struct {
 	Provider     provider.Provider   // injected Claude provider
 	Recaller     MemoryRecaller      // may be nil — auto-injects relevant memories
 	SkillStore   skills.Store        // may be nil — injects skill catalog into system prompts
+	Orchestrator *agents.Orchestrator // may be nil — multi-agent orchestrator
 	mu           sync.Mutex          // serialize Claude calls (single user v1)
 
 	// Upload registry: upload_id → UploadEntry
@@ -280,6 +282,67 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		"source": "api",
 	})
 
+	// Orchestrator dispatch: delegate to multi-agent coordinator.
+	if tierName == "orchestrator" && cs.Orchestrator != nil {
+		var orchSysPrompts []string
+		orchSysArgs := memory.CollectPrompts(cs.ContextDir)
+		for i := 0; i < len(orchSysArgs)-1; i += 2 {
+			if orchSysArgs[i] == "--append-system-prompt" {
+				orchSysPrompts = append(orchSysPrompts, orchSysArgs[i+1])
+			}
+		}
+		if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {
+			orchSysPrompts = append(orchSysPrompts, recallBlock)
+		}
+		if cs.SkillStore != nil {
+			if catalog := skills.BuildCatalog(cs.SkillStore); catalog != "" {
+				orchSysPrompts = append(orchSysPrompts, catalog)
+			}
+		}
+
+		onProgress := func(phase, detail string) {
+			switch phase {
+			case "thinking":
+				onEvent(ChatEvent{Type: "thinking", Data: struct{}{}})
+			case "agent":
+				onEvent(ChatEvent{Type: "tool_use", Data: map[string]string{"name": "agent:" + detail}})
+			}
+		}
+
+		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchSysPrompts, onProgress)
+		if orchErr != nil {
+			return fmt.Errorf("orchestrator: %w", orchErr)
+		}
+
+		assistantMsg := ChatMessage{
+			ID:        NewMessageID(),
+			Role:      "assistant",
+			Text:      orchResult,
+			Timestamp: time.Now(),
+			Model:     "orchestrator",
+			Tier:      "orchestrator",
+			CostUSD:   orchMeta.TotalCost,
+		}
+		cs.ChatStore.Append(assistantMsg)
+
+		onEvent(ChatEvent{Type: "text", Data: map[string]string{"text": orchResult}})
+		onEvent(ChatEvent{Type: "done", Data: ChatDoneData{
+			MsgID:   assistantMsg.ID,
+			Model:   "orchestrator",
+			CostUSD: orchMeta.TotalCost,
+			Tier:    "orchestrator",
+		}})
+
+		cs.EventLog.Log("orchestrator_out", map[string]any{
+			"iterations":  orchMeta.Iterations,
+			"total_cost":  orchMeta.TotalCost,
+			"agent_calls": len(orchMeta.AgentCalls),
+			"task_id":     orchMeta.ID,
+			"source":      "api",
+		})
+		return nil
+	}
+
 	// Build system prompts.
 	systemPrompts := memory.CollectPrompts(cs.ContextDir)
 	// Convert --append-system-prompt flags to flat strings.
@@ -297,6 +360,15 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	if cs.SkillStore != nil {
 		if catalog := skills.BuildCatalog(cs.SkillStore); catalog != "" {
 			sysPromptTexts = append(sysPromptTexts, catalog)
+		}
+		// Auto-inject skills whose triggers match the user message.
+		if matched := skills.MatchTriggers(cs.SkillStore, req.Message); len(matched) > 0 {
+			names := make([]string, len(matched))
+			for i, sk := range matched {
+				names[i] = sk.Name
+			}
+			log.Printf("[chat-api] skills: auto-injected %v", names)
+			sysPromptTexts = append(sysPromptTexts, skills.BuildInjection(matched))
 		}
 	}
 	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))

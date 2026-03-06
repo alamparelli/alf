@@ -11,7 +11,8 @@ import (
 	"unicode/utf8"
 )
 
-const maxFileSize = 1 << 20 // 1 MB
+const maxFileSize = 1 << 20  // 1 MB
+const maxUploadTotal = 10 << 20 // 10 MB total for multi-file upload
 
 // editableExts lists file extensions that can be written via PUT.
 var editableExts = map[string]bool{
@@ -287,12 +288,17 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 
 // protectedTopDirs are top-level directories that cannot be deleted.
 var protectedTopDirs = map[string]bool{
-	"config.d":  true,
-	"context.d": true,
-	"memory.d":  true,
-	"pages.d":   true,
-	"skills.d":  true,
-	"tools":     true,
+	"config":   true,
+	"config.d": true,
+	"context":  true,
+	"docs":     true,
+	"logs":     true,
+	"pages":    true,
+	"sessions": true,
+	"skills":   true,
+	"skills.d": true,
+	"tools":    true,
+	"tools.d":  true,
 }
 
 func (h *WorkspaceHandler) del(w http.ResponseWriter, absPath, relPath string) {
@@ -346,7 +352,153 @@ func (h *WorkspaceHandler) notifyChange(relPath string) {
 		h.Notifier.Notify(ReloadTools)
 	case strings.HasPrefix(relPath, "skills") || strings.HasPrefix(relPath, "skills.d"):
 		h.Notifier.Notify(ReloadSkills)
+	case strings.HasPrefix(relPath, "config.d/agents"):
+		h.Notifier.Notify(ReloadAgents)
 	}
+}
+
+// UploadHandler handles multi-file uploads to a target directory.
+//
+//	POST /api/workspace/upload  (multipart/form-data)
+//	  - "target" form field: destination directory relative to DataDir
+//	  - "files" form field(s): file content (supports multiple)
+type UploadHandler struct {
+	DataDir   string
+	ConfigDir string
+	SkillsDir string
+	Notifier  Notifier
+}
+
+func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, jsonErr("method not allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseMultipartForm(maxUploadTotal); err != nil {
+		http.Error(w, jsonErr("request too large or invalid multipart"), http.StatusBadRequest)
+		return
+	}
+
+	target := r.FormValue("target")
+
+	// Validate target directory.
+	wsH := &WorkspaceHandler{DataDir: h.DataDir, ConfigDir: h.ConfigDir, SkillsDir: h.SkillsDir}
+	targetAbs, err := wsH.resolve(target)
+	if err != nil {
+		http.Error(w, jsonErr("invalid target path"), http.StatusBadRequest)
+		return
+	}
+
+	// Ensure target exists and is a directory.
+	info, err := os.Stat(targetAbs)
+	if err != nil && !os.IsNotExist(err) {
+		http.Error(w, jsonErr("target error"), http.StatusInternalServerError)
+		return
+	}
+	if err == nil && !info.IsDir() {
+		http.Error(w, jsonErr("target is not a directory"), http.StatusBadRequest)
+		return
+	}
+
+	// Use the writable path for the target (config.d, skills.d remap).
+	writeTarget := wsH.resolveWrite(target, targetAbs)
+
+	// Create target directory if it doesn't exist.
+	if err := os.MkdirAll(writeTarget, 0755); err != nil {
+		http.Error(w, jsonErr("failed to create target directory"), http.StatusInternalServerError)
+		return
+	}
+
+	files := r.MultipartForm.File["files"]
+	if len(files) == 0 {
+		http.Error(w, jsonErr("no files provided"), http.StatusBadRequest)
+		return
+	}
+
+	// Also accept webkitRelativePath hints for preserving folder structure.
+	relativePaths := r.MultipartForm.Value["paths"]
+
+	var saved []string
+	for i, fh := range files {
+		if fh.Size > maxFileSize {
+			http.Error(w, jsonErr("file too large: "+fh.Filename), http.StatusRequestEntityTooLarge)
+			return
+		}
+
+		// Determine destination path. If a relative path is provided, preserve directory structure.
+		destName := filepath.Base(fh.Filename)
+		if i < len(relativePaths) && relativePaths[i] != "" {
+			// Sanitize the relative path.
+			relP := filepath.Clean(relativePaths[i])
+			if !strings.HasPrefix(relP, "..") && relP != "." {
+				destName = relP
+			}
+		}
+
+		destPath := filepath.Join(writeTarget, destName)
+
+		// Security: ensure we don't escape the target directory.
+		if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(writeTarget)) {
+			http.Error(w, jsonErr("invalid file path: "+fh.Filename), http.StatusBadRequest)
+			return
+		}
+
+		// Ensure parent directories exist for nested paths.
+		if dir := filepath.Dir(destPath); dir != writeTarget {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				http.Error(w, jsonErr("failed to create directory"), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		src, err := fh.Open()
+		if err != nil {
+			http.Error(w, jsonErr("failed to read file: "+fh.Filename), http.StatusInternalServerError)
+			return
+		}
+
+		content, err := io.ReadAll(io.LimitReader(src, maxFileSize+1))
+		src.Close()
+		if err != nil {
+			http.Error(w, jsonErr("failed to read file: "+fh.Filename), http.StatusInternalServerError)
+			return
+		}
+
+		if err := os.WriteFile(destPath, content, 0644); err != nil {
+			http.Error(w, jsonErr("failed to write file: "+fh.Filename), http.StatusInternalServerError)
+			return
+		}
+
+		relSaved := target
+		if relSaved != "" {
+			relSaved += "/"
+		}
+		relSaved += destName
+		saved = append(saved, relSaved)
+	}
+
+	// Notify about changes.
+	if h.Notifier != nil {
+		for _, s := range saved {
+			switch {
+			case strings.HasPrefix(s, "tools"):
+				h.Notifier.Notify(ReloadTools)
+			case strings.HasPrefix(s, "skills") || strings.HasPrefix(s, "skills.d"):
+				h.Notifier.Notify(ReloadSkills)
+			case s == "config.d/config.json":
+				h.Notifier.Notify(ReloadConfig)
+			case s == "config.d/tiers.json":
+				h.Notifier.Notify(ReloadTiers)
+			}
+		}
+	}
+
+	data, _ := json.Marshal(map[string]any{
+		"ok":    true,
+		"files": saved,
+	})
+	w.Write(data)
 }
 
 // isBinary checks if content is likely binary by looking for null bytes

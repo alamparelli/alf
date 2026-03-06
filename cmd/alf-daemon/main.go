@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alamparelli/alf/internal/agents"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/gittrack"
@@ -143,18 +146,38 @@ func main() {
 	for _, sub := range []string{"config", "tools", "skills", "context", "pages"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
+	os.MkdirAll(filepath.Join(configDir, "agents"), 0o755)
 
 	// Populate tools.d/ with symlinks to each system tool in /opt/alf/tools/.
 	// The host volume mount overwrites any Dockerfile-created symlinks,
 	// so we link individual tools at runtime instead.
 	linkSystemTools(filepath.Join(dataDir, "tools.d"), "/opt/alf/tools")
 
-	// Fix data directory permissions so the claude subprocess (uid 1001, gid 1000)
+	// Ensure Claude Code finds its native binary at $HOME/.local/bin/claude.
+	// The volume mount overwrites any Dockerfile-created structure.
+	if claudePath, err := exec.LookPath("claude"); err == nil {
+		localBin := filepath.Join(dataDir, ".local", "bin")
+		os.MkdirAll(localBin, 0o755)
+		link := filepath.Join(localBin, "claude")
+		os.Remove(link) // remove stale symlink
+		if err := os.Symlink(claudePath, link); err == nil {
+			log.Printf("linked %s → %s", link, claudePath)
+		}
+	}
+
+	// Fix directory permissions so the claude subprocess (uid 1001, gid 1000)
 	// can read/write files created before the permission refactoring.
 	fixDataPermissions(dataDir)
+	fixDataPermissions(configDir)
 
 	// Migrate config from old data/config/ to configDir (before loading).
 	migrateConfig(dataDir, configDir)
+
+	// Run user setup script if modified since last run.
+	runSetupScript(dataDir)
+
+	// Generate llms.txt index of available documentation.
+	writeLLMSIndex(dataDir)
 
 	// Load initial config.
 	configStore := cc.NewFileConfigStore(cc.ConfigPath(configDir))
@@ -172,6 +195,9 @@ func main() {
 	// Load skill catalog (system dir + user dir).
 	// skills.d contains SKILL.md-based skills; legacy "skills/" is JSON-based.
 	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills.d"))
+
+	// Load agent team configurations.
+	agentStore := agents.NewFileAgentStore(filepath.Join(configDir, "agents"))
 
 	// Set process-wide timezone from config so log timestamps are correct.
 	time.Local = resolveTimezone(cfg.Timezone)
@@ -266,6 +292,7 @@ func main() {
 
 	// Ring buffer tracking Alf's sent message IDs for reaction matching.
 	alfMsgIDs := newRingBuffer(200)
+	chatHistory := newChatHistoryBuffer(10) // last 10 exchanges per chat
 
 	// Chat message store for mobile app API.
 	chatStore := cc.NewChatStore(dataDir)
@@ -276,6 +303,9 @@ func main() {
 	// Provider: spawn-per-call Claude CLI for responses.
 	tiersTimeout := time.Duration(cfg.TiersTimeout) * time.Second // 0 → default 5m inside NewCLIProvider
 	cliProvider := provider.NewCLIProvider(dataDir, tiersTimeout, claudeCred)
+
+	// Multi-agent orchestrator.
+	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel)
 
 	// Router model for message classification.
 	routerModel := router.ResolveModel(tierStore.Current().RouterModel)
@@ -488,6 +518,12 @@ func main() {
 				if git != nil {
 					git.Commit("skills updated via CC")
 				}
+			case cc.ReloadAgents:
+				if err := agentStore.Reload(); err != nil {
+					log.Printf("agents reload error: %v", err)
+				} else {
+					log.Printf("agents reloaded (%d teams)", len(agentStore.All()))
+				}
 			}
 		default:
 		}
@@ -498,6 +534,9 @@ func main() {
 			time.Sleep(5 * time.Second)
 			continue
 		}
+
+		// Merge album messages (same media_group_id) into single updates.
+		updates = mergeMediaGroups(updates)
 
 		for _, u := range updates {
 			offset = u.UpdateID + 1
@@ -546,6 +585,15 @@ func main() {
 
 			log.Printf("← %s: %s", u.Message.From.Username, u.Message.Text)
 			stats.RecordMessage()
+
+			// Record user message in chat history buffer (for GIF/media context).
+			userText := u.Message.Text
+			if userText == "" {
+				userText = u.Message.Caption
+			}
+			if userText != "" {
+				chatHistory.Add(u.Message.Chat.ID, "user", userText)
+			}
 
 			// Extract reply context if this is a quoted reply.
 			isReply := u.Message.ReplyToMessage != nil
@@ -621,161 +669,201 @@ func main() {
 			// Handle media messages: download and save for Claude to read.
 			var mediaCleanup func()
 			if hasMedia && !hasVoice {
-				var fileID, fileName string
-				var duration int
+				// Collect all files to download (supports albums via mergeMediaGroups).
+				type fileRef struct {
+					FileID   string
+					FileName string
+					Duration int
+					IsAnim   bool
+					IsVNote  bool
+				}
+				var files []fileRef
+
 				if len(u.Message.Photo) > 0 {
-					fileID = u.Message.Photo[len(u.Message.Photo)-1].FileID
-					fileName = "photo.jpg"
+					// Albums: each photo pair (sizes) in Photo slice — pick largest per photo.
+					// After mergeMediaGroups, multiple photos from an album are concatenated.
+					// Telegram sends multiple sizes per photo; pick the largest of each.
+					// For a single photo: last element. For albums: every N-th element.
+					// Simple approach: deduplicate by file_id prefix (sizes share prefix).
+					seen := make(map[string]bool)
+					for i := len(u.Message.Photo) - 1; i >= 0; i-- {
+						p := u.Message.Photo[i]
+						// Use first 20 chars of FileID as group key (sizes share prefix).
+						key := p.FileID
+						if len(key) > 20 {
+							key = key[:20]
+						}
+						if !seen[key] {
+							seen[key] = true
+							files = append(files, fileRef{
+								FileID:   p.FileID,
+								FileName: fmt.Sprintf("photo_%d.jpg", len(files)+1),
+							})
+						}
+					}
 				} else if u.Message.Document != nil {
-					fileID = u.Message.Document.FileID
-					fileName = u.Message.Document.FileName
-					if fileName == "" {
-						fileName = "document"
+					fn := u.Message.Document.FileName
+					if fn == "" {
+						fn = "document"
 					}
+					files = append(files, fileRef{FileID: u.Message.Document.FileID, FileName: fn})
 				} else if u.Message.Video != nil {
-					fileID = u.Message.Video.FileID
-					fileName = u.Message.Video.FileName
-					if fileName == "" {
-						fileName = "video.mp4"
+					fn := u.Message.Video.FileName
+					if fn == "" {
+						fn = "video.mp4"
 					}
-					duration = u.Message.Video.Duration
+					files = append(files, fileRef{FileID: u.Message.Video.FileID, FileName: fn, Duration: u.Message.Video.Duration})
 				} else if u.Message.Animation != nil {
-					fileID = u.Message.Animation.FileID
-					fileName = u.Message.Animation.FileName
-					if fileName == "" {
-						fileName = "animation.gif"
+					fn := u.Message.Animation.FileName
+					if fn == "" {
+						fn = "animation.gif"
 					}
-					duration = u.Message.Animation.Duration
+					files = append(files, fileRef{FileID: u.Message.Animation.FileID, FileName: fn, Duration: u.Message.Animation.Duration, IsAnim: true})
 				} else if u.Message.VideoNote != nil {
-					fileID = u.Message.VideoNote.FileID
-					fileName = "videonote.mp4"
-					duration = u.Message.VideoNote.Duration
+					files = append(files, fileRef{FileID: u.Message.VideoNote.FileID, FileName: "videonote.mp4", Duration: u.Message.VideoNote.Duration, IsVNote: true})
+				}
+				// Add extra files from album merging.
+				for _, ef := range u.Message.extraFiles {
+					fn := ef.FileName
+					if fn == "" {
+						fn = fmt.Sprintf("file_%d", len(files)+1)
+					}
+					files = append(files, fileRef{FileID: ef.FileID, FileName: fn})
 				}
 
-				if fileID != "" {
+				if len(files) > 0 {
 					tg.SendChatAction(u.Message.Chat.ID, "typing")
-					data, err := media.DownloadFile(client, token, fileID)
-					if err != nil {
-						log.Printf("media download failed: %v", err)
-					} else {
-						mimeType := media.DetectMimeType(data, fileName)
-						ext := extFromMime(mimeType, fileName)
+					var cleanupPaths []string
+					var allParts []string
+
+					caption := u.Message.Caption
+					if caption == "" {
+						caption = u.Message.Text
+					}
+
+					for fi, f := range files {
+						data, err := media.DownloadFile(client, token, f.FileID)
+						if err != nil {
+							log.Printf("media download failed (%s): %v", f.FileName, err)
+							continue
+						}
+
+						mimeType := media.DetectMimeType(data, f.FileName)
+						ext := extFromMime(mimeType, f.FileName)
 						tmpFile, err := os.CreateTemp("", "alf-media-*"+ext)
 						if err != nil {
 							log.Printf("media temp file failed: %v", err)
-						} else {
-							tmpFile.Write(data)
-							tmpFile.Close()
-							os.Chmod(tmpFile.Name(), 0o644) // world-readable for claude subprocess
-							tmpPath := tmpFile.Name()
+							continue
+						}
+						tmpFile.Write(data)
+						tmpFile.Close()
+						os.Chmod(tmpFile.Name(), 0o644)
+						tmpPath := tmpFile.Name()
+						cleanupPaths = append(cleanupPaths, tmpPath)
 
-							// Track all temp files for delayed cleanup.
-							var cleanupPaths []string
-							cleanupPaths = append(cleanupPaths, tmpPath)
-
-							caption := u.Message.Caption
-							if caption == "" {
-								caption = u.Message.Text
+						// Video/GIF/VideoNote handling.
+						isVideoDoc := !hasVideo && media.IsVideoContent(mimeType, f.FileName)
+						if hasVideo || isVideoDoc || f.IsAnim || f.IsVNote {
+							mediaType := "VIDEO"
+							if f.IsAnim {
+								mediaType = "GIF/Animation"
+							} else if f.IsVNote {
+								mediaType = "VIDEO NOTE (round video)"
 							}
 
-							// Video/GIF/VideoNote/video documents: extract frames + audio transcript.
-							isVideoDoc := !hasVideo && media.IsVideoContent(mimeType, fileName)
-							if hasVideo || isVideoDoc {
-								mediaType := "VIDEO"
-								if u.Message.Animation != nil {
-									mediaType = "GIF/Animation"
-								} else if u.Message.VideoNote != nil {
-									mediaType = "VIDEO NOTE (round video)"
-								}
+							frames, err := media.ExtractFrames(tmpPath, 16)
+							if err != nil {
+								log.Printf("frame extraction failed: %v", err)
+								allParts = append(allParts, fmt.Sprintf("[%s from Telegram, %ds — frame extraction failed]", mediaType, f.Duration))
+							} else {
+								cleanupPaths = append(cleanupPaths, frames...)
 
-								frames, err := media.ExtractFrames(tmpPath, 16)
-								if err != nil {
-									log.Printf("frame extraction failed: %v", err)
-									// Fallback: tell Claude the file is a video it can't view.
-									if caption != "" {
-										u.Message.Text = fmt.Sprintf("[%s from Telegram, %ds — frame extraction failed]\n%s", mediaType, duration, caption)
-									} else {
-										u.Message.Text = fmt.Sprintf("[%s from Telegram, %ds — frame extraction failed. Ask the user what it's about.]", mediaType, duration)
-									}
-								} else {
-									cleanupPaths = append(cleanupPaths, frames...)
-
-									// Try to extract and transcribe audio from videos (not GIFs).
-									var transcript string
-									if u.Message.Animation == nil && transcriber != nil && transcriber.IsReady() {
-										audioPath, err := media.ExtractAudio(tmpPath)
+								var transcript string
+								if !f.IsAnim && transcriber != nil && transcriber.IsReady() {
+									audioPath, err := media.ExtractAudio(tmpPath)
+									if err != nil {
+										log.Printf("video audio extraction failed: %v", err)
+									} else if audioPath != "" {
+										cleanupPaths = append(cleanupPaths, audioPath)
+										result, err := transcriber.Transcribe(audioPath)
 										if err != nil {
-											log.Printf("video audio extraction failed: %v", err)
-										} else if audioPath != "" {
-											cleanupPaths = append(cleanupPaths, audioPath)
-											result, err := transcriber.Transcribe(audioPath)
-											if err != nil {
-												log.Printf("video audio transcription failed: %v", err)
-											} else if result.Text != "" {
-												transcript = result.Text
-												log.Printf("video audio: %q (%s)", transcript, result.Language)
-											}
+											log.Printf("video audio transcription failed: %v", err)
+										} else if result.Text != "" {
+											transcript = result.Text
+											log.Printf("video audio: %q (%s)", transcript, result.Language)
 										}
 									}
-
-									var parts []string
-									if len(frames) == 1 {
-										parts = append(parts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) — contact sheet with key frames. Use Read tool to view: %s]", mediaType, fileName, duration, frames[0]))
-									} else {
-										parts = append(parts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) — %d frames extracted. Use Read tool to view: %s]", mediaType, fileName, duration, len(frames), strings.Join(frames, ", ")))
-									}
-									if transcript != "" {
-										parts = append(parts, fmt.Sprintf("[Audio transcript: %s]", transcript))
-									}
-									if caption != "" {
-										parts = append(parts, caption)
-									} else if u.Message.Animation != nil {
-										parts = append(parts, "The user sent this GIF as a reaction to the conversation. GIFs express emotions, humor, or reactions — don't describe the GIF literally. Instead, understand the feeling/mood it conveys and respond to that emotion naturally, matching the vibe. Keep it short.")
-									} else {
-										parts = append(parts, "The user shared this video in chat. Describe what you see in the frames and the audio context. React naturally.")
-									}
-									u.Message.Text = strings.Join(parts, "\n")
 								}
 
-								log.Printf("media: video %s (%ds) → %d frames", fileName, duration, len(cleanupPaths)-1)
-							} else if media.IsImageContent(mimeType) {
-								if caption != "" {
-									u.Message.Text = fmt.Sprintf("[PHOTO from Telegram chat — use Read tool to view: %s]\n%s", tmpPath, caption)
+								if len(frames) == 1 {
+									allParts = append(allParts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) — contact sheet with key frames. Use Read tool to view: %s]", mediaType, f.FileName, f.Duration, frames[0]))
 								} else {
-									u.Message.Text = fmt.Sprintf("[PHOTO from Telegram chat — use Read tool to view: %s]\nThe user shared this photo in chat. React naturally as you would in a personal conversation — comment on what you see, the mood, the context. This is NOT a code review.", tmpPath)
+									allParts = append(allParts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) — %d frames extracted. Use Read tool to view: %s]", mediaType, f.FileName, f.Duration, len(frames), strings.Join(frames, ", ")))
 								}
-							} else if media.IsTextContent(mimeType) || mimeType == "application/pdf" {
-								textContent := media.ExtractTextFromDocument(data, mimeType)
-								if caption != "" {
-									u.Message.Text = fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s\n\n%s", fileName, textContent, caption)
-								} else {
-									u.Message.Text = fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s", fileName, textContent)
-								}
-							} else {
-								if caption != "" {
-									u.Message.Text = fmt.Sprintf("[FILE from Telegram chat: %s — use Read tool to view: %s]\n%s", fileName, tmpPath, caption)
-								} else {
-									u.Message.Text = fmt.Sprintf("[FILE from Telegram chat: %s — use Read tool to view: %s]\nThe user shared this file. Analyze and respond.", fileName, tmpPath)
+								if transcript != "" {
+									allParts = append(allParts, fmt.Sprintf("[Audio transcript: %s]", transcript))
 								}
 							}
 
-							mediaCleanup = func() {
-								for _, p := range cleanupPaths {
-									os.Remove(p)
-								}
+							log.Printf("media: video %s (%ds) → frames", f.FileName, f.Duration)
+						} else if media.IsImageContent(mimeType) {
+							label := "PHOTO"
+							if len(files) > 1 {
+								label = fmt.Sprintf("PHOTO %d/%d", fi+1, len(files))
 							}
+							allParts = append(allParts, fmt.Sprintf("[%s from Telegram chat — use Read tool to view: %s]", label, tmpPath))
+						} else if media.IsTextContent(mimeType) || mimeType == "application/pdf" {
+							textContent := media.ExtractTextFromDocument(data, mimeType)
+							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s", f.FileName, textContent))
+						} else {
+							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s — use Read tool to view: %s]", f.FileName, tmpPath))
+						}
 
-							log.Printf("media: saved %s (%s, %d bytes) → %s", fileName, mimeType, len(data), tmpPath)
-							eventLog.Log("media_in", map[string]any{
-								"chat_id":   u.Message.Chat.ID,
-								"username":  u.Message.From.Username,
-								"file_name": fileName,
-								"mime_type": mimeType,
-								"size":      len(data),
-								"tmp_path":  tmpPath,
-								"is_video":  hasVideo,
-								"duration":  duration,
-							})
+						log.Printf("media: saved %s (%s, %d bytes) → %s", f.FileName, mimeType, len(data), tmpPath)
+						eventLog.Log("media_in", map[string]any{
+							"chat_id":   u.Message.Chat.ID,
+							"username":  u.Message.From.Username,
+							"file_name": f.FileName,
+							"mime_type": mimeType,
+							"size":      len(data),
+							"tmp_path":  tmpPath,
+							"is_video":  hasVideo || f.IsAnim || f.IsVNote,
+						})
+					}
+
+					// Add caption or contextual instruction.
+					if caption != "" {
+						allParts = append(allParts, caption)
+					} else if u.Message.Animation != nil {
+						// GIF reaction: inject recent conversation context.
+						recent := chatHistory.Recent(u.Message.Chat.ID, 6)
+						if len(recent) > 0 {
+							var ctxLines []string
+							ctxLines = append(ctxLines, "[Recent conversation for context:")
+							for _, e := range recent {
+								role := "User"
+								if e.Role == "alf" {
+									role = "Alf"
+								}
+								ctxLines = append(ctxLines, fmt.Sprintf("- %s: %s", role, e.Text))
+							}
+							ctxLines = append(ctxLines, "]")
+							allParts = append(allParts, strings.Join(ctxLines, "\n"))
+						}
+						allParts = append(allParts, "The user sent this GIF as a reaction to the conversation. GIFs express emotions, humor, or reactions — don't describe the GIF literally. Instead, understand the feeling/mood it conveys and respond to that emotion naturally, matching the vibe. Keep it short.")
+					} else if len(files) > 1 {
+						allParts = append(allParts, fmt.Sprintf("The user sent %d files/photos together as an album. Analyze all of them and respond naturally.", len(files)))
+					} else if hasVideo {
+						allParts = append(allParts, "The user shared this video in chat. Describe what you see in the frames and the audio context. React naturally.")
+					} else {
+						allParts = append(allParts, "The user shared this in chat. React naturally as you would in a personal conversation — comment on what you see, the mood, the context.")
+					}
+
+					u.Message.Text = strings.Join(allParts, "\n")
+
+					mediaCleanup = func() {
+						for _, p := range cleanupPaths {
+							os.Remove(p)
 						}
 					}
 				}
@@ -901,6 +989,7 @@ func main() {
 				maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, routeResult.React, contextDir)
 				if mid, err := tg.SendMessageReturnID(chatID, routeResult.Response); err == nil && mid != 0 {
 					alfMsgIDs.Add(mid)
+					chatHistory.Add(chatID, "alf", routeResult.Response)
 					log.Printf("tracking alf msg %d (buffer=%d)", mid, alfMsgIDs.Size())
 					// Log outgoing message
 					eventLog.Log("message_out", map[string]any{
@@ -925,6 +1014,87 @@ func main() {
 				"model":            tp.Model,
 				"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
 			})
+
+			// Orchestrator dispatch: delegate to multi-agent coordinator.
+			if routeResult.Tier == "orchestrator" && len(agentStore.All()) > 0 {
+				// Build system prompts (same as normal path).
+				sysPrompts := memory.CollectPrompts(contextDir)
+				var orchSysPrompts []string
+				for i := 0; i < len(sysPrompts)-1; i += 2 {
+					if sysPrompts[i] == "--append-system-prompt" {
+						orchSysPrompts = append(orchSysPrompts, sysPrompts[i+1])
+					}
+				}
+				if preRecallBlock != "" {
+					orchSysPrompts = append(orchSysPrompts, preRecallBlock)
+				}
+				if catalog := skills.BuildCatalog(skillStore); catalog != "" {
+					orchSysPrompts = append(orchSysPrompts, catalog)
+				}
+
+				// Status animation for orchestrator.
+				orchTag := "[orchestrator] "
+				if routingMsgID != 0 {
+					tg.EditMessage(chatID, routingMsgID, orchTag+"Coordinating agents...")
+				}
+				orchAnim := newDotAnimator(tg, chatID, routingMsgID, orchTag+"Coordinating agents", "choose_sticker")
+
+				orchProgress := func(phase, detail string) {
+					switch phase {
+					case "thinking":
+						orchAnim.SetPhase(orchTag+"Thinking", "choose_sticker")
+					case "agent":
+						orchAnim.SetPhase(orchTag+"Agent: "+detail, "upload_document")
+					}
+				}
+
+				start := time.Now()
+				orchResult, orchMeta, orchErr := orch.Run(context.Background(), msgWithReplyContext, orchSysPrompts, orchProgress)
+				duration := time.Since(start)
+
+				orchAnim.Stop()
+				if routingMsgID != 0 {
+					tg.DeleteMessage(chatID, routingMsgID)
+				}
+
+				if orchErr != nil {
+					log.Printf("orchestrator error: %v", orchErr)
+					tg.SendHTML(chatID, fmt.Sprintf("Orchestrator error: %v", orchErr))
+					eventLog.Log("orchestrator_error", map[string]any{
+						"chat_id":     chatID,
+						"error":       orchErr.Error(),
+						"iterations":  orchMeta.Iterations,
+						"total_cost":  orchMeta.TotalCost,
+						"duration_ms": duration.Milliseconds(),
+					})
+					continue
+				}
+
+				log.Printf("→ orchestrator %dms %d iterations $%.4f", duration.Milliseconds(), orchMeta.Iterations, orchMeta.TotalCost)
+
+				eventLog.Log("orchestrator_out", map[string]any{
+					"chat_id":      chatID,
+					"iterations":   orchMeta.Iterations,
+					"total_cost":   orchMeta.TotalCost,
+					"agent_calls":  len(orchMeta.AgentCalls),
+					"duration_ms":  duration.Milliseconds(),
+					"text_length":  len(orchResult),
+					"task_id":      orchMeta.ID,
+				})
+
+				if msgID, err := tg.SendMessageReturnID(chatID, orchResult); err == nil && msgID != 0 {
+					alfMsgIDs.Add(msgID)
+					chatHistory.Add(chatID, "alf", orchResult)
+				}
+				if mediaCleanup != nil {
+					cleanup := mediaCleanup
+					go func() {
+						time.Sleep(10 * time.Minute)
+						cleanup()
+					}()
+				}
+				continue
+			}
 
 			// Transition routing message into processing status message.
 			tierTag := "[" + routeResult.Tier + "] "
@@ -975,7 +1145,21 @@ func main() {
 			if catalog := skills.BuildCatalog(skillStore); catalog != "" {
 				sysPromptTexts = append(sysPromptTexts, catalog)
 			}
+			// Auto-inject skills whose triggers match the user message.
+			if matched := skills.MatchTriggers(skillStore, u.Message.Text); len(matched) > 0 {
+				names := make([]string, len(matched))
+				for i, sk := range matched {
+					names[i] = sk.Name
+				}
+				log.Printf("skills: auto-injected %v", names)
+				sysPromptTexts = append(sysPromptTexts, skills.BuildInjection(matched))
+			}
 			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
+
+			// Documentation index — lets the model discover and read docs.
+			if _, err := os.Stat(filepath.Join(dataDir, "llms.txt")); err == nil {
+				sysPromptTexts = append(sysPromptTexts, "Documentation is available in ~/data/docs/. Read ~/data/llms.txt for the index. When you install packages, read the container-packages doc first.")
+			}
 
 			invokeParams := provider.Params{
 				Model:         tp.Model,
@@ -1104,6 +1288,7 @@ func main() {
 
 			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {
 				alfMsgIDs.Add(msgID)
+				chatHistory.Add(chatID, "alf", reply)
 				log.Printf("tracking alf msg %d (buffer=%d)", msgID, alfMsgIDs.Size())
 				// Log sent message ID
 				eventLog.Log("message_sent", map[string]any{
@@ -1162,6 +1347,13 @@ type Message struct {
 	Voice           *Voice     `json:"voice"`
 	VideoNote       *VideoNote `json:"video_note"`
 	Caption         string     `json:"caption"`
+	MediaGroupID    string     `json:"media_group_id"`
+	extraFiles      []mediaFile // populated by mergeMediaGroups for multi-file albums
+}
+
+type mediaFile struct {
+	FileID   string
+	FileName string
 }
 
 type Photo struct {
@@ -1416,10 +1608,22 @@ Send me a message to get started — I'll introduce myself and we'll get to know
 		help := "<b>Available commands:</b>\n" +
 			"/help — Show this message\n" +
 			"/new — Start a new conversation session\n" +
+			"/bash — Execute a bash command directly\n" +
 			"/restart — Restart the ALF daemon\n" +
 			"/login — Get a login link for the Control Center\n" +
 			"/start — Re-run onboarding (get to know each other)"
 		tg.SendHTML(msg.Chat.ID, help)
+		return true
+	case "/bash":
+		if !allowedChatIDs[msg.Chat.ID] {
+			return true
+		}
+		parts := strings.SplitN(msg.Text, " ", 2)
+		if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+			tg.SendHTML(msg.Chat.ID, "Usage: <code>/bash &lt;command&gt;</code>")
+			return true
+		}
+		go execBashCommand(tg, msg.Chat.ID, strings.TrimSpace(parts[1]))
 		return true
 	}
 	return false
@@ -1542,8 +1746,17 @@ func fixDataPermissions(dataDir string) {
 	}
 
 	fixed := 0
+	docsDir := filepath.Join(dataDir, "docs")
+	llmsFile := filepath.Join(dataDir, "llms.txt")
 	filepath.Walk(dataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			return nil
+		}
+		// Skip read-only system files.
+		if path == llmsFile {
+			return nil
+		}
+		if path == docsDir || strings.HasPrefix(path, docsDir+string(filepath.Separator)) {
 			return nil
 		}
 		mode := info.Mode()
@@ -1570,7 +1783,7 @@ func fixDataPermissions(dataDir string) {
 		return nil
 	})
 	if fixed > 0 {
-		log.Printf("fixed permissions on %d files/dirs in data/", fixed)
+		log.Printf("fixed permissions on %d files/dirs in %s", fixed, dataDir)
 	}
 }
 
@@ -1878,6 +2091,108 @@ func (r *ringBuffer) Size() int {
 	return r.pos
 }
 
+// chatHistoryBuffer stores recent message exchanges per chat for context injection.
+type chatHistoryBuffer struct {
+	mu      sync.Mutex
+	history map[int64][]chatEntry
+	maxSize int
+}
+
+type chatEntry struct {
+	Role string // "user" or "alf"
+	Text string
+}
+
+func newChatHistoryBuffer(maxPerChat int) *chatHistoryBuffer {
+	return &chatHistoryBuffer{
+		history: make(map[int64][]chatEntry),
+		maxSize: maxPerChat,
+	}
+}
+
+func (h *chatHistoryBuffer) Add(chatID int64, role, text string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	// Truncate long messages for context summary.
+	if len(text) > 200 {
+		text = text[:200] + "..."
+	}
+	entries := h.history[chatID]
+	entries = append(entries, chatEntry{Role: role, Text: text})
+	if len(entries) > h.maxSize {
+		entries = entries[len(entries)-h.maxSize:]
+	}
+	h.history[chatID] = entries
+}
+
+func (h *chatHistoryBuffer) Recent(chatID int64, n int) []chatEntry {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	entries := h.history[chatID]
+	if len(entries) <= n {
+		return append([]chatEntry{}, entries...)
+	}
+	return append([]chatEntry{}, entries[len(entries)-n:]...)
+}
+
+func (h *chatHistoryBuffer) Clear(chatID int64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.history, chatID)
+}
+
+// mergeMediaGroups consolidates updates that share the same media_group_id
+// into a single update with multiple file references. This ensures albums
+// (multiple photos/documents sent together) are processed as one message.
+func mergeMediaGroups(updates []Update) []Update {
+	var merged []Update
+	seen := make(map[string]int) // media_group_id → index in merged
+
+	for _, u := range updates {
+		if u.Message == nil || u.Message.MediaGroupID == "" {
+			merged = append(merged, u)
+			continue
+		}
+
+		gid := u.Message.MediaGroupID
+		if idx, ok := seen[gid]; ok {
+			// Merge into existing: append photos/documents from this message.
+			target := merged[idx].Message
+			if len(u.Message.Photo) > 0 {
+				target.Photo = append(target.Photo, u.Message.Photo...)
+			}
+			if u.Message.Document != nil {
+				// Store additional documents as extra photos workaround:
+				// we'll handle multi-doc via extraFiles below.
+				if target.extraFiles == nil {
+					target.extraFiles = []mediaFile{}
+				}
+				target.extraFiles = append(target.extraFiles, mediaFile{
+					FileID:   u.Message.Document.FileID,
+					FileName: u.Message.Document.FileName,
+				})
+			}
+			if u.Message.Video != nil {
+				if target.extraFiles == nil {
+					target.extraFiles = []mediaFile{}
+				}
+				target.extraFiles = append(target.extraFiles, mediaFile{
+					FileID:   u.Message.Video.FileID,
+					FileName: u.Message.Video.FileName,
+				})
+			}
+			// Use caption from whichever message has one.
+			if target.Caption == "" && u.Message.Caption != "" {
+				target.Caption = u.Message.Caption
+			}
+		} else {
+			seen[gid] = len(merged)
+			merged = append(merged, u)
+		}
+	}
+	return merged
+}
+
 // handleReaction processes an emoji reaction on an Alf message.
 func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, contextDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider) {
 	// Log the reaction and update live feedback.
@@ -2143,5 +2458,122 @@ func resolveTimezone(tz string) *time.Location {
 	}
 	// time.Local already respects the TZ environment variable.
 	return time.Local
+}
+
+// execBashCommand runs a bash command and sends the output via Telegram.
+func execBashCommand(tg *tgclient.Client, chatID int64, command string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	tg.SendChatAction(chatID, "typing")
+
+	err := cmd.Run()
+	result := out.String()
+	if len(result) > 4000 {
+		result = result[:4000] + "\n... (truncated)"
+	}
+
+	var msg string
+	if err != nil {
+		if result != "" {
+			msg = fmt.Sprintf("<pre>%s</pre>\n\nExit: %v", tgclient.EscapeHTML(result), err)
+		} else {
+			msg = fmt.Sprintf("Error: %v", err)
+		}
+	} else if result == "" {
+		msg = "<i>Command completed (no output)</i>"
+	} else {
+		msg = fmt.Sprintf("<pre>%s</pre>", tgclient.EscapeHTML(result))
+	}
+
+	tg.SendHTML(chatID, msg)
+}
+
+// runSetupScript executes data/setup.sh if it exists and has changed since last run.
+// A SHA-256 hash is stored in data/.setup-hash to skip unchanged scripts.
+func runSetupScript(dataDir string) {
+	script := filepath.Join(dataDir, "setup.sh")
+	data, err := os.ReadFile(script)
+	if err != nil {
+		return // no setup.sh — nothing to do
+	}
+
+	// Check hash to skip if unchanged.
+	h := sha256.Sum256(data)
+	currentHash := hex.EncodeToString(h[:])
+	hashFile := filepath.Join(dataDir, ".setup-hash")
+	if prev, err := os.ReadFile(hashFile); err == nil && strings.TrimSpace(string(prev)) == currentHash {
+		log.Printf("setup: script unchanged, skipping")
+		return
+	}
+
+	log.Printf("setup: running %s ...", script)
+	cmd := exec.Command("bash", script)
+	cmd.Dir = dataDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		log.Printf("setup: script failed: %v (will retry on next restart)", err)
+		return // don't save hash so it retries
+	}
+
+	os.WriteFile(hashFile, []byte(currentHash), 0o644)
+	log.Printf("setup: script completed successfully")
+}
+
+// writeLLMSIndex generates a llms.txt file in dataDir with an index of all embedded docs.
+// This lets the LLM quickly discover available documentation.
+func writeLLMSIndex(dataDir string) {
+	entries, err := cc.DocsFS().ReadDir("docs")
+	if err != nil {
+		return
+	}
+
+	var b strings.Builder
+	b.WriteString("# ALF Documentation Index\n")
+	b.WriteString("# Read any doc: cat ~/data/docs/<id>.md\n\n")
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".md")
+		data, err := cc.DocsFS().ReadFile("docs/" + e.Name())
+		if err != nil {
+			continue
+		}
+		// Extract title from first # heading.
+		title := id
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "# ") {
+				title = strings.TrimPrefix(strings.TrimSpace(line), "# ")
+				break
+			}
+		}
+		b.WriteString(fmt.Sprintf("- %s: %s\n", id, title))
+	}
+
+	// Write docs to filesystem so LLM can read them (read-only).
+	docsDir := filepath.Join(dataDir, "docs")
+	os.MkdirAll(docsDir, 0o555)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		data, _ := cc.DocsFS().ReadFile("docs/" + e.Name())
+		dest := filepath.Join(docsDir, e.Name())
+		os.Chmod(dest, 0o644) // make writable before overwrite
+		os.WriteFile(dest, data, 0o444)
+	}
+
+	llmsPath := filepath.Join(dataDir, "llms.txt")
+	os.Chmod(llmsPath, 0o644) // make writable before overwrite
+	os.WriteFile(llmsPath, []byte(b.String()), 0o444)
+	log.Printf("docs: wrote llms.txt (%d docs)", len(entries))
 }
 

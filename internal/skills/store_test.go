@@ -161,10 +161,11 @@ func TestFileSkillStore_MissingDir(t *testing.T) {
 }
 
 func TestParseFrontmatter_QuotedValues(t *testing.T) {
-	name, desc, ver, body := parseFrontmatter(`---
+	name, desc, ver, triggers, body := parseFrontmatter(`---
 name: "my-skill"
 description: 'A quoted description'
 version: "2"
+triggers: tweet, draft, x
 ---
 
 Body here.
@@ -177,6 +178,9 @@ Body here.
 	}
 	if ver != "2" {
 		t.Errorf("version = %q", ver)
+	}
+	if len(triggers) != 3 || triggers[0] != "tweet" || triggers[1] != "draft" || triggers[2] != "x" {
+		t.Errorf("triggers = %v", triggers)
 	}
 	if body != "Body here." {
 		t.Errorf("body = %q", body)

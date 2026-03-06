@@ -86,9 +86,10 @@ RUN mkdir -p /opt/alf/models/all-MiniLM-L6-v2 \
        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
 
 # Claude Code native binary.
+# Keep ~/.local/bin/claude so Claude Code recognises the native install.
 RUN curl -fsSL https://claude.ai/install.sh | bash \
     && cp "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
-    && rm -rf /root/.local/share/claude /root/.local/bin/claude /root/.claude \
+    && rm -rf /root/.local/share/claude /root/.claude \
     && claude --version
 
 ENV PATH="/opt/alf/tools:${PATH}"

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/provider"
 )
 
@@ -23,6 +24,7 @@ type Deps struct {
 	Magic          *MagicStore
 	Sessions       *SessionStore
 	ChatService    *ChatService // nil if chat API disabled
+	AgentStore     agents.Store  // nil if agents disabled
 	MemStore       MemoryStorer       // nil if memory unavailable
 	MemProvider    provider.Provider  // nil if memory unavailable
 	AuthToken        string
@@ -68,6 +70,12 @@ func HandlerFactory(deps Deps) http.Handler {
 		Event:    ReloadConfig,
 	})
 	mux.Handle("/api/workspace", &WorkspaceHandler{
+		DataDir:   deps.DataDir,
+		ConfigDir: deps.ConfigDir,
+		SkillsDir: deps.SkillsDir,
+		Notifier:  deps.Notifier,
+	})
+	mux.Handle("/api/workspace/upload", &UploadHandler{
 		DataDir:   deps.DataDir,
 		ConfigDir: deps.ConfigDir,
 		SkillsDir: deps.SkillsDir,
@@ -129,6 +137,9 @@ func HandlerFactory(deps Deps) http.Handler {
 	// Docs (embedded markdown).
 	mux.Handle("/api/docs/", &DocsHandler{})
 
+	// Bash command execution.
+	mux.Handle("/api/bash", &BashHandler{})
+
 	// Restart.
 	mux.Handle("/api/restart", &RestartHandler{})
 
@@ -164,7 +175,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	handler = jsonMiddleware(handler)
 	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
-	handler = newRateLimiter(60).middleware(handler)
+	handler = newRateLimiter(180).middleware(handler)
 	handler = loggingMiddleware(handler)
 
 	return handler

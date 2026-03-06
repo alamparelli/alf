@@ -96,7 +96,7 @@ func TestBuildPrompt_IncludesRoutableTiers(t *testing.T) {
 
 func TestBuildPrompt_ExcludesDisabledTiers(t *testing.T) {
 	tiers := defaultTiers()
-	tiers.Tiers[5].Enabled = false // disable "opus_rw"
+	tiers.Tiers[6].Enabled = false // disable "opus_rw"
 	valid := validTierSet(tiers)
 	prompt := buildPrompt(ClassifyInput{Message: "hello", Tiers: tiers, DataDir: t.TempDir(), ConfigDir: t.TempDir()}, valid)
 
@@ -212,10 +212,10 @@ func TestFallbackResult(t *testing.T) {
 		t.Errorf("expected fallback tier=haiku_r, got %q", r.Tier)
 	}
 
-	// Disable haiku_r → next lowest is sonnet_r (priority 2)
+	// Disable haiku_r → next lowest is haiku_rw (priority 2)
 	tiers.Tiers[1].Enabled = false
 	r = fallbackResult(tiers)
-	if r.Tier != "sonnet_r" {
-		t.Errorf("expected fallback tier=sonnet_r, got %q", r.Tier)
+	if r.Tier != "haiku_rw" {
+		t.Errorf("expected fallback tier=haiku_rw, got %q", r.Tier)
 	}
 }

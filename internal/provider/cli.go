@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -258,11 +259,16 @@ var safeEnvPrefixes = []string{
 }
 
 // safeEnv builds a subprocess environment with only safe variables plus HOME/ALF_DATA_DIR.
+// It prepends $HOME/.local/bin to PATH so Claude Code finds its native binary.
 func safeEnv(dataDir string) []string {
 	env := make([]string, 0, 16)
+	localBin := filepath.Join(dataDir, ".local", "bin")
 	for _, e := range os.Environ() {
 		for _, prefix := range safeEnvPrefixes {
 			if strings.HasPrefix(e, prefix) {
+				if strings.HasPrefix(e, "PATH=") {
+					e = "PATH=" + localBin + ":" + strings.TrimPrefix(e, "PATH=")
+				}
 				env = append(env, e)
 				break
 			}

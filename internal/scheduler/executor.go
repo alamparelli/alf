@@ -1,10 +1,12 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -92,7 +94,13 @@ func (e *Engine) executeJob(j *Job) {
 	var err error
 
 	if j.Tier == "direct" {
-		text = j.Prompt
+		if j.Command != "" {
+			text, err = e.runCommand(j)
+		} else {
+			// Legacy: direct jobs with prompt only (deprecated).
+			log.Printf("scheduler: [%s] DEPRECATION: direct job using prompt instead of command — migrate to --command", j.ID)
+			text = j.Prompt
+		}
 	} else {
 		text, err = e.invokeLLM(j)
 	}
@@ -139,6 +147,39 @@ func (e *Engine) executeJob(j *Job) {
 	if !j.System {
 		e.store.Save()
 	}
+}
+
+// runCommand executes a bash command for direct-tier jobs.
+func (e *Engine) runCommand(j *Job) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", j.Command)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	err := cmd.Run()
+	output := buf.String()
+
+	// Truncate to 4000 chars (Telegram message limit safety).
+	const maxOutput = 4000
+	if len(output) > maxOutput {
+		output = output[:maxOutput] + "\n... (truncated)"
+	}
+
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("command timed out after 2 minutes")
+		}
+		// Include output on failure for debugging.
+		if output != "" {
+			return "", fmt.Errorf("command failed: %w\n%s", err, output)
+		}
+		return "", fmt.Errorf("command failed: %w", err)
+	}
+
+	return strings.TrimSpace(output), nil
 }
 
 // invokeLLM calls the Claude provider with tier-appropriate params.

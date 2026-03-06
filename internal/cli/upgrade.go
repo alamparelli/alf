@@ -40,6 +40,11 @@ func RunUpgrade(currentVersion string) {
 		PrintInfo(fmt.Sprintf("Warning: failed to seed bundled skills: %v", err))
 	}
 
+	// Seed any new bundled agent teams.
+	if err := SeedBundledAgents(dir); err != nil {
+		PrintInfo(fmt.Sprintf("Warning: failed to seed bundled agents: %v", err))
+	}
+
 	PrintInfo("Restarting ALF...")
 	dockerCompose(dir, "up", "-d")
 	PrintCheck("ALF restarted")

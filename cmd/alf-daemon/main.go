@@ -1372,10 +1372,17 @@ func main() {
 				continue
 			}
 
-			// Append footer with active skills (if enabled in config).
+			// Append footer with tier and active skills (if enabled in config).
 			if cfg.ShowSkillFooter == nil || *cfg.ShowSkillFooter {
+				var footerParts []string
+				if routeResult.Tier != "" {
+					footerParts = append(footerParts, "["+routeResult.Tier+"]")
+				}
 				if activeSkills := chatSessions.GetSkills(chatID); len(activeSkills) > 0 {
-					reply += "\n\n\u2699\ufe0f " + strings.Join(activeSkills, ", ")
+					footerParts = append(footerParts, strings.Join(activeSkills, ", "))
+				}
+				if len(footerParts) > 0 {
+					reply += "\n\n\u2699\ufe0f " + strings.Join(footerParts, " · ")
 				}
 			}
 

@@ -313,6 +313,11 @@ func promptDirectory(reader *bufio.Reader, previous string) string {
 		fmt.Printf("  Warning: failed to seed bundled skills: %v\n", err)
 	}
 
+	// Seed bundled agent teams (e.g. starter).
+	if err := SeedBundledAgents(dir); err != nil {
+		fmt.Printf("  Warning: failed to seed bundled agents: %v\n", err)
+	}
+
 	PrintCheck(fmt.Sprintf("Directory ready: %s", dir))
 	return dir
 }

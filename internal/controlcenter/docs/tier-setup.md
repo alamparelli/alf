@@ -193,3 +193,4 @@ It controls how much "thinking" the model does before answering. `low` = quick g
 ## What's next?
 
 - [Getting Started](docs:getting-started) — ALF setup and overview
+- [Creating Skills](docs:creating-skills) — teach ALF new abilities with auto-injection

@@ -6,6 +6,7 @@ type Skill struct {
 	Description string   `json:"description"`
 	Version     string   `json:"version,omitempty"`
 	Triggers    []string `json:"triggers,omitempty"` // keywords that auto-inject this skill
+	Tier        string   `json:"tier,omitempty"`     // minimum tier name when this skill is active
 	Prompt      string   `json:"-"`                  // flattened body (SKILL.md + refs), not serialized
 	Dir         string   `json:"-"`                  // absolute path to skill directory
 }

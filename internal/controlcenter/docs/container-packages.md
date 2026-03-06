@@ -8,26 +8,25 @@ order: 10
 
 How to create tools, pages, and extend ALF's capabilities inside the container.
 
-## Directory Structure
+## Directory structure
 
 ALF runs in a Docker container. The `data/` volume is persistent across restarts but **not across container rebuilds** (image updates).
 
 | Directory | Persistent | Purpose |
 |-----------|-----------|---------|
-| `~/data/tools.d/` | Yes (volume) | Symlinks to system tools — auto-generated, do not edit |
-| `~/data/tools/` | Yes (volume) | Custom tool definitions (JSON) |
+| `~/data/tools/` | Yes (volume) | Custom scripts and executables |
 | `~/data/pages/` | Yes (volume) | HTML dashboards served at `/pages/<name>` |
-| `~/data/skills/` | Yes (volume) | Custom skill definitions (SKILL.md) |
+| `~/data/skills/` | Yes (volume) | Custom skills (SKILL.md folders) |
 | `~/data/context/` | Yes (volume) | Context files injected into every conversation |
-| `~/data/config.d/` | Read-only mount | Configuration (tiers.json, config.json, agents/) |
+| `~/data/tools.d/` | Yes (volume) | Symlinks to system tools — auto-generated, do not edit |
 | `~/data/skills.d/` | Read-only mount | Bundled skills (read-only copy) |
+| `~/data/config.d/` | Read-only mount | Configuration (tiers.json, config.json, agents/) |
 
-## Creating a CLI Tool
+## Creating a CLI tool
 
-Write a script, make it executable, and place it in a directory that's in PATH (`/opt/alf/tools/` is in PATH).
+Write a script, make it executable, and place it in `~/data/tools/`.
 
 ```bash
-# Example: create a tool in the persistent data volume
 cat > ~/data/tools/my-tool << 'SCRIPT'
 #!/bin/bash
 echo "Hello from my-tool"
@@ -36,25 +35,51 @@ SCRIPT
 chmod +x ~/data/tools/my-tool
 ```
 
-To make it available as a named command, create a symlink in tools.d/:
+Your tool is now available at `~/data/tools/my-tool`. Call it by full path, or add `~/data/tools` to your script's PATH.
+
+### Making tools discoverable
+
+Add a `--help` flag so ALF knows what your tool does:
+
 ```bash
-ln -sf ~/data/tools/my-tool ~/data/tools.d/my-tool
+cat > ~/data/tools/disk-check << 'SCRIPT'
+#!/bin/bash
+if [ "$1" = "--help" ]; then
+    echo "Check disk usage across all mounted volumes."
+    echo "Usage: disk-check [--threshold N]"
+    echo "  --threshold N   Alert if any volume exceeds N% (default: 80)"
+    exit 0
+fi
+
+threshold=${2:-80}
+df -h | awk -v t="$threshold" 'NR>1 && int($5)>t {print "WARNING:", $6, "is", $5, "full"}'
+SCRIPT
+chmod +x ~/data/tools/disk-check
 ```
 
-**Limitation:** `tools.d/` symlinks are regenerated from `/opt/alf/tools/` on each daemon restart. Custom symlinks in `tools.d/` will be removed. Place custom executables directly in `~/data/tools/` and call them by full path, or add `~/data/tools` to your script's PATH.
+> `tools.d/` symlinks are regenerated from `/opt/alf/tools/` on each daemon restart. Custom symlinks you place there will be removed. Put your tools in `~/data/tools/` instead.
 
-## Creating an HTML Page
+## Creating an HTML page
 
-Write an HTML file to `~/data/pages/`. It becomes accessible at `https://<domain>/pages/<name>` in the Control Center.
+Write an HTML file to `~/data/pages/`. It becomes accessible at `https://<domain>/pages/<name>` in the Control Center sidebar.
 
 ```bash
 cat > ~/data/pages/status.html << 'HTML'
 <html>
+<head>
+<style>
+  body { font-family: sans-serif; padding: 20px; background: var(--bg); color: var(--text); }
+  .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  h1 { color: var(--accent); }
+</style>
+</head>
 <body>
   <h1>System Status</h1>
-  <pre id="out"></pre>
+  <div class="card">
+    <pre id="out"></pre>
+  </div>
   <script>
-    fetch('/api/bash', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{"command":"uptime"}'})
+    fetch('/api/bash', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{"command":"uptime && df -h"}'})
       .then(r=>r.json()).then(d=>document.getElementById('out').textContent=d.output);
   </script>
 </body>
@@ -62,12 +87,53 @@ cat > ~/data/pages/status.html << 'HTML'
 HTML
 ```
 
-**Limitations:**
-- Pages run inside a strict Content Security Policy (no external scripts, no inline event handlers)
+### Page rules
+
+**Security (Content Security Policy):**
+- No external scripts — `<script src="https://...">` is blocked
+- No inline event handlers — `onclick="..."` is blocked. Use `addEventListener()` instead
+- No external stylesheets — `<link rel="stylesheet" href="https://...">` is blocked
+- Fetch/XHR is restricted to same origin (`/api/*` endpoints work fine)
+
+**CSS:**
+- All CSS must be in `<style>` blocks (inline) — external stylesheets are blocked
+- Use CC theme variables to match the current theme automatically:
+
+| Variable | What it styles |
+|----------|---------------|
+| `var(--bg)` | Page background |
+| `var(--text)` | Main text color |
+| `var(--text-dim)` | Secondary/muted text |
+| `var(--accent)` | Brand color (links, highlights) |
+| `var(--border)` | Border and divider color |
+| `var(--bg-card)` | Card/panel background |
+
+- Avoid using the `.empty` class name — it conflicts with CC internals
+
+**Other limits:**
 - Maximum file size: 5MB
 - File names must be alphanumeric + hyphens only
 
-## Package Persistence Across Rebuilds
+## Creating a skill
+
+Skills are instructions that ALF follows for specific topics. See [Creating Skills](docs:creating-skills) for a full guide.
+
+Quick version:
+
+```bash
+mkdir -p ~/data/skills/my-skill
+cat > ~/data/skills/my-skill/SKILL.md << 'EOF'
+---
+name: my-skill
+description: What this skill does (one line)
+triggers: keyword1, keyword2, keyword3
+---
+
+Your instructions here. ALF follows these when a trigger matches.
+EOF
+```
+
+## Package persistence across rebuilds
 
 When the container image is rebuilt (`alf upgrade`), everything outside the `data/` volume is lost. This includes pip packages, apt packages, npm packages, and any binaries installed at runtime.
 
@@ -113,13 +179,19 @@ curl -fsSL https://example.com/tool.tar.gz | tar xz -C /usr/local/bin
 3. Script runs as root — no `sudo` needed
 4. If installation fails, it will retry on next restart (hash not saved on failure)
 
-## What Survives a Rebuild
+## What survives a rebuild
 
 | Survives | Lost |
 |----------|------|
 | Everything in `~/data/` | pip/apt/npm packages |
 | Scripts in `~/data/tools/` | Binaries in `/usr/local/bin` |
 | HTML in `~/data/pages/` | System-level config changes |
-| `~/data/setup.sh` | Anything outside data volume |
+| Skills in `~/data/skills/` | Anything outside data volume |
+| `~/data/setup.sh` | |
 
 **Rule of thumb:** if you create it, put it in `~/data/`. If you install it, register it in `~/data/setup.sh`.
+
+## What's next?
+
+- [Creating Skills](docs:creating-skills) — full guide on skill creation
+- [Tools Reference](docs:tools-reference) — built-in CLI tools

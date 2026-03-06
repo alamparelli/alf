@@ -16,6 +16,7 @@ type Entry struct {
 	LastActive   time.Time `json:"last_active"`
 	LastTier     string    `json:"last_tier,omitempty"`
 	MessageCount int       `json:"message_count,omitempty"`
+	ActiveSkills []string  `json:"active_skills,omitempty"` // skills active for this session
 }
 
 // Store manages per-chat Claude session IDs with timeout-based expiry.
@@ -153,6 +154,50 @@ func (s *Store) Archive(chatID int64) string {
 	delete(s.entries, chatID)
 	s.persist()
 	return old
+}
+
+// AddSkills merges skill names into the active set for a chat session.
+// Creates a session entry if one doesn't exist yet.
+func (s *Store) AddSkills(chatID int64, names []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.entries[chatID]
+	if !ok {
+		now := time.Now()
+		e = &Entry{
+			ChatID:    chatID,
+			CreatedAt: now,
+			LastActive: now,
+		}
+		s.entries[chatID] = e
+	}
+	seen := make(map[string]bool, len(e.ActiveSkills))
+	for _, n := range e.ActiveSkills {
+		seen[n] = true
+	}
+	for _, n := range names {
+		if !seen[n] {
+			e.ActiveSkills = append(e.ActiveSkills, n)
+			seen[n] = true
+		}
+	}
+	s.persist()
+}
+
+// GetSkills returns the active skill names for a chat, or nil if none/expired.
+func (s *Store) GetSkills(chatID int64) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.entries[chatID]
+	if !ok {
+		return nil
+	}
+	if time.Since(e.LastActive) >= s.timeout {
+		return nil
+	}
+	return e.ActiveSkills
 }
 
 // SetTimeout updates the inactivity timeout. Safe for concurrent use.

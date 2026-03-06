@@ -134,6 +134,22 @@ func main() {
 		ccExternalURL = "http://localhost:8080"
 	}
 
+	// Ensure log directory exists before setting up file logging.
+	os.MkdirAll(filepath.Join(dataDir, "logs"), 0o755)
+
+	// Tee log output to both stdout and a file so CC and Claude can read logs.
+	logPath := filepath.Join(dataDir, "logs", "daemon.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err == nil {
+		log.SetOutput(io.MultiWriter(os.Stderr, logFile))
+		defer logFile.Close()
+		// Rotate: truncate if over 2MB.
+		if info, err := logFile.Stat(); err == nil && info.Size() > 2<<20 {
+			logFile.Truncate(0)
+			logFile.Seek(0, 0)
+		}
+	}
+
 	log.Printf("alf-daemon %s starting...", version)
 
 	// Write version file so Claude -p can read it.
@@ -192,9 +208,8 @@ func main() {
 		log.Printf("warning: failed to load tiers: %v", err)
 	}
 
-	// Load skill catalog (system dir + user dir).
-	// skills.d contains SKILL.md-based skills; legacy "skills/" is JSON-based.
-	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills.d"))
+	// Load skill catalog: system → bundled copy → user (later overrides earlier).
+	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills.d"), filepath.Join(dataDir, "skills"))
 
 	// Load agent team configurations.
 	agentStore := agents.NewFileAgentStore(filepath.Join(configDir, "agents"))
@@ -963,6 +978,39 @@ func main() {
 			if forcedTierName == "" && !hasMedia {
 				routingAnim.Stop()
 			}
+
+			// Quote-reply upgrade: replies carry important context that instant
+			// tiers cannot handle well (no conversation history). Upgrade to
+			// the default fallback tier so the quoted message gets proper treatment.
+			if isReply && forcedTierName == "" {
+				upgraded := false
+				if routeResult.Response != "" && routeResult.Tier == "" {
+					// Direct response → upgrade to tier.
+					fallback := tierStore.Current().DefaultFallback
+					if fallback == "" {
+						fallback = "haiku_r"
+					}
+					routeResult = router.Result{Tier: fallback, Reason: "reply-upgrade: direct→" + fallback}
+					upgraded = true
+				} else if routeResult.Tier != "" {
+					// Check if routed to an instant tier → upgrade.
+					for _, t := range tierStore.Current().Tiers {
+						if t.Name == routeResult.Tier && t.Instant {
+							fallback := tierStore.Current().DefaultFallback
+							if fallback == "" {
+								fallback = "haiku_r"
+							}
+							routeResult = router.Result{Tier: fallback, Reason: fmt.Sprintf("reply-upgrade: %s→%s", t.Name, fallback)}
+							upgraded = true
+							break
+						}
+					}
+				}
+				if upgraded {
+					log.Printf("→ reply detected, upgrading tier → %s", routeResult.Tier)
+				}
+			}
+
 			// If highly relevant memories were recalled (distance < 0.6), override
 			// instant responses — the user is asking about something personal.
 			if preRecallBlock != "" && recallBestDist < 0.6 && routeResult.Response != "" && routeResult.Tier == "" {
@@ -973,6 +1021,46 @@ func main() {
 				}
 				routeResult = router.Result{Tier: fallback, Reason: "memory-override: instant→" + fallback}
 			}
+			// Register trigger-matched skills in the session BEFORE tier override,
+			// so the first message in a session can also benefit from skill tier requirements.
+			if triggerMatched := skills.MatchTriggers(skillStore, u.Message.Text); len(triggerMatched) > 0 {
+				triggerNames := make([]string, len(triggerMatched))
+				for i, sk := range triggerMatched {
+					triggerNames[i] = sk.Name
+				}
+				log.Printf("skills: trigger-matched %v", triggerNames)
+				chatSessions.AddSkills(chatID, triggerNames)
+			}
+
+			// Skill tier override: if an active skill requires a specific tier,
+			// force routing to that tier (overrides direct responses and lower tiers).
+			if activeSkills := chatSessions.GetSkills(chatID); len(activeSkills) > 0 {
+				if minTier := skills.ResolveMinTier(skillStore, activeSkills); minTier != "" {
+					// Direct response → force to skill tier.
+					if routeResult.Response != "" && routeResult.Tier == "" {
+						routeResult = router.Result{Tier: minTier, Reason: "skill-tier: " + minTier}
+						log.Printf("→ skill tier override: direct→%s", minTier)
+					} else if routeResult.Tier != "" && routeResult.Tier != minTier {
+						// Check if current tier has lower priority than required tier.
+						currentPri, requiredPri := -1, -1
+						for _, t := range tierStore.Current().Tiers {
+							if t.Name == routeResult.Tier {
+								currentPri = t.Priority
+							}
+							if t.Name == minTier {
+								requiredPri = t.Priority
+							}
+						}
+						if requiredPri >= 0 && (currentPri < requiredPri) {
+							old := routeResult.Tier
+							routeResult.Tier = minTier
+							routeResult.Reason = fmt.Sprintf("skill-tier: %s→%s", old, minTier)
+							log.Printf("→ skill tier override: %s→%s", old, minTier)
+						}
+					}
+				}
+			}
+
 			if routeResult.Response != "" && routeResult.Tier == "" {
 				log.Printf("→ router direct response")
 				// Delete routing status message.
@@ -1145,14 +1233,12 @@ func main() {
 			if catalog := skills.BuildCatalog(skillStore); catalog != "" {
 				sysPromptTexts = append(sysPromptTexts, catalog)
 			}
-			// Auto-inject skills whose triggers match the user message.
-			if matched := skills.MatchTriggers(skillStore, u.Message.Text); len(matched) > 0 {
-				names := make([]string, len(matched))
-				for i, sk := range matched {
-					names[i] = sk.Name
+			// Inject all session-active skills (trigger-matched earlier + persisted from previous messages).
+			if activeSkills := chatSessions.GetSkills(chatID); len(activeSkills) > 0 {
+				if injection := skills.BuildInjectionByName(skillStore, activeSkills); injection != "" {
+					log.Printf("skills: session-active %v", activeSkills)
+					sysPromptTexts = append(sysPromptTexts, injection)
 				}
-				log.Printf("skills: auto-injected %v", names)
-				sysPromptTexts = append(sysPromptTexts, skills.BuildInjection(matched))
 			}
 			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
 
@@ -1284,6 +1370,13 @@ func main() {
 			if reply == "Done (no text output)." {
 				log.Printf("suppressing empty response for chat %d", chatID)
 				continue
+			}
+
+			// Append footer with active skills (if enabled in config).
+			if cfg.ShowSkillFooter == nil || *cfg.ShowSkillFooter {
+				if activeSkills := chatSessions.GetSkills(chatID); len(activeSkills) > 0 {
+					reply += "\n\n\u2699\ufe0f " + strings.Join(activeSkills, ", ")
+				}
 			}
 
 			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {

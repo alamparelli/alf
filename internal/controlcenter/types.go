@@ -21,6 +21,7 @@ type Config struct {
 	AuthBanDuration         int    `json:"auth_ban_duration"`          // IP ban duration in minutes, 0 = use default (15)
 	Timezone                string `json:"timezone"`                   // IANA timezone (e.g. "Europe/Brussels"), empty = TZ env or UTC
 	TiersTimeout            int    `json:"tiers_timeout"`              // seconds for Claude tier invocations, 0 = default (300)
+	ShowSkillFooter         *bool  `json:"show_skill_footer"`          // show active skills in message footer, nil = true (default on)
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -45,8 +46,11 @@ func DefaultConfig() *Config {
 		AuthBanThreshold:        10,
 		AuthBanDuration:         15,
 		TiersTimeout:            300,
+		ShowSkillFooter:         boolPtr(true),
 	}
 }
+
+func boolPtr(v bool) *bool { return &v }
 
 // Tier defines a routing tier for message processing.
 type Tier struct {

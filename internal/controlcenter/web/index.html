@@ -17,6 +17,7 @@
         <a class="nav-item active" data-view="home"><i data-lucide="home"></i> Home</a>
         <a class="nav-item" data-view="chat"><i data-lucide="message-circle"></i> Chat</a>
         <div class="nav-spacer" id="navSpacer"></div>
+        <a class="nav-item" data-view="logs"><i data-lucide="scroll-text"></i> Logs</a>
         <a class="nav-item" data-view="docs"><i data-lucide="book-open"></i> Docs</a>
         <div class="sidebar-footer">
           <p>Made with ❤️ by <a href="https://x.com/a_lamparelli" target="_blank">@a_lamparelli</a></p>
@@ -196,6 +197,26 @@
       </div>
 
       <iframe id="pageFrame" class="page-frame" style="display:none"></iframe>
+
+      <div id="logsView" class="logs-view" style="display:none">
+        <div class="logs-toolbar">
+          <select id="logSelect"></select>
+          <div class="logs-toolbar-right">
+            <select id="logLines">
+              <option value="100">100 lines</option>
+              <option value="200" selected>200 lines</option>
+              <option value="500">500 lines</option>
+              <option value="1000">1000 lines</option>
+            </select>
+            <label class="logs-auto-label"><input type="checkbox" id="logAutoRefresh" checked> Auto</label>
+            <button class="btn btn-icon" id="logRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+          </div>
+        </div>
+        <div class="logs-search-bar">
+          <input type="text" id="logSearch" placeholder="Filter logs...">
+        </div>
+        <pre class="logs-output" id="logOutput"></pre>
+      </div>
 
       <div id="docsView" class="docs-view" style="display:none">
         <div id="docsContent"></div>

@@ -65,8 +65,10 @@ type Tier struct {
 	MaxTurns     int      `json:"max_turns,omitempty"`
 	WriteCapable bool     `json:"write_capable"`
 	Tools        []string `json:"tools,omitempty"`
-	Effort       string   `json:"effort,omitempty"`
-	ForceCommand bool     `json:"force_command"`
+	Effort        string   `json:"effort,omitempty"`
+	MaxIterations int      `json:"max_iterations,omitempty"`
+	TimeoutMin    int      `json:"timeout_minutes,omitempty"`
+	ForceCommand  bool     `json:"force_command"`
 }
 
 // RouterDescription returns Description if set, otherwise falls back to RouterLabel.
@@ -105,7 +107,7 @@ func DefaultTiersConfig() *TiersConfig {
 			{Name: "sonnet_rw", Model: "sonnet", Priority: 4, Enabled: true, Routable: true, RouterLabel: "Editing code files, implementing features, fixing bugs in code, creating scripts, modifying configurations, writing tests, multi-file text changes", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 30},
 			{Name: "opus_r", Model: "opus", Priority: 5, Enabled: true, Routable: true, RouterLabel: "Architecture design, system-level reasoning, complex trade-off analysis, long-form strategic planning, reviewing entire codebases, deep technical research", Effort: "medium", Tools: []string{"Read"}},
 			{Name: "opus_rw", Model: "opus", Priority: 6, Enabled: true, Routable: true, RouterLabel: "Large-scale refactoring across multiple files, implementing complex features with many moving parts, redesigning system architecture, building new modules from scratch", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 40},
-			{Name: "orchestrator", Model: "opus", Priority: 7, Enabled: false, Routable: false, ForceCommand: true, WriteCapable: false, Effort: "high", MaxTurns: 1, Description: "Multi-agent orchestrator for complex multi-step tasks"},
+			{Name: "orchestrator", Model: "opus", Priority: 7, Enabled: false, Routable: true, ForceCommand: true, WriteCapable: false, Effort: "medium", MaxTurns: 10, MaxIterations: 10, TimeoutMin: 60, Tools: []string{"Read"}, Description: "Multi-agent orchestrator for complex multi-step tasks requiring parallel work by multiple specialized agents"},
 		},
 	}
 }

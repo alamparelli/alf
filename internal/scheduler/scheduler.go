@@ -17,8 +17,9 @@ type Config struct {
 	TG         TelegramSender
 	Provider   ProviderInvoker
 	TierStore  TierStoreReader
-	SkillStore SkillStoreReader // optional — injects skill prompts into jobs
-	ChatLogger ChatLogger
+	SkillStore   SkillStoreReader   // optional — injects skill prompts into jobs
+	Orchestrator OrchestratorRunner // optional — multi-agent orchestration
+	ChatLogger   ChatLogger
 	CronPath   string
 	Location   *time.Location
 }

@@ -76,6 +76,7 @@ sidebarOverlay.addEventListener('click', () => {
 function navigateTo(view) {
   const homeView = document.getElementById('homeView');
   const chatView = document.getElementById('chatView');
+  const tasksView = document.getElementById('tasksView');
   const pageFrame = document.getElementById('pageFrame');
   const docsView = document.getElementById('docsView');
   const logsView = document.getElementById('logsView');
@@ -83,12 +84,14 @@ function navigateTo(view) {
   // Update active nav item — docs:id should highlight the docs nav item
   const navView = view.startsWith('docs:') ? 'docs' : view;
   logsStopAutoRefresh();
+  tasksStopAutoRefresh();
   document.querySelectorAll('#sidebarNav .nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === navView);
   });
 
   homeView.style.display = 'none';
   chatView.style.display = 'none';
+  tasksView.style.display = 'none';
   pageFrame.style.display = 'none';
   docsView.style.display = 'none';
   logsView.style.display = 'none';
@@ -104,6 +107,10 @@ function navigateTo(view) {
     const name = view.slice(5);
     pageFrame.style.display = '';
     pageFrame.src = '/pages/' + encodeURIComponent(name);
+  } else if (view === 'tasks') {
+    tasksView.style.display = '';
+    pageFrame.src = '';
+    tasksInit();
   } else if (view === 'logs') {
     logsView.style.display = '';
     pageFrame.src = '';
@@ -128,37 +135,32 @@ function navigateTo(view) {
 // Bind Home + Chat + Docs + Logs nav
 document.querySelector('#sidebarNav .nav-item[data-view="home"]').addEventListener('click', () => navigateTo('home'));
 document.querySelector('#sidebarNav .nav-item[data-view="chat"]').addEventListener('click', () => navigateTo('chat'));
+document.querySelector('#sidebarNav .nav-item[data-view="tasks"]').addEventListener('click', () => navigateTo('tasks'));
 document.querySelector('#sidebarNav .nav-item[data-view="logs"]').addEventListener('click', () => navigateTo('logs'));
 document.querySelector('#sidebarNav .nav-item[data-view="docs"]').addEventListener('click', () => navigateTo('docs'));
 
 // --- Status ---
 function loadStatus() {
   api('/api/status').then(s => {
-    document.getElementById('statusText').textContent = s.status || 'unknown';
     const dot = document.getElementById('statusDot');
     dot.className = 'dot ' + (s.status === 'running' ? 'green' : 'red');
-    document.getElementById('uptimeValue').textContent = s.uptime || '--';
-    document.getElementById('msgCount').textContent = s.message_count || 0;
+    document.getElementById('uptimeValue').textContent = s.uptime ? 'Up ' + s.uptime : '--';
     if (s.last_message) {
       const d = new Date(s.last_message);
       document.getElementById('lastMsg').textContent = d.toLocaleTimeString();
     }
+    // Session info
+    if (s.session) {
+      document.getElementById('sessionIdLabel').textContent = 'Session: ' + s.session.id;
+    } else {
+      document.getElementById('sessionIdLabel').textContent = '';
+    }
   }).catch(() => {
-    document.getElementById('statusText').textContent = 'error';
     document.getElementById('statusDot').className = 'dot red';
+    document.getElementById('uptimeValue').textContent = 'offline';
   });
 }
 
-// --- Config (read-only) ---
-function loadConfig() {
-  api('/api/config').then(cfg => {
-    document.getElementById('cfgLogLevel').textContent = cfg.log_level || 'info';
-    const qs = cfg.quiet_hours?.start || 0;
-    const qe = cfg.quiet_hours?.end || 0;
-    document.getElementById('cfgQuietHours').textContent = (qs === 0 && qe === 0) ? 'Disabled' : qs + ':00 — ' + qe + ':00';
-    document.getElementById('cfgSystemPrompt').textContent = cfg.system_prompt || '(default)';
-  }).catch(() => {});
-}
 
 function esc(s) {
   const d = document.createElement('div');
@@ -254,7 +256,7 @@ function wsRenderDir(dirPath, depth) {
       const chevronIcon = expanded ? 'chevron-down' : 'chevron-right';
       const folderIcon = expanded ? 'folder-open' : 'folder';
 
-      const canDeleteDir = depth > 0 || !wsProtectedDirs.includes(e.name);
+      const canDeleteDir = !wsProtectedDirs.includes(fullPath) && (depth > 0 || !wsProtectedDirs.includes(e.name));
       html += '<div class="ws-node ws-node-dir' + (expanded ? ' expanded' : '') + '" data-path="' + esc(fullPath) + '" style="padding-left:' + (8 + depth * 20) + 'px">' +
         wsIcon(chevronIcon, 'ws-icon ws-icon-chevron') +
         wsIcon(folderIcon, 'ws-icon ws-icon-folder') +
@@ -1874,6 +1876,163 @@ function docsShowArticle(id) {
   });
 }
 
+// ─── Tasks ──────────────────────────────────────────
+let tasksInitialized = false;
+let tasksAutoTimer = null;
+
+function tasksStopAutoRefresh() {
+  if (tasksAutoTimer) { clearInterval(tasksAutoTimer); tasksAutoTimer = null; }
+}
+
+function tasksStartAutoRefresh() {
+  tasksStopAutoRefresh();
+  tasksAutoTimer = setInterval(tasksFetch, 3000);
+}
+
+function tasksInit() {
+  if (!tasksInitialized) {
+    tasksInitialized = true;
+    document.getElementById('tasksRefreshBtn').addEventListener('click', () => tasksFetch());
+    document.getElementById('tasksAutoRefresh').addEventListener('change', (e) => {
+      if (e.target.checked) tasksStartAutoRefresh(); else tasksStopAutoRefresh();
+    });
+  }
+  tasksFetch();
+  if (document.getElementById('tasksAutoRefresh').checked) tasksStartAutoRefresh();
+}
+
+async function tasksFetch() {
+  try {
+    const res = await fetch('/api/tasks');
+    const data = await res.json();
+    tasksRender(data.running || [], data.completed || []);
+  } catch (e) {
+    document.getElementById('tasksList').innerHTML = '<div class="task-empty">Failed to load tasks</div>';
+  }
+}
+
+function tasksRender(running, completed) {
+  const container = document.getElementById('tasksList');
+
+  if (running.length === 0 && completed.length === 0) {
+    container.innerHTML = '<div class="task-empty"><div class="task-empty-icon">\u{1F916}</div>No orchestrator tasks yet.<br><span style="font-size:0.8rem;opacity:0.7">Tasks appear here when you use the orchestrator tier.</span></div>';
+    return;
+  }
+
+  let html = '';
+
+  if (running.length > 0) {
+    html += '<h3 class="tasks-section-title">\u{26A1} Running (' + running.length + ')</h3>';
+    for (const task of running) {
+      html += taskCard(task, true);
+    }
+  }
+
+  if (completed.length > 0) {
+    html += '<h3 class="tasks-section-title">Recent</h3>';
+    for (const task of completed) {
+      html += taskCard(task, false);
+    }
+  }
+
+  container.innerHTML = html;
+
+  container.querySelectorAll('.task-cancel-btn').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); tasksCancel(btn.dataset.id); };
+  });
+
+  container.querySelectorAll('.task-card-header').forEach(header => {
+    header.onclick = () => {
+      const card = header.closest('.task-card');
+      card.classList.toggle('expanded');
+    };
+  });
+
+  lucide.createIcons({ attrs: { class: ['lucide'] }, nameAttr: 'data-lucide' });
+}
+
+function taskCard(task, isRunning) {
+  const elapsed = taskElapsed(task.started_at);
+  const statusClass = isRunning ? 'running' : (task.status === 'completed' ? 'completed' : (task.status === 'timeout' ? 'timeout' : 'failed'));
+  const statusLabel = isRunning ? 'running' : task.status;
+  const cost = task.total_cost_usd ? '$' + task.total_cost_usd.toFixed(4) : '--';
+  const prompt = taskEscapeHtml(task.prompt || 'No prompt').substring(0, 200);
+  const agentCount = (task.agent_calls && task.agent_calls.length) || 0;
+
+  let agentSteps = '';
+  if (agentCount > 0) {
+    agentSteps = '<div class="task-steps"><div class="task-steps-title">Agent calls (' + agentCount + ')</div>';
+    for (const call of task.agent_calls) {
+      const agentName = call.agent.split('/').pop();
+      const callStatus = call.error ? 'failed' : 'completed';
+      const callIcon = call.error ? '\u2717' : '\u2713';
+      const callCost = call.cost_usd ? '$' + call.cost_usd.toFixed(4) : '';
+      const callResult = call.error
+        ? taskEscapeHtml(call.error).substring(0, 300)
+        : taskEscapeHtml(call.text || '').substring(0, 300);
+      agentSteps += '<div class="task-step ' + callStatus + '">' +
+        '<span class="task-step-icon">' + callIcon + '</span>' +
+        '<span class="task-step-agent">' + taskEscapeHtml(agentName) + '</span>' +
+        '<span class="task-step-cost">' + callCost + '</span>' +
+        (callResult ? '<div class="task-step-result">' + callResult + '</div>' : '') +
+        '</div>';
+    }
+    agentSteps += '</div>';
+  }
+
+  const cancelBtn = isRunning
+    ? '<div class="task-card-actions"><button class="btn btn-sm task-cancel-btn" data-id="' + taskEscapeHtml(task.id) + '">Cancel</button></div>'
+    : '';
+
+  return '<div class="task-card ' + statusClass + '">' +
+    '<div class="task-card-header">' +
+      '<span class="task-status-badge ' + statusClass + '">' + statusLabel + '</span>' +
+      '<div class="task-card-body">' +
+        '<div class="task-card-prompt">' + prompt + '</div>' +
+        '<div class="task-card-info">' +
+          '<div class="task-card-meta">' +
+            '<span class="task-meta-item"><i data-lucide="repeat"></i> ' + (task.iterations || 0) + '</span>' +
+            (agentCount > 0 ? '<span class="task-meta-item"><i data-lucide="bot"></i> ' + agentCount + '</span>' : '') +
+            '<span class="task-meta-item"><i data-lucide="coins"></i> ' + cost + '</span>' +
+            '<span class="task-meta-item"><i data-lucide="clock"></i> ' + elapsed + '</span>' +
+          '</div>' +
+          cancelBtn +
+        '</div>' +
+      '</div>' +
+      (agentCount > 0 ? '<span class="task-chevron"><i data-lucide="chevron-right"></i></span>' : '') +
+    '</div>' +
+    agentSteps +
+  '</div>';
+}
+
+function taskElapsed(startedAt) {
+  if (!startedAt) return '--';
+  const start = new Date(startedAt);
+  const now = new Date();
+  const diffMs = now - start;
+  const secs = Math.floor(diffMs / 1000);
+  if (secs < 60) return secs + 's';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return mins + 'm ' + (secs % 60) + 's';
+  const hours = Math.floor(mins / 60);
+  return hours + 'h ' + (mins % 60) + 'm';
+}
+
+async function tasksCancel(id) {
+  try {
+    await fetch('/api/tasks?id=' + encodeURIComponent(id), { method: 'DELETE' });
+    tasksFetch();
+  } catch (e) {
+    toast('Cancel failed: ' + e.message, 'error');
+  }
+}
+
+function taskEscapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
 // --- Logs ---
 let logsAutoTimer = null;
 let logsInitialized = false;
@@ -1953,7 +2112,6 @@ function logsLineClass(line) {
 
 // --- Init ---
 loadStatus();
-loadConfig();
 loadTeachTiers();
 loadPages().then(() => {
   const saved = localStorage.getItem('alf-view');

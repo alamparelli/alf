@@ -62,6 +62,54 @@ func CollectInline(contextDir string) string {
 }
 
 
+// WorkspaceSummary returns a compact overview of the data directory structure
+// for injection into the orchestrator's system prompt.
+func WorkspaceSummary(dataDir string) string {
+	var sb strings.Builder
+	sb.WriteString("=== [Workspace] ===\n")
+
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		sb.WriteString("(unable to read workspace)\n")
+		return sb.String()
+	}
+
+	count := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if count >= 30 {
+			sb.WriteString("  ... (truncated)\n")
+			break
+		}
+		if e.IsDir() {
+			sb.WriteString(fmt.Sprintf("  %s/", e.Name()))
+			// Expand context/ directory one level deeper.
+			if e.Name() == "context" {
+				sub, err := os.ReadDir(filepath.Join(dataDir, "context"))
+				if err == nil {
+					var names []string
+					for _, s := range sub {
+						if !strings.HasPrefix(s.Name(), ".") {
+							names = append(names, s.Name())
+						}
+					}
+					if len(names) > 0 {
+						sb.WriteString(" " + strings.Join(names, ", "))
+					}
+				}
+			}
+			sb.WriteString("\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("  %s\n", e.Name()))
+		}
+		count++
+	}
+
+	return sb.String()
+}
+
 // DefaultFiles maps filename -> default content for bootstrap.
 var DefaultFiles = map[string]string{
 	"soul.md": `# Soul

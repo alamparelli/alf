@@ -60,12 +60,16 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	if params.WriteCapable {
 		// Full access — all tools auto-approved.
 		args = append(args, "--dangerously-skip-permissions")
-	} else {
+	} else if len(params.Tools) > 0 {
 		// Read-only: whitelist specific tools, deny everything else.
 		// In non-interactive (-p) mode, non-allowed tools are auto-denied.
 		for _, tool := range params.Tools {
 			args = append(args, "--allowedTools", tool)
 		}
+	} else {
+		// No tools requested — restrict to nothing so Claude doesn't
+		// waste turns attempting tools that get auto-denied.
+		args = append(args, "--allowedTools", "")
 	}
 	if params.Effort != "" {
 		args = append(args, "--effort", params.Effort)
@@ -102,7 +106,10 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	// Build a safe environment for the subprocess (allowlist, not blocklist).
 	// Prevents leaking secrets (TELEGRAM_BOT_TOKEN, CC_AUTH_TOKEN, etc.)
 	// to Claude which runs with --dangerously-skip-permissions.
-	cmd.Env = safeEnv(dataDir)
+	// HOME must always point to the main data dir (where .claude/ config lives),
+	// not the task-specific working directory.
+	homeDir := p.DefaultDataDir
+	cmd.Env = safeEnv(homeDir)
 	cmd.Env = append(cmd.Env, params.Env...)
 
 	log.Printf("provider: invoke starting (resume=%q, model=%s, max_turns=%d, effort=%s, sys_prompts=%d, tools=%v, write=%v)",
@@ -112,13 +119,33 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
+	// Capture stderr concurrently so we can surface errors during startup hangs.
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
 	invokeStart := time.Now()
+
+	// Read stderr in background.
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		buf := make([]byte, 4096)
+		for {
+			n, err := stderrPipe.Read(buf)
+			if n > 0 {
+				stderr.Write(buf[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 
 	var (
 		resultText   strings.Builder
@@ -128,22 +155,81 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		firstEvent   bool
 	)
 
-	scanner := bufio.NewScanner(stdoutPipe)
-	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
+	// Use a channel to detect first-event timeout.
+	lineCh := make(chan []byte, 64)
+	scanDone := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdoutPipe)
+		scanner.Buffer(make([]byte, 256*1024), 1024*1024)
+		for scanner.Scan() {
+			line := make([]byte, len(scanner.Bytes()))
+			copy(line, scanner.Bytes())
+			lineCh <- line
+		}
+		scanDone <- scanner.Err()
+		close(lineCh)
+	}()
+
+	// Wait up to 90s for the first event. After that, fail fast with stderr.
+	const firstEventTimeout = 90 * time.Second
+	firstTimer := time.NewTimer(firstEventTimeout)
+	defer firstTimer.Stop()
+
+	waitFirstEvent := true
+	for {
+		if waitFirstEvent {
+			select {
+			case line, ok := <-lineCh:
+				if !ok {
+					goto done
+				}
+				firstTimer.Stop()
+				waitFirstEvent = false
+				if len(line) == 0 {
+					continue
+				}
+				eventCount++
+				firstEvent = true
+				log.Printf("provider: first event after %dms", time.Since(invokeStart).Milliseconds())
+				// Process this line below.
+				lastEvent = make(json.RawMessage, len(line))
+				copy(lastEvent, line)
+				goto processEvent
+			case <-firstTimer.C:
+				// No events within timeout — kill and report stderr.
+				cmd.Process.Kill()
+				<-stderrDone
+				cmd.Wait()
+				errMsg := strings.TrimSpace(stderr.String())
+				if errMsg == "" {
+					errMsg = "no output"
+				}
+				return nil, fmt.Errorf("claude startup timeout (%v): %s", firstEventTimeout, truncStderr(errMsg, 500))
+			case <-cmdCtx.Done():
+				cmd.Process.Kill()
+				<-stderrDone
+				cmd.Wait()
+				return nil, fmt.Errorf("claude context cancelled during startup: %v", cmdCtx.Err())
+			}
+		} else {
+			line, ok := <-lineCh
+			if !ok {
+				goto done
+			}
+			if len(line) == 0 {
+				continue
+			}
+			eventCount++
+			if !firstEvent {
+				firstEvent = true
+				log.Printf("provider: first event after %dms", time.Since(invokeStart).Milliseconds())
+			}
+
+			lastEvent = make(json.RawMessage, len(line))
+			copy(lastEvent, line)
 		}
 
-		eventCount++
-		if !firstEvent {
-			firstEvent = true
-			log.Printf("provider: first event after %dms", time.Since(invokeStart).Milliseconds())
-		}
-
-		lastEvent = make(json.RawMessage, len(line))
-		copy(lastEvent, line)
+	processEvent:
 
 		var event struct {
 			Type  string `json:"type"`
@@ -158,7 +244,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 				} `json:"content_block"`
 			} `json:"event"`
 		}
-		if json.Unmarshal(line, &event) != nil {
+		if json.Unmarshal(lastEvent, &event) != nil {
 			continue
 		}
 
@@ -179,6 +265,9 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		}
 	}
 
+done:
+	<-scanDone
+	<-stderrDone
 	waitErr := cmd.Wait()
 	invokeDur := time.Since(invokeStart)
 	log.Printf("provider: invoke done %dms events=%d text=%d bytes stderr=%q",
@@ -280,10 +369,10 @@ var safeEnvPrefixes = []string{
 }
 
 // safeEnv builds a subprocess environment with only safe variables plus HOME/ALF_DATA_DIR.
-// It prepends $HOME/.local/bin to PATH so Claude Code finds its native binary.
-func safeEnv(dataDir string) []string {
+// homeDir is the main data directory where .claude/ config and .local/bin live.
+func safeEnv(homeDir string) []string {
 	env := make([]string, 0, 16)
-	localBin := filepath.Join(dataDir, ".local", "bin")
+	localBin := filepath.Join(homeDir, ".local", "bin")
 	for _, e := range os.Environ() {
 		for _, prefix := range safeEnvPrefixes {
 			if strings.HasPrefix(e, prefix) {
@@ -295,6 +384,6 @@ func safeEnv(dataDir string) []string {
 			}
 		}
 	}
-	env = append(env, "HOME="+dataDir, "ALF_DATA_DIR="+dataDir)
+	env = append(env, "HOME="+homeDir, "ALF_DATA_DIR="+homeDir)
 	return env
 }

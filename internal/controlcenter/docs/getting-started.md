@@ -1,165 +1,188 @@
 ---
-category: Setup
-tags: install, init, quickstart, telegram, control center
+category: Basics
+tags: quickstart, tiers, commands, control center, workspace, teach
 order: 1
 ---
 
 # Getting Started
 
-Set up your personal AI assistant in under 5 minutes.
+Welcome to ALF's documentation. If you're reading this, you're already set up and logged in — so let's skip the installation and get straight to what you can do.
 
-## What is ALF?
+## Talking to ALF
 
-ALF is your personal AI assistant. It runs on your own server and talks to you through Telegram. Think of it like having a smart helper that you fully control — your data stays yours.
+Send a message on Telegram or use the Chat tab here. ALF reads your message, picks the right model, and replies.
 
-Here's what makes it special:
+That's the basic loop. But there's a lot more going on under the hood.
 
-- **Talks to you on Telegram** — just send a message, like texting a friend
-- **Picks the right brain for the job** — simple questions get fast answers, complex ones get deeper thinking
-- **Learns about you over time** — remembers your preferences and context
-- **Has a web dashboard** — manage everything from your browser
+## How ALF picks the right model
 
-## Quick start
+ALF uses a system called **tiers**. Each tier is a different configuration — a Claude model with specific capabilities.
 
-### Step 1: Install
-
-Download the `alf` command-line tool:
-
-```bash
-go install github.com/alamparelli/alf/cmd/alf@latest
-```
-
-### Step 2: Set up
-
-Run the setup wizard. It asks you a few questions:
-
-```bash
-alf init
-```
-
-You'll need:
-
-| What | Where to get it |
-|------|-----------------|
-| **Telegram Bot Token** | Open Telegram, search for [@BotFather](https://t.me/BotFather), send `/newbot` |
-| **Your Chat ID** | Open Telegram, search for [@userinfobot](https://t.me/userinfobot), send any message |
-
-> The wizard also asks for a **data directory** (where ALF stores its files, default: `~/.alf`) and a **port** for the web dashboard (default: `8080`).
-
-### Step 3: Start
-
-```bash
-alf start
-```
-
-That's it! ALF pulls its Docker image, starts up, and sends you a welcome message on Telegram.
-
-### Step 4: Say hello
-
-Open Telegram and send any message to your bot. You should get a reply within seconds.
-
-## How does ALF decide which model to use?
-
-ALF uses a system called **tiers**. Each tier is a different configuration — a combination of a Claude model, speed, and capabilities.
-
-Here's an analogy: imagine you have three assistants.
-
-- **The quick one** (Haiku) — great for "yes/no", casual chat, simple questions. Fast and cheap.
-- **The smart one** (Sonnet) — handles code review, analysis, writing. A good balance.
-- **The expert** (Opus) — for complex architecture, deep research, big refactoring. Powerful but slower.
-
-When you send a message, a fast **router** reads it and picks the best tier. For example:
+When you send a message, a fast **router** classifies it and picks a tier:
 
 | You send... | ALF picks... | Why |
 |-------------|-------------|-----|
-| "Hey!" | instant (Haiku) | Simple greeting, fast reply |
-| "What's the weather like?" | haiku_r | Quick factual question |
-| "Review this code for bugs" | sonnet_r | Needs analysis and reasoning |
-| "Refactor the auth system" | opus_rw | Complex, multi-file changes |
+| "Hey!" | instant (Haiku) | Simple greeting, instant reply |
+| "What's the weather?" | haiku_r | Quick question, read-only |
+| "Review this code" | sonnet_r | Needs analysis |
+| "Refactor the auth system" | opus_rw | Complex, needs file access |
+| "Research X and write a report" | orchestrator | Multi-step, needs agent coordination |
 
-> You can override the router. Tiers with `force_command: true` can be invoked directly — type `/<tier_name> <message>` (e.g. `/sonnet_rw fix this bug`) and ALF uses that tier for your message.
+When you send a photo with a caption, the router classifies based on the caption text and ensures the chosen tier can view images. Photos without a caption go to the cheapest image-capable tier.
 
-Want to customize tiers? See [Setting Up Tiers](docs:tier-setup).
+### Overriding the router
+
+Tiers with `force_command: true` can be called directly. Type `/<tier_name> <message>`:
+
+```
+/sonnet_rw fix the bug in router.go
+/opus_r explain the architecture of this project
+```
+
+This bypasses the router entirely — useful when you know you need a specific model.
+
+> See [Setting Up Tiers](docs:tier-setup) to customize which models ALF uses and when.
 
 ## The Control Center
 
-The Control Center (CC) is your web dashboard. Open it at:
-
-```
-http://your-server:<port>
-```
-
-The port is whatever you chose during `alf init` (default: `8080`).
-
-### How to log in
-
-1. Send `/login` to ALF on Telegram
-2. You'll get a magic link — click it
-3. You're in!
-
-### What you'll find
+You're looking at it. Here's what each section does:
 
 | Tab | What it does |
 |-----|-------------|
-| **Home** | See ALF's status, uptime, and message count. Edit configuration. Browse and edit files. Import knowledge. |
-| **Chat** | Chat with ALF from your browser (same as Telegram, different interface) |
-| **Pages** | Dynamic dashboards that ALF generates for you (appear in the sidebar when pages exist) |
-| **Docs** | You are here! |
+| **Home** | Status, configuration, Workspace Explorer, Teach |
+| **Chat** | Browser-based chat (same as Telegram, different interface) |
+| **Tasks** | Monitor orchestrator tasks — running, completed, failed |
+| **Pages** | Dynamic HTML dashboards ALF generates (appears when pages exist) |
+| **Logs** | Daemon logs and event viewer |
+| **Docs** | You are here |
 
-### The Workspace Explorer
+## The Workspace Explorer
 
-On the Home tab, scroll down to **Workspace**. This is a file browser for everything ALF stores:
+On the Home tab, scroll down to **Workspace**. This is a file browser for ALF's data:
 
 | Folder | What's inside | Example |
 |--------|-------------|---------|
-| `config.d/` | Settings and tier configuration | `tiers.json`, `config.json` |
-| `context/` | Files added to every conversation | `project-notes.md` |
+| `config.d/` | Tiers, config, agent teams | `tiers.json`, `agents/starter.json` |
+| `context/` | Files added to every conversation | `index.md`, `project-notes.md` |
 | `skills/` | Custom skills ALF can use | `x-manager/SKILL.md` |
 | `tools/` | Custom scripts and executables | `disk-check` |
 | `pages/` | HTML dashboards | `status-board.html` |
-| `logs/` | Daemon logs and conversation history | `daemon.log`, `events/` |
+| `logs/` | Daemon logs and event history | `daemon.log`, `events/` |
 
-### Teaching ALF
+You can create, edit, and delete files directly from here. Changes are picked up automatically.
+
+## Teaching ALF
 
 Want ALF to remember something? Use the **Teach** feature on the Home tab.
 
-1. Pick a destination: **Memory** (ALF remembers it) or **Context file** (added to every conversation)
+1. Pick a destination: **Memory** (ALF remembers it) or **Context file** (injected into every conversation)
 2. Choose how to process it: extract key facts, preferences, decisions, or store as-is
 3. Paste your content (meeting notes, docs, anything)
 4. Click **Import**
 
-Example: paste your meeting notes, pick "Extract key facts", and ALF will pull out the important points and remember them.
+Example: paste meeting notes, pick "Extract key facts", and ALF pulls out action items and stores them in memory.
+
+## Scheduling tasks
+
+ALF can run tasks automatically on a schedule. Ask ALF to create one for you, or use the `schedule` tool directly.
+
+### Ask ALF to schedule something
+
+Just tell ALF what you want in natural language:
+
+```
+Schedule a daily morning briefing at 9 AM that summarizes my priorities
+```
+
+```
+Every Monday at 8 AM, check for new GitHub issues and send me a summary
+```
+
+ALF will use the `schedule create` tool with the right parameters.
+
+### Schedule tool reference
+
+Two types of scheduled jobs:
+
+**LLM jobs** — ALF thinks and responds using a prompt:
+```bash
+schedule create --name "morning brief" --schedule "0 0 9 * * 1-5" \
+  --tier sonnet_r --prompt "Summarize today's priorities" --output telegram
+```
+
+**Direct jobs** — run a bash command, no LLM involved:
+```bash
+schedule create --name "disk check" --schedule "0 0 */6 * * *" \
+  --command "df -h" --output telegram
+```
+
+**Orchestrator jobs** — coordinate multiple agents for complex tasks:
+```bash
+schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
+  --tier orchestrator --prompt "Analyze this week's commits and write a report" \
+  --output telegram
+```
+
+### Schedule options
+
+| Option | Required | What it does |
+|--------|----------|-------------|
+| `--name` | Yes | Job name (for identification) |
+| `--schedule` | Yes | Cron expression or one-shot datetime |
+| `--tier` | For LLM | Which tier to use (`haiku_r`, `sonnet_rw`, `orchestrator`, etc.) |
+| `--prompt` | For LLM | What to ask the model |
+| `--command` | For direct | Bash command to execute |
+| `--output` | No | Where to send results: `telegram`, `file`, `both`, `silent` (default: `telegram`) |
+| `--skills` | No | Comma-separated skill names to inject |
+
+### Schedule expressions
+
+```
+Seconds Minutes Hours DayOfMonth Month DayOfWeek
+```
+
+| Expression | Meaning |
+|-----------|---------|
+| `0 0 9 * * 1-5` | Every weekday at 9:00 AM |
+| `0 30 8 * * 1` | Every Monday at 8:30 AM |
+| `0 0 */6 * * *` | Every 6 hours |
+| `0 */30 * * * *` | Every 30 minutes |
+| `2026-03-15T14:00:00Z` | One-shot at a specific time (RFC3339) |
+
+### Managing scheduled jobs
+
+```bash
+schedule list                           # List all jobs
+schedule list --user                    # List user-created jobs only
+schedule update <id> --enabled false    # Disable a job
+schedule update <id> --schedule "..."   # Change the schedule
+schedule delete <id>                    # Remove a job
+```
 
 ## Useful commands
 
-These work in both Telegram and the CC Chat tab:
+These work in both Telegram and CC Chat:
 
 | Command | What it does |
 |---------|-------------|
 | `/start` | Run the welcome onboarding again |
 | `/new` | Clear the conversation and start fresh |
-| `/login` | Get a link to open the Control Center |
-
-## Keeping ALF up to date
-
-```bash
-alf upgrade
-```
-
-This downloads the latest version and restarts ALF. Your data and settings are preserved.
+| `/login` | Get a new magic link for the Control Center |
+| `/<tier_name>` | Force a specific tier (e.g. `/opus_rw fix this bug`) |
 
 ## Something not working?
 
 | Problem | What to try |
 |---------|------------|
-| ALF doesn't reply on Telegram | Run `alf status` to check if it's running. Look at logs in the Workspace Explorer. |
-| Can't open the Control Center | Make sure the port is right and not blocked. Check Docker with `docker logs alf`. |
-| ALF picks the wrong tier | Edit `tiers.json` in Workspace. Check that `router_label` descriptions are clear. See [Setting Up Tiers](docs:tier-setup). |
-| ALF is slow to respond | You might be hitting a powerful tier for simple messages. Check your tier setup — make sure Haiku handles casual chat. |
+| ALF doesn't reply on Telegram | Check Logs tab for errors. Ask your admin to run `alf status`. |
+| ALF picks the wrong tier | Edit `tiers.json` in Workspace. Make sure `router_label` descriptions are clear. |
+| ALF is slow | You might be hitting a powerful tier for simple messages. Check tier setup. |
+| Scheduled job didn't run | Check Logs tab. Verify the cron expression. Use `schedule list` to check next run time. |
 
 ## What's next?
 
 - [Setting Up Tiers](docs:tier-setup) — customize which models ALF uses and when
-- [Managing Conversations](docs:sessions) — sessions, /new, and best practices
-- [Creating Skills](docs:creating-skills) — teach ALF new abilities
-- [Building Tools & Extensions](docs:container-packages) — create tools, pages, and install packages
+- [Managing Conversations](docs:sessions) — sessions, `/new`, and context management
+- [Creating Skills](docs:creating-skills) — teach ALF new abilities with auto-injection
+- [Agent Teams](docs:agent-teams) — coordinate multiple agents for complex tasks
+- [Building Tools & Extensions](docs:container-packages) — install packages, create tools, add pages

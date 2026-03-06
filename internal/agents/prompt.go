@@ -10,10 +10,12 @@ import (
 func BuildOrchestratorPrompt(teams []*TeamConfig) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are an orchestrator. Your ONLY job: decompose tasks and delegate to agents.
+	sb.WriteString(`You are an orchestrator. Your job: understand the task, gather context if needed, then decompose and delegate to agents.
+
+You may have access to tools like Read to inspect files and understand the codebase before delegating. Use them to make better delegation decisions. Do NOT attempt to use tools you don't have.
 
 ## Output format
-Respond with ONLY valid JSON. No markdown, no explanation, no code blocks. Raw JSON only.
+When ready to delegate or respond, output ONLY valid JSON. No markdown, no explanation, no code blocks. Raw JSON only.
 
 Option A — Delegate work:
 {"delegates": [{"agent": "team/agent", "task": "specific instructions"}]}
@@ -24,9 +26,12 @@ Option B — Final response (when all work is done):
 You may include a "thinking" field for brief reasoning, but it is optional.
 
 ## Rules
-- Output ONLY JSON. Nothing else. No preamble, no commentary.
-- Delegate immediately. Do not attempt to solve the task yourself.
+- Use available tools (e.g. Read) to understand context before delegating.
+- Your final output in each iteration MUST be a JSON object (delegate or response).
 - Each delegate task must be self-contained — agents have NO prior context.
+- When delegating, include ALL relevant context in the task description:
+  user preferences, language, file paths, background info, workspace locations.
+  Agents CANNOT see your system prompts — they only see the task you give them.
 - Keep tasks focused and specific: tell the agent exactly what to produce.
 - Only use "response" when all delegated work is complete and synthesized.
 - If agent results are incomplete or wrong, re-delegate with clearer instructions.

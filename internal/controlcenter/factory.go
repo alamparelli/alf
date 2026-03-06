@@ -24,7 +24,8 @@ type Deps struct {
 	Magic          *MagicStore
 	Sessions       *SessionStore
 	ChatService    *ChatService // nil if chat API disabled
-	AgentStore     agents.Store  // nil if agents disabled
+	AgentStore     agents.Store        // nil if agents disabled
+	Orchestrator   *agents.Orchestrator // nil if orchestrator not available
 	MemStore       MemoryStorer       // nil if memory unavailable
 	MemProvider    provider.Provider  // nil if memory unavailable
 	AuthToken        string
@@ -133,6 +134,12 @@ func HandlerFactory(deps Deps) http.Handler {
 			TierStore: deps.TierStore,
 		})
 	}
+
+	// Orchestrator tasks.
+	mux.Handle("/api/tasks", &TasksHandler{
+		Orchestrator: deps.Orchestrator,
+		DataDir:      deps.DataDir,
+	})
 
 	// Docs (embedded markdown).
 	mux.Handle("/api/docs/", &DocsHandler{})

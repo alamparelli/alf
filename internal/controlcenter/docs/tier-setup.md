@@ -41,6 +41,9 @@ ALF comes with 7 tiers out of the box. Here's what each one does:
 | `sonnet_rw` | Sonnet | Write code, fix bugs, create scripts | Yes (max 10 steps) |
 | `opus_r` | Opus | Architecture, deep analysis, strategy | No |
 | `opus_rw` | Opus | Large refactoring, complex features | Yes (max 20 steps) |
+| `orchestrator` | Opus | Multi-agent coordination for complex tasks | Via agents |
+
+The orchestrator tier is **disabled by default**. Enable it in `tiers.json` to let the router automatically delegate complex tasks to agent teams. See [Agent Teams](docs:agent-teams) for setup.
 
 > Most of your messages will be handled by Haiku — it's fast and cheap. Sonnet and Opus only kick in when needed.
 
@@ -102,6 +105,9 @@ Here's what a `tiers.json` file looks like:
 | `effort` | How hard the model thinks: `low`, `medium`, or `high`. | `"medium"` |
 | `force_command` | Enable `/<tier_name> <message>` to bypass routing and force this tier. Works in Telegram and CC Chat. | `true` |
 | `max_turns` | Max steps for tool use. Prevents runaway loops. 0 = unlimited. | `10` |
+| `max_iterations` | (Orchestrator only) Max delegate→synthesize cycles. | `10` |
+| `timeout_minutes` | (Orchestrator only) Hard timeout in minutes. | `60` |
+| `tools` | List of allowed tools for read-only tiers (e.g. `["Read"]`, `["Read", "WebSearch"]`). Write-capable tiers get all tools. | `["Read"]` |
 
 ## Example: simple two-tier setup
 
@@ -182,6 +188,15 @@ Yes, always on write-capable tiers. Without it, a write tier could loop endlessl
 **What does `effort` actually do?**
 It controls how much "thinking" the model does before answering. `low` = quick gut reaction. `medium` = balanced. `high` = deep reasoning. Higher effort means slower (and slightly more expensive) responses.
 
+## Media routing
+
+When you send a photo, document, or video:
+
+- **With a caption** — the router classifies the caption to pick the right tier, then verifies the tier can view images (has Read tool or is write-capable). If not, it upgrades to the cheapest image-capable tier.
+- **Without a caption** — goes directly to the cheapest non-instant tier with image support.
+
+This means sending a screenshot with "fix this bug" routes to `sonnet_rw`, not `haiku_r`.
+
 ## Tips for good routing
 
 1. **Write detailed `router_label` values.** This is the #1 thing the router looks at. Be specific.
@@ -193,4 +208,5 @@ It controls how much "thinking" the model does before answering. `low` = quick g
 ## What's next?
 
 - [Getting Started](docs:getting-started) — ALF setup and overview
+- [Agent Teams](docs:agent-teams) — coordinate multiple agents for complex tasks
 - [Creating Skills](docs:creating-skills) — teach ALF new abilities with auto-injection

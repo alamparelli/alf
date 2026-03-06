@@ -66,6 +66,7 @@ type RunConfig struct {
 	Effort        string
 	MaxIterations int
 	MaxTurns      int
+	Tools         []string
 }
 
 // TaskMeta tracks orchestration lifecycle (mirrors agents.TaskMeta).

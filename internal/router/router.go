@@ -86,6 +86,11 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string 
 	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, or edit ANYTHING (files, tasks, settings, status, etc.).\n")
 	b.WriteString("IMPORTANT: If the message references conversation history (\"what did we talk about\", \"earlier\", \"before\", \"you said\", \"continue\"), you MUST route to a tier — never respond directly, because you have no conversation memory.\n")
 
+	// Orchestrator routing hint (only if orchestrator tier is available).
+	if hasOrchestrator(tiers) {
+		b.WriteString("IMPORTANT: Route to \"orchestrator\" when the user asks for multi-step work requiring parallel agents, team coordination, or explicitly mentions agents/orchestrator. Examples: \"lance une équipe\", \"use agents to\", \"coordinate multiple tasks\", complex research+write+review workflows. Do NOT route to sonnet/opus and expect them to call the orchestrator — only the orchestrator tier can coordinate agents.\n")
+	}
+
 	// 4. Custom router prompt from file.
 	routerPromptPath := filepath.Join(configDir, "router-prompt.md")
 	if data, err := os.ReadFile(routerPromptPath); err == nil {
@@ -198,7 +203,11 @@ func FallbackResult(tiers *cc.TiersConfig) Result {
 			return Result{Tier: t.Name, Reason: "fallback"}
 		}
 	}
-	return Result{Tier: "instant", Reason: "fallback (no tiers)"}
+	// All tiers disabled — use first tier regardless.
+	if len(tiers.Tiers) > 0 {
+		return Result{Tier: tiers.Tiers[0].Name, Reason: "fallback (all disabled)"}
+	}
+	return Result{Reason: "fallback (no tiers)"}
 }
 
 // TierAccess returns "read-write" or "read-only" for a tier name.
@@ -246,6 +255,10 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 
 	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, or edit ANYTHING (files, tasks, settings, status, etc.).\n")
 	b.WriteString("IMPORTANT: If the message references conversation history (\"what did we talk about\", \"earlier\", \"before\", \"you said\", \"continue\"), you MUST route to a tier — never respond directly, because you have no conversation memory.\n")
+
+	if hasOrchestrator(input.Tiers) {
+		b.WriteString("IMPORTANT: Route to \"orchestrator\" when the user asks for multi-step work requiring parallel agents, team coordination, or explicitly mentions agents/orchestrator. Examples: \"lance une équipe\", \"use agents to\", \"coordinate multiple tasks\", complex research+write+review workflows. Do NOT route to sonnet/opus and expect them to call the orchestrator — only the orchestrator tier can coordinate agents.\n")
+	}
 
 	if input.MessageCount > 0 && input.LastTier != "" {
 		b.WriteString(fmt.Sprintf("\nConversation context: Message #%d in session. Previous message handled by %q.\n", input.MessageCount+1, input.LastTier))
@@ -343,6 +356,16 @@ func stripMarkdownFences(s string) string {
 		s = strings.TrimSpace(s)
 	}
 	return s
+}
+
+// hasOrchestrator returns true if an enabled+routable orchestrator tier exists.
+func hasOrchestrator(tiers *cc.TiersConfig) bool {
+	for _, t := range tiers.Tiers {
+		if t.Name == "orchestrator" && t.Enabled && t.Routable {
+			return true
+		}
+	}
+	return false
 }
 
 func truncate(s string, n int) string {

@@ -130,9 +130,21 @@ Send a voice message on Telegram. ALF transcribes it locally and processes the t
 
 ALF discovers CLI tools and skills at boot. System tools live in `tools.d/` (read-only), user tools in `tools/`. Same pattern for skills (`skills.d/`, `skills/`). All tools support `--help` — ALF runs it before first use. Missing a capability? Drop an executable in `tools/` or a skill definition in `skills/`.
 
+### Agent teams
+
+ALF can coordinate multiple specialized agents for complex tasks. An **orchestrator** (Opus) breaks down requests, delegates sub-tasks to agents (researcher, writer, reviewer...), reviews results, and synthesizes a final answer. Agents work in isolated sessions — no context bleeds between them.
+
+Teams are defined as JSON files in `config.d/agents/`. A bundled "starter" team ships with ALF. Invoke manually via `/orchestrator <task>` or schedule with `--tier orchestrator`.
+
 ### Scheduler
 
-Cron-based job scheduling with timezone support. System jobs (memory extraction) and user-defined jobs. Jobs execute as Claude conversations with configurable prompts. Execution logs are written to `data/logs/scheduler/` and recorded in conversation history.
+Cron-based job scheduling with timezone support. Three execution modes:
+
+- **LLM jobs** — run a prompt through any tier (`--tier sonnet_r --prompt "..."`)
+- **Direct jobs** — execute bash commands (`--tier direct --command "df -h"`)
+- **Orchestrator jobs** — coordinate multiple agents (`--tier orchestrator --prompt "..."`)
+
+System jobs (memory extraction) and user-defined jobs. Execution logs in `data/logs/scheduler/` and recorded in conversation history. Skill injection via `--skills` flag.
 
 ### Control Center
 
@@ -184,6 +196,7 @@ cmd/
   signal/          System tool: send Telegram messages and reactions from Claude sessions
 
 internal/
+  agents/          Multi-agent orchestrator, team config store, session isolation
   cli/             CLI command implementations + embedded templates
   controlcenter/   HTTP server, auth, config CRUD, chat API, workspace, pages, teach
   provider/        Provider/Classifier interfaces + Claude CLI implementations

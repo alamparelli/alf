@@ -12,6 +12,10 @@ Each agent works in an isolated session — it only sees the specific sub-task a
 
 ## How to use it
 
+### Automatic routing
+
+When the orchestrator tier is enabled, the router automatically detects multi-step tasks and routes them to the orchestrator. Phrases like "use agents", "lance une équipe", "coordinate multiple tasks", or complex research+write+review workflows trigger orchestrator routing.
+
 ### Force command
 
 In Telegram or CC Chat, use `/orchestrator` followed by your request:
@@ -21,6 +25,10 @@ In Telegram or CC Chat, use `/orchestrator` followed by your request:
 ```
 
 The orchestrator reads your message, decides which agents to involve, delegates work, and returns a combined result.
+
+### Monitoring tasks
+
+Open the **Tasks** tab in the Control Center to see running and completed orchestrator tasks. Each card shows the prompt, number of iterations, agent calls, cost, and elapsed time. Click a card to expand and see individual agent results.
 
 ### Scheduled jobs
 
@@ -102,7 +110,7 @@ Here's the full format:
 | `system_prompt` | Yes | Instructions the agent follows. Be specific about what it should do and how. |
 | `tools` | No | List of tools the agent can use (e.g. `WebSearch`, `Read`, `Edit`, `Write`, `Bash`). |
 | `write_capable` | No | Can the agent create or modify files? Default: `false` |
-| `max_turns` | No | Max conversation turns per delegation. Default: 3 |
+| `max_turns` | No | Max conversation turns per delegation. Default: 3. Use 5-10 for agents that need to read files or search the web. |
 | `effort` | No | Thinking effort: `low`, `medium`, `high`. Default: `medium` |
 
 ### Example: SEO content team
@@ -161,7 +169,7 @@ ALF will generate the JSON. You can then save it via the **Workspace Explorer** 
 
 - **Give agents clear, specific system prompts.** Vague prompts produce vague results. Tell each agent exactly what it should do and what format to use.
 - **Use the cheapest model that can do the job.** Haiku for simple extraction or formatting. Sonnet for most tasks. Opus only when you truly need deep reasoning.
-- **Keep `max_turns` low.** This controls cost. Start with 2-3 and increase only if agents need more steps.
+- **Give agents enough turns.** Start with 5-10 for agents that use tools (Read, WebSearch, Write). Use 2-3 only for review-only agents.
 - **The orchestrator can re-delegate.** If an agent's result is poor, the orchestrator sends it back with feedback. You don't need to handle retries yourself.
 - **You can have multiple team files.** Drop as many JSON files into `config.d/agents/` as you want. The orchestrator sees all teams and picks the right agents for each task.
 
@@ -183,10 +191,14 @@ The orchestrator tier in `tiers.json` controls how the orchestrator brain behave
 | Field | Default | Description |
 |-------|---------|-------------|
 | `model` | `opus` | Model used for the orchestrator brain (reasoning and delegation). |
-| `effort` | `high` | Thinking effort for the orchestrator brain. |
-| `max_turns` | `1` | Max turns per orchestrator brain call. The brain outputs JSON — it doesn't use tools, so 1 is usually sufficient. Increase if you want the brain to use tools before delegating. |
+| `effort` | `medium` | Thinking effort for the orchestrator brain. `medium` is recommended — `high` uses extended thinking which consumes more turns. |
+| `max_turns` | `10` | Max turns per orchestrator brain call. The brain outputs JSON text only (no tools). |
+| `max_iterations` | `10` | How many delegate→synthesize cycles. Each cycle = one orchestrator call + agent delegation. |
+| `timeout_minutes` | `60` | Hard timeout for the entire orchestration run. Also bounded by each team's `global_timeout_minutes`. |
 
-The iteration limit (how many delegate→synthesize cycles) defaults to 10 and is bounded by the team's `global_timeout_minutes`.
+To enable the orchestrator, set `"enabled": true` in `tiers.json`. The orchestrator is disabled by default.
+
+> The orchestrator brain has no tools — it only outputs JSON text. If the brain repeatedly hits "turn limit reached", increase `max_turns`. If tasks time out before completing, increase `max_iterations` or `timeout_minutes`.
 
 > The entire flow is automatic. You send one message, and the orchestrator handles all the coordination. You only see the final synthesized answer.
 

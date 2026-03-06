@@ -205,7 +205,7 @@ func main() {
 	// Load initial tiers config.
 	tierStore := cc.NewFileTierStore(cc.TiersPath(configDir))
 	if err := tierStore.Reload(); err != nil {
-		log.Printf("warning: failed to load tiers: %v", err)
+		log.Printf("ERROR: failed to load tiers: %v — using defaults (your tiers.json edits are IGNORED)", err)
 	}
 
 	// Load skill catalog: system → bundled copy → user (later overrides earlier).
@@ -372,7 +372,7 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider)
+		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -515,7 +515,7 @@ func main() {
 				}
 			case cc.ReloadTiers:
 				if err := tierStore.Reload(); err != nil {
-					log.Printf("tiers reload error: %v", err)
+					log.Printf("ERROR: tiers reload failed: %v — keeping previous config", err)
 				} else {
 					log.Println("tiers reloaded")
 				}
@@ -627,7 +627,7 @@ func main() {
 
 			// Note: hasText, hasMedia, hasVoice already determined above
 
-			truncated := u.Message.Text
+			truncated := userText // includes caption for media messages
 			if len(truncated) > 200 {
 				truncated = truncated[:200]
 			}
@@ -950,34 +950,40 @@ func main() {
 			// Force command bypasses routing entirely.
 			if forcedTierName != "" {
 				routingAnim.Stop()
-				if routingMsgID != 0 {
-					tg.DeleteMessage(chatID, routingMsgID)
-				}
+				// Keep routingMsgID alive — it transitions to thinking animation below.
 				routeResult = router.Result{Tier: forcedTierName, Reason: "force_command"}
 				log.Printf("→ force command → tier %q", forcedTierName)
 			} else if hasMedia {
-			// Media messages bypass the router — they need a full Claude Code
-			// session with Read tool access to view images/files.
-				routingAnim.Stop()
-				if routingMsgID != 0 {
-					tg.DeleteMessage(chatID, routingMsgID)
-				}
-				// Pick the lowest-priority enabled non-instant tier for media.
-				// Instant tiers (haiku) can't meaningfully respond to images/GIFs.
-				tierName := ""
-				bestPriority := int(^uint(0) >> 1) // max int
-				for _, t := range tierStore.Current().Tiers {
-					log.Printf("media tier scan: %s priority=%d enabled=%v instant=%v", t.Name, t.Priority, t.Enabled, t.Instant)
-					if t.Enabled && !t.Instant && t.Priority < bestPriority {
-						tierName = t.Name
-						bestPriority = t.Priority
+				// Media needs a non-instant tier with Read tool access.
+				// If caption present, classify to pick the right tier then
+				// ensure it can view images; otherwise cheapest non-instant.
+				if routerMsg != "" {
+					routeResult = classifyMessage(routerMsg, tierStore.Current())
+					log.Printf("→ media+caption: router chose tier=%q reason=%q", routeResult.Tier, routeResult.Reason)
+
+					needsUpgrade := false
+					if routeResult.Tier == "" || routeResult.Response != "" {
+						needsUpgrade = true
+					} else {
+						for _, t := range tierStore.Current().Tiers {
+							if t.Name == routeResult.Tier && (t.Instant || !tierHasRead(t)) {
+								needsUpgrade = true
+								break
+							}
+						}
 					}
+					if needsUpgrade {
+						upgraded := lowestMediaTier(tierStore.Current())
+						log.Printf("→ media upgrade: %q → %q (needs Read tool)", routeResult.Tier, upgraded)
+						routeResult = router.Result{Tier: upgraded, Reason: fmt.Sprintf("media-upgrade: %s→%s", routeResult.Tier, upgraded)}
+					}
+				} else {
+					tierName := lowestMediaTier(tierStore.Current())
+					routeResult = router.Result{Tier: tierName, Reason: "media bypass (no caption)"}
+					log.Printf("→ media (no caption), bypassing router → tier %q", tierName)
 				}
-				if tierName == "" && len(tierStore.Current().Tiers) > 0 {
-					tierName = tierStore.Current().Tiers[0].Name
-				}
-				routeResult = router.Result{Tier: tierName, Reason: "media bypass"}
-				log.Printf("→ media detected, bypassing router → tier %q", tierName)
+				routingAnim.Stop()
+				// Keep routingMsgID alive — it transitions to thinking animation below.
 			} else {
 				routeResult = classifyMessage(routerMsg, tierStore.Current())
 			}
@@ -988,28 +994,35 @@ func main() {
 			}
 
 			// Quote-reply upgrade: replies carry important context that instant
-			// tiers cannot handle well (no conversation history). Upgrade to
-			// the default fallback tier so the quoted message gets proper treatment.
+			// tiers cannot handle well (no conversation history). Re-classify
+			// with the full message so the router can make a proper decision.
 			if isReply && forcedTierName == "" {
-				upgraded := false
+				needsReclassify := false
+				originalResult := routeResult
 				if routeResult.Response != "" && routeResult.Tier == "" {
-					// Direct response → upgrade to tier.
-					fallback := firstFallbackTier(tierStore)
-					routeResult = router.Result{Tier: fallback, Reason: "reply-upgrade: direct→" + fallback}
-					upgraded = true
+					needsReclassify = true // direct response on a reply — router lacked context
 				} else if routeResult.Tier != "" {
-					// Check if routed to an instant tier → upgrade.
 					for _, t := range tierStore.Current().Tiers {
 						if t.Name == routeResult.Tier && t.Instant {
-							fallback := firstFallbackTier(tierStore)
-							routeResult = router.Result{Tier: fallback, Reason: fmt.Sprintf("reply-upgrade: %s→%s", t.Name, fallback)}
-							upgraded = true
+							needsReclassify = true // instant tier on a reply
 							break
 						}
 					}
 				}
-				if upgraded {
-					log.Printf("→ reply detected, upgrading tier → %s", routeResult.Tier)
+				if needsReclassify {
+					// Re-classify with full reply context + hint to route (not respond directly).
+					replyHint := msgWithReplyContext + "\n[CONTEXT: This is a reply to a previous assistant message. Route to an appropriate tier — do not respond directly.]"
+					reclassified := classifyMessage(replyHint, tierStore.Current())
+					if reclassified.Tier != "" {
+						// Router picked a real tier — use it.
+						routeResult = reclassified
+						routeResult.Reason = "reply-reclassify: " + reclassified.Reason
+					} else {
+						// Still direct/instant — fall back to default tier.
+						fallback := firstFallbackTier(tierStore)
+						routeResult = router.Result{Tier: fallback, Reason: fmt.Sprintf("reply-fallback: %s→%s", originalResult.Tier, fallback)}
+					}
+					log.Printf("→ reply re-routed: %s → %s (%s)", originalResult.Tier, routeResult.Tier, routeResult.Reason)
 				}
 			}
 
@@ -1091,6 +1104,22 @@ func main() {
 				continue
 			}
 
+			// Validate selected tier is still enabled and routable.
+			if routeResult.Tier != "" && forcedTierName == "" {
+				valid := false
+				for _, t := range tierStore.Current().Tiers {
+					if t.Name == routeResult.Tier && t.Enabled && (t.Routable || t.ForceCommand) {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					fallback := firstFallbackTier(tierStore)
+					log.Printf("→ tier %q not routable/enabled, falling back → %s", routeResult.Tier, fallback)
+					routeResult = router.Result{Tier: fallback, Reason: fmt.Sprintf("tier-invalid: %s→%s", routeResult.Tier, fallback)}
+				}
+			}
+
 			// Resolve tier to params.
 			tp = resolveTierParams(routeResult.Tier, tierStore.Current())
 
@@ -1119,15 +1148,33 @@ func main() {
 					orchSysPrompts = append(orchSysPrompts, catalog)
 				}
 
+				// Enrich orchestrator with workspace awareness and chat history.
+				orchSysPrompts = append(orchSysPrompts, memory.WorkspaceSummary(dataDir))
+				if recent := chatHistory.Recent(chatID, 5); len(recent) > 0 {
+					var histBuf strings.Builder
+					histBuf.WriteString("=== [Recent conversation] ===\n")
+					for _, e := range recent {
+						if e.Role == "user" {
+							histBuf.WriteString("User: " + e.Text + "\n")
+						} else {
+							histBuf.WriteString("Alf: " + e.Text + "\n")
+						}
+					}
+					orchSysPrompts = append(orchSysPrompts, histBuf.String())
+				}
+
 				// Capture loop variables for the goroutine.
 				orchChatID := chatID
 				orchMsg := msgWithReplyContext
 				orchRoutingMsgID := routingMsgID
 				orchMediaCleanup := mediaCleanup
 				orchRC := agents.RunConfig{
-					Model:    tp.Model,
-					Effort:   tp.Effort,
-					MaxTurns: tp.MaxTurns,
+					Model:         tp.Model,
+					Effort:        tp.Effort,
+					MaxTurns:      tp.MaxTurns,
+					MaxIterations: tp.MaxIterations,
+					TimeoutMin:    tp.TimeoutMin,
+					Tools:         tp.Tools,
 				}
 
 				go func() {
@@ -1183,6 +1230,7 @@ func main() {
 						"total_cost":   orchMeta.TotalCost,
 						"agent_calls":  len(orchMeta.AgentCalls),
 						"duration_ms":  duration.Milliseconds(),
+						"text":         orchResult,
 						"text_length":  len(orchResult),
 						"task_id":      orchMeta.ID,
 					})
@@ -1424,11 +1472,13 @@ IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
-	Model        string   // full model name, e.g. "claude-sonnet-4-5"
-	Tools        []string // nil = omit flag
-	WriteCapable bool     // if true, grants full tool access; if false, restricts to Tools whitelist
-	Effort       string   // "" = omit flag
-	MaxTurns     int      // 0 = omit flag (use Claude default)
+	Model         string   // full model name, e.g. "claude-sonnet-4-5"
+	Tools         []string // nil = omit flag
+	WriteCapable  bool     // if true, grants full tool access; if false, restricts to Tools whitelist
+	Effort        string   // "" = omit flag
+	MaxTurns      int      // 0 = omit flag (use Claude default)
+	MaxIterations int      // max orchestrator iterations (0 = default)
+	TimeoutMin    int      // global timeout in minutes (0 = default)
 }
 
 func readSecret(envVar string) string {
@@ -1868,11 +1918,13 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			return tierParams{
-				Model:        router.ResolveModel(t.Model),
-				Tools:        t.Tools,
-				WriteCapable: t.WriteCapable,
-				Effort:       t.Effort,
-				MaxTurns:     t.MaxTurns,
+				Model:         router.ResolveModel(t.Model),
+				Tools:         t.Tools,
+				WriteCapable:  t.WriteCapable,
+				Effort:        t.Effort,
+				MaxTurns:      t.MaxTurns,
+				MaxIterations: t.MaxIterations,
+				TimeoutMin:    t.TimeoutMin,
 			}
 		}
 	}
@@ -2610,6 +2662,7 @@ func (s *schedulerOrchestrator) Run(ctx context.Context, userMessage string, sys
 		Effort:        rc.Effort,
 		MaxIterations: rc.MaxIterations,
 		MaxTurns:      rc.MaxTurns,
+		Tools:         rc.Tools,
 	}, agentProgress)
 	if err != nil {
 		return "", nil, err
@@ -2768,6 +2821,51 @@ func firstFallbackTier(tierStore cc.TierStore) string {
 	}
 	if len(cur.Tiers) > 0 {
 		return cur.Tiers[0].Name
+	}
+	return ""
+}
+
+// tierHasRead returns true if the tier's tool list includes the Read tool.
+func tierHasRead(t cc.Tier) bool {
+	if t.WriteCapable {
+		return true // write-capable tiers have all tools including Read
+	}
+	for _, tool := range t.Tools {
+		if tool == "Read" {
+			return true
+		}
+	}
+	return false
+}
+
+// lowestMediaTier returns the cheapest enabled non-instant tier that has the
+// Read tool. Falls back to any non-instant tier, then to the first tier.
+func lowestMediaTier(tiers *cc.TiersConfig) string {
+	bestName := ""
+	bestPriority := int(^uint(0) >> 1)
+	// First pass: prefer tiers with Read tool.
+	for _, t := range tiers.Tiers {
+		if t.Enabled && !t.Instant && tierHasRead(t) && t.Priority < bestPriority {
+			bestName = t.Name
+			bestPriority = t.Priority
+		}
+	}
+	if bestName != "" {
+		return bestName
+	}
+	// Second pass: any non-instant tier.
+	bestPriority = int(^uint(0) >> 1)
+	for _, t := range tiers.Tiers {
+		if t.Enabled && !t.Instant && t.Priority < bestPriority {
+			bestName = t.Name
+			bestPriority = t.Priority
+		}
+	}
+	if bestName != "" {
+		return bestName
+	}
+	if len(tiers.Tiers) > 0 {
+		return tiers.Tiers[0].Name
 	}
 	return ""
 }

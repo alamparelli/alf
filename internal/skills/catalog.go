@@ -26,6 +26,7 @@ func BuildCatalog(store Store) string {
 
 	var sb strings.Builder
 	sb.WriteString("=== [Available Skills] ===\n")
+	sb.WriteString("Before saying you cannot do something, check if a skill below handles it.\n")
 	for _, e := range entries {
 		sb.WriteString(e)
 		sb.WriteByte('\n')
@@ -57,20 +58,52 @@ func MatchTriggers(store Store, message string) []*Skill {
 	return matched
 }
 
-// BuildInjection returns a system prompt block with the full prompt content
-// of the given skills, ready to inject. Returns "" if skills is empty.
+// BuildInjection returns a system prompt block that tells Claude to read
+// the matched skills. Injects metadata + path, NOT the full prompt.
+// This keeps context small and forces Claude to actively engage with the skill.
 func BuildInjection(matched []*Skill) string {
 	if len(matched) == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
-	sb.WriteString("=== [Auto-Loaded Skills] ===\n")
-	sb.WriteString("The following skills were auto-loaded based on your message. Follow their instructions.\n\n")
+	sb.WriteString("=== [ACTIVE SKILLS — YOU MUST USE THESE] ===\n")
+	sb.WriteString("The following skills are active for this conversation.\n")
+	sb.WriteString("MANDATORY: Read each skill's SKILL.md file NOW and follow its instructions.\n")
+	sb.WriteString("Do NOT claim you cannot do something if an active skill provides the capability.\n\n")
 	for _, sk := range matched {
-		sb.WriteString(fmt.Sprintf("--- skill: %s ---\n", sk.Name))
-		sb.WriteString(sk.Prompt)
-		sb.WriteString("\n\n")
+		desc := sk.Description
+		if desc == "" {
+			desc = "(no description)"
+		}
+		sb.WriteString(fmt.Sprintf("- **%s**: %s\n  Read: %s/SKILL.md\n", sk.Name, desc, sk.Dir))
 	}
+	sb.WriteString("\nYou MUST read these SKILL.md files before responding to skill-related requests.\n")
 	return sb.String()
+}
+
+// ResolveMinTier returns the tier name required by active skills, or "" if none.
+// When multiple skills specify a tier, returns the first non-empty one found.
+func ResolveMinTier(store Store, names []string) string {
+	for _, name := range names {
+		if sk, ok := store.Get(name); ok && sk.Tier != "" {
+			return sk.Tier
+		}
+	}
+	return ""
+}
+
+// BuildInjectionByName returns an injection block for skills looked up by name.
+// Used for session-persisted skills that were triggered in earlier messages.
+func BuildInjectionByName(store Store, names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	var matched []*Skill
+	for _, name := range names {
+		if sk, ok := store.Get(name); ok {
+			matched = append(matched, sk)
+		}
+	}
+	return BuildInjection(matched)
 }

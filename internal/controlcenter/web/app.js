@@ -78,9 +78,11 @@ function navigateTo(view) {
   const chatView = document.getElementById('chatView');
   const pageFrame = document.getElementById('pageFrame');
   const docsView = document.getElementById('docsView');
+  const logsView = document.getElementById('logsView');
 
   // Update active nav item — docs:id should highlight the docs nav item
   const navView = view.startsWith('docs:') ? 'docs' : view;
+  logsStopAutoRefresh();
   document.querySelectorAll('#sidebarNav .nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === navView);
   });
@@ -89,6 +91,7 @@ function navigateTo(view) {
   chatView.style.display = 'none';
   pageFrame.style.display = 'none';
   docsView.style.display = 'none';
+  logsView.style.display = 'none';
 
   if (view === 'home') {
     homeView.style.display = '';
@@ -101,6 +104,10 @@ function navigateTo(view) {
     const name = view.slice(5);
     pageFrame.style.display = '';
     pageFrame.src = '/pages/' + encodeURIComponent(name);
+  } else if (view === 'logs') {
+    logsView.style.display = '';
+    pageFrame.src = '';
+    logsInit();
   } else if (view === 'docs') {
     docsView.style.display = '';
     pageFrame.src = '';
@@ -118,9 +125,10 @@ function navigateTo(view) {
   sidebarOverlay.classList.remove('open');
 }
 
-// Bind Home + Chat + Docs nav
+// Bind Home + Chat + Docs + Logs nav
 document.querySelector('#sidebarNav .nav-item[data-view="home"]').addEventListener('click', () => navigateTo('home'));
 document.querySelector('#sidebarNav .nav-item[data-view="chat"]').addEventListener('click', () => navigateTo('chat'));
+document.querySelector('#sidebarNav .nav-item[data-view="logs"]').addEventListener('click', () => navigateTo('logs'));
 document.querySelector('#sidebarNav .nav-item[data-view="docs"]').addEventListener('click', () => navigateTo('docs'));
 
 // --- Status ---
@@ -1864,6 +1872,83 @@ function docsShowArticle(id) {
   }).catch(() => {
     content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Document not found.</div>';
   });
+}
+
+// --- Logs ---
+let logsAutoTimer = null;
+let logsInitialized = false;
+
+function logsStopAutoRefresh() {
+  if (logsAutoTimer) { clearInterval(logsAutoTimer); logsAutoTimer = null; }
+}
+
+async function logsInit() {
+  const sel = document.getElementById('logSelect');
+  if (!logsInitialized) {
+    logsInitialized = true;
+    try {
+      const res = await fetch('/api/logs');
+      const data = await res.json();
+      sel.innerHTML = '';
+      (data.available || []).forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name.replace(/\.log$/, '');
+        sel.appendChild(opt);
+      });
+    } catch { sel.innerHTML = '<option>error</option>'; }
+    sel.addEventListener('change', () => logsFetch());
+    document.getElementById('logLines').addEventListener('change', () => logsFetch());
+    document.getElementById('logRefreshBtn').addEventListener('click', () => logsFetch());
+    document.getElementById('logSearch').addEventListener('input', () => logsApplyFilter());
+    document.getElementById('logAutoRefresh').addEventListener('change', (e) => {
+      if (e.target.checked) logsStartAutoRefresh(); else logsStopAutoRefresh();
+    });
+  }
+  logsFetch();
+  if (document.getElementById('logAutoRefresh').checked) logsStartAutoRefresh();
+}
+
+function logsStartAutoRefresh() {
+  logsStopAutoRefresh();
+  logsAutoTimer = setInterval(() => logsFetch(), 5000);
+}
+
+let _logsAllLines = [];
+async function logsFetch() {
+  const name = document.getElementById('logSelect').value;
+  const n = document.getElementById('logLines').value;
+  if (!name) return;
+  try {
+    const res = await fetch(`/api/logs?name=${encodeURIComponent(name)}&n=${n}`);
+    const data = await res.json();
+    _logsAllLines = data.lines || [];
+    logsApplyFilter();
+  } catch {
+    document.getElementById('logOutput').textContent = 'Failed to load logs.';
+  }
+}
+
+function logsApplyFilter() {
+  const q = document.getElementById('logSearch').value.toLowerCase();
+  const out = document.getElementById('logOutput');
+  const filtered = q ? _logsAllLines.filter(l => l.toLowerCase().includes(q)) : _logsAllLines;
+  out.innerHTML = '';
+  filtered.forEach(line => {
+    const span = document.createElement('span');
+    span.className = 'log-line' + logsLineClass(line);
+    span.textContent = line;
+    out.appendChild(span);
+    out.appendChild(document.createTextNode('\n'));
+  });
+  out.scrollTop = out.scrollHeight;
+}
+
+function logsLineClass(line) {
+  if (/\bERROR\b/i.test(line)) return ' log-error';
+  if (/\bWARN(ING)?\b/i.test(line)) return ' log-warn';
+  if (/\bDEBUG\b/i.test(line)) return ' log-debug';
+  return '';
 }
 
 // --- Init ---

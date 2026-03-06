@@ -113,12 +113,11 @@ On the Home tab, scroll down to **Workspace**. This is a file browser for everyt
 | Folder | What's inside | Example |
 |--------|-------------|---------|
 | `config.d/` | Settings and tier configuration | `tiers.json`, `config.json` |
-| `context.d/` | Files added to every conversation | `project-notes.md` |
-| `skills.d/` | Custom skills ALF can use | `security-audit/SKILL.md` |
-| `tools/` | Tool definitions | `web-search.json` |
-| `memory.d/` | Facts ALF has learned about you | Auto-generated |
+| `context/` | Files added to every conversation | `project-notes.md` |
+| `skills/` | Custom skills ALF can use | `x-manager/SKILL.md` |
+| `tools/` | Custom scripts and executables | `disk-check` |
 | `pages/` | HTML dashboards | `status-board.html` |
-| `logs/` | Conversation history | Auto-generated |
+| `logs/` | Daemon logs and conversation history | `daemon.log`, `events/` |
 
 ### Teaching ALF
 
@@ -161,3 +160,6 @@ This downloads the latest version and restarts ALF. Your data and settings are p
 ## What's next?
 
 - [Setting Up Tiers](docs:tier-setup) — customize which models ALF uses and when
+- [Managing Conversations](docs:sessions) — sessions, /new, and best practices
+- [Creating Skills](docs:creating-skills) — teach ALF new abilities
+- [Building Tools & Extensions](docs:container-packages) — create tools, pages, and install packages

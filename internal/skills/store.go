@@ -12,18 +12,18 @@ import (
 
 const promptSoftLimit = 8 * 1024 // 8KB
 
-// fileSkillStore loads skills from system and user directories.
-// User skills override system skills by folder name.
+// fileSkillStore loads skills from multiple directories.
+// Later directories override earlier ones by skill name.
 type fileSkillStore struct {
-	systemDir string
-	userDir   string
-	current   atomic.Pointer[map[string]*Skill]
+	dirs    []string
+	current atomic.Pointer[map[string]*Skill]
 }
 
-// NewFileSkillStore creates a Store backed by two directories.
-// Either directory may be empty or nonexistent.
-func NewFileSkillStore(systemDir, userDir string) Store {
-	s := &fileSkillStore{systemDir: systemDir, userDir: userDir}
+// NewFileSkillStore creates a Store backed by directories loaded in order.
+// Later directories override earlier ones by skill name.
+// Any directory may be empty or nonexistent.
+func NewFileSkillStore(dirs ...string) Store {
+	s := &fileSkillStore{dirs: dirs}
 	empty := make(map[string]*Skill)
 	s.current.Store(&empty)
 	_ = s.Reload()
@@ -49,18 +49,16 @@ func (s *fileSkillStore) Get(name string) (*Skill, bool) {
 func (s *fileSkillStore) Reload() error {
 	merged := make(map[string]*Skill)
 
-	// Load system skills first.
-	for k, v := range loadDir(s.systemDir) {
-		merged[k] = v
-	}
-	// User skills override system by name.
-	for k, v := range loadDir(s.userDir) {
-		merged[k] = v
+	// Load directories in order; later dirs override earlier by name.
+	for _, dir := range s.dirs {
+		for k, v := range loadDir(dir) {
+			merged[k] = v
+		}
 	}
 
 	s.current.Store(&merged)
 	if len(merged) > 0 {
-		log.Printf("skills: loaded %d skills (system=%s, user=%s)", len(merged), s.systemDir, s.userDir)
+		log.Printf("skills: loaded %d skills from %v", len(merged), s.dirs)
 	}
 	return nil
 }
@@ -102,7 +100,7 @@ func parseSkill(skillDir string) (*Skill, error) {
 		return nil, err
 	}
 
-	name, description, version, triggers, body := parseFrontmatter(string(data))
+	name, description, version, triggers, tier, body := parseFrontmatter(string(data))
 
 	// Default name from directory name.
 	if name == "" {
@@ -137,6 +135,7 @@ func parseSkill(skillDir string) (*Skill, error) {
 		Description: description,
 		Version:     version,
 		Triggers:    triggers,
+		Tier:        tier,
 		Prompt:      prompt,
 		Dir:         skillDir,
 	}, nil
@@ -151,10 +150,10 @@ func parseSkill(skillDir string) (*Skill, error) {
 //	version: value
 //	---
 //	body content
-func parseFrontmatter(content string) (name, description, version string, triggers []string, body string) {
+func parseFrontmatter(content string) (name, description, version string, triggers []string, tier string, body string) {
 	content = strings.TrimLeft(content, "\xef\xbb\xbf") // strip BOM
 	if !strings.HasPrefix(strings.TrimSpace(content), "---") {
-		return "", "", "", nil, strings.TrimSpace(content)
+		return "", "", "", nil, "", strings.TrimSpace(content)
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
@@ -172,7 +171,7 @@ func parseFrontmatter(content string) (name, description, version string, trigge
 	}
 	if !foundEnd {
 		// No closing ---, treat entire content as body.
-		return "", "", "", nil, strings.TrimSpace(content)
+		return "", "", "", nil, "", strings.TrimSpace(content)
 	}
 
 	// Parse simple key: value pairs from frontmatter.
@@ -190,6 +189,8 @@ func parseFrontmatter(content string) (name, description, version string, trigge
 			version = val
 		case "triggers":
 			triggers = parseList(val)
+		case "tier":
+			tier = val
 		}
 	}
 

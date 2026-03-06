@@ -161,6 +161,7 @@ function esc(s) {
 // --- Workspace Explorer (Tree) ---
 let wsOpenPath = null;
 let wsTree = {};  // { [dirPath]: { loaded, expanded, entries[] } }
+let wsProtectedDirs = [];  // populated from backend on root listing
 
 // Lucide icon names by file extension.
 const FILE_ICON_MAP = {
@@ -197,6 +198,7 @@ function wsToggleDir(dirPath) {
   }
   api('/api/workspace?path=' + encodeURIComponent(dirPath)).then(r => {
     if (r.type !== 'directory') return;
+    if (r.protected) wsProtectedDirs = r.protected;
     wsTree[dirPath] = { loaded: true, expanded: true, entries: r.entries || [] };
     wsRender();
   }).catch(() => {
@@ -244,7 +246,7 @@ function wsRenderDir(dirPath, depth) {
       const chevronIcon = expanded ? 'chevron-down' : 'chevron-right';
       const folderIcon = expanded ? 'folder-open' : 'folder';
 
-      const canDeleteDir = depth > 0 || !['config.d','context.d','memory.d','pages.d','skills.d','tools'].includes(e.name);
+      const canDeleteDir = depth > 0 || !wsProtectedDirs.includes(e.name);
       html += '<div class="ws-node ws-node-dir' + (expanded ? ' expanded' : '') + '" data-path="' + esc(fullPath) + '" style="padding-left:' + (8 + depth * 20) + 'px">' +
         wsIcon(chevronIcon, 'ws-icon ws-icon-chevron') +
         wsIcon(folderIcon, 'ws-icon ws-icon-folder') +

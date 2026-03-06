@@ -130,21 +130,10 @@ func (t *Tracker) git(args ...string) error {
 }
 
 func (t *Tracker) writeGitignore() error {
-	content := `*
-!.gitignore
-!.claude/
-!.claude/**
-!config.d/
-!config.d/**
-!tools/
-!tools/**
-!skills/
-!skills/**
-!context/
-!context/**
-!logs/
-!logs/events/
-!logs/events/*.jsonl
+	content := `# Track everything by default, exclude heavy/transient data.
+.claude/settings.local.json
+agents/
+tmp/
 `
 	return os.WriteFile(filepath.Join(t.dir, ".gitignore"), []byte(content), 0o644)
 }

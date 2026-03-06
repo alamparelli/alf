@@ -131,6 +131,10 @@ func (s *Server) handleConn(conn net.Conn) {
 				resp.Error = "--command is only for direct tier (deterministic bash jobs)"
 				break
 			}
+			if tier == "" {
+				resp.Error = "--tier is required for LLM jobs"
+				break
+			}
 		}
 		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Command, req.Output, req.Skills)
 		if err != nil {

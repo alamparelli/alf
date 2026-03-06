@@ -183,8 +183,8 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 	}
 	// Include protected list on root listing so the frontend has a single source of truth.
 	if relPath == "" {
-		names := make([]string, 0, len(protectedTopDirs))
-		for k := range protectedTopDirs {
+		names := make([]string, 0, len(protectedDirs))
+		for k := range protectedDirs {
 			names = append(names, k)
 		}
 		sort.Strings(names)
@@ -296,19 +296,20 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 	w.Write([]byte(`{"ok":true}`))
 }
 
-// protectedTopDirs are top-level directories that cannot be deleted.
-var protectedTopDirs = map[string]bool{
-	"config":   true,
-	"config.d": true,
-	"context":  true,
-	"docs":     true,
-	"logs":     true,
-	"pages":    true,
-	"sessions": true,
-	"skills":   true,
-	"skills.d": true,
-	"tools":    true,
-	"tools.d":  true,
+// protectedDirs are directories that cannot be deleted (top-level and nested).
+var protectedDirs = map[string]bool{
+	"config":          true,
+	"config.d":        true,
+	"config.d/agents": true,
+	"context":         true,
+	"docs":            true,
+	"logs":            true,
+	"pages":           true,
+	"sessions":        true,
+	"skills":          true,
+	"skills.d":        true,
+	"tools":           true,
+	"tools.d":         true,
 }
 
 func (h *WorkspaceHandler) del(w http.ResponseWriter, absPath, relPath string) {
@@ -328,8 +329,8 @@ func (h *WorkspaceHandler) del(w http.ResponseWriter, absPath, relPath string) {
 	}
 
 	if info.IsDir() {
-		// Protect top-level system directories.
-		if protectedTopDirs[relPath] {
+		// Protect system directories.
+		if protectedDirs[relPath] {
 			http.Error(w, jsonErr("cannot delete system directory"), http.StatusForbidden)
 			return
 		}

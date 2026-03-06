@@ -124,7 +124,8 @@ func (e *Extractor) RunOnce(since time.Time) error {
 	}
 
 	if len(conversations) < 3 {
-		log.Printf("memstore: skipping extraction — only %d message pairs (will retry next cycle)", len(conversations))
+		log.Printf("memstore: skipping extraction — only %d message pairs (advancing state)", len(conversations))
+		e.saveState() // advance LastRun so we don't stay permanently overdue
 		return nil
 	}
 
@@ -230,7 +231,7 @@ func (e *Extractor) readDayEvents(path string, since time.Time) ([]conversationL
 					text: event.Text,
 				})
 			}
-		case "message_out":
+		case "message_out", "orchestrator_out":
 			if event.Text != "" {
 				lines = append(lines, conversationLine{
 					ts:   event.TS,

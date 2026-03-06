@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/provider"
 )
 
@@ -26,10 +27,14 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider) (*Server, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator) (*Server, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore, pageStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
-	statusProvider := NewStatusProvider(stats, version)
+	var chatStore *ChatStore
+	if chatService != nil {
+		chatStore = chatService.ChatStore
+	}
+	statusProvider := NewStatusProvider(stats, version, chatStore)
 	notifier := NewChannelNotifier(reloadCh)
 
 	// Load initial tiers into memory.
@@ -63,6 +68,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		ChatService:    chatService,
 		MemStore:       memStore,
 		MemProvider:    memProvider,
+		Orchestrator:   orchestrator,
 		AuthToken:      authToken,
 		AllowedOrigin:    strings.TrimRight(externalURL, "/"),
 		SecureCookies:    strings.HasPrefix(externalURL, "https://"),

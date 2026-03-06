@@ -133,6 +133,10 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			}
 		}
 	}
+	// Tier-level timeout overrides team-level timeout if set.
+	if rc.TimeoutMin > 0 {
+		globalTimeout = time.Duration(rc.TimeoutMin) * time.Minute
+	}
 	log.Printf("[orchestrator] global timeout=%s | task_dir=%s", globalTimeout, taskDir)
 	ctx, cancel := context.WithTimeout(ctx, globalTimeout)
 	defer cancel()
@@ -174,12 +178,14 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	}
 	orchMaxTurns := rc.MaxTurns
 	if orchMaxTurns <= 0 {
-		orchMaxTurns = 1
+		orchMaxTurns = defaultMaxIterations
 	}
 	log.Printf("[orchestrator] system prompts: %d total (%d user + orchestrator prompt) | max_iterations=%d model=%s effort=%s max_turns=%d", len(allSystemPrompts), len(systemPrompts), maxIterations, orchModel, orchEffort, orchMaxTurns)
 
 	// First call: send user message.
 	prompt := userMessage
+	turnLimitRetries := 0
+	const maxTurnLimitRetries = 2
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
 		meta.Iterations = iteration + 1
@@ -192,10 +198,8 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			onProgress("thinking", fmt.Sprintf("iteration %d", iteration+1))
 		}
 
-		// Invoke orchestrator.
+		// Invoke orchestrator (read-only, uses taskDir as cwd).
 		orchSessionID := sm.Get(orchestratorKey)
-		orchDir := filepath.Join(taskDir, "orchestrator")
-		os.MkdirAll(orchDir, 0o755)
 
 		hasResume := orchSessionID != ""
 		log.Printf("[orchestrator] invoking model=%s effort=%s resume=%v", orchModel, orchEffort, hasResume)
@@ -204,9 +208,10 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			Model:         orchModel,
 			SystemPrompts: allSystemPrompts,
 			ResumeID:      orchSessionID,
-			DataDir:       orchDir,
+			DataDir:       taskDir,
 			Effort:        orchEffort,
 			MaxTurns:      orchMaxTurns,
+			Tools:         rc.Tools,
 		}
 
 		result, err := o.provider.Invoke(ctx, prompt, params, nil)
@@ -235,6 +240,21 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		log.Printf("[orchestrator] response received: %dms $%.4f %d chars session=%s",
 			iterDur.Milliseconds(), result.CostUSD, len(result.Text), truncate(result.SessionID, 12))
 		log.Printf("[orchestrator] raw output: %s", truncate(result.Text, 300))
+
+		// Detect orchestrator turn limit — retry a limited number of times.
+		if strings.Contains(result.Text, "Turn limit reached") {
+			turnLimitRetries++
+			if turnLimitRetries > maxTurnLimitRetries {
+				log.Printf("[orchestrator] ✗ orchestrator hit turn limit %d times — aborting", turnLimitRetries)
+				meta.Status = "failed"
+				o.saveMeta(taskDir, meta)
+				return "", meta, fmt.Errorf("orchestrator repeatedly hit turn limit (%d retries) — try increasing max_turns in the orchestrator tier config", maxTurnLimitRetries)
+			}
+			log.Printf("[orchestrator] ⚠ orchestrator hit turn limit (%d/%d retries) — clearing session", turnLimitRetries, maxTurnLimitRetries)
+			sm.Clear(orchestratorKey)
+			prompt = userMessage
+			continue
+		}
 
 		// Parse orchestrator output.
 		output := parseOrchestratorOutput(result.Text)
@@ -362,31 +382,49 @@ func (o *Orchestrator) executeDelegates(
 		sem     = make(chan struct{}, maxConcurrent)
 	)
 
-	for _, d := range delegates {
+	// Track how many times each agent appears to create unique session keys.
+	agentCount := make(map[string]int, len(delegates))
+	type indexedDelegate struct {
+		DelegateRequest
+		index int
+	}
+	indexed := make([]indexedDelegate, len(delegates))
+	for i, d := range delegates {
+		agentCount[d.Agent]++
+		indexed[i] = indexedDelegate{d, agentCount[d.Agent]}
+	}
+
+	for _, id := range indexed {
 		wg.Add(1)
-		go func(d DelegateRequest) {
+		go func(d DelegateRequest, idx int) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			ar := o.invokeAgent(ctx, d, sm, taskDir, onProgress)
+			// Use unique session key when same agent is delegated multiple times.
+			sessionKey := d.Agent
+			if agentCount[d.Agent] > 1 {
+				sessionKey = fmt.Sprintf("%s#%d", d.Agent, idx)
+			}
+			ar := o.invokeAgentWithKey(ctx, d, sessionKey, sm, taskDir, onProgress)
 
 			mu.Lock()
 			results = append(results, ar)
 			meta.AgentCalls = append(meta.AgentCalls, ar)
 			meta.TotalCost += ar.CostUSD
 			mu.Unlock()
-		}(d)
+		}(id.DelegateRequest, id.index)
 	}
 
 	wg.Wait()
 	return results
 }
 
-// invokeAgent calls a single sub-agent.
-func (o *Orchestrator) invokeAgent(
+// invokeAgentWithKey calls a single sub-agent using the given session key.
+func (o *Orchestrator) invokeAgentWithKey(
 	ctx context.Context,
 	d DelegateRequest,
+	sessionKey string,
 	sm *SessionManager,
 	taskDir string,
 	onProgress ProgressFunc,
@@ -408,15 +446,22 @@ func (o *Orchestrator) invokeAgent(
 		onProgress("agent", fmt.Sprintf("%s/%s", teamName, agentName))
 	}
 
-	agentDir := filepath.Join(taskDir, fmt.Sprintf("%s-%s", teamName, agentName))
-	os.MkdirAll(agentDir, 0o755)
+	// Write-capable agents get their own working directory; read-only agents share taskDir.
+	agentDir := taskDir
+	if ac.WriteCapable {
+		agentDir = filepath.Join(taskDir, fmt.Sprintf("%s-%s", teamName, agentName))
+		if sessionKey != d.Agent {
+			agentDir = filepath.Join(taskDir, fmt.Sprintf("%s-%s-%s", teamName, agentName, sessionKey[strings.LastIndex(sessionKey, "#")+1:]))
+		}
+		os.MkdirAll(agentDir, 0o755)
+	}
 
 	model := ac.Model
 	if o.resolveModel != nil {
 		model = o.resolveModel(ac.Model)
 	}
 
-	sessionID := sm.Get(d.Agent)
+	sessionID := sm.Get(sessionKey)
 	hasResume := sessionID != ""
 	log.Printf("[orchestrator] → agent %s/%s: model=%s effort=%s write=%v max_turns=%d resume=%v",
 		teamName, agentName, model, ac.Effort, ac.WriteCapable, ac.MaxTurns, hasResume)
@@ -438,7 +483,7 @@ func (o *Orchestrator) invokeAgent(
 	// Retry without resume if session expired.
 	if err != nil && sessionID != "" && strings.Contains(err.Error(), "No conversation found") {
 		log.Printf("[orchestrator]   agent %s/%s session expired, retrying", teamName, agentName)
-		sm.Clear(d.Agent)
+		sm.Clear(sessionKey)
 		params.ResumeID = ""
 		result, err = o.provider.Invoke(ctx, d.Task, params, nil)
 	}
@@ -457,7 +502,7 @@ func (o *Orchestrator) invokeAgent(
 	}
 
 	if result.SessionID != "" {
-		sm.Set(d.Agent, result.SessionID)
+		sm.Set(sessionKey, result.SessionID)
 	}
 
 	log.Printf("[orchestrator] ← agent %s/%s: %dms $%.4f %d chars session=%s",

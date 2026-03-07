@@ -94,6 +94,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 
 ENV PATH="/opt/alf/tools:${PATH}"
 
+COPY internal/controlcenter/defaults/tiers.json /opt/alf/defaults/tiers.json
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
 COPY --from=builder /extract-video /opt/alf/bin/extract-video
 COPY --from=builder /recall-tools /opt/alf/bin/recall-tools

@@ -668,6 +668,16 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	}
 	PrintCheck("config.json")
 
+	if err := SeedTiersConfig(dir); err != nil {
+		Fatal(fmt.Sprintf("Failed to write tiers.json: %v", err))
+	}
+	PrintCheck("tiers.json")
+
+	if err := SeedBootstrapScript(dir); err != nil {
+		Fatal(fmt.Sprintf("Failed to write bootstrap.sh: %v", err))
+	}
+	PrintCheck("bootstrap.sh")
+
 	// Write config README if it doesn't exist.
 	readmePath := filepath.Join(dir, "config.d", "README.md")
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
+
+	"github.com/alamparelli/alf/internal/controlcenter"
 )
 
 //go:embed templates/*
@@ -86,6 +88,52 @@ func SeedBundledAgents(dir string) error {
 	// Agents live inside config.d/ which is mounted as /opt/alf/config in the container.
 	agentsDir := filepath.Join(dir, "config.d", "agents")
 	return seedEmbedded(bundledAgentsFS, "bundled_agents", agentsDir)
+}
+
+// SeedTiersConfig writes the default tiers.json if it doesn't already exist.
+func SeedTiersConfig(dir string) error {
+	configD := filepath.Join(dir, "config.d")
+	if err := os.MkdirAll(configD, 0o755); err != nil {
+		return err
+	}
+	dest := filepath.Join(configD, "tiers.json")
+	if _, err := os.Stat(dest); err == nil {
+		return nil // already exists, don't overwrite
+	}
+	return os.WriteFile(dest, controlcenter.DefaultTiersJSON(), 0o644)
+}
+
+// SeedBootstrapScript writes data/bootstrap.sh if it doesn't already exist.
+// This script runs automatically at daemon startup when modified.
+func SeedBootstrapScript(dir string) error {
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return err
+	}
+	dest := filepath.Join(dataDir, "bootstrap.sh")
+	if _, err := os.Stat(dest); err == nil {
+		return nil // already exists, don't overwrite
+	}
+	content := `#!/usr/bin/env bash
+# ─── ALF Bootstrap Script ───────────────────────────────────────────
+# This script runs automatically at daemon startup when its content changes.
+# Use it to install packages, configure tools, or set up your environment.
+#
+# Examples:
+#   apt-get update && apt-get install -y jq
+#   pip install faster-whisper
+#   npm install -g @anthropic-ai/claude-code
+#
+# Notes:
+#   - Runs as root inside the container
+#   - Only re-runs when the file content changes (SHA-256 hash check)
+#   - stdout/stderr are logged to the daemon log
+#   - The working directory is /home/node/data
+# ─────────────────────────────────────────────────────────────────────
+set -e
+
+`
+	return os.WriteFile(dest, []byte(content), 0o755)
 }
 
 func seedEmbedded(fsys embed.FS, root, destDir string) error {

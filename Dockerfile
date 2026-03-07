@@ -134,6 +134,9 @@ RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
     && chmod -R 755 /opt/alf/tools \
     && chmod -R 755 /opt/alf/bin
 
+# Git safe directory for all users (data dir is root:node, accessed by node+claude).
+RUN git config --system --add safe.directory /home/node/data
+
 WORKDIR /home/node
 
 EXPOSE 8080

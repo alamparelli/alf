@@ -28,10 +28,9 @@ type magicEntry struct {
 
 // MagicStore manages short-lived magic link codes for authentication.
 type MagicStore struct {
-	mu       sync.Mutex
-	entries  map[string]*magicEntry
-	nowFn    func() time.Time
-	sessions *SessionStore // if set, revoke sessions on new magic link
+	mu      sync.Mutex
+	entries map[string]*magicEntry
+	nowFn   func() time.Time
 }
 
 // NewMagicStore creates a MagicStore. Pass nil for nowFn to use time.Now.
@@ -43,12 +42,6 @@ func NewMagicStore(nowFn func() time.Time) *MagicStore {
 		entries: make(map[string]*magicEntry),
 		nowFn:   nowFn,
 	}
-}
-
-// SetSessionStore links a SessionStore so that issuing a new magic link
-// revokes all existing sessions for that chat ID.
-func (ms *MagicStore) SetSessionStore(ss *SessionStore) {
-	ms.sessions = ss
 }
 
 // Issue creates a new magic code for the given chat ID.
@@ -66,10 +59,6 @@ func (ms *MagicStore) Issue(chatID int64, sessTTL time.Duration) (string, error)
 		if e.chatID == chatID {
 			delete(ms.entries, k)
 		}
-	}
-	// Revoke all existing sessions for this chat ID.
-	if ms.sessions != nil {
-		ms.sessions.RevokeChat(chatID)
 	}
 	ms.entries[code] = &magicEntry{
 		chatID:     chatID,
@@ -129,13 +118,16 @@ type persistedSession struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+const defaultMaxSessions = 2
+
 // SessionStore manages authenticated sessions.
 // When path is set, sessions are persisted to disk and survive restarts.
 type SessionStore struct {
-	mu       sync.Mutex
-	sessions map[string]*session
-	nowFn    func() time.Time
-	path     string // empty = in-memory only
+	mu          sync.Mutex
+	sessions    map[string]*session
+	nowFn       func() time.Time
+	path        string // empty = in-memory only
+	maxSessions int    // max concurrent sessions per chatID, 0 = defaultMaxSessions
 }
 
 // NewSessionStore creates a SessionStore. Pass nil for nowFn to use time.Now.
@@ -166,8 +158,16 @@ func NewFileSessionStore(path string, nowFn func() time.Time) *SessionStore {
 	return ss
 }
 
+// SetMaxSessions sets the maximum concurrent sessions per chatID.
+func (ss *SessionStore) SetMaxSessions(n int) {
+	ss.mu.Lock()
+	ss.maxSessions = n
+	ss.mu.Unlock()
+}
+
 // Issue creates a new session for the given chat ID with the specified TTL.
 // If ttl is 0, the default sessionTTL (24h) is used.
+// When the session limit is reached, the oldest session for that chatID is evicted.
 func (ss *SessionStore) Issue(chatID int64, ttl time.Duration) (string, error) {
 	if ttl <= 0 {
 		ttl = sessionTTL
@@ -179,12 +179,13 @@ func (ss *SessionStore) Issue(chatID int64, ttl time.Duration) (string, error) {
 	}
 
 	ss.mu.Lock()
-	// Revoke any existing sessions for this chat ID (one active session at a time).
-	for k, s := range ss.sessions {
-		if s.chatID == chatID {
-			delete(ss.sessions, k)
-		}
+	// Enforce max sessions per chatID: evict oldest if at limit.
+	max := ss.maxSessions
+	if max <= 0 {
+		max = defaultMaxSessions
 	}
+	ss.evictOldestLocked(chatID, max-1) // make room for the new one
+
 	ss.sessions[id] = &session{
 		chatID:    chatID,
 		expiresAt: ss.nowFn().Add(ttl),
@@ -193,6 +194,40 @@ func (ss *SessionStore) Issue(chatID int64, ttl time.Duration) (string, error) {
 	ss.mu.Unlock()
 
 	return id, nil
+}
+
+// evictOldestLocked removes the oldest sessions for chatID until at most maxKeep remain.
+// Caller MUST hold mu.
+func (ss *SessionStore) evictOldestLocked(chatID int64, maxKeep int) {
+	// Collect sessions for this chatID.
+	type entry struct {
+		id        string
+		expiresAt time.Time
+	}
+	var entries []entry
+	now := ss.nowFn()
+	for id, s := range ss.sessions {
+		if s.chatID == chatID {
+			if now.After(s.expiresAt) {
+				// Prune expired while we're here.
+				delete(ss.sessions, id)
+				continue
+			}
+			entries = append(entries, entry{id, s.expiresAt})
+		}
+	}
+
+	// Evict oldest (earliest expiry) until within limit.
+	for len(entries) > maxKeep {
+		oldestIdx := 0
+		for i := 1; i < len(entries); i++ {
+			if entries[i].expiresAt.Before(entries[oldestIdx].expiresAt) {
+				oldestIdx = i
+			}
+		}
+		delete(ss.sessions, entries[oldestIdx].id)
+		entries = append(entries[:oldestIdx], entries[oldestIdx+1:]...)
+	}
 }
 
 // RevokeChat removes all sessions for the given chat ID.

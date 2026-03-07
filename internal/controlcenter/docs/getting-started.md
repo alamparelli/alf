@@ -26,7 +26,7 @@ When you send a message, a fast **router** classifies it and picks a tier:
 | "What's the weather?" | haiku_r | Quick question, read-only |
 | "Review this code" | sonnet_r | Needs analysis |
 | "Refactor the auth system" | opus_rw | Complex, needs file access |
-| "Research X and write a report" | orchestrator | Multi-step, needs agent coordination |
+| "Research X and write a report" | agent | Multi-step, needs agent coordination |
 
 When you send a photo with a caption, the router classifies based on the caption text and ensures the chosen tier can view images. Photos without a caption go to the cheapest image-capable tier.
 
@@ -51,7 +51,7 @@ You're looking at it. Here's what each section does:
 |-----|-------------|
 | **Home** | Status, configuration, Workspace Explorer, Teach |
 | **Chat** | Browser-based chat (same as Telegram, different interface) |
-| **Tasks** | Monitor orchestrator tasks — running, completed, failed |
+| **Tasks** | Monitor agent tasks — running, completed, failed |
 | **Pages** | Dynamic HTML dashboards ALF generates (appears when pages exist) |
 | **Logs** | Daemon logs and event viewer |
 | **Docs** | You are here |
@@ -116,10 +116,10 @@ schedule create --name "disk check" --schedule "0 0 */6 * * *" \
   --command "df -h" --output telegram
 ```
 
-**Orchestrator jobs** — coordinate multiple agents for complex tasks:
+**Agent jobs** — coordinate multiple agents for complex tasks:
 ```bash
 schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
-  --tier orchestrator --prompt "Analyze this week's commits and write a report" \
+  --tier agent --prompt "Analyze this week's commits and write a report" \
   --output telegram
 ```
 
@@ -129,7 +129,7 @@ schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
 |--------|----------|-------------|
 | `--name` | Yes | Job name (for identification) |
 | `--schedule` | Yes | Cron expression or one-shot datetime |
-| `--tier` | For LLM | Which tier to use (`haiku_r`, `sonnet_rw`, `orchestrator`, etc.) |
+| `--tier` | For LLM | Which tier to use (`haiku_r`, `sonnet_rw`, `agent`, etc.) |
 | `--prompt` | For LLM | What to ask the model |
 | `--command` | For direct | Bash command to execute |
 | `--output` | No | Where to send results: `telegram`, `file`, `both`, `silent` (default: `telegram`) |

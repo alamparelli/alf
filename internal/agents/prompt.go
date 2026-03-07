@@ -10,7 +10,7 @@ import (
 func BuildOrchestratorPrompt(teams []*TeamConfig) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are an orchestrator. Your job: understand the task, gather context if needed, then decompose and delegate to agents.
+	sb.WriteString(`You are an agent. Your job: understand the task, gather context if needed, then decompose and delegate to agents.
 
 You may have access to tools like Read to inspect files and understand the codebase before delegating. Use them to make better delegation decisions. Do NOT attempt to use tools you don't have.
 

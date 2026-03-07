@@ -20,13 +20,11 @@ Every time you send a message, ALF's **router** reads it and picks the best tier
 
 ## Where to edit tiers
 
-Open the Control Center, go to **Home > Workspace**, then navigate to:
+**Option 1 — Tiers tab (recommended).** Open the Control Center sidebar and click **Tiers**. You'll see all tiers in a visual list. Click **Add Tier** or **Edit** to use the form with dropdowns, checkboxes, and tool selection.
 
-```
-config.d / tiers.json
-```
+**Option 2 — Workspace editor.** Go to **Home > Workspace**, navigate to `config.d/tiers.json`, and edit the JSON directly.
 
-Edit the JSON, click **Save**. Changes take effect immediately — no restart needed.
+Changes take effect immediately — no restart needed.
 
 ## The default setup
 
@@ -41,9 +39,9 @@ ALF comes with 7 tiers out of the box. Here's what each one does:
 | `sonnet_rw` | Sonnet | Write code, fix bugs, create scripts | Yes (max 10 steps) |
 | `opus_r` | Opus | Architecture, deep analysis, strategy | No |
 | `opus_rw` | Opus | Large refactoring, complex features | Yes (max 20 steps) |
-| `orchestrator` | Opus | Multi-agent coordination for complex tasks | Via agents |
+| `agent` | Opus | Multi-agent coordination for complex tasks | Via agents |
 
-The orchestrator tier is **disabled by default**. Enable it in `tiers.json` to let the router automatically delegate complex tasks to agent teams. See [Agent Teams](docs:agent-teams) for setup.
+The agent tier is **disabled by default**. Enable it in `tiers.json` to let the router automatically delegate complex tasks to agent teams. See [Agent Teams](docs:agent-teams) for setup.
 
 > Most of your messages will be handled by Haiku — it's fast and cheap. Sonnet and Opus only kick in when needed.
 
@@ -105,8 +103,8 @@ Here's what a `tiers.json` file looks like:
 | `effort` | How hard the model thinks: `low`, `medium`, or `high`. | `"medium"` |
 | `force_command` | Enable `/<tier_name> <message>` to bypass routing and force this tier. Works in Telegram and CC Chat. | `true` |
 | `max_turns` | Max steps for tool use. Prevents runaway loops. 0 = unlimited. | `10` |
-| `max_iterations` | (Orchestrator only) Max delegate→synthesize cycles. | `10` |
-| `timeout_minutes` | (Orchestrator only) Hard timeout in minutes. | `60` |
+| `max_iterations` | (Agent only) Max delegate→synthesize cycles. | `10` |
+| `timeout_minutes` | (Agent only) Hard timeout in minutes. | `60` |
 | `tools` | List of allowed tools for read-only tiers (e.g. `["Read"]`, `["Read", "WebSearch"]`). Write-capable tiers get all tools. | `["Read"]` |
 
 ## Example: simple two-tier setup
@@ -165,6 +163,30 @@ Want an Opus tier you can trigger manually, but the router never picks it automa
 ```
 
 Add this to your `tiers` array. Now type `/power analyze this system` in Telegram or CC Chat to use it. The router will never pick it on its own. Note: you must include a message after the command — `/power` alone shows a usage hint.
+
+## Available tools
+
+The `tools` field controls which Claude Code tools a read-only tier can use. Write-capable tiers (`write_capable: true`) get all tools automatically.
+
+| Tool | What it does |
+|------|-------------|
+| `Read` | Read files — code, config, logs, images, PDFs |
+| `Write` | Create or overwrite files |
+| `Edit` | Modify existing files (text replacement) |
+| `Bash` | Execute shell commands |
+| `Glob` | Search files by pattern (e.g. `**/*.go`) |
+| `Grep` | Search file contents with regex |
+| `WebSearch` | Search the web for information |
+| `WebFetch` | Fetch content from a URL |
+| `NotebookEdit` | Edit Jupyter notebooks |
+| `Agent` | Launch a sub-agent for complex tasks |
+
+**Typical combinations:**
+- Read-only analysis: `["Read"]`
+- Read + web research: `["Read", "WebSearch"]`
+- Full read access: `["Read", "Glob", "Grep", "WebSearch", "WebFetch"]`
+
+> Write-capable tiers don't need a `tools` list — they get everything via `--dangerously-skip-permissions`.
 
 ## Common questions
 

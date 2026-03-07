@@ -76,10 +76,12 @@ sidebarOverlay.addEventListener('click', () => {
 function navigateTo(view) {
   const homeView = document.getElementById('homeView');
   const chatView = document.getElementById('chatView');
+  const schedulesView = document.getElementById('schedulesView');
   const tasksView = document.getElementById('tasksView');
   const pageFrame = document.getElementById('pageFrame');
   const docsView = document.getElementById('docsView');
   const logsView = document.getElementById('logsView');
+  const tiersView = document.getElementById('tiersView');
 
   // Update active nav item — docs:id should highlight the docs nav item
   const navView = view.startsWith('docs:') ? 'docs' : view;
@@ -91,10 +93,12 @@ function navigateTo(view) {
 
   homeView.style.display = 'none';
   chatView.style.display = 'none';
+  schedulesView.style.display = 'none';
   tasksView.style.display = 'none';
   pageFrame.style.display = 'none';
   docsView.style.display = 'none';
   logsView.style.display = 'none';
+  tiersView.style.display = 'none';
 
   if (view === 'home') {
     homeView.style.display = '';
@@ -107,6 +111,10 @@ function navigateTo(view) {
     const name = view.slice(5);
     pageFrame.style.display = '';
     pageFrame.src = '/pages/' + encodeURIComponent(name);
+  } else if (view === 'schedules') {
+    schedulesView.style.display = '';
+    pageFrame.src = '';
+    schedulesInit();
   } else if (view === 'tasks') {
     tasksView.style.display = '';
     pageFrame.src = '';
@@ -123,6 +131,10 @@ function navigateTo(view) {
     docsView.style.display = '';
     pageFrame.src = '';
     docsShowArticle(view.slice(5));
+  } else if (view === 'tiers') {
+    tiersView.style.display = '';
+    pageFrame.src = '';
+    tiersInit();
   }
 
   localStorage.setItem('alf-view', view);
@@ -135,30 +147,15 @@ function navigateTo(view) {
 // Bind Home + Chat + Docs + Logs nav
 document.querySelector('#sidebarNav .nav-item[data-view="home"]').addEventListener('click', () => navigateTo('home'));
 document.querySelector('#sidebarNav .nav-item[data-view="chat"]').addEventListener('click', () => navigateTo('chat'));
+document.querySelector('#sidebarNav .nav-item[data-view="schedules"]').addEventListener('click', () => navigateTo('schedules'));
 document.querySelector('#sidebarNav .nav-item[data-view="tasks"]').addEventListener('click', () => navigateTo('tasks'));
 document.querySelector('#sidebarNav .nav-item[data-view="logs"]').addEventListener('click', () => navigateTo('logs'));
 document.querySelector('#sidebarNav .nav-item[data-view="docs"]').addEventListener('click', () => navigateTo('docs'));
+document.querySelector('#sidebarNav .nav-item[data-view="tiers"]').addEventListener('click', () => navigateTo('tiers'));
 
 // --- Status ---
 function loadStatus() {
-  api('/api/status').then(s => {
-    const dot = document.getElementById('statusDot');
-    dot.className = 'dot ' + (s.status === 'running' ? 'green' : 'red');
-    document.getElementById('uptimeValue').textContent = s.uptime ? 'Up ' + s.uptime : '--';
-    if (s.last_message) {
-      const d = new Date(s.last_message);
-      document.getElementById('lastMsg').textContent = d.toLocaleTimeString();
-    }
-    // Session info
-    if (s.session) {
-      document.getElementById('sessionIdLabel').textContent = 'Session: ' + s.session.id;
-    } else {
-      document.getElementById('sessionIdLabel').textContent = '';
-    }
-  }).catch(() => {
-    document.getElementById('statusDot').className = 'dot red';
-    document.getElementById('uptimeValue').textContent = 'offline';
-  });
+  api('/api/status').catch(() => {});
 }
 
 
@@ -1876,6 +1873,222 @@ function docsShowArticle(id) {
   });
 }
 
+// ─── Schedules ──────────────────────────────────────
+let schedulesCache = null;
+let schedulesVisible = [];
+let schedulesInitialized = false;
+
+const OUTPUTS = ['telegram', 'file', 'both', 'silent'];
+
+function schedulesInit() {
+  if (!schedulesInitialized) {
+    schedulesInitialized = true;
+    document.getElementById('schedulesAddBtn').addEventListener('click', () => schedulesShowModal(null));
+  }
+  schedulesLoad();
+}
+
+function schedulesLoad() {
+  api('/api/schedules').then(data => {
+    schedulesCache = data.jobs || [];
+    schedulesRender();
+  }).catch(() => toast('Failed to load schedules', 'error'));
+}
+
+function schedulesRender() {
+  const list = document.getElementById('schedulesList');
+
+  // Filter out internal system jobs — only show user/Alf-created ones.
+  schedulesVisible = (schedulesCache || []).filter(j => !j.system);
+  const visible = schedulesVisible;
+
+  if (!visible.length) {
+    list.innerHTML = '<div class="task-empty"><div class="task-empty-icon">&#128197;</div>No scheduled jobs yet.<br><span style="font-size:0.8rem;opacity:0.7">Create jobs to run prompts or commands on a schedule.</span></div>';
+    return;
+  }
+
+  list.innerHTML = visible.map((j, i) => {
+    const statusDot = j.enabled ? '<span class="dot green"></span>' : '<span class="dot red"></span>';
+    const badges = [];
+    if (j.system) badges.push('<span class="tier-badge tier-badge-routable">system</span>');
+    if (j.managed) badges.push('<span class="tier-badge tier-badge-instant">managed</span>');
+    if (j.auto_delete) badges.push('<span class="tier-badge tier-badge-force">one-shot</span>');
+    const tierLabel = j.tier === 'direct' ? 'direct (bash)' : (j.tier || 'default');
+    const outputBadge = '<span class="tier-badge tier-badge-routable">' + esc(j.output || 'telegram') + '</span>';
+    const nextRun = j.next_run ? schedRelTime(j.next_run) : '--';
+    const lastRun = j.last_run ? schedRelTime(j.last_run) : '--';
+    const prompt = j.tier === 'direct' ? (j.command || '--') : (j.prompt || '--');
+
+    const canEdit = !j.managed;
+    const actions = canEdit
+      ? '<button class="btn-sm sched-edit-btn" data-idx="' + i + '">Edit</button>' +
+        '<button class="btn-sm btn-danger sched-delete-btn" data-idx="' + i + '">Delete</button>'
+      : '<button class="btn-sm sched-toggle-btn" data-idx="' + i + '">' + (j.enabled ? 'Disable' : 'Enable') + '</button>';
+
+    return '<div class="tier-card" data-idx="' + i + '">' +
+      '<div class="tier-card-header">' +
+        '<div class="tier-card-title">' + statusDot + '<strong>' + esc(j.name) + '</strong></div>' +
+        '<span class="tier-model-badge" style="color:var(--text-dim)">' + esc(j.schedule) + '</span>' +
+        '<div class="tier-card-actions">' + actions + '</div>' +
+      '</div>' +
+      '<div class="tier-card-details">' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">ID</span><span class="tier-detail-value" style="font-family:monospace;font-size:0.75rem;opacity:0.7">' + esc(j.id) + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">Tier</span><span class="tier-detail-value">' + esc(tierLabel) + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">' + (j.tier === 'direct' ? 'Command' : 'Prompt') + '</span><span class="tier-detail-value sched-prompt">' + esc(prompt.substring(0, 200)) + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">Output</span><span class="tier-detail-value">' + outputBadge + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">Next run</span><span class="tier-detail-value">' + esc(nextRun) + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">Last run</span><span class="tier-detail-value">' + esc(lastRun) + '</span></div>' +
+        (j.last_error ? '<div class="tier-detail-row"><span class="tier-detail-label">Last error</span><span class="tier-detail-value" style="color:var(--red)">' + esc(j.last_error.substring(0, 200)) + '</span></div>' : '') +
+        (badges.length ? '<div class="tier-detail-row"><span class="tier-detail-label">Flags</span><span class="tier-detail-value">' + badges.join(' ') + '</span></div>' : '') +
+        (j.skills && j.skills.length ? '<div class="tier-detail-row"><span class="tier-detail-label">Skills</span><span class="tier-detail-value">' + esc(j.skills.join(', ')) + '</span></div>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  list.querySelectorAll('.sched-edit-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      schedulesShowModal(schedulesVisible[+btn.dataset.idx]);
+    });
+  });
+  list.querySelectorAll('.sched-delete-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const j = schedulesVisible[+btn.dataset.idx];
+      if (!confirm('Delete job "' + j.name + '"?')) return;
+      api('/api/schedules?id=' + encodeURIComponent(j.id), { method: 'DELETE' })
+        .then(() => { toast('Job deleted'); schedulesLoad(); })
+        .catch(err => toast('Delete failed: ' + err.message, 'error'));
+    });
+  });
+  list.querySelectorAll('.sched-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const j = schedulesVisible[+btn.dataset.idx];
+      api('/api/schedules', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: j.id, fields: { enabled: j.enabled ? 'false' : 'true' } }),
+      }).then(() => { toast(j.enabled ? 'Job disabled' : 'Job enabled'); schedulesLoad(); })
+        .catch(err => toast('Toggle failed: ' + err.message, 'error'));
+    });
+  });
+}
+
+function schedulesShowModal(job) {
+  const isEdit = !!job;
+  const j = job || { name: '', schedule: '', tier: '', prompt: '', command: '', output: 'telegram', skills: [] };
+
+  const old = document.getElementById('schedModal');
+  if (old) old.remove();
+
+  const isDirect = j.tier === 'direct';
+  const outputOpts = OUTPUTS.map(o => '<option value="' + o + '"' + (j.output === o ? ' selected' : '') + '>' + o + '</option>').join('');
+
+  const html = '<div class="modal-backdrop" id="schedModal">' +
+    '<div class="modal tier-modal">' +
+      '<h3>' + (isEdit ? 'Edit Job' : 'Add Job') + '</h3>' +
+      '<div class="tier-form">' +
+        '<div class="form-row"><label>Name</label><input type="text" id="sjName" value="' + esc(j.name) + '"' + (isEdit ? ' readonly style="opacity:0.6"' : '') + '></div>' +
+        '<div class="form-row"><label>Schedule</label><input type="text" id="sjSchedule" value="' + esc(j.schedule) + '" placeholder="0 30 9 * * * (cron with seconds)"></div>' +
+        '<div class="form-row"><label>Tier</label><input type="text" id="sjTier" value="' + esc(j.tier || '') + '" placeholder="haiku_r, sonnet_rw, direct..."></div>' +
+        '<div class="form-row" id="sjPromptRow"><label>Prompt</label><textarea id="sjPrompt" rows="3" placeholder="What should the LLM do?">' + esc(j.prompt || '') + '</textarea></div>' +
+        '<div class="form-row" id="sjCommandRow" style="display:none"><label>Command</label><textarea id="sjCommand" rows="3" placeholder="Bash command to execute">' + esc(j.command || '') + '</textarea></div>' +
+        '<div class="form-row"><label>Output</label><select id="sjOutput">' + outputOpts + '</select></div>' +
+        '<div class="form-row"><label>Skills</label><input type="text" id="sjSkills" value="' + esc((j.skills || []).join(', ')) + '" placeholder="skill1, skill2 (optional)"></div>' +
+      '</div>' +
+      '<div class="upload-actions">' +
+        '<button class="btn" id="schedModalCancel">Cancel</button>' +
+        '<button class="btn btn-primary" id="schedModalSave">' + (isEdit ? 'Save' : 'Add') + '</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  const tierInput = document.getElementById('sjTier');
+  const promptRow = document.getElementById('sjPromptRow');
+  const commandRow = document.getElementById('sjCommandRow');
+
+  function togglePromptCommand() {
+    const isDirect = tierInput.value.trim() === 'direct';
+    promptRow.style.display = isDirect ? 'none' : '';
+    commandRow.style.display = isDirect ? '' : 'none';
+  }
+  togglePromptCommand();
+  if (isDirect) { commandRow.style.display = ''; promptRow.style.display = 'none'; }
+  tierInput.addEventListener('input', togglePromptCommand);
+
+  document.getElementById('schedModalCancel').addEventListener('click', () => document.getElementById('schedModal').remove());
+  document.getElementById('schedModal').addEventListener('click', e => { if (e.target.id === 'schedModal') document.getElementById('schedModal').remove(); });
+
+  document.getElementById('schedModalSave').addEventListener('click', () => {
+    const name = document.getElementById('sjName').value.trim();
+    const schedule = document.getElementById('sjSchedule').value.trim();
+    const tier = document.getElementById('sjTier').value.trim();
+    const prompt = document.getElementById('sjPrompt').value.trim();
+    const command = document.getElementById('sjCommand').value.trim();
+    const output = document.getElementById('sjOutput').value;
+    const skillsRaw = document.getElementById('sjSkills').value.trim();
+    const skills = skillsRaw ? skillsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+    if (!name) { toast('Name is required', 'error'); return; }
+    if (!schedule) { toast('Schedule is required', 'error'); return; }
+
+    if (isEdit) {
+      const fields = {};
+      if (schedule !== j.schedule) fields.schedule = schedule;
+      if (tier !== j.tier) fields.tier = tier;
+      if (prompt !== (j.prompt || '')) fields.prompt = prompt;
+      if (command !== (j.command || '')) fields.command = command;
+      if (output !== j.output) fields.output = output;
+      if (Object.keys(fields).length === 0) {
+        document.getElementById('schedModal').remove();
+        return;
+      }
+      api('/api/schedules', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: j.id, fields }),
+      }).then(() => {
+        toast('Job updated');
+        document.getElementById('schedModal').remove();
+        schedulesLoad();
+      }).catch(err => toast('Update failed: ' + err.message, 'error'));
+    } else {
+      const body = { name, schedule, output };
+      if (tier) body.tier = tier;
+      if (tier === 'direct') { body.command = command; } else { body.prompt = prompt; }
+      if (skills.length) body.skills = skills;
+      api('/api/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(() => {
+        toast('Job created');
+        document.getElementById('schedModal').remove();
+        schedulesLoad();
+      }).catch(err => toast('Create failed: ' + err.message, 'error'));
+    }
+  });
+}
+
+function schedRelTime(iso) {
+  if (!iso) return '--';
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = d - now;
+  const abs = Math.abs(diff);
+  const secs = Math.floor(abs / 1000);
+  if (secs < 60) return (diff > 0 ? 'in ' : '') + secs + 's' + (diff <= 0 ? ' ago' : '');
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return (diff > 0 ? 'in ' : '') + mins + 'm' + (diff <= 0 ? ' ago' : '');
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return (diff > 0 ? 'in ' : '') + hours + 'h' + (diff <= 0 ? ' ago' : '');
+  const days = Math.floor(hours / 24);
+  return (diff > 0 ? 'in ' : '') + days + 'd' + (diff <= 0 ? ' ago' : '');
+}
+
 // ─── Tasks ──────────────────────────────────────────
 let tasksInitialized = false;
 let tasksAutoTimer = null;
@@ -1915,7 +2128,7 @@ function tasksRender(running, completed) {
   const container = document.getElementById('tasksList');
 
   if (running.length === 0 && completed.length === 0) {
-    container.innerHTML = '<div class="task-empty"><div class="task-empty-icon">\u{1F916}</div>No orchestrator tasks yet.<br><span style="font-size:0.8rem;opacity:0.7">Tasks appear here when you use the orchestrator tier.</span></div>';
+    container.innerHTML = '<div class="task-empty"><div class="task-empty-icon">\u{1F916}</div>No agent tasks yet.<br><span style="font-size:0.8rem;opacity:0.7">Tasks appear here when you use the agent tier.</span></div>';
     return;
   }
 
@@ -1980,26 +2193,25 @@ function taskCard(task, isRunning) {
     agentSteps += '</div>';
   }
 
+  const statusDot = '<span class="dot ' + (isRunning ? 'blue' : statusClass === 'completed' ? 'green' : 'red') + '"></span>';
   const cancelBtn = isRunning
-    ? '<div class="task-card-actions"><button class="btn btn-sm task-cancel-btn" data-id="' + taskEscapeHtml(task.id) + '">Cancel</button></div>'
+    ? '<button class="btn-sm btn-danger task-cancel-btn" data-id="' + taskEscapeHtml(task.id) + '">Cancel</button>'
     : '';
 
   return '<div class="task-card ' + statusClass + '">' +
     '<div class="task-card-header">' +
+      '<div class="task-card-title">' + statusDot + '<strong>' + prompt + '</strong></div>' +
       '<span class="task-status-badge ' + statusClass + '">' + statusLabel + '</span>' +
-      '<div class="task-card-body">' +
-        '<div class="task-card-prompt">' + prompt + '</div>' +
-        '<div class="task-card-info">' +
-          '<div class="task-card-meta">' +
-            '<span class="task-meta-item"><i data-lucide="repeat"></i> ' + (task.iterations || 0) + '</span>' +
-            (agentCount > 0 ? '<span class="task-meta-item"><i data-lucide="bot"></i> ' + agentCount + '</span>' : '') +
-            '<span class="task-meta-item"><i data-lucide="coins"></i> ' + cost + '</span>' +
-            '<span class="task-meta-item"><i data-lucide="clock"></i> ' + elapsed + '</span>' +
-          '</div>' +
-          cancelBtn +
-        '</div>' +
+      '<div class="task-card-actions">' +
+        (agentCount > 0 ? '<span class="task-chevron"><i data-lucide="chevron-right"></i></span>' : '') +
+        cancelBtn +
       '</div>' +
-      (agentCount > 0 ? '<span class="task-chevron"><i data-lucide="chevron-right"></i></span>' : '') +
+    '</div>' +
+    '<div class="task-card-details">' +
+      '<div class="task-detail-row"><span class="task-detail-label">Elapsed</span><span class="task-detail-value">' + elapsed + '</span></div>' +
+      '<div class="task-detail-row"><span class="task-detail-label">Cost</span><span class="task-detail-value">' + cost + '</span></div>' +
+      '<div class="task-detail-row"><span class="task-detail-label">Iterations</span><span class="task-detail-value">' + (task.iterations || 0) + '</span></div>' +
+      (agentCount > 0 ? '<div class="task-detail-row"><span class="task-detail-label">Agents</span><span class="task-detail-value">' + agentCount + '</span></div>' : '') +
     '</div>' +
     agentSteps +
   '</div>';
@@ -2108,6 +2320,267 @@ function logsLineClass(line) {
   if (/\bWARN(ING)?\b/i.test(line)) return ' log-warn';
   if (/\bDEBUG\b/i.test(line)) return ' log-debug';
   return '';
+}
+
+// --- Tiers ---
+
+const AVAILABLE_TOOLS = [
+  { name: 'Read', desc: 'Read files (code, config, logs, images, PDF)' },
+  { name: 'Write', desc: 'Create or overwrite files' },
+  { name: 'Edit', desc: 'Modify existing files (text replacement)' },
+  { name: 'Bash', desc: 'Execute shell commands' },
+  { name: 'Glob', desc: 'Search files by pattern (e.g. **/*.go)' },
+  { name: 'Grep', desc: 'Search file contents with regex' },
+  { name: 'WebSearch', desc: 'Search the web for information' },
+  { name: 'WebFetch', desc: 'Fetch content from a URL' },
+  { name: 'NotebookEdit', desc: 'Edit Jupyter notebooks' },
+  { name: 'Agent', desc: 'Launch a sub-agent for complex tasks' },
+];
+
+const MODELS = ['haiku', 'sonnet', 'opus'];
+const EFFORTS = ['low', 'medium', 'high'];
+
+let tiersCache = null;
+let tiersInitialized = false;
+
+function tiersInit() {
+  if (!tiersInitialized) {
+    tiersInitialized = true;
+    document.getElementById('tiersAddBtn').addEventListener('click', () => tiersShowModal(null));
+  }
+  tiersLoad();
+}
+
+function tiersLoad() {
+  api('/api/tiers').then(data => {
+    tiersCache = data;
+    tiersRender();
+  }).catch(() => toast('Failed to load tiers', 'error'));
+}
+
+function tiersRender() {
+  if (!tiersCache) return;
+  const list = document.getElementById('tiersList');
+  const cfg = document.getElementById('tiersRouterConfig');
+
+  // Router config summary
+  cfg.innerHTML = '<div class="tiers-router-card">' +
+    '<div class="tiers-router-row"><span class="tiers-router-label">Router model</span><span class="tiers-router-value">' + esc(tiersCache.router_model || 'haiku') + '</span></div>' +
+    '<div class="tiers-router-row"><span class="tiers-router-label">Default fallback</span><span class="tiers-router-value">' + esc(tiersCache.default_fallback || 'haiku_r') + '</span></div>' +
+    '<div class="tiers-router-row"><button class="btn-sm" id="tiersEditRouterBtn">Edit router settings</button></div>' +
+    '</div>';
+  document.getElementById('tiersEditRouterBtn').addEventListener('click', () => tiersShowRouterModal());
+
+  // Tier cards
+  const tiers = tiersCache.tiers || [];
+  if (!tiers.length) {
+    list.innerHTML = '<div class="task-empty"><div class="task-empty-icon">&#9881;</div>No tiers configured</div>';
+    return;
+  }
+
+  list.innerHTML = tiers.map((t, i) => {
+    const modelColor = t.model === 'opus' ? 'var(--accent)' : t.model === 'sonnet' ? 'var(--green)' : 'var(--text-dim)';
+    const statusDot = t.enabled ? '<span class="dot green"></span>' : '<span class="dot red"></span>';
+    const badges = [];
+    if (t.instant) badges.push('<span class="tier-badge tier-badge-instant">instant</span>');
+    if (t.write_capable) badges.push('<span class="tier-badge tier-badge-write">write</span>');
+    if (t.force_command) badges.push('<span class="tier-badge tier-badge-force">force</span>');
+    if (t.routable) badges.push('<span class="tier-badge tier-badge-routable">routable</span>');
+    const tools = (t.tools || []).join(', ') || (t.write_capable ? 'all (write-capable)' : 'none');
+    return '<div class="tier-card" data-idx="' + i + '">' +
+      '<div class="tier-card-header">' +
+        '<div class="tier-card-title">' + statusDot + '<strong>' + esc(t.name) + '</strong></div>' +
+        '<span class="tier-model-badge" style="color:' + modelColor + '">' + esc(t.model) + '</span>' +
+        '<span class="tier-priority">P' + t.priority + '</span>' +
+        '<div class="tier-card-actions">' +
+          '<button class="btn-sm tier-edit-btn" data-idx="' + i + '">Edit</button>' +
+          '<button class="btn-sm btn-danger tier-delete-btn" data-idx="' + i + '">Delete</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="tier-card-details">' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">Label</span><span class="tier-detail-value">' + esc(t.router_label || t.description || '—') + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">Tools</span><span class="tier-detail-value">' + esc(tools) + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">Effort</span><span class="tier-detail-value">' + esc(t.effort || '—') + '</span></div>' +
+        (t.max_turns ? '<div class="tier-detail-row"><span class="tier-detail-label">Max turns</span><span class="tier-detail-value">' + t.max_turns + '</span></div>' : '') +
+        (t.max_iterations ? '<div class="tier-detail-row"><span class="tier-detail-label">Max iterations</span><span class="tier-detail-value">' + t.max_iterations + '</span></div>' : '') +
+        (t.timeout_minutes ? '<div class="tier-detail-row"><span class="tier-detail-label">Timeout</span><span class="tier-detail-value">' + t.timeout_minutes + ' min</span></div>' : '') +
+        (badges.length ? '<div class="tier-detail-row"><span class="tier-detail-label">Flags</span><span class="tier-detail-value">' + badges.join(' ') + '</span></div>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  list.querySelectorAll('.tier-edit-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      tiersShowModal(tiersCache.tiers[+btn.dataset.idx]);
+    });
+  });
+  list.querySelectorAll('.tier-delete-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const idx = +btn.dataset.idx;
+      const name = tiersCache.tiers[idx].name;
+      if (!confirm('Delete tier "' + name + '"?')) return;
+      tiersCache.tiers.splice(idx, 1);
+      tiersSave();
+    });
+  });
+}
+
+function tiersShowModal(tier) {
+  const isEdit = !!tier;
+  const t = tier || { name: '', model: 'haiku', priority: 0, enabled: true, routable: true, router_label: '', effort: 'low', tools: [], write_capable: false, force_command: false, instant: false, max_turns: 0, max_iterations: 0, timeout_minutes: 0, description: '' };
+
+  // Remove existing modal
+  const old = document.getElementById('tierModal');
+  if (old) old.remove();
+
+  const toolChecks = AVAILABLE_TOOLS.map(tool => {
+    const checked = (t.tools || []).includes(tool.name) ? ' checked' : '';
+    return '<label class="tier-tool-check"><input type="checkbox" value="' + tool.name + '"' + checked + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">— ' + esc(tool.desc) + '</span></label>';
+  }).join('');
+
+  const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (t.model === m ? ' selected' : '') + '>' + m + '</option>').join('');
+  const effortOpts = ['', ...EFFORTS].map(e => '<option value="' + e + '"' + (t.effort === e ? ' selected' : '') + '>' + (e || '—') + '</option>').join('');
+
+  const html = '<div class="modal-backdrop" id="tierModal">' +
+    '<div class="modal tier-modal">' +
+      '<h3>' + (isEdit ? 'Edit Tier' : 'Add Tier') + '</h3>' +
+      '<div class="tier-form">' +
+        '<div class="form-row"><label>Name</label><input type="text" id="tfName" value="' + esc(t.name) + '"' + (isEdit ? ' readonly style="opacity:0.6"' : '') + '></div>' +
+        '<div class="form-row"><label>Model</label><select id="tfModel">' + modelOpts + '</select></div>' +
+        '<div class="form-row"><label>Priority</label><input type="number" id="tfPriority" value="' + t.priority + '" min="0" max="99"></div>' +
+        '<div class="form-row"><label>Effort</label><select id="tfEffort">' + effortOpts + '</select></div>' +
+        '<div class="form-row"><label>Router label</label><input type="text" id="tfLabel" value="' + esc(t.router_label || '') + '" placeholder="Description for the router"></div>' +
+        '<div class="form-row"><label>Description</label><input type="text" id="tfDesc" value="' + esc(t.description || '') + '" placeholder="Optional description"></div>' +
+        '<div class="form-row"><label>Max turns</label><input type="number" id="tfMaxTurns" value="' + (t.max_turns || 0) + '" min="0"></div>' +
+        '<div class="form-row"><label>Max iterations</label><input type="number" id="tfMaxIter" value="' + (t.max_iterations || 0) + '" min="0"></div>' +
+        '<div class="form-row"><label>Timeout (min)</label><input type="number" id="tfTimeout" value="' + (t.timeout_minutes || 0) + '" min="0"></div>' +
+        '<div class="tier-flags">' +
+          '<label class="tier-flag-check"><input type="checkbox" id="tfEnabled"' + (t.enabled ? ' checked' : '') + '> Enabled</label>' +
+          '<label class="tier-flag-check"><input type="checkbox" id="tfRoutable"' + (t.routable ? ' checked' : '') + '> Routable</label>' +
+          '<label class="tier-flag-check"><input type="checkbox" id="tfWriteCapable"' + (t.write_capable ? ' checked' : '') + '> Write capable</label>' +
+          '<label class="tier-flag-check"><input type="checkbox" id="tfForceCmd"' + (t.force_command ? ' checked' : '') + '> Force command</label>' +
+          '<label class="tier-flag-check"><input type="checkbox" id="tfInstant"' + (t.instant ? ' checked' : '') + '> Instant</label>' +
+        '</div>' +
+        '<div class="tier-tools-section">' +
+          '<div class="tier-tools-header">Tools <span class="tier-tools-hint">(only for read-only tiers — write-capable tiers get all tools)</span></div>' +
+          '<div class="tier-tools-list" id="tfTools">' + toolChecks + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="upload-actions">' +
+        '<button class="btn" id="tierModalCancel">Cancel</button>' +
+        '<button class="btn btn-primary" id="tierModalSave">' + (isEdit ? 'Save' : 'Add') + '</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  // Toggle tools visibility based on write_capable
+  const wcCheck = document.getElementById('tfWriteCapable');
+  const toolsSection = document.querySelector('.tier-tools-section');
+  function toggleTools() { toolsSection.style.opacity = wcCheck.checked ? '0.4' : '1'; }
+  toggleTools();
+  wcCheck.addEventListener('change', toggleTools);
+
+  document.getElementById('tierModalCancel').addEventListener('click', () => document.getElementById('tierModal').remove());
+  document.getElementById('tierModal').addEventListener('click', e => { if (e.target.id === 'tierModal') document.getElementById('tierModal').remove(); });
+
+  document.getElementById('tierModalSave').addEventListener('click', () => {
+    const newTier = {
+      name: document.getElementById('tfName').value.trim(),
+      model: document.getElementById('tfModel').value,
+      priority: parseInt(document.getElementById('tfPriority').value, 10) || 0,
+      enabled: document.getElementById('tfEnabled').checked,
+      routable: document.getElementById('tfRoutable').checked,
+      instant: document.getElementById('tfInstant').checked,
+      router_label: document.getElementById('tfLabel').value.trim(),
+      description: document.getElementById('tfDesc').value.trim(),
+      max_turns: parseInt(document.getElementById('tfMaxTurns').value, 10) || 0,
+      max_iterations: parseInt(document.getElementById('tfMaxIter').value, 10) || 0,
+      timeout_minutes: parseInt(document.getElementById('tfTimeout').value, 10) || 0,
+      effort: document.getElementById('tfEffort').value,
+      write_capable: document.getElementById('tfWriteCapable').checked,
+      force_command: document.getElementById('tfForceCmd').checked,
+      tools: [],
+    };
+    if (!newTier.write_capable) {
+      document.querySelectorAll('#tfTools input:checked').forEach(cb => newTier.tools.push(cb.value));
+    }
+    // Clean zero values
+    if (!newTier.max_turns) delete newTier.max_turns;
+    if (!newTier.max_iterations) delete newTier.max_iterations;
+    if (!newTier.timeout_minutes) delete newTier.timeout_minutes;
+    if (!newTier.router_label) delete newTier.router_label;
+    if (!newTier.description) delete newTier.description;
+    if (!newTier.effort) delete newTier.effort;
+    if (!newTier.tools || !newTier.tools.length) delete newTier.tools;
+
+    if (!newTier.name) { toast('Name is required', 'error'); return; }
+
+    if (isEdit) {
+      const idx = tiersCache.tiers.findIndex(x => x.name === tier.name);
+      if (idx >= 0) tiersCache.tiers[idx] = newTier;
+    } else {
+      if (tiersCache.tiers.some(x => x.name === newTier.name)) { toast('Tier "' + newTier.name + '" already exists', 'error'); return; }
+      tiersCache.tiers.push(newTier);
+    }
+    document.getElementById('tierModal').remove();
+    tiersSave();
+  });
+}
+
+function tiersShowRouterModal() {
+  const old = document.getElementById('tierRouterModal');
+  if (old) old.remove();
+
+  const c = tiersCache;
+  const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (c.router_model === m ? ' selected' : '') + '>' + m + '</option>').join('');
+  const fbOpts = (c.tiers || []).map(t => '<option value="' + t.name + '"' + (c.default_fallback === t.name ? ' selected' : '') + '>' + t.name + '</option>').join('');
+
+  const html = '<div class="modal-backdrop" id="tierRouterModal">' +
+    '<div class="modal tier-modal">' +
+      '<h3>Router Settings</h3>' +
+      '<div class="tier-form">' +
+        '<div class="form-row"><label>Router model</label><select id="trModel">' + modelOpts + '</select></div>' +
+        '<div class="form-row"><label>Default fallback</label><select id="trFallback">' + fbOpts + '</select></div>' +
+        '<div class="form-row"><label>Instant label</label><input type="text" id="trInstant" value="' + esc(c.router_instant_label || '') + '"></div>' +
+        '<div class="form-row"><label>Distinctions</label><textarea class="json-editor" id="trDistinctions" rows="4">' + esc(c.router_distinctions || '') + '</textarea></div>' +
+      '</div>' +
+      '<div class="upload-actions">' +
+        '<button class="btn" id="trCancel">Cancel</button>' +
+        '<button class="btn btn-primary" id="trSave">Save</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById('trCancel').addEventListener('click', () => document.getElementById('tierRouterModal').remove());
+  document.getElementById('tierRouterModal').addEventListener('click', e => { if (e.target.id === 'tierRouterModal') document.getElementById('tierRouterModal').remove(); });
+
+  document.getElementById('trSave').addEventListener('click', () => {
+    tiersCache.router_model = document.getElementById('trModel').value;
+    tiersCache.default_fallback = document.getElementById('trFallback').value;
+    tiersCache.router_instant_label = document.getElementById('trInstant').value.trim();
+    tiersCache.router_distinctions = document.getElementById('trDistinctions').value.trim();
+    document.getElementById('tierRouterModal').remove();
+    tiersSave();
+  });
+}
+
+function tiersSave() {
+  api('/api/tiers', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(tiersCache),
+  }).then(() => {
+    toast('Tiers saved');
+    tiersRender();
+  }).catch(err => {
+    toast('Save failed: ' + (err.error || err.message || 'unknown'), 'error');
+    tiersLoad(); // reload from server
+  });
 }
 
 // --- Init ---

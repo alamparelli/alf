@@ -577,13 +577,13 @@ func TestWorkingDirCreated(t *testing.T) {
 	}
 
 	taskDir := filepath.Join(dataDir, "agents", meta.ID)
-	// Check orchestrator dir exists.
-	if _, err := os.Stat(filepath.Join(taskDir, "orchestrator")); err != nil {
-		t.Error("orchestrator dir not created")
+	// Check task dir exists (orchestrator and read-only agents share it).
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Error("task dir not created")
 	}
-	// Check agent dir exists.
-	if _, err := os.Stat(filepath.Join(taskDir, "content-researcher")); err != nil {
-		t.Error("agent dir not created")
+	// Check task.json was written.
+	if _, err := os.Stat(filepath.Join(taskDir, "task.json")); err != nil {
+		t.Error("task.json not written")
 	}
 }
 
@@ -659,9 +659,9 @@ func TestRunConfigMaxTurnsDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Default MaxTurns for the brain should be 1.
-	if mp.calls[0].Params.MaxTurns != 1 {
-		t.Errorf("expected default MaxTurns=1, got %d", mp.calls[0].Params.MaxTurns)
+	// Default MaxTurns for the brain matches defaultMaxIterations (10).
+	if mp.calls[0].Params.MaxTurns != 10 {
+		t.Errorf("expected default MaxTurns=10, got %d", mp.calls[0].Params.MaxTurns)
 	}
 }
 

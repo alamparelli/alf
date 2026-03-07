@@ -61,12 +61,11 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string 
 	}
 
 	// 2. Role description.
-	b.WriteString("You are a smart message router AND responder. Your job:\n")
-	b.WriteString("1. If you can fully answer the message yourself, respond directly.\n")
-	b.WriteString("2. If the message needs tools, file access, code changes, or deep reasoning, route it to the appropriate tier.\n\n")
+	b.WriteString("You are a message router. Your ONLY job is to pick the best tier for each message.\n")
+	b.WriteString("You NEVER respond to the user directly. You ALWAYS route to a tier.\n\n")
 
 	// 3. Tier catalog.
-	b.WriteString("Available tiers (only route when YOU cannot handle it):\n")
+	b.WriteString("Available tiers:\n")
 	for _, t := range tiers.Tiers {
 		if !t.Enabled || !t.Routable {
 			continue
@@ -83,8 +82,7 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string 
 		b.WriteString(fmt.Sprintf("\nKey distinctions: %s\n", tiers.RouterDistinctions))
 	}
 
-	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, or edit ANYTHING (files, tasks, settings, status, etc.).\n")
-	b.WriteString("IMPORTANT: If the message references conversation history (\"what did we talk about\", \"earlier\", \"before\", \"you said\", \"continue\"), you MUST route to a tier — never respond directly, because you have no conversation memory.\n")
+	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, or schedule ANYTHING (files, tasks, settings, status, jobs, schedules, etc.).\n")
 
 	// Orchestrator routing hint (only if orchestrator tier is available).
 	if hasOrchestrator(tiers) {
@@ -123,8 +121,7 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string 
 
 	// 7. Response format.
 	b.WriteString("\nRespond with ONLY a JSON object:")
-	b.WriteString("\n- If you can answer: {\"response\": \"<your answer>\", \"reason\": \"direct\", \"react\": \"EMOJI_or_empty\"}")
-	b.WriteString("\n- If you need to route: {\"tier\": \"<EXACT tier name from list above>\", \"reason\": \"<brief reason>\"}")
+	b.WriteString("\n{\"tier\": \"<EXACT tier name from list above>\", \"reason\": \"<brief reason>\", \"react\": \"EMOJI_or_empty\"}")
 	b.WriteString("\nThe \"tier\" value MUST be one of the valid tier names listed above. Do NOT invent tier names.")
 	b.WriteString("\nThe optional \"react\" field suggests a single emoji reaction for the user's message (shows you understood it). Omit or leave empty if no reaction fits. Pick contextually relevant emojis, not generic thumbs up.")
 
@@ -150,26 +147,19 @@ func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 	valid := ValidTierSet(tiers)
 	result := parseResponse(raw, valid)
 
-	// Router answered directly.
-	if result.Response != "" && result.Tier == "" {
-		log.Printf("router: %s → direct response (%s)", truncate(message, 60), result.Reason)
-		return result
-	}
-
 	// Router routed to a valid tier.
 	if result.Tier != "" {
 		log.Printf("router: %s → %s (%s)", truncate(message, 60), result.Tier, result.Reason)
 		return result
 	}
 
-	// Parse failed but non-empty text — use as direct response.
-	if raw != "" && !strings.HasPrefix(raw, "Error:") && !strings.EqualFold(raw, "Execution error") {
-		log.Printf("router: %s → direct response (plain text)", truncate(message, 60))
-		return Result{Response: raw, Reason: "plain-text direct"}
-	}
-
+	// Router returned a direct response or unparseable text — fallback to default tier.
 	fb := FallbackResult(tiers)
-	log.Printf("router: parse failed (%s), falling back to %s", truncate(raw, 100), fb.Tier)
+	if result.Response != "" {
+		log.Printf("router: %s → direct response ignored, falling back to %s", truncate(message, 60), fb.Tier)
+	} else {
+		log.Printf("router: parse failed (%s), falling back to %s", truncate(raw, 100), fb.Tier)
+	}
 	return fb
 }
 
@@ -232,11 +222,10 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString("You are a smart message router AND responder. Your job:\n")
-	b.WriteString("1. If you can fully answer the message yourself, respond directly.\n")
-	b.WriteString("2. If the message needs tools, file access, code changes, or deep reasoning, route it to the appropriate tier.\n\n")
+	b.WriteString("You are a message router. Your ONLY job is to pick the best tier for each message.\n")
+	b.WriteString("You NEVER respond to the user directly. You ALWAYS route to a tier.\n\n")
 
-	b.WriteString("Available tiers (only route when YOU cannot handle it):\n")
+	b.WriteString("Available tiers:\n")
 	for _, t := range input.Tiers.Tiers {
 		if !t.Enabled || !t.Routable {
 			continue
@@ -253,8 +242,7 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 		b.WriteString(fmt.Sprintf("\nKey distinctions: %s\n", input.Tiers.RouterDistinctions))
 	}
 
-	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, or edit ANYTHING (files, tasks, settings, status, etc.).\n")
-	b.WriteString("IMPORTANT: If the message references conversation history (\"what did we talk about\", \"earlier\", \"before\", \"you said\", \"continue\"), you MUST route to a tier — never respond directly, because you have no conversation memory.\n")
+	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, or schedule ANYTHING (files, tasks, settings, status, jobs, schedules, etc.).\n")
 
 	if hasOrchestrator(input.Tiers) {
 		b.WriteString("IMPORTANT: Route to \"orchestrator\" when the user asks for multi-step work requiring parallel agents, team coordination, or explicitly mentions agents/orchestrator. Examples: \"lance une équipe\", \"use agents to\", \"coordinate multiple tasks\", complex research+write+review workflows. Do NOT route to sonnet/opus and expect them to call the orchestrator — only the orchestrator tier can coordinate agents.\n")
@@ -291,8 +279,7 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	b.WriteString("\n")
 
 	b.WriteString("\nRespond with ONLY a JSON object:")
-	b.WriteString("\n- If you can answer: {\"response\": \"<your answer>\", \"reason\": \"direct\", \"react\": \"EMOJI_or_empty\"}")
-	b.WriteString("\n- If you need to route: {\"tier\": \"<EXACT tier name from list above>\", \"reason\": \"<brief reason>\"}")
+	b.WriteString("\n{\"tier\": \"<EXACT tier name from list above>\", \"reason\": \"<brief reason>\", \"react\": \"EMOJI_or_empty\"}")
 	b.WriteString("\nThe \"tier\" value MUST be one of the valid tier names listed above. Do NOT invent tier names.")
 	b.WriteString("\nThe optional \"react\" field suggests a single emoji reaction for the user's message (shows you understood it). Omit or leave empty if no reaction fits. Pick contextually relevant emojis, not generic thumbs up.")
 
@@ -358,10 +345,10 @@ func stripMarkdownFences(s string) string {
 	return s
 }
 
-// hasOrchestrator returns true if an enabled+routable orchestrator tier exists.
+// hasOrchestrator returns true if an enabled+routable agent tier exists.
 func hasOrchestrator(tiers *cc.TiersConfig) bool {
 	for _, t := range tiers.Tiers {
-		if t.Name == "orchestrator" && t.Enabled && t.Routable {
+		if t.Name == "agent" && t.Enabled && t.Routable {
 			return true
 		}
 	}

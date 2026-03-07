@@ -126,7 +126,6 @@ func main() {
 	magic.StartCleanup()
 	sessions := cc.NewFileSessionStore(filepath.Join(configDir, "sessions.json"), nil)
 	sessions.StartCleanup()
-	magic.SetSessionStore(sessions)
 
 	// CC external URL for magic link generation.
 	ccExternalURL := os.Getenv("CC_EXTERNAL_URL")
@@ -190,7 +189,7 @@ func main() {
 	migrateConfig(dataDir, configDir)
 
 	// Run user setup script if modified since last run.
-	runSetupScript(dataDir)
+	runBootstrapScript(dataDir)
 
 	// Generate llms.txt index of available documentation.
 	writeLLMSIndex(dataDir)
@@ -202,6 +201,12 @@ func main() {
 		log.Printf("warning: failed to load config: %v", err)
 		cfg = cc.DefaultConfig()
 	}
+	if cfg.MaxSessions > 0 {
+		sessions.SetMaxSessions(cfg.MaxSessions)
+	}
+	// Seed default tiers.json if not present (from image-embedded copy).
+	seedDefaultTiers(configDir)
+
 	// Load initial tiers config.
 	tierStore := cc.NewFileTierStore(cc.TiersPath(configDir))
 	if err := tierStore.Reload(); err != nil {
@@ -322,7 +327,7 @@ func main() {
 	tiersTimeout := time.Duration(cfg.TiersTimeout) * time.Second // 0 → default 5m inside NewCLIProvider
 	cliProvider := provider.NewCLIProvider(dataDir, tiersTimeout, claudeCred)
 
-	// Multi-agent orchestrator.
+	// Multi-agent coordinator.
 	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel)
 
 	// Router model for message classification.
@@ -370,9 +375,12 @@ func main() {
 		chatService.Recaller = &memStoreRecaller{store: memDB}
 	}
 
+	// Schedule adapter (engine set later after scheduler is created).
+	schedAdapter := &ccScheduleAdapter{}
+
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch)
+		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, schedAdapter)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -472,6 +480,8 @@ func main() {
 		}()
 	}
 
+	schedAdapter.engine = sched
+
 	if err := sched.Start(filepath.Join(contextDir, "scheduler.sock")); err != nil {
 		log.Printf("warning: scheduler start failed: %v", err)
 	}
@@ -503,6 +513,9 @@ func main() {
 					cfg = newCfg
 					if cfg.SessionTimeout > 0 {
 						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
+					}
+					if cfg.MaxSessions > 0 {
+						sessions.SetMaxSessions(cfg.MaxSessions)
 					}
 					if cfg.Timezone != oldTZ {
 						time.Local = resolveTimezone(cfg.Timezone)
@@ -893,13 +906,19 @@ func main() {
 			}
 
 			// Command routing: handle /commands before passing to Claude.
+			// For media messages, use original caption for command detection since
+			// u.Message.Text has been replaced with [PHOTO...]\ncaption.
 			var forcedTierName string
-			if strings.HasPrefix(u.Message.Text, "/") {
+			cmdSource := u.Message.Text
+			if hasMedia && u.Message.Caption != "" {
+				cmdSource = u.Message.Caption
+			}
+			if strings.HasPrefix(cmdSource, "/") {
 				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir, orch) {
 					continue
 				}
 				// Check for force command: /<tier_name> <message>
-				parts := strings.SplitN(u.Message.Text, " ", 2)
+				parts := strings.SplitN(cmdSource, " ", 2)
 				cmdName := strings.TrimPrefix(parts[0], "/")
 				for _, t := range tierStore.Current().Tiers {
 					if t.ForceCommand && t.Name == cmdName {
@@ -908,7 +927,12 @@ func main() {
 							forcedTierName = "_skip" // signal to skip this update
 						} else {
 							forcedTierName = t.Name
-							u.Message.Text = strings.TrimSpace(parts[1])
+							if hasMedia {
+								// Strip command prefix from the built media text.
+								u.Message.Text = strings.Replace(u.Message.Text, cmdSource, strings.TrimSpace(parts[1]), 1)
+							} else {
+								u.Message.Text = strings.TrimSpace(parts[1])
+							}
 						}
 						break
 					}
@@ -1131,8 +1155,8 @@ func main() {
 				"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
 			})
 
-			// Orchestrator dispatch: delegate to multi-agent coordinator (non-blocking).
-			if routeResult.Tier == "orchestrator" && len(agentStore.All()) > 0 {
+			// Agent dispatch: delegate to multi-agent coordinator (non-blocking).
+			if routeResult.Tier == "agent" && len(agentStore.All()) > 0 {
 				// Build system prompts (same as normal path).
 				sysPrompts := memory.CollectPrompts(contextDir)
 				var orchSysPrompts []string
@@ -1148,7 +1172,7 @@ func main() {
 					orchSysPrompts = append(orchSysPrompts, catalog)
 				}
 
-				// Enrich orchestrator with workspace awareness and chat history.
+				// Enrich agent with workspace awareness and chat history.
 				orchSysPrompts = append(orchSysPrompts, memory.WorkspaceSummary(dataDir))
 				if recent := chatHistory.Recent(chatID, 5); len(recent) > 0 {
 					var histBuf strings.Builder
@@ -1178,8 +1202,8 @@ func main() {
 				}
 
 				go func() {
-					// Status animation for orchestrator.
-					orchTag := "[orchestrator] "
+					// Status animation for agent.
+					orchTag := "[agent] "
 					if orchRoutingMsgID != 0 {
 						tg.EditMessage(orchChatID, orchRoutingMsgID, orchTag+"Coordinating agents...")
 					}
@@ -1210,9 +1234,9 @@ func main() {
 					}
 
 					if orchErr != nil {
-						log.Printf("orchestrator error: %v", orchErr)
+						log.Printf("agent error: %v", orchErr)
 						tg.SendHTML(orchChatID, fmt.Sprintf("Orchestrator error: %v", orchErr))
-						eventLog.Log("orchestrator_error", map[string]any{
+						eventLog.Log("agent_error", map[string]any{
 							"chat_id":     orchChatID,
 							"error":       orchErr.Error(),
 							"iterations":  orchMeta.Iterations,
@@ -1222,9 +1246,9 @@ func main() {
 						return
 					}
 
-					log.Printf("→ orchestrator %dms %d iterations $%.4f", duration.Milliseconds(), orchMeta.Iterations, orchMeta.TotalCost)
+					log.Printf("→ agent %dms %d iterations $%.4f", duration.Milliseconds(), orchMeta.Iterations, orchMeta.TotalCost)
 
-					eventLog.Log("orchestrator_out", map[string]any{
+					eventLog.Log("agent_out", map[string]any{
 						"chat_id":      orchChatID,
 						"iterations":   orchMeta.Iterations,
 						"total_cost":   orchMeta.TotalCost,
@@ -1477,7 +1501,7 @@ type tierParams struct {
 	WriteCapable  bool     // if true, grants full tool access; if false, restricts to Tools whitelist
 	Effort        string   // "" = omit flag
 	MaxTurns      int      // 0 = omit flag (use Claude default)
-	MaxIterations int      // max orchestrator iterations (0 = default)
+	MaxIterations int      // max agent iterations (0 = default)
 	TimeoutMin    int      // global timeout in minutes (0 = default)
 }
 
@@ -1775,11 +1799,11 @@ Send me a message to get started — I'll introduce myself and we'll get to know
 		}
 		running := orch.Running()
 		if len(running) == 0 {
-			tg.SendHTML(msg.Chat.ID, "No orchestrator jobs running.")
+			tg.SendHTML(msg.Chat.ID, "No agent jobs running.")
 			return true
 		}
 		n := orch.CancelAll()
-		tg.SendHTML(msg.Chat.ID, fmt.Sprintf("Cancelled %d orchestrator job(s).", n))
+		tg.SendHTML(msg.Chat.ID, fmt.Sprintf("Cancelled %d agent job(s).", n))
 		return true
 	case "/jobs":
 		if !allowedChatIDs[msg.Chat.ID] {
@@ -1787,7 +1811,7 @@ Send me a message to get started — I'll introduce myself and we'll get to know
 		}
 		running := orch.Running()
 		if len(running) == 0 {
-			tg.SendHTML(msg.Chat.ID, "No orchestrator jobs running.")
+			tg.SendHTML(msg.Chat.ID, "No agent jobs running.")
 			return true
 		}
 		var lines []string
@@ -1799,15 +1823,15 @@ Send me a message to get started — I'll introduce myself and we'll get to know
 			}
 			lines = append(lines, fmt.Sprintf("• <code>%s</code> — %s, iteration %d", rt.ID, elapsed, iter))
 		}
-		tg.SendHTML(msg.Chat.ID, "<b>Running orchestrator jobs:</b>\n"+strings.Join(lines, "\n"))
+		tg.SendHTML(msg.Chat.ID, "<b>Running agent jobs:</b>\n"+strings.Join(lines, "\n"))
 		return true
 	case "/help":
 		help := "<b>Available commands:</b>\n" +
 			"/help — Show this message\n" +
 			"/new — Start a new conversation session\n" +
 			"/bash — Execute a bash command directly\n" +
-			"/jobs — List running orchestrator jobs\n" +
-			"/cancel — Cancel all running orchestrator jobs\n" +
+			"/jobs — List running agent jobs\n" +
+			"/cancel — Cancel all running agent jobs\n" +
 			"/restart — Restart the ALF daemon\n" +
 			"/login — Get a login link for the Control Center\n" +
 			"/start — Re-run onboarding (get to know each other)"
@@ -2018,6 +2042,26 @@ func linkSystemTools(toolsDir, srcDir string) {
 			log.Printf("linked tools.d/%s → %s", e.Name(), target)
 		}
 	}
+}
+
+// seedDefaultTiers copies /opt/alf/defaults/tiers.json into the config dir
+// if no user tiers.json exists yet.
+func seedDefaultTiers(configDir string) {
+	dest := cc.TiersPath(configDir)
+	if _, err := os.Stat(dest); err == nil {
+		return // user file already exists
+	}
+	const defaultPath = "/opt/alf/defaults/tiers.json"
+	data, err := os.ReadFile(defaultPath)
+	if err != nil {
+		log.Printf("seed-tiers: no default at %s: %v", defaultPath, err)
+		return
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		log.Printf("seed-tiers: failed to write %s: %v", dest, err)
+		return
+	}
+	log.Printf("seed-tiers: created %s from defaults", dest)
 }
 
 func migrateConfig(dataDir, configDir string) {
@@ -2675,6 +2719,71 @@ func (s *schedulerOrchestrator) Run(ctx context.Context, userMessage string, sys
 	}, nil
 }
 
+// ccScheduleAdapter adapts scheduler.Engine to the cc.ScheduleEngine interface.
+type ccScheduleAdapter struct {
+	engine *scheduler.Engine
+}
+
+func (a *ccScheduleAdapter) List(userOnly bool) []cc.ScheduleJob {
+	if a.engine == nil {
+		return nil
+	}
+	jobs := a.engine.List(userOnly)
+	out := make([]cc.ScheduleJob, len(jobs))
+	for i, j := range jobs {
+		out[i] = schedulerJobToCC(j)
+	}
+	return out
+}
+
+func (a *ccScheduleAdapter) Create(name, schedule, tier, prompt, command, output string, skills []string) (*cc.ScheduleJob, error) {
+	j, err := a.engine.Create(name, schedule, tier, prompt, command, output, skills)
+	if err != nil {
+		return nil, err
+	}
+	sj := schedulerJobToCC(j)
+	return &sj, nil
+}
+
+func (a *ccScheduleAdapter) Delete(id string) error {
+	return a.engine.Delete(id)
+}
+
+func (a *ccScheduleAdapter) Update(id string, fields map[string]string) (*cc.ScheduleJob, error) {
+	j, err := a.engine.Update(id, fields)
+	if err != nil {
+		return nil, err
+	}
+	sj := schedulerJobToCC(j)
+	return &sj, nil
+}
+
+func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
+	sj := cc.ScheduleJob{
+		ID:         j.ID,
+		Name:       j.Name,
+		Schedule:   j.Schedule,
+		Tier:       j.Tier,
+		Prompt:     j.Prompt,
+		Command:    j.Command,
+		Output:     j.Output,
+		Enabled:    j.Enabled,
+		System:     j.System,
+		Managed:    j.Managed,
+		AutoDelete: j.AutoDelete,
+		Skills:     j.Skills,
+		CreatedAt:  j.CreatedAt.Format(time.RFC3339),
+	}
+	if j.LastRun != nil {
+		sj.LastRun = j.LastRun.Format(time.RFC3339)
+	}
+	if j.NextRun != nil {
+		sj.NextRun = j.NextRun.Format(time.RFC3339)
+	}
+	sj.LastError = j.LastError
+	return sj
+}
+
 // resolveTimezone loads an IANA timezone from config, falling back to TZ env then UTC.
 func resolveTimezone(tz string) *time.Location {
 	if tz != "" {
@@ -2724,36 +2833,45 @@ func execBashCommand(tg *tgclient.Client, chatID int64, command string) {
 	tg.SendHTML(chatID, msg)
 }
 
-// runSetupScript executes data/setup.sh if it exists and has changed since last run.
-// A SHA-256 hash is stored in data/.setup-hash to skip unchanged scripts.
-func runSetupScript(dataDir string) {
-	script := filepath.Join(dataDir, "setup.sh")
+// runBootstrapScript executes data/bootstrap.sh if it exists and has changed since last run.
+// A SHA-256 hash is stored in data/.bootstrap-hash to skip unchanged scripts.
+// Also checks for legacy data/setup.sh for backward compatibility.
+func runBootstrapScript(dataDir string) {
+	script := filepath.Join(dataDir, "bootstrap.sh")
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		// Fallback to legacy name.
+		legacy := filepath.Join(dataDir, "setup.sh")
+		if _, err := os.Stat(legacy); os.IsNotExist(err) {
+			return
+		}
+		script = legacy
+	}
 	data, err := os.ReadFile(script)
 	if err != nil {
-		return // no setup.sh — nothing to do
+		return
 	}
 
 	// Check hash to skip if unchanged.
 	h := sha256.Sum256(data)
 	currentHash := hex.EncodeToString(h[:])
-	hashFile := filepath.Join(dataDir, ".setup-hash")
+	hashFile := filepath.Join(dataDir, ".bootstrap-hash")
 	if prev, err := os.ReadFile(hashFile); err == nil && strings.TrimSpace(string(prev)) == currentHash {
-		log.Printf("setup: script unchanged, skipping")
+		log.Printf("bootstrap: script unchanged, skipping")
 		return
 	}
 
-	log.Printf("setup: running %s ...", script)
+	log.Printf("bootstrap: running %s ...", script)
 	cmd := exec.Command("bash", script)
 	cmd.Dir = dataDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		log.Printf("setup: script failed: %v (will retry on next restart)", err)
+		log.Printf("bootstrap: script failed: %v (will retry on next restart)", err)
 		return // don't save hash so it retries
 	}
 
 	os.WriteFile(hashFile, []byte(currentHash), 0o644)
-	log.Printf("setup: script completed successfully")
+	log.Printf("bootstrap: script completed successfully")
 }
 
 // writeLLMSIndex generates a llms.txt file in dataDir with an index of all embedded docs.

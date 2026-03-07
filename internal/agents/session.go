@@ -3,7 +3,7 @@ package agents
 import "sync"
 
 // SessionManager tracks Claude session IDs within one orchestration run.
-// Maps agent key (e.g. "orchestrator", "team/agent") to its session ID
+// Maps agent key (e.g. "agent", "team/agent") to its session ID
 // so the same agent can be resumed across iterations.
 type SessionManager struct {
 	mu       sync.Mutex

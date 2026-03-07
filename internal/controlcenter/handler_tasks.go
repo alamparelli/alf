@@ -10,7 +10,7 @@ import (
 	"github.com/alamparelli/alf/internal/agents"
 )
 
-// TasksHandler serves running and completed orchestrator tasks.
+// TasksHandler serves running and completed agent tasks.
 type TasksHandler struct {
 	Orchestrator *agents.Orchestrator
 	DataDir      string
@@ -28,7 +28,7 @@ func (h *TasksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {
-	// Get running tasks from orchestrator.
+	// Get running tasks from agent.
 	var running []agents.TaskMeta
 	if h.Orchestrator != nil {
 		for _, rt := range h.Orchestrator.Running() {
@@ -55,7 +55,7 @@ func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(data, &meta) != nil {
 			continue
 		}
-		// Only include non-running tasks (running ones come from orchestrator).
+		// Only include non-running tasks (running ones come from agent).
 		if meta.Status == "running" {
 			continue
 		}
@@ -83,7 +83,7 @@ func (h *TasksHandler) cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Orchestrator == nil {
-		http.Error(w, "orchestrator not available", http.StatusServiceUnavailable)
+		http.Error(w, "agent not available", http.StatusServiceUnavailable)
 		return
 	}
 	ok := h.Orchestrator.Cancel(id)

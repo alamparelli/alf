@@ -17,7 +17,7 @@ import (
 const (
 	defaultMaxIterations = 10
 	defaultGlobalTimeout = 60 * time.Minute
-	orchestratorKey      = "orchestrator"
+	orchestratorKey      = "agent"
 )
 
 // ResolveModelFunc maps short model names to full CLI model names.

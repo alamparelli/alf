@@ -1,9 +1,14 @@
 package controlcenter
 
 import (
+	_ "embed"
+	"encoding/json"
 	"sync/atomic"
 	"time"
 )
+
+//go:embed defaults/tiers.json
+var defaultTiersJSON []byte
 
 // Config holds non-secret runtime parameters.
 type Config struct {
@@ -22,6 +27,7 @@ type Config struct {
 	Timezone                string `json:"timezone"`                   // IANA timezone (e.g. "Europe/Brussels"), empty = TZ env or UTC
 	TiersTimeout            int    `json:"tiers_timeout"`              // seconds for Claude tier invocations, 0 = default (300)
 	ShowSkillFooter         *bool  `json:"show_skill_footer"`          // show active skills in message footer, nil = true (default on)
+	MaxSessions             int    `json:"max_sessions"`               // max concurrent sessions per user, 0 = default (2)
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -39,7 +45,7 @@ func DefaultConfig() *Config {
 		QuietHours:       QuietHours{Start: 0, End: 0},
 		SessionTimeout:   30,
 		GitTrack:         true,
-		GitSweepInterval: 5,
+		GitSweepInterval: 15,
 		AutoUpdateCheck:         true,
 		AutoUpdateCheckInterval: 21600,
 		AutoUpdateNotify:        true,
@@ -88,28 +94,19 @@ type TiersConfig struct {
 	RouterDistinctions string `json:"router_distinctions,omitempty"`
 }
 
-// DefaultTiersConfig returns a TiersConfig with starter tiers.
-// 7-tier layout: instant + read/write pairs per model (haiku, sonnet, opus).
+// DefaultTiersConfig returns a TiersConfig parsed from the embedded defaults/tiers.json.
 func DefaultTiersConfig() *TiersConfig {
-	return &TiersConfig{
-		RouterModel:        "haiku",
-		DefaultFallback:    "haiku_r",
-		RouterInstantLabel: "One-line replies: hi, thanks, ok, bye, thumbs up, simple yes/no answers",
-		RouterDistinctions: "haiku vs sonnet: If the answer requires reasoning, analysis, or structured output, use sonnet. If it is conversational, factual recall, or a short answer, use haiku. " +
-			"sonnet vs opus: Use opus only when the task involves system-wide thinking, multi-component architecture, or requires holding many constraints simultaneously. Most code tasks are sonnet. " +
-			"read vs write (_r vs _rw): Use _rw ONLY when the user explicitly requests to create, edit, delete, or modify files, run a tool, or execute a scheduled action. Questions about code or asking for suggestions stay in _r even if they mention files. " +
-			"When in doubt: Default to haiku_r. It is better to respond fast with a simpler model than to over-escalate.",
-		Tiers: []Tier{
-			{Name: "instant", Model: "haiku", Priority: 0, Enabled: true, Routable: true, Instant: true, RouterLabel: "One-line replies: hi, thanks, ok, bye, thumbs up, simple yes/no answers", Effort: "low"},
-			{Name: "haiku_r", Model: "haiku", Priority: 1, Enabled: true, Routable: true, RouterLabel: "Casual conversation, simple factual questions, short summaries, translations, dictionary lookups, weather-style queries, small talk, jokes", Effort: "low", Tools: []string{"Read"}},
-			{Name: "haiku_rw", Model: "haiku", Priority: 2, Enabled: true, Routable: true, RouterLabel: "Running scheduled jobs, invoking tools (reminders, timers, web search), simple file creation, quick one-line edits, toggling settings", WriteCapable: true, ForceCommand: true, Effort: "low", MaxTurns: 5},
-			{Name: "sonnet_r", Model: "sonnet", Priority: 3, Enabled: true, Routable: true, RouterLabel: "Code review, debugging analysis, explaining complex concepts, comparing options, writing structured content (emails, docs), research synthesis, data interpretation", Effort: "medium", Tools: []string{"Read"}},
-			{Name: "sonnet_rw", Model: "sonnet", Priority: 4, Enabled: true, Routable: true, RouterLabel: "Editing code files, implementing features, fixing bugs in code, creating scripts, modifying configurations, writing tests, multi-file text changes", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 30},
-			{Name: "opus_r", Model: "opus", Priority: 5, Enabled: true, Routable: true, RouterLabel: "Architecture design, system-level reasoning, complex trade-off analysis, long-form strategic planning, reviewing entire codebases, deep technical research", Effort: "medium", Tools: []string{"Read"}},
-			{Name: "opus_rw", Model: "opus", Priority: 6, Enabled: true, Routable: true, RouterLabel: "Large-scale refactoring across multiple files, implementing complex features with many moving parts, redesigning system architecture, building new modules from scratch", WriteCapable: true, ForceCommand: true, Effort: "medium", MaxTurns: 40},
-			{Name: "orchestrator", Model: "opus", Priority: 7, Enabled: false, Routable: true, ForceCommand: true, WriteCapable: false, Effort: "medium", MaxTurns: 10, MaxIterations: 10, TimeoutMin: 60, Tools: []string{"Read"}, Description: "Multi-agent orchestrator for complex multi-step tasks requiring parallel work by multiple specialized agents"},
-		},
+	var cfg TiersConfig
+	if err := json.Unmarshal(defaultTiersJSON, &cfg); err != nil {
+		// Should never happen — embedded file is validated at build time.
+		panic("controlcenter: invalid embedded tiers.json: " + err.Error())
 	}
+	return &cfg
+}
+
+// DefaultTiersJSON returns the raw embedded tiers.json bytes.
+func DefaultTiersJSON() []byte {
+	return defaultTiersJSON
 }
 
 // AllowedModels defines valid model names for tier validation.

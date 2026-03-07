@@ -137,20 +137,20 @@ EOF
 
 When the container image is rebuilt (`alf upgrade`), everything outside the `data/` volume is lost. This includes pip packages, apt packages, npm packages, and any binaries installed at runtime.
 
-### setup.sh
+### bootstrap.sh
 
-The file `~/data/setup.sh` is automatically executed at daemon startup. It only re-runs when its content changes (hash-checked for fast boot).
+The file `~/data/bootstrap.sh` is automatically executed at daemon startup. It only re-runs when its content changes (hash-checked for fast boot).
 
-**When you install any package, always append the install command to `~/data/setup.sh`:**
+**When you install any package, always append the install command to `~/data/bootstrap.sh`:**
 
 ```bash
-# Append to setup.sh — do NOT overwrite
-cat >> ~/data/setup.sh << 'EOF'
+# Append to bootstrap.sh — do NOT overwrite
+cat >> ~/data/bootstrap.sh << 'EOF'
 pip3 install --quiet requests
 EOF
 ```
 
-### Example setup.sh
+### Example bootstrap.sh
 
 ```bash
 #!/bin/bash
@@ -187,9 +187,9 @@ curl -fsSL https://example.com/tool.tar.gz | tar xz -C /usr/local/bin
 | Scripts in `~/data/tools/` | Binaries in `/usr/local/bin` |
 | HTML in `~/data/pages/` | System-level config changes |
 | Skills in `~/data/skills/` | Anything outside data volume |
-| `~/data/setup.sh` | |
+| `~/data/bootstrap.sh` | |
 
-**Rule of thumb:** if you create it, put it in `~/data/`. If you install it, register it in `~/data/setup.sh`.
+**Rule of thumb:** if you create it, put it in `~/data/`. If you install it, register it in `~/data/bootstrap.sh`.
 
 ## What's next?
 

@@ -1,0 +1,84 @@
+package controlcenter
+
+import (
+	"encoding/json"
+	"net/http"
+)
+
+// SchedulesHandler serves GET/POST/PUT/DELETE for scheduled jobs.
+type SchedulesHandler struct {
+	Engine ScheduleEngine
+}
+
+func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.Engine == nil {
+		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scheduler not available"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		jobs := h.Engine.List(false)
+		respondJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+
+	case http.MethodPost:
+		var req struct {
+			Name     string   `json:"name"`
+			Schedule string   `json:"schedule"`
+			Tier     string   `json:"tier"`
+			Prompt   string   `json:"prompt"`
+			Command  string   `json:"command"`
+			Output   string   `json:"output"`
+			Skills   []string `json:"skills"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+			return
+		}
+		if req.Name == "" || req.Schedule == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name and schedule are required"})
+			return
+		}
+		job, err := h.Engine.Create(req.Name, req.Schedule, req.Tier, req.Prompt, req.Command, req.Output, req.Skills)
+		if err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusCreated, map[string]any{"job": job})
+
+	case http.MethodPut:
+		var req struct {
+			ID     string            `json:"id"`
+			Fields map[string]string `json:"fields"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+			return
+		}
+		if req.ID == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+			return
+		}
+		job, err := h.Engine.Update(req.ID, req.Fields)
+		if err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"job": job})
+
+	case http.MethodDelete:
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "id query param required"})
+			return
+		}
+		if err := h.Engine.Delete(id); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}

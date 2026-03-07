@@ -14,14 +14,18 @@
         <h1><span>ALF</span> CC</h1>
       </div>
       <nav class="sidebar-nav" id="sidebarNav">
-        <a class="nav-item active" data-view="home"><i data-lucide="home"></i> Home</a>
-        <a class="nav-item" data-view="chat"><i data-lucide="message-circle"></i> Chat</a>
-        <a class="nav-item" data-view="schedules"><i data-lucide="calendar-clock"></i> Schedules</a>
-        <a class="nav-item" data-view="tasks"><i data-lucide="layers"></i> Tasks</a>
-        <a class="nav-item" data-view="tiers"><i data-lucide="sliders-horizontal"></i> Tiers</a>
+        <div class="nav-grid" id="navGrid">
+          <a class="nav-icon active" data-view="home" title="Home"><i data-lucide="home"></i></a>
+          <a class="nav-icon" data-view="chat" title="Chat"><i data-lucide="message-circle"></i></a>
+          <a class="nav-icon" data-view="schedules" title="Schedules"><i data-lucide="calendar-clock"></i></a>
+          <a class="nav-icon" data-view="tasks" title="Tasks"><i data-lucide="layers"></i></a>
+          <a class="nav-icon" data-view="tiers" title="Tiers"><i data-lucide="sliders-horizontal"></i></a>
+          <a class="nav-icon" data-view="firewall" title="Firewall"><i data-lucide="shield"></i></a>
+          <a class="nav-icon" data-view="logs" title="Logs"><i data-lucide="scroll-text"></i></a>
+          <a class="nav-icon" data-view="docs" title="Docs"><i data-lucide="book-open"></i></a>
+        </div>
+        <div class="nav-pages-section" id="navPagesSection"></div>
         <div class="nav-spacer" id="navSpacer"></div>
-        <a class="nav-item" data-view="logs"><i data-lucide="scroll-text"></i> Logs</a>
-        <a class="nav-item" data-view="docs"><i data-lucide="book-open"></i> Docs</a>
         <div class="sidebar-footer">
           <p>Made with ❤️ by <a href="https://x.com/a_lamparelli" target="_blank">@a_lamparelli</a></p>
           <p><a href="https://github.com/alamparelli" target="_blank"><i data-lucide="github"></i></a></p>
@@ -208,6 +212,44 @@
 
       <div id="docsView" class="docs-view" style="display:none">
         <div id="docsContent"></div>
+      </div>
+
+      <div id="firewallView" class="firewall-view" style="display:none">
+        <div class="firewall-toolbar">
+          <h2>Firewall</h2>
+          <div class="firewall-toolbar-right">
+            <label class="logs-auto-label"><input type="checkbox" id="fwAutoRefresh" checked> Auto</label>
+            <button class="btn btn-icon" id="fwRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+          </div>
+        </div>
+        <div class="card firewall-config-card">
+          <div class="firewall-mode-row">
+            <span class="firewall-mode-label">Mode</span>
+            <div class="segmented-control" id="fwModeControl">
+              <button class="seg-btn active" data-value="log-only">Log Only</button>
+              <button class="seg-btn" data-value="enforce">Enforce</button>
+            </div>
+          </div>
+          <div class="firewall-rules-header">
+            <h3>Rules</h3>
+            <button class="btn" id="fwAddRuleBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Add Rule</button>
+          </div>
+          <div class="firewall-rules-list" id="fwRulesList"></div>
+        </div>
+        <div class="card firewall-log-card">
+          <div class="firewall-log-header">
+            <h3>Request Log</h3>
+            <button class="btn btn-icon btn-danger-icon" id="fwClearLogBtn" title="Clear log"><i data-lucide="trash-2"></i></button>
+          </div>
+          <div class="firewall-log-table-wrap">
+            <table class="firewall-log-table" id="fwLogTable">
+              <thead>
+                <tr><th>Time</th><th>Method</th><th>Host</th><th>Path</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody id="fwLogBody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <div id="tiersView" class="tiers-view" style="display:none">

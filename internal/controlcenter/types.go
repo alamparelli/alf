@@ -133,6 +133,7 @@ const (
 	ReloadTools
 	ReloadSkills
 	ReloadAgents
+	ReloadFirewall
 )
 
 // Stats tracks daemon runtime metrics. Safe for concurrent use.

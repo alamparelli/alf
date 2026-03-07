@@ -9,3 +9,9 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/yalue/onnxruntime_go v1.26.0
 )
+
+require (
+	github.com/elazarl/goproxy v1.8.2 // indirect
+	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
+)

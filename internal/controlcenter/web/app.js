@@ -82,12 +82,14 @@ function navigateTo(view) {
   const docsView = document.getElementById('docsView');
   const logsView = document.getElementById('logsView');
   const tiersView = document.getElementById('tiersView');
+  const firewallView = document.getElementById('firewallView');
 
   // Update active nav item — docs:id should highlight the docs nav item
-  const navView = view.startsWith('docs:') ? 'docs' : view;
+  const navView = view.startsWith('docs:') ? 'docs' : (view.startsWith('page:') ? view : view);
   logsStopAutoRefresh();
   tasksStopAutoRefresh();
-  document.querySelectorAll('#sidebarNav .nav-item').forEach(el => {
+  fwStopAutoRefresh();
+  document.querySelectorAll('#navGrid .nav-icon, #navPagesSection .nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === navView);
   });
 
@@ -99,6 +101,7 @@ function navigateTo(view) {
   docsView.style.display = 'none';
   logsView.style.display = 'none';
   tiersView.style.display = 'none';
+  firewallView.style.display = 'none';
 
   if (view === 'home') {
     homeView.style.display = '';
@@ -135,6 +138,10 @@ function navigateTo(view) {
     tiersView.style.display = '';
     pageFrame.src = '';
     tiersInit();
+  } else if (view === 'firewall') {
+    firewallView.style.display = '';
+    pageFrame.src = '';
+    fwInit();
   }
 
   localStorage.setItem('alf-view', view);
@@ -144,14 +151,10 @@ function navigateTo(view) {
   sidebarOverlay.classList.remove('open');
 }
 
-// Bind Home + Chat + Docs + Logs nav
-document.querySelector('#sidebarNav .nav-item[data-view="home"]').addEventListener('click', () => navigateTo('home'));
-document.querySelector('#sidebarNav .nav-item[data-view="chat"]').addEventListener('click', () => navigateTo('chat'));
-document.querySelector('#sidebarNav .nav-item[data-view="schedules"]').addEventListener('click', () => navigateTo('schedules'));
-document.querySelector('#sidebarNav .nav-item[data-view="tasks"]').addEventListener('click', () => navigateTo('tasks'));
-document.querySelector('#sidebarNav .nav-item[data-view="logs"]').addEventListener('click', () => navigateTo('logs'));
-document.querySelector('#sidebarNav .nav-item[data-view="docs"]').addEventListener('click', () => navigateTo('docs'));
-document.querySelector('#sidebarNav .nav-item[data-view="tiers"]').addEventListener('click', () => navigateTo('tiers'));
+// Bind system nav icons
+document.querySelectorAll('#navGrid .nav-icon').forEach(el => {
+  el.addEventListener('click', () => navigateTo(el.dataset.view));
+});
 
 // --- Status ---
 function loadStatus() {
@@ -1646,27 +1649,26 @@ function capitalizeName(name) {
 
 function loadPages() {
   return api('/api/pages/').then(r => {
-    const nav = document.getElementById('sidebarNav');
+    const section = document.getElementById('navPagesSection');
     const items = r.items || [];
 
-    // Remove existing page nav items (keep Home)
-    nav.querySelectorAll('.nav-item[data-view^="page:"]').forEach(el => el.remove());
+    // Remove existing page nav items.
+    section.innerHTML = '';
 
-    const spacer = document.getElementById('navSpacer');
     items.forEach(p => {
       const a = document.createElement('a');
       a.className = 'nav-item';
       a.dataset.view = 'page:' + p.name;
       a.innerHTML = '<i data-lucide="file-code"></i> ' + esc(capitalizeName(p.name));
       a.addEventListener('click', () => navigateTo(a.dataset.view));
-      nav.insertBefore(a, spacer);
+      section.appendChild(a);
     });
 
     // Restore active state
-    const activeView = document.querySelector('#sidebarNav .nav-item.active');
-    if (activeView) {
-      nav.querySelectorAll('.nav-item').forEach(el => {
-        el.classList.toggle('active', el.dataset.view === activeView.dataset.view);
+    const currentView = localStorage.getItem('alf-view');
+    if (currentView && currentView.startsWith('page:')) {
+      section.querySelectorAll('.nav-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.view === currentView);
       });
     }
 
@@ -2593,3 +2595,198 @@ loadPages().then(() => {
 wsInit();
 setInterval(loadStatus, 30000);
 setInterval(loadPages, 30000);
+
+// --- Firewall ---
+let fwInitialized = false;
+let fwAutoTimer = null;
+let fwCache = null;
+
+function fwInit() {
+  if (!fwInitialized) {
+    fwInitialized = true;
+    document.getElementById('fwRefreshBtn').addEventListener('click', fwLoad);
+    document.getElementById('fwClearLogBtn').addEventListener('click', fwClearLog);
+    document.getElementById('fwAddRuleBtn').addEventListener('click', () => fwShowRuleModal());
+
+    // Mode toggle.
+    document.querySelectorAll('#fwModeControl .seg-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#fwModeControl .seg-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        fwSaveConfig();
+      });
+    });
+  }
+  fwLoad();
+  fwStartAutoRefresh();
+}
+
+function fwStartAutoRefresh() {
+  fwStopAutoRefresh();
+  const cb = document.getElementById('fwAutoRefresh');
+  if (cb && cb.checked) {
+    fwAutoTimer = setInterval(fwLoad, 3000);
+  }
+}
+function fwStopAutoRefresh() {
+  if (fwAutoTimer) { clearInterval(fwAutoTimer); fwAutoTimer = null; }
+}
+
+document.addEventListener('change', e => {
+  if (e.target.id === 'fwAutoRefresh') {
+    if (e.target.checked) fwStartAutoRefresh(); else fwStopAutoRefresh();
+  }
+});
+
+function fwLoad() {
+  api('/api/firewall').then(data => {
+    fwCache = data;
+    fwRender();
+  }).catch(() => {});
+}
+
+function fwRender() {
+  if (!fwCache) return;
+  const cfg = fwCache.config || {};
+  const logEntries = fwCache.log || [];
+
+  // Mode toggle.
+  document.querySelectorAll('#fwModeControl .seg-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.value === cfg.mode);
+  });
+
+  // Rules list.
+  const rulesList = document.getElementById('fwRulesList');
+  const rules = cfg.rules || [];
+  if (rules.length === 0) {
+    rulesList.innerHTML = '<div class="fw-empty">No rules. All traffic is logged.</div>';
+  } else {
+    rulesList.innerHTML = rules.map((r, i) => `
+      <div class="fw-rule-row">
+        <code class="fw-rule-pattern">${esc(r.pattern)}</code>
+        <span class="fw-rule-badge fw-rule-${r.action}">${r.action}</span>
+        <button class="btn btn-icon btn-danger-icon fw-rule-del" data-idx="${i}" title="Delete rule"><i data-lucide="x"></i></button>
+      </div>
+    `).join('');
+    lucide.createIcons();
+    rulesList.querySelectorAll('.fw-rule-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        rules.splice(idx, 1);
+        fwSaveConfig();
+      });
+    });
+  }
+
+  // Log table.
+  const tbody = document.getElementById('fwLogBody');
+  // Show newest first.
+  const reversed = [...logEntries].reverse();
+  tbody.innerHTML = reversed.map(e => {
+    const t = new Date(e.time);
+    const ts = t.toLocaleTimeString();
+    const statusBadge = e.blocked
+      ? '<span class="fw-status-badge fw-blocked">blocked</span>'
+      : (e.status ? `<span class="fw-status-badge fw-allowed">${e.status}</span>` : '<span class="fw-status-badge fw-allowed">ok</span>');
+    const hasDenyRule = (fwCache.config.rules || []).some(r => matchFwPattern(r.pattern, e.host) && r.action === 'deny');
+    const denyBtn = (!e.blocked && !hasDenyRule)
+      ? `<button class="btn btn-xs btn-deny-row" data-host="${esc(e.host)}" title="Add deny rule for ${esc(e.host)}">Deny</button>`
+      : '';
+    return `<tr class="${e.blocked ? 'fw-row-blocked' : ''}">
+      <td>${ts}</td>
+      <td>${esc(e.method)}</td>
+      <td>${esc(e.host)}</td>
+      <td class="fw-path-cell">${esc(e.path || '')}</td>
+      <td>${statusBadge}</td>
+      <td>${denyBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function matchFwPattern(pattern, host) {
+  pattern = pattern.toLowerCase();
+  host = host.toLowerCase();
+  if (pattern === '*') return true;
+  if (pattern === host) return true;
+  if (pattern.startsWith('*.')) {
+    const suffix = pattern.slice(1); // ".example.com"
+    return host.endsWith(suffix);
+  }
+  return false;
+}
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.btn-deny-row');
+  if (!btn) return;
+  const host = btn.dataset.host;
+  if (!host || !fwCache) return;
+  if (!fwCache.config.rules) fwCache.config.rules = [];
+  fwCache.config.rules.push({ pattern: host, action: 'deny' });
+  fwSaveConfig();
+});
+
+function fwSaveConfig() {
+  if (!fwCache) return;
+  const mode = document.querySelector('#fwModeControl .seg-btn.active')?.dataset.value || 'log-only';
+  const cfg = { ...fwCache.config, mode, rules: fwCache.config.rules || [] };
+  api('/api/firewall', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg),
+  }).then(() => {
+    showToast('Firewall config saved');
+    fwLoad();
+  }).catch(err => showToast('Save failed: ' + err.message, true));
+}
+
+function fwClearLog() {
+  api('/api/firewall', { method: 'DELETE' }).then(() => {
+    showToast('Log cleared');
+    fwLoad();
+  });
+}
+
+function fwShowRuleModal() {
+  const old = document.getElementById('fwRuleModal');
+  if (old) old.remove();
+  const modal = document.createElement('div');
+  modal.id = 'fwRuleModal';
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal">
+      <h3>Add Rule</h3>
+      <div class="form-row">
+        <label>Pattern</label>
+        <input type="text" id="fwRulePattern" placeholder="e.g. *.evil.com or example.com or *">
+      </div>
+      <div class="form-row">
+        <label>Action</label>
+        <select id="fwRuleAction">
+          <option value="deny">Deny</option>
+          <option value="allow">Allow</option>
+        </select>
+      </div>
+      <div class="upload-actions">
+        <button class="btn" id="fwRuleCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="fwRuleSaveBtn">Add</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById('fwRuleCancelBtn').addEventListener('click', () => modal.remove());
+  document.getElementById('fwRuleSaveBtn').addEventListener('click', () => {
+    const pattern = document.getElementById('fwRulePattern').value.trim();
+    const action = document.getElementById('fwRuleAction').value;
+    if (!pattern) return;
+    if (!fwCache.config.rules) fwCache.config.rules = [];
+    fwCache.config.rules.push({ pattern, action });
+    modal.remove();
+    fwSaveConfig();
+  });
+}
+
+function esc(s) {
+  if (typeof esc._el === 'undefined') esc._el = document.createElement('span');
+  esc._el.textContent = s;
+  return esc._el.innerHTML;
+}

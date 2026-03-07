@@ -348,16 +348,40 @@ func main() {
 	tiersTimeout := time.Duration(cfg.TiersTimeout) * time.Second // 0 → default 5m inside NewCLIProvider
 	cliProvider := provider.NewCLIProvider(dataDir, tiersTimeout, claudeCred)
 
+	// OpenRouter API provider (optional).
+	orAPIKey := readSecret("OPENROUTER_API_KEY")
+	apiHistory := provider.NewHistory(dataDir, 100, sessionTimeout)
+	var apiProvider *provider.APIProvider
+	if orAPIKey != "" {
+		apiProvider = provider.NewAPIProvider(orAPIKey, apiHistory)
+		log.Println("OpenRouter API provider enabled")
+	} else {
+		log.Println("OpenRouter API provider disabled (no OPENROUTER_API_KEY)")
+	}
+	registry := &provider.Registry{
+		CLI:        cliProvider,
+		OpenRouter: apiProvider,
+	}
+
 	// Multi-agent coordinator.
 	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel)
 
 	// Router model for message classification.
-	routerModel := router.ResolveModel(tierStore.Current().RouterModel)
-	if routerModel == "" {
-		routerModel = router.ResolveModel("haiku")
+	routerBackend := tierStore.Current().RouterBackend
+	routerModel := tierStore.Current().RouterModel
+	if routerBackend == "openrouter" {
+		// For OpenRouter, use the model string as-is.
+		if routerModel == "" {
+			routerModel = "anthropic/claude-haiku-4-5"
+		}
+	} else {
+		routerModel = router.ResolveModel(routerModel)
+		if routerModel == "" {
+			routerModel = router.ResolveModel("haiku")
+		}
 	}
 
-	// classifyMessage spawns a Claude CLI process per classification.
+	// classifyMessage uses the configured router backend for classification.
 	classifyMessage := func(message string, tiers *cc.TiersConfig) router.Result {
 		prompt := router.BuildClassifyPrompt(router.ClassifyInput{
 			Message:   message,
@@ -365,18 +389,19 @@ func main() {
 			DataDir:   dataDir,
 			ConfigDir: configDir,
 		})
+		routerProv := registry.ForBackend(routerBackend)
 		params := provider.Params{
 			Model:    routerModel,
 			MaxTurns: 2,
 			DataDir:  dataDir,
 		}
 		start := time.Now()
-		result, err := cliProvider.Invoke(context.Background(), prompt, params, nil)
+		result, err := routerProv.Invoke(context.Background(), prompt, params, nil)
 		if err != nil {
 			log.Printf("router: classify error: %v", err)
 			return router.FallbackResult(tiers)
 		}
-		log.Printf("router: classify took %dms", time.Since(start).Milliseconds())
+		log.Printf("router: classify took %dms (backend=%s)", time.Since(start).Milliseconds(), routerBackend)
 		return router.InterpretRaw(result.Text, tiers, message)
 	}
 
@@ -391,6 +416,8 @@ func main() {
 		}
 	}
 	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
+	chatService.Registry = registry
+	chatService.APIHistory = apiHistory
 	chatService.SkillStore = skillStore
 	if memDB != nil {
 		chatService.Recaller = &memStoreRecaller{store: memDB}
@@ -553,11 +580,20 @@ func main() {
 				} else {
 					log.Println("tiers reloaded")
 				}
-				newModel := router.ResolveModel(tierStore.Current().RouterModel)
-				if newModel == "" {
-					newModel = router.ResolveModel("haiku")
+				routerBackend = tierStore.Current().RouterBackend
+				if routerBackend == "openrouter" {
+					newModel := tierStore.Current().RouterModel
+					if newModel == "" {
+						newModel = "anthropic/claude-haiku-4-5"
+					}
+					routerModel = newModel
+				} else {
+					newModel := router.ResolveModel(tierStore.Current().RouterModel)
+					if newModel == "" {
+						newModel = router.ResolveModel("haiku")
+					}
+					routerModel = newModel
 				}
-				routerModel = newModel
 				if git != nil {
 					git.Commit("tiers updated via CC")
 				}
@@ -941,7 +977,7 @@ func main() {
 				cmdSource = u.Message.Caption
 			}
 			if strings.HasPrefix(cmdSource, "/") {
-				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir, orch) {
+				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir, orch, apiHistory) {
 					continue
 				}
 				// Check for force command: /<tier_name> <message>
@@ -1361,6 +1397,10 @@ func main() {
 				sysPromptTexts = append(sysPromptTexts, "Documentation is available in ~/data/docs/. Read ~/data/llms.txt for the index. When you install packages, read the container-packages doc first.")
 			}
 
+			// Select provider based on tier backend.
+			tierProv := registry.ForBackend(tp.Backend)
+			isAPITier := tp.Backend == "openrouter"
+
 			invokeParams := provider.Params{
 				Model:         tp.Model,
 				Tools:         tp.Tools,
@@ -1370,6 +1410,10 @@ func main() {
 				SystemPrompts: sysPromptTexts,
 				ResumeID:      resumeID,
 				DataDir:       dataDir,
+			}
+			if isAPITier {
+				invokeParams.SessionKey = fmt.Sprintf("tg:%d", chatID)
+				invokeParams.ResumeID = "" // API tiers use history, not --resume
 			}
 
 			// Signal server: per-invocation socket for react/status from Claude subprocess.
@@ -1385,13 +1429,13 @@ func main() {
 			}
 
 			start := time.Now()
-			result, err := cliProvider.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
-			// Retry without resume if session not found.
-			if err != nil && resumeID != "" && strings.Contains(err.Error(), "No conversation found") {
+			result, err := tierProv.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
+			// Retry without resume if session not found (CLI only).
+			if err != nil && resumeID != "" && !isAPITier && strings.Contains(err.Error(), "No conversation found") {
 				log.Printf("session %s expired, starting fresh", resumeID)
 				chatSessions.Archive(chatID)
 				invokeParams.ResumeID = ""
-				result, err = cliProvider.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
+				result, err = tierProv.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
 			}
 			duration := time.Since(start)
 
@@ -1439,6 +1483,9 @@ func main() {
 						"reason":     reason,
 					})
 				}
+			} else if isAPITier {
+				// API tiers don't return session IDs — just track context.
+				chatSessions.TouchContext(chatID, routeResult.Tier)
 			}
 			chatSessions.Touch(chatID)
 
@@ -1530,6 +1577,7 @@ type tierParams struct {
 	MaxTurns      int      // 0 = omit flag (use Claude default)
 	MaxIterations int      // max agent iterations (0 = default)
 	TimeoutMin    int      // global timeout in minutes (0 = default)
+	Backend       string   // "cli" (default), "openrouter"
 }
 
 func readSecret(envVar string) string {
@@ -1778,7 +1826,7 @@ func hasMedia(msg *Message) bool {
 }
 
 // handleCommand processes known /commands. Returns true if handled.
-func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string, orch *agents.Orchestrator) bool {
+func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string, orch *agents.Orchestrator, apiHistory *provider.History) bool {
 	cmd := strings.SplitN(msg.Text, " ", 2)[0]
 	switch cmd {
 	case "/login":
@@ -1786,6 +1834,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 		return true
 	case "/new":
 		old := chatSessions.Archive(msg.Chat.ID)
+		apiHistory.Clear(fmt.Sprintf("tg:%d", msg.Chat.ID))
 		reply := "New session started."
 		if old != "" {
 			reply = "Previous session archived. New session started."
@@ -1968,14 +2017,21 @@ func answerCallbackQuery(client *http.Client, token string, callbackID string) {
 func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
+			model := t.Model
+			// For CLI backend, resolve short names to full model IDs.
+			// For openrouter, use the model string as-is (e.g. "anthropic/claude-haiku-4-5").
+			if t.Backend != "openrouter" {
+				model = router.ResolveModel(t.Model)
+			}
 			return tierParams{
-				Model:         router.ResolveModel(t.Model),
+				Model:         model,
 				Tools:         t.Tools,
 				WriteCapable:  t.WriteCapable,
 				Effort:        t.Effort,
 				MaxTurns:      t.MaxTurns,
 				MaxIterations: t.MaxIterations,
 				TimeoutMin:    t.TimeoutMin,
+				Backend:       t.Backend,
 			}
 		}
 	}

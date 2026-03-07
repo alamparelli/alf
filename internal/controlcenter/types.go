@@ -75,6 +75,7 @@ type Tier struct {
 	MaxIterations int      `json:"max_iterations,omitempty"`
 	TimeoutMin    int      `json:"timeout_minutes,omitempty"`
 	ForceCommand  bool     `json:"force_command"`
+	Backend       string   `json:"backend,omitempty"` // "cli" (default), "openrouter"
 }
 
 // RouterDescription returns Description if set, otherwise falls back to RouterLabel.
@@ -92,6 +93,7 @@ type TiersConfig struct {
 	DefaultFallback    string `json:"default_fallback,omitempty"`
 	RouterInstantLabel string `json:"router_instant_label,omitempty"`
 	RouterDistinctions string `json:"router_distinctions,omitempty"`
+	RouterBackend      string `json:"router_backend,omitempty"` // "cli" (default), "openrouter"
 }
 
 // DefaultTiersConfig returns a TiersConfig parsed from the embedded defaults/tiers.json.
@@ -114,6 +116,13 @@ var AllowedModels = map[string]bool{
 	"haiku":  true,
 	"sonnet": true,
 	"opus":   true,
+}
+
+// AllowedBackends defines valid backend values (empty string = default CLI).
+var AllowedBackends = map[string]bool{
+	"":           true,
+	"cli":        true,
+	"openrouter": true,
 }
 
 // AllowedEfforts defines valid effort levels (empty string = unset).

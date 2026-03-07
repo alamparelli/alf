@@ -1,4 +1,5 @@
 {
+  "router_backend": "",
   "router_model": "haiku",
   "default_fallback": "haiku_r",
   "router_distinctions": "haiku vs sonnet: If the answer requires reasoning, analysis, or structured output, use sonnet. If it is conversational, factual recall, or a short answer, use haiku. sonnet vs opus: Use opus only when the task involves system-wide thinking, multi-component architecture, or requires holding many constraints simultaneously. Most code tasks are sonnet. read vs write (_r vs _rw): Use _rw ONLY when the user explicitly requests to create, edit, delete, or modify files, run a tool, or execute a scheduled action. Questions about code or asking for suggestions stay in _r even if they mention files. When in doubt: Default to haiku_r. It is better to respond fast with a simpler model than to over-escalate.",

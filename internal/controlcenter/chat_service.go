@@ -61,14 +61,16 @@ type ChatService struct {
 	Sessions     *chatsession.Store
 	EventLog     *eventlog.Logger
 	ChatStore    *ChatStore
-	Transcriber  *voice.Transcriber  // may be nil
-	Classify     ClassifyFunc        // injected router
-	ResolveModel ResolveModelFunc    // injected model resolver
-	Provider     provider.Provider   // injected Claude provider
-	Recaller     MemoryRecaller      // may be nil — auto-injects relevant memories
-	SkillStore   skills.Store        // may be nil — injects skill catalog into system prompts
+	Transcriber  *voice.Transcriber   // may be nil
+	Classify     ClassifyFunc         // injected router
+	ResolveModel ResolveModelFunc     // injected model resolver
+	Provider     provider.Provider    // injected Claude provider (default)
+	Registry     *provider.Registry   // may be nil — multi-backend dispatch
+	APIHistory   *provider.History    // may be nil — API provider history
+	Recaller     MemoryRecaller       // may be nil — auto-injects relevant memories
+	SkillStore   skills.Store         // may be nil — injects skill catalog into system prompts
 	Orchestrator *agents.Orchestrator // may be nil — multi-agent orchestrator
-	mu           sync.Mutex          // serialize Claude calls (single user v1)
+	mu           sync.Mutex           // serialize Claude calls (single user v1)
 
 	// Upload registry: upload_id → UploadEntry
 	uploads   map[string]*UploadEntry
@@ -373,7 +375,14 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	}
 	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
 
-	// Invoke Claude via Provider.
+	// Select provider based on tier backend.
+	prov := cs.Provider
+	isAPITier := tp.Backend == "openrouter"
+	if cs.Registry != nil {
+		prov = cs.Registry.ForBackend(tp.Backend)
+	}
+
+	// Invoke via selected Provider.
 	resumeID := cs.Sessions.Get(apiChatID)
 	params := provider.Params{
 		Model:         tp.Model,
@@ -382,6 +391,10 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		SystemPrompts: sysPromptTexts,
 		ResumeID:      resumeID,
 		DataDir:       cs.DataDir,
+	}
+	if isAPITier {
+		params.SessionKey = fmt.Sprintf("cc:%d", apiChatID)
+		params.ResumeID = "" // API tiers use history, not --resume
 	}
 
 	var progressFn provider.OnProgress
@@ -394,14 +407,14 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		}
 	}
 
-	result, err := cs.Provider.Invoke(ctx, prompt, params, progressFn)
+	result, err := prov.Invoke(ctx, prompt, params, progressFn)
 
-	// Retry without resume if session not found.
-	if err != nil && resumeID != "" && strings.Contains(err.Error(), "No conversation found") {
+	// Retry without resume if session not found (CLI only).
+	if err != nil && resumeID != "" && !isAPITier && strings.Contains(err.Error(), "No conversation found") {
 		log.Printf("[chat-api] session %s expired, starting fresh", resumeID)
 		cs.Sessions.Archive(apiChatID)
 		params.ResumeID = ""
-		result, err = cs.Provider.Invoke(ctx, prompt, params, nil)
+		result, err = prov.Invoke(ctx, prompt, params, nil)
 	}
 
 	if err != nil {
@@ -411,6 +424,8 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	// Update session.
 	if result.SessionID != "" {
 		cs.Sessions.SetWithContext(apiChatID, result.SessionID, tierName)
+	} else if isAPITier {
+		cs.Sessions.TouchContext(apiChatID, tierName)
 	}
 
 	// Extract reaction.
@@ -501,6 +516,9 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 // NewSession archives the current API chat session and optionally triggers onboarding.
 func (cs *ChatService) NewSession(onboard bool) string {
 	old := cs.Sessions.Archive(apiChatID)
+	if cs.APIHistory != nil {
+		cs.APIHistory.Clear(fmt.Sprintf("cc:%d", apiChatID))
+	}
 	if onboard {
 		memory.SetOnboarding(cs.ContextDir)
 	}
@@ -596,13 +614,15 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			model := t.Model
-			if cs.ResolveModel != nil {
+			// For CLI backend, resolve short names; for openrouter, use as-is.
+			if t.Backend != "openrouter" && cs.ResolveModel != nil {
 				model = cs.ResolveModel(t.Model)
 			}
 			return tierParams{
-				Model:  model,
-				Tools:  t.Tools,
-				Effort: t.Effort,
+				Model:   model,
+				Tools:   t.Tools,
+				Effort:  t.Effort,
+				Backend: t.Backend,
 			}
 		}
 	}
@@ -615,9 +635,10 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
-	Model  string
-	Tools  []string
-	Effort string
+	Model   string
+	Tools   []string
+	Effort  string
+	Backend string
 }
 
 // extractReactionTag parses [[react:EMOJI]] from the start of text.

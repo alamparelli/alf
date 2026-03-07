@@ -31,6 +31,7 @@ type Params struct {
 	ResumeID      string
 	DataDir       string   // working directory for Claude subprocess
 	Env           []string // additional env vars for subprocess (e.g. ALF_SIGNAL_SOCK)
+	SessionKey    string   // API history key (e.g. "tg:12345"); CLI ignores this
 }
 
 // Provider invokes Claude and returns a result.

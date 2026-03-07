@@ -1879,6 +1879,7 @@ function docsShowArticle(id) {
 let schedulesCache = null;
 let schedulesVisible = [];
 let schedulesInitialized = false;
+let schedulesFilter = 'all';
 
 const OUTPUTS = ['telegram', 'file', 'both', 'silent'];
 
@@ -1886,6 +1887,14 @@ function schedulesInit() {
   if (!schedulesInitialized) {
     schedulesInitialized = true;
     document.getElementById('schedulesAddBtn').addEventListener('click', () => schedulesShowModal(null));
+    document.getElementById('schedFilters').addEventListener('click', e => {
+      const btn = e.target.closest('.sched-filter');
+      if (!btn) return;
+      document.querySelectorAll('.sched-filter').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      schedulesFilter = btn.dataset.filter;
+      schedulesRender();
+    });
   }
   schedulesLoad();
 }
@@ -1901,11 +1910,40 @@ function schedulesRender() {
   const list = document.getElementById('schedulesList');
 
   // Filter out internal system jobs — only show user/Alf-created ones.
-  schedulesVisible = (schedulesCache || []).filter(j => !j.system);
+  let filtered = (schedulesCache || []).filter(j => !j.system);
+
+  // Sort by next_run descending (soonest first, no next_run at bottom).
+  filtered.sort((a, b) => {
+    if (!a.next_run && !b.next_run) return 0;
+    if (!a.next_run) return 1;
+    if (!b.next_run) return -1;
+    return new Date(a.next_run) - new Date(b.next_run);
+  });
+
+  // Apply filter.
+  const now = new Date();
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const weekEnd = new Date(todayEnd);
+  weekEnd.setDate(weekEnd.getDate() + (7 - weekEnd.getDay()));
+
+  if (schedulesFilter === 'recurring') {
+    filtered = filtered.filter(j => !j.auto_delete);
+  } else if (schedulesFilter === 'today') {
+    filtered = filtered.filter(j => j.next_run && new Date(j.next_run) <= todayEnd);
+  } else if (schedulesFilter === 'week') {
+    filtered = filtered.filter(j => j.next_run && new Date(j.next_run) <= weekEnd);
+  } else if (schedulesFilter === 'later') {
+    filtered = filtered.filter(j => !j.next_run || new Date(j.next_run) > weekEnd);
+  }
+
+  schedulesVisible = filtered;
   const visible = schedulesVisible;
 
   if (!visible.length) {
-    list.innerHTML = '<div class="task-empty"><div class="task-empty-icon">&#128197;</div>No scheduled jobs yet.<br><span style="font-size:0.8rem;opacity:0.7">Create jobs to run prompts or commands on a schedule.</span></div>';
+    const msg = schedulesFilter === 'all'
+      ? 'No scheduled jobs yet.<br><span style="font-size:0.8rem;opacity:0.7">Create jobs to run prompts or commands on a schedule.</span>'
+      : 'No jobs match this filter.';
+    list.innerHTML = '<div class="task-empty"><div class="task-empty-icon">&#128197;</div>' + msg + '</div>';
     return;
   }
 

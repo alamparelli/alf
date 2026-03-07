@@ -35,9 +35,10 @@ body {
 
 /* Compact icon grid for system tabs */
 .nav-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+  display: flex; flex-wrap: wrap; gap: 4px;
   padding: 0 0 8px;
 }
+.nav-grid .nav-icon { flex: 1 1 0; min-width: 0; }
 .nav-icon {
   display: flex; align-items: center; justify-content: center;
   padding: 10px 0; border-radius: 8px;
@@ -968,6 +969,16 @@ body:not(.light) .jv-bool { color: #ffab70; }
   letter-spacing: 0.05em; color: var(--text-dim);
 }
 .schedules-toolbar-right { margin-left: auto; }
+.sched-filters {
+  display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap;
+}
+.sched-filter {
+  padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-dim); font-size: 0.78rem;
+  cursor: pointer; transition: all 0.15s;
+}
+.sched-filter:hover { background: var(--border); color: var(--text); }
+.sched-filter.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .schedules-list {
   display: flex; flex-direction: column; gap: 10px;
 }

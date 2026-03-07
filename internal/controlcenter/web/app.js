@@ -2379,6 +2379,7 @@ const AVAILABLE_TOOLS = [
 
 const MODELS = ['haiku', 'sonnet', 'opus'];
 const EFFORTS = ['low', 'medium', 'high'];
+const BACKENDS = ['', 'cli', 'openrouter'];
 
 let tiersCache = null;
 let tiersInitialized = false;
@@ -2404,7 +2405,9 @@ function tiersRender() {
   const cfg = document.getElementById('tiersRouterConfig');
 
   // Router config summary
+  const routerBackendLabel = tiersCache.router_backend === 'openrouter' ? 'openrouter' : 'cli';
   cfg.innerHTML = '<div class="tiers-router-card">' +
+    '<div class="tiers-router-row"><span class="tiers-router-label">Router backend</span><span class="tiers-router-value">' + esc(routerBackendLabel) + '</span></div>' +
     '<div class="tiers-router-row"><span class="tiers-router-label">Router model</span><span class="tiers-router-value">' + esc(tiersCache.router_model || 'haiku') + '</span></div>' +
     '<div class="tiers-router-row"><span class="tiers-router-label">Default fallback</span><span class="tiers-router-value">' + esc(tiersCache.default_fallback || 'haiku_r') + '</span></div>' +
     '<div class="tiers-router-row"><button class="btn-sm" id="tiersEditRouterBtn">Edit router settings</button></div>' +
@@ -2426,6 +2429,7 @@ function tiersRender() {
     if (t.write_capable) badges.push('<span class="tier-badge tier-badge-write">write</span>');
     if (t.force_command) badges.push('<span class="tier-badge tier-badge-force">force</span>');
     if (t.routable) badges.push('<span class="tier-badge tier-badge-routable">routable</span>');
+    if (t.backend === 'openrouter') badges.push('<span class="tier-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">openrouter</span>');
     const tools = (t.tools || []).join(', ') || (t.write_capable ? 'all (write-capable)' : 'none');
     return '<div class="tier-card" data-idx="' + i + '">' +
       '<div class="tier-card-header">' +
@@ -2469,7 +2473,7 @@ function tiersRender() {
 
 function tiersShowModal(tier) {
   const isEdit = !!tier;
-  const t = tier || { name: '', model: 'haiku', priority: 0, enabled: true, routable: true, router_label: '', effort: 'low', tools: [], write_capable: false, force_command: false, instant: false, max_turns: 0, max_iterations: 0, timeout_minutes: 0, description: '' };
+  const t = tier || { name: '', model: 'haiku', priority: 0, enabled: true, routable: true, router_label: '', effort: 'low', tools: [], write_capable: false, force_command: false, instant: false, max_turns: 0, max_iterations: 0, timeout_minutes: 0, description: '', backend: '' };
 
   // Remove existing modal
   const old = document.getElementById('tierModal');
@@ -2482,13 +2486,16 @@ function tiersShowModal(tier) {
 
   const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (t.model === m ? ' selected' : '') + '>' + m + '</option>').join('');
   const effortOpts = ['', ...EFFORTS].map(e => '<option value="' + e + '"' + (t.effort === e ? ' selected' : '') + '>' + (e || '—') + '</option>').join('');
+  const backendOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((t.backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
+  const isOR = t.backend === 'openrouter';
 
   const html = '<div class="modal-backdrop" id="tierModal">' +
     '<div class="modal tier-modal">' +
       '<h3>' + (isEdit ? 'Edit Tier' : 'Add Tier') + '</h3>' +
       '<div class="tier-form">' +
         '<div class="form-row"><label>Name</label><input type="text" id="tfName" value="' + esc(t.name) + '"' + (isEdit ? ' readonly style="opacity:0.6"' : '') + '></div>' +
-        '<div class="form-row"><label>Model</label><select id="tfModel">' + modelOpts + '</select></div>' +
+        '<div class="form-row"><label>Backend</label><select id="tfBackend">' + backendOpts + '</select></div>' +
+        '<div class="form-row" id="tfModelRow"><label>Model</label>' + (isOR ? '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="tfModel">' + modelOpts + '</select>') + '</div>' +
         '<div class="form-row"><label>Priority</label><input type="number" id="tfPriority" value="' + t.priority + '" min="0" max="99"></div>' +
         '<div class="form-row"><label>Effort</label><select id="tfEffort">' + effortOpts + '</select></div>' +
         '<div class="form-row"><label>Router label</label><input type="text" id="tfLabel" value="' + esc(t.router_label || '') + '" placeholder="Description for the router"></div>' +
@@ -2524,13 +2531,26 @@ function tiersShowModal(tier) {
   toggleTools();
   wcCheck.addEventListener('change', toggleTools);
 
+  // Swap model select/input when backend changes
+  document.getElementById('tfBackend').addEventListener('change', function() {
+    const row = document.getElementById('tfModelRow');
+    const curVal = document.getElementById('tfModel').value;
+    if (this.value === 'openrouter') {
+      row.innerHTML = '<label>Model</label><input type="text" id="tfModel" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
+    } else {
+      const opts = MODELS.map(m => '<option value="' + m + '"' + (curVal === m ? ' selected' : '') + '>' + m + '</option>').join('');
+      row.innerHTML = '<label>Model</label><select id="tfModel">' + opts + '</select>';
+    }
+  });
+
   document.getElementById('tierModalCancel').addEventListener('click', () => document.getElementById('tierModal').remove());
   document.getElementById('tierModal').addEventListener('click', e => { if (e.target.id === 'tierModal') document.getElementById('tierModal').remove(); });
 
   document.getElementById('tierModalSave').addEventListener('click', () => {
+    const backend = document.getElementById('tfBackend').value;
     const newTier = {
       name: document.getElementById('tfName').value.trim(),
-      model: document.getElementById('tfModel').value,
+      model: document.getElementById('tfModel').value.trim(),
       priority: parseInt(document.getElementById('tfPriority').value, 10) || 0,
       enabled: document.getElementById('tfEnabled').checked,
       routable: document.getElementById('tfRoutable').checked,
@@ -2543,6 +2563,7 @@ function tiersShowModal(tier) {
       effort: document.getElementById('tfEffort').value,
       write_capable: document.getElementById('tfWriteCapable').checked,
       force_command: document.getElementById('tfForceCmd').checked,
+      backend: backend,
       tools: [],
     };
     if (!newTier.write_capable) {
@@ -2556,6 +2577,7 @@ function tiersShowModal(tier) {
     if (!newTier.description) delete newTier.description;
     if (!newTier.effort) delete newTier.effort;
     if (!newTier.tools || !newTier.tools.length) delete newTier.tools;
+    if (!newTier.backend || newTier.backend === 'cli') delete newTier.backend;
 
     if (!newTier.name) { toast('Name is required', 'error'); return; }
 
@@ -2576,14 +2598,17 @@ function tiersShowRouterModal() {
   if (old) old.remove();
 
   const c = tiersCache;
+  const isOR = c.router_backend === 'openrouter';
   const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (c.router_model === m ? ' selected' : '') + '>' + m + '</option>').join('');
   const fbOpts = (c.tiers || []).map(t => '<option value="' + t.name + '"' + (c.default_fallback === t.name ? ' selected' : '') + '>' + t.name + '</option>').join('');
+  const rbOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((c.router_backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
 
   const html = '<div class="modal-backdrop" id="tierRouterModal">' +
     '<div class="modal tier-modal">' +
       '<h3>Router Settings</h3>' +
       '<div class="tier-form">' +
-        '<div class="form-row"><label>Router model</label><select id="trModel">' + modelOpts + '</select></div>' +
+        '<div class="form-row"><label>Router backend</label><select id="trBackend">' + rbOpts + '</select></div>' +
+        '<div class="form-row" id="trModelRow"><label>Router model</label>' + (isOR ? '<input type="text" id="trModel" value="' + esc(c.router_model || '') + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="trModel">' + modelOpts + '</select>') + '</div>' +
         '<div class="form-row"><label>Default fallback</label><select id="trFallback">' + fbOpts + '</select></div>' +
         '<div class="form-row"><label>Instant label</label><input type="text" id="trInstant" value="' + esc(c.router_instant_label || '') + '"></div>' +
         '<div class="form-row"><label>Distinctions</label><textarea class="json-editor" id="trDistinctions" rows="4">' + esc(c.router_distinctions || '') + '</textarea></div>' +
@@ -2596,11 +2621,26 @@ function tiersShowRouterModal() {
   '</div>';
 
   document.body.insertAdjacentHTML('beforeend', html);
+
+  // Swap model select/input when backend changes
+  document.getElementById('trBackend').addEventListener('change', function() {
+    const row = document.getElementById('trModelRow');
+    const curVal = document.getElementById('trModel').value;
+    if (this.value === 'openrouter') {
+      row.innerHTML = '<label>Router model</label><input type="text" id="trModel" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
+    } else {
+      const opts = MODELS.map(m => '<option value="' + m + '"' + (curVal === m ? ' selected' : '') + '>' + m + '</option>').join('');
+      row.innerHTML = '<label>Router model</label><select id="trModel">' + opts + '</select>';
+    }
+  });
+
   document.getElementById('trCancel').addEventListener('click', () => document.getElementById('tierRouterModal').remove());
   document.getElementById('tierRouterModal').addEventListener('click', e => { if (e.target.id === 'tierRouterModal') document.getElementById('tierRouterModal').remove(); });
 
   document.getElementById('trSave').addEventListener('click', () => {
-    tiersCache.router_model = document.getElementById('trModel').value;
+    const backend = document.getElementById('trBackend').value;
+    tiersCache.router_backend = backend || '';
+    tiersCache.router_model = document.getElementById('trModel').value.trim();
     tiersCache.default_fallback = document.getElementById('trFallback').value;
     tiersCache.router_instant_label = document.getElementById('trInstant').value.trim();
     tiersCache.router_distinctions = document.getElementById('trDistinctions').value.trim();

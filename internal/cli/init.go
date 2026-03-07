@@ -73,15 +73,16 @@ var emailRegex = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
 // setupProfile stores previous init values so re-running `alf init` pre-fills them.
 type setupProfile struct {
-	Dir       string `json:"dir,omitempty"`
-	BotToken  string `json:"bot_token,omitempty"`
-	ChatID    string `json:"chat_id,omitempty"`
-	HTTPS     bool   `json:"https,omitempty"`
-	Domain    string `json:"domain,omitempty"`
-	AcmeEmail string `json:"acme_email,omitempty"`
-	Port      string `json:"port,omitempty"`
-	Host      string `json:"host,omitempty"`
-	Timezone  string `json:"timezone,omitempty"`
+	Dir            string `json:"dir,omitempty"`
+	BotToken       string `json:"bot_token,omitempty"`
+	ChatID         string `json:"chat_id,omitempty"`
+	HTTPS          bool   `json:"https,omitempty"`
+	Domain         string `json:"domain,omitempty"`
+	AcmeEmail      string `json:"acme_email,omitempty"`
+	Port           string `json:"port,omitempty"`
+	Host           string `json:"host,omitempty"`
+	Timezone       string `json:"timezone,omitempty"`
+	OpenRouterKey  bool   `json:"openrouter_key,omitempty"` // true if key was set
 }
 
 func setupProfilePath() string {
@@ -182,6 +183,9 @@ func RunInit() {
 	profile := loadSetupProfile()
 	profile.Timezone = tz
 	saveSetupProfile(profile)
+
+	// Step 5c: Optional OpenRouter API key
+	promptOpenRouter(reader, dir, prev.OpenRouterKey)
 
 	// Set default image, allow override via ALF_IMAGE env var.
 	composeData.Image = "ghcr.io/alamparelli/alf:latest"
@@ -746,6 +750,49 @@ func pullAndStart(dir, botName string, httpsEnabled bool) {
 	}
 
 	PrintWarning("ALF started but health check inconclusive. Check with: alf status")
+}
+
+func promptOpenRouter(reader *bufio.Reader, dir string, hadKey bool) {
+	hint := "N"
+	if hadKey {
+		hint = "Y"
+	}
+	fmt.Printf("\n  OpenRouter gives access to all LLM models (GPT, Gemini, Llama, etc.) via a single API key.")
+	fmt.Printf("\n  Use OpenRouter as an alternative backend? [%s]: ", hint)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+	if input == "" {
+		if !hadKey {
+			return
+		}
+		input = "y"
+	}
+	if input != "y" && input != "yes" {
+		return
+	}
+
+	fmt.Print("  OpenRouter API key (sk-or-...): ")
+	key, _ := reader.ReadString('\n')
+	key = strings.TrimSpace(key)
+	if key == "" {
+		if hadKey {
+			PrintCheck("Keeping existing OpenRouter key")
+		}
+		return
+	}
+	if !strings.HasPrefix(key, "sk-or-") {
+		PrintWarning("Key doesn't start with sk-or- — saving anyway")
+	}
+	if err := SetSecret(dir, "openrouter_api_key", key); err != nil {
+		PrintError(fmt.Sprintf("Failed to save OpenRouter key: %v", err))
+		return
+	}
+	PrintCheck("OpenRouter API key saved")
+
+	// Update profile.
+	profile := loadSetupProfile()
+	profile.OpenRouterKey = true
+	saveSetupProfile(profile)
 }
 
 func fixClaudeOwnership() {

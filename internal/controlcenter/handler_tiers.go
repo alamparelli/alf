@@ -51,15 +51,22 @@ func validateTiersConfig(cfg *TiersConfig) error {
 			return errVal("duplicate tier name: " + t.Name)
 		}
 		names[t.Name] = true
-		if !AllowedModels[t.Model] {
+		// Skip model validation for openrouter tiers (any model ID is valid).
+		if t.Backend != "openrouter" && !AllowedModels[t.Model] {
 			return errVal("invalid model for tier " + t.Name + ": " + t.Model)
 		}
 		if t.Effort != "" && !AllowedEfforts[t.Effort] {
 			return errVal("invalid effort for tier " + t.Name + ": " + t.Effort)
 		}
+		if !AllowedBackends[t.Backend] {
+			return errVal("invalid backend for tier " + t.Name + ": " + t.Backend)
+		}
 	}
-	if cfg.RouterModel != "" && !AllowedModels[cfg.RouterModel] {
+	if cfg.RouterModel != "" && cfg.RouterBackend != "openrouter" && !AllowedModels[cfg.RouterModel] {
 		return errVal("invalid router_model: " + cfg.RouterModel)
+	}
+	if !AllowedBackends[cfg.RouterBackend] {
+		return errVal("invalid router_backend: " + cfg.RouterBackend)
 	}
 	return nil
 }

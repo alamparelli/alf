@@ -82,7 +82,7 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string 
 		b.WriteString(fmt.Sprintf("\nKey distinctions: %s\n", tiers.RouterDistinctions))
 	}
 
-	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, or schedule ANYTHING (files, tasks, settings, status, jobs, schedules, etc.).\n")
+	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, schedule, fix, polish, apply, correct, repair, improve, refactor, rewrite, implement, build, deploy, add, rename, move, replace, merge, or generate ANYTHING (files, tasks, settings, status, jobs, schedules, code, etc.). When in doubt, prefer _rw over _r.\n")
 
 	// Orchestrator routing hint (only if orchestrator tier is available).
 	if hasOrchestrator(tiers) {
@@ -118,6 +118,7 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string 
 	b.WriteString("\nYou maintain conversation context across messages. After each tier response, you'll receive a summary like:\n")
 	b.WriteString("[tierName (access) responded: brief summary]\n")
 	b.WriteString("Use this to track what happened and make better routing decisions for follow-up messages.\n")
+	b.WriteString("IMPORTANT: Even for follow-up messages, if the user requests an action (fix, apply, create, modify, etc.), route to a write-capable tier — do NOT stick to a read-only tier just because it handled the previous message.\n")
 
 	// 7. Response format.
 	b.WriteString("\nRespond with ONLY a JSON object:")
@@ -143,12 +144,23 @@ func ParseResponse(raw string, tiers *cc.TiersConfig) Result {
 
 // InterpretRaw applies the full interpretation logic to raw classifier output:
 // parse JSON, handle direct responses, fallback on text scan, fallback tier.
+// Includes a programmatic guardrail: if the selected tier is read-only but
+// the message has write intent, it upgrades to the lowest write-capable tier.
 func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 	valid := ValidTierSet(tiers)
 	result := parseResponse(raw, valid)
 
 	// Router routed to a valid tier.
 	if result.Tier != "" {
+		// Guardrail: upgrade read-only → write-capable if write intent detected.
+		if !tierIsWriteCapable(result.Tier, tiers) && HasWriteIntent(message) {
+			if wt := lowestWriteTier(tiers); wt != "" {
+				log.Printf("router: %s → %s upgraded to %s (write intent detected)", truncate(message, 60), result.Tier, wt)
+				result.Tier = wt
+				result.Reason += " [upgraded: write intent]"
+				return result
+			}
+		}
 		log.Printf("router: %s → %s (%s)", truncate(message, 60), result.Tier, result.Reason)
 		return result
 	}
@@ -242,7 +254,7 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 		b.WriteString(fmt.Sprintf("\nKey distinctions: %s\n", input.Tiers.RouterDistinctions))
 	}
 
-	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, or schedule ANYTHING (files, tasks, settings, status, jobs, schedules, etc.).\n")
+	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, schedule, fix, polish, apply, correct, repair, improve, refactor, rewrite, implement, build, deploy, add, rename, move, replace, merge, or generate ANYTHING (files, tasks, settings, status, jobs, schedules, code, etc.). When in doubt, prefer _rw over _r.\n")
 
 	if hasOrchestrator(input.Tiers) {
 		b.WriteString("IMPORTANT: Route to \"orchestrator\" when the user asks for multi-step work requiring parallel agents, team coordination, or explicitly mentions agents/orchestrator. Examples: \"lance une équipe\", \"use agents to\", \"coordinate multiple tasks\", complex research+write+review workflows. Do NOT route to sonnet/opus and expect them to call the orchestrator — only the orchestrator tier can coordinate agents.\n")
@@ -250,7 +262,7 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 
 	if input.MessageCount > 0 && input.LastTier != "" {
 		b.WriteString(fmt.Sprintf("\nConversation context: Message #%d in session. Previous message handled by %q.\n", input.MessageCount+1, input.LastTier))
-		b.WriteString("If the message is a short reply (\"oui\", \"non\", \"ok\", \"yes\", \"no\", \"continue\") that clearly answers or continues the previous exchange, route to the same tier (\"" + input.LastTier + "\"). But if it's a new greeting or new topic, route normally.\n")
+		b.WriteString("If the message is a short reply (\"oui\", \"non\", \"ok\", \"yes\", \"no\", \"continue\") that clearly answers or continues the previous exchange, route to the same tier (\"" + input.LastTier + "\"). But if the message requests any action (fix, apply, create, modify, etc.) or is a new topic, route based on intent — do NOT stick to the previous tier if it lacks write capability.\n")
 	}
 
 	routerPromptPath := filepath.Join(input.ConfigDir, "router-prompt.md")
@@ -353,6 +365,71 @@ func hasOrchestrator(tiers *cc.TiersConfig) bool {
 		}
 	}
 	return false
+}
+
+// writeIntentVerbs are words that signal the user wants something modified.
+// Checked with word-boundary detection to avoid false positives.
+var writeIntentVerbs = []string{
+	"fix", "polish", "apply", "correct", "repair", "patch", "improve",
+	"refactor", "clean up", "cleanup", "rewrite", "rework",
+	"create", "modify", "delete", "remove", "update", "set", "mark",
+	"change", "edit", "enable", "disable", "mute", "silence",
+	"configure", "schedule", "install", "build", "deploy", "run",
+	"write", "add", "rename", "move", "replace", "merge", "split",
+	"implement", "execute", "generate", "transform", "convert",
+}
+
+// HasWriteIntent returns true if the message contains words signaling
+// the user wants something created, modified, or fixed.
+func HasWriteIntent(message string) bool {
+	lower := strings.ToLower(message)
+	for _, verb := range writeIntentVerbs {
+		idx := strings.Index(lower, verb)
+		if idx == -1 {
+			continue
+		}
+		// Word boundary check: character before must be start-of-string or non-letter.
+		if idx > 0 {
+			prev := rune(lower[idx-1])
+			if prev >= 'a' && prev <= 'z' {
+				continue
+			}
+		}
+		// Character after must be end-of-string or non-letter.
+		end := idx + len(verb)
+		if end < len(lower) {
+			next := rune(lower[end])
+			if next >= 'a' && next <= 'z' {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// tierIsWriteCapable returns true if the named tier has WriteCapable set.
+func tierIsWriteCapable(name string, tiers *cc.TiersConfig) bool {
+	for _, t := range tiers.Tiers {
+		if t.Name == name {
+			return t.WriteCapable
+		}
+	}
+	return false
+}
+
+// lowestWriteTier returns the name of the lowest-priority enabled, routable,
+// write-capable tier. Returns "" if none found.
+func lowestWriteTier(tiers *cc.TiersConfig) string {
+	best := ""
+	bestPriority := int(^uint(0) >> 1)
+	for _, t := range tiers.Tiers {
+		if t.Enabled && t.Routable && t.WriteCapable && t.Priority < bestPriority {
+			best = t.Name
+			bestPriority = t.Priority
+		}
+	}
+	return best
 }
 
 func truncate(s string, n int) string {

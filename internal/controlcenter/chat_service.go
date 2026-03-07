@@ -282,8 +282,8 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		"source": "api",
 	})
 
-	// Orchestrator dispatch: delegate to multi-agent coordinator.
-	if tierName == "orchestrator" && cs.Orchestrator != nil {
+	// Agent dispatch: delegate to multi-agent coordinator.
+	if tierName == "agent" && cs.Orchestrator != nil {
 		var orchSysPrompts []string
 		orchSysArgs := memory.CollectPrompts(cs.ContextDir)
 		for i := 0; i < len(orchSysArgs)-1; i += 2 {
@@ -311,7 +311,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchSysPrompts, agents.RunConfig{}, onProgress)
 		if orchErr != nil {
-			return fmt.Errorf("orchestrator: %w", orchErr)
+			return fmt.Errorf("agent: %w", orchErr)
 		}
 
 		assistantMsg := ChatMessage{
@@ -319,8 +319,8 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			Role:      "assistant",
 			Text:      orchResult,
 			Timestamp: time.Now(),
-			Model:     "orchestrator",
-			Tier:      "orchestrator",
+			Model:     "agent",
+			Tier:      "agent",
 			CostUSD:   orchMeta.TotalCost,
 		}
 		cs.ChatStore.Append(assistantMsg)
@@ -328,12 +328,12 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		onEvent(ChatEvent{Type: "text", Data: map[string]string{"text": orchResult}})
 		onEvent(ChatEvent{Type: "done", Data: ChatDoneData{
 			MsgID:   assistantMsg.ID,
-			Model:   "orchestrator",
+			Model:   "agent",
 			CostUSD: orchMeta.TotalCost,
-			Tier:    "orchestrator",
+			Tier:    "agent",
 		}})
 
-		cs.EventLog.Log("orchestrator_out", map[string]any{
+		cs.EventLog.Log("agent_out", map[string]any{
 			"iterations":  orchMeta.Iterations,
 			"total_cost":  orchMeta.TotalCost,
 			"agent_calls": len(orchMeta.AgentCalls),

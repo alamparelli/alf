@@ -1,12 +1,12 @@
 ---
 category: Advanced
-tags: agents, orchestrator, teams, multi-agent, delegation
+tags: agents, agent, teams, multi-agent, delegation
 order: 15
 ---
 
 # Agent Teams
 
-ALF can coordinate multiple specialized AI agents to tackle complex tasks. An orchestrator (powered by Opus) breaks down your request, delegates sub-tasks to agents, reviews their results, and synthesizes a final answer.
+ALF can coordinate multiple specialized AI agents to tackle complex tasks. An agent (powered by Opus) breaks down your request, delegates sub-tasks to agents, reviews their results, and synthesizes a final answer.
 
 Each agent works in an isolated session — it only sees the specific sub-task assigned to it. No context bleeds between agents.
 
@@ -14,29 +14,29 @@ Each agent works in an isolated session — it only sees the specific sub-task a
 
 ### Automatic routing
 
-When the orchestrator tier is enabled, the router automatically detects multi-step tasks and routes them to the orchestrator. Phrases like "use agents", "lance une équipe", "coordinate multiple tasks", or complex research+write+review workflows trigger orchestrator routing.
+When the agent tier is enabled, the router automatically detects multi-step tasks and routes them to the agent. Phrases like "use agents", "lance une équipe", "coordinate multiple tasks", or complex research+write+review workflows trigger agent routing.
 
 ### Force command
 
-In Telegram or CC Chat, use `/orchestrator` followed by your request:
+In Telegram or CC Chat, use `/agent` followed by your request:
 
 ```
-/orchestrator Research the latest Go 1.23 features and write a blog post about them
+/agent Research the latest Go 1.23 features and write a blog post about them
 ```
 
-The orchestrator reads your message, decides which agents to involve, delegates work, and returns a combined result.
+The agent reads your message, decides which agents to involve, delegates work, and returns a combined result.
 
 ### Monitoring tasks
 
-Open the **Tasks** tab in the Control Center to see running and completed orchestrator tasks. Each card shows the prompt, number of iterations, agent calls, cost, and elapsed time. Click a card to expand and see individual agent results.
+Open the **Tasks** tab in the Control Center to see running and completed agent tasks. Each card shows the prompt, number of iterations, agent calls, cost, and elapsed time. Click a card to expand and see individual agent results.
 
 ### Scheduled jobs
 
-You can schedule orchestrator jobs using the schedule tool:
+You can schedule agent jobs using the schedule tool:
 
 ```bash
 schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
-  --tier orchestrator --prompt "Analyze this week's git commits and write a summary report" \
+  --tier agent --prompt "Analyze this week's git commits and write a summary report" \
   --output telegram
 ```
 
@@ -44,13 +44,13 @@ This runs every Monday at 9 AM, using the full agent team pipeline.
 
 ### When to use it
 
-Use the orchestrator for:
+Use the agent for:
 
 - Complex tasks requiring multiple perspectives (research + writing + review)
 - Tasks that benefit from specialization (one agent researches, another writes)
 - Multi-step workflows where quality matters more than speed
 
-> Don't use the orchestrator for simple questions or quick tasks. Regular tiers handle those faster and cheaper. The orchestrator adds overhead — it's worth it only when the task is complex enough to benefit from delegation.
+> Don't use the agent for simple questions or quick tasks. Regular tiers handle those faster and cheaper. The agent adds overhead — it's worth it only when the task is complex enough to benefit from delegation.
 
 ## The starter team
 
@@ -62,7 +62,7 @@ ALF ships with a bundled starter team of 3 agents:
 | **writer** | Drafts text, can write files | Sonnet |
 | **reviewer** | Reviews quality, finds issues, suggests improvements | Sonnet |
 
-The orchestrator (Opus) decides which agents to call, what to ask them, and whether the results are good enough — or if another round of delegation is needed.
+The agent (Opus) decides which agents to call, what to ask them, and whether the results are good enough — or if another round of delegation is needed.
 
 ## Creating custom teams
 
@@ -95,17 +95,17 @@ Here's the full format:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | Yes | Team name. Used as the `team/` prefix when the orchestrator delegates. |
-| `description` | Yes | What the team does. The orchestrator reads this to decide when to use the team. |
+| `name` | Yes | Team name. Used as the `team/` prefix when the agent delegates. |
+| `description` | Yes | What the team does. The agent reads this to decide when to use the team. |
 | `max_agents_per_request` | No | Max agents running in parallel. Default: 3 |
-| `global_timeout_minutes` | No | Max time for the entire orchestration. Default: 60 |
+| `global_timeout_minutes` | No | Max time for the entire agent run. Default: 60 |
 
 ### Agent fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Agent identifier. Used in `team/agent` format when delegating. |
-| `description` | Yes | What the agent does. The orchestrator reads this to decide who gets which task. |
+| `description` | Yes | What the agent does. The agent reads this to decide who gets which task. |
 | `model` | Yes | Which model to use: `haiku`, `sonnet`, or `opus`. |
 | `system_prompt` | Yes | Instructions the agent follows. Be specific about what it should do and how. |
 | `tools` | No | List of tools the agent can use (e.g. `WebSearch`, `Read`, `Edit`, `Write`, `Bash`). |
@@ -170,37 +170,37 @@ ALF will generate the JSON. You can then save it via the **Workspace Explorer** 
 - **Give agents clear, specific system prompts.** Vague prompts produce vague results. Tell each agent exactly what it should do and what format to use.
 - **Use the cheapest model that can do the job.** Haiku for simple extraction or formatting. Sonnet for most tasks. Opus only when you truly need deep reasoning.
 - **Give agents enough turns.** Start with 5-10 for agents that use tools (Read, WebSearch, Write). Use 2-3 only for review-only agents.
-- **The orchestrator can re-delegate.** If an agent's result is poor, the orchestrator sends it back with feedback. You don't need to handle retries yourself.
-- **You can have multiple team files.** Drop as many JSON files into `config.d/agents/` as you want. The orchestrator sees all teams and picks the right agents for each task.
+- **The agent can re-delegate.** If an agent's result is poor, the agent sends it back with feedback. You don't need to handle retries yourself.
+- **You can have multiple team files.** Drop as many JSON files into `config.d/agents/` as you want. The agent sees all teams and picks the right agents for each task.
 
 ## How it works under the hood
 
-1. The orchestrator receives your message along with ALF context and the full agent catalog.
+1. The agent receives your message along with ALF context and the full agent catalog.
 2. It outputs a JSON delegation plan: `{"delegates": [{"agent": "team/agent", "task": "..."}]}`
 3. ALF runs the delegated agents in parallel, each in an isolated working directory.
-4. Agent results are sent back to the orchestrator.
-5. The orchestrator either delegates more work or outputs the final answer: `{"response": "..."}`
-6. This loop continues for up to 10 iterations (configurable via the `max_turns` field in the orchestrator tier).
+4. Agent results are sent back to the agent.
+5. The agent either delegates more work or outputs the final answer: `{"response": "..."}`
+6. This loop continues for up to 10 iterations (configurable via the `max_turns` field in the agent tier).
 
-The orchestrator runs **non-blocking** — you can continue chatting with ALF while it works in the background. Progress updates appear as animated status messages in Telegram.
+The agent runs **non-blocking** — you can continue chatting with ALF while it works in the background. Progress updates appear as animated status messages in Telegram.
 
-### Orchestrator tier settings
+### Agent tier settings
 
-The orchestrator tier in `tiers.json` controls how the orchestrator brain behaves:
+The agent tier in `tiers.json` controls how the agent brain behaves:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `model` | `opus` | Model used for the orchestrator brain (reasoning and delegation). |
-| `effort` | `medium` | Thinking effort for the orchestrator brain. `medium` is recommended — `high` uses extended thinking which consumes more turns. |
-| `max_turns` | `10` | Max turns per orchestrator brain call. The brain outputs JSON text only (no tools). |
-| `max_iterations` | `10` | How many delegate→synthesize cycles. Each cycle = one orchestrator call + agent delegation. |
-| `timeout_minutes` | `60` | Hard timeout for the entire orchestration run. Also bounded by each team's `global_timeout_minutes`. |
+| `model` | `opus` | Model used for the agent brain (reasoning and delegation). |
+| `effort` | `medium` | Thinking effort for the agent brain. `medium` is recommended — `high` uses extended thinking which consumes more turns. |
+| `max_turns` | `10` | Max turns per agent brain call. The brain outputs JSON text only (no tools). |
+| `max_iterations` | `10` | How many delegate→synthesize cycles. Each cycle = one agent call + agent delegation. |
+| `timeout_minutes` | `60` | Hard timeout for the entire agent run. Also bounded by each team's `global_timeout_minutes`. |
 
-To enable the orchestrator, set `"enabled": true` in `tiers.json`. The orchestrator is disabled by default.
+To enable the agent, set `"enabled": true` in `tiers.json`. The agent is disabled by default.
 
-> The orchestrator brain has no tools — it only outputs JSON text. If the brain repeatedly hits "turn limit reached", increase `max_turns`. If tasks time out before completing, increase `max_iterations` or `timeout_minutes`.
+> The agent brain has no tools — it only outputs JSON text. If the brain repeatedly hits "turn limit reached", increase `max_turns`. If tasks time out before completing, increase `max_iterations` or `timeout_minutes`.
 
-> The entire flow is automatic. You send one message, and the orchestrator handles all the coordination. You only see the final synthesized answer.
+> The entire flow is automatic. You send one message, and the agent handles all the coordination. You only see the final synthesized answer.
 
 ## What's next?
 

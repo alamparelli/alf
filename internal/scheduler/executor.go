@@ -125,7 +125,7 @@ func (e *Engine) executeJob(j *Job) {
 			log.Printf("scheduler: [%s] DEPRECATION: direct job using prompt instead of command — migrate to --command", j.ID)
 			text = j.Prompt
 		}
-	} else if j.Tier == "orchestrator" && e.cfg.Orchestrator != nil {
+	} else if j.Tier == "agent" && e.cfg.Orchestrator != nil {
 		text, err = e.invokeOrchestrator(j)
 	} else {
 		text, err = e.invokeLLM(j)

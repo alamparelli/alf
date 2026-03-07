@@ -172,6 +172,58 @@ func TestSessionStore_UnknownID(t *testing.T) {
 	}
 }
 
+func TestSessionStore_MaxSessionsEvictsOldest(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	ss := NewSessionStore(func() time.Time { return now })
+	ss.SetMaxSessions(2)
+
+	// Issue 2 sessions.
+	id1, _ := ss.Issue(100, 24*time.Hour)
+	now = now.Add(time.Minute)
+	id2, _ := ss.Issue(100, 24*time.Hour)
+
+	if !ss.Valid(id1) || !ss.Valid(id2) {
+		t.Fatal("both sessions should be valid")
+	}
+
+	// Issue a 3rd — oldest (id1) should be evicted.
+	now = now.Add(time.Minute)
+	id3, _ := ss.Issue(100, 24*time.Hour)
+
+	if ss.Valid(id1) {
+		t.Error("oldest session should have been evicted")
+	}
+	if !ss.Valid(id2) {
+		t.Error("second session should still be valid")
+	}
+	if !ss.Valid(id3) {
+		t.Error("new session should be valid")
+	}
+}
+
+func TestSessionStore_MaxSessionsPerChatID(t *testing.T) {
+	ss := NewSessionStore(nil)
+	ss.SetMaxSessions(2)
+
+	// Sessions for different chatIDs don't interfere.
+	a1, _ := ss.Issue(100, 24*time.Hour)
+	a2, _ := ss.Issue(100, 24*time.Hour)
+	b1, _ := ss.Issue(200, 24*time.Hour)
+
+	// Adding a 3rd for chatID=100 evicts one, but chatID=200 is untouched.
+	a3, _ := ss.Issue(100, 24*time.Hour)
+
+	if ss.Valid(a1) {
+		t.Error("oldest session for chatID=100 should be evicted")
+	}
+	if !ss.Valid(a2) || !ss.Valid(a3) {
+		t.Error("remaining sessions for chatID=100 should be valid")
+	}
+	if !ss.Valid(b1) {
+		t.Error("session for chatID=200 should be unaffected")
+	}
+}
+
 func TestFileSessionStore_PersistAcrossRestarts(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/sessions.json"

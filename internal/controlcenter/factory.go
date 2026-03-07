@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
 )
 
@@ -28,6 +29,9 @@ type Deps struct {
 	Orchestrator   *agents.Orchestrator // nil if orchestrator not available
 	MemStore       MemoryStorer       // nil if memory unavailable
 	MemProvider    provider.Provider  // nil if memory unavailable
+	Scheduler      ScheduleEngine     // nil if scheduler unavailable
+	FirewallStore  *firewall.Store     // nil if firewall unavailable
+	FirewallProxy  *firewall.Proxy     // nil if firewall unavailable
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS
@@ -89,6 +93,11 @@ func HandlerFactory(deps Deps) http.Handler {
 		Reader: deps.LogReader,
 	})
 
+	mux.Handle("/api/tiers", &TiersHandler{
+		TierStore: deps.TierStore,
+		Notifier:  deps.Notifier,
+	})
+
 	// Resource CRUD routes.
 	mux.Handle("/api/context/", &ResourceHandler{
 		Store: deps.ContextStore,
@@ -135,10 +144,22 @@ func HandlerFactory(deps Deps) http.Handler {
 		})
 	}
 
+	// Scheduled jobs.
+	mux.Handle("/api/schedules", &SchedulesHandler{
+		Engine: deps.Scheduler,
+	})
+
 	// Orchestrator tasks.
 	mux.Handle("/api/tasks", &TasksHandler{
 		Orchestrator: deps.Orchestrator,
 		DataDir:      deps.DataDir,
+	})
+
+	// Firewall.
+	mux.Handle("/api/firewall", &FirewallHandler{
+		Store:    deps.FirewallStore,
+		Proxy:    deps.FirewallProxy,
+		Notifier: deps.Notifier,
 	})
 
 	// Docs (embedded markdown).

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/firewall"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/gittrack"
@@ -207,6 +208,26 @@ func main() {
 	// Seed default tiers.json if not present (from image-embedded copy).
 	seedDefaultTiers(configDir)
 
+	// Start outbound traffic firewall proxy.
+	fwStore := firewall.NewStore(configDir)
+	fwCfg, err := fwStore.Load()
+	if err != nil {
+		log.Printf("warning: failed to load firewall config: %v — using defaults", err)
+		fwCfg = firewall.DefaultConfig()
+	}
+	fwProxy := firewall.NewProxy(fwCfg)
+	go func() {
+		addr := fmt.Sprintf("127.0.0.1:%d", fwCfg.Port)
+		log.Printf("[firewall] proxy starting on %s (mode=%s, %d rules)", addr, fwCfg.Mode, len(fwCfg.Rules))
+		if err := http.ListenAndServe(addr, fwProxy.Handler()); err != nil {
+			log.Printf("[firewall] proxy error: %v", err)
+		}
+	}()
+	proxyURL := fmt.Sprintf("http://127.0.0.1:%d", fwCfg.Port)
+	os.Setenv("HTTP_PROXY", proxyURL)
+	os.Setenv("HTTPS_PROXY", proxyURL)
+	os.Setenv("NO_PROXY", "127.0.0.1,localhost")
+
 	// Load initial tiers config.
 	tierStore := cc.NewFileTierStore(cc.TiersPath(configDir))
 	if err := tierStore.Reload(); err != nil {
@@ -380,7 +401,7 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, schedAdapter)
+		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, schedAdapter, fwStore, fwProxy)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -559,6 +580,12 @@ func main() {
 					log.Printf("agents reload error: %v", err)
 				} else {
 					log.Printf("agents reloaded (%d teams)", len(agentStore.All()))
+				}
+			case cc.ReloadFirewall:
+				if newFWCfg, err := fwStore.Load(); err == nil {
+					fwProxy.Reload(newFWCfg)
+				} else {
+					log.Printf("firewall reload error: %v", err)
 				}
 			}
 		default:
@@ -2997,6 +3024,7 @@ func watchConfigFiles(configDir string, reloadCh chan cc.ReloadEvent) {
 	entries := []watchEntry{
 		{cc.TiersPath(configDir), cc.ReloadTiers},
 		{filepath.Join(configDir, "config.json"), cc.ReloadConfig},
+		{filepath.Join(configDir, "firewall.json"), cc.ReloadFirewall},
 	}
 
 	modTimes := make(map[string]time.Time)

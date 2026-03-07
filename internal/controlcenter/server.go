@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
 )
 
@@ -27,7 +28,7 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator) (*Server, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy) (*Server, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore, pageStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	var chatStore *ChatStore
@@ -69,6 +70,9 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		MemStore:       memStore,
 		MemProvider:    memProvider,
 		Orchestrator:   orchestrator,
+		Scheduler:      scheduler,
+		FirewallStore:  fwStore,
+		FirewallProxy:  fwProxy,
 		AuthToken:      authToken,
 		AllowedOrigin:    strings.TrimRight(externalURL, "/"),
 		SecureCookies:    strings.HasPrefix(externalURL, "https://"),

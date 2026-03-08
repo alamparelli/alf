@@ -68,6 +68,7 @@ type RunConfig struct {
 type TaskMeta struct {
 	ID          string        `json:"id"`
 	Prompt      string        `json:"prompt,omitempty"`
+	Response    string        `json:"response,omitempty"`
 	StartedAt   time.Time     `json:"started_at"`
 	CompletedAt *time.Time    `json:"completed_at,omitempty"`
 	Iterations  int           `json:"iterations"`

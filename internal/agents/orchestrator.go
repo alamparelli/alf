@@ -273,6 +273,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		if output.Response != "" {
 			log.Printf("[orchestrator] ✓ final response received (%d chars)", len(output.Response))
 			meta.Status = "completed"
+			meta.Response = output.Response
 			now := time.Now()
 			meta.CompletedAt = &now
 			o.saveMeta(taskDir, meta)

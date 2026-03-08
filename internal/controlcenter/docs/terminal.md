@@ -37,7 +37,7 @@ Files inside `~/data/` are mounted as a Docker volume and survive rebuilds:
 
 | Persistent (`~/data/`) | Lost on rebuild |
 |------------------------|-----------------|
-| `tools/`, `skills/`, `pages/` | apt/pip/npm packages |
+| `tools/`, `skills/`, `apps/` | apt/pip/npm packages |
 | `context/`, `config.d/` | Binaries in `/usr/local/bin` |
 | `bootstrap.sh` | Shell config (`.bashrc` edits) |
 | `logs/` | System-level configuration |

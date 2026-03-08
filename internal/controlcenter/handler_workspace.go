@@ -55,9 +55,17 @@ func (h *WorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		h.get(w, absPath, relPath)
 	case http.MethodPut:
+		if h.isReadOnly(relPath) {
+			http.Error(w, jsonErr("read-only directory"), http.StatusForbidden)
+			return
+		}
 		writePath := h.resolveWrite(relPath, absPath)
 		h.put(w, r, writePath, relPath)
 	case http.MethodDelete:
+		if h.isReadOnly(relPath) {
+			http.Error(w, jsonErr("read-only directory"), http.StatusForbidden)
+			return
+		}
 		writePath := h.resolveWrite(relPath, absPath)
 		h.del(w, writePath, relPath)
 	default:
@@ -79,16 +87,51 @@ func (h *WorkspaceHandler) resolve(rel string) (string, error) {
 		if perr != nil {
 			return "", perr
 		}
-		if !strings.HasPrefix(resolvedParent, h.realDataDir()) {
+		if !h.isAllowedPath(resolvedParent) {
 			return "", os.ErrPermission
 		}
 		return cleaned, nil
 	}
 
-	if !strings.HasPrefix(resolved, h.realDataDir()) {
+	if !h.isAllowedPath(resolved) {
 		return "", os.ErrPermission
 	}
 	return resolved, nil
+}
+
+// isAllowedPath checks if a resolved path falls within DataDir, ConfigDir, or SkillsDir.
+func (h *WorkspaceHandler) isAllowedPath(resolved string) bool {
+	if strings.HasPrefix(resolved, h.realDataDir()) {
+		return true
+	}
+	if h.ConfigDir != "" {
+		if real, err := filepath.EvalSymlinks(h.ConfigDir); err == nil {
+			if strings.HasPrefix(resolved, real) {
+				return true
+			}
+		}
+	}
+	if h.SkillsDir != "" {
+		if real, err := filepath.EvalSymlinks(h.SkillsDir); err == nil {
+			if strings.HasPrefix(resolved, real) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// readOnlyPrefixes are workspace paths that the user can browse but not edit.
+var readOnlyPrefixes = []string{"config.d", "skills.d", "tools.d"}
+
+// isReadOnly returns true if relPath falls inside a read-only directory.
+func (h *WorkspaceHandler) isReadOnly(relPath string) bool {
+	for _, prefix := range readOnlyPrefixes {
+		if relPath == prefix || strings.HasPrefix(relPath, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveWrite returns the writable path for a given relPath.
@@ -132,7 +175,7 @@ func (h *WorkspaceHandler) get(w http.ResponseWriter, absPath, relPath string) {
 	if info.IsDir() {
 		h.listDir(w, absPath, relPath)
 	} else {
-		h.readFile(w, absPath, info)
+		h.readFile(w, absPath, relPath, info)
 	}
 }
 
@@ -185,7 +228,7 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 		"path":    relPath,
 		"entries": all,
 	}
-	// Include protected list on root listing so the frontend has a single source of truth.
+	// Include protected + readOnly lists on root listing for frontend.
 	if relPath == "" {
 		names := make([]string, 0, len(protectedDirs))
 		for k := range protectedDirs {
@@ -193,14 +236,15 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 		}
 		sort.Strings(names)
 		resp["protected"] = names
+		resp["readOnly"] = readOnlyPrefixes
 	}
 	data, _ := json.Marshal(resp)
 	w.Write(data)
 }
 
-func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath string, info os.FileInfo) {
+func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath, relPath string, info os.FileInfo) {
 	ext := strings.ToLower(filepath.Ext(absPath))
-	editable := editableExts[ext]
+	editable := editableExts[ext] && !h.isReadOnly(relPath)
 
 	if info.Size() > maxFileSize {
 		data, _ := json.Marshal(map[string]any{
@@ -308,7 +352,7 @@ var protectedDirs = map[string]bool{
 	"context":         true,
 	"docs":            true,
 	"logs":            true,
-	"pages":           true,
+	"apps":            true,
 	"sessions":        true,
 	"skills":          true,
 	"skills.d":        true,

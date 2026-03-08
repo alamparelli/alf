@@ -131,30 +131,10 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	cmd.Env = safeEnv(homeDir, dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
 
-	// Log full args (excluding prompt content which can be huge).
-	debugArgs := make([]string, 0, len(args))
-	for i, a := range args {
-		if i > 0 && (args[i-1] == "-p" || args[i-1] == "--append-system-prompt") {
-			debugArgs = append(debugArgs, fmt.Sprintf("[%d chars]", len(a)))
-		} else {
-			debugArgs = append(debugArgs, a)
-		}
-	}
-	log.Printf("provider: invoke starting (resume=%q, model=%s, max_turns=%d, effort=%s, sys_prompts=%d, tools=%v, write=%v, env_count=%d)",
-		params.ResumeID, model, params.MaxTurns, params.Effort, len(params.SystemPrompts), params.Tools, params.WriteCapable, len(cmd.Env))
-	log.Printf("provider: args=%v", debugArgs)
-	// Log environment for debugging (redact values for safety).
-	for _, e := range cmd.Env {
-		if k, _, ok := strings.Cut(e, "="); ok {
-			v := strings.TrimPrefix(e, k+"=")
-			if len(v) > 80 {
-				v = v[:80] + "..."
-			}
-			log.Printf("provider: env %s=%s", k, v)
-		}
-	}
+	log.Printf("provider: invoke (model=%s, resume=%q, write=%v, turns=%d)",
+		model, params.ResumeID, params.WriteCapable, params.MaxTurns)
 
-	// Preflight: verify claude binary is reachable and responsive with this env.
+	// Preflight: verify claude binary is reachable with this env.
 	preCmd := exec.CommandContext(cmdCtx, "claude", "--version")
 	preCmd.Dir = dataDir
 	preCmd.Env = cmd.Env
@@ -162,10 +142,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		preCmd.SysProcAttr = &syscall.SysProcAttr{Credential: p.Credential}
 	}
 	if preOut, preErr := preCmd.CombinedOutput(); preErr != nil {
-		log.Printf("provider: preflight FAILED: %v — output: %s", preErr, truncStderr(string(preOut), 500))
 		return nil, fmt.Errorf("claude preflight check failed: %w — %s", preErr, truncStderr(string(preOut), 300))
-	} else {
-		log.Printf("provider: preflight OK: %s", strings.TrimSpace(string(preOut)))
 	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -182,19 +159,15 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
-	log.Printf("provider: process started (pid=%d, uid=%d, home=%s, dir=%s)",
-		cmd.Process.Pid, func() uint32 { if p.Credential != nil { return p.Credential.Uid }; return 0 }(), homeDir, dataDir)
 	invokeStart := time.Now()
 
-	// Read stderr in background — log lines in real-time for debugging.
+	// Capture stderr for error reporting.
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
 		scanner := bufio.NewScanner(stderrPipe)
 		for scanner.Scan() {
-			line := scanner.Text()
-			stderr.WriteString(line + "\n")
-			log.Printf("provider stderr [pid=%d]: %s", cmd.Process.Pid, line)
+			stderr.WriteString(scanner.Text() + "\n")
 		}
 	}()
 
@@ -226,8 +199,8 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	firstTimer := time.NewTimer(firstEventTimeout)
 	defer firstTimer.Stop()
 
-	// Periodic heartbeat: log every 10s while waiting for the first event.
-	heartbeat := time.NewTicker(10 * time.Second)
+	// Periodic heartbeat: log every 15s while waiting for the first event.
+	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
 	waitFirstEvent := true
@@ -235,29 +208,8 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		if waitFirstEvent {
 			select {
 			case <-heartbeat.C:
-				// Check if process is still alive via /proc (Linux).
-				procStatus := "unknown"
-				if statusBytes, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", cmd.Process.Pid)); err == nil {
-					for _, line := range strings.Split(string(statusBytes), "\n") {
-						if strings.HasPrefix(line, "State:") {
-							procStatus = strings.TrimSpace(strings.TrimPrefix(line, "State:"))
-							break
-						}
-					}
-				}
-				// Check open fds for /dev/tty or /dev/pts (would indicate interactive prompt).
-				fds := ""
-				if entries, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", cmd.Process.Pid)); err == nil {
-					for _, e := range entries {
-						if target, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%s", cmd.Process.Pid, e.Name())); err == nil {
-							if strings.Contains(target, "tty") || strings.Contains(target, "pts") {
-								fds += " " + e.Name() + "→" + target
-							}
-						}
-					}
-				}
-				log.Printf("provider: waiting for first event... %dms elapsed, pid=%d state=%s stderr=%d tty_fds=[%s]",
-					time.Since(invokeStart).Milliseconds(), cmd.Process.Pid, procStatus, stderr.Len(), strings.TrimSpace(fds))
+				log.Printf("provider: waiting for first event… %ds elapsed",
+					int(time.Since(invokeStart).Seconds()))
 				continue
 			case line, ok := <-lineCh:
 				if !ok {
@@ -270,18 +222,15 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 				}
 				eventCount++
 				firstEvent = true
-				log.Printf("provider: first event after %dms", time.Since(invokeStart).Milliseconds())
 				// Process this line below.
 				lastEvent = make(json.RawMessage, len(line))
 				copy(lastEvent, line)
 				goto processEvent
 			case <-firstTimer.C:
 				// No events within timeout — kill and report stderr.
-				log.Printf("provider: TIMEOUT pid=%d after %v — killing process", cmd.Process.Pid, firstEventTimeout)
 				cmd.Process.Kill()
 				<-stderrDone
-				waitErr := cmd.Wait()
-				log.Printf("provider: killed pid=%d, wait=%v, stderr_len=%d", cmd.Process.Pid, waitErr, stderr.Len())
+				cmd.Wait()
 				errMsg := strings.TrimSpace(stderr.String())
 				if errMsg == "" {
 					errMsg = "no output on stdout or stderr"
@@ -304,7 +253,6 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 			eventCount++
 			if !firstEvent {
 				firstEvent = true
-				log.Printf("provider: first event after %dms", time.Since(invokeStart).Milliseconds())
 			}
 
 			lastEvent = make(json.RawMessage, len(line))
@@ -354,8 +302,7 @@ done:
 	<-stderrDone
 	waitErr := cmd.Wait()
 	invokeDur := time.Since(invokeStart)
-	log.Printf("provider: invoke done %dms events=%d text=%d bytes stderr=%q",
-		invokeDur.Milliseconds(), eventCount, resultText.Len(), truncStderr(stderr.String(), 200))
+	log.Printf("provider: done %dms events=%d", invokeDur.Milliseconds(), eventCount)
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("claude timed out after %v", timeout)
 	}
@@ -384,7 +331,7 @@ done:
 				if errDetail == "" {
 					errDetail = "unknown error"
 				}
-				log.Printf("provider: claude error (subtype=%s, turns=%d)", parsed.Subtype, parsed.NumTurns)
+				log.Printf("provider: error subtype=%s", parsed.Subtype)
 				return nil, fmt.Errorf("claude: %s", errDetail)
 			}
 			if text == "" {

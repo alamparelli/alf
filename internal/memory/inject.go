@@ -75,8 +75,14 @@ func WorkspaceSummary(dataDir string) string {
 	}
 
 	count := 0
+	// Dirs managed via Control Center — visible to user, not to Claude.
+	hiddenDirs := map[string]bool{"config.d": true, "skills.d": true}
+
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if hiddenDirs[e.Name()] {
 			continue
 		}
 		if count >= 30 {

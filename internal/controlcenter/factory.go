@@ -18,7 +18,7 @@ type Deps struct {
 	ContextStore    ResourceStore
 	ToolStore      ResourceStore
 	SkillStore     ResourceStore
-	PageStore      ResourceStore
+	AppStore       AppStore
 	LogReader      LogReader
 	StatusProvider StatusProvider
 	Notifier       Notifier
@@ -45,18 +45,15 @@ type Deps struct {
 	WebFS          fs.FS // embedded web assets (style.css, app.js)
 }
 
-// maxPageSize is the maximum size for a page file (5 MB).
-const maxPageSize = 5 << 20
-
 // StoreFactory creates concrete store implementations from data and config directories.
-func StoreFactory(dataDir, configDir string) (ConfigStore, TierStore, ResourceStore, ResourceStore, ResourceStore, ResourceStore) {
+func StoreFactory(dataDir, configDir string) (ConfigStore, TierStore, ResourceStore, ResourceStore, ResourceStore, AppStore) {
 	cs := NewFileConfigStore(ConfigPath(configDir))
 	ts := NewFileTierStore(TiersPath(configDir))
 	ms := NewFileResourceStore(filepath.Join(dataDir, "context"), ".md")
 	tools := NewFileResourceStore(filepath.Join(dataDir, "tools"), ".json")
 	skills := NewFileResourceStore(filepath.Join(dataDir, "skills"), ".json")
-	pages := NewFileResourceStoreWithLimit(filepath.Join(dataDir, "pages"), ".html", maxPageSize)
-	return cs, ts, ms, tools, skills, pages
+	apps := NewFileAppStore(filepath.Join(dataDir, "apps"))
+	return cs, ts, ms, tools, skills, apps
 }
 
 // LogReaderFactory creates a LogReader from a data directory.
@@ -114,13 +111,13 @@ func HandlerFactory(deps Deps) http.Handler {
 		Event:    ReloadSkills,
 	})
 
-	// Pages: API listing/CRUD + raw HTML serving.
-	if deps.PageStore != nil {
-		mux.Handle("/api/pages/", &ResourceHandler{
-			Store: deps.PageStore,
+	// Apps: directory-based apps with index.html + assets.
+	if deps.AppStore != nil {
+		mux.Handle("/api/apps/", &AppListHandler{
+			Store: deps.AppStore,
 		})
-		mux.Handle("/pages/", &PageHandler{
-			Store: deps.PageStore,
+		mux.Handle("/apps/", &AppHandler{
+			Store: deps.AppStore,
 		})
 	}
 

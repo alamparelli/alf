@@ -48,6 +48,8 @@ func main() {
 			fmt.Println("Usage: alf secret [list|set|remove]")
 			os.Exit(1)
 		}
+	case "token":
+		cli.RunToken()
 	case "login":
 		cli.RunLogin()
 	case "magic-link":
@@ -78,6 +80,7 @@ func printUsage() {
 	fmt.Println("  upgrade   Update CLI binary and Docker image")
 	fmt.Println("  logs      Follow ALF logs")
 	fmt.Println("  status    Show ALF status and versions")
+	fmt.Println("  token     Print bearer token for API/mobile access")
 	fmt.Println("  login     Authenticate Claude inside the container")
 	fmt.Println("  magic-link  Generate a Control Center login link")
 	fmt.Println("  secret    Manage secrets (list/set/remove)")

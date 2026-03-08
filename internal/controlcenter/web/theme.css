@@ -1,17 +1,54 @@
-/* ALF CC Theme Variables — single pastel theme.
+/* ALF CC Theme — Catppuccin Latte (light) / Mocha (dark).
+   Follows OS preference via prefers-color-scheme. No manual toggle.
    Usage: <link rel="stylesheet" href="/static/theme.css">
+   Palette: https://catppuccin.com
 */
+
+/* Catppuccin Latte (light) */
 :root {
-  --bg: #F0EDE8;
-  --bg-card: #FFFFFF;
-  --bg-input: #F7F5F2;
-  --text: #2D2D2D;
-  --text-dim: #8A8A8E;
-  --accent: #7C9CBF;
-  --green: #7BC8A4;
-  --red: #D4847C;
-  --yellow: #E0C08C;
-  --border: #D8D4CF;
+  --bg: #e6e9ef;        /* mantle */
+  --bg-card: #eff1f5;   /* base */
+  --bg-input: #dce0e8;  /* crust */
+  --text: #4c4f69;      /* text */
+  --text-dim: #6c6f85;  /* subtext0 */
+  --accent: #1e66f5;    /* blue */
+  --green: #40a02b;
+  --red: #d20f39;
+  --yellow: #df8e1d;
+  --border: #bcc0cc;    /* surface1 */
   --radius: 12px;
-  --on-accent: #FFFFFF;
+  --on-accent: #eff1f5; /* base */
+
+  /* Semantic — used by CC internal components */
+  --mauve: #8839ef;
+  --pink: #ea76cb;
+  --teal: #179299;
+  --sapphire: #209fb5;
+  --peach: #fe640b;
+  --lavender: #7287fd;
+}
+
+/* Catppuccin Mocha (dark) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #181825;        /* mantle */
+    --bg-card: #1e1e2e;   /* base */
+    --bg-input: #313244;  /* surface0 */
+    --text: #cdd6f4;      /* text */
+    --text-dim: #7f849c;  /* overlay1 */
+    --accent: #89b4fa;    /* blue */
+    --green: #a6e3a1;
+    --red: #f38ba8;
+    --yellow: #f9e2af;
+    --border: #45475a;    /* surface1 */
+    --on-accent: #1e1e2e; /* base */
+
+    /* Semantic */
+    --mauve: #cba6f7;
+    --pink: #f5c2e7;
+    --teal: #94e2d5;
+    --sapphire: #74c7ec;
+    --peach: #fab387;
+    --lavender: #b4befe;
+  }
 }

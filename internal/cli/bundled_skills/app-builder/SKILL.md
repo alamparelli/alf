@@ -2,7 +2,7 @@
 name: app-builder
 description: Creates self-contained web apps in ~/data/apps/ with standardized structure, SQLite storage, and Lucide icons
 version: "1"
-triggers: app, dashboard, webapp, web app
+triggers: app, application, dashboard, webapp, web app
 tier: agent
 ---
 
@@ -53,29 +53,38 @@ Browse https://lucide.dev/icons for the full list.
 
 ### 4. Build the frontend
 
-**IMPORTANT: Apps are loaded inside the CC via an iframe.** The CC injects `theme.css` into the iframe. You MUST use the CC design variables and patterns — apps must look native to the Control Center, not like a separate product.
+**CRITICAL: Apps are loaded inside the CC via an iframe.** The CC injects `theme.css` into the iframe. You MUST use the CC design variables — apps must look native to the Control Center.
+
+**⚠️ ABSOLUTE COLOR RULES — VIOLATION = BROKEN APP:**
+- **NEVER** write hex colors (`#000`, `#fff`, `#333`, `#1a1a2e`, etc.) for backgrounds, text, borders, or accents
+- **NEVER** write `rgb()`, `rgba()`, `hsl()` for any themed property
+- **NEVER** create a dark theme — the CC uses a warm pastel light theme
+- **ALWAYS** use `var(--bg)`, `var(--text)`, `var(--accent)`, etc. for ALL colors
+- The ONLY acceptable hardcoded colors are: `transparent`, `currentColor`, and `rgba(0,0,0,0.02)` for subtle hovers
+- If you catch yourself writing a hex color, STOP and use the matching CSS variable instead
 
 **Step 1: Link the CC theme** — every `index.html` must include:
 ```html
 <link rel="stylesheet" href="/static/theme.css">
 ```
-This gives you the full CC variable set. The CC automatically toggles `.light` class on the iframe's `<html>` for light mode support.
+This gives you the full CC variable set. The theme is a warm pastel palette — cream backgrounds, soft muted accents. No dark mode.
 
 **Step 2: CC Design System variables** — use these, never hardcode colors:
 
-| Variable | Dark | Light | Usage |
-|----------|------|-------|-------|
-| `--bg` | `#000000` | `#F2F2F7` | Page background |
-| `--bg-card` | `#1C1C1E` | `#FFFFFF` | Card/section background |
-| `--bg-input` | `#1C1C1E` | `#F2F2F7` | Input/textarea background |
-| `--text` | `#FFFFFF` | `#000000` | Primary text |
-| `--text-dim` | `#8E8E93` | `#8E8E93` | Secondary text, labels |
-| `--accent` | `#0A84FF` | `#007AFF` | Links, primary buttons, active states |
-| `--green` | `#30D158` | `#34C759` | Success, positive |
-| `--red` | `#FF453A` | `#FF3B30` | Error, danger |
-| `--yellow` | `#FF9F0A` | `#FF9500` | Warning |
-| `--border` | `#38383A` | `#D1D1D6` | Borders, dividers, secondary button bg |
-| `--radius` | `12px` | `12px` | Border radius for cards, buttons, inputs |
+| Variable | Value | Usage |
+|----------|-------|-------|
+| `--bg` | `#F0EDE8` | Page background (warm cream) |
+| `--bg-card` | `#FFFFFF` | Card/section background |
+| `--bg-input` | `#F7F5F2` | Input/textarea background |
+| `--text` | `#2D2D2D` | Primary text |
+| `--text-dim` | `#8A8A8E` | Secondary text, labels |
+| `--accent` | `#7C9CBF` | Links, primary buttons, active states (pastel blue-grey) |
+| `--green` | `#7BC8A4` | Success, positive (sage green) |
+| `--red` | `#D4847C` | Error, danger (dusty rose) |
+| `--yellow` | `#E0C08C` | Warning (warm sand) |
+| `--border` | `#D8D4CF` | Borders, dividers, secondary button bg |
+| `--radius` | `12px` | Border radius for cards, buttons, inputs |
+| `--on-accent` | `#FFFFFF` | Text color on accent backgrounds (buttons, toasts) |
 
 **Step 3: CC component patterns** — copy these exactly:
 
@@ -100,7 +109,7 @@ body {
 
 /* Buttons */
 .btn {
-  background: var(--accent); color: #fff; border: none;
+  background: var(--accent); color: var(--on-accent); border: none;
   padding: 8px 20px; border-radius: var(--radius); cursor: pointer;
   font-size: 0.85rem; font-weight: 500; transition: opacity 0.15s;
 }
@@ -152,7 +161,7 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: var(--a
 .toast {
   position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
   border-radius: var(--radius); font-size: 0.85rem; font-weight: 500;
-  opacity: 0; transition: opacity 0.3s; z-index: 100; color: #fff;
+  opacity: 0; transition: opacity 0.3s; z-index: 100; color: var(--on-accent);
 }
 .toast.show { opacity: 1; }
 .toast.success { background: var(--green); }
@@ -162,7 +171,7 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: var(--a
 table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 th { text-align: left; padding: 8px; color: var(--text-dim); border-bottom: 1px solid var(--border); font-weight: 500; }
 td { padding: 8px; border-bottom: 1px solid var(--border); }
-tr:hover { background: rgba(255,255,255,0.02); }
+tr:hover { background: rgba(0,0,0,0.02); }
 
 /* Monospace text */
 .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.78rem; }
@@ -173,7 +182,8 @@ tr:hover { background: rgba(255,255,255,0.02); }
 
 **Mandatory rules:**
 - Mobile-first, responsive layout
-- Dark theme by default with light mode support via CC theme
+- **ZERO hardcoded colors** — every color must come from `var(--*)` CSS variables
+- The CC theme is a **warm pastel light palette** (cream `#F0EDE8` bg, white cards, muted accents). Do NOT create dark UIs.
 - No external dependencies (CSP blocks external scripts/styles)
 - All JS must be inline or in `assets/app.js` loaded via relative path
 - All CSS must be inline or in `assets/style.css` loaded via relative path
@@ -263,7 +273,11 @@ Tell the user to register the schedule via chat: "Schedule `~/data/apps/{name}/s
 Before delivering, verify:
 
 - [ ] `index.html` exists and loads correctly
+- [ ] `index.html` includes `<link rel="stylesheet" href="/static/theme.css">`
 - [ ] `app.json` has name, icon, and description
+- [ ] **ZERO hex colors in CSS** — grep your output for `#` followed by hex digits. Every match is a bug. Replace with `var(--*)`.
+- [ ] No `background: #...`, no `color: #...`, no `border-color: #...` — all must use CSS variables
+- [ ] The app looks like a **light pastel UI** (cream background, white cards), NOT a dark theme
 - [ ] Mobile responsive (test at 375px width mentally)
 - [ ] No external resource loading (CSP compliant)
 - [ ] Data directory created if app stores data
@@ -278,3 +292,5 @@ Before delivering, verify:
 - Do NOT create overly complex architectures — keep it simple
 - Do NOT use external CDNs (CSP blocks them)
 - Do NOT hardcode absolute URLs — use relative paths
+- Do NOT hardcode ANY colors — no `#000`, `#fff`, `#1a1a2e`, `rgb()`, `hsl()`. Use `var(--*)` exclusively.
+- Do NOT create dark-themed UIs — the CC theme is a warm pastel light palette

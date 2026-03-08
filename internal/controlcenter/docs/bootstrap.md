@@ -74,10 +74,6 @@ That's why `bootstrap.sh` exists: it reinstalls everything automatically.
 | Scripts in `data/tools/` | System-level config |
 | Config in `config.d/` | Anything outside volumes |
 
-## Legacy support
-
-If no `bootstrap.sh` exists, the daemon also checks for `data/setup.sh` (the previous name). Both work, but `bootstrap.sh` takes priority.
-
 ## What's next?
 
 - [Container Packages](docs:container-packages) -- detailed package installation guide

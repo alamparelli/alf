@@ -207,6 +207,8 @@ func main() {
 	}
 	// Seed default tiers.json if not present (from image-embedded copy).
 	seedDefaultTiers(configDir)
+	// Remove stale Claude settings that may restrict tool permissions.
+	cleanClaudeSettings(dataDir)
 
 	// Start outbound traffic firewall proxy.
 	fwStore := firewall.NewStore(configDir)
@@ -449,6 +451,12 @@ func main() {
 	// Telegram client for sending formatted messages.
 	tg := tgclient.NewClient(token)
 	tg.HTTP = client
+	tg.OnRateLimit = func(wait time.Duration) {
+		eventLog.Log("telegram_rate_limit", map[string]any{
+			"wait_seconds": wait.Seconds(),
+		})
+		log.Printf("[telegram] rate limited — waiting %v before retry", wait)
+	}
 
 	// Auto-update checker (initialized here, scheduled via unified scheduler below).
 	var uc *updater.Checker
@@ -1009,13 +1017,9 @@ func main() {
 			chatID := u.Message.Chat.ID
 			resumeID := chatSessions.Get(chatID)
 
-			// Show routing status immediately (silent, will be deleted).
+			// Show typing indicator while classifying.
 			tg.SendChatAction(chatID, "typing")
-			routingBase := pickRandom(statusRouting)
-			routingMsgID, _ := tg.SendMessageGetID(chatID, routingBase+".")
-
-			// Animate dots on routing message while classifying.
-			routingAnim := newDotAnimator(tg, chatID, routingMsgID, routingBase, "typing")
+			routingAnim := newTypingIndicator(tg, chatID, "typing")
 
 			// Build complete message content including media captions and reply context.
 			msgWithReplyContext := buildMessageContent(u.Message)
@@ -1037,7 +1041,6 @@ func main() {
 			// Force command bypasses routing entirely.
 			if forcedTierName != "" {
 				routingAnim.Stop()
-				// Keep routingMsgID alive — it transitions to thinking animation below.
 				routeResult = router.Result{Tier: forcedTierName, Reason: "force_command"}
 				log.Printf("→ force command → tier %q", forcedTierName)
 			} else if hasMedia {
@@ -1070,7 +1073,6 @@ func main() {
 					log.Printf("→ media (no caption), bypassing router → tier %q", tierName)
 				}
 				routingAnim.Stop()
-				// Keep routingMsgID alive — it transitions to thinking animation below.
 			} else {
 				routeResult = classifyMessage(routerMsg, tierStore.Current())
 			}
@@ -1162,10 +1164,6 @@ func main() {
 
 			if routeResult.Response != "" && routeResult.Tier == "" {
 				log.Printf("→ router direct response")
-				// Delete routing status message.
-				if routingMsgID != 0 {
-					tg.DeleteMessage(chatID, routingMsgID)
-				}
 				eventLog.Log("router_direct", map[string]any{
 					"chat_id":          chatID,
 					"reason":           routeResult.Reason,
@@ -1253,7 +1251,6 @@ func main() {
 				// Capture loop variables for the goroutine.
 				orchChatID := chatID
 				orchMsg := msgWithReplyContext
-				orchRoutingMsgID := routingMsgID
 				orchMediaCleanup := mediaCleanup
 				orchRC := agents.RunConfig{
 					Model:         tp.Model,
@@ -1265,25 +1262,17 @@ func main() {
 				}
 
 				go func() {
-					// Status animation for agent.
-					orchTag := "[agent] "
-					if orchRoutingMsgID != 0 {
-						tg.EditMessage(orchChatID, orchRoutingMsgID, orchTag+"Coordinating agents...")
-					}
-					orchAnim := newDotAnimator(tg, orchChatID, orchRoutingMsgID, orchTag+"Coordinating agents", "choose_sticker")
+					// Typing indicator for agent orchestration.
+					orchAnim := newTypingIndicator(tg, orchChatID, "choose_sticker")
 
 					orchProgress := func(phase, detail string) {
 						switch phase {
 						case "thinking":
-							orchAnim.SetPhase(orchTag+"🧠 Thinking", "choose_sticker")
-						case "planning":
-							orchAnim.SetPhase(orchTag+"📋 "+detail, "choose_sticker")
-						case "agent":
-							orchAnim.SetPhase(orchTag+"⚡ "+detail, "upload_document")
-						case "agent_done":
-							orchAnim.SetPhase(orchTag+"✓ "+detail, "upload_document")
+							orchAnim.SetAction("choose_sticker")
+						case "planning", "agent", "agent_done":
+							orchAnim.SetAction("upload_document")
 						case "synthesizing":
-							orchAnim.SetPhase(orchTag+"📝 Synthesizing results", "typing")
+							orchAnim.SetAction("typing")
 						}
 					}
 
@@ -1292,9 +1281,6 @@ func main() {
 					duration := time.Since(start)
 
 					orchAnim.Stop()
-					if orchRoutingMsgID != 0 {
-						tg.DeleteMessage(orchChatID, orchRoutingMsgID)
-					}
 
 					if orchErr != nil {
 						log.Printf("agent error: %v", orchErr)
@@ -1334,31 +1320,22 @@ func main() {
 				continue
 			}
 
-			// Transition routing message into processing status message.
-			tierTag := "[" + routeResult.Tier + "] "
-			var statusAnim *dotAnimator
-			if routingMsgID != 0 {
-				thinkBase := tierTag + pickRandom(statusThinking)
-				tg.EditMessage(chatID, routingMsgID, thinkBase+dotFrames[0])
-				statusAnim = newDotAnimator(tg, chatID, routingMsgID, thinkBase, "choose_sticker")
-			}
+			// Typing indicator during processing.
+			statusAnim := newTypingIndicator(tg, chatID, "choose_sticker")
 
 			lastPhase := ""
 			onProgress := func(event provider.StreamEvent) {
-				if statusAnim == nil {
-					return
-				}
 				if event.Type == lastPhase {
 					return
 				}
 				lastPhase = event.Type
 				switch event.Type {
 				case "thinking":
-					statusAnim.SetPhase(tierTag+pickRandom(statusThinking), "choose_sticker")
+					statusAnim.SetAction("choose_sticker")
 				case "tool_use":
-					statusAnim.SetPhase(tierTag+pickRandom(statusToolUse), "upload_document")
-				case "text":
-					statusAnim.SetPhase(tierTag+pickRandom(statusWriting), "typing")
+					statusAnim.SetAction("upload_document")
+				case "text_delta":
+					statusAnim.SetAction("typing")
 				}
 			}
 
@@ -1445,11 +1422,8 @@ func main() {
 				os.Remove(sigSockPath)
 			}
 
-			// Cleanup: stop animation, delete status msg.
-			if statusAnim != nil {
-				statusAnim.Stop()
-				tg.DeleteMessage(chatID, routingMsgID)
-			}
+			// Stop typing indicator.
+			statusAnim.Stop()
 
 			if err != nil {
 				log.Printf("claude error: %v", err)
@@ -2147,6 +2121,21 @@ func seedDefaultTiers(configDir string) {
 	log.Printf("seed-tiers: created %s from defaults", dest)
 }
 
+// cleanClaudeSettings removes .claude/settings.json at startup.
+// Claude Code may persist restrictive allow-lists in this file which then
+// block tools (Edit, Write, etc.) even when --dangerously-skip-permissions
+// is used. Deleting it on restart ensures a clean slate every time.
+func cleanClaudeSettings(dataDir string) {
+	p := filepath.Join(dataDir, ".claude", "settings.json")
+	if err := os.Remove(p); err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("clean-settings: failed to remove %s: %v", p, err)
+		}
+		return
+	}
+	log.Printf("clean-settings: removed stale %s", p)
+}
+
 func migrateConfig(dataDir, configDir string) {
 	oldConfigDir := filepath.Join(dataDir, "config")
 
@@ -2195,52 +2184,6 @@ func migrateConfig(dataDir, configDir string) {
 	}
 }
 
-// Status message pools for natural, varied progress indicators.
-// Status message pools — no trailing dots (animated separately).
-var statusRouting = []string{
-	"Let me think",
-	"On it",
-	"Hmm",
-	"One sec",
-	"Looking into it",
-	"Give me a moment",
-	"Processing",
-	"Checking",
-}
-
-var statusThinking = []string{
-	"🧠 Thinking",
-	"🔍 Analyzing",
-	"⛏ Digging in",
-	"💭 Reasoning",
-	"🧩 Working it out",
-	"🤔 Considering",
-}
-
-var statusToolUse = []string{
-	"📂 Reading files",
-	"🔎 Looking things up",
-	"📝 Checking the code",
-	"🕵️ Investigating",
-	"📚 Doing some research",
-	"🗂 Gathering context",
-}
-
-var statusWriting = []string{
-	"✍️ Writing",
-	"📝 Drafting",
-	"🔧 Putting it together",
-	"⏳ Almost there",
-	"🎁 Wrapping up",
-}
-
-// dotCycle returns animated dots: ".", "..", "...", "." cycling on each call.
-var dotFrames = []string{".", "..", "..."}
-
-func pickRandom(pool []string) string {
-	return pool[rand.Intn(len(pool))]
-}
-
 // extractorAdapter bridges provider.CLIProvider to memstore.ExtractorProvider.
 type extractorAdapter struct {
 	prov *provider.CLIProvider
@@ -2259,82 +2202,56 @@ func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params mem
 	return result.Text, nil
 }
 
-// dotAnimator animates a Telegram status message with cycling dots and chat actions.
-type dotAnimator struct {
-	tg       *tgclient.Client
-	chatID   int64
-	msgID    int64
-	base     string // current text prefix (e.g. "Thinking")
-	dotIdx   int
-	lastEdit time.Time
-	mu       sync.Mutex
-	done     chan struct{}
-	action   string // current chat action (e.g. "typing")
+// typingIndicator sends periodic Telegram chat actions (typing, choose_sticker, etc.)
+// without sending or editing any messages.
+type typingIndicator struct {
+	tg     *tgclient.Client
+	chatID int64
+	action string
+	mu     sync.Mutex
+	done   chan struct{}
 }
 
-// newDotAnimator creates and starts a dot animator that ticks every second.
-func newDotAnimator(tg *tgclient.Client, chatID, msgID int64, base, action string) *dotAnimator {
-	da := &dotAnimator{
-		tg:       tg,
-		chatID:   chatID,
-		msgID:    msgID,
-		base:     base,
-		dotIdx:   1, // 0th frame already shown by caller
-		lastEdit: time.Now(),
-		done:     make(chan struct{}),
-		action:   action,
+func newTypingIndicator(tg *tgclient.Client, chatID int64, action string) *typingIndicator {
+	ti := &typingIndicator{
+		tg:     tg,
+		chatID: chatID,
+		action: action,
+		done:   make(chan struct{}),
 	}
-	go da.run()
-	return da
+	go ti.run()
+	return ti
 }
 
-func (da *dotAnimator) run() {
-	ticker := time.NewTicker(1 * time.Second)
+func (ti *typingIndicator) run() {
+	ticker := time.NewTicker(4 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-da.done:
+		case <-ti.done:
 			return
 		case <-ticker.C:
-			da.tick()
+			ti.mu.Lock()
+			action := ti.action
+			ti.mu.Unlock()
+			ti.tg.SendChatAction(ti.chatID, action)
 		}
 	}
 }
 
-func (da *dotAnimator) tick() {
-	da.mu.Lock()
-	defer da.mu.Unlock()
-	if da.msgID == 0 {
-		return
-	}
-	da.tg.EditMessage(da.chatID, da.msgID, da.base+dotFrames[da.dotIdx%len(dotFrames)])
-	da.dotIdx++
-	da.lastEdit = time.Now()
-	da.tg.SendChatAction(da.chatID, da.action)
+// SetAction changes the chat action type.
+func (ti *typingIndicator) SetAction(action string) {
+	ti.mu.Lock()
+	defer ti.mu.Unlock()
+	ti.action = action
 }
 
-// SetPhase changes the status text and chat action (e.g. on progress events).
-func (da *dotAnimator) SetPhase(base, action string) {
-	da.mu.Lock()
-	defer da.mu.Unlock()
-	da.base = base
-	da.action = action
-	da.dotIdx = 0
-}
-
-// SetAction changes only the chat action without resetting the text.
-func (da *dotAnimator) SetAction(action string) {
-	da.mu.Lock()
-	defer da.mu.Unlock()
-	da.action = action
-}
-
-// Stop halts the animation.
-func (da *dotAnimator) Stop() {
+// Stop halts the typing indicator.
+func (ti *typingIndicator) Stop() {
 	select {
-	case <-da.done:
+	case <-ti.done:
 	default:
-		close(da.done)
+		close(ti.done)
 	}
 }
 
@@ -2918,16 +2835,10 @@ func execBashCommand(tg *tgclient.Client, chatID int64, command string) {
 
 // runBootstrapScript executes data/bootstrap.sh if it exists and has changed since last run.
 // A SHA-256 hash is stored in data/.bootstrap-hash to skip unchanged scripts.
-// Also checks for legacy data/setup.sh for backward compatibility.
 func runBootstrapScript(dataDir string) {
 	script := filepath.Join(dataDir, "bootstrap.sh")
 	if _, err := os.Stat(script); os.IsNotExist(err) {
-		// Fallback to legacy name.
-		legacy := filepath.Join(dataDir, "setup.sh")
-		if _, err := os.Stat(legacy); os.IsNotExist(err) {
-			return
-		}
-		script = legacy
+		return
 	}
 	data, err := os.ReadFile(script)
 	if err != nil {

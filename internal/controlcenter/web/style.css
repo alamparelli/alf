@@ -278,7 +278,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .ws-dir-delete .ws-icon { width: 14px; height: 14px; }
 .ws-node-dir:hover .ws-dir-delete { opacity: 0.6; }
-.ws-dir-delete:hover { opacity: 1 !important; color: var(--danger, #e55); }
+.ws-dir-delete:hover { opacity: 1 !important; color: var(--red); }
 
 /* File nodes */
 .ws-node-file { color: var(--text); font-weight: 400; }
@@ -474,13 +474,13 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 /* Thinking blocks — collapsible <details> disclosures */
 .chat-thinking-block {
   margin: 4px 16px; border-radius: 8px;
-  border: 1px solid color-mix(in srgb, #a78bfa 25%, var(--border));
-  background: color-mix(in srgb, #a78bfa 4%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--mauve) 25%, var(--border));
+  background: color-mix(in srgb, var(--mauve) 4%, var(--bg-card));
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 0.75rem;
 }
 .chat-thinking-summary {
-  padding: 6px 10px; cursor: pointer; color: #a78bfa;
+  padding: 6px 10px; cursor: pointer; color: var(--mauve);
   list-style: none; user-select: none;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -500,12 +500,12 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 /* Tool blocks — inline bubbles */
 .chat-tool-block {
   margin: 4px 16px; border-radius: 8px; padding: 6px 10px;
-  border: 1px solid color-mix(in srgb, #60a5fa 20%, var(--border));
-  background: color-mix(in srgb, #60a5fa 4%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--sapphire) 20%, var(--border));
+  background: color-mix(in srgb, var(--sapphire) 4%, var(--bg-card));
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 0.75rem;
 }
-.chat-tool-header { color: #60a5fa; display: flex; align-items: center; gap: 4px; }
+.chat-tool-header { color: var(--sapphire); display: flex; align-items: center; gap: 4px; }
 .chat-tool-header strong { font-weight: 600; }
 .chat-tool-icon { font-size: 0.9rem; }
 .chat-tool-input {
@@ -515,7 +515,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .chat-tool-input:empty { display: none; }
 .chat-tool-result-inline {
-  font-size: 0.68rem; color: #6ee7b7; opacity: 0.6;
+  font-size: 0.68rem; color: var(--teal); opacity: 0.6;
   padding: 3px 0 0 22px; white-space: pre-wrap; word-break: break-word;
   max-height: 80px; overflow-y: auto; line-height: 1.3;
 }
@@ -546,13 +546,13 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .chat-step-icon { font-size: 0.9rem; flex-shrink: 0; }
 .chat-step-label { opacity: 0.85; }
-.chat-step.agent_start .chat-step-label { color: #34d399; font-weight: 600; }
-.chat-step.agent_done .chat-step-label { color: #6ee7b7; }
-.chat-step.agent_thinking .chat-step-label { color: #a78bfa; opacity: 0.7; padding-left: 12px; }
-.chat-step.agent_tool .chat-step-label { color: #60a5fa; opacity: 0.7; padding-left: 12px; }
-.chat-step.task_started .chat-step-label { color: #f59e0b; font-weight: 600; }
-.chat-step.planning .chat-step-label { color: #fbbf24; }
-.chat-step.synthesizing .chat-step-label { color: #f472b6; }
+.chat-step.agent_start .chat-step-label { color: var(--green); font-weight: 600; }
+.chat-step.agent_done .chat-step-label { color: var(--teal); }
+.chat-step.agent_thinking .chat-step-label { color: var(--mauve); opacity: 0.7; padding-left: 12px; }
+.chat-step.agent_tool .chat-step-label { color: var(--sapphire); opacity: 0.7; padding-left: 12px; }
+.chat-step.task_started .chat-step-label { color: var(--yellow); font-weight: 600; }
+.chat-step.planning .chat-step-label { color: var(--peach); }
+.chat-step.synthesizing .chat-step-label { color: var(--pink); }
 .chat-bubble-reaction {
   display: inline-block; font-size: 1.1rem; margin-top: 2px;
 }
@@ -708,8 +708,8 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   font-size: 0.78rem; line-height: 1.5; white-space: pre-wrap; word-break: break-all; tab-size: 4;
 }
 .log-line { display: block; }
-.log-error { color: #e74c3c; }
-.log-warn { color: #f39c12; }
+.log-error { color: var(--red); }
+.log-warn { color: var(--yellow); }
 .log-debug { color: var(--text-dim); }
 
 /* ─── Tasks ──────────────────────────────────────── */
@@ -760,7 +760,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .task-card-title .dot { width: 8px; height: 8px; flex-shrink: 0; }
-.task-card-title .dot.blue { background: var(--blue, #3b82f6); }
+.task-card-title .dot.blue { background: var(--accent); }
 .task-card-actions {
   display: flex; align-items: center; gap: 6px; flex-shrink: 0;
 }
@@ -770,11 +770,11 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
   flex-shrink: 0;
 }
-.task-status-badge.running { background: color-mix(in srgb, var(--blue, #3b82f6) 15%, transparent); color: var(--blue, #3b82f6); }
+.task-status-badge.running { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
 .task-status-badge.completed { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
 .task-status-badge.failed { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
-.task-status-badge.timeout { background: color-mix(in srgb, var(--yellow, #eab308) 15%, transparent); color: var(--yellow, #eab308); }
-.task-status-badge.interrupted { background: color-mix(in srgb, var(--yellow, #eab308) 15%, transparent); color: var(--yellow, #eab308); }
+.task-status-badge.timeout { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
+.task-status-badge.interrupted { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
 
 .task-card-details { padding: 10px 16px; }
 .task-detail-row {
@@ -910,14 +910,14 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .task-relaunch-btn {
   display: inline-flex; align-items: center;
   font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;
-  background: color-mix(in srgb, var(--blue, #3b82f6) 10%, transparent);
-  color: var(--blue, #3b82f6); border: 1px solid color-mix(in srgb, var(--blue, #3b82f6) 25%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   cursor: pointer; font-weight: 500;
   transition: background 0.15s, border-color 0.15s;
 }
 .task-relaunch-btn:hover {
-  background: color-mix(in srgb, var(--blue, #3b82f6) 20%, transparent);
-  border-color: color-mix(in srgb, var(--blue, #3b82f6) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .tasks-section-toggle {
@@ -1125,7 +1125,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   background: var(--bg-input); border: 1px solid var(--border);
   border-radius: 4px; color: var(--text); padding: 4px 8px;
   font-size: 0.82rem; font-family: 'SF Mono', 'Fira Code', monospace;
-  color-scheme: light;
+  color-scheme: light dark;
 }
 .jv-input-dt:focus { border-color: var(--accent); outline: none; }
 .jv-input-bool {
@@ -1149,9 +1149,9 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .jv-null { color: var(--text-dim); font-style: italic; }
 
 /* Legacy JSON read-only (JSONL) */
-.jv-string { color: #22863a; }
-.jv-number { color: #005cc5; }
-.jv-bool { color: #e36209; }
+.jv-string { color: var(--green); }
+.jv-number { color: var(--sapphire); }
+.jv-bool { color: var(--peach); }
 .jv-bracket { color: var(--text-dim); }
 .jv-row { padding-left: calc(var(--depth, 0) * 16px); white-space: nowrap; }
 .jsonl-entry {
@@ -1276,7 +1276,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .tier-badge-instant { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
 .tier-badge-write { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
-.tier-badge-force { background: color-mix(in srgb, var(--yellow, #eab308) 15%, transparent); color: var(--yellow, #eab308); }
+.tier-badge-force { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
 .tier-badge-routable { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
 
 /* Tier modal */

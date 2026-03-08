@@ -58,7 +58,7 @@ Browse https://lucide.dev/icons for the full list.
 **⚠️ ABSOLUTE COLOR RULES — VIOLATION = BROKEN APP:**
 - **NEVER** write hex colors (`#000`, `#fff`, `#333`, `#1a1a2e`, etc.) for backgrounds, text, borders, or accents
 - **NEVER** write `rgb()`, `rgba()`, `hsl()` for any themed property
-- **NEVER** create a dark theme — the CC uses a warm pastel light theme
+- **NEVER** create your own dark/light theme logic — the CC theme handles this automatically via `prefers-color-scheme`
 - **ALWAYS** use `var(--bg)`, `var(--text)`, `var(--accent)`, etc. for ALL colors
 - The ONLY acceptable hardcoded colors are: `transparent`, `currentColor`, and `rgba(0,0,0,0.02)` for subtle hovers
 - If you catch yourself writing a hex color, STOP and use the matching CSS variable instead
@@ -67,24 +67,28 @@ Browse https://lucide.dev/icons for the full list.
 ```html
 <link rel="stylesheet" href="/static/theme.css">
 ```
-This gives you the full CC variable set. The theme is a warm pastel palette — cream backgrounds, soft muted accents. No dark mode.
+This gives you the full CC variable set. The theme **automatically adapts to the user's OS light/dark preference** via `prefers-color-scheme`. You do NOT need to handle theme switching — just use `var(--*)` and it works.
 
 **Step 2: CC Design System variables** — use these, never hardcode colors:
 
-| Variable | Value | Usage |
-|----------|-------|-------|
-| `--bg` | `#F0EDE8` | Page background (warm cream) |
-| `--bg-card` | `#FFFFFF` | Card/section background |
-| `--bg-input` | `#F7F5F2` | Input/textarea background |
-| `--text` | `#2D2D2D` | Primary text |
-| `--text-dim` | `#8A8A8E` | Secondary text, labels |
-| `--accent` | `#7C9CBF` | Links, primary buttons, active states (pastel blue-grey) |
-| `--green` | `#7BC8A4` | Success, positive (sage green) |
-| `--red` | `#D4847C` | Error, danger (dusty rose) |
-| `--yellow` | `#E0C08C` | Warning (warm sand) |
-| `--border` | `#D8D4CF` | Borders, dividers, secondary button bg |
-| `--radius` | `12px` | Border radius for cards, buttons, inputs |
-| `--on-accent` | `#FFFFFF` | Text color on accent backgrounds (buttons, toasts) |
+The CC uses **Catppuccin** — Latte (light) and Mocha (dark), switching automatically with the OS.
+
+| Variable | Latte (light) | Mocha (dark) | Usage |
+|----------|---------------|--------------|-------|
+| `--bg` | `#e6e9ef` | `#181825` | Page background (mantle) |
+| `--bg-card` | `#eff1f5` | `#1e1e2e` | Card/section background (base) |
+| `--bg-input` | `#dce0e8` | `#313244` | Input/textarea background |
+| `--text` | `#4c4f69` | `#cdd6f4` | Primary text |
+| `--text-dim` | `#6c6f85` | `#7f849c` | Secondary text, labels |
+| `--accent` | `#1e66f5` | `#89b4fa` | Links, primary buttons (blue) |
+| `--green` | `#40a02b` | `#a6e3a1` | Success, positive |
+| `--red` | `#d20f39` | `#f38ba8` | Error, danger |
+| `--yellow` | `#df8e1d` | `#f9e2af` | Warning |
+| `--border` | `#bcc0cc` | `#45475a` | Borders, dividers (surface1) |
+| `--radius` | `12px` | `12px` | Border radius |
+| `--on-accent` | `#eff1f5` | `#1e1e2e` | Text on accent backgrounds |
+
+The values above are for reference only. **Always use `var(--*)`, never the hex values directly.** The theme handles light/dark automatically via `prefers-color-scheme`.
 
 **Step 3: CC component patterns** — copy these exactly:
 
@@ -183,7 +187,7 @@ tr:hover { background: rgba(0,0,0,0.02); }
 **Mandatory rules:**
 - Mobile-first, responsive layout
 - **ZERO hardcoded colors** — every color must come from `var(--*)` CSS variables
-- The CC theme is a **warm pastel light palette** (cream `#F0EDE8` bg, white cards, muted accents). Do NOT create dark UIs.
+- The CC theme auto-adapts to OS dark/light — do NOT write your own theme logic
 - No external dependencies (CSP blocks external scripts/styles)
 - All JS must be inline or in `assets/app.js` loaded via relative path
 - All CSS must be inline or in `assets/style.css` loaded via relative path
@@ -277,7 +281,7 @@ Before delivering, verify:
 - [ ] `app.json` has name, icon, and description
 - [ ] **ZERO hex colors in CSS** — grep your output for `#` followed by hex digits. Every match is a bug. Replace with `var(--*)`.
 - [ ] No `background: #...`, no `color: #...`, no `border-color: #...` — all must use CSS variables
-- [ ] The app looks like a **light pastel UI** (cream background, white cards), NOT a dark theme
+- [ ] The app adapts to OS theme automatically (no custom dark/light logic)
 - [ ] Mobile responsive (test at 375px width mentally)
 - [ ] No external resource loading (CSP compliant)
 - [ ] Data directory created if app stores data
@@ -293,4 +297,4 @@ Before delivering, verify:
 - Do NOT use external CDNs (CSP blocks them)
 - Do NOT hardcode absolute URLs — use relative paths
 - Do NOT hardcode ANY colors — no `#000`, `#fff`, `#1a1a2e`, `rgb()`, `hsl()`. Use `var(--*)` exclusively.
-- Do NOT create dark-themed UIs — the CC theme is a warm pastel light palette
+- Do NOT write dark/light theme logic — `theme.css` handles this via `prefers-color-scheme` automatically

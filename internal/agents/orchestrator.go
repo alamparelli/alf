@@ -124,6 +124,11 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	o.saveTeams(taskDir, teams)
 	o.saveMeta(taskDir, meta)
 
+	// Notify caller of the task ID so it can be referenced.
+	if onProgress != nil {
+		onProgress("task_started", taskID)
+	}
+
 	// Determine global timeout from max team timeout.
 	globalTimeout := defaultGlobalTimeout
 	for _, tc := range teams {
@@ -405,6 +410,24 @@ func (o *Orchestrator) executeDelegates(
 		indexed[i] = indexedDelegate{d, agentCount[d.Agent]}
 	}
 
+	// Pre-register all agents as "working" in meta so the Tasks UI shows them immediately.
+	mu.Lock()
+	workingIndices := make(map[string]int, len(indexed)) // agent key → index in AgentCalls
+	for _, id := range indexed {
+		key := id.Agent
+		if agentCount[id.Agent] > 1 {
+			key = fmt.Sprintf("%s#%d", id.Agent, id.index)
+		}
+		workingIndices[key] = len(meta.AgentCalls)
+		meta.AgentCalls = append(meta.AgentCalls, AgentResult{
+			Agent:  id.Agent,
+			Task:   id.DelegateRequest.Task,
+			Status: "working",
+		})
+	}
+	o.saveMeta(taskDir, meta)
+	mu.Unlock()
+
 	for _, id := range indexed {
 		wg.Add(1)
 		go func(d DelegateRequest, idx int) {
@@ -419,10 +442,22 @@ func (o *Orchestrator) executeDelegates(
 			}
 			ar := o.invokeAgentWithKey(ctx, d, sessionKey, sm, taskDir, onProgress)
 
+			// Set final status.
+			if ar.Error != "" {
+				ar.Status = "failed"
+			} else {
+				ar.Status = "completed"
+			}
+			ar.Task = d.Task
+
 			mu.Lock()
 			results = append(results, ar)
-			meta.AgentCalls = append(meta.AgentCalls, ar)
+			// Update the pre-registered "working" entry with final result.
+			if i, ok := workingIndices[sessionKey]; ok && i < len(meta.AgentCalls) {
+				meta.AgentCalls[i] = ar
+			}
 			meta.TotalCost += ar.CostUSD
+			o.saveMeta(taskDir, meta)
 			mu.Unlock()
 		}(id.DelegateRequest, id.index)
 	}
@@ -489,14 +524,29 @@ func (o *Orchestrator) invokeAgentWithKey(
 		DataDir:       agentDir,
 	}
 
-	result, err := o.provider.Invoke(ctx, d.Task, params, nil)
+	// Forward agent streaming events to progress callback.
+	var agentProgress provider.OnProgress
+	if onProgress != nil {
+		agentProgress = func(event provider.StreamEvent) {
+			switch event.Type {
+			case "thinking":
+				if event.Text == "" {
+					onProgress("agent_thinking", agentName)
+				}
+			case "tool_use":
+				onProgress("agent_tool", agentName+":"+event.Detail)
+			}
+		}
+	}
+
+	result, err := o.provider.Invoke(ctx, d.Task, params, agentProgress)
 
 	// Retry without resume if session expired.
 	if err != nil && sessionID != "" && strings.Contains(err.Error(), "No conversation found") {
 		log.Printf("[orchestrator]   agent %s/%s session expired, retrying", teamName, agentName)
 		sm.Clear(sessionKey)
 		params.ResumeID = ""
-		result, err = o.provider.Invoke(ctx, d.Task, params, nil)
+		result, err = o.provider.Invoke(ctx, d.Task, params, agentProgress)
 	}
 
 	dur := time.Since(start)

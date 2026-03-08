@@ -49,7 +49,11 @@ func main() {
 			os.Exit(1)
 		}
 	case "token":
-		cli.RunToken()
+		if len(os.Args) > 2 && os.Args[2] == "reset" {
+			cli.RunTokenReset()
+		} else {
+			cli.RunToken()
+		}
 	case "login":
 		cli.RunLogin()
 	case "magic-link":

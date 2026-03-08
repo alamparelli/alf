@@ -123,7 +123,7 @@ body {
 /* Terminal */
 .terminal-view {
   display: flex; flex-direction: column; flex: 1;
-  padding: 16px; overflow: hidden;
+  padding: 0; overflow: hidden;
   min-width: 0; /* prevent flex overflow */
 }
 .terminal-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -133,8 +133,7 @@ body {
 }
 #terminalContainer {
   flex: 1; min-height: 0; min-width: 0; overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 8px;
+  border: none; border-radius: 0; padding: 0;
 }
 #terminalContainer .xterm { height: 100%; }
 #terminalContainer .xterm-viewport { overflow-y: auto !important; }
@@ -1186,8 +1185,8 @@ body:not(.light) .jv-bool { color: #ffab70; }
   .card { padding: 14px; margin-bottom: 12px; }
   .card h2 { font-size: 0.8rem; margin-bottom: 8px; }
 
-  .terminal-view { padding: 8px 4px; }
-  #terminalContainer { padding: 4px; }
+  .terminal-view { padding: 0; }
+  #terminalContainer { padding: 0; }
   .terminal-toolbar { margin-bottom: 4px; }
 
   .status-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }

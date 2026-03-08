@@ -60,7 +60,6 @@ Routing tier configuration. The router classifies each message and routes it to 
 | max_turns | int | 0 | Max agentic turns (0 = default 3) |
 | effort | string | "" | "low", "medium", or "high" |
 | write_capable | bool | false | Whether this tier can write files |
-| instant | bool | false | Router responds directly, skips second LLM call |
 | tools | []string | [] | Allowed tools (empty = all) |
 
 ## sessions.json

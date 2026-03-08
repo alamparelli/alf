@@ -254,6 +254,17 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		routeResult = rr
 	}
 
+	// During onboarding, force a capable tier — direct responses and
+	// instant tiers are too weak for the onboarding conversation.
+	// During onboarding, force a capable conversational tier.
+	// The lowest-priority tier (e.g. haiku) is too weak for multi-turn onboarding.
+	isOnboarding := memory.OnboardingPrompt(cs.ContextDir) != ""
+	if isOnboarding {
+		fallback := cs.onboardingTier()
+		log.Printf("[chat-api] onboarding override: %q → tier %q", routeResult.Tier, fallback)
+		routeResult = RouteResult{Tier: fallback, Reason: "onboarding-override"}
+	}
+
 	// Router direct response.
 	if routeResult.Response != "" && routeResult.Tier == "" {
 		cs.Sessions.TouchContext(apiChatID, "router")
@@ -364,6 +375,10 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		if systemPrompts[i] == "--append-system-prompt" {
 			sysPromptTexts = append(sysPromptTexts, systemPrompts[i+1])
 		}
+	}
+	// Inject onboarding prompt on first use.
+	if onboarding := memory.OnboardingPrompt(cs.ContextDir); onboarding != "" {
+		sysPromptTexts = append(sysPromptTexts, onboarding)
 	}
 	// Auto-inject relevant memories from long-term store.
 	if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {
@@ -540,6 +555,8 @@ func (cs *ChatService) NewSession(onboard bool) string {
 	}
 	if onboard {
 		memory.SetOnboarding(cs.ContextDir)
+	} else {
+		memory.ClearOnboarding(cs.ContextDir)
 	}
 	return old
 }
@@ -627,6 +644,58 @@ func (cs *ChatService) resolveMediaRefs(ids []string) []MediaRef {
 	return refs
 }
 
+// firstFallbackTier returns the first enabled non-instant tier, or the first enabled tier.
+func (cs *ChatService) firstFallbackTier() string {
+	tiers := cs.TierStore.Current()
+	if tiers.DefaultFallback != "" {
+		return tiers.DefaultFallback
+	}
+	for _, t := range tiers.Tiers {
+		if t.Enabled {
+			return t.Name
+		}
+	}
+	if len(tiers.Tiers) > 0 {
+		return tiers.Tiers[0].Name
+	}
+	return ""
+}
+
+// onboardingTier returns a capable tier for onboarding (priority >= 2, i.e. sonnet-level).
+// Falls back to firstFallbackTier if nothing better is available.
+func (cs *ChatService) onboardingTier() string {
+	tiers := cs.TierStore.Current()
+	// Pick the second-priority enabled tier (skip the cheapest).
+	type candidate struct {
+		name     string
+		priority int
+	}
+	var candidates []candidate
+	for _, t := range tiers.Tiers {
+		if t.Enabled && t.Name != "agent" {
+			candidates = append(candidates, candidate{t.Name, t.Priority})
+		}
+	}
+	if len(candidates) >= 2 {
+		// Sort by priority ascending, pick second.
+		best := candidates[0]
+		second := candidates[1]
+		if second.priority < best.priority {
+			best, second = second, best
+		}
+		for _, c := range candidates[2:] {
+			if c.priority < best.priority {
+				second = best
+				best = c
+			} else if c.priority < second.priority {
+				second = c
+			}
+		}
+		return second.name
+	}
+	return cs.firstFallbackTier()
+}
+
 // resolveTierParams looks up tier config and returns CLI parameters.
 func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 	tiers := cs.TierStore.Current()
@@ -705,11 +774,8 @@ func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 
 	resumeID := cs.Sessions.Get(apiChatID)
 	tp := tierParams{Model: "claude-haiku-4-5"}
-	for _, t := range cs.TierStore.Current().Tiers {
-		if t.Instant {
-			tp = cs.resolveTierParams(t.Name)
-			break
-		}
+	if fallback := cs.firstFallbackTier(); fallback != "" {
+		tp = cs.resolveTierParams(fallback)
 	}
 
 	params := provider.Params{

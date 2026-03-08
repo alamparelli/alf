@@ -152,6 +152,14 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	}
 	o.mu.Unlock()
 	defer func() {
+		// If status is still "running" when we exit (e.g. context cancelled,
+		// panic recovery), update disk so the task isn't orphaned as invisible.
+		if meta.Status == "running" {
+			meta.Status = "interrupted"
+			now := time.Now()
+			meta.CompletedAt = &now
+			o.saveMeta(taskDir, meta)
+		}
 		o.mu.Lock()
 		delete(o.running, taskID)
 		o.mu.Unlock()
@@ -212,7 +220,8 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			DataDir:       taskDir,
 			Effort:        orchEffort,
 			MaxTurns:      orchMaxTurns,
-			Tools:         rc.Tools,
+			// No tools for orchestrator brain — it must only produce JSON delegation output.
+			// Tools are for sub-agents, not the coordinator.
 		}
 
 		result, err := o.provider.Invoke(ctx, prompt, params, nil)

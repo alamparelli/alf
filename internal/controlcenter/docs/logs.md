@@ -35,8 +35,8 @@ Lines are color-coded by severity:
 |-------|-------|---------|
 | ERROR | Red | `ERROR auth: invalid token` |
 | WARN | Yellow | `WARNING: session timeout` |
-| DEBUG | Dim | `DEBUG router: haiku_r → sonnet_rw` |
-| Info | Default | `router: hello → haiku_r (greeting)` |
+| DEBUG | Dim | `DEBUG router: haiku → sonnet` |
+| Info | Default | `router: hello → haiku (greeting)` |
 
 The log auto-scrolls to the bottom so you always see the latest entries.
 

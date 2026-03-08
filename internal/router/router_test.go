@@ -12,12 +12,12 @@ func defaultTiers() *cc.TiersConfig {
 }
 
 func TestParseResponse_ValidJSON(t *testing.T) {
-	valid := map[string]bool{"haiku_r": true, "sonnet_r": true, "sonnet_rw": true}
-	raw := `{"tier": "sonnet_r", "reason": "needs explanation"}`
+	valid := map[string]bool{"haiku": true, "sonnet": true, "opus": true}
+	raw := `{"tier": "sonnet", "reason": "needs explanation"}`
 
 	r := parseResponse(raw, valid)
-	if r.Tier != "sonnet_r" {
-		t.Errorf("expected tier=sonnet_r, got %q", r.Tier)
+	if r.Tier != "sonnet" {
+		t.Errorf("expected tier=sonnet, got %q", r.Tier)
 	}
 	if r.Reason != "needs explanation" {
 		t.Errorf("expected reason='needs explanation', got %q", r.Reason)
@@ -25,22 +25,22 @@ func TestParseResponse_ValidJSON(t *testing.T) {
 }
 
 func TestParseResponse_MarkdownFences(t *testing.T) {
-	valid := map[string]bool{"sonnet_rw": true, "sonnet_r": true}
-	raw := "```json\n{\"tier\": \"sonnet_rw\", \"reason\": \"file changes\"}\n```"
+	valid := map[string]bool{"sonnet": true, "haiku": true}
+	raw := "```json\n{\"tier\": \"sonnet\", \"reason\": \"file changes\"}\n```"
 
 	r := parseResponse(raw, valid)
-	if r.Tier != "sonnet_rw" {
-		t.Errorf("expected tier=sonnet_rw, got %q", r.Tier)
+	if r.Tier != "sonnet" {
+		t.Errorf("expected tier=sonnet, got %q", r.Tier)
 	}
 }
 
 func TestParseResponse_RawTextFallback(t *testing.T) {
-	valid := map[string]bool{"haiku_r": true, "sonnet_r": true, "sonnet_rw": true}
-	raw := "I think this should be classified as sonnet_r because it needs reasoning."
+	valid := map[string]bool{"haiku": true, "sonnet": true, "opus": true}
+	raw := "I think this should be classified as sonnet because it needs reasoning."
 
 	r := parseResponse(raw, valid)
-	if r.Tier != "sonnet_r" {
-		t.Errorf("expected tier=sonnet_r from text scan, got %q", r.Tier)
+	if r.Tier != "sonnet" {
+		t.Errorf("expected tier=sonnet from text scan, got %q", r.Tier)
 	}
 	if r.Reason != "text-scan fallback" {
 		t.Errorf("expected reason='text-scan fallback', got %q", r.Reason)
@@ -48,7 +48,7 @@ func TestParseResponse_RawTextFallback(t *testing.T) {
 }
 
 func TestParseResponse_Garbage(t *testing.T) {
-	valid := map[string]bool{"haiku_r": true, "analyze": true}
+	valid := map[string]bool{"haiku": true, "analyze": true}
 	raw := "lorem ipsum dolor sit amet"
 
 	r := parseResponse(raw, valid)
@@ -58,7 +58,7 @@ func TestParseResponse_Garbage(t *testing.T) {
 }
 
 func TestParseResponse_InvalidTierInJSON(t *testing.T) {
-	valid := map[string]bool{"haiku_r": true, "sonnet_r": true}
+	valid := map[string]bool{"haiku": true, "sonnet": true}
 	raw := `{"tier": "nonexistent", "reason": "test"}`
 
 	r := parseResponse(raw, valid)
@@ -72,7 +72,7 @@ func TestBuildPrompt_IncludesRoutableTiers(t *testing.T) {
 	valid := validTierSet(tiers)
 	prompt := buildPrompt(ClassifyInput{Message: "hello", Tiers: tiers, DataDir: t.TempDir(), ConfigDir: t.TempDir()}, valid)
 
-	for _, name := range []string{"haiku_r", "sonnet_r", "sonnet_rw", "opus_r", "opus_rw"} {
+	for _, name := range []string{"haiku", "sonnet", "opus"} {
 		if !strings.Contains(prompt, name) {
 			t.Errorf("prompt should contain tier %q", name)
 		}
@@ -81,9 +81,9 @@ func TestBuildPrompt_IncludesRoutableTiers(t *testing.T) {
 
 func TestBuildPrompt_ExcludesDisabledTiers(t *testing.T) {
 	tiers := defaultTiers()
-	// Find and disable opus_rw
+	// Find and disable opus
 	for i := range tiers.Tiers {
-		if tiers.Tiers[i].Name == "opus_rw" {
+		if tiers.Tiers[i].Name == "opus" {
 			tiers.Tiers[i].Enabled = false
 			break
 		}
@@ -93,8 +93,8 @@ func TestBuildPrompt_ExcludesDisabledTiers(t *testing.T) {
 
 	lines := strings.Split(prompt, "\n")
 	for _, line := range lines {
-		if strings.HasPrefix(line, "- opus_rw") {
-			t.Error("disabled tier 'opus_rw' should not be listed")
+		if strings.HasPrefix(line, "- opus") {
+			t.Error("disabled tier 'opus' should not be listed")
 		}
 	}
 }
@@ -150,7 +150,7 @@ func TestValidTierSet_Default(t *testing.T) {
 	tiers := defaultTiers()
 	valid := validTierSet(tiers)
 
-	expected := []string{"haiku_r", "sonnet_r", "sonnet_rw", "opus_r", "opus_rw"}
+	expected := []string{"haiku", "sonnet", "opus"}
 	for _, name := range expected {
 		if !valid[name] {
 			t.Errorf("expected %q in valid set", name)
@@ -161,14 +161,14 @@ func TestValidTierSet_Default(t *testing.T) {
 func TestValidTierSet_ExcludesNonRoutable(t *testing.T) {
 	tiers := defaultTiers()
 	for i := range tiers.Tiers {
-		if tiers.Tiers[i].Name == "haiku_r" {
+		if tiers.Tiers[i].Name == "haiku" {
 			tiers.Tiers[i].Routable = false
 			break
 		}
 	}
 	valid := validTierSet(tiers)
 
-	if valid["haiku_r"] {
+	if valid["haiku"] {
 		t.Error("non-routable tier should not be in valid set")
 	}
 }
@@ -223,13 +223,13 @@ func TestHasWriteIntent(t *testing.T) {
 	}
 }
 
-func TestInterpretRaw_UpgradesReadOnlyOnWriteIntent(t *testing.T) {
+func TestInterpretRaw_UpgradesNonWriteTierOnWriteIntent(t *testing.T) {
 	tiers := defaultTiers()
-	// Router picks haiku_r but message has write intent → should upgrade
-	raw := `{"tier": "haiku_r", "reason": "follow-up"}`
+	// Router picks agent (non-write-capable) but message has write intent → should upgrade
+	raw := `{"tier": "agent", "reason": "follow-up"}`
 	r := InterpretRaw(raw, tiers, "you can fix all and polish")
-	if r.Tier == "haiku_r" {
-		t.Error("should have upgraded from haiku_r to a write-capable tier")
+	if r.Tier == "agent" {
+		t.Error("should have upgraded from agent to a write-capable tier")
 	}
 	if !strings.Contains(r.Reason, "write intent") {
 		t.Errorf("reason should mention write intent upgrade, got %q", r.Reason)
@@ -243,10 +243,10 @@ func TestInterpretRaw_UpgradesReadOnlyOnWriteIntent(t *testing.T) {
 
 func TestInterpretRaw_NoUpgradeForReadOnly(t *testing.T) {
 	tiers := defaultTiers()
-	// Router picks haiku_r for a read-only message → no upgrade
-	raw := `{"tier": "haiku_r", "reason": "simple question"}`
+	// Router picks haiku for a read-only message → no upgrade
+	raw := `{"tier": "haiku", "reason": "simple question"}`
 	r := InterpretRaw(raw, tiers, "what time is it")
-	if r.Tier != "haiku_r" {
+	if r.Tier != "haiku" {
 		t.Errorf("should NOT upgrade for read-only message, got %q", r.Tier)
 	}
 }
@@ -254,10 +254,10 @@ func TestInterpretRaw_NoUpgradeForReadOnly(t *testing.T) {
 func TestInterpretRaw_NoUpgradeForWriteTier(t *testing.T) {
 	tiers := defaultTiers()
 	// Router already picks a write tier → no upgrade needed
-	raw := `{"tier": "sonnet_rw", "reason": "file changes"}`
+	raw := `{"tier": "sonnet", "reason": "file changes"}`
 	r := InterpretRaw(raw, tiers, "fix the bug")
-	if r.Tier != "sonnet_rw" {
-		t.Errorf("should keep sonnet_rw for write-capable tier, got %q", r.Tier)
+	if r.Tier != "sonnet" {
+		t.Errorf("should keep sonnet for write-capable tier, got %q", r.Tier)
 	}
 }
 
@@ -266,9 +266,9 @@ func TestStripMarkdownFences(t *testing.T) {
 		input string
 		want  string
 	}{
-		{`{"tier": "sonnet_r"}`, `{"tier": "sonnet_r"}`},
-		{"```json\n{\"tier\": \"sonnet_r\"}\n```", `{"tier": "sonnet_r"}`},
-		{"```\n{\"tier\": \"sonnet_r\"}\n```", `{"tier": "sonnet_r"}`},
+		{`{"tier": "sonnet"}`, `{"tier": "sonnet"}`},
+		{"```json\n{\"tier\": \"sonnet\"}\n```", `{"tier": "sonnet"}`},
+		{"```\n{\"tier\": \"sonnet\"}\n```", `{"tier": "sonnet"}`},
 	}
 
 	for _, tt := range tests {
@@ -281,22 +281,22 @@ func TestStripMarkdownFences(t *testing.T) {
 
 func TestFallbackResult(t *testing.T) {
 	tiers := defaultTiers()
-	// fallbackResult picks lowest-priority enabled tier → haiku_r (priority 1)
+	// fallbackResult picks lowest-priority enabled tier → haiku (priority 1)
 	r := fallbackResult(tiers)
-	if r.Tier != "haiku_r" {
-		t.Errorf("expected fallback tier=haiku_r, got %q", r.Tier)
+	if r.Tier != "haiku" {
+		t.Errorf("expected fallback tier=haiku, got %q", r.Tier)
 	}
 
-	// Disable haiku_r → next lowest is haiku_rw (priority 2)
+	// Disable haiku → next lowest is sonnet (priority 2)
 	for i := range tiers.Tiers {
-		if tiers.Tiers[i].Name == "haiku_r" {
+		if tiers.Tiers[i].Name == "haiku" {
 			tiers.Tiers[i].Enabled = false
 			break
 		}
 	}
 	r = fallbackResult(tiers)
-	if r.Tier != "haiku_rw" {
-		t.Errorf("expected fallback tier=haiku_rw, got %q", r.Tier)
+	if r.Tier != "sonnet" {
+		t.Errorf("expected fallback tier=sonnet, got %q", r.Tier)
 	}
 }
 

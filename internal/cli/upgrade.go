@@ -29,7 +29,7 @@ func RunUpgrade(currentVersion string) {
 	// Migrate config from data/config/ to config.d/ if needed.
 	migrateConfigDir(dir)
 
-	// Fix volume ownership — previous versions ran as root, now runs as node (uid 1000).
+	// Fix volume ownership — previous versions ran as root, now runs as alf (uid 1000).
 	fixVolumePermissions(dir)
 
 	// Fix secret file permissions — previous versions wrote 0o644 (world-readable).
@@ -152,7 +152,7 @@ func fixVolumePermissions(dir string) {
 		}
 	}
 
-	// Everything owned by node (1000:1000).
+	// Everything owned by alf (1000:1000).
 	chown("data", "1000:1000")
 	chown("config.d", "1000:1000")
 

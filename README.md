@@ -140,7 +140,7 @@ Teams are defined as JSON files in `config.d/agents/`. A bundled "starter" team 
 
 Cron-based job scheduling with timezone support. Three execution modes:
 
-- **LLM jobs** — run a prompt through any tier (`--tier sonnet_r --prompt "..."`)
+- **LLM jobs** — run a prompt through any tier (`--tier sonnet --prompt "..."`)
 - **Direct jobs** — execute bash commands (`--tier direct --command "df -h"`)
 - **Orchestrator jobs** — coordinate multiple agents (`--tier orchestrator --prompt "..."`)
 
@@ -219,9 +219,9 @@ internal/
 
 ALF runs as root inside the container to manage subprocess isolation. Claude runs as a restricted user (uid 1001):
 
-- `/opt/alf/config/` — read-only for Claude
-- `/opt/alf/tools/` — read + execute only
-- `/home/node/data/` — read + write (group-writable via umask)
+- `/opt/alf/config.d/` — read-only for Claude
+- `/opt/alf/tools.d/` — read + execute only
+- `/home/alf/data/` — read + write (group-writable via umask)
 - Secrets via Docker secrets mechanism, never in environment variables
 - Rate limiting (60 req/min global, 5 req/min on auth) + CORS on the Control Center API
 - Auth via magic link (time-limited, rotating) with session cookies

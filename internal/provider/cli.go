@@ -17,6 +17,8 @@ import (
 
 // CLIProvider invokes Claude Code CLI as a subprocess (spawn-per-call).
 type CLIProvider struct {
+	// HomeDir is HOME for the Claude subprocess (where .claude/ config lives).
+	HomeDir string
 	// DefaultDataDir is used when Params.DataDir is empty.
 	DefaultDataDir string
 	// Timeout for each invocation. Zero means 5 minutes.
@@ -26,11 +28,12 @@ type CLIProvider struct {
 }
 
 // NewCLIProvider creates a new CLIProvider.
-func NewCLIProvider(dataDir string, timeout time.Duration, cred *syscall.Credential) *CLIProvider {
+func NewCLIProvider(homeDir, dataDir string, timeout time.Duration, cred *syscall.Credential) *CLIProvider {
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
 	return &CLIProvider{
+		HomeDir:        homeDir,
 		DefaultDataDir: dataDir,
 		Timeout:        timeout,
 		Credential:     cred,
@@ -63,14 +66,14 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 
 	if !params.WriteCapable {
 		if len(params.Tools) > 0 {
-			// Read-only: whitelist specific tools, deny everything else.
-			for _, tool := range params.Tools {
-				args = append(args, "--allowedTools", tool)
-			}
+			// Read-only: whitelist specific tools, disable everything else.
+			// --tools controls availability (not just permissions), so it works
+			// even with --dangerously-skip-permissions.
+			args = append(args, "--tools", strings.Join(params.Tools, ","))
 		} else {
-			// No tools requested — restrict to nothing so Claude doesn't
-			// waste turns attempting tools that get auto-denied.
-			args = append(args, "--allowedTools", "")
+			// No tools requested — disable all tools so Claude produces
+			// text output only, without wasting turns on tool calls.
+			args = append(args, "--tools", "")
 		}
 	}
 	if params.Effort != "" {
@@ -83,9 +86,14 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		args = append(args, "--max-turns", fmt.Sprintf("%d", params.MaxTurns))
 	}
 
-	// Append system prompts (context files, reaction instructions, etc.)
-	for _, sp := range params.SystemPrompts {
-		args = append(args, "--append-system-prompt", sp)
+	// System prompts: first one replaces Claude Code's default identity
+	// (--system-prompt), rest are appended (--append-system-prompt).
+	for i, sp := range params.SystemPrompts {
+		if i == 0 {
+			args = append(args, "--system-prompt", sp)
+		} else {
+			args = append(args, "--append-system-prompt", sp)
+		}
 	}
 
 	dataDir := params.DataDir
@@ -96,7 +104,11 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	// Remove stale settings.json before every invocation. Claude Code may
 	// persist restrictive allow-lists that block tools even when
 	// --dangerously-skip-permissions is used.
-	if sp := filepath.Join(p.DefaultDataDir, ".claude", "settings.json"); true {
+	homeDir := p.HomeDir
+	if homeDir == "" {
+		homeDir = p.DefaultDataDir
+	}
+	if sp := filepath.Join(homeDir, ".claude", "settings.json"); true {
 		_ = os.Remove(sp)
 	}
 
@@ -115,10 +127,9 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	// Build a safe environment for the subprocess (allowlist, not blocklist).
 	// Prevents leaking secrets (TELEGRAM_BOT_TOKEN, CC_AUTH_TOKEN, etc.)
 	// to Claude which runs with --dangerously-skip-permissions.
-	// HOME must always point to the main data dir (where .claude/ config lives),
+	// HOME must always point to the home dir (where .claude/ config lives),
 	// not the task-specific working directory.
-	homeDir := p.DefaultDataDir
-	cmd.Env = safeEnv(homeDir)
+	cmd.Env = safeEnv(homeDir, dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
 
 	log.Printf("provider: invoke starting (resume=%q, model=%s, max_turns=%d, effort=%s, sys_prompts=%d, tools=%v, write=%v)",
@@ -304,6 +315,16 @@ done:
 			if text == "" {
 				text = resultText.String()
 			}
+			// If Claude CLI returned an error with no text, propagate as error
+			// so callers (retry logic) can handle it properly.
+			if parsed.IsError && text == "" {
+				errDetail := parsed.Subtype
+				if errDetail == "" {
+					errDetail = "unknown error"
+				}
+				log.Printf("provider: claude error (subtype=%s, turns=%d)", parsed.Subtype, parsed.NumTurns)
+				return nil, fmt.Errorf("claude: %s", errDetail)
+			}
 			if text == "" {
 				switch parsed.Subtype {
 				case "error_max_turns":
@@ -383,8 +404,9 @@ var safeEnvPrefixes = []string{
 }
 
 // safeEnv builds a subprocess environment with only safe variables plus HOME/ALF_DATA_DIR.
-// homeDir is the main data directory where .claude/ config and .local/bin live.
-func safeEnv(homeDir string) []string {
+// homeDir is where .claude/ config and .local/bin live (set as HOME).
+// dataDir is the working data directory (set as ALF_DATA_DIR).
+func safeEnv(homeDir, dataDir string) []string {
 	env := make([]string, 0, 16)
 	localBin := filepath.Join(homeDir, ".local", "bin")
 	for _, e := range os.Environ() {
@@ -398,6 +420,6 @@ func safeEnv(homeDir string) []string {
 			}
 		}
 	}
-	env = append(env, "HOME="+homeDir, "ALF_DATA_DIR="+homeDir)
+	env = append(env, "HOME="+homeDir, "ALF_DATA_DIR="+dataDir)
 	return env
 }

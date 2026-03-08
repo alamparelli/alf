@@ -7,14 +7,14 @@ import (
 )
 
 func TestNewCLIProvider_DefaultTimeout(t *testing.T) {
-	p := NewCLIProvider("/tmp", 0, nil)
+	p := NewCLIProvider("/tmp", "/tmp", 0, nil)
 	if p.Timeout != 5*time.Minute {
 		t.Errorf("expected default timeout 5m, got %v", p.Timeout)
 	}
 }
 
 func TestNewCLIProvider_CustomTimeout(t *testing.T) {
-	p := NewCLIProvider("/tmp", 2*time.Minute, nil)
+	p := NewCLIProvider("/tmp", "/tmp", 2*time.Minute, nil)
 	if p.Timeout != 2*time.Minute {
 		t.Errorf("expected timeout 2m, got %v", p.Timeout)
 	}
@@ -22,7 +22,8 @@ func TestNewCLIProvider_CustomTimeout(t *testing.T) {
 
 func TestCLIProvider_InvokeNoClaude(t *testing.T) {
 	// When 'claude' binary is not available, Invoke should return an error.
-	p := NewCLIProvider(t.TempDir(), 5*time.Second, nil)
+	dir := t.TempDir()
+	p := NewCLIProvider(dir, dir, 5*time.Second, nil)
 
 	// Override PATH to ensure claude is not found.
 	t.Setenv("PATH", t.TempDir())
@@ -35,7 +36,8 @@ func TestCLIProvider_InvokeNoClaude(t *testing.T) {
 
 func TestCLIProvider_InvokeCancelled(t *testing.T) {
 	// Cancelled context should return an error.
-	p := NewCLIProvider(t.TempDir(), 5*time.Second, nil)
+	dir := t.TempDir()
+	p := NewCLIProvider(dir, dir, 5*time.Second, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -49,7 +51,8 @@ func TestCLIProvider_InvokeCancelled(t *testing.T) {
 func TestCLIProvider_ParamsBuildsArgs(t *testing.T) {
 	// Verify that Params fields are used. We can't easily test args without
 	// actually running claude, but we can verify the provider handles empty params.
-	p := NewCLIProvider(t.TempDir(), 1*time.Second, nil)
+	dir := t.TempDir()
+	p := NewCLIProvider(dir, dir, 1*time.Second, nil)
 
 	params := Params{
 		Model:         "claude-haiku-4-5",

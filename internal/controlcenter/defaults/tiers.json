@@ -1,90 +1,59 @@
 {
   "router_backend": "",
   "router_model": "haiku",
-  "default_fallback": "haiku_r",
-  "router_distinctions": "Tier escalation: Use the cheapest tier (lowest priority) that can handle the task. Escalate to a higher tier only when the task clearly requires more capability. Lightweight vs heavyweight: Use lightweight tiers for conversational replies, factual recall, short answers, and simple tool invocations. Use heavyweight tiers for reasoning, analysis, structured output, code work, and multi-step tasks. Use the highest tier only for system-wide architecture, multi-component design, or holding many constraints simultaneously. Read-only vs read-write: Use write-capable tiers ONLY when the user explicitly requests creating, editing, deleting, or modifying files, running tools, or executing actions. Questions about code or asking for suggestions use read-only tiers even if they mention files. Agent tier: Use the agent tier for complex multi-step tasks that benefit from parallel execution by multiple specialized sub-agents (research + implementation, multi-file coordinated changes, tasks requiring different expertise areas simultaneously). When in doubt: Default to the lowest-priority enabled tier. Fast and cheap is better than over-escalating.",
+  "default_fallback": "haiku",
+  "router_distinctions": "Select the tier whose capabilities best fit the task — Under-escalating (using a tier too weak for the task) is just as costly as over-escalating, because it produces poor results that require retries.\n\nWhen in doubt: Consider what happens if the selected tier is too weak for the task. If failure or poor quality is likely, escalate. The goal is a correct result on the first attempt, not minimal cost.",
   "tiers": [
     {
-      "name": "haiku_r",
+      "name": "haiku",
       "model": "haiku",
       "priority": 1,
       "enabled": true,
       "routable": true,
-      "router_label": "Casual conversation, simple factual questions, short summaries, translations, dictionary lookups, weather-style queries, small talk, jokes",
+      "router_label": "Casual conversation, simple factual questions, short summaries, translations, web searches, running scheduled jobs, invoking tools, simple file creation, quick edits, toggling settings",
+      "max_turns": 10,
+      "write_capable": true,
       "effort": "low",
-      "tools": ["Read", "WebSearch"]
+      "force_command": true
     },
     {
-      "name": "haiku_rw",
-      "model": "haiku",
+      "name": "sonnet",
+      "model": "sonnet",
       "priority": 2,
       "enabled": true,
       "routable": true,
-      "router_label": "Running scheduled jobs, invoking tools (reminders, timers, web search), simple file creation, quick one-line edits, toggling settings",
+      "router_label": "Code review, debugging, explaining complex concepts, research synthesis, editing code files, implementing features, fixing bugs, creating scripts, writing tests, multi-file changes",
+      "max_turns": 30,
       "write_capable": true,
-      "force_command": true,
-      "effort": "low",
-      "max_turns": 5
+      "effort": "medium",
+      "force_command": true
     },
     {
-      "name": "sonnet_r",
-      "model": "sonnet",
+      "name": "opus",
+      "model": "opus",
       "priority": 3,
       "enabled": true,
       "routable": true,
-      "router_label": "Code review, debugging analysis, explaining complex concepts, comparing options, writing structured content (emails, docs), research synthesis, data interpretation",
-      "effort": "medium",
-      "tools": ["Read", "WebSearch"]
-    },
-    {
-      "name": "sonnet_rw",
-      "model": "sonnet",
-      "priority": 4,
-      "enabled": true,
-      "routable": true,
-      "router_label": "Editing code files, implementing features, fixing bugs in code, creating scripts, modifying configurations, writing tests, multi-file text changes",
+      "router_label": "Architecture design, system-level reasoning, complex trade-off analysis, large-scale refactoring, implementing complex features, redesigning system architecture, building new modules from scratch",
+      "max_turns": 40,
       "write_capable": true,
-      "force_command": true,
       "effort": "medium",
-      "max_turns": 30
-    },
-    {
-      "name": "opus_r",
-      "model": "opus",
-      "priority": 5,
-      "enabled": true,
-      "routable": true,
-      "router_label": "Architecture design, system-level reasoning, complex trade-off analysis, long-form strategic planning, reviewing entire codebases, deep technical research",
-      "effort": "medium",
-      "tools": ["Read", "WebSearch"]
-    },
-    {
-      "name": "opus_rw",
-      "model": "opus",
-      "priority": 6,
-      "enabled": true,
-      "routable": true,
-      "router_label": "Large-scale refactoring across multiple files, implementing complex features with many moving parts, redesigning system architecture, building new modules from scratch",
-      "write_capable": true,
-      "force_command": true,
-      "effort": "medium",
-      "max_turns": 40
+      "force_command": true
     },
     {
       "name": "agent",
       "model": "opus",
-      "priority": 7,
-      "enabled": false,
+      "priority": 4,
+      "enabled": true,
       "routable": true,
-      "force_command": true,
-      "write_capable": false,
-      "effort": "high",
-      "orchestrator_max_turns": 3,
+      "description": "Multi-agent orchestrator for complex multi-step tasks requiring parallel work by multiple specialized agents",
       "max_turns": 10,
+      "write_capable": false,
+      "effort": "medium",
+      "orchestrator_max_turns": 3,
       "max_iterations": 10,
       "timeout_minutes": 60,
-      "tools": ["Read"],
-      "description": "Multi-agent coordinator for complex multi-step tasks requiring parallel work by multiple specialized agents"
+      "force_command": true
     }
   ]
 }

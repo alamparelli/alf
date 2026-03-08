@@ -202,7 +202,7 @@ function loadStatus() {
       const r = await api('/api/bash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'bash /home/node/data/bootstrap.sh 2>&1' })
+        body: JSON.stringify({ command: 'bash /home/alf/data/bootstrap.sh 2>&1' })
       });
       showOutput(r.output || (r.exit_code === 0 ? 'Done.' : 'Failed (exit ' + r.exit_code + ')'));
       if (r.exit_code !== 0 && r.error) showOutput(r.output + '\n\nError: ' + r.error);
@@ -220,14 +220,14 @@ function loadStatus() {
       const r = await api('/api/bash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'HOME=/home/node/data claude -p "ping" --output-format json --max-turns 1 --model haiku --allowedTools "" 2>&1 | head -5' })
+        body: JSON.stringify({ command: 'HOME=/home/alf claude -p "ping" --output-format json --max-turns 1 --model haiku --allowedTools "" 2>&1 | head -5' })
       });
       if (r.exit_code === 0) {
         showOutput('Claude is authenticated.');
       } else {
         showOutput('Claude is NOT authenticated.\n\n' +
           'To authenticate, run on the host machine:\n  alf login\n\n' +
-          'Or inside the container:\n  docker exec -it -e HOME=/home/node/data alf claude\n  Then type /login');
+          'Or inside the container:\n  docker exec -it -e HOME=/home/alf alf claude\n  Then type /login');
       }
     } catch (e) {
       showOutput('Error: ' + (e.message || e.error || 'request failed'));
@@ -2316,7 +2316,7 @@ function schedulesShowModal(job) {
       '<div class="tier-form">' +
         '<div class="form-row"><label>Name</label><input type="text" id="sjName" value="' + esc(j.name) + '"' + (isEdit ? ' readonly style="opacity:0.6"' : '') + '></div>' +
         '<div class="form-row"><label>Schedule</label><input type="text" id="sjSchedule" value="' + esc(j.schedule) + '" placeholder="0 30 9 * * * (cron with seconds)"></div>' +
-        '<div class="form-row"><label>Tier</label><input type="text" id="sjTier" value="' + esc(j.tier || '') + '" placeholder="haiku_r, sonnet_rw, direct..."></div>' +
+        '<div class="form-row"><label>Tier</label><input type="text" id="sjTier" value="' + esc(j.tier || '') + '" placeholder="haiku, sonnet, direct..."></div>' +
         '<div class="form-row" id="sjPromptRow"><label>Prompt</label><textarea id="sjPrompt" rows="3" placeholder="What should the LLM do?">' + esc(j.prompt || '') + '</textarea></div>' +
         '<div class="form-row" id="sjCommandRow" style="display:none"><label>Command</label><textarea id="sjCommand" rows="3" placeholder="Bash command to execute">' + esc(j.command || '') + '</textarea></div>' +
         '<div class="form-row"><label>Output</label><select id="sjOutput">' + outputOpts + '</select></div>' +
@@ -2694,7 +2694,7 @@ function tiersRender() {
   cfg.innerHTML = '<div class="tiers-router-card">' +
     '<div class="tiers-router-row"><span class="tiers-router-label">Router backend</span><span class="tiers-router-value">' + esc(routerBackendLabel) + '</span></div>' +
     '<div class="tiers-router-row"><span class="tiers-router-label">Router model</span><span class="tiers-router-value">' + esc(tiersCache.router_model || 'haiku') + '</span></div>' +
-    '<div class="tiers-router-row"><span class="tiers-router-label">Default fallback</span><span class="tiers-router-value">' + esc(tiersCache.default_fallback || 'haiku_r') + '</span></div>' +
+    '<div class="tiers-router-row"><span class="tiers-router-label">Default fallback</span><span class="tiers-router-value">' + esc(tiersCache.default_fallback || 'haiku') + '</span></div>' +
     '<div class="tiers-router-row"><button class="btn-sm" id="tiersEditRouterBtn">Edit router settings</button></div>' +
     '</div>';
   document.getElementById('tiersEditRouterBtn').addEventListener('click', () => tiersShowRouterModal());

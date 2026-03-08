@@ -23,9 +23,9 @@ When you send a message, a fast **router** classifies it and picks a tier:
 | You send... | ALF picks... | Why |
 |-------------|-------------|-----|
 | "Hey!" | instant (Haiku) | Simple greeting, instant reply |
-| "What's the weather?" | haiku_r | Quick question, read-only |
-| "Review this code" | sonnet_r | Needs analysis |
-| "Refactor the auth system" | opus_rw | Complex, needs file access |
+| "What's the weather?" | haiku | Quick question, read-only |
+| "Review this code" | sonnet | Needs analysis |
+| "Refactor the auth system" | opus | Complex, needs file access |
 | "Research X and write a report" | agent | Multi-step, needs agent coordination |
 
 When you send a photo with a caption, the router classifies based on the caption text and ensures the chosen tier can view images. Photos without a caption go to the cheapest image-capable tier.
@@ -35,8 +35,8 @@ When you send a photo with a caption, the router classifies based on the caption
 Tiers with `force_command: true` can be called directly. Type `/<tier_name> <message>`:
 
 ```
-/sonnet_rw fix the bug in router.go
-/opus_r explain the architecture of this project
+/sonnet fix the bug in router.go
+/opus explain the architecture of this project
 ```
 
 This bypasses the router entirely — useful when you know you need a specific model.
@@ -108,7 +108,7 @@ Two types of scheduled jobs:
 **LLM jobs** — ALF thinks and responds using a prompt:
 ```bash
 schedule create --name "morning brief" --schedule "0 0 9 * * 1-5" \
-  --tier sonnet_r --prompt "Summarize today's priorities" --output telegram
+  --tier sonnet --prompt "Summarize today's priorities" --output telegram
 ```
 
 **Direct jobs** — run a bash command, no LLM involved:
@@ -130,7 +130,7 @@ schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
 |--------|----------|-------------|
 | `--name` | Yes | Job name (for identification) |
 | `--schedule` | Yes | Cron expression or one-shot datetime |
-| `--tier` | For LLM | Which tier to use (`haiku_r`, `sonnet_rw`, `agent`, etc.) |
+| `--tier` | For LLM | Which tier to use (`haiku`, `sonnet`, `agent`, etc.) |
 | `--prompt` | For LLM | What to ask the model |
 | `--command` | For direct | Bash command to execute |
 | `--output` | No | Where to send results: `telegram`, `file`, `both`, `silent` (default: `telegram`) |
@@ -169,7 +169,7 @@ These work in both Telegram and CC Chat:
 | `/start` | Run the welcome onboarding again |
 | `/new` | Clear the conversation and start fresh |
 | `/login` | Get a new magic link for the Control Center |
-| `/<tier_name>` | Force a specific tier (e.g. `/opus_rw fix this bug`) |
+| `/<tier_name>` | Force a specific tier (e.g. `/opus fix this bug`) |
 
 ## Something not working?
 

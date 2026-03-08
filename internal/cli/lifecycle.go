@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -62,6 +63,41 @@ func RunRestart() {
 
 // RunCompose regenerates docker-compose.yml from the saved setup profile
 // and current secrets. Use after adding secrets or upgrading the CLI.
+// RunMagicLink generates a CC login link via the daemon API.
+func RunMagicLink() {
+	// Read the auth token from secrets.
+	dir := alfDir()
+	tokenFile := filepath.Join(dir, "secrets", "cc_auth_token")
+	tokenBytes, err := os.ReadFile(tokenFile)
+	if err != nil || strings.TrimSpace(string(tokenBytes)) == "" {
+		Fatal("cc_auth_token secret not set. Run: alf secret set cc_auth_token <token>")
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+
+	// Call the daemon's magic-link API via docker exec + curl.
+	cmd := exec.Command("docker", "exec", "alf",
+		"curl", "-sf", "-X", "POST",
+		"-H", "Authorization: Bearer "+token,
+		"http://127.0.0.1:8080/api/magic-link")
+	out, err := cmd.Output()
+	if err != nil {
+		Fatal("Failed to generate magic link. Is ALF running?")
+	}
+
+	var resp struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil || resp.URL == "" {
+		Fatal("Invalid response from daemon")
+	}
+
+	fmt.Println()
+	PrintCheck("Magic link generated (valid for 7 days):")
+	fmt.Println()
+	fmt.Println("  " + resp.URL)
+	fmt.Println()
+}
+
 func RunCompose() {
 	dir := alfDir()
 	ensureOptionalSecrets(dir)

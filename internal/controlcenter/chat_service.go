@@ -322,7 +322,6 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
 			MaxIterations:        tp.MaxIterations,
 			TimeoutMin:           tp.TimeoutMin,
-			Tools:                tp.Tools,
 		}, onProgress)
 		if orchErr != nil {
 			return fmt.Errorf("agent: %w", orchErr)
@@ -401,6 +400,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		Tools:         tp.Tools,
 		WriteCapable:  tp.WriteCapable,
 		Effort:        tp.Effort,
+		MaxTurns:      tp.MaxTurns,
 		SystemPrompts: sysPromptTexts,
 		ResumeID:      resumeID,
 		DataDir:       cs.DataDir,
@@ -428,9 +428,9 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 	result, err := prov.Invoke(ctx, prompt, params, progressFn)
 
-	// Retry without resume if session not found (CLI only).
-	if err != nil && resumeID != "" && !isAPITier && strings.Contains(err.Error(), "No conversation found") {
-		log.Printf("[chat-api] session %s expired, starting fresh", resumeID)
+	// Retry without resume if session failed (CLI only).
+	if err != nil && resumeID != "" && !isAPITier {
+		log.Printf("[chat-api] session %s failed (%v), starting fresh", resumeID, err)
 		cs.Sessions.Archive(apiChatID)
 		params.ResumeID = ""
 		result, err = prov.Invoke(ctx, prompt, params, nil)

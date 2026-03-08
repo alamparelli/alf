@@ -117,7 +117,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("audio_file", nargs="?", help="Path to audio file (one-shot mode)")
     parser.add_argument("--model", default="small", help="Whisper model name")
-    parser.add_argument("--models-dir", default="/home/node/data/models", help="Directory to store models")
+    parser.add_argument("--models-dir", default="/home/alf/data/models", help="Directory to store models")
     parser.add_argument("--server", action="store_true", help="Run as persistent server (stdin/stdout JSON lines)")
     args = parser.parse_args()
 

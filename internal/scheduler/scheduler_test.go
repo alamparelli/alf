@@ -270,7 +270,7 @@ func TestManagedJobCannotBeDeleted(t *testing.T) {
 	e.cron.Start()
 	defer e.cron.Stop()
 
-	_, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit", "telegram", nil)
+	_, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku", "audit", "telegram", nil)
 	if err != nil {
 		t.Fatalf("EnsureManaged: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestManagedJobCannotBeUpdated(t *testing.T) {
 	e.cron.Start()
 	defer e.cron.Stop()
 
-	_, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit", "telegram", nil)
+	_, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku", "audit", "telegram", nil)
 	if err != nil {
 		t.Fatalf("EnsureManaged: %v", err)
 	}
@@ -310,12 +310,12 @@ func TestEnsureManagedIdempotent(t *testing.T) {
 	e.cron.Start()
 	defer e.cron.Stop()
 
-	j1, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit v1", "telegram", nil)
+	j1, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku", "audit v1", "telegram", nil)
 	if err != nil {
 		t.Fatalf("EnsureManaged first call: %v", err)
 	}
 
-	j2, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 2h", "haiku_r", "audit v2", "telegram", nil)
+	j2, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 2h", "haiku", "audit v2", "telegram", nil)
 	if err != nil {
 		t.Fatalf("EnsureManaged second call: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestManagedJobPersistedInCronJSON(t *testing.T) {
 	e.cron.Start()
 	defer e.cron.Stop()
 
-	_, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit", "telegram", nil)
+	_, err := e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku", "audit", "telegram", nil)
 	if err != nil {
 		t.Fatalf("EnsureManaged: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestManagedJobVisibleInList(t *testing.T) {
 	e.cron.Start()
 	defer e.cron.Stop()
 
-	e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku_r", "audit", "telegram", nil)
+	e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku", "audit", "telegram", nil)
 	e.Create("user-job", "@every 2h", "direct", "", "echo hello", "silent", nil)
 
 	all := e.List(false)

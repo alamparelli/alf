@@ -104,7 +104,18 @@ func TestGitignore_Content(t *testing.T) {
 	}
 
 	content := string(data)
-	for _, expected := range []string{"!config.d/", "!config.d/**", "!context/", "!context/**", "!logs/events/*.jsonl", "!.claude/", "!tools/", "!skills/"} {
+
+	// The gitignore tracks everything by default (no blanket "*" deny),
+	// so only transient/heavy paths need exclusion rules.
+	for _, expected := range []string{
+		".cache/",
+		".local/",
+		"sessions/",
+		"logs/daemon.log",
+		"*.db-shm",
+		"*.db-wal",
+		"*.sock",
+	} {
 		if !strings.Contains(content, expected) {
 			t.Errorf(".gitignore should contain %q", expected)
 		}

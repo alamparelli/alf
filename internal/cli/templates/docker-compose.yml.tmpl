@@ -58,11 +58,14 @@ services:
       - cc_auth_token
       - openrouter_api_key
     volumes:
-      - ./data:/home/node/data
-      - ./config.d:/opt/alf/config
-      - ./config.d:/home/node/data/config.d:ro
-      - ./skills.d:/opt/alf/skills
-      - ./skills.d:/home/node/data/skills.d:ro
+      - ./data:/home/alf/data
+      - ./config.d:/opt/alf/config.d
+      - ./skills.d:/opt/alf/skills.d
+      - ./cache/claude:/home/alf/.claude
+      - ./cache/local:/home/alf/.local
+      - ./cache/npm:/home/alf/.npm
+      - ./cache/cache:/home/alf/.cache
+      - ./local:/opt/alf/user-packages
 {{- range .Workspaces}}
       - {{.}}:/workspaces/{{base .}}
 {{- end}}

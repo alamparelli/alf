@@ -23,7 +23,7 @@ var editableExts = map[string]bool{
 
 // WorkspaceHandler serves the data directory as a browsable workspace.
 // Files under config.d/ are read via the :ro bind mount in DataDir but
-// written through ConfigDir (the rw mount at /opt/alf/config).
+// written through ConfigDir (the rw mount at /opt/alf/config.d).
 //
 //	GET    /api/workspace?path=         → list directory
 //	GET    /api/workspace?path=foo.md   → read file
@@ -31,8 +31,8 @@ var editableExts = map[string]bool{
 //	DELETE /api/workspace?path=foo.md   → delete file
 type WorkspaceHandler struct {
 	DataDir   string
-	ConfigDir string // rw path for config.d writes (e.g. /opt/alf/config)
-	SkillsDir string // rw path for skills.d writes (e.g. /opt/alf/skills)
+	ConfigDir string // rw path for config.d writes (e.g. /opt/alf/config.d)
+	SkillsDir string // rw path for skills.d writes (e.g. /opt/alf/skills.d)
 	Notifier  Notifier
 }
 

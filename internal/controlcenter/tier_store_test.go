@@ -13,17 +13,17 @@ func TestFileTierStore_LoadDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if len(tiers.Tiers) < 6 {
-		t.Fatalf("expected at least 6 default tiers, got %d", len(tiers.Tiers))
+	if len(tiers.Tiers) < 4 {
+		t.Fatalf("expected at least 4 default tiers, got %d", len(tiers.Tiers))
 	}
-	if tiers.Tiers[0].Name != "haiku_r" {
-		t.Errorf("expected first tier 'haiku_r', got %q", tiers.Tiers[0].Name)
+	if tiers.Tiers[0].Name != "haiku" {
+		t.Errorf("expected first tier 'haiku', got %q", tiers.Tiers[0].Name)
 	}
 	if tiers.Tiers[0].Effort != "low" {
 		t.Errorf("expected effort 'low', got %q", tiers.Tiers[0].Effort)
 	}
 	if !tiers.Tiers[0].Routable {
-		t.Error("expected haiku_r tier to be routable")
+		t.Error("expected haiku tier to be routable")
 	}
 }
 
@@ -34,7 +34,7 @@ func TestFileTierStore_Current(t *testing.T) {
 
 	// Before any file, Current returns default.
 	cur := store.Current()
-	if len(cur.Tiers) < 6 || cur.Tiers[0].Name != "haiku_r" {
+	if len(cur.Tiers) < 4 || cur.Tiers[0].Name != "haiku" {
 		t.Error("Current() should return default tiers before any file write")
 	}
 }
@@ -70,8 +70,8 @@ func TestFileTierStore_Reload(t *testing.T) {
 }
 
 func TestTiersPath(t *testing.T) {
-	got := TiersPath("/opt/alf/config")
-	want := "/opt/alf/config/tiers.json"
+	got := TiersPath("/opt/alf/config.d")
+	want := "/opt/alf/config.d/tiers.json"
 	if got != want {
 		t.Errorf("TiersPath() = %q, want %q", got, want)
 	}

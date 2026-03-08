@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -83,21 +81,27 @@ func main() {
 	}
 
 	// Data directory for logs, sessions, context, etc.
-	dataDir := "/home/node/data"
+	dataDir := "/home/alf/data"
 	if d := os.Getenv("ALF_DATA_DIR"); d != "" {
 		dataDir = d
 	}
 
 	// Config directory (RW for CC, separate from data volume).
-	configDir := "/opt/alf/config"
+	configDir := "/opt/alf/config.d"
 	if d := os.Getenv("ALF_CONFIG_DIR"); d != "" {
 		configDir = d
 	}
 
 	// Skills directory (RW for CC, separate from data volume).
-	skillsDir := "/opt/alf/skills"
+	skillsDir := "/opt/alf/skills.d"
 	if d := os.Getenv("ALF_SKILLS_DIR"); d != "" {
 		skillsDir = d
+	}
+
+	// Home directory (parent of data). Used for HOME env, symlinks, bashrc.
+	homeDir := "/home/alf"
+	if d := os.Getenv("ALF_HOME_DIR"); d != "" {
+		homeDir = d
 	}
 
 	// Clean up stale signal sockets from previous runs (e.g. killed during redeploy).
@@ -167,22 +171,32 @@ func main() {
 	// Populate tools.d/ with symlinks to each system tool in /opt/alf/tools/.
 	// The host volume mount overwrites any Dockerfile-created symlinks,
 	// so we link individual tools at runtime instead.
-	linkSystemTools(filepath.Join(dataDir, "tools.d"), "/opt/alf/tools")
+	linkSystemTools(filepath.Join(dataDir, "tools.d"), "/opt/alf/tools.d")
 
 	// Ensure Claude Code finds its native binary at $HOME/.local/bin/claude.
 	// The volume mount overwrites any Dockerfile-created structure.
 	if claudePath, err := exec.LookPath("claude"); err == nil {
-		localBin := filepath.Join(dataDir, ".local", "bin")
+		localBin := filepath.Join(homeDir, ".local", "bin")
 		os.MkdirAll(localBin, 0o755)
 		link := filepath.Join(localBin, "claude")
-		os.Remove(link) // remove stale symlink
+		os.Remove(link)
 		if err := os.Symlink(claudePath, link); err == nil {
 			log.Printf("linked %s → %s", link, claudePath)
 		}
 	}
 
 	// Ensure ~/.local/bin is in PATH for interactive shells (terminal, docker exec).
-	ensureBashrcPath(os.Getenv("HOME"))
+	ensureBashrcPath(homeDir)
+
+	// Persist/restore .claude.json via the .claude/ volume mount.
+	// Claude CLI replaces symlinks with real files, so we use copy-based persistence.
+	syncClaudeJSON(homeDir)
+
+	// Create data directory symlinks for config and skills.
+	setupDataSymlinks(dataDir, configDir, skillsDir)
+
+	// Set up user-packages paths.
+	setupUserPackagesPaths()
 
 	// Fix directory permissions so the claude subprocess (uid 1001, gid 1000)
 	// can read/write files created before the permission refactoring.
@@ -191,9 +205,6 @@ func main() {
 
 	// Migrate config from old data/config/ to configDir (before loading).
 	migrateConfig(dataDir, configDir)
-
-	// Run user setup script if modified since last run.
-	runBootstrapScript(dataDir)
 
 	// Generate llms.txt index of available documentation.
 	writeLLMSIndex(dataDir)
@@ -211,7 +222,7 @@ func main() {
 	// Seed default tiers.json if not present (from image-embedded copy).
 	seedDefaultTiers(configDir)
 	// Remove stale Claude settings that may restrict tool permissions.
-	cleanClaudeSettings(dataDir)
+	cleanClaudeSettings(homeDir)
 
 	// Start outbound traffic firewall proxy.
 	fwStore := firewall.NewStore(configDir)
@@ -351,12 +362,12 @@ func main() {
 	// Chat message store for mobile app API.
 	chatStore := cc.NewChatStore(dataDir)
 
-	// Claude subprocess credential (run as claude user uid 1001, gid 1000/node).
+	// Claude subprocess credential (run as claude user uid 1001, gid 1000/alf).
 	claudeCred := &syscall.Credential{Uid: 1001, Gid: 1000}
 
 	// Provider: spawn-per-call Claude CLI for responses.
 	tiersTimeout := time.Duration(cfg.TiersTimeout) * time.Second // 0 → default 5m inside NewCLIProvider
-	cliProvider := provider.NewCLIProvider(dataDir, tiersTimeout, claudeCred)
+	cliProvider := provider.NewCLIProvider(homeDir, dataDir, tiersTimeout, claudeCred)
 
 	// OpenRouter API provider (optional).
 	orAPIKey := readSecret("OPENROUTER_API_KEY")
@@ -578,7 +589,7 @@ func main() {
 			"Security Audit",
 			"0 0 9 * * *", // daily at 09:00
 			firstFallbackTier(tierStore),
-			"Run a full security audit. Read all files in /home/node/data/skills.d/, /home/node/data/skills/, /home/node/data/tools.d/, and /home/node/data/tools/. Follow the security-audit skill instructions to produce a structured report.",
+			"Run a full security audit. Read all files in /home/alf/data/skills.d/, /home/alf/data/skills/, /home/alf/data/tools.d/, and /home/alf/data/tools/. Follow the security-audit skill instructions to produce a structured report.",
 			"telegram",
 			[]string{"security-audit"},
 		); err != nil {
@@ -1291,7 +1302,6 @@ func main() {
 					OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
 					MaxIterations:        tp.MaxIterations,
 					TimeoutMin:           tp.TimeoutMin,
-					Tools:                tp.Tools,
 				}
 
 				go func() {
@@ -1440,9 +1450,9 @@ func main() {
 
 			start := time.Now()
 			result, err := tierProv.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
-			// Retry without resume if session not found (CLI only).
-			if err != nil && resumeID != "" && !isAPITier && strings.Contains(err.Error(), "No conversation found") {
-				log.Printf("session %s expired, starting fresh", resumeID)
+			// Retry without resume if session failed (CLI only).
+			if err != nil && resumeID != "" && !isAPITier {
+				log.Printf("session %s failed (%v), starting fresh", resumeID, err)
 				chatSessions.Archive(chatID)
 				invokeParams.ResumeID = ""
 				result, err = tierProv.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
@@ -1471,8 +1481,10 @@ func main() {
 			}
 
 			// Clear onboarding flag after first successful response.
+			// Don't clear immediately — wait until next /new so system prompts
+			// stay consistent within a resumed session.
 			if onboarding != "" {
-				memory.ClearOnboarding(contextDir)
+				onboarding = "" // prevent re-clearing on subsequent messages
 			}
 
 			// Store the session ID returned by Claude for future --resume.
@@ -1843,6 +1855,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 	case "/new":
 		old := chatSessions.Archive(msg.Chat.ID)
 		apiHistory.Clear(fmt.Sprintf("tg:%d", msg.Chat.ID))
+		memory.ClearOnboarding(contextDir)
 		reply := "New session started."
 		if old != "" {
 			reply = "Previous session archived. New session started."
@@ -2050,7 +2063,7 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 
 // migrateConfig copies config files from old data/config/ to configDir on first run.
 // fixDataPermissions ensures all files and directories under dataDir are
-// group-readable/writable so the claude subprocess (uid 1001, gid node/1000)
+// group-readable/writable so the claude subprocess (uid 1001, gid alf/1000)
 // ensureBashrcPath adds ~/.local/bin to PATH in .bashrc if not already present.
 // This fixes the "native installation exists but ~/.local/bin is not in your PATH" warning
 // for interactive shells (CC terminal, docker exec).
@@ -2196,12 +2209,73 @@ func autoEnableAgentTier(tierStore cc.TierStore) {
 	}
 }
 
+// syncClaudeJSON persists .claude.json across container rebuilds.
+// Claude CLI replaces symlinks with real files, so we can't use a symlink.
+// Strategy: on startup, restore from the .claude/ volume if the file is missing;
+// after restoring (or if already present), back it up into the volume.
+// Also ensures group-readable permissions so the claude subprocess (uid 1001) can read it.
+func syncClaudeJSON(homeDir string) {
+	realFile := filepath.Join(homeDir, ".claude.json")
+	volumeCopy := filepath.Join(homeDir, ".claude", "claude.json")
+
+	// If .claude.json is a symlink (from Dockerfile), remove it — we use copies now.
+	if fi, err := os.Lstat(realFile); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		os.Remove(realFile)
+	}
+
+	if _, err := os.Stat(realFile); os.IsNotExist(err) {
+		// File missing (fresh container or rebuild). Try restoring from volume.
+		if data, err := os.ReadFile(volumeCopy); err == nil && len(data) > 0 {
+			os.WriteFile(realFile, data, 0o640)
+			log.Printf("claude-json: restored from volume backup")
+		} else {
+			// Check for Claude's own backup files.
+			backupDir := filepath.Join(homeDir, ".claude", "backups")
+			entries, _ := os.ReadDir(backupDir)
+			var newest string
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), ".claude.json.backup.") {
+					newest = filepath.Join(backupDir, e.Name())
+				}
+			}
+			if newest != "" {
+				if data, err := os.ReadFile(newest); err == nil {
+					os.WriteFile(realFile, data, 0o640)
+					log.Printf("claude-json: restored from Claude backup %s", filepath.Base(newest))
+				}
+			}
+		}
+	}
+
+	// Back up current file into volume for next rebuild.
+	if data, err := os.ReadFile(realFile); err == nil && len(data) > 0 {
+		os.WriteFile(volumeCopy, data, 0o640)
+	}
+
+	// Ensure group-readable so claude user (uid 1001, gid 1000) can read.
+	os.Chmod(realFile, 0o640)
+
+	// Fix .claude/ directory permissions: group needs read+traverse.
+	claudeDir := filepath.Join(homeDir, ".claude")
+	filepath.Walk(claudeDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			os.Chmod(path, info.Mode()|0o050) // g+rx
+		} else {
+			os.Chmod(path, info.Mode()|0o040) // g+r
+		}
+		return nil
+	})
+}
+
 // cleanClaudeSettings removes .claude/settings.json at startup.
 // Claude Code may persist restrictive allow-lists in this file which then
 // block tools (Edit, Write, etc.) even when --dangerously-skip-permissions
 // is used. Deleting it on restart ensures a clean slate every time.
-func cleanClaudeSettings(dataDir string) {
-	p := filepath.Join(dataDir, ".claude", "settings.json")
+func cleanClaudeSettings(homeDir string) {
+	p := filepath.Join(homeDir, ".claude", "settings.json")
 	if err := os.Remove(p); err != nil {
 		if !os.IsNotExist(err) {
 			log.Printf("clean-settings: failed to remove %s: %v", p, err)
@@ -2782,7 +2856,6 @@ func (s *schedulerOrchestrator) Run(ctx context.Context, userMessage string, sys
 		MaxIterations:        rc.MaxIterations,
 		MaxTurns:             rc.MaxTurns,
 		OrchestratorMaxTurns: rc.OrchestratorMaxTurns,
-		Tools:                rc.Tools,
 	}, agentProgress)
 	if err != nil {
 		return "", nil, err
@@ -2909,54 +2982,6 @@ func execBashCommand(tg *tgclient.Client, chatID int64, command string) {
 	tg.SendHTML(chatID, msg)
 }
 
-// runBootstrapScript executes data/bootstrap.sh if it exists and has changed since last run.
-// A SHA-256 hash is stored in data/.bootstrap-hash to skip unchanged scripts.
-func runBootstrapScript(dataDir string) {
-	script := filepath.Join(dataDir, "bootstrap.sh")
-	info, err := os.Stat(script)
-	if os.IsNotExist(err) {
-		return
-	}
-	if err != nil {
-		log.Printf("bootstrap: stat error: %v", err)
-		return
-	}
-	data, err := os.ReadFile(script)
-	if err != nil {
-		log.Printf("bootstrap: read error: %v", err)
-		return
-	}
-
-	// Check executable permission.
-	if info.Mode()&0o111 == 0 {
-		log.Printf("bootstrap: fixing permissions on %s (was %s)", script, info.Mode())
-		os.Chmod(script, 0o755)
-	}
-
-	// Check hash to skip if unchanged.
-	h := sha256.Sum256(data)
-	currentHash := hex.EncodeToString(h[:])
-	hashFile := filepath.Join(dataDir, ".bootstrap-hash")
-	if prev, err := os.ReadFile(hashFile); err == nil && strings.TrimSpace(string(prev)) == currentHash {
-		log.Printf("bootstrap: script unchanged (%d bytes), skipping", len(data))
-		return
-	}
-
-	log.Printf("bootstrap: running %s (%d bytes, hash=%s) ...", script, len(data), currentHash[:12])
-	start := time.Now()
-	cmd := exec.Command("bash", "-x", script) // -x traces each command for debugging
-	cmd.Dir = dataDir
-	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		log.Printf("bootstrap: script failed after %s: %v (will retry on next restart)", time.Since(start).Round(time.Second), err)
-		return // don't save hash so it retries
-	}
-
-	os.WriteFile(hashFile, []byte(currentHash), 0o644)
-	log.Printf("bootstrap: script completed successfully in %s", time.Since(start).Round(time.Second))
-}
 
 // writeLLMSIndex generates a llms.txt file in dataDir with an index of all embedded docs.
 // This lets the LLM quickly discover available documentation.
@@ -3116,5 +3141,48 @@ func watchConfigFiles(configDir string, reloadCh chan cc.ReloadEvent) {
 			}
 		}
 	}
+}
+
+
+// setupDataSymlinks creates symlinks inside data/ pointing to config.d and skills.d.
+func setupDataSymlinks(dataDir, configDir, skillsDir string) {
+	links := map[string]string{
+		filepath.Join(dataDir, "config.d"): configDir,
+		filepath.Join(dataDir, "skills.d"): skillsDir,
+	}
+	for link, target := range links {
+		if dest, err := os.Readlink(link); err == nil && dest == target {
+			continue
+		}
+		os.RemoveAll(link)
+		if err := os.Symlink(target, link); err != nil {
+			log.Printf("symlink %s → %s: %v", link, target, err)
+		} else {
+			log.Printf("symlink %s → %s", filepath.Base(link), target)
+		}
+	}
+}
+
+// setupUserPackagesPaths adds /opt/alf/user-packages/bin to PATH and lib to LD_LIBRARY_PATH.
+func setupUserPackagesPaths() {
+	const pkgDir = "/opt/alf/user-packages"
+	binDir := filepath.Join(pkgDir, "bin")
+	libDir := filepath.Join(pkgDir, "lib")
+	os.MkdirAll(binDir, 0o755)
+	os.MkdirAll(libDir, 0o755)
+
+	path := os.Getenv("PATH")
+	if !strings.Contains(path, binDir) {
+		os.Setenv("PATH", binDir+":"+path)
+	}
+	ldPath := os.Getenv("LD_LIBRARY_PATH")
+	if !strings.Contains(ldPath, libDir) {
+		if ldPath == "" {
+			os.Setenv("LD_LIBRARY_PATH", libDir)
+		} else {
+			os.Setenv("LD_LIBRARY_PATH", libDir+":"+ldPath)
+		}
+	}
+	log.Printf("user-packages: PATH includes %s, LD_LIBRARY_PATH includes %s", binDir, libDir)
 }
 

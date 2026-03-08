@@ -21,7 +21,7 @@ Two types of jobs:
 
 | Type | Tier | What it does |
 |------|------|-------------|
-| **LLM prompt** | Any tier (e.g. `sonnet_rw`) | Sends a prompt to Claude, same as sending a Telegram message |
+| **LLM prompt** | Any tier (e.g. `sonnet`) | Sends a prompt to Claude, same as sending a Telegram message |
 | **Bash command** | `direct` | Runs a shell command inside the container, no LLM involved |
 
 ## Creating a job
@@ -107,7 +107,7 @@ Internal jobs (like config watchers or update checks) are hidden from the UI. Th
 |-------|-------|
 | Name | `daily-standup` |
 | Schedule | `0 0 9 * * *` |
-| Tier | `sonnet_r` |
+| Tier | `sonnet` |
 | Prompt | `Summarize what changed in the workspace since yesterday. List new files, modified files, and any open tasks.` |
 | Output | `telegram` |
 
@@ -118,7 +118,7 @@ Internal jobs (like config watchers or update checks) are hidden from the UI. Th
 | Name | `git-backup` |
 | Schedule | `0 0 * * * *` |
 | Tier | `direct` |
-| Command | `cd /home/node/data && git add -A && git commit -m "auto-backup $(date +%H:%M)" 2>/dev/null; true` |
+| Command | `cd /home/alf/data && git add -A && git commit -m "auto-backup $(date +%H:%M)" 2>/dev/null; true` |
 | Output | `silent` |
 
 ## Common questions

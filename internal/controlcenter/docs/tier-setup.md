@@ -28,17 +28,14 @@ Changes take effect immediately — no restart needed.
 
 ## The default setup
 
-ALF comes with 7 tiers out of the box. Here's what each one does:
+ALF comes with 5 tiers out of the box. Here's what each one does:
 
 | Tier | Model | What it handles | Can edit files? |
 |------|-------|----------------|:-:|
 | `instant` | Haiku | "Hi", "thanks", "ok", yes/no | No |
-| `haiku_r` | Haiku | Chat, Q&A, summaries, translations | No |
-| `haiku_rw` | Haiku | Run tools, schedules, quick edits | Yes (max 5 steps) |
-| `sonnet_r` | Sonnet | Code review, analysis, research | No |
-| `sonnet_rw` | Sonnet | Write code, fix bugs, create scripts | Yes (max 10 steps) |
-| `opus_r` | Opus | Architecture, deep analysis, strategy | No |
-| `opus_rw` | Opus | Large refactoring, complex features | Yes (max 20 steps) |
+| `haiku` | Haiku | Chat, Q&A, summaries, translations, quick edits | Yes (max 5 steps) |
+| `sonnet` | Sonnet | Code review, analysis, research, write code, fix bugs | Yes (max 10 steps) |
+| `opus` | Opus | Architecture, deep analysis, large refactoring | Yes (max 20 steps) |
 | `agent` | Opus | Multi-agent coordination for complex tasks | Via agents |
 
 The agent tier is **disabled by default**. Enable it in `tiers.json` to let the router automatically delegate complex tasks to agent teams. See [Agent Teams](docs:agent-teams) for setup.
@@ -52,9 +49,9 @@ The router follows these rules:
 1. **Simple question?** Use Haiku. Chat, facts, jokes, translations — all Haiku.
 2. **Needs thinking?** Use Sonnet. Code review, analysis, writing structured content.
 3. **Really complex?** Use Opus. Only for system-wide architecture or holding many constraints at once.
-4. **Need to change files?** Use a `_rw` tier. Only when you explicitly ask to create, edit, or delete something.
+4. **Need to change files?** Each tier is write-capable. The router picks the right model based on complexity.
 
-> If the router can't decide, it falls back to `haiku_r`. Fast and safe.
+> If the router can't decide, it falls back to `haiku`. Fast and safe.
 
 ## Understanding the config file
 
@@ -63,7 +60,7 @@ Here's what a `tiers.json` file looks like:
 ```json
 {
   "router_model": "haiku",
-  "default_fallback": "haiku_r",
+  "default_fallback": "haiku",
   "router_distinctions": "Use haiku for casual chat. Use sonnet for analysis and code. Use opus only for complex architecture.",
   "tiers": [
     {
@@ -84,14 +81,14 @@ Here's what a `tiers.json` file looks like:
 | Setting | What it does | Example |
 |---------|-------------|---------|
 | `router_model` | Which model classifies your messages. Keep this cheap and fast. | `"haiku"` |
-| `default_fallback` | Which tier to use when the router can't decide. | `"haiku_r"` |
+| `default_fallback` | Which tier to use when the router can't decide. | `"haiku"` |
 | `router_distinctions` | Plain English rules for the router. This is your main control lever. | `"Use haiku for simple tasks..."` |
 
 ### Per-tier settings
 
 | Setting | What it does | Example |
 |---------|-------------|---------|
-| `name` | Unique name. Shows up in logs and status messages. | `"sonnet_rw"` |
+| `name` | Unique name. Shows up in logs and status messages. | `"sonnet"` |
 | `model` | Which Claude model to use: `haiku`, `sonnet`, or `opus`. | `"sonnet"` |
 | `priority` | Lower number = higher priority. Used for fallback selection and media routing. | `3` |
 | `enabled` | Set to `false` to turn off a tier completely. | `true` |
@@ -191,7 +188,7 @@ The `tools` field controls which Claude Code tools a read-only tier can use. Wri
 ## Common questions
 
 **How do I know which tier handled my message?**
-In the CC Chat tab, each reply shows the tier name and model in the metadata below the message. In Telegram, ALF shows a status message like "Processing with sonnet_r".
+In the CC Chat tab, each reply shows the tier name and model in the metadata below the message. In Telegram, ALF shows a status message like "Processing with sonnet".
 
 **ALF keeps using Sonnet for simple questions. How do I fix it?**
 Make your `router_label` for Haiku tiers more descriptive. Be specific:
@@ -217,7 +214,7 @@ When you send a photo, document, or video:
 - **With a caption** — the router classifies the caption to pick the right tier, then verifies the tier can view images (has Read tool or is write-capable). If not, it upgrades to the cheapest image-capable tier.
 - **Without a caption** — goes directly to the cheapest non-instant tier with image support.
 
-This means sending a screenshot with "fix this bug" routes to `sonnet_rw`, not `haiku_r`.
+This means sending a screenshot with "fix this bug" routes to `sonnet`, not `haiku`.
 
 ## Tips for good routing
 

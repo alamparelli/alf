@@ -2,7 +2,7 @@
   "router_backend": "",
   "router_model": "haiku",
   "default_fallback": "haiku_r",
-  "router_distinctions": "haiku vs sonnet: If the answer requires reasoning, analysis, or structured output, use sonnet. If it is conversational, factual recall, or a short answer, use haiku. sonnet vs opus: Use opus only when the task involves system-wide thinking, multi-component architecture, or requires holding many constraints simultaneously. Most code tasks are sonnet. read vs write (_r vs _rw): Use _rw ONLY when the user explicitly requests to create, edit, delete, or modify files, run a tool, or execute a scheduled action. Questions about code or asking for suggestions stay in _r even if they mention files. When in doubt: Default to haiku_r. It is better to respond fast with a simpler model than to over-escalate.",
+  "router_distinctions": "Tier escalation: Use the cheapest tier (lowest priority) that can handle the task. Escalate to a higher tier only when the task clearly requires more capability. Lightweight vs heavyweight: Use lightweight tiers for conversational replies, factual recall, short answers, and simple tool invocations. Use heavyweight tiers for reasoning, analysis, structured output, code work, and multi-step tasks. Use the highest tier only for system-wide architecture, multi-component design, or holding many constraints simultaneously. Read-only vs read-write: Use write-capable tiers ONLY when the user explicitly requests creating, editing, deleting, or modifying files, running tools, or executing actions. Questions about code or asking for suggestions use read-only tiers even if they mention files. Agent tier: Use the agent tier for complex multi-step tasks that benefit from parallel execution by multiple specialized sub-agents (research + implementation, multi-file coordinated changes, tasks requiring different expertise areas simultaneously). When in doubt: Default to the lowest-priority enabled tier. Fast and cheap is better than over-escalating.",
   "tiers": [
     {
       "name": "haiku_r",
@@ -78,11 +78,12 @@
       "routable": true,
       "force_command": true,
       "write_capable": false,
-      "effort": "medium",
+      "effort": "high",
+      "orchestrator_max_turns": 3,
       "max_turns": 10,
       "max_iterations": 10,
       "timeout_minutes": 60,
-      "tools": ["Read", "WebSearch", "Agent"],
+      "tools": ["Read"],
       "description": "Multi-agent coordinator for complex multi-step tasks requiring parallel work by multiple specialized agents"
     }
   ]

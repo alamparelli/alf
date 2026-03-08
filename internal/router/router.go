@@ -20,6 +20,13 @@ type Result struct {
 	React    string // optional emoji reaction suggestion for the user's message
 }
 
+// AgentTeamInfo describes an agent team for routing awareness.
+type AgentTeamInfo struct {
+	Name        string
+	Description string
+	Agents      []string // agent names within the team
+}
+
 // ClassifyInput holds all inputs for the router classifier.
 type ClassifyInput struct {
 	Message      string
@@ -28,6 +35,7 @@ type ClassifyInput struct {
 	ConfigDir    string // RO config path (for router-prompt.md)
 	LastTier     string // from session store
 	MessageCount int    // from session store
+	AgentTeams   []AgentTeamInfo // available agent teams for routing hints
 }
 
 // ResolveModel maps short model names to full Claude model identifiers.
@@ -50,7 +58,7 @@ func ResolveModel(short string) string {
 // BuildSystemPrompt constructs the one-time system prompt for the persistent
 // classifier process. Includes personality, tier catalog, rules, and response format.
 // This is sent once at process start; per-message user text goes via stdin.
-func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string {
+func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string, agentTeams []AgentTeamInfo) string {
 	var b strings.Builder
 
 	// 1. Personality (soul.md + mood.md) so direct responses match ALF's voice.
@@ -84,9 +92,9 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string) string 
 
 	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, schedule, fix, polish, apply, correct, repair, improve, refactor, rewrite, implement, build, deploy, add, rename, move, replace, merge, or generate ANYTHING (files, tasks, settings, status, jobs, schedules, code, etc.). When in doubt, prefer _rw over _r.\n")
 
-	// Orchestrator routing hint (only if orchestrator tier is available).
+	// Orchestrator routing hint with available teams.
 	if hasOrchestrator(tiers) {
-		b.WriteString("IMPORTANT: Route to \"orchestrator\" when the user asks for multi-step work requiring parallel agents, team coordination, or explicitly mentions agents/orchestrator. Examples: \"lance une équipe\", \"use agents to\", \"coordinate multiple tasks\", complex research+write+review workflows. Do NOT route to sonnet/opus and expect them to call the orchestrator — only the orchestrator tier can coordinate agents.\n")
+		b.WriteString(buildAgentTeamsHint(agentTeams))
 	}
 
 	// 4. Custom router prompt from file.
@@ -257,7 +265,7 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, schedule, fix, polish, apply, correct, repair, improve, refactor, rewrite, implement, build, deploy, add, rename, move, replace, merge, or generate ANYTHING (files, tasks, settings, status, jobs, schedules, code, etc.). When in doubt, prefer _rw over _r.\n")
 
 	if hasOrchestrator(input.Tiers) {
-		b.WriteString("IMPORTANT: Route to \"orchestrator\" when the user asks for multi-step work requiring parallel agents, team coordination, or explicitly mentions agents/orchestrator. Examples: \"lance une équipe\", \"use agents to\", \"coordinate multiple tasks\", complex research+write+review workflows. Do NOT route to sonnet/opus and expect them to call the orchestrator — only the orchestrator tier can coordinate agents.\n")
+		b.WriteString(buildAgentTeamsHint(input.AgentTeams))
 	}
 
 	if input.MessageCount > 0 && input.LastTier != "" {
@@ -355,6 +363,35 @@ func stripMarkdownFences(s string) string {
 		s = strings.TrimSpace(s)
 	}
 	return s
+}
+
+// buildAgentTeamsHint generates a routing hint paragraph describing available agent teams.
+// If no teams are configured, falls back to a generic orchestrator hint.
+func buildAgentTeamsHint(teams []AgentTeamInfo) string {
+	var b strings.Builder
+	b.WriteString("IMPORTANT: Route to \"agent\" tier when:\n")
+	b.WriteString("  1. The task matches an available agent team's specialty (see list below)\n")
+	b.WriteString("  2. The user explicitly asks to use agents/teams (\"lance une équipe\", \"use agents\")\n")
+	b.WriteString("  3. The task requires research+writing, or multiple steps that benefit from parallel work\n")
+
+	if len(teams) > 0 {
+		b.WriteString("\nAvailable agent teams:\n")
+		for _, t := range teams {
+			b.WriteString(fmt.Sprintf("  - \"%s\": %s", t.Name, t.Description))
+			if len(t.Agents) > 0 {
+				b.WriteString(fmt.Sprintf(" [agents: %s]", strings.Join(t.Agents, ", ")))
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\nExamples that MUST route to \"agent\":\n")
+		b.WriteString("  - \"rédige un article sur X\" → agent (writer team)\n")
+		b.WriteString("  - \"write a blog post about Y\" → agent (research + writing)\n")
+		b.WriteString("  - \"research Z and write a report\" → agent (multi-step)\n")
+		b.WriteString("  - \"review this code and fix issues\" → agent (review + fix)\n")
+	}
+
+	b.WriteString("\nDo NOT route to sonnet/opus for tasks that match a team — only the \"agent\" tier can coordinate agents.\n")
+	return b.String()
 }
 
 // hasOrchestrator returns true if an enabled+routable agent tier exists.

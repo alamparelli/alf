@@ -22,13 +22,14 @@ var bundledAgentsFS embed.FS
 
 // ComposeData holds values for the docker-compose template.
 type ComposeData struct {
-	Image         string // Docker image (default: ghcr.io/alamparelli/alf:latest)
+	Image         string   // Docker image (default: ghcr.io/alamparelli/alf:latest)
 	CCPort        string
 	CCExternalURL string
 	EnableHTTPS   bool
 	Domain        string
 	AcmeEmail     string
-	Timezone      string // IANA timezone (e.g. "Europe/Brussels")
+	Timezone      string   // IANA timezone (e.g. "Europe/Brussels")
+	Workspaces    []string // Host paths mounted as workspaces under /workspaces/<basename>
 }
 
 // RenderDockerCompose writes docker-compose.yml with the given port.
@@ -37,7 +38,8 @@ func RenderDockerCompose(dir string, data ComposeData) error {
 	if err != nil {
 		return err
 	}
-	tmpl, err := template.New("compose").Parse(string(src))
+	funcs := template.FuncMap{"base": filepath.Base}
+	tmpl, err := template.New("compose").Funcs(funcs).Parse(string(src))
 	if err != nil {
 		return err
 	}

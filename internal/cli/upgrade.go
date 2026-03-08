@@ -35,6 +35,14 @@ func RunUpgrade(currentVersion string) {
 	// Fix secret file permissions — previous versions wrote 0o644 (world-readable).
 	HardenSecrets(dir)
 
+	// Ensure optional secret files exist (even empty) so docker-compose
+	// doesn't fail when secrets are always declared in the template.
+	ensureOptionalSecrets(dir)
+
+	// Regenerate docker-compose.yml from saved profile so new secrets
+	// and template changes are picked up without re-running init.
+	regenerateCompose(dir)
+
 	// Seed any new bundled skills.
 	if err := SeedBundledSkills(dir); err != nil {
 		PrintInfo(fmt.Sprintf("Warning: failed to seed bundled skills: %v", err))
@@ -226,6 +234,50 @@ func copyDir(src, dst string) error {
 		}
 		return os.WriteFile(target, data, info.Mode())
 	})
+}
+
+// regenerateCompose rebuilds docker-compose.yml from the saved setup profile.
+func regenerateCompose(dir string) {
+	profile := loadSetupProfile()
+	if profile.Dir == "" {
+		// No saved profile — can't regenerate.
+		return
+	}
+
+	var data ComposeData
+	if profile.HTTPS {
+		data = ComposeData{
+			EnableHTTPS:   true,
+			Domain:        profile.Domain,
+			AcmeEmail:     profile.AcmeEmail,
+			CCExternalURL: fmt.Sprintf("https://%s", profile.Domain),
+		}
+	} else {
+		port := profile.Port
+		if port == "" {
+			port = "8080"
+		}
+		host := profile.Host
+		if host == "" {
+			host = "localhost"
+		}
+		data = ComposeData{
+			CCPort:        port,
+			CCExternalURL: fmt.Sprintf("http://%s:%s", host, port),
+		}
+	}
+	data.Timezone = profile.Timezone
+	data.Workspaces = profile.Workspaces
+	data.Image = "ghcr.io/alamparelli/alf:latest"
+	if img := os.Getenv("ALF_IMAGE"); img != "" {
+		data.Image = img
+	}
+
+	if err := RenderDockerCompose(dir, data); err != nil {
+		PrintWarning(fmt.Sprintf("Failed to regenerate docker-compose.yml: %v", err))
+		return
+	}
+	PrintCheck("docker-compose.yml regenerated")
 }
 
 func fetchLatestTag() (string, error) {

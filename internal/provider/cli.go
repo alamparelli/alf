@@ -57,19 +57,21 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		"--verbose",
 	}
 
-	if params.WriteCapable {
-		// Full access — all tools auto-approved.
-		args = append(args, "--dangerously-skip-permissions")
-	} else if len(params.Tools) > 0 {
-		// Read-only: whitelist specific tools, deny everything else.
-		// In non-interactive (-p) mode, non-allowed tools are auto-denied.
-		for _, tool := range params.Tools {
-			args = append(args, "--allowedTools", tool)
+	// Always skip permissions so resumed sessions never inherit a
+	// restrictive permission mode from a previous read-only invocation.
+	args = append(args, "--dangerously-skip-permissions")
+
+	if !params.WriteCapable {
+		if len(params.Tools) > 0 {
+			// Read-only: whitelist specific tools, deny everything else.
+			for _, tool := range params.Tools {
+				args = append(args, "--allowedTools", tool)
+			}
+		} else {
+			// No tools requested — restrict to nothing so Claude doesn't
+			// waste turns attempting tools that get auto-denied.
+			args = append(args, "--allowedTools", "")
 		}
-	} else {
-		// No tools requested — restrict to nothing so Claude doesn't
-		// waste turns attempting tools that get auto-denied.
-		args = append(args, "--allowedTools", "")
 	}
 	if params.Effort != "" {
 		args = append(args, "--effort", params.Effort)
@@ -89,6 +91,13 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	dataDir := params.DataDir
 	if dataDir == "" {
 		dataDir = p.DefaultDataDir
+	}
+
+	// Remove stale settings.json before every invocation. Claude Code may
+	// persist restrictive allow-lists that block tools even when
+	// --dangerously-skip-permissions is used.
+	if sp := filepath.Join(p.DefaultDataDir, ".claude", "settings.json"); true {
+		_ = os.Remove(sp)
 	}
 
 	timeout := p.Timeout
@@ -253,10 +262,12 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "thinking" && !sentThinking:
 				onProgress(StreamEvent{Type: "thinking"})
 				sentThinking = true
+			case event.Type == "stream_event" && event.Event.Delta.Type == "thinking_delta":
+				onProgress(StreamEvent{Type: "thinking", Text: event.Event.Delta.Text})
 			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "tool_use":
 				onProgress(StreamEvent{Type: "tool_use", Detail: event.Event.ContentBlock.Name})
 			case event.Type == "stream_event" && event.Event.Delta.Type == "text_delta":
-				onProgress(StreamEvent{Type: "text"})
+				onProgress(StreamEvent{Type: "text_delta", Text: event.Event.Delta.Text})
 			}
 		}
 

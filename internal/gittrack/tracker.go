@@ -35,7 +35,9 @@ func (t *Tracker) Init() error {
 	// Always mark directory as safe (required when daemon runs as root but dir is owned by another user).
 	_ = t.git("config", "--global", "--add", "safe.directory", t.dir)
 	if _, err := os.Stat(gitDir); err == nil {
-		return nil // already initialized
+		// Repo exists — ensure .gitignore is up-to-date.
+		_ = t.writeGitignore()
+		return nil
 	}
 
 	if err := t.git("init"); err != nil {
@@ -131,9 +133,34 @@ func (t *Tracker) git(args ...string) error {
 
 func (t *Tracker) writeGitignore() error {
 	content := `# Track everything by default, exclude heavy/transient data.
+
+# System / cache / runtime.
+.cache/
+.config/
+.local/
+.npm/
+.bashrc
+.bootstrap-hash
+.claude/debug/
+.claude/settings.json
 .claude/settings.local.json
+.claude/plugins/
+.claude/shell-snapshots/
 agents/
 tmp/
+models/
+sessions/
+logs/daemon.log
+
+# Transient database files and sockets.
+*.db-shm
+*.db-wal
+*.sock
+
+# Secrets.
+**/client_secret_*.json
+**/token.json
+**/ga-token.json
 `
 	return os.WriteFile(filepath.Join(t.dir, ".gitignore"), []byte(content), 0o644)
 }

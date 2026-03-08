@@ -72,6 +72,10 @@ type ChatService struct {
 	Orchestrator *agents.Orchestrator // may be nil — multi-agent orchestrator
 	mu           sync.Mutex           // serialize Claude calls (single user v1)
 
+	// Background job tracking.
+	activeJob *chatJob
+	jobMu     sync.Mutex
+
 	// Upload registry: upload_id → UploadEntry
 	uploads   map[string]*UploadEntry
 	uploadsMu sync.Mutex
@@ -79,7 +83,7 @@ type ChatService struct {
 
 // ChatEvent is sent to clients via SSE during streaming.
 type ChatEvent struct {
-	Type string `json:"type"` // thinking, tool_use, text, reaction, done
+	Type string `json:"type"` // thinking, tool_use, text_delta, text, reaction, done
 	Data any    `json:"data"`
 }
 
@@ -305,13 +309,21 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		onProgress := func(phase, detail string) {
 			switch phase {
 			case "thinking":
-				onEvent(ChatEvent{Type: "thinking", Data: struct{}{}})
+				onEvent(ChatEvent{Type: "thinking", Data: map[string]string{}})
 			case "agent":
 				onEvent(ChatEvent{Type: "tool_use", Data: map[string]string{"name": "agent:" + detail}})
 			}
 		}
 
-		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchSysPrompts, agents.RunConfig{}, onProgress)
+		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchSysPrompts, agents.RunConfig{
+			Model:                tp.Model,
+			Effort:               tp.Effort,
+			MaxTurns:             tp.MaxTurns,
+			OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
+			MaxIterations:        tp.MaxIterations,
+			TimeoutMin:           tp.TimeoutMin,
+			Tools:                tp.Tools,
+		}, onProgress)
 		if orchErr != nil {
 			return fmt.Errorf("agent: %w", orchErr)
 		}
@@ -387,6 +399,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	params := provider.Params{
 		Model:         tp.Model,
 		Tools:         tp.Tools,
+		WriteCapable:  tp.WriteCapable,
 		Effort:        tp.Effort,
 		SystemPrompts: sysPromptTexts,
 		ResumeID:      resumeID,
@@ -401,9 +414,15 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	progressFn = func(event provider.StreamEvent) {
 		switch event.Type {
 		case "thinking":
-			onEvent(ChatEvent{Type: "thinking", Data: struct{}{}})
+			if event.Text != "" {
+				onEvent(ChatEvent{Type: "thinking", Data: map[string]string{"text": event.Text}})
+			} else {
+				onEvent(ChatEvent{Type: "thinking", Data: map[string]string{}})
+			}
 		case "tool_use":
 			onEvent(ChatEvent{Type: "tool_use", Data: map[string]string{"name": event.Detail}})
+		case "text_delta":
+			onEvent(ChatEvent{Type: "text_delta", Data: map[string]string{"text": event.Text}})
 		}
 	}
 
@@ -619,10 +638,15 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 				model = cs.ResolveModel(t.Model)
 			}
 			return tierParams{
-				Model:   model,
-				Tools:   t.Tools,
-				Effort:  t.Effort,
-				Backend: t.Backend,
+				Model:                model,
+				Tools:                t.Tools,
+				Effort:               t.Effort,
+				Backend:              t.Backend,
+				WriteCapable:         t.WriteCapable,
+				MaxTurns:             t.MaxTurns,
+				OrchestratorMaxTurns: t.OrchestratorMaxTurns,
+				MaxIterations:        t.MaxIterations,
+				TimeoutMin:           t.TimeoutMin,
 			}
 		}
 	}
@@ -635,10 +659,15 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
-	Model   string
-	Tools   []string
-	Effort  string
-	Backend string
+	Model                string
+	Tools                []string
+	Effort               string
+	Backend              string
+	WriteCapable         bool
+	MaxTurns             int
+	OrchestratorMaxTurns int
+	MaxIterations        int
+	TimeoutMin           int
 }
 
 // extractReactionTag parses [[react:EMOJI]] from the start of text.
@@ -860,6 +889,50 @@ func extFromMimeMap(mimeType, fileName string) string {
 // Returns a formatted system prompt block, or "" if nothing relevant.
 const recallDistanceThreshold = 1.2
 const recallLimit = 3
+
+// StartJob launches Ask in a background goroutine and returns the job for streaming.
+// If a job is already running, returns it for reconnection.
+func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
+	cs.jobMu.Lock()
+	if j := cs.activeJob; j != nil && !j.isDone() {
+		cs.jobMu.Unlock()
+		return j
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	job := newChatJob(cancel)
+	cs.activeJob = job
+	cs.jobMu.Unlock()
+
+	go func() {
+		err := cs.Ask(ctx, req, func(evt ChatEvent) {
+			job.push(evt)
+		})
+		job.finish(err)
+	}()
+
+	return job
+}
+
+// ActiveJob returns the current in-flight job, or nil if none.
+func (cs *ChatService) ActiveJob() *chatJob {
+	cs.jobMu.Lock()
+	defer cs.jobMu.Unlock()
+	if cs.activeJob != nil && !cs.activeJob.isDone() {
+		return cs.activeJob
+	}
+	return nil
+}
+
+// GetJob returns a job by ID (even if completed) for reconnection.
+func (cs *ChatService) GetJob(id string) *chatJob {
+	cs.jobMu.Lock()
+	defer cs.jobMu.Unlock()
+	if cs.activeJob != nil && cs.activeJob.ID == id {
+		return cs.activeJob
+	}
+	return nil
+}
 
 func recallMemories(recaller MemoryRecaller, message string) string {
 	if recaller == nil || len(message) < 5 {

@@ -53,6 +53,7 @@ You're looking at it. Here's what each section does:
 | **Chat** | Browser-based chat (same as Telegram, different interface) |
 | **Tasks** | Monitor agent tasks — running, completed, failed |
 | **Pages** | Dynamic HTML dashboards ALF generates (appears when pages exist) |
+| **Terminal** | Shell session inside the Docker container ([details](docs:terminal)) |
 | **Logs** | Daemon logs and event viewer |
 | **Docs** | You are here |
 
@@ -178,6 +179,24 @@ These work in both Telegram and CC Chat:
 | ALF picks the wrong tier | Edit `tiers.json` in Workspace. Make sure `router_label` descriptions are clear. |
 | ALF is slow | You might be hitting a powerful tier for simple messages. Check tier setup. |
 | Scheduled job didn't run | Check Logs tab. Verify the cron expression. Use `schedule list` to check next run time. |
+
+## Customizing the deployment
+
+ALF's `docker-compose.yml` is auto-generated and regenerated on upgrades. **Do not edit it directly** — your changes will be overwritten.
+
+For custom configuration (extra volumes, networks, labels, environment variables), create a `docker-compose.override.yml` in the same directory. Docker Compose automatically merges both files:
+
+```yaml
+# docker-compose.override.yml
+services:
+  alf:
+    environment:
+      - MY_CUSTOM_VAR=value
+    volumes:
+      - /my/data:/mnt/data
+```
+
+To regenerate the base file manually (e.g. after adding a secret): `alf compose`
 
 ## What's next?
 

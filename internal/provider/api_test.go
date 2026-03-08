@@ -183,8 +183,8 @@ func TestAPIProvider_OnProgress(t *testing.T) {
 		t.Fatalf("expected 2 progress events, got %d", len(events))
 	}
 	for _, e := range events {
-		if e.Type != "text" {
-			t.Errorf("expected 'text' event type, got %q", e.Type)
+		if e.Type != "text_delta" {
+			t.Errorf("expected 'text_delta' event type, got %q", e.Type)
 		}
 	}
 }

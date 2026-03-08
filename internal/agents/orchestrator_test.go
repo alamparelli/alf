@@ -214,9 +214,14 @@ func TestAgentSessionResume(t *testing.T) {
 	}
 }
 
-func TestPlainTextFallback(t *testing.T) {
+func TestPlainTextTriggersNudge(t *testing.T) {
 	mp := newMockProvider([]*provider.Result{
+		// First: plain text (invalid) — should trigger nudge
 		{Text: "Just a plain answer without JSON"},
+		// After nudge: proper delegation
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find info"}]}`},
+		{Text: "agent result"},
+		{Text: `{"response": "done"}`},
 	}, nil)
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
@@ -225,8 +230,12 @@ func TestPlainTextFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text != "Just a plain answer without JSON" {
+	if text != "done" {
 		t.Errorf("unexpected: %s", text)
+	}
+	// Should have been nudged: 1 (plain text) + 1 (delegate) + 1 (agent) + 1 (response) = 4 calls
+	if mp.callCount() != 4 {
+		t.Errorf("expected 4 calls (nudge + delegation), got %d", mp.callCount())
 	}
 }
 
@@ -471,9 +480,12 @@ func TestNoTeamsConfigured(t *testing.T) {
 	}
 }
 
-func TestMalformedJSON(t *testing.T) {
+func TestMalformedJSONTriggersNudge(t *testing.T) {
 	mp := newMockProvider([]*provider.Result{
+		// Malformed JSON — triggers nudge
 		{Text: `not json at all`},
+		// After nudge: proper response
+		{Text: `{"response": "ok after nudge"}`},
 	}, nil)
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
@@ -482,8 +494,11 @@ func TestMalformedJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text != "not json at all" {
-		t.Errorf("expected plain text fallback, got: %s", text)
+	if text != "ok after nudge" {
+		t.Errorf("expected nudged response, got: %s", text)
+	}
+	if mp.callCount() != 2 {
+		t.Errorf("expected 2 calls (nudge + proper), got %d", mp.callCount())
 	}
 }
 
@@ -626,24 +641,24 @@ func (p *blockingProvider) Invoke(ctx context.Context, prompt string, params pro
 
 // --- RunConfig tests ---
 
-func TestRunConfigMaxTurnsPassedToBrain(t *testing.T) {
+func TestRunConfigOrchestratorMaxTurnsPassedToBrain(t *testing.T) {
 	mp := newMockProvider([]*provider.Result{
 		{Text: `{"response": "done"}`, CostUSD: 0.01},
 	}, nil)
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
 
-	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{MaxTurns: 3}, nil)
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{OrchestratorMaxTurns: 5}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// The orchestrator brain call should have MaxTurns=3.
+	// The orchestrator brain call should have MaxTurns=5.
 	if len(mp.calls) == 0 {
 		t.Fatal("no calls recorded")
 	}
-	if mp.calls[0].Params.MaxTurns != 3 {
-		t.Errorf("expected MaxTurns=3 for brain, got %d", mp.calls[0].Params.MaxTurns)
+	if mp.calls[0].Params.MaxTurns != 5 {
+		t.Errorf("expected MaxTurns=5 for brain, got %d", mp.calls[0].Params.MaxTurns)
 	}
 }
 
@@ -659,9 +674,9 @@ func TestRunConfigMaxTurnsDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Default MaxTurns for the brain matches defaultMaxIterations (10).
-	if mp.calls[0].Params.MaxTurns != 10 {
-		t.Errorf("expected default MaxTurns=10, got %d", mp.calls[0].Params.MaxTurns)
+	// Default orchestrator turns = defaultOrchestratorTurns (3).
+	if mp.calls[0].Params.MaxTurns != 3 {
+		t.Errorf("expected default orchestrator MaxTurns=3, got %d", mp.calls[0].Params.MaxTurns)
 	}
 }
 

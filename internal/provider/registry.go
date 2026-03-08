@@ -1,5 +1,7 @@
 package provider
 
+import "log"
+
 // Registry holds available provider backends and dispatches by name.
 type Registry struct {
 	CLI        *CLIProvider
@@ -14,6 +16,7 @@ func (r *Registry) ForBackend(backend string) Provider {
 		if r.OpenRouter != nil {
 			return r.OpenRouter
 		}
+		log.Printf("WARNING: openrouter backend requested but no OPENROUTER_API_KEY configured, falling back to CLI")
 		return r.CLI
 	default:
 		return r.CLI

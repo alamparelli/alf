@@ -4,8 +4,9 @@ import "context"
 
 // StreamEvent represents a real-time event from the Claude CLI stream.
 type StreamEvent struct {
-	Type   string // "thinking", "tool_use", "text"
+	Type   string // "thinking", "tool_use", "text_delta"
 	Detail string // tool name for tool_use, empty otherwise
+	Text   string // delta text for text_delta and thinking
 }
 
 // OnProgress is called with stream events as Claude processes.

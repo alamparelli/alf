@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	defaultMaxIterations = 10
-	defaultGlobalTimeout = 60 * time.Minute
-	orchestratorKey      = "agent"
+	defaultMaxIterations  = 10
+	defaultOrchestratorTurns = 3 // low: orchestrator should output JSON quickly, not do deep tool work
+	defaultGlobalTimeout  = 60 * time.Minute
+	orchestratorKey       = "agent"
 )
 
 // ResolveModelFunc maps short model names to full CLI model names.
@@ -176,9 +177,9 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	if orchEffort == "" {
 		orchEffort = "high"
 	}
-	orchMaxTurns := rc.MaxTurns
+	orchMaxTurns := rc.OrchestratorMaxTurns
 	if orchMaxTurns <= 0 {
-		orchMaxTurns = defaultMaxIterations
+		orchMaxTurns = defaultOrchestratorTurns
 	}
 	log.Printf("[orchestrator] system prompts: %d total (%d user + orchestrator prompt) | max_iterations=%d model=%s effort=%s max_turns=%d", len(allSystemPrompts), len(systemPrompts), maxIterations, orchModel, orchEffort, orchMaxTurns)
 
@@ -547,13 +548,9 @@ func parseOrchestratorOutput(text string) OrchestratorOutput {
 parse:
 	var out OrchestratorOutput
 	if err := json.Unmarshal([]byte(jsonStr), &out); err != nil {
-		// Not valid JSON — treat entire text as final response.
-		return OrchestratorOutput{Response: text}
-	}
-
-	// If neither response nor delegates with content, treat as plain text.
-	if out.Response == "" && out.Delegates == nil {
-		return OrchestratorOutput{Response: text}
+		// Not valid JSON — do NOT treat as response; force re-delegation.
+		log.Printf("[orchestrator] ⚠ output is not valid JSON, will nudge for proper delegation")
+		return OrchestratorOutput{} // empty = triggers nudge loop
 	}
 
 	return out

@@ -60,6 +60,14 @@ func RunRestart() {
 	PrintCheck("ALF restarted")
 }
 
+// RunCompose regenerates docker-compose.yml from the saved setup profile
+// and current secrets. Use after adding secrets or upgrading the CLI.
+func RunCompose() {
+	dir := alfDir()
+	ensureOptionalSecrets(dir)
+	regenerateCompose(dir)
+}
+
 func RunLogs() {
 	dir := alfDir()
 	dockerCompose(dir, "logs", "-f")

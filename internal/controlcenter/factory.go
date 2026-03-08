@@ -126,6 +126,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	// Chat API (mobile app).
 	if deps.ChatService != nil {
 		mux.Handle("/api/chat", &ChatHandler{Service: deps.ChatService})
+		mux.Handle("/api/chat/job", &ChatJobHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/upload", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/media/", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/react", &ChatReactHandler{Service: deps.ChatService})
@@ -206,5 +207,15 @@ func HandlerFactory(deps Deps) http.Handler {
 	handler = newRateLimiter(180).middleware(handler)
 	handler = loggingMiddleware(handler)
 
-	return handler
+	// Terminal WebSocket: registered outside middleware stack so the
+	// ResponseWriter keeps its http.Hijacker interface for the upgrade.
+	// Auth is checked inline before accepting the connection.
+	outer := http.NewServeMux()
+	outer.Handle("/api/terminal", &TerminalHandler{
+		AuthToken: deps.AuthToken,
+		Sessions:  deps.Sessions,
+	})
+	outer.Handle("/", handler)
+
+	return outer
 }

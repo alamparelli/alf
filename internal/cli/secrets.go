@@ -20,6 +20,7 @@ var SecretRegistry = []Secret{
 	{Name: "telegram_bot_token", Description: "Telegram bot token from @BotFather", Required: true},
 	{Name: "telegram_chat_id", Description: "Your Telegram chat ID", Required: true},
 	{Name: "cc_auth_token", Description: "Control Center auth token (auto-generated)", Required: false},
+	{Name: "openrouter_api_key", Description: "OpenRouter API key (sk-or-...)", Required: false},
 }
 
 func secretsDir(baseDir string) string {
@@ -143,6 +144,24 @@ func RunSecretSet(args []string) {
 		Fatal(fmt.Sprintf("Failed to set secret: %v", err))
 	}
 	PrintCheck(fmt.Sprintf("Secret '%s' saved", name))
+}
+
+// ensureOptionalSecrets creates empty files for optional secrets that
+// don't exist yet. Docker Compose requires secret files to exist even
+// if they're empty. This allows "alf secret set <name> <value>" +
+// "alf restart" to work without re-running "alf init".
+func ensureOptionalSecrets(baseDir string) {
+	dir := secretsDir(baseDir)
+	os.MkdirAll(dir, 0o700)
+	for _, s := range SecretRegistry {
+		if s.Required {
+			continue
+		}
+		p := filepath.Join(dir, s.Name)
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			os.WriteFile(p, []byte(""), 0o600)
+		}
+	}
 }
 
 // RunSecretRemove removes a secret by name.

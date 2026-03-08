@@ -50,6 +50,8 @@ func main() {
 		}
 	case "login":
 		cli.RunLogin()
+	case "magic-link":
+		cli.RunMagicLink()
 	case "compose":
 		cli.RunCompose()
 	case "uninstall":
@@ -77,6 +79,7 @@ func printUsage() {
 	fmt.Println("  logs      Follow ALF logs")
 	fmt.Println("  status    Show ALF status and versions")
 	fmt.Println("  login     Authenticate Claude inside the container")
+	fmt.Println("  magic-link  Generate a Control Center login link")
 	fmt.Println("  secret    Manage secrets (list/set/remove)")
 	fmt.Println("  uninstall Remove ALF completely")
 	fmt.Println("  version   Print CLI version")

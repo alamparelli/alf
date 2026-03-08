@@ -313,6 +313,8 @@ func promptDirectory(reader *bufio.Reader, previous string) string {
 		"config.d", "skills.d",
 		"data/.claude", "data/tools", "data/skills",
 		"data/logs", "data/context",
+		"cache/claude", "cache/local", "cache/npm", "cache/cache",
+		"local",
 	}
 	for _, sub := range subdirs {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
@@ -863,12 +865,16 @@ func promptWorkspaces(reader *bufio.Reader, previous []string) []string {
 
 func fixClaudeOwnership() {
 	fix := exec.Command("docker", "exec", "alf",
-		"sh", "-c", "chown -R 1000:1000 /home/node/data/.claude /home/node/data/.claude.json 2>/dev/null; true")
+		"sh", "-c", `chown -R 1000:1000 /home/alf/.claude /home/alf/.claude.json 2>/dev/null
+chmod 640 /home/alf/.claude.json 2>/dev/null
+chmod -R g+rX /home/alf/.claude 2>/dev/null
+cp /home/alf/.claude.json /home/alf/.claude/claude.json 2>/dev/null
+true`)
 	fix.Run()
 }
 
 func verifyClaudeAuth() {
-	verify := exec.Command("docker", "exec", "-e", "HOME=/home/node/data",
+	verify := exec.Command("docker", "exec", "--user", "1000:1000", "-e", "HOME=/home/alf",
 		"alf", "claude", "-p", "ping", "--output-format", "json", "--max-turns", "1")
 	out, _ := verify.Output()
 	if len(out) > 0 && strings.Contains(string(out), `"is_error":false`) {
@@ -876,7 +882,7 @@ func verifyClaudeAuth() {
 	} else {
 		PrintWarning("Claude not authenticated yet. Run:")
 		fmt.Println()
-		fmt.Println("    docker exec -it -e HOME=/home/node/data alf claude")
+		fmt.Println("    docker exec -it -e HOME=/home/alf alf claude")
 		fmt.Println("    Then: alf login")
 		fmt.Println()
 	}
@@ -887,7 +893,7 @@ func RunLogin() {
 	PrintInfo("Launching Claude Code for authentication...")
 	fmt.Println("  Type " + colorBold + "/login" + colorReset + " inside Claude to authenticate, then " + colorBold + "/exit" + colorReset + " when done.")
 	fmt.Println()
-	cmd := exec.Command("docker", "exec", "-it", "-e", "HOME=/home/node/data", "alf", "claude")
+	cmd := exec.Command("docker", "exec", "-it", "--user", "1000:1000", "-e", "HOME=/home/alf", "alf", "claude")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -54,13 +54,15 @@ Use the agent for:
 
 ## The starter team
 
-ALF ships with a bundled starter team of 3 agents:
+ALF ships with a bundled starter team of 3 agents, all with full tool access (`write_capable: true`):
 
-| Agent | What it does | Model |
-|-------|-------------|-------|
-| **researcher** | Gathers information, searches the web | Sonnet |
-| **writer** | Drafts text, can write files | Sonnet |
-| **reviewer** | Reviews quality, finds issues, suggests improvements | Sonnet |
+| Agent | What it does | Model | Max turns |
+|-------|-------------|-------|-----------|
+| **researcher** | Gathers information, searches the web, reads files | Sonnet | 15 |
+| **writer** | Drafts text, writes files, creates content | Sonnet | 15 |
+| **reviewer** | Reviews quality, finds issues, suggests improvements | Sonnet | 10 |
+
+All starter agents have unrestricted tool access (Read, Write, Edit, Bash, WebSearch, etc.). This ensures they can complete their tasks without hitting tool restrictions. You can fine-tune permissions later by setting `write_capable: false` and specifying a `tools` whitelist per agent.
 
 The agent (Opus) decides which agents to call, what to ask them, and whether the results are good enough — or if another round of delegation is needed.
 
@@ -158,7 +160,7 @@ Here's the full format:
 Instead of writing JSON by hand, ask ALF to generate the configuration for you:
 
 ```
-/sonnet_r Design an agent team for SEO content analysis with a keyword researcher, content writer, and SEO auditor. Show me the JSON.
+/sonnet Design an agent team for SEO content analysis with a keyword researcher, content writer, and SEO auditor. Show me the JSON.
 ```
 
 ALF will generate the JSON. You can then save it via the **Workspace Explorer** in the Control Center: navigate to `config.d/agents/`, click the upload or create button, and paste the JSON.
@@ -169,7 +171,7 @@ ALF will generate the JSON. You can then save it via the **Workspace Explorer** 
 
 - **Give agents clear, specific system prompts.** Vague prompts produce vague results. Tell each agent exactly what it should do and what format to use.
 - **Use the cheapest model that can do the job.** Haiku for simple extraction or formatting. Sonnet for most tasks. Opus only when you truly need deep reasoning.
-- **Give agents enough turns.** Start with 5-10 for agents that use tools (Read, WebSearch, Write). Use 2-3 only for review-only agents.
+- **Give agents enough turns.** Start with 10-15 for agents that use tools. Use 5-10 for review-only agents. Too few turns → "turn limit reached" errors.
 - **The agent can re-delegate.** If an agent's result is poor, the agent sends it back with feedback. You don't need to handle retries yourself.
 - **You can have multiple team files.** Drop as many JSON files into `config.d/agents/` as you want. The agent sees all teams and picks the right agents for each task.
 

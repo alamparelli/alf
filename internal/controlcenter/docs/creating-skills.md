@@ -65,7 +65,7 @@ Every `SKILL.md` starts with a **frontmatter** block (metadata between `---` lin
 name: x-manager
 description: X/Twitter content manager. Draft and publish tweets.
 triggers: tweet, draft, twitter, x post, publication
-tier: sonnet_rw
+tier: sonnet
 version: "1"
 ---
 
@@ -84,7 +84,7 @@ You are an X/Twitter content manager for @username.
 | `name` | No | Skill name. Defaults to the folder name if not set. |
 | `description` | Yes* | One-line summary shown in the skill catalog. *Without this, ALF can't discover the skill.* |
 | `triggers` | No | Comma-separated keywords for auto-injection (see below). |
-| `tier` | No | Minimum tier name (e.g. `sonnet_rw`). When this skill is active, ALF won't use a lower tier. |
+| `tier` | No | Minimum tier name (e.g. `sonnet`). When this skill is active, ALF won't use a lower tier. |
 | `version` | No | Version string, for your own tracking. |
 
 ### Trigger keywords
@@ -110,14 +110,14 @@ Some skills need a capable model. A skill that calls APIs, writes structured con
 Add `tier` to your frontmatter to set a floor:
 
 ```yaml
-tier: sonnet_rw
+tier: sonnet
 ```
 
-When this skill is active in the session, ALF will never use a tier with lower priority. If the router picks `haiku_rw` but the skill requires `sonnet_rw`, ALF automatically upgrades.
+When this skill is active in the session, ALF will never use a tier with lower priority. If the router picks `haiku` but the skill requires `sonnet`, ALF automatically upgrades.
 
 The tier name must match exactly one of your configured tiers in `tiers.json`.
 
-> Use `_rw` tiers for skills that need to run scripts, call APIs, or create files. Read-only tiers can't execute tools.
+> Use write-capable tiers for skills that need to run scripts, call APIs, or create files. Read-only tiers can't execute tools.
 
 ## Keeping skills under the size limit
 
@@ -245,7 +245,7 @@ skills/
 
 ALF loads skills in this order:
 
-1. System skills (`/opt/alf/skills/`) — bundled with ALF
+1. System skills (`/opt/alf/skills.d/`) — bundled with ALF
 2. Bundled copies (`~/data/skills.d/`) — read-only
 3. User skills (`~/data/skills/`) — your custom skills
 

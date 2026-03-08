@@ -18,6 +18,7 @@ import (
 type ClassifierConfig struct {
 	Model        string             // e.g. "claude-haiku-4-5"
 	SystemPrompt string             // one-time system prompt (personality + tiers + rules)
+	HomeDir      string             // HOME for subprocess (where .claude/ lives); falls back to DataDir
 	DataDir      string             // working directory
 	Credential   *syscall.Credential // subprocess isolation
 	IdleTimeout  time.Duration      // restart after idle (resets conversation context)
@@ -80,7 +81,7 @@ func (c *CLIClassifier) startLocked() error {
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--max-turns", "3",
-		"--allowedTools", "",
+		"--tools", "",
 		"--dangerously-skip-permissions",
 		"--no-session-persistence",
 		"--verbose",
@@ -95,7 +96,11 @@ func (c *CLIClassifier) startLocked() error {
 	}
 
 	// Build a safe environment (same allowlist as CLIProvider).
-	cmd.Env = safeEnv(c.cfg.DataDir)
+	classifierHome := c.cfg.HomeDir
+	if classifierHome == "" {
+		classifierHome = c.cfg.DataDir
+	}
+	cmd.Env = safeEnv(classifierHome, c.cfg.DataDir)
 
 	// Capture stderr to log any Claude CLI errors.
 	stderrPipe, err := cmd.StderrPipe()

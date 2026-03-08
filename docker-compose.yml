@@ -15,8 +15,11 @@ services:
       - telegram_chat_id
       - cc_auth_token
     volumes:
-      - ./dev-data:/home/node/data
-      - ./dev-claude-session:/home/node/.claude
+      - ./dev-data:/home/alf/data
+      - ./dev-cache/claude:/home/alf/.claude
+      - ./dev-cache/local:/home/alf/.local
+      - ./dev-cache/npm:/home/alf/.npm
+      - ./dev-cache/cache:/home/alf/.cache
     mem_limit: 512m
     cpus: "0.5"
 

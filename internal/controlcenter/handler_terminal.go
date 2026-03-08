@@ -56,7 +56,7 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// container rebuilds.
 	dataDir := os.Getenv("ALF_DATA_DIR")
 	if dataDir == "" {
-		dataDir = "/home/node/data"
+		dataDir = "/home/alf/data"
 	}
 	for i, e := range env {
 		if strings.HasPrefix(e, "HOME=") {

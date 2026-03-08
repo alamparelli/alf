@@ -332,7 +332,7 @@ Commands:
 Create options:
   --name <name>           Job name (required)
   --schedule <expr>       Cron expression or RFC3339 one-shot (required)
-  --tier <tier>           LLM tier (e.g. haiku_r, sonnet_rw) or "direct" for bash
+  --tier <tier>           LLM tier (e.g. haiku, sonnet, opus) or "direct" for bash
   --prompt <text>         Prompt for LLM tiers (required for LLM jobs)
   --command <cmd>         Bash command for direct tier (required for direct jobs)
   --output <dest>         telegram | file | both | silent (default: telegram)
@@ -350,11 +350,11 @@ Examples:
 
   # LLM: daily briefing with sonnet
   schedule create --name "morning brief" --schedule "0 0 9 * * 1-5" \
-    --tier sonnet_r --prompt "Summarize today's priorities" --output telegram
+    --tier sonnet --prompt "Summarize today's priorities" --output telegram
 
   # LLM: one-shot reminder
   schedule create --name "deploy check" --schedule "2026-03-10T15:00:00Z" \
-    --tier haiku_r --prompt "Check if v2.1 deployed correctly" --output telegram
+    --tier haiku --prompt "Check if v2.1 deployed correctly" --output telegram
 
 Update options:
   schedule update <id> [--enabled true|false] [--schedule ...] [--prompt ...] [--command ...] [--name ...] [--output ...]

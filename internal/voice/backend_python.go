@@ -40,7 +40,7 @@ func New(scriptPath, model, modelsDir string, timeout time.Duration) (*Transcrib
 		model = "small"
 	}
 	if modelsDir == "" {
-		modelsDir = "/home/node/data/models"
+		modelsDir = "/home/alf/data/models"
 	}
 
 	return &Transcriber{

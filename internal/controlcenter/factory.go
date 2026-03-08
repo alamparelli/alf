@@ -40,6 +40,7 @@ type Deps struct {
 	DataDir          string
 	ConfigDir      string
 	SkillsDir      string
+	ExternalURL    string // public URL (e.g. https://cc.lamparelli.eu)
 	DashboardHTML  string
 	WebFS          fs.FS // embedded web assets (style.css, app.js)
 }
@@ -186,6 +187,14 @@ func HandlerFactory(deps Deps) http.Handler {
 			Secure:   deps.SecureCookies,
 		}))
 		mux.Handle("/auth", authHandler)
+	}
+
+	// Magic link generator (auth-token protected, for CLI usage).
+	if deps.Magic != nil && deps.ExternalURL != "" {
+		mux.Handle("/api/magic-link", &MagicLinkHandler{
+			Magic:       deps.Magic,
+			ExternalURL: deps.ExternalURL,
+		})
 	}
 
 	// Static assets (CSS, JS) — served from embedded web/ directory.

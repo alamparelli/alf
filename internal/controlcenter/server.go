@@ -81,6 +81,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		DataDir:        dataDir,
 		ConfigDir:      configDir,
 		SkillsDir:      skillsDir,
+		ExternalURL:    strings.TrimRight(externalURL, "/"),
 		DashboardHTML:  string(htmlBytes),
 		WebFS:          webSub,
 	})

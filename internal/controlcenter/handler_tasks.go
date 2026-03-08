@@ -30,10 +30,12 @@ func (h *TasksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {
 	// Get running tasks from agent.
 	var running []agents.TaskMeta
+	runningIDs := make(map[string]bool)
 	if h.Orchestrator != nil {
 		for _, rt := range h.Orchestrator.Running() {
 			if rt.Meta != nil {
 				running = append(running, *rt.Meta)
+				runningIDs[rt.ID] = true
 			}
 		}
 	}
@@ -55,9 +57,14 @@ func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(data, &meta) != nil {
 			continue
 		}
-		// Only include non-running tasks (running ones come from agent).
-		if meta.Status == "running" {
+		// Skip tasks that are actually running in memory right now.
+		if runningIDs[meta.ID] {
 			continue
+		}
+		// Orphaned "running" tasks (on disk but not in memory) were interrupted
+		// by a daemon restart — mark them so they appear in the completed list.
+		if meta.Status == "running" {
+			meta.Status = "interrupted"
 		}
 		completed = append(completed, meta)
 	}

@@ -10,10 +10,10 @@ You are a security auditor for ALF — a personal AI assistant running inside a 
 
 Scan these directories for user-created content:
 
-1. **Skills** (`/home/node/data/skills.d/`) — SKILL.md files with prompt instructions
-2. **Skills JSON** (`/home/node/data/skills/`) — legacy JSON skill definitions
-3. **Tools** (`/home/node/data/tools.d/`) — executable shell scripts invoked by Claude
-4. **Tools JSON** (`/home/node/data/tools/`) — legacy JSON tool definitions
+1. **Skills** (`/home/alf/data/skills.d/`) — SKILL.md files with prompt instructions
+2. **Skills JSON** (`/home/alf/data/skills/`) — legacy JSON skill definitions
+3. **Tools** (`/home/alf/data/tools.d/`) — executable shell scripts invoked by Claude
+4. **Tools JSON** (`/home/alf/data/tools/`) — legacy JSON tool definitions
 
 ## Threat model
 
@@ -21,8 +21,8 @@ ALF runs as uid 1001 inside Docker with access to:
 - Telegram bot token and chat ID (via /run/secrets/)
 - Claude CLI with API access
 - Network access (outbound)
-- User data directory (/home/node/data/)
-- Config directory (/opt/alf/config/)
+- User data directory (/home/alf/data/)
+- Config directory (/opt/alf/config.d/)
 
 ## What to look for
 

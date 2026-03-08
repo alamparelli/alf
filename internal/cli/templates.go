@@ -87,7 +87,7 @@ func SeedBundledSkills(dir string) error {
 // SeedBundledAgents copies embedded agent teams into the agents directory.
 // Existing files are not overwritten (preserves user modifications).
 func SeedBundledAgents(dir string) error {
-	// Agents live inside config.d/ which is mounted as /opt/alf/config in the container.
+	// Agents live inside config.d/ which is mounted as /opt/alf/config.d in the container.
 	agentsDir := filepath.Join(dir, "config.d", "agents")
 	return seedEmbedded(bundledAgentsFS, "bundled_agents", agentsDir)
 }
@@ -130,7 +130,7 @@ func SeedBootstrapScript(dir string) error {
 #   - Runs as root inside the container
 #   - Only re-runs when the file content changes (SHA-256 hash check)
 #   - stdout/stderr are logged to the daemon log
-#   - The working directory is /home/node/data
+#   - The working directory is /home/alf/data
 # ─────────────────────────────────────────────────────────────────────
 set -e
 

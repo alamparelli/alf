@@ -66,11 +66,11 @@ schedule create --name "disk check" --schedule "0 0 */6 * * *" \
 
 # LLM job
 schedule create --name "morning brief" --schedule "0 0 9 * * 1-5" \
-  --tier sonnet_r --prompt "Summarize today's priorities" --output telegram
+  --tier sonnet --prompt "Summarize today's priorities" --output telegram
 
 # One-shot (RFC3339 timestamp)
 schedule create --name "deploy check" --schedule "2026-03-10T15:00:00Z" \
-  --tier haiku_r --prompt "Check if v2.1 deployed correctly"
+  --tier haiku --prompt "Check if v2.1 deployed correctly"
 ```
 
 | Flag | Required | Description |

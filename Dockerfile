@@ -92,7 +92,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
     && rm -rf /root/.local/share/claude /root/.claude \
     && claude --version
 
-ENV PATH="/opt/alf/tools:${PATH}"
+ENV PATH="/opt/alf/tools.d:${PATH}"
 
 COPY internal/controlcenter/defaults/tiers.json /opt/alf/defaults/tiers.json
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon
@@ -105,40 +105,46 @@ COPY --from=builder /schedule-tools /opt/alf/bin/schedule-tools
 COPY scripts/transcribe.py /opt/alf/transcribe.py
 
 # Tool symlinks: clean names only, pointing to binaries in /opt/alf/bin/.
-RUN mkdir -p /opt/alf/tools \
-    && ln -s /opt/alf/bin/extract-video /opt/alf/tools/extract-video \
-    && ln -s /opt/alf/bin/recall-tools /opt/alf/tools/recall \
-    && ln -s /opt/alf/bin/recall-tools /opt/alf/tools/remember \
-    && ln -s /opt/alf/bin/recall-tools /opt/alf/tools/forget \
-    && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools/react \
-    && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools/status \
-    && ln -s /opt/alf/bin/schedule-tools /opt/alf/tools/schedule
+RUN mkdir -p /opt/alf/tools.d \
+    && ln -s /opt/alf/bin/extract-video /opt/alf/tools.d/extract-video \
+    && ln -s /opt/alf/bin/recall-tools /opt/alf/tools.d/recall \
+    && ln -s /opt/alf/bin/recall-tools /opt/alf/tools.d/remember \
+    && ln -s /opt/alf/bin/recall-tools /opt/alf/tools.d/forget \
+    && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools.d/react \
+    && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools.d/status \
+    && ln -s /opt/alf/bin/schedule-tools /opt/alf/tools.d/schedule
 
 # Create users for two-user privilege model.
-RUN groupadd --gid 1000 node \
-    && useradd --uid 1000 --gid node --shell /bin/bash --create-home node \
-    && useradd -u 1001 -g node -s /bin/bash -M claude \
-    && mkdir -p /home/claude && chown claude:node /home/claude
+RUN groupadd --gid 1000 alf \
+    && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf \
+    && useradd -u 1001 -g alf -s /bin/bash -M claude \
+    && mkdir -p /home/claude && chown claude:alf /home/claude
 
 # Directory structure for volumes.
-RUN mkdir -p /home/node/data/logs /home/node/data/sessions \
-    && mkdir -p /home/node/data/tools /home/node/data/skills \
-    && mkdir -p /home/node/data/pages \
-    && mkdir -p /home/node/data/.claude \
-    && mkdir -p /home/node/data/config.d /home/node/data/skills.d \
-    && mkdir -p /opt/alf/config \
-    && chown -R root:node /home/node/data \
-    && chmod -R g+ws /home/node/data \
-    && chown -R root:root /opt/alf/config \
-    && chmod 755 /opt/alf/config \
-    && chmod -R 755 /opt/alf/tools \
+RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
+    && mkdir -p /home/alf/data/tools /home/alf/data/skills \
+    && mkdir -p /home/alf/data/pages \
+    && mkdir -p /home/alf/data/.claude \
+    && mkdir -p /home/alf/data/config.d /home/alf/data/skills.d \
+    && mkdir -p /opt/alf/config.d \
+    && mkdir -p /opt/alf/user-packages/bin /opt/alf/user-packages/lib \
+    && chown -R root:alf /home/alf/data \
+    && chmod -R g+ws /home/alf/data \
+    && chown -R root:root /opt/alf/config.d \
+    && chmod 755 /opt/alf/config.d \
+    && chmod -R 755 /opt/alf/tools.d \
     && chmod -R 755 /opt/alf/bin
 
-# Git safe directory for all users (data dir is root:node, accessed by node+claude).
-RUN git config --system --add safe.directory /home/node/data
+# Git safe directory for all users (data dir is root:alf, accessed by alf+claude).
+RUN git config --system --add safe.directory /home/alf/data
 
-WORKDIR /home/node
+WORKDIR /home/alf
+
+ENV HOME=/home/alf
+
+COPY scripts/entrypoint.sh /opt/alf/entrypoint.sh
+RUN chmod +x /opt/alf/entrypoint.sh
 
 EXPOSE 8080
 
-CMD ["/opt/alf/alf-daemon"]
+ENTRYPOINT ["/opt/alf/entrypoint.sh"]

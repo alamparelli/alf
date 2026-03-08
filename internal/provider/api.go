@@ -204,7 +204,7 @@ func (p *APIProvider) doRequestWithRetry(ctx context.Context, reqBody apiRequest
 			if choice.Delta.Content != "" {
 				resultText.WriteString(choice.Delta.Content)
 				if onProgress != nil {
-					onProgress(StreamEvent{Type: "text"})
+					onProgress(StreamEvent{Type: "text_delta", Text: choice.Delta.Content})
 				}
 			}
 		}

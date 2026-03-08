@@ -11,7 +11,9 @@ require (
 )
 
 require (
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/elazarl/goproxy v1.8.2 // indirect
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
+	nhooyr.io/websocket v1.8.17 // indirect
 )

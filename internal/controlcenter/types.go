@@ -68,12 +68,13 @@ type Tier struct {
 	Instant      bool     `json:"instant"`
 	RouterLabel  string   `json:"router_label,omitempty"`
 	Description  string   `json:"description,omitempty"`
-	MaxTurns     int      `json:"max_turns,omitempty"`
-	WriteCapable bool     `json:"write_capable"`
-	Tools        []string `json:"tools,omitempty"`
-	Effort        string   `json:"effort,omitempty"`
-	MaxIterations int      `json:"max_iterations,omitempty"`
-	TimeoutMin    int      `json:"timeout_minutes,omitempty"`
+	MaxTurns              int      `json:"max_turns,omitempty"`
+	OrchestratorMaxTurns  int      `json:"orchestrator_max_turns,omitempty"` // turns per orchestrator iteration (agent tier only)
+	WriteCapable          bool     `json:"write_capable"`
+	Tools                 []string `json:"tools,omitempty"`
+	Effort                string   `json:"effort,omitempty"`
+	MaxIterations         int      `json:"max_iterations,omitempty"`
+	TimeoutMin            int      `json:"timeout_minutes,omitempty"`
 	ForceCommand  bool     `json:"force_command"`
 	Backend       string   `json:"backend,omitempty"` // "cli" (default), "openrouter"
 }

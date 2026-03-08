@@ -38,36 +38,8 @@ func (h *ChatHandler) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set up SSE.
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no") // nginx
-	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
-
-	ctx := r.Context()
-	err := h.Service.Ask(ctx, req, func(evt ChatEvent) {
-		data, err := json.Marshal(evt.Data)
-		if err != nil {
-			return
-		}
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
-		flusher.Flush()
-	})
-
-	if err != nil {
-		errData, _ := json.Marshal(map[string]string{"error": err.Error()})
-		fmt.Fprintf(w, "event: error\ndata: %s\n\n", errData)
-		flusher.Flush()
-		log.Printf("[chat-api] error: %v", err)
-	}
+	job := h.Service.StartJob(req)
+	streamJob(w, r, job, 0)
 }
 
 func (h *ChatHandler) newSession(w http.ResponseWriter, r *http.Request) {
@@ -95,4 +67,108 @@ func (h *ChatHandler) history(w http.ResponseWriter, r *http.Request) {
 	msgs := h.Service.History(limit, before)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(msgs)
+}
+
+// ChatJobHandler handles GET /api/chat/job (status + reconnect) and DELETE (cancel).
+type ChatJobHandler struct {
+	Service *ChatService
+}
+
+func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Reconnect to stream: /api/chat/job?stream=<id>&offset=<n>
+		if jobID := r.URL.Query().Get("stream"); jobID != "" {
+			job := h.Service.GetJob(jobID)
+			if job == nil {
+				http.Error(w, `{"error":"job not found"}`, http.StatusNotFound)
+				return
+			}
+			offset := 0
+			if o := r.URL.Query().Get("offset"); o != "" {
+				if n, err := strconv.Atoi(o); err == nil {
+					offset = n
+				}
+			}
+			streamJob(w, r, job, offset)
+			return
+		}
+
+		// Status check.
+		j := h.Service.ActiveJob()
+		w.Header().Set("Content-Type", "application/json")
+		if j == nil {
+			json.NewEncoder(w).Encode(map[string]any{"active": false})
+		} else {
+			json.NewEncoder(w).Encode(map[string]any{
+				"active": true,
+				"job_id": j.ID,
+				"events": j.eventCount(),
+			})
+		}
+
+	case http.MethodDelete:
+		j := h.Service.ActiveJob()
+		if j != nil {
+			j.cancel()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// streamJob writes SSE events from a background job to the HTTP response.
+// The job continues running even if the client disconnects.
+func streamJob(w http.ResponseWriter, r *http.Request, job *chatJob, offset int) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	// First event: job ID for reconnection.
+	jobData, _ := json.Marshal(map[string]string{"job_id": job.ID})
+	fmt.Fprintf(w, "event: job\ndata: %s\n\n", jobData)
+	flusher.Flush()
+
+	ctx := r.Context()
+	for {
+		events, done, jobErr, wait := job.snapshot(offset)
+
+		for _, evt := range events {
+			data, err := json.Marshal(evt.Data)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
+			flusher.Flush()
+			offset++
+		}
+
+		if done {
+			if jobErr != nil {
+				errData, _ := json.Marshal(map[string]string{"error": jobErr.Error()})
+				fmt.Fprintf(w, "event: error\ndata: %s\n\n", errData)
+				flusher.Flush()
+			}
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			log.Printf("[chat-job] client disconnected, job %s continues in background", job.ID)
+			return
+		case <-wait:
+			// New events available.
+		}
+	}
 }

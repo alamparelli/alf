@@ -83,6 +83,7 @@ function navigateTo(view) {
   const logsView = document.getElementById('logsView');
   const tiersView = document.getElementById('tiersView');
   const firewallView = document.getElementById('firewallView');
+  const terminalView = document.getElementById('terminalView');
 
   // Update active nav item — docs:id should highlight the docs nav item
   const navView = view.startsWith('docs:') ? 'docs' : (view.startsWith('page:') ? view : view);
@@ -102,6 +103,7 @@ function navigateTo(view) {
   logsView.style.display = 'none';
   tiersView.style.display = 'none';
   firewallView.style.display = 'none';
+  terminalView.style.display = 'none';
 
   if (view === 'home') {
     homeView.style.display = '';
@@ -142,6 +144,10 @@ function navigateTo(view) {
     firewallView.style.display = '';
     pageFrame.src = '';
     fwInit();
+  } else if (view === 'terminal') {
+    terminalView.style.display = '';
+    pageFrame.src = '';
+    terminalInit();
   }
 
   localStorage.setItem('alf-view', view);
@@ -161,6 +167,75 @@ function loadStatus() {
   api('/api/status').catch(() => {});
 }
 
+
+// --- Admin Actions ---
+(function() {
+  const restartBtn = document.getElementById('adminRestartBtn');
+  const bootstrapBtn = document.getElementById('adminBootstrapBtn');
+  const claudeAuthBtn = document.getElementById('adminClaudeAuthBtn');
+  const outputEl = document.getElementById('adminOutput');
+  const outputText = document.getElementById('adminOutputText');
+
+  function showOutput(text) {
+    outputText.textContent = text;
+    outputEl.style.display = '';
+  }
+
+  restartBtn.addEventListener('click', async () => {
+    if (!confirm('Restart the ALF daemon?')) return;
+    restartBtn.disabled = true;
+    try {
+      await fetch('/api/restart', { method: 'POST', credentials: 'same-origin' });
+      showOutput('Restarting... the page will reload shortly.');
+      setTimeout(() => location.reload(), 4000);
+    } catch (e) {
+      showOutput('Restart request sent. Reloading...');
+      setTimeout(() => location.reload(), 4000);
+    }
+  });
+
+  bootstrapBtn.addEventListener('click', async () => {
+    if (!confirm('Run bootstrap.sh? This may install packages and take a while.')) return;
+    bootstrapBtn.disabled = true;
+    showOutput('Running bootstrap.sh...');
+    try {
+      const r = await api('/api/bash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'bash /home/node/data/bootstrap.sh 2>&1' })
+      });
+      showOutput(r.output || (r.exit_code === 0 ? 'Done.' : 'Failed (exit ' + r.exit_code + ')'));
+      if (r.exit_code !== 0 && r.error) showOutput(r.output + '\n\nError: ' + r.error);
+    } catch (e) {
+      showOutput('Error: ' + (e.message || e.error || 'request failed'));
+    } finally {
+      bootstrapBtn.disabled = false;
+    }
+  });
+
+  claudeAuthBtn.addEventListener('click', async () => {
+    claudeAuthBtn.disabled = true;
+    showOutput('Checking Claude auth status...');
+    try {
+      const r = await api('/api/bash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'HOME=/home/node/data claude -p "ping" --output-format json --max-turns 1 --model haiku --allowedTools "" 2>&1 | head -5' })
+      });
+      if (r.exit_code === 0) {
+        showOutput('Claude is authenticated.');
+      } else {
+        showOutput('Claude is NOT authenticated.\n\n' +
+          'To authenticate, run on the host machine:\n  alf login\n\n' +
+          'Or inside the container:\n  docker exec -it -e HOME=/home/node/data alf claude\n  Then type /login');
+      }
+    } catch (e) {
+      showOutput('Error: ' + (e.message || e.error || 'request failed'));
+    } finally {
+      claudeAuthBtn.disabled = false;
+    }
+  });
+})();
 
 function esc(s) {
   const d = document.createElement('div');
@@ -1095,6 +1170,9 @@ teachSubmit.addEventListener('click', () => {
 // --- Chat ---
 let chatHistoryLoaded = false;
 let chatSending = false;
+let chatJobId = null;
+let chatEventOffset = 0;
+let chatReconnectTimer = null;
 const chatMessages = document.getElementById('chatMessages');
 const chatInput = document.getElementById('chatInput');
 const chatSendBtn = document.getElementById('chatSendBtn');
@@ -1114,12 +1192,90 @@ function chatLoadHistory() {
       msgs.forEach(m => chatAppendBubble(m.role, m.text, m));
       chatScrollBottom();
     })
+    .then(() => chatCheckActiveJob())
     .catch(() => {});
+}
+
+// Check for in-flight background job on page load / reconnect.
+async function chatCheckActiveJob() {
+  try {
+    const res = await fetch('/api/chat/job', { credentials: 'same-origin' });
+    const data = await res.json();
+    if (data.active) {
+      chatJobId = data.job_id;
+      chatEventOffset = 0;
+      chatSending = true;
+      chatSendBtn.disabled = true;
+      chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Reconnecting...');
+      await chatStreamFromJob(chatJobId, 0);
+      chatFinishSend();
+    }
+  } catch {}
+}
+
+// Stream events from a background job, with auto-reconnect on failure.
+async function chatStreamFromJob(jobId, offset) {
+  const url = '/api/chat/job?stream=' + encodeURIComponent(jobId) + '&offset=' + offset;
+  try {
+    const res = await fetch(url, { credentials: 'same-origin' });
+    if (!res.ok) {
+      // Job gone (server restart, expired) — clean up.
+      chatJobId = null;
+      return;
+    }
+    await chatProcessStream(res);
+  } catch (e) {
+    // Network error — auto-reconnect after delay.
+    if (chatJobId) {
+      await new Promise(r => setTimeout(r, 2000));
+      if (chatJobId) return chatStreamFromJob(chatJobId, chatEventOffset);
+    }
+  }
 }
 
 const QUICK_REACTIONS = ['👍', '❤', '🔥', '😁', '🤔', '👎'];
 
+// Collapsible steps group for thinking + tool_use events.
+let chatStepsGroup = null;
+let chatStepsBody = null;
+let chatStepsCount = 0;
+let chatThinkingTextEl = null;
+
+function chatGetOrCreateStepsGroup() {
+  if (chatStepsGroup) return chatStepsGroup;
+  chatStepsGroup = document.createElement('div');
+  chatStepsGroup.className = 'chat-steps-group';
+  const toggle = document.createElement('button');
+  toggle.className = 'chat-steps-toggle';
+  toggle.innerHTML = '<span class="chevron">&#9654;</span> <span class="steps-summary">Thinking...</span>';
+  toggle.addEventListener('click', () => {
+    chatStepsGroup.classList.toggle('open');
+  });
+  chatStepsBody = document.createElement('div');
+  chatStepsBody.className = 'chat-steps-body';
+  chatStepsGroup.appendChild(toggle);
+  chatStepsGroup.appendChild(chatStepsBody);
+  chatStepsGroup.classList.add('open'); // auto-expand so thinking/tools are visible
+  chatMessages.appendChild(chatStepsGroup);
+  chatStepsCount = 0;
+  return chatStepsGroup;
+}
+
+function chatUpdateStepsSummary() {
+  if (!chatStepsGroup) return;
+  const summary = chatStepsGroup.querySelector('.steps-summary');
+  if (summary) {
+    const parts = [];
+    const thinkingSteps = chatStepsBody.querySelectorAll('.chat-step.thinking').length;
+    const toolSteps = chatStepsBody.querySelectorAll('.chat-step.tool_use').length;
+    if (thinkingSteps > 0) parts.push('Thinking');
+    if (toolSteps > 0) parts.push(toolSteps + ' tool' + (toolSteps > 1 ? 's' : ''));
+    summary.textContent = parts.join(' + ') || 'Processing...';
+  }
+}
+
 function chatAppendStep(type, label) {
+  chatGetOrCreateStepsGroup();
   const el = document.createElement('div');
   el.className = 'chat-step ' + type;
   if (type === 'thinking') {
@@ -1127,8 +1283,33 @@ function chatAppendStep(type, label) {
   } else {
     el.innerHTML = '<span class="chat-step-icon">⚙️</span> <span class="chat-step-label">' + esc(label) + '</span>';
   }
-  chatMessages.appendChild(el);
+  chatStepsBody.appendChild(el);
+  chatStepsCount++;
+  chatUpdateStepsSummary();
   chatScrollBottom();
+}
+
+function chatAppendThinkingText(text) {
+  if (!chatStepsGroup) chatGetOrCreateStepsGroup();
+  if (!chatThinkingTextEl) {
+    chatThinkingTextEl = document.createElement('div');
+    chatThinkingTextEl.className = 'chat-thinking-text';
+    chatStepsBody.appendChild(chatThinkingTextEl);
+  }
+  chatThinkingTextEl.textContent += text;
+  // Auto-scroll the thinking text container.
+  chatThinkingTextEl.scrollTop = chatThinkingTextEl.scrollHeight;
+}
+
+// Update bubble text content without clobbering meta/reactions elements.
+function chatUpdateBubbleContent(bubble, text) {
+  let contentEl = bubble.querySelector('.chat-bubble-content');
+  if (!contentEl) {
+    contentEl = document.createElement('div');
+    contentEl.className = 'chat-bubble-content';
+    bubble.insertBefore(contentEl, bubble.firstChild);
+  }
+  contentEl.innerHTML = chatRenderMd(text);
 }
 
 function chatAppendBubble(role, text, meta) {
@@ -1268,6 +1449,164 @@ function chatRenderMd(text) {
   return html;
 }
 
+// Shared stream state for current response.
+let chatAssistantBubble = null;
+let chatFullText = '';
+let chatDoneData = null;
+let chatReaction = null;
+let chatStreamingText = false; // true once we start receiving text_delta
+
+// Process an SSE stream response (shared by send and reconnect).
+async function chatProcessStream(res) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop();
+
+    for (const part of parts) {
+      const lines = part.split('\n');
+      let eventType = '';
+      let eventData = '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) eventType = line.slice(7);
+        else if (line.startsWith('data: ')) eventData = line.slice(6);
+      }
+      if (!eventType) continue;
+
+      let data;
+      try { data = JSON.parse(eventData); } catch { continue; }
+
+      chatEventOffset++;
+
+      switch (eventType) {
+        case 'job':
+          chatJobId = data.job_id;
+          chatEventOffset = 0; // job event doesn't count as a buffered event
+          break;
+        case 'thinking':
+          if (data.text) {
+            chatAppendThinkingText(data.text);
+          } else {
+            chatAppendStep('thinking', 'Thinking...');
+            chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
+          }
+          break;
+        case 'tool_use':
+          chatAppendStep('tool_use', data.name || 'tool');
+          chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Using ' + esc(data.name || 'tool') + '...');
+          break;
+        case 'text_delta':
+          if (!chatStreamingText) {
+            chatStreamingText = true;
+            chatClearStatus();
+            // Collapse steps group now that text is arriving.
+            if (chatStepsGroup) chatStepsGroup.classList.remove('open');
+            chatAssistantBubble = document.createElement('div');
+            chatAssistantBubble.className = 'chat-bubble assistant';
+            chatAssistantBubble.innerHTML = '';
+            // Add meta element so finalizeBubble can populate time/tier/model.
+            const metaEl = document.createElement('div');
+            metaEl.className = 'chat-bubble-meta';
+            const reactionsEl = document.createElement('span');
+            reactionsEl.className = 'chat-reactions';
+            metaEl.appendChild(reactionsEl);
+            chatAssistantBubble.appendChild(metaEl);
+            chatMessages.appendChild(chatAssistantBubble);
+          }
+          chatFullText += (data.text || '');
+          chatUpdateBubbleContent(chatAssistantBubble, chatFullText);
+          chatScrollBottom();
+          break;
+        case 'text':
+          // Final full text (fallback for non-streaming or final confirmation).
+          chatFullText = data.text || chatFullText;
+          if (!chatAssistantBubble) {
+            chatAssistantBubble = chatAppendBubble('assistant', chatFullText, {});
+          } else {
+            chatUpdateBubbleContent(chatAssistantBubble, chatFullText);
+          }
+          chatScrollBottom();
+          break;
+        case 'reaction':
+          chatReaction = data.emoji;
+          break;
+        case 'done':
+          chatDoneData = data;
+          chatJobId = null; // job complete
+          break;
+        case 'error':
+          toast(data.error || 'Chat error', 'error');
+          chatJobId = null;
+          break;
+      }
+    }
+  }
+}
+
+// Finalize the assistant bubble after stream completes.
+function chatFinalizeBubble() {
+  if (chatAssistantBubble && chatDoneData) {
+    chatAssistantBubble.dataset.msgId = chatDoneData.msg_id;
+    const metaEl = chatAssistantBubble.querySelector('.chat-bubble-meta');
+    if (metaEl) {
+      const reactionsEl = metaEl.querySelector('.chat-reactions');
+      let parts = [new Date().toLocaleTimeString()];
+      if (chatDoneData.tier) parts.push(chatDoneData.tier);
+      if (chatDoneData.model) parts.push(chatDoneData.model);
+      metaEl.textContent = parts.join(' · ');
+      if (reactionsEl) {
+        metaEl.appendChild(reactionsEl);
+      } else {
+        const newReactionsEl = document.createElement('span');
+        newReactionsEl.className = 'chat-reactions';
+        metaEl.appendChild(newReactionsEl);
+      }
+      if (chatReaction) {
+        const rEl = metaEl.querySelector('.chat-reactions');
+        const span = document.createElement('span');
+        span.className = 'chat-bubble-reaction';
+        span.textContent = chatReaction;
+        if (rEl) rEl.appendChild(span);
+      }
+    }
+    const reactBtn = document.createElement('button');
+    reactBtn.className = 'chat-react-btn';
+    reactBtn.textContent = '\u{1F60A}';
+    reactBtn.title = 'React';
+    const msgId = chatDoneData.msg_id;
+    reactBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      chatShowReactPicker(chatAssistantBubble, msgId, reactBtn);
+    });
+    chatAssistantBubble.appendChild(reactBtn);
+  }
+}
+
+function chatFinishSend() {
+  chatFinalizeBubble();
+  chatClearStatus();
+  chatSending = false;
+  chatSendBtn.disabled = false;
+  chatInput.focus();
+  chatAssistantBubble = null;
+  chatFullText = '';
+  chatDoneData = null;
+  chatReaction = null;
+  chatJobId = null;
+  chatStreamingText = false;
+  chatStepsGroup = null;
+  chatStepsBody = null;
+  chatStepsCount = 0;
+  chatThinkingTextEl = null;
+}
+
 async function chatSend() {
   const text = chatInput.value.trim();
   if (!text || chatSending) return;
@@ -1323,14 +1662,22 @@ async function chatSend() {
   chatInput.value = '';
   chatInput.style.height = '';
 
+  // Reset stream state.
+  chatAssistantBubble = null;
+  chatFullText = '';
+  chatDoneData = null;
+  chatReaction = null;
+  chatJobId = null;
+  chatEventOffset = 0;
+  chatStreamingText = false;
+  chatStepsGroup = null;
+  chatStepsBody = null;
+  chatStepsCount = 0;
+  chatThinkingTextEl = null;
+
   chatAppendBubble('user', text, {});
   chatScrollBottom();
   chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
-
-  let assistantBubble = null;
-  let fullText = '';
-  let doneData = null;
-  let reaction = null;
 
   try {
     const res = await fetch('/api/chat', {
@@ -1342,117 +1689,41 @@ async function chatSend() {
 
     if (res.status === 401) {
       toast('Session expired', 'error');
-      chatClearStatus();
-      chatSending = false;
-      chatSendBtn.disabled = false;
+      chatFinishSend();
+      return;
+    }
+    if (res.status === 409) {
+      toast('A request is already running', 'error');
+      chatFinishSend();
       return;
     }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop();
-
-      for (const part of parts) {
-        const lines = part.split('\n');
-        let eventType = '';
-        let eventData = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) eventType = line.slice(7);
-          else if (line.startsWith('data: ')) eventData = line.slice(6);
-        }
-        if (!eventType) continue;
-
-        let data;
-        try { data = JSON.parse(eventData); } catch { continue; }
-
-        switch (eventType) {
-          case 'thinking':
-            chatAppendStep('thinking', 'Thinking...');
-            chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
-            break;
-          case 'tool_use':
-            chatAppendStep('tool_use', data.name || 'tool');
-            chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Using ' + esc(data.name || 'tool') + '...');
-            break;
-          case 'text':
-            fullText = data.text || '';
-            assistantBubble = chatAppendBubble('assistant', fullText, {});
-            chatScrollBottom();
-            break;
-          case 'reaction':
-            reaction = data.emoji;
-            break;
-          case 'done':
-            doneData = data;
-            break;
-          case 'error':
-            toast(data.error || 'Chat error', 'error');
-            break;
-        }
-      }
-    }
-
-    // Update assistant bubble meta with done data
-    if (assistantBubble && doneData) {
-      assistantBubble.dataset.msgId = doneData.msg_id;
-      const metaEl = assistantBubble.querySelector('.chat-bubble-meta');
-      if (metaEl) {
-        // Rebuild meta text (keep reactions container)
-        const reactionsEl = metaEl.querySelector('.chat-reactions');
-        let parts = [new Date().toLocaleTimeString()];
-        if (doneData.tier) parts.push(doneData.tier);
-        if (doneData.model) parts.push(doneData.model);
-        metaEl.textContent = parts.join(' · ');
-        // Re-add reactions container
-        if (reactionsEl) {
-          metaEl.appendChild(reactionsEl);
-        } else {
-          const newReactionsEl = document.createElement('span');
-          newReactionsEl.className = 'chat-reactions';
-          metaEl.appendChild(newReactionsEl);
-        }
-        if (reaction) {
-          const rEl = metaEl.querySelector('.chat-reactions');
-          const span = document.createElement('span');
-          span.className = 'chat-bubble-reaction';
-          span.textContent = reaction;
-          if (rEl) rEl.appendChild(span);
-        }
-      }
-      // Add react button
-      const reactBtn = document.createElement('button');
-      reactBtn.className = 'chat-react-btn';
-      reactBtn.textContent = '😊';
-      reactBtn.title = 'React';
-      reactBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        chatShowReactPicker(assistantBubble, doneData.msg_id, reactBtn);
-      });
-      assistantBubble.appendChild(reactBtn);
-    }
-
+    await chatProcessStream(res);
   } catch (e) {
-    toast('Failed to send message', 'error');
+    // Connection lost — try to reconnect to background job.
+    if (chatJobId) {
+      chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Reconnecting...');
+      await chatStreamFromJob(chatJobId, chatEventOffset);
+    } else {
+      toast('Failed to send message', 'error');
+    }
   }
 
-  chatClearStatus();
-  chatSending = false;
-  chatSendBtn.disabled = false;
-  chatInput.focus();
+  chatFinishSend();
 }
+
+// Auto-reconnect when tab becomes visible again.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !chatSending) {
+    chatCheckActiveJob();
+  }
+});
 
 // --- Chat Commands ---
 const CHAT_COMMANDS = [
   { name: '/clear', description: 'Clear chat and start fresh', icon: 'trash-2' },
   { name: '/new', description: 'Start a new conversation', icon: 'refresh-cw' },
+  { name: '/stop', description: 'Cancel the running request', icon: 'square' },
   { name: '/start', description: 'Re-run onboarding', icon: 'play' },
   { name: '/restart', description: 'Restart ALF daemon', icon: 'power' },
   { name: '/bash', description: 'Execute a bash command', icon: 'terminal', dynamic: true },
@@ -1558,6 +1829,16 @@ function chatExecCommand(cmd) {
           chatScrollBottom();
         })
         .catch(() => { chatAppendBubble('assistant', 'Failed.', { tier: 'system' }); chatScrollBottom(); });
+      break;
+    case '/stop':
+      fetch('/api/chat/job', { method: 'DELETE', credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(() => {
+          chatAppendBubble('assistant', 'Request cancelled.', { tier: 'system' });
+          chatScrollBottom();
+          if (chatSending) chatFinishSend();
+        })
+        .catch(() => { chatAppendBubble('assistant', 'Failed to cancel.', { tier: 'system' }); chatScrollBottom(); });
       break;
     case '/restart':
       if (!confirm('Restart ALF daemon?')) return;
@@ -1934,6 +2215,10 @@ function schedulesRender() {
     filtered = filtered.filter(j => j.next_run && new Date(j.next_run) <= weekEnd);
   } else if (schedulesFilter === 'later') {
     filtered = filtered.filter(j => !j.next_run || new Date(j.next_run) > weekEnd);
+  } else if (schedulesFilter === 'oneshot') {
+    filtered = filtered.filter(j => j.auto_delete);
+  } else if (schedulesFilter === 'obsolete') {
+    filtered = filtered.filter(j => j.auto_delete && (!j.next_run || new Date(j.next_run) < now));
   }
 
   schedulesVisible = filtered;
@@ -2868,3 +3153,189 @@ function esc(s) {
   esc._el.textContent = s;
   return esc._el.innerHTML;
 }
+
+// --- Terminal (xterm.js + WebSocket PTY) ---
+const termThemes = {
+  'Catppuccin Mocha': {
+    background: '#1e1e2e', foreground: '#cdd6f4', cursor: '#f5e0dc', cursorAccent: '#1e1e2e',
+    selectionBackground: 'rgba(108,123,196,0.4)', selectionForeground: '#ffffff',
+    black: '#45475a', red: '#f38ba8', green: '#a6e3a1', yellow: '#f9e2af',
+    blue: '#89b4fa', magenta: '#f5c2e7', cyan: '#94e2d5', white: '#bac2de',
+    brightBlack: '#585b70', brightRed: '#f38ba8', brightGreen: '#a6e3a1', brightYellow: '#f9e2af',
+    brightBlue: '#89b4fa', brightMagenta: '#f5c2e7', brightCyan: '#94e2d5', brightWhite: '#a6adc8',
+  },
+  'Catppuccin Latte': {
+    background: '#eff1f5', foreground: '#4c4f69', cursor: '#dc8a78', cursorAccent: '#eff1f5',
+    selectionBackground: 'rgba(0,90,200,0.25)', selectionForeground: '#000000',
+    black: '#5c5f77', red: '#d20f39', green: '#40a02b', yellow: '#df8e1d',
+    blue: '#1e66f5', magenta: '#ea76cb', cyan: '#179299', white: '#acb0be',
+    brightBlack: '#6c6f85', brightRed: '#d20f39', brightGreen: '#40a02b', brightYellow: '#df8e1d',
+    brightBlue: '#1e66f5', brightMagenta: '#ea76cb', brightCyan: '#179299', brightWhite: '#bcc0cc',
+  },
+  'Dracula': {
+    background: '#282a36', foreground: '#f8f8f2', cursor: '#f8f8f2', cursorAccent: '#282a36',
+    selectionBackground: 'rgba(68,71,90,0.6)', selectionForeground: '#f8f8f2',
+    black: '#21222c', red: '#ff5555', green: '#50fa7b', yellow: '#f1fa8c',
+    blue: '#bd93f9', magenta: '#ff79c6', cyan: '#8be9fd', white: '#f8f8f2',
+    brightBlack: '#6272a4', brightRed: '#ff6e6e', brightGreen: '#69ff94', brightYellow: '#ffffa5',
+    brightBlue: '#d6acff', brightMagenta: '#ff92df', brightCyan: '#a4ffff', brightWhite: '#ffffff',
+  },
+  'Solarized Dark': {
+    background: '#002b36', foreground: '#839496', cursor: '#93a1a1', cursorAccent: '#002b36',
+    selectionBackground: 'rgba(147,161,161,0.3)', selectionForeground: '#fdf6e3',
+    black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900',
+    blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
+    brightBlack: '#586e75', brightRed: '#cb4b16', brightGreen: '#586e75', brightYellow: '#657b83',
+    brightBlue: '#839496', brightMagenta: '#6c71c4', brightCyan: '#93a1a1', brightWhite: '#fdf6e3',
+  },
+  'Solarized Light': {
+    background: '#fdf6e3', foreground: '#657b83', cursor: '#586e75', cursorAccent: '#fdf6e3',
+    selectionBackground: 'rgba(0,90,200,0.2)', selectionForeground: '#002b36',
+    black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900',
+    blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
+    brightBlack: '#586e75', brightRed: '#cb4b16', brightGreen: '#586e75', brightYellow: '#657b83',
+    brightBlue: '#839496', brightMagenta: '#6c71c4', brightCyan: '#93a1a1', brightWhite: '#fdf6e3',
+  },
+  'Tokyo Night': {
+    background: '#1a1b26', foreground: '#a9b1d6', cursor: '#c0caf5', cursorAccent: '#1a1b26',
+    selectionBackground: 'rgba(40,52,100,0.6)', selectionForeground: '#c0caf5',
+    black: '#15161e', red: '#f7768e', green: '#9ece6a', yellow: '#e0af68',
+    blue: '#7aa2f7', magenta: '#bb9af7', cyan: '#7dcfff', white: '#a9b1d6',
+    brightBlack: '#414868', brightRed: '#f7768e', brightGreen: '#9ece6a', brightYellow: '#e0af68',
+    brightBlue: '#7aa2f7', brightMagenta: '#bb9af7', brightCyan: '#7dcfff', brightWhite: '#c0caf5',
+  },
+  'GitHub Dark': {
+    background: '#0d1117', foreground: '#c9d1d9', cursor: '#c9d1d9', cursorAccent: '#0d1117',
+    selectionBackground: 'rgba(56,139,253,0.3)', selectionForeground: '#f0f6fc',
+    black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
+    blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
+    brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
+    brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
+  },
+  'Nord': {
+    background: '#2e3440', foreground: '#d8dee9', cursor: '#d8dee9', cursorAccent: '#2e3440',
+    selectionBackground: 'rgba(136,192,208,0.3)', selectionForeground: '#eceff4',
+    black: '#3b4252', red: '#bf616a', green: '#a3be8c', yellow: '#ebcb8b',
+    blue: '#81a1c1', magenta: '#b48ead', cyan: '#88c0d0', white: '#e5e9f0',
+    brightBlack: '#4c566a', brightRed: '#bf616a', brightGreen: '#a3be8c', brightYellow: '#ebcb8b',
+    brightBlue: '#81a1c1', brightMagenta: '#b48ead', brightCyan: '#8fbcbb', brightWhite: '#eceff4',
+  },
+};
+
+let termInstance = null;
+let termWS = null;
+let termFitAddon = null;
+let termResizeObserver = null;
+
+// Populate theme selector.
+(function() {
+  const sel = document.getElementById('termThemeSelect');
+  Object.keys(termThemes).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  const saved = localStorage.getItem('alf-term-theme');
+  if (saved && termThemes[saved]) sel.value = saved;
+  else sel.value = dark ? 'Catppuccin Mocha' : 'Catppuccin Latte';
+
+  sel.addEventListener('change', () => {
+    localStorage.setItem('alf-term-theme', sel.value);
+    if (termInstance) {
+      termInstance.options.theme = termThemes[sel.value];
+    }
+  });
+})();
+
+function termGetTheme() {
+  const sel = document.getElementById('termThemeSelect');
+  return termThemes[sel.value] || termThemes[dark ? 'Catppuccin Mocha' : 'Catppuccin Latte'];
+}
+
+function terminalInit() {
+  if (termInstance && termWS && termWS.readyState === WebSocket.OPEN) {
+    termFitAddon.fit();
+    termInstance.focus();
+    return;
+  }
+  terminalStart();
+}
+
+function terminalStart() {
+  // Cleanup previous session.
+  if (termWS) { termWS.close(); termWS = null; }
+  if (termInstance) { termInstance.dispose(); termInstance = null; }
+  if (termResizeObserver) { termResizeObserver.disconnect(); termResizeObserver = null; }
+
+  const container = document.getElementById('terminalContainer');
+  container.innerHTML = '';
+
+  const term = new Terminal({
+    cursorBlink: true,
+    cursorStyle: 'block',
+    fontSize: 14,
+    fontFamily: 'Menlo, Monaco, Consolas, monospace',
+    theme: termGetTheme(),
+    allowProposedApi: true,
+  });
+  const fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(container);
+  termInstance = term;
+  termFitAddon = fitAddon;
+
+  // Wait for layout to settle, then fit + connect.
+  setTimeout(() => {
+    fitAddon.fit();
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(proto + '//' + location.host + '/api/terminal');
+    ws.binaryType = 'arraybuffer';
+    termWS = ws;
+
+    function sendSize() {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const buf = new Uint8Array(5);
+      buf[0] = 1;
+      buf[1] = (term.cols >> 8) & 0xff;
+      buf[2] = term.cols & 0xff;
+      buf[3] = (term.rows >> 8) & 0xff;
+      buf[4] = term.rows & 0xff;
+      ws.send(buf);
+    }
+
+    ws.onopen = () => sendSize();
+
+    ws.onmessage = (ev) => {
+      term.write(new Uint8Array(ev.data));
+    };
+
+    ws.onclose = () => {
+      term.write('\r\n\x1b[90m[session ended — click New Session to reconnect]\x1b[0m\r\n');
+    };
+
+    term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    });
+
+    let resizeTimeout = null;
+    function onResize() {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        fitAddon.fit();
+        sendSize();
+      }, 100);
+    }
+
+    window.addEventListener('resize', onResize);
+    termResizeObserver = new ResizeObserver(onResize);
+    termResizeObserver.observe(container);
+
+    term.focus();
+  }, 50);
+}
+
+document.getElementById('termNewBtn').addEventListener('click', terminalStart);

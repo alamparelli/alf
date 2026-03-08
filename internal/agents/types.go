@@ -56,12 +56,13 @@ type agentResultJSON struct {
 
 // RunConfig holds tier-level settings for an orchestrator run.
 type RunConfig struct {
-	Model         string   // full model name for the orchestrator brain
-	Effort        string   // effort level (e.g. "high")
-	MaxIterations int      // max orchestrate→delegate cycles (0 = default 10)
-	MaxTurns      int      // max turns per orchestrator brain call (0 = default 1)
-	TimeoutMin    int      // global timeout in minutes (0 = default 60)
-	Tools         []string // tools available to orchestrator brain (e.g. ["Read"])
+	Model                string   // full model name for the orchestrator brain
+	Effort               string   // effort level (e.g. "high")
+	MaxIterations        int      // max orchestrate→delegate cycles (0 = default 10)
+	MaxTurns             int      // max turns per sub-agent call (0 = use agent config)
+	OrchestratorMaxTurns int      // max turns per orchestrator brain call (0 = default 3)
+	TimeoutMin           int      // global timeout in minutes (0 = default 60)
+	Tools                []string // tools available to orchestrator brain (e.g. ["Read"])
 }
 
 // TaskMeta tracks the lifecycle of an orchestration run.

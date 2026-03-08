@@ -7,12 +7,15 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 )
 
 // Client sends messages via the Telegram Bot API.
 type Client struct {
-	Token string
-	HTTP  *http.Client
+	Token       string
+	HTTP        *http.Client
+	OnRateLimit func(wait time.Duration) // optional callback when rate-limited
 }
 
 // NewClient creates a Telegram client with the given bot token.
@@ -100,7 +103,7 @@ func (c *Client) sendChunksTrack(chatID int64, chunks []string, parseMode string
 		payload, _ := json.Marshal(msg)
 		body, err := c.postRaw("sendMessage", payload)
 		if err != nil {
-			if parseMode != "" {
+			if parseMode != "" && !isRateLimitError(err) {
 				log.Printf("HTML send failed, retrying as plain text: %v", err)
 				plain := StripHTML(chunk)
 				fallback, _ := json.Marshal(map[string]any{
@@ -193,8 +196,36 @@ func (c *Client) SetMessageReaction(chatID, messageID int64, emoji string) error
 	return c.post("setMessageReaction", payload)
 }
 
+// maxRetryAfter is the maximum time we'll wait for a Telegram rate limit.
+const maxRetryAfter = 120 * time.Second
+
 // postRaw makes a POST request and returns the raw response body.
+// Automatically waits and retries once on 429 Too Many Requests.
 func (c *Client) postRaw(method string, payload []byte) ([]byte, error) {
+	body, err := c.doPost(method, payload)
+	if err == nil {
+		return body, nil
+	}
+
+	// Check if it's a rate limit error — wait and retry once.
+	wait := parseRetryAfter(body)
+	if wait <= 0 {
+		return nil, err
+	}
+	if wait > maxRetryAfter {
+		log.Printf("telegram: rate limited for %v (capped at %v)", wait, maxRetryAfter)
+		wait = maxRetryAfter
+	} else {
+		log.Printf("telegram: rate limited, waiting %v before retry", wait)
+	}
+	if c.OnRateLimit != nil {
+		c.OnRateLimit(wait)
+	}
+	time.Sleep(wait)
+	return c.doPost(method, payload)
+}
+
+func (c *Client) doPost(method string, payload []byte) ([]byte, error) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", c.Token, method)
 	resp, err := c.HTTP.Post(url, "application/json", bytes.NewReader(payload))
 	if err != nil {
@@ -212,10 +243,32 @@ func (c *Client) postRaw(method string, payload []byte) ([]byte, error) {
 		return nil, fmt.Errorf("telegram %s: invalid response", method)
 	}
 	if !result.OK {
-		return nil, fmt.Errorf("telegram %s: %s", method, result.Description)
+		return body, fmt.Errorf("telegram %s: %s", method, result.Description)
 	}
 
 	return body, nil
+}
+
+// parseRetryAfter extracts the retry_after seconds from a Telegram 429 response.
+func parseRetryAfter(body []byte) time.Duration {
+	if len(body) == 0 {
+		return 0
+	}
+	var resp struct {
+		ErrorCode  int `json:"error_code"`
+		Parameters struct {
+			RetryAfter int `json:"retry_after"`
+		} `json:"parameters"`
+	}
+	if json.Unmarshal(body, &resp) != nil || resp.ErrorCode != 429 || resp.Parameters.RetryAfter <= 0 {
+		return 0
+	}
+	return time.Duration(resp.Parameters.RetryAfter) * time.Second
+}
+
+// isRateLimitError checks if the error is a Telegram 429 rate limit.
+func isRateLimitError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Too Many Requests")
 }
 
 // post makes a POST request to the Telegram Bot API.

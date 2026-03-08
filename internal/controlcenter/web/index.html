@@ -2,9 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>ALF Control Center</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5/css/xterm.css">
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
@@ -21,6 +25,7 @@
           <a class="nav-icon" data-view="tasks" title="Tasks"><i data-lucide="layers"></i></a>
           <a class="nav-icon" data-view="tiers" title="Tiers"><i data-lucide="sliders-horizontal"></i></a>
           <a class="nav-icon" data-view="firewall" title="Firewall"><i data-lucide="shield"></i></a>
+          <a class="nav-icon" data-view="terminal" title="Terminal"><i data-lucide="terminal"></i></a>
           <a class="nav-icon" data-view="logs" title="Logs"><i data-lucide="scroll-text"></i></a>
           <a class="nav-icon" data-view="docs" title="Docs"><i data-lucide="book-open"></i></a>
         </div>
@@ -49,9 +54,18 @@
       </div>
 
       <div id="homeView">
-        <!-- Status Card removed — info available via /api/status -->
-
-        <!-- Config Card -->
+        <!-- Admin Actions -->
+        <div class="card" id="adminCard">
+          <h2>Admin</h2>
+          <div class="admin-actions">
+            <button class="btn admin-btn" id="adminRestartBtn"><i data-lucide="rotate-cw"></i> Restart</button>
+            <button class="btn admin-btn" id="adminBootstrapBtn"><i data-lucide="package"></i> Bootstrap</button>
+            <button class="btn admin-btn" id="adminClaudeAuthBtn"><i data-lucide="key-round"></i> Claude Auth</button>
+          </div>
+          <div class="admin-output" id="adminOutput" style="display:none">
+            <pre id="adminOutputText"></pre>
+          </div>
+        </div>
 
         <!-- Workspace Explorer -->
         <div class="card" id="workspaceCard">
@@ -180,6 +194,8 @@
           <button class="sched-filter" data-filter="today">Today</button>
           <button class="sched-filter" data-filter="week">This Week</button>
           <button class="sched-filter" data-filter="later">Later</button>
+          <button class="sched-filter" data-filter="oneshot">One-shot</button>
+          <button class="sched-filter" data-filter="obsolete">Obsolete</button>
         </div>
         <div class="schedules-list" id="schedulesList"></div>
       </div>
@@ -259,6 +275,14 @@
         </div>
       </div>
 
+      <div id="terminalView" class="terminal-view" style="display:none">
+        <div class="terminal-toolbar">
+          <button class="btn" id="termNewBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>New Session</button>
+          <select id="termThemeSelect" class="term-theme-select"></select>
+        </div>
+        <div id="terminalContainer"></div>
+      </div>
+
       <div id="tiersView" class="tiers-view" style="display:none">
         <div class="tiers-toolbar">
           <h2>Tiers</h2>
@@ -274,6 +298,8 @@
 
   <div class="toast" id="toast"></div>
   <script src="/static/marked.min.js"></script>
+  <script src="https://unpkg.com/@xterm/xterm@5/lib/xterm.js"></script>
+  <script src="https://unpkg.com/@xterm/addon-fit@0/lib/addon-fit.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

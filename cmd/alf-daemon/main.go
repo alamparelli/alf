@@ -181,6 +181,9 @@ func main() {
 		}
 	}
 
+	// Ensure ~/.local/bin is in PATH for interactive shells (terminal, docker exec).
+	ensureBashrcPath(os.Getenv("HOME"))
+
 	// Fix directory permissions so the claude subprocess (uid 1001, gid 1000)
 	// can read/write files created before the permission refactoring.
 	fixDataPermissions(dataDir)
@@ -244,6 +247,11 @@ func main() {
 
 	// Load agent team configurations.
 	agentStore := agents.NewFileAgentStore(filepath.Join(configDir, "agents"))
+
+	// Auto-enable the agent tier when teams are configured.
+	if teams := agentStore.All(); len(teams) > 0 {
+		autoEnableAgentTier(tierStore)
+	}
 
 	// Set process-wide timezone from config so log timestamps are correct.
 	time.Local = resolveTimezone(cfg.Timezone)
@@ -383,13 +391,32 @@ func main() {
 		}
 	}
 
+	// agentTeamsForRouter converts the agent store into router-friendly team info.
+	agentTeamsForRouter := func() []router.AgentTeamInfo {
+		teams := agentStore.All()
+		infos := make([]router.AgentTeamInfo, 0, len(teams))
+		for _, t := range teams {
+			names := make([]string, len(t.Agents))
+			for i, a := range t.Agents {
+				names[i] = a.Name
+			}
+			infos = append(infos, router.AgentTeamInfo{
+				Name:        t.Name,
+				Description: t.Description,
+				Agents:      names,
+			})
+		}
+		return infos
+	}
+
 	// classifyMessage uses the configured router backend for classification.
 	classifyMessage := func(message string, tiers *cc.TiersConfig) router.Result {
 		prompt := router.BuildClassifyPrompt(router.ClassifyInput{
-			Message:   message,
-			Tiers:     tiers,
-			DataDir:   dataDir,
-			ConfigDir: configDir,
+			Message:    message,
+			Tiers:      tiers,
+			DataDir:    dataDir,
+			ConfigDir:  configDir,
+			AgentTeams: agentTeamsForRouter(),
 		})
 		routerProv := registry.ForBackend(routerBackend)
 		params := provider.Params{
@@ -421,6 +448,7 @@ func main() {
 	chatService.Registry = registry
 	chatService.APIHistory = apiHistory
 	chatService.SkillStore = skillStore
+	chatService.Orchestrator = orch
 	if memDB != nil {
 		chatService.Recaller = &memStoreRecaller{store: memDB}
 	}
@@ -623,7 +651,11 @@ func main() {
 				if err := agentStore.Reload(); err != nil {
 					log.Printf("agents reload error: %v", err)
 				} else {
-					log.Printf("agents reloaded (%d teams)", len(agentStore.All()))
+					teams := agentStore.All()
+					log.Printf("agents reloaded (%d teams)", len(teams))
+					if len(teams) > 0 {
+						autoEnableAgentTier(tierStore)
+					}
 				}
 			case cc.ReloadFirewall:
 				if newFWCfg, err := fwStore.Load(); err == nil {
@@ -1253,12 +1285,13 @@ func main() {
 				orchMsg := msgWithReplyContext
 				orchMediaCleanup := mediaCleanup
 				orchRC := agents.RunConfig{
-					Model:         tp.Model,
-					Effort:        tp.Effort,
-					MaxTurns:      tp.MaxTurns,
-					MaxIterations: tp.MaxIterations,
-					TimeoutMin:    tp.TimeoutMin,
-					Tools:         tp.Tools,
+					Model:                tp.Model,
+					Effort:               tp.Effort,
+					MaxTurns:             tp.MaxTurns,
+					OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
+					MaxIterations:        tp.MaxIterations,
+					TimeoutMin:           tp.TimeoutMin,
+					Tools:                tp.Tools,
 				}
 
 				go func() {
@@ -1544,14 +1577,15 @@ IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {
-	Model         string   // full model name, e.g. "claude-sonnet-4-5"
-	Tools         []string // nil = omit flag
-	WriteCapable  bool     // if true, grants full tool access; if false, restricts to Tools whitelist
-	Effort        string   // "" = omit flag
-	MaxTurns      int      // 0 = omit flag (use Claude default)
-	MaxIterations int      // max agent iterations (0 = default)
-	TimeoutMin    int      // global timeout in minutes (0 = default)
-	Backend       string   // "cli" (default), "openrouter"
+	Model                string   // full model name, e.g. "claude-sonnet-4-5"
+	Tools                []string // nil = omit flag
+	WriteCapable         bool     // if true, grants full tool access; if false, restricts to Tools whitelist
+	Effort               string   // "" = omit flag
+	MaxTurns             int      // 0 = omit flag (use Claude default)
+	OrchestratorMaxTurns int      // turns per orchestrator brain call (0 = default 3)
+	MaxIterations        int      // max agent iterations (0 = default)
+	TimeoutMin           int      // global timeout in minutes (0 = default)
+	Backend              string   // "cli" (default), "openrouter"
 }
 
 func readSecret(envVar string) string {
@@ -1998,14 +2032,15 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 				model = router.ResolveModel(t.Model)
 			}
 			return tierParams{
-				Model:         model,
-				Tools:         t.Tools,
-				WriteCapable:  t.WriteCapable,
-				Effort:        t.Effort,
-				MaxTurns:      t.MaxTurns,
-				MaxIterations: t.MaxIterations,
-				TimeoutMin:    t.TimeoutMin,
-				Backend:       t.Backend,
+				Model:                model,
+				Tools:                t.Tools,
+				WriteCapable:         t.WriteCapable,
+				Effort:               t.Effort,
+				MaxTurns:             t.MaxTurns,
+				OrchestratorMaxTurns: t.OrchestratorMaxTurns,
+				MaxIterations:        t.MaxIterations,
+				TimeoutMin:           t.TimeoutMin,
+				Backend:              t.Backend,
 			}
 		}
 	}
@@ -2016,6 +2051,33 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 // migrateConfig copies config files from old data/config/ to configDir on first run.
 // fixDataPermissions ensures all files and directories under dataDir are
 // group-readable/writable so the claude subprocess (uid 1001, gid node/1000)
+// ensureBashrcPath adds ~/.local/bin to PATH in .bashrc if not already present.
+// This fixes the "native installation exists but ~/.local/bin is not in your PATH" warning
+// for interactive shells (CC terminal, docker exec).
+func ensureBashrcPath(home string) {
+	if home == "" {
+		return
+	}
+	bashrc := filepath.Join(home, ".bashrc")
+	line := `export PATH="$HOME/.local/bin:$PATH"`
+
+	// Check if already present.
+	if data, err := os.ReadFile(bashrc); err == nil {
+		if strings.Contains(string(data), ".local/bin") {
+			return
+		}
+	}
+
+	f, err := os.OpenFile(bashrc, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.Printf("bashrc: cannot write %s: %v", bashrc, err)
+		return
+	}
+	defer f.Close()
+	f.WriteString("\n" + line + "\n")
+	log.Printf("bashrc: added .local/bin to PATH")
+}
+
 // can access files created by root or node before the permission refactoring.
 func fixDataPermissions(dataDir string) {
 	// Determine the expected uid:gid from the data dir itself.
@@ -2119,6 +2181,19 @@ func seedDefaultTiers(configDir string) {
 		return
 	}
 	log.Printf("seed-tiers: created %s from defaults", dest)
+}
+
+// autoEnableAgentTier enables the agent tier in-memory when agent teams are configured.
+// Does NOT modify the tiers.json file — only affects the runtime state.
+func autoEnableAgentTier(tierStore cc.TierStore) {
+	tiers := tierStore.Current()
+	for i := range tiers.Tiers {
+		if tiers.Tiers[i].Name == "agent" && !tiers.Tiers[i].Enabled {
+			tiers.Tiers[i].Enabled = true
+			log.Printf("auto-enabled agent tier (agent teams found)")
+			return
+		}
+	}
 }
 
 // cleanClaudeSettings removes .claude/settings.json at startup.
@@ -2702,11 +2777,12 @@ func (s *schedulerOrchestrator) Run(ctx context.Context, userMessage string, sys
 	}
 
 	text, meta, err := s.o.Run(ctx, userMessage, systemPrompts, agents.RunConfig{
-		Model:         rc.Model,
-		Effort:        rc.Effort,
-		MaxIterations: rc.MaxIterations,
-		MaxTurns:      rc.MaxTurns,
-		Tools:         rc.Tools,
+		Model:                rc.Model,
+		Effort:               rc.Effort,
+		MaxIterations:        rc.MaxIterations,
+		MaxTurns:             rc.MaxTurns,
+		OrchestratorMaxTurns: rc.OrchestratorMaxTurns,
+		Tools:                rc.Tools,
 	}, agentProgress)
 	if err != nil {
 		return "", nil, err
@@ -2837,12 +2913,24 @@ func execBashCommand(tg *tgclient.Client, chatID int64, command string) {
 // A SHA-256 hash is stored in data/.bootstrap-hash to skip unchanged scripts.
 func runBootstrapScript(dataDir string) {
 	script := filepath.Join(dataDir, "bootstrap.sh")
-	if _, err := os.Stat(script); os.IsNotExist(err) {
+	info, err := os.Stat(script)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		log.Printf("bootstrap: stat error: %v", err)
 		return
 	}
 	data, err := os.ReadFile(script)
 	if err != nil {
+		log.Printf("bootstrap: read error: %v", err)
 		return
+	}
+
+	// Check executable permission.
+	if info.Mode()&0o111 == 0 {
+		log.Printf("bootstrap: fixing permissions on %s (was %s)", script, info.Mode())
+		os.Chmod(script, 0o755)
 	}
 
 	// Check hash to skip if unchanged.
@@ -2850,22 +2938,24 @@ func runBootstrapScript(dataDir string) {
 	currentHash := hex.EncodeToString(h[:])
 	hashFile := filepath.Join(dataDir, ".bootstrap-hash")
 	if prev, err := os.ReadFile(hashFile); err == nil && strings.TrimSpace(string(prev)) == currentHash {
-		log.Printf("bootstrap: script unchanged, skipping")
+		log.Printf("bootstrap: script unchanged (%d bytes), skipping", len(data))
 		return
 	}
 
-	log.Printf("bootstrap: running %s ...", script)
-	cmd := exec.Command("bash", script)
+	log.Printf("bootstrap: running %s (%d bytes, hash=%s) ...", script, len(data), currentHash[:12])
+	start := time.Now()
+	cmd := exec.Command("bash", "-x", script) // -x traces each command for debugging
 	cmd.Dir = dataDir
+	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		log.Printf("bootstrap: script failed: %v (will retry on next restart)", err)
+		log.Printf("bootstrap: script failed after %s: %v (will retry on next restart)", time.Since(start).Round(time.Second), err)
 		return // don't save hash so it retries
 	}
 
 	os.WriteFile(hashFile, []byte(currentHash), 0o644)
-	log.Printf("bootstrap: script completed successfully")
+	log.Printf("bootstrap: script completed successfully in %s", time.Since(start).Round(time.Second))
 }
 
 // writeLLMSIndex generates a llms.txt file in dataDir with an index of all embedded docs.

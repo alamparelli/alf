@@ -62,11 +62,12 @@ type ProgressFunc func(phase, detail string)
 
 // RunConfig holds tier-level settings for an orchestrator run (mirrors agents.RunConfig).
 type RunConfig struct {
-	Model         string
-	Effort        string
-	MaxIterations int
-	MaxTurns      int
-	Tools         []string
+	Model                string
+	Effort               string
+	MaxIterations        int
+	MaxTurns             int
+	OrchestratorMaxTurns int
+	Tools                []string
 }
 
 // TaskMeta tracks orchestration lifecycle (mirrors agents.TaskMeta).

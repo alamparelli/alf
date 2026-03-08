@@ -10,7 +10,7 @@ OpenRouter provides access to all major LLM models (Claude, GPT, Gemini, Llama, 
    alf secret set openrouter_api_key sk-or-v1-...
    ```
    Or configure during `alf init`.
-3. Restart ALF: `alf restart`
+3. Restart ALF: `docker compose down && docker compose up -d` (from the ALF directory)
 
 ## Configuring a Tier
 

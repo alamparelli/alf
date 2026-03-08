@@ -73,16 +73,17 @@ var emailRegex = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
 // setupProfile stores previous init values so re-running `alf init` pre-fills them.
 type setupProfile struct {
-	Dir            string `json:"dir,omitempty"`
-	BotToken       string `json:"bot_token,omitempty"`
-	ChatID         string `json:"chat_id,omitempty"`
-	HTTPS          bool   `json:"https,omitempty"`
-	Domain         string `json:"domain,omitempty"`
-	AcmeEmail      string `json:"acme_email,omitempty"`
-	Port           string `json:"port,omitempty"`
-	Host           string `json:"host,omitempty"`
-	Timezone       string `json:"timezone,omitempty"`
-	OpenRouterKey  bool   `json:"openrouter_key,omitempty"` // true if key was set
+	Dir            string   `json:"dir,omitempty"`
+	BotToken       string   `json:"bot_token,omitempty"`
+	ChatID         string   `json:"chat_id,omitempty"`
+	HTTPS          bool     `json:"https,omitempty"`
+	Domain         string   `json:"domain,omitempty"`
+	AcmeEmail      string   `json:"acme_email,omitempty"`
+	Port           string   `json:"port,omitempty"`
+	Host           string   `json:"host,omitempty"`
+	Timezone       string   `json:"timezone,omitempty"`
+	OpenRouterKey  bool     `json:"openrouter_key,omitempty"` // true if key was set
+	Workspaces     []string `json:"workspaces,omitempty"`     // host paths to mount
 }
 
 func setupProfilePath() string {
@@ -186,6 +187,13 @@ func RunInit() {
 
 	// Step 5c: Optional OpenRouter API key
 	promptOpenRouter(reader, dir, prev.OpenRouterKey)
+
+	// Step 5d: Workspaces (host directories to mount)
+	workspaces := promptWorkspaces(reader, prev.Workspaces)
+	composeData.Workspaces = workspaces
+	profile = loadSetupProfile()
+	profile.Workspaces = workspaces
+	saveSetupProfile(profile)
 
 	// Set default image, allow override via ALF_IMAGE env var.
 	composeData.Image = "ghcr.io/alamparelli/alf:latest"
@@ -662,6 +670,10 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	}
 	PrintCheck("secrets/cc_auth_token")
 
+	// Ensure optional secret files exist (even empty) so docker-compose
+	// doesn't fail on missing file references.
+	ensureOptionalSecrets(dir)
+
 	if err := RenderDockerCompose(dir, compose); err != nil {
 		Fatal(fmt.Sprintf("Failed to write docker-compose.yml: %v", err))
 	}
@@ -793,6 +805,60 @@ func promptOpenRouter(reader *bufio.Reader, dir string, hadKey bool) {
 	profile := loadSetupProfile()
 	profile.OpenRouterKey = true
 	saveSetupProfile(profile)
+}
+
+func promptWorkspaces(reader *bufio.Reader, previous []string) []string {
+	fmt.Println("\n  Mount host directories as workspaces so ALF can access and code in your repos.")
+	if len(previous) > 0 {
+		fmt.Println("  Current workspaces:")
+		for _, w := range previous {
+			fmt.Printf("    - %s\n", w)
+		}
+	}
+	fmt.Println("  Enter absolute paths, one per line. Empty line to finish.")
+
+	var workspaces []string
+	// Pre-fill with previous if user just presses Enter on first line.
+	firstLine := true
+	for {
+		fmt.Print("  Path: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input == "" {
+			if firstLine && len(previous) > 0 {
+				PrintCheck(fmt.Sprintf("Keeping %d workspace(s)", len(previous)))
+				return previous
+			}
+			break
+		}
+		firstLine = false
+
+		// Expand ~ to home dir.
+		if strings.HasPrefix(input, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				input = filepath.Join(home, input[2:])
+			}
+		}
+
+		// Validate path exists.
+		info, err := os.Stat(input)
+		if err != nil {
+			PrintWarning(fmt.Sprintf("Path does not exist: %s (skipped)", input))
+			continue
+		}
+		if !info.IsDir() {
+			PrintWarning(fmt.Sprintf("Not a directory: %s (skipped)", input))
+			continue
+		}
+
+		workspaces = append(workspaces, input)
+		PrintCheck(fmt.Sprintf("Added: %s → /workspaces/%s", input, filepath.Base(input)))
+	}
+
+	if len(workspaces) == 0 {
+		fmt.Println("  No workspaces configured.")
+	}
+	return workspaces
 }
 
 func fixClaudeOwnership() {

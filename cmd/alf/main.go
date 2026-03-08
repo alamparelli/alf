@@ -50,6 +50,8 @@ func main() {
 		}
 	case "login":
 		cli.RunLogin()
+	case "compose":
+		cli.RunCompose()
 	case "uninstall":
 		cli.RunUninstall()
 	case "version":

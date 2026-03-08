@@ -49,14 +49,14 @@ body {
 .nav-icon.active { background: var(--accent); color: #fff; }
 .nav-icon .lucide, .nav-icon i { width: 18px; height: 18px; }
 
-/* User pages section */
-.nav-pages-section {
+/* User apps section */
+.nav-apps-section {
   display: flex; flex-direction: column; gap: 2px;
   border-top: 1px solid var(--border); padding-top: 6px;
 }
-.nav-pages-section:empty { display: none; }
+.nav-apps-section:empty { display: none; }
 
-/* Nav items (user pages) */
+/* Nav items (user apps) */
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; border-radius: 8px;
@@ -772,6 +772,22 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   word-break: break-word; line-height: 1.5;
   background: var(--bg-input); border-radius: 4px; padding: 6px 8px;
 }
+.task-section {
+  padding: 0 16px 12px; display: none;
+  border-top: 1px solid var(--border);
+}
+.task-card.expanded .task-section { display: block; }
+.task-section-title {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-dim); font-weight: 600; padding: 10px 0 6px;
+}
+.task-section-body {
+  font-size: 0.82rem; color: var(--text); line-height: 1.6;
+  background: var(--bg-input); border-radius: 6px; padding: 10px 12px;
+  word-break: break-word; white-space: pre-wrap; max-height: 300px;
+  overflow-y: auto;
+}
+
 .task-chevron {
   color: var(--text-dim); transition: transform 0.2s; flex-shrink: 0;
 }
@@ -1230,6 +1246,7 @@ body:not(.light) .jv-bool { color: #ffab70; }
   .task-card-header { gap: 8px; padding: 10px 12px; }
   .task-card-details { padding: 8px 12px; }
   .task-steps { padding: 0 12px 10px; }
+  .task-section { padding: 0 12px 10px; }
   .docs-view { padding: 12px 10px; }
   .docs-sidebar { display: none; }
   .docs-toc { display: none; }

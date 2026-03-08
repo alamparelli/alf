@@ -52,7 +52,7 @@ You're looking at it. Here's what each section does:
 | **Home** | Status, configuration, Workspace Explorer, Teach |
 | **Chat** | Browser-based chat (same as Telegram, different interface) |
 | **Tasks** | Monitor agent tasks — running, completed, failed |
-| **Pages** | Dynamic HTML dashboards ALF generates (appears when pages exist) |
+| **Apps** | Self-contained apps ALF generates (appears when apps exist) |
 | **Terminal** | Shell session inside the Docker container ([details](docs:terminal)) |
 | **Logs** | Daemon logs and event viewer |
 | **Docs** | You are here |
@@ -67,7 +67,7 @@ On the Home tab, scroll down to **Workspace**. This is a file browser for ALF's 
 | `context/` | Files added to every conversation | `index.md`, `project-notes.md` |
 | `skills/` | Custom skills ALF can use | `x-manager/SKILL.md` |
 | `tools/` | Custom scripts and executables | `disk-check` |
-| `pages/` | HTML dashboards | `status-board.html` |
+| `apps/` | Self-contained apps | `trend-radar/index.html` |
 | `logs/` | Daemon logs and event history | `daemon.log`, `events/` |
 
 You can create, edit, and delete files directly from here. Changes are picked up automatically.
@@ -204,4 +204,4 @@ To regenerate the base file manually (e.g. after adding a secret): `alf compose`
 - [Managing Conversations](docs:sessions) — sessions, `/new`, and context management
 - [Creating Skills](docs:creating-skills) — teach ALF new abilities with auto-injection
 - [Agent Teams](docs:agent-teams) — coordinate multiple agents for complex tasks
-- [Building Tools & Extensions](docs:container-packages) — install packages, create tools, add pages
+- [Building Tools & Extensions](docs:container-packages) — install packages, create tools, build apps

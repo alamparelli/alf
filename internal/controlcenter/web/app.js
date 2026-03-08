@@ -115,7 +115,7 @@ function navigateTo(view) {
   } else if (view.startsWith('page:')) {
     const name = view.slice(5);
     pageFrame.style.display = '';
-    pageFrame.src = '/pages/' + encodeURIComponent(name);
+    pageFrame.src = '/apps/' + encodeURIComponent(name) + '/';
   } else if (view === 'schedules') {
     schedulesView.style.display = '';
     pageFrame.src = '';
@@ -907,7 +907,7 @@ function wsShowUploadModal() {
   ).join('');
 
   // Populate target options from known directories.
-  const dirs = ['skills.d', 'tools', 'context.d', 'config.d', 'memory.d', 'pages.d'];
+  const dirs = ['skills.d', 'tools', 'context.d', 'config.d', 'memory.d', 'apps'];
   target.innerHTML = dirs.map(d => '<option value="' + d + '">' + d + '</option>').join('');
   // Add custom option.
   target.innerHTML += '<option value="__custom">Other...</option>';
@@ -1929,24 +1929,25 @@ chatInput.addEventListener('input', () => {
   }
 });
 
-// --- Pages (sidebar nav) ---
+// --- Apps (sidebar nav) ---
 function capitalizeName(name) {
   return name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function loadPages() {
-  return api('/api/pages/').then(r => {
-    const section = document.getElementById('navPagesSection');
+function loadApps() {
+  return api('/api/apps/').then(r => {
+    const section = document.getElementById('navAppsSection');
     const items = r.items || [];
 
-    // Remove existing page nav items.
     section.innerHTML = '';
 
-    items.forEach(p => {
+    items.forEach(app => {
       const a = document.createElement('a');
       a.className = 'nav-item';
-      a.dataset.view = 'page:' + p.name;
-      a.innerHTML = '<i data-lucide="file-code"></i> ' + esc(capitalizeName(p.name));
+      a.dataset.view = 'page:' + app.name;
+      const icon = app.icon || 'app-window';
+      const label = app.display_name || capitalizeName(app.name);
+      a.innerHTML = '<i data-lucide="' + esc(icon) + '"></i> ' + esc(label);
       a.addEventListener('click', () => navigateTo(a.dataset.view));
       section.appendChild(a);
     });
@@ -2455,6 +2456,9 @@ async function tasksFetch() {
   }
 }
 
+// Track which task cards are expanded so refresh doesn't collapse them.
+let tasksExpandedSet = new Set();
+
 function tasksRender(running, completed) {
   const container = document.getElementById('tasksList');
 
@@ -2485,10 +2489,23 @@ function tasksRender(running, completed) {
     btn.onclick = (e) => { e.stopPropagation(); tasksCancel(btn.dataset.id); };
   });
 
+  // Restore expanded state and bind click handlers.
+  container.querySelectorAll('.task-card').forEach(card => {
+    const id = card.dataset.taskId;
+    if (id && tasksExpandedSet.has(id)) {
+      card.classList.add('expanded');
+    }
+  });
+
   container.querySelectorAll('.task-card-header').forEach(header => {
     header.onclick = () => {
       const card = header.closest('.task-card');
+      const id = card.dataset.taskId;
       card.classList.toggle('expanded');
+      if (id) {
+        if (card.classList.contains('expanded')) tasksExpandedSet.add(id);
+        else tasksExpandedSet.delete(id);
+      }
     };
   });
 
@@ -2496,13 +2513,22 @@ function tasksRender(running, completed) {
 }
 
 function taskCard(task, isRunning) {
-  const elapsed = taskElapsed(task.started_at);
+  const elapsed = isRunning
+    ? taskElapsed(task.started_at, null)
+    : taskElapsed(task.started_at, task.completed_at);
   const statusClass = isRunning ? 'running' : (task.status === 'completed' ? 'completed' : (task.status === 'timeout' ? 'timeout' : 'failed'));
   const statusLabel = isRunning ? 'running' : task.status;
   const cost = task.total_cost_usd ? '$' + task.total_cost_usd.toFixed(4) : '--';
-  const prompt = taskEscapeHtml(task.prompt || 'No prompt').substring(0, 200);
+  const promptPreview = taskEscapeHtml(task.prompt || 'No prompt').substring(0, 200);
   const agentCount = (task.agent_calls && task.agent_calls.length) || 0;
 
+  // Full request section.
+  const fullPrompt = task.prompt ? '<div class="task-section"><div class="task-section-title">Request</div><div class="task-section-body">' + taskEscapeHtml(task.prompt) + '</div></div>' : '';
+
+  // Output section.
+  const output = task.response ? '<div class="task-section"><div class="task-section-title">Output</div><div class="task-section-body">' + taskEscapeHtml(task.response) + '</div></div>' : '';
+
+  // Agent calls section.
   let agentSteps = '';
   if (agentCount > 0) {
     agentSteps = '<div class="task-steps"><div class="task-steps-title">Agent calls (' + agentCount + ')</div>';
@@ -2512,8 +2538,8 @@ function taskCard(task, isRunning) {
       const callIcon = call.error ? '\u2717' : '\u2713';
       const callCost = call.cost_usd ? '$' + call.cost_usd.toFixed(4) : '';
       const callResult = call.error
-        ? taskEscapeHtml(call.error).substring(0, 300)
-        : taskEscapeHtml(call.text || '').substring(0, 300);
+        ? taskEscapeHtml(call.error)
+        : taskEscapeHtml(call.text || '');
       agentSteps += '<div class="task-step ' + callStatus + '">' +
         '<span class="task-step-icon">' + callIcon + '</span>' +
         '<span class="task-step-agent">' + taskEscapeHtml(agentName) + '</span>' +
@@ -2529,12 +2555,12 @@ function taskCard(task, isRunning) {
     ? '<button class="btn-sm btn-danger task-cancel-btn" data-id="' + taskEscapeHtml(task.id) + '">Cancel</button>'
     : '';
 
-  return '<div class="task-card ' + statusClass + '">' +
+  return '<div class="task-card ' + statusClass + '" data-task-id="' + taskEscapeHtml(task.id) + '">' +
     '<div class="task-card-header">' +
-      '<div class="task-card-title">' + statusDot + '<strong>' + prompt + '</strong></div>' +
+      '<div class="task-card-title">' + statusDot + '<strong>' + promptPreview + '</strong></div>' +
       '<span class="task-status-badge ' + statusClass + '">' + statusLabel + '</span>' +
       '<div class="task-card-actions">' +
-        (agentCount > 0 ? '<span class="task-chevron"><i data-lucide="chevron-right"></i></span>' : '') +
+        '<span class="task-chevron"><i data-lucide="chevron-right"></i></span>' +
         cancelBtn +
       '</div>' +
     '</div>' +
@@ -2544,15 +2570,17 @@ function taskCard(task, isRunning) {
       '<div class="task-detail-row"><span class="task-detail-label">Iterations</span><span class="task-detail-value">' + (task.iterations || 0) + '</span></div>' +
       (agentCount > 0 ? '<div class="task-detail-row"><span class="task-detail-label">Agents</span><span class="task-detail-value">' + agentCount + '</span></div>' : '') +
     '</div>' +
+    fullPrompt +
+    output +
     agentSteps +
   '</div>';
 }
 
-function taskElapsed(startedAt) {
+function taskElapsed(startedAt, completedAt) {
   if (!startedAt) return '--';
   const start = new Date(startedAt);
-  const now = new Date();
-  const diffMs = now - start;
+  const end = completedAt ? new Date(completedAt) : new Date();
+  const diffMs = end - start;
   const secs = Math.floor(diffMs / 1000);
   if (secs < 60) return secs + 's';
   const mins = Math.floor(secs / 60);
@@ -2952,13 +2980,13 @@ function tiersSave() {
 // --- Init ---
 loadStatus();
 loadTeachTiers();
-loadPages().then(() => {
+loadApps().then(() => {
   const saved = localStorage.getItem('alf-view');
   if (saved && saved !== 'home') navigateTo(saved);
 });
 wsInit();
 setInterval(loadStatus, 30000);
-setInterval(loadPages, 30000);
+setInterval(loadApps, 30000);
 
 // --- Firewall ---
 let fwInitialized = false;

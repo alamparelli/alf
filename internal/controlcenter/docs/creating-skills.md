@@ -270,5 +270,5 @@ Skills reload automatically when ALF detects changes in the Workspace. You can a
 
 ## What's next?
 
-- [Building Tools & Extensions](docs:container-packages) — create tools, pages, and more
+- [Building Tools & Extensions](docs:container-packages) — create tools, apps, and more
 - [Tools Reference](docs:tools-reference) — built-in CLI tools

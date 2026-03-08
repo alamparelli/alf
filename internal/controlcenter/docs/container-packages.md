@@ -1,12 +1,12 @@
 ---
 category: Development
-tags: tools, pages, config, packages, persistence, setup, docker, build
+tags: tools, apps, config, packages, persistence, setup, docker, build
 order: 10
 ---
 
 # Building Tools & Extensions
 
-How to create tools, pages, and extend ALF's capabilities inside the container.
+How to create tools, apps, and extend ALF's capabilities inside the container.
 
 ## Directory structure
 
@@ -15,7 +15,7 @@ ALF runs in a Docker container. The `data/` volume is persistent across restarts
 | Directory | Persistent | Purpose |
 |-----------|-----------|---------|
 | `~/data/tools/` | Yes (volume) | Custom scripts and executables |
-| `~/data/pages/` | Yes (volume) | HTML dashboards served at `/pages/<name>` |
+| `~/data/apps/` | Yes (volume) | App directories served at `/apps/<name>` |
 | `~/data/skills/` | Yes (volume) | Custom skills (SKILL.md folders) |
 | `~/data/context/` | Yes (volume) | Context files injected into every conversation |
 | `~/data/tools.d/` | Yes (volume) | Symlinks to system tools — auto-generated, do not edit |
@@ -59,12 +59,13 @@ chmod +x ~/data/tools/disk-check
 
 > `tools.d/` symlinks are regenerated from `/opt/alf/tools/` on each daemon restart. Custom symlinks you place there will be removed. Put your tools in `~/data/tools/` instead.
 
-## Creating an HTML page
+## Creating an app
 
-Write an HTML file to `~/data/pages/`. It becomes accessible at `https://<domain>/pages/<name>` in the Control Center sidebar.
+Create a directory in `~/data/apps/` with an `index.html` file. It becomes accessible at `https://<domain>/apps/<name>` in the Control Center sidebar. Add an optional `app.json` for metadata (display name, Lucide icon, description).
 
 ```bash
-cat > ~/data/pages/status.html << 'HTML'
+mkdir -p ~/data/apps/status
+cat > ~/data/apps/status/index.html << 'HTML'
 <html>
 <head>
 <style>
@@ -87,7 +88,7 @@ cat > ~/data/pages/status.html << 'HTML'
 HTML
 ```
 
-### Page rules
+### App rules
 
 **Security (Content Security Policy):**
 - No external scripts — `<script src="https://...">` is blocked
@@ -185,7 +186,7 @@ curl -fsSL https://example.com/tool.tar.gz | tar xz -C /usr/local/bin
 |----------|------|
 | Everything in `~/data/` | pip/apt/npm packages |
 | Scripts in `~/data/tools/` | Binaries in `/usr/local/bin` |
-| HTML in `~/data/pages/` | System-level config changes |
+| Apps in `~/data/apps/` | System-level config changes |
 | Skills in `~/data/skills/` | Anything outside data volume |
 | `~/data/bootstrap.sh` | |
 

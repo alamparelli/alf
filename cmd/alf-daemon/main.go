@@ -161,9 +161,10 @@ func main() {
 
 	// Ensure directories exist.
 	os.MkdirAll(configDir, 0o755)
+	os.MkdirAll(skillsDir, 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
-	for _, sub := range []string{"config", "tools", "skills", "context", "pages"} {
+	for _, sub := range []string{"config", "tools", "skills", "context", "apps"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
 	os.MkdirAll(filepath.Join(configDir, "agents"), 0o755)
@@ -2220,6 +2221,10 @@ func linkSystemTools(toolsDir, srcDir string) {
 			log.Printf("linked tools.d/%s → %s", e.Name(), target)
 		}
 	}
+
+	// Lock down: tools.d is system-managed, Claude subprocess must not write here.
+	os.Chmod(toolsDir, 0o755)
+	os.Chown(toolsDir, 0, 0) // root:root
 }
 
 // seedDefaultTiers copies /opt/alf/defaults/tiers.json into the config dir

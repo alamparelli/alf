@@ -202,6 +202,12 @@ func main() {
 	// can read/write files created before the permission refactoring.
 	fixDataPermissions(dataDir)
 	fixDataPermissions(configDir)
+	// Fix HOME subdirectories that root may have written to (claude CLI
+	// config, npm/pip local installs). Without this, claude -p hangs with
+	// EACCES because it cannot write to .claude/ or .local/.
+	// Use explicit uid:gid (alf=1001, alf-group=1000) because these dirs
+	// may be owned by root, and fixDataPermissions infers from the dir owner.
+	fixHomeDirPermissions(homeDir, 1001, 1000)
 
 	// Migrate config from old data/config/ to configDir (before loading).
 	migrateConfig(dataDir, configDir)
@@ -1375,6 +1381,11 @@ func main() {
 			// Build system prompts (context files + reaction instruction).
 			sysPrompts := memory.CollectPrompts(contextDir)
 			var sysPromptTexts []string
+			// Inject onboarding prompt FIRST so it becomes the primary --system-prompt.
+			onboarding := memory.OnboardingPrompt(contextDir)
+			if onboarding != "" {
+				sysPromptTexts = append(sysPromptTexts, onboarding)
+			}
 			for i := 0; i < len(sysPrompts)-1; i += 2 {
 				if sysPrompts[i] == "--append-system-prompt" {
 					sysPromptTexts = append(sysPromptTexts, sysPrompts[i+1])
@@ -1383,11 +1394,6 @@ func main() {
 			// Inject pre-recalled memories (computed before routing).
 			if preRecallBlock != "" {
 				sysPromptTexts = append(sysPromptTexts, preRecallBlock)
-			}
-			// Inject onboarding prompt on first use.
-			onboarding := memory.OnboardingPrompt(contextDir)
-			if onboarding != "" {
-				sysPromptTexts = append(sysPromptTexts, onboarding)
 			}
 			// Inject skill catalog so the model knows available skills.
 			if catalog := skills.BuildCatalog(skillStore); catalog != "" {
@@ -2074,6 +2080,63 @@ func ensureBashrcPath(home string) {
 	log.Printf("bashrc: added .local/bin to PATH")
 }
 
+// fixHomeDirPermissions ensures all files under HOME/.claude and HOME/.local
+// are owned by the given uid:gid with correct permissions. The daemon runs as
+// root and writes files (syncClaudeJSON, npm install, etc.) that the claude
+// subprocess (uid 1001) must be able to read/write.
+func fixHomeDirPermissions(homeDir string, uid, gid int) {
+	// Fix individual files in HOME that root may have written.
+	for _, name := range []string{".claude.json", ".gitconfig"} {
+		p := filepath.Join(homeDir, name)
+		if fi, err := os.Stat(p); err == nil {
+			if sys, ok := fi.Sys().(*syscall.Stat_t); ok {
+				if int(sys.Uid) != uid || int(sys.Gid) != gid {
+					os.Chown(p, uid, gid)
+				}
+			}
+		}
+	}
+	dirs := []string{
+		filepath.Join(homeDir, ".claude"),
+		filepath.Join(homeDir, ".local"),
+		filepath.Join(homeDir, ".cache"),
+		filepath.Join(homeDir, ".npm"),
+	}
+	fixed := 0
+	for _, dir := range dirs {
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		// Fix the directory itself first.
+		os.Chown(dir, uid, gid)
+		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if sys, ok := info.Sys().(*syscall.Stat_t); ok {
+				if int(sys.Uid) != uid || int(sys.Gid) != gid {
+					os.Chown(path, uid, gid)
+					fixed++
+				}
+			}
+			mode := info.Mode()
+			if info.IsDir() {
+				if mode.Perm()&0o070 != 0o070 {
+					os.Chmod(path, mode.Perm()|0o070)
+				}
+			} else {
+				if mode.Perm()&0o060 != 0o060 {
+					os.Chmod(path, mode.Perm()|0o060)
+				}
+			}
+			return nil
+		})
+	}
+	if fixed > 0 {
+		log.Printf("fixed ownership on %d files in HOME subdirs", fixed)
+	}
+}
+
 // can access files created by root or node before the permission refactoring.
 func fixDataPermissions(dataDir string) {
 	// Determine the expected uid:gid from the data dir itself.
@@ -2235,7 +2298,8 @@ func syncClaudeJSON(homeDir string) {
 		os.WriteFile(volumeCopy, data, 0o640)
 	}
 
-	// Ensure group-readable so claude user (uid 1001, gid 1000) can read.
+	// Ensure claude user (uid 1001, gid 1000) can read — chown + chmod.
+	os.Chown(realFile, 1001, 1000)
 	os.Chmod(realFile, 0o640)
 
 	// Fix .claude/ directory permissions: group needs read+traverse.

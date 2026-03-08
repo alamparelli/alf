@@ -102,6 +102,17 @@ func (c *CLIClassifier) startLocked() error {
 	}
 	cmd.Env = safeEnv(classifierHome, c.cfg.DataDir)
 
+	// Log classifier environment for debugging.
+	for _, e := range cmd.Env {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			v := strings.TrimPrefix(e, k+"=")
+			if len(v) > 80 {
+				v = v[:80] + "..."
+			}
+			log.Printf("classifier: env %s=%s", k, v)
+		}
+	}
+
 	// Capture stderr to log any Claude CLI errors.
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {

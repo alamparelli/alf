@@ -246,10 +246,10 @@ func TestChatService_BuildPromptWithMedia(t *testing.T) {
 func TestChatService_ResolveTierParams(t *testing.T) {
 	svc := newTestChatService(t)
 
-	// Default tiers should include "instant".
-	tp := svc.resolveTierParams("instant")
+	// Default tiers should include "haiku".
+	tp := svc.resolveTierParams("haiku")
 	if tp.Model == "" {
-		t.Error("expected non-empty model for instant tier")
+		t.Error("expected non-empty model for haiku tier")
 	}
 
 	// Unknown tier should fallback.

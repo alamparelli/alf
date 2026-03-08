@@ -771,7 +771,7 @@ func TestExtractorFiltersNonMessageEvents(t *testing.T) {
 	now := time.Now()
 	lines := []string{
 		`{"event":"message_in","ts":"` + now.Add(-1*time.Hour).Format(time.RFC3339) + `","text":"hello"}`,
-		`{"event":"router_classify","ts":"` + now.Add(-59*time.Minute).Format(time.RFC3339) + `","tier":"instant"}`,
+		`{"event":"router_classify","ts":"` + now.Add(-59*time.Minute).Format(time.RFC3339) + `","tier":"haiku"}`,
 		`{"event":"session_new","ts":"` + now.Add(-58*time.Minute).Format(time.RFC3339) + `","session_id":"abc"}`,
 		`{"event":"message_out","ts":"` + now.Add(-57*time.Minute).Format(time.RFC3339) + `","text":"reply"}`,
 		`{"event":"bot_error","ts":"` + now.Add(-56*time.Minute).Format(time.RFC3339) + `","error":"something"}`,

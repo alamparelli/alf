@@ -1070,7 +1070,7 @@ func main() {
 			routerMsg := buildRouterMessage(u.Message)
 
 			// Pre-route memory recall: check long-term store BEFORE routing
-			// so instant-tier responses also have personal context.
+			// so direct responses also have personal context.
 			var preRecallBlock string
 			recallBestDist := 2.0
 			if memDB != nil {
@@ -1087,9 +1087,9 @@ func main() {
 				routeResult = router.Result{Tier: forcedTierName, Reason: "force_command"}
 				log.Printf("→ force command → tier %q", forcedTierName)
 			} else if hasMedia {
-				// Media needs a non-instant tier with Read tool access.
+				// Media needs a tier with Read tool access.
 				// If caption present, classify to pick the right tier then
-				// ensure it can view images; otherwise cheapest non-instant.
+				// ensure it can view images; otherwise cheapest with Read.
 				if routerMsg != "" {
 					routeResult = classifyMessage(routerMsg, tierStore.Current())
 					log.Printf("→ media+caption: router chose tier=%q reason=%q", routeResult.Tier, routeResult.Reason)
@@ -1099,7 +1099,7 @@ func main() {
 						needsUpgrade = true
 					} else {
 						for _, t := range tierStore.Current().Tiers {
-							if t.Name == routeResult.Tier && (t.Instant || !tierHasRead(t)) {
+							if t.Name == routeResult.Tier && !tierHasRead(t) {
 								needsUpgrade = true
 								break
 							}
@@ -1125,45 +1125,35 @@ func main() {
 				routingAnim.Stop()
 			}
 
-			// Quote-reply upgrade: replies carry important context that instant
-			// tiers cannot handle well (no conversation history). Re-classify
-			// with the full message so the router can make a proper decision.
-			if isReply && forcedTierName == "" {
-				needsReclassify := false
+			// Quote-reply upgrade: replies carry important context. If the router
+			// gave a direct response, re-classify with full context.
+			if isReply && forcedTierName == "" && routeResult.Response != "" && routeResult.Tier == "" {
 				originalResult := routeResult
-				if routeResult.Response != "" && routeResult.Tier == "" {
-					needsReclassify = true // direct response on a reply — router lacked context
-				} else if routeResult.Tier != "" {
-					for _, t := range tierStore.Current().Tiers {
-						if t.Name == routeResult.Tier && t.Instant {
-							needsReclassify = true // instant tier on a reply
-							break
-						}
-					}
+				replyHint := msgWithReplyContext + "\n[CONTEXT: This is a reply to a previous assistant message. Route to an appropriate tier — do not respond directly.]"
+				reclassified := classifyMessage(replyHint, tierStore.Current())
+				if reclassified.Tier != "" {
+					routeResult = reclassified
+					routeResult.Reason = "reply-reclassify: " + reclassified.Reason
+				} else {
+					fallback := firstFallbackTier(tierStore)
+					routeResult = router.Result{Tier: fallback, Reason: fmt.Sprintf("reply-fallback: %s→%s", originalResult.Tier, fallback)}
 				}
-				if needsReclassify {
-					// Re-classify with full reply context + hint to route (not respond directly).
-					replyHint := msgWithReplyContext + "\n[CONTEXT: This is a reply to a previous assistant message. Route to an appropriate tier — do not respond directly.]"
-					reclassified := classifyMessage(replyHint, tierStore.Current())
-					if reclassified.Tier != "" {
-						// Router picked a real tier — use it.
-						routeResult = reclassified
-						routeResult.Reason = "reply-reclassify: " + reclassified.Reason
-					} else {
-						// Still direct/instant — fall back to default tier.
-						fallback := firstFallbackTier(tierStore)
-						routeResult = router.Result{Tier: fallback, Reason: fmt.Sprintf("reply-fallback: %s→%s", originalResult.Tier, fallback)}
-					}
-					log.Printf("→ reply re-routed: %s → %s (%s)", originalResult.Tier, routeResult.Tier, routeResult.Reason)
-				}
+				log.Printf("→ reply re-routed: %s → %s (%s)", originalResult.Tier, routeResult.Tier, routeResult.Reason)
+			}
+
+			// During onboarding, always force a capable conversational tier.
+			if memory.OnboardingPrompt(contextDir) != "" {
+				fallback := onboardingTier(tierStore)
+				log.Printf("→ onboarding override: %q → tier %q", routeResult.Tier, fallback)
+				routeResult = router.Result{Tier: fallback, Reason: "onboarding-override: " + fallback}
 			}
 
 			// If highly relevant memories were recalled (distance < 0.6), override
-			// instant responses — the user is asking about something personal.
+			// direct responses — the user is asking about something personal.
 			if preRecallBlock != "" && recallBestDist < 0.6 && routeResult.Response != "" && routeResult.Tier == "" {
-				log.Printf("→ memory override: instant response upgraded to tier (best_dist=%.2f)", recallBestDist)
+				log.Printf("→ memory override: direct response upgraded to tier (best_dist=%.2f)", recallBestDist)
 				fallback := firstFallbackTier(tierStore)
-				routeResult = router.Result{Tier: fallback, Reason: "memory-override: instant→" + fallback}
+				routeResult = router.Result{Tier: fallback, Reason: "memory-override: direct→" + fallback}
 			}
 			// Register trigger-matched skills in the session BEFORE tier override,
 			// so the first message in a session can also benefit from skill tier requirements.
@@ -1869,16 +1859,9 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 	case "/start":
 		memory.SetOnboarding(contextDir)
 		chatSessions.Archive(msg.Chat.ID) // fresh session so onboarding prompt takes effect
-		welcome := `Hey, I'm <b>Alf</b> — your personal AI assistant powered by Claude.
-
-Send me a message to get started — I'll introduce myself and we'll get to know each other.
-
-<b>Commands:</b>
-/new — Fresh conversation
-/login — Access the Control Center
-/help — Show all commands`
-		tg.SendHTML(msg.Chat.ID, welcome)
-		return true
+		// Auto-trigger onboarding conversation — fall through to normal message processing.
+		msg.Text = "hello"
+		return false
 	case "/restart":
 		if !allowedChatIDs[msg.Chat.ID] {
 			return true
@@ -2641,12 +2624,12 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 	}
 
 	resumeID := chatSessions.Get(chatID)
-	// Use the instant tier for fast follow-up.
+	// Use the cheapest tier for fast follow-up.
 	model := "claude-haiku-4-5"
+	fallback := firstFallbackTier(tierStore)
 	for _, t := range tierStore.Current().Tiers {
-		if t.Instant {
-			m := router.ResolveModel(t.Model)
-			if m != "" {
+		if t.Name == fallback {
+			if m := router.ResolveModel(t.Model); m != "" {
 				model = m
 			}
 			break
@@ -3035,14 +3018,14 @@ func writeLLMSIndex(dataDir string) {
 }
 
 // firstFallbackTier returns DefaultFallback from config, or the first enabled
-// non-instant tier, or the first tier overall. Never hardcodes a tier name.
+// tier, or the first tier overall. Never hardcodes a tier name.
 func firstFallbackTier(tierStore cc.TierStore) string {
 	cur := tierStore.Current()
 	if cur.DefaultFallback != "" {
 		return cur.DefaultFallback
 	}
 	for _, t := range cur.Tiers {
-		if t.Enabled && !t.Instant {
+		if t.Enabled {
 			return t.Name
 		}
 	}
@@ -3050,6 +3033,38 @@ func firstFallbackTier(tierStore cc.TierStore) string {
 		return cur.Tiers[0].Name
 	}
 	return ""
+}
+
+// onboardingTier picks a capable tier for onboarding (second priority, e.g. sonnet).
+func onboardingTier(tierStore cc.TierStore) string {
+	cur := tierStore.Current()
+	type candidate struct {
+		name     string
+		priority int
+	}
+	var candidates []candidate
+	for _, t := range cur.Tiers {
+		if t.Enabled && t.Name != "agent" {
+			candidates = append(candidates, candidate{t.Name, t.Priority})
+		}
+	}
+	if len(candidates) >= 2 {
+		best := candidates[0]
+		second := candidates[1]
+		if second.priority < best.priority {
+			best, second = second, best
+		}
+		for _, c := range candidates[2:] {
+			if c.priority < best.priority {
+				second = best
+				best = c
+			} else if c.priority < second.priority {
+				second = c
+			}
+		}
+		return second.name
+	}
+	return firstFallbackTier(tierStore)
 }
 
 // tierHasRead returns true if the tier's tool list includes the Read tool.
@@ -3065,14 +3080,14 @@ func tierHasRead(t cc.Tier) bool {
 	return false
 }
 
-// lowestMediaTier returns the cheapest enabled non-instant tier that has the
-// Read tool. Falls back to any non-instant tier, then to the first tier.
+// lowestMediaTier returns the cheapest enabled tier that has the Read tool.
+// Falls back to any enabled tier, then to the first tier.
 func lowestMediaTier(tiers *cc.TiersConfig) string {
 	bestName := ""
 	bestPriority := int(^uint(0) >> 1)
 	// First pass: prefer tiers with Read tool.
 	for _, t := range tiers.Tiers {
-		if t.Enabled && !t.Instant && tierHasRead(t) && t.Priority < bestPriority {
+		if t.Enabled && tierHasRead(t) && t.Priority < bestPriority {
 			bestName = t.Name
 			bestPriority = t.Priority
 		}
@@ -3080,10 +3095,10 @@ func lowestMediaTier(tiers *cc.TiersConfig) string {
 	if bestName != "" {
 		return bestName
 	}
-	// Second pass: any non-instant tier.
+	// Second pass: any enabled tier.
 	bestPriority = int(^uint(0) >> 1)
 	for _, t := range tiers.Tiers {
-		if t.Enabled && !t.Instant && t.Priority < bestPriority {
+		if t.Enabled && t.Priority < bestPriority {
 			bestName = t.Name
 			bestPriority = t.Priority
 		}

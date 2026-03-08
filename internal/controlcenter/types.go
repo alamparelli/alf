@@ -65,7 +65,6 @@ type Tier struct {
 	Priority     int      `json:"priority"`
 	Enabled      bool     `json:"enabled"`
 	Routable     bool     `json:"routable"`
-	Instant      bool     `json:"instant"`
 	RouterLabel  string   `json:"router_label,omitempty"`
 	Description  string   `json:"description,omitempty"`
 	MaxTurns              int      `json:"max_turns,omitempty"`
@@ -92,7 +91,6 @@ type TiersConfig struct {
 	Tiers              []Tier `json:"tiers"`
 	RouterModel        string `json:"router_model,omitempty"`
 	DefaultFallback    string `json:"default_fallback,omitempty"`
-	RouterInstantLabel string `json:"router_instant_label,omitempty"`
 	RouterDistinctions string `json:"router_distinctions,omitempty"`
 	RouterBackend      string `json:"router_backend,omitempty"` // "cli" (default), "openrouter"
 }

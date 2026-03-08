@@ -1825,8 +1825,14 @@ function chatExecCommand(cmd) {
       fetch('/api/chat?onboard=1', { method: 'DELETE', credentials: 'same-origin' })
         .then(r => r.json())
         .then(r => {
-          chatAppendBubble('assistant', r.ok ? 'Onboarding active — send a message to begin.' : 'Failed.', { tier: 'system' });
-          chatScrollBottom();
+          if (r.ok) {
+            // Auto-trigger onboarding conversation.
+            chatInput.value = 'hello';
+            chatSend();
+          } else {
+            chatAppendBubble('assistant', 'Failed.', { tier: 'system' });
+            chatScrollBottom();
+          }
         })
         .catch(() => { chatAppendBubble('assistant', 'Failed.', { tier: 'system' }); chatScrollBottom(); });
       break;
@@ -2710,7 +2716,6 @@ function tiersRender() {
     const modelColor = t.model === 'opus' ? 'var(--accent)' : t.model === 'sonnet' ? 'var(--green)' : 'var(--text-dim)';
     const statusDot = t.enabled ? '<span class="dot green"></span>' : '<span class="dot red"></span>';
     const badges = [];
-    if (t.instant) badges.push('<span class="tier-badge tier-badge-instant">instant</span>');
     if (t.write_capable) badges.push('<span class="tier-badge tier-badge-write">write</span>');
     if (t.force_command) badges.push('<span class="tier-badge tier-badge-force">force</span>');
     if (t.routable) badges.push('<span class="tier-badge tier-badge-routable">routable</span>');
@@ -2758,7 +2763,7 @@ function tiersRender() {
 
 function tiersShowModal(tier) {
   const isEdit = !!tier;
-  const t = tier || { name: '', model: 'haiku', priority: 0, enabled: true, routable: true, router_label: '', effort: 'low', tools: [], write_capable: false, force_command: false, instant: false, max_turns: 0, max_iterations: 0, timeout_minutes: 0, description: '', backend: '' };
+  const t = tier || { name: '', model: 'haiku', priority: 0, enabled: true, routable: true, router_label: '', effort: 'low', tools: [], write_capable: false, force_command: false, max_turns: 0, max_iterations: 0, timeout_minutes: 0, description: '', backend: '' };
 
   // Remove existing modal
   const old = document.getElementById('tierModal');
@@ -2793,7 +2798,6 @@ function tiersShowModal(tier) {
           '<label class="tier-flag-check"><input type="checkbox" id="tfRoutable"' + (t.routable ? ' checked' : '') + '> Routable</label>' +
           '<label class="tier-flag-check"><input type="checkbox" id="tfWriteCapable"' + (t.write_capable ? ' checked' : '') + '> Write capable</label>' +
           '<label class="tier-flag-check"><input type="checkbox" id="tfForceCmd"' + (t.force_command ? ' checked' : '') + '> Force command</label>' +
-          '<label class="tier-flag-check"><input type="checkbox" id="tfInstant"' + (t.instant ? ' checked' : '') + '> Instant</label>' +
         '</div>' +
         '<div class="tier-tools-section">' +
           '<div class="tier-tools-header">Tools <span class="tier-tools-hint">(only for read-only tiers — write-capable tiers get all tools)</span></div>' +
@@ -2839,7 +2843,6 @@ function tiersShowModal(tier) {
       priority: parseInt(document.getElementById('tfPriority').value, 10) || 0,
       enabled: document.getElementById('tfEnabled').checked,
       routable: document.getElementById('tfRoutable').checked,
-      instant: document.getElementById('tfInstant').checked,
       router_label: document.getElementById('tfLabel').value.trim(),
       description: document.getElementById('tfDesc').value.trim(),
       max_turns: parseInt(document.getElementById('tfMaxTurns').value, 10) || 0,
@@ -2895,7 +2898,6 @@ function tiersShowRouterModal() {
         '<div class="form-row"><label>Router backend</label><select id="trBackend">' + rbOpts + '</select></div>' +
         '<div class="form-row" id="trModelRow"><label>Router model</label>' + (isOR ? '<input type="text" id="trModel" value="' + esc(c.router_model || '') + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="trModel">' + modelOpts + '</select>') + '</div>' +
         '<div class="form-row"><label>Default fallback</label><select id="trFallback">' + fbOpts + '</select></div>' +
-        '<div class="form-row"><label>Instant label</label><input type="text" id="trInstant" value="' + esc(c.router_instant_label || '') + '"></div>' +
         '<div class="form-row"><label>Distinctions</label><textarea class="json-editor" id="trDistinctions" rows="4">' + esc(c.router_distinctions || '') + '</textarea></div>' +
       '</div>' +
       '<div class="upload-actions">' +
@@ -2927,7 +2929,6 @@ function tiersShowRouterModal() {
     tiersCache.router_backend = backend || '';
     tiersCache.router_model = document.getElementById('trModel').value.trim();
     tiersCache.default_fallback = document.getElementById('trFallback').value;
-    tiersCache.router_instant_label = document.getElementById('trInstant').value.trim();
     tiersCache.router_distinctions = document.getElementById('trDistinctions').value.trim();
     document.getElementById('tierRouterModal').remove();
     tiersSave();

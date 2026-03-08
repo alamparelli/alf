@@ -14,7 +14,7 @@ import (
 
 // Result holds the classification output from the router.
 type Result struct {
-	Tier     string // tier name (e.g. "instant", "analyze", "heavy")
+	Tier     string // tier name (e.g. "haiku", "sonnet", "opus")
 	Response string // non-empty only for direct router responses
 	Reason   string // classifier reasoning
 	React    string // optional emoji reaction suggestion for the user's message
@@ -196,11 +196,11 @@ func ValidTierSet(tiers *cc.TiersConfig) map[string]bool {
 
 // FallbackResult returns a fallback tier when classification fails.
 func FallbackResult(tiers *cc.TiersConfig) Result {
-	// Pick the lowest-priority enabled non-instant tier.
+	// Pick the lowest-priority enabled tier.
 	best := ""
 	bestPriority := int(^uint(0) >> 1)
 	for _, t := range tiers.Tiers {
-		if t.Enabled && !t.Instant && t.Priority < bestPriority {
+		if t.Enabled && t.Priority < bestPriority {
 			best = t.Name
 			bestPriority = t.Priority
 		}

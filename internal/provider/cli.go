@@ -86,14 +86,10 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		args = append(args, "--max-turns", fmt.Sprintf("%d", params.MaxTurns))
 	}
 
-	// System prompts: first one replaces Claude Code's default identity
-	// (--system-prompt), rest are appended (--append-system-prompt).
-	for i, sp := range params.SystemPrompts {
-		if i == 0 {
-			args = append(args, "--system-prompt", sp)
-		} else {
-			args = append(args, "--append-system-prompt", sp)
-		}
+	// System prompts: all appended to preserve Claude Code's default behavior.
+	// Note: --system-prompt (replace) causes startup hangs — always use --append.
+	for _, sp := range params.SystemPrompts {
+		args = append(args, "--append-system-prompt", sp)
 	}
 
 	dataDir := params.DataDir
@@ -102,8 +98,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	}
 
 	// Remove stale settings.json before every invocation. Claude Code may
-	// persist restrictive allow-lists that block tools even when
-	// --dangerously-skip-permissions is used.
+	// persist restrictive allow-lists that block tools on resumed sessions.
 	homeDir := p.HomeDir
 	if homeDir == "" {
 		homeDir = p.DefaultDataDir
@@ -132,8 +127,18 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	cmd.Env = safeEnv(homeDir, dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
 
-	log.Printf("provider: invoke starting (resume=%q, model=%s, max_turns=%d, effort=%s, sys_prompts=%d, tools=%v, write=%v)",
-		params.ResumeID, model, params.MaxTurns, params.Effort, len(params.SystemPrompts), params.Tools, params.WriteCapable)
+	// Log full args (excluding prompt content which can be huge).
+	debugArgs := make([]string, 0, len(args))
+	for i, a := range args {
+		if i > 0 && (args[i-1] == "-p" || args[i-1] == "--append-system-prompt") {
+			debugArgs = append(debugArgs, fmt.Sprintf("[%d chars]", len(a)))
+		} else {
+			debugArgs = append(debugArgs, a)
+		}
+	}
+	log.Printf("provider: invoke starting (resume=%q, model=%s, max_turns=%d, effort=%s, sys_prompts=%d, tools=%v, write=%v, env_count=%d)",
+		params.ResumeID, model, params.MaxTurns, params.Effort, len(params.SystemPrompts), params.Tools, params.WriteCapable, len(cmd.Env))
+	log.Printf("provider: args=%v", debugArgs)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -149,21 +154,19 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
+	log.Printf("provider: process started (pid=%d, uid=%d, home=%s, dir=%s)",
+		cmd.Process.Pid, func() uint32 { if p.Credential != nil { return p.Credential.Uid }; return 0 }(), homeDir, dataDir)
 	invokeStart := time.Now()
 
-	// Read stderr in background.
+	// Read stderr in background — log lines in real-time for debugging.
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
-		buf := make([]byte, 4096)
-		for {
-			n, err := stderrPipe.Read(buf)
-			if n > 0 {
-				stderr.Write(buf[:n])
-			}
-			if err != nil {
-				return
-			}
+		scanner := bufio.NewScanner(stderrPipe)
+		for scanner.Scan() {
+			line := scanner.Text()
+			stderr.WriteString(line + "\n")
+			log.Printf("provider stderr [pid=%d]: %s", cmd.Process.Pid, line)
 		}
 	}()
 
@@ -217,12 +220,14 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 				goto processEvent
 			case <-firstTimer.C:
 				// No events within timeout — kill and report stderr.
+				log.Printf("provider: TIMEOUT pid=%d after %v — killing process", cmd.Process.Pid, firstEventTimeout)
 				cmd.Process.Kill()
 				<-stderrDone
-				cmd.Wait()
+				waitErr := cmd.Wait()
+				log.Printf("provider: killed pid=%d, wait=%v, stderr_len=%d", cmd.Process.Pid, waitErr, stderr.Len())
 				errMsg := strings.TrimSpace(stderr.String())
 				if errMsg == "" {
-					errMsg = "no output"
+					errMsg = "no output on stdout or stderr"
 				}
 				return nil, fmt.Errorf("claude startup timeout (%v): %s", firstEventTimeout, truncStderr(errMsg, 500))
 			case <-cmdCtx.Done():

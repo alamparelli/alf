@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/creack/pty"
 	"nhooyr.io/websocket"
@@ -42,29 +43,31 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if shell == "" {
 		shell = "/bin/bash"
 	}
+	// Run shell as alf user (uid=1001), not root.
 	cmd := exec.CommandContext(ctx, shell, "--login")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
+	}
+	homeDir := "/home/alf"
+	if d := os.Getenv("ALF_HOME_DIR"); d != "" {
+		homeDir = d
+	}
+	cmd.Dir = homeDir
+	localBin := homeDir + "/.local/bin"
 	env := os.Environ()
-	// Ensure ~/.local/bin is in PATH for Claude CLI.
 	for i, e := range env {
 		if strings.HasPrefix(e, "PATH=") {
-			env[i] = e + ":" + os.Getenv("HOME") + "/.local/bin"
+			env[i] = "PATH=" + localBin + ":" + strings.TrimPrefix(e, "PATH=")
 			break
 		}
-	}
-	// Override HOME to point to the persistent data volume so that
-	// Claude CLI auth (~/.claude/) and binaries (~/.local/bin/) survive
-	// container rebuilds.
-	dataDir := os.Getenv("ALF_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "/home/alf/data"
 	}
 	for i, e := range env {
 		if strings.HasPrefix(e, "HOME=") {
-			env[i] = "HOME=" + dataDir
+			env[i] = "HOME=" + homeDir
 			break
 		}
 	}
-	cmd.Env = append(env, "TERM=xterm-256color")
+	cmd.Env = append(env, "TERM=xterm-256color", "USER=alf", "LOGNAME=alf")
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {

@@ -155,12 +155,16 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 			continue
 		}
 
-		info, err := e.Info()
+		// Use os.Stat (not Lstat) to follow symlinks — so symlinked dirs
+		// appear as directories in the file browser, not as tiny files.
+		fullPath := filepath.Join(absPath, name)
+		info, err := os.Stat(fullPath)
 		if err != nil {
 			continue
 		}
-		entry := wsEntry{Name: name, IsDir: e.IsDir(), Size: info.Size()}
-		if e.IsDir() {
+		isDir := info.IsDir()
+		entry := wsEntry{Name: name, IsDir: isDir, Size: info.Size()}
+		if isDir {
 			dirs = append(dirs, entry)
 		} else {
 			files = append(files, entry)

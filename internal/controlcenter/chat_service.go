@@ -371,14 +371,15 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	systemPrompts := memory.CollectPrompts(cs.ContextDir)
 	// Convert --append-system-prompt flags to flat strings.
 	var sysPromptTexts []string
+	// Inject onboarding prompt FIRST so it becomes the primary --system-prompt.
+	// This ensures Claude follows the onboarding instructions over all other prompts.
+	if onboarding := memory.OnboardingPrompt(cs.ContextDir); onboarding != "" {
+		sysPromptTexts = append(sysPromptTexts, onboarding)
+	}
 	for i := 0; i < len(systemPrompts)-1; i += 2 {
 		if systemPrompts[i] == "--append-system-prompt" {
 			sysPromptTexts = append(sysPromptTexts, systemPrompts[i+1])
 		}
-	}
-	// Inject onboarding prompt on first use.
-	if onboarding := memory.OnboardingPrompt(cs.ContextDir); onboarding != "" {
-		sysPromptTexts = append(sysPromptTexts, onboarding)
 	}
 	// Auto-inject relevant memories from long-term store.
 	if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {

@@ -86,10 +86,14 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		args = append(args, "--max-turns", fmt.Sprintf("%d", params.MaxTurns))
 	}
 
-	// System prompts: all appended to preserve Claude Code's default behavior.
-	// Note: --system-prompt (replace) causes startup hangs — always use --append.
-	for _, sp := range params.SystemPrompts {
-		args = append(args, "--append-system-prompt", sp)
+	// System prompts: first one replaces Claude Code's default identity
+	// (--system-prompt), rest are appended (--append-system-prompt).
+	for i, sp := range params.SystemPrompts {
+		if i == 0 {
+			args = append(args, "--system-prompt", sp)
+		} else {
+			args = append(args, "--append-system-prompt", sp)
+		}
 	}
 
 	dataDir := params.DataDir
@@ -139,6 +143,30 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	log.Printf("provider: invoke starting (resume=%q, model=%s, max_turns=%d, effort=%s, sys_prompts=%d, tools=%v, write=%v, env_count=%d)",
 		params.ResumeID, model, params.MaxTurns, params.Effort, len(params.SystemPrompts), params.Tools, params.WriteCapable, len(cmd.Env))
 	log.Printf("provider: args=%v", debugArgs)
+	// Log environment for debugging (redact values for safety).
+	for _, e := range cmd.Env {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			v := strings.TrimPrefix(e, k+"=")
+			if len(v) > 80 {
+				v = v[:80] + "..."
+			}
+			log.Printf("provider: env %s=%s", k, v)
+		}
+	}
+
+	// Preflight: verify claude binary is reachable and responsive with this env.
+	preCmd := exec.CommandContext(cmdCtx, "claude", "--version")
+	preCmd.Dir = dataDir
+	preCmd.Env = cmd.Env
+	if p.Credential != nil {
+		preCmd.SysProcAttr = &syscall.SysProcAttr{Credential: p.Credential}
+	}
+	if preOut, preErr := preCmd.CombinedOutput(); preErr != nil {
+		log.Printf("provider: preflight FAILED: %v — output: %s", preErr, truncStderr(string(preOut), 500))
+		return nil, fmt.Errorf("claude preflight check failed: %w — %s", preErr, truncStderr(string(preOut), 300))
+	} else {
+		log.Printf("provider: preflight OK: %s", strings.TrimSpace(string(preOut)))
+	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -198,10 +226,39 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	firstTimer := time.NewTimer(firstEventTimeout)
 	defer firstTimer.Stop()
 
+	// Periodic heartbeat: log every 10s while waiting for the first event.
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+
 	waitFirstEvent := true
 	for {
 		if waitFirstEvent {
 			select {
+			case <-heartbeat.C:
+				// Check if process is still alive via /proc (Linux).
+				procStatus := "unknown"
+				if statusBytes, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", cmd.Process.Pid)); err == nil {
+					for _, line := range strings.Split(string(statusBytes), "\n") {
+						if strings.HasPrefix(line, "State:") {
+							procStatus = strings.TrimSpace(strings.TrimPrefix(line, "State:"))
+							break
+						}
+					}
+				}
+				// Check open fds for /dev/tty or /dev/pts (would indicate interactive prompt).
+				fds := ""
+				if entries, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", cmd.Process.Pid)); err == nil {
+					for _, e := range entries {
+						if target, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%s", cmd.Process.Pid, e.Name())); err == nil {
+							if strings.Contains(target, "tty") || strings.Contains(target, "pts") {
+								fds += " " + e.Name() + "→" + target
+							}
+						}
+					}
+				}
+				log.Printf("provider: waiting for first event... %dms elapsed, pid=%d state=%s stderr=%d tty_fds=[%s]",
+					time.Since(invokeStart).Milliseconds(), cmd.Process.Pid, procStatus, stderr.Len(), strings.TrimSpace(fds))
+				continue
 			case line, ok := <-lineCh:
 				if !ok {
 					goto done
@@ -397,9 +454,11 @@ var safeEnvPrefixes = []string{
 	"LANG=",
 	"LC_",
 	"TZ=",
-	"HTTP_PROXY=",
-	"HTTPS_PROXY=",
-	"NO_PROXY=",
+	// Note: HTTP_PROXY/HTTPS_PROXY deliberately excluded. The firewall proxy
+	// at 127.0.0.1:4751 causes Claude CLI to hang — its HTTPS CONNECT handling
+	// is incompatible with Claude's OAuth/API flows. Claude Code's own tool
+	// invocations (web fetches, etc.) will still respect the proxy if needed,
+	// but the CLI subprocess itself must connect directly.
 	"TMPDIR=",
 	"XDG_",
 	"OMP_NUM_THREADS=",

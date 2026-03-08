@@ -123,7 +123,7 @@ body {
 /* Terminal */
 .terminal-view {
   display: flex; flex-direction: column; flex: 1;
-  padding: 0; overflow: hidden;
+  padding: 12px; overflow: hidden;
   min-width: 0; /* prevent flex overflow */
 }
 .terminal-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -502,11 +502,32 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .chat-step-label { opacity: 0.85; }
 .chat-step.thinking .chat-step-label { color: #a78bfa; }
 .chat-step.tool_use .chat-step-label { color: #60a5fa; }
+.chat-step.agent_start .chat-step-label { color: #34d399; font-weight: 600; }
+.chat-step.agent_done .chat-step-label { color: #6ee7b7; }
+.chat-step.agent_thinking .chat-step-label { color: #a78bfa; opacity: 0.7; padding-left: 12px; }
+.chat-step.agent_tool .chat-step-label { color: #60a5fa; opacity: 0.7; padding-left: 12px; }
+.chat-step.task_started .chat-step-label { color: #f59e0b; font-weight: 600; font-family: 'SF Mono', 'Fira Code', monospace; }
+.chat-step.planning .chat-step-label { color: #fbbf24; }
+.chat-step.synthesizing .chat-step-label { color: #f472b6; }
 .chat-thinking-text {
   font-size: 0.72rem; color: var(--text-dim); opacity: 0.7;
   padding: 2px 0 2px 24px; white-space: pre-wrap; word-break: break-word;
   max-height: 200px; overflow-y: auto; line-height: 1.4;
 }
+.chat-tool-detail {
+  font-size: 0.68rem; color: var(--text-dim); opacity: 0.6;
+  padding: 2px 0 0 24px; white-space: pre-wrap; word-break: break-all;
+  max-height: 80px; overflow-y: auto; line-height: 1.3;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.chat-tool-detail:empty { display: none; }
+.chat-tool-result {
+  font-size: 0.68rem; color: #6ee7b7; opacity: 0.5;
+  padding: 1px 0 2px 24px; white-space: pre-wrap; word-break: break-word;
+  max-height: 60px; overflow-y: auto; line-height: 1.3;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.chat-tool-result:empty { display: none; }
 .chat-bubble-reaction {
   display: inline-block; font-size: 1.1rem; margin-top: 2px;
 }
@@ -751,14 +772,28 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   color: var(--text-dim); font-weight: 600; padding: 10px 0 6px;
 }
 .task-step {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 8px 0; border-bottom: 1px solid var(--border);
+  padding: 0; border-bottom: 1px solid var(--border);
   font-size: 0.82rem;
 }
 .task-step:last-child { border-bottom: none; }
-.task-step-icon { flex-shrink: 0; width: 1.2em; margin-top: 1px; }
+.task-step-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; cursor: pointer;
+}
+.task-step-icon { flex-shrink: 0; width: 1.2em; }
 .task-step.completed .task-step-icon { color: var(--green); }
 .task-step.failed .task-step-icon { color: var(--red); }
+.task-step.working .task-step-icon { color: var(--blue); animation: pulse-icon 1.5s ease-in-out infinite; }
+@keyframes pulse-icon { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.task-step-badge {
+  font-size: 0.65rem; padding: 1px 6px; border-radius: 8px;
+  text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;
+}
+.task-step-badge.working { background: rgba(59,130,246,0.15); color: var(--blue); }
+.task-step-task {
+  font-size: 0.72rem; color: var(--text-dim); padding: 2px 0 4px 24px;
+  line-height: 1.4; opacity: 0.7;
+}
 .task-step-agent {
   font-weight: 600; min-width: 80px; color: var(--text);
   font-size: 0.82rem;
@@ -767,11 +802,18 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   color: var(--text-dim); font-size: 0.75rem; min-width: 60px;
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
-.task-step-result {
-  width: 100%; margin-top: 4px; font-size: 0.78rem; color: var(--text-dim);
-  word-break: break-word; line-height: 1.5;
-  background: var(--bg-input); border-radius: 4px; padding: 6px 8px;
+.task-step-toggle {
+  color: var(--text-dim); transition: transform 0.2s; margin-left: auto; flex-shrink: 0;
 }
+.task-step-toggle i, .task-step-toggle .lucide { width: 14px; height: 14px; }
+.task-step.step-expanded .task-step-toggle { transform: rotate(90deg); }
+.task-step-result {
+  display: none;
+  margin: 0 0 8px; font-size: 0.78rem; color: var(--text-dim);
+  word-break: break-word; line-height: 1.5;
+  background: var(--bg-input); border-radius: 4px; padding: 8px 10px;
+}
+.task-step.step-expanded .task-step-result { display: block; }
 .task-section {
   padding: 0 16px 12px; display: none;
   border-top: 1px solid var(--border);
@@ -784,9 +826,32 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .task-section-body {
   font-size: 0.82rem; color: var(--text); line-height: 1.6;
   background: var(--bg-input); border-radius: 6px; padding: 10px 12px;
-  word-break: break-word; white-space: pre-wrap; max-height: 300px;
+  word-break: break-word; white-space: pre-wrap; max-height: 400px;
   overflow-y: auto;
 }
+.task-section-body.task-md { white-space: normal; }
+.task-section-body.task-md p { margin: 0 0 8px; }
+.task-section-body.task-md p:last-child { margin: 0; }
+.task-section-body.task-md pre {
+  background: var(--bg); border-radius: 4px; padding: 8px 10px;
+  overflow-x: auto; margin: 6px 0; font-size: 0.78rem;
+}
+.task-section-body.task-md code {
+  background: var(--bg); padding: 1px 4px; border-radius: 3px; font-size: 0.78rem;
+}
+.task-section-body.task-md pre code { background: none; padding: 0; }
+.task-section-body.task-md strong { color: var(--text); }
+
+.task-step-result p { margin: 0 0 6px; }
+.task-step-result p:last-child { margin: 0; }
+.task-step-result pre {
+  background: var(--bg); border-radius: 4px; padding: 6px 8px;
+  overflow-x: auto; margin: 4px 0; font-size: 0.75rem;
+}
+.task-step-result code {
+  background: var(--bg); padding: 1px 3px; border-radius: 3px; font-size: 0.75rem;
+}
+.task-step-result pre code { background: none; padding: 0; }
 
 .task-chevron {
   color: var(--text-dim); transition: transform 0.2s; flex-shrink: 0;
@@ -1201,7 +1266,7 @@ body:not(.light) .jv-bool { color: #ffab70; }
   .card { padding: 14px; margin-bottom: 12px; }
   .card h2 { font-size: 0.8rem; margin-bottom: 8px; }
 
-  .terminal-view { padding: 0; }
+  .terminal-view { padding: 6px; }
   #terminalContainer { padding: 0; }
   .terminal-toolbar { margin-bottom: 4px; }
 

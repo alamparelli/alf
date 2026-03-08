@@ -39,6 +39,8 @@ type OrchestratorOutput struct {
 // AgentResult holds the outcome of a single sub-agent invocation.
 type AgentResult struct {
 	Agent    string        `json:"agent"`
+	Task     string        `json:"task,omitempty"`
+	Status   string        `json:"status"` // "working", "completed", "failed"
 	Text     string        `json:"text,omitempty"`
 	Error    string        `json:"error,omitempty"`
 	CostUSD  float64       `json:"cost_usd"`

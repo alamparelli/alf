@@ -177,7 +177,11 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		sentThinking bool
 		eventCount   int
 		firstEvent   bool
+		curToolName  string
+		curToolID    string
+		curToolInput strings.Builder
 	)
+	_ = curToolID // used in progress callback
 
 	// Use a channel to detect first-event timeout.
 	lineCh := make(chan []byte, 64)
@@ -264,31 +268,93 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		var event struct {
 			Type  string `json:"type"`
 			Event struct {
+				Type  string `json:"type"`
 				Delta struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
+					Type        string `json:"type"`
+					Text        string `json:"text"`
+					Thinking    string `json:"thinking"`
+					PartialJSON string `json:"partial_json"`
 				} `json:"delta"`
 				ContentBlock struct {
 					Type string `json:"type"`
 					Name string `json:"name"`
+					ID   string `json:"id"`
 				} `json:"content_block"`
+				// tool_result fields
+				Content   json.RawMessage `json:"content"`
+				ToolUseID string          `json:"tool_use_id"`
 			} `json:"event"`
 		}
 		if json.Unmarshal(lastEvent, &event) != nil {
 			continue
 		}
 
+		// Unwrap stream_event envelope.
+		evtType := ""
+		if event.Type == "stream_event" {
+			evtType = event.Event.Type
+		}
+
 		if onProgress != nil {
 			switch {
-			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "thinking" && !sentThinking:
+			// content_block_start: thinking
+			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "thinking" && !sentThinking:
 				onProgress(StreamEvent{Type: "thinking"})
 				sentThinking = true
-			case event.Type == "stream_event" && event.Event.Delta.Type == "thinking_delta":
-				onProgress(StreamEvent{Type: "thinking", Text: event.Event.Delta.Text})
-			case event.Type == "stream_event" && event.Event.ContentBlock.Type == "tool_use":
+			// content_block_start: tool_use
+			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "tool_use":
+				curToolName = event.Event.ContentBlock.Name
+				curToolID = event.Event.ContentBlock.ID
+				curToolInput.Reset()
 				onProgress(StreamEvent{Type: "tool_use", Detail: event.Event.ContentBlock.Name})
-			case event.Type == "stream_event" && event.Event.Delta.Type == "text_delta":
+			// content_block_delta: thinking
+			case evtType == "content_block_delta" && event.Event.Delta.Type == "thinking_delta":
+				text := event.Event.Delta.Text
+				if text == "" {
+					text = event.Event.Delta.Thinking
+				}
+				if text != "" {
+					onProgress(StreamEvent{Type: "thinking", Text: text})
+				}
+			// content_block_delta: tool input
+			case evtType == "content_block_delta" && event.Event.Delta.Type == "input_json_delta":
+				chunk := event.Event.Delta.PartialJSON
+				if chunk != "" {
+					curToolInput.WriteString(chunk)
+					onProgress(StreamEvent{Type: "tool_input", Detail: curToolName, Text: chunk})
+				}
+			// content_block_delta: text
+			case evtType == "content_block_delta" && event.Event.Delta.Type == "text_delta":
 				onProgress(StreamEvent{Type: "text_delta", Text: event.Event.Delta.Text})
+			// content_block_stop
+			case evtType == "content_block_stop":
+				// no-op, frontend tracks via block_start events
+			// tool_result (separate event type, not wrapped in content_block)
+			case evtType == "tool_result" || (event.Type == "stream_event" && event.Event.ToolUseID != ""):
+				resultStr := ""
+				if event.Event.Content != nil {
+					// Content can be string or array of blocks
+					var s string
+					if json.Unmarshal(event.Event.Content, &s) == nil {
+						resultStr = s
+					} else {
+						var blocks []struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+						}
+						if json.Unmarshal(event.Event.Content, &blocks) == nil {
+							for _, b := range blocks {
+								if b.Type == "text" {
+									resultStr += b.Text
+								}
+							}
+						}
+					}
+				}
+				if len(resultStr) > 500 {
+					resultStr = resultStr[:500] + "…"
+				}
+				onProgress(StreamEvent{Type: "tool_result", Detail: event.Event.ToolUseID, Text: resultStr})
 			}
 		}
 

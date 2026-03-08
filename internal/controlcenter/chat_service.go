@@ -319,10 +319,22 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 		onProgress := func(phase, detail string) {
 			switch phase {
+			case "task_started":
+				onEvent(ChatEvent{Type: "task_started", Data: map[string]string{"task_id": detail}})
 			case "thinking":
 				onEvent(ChatEvent{Type: "thinking", Data: map[string]string{}})
+			case "planning":
+				onEvent(ChatEvent{Type: "planning", Data: map[string]string{"detail": detail}})
 			case "agent":
-				onEvent(ChatEvent{Type: "tool_use", Data: map[string]string{"name": "agent:" + detail}})
+				onEvent(ChatEvent{Type: "agent_start", Data: map[string]string{"name": detail}})
+			case "agent_thinking":
+				onEvent(ChatEvent{Type: "agent_thinking", Data: map[string]string{"name": detail}})
+			case "agent_tool":
+				onEvent(ChatEvent{Type: "agent_tool", Data: map[string]string{"detail": detail}})
+			case "agent_done":
+				onEvent(ChatEvent{Type: "agent_done", Data: map[string]string{"detail": detail}})
+			case "synthesizing":
+				onEvent(ChatEvent{Type: "synthesizing", Data: map[string]string{}})
 			}
 		}
 
@@ -437,6 +449,10 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			}
 		case "tool_use":
 			onEvent(ChatEvent{Type: "tool_use", Data: map[string]string{"name": event.Detail}})
+		case "tool_input":
+			onEvent(ChatEvent{Type: "tool_input", Data: map[string]string{"name": event.Detail, "chunk": event.Text}})
+		case "tool_result":
+			onEvent(ChatEvent{Type: "tool_result", Data: map[string]string{"tool_id": event.Detail, "result": event.Text}})
 		case "text_delta":
 			onEvent(ChatEvent{Type: "text_delta", Data: map[string]string{"text": event.Text}})
 		}

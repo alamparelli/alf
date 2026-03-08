@@ -39,6 +39,7 @@ services:
       - "traefik.http.routers.alf.entrypoints=websecure"
       - "traefik.http.routers.alf.tls.certresolver=letsencrypt"
       - "traefik.http.services.alf.loadbalancer.server.port=8080"
+      - "traefik.http.services.alf.loadbalancer.responseforwarding.flushinterval=-1"
 {{- else}}
     ports:
       - "0.0.0.0:{{.CCPort}}:8080"

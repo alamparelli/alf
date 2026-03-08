@@ -24,28 +24,12 @@ function toast(msg, type = 'success') {
 }
 
 // --- Theme toggle ---
-const themeBtn = document.getElementById('themeToggle');
-let dark = localStorage.getItem('alf-theme') !== 'light';
-document.body.classList.toggle('light', !dark);
-themeBtn.textContent = dark ? 'Light' : 'Dark';
-themeBtn.onclick = () => {
-  dark = !dark;
-  document.body.classList.toggle('light', !dark);
-  themeBtn.textContent = dark ? 'Light' : 'Dark';
-  localStorage.setItem('alf-theme', dark ? 'dark' : 'light');
-  syncIframeTheme();
-};
-
+// Inject theme.css into iframe when it loads an app page.
 function syncIframeTheme() {
   const frame = document.getElementById('pageFrame');
   try {
     const doc = frame.contentDocument;
     if (!doc || !doc.documentElement) return;
-
-    // Toggle light class on the iframe's html element.
-    doc.documentElement.classList.toggle('light', !dark);
-
-    // Inject theme.css if not already present.
     if (!doc.getElementById('alf-theme')) {
       const link = doc.createElement('link');
       link.id = 'alf-theme';
@@ -55,8 +39,6 @@ function syncIframeTheme() {
     }
   } catch (_) { /* cross-origin or not loaded */ }
 }
-
-// Sync theme when iframe loads a new page.
 document.getElementById('pageFrame').addEventListener('load', syncIframeTheme);
 
 // --- Sidebar navigation ---
@@ -1235,88 +1217,108 @@ async function chatStreamFromJob(jobId, offset) {
 
 const QUICK_REACTIONS = ['👍', '❤', '🔥', '😁', '🤔', '👎'];
 
-// Collapsible steps group for thinking + tool_use events.
-let chatStepsGroup = null;
-let chatStepsBody = null;
-let chatStepsCount = 0;
-let chatThinkingTextEl = null;
-let chatCurrentToolEl = null;
-let chatCurrentToolInput = '';
+// Legacy state vars removed — see chatThinkingEl, chatCurrentToolBlock, chatAgentTracker below.
 
-function chatGetOrCreateStepsGroup() {
-  if (chatStepsGroup) return chatStepsGroup;
-  chatStepsGroup = document.createElement('div');
-  chatStepsGroup.className = 'chat-steps-group';
-  const toggle = document.createElement('button');
-  toggle.className = 'chat-steps-toggle';
-  toggle.innerHTML = '<span class="chevron">&#9654;</span> <span class="steps-summary">Thinking...</span>';
-  toggle.addEventListener('click', () => {
-    chatStepsGroup.classList.toggle('open');
-  });
-  chatStepsBody = document.createElement('div');
-  chatStepsBody.className = 'chat-steps-body';
-  chatStepsGroup.appendChild(toggle);
-  chatStepsGroup.appendChild(chatStepsBody);
-  chatStepsGroup.classList.add('open'); // auto-expand so thinking/tools are visible
-  chatMessages.appendChild(chatStepsGroup);
-  chatStepsCount = 0;
-  return chatStepsGroup;
-}
+// --- Thinking blocks (legacy-style <details> disclosures) ---
 
-function chatUpdateStepsSummary() {
-  if (!chatStepsGroup) return;
-  const summary = chatStepsGroup.querySelector('.steps-summary');
-  if (summary) {
-    const parts = [];
-    const thinkingSteps = chatStepsBody.querySelectorAll('.chat-step.thinking').length;
-    const toolSteps = chatStepsBody.querySelectorAll('.chat-step.tool_use').length;
-    const agentSteps = chatStepsBody.querySelectorAll('.chat-step.agent_start').length;
-    const agentDone = chatStepsBody.querySelectorAll('.chat-step.agent_done').length;
-    if (thinkingSteps > 0) parts.push('Thinking');
-    if (toolSteps > 0) parts.push(toolSteps + ' tool' + (toolSteps > 1 ? 's' : ''));
-    if (agentSteps > 0) {
-      const running = agentSteps - agentDone;
-      if (running > 0) parts.push(running + ' agent' + (running > 1 ? 's' : '') + ' running');
-      if (agentDone > 0) parts.push(agentDone + ' agent' + (agentDone > 1 ? 's' : '') + ' done');
-    }
-    summary.textContent = parts.join(' · ') || 'Processing...';
-  }
-}
-
-function chatAppendStep(type, label) {
-  chatGetOrCreateStepsGroup();
-  const el = document.createElement('div');
-  el.className = 'chat-step ' + type;
-  const icons = {
-    thinking: '🧠', tool_use: '⚙️', task_started: '📌', agent_start: '🤖',
-    agent_done: '✅', agent_thinking: '🧠', agent_tool: '🔧',
-    planning: '📋', synthesizing: '🔄'
-  };
-  const icon = icons[type] || '▸';
-  el.innerHTML = '<span class="chat-step-icon">' + icon + '</span> <span class="chat-step-label">' + esc(label) + '</span>';
-  if (type === 'tool_use') {
-    const detailEl = document.createElement('div');
-    detailEl.className = 'chat-tool-detail';
-    el.appendChild(detailEl);
-    chatCurrentToolEl = el;
-    chatCurrentToolInput = '';
-  }
-  chatStepsBody.appendChild(el);
-  chatStepsCount++;
-  chatUpdateStepsSummary();
+function chatNewThinkingBlock() {
+  const det = document.createElement('details');
+  det.className = 'chat-thinking-block';
+  det.open = true;
+  const summary = document.createElement('summary');
+  summary.className = 'chat-thinking-summary';
+  summary.textContent = '🧠 Thinking...';
+  const content = document.createElement('div');
+  content.className = 'chat-thinking-content';
+  det.appendChild(summary);
+  det.appendChild(content);
+  chatMessages.appendChild(det);
+  chatThinkingEl = { det: det, summary: summary, content: content, text: '' };
   chatScrollBottom();
+  return chatThinkingEl;
 }
 
 function chatAppendThinkingText(text) {
-  if (!chatStepsGroup) chatGetOrCreateStepsGroup();
-  if (!chatThinkingTextEl) {
-    chatThinkingTextEl = document.createElement('div');
-    chatThinkingTextEl.className = 'chat-thinking-text';
-    chatStepsBody.appendChild(chatThinkingTextEl);
+  if (!chatThinkingEl) chatNewThinkingBlock();
+  chatThinkingEl.text += text;
+  chatThinkingEl.content.textContent = chatThinkingEl.text;
+  var preview = chatThinkingEl.text.slice(0, 100).replace(/\n/g, ' ');
+  chatThinkingEl.summary.textContent = '🧠 ' + preview + (chatThinkingEl.text.length > 100 ? '…' : '');
+  chatThinkingEl.content.scrollTop = chatThinkingEl.content.scrollHeight;
+  chatScrollBottom();
+}
+
+// --- Tool blocks (inline bubbles with name + input + result) ---
+
+function chatNewToolBlock(name) {
+  // Close previous thinking block when a tool starts
+  if (chatThinkingEl && chatThinkingEl.det.open) {
+    chatThinkingEl.det.open = false;
   }
-  chatThinkingTextEl.textContent += text;
-  // Auto-scroll the thinking text container.
-  chatThinkingTextEl.scrollTop = chatThinkingTextEl.scrollHeight;
+  var el = document.createElement('div');
+  el.className = 'chat-tool-block';
+  el.innerHTML = '<div class="chat-tool-header"><span class="chat-tool-icon">⚙️</span> <strong>' + esc(name) + '</strong></div>';
+  var inputEl = document.createElement('div');
+  inputEl.className = 'chat-tool-input';
+  el.appendChild(inputEl);
+  var resultEl = document.createElement('div');
+  resultEl.className = 'chat-tool-result-inline';
+  el.appendChild(resultEl);
+  chatMessages.appendChild(el);
+  chatCurrentToolBlock = el;
+  chatCurrentToolInput = '';
+  chatScrollBottom();
+  return el;
+}
+
+// --- Agent tracker (compact group for orchestrator phase events) ---
+
+function chatGetOrCreateAgentTracker() {
+  if (chatAgentTracker) return chatAgentTracker;
+  chatAgentTracker = document.createElement('div');
+  chatAgentTracker.className = 'chat-agent-tracker';
+  var toggle = document.createElement('button');
+  toggle.className = 'chat-agent-toggle';
+  toggle.innerHTML = '<span class="chevron">&#9654;</span> <span class="agent-summary">Agent working...</span>';
+  toggle.addEventListener('click', function() {
+    chatAgentTracker.classList.toggle('open');
+  });
+  chatAgentTrackerBody = document.createElement('div');
+  chatAgentTrackerBody.className = 'chat-agent-body';
+  chatAgentTracker.appendChild(toggle);
+  chatAgentTracker.appendChild(chatAgentTrackerBody);
+  chatAgentTracker.classList.add('open');
+  chatMessages.appendChild(chatAgentTracker);
+  chatAgentStepCount = 0;
+  return chatAgentTracker;
+}
+
+function chatAppendAgentStep(type, label) {
+  chatGetOrCreateAgentTracker();
+  var el = document.createElement('div');
+  el.className = 'chat-step ' + type;
+  var icons = {
+    task_started: '📌', agent_start: '🤖', agent_done: '✅',
+    agent_thinking: '🧠', agent_tool: '🔧', planning: '📋', synthesizing: '🔄'
+  };
+  var icon = icons[type] || '▸';
+  el.innerHTML = '<span class="chat-step-icon">' + icon + '</span> <span class="chat-step-label">' + esc(label) + '</span>';
+  chatAgentTrackerBody.appendChild(el);
+  chatAgentStepCount++;
+  chatScrollBottom();
+}
+
+function chatUpdateAgentSummary() {
+  if (!chatAgentTracker) return;
+  var summary = chatAgentTracker.querySelector('.agent-summary');
+  if (!summary) return;
+  var starts = chatAgentTrackerBody.querySelectorAll('.chat-step.agent_start').length;
+  var dones = chatAgentTrackerBody.querySelectorAll('.chat-step.agent_done').length;
+  var running = starts - dones;
+  var parts = [];
+  if (running > 0) parts.push(running + ' agent' + (running > 1 ? 's' : '') + ' running');
+  if (dones > 0) parts.push(dones + ' done');
+  summary.textContent = parts.join(' · ') || 'Agent working...';
 }
 
 // Update bubble text content without clobbering meta/reactions elements.
@@ -1473,18 +1475,29 @@ let chatFullText = '';
 let chatDoneData = null;
 let chatReaction = null;
 let chatStreamingText = false; // true once we start receiving text_delta
+let chatThinkingEl = null;        // { det, summary, content, text } current thinking block
+let chatCurrentToolBlock = null;  // current tool block div
+let chatCurrentToolInput = '';    // accumulated tool input JSON
+let chatAgentTracker = null;      // agent events container
+let chatAgentTrackerBody = null;
+let chatAgentStepCount = 0;
 
 // Process an SSE stream response (shared by send and reconnect).
 async function chatProcessStream(res) {
+  console.log('[chat-stream] status:', res.status, 'content-type:', res.headers.get('content-type'));
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let chunkCount = 0;
 
   while (true) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done) { console.log('[chat-stream] stream done, total chunks:', chunkCount); break; }
 
-    buffer += decoder.decode(value, { stream: true });
+    chunkCount++;
+    const chunk = decoder.decode(value, { stream: true });
+    console.log('[chat-stream] chunk #' + chunkCount, 'size:', chunk.length, 'preview:', chunk.slice(0, 120));
+    buffer += chunk;
     const parts = buffer.split('\n\n');
     buffer = parts.pop();
 
@@ -1501,6 +1514,7 @@ async function chatProcessStream(res) {
       let data;
       try { data = JSON.parse(eventData); } catch { continue; }
 
+      console.log('[chat-stream] event:', eventType, data);
       chatEventOffset++;
 
       switch (eventType) {
@@ -1512,85 +1526,88 @@ async function chatProcessStream(res) {
           if (data.text) {
             chatAppendThinkingText(data.text);
           } else {
-            chatAppendStep('thinking', 'Thinking...');
+            chatNewThinkingBlock();
             chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
           }
           break;
         case 'task_started':
-          chatAppendStep('task_started', 'Task ' + (data.task_id || ''));
+          chatAppendAgentStep('task_started', 'Task ' + (data.task_id || ''));
           chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Agent task started...');
           break;
         case 'tool_use':
-          chatAppendStep('tool_use', data.name || 'tool');
+          chatNewToolBlock(data.name || 'tool');
           chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Using ' + esc(data.name || 'tool') + '...');
           break;
         case 'tool_input':
-          if (chatCurrentToolEl) {
+          if (chatCurrentToolBlock) {
             chatCurrentToolInput += (data.chunk || '');
-            const detailEl = chatCurrentToolEl.querySelector('.chat-tool-detail');
-            if (detailEl) {
-              let display = chatCurrentToolInput;
+            var inputEl = chatCurrentToolBlock.querySelector('.chat-tool-input');
+            if (inputEl) {
+              var display = chatCurrentToolInput;
               try {
-                const parsed = JSON.parse(chatCurrentToolInput);
+                var parsed = JSON.parse(chatCurrentToolInput);
                 display = Object.entries(parsed).map(function(e) {
-                  const vs = typeof e[1] === 'string' ? e[1] : JSON.stringify(e[1]);
+                  var vs = typeof e[1] === 'string' ? e[1] : JSON.stringify(e[1]);
                   return e[0] + ': ' + (vs.length > 120 ? vs.slice(0, 120) + '\u2026' : vs);
                 }).join('\n');
               } catch(ex) { /* still accumulating JSON */ }
-              detailEl.textContent = display;
+              inputEl.textContent = display;
             }
           }
           break;
         case 'tool_result':
-          if (chatCurrentToolEl) {
-            var resEl = document.createElement('div');
-            resEl.className = 'chat-tool-result';
-            resEl.textContent = data.result || '';
-            chatCurrentToolEl.appendChild(resEl);
-            chatCurrentToolEl = null;
+          if (chatCurrentToolBlock) {
+            var resultEl = chatCurrentToolBlock.querySelector('.chat-tool-result-inline');
+            if (resultEl) {
+              var resultText = data.result || '';
+              if (resultText.length > 300) resultText = resultText.slice(0, 300) + '…';
+              resultEl.textContent = resultText;
+            }
+            chatCurrentToolBlock = null;
             chatCurrentToolInput = '';
           }
           break;
         case 'planning':
-          chatAppendStep('planning', data.detail || 'Planning...');
+          chatAppendAgentStep('planning', data.detail || 'Planning...');
           chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Planning...');
           break;
         case 'agent_start':
-          chatAppendStep('agent_start', 'Agent: ' + (data.name || '?'));
+          chatAppendAgentStep('agent_start', 'Agent: ' + (data.name || '?'));
           chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Agent ' + esc(data.name || '') + ' running...');
           break;
         case 'agent_thinking':
-          chatAppendStep('agent_thinking', (data.name || 'Agent') + ' thinking...');
+          chatAppendAgentStep('agent_thinking', (data.name || 'Agent') + ' thinking...');
           break;
         case 'agent_tool': {
-          const parts = (data.detail || '').split(':');
-          const agentName = parts[0] || 'Agent';
-          const toolName = parts.slice(1).join(':') || 'tool';
-          chatAppendStep('agent_tool', agentName + ' → ' + toolName);
+          var agParts = (data.detail || '').split(':');
+          var agentName = agParts[0] || 'Agent';
+          var toolName = agParts.slice(1).join(':') || 'tool';
+          chatAppendAgentStep('agent_tool', agentName + ' → ' + toolName);
           chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> ' + esc(agentName) + ' using ' + esc(toolName) + '...');
           break;
         }
         case 'agent_done':
-          chatAppendStep('agent_done', data.detail || 'Agent done');
-          chatUpdateStepsSummary();
+          chatAppendAgentStep('agent_done', data.detail || 'Agent done');
+          chatUpdateAgentSummary();
           break;
         case 'synthesizing':
-          chatAppendStep('synthesizing', 'Synthesizing results...');
+          chatAppendAgentStep('synthesizing', 'Synthesizing results...');
           chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Synthesizing...');
           break;
         case 'text_delta':
           if (!chatStreamingText) {
             chatStreamingText = true;
             chatClearStatus();
-            // Collapse steps group now that text is arriving.
-            if (chatStepsGroup) chatStepsGroup.classList.remove('open');
+            // Collapse thinking block when text starts arriving.
+            if (chatThinkingEl && chatThinkingEl.det.open) chatThinkingEl.det.open = false;
+            // Collapse agent tracker when text starts arriving.
+            if (chatAgentTracker) chatAgentTracker.classList.remove('open');
             chatAssistantBubble = document.createElement('div');
             chatAssistantBubble.className = 'chat-bubble assistant';
             chatAssistantBubble.innerHTML = '';
-            // Add meta element so finalizeBubble can populate time/tier/model.
-            const metaEl = document.createElement('div');
+            var metaEl = document.createElement('div');
             metaEl.className = 'chat-bubble-meta';
-            const reactionsEl = document.createElement('span');
+            var reactionsEl = document.createElement('span');
             reactionsEl.className = 'chat-reactions';
             metaEl.appendChild(reactionsEl);
             chatAssistantBubble.appendChild(metaEl);
@@ -1677,12 +1694,12 @@ function chatFinishSend() {
   chatReaction = null;
   chatJobId = null;
   chatStreamingText = false;
-  chatStepsGroup = null;
-  chatStepsBody = null;
-  chatStepsCount = 0;
-  chatThinkingTextEl = null;
-  chatCurrentToolEl = null;
+  chatThinkingEl = null;
+  chatCurrentToolBlock = null;
   chatCurrentToolInput = '';
+  chatAgentTracker = null;
+  chatAgentTrackerBody = null;
+  chatAgentStepCount = 0;
 }
 
 async function chatSend() {
@@ -1748,10 +1765,12 @@ async function chatSend() {
   chatJobId = null;
   chatEventOffset = 0;
   chatStreamingText = false;
-  chatStepsGroup = null;
-  chatStepsBody = null;
-  chatStepsCount = 0;
-  chatThinkingTextEl = null;
+  chatThinkingEl = null;
+  chatCurrentToolBlock = null;
+  chatCurrentToolInput = '';
+  chatAgentTracker = null;
+  chatAgentTrackerBody = null;
+  chatAgentStepCount = 0;
 
   chatAppendBubble('user', text, {});
   chatScrollBottom();
@@ -2537,35 +2556,61 @@ async function tasksFetch() {
 // Track which task cards and agent steps are expanded so refresh doesn't collapse them.
 let tasksExpandedSet = new Set();
 let tasksStepExpandedSet = new Set();
+// Track whether completed section is collapsed (default: collapsed).
+let tasksCompletedVisible = false;
 
 function tasksRender(running, completed) {
   const container = document.getElementById('tasksList');
 
   if (running.length === 0 && completed.length === 0) {
-    container.innerHTML = '<div class="task-empty"><div class="task-empty-icon">\u{1F916}</div>No agent tasks yet.<br><span style="font-size:0.8rem;opacity:0.7">Tasks appear here when you use the agent tier.</span></div>';
+    container.innerHTML = '<div class="task-empty"><i data-lucide="bot" style="width:40px;height:40px;opacity:0.3;margin-bottom:8px"></i><br>No agent tasks yet.<br><span style="font-size:0.8rem;opacity:0.7">Tasks appear here when you use the agent tier.</span></div>';
     return;
   }
 
   let html = '';
 
   if (running.length > 0) {
-    html += '<h3 class="tasks-section-title">\u{26A1} Running (' + running.length + ')</h3>';
+    html += '<h3 class="tasks-section-title"><i data-lucide="zap" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Running (' + running.length + ')</h3>';
     for (const task of running) {
       html += taskCard(task, true);
     }
   }
 
   if (completed.length > 0) {
-    html += '<h3 class="tasks-section-title">Recent</h3>';
+    const chevronDir = tasksCompletedVisible ? 'chevron-down' : 'chevron-right';
+    html += '<h3 class="tasks-section-title tasks-section-toggle" id="tasksCompletedToggle">' +
+      '<i data-lucide="' + chevronDir + '" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>' +
+      'Recent (' + completed.length + ')</h3>';
+    html += '<div class="tasks-completed-list" id="tasksCompletedList" style="display:' + (tasksCompletedVisible ? 'flex' : 'none') + '">';
     for (const task of completed) {
       html += taskCard(task, false);
     }
+    html += '</div>';
   }
 
   container.innerHTML = html;
 
+  // Bind completed section toggle.
+  const toggle = document.getElementById('tasksCompletedToggle');
+  if (toggle) {
+    toggle.onclick = () => {
+      tasksCompletedVisible = !tasksCompletedVisible;
+      const list = document.getElementById('tasksCompletedList');
+      list.style.display = tasksCompletedVisible ? 'flex' : 'none';
+      const icon = toggle.querySelector('.lucide, i[data-lucide]');
+      if (icon) {
+        icon.setAttribute('data-lucide', tasksCompletedVisible ? 'chevron-down' : 'chevron-right');
+        lucide.createIcons({ attrs: { class: ['lucide'] }, nameAttr: 'data-lucide' });
+      }
+    };
+  }
+
   container.querySelectorAll('.task-cancel-btn').forEach(btn => {
     btn.onclick = (e) => { e.stopPropagation(); tasksCancel(btn.dataset.id); };
+  });
+
+  container.querySelectorAll('.task-relaunch-btn').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); tasksRelaunch(btn.dataset.prompt); };
   });
 
   // Restore expanded state and bind click handlers.
@@ -2610,21 +2655,31 @@ function tasksRender(running, completed) {
   lucide.createIcons({ attrs: { class: ['lucide'] }, nameAttr: 'data-lucide' });
 }
 
+function taskRenderMd(text) {
+  if (!text) return '';
+  try {
+    return marked.parse(text, { breaks: true, gfm: true });
+  } catch (e) {
+    return chatRenderMd(text);
+  }
+}
+
 function taskCard(task, isRunning) {
   const elapsed = isRunning
     ? taskElapsed(task.started_at, null)
     : taskElapsed(task.started_at, task.completed_at);
-  const statusClass = isRunning ? 'running' : (task.status === 'completed' ? 'completed' : (task.status === 'timeout' ? 'timeout' : 'failed'));
+  const statusClass = isRunning ? 'running' : (task.status === 'completed' ? 'completed' : (task.status === 'timeout' ? 'timeout' : (task.status === 'interrupted' ? 'interrupted' : 'failed')));
   const statusLabel = isRunning ? 'running' : task.status;
   const cost = task.total_cost_usd ? '$' + task.total_cost_usd.toFixed(4) : '--';
   const promptPreview = taskEscapeHtml(task.prompt || 'No prompt').substring(0, 200);
   const agentCount = (task.agent_calls && task.agent_calls.length) || 0;
+  const shortId = task.id ? task.id.substring(0, 8) : '--';
 
   // Full request section.
-  const fullPrompt = task.prompt ? '<div class="task-section"><div class="task-section-title">Request</div><div class="task-section-body">' + taskEscapeHtml(task.prompt) + '</div></div>' : '';
+  const fullPrompt = task.prompt ? '<div class="task-section"><div class="task-section-title"><i data-lucide="message-square" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Request</div><div class="task-section-body">' + taskEscapeHtml(task.prompt) + '</div></div>' : '';
 
-  // Output section (rendered as markdown).
-  const output = task.response ? '<div class="task-section"><div class="task-section-title">Output</div><div class="task-section-body task-md">' + chatRenderMd(task.response) + '</div></div>' : '';
+  // Output section (rendered as markdown via marked).
+  const output = task.response ? '<div class="task-section"><div class="task-section-title"><i data-lucide="file-text" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Output</div><div class="task-section-body task-md">' + taskRenderMd(task.response) + '</div></div>' : '';
 
   // Agent calls section.
   let agentSteps = '';
@@ -2634,27 +2689,34 @@ function taskCard(task, isRunning) {
     const agentSummary = workingCount > 0
       ? agentCount + ' agents (' + workingCount + ' working, ' + doneCount + ' done)'
       : agentCount + ' agents';
-    agentSteps = '<div class="task-steps"><div class="task-steps-title">Agent calls \u2014 ' + agentSummary + '</div>';
+    agentSteps = '<div class="task-steps"><div class="task-steps-title"><i data-lucide="users" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Agent calls \u2014 ' + agentSummary + '</div>';
     task.agent_calls.forEach(function(call, idx) {
       const stepKey = task.id + ':' + idx;
-      const agentName = call.agent.split('/').pop();
+      const agentParts = call.agent.split('/');
+      const teamName = agentParts.length > 1 ? agentParts[0] : '';
+      const agentName = agentParts.pop();
       const isWorking = call.status === 'working';
       const callStatus = isWorking ? 'working' : (call.error ? 'failed' : 'completed');
-      const callIcon = isWorking ? '\u23f3' : (call.error ? '\u2717' : '\u2713');
       const callCost = call.cost_usd ? '$' + call.cost_usd.toFixed(4) : '';
-      const callTask = call.task ? '<div class="task-step-task">' + taskEscapeHtml(call.task).substring(0, 200) + '</div>' : '';
+      const callTask = call.task ? '<div class="task-step-task">' + taskEscapeHtml(call.task).substring(0, 300) + '</div>' : '';
       const callResult = isWorking ? ''
-        : (call.error ? taskEscapeHtml(call.error) : chatRenderMd(call.text || ''));
+        : (call.error ? '<pre class="task-step-error">' + taskEscapeHtml(call.error) + '</pre>' : taskRenderMd(call.text || ''));
+      // Meta badges: team, model.
+      let metaBadges = '';
+      if (teamName) metaBadges += '<span class="task-step-meta">' + taskEscapeHtml(teamName) + '</span>';
+      if (call.model) metaBadges += '<span class="task-step-meta">' + taskEscapeHtml(call.model) + '</span>';
+
       agentSteps += '<div class="task-step ' + callStatus + '" data-step-key="' + taskEscapeHtml(stepKey) + '">' +
         '<div class="task-step-header">' +
-          '<span class="task-step-icon">' + callIcon + '</span>' +
+          '<span class="task-step-icon"><i data-lucide="' + (isWorking ? 'loader' : (call.error ? 'x-circle' : 'check-circle')) + '"></i></span>' +
           '<span class="task-step-agent">' + taskEscapeHtml(agentName) + '</span>' +
-          (isWorking ? '<span class="task-step-badge working">working</span>' : '') +
+          metaBadges +
+          (isWorking ? '<span class="task-step-badge working"><i data-lucide="loader" style="width:10px;height:10px;vertical-align:middle;margin-right:2px"></i>working</span>' : '') +
           '<span class="task-step-cost">' + callCost + '</span>' +
           (callResult ? '<span class="task-step-toggle"><i data-lucide="chevron-right"></i></span>' : '') +
         '</div>' +
         callTask +
-        (callResult ? '<div class="task-step-result">' + callResult + '</div>' : '') +
+        (callResult ? '<div class="task-step-result task-md">' + callResult + '</div>' : '') +
         '</div>';
     });
     agentSteps += '</div>';
@@ -2662,23 +2724,27 @@ function taskCard(task, isRunning) {
 
   const statusDot = '<span class="dot ' + (isRunning ? 'blue' : statusClass === 'completed' ? 'green' : 'red') + '"></span>';
   const cancelBtn = isRunning
-    ? '<button class="btn-sm btn-danger task-cancel-btn" data-id="' + taskEscapeHtml(task.id) + '">Cancel</button>'
+    ? '<button class="btn-sm btn-danger task-cancel-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="square" style="width:12px;height:12px;vertical-align:middle;margin-right:2px"></i>Cancel</button>'
+    : '';
+  const relaunchBtn = !isRunning && task.prompt
+    ? '<button class="btn-sm task-relaunch-btn" data-prompt="' + taskEscapeHtml(task.prompt).replace(/"/g, '&quot;') + '"><i data-lucide="rotate-cw" style="width:12px;height:12px;vertical-align:middle;margin-right:2px"></i>Relaunch</button>'
     : '';
 
   return '<div class="task-card ' + statusClass + '" data-task-id="' + taskEscapeHtml(task.id) + '">' +
     '<div class="task-card-header">' +
-      '<div class="task-card-title">' + statusDot + '<strong>' + promptPreview + '</strong></div>' +
+      '<div class="task-card-title">' + statusDot + '<span class="task-id">#' + shortId + '</span><strong>' + promptPreview + '</strong></div>' +
       '<span class="task-status-badge ' + statusClass + '">' + statusLabel + '</span>' +
       '<div class="task-card-actions">' +
-        '<span class="task-chevron"><i data-lucide="chevron-right"></i></span>' +
+        relaunchBtn +
         cancelBtn +
+        '<span class="task-chevron"><i data-lucide="chevron-right"></i></span>' +
       '</div>' +
     '</div>' +
     '<div class="task-card-details">' +
-      '<div class="task-detail-row"><span class="task-detail-label">Elapsed</span><span class="task-detail-value">' + elapsed + '</span></div>' +
-      '<div class="task-detail-row"><span class="task-detail-label">Cost</span><span class="task-detail-value">' + cost + '</span></div>' +
-      '<div class="task-detail-row"><span class="task-detail-label">Iterations</span><span class="task-detail-value">' + (task.iterations || 0) + '</span></div>' +
-      (agentCount > 0 ? '<div class="task-detail-row"><span class="task-detail-label">Agents</span><span class="task-detail-value">' + agentCount + '</span></div>' : '') +
+      '<div class="task-detail-row"><span class="task-detail-label"><i data-lucide="clock" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Elapsed</span><span class="task-detail-value">' + elapsed + '</span></div>' +
+      '<div class="task-detail-row"><span class="task-detail-label"><i data-lucide="coins" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Cost</span><span class="task-detail-value">' + cost + '</span></div>' +
+      '<div class="task-detail-row"><span class="task-detail-label"><i data-lucide="repeat" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Iterations</span><span class="task-detail-value">' + (task.iterations || 0) + '</span></div>' +
+      (agentCount > 0 ? '<div class="task-detail-row"><span class="task-detail-label"><i data-lucide="users" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Agents</span><span class="task-detail-value">' + agentCount + '</span></div>' : '') +
     '</div>' +
     fullPrompt +
     output +
@@ -2705,6 +2771,24 @@ async function tasksCancel(id) {
     tasksFetch();
   } catch (e) {
     toast('Cancel failed: ' + e.message, 'error');
+  }
+}
+
+async function tasksRelaunch(prompt) {
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: prompt }),
+    });
+    if (res.ok) {
+      toast('Task relaunched');
+      setTimeout(() => tasksFetch(), 1000);
+    } else {
+      toast('Relaunch failed', 'error');
+    }
+  } catch (e) {
+    toast('Relaunch failed: ' + e.message, 'error');
   }
 }
 

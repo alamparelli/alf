@@ -174,7 +174,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	var (
 		resultText   strings.Builder
 		lastEvent    json.RawMessage
-		sentThinking bool
+		inThinking   bool
 		eventCount   int
 		firstEvent   bool
 		curToolName  string
@@ -297,12 +297,15 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 
 		if onProgress != nil {
 			switch {
-			// content_block_start: thinking
-			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "thinking" && !sentThinking:
-				onProgress(StreamEvent{Type: "thinking"})
-				sentThinking = true
+			// content_block_start: thinking — emit for each new thinking block
+			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "thinking":
+				if !inThinking {
+					onProgress(StreamEvent{Type: "thinking"})
+					inThinking = true
+				}
 			// content_block_start: tool_use
 			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "tool_use":
+				inThinking = false // end any open thinking block
 				curToolName = event.Event.ContentBlock.Name
 				curToolID = event.Event.ContentBlock.ID
 				curToolInput.Reset()
@@ -326,9 +329,14 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 			// content_block_delta: text
 			case evtType == "content_block_delta" && event.Event.Delta.Type == "text_delta":
 				onProgress(StreamEvent{Type: "text_delta", Text: event.Event.Delta.Text})
+			// content_block_start: text — reset thinking state
+			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "text":
+				inThinking = false
 			// content_block_stop
 			case evtType == "content_block_stop":
-				// no-op, frontend tracks via block_start events
+				if inThinking {
+					inThinking = false // allow new thinking block after tools
+				}
 			// tool_result (separate event type, not wrapped in content_block)
 			case evtType == "tool_result" || (event.Type == "stream_event" && event.Event.ToolUseID != ""):
 				resultStr := ""

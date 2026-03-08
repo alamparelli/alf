@@ -557,6 +557,7 @@ func (o *Orchestrator) invokeAgentWithKey(
 		}
 		return AgentResult{
 			Agent:    d.Agent,
+			Model:    model,
 			Error:    err.Error(),
 			Duration: dur,
 		}
@@ -575,6 +576,7 @@ func (o *Orchestrator) invokeAgentWithKey(
 
 	return AgentResult{
 		Agent:    d.Agent,
+		Model:    model,
 		Text:     result.Text,
 		CostUSD:  result.CostUSD,
 		Duration: dur,

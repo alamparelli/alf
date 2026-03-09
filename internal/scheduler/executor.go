@@ -134,7 +134,10 @@ func (e *Engine) executeJob(j *Job) {
 	var err error
 	var execResult *execResult
 
-	if j.Tier == "direct" {
+	if j.Message != "" {
+		// Reminder: push message directly, no LLM/command execution.
+		text = j.Message
+	} else if j.Tier == "direct" {
 		if j.Command != "" {
 			text, err = e.runCommand(j)
 		} else {
@@ -148,10 +151,14 @@ func (e *Engine) executeJob(j *Job) {
 	}
 
 	duration := time.Since(start)
+	tier := j.Tier
+	if j.Message != "" {
+		tier = "reminder"
+	}
 	rec := RunRecord{
 		JobID:      j.ID,
 		JobName:    j.Name,
-		Tier:       j.Tier,
+		Tier:       tier,
 		StartedAt:  start,
 		DurationMs: duration.Milliseconds(),
 	}
@@ -324,6 +331,22 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		NumTurns: result.NumTurns,
 	}
 	return result.Text, meta, nil
+}
+
+// SendDailyDigest generates and sends a schedule execution report for the last 24h.
+func (e *Engine) SendDailyDigest() error {
+	digest := e.runLog.DailyDigest(time.Now().Add(-24 * time.Hour))
+	if digest == "" {
+		log.Println("scheduler: daily digest — no runs in last 24h, skipping")
+		return nil
+	}
+	if e.cfg.TG != nil && e.cfg.ChatID != 0 {
+		if err := e.cfg.TG.SendMessage(e.cfg.ChatID, digest); err != nil {
+			return fmt.Errorf("send digest: %w", err)
+		}
+	}
+	log.Printf("scheduler: daily digest sent")
+	return nil
 }
 
 // dispatch routes job output to the configured destination.

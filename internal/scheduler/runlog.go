@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -179,6 +180,111 @@ func splitLines(data []byte) [][]byte {
 		lines = append(lines, data[start:])
 	}
 	return lines
+}
+
+// Since returns all records across all jobs started after the given time, newest first.
+func (rl *RunLog) Since(since time.Time) []RunRecord {
+	entries, err := os.ReadDir(rl.dir)
+	if err != nil {
+		return nil
+	}
+
+	var all []RunRecord
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+			continue
+		}
+		id := e.Name()[:len(e.Name())-6]
+		for _, r := range rl.Recent(id, 0) {
+			if r.StartedAt.After(since) {
+				all = append(all, r)
+			}
+		}
+	}
+
+	sortRecords(all)
+	return all
+}
+
+// DailyDigest generates a plain-text summary of job executions since the given time.
+func (rl *RunLog) DailyDigest(since time.Time) string {
+	records := rl.Since(since)
+	if len(records) == 0 {
+		return ""
+	}
+
+	// Aggregate per job.
+	type jobSummary struct {
+		name    string
+		ok      int
+		fail    int
+		skip    int
+		errors  []string
+		totalMs int64
+		cost    float64
+	}
+	byJob := make(map[string]*jobSummary)
+	order := []string{}
+	for _, r := range records {
+		s, exists := byJob[r.JobID]
+		if !exists {
+			s = &jobSummary{name: r.JobName}
+			byJob[r.JobID] = s
+			order = append(order, r.JobID)
+		}
+		s.totalMs += r.DurationMs
+		s.cost += r.CostUSD
+		switch r.Status {
+		case "ok":
+			s.ok++
+		case "error", "timeout":
+			s.fail++
+			if r.Error != "" {
+				errMsg := r.Error
+				if len(errMsg) > 120 {
+					errMsg = errMsg[:120] + "..."
+				}
+				s.errors = append(s.errors, errMsg)
+			}
+		case "skipped":
+			s.skip++
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Schedule Report (%d runs since %s)\n\n",
+		len(records), since.Format("15:04")))
+
+	totalOk, totalFail := 0, 0
+	for _, id := range order {
+		s := byJob[id]
+		totalOk += s.ok
+		totalFail += s.fail
+		status := "OK"
+		if s.fail > 0 {
+			status = fmt.Sprintf("FAIL %d/%d", s.fail, s.ok+s.fail+s.skip)
+		}
+		dur := time.Duration(s.totalMs) * time.Millisecond
+		line := fmt.Sprintf("- %s: %s", s.name, status)
+		if dur > time.Second {
+			line += fmt.Sprintf(" (%s)", dur.Round(time.Second))
+		}
+		if s.cost > 0 {
+			line += fmt.Sprintf(" $%.4f", s.cost)
+		}
+		sb.WriteString(line + "\n")
+		for _, e := range s.errors {
+			sb.WriteString(fmt.Sprintf("  err: %s\n", e))
+		}
+	}
+
+	if totalFail == 0 {
+		sb.WriteString(fmt.Sprintf("\nAll %d runs succeeded.", totalOk))
+	} else {
+		sb.WriteString(fmt.Sprintf("\n%d OK, %d failed.", totalOk, totalFail))
+	}
+
+	return sb.String()
 }
 
 // Truncate keeps only the last N records for a job (prevents unbounded growth).

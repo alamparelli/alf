@@ -292,6 +292,8 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	tierName = routeResult.Tier
 	tp := cs.resolveTierParams(tierName)
 
+	onEvent(ChatEvent{Type: "routed", Data: map[string]string{"tier": tierName, "model": tp.Model}})
+
 	cs.EventLog.Log("router_classify", map[string]any{
 		"tier":   tierName,
 		"reason": routeResult.Reason,

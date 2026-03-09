@@ -37,6 +37,10 @@ type Engine struct {
 	entries map[string]cron.EntryID
 
 	server *Server
+
+	// OnChange is called after any mutation (create/update/delete).
+	// Set by the daemon to push real-time updates to the CC.
+	OnChange func()
 }
 
 // New creates a scheduler engine.
@@ -177,6 +181,13 @@ func (e *Engine) Stop() {
 	log.Println("scheduler: stopped")
 }
 
+// notifyChange fires the OnChange callback if set.
+func (e *Engine) notifyChange() {
+	if e.OnChange != nil {
+		e.OnChange()
+	}
+}
+
 // validOutputs defines acceptable output values.
 var validOutputs = map[string]bool{
 	"telegram": true,
@@ -239,6 +250,44 @@ func (e *Engine) Create(name, schedule, tier, prompt, command, output string, ti
 	}
 
 	log.Printf("scheduler: created job %s (%s) schedule=%s tier=%s", j.ID, j.Name, j.Schedule, j.Tier)
+	e.notifyChange()
+	return j, nil
+}
+
+// CreateReminder adds a push-notification job (no LLM, no command — just a message).
+func (e *Engine) CreateReminder(name, schedule, message, output string, timeout time.Duration) (*Job, error) {
+	if output == "" {
+		output = "telegram"
+	}
+	if !validOutputs[output] {
+		return nil, fmt.Errorf("invalid output %q (must be telegram, file, both, or silent)", output)
+	}
+
+	j := &Job{
+		ID:        GenerateID(),
+		Name:      name,
+		Schedule:  schedule,
+		Message:   message,
+		Output:    output,
+		Timeout:   timeout,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+	}
+
+	if _, err := time.Parse(time.RFC3339, schedule); err == nil {
+		j.AutoDelete = true
+	}
+
+	if err := e.scheduleJob(j); err != nil {
+		return nil, fmt.Errorf("invalid schedule: %w", err)
+	}
+
+	if err := e.store.Add(j); err != nil {
+		return nil, err
+	}
+
+	log.Printf("scheduler: created reminder %s (%s) schedule=%s", j.ID, j.Name, j.Schedule)
+	e.notifyChange()
 	return j, nil
 }
 
@@ -264,6 +313,7 @@ func (e *Engine) Delete(id string) error {
 
 	e.store.Remove(id)
 	log.Printf("scheduler: deleted job %s", id)
+	e.notifyChange()
 	return nil
 }
 
@@ -316,6 +366,8 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 			j.Prompt = v
 		case "command":
 			j.Command = v
+		case "message":
+			j.Message = v
 		case "output":
 			j.Output = v
 		case "timeout":
@@ -351,6 +403,7 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 	}
 
 	log.Printf("scheduler: updated job %s", id)
+	e.notifyChange()
 	return j, nil
 }
 

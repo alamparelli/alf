@@ -1499,6 +1499,7 @@ let chatCurrentToolInput = '';    // accumulated tool input JSON
 let chatAgentTracker = null;      // agent events container
 let chatAgentTrackerBody = null;
 let chatAgentStepCount = 0;
+let chatCurrentTier = '';         // tier name from routing
 
 // Process an SSE stream response (shared by send and reconnect).
 async function chatProcessStream(res) {
@@ -1540,12 +1541,17 @@ async function chatProcessStream(res) {
           chatJobId = data.job_id;
           chatEventOffset = 0; // job event doesn't count as a buffered event
           break;
+        case 'routed':
+          chatCurrentTier = data.tier || '';
+          chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Routed to <strong>' + esc(chatCurrentTier) + '</strong>');
+          break;
         case 'thinking':
           if (data.text) {
             chatAppendThinkingText(data.text);
           } else {
             chatNewThinkingBlock();
-            chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
+            var tierTag = chatCurrentTier ? ' <span style="opacity:0.6;font-weight:normal">(' + esc(chatCurrentTier) + ')</span>' : '';
+            chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...' + tierTag);
           }
           break;
         case 'task_started':
@@ -1718,6 +1724,7 @@ function chatFinishSend() {
   chatAgentTracker = null;
   chatAgentTrackerBody = null;
   chatAgentStepCount = 0;
+  chatCurrentTier = '';
 }
 
 async function chatSend() {
@@ -2283,6 +2290,7 @@ let schedulesCache = null;
 let schedulesVisible = [];
 let schedulesInitialized = false;
 let schedulesFilter = 'all';
+let schedulesSSE = null;
 
 const OUTPUTS = ['telegram', 'file', 'both', 'silent'];
 
@@ -2298,8 +2306,21 @@ function schedulesInit() {
       schedulesFilter = btn.dataset.filter;
       schedulesRender();
     });
+    schedulesConnectSSE();
   }
   schedulesLoad();
+}
+
+function schedulesConnectSSE() {
+  if (schedulesSSE) { schedulesSSE.close(); schedulesSSE = null; }
+  const es = new EventSource('/api/schedules/events');
+  es.addEventListener('change', () => schedulesLoad());
+  es.onerror = () => {
+    es.close();
+    schedulesSSE = null;
+    setTimeout(schedulesConnectSSE, 5000);
+  };
+  schedulesSSE = es;
 }
 
 function schedulesLoad() {
@@ -2360,11 +2381,24 @@ function schedulesRender() {
     if (j.system) badges.push('<span class="tier-badge tier-badge-routable">system</span>');
     if (j.managed) badges.push('<span class="tier-badge tier-badge-instant">managed</span>');
     if (j.auto_delete) badges.push('<span class="tier-badge tier-badge-force">one-shot</span>');
-    const tierLabel = j.tier === 'direct' ? 'direct (bash)' : (j.tier || 'default');
+    const isReminder = !!j.message;
+    const tierLabel = isReminder ? 'reminder' : (j.tier === 'direct' ? 'direct (bash)' : (j.tier || 'default'));
     const outputBadge = '<span class="tier-badge tier-badge-routable">' + esc(j.output || 'telegram') + '</span>';
     const nextRun = j.next_run ? schedRelTime(j.next_run) : '--';
     const lastRun = j.last_run ? schedRelTime(j.last_run) : '--';
-    const prompt = j.tier === 'direct' ? (j.command || '--') : (j.prompt || '--');
+
+    // Content row: message for reminders, command for direct, prompt for LLM.
+    let contentLabel, contentValue;
+    if (isReminder) {
+      contentLabel = 'Message';
+      contentValue = j.message || '--';
+    } else if (j.tier === 'direct') {
+      contentLabel = 'Command';
+      contentValue = j.command || '--';
+    } else {
+      contentLabel = 'Prompt';
+      contentValue = j.prompt || '--';
+    }
 
     const canEdit = !j.managed;
     const actions = canEdit
@@ -2381,8 +2415,9 @@ function schedulesRender() {
       '<div class="tier-card-details">' +
         '<div class="tier-detail-row"><span class="tier-detail-label">ID</span><span class="tier-detail-value" style="font-family:monospace;font-size:0.75rem;opacity:0.7">' + esc(j.id) + '</span></div>' +
         '<div class="tier-detail-row"><span class="tier-detail-label">Tier</span><span class="tier-detail-value">' + esc(tierLabel) + '</span></div>' +
-        '<div class="tier-detail-row"><span class="tier-detail-label">' + (j.tier === 'direct' ? 'Command' : 'Prompt') + '</span><span class="tier-detail-value sched-prompt">' + esc(prompt.substring(0, 200)) + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">' + esc(contentLabel) + '</span><span class="tier-detail-value sched-prompt">' + esc(contentValue.substring(0, 200)) + '</span></div>' +
         '<div class="tier-detail-row"><span class="tier-detail-label">Output</span><span class="tier-detail-value">' + outputBadge + '</span></div>' +
+        (j.timeout ? '<div class="tier-detail-row"><span class="tier-detail-label">Timeout</span><span class="tier-detail-value">' + esc(j.timeout) + '</span></div>' : '') +
         '<div class="tier-detail-row"><span class="tier-detail-label">Next run</span><span class="tier-detail-value">' + esc(nextRun) + '</span></div>' +
         '<div class="tier-detail-row"><span class="tier-detail-label">Last run</span><span class="tier-detail-value">' + esc(lastRun) + '</span></div>' +
         (j.last_error ? '<div class="tier-detail-row"><span class="tier-detail-label">Last error</span><span class="tier-detail-value" style="color:var(--red)">' + esc(j.last_error.substring(0, 200)) + '</span></div>' : '') +

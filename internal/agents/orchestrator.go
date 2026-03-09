@@ -492,15 +492,12 @@ func (o *Orchestrator) invokeAgentWithKey(
 		onProgress("agent", fmt.Sprintf("%s/%s", teamName, agentName))
 	}
 
-	// Write-capable agents get their own working directory; read-only agents share taskDir.
-	agentDir := taskDir
-	if ac.WriteCapable {
-		agentDir = filepath.Join(taskDir, fmt.Sprintf("%s-%s", teamName, agentName))
-		if sessionKey != d.Agent {
-			agentDir = filepath.Join(taskDir, fmt.Sprintf("%s-%s-%s", teamName, agentName, sessionKey[strings.LastIndex(sessionKey, "#")+1:]))
-		}
-		os.MkdirAll(agentDir, 0o755)
+	// Every agent gets its own working directory under the task folder.
+	agentDir := filepath.Join(taskDir, fmt.Sprintf("%s-%s", teamName, agentName))
+	if sessionKey != d.Agent {
+		agentDir = filepath.Join(taskDir, fmt.Sprintf("%s-%s-%s", teamName, agentName, sessionKey[strings.LastIndex(sessionKey, "#")+1:]))
 	}
+	os.MkdirAll(agentDir, 0o755)
 
 	model := ac.Model
 	if o.resolveModel != nil {
@@ -569,6 +566,22 @@ func (o *Orchestrator) invokeAgentWithKey(
 
 	log.Printf("[orchestrator] ← agent %s/%s: %dms $%.4f %d chars session=%s",
 		teamName, agentName, dur.Milliseconds(), result.CostUSD, len(result.Text), truncate(result.SessionID, 12))
+
+	// Detect turn limit as a sub-agent failure.
+	if strings.Contains(result.Text, "Turn limit reached") {
+		log.Printf("[orchestrator] ✗ agent %s/%s hit turn limit", teamName, agentName)
+		if onProgress != nil {
+			onProgress("agent_done", fmt.Sprintf("%s ✗ turn limit (%ds)", agentName, int(dur.Seconds())))
+		}
+		return AgentResult{
+			Agent:    d.Agent,
+			Model:    model,
+			Text:     result.Text,
+			Error:    "turn limit reached",
+			CostUSD:  result.CostUSD,
+			Duration: dur,
+		}
+	}
 
 	if onProgress != nil {
 		onProgress("agent_done", fmt.Sprintf("%s ✓ (%ds, $%.4f)", agentName, int(dur.Seconds()), result.CostUSD))

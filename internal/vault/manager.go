@@ -158,30 +158,22 @@ func (m *Manager) IsFirstTime() bool {
 	return os.IsNotExist(err)
 }
 
-// Reset deletes vault.enc, clears tokens, and restarts vault-server
-// so it starts fresh with no encrypted store.
+// Reset stops vault-server, deletes vault.enc, clears tokens,
+// and restarts vault-server fresh with no encrypted store.
 func (m *Manager) Reset() error {
-	m.mu.Lock()
-	// Kill the running vault-server.
-	m.kill()
-	m.mu.Unlock()
+	// Stop cancels the watchdog and kills the process — no respawn race.
+	m.Stop()
 
-	// Delete the encrypted store.
+	// Delete the encrypted store while nothing is running.
 	path := m.dataDir + "/vault.enc"
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete vault.enc: %w", err)
 	}
 	m.ClearTokens()
 
-	// Restart vault-server (it will start with no vault.enc).
-	m.mu.Lock()
-	err := m.spawn()
-	m.mu.Unlock()
-	if err != nil {
+	// Restart with a fresh watchdog via Start().
+	if err := m.Start(context.Background()); err != nil {
 		return fmt.Errorf("restart vault-server: %w", err)
-	}
-	if err := m.waitHealthy(10 * time.Second); err != nil {
-		return fmt.Errorf("vault-server not healthy after reset: %w", err)
 	}
 
 	log.Println("[vault] reset complete — vault.enc deleted, server restarted")

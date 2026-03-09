@@ -56,6 +56,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     sqlite3 \
     htop \
+    jq \
+    imagemagick \
+    pandoc \
+    build-essential \
+    unzip \
+    zip \
+    wget \
+    tree \
+    ripgrep \
+    less \
+    file \
+    openssh-client \
+    rsync \
+    nano \
+    tmux \
+    dnsutils \
+    net-tools \
     && if [ "${TARGETARCH}" = "arm64" ]; then \
          apt-get install -y --no-install-recommends libgomp1; \
        else \
@@ -94,6 +111,11 @@ RUN mkdir -p /opt/alf/models/all-MiniLM-L6-v2 \
        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx" \
     && curl -fsSL -o /opt/alf/models/all-MiniLM-L6-v2/tokenizer.json \
        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
+
+# Pre-install faster-whisper (amd64 only, arm64 uses whisper.cpp).
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
+      pip3 install --break-system-packages --no-cache-dir faster-whisper; \
+    fi
 
 # Claude Code native binary.
 # Keep ~/.local/bin/claude so Claude Code recognises the native install.
@@ -140,8 +162,8 @@ RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
     && mkdir -p /opt/alf/user-packages/bin /opt/alf/user-packages/lib \
     && chown -R root:alf /home/alf/data \
     && chmod -R g+ws /home/alf/data \
-    && chown -R root:root /opt/alf/config.d \
-    && chmod 755 /opt/alf/config.d \
+    && chown -R alf:alf /opt/alf/config.d \
+    && chmod 750 /opt/alf/config.d \
     && chmod -R 755 /opt/alf/tools.d \
     && chmod -R 755 /opt/alf/bin
 

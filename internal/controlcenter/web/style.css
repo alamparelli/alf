@@ -742,6 +742,19 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .log-error { color: var(--red); }
 .log-warn { color: var(--yellow); }
 .log-debug { color: var(--text-dim); }
+.log-response { color: var(--accent); font-weight: 500; }
+.logs-filters {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+}
+.log-filter-chip {
+  padding: 2px 10px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text-dim); font-size: 0.72rem;
+  cursor: pointer; transition: all 0.15s;
+}
+.log-filter-chip:hover { border-color: var(--accent); color: var(--text); }
+.log-filter-chip.active {
+  background: var(--accent); color: var(--on-accent); border-color: var(--accent);
+}
 
 /* ─── Tasks ──────────────────────────────────────── */
 .tasks-view {

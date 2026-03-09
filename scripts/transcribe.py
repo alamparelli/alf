@@ -16,16 +16,7 @@ import time
 
 def load_model(model_name, models_dir):
     """Load the faster-whisper model."""
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError:
-        print("faster-whisper not installed. Installing...", file=sys.stderr)
-        import subprocess
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install",
-            "--break-system-packages", "faster-whisper"
-        ], stdout=sys.stderr, stderr=sys.stderr)
-        from faster_whisper import WhisperModel
+    from faster_whisper import WhisperModel
 
     os.makedirs(models_dir, exist_ok=True)
 

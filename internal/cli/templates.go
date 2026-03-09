@@ -30,6 +30,7 @@ type ComposeData struct {
 	AcmeEmail     string
 	Timezone      string   // IANA timezone (e.g. "Europe/Brussels")
 	Workspaces    []string // Host paths mounted as workspaces under /workspaces/<basename>
+	JSRuntime     string   // "node", "deno", "bun", or "" (none)
 }
 
 // RenderDockerCompose writes docker-compose.yml with the given port.

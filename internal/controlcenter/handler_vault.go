@@ -25,7 +25,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimPrefix(path, "/")
 
 	// Routes that need a valid admin token — auto-recover if revoked.
-	needsAuth := path != "" && path != "status" && path != "unlock"
+	needsAuth := path != "" && path != "status" && path != "unlock" && path != "reset"
 	if needsAuth {
 		if err := h.Manager.EnsureAuth(); err != nil {
 			respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "vault auth failed: " + err.Error()})

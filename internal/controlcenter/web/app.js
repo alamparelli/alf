@@ -3983,14 +3983,15 @@ async function vaultLoadTokens() {
     list.innerHTML = tokens.map(t => {
       const prefix = t.id_prefix || t.id || '???';
       const label = vaultScopeLabels[t.scope] || esc(t.scope);
+      const isSystem = t.scope === 'admin';
       return `
       <div class="vault-item">
         <div class="vault-item-info">
-          <span class="vault-item-name">${esc(prefix)}</span>
+          <span class="vault-item-name">${esc(prefix)}${isSystem ? ' <span class="vault-system-badge">system</span>' : ''}</span>
           <span class="vault-item-detail">${label}</span>
         </div>
         <div class="vault-item-actions">
-          <button class="btn btn-icon vault-revoke-btn" data-prefix="${esc(prefix)}" title="Revoke"><i data-lucide="trash-2"></i></button>
+          ${isSystem ? '' : `<button class="btn btn-icon vault-revoke-btn" data-prefix="${esc(prefix)}" title="Revoke"><i data-lucide="trash-2"></i></button>`}
         </div>
       </div>`;
     }).join('');

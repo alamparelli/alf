@@ -23,6 +23,15 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/vault")
 	path = strings.TrimPrefix(path, "/")
 
+	// Routes that need a valid admin token — auto-recover if revoked.
+	needsAuth := path != "" && path != "status" && path != "unlock"
+	if needsAuth {
+		if err := h.Manager.EnsureAuth(); err != nil {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "vault auth failed: " + err.Error()})
+			return
+		}
+	}
+
 	switch {
 	case path == "" || path == "status":
 		h.handleStatus(w, r)

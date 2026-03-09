@@ -2,7 +2,7 @@
 name: app-builder
 description: Creates self-contained web apps in ~/data/apps/ with standardized structure, SQLite storage, and Lucide icons
 version: "1"
-triggers: app, application, dashboard, webapp, web app
+triggers: app, apps, application, applications, dashboard, webapp, web app
 tier: agent
 ---
 
@@ -185,7 +185,7 @@ tr:hover { background: rgba(0,0,0,0.02); }
 ```
 
 **Mandatory rules:**
-- Mobile-first, responsive layout
+- **Mobile-first, responsive layout** — design for 375px first, then scale up
 - **ZERO hardcoded colors** — every color must come from `var(--*)` CSS variables
 - The CC theme auto-adapts to OS dark/light — do NOT write your own theme logic
 - No external dependencies (CSP blocks external scripts/styles)
@@ -194,6 +194,83 @@ tr:hover { background: rgba(0,0,0,0.02); }
 - API calls use relative paths (`/api/bash`, `/api/apps/...`)
 - Use `<link rel="stylesheet" href="/static/theme.css">` for CC variables
 - Design MUST look like a native CC page, not a generic web app
+
+### Mobile Responsiveness (REQUIRED)
+
+Every app MUST be fully usable on mobile (375px–430px). This is not optional.
+
+**Responsive patterns to always include:**
+
+```css
+/* Mobile-first base — then scale UP */
+body { padding: 12px 8px; }
+
+/* Stack layouts on mobile */
+.grid, .row { display: flex; flex-direction: column; gap: 12px; }
+
+/* Responsive grid — single column on mobile, multi on desktop */
+@media (min-width: 640px) {
+  body { padding: 24px 16px; }
+  .grid { flex-direction: row; flex-wrap: wrap; }
+  .grid > * { flex: 1; min-width: 280px; }
+}
+
+@media (min-width: 1024px) {
+  .container { max-width: 900px; margin: 0 auto; }
+}
+
+/* Touch-friendly targets — minimum 44px */
+button, .btn, select, input, a.action {
+  min-height: 44px;
+}
+
+/* Tables: horizontal scroll on mobile */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* Hide non-essential columns on mobile */
+@media (max-width: 639px) {
+  .hide-mobile { display: none; }
+  .card { padding: 14px; }
+  th, td { padding: 6px 4px; font-size: 0.78rem; }
+}
+```
+
+**Mobile checklist:**
+- No horizontal scroll on content (tables excepted with `.table-wrap`)
+- Touch targets minimum 44px height
+- Text readable without zooming (min 14px body)
+- Forms stack vertically on mobile
+- Modals/dialogs are full-width on mobile
+- No hover-only interactions — all hover states must have tap alternatives
+
+### Design Quality
+
+Apps must be visually polished — not generic AI output. Apply these principles within the CC design system:
+
+**Typography:**
+- Use the system font stack (required by CSP), but make it distinctive through size contrast, weight variation, and letter-spacing
+- Hero numbers/stats: go large (2rem+), light weight. Labels: small, uppercase, tracked
+- Create clear visual hierarchy — not everything should be the same size
+
+**Motion & Micro-interactions:**
+- Use CSS transitions for state changes (0.15s–0.3s ease)
+- Staggered `animation-delay` for list/card reveals on load
+- Subtle hover transforms: `scale(1.02)`, slight shadow lift
+- Loading states: skeleton screens or pulse animations, not spinners
+- Example: `@keyframes fadeUp { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }`
+
+**Spatial Composition:**
+- Use generous spacing — don't cram elements. White space is a feature
+- Cards with clear visual separation (border + background difference)
+- Group related controls; separate unrelated sections with spacing, not just dividers
+- Consider asymmetric layouts for dashboards — not everything needs equal columns
+
+**Visual Details:**
+- Use `var(--border)` creatively: double borders for emphasis, dashed for secondary
+- Subtle shadows: `box-shadow: 0 1px 3px rgba(0,0,0,0.04)` for depth (only shadow exception to color rule)
+- Status indicators: colored dots, badges, progress bars — not just text
+- Empty states: helpful message + icon, not just blank space
+- Use Lucide icons inline (via SVG) to add visual weight where text alone is insufficient
 
 **CSP constraints:**
 - NO `<script src="https://...">` — blocked
@@ -282,7 +359,10 @@ Before delivering, verify:
 - [ ] **ZERO hex colors in CSS** — grep your output for `#` followed by hex digits. Every match is a bug. Replace with `var(--*)`.
 - [ ] No `background: #...`, no `color: #...`, no `border-color: #...` — all must use CSS variables
 - [ ] The app adapts to OS theme automatically (no custom dark/light logic)
-- [ ] Mobile responsive (test at 375px width mentally)
+- [ ] Mobile responsive — verified layout works at 375px (single column, no overflow, 44px touch targets)
+- [ ] No hover-only interactions — all interactions work on touch devices
+- [ ] Staggered animations on load for cards/lists
+- [ ] Empty states designed (not just blank)
 - [ ] No external resource loading (CSP compliant)
 - [ ] Data directory created if app stores data
 - [ ] All file paths use relative references for assets

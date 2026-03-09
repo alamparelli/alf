@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -862,42 +864,54 @@ func promptWorkspaces(reader *bufio.Reader, previous []string) []string {
 	return workspaces
 }
 
-func fixClaudeOwnership() {
-	fix := exec.Command("docker", "exec", "alf",
-		"sh", "-c", `chown -R 1000:1000 /home/alf/.claude /home/alf/.claude.json 2>/dev/null
-chmod 640 /home/alf/.claude.json 2>/dev/null
-chmod -R g+rX /home/alf/.claude 2>/dev/null
-cp /home/alf/.claude.json /home/alf/.claude/claude.json 2>/dev/null
-true`)
-	fix.Run()
-}
-
-func verifyClaudeAuth() {
-	verify := exec.Command("docker", "exec", "--user", "1000:1000", "-e", "HOME=/home/alf",
-		"alf", "claude", "-p", "ping", "--output-format", "json", "--max-turns", "1")
-	out, _ := verify.Output()
-	if len(out) > 0 && strings.Contains(string(out), `"is_error":false`) {
-		PrintCheck("Claude authenticated")
-	} else {
-		PrintWarning("Claude not authenticated yet. Run:")
-		fmt.Println()
-		fmt.Println("    docker exec -it -e HOME=/home/alf alf claude")
-		fmt.Println("    Then: alf login")
-		fmt.Println()
-	}
-}
-
-// RunLogin allows re-authenticating Claude from the CLI.
+// RunLogin creates a long-lived Claude OAuth token via `claude setup-token`
+// and stores it as a Docker secret for the daemon.
 func RunLogin() {
-	PrintInfo("Launching Claude Code for authentication...")
-	fmt.Println("  Type " + colorBold + "/login" + colorReset + " inside Claude to authenticate, then " + colorBold + "/exit" + colorReset + " when done.")
+	PrintInfo("Creating Claude OAuth token...")
 	fmt.Println()
-	cmd := exec.Command("docker", "exec", "-it", "--user", "1000:1000", "-e", "HOME=/home/alf", "alf", "claude")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Run()
 
-	fixClaudeOwnership()
-	verifyClaudeAuth()
+	// Run claude setup-token inside the container, capturing output while showing it.
+	var buf bytes.Buffer
+	cmd := exec.Command("docker", "exec", "-it", "--user", "1000:1000", "-e", "HOME=/home/alf", "alf", "claude", "setup-token")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		Fatal(fmt.Sprintf("setup-token failed: %v", err))
+	}
+
+	// Parse the token from output (sk-ant-oat01-...).
+	token := extractOAuthToken(buf.String())
+	if token == "" {
+		PrintWarning("Could not extract token from output.")
+		fmt.Println("  Paste the token manually:")
+		fmt.Print("  > ")
+		reader := bufio.NewReader(os.Stdin)
+		line, _ := reader.ReadString('\n')
+		token = strings.TrimSpace(line)
+	}
+
+	if token == "" {
+		Fatal("No token provided")
+	}
+
+	// Store as Docker secret.
+	dir := alfDir()
+	if err := SetSecret(dir, "claude_oauth_token", token); err != nil {
+		Fatal(fmt.Sprintf("Failed to save token: %v", err))
+	}
+	PrintCheck("OAuth token saved")
+	fmt.Println()
+	PrintInfo("Run " + colorBold + "alf restart" + colorReset + " to apply the new token.")
+}
+
+// extractOAuthToken finds a Claude OAuth token (sk-ant-oat01-...) in text.
+func extractOAuthToken(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "sk-ant-oat01-") {
+			return line
+		}
+	}
+	return ""
 }

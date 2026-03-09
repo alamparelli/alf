@@ -3,6 +3,7 @@ package controlcenter
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/alamparelli/alf/internal/vault"
@@ -98,7 +99,7 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Password == "" {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "password required"})
 		return
 	}
@@ -121,6 +122,7 @@ func (h *VaultHandler) handleLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Manager.ClearTokens()
+	os.Unsetenv("VAULT_TOKEN")
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -136,7 +138,7 @@ func (h *VaultHandler) handleListServices(w http.ResponseWriter, r *http.Request
 
 func (h *VaultHandler) handleAddService(w http.ResponseWriter, r *http.Request) {
 	c := h.Manager.Client()
-	if err := c.AddService(r.Body); err != nil {
+	if err := c.AddService(http.MaxBytesReader(w, r.Body, 1<<20)); err != nil {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -175,7 +177,7 @@ func (h *VaultHandler) handleCreateToken(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		Scope string `json:"scope"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Scope == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Scope == "" {
 		req.Scope = "proxy"
 	}
 	c := h.Manager.Client()

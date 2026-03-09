@@ -1332,6 +1332,11 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .tier-form .form-row input[type="number"],
 .tier-form .form-row select { flex: 1; min-width: 0; }
 
+.tier-label-textarea {
+  resize: vertical; min-height: 2.4em; max-height: 12em;
+  font-family: inherit; font-size: inherit; line-height: 1.4;
+  field-sizing: content;
+}
 .tier-flags {
   display: flex; flex-wrap: wrap; gap: 8px 16px;
   padding: 10px 0; border-top: 1px solid var(--border);

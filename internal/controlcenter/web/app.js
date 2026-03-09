@@ -3086,7 +3086,7 @@ function tiersShowModal(tier) {
         '<div class="form-row" id="tfModelRow"><label>Model</label>' + (isOR ? '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="tfModel">' + modelOpts + '</select>') + '</div>' +
         '<div class="form-row"><label>Priority</label><input type="number" id="tfPriority" value="' + t.priority + '" min="0" max="99"></div>' +
         '<div class="form-row"><label>Effort</label><select id="tfEffort">' + effortOpts + '</select></div>' +
-        '<div class="form-row"><label>Router label</label><input type="text" id="tfLabel" value="' + esc(t.router_label || '') + '" placeholder="Description for the router"></div>' +
+        '<div class="form-row"><label>Router label</label><textarea id="tfLabel" class="input tier-label-textarea" rows="2" placeholder="Description for the router">' + esc(t.router_label || '') + '</textarea></div>' +
         '<div class="form-row"><label>Description</label><input type="text" id="tfDesc" value="' + esc(t.description || '') + '" placeholder="Optional description"></div>' +
         '<div class="form-row"><label>Max turns</label><input type="number" id="tfMaxTurns" value="' + (t.max_turns || 0) + '" min="0"></div>' +
         '<div class="form-row"><label>Max iterations</label><input type="number" id="tfMaxIter" value="' + (t.max_iterations || 0) + '" min="0"></div>' +

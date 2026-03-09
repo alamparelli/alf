@@ -105,19 +105,31 @@ func jsonMiddleware(next http.Handler) http.Handler {
 // csrfMiddleware requires a X-Requested-With header on state-changing requests.
 // HTML forms cannot set custom headers, so this prevents cross-site form submissions.
 // JavaScript from allowed origins can set this header, and CORS preflight enforces the origin check.
-func csrfMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			if strings.HasPrefix(r.URL.Path, "/api/") && r.Header.Get("X-Requested-With") == "" {
-				// Allow Bearer-token authenticated requests (API clients, not browsers).
-				if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+// Same-origin requests (verified via Referer) are also allowed — this covers CC apps
+// served at /apps/* which have their own JS context without the fetch override.
+func csrfMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+				if strings.HasPrefix(r.URL.Path, "/api/") && r.Header.Get("X-Requested-With") == "" {
+					// Allow Bearer-token authenticated requests (API clients, not browsers).
+					if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+						next.ServeHTTP(w, r)
+						return
+					}
+					// Allow same-origin requests verified via Referer header.
+					// CC apps at /apps/* make fetch calls without X-Requested-With.
+					if allowedOrigin != "" && strings.HasPrefix(r.Header.Get("Referer"), allowedOrigin) {
+						next.ServeHTTP(w, r)
+						return
+					}
 					http.Error(w, `{"error":"missing X-Requested-With header"}`, http.StatusForbidden)
 					return
 				}
 			}
-		}
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // Polling endpoints excluded from logging to reduce noise.

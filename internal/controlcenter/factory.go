@@ -208,7 +208,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	exempt := map[string]bool{"/health": true, "/auth": true}
 	var handler http.Handler = mux
 	handler = jsonMiddleware(handler)
-	handler = csrfMiddleware(handler)
+	handler = csrfMiddleware(deps.AllowedOrigin)(handler)
 	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
 	handler = newRateLimiter(180).middleware(handler)

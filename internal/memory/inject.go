@@ -255,10 +255,14 @@ func GenerateToolbox(contextDir, dataDir string) {
 
 	// Scan system tools (tools.d/).
 	systemTools := scanTools(filepath.Join(dataDir, "tools.d"))
+	hasVault := false
 	if len(systemTools) > 0 {
 		sb.WriteString("## System Tools (tools.d/)\n\n")
 		for _, t := range systemTools {
 			sb.WriteString(fmt.Sprintf("- `%s`\n", t))
+			if t == "vault" {
+				hasVault = true
+			}
 		}
 		sb.WriteString("\n")
 	}
@@ -270,6 +274,36 @@ func GenerateToolbox(contextDir, dataDir string) {
 		for _, t := range userTools {
 			sb.WriteString(fmt.Sprintf("- `%s`\n", t))
 		}
+		sb.WriteString("\n")
+	}
+
+	// Vault usage instructions (only if vault tool is present).
+	if hasVault {
+		vaultStatus := "unknown"
+		if addr := os.Getenv("VAULT_ADDR"); addr != "" {
+			if tok := os.Getenv("VAULT_TOKEN"); tok != "" {
+				vaultStatus = "ready"
+			} else {
+				vaultStatus = "locked (no token — ask user to unlock via Control Center)"
+			}
+		} else {
+			vaultStatus = "not configured (no VAULT_ADDR)"
+		}
+		sb.WriteString("## Vault (Secrets Proxy)\n\n")
+		sb.WriteString(fmt.Sprintf("Status: **%s**\n\n", vaultStatus))
+		sb.WriteString("The vault stores API credentials securely. Use it to call external APIs without seeing the secrets.\n\n")
+		sb.WriteString("```\n")
+		sb.WriteString("vault proxy <service> <method> <path> [body]\n")
+		sb.WriteString("vault proxy github GET /user\n")
+		sb.WriteString("vault proxy slack POST /chat.postMessage '{\"channel\":\"#general\",\"text\":\"hello\"}'\n")
+		sb.WriteString("vault list                    # list configured services\n")
+		sb.WriteString("vault health                  # check vault status\n")
+		sb.WriteString("```\n\n")
+		sb.WriteString("Rules:\n")
+		sb.WriteString("- ALWAYS use `vault proxy` for external API calls when a service is configured.\n")
+		sb.WriteString("- NEVER ask the user for API keys — tell them to add the service via the Control Center vault page.\n")
+		sb.WriteString("- If vault is locked or unreachable, tell the user: \"The vault is locked. Please unlock it in the Control Center.\"\n")
+		sb.WriteString("- Run `vault list` to check which services are available before making API calls.\n")
 		sb.WriteString("\n")
 	}
 

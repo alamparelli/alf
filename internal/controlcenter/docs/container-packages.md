@@ -80,7 +80,7 @@ cat > ~/data/apps/status/index.html << 'HTML'
     <pre id="out"></pre>
   </div>
   <script>
-    fetch('/api/bash', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{"command":"uptime && df -h"}'})
+    fetch('/api/bash', {method:'POST', headers:{'Content-Type':'application/json', 'X-Requested-With':'app'}, body:'{"command":"uptime && df -h"}'})
       .then(r=>r.json()).then(d=>document.getElementById('out').textContent=d.output);
   </script>
 </body>

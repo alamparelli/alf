@@ -66,7 +66,7 @@ func TestWorkspace_PrefixConfusionBlocked(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCSRF_BlocksPostWithoutHeader(t *testing.T) {
-	handler := csrfMiddleware(okHandler())
+	handler := csrfMiddleware("")(okHandler())
 	req := httptest.NewRequest("POST", "/api/bash", strings.NewReader(`{"command":"id"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -82,7 +82,7 @@ func TestCSRF_BlocksPostWithoutHeader(t *testing.T) {
 }
 
 func TestCSRF_AllowsPostWithHeader(t *testing.T) {
-	handler := csrfMiddleware(okHandler())
+	handler := csrfMiddleware("")(okHandler())
 	req := httptest.NewRequest("POST", "/api/bash", strings.NewReader(`{"command":"id"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
@@ -96,7 +96,7 @@ func TestCSRF_AllowsPostWithHeader(t *testing.T) {
 }
 
 func TestCSRF_AllowsGetWithoutHeader(t *testing.T) {
-	handler := csrfMiddleware(okHandler())
+	handler := csrfMiddleware("")(okHandler())
 	req := httptest.NewRequest("GET", "/api/status", nil)
 	rec := httptest.NewRecorder()
 
@@ -108,7 +108,7 @@ func TestCSRF_AllowsGetWithoutHeader(t *testing.T) {
 }
 
 func TestCSRF_AllowsBearerWithoutHeader(t *testing.T) {
-	handler := csrfMiddleware(okHandler())
+	handler := csrfMiddleware("")(okHandler())
 	req := httptest.NewRequest("POST", "/api/restart", nil)
 	req.Header.Set("Authorization", "Bearer some-token")
 	rec := httptest.NewRecorder()
@@ -121,7 +121,7 @@ func TestCSRF_AllowsBearerWithoutHeader(t *testing.T) {
 }
 
 func TestCSRF_BlocksDeleteWithoutHeader(t *testing.T) {
-	handler := csrfMiddleware(okHandler())
+	handler := csrfMiddleware("")(okHandler())
 	req := httptest.NewRequest("DELETE", "/api/chat", nil)
 	rec := httptest.NewRecorder()
 
@@ -133,7 +133,7 @@ func TestCSRF_BlocksDeleteWithoutHeader(t *testing.T) {
 }
 
 func TestCSRF_BlocksPutWithoutHeader(t *testing.T) {
-	handler := csrfMiddleware(okHandler())
+	handler := csrfMiddleware("")(okHandler())
 	req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 
@@ -145,7 +145,7 @@ func TestCSRF_BlocksPutWithoutHeader(t *testing.T) {
 }
 
 func TestCSRF_SkipsNonAPIRoutes(t *testing.T) {
-	handler := csrfMiddleware(okHandler())
+	handler := csrfMiddleware("")(okHandler())
 	req := httptest.NewRequest("POST", "/auth", strings.NewReader("code=abc"))
 	rec := httptest.NewRecorder()
 
@@ -153,6 +153,35 @@ func TestCSRF_SkipsNonAPIRoutes(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("POST to non-API path should not require CSRF header, got %d", rec.Code)
+	}
+}
+
+func TestCSRF_AllowsSameOriginReferer(t *testing.T) {
+	// Apps at /apps/* make fetch calls without X-Requested-With but with a same-origin Referer.
+	handler := csrfMiddleware("https://cc.example.com")(okHandler())
+	req := httptest.NewRequest("POST", "/api/bash", strings.NewReader(`{"command":"id"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Referer", "https://cc.example.com/apps/my-app/")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("POST with same-origin Referer should be allowed, got %d", rec.Code)
+	}
+}
+
+func TestCSRF_BlocksCrossOriginReferer(t *testing.T) {
+	handler := csrfMiddleware("https://cc.example.com")(okHandler())
+	req := httptest.NewRequest("POST", "/api/bash", strings.NewReader(`{"command":"id"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Referer", "https://evil.com/attack")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("POST with cross-origin Referer should be 403, got %d", rec.Code)
 	}
 }
 

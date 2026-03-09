@@ -32,7 +32,7 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, vaultMgr *vault.Manager) (*Server, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, vaultMgr *vault.Manager) (*Server, *ScheduleEventBroker, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore, appStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	var chatStore *ChatStore
@@ -47,15 +47,17 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		log.Printf("[CC] warning: failed to load tiers: %v", err)
 	}
 
+	schedEventBroker := NewScheduleEventBroker()
+
 	htmlBytes, err := webFS.ReadFile("web/index.html")
 	if err != nil {
-		return nil, fmt.Errorf("read dashboard HTML: %w", err)
+		return nil, nil, fmt.Errorf("read dashboard HTML: %w", err)
 	}
 
 	// Sub-filesystem rooted at web/ for static asset serving.
 	webSub, err := fs.Sub(webFS, "web")
 	if err != nil {
-		return nil, fmt.Errorf("create web sub-fs: %w", err)
+		return nil, nil, fmt.Errorf("create web sub-fs: %w", err)
 	}
 
 	// Schedule run log uses the same logs/scheduler directory as the scheduler engine.
@@ -81,7 +83,8 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		ScheduleRunLog: schedRunLog,
 		FirewallStore:  fwStore,
 		FirewallProxy:  fwProxy,
-		VaultManager:   vaultMgr,
+		VaultManager:     vaultMgr,
+		ScheduleEvents:  schedEventBroker,
 		AuthToken:      authToken,
 		AllowedOrigin:    strings.TrimRight(externalURL, "/"),
 		SecureCookies:    strings.HasPrefix(externalURL, "https://"),
@@ -107,7 +110,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 			MaxHeaderBytes:    1 << 20,           // 1MB
 		},
 		addr: addr,
-	}, nil
+	}, schedEventBroker, nil
 }
 
 // Start begins listening. Blocks until the server stops.

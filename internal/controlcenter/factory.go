@@ -35,7 +35,8 @@ type Deps struct {
 	ScheduleRunLog *scheduler.RunLog  // nil if scheduler unavailable
 	FirewallStore  *firewall.Store     // nil if firewall unavailable
 	FirewallProxy  *firewall.Proxy     // nil if firewall unavailable
-	VaultManager   *vault.Manager      // nil if vault unavailable
+	VaultManager     *vault.Manager      // nil if vault unavailable
+	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS
@@ -154,6 +155,9 @@ func HandlerFactory(deps Deps) http.Handler {
 	mux.Handle("/api/schedules/logs", &ScheduleLogsHandler{
 		RunLog: deps.ScheduleRunLog,
 	})
+	if deps.ScheduleEvents != nil {
+		mux.Handle("/api/schedules/events", deps.ScheduleEvents)
+	}
 
 	// Orchestrator tasks.
 	mux.Handle("/api/tasks", &TasksHandler{

@@ -29,6 +29,7 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Tier     string   `json:"tier"`
 			Prompt   string   `json:"prompt"`
 			Command  string   `json:"command"`
+			Message  string   `json:"message"`
 			Output   string   `json:"output"`
 			Timeout  string   `json:"timeout"`
 			Skills   []string `json:"skills"`
@@ -49,6 +50,20 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid timeout: " + err.Error()})
 				return
 			}
+		}
+		// Reminder mode: message is mutually exclusive with prompt/command/tier.
+		if req.Message != "" {
+			if req.Prompt != "" || req.Command != "" || req.Tier != "" {
+				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "message is a direct push notification — cannot be combined with prompt, command, or tier"})
+				return
+			}
+			job, err := h.Engine.CreateReminder(req.Name, req.Schedule, req.Message, req.Output, timeout)
+			if err != nil {
+				respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			respondJSON(w, http.StatusCreated, map[string]any{"job": job})
+			return
 		}
 		job, err := h.Engine.Create(req.Name, req.Schedule, req.Tier, req.Prompt, req.Command, req.Output, timeout, req.Skills)
 		if err != nil {

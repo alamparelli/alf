@@ -40,6 +40,7 @@ type ScheduleJob struct {
 	Tier       string  `json:"tier"`
 	Prompt     string  `json:"prompt"`
 	Command    string  `json:"command,omitempty"`
+	Message    string  `json:"message,omitempty"`
 	Output     string  `json:"output"`
 	Enabled    bool    `json:"enabled"`
 	System     bool    `json:"system"`
@@ -57,6 +58,7 @@ type ScheduleJob struct {
 type ScheduleEngine interface {
 	List(userOnly bool) []ScheduleJob
 	Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string) (*ScheduleJob, error)
+	CreateReminder(name, schedule, message, output string, timeout time.Duration) (*ScheduleJob, error)
 	Delete(id string) error
 	Update(id string, fields map[string]string) (*ScheduleJob, error)
 }

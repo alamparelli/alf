@@ -503,13 +503,15 @@ func main() {
 
 	// Schedule adapter (engine set later after scheduler is created).
 	schedAdapter := &ccScheduleAdapter{}
+	var schedEventBroker *cc.ScheduleEventBroker
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, schedAdapter, fwStore, fwProxy, vaultMgr)
+		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, schedAdapter, fwStore, fwProxy, vaultMgr)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
+			schedEventBroker = broker
 			go func() {
 				if err := server.Start(); err != nil && err != http.ErrServerClosed {
 					log.Printf("Control Center error: %v", err)
@@ -612,7 +614,13 @@ func main() {
 		}()
 	}
 
+	// Daily schedule digest — runs at 08:00 local time.
+	sched.RegisterSystem("sched-digest", "Schedule Digest", "0 0 8 * * *", sched.SendDailyDigest)
+
 	schedAdapter.engine = sched
+	if schedEventBroker != nil {
+		sched.OnChange = schedEventBroker.Notify
+	}
 
 	if err := sched.Start(filepath.Join(contextDir, "scheduler.sock")); err != nil {
 		log.Printf("warning: scheduler start failed: %v", err)
@@ -3037,6 +3045,15 @@ func (a *ccScheduleAdapter) Create(name, schedule, tier, prompt, command, output
 	return &sj, nil
 }
 
+func (a *ccScheduleAdapter) CreateReminder(name, schedule, message, output string, timeout time.Duration) (*cc.ScheduleJob, error) {
+	j, err := a.engine.CreateReminder(name, schedule, message, output, timeout)
+	if err != nil {
+		return nil, err
+	}
+	sj := schedulerJobToCC(j)
+	return &sj, nil
+}
+
 func (a *ccScheduleAdapter) Delete(id string) error {
 	return a.engine.Delete(id)
 }
@@ -3058,6 +3075,7 @@ func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 		Tier:       j.Tier,
 		Prompt:     j.Prompt,
 		Command:    j.Command,
+		Message:    j.Message,
 		Output:     j.Output,
 		Enabled:    j.Enabled,
 		System:     j.System,

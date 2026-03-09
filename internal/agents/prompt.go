@@ -41,6 +41,7 @@ You may include a "thinking" field for brief reasoning, but it is optional.
 - The "response" field should summarize what was done, NOT contain the deliverable itself.
 - If agent results are incomplete or wrong, re-delegate with clearer instructions.
 - You can run multiple agents in parallel by including multiple delegates.
+- When an agent creates a resource (scheduled job, file, etc.), your final response MUST include the ID or path returned by the agent so the user can reference it.
 
 `)
 

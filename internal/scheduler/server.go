@@ -18,6 +18,7 @@ type socketRequest struct {
 	Tier     string            `json:"tier,omitempty"`
 	Prompt   string            `json:"prompt,omitempty"`
 	Command  string            `json:"command,omitempty"`
+	Message  string            `json:"message,omitempty"`
 	Output   string            `json:"output,omitempty"`
 	Timeout  string            `json:"timeout,omitempty"` // Go duration string (e.g. "10m", "1h")
 	ID       string            `json:"id,omitempty"`
@@ -104,6 +105,31 @@ func (s *Server) handleConn(conn net.Conn) {
 			resp.Error = "name and schedule are required"
 			break
 		}
+
+		// Reminder mode: --message is mutually exclusive with --prompt, --command, --tier.
+		if req.Message != "" {
+			if req.Prompt != "" || req.Command != "" || req.Tier != "" {
+				resp.Error = "--message is a direct push notification — cannot be combined with --prompt, --command, or --tier"
+				break
+			}
+			var timeout time.Duration
+			if req.Timeout != "" {
+				var terr error
+				timeout, terr = time.ParseDuration(req.Timeout)
+				if terr != nil {
+					resp.Error = fmt.Sprintf("invalid timeout %q: %v", req.Timeout, terr)
+					break
+				}
+			}
+			job, err := s.engine.CreateReminder(req.Name, req.Schedule, req.Message, req.Output, timeout)
+			if err != nil {
+				resp.Error = err.Error()
+			} else {
+				resp.Job = job
+			}
+			break
+		}
+
 		tier := req.Tier
 		// Auto-detect direct tier when command is provided without explicit tier.
 		if tier == "" && req.Command != "" {

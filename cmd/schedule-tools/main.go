@@ -17,6 +17,7 @@ type socketRequest struct {
 	Tier     string            `json:"tier,omitempty"`
 	Prompt   string            `json:"prompt,omitempty"`
 	Command  string            `json:"command,omitempty"`
+	Message  string            `json:"message,omitempty"`
 	Output   string            `json:"output,omitempty"`
 	Timeout  string            `json:"timeout,omitempty"`
 	ID       string            `json:"id,omitempty"`
@@ -32,6 +33,7 @@ type job struct {
 	Tier      string     `json:"tier"`
 	Prompt    string     `json:"prompt"`
 	Command   string     `json:"command"`
+	Message   string     `json:"message"`
 	Output    string     `json:"output"`
 	Enabled   bool       `json:"enabled"`
 	System    bool       `json:"system"`
@@ -104,6 +106,7 @@ func doCreate(sockPath string) {
 	tier := args["tier"]
 	prompt := args["prompt"]
 	command := args["command"]
+	message := args["message"]
 	output := args["output"]
 	timeout := args["timeout"]
 	skillsRaw := args["skills"]
@@ -112,6 +115,36 @@ func doCreate(sockPath string) {
 		fmt.Fprintf(os.Stderr, "Error: --name and --schedule are required\n\n")
 		printUsage()
 		os.Exit(1)
+	}
+
+	// Reminder mode: --message is mutually exclusive with --prompt, --command, --tier.
+	if message != "" {
+		if prompt != "" || command != "" || tier != "" {
+			fmt.Fprintf(os.Stderr, "Error: --message is a direct push notification — cannot be combined with --prompt, --command, or --tier\n")
+			os.Exit(1)
+		}
+
+		resp := socketCall(sockPath, socketRequest{
+			Action:   "create",
+			Name:     name,
+			Schedule: schedule,
+			Message:  message,
+			Output:   output,
+			Timeout:  timeout,
+		})
+
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+
+		if resp.Job != nil {
+			fmt.Printf("Created reminder %s (%s)\n", resp.Job.ID, resp.Job.Name)
+			if resp.Job.NextRun != nil {
+				fmt.Printf("Next run: %s\n", resp.Job.NextRun.Format("2006-01-02 15:04:05"))
+			}
+		}
+		return
 	}
 
 	// Auto-detect direct tier when --command is provided.
@@ -229,7 +262,9 @@ func doList(sockPath string) {
 			name = name[:22] + "..."
 		}
 		tier := j.Tier
-		if tier == "" {
+		if j.Message != "" {
+			tier = "reminder"
+		} else if tier == "" {
 			tier = "-"
 		}
 		fmt.Printf("%-10s %-8s %-25s %-20s %-10s %-10s %-8s %s\n", j.ID, typ, name, sched, tier, j.Output, enabled, nextRun)
@@ -338,11 +373,22 @@ Create options:
   --tier <tier>           LLM tier (e.g. haiku, sonnet, opus) or "direct" for bash
   --prompt <text>         Prompt for LLM tiers (required for LLM jobs)
   --command <cmd>         Bash command for direct tier (required for direct jobs)
+  --message <text>        Direct push notification (no LLM, no command — just sends the message)
   --output <dest>         telegram | file | both | silent (default: telegram)
   --timeout <duration>    Execution timeout (e.g. 5m, 10m, 1h). Defaults: direct=2m, LLM=5m, agent=30m
   --skills <s1,s2>        Comma-separated skill names (LLM jobs only)
 
+  Note: --message, --prompt, and --command are mutually exclusive.
+
 Examples:
+  # Reminder: daily standup notification (no LLM cost)
+  schedule create --name "standup" --schedule "0 55 8 * * 1-5" \
+    --message "Daily standup in 5 minutes"
+
+  # Reminder: one-shot reminder at a specific time
+  schedule create --name "call john" --schedule "2026-03-10T14:00:00Z" \
+    --message "Call John about the contract renewal"
+
   # Deterministic: check disk usage every 6 hours
   schedule create --name "disk check" --schedule "0 0 */6 * * *" \
     --command "df -h" --output telegram
@@ -356,12 +402,12 @@ Examples:
   schedule create --name "morning brief" --schedule "0 0 9 * * 1-5" \
     --tier sonnet --prompt "Summarize today's priorities" --output telegram
 
-  # LLM: one-shot reminder
+  # LLM: one-shot task at a specific time
   schedule create --name "deploy check" --schedule "2026-03-10T15:00:00Z" \
     --tier haiku --prompt "Check if v2.1 deployed correctly" --output telegram
 
 Update options:
-  schedule update <id> [--enabled true|false] [--schedule ...] [--prompt ...] [--command ...] [--name ...] [--output ...] [--timeout ...]
+  schedule update <id> [--enabled true|false] [--schedule ...] [--prompt ...] [--command ...] [--message ...] [--name ...] [--output ...] [--timeout ...]
 
 Other:
   schedule list [--user]

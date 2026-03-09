@@ -22,8 +22,9 @@ type Job struct {
 	Enabled    bool       `json:"enabled"`
 	System     bool       `json:"system"`
 	Managed    bool       `json:"managed,omitempty"`
-	AutoDelete bool       `json:"auto_delete"`
-	Skills     []string   `json:"skills,omitempty"`
+	AutoDelete bool          `json:"auto_delete"`
+	Timeout    time.Duration `json:"timeout,omitempty"` // 0 = use default per tier
+	Skills     []string      `json:"skills,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	LastRun    *time.Time `json:"last_run"`
 	NextRun    *time.Time `json:"next_run"`

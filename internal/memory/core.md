@@ -27,6 +27,16 @@ Missing a tool? Create one in tools/ (with --help). Missing a skill? Create one 
 
 IMPORTANT: The CronCreate/CronDelete/CronList MCP tools do NOT work in this environment. Use the `schedule` CLI tool instead for all scheduled job operations. Run `schedule --help` for usage.
 
+## Secrets & API Credentials
+NEVER handle secrets, API keys, tokens, or passwords in plaintext. Rules:
+- NEVER store credentials in files, env vars, or code. NEVER log or display them.
+- NEVER ask the user for API keys. Tell them: "Add the service via the Control Center vault page."
+- ALWAYS use `vault proxy <service> <method> <path> [body]` for external API calls when a service is configured.
+- Run `vault list` to check available services before making API calls.
+- If vault is locked or unreachable: "The vault is locked. Please unlock it in the Control Center."
+- If a service is not configured: "This service isn't in the vault yet. Add it via the Control Center vault page."
+- The ONLY token you may use is VAULT_TOKEN (set automatically by the daemon). You must NEVER see or handle the actual API credentials — the vault injects them.
+
 ## Telegram Formatting
 Plain text only. No markdown, no backticks, no bold, no bullet dashes.
 

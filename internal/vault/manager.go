@@ -152,6 +152,12 @@ func (m *Manager) Addr() string {
 	return m.addr
 }
 
+// PasswordFile returns the path to the persisted master password file
+// in the vault data directory (writable, survives container restarts).
+func (m *Manager) PasswordFile() string {
+	return m.dataDir + "/.master-password"
+}
+
 // IsFirstTime returns true if no vault.enc exists yet (fresh setup).
 func (m *Manager) IsFirstTime() bool {
 	_, err := os.Stat(m.dataDir + "/vault.enc")
@@ -201,6 +207,7 @@ func (m *Manager) spawn() error {
 	cmd := exec.Command(bin,
 		"-listen", "127.0.0.1:8390",
 		"-data-dir", m.dataDir,
+		"-token-ttl", "8760h", // 1 year — daemon manages token lifecycle
 	)
 	// Route subprocess output through Go's log package instead of raw os.Stdout.
 	// Direct pipe inheritance can cause SIGPIPE in containerized environments
@@ -314,7 +321,21 @@ func (m *Manager) watchdog(ctx context.Context) {
 		log.Println("[vault] restarted successfully")
 		backoff = time.Second
 
-		if status, err := m.Health(); err == nil {
+		// Re-authenticate after restart (token store is in-memory, lost on crash).
+		m.mu.Lock()
+		pw := m.masterPass
+		m.mu.Unlock()
+		if pw != "" {
+			if err := m.AutoUnlock(pw); err != nil {
+				log.Printf("[vault] re-unlock after restart failed: %v", err)
+			} else if _, err := m.CreateProxyToken(); err != nil {
+				log.Printf("[vault] re-create proxy token failed: %v", err)
+			} else {
+				os.Setenv("VAULT_ADDR", m.addr)
+				os.Setenv("VAULT_TOKEN", m.ProxyToken())
+				log.Println("[vault] re-authenticated after restart, proxy token updated")
+			}
+		} else if status, err := m.Health(); err == nil {
 			log.Printf("[vault] status after restart: %s", status)
 		}
 	}

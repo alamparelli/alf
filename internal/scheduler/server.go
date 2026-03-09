@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 )
 
 // socketRequest is the JSON protocol for schedule tool → daemon communication.
@@ -18,6 +19,7 @@ type socketRequest struct {
 	Prompt   string            `json:"prompt,omitempty"`
 	Command  string            `json:"command,omitempty"`
 	Output   string            `json:"output,omitempty"`
+	Timeout  string            `json:"timeout,omitempty"` // Go duration string (e.g. "10m", "1h")
 	ID       string            `json:"id,omitempty"`
 	Skills   []string          `json:"skills,omitempty"`
 	Fields   map[string]string `json:"fields,omitempty"`
@@ -136,7 +138,16 @@ func (s *Server) handleConn(conn net.Conn) {
 				break
 			}
 		}
-		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Command, req.Output, req.Skills)
+		var timeout time.Duration
+		if req.Timeout != "" {
+			var terr error
+			timeout, terr = time.ParseDuration(req.Timeout)
+			if terr != nil {
+				resp.Error = fmt.Sprintf("invalid timeout %q: %v", req.Timeout, terr)
+				break
+			}
+		}
+		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Command, req.Output, timeout, req.Skills)
 		if err != nil {
 			resp.Error = err.Error()
 		} else {

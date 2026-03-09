@@ -3252,7 +3252,7 @@ loadStatus();
 loadTeachTiers();
 loadApps().then(() => {
   const saved = localStorage.getItem('alf-view');
-  if (saved && saved !== 'home') navigateTo(saved);
+  navigateTo(saved || 'chat');
 });
 wsInit();
 setInterval(loadStatus, 30000);
@@ -3863,7 +3863,7 @@ async function vaultSetup() {
 }
 
 async function vaultReset() {
-  if (!confirm('This will delete all stored credentials and reset the vault. Continue?')) return;
+  if (!confirm('Reset the vault?\n\n⚠ This will permanently delete ALL stored credentials, services, and tokens.\nYou will need to re-configure all API services from scratch.\nAlf will lose access to all external APIs.\n\nThis cannot be undone. Continue?')) return;
   try {
     await api('/api/vault/reset', { method: 'POST' });
     vaultRefresh();
@@ -3891,6 +3891,14 @@ async function vaultUnlock() {
 }
 
 async function vaultLock() {
+  const ok = confirm(
+    'Lock the vault?\n\n' +
+    '⚠ This will immediately revoke all tokens and disable API proxy access.\n' +
+    'Alf will no longer be able to call external APIs (vault proxy) until you unlock again.\n' +
+    'Scheduled jobs that use vault services will fail.\n\n' +
+    'Continue?'
+  );
+  if (!ok) return;
   try {
     await api('/api/vault/lock', { method: 'POST' });
     vaultRefresh();

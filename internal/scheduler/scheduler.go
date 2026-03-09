@@ -186,7 +186,7 @@ var validOutputs = map[string]bool{
 }
 
 // Create adds a new user job.
-func (e *Engine) Create(name, schedule, tier, prompt, command, output string, skills []string) (*Job, error) {
+func (e *Engine) Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string) (*Job, error) {
 	if output == "" {
 		output = "telegram"
 	}
@@ -219,6 +219,7 @@ func (e *Engine) Create(name, schedule, tier, prompt, command, output string, sk
 		Prompt:    prompt,
 		Command:   command,
 		Output:    output,
+		Timeout:   timeout,
 		Skills:    skills,
 		Enabled:   true,
 		CreatedAt: time.Now(),
@@ -317,6 +318,12 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 			j.Command = v
 		case "output":
 			j.Output = v
+		case "timeout":
+			d, err := time.ParseDuration(v)
+			if err != nil {
+				return nil, fmt.Errorf("invalid timeout %q: %w", v, err)
+			}
+			j.Timeout = d
 		case "enabled":
 			j.Enabled = v == "true"
 			reschedule = true

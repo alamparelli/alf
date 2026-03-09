@@ -1,5 +1,7 @@
 package controlcenter
 
+import "time"
+
 // ConfigStore loads and saves runtime configuration.
 type ConfigStore interface {
 	Load() (*Config, error)
@@ -43,6 +45,7 @@ type ScheduleJob struct {
 	System     bool    `json:"system"`
 	Managed    bool    `json:"managed,omitempty"`
 	AutoDelete bool    `json:"auto_delete"`
+	Timeout    string   `json:"timeout,omitempty"` // Go duration string
 	Skills     []string `json:"skills,omitempty"`
 	CreatedAt  string  `json:"created_at"`
 	LastRun    string  `json:"last_run,omitempty"`
@@ -53,7 +56,7 @@ type ScheduleJob struct {
 // ScheduleEngine is the subset of scheduler.Engine used by the CC schedules tab.
 type ScheduleEngine interface {
 	List(userOnly bool) []ScheduleJob
-	Create(name, schedule, tier, prompt, command, output string, skills []string) (*ScheduleJob, error)
+	Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string) (*ScheduleJob, error)
 	Delete(id string) error
 	Update(id string, fields map[string]string) (*ScheduleJob, error)
 }

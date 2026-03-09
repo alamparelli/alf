@@ -337,14 +337,41 @@ fetch('/api/bash', {
 });
 ```
 
-### 6. Schedules (optional)
+### 6. External APIs — ALWAYS use Vault Proxy
+
+**CRITICAL: NEVER hardcode API keys, tokens, or passwords in app code, scripts, or config files.**
+
+If an app needs to call an external API:
+- Use `vault proxy <service> <method> <path> [body]` — the vault injects credentials automatically
+- Run `vault list` first to check which services are configured
+- If the service isn't configured, tell the user: "Add the service via the Control Center vault page."
+- NEVER ask the user for API keys or store them in files
+
+```bash
+#!/bin/bash
+# schedules/collect.sh — fetches data via vault proxy (credentials injected automatically)
+vault proxy myapi GET /data | jq '.' > ~/data/apps/my-app/data/latest.json
+```
+
+```javascript
+// Frontend: call vault proxy through the ALF bash API
+fetch('/api/bash', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({command: 'vault proxy myapi GET /endpoint'})
+}).then(r => r.json()).then(d => {
+  const data = JSON.parse(d.output);
+});
+```
+
+### 7. Schedules (optional)
 
 For apps that need periodic data fetching, create shell scripts in `schedules/`:
 
 ```bash
 #!/bin/bash
-# schedules/collect.sh — fetches data and stores it
-curl -s "https://api.example.com/data" | jq '.' > ~/data/apps/my-app/data/latest.json
+# schedules/collect.sh — fetches data via vault proxy
+vault proxy myapi GET /data | jq '.' > ~/data/apps/my-app/data/latest.json
 ```
 
 Tell the user to register the schedule via chat: "Schedule `~/data/apps/{name}/schedules/collect.sh` to run every 6 hours"
@@ -378,3 +405,6 @@ Before delivering, verify:
 - Do NOT hardcode absolute URLs — use relative paths
 - Do NOT hardcode ANY colors — no `#000`, `#fff`, `#1a1a2e`, `rgb()`, `hsl()`. Use `var(--*)` exclusively.
 - Do NOT write dark/light theme logic — `theme.css` handles this via `prefers-color-scheme` automatically
+- Do NOT hardcode API keys, tokens, or secrets anywhere — use `vault proxy` for all external API calls
+- Do NOT store credentials in files, env vars, or config — the vault handles all secrets
+- Do NOT ask the user for API keys — tell them to add the service via the Control Center vault page

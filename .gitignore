@@ -18,6 +18,7 @@ Thumbs.db
 
 # Go
 vendor/
+third_party/
 
 # User space (runtime data)
 user-space/

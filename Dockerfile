@@ -17,11 +17,19 @@ RUN if [ "${TARGETARCH}" = "arm64" ]; then \
       && cmake --install build --prefix /usr/local; \
     fi
 
+# Copy vault-proxy source (needed as Go module dependency + standalone binaries).
+WORKDIR /vault-proxy
+COPY third_party/vault-proxy/ .
+
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+# Point replace directive to the vendored vault-proxy.
+RUN go mod edit -replace github.com/alessandrolamparelli/vault-proxy=/vault-proxy \
+    && go mod download
 
 COPY . .
+# Re-apply replace after COPY overwrites go.mod with the local-path version.
+RUN go mod edit -replace github.com/alessandrolamparelli/vault-proxy=/vault-proxy
 
 # Build Go binaries.
 # arm64: link whisper.cpp for native transcription.
@@ -38,6 +46,11 @@ RUN if [ "${TARGETARCH}" = "arm64" ]; then \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /telegram-tools ./cmd/signal \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /schedule-tools ./cmd/schedule-tools
+
+# Build vault-proxy binaries (secrets vault for AI agents).
+WORKDIR /vault-proxy
+RUN CGO_ENABLED=0 GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /vault-server ./cmd/vault-server \
+    && CGO_ENABLED=0 GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /vault-cli ./cmd/vault-cli
 
 # Stage 2: Runtime.
 FROM debian:bookworm-slim
@@ -73,6 +86,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
     dnsutils \
     net-tools \
+    procps \
+    iproute2 \
     && if [ "${TARGETARCH}" = "arm64" ]; then \
          apt-get install -y --no-install-recommends libgomp1; \
        else \
@@ -132,6 +147,8 @@ COPY --from=builder /extract-video /opt/alf/bin/extract-video
 COPY --from=builder /recall-tools /opt/alf/bin/recall-tools
 COPY --from=builder /telegram-tools /opt/alf/bin/telegram-tools
 COPY --from=builder /schedule-tools /opt/alf/bin/schedule-tools
+COPY --from=builder /vault-server /opt/alf/bin/vault-server
+COPY --from=builder /vault-cli /opt/alf/bin/vault-cli
 
 # Transcription script (used on amd64 with faster-whisper, ignored on arm64).
 COPY scripts/transcribe.py /opt/alf/transcribe.py
@@ -144,7 +161,9 @@ RUN mkdir -p /opt/alf/tools.d \
     && ln -s /opt/alf/bin/recall-tools /opt/alf/tools.d/forget \
     && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools.d/react \
     && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools.d/status \
-    && ln -s /opt/alf/bin/schedule-tools /opt/alf/tools.d/schedule
+    && ln -s /opt/alf/bin/schedule-tools /opt/alf/tools.d/schedule \
+    && ln -s /opt/alf/bin/vault-cli /opt/alf/tools.d/vault \
+    && ln -s /opt/alf/bin/vault-server /usr/local/bin/vault-server
 
 # Create users for two-user privilege model.
 RUN groupadd --gid 1000 alf \
@@ -159,11 +178,14 @@ RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
     && mkdir -p /home/alf/data/.claude \
     && mkdir -p /home/alf/data/config.d /home/alf/data/skills.d \
     && mkdir -p /opt/alf/config.d \
+    && mkdir -p /opt/alf/vault-data \
     && mkdir -p /opt/alf/user-packages/bin /opt/alf/user-packages/lib \
     && chown -R root:alf /home/alf/data \
     && chmod -R g+ws /home/alf/data \
     && chown -R alf:alf /opt/alf/config.d \
     && chmod 750 /opt/alf/config.d \
+    && chown alf:alf /opt/alf/vault-data \
+    && chmod 700 /opt/alf/vault-data \
     && chmod -R 755 /opt/alf/tools.d \
     && chmod -R 755 /opt/alf/bin
 

@@ -77,6 +77,7 @@ function navigateTo(view) {
   const logsView = document.getElementById('logsView');
   const tiersView = document.getElementById('tiersView');
   const firewallView = document.getElementById('firewallView');
+  const vaultView = document.getElementById('vaultView');
   const terminalView = document.getElementById('terminalView');
 
   // Update active nav item — docs:id should highlight the docs nav item
@@ -97,6 +98,7 @@ function navigateTo(view) {
   logsView.style.display = 'none';
   tiersView.style.display = 'none';
   firewallView.style.display = 'none';
+  vaultView.style.display = 'none';
   terminalView.style.display = 'none';
 
   if (view === 'home') {
@@ -138,6 +140,10 @@ function navigateTo(view) {
     firewallView.style.display = '';
     pageFrame.src = '';
     fwInit();
+  } else if (view === 'vault') {
+    vaultView.style.display = '';
+    pageFrame.src = '';
+    vaultInit();
   } else if (view === 'terminal') {
     terminalView.style.display = '';
     pageFrame.src = '';
@@ -3760,3 +3766,271 @@ if (isTouchDevice) {
     clearTimeout(termLongPressTimer);
   }, { passive: true });
 }
+
+// ========== Vault ==========
+
+let vaultInited = false;
+
+function vaultInit() {
+  if (vaultInited) { vaultRefresh(); return; }
+  vaultInited = true;
+
+  document.getElementById('vaultUnlockBtn').addEventListener('click', vaultUnlock);
+  document.getElementById('vaultPasswordInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') vaultUnlock();
+  });
+  document.getElementById('vaultLockBtn').addEventListener('click', vaultLock);
+  document.getElementById('vaultRefreshBtn').addEventListener('click', vaultRefresh);
+  document.getElementById('vaultAddServiceBtn').addEventListener('click', () => vaultShowServiceModal());
+  document.getElementById('vaultSvcCancelBtn').addEventListener('click', () => {
+    document.getElementById('vaultServiceModal').style.display = 'none';
+  });
+  document.getElementById('vaultSvcSaveBtn').addEventListener('click', vaultSaveService);
+  document.getElementById('vaultSvcAuthType').addEventListener('change', vaultToggleAuthFields);
+  document.getElementById('vaultCreateTokenBtn').addEventListener('click', vaultCreateToken);
+
+  vaultRefresh();
+}
+
+async function vaultRefresh() {
+  try {
+    const data = await api('/api/vault/status');
+    const dot = document.getElementById('vaultStatusDot');
+    const text = document.getElementById('vaultStatusText');
+    const unlockCard = document.getElementById('vaultUnlockCard');
+    const lockBtn = document.getElementById('vaultLockBtn');
+    const servicesCard = document.getElementById('vaultServicesCard');
+    const tokensCard = document.getElementById('vaultTokensCard');
+
+    if (!data.available) {
+      dot.className = 'vault-status-indicator vault-status-off';
+      text.textContent = 'Vault not available';
+      unlockCard.style.display = 'none';
+      lockBtn.style.display = 'none';
+      servicesCard.style.display = 'none';
+      tokensCard.style.display = 'none';
+      return;
+    }
+
+    if (data.status === 'unlocked') {
+      dot.className = 'vault-status-indicator vault-status-on';
+      text.textContent = 'Unlocked';
+      unlockCard.style.display = 'none';
+      lockBtn.style.display = '';
+      servicesCard.style.display = '';
+      tokensCard.style.display = '';
+      vaultLoadServices();
+      vaultLoadTokens();
+    } else {
+      dot.className = 'vault-status-indicator vault-status-locked';
+      text.textContent = data.status === 'unreachable' ? 'Unreachable' : 'Locked';
+      unlockCard.style.display = '';
+      lockBtn.style.display = 'none';
+      servicesCard.style.display = 'none';
+      tokensCard.style.display = 'none';
+    }
+  } catch (err) {
+    const msg = err?.error || err?.message || 'unknown error';
+    document.getElementById('vaultStatusText').textContent = 'Error: ' + msg;
+  }
+}
+
+async function vaultUnlock() {
+  const pw = document.getElementById('vaultPasswordInput').value.trim();
+  if (!pw) return;
+  try {
+    await api('/api/vault/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw })
+    });
+    document.getElementById('vaultPasswordInput').value = '';
+    vaultRefresh();
+  } catch (err) {
+    const msg = err?.error || err?.message || 'unknown error';
+    alert('Unlock failed: ' + msg);
+  }
+}
+
+async function vaultLock() {
+  try {
+    await api('/api/vault/lock', { method: 'POST' });
+    vaultRefresh();
+  } catch (err) {
+    const msg = err?.error || err?.message || 'unknown error';
+    alert('Lock failed: ' + msg);
+  }
+}
+
+async function vaultLoadServices() {
+  try {
+    const services = await api('/api/vault/services');
+    const list = document.getElementById('vaultServicesList');
+    if (!services || services.length === 0) {
+      list.innerHTML = '<div class="vault-empty">Add a service to store its API credentials, then use Access Keys to let apps call it through the proxy.</div>';
+      return;
+    }
+    list.innerHTML = services.map(s => `
+      <div class="vault-item">
+        <div class="vault-item-info">
+          <span class="vault-item-name">${esc(s.name)}</span>
+          <span class="vault-item-detail">${esc(s.base_url)} &middot; ${esc(s.auth_type)}</span>
+        </div>
+        <div class="vault-item-actions">
+          <button class="btn btn-icon vault-test-btn" data-name="${esc(s.name)}" title="Test"><i data-lucide="zap"></i></button>
+          <button class="btn btn-icon vault-del-btn" data-name="${esc(s.name)}" title="Delete"><i data-lucide="trash-2"></i></button>
+        </div>
+      </div>
+    `).join('');
+    lucide.createIcons();
+    list.querySelectorAll('.vault-test-btn').forEach(btn => {
+      btn.addEventListener('click', () => vaultTestService(btn.dataset.name, btn));
+    });
+    list.querySelectorAll('.vault-del-btn').forEach(btn => {
+      btn.addEventListener('click', () => vaultDeleteService(btn.dataset.name));
+    });
+  } catch (err) {
+    document.getElementById('vaultServicesList').innerHTML = '<div class="vault-empty">Error loading services</div>';
+  }
+}
+
+async function vaultTestService(name, btn) {
+  btn.disabled = true;
+  try {
+    const result = await api('/api/vault/services/' + encodeURIComponent(name) + '/test', { method: 'POST' });
+    btn.classList.add(result.ok ? 'vault-test-ok' : 'vault-test-fail');
+    setTimeout(() => btn.classList.remove('vault-test-ok', 'vault-test-fail'), 2000);
+  } catch (err) {
+    btn.classList.add('vault-test-fail');
+    setTimeout(() => btn.classList.remove('vault-test-fail'), 2000);
+  }
+  btn.disabled = false;
+}
+
+async function vaultDeleteService(name) {
+  if (!confirm('Delete service "' + name + '"?')) return;
+  try {
+    await api('/api/vault/services/' + encodeURIComponent(name), { method: 'DELETE' });
+    vaultLoadServices();
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  }
+}
+
+function vaultShowServiceModal() {
+  document.getElementById('vaultSvcName').value = '';
+  document.getElementById('vaultSvcBaseURL').value = '';
+  document.getElementById('vaultSvcAuthType').value = 'bearer';
+  document.getElementById('vaultSvcToken').value = '';
+  document.getElementById('vaultSvcHeaderName').value = '';
+  document.getElementById('vaultSvcHeaderValue').value = '';
+  document.getElementById('vaultSvcUsername').value = '';
+  document.getElementById('vaultSvcPassword').value = '';
+  vaultToggleAuthFields();
+  document.getElementById('vaultServiceModal').style.display = '';
+}
+
+function vaultToggleAuthFields() {
+  const type = document.getElementById('vaultSvcAuthType').value;
+  document.getElementById('vaultSvcBearerGroup').style.display = type === 'bearer' ? '' : 'none';
+  document.getElementById('vaultSvcHeaderGroup').style.display = type === 'header' ? '' : 'none';
+  document.getElementById('vaultSvcBasicGroup').style.display = type === 'basic' ? '' : 'none';
+}
+
+async function vaultSaveService() {
+  const name = document.getElementById('vaultSvcName').value.trim();
+  const baseURL = document.getElementById('vaultSvcBaseURL').value.trim();
+  const authType = document.getElementById('vaultSvcAuthType').value;
+  if (!name || !baseURL) { alert('Name and Base URL are required'); return; }
+
+  const payload = { name, base_url: baseURL, auth: { type: authType } };
+  if (authType === 'bearer') {
+    payload.auth.token = document.getElementById('vaultSvcToken').value;
+  } else if (authType === 'header') {
+    payload.auth.header_name = document.getElementById('vaultSvcHeaderName').value;
+    payload.auth.header_value = document.getElementById('vaultSvcHeaderValue').value;
+  } else if (authType === 'basic') {
+    payload.auth.username = document.getElementById('vaultSvcUsername').value;
+    payload.auth.password = document.getElementById('vaultSvcPassword').value;
+  }
+
+  try {
+    await api('/api/vault/services', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    document.getElementById('vaultServiceModal').style.display = 'none';
+    vaultLoadServices();
+  } catch (err) {
+    alert('Save failed: ' + err.message);
+  }
+}
+
+const vaultScopeLabels = {
+  proxy: 'LLM Access (read-only)',
+  admin: 'Full Access',
+};
+
+async function vaultLoadTokens() {
+  try {
+    const tokens = await api('/api/vault/tokens');
+    const list = document.getElementById('vaultTokensList');
+    if (!tokens || tokens.length === 0) {
+      list.innerHTML = '<div class="vault-empty">No active keys.</div>';
+      return;
+    }
+    list.innerHTML = tokens.map(t => {
+      const prefix = t.id_prefix || t.id || '???';
+      const label = vaultScopeLabels[t.scope] || esc(t.scope);
+      return `
+      <div class="vault-item">
+        <div class="vault-item-info">
+          <span class="vault-item-name">${esc(prefix)}</span>
+          <span class="vault-item-detail">${label}</span>
+        </div>
+        <div class="vault-item-actions">
+          <button class="btn btn-icon vault-revoke-btn" data-prefix="${esc(prefix)}" title="Revoke"><i data-lucide="trash-2"></i></button>
+        </div>
+      </div>`;
+    }).join('');
+    lucide.createIcons();
+    list.querySelectorAll('.vault-revoke-btn').forEach(btn => {
+      btn.addEventListener('click', () => vaultRevokeKey(btn.dataset.prefix));
+    });
+  } catch (err) {
+    document.getElementById('vaultTokensList').innerHTML = '<div class="vault-empty">Error loading keys</div>';
+  }
+}
+
+async function vaultCreateToken() {
+  const scope = prompt('Key scope (proxy or admin):', 'proxy');
+  if (!scope) return;
+  try {
+    const result = await api('/api/vault/tokens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope })
+    });
+    if (result.id) {
+      alert('Key created:\n' + result.id + '\n\nSave this — it won\'t be shown again.');
+    }
+    vaultLoadTokens();
+  } catch (err) {
+    const msg = err?.error || err?.message || 'unknown error';
+    alert('Create key failed: ' + msg);
+  }
+}
+
+async function vaultRevokeKey(prefix) {
+  if (!confirm('Revoke this key?')) return;
+  try {
+    const cleanId = prefix.replace(/\.+$/, ''); // strip trailing dots from "abc123..."
+    await api('/api/vault/tokens/' + encodeURIComponent(cleanId), { method: 'DELETE' });
+    vaultLoadTokens();
+  } catch (err) {
+    const msg = err?.error || err?.message || 'unknown error';
+    alert('Revoke failed: ' + msg);
+  }
+}
+

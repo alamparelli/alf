@@ -21,6 +21,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/firewall"
+	"github.com/alamparelli/alf/internal/vault"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/gittrack"
@@ -258,6 +259,28 @@ func main() {
 	os.Setenv("HTTPS_PROXY", proxyURL)
 	os.Setenv("NO_PROXY", "127.0.0.1,localhost")
 
+	// Start vault-server if binary is available.
+	var vaultMgr *vault.Manager
+	if _, err := exec.LookPath("vault-server"); err == nil {
+		vaultMgr = vault.NewManager("/opt/alf/vault-data")
+		if err := vaultMgr.Start(context.Background()); err != nil {
+			log.Printf("warning: vault-server failed to start: %v", err)
+			vaultMgr = nil
+		} else if pw := readSecret("VAULT_MASTER_PASSWORD"); pw != "" {
+			if err := vaultMgr.AutoUnlock(pw); err != nil {
+				log.Printf("warning: vault auto-unlock failed: %v", err)
+			} else if _, err := vaultMgr.CreateProxyToken(); err != nil {
+				log.Printf("warning: vault proxy token failed: %v", err)
+			} else {
+				os.Setenv("VAULT_ADDR", vaultMgr.Addr())
+				os.Setenv("VAULT_TOKEN", vaultMgr.ProxyToken())
+				log.Println("vault: unlocked, proxy token created")
+			}
+		} else {
+			log.Println("vault: started (locked — set vault_master_password or unlock via Control Center)")
+		}
+	}
+
 	// Load initial tiers config.
 	tierStore := cc.NewFileTierStore(cc.TiersPath(configDir))
 	if err := tierStore.Reload(); err != nil {
@@ -483,7 +506,7 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, schedAdapter, fwStore, fwProxy)
+		server, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, schedAdapter, fwStore, fwProxy, vaultMgr)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {

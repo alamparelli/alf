@@ -50,6 +50,7 @@ services:
       - CC_AUTH_TOKEN_FILE=/run/secrets/cc_auth_token
       - OPENROUTER_API_KEY_FILE=/run/secrets/openrouter_api_key
       - CLAUDE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth_token
+      - VAULT_MASTER_PASSWORD_FILE=/run/secrets/vault_master_password
       - CC_EXTERNAL_URL={{.CCExternalURL}}
 {{- if .Timezone}}
       - TZ={{.Timezone}}
@@ -60,6 +61,7 @@ services:
       - cc_auth_token
       - openrouter_api_key
       - claude_oauth_token
+      - vault_master_password
     volumes:
       - ./data:/home/alf/data
       - ./config.d:/opt/alf/config.d
@@ -69,6 +71,7 @@ services:
       - ./cache/npm:/home/alf/.npm
       - ./cache/cache:/home/alf/.cache
       - ./local:/opt/alf/user-packages
+      - ./vault-data:/opt/alf/vault-data
 {{- range .Workspaces}}
       - {{.}}:/workspaces/{{base .}}
 {{- end}}
@@ -96,3 +99,5 @@ secrets:
     file: ./secrets/openrouter_api_key
   claude_oauth_token:
     file: ./secrets/claude_oauth_token
+  vault_master_password:
+    file: ./secrets/vault_master_password

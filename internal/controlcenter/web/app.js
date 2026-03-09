@@ -2291,6 +2291,8 @@ let schedulesVisible = [];
 let schedulesInitialized = false;
 let schedulesFilter = 'all';
 let schedulesSSE = null;
+let schedCollapsedSet = new Set(); // track collapsed job IDs
+let schedAllCollapsed = false;
 
 const OUTPUTS = ['telegram', 'file', 'both', 'silent'];
 
@@ -2298,6 +2300,15 @@ function schedulesInit() {
   if (!schedulesInitialized) {
     schedulesInitialized = true;
     document.getElementById('schedulesAddBtn').addEventListener('click', () => schedulesShowModal(null));
+    document.getElementById('schedCollapseAllBtn').addEventListener('click', () => {
+      schedAllCollapsed = !schedAllCollapsed;
+      if (schedAllCollapsed) {
+        (schedulesVisible || []).forEach(j => schedCollapsedSet.add(j.id));
+      } else {
+        schedCollapsedSet.clear();
+      }
+      schedulesRender();
+    });
     document.getElementById('schedFilters').addEventListener('click', e => {
       const btn = e.target.closest('.sched-filter');
       if (!btn) return;
@@ -2406,8 +2417,10 @@ function schedulesRender() {
         '<button class="btn-sm btn-danger sched-delete-btn" data-idx="' + i + '">Delete</button>'
       : '<button class="btn-sm sched-toggle-btn" data-idx="' + i + '">' + (j.enabled ? 'Disable' : 'Enable') + '</button>';
 
-    return '<div class="tier-card" data-idx="' + i + '">' +
+    const isCollapsed = schedCollapsedSet.has(j.id);
+    return '<div class="tier-card' + (isCollapsed ? ' collapsed' : '') + '" data-idx="' + i + '" data-sched-id="' + esc(j.id) + '">' +
       '<div class="tier-card-header">' +
+        '<i data-lucide="chevron-down" class="sched-collapse-chevron" style="width:14px;height:14px"></i>' +
         '<div class="tier-card-title">' + statusDot + '<strong>' + esc(j.name) + '</strong></div>' +
         '<span class="tier-model-badge" style="color:var(--text-dim)">' + esc(j.schedule) + '</span>' +
         '<div class="tier-card-actions">' + actions + '</div>' +
@@ -2455,6 +2468,28 @@ function schedulesRender() {
         .catch(err => toast('Toggle failed: ' + err.message, 'error'));
     });
   });
+  // Collapse/expand individual cards.
+  list.querySelectorAll('.sched-collapse-chevron').forEach(chevron => {
+    chevron.addEventListener('click', e => {
+      e.stopPropagation();
+      const card = chevron.closest('.tier-card');
+      const id = card.dataset.schedId;
+      if (schedCollapsedSet.has(id)) {
+        schedCollapsedSet.delete(id);
+        schedAllCollapsed = false;
+      } else {
+        schedCollapsedSet.add(id);
+      }
+      card.classList.toggle('collapsed');
+    });
+  });
+  // Update collapse-all button icon.
+  const colBtn = document.getElementById('schedCollapseAllBtn');
+  if (colBtn) {
+    const icon = colBtn.querySelector('i[data-lucide]');
+    if (icon) icon.setAttribute('data-lucide', schedAllCollapsed ? 'maximize-2' : 'minimize-2');
+  }
+  if (window.lucide) lucide.createIcons();
 }
 
 function schedulesShowModal(job) {
@@ -2591,6 +2626,18 @@ function tasksInit() {
     document.getElementById('tasksAutoRefresh').addEventListener('change', (e) => {
       if (e.target.checked) tasksStartAutoRefresh(); else tasksStopAutoRefresh();
     });
+    // Tab bar switching.
+    document.querySelectorAll('.tasks-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tasks-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.tab;
+        document.getElementById('tasksRunsPane').style.display = target === 'tasks-runs' ? '' : 'none';
+        document.getElementById('tasksTeamsPane').style.display = target === 'tasks-teams' ? '' : 'none';
+        if (target === 'tasks-teams') teamsFetch();
+      });
+    });
+    teamsInitEditor();
   }
   tasksFetch();
   if (document.getElementById('tasksAutoRefresh').checked) tasksStartAutoRefresh();
@@ -2851,6 +2898,169 @@ function taskEscapeHtml(s) {
   return d.innerHTML;
 }
 
+// --- Teams Management ---
+const teamsTemplate = {
+  name: "my-team",
+  description: "What this team does",
+  max_agents_per_request: 3,
+  global_timeout_minutes: 15,
+  agents: [{
+    name: "agent-name",
+    description: "What this agent does",
+    model: "sonnet",
+    system_prompt: "You are a specialist in...",
+    tools: [],
+    write_capable: false,
+    max_turns: 10,
+    effort: "medium"
+  }]
+};
+
+async function teamsFetch() {
+  try {
+    const data = await api('/api/teams');
+    teamsRender(data.teams || []);
+  } catch (e) {
+    document.getElementById('teamsList').innerHTML = '<div class="task-empty">Failed to load teams</div>';
+  }
+}
+
+function teamsRender(teams) {
+  const container = document.getElementById('teamsList');
+  if (teams.length === 0) {
+    container.innerHTML = '<div class="task-empty"><i data-lucide="users" style="width:40px;height:40px;opacity:0.3;margin-bottom:8px"></i><br>No agent teams configured.<br><span style="font-size:0.8rem;opacity:0.7">Click "New Team" to add one.</span></div>';
+    lucide.createIcons({ attrs: { class: ['lucide'] }, nameAttr: 'data-lucide' });
+    return;
+  }
+  let html = '';
+  for (const team of teams) {
+    const agentBadges = (team.agents || []).map(a =>
+      '<span class="team-agent-badge">' + taskEscapeHtml(a.name) + ' (' + taskEscapeHtml(a.model || '?') + ')</span>'
+    ).join('');
+    html += '<div class="team-card" data-team-name="' + taskEscapeHtml(team.name) + '">' +
+      '<div class="team-card-header">' +
+        '<span class="team-card-name">' + taskEscapeHtml(team.name) + '</span>' +
+        '<div class="team-card-actions">' +
+          '<button class="btn btn-sm btn-icon team-edit-btn" title="Edit"><i data-lucide="edit-2" style="width:14px;height:14px"></i></button>' +
+          '<button class="btn btn-sm btn-icon btn-danger team-delete-btn" title="Delete"><i data-lucide="trash-2" style="width:14px;height:14px"></i></button>' +
+        '</div>' +
+      '</div>' +
+      (team.description ? '<div class="team-card-desc">' + taskEscapeHtml(team.description) + '</div>' : '') +
+      '<div class="team-card-agents">' + agentBadges + '</div>' +
+    '</div>';
+  }
+  container.innerHTML = html;
+  lucide.createIcons({ attrs: { class: ['lucide'] }, nameAttr: 'data-lucide' });
+
+  // Bind edit buttons.
+  container.querySelectorAll('.team-edit-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = btn.closest('.team-card');
+      const name = card.dataset.teamName;
+      const team = teams.find(t => t.name === name);
+      if (team) teamsOpenEditor(team);
+    });
+  });
+  // Bind delete buttons.
+  container.querySelectorAll('.team-delete-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = btn.closest('.team-card');
+      const name = card.dataset.teamName;
+      if (confirm('Delete team "' + name + '"?')) teamsDelete(name);
+    });
+  });
+}
+
+function teamsInitEditor() {
+  document.getElementById('teamsAddBtn').addEventListener('click', () => {
+    teamsOpenEditor(null);
+  });
+  document.getElementById('teamsRefreshBtn').addEventListener('click', () => teamsFetch());
+  document.getElementById('teamsEditorSave').addEventListener('click', () => teamsSave());
+  document.getElementById('teamsEditorCancel').addEventListener('click', () => teamsCloseEditor());
+}
+
+function teamsOpenEditor(team) {
+  const editor = document.getElementById('teamsEditor');
+  const textarea = document.getElementById('teamsEditorJson');
+  const title = document.getElementById('teamsEditorTitle');
+  const hint = document.getElementById('teamsEditorHint');
+
+  editor.style.display = '';
+  hint.textContent = '';
+  hint.className = 'teams-editor-hint';
+
+  if (team) {
+    title.textContent = 'Edit: ' + team.name;
+    textarea.value = JSON.stringify(team, null, 2);
+  } else {
+    title.textContent = 'New Team';
+    textarea.value = JSON.stringify(teamsTemplate, null, 2);
+  }
+  textarea.focus();
+}
+
+function teamsCloseEditor() {
+  document.getElementById('teamsEditor').style.display = 'none';
+}
+
+async function teamsSave() {
+  const textarea = document.getElementById('teamsEditorJson');
+  const hint = document.getElementById('teamsEditorHint');
+  hint.textContent = '';
+  hint.className = 'teams-editor-hint';
+
+  let parsed;
+  try {
+    parsed = JSON.parse(textarea.value);
+  } catch (e) {
+    hint.textContent = 'Invalid JSON: ' + e.message;
+    hint.className = 'teams-editor-hint error';
+    return;
+  }
+
+  if (!parsed.name) {
+    hint.textContent = 'Team name is required.';
+    hint.className = 'teams-editor-hint error';
+    return;
+  }
+
+  try {
+    const data = await api('/api/teams', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsed),
+    });
+    if (data.ok) {
+      toast('Team saved');
+      teamsCloseEditor();
+      await teamsFetch();
+    } else {
+      hint.textContent = data.error || 'Save failed';
+      hint.className = 'teams-editor-hint error';
+    }
+  } catch (e) {
+    hint.textContent = 'Save failed: ' + (e.error || e.message || 'unknown error');
+    hint.className = 'teams-editor-hint error';
+  }
+}
+
+async function teamsDelete(name) {
+  try {
+    const data = await api('/api/teams?name=' + encodeURIComponent(name), { method: 'DELETE' });
+    if (data.ok) {
+      toast('Team deleted');
+      await teamsFetch();
+    } else {
+      toast(data.error || 'Delete failed', 'error');
+    }
+  } catch (e) {
+    toast('Delete failed: ' + (e.error || e.message || 'unknown'), 'error');
+  }
+}
+
 // --- Logs ---
 let logsAutoTimer = null;
 let logsInitialized = false;
@@ -2967,15 +3177,21 @@ function logsApplyFilter() {
     if (q && !l.toLowerCase().includes(q)) return false;
     return logsMatchesFilter(l);
   });
+  // Preserve scroll position unless user was at the bottom (auto-follow).
+  const wasAtBottom = out.scrollTop + out.clientHeight >= out.scrollHeight - 20;
+  const prevScroll = out.scrollTop;
   out.innerHTML = '';
   filtered.forEach(line => {
     const span = document.createElement('span');
     span.className = 'log-line' + logsLineClass(line);
     span.textContent = line;
     out.appendChild(span);
-    out.appendChild(document.createTextNode('\n'));
   });
-  out.scrollTop = out.scrollHeight;
+  if (wasAtBottom) {
+    out.scrollTop = out.scrollHeight;
+  } else {
+    out.scrollTop = prevScroll;
+  }
 }
 
 function logsLineClass(line) {

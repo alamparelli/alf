@@ -14,12 +14,10 @@ import (
 const maxFileSize = 1 << 20  // 1 MB
 const maxUploadTotal = 10 << 20 // 10 MB total for multi-file upload
 
-// editableExts lists file extensions that can be written via PUT.
-var editableExts = map[string]bool{
-	".md": true, ".json": true, ".txt": true,
-	".yaml": true, ".yml": true, ".toml": true,
-	".sh": true, ".py": true, ".js": true,
-}
+// editableExts is no longer used for write gating — all non-binary text files
+// under the workspace are editable. Kept only for backward compat in readFile
+// (the "editable" JSON field hint to the frontend).
+var editableExts map[string]bool // nil — unused
 
 // WorkspaceHandler serves the data directory as a browsable workspace.
 // Files under config.d/ are read via the :ro bind mount in DataDir but
@@ -129,16 +127,10 @@ func pathWithinDir(path, dir string) bool {
 	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
 }
 
-// readOnlyPrefixes are workspace paths that the user can browse but not edit.
-var readOnlyPrefixes = []string{"config.d", "skills.d", "tools.d"}
-
 // isReadOnly returns true if relPath falls inside a read-only directory.
+// Currently no directories are read-only — config.d and skills.d writes are
+// remapped to their rw mounts by resolveWrite.
 func (h *WorkspaceHandler) isReadOnly(relPath string) bool {
-	for _, prefix := range readOnlyPrefixes {
-		if relPath == prefix || strings.HasPrefix(relPath, prefix+"/") {
-			return true
-		}
-	}
 	return false
 }
 
@@ -257,15 +249,14 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 		}
 		sort.Strings(names)
 		resp["protected"] = names
-		resp["readOnly"] = readOnlyPrefixes
+		resp["readOnly"] = []string{}
 	}
 	data, _ := json.Marshal(resp)
 	w.Write(data)
 }
 
 func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath, relPath string, info os.FileInfo) {
-	ext := strings.ToLower(filepath.Ext(absPath))
-	editable := editableExts[ext] && !h.isReadOnly(relPath)
+	editable := !h.isReadOnly(relPath)
 
 	if info.Size() > maxFileSize {
 		data, _ := json.Marshal(map[string]any{
@@ -310,12 +301,6 @@ func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath, relPath stri
 func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, relPath string) {
 	if relPath == "" {
 		http.Error(w, jsonErr("cannot write to root directory"), http.StatusBadRequest)
-		return
-	}
-
-	ext := strings.ToLower(filepath.Ext(absPath))
-	if !editableExts[ext] {
-		http.Error(w, jsonErr("file type not editable: "+ext), http.StatusForbidden)
 		return
 	}
 
@@ -369,7 +354,7 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 var protectedDirs = map[string]bool{
 	"config":          true,
 	"config.d":        true,
-	"config.d/agents": true,
+	"agents/teams": true,
 	"context":         true,
 	"docs":            true,
 	"logs":            true,
@@ -432,7 +417,7 @@ func (h *WorkspaceHandler) notifyChange(relPath string) {
 		h.Notifier.Notify(ReloadTools)
 	case strings.HasPrefix(relPath, "skills") || strings.HasPrefix(relPath, "skills.d"):
 		h.Notifier.Notify(ReloadSkills)
-	case strings.HasPrefix(relPath, "config.d/agents"):
+	case strings.HasPrefix(relPath, "agents/teams"):
 		h.Notifier.Notify(ReloadAgents)
 	}
 }

@@ -762,6 +762,50 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   padding: 24px 16px; max-width: 900px; width: 100%; margin: 0 auto;
   overflow-y: auto;
 }
+.tasks-tab-bar {
+  display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+.tasks-tab {
+  padding: 8px 16px; border: none; background: none; color: var(--text-dim);
+  cursor: pointer; font-size: 0.9rem; border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tasks-tab:hover { color: var(--text); }
+.tasks-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tasks-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; }
+
+/* ─── Teams management ─────────────────────────────── */
+.teams-list { display: flex; flex-direction: column; gap: 8px; }
+.team-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 16px; cursor: pointer; transition: border-color 0.15s;
+}
+.team-card:hover { border-color: var(--accent); }
+.team-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.team-card-name { font-weight: 600; font-size: 0.95rem; }
+.team-card-desc { font-size: 0.8rem; color: var(--text-dim); margin-top: 4px; }
+.team-card-agents { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.team-agent-badge {
+  font-size: 0.75rem; padding: 2px 8px; border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+.team-card-actions { display: flex; gap: 4px; }
+.teams-editor { margin-top: 12px; }
+.teams-editor-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.teams-editor-header span { font-weight: 600; font-size: 0.95rem; }
+.teams-json-editor {
+  width: 100%; min-height: 300px; font-family: var(--font-mono, monospace);
+  font-size: 0.85rem; background: var(--card); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+  resize: vertical; tab-size: 2;
+}
+.teams-editor-hint { font-size: 0.8rem; color: var(--text-dim); margin-top: 4px; }
+.teams-editor-hint.error { color: var(--danger, #e55); }
 .tasks-toolbar {
   display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
 }
@@ -1224,7 +1268,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .schedules-toolbar-right { margin-left: auto; }
 .sched-filters {
-  display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap;
+  display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;
 }
 .sched-filter {
   padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
@@ -1303,6 +1347,10 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 
 .tier-card-details { padding: 10px 16px; }
+.tier-card.collapsed .tier-card-details { display: none; }
+.tier-card.collapsed .tier-card-header { border-bottom: none; }
+.sched-collapse-chevron { transition: transform 0.15s; cursor: pointer; flex-shrink: 0; }
+.tier-card.collapsed .sched-collapse-chevron { transform: rotate(-90deg); }
 .tier-detail-row {
   display: flex; gap: 12px; padding: 3px 0; font-size: 0.82rem;
 }

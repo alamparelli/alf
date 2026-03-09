@@ -174,7 +174,7 @@ func main() {
 	for _, sub := range []string{"config", "tools", "skills", "context", "apps"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
-	os.MkdirAll(filepath.Join(configDir, "agents"), 0o755)
+	os.MkdirAll(filepath.Join(dataDir, "agents", "teams"), 0o755)
 
 	// Populate tools.d/ with symlinks to each system tool in /opt/alf/tools/.
 	// The host volume mount overwrites any Dockerfile-created symlinks,
@@ -294,7 +294,7 @@ func main() {
 	go watchConfigFiles(configDir, reloadCh)
 
 	// Load agent team configurations.
-	agentStore := agents.NewFileAgentStore(filepath.Join(configDir, "agents"))
+	agentStore := agents.NewFileAgentStore(filepath.Join(dataDir, "agents", "teams"))
 
 	// Auto-enable the agent tier when teams are configured.
 	if teams := agentStore.All(); len(teams) > 0 {

@@ -53,7 +53,7 @@ func TestSeedBundledAgents(t *testing.T) {
 	}
 
 	// Verify the store can load the seeded files.
-	agentsDir := dir + "/config.d/agents"
+	agentsDir := dir + "/agents/teams"
 	store := agents.NewFileAgentStore(agentsDir)
 	all := store.All()
 	if len(all) == 0 {
@@ -85,7 +85,7 @@ func TestSeedBundledAgentsIdempotent(t *testing.T) {
 	}
 
 	// Modify the seeded file.
-	modifiedPath := dir + "/config.d/agents/starter.json"
+	modifiedPath := dir + "/agents/teams/starter.json"
 	if err := os.WriteFile(modifiedPath, []byte(`{"name":"starter","agents":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestSeedBundledAgentsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := agents.NewFileAgentStore(dir + "/config.d/agents")
+	store := agents.NewFileAgentStore(dir + "/agents/teams")
 	tc, _ := store.Get("starter")
 	if len(tc.Agents) != 0 {
 		t.Error("expected modified file to be preserved (0 agents), but it was overwritten")

@@ -3900,6 +3900,8 @@ async function vaultLock() {
   }
 }
 
+let vaultServicesCache = [];
+
 async function vaultLoadServices() {
   try {
     const services = await api('/api/vault/services');
@@ -3908,19 +3910,24 @@ async function vaultLoadServices() {
       list.innerHTML = '<div class="vault-empty">Add a service to store its API credentials, then use Access Keys to let apps call it through the proxy.</div>';
       return;
     }
+    vaultServicesCache = services;
     list.innerHTML = services.map(s => `
       <div class="vault-item">
         <div class="vault-item-info">
           <span class="vault-item-name">${esc(s.name)}</span>
-          <span class="vault-item-detail">${esc(s.base_url)} &middot; ${esc(s.auth_type)}</span>
+          <span class="vault-item-detail">${esc(s.base_url)} &middot; ${esc(s.auth_type)}${s.tls_skip_verify ? ' &middot; TLS skip' : ''}</span>
         </div>
         <div class="vault-item-actions">
+          <button class="btn btn-icon vault-edit-btn" data-name="${esc(s.name)}" title="Edit"><i data-lucide="pencil"></i></button>
           <button class="btn btn-icon vault-test-btn" data-name="${esc(s.name)}" title="Test"><i data-lucide="zap"></i></button>
           <button class="btn btn-icon vault-del-btn" data-name="${esc(s.name)}" title="Delete"><i data-lucide="trash-2"></i></button>
         </div>
       </div>
     `).join('');
     lucide.createIcons();
+    list.querySelectorAll('.vault-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => vaultEditService(btn.dataset.name));
+    });
     list.querySelectorAll('.vault-test-btn').forEach(btn => {
       btn.addEventListener('click', () => vaultTestService(btn.dataset.name, btn));
     });
@@ -3955,17 +3962,35 @@ async function vaultDeleteService(name) {
   }
 }
 
-function vaultShowServiceModal() {
-  document.getElementById('vaultSvcName').value = '';
-  document.getElementById('vaultSvcBaseURL').value = '';
-  document.getElementById('vaultSvcAuthType').value = 'bearer';
+function vaultShowServiceModal(edit) {
+  document.getElementById('vaultServiceModalTitle').textContent = edit ? 'Edit Service' : 'Add Service';
+  document.getElementById('vaultSvcName').value = edit ? edit.name : '';
+  document.getElementById('vaultSvcName').readOnly = !!edit;
+  document.getElementById('vaultSvcBaseURL').value = edit ? edit.base_url : '';
+  document.getElementById('vaultSvcAuthType').value = edit ? (edit.auth_type || 'bearer') : 'bearer';
   document.getElementById('vaultSvcToken').value = '';
   document.getElementById('vaultSvcHeaderName').value = '';
   document.getElementById('vaultSvcHeaderValue').value = '';
   document.getElementById('vaultSvcUsername').value = '';
   document.getElementById('vaultSvcPassword').value = '';
+  document.getElementById('vaultSvcTLSSkip').checked = edit ? !!edit.tls_skip_verify : false;
+  if (edit) {
+    document.getElementById('vaultSvcToken').placeholder = '(unchanged — leave empty to keep)';
+    document.getElementById('vaultSvcHeaderValue').placeholder = '(unchanged — leave empty to keep)';
+    document.getElementById('vaultSvcPassword').placeholder = '(unchanged — leave empty to keep)';
+  } else {
+    document.getElementById('vaultSvcToken').placeholder = 'Bearer token';
+    document.getElementById('vaultSvcHeaderValue').placeholder = 'Value';
+    document.getElementById('vaultSvcPassword').placeholder = 'Password';
+  }
   vaultToggleAuthFields();
   document.getElementById('vaultServiceModal').style.display = '';
+}
+
+function vaultEditService(name) {
+  const svc = vaultServicesCache.find(s => s.name === name);
+  if (!svc) return;
+  vaultShowServiceModal(svc);
 }
 
 function vaultToggleAuthFields() {
@@ -3981,7 +4006,9 @@ async function vaultSaveService() {
   const authType = document.getElementById('vaultSvcAuthType').value;
   if (!name || !baseURL) { alert('Name and Base URL are required'); return; }
 
+  const tlsSkip = document.getElementById('vaultSvcTLSSkip').checked;
   const payload = { name, base_url: baseURL, auth: { type: authType } };
+  if (tlsSkip) payload.tls_skip_verify = true;
   if (authType === 'bearer') {
     payload.auth.token = document.getElementById('vaultSvcToken').value;
   } else if (authType === 'header') {

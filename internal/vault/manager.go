@@ -202,8 +202,11 @@ func (m *Manager) spawn() error {
 		"-listen", "127.0.0.1:8390",
 		"-data-dir", m.dataDir,
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Route subprocess output through Go's log package instead of raw os.Stdout.
+	// Direct pipe inheritance can cause SIGPIPE in containerized environments
+	// when the logging driver pipe breaks, killing the subprocess.
+	cmd.Stdout = &logWriter{prefix: "[vault-server] "}
+	cmd.Stderr = &logWriter{prefix: "[vault-server] "}
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true, // own process group for clean shutdown
 	}
@@ -315,4 +318,33 @@ func (m *Manager) watchdog(ctx context.Context) {
 			log.Printf("[vault] status after restart: %s", status)
 		}
 	}
+}
+
+// logWriter routes subprocess output through Go's log package line-by-line.
+// This avoids raw pipe inheritance which can cause SIGPIPE in containers.
+type logWriter struct {
+	prefix string
+	buf    []byte
+}
+
+func (w *logWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		idx := -1
+		for i, b := range w.buf {
+			if b == '\n' {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			break
+		}
+		line := string(w.buf[:idx])
+		w.buf = w.buf[idx+1:]
+		if line != "" {
+			log.Printf("%s%s", w.prefix, line)
+		}
+	}
+	return len(p), nil
 }

@@ -1,6 +1,8 @@
 package controlcenter
 
 import (
+	"bufio"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -269,3 +271,97 @@ func TestCORSMiddleware_Preflight(t *testing.T) {
 		t.Errorf("expected 204 for preflight, got %d", rec.Code)
 	}
 }
+
+// --- statusWriter Hijacker regression tests ---
+
+// mockHijackWriter implements both http.ResponseWriter and http.Hijacker.
+type mockHijackWriter struct {
+	httptest.ResponseRecorder
+	hijacked bool
+}
+
+func (m *mockHijackWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	m.hijacked = true
+	return nil, nil, nil // success sentinel
+}
+
+func TestStatusWriter_ImplementsHijacker_WhenUnderlying(t *testing.T) {
+	mock := &mockHijackWriter{}
+	sw := &statusWriter{ResponseWriter: mock, status: 200}
+
+	// statusWriter must satisfy http.Hijacker when the underlying writer does.
+	hijacker, ok := interface{}(sw).(http.Hijacker)
+	if !ok {
+		t.Fatal("statusWriter does not implement http.Hijacker")
+	}
+
+	_, _, err := hijacker.Hijack()
+	if err != nil {
+		t.Errorf("expected nil error from delegated Hijack, got: %v", err)
+	}
+	if !mock.hijacked {
+		t.Error("expected Hijack to delegate to underlying writer")
+	}
+}
+
+func TestStatusWriter_Hijack_ErrorsWhenUnderlyingNotHijacker(t *testing.T) {
+	// httptest.ResponseRecorder does NOT implement http.Hijacker.
+	rec := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rec, status: 200}
+
+	_, _, err := sw.Hijack()
+	if err == nil {
+		t.Fatal("expected error when underlying writer is not a Hijacker")
+	}
+	expected := "underlying ResponseWriter does not implement http.Hijacker"
+	if err.Error() != expected {
+		t.Errorf("expected error %q, got %q", expected, err.Error())
+	}
+}
+
+func TestStatusWriter_Hijack_InterfaceCheck(t *testing.T) {
+	// Compile-time interface satisfaction is implicit via the method,
+	// but verify the type assertion works at runtime.
+	var w http.ResponseWriter = &statusWriter{ResponseWriter: httptest.NewRecorder()}
+	if _, ok := w.(http.Hijacker); !ok {
+		t.Fatal("statusWriter should always satisfy http.Hijacker interface")
+	}
+}
+
+// Verify Flush still works (related interface delegation).
+func TestStatusWriter_Flush(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rec, status: 200}
+	// Should not panic even though ResponseRecorder implements Flusher.
+	sw.Flush()
+	if !rec.Flushed {
+		t.Error("expected Flush to delegate to underlying ResponseRecorder")
+	}
+}
+
+// Ensure loggingMiddleware preserves Hijacker through the full stack.
+func TestLoggingMiddleware_PreservesHijacker(t *testing.T) {
+	handler := loggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("ResponseWriter inside loggingMiddleware does not implement http.Hijacker")
+			return
+		}
+		_, _, err := hijacker.Hijack()
+		// Underlying is mockHijackWriter, so Hijack succeeds.
+		if err != nil {
+			t.Errorf("unexpected Hijack error: %v", err)
+		}
+	}))
+
+	mock := &mockHijackWriter{}
+	req := httptest.NewRequest("GET", "/ws/terminal", nil)
+	handler.ServeHTTP(mock, req)
+	if !mock.hijacked {
+		t.Error("expected Hijack to reach underlying writer through loggingMiddleware")
+	}
+}
+
+// Ensure compile-time interface satisfaction.
+var _ http.Hijacker = (*statusWriter)(nil)
+var _ http.Flusher = (*statusWriter)(nil)

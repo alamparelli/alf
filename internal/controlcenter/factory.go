@@ -165,6 +165,13 @@ func HandlerFactory(deps Deps) http.Handler {
 		DataDir:      deps.DataDir,
 	})
 
+	// Agent teams management.
+	mux.Handle("/api/teams", &TeamsHandler{
+		AgentStore: deps.AgentStore,
+		DataDir:    deps.DataDir,
+		Notifier:   deps.Notifier,
+	})
+
 	// Firewall.
 	mux.Handle("/api/firewall", &FirewallHandler{
 		Store:    deps.FirewallStore,

@@ -196,19 +196,50 @@
           <button class="sched-filter" data-filter="later">Later</button>
           <button class="sched-filter" data-filter="oneshot">One-shot</button>
           <button class="sched-filter" data-filter="obsolete">Obsolete</button>
+          <span style="flex:1"></span>
+          <button class="sched-filter" id="schedCollapseAllBtn" title="Collapse/expand all"><i data-lucide="minimize-2" style="width:14px;height:14px"></i></button>
         </div>
         <div class="schedules-list" id="schedulesList"></div>
       </div>
 
       <div id="tasksView" class="tasks-view" style="display:none">
-        <div class="tasks-toolbar">
-          <h2>Agent Tasks</h2>
-          <div class="tasks-toolbar-right">
-            <label class="logs-auto-label"><input type="checkbox" id="tasksAutoRefresh" checked> Auto</label>
-            <button class="btn btn-icon" id="tasksRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+        <div class="tasks-tab-bar">
+          <button class="tasks-tab active" data-tab="tasks-runs">Tasks</button>
+          <button class="tasks-tab" data-tab="tasks-teams">Teams</button>
+        </div>
+
+        <div id="tasksRunsPane" class="tasks-pane">
+          <div class="tasks-toolbar">
+            <h2>Agent Tasks</h2>
+            <div class="tasks-toolbar-right">
+              <label class="logs-auto-label"><input type="checkbox" id="tasksAutoRefresh" checked> Auto</label>
+              <button class="btn btn-icon" id="tasksRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+            </div>
+          </div>
+          <div class="tasks-list" id="tasksList"></div>
+        </div>
+
+        <div id="tasksTeamsPane" class="tasks-pane" style="display:none">
+          <div class="tasks-toolbar">
+            <h2>Agent Teams</h2>
+            <div class="tasks-toolbar-right">
+              <button class="btn btn-sm" id="teamsAddBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:2px"></i>New Team</button>
+              <button class="btn btn-icon" id="teamsRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+            </div>
+          </div>
+          <div class="teams-list" id="teamsList"></div>
+          <div class="teams-editor" id="teamsEditor" style="display:none">
+            <div class="teams-editor-header">
+              <span id="teamsEditorTitle">New Team</span>
+              <div>
+                <button class="btn btn-sm" id="teamsEditorSave">Save</button>
+                <button class="btn btn-sm btn-ghost" id="teamsEditorCancel">Cancel</button>
+              </div>
+            </div>
+            <textarea id="teamsEditorJson" class="teams-json-editor" spellcheck="false" placeholder='Paste team JSON here...'></textarea>
+            <div class="teams-editor-hint" id="teamsEditorHint"></div>
           </div>
         </div>
-        <div class="tasks-list" id="tasksList"></div>
       </div>
 
       <iframe id="pageFrame" class="page-frame" style="display:none"></iframe>

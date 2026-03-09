@@ -3,6 +3,7 @@ package scheduler
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -26,10 +27,11 @@ type Config struct {
 
 // Engine is the unified scheduler that manages cron jobs + one-shots.
 type Engine struct {
-	cfg   Config
-	store *Store
-	cron  *cron.Cron
-	mu    sync.Mutex
+	cfg    Config
+	store  *Store
+	cron   *cron.Cron
+	runLog *RunLog
+	mu     sync.Mutex
 
 	// Map of job ID → cron entry ID for removal.
 	entries map[string]cron.EntryID
@@ -43,10 +45,12 @@ func New(cfg Config) *Engine {
 	if loc == nil {
 		loc = time.Local
 	}
+	logDir := filepath.Join(cfg.DataDir, "logs", "scheduler")
 	return &Engine{
 		cfg:     cfg,
 		store:   NewStore(cfg.CronPath),
 		cron:    cron.New(cron.WithLocation(loc), cron.WithSeconds()),
+		runLog:  NewRunLog(logDir),
 		entries: make(map[string]cron.EntryID),
 	}
 }
@@ -70,6 +74,9 @@ func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error) {
 	entryID, err := e.cron.AddFunc(schedule, func() {
 		if job.running {
 			log.Printf("scheduler: skipping %s (still running)", id)
+			e.runLog.appendAndTruncate(RunRecord{
+				JobID: id, JobName: name, StartedAt: time.Now(), Status: "skipped",
+			})
 			return
 		}
 		job.running = true
@@ -78,11 +85,21 @@ func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error) {
 
 		job.LastRun = &start
 		if err := fn(); err != nil {
+			duration := time.Since(start)
 			job.LastError = err.Error()
-			log.Printf("scheduler: [%s] failed (%s): %v", id, time.Since(start).Round(time.Millisecond), err)
+			log.Printf("scheduler: [%s] failed (%s): %v", id, duration.Round(time.Millisecond), err)
+			e.runLog.appendAndTruncate(RunRecord{
+				JobID: id, JobName: name, Tier: "system", StartedAt: start,
+				DurationMs: duration.Milliseconds(), Status: "error", Error: err.Error(),
+			})
 		} else {
+			duration := time.Since(start)
 			job.LastError = ""
-			log.Printf("scheduler: [%s] ok (%s)", id, time.Since(start).Round(time.Millisecond))
+			log.Printf("scheduler: [%s] ok (%s)", id, duration.Round(time.Millisecond))
+			e.runLog.appendAndTruncate(RunRecord{
+				JobID: id, JobName: name, Tier: "system", StartedAt: start,
+				DurationMs: duration.Milliseconds(), Status: "ok",
+			})
 		}
 	})
 	if err != nil {
@@ -375,6 +392,11 @@ func (e *Engine) List(userOnly bool) []*Job {
 		}
 	}
 	return out
+}
+
+// RunHistory returns the execution log for querying.
+func (e *Engine) RunHistory() *RunLog {
+	return e.runLog
 }
 
 // scheduleJob registers a job with the cron engine.

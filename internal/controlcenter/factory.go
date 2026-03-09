@@ -9,6 +9,7 @@ import (
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
+	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/vault"
 )
 
@@ -31,6 +32,7 @@ type Deps struct {
 	MemStore       MemoryStorer       // nil if memory unavailable
 	MemProvider    provider.Provider  // nil if memory unavailable
 	Scheduler      ScheduleEngine     // nil if scheduler unavailable
+	ScheduleRunLog *scheduler.RunLog  // nil if scheduler unavailable
 	FirewallStore  *firewall.Store     // nil if firewall unavailable
 	FirewallProxy  *firewall.Proxy     // nil if firewall unavailable
 	VaultManager   *vault.Manager      // nil if vault unavailable
@@ -148,6 +150,9 @@ func HandlerFactory(deps Deps) http.Handler {
 	// Scheduled jobs.
 	mux.Handle("/api/schedules", &SchedulesHandler{
 		Engine: deps.Scheduler,
+	})
+	mux.Handle("/api/schedules/logs", &ScheduleLogsHandler{
+		RunLog: deps.ScheduleRunLog,
 	})
 
 	// Orchestrator tasks.

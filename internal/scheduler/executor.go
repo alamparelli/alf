@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// execResult captures metadata from LLM/orchestrator invocations.
+type execResult struct {
+	CostUSD    float64
+	Model      string
+	NumTurns   int
+	Iterations int
+}
+
 // TelegramSender sends messages to Telegram.
 type TelegramSender interface {
 	SendMessage(chatID int64, text string) error
@@ -107,6 +115,13 @@ type TierInfo struct {
 func (e *Engine) executeJob(j *Job) {
 	if j.running {
 		log.Printf("scheduler: skipping %s (still running)", j.ID)
+		e.runLog.appendAndTruncate(RunRecord{
+			JobID:     j.ID,
+			JobName:   j.Name,
+			Tier:      j.Tier,
+			StartedAt: time.Now(),
+			Status:    "skipped",
+		})
 		return
 	}
 	j.running = true
@@ -117,35 +132,60 @@ func (e *Engine) executeJob(j *Job) {
 
 	var text string
 	var err error
+	var execResult *execResult
 
 	if j.Tier == "direct" {
 		if j.Command != "" {
 			text, err = e.runCommand(j)
 		} else {
-			// Legacy: direct jobs with prompt only (deprecated).
 			log.Printf("scheduler: [%s] DEPRECATION: direct job using prompt instead of command — migrate to --command", j.ID)
 			text = j.Prompt
 		}
 	} else if j.Tier == "agent" && e.cfg.Orchestrator != nil {
-		text, err = e.invokeOrchestrator(j)
+		text, execResult, err = e.invokeOrchestratorWithMeta(j)
 	} else {
-		text, err = e.invokeLLM(j)
+		text, execResult, err = e.invokeLLMWithMeta(j)
+	}
+
+	duration := time.Since(start)
+	rec := RunRecord{
+		JobID:      j.ID,
+		JobName:    j.Name,
+		Tier:       j.Tier,
+		StartedAt:  start,
+		DurationMs: duration.Milliseconds(),
+	}
+	if execResult != nil {
+		rec.CostUSD = execResult.CostUSD
+		rec.Model = execResult.Model
+		rec.NumTurns = execResult.NumTurns
+		rec.Iterations = execResult.Iterations
 	}
 
 	if err != nil {
 		j.LastError = err.Error()
-		log.Printf("scheduler: [%s] %q failed (%s): %v", j.ID, j.Name, time.Since(start).Round(time.Millisecond), err)
+		rec.Status = "error"
+		rec.Error = err.Error()
+		if strings.Contains(err.Error(), "timed out") {
+			rec.Status = "timeout"
+		}
+		log.Printf("scheduler: [%s] %q failed (%s): %v", j.ID, j.Name, duration.Round(time.Millisecond), err)
+		e.runLog.appendAndTruncate(rec)
+
 		// Notify on failure if output includes telegram.
 		if j.Output == "telegram" || j.Output == "both" {
 			if e.cfg.TG != nil && e.cfg.ChatID != 0 {
-				e.cfg.TG.SendMessage(e.cfg.ChatID, fmt.Sprintf("Scheduled job \"%s\" failed: %s", j.Name, err))
+				e.cfg.TG.SendMessage(e.cfg.ChatID, fmt.Sprintf("⚠️ Scheduled job \"%s\" failed: %s", j.Name, err))
 			}
 		}
 		return
 	}
 
 	j.LastError = ""
-	log.Printf("scheduler: [%s] %q ok (%s)", j.ID, j.Name, time.Since(start).Round(time.Millisecond))
+	rec.Status = "ok"
+	rec.OutputLen = len(text)
+	log.Printf("scheduler: [%s] %q ok (%s, %d chars)", j.ID, j.Name, duration.Round(time.Millisecond), len(text))
+	e.runLog.appendAndTruncate(rec)
 
 	// Suppress internal fallback messages.
 	if text == "Done (no text output)." {
@@ -211,8 +251,14 @@ func (e *Engine) runCommand(j *Job) (string, error) {
 
 // invokeLLM calls the Claude provider with tier-appropriate params.
 func (e *Engine) invokeLLM(j *Job) (string, error) {
+	text, _, err := e.invokeLLMWithMeta(j)
+	return text, err
+}
+
+// invokeLLMWithMeta calls the Claude provider and returns execution metadata.
+func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 	if e.cfg.Provider == nil {
-		return "", fmt.Errorf("no provider configured")
+		return "", nil, fmt.Errorf("no provider configured")
 	}
 
 	params := ProviderParams{
@@ -261,9 +307,15 @@ func (e *Engine) invokeLLM(j *Job) (string, error) {
 
 	result, err := e.cfg.Provider.Invoke(ctx, j.Prompt, params, nil)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return result.Text, nil
+
+	meta := &execResult{
+		CostUSD:  result.CostUSD,
+		Model:    result.Model,
+		NumTurns: result.NumTurns,
+	}
+	return result.Text, meta, nil
 }
 
 // dispatch routes job output to the configured destination.
@@ -313,10 +365,16 @@ func (e *Engine) writeFile(j *Job, text string) {
 	f.WriteString("\n")
 }
 
-// invokeOrchestrator delegates the job to the multi-agent orchestrator.
+// invokeOrchestrator delegates the job to the multi-agent orchestrator (legacy wrapper).
 func (e *Engine) invokeOrchestrator(j *Job) (string, error) {
+	text, _, err := e.invokeOrchestratorWithMeta(j)
+	return text, err
+}
+
+// invokeOrchestratorWithMeta delegates to the orchestrator and returns execution metadata.
+func (e *Engine) invokeOrchestratorWithMeta(j *Job) (string, *execResult, error) {
 	if e.cfg.Orchestrator == nil {
-		return "", fmt.Errorf("orchestrator not configured")
+		return "", nil, fmt.Errorf("orchestrator not configured")
 	}
 
 	// Build system prompts (same as invokeLLM).
@@ -339,11 +397,15 @@ func (e *Engine) invokeOrchestrator(j *Job) (string, error) {
 
 	text, meta, err := e.cfg.Orchestrator.Run(ctx, j.Prompt, sysPrompts, RunConfig{}, nil)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
+	result := &execResult{
+		Iterations: meta.Iterations,
+		CostUSD:    meta.TotalCost,
+	}
 	log.Printf("scheduler: [%s] orchestrator done: %d iterations, $%.4f", j.ID, meta.Iterations, meta.TotalCost)
-	return text, nil
+	return text, result, nil
 }
 
 // buildSkillBlock resolves skill names and returns flattened prompts for injection.

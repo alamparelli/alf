@@ -10,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"path/filepath"
+
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
+	scheduler_pkg "github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/vault"
 )
 
@@ -55,6 +58,9 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		return nil, fmt.Errorf("create web sub-fs: %w", err)
 	}
 
+	// Schedule run log uses the same logs/scheduler directory as the scheduler engine.
+	schedRunLog := scheduler_pkg.NewRunLog(filepath.Join(dataDir, "logs", "scheduler"))
+
 	handler := HandlerFactory(Deps{
 		ConfigStore:    configStore,
 		TierStore:      tierStore,
@@ -72,6 +78,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		MemProvider:    memProvider,
 		Orchestrator:   orchestrator,
 		Scheduler:      scheduler,
+		ScheduleRunLog: schedRunLog,
 		FirewallStore:  fwStore,
 		FirewallProxy:  fwProxy,
 		VaultManager:   vaultMgr,

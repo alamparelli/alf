@@ -1,7 +1,6 @@
 package memory
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,9 +8,6 @@ import (
 	"strings"
 	"time"
 )
-
-//go:embed core.md
-var coreMD string
 
 // injectedFiles are the only files injected into every conversation.
 // All other context/*.md files must be read on-demand by the model.
@@ -43,6 +39,54 @@ func CollectPrompts(contextDir string) []string {
 		args = append(args, "--append-system-prompt", block)
 	}
 	return args
+}
+
+// CollectSchedulerPrompts returns system prompt strings for scheduled job execution.
+// Injects L1 (identity: core.md), L2 (capabilities: toolbox.md), and L3 (user context: index.md).
+// Excludes personality (soul.md, mood.md) — scheduler jobs are mechanical.
+func CollectSchedulerPrompts(contextDir string) []string {
+	var prompts []string
+
+	// L1: Core identity + rules (tools, vault, forbidden tools, etc.)
+	prompts = append(prompts, strings.TrimSpace(coreMD))
+
+	// L2: Available tools + L3: User context.
+	for _, f := range []string{"toolbox.md", "index.md"} {
+		content, err := os.ReadFile(filepath.Join(contextDir, f))
+		if err != nil || len(strings.TrimSpace(string(content))) == 0 {
+			continue
+		}
+		prompts = append(prompts, fmt.Sprintf("=== [%s] ===\n%s", f, strings.TrimSpace(string(content))))
+	}
+
+	return prompts
+}
+
+// ToolReminder returns a compact end-of-context reminder of key capabilities.
+// Positioned last in system prompts so it stays near the end of the context window,
+// where the model pays more attention during long conversations.
+func ToolReminder(contextDir string) string {
+	var tools []string
+
+	// Read toolbox.md to extract tool names.
+	content, err := os.ReadFile(filepath.Join(contextDir, "toolbox.md"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "- `") {
+			name := strings.TrimPrefix(line, "- `")
+			if idx := strings.Index(name, "`"); idx > 0 {
+				tools = append(tools, name[:idx])
+			}
+		}
+	}
+	if len(tools) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("=== [Reminder] ===\nYou have CLI tools available: %s. Run <tool> --help before first use. Use `vault proxy` for external API calls. Check context/ for stored knowledge.", strings.Join(tools, ", "))
 }
 
 // CollectInline reads soul.md + mood.md and returns their content
@@ -188,49 +232,11 @@ func Bootstrap(contextDir string) {
 	}
 }
 
-const onboardingPrompt = `## ONBOARDING MODE — Getting to Know Each Other
-
-You are meeting this user for the first time. This is the onboarding conversation.
-YOU ARE ALF. Not Claude, not a chatbot. A personal AI assistant meeting its new owner.
-
-### Your mission
-Have a warm, natural conversation to learn about the user AND let them shape who you are.
-Everything learned here gets written to your memory files and persists forever.
-
-### Phase 1 — Who are they? (2-3 questions)
-1. Their name and what they do (work, studies, passion — anything)
-2. What they want help with — work, personal projects, learning, creative work, daily organization, research, anything else?
-3. What language(s) they prefer to communicate in
-
-### Phase 2 — How should you behave? (2-3 questions)
-4. Communication style — casual/formal? concise/detailed? Do they want opinions or just answers?
-5. Personality — should you be funny, serious, direct, encouraging, sarcastic, chill? What tone fits them?
-6. Anything they hate in an assistant — things to never do (e.g. "don't be too positive", "don't ask if I need more help", "always be brief")
-
-### Phase 3 — Wrap up
-7. Summarize what you learned in 3-4 bullet points and ask if it's correct
-8. Once confirmed, update these files using the Edit/Write tools:
-   - **context/soul.md** — rewrite the Personality section to match their preferences. Keep the Principles and Self-awareness sections. Make the personality genuinely theirs, not generic.
-   - **context/index.md** — fill in User Preferences and Project Context with what you learned. Remove the placeholder text.
-9. Tell them: "You can always tweak my personality by editing soul.md, or use /login to access the Control Center."
-10. End naturally — don't force the next interaction.
-
-### Rules
-- Ask ONE question at a time, wait for the answer
-- Be conversational and genuine, not a questionnaire
-- Don't assume anything about the user — they could be anyone
-- Reply in the language the user writes in
-- Keep messages short — no walls of text
-- If the user's message is just a greeting, introduce yourself and ask your first question
-- You MUST update soul.md and index.md before ending onboarding — this is critical
-
-This prompt disappears after the onboarding session ends.`
-
 // OnboardingPrompt returns the onboarding instruction if the flag exists, empty string otherwise.
 func OnboardingPrompt(contextDir string) string {
 	path := filepath.Join(contextDir, ".onboarding")
 	if _, err := os.Stat(path); err == nil {
-		return onboardingPrompt
+		return OnboardingMD
 	}
 	return ""
 }

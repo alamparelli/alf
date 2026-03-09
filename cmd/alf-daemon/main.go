@@ -1449,7 +1449,7 @@ func main() {
 					sysPromptTexts = append(sysPromptTexts, injection)
 				}
 			}
-			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
+			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
 
 			// Documentation index — lets the model discover and read docs.
 			if _, err := os.Stat(filepath.Join(dataDir, "llms.txt")); err == nil {
@@ -1625,10 +1625,7 @@ func main() {
 	}
 }
 
-// reactionSystemPromptTmpl is the template for the reaction instruction injected into Claude calls.
-// The %s placeholder is filled with mood.AllowedReactionList().
-const reactionSystemPromptTmpl = `You may optionally suggest a single emoji reaction for the user's message by starting your response with [[react:EMOJI]]. Pick an emoji that shows you understood the message — not generic thumbs up. Use [[react:none]] or omit the tag if no reaction fits. The tag will be stripped before the user sees your response.
-IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
+// reactionSystemPromptTmpl references the centralized prompt in memory/reaction.md.
 
 // tierParams holds per-tier Claude CLI arguments.
 type tierParams struct {

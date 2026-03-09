@@ -139,9 +139,7 @@ type ReactResult struct {
 	Mirror string `json:"mirror,omitempty"`
 }
 
-// reactionSystemPromptTmpl is the reaction instruction injected into every Claude call.
-const reactionSystemPromptTmpl = `You may optionally suggest a single emoji reaction for the user's message by starting your response with [[react:EMOJI]]. Pick an emoji that shows you understood the message — not generic thumbs up. Use [[react:none]] or omit the tag if no reaction fits. The tag will be stripped before the user sees your response.
-IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s`
+// reactionSystemPromptTmpl references the centralized prompt in memory/reaction.md.
 
 // NewChatService creates a new ChatService.
 func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatStore *ChatStore, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
@@ -414,7 +412,11 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			sysPromptTexts = append(sysPromptTexts, skills.BuildInjection(matched))
 		}
 	}
-	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(reactionSystemPromptTmpl, mood.AllowedReactionList()))
+	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
+	// Tool reminder at end of context — model pays more attention to recent prompts.
+	if reminder := memory.ToolReminder(cs.ContextDir); reminder != "" {
+		sysPromptTexts = append(sysPromptTexts, reminder)
+	}
 
 	// Select provider based on tier backend.
 	prov := cs.Provider

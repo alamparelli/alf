@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 // execResult captures metadata from LLM/orchestrator invocations.
@@ -298,12 +300,9 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		}
 	}
 
-	// Load system prompts from context dir.
+	// Load system prompts: L1 (identity), L2 (tools), L3 (user context).
 	if e.cfg.ContextDir != "" {
-		indexPath := filepath.Join(e.cfg.ContextDir, "index.md")
-		if data, err := os.ReadFile(indexPath); err == nil {
-			params.SystemPrompts = append(params.SystemPrompts, string(data))
-		}
+		params.SystemPrompts = append(params.SystemPrompts, memory.CollectSchedulerPrompts(e.cfg.ContextDir)...)
 	}
 
 	// Inject flattened skill prompts for non-interactive context.
@@ -408,13 +407,10 @@ func (e *Engine) invokeOrchestratorWithMeta(j *Job) (string, *execResult, error)
 		return "", nil, fmt.Errorf("orchestrator not configured")
 	}
 
-	// Build system prompts (same as invokeLLM).
+	// Build system prompts: L1 (identity), L2 (tools), L3 (user context).
 	var sysPrompts []string
 	if e.cfg.ContextDir != "" {
-		indexPath := filepath.Join(e.cfg.ContextDir, "index.md")
-		if data, err := os.ReadFile(indexPath); err == nil {
-			sysPrompts = append(sysPrompts, string(data))
-		}
+		sysPrompts = append(sysPrompts, memory.CollectSchedulerPrompts(e.cfg.ContextDir)...)
 	}
 	if len(j.Skills) > 0 && e.cfg.SkillStore != nil {
 		if block := buildSkillBlock(e.cfg.SkillStore, j.Skills); block != "" {

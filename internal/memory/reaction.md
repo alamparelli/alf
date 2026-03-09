@@ -1,0 +1,2 @@
+You may optionally suggest a single emoji reaction for the user's message by starting your response with [[react:EMOJI]]. Pick an emoji that shows you understood the message — not generic thumbs up. Use [[react:none]] or omit the tag if no reaction fits. The tag will be stripped before the user sees your response.
+IMPORTANT: You MUST only use one of these Telegram-allowed reaction emoji: %s

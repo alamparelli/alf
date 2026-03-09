@@ -68,11 +68,14 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string, agentTe
 		b.WriteString("\n\n")
 	}
 
-	// 2. Role description.
-	b.WriteString("You are a message router. Your ONLY job is to pick the best tier for each message.\n")
-	b.WriteString("You NEVER respond to the user directly. You ALWAYS route to a tier.\n\n")
+	// 2. Router instructions (static part from .md file).
+	// Split at first blank line to separate role description from rules.
+	routerParts := strings.SplitN(strings.TrimSpace(memory.RouterMD), "\n\n", 2)
+	// Role description (first paragraph of router.md).
+	b.WriteString(routerParts[0])
+	b.WriteString("\n\n")
 
-	// 3. Tier catalog.
+	// 3. Tier catalog (dynamic).
 	b.WriteString("Available tiers:\n")
 	for _, t := range tiers.Tiers {
 		if !t.Enabled || !t.Routable {
@@ -89,8 +92,6 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string, agentTe
 	if tiers.RouterDistinctions != "" {
 		b.WriteString(fmt.Sprintf("\nKey distinctions: %s\n", tiers.RouterDistinctions))
 	}
-
-	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, schedule, fix, polish, apply, correct, repair, improve, refactor, rewrite, implement, build, deploy, add, rename, move, replace, merge, or generate ANYTHING (files, tasks, settings, status, jobs, schedules, code, etc.). When in doubt, prefer _rw over _r.\n")
 
 	// Orchestrator routing hint with available teams.
 	if hasOrchestrator(tiers) {
@@ -122,17 +123,11 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string, agentTe
 	}
 	b.WriteString("\n")
 
-	// 6. Conversation context instruction.
-	b.WriteString("\nYou maintain conversation context across messages. After each tier response, you'll receive a summary like:\n")
-	b.WriteString("[tierName (access) responded: brief summary]\n")
-	b.WriteString("Use this to track what happened and make better routing decisions for follow-up messages.\n")
-	b.WriteString("IMPORTANT: Even for follow-up messages, if the user requests an action (fix, apply, create, modify, etc.), route to a write-capable tier — do NOT stick to a read-only tier just because it handled the previous message.\n")
-
-	// 7. Response format.
-	b.WriteString("\nRespond with ONLY a JSON object:")
-	b.WriteString("\n{\"tier\": \"<EXACT tier name from list above>\", \"reason\": \"<brief reason>\", \"react\": \"EMOJI_or_empty\"}")
-	b.WriteString("\nThe \"tier\" value MUST be one of the valid tier names listed above. Do NOT invent tier names.")
-	b.WriteString("\nThe optional \"react\" field suggests a single emoji reaction for the user's message (shows you understood it). Omit or leave empty if no reaction fits. Pick contextually relevant emojis, not generic thumbs up.")
+	// 6. Remaining router instructions (write-intent rules, context tracking, response format).
+	if len(routerParts) > 1 {
+		b.WriteString("\n")
+		b.WriteString(routerParts[1])
+	}
 
 	return b.String()
 }
@@ -242,8 +237,10 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString("You are a message router. Your ONLY job is to pick the best tier for each message.\n")
-	b.WriteString("You NEVER respond to the user directly. You ALWAYS route to a tier.\n\n")
+	// Role description (first paragraph of router.md).
+	routerParts := strings.SplitN(strings.TrimSpace(memory.RouterMD), "\n\n", 2)
+	b.WriteString(routerParts[0])
+	b.WriteString("\n\n")
 
 	b.WriteString("Available tiers:\n")
 	for _, t := range input.Tiers.Tiers {
@@ -261,8 +258,6 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	if input.Tiers.RouterDistinctions != "" {
 		b.WriteString(fmt.Sprintf("\nKey distinctions: %s\n", input.Tiers.RouterDistinctions))
 	}
-
-	b.WriteString("\nIMPORTANT: Route to a write-capable (_rw) tier when the user asks to create, modify, delete, update, set, mark, change, edit, enable, disable, mute, silence, configure, schedule, fix, polish, apply, correct, repair, improve, refactor, rewrite, implement, build, deploy, add, rename, move, replace, merge, or generate ANYTHING (files, tasks, settings, status, jobs, schedules, code, etc.). When in doubt, prefer _rw over _r.\n")
 
 	if hasOrchestrator(input.Tiers) {
 		b.WriteString(buildAgentTeamsHint(input.AgentTeams))
@@ -298,10 +293,11 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 	}
 	b.WriteString("\n")
 
-	b.WriteString("\nRespond with ONLY a JSON object:")
-	b.WriteString("\n{\"tier\": \"<EXACT tier name from list above>\", \"reason\": \"<brief reason>\", \"react\": \"EMOJI_or_empty\"}")
-	b.WriteString("\nThe \"tier\" value MUST be one of the valid tier names listed above. Do NOT invent tier names.")
-	b.WriteString("\nThe optional \"react\" field suggests a single emoji reaction for the user's message (shows you understood it). Omit or leave empty if no reaction fits. Pick contextually relevant emojis, not generic thumbs up.")
+	// Remaining router instructions (write-intent rules, context tracking, response format).
+	if len(routerParts) > 1 {
+		b.WriteString("\n")
+		b.WriteString(routerParts[1])
+	}
 
 	return b.String()
 }

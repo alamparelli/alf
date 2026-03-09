@@ -9,6 +9,7 @@ import (
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
+	"github.com/alamparelli/alf/internal/vault"
 )
 
 // Deps holds all dependencies needed to build the control center.
@@ -32,6 +33,7 @@ type Deps struct {
 	Scheduler      ScheduleEngine     // nil if scheduler unavailable
 	FirewallStore  *firewall.Store     // nil if firewall unavailable
 	FirewallProxy  *firewall.Proxy     // nil if firewall unavailable
+	VaultManager   *vault.Manager      // nil if vault unavailable
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS
@@ -160,6 +162,11 @@ func HandlerFactory(deps Deps) http.Handler {
 		Proxy:    deps.FirewallProxy,
 		Notifier: deps.Notifier,
 	})
+
+	// Vault (secrets proxy).
+	vaultH := &VaultHandler{Manager: deps.VaultManager}
+	mux.Handle("/api/vault/", vaultH)
+	mux.Handle("/api/vault", vaultH)
 
 	// Docs (embedded markdown).
 	mux.Handle("/api/docs/", &DocsHandler{})

@@ -27,6 +27,7 @@
           <a class="nav-icon" data-view="logs" title="Logs"><i data-lucide="scroll-text"></i></a>
           <a class="nav-icon" data-view="tiers" title="Tiers"><i data-lucide="sliders-horizontal"></i></a>
           <a class="nav-icon" data-view="firewall" title="Firewall"><i data-lucide="shield"></i></a>
+          <a class="nav-icon" data-view="vault" title="Vault"><i data-lucide="lock"></i></a>
           <a class="nav-icon" data-view="docs" title="Docs"><i data-lucide="book-open"></i></a>
         </div>
         <div class="nav-apps-section" id="navAppsSection"></div>
@@ -231,6 +232,87 @@
           <div class="logs-filters" id="logFilters"></div>
         </div>
         <pre class="logs-output" id="logOutput"></pre>
+      </div>
+
+      <div id="vaultView" class="vault-view" style="display:none">
+        <div class="vault-toolbar">
+          <h2>Vault</h2>
+          <div class="vault-toolbar-right">
+            <span class="vault-status-indicator" id="vaultStatusDot"></span>
+            <span id="vaultStatusText">Checking...</span>
+            <button class="btn btn-secondary" id="vaultLockBtn" style="display:none">Lock</button>
+            <button class="btn btn-icon" id="vaultRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+          </div>
+        </div>
+
+        <!-- Unlock -->
+        <div class="card vault-unlock-card" id="vaultUnlockCard" style="display:none">
+          <div class="vault-unlock-form">
+            <input type="password" id="vaultPasswordInput" placeholder="Master password" class="input" autocomplete="off">
+            <button class="btn" id="vaultUnlockBtn">Unlock</button>
+          </div>
+        </div>
+
+        <!-- Services -->
+        <div class="card vault-services-card" id="vaultServicesCard" style="display:none">
+          <div class="vault-section-header">
+            <h3>Services</h3>
+            <button class="btn" id="vaultAddServiceBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Add</button>
+          </div>
+          <div id="vaultServicesList" class="vault-list"></div>
+        </div>
+
+        <!-- Add/Edit Service Modal -->
+        <div class="modal-overlay" id="vaultServiceModal" style="display:none">
+          <div class="modal">
+            <h3 id="vaultServiceModalTitle">Add Service</h3>
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" id="vaultSvcName" class="input" placeholder="e.g. github">
+            </div>
+            <div class="form-group">
+              <label>Base URL</label>
+              <input type="text" id="vaultSvcBaseURL" class="input" placeholder="https://api.github.com">
+            </div>
+            <div class="form-group">
+              <label>Auth Type</label>
+              <select id="vaultSvcAuthType" class="input">
+                <option value="bearer">Bearer Token</option>
+                <option value="header">Custom Header</option>
+                <option value="basic">Basic Auth</option>
+              </select>
+            </div>
+            <div class="form-group" id="vaultSvcBearerGroup">
+              <label>Token</label>
+              <input type="password" id="vaultSvcToken" class="input" placeholder="Bearer token">
+            </div>
+            <div class="form-group" id="vaultSvcHeaderGroup" style="display:none">
+              <label>Header Name</label>
+              <input type="text" id="vaultSvcHeaderName" class="input" placeholder="X-API-Key">
+              <label>Header Value</label>
+              <input type="password" id="vaultSvcHeaderValue" class="input" placeholder="Value">
+            </div>
+            <div class="form-group" id="vaultSvcBasicGroup" style="display:none">
+              <label>Username</label>
+              <input type="text" id="vaultSvcUsername" class="input" placeholder="Username">
+              <label>Password</label>
+              <input type="password" id="vaultSvcPassword" class="input" placeholder="Password">
+            </div>
+            <div class="modal-actions">
+              <button class="btn btn-secondary" id="vaultSvcCancelBtn">Cancel</button>
+              <button class="btn" id="vaultSvcSaveBtn">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Access Keys -->
+        <div class="card vault-keys-card" id="vaultTokensCard" style="display:none">
+          <div class="vault-section-header">
+            <h3>Access Keys</h3>
+            <button class="btn" id="vaultCreateTokenBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Create</button>
+          </div>
+          <div id="vaultTokensList" class="vault-list"></div>
+        </div>
       </div>
 
       <div id="docsView" class="docs-view" style="display:none">

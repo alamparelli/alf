@@ -209,6 +209,19 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 		// Use os.Stat (not Lstat) to follow symlinks — so symlinked dirs
 		// appear as directories in the file browser, not as tiny files.
 		fullPath := filepath.Join(absPath, name)
+
+		// Skip self-referencing symlinks to prevent infinite directory loops.
+		if e.Type()&os.ModeSymlink != 0 {
+			target, err := filepath.EvalSymlinks(fullPath)
+			if err != nil {
+				continue
+			}
+			resolvedParent, _ := filepath.EvalSymlinks(absPath)
+			if target == resolvedParent || strings.HasPrefix(resolvedParent, target+string(filepath.Separator)) {
+				continue
+			}
+		}
+
 		info, err := os.Stat(fullPath)
 		if err != nil {
 			continue

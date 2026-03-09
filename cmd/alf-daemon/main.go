@@ -49,6 +49,12 @@ func main() {
 	chatID := readSecret("TELEGRAM_CHAT_ID")
 	authToken := readSecret("CC_AUTH_TOKEN")
 
+	// Set Claude OAuth token as env var if available (picked up by safeEnv for subprocesses).
+	if oauthToken := readSecret("CLAUDE_OAUTH_TOKEN"); oauthToken != "" {
+		os.Setenv("CLAUDE_CODE_OAUTH_TOKEN", oauthToken)
+		log.Println("Claude OAuth token loaded from secret")
+	}
+
 	if token == "" || chatID == "" {
 		// Log diagnostic info to help users debug secrets issues.
 		log.Println("ERROR: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")

@@ -17,8 +17,9 @@ import (
 // TerminalHandler upgrades to WebSocket and bridges to a PTY shell.
 // Registered outside the middleware stack to preserve http.Hijacker.
 type TerminalHandler struct {
-	AuthToken string
-	Sessions  *SessionStore
+	AuthToken     string
+	Sessions      *SessionStore
+	AllowedOrigin string // e.g. "https://cc.lamparelli.eu" — restricts WebSocket origin
 }
 
 func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -28,8 +29,13 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Restrict WebSocket origin to prevent cross-site WebSocket hijacking.
+	originPatterns := []string{"*"}
+	if h.AllowedOrigin != "" {
+		originPatterns = []string{h.AllowedOrigin}
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
+		OriginPatterns: originPatterns,
 	})
 	if err != nil {
 		log.Printf("[terminal] websocket accept: %v", err)
@@ -53,21 +59,9 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		homeDir = d
 	}
 	cmd.Dir = homeDir
-	localBin := homeDir + "/.local/bin"
-	env := os.Environ()
-	for i, e := range env {
-		if strings.HasPrefix(e, "PATH=") {
-			env[i] = "PATH=" + localBin + ":" + strings.TrimPrefix(e, "PATH=")
-			break
-		}
-	}
-	for i, e := range env {
-		if strings.HasPrefix(e, "HOME=") {
-			env[i] = "HOME=" + homeDir
-			break
-		}
-	}
-	cmd.Env = append(env, "TERM=xterm-256color", "USER=alf", "LOGNAME=alf")
+	// Build a safe environment — exclude daemon secrets (OAuth tokens, API keys, etc.).
+	env := termSafeEnv(homeDir)
+	cmd.Env = env
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -124,6 +118,35 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cmd.Process.Kill()
 	cmd.Wait()
 	log.Printf("[terminal] session ended")
+}
+
+// termSafeEnv builds a filtered environment for terminal sessions,
+// excluding daemon secrets (OAuth tokens, API keys, auth tokens).
+func termSafeEnv(homeDir string) []string {
+	safePrefixes := []string{
+		"PATH=", "TERM=", "LANG=", "LC_", "TZ=", "TMPDIR=",
+		"XDG_", "OMP_NUM_THREADS=", "ANTHROPIC_", "CLAUDE_",
+	}
+	localBin := homeDir + "/.local/bin"
+	env := make([]string, 0, 16)
+	for _, e := range os.Environ() {
+		for _, prefix := range safePrefixes {
+			if strings.HasPrefix(e, prefix) {
+				if strings.HasPrefix(e, "PATH=") {
+					e = "PATH=" + localBin + ":" + strings.TrimPrefix(e, "PATH=")
+				}
+				env = append(env, e)
+				break
+			}
+		}
+	}
+	env = append(env,
+		"HOME="+homeDir,
+		"USER=alf",
+		"LOGNAME=alf",
+		"TERM=xterm-256color",
+	)
+	return env
 }
 
 func (h *TerminalHandler) checkAuth(r *http.Request) bool {

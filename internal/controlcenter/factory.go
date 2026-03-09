@@ -208,19 +208,26 @@ func HandlerFactory(deps Deps) http.Handler {
 	exempt := map[string]bool{"/health": true, "/auth": true}
 	var handler http.Handler = mux
 	handler = jsonMiddleware(handler)
+	handler = csrfMiddleware(handler)
 	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
 	handler = newRateLimiter(180).middleware(handler)
 	handler = loggingMiddleware(handler)
 
-	// Terminal WebSocket: registered outside middleware stack so the
+	// Terminal WebSocket: registered outside the main middleware stack so the
 	// ResponseWriter keeps its http.Hijacker interface for the upgrade.
-	// Auth is checked inline before accepting the connection.
+	// Auth is checked inline. Rate limiting and logging applied separately.
+	termRL := newRateLimiter(30) // 30 req/min for terminal connections
+	var termHandler http.Handler = &TerminalHandler{
+		AuthToken:     deps.AuthToken,
+		Sessions:      deps.Sessions,
+		AllowedOrigin: deps.AllowedOrigin,
+	}
+	termHandler = termRL.middleware(termHandler)
+	termHandler = loggingMiddleware(termHandler)
+
 	outer := http.NewServeMux()
-	outer.Handle("/api/terminal", &TerminalHandler{
-		AuthToken: deps.AuthToken,
-		Sessions:  deps.Sessions,
-	})
+	outer.Handle("/api/terminal", termHandler)
 	outer.Handle("/", handler)
 
 	return outer

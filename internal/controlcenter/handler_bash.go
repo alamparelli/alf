@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -42,6 +43,9 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", req.Command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

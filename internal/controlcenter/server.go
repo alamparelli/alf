@@ -89,10 +89,13 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 	addr := "0.0.0.0:8080"
 	return &Server{
 		httpServer: &http.Server{
-			Addr:         addr,
-			Handler:      handler,
-			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 10 * time.Minute, // long for SSE streaming
+			Addr:              addr,
+			Handler:           handler,
+			ReadTimeout:       30 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			WriteTimeout:      10 * time.Minute, // long for SSE streaming
+			MaxHeaderBytes:    1 << 20,           // 1MB
 		},
 		addr: addr,
 	}, nil

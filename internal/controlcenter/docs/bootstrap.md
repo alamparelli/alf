@@ -4,77 +4,101 @@ tags: bootstrap, setup, packages, install, startup
 order: 6
 ---
 
-# Bootstrap Script
+# Bootstrap & Packages
 
-Automatically install packages and configure the container at every startup.
+How ALF installs packages and runs startup scripts.
 
-## What is bootstrap.sh?
+## Two-phase startup
 
-The file `data/bootstrap.sh` runs automatically when the ALF daemon starts. Use it to install packages, download binaries, or configure tools that don't survive a container rebuild.
+ALF's startup has two phases, each with a different purpose and privilege level:
 
-ALF creates an empty `bootstrap.sh` during `alf init`. You fill it with your commands.
+| Phase | File | Runs as | Purpose |
+|-------|------|---------|---------|
+| 1. System packages | `config.d/packages.txt` | root | `apt install` of system packages |
+| 2. User bootstrap | `data/bootstrap.sh` | alf (uid 1000) | pip/npm install, start services, config |
 
-## How it works
+### Phase 1: System packages (`config.d/packages.txt`)
 
-1. Daemon starts and checks if `data/bootstrap.sh` exists
-2. Computes a SHA-256 hash of the file content
-3. If the hash matches the previous run, **skips execution** (fast boot)
-4. If the content changed, runs the script and saves the new hash
-5. If the script fails, the hash is **not saved** so it retries on next restart
+Add one Debian package name per line. Packages are installed as root at container startup, only when the file changes.
 
-This means:
-- First boot after editing: script runs
-- Subsequent boots with no changes: script is skipped instantly
-- Failed runs: automatically retry on next restart
+```
+jq
+imagemagick
+pandoc
+```
 
-## Example
+**Where to edit:** Workspace Explorer > `config.d/packages.txt`
+
+Packages listed here survive container restarts. On `alf upgrade` (new image), the file persists in `config.d/` and packages are reinstalled automatically on first boot.
+
+> ALF will suggest adding packages here when it detects a missing command. For example: *"Command `jq` not found. Add `jq` to `config.d/packages.txt` and restart."*
+
+### Phase 2: User bootstrap (`data/bootstrap.sh`)
+
+Runs as the `alf` user (not root). Use it for:
+
+- **pip/npm installs** (user-space, no sudo)
+- **Starting background services** (API servers, daemons)
+- **File permissions** (chmod on secrets)
+- **Symlinks and config** within the data directory
 
 ```bash
 #!/usr/bin/env bash
 set -e
 
-# System packages
-apt-get update -qq && apt-get install -y --no-install-recommends jq htop
+# Python packages
+pip3 install --quiet --break-system-packages requests numpy
 
-# Python
-pip3 install --quiet faster-whisper requests numpy
-
-# Node.js
+# Node.js packages
 npm install -g --silent typescript
 
-# Binary download
-curl -fsSL https://example.com/tool.tar.gz | tar xz -C /usr/local/bin
+# Start a background service
+nohup python3 /home/alf/data/tools/my-api serve &
 ```
+
+**What bootstrap.sh cannot do** (no root):
+- `apt install` -- use `config.d/packages.txt` instead
+- Write to `/usr/`, `/etc/`, `/root/`
+- Install system-wide binaries
+
+## Where to edit
+
+| File | Via Workspace Explorer | Via SSH |
+|------|----------------------|---------|
+| `config.d/packages.txt` | Home > Workspace > `config.d/packages.txt` | `~/alf/config.d/packages.txt` |
+| `data/bootstrap.sh` | Home > Workspace > `bootstrap.sh` | `~/alf/data/bootstrap.sh` |
+
+After editing either file, run `alf restart` to apply changes.
+
+## What survives a rebuild?
+
+When you run `alf upgrade`, the container image is rebuilt. Everything outside volumes is lost.
+
+| Survives rebuild | Lost on rebuild |
+|-----------------|----------------|
+| `config.d/packages.txt` | Installed apt packages (reinstalled automatically) |
+| `data/bootstrap.sh` | Installed pip/npm packages (reinstalled automatically) |
+| Everything in `data/` | Binaries in `/usr/local/bin` |
+| Config in `config.d/` | System-level config changes |
+
+**Rule of thumb:** system packages go in `packages.txt`, everything else goes in `bootstrap.sh`.
 
 ## Best practices
 
 | Do | Don't |
 |----|-------|
-| Use quiet flags (`--quiet`, `-y`, `-qq`) | Write interactive prompts |
-| Append new commands at the bottom | Delete existing working lines |
-| Use `set -e` to stop on errors | Ignore failures silently |
+| Use quiet flags (`--quiet`, `-y`, `-qq`) | Write interactive prompts in bootstrap.sh |
+| Put apt packages in `packages.txt` | Run `apt install` in bootstrap.sh |
+| Use `set -e` in bootstrap.sh | Ignore failures silently |
 | Keep installs idempotent | Assume previous state |
 
-## Where to edit
+## Pre-installed packages
 
-- **Workspace Explorer:** Home > Workspace > `data/bootstrap.sh`
-- **Telegram:** Ask ALF to edit the file (requires a write-capable tier)
-- **SSH:** Edit directly at `~/alf/data/bootstrap.sh` on your host
+These are already in the container image (no need to add them):
 
-## What survives a rebuild?
-
-When you run `alf upgrade`, the container image is rebuilt. Everything outside the `data/` volume is lost, including pip/apt/npm packages and binaries in `/usr/local/bin`.
-
-That's why `bootstrap.sh` exists: it reinstalls everything automatically.
-
-| Survives rebuild | Lost on rebuild |
-|-----------------|----------------|
-| Everything in `data/` | pip/apt/npm packages |
-| `data/bootstrap.sh` | Binaries in `/usr/local/bin` |
-| Scripts in `data/tools/` | System-level config |
-| Config in `config.d/` | Anything outside volumes |
+`bash` `ca-certificates` `curl` `git` `trash-cli` `poppler-utils` `ffmpeg` `ffprobe` `sqlite3` `htop` `gh` `python3` `pip3`
 
 ## What's next?
 
-- [Container Packages](docs:container-packages) -- detailed package installation guide
+- [Container Packages](docs:container-packages) -- detailed guide on tools, apps, and extensions
 - [Getting Started](docs:getting-started) -- ALF setup and overview

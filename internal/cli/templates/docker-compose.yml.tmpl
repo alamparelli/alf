@@ -74,6 +74,16 @@ services:
 {{- end}}
     mem_limit: 2g
     cpus: "2.0"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
 
 secrets:
   telegram_bot_token:

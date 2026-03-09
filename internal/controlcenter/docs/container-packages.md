@@ -136,61 +136,61 @@ EOF
 
 ## Package persistence across rebuilds
 
-When the container image is rebuilt (`alf upgrade`), everything outside the `data/` volume is lost. This includes pip packages, apt packages, npm packages, and any binaries installed at runtime.
+When the container image is rebuilt (`alf upgrade`), everything outside the volumes is lost. This includes pip packages, apt packages, npm packages, and any binaries installed at runtime.
 
-### bootstrap.sh
+ALF uses a two-phase startup to reinstall everything automatically:
 
-The file `~/data/bootstrap.sh` is automatically executed at daemon startup. It only re-runs when its content changes (hash-checked for fast boot).
+### System packages (`config.d/packages.txt`)
 
-**When you install any package, always append the install command to `~/data/bootstrap.sh`:**
+Add one Debian package name per line. Installed as root at startup, only when the file changes.
 
-```bash
-# Append to bootstrap.sh — do NOT overwrite
-cat >> ~/data/bootstrap.sh << 'EOF'
-pip3 install --quiet requests
-EOF
+```
+jq
+imagemagick
+pandoc
 ```
 
-### Example bootstrap.sh
+Edit via: Workspace Explorer > `config.d/packages.txt`, then `alf restart`.
+
+### User bootstrap (`data/bootstrap.sh`)
+
+Runs as the `alf` user (not root) at every startup. Use for pip/npm installs and starting services.
 
 ```bash
 #!/bin/bash
 set -e
 
 # Python
-pip3 install --quiet faster-whisper requests numpy
-
-# System packages
-apt-get update -qq && apt-get install -y --no-install-recommends jq htop
+pip3 install --quiet --break-system-packages requests numpy
 
 # Node.js
 npm install -g --silent typescript
 
-# Go
-GOBIN=/usr/local/bin go install github.com/example/tool@latest
-
-# Binary download
-curl -fsSL https://example.com/tool.tar.gz | tar xz -C /usr/local/bin
+# Start a background service
+nohup python3 ~/data/tools/my-api serve &
 ```
+
+> **Do not** put `apt install` commands in bootstrap.sh — it runs as a non-root user. Use `config.d/packages.txt` instead.
 
 ### Rules
 
 1. Use quiet/non-interactive flags (`--quiet`, `-y`, `-qq`, `--silent`)
 2. Append new lines — do not overwrite existing content
-3. Script runs as root — no `sudo` needed
-4. If installation fails, it will retry on next restart (hash not saved on failure)
+3. bootstrap.sh runs as user `alf` — no `sudo`, no `apt`
+4. If bootstrap fails, the daemon still starts (warnings logged)
 
 ## What survives a rebuild
 
 | Survives | Lost |
 |----------|------|
-| Everything in `~/data/` | pip/apt/npm packages |
-| Scripts in `~/data/tools/` | Binaries in `/usr/local/bin` |
-| Apps in `~/data/apps/` | System-level config changes |
-| Skills in `~/data/skills/` | Anything outside data volume |
+| Everything in `~/data/` | pip/apt/npm packages (reinstalled automatically) |
+| `config.d/packages.txt` | Binaries in `/usr/local/bin` |
+| Scripts in `~/data/tools/` | System-level config changes |
+| Apps in `~/data/apps/` | Anything outside volumes |
+| Skills in `~/data/skills/` | |
 | `~/data/bootstrap.sh` | |
 
-**Rule of thumb:** if you create it, put it in `~/data/`. If you install it, register it in `~/data/bootstrap.sh`.
+**Rule of thumb:** system packages go in `config.d/packages.txt`, pip/npm go in `data/bootstrap.sh`, custom scripts go in `data/tools/`.
 
 ## What's next?
 

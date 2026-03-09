@@ -100,25 +100,33 @@ func (h *WorkspaceHandler) resolve(rel string) (string, error) {
 }
 
 // isAllowedPath checks if a resolved path falls within DataDir, ConfigDir, or SkillsDir.
+// Uses directory-boundary-safe prefix check to prevent prefix confusion attacks
+// (e.g. /home/alf/data-evil matching /home/alf/data).
 func (h *WorkspaceHandler) isAllowedPath(resolved string) bool {
-	if strings.HasPrefix(resolved, h.realDataDir()) {
+	if pathWithinDir(resolved, h.realDataDir()) {
 		return true
 	}
 	if h.ConfigDir != "" {
 		if real, err := filepath.EvalSymlinks(h.ConfigDir); err == nil {
-			if strings.HasPrefix(resolved, real) {
+			if pathWithinDir(resolved, real) {
 				return true
 			}
 		}
 	}
 	if h.SkillsDir != "" {
 		if real, err := filepath.EvalSymlinks(h.SkillsDir); err == nil {
-			if strings.HasPrefix(resolved, real) {
+			if pathWithinDir(resolved, real) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// pathWithinDir checks if path is exactly dir or a child of dir, with a proper
+// directory boundary check to prevent prefix confusion.
+func pathWithinDir(path, dir string) bool {
+	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
 }
 
 // readOnlyPrefixes are workspace paths that the user can browse but not edit.
@@ -498,7 +506,7 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		destPath := filepath.Join(writeTarget, destName)
 
 		// Security: ensure we don't escape the target directory.
-		if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(writeTarget)) {
+		if !pathWithinDir(filepath.Clean(destPath), filepath.Clean(writeTarget)) {
 			http.Error(w, jsonErr("invalid file path: "+fh.Filename), http.StatusBadRequest)
 			return
 		}

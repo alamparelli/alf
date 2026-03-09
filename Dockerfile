@@ -1,5 +1,5 @@
 # Stage 1: Build Go binaries with CGO (sqlite-vec, whisper.cpp on arm64).
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 ARG TARGETARCH
 
@@ -54,11 +54,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     trash-cli \
     poppler-utils \
     xz-utils \
+    sqlite3 \
+    htop \
     && if [ "${TARGETARCH}" = "arm64" ]; then \
          apt-get install -y --no-install-recommends libgomp1; \
        else \
          apt-get install -y --no-install-recommends python3-pip; \
        fi \
+    && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI.
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # Static ffmpeg+ffprobe (~80 MB unpacked vs ~400 MB Debian packages).

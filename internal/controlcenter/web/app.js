@@ -2,8 +2,20 @@
 // No tokens in URL, meta tags, or sessionStorage.
 sessionStorage.removeItem('cc_token'); // cleanup legacy token
 
+// CSRF: wrap native fetch to auto-inject X-Requested-With on same-origin state-changing requests.
+const _nativeFetch = window.fetch;
+window.fetch = function(url, opts) {
+  opts = opts || {};
+  const method = (opts.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    opts.headers = opts.headers || {};
+    if (!opts.headers['X-Requested-With']) opts.headers['X-Requested-With'] = 'XMLHttpRequest';
+  }
+  return _nativeFetch.call(this, url, opts);
+};
+
 function api(path, opts = {}) {
-  const headers = { ...(opts.headers || {}) };
+  const headers = { 'X-Requested-With': 'XMLHttpRequest', ...(opts.headers || {}) };
   return fetch(path, { ...opts, headers, credentials: 'same-origin' }).then(r => {
     if (r.status === 401) {
       toast('Session expired — send /login to your bot', 'error');
@@ -2210,7 +2222,7 @@ function docsShowArticle(id) {
   const content = document.getElementById('docsContent');
   content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Loading...</div>';
   api('/api/docs/' + encodeURIComponent(id)).then(doc => {
-    const rendered = marked.parse(doc.content, { breaks: false, gfm: true });
+    const rendered = DOMPurify.sanitize(marked.parse(doc.content, { breaks: false, gfm: true }));
 
     // Build TOC from headings
     const tmp = document.createElement('div');
@@ -2658,7 +2670,7 @@ function tasksRender(running, completed) {
 function taskRenderMd(text) {
   if (!text) return '';
   try {
-    return marked.parse(text, { breaks: true, gfm: true });
+    return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
   } catch (e) {
     return chatRenderMd(text);
   }

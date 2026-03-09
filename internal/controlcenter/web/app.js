@@ -3562,3 +3562,131 @@ function terminalStart() {
 }
 
 document.getElementById('termNewBtn').addEventListener('click', terminalStart);
+
+// --- Terminal mobile support ---
+const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+if (isTouchDevice) {
+  document.getElementById('termInputBar').style.display = 'flex';
+  document.querySelectorAll('.term-mobile-btn').forEach(b => b.style.display = '');
+}
+
+// Paste button — read clipboard and send to terminal.
+document.getElementById('termPasteBtn').addEventListener('click', async () => {
+  if (!termInstance || !termWS || termWS.readyState !== WebSocket.OPEN) return;
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) termWS.send(text);
+    termInstance.focus();
+  } catch { /* clipboard permission denied */ }
+});
+
+// Copy button — copy xterm selection to clipboard.
+document.getElementById('termCopyBtn').addEventListener('click', async () => {
+  if (!termInstance) return;
+  const sel = termInstance.getSelection();
+  if (sel) {
+    try { await navigator.clipboard.writeText(sel); } catch {}
+  }
+});
+
+// Mobile input bar — type/paste text and send with Enter or button.
+const termInput = document.getElementById('termInput');
+const termSendBtn = document.getElementById('termSendBtn');
+
+function termSendInput() {
+  if (!termWS || termWS.readyState !== WebSocket.OPEN) return;
+  const text = termInput.value;
+  if (!text) return;
+  termWS.send(text + '\n');
+  termInput.value = '';
+}
+
+termSendBtn.addEventListener('click', termSendInput);
+termInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); termSendInput(); }
+  // Send Ctrl+C
+  if (e.key === 'c' && e.ctrlKey) {
+    e.preventDefault();
+    if (termWS && termWS.readyState === WebSocket.OPEN) termWS.send('\x03');
+    termInput.value = '';
+  }
+});
+
+// --- Terminal long-press context menu ---
+let termLongPressTimer = null;
+const LONG_PRESS_MS = 500;
+
+function termShowContextMenu(x, y) {
+  termHideContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'term-context-menu';
+  menu.id = 'termContextMenu';
+
+  const hasSel = termInstance && termInstance.getSelection();
+
+  const items = [
+    ...(hasSel ? [{ label: 'Copy', icon: 'copy', action: 'copy' }] : []),
+    { label: 'Paste', icon: 'clipboard-paste', action: 'paste' },
+    { label: 'Select All', icon: 'text-select', action: 'selectall' },
+  ];
+
+  items.forEach(item => {
+    const btn = document.createElement('button');
+    btn.innerHTML = '<i data-lucide="' + item.icon + '"></i> ' + item.label;
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (item.action === 'copy') {
+        const sel = termInstance.getSelection();
+        if (sel) try { await navigator.clipboard.writeText(sel); } catch {}
+      } else if (item.action === 'paste') {
+        if (termWS && termWS.readyState === WebSocket.OPEN) {
+          try {
+            const text = await navigator.clipboard.readText();
+            if (text) termWS.send(text);
+          } catch {}
+        }
+      } else if (item.action === 'selectall') {
+        if (termInstance) termInstance.selectAll();
+      }
+      termHideContextMenu();
+    });
+    menu.appendChild(btn);
+  });
+
+  // Position within viewport bounds.
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  const maxX = window.innerWidth - rect.width - 8;
+  const maxY = window.innerHeight - rect.height - 8;
+  menu.style.left = Math.min(x, maxX) + 'px';
+  menu.style.top = Math.min(y, maxY) + 'px';
+
+  lucide.createIcons({ nodes: menu.querySelectorAll('[data-lucide]') });
+
+  // Dismiss on any tap outside.
+  setTimeout(() => document.addEventListener('touchstart', termHideContextMenu, { once: true }), 10);
+}
+
+function termHideContextMenu() {
+  const m = document.getElementById('termContextMenu');
+  if (m) m.remove();
+}
+
+if (isTouchDevice) {
+  const container = document.getElementById('terminalContainer');
+  container.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    termLongPressTimer = setTimeout(() => {
+      termShowContextMenu(touch.clientX, touch.clientY);
+    }, LONG_PRESS_MS);
+  }, { passive: true });
+
+  container.addEventListener('touchmove', () => {
+    clearTimeout(termLongPressTimer);
+  }, { passive: true });
+
+  container.addEventListener('touchend', () => {
+    clearTimeout(termLongPressTimer);
+  }, { passive: true });
+}

@@ -309,6 +309,12 @@
               <label>Password</label>
               <input type="password" id="vaultSvcPassword" class="input" placeholder="Password">
             </div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="vaultSvcTLSSkip"> Skip TLS verification
+              </label>
+              <span class="form-hint">Enable for self-signed certs or internal services (allows HTTP and private IPs)</span>
+            </div>
             <div class="modal-actions">
               <button class="btn btn-secondary" id="vaultSvcCancelBtn">Cancel</button>
               <button class="btn" id="vaultSvcSaveBtn">Save</button>

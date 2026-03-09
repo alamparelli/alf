@@ -208,7 +208,8 @@ func main() {
 	// Fix directory permissions so the claude subprocess (uid 1001, gid 1000)
 	// can read/write files created before the permission refactoring.
 	fixDataPermissions(dataDir)
-	fixDataPermissions(configDir)
+	lockDirReadOnly(configDir)
+	lockDirReadOnly(skillsDir)
 	// Fix HOME subdirectories that root may have written to (claude CLI
 	// config, npm/pip local installs). Without this, claude -p hangs with
 	// EACCES because it cannot write to .claude/ or .local/.
@@ -1341,7 +1342,11 @@ func main() {
 						return
 					}
 
-					log.Printf("→ agent %dms %d iterations $%.4f", duration.Milliseconds(), orchMeta.Iterations, orchMeta.TotalCost)
+					orchSessShort := orchMeta.ID
+				if len(orchSessShort) > 8 {
+					orchSessShort = orchSessShort[:8]
+				}
+				log.Printf("→ agent %dms %d iterations $%.4f sid:%s", duration.Milliseconds(), orchMeta.Iterations, orchMeta.TotalCost, orchSessShort)
 
 					eventLog.Log("agent_out", map[string]any{
 						"chat_id":      orchChatID,
@@ -1531,7 +1536,11 @@ func main() {
 				reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
 			}
 
-			log.Printf("→ %s %dms %dt $%.4f", result.Model, duration.Milliseconds(), result.NumTurns, result.CostUSD)
+			sessShort := result.SessionID
+			if len(sessShort) > 8 {
+				sessShort = sessShort[:8]
+			}
+			log.Printf("→ %s %dms %dt $%.4f sid:%s", result.Model, duration.Milliseconds(), result.NumTurns, result.CostUSD, sessShort)
 
 			eventLog.Log("message_out", map[string]any{
 				"chat_id":          chatID,
@@ -2194,6 +2203,41 @@ func fixDataPermissions(dataDir string) {
 	})
 	if fixed > 0 {
 		log.Printf("fixed permissions on %d files/dirs in %s", fixed, dataDir)
+	}
+}
+
+// lockDirReadOnly ensures a directory under /opt/alf/ is owned by alf (uid 1000)
+// and group-readable but NOT group-writable. The claude subprocess (uid 1001,
+// gid 1000) can read but not modify files. Used for config.d and skills.d.
+func lockDirReadOnly(configDir string) {
+	fixed := 0
+	filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		// Ensure owned by alf:alf (1000:1000).
+		if sys, ok := info.Sys().(*syscall.Stat_t); ok {
+			if int(sys.Uid) != 1000 || int(sys.Gid) != 1000 {
+				os.Chown(path, 1000, 1000)
+				fixed++
+			}
+		}
+		// Dirs: rwxr-x--- (750), Files: rw-r----- (640).
+		mode := info.Mode().Perm()
+		var want os.FileMode
+		if info.IsDir() {
+			want = 0o750
+		} else {
+			want = 0o640
+		}
+		if mode != want {
+			os.Chmod(path, want)
+			fixed++
+		}
+		return nil
+	})
+	if fixed > 0 {
+		log.Printf("locked %s permissions on %d files/dirs (group=ro)", configDir, fixed)
 	}
 }
 

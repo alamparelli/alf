@@ -85,6 +85,7 @@ type setupProfile struct {
 	Timezone       string   `json:"timezone,omitempty"`
 	OpenRouterKey  bool     `json:"openrouter_key,omitempty"` // true if key was set
 	Workspaces     []string `json:"workspaces,omitempty"`     // host paths to mount
+	JSRuntime      string   `json:"js_runtime,omitempty"`     // "node", "deno", "bun", or ""
 }
 
 func setupProfilePath() string {
@@ -194,6 +195,13 @@ func RunInit() {
 	composeData.Workspaces = workspaces
 	profile = loadSetupProfile()
 	profile.Workspaces = workspaces
+	saveSetupProfile(profile)
+
+	// Step 5e: JS Runtime
+	jsRuntime := promptJSRuntime(reader, prev.JSRuntime)
+	composeData.JSRuntime = jsRuntime
+	profile = loadSetupProfile()
+	profile.JSRuntime = jsRuntime
 	saveSetupProfile(profile)
 
 	// Set default image, allow override via ALF_IMAGE env var.
@@ -697,6 +705,9 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	}
 	PrintCheck("bootstrap.sh")
 
+	// Write runtime.txt with JS runtime choice (if selected).
+	writeRuntimeTxt(dir, compose.JSRuntime)
+
 	// Write config README if it doesn't exist.
 	readmePath := filepath.Join(dir, "config.d", "README.md")
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
@@ -862,6 +873,77 @@ func promptWorkspaces(reader *bufio.Reader, previous []string) []string {
 		fmt.Println("  No workspaces configured.")
 	}
 	return workspaces
+}
+
+func writeRuntimeTxt(dir, jsRuntime string) {
+	runtimePath := filepath.Join(dir, "config.d", "runtime.txt")
+	if jsRuntime == "" {
+		// Remove runtime.txt if no runtime selected.
+		os.Remove(runtimePath)
+		return
+	}
+	content := fmt.Sprintf("# JS runtime installed at container startup\n%s\n", jsRuntime)
+	if err := os.WriteFile(runtimePath, []byte(content), 0o644); err != nil {
+		PrintWarning(fmt.Sprintf("Failed to write runtime.txt: %v", err))
+		return
+	}
+	PrintCheck("config.d/runtime.txt (" + jsRuntime + ")")
+}
+
+var jsRuntimeOptions = []struct {
+	Key  string
+	Name string
+}{
+	{"", "None"},
+	{"node", "Node.js (nodejs + npm)"},
+	{"deno", "Deno"},
+	{"bun", "Bun"},
+}
+
+func promptJSRuntime(reader *bufio.Reader, previous string) string {
+	fmt.Println("\n  JavaScript runtime for the container:")
+	for i, opt := range jsRuntimeOptions {
+		marker := "  "
+		if opt.Key == previous {
+			marker = "* "
+		}
+		fmt.Printf("    %s%d) %s\n", marker, i, opt.Name)
+	}
+
+	defaultIdx := 0
+	for i, opt := range jsRuntimeOptions {
+		if opt.Key == previous {
+			defaultIdx = i
+			break
+		}
+	}
+
+	fmt.Printf("  Choice [%d]: ", defaultIdx)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	if input == "" {
+		choice := jsRuntimeOptions[defaultIdx].Key
+		if choice == "" {
+			PrintCheck("No JS runtime")
+		} else {
+			PrintCheck("JS runtime: " + choice)
+		}
+		return choice
+	}
+
+	idx := 0
+	if _, err := fmt.Sscanf(input, "%d", &idx); err != nil || idx < 0 || idx >= len(jsRuntimeOptions) {
+		PrintWarning("Invalid choice, keeping default")
+		return previous
+	}
+
+	choice := jsRuntimeOptions[idx].Key
+	if choice == "" {
+		PrintCheck("No JS runtime")
+	} else {
+		PrintCheck("JS runtime: " + choice)
+	}
+	return choice
 }
 
 // RunLogin creates a long-lived Claude OAuth token via `claude setup-token`

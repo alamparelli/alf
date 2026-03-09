@@ -458,6 +458,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		}
 	}
 
+	start := time.Now()
 	result, err := prov.Invoke(ctx, prompt, params, progressFn)
 
 	// Retry without resume if session failed (CLI only).
@@ -467,10 +468,17 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		params.ResumeID = ""
 		result, err = prov.Invoke(ctx, prompt, params, nil)
 	}
+	duration := time.Since(start)
 
 	if err != nil {
 		return fmt.Errorf("claude: %w", err)
 	}
+
+	sessShort := result.SessionID
+	if len(sessShort) > 8 {
+		sessShort = sessShort[:8]
+	}
+	log.Printf("[chat-api] → %s %dms %dt $%.4f sid:%s", result.Model, duration.Milliseconds(), result.NumTurns, result.CostUSD, sessShort)
 
 	// Update session.
 	if result.SessionID != "" {

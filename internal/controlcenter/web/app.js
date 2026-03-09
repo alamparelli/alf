@@ -2851,6 +2851,8 @@ function logsStartAutoRefresh() {
 }
 
 let _logsAllLines = [];
+let _logsActiveFilter = null; // {type:'session'|'model'|'level', value:string}
+
 async function logsFetch() {
   const name = document.getElementById('logSelect').value;
   const n = document.getElementById('logLines').value;
@@ -2859,16 +2861,71 @@ async function logsFetch() {
     const res = await fetch(`/api/logs?name=${encodeURIComponent(name)}&n=${n}`);
     const data = await res.json();
     _logsAllLines = data.lines || [];
+    logsBuildFilters();
     logsApplyFilter();
   } catch {
     document.getElementById('logOutput').textContent = 'Failed to load logs.';
   }
 }
 
+function logsBuildFilters() {
+  const container = document.getElementById('logFilters');
+  if (!container) return;
+  // Extract unique sessions and models from log lines.
+  const sessions = new Set();
+  const models = new Set();
+  let hasErrors = false;
+  const sidRe = /sid:([a-f0-9-]+)/i;
+  const arrowRe = /→\s+([\w.-]+)\s+\d+ms/;
+  _logsAllLines.forEach(line => {
+    const sm = line.match(sidRe);
+    if (sm) sessions.add(sm[1]);
+    const mm = line.match(arrowRe);
+    if (mm && mm[1] !== 'agent') models.add(mm[1]);
+    if (/\bERROR\b/i.test(line)) hasErrors = true;
+  });
+  container.innerHTML = '';
+  if (sessions.size === 0 && models.size === 0 && !hasErrors) return;
+
+  const mkChip = (label, type, value) => {
+    const btn = document.createElement('button');
+    btn.className = 'log-filter-chip' + (_logsActiveFilter && _logsActiveFilter.type === type && _logsActiveFilter.value === value ? ' active' : '');
+    btn.textContent = label;
+    btn.onclick = () => {
+      if (_logsActiveFilter && _logsActiveFilter.type === type && _logsActiveFilter.value === value) {
+        _logsActiveFilter = null;
+      } else {
+        _logsActiveFilter = { type, value };
+      }
+      logsBuildFilters();
+      logsApplyFilter();
+    };
+    container.appendChild(btn);
+  };
+
+  if (hasErrors) mkChip('Errors', 'level', 'error');
+  models.forEach(m => mkChip(m, 'model', m));
+  // Show last 5 sessions (most recent first).
+  const sessArr = [...sessions].slice(-5).reverse();
+  sessArr.forEach((s, i) => mkChip(`session ${s}`, 'session', s));
+}
+
+function logsMatchesFilter(line) {
+  if (!_logsActiveFilter) return true;
+  const { type, value } = _logsActiveFilter;
+  if (type === 'level') return /\bERROR\b/i.test(line);
+  if (type === 'session') return line.includes('sid:' + value);
+  if (type === 'model') return line.includes('→ ' + value) || line.includes(value);
+  return true;
+}
+
 function logsApplyFilter() {
   const q = document.getElementById('logSearch').value.toLowerCase();
   const out = document.getElementById('logOutput');
-  const filtered = q ? _logsAllLines.filter(l => l.toLowerCase().includes(q)) : _logsAllLines;
+  const filtered = _logsAllLines.filter(l => {
+    if (q && !l.toLowerCase().includes(q)) return false;
+    return logsMatchesFilter(l);
+  });
   out.innerHTML = '';
   filtered.forEach(line => {
     const span = document.createElement('span');
@@ -2884,6 +2941,7 @@ function logsLineClass(line) {
   if (/\bERROR\b/i.test(line)) return ' log-error';
   if (/\bWARN(ING)?\b/i.test(line)) return ' log-warn';
   if (/\bDEBUG\b/i.test(line)) return ' log-debug';
+  if (/→/.test(line)) return ' log-response';
   return '';
 }
 

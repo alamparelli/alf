@@ -2,19 +2,54 @@
 set -e
 
 PACKAGES="/opt/alf/config.d/packages.txt"
+RUNTIME="/opt/alf/config.d/runtime.txt"
 BOOTSTRAP="/home/alf/data/bootstrap.sh"
 
 # Phase 1: Install system packages as root (if packages.txt exists).
-# One package name per line. Runs only when the file changes (stamp check).
+# One package name per line. Lines starting with # are ignored.
 if [ -f "$PACKAGES" ]; then
     STAMP="/tmp/.packages-stamp"
     if [ ! -f "$STAMP" ] || ! cmp -s "$PACKAGES" "$STAMP"; then
         echo "entrypoint: installing system packages ..."
-        DEBIAN_FRONTEND=noninteractive apt-get update -qq \
-            && xargs -a "$PACKAGES" apt-get install -y --no-install-recommends -qq \
-            && rm -rf /var/lib/apt/lists/* \
-            || echo "entrypoint: WARNING — package install failed, continuing"
+        PKGS=$(grep -v '^\s*#' "$PACKAGES" | grep -v '^\s*$' | tr '\n' ' ')
+        if [ -n "$PKGS" ]; then
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+                && apt-get install -y --no-install-recommends -qq $PKGS \
+                && rm -rf /var/lib/apt/lists/* \
+                || echo "entrypoint: WARNING — package install failed, continuing"
+        fi
         cp "$PACKAGES" "$STAMP"
+    fi
+fi
+
+# Phase 1b: Install JS runtime (if runtime.txt exists).
+# Supports: node, deno, bun. Installs once (stamp check).
+if [ -f "$RUNTIME" ]; then
+    RT=$(grep -v '^\s*#' "$RUNTIME" | grep -v '^\s*$' | head -1 | tr -d '[:space:]')
+    STAMP="/tmp/.runtime-stamp"
+    PREV=$(cat "$STAMP" 2>/dev/null || echo "")
+    if [ -n "$RT" ] && [ "$RT" != "$PREV" ]; then
+        echo "entrypoint: installing JS runtime: $RT ..."
+        case "$RT" in
+            node)
+                DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+                    && apt-get install -y --no-install-recommends -qq nodejs npm \
+                    && rm -rf /var/lib/apt/lists/* \
+                    || echo "entrypoint: WARNING — node install failed"
+                ;;
+            deno)
+                curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
+                    || echo "entrypoint: WARNING — deno install failed"
+                ;;
+            bun)
+                curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash \
+                    || echo "entrypoint: WARNING — bun install failed"
+                ;;
+            *)
+                echo "entrypoint: WARNING — unknown JS runtime: $RT"
+                ;;
+        esac
+        echo "$RT" > "$STAMP"
     fi
 fi
 

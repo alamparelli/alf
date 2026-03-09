@@ -22,9 +22,9 @@ ALF's startup has two phases, each with a different purpose and privilege level:
 Add one Debian package name per line. Packages are installed as root at container startup, only when the file changes.
 
 ```
-jq
-imagemagick
-pandoc
+graphviz
+texlive-base
+chromium
 ```
 
 **Where to edit:** Workspace Explorer > `config.d/packages.txt`
@@ -94,9 +94,20 @@ When you run `alf upgrade`, the container image is rebuilt. Everything outside v
 
 ## Pre-installed packages
 
-These are already in the container image (no need to add them):
+These are already in the container image — no need to add them to `packages.txt`.
 
-`bash` `ca-certificates` `curl` `git` `trash-cli` `poppler-utils` `ffmpeg` `ffprobe` `sqlite3` `htop` `gh` `python3` `pip3`
+| Category | Packages |
+|----------|----------|
+| **Shell & editors** | `bash` `nano` `less` `tmux` |
+| **Network & transfer** | `curl` `wget` `openssh-client` `rsync` `dnsutils` `net-tools` |
+| **Search & files** | `git` `ripgrep` `tree` `file` `trash-cli` `unzip` `zip` |
+| **Build tools** | `build-essential` (gcc, g++, make) |
+| **Data & docs** | `jq` `sqlite3` `pandoc` `poppler-utils` |
+| **Media** | `ffmpeg` `imagemagick` |
+| **System** | `ca-certificates` `xz-utils` `htop` |
+| **Dev tools** | `gh` (GitHub CLI) `python3` `pip3` (amd64) `node` `npm` |
+
+Need something else? Add it to `config.d/packages.txt` (one package per line) and restart. Packages are installed as root on startup and persist across restarts.
 
 ## What's next?
 

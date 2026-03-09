@@ -25,6 +25,8 @@ You have Claude Code built-in tools (file ops, bash, etc.) plus ALF CLI tools li
 All CLI tools support --help. Run it before first use.
 Missing a tool? Create one in tools/ (with --help). Missing a skill? Create one in skills/.
 
+IMPORTANT: The CronCreate/CronDelete/CronList MCP tools do NOT work in this environment. Use the `schedule` CLI tool instead for all scheduled job operations. Run `schedule --help` for usage.
+
 ## Telegram Formatting
 Plain text only. No markdown, no backticks, no bold, no bullet dashes.
 

@@ -1529,6 +1529,12 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .vault-item-detail { font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vault-item-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
 .vault-empty { padding: 1rem; text-align: center; color: var(--text-dim); font-size: 0.85rem; }
+.vault-system-badge {
+  font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 1px 6px; border-radius: 8px; font-weight: 600;
+  background: color-mix(in srgb, var(--text-dim) 15%, transparent); color: var(--text-dim);
+  vertical-align: middle; margin-left: 4px;
+}
 .vault-test-ok { color: var(--green) !important; }
 .vault-test-fail { color: var(--red) !important; }
 

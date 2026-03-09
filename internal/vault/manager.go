@@ -20,6 +20,7 @@ type Manager struct {
 	addr       string
 	adminToken string
 	proxyToken string
+	masterPass string // stored for re-authentication if admin token is revoked
 	mu         sync.Mutex
 	cancel     context.CancelFunc
 
@@ -77,7 +78,7 @@ func (m *Manager) Stop() error {
 }
 
 // AutoUnlock unlocks the vault with the given master password.
-// Stores the admin token for subsequent API calls.
+// Stores the admin token and password for re-authentication if needed.
 func (m *Manager) AutoUnlock(password string) error {
 	c := vaultclient.NewWithToken(m.addr, "")
 	token, err := c.Unlock(password)
@@ -86,8 +87,27 @@ func (m *Manager) AutoUnlock(password string) error {
 	}
 	m.mu.Lock()
 	m.adminToken = token
+	m.masterPass = password
 	m.mu.Unlock()
 	return nil
+}
+
+// EnsureAuth re-authenticates if the admin token has been revoked.
+// Returns nil if the admin token is valid, or re-unlocks using stored password.
+func (m *Manager) EnsureAuth() error {
+	c := m.Client()
+	// Quick check: try listing tokens — if 401, re-auth.
+	if _, err := c.ListTokens(); err == nil {
+		return nil
+	}
+	m.mu.Lock()
+	pw := m.masterPass
+	m.mu.Unlock()
+	if pw == "" {
+		return fmt.Errorf("admin token invalid and no master password stored")
+	}
+	log.Println("[vault] admin token invalid, re-authenticating...")
+	return m.AutoUnlock(pw)
 }
 
 // CreateProxyToken creates a proxy-scoped token for Claude subprocess usage.

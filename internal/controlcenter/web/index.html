@@ -291,6 +291,8 @@
                 <option value="bearer">Bearer Token</option>
                 <option value="header">Custom Header</option>
                 <option value="basic">Basic Auth</option>
+                <option value="oauth2_client">OAuth2 Client</option>
+                <option value="service_account">Service Account</option>
               </select>
             </div>
             <div class="form-group" id="vaultSvcBearerGroup">
@@ -309,6 +311,29 @@
               <label>Password</label>
               <input type="password" id="vaultSvcPassword" class="input" placeholder="Password">
             </div>
+            <div class="form-group" id="vaultSvcOAuth2Group" style="display:none">
+              <label>Client ID</label>
+              <input type="text" id="vaultSvcOAuthClientId" class="input" placeholder="Client ID">
+              <label>Client Secret</label>
+              <input type="password" id="vaultSvcOAuthClientSecret" class="input" placeholder="Client Secret">
+              <label>Token URL</label>
+              <input type="text" id="vaultSvcOAuthTokenUrl" class="input" placeholder="https://oauth2.googleapis.com/token">
+              <label>Refresh Token</label>
+              <input type="password" id="vaultSvcOAuthRefreshToken" class="input" placeholder="Refresh token">
+              <label>Scopes (comma-separated)</label>
+              <input type="text" id="vaultSvcOAuthScopes" class="input" placeholder="e.g. read,write">
+            </div>
+            <div class="form-group" id="vaultSvcSAGroup" style="display:none">
+              <label>Key File</label>
+              <select id="vaultSvcSAFileRef" class="input">
+                <option value="">Upload a key file first</option>
+              </select>
+              <span class="form-hint">Upload service account JSON files in the Files section below</span>
+              <label>Scopes (comma-separated)</label>
+              <input type="text" id="vaultSvcSAScopes" class="input" placeholder="e.g. https://www.googleapis.com/auth/spreadsheets">
+              <label>Token URL (optional)</label>
+              <input type="text" id="vaultSvcSATokenUrl" class="input" placeholder="Default: Google OAuth2">
+            </div>
             <div class="form-group">
               <label class="checkbox-label">
                 <input type="checkbox" id="vaultSvcTLSSkip"> Skip TLS verification
@@ -320,6 +345,18 @@
               <button class="btn" id="vaultSvcSaveBtn">Save</button>
             </div>
           </div>
+        </div>
+
+        <!-- Files -->
+        <div class="card vault-files-card" id="vaultFilesCard" style="display:none">
+          <div class="vault-section-header">
+            <h3>Files</h3>
+            <label class="btn vault-file-upload-btn">
+              <i data-lucide="upload" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Upload
+              <input type="file" id="vaultFileInput" style="display:none">
+            </label>
+          </div>
+          <div id="vaultFilesList" class="vault-list"></div>
         </div>
 
         <!-- Access Keys -->

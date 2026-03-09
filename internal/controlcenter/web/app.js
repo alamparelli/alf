@@ -3793,6 +3793,7 @@ function vaultInit() {
   document.getElementById('vaultSvcSaveBtn').addEventListener('click', vaultSaveService);
   document.getElementById('vaultSvcAuthType').addEventListener('change', vaultToggleAuthFields);
   document.getElementById('vaultCreateTokenBtn').addEventListener('click', vaultCreateToken);
+  document.getElementById('vaultFileInput').addEventListener('change', vaultUploadFile);
 
   vaultRefresh();
 }
@@ -3806,6 +3807,7 @@ async function vaultRefresh() {
     const unlockCard = document.getElementById('vaultUnlockCard');
     const lockBtn = document.getElementById('vaultLockBtn');
     const servicesCard = document.getElementById('vaultServicesCard');
+    const filesCard = document.getElementById('vaultFilesCard');
     const tokensCard = document.getElementById('vaultTokensCard');
 
     // Hide everything first.
@@ -3813,6 +3815,7 @@ async function vaultRefresh() {
     unlockCard.style.display = 'none';
     lockBtn.style.display = 'none';
     servicesCard.style.display = 'none';
+    filesCard.style.display = 'none';
     tokensCard.style.display = 'none';
 
     if (!data.available) {
@@ -3826,8 +3829,10 @@ async function vaultRefresh() {
       text.textContent = 'Unlocked';
       lockBtn.style.display = '';
       servicesCard.style.display = '';
+      filesCard.style.display = '';
       tokensCard.style.display = '';
       vaultLoadServices();
+      vaultLoadFiles();
       vaultLoadTokens();
     } else if (data.first_time) {
       dot.className = 'vault-status-indicator vault-status-off';
@@ -3981,15 +3986,27 @@ function vaultShowServiceModal(edit) {
   document.getElementById('vaultSvcHeaderValue').value = '';
   document.getElementById('vaultSvcUsername').value = '';
   document.getElementById('vaultSvcPassword').value = '';
+  document.getElementById('vaultSvcOAuthClientId').value = '';
+  document.getElementById('vaultSvcOAuthClientSecret').value = '';
+  document.getElementById('vaultSvcOAuthTokenUrl').value = '';
+  document.getElementById('vaultSvcOAuthRefreshToken').value = '';
+  document.getElementById('vaultSvcOAuthScopes').value = '';
+  document.getElementById('vaultSvcSAFileRef').value = '';
+  document.getElementById('vaultSvcSAScopes').value = '';
+  document.getElementById('vaultSvcSATokenUrl').value = '';
   document.getElementById('vaultSvcTLSSkip').checked = edit ? !!edit.tls_skip_verify : false;
   if (edit) {
     document.getElementById('vaultSvcToken').placeholder = '(unchanged — leave empty to keep)';
     document.getElementById('vaultSvcHeaderValue').placeholder = '(unchanged — leave empty to keep)';
     document.getElementById('vaultSvcPassword').placeholder = '(unchanged — leave empty to keep)';
+    document.getElementById('vaultSvcOAuthClientSecret').placeholder = '(unchanged — leave empty to keep)';
+    document.getElementById('vaultSvcOAuthRefreshToken').placeholder = '(unchanged — leave empty to keep)';
   } else {
     document.getElementById('vaultSvcToken').placeholder = 'Bearer token';
     document.getElementById('vaultSvcHeaderValue').placeholder = 'Value';
     document.getElementById('vaultSvcPassword').placeholder = 'Password';
+    document.getElementById('vaultSvcOAuthClientSecret').placeholder = 'Client Secret';
+    document.getElementById('vaultSvcOAuthRefreshToken').placeholder = 'Refresh token';
   }
   vaultToggleAuthFields();
   document.getElementById('vaultServiceModal').style.display = '';
@@ -4006,6 +4023,9 @@ function vaultToggleAuthFields() {
   document.getElementById('vaultSvcBearerGroup').style.display = type === 'bearer' ? '' : 'none';
   document.getElementById('vaultSvcHeaderGroup').style.display = type === 'header' ? '' : 'none';
   document.getElementById('vaultSvcBasicGroup').style.display = type === 'basic' ? '' : 'none';
+  document.getElementById('vaultSvcOAuth2Group').style.display = type === 'oauth2_client' ? '' : 'none';
+  document.getElementById('vaultSvcSAGroup').style.display = type === 'service_account' ? '' : 'none';
+  if (type === 'service_account') vaultPopulateFileRefs();
 }
 
 async function vaultSaveService() {
@@ -4025,6 +4045,20 @@ async function vaultSaveService() {
   } else if (authType === 'basic') {
     payload.auth.username = document.getElementById('vaultSvcUsername').value;
     payload.auth.password = document.getElementById('vaultSvcPassword').value;
+  } else if (authType === 'oauth2_client') {
+    payload.auth.client_id = document.getElementById('vaultSvcOAuthClientId').value;
+    payload.auth.client_secret = document.getElementById('vaultSvcOAuthClientSecret').value;
+    payload.auth.token_url = document.getElementById('vaultSvcOAuthTokenUrl').value;
+    payload.auth.refresh_token = document.getElementById('vaultSvcOAuthRefreshToken').value;
+    const scopes = document.getElementById('vaultSvcOAuthScopes').value.trim();
+    if (scopes) payload.auth.scopes = scopes.split(',').map(s => s.trim()).filter(Boolean);
+  } else if (authType === 'service_account') {
+    payload.auth.file_ref = document.getElementById('vaultSvcSAFileRef').value;
+    if (!payload.auth.file_ref) { alert('Select a key file'); return; }
+    const saScopes = document.getElementById('vaultSvcSAScopes').value.trim();
+    if (saScopes) payload.auth.sa_scopes = saScopes.split(',').map(s => s.trim()).filter(Boolean);
+    const saTokenUrl = document.getElementById('vaultSvcSATokenUrl').value.trim();
+    if (saTokenUrl) payload.auth.sa_token_url = saTokenUrl;
   }
 
   try {
@@ -4036,7 +4070,7 @@ async function vaultSaveService() {
     document.getElementById('vaultServiceModal').style.display = 'none';
     vaultLoadServices();
   } catch (err) {
-    alert('Save failed: ' + err.message);
+    alert('Save failed: ' + (err?.error || err?.message || 'unknown error'));
   }
 }
 
@@ -4106,5 +4140,95 @@ async function vaultRevokeKey(prefix) {
     const msg = err?.error || err?.message || 'unknown error';
     alert('Revoke failed: ' + msg);
   }
+}
+
+// --- Vault Files ---
+
+let vaultFilesCache = [];
+
+async function vaultLoadFiles() {
+  try {
+    const files = await api('/api/vault/files');
+    vaultFilesCache = files || [];
+    const list = document.getElementById('vaultFilesList');
+    if (!files || files.length === 0) {
+      list.innerHTML = '<div class="vault-empty">No files stored. Upload service account keys or certificates here.</div>';
+      return;
+    }
+    list.innerHTML = files.map(f => `
+      <div class="vault-item">
+        <div class="vault-item-info">
+          <span class="vault-item-name">${esc(f.name)}</span>
+          <span class="vault-item-detail">${esc(f.mime_type)} &middot; ${formatFileSize(f.size)}</span>
+        </div>
+        <div class="vault-item-actions">
+          <button class="btn btn-icon vault-file-del-btn" data-name="${esc(f.name)}" title="Delete"><i data-lucide="trash-2"></i></button>
+        </div>
+      </div>
+    `).join('');
+    lucide.createIcons();
+    list.querySelectorAll('.vault-file-del-btn').forEach(btn => {
+      btn.addEventListener('click', () => vaultDeleteFile(btn.dataset.name));
+    });
+  } catch (err) {
+    document.getElementById('vaultFilesList').innerHTML = '<div class="vault-empty">Error loading files</div>';
+  }
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+async function vaultUploadFile() {
+  const input = document.getElementById('vaultFileInput');
+  const file = input.files[0];
+  if (!file) return;
+  const name = prompt('File name in vault:', file.name);
+  if (!name) { input.value = ''; return; }
+
+  const form = new FormData();
+  form.append('name', name);
+  form.append('file', file);
+
+  try {
+    await _nativeFetch('/api/vault/files', {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      credentials: 'same-origin',
+      body: form
+    }).then(r => {
+      if (!r.ok) return r.json().then(j => { throw j; });
+      return r.json();
+    });
+    toast('File uploaded');
+    vaultLoadFiles();
+  } catch (err) {
+    alert('Upload failed: ' + (err?.error || err?.message || 'unknown error'));
+  }
+  input.value = '';
+}
+
+async function vaultDeleteFile(name) {
+  if (!confirm('Delete file "' + name + '"?\n\nServices referencing this file will break.')) return;
+  try {
+    await api('/api/vault/files/' + encodeURIComponent(name), { method: 'DELETE' });
+    vaultLoadFiles();
+  } catch (err) {
+    alert('Delete failed: ' + (err?.error || err?.message || 'unknown error'));
+  }
+}
+
+async function vaultPopulateFileRefs() {
+  const select = document.getElementById('vaultSvcSAFileRef');
+  const current = select.value;
+  // Use cached files or fetch fresh.
+  if (!vaultFilesCache.length) {
+    try { vaultFilesCache = await api('/api/vault/files') || []; } catch (e) { /* ignore */ }
+  }
+  select.innerHTML = '<option value="">-- select key file --</option>' +
+    vaultFilesCache.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('');
+  if (current) select.value = current;
 }
 

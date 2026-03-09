@@ -45,7 +45,7 @@ The vault auto-unlocks at startup when `vault_master_password` is set as a Docke
 3. Fill in the base URL and authentication credentials
 4. Click **Test** to verify connectivity
 
-### 3. Claude uses the vault
+### Claude uses the vault
 
 Claude can call any registered service through the vault proxy:
 

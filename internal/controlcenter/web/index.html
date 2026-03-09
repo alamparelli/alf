@@ -245,11 +245,22 @@
           </div>
         </div>
 
+        <!-- First-time setup -->
+        <div class="card vault-setup-card" id="vaultSetupCard" style="display:none">
+          <p class="vault-setup-text">Choose a master password to encrypt your vault. This password protects all stored API credentials.</p>
+          <div class="vault-unlock-form">
+            <input type="password" id="vaultSetupPassword" placeholder="Choose master password" class="input" autocomplete="off">
+            <button class="btn" id="vaultSetupBtn">Create Vault</button>
+          </div>
+          <p class="vault-setup-hint">To auto-unlock on restart, also run: <code>alf secret set vault_master_password "your-password"</code></p>
+        </div>
+
         <!-- Unlock -->
         <div class="card vault-unlock-card" id="vaultUnlockCard" style="display:none">
           <div class="vault-unlock-form">
             <input type="password" id="vaultPasswordInput" placeholder="Master password" class="input" autocomplete="off">
             <button class="btn" id="vaultUnlockBtn">Unlock</button>
+            <button class="btn btn-secondary" id="vaultResetBtn" title="Delete vault and start fresh">Reset</button>
           </div>
         </div>
 

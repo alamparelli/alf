@@ -19,7 +19,15 @@ Vault is a built-in secrets manager that runs inside the ALF container. It encry
 
 ## Setup
 
-### 1. Set a master password
+### Option A: First-time setup via Control Center
+
+1. Open the **Vault** tab in the sidebar
+2. Choose a master password (min 8 characters) and click **Create Vault**
+3. The vault is created and unlocked immediately
+
+> **Note:** This password won't persist across container restarts. For auto-unlock, also set the Docker secret (see Option B).
+
+### Option B: Set a master password via CLI
 
 On the host machine:
 
@@ -28,9 +36,9 @@ alf secret set vault_master_password "your-strong-password"
 alf restart
 ```
 
-The vault starts locked on every boot. If `vault_master_password` is set as a Docker secret, it auto-unlocks at startup.
+The vault auto-unlocks at startup when `vault_master_password` is set as a Docker secret.
 
-### 2. Add services via Control Center
+### Add services
 
 1. Open the **Vault** tab in the sidebar
 2. Click **Add** to register a service (e.g., GitHub API, Slack, etc.)
@@ -74,11 +82,28 @@ Claude's `VAULT_TOKEN` environment variable contains a proxy-scoped token, so it
 - `vault-data/` volume is separate from the data directory — Claude cannot access the encrypted file
 - SSRF protection: vault-server blocks requests to private IP ranges
 
+## Reset vault
+
+The master password is the encryption key — it cannot be changed. To start fresh with a new password:
+
+**Via Control Center:**
+1. Go to the **Vault** tab
+2. If locked, click **Reset** next to the unlock form
+3. Choose a new master password
+
+**Via CLI (on host):**
+```bash
+ssh your-server 'rm /path/to/alf/vault-data/vault.enc'
+alf secret set vault_master_password "new-password"
+alf restart
+```
+
+> **Warning:** Resetting deletes all stored API credentials. Services must be re-added.
+
 ## Operational notes
 
 - **First-time setup:** An empty vault is created automatically on first unlock
 - **Crash recovery:** vault-server restarts automatically with exponential backoff
-- **Password change:** Not supported (password = encryption key). To reset: delete `vault-data/vault.enc` and start fresh
 - **Without master password:** vault-server starts but stays locked. Unlock manually via the Control Center vault page
 - **Disable vault:** Remove the `vault_master_password` secret. Vault-server still starts (locked) but has zero impact
 

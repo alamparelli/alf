@@ -1511,6 +1511,10 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .vault-status-on { background: var(--green); }
 .vault-status-locked { background: var(--yellow); }
 .vault-status-off { background: var(--text-dim); }
+.vault-setup-card { margin-bottom: 16px; }
+.vault-setup-text { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--text-dim); line-height: 1.5; }
+.vault-setup-hint { margin: 0.75rem 0 0; font-size: 0.75rem; color: var(--text-dim); }
+.vault-setup-hint code { font-size: 0.7rem; padding: 1px 4px; border-radius: 3px; background: var(--bg-input); }
 .vault-unlock-card { margin-bottom: 16px; }
 .vault-unlock-form { display: flex; gap: 0.5rem; align-items: center; }
 .vault-unlock-form .input { flex: 1; }

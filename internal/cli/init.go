@@ -212,8 +212,8 @@ func RunInit() {
 
 	// Step 8: Claude authentication
 	PrintStep(8, "Claude authentication")
-	fmt.Println("\n  ALF needs Claude Code authentication.")
-	fmt.Println("  Run " + colorBold + "alf login" + colorReset + " to authenticate.")
+	fmt.Println()
+	runLoginFlow(dir)
 
 	// Summary
 	fmt.Println()
@@ -224,7 +224,7 @@ func RunInit() {
 	PrintCheck(fmt.Sprintf("Bot: @%s", botName))
 	PrintCheck(fmt.Sprintf("Dashboard: %s", composeData.CCExternalURL))
 	fmt.Println()
-	PrintSuccess("Run " + colorBold + "alf login" + colorReset + " to authenticate Claude, then message @" + botName + " on Telegram.")
+	PrintSuccess("Message @" + botName + " on Telegram to start.")
 	fmt.Println()
 }
 
@@ -867,6 +867,15 @@ func promptWorkspaces(reader *bufio.Reader, previous []string) []string {
 // RunLogin creates a long-lived Claude OAuth token via `claude setup-token`
 // and stores it as a Docker secret for the daemon.
 func RunLogin() {
+	dir := alfDir()
+	runLoginFlow(dir)
+	fmt.Println()
+	PrintInfo("Run " + colorBold + "alf restart" + colorReset + " to apply the new token.")
+}
+
+// runLoginFlow runs claude setup-token inside the container, captures
+// the OAuth token, and stores it as a Docker secret.
+func runLoginFlow(dir string) {
 	PrintInfo("Creating Claude OAuth token...")
 	fmt.Println()
 
@@ -896,22 +905,24 @@ func RunLogin() {
 	}
 
 	// Store as Docker secret.
-	dir := alfDir()
 	if err := SetSecret(dir, "claude_oauth_token", token); err != nil {
 		Fatal(fmt.Sprintf("Failed to save token: %v", err))
 	}
 	PrintCheck("OAuth token saved")
-	fmt.Println()
-	PrintInfo("Run " + colorBold + "alf restart" + colorReset + " to apply the new token.")
 }
 
 // extractOAuthToken finds a Claude OAuth token (sk-ant-oat01-...) in text.
+// Handles ANSI escape codes and line wrapping from interactive terminal output.
 func extractOAuthToken(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "sk-ant-oat01-") {
-			return line
-		}
+	// Strip ANSI escape sequences.
+	ansi := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	text = ansi.ReplaceAllString(text, "")
+	// Remove all whitespace so wrapped tokens are joined.
+	text = strings.Join(strings.Fields(text), "")
+	// Find the token pattern.
+	re := regexp.MustCompile(`sk-ant-oat01-[a-zA-Z0-9_-]+`)
+	if m := re.FindString(text); m != "" {
+		return m
 	}
 	return ""
 }

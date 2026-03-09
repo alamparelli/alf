@@ -277,9 +277,15 @@
       <div id="terminalView" class="terminal-view" style="display:none">
         <div class="terminal-toolbar">
           <button class="btn" id="termNewBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>New Session</button>
+          <button class="btn term-mobile-btn" id="termPasteBtn" title="Paste from clipboard"><i data-lucide="clipboard-paste" style="width:14px;height:14px;vertical-align:middle"></i></button>
+          <button class="btn term-mobile-btn" id="termCopyBtn" title="Copy selection"><i data-lucide="copy" style="width:14px;height:14px;vertical-align:middle"></i></button>
           <select id="termThemeSelect" class="term-theme-select"></select>
         </div>
         <div id="terminalContainer"></div>
+        <div class="term-input-bar" id="termInputBar">
+          <input type="text" id="termInput" placeholder="Type or paste command..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+          <button class="btn" id="termSendBtn"><i data-lucide="corner-down-left" style="width:14px;height:14px;vertical-align:middle"></i></button>
+        </div>
       </div>
 
       <div id="tiersView" class="tiers-view" style="display:none">

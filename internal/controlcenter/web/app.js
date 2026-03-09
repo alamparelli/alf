@@ -3779,6 +3779,11 @@ function vaultInit() {
   document.getElementById('vaultPasswordInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') vaultUnlock();
   });
+  document.getElementById('vaultSetupBtn').addEventListener('click', vaultSetup);
+  document.getElementById('vaultSetupPassword').addEventListener('keydown', e => {
+    if (e.key === 'Enter') vaultSetup();
+  });
+  document.getElementById('vaultResetBtn').addEventListener('click', vaultReset);
   document.getElementById('vaultLockBtn').addEventListener('click', vaultLock);
   document.getElementById('vaultRefreshBtn').addEventListener('click', vaultRefresh);
   document.getElementById('vaultAddServiceBtn').addEventListener('click', () => vaultShowServiceModal());
@@ -3797,41 +3802,74 @@ async function vaultRefresh() {
     const data = await api('/api/vault/status');
     const dot = document.getElementById('vaultStatusDot');
     const text = document.getElementById('vaultStatusText');
+    const setupCard = document.getElementById('vaultSetupCard');
     const unlockCard = document.getElementById('vaultUnlockCard');
     const lockBtn = document.getElementById('vaultLockBtn');
     const servicesCard = document.getElementById('vaultServicesCard');
     const tokensCard = document.getElementById('vaultTokensCard');
 
+    // Hide everything first.
+    setupCard.style.display = 'none';
+    unlockCard.style.display = 'none';
+    lockBtn.style.display = 'none';
+    servicesCard.style.display = 'none';
+    tokensCard.style.display = 'none';
+
     if (!data.available) {
       dot.className = 'vault-status-indicator vault-status-off';
       text.textContent = 'Vault not available';
-      unlockCard.style.display = 'none';
-      lockBtn.style.display = 'none';
-      servicesCard.style.display = 'none';
-      tokensCard.style.display = 'none';
       return;
     }
 
     if (data.status === 'unlocked') {
       dot.className = 'vault-status-indicator vault-status-on';
       text.textContent = 'Unlocked';
-      unlockCard.style.display = 'none';
       lockBtn.style.display = '';
       servicesCard.style.display = '';
       tokensCard.style.display = '';
       vaultLoadServices();
       vaultLoadTokens();
+    } else if (data.first_time) {
+      dot.className = 'vault-status-indicator vault-status-off';
+      text.textContent = 'Not configured';
+      setupCard.style.display = '';
     } else {
       dot.className = 'vault-status-indicator vault-status-locked';
       text.textContent = data.status === 'unreachable' ? 'Unreachable' : 'Locked';
       unlockCard.style.display = '';
-      lockBtn.style.display = 'none';
-      servicesCard.style.display = 'none';
-      tokensCard.style.display = 'none';
     }
   } catch (err) {
     const msg = err?.error || err?.message || 'unknown error';
     document.getElementById('vaultStatusText').textContent = 'Error: ' + msg;
+  }
+}
+
+async function vaultSetup() {
+  const pw = document.getElementById('vaultSetupPassword').value.trim();
+  if (!pw) return;
+  if (pw.length < 8) { alert('Password must be at least 8 characters.'); return; }
+  try {
+    await api('/api/vault/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw })
+    });
+    document.getElementById('vaultSetupPassword').value = '';
+    vaultRefresh();
+  } catch (err) {
+    const msg = err?.error || err?.message || 'unknown error';
+    alert('Setup failed: ' + msg);
+  }
+}
+
+async function vaultReset() {
+  if (!confirm('This will delete all stored credentials and reset the vault. Continue?')) return;
+  try {
+    await api('/api/vault/reset', { method: 'POST' });
+    vaultRefresh();
+  } catch (err) {
+    const msg = err?.error || err?.message || 'unknown error';
+    alert('Reset failed: ' + msg);
   }
 }
 

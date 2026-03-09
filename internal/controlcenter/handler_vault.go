@@ -40,6 +40,8 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleUnlock(w, r)
 	case path == "lock" && r.Method == http.MethodPost:
 		h.handleLock(w, r)
+	case path == "reset" && r.Method == http.MethodPost:
+		h.handleReset(w, r)
 	case path == "services" && r.Method == http.MethodGet:
 		h.handleListServices(w, r)
 	case path == "services" && r.Method == http.MethodPost:
@@ -83,15 +85,17 @@ func (h *VaultHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := h.Manager.Health()
 	if err != nil {
 		respondJSON(w, http.StatusOK, map[string]any{
-			"available": true,
-			"status":    "unreachable",
-			"error":     err.Error(),
+			"available":  true,
+			"status":     "unreachable",
+			"first_time": h.Manager.IsFirstTime(),
+			"error":      err.Error(),
 		})
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"available": true,
-		"status":    status,
+		"available":  true,
+		"status":     status,
+		"first_time": h.Manager.IsFirstTime(),
 	})
 }
 
@@ -195,6 +199,18 @@ func (h *VaultHandler) handleRevokeToken(w http.ResponseWriter, _ *http.Request,
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (h *VaultHandler) handleReset(w http.ResponseWriter, r *http.Request) {
+	// Lock first if unlocked (ignore errors — may already be locked).
+	c := h.Manager.Client()
+	_ = c.Lock()
+	if err := h.Manager.Reset(); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	os.Unsetenv("VAULT_TOKEN")
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

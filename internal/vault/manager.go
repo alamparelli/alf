@@ -152,6 +152,24 @@ func (m *Manager) Addr() string {
 	return m.addr
 }
 
+// IsFirstTime returns true if no vault.enc exists yet (fresh setup).
+func (m *Manager) IsFirstTime() bool {
+	_, err := os.Stat(m.dataDir + "/vault.enc")
+	return os.IsNotExist(err)
+}
+
+// Reset deletes vault.enc and clears all tokens. The vault must be re-unlocked
+// with a new password to create a fresh encrypted store.
+func (m *Manager) Reset() error {
+	path := m.dataDir + "/vault.enc"
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete vault.enc: %w", err)
+	}
+	m.ClearTokens()
+	log.Println("[vault] vault.enc deleted — vault reset")
+	return nil
+}
+
 // Health returns the vault status ("locked" or "unlocked").
 func (m *Manager) Health() (string, error) {
 	c := vaultclient.NewWithToken(m.addr, "")

@@ -218,7 +218,11 @@ func (e *Engine) executeJob(j *Job) {
 
 // runCommand executes a bash command for direct-tier jobs.
 func (e *Engine) runCommand(j *Job) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	timeout := j.Timeout
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", j.Command)
@@ -237,7 +241,7 @@ func (e *Engine) runCommand(j *Job) (string, error) {
 
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("command timed out after 2 minutes")
+			return "", fmt.Errorf("command timed out after %v", timeout)
 		}
 		// Include output on failure for debugging.
 		if output != "" {
@@ -302,7 +306,11 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	llmTimeout := j.Timeout
+	if llmTimeout <= 0 {
+		llmTimeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), llmTimeout)
 	defer cancel()
 
 	result, err := e.cfg.Provider.Invoke(ctx, j.Prompt, params, nil)
@@ -391,8 +399,11 @@ func (e *Engine) invokeOrchestratorWithMeta(j *Job) (string, *execResult, error)
 		}
 	}
 
-	// Orchestrator jobs get a longer timeout (up to 30 minutes).
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	orchTimeout := j.Timeout
+	if orchTimeout <= 0 {
+		orchTimeout = 30 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), orchTimeout)
 	defer cancel()
 
 	text, meta, err := e.cfg.Orchestrator.Run(ctx, j.Prompt, sysPrompts, RunConfig{}, nil)

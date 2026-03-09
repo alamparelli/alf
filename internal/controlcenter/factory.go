@@ -169,7 +169,11 @@ func HandlerFactory(deps Deps) http.Handler {
 	})
 
 	// Vault (secrets proxy).
-	vaultH := &VaultHandler{Manager: deps.VaultManager}
+	vaultH := &VaultHandler{
+		Manager:    deps.VaultManager,
+		ContextDir: filepath.Join(deps.DataDir, "context"),
+		DataDir:    deps.DataDir,
+	}
 	mux.Handle("/api/vault/", vaultH)
 	mux.Handle("/api/vault", vaultH)
 

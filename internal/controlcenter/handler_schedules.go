@@ -3,6 +3,7 @@ package controlcenter
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 // SchedulesHandler serves GET/POST/PUT/DELETE for scheduled jobs.
@@ -29,6 +30,7 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Prompt   string   `json:"prompt"`
 			Command  string   `json:"command"`
 			Output   string   `json:"output"`
+			Timeout  string   `json:"timeout"`
 			Skills   []string `json:"skills"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -39,7 +41,16 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name and schedule are required"})
 			return
 		}
-		job, err := h.Engine.Create(req.Name, req.Schedule, req.Tier, req.Prompt, req.Command, req.Output, req.Skills)
+		var timeout time.Duration
+		if req.Timeout != "" {
+			var err error
+			timeout, err = time.ParseDuration(req.Timeout)
+			if err != nil {
+				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid timeout: " + err.Error()})
+				return
+			}
+		}
+		job, err := h.Engine.Create(req.Name, req.Schedule, req.Tier, req.Prompt, req.Command, req.Output, timeout, req.Skills)
 		if err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return

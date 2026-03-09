@@ -19,35 +19,38 @@ Vault is a built-in secrets manager that runs inside the Alf container. It encry
 
 ## Setup
 
-### Option A: First-time setup via Control Center
+### First-time setup via Control Center
 
 1. Open the **Vault** tab in the sidebar
 2. Choose a master password (min 8 characters) and click **Create Vault**
-3. The vault is created and unlocked immediately
+3. The vault is created, unlocked, and the password is persisted automatically
 
-> **Note:** This password won't persist across container restarts. For auto-unlock, also set the Docker secret (see Option B).
+The master password is saved so the vault auto-unlocks on every container restart. No manual Docker secret configuration needed.
 
-### Option B: Set a master password via CLI
-
-On the host machine:
+### Alternative: Set password via CLI (on host)
 
 ```bash
 alf secret set vault_master_password "your-strong-password"
 alf restart
 ```
 
-The vault auto-unlocks at startup when `vault_master_password` is set as a Docker secret.
+Both methods achieve the same result. The Control Center method is recommended for simplicity.
 
 ### Add services
 
 1. Open the **Vault** tab in the sidebar
 2. Click **Add** to register a service (e.g., GitHub API, Slack, etc.)
 3. Fill in the base URL and authentication credentials
-4. Click **Test** to verify connectivity
+4. Optionally check **Skip TLS verification** for internal services with self-signed certificates or HTTP endpoints
+5. Click **Test** to verify connectivity
+
+### Edit services
+
+Click the pencil icon next to any service to update its configuration. The service name cannot be changed — update the base URL, auth credentials, or TLS settings as needed. Leave password fields empty to keep existing credentials.
 
 ### Alf uses the vault
 
-Alf can call any registered service through the vault proxy:
+Alf calls any registered service through the vault proxy:
 
 ```bash
 vault proxy github GET /user
@@ -71,16 +74,22 @@ Vault uses scoped tokens for access control:
 - **Admin** — full access (unlock, lock, service CRUD, token management). Used by the Control Center.
 - **Proxy** — read-only, can only list services and proxy requests. This is what Alf gets.
 
-Alf's `VAULT_TOKEN` environment variable contains a proxy-scoped token, so it cannot modify services, create tokens, or lock/unlock the vault.
+Alf's `VAULT_TOKEN` environment variable contains a proxy-scoped token, so it cannot modify services, create tokens, or lock/unlock the vault. Tokens have a 1-year TTL and are automatically re-created if vault-server restarts.
 
 ## Security model
 
 - Credentials are encrypted at rest in `vault-data/vault.enc` using AES-256-GCM
 - Master password derives the encryption key via Argon2id
-- The master password itself is stored as a Docker secret (never in the container filesystem)
 - Alf subprocess only receives `VAULT_ADDR` and `VAULT_TOKEN` (proxy scope)
 - `vault-data/` volume is separate from the data directory — Alf cannot access the encrypted file
-- SSRF protection: vault-server blocks requests to private IP ranges
+- SSRF protection: vault-server blocks requests to private/link-local IP ranges
+- TLS skip verify: allows HTTP and private IPs only when explicitly enabled per service (still blocks link-local/metadata IPs)
+
+## Locking
+
+Locking the vault immediately revokes all tokens and disables API proxy access. Alf will no longer be able to call external APIs until you unlock again. Scheduled jobs that use vault services will fail.
+
+Use lock only when you need to immediately cut off all API access (e.g., compromised credentials). Under normal operation, the vault should stay unlocked.
 
 ## Reset vault
 
@@ -88,24 +97,18 @@ The master password is the encryption key — it cannot be changed. To start fre
 
 **Via Control Center:**
 1. Go to the **Vault** tab
-2. If locked, click **Reset** next to the unlock form
+2. Click **Reset** — this deletes all stored credentials and the persisted password
 3. Choose a new master password
-
-**Via CLI (on host):**
-```bash
-ssh your-server 'rm /path/to/alf/vault-data/vault.enc'
-alf secret set vault_master_password "new-password"
-alf restart
-```
 
 > **Warning:** Resetting deletes all stored API credentials. Services must be re-added.
 
-## Operational notes
+## Lifecycle
 
-- **First-time setup:** An empty vault is created automatically on first unlock
-- **Crash recovery:** vault-server restarts automatically with exponential backoff
-- **Without master password:** vault-server starts but stays locked. Unlock manually via the Control Center vault page
-- **Disable vault:** Remove the `vault_master_password` secret. Vault-server still starts (locked) but has zero impact
+- **Container start:** vault-server starts automatically. If a master password is persisted (from a previous CC unlock or Docker secret), the vault auto-unlocks and creates proxy tokens.
+- **Crash recovery:** vault-server restarts automatically with exponential backoff (1s → 30s max). After restart, it re-unlocks and re-creates all tokens automatically — no manual intervention needed.
+- **CC unlock:** persists the master password so future restarts auto-unlock.
+- **CC lock:** revokes all tokens, clears `VAULT_TOKEN` from environment. The persisted password is kept so you can unlock again easily.
+- **CC reset:** deletes `vault.enc`, clears persisted password, restarts vault-server fresh.
 
 ## Troubleshooting
 
@@ -115,5 +118,11 @@ Check daemon logs for `[vault]` entries. The process may have crashed. It should
 **Alf says "vault: command not found":**
 The `vault` symlink in `tools.d/` may be missing. Check `/opt/alf/tools.d/vault` exists and points to `/opt/alf/bin/vault-cli`.
 
-**"HTTP 401" from vault proxy:**
-The proxy token may have expired or the vault was re-locked. Check vault status in CC and unlock if needed.
+**"invalid token" from vault proxy:**
+Vault-server stores tokens in memory. If it restarted, all tokens were invalidated. The watchdog should re-create them automatically. Check logs for `[vault] re-authenticated after restart`. If not present, unlock the vault via CC.
+
+**"No VAULT_TOKEN found" in scheduled jobs:**
+The vault must be unlocked for Alf to use it. Check vault status in CC. If locked, unlock it — the token propagates to all future subprocess invocations immediately.
+
+**Scheduled jobs fail after container restart:**
+The master password may not be persisted. Unlock the vault once via the Control Center — the password is saved automatically for future restarts.

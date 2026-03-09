@@ -266,7 +266,7 @@ func main() {
 		if err := vaultMgr.Start(context.Background()); err != nil {
 			log.Printf("warning: vault-server failed to start: %v", err)
 			vaultMgr = nil
-		} else if pw := readSecret("VAULT_MASTER_PASSWORD"); pw != "" {
+		} else if pw := vaultPassword(vaultMgr); pw != "" {
 			if err := vaultMgr.AutoUnlock(pw); err != nil {
 				log.Printf("warning: vault auto-unlock failed: %v", err)
 			} else if _, err := vaultMgr.CreateProxyToken(); err != nil {
@@ -1633,6 +1633,24 @@ type tierParams struct {
 	MaxIterations        int      // max agent iterations (0 = default)
 	TimeoutMin           int      // global timeout in minutes (0 = default)
 	Backend              string   // "cli" (default), "openrouter"
+}
+
+// vaultPassword reads the master password from Docker secret first,
+// then falls back to the persisted password file in the vault data directory
+// (written by CC unlock handler).
+func vaultPassword(mgr *vault.Manager) string {
+	if pw := readSecret("VAULT_MASTER_PASSWORD"); pw != "" {
+		return pw
+	}
+	if mgr != nil {
+		data, err := os.ReadFile(mgr.PasswordFile())
+		if err == nil {
+			if pw := strings.TrimSpace(string(data)); pw != "" {
+				return pw
+			}
+		}
+	}
+	return ""
 }
 
 func readSecret(envVar string) string {
@@ -3010,8 +3028,8 @@ func (a *ccScheduleAdapter) List(userOnly bool) []cc.ScheduleJob {
 	return out
 }
 
-func (a *ccScheduleAdapter) Create(name, schedule, tier, prompt, command, output string, skills []string) (*cc.ScheduleJob, error) {
-	j, err := a.engine.Create(name, schedule, tier, prompt, command, output, skills)
+func (a *ccScheduleAdapter) Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string) (*cc.ScheduleJob, error) {
+	j, err := a.engine.Create(name, schedule, tier, prompt, command, output, timeout, skills)
 	if err != nil {
 		return nil, err
 	}
@@ -3047,6 +3065,9 @@ func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 		AutoDelete: j.AutoDelete,
 		Skills:     j.Skills,
 		CreatedAt:  j.CreatedAt.Format(time.RFC3339),
+	}
+	if j.Timeout > 0 {
+		sj.Timeout = j.Timeout.String()
 	}
 	if j.LastRun != nil {
 		sj.LastRun = j.LastRun.Format(time.RFC3339)

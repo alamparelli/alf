@@ -18,6 +18,7 @@ type socketRequest struct {
 	Prompt   string            `json:"prompt,omitempty"`
 	Command  string            `json:"command,omitempty"`
 	Output   string            `json:"output,omitempty"`
+	Timeout  string            `json:"timeout,omitempty"`
 	ID       string            `json:"id,omitempty"`
 	Skills   []string          `json:"skills,omitempty"`
 	Fields   map[string]string `json:"fields,omitempty"`
@@ -104,6 +105,7 @@ func doCreate(sockPath string) {
 	prompt := args["prompt"]
 	command := args["command"]
 	output := args["output"]
+	timeout := args["timeout"]
 	skillsRaw := args["skills"]
 
 	if name == "" || schedule == "" {
@@ -161,6 +163,7 @@ func doCreate(sockPath string) {
 		Prompt:   prompt,
 		Command:  command,
 		Output:   output,
+		Timeout:  timeout,
 		Skills:   skills,
 	})
 
@@ -336,6 +339,7 @@ Create options:
   --prompt <text>         Prompt for LLM tiers (required for LLM jobs)
   --command <cmd>         Bash command for direct tier (required for direct jobs)
   --output <dest>         telegram | file | both | silent (default: telegram)
+  --timeout <duration>    Execution timeout (e.g. 5m, 10m, 1h). Defaults: direct=2m, LLM=5m, agent=30m
   --skills <s1,s2>        Comma-separated skill names (LLM jobs only)
 
 Examples:
@@ -357,7 +361,7 @@ Examples:
     --tier haiku --prompt "Check if v2.1 deployed correctly" --output telegram
 
 Update options:
-  schedule update <id> [--enabled true|false] [--schedule ...] [--prompt ...] [--command ...] [--name ...] [--output ...]
+  schedule update <id> [--enabled true|false] [--schedule ...] [--prompt ...] [--command ...] [--name ...] [--output ...] [--timeout ...]
 
 Other:
   schedule list [--user]

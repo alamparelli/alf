@@ -2,16 +2,20 @@ package controlcenter
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/vault"
 )
 
 // VaultHandler proxies requests to the vault-server via the Manager.
 type VaultHandler struct {
-	Manager *vault.Manager // nil = vault binaries not present
+	Manager    *vault.Manager // nil = vault binaries not present
+	ContextDir string         // path to context/ dir for toolbox regeneration
+	DataDir    string         // path to data dir for toolbox regeneration
 }
 
 func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +120,20 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "proxy token: " + err.Error()})
 		return
 	}
+	// Persist master password so auto-unlock works after container restart.
+	// Docker secrets are read-only, so write to the vault data directory instead.
+	if pwFile := h.Manager.PasswordFile(); pwFile != "" {
+		if err := os.WriteFile(pwFile, []byte(req.Password), 0600); err != nil {
+			log.Printf("[vault] warning: failed to persist master password: %v", err)
+		}
+	}
+	// Propagate env vars so the LLM subprocess can use the vault CLI tool.
+	os.Setenv("VAULT_ADDR", h.Manager.Addr())
+	os.Setenv("VAULT_TOKEN", h.Manager.ProxyToken())
+	// Regenerate toolbox so LLM sees vault as "ready".
+	if h.ContextDir != "" {
+		memory.GenerateToolbox(h.ContextDir, h.DataDir)
+	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -127,6 +145,10 @@ func (h *VaultHandler) handleLock(w http.ResponseWriter, r *http.Request) {
 	}
 	h.Manager.ClearTokens()
 	os.Unsetenv("VAULT_TOKEN")
+	// Regenerate toolbox so LLM sees vault as "locked".
+	if h.ContextDir != "" {
+		memory.GenerateToolbox(h.ContextDir, h.DataDir)
+	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -211,6 +233,13 @@ func (h *VaultHandler) handleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	os.Unsetenv("VAULT_TOKEN")
+	// Clear persisted master password so auto-unlock doesn't use stale credentials.
+	if pwFile := h.Manager.PasswordFile(); pwFile != "" {
+		os.Remove(pwFile)
+	}
+	if h.ContextDir != "" {
+		memory.GenerateToolbox(h.ContextDir, h.DataDir)
+	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

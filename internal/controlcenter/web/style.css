@@ -1545,6 +1545,8 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .vault-test-ok { color: var(--green) !important; }
 .vault-test-fail { color: var(--red) !important; }
+.vault-files-card { margin-bottom: 16px; }
+.vault-file-upload-btn { cursor: pointer; }
 
 /* Vault modal */
 .modal-overlay {

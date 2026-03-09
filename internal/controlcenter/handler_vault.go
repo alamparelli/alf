@@ -2,9 +2,11 @@ package controlcenter
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/alamparelli/alf/internal/memory"
@@ -76,6 +78,24 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.handleRevokeToken(w, r, id)
+	case path == "files" && r.Method == http.MethodGet:
+		h.handleListFiles(w, r)
+	case path == "files" && r.Method == http.MethodPost:
+		h.handleUploadFile(w, r)
+	case strings.HasPrefix(path, "files/") && r.Method == http.MethodGet:
+		name := strings.TrimPrefix(path, "files/")
+		if !isVaultSafeName(name) {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			return
+		}
+		h.handleGetFile(w, r, name)
+	case strings.HasPrefix(path, "files/") && r.Method == http.MethodDelete:
+		name := strings.TrimPrefix(path, "files/")
+		if !isVaultSafeName(name) {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			return
+		}
+		h.handleDeleteFile(w, r, name)
 	default:
 		respondJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
@@ -239,6 +259,80 @@ func (h *VaultHandler) handleReset(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.ContextDir != "" {
 		memory.GenerateToolbox(h.ContextDir, h.DataDir)
+	}
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// --- File management ---
+
+func (h *VaultHandler) handleListFiles(w http.ResponseWriter, r *http.Request) {
+	c := h.Manager.Client()
+	files, err := c.ListFiles()
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	respondJSON(w, http.StatusOK, files)
+}
+
+func (h *VaultHandler) handleUploadFile(w http.ResponseWriter, r *http.Request) {
+	// Parse multipart from browser, save to temp, proxy via client.
+	if err := r.ParseMultipartForm(5 << 20); err != nil { // 5MB
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart: " + err.Error()})
+		return
+	}
+	name := r.FormValue("name")
+	if name == "" || !isVaultSafeName(name) {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "file required"})
+		return
+	}
+	defer file.Close()
+
+	// Write to temp file for the client.
+	tmp, err := os.CreateTemp("", "vault-upload-*")
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "temp file: " + err.Error()})
+		return
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := io.Copy(tmp, file); err != nil {
+		tmp.Close()
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write temp: " + err.Error()})
+		return
+	}
+	tmp.Close()
+
+	c := h.Manager.Client()
+	if err := c.UploadFile(name, tmpPath); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]bool{"ok": true})
+}
+
+func (h *VaultHandler) handleGetFile(w http.ResponseWriter, _ *http.Request, name string) {
+	c := h.Manager.Client()
+	data, err := c.GetFile(name)
+	if err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(name))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Write(data)
+}
+
+func (h *VaultHandler) handleDeleteFile(w http.ResponseWriter, _ *http.Request, name string) {
+	c := h.Manager.Client()
+	if err := c.DeleteFile(name); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

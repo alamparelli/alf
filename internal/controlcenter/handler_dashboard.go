@@ -23,7 +23,7 @@ func (h *DashboardHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"default-src 'self'; "+
 			"script-src 'self' https://unpkg.com; "+
 			"style-src 'self' 'unsafe-inline' https://unpkg.com; "+
-			"connect-src 'self' wss:; "+
+			"connect-src 'self' wss: https://unpkg.com; "+
 			"img-src 'self' data:; "+
 			"frame-ancestors 'self'")
 	w.Write([]byte(h.HTML))

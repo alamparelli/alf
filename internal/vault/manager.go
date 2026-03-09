@@ -137,11 +137,13 @@ func (m *Manager) ProxyToken() string {
 	return m.proxyToken
 }
 
-// ClearTokens invalidates stored tokens (e.g. after vault lock).
+// ClearTokens invalidates stored tokens and master password (e.g. after vault lock).
+// After this, EnsureAuth cannot re-unlock — user must unlock manually.
 func (m *Manager) ClearTokens() {
 	m.mu.Lock()
 	m.adminToken = ""
 	m.proxyToken = ""
+	m.masterPass = ""
 	m.mu.Unlock()
 }
 

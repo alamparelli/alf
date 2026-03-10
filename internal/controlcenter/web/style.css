@@ -702,7 +702,8 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .sidebar-footer p { margin: 0 0 4px; }
 .sidebar-footer a { color: var(--text); text-decoration: none; }
 .sidebar-footer a:hover { color: var(--accent); }
-.sidebar-footer .lucide, .sidebar-footer i { width: 16px; height: 16px; vertical-align: middle; }
+.sidebar-footer .lucide, .sidebar-footer i, .sidebar-footer svg { width: 16px; height: 16px; vertical-align: middle; }
+.sidebar-footer-socials { display: flex; justify-content: center; gap: 12px; margin: 4px 0; }
 .sidebar-footer-label { display: block; margin: 6px 0 4px; font-size: 0.7rem; color: var(--text-dim); }
 .sidebar-footer-links {
   display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px;

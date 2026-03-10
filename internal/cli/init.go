@@ -2,12 +2,10 @@ package cli
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -221,7 +219,7 @@ func RunInit() {
 	// Step 8: Claude authentication
 	PrintStep(8, "Claude authentication")
 	fmt.Println()
-	runLoginFlow(dir)
+	RunLogin()
 
 	// Summary
 	fmt.Println()
@@ -949,92 +947,41 @@ func promptJSRuntime(reader *bufio.Reader, previous string) string {
 	return choice
 }
 
-// RunLogin creates a long-lived Claude OAuth token via `claude setup-token`
-// and stores it as a Docker secret for the daemon.
+// RunLogin launches Claude Code interactively so the user can authenticate
+// via /login. Auth persists in the .claude volume mount.
 func RunLogin() {
-	dir := alfDir()
-	runLoginFlow(dir)
-	fmt.Println()
-	PrintInfo("Run " + colorBold + "alf restart" + colorReset + " to apply the new token.")
-}
-
-// runLoginFlow runs claude setup-token inside the container, captures
-// the OAuth token, and stores it as a Docker secret.
-func runLoginFlow(dir string) {
-	PrintInfo("Creating Claude OAuth token...")
+	PrintInfo("Launching Claude Code for authentication...")
+	fmt.Println("  Type " + colorBold + "/login" + colorReset + " inside Claude to authenticate, then " + colorBold + "/exit" + colorReset + " when done.")
 	fmt.Println()
 
-	// Run claude setup-token inside the container, capturing output while showing it.
-	var buf bytes.Buffer
-	cmd := exec.Command("docker", "exec", "-it", "--user", "1001:1000", "-e", "HOME=/home/alf", "alf", "claude", "setup-token")
+	cmd := exec.Command("docker", "exec", "-it", "--user", "1000:1000", "-e", "HOME=/home/alf", "alf", "claude")
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
+	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		Fatal(fmt.Sprintf("setup-token failed: %v", err))
-	}
+	cmd.Run()
 
-	// Parse the token from output (sk-ant-oat01-...).
-	token := extractOAuthToken(buf.String())
-	if token == "" {
-		PrintWarning("Could not extract token from output.")
-		fmt.Println("  Paste the token manually:")
-		fmt.Print("  > ")
-		reader := bufio.NewReader(os.Stdin)
-		line, _ := reader.ReadString('\n')
-		token = strings.TrimSpace(line)
-	}
-
-	if token == "" {
-		Fatal("No token provided")
-	}
-
-	// Store as Docker secret.
-	if err := SetSecret(dir, "claude_oauth_token", token); err != nil {
-		Fatal(fmt.Sprintf("Failed to save token: %v", err))
-	}
-	PrintCheck("OAuth token saved")
+	fixClaudeOwnership()
+	verifyClaudeAuth()
 }
 
-// extractOAuthToken finds a Claude OAuth token (sk-ant-oat01-...) in text.
-// Handles ANSI escape codes and line wrapping from interactive terminal output.
-// The token may be wrapped across lines, so we collect contiguous token-char
-// lines starting from the sk-ant-oat01- prefix and join only those.
-func extractOAuthToken(text string) string {
-	// Strip ANSI escape sequences and terminal control characters.
-	ansi := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-	text = ansi.ReplaceAllString(text, "")
-	// Remove carriage returns and other non-printable control chars (except newline).
-	ctrl := regexp.MustCompile(`[\x00-\x09\x0b-\x1f\x7f]`)
-	text = ctrl.ReplaceAllString(text, "")
-
-	// Collect lines that are part of the token block.
-	// The token is pure [a-zA-Z0-9_-] chars, possibly wrapped across lines.
-	// Lines with spaces or mixed prose (e.g. "Store this token...") are not part of it.
-	// Continuation lines must not look like English prose (capitalized word).
-	tokenCharLine := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-	proseStart := regexp.MustCompile(`^[A-Z][a-z]`)
-	var tokenParts []string
-	collecting := false
-
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if !collecting {
-			if strings.HasPrefix(line, "sk-ant-oat01-") && tokenCharLine.MatchString(line) {
-				collecting = true
-				tokenParts = append(tokenParts, line)
-			}
-		} else {
-			if len(line) > 0 && tokenCharLine.MatchString(line) && !proseStart.MatchString(line) {
-				tokenParts = append(tokenParts, line)
-			} else {
-				break // end of token block
-			}
-		}
-	}
-
-	if len(tokenParts) > 0 {
-		return strings.Join(tokenParts, "")
-	}
-	return ""
+func fixClaudeOwnership() {
+	fix := exec.Command("docker", "exec", "alf",
+		"sh", "-c", `chown -R 1000:1000 /home/alf/.claude /home/alf/.claude.json 2>/dev/null
+chmod 640 /home/alf/.claude.json 2>/dev/null
+chmod -R g+rX /home/alf/.claude 2>/dev/null
+cp /home/alf/.claude.json /home/alf/.claude/claude.json 2>/dev/null
+true`)
+	fix.Run()
 }
+
+func verifyClaudeAuth() {
+	verify := exec.Command("docker", "exec", "--user", "1000:1000", "-e", "HOME=/home/alf",
+		"alf", "claude", "-p", "ping", "--output-format", "json", "--max-turns", "1")
+	out, _ := verify.Output()
+	if len(out) > 0 && strings.Contains(string(out), `"is_error":false`) {
+		PrintCheck("Claude authenticated")
+	} else {
+		PrintWarning("Claude may not be authenticated yet. Try running: alf login")
+	}
+}
+

@@ -341,6 +341,9 @@ func promptDirectory(reader *bufio.Reader, previous string) string {
 		fmt.Printf("  Warning: failed to seed bundled agents: %v\n", err)
 	}
 
+	// Save install path so all CLI commands can find it (e.g. alf login, alf status).
+	SaveInstallDir(dir)
+
 	PrintCheck(fmt.Sprintf("Directory ready: %s", dir))
 	return dir
 }

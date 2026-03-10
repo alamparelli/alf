@@ -375,6 +375,8 @@ vault proxy myapi GET /data | jq '.' > ~/data/apps/my-app/data/latest.json
 
 Tell the user to register the schedule via chat: "Schedule `~/data/apps/{name}/schedules/collect.sh` to run every 6 hours"
 
+> **PATH note:** Both `~/data/tools.d/` (system tools) and `~/data/tools/` (user tools) are in PATH. Scripts can call `vault`, `schedule`, `recall`, `remember`, `react`, `status`, and any user tools by name — no full path needed. Make scheduled scripts and app backends use tool names directly.
+
 ## Quality checklist
 
 Before delivering, verify:

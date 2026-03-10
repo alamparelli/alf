@@ -35,7 +35,13 @@ SCRIPT
 chmod +x ~/data/tools/my-tool
 ```
 
-Your tool is now available at `~/data/tools/my-tool`. Call it by full path, or add `~/data/tools` to your script's PATH.
+Your tool is now available immediately — both `~/data/tools/` and `~/data/tools.d/` are in ALF's PATH, so you can call it by name:
+
+```bash
+my-tool --help
+```
+
+No full path needed.
 
 ### Making tools discoverable
 

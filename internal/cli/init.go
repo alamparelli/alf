@@ -995,25 +995,40 @@ func runLoginFlow(dir string) {
 
 // extractOAuthToken finds a Claude OAuth token (sk-ant-oat01-...) in text.
 // Handles ANSI escape codes and line wrapping from interactive terminal output.
+// The token may be wrapped across lines, so we collect contiguous token-char
+// lines starting from the sk-ant-oat01- prefix and join only those.
 func extractOAuthToken(text string) string {
 	// Strip ANSI escape sequences.
 	ansi := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 	text = ansi.ReplaceAllString(text, "")
 
-	// First try line-by-line to avoid joining token with surrounding prose
-	// (e.g. "sk-ant-oat01-...XYZStorethistokensecurely").
-	re := regexp.MustCompile(`sk-ant-oat01-[a-zA-Z0-9_-]+`)
+	// Collect lines that are part of the token block.
+	// The token is pure [a-zA-Z0-9_-] chars, possibly wrapped across lines.
+	// Lines with spaces or mixed prose (e.g. "Store this token...") are not part of it.
+	// Continuation lines must not look like English prose (capitalized word).
+	tokenCharLine := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	proseStart := regexp.MustCompile(`^[A-Z][a-z]`)
+	var tokenParts []string
+	collecting := false
+
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
-		if m := re.FindString(line); m != "" {
-			return m
+		if !collecting {
+			if strings.HasPrefix(line, "sk-ant-oat01-") && tokenCharLine.MatchString(line) {
+				collecting = true
+				tokenParts = append(tokenParts, line)
+			}
+		} else {
+			if len(line) > 0 && tokenCharLine.MatchString(line) && !proseStart.MatchString(line) {
+				tokenParts = append(tokenParts, line)
+			} else {
+				break // end of token block
+			}
 		}
 	}
 
-	// Fallback: join all whitespace (handles tokens wrapped across lines).
-	joined := strings.Join(strings.Fields(text), "")
-	if m := re.FindString(joined); m != "" {
-		return m
+	if len(tokenParts) > 0 {
+		return strings.Join(tokenParts, "")
 	}
 	return ""
 }

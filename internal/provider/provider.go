@@ -32,7 +32,15 @@ type Params struct {
 	ResumeID      string
 	DataDir       string   // working directory for Claude subprocess
 	Env           []string // additional env vars for subprocess (e.g. ALF_SIGNAL_SOCK)
-	SessionKey    string   // API history key (e.g. "tg:12345"); CLI ignores this
+	SessionKey    string            // API history key (e.g. "tg:12345"); CLI ignores this
+	ConvMessages  []ContextMessage  // conversation history from unified store; takes priority over SessionKey history
+}
+
+// ContextMessage is a simple role+content pair used to pass conversation
+// history to providers. Produced by conversation.FlattenForAPI().
+type ContextMessage struct {
+	Role    string
+	Content string
 }
 
 // Provider invokes Claude and returns a result.

@@ -109,8 +109,13 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		messages = append(messages, apiMessage{Role: "system", Content: combined})
 	}
 
-	// History (only for keyed sessions, not stateless classify calls).
-	if params.SessionKey != "" && p.history != nil {
+	// Conversation history: prefer unified ConvMessages, fall back to per-key History.
+	if len(params.ConvMessages) > 0 {
+		for _, m := range params.ConvMessages {
+			messages = append(messages, apiMessage{Role: m.Role, Content: m.Content})
+		}
+	} else if params.SessionKey != "" && p.history != nil {
+		// Legacy path: classifier and other keyed sessions.
 		hist := p.history.Get(params.SessionKey)
 		for _, m := range hist {
 			messages = append(messages, apiMessage{Role: m.Role, Content: m.Content})
@@ -132,8 +137,8 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		return nil, err
 	}
 
-	// Append to history.
-	if params.SessionKey != "" && p.history != nil {
+	// Append to legacy history (only for keyed sessions without ConvMessages).
+	if len(params.ConvMessages) == 0 && params.SessionKey != "" && p.history != nil {
 		p.history.Append(params.SessionKey, Message{Role: "user", Content: prompt})
 		p.history.Append(params.SessionKey, Message{Role: "assistant", Content: result.Text})
 	}

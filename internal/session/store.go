@@ -15,6 +15,7 @@ type Entry struct {
 	CreatedAt    time.Time `json:"created_at"`
 	LastActive   time.Time `json:"last_active"`
 	LastTier     string    `json:"last_tier,omitempty"`
+	LastBackend  string    `json:"last_backend,omitempty"` // last backend used (cli, openrouter, ollama, etc.)
 	MessageCount int       `json:"message_count,omitempty"`
 	ActiveSkills []string  `json:"active_skills,omitempty"` // skills active for this session
 }
@@ -105,6 +106,28 @@ func (s *Store) SetWithContext(chatID int64, sessionID, tierName string) {
 	s.persist()
 }
 
+// SetWithBackend stores the session ID and updates routing context including backend.
+func (s *Store) SetWithBackend(chatID int64, sessionID, tierName, backend string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	e, ok := s.entries[chatID]
+	if !ok {
+		e = &Entry{
+			ChatID:    chatID,
+			CreatedAt: now,
+		}
+		s.entries[chatID] = e
+	}
+	e.SessionID = sessionID
+	e.LastActive = now
+	e.LastTier = tierName
+	e.LastBackend = backend
+	e.MessageCount++
+	s.persist()
+}
+
 // TouchContext updates the routing context without changing the session ID.
 // Used for router direct responses that don't go through askClaude.
 func (s *Store) TouchContext(chatID int64, tierName string) {
@@ -139,6 +162,21 @@ func (s *Store) Context(chatID int64) (lastTier string, msgCount int) {
 		return "", 0
 	}
 	return e.LastTier, e.MessageCount
+}
+
+// ContextFull returns the full routing context including last backend.
+func (s *Store) ContextFull(chatID int64) (lastTier, lastBackend string, msgCount int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.entries[chatID]
+	if !ok {
+		return "", "", 0
+	}
+	if time.Since(e.LastActive) >= s.timeout {
+		return "", "", 0
+	}
+	return e.LastTier, e.LastBackend, e.MessageCount
 }
 
 // Archive clears the session for a chat and returns the old session ID.

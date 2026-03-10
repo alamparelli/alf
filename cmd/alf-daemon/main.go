@@ -36,6 +36,7 @@ import (
 	"github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/signal"
 	"github.com/alamparelli/alf/internal/skills"
+	"github.com/alamparelli/alf/internal/tooling"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/updater"
 	"github.com/alamparelli/alf/internal/voice"
@@ -502,6 +503,12 @@ func main() {
 	chatService.SkillStore = skillStore
 	chatService.Orchestrator = orch
 	chatService.ConvStore = convStore
+	chatService.ToolRegistry = tooling.NewRegistry(dataDir)
+	chatService.ToolExecutor = &tooling.Executor{
+		DataDir: dataDir,
+		HomeDir: homeDir,
+		Timeout: 30 * time.Second,
+	}
 	if memDB != nil {
 		chatService.Recaller = &memStoreRecaller{store: memDB}
 	}
@@ -1317,7 +1324,7 @@ func main() {
 			}
 
 			// Resolve tier to params.
-			tp = resolveTierParams(routeResult.Tier, tierStore.Current())
+			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), dataDir)
 
 			eventLog.Log("router_classify", map[string]any{
 				"chat_id":          chatID,
@@ -1516,8 +1523,24 @@ func main() {
 			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf("Current session ID: %s (channel: tg)", tgConvID))
 
 			// Select provider based on tier backend.
-			tierProv := registry.ForBackend(tp.Backend)
+			var tierProv provider.Provider = registry.ForBackend(tp.Backend)
 			isAPITier := tp.Backend != "" && tp.Backend != "cli"
+
+			// Wrap API provider with agentic tool loop when tier has tools.
+			if isAPITier && chatService.ToolRegistry != nil && chatService.ToolExecutor != nil && len(tp.Tools) > 0 {
+				if apiProv, ok := tierProv.(*provider.APIProvider); ok {
+					schemas := chatService.ToolRegistry.ForTools(tp.Tools)
+					if len(schemas) > 0 {
+						tools := tooling.ToOpenAI(schemas)
+						maxTurns := tp.MaxTurns
+						if maxTurns <= 0 {
+							maxTurns = 10
+						}
+						tierProv = provider.NewToolLoop(apiProv, &tgToolExecutorAdapter{exec: chatService.ToolExecutor}, tools, maxTurns)
+						log.Printf("[chat:%d] tool loop enabled: %d tools, max_turns=%d", chatID, len(schemas), maxTurns)
+					}
+				}
+			}
 
 			// Detect backend switch for context continuity.
 			_, lastBackend, _ := chatSessions.ContextFull(chatID)
@@ -2252,7 +2275,7 @@ func answerCallbackQuery(client *http.Client, token string, callbackID string) {
 	defer resp.Body.Close()
 }
 
-func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
+func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			model := t.Model
@@ -2261,9 +2284,17 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 			if t.Backend == "" || t.Backend == "cli" {
 				model = router.ResolveModel(t.Model)
 			}
+			// Resolve ["*"] into all available tool names.
+			tools := t.Tools
+			if len(tools) == 1 && tools[0] == "*" {
+				tools = tooling.DiscoverToolNames(dataDir)
+				if len(tools) > 0 {
+					log.Printf("[chat] tier %q: wildcard resolved to %d tools", tierName, len(tools))
+				}
+			}
 			return tierParams{
 				Model:                model,
-				Tools:                t.Tools,
+				Tools:                tools,
 				WriteCapable:         t.WriteCapable,
 				Effort:               t.Effort,
 				MaxTurns:             t.MaxTurns,
@@ -3543,5 +3574,23 @@ func setupUserPackagesPaths() {
 		}
 	}
 	log.Printf("user-packages: PATH includes %s, LD_LIBRARY_PATH includes %s", binDir, libDir)
+}
+
+// tgToolExecutorAdapter bridges tooling.Executor to provider.ToolExecutor for the TG handler.
+type tgToolExecutorAdapter struct {
+	exec *tooling.Executor
+}
+
+func (a *tgToolExecutorAdapter) Execute(ctx context.Context, call provider.ToolCallRequest) provider.ToolCallResult {
+	result := a.exec.Execute(ctx, tooling.CallRequest{
+		ID:        call.ID,
+		Name:      call.Name,
+		Arguments: call.Arguments,
+	})
+	return provider.ToolCallResult{
+		ID:      result.ID,
+		Output:  result.Output,
+		IsError: result.IsError,
+	}
 }
 

@@ -3420,18 +3420,13 @@ function logsLineClass(line) {
 
 // --- Tiers ---
 
-const AVAILABLE_TOOLS = [
-  { name: 'Read', desc: 'Read files (code, config, logs, images, PDF)' },
-  { name: 'Write', desc: 'Create or overwrite files' },
-  { name: 'Edit', desc: 'Modify existing files (text replacement)' },
-  { name: 'Bash', desc: 'Execute shell commands' },
-  { name: 'Glob', desc: 'Search files by pattern (e.g. **/*.go)' },
-  { name: 'Grep', desc: 'Search file contents with regex' },
-  { name: 'WebSearch', desc: 'Search the web for information' },
-  { name: 'WebFetch', desc: 'Fetch content from a URL' },
-  { name: 'NotebookEdit', desc: 'Edit Jupyter notebooks' },
-  { name: 'Agent', desc: 'Launch a sub-agent for complex tasks' },
-];
+// Populated dynamically from tiers API response (available_tools field).
+let AVAILABLE_TOOLS = [];
+function toolsRefresh(data) {
+  if (data && data.available_tools) {
+    AVAILABLE_TOOLS = data.available_tools;
+  }
+}
 
 const MODELS = ['haiku', 'sonnet', 'opus'];
 const EFFORTS = ['low', 'medium', 'high'];
@@ -3459,6 +3454,7 @@ function tiersInit() {
 function tiersLoad() {
   api('/api/tiers').then(data => {
     backendsRefresh(data);
+    toolsRefresh(data);
     tiersCache = data;
     tiersRender();
   }).catch(() => toast('Failed to load tiers', 'error'));
@@ -3494,7 +3490,8 @@ function tiersRender() {
     if (t.force_command) badges.push('<span class="tier-badge tier-badge-force">force</span>');
     if (t.routable) badges.push('<span class="tier-badge tier-badge-routable">routable</span>');
     if (t.backend && t.backend !== 'cli') badges.push('<span class="tier-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">' + esc(t.backend) + '</span>');
-    const tools = (t.tools || []).join(', ') || (t.write_capable ? 'all (write-capable)' : 'none');
+    const toolsList = t.tools || [];
+    const tools = toolsList.includes('*') ? 'all (wildcard)' : toolsList.join(', ') || (t.write_capable ? 'all (write-capable)' : 'none');
     return '<div class="tier-card" data-idx="' + i + '">' +
       '<div class="tier-card-header">' +
         '<div class="tier-card-title">' + statusDot + '<strong>' + esc(t.name) + '</strong></div>' +
@@ -3543,10 +3540,21 @@ function tiersShowModal(tier) {
   const old = document.getElementById('tierModal');
   if (old) old.remove();
 
-  const toolChecks = AVAILABLE_TOOLS.map(tool => {
-    const checked = (t.tools || []).includes(tool.name) ? ' checked' : '';
-    return '<label class="tier-tool-check"><input type="checkbox" value="' + tool.name + '"' + checked + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">— ' + esc(tool.desc) + '</span></label>';
+  const isWildcard = (t.tools || []).includes('*');
+  const cliToolsList = AVAILABLE_TOOLS.filter(tool => tool.source === 'cli');
+  const alfToolsList = AVAILABLE_TOOLS.filter(tool => tool.source === 'alf');
+  const wildcardCheck = '<label class="tier-tool-check tier-tool-wildcard"><input type="checkbox" id="tfToolsWildcard" value="*"' + (isWildcard ? ' checked' : '') + '> <strong>* (all tools)</strong> <span class="tier-tool-desc">— enable all available tools</span></label>';
+  const cliChecks = cliToolsList.map(tool => {
+    const checked = !isWildcard && (t.tools || []).includes(tool.name) ? ' checked' : '';
+    return '<label class="tier-tool-check tier-tool-cli"><input type="checkbox" value="' + tool.name + '"' + checked + (isWildcard ? ' disabled' : '') + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">— ' + esc(tool.desc) + '</span></label>';
   }).join('');
+  const alfChecks = alfToolsList.length ? alfToolsList.map(tool => {
+    const checked = !isWildcard && (t.tools || []).includes(tool.name) ? ' checked' : '';
+    return '<label class="tier-tool-check tier-tool-alf"><input type="checkbox" value="' + tool.name + '"' + checked + (isWildcard ? ' disabled' : '') + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">— ' + esc(tool.desc) + '</span></label>';
+  }).join('') : '';
+  const toolChecks = wildcardCheck +
+    (cliChecks ? '<div class="tier-tools-group-label">CLI tools</div>' + cliChecks : '') +
+    (alfChecks ? '<div class="tier-tools-group-label">ALF tools</div>' + alfChecks : '');
 
   const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (t.model === m ? ' selected' : '') + '>' + m + '</option>').join('');
   const effortOpts = ['', ...EFFORTS].map(e => '<option value="' + e + '"' + (t.effort === e ? ' selected' : '') + '>' + (e || '—') + '</option>').join('');
@@ -3574,7 +3582,7 @@ function tiersShowModal(tier) {
           '<label class="tier-flag-check"><input type="checkbox" id="tfForceCmd"' + (t.force_command ? ' checked' : '') + '> Force command</label>' +
         '</div>' +
         '<div class="tier-tools-section">' +
-          '<div class="tier-tools-header">Tools <span class="tier-tools-hint">(only for read-only tiers — write-capable tiers get all tools)</span></div>' +
+          '<div class="tier-tools-header">Tools <span class="tier-tools-hint">(CLI tools for Claude CLI tiers, ALF tools for API tiers with tool loop)</span></div>' +
           '<div class="tier-tools-list" id="tfTools">' + toolChecks + '</div>' +
         '</div>' +
       '</div>' +
@@ -3593,6 +3601,17 @@ function tiersShowModal(tier) {
   function toggleTools() { toolsSection.style.opacity = wcCheck.checked ? '0.4' : '1'; }
   toggleTools();
   wcCheck.addEventListener('change', toggleTools);
+
+  // Wildcard toggle: disable individual tool checkboxes when * is checked.
+  const wildcardCb = document.getElementById('tfToolsWildcard');
+  function toggleWildcard() {
+    const indivCbs = document.querySelectorAll('#tfTools input[type=checkbox]:not(#tfToolsWildcard)');
+    indivCbs.forEach(cb => {
+      cb.disabled = wildcardCb.checked;
+      if (wildcardCb.checked) cb.checked = false;
+    });
+  }
+  if (wildcardCb) wildcardCb.addEventListener('change', toggleWildcard);
 
   // Swap model select/input when backend changes
   document.getElementById('tfBackend').addEventListener('change', function() {
@@ -3629,7 +3648,12 @@ function tiersShowModal(tier) {
       tools: [],
     };
     if (!newTier.write_capable) {
-      document.querySelectorAll('#tfTools input:checked').forEach(cb => newTier.tools.push(cb.value));
+      const wc = document.getElementById('tfToolsWildcard');
+      if (wc && wc.checked) {
+        newTier.tools = ['*'];
+      } else {
+        document.querySelectorAll('#tfTools input:checked:not(#tfToolsWildcard)').forEach(cb => newTier.tools.push(cb.value));
+      }
     }
     // Clean zero values
     if (!newTier.max_turns) delete newTier.max_turns;

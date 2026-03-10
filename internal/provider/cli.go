@@ -500,7 +500,8 @@ func safeEnv(homeDir, dataDir string) []string {
 		for _, prefix := range safeEnvPrefixes {
 			if strings.HasPrefix(e, prefix) {
 				if strings.HasPrefix(e, "PATH=") {
-					e = "PATH=" + localBin + ":" + strings.TrimPrefix(e, "PATH=")
+					toolsDirs := filepath.Join(dataDir, "tools.d") + ":" + filepath.Join(dataDir, "tools")
+					e = "PATH=" + localBin + ":" + toolsDirs + ":" + strings.TrimPrefix(e, "PATH=")
 				}
 				env = append(env, e)
 				break

@@ -10,7 +10,7 @@ func TestBuildPromptContainsTeams(t *testing.T) {
 		{Name: "alpha", Description: "Alpha team"},
 		{Name: "beta", Description: "Beta team"},
 	}
-	prompt := BuildOrchestratorPrompt(teams)
+	prompt := BuildOrchestratorPrompt(teams, "")
 	if !strings.Contains(prompt, "alpha") || !strings.Contains(prompt, "Alpha team") {
 		t.Error("prompt missing alpha team")
 	}
@@ -29,7 +29,7 @@ func TestBuildPromptContainsAgents(t *testing.T) {
 			},
 		},
 	}
-	prompt := BuildOrchestratorPrompt(teams)
+	prompt := BuildOrchestratorPrompt(teams, "")
 	if !strings.Contains(prompt, "content/researcher") {
 		t.Error("prompt missing researcher agent")
 	}
@@ -46,7 +46,7 @@ func TestBuildPromptContainsAgents(t *testing.T) {
 
 func TestBuildPromptContainsProtocol(t *testing.T) {
 	teams := []*TeamConfig{{Name: "t", Agents: []AgentConfig{{Name: "a", Model: "h", SystemPrompt: "hi"}}}}
-	prompt := BuildOrchestratorPrompt(teams)
+	prompt := BuildOrchestratorPrompt(teams, "")
 	if !strings.Contains(prompt, "delegates") {
 		t.Error("prompt missing delegation protocol")
 	}
@@ -56,7 +56,7 @@ func TestBuildPromptContainsProtocol(t *testing.T) {
 }
 
 func TestBuildPromptEmptyTeams(t *testing.T) {
-	prompt := BuildOrchestratorPrompt(nil)
+	prompt := BuildOrchestratorPrompt(nil, "")
 	if !strings.Contains(prompt, "No agent teams") {
 		t.Error("prompt should indicate no teams available")
 	}
@@ -64,7 +64,7 @@ func TestBuildPromptEmptyTeams(t *testing.T) {
 
 func TestBuildPromptGoalDriven(t *testing.T) {
 	teams := []*TeamConfig{{Name: "t", Agents: []AgentConfig{{Name: "a", Model: "h", SystemPrompt: "hi"}}}}
-	prompt := BuildOrchestratorPrompt(teams)
+	prompt := BuildOrchestratorPrompt(teams, "")
 	if !strings.Contains(prompt, "NEVER DO THE WORK YOURSELF") {
 		t.Error("prompt should contain strict delegation instruction")
 	}

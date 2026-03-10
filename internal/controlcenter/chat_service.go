@@ -300,21 +300,34 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	})
 
 	// Agent dispatch: delegate to multi-agent coordinator.
+	// The orchestrator brain is delegation-only — it does NOT need core/soul/toolbox
+	// prompts which contain file-writing instructions meant for conversational mode.
+	// Only inject memory recall and skill catalog.
 	if tierName == "agent" && cs.Orchestrator != nil {
 		var orchSysPrompts []string
-		orchSysArgs := memory.CollectPrompts(cs.ContextDir)
-		for i := 0; i < len(orchSysArgs)-1; i += 2 {
-			if orchSysArgs[i] == "--append-system-prompt" {
-				orchSysPrompts = append(orchSysPrompts, orchSysArgs[i+1])
-			}
-		}
 		if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {
 			orchSysPrompts = append(orchSysPrompts, recallBlock)
 		}
+		// Match skills for orchestrator catalog + sub-agent injection.
+		var skillInjections []string
 		if cs.SkillStore != nil {
 			if catalog := skills.BuildCatalog(cs.SkillStore); catalog != "" {
 				orchSysPrompts = append(orchSysPrompts, catalog)
 			}
+			if matched := skills.MatchTriggers(cs.SkillStore, req.Message); len(matched) > 0 {
+				names := make([]string, len(matched))
+				for i, sk := range matched {
+					names[i] = sk.Name
+					if sk.Prompt != "" {
+						skillInjections = append(skillInjections, sk.Prompt)
+					}
+				}
+				log.Printf("[chat-api] agent: matched skills %v (%d prompts injected)", names, len(skillInjections))
+			} else {
+				log.Printf("[chat-api] agent: no skill triggers matched in message")
+			}
+		} else {
+			log.Printf("[chat-api] agent: SkillStore is nil, skipping skill injection")
 		}
 
 		onProgress := func(phase, detail string) {
@@ -345,6 +358,8 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
 			MaxIterations:        tp.MaxIterations,
 			TimeoutMin:           tp.TimeoutMin,
+			SkillPrompts:         skillInjections,
+			MemoryContext:        memory.CollectAgentContext(cs.ContextDir),
 		}, onProgress)
 		if orchErr != nil {
 			return fmt.Errorf("agent: %w", orchErr)

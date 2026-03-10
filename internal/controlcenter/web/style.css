@@ -806,6 +806,66 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .teams-editor-hint { font-size: 0.8rem; color: var(--text-dim); margin-top: 4px; }
 .teams-editor-hint.error { color: var(--danger, #e55); }
+.task-launcher {
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--bg-card);
+}
+.task-launcher-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.task-launcher-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.task-launcher-select {
+  flex: 1;
+  background: var(--bg-input, var(--bg));
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+.task-launcher-select:focus { outline: none; border-color: var(--accent); }
+.task-launcher-input {
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+  background: var(--bg-input, var(--bg));
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+.task-launcher-input:focus { outline: none; border-color: var(--accent); }
+.task-launcher-input::placeholder { color: var(--text-dim); }
+.task-launcher-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.task-launcher .btn-accent {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  border: none;
+  font-weight: 600;
+}
+.task-launcher .btn-accent:hover { opacity: 0.9; }
+.task-launcher .btn-accent:disabled { opacity: 0.5; cursor: not-allowed; }
 .tasks-toolbar {
   display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
 }

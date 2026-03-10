@@ -216,6 +216,18 @@
               <button class="btn btn-icon" id="tasksRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
             </div>
           </div>
+          <div class="task-launcher" id="taskLauncher">
+            <div class="task-launcher-header">
+              <label class="task-launcher-label" for="taskLauncherTeam">Team</label>
+              <select id="taskLauncherTeam" class="task-launcher-select">
+                <option value="">Auto (best fit)</option>
+              </select>
+            </div>
+            <textarea id="taskLauncherInput" class="task-launcher-input" placeholder="Describe the task for the agent team..." rows="4"></textarea>
+            <div class="task-launcher-actions">
+              <button class="btn btn-sm btn-accent" id="taskLaunchBtn"><i data-lucide="play" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Launch</button>
+            </div>
+          </div>
           <div class="tasks-list" id="tasksList"></div>
         </div>
 

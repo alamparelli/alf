@@ -178,10 +178,14 @@
       <div id="chatView" class="chat-view" style="display:none">
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-status" id="chatStatus"></div>
+        <div class="chat-media-preview" id="chatMediaPreview"></div>
         <div class="chat-input-bar">
+          <button class="btn-icon chat-attach-btn" id="chatAttachBtn" title="Attach image"><i data-lucide="paperclip"></i></button>
+          <input type="file" id="chatFileInput" accept="image/*,application/pdf,.txt,.md,.json,.csv" multiple hidden>
           <textarea id="chatInput" placeholder="Message ALF..." rows="1"></textarea>
           <button class="btn chat-send-btn" id="chatSendBtn"><i data-lucide="send"></i></button>
         </div>
+        <div class="chat-drop-overlay" id="chatDropOverlay"><span>Drop files here</span></div>
       </div>
 
       <div id="schedulesView" class="schedules-view" style="display:none">

@@ -1177,6 +1177,143 @@ const chatMessages = document.getElementById('chatMessages');
 const chatInput = document.getElementById('chatInput');
 const chatSendBtn = document.getElementById('chatSendBtn');
 const chatStatus = document.getElementById('chatStatus');
+const chatMediaPreview = document.getElementById('chatMediaPreview');
+const chatAttachBtn = document.getElementById('chatAttachBtn');
+const chatFileInput = document.getElementById('chatFileInput');
+const chatDropOverlay = document.getElementById('chatDropOverlay');
+let chatPendingFiles = [];
+let chatDragCounter = 0;
+
+// --- Chat media: attach button ---
+chatAttachBtn.addEventListener('click', () => chatFileInput.click());
+chatFileInput.addEventListener('change', () => {
+  if (chatFileInput.files.length) {
+    chatAddFiles(Array.from(chatFileInput.files));
+    chatFileInput.value = '';
+  }
+});
+
+// --- Chat media: drag and drop ---
+const chatView = document.getElementById('chatView');
+chatView.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  chatDragCounter++;
+  if (chatDragCounter === 1) chatDropOverlay.classList.add('active');
+});
+chatView.addEventListener('dragover', (e) => e.preventDefault());
+chatView.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  chatDragCounter--;
+  if (chatDragCounter <= 0) { chatDragCounter = 0; chatDropOverlay.classList.remove('active'); }
+});
+chatView.addEventListener('drop', (e) => {
+  e.preventDefault();
+  chatDragCounter = 0;
+  chatDropOverlay.classList.remove('active');
+  if (e.dataTransfer.files.length) chatAddFiles(Array.from(e.dataTransfer.files));
+});
+
+// --- Chat media: clipboard paste ---
+chatInput.addEventListener('paste', (e) => {
+  const files = [];
+  for (const item of (e.clipboardData || {}).items || []) {
+    if (item.kind === 'file') files.push(item.getAsFile());
+  }
+  if (files.length) {
+    e.preventDefault();
+    chatAddFiles(files);
+  }
+});
+
+// --- Chat media: pending files management ---
+function chatAddFiles(files) {
+  for (const f of files) {
+    // Generate thumbnail for images, null for others.
+    const entry = { file: f, url: null };
+    if (f.type.startsWith('image/')) {
+      entry.url = URL.createObjectURL(f);
+    }
+    chatPendingFiles.push(entry);
+  }
+  chatRenderPendingFiles();
+}
+
+function chatRemoveFile(idx) {
+  const entry = chatPendingFiles[idx];
+  if (entry.url) URL.revokeObjectURL(entry.url);
+  chatPendingFiles.splice(idx, 1);
+  chatRenderPendingFiles();
+}
+
+function chatRenderPendingFiles() {
+  chatMediaPreview.innerHTML = '';
+  if (!chatPendingFiles.length) {
+    chatMediaPreview.classList.remove('has-files');
+    return;
+  }
+  chatMediaPreview.classList.add('has-files');
+  chatPendingFiles.forEach((entry, i) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'chat-media-thumb';
+    if (entry.url) {
+      const img = document.createElement('img');
+      img.src = entry.url;
+      thumb.appendChild(img);
+    }
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = entry.file.name;
+    thumb.appendChild(name);
+    const rm = document.createElement('button');
+    rm.className = 'remove';
+    rm.textContent = '\u00d7';
+    rm.onclick = () => chatRemoveFile(i);
+    thumb.appendChild(rm);
+    chatMediaPreview.appendChild(thumb);
+  });
+}
+
+// Upload pending files and return array of upload_ids.
+async function chatUploadPendingFiles() {
+  const ids = [];
+  for (const entry of chatPendingFiles) {
+    const form = new FormData();
+    form.append('file', entry.file);
+    form.append('type', entry.file.type.startsWith('image/') ? 'photo' : 'document');
+    const res = await fetch('/api/chat/upload', { method: 'POST', credentials: 'same-origin', body: form });
+    if (!res.ok) throw new Error('Upload failed: ' + entry.file.name);
+    const data = await res.json();
+    ids.push(data.upload_id);
+  }
+  // Cleanup previews.
+  chatPendingFiles.forEach(e => { if (e.url) URL.revokeObjectURL(e.url); });
+  chatPendingFiles = [];
+  chatRenderPendingFiles();
+  return ids;
+}
+
+// Render media refs inside a chat bubble (for history & live messages).
+function chatRenderMediaInBubble(bubble, mediaRefs) {
+  if (!mediaRefs || !mediaRefs.length) return;
+  const container = document.createElement('div');
+  container.className = 'chat-bubble-media';
+  mediaRefs.forEach(ref => {
+    if (ref.mime_type && ref.mime_type.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.src = '/api/chat/media/' + ref.upload_id;
+      img.alt = ref.file_name || 'image';
+      img.title = ref.file_name || '';
+      img.addEventListener('click', () => window.open(img.src, '_blank'));
+      container.appendChild(img);
+    } else {
+      const badge = document.createElement('span');
+      badge.className = 'file-badge';
+      badge.textContent = ref.file_name || 'file';
+      container.appendChild(badge);
+    }
+  });
+  bubble.prepend(container);
+}
 
 function chatLoadHistory() {
   if (chatHistoryLoaded) return;
@@ -1355,6 +1492,10 @@ function chatAppendBubble(role, text, meta) {
   bubble.className = 'chat-bubble ' + role;
   if (meta && meta.id) bubble.dataset.msgId = meta.id;
   bubble.innerHTML = role === 'user' ? esc(text) : chatRenderMd(text);
+  // Render media attachments (from history or live send).
+  if (meta && meta.media && meta.media.length) {
+    chatRenderMediaInBubble(bubble, meta.media);
+  }
 
   const metaEl = document.createElement('div');
   metaEl.className = 'chat-bubble-meta';
@@ -1724,7 +1865,8 @@ function chatFinishSend() {
 
 async function chatSend() {
   const text = chatInput.value.trim();
-  if (!text || chatSending) return;
+  const hasFiles = chatPendingFiles.length > 0;
+  if ((!text && !hasFiles) || chatSending) return;
 
   // Handle /bash command locally.
   if (text.startsWith('/bash ')) {
@@ -1792,16 +1934,31 @@ async function chatSend() {
   chatAgentTrackerBody = null;
   chatAgentStepCount = 0;
 
-  chatAppendBubble('user', text, {});
+  // Upload pending files first.
+  let mediaIds = [];
+  if (hasFiles) {
+    chatSetStatus('Uploading files...');
+    try {
+      mediaIds = await chatUploadPendingFiles();
+    } catch (e) {
+      toast('Upload failed: ' + e.message, 'error');
+      chatFinishSend();
+      return;
+    }
+  }
+
+  chatAppendBubble('user', text || (mediaIds.length + ' file(s)'), {});
   chatScrollBottom();
   chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
 
   try {
+    const payload = { message: text || 'Describe these files' };
+    if (mediaIds.length) payload.media_ids = mediaIds;
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify(payload),
     });
 
     if (res.status === 401) {

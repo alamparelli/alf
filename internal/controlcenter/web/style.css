@@ -1677,4 +1677,12 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .form-group .checkbox-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.85rem; color: var(--text); }
 .form-group .checkbox-label input[type="checkbox"] { width: auto; margin: 0; }
 .form-hint { display: block; font-size: 0.7rem; color: var(--text-dim); margin-top: 0.25rem; }
+.oauth2-mode-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+.oauth2-tab {
+  padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text-dim); font-size: 0.82rem; cursor: pointer;
+  font-family: inherit;
+}
+.oauth2-tab.active { background: var(--accent); color: var(--on-accent, #fff); border-color: var(--accent); }
+.oauth2-tab:hover:not(.active) { border-color: var(--accent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }

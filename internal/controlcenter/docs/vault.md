@@ -61,11 +61,51 @@ The `vault` tool automatically injects the right authentication headers. Alf nev
 
 ## Auth types
 
-| Type | Fields | Header injected |
-|------|--------|----------------|
-| `bearer` | Token | `Authorization: Bearer <token>` |
-| `header` | Header name + value | `<HeaderName>: <value>` |
-| `basic` | Username + password | `Authorization: Basic <base64>` |
+| Type | Fields | Description |
+|------|--------|-------------|
+| `bearer` | Token | Static `Authorization: Bearer <token>` header |
+| `header` | Header name + value | Custom header injection (e.g. `X-API-Key`) |
+| `basic` | Username + password | `Authorization: Basic <base64>` header |
+| `oauth2_client` | 3 setup modes (see below) | OAuth2 with automatic token refresh |
+| `service_account` | Service account key file | Google service account JWT exchange, no user consent needed |
+
+### OAuth2 Client
+
+Three setup modes, same `oauth2_client` type:
+
+| Mode | What you need | Best for |
+|------|---------------|----------|
+| **Browser flow** | `client_secret_*.json` only | Simplest — no token.json needed |
+| **File-based** | `client_secret_*.json` + `token.json` | When you already have a token.json |
+| **Manual** | client_id, client_secret, refresh_token, token_url | Any OAuth2 provider |
+
+**Browser flow (recommended for Google APIs):**
+
+Prerequisites — in Google Cloud Console:
+1. Create an OAuth Client ID of type **Web application** (not "Desktop app")
+2. Add `https://<your-cc-domain>/api/vault/oauth2/callback` as an **Authorized redirect URI**
+3. Download the `client_secret_*.json` file
+
+Then in the Control Center:
+1. Upload the `client_secret_*.json` via the **Files** section in the Vault tab
+2. Select **OAuth2 Client** auth type, switch to **Browser Flow** tab
+3. Fill in service name, base URL, select the uploaded file, add scopes
+4. Click **Authorize in Browser** → a new tab opens with Google consent
+5. Authorize → Google redirects back to the Control Center, which creates the service automatically
+
+The flow expires after 5 minutes. The callback is protected by a 128-bit random state parameter.
+
+**File-based:** Upload `client_secret_*.json` and `token.json` via the **Files** section, then create a service with type `oauth2_client` and fields `client_secret_file` + `token_file`. The vault extracts credentials automatically.
+
+**Manual:** Provide `client_id`, `client_secret`, `refresh_token`, and `token_url` directly.
+
+All three paths result in the same runtime behavior: the vault refreshes the access token 30 seconds before expiry and persists rotated refresh tokens.
+
+### Service Account (Google, no user consent)
+
+Upload a Google service account key JSON file, then create a service referencing it with `file_ref`. The vault signs JWTs and exchanges them for access tokens automatically.
+
+> For detailed setup instructions, curl examples, and file format specs, see the [vault-proxy AUTH_SETUP guide](https://github.com/alamparelli/vault-proxy/blob/main/docs/AUTH_SETUP.md).
 
 ## Tokens
 
@@ -82,7 +122,7 @@ Alf's `VAULT_TOKEN` environment variable contains a proxy-scoped token, so it ca
 - Master password derives the encryption key via Argon2id
 - Alf subprocess only receives `VAULT_ADDR` and `VAULT_TOKEN` (proxy scope)
 - `vault-data/` volume is separate from the data directory — Alf cannot access the encrypted file
-- SSRF protection: vault-server blocks requests to private/link-local IP ranges
+- SSRF protection: vault-server blocks requests to private/link-local IP ranges (DNS-level validation, ignores system HTTP proxy)
 - TLS skip verify: allows HTTP and private IPs only when explicitly enabled per service (still blocks link-local/metadata IPs)
 
 ## Locking

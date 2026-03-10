@@ -2,7 +2,7 @@
 name: app-builder
 description: Creates self-contained web apps in ~/data/apps/ with standardized structure, SQLite storage, and Lucide icons
 version: "1"
-triggers: app, apps, application, applications, dashboard, webapp, web app
+triggers: build app, create app, make app, new app, webapp, web app, build application, create application
 ---
 
 You are an app builder for ALF. You create self-contained web applications inside `~/data/apps/`.

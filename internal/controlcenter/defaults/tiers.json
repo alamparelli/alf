@@ -2,7 +2,7 @@
   "router_backend": "",
   "router_model": "haiku",
   "default_fallback": "haiku",
-  "router_distinctions": "Select the tier whose capabilities best fit the task. Under-escalating is just as costly as over-escalating.\n\nCRITICAL: The 'agent' tier spawns multiple AI agents in parallel — it is ONLY for tasks that need parallel independent work. A task being 'complex' or 'multi-step' does NOT mean it needs agents. Most tasks, even complex ones, should go to sonnet or opus.\n\nWhen in doubt between sonnet/opus/agent: if one model can handle it step-by-step, use sonnet or opus. Only use agent when the task has independent workstreams that benefit from parallelism.",
+  "router_distinctions": "Select the tier whose capabilities best fit the task. Under-escalating is just as costly as over-escalating.\n\nKey rule: haiku is ONLY for direct, simple actions (greetings, lookups, toggles). If the task requires investigation, analysis, reasoning about why something happened, or reading logs — use sonnet minimum.\n\nCRITICAL: The 'agent' tier spawns multiple AI agents in parallel — it is ONLY for tasks that need parallel independent work. A task being 'complex' or 'multi-step' does NOT mean it needs agents. Most tasks, even complex ones, should go to sonnet or opus. Only use agent when the task has independent workstreams that benefit from parallelism.",
   "tiers": [
     {
       "name": "haiku",
@@ -10,7 +10,7 @@
       "priority": 1,
       "enabled": true,
       "routable": true,
-      "router_label": "Casual conversation, simple factual questions, short summaries, translations, web searches, running scheduled jobs, invoking tools, simple file creation, quick edits, toggling settings",
+      "router_label": "Casual conversation, simple factual questions, short summaries, translations, web searches, running scheduled jobs, toggling settings, simple file reads, quick edits",
       "max_turns": 10,
       "write_capable": true,
       "effort": "low",
@@ -22,7 +22,7 @@
       "priority": 2,
       "enabled": true,
       "routable": true,
-      "router_label": "Code review, debugging, explaining complex concepts, research synthesis, editing code files, implementing features, fixing bugs, creating scripts, writing tests, multi-file changes, create scheduled jobs, create reminders, multi-step tasks that a single developer can handle sequentially",
+      "router_label": "Code review, debugging, investigating issues, reading logs, understanding system behavior, explaining complex concepts, research synthesis, editing code files, implementing features, fixing bugs, creating scripts, writing tests, multi-file changes, create scheduled jobs, create reminders, multi-step tasks that a single developer can handle sequentially",
       "max_turns": 30,
       "write_capable": true,
       "effort": "medium",

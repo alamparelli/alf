@@ -355,16 +355,35 @@
               <input type="password" id="vaultSvcPassword" class="input" placeholder="Password">
             </div>
             <div class="form-group" id="vaultSvcOAuth2Group" style="display:none">
-              <label>Client ID</label>
-              <input type="text" id="vaultSvcOAuthClientId" class="input" placeholder="Client ID">
-              <label>Client Secret</label>
-              <input type="password" id="vaultSvcOAuthClientSecret" class="input" placeholder="Client Secret">
-              <label>Token URL</label>
-              <input type="text" id="vaultSvcOAuthTokenUrl" class="input" placeholder="https://oauth2.googleapis.com/token">
-              <label>Refresh Token</label>
-              <input type="password" id="vaultSvcOAuthRefreshToken" class="input" placeholder="Refresh token">
-              <label>Scopes (comma-separated)</label>
-              <input type="text" id="vaultSvcOAuthScopes" class="input" placeholder="e.g. read,write">
+              <div class="oauth2-mode-tabs">
+                <button type="button" class="oauth2-tab active" data-mode="browser" id="vaultOAuth2TabBrowser">Browser Flow</button>
+                <button type="button" class="oauth2-tab" data-mode="manual" id="vaultOAuth2TabManual">Manual</button>
+              </div>
+              <div id="vaultOAuth2BrowserMode">
+                <label>Client Secret File</label>
+                <select id="vaultSvcOAuthFileRef" class="input"><option value="">Select uploaded file...</option></select>
+                <span class="form-hint">Upload your Google client_secret_*.json in the Files section below</span>
+                <label>Scopes (comma-separated)</label>
+                <input type="text" id="vaultSvcOAuthBrowserScopes" class="input" placeholder="e.g. https://www.googleapis.com/auth/gmail.readonly">
+                <div style="margin-top:8px">
+                  <button type="button" class="btn btn-sm btn-accent" id="vaultOAuth2AuthorizeBtn">
+                    <i data-lucide="external-link" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Authorize in Browser
+                  </button>
+                  <span id="vaultOAuth2FlowStatus" style="margin-left:8px;font-size:0.85rem;color:var(--text-dim)"></span>
+                </div>
+              </div>
+              <div id="vaultOAuth2ManualMode" style="display:none">
+                <label>Client ID</label>
+                <input type="text" id="vaultSvcOAuthClientId" class="input" placeholder="Client ID">
+                <label>Client Secret</label>
+                <input type="password" id="vaultSvcOAuthClientSecret" class="input" placeholder="Client Secret">
+                <label>Token URL</label>
+                <input type="text" id="vaultSvcOAuthTokenUrl" class="input" placeholder="https://oauth2.googleapis.com/token">
+                <label>Refresh Token</label>
+                <input type="password" id="vaultSvcOAuthRefreshToken" class="input" placeholder="Refresh token">
+                <label>Scopes (comma-separated)</label>
+                <input type="text" id="vaultSvcOAuthScopes" class="input" placeholder="e.g. read,write">
+              </div>
             </div>
             <div class="form-group" id="vaultSvcSAGroup" style="display:none">
               <label>Key File</label>

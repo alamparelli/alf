@@ -998,9 +998,12 @@ func runLoginFlow(dir string) {
 // The token may be wrapped across lines, so we collect contiguous token-char
 // lines starting from the sk-ant-oat01- prefix and join only those.
 func extractOAuthToken(text string) string {
-	// Strip ANSI escape sequences.
+	// Strip ANSI escape sequences and terminal control characters.
 	ansi := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 	text = ansi.ReplaceAllString(text, "")
+	// Remove carriage returns and other non-printable control chars (except newline).
+	ctrl := regexp.MustCompile(`[\x00-\x09\x0b-\x1f\x7f]`)
+	text = ctrl.ReplaceAllString(text, "")
 
 	// Collect lines that are part of the token block.
 	// The token is pure [a-zA-Z0-9_-] chars, possibly wrapped across lines.

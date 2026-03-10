@@ -89,6 +89,15 @@ The router classifies messages and routes them to tiers. Switch it to an API bac
 
 Or use the Control Center: Tiers > Router settings.
 
+## Cross-backend context
+
+Conversation history flows seamlessly across backends. When the router switches a message from a CLI tier to an API tier (or vice versa), the unified conversation store provides context to the new provider:
+
+- **API backends** receive conversation history as structured messages in the API request
+- **CLI backends** receive conversation history as an injected system prompt (when no active `--resume` session exists)
+
+This means users don't lose context when the router switches tiers mid-conversation.
+
 ## Limitations
 
 - API backends are **chat-only** — no tools (Read, Write, Bash, etc.). Use CLI tiers for agentic work.

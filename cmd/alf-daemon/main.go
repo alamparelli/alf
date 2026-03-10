@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/vault"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
@@ -404,6 +405,8 @@ func main() {
 
 	// Chat message store for mobile app API.
 	chatStore := cc.NewChatStore(dataDir)
+	// Unified conversation store (rich messages with content blocks).
+	convStore := conversation.NewStore(dataDir)
 
 	// Claude subprocess credential (run as claude user uid 1001, gid 1000/alf).
 	claudeCred := &syscall.Credential{Uid: 1001, Gid: 1000}
@@ -496,9 +499,9 @@ func main() {
 	}
 	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
 	chatService.Registry = registry
-	chatService.APIHistory = apiHistory
 	chatService.SkillStore = skillStore
 	chatService.Orchestrator = orch
+	chatService.ConvStore = convStore
 	if memDB != nil {
 		chatService.Recaller = &memStoreRecaller{store: memDB}
 	}
@@ -796,6 +799,18 @@ func main() {
 				chatHistory.Add(u.Message.Chat.ID, "user", userText)
 			}
 
+			// Write user message to unified conversation store.
+			tgUserMsgID := conversation.NewMessageID()
+			tgConvID := convStore.ConvID(conversation.ChannelTelegram)
+			convStore.Append(conversation.Message{
+				ID:        tgUserMsgID,
+				ConvID:    tgConvID,
+				Channel:   conversation.ChannelTelegram,
+				Role:      "user",
+				Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: userText}},
+				Timestamp: time.Now(),
+			})
+
 			// Extract reply context if this is a quoted reply.
 			isReply := u.Message.ReplyToMessage != nil
 			repliedToID := int64(0)
@@ -1080,7 +1095,7 @@ func main() {
 				cmdSource = u.Message.Caption
 			}
 			if strings.HasPrefix(cmdSource, "/") {
-				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir, orch, apiHistory) {
+				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir, orch, convStore) {
 					continue
 				}
 				// Check for force command: /<tier_name> <message>
@@ -1255,6 +1270,17 @@ func main() {
 					"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
 				})
 				chatSessions.TouchContext(chatID, "router")
+				// Write router response to conversation store.
+				convStore.Append(conversation.Message{
+					ID:        conversation.NewMessageID(),
+					ConvID:    tgConvID,
+					Channel:   conversation.ChannelTelegram,
+					Role:      "assistant",
+					Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: routeResult.Response}},
+					Timestamp: time.Now(),
+					Model:     "router",
+					Tier:      "router",
+				})
 				// React to the user's message before sending the reply (more natural).
 				maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, routeResult.React, contextDir)
 				if mid, err := tg.SendMessageReturnID(chatID, routeResult.Response); err == nil && mid != 0 {
@@ -1409,6 +1435,17 @@ func main() {
 					if msgID, err := tg.SendMessageReturnID(orchChatID, orchResult); err == nil && msgID != 0 {
 						alfMsgIDs.Add(msgID)
 						chatHistory.Add(orchChatID, "alf", orchResult)
+						convStore.Append(conversation.Message{
+							ID:        conversation.NewMessageID(),
+							ConvID:    tgConvID,
+							Channel:   conversation.ChannelTelegram,
+							Role:      "assistant",
+							Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: orchResult}},
+							Timestamp: time.Now(),
+							Model:     "agent",
+							Tier:      "agent",
+							CostUSD:   orchMeta.TotalCost,
+						})
 					}
 					if orchMediaCleanup != nil {
 						time.Sleep(10 * time.Minute)
@@ -1422,7 +1459,7 @@ func main() {
 			statusAnim := newTypingIndicator(tg, chatID, "choose_sticker")
 
 			lastPhase := ""
-			onProgress := func(event provider.StreamEvent) {
+			rawOnProgress := func(event provider.StreamEvent) {
 				if event.Type == lastPhase {
 					return
 				}
@@ -1436,6 +1473,9 @@ func main() {
 					statusAnim.SetAction("typing")
 				}
 			}
+			// Wrap with accumulator to capture content blocks.
+			tgAcc := conversation.NewAccumulator()
+			onProgress := tgAcc.OnProgress(rawOnProgress)
 
 			// Build system prompts (context files + reaction instruction).
 			sysPrompts := memory.CollectPrompts(contextDir)
@@ -1472,9 +1512,16 @@ func main() {
 				sysPromptTexts = append(sysPromptTexts, "Documentation is available in ~/data/docs/. Read ~/data/llms.txt for the index. When you install packages, read the container-packages doc first.")
 			}
 
+			// Inject session/conversation ID so the LLM can provide it when asked.
+			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf("Current session ID: %s (channel: tg)", tgConvID))
+
 			// Select provider based on tier backend.
 			tierProv := registry.ForBackend(tp.Backend)
 			isAPITier := tp.Backend != "" && tp.Backend != "cli"
+
+			// Detect backend switch for context continuity.
+			_, lastBackend, _ := chatSessions.ContextFull(chatID)
+			backendChanged := lastBackend != "" && lastBackend != tp.Backend
 
 			invokeParams := provider.Params{
 				Model:         tp.Model,
@@ -1487,8 +1534,28 @@ func main() {
 				DataDir:       dataDir,
 			}
 			if isAPITier {
-				invokeParams.SessionKey = fmt.Sprintf("tg:%d", chatID)
-				invokeParams.ResumeID = "" // API tiers use history, not --resume
+				invokeParams.ResumeID = "" // API tiers use ConvMessages, not --resume
+			}
+			if backendChanged {
+				log.Printf("[chat:%d] backend switch %s→%s, dropping resume", chatID, lastBackend, tp.Backend)
+				invokeParams.ResumeID = ""
+			}
+
+			// Inject conversation context from unified store.
+			tgConvMsgs := conversation.BuildContext(convStore.Recent(conversation.ChannelTelegram, 0), conversation.DefaultMaxMessages)
+			if isAPITier || invokeParams.ResumeID == "" {
+				if isAPITier {
+					flat := conversation.FlattenForAPI(tgConvMsgs)
+					ctxMsgs := make([]provider.ContextMessage, len(flat))
+					for i, m := range flat {
+						ctxMsgs[i] = provider.ContextMessage{Role: m.Role, Content: m.Content}
+					}
+					invokeParams.ConvMessages = ctxMsgs
+				} else {
+					if histPrompt := conversation.FormatAsSystemPrompt(tgConvMsgs); histPrompt != "" {
+						invokeParams.SystemPrompts = append(invokeParams.SystemPrompts, histPrompt)
+					}
+				}
 			}
 
 			// Signal server: per-invocation socket for react/status from Claude subprocess.
@@ -1545,7 +1612,7 @@ func main() {
 			// Store the session ID returned by Claude for future --resume.
 			if result.SessionID != "" {
 				isNew := resumeID == ""
-				chatSessions.SetWithContext(chatID, result.SessionID, routeResult.Tier)
+				chatSessions.SetWithBackend(chatID, result.SessionID, routeResult.Tier, tp.Backend)
 				if isNew {
 					reason := "first"
 					if resumeID == "" && len(chatSessions.Get(chatID)) > 0 {
@@ -1628,6 +1695,29 @@ func main() {
 			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {
 				alfMsgIDs.Add(msgID)
 				chatHistory.Add(chatID, "alf", reply)
+
+				// Write assistant message to unified conversation store.
+				var tgBlocks []conversation.ContentBlock
+				if tgAcc != nil {
+					tgBlocks = tgAcc.Blocks()
+				}
+				if len(tgBlocks) == 0 {
+					tgBlocks = []conversation.ContentBlock{{Type: conversation.BlockText, Text: cleanText}}
+				}
+				convStore.Append(conversation.Message{
+					ID:        conversation.NewMessageID(),
+					ConvID:    tgConvID,
+					Channel:   conversation.ChannelTelegram,
+					Role:      "assistant",
+					Blocks:    tgBlocks,
+					Timestamp: time.Now(),
+					Model:     result.Model,
+					Tier:      routeResult.Tier,
+					Backend:   tp.Backend,
+					CostUSD:   result.CostUSD,
+					SessionID: result.SessionID,
+				})
+
 				log.Printf("tracking alf msg %d (buffer=%d)", msgID, alfMsgIDs.Size())
 				// Log sent message ID
 				eventLog.Log("message_sent", map[string]any{
@@ -1979,7 +2069,7 @@ func hasMedia(msg *Message) bool {
 }
 
 // handleCommand processes known /commands. Returns true if handled.
-func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string, orch *agents.Orchestrator, apiHistory *provider.History) bool {
+func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string, orch *agents.Orchestrator, convStore *conversation.Store) bool {
 	cmd := strings.SplitN(msg.Text, " ", 2)[0]
 	switch cmd {
 	case "/login":
@@ -1987,7 +2077,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 		return true
 	case "/new":
 		old := chatSessions.Archive(msg.Chat.ID)
-		apiHistory.Clear(fmt.Sprintf("tg:%d", msg.Chat.ID))
+		convStore.NewConversation(conversation.ChannelTelegram)
 		memory.ClearOnboarding(contextDir)
 		reply := "New session started."
 		if old != "" {
@@ -2002,6 +2092,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 	case "/start":
 		memory.SetOnboarding(contextDir)
 		chatSessions.Archive(msg.Chat.ID) // fresh session so onboarding prompt takes effect
+		convStore.NewConversation(conversation.ChannelTelegram)
 		// Auto-trigger onboarding conversation — fall through to normal message processing.
 		msg.Text = "hello"
 		return false

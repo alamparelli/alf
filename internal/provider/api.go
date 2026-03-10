@@ -14,23 +14,68 @@ import (
 )
 
 // APIProvider implements the Provider interface via HTTP calls to an
-// OpenAI-compatible API (e.g. OpenRouter).
+// OpenAI-compatible API (OpenRouter, Ollama, OpenAI, Groq, etc.).
 type APIProvider struct {
-	apiKey  string
-	baseURL string
-	history *History
-	client  *http.Client
+	name         string
+	apiKey       string
+	baseURL      string
+	headers      map[string]string
+	defaultModel string
+	maxTokens    int
+	auth         string // "bearer" or "none"
+	history      *History
+	client       *http.Client
 }
 
-// NewAPIProvider creates a new APIProvider for OpenRouter.
-func NewAPIProvider(apiKey string, history *History) *APIProvider {
+// APIProviderConfig holds configuration for creating an APIProvider.
+type APIProviderConfig struct {
+	Name         string
+	BaseURL      string
+	APIKey       string            // resolved from vault or secret at startup
+	Headers      map[string]string // custom headers (e.g. HTTP-Referer, X-Title)
+	DefaultModel string
+	MaxTokens    int    // 0 = 4096
+	Auth         string // "bearer" (default), "none" (Ollama)
+}
+
+// NewAPIProviderFromConfig creates a new APIProvider from a config.
+func NewAPIProviderFromConfig(cfg APIProviderConfig, history *History) *APIProvider {
+	auth := cfg.Auth
+	if auth == "" {
+		auth = "bearer"
+	}
+	maxTokens := cfg.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 4096
+	}
 	return &APIProvider{
-		apiKey:  apiKey,
-		baseURL: "https://openrouter.ai/api/v1",
-		history: history,
-		client:  &http.Client{Timeout: 5 * time.Minute},
+		name:         cfg.Name,
+		apiKey:       cfg.APIKey,
+		baseURL:      cfg.BaseURL,
+		headers:      cfg.Headers,
+		defaultModel: cfg.DefaultModel,
+		maxTokens:    maxTokens,
+		auth:         auth,
+		history:      history,
+		client:       &http.Client{Timeout: 5 * time.Minute},
 	}
 }
+
+// NewAPIProvider creates an APIProvider for OpenRouter (backward compat).
+// Deprecated: use NewAPIProviderFromConfig.
+func NewAPIProvider(apiKey string, history *History) *APIProvider {
+	return NewAPIProviderFromConfig(APIProviderConfig{
+		Name:         "openrouter",
+		BaseURL:      "https://openrouter.ai/api/v1",
+		APIKey:       apiKey,
+		Headers:      map[string]string{"HTTP-Referer": "https://github.com/alamparelli/alf", "X-Title": "ALF"},
+		DefaultModel: "anthropic/claude-haiku-4-5",
+		Auth:         "bearer",
+	}, history)
+}
+
+// Name returns the backend name.
+func (p *APIProvider) Name() string { return p.name }
 
 // apiRequest is the OpenAI chat completions request body.
 type apiRequest struct {
@@ -48,6 +93,9 @@ type apiMessage struct {
 // Invoke sends a prompt to the API and returns the result.
 func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, onProgress OnProgress) (*Result, error) {
 	model := params.Model
+	if model == "" {
+		model = p.defaultModel
+	}
 	if model == "" {
 		model = "anthropic/claude-haiku-4-5"
 	}
@@ -72,12 +120,11 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	// Current user message.
 	messages = append(messages, apiMessage{Role: "user", Content: prompt})
 
-	maxTokens := 4096
 	reqBody := apiRequest{
 		Model:     model,
 		Messages:  messages,
 		Stream:    true,
-		MaxTokens: maxTokens,
+		MaxTokens: p.maxTokens,
 	}
 
 	result, err := p.doRequest(ctx, reqBody, onProgress)
@@ -110,21 +157,28 @@ func (p *APIProvider) doRequestWithRetry(ctx context.Context, reqBody apiRequest
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("HTTP-Referer", "https://github.com/alamparelli/alf")
-	req.Header.Set("X-Title", "ALF")
+
+	// Auth header.
+	if p.auth != "none" && p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	// Custom headers from config.
+	for k, v := range p.headers {
+		req.Header.Set(k, v)
+	}
 
 	start := time.Now()
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("api request: %w", err)
+		return nil, fmt.Errorf("api request (%s): %w", p.name, err)
 	}
 	defer resp.Body.Close()
 
 	// Rate limit retry.
 	if resp.StatusCode == 429 && attempt < 3 {
 		body, _ := io.ReadAll(resp.Body)
-		log.Printf("api: 429 rate limited (attempt %d/3): %s", attempt+1, truncBody(body))
+		log.Printf("api[%s]: 429 rate limited (attempt %d/3): %s", p.name, attempt+1, truncBody(body))
 		wait := time.Duration(1<<uint(attempt)) * time.Second
 		select {
 		case <-time.After(wait):
@@ -139,7 +193,7 @@ func (p *APIProvider) doRequestWithRetry(ctx context.Context, reqBody apiRequest
 		body, _ := io.ReadAll(resp.Body)
 		bodyStr := string(body)
 		if strings.Contains(bodyStr, "context") && (strings.Contains(bodyStr, "length") || strings.Contains(bodyStr, "too long") || strings.Contains(bodyStr, "maximum")) {
-			log.Printf("api: context overflow, truncating history and retrying")
+			log.Printf("api[%s]: context overflow, truncating history and retrying", p.name)
 			// Drop first half of non-system messages.
 			var trimmed []apiMessage
 			for _, m := range reqBody.Messages {
@@ -170,7 +224,7 @@ func (p *APIProvider) doRequestWithRetry(ctx context.Context, reqBody apiRequest
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("api error %d: %s", resp.StatusCode, truncBody(body))
+		return nil, fmt.Errorf("api[%s] error %d: %s", p.name, resp.StatusCode, truncBody(body))
 	}
 
 	// Parse SSE stream.
@@ -212,10 +266,10 @@ func (p *APIProvider) doRequestWithRetry(ctx context.Context, reqBody apiRequest
 
 	duration := time.Since(start)
 	text := strings.TrimSpace(resultText.String())
-	log.Printf("api: response %dms %d chars model=%s", duration.Milliseconds(), len(text), reqBody.Model)
+	log.Printf("api[%s]: response %dms %d chars model=%s", p.name, duration.Milliseconds(), len(text), reqBody.Model)
 
 	if text == "" {
-		return nil, fmt.Errorf("api returned empty response")
+		return nil, fmt.Errorf("api[%s] returned empty response", p.name)
 	}
 
 	return &Result{

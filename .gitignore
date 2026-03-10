@@ -34,3 +34,4 @@ dev-claude-session/
 mobile/
 scripts/dev-deploy.sh
 scripts/dev-local.sh
+docs/business-analysis-alf.md

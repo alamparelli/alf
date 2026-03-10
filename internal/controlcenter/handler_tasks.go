@@ -110,7 +110,7 @@ func (h *TasksHandler) resolveAgentConfig() agents.RunConfig {
 	for _, t := range tiers.Tiers {
 		if t.Name == "agent" {
 			model := t.Model
-			if t.Backend != "openrouter" && h.ResolveModel != nil {
+			if (t.Backend == "" || t.Backend == "cli") && h.ResolveModel != nil {
 				model = h.ResolveModel(t.Model)
 			}
 			return agents.RunConfig{

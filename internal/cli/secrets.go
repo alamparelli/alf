@@ -21,6 +21,7 @@ var SecretRegistry = []Secret{
 	{Name: "telegram_chat_id", Description: "Your Telegram chat ID", Required: true},
 	{Name: "cc_auth_token", Description: "Control Center auth token (auto-generated)", Required: false},
 	{Name: "openrouter_api_key", Description: "OpenRouter API key (sk-or-...)", Required: false},
+	{Name: "openai_api_key", Description: "OpenAI API key (sk-...)", Required: false},
 	{Name: "claude_oauth_token", Description: "Claude Code OAuth token (via alf login)", Required: false},
 	{Name: "vault_master_password", Description: "Vault master password (enables secrets vault)", Required: false},
 }

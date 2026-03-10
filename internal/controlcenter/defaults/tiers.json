@@ -2,7 +2,7 @@
   "router_backend": "",
   "router_model": "haiku",
   "default_fallback": "haiku",
-  "router_distinctions": "Select the tier whose capabilities best fit the task. Under-escalating is just as costly as over-escalating.\n\nKey rule: haiku is ONLY for direct, simple actions (greetings, lookups, toggles). If the task requires investigation, analysis, reasoning about why something happened, or reading logs — use sonnet minimum.\n\nCRITICAL: The 'agent' tier spawns multiple AI agents in parallel — it is ONLY for tasks that need parallel independent work. A task being 'complex' or 'multi-step' does NOT mean it needs agents. Most tasks, even complex ones, should go to sonnet or opus. Only use agent when the task has independent workstreams that benefit from parallelism.",
+  "router_distinctions": "Pick the tier that best balances capability and cost for the task. Do not default to the cheapest option — choose the right tool for the job.\n\nLow-priority tiers: simple direct actions (greetings, lookups, quick answers). Mid-priority tiers: investigation, analysis, code changes, debugging, multi-step work. High-priority tiers: architecture, deep reasoning, large-scale refactoring.\n\nCRITICAL: The 'agent' tier spawns multiple AI agents in parallel — ONLY use it for tasks with independent parallel workstreams. Most tasks, even complex ones, should go to a single-model tier.",
   "tiers": [
     {
       "name": "haiku",

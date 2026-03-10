@@ -85,10 +85,10 @@ func SeedBundledSkills(dir string) error {
 	return seedEmbedded(bundledSkillsFS, "bundled_skills", skillsDir)
 }
 
-// SeedBundledAgents copies embedded agent teams into the teams directory.
+// SeedBundledAgents copies embedded agent teams into the data/agents/teams directory.
 // Existing files are not overwritten (preserves user modifications).
 func SeedBundledAgents(dir string) error {
-	agentsDir := filepath.Join(dir, "agents", "teams")
+	agentsDir := filepath.Join(dir, "data", "agents", "teams")
 	return seedEmbedded(bundledAgentsFS, "bundled_agents", agentsDir)
 }
 

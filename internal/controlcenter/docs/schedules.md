@@ -17,12 +17,13 @@ Run prompts or bash commands automatically on a schedule.
 
 ## What can you schedule?
 
-Two types of jobs:
+Three types of jobs:
 
 | Type | Tier | What it does |
 |------|------|-------------|
 | **LLM prompt** | Any tier (e.g. `sonnet`) | Sends a prompt to Claude, same as sending a Telegram message |
 | **Bash command** | `direct` | Runs a shell command inside the container, no LLM involved |
+| **Reminder** | `reminder` | Sends a message directly to Telegram — no LLM, no bash, just a notification |
 
 ## Creating a job
 
@@ -35,6 +36,8 @@ Click **Add Job** and fill in the form:
 | **Tier** | No | Which model tier to use. Leave empty for the default. Set to `direct` for bash commands. |
 | **Prompt** | Depends | The prompt to send to Claude. Shown when tier is not `direct`. |
 | **Command** | Depends | The bash command to run. Shown when tier is `direct`. |
+| **Message** | Depends | The text to send as a reminder. Mutually exclusive with prompt and command. |
+| **Timeout** | No | Max execution time (e.g. `5m`, `30s`, `2h`). Default: 2 minutes for direct, 5 minutes for LLM. |
 | **Output** | Yes | Where results go (see output options below). |
 | **Skills** | No | Comma-separated skill names to activate for the job. |
 
@@ -120,6 +123,25 @@ Internal jobs (like config watchers or update checks) are hidden from the UI. Th
 | Tier | `direct` |
 | Command | `cd /home/alf/data && git add -A && git commit -m "auto-backup $(date +%H:%M)" 2>/dev/null; true` |
 | Output | `silent` |
+
+## Execution logs
+
+Every job execution is recorded with its status, duration, tier, and output. View logs:
+
+- **Logs tab** → filter by `scheduler` to see execution entries
+- **API** → `GET /api/schedule-logs?limit=50` returns recent executions as JSON
+
+Logs include the job name, execution time, success/failure status, and output (truncated to 4KB per entry).
+
+## Daily digest
+
+ALF can send a daily summary of all scheduled job executions. This is a system job that runs once per day and reports:
+
+- How many jobs ran in the last 24 hours
+- Success/failure counts
+- Details of any failures
+
+The digest is sent to Telegram automatically.
 
 ## Common questions
 

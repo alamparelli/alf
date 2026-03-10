@@ -963,7 +963,7 @@ func runLoginFlow(dir string) {
 
 	// Run claude setup-token inside the container, capturing output while showing it.
 	var buf bytes.Buffer
-	cmd := exec.Command("docker", "exec", "-it", "--user", "1000:1000", "-e", "HOME=/home/alf", "alf", "claude", "setup-token")
+	cmd := exec.Command("docker", "exec", "-it", "--user", "1001:1000", "-e", "HOME=/home/alf", "alf", "claude", "setup-token")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
 	cmd.Stderr = os.Stderr
@@ -999,11 +999,20 @@ func extractOAuthToken(text string) string {
 	// Strip ANSI escape sequences.
 	ansi := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 	text = ansi.ReplaceAllString(text, "")
-	// Remove all whitespace so wrapped tokens are joined.
-	text = strings.Join(strings.Fields(text), "")
-	// Find the token pattern.
+
+	// First try line-by-line to avoid joining token with surrounding prose
+	// (e.g. "sk-ant-oat01-...XYZStorethistokensecurely").
 	re := regexp.MustCompile(`sk-ant-oat01-[a-zA-Z0-9_-]+`)
-	if m := re.FindString(text); m != "" {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if m := re.FindString(line); m != "" {
+			return m
+		}
+	}
+
+	// Fallback: join all whitespace (handles tokens wrapped across lines).
+	joined := strings.Join(strings.Fields(text), "")
+	if m := re.FindString(joined); m != "" {
 		return m
 	}
 	return ""

@@ -49,13 +49,17 @@ You're looking at it. Here's what each section does:
 
 | Tab | What it does |
 |-----|-------------|
-| **Home** | Status, configuration, Workspace Explorer, Teach |
+| **Home** | Admin actions, Workspace Explorer, Teach |
 | **Chat** | Browser-based chat (same as Telegram, different interface) |
-| **Tasks** | Monitor agent tasks — running, completed, failed |
-| **Apps** | Self-contained apps ALF generates (appears when apps exist) |
 | **Terminal** | Shell session inside the Docker container ([details](docs:terminal)) |
-| **Logs** | Daemon logs and event viewer |
+| **Tasks** | Monitor agent tasks — running, completed, failed. Launch new tasks. |
+| **Schedules** | Create, edit, and monitor scheduled jobs ([details](docs:schedules)) |
+| **Logs** | Daemon logs with search and session filtering ([details](docs:logs)) |
+| **Tiers** | Configure response tiers in real-time ([details](docs:tier-setup)) |
+| **Firewall** | Network firewall rules ([details](docs:firewall)) |
+| **Vault** | Secrets vault — store credentials, OAuth2 tokens, files ([details](docs:vault)) |
 | **Docs** | You are here |
+| **Apps** | Self-contained apps ALF generates (appears when apps exist) |
 
 ## The Workspace Explorer
 
@@ -133,6 +137,8 @@ schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
 | `--tier` | For LLM | Which tier to use (`haiku`, `sonnet`, `agent`, etc.) |
 | `--prompt` | For LLM | What to ask the model |
 | `--command` | For direct | Bash command to execute |
+| `--message` | For reminder | Text to send directly (no LLM, no bash) |
+| `--timeout` | No | Max execution time (e.g. `5m`, `30s`). Default varies by tier. |
 | `--output` | No | Where to send results: `telegram`, `file`, `both`, `silent` (default: `telegram`) |
 | `--skills` | No | Comma-separated skill names to inject |
 

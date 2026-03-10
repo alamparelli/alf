@@ -159,11 +159,19 @@ func HandlerFactory(deps Deps) http.Handler {
 		mux.Handle("/api/schedules/events", deps.ScheduleEvents)
 	}
 
-	// Orchestrator tasks.
-	mux.Handle("/api/tasks", &TasksHandler{
+	// Orchestrator tasks (independent of chat pipeline — no mutex contention).
+	taskHandler := &TasksHandler{
 		Orchestrator: deps.Orchestrator,
 		DataDir:      deps.DataDir,
-	})
+		ContextDir:   filepath.Join(deps.DataDir, "context"),
+	}
+	if deps.ChatService != nil {
+		taskHandler.TierStore = deps.ChatService.TierStore
+		taskHandler.SkillStore = deps.ChatService.SkillStore
+		taskHandler.Recaller = deps.ChatService.Recaller
+		taskHandler.ResolveModel = deps.ChatService.ResolveModel
+	}
+	mux.Handle("/api/tasks", taskHandler)
 
 	// Agent teams management.
 	mux.Handle("/api/teams", &TeamsHandler{

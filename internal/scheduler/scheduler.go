@@ -21,6 +21,7 @@ type Config struct {
 	SkillStore   SkillStoreReader   // optional — injects skill prompts into jobs
 	Orchestrator OrchestratorRunner // optional — multi-agent orchestration
 	ChatLogger   ChatLogger
+	EventLog     EventLogger        // optional — writes schedule_run events to daily logs
 	CronPath   string
 	Location   *time.Location
 }

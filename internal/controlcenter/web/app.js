@@ -2662,11 +2662,11 @@ function tasksInit() {
       launchBtn.disabled = true;
       launchBtn.innerHTML = '<span class="dot-pulse"><span></span><span></span><span></span></span> Launching...';
       try {
-        const res = await fetch('/api/chat', {
+        const res = await fetch('/api/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ message: message, model: 'agent' }),
+          body: JSON.stringify({ message: message }),
         });
         if (!res.ok) throw new Error('status ' + res.status);
         launchInput.value = '';

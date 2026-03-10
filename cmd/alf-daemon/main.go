@@ -412,20 +412,10 @@ func main() {
 	tiersTimeout := time.Duration(cfg.TiersTimeout) * time.Second // 0 → default 5m inside NewCLIProvider
 	cliProvider := provider.NewCLIProvider(homeDir, dataDir, tiersTimeout, claudeCred)
 
-	// OpenRouter API provider (optional).
-	orAPIKey := readSecret("OPENROUTER_API_KEY")
+	// API backends: config-driven registration.
 	apiHistory := provider.NewHistory(dataDir, 100, sessionTimeout)
-	var apiProvider *provider.APIProvider
-	if orAPIKey != "" {
-		apiProvider = provider.NewAPIProvider(orAPIKey, apiHistory)
-		log.Println("OpenRouter API provider enabled")
-	} else {
-		log.Println("OpenRouter API provider disabled (no OPENROUTER_API_KEY)")
-	}
-	registry := &provider.Registry{
-		CLI:        cliProvider,
-		OpenRouter: apiProvider,
-	}
+	registry := provider.NewRegistry(cliProvider)
+	registerBackends(registry, cfg, apiHistory, vaultMgr)
 
 	// Multi-agent coordinator.
 	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel)
@@ -433,10 +423,16 @@ func main() {
 	// Router model for message classification.
 	routerBackend := tierStore.Current().RouterBackend
 	routerModel := tierStore.Current().RouterModel
-	if routerBackend == "openrouter" {
-		// For OpenRouter, use the model string as-is.
+	isAPIRouter := routerBackend != "" && routerBackend != "cli"
+	if isAPIRouter {
+		// For API backends, use the model string as-is.
 		if routerModel == "" {
-			routerModel = "anthropic/claude-haiku-4-5"
+			if ap := registry.GetAPIBackend(routerBackend); ap != nil {
+				routerModel = ap.Name() // will get default from provider
+			}
+			if routerModel == "" {
+				routerModel = "anthropic/claude-haiku-4-5"
+			}
 		}
 	} else {
 		routerModel = router.ResolveModel(routerModel)
@@ -668,7 +664,9 @@ func main() {
 						time.Local = resolveTimezone(cfg.Timezone)
 						log.Printf("config: timezone changed to %q (logs updated, scheduler needs restart)", cfg.Timezone)
 					}
-					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone)
+					// Re-register backends if config changed.
+					registerBackends(registry, cfg, apiHistory, vaultMgr)
+					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {
 					git.Commit("config updated via CC")
@@ -680,7 +678,8 @@ func main() {
 					log.Println("tiers reloaded")
 				}
 				routerBackend = tierStore.Current().RouterBackend
-				if routerBackend == "openrouter" {
+				isAPIR := routerBackend != "" && routerBackend != "cli"
+				if isAPIR {
 					newModel := tierStore.Current().RouterModel
 					if newModel == "" {
 						newModel = "anthropic/claude-haiku-4-5"
@@ -1475,7 +1474,7 @@ func main() {
 
 			// Select provider based on tier backend.
 			tierProv := registry.ForBackend(tp.Backend)
-			isAPITier := tp.Backend == "openrouter"
+			isAPITier := tp.Backend != "" && tp.Backend != "cli"
 
 			invokeParams := provider.Params{
 				Model:         tp.Model,
@@ -1654,7 +1653,7 @@ type tierParams struct {
 	OrchestratorMaxTurns int      // turns per orchestrator brain call (0 = default 3)
 	MaxIterations        int      // max agent iterations (0 = default)
 	TimeoutMin           int      // global timeout in minutes (0 = default)
-	Backend              string   // "cli" (default), "openrouter"
+	Backend              string   // "cli" (default), or registered backend name
 }
 
 // vaultPassword reads the master password from Docker secret first,
@@ -1683,6 +1682,65 @@ func readSecret(envVar string) string {
 		}
 	}
 	return strings.TrimSpace(os.Getenv(envVar))
+}
+
+// registerBackends registers API backends from config.json into the registry.
+// Backward compat: if no backends in config, check for OPENROUTER_API_KEY secret.
+func registerBackends(registry *provider.Registry, cfg *cc.Config, apiHistory *provider.History, vaultMgr *vault.Manager) {
+	if len(cfg.Backends) > 0 {
+		for name, bcfg := range cfg.Backends {
+			apiKey := resolveBackendAPIKey(name, bcfg, vaultMgr)
+			if bcfg.Auth != "none" && apiKey == "" {
+				log.Printf("backend %s: skipped (no API key available)", name)
+				continue
+			}
+			auth := bcfg.Auth
+			if auth == "" {
+				auth = "bearer"
+			}
+			prov := provider.NewAPIProviderFromConfig(provider.APIProviderConfig{
+				Name:         name,
+				BaseURL:      bcfg.BaseURL,
+				APIKey:       apiKey,
+				Headers:      bcfg.Headers,
+				DefaultModel: bcfg.DefaultModel,
+				MaxTokens:    bcfg.MaxTokens,
+				Auth:         auth,
+			}, apiHistory)
+			registry.Register(name, prov)
+		}
+	} else {
+		// Backward compat: check for legacy OPENROUTER_API_KEY secret.
+		if orAPIKey := readSecret("OPENROUTER_API_KEY"); orAPIKey != "" {
+			prov := provider.NewAPIProvider(orAPIKey, apiHistory)
+			registry.Register("openrouter", prov)
+			log.Println("OpenRouter API provider enabled (legacy secret)")
+		} else {
+			log.Println("No API backends configured")
+		}
+	}
+	// Update AllowedBackends for tier validation.
+	cc.SetAllowedBackends(registry.BackendNames())
+}
+
+// resolveBackendAPIKey resolves the API key for a backend.
+// Priority: vault_service → Docker secret (BACKENDNAME_API_KEY) → empty.
+func resolveBackendAPIKey(name string, bcfg cc.BackendConfig, vaultMgr *vault.Manager) string {
+	if bcfg.Auth == "none" {
+		return ""
+	}
+	// Try vault first if vault_service is specified.
+	if bcfg.VaultService != "" && vaultMgr != nil {
+		// Vault proxy doesn't expose raw keys — the proxy approach means
+		// requests go through vault. For now, fall through to Docker secret.
+		// Future: vault-proxy integration for direct API proxying.
+	}
+	// Fall back to Docker secret: <UPPERCASE_NAME>_API_KEY
+	secretName := strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
+	if key := readSecret(secretName); key != "" {
+		return key
+	}
+	return ""
 }
 
 type Update struct {
@@ -2108,8 +2166,8 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
 		if t.Name == tierName {
 			model := t.Model
 			// For CLI backend, resolve short names to full model IDs.
-			// For openrouter, use the model string as-is (e.g. "anthropic/claude-haiku-4-5").
-			if t.Backend != "openrouter" {
+			// For API backends, use the model string as-is.
+			if t.Backend == "" || t.Backend == "cli" {
 				model = router.ResolveModel(t.Model)
 			}
 			return tierParams{

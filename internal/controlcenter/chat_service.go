@@ -441,7 +441,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 	// Select provider based on tier backend.
 	prov := cs.Provider
-	isAPITier := tp.Backend == "openrouter"
+	isAPITier := tp.Backend != "" && tp.Backend != "cli"
 	if cs.Registry != nil {
 		prov = cs.Registry.ForBackend(tp.Backend)
 	}
@@ -757,8 +757,8 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			model := t.Model
-			// For CLI backend, resolve short names; for openrouter, use as-is.
-			if t.Backend != "openrouter" && cs.ResolveModel != nil {
+			// For CLI backend, resolve short names; for API backends, use model string as-is.
+			if (t.Backend == "" || t.Backend == "cli") && cs.ResolveModel != nil {
 				model = cs.ResolveModel(t.Model)
 			}
 			return tierParams{

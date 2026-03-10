@@ -10,6 +10,16 @@ import (
 //go:embed defaults/tiers.json
 var defaultTiersJSON []byte
 
+// BackendConfig defines an OpenAI-compatible LLM API endpoint.
+type BackendConfig struct {
+	BaseURL      string            `json:"base_url"`
+	VaultService string            `json:"vault_service,omitempty"` // vault service name for API key
+	Headers      map[string]string `json:"headers,omitempty"`       // custom headers (e.g. HTTP-Referer)
+	Auth         string            `json:"auth,omitempty"`          // "bearer" (default), "none" (Ollama)
+	DefaultModel string            `json:"default_model,omitempty"` // model if tier doesn't specify one
+	MaxTokens    int               `json:"max_tokens,omitempty"`    // 0 = 4096
+}
+
 // Config holds non-secret runtime parameters.
 type Config struct {
 	LogLevel       string     `json:"log_level"`
@@ -28,6 +38,7 @@ type Config struct {
 	TiersTimeout            int    `json:"tiers_timeout"`              // seconds for Claude tier invocations, 0 = default (300)
 	ShowSkillFooter         *bool  `json:"show_skill_footer"`          // show active skills in message footer, nil = true (default on)
 	MaxSessions             int    `json:"max_sessions"`               // max concurrent sessions per user, 0 = default (2)
+	Backends                map[string]BackendConfig `json:"backends,omitempty"` // named API backends
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -75,7 +86,7 @@ type Tier struct {
 	MaxIterations         int      `json:"max_iterations,omitempty"`
 	TimeoutMin            int      `json:"timeout_minutes,omitempty"`
 	ForceCommand  bool     `json:"force_command"`
-	Backend       string   `json:"backend,omitempty"` // "cli" (default), "openrouter"
+	Backend       string   `json:"backend,omitempty"` // "cli" (default), or registered backend name
 }
 
 // RouterDescription returns Description if set, otherwise falls back to RouterLabel.
@@ -92,7 +103,7 @@ type TiersConfig struct {
 	RouterModel        string `json:"router_model,omitempty"`
 	DefaultFallback    string `json:"default_fallback,omitempty"`
 	RouterDistinctions string `json:"router_distinctions,omitempty"`
-	RouterBackend      string `json:"router_backend,omitempty"` // "cli" (default), "openrouter"
+	RouterBackend      string `json:"router_backend,omitempty"` // "cli" (default), or registered backend name
 }
 
 // DefaultTiersConfig returns a TiersConfig parsed from the embedded defaults/tiers.json.
@@ -117,11 +128,20 @@ var AllowedModels = map[string]bool{
 	"opus":   true,
 }
 
-// AllowedBackends defines valid backend values (empty string = default CLI).
+// AllowedBackends is populated at runtime from registered backends.
+// "" and "cli" are always valid; additional backends come from config.
 var AllowedBackends = map[string]bool{
-	"":           true,
-	"cli":        true,
-	"openrouter": true,
+	"":    true,
+	"cli": true,
+}
+
+// SetAllowedBackends updates the allowed backends set with registered backend names.
+func SetAllowedBackends(names []string) {
+	m := map[string]bool{"": true, "cli": true}
+	for _, n := range names {
+		m[n] = true
+	}
+	AllowedBackends = m
 }
 
 // AllowedEfforts defines valid effort levels (empty string = unset).

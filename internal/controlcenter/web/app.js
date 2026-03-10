@@ -1300,10 +1300,12 @@ function chatRenderMediaInBubble(bubble, mediaRefs) {
   mediaRefs.forEach(ref => {
     if (ref.mime_type && ref.mime_type.startsWith('image/')) {
       const img = document.createElement('img');
-      img.src = '/api/chat/media/' + ref.upload_id;
+      const serverUrl = '/api/chat/media/' + ref.upload_id;
+      img.src = ref._localUrl || serverUrl;
       img.alt = ref.file_name || 'image';
       img.title = ref.file_name || '';
-      img.addEventListener('click', () => window.open(img.src, '_blank'));
+      img.onerror = () => { img.style.display = 'none'; };
+      img.addEventListener('click', () => window.open(serverUrl, '_blank'));
       container.appendChild(img);
     } else {
       const badge = document.createElement('span');
@@ -1491,7 +1493,7 @@ function chatAppendBubble(role, text, meta) {
   const bubble = document.createElement('div');
   bubble.className = 'chat-bubble ' + role;
   if (meta && meta.id) bubble.dataset.msgId = meta.id;
-  bubble.innerHTML = role === 'user' ? esc(text) : chatRenderMd(text);
+  if (text) bubble.innerHTML = role === 'user' ? esc(text) : chatRenderMd(text);
   // Render media attachments (from history or live send).
   if (meta && meta.media && meta.media.length) {
     chatRenderMediaInBubble(bubble, meta.media);
@@ -1936,7 +1938,10 @@ async function chatSend() {
 
   // Upload pending files first.
   let mediaIds = [];
+  let pendingBlobUrls = [];
   if (hasFiles) {
+    // Save blob URLs before upload (upload clears chatPendingFiles).
+    pendingBlobUrls = chatPendingFiles.map(e => ({ url: e.url, mime: e.file.type, name: e.file.name }));
     chatSetStatus('Uploading files...');
     try {
       mediaIds = await chatUploadPendingFiles();
@@ -1947,12 +1952,19 @@ async function chatSend() {
     }
   }
 
-  chatAppendBubble('user', text || (mediaIds.length + ' file(s)'), {});
+  // Build local media refs with blob URLs for instant thumbnail display.
+  const localMedia = pendingBlobUrls.map((p, i) => ({
+    upload_id: mediaIds[i],
+    mime_type: p.mime || '',
+    file_name: p.name || '',
+    _localUrl: p.url,
+  }));
+  chatAppendBubble('user', text, { media: localMedia.length ? localMedia : undefined });
   chatScrollBottom();
   chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
 
   try {
-    const payload = { message: text || 'Describe these files' };
+    const payload = { message: text };
     if (mediaIds.length) payload.media_ids = mediaIds;
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -3423,7 +3435,16 @@ const AVAILABLE_TOOLS = [
 
 const MODELS = ['haiku', 'sonnet', 'opus'];
 const EFFORTS = ['low', 'medium', 'high'];
-const BACKENDS = ['', 'cli', 'openrouter'];
+let BACKENDS = ['', 'cli'];
+// Dynamically populated from config backends.
+function backendsRefresh() {
+  api('/api/config').then(cfg => {
+    const names = ['', 'cli'];
+    if (cfg.backends) Object.keys(cfg.backends).forEach(n => names.push(n));
+    BACKENDS = [...new Set(names)];
+  }).catch(() => {});
+}
+backendsRefresh();
 
 let tiersCache = null;
 let tiersInitialized = false;
@@ -3449,7 +3470,7 @@ function tiersRender() {
   const cfg = document.getElementById('tiersRouterConfig');
 
   // Router config summary
-  const routerBackendLabel = tiersCache.router_backend === 'openrouter' ? 'openrouter' : 'cli';
+  const routerBackendLabel = tiersCache.router_backend && tiersCache.router_backend !== 'cli' ? tiersCache.router_backend : 'cli';
   cfg.innerHTML = '<div class="tiers-router-card">' +
     '<div class="tiers-router-row"><span class="tiers-router-label">Router backend</span><span class="tiers-router-value">' + esc(routerBackendLabel) + '</span></div>' +
     '<div class="tiers-router-row"><span class="tiers-router-label">Router model</span><span class="tiers-router-value">' + esc(tiersCache.router_model || 'haiku') + '</span></div>' +
@@ -3472,7 +3493,7 @@ function tiersRender() {
     if (t.write_capable) badges.push('<span class="tier-badge tier-badge-write">write</span>');
     if (t.force_command) badges.push('<span class="tier-badge tier-badge-force">force</span>');
     if (t.routable) badges.push('<span class="tier-badge tier-badge-routable">routable</span>');
-    if (t.backend === 'openrouter') badges.push('<span class="tier-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">openrouter</span>');
+    if (t.backend && t.backend !== 'cli') badges.push('<span class="tier-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">' + esc(t.backend) + '</span>');
     const tools = (t.tools || []).join(', ') || (t.write_capable ? 'all (write-capable)' : 'none');
     return '<div class="tier-card" data-idx="' + i + '">' +
       '<div class="tier-card-header">' +
@@ -3530,7 +3551,7 @@ function tiersShowModal(tier) {
   const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (t.model === m ? ' selected' : '') + '>' + m + '</option>').join('');
   const effortOpts = ['', ...EFFORTS].map(e => '<option value="' + e + '"' + (t.effort === e ? ' selected' : '') + '>' + (e || '—') + '</option>').join('');
   const backendOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((t.backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
-  const isOR = t.backend === 'openrouter';
+  const isAPI = t.backend && t.backend !== 'cli';
 
   const html = '<div class="modal-backdrop" id="tierModal">' +
     '<div class="modal tier-modal">' +
@@ -3538,7 +3559,7 @@ function tiersShowModal(tier) {
       '<div class="tier-form">' +
         '<div class="form-row"><label>Name</label><input type="text" id="tfName" value="' + esc(t.name) + '"' + (isEdit ? ' readonly style="opacity:0.6"' : '') + '></div>' +
         '<div class="form-row"><label>Backend</label><select id="tfBackend">' + backendOpts + '</select></div>' +
-        '<div class="form-row" id="tfModelRow"><label>Model</label>' + (isOR ? '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="tfModel">' + modelOpts + '</select>') + '</div>' +
+        '<div class="form-row" id="tfModelRow"><label>Model</label>' + (isAPI ? '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="tfModel">' + modelOpts + '</select>') + '</div>' +
         '<div class="form-row"><label>Priority</label><input type="number" id="tfPriority" value="' + t.priority + '" min="0" max="99"></div>' +
         '<div class="form-row"><label>Effort</label><select id="tfEffort">' + effortOpts + '</select></div>' +
         '<div class="form-row"><label>Router label</label><textarea id="tfLabel" class="input tier-label-textarea" rows="2" placeholder="Description for the router">' + esc(t.router_label || '') + '</textarea></div>' +
@@ -3577,7 +3598,7 @@ function tiersShowModal(tier) {
   document.getElementById('tfBackend').addEventListener('change', function() {
     const row = document.getElementById('tfModelRow');
     const curVal = document.getElementById('tfModel').value;
-    if (this.value === 'openrouter') {
+    if (this.value && this.value !== 'cli') {
       row.innerHTML = '<label>Model</label><input type="text" id="tfModel" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
     } else {
       const opts = MODELS.map(m => '<option value="' + m + '"' + (curVal === m ? ' selected' : '') + '>' + m + '</option>').join('');
@@ -3639,7 +3660,7 @@ function tiersShowRouterModal() {
   if (old) old.remove();
 
   const c = tiersCache;
-  const isOR = c.router_backend === 'openrouter';
+  const isAPIR = c.router_backend && c.router_backend !== 'cli';
   const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (c.router_model === m ? ' selected' : '') + '>' + m + '</option>').join('');
   const fbOpts = (c.tiers || []).map(t => '<option value="' + t.name + '"' + (c.default_fallback === t.name ? ' selected' : '') + '>' + t.name + '</option>').join('');
   const rbOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((c.router_backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
@@ -3649,7 +3670,7 @@ function tiersShowRouterModal() {
       '<h3>Router Settings</h3>' +
       '<div class="tier-form">' +
         '<div class="form-row"><label>Router backend</label><select id="trBackend">' + rbOpts + '</select></div>' +
-        '<div class="form-row" id="trModelRow"><label>Router model</label>' + (isOR ? '<input type="text" id="trModel" value="' + esc(c.router_model || '') + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="trModel">' + modelOpts + '</select>') + '</div>' +
+        '<div class="form-row" id="trModelRow"><label>Router model</label>' + (isAPIR ? '<input type="text" id="trModel" value="' + esc(c.router_model || '') + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="trModel">' + modelOpts + '</select>') + '</div>' +
         '<div class="form-row"><label>Default fallback</label><select id="trFallback">' + fbOpts + '</select></div>' +
         '<div class="form-row"><label>Distinctions</label><textarea class="json-editor" id="trDistinctions" rows="4">' + esc(c.router_distinctions || '') + '</textarea></div>' +
       '</div>' +
@@ -3666,7 +3687,7 @@ function tiersShowRouterModal() {
   document.getElementById('trBackend').addEventListener('change', function() {
     const row = document.getElementById('trModelRow');
     const curVal = document.getElementById('trModel').value;
-    if (this.value === 'openrouter') {
+    if (this.value && this.value !== 'cli') {
       row.innerHTML = '<label>Router model</label><input type="text" id="trModel" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
     } else {
       const opts = MODELS.map(m => '<option value="' + m + '"' + (curVal === m ? ' selected' : '') + '>' + m + '</option>').join('');

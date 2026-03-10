@@ -72,18 +72,19 @@ var emailRegex = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
 // setupProfile stores previous init values so re-running `alf init` pre-fills them.
 type setupProfile struct {
-	Dir            string   `json:"dir,omitempty"`
-	BotToken       string   `json:"bot_token,omitempty"`
-	ChatID         string   `json:"chat_id,omitempty"`
-	HTTPS          bool     `json:"https,omitempty"`
-	Domain         string   `json:"domain,omitempty"`
-	AcmeEmail      string   `json:"acme_email,omitempty"`
-	Port           string   `json:"port,omitempty"`
-	Host           string   `json:"host,omitempty"`
-	Timezone       string   `json:"timezone,omitempty"`
-	OpenRouterKey  bool     `json:"openrouter_key,omitempty"` // true if key was set
-	Workspaces     []string `json:"workspaces,omitempty"`     // host paths to mount
-	JSRuntime      string   `json:"js_runtime,omitempty"`     // "node", "deno", "bun", or ""
+	Dir                string   `json:"dir,omitempty"`
+	BotToken           string   `json:"bot_token,omitempty"`
+	ChatID             string   `json:"chat_id,omitempty"`
+	HTTPS              bool     `json:"https,omitempty"`
+	Domain             string   `json:"domain,omitempty"`
+	AcmeEmail          string   `json:"acme_email,omitempty"`
+	Port               string   `json:"port,omitempty"`
+	Host               string   `json:"host,omitempty"`
+	Timezone           string   `json:"timezone,omitempty"`
+	OpenRouterKey      bool     `json:"openrouter_key,omitempty"`      // true if key was set (backward compat)
+	ConfiguredBackends []string `json:"configured_backends,omitempty"` // ["openrouter", "openai"]
+	Workspaces         []string `json:"workspaces,omitempty"`          // host paths to mount
+	JSRuntime          string   `json:"js_runtime,omitempty"`          // "node", "deno", "bun", or ""
 }
 
 func setupProfilePath() string {
@@ -185,8 +186,8 @@ func RunInit() {
 	profile.Timezone = tz
 	saveSetupProfile(profile)
 
-	// Step 5c: Optional OpenRouter API key
-	promptOpenRouter(reader, dir, prev.OpenRouterKey)
+	// Step 5c: LLM backend configuration
+	promptBackends(reader, dir, &profile)
 
 	// Step 5d: Workspaces (host directories to mount)
 	workspaces := promptWorkspaces(reader, prev.Workspaces)
@@ -779,47 +780,152 @@ func pullAndStart(dir, botName string, httpsEnabled bool) {
 	PrintWarning("ALF started but health check inconclusive. Check with: alf status")
 }
 
-func promptOpenRouter(reader *bufio.Reader, dir string, hadKey bool) {
-	hint := "N"
-	if hadKey {
-		hint = "Y"
+// backendOption defines a backend choice in the init wizard.
+type backendOption struct {
+	Key       string // "openrouter", "openai", "custom"
+	Name      string
+	BaseURL   string // pre-filled for known backends
+	SecretName string // secret file name for the API key
+	KeyPrefix string // expected key prefix for validation hint
+}
+
+var knownBackends = []backendOption{
+	{Key: "openrouter", Name: "OpenRouter (GPT, Gemini, Llama, etc.)", BaseURL: "https://openrouter.ai/api/v1", SecretName: "openrouter_api_key", KeyPrefix: "sk-or-"},
+	{Key: "openai", Name: "OpenAI (GPT-4o, o1, etc.)", BaseURL: "https://api.openai.com/v1", SecretName: "openai_api_key", KeyPrefix: "sk-"},
+	{Key: "custom", Name: "Custom OpenAI-compatible endpoint"},
+}
+
+func promptBackends(reader *bufio.Reader, dir string, profile *setupProfile) {
+	fmt.Println("\n  ALF supports multiple LLM backends via OpenAI-compatible APIs.")
+	fmt.Println("  Configure backends now, or skip and set them later via the Control Center.")
+	fmt.Println()
+
+	// Show previous config.
+	if len(profile.ConfiguredBackends) > 0 {
+		fmt.Printf("  Previously configured: %s\n", strings.Join(profile.ConfiguredBackends, ", "))
+	} else if profile.OpenRouterKey {
+		fmt.Println("  Previously configured: openrouter")
 	}
-	fmt.Printf("\n  OpenRouter gives access to all LLM models (GPT, Gemini, Llama, etc.) via a single API key.")
-	fmt.Printf("\n  Use OpenRouter as an alternative backend? [%s]: ", hint)
+
+	for i, opt := range knownBackends {
+		fmt.Printf("    [%d] %s\n", i+1, opt.Name)
+	}
+	fmt.Printf("    [%d] Skip\n", len(knownBackends)+1)
+	fmt.Println()
+	fmt.Println("  Enter numbers separated by commas (e.g. 1,2) or press Enter to skip.")
+	fmt.Print("  Choice: ")
+
 	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(strings.ToLower(input))
+	input = strings.TrimSpace(input)
 	if input == "" {
-		if !hadKey {
-			return
+		// Keep existing backends.
+		if profile.OpenRouterKey || len(profile.ConfiguredBackends) > 0 {
+			PrintCheck("Keeping existing backend configuration")
 		}
-		input = "y"
-	}
-	if input != "y" && input != "yes" {
 		return
 	}
 
-	fmt.Print("  OpenRouter API key (sk-or-...): ")
+	var configured []string
+	parts := strings.Split(input, ",")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		var idx int
+		if _, err := fmt.Sscanf(p, "%d", &idx); err != nil || idx < 1 || idx > len(knownBackends)+1 {
+			PrintWarning(fmt.Sprintf("Invalid choice: %s (skipped)", p))
+			continue
+		}
+		if idx == len(knownBackends)+1 {
+			// Skip
+			return
+		}
+		opt := knownBackends[idx-1]
+		if opt.Key == "custom" {
+			promptCustomBackend(reader, dir, &configured)
+		} else {
+			promptKnownBackend(reader, dir, opt, &configured)
+		}
+	}
+
+	profile.ConfiguredBackends = configured
+	// Backward compat: set OpenRouterKey if openrouter was configured.
+	for _, name := range configured {
+		if name == "openrouter" {
+			profile.OpenRouterKey = true
+		}
+	}
+	saveSetupProfile(*profile)
+}
+
+func promptKnownBackend(reader *bufio.Reader, dir string, opt backendOption, configured *[]string) {
+	existing := secretExists(dir, opt.SecretName)
+	fmt.Printf("\n  %s API key", opt.Name)
+	if existing {
+		fmt.Print(" (press Enter to keep existing): ")
+	} else {
+		fmt.Print(": ")
+	}
+
 	key, _ := reader.ReadString('\n')
 	key = strings.TrimSpace(key)
 	if key == "" {
-		if hadKey {
-			PrintCheck("Keeping existing OpenRouter key")
+		if existing {
+			PrintCheck(fmt.Sprintf("Keeping existing %s key", opt.Key))
+			*configured = append(*configured, opt.Key)
+		} else {
+			PrintWarning(fmt.Sprintf("No %s API key provided — skipped", opt.Key))
 		}
 		return
 	}
-	if !strings.HasPrefix(key, "sk-or-") {
-		PrintWarning("Key doesn't start with sk-or- — saving anyway")
+
+	if opt.KeyPrefix != "" && !strings.HasPrefix(key, opt.KeyPrefix) {
+		PrintWarning(fmt.Sprintf("Key doesn't start with %s — saving anyway", opt.KeyPrefix))
 	}
-	if err := SetSecret(dir, "openrouter_api_key", key); err != nil {
-		PrintError(fmt.Sprintf("Failed to save OpenRouter key: %v", err))
+	if err := SetSecret(dir, opt.SecretName, key); err != nil {
+		PrintError(fmt.Sprintf("Failed to save %s key: %v", opt.Key, err))
 		return
 	}
-	PrintCheck("OpenRouter API key saved")
+	PrintCheck(fmt.Sprintf("%s API key saved", opt.Name))
+	*configured = append(*configured, opt.Key)
+}
 
-	// Update profile.
-	profile := loadSetupProfile()
-	profile.OpenRouterKey = true
-	saveSetupProfile(profile)
+func promptCustomBackend(reader *bufio.Reader, dir string, configured *[]string) {
+	fmt.Print("\n  Backend name (e.g. ollama, together): ")
+	name, _ := reader.ReadString('\n')
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		PrintWarning("No name provided — skipped")
+		return
+	}
+
+	fmt.Print("  Base URL (e.g. http://localhost:11434/v1): ")
+	baseURL, _ := reader.ReadString('\n')
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		PrintWarning("No base URL provided — skipped")
+		return
+	}
+
+	fmt.Print("  Requires API key? [y/N]: ")
+	authInput, _ := reader.ReadString('\n')
+	authInput = strings.TrimSpace(strings.ToLower(authInput))
+
+	if authInput == "y" || authInput == "yes" {
+		secretName := name + "_api_key"
+		fmt.Printf("  API key for %s: ", name)
+		key, _ := reader.ReadString('\n')
+		key = strings.TrimSpace(key)
+		if key != "" {
+			if err := SetSecret(dir, secretName, key); err != nil {
+				PrintError(fmt.Sprintf("Failed to save %s key: %v", name, err))
+				return
+			}
+			PrintCheck(fmt.Sprintf("%s API key saved", name))
+		}
+	}
+
+	PrintCheck(fmt.Sprintf("Custom backend %q configured (base_url: %s)", name, baseURL))
+	PrintInfo(fmt.Sprintf("Add this to config.json backends section: %q: {\"base_url\": \"%s\"}", name, baseURL))
+	*configured = append(*configured, name)
 }
 
 func promptWorkspaces(reader *bufio.Reader, previous []string) []string {

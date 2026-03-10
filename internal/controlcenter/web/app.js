@@ -3436,15 +3436,14 @@ const AVAILABLE_TOOLS = [
 const MODELS = ['haiku', 'sonnet', 'opus'];
 const EFFORTS = ['low', 'medium', 'high'];
 let BACKENDS = ['', 'cli'];
-// Dynamically populated from config backends.
-function backendsRefresh() {
-  api('/api/config').then(cfg => {
-    const names = ['', 'cli'];
-    if (cfg.backends) Object.keys(cfg.backends).forEach(n => names.push(n));
+// Populated from tiers API response (available_backends field).
+function backendsRefresh(data) {
+  if (data && data.available_backends) {
+    const names = [''];
+    data.available_backends.forEach(n => names.push(n));
     BACKENDS = [...new Set(names)];
-  }).catch(() => {});
+  }
 }
-backendsRefresh();
 
 let tiersCache = null;
 let tiersInitialized = false;
@@ -3459,6 +3458,7 @@ function tiersInit() {
 
 function tiersLoad() {
   api('/api/tiers').then(data => {
+    backendsRefresh(data);
     tiersCache = data;
     tiersRender();
   }).catch(() => toast('Failed to load tiers', 'error'));

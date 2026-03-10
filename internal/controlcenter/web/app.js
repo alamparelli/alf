@@ -3878,6 +3878,8 @@ function terminalStart() {
   });
   const fitAddon = new FitAddon.FitAddon();
   term.loadAddon(fitAddon);
+  const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+  term.loadAddon(webLinksAddon);
   term.open(container);
   termInstance = term;
   termFitAddon = fitAddon;

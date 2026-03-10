@@ -59,6 +59,8 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 // renderLoginPage returns a minimal HTML page instructing the user to send /login to the bot.
 func renderLoginPage(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Override restrictive default CSP for the login page HTML.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>ALF Control Center — Login</title>
@@ -133,6 +135,25 @@ func csrfMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// securityHeadersMiddleware sets security headers on every response.
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// CSP for HTML responses is set by DashboardHandler with page-specific policy.
+		// For non-HTML (API, static), a restrictive default prevents any rendering.
+		if !strings.HasPrefix(r.URL.Path, "/apps/") {
+			if existing := h.Get("Content-Security-Policy"); existing == "" {
+				h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Polling endpoints excluded from logging to reduce noise.

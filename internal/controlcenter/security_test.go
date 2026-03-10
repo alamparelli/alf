@@ -190,21 +190,32 @@ func TestCSRF_BlocksCrossOriginReferer(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDashboard_SecurityHeaders(t *testing.T) {
-	h := &DashboardHandler{HTML: "<html></html>"}
+	// Test through full middleware stack to verify global security headers.
+	ss := NewSessionStore(nil)
+	sid, _ := ss.Issue(100, 24*time.Hour)
+	deps := Deps{
+		AuthToken:     "test-token",
+		Sessions:      ss,
+		DashboardHTML: "<html></html>",
+	}
+	handler := HandlerFactory(deps)
+
 	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{Name: "cc_session", Value: sid})
 	rec := httptest.NewRecorder()
 
-	h.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
 	checks := map[string]string{
-		"X-Frame-Options":        "SAMEORIGIN",
-		"X-Content-Type-Options": "nosniff",
-		"Referrer-Policy":        "strict-origin-when-cross-origin",
-		"Content-Security-Policy": "default-src 'self'",
+		"Strict-Transport-Security": "max-age=31536000",
+		"X-Frame-Options":          "DENY",
+		"X-Content-Type-Options":   "nosniff",
+		"Referrer-Policy":          "strict-origin-when-cross-origin",
+		"Content-Security-Policy":  "default-src 'self'",
 	}
 	for header, mustContain := range checks {
 		got := rec.Header().Get(header)

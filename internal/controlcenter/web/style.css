@@ -1545,6 +1545,15 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .tier-tool-desc {
   color: var(--text-dim); font-weight: 400;
 }
+.tier-tool-wildcard {
+  border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 4px;
+}
+.tier-tool-check input:disabled { opacity: 0.3; }
+.tier-tool-check:has(input:disabled) { opacity: 0.4; }
+.tier-tools-group-label {
+  font-size: 0.72rem; font-weight: 600; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.05em; margin-top: 6px; margin-bottom: 2px;
+}
 
 /* Responsive */
 @media (max-width: 600px) {

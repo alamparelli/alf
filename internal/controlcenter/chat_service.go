@@ -20,6 +20,7 @@ import (
 	"github.com/alamparelli/alf/internal/provider"
 	chatsession "github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/skills"
+	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/voice"
 )
 
@@ -69,9 +70,11 @@ type ChatService struct {
 	Registry     *provider.Registry   // may be nil — multi-backend dispatch
 	Recaller     MemoryRecaller       // may be nil — auto-injects relevant memories
 	SkillStore   skills.Store         // may be nil — injects skill catalog into system prompts
-	Orchestrator *agents.Orchestrator        // may be nil — multi-agent orchestrator
-	ConvStore    *conversation.Store         // may be nil — unified conversation store (Phase 1: parallel write)
-	mu           sync.Mutex                  // serialize Claude calls (single user v1)
+	Orchestrator  *agents.Orchestrator        // may be nil — multi-agent orchestrator
+	ConvStore     *conversation.Store         // may be nil — unified conversation store (Phase 1: parallel write)
+	ToolRegistry  *tooling.Registry           // may be nil — tool schemas for API agentic loop
+	ToolExecutor  *tooling.Executor           // may be nil — tool subprocess runner
+	mu            sync.Mutex                  // serialize Claude calls (single user v1)
 
 	// Background job tracking.
 	activeJob *chatJob
@@ -505,6 +508,23 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		prov = cs.Registry.ForBackend(tp.Backend)
 	}
 
+	// Wrap API provider with agentic tool loop when tier has tools.
+	if isAPITier && cs.ToolRegistry != nil && cs.ToolExecutor != nil && len(tp.Tools) > 0 {
+		if apiProv, ok := prov.(*provider.APIProvider); ok {
+			schemas := cs.ToolRegistry.ForTools(tp.Tools)
+			if len(schemas) > 0 {
+				tools := tooling.ToOpenAI(schemas)
+				maxTurns := tp.MaxTurns
+				if maxTurns <= 0 {
+					maxTurns = 10
+				}
+				executor := &toolExecutorAdapter{exec: cs.ToolExecutor}
+				prov = provider.NewToolLoop(apiProv, executor, tools, maxTurns)
+				log.Printf("[chat-api] tool loop enabled: %d tools, max_turns=%d", len(schemas), maxTurns)
+			}
+		}
+	}
+
 	// Invoke via selected Provider.
 	resumeID := cs.Sessions.Get(apiChatID)
 	_, lastBackend, _ := cs.Sessions.ContextFull(apiChatID)
@@ -884,9 +904,17 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 			if (t.Backend == "" || t.Backend == "cli") && cs.ResolveModel != nil {
 				model = cs.ResolveModel(t.Model)
 			}
+			// Resolve ["*"] into all available tool names.
+			tools := t.Tools
+			if len(tools) == 1 && tools[0] == "*" {
+				tools = tooling.DiscoverToolNames(cs.DataDir)
+				if len(tools) > 0 {
+					log.Printf("[chat] tier %q: wildcard resolved to %d tools", tierName, len(tools))
+				}
+			}
 			return tierParams{
 				Model:                model,
-				Tools:                t.Tools,
+				Tools:                tools,
 				Effort:               t.Effort,
 				Backend:              t.Backend,
 				WriteCapable:         t.WriteCapable,
@@ -1212,4 +1240,22 @@ func recallMemories(recaller MemoryRecaller, message string) string {
 	}
 	log.Printf("[chat-api] recall: injected %d memories for %q", len(relevant), q)
 	return sb.String()
+}
+
+// toolExecutorAdapter bridges tooling.Executor to provider.ToolExecutor.
+type toolExecutorAdapter struct {
+	exec *tooling.Executor
+}
+
+func (a *toolExecutorAdapter) Execute(ctx context.Context, call provider.ToolCallRequest) provider.ToolCallResult {
+	result := a.exec.Execute(ctx, tooling.CallRequest{
+		ID:        call.ID,
+		Name:      call.Name,
+		Arguments: call.Arguments,
+	})
+	return provider.ToolCallResult{
+		ID:      result.ID,
+		Output:  result.Output,
+		IsError: result.IsError,
+	}
 }

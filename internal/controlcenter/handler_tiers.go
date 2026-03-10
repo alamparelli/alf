@@ -3,12 +3,37 @@ package controlcenter
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
 // TiersHandler serves the full tiers configuration for the CC tiers tab.
 type TiersHandler struct {
-	TierStore TierStore
-	Notifier  Notifier
+	TierStore    TierStore
+	Notifier     Notifier
+	DataDir      string             // for tool discovery
+	ToolRegistry *tooling.Registry  // may be nil
+}
+
+// toolInfo describes an available tool for the frontend.
+type toolInfo struct {
+	Name   string `json:"name"`
+	Desc   string `json:"desc"`
+	Source string `json:"source"` // "cli" or "alf"
+}
+
+// cliTools are the Claude Code built-in tools.
+var cliTools = []toolInfo{
+	{Name: "Read", Desc: "Read files (code, config, logs, images, PDF)", Source: "cli"},
+	{Name: "Write", Desc: "Create or overwrite files", Source: "cli"},
+	{Name: "Edit", Desc: "Modify existing files (text replacement)", Source: "cli"},
+	{Name: "Bash", Desc: "Execute shell commands", Source: "cli"},
+	{Name: "Glob", Desc: "Search files by pattern (e.g. **/*.go)", Source: "cli"},
+	{Name: "Grep", Desc: "Search file contents with regex", Source: "cli"},
+	{Name: "WebSearch", Desc: "Search the web for information", Source: "cli"},
+	{Name: "WebFetch", Desc: "Fetch content from a URL", Source: "cli"},
+	{Name: "NotebookEdit", Desc: "Edit Jupyter notebooks", Source: "cli"},
+	{Name: "Agent", Desc: "Launch a sub-agent for complex tasks", Source: "cli"},
 }
 
 func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -18,15 +43,29 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Include registered backends so frontend can populate dropdowns.
 		type tiersResponse struct {
 			*TiersConfig
-			AvailableBackends []string `json:"available_backends"`
+			AvailableBackends []string   `json:"available_backends"`
+			AvailableTools    []toolInfo `json:"available_tools"`
 		}
 		backends := make([]string, 0, len(AllowedBackends))
 		for b := range AllowedBackends {
-			if b != "" { // skip empty string (default)
+			if b != "" {
 				backends = append(backends, b)
 			}
 		}
-		respondJSON(w, http.StatusOK, tiersResponse{TiersConfig: cfg, AvailableBackends: backends})
+		// Build tool list: CLI tools + discovered ALF tools.
+		tools := append([]toolInfo{}, cliTools...)
+		if h.DataDir != "" {
+			for _, name := range tooling.DiscoverToolNames(h.DataDir) {
+				desc := "ALF tool"
+				if h.ToolRegistry != nil {
+					if schema, ok := h.ToolRegistry.Get(name); ok {
+						desc = schema.Description
+					}
+				}
+				tools = append(tools, toolInfo{Name: name, Desc: desc, Source: "alf"})
+			}
+		}
+		respondJSON(w, http.StatusOK, tiersResponse{TiersConfig: cfg, AvailableBackends: backends, AvailableTools: tools})
 
 	case http.MethodPut:
 		var cfg TiersConfig

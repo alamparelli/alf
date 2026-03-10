@@ -10,6 +10,7 @@ import (
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
+	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
 )
 
@@ -37,6 +38,7 @@ type Deps struct {
 	FirewallProxy  *firewall.Proxy     // nil if firewall unavailable
 	VaultManager     *vault.Manager      // nil if vault unavailable
 	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable
+	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS
@@ -97,8 +99,10 @@ func HandlerFactory(deps Deps) http.Handler {
 	})
 
 	mux.Handle("/api/tiers", &TiersHandler{
-		TierStore: deps.TierStore,
-		Notifier:  deps.Notifier,
+		TierStore:    deps.TierStore,
+		Notifier:     deps.Notifier,
+		DataDir:      deps.DataDir,
+		ToolRegistry: deps.ToolRegistry,
 	})
 
 	// Resource CRUD routes.

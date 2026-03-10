@@ -16,6 +16,7 @@ import (
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
 	scheduler_pkg "github.com/alamparelli/alf/internal/scheduler"
+	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
 )
 
@@ -86,6 +87,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		FirewallProxy:  fwProxy,
 		VaultManager:     vaultMgr,
 		ScheduleEvents:  schedEventBroker,
+		ToolRegistry:    chatServiceToolRegistry(chatService),
 		AuthToken:      authToken,
 		AllowedOrigin:    strings.TrimRight(externalURL, "/"),
 		SecureCookies:    strings.HasPrefix(externalURL, "https://"),
@@ -123,4 +125,12 @@ func (s *Server) Start() error {
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
+}
+
+// chatServiceToolRegistry extracts the ToolRegistry from a ChatService, or nil.
+func chatServiceToolRegistry(cs *ChatService) *tooling.Registry {
+	if cs == nil {
+		return nil
+	}
+	return cs.ToolRegistry
 }

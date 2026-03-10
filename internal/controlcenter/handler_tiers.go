@@ -15,7 +15,18 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		cfg := h.TierStore.Current()
-		respondJSON(w, http.StatusOK, cfg)
+		// Include registered backends so frontend can populate dropdowns.
+		type tiersResponse struct {
+			*TiersConfig
+			AvailableBackends []string `json:"available_backends"`
+		}
+		backends := make([]string, 0, len(AllowedBackends))
+		for b := range AllowedBackends {
+			if b != "" { // skip empty string (default)
+				backends = append(backends, b)
+			}
+		}
+		respondJSON(w, http.StatusOK, tiersResponse{TiersConfig: cfg, AvailableBackends: backends})
 
 	case http.MethodPut:
 		var cfg TiersConfig

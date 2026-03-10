@@ -190,12 +190,23 @@ func ValidTierSet(tiers *cc.TiersConfig) map[string]bool {
 }
 
 // FallbackResult returns a fallback tier when classification fails.
+// Uses default_fallback if set and the tier is enabled, otherwise picks
+// the lowest-priority enabled+routable tier.
 func FallbackResult(tiers *cc.TiersConfig) Result {
-	// Pick the lowest-priority enabled tier.
+	// Honor explicit default_fallback if the tier exists and is enabled.
+	if tiers.DefaultFallback != "" {
+		for _, t := range tiers.Tiers {
+			if t.Name == tiers.DefaultFallback && t.Enabled {
+				return Result{Tier: t.Name, Reason: "fallback (default)"}
+			}
+		}
+	}
+
+	// Pick the lowest-priority enabled+routable tier.
 	best := ""
 	bestPriority := int(^uint(0) >> 1)
 	for _, t := range tiers.Tiers {
-		if t.Enabled && t.Priority < bestPriority {
+		if t.Enabled && t.Routable && t.Priority < bestPriority {
 			best = t.Name
 			bestPriority = t.Priority
 		}
@@ -203,6 +214,7 @@ func FallbackResult(tiers *cc.TiersConfig) Result {
 	if best != "" {
 		return Result{Tier: best, Reason: "fallback"}
 	}
+	// Any enabled tier.
 	for _, t := range tiers.Tiers {
 		if t.Enabled {
 			return Result{Tier: t.Name, Reason: "fallback"}

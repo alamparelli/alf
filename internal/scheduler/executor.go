@@ -57,6 +57,11 @@ type ChatLogger interface {
 	LogScheduledMessage(text, tier, jobName string)
 }
 
+// EventLogger writes structured events to daily log files.
+type EventLogger interface {
+	Log(event string, fields map[string]any)
+}
+
 // TierStoreReader reads tier configuration.
 type TierStoreReader interface {
 	Current() *TiersSnapshot
@@ -117,13 +122,15 @@ type TierInfo struct {
 func (e *Engine) executeJob(j *Job) {
 	if j.running {
 		log.Printf("scheduler: skipping %s (still running)", j.ID)
-		e.runLog.appendAndTruncate(RunRecord{
+		rec := RunRecord{
 			JobID:     j.ID,
 			JobName:   j.Name,
 			Tier:      j.Tier,
 			StartedAt: time.Now(),
 			Status:    "skipped",
-		})
+		}
+		e.runLog.appendAndTruncate(rec)
+		e.logScheduleRun(rec, "")
 		return
 	}
 	j.running = true
@@ -180,6 +187,7 @@ func (e *Engine) executeJob(j *Job) {
 		}
 		log.Printf("scheduler: [%s] %q failed (%s): %v", j.ID, j.Name, duration.Round(time.Millisecond), err)
 		e.runLog.appendAndTruncate(rec)
+		e.logScheduleRun(rec, "")
 
 		// Notify on failure if output includes telegram.
 		if j.Output == "telegram" || j.Output == "both" {
@@ -195,6 +203,7 @@ func (e *Engine) executeJob(j *Job) {
 	rec.OutputLen = len(text)
 	log.Printf("scheduler: [%s] %q ok (%s, %d chars)", j.ID, j.Name, duration.Round(time.Millisecond), len(text))
 	e.runLog.appendAndTruncate(rec)
+	e.logScheduleRun(rec, text)
 
 	// Suppress internal fallback messages.
 	if text == "Done (no text output)." {
@@ -436,6 +445,44 @@ func (e *Engine) invokeOrchestratorWithMeta(j *Job) (string, *execResult, error)
 	}
 	log.Printf("scheduler: [%s] orchestrator done: %d iterations, $%.4f", j.ID, meta.Iterations, meta.TotalCost)
 	return text, result, nil
+}
+
+// logScheduleRun writes a schedule_run event to the daily event log.
+func (e *Engine) logScheduleRun(rec RunRecord, output string) {
+	if e.cfg.EventLog == nil {
+		return
+	}
+	fields := map[string]any{
+		"job_id":      rec.JobID,
+		"job_name":    rec.JobName,
+		"tier":        rec.Tier,
+		"status":      rec.Status,
+		"duration_ms": rec.DurationMs,
+	}
+	if rec.Error != "" {
+		errMsg := rec.Error
+		if len(errMsg) > 300 {
+			errMsg = errMsg[:300]
+		}
+		fields["error"] = errMsg
+	}
+	if rec.CostUSD > 0 {
+		fields["cost_usd"] = rec.CostUSD
+	}
+	if rec.Model != "" {
+		fields["model"] = rec.Model
+	}
+	if rec.Iterations > 0 {
+		fields["iterations"] = rec.Iterations
+	}
+	if output != "" {
+		if len(output) > 500 {
+			output = output[:500]
+		}
+		fields["output"] = output
+	}
+	fields["output_len"] = rec.OutputLen
+	e.cfg.EventLog.Log("schedule_run", fields)
 }
 
 // buildSkillBlock resolves skill names and returns flattened prompts for injection.

@@ -1,30 +1,129 @@
 package controlcenter
 
 import (
+	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/skills"
 )
 
-// TasksHandler serves running and completed agent tasks.
+// TasksHandler serves running and completed agent tasks, and launches new ones.
+// Task launches bypass ChatService entirely — they run in their own goroutine
+// and are tracked by the Orchestrator, not the chat mutex.
 type TasksHandler struct {
 	Orchestrator *agents.Orchestrator
 	DataDir      string
+	ContextDir   string
+
+	// Optional dependencies for building orchestrator context.
+	TierStore    TierStore
+	SkillStore   skills.Store
+	Recaller     MemoryRecaller
+	ResolveModel func(short string) string
 }
 
 func (h *TasksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		h.list(w, r)
+	case http.MethodPost:
+		h.launch(w, r)
 	case http.MethodDelete:
 		h.cancel(w, r)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// launch starts an orchestrator task in a separate goroutine, completely
+// independent of the chat pipeline. Multiple tasks can run concurrently.
+func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
+	if h.Orchestrator == nil {
+		http.Error(w, "agent not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Message == "" {
+		http.Error(w, "empty message", http.StatusBadRequest)
+		return
+	}
+
+	// Build orchestrator system prompts (same logic as chat_service agent path).
+	var sysPrompts []string
+	if h.Recaller != nil {
+		if block := recallMemories(h.Recaller, req.Message); block != "" {
+			sysPrompts = append(sysPrompts, block)
+		}
+	}
+
+	var skillInjections []string
+	if h.SkillStore != nil {
+		if catalog := skills.BuildCatalog(h.SkillStore); catalog != "" {
+			sysPrompts = append(sysPrompts, catalog)
+		}
+		if matched := skills.MatchTriggers(h.SkillStore, req.Message); len(matched) > 0 {
+			for _, sk := range matched {
+				if sk.Prompt != "" {
+					skillInjections = append(skillInjections, sk.Prompt)
+				}
+			}
+		}
+	}
+
+	// Resolve agent tier params from tier config.
+	rc := h.resolveAgentConfig()
+	rc.SkillPrompts = skillInjections
+	rc.MemoryContext = memory.CollectAgentContext(h.ContextDir)
+
+	// Fire and forget — task is tracked by orchestrator.running map.
+	go func() {
+		_, _, err := h.Orchestrator.Run(context.Background(), req.Message, sysPrompts, rc, nil)
+		if err != nil {
+			log.Printf("[tasks] background task failed: %v", err)
+		}
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// resolveAgentConfig reads the "agent" tier config to get model/effort/timeout settings.
+func (h *TasksHandler) resolveAgentConfig() agents.RunConfig {
+	if h.TierStore == nil {
+		return agents.RunConfig{}
+	}
+	tiers := h.TierStore.Current()
+	for _, t := range tiers.Tiers {
+		if t.Name == "agent" {
+			model := t.Model
+			if t.Backend != "openrouter" && h.ResolveModel != nil {
+				model = h.ResolveModel(t.Model)
+			}
+			return agents.RunConfig{
+				Model:                model,
+				Effort:               t.Effort,
+				MaxTurns:             t.MaxTurns,
+				OrchestratorMaxTurns: t.OrchestratorMaxTurns,
+				MaxIterations:        t.MaxIterations,
+				TimeoutMin:           t.TimeoutMin,
+			}
+		}
+	}
+	return agents.RunConfig{}
 }
 
 func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {

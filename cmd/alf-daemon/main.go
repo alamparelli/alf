@@ -579,6 +579,7 @@ func main() {
 		SkillStore:   &schedulerSkillStore{s: skillStore},
 		Orchestrator: &schedulerOrchestrator{o: orch},
 		ChatLogger:   &schedulerChatLogger{store: chatStore},
+		EventLog:     eventLog,
 		CronPath:     filepath.Join(configDir, "cron.json"),
 		Location:     schedLocation,
 	})
@@ -817,6 +818,7 @@ func main() {
 				"replied_to_id": repliedToID,
 				"has_media":     hasMedia,
 				"has_voice":     hasVoice,
+				"session_id":    chatSessions.Get(u.Message.Chat.ID),
 			})
 
 			// Handle voice messages: transcribe and treat as text.

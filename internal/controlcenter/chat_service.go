@@ -384,11 +384,17 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			Tier:    "agent",
 		}})
 
+		agentText := orchResult
+		if len(agentText) > 500 {
+			agentText = agentText[:500]
+		}
 		cs.EventLog.Log("agent_out", map[string]any{
 			"iterations":  orchMeta.Iterations,
 			"total_cost":  orchMeta.TotalCost,
 			"agent_calls": len(orchMeta.AgentCalls),
 			"task_id":     orchMeta.ID,
+			"text":        agentText,
+			"text_length": len(orchResult),
 			"source":      "api",
 		})
 		return nil
@@ -548,9 +554,14 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		Tier:      tierName,
 	}})
 
+	outText := cleanText
+	if len(outText) > 500 {
+		outText = outText[:500]
+	}
 	cs.EventLog.Log("message_out", map[string]any{
 		"model":       result.Model,
 		"cost_usd":    result.CostUSD,
+		"text":        outText,
 		"text_length": len(cleanText),
 		"session_id":  result.SessionID,
 		"tier":        tierName,

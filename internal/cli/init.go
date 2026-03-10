@@ -222,6 +222,10 @@ func RunInit() {
 	fmt.Println()
 	RunLogin()
 
+	// Step 9: Generate 30-day magic link
+	PrintStep(9, "Dashboard access link")
+	magicURL := generateInitMagicLink(dir)
+
 	// Summary
 	fmt.Println()
 	PrintBanner()
@@ -230,6 +234,11 @@ func RunInit() {
 	PrintCheck(fmt.Sprintf("Install directory: %s", dir))
 	PrintCheck(fmt.Sprintf("Bot: @%s", botName))
 	PrintCheck(fmt.Sprintf("Dashboard: %s", composeData.CCExternalURL))
+	if magicURL != "" {
+		fmt.Println()
+		PrintCheck("Magic link (valid 30 days):")
+		fmt.Println("  " + magicURL)
+	}
 	fmt.Println()
 	PrintSuccess("Message @" + botName + " on Telegram to start.")
 	fmt.Println()
@@ -1051,6 +1060,37 @@ func promptJSRuntime(reader *bufio.Reader, previous string) string {
 		PrintCheck("JS runtime: " + choice)
 	}
 	return choice
+}
+
+// generateInitMagicLink generates a 30-day magic link via the daemon API.
+// Returns the URL or empty string on failure (non-fatal).
+func generateInitMagicLink(dir string) string {
+	tokenFile := filepath.Join(dir, "secrets", "cc_auth_token")
+	tokenBytes, err := os.ReadFile(tokenFile)
+	if err != nil || strings.TrimSpace(string(tokenBytes)) == "" {
+		PrintWarning("Could not read cc_auth_token — skipping magic link")
+		return ""
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+
+	cmd := exec.Command("docker", "exec", "alf",
+		"curl", "-sf", "-X", "POST",
+		"-H", "Authorization: Bearer "+token,
+		"http://127.0.0.1:8080/api/magic-link?days=30")
+	out, err := cmd.Output()
+	if err != nil {
+		PrintWarning("Could not generate magic link — try: alf magic-link")
+		return ""
+	}
+
+	var resp struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil || resp.URL == "" {
+		PrintWarning("Invalid magic link response — try: alf magic-link")
+		return ""
+	}
+	return resp.URL
 }
 
 // RunLogin launches Claude Code interactively so the user can authenticate

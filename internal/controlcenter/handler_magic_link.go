@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -21,8 +22,16 @@ func (h *MagicLinkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Duration: default 7 days, override with ?days=N (max 90).
+	days := 7
+	if d := r.URL.Query().Get("days"); d != "" {
+		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 90 {
+			days = n
+		}
+	}
+
 	// Use chat ID 0 for CLI-generated links (not tied to a Telegram chat).
-	code, err := h.Magic.Issue(0, 7*24*time.Hour)
+	code, err := h.Magic.Issue(0, time.Duration(days)*24*time.Hour)
 	if err != nil {
 		http.Error(w, `{"error":"failed to generate link"}`, http.StatusInternalServerError)
 		return

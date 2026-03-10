@@ -3906,8 +3906,28 @@ function terminalStart() {
 
     ws.onopen = () => sendSize();
 
+    // Buffer terminal output to detect long URLs (e.g. OAuth) that wrap
+    // across multiple lines and are hard to click/copy in a terminal.
+    let termUrlBuf = '';
+    let termUrlTimer = null;
+    function termCheckForUrl() {
+      // Match URLs ≥120 chars (OAuth links are typically 200+).
+      const m = termUrlBuf.match(/https?:\/\/[^\s\x1b]{120,}/);
+      if (m) {
+        const url = m[0];
+        termShowUrlBar(url);
+      }
+      termUrlBuf = '';
+    }
+
     ws.onmessage = (ev) => {
-      term.write(new Uint8Array(ev.data));
+      const bytes = new Uint8Array(ev.data);
+      term.write(bytes);
+      // Accumulate text for URL detection (strip most control chars).
+      const chunk = new TextDecoder().decode(bytes).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]/g, '');
+      termUrlBuf += chunk;
+      clearTimeout(termUrlTimer);
+      termUrlTimer = setTimeout(termCheckForUrl, 300);
     };
 
     ws.onclose = () => {
@@ -3938,6 +3958,27 @@ function terminalStart() {
 }
 
 document.getElementById('termNewBtn').addEventListener('click', terminalStart);
+
+// URL action bar — shown when a long URL is detected in terminal output.
+function termShowUrlBar(url) {
+  let bar = document.getElementById('termUrlBar');
+  if (bar) bar.remove();
+  bar = document.createElement('div');
+  bar.id = 'termUrlBar';
+  bar.innerHTML =
+    '<span class="term-url-label">Link detected</span>' +
+    '<button class="btn-sm" id="termUrlOpen">Open</button>' +
+    '<button class="btn-sm" id="termUrlCopy">Copy URL</button>' +
+    '<button class="btn-sm btn-ghost" id="termUrlDismiss">&times;</button>';
+  document.getElementById('terminalContainer').prepend(bar);
+  document.getElementById('termUrlOpen').onclick = () => { window.open(url, '_blank'); };
+  document.getElementById('termUrlCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(url); toast('URL copied'); } catch {}
+  };
+  document.getElementById('termUrlDismiss').onclick = () => bar.remove();
+  // Auto-dismiss after 60s.
+  setTimeout(() => { if (bar.parentNode) bar.remove(); }, 60000);
+}
 
 // --- Terminal mobile support ---
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;

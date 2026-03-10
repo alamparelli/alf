@@ -31,7 +31,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimPrefix(path, "/")
 
 	// Routes that need a valid admin token — auto-recover if revoked.
-	needsAuth := path != "" && path != "status" && path != "unlock" && path != "reset"
+	needsAuth := path != "" && path != "status" && path != "unlock" && path != "reset" && path != "oauth2/callback"
 	if needsAuth {
 		if err := h.Manager.EnsureAuth(); err != nil {
 			respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "vault auth failed: " + err.Error()})
@@ -78,6 +78,10 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.handleRevokeToken(w, r, id)
+	case path == "oauth2/authorize" && r.Method == http.MethodPost:
+		h.handleOAuth2Authorize(w, r)
+	case path == "oauth2/callback" && r.Method == http.MethodGet:
+		h.handleOAuth2Callback(w, r)
 	case path == "files" && r.Method == http.MethodGet:
 		h.handleListFiles(w, r)
 	case path == "files" && r.Method == http.MethodPost:
@@ -335,6 +339,56 @@ func (h *VaultHandler) handleDeleteFile(w http.ResponseWriter, _ *http.Request, 
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (h *VaultHandler) handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
+	// Proxy the Google OAuth2 callback to vault-server.
+	// This is a browser redirect — no auth token, just query params (code, state).
+	addr := h.Manager.Addr()
+	proxyURL := addr + "/auth/oauth2/callback?" + r.URL.RawQuery
+	resp, err := http.Get(proxyURL)
+	if err != nil {
+		http.Error(w, "vault unreachable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (h *VaultHandler) handleOAuth2Authorize(w http.ResponseWriter, r *http.Request) {
+	// Proxy POST /auth/oauth2/authorize to vault-server.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	addr := h.Manager.Addr()
+	token := h.Manager.AdminToken()
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, addr+"/auth/oauth2/authorize", strings.NewReader(string(body)))
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "vault unreachable: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(respBody)
 }
 
 // isVaultSafeName validates that a name/id has no path traversal characters.

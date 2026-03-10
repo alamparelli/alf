@@ -232,7 +232,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	})
 
 	// Apply middleware stack (outermost first).
-	exempt := map[string]bool{"/health": true, "/auth": true}
+	exempt := map[string]bool{"/health": true, "/auth": true, "/api/vault/oauth2/callback": true}
 	var handler http.Handler = mux
 	handler = jsonMiddleware(handler)
 	handler = csrfMiddleware(deps.AllowedOrigin)(handler)

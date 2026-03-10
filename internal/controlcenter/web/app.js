@@ -4092,6 +4092,9 @@ function vaultInit() {
   document.getElementById('vaultSvcAuthType').addEventListener('change', vaultToggleAuthFields);
   document.getElementById('vaultCreateTokenBtn').addEventListener('click', vaultCreateToken);
   document.getElementById('vaultFileInput').addEventListener('change', vaultUploadFile);
+  document.getElementById('vaultOAuth2TabBrowser').addEventListener('click', () => vaultOAuth2SetMode('browser'));
+  document.getElementById('vaultOAuth2TabManual').addEventListener('click', () => vaultOAuth2SetMode('manual'));
+  document.getElementById('vaultOAuth2AuthorizeBtn').addEventListener('click', vaultOAuth2StartFlow);
 
   vaultRefresh();
 }
@@ -4324,6 +4327,101 @@ function vaultToggleAuthFields() {
   document.getElementById('vaultSvcOAuth2Group').style.display = type === 'oauth2_client' ? '' : 'none';
   document.getElementById('vaultSvcSAGroup').style.display = type === 'service_account' ? '' : 'none';
   if (type === 'service_account') vaultPopulateFileRefs();
+  if (type === 'oauth2_client') vaultPopulateOAuthFileRefs();
+}
+
+function vaultOAuth2SetMode(mode) {
+  document.querySelectorAll('.oauth2-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  document.getElementById('vaultOAuth2BrowserMode').style.display = mode === 'browser' ? '' : 'none';
+  document.getElementById('vaultOAuth2ManualMode').style.display = mode === 'manual' ? '' : 'none';
+}
+
+async function vaultPopulateOAuthFileRefs() {
+  const sel = document.getElementById('vaultSvcOAuthFileRef');
+  try {
+    const files = await api('/api/vault/files');
+    while (sel.options.length > 1) sel.remove(1);
+    for (const f of (files || [])) {
+      const name = typeof f === 'string' ? f : f.name;
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    }
+  } catch {}
+}
+
+async function vaultOAuth2StartFlow() {
+  const name = document.getElementById('vaultSvcName').value.trim();
+  const baseURL = document.getElementById('vaultSvcBaseURL').value.trim();
+  const fileRef = document.getElementById('vaultSvcOAuthFileRef').value;
+  const scopesRaw = document.getElementById('vaultSvcOAuthBrowserScopes').value.trim();
+  const tlsSkip = document.getElementById('vaultSvcTLSSkip').checked;
+  const statusEl = document.getElementById('vaultOAuth2FlowStatus');
+
+  if (!name || !baseURL) { alert('Name and Base URL are required'); return; }
+  if (!fileRef) { alert('Select a client secret file'); return; }
+
+  const btn = document.getElementById('vaultOAuth2AuthorizeBtn');
+  btn.disabled = true;
+  statusEl.textContent = 'Starting flow...';
+  statusEl.style.color = 'var(--text-dim)';
+
+  // Build the CC callback URL so Google redirects back through the Control Center.
+  const ccOrigin = window.location.origin;
+  const payload = {
+    client_secret_file: fileRef,
+    service_name: name,
+    base_url: baseURL,
+    redirect_uri: ccOrigin + '/api/vault/oauth2/callback',
+  };
+  if (scopesRaw) payload.scopes = scopesRaw.split(',').map(s => s.trim()).filter(Boolean);
+  if (tlsSkip) payload.tls_skip_verify = true;
+
+  try {
+    const data = await api('/api/vault/oauth2/authorize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (data.auth_url) {
+      window.open(data.auth_url, '_blank');
+      statusEl.textContent = 'Waiting for authorization... (check browser tab)';
+      statusEl.style.color = 'var(--accent)';
+      // Poll for service creation.
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        if (attempts > 60) { // 5 min timeout
+          clearInterval(poll);
+          statusEl.textContent = 'Flow timed out';
+          statusEl.style.color = 'var(--danger, #e55)';
+          btn.disabled = false;
+          return;
+        }
+        try {
+          const services = await api('/api/vault/services');
+          if ((services || []).some(s => s.name === name)) {
+            clearInterval(poll);
+            statusEl.textContent = 'Service created!';
+            statusEl.style.color = 'var(--success, #4c4)';
+            btn.disabled = false;
+            document.getElementById('vaultServiceModal').style.display = 'none';
+            vaultLoadServices();
+            toast('OAuth2 service "' + name + '" created');
+          }
+        } catch {}
+      }, 5000);
+    } else {
+      statusEl.textContent = 'Error: no auth_url returned';
+      statusEl.style.color = 'var(--danger, #e55)';
+      btn.disabled = false;
+    }
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + (err?.error || err?.message || 'unknown');
+    statusEl.style.color = 'var(--danger, #e55)';
+    btn.disabled = false;
+  }
 }
 
 async function vaultSaveService() {
@@ -4344,10 +4442,21 @@ async function vaultSaveService() {
     payload.auth.username = document.getElementById('vaultSvcUsername').value;
     payload.auth.password = document.getElementById('vaultSvcPassword').value;
   } else if (authType === 'oauth2_client') {
-    payload.auth.client_id = document.getElementById('vaultSvcOAuthClientId').value;
-    payload.auth.client_secret = document.getElementById('vaultSvcOAuthClientSecret').value;
-    payload.auth.token_url = document.getElementById('vaultSvcOAuthTokenUrl').value;
-    payload.auth.refresh_token = document.getElementById('vaultSvcOAuthRefreshToken').value;
+    const oauth2Mode = document.querySelector('.oauth2-tab.active')?.dataset.mode || 'manual';
+    if (oauth2Mode === 'browser') {
+      // Browser flow is handled by vaultOAuth2StartFlow — nothing to save here.
+      alert('Use the "Authorize in Browser" button for browser flow');
+      return;
+    }
+    // Manual mode — only send non-empty fields (edit leaves secrets empty to keep existing).
+    const cid = document.getElementById('vaultSvcOAuthClientId').value;
+    const csec = document.getElementById('vaultSvcOAuthClientSecret').value;
+    const turl = document.getElementById('vaultSvcOAuthTokenUrl').value;
+    const rtok = document.getElementById('vaultSvcOAuthRefreshToken').value;
+    if (cid) payload.auth.client_id = cid;
+    if (csec) payload.auth.client_secret = csec;
+    if (turl) payload.auth.token_url = turl;
+    if (rtok) payload.auth.refresh_token = rtok;
     const scopes = document.getElementById('vaultSvcOAuthScopes').value.trim();
     if (scopes) payload.auth.scopes = scopes.split(',').map(s => s.trim()).filter(Boolean);
   } else if (authType === 'service_account') {

@@ -966,7 +966,7 @@ func runLoginFlow(dir string) {
 
 	// Run claude setup-token inside the container, capturing output while showing it.
 	var buf bytes.Buffer
-	cmd := exec.Command("docker", "exec", "-i", "--user", "1001:1000", "-e", "HOME=/home/alf", "alf", "claude", "setup-token")
+	cmd := exec.Command("docker", "exec", "-it", "--user", "1001:1000", "-e", "HOME=/home/alf", "alf", "claude", "setup-token")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
 	cmd.Stderr = os.Stderr

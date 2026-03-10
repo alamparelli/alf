@@ -10,11 +10,21 @@ import (
 	"strings"
 )
 
-func alfDir() string {
+// savedInstallPath returns the path to the file that stores the install directory.
+func savedInstallPath() string {
 	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, "alf")
+	return filepath.Join(home, ".config", "alf", "path")
+}
 
-	// Check current directory first — if it has a docker-compose.yml, use it.
+// SaveInstallDir persists the install directory so all CLI commands can find it.
+func SaveInstallDir(dir string) {
+	p := savedInstallPath()
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	os.WriteFile(p, []byte(dir+"\n"), 0o644)
+}
+
+func alfDir() string {
+	// 1. Check current directory — if it has a docker-compose.yml, use it.
 	// But never use a git repository (source code) as install dir.
 	if _, err := os.Stat("docker-compose.yml"); err == nil {
 		cwd, _ := os.Getwd()
@@ -23,6 +33,17 @@ func alfDir() string {
 		}
 	}
 
+	// 2. Check saved install path from alf init.
+	if data, err := os.ReadFile(savedInstallPath()); err == nil {
+		dir := strings.TrimSpace(string(data))
+		if _, err := os.Stat(filepath.Join(dir, "docker-compose.yml")); err == nil {
+			return dir
+		}
+	}
+
+	// 3. Default to ~/alf.
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, "alf")
 	if _, err := os.Stat(filepath.Join(dir, "docker-compose.yml")); err != nil {
 		Fatal("ALF is not installed. Run 'alf init' first.")
 	}

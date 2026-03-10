@@ -109,7 +109,9 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 
 	taskID := fmt.Sprintf("%d", time.Now().UnixNano())
 	taskDir := filepath.Join(o.dataDir, "agents", taskID)
-	os.MkdirAll(taskDir, 0o755)
+	os.MkdirAll(taskDir, 0o775)
+	os.Chmod(taskDir, 0o775)
+	os.Chown(taskDir, 1000, 1000) // alf:alf so claude (gid 1000) can write
 
 	log.Printf("[orchestrator] task %s started | teams=%d | message=%q", taskID, len(teams), truncate(userMessage, 120))
 
@@ -173,7 +175,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	sm := newSessionManager()
 
 	// Build orchestrator system prompt.
-	orchPrompt := BuildOrchestratorPrompt(teams)
+	orchPrompt := BuildOrchestratorPrompt(teams, taskDir)
 	allSystemPrompts := append(systemPrompts, orchPrompt)
 	maxIterations := rc.MaxIterations
 	if maxIterations <= 0 {
@@ -309,7 +311,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		}
 
 		// Execute delegates.
-		agentResults := o.executeDelegates(ctx, output.Delegates, teams, sm, taskDir, meta, onProgress)
+		agentResults := o.executeDelegates(ctx, output.Delegates, teams, sm, taskDir, meta, rc.SkillPrompts, rc.MemoryContext, onProgress)
 
 		// Log results summary.
 		log.Printf("[orchestrator] delegates completed:")
@@ -369,6 +371,8 @@ func (o *Orchestrator) executeDelegates(
 	sm *SessionManager,
 	taskDir string,
 	meta *TaskMeta,
+	skillPrompts []string,
+	memoryContext []string,
 	onProgress ProgressFunc,
 ) []AgentResult {
 	// Find max concurrent limit from the relevant teams.
@@ -440,7 +444,7 @@ func (o *Orchestrator) executeDelegates(
 			if agentCount[d.Agent] > 1 {
 				sessionKey = fmt.Sprintf("%s#%d", d.Agent, idx)
 			}
-			ar := o.invokeAgentWithKey(ctx, d, sessionKey, sm, taskDir, onProgress)
+			ar := o.invokeAgentWithKey(ctx, d, sessionKey, sm, taskDir, skillPrompts, memoryContext, onProgress)
 
 			// Set final status.
 			if ar.Error != "" {
@@ -473,6 +477,8 @@ func (o *Orchestrator) invokeAgentWithKey(
 	sessionKey string,
 	sm *SessionManager,
 	taskDir string,
+	skillPrompts []string,
+	memoryContext []string,
 	onProgress ProgressFunc,
 ) AgentResult {
 	start := time.Now()
@@ -497,7 +503,9 @@ func (o *Orchestrator) invokeAgentWithKey(
 	if sessionKey != d.Agent {
 		agentDir = filepath.Join(taskDir, fmt.Sprintf("%s-%s-%s", teamName, agentName, sessionKey[strings.LastIndex(sessionKey, "#")+1:]))
 	}
-	os.MkdirAll(agentDir, 0o755)
+	os.MkdirAll(agentDir, 0o775)
+	os.Chmod(agentDir, 0o775)
+	os.Chown(agentDir, 1000, 1000) // alf:alf so claude (gid 1000) can write
 
 	model := ac.Model
 	if o.resolveModel != nil {
@@ -510,13 +518,22 @@ func (o *Orchestrator) invokeAgentWithKey(
 		teamName, agentName, model, ac.Effort, ac.WriteCapable, ac.MaxTurns, hasResume)
 	log.Printf("[orchestrator]   task: %s", truncate(d.Task, 150))
 
+	// Build system prompts: agent's own prompt + memory context + skill prompts.
+	sysPrompts := make([]string, 0, 1+len(memoryContext)+len(skillPrompts))
+	sysPrompts = append(sysPrompts, ac.SystemPrompt)
+	sysPrompts = append(sysPrompts, memoryContext...)
+	sysPrompts = append(sysPrompts, skillPrompts...)
+	if len(memoryContext) > 0 || len(skillPrompts) > 0 {
+		log.Printf("[orchestrator]   injecting %d memory + %d skill prompt(s) into agent %s/%s", len(memoryContext), len(skillPrompts), teamName, agentName)
+	}
+
 	params := provider.Params{
 		Model:         model,
 		Tools:         ac.Tools,
 		WriteCapable:  ac.WriteCapable,
 		Effort:        ac.Effort,
 		MaxTurns:      ac.MaxTurns,
-		SystemPrompts: []string{ac.SystemPrompt},
+		SystemPrompts: sysPrompts,
 		ResumeID:      sessionID,
 		DataDir:       agentDir,
 	}

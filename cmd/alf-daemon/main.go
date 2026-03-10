@@ -171,10 +171,16 @@ func main() {
 	os.MkdirAll(skillsDir, 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "logs", "events"), 0o755)
 	os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755)
-	for _, sub := range []string{"config", "tools", "skills", "context", "apps"} {
+	for _, sub := range []string{"config", "tools", "skills", "context"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
-	os.MkdirAll(filepath.Join(dataDir, "agents", "teams"), 0o755)
+	// Directories where claude (uid 1001, gid 1000) needs write access.
+	for _, sub := range []string{"agents", "apps"} {
+		os.MkdirAll(filepath.Join(dataDir, sub), 0o775)
+		os.Chmod(filepath.Join(dataDir, sub), 0o775)
+		os.Chown(filepath.Join(dataDir, sub), 1000, 1000)
+	}
+	os.MkdirAll(filepath.Join(dataDir, "agents", "teams"), 0o775)
 
 	// Populate tools.d/ with symlinks to each system tool in /opt/alf/tools/.
 	// The host volume mount overwrites any Dockerfile-created symlinks,
@@ -507,7 +513,7 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, schedAdapter, fwStore, fwProxy, vaultMgr)
+		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -1295,20 +1301,27 @@ func main() {
 			})
 
 			// Agent dispatch: delegate to multi-agent coordinator (non-blocking).
+			// The orchestrator brain is delegation-only — skip core/soul/toolbox
+			// prompts which contain file-writing instructions for conversational mode.
 			if routeResult.Tier == "agent" && len(agentStore.All()) > 0 {
-				// Build system prompts (same as normal path).
-				sysPrompts := memory.CollectPrompts(contextDir)
 				var orchSysPrompts []string
-				for i := 0; i < len(sysPrompts)-1; i += 2 {
-					if sysPrompts[i] == "--append-system-prompt" {
-						orchSysPrompts = append(orchSysPrompts, sysPrompts[i+1])
-					}
-				}
 				if preRecallBlock != "" {
 					orchSysPrompts = append(orchSysPrompts, preRecallBlock)
 				}
 				if catalog := skills.BuildCatalog(skillStore); catalog != "" {
 					orchSysPrompts = append(orchSysPrompts, catalog)
+				}
+				// Match skills for sub-agent injection.
+				var skillInjections []string
+				if matched := skills.MatchTriggers(skillStore, msgWithReplyContext); len(matched) > 0 {
+					names := make([]string, len(matched))
+					for i, sk := range matched {
+						names[i] = sk.Name
+						if sk.Prompt != "" {
+							skillInjections = append(skillInjections, sk.Prompt)
+						}
+					}
+					log.Printf("[chat:%d] agent: matched skills %v (%d prompts)", chatID, names, len(skillInjections))
 				}
 
 				// Enrich agent with workspace awareness and chat history.
@@ -1337,6 +1350,8 @@ func main() {
 					OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
 					MaxIterations:        tp.MaxIterations,
 					TimeoutMin:           tp.TimeoutMin,
+					SkillPrompts:         skillInjections,
+					MemoryContext:        memory.CollectAgentContext(contextDir),
 				}
 
 				go func() {

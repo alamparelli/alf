@@ -1503,19 +1503,15 @@ let chatCurrentTier = '';         // tier name from routing
 
 // Process an SSE stream response (shared by send and reconnect).
 async function chatProcessStream(res) {
-  console.log('[chat-stream] status:', res.status, 'content-type:', res.headers.get('content-type'));
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let chunkCount = 0;
 
   while (true) {
     const { done, value } = await reader.read();
-    if (done) { console.log('[chat-stream] stream done, total chunks:', chunkCount); break; }
+    if (done) break;
 
-    chunkCount++;
     const chunk = decoder.decode(value, { stream: true });
-    console.log('[chat-stream] chunk #' + chunkCount, 'size:', chunk.length, 'preview:', chunk.slice(0, 120));
     buffer += chunk;
     const parts = buffer.split('\n\n');
     buffer = parts.pop();
@@ -1533,7 +1529,6 @@ async function chatProcessStream(res) {
       let data;
       try { data = JSON.parse(eventData); } catch { continue; }
 
-      console.log('[chat-stream] event:', eventType, data);
       chatEventOffset++;
 
       switch (eventType) {
@@ -2610,6 +2605,22 @@ function schedRelTime(iso) {
 let tasksInitialized = false;
 let tasksAutoTimer = null;
 
+async function taskLauncherLoadTeams() {
+  const sel = document.getElementById('taskLauncherTeam');
+  try {
+    const data = await api('/api/teams');
+    const teams = data.teams || [];
+    // Keep the first "Auto" option, clear the rest.
+    while (sel.options.length > 1) sel.remove(1);
+    for (const t of teams) {
+      const opt = document.createElement('option');
+      opt.value = t.name;
+      opt.textContent = t.name + (t.description ? ' — ' + t.description : '');
+      sel.appendChild(opt);
+    }
+  } catch {}
+}
+
 function tasksStopAutoRefresh() {
   if (tasksAutoTimer) { clearInterval(tasksAutoTimer); tasksAutoTimer = null; }
 }
@@ -2638,6 +2649,42 @@ function tasksInit() {
       });
     });
     teamsInitEditor();
+    // Task launcher: send prompt to agent tier.
+    const launchBtn = document.getElementById('taskLaunchBtn');
+    const launchInput = document.getElementById('taskLauncherInput');
+    const launchTeam = document.getElementById('taskLauncherTeam');
+    taskLauncherLoadTeams();
+    launchBtn.addEventListener('click', async () => {
+      const prompt = launchInput.value.trim();
+      if (!prompt) return;
+      const team = launchTeam.value;
+      const message = team ? '[Use team: ' + team + ']\n' + prompt : prompt;
+      launchBtn.disabled = true;
+      launchBtn.innerHTML = '<span class="dot-pulse"><span></span><span></span><span></span></span> Launching...';
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ message: message, model: 'agent' }),
+        });
+        if (!res.ok) throw new Error('status ' + res.status);
+        launchInput.value = '';
+        toast('Task launched');
+        setTimeout(() => tasksFetch(), 1500);
+      } catch (e) {
+        toast('Launch failed: ' + e.message, 'error');
+      }
+      launchBtn.disabled = false;
+      launchBtn.innerHTML = '<i data-lucide="play" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Launch';
+      lucide.createIcons({ nodes: [launchBtn] });
+    });
+    launchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        launchBtn.click();
+      }
+    });
   }
   tasksFetch();
   if (document.getElementById('tasksAutoRefresh').checked) tasksStartAutoRefresh();

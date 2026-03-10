@@ -62,6 +62,34 @@ func CollectSchedulerPrompts(contextDir string) []string {
 	return prompts
 }
 
+// CollectAgentContext returns system prompt strings for sub-agent injection.
+// Includes core identity, toolbox, user context (index.md), and current date.
+// Lighter than full conversational prompts — no soul/mood (agents are mechanical).
+func CollectAgentContext(contextDir string) []string {
+	var prompts []string
+
+	// Core identity + rules.
+	prompts = append(prompts, strings.TrimSpace(coreMD))
+
+	// Current date/time.
+	now := time.Now()
+	clock := fmt.Sprintf("Current date: %s %d %s %d\nTime: %s",
+		now.Format("Monday"), now.Day(), now.Format("January"), now.Year(),
+		now.Format("15:04"))
+	prompts = append(prompts, clock)
+
+	// Toolbox + user context.
+	for _, f := range []string{"toolbox.md", "index.md"} {
+		content, err := os.ReadFile(filepath.Join(contextDir, f))
+		if err != nil || len(strings.TrimSpace(string(content))) == 0 {
+			continue
+		}
+		prompts = append(prompts, fmt.Sprintf("=== [%s] ===\n%s", f, strings.TrimSpace(string(content))))
+	}
+
+	return prompts
+}
+
 // ToolReminder returns a compact end-of-context reminder of key capabilities.
 // Positioned last in system prompts so it stays near the end of the context window,
 // where the model pays more attention during long conversations.

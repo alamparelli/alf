@@ -4119,9 +4119,9 @@ async function vaultRefresh() {
     filesCard.style.display = 'none';
     tokensCard.style.display = 'none';
 
-    if (!data.available) {
+    if (!data || !data.available) {
       dot.className = 'vault-status-indicator vault-status-off';
-      text.textContent = 'Vault not available';
+      text.textContent = 'Vault not available (binary missing)';
       return;
     }
 
@@ -4146,7 +4146,11 @@ async function vaultRefresh() {
     }
   } catch (err) {
     const msg = err?.error || err?.message || 'unknown error';
-    document.getElementById('vaultStatusText').textContent = 'Error: ' + msg;
+    const dot = document.getElementById('vaultStatusDot');
+    dot.className = 'vault-status-indicator vault-status-off';
+    document.getElementById('vaultStatusText').textContent = msg === 'vault not available'
+      ? 'Not available (vault-server not found)'
+      : 'Error: ' + msg;
   }
 }
 

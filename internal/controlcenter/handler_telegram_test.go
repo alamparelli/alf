@@ -11,8 +11,7 @@ import (
 )
 
 func TestTelegramHandler_GetUnconfigured(t *testing.T) {
-	dir := t.TempDir()
-	h := &TelegramHandler{ConfigDir: dir}
+	h := &TelegramHandler{} // no vault, no env vars
 
 	req := httptest.NewRequest(http.MethodGet, "/api/telegram", nil)
 	w := httptest.NewRecorder()
@@ -31,8 +30,7 @@ func TestTelegramHandler_GetUnconfigured(t *testing.T) {
 }
 
 func TestTelegramHandler_PutMissingFields(t *testing.T) {
-	dir := t.TempDir()
-	h := &TelegramHandler{ConfigDir: dir}
+	h := &TelegramHandler{}
 
 	body := strings.NewReader(`{"bot_token": "123:abc"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/telegram", body)
@@ -45,8 +43,7 @@ func TestTelegramHandler_PutMissingFields(t *testing.T) {
 }
 
 func TestTelegramHandler_PutEmptyBody(t *testing.T) {
-	dir := t.TempDir()
-	h := &TelegramHandler{ConfigDir: dir}
+	h := &TelegramHandler{}
 
 	body := strings.NewReader(`{}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/telegram", body)
@@ -59,11 +56,7 @@ func TestTelegramHandler_PutEmptyBody(t *testing.T) {
 }
 
 func TestTelegramHandler_Delete(t *testing.T) {
-	dir := t.TempDir()
-	h := &TelegramHandler{ConfigDir: dir}
-
-	// Write a config file first.
-	os.WriteFile(filepath.Join(dir, "telegram.json"), []byte(`{"bot_token":"x","chat_id":"1"}`), 0o600)
+	h := &TelegramHandler{} // nil vault — delete is a no-op but should return 200
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/telegram", nil)
 	w := httptest.NewRecorder()
@@ -72,19 +65,20 @@ func TestTelegramHandler_Delete(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-
-	// Verify file is gone.
-	if _, err := os.Stat(filepath.Join(dir, "telegram.json")); !os.IsNotExist(err) {
-		t.Error("expected telegram.json to be deleted")
-	}
 }
 
-func TestTelegramHandler_GetConfigured(t *testing.T) {
+func TestTelegramHandler_GetConfiguredViaDockerSecrets(t *testing.T) {
 	dir := t.TempDir()
-	h := &TelegramHandler{ConfigDir: dir}
+	h := &TelegramHandler{} // no vault
 
-	// Write a config with a fake token (won't validate against TG API, but tests load logic).
-	os.WriteFile(filepath.Join(dir, "telegram.json"), []byte(`{"bot_token":"12345678:ABCDEFGHIJKLMNOP","chat_id":"999"}`), 0o600)
+	// Simulate Docker secrets via _FILE env vars.
+	tokenFile := filepath.Join(dir, "bot_token")
+	chatFile := filepath.Join(dir, "chat_id")
+	os.WriteFile(tokenFile, []byte("12345678:ABCDEFGHIJKLMNOP"), 0o600)
+	os.WriteFile(chatFile, []byte("999"), 0o600)
+
+	t.Setenv("TELEGRAM_BOT_TOKEN_FILE", tokenFile)
+	t.Setenv("TELEGRAM_CHAT_ID_FILE", chatFile)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/telegram", nil)
 	w := httptest.NewRecorder()
@@ -99,7 +93,6 @@ func TestTelegramHandler_GetConfigured(t *testing.T) {
 	if resp["chat_id"] != "999" {
 		t.Errorf("expected chat_id=999, got %v", resp["chat_id"])
 	}
-	// Token should be masked.
 	if masked, ok := resp["bot_token_masked"].(string); ok {
 		if !strings.Contains(masked, "...") {
 			t.Errorf("expected masked token with '...', got %q", masked)
@@ -110,7 +103,7 @@ func TestTelegramHandler_GetConfigured(t *testing.T) {
 }
 
 func TestTelegramHandler_MethodNotAllowed(t *testing.T) {
-	h := &TelegramHandler{ConfigDir: t.TempDir()}
+	h := &TelegramHandler{}
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/telegram", nil)
 	w := httptest.NewRecorder()

@@ -307,26 +307,51 @@ function esc(s) {
   const tokenInput = document.getElementById('tgBotToken');
   const chatIDInput = document.getElementById('tgChatID');
   const saveBtn = document.getElementById('tgSaveBtn');
+  const cancelBtn = document.getElementById('tgCancelBtn');
   const disconnectBtn = document.getElementById('tgDisconnectBtn');
+  const editBtn = document.getElementById('tgEditBtn');
   const resultEl = document.getElementById('tgResult');
 
   if (!statusEl) return;
 
+  let isConfigured = false;
+
+  function collapse() {
+    formEl.style.display = 'none';
+    editBtn.style.display = '';
+    resultEl.style.display = 'none';
+  }
+
+  function expand() {
+    formEl.style.display = '';
+    editBtn.style.display = 'none';
+    if (isConfigured) {
+      cancelBtn.style.display = '';
+      disconnectBtn.style.display = '';
+    }
+  }
+
   async function loadStatus() {
     try {
       const data = await api('/api/telegram');
-      formEl.style.display = '';
+      isConfigured = !!data.configured;
       if (data.configured) {
         statusEl.innerHTML = '<div class="tg-status tg-connected"><i data-lucide="check-circle"></i> Connected' +
-          (data.bot_name ? ' — @' + esc(data.bot_name) : '') + '</div>';
+          (data.bot_name ? ' — @' + esc(data.bot_name) : '') +
+          (data.chat_id ? ' <span class="tg-detail">(chat ' + esc(data.chat_id) + ')</span>' : '') +
+          '</div>';
         tokenInput.placeholder = data.bot_token_masked || '***';
         tokenInput.value = '';
         chatIDInput.value = data.chat_id || '';
-        disconnectBtn.style.display = '';
+        // Collapsed by default when configured.
+        collapse();
         lucide.createIcons();
       } else {
         statusEl.innerHTML = '<div class="tg-status tg-disconnected"><i data-lucide="circle-off"></i> Not configured</div>';
+        editBtn.style.display = 'none';
+        cancelBtn.style.display = 'none';
         disconnectBtn.style.display = 'none';
+        formEl.style.display = '';
         lucide.createIcons();
       }
     } catch (e) {
@@ -334,6 +359,12 @@ function esc(s) {
       formEl.style.display = '';
     }
   }
+
+  editBtn.addEventListener('click', expand);
+  cancelBtn.addEventListener('click', () => {
+    collapse();
+    resultEl.style.display = 'none';
+  });
 
   saveBtn.addEventListener('click', async () => {
     const token = tokenInput.value.trim();

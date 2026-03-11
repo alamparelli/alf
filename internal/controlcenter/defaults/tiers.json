@@ -11,7 +11,7 @@
       "enabled": true,
       "routable": true,
       "router_label": "Casual conversation, simple factual questions, short summaries, translations, web searches, running scheduled jobs, toggling settings, simple file reads, quick edits",
-      "max_turns": 10,
+      "max_turns": 30,
       "write_capable": true,
       "effort": "low",
       "force_command": true

@@ -75,21 +75,8 @@ func main() {
 		configDir = d
 	}
 
-	// Fallback: read Telegram config from config.d/telegram.json (set via Control Center).
-	if token == "" || chatID == "" {
-		if tgCfg := readTelegramConfig(configDir); tgCfg != nil {
-			if tgCfg.BotToken != "" && tgCfg.ChatID != "" {
-				token = tgCfg.BotToken
-				chatID = tgCfg.ChatID
-				log.Println("Telegram config loaded from config.d/telegram.json")
-			}
-		}
-	}
-
+	// telegramEnabled is finalized after vault is available (see below).
 	telegramEnabled := token != "" && chatID != ""
-	if !telegramEnabled {
-		log.Println("Telegram not configured — running in Control Center-only mode")
-	}
 
 	// Skills directory (RW for CC, separate from data volume).
 	skillsDir := "/opt/alf/skills.d"
@@ -280,6 +267,45 @@ func main() {
 		} else {
 			log.Println("vault: started (locked — set vault_master_password or unlock via Control Center)")
 		}
+	}
+
+	// Fallback: read Telegram config from vault (primary) or config.d/telegram.json (legacy).
+	if token == "" || chatID == "" {
+		if vaultMgr != nil && vaultMgr.AdminToken() != "" {
+			if v, err := vaultMgr.GetSecret("telegram_bot_token"); err == nil && v != "" {
+				token = v
+			}
+			if v, err := vaultMgr.GetSecret("telegram_chat_id"); err == nil && v != "" {
+				chatID = v
+			}
+			if token != "" && chatID != "" {
+				log.Println("Telegram config loaded from vault")
+			}
+		}
+	}
+	if token == "" || chatID == "" {
+		if tgCfg := readTelegramConfig(configDir); tgCfg != nil {
+			if tgCfg.BotToken != "" && tgCfg.ChatID != "" {
+				token = tgCfg.BotToken
+				chatID = tgCfg.ChatID
+				log.Println("Telegram config loaded from config.d/telegram.json")
+			}
+		}
+	}
+	// Migrate: if Telegram config came from Docker secrets or legacy file, persist to vault.
+	if token != "" && chatID != "" && vaultMgr != nil && vaultMgr.AdminToken() != "" {
+		vaultToken, _ := vaultMgr.GetSecret("telegram_bot_token")
+		if vaultToken == "" {
+			if err := vaultMgr.SetSecret("telegram_bot_token", token); err == nil {
+				vaultMgr.SetSecret("telegram_chat_id", chatID)
+				log.Println("Telegram credentials migrated to vault")
+			}
+		}
+	}
+
+	telegramEnabled = token != "" && chatID != ""
+	if !telegramEnabled {
+		log.Println("Telegram not configured — running in Control Center-only mode")
 	}
 
 	// Load initial tiers config.
@@ -643,7 +669,7 @@ func main() {
 			"Security Audit",
 			"0 0 9 * * *", // daily at 09:00
 			firstFallbackTier(tierStore),
-			"Run a full security audit following the security-audit skill instructions. Use the exact bash commands from the skill to discover files, then read and analyze each one.",
+			"Execute the bash commands from the security-audit skill using the Bash tool to discover files, then use the Read tool to analyze each one. Output your security report.",
 			"telegram",
 			[]string{"security-audit"},
 		); err != nil {
@@ -658,7 +684,7 @@ func main() {
 			"Health Check",
 			"0 0 */2 * * *", // every 2 hours
 			firstFallbackTier(tierStore),
-			"Run a silent health check following the health-check skill instructions. Only output text if actual issues are found. If everything is healthy, output nothing.",
+			"Execute each bash command from the health-check skill using the Bash tool. Analyze the results. If no issues, respond with empty string (no text). Only output a report if real problems are found.",
 			"telegram",
 			[]string{"health-check"},
 		); err != nil {

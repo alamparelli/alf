@@ -227,7 +227,7 @@ func HandlerFactory(deps Deps) http.Handler {
 
 	// Telegram integration.
 	mux.Handle("/api/telegram", &TelegramHandler{
-		ConfigDir: deps.ConfigDir,
+		Vault: deps.VaultManager,
 	})
 
 	// Docs (embedded markdown).

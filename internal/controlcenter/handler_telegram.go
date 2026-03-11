@@ -5,34 +5,53 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alamparelli/alf/internal/vault"
 )
 
-// TelegramConfig stores Telegram integration settings in config.d/telegram.json.
-type TelegramConfig struct {
-	BotToken string `json:"bot_token,omitempty"`
-	ChatID   string `json:"chat_id,omitempty"`
-}
-
-// TelegramHandler handles GET and PUT /api/telegram for configuring Telegram integration.
+// TelegramHandler handles GET, PUT, DELETE /api/telegram for configuring Telegram integration.
+// Bot token is stored in the vault (encrypted). Chat ID is stored in the vault too.
+// Fallback: reads Docker secrets for backward compatibility with alf init setups.
 type TelegramHandler struct {
-	ConfigDir string
+	Vault *vault.Manager
 }
 
-func (h *TelegramHandler) configPath() string {
-	return filepath.Join(h.ConfigDir, "telegram.json")
-}
+const (
+	vaultKeyTGBotToken = "telegram_bot_token"
+	vaultKeyTGChatID   = "telegram_chat_id"
+)
 
-func (h *TelegramHandler) load() TelegramConfig {
-	var cfg TelegramConfig
-	data, err := os.ReadFile(h.configPath())
-	if err != nil {
-		return cfg
+func (h *TelegramHandler) loadToken() string {
+	// Primary: vault.
+	if h.Vault != nil {
+		if v, err := h.Vault.GetSecret(vaultKeyTGBotToken); err == nil && v != "" {
+			return v
+		}
 	}
-	json.Unmarshal(data, &cfg)
-	return cfg
+	// Fallback: Docker secrets.
+	return readSecretEnv("TELEGRAM_BOT_TOKEN")
+}
+
+func (h *TelegramHandler) loadChatID() string {
+	if h.Vault != nil {
+		if v, err := h.Vault.GetSecret(vaultKeyTGChatID); err == nil && v != "" {
+			return v
+		}
+	}
+	return readSecretEnv("TELEGRAM_CHAT_ID")
+}
+
+// readSecretEnv reads a secret from a *_FILE env var (Docker secrets) or the env var directly.
+func readSecretEnv(envVar string) string {
+	if path := os.Getenv(envVar + "_FILE"); path != "" {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return strings.TrimSpace(os.Getenv(envVar))
 }
 
 func (h *TelegramHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,22 +68,20 @@ func (h *TelegramHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TelegramHandler) get(w http.ResponseWriter, _ *http.Request) {
-	cfg := h.load()
+	token := h.loadToken()
+	chatID := h.loadChatID()
 
-	// Return status with masked secrets.
 	resp := map[string]any{
-		"configured": cfg.BotToken != "" && cfg.ChatID != "",
-		"chat_id":    cfg.ChatID,
+		"configured": token != "" && chatID != "",
+		"chat_id":    chatID,
 	}
-	if cfg.BotToken != "" {
-		// Mask token: show first 8 chars + last 4.
-		if len(cfg.BotToken) > 12 {
-			resp["bot_token_masked"] = cfg.BotToken[:8] + "..." + cfg.BotToken[len(cfg.BotToken)-4:]
+	if token != "" {
+		if len(token) > 12 {
+			resp["bot_token_masked"] = token[:8] + "..." + token[len(token)-4:]
 		} else {
 			resp["bot_token_masked"] = "***"
 		}
-		// Validate token against Telegram API.
-		if name := validateBotTokenHTTP(cfg.BotToken); name != "" {
+		if name := validateBotTokenHTTP(token); name != "" {
 			resp["bot_name"] = name
 		}
 	}
@@ -91,33 +108,41 @@ func (h *TelegramHandler) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate bot token.
+	// Validate bot token against Telegram API.
 	botName := validateBotTokenHTTP(req.BotToken)
 	if botName == "" {
 		http.Error(w, jsonErr("invalid bot token — could not verify with Telegram API"), http.StatusBadRequest)
 		return
 	}
 
-	cfg := TelegramConfig{
-		BotToken: req.BotToken,
-		ChatID:   req.ChatID,
+	if h.Vault == nil {
+		http.Error(w, jsonErr("vault not available"), http.StatusServiceUnavailable)
+		return
 	}
-	data, _ := json.MarshalIndent(cfg, "", "  ")
-	if err := os.WriteFile(h.configPath(), data, 0o600); err != nil {
-		http.Error(w, jsonErr(fmt.Sprintf("failed to save: %v", err)), http.StatusInternalServerError)
+
+	// Store in vault.
+	if err := h.Vault.SetSecret(vaultKeyTGBotToken, req.BotToken); err != nil {
+		http.Error(w, jsonErr(fmt.Sprintf("failed to save bot token: %v", err)), http.StatusInternalServerError)
+		return
+	}
+	if err := h.Vault.SetSecret(vaultKeyTGChatID, req.ChatID); err != nil {
+		http.Error(w, jsonErr(fmt.Sprintf("failed to save chat ID: %v", err)), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"ok":              true,
-		"bot_name":        botName,
+		"ok":               true,
+		"bot_name":         botName,
 		"restart_required": true,
 	})
 }
 
 func (h *TelegramHandler) del(w http.ResponseWriter, _ *http.Request) {
-	os.Remove(h.configPath())
+	if h.Vault != nil {
+		h.Vault.Client().DeleteFile(vaultKeyTGBotToken)
+		h.Vault.Client().DeleteFile(vaultKeyTGChatID)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }

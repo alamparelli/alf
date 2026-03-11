@@ -1,6 +1,7 @@
 # Binaries (root only)
 /alf
 /alf-daemon
+/memory-tools
 *.exe
 
 # Environment

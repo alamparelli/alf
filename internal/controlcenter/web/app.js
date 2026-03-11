@@ -4458,21 +4458,27 @@ function termShowUrlBar(url) {
   setTimeout(() => { if (bar.parentNode) bar.remove(); }, 60000);
 }
 
-// --- Terminal mobile support ---
+// --- Terminal input support ---
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-if (isTouchDevice) {
-  document.getElementById('termInputBar').style.display = 'flex';
-  document.querySelectorAll('.term-mobile-btn').forEach(b => b.style.display = '');
-}
 
 // Paste button — read clipboard and send to terminal.
+// Uses Clipboard API with fallback for mobile browsers that deny readText().
 document.getElementById('termPasteBtn').addEventListener('click', async () => {
-  if (!termInstance || !termWS || termWS.readyState !== WebSocket.OPEN) return;
+  if (!termWS || termWS.readyState !== WebSocket.OPEN) return;
+  // Try Clipboard API first (works on desktop + Android Chrome + iOS 16+).
   try {
     const text = await navigator.clipboard.readText();
-    if (text) termWS.send(text);
-    termInstance.focus();
-  } catch { /* clipboard permission denied */ }
+    if (text) {
+      termWS.send(text);
+      if (termInstance) termInstance.focus();
+      return;
+    }
+  } catch { /* permission denied or not supported */ }
+  // Fallback: focus the input bar so the user can long-press > paste natively.
+  const inp = document.getElementById('termInput');
+  inp.value = '';
+  inp.focus();
+  toast('Paste into the input field below', 'info');
 });
 
 // Copy button — copy xterm selection to clipboard.
@@ -4497,6 +4503,12 @@ function termSendInput() {
 }
 
 termSendBtn.addEventListener('click', termSendInput);
+// Auto-send pasted content (no need to press Enter after pasting).
+termInput.addEventListener('paste', (e) => {
+  setTimeout(() => {
+    if (termInput.value) termSendInput();
+  }, 0);
+});
 termInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); termSendInput(); }
   // Send Ctrl+C
@@ -4537,8 +4549,13 @@ function termShowContextMenu(x, y) {
         if (termWS && termWS.readyState === WebSocket.OPEN) {
           try {
             const text = await navigator.clipboard.readText();
-            if (text) termWS.send(text);
+            if (text) { termWS.send(text); return; }
           } catch {}
+          // Fallback: focus input bar for native paste.
+          const inp = document.getElementById('termInput');
+          inp.value = '';
+          inp.focus();
+          toast('Paste into the input field below', 'info');
         }
       } else if (item.action === 'selectall') {
         if (termInstance) termInstance.selectAll();

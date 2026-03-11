@@ -123,6 +123,12 @@ func HandlerFactory(deps Deps) http.Handler {
 		Notifier: deps.Notifier,
 		Event:    ReloadTools,
 	})
+	mux.Handle("/api/skills/import", &SkillImportHandler{
+		DataDir:          deps.DataDir,
+		ProviderRegistry: deps.ProviderRegistry,
+		ModelCache:       deps.ModelCache,
+		Notifier:         deps.Notifier,
+	})
 	mux.Handle("/api/skills/", &ResourceHandler{
 		Store:    deps.SkillStore,
 		Notifier: deps.Notifier,
@@ -163,6 +169,9 @@ func HandlerFactory(deps Deps) http.Handler {
 
 	// Scheduled jobs.
 	mux.Handle("/api/schedules", &SchedulesHandler{
+		Engine: deps.Scheduler,
+	})
+	mux.Handle("/api/schedules/run", &ScheduleRunHandler{
 		Engine: deps.Scheduler,
 	})
 	mux.Handle("/api/schedules/logs", &ScheduleLogsHandler{
@@ -260,7 +269,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
 	handler = securityHeadersMiddleware(handler)
-	handler = newRateLimiter(60).middleware(handler) // 60 req/min per IP
+	handler = newRateLimiter(120).middleware(handler) // 120 req/min per IP
 	handler = loggingMiddleware(handler)
 
 	// Terminal WebSocket: registered outside the main middleware stack so the

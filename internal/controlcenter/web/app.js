@@ -2576,10 +2576,13 @@ function schedulesRender() {
     }
 
     const canEdit = !j.managed;
+    const runBtn = j.enabled ? '<button class="btn-sm sched-run-btn" data-idx="' + i + '" title="Run now">Run</button>' : '';
     const actions = canEdit
-      ? '<button class="btn-sm sched-edit-btn" data-idx="' + i + '">Edit</button>' +
+      ? runBtn +
+        '<button class="btn-sm sched-edit-btn" data-idx="' + i + '">Edit</button>' +
         '<button class="btn-sm btn-danger sched-delete-btn" data-idx="' + i + '">Delete</button>'
-      : '<button class="btn-sm sched-toggle-btn" data-idx="' + i + '">' + (j.enabled ? 'Disable' : 'Enable') + '</button>';
+      : runBtn +
+        '<button class="btn-sm sched-toggle-btn" data-idx="' + i + '">' + (j.enabled ? 'Disable' : 'Enable') + '</button>';
 
     const isCollapsed = schedCollapsedSet.has(j.id);
     return '<div class="tier-card' + (isCollapsed ? ' collapsed' : '') + '" data-idx="' + i + '" data-sched-id="' + esc(j.id) + '">' +
@@ -2618,6 +2621,22 @@ function schedulesRender() {
       api('/api/schedules?id=' + encodeURIComponent(j.id), { method: 'DELETE' })
         .then(() => { toast('Job deleted'); schedulesLoad(); })
         .catch(err => toast('Delete failed: ' + err.message, 'error'));
+    });
+  });
+  list.querySelectorAll('.sched-run-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const j = schedulesVisible[+btn.dataset.idx];
+      if (!confirm('Run "' + j.name + '" now?\n\nThis will execute the job immediately as a one-shot.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Running...';
+      api('/api/schedules/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: j.id }),
+      }).then(() => { toast('Job triggered: ' + j.name); })
+        .catch(err => toast('Run failed: ' + err.message, 'error'))
+        .finally(() => { btn.disabled = false; btn.textContent = 'Run'; });
     });
   });
   list.querySelectorAll('.sched-toggle-btn').forEach(btn => {
@@ -4957,6 +4976,162 @@ async function vaultDeleteFile(name) {
     alert('Delete failed: ' + (err?.error || err?.message || 'unknown error'));
   }
 }
+
+// --- Skills Store ---
+(function() {
+  const STORE_PREF_KEY = 'alf_skill_import_prefs';
+  const phase1 = document.getElementById('skillImportPhase1');
+  const phase2 = document.getElementById('skillImportPhase2');
+  const loading = document.getElementById('skillImportLoading');
+  const cmdInput = document.getElementById('skillImportCmd');
+  const backendSelect = document.getElementById('skillImportBackend');
+  const modelSelect = document.getElementById('skillImportModel');
+  const rememberCheck = document.getElementById('skillImportRemember');
+
+  let scanData = null;
+
+  // Populate backend/model on page load.
+  function initSkillStore() {
+    backendSelect.innerHTML = BACKENDS.map(b =>
+      '<option value="' + b + '">' + (b || 'cli (default)') + '</option>'
+    ).join('');
+    // Restore saved preferences.
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE_PREF_KEY));
+      if (saved) {
+        if (saved.backend && BACKENDS.includes(saved.backend)) backendSelect.value = saved.backend;
+        rememberCheck.checked = true;
+      }
+    } catch (_) {}
+    fetchBackendModels(backendSelect.value, 'skillImportModel');
+    // Restore saved model after dropdown is populated.
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE_PREF_KEY));
+      if (saved && saved.model) {
+        setTimeout(() => { if (modelSelect.querySelector('option[value="' + saved.model + '"]')) modelSelect.value = saved.model; }, 500);
+      }
+    } catch (_) {}
+  }
+  // Init after tiers are loaded (BACKENDS populated).
+  setTimeout(initSkillStore, 800);
+
+  backendSelect.addEventListener('change', function() {
+    fetchBackendModels(this.value, 'skillImportModel');
+  });
+
+  function resetToPhase1() {
+    scanData = null;
+    phase1.style.display = '';
+    phase2.style.display = 'none';
+    loading.style.display = 'none';
+  }
+
+  document.getElementById('skillImportCancel2').addEventListener('click', resetToPhase1);
+
+  document.getElementById('skillImportScan').addEventListener('click', async () => {
+    const cmd = cmdInput.value.trim();
+    if (!cmd) { toast('Paste a skills.sh command or owner/repo', 'error'); return; }
+
+    phase1.style.display = 'none';
+    loading.style.display = 'flex';
+
+    // Save preferences if checked.
+    if (rememberCheck.checked) {
+      localStorage.setItem(STORE_PREF_KEY, JSON.stringify({ backend: backendSelect.value, model: modelSelect.value }));
+    } else {
+      localStorage.removeItem(STORE_PREF_KEY);
+    }
+
+    try {
+      const data = await api('/api/skills/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'scan',
+          command: cmd,
+          backend: backendSelect.value,
+          model: modelSelect.value
+        })
+      });
+      scanData = data;
+      showReview(data);
+    } catch (err) {
+      loading.style.display = 'none';
+      phase1.style.display = '';
+      toast(err.error || 'Scan failed', 'error');
+    }
+  });
+
+  function showReview(data) {
+    loading.style.display = 'none';
+    phase2.style.display = '';
+
+    document.getElementById('skillImportName').textContent = data.name;
+    document.getElementById('skillImportSource').textContent = data.source;
+    document.getElementById('skillImportDesc').textContent = data.description || '—';
+
+    const badge = document.getElementById('skillImportVerdict');
+    badge.textContent = data.verdict;
+    badge.className = 'verdict-badge verdict-' + data.verdict.toLowerCase();
+
+    const issuesEl = document.getElementById('skillImportIssues');
+    if (data.issues && data.issues.length > 0) {
+      issuesEl.style.display = '';
+      issuesEl.innerHTML = '<strong>Issues found:</strong><ul>' +
+        data.issues.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>';
+    } else {
+      issuesEl.style.display = 'none';
+    }
+
+    document.getElementById('skillImportTriggers').value = (data.triggers || []).join(', ');
+    document.getElementById('skillImportTier').value = data.tier || '';
+    document.getElementById('skillImportContent').value = data.content;
+
+    const installBtn = document.getElementById('skillImportInstall');
+    if (data.verdict === 'FAIL') {
+      installBtn.textContent = 'Install Anyway';
+      installBtn.classList.add('btn-danger');
+    } else if (data.verdict === 'WARN') {
+      installBtn.textContent = 'Install Anyway';
+      installBtn.classList.remove('btn-danger');
+    } else {
+      installBtn.textContent = 'Install';
+      installBtn.classList.remove('btn-danger');
+    }
+  }
+
+  document.getElementById('skillImportInstall').addEventListener('click', async () => {
+    if (!scanData) return;
+
+    const installBtn = document.getElementById('skillImportInstall');
+    installBtn.disabled = true;
+    installBtn.textContent = 'Installing...';
+
+    try {
+      const data = await api('/api/skills/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'install',
+          name: scanData.name,
+          content: scanData.content,
+          triggers: document.getElementById('skillImportTriggers').value,
+          tier: document.getElementById('skillImportTier').value,
+          source: scanData.source
+        })
+      });
+      toast('Skill "' + data.name + '" installed successfully');
+      resetToPhase1();
+      cmdInput.value = '';
+      wsInit();
+    } catch (err) {
+      toast(err.error || 'Install failed', 'error');
+    } finally {
+      installBtn.disabled = false;
+      installBtn.textContent = 'Install';
+    }
+  });
+})();
 
 async function vaultPopulateFileRefs() {
   const select = document.getElementById('vaultSvcSAFileRef');

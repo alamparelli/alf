@@ -127,6 +127,73 @@
           </div>
         </div>
 
+        <!-- Skills Store -->
+        <div class="card" id="skillStoreCard">
+          <h2>Skills Store</h2>
+          <p class="card-subtitle">Import community skills from <a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a>. Browse the catalog, copy a skill's install command, and paste it below. ALF will fetch the skill, run a security scan, and let you review before installing.</p>
+
+          <!-- Phase 1: Input -->
+          <div id="skillImportPhase1">
+            <div class="form-row">
+              <label>Install command</label>
+              <input type="text" id="skillImportCmd" placeholder="e.g. npx skills add vercel-labs/skills --skill find-skills" autocomplete="off">
+              <small class="form-hint">Paste from skills.sh, or just type owner/repo (e.g. vercel-labs/skills --skill find-skills)</small>
+            </div>
+            <div class="form-row form-row-inline">
+              <div>
+                <label>Security scan backend</label>
+                <select id="skillImportBackend"></select>
+                <small class="form-hint">The LLM backend used to analyze the skill for security issues</small>
+              </div>
+              <div>
+                <label>Security scan model</label>
+                <select id="skillImportModel"><option value="">Loading...</option></select>
+                <small class="form-hint">Choose a capable model for accurate security analysis</small>
+              </div>
+            </div>
+            <label class="skill-import-remember"><input type="checkbox" id="skillImportRemember"> Remember this backend/model for future imports</label>
+            <div class="skill-import-actions">
+              <button class="btn btn-primary" id="skillImportScan"><i data-lucide="shield-check" style="width:14px;height:14px"></i> Scan &amp; Review</button>
+            </div>
+          </div>
+
+          <!-- Phase 2: Review -->
+          <div id="skillImportPhase2" style="display:none">
+            <div class="skill-import-meta">
+              <div class="skill-import-row"><strong>Name:</strong> <span id="skillImportName"></span></div>
+              <div class="skill-import-row"><strong>Source:</strong> <span id="skillImportSource"></span></div>
+              <div class="skill-import-row"><strong>Description:</strong> <span id="skillImportDesc"></span></div>
+              <div class="skill-import-row"><strong>Security verdict:</strong> <span id="skillImportVerdict" class="verdict-badge"></span></div>
+            </div>
+            <div id="skillImportIssues" class="skill-import-issues" style="display:none"></div>
+            <div class="form-row form-row-inline">
+              <div>
+                <label>Triggers</label>
+                <input type="text" id="skillImportTriggers" placeholder="comma-separated keywords">
+                <small class="form-hint">Keywords that auto-activate this skill when mentioned in messages</small>
+              </div>
+              <div>
+                <label>Tier</label>
+                <input type="text" id="skillImportTier" placeholder="e.g. fast, smart">
+                <small class="form-hint">Minimum tier required (leave empty for any)</small>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>Skill content preview</label>
+              <textarea class="json-editor skill-import-preview" id="skillImportContent" rows="10" readonly></textarea>
+            </div>
+            <div class="skill-import-actions">
+              <button class="btn" id="skillImportCancel2">Cancel</button>
+              <button class="btn btn-primary" id="skillImportInstall">Install</button>
+            </div>
+          </div>
+
+          <!-- Loading state -->
+          <div id="skillImportLoading" class="skill-import-loading" style="display:none">
+            <div class="spinner"></div> <span>Fetching and scanning skill for security issues...</span>
+          </div>
+        </div>
+
         <!-- Teach Card -->
         <div class="card" id="teachCard">
           <h2>Teach</h2>

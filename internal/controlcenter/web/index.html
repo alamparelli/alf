@@ -128,8 +128,16 @@
         </div>
 
         <!-- Skills Store -->
-        <div class="card" id="skillStoreCard">
-          <h2>Skills Store</h2>
+        <div class="card skill-store-card" id="skillStoreCard">
+          <div class="skill-store-header">
+            <h2>Skills Store</h2>
+            <button class="btn btn-icon skill-store-info-btn" id="skillStoreInfoBtn" title="Important information"><i data-lucide="info" style="width:16px;height:16px"></i></button>
+          </div>
+          <div class="skill-store-disclaimer" id="skillStoreDisclaimer" style="display:none">
+            <strong>A word of caution</strong>
+            <p>Importing skills from external sources carries inherent risk. Community skills may contain untested logic, outdated patterns, or subtle prompt issues that are hard to detect automatically.</p>
+            <p>For best results, <strong>create your own skills</strong> — use AI to help you write them based on your specific needs, or adapt existing scripts you already trust. Use this store as inspiration, not as a blind install source.</p>
+          </div>
           <p class="card-subtitle">Import community skills from <a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a>. Browse the catalog, copy a skill's install command, and paste it below. ALF will fetch the skill, run a security scan, and let you review before installing.</p>
 
           <!-- Phase 1: Input -->
@@ -174,13 +182,16 @@
               </div>
               <div>
                 <label>Tier</label>
-                <input type="text" id="skillImportTier" placeholder="e.g. fast, smart">
-                <small class="form-hint">Minimum tier required (leave empty for any)</small>
+                <select id="skillImportTier"></select>
+                <small class="form-hint">Minimum tier required to run this skill</small>
               </div>
             </div>
             <div class="form-row">
-              <label>Skill content preview</label>
-              <textarea class="json-editor skill-import-preview" id="skillImportContent" rows="10" readonly></textarea>
+              <div class="skill-content-header">
+                <label>Skill content preview</label>
+                <button class="btn btn-sm btn-outline" id="skillImportCorrect" title="Ask AI to fix security issues"><i data-lucide="wand-2" style="width:13px;height:13px"></i> Correct with AI</button>
+              </div>
+              <textarea class="json-editor skill-import-preview" id="skillImportContent" rows="10"></textarea>
             </div>
             <div class="skill-import-actions">
               <button class="btn" id="skillImportCancel2">Cancel</button>

@@ -213,7 +213,7 @@ body {
 @keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 /* Terminal mobile support */
 .term-input-bar {
-  display: none;
+  display: flex;
   align-items: center; gap: 6px; padding: 6px 0 0;
 }
 .term-input-bar input {
@@ -224,7 +224,7 @@ body {
 }
 .term-input-bar input:focus { outline: none; border-color: var(--accent); }
 .term-input-bar .btn { padding: 8px 10px; flex-shrink: 0; }
-.term-mobile-btn { display: none; }
+.term-mobile-btn { display: inline-flex; align-items: center; }
 /* Terminal long-press context menu */
 .term-context-menu {
   position: fixed; z-index: 9999;

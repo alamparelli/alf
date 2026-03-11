@@ -4996,27 +4996,51 @@ async function vaultDeleteFile(name) {
       '<option value="' + b + '">' + (b || 'cli (default)') + '</option>'
     ).join('');
     // Restore saved preferences.
+    let savedPrefs = null;
     try {
-      const saved = JSON.parse(localStorage.getItem(STORE_PREF_KEY));
-      if (saved) {
-        if (saved.backend && BACKENDS.includes(saved.backend)) backendSelect.value = saved.backend;
+      savedPrefs = JSON.parse(localStorage.getItem(STORE_PREF_KEY));
+      if (savedPrefs) {
+        if (savedPrefs.backend && BACKENDS.includes(savedPrefs.backend)) backendSelect.value = savedPrefs.backend;
         rememberCheck.checked = true;
       }
     } catch (_) {}
     fetchBackendModels(backendSelect.value, 'skillImportModel');
-    // Restore saved model after dropdown is populated.
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORE_PREF_KEY));
-      if (saved && saved.model) {
-        setTimeout(() => { if (modelSelect.querySelector('option[value="' + saved.model + '"]')) modelSelect.value = saved.model; }, 500);
-      }
-    } catch (_) {}
+    // Restore saved model once the dropdown is populated (poll up to 3s).
+    if (savedPrefs && savedPrefs.model) {
+      let attempts = 0;
+      const tryRestore = setInterval(() => {
+        attempts++;
+        if (modelSelect.querySelector('option[value="' + savedPrefs.model + '"]')) {
+          modelSelect.value = savedPrefs.model;
+          clearInterval(tryRestore);
+        } else if (attempts > 15) {
+          clearInterval(tryRestore);
+        }
+      }, 200);
+    }
   }
   // Init after tiers are loaded (BACKENDS populated).
   setTimeout(initSkillStore, 800);
 
   backendSelect.addEventListener('change', function() {
     fetchBackendModels(this.value, 'skillImportModel');
+    if (rememberCheck.checked) {
+      localStorage.setItem(STORE_PREF_KEY, JSON.stringify({ backend: backendSelect.value, model: modelSelect.value }));
+    }
+  });
+
+  modelSelect.addEventListener('change', function() {
+    if (rememberCheck.checked) {
+      localStorage.setItem(STORE_PREF_KEY, JSON.stringify({ backend: backendSelect.value, model: modelSelect.value }));
+    }
+  });
+
+  rememberCheck.addEventListener('change', function() {
+    if (this.checked) {
+      localStorage.setItem(STORE_PREF_KEY, JSON.stringify({ backend: backendSelect.value, model: modelSelect.value }));
+    } else {
+      localStorage.removeItem(STORE_PREF_KEY);
+    }
   });
 
   function resetToPhase1() {
@@ -5058,7 +5082,36 @@ async function vaultDeleteFile(name) {
     } catch (err) {
       loading.style.display = 'none';
       phase1.style.display = '';
-      toast(err.error || 'Scan failed', 'error');
+      // If repo has multiple skills, show picker.
+      if (err.available_skills && err.available_skills.length > 0) {
+        const skills = err.available_skills;
+        const hint = err.hint || '';
+        const listHTML = skills.map(s =>
+          '<button class="btn btn-sm skill-pick-btn" data-skill="' + esc(s) + '">' + esc(s) + '</button>'
+        ).join(' ');
+        const pickerHTML = '<div class="skill-picker">' +
+          '<p><strong>This repo contains multiple skills.</strong> Pick one:</p>' +
+          '<div class="skill-pick-list">' + listHTML + '</div></div>';
+        // Insert picker above the command input.
+        let picker = document.getElementById('skillPickerWrap');
+        if (!picker) {
+          picker = document.createElement('div');
+          picker.id = 'skillPickerWrap';
+          cmdInput.parentNode.insertBefore(picker, cmdInput);
+        }
+        picker.innerHTML = pickerHTML;
+        picker.querySelectorAll('.skill-pick-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const base = cmdInput.value.replace(/\s+--skill\s+\S+/, '').trim();
+            cmdInput.value = base + ' --skill ' + btn.dataset.skill;
+            picker.innerHTML = '';
+            toast('Selected "' + btn.dataset.skill + '" — click Scan & Review');
+          });
+        });
+        if (window.lucide) lucide.createIcons();
+      } else {
+        toast(err.error || 'Scan failed', 'error');
+      }
     }
   });
 
@@ -5084,7 +5137,17 @@ async function vaultDeleteFile(name) {
     }
 
     document.getElementById('skillImportTriggers').value = (data.triggers || []).join(', ');
-    document.getElementById('skillImportTier').value = data.tier || '';
+
+    // Populate tier dropdown from tiersCache.
+    const tierSelect = document.getElementById('skillImportTier');
+    let tierOpts = '<option value="">(any tier)</option>';
+    if (tiersCache && tiersCache.tiers) {
+      tiersCache.tiers.filter(t => t.enabled).forEach(t => {
+        tierOpts += '<option value="' + esc(t.name) + '"' + (t.name === data.tier ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+      });
+    }
+    tierSelect.innerHTML = tierOpts;
+
     document.getElementById('skillImportContent').value = data.content;
 
     const installBtn = document.getElementById('skillImportInstall');
@@ -5100,6 +5163,44 @@ async function vaultDeleteFile(name) {
     }
   }
 
+  // Disclaimer toggle.
+  document.getElementById('skillStoreInfoBtn').addEventListener('click', () => {
+    const d = document.getElementById('skillStoreDisclaimer');
+    d.style.display = d.style.display === 'none' ? '' : 'none';
+  });
+
+  // Correct with AI.
+  document.getElementById('skillImportCorrect').addEventListener('click', async () => {
+    if (!scanData) return;
+    const btn = document.getElementById('skillImportCorrect');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width:13px;height:13px"></div> Correcting...';
+
+    const issues = (scanData.issues || []).join('\n- ');
+    try {
+      const data = await api('/api/skills/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'correct',
+          content: document.getElementById('skillImportContent').value,
+          triggers: issues, // pass issues via triggers field
+          backend: backendSelect.value,
+          model: modelSelect.value
+        })
+      });
+      document.getElementById('skillImportContent').value = data.content;
+      scanData.content = data.content;
+      toast('Skill corrected — review the changes before installing');
+    } catch (err) {
+      toast(err.error || 'Correction failed', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="wand-2" style="width:13px;height:13px"></i> Correct with AI';
+      if (window.lucide) lucide.createIcons();
+    }
+  });
+
   document.getElementById('skillImportInstall').addEventListener('click', async () => {
     if (!scanData) return;
 
@@ -5114,7 +5215,7 @@ async function vaultDeleteFile(name) {
         body: JSON.stringify({
           action: 'install',
           name: scanData.name,
-          content: scanData.content,
+          content: document.getElementById('skillImportContent').value,
           triggers: document.getElementById('skillImportTriggers').value,
           tier: document.getElementById('skillImportTier').value,
           source: scanData.source

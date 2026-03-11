@@ -113,10 +113,12 @@ func (h *SkillImportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch req.Action {
 	case "scan":
 		h.handleScan(w, req)
+	case "correct":
+		h.handleCorrect(w, req)
 	case "install":
 		h.handleInstall(w, req)
 	default:
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be 'scan' or 'install'"})
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be 'scan', 'correct', or 'install'"})
 	}
 }
 
@@ -130,6 +132,15 @@ func (h *SkillImportHandler) handleScan(w http.ResponseWriter, req skillImportRe
 	// Fetch SKILL.md from GitHub.
 	content, err := fetchSkillFromGitHub(owner, repo, skillName)
 	if err != nil {
+		// SKILL.md not found — try listing available skills in the repo.
+		if available := listRepoSkills(owner, repo); len(available) > 0 {
+			respondJSON(w, http.StatusNotFound, map[string]any{
+				"error":            fmt.Sprintf("skill %q not found in %s/%s", skillName, owner, repo),
+				"available_skills": available,
+				"hint":             fmt.Sprintf("Try: %s/%s --skill %s", owner, repo, available[0]),
+			})
+			return
+		}
 		respondJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch skill: %v", err)})
 		return
 	}
@@ -175,6 +186,75 @@ func (h *SkillImportHandler) handleScan(w http.ResponseWriter, req skillImportRe
 	}
 
 	respondJSON(w, http.StatusOK, resp)
+}
+
+// correctionPrompt instructs the LLM to fix issues in a SKILL.md.
+const correctionPrompt = `You are a skill file editor. You receive a SKILL.md that has security issues identified by a security scan.
+
+Your job:
+1. Fix ALL security issues listed below
+2. Keep the skill's core functionality intact
+3. Preserve the frontmatter format (--- delimited YAML)
+4. Remove or rewrite any dangerous instructions (shell commands that delete files, access secrets, send data externally, prompt injection attempts)
+5. If a feature cannot be made safe, replace it with a safe alternative or remove it with a comment explaining why
+
+Return ONLY the corrected SKILL.md content. No explanations, no code fences, no preamble — just the raw SKILL.md file content.`
+
+func (h *SkillImportHandler) handleCorrect(w http.ResponseWriter, req skillImportRequest) {
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "content is required"})
+		return
+	}
+
+	issues := strings.TrimSpace(req.Triggers) // reuse triggers field for issues list
+	if issues == "" {
+		issues = "General security review"
+	}
+
+	if h.ProviderRegistry == nil {
+		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no provider registry available"})
+		return
+	}
+
+	prov := h.ProviderRegistry.ForBackend(req.Backend)
+	if prov == nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "backend not available"})
+		return
+	}
+
+	model := req.Model
+	if model == "" {
+		model = "claude-haiku-4-5"
+	}
+
+	prompt := fmt.Sprintf("Security issues found:\n%s\n\nOriginal SKILL.md:\n```\n%s\n```\n\nReturn the corrected SKILL.md:", issues, content)
+
+	ctx, cancel := context.WithTimeout(context.Background(), skillScanTimeout)
+	defer cancel()
+
+	result, err := prov.Invoke(ctx, prompt, provider.Params{
+		Model:         model,
+		MaxTurns:      1,
+		Tools:         []string{""},
+		SystemPrompts: []string{correctionPrompt},
+	}, nil)
+	if err != nil {
+		log.Printf("[CC] skill import correct error: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("correction failed: %v", err)})
+		return
+	}
+
+	// Clean response — strip code fences if the LLM wrapped it.
+	corrected := strings.TrimSpace(result.Text)
+	corrected = strings.TrimPrefix(corrected, "```markdown")
+	corrected = strings.TrimPrefix(corrected, "```md")
+	corrected = strings.TrimPrefix(corrected, "```yaml")
+	corrected = strings.TrimPrefix(corrected, "```")
+	corrected = strings.TrimSuffix(corrected, "```")
+	corrected = strings.TrimSpace(corrected)
+
+	respondJSON(w, http.StatusOK, map[string]string{"content": corrected})
 }
 
 func (h *SkillImportHandler) handleInstall(w http.ResponseWriter, req skillImportRequest) {
@@ -329,6 +409,43 @@ func fetchSkillFromGitHub(owner, repo, skillName string) (string, error) {
 		return "", fmt.Errorf("SKILL.md not found in %s/%s: %w", owner, repo, lastErr)
 	}
 	return "", fmt.Errorf("SKILL.md not found in %s/%s", owner, repo)
+}
+
+// listRepoSkills queries the GitHub API for available skills in a repo.
+// Returns skill directory names from the skills/ directory, or nil.
+func listRepoSkills(owner, repo string) []string {
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/skills", owner, repo)
+
+	resp, err := client.Get(url)
+	if err != nil || resp.StatusCode != 200 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return nil
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if err != nil {
+		return nil
+	}
+
+	var entries []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return nil
+	}
+
+	var skills []string
+	for _, e := range entries {
+		if e.Type == "dir" && safeSkillName.MatchString(e.Name) {
+			skills = append(skills, e.Name)
+		}
+	}
+	return skills
 }
 
 type scanResult struct {

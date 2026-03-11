@@ -827,7 +827,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 /* ─── Tasks ──────────────────────────────────────── */
 .tasks-view {
   display: flex; flex-direction: column; height: 0; flex: 1;
-  padding: 24px 16px; max-width: 900px; width: 100%; margin: 0 auto;
+  padding: 24px 16px; width: 100%;
   overflow-y: auto;
 }
 .tasks-tab-bar {
@@ -1384,7 +1384,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 /* Schedules */
 .schedules-view {
   display: flex; flex-direction: column; height: 0; flex: 1;
-  padding: 24px 16px; max-width: 900px; width: 100%; margin: 0 auto;
+  padding: 24px 16px; width: 100%;
   overflow-y: auto;
 }
 .schedules-toolbar {
@@ -1416,7 +1416,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 
 .tiers-view {
   display: flex; flex-direction: column; height: 0; flex: 1;
-  padding: 24px 16px; max-width: 900px; width: 100%; margin: 0 auto;
+  padding: 24px 16px; width: 100%;
   overflow-y: auto;
 }
 .tiers-toolbar {
@@ -1697,7 +1697,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 /* ========== Vault ========== */
 .vault-view {
   display: flex; flex-direction: column; height: 0; flex: 1;
-  padding: 24px; overflow-y: auto; max-width: 900px; width: 100%;
+  padding: 24px; overflow-y: auto; width: 100%;
 }
 .vault-toolbar {
   display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
@@ -1773,6 +1773,19 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
 
 /* Skills Store */
+.skill-store-card { border-color: color-mix(in srgb, #ea580c 40%, var(--border)); }
+.skill-store-header { display: flex; align-items: center; gap: 8px; }
+.skill-store-header h2 { margin-bottom: 0; }
+.skill-store-info-btn { color: var(--text-dim); padding: 2px; margin-left: auto; }
+.skill-store-info-btn:hover { color: var(--accent); }
+.skill-store-disclaimer {
+  background: color-mix(in srgb, #ea580c 6%, var(--bg));
+  border: 1px solid color-mix(in srgb, #ea580c 30%, var(--border));
+  border-radius: var(--radius); padding: 12px 14px; margin: 12px 0;
+  font-size: 0.82rem; line-height: 1.5;
+}
+.skill-store-disclaimer strong { color: #ea580c; display: block; margin-bottom: 4px; }
+.skill-store-disclaimer p { margin: 4px 0; color: var(--text-dim); }
 .card-subtitle {
   font-size: 0.82rem; color: var(--text-dim); margin: -8px 0 16px; line-height: 1.5;
 }
@@ -1803,6 +1816,14 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .skill-import-issues ul { margin: 4px 0 0 16px; padding: 0; }
 .skill-import-issues li { margin-bottom: 2px; }
+.skill-content-header {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;
+}
+.skill-content-header label { margin-bottom: 0; }
+.btn-outline {
+  background: transparent; border: 1px solid var(--border); color: var(--text);
+}
+.btn-outline:hover { border-color: var(--accent); color: var(--accent); }
 .skill-import-preview {
   font-family: var(--font-mono, monospace); font-size: 0.78rem;
   background: var(--bg); resize: vertical;
@@ -1819,3 +1840,11 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .btn-danger { background: #dc2626; color: #fff; border-color: #dc2626; }
 .btn-danger:hover { background: #b91c1c; }
+.skill-picker {
+  background: var(--bg); border: 1px solid var(--accent); border-radius: var(--radius);
+  padding: 12px; margin-bottom: 12px; font-size: 0.85rem;
+}
+.skill-picker p { margin: 0 0 8px; }
+.skill-pick-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.skill-pick-btn { cursor: pointer; }
+.skill-pick-btn:hover { border-color: var(--accent); color: var(--accent); }

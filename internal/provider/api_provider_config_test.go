@@ -232,3 +232,47 @@ func TestAPIProviderName(t *testing.T) {
 		t.Errorf("expected 'groq', got %q", p.Name())
 	}
 }
+
+func TestAPIProviderAccessors(t *testing.T) {
+	p := NewAPIProviderFromConfig(APIProviderConfig{
+		Name:    "openrouter",
+		BaseURL: "https://openrouter.ai/api/v1",
+		APIKey:  "sk-or-test",
+		Auth:    "bearer",
+		Headers: map[string]string{"HTTP-Referer": "https://alf.dev", "X-Title": "ALF"},
+	}, nil)
+
+	if p.BaseURL() != "https://openrouter.ai/api/v1" {
+		t.Errorf("BaseURL: expected 'https://openrouter.ai/api/v1', got %q", p.BaseURL())
+	}
+	if p.APIKey() != "sk-or-test" {
+		t.Errorf("APIKey: expected 'sk-or-test', got %q", p.APIKey())
+	}
+	if p.Auth() != "bearer" {
+		t.Errorf("Auth: expected 'bearer', got %q", p.Auth())
+	}
+	if p.Headers()["HTTP-Referer"] != "https://alf.dev" {
+		t.Errorf("Headers: expected HTTP-Referer 'https://alf.dev', got %q", p.Headers()["HTTP-Referer"])
+	}
+	if p.Headers()["X-Title"] != "ALF" {
+		t.Errorf("Headers: expected X-Title 'ALF', got %q", p.Headers()["X-Title"])
+	}
+}
+
+func TestAPIProviderAccessors_Ollama(t *testing.T) {
+	p := NewAPIProviderFromConfig(APIProviderConfig{
+		Name:    "ollama",
+		BaseURL: "http://localhost:11434/v1",
+		Auth:    "none",
+	}, nil)
+
+	if p.Auth() != "none" {
+		t.Errorf("Auth: expected 'none', got %q", p.Auth())
+	}
+	if p.APIKey() != "" {
+		t.Errorf("APIKey: expected empty, got %q", p.APIKey())
+	}
+	if p.Headers() != nil {
+		t.Errorf("Headers: expected nil, got %v", p.Headers())
+	}
+}

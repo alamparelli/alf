@@ -1534,6 +1534,12 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .tier-tools-hint {
   font-weight: 400; font-size: 0.75rem; color: var(--text-dim);
 }
+.model-filter {
+  width: 100%; padding: 4px 8px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg); color: var(--text);
+}
+.model-select-searchable { max-height: 200px; }
+.form-row select { max-width: 100%; }
 .tier-tools-list {
   display: flex; flex-direction: column; gap: 4px;
 }

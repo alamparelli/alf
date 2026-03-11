@@ -3428,15 +3428,72 @@ function toolsRefresh(data) {
   }
 }
 
-const MODELS = ['haiku', 'sonnet', 'opus'];
+const CLI_MODELS = ['haiku', 'sonnet', 'opus'];
 const EFFORTS = ['low', 'medium', 'high'];
 let BACKENDS = ['', 'cli'];
+// Cache of fetched models per backend name: { backendName: [{id, name}] }
+const BACKEND_MODELS_CACHE = { '': CLI_MODELS.map(m => ({id: m})), 'cli': CLI_MODELS.map(m => ({id: m})) };
 // Populated from tiers API response (available_backends field).
 function backendsRefresh(data) {
   if (data && data.available_backends) {
     const names = [''];
     data.available_backends.forEach(n => names.push(n));
     BACKENDS = [...new Set(names)];
+  }
+}
+
+// Fetch models for a backend and update the model field in the form.
+function fetchBackendModels(backendName, targetSelectId) {
+  const key = backendName || 'cli';
+  if (BACKEND_MODELS_CACHE[key]) {
+    renderModelField(key, BACKEND_MODELS_CACHE[key], targetSelectId);
+    return;
+  }
+  const row = document.getElementById(targetSelectId).closest('.form-row');
+  row.innerHTML = '<label>Model</label><span class="tier-tool-desc">Loading models...</span>';
+  api('/api/backends/' + encodeURIComponent(key) + '/models').then(data => {
+    const models = data.models || [];
+    BACKEND_MODELS_CACHE[key] = models;
+    renderModelField(key, models, targetSelectId);
+  }).catch(() => {
+    // Fallback: free-text input on error
+    row.innerHTML = '<label>Model</label><input type="text" id="' + targetSelectId + '" placeholder="e.g. gpt-4o">';
+  });
+}
+
+function renderModelField(backendKey, models, targetId) {
+  const row = document.getElementById(targetId) ? document.getElementById(targetId).closest('.form-row') : document.querySelector('[data-model-target="' + targetId + '"]');
+  if (!row) return;
+  const isCLI = !backendKey || backendKey === 'cli';
+  const curEl = document.getElementById(targetId);
+  const curVal = curEl ? curEl.value : '';
+  if (models.length > 0) {
+    const opts = models.map(m => {
+      const label = m.name ? m.name + ' (' + m.id + ')' : m.id;
+      const sel = (m.id === curVal) ? ' selected' : '';
+      return '<option value="' + esc(m.id) + '"' + sel + '>' + esc(label) + '</option>';
+    }).join('');
+    // Add current value if not in list (user may have typed a custom model)
+    const ids = models.map(m => m.id);
+    const extra = (curVal && !ids.includes(curVal)) ? '<option value="' + esc(curVal) + '" selected>' + esc(curVal) + ' (custom)</option>' : '';
+    const searchable = !isCLI && models.length > 10;
+    row.innerHTML = '<label>Model</label><select id="' + targetId + '"' + (searchable ? ' class="model-select-searchable"' : '') + '>' + extra + opts + '</select>' +
+      (!isCLI ? '<input type="text" class="model-filter" placeholder="Filter models..." style="margin-top:4px;font-size:12px">' : '');
+    // Wire filter for large lists
+    if (!isCLI && models.length > 10) {
+      const filterInput = row.querySelector('.model-filter');
+      const select = document.getElementById(targetId);
+      if (filterInput && select) {
+        filterInput.addEventListener('input', function() {
+          const q = this.value.toLowerCase();
+          Array.from(select.options).forEach(opt => {
+            opt.style.display = opt.text.toLowerCase().includes(q) || !q ? '' : 'none';
+          });
+        });
+      }
+    }
+  } else {
+    row.innerHTML = '<label>Model</label><input type="text" id="' + targetId + '" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
   }
 }
 
@@ -3556,10 +3613,10 @@ function tiersShowModal(tier) {
     (cliChecks ? '<div class="tier-tools-group-label">CLI tools</div>' + cliChecks : '') +
     (alfChecks ? '<div class="tier-tools-group-label">ALF tools</div>' + alfChecks : '');
 
-  const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (t.model === m ? ' selected' : '') + '>' + m + '</option>').join('');
   const effortOpts = ['', ...EFFORTS].map(e => '<option value="' + e + '"' + (t.effort === e ? ' selected' : '') + '>' + (e || '—') + '</option>').join('');
   const backendOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((t.backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
-  const isAPI = t.backend && t.backend !== 'cli';
+  // Initial model field: temporary placeholder, will be populated by fetchBackendModels after modal renders
+  const modelPlaceholder = '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="Loading...">';
 
   const html = '<div class="modal-backdrop" id="tierModal">' +
     '<div class="modal tier-modal">' +
@@ -3567,7 +3624,7 @@ function tiersShowModal(tier) {
       '<div class="tier-form">' +
         '<div class="form-row"><label>Name</label><input type="text" id="tfName" value="' + esc(t.name) + '"' + (isEdit ? ' readonly style="opacity:0.6"' : '') + '></div>' +
         '<div class="form-row"><label>Backend</label><select id="tfBackend">' + backendOpts + '</select></div>' +
-        '<div class="form-row" id="tfModelRow"><label>Model</label>' + (isAPI ? '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="tfModel">' + modelOpts + '</select>') + '</div>' +
+        '<div class="form-row" id="tfModelRow"><label>Model</label>' + modelPlaceholder + '</div>' +
         '<div class="form-row"><label>Priority</label><input type="number" id="tfPriority" value="' + t.priority + '" min="0" max="99"></div>' +
         '<div class="form-row"><label>Effort</label><select id="tfEffort">' + effortOpts + '</select></div>' +
         '<div class="form-row"><label>Router label</label><textarea id="tfLabel" class="input tier-label-textarea" rows="2" placeholder="Description for the router">' + esc(t.router_label || '') + '</textarea></div>' +
@@ -3595,6 +3652,9 @@ function tiersShowModal(tier) {
 
   document.body.insertAdjacentHTML('beforeend', html);
 
+  // Fetch and render models for the current backend
+  fetchBackendModels(t.backend || '', 'tfModel');
+
   // Toggle tools visibility based on write_capable
   const wcCheck = document.getElementById('tfWriteCapable');
   const toolsSection = document.querySelector('.tier-tools-section');
@@ -3613,16 +3673,20 @@ function tiersShowModal(tier) {
   }
   if (wildcardCb) wildcardCb.addEventListener('change', toggleWildcard);
 
-  // Swap model select/input when backend changes
+  // Swap model select/input when backend changes + toggle CLI tools visibility
+  function updateToolsVisibility(backendVal) {
+    const isCLI = !backendVal || backendVal === 'cli';
+    document.querySelectorAll('.tier-tool-cli').forEach(el => el.style.display = isCLI ? '' : 'none');
+    const cliGroupLabel = document.querySelector('.tier-tools-group-label');
+    if (cliGroupLabel && cliGroupLabel.textContent === 'CLI tools') cliGroupLabel.style.display = isCLI ? '' : 'none';
+    const hint = document.querySelector('.tier-tools-hint');
+    if (hint) hint.textContent = isCLI ? 'CLI tools for Claude CLI tiers' : 'ALF tools for API tiers with tool loop';
+  }
+  updateToolsVisibility(t.backend);
+
   document.getElementById('tfBackend').addEventListener('change', function() {
-    const row = document.getElementById('tfModelRow');
-    const curVal = document.getElementById('tfModel').value;
-    if (this.value && this.value !== 'cli') {
-      row.innerHTML = '<label>Model</label><input type="text" id="tfModel" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
-    } else {
-      const opts = MODELS.map(m => '<option value="' + m + '"' + (curVal === m ? ' selected' : '') + '>' + m + '</option>').join('');
-      row.innerHTML = '<label>Model</label><select id="tfModel">' + opts + '</select>';
-    }
+    fetchBackendModels(this.value, 'tfModel');
+    updateToolsVisibility(this.value);
   });
 
   document.getElementById('tierModalCancel').addEventListener('click', () => document.getElementById('tierModal').remove());
@@ -3684,17 +3748,16 @@ function tiersShowRouterModal() {
   if (old) old.remove();
 
   const c = tiersCache;
-  const isAPIR = c.router_backend && c.router_backend !== 'cli';
-  const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (c.router_model === m ? ' selected' : '') + '>' + m + '</option>').join('');
   const fbOpts = (c.tiers || []).map(t => '<option value="' + t.name + '"' + (c.default_fallback === t.name ? ' selected' : '') + '>' + t.name + '</option>').join('');
   const rbOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((c.router_backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
+  const modelPlaceholder = '<input type="text" id="trModel" value="' + esc(c.router_model || '') + '" placeholder="Loading...">';
 
   const html = '<div class="modal-backdrop" id="tierRouterModal">' +
     '<div class="modal tier-modal">' +
       '<h3>Router Settings</h3>' +
       '<div class="tier-form">' +
         '<div class="form-row"><label>Router backend</label><select id="trBackend">' + rbOpts + '</select></div>' +
-        '<div class="form-row" id="trModelRow"><label>Router model</label>' + (isAPIR ? '<input type="text" id="trModel" value="' + esc(c.router_model || '') + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="trModel">' + modelOpts + '</select>') + '</div>' +
+        '<div class="form-row" id="trModelRow"><label>Router model</label>' + modelPlaceholder + '</div>' +
         '<div class="form-row"><label>Default fallback</label><select id="trFallback">' + fbOpts + '</select></div>' +
         '<div class="form-row"><label>Distinctions</label><textarea class="json-editor" id="trDistinctions" rows="4">' + esc(c.router_distinctions || '') + '</textarea></div>' +
       '</div>' +
@@ -3707,16 +3770,12 @@ function tiersShowRouterModal() {
 
   document.body.insertAdjacentHTML('beforeend', html);
 
-  // Swap model select/input when backend changes
+  // Fetch and render models for the current router backend
+  fetchBackendModels(c.router_backend || '', 'trModel');
+
+  // Swap model dropdown when backend changes
   document.getElementById('trBackend').addEventListener('change', function() {
-    const row = document.getElementById('trModelRow');
-    const curVal = document.getElementById('trModel').value;
-    if (this.value && this.value !== 'cli') {
-      row.innerHTML = '<label>Router model</label><input type="text" id="trModel" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
-    } else {
-      const opts = MODELS.map(m => '<option value="' + m + '"' + (curVal === m ? ' selected' : '') + '>' + m + '</option>').join('');
-      row.innerHTML = '<label>Router model</label><select id="trModel">' + opts + '</select>';
-    }
+    fetchBackendModels(this.value, 'trModel');
   });
 
   document.getElementById('trCancel').addEventListener('click', () => document.getElementById('tierRouterModal').remove());

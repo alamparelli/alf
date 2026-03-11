@@ -75,7 +75,11 @@ func NewAPIProvider(apiKey string, history *History) *APIProvider {
 }
 
 // Name returns the backend name.
-func (p *APIProvider) Name() string { return p.name }
+func (p *APIProvider) Name() string              { return p.name }
+func (p *APIProvider) BaseURL() string            { return p.baseURL }
+func (p *APIProvider) Auth() string               { return p.auth }
+func (p *APIProvider) APIKey() string             { return p.apiKey }
+func (p *APIProvider) Headers() map[string]string { return p.headers }
 
 // apiRequest is the OpenAI chat completions request body.
 type apiRequest struct {

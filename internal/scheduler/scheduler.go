@@ -455,6 +455,22 @@ func (e *Engine) List(userOnly bool) []*Job {
 	return out
 }
 
+// RunNow triggers an immediate one-shot execution of a job in a background goroutine.
+// It clones the job config so the original schedule is unaffected.
+func (e *Engine) RunNow(id string) error {
+	j := e.store.Get(id)
+	if j == nil {
+		return fmt.Errorf("job %s not found", id)
+	}
+
+	// Clone the job to avoid mutating the scheduled instance.
+	clone := *j
+	clone.running = false
+	go e.executeJob(&clone)
+	log.Printf("scheduler: triggered immediate run for job %s (%s)", j.ID, j.Name)
+	return nil
+}
+
 // RunHistory returns the execution log for querying.
 func (e *Engine) RunHistory() *RunLog {
 	return e.runLog

@@ -82,11 +82,12 @@ Jobs are sorted by next run time — soonest first.
 
 ## Editing and deleting
 
+- Click **Run** to trigger an immediate execution of the job. A confirmation popup appears before running. The job runs as a one-shot in the background — the original schedule is unaffected.
 - Click **Edit** to change the schedule, tier, prompt, or output.
 - Click **Delete** to remove the job permanently.
 - Click **Disable** / **Enable** to pause a job without deleting it.
 
-> Managed jobs (created by ALF itself) can only be enabled/disabled, not edited or deleted from the UI.
+> Managed jobs (created by ALF itself) can only be enabled/disabled and manually triggered, not edited or deleted from the UI.
 
 ## Job types explained
 
@@ -132,6 +133,34 @@ Every job execution is recorded with its status, duration, tier, and output. Vie
 - **API** → `GET /api/schedule-logs?limit=50` returns recent executions as JSON
 
 Logs include the job name, execution time, success/failure status, and output (truncated to 4KB per entry).
+
+### Run statuses
+
+| Status | Meaning |
+|--------|---------|
+| `ok` | Job completed successfully |
+| `error` | Job failed (check `last_error` on the job card) |
+| `timeout` | Job exceeded its timeout duration |
+| `turn_limit` | Claude ran out of turns before completing (see below) |
+| `skipped` | Job was still running from a previous trigger |
+
+## Turn limit reached
+
+When a scheduled job hits the turn limit, ALF sends a detailed notification to Telegram with:
+
+- **Job name and ID** — which job failed
+- **Tier** — which tier was used
+- **Prompt snippet** — the beginning of the prompt that was sent
+
+The job card also shows `turn limit reached` in the Last Error field.
+
+### How to fix turn limit issues
+
+1. **Simplify the prompt** — break complex instructions into smaller, focused steps. If a prompt asks to "research, analyze, and write a report", split it into separate jobs.
+2. **Increase max_turns** — go to the Tiers tab, edit the tier used by this job, and increase the `Max turns` value.
+3. **Switch tier** — use a tier with more turns or a more capable model.
+4. **Use the `agent` tier** — for complex multi-step tasks, route to the orchestrator which handles iteration loops natively.
+5. **Add skills** — providing structured skill prompts reduces wasted turns on figuring out how to do things.
 
 ## Daily digest
 

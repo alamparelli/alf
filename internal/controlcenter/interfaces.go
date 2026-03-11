@@ -61,4 +61,5 @@ type ScheduleEngine interface {
 	CreateReminder(name, schedule, message, output string, timeout time.Duration) (*ScheduleJob, error)
 	Delete(id string) error
 	Update(id string, fields map[string]string) (*ScheduleJob, error)
+	RunNow(id string) error
 }

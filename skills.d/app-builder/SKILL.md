@@ -363,7 +363,92 @@ fetch('/api/bash', {
 });
 ```
 
-### 7. Schedules (optional)
+### 7. Dependency management (CRITICAL)
+
+If the app requires Python packages (e.g. `feedparser`, `requests`, `beautifulsoup4`):
+
+**Step 1: Create `requirements.txt`** in the app root:
+```
+~/data/apps/{app-name}/requirements.txt
+```
+
+**Step 2: Install and verify** — run both in sequence:
+```bash
+pip3 install --break-system-packages --quiet -r ~/data/apps/{app-name}/requirements.txt
+python3 -c "import feedparser; print('OK')"  # verify each package imports
+```
+
+**Step 3: Report to user** — after installation, explicitly list:
+- Which packages were installed and their versions
+- Whether each import succeeded
+- If any failed, fix before proceeding
+
+**Step 4: Add install step to scheduled scripts** — every script that uses pip packages must ensure deps are installed:
+```bash
+#!/bin/bash
+# Auto-install deps if missing
+pip3 install --break-system-packages --quiet -r ~/data/apps/{app-name}/requirements.txt 2>/dev/null
+python3 ~/data/apps/{app-name}/pipeline.py
+```
+
+**Rules:**
+- NEVER assume packages are pre-installed in the container
+- ALWAYS create `requirements.txt` even for a single package
+- ALWAYS verify imports after installation before moving on
+- If installation fails (network, permission), report the error clearly to the user
+
+### 8. Testing & validation (MANDATORY)
+
+After building any component, you MUST test it before moving on. Do not deliver untested code.
+
+**For Python scripts/backends:**
+```bash
+# 1. Run the script and check exit code
+python3 ~/data/apps/{app-name}/pipeline.py
+echo "Exit code: $?"
+
+# 2. Check output exists and is valid
+cat ~/data/apps/{app-name}/data/output.json | python3 -c "import sys,json; json.load(sys.stdin); print('Valid JSON')"
+```
+
+**For scheduled scripts:**
+```bash
+# Run the schedule script exactly as cron would
+bash ~/data/apps/{app-name}/schedules/collect.sh
+echo "Exit code: $?"
+```
+
+**For frontend apps:**
+```bash
+# Verify index.html exists and is valid
+test -f ~/data/apps/{app-name}/index.html && echo "OK" || echo "MISSING"
+
+# Verify app.json is valid JSON
+python3 -c "import json; json.load(open('$HOME/data/apps/{app-name}/app.json')); print('OK')"
+
+# Check no broken asset references
+grep -oP 'src="([^"]+)"' ~/data/apps/{app-name}/index.html | while read -r ref; do
+  f="${ref#src=\"}"; f="${f%\"}"
+  [[ "$f" = /* ]] && continue  # skip absolute paths (CC routes)
+  test -f ~/data/apps/{app-name}/"$f" && echo "OK: $f" || echo "MISSING: $f"
+done
+```
+
+**Validation loop:**
+1. Build the component
+2. Run it
+3. If it fails → read the error, fix the code, run again
+4. Repeat until it passes
+5. Only then report success to the user
+
+**Report format** — after validation, tell the user:
+```
+Installed: feedparser 6.0.11, requests 2.31.0
+Tested: pipeline.py ran successfully (exit 0), output: 15 articles parsed
+Output: ~/data/apps/tech-digest/data/digest.json (valid JSON, 24KB)
+```
+
+### 9. Schedules (optional)
 
 For apps that need periodic data fetching, create shell scripts in `schedules/`:
 
@@ -395,6 +480,12 @@ Before delivering, verify:
 - [ ] Data directory created if app stores data
 - [ ] All file paths use relative references for assets
 - [ ] Error states handled (empty data, failed fetches)
+- [ ] **Dependencies**: `requirements.txt` exists if Python packages are used
+- [ ] **Dependencies installed**: all packages installed and imports verified
+- [ ] **Scripts tested**: every script/pipeline ran successfully (exit 0)
+- [ ] **Output validated**: generated data files exist and are valid (JSON parseable, non-empty)
+- [ ] **Scheduled scripts self-install deps**: each script includes `pip3 install -r requirements.txt` guard
+- [ ] **User informed**: reported installed packages, versions, and test results
 
 ## What NOT to do
 

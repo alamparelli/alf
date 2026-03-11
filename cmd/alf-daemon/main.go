@@ -3267,6 +3267,10 @@ func (a *ccScheduleAdapter) Delete(id string) error {
 	return a.engine.Delete(id)
 }
 
+func (a *ccScheduleAdapter) RunNow(id string) error {
+	return a.engine.RunNow(id)
+}
+
 func (a *ccScheduleAdapter) Update(id string, fields map[string]string) (*cc.ScheduleJob, error) {
 	j, err := a.engine.Update(id, fields)
 	if err != nil {

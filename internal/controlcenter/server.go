@@ -33,7 +33,7 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, vaultMgr *vault.Manager) (*Server, *ScheduleEventBroker, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, vaultMgr *vault.Manager, providerRegistry *provider.Registry) (*Server, *ScheduleEventBroker, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore, appStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	var chatStore *ChatStore
@@ -87,7 +87,8 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		FirewallProxy:  fwProxy,
 		VaultManager:     vaultMgr,
 		ScheduleEvents:  schedEventBroker,
-		ToolRegistry:    chatServiceToolRegistry(chatService),
+		ToolRegistry:     chatServiceToolRegistry(chatService),
+		ProviderRegistry: providerRegistry,
 		AuthToken:      authToken,
 		AllowedOrigin:    strings.TrimRight(externalURL, "/"),
 		SecureCookies:    strings.HasPrefix(externalURL, "https://"),

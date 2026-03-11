@@ -60,9 +60,26 @@ Set via `alf secret set <name> <value>` or during `alf init`.
 
 Backends with `"auth": "none"` (e.g. Ollama) skip authentication entirely.
 
+## Model Discovery
+
+When you select a backend in the Tiers configuration, ALF automatically fetches the list of available models from the provider's API:
+
+- **Ollama**: queries `GET /api/tags` for locally installed models
+- **OpenAI**: queries `GET /v1/models` for available models
+- **OpenRouter**: queries `GET /api/v1/models` for the full model catalog
+
+The model dropdown is populated dynamically — no need to type model IDs manually. Results are cached per session.
+
+You can also query models programmatically:
+```
+GET /api/backends/{name}/models
+```
+
+Returns `{"backend": "ollama", "models": [{"id": "llama3.2:latest"}, ...]}`.
+
 ## Configuring a Tier
 
-In the Control Center Tiers tab, set the **Backend** dropdown to your backend name and enter the full model ID:
+In the Control Center Tiers tab, set the **Backend** dropdown to your backend name. The model dropdown will update automatically with available models:
 
 ```json
 {
@@ -100,9 +117,10 @@ This means users don't lose context when the router switches tiers mid-conversat
 
 ## Limitations
 
-- API backends are **chat-only** — no tools (Read, Write, Bash, etc.). Use CLI tiers for agentic work.
+- API backends support ALF tools (via tool loop) but **not CLI tools** (Read, Write, Bash, etc.). Use CLI tiers for agentic work requiring Claude Code capabilities.
 - No streaming of thinking/tool_use events — only text deltas
 - Cost tracking not available for API backends (shows $0.00)
+- Tool selection: when editing a tier with an API backend, only ALF tools are shown. CLI tools are exclusive to CLI-based tiers.
 
 ## Troubleshooting
 

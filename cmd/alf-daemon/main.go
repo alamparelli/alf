@@ -647,11 +647,26 @@ func main() {
 			"Security Audit",
 			"0 0 9 * * *", // daily at 09:00
 			firstFallbackTier(tierStore),
-			"Run a full security audit. Read all files in /home/alf/data/skills.d/, /home/alf/data/skills/, /home/alf/data/tools.d/, and /home/alf/data/tools/. Follow the security-audit skill instructions to produce a structured report.",
+			"Run a full security audit following the security-audit skill instructions. Use the exact bash commands from the skill to discover files, then read and analyze each one.",
 			"telegram",
 			[]string{"security-audit"},
 		); err != nil {
 			log.Printf("warning: failed to seed security-audit job: %v", err)
+		}
+	}
+
+	// Seed health check job — runs every 2h silently, only reports when issues found.
+	if _, ok := skillStore.Get("health-check"); ok {
+		if _, err := sched.EnsureManaged(
+			"health-check",
+			"Health Check",
+			"0 0 */2 * * *", // every 2 hours
+			firstFallbackTier(tierStore),
+			"Run a silent health check following the health-check skill instructions. Only output text if actual issues are found. If everything is healthy, output nothing.",
+			"telegram",
+			[]string{"health-check"},
+		); err != nil {
+			log.Printf("warning: failed to seed health-check job: %v", err)
 		}
 	}
 

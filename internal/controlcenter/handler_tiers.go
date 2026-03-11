@@ -13,6 +13,7 @@ type TiersHandler struct {
 	Notifier     Notifier
 	DataDir      string             // for tool discovery
 	ToolRegistry *tooling.Registry  // may be nil
+	ModelCache   *ModelCache        // may be nil — pre-fetched models per backend
 }
 
 // toolInfo describes an available tool for the frontend.
@@ -43,8 +44,9 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Include registered backends so frontend can populate dropdowns.
 		type tiersResponse struct {
 			*TiersConfig
-			AvailableBackends []string   `json:"available_backends"`
-			AvailableTools    []toolInfo `json:"available_tools"`
+			AvailableBackends []string                `json:"available_backends"`
+			AvailableTools    []toolInfo              `json:"available_tools"`
+			BackendModels     map[string][]modelInfo  `json:"backend_models,omitempty"`
 		}
 		backends := make([]string, 0, len(AllowedBackends))
 		for b := range AllowedBackends {
@@ -65,7 +67,12 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				tools = append(tools, toolInfo{Name: name, Desc: desc, Source: "alf"})
 			}
 		}
-		respondJSON(w, http.StatusOK, tiersResponse{TiersConfig: cfg, AvailableBackends: backends, AvailableTools: tools})
+		// Include pre-fetched models per backend (populated by background cache).
+		var backendModels map[string][]modelInfo
+		if h.ModelCache != nil {
+			backendModels = h.ModelCache.All()
+		}
+		respondJSON(w, http.StatusOK, tiersResponse{TiersConfig: cfg, AvailableBackends: backends, AvailableTools: tools, BackendModels: backendModels})
 
 	case http.MethodPut:
 		var cfg TiersConfig

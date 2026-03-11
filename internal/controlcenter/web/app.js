@@ -3433,12 +3433,22 @@ const EFFORTS = ['low', 'medium', 'high'];
 let BACKENDS = ['', 'cli'];
 // Cache of fetched models per backend name: { backendName: [{id, name}] }
 const BACKEND_MODELS_CACHE = { '': CLI_MODELS.map(m => ({id: m})), 'cli': CLI_MODELS.map(m => ({id: m})) };
-// Populated from tiers API response (available_backends field).
+// Populated from tiers API response (available_backends + backend_models fields).
 function backendsRefresh(data) {
   if (data && data.available_backends) {
     const names = [''];
     data.available_backends.forEach(n => names.push(n));
     BACKENDS = [...new Set(names)];
+  }
+  // Pre-populate model cache from backend_models (fetched at daemon startup).
+  if (data && data.backend_models) {
+    for (const [backend, models] of Object.entries(data.backend_models)) {
+      if (models && models.length > 0) {
+        // Sort models alphabetically by id.
+        models.sort((a, b) => a.id.localeCompare(b.id));
+        BACKEND_MODELS_CACHE[backend] = models;
+      }
+    }
   }
 }
 
@@ -3449,38 +3459,38 @@ function fetchBackendModels(backendName, targetSelectId) {
     renderModelField(key, BACKEND_MODELS_CACHE[key], targetSelectId);
     return;
   }
-  const row = document.getElementById(targetSelectId).closest('.form-row');
-  row.innerHTML = '<label>Model</label><span class="tier-tool-desc">Loading models...</span>';
+  // Cache miss: fetch on demand (fallback if daemon cache not ready yet).
+  const el = document.getElementById(targetSelectId);
+  const row = el ? el.closest('.form-row') : null;
+  if (row) row.innerHTML = '<label>Model</label><span class="tier-tool-desc">Loading models...</span><input type="hidden" id="' + targetSelectId + '">';
   api('/api/backends/' + encodeURIComponent(key) + '/models').then(data => {
-    const models = data.models || [];
+    const models = (data.models || []).sort((a, b) => a.id.localeCompare(b.id));
     BACKEND_MODELS_CACHE[key] = models;
     renderModelField(key, models, targetSelectId);
   }).catch(() => {
-    // Fallback: free-text input on error
-    row.innerHTML = '<label>Model</label><input type="text" id="' + targetSelectId + '" placeholder="e.g. gpt-4o">';
+    if (row) row.innerHTML = '<label>Model</label><input type="text" id="' + targetSelectId + '" placeholder="e.g. gpt-4o">';
   });
 }
 
 function renderModelField(backendKey, models, targetId) {
-  const row = document.getElementById(targetId) ? document.getElementById(targetId).closest('.form-row') : document.querySelector('[data-model-target="' + targetId + '"]');
+  const el = document.getElementById(targetId);
+  const row = el ? el.closest('.form-row') : null;
   if (!row) return;
   const isCLI = !backendKey || backendKey === 'cli';
-  const curEl = document.getElementById(targetId);
-  const curVal = curEl ? curEl.value : '';
+  const curVal = el ? el.value : '';
   if (models.length > 0) {
+    // Show model ID as label (the actual variable name, not display title).
     const opts = models.map(m => {
-      const label = m.name ? m.name + ' (' + m.id + ')' : m.id;
       const sel = (m.id === curVal) ? ' selected' : '';
-      return '<option value="' + esc(m.id) + '"' + sel + '>' + esc(label) + '</option>';
+      return '<option value="' + esc(m.id) + '"' + sel + '>' + esc(m.id) + '</option>';
     }).join('');
-    // Add current value if not in list (user may have typed a custom model)
+    // Add current value if not in list (user may have typed a custom model).
     const ids = models.map(m => m.id);
     const extra = (curVal && !ids.includes(curVal)) ? '<option value="' + esc(curVal) + '" selected>' + esc(curVal) + ' (custom)</option>' : '';
-    const searchable = !isCLI && models.length > 10;
-    row.innerHTML = '<label>Model</label><select id="' + targetId + '"' + (searchable ? ' class="model-select-searchable"' : '') + '>' + extra + opts + '</select>' +
-      (!isCLI ? '<input type="text" class="model-filter" placeholder="Filter models..." style="margin-top:4px;font-size:12px">' : '');
-    // Wire filter for large lists
-    if (!isCLI && models.length > 10) {
+    const hasFilter = !isCLI && models.length > 10;
+    row.innerHTML = '<label>Model</label><select id="' + targetId + '">' + extra + opts + '</select>' +
+      (hasFilter ? '<input type="text" class="model-filter" placeholder="Filter models...">' : '');
+    if (hasFilter) {
       const filterInput = row.querySelector('.model-filter');
       const select = document.getElementById(targetId);
       if (filterInput && select) {

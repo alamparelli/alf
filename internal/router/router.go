@@ -399,6 +399,10 @@ func buildAgentTeamsHint(teams []AgentTeamInfo) string {
 	}
 
 	b.WriteString("\nDo NOT route to sonnet/opus for tasks that match a team — only the \"agent\" tier can coordinate agents.\n")
+	b.WriteString("Do NOT route to \"agent\" for:\n")
+	b.WriteString("  - Conversational messages (\"ok\", \"merci\", \"on va focus sur X\", \"j'ai fini\", small talk)\n")
+	b.WriteString("  - Simple questions or status checks\n")
+	b.WriteString("  - Topic changes or expressions of intent without an actionable instruction\n")
 	return b.String()
 }
 

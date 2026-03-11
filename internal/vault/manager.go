@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -195,6 +196,32 @@ func (m *Manager) Health() (string, error) {
 // Client returns a vault client using the admin token.
 func (m *Manager) Client() *vaultclient.Client {
 	return vaultclient.NewWithToken(m.addr, m.AdminToken())
+}
+
+// GetSecret reads a secret file from the vault and returns its contents as a string.
+func (m *Manager) GetSecret(name string) (string, error) {
+	data, err := m.Client().GetFile(name)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// SetSecret writes a secret to the vault as an encrypted file.
+func (m *Manager) SetSecret(name, value string) error {
+	tmp, err := os.CreateTemp("", "vault-secret-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.WriteString(value); err != nil {
+		tmp.Close()
+		return err
+	}
+	tmp.Close()
+
+	return m.Client().UploadFile(name, tmp.Name())
 }
 
 // spawn starts vault-server and sets up waitCh. Must be called with m.mu held.

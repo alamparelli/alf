@@ -1500,10 +1500,12 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .tier-badge-routable { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
 
 /* Tier modal */
-.tier-modal { max-width: 560px; max-height: 90vh; overflow-y: auto; }
+.tier-modal { max-width: 820px; max-height: 90vh; overflow-y: auto; }
 .tier-form { margin-bottom: 16px; }
 .tier-form .form-row { margin-bottom: 10px; }
 .tier-form .form-row label { min-width: 110px; }
+.model-library-link { font-size: 0.75rem; font-weight: normal; color: var(--blue); text-decoration: none; margin-left: 6px; }
+.model-library-link:hover { text-decoration: underline; }
 .tier-form .form-row input[type="text"],
 .tier-form .form-row input[type="number"],
 .tier-form .form-row select { flex: 1; min-width: 0; }

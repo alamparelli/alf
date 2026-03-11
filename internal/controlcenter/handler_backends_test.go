@@ -189,8 +189,9 @@ func TestBackendsModelsHandler_FetchFromMockOpenAI(t *testing.T) {
 	if len(resp.Models) != 3 {
 		t.Fatalf("expected 3 models, got %d", len(resp.Models))
 	}
-	if resp.Models[0].ID != "gpt-4o" {
-		t.Errorf("expected gpt-4o, got %q", resp.Models[0].ID)
+	// Models are sorted alphabetically by ID.
+	if resp.Models[0].ID != "gpt-3.5-turbo" {
+		t.Errorf("expected gpt-3.5-turbo (sorted first), got %q", resp.Models[0].ID)
 	}
 }
 

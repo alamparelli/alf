@@ -89,6 +89,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		ScheduleEvents:  schedEventBroker,
 		ToolRegistry:     chatServiceToolRegistry(chatService),
 		ProviderRegistry: providerRegistry,
+		ModelCache:       newModelCacheIfRegistry(providerRegistry),
 		AuthToken:      authToken,
 		AllowedOrigin:    strings.TrimRight(externalURL, "/"),
 		SecureCookies:    strings.HasPrefix(externalURL, "https://"),
@@ -126,6 +127,14 @@ func (s *Server) Start() error {
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
+}
+
+// newModelCacheIfRegistry creates a ModelCache if a registry is available.
+func newModelCacheIfRegistry(reg *provider.Registry) *ModelCache {
+	if reg == nil {
+		return nil
+	}
+	return NewModelCache(reg, 12*time.Hour)
 }
 
 // chatServiceToolRegistry extracts the ToolRegistry from a ChatService, or nil.

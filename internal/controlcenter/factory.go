@@ -40,6 +40,7 @@ type Deps struct {
 	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable
 	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
 	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
+	ModelCache       *ModelCache           // nil if model cache unavailable
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS
@@ -104,11 +105,13 @@ func HandlerFactory(deps Deps) http.Handler {
 		Notifier:     deps.Notifier,
 		DataDir:      deps.DataDir,
 		ToolRegistry: deps.ToolRegistry,
+		ModelCache:   deps.ModelCache,
 	})
 
 	// Backend models discovery.
 	mux.Handle("/api/backends/", &BackendsModelsHandler{
 		Registry: deps.ProviderRegistry,
+		Cache:    deps.ModelCache,
 	})
 
 	// Resource CRUD routes.

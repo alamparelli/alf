@@ -3472,12 +3472,25 @@ function fetchBackendModels(backendName, targetSelectId) {
   });
 }
 
+// Model library URLs for each backend type.
+const MODEL_LIBRARY_URLS = {
+  'ollama': 'https://ollama.com/library',
+  'openrouter': 'https://openrouter.ai/models',
+};
+
+function modelLibraryLink(backendKey) {
+  const url = MODEL_LIBRARY_URLS[backendKey];
+  if (!url) return '';
+  return ' <a href="' + url + '" target="_blank" rel="noopener" class="model-library-link" title="Browse models">Browse models &#8599;</a>';
+}
+
 function renderModelField(backendKey, models, targetId) {
   const el = document.getElementById(targetId);
   const row = el ? el.closest('.form-row') : null;
   if (!row) return;
   const isCLI = !backendKey || backendKey === 'cli';
   const curVal = el ? el.value : '';
+  const libLink = modelLibraryLink(backendKey);
   if (models.length > 0) {
     // Show model ID as label (the actual variable name, not display title).
     const opts = models.map(m => {
@@ -3488,7 +3501,7 @@ function renderModelField(backendKey, models, targetId) {
     const ids = models.map(m => m.id);
     const extra = (curVal && !ids.includes(curVal)) ? '<option value="' + esc(curVal) + '" selected>' + esc(curVal) + ' (custom)</option>' : '';
     const hasFilter = !isCLI && models.length > 10;
-    row.innerHTML = '<label>Model</label><select id="' + targetId + '">' + extra + opts + '</select>' +
+    row.innerHTML = '<label>Model' + libLink + '</label><select id="' + targetId + '">' + extra + opts + '</select>' +
       (hasFilter ? '<input type="text" class="model-filter" placeholder="Filter models...">' : '');
     if (hasFilter) {
       const filterInput = row.querySelector('.model-filter');
@@ -3503,7 +3516,7 @@ function renderModelField(backendKey, models, targetId) {
       }
     }
   } else {
-    row.innerHTML = '<label>Model</label><input type="text" id="' + targetId + '" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
+    row.innerHTML = '<label>Model' + libLink + '</label><input type="text" id="' + targetId + '" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
   }
 }
 

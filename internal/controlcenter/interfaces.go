@@ -52,6 +52,7 @@ type ScheduleJob struct {
 	LastRun    string  `json:"last_run,omitempty"`
 	NextRun    string  `json:"next_run,omitempty"`
 	LastError  string  `json:"last_error,omitempty"`
+	Running    bool    `json:"running,omitempty"`
 }
 
 // ScheduleEngine is the subset of scheduler.Engine used by the CC schedules tab.

@@ -70,6 +70,39 @@
           </div>
         </div>
 
+        <!-- Activity Monitor -->
+        <div class="activity-bar" id="activityBar" style="display:none">
+          <div class="activity-header">
+            <span class="activity-dot"></span>
+            <span class="activity-label" id="activityLabel">Active</span>
+          </div>
+          <div class="activity-items" id="activityItems"></div>
+        </div>
+
+        <!-- Telegram Integration -->
+        <div class="card" id="telegramCard">
+          <h2>Telegram Integration</h2>
+          <div id="telegramStatus"></div>
+          <div id="telegramForm" style="display:none">
+            <p class="form-hint">Connect Telegram to chat with ALF from your phone.</p>
+            <div class="form-group">
+              <label>Bot Token</label>
+              <input type="text" id="tgBotToken" placeholder="123456789:ABCdef..." class="input">
+              <small class="form-help">Create a bot via <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram</small>
+            </div>
+            <div class="form-group">
+              <label>Chat ID</label>
+              <input type="text" id="tgChatID" placeholder="123456789" class="input">
+              <small class="form-help">Your personal chat ID (send /start to the bot, then check getUpdates)</small>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" id="tgSaveBtn">Save & Verify</button>
+              <button class="btn" id="tgDisconnectBtn" style="display:none">Disconnect</button>
+            </div>
+            <div id="tgResult" style="display:none"></div>
+          </div>
+        </div>
+
         <!-- Workspace Explorer -->
         <div class="card" id="workspaceCard">
           <h2>Workspace</h2>

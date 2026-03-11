@@ -36,6 +36,11 @@ type Job struct {
 	cronID  int // robfig/cron entry ID
 }
 
+// IsRunning reports whether the job is currently executing.
+func (j *Job) IsRunning() bool {
+	return j.running
+}
+
 // Store persists jobs to a JSON file with atomic rename.
 type Store struct {
 	path string

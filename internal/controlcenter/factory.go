@@ -218,6 +218,18 @@ func HandlerFactory(deps Deps) http.Handler {
 	mux.Handle("/api/vault/", vaultH)
 	mux.Handle("/api/vault", vaultH)
 
+	// Activity monitor (active operations).
+	mux.Handle("/api/activity", &ActivityHandler{
+		ChatService:  deps.ChatService,
+		Scheduler:    deps.Scheduler,
+		Orchestrator: deps.Orchestrator,
+	})
+
+	// Telegram integration.
+	mux.Handle("/api/telegram", &TelegramHandler{
+		ConfigDir: deps.ConfigDir,
+	})
+
 	// Docs (embedded markdown).
 	mux.Handle("/api/docs/", &DocsHandler{})
 

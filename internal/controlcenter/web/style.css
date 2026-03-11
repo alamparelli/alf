@@ -120,6 +120,46 @@ body {
 }
 .admin-output pre { font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; margin: 0; }
 
+/* Activity Monitor */
+.activity-bar {
+  background: var(--card-bg); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: 10px 14px; margin-bottom: 16px;
+}
+.activity-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.activity-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  animation: activity-pulse 1.5s ease-in-out infinite;
+}
+@keyframes activity-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.activity-label { font-size: 0.8rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+.activity-items { display: flex; flex-direction: column; gap: 4px; }
+.activity-item { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; padding: 4px 0; }
+.activity-item i { width: 14px; height: 14px; color: var(--text-dim); flex-shrink: 0; }
+.activity-badge {
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
+  padding: 1px 6px; color: var(--text-dim); flex-shrink: 0;
+}
+.activity-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-elapsed { color: var(--text-dim); font-size: 0.8rem; flex-shrink: 0; }
+
+/* Telegram Integration */
+.tg-status { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-weight: 500; }
+.tg-status i { width: 16px; height: 16px; }
+.tg-connected { color: var(--success, #22c55e); }
+.tg-disconnected { color: var(--text-dim); }
+#telegramForm .form-group { margin: 12px 0; }
+#telegramForm .form-group label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 4px; }
+#telegramForm .form-group .input { width: 100%; max-width: 400px; }
+#telegramForm .form-help { display: block; font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; }
+#telegramForm .form-help a { color: var(--accent); }
+#telegramForm .form-hint { color: var(--text-dim); font-size: 0.85rem; margin: 4px 0 12px; }
+#telegramForm .form-actions { display: flex; gap: 8px; margin-top: 16px; }
+.tg-result { margin-top: 12px; padding: 10px 14px; border-radius: var(--radius); font-size: 0.85rem; }
+.tg-result.tg-success { background: rgba(34,197,94,0.1); color: var(--success, #22c55e); }
+.tg-result.tg-error { background: rgba(239,68,68,0.1); color: var(--error, #ef4444); }
+.tg-result .btn-sm { font-size: 0.75rem; padding: 4px 10px; margin-left: 8px; }
+
 /* Terminal */
 .terminal-view {
   display: flex; flex-direction: column; flex: 1;

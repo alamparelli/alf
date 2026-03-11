@@ -58,32 +58,6 @@ func main() {
 		log.Println("Claude OAuth token loaded from secret")
 	}
 
-	if token == "" || chatID == "" {
-		// Log diagnostic info to help users debug secrets issues.
-		log.Println("ERROR: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
-		for _, name := range []string{"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"} {
-			filePath := os.Getenv(name + "_FILE")
-			if filePath == "" {
-				log.Printf("  %s_FILE env var: not set", name)
-			} else if _, err := os.Stat(filePath); err != nil {
-				log.Printf("  %s_FILE=%s: file not found", name, filePath)
-			} else {
-				data, _ := os.ReadFile(filePath)
-				if strings.TrimSpace(string(data)) == "" {
-					log.Printf("  %s_FILE=%s: file exists but is empty", name, filePath)
-				} else {
-					log.Printf("  %s_FILE=%s: file exists with content", name, filePath)
-				}
-			}
-			if v := os.Getenv(name); v != "" {
-				log.Printf("  %s env var: set", name)
-			} else {
-				log.Printf("  %s env var: not set", name)
-			}
-		}
-		log.Fatal("Exiting. Ensure secrets are configured — see https://github.com/alamparelli/alf#secrets")
-	}
-
 	// Verify claude CLI is available.
 	if _, err := exec.LookPath("claude"); err != nil {
 		log.Fatal("claude CLI not found in PATH")
@@ -99,6 +73,22 @@ func main() {
 	configDir := "/opt/alf/config.d"
 	if d := os.Getenv("ALF_CONFIG_DIR"); d != "" {
 		configDir = d
+	}
+
+	// Fallback: read Telegram config from config.d/telegram.json (set via Control Center).
+	if token == "" || chatID == "" {
+		if tgCfg := readTelegramConfig(configDir); tgCfg != nil {
+			if tgCfg.BotToken != "" && tgCfg.ChatID != "" {
+				token = tgCfg.BotToken
+				chatID = tgCfg.ChatID
+				log.Println("Telegram config loaded from config.d/telegram.json")
+			}
+		}
+	}
+
+	telegramEnabled := token != "" && chatID != ""
+	if !telegramEnabled {
+		log.Println("Telegram not configured — running in Control Center-only mode")
 	}
 
 	// Skills directory (RW for CC, separate from data volume).
@@ -123,11 +113,14 @@ func main() {
 
 	// Parse allowed chat IDs for login authorization.
 	// Default to TELEGRAM_CHAT_ID if ALLOWED_CHAT_IDS not explicitly set.
-	allowedRaw := readSecret("ALLOWED_CHAT_IDS")
-	if allowedRaw == "" {
-		allowedRaw = chatID
+	var allowedChatIDs map[int64]bool
+	if telegramEnabled {
+		allowedRaw := readSecret("ALLOWED_CHAT_IDS")
+		if allowedRaw == "" {
+			allowedRaw = chatID
+		}
+		allowedChatIDs = parseAllowedChatIDs(allowedRaw)
 	}
-	allowedChatIDs := parseAllowedChatIDs(allowedRaw)
 
 	// Shared stats for CC status endpoint.
 	stats := cc.NewStats()
@@ -538,14 +531,17 @@ func main() {
 	var offset int64
 	client := &http.Client{Timeout: 35 * time.Second}
 
-	// Telegram client for sending formatted messages.
-	tg := tgclient.NewClient(token)
-	tg.HTTP = client
-	tg.OnRateLimit = func(wait time.Duration) {
-		eventLog.Log("telegram_rate_limit", map[string]any{
-			"wait_seconds": wait.Seconds(),
-		})
-		log.Printf("[telegram] rate limited — waiting %v before retry", wait)
+	// Telegram client for sending formatted messages (nil if TG disabled).
+	var tg *tgclient.Client
+	if telegramEnabled {
+		tg = tgclient.NewClient(token)
+		tg.HTTP = client
+		tg.OnRateLimit = func(wait time.Duration) {
+			eventLog.Log("telegram_rate_limit", map[string]any{
+				"wait_seconds": wait.Seconds(),
+			})
+			log.Printf("[telegram] rate limited — waiting %v before retry", wait)
+		}
 	}
 
 	// Auto-update checker (initialized here, scheduled via unified scheduler below).
@@ -557,7 +553,7 @@ func main() {
 		}
 		notifyFn := func(current, latest string) {
 			log.Printf("update available: %s → %s", current, latest)
-			if cfg.AutoUpdateNotify && token != "" && chatID != "" {
+			if cfg.AutoUpdateNotify && telegramEnabled && tg != nil {
 				cid, _ := strconv.ParseInt(chatID, 10, 64)
 				if cid != 0 {
 					tg.SendHTML(cid, fmt.Sprintf("Update available: %s → %s\nRun <code>alf upgrade</code> on the host to update.", current, latest))
@@ -667,6 +663,88 @@ func main() {
 			[]string{"health-check"},
 		); err != nil {
 			log.Printf("warning: failed to seed health-check job: %v", err)
+		}
+	}
+
+	// When Telegram is not configured, run a CC-only event loop.
+	if !telegramEnabled {
+		log.Println("Running in Control Center-only mode (no Telegram polling)")
+		for event := range reloadCh {
+			switch event {
+			case cc.ReloadConfig:
+				if newCfg, err := configStore.Load(); err == nil {
+					oldTZ := cfg.Timezone
+					cfg = newCfg
+					if cfg.SessionTimeout > 0 {
+						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
+					}
+					if cfg.MaxSessions > 0 {
+						sessions.SetMaxSessions(cfg.MaxSessions)
+					}
+					if cfg.Timezone != oldTZ {
+						time.Local = resolveTimezone(cfg.Timezone)
+					}
+					registerBackends(registry, cfg, apiHistory, vaultMgr)
+					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
+				}
+				if git != nil {
+					git.Commit("config updated via CC")
+				}
+			case cc.ReloadTiers:
+				if err := tierStore.Reload(); err != nil {
+					log.Printf("ERROR: tiers reload failed: %v", err)
+				} else {
+					log.Println("tiers reloaded")
+				}
+				routerBackend = tierStore.Current().RouterBackend
+				isAPIR := routerBackend != "" && routerBackend != "cli"
+				if isAPIR {
+					newModel := tierStore.Current().RouterModel
+					if newModel == "" {
+						newModel = "anthropic/claude-haiku-4-5"
+					}
+					routerModel = newModel
+				} else {
+					newModel := router.ResolveModel(tierStore.Current().RouterModel)
+					if newModel == "" {
+						newModel = router.ResolveModel("haiku")
+					}
+					routerModel = newModel
+				}
+				if git != nil {
+					git.Commit("tiers updated via CC")
+				}
+			case cc.ReloadSkills:
+				if err := skillStore.Reload(); err != nil {
+					log.Printf("skills reload error: %v", err)
+				} else {
+					log.Println("skills reloaded")
+				}
+				if git != nil {
+					git.Commit("skills updated via CC")
+				}
+			case cc.ReloadAgents:
+				if err := agentStore.Reload(); err != nil {
+					log.Printf("agents reload error: %v", err)
+				} else {
+					teams := agentStore.All()
+					log.Printf("agents reloaded (%d teams)", len(teams))
+					if len(teams) > 0 {
+						autoEnableAgentTier(tierStore)
+					}
+				}
+			case cc.ReloadFirewall:
+				if newFWCfg, err := fwStore.Load(); err == nil {
+					fwProxy.Reload(newFWCfg)
+				} else {
+					log.Printf("firewall reload error: %v", err)
+				}
+			case cc.ReloadTools:
+				log.Println("tools reloaded")
+				if git != nil {
+					git.Commit("tools updated via CC")
+				}
+			}
 		}
 	}
 
@@ -1810,6 +1888,25 @@ func readSecret(envVar string) string {
 		}
 	}
 	return strings.TrimSpace(os.Getenv(envVar))
+}
+
+// telegramJSONConfig mirrors controlcenter.TelegramConfig for reading.
+type telegramJSONConfig struct {
+	BotToken string `json:"bot_token"`
+	ChatID   string `json:"chat_id"`
+}
+
+// readTelegramConfig reads Telegram settings from config.d/telegram.json (set via CC).
+func readTelegramConfig(configDir string) *telegramJSONConfig {
+	data, err := os.ReadFile(filepath.Join(configDir, "telegram.json"))
+	if err != nil {
+		return nil
+	}
+	var cfg telegramJSONConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil
+	}
+	return &cfg
 }
 
 // registerBackends registers API backends from config.json into the registry.
@@ -3307,6 +3404,7 @@ func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 		sj.NextRun = j.NextRun.Format(time.RFC3339)
 	}
 	sj.LastError = j.LastError
+	sj.Running = j.IsRunning()
 	return sj
 }
 

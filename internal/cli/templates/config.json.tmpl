@@ -1,6 +1,6 @@
 {
   "log_level": "info",
-  "allowed_chat_ids": [{{.ChatID}}],
+  "allowed_chat_ids": [{{if .ChatID}}{{.ChatID}}{{end}}],
   "system_prompt": "",
   "quiet_hours": {
     "start": 0,

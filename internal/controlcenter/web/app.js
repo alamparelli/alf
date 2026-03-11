@@ -243,6 +243,150 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// --- Activity Monitor ---
+(function() {
+  const bar = document.getElementById('activityBar');
+  const label = document.getElementById('activityLabel');
+  const itemsEl = document.getElementById('activityItems');
+  if (!bar) return;
+
+  const typeIcons = {
+    chat: 'message-circle',
+    schedule: 'clock',
+    task: 'cpu',
+  };
+  const typeLabels = {
+    chat: 'Chat',
+    schedule: 'Schedule',
+    task: 'Task',
+  };
+
+  let lastJSON = '';
+
+  async function poll() {
+    try {
+      const data = await api('/api/activity');
+      const json = JSON.stringify(data.items || []);
+      if (json === lastJSON) return; // skip DOM update if unchanged
+      lastJSON = json;
+
+      if (!data.items || data.items.length === 0) {
+        bar.style.display = 'none';
+        return;
+      }
+
+      bar.style.display = '';
+      const n = data.items.length;
+      label.textContent = n + ' active operation' + (n > 1 ? 's' : '');
+
+      itemsEl.innerHTML = data.items.map(item => {
+        const icon = typeIcons[item.type] || 'activity';
+        const badge = typeLabels[item.type] || item.type;
+        const elapsed = item.elapsed ? ' — ' + esc(item.elapsed) : '';
+        return '<div class="activity-item">' +
+          '<i data-lucide="' + icon + '"></i>' +
+          '<span class="activity-badge">' + esc(badge) + '</span>' +
+          '<span class="activity-name">' + esc(item.name) + '</span>' +
+          '<span class="activity-elapsed">' + elapsed + '</span>' +
+          '</div>';
+      }).join('');
+      lucide.createIcons();
+    } catch (e) {
+      // silent — don't disrupt UI on transient errors
+    }
+  }
+
+  poll();
+  setInterval(poll, 5000);
+})();
+
+// --- Telegram Integration ---
+(function() {
+  const statusEl = document.getElementById('telegramStatus');
+  const formEl = document.getElementById('telegramForm');
+  const tokenInput = document.getElementById('tgBotToken');
+  const chatIDInput = document.getElementById('tgChatID');
+  const saveBtn = document.getElementById('tgSaveBtn');
+  const disconnectBtn = document.getElementById('tgDisconnectBtn');
+  const resultEl = document.getElementById('tgResult');
+
+  if (!statusEl) return;
+
+  async function loadStatus() {
+    try {
+      const data = await api('/api/telegram');
+      formEl.style.display = '';
+      if (data.configured) {
+        statusEl.innerHTML = '<div class="tg-status tg-connected"><i data-lucide="check-circle"></i> Connected' +
+          (data.bot_name ? ' — @' + esc(data.bot_name) : '') + '</div>';
+        tokenInput.placeholder = data.bot_token_masked || '***';
+        tokenInput.value = '';
+        chatIDInput.value = data.chat_id || '';
+        disconnectBtn.style.display = '';
+        lucide.createIcons();
+      } else {
+        statusEl.innerHTML = '<div class="tg-status tg-disconnected"><i data-lucide="circle-off"></i> Not configured</div>';
+        disconnectBtn.style.display = 'none';
+        lucide.createIcons();
+      }
+    } catch (e) {
+      statusEl.innerHTML = '<div class="tg-status tg-disconnected">Could not load Telegram status</div>';
+      formEl.style.display = '';
+    }
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    const token = tokenInput.value.trim();
+    const chatID = chatIDInput.value.trim();
+    if (!token || !chatID) {
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-error';
+      resultEl.textContent = 'Both bot token and chat ID are required.';
+      return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Verifying...';
+    try {
+      const data = await api('/api/telegram', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_token: token, chat_id: chatID })
+      });
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-success';
+      resultEl.innerHTML = 'Telegram connected to @' + esc(data.bot_name) + '.<br>' +
+        '<strong>Restart ALF to activate.</strong> ' +
+        '<button class="btn btn-sm" onclick="document.getElementById(\'adminRestartBtn\').click()">Restart now</button>';
+      loadStatus();
+    } catch (e) {
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-error';
+      resultEl.textContent = e.error || e.message || 'Failed to save Telegram config.';
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save & Verify';
+    }
+  });
+
+  disconnectBtn.addEventListener('click', async () => {
+    if (!confirm('Disconnect Telegram? ALF will run in Control Center-only mode after restart.')) return;
+    try {
+      await api('/api/telegram', { method: 'DELETE' });
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-success';
+      resultEl.innerHTML = 'Telegram disconnected. <strong>Restart ALF to apply.</strong> ' +
+        '<button class="btn btn-sm" onclick="document.getElementById(\'adminRestartBtn\').click()">Restart now</button>';
+      loadStatus();
+    } catch (e) {
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-error';
+      resultEl.textContent = 'Failed to disconnect.';
+    }
+  });
+
+  loadStatus();
+})();
+
 // --- Workspace Explorer (Tree) ---
 let wsOpenPath = null;
 let wsTree = {};  // { [dirPath]: { loaded, expanded, entries[] } }

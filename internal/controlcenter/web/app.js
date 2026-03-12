@@ -4313,7 +4313,7 @@ let termResizeObserver = null;
   });
   const saved = localStorage.getItem('alf-term-theme');
   if (saved && termThemes[saved]) sel.value = saved;
-  else sel.value = dark ? 'Catppuccin Mocha' : 'Catppuccin Latte';
+  else sel.value = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'Catppuccin Mocha' : 'Catppuccin Latte';
 
   sel.addEventListener('change', () => {
     localStorage.setItem('alf-term-theme', sel.value);
@@ -4325,7 +4325,7 @@ let termResizeObserver = null;
 
 function termGetTheme() {
   const sel = document.getElementById('termThemeSelect');
-  return termThemes[sel.value] || termThemes[dark ? 'Catppuccin Mocha' : 'Catppuccin Latte'];
+  return termThemes[sel.value] || termThemes[window.matchMedia('(prefers-color-scheme: dark)').matches ? 'Catppuccin Mocha' : 'Catppuccin Latte'];
 }
 
 function terminalInit() {
@@ -4605,7 +4605,7 @@ if (isTouchDevice) {
 
 // ========== Vault ==========
 
-let vaultInited = false;
+var vaultInited = false;
 
 function vaultInit() {
   if (vaultInited) { vaultRefresh(); return; }

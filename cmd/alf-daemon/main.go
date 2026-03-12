@@ -547,6 +547,7 @@ func main() {
 		tooling.GrepNativeTool{},
 		tooling.GlobNativeTool{},
 		tooling.ReadFileNativeTool{},
+		tooling.WriteFileNativeTool{},
 	}
 	toolExecutor := &tooling.Executor{
 		DataDir: dataDir,

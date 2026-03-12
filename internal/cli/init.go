@@ -85,6 +85,7 @@ type setupProfile struct {
 	ConfiguredBackends []string `json:"configured_backends,omitempty"` // ["openrouter", "openai"]
 	Workspaces         []string `json:"workspaces,omitempty"`          // host paths to mount
 	JSRuntime          string   `json:"js_runtime,omitempty"`          // "node", "deno", "bun", or ""
+	ImageTag           string   `json:"image_tag,omitempty"`           // Docker image tag override (e.g. "0.6.49")
 }
 
 func setupProfilePath() string {
@@ -223,11 +224,19 @@ func RunInit() {
 	profile.JSRuntime = jsRuntime
 	saveSetupProfile(profile)
 
-	// Set default image
-	composeData.Image = "ghcr.io/alamparelli/alf:latest"
+	// Docker image version
+	imageTag := promptImageTag(reader, prev.ImageTag)
+	if imageTag == "" || imageTag == "latest" {
+		composeData.Image = "ghcr.io/alamparelli/alf:latest"
+	} else {
+		composeData.Image = "ghcr.io/alamparelli/alf:" + imageTag
+	}
 	if img := os.Getenv("ALF_IMAGE"); img != "" {
 		composeData.Image = img
 	}
+	profile = loadSetupProfile()
+	profile.ImageTag = imageTag
+	saveSetupProfile(profile)
 
 	// Step 8: Generate files
 	nextStep("Generating configuration files")
@@ -1072,6 +1081,23 @@ func promptWorkspaces(reader *bufio.Reader, previous []string) []string {
 		fmt.Println("  No workspaces configured.")
 	}
 	return workspaces
+}
+
+func promptImageTag(reader *bufio.Reader, previous string) string {
+	def := "latest"
+	if previous != "" {
+		def = previous
+	}
+	fmt.Printf("\n  Docker image version [%s]: ", def)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return def
+	}
+	// Strip leading "v" if user types "v0.6.49"
+	input = strings.TrimPrefix(input, "v")
+	PrintCheck(fmt.Sprintf("Image: ghcr.io/alamparelli/alf:%s", input))
+	return input
 }
 
 func writeRuntimeTxt(dir, jsRuntime string) {

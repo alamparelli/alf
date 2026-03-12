@@ -22,7 +22,7 @@ Everything learned here gets written to your memory files and persists forever.
 8. Once confirmed, update these files using the Edit/Write tools:
    - **context/soul.md** — rewrite the Personality section to match their preferences. Keep the Principles and Self-awareness sections. Make the personality genuinely theirs, not generic.
    - **context/index.md** — fill in User Preferences and Project Context with what you learned. Remove the placeholder text.
-9. Tell them: "You can always tweak my personality by editing soul.md, or use /login to access the Control Center."
+9. Tell them the Control Center has a Getting Started guide that covers everything — tiers, scheduling, skills, workspace, and more. They can find it under the Docs tab. If they're on Telegram, they can use `/login` to get a link to the Control Center.
 10. End naturally — don't force the next interaction.
 
 ### CRITICAL: Save after every answer

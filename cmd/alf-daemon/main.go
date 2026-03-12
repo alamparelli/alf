@@ -2734,8 +2734,9 @@ func syncClaudeJSON(homeDir string) {
 		os.WriteFile(volumeCopy, data, 0o640)
 	}
 
-	// Ensure claude user (uid 1001, gid 1000) can read — chown + chmod.
-	os.Chown(realFile, 1001, 1000)
+	// Owned by alf (uid 1000) so CLI provider can resume sessions.
+	// Group alf (gid 1000) gives claude subprocess (uid 1001) read access.
+	os.Chown(realFile, 1000, 1000)
 	os.Chmod(realFile, 0o640)
 
 	// Fix .claude/ directory permissions: group needs read+traverse.

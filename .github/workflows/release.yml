@@ -19,10 +19,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if image already exists
+        id: check
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          TOKEN=$(curl -s "https://ghcr.io/token?service=ghcr.io&scope=repository:alamparelli/alf:pull" | jq -r .token)
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/alamparelli/alf/manifests/${VERSION}")
+          if [ "$STATUS" = "200" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image ${VERSION} already exists — skipping Docker build"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Clone vault-proxy into third_party
+        if: steps.check.outputs.exists != 'true'
         run: git clone --depth 1 https://github.com/alamparelli/vault-proxy.git third_party/vault-proxy
 
       - name: Log in to GHCR
+        if: steps.check.outputs.exists != 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -30,9 +45,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
+        if: steps.check.outputs.exists != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Docker metadata
+        if: steps.check.outputs.exists != 'true'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -44,6 +61,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
+        if: steps.check.outputs.exists != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .

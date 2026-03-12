@@ -35,15 +35,8 @@ echo ""
 branch=$(git branch --show-current)
 git tag "$next"
 
-if [ "$LOCAL_BUILD" = true ]; then
-  # Local build: push branch only, skip tag push to avoid triggering CI/CD.
-  echo "Tagging ${next} (local build — tag not pushed to remote)..."
-  git push origin "$branch"
-else
-  # CI/CD build: push branch + tag to trigger GitHub Actions workflow.
-  echo "Tagging ${next} and pushing ${branch}..."
-  git push origin "$branch" "$next"
-fi
+echo "Tagging ${next} and pushing ${branch}..."
+git push origin "$branch" "$next"
 
 echo ""
 echo "Released ${next}"

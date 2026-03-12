@@ -419,6 +419,11 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 // If a job with the given ID already exists (managed or not), it is returned as-is.
 func (e *Engine) EnsureManaged(id, name, schedule, tier, prompt, output string, skills []string) (*Job, error) {
 	if existing := e.store.Get(id); existing != nil {
+		// Backfill skills if the existing job is missing them (upgrade path).
+		if len(existing.Skills) == 0 && len(skills) > 0 {
+			existing.Skills = skills
+			e.store.Update(existing)
+		}
 		return existing, nil
 	}
 

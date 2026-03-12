@@ -116,15 +116,15 @@ The heartbeat is a managed job that executes custom instructions you define in `
 ```yaml
 ---
 tier: haiku
-schedule: "0 0 */6 * * *"
 ---
 
 Check if there are any pending tasks in my todo list and summarize them.
 ```
 
 - **tier** — which model to use (optional, defaults to lowest available)
-- **schedule** — cron expression (optional, editable via CC Settings button)
 - **body** — the prompt to execute. Leave empty to skip.
+
+The schedule is managed by the heartbeat managed job and can be changed via the Control Center Settings button.
 
 The heartbeat file is preserved across upgrades — ALF never overwrites it.
 

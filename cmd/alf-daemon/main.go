@@ -191,6 +191,9 @@ func main() {
 	// Create data directory symlinks for config and skills.
 	setupDataSymlinks(dataDir, configDir, skillsDir)
 
+	// Seed bundled skills from Docker image defaults (no-op if already present).
+	seedBundledSkills(skillsDir)
+
 	// Set up user-packages paths.
 	setupUserPackagesPaths()
 
@@ -338,6 +341,9 @@ func main() {
 	// Bootstrap default memory files (soul.md, mood.md, index.md).
 	contextDir := filepath.Join(dataDir, "context")
 	memory.Bootstrap(contextDir)
+
+	// Seed default heartbeat.md if missing.
+	seedHeartbeatFile(contextDir)
 
 	// Generate toolbox.md — explicit list of all available CLI tools.
 	memory.GenerateToolbox(contextDir, dataDir)
@@ -3729,6 +3735,25 @@ func watchConfigFiles(configDir string, reloadCh chan cc.ReloadEvent) {
 }
 
 
+// seedHeartbeatFile creates a default context/heartbeat.md if it doesn't exist.
+func seedHeartbeatFile(contextDir string) {
+	hbPath := filepath.Join(contextDir, "heartbeat.md")
+	if _, err := os.Stat(hbPath); err == nil {
+		return // already exists
+	}
+	os.MkdirAll(contextDir, 0o755)
+	content := `---
+tier: haiku
+---
+
+`
+	if err := os.WriteFile(hbPath, []byte(content), 0o644); err != nil {
+		log.Printf("seed heartbeat.md: %v", err)
+	} else {
+		log.Printf("seeded default context/heartbeat.md")
+	}
+}
+
 // setupDataSymlinks creates symlinks inside data/ pointing to config.d and skills.d.
 func setupDataSymlinks(dataDir, configDir, skillsDir string) {
 	links := map[string]string{
@@ -3746,6 +3771,73 @@ func setupDataSymlinks(dataDir, configDir, skillsDir string) {
 			log.Printf("symlink %s → %s", filepath.Base(link), target)
 		}
 	}
+}
+
+// seedBundledSkills copies missing skill directories from /opt/alf/defaults/skills.d
+// into the active skills directory. Existing skills are never overwritten.
+func seedBundledSkills(skillsDir string) {
+	const defaultsDir = "/opt/alf/defaults/skills.d"
+	entries, err := os.ReadDir(defaultsDir)
+	if err != nil {
+		return // no defaults directory (e.g. running outside Docker)
+	}
+	os.MkdirAll(skillsDir, 0o755)
+	for _, e := range entries {
+		if !e.IsDir() {
+			// Copy top-level files (e.g. README.md).
+			src := filepath.Join(defaultsDir, e.Name())
+			dst := filepath.Join(skillsDir, e.Name())
+			if _, err := os.Stat(dst); err == nil {
+				continue
+			}
+			data, err := os.ReadFile(src)
+			if err == nil {
+				os.WriteFile(dst, data, 0o644)
+				log.Printf("seeded skill file: %s", e.Name())
+			}
+			continue
+		}
+		dest := filepath.Join(skillsDir, e.Name())
+		if _, err := os.Stat(dest); err == nil {
+			continue // skill already exists
+		}
+		// Copy entire skill directory.
+		src := filepath.Join(defaultsDir, e.Name())
+		if err := copyDir(src, dest); err != nil {
+			log.Printf("seed skill %s: %v", e.Name(), err)
+		} else {
+			log.Printf("seeded bundled skill: %s", e.Name())
+		}
+	}
+}
+
+// copyDir recursively copies a directory tree.
+func copyDir(src, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		s := filepath.Join(src, e.Name())
+		d := filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			if err := copyDir(s, d); err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(s)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(d, data, 0o644); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // setupUserPackagesPaths adds /opt/alf/user-packages/bin to PATH and lib to LD_LIBRARY_PATH.

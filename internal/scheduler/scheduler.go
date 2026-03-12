@@ -417,7 +417,7 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 // EnsureManaged creates a managed job with a fixed ID if it doesn't already exist.
 // Managed jobs are persisted in cron.json but cannot be modified/deleted via the schedule tool.
 // If a job with the given ID already exists (managed or not), it is returned as-is.
-func (e *Engine) EnsureManaged(id, name, schedule, tier, prompt, output string, skills []string) (*Job, error) {
+func (e *Engine) EnsureManaged(id, name, schedule, tier, prompt, output string, skills []string, enabled bool) (*Job, error) {
 	if existing := e.store.Get(id); existing != nil {
 		// Backfill skills if the existing job is missing them (upgrade path).
 		if len(existing.Skills) == 0 && len(skills) > 0 {
@@ -436,24 +436,30 @@ func (e *Engine) EnsureManaged(id, name, schedule, tier, prompt, output string, 
 		Output:    output,
 		Skills:    skills,
 		Managed:   true,
-		Enabled:   true,
+		Enabled:   enabled,
 		CreatedAt: time.Now(),
 	}
 
-	if err := e.scheduleJob(j); err != nil {
-		return nil, fmt.Errorf("invalid schedule: %w", err)
+	if enabled {
+		if err := e.scheduleJob(j); err != nil {
+			return nil, fmt.Errorf("invalid schedule: %w", err)
+		}
 	}
 	if err := e.store.Add(j); err != nil {
 		return nil, err
 	}
 
-	log.Printf("scheduler: seeded managed job %s (%s)", id, name)
+	state := "enabled"
+	if !enabled {
+		state = "disabled"
+	}
+	log.Printf("scheduler: seeded managed job %s (%s) [%s]", id, name, state)
 	return j, nil
 }
 
 // EnsureManagedFull is like EnsureManaged but also sets a Command field,
 // enabling two-phase execution (command runs first, LLM only if issues detected).
-func (e *Engine) EnsureManagedFull(id, name, schedule, tier, prompt, command, output string, skills []string) (*Job, error) {
+func (e *Engine) EnsureManagedFull(id, name, schedule, tier, prompt, command, output string, skills []string, enabled bool) (*Job, error) {
 	if existing := e.store.Get(id); existing != nil {
 		return existing, nil
 	}
@@ -468,18 +474,24 @@ func (e *Engine) EnsureManagedFull(id, name, schedule, tier, prompt, command, ou
 		Output:    output,
 		Skills:    skills,
 		Managed:   true,
-		Enabled:   true,
+		Enabled:   enabled,
 		CreatedAt: time.Now(),
 	}
 
-	if err := e.scheduleJob(j); err != nil {
-		return nil, fmt.Errorf("invalid schedule: %w", err)
+	if enabled {
+		if err := e.scheduleJob(j); err != nil {
+			return nil, fmt.Errorf("invalid schedule: %w", err)
+		}
 	}
 	if err := e.store.Add(j); err != nil {
 		return nil, err
 	}
 
-	log.Printf("scheduler: seeded managed job %s (%s) [two-phase]", id, name)
+	state := "enabled"
+	if !enabled {
+		state = "disabled"
+	}
+	log.Printf("scheduler: seeded managed job %s (%s) [two-phase, %s]", id, name, state)
 	return j, nil
 }
 

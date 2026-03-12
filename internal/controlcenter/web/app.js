@@ -2574,7 +2574,10 @@ function docsShowArticle(id) {
   const content = document.getElementById('docsContent');
   content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Loading...</div>';
   api('/api/docs/' + encodeURIComponent(id)).then(doc => {
-    const rendered = DOMPurify.sanitize(marked.parse(doc.content, { breaks: false, gfm: true }), { ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|docs):)/i });
+    // Convert docs: links to data attributes before sanitizing (DOMPurify strips unknown protocols).
+    let rawHtml = marked.parse(doc.content, { breaks: false, gfm: true });
+    rawHtml = rawHtml.replace(/href="docs:([^"]+)"/g, 'href="#" data-doc-link="$1"');
+    const rendered = DOMPurify.sanitize(rawHtml);
 
     // Build TOC from headings
     const tmp = document.createElement('div');
@@ -2597,18 +2600,16 @@ function docsShowArticle(id) {
     html += tocHtml;
     html += '<div class="docs-article">' + tmp.innerHTML + '</div>';
     html += '</div>';
+    html += '<button class="docs-scroll-top" id="docsScrollTop" title="Back to top"><i data-lucide="chevron-up"></i></button>';
     content.innerHTML = html;
 
     document.getElementById('docsBackBtn').addEventListener('click', () => navigateTo('docs'));
-    // Handle internal doc links (docs:id)
-    content.querySelectorAll('.docs-article a').forEach(a => {
-      const href = a.getAttribute('href');
-      if (href && href.startsWith('docs:')) {
-        a.addEventListener('click', (e) => {
-          e.preventDefault();
-          navigateTo(href);
-        });
-      }
+    // Handle internal doc links (data-doc-link attribute, converted from docs: protocol)
+    content.querySelectorAll('.docs-article a[data-doc-link]').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        navigateTo('docs:' + a.dataset.docLink);
+      });
     });
     // Smooth scroll for TOC links
     content.querySelectorAll('.docs-toc-item').forEach(a => {
@@ -2618,6 +2619,15 @@ function docsShowArticle(id) {
         if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     });
+    // Scroll-to-top button visibility
+    const scrollBtn = document.getElementById('docsScrollTop');
+    const mainContent = document.querySelector('.main-content');
+    if (scrollBtn && mainContent) {
+      scrollBtn.addEventListener('click', () => mainContent.scrollTo({ top: 0, behavior: 'smooth' }));
+      mainContent.addEventListener('scroll', () => {
+        scrollBtn.classList.toggle('visible', mainContent.scrollTop > 400);
+      });
+    }
     if (window.lucide) lucide.createIcons();
   }).catch(() => {
     content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Document not found.</div>';
@@ -3895,6 +3905,7 @@ function tiersShowModal(tier) {
           '<label class="tier-flag-check"><input type="checkbox" id="tfWriteCapable"' + (t.write_capable ? ' checked' : '') + '> Write capable</label>' +
           '<label class="tier-flag-check"><input type="checkbox" id="tfForceCmd"' + (t.force_command ? ' checked' : '') + '> Force command</label>' +
         '</div>' +
+        '<div class="form-row"><label>System prompt</label><textarea id="tfSystemPrompt" class="input tier-label-textarea" rows="3" placeholder="Extra instructions prepended for this tier (optional)">' + esc(t.system_prompt || '') + '</textarea></div>' +
         '<div class="tier-tools-section">' +
           '<div class="tier-tools-header">Tools <span class="tier-tools-hint">(CLI tools for Claude CLI tiers, ALF tools for API tiers with tool loop)</span></div>' +
           '<div class="tier-tools-list" id="tfTools">' + toolChecks + '</div>' +
@@ -3966,6 +3977,7 @@ function tiersShowModal(tier) {
       write_capable: document.getElementById('tfWriteCapable').checked,
       force_command: document.getElementById('tfForceCmd').checked,
       backend: backend,
+      system_prompt: document.getElementById('tfSystemPrompt').value.trim(),
       tools: [],
     };
     if (!newTier.write_capable) {

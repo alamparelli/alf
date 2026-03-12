@@ -1627,6 +1627,10 @@ func main() {
 			// Build system prompts (context files + reaction instruction).
 			sysPrompts := memory.CollectPrompts(contextDir)
 			var sysPromptTexts []string
+			// Inject per-tier system prompt first so it has high priority.
+			if tp.SystemPrompt != "" {
+				sysPromptTexts = append(sysPromptTexts, tp.SystemPrompt)
+			}
 			// Inject onboarding prompt FIRST so it becomes the primary --system-prompt.
 			onboarding := memory.OnboardingPrompt(contextDir)
 			if onboarding != "" {
@@ -1907,6 +1911,7 @@ type tierParams struct {
 	MaxIterations        int      // max agent iterations (0 = default)
 	TimeoutMin           int      // global timeout in minutes (0 = default)
 	Backend              string   // "cli" (default), or registered backend name
+	SystemPrompt         string   // extra system prompt for this tier
 }
 
 // vaultPassword reads the master password from Docker secret first,
@@ -2461,6 +2466,7 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string) t
 				MaxIterations:        t.MaxIterations,
 				TimeoutMin:           t.TimeoutMin,
 				Backend:              t.Backend,
+				SystemPrompt:         t.SystemPrompt,
 			}
 		}
 	}

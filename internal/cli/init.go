@@ -277,6 +277,8 @@ func RunInit() {
 		PrintSuccess("You're all set! Open the Control Center link above to start using ALF.")
 	}
 	fmt.Println()
+	PrintInfo("Run 'alf help' to see all available commands.")
+	fmt.Println()
 }
 
 func checkPrerequisites() {

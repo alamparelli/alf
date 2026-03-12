@@ -818,6 +818,16 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 /* Nav spacer (pushes Docs + footer to bottom) */
 .nav-spacer { flex: 1; }
 
+/* Report issue */
+.sidebar-report { padding: 8px 12px; }
+.sidebar-report .report-issue {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  font-size: 0.78rem; color: var(--text-dim); border: 1px solid var(--border);
+  border-radius: 6px; text-decoration: none; justify-content: center;
+}
+.sidebar-report .report-issue:hover { color: var(--accent); border-color: var(--accent); }
+.sidebar-report .report-issue .lucide, .sidebar-report .report-issue i { width: 14px; height: 14px; }
+
 /* Sidebar footer */
 .sidebar-footer {
   border-top: 1px solid var(--border); padding: 12px 12px 8px;

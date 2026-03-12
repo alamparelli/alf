@@ -130,16 +130,21 @@ func (h *SkillImportHandler) handleScan(w http.ResponseWriter, req skillImportRe
 	}
 
 	// Fetch SKILL.md from GitHub.
+	// Check if the user explicitly selected a skill via --skill flag.
+	explicitSkill := strings.Contains(req.Command, "--skill")
 	content, err := fetchSkillFromGitHub(owner, repo, skillName)
 	if err != nil {
-		// SKILL.md not found — try listing available skills in the repo.
-		if available := listRepoSkills(owner, repo); len(available) > 0 {
-			respondJSON(w, http.StatusNotFound, map[string]any{
-				"error":            fmt.Sprintf("skill %q not found in %s/%s", skillName, owner, repo),
-				"available_skills": available,
-				"hint":             fmt.Sprintf("Try: %s/%s --skill %s", owner, repo, available[0]),
-			})
-			return
+		// Only show the skill picker if no --skill was explicitly provided.
+		// Otherwise we'd loop: pick skill → scan → 404 → show picker → pick → ...
+		if !explicitSkill {
+			if available := listRepoSkills(owner, repo); len(available) > 0 {
+				respondJSON(w, http.StatusNotFound, map[string]any{
+					"error":            fmt.Sprintf("skill %q not found in %s/%s", skillName, owner, repo),
+					"available_skills": available,
+					"hint":             fmt.Sprintf("Try: %s/%s --skill %s", owner, repo, available[0]),
+				})
+				return
+			}
 		}
 		respondJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch skill: %v", err)})
 		return

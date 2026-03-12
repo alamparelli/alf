@@ -58,7 +58,11 @@ type Deps struct {
 // StoreFactory creates concrete store implementations from data and config directories.
 func StoreFactory(dataDir, configDir string) (ConfigStore, TierStore, ResourceStore, ResourceStore, ResourceStore, AppStore) {
 	cs := NewFileConfigStore(ConfigPath(configDir))
-	ts := NewFileTierStore(TiersPath(configDir))
+	cfg, err := cs.Load()
+	if err != nil {
+		cfg = DefaultConfig()
+	}
+	ts := NewFileTierStore(TiersPathFromConfig(configDir, cfg))
 	ms := NewFileResourceStore(filepath.Join(dataDir, "context"), ".md")
 	tools := NewFileResourceStore(filepath.Join(dataDir, "tools"), ".json")
 	skills := NewFileResourceStore(filepath.Join(dataDir, "skills"), ".json")

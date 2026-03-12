@@ -315,8 +315,9 @@ func main() {
 		log.Println("Telegram not configured — running in Control Center-only mode")
 	}
 
-	// Load initial tiers config.
-	tierStore := cc.NewFileTierStore(cc.TiersPath(configDir))
+	// Load initial tiers config. Honour optional tiers_file override in config.
+	tiersPath := cc.TiersPathFromConfig(configDir, cfg)
+	tierStore := cc.NewFileTierStore(tiersPath)
 	if err := tierStore.Reload(); err != nil {
 		log.Printf("ERROR: failed to load tiers: %v — using defaults (your tiers.json edits are IGNORED)", err)
 	}
@@ -325,7 +326,8 @@ func main() {
 	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills.d"), filepath.Join(dataDir, "skills"))
 
 	// Watch config files for changes and auto-reload.
-	go watchConfigFiles(configDir, reloadCh)
+	// The tiers path function is a closure so the watcher always tracks the live path.
+	go watchConfigFiles(configDir, func() string { return tierStore.Path() }, reloadCh)
 
 	// Load agent team configurations.
 	agentStore := agents.NewFileAgentStore(filepath.Join(dataDir, "agents", "teams"))
@@ -761,6 +763,7 @@ func main() {
 			case cc.ReloadConfig:
 				if newCfg, err := configStore.Load(); err == nil {
 					oldTZ := cfg.Timezone
+					oldTiersFile := cfg.TiersFile
 					cfg = newCfg
 					if cfg.SessionTimeout > 0 {
 						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
@@ -770,6 +773,15 @@ func main() {
 					}
 					if cfg.Timezone != oldTZ {
 						time.Local = resolveTimezone(cfg.Timezone)
+					}
+					// Switch tiers file if tiers_file changed.
+					if cfg.TiersFile != oldTiersFile {
+						newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
+						if err := tierStore.SetPath(newTiersPath); err != nil {
+							log.Printf("ERROR: tiers reload from new path %q failed: %v — keeping previous tiers", newTiersPath, err)
+						} else {
+							log.Printf("config: tiers_file changed to %q", newTiersPath)
+						}
 					}
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
@@ -843,6 +855,7 @@ func main() {
 			case cc.ReloadConfig:
 				if newCfg, err := configStore.Load(); err == nil {
 					oldTZ := cfg.Timezone
+					oldTiersFile := cfg.TiersFile
 					cfg = newCfg
 					if cfg.SessionTimeout > 0 {
 						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
@@ -853,6 +866,15 @@ func main() {
 					if cfg.Timezone != oldTZ {
 						time.Local = resolveTimezone(cfg.Timezone)
 						log.Printf("config: timezone changed to %q (logs updated, scheduler needs restart)", cfg.Timezone)
+					}
+					// Switch tiers file if tiers_file changed.
+					if cfg.TiersFile != oldTiersFile {
+						newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
+						if err := tierStore.SetPath(newTiersPath); err != nil {
+							log.Printf("ERROR: tiers reload from new path %q failed: %v — keeping previous tiers", newTiersPath, err)
+						} else {
+							log.Printf("config: tiers_file changed to %q", newTiersPath)
+						}
 					}
 					// Re-register backends if config changed.
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
@@ -3699,21 +3721,27 @@ func lowestMediaTier(tiers *cc.TiersConfig) string {
 }
 
 // watchConfigFiles polls config files for changes and sends reload events.
-func watchConfigFiles(configDir string, reloadCh chan cc.ReloadEvent) {
+// tiersPathFn is called each tick so the watcher follows runtime tiers_file changes.
+func watchConfigFiles(configDir string, tiersPathFn func() string, reloadCh chan cc.ReloadEvent) {
 	type watchEntry struct {
 		path  string
 		event cc.ReloadEvent
 	}
-	entries := []watchEntry{
-		{cc.TiersPath(configDir), cc.ReloadTiers},
+
+	staticEntries := []watchEntry{
 		{filepath.Join(configDir, "config.json"), cc.ReloadConfig},
 		{filepath.Join(configDir, "firewall.json"), cc.ReloadFirewall},
 	}
 
 	modTimes := make(map[string]time.Time)
-	for _, e := range entries {
+	for _, e := range staticEntries {
 		if info, err := os.Stat(e.path); err == nil {
 			modTimes[e.path] = info.ModTime()
+		}
+	}
+	if p := tiersPathFn(); p != "" {
+		if info, err := os.Stat(p); err == nil {
+			modTimes[p] = info.ModTime()
 		}
 	}
 
@@ -3721,6 +3749,9 @@ func watchConfigFiles(configDir string, reloadCh chan cc.ReloadEvent) {
 	defer ticker.Stop()
 
 	for range ticker.C {
+		// Build the full entry list each tick so tiers path changes are picked up.
+		entries := append(staticEntries, watchEntry{tiersPathFn(), cc.ReloadTiers})
+
 		for _, e := range entries {
 			info, err := os.Stat(e.path)
 			if err != nil {

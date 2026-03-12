@@ -71,6 +71,7 @@ You're looking at it. Here's what each section does:
 | **Tiers** | Configure response tiers in real-time ([details](docs:tier-setup)) |
 | **Firewall** | Network firewall rules ([details](docs:firewall)) |
 | **Vault** | Secrets vault — store credentials, OAuth2 tokens, files ([details](docs:vault)) |
+| **Settings** | Configuration, Telegram setup, admin actions ([details](docs:config)) |
 | **Docs** | You are here |
 | **Apps** | Self-contained apps ALF generates (appears when apps exist) |
 
@@ -220,6 +221,7 @@ To regenerate the base file manually (e.g. after adding a secret): `alf compose`
 ## What's next?
 
 - [Setting Up Tiers](docs:tier-setup) — customize which models ALF uses and when
+- [Configuration Reference](docs:config) — all `config.json` fields explained
 - [Managing Conversations](docs:sessions) — sessions, `/new`, and context management
 - [Creating Skills](docs:creating-skills) — teach ALF new abilities with auto-injection
 - [Agent Teams](docs:agent-teams) — coordinate multiple agents for complex tasks

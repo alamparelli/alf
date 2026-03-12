@@ -216,6 +216,26 @@ When you send a photo, document, or video:
 
 This means sending a screenshot with "fix this bug" routes to `sonnet`, not `haiku`.
 
+## Using multiple tier configurations
+
+You can maintain several tier files and switch between them without editing `tiers.json`.
+
+Set `tiers_file` in `config.json` (via **Settings → Configuration**):
+
+```json
+{
+  "tiers_file": "tiers-minimal.json"
+}
+```
+
+Relative paths are resolved inside `config.d/`. Absolute paths are used as-is.
+When you save the change, ALF reloads immediately from the new file — no restart needed.
+The file watcher also tracks the new path, so future edits to it hot-reload as expected.
+
+To go back to the default, set `"tiers_file": "tiers.json"`.
+
+See [Configuration Reference](docs:config) for all `config.json` fields.
+
 ## Tips for good routing
 
 1. **Write detailed `router_label` values.** This is the #1 thing the router looks at. Be specific.

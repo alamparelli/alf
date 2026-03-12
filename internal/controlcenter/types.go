@@ -39,6 +39,10 @@ type Config struct {
 	ShowSkillFooter         *bool  `json:"show_skill_footer"`          // show active skills in message footer, nil = true (default on)
 	MaxSessions             int    `json:"max_sessions"`               // max concurrent sessions per user, 0 = default (2)
 	Backends                map[string]BackendConfig `json:"backends,omitempty"` // named API backends
+	// TiersFile overrides the default tiers.json filename. Relative paths are
+	// resolved against config.d/. Absolute paths are used as-is.
+	// Empty (default) means tiers.json.
+	TiersFile string `json:"tiers_file,omitempty"`
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -64,6 +68,7 @@ func DefaultConfig() *Config {
 		AuthBanDuration:         15,
 		TiersTimeout:            300,
 		ShowSkillFooter:         boolPtr(true),
+		TiersFile:               "tiers.json",
 	}
 }
 

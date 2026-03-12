@@ -248,11 +248,15 @@ func RunInit() {
 
 	// Step 10: Claude authentication
 	nextStep("Claude authentication")
-	fmt.Println()
-	fmt.Println("  Claude is the AI that powers ALF. You need to authenticate once")
-	fmt.Println("  so ALF can use Claude on your behalf.")
-	fmt.Println()
-	RunLogin()
+	if isClaudeAuthenticated() {
+		PrintCheck("Claude is already authenticated")
+	} else {
+		fmt.Println()
+		fmt.Println("  Claude is the AI that powers ALF. You need to authenticate once")
+		fmt.Println("  so ALF can use Claude on your behalf.")
+		fmt.Println()
+		RunLogin()
+	}
 
 	// Step 11: LLM backends (optional)
 	nextStep("LLM backends (optional)")
@@ -714,6 +718,12 @@ func promptTimezone(reader *bufio.Reader, previous string) string {
 		hint = detected
 	}
 
+	// Show current time in detected timezone so the user can verify.
+	now := time.Now()
+	if loc, err := time.LoadLocation(hint); err == nil {
+		fmt.Printf("  ALF uses your timezone for scheduled tasks and daily routines.\n")
+		fmt.Printf("  Detected: %s (currently %s)\n", hint, now.In(loc).Format("15:04"))
+	}
 	fmt.Printf("  Timezone [%s]: ", hint)
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(input)
@@ -724,8 +734,8 @@ func promptTimezone(reader *bufio.Reader, previous string) string {
 	}
 
 	if _, err := time.LoadLocation(input); err != nil {
-		PrintWarning(fmt.Sprintf("Invalid timezone %q, using %s", input, hint))
-		PrintCheck(fmt.Sprintf("Timezone: %s", hint))
+		PrintWarning(fmt.Sprintf("Invalid timezone %q — expected format like Europe/Paris or America/New_York", input))
+		PrintCheck(fmt.Sprintf("Using: %s", hint))
 		return hint
 	}
 
@@ -1229,11 +1239,15 @@ true`)
 	fix.Run()
 }
 
-func verifyClaudeAuth() {
+func isClaudeAuthenticated() bool {
 	verify := exec.Command("docker", "exec", "--user", "1000:1000", "-e", "HOME=/home/alf",
 		"alf", "claude", "-p", "ping", "--output-format", "json", "--max-turns", "1")
 	out, _ := verify.Output()
-	if len(out) > 0 && strings.Contains(string(out), `"is_error":false`) {
+	return len(out) > 0 && strings.Contains(string(out), `"is_error":false`)
+}
+
+func verifyClaudeAuth() {
+	if isClaudeAuthenticated() {
 		PrintCheck("Claude authenticated")
 	} else {
 		PrintWarning("Claude may not be authenticated yet. Try running: alf login")

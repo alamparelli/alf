@@ -1352,6 +1352,16 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .docs-article hr {
   border: none; border-top: 1px solid var(--border); margin: 24px 0;
 }
+.docs-scroll-top {
+  position: fixed; bottom: 24px; right: 24px; width: 36px; height: 36px;
+  border-radius: 50%; border: 1px solid var(--border); background: var(--bg-card);
+  color: var(--text-dim); cursor: pointer; display: flex; align-items: center;
+  justify-content: center; opacity: 0; pointer-events: none;
+  transition: opacity 0.2s, background 0.2s; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.docs-scroll-top.visible { opacity: 1; pointer-events: auto; }
+.docs-scroll-top:hover { background: var(--bg-input); color: var(--text); }
+.docs-scroll-top svg { width: 18px; height: 18px; }
 
 /* JSON Viewer */
 .ws-viewer {

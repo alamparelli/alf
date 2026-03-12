@@ -86,7 +86,8 @@ type Tier struct {
 	MaxIterations         int      `json:"max_iterations,omitempty"`
 	TimeoutMin            int      `json:"timeout_minutes,omitempty"`
 	ForceCommand  bool     `json:"force_command"`
-	Backend       string   `json:"backend,omitempty"` // "cli" (default), or registered backend name
+	Backend       string   `json:"backend,omitempty"`      // "cli" (default), or registered backend name
+	SystemPrompt  string   `json:"system_prompt,omitempty"` // extra system prompt prepended for this tier
 }
 
 // RouterDescription returns Description if set, otherwise falls back to RouterLabel.

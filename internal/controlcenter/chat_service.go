@@ -461,6 +461,10 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	systemPrompts := memory.CollectPrompts(cs.ContextDir)
 	// Convert --append-system-prompt flags to flat strings.
 	var sysPromptTexts []string
+	// Inject per-tier system prompt first so it has high priority.
+	if tp.SystemPrompt != "" {
+		sysPromptTexts = append(sysPromptTexts, tp.SystemPrompt)
+	}
 	// Inject onboarding prompt FIRST so it becomes the primary --system-prompt.
 	// This ensures Claude follows the onboarding instructions over all other prompts.
 	if onboarding := memory.OnboardingPrompt(cs.ContextDir); onboarding != "" {
@@ -934,6 +938,7 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 				OrchestratorMaxTurns: t.OrchestratorMaxTurns,
 				MaxIterations:        t.MaxIterations,
 				TimeoutMin:           t.TimeoutMin,
+				SystemPrompt:         t.SystemPrompt,
 			}
 		}
 	}
@@ -955,6 +960,7 @@ type tierParams struct {
 	OrchestratorMaxTurns int
 	MaxIterations        int
 	TimeoutMin           int
+	SystemPrompt         string
 }
 
 // extractReactionTag parses [[react:EMOJI]] from the start of text.

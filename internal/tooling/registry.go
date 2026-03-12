@@ -91,6 +91,37 @@ func (r *Registry) Get(name string) (ToolSchema, bool) {
 	return s, ok
 }
 
+// RegisterNative adds a native Go tool's schema to the registry.
+func (r *Registry) RegisterNative(t NativeTool) {
+	r.schemas[t.ToolName()] = t.Schema()
+}
+
+// AllSchemas returns all registered schemas (native + file-based user tools).
+// Use this to build the tool list for API LLMs.
+func (r *Registry) AllSchemas() []ToolSchema {
+	schemas := make([]ToolSchema, 0, len(r.schemas))
+	for _, s := range r.schemas {
+		schemas = append(schemas, s)
+	}
+	return schemas
+}
+
+// UserToolNames returns only user tool names from tools/ (not system/native tools).
+// Use this to generate the toolbox for Claude CLI.
+func (r *Registry) UserToolNames() []string {
+	entries, err := os.ReadDir(filepath.Join(r.dataDir, "tools"))
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && !strings.HasSuffix(e.Name(), ".json") {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
 // DiscoverToolNames returns all executable tool names found in tools.d/ and tools/.
 // This includes tools with and without JSON manifests.
 func DiscoverToolNames(dataDir string) []string {

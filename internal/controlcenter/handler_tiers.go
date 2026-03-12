@@ -54,17 +54,18 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				backends = append(backends, b)
 			}
 		}
-		// Build tool list: CLI tools + discovered ALF tools.
+		// Build tool list: CLI tools + ALF tools.
 		tools := append([]toolInfo{}, cliTools...)
-		if h.DataDir != "" {
-			for _, name := range tooling.DiscoverToolNames(h.DataDir) {
-				desc := "ALF tool"
-				if h.ToolRegistry != nil {
-					if schema, ok := h.ToolRegistry.Get(name); ok {
-						desc = schema.Description
-					}
-				}
-				tools = append(tools, toolInfo{Name: name, Desc: desc, Source: "alf"})
+		if h.ToolRegistry != nil {
+			// Native Go tools + user tools with JSON schemas — curated list only.
+			// Only tools with a JSON schema — LLMs need a definition to invoke them.
+			for _, schema := range h.ToolRegistry.AllSchemas() {
+				tools = append(tools, toolInfo{Name: schema.Name, Desc: schema.Description, Source: "alf"})
+			}
+		} else if h.DataDir != "" {
+			// Fallback when no registry: only show tools with a JSON schema.
+			for _, schema := range tooling.NewRegistry(h.DataDir).AllSchemas() {
+				tools = append(tools, toolInfo{Name: schema.Name, Desc: schema.Description, Source: "alf"})
 			}
 		}
 		// Include pre-fetched models per backend (populated by background cache).

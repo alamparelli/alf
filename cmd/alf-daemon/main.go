@@ -269,21 +269,25 @@ func main() {
 		}
 	}
 
-	// Fallback: read Telegram config from vault (primary) or config.d/telegram.json (legacy).
-	if token == "" || chatID == "" {
-		if vaultMgr != nil && vaultMgr.AdminToken() != "" {
-			if v, err := vaultMgr.GetSecret("telegram_bot_token"); err == nil && v != "" {
-				token = v
-			}
-			if v, err := vaultMgr.GetSecret("telegram_chat_id"); err == nil && v != "" {
-				chatID = v
-			}
-			if token != "" && chatID != "" {
-				log.Println("Telegram config loaded from vault")
-			}
+	// Load Telegram config: vault is authoritative when unlocked.
+	// If vault is unlocked and credentials are absent, do NOT fall back to Docker secrets
+	// (the user may have deliberately removed them). Fallback sources are only used
+	// when the vault is locked or not yet set up.
+	vaultChecked := false
+	if vaultMgr != nil && vaultMgr.AdminToken() != "" {
+		vaultChecked = true
+		if v, err := vaultMgr.GetSecret("telegram_bot_token"); err == nil && v != "" {
+			token = v
+		}
+		if v, err := vaultMgr.GetSecret("telegram_chat_id"); err == nil && v != "" {
+			chatID = v
+		}
+		if token != "" && chatID != "" {
+			log.Println("Telegram config loaded from vault")
 		}
 	}
-	if token == "" || chatID == "" {
+	if !vaultChecked && (token == "" || chatID == "") {
+		// Vault not available — fall back to legacy sources.
 		if tgCfg := readTelegramConfig(configDir); tgCfg != nil {
 			if tgCfg.BotToken != "" && tgCfg.ChatID != "" {
 				token = tgCfg.BotToken
@@ -292,10 +296,10 @@ func main() {
 			}
 		}
 	}
-	// Migrate: if Telegram config came from Docker secrets or legacy file, persist to vault.
-	if token != "" && chatID != "" && vaultMgr != nil && vaultMgr.AdminToken() != "" {
-		vaultToken, _ := vaultMgr.GetSecret("telegram_bot_token")
-		if vaultToken == "" {
+	// Migrate: if vault is unlocked and credentials came from Docker secrets, persist them.
+	if token != "" && chatID != "" && vaultChecked {
+		existing, _ := vaultMgr.GetSecret("telegram_bot_token")
+		if existing == "" {
 			if err := vaultMgr.SetSecret("telegram_bot_token", token); err == nil {
 				vaultMgr.SetSecret("telegram_chat_id", chatID)
 				log.Println("Telegram credentials migrated to vault")
@@ -538,7 +542,24 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry)
+		// On vault unlock, migrate Telegram credentials from Docker secrets into vault.
+		onVaultUnlock := func() {
+			if vaultMgr == nil || vaultMgr.AdminToken() == "" {
+				return
+			}
+			existing, _ := vaultMgr.GetSecret("telegram_bot_token")
+			if existing != "" {
+				return // already in vault
+			}
+			if token == "" || chatID == "" {
+				return // nothing to migrate
+			}
+			if err := vaultMgr.SetSecret("telegram_bot_token", token); err == nil {
+				vaultMgr.SetSecret("telegram_chat_id", chatID)
+				log.Println("Telegram credentials migrated to vault on first unlock")
+			}
+		}
+		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {

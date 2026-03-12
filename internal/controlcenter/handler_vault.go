@@ -136,7 +136,7 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Manager.AutoUnlock(req.Password); err != nil {
-		respondJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	// Create proxy token for Claude subprocess.

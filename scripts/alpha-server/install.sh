@@ -98,7 +98,16 @@ main() {
     esac
 
     echo ""
-    echo "Run 'alf init' to get started."
+    case ":$PATH:" in
+        *":${INSTALL_DIR}:"*) echo "Run 'alf init' to get started." ;;
+        *)
+            echo "Before running alf, reload your shell:"
+            echo ""
+            echo "  source ${profile}"
+            echo ""
+            echo "Then run 'alf init' to get started."
+            ;;
+    esac
 }
 
 main

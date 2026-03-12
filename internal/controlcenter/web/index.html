@@ -25,10 +25,11 @@
           <a class="nav-icon" data-view="terminal" title="Terminal"><i data-lucide="terminal"></i></a>
           <a class="nav-icon" data-view="tasks" title="Tasks"><i data-lucide="layers"></i></a>
           <a class="nav-icon" data-view="schedules" title="Schedules"><i data-lucide="calendar-clock"></i></a>
-          <a class="nav-icon" data-view="logs" title="Logs"><i data-lucide="scroll-text"></i></a>
           <a class="nav-icon" data-view="tiers" title="Tiers"><i data-lucide="sliders-horizontal"></i></a>
           <a class="nav-icon" data-view="firewall" title="Firewall"><i data-lucide="shield"></i></a>
           <a class="nav-icon" data-view="vault" title="Vault"><i data-lucide="lock"></i></a>
+          <a class="nav-icon" data-view="settings" title="Settings"><i data-lucide="settings"></i></a>
+          <a class="nav-icon" data-view="logs" title="Logs"><i data-lucide="scroll-text"></i></a>
           <a class="nav-icon" data-view="docs" title="Docs"><i data-lucide="book-open"></i></a>
         </div>
         <div class="nav-apps-section" id="navAppsSection"></div>
@@ -61,17 +62,6 @@
       </div>
 
       <div id="homeView">
-        <!-- Admin Actions -->
-        <div class="card" id="adminCard">
-          <h2>Admin</h2>
-          <div class="admin-actions">
-            <button class="btn admin-btn" id="adminRestartBtn"><i data-lucide="rotate-cw"></i> Restart</button>
-          </div>
-          <div class="admin-output" id="adminOutput" style="display:none">
-            <pre id="adminOutputText"></pre>
-          </div>
-        </div>
-
         <!-- Activity Monitor -->
         <div class="activity-bar" id="activityBar" style="display:none">
           <div class="activity-header">
@@ -79,34 +69,6 @@
             <span class="activity-label" id="activityLabel">Active</span>
           </div>
           <div class="activity-items" id="activityItems"></div>
-        </div>
-
-        <!-- Telegram Integration -->
-        <div class="card" id="telegramCard">
-          <div class="tg-header">
-            <h2>Telegram Integration</h2>
-            <button class="btn btn-sm tg-edit-btn" id="tgEditBtn" style="display:none"><i data-lucide="pencil"></i> Edit</button>
-          </div>
-          <div id="telegramStatus"></div>
-          <div id="telegramForm" style="display:none">
-            <p class="form-hint">Connect Telegram to chat with ALF from your phone.</p>
-            <div class="form-group">
-              <label>Bot Token</label>
-              <input type="text" id="tgBotToken" placeholder="123456789:ABCdef..." class="input">
-              <small class="form-help">Create a bot via <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram</small>
-            </div>
-            <div class="form-group">
-              <label>Chat ID</label>
-              <input type="text" id="tgChatID" placeholder="123456789" class="input">
-              <small class="form-help">Your personal chat ID (send /start to the bot, then check getUpdates)</small>
-            </div>
-            <div class="form-actions">
-              <button class="btn btn-primary" id="tgSaveBtn">Save & Verify</button>
-              <button class="btn" id="tgCancelBtn" style="display:none">Cancel</button>
-              <button class="btn btn-sm" id="tgDisconnectBtn" style="display:none">Disconnect</button>
-            </div>
-            <div id="tgResult" style="display:none"></div>
-          </div>
         </div>
 
         <!-- Workspace Explorer -->
@@ -552,6 +514,49 @@
             <button class="btn" id="vaultCreateTokenBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Create</button>
           </div>
           <div id="vaultTokensList" class="vault-list"></div>
+        </div>
+      </div>
+
+      <div id="settingsView" class="settings-view" style="display:none">
+        <h2>Settings</h2>
+
+        <!-- Admin Actions -->
+        <div class="card" id="adminCard">
+          <h3>System</h3>
+          <div class="admin-actions">
+            <button class="btn admin-btn" id="adminRestartBtn"><i data-lucide="rotate-cw"></i> Restart</button>
+          </div>
+          <div class="admin-output" id="adminOutput" style="display:none">
+            <pre id="adminOutputText"></pre>
+          </div>
+        </div>
+
+        <!-- Telegram Integration -->
+        <div class="card" id="telegramCard">
+          <div class="tg-header">
+            <h3>Telegram Integration</h3>
+            <button class="btn btn-sm tg-edit-btn" id="tgEditBtn" style="display:none"><i data-lucide="pencil"></i> Edit</button>
+          </div>
+          <div id="telegramStatus"></div>
+          <div id="telegramForm" style="display:none">
+            <p class="form-hint">Connect Telegram to chat with ALF from your phone.</p>
+            <div class="form-group">
+              <label>Bot Token</label>
+              <input type="text" id="tgBotToken" placeholder="123456789:ABCdef..." class="input">
+              <small class="form-help">Create a bot via <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram</small>
+            </div>
+            <div class="form-group">
+              <label>Chat ID</label>
+              <input type="text" id="tgChatID" placeholder="123456789" class="input">
+              <small class="form-help">Your personal chat ID (send /start to the bot, then check getUpdates)</small>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" id="tgSaveBtn">Save & Verify</button>
+              <button class="btn" id="tgCancelBtn" style="display:none">Cancel</button>
+              <button class="btn btn-sm" id="tgDisconnectBtn" style="display:none">Disconnect</button>
+            </div>
+            <div id="tgResult" style="display:none"></div>
+          </div>
         </div>
       </div>
 

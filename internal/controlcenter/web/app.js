@@ -79,6 +79,7 @@ function navigateTo(view) {
   const firewallView = document.getElementById('firewallView');
   const vaultView = document.getElementById('vaultView');
   const terminalView = document.getElementById('terminalView');
+  const settingsView = document.getElementById('settingsView');
 
   // Update active nav item — docs:id should highlight the docs nav item
   const navView = view.startsWith('docs:') ? 'docs' : (view.startsWith('page:') ? view : view);
@@ -100,6 +101,7 @@ function navigateTo(view) {
   firewallView.style.display = 'none';
   vaultView.style.display = 'none';
   terminalView.style.display = 'none';
+  settingsView.style.display = 'none';
 
   if (view === 'home') {
     homeView.style.display = '';
@@ -148,6 +150,9 @@ function navigateTo(view) {
     terminalView.style.display = '';
     pageFrame.src = '';
     terminalInit();
+  } else if (view === 'settings') {
+    settingsView.style.display = '';
+    pageFrame.src = '';
   }
 
   localStorage.setItem('alf-view', view);

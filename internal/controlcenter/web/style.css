@@ -1712,6 +1712,13 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 
 /* Firewall */
+.settings-view {
+  display: flex; flex-direction: column; height: 0; flex: 1;
+  padding: 24px; overflow-y: auto; width: 100%; max-width: 700px;
+}
+.settings-view > h2 { margin: 0 0 16px; }
+.settings-view .card { margin-bottom: 16px; }
+
 .firewall-view {
   display: flex; flex-direction: column; height: 0; flex: 1;
   padding: 24px; overflow-y: auto;

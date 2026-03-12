@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -131,8 +132,8 @@ func RunInit() {
 		fmt.Println("    5. Timezone")
 		fmt.Println("    6. Workspaces")
 		fmt.Println("    7. JavaScript runtime")
-		fmt.Println("    8. Start ALF & authenticate with Claude")
-		fmt.Println("    9. LLM backends (optional)")
+		fmt.Println("    8. Start ALF")
+		fmt.Println("    9. LLM providers")
 		fmt.Println()
 		fmt.Println("  It takes about 2 minutes.")
 	}
@@ -246,31 +247,9 @@ func RunInit() {
 	nextStep("Starting ALF")
 	pullAndStart(dir, botName, composeData.EnableHTTPS)
 
-	// Step 10: Claude authentication
-	nextStep("Claude authentication")
-	if isClaudeAuthenticated() {
-		PrintCheck("Claude is already authenticated")
-	} else {
-		fmt.Println()
-		fmt.Println("  Claude is the AI that powers ALF. You need to authenticate once")
-		fmt.Println("  so ALF can use Claude on your behalf.")
-		fmt.Println()
-		RunLogin()
-	}
-
-	// Step 11: LLM backends (optional)
-	nextStep("LLM backends (optional)")
-	fmt.Println()
-	fmt.Println("  ALF can also use other LLMs (GPT, Gemini, Llama, etc.) via OpenAI-compatible APIs.")
-	fmt.Println("  This is optional — you can always configure backends later in the Control Center.")
-	fmt.Print("\n  Configure LLM backends now? [y/N]: ")
-	backendInput, _ := reader.ReadString('\n')
-	backendInput = strings.TrimSpace(strings.ToLower(backendInput))
-	if backendInput == "y" || backendInput == "yes" {
-		promptBackends(reader, dir, &profile)
-	} else {
-		PrintInfo("Skipped — configure backends anytime in the Control Center")
-	}
+	// Step 10: LLM Providers
+	nextStep("LLM Providers")
+	promptLLMProviders(reader, dir, &profile)
 
 	// Step 12: Generate magic link for Control Center
 	nextStep("Control Center access link")
@@ -718,19 +697,52 @@ func promptTimezone(reader *bufio.Reader, previous string) string {
 		hint = detected
 	}
 
-	// Show current time in detected timezone so the user can verify.
+	// Common timezones for quick selection.
+	commonTZs := []string{
+		"Europe/London",
+		"Europe/Paris",
+		"Europe/Berlin",
+		"America/New_York",
+		"America/Chicago",
+		"America/Denver",
+		"America/Los_Angeles",
+		"Asia/Tokyo",
+		"Asia/Shanghai",
+		"Australia/Sydney",
+	}
+
 	now := time.Now()
+	fmt.Printf("  ALF uses your timezone for scheduled tasks and daily routines.\n")
 	if loc, err := time.LoadLocation(hint); err == nil {
-		fmt.Printf("  ALF uses your timezone for scheduled tasks and daily routines.\n")
 		fmt.Printf("  Detected: %s (currently %s)\n", hint, now.In(loc).Format("15:04"))
 	}
-	fmt.Printf("  Timezone [%s]: ", hint)
+
+	fmt.Println()
+	fmt.Printf("  Common timezones:\n")
+	for i, tz := range commonTZs {
+		loc, _ := time.LoadLocation(tz)
+		marker := "  "
+		if tz == hint {
+			marker = "→ "
+		}
+		fmt.Printf("  %s%2d) %-22s %s\n", marker, i+1, tz, now.In(loc).Format("15:04"))
+	}
+
+	fmt.Println()
+	fmt.Printf("  Pick a number, type a timezone, or press Enter for [%s]: ", hint)
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(input)
 
 	if input == "" {
 		PrintCheck(fmt.Sprintf("Timezone: %s", hint))
 		return hint
+	}
+
+	// Check if input is a number selecting from the list.
+	if n, err := strconv.Atoi(input); err == nil && n >= 1 && n <= len(commonTZs) {
+		chosen := commonTZs[n-1]
+		PrintCheck(fmt.Sprintf("Timezone: %s", chosen))
+		return chosen
 	}
 
 	if _, err := time.LoadLocation(input); err != nil {
@@ -900,65 +912,95 @@ type backendOption struct {
 	KeyPrefix string // expected key prefix for validation hint
 }
 
-var knownBackends = []backendOption{
-	{Key: "openrouter", Name: "OpenRouter (GPT, Gemini, Llama, etc.)", BaseURL: "https://openrouter.ai/api/v1", SecretName: "openrouter_api_key", KeyPrefix: "sk-or-"},
-	{Key: "openai", Name: "OpenAI (GPT-4o, o1, etc.)", BaseURL: "https://api.openai.com/v1", SecretName: "openai_api_key", KeyPrefix: "sk-"},
-	{Key: "custom", Name: "Custom OpenAI-compatible endpoint"},
+// llmProvider defines a provider choice in the init wizard.
+type llmProvider struct {
+	Key        string
+	Name       string
+	IsDefault  bool   // selected by default (Claude)
+	IsClaude   bool   // needs Claude auth flow instead of API key
+	BaseURL    string
+	SecretName string
+	KeyPrefix  string
 }
 
-func promptBackends(reader *bufio.Reader, dir string, profile *setupProfile) {
-	fmt.Println("\n  ALF supports multiple LLM backends via OpenAI-compatible APIs.")
-	fmt.Println("  Configure backends now, or skip and set them later via the Control Center.")
+var llmProviders = []llmProvider{
+	{Key: "claude", Name: "Claude (Anthropic subscription / Claude Code)", IsDefault: true, IsClaude: true},
+	{Key: "openrouter", Name: "OpenRouter (GPT, Gemini, Llama, etc.)", BaseURL: "https://openrouter.ai/api/v1", SecretName: "openrouter_api_key", KeyPrefix: "sk-or-"},
+	{Key: "openai", Name: "OpenAI (GPT-4o, o1, etc.)", BaseURL: "https://api.openai.com/v1", SecretName: "openai_api_key", KeyPrefix: "sk-"},
+	{Key: "ollama", Name: "Ollama (local models)", BaseURL: "http://host.docker.internal:11434/v1"},
+	{Key: "custom", Name: "Other (custom OpenAI-compatible endpoint)"},
+}
+
+func promptLLMProviders(reader *bufio.Reader, dir string, profile *setupProfile) {
+	fmt.Println()
+	fmt.Println("  Choose which LLM providers to configure.")
+	fmt.Println("  Claude is selected by default. You can add others now or later via the Control Center.")
 	fmt.Println()
 
 	// Show previous config.
 	if len(profile.ConfiguredBackends) > 0 {
-		fmt.Printf("  Previously configured: %s\n", strings.Join(profile.ConfiguredBackends, ", "))
-	} else if profile.OpenRouterKey {
-		fmt.Println("  Previously configured: openrouter")
+		fmt.Printf("  Previously configured: %s\n\n", strings.Join(profile.ConfiguredBackends, ", "))
 	}
 
-	for i, opt := range knownBackends {
-		fmt.Printf("    [%d] %s\n", i+1, opt.Name)
+	for i, p := range llmProviders {
+		marker := " "
+		if p.IsDefault {
+			marker = "*"
+		}
+		fmt.Printf("  %s %d) %s\n", marker, i+1, p.Name)
 	}
-	fmt.Printf("    [%d] Skip\n", len(knownBackends)+1)
 	fmt.Println()
-	fmt.Println("  Enter numbers separated by commas (e.g. 1,2) or press Enter to skip.")
-	fmt.Print("  Choice: ")
+	fmt.Println("  Enter numbers separated by commas (e.g. 1,2,3).")
+	fmt.Print("  Providers [1]: ")
 
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(input)
+
+	// Default: just Claude.
 	if input == "" {
-		// Keep existing backends.
-		if profile.OpenRouterKey || len(profile.ConfiguredBackends) > 0 {
-			PrintCheck("Keeping existing backend configuration")
-		}
-		return
+		input = "1"
 	}
 
 	var configured []string
 	parts := strings.Split(input, ",")
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
-		var idx int
-		if _, err := fmt.Sscanf(p, "%d", &idx); err != nil || idx < 1 || idx > len(knownBackends)+1 {
+		idx, err := strconv.Atoi(p)
+		if err != nil || idx < 1 || idx > len(llmProviders) {
 			PrintWarning(fmt.Sprintf("Invalid choice: %s (skipped)", p))
 			continue
 		}
-		if idx == len(knownBackends)+1 {
-			// Skip
-			return
-		}
-		opt := knownBackends[idx-1]
-		if opt.Key == "custom" {
+		prov := llmProviders[idx-1]
+		if prov.IsClaude {
+			// Claude auth flow.
+			if isClaudeAuthenticated() {
+				PrintCheck("Claude is already authenticated")
+			} else {
+				fmt.Println()
+				fmt.Println("  Claude is the AI that powers ALF. You need to authenticate once")
+				fmt.Println("  so ALF can use Claude on your behalf.")
+				fmt.Println()
+				RunLogin()
+			}
+			configured = append(configured, "claude")
+		} else if prov.Key == "custom" {
 			promptCustomBackend(reader, dir, &configured)
+		} else if prov.Key == "ollama" {
+			PrintCheck("Ollama configured (expects Ollama running on host at port 11434)")
+			PrintInfo("Make sure Ollama is running: ollama serve")
+			configured = append(configured, "ollama")
 		} else {
-			promptKnownBackend(reader, dir, opt, &configured)
+			promptKnownBackend(reader, dir, backendOption{
+				Key:        prov.Key,
+				Name:       prov.Name,
+				BaseURL:    prov.BaseURL,
+				SecretName: prov.SecretName,
+				KeyPrefix:  prov.KeyPrefix,
+			}, &configured)
 		}
 	}
 
 	profile.ConfiguredBackends = configured
-	// Backward compat: set OpenRouterKey if openrouter was configured.
 	for _, name := range configured {
 		if name == "openrouter" {
 			profile.OpenRouterKey = true

@@ -2717,6 +2717,11 @@ function schedulesRender() {
     } else {
       contentLabel = 'Prompt';
       contentValue = j.prompt || '--';
+      // Hide internal sentinel prompts for managed jobs.
+      if (j.managed && contentValue.startsWith('__') && contentValue.endsWith('__')) {
+        contentLabel = 'Type';
+        contentValue = contentValue.replace(/__/g, '') + ' (reads context/' + contentValue.replace(/__/g, '') + '.md at runtime)';
+      }
     }
 
     const canFullEdit = !j.managed && !j.system;

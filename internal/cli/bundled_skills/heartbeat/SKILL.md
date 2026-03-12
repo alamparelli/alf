@@ -24,12 +24,12 @@ The user can configure the heartbeat via YAML frontmatter:
 ```yaml
 ---
 tier: haiku
-schedule: "0 0 */6 * * *"
 ---
 ```
 
 - `tier` — which LLM tier to use (default: lowest available)
-- `schedule` — cron expression (default: every 6 hours). Editable via the Control Center.
+
+The schedule is managed by the heartbeat managed job and can be changed via the Control Center.
 
 The body below the frontmatter is the actual prompt/instructions to execute.
 

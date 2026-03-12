@@ -36,7 +36,8 @@ When you need to SAVE information:
 - NEVER store credentials or secrets anywhere — use the vault
 
 ## Tools & Skills
-You have Claude Code built-in tools (file ops, bash, etc.) plus ALF CLI tools listed in toolbox.md.
+You have Claude Code built-in tools (file ops, bash, etc.) plus ALF CLI tools.
+Check `context/toolbox.md` for the full list of available CLI tools — it is auto-generated at startup.
 All CLI tools support --help. Run it before first use.
 Missing a tool? Create one in tools/ (with --help). Missing a skill? Create one in skills/.
 

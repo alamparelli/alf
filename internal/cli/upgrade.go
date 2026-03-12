@@ -277,7 +277,11 @@ func regenerateCompose(dir string) {
 	}
 	data.Timezone = profile.Timezone
 	data.Workspaces = profile.Workspaces
-	data.Image = "ghcr.io/alamparelli/alf:latest"
+	if profile.ImageTag != "" && profile.ImageTag != "latest" {
+		data.Image = "ghcr.io/alamparelli/alf:" + profile.ImageTag
+	} else {
+		data.Image = "ghcr.io/alamparelli/alf:latest"
+	}
 	if img := os.Getenv("ALF_IMAGE"); img != "" {
 		data.Image = img
 	}

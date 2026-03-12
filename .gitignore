@@ -1,6 +1,7 @@
 # Binaries (root only)
 /alf
 /alf-daemon
+/memory-tools
 *.exe
 
 # Environment
@@ -34,3 +35,4 @@ dev-claude-session/
 mobile/
 scripts/dev-deploy.sh
 scripts/dev-local.sh
+technical/

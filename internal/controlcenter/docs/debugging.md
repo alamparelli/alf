@@ -83,6 +83,7 @@ Structured events in `logs/events.jsonl`.
 | `agent_out` | Orchestrator task completed with iterations, cost, task_id |
 | `bot_error` / `agent_error` | Errors with context |
 | `route` | Routing decision with tier and reason |
+| `schedule_run` | Scheduled job execution with job_id, job_name, tier, status (`ok`/`error`/`timeout`/`turn_limit`/`skipped`), cost, model |
 
 ```bash
 # All events for a specific session
@@ -128,6 +129,24 @@ Verify tier config in `config.d/tiers.json`.
 cat logs/events.jsonl | jq 'select(.type == "session_new" and .data.reason == "timeout")'
 ```
 Check session timeout value in config.
+
+### Turn limit reached
+```bash
+# Find all turn limit events
+grep "turn limit" logs/alf.log
+
+# Check which jobs hit the limit (from run log)
+cat logs/events.jsonl | jq 'select(.data.status == "turn_limit") | {job: .data.job_name, tier: .data.tier, time: .ts}'
+
+# Check scheduled job run history
+cat logs/scheduler/*/*.txt 2>/dev/null | head -100
+```
+Common causes:
+- Prompt too complex for the tier's `max_turns` setting
+- Skill not providing enough structure — the model wastes turns figuring out what to do
+- Missing tools — the model loops trying alternative approaches
+
+Fix: simplify the prompt, increase `max_turns` in the tier config, or add targeted skills.
 
 ### Empty response
 ```bash

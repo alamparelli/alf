@@ -3,19 +3,76 @@ package controlcenter
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
 // TiersHandler serves the full tiers configuration for the CC tiers tab.
 type TiersHandler struct {
-	TierStore TierStore
-	Notifier  Notifier
+	TierStore    TierStore
+	Notifier     Notifier
+	DataDir      string             // for tool discovery
+	ToolRegistry *tooling.Registry  // may be nil
+	ModelCache   *ModelCache        // may be nil — pre-fetched models per backend
+}
+
+// toolInfo describes an available tool for the frontend.
+type toolInfo struct {
+	Name   string `json:"name"`
+	Desc   string `json:"desc"`
+	Source string `json:"source"` // "cli" or "alf"
+}
+
+// cliTools are the Claude Code built-in tools.
+var cliTools = []toolInfo{
+	{Name: "Read", Desc: "Read files (code, config, logs, images, PDF)", Source: "cli"},
+	{Name: "Write", Desc: "Create or overwrite files", Source: "cli"},
+	{Name: "Edit", Desc: "Modify existing files (text replacement)", Source: "cli"},
+	{Name: "Bash", Desc: "Execute shell commands", Source: "cli"},
+	{Name: "Glob", Desc: "Search files by pattern (e.g. **/*.go)", Source: "cli"},
+	{Name: "Grep", Desc: "Search file contents with regex", Source: "cli"},
+	{Name: "WebSearch", Desc: "Search the web for information", Source: "cli"},
+	{Name: "WebFetch", Desc: "Fetch content from a URL", Source: "cli"},
+	{Name: "NotebookEdit", Desc: "Edit Jupyter notebooks", Source: "cli"},
+	{Name: "Agent", Desc: "Launch a sub-agent for complex tasks", Source: "cli"},
 }
 
 func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		cfg := h.TierStore.Current()
-		respondJSON(w, http.StatusOK, cfg)
+		// Include registered backends so frontend can populate dropdowns.
+		type tiersResponse struct {
+			*TiersConfig
+			AvailableBackends []string                `json:"available_backends"`
+			AvailableTools    []toolInfo              `json:"available_tools"`
+			BackendModels     map[string][]modelInfo  `json:"backend_models,omitempty"`
+		}
+		backends := make([]string, 0, len(AllowedBackends))
+		for b := range AllowedBackends {
+			if b != "" {
+				backends = append(backends, b)
+			}
+		}
+		// Build tool list: CLI tools + discovered ALF tools.
+		tools := append([]toolInfo{}, cliTools...)
+		if h.DataDir != "" {
+			for _, name := range tooling.DiscoverToolNames(h.DataDir) {
+				desc := "ALF tool"
+				if h.ToolRegistry != nil {
+					if schema, ok := h.ToolRegistry.Get(name); ok {
+						desc = schema.Description
+					}
+				}
+				tools = append(tools, toolInfo{Name: name, Desc: desc, Source: "alf"})
+			}
+		}
+		// Include pre-fetched models per backend (populated by background cache).
+		var backendModels map[string][]modelInfo
+		if h.ModelCache != nil {
+			backendModels = h.ModelCache.All()
+		}
+		respondJSON(w, http.StatusOK, tiersResponse{TiersConfig: cfg, AvailableBackends: backends, AvailableTools: tools, BackendModels: backendModels})
 
 	case http.MethodPut:
 		var cfg TiersConfig
@@ -51,8 +108,9 @@ func validateTiersConfig(cfg *TiersConfig) error {
 			return errVal("duplicate tier name: " + t.Name)
 		}
 		names[t.Name] = true
-		// Skip model validation for openrouter tiers (any model ID is valid).
-		if t.Backend != "openrouter" && !AllowedModels[t.Model] {
+		// Skip model validation for API backends (any model ID is valid).
+		isAPIBackend := t.Backend != "" && t.Backend != "cli"
+		if !isAPIBackend && !AllowedModels[t.Model] {
 			return errVal("invalid model for tier " + t.Name + ": " + t.Model)
 		}
 		if t.Effort != "" && !AllowedEfforts[t.Effort] {
@@ -62,7 +120,8 @@ func validateTiersConfig(cfg *TiersConfig) error {
 			return errVal("invalid backend for tier " + t.Name + ": " + t.Backend)
 		}
 	}
-	if cfg.RouterModel != "" && cfg.RouterBackend != "openrouter" && !AllowedModels[cfg.RouterModel] {
+	isAPIRouter := cfg.RouterBackend != "" && cfg.RouterBackend != "cli"
+	if cfg.RouterModel != "" && !isAPIRouter && !AllowedModels[cfg.RouterModel] {
 		return errVal("invalid router_model: " + cfg.RouterModel)
 	}
 	if !AllowedBackends[cfg.RouterBackend] {

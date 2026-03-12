@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/vault"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
@@ -35,6 +36,7 @@ import (
 	"github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/signal"
 	"github.com/alamparelli/alf/internal/skills"
+	"github.com/alamparelli/alf/internal/tooling"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/updater"
 	"github.com/alamparelli/alf/internal/voice"
@@ -56,32 +58,6 @@ func main() {
 		log.Println("Claude OAuth token loaded from secret")
 	}
 
-	if token == "" || chatID == "" {
-		// Log diagnostic info to help users debug secrets issues.
-		log.Println("ERROR: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
-		for _, name := range []string{"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"} {
-			filePath := os.Getenv(name + "_FILE")
-			if filePath == "" {
-				log.Printf("  %s_FILE env var: not set", name)
-			} else if _, err := os.Stat(filePath); err != nil {
-				log.Printf("  %s_FILE=%s: file not found", name, filePath)
-			} else {
-				data, _ := os.ReadFile(filePath)
-				if strings.TrimSpace(string(data)) == "" {
-					log.Printf("  %s_FILE=%s: file exists but is empty", name, filePath)
-				} else {
-					log.Printf("  %s_FILE=%s: file exists with content", name, filePath)
-				}
-			}
-			if v := os.Getenv(name); v != "" {
-				log.Printf("  %s env var: set", name)
-			} else {
-				log.Printf("  %s env var: not set", name)
-			}
-		}
-		log.Fatal("Exiting. Ensure secrets are configured — see https://github.com/alamparelli/alf#secrets")
-	}
-
 	// Verify claude CLI is available.
 	if _, err := exec.LookPath("claude"); err != nil {
 		log.Fatal("claude CLI not found in PATH")
@@ -98,6 +74,9 @@ func main() {
 	if d := os.Getenv("ALF_CONFIG_DIR"); d != "" {
 		configDir = d
 	}
+
+	// telegramEnabled is finalized after vault is available (see below).
+	telegramEnabled := token != "" && chatID != ""
 
 	// Skills directory (RW for CC, separate from data volume).
 	skillsDir := "/opt/alf/skills.d"
@@ -121,11 +100,14 @@ func main() {
 
 	// Parse allowed chat IDs for login authorization.
 	// Default to TELEGRAM_CHAT_ID if ALLOWED_CHAT_IDS not explicitly set.
-	allowedRaw := readSecret("ALLOWED_CHAT_IDS")
-	if allowedRaw == "" {
-		allowedRaw = chatID
+	var allowedChatIDs map[int64]bool
+	if telegramEnabled {
+		allowedRaw := readSecret("ALLOWED_CHAT_IDS")
+		if allowedRaw == "" {
+			allowedRaw = chatID
+		}
+		allowedChatIDs = parseAllowedChatIDs(allowedRaw)
 	}
-	allowedChatIDs := parseAllowedChatIDs(allowedRaw)
 
 	// Shared stats for CC status endpoint.
 	stats := cc.NewStats()
@@ -287,6 +269,45 @@ func main() {
 		}
 	}
 
+	// Fallback: read Telegram config from vault (primary) or config.d/telegram.json (legacy).
+	if token == "" || chatID == "" {
+		if vaultMgr != nil && vaultMgr.AdminToken() != "" {
+			if v, err := vaultMgr.GetSecret("telegram_bot_token"); err == nil && v != "" {
+				token = v
+			}
+			if v, err := vaultMgr.GetSecret("telegram_chat_id"); err == nil && v != "" {
+				chatID = v
+			}
+			if token != "" && chatID != "" {
+				log.Println("Telegram config loaded from vault")
+			}
+		}
+	}
+	if token == "" || chatID == "" {
+		if tgCfg := readTelegramConfig(configDir); tgCfg != nil {
+			if tgCfg.BotToken != "" && tgCfg.ChatID != "" {
+				token = tgCfg.BotToken
+				chatID = tgCfg.ChatID
+				log.Println("Telegram config loaded from config.d/telegram.json")
+			}
+		}
+	}
+	// Migrate: if Telegram config came from Docker secrets or legacy file, persist to vault.
+	if token != "" && chatID != "" && vaultMgr != nil && vaultMgr.AdminToken() != "" {
+		vaultToken, _ := vaultMgr.GetSecret("telegram_bot_token")
+		if vaultToken == "" {
+			if err := vaultMgr.SetSecret("telegram_bot_token", token); err == nil {
+				vaultMgr.SetSecret("telegram_chat_id", chatID)
+				log.Println("Telegram credentials migrated to vault")
+			}
+		}
+	}
+
+	telegramEnabled = token != "" && chatID != ""
+	if !telegramEnabled {
+		log.Println("Telegram not configured — running in Control Center-only mode")
+	}
+
 	// Load initial tiers config.
 	tierStore := cc.NewFileTierStore(cc.TiersPath(configDir))
 	if err := tierStore.Reload(); err != nil {
@@ -404,6 +425,8 @@ func main() {
 
 	// Chat message store for mobile app API.
 	chatStore := cc.NewChatStore(dataDir)
+	// Unified conversation store (rich messages with content blocks).
+	convStore := conversation.NewStore(dataDir)
 
 	// Claude subprocess credential (run as claude user uid 1001, gid 1000/alf).
 	claudeCred := &syscall.Credential{Uid: 1001, Gid: 1000}
@@ -412,20 +435,10 @@ func main() {
 	tiersTimeout := time.Duration(cfg.TiersTimeout) * time.Second // 0 → default 5m inside NewCLIProvider
 	cliProvider := provider.NewCLIProvider(homeDir, dataDir, tiersTimeout, claudeCred)
 
-	// OpenRouter API provider (optional).
-	orAPIKey := readSecret("OPENROUTER_API_KEY")
+	// API backends: config-driven registration.
 	apiHistory := provider.NewHistory(dataDir, 100, sessionTimeout)
-	var apiProvider *provider.APIProvider
-	if orAPIKey != "" {
-		apiProvider = provider.NewAPIProvider(orAPIKey, apiHistory)
-		log.Println("OpenRouter API provider enabled")
-	} else {
-		log.Println("OpenRouter API provider disabled (no OPENROUTER_API_KEY)")
-	}
-	registry := &provider.Registry{
-		CLI:        cliProvider,
-		OpenRouter: apiProvider,
-	}
+	registry := provider.NewRegistry(cliProvider)
+	registerBackends(registry, cfg, apiHistory, vaultMgr)
 
 	// Multi-agent coordinator.
 	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel)
@@ -433,10 +446,16 @@ func main() {
 	// Router model for message classification.
 	routerBackend := tierStore.Current().RouterBackend
 	routerModel := tierStore.Current().RouterModel
-	if routerBackend == "openrouter" {
-		// For OpenRouter, use the model string as-is.
+	isAPIRouter := routerBackend != "" && routerBackend != "cli"
+	if isAPIRouter {
+		// For API backends, use the model string as-is.
 		if routerModel == "" {
-			routerModel = "anthropic/claude-haiku-4-5"
+			if ap := registry.GetAPIBackend(routerBackend); ap != nil {
+				routerModel = ap.Name() // will get default from provider
+			}
+			if routerModel == "" {
+				routerModel = "anthropic/claude-haiku-4-5"
+			}
 		}
 	} else {
 		routerModel = router.ResolveModel(routerModel)
@@ -500,9 +519,15 @@ func main() {
 	}
 	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
 	chatService.Registry = registry
-	chatService.APIHistory = apiHistory
 	chatService.SkillStore = skillStore
 	chatService.Orchestrator = orch
+	chatService.ConvStore = convStore
+	chatService.ToolRegistry = tooling.NewRegistry(dataDir)
+	chatService.ToolExecutor = &tooling.Executor{
+		DataDir: dataDir,
+		HomeDir: homeDir,
+		Timeout: 30 * time.Second,
+	}
 	if memDB != nil {
 		chatService.Recaller = &memStoreRecaller{store: memDB}
 	}
@@ -513,7 +538,7 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr)
+		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -532,14 +557,17 @@ func main() {
 	var offset int64
 	client := &http.Client{Timeout: 35 * time.Second}
 
-	// Telegram client for sending formatted messages.
-	tg := tgclient.NewClient(token)
-	tg.HTTP = client
-	tg.OnRateLimit = func(wait time.Duration) {
-		eventLog.Log("telegram_rate_limit", map[string]any{
-			"wait_seconds": wait.Seconds(),
-		})
-		log.Printf("[telegram] rate limited — waiting %v before retry", wait)
+	// Telegram client for sending formatted messages (nil if TG disabled).
+	var tg *tgclient.Client
+	if telegramEnabled {
+		tg = tgclient.NewClient(token)
+		tg.HTTP = client
+		tg.OnRateLimit = func(wait time.Duration) {
+			eventLog.Log("telegram_rate_limit", map[string]any{
+				"wait_seconds": wait.Seconds(),
+			})
+			log.Printf("[telegram] rate limited — waiting %v before retry", wait)
+		}
 	}
 
 	// Auto-update checker (initialized here, scheduled via unified scheduler below).
@@ -551,7 +579,7 @@ func main() {
 		}
 		notifyFn := func(current, latest string) {
 			log.Printf("update available: %s → %s", current, latest)
-			if cfg.AutoUpdateNotify && token != "" && chatID != "" {
+			if cfg.AutoUpdateNotify && telegramEnabled && tg != nil {
 				cid, _ := strconv.ParseInt(chatID, 10, 64)
 				if cid != 0 {
 					tg.SendHTML(cid, fmt.Sprintf("Update available: %s → %s\nRun <code>alf upgrade</code> on the host to update.", current, latest))
@@ -641,11 +669,108 @@ func main() {
 			"Security Audit",
 			"0 0 9 * * *", // daily at 09:00
 			firstFallbackTier(tierStore),
-			"Run a full security audit. Read all files in /home/alf/data/skills.d/, /home/alf/data/skills/, /home/alf/data/tools.d/, and /home/alf/data/tools/. Follow the security-audit skill instructions to produce a structured report.",
+			"Execute the bash commands from the security-audit skill using the Bash tool to discover files, then use the Read tool to analyze each one. Output your security report.",
 			"telegram",
 			[]string{"security-audit"},
 		); err != nil {
 			log.Printf("warning: failed to seed security-audit job: %v", err)
+		}
+	}
+
+	// Seed health check job — runs every 2h silently, only reports when issues found.
+	if _, ok := skillStore.Get("health-check"); ok {
+		if _, err := sched.EnsureManaged(
+			"health-check",
+			"Health Check",
+			"0 0 */2 * * *", // every 2 hours
+			firstFallbackTier(tierStore),
+			"Execute each bash command from the health-check skill using the Bash tool. Analyze the results. If no issues, respond with empty string (no text). Only output a report if real problems are found.",
+			"telegram",
+			[]string{"health-check"},
+		); err != nil {
+			log.Printf("warning: failed to seed health-check job: %v", err)
+		}
+	}
+
+	// When Telegram is not configured, run a CC-only event loop.
+	if !telegramEnabled {
+		log.Println("Running in Control Center-only mode (no Telegram polling)")
+		for event := range reloadCh {
+			switch event {
+			case cc.ReloadConfig:
+				if newCfg, err := configStore.Load(); err == nil {
+					oldTZ := cfg.Timezone
+					cfg = newCfg
+					if cfg.SessionTimeout > 0 {
+						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
+					}
+					if cfg.MaxSessions > 0 {
+						sessions.SetMaxSessions(cfg.MaxSessions)
+					}
+					if cfg.Timezone != oldTZ {
+						time.Local = resolveTimezone(cfg.Timezone)
+					}
+					registerBackends(registry, cfg, apiHistory, vaultMgr)
+					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
+				}
+				if git != nil {
+					git.Commit("config updated via CC")
+				}
+			case cc.ReloadTiers:
+				if err := tierStore.Reload(); err != nil {
+					log.Printf("ERROR: tiers reload failed: %v", err)
+				} else {
+					log.Println("tiers reloaded")
+				}
+				routerBackend = tierStore.Current().RouterBackend
+				isAPIR := routerBackend != "" && routerBackend != "cli"
+				if isAPIR {
+					newModel := tierStore.Current().RouterModel
+					if newModel == "" {
+						newModel = "anthropic/claude-haiku-4-5"
+					}
+					routerModel = newModel
+				} else {
+					newModel := router.ResolveModel(tierStore.Current().RouterModel)
+					if newModel == "" {
+						newModel = router.ResolveModel("haiku")
+					}
+					routerModel = newModel
+				}
+				if git != nil {
+					git.Commit("tiers updated via CC")
+				}
+			case cc.ReloadSkills:
+				if err := skillStore.Reload(); err != nil {
+					log.Printf("skills reload error: %v", err)
+				} else {
+					log.Println("skills reloaded")
+				}
+				if git != nil {
+					git.Commit("skills updated via CC")
+				}
+			case cc.ReloadAgents:
+				if err := agentStore.Reload(); err != nil {
+					log.Printf("agents reload error: %v", err)
+				} else {
+					teams := agentStore.All()
+					log.Printf("agents reloaded (%d teams)", len(teams))
+					if len(teams) > 0 {
+						autoEnableAgentTier(tierStore)
+					}
+				}
+			case cc.ReloadFirewall:
+				if newFWCfg, err := fwStore.Load(); err == nil {
+					fwProxy.Reload(newFWCfg)
+				} else {
+					log.Printf("firewall reload error: %v", err)
+				}
+			case cc.ReloadTools:
+				log.Println("tools reloaded")
+				if git != nil {
+					git.Commit("tools updated via CC")
+				}
+			}
 		}
 	}
 
@@ -668,7 +793,9 @@ func main() {
 						time.Local = resolveTimezone(cfg.Timezone)
 						log.Printf("config: timezone changed to %q (logs updated, scheduler needs restart)", cfg.Timezone)
 					}
-					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone)
+					// Re-register backends if config changed.
+					registerBackends(registry, cfg, apiHistory, vaultMgr)
+					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {
 					git.Commit("config updated via CC")
@@ -680,7 +807,8 @@ func main() {
 					log.Println("tiers reloaded")
 				}
 				routerBackend = tierStore.Current().RouterBackend
-				if routerBackend == "openrouter" {
+				isAPIR := routerBackend != "" && routerBackend != "cli"
+				if isAPIR {
 					newModel := tierStore.Current().RouterModel
 					if newModel == "" {
 						newModel = "anthropic/claude-haiku-4-5"
@@ -796,6 +924,18 @@ func main() {
 			if userText != "" {
 				chatHistory.Add(u.Message.Chat.ID, "user", userText)
 			}
+
+			// Write user message to unified conversation store.
+			tgUserMsgID := conversation.NewMessageID()
+			tgConvID := convStore.ConvID(conversation.ChannelTelegram)
+			convStore.Append(conversation.Message{
+				ID:        tgUserMsgID,
+				ConvID:    tgConvID,
+				Channel:   conversation.ChannelTelegram,
+				Role:      "user",
+				Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: userText}},
+				Timestamp: time.Now(),
+			})
 
 			// Extract reply context if this is a quoted reply.
 			isReply := u.Message.ReplyToMessage != nil
@@ -1081,7 +1221,7 @@ func main() {
 				cmdSource = u.Message.Caption
 			}
 			if strings.HasPrefix(cmdSource, "/") {
-				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir, orch, apiHistory) {
+				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir, orch, convStore) {
 					continue
 				}
 				// Check for force command: /<tier_name> <message>
@@ -1256,6 +1396,17 @@ func main() {
 					"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
 				})
 				chatSessions.TouchContext(chatID, "router")
+				// Write router response to conversation store.
+				convStore.Append(conversation.Message{
+					ID:        conversation.NewMessageID(),
+					ConvID:    tgConvID,
+					Channel:   conversation.ChannelTelegram,
+					Role:      "assistant",
+					Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: routeResult.Response}},
+					Timestamp: time.Now(),
+					Model:     "router",
+					Tier:      "router",
+				})
 				// React to the user's message before sending the reply (more natural).
 				maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, routeResult.React, contextDir)
 				if mid, err := tg.SendMessageReturnID(chatID, routeResult.Response); err == nil && mid != 0 {
@@ -1292,7 +1443,7 @@ func main() {
 			}
 
 			// Resolve tier to params.
-			tp = resolveTierParams(routeResult.Tier, tierStore.Current())
+			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), dataDir)
 
 			eventLog.Log("router_classify", map[string]any{
 				"chat_id":          chatID,
@@ -1410,6 +1561,17 @@ func main() {
 					if msgID, err := tg.SendMessageReturnID(orchChatID, orchResult); err == nil && msgID != 0 {
 						alfMsgIDs.Add(msgID)
 						chatHistory.Add(orchChatID, "alf", orchResult)
+						convStore.Append(conversation.Message{
+							ID:        conversation.NewMessageID(),
+							ConvID:    tgConvID,
+							Channel:   conversation.ChannelTelegram,
+							Role:      "assistant",
+							Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: orchResult}},
+							Timestamp: time.Now(),
+							Model:     "agent",
+							Tier:      "agent",
+							CostUSD:   orchMeta.TotalCost,
+						})
 					}
 					if orchMediaCleanup != nil {
 						time.Sleep(10 * time.Minute)
@@ -1423,7 +1585,7 @@ func main() {
 			statusAnim := newTypingIndicator(tg, chatID, "choose_sticker")
 
 			lastPhase := ""
-			onProgress := func(event provider.StreamEvent) {
+			rawOnProgress := func(event provider.StreamEvent) {
 				if event.Type == lastPhase {
 					return
 				}
@@ -1437,6 +1599,9 @@ func main() {
 					statusAnim.SetAction("typing")
 				}
 			}
+			// Wrap with accumulator to capture content blocks.
+			tgAcc := conversation.NewAccumulator()
+			onProgress := tgAcc.OnProgress(rawOnProgress)
 
 			// Build system prompts (context files + reaction instruction).
 			sysPrompts := memory.CollectPrompts(contextDir)
@@ -1473,9 +1638,32 @@ func main() {
 				sysPromptTexts = append(sysPromptTexts, "Documentation is available in ~/data/docs/. Read ~/data/llms.txt for the index. When you install packages, read the container-packages doc first.")
 			}
 
+			// Inject session/conversation ID so the LLM can provide it when asked.
+			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf("Current session ID: %s (channel: tg)", tgConvID))
+
 			// Select provider based on tier backend.
-			tierProv := registry.ForBackend(tp.Backend)
-			isAPITier := tp.Backend == "openrouter"
+			var tierProv provider.Provider = registry.ForBackend(tp.Backend)
+			isAPITier := tp.Backend != "" && tp.Backend != "cli"
+
+			// Wrap API provider with agentic tool loop when tier has tools.
+			if isAPITier && chatService.ToolRegistry != nil && chatService.ToolExecutor != nil && len(tp.Tools) > 0 {
+				if apiProv, ok := tierProv.(*provider.APIProvider); ok {
+					schemas := chatService.ToolRegistry.ForTools(tp.Tools)
+					if len(schemas) > 0 {
+						tools := tooling.ToOpenAI(schemas)
+						maxTurns := tp.MaxTurns
+						if maxTurns <= 0 {
+							maxTurns = 10
+						}
+						tierProv = provider.NewToolLoop(apiProv, &tgToolExecutorAdapter{exec: chatService.ToolExecutor}, tools, maxTurns)
+						log.Printf("[chat:%d] tool loop enabled: %d tools, max_turns=%d", chatID, len(schemas), maxTurns)
+					}
+				}
+			}
+
+			// Detect backend switch for context continuity.
+			_, lastBackend, _ := chatSessions.ContextFull(chatID)
+			backendChanged := lastBackend != "" && lastBackend != tp.Backend
 
 			invokeParams := provider.Params{
 				Model:         tp.Model,
@@ -1488,8 +1676,28 @@ func main() {
 				DataDir:       dataDir,
 			}
 			if isAPITier {
-				invokeParams.SessionKey = fmt.Sprintf("tg:%d", chatID)
-				invokeParams.ResumeID = "" // API tiers use history, not --resume
+				invokeParams.ResumeID = "" // API tiers use ConvMessages, not --resume
+			}
+			if backendChanged {
+				log.Printf("[chat:%d] backend switch %s→%s, dropping resume", chatID, lastBackend, tp.Backend)
+				invokeParams.ResumeID = ""
+			}
+
+			// Inject conversation context from unified store.
+			tgConvMsgs := conversation.BuildContext(convStore.Recent(conversation.ChannelTelegram, 0), conversation.DefaultMaxMessages)
+			if isAPITier || invokeParams.ResumeID == "" {
+				if isAPITier {
+					flat := conversation.FlattenForAPI(tgConvMsgs)
+					ctxMsgs := make([]provider.ContextMessage, len(flat))
+					for i, m := range flat {
+						ctxMsgs[i] = provider.ContextMessage{Role: m.Role, Content: m.Content}
+					}
+					invokeParams.ConvMessages = ctxMsgs
+				} else {
+					if histPrompt := conversation.FormatAsSystemPrompt(tgConvMsgs); histPrompt != "" {
+						invokeParams.SystemPrompts = append(invokeParams.SystemPrompts, histPrompt)
+					}
+				}
 			}
 
 			// Signal server: per-invocation socket for react/status from Claude subprocess.
@@ -1546,7 +1754,7 @@ func main() {
 			// Store the session ID returned by Claude for future --resume.
 			if result.SessionID != "" {
 				isNew := resumeID == ""
-				chatSessions.SetWithContext(chatID, result.SessionID, routeResult.Tier)
+				chatSessions.SetWithBackend(chatID, result.SessionID, routeResult.Tier, tp.Backend)
 				if isNew {
 					reason := "first"
 					if resumeID == "" && len(chatSessions.Get(chatID)) > 0 {
@@ -1629,6 +1837,29 @@ func main() {
 			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {
 				alfMsgIDs.Add(msgID)
 				chatHistory.Add(chatID, "alf", reply)
+
+				// Write assistant message to unified conversation store.
+				var tgBlocks []conversation.ContentBlock
+				if tgAcc != nil {
+					tgBlocks = tgAcc.Blocks()
+				}
+				if len(tgBlocks) == 0 {
+					tgBlocks = []conversation.ContentBlock{{Type: conversation.BlockText, Text: cleanText}}
+				}
+				convStore.Append(conversation.Message{
+					ID:        conversation.NewMessageID(),
+					ConvID:    tgConvID,
+					Channel:   conversation.ChannelTelegram,
+					Role:      "assistant",
+					Blocks:    tgBlocks,
+					Timestamp: time.Now(),
+					Model:     result.Model,
+					Tier:      routeResult.Tier,
+					Backend:   tp.Backend,
+					CostUSD:   result.CostUSD,
+					SessionID: result.SessionID,
+				})
+
 				log.Printf("tracking alf msg %d (buffer=%d)", msgID, alfMsgIDs.Size())
 				// Log sent message ID
 				eventLog.Log("message_sent", map[string]any{
@@ -1654,7 +1885,7 @@ type tierParams struct {
 	OrchestratorMaxTurns int      // turns per orchestrator brain call (0 = default 3)
 	MaxIterations        int      // max agent iterations (0 = default)
 	TimeoutMin           int      // global timeout in minutes (0 = default)
-	Backend              string   // "cli" (default), "openrouter"
+	Backend              string   // "cli" (default), or registered backend name
 }
 
 // vaultPassword reads the master password from Docker secret first,
@@ -1683,6 +1914,84 @@ func readSecret(envVar string) string {
 		}
 	}
 	return strings.TrimSpace(os.Getenv(envVar))
+}
+
+// telegramJSONConfig mirrors controlcenter.TelegramConfig for reading.
+type telegramJSONConfig struct {
+	BotToken string `json:"bot_token"`
+	ChatID   string `json:"chat_id"`
+}
+
+// readTelegramConfig reads Telegram settings from config.d/telegram.json (set via CC).
+func readTelegramConfig(configDir string) *telegramJSONConfig {
+	data, err := os.ReadFile(filepath.Join(configDir, "telegram.json"))
+	if err != nil {
+		return nil
+	}
+	var cfg telegramJSONConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil
+	}
+	return &cfg
+}
+
+// registerBackends registers API backends from config.json into the registry.
+// Backward compat: if no backends in config, check for OPENROUTER_API_KEY secret.
+func registerBackends(registry *provider.Registry, cfg *cc.Config, apiHistory *provider.History, vaultMgr *vault.Manager) {
+	if len(cfg.Backends) > 0 {
+		for name, bcfg := range cfg.Backends {
+			apiKey := resolveBackendAPIKey(name, bcfg, vaultMgr)
+			if bcfg.Auth != "none" && apiKey == "" {
+				log.Printf("backend %s: skipped (no API key available)", name)
+				continue
+			}
+			auth := bcfg.Auth
+			if auth == "" {
+				auth = "bearer"
+			}
+			prov := provider.NewAPIProviderFromConfig(provider.APIProviderConfig{
+				Name:         name,
+				BaseURL:      bcfg.BaseURL,
+				APIKey:       apiKey,
+				Headers:      bcfg.Headers,
+				DefaultModel: bcfg.DefaultModel,
+				MaxTokens:    bcfg.MaxTokens,
+				Auth:         auth,
+			}, apiHistory)
+			registry.Register(name, prov)
+		}
+	} else {
+		// Backward compat: check for legacy OPENROUTER_API_KEY secret.
+		if orAPIKey := readSecret("OPENROUTER_API_KEY"); orAPIKey != "" {
+			prov := provider.NewAPIProvider(orAPIKey, apiHistory)
+			registry.Register("openrouter", prov)
+			log.Println("OpenRouter API provider enabled (legacy secret)")
+		} else {
+			log.Println("No API backends configured")
+		}
+	}
+	// Update AllowedBackends for tier validation.
+	cc.SetAllowedBackends(registry.BackendNames())
+}
+
+// resolveBackendAPIKey resolves the API key for a backend.
+// Priority: vault_service → Docker secret (BACKENDNAME_API_KEY) → empty.
+func resolveBackendAPIKey(name string, bcfg cc.BackendConfig, vaultMgr *vault.Manager) string {
+	if bcfg.Auth == "none" {
+		return ""
+	}
+	// Try vault first if vault_service is specified.
+	if bcfg.VaultService != "" && vaultMgr != nil {
+		// Vault proxy doesn't expose raw keys — the proxy approach means
+		// requests go through vault. For now, fall through to Docker secret.
+		// Future: vault-proxy integration for direct API proxying.
+	}
+	// Fall back to Docker secret: <UPPERCASE_NAME>_API_KEY
+	secretName := strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
+	if key := readSecret(secretName); key != "" {
+		return key
+	}
+	return ""
 }
 
 type Update struct {
@@ -1921,7 +2230,7 @@ func hasMedia(msg *Message) bool {
 }
 
 // handleCommand processes known /commands. Returns true if handled.
-func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string, orch *agents.Orchestrator, apiHistory *provider.History) bool {
+func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string, orch *agents.Orchestrator, convStore *conversation.Store) bool {
 	cmd := strings.SplitN(msg.Text, " ", 2)[0]
 	switch cmd {
 	case "/login":
@@ -1929,7 +2238,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 		return true
 	case "/new":
 		old := chatSessions.Archive(msg.Chat.ID)
-		apiHistory.Clear(fmt.Sprintf("tg:%d", msg.Chat.ID))
+		convStore.NewConversation(conversation.ChannelTelegram)
 		memory.ClearOnboarding(contextDir)
 		reply := "New session started."
 		if old != "" {
@@ -1944,6 +2253,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 	case "/start":
 		memory.SetOnboarding(contextDir)
 		chatSessions.Archive(msg.Chat.ID) // fresh session so onboarding prompt takes effect
+		convStore.NewConversation(conversation.ChannelTelegram)
 		// Auto-trigger onboarding conversation — fall through to normal message processing.
 		msg.Text = "hello"
 		return false
@@ -2103,18 +2413,26 @@ func answerCallbackQuery(client *http.Client, token string, callbackID string) {
 	defer resp.Body.Close()
 }
 
-func resolveTierParams(tierName string, tiers *cc.TiersConfig) tierParams {
+func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			model := t.Model
 			// For CLI backend, resolve short names to full model IDs.
-			// For openrouter, use the model string as-is (e.g. "anthropic/claude-haiku-4-5").
-			if t.Backend != "openrouter" {
+			// For API backends, use the model string as-is.
+			if t.Backend == "" || t.Backend == "cli" {
 				model = router.ResolveModel(t.Model)
+			}
+			// Resolve ["*"] into all available tool names.
+			tools := t.Tools
+			if len(tools) == 1 && tools[0] == "*" {
+				tools = tooling.DiscoverToolNames(dataDir)
+				if len(tools) > 0 {
+					log.Printf("[chat] tier %q: wildcard resolved to %d tools", tierName, len(tools))
+				}
 			}
 			return tierParams{
 				Model:                model,
-				Tools:                t.Tools,
+				Tools:                tools,
 				WriteCapable:         t.WriteCapable,
 				Effort:               t.Effort,
 				MaxTurns:             t.MaxTurns,
@@ -3072,6 +3390,10 @@ func (a *ccScheduleAdapter) Delete(id string) error {
 	return a.engine.Delete(id)
 }
 
+func (a *ccScheduleAdapter) RunNow(id string) error {
+	return a.engine.RunNow(id)
+}
+
 func (a *ccScheduleAdapter) Update(id string, fields map[string]string) (*cc.ScheduleJob, error) {
 	j, err := a.engine.Update(id, fields)
 	if err != nil {
@@ -3108,6 +3430,7 @@ func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 		sj.NextRun = j.NextRun.Format(time.RFC3339)
 	}
 	sj.LastError = j.LastError
+	sj.Running = j.IsRunning()
 	return sj
 }
 
@@ -3394,5 +3717,23 @@ func setupUserPackagesPaths() {
 		}
 	}
 	log.Printf("user-packages: PATH includes %s, LD_LIBRARY_PATH includes %s", binDir, libDir)
+}
+
+// tgToolExecutorAdapter bridges tooling.Executor to provider.ToolExecutor for the TG handler.
+type tgToolExecutorAdapter struct {
+	exec *tooling.Executor
+}
+
+func (a *tgToolExecutorAdapter) Execute(ctx context.Context, call provider.ToolCallRequest) provider.ToolCallResult {
+	result := a.exec.Execute(ctx, tooling.CallRequest{
+		ID:        call.ID,
+		Name:      call.Name,
+		Arguments: call.Arguments,
+	})
+	return provider.ToolCallResult{
+		ID:      result.ID,
+		Output:  result.Output,
+		IsError: result.IsError,
+	}
 }
 

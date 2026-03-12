@@ -1,0 +1,14 @@
+{
+  "name": "forget",
+  "description": "Delete a memory by ID. Use recall first to find the ID.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "integer",
+        "description": "Memory ID to delete"
+      }
+    },
+    "required": ["id"]
+  }
+}

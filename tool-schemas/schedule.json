@@ -1,0 +1,52 @@
+{
+  "name": "schedule",
+  "description": "Manage scheduled jobs: create, list, delete, update. Supports cron schedules, one-shot times, LLM prompts, bash commands, and reminders.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["create", "list", "delete", "update"],
+        "description": "Action to perform"
+      },
+      "name": {
+        "type": "string",
+        "description": "Job name (required for create)"
+      },
+      "schedule": {
+        "type": "string",
+        "description": "Cron expression (e.g. '0 0 9 * * 1-5') or RFC3339 one-shot time (required for create)"
+      },
+      "tier": {
+        "type": "string",
+        "description": "LLM tier (haiku, sonnet, opus) or 'direct' for bash commands"
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Prompt for LLM tiers"
+      },
+      "command": {
+        "type": "string",
+        "description": "Bash command for direct tier"
+      },
+      "message": {
+        "type": "string",
+        "description": "Direct push notification text (no LLM, no command)"
+      },
+      "output": {
+        "type": "string",
+        "enum": ["telegram", "file", "both", "silent"],
+        "description": "Output destination (default: telegram)"
+      },
+      "id": {
+        "type": "string",
+        "description": "Job ID (required for delete/update)"
+      },
+      "user_only": {
+        "type": "boolean",
+        "description": "List only user-created jobs (not system jobs)"
+      }
+    },
+    "required": ["action"]
+  }
+}

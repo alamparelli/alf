@@ -10,6 +10,7 @@ import (
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
+	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
 )
 
@@ -37,6 +38,9 @@ type Deps struct {
 	FirewallProxy  *firewall.Proxy     // nil if firewall unavailable
 	VaultManager     *vault.Manager      // nil if vault unavailable
 	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable
+	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
+	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
+	ModelCache       *ModelCache           // nil if model cache unavailable
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS
@@ -97,8 +101,17 @@ func HandlerFactory(deps Deps) http.Handler {
 	})
 
 	mux.Handle("/api/tiers", &TiersHandler{
-		TierStore: deps.TierStore,
-		Notifier:  deps.Notifier,
+		TierStore:    deps.TierStore,
+		Notifier:     deps.Notifier,
+		DataDir:      deps.DataDir,
+		ToolRegistry: deps.ToolRegistry,
+		ModelCache:   deps.ModelCache,
+	})
+
+	// Backend models discovery.
+	mux.Handle("/api/backends/", &BackendsModelsHandler{
+		Registry: deps.ProviderRegistry,
+		Cache:    deps.ModelCache,
 	})
 
 	// Resource CRUD routes.
@@ -109,6 +122,12 @@ func HandlerFactory(deps Deps) http.Handler {
 		Store:    deps.ToolStore,
 		Notifier: deps.Notifier,
 		Event:    ReloadTools,
+	})
+	mux.Handle("/api/skills/import", &SkillImportHandler{
+		DataDir:          deps.DataDir,
+		ProviderRegistry: deps.ProviderRegistry,
+		ModelCache:       deps.ModelCache,
+		Notifier:         deps.Notifier,
 	})
 	mux.Handle("/api/skills/", &ResourceHandler{
 		Store:    deps.SkillStore,
@@ -150,6 +169,9 @@ func HandlerFactory(deps Deps) http.Handler {
 
 	// Scheduled jobs.
 	mux.Handle("/api/schedules", &SchedulesHandler{
+		Engine: deps.Scheduler,
+	})
+	mux.Handle("/api/schedules/run", &ScheduleRunHandler{
 		Engine: deps.Scheduler,
 	})
 	mux.Handle("/api/schedules/logs", &ScheduleLogsHandler{
@@ -195,6 +217,18 @@ func HandlerFactory(deps Deps) http.Handler {
 	}
 	mux.Handle("/api/vault/", vaultH)
 	mux.Handle("/api/vault", vaultH)
+
+	// Activity monitor (active operations).
+	mux.Handle("/api/activity", &ActivityHandler{
+		ChatService:  deps.ChatService,
+		Scheduler:    deps.Scheduler,
+		Orchestrator: deps.Orchestrator,
+	})
+
+	// Telegram integration.
+	mux.Handle("/api/telegram", &TelegramHandler{
+		Vault: deps.VaultManager,
+	})
 
 	// Docs (embedded markdown).
 	mux.Handle("/api/docs/", &DocsHandler{})
@@ -247,7 +281,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
 	handler = securityHeadersMiddleware(handler)
-	handler = newRateLimiter(60).middleware(handler) // 60 req/min per IP
+	handler = newRateLimiter(120).middleware(handler) // 120 req/min per IP
 	handler = loggingMiddleware(handler)
 
 	// Terminal WebSocket: registered outside the main middleware stack so the

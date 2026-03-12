@@ -79,6 +79,55 @@ func TestConfigHandler_PUT_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestConfigHandler_PUT_BackendMissingBaseURL(t *testing.T) {
+	h := &ConfigHandler{Store: &mockConfigStore{}}
+
+	body := `{"log_level":"info","backends":{"test":{"auth":"bearer"}}}`
+	req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "base_url is required") {
+		t.Errorf("expected base_url error, got: %s", rec.Body.String())
+	}
+}
+
+func TestConfigHandler_PUT_BackendInvalidAuth(t *testing.T) {
+	h := &ConfigHandler{Store: &mockConfigStore{}}
+
+	body := `{"log_level":"info","backends":{"test":{"base_url":"https://example.com/v1","auth":"invalid"}}}`
+	req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid auth") {
+		t.Errorf("expected auth error, got: %s", rec.Body.String())
+	}
+}
+
+func TestConfigHandler_PUT_BackendValid(t *testing.T) {
+	store := &mockConfigStore{}
+	h := &ConfigHandler{Store: store}
+
+	body := `{"log_level":"info","backends":{"openai":{"base_url":"https://api.openai.com/v1","auth":"bearer"}}}`
+	req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.saved == nil || len(store.saved.Backends) != 1 {
+		t.Error("expected backends to be saved")
+	}
+}
+
 func TestConfigHandler_DELETE_NotAllowed(t *testing.T) {
 	h := &ConfigHandler{Store: &mockConfigStore{}}
 

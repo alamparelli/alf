@@ -198,6 +198,42 @@ func (e *Engine) executeJob(j *Job) {
 		return
 	}
 
+	// Detect turn limit as a soft failure — enrich with job context.
+	if strings.Contains(text, "Turn limit reached") || strings.Contains(text, "turn limit") {
+		rec.Status = "turn_limit"
+		promptSnippet := j.Prompt
+		if len(promptSnippet) > 120 {
+			promptSnippet = promptSnippet[:120] + "..."
+		}
+		tierLabel := j.Tier
+		if tierLabel == "" {
+			tierLabel = "default"
+		}
+		detail := fmt.Sprintf(
+			"⚠️ Turn limit reached for job \"%s\"\n"+
+				"• Job ID: %s\n"+
+				"• Tier: %s\n"+
+				"• Prompt: %s\n\n"+
+				"The task could not complete within the allowed turns. "+
+				"Try: simplify the prompt, increase max_turns in tier config, or split into smaller steps.",
+			j.Name, j.ID, tierLabel, promptSnippet)
+		j.LastError = "turn limit reached"
+		rec.Error = "turn limit reached"
+		log.Printf("scheduler: [%s] %q turn limit reached (%s)", j.ID, j.Name, duration.Round(time.Millisecond))
+		e.runLog.appendAndTruncate(rec)
+		e.logScheduleRun(rec, text)
+
+		if j.Output == "telegram" || j.Output == "both" {
+			if e.cfg.TG != nil && e.cfg.ChatID != 0 {
+				e.cfg.TG.SendMessage(e.cfg.ChatID, detail)
+			}
+		}
+		if !j.System {
+			e.store.Save()
+		}
+		return
+	}
+
 	j.LastError = ""
 	rec.Status = "ok"
 	rec.OutputLen = len(text)

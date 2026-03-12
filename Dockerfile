@@ -165,6 +165,9 @@ RUN mkdir -p /opt/alf/tools.d \
     && ln -s /opt/alf/bin/vault-cli /opt/alf/tools.d/vault \
     && ln -s /opt/alf/bin/vault-server /usr/local/bin/vault-server
 
+# Tool schemas for API-tier agentic tool loop.
+COPY tool-schemas/*.json /opt/alf/tools.d/
+
 # Create users for two-user privilege model.
 RUN groupadd --gid 1000 alf \
     && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf \

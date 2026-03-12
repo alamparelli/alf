@@ -125,10 +125,13 @@ func RunInit() {
 		fmt.Println()
 		fmt.Println("    1. Check prerequisites (Docker)")
 		fmt.Println("    2. Choose where to install ALF")
-		fmt.Println("    3. Connect Telegram (optional — for chatting with ALF via your phone)")
-		fmt.Println("    4. Set up your Control Center (web dashboard to manage ALF)")
-		fmt.Println("    5. Configure timezone, LLM backends, workspaces")
-		fmt.Println("    6. Authenticate with Claude")
+		fmt.Println("    3. Connect Telegram (optional)")
+		fmt.Println("    4. Set up your Control Center (web dashboard)")
+		fmt.Println("    5. Timezone")
+		fmt.Println("    6. Workspaces")
+		fmt.Println("    7. JavaScript runtime")
+		fmt.Println("    8. Start ALF & authenticate with Claude")
+		fmt.Println("    9. LLM backends (optional)")
 		fmt.Println()
 		fmt.Println("  It takes about 2 minutes.")
 	}
@@ -166,6 +169,9 @@ func RunInit() {
 	if promptHTTPS(reader, prev.HTTPS) {
 		domain := promptDomain(reader, prev.Domain)
 		acmeEmail := promptAcmeEmail(reader, prev.AcmeEmail)
+		fmt.Println()
+		PrintInfo("Make sure ports 80 and 443 are open on your server/firewall.")
+		PrintInfo("Traefik needs both ports for HTTPS certificate generation (ACME).")
 		checkPortsForHTTPS()
 		composeData = ComposeData{
 			EnableHTTPS:   true,
@@ -193,27 +199,24 @@ func RunInit() {
 		})
 	}
 
-	// Step 5: Additional configuration
-	nextStep("Configuration")
-
-	// Timezone
+	// Step 5: Timezone
+	nextStep("Timezone")
 	tz := promptTimezone(reader, prev.Timezone)
 	composeData.Timezone = tz
 	profile := loadSetupProfile()
 	profile.Timezone = tz
 	saveSetupProfile(profile)
 
-	// LLM backends
-	promptBackends(reader, dir, &profile)
-
-	// Workspaces
+	// Step 6: Workspaces
+	nextStep("Workspaces")
 	workspaces := promptWorkspaces(reader, prev.Workspaces)
 	composeData.Workspaces = workspaces
 	profile = loadSetupProfile()
 	profile.Workspaces = workspaces
 	saveSetupProfile(profile)
 
-	// JS Runtime
+	// Step 7: JS Runtime
+	nextStep("JavaScript runtime")
 	jsRuntime := promptJSRuntime(reader, prev.JSRuntime)
 	composeData.JSRuntime = jsRuntime
 	profile = loadSetupProfile()
@@ -226,15 +229,15 @@ func RunInit() {
 		composeData.Image = img
 	}
 
-	// Step 6: Generate files
+	// Step 8: Generate files
 	nextStep("Generating configuration files")
 	generateFiles(dir, botToken, chatID, composeData)
 
-	// Step 7: Pull & Start
+	// Step 9: Pull & Start
 	nextStep("Starting ALF")
 	pullAndStart(dir, botName, composeData.EnableHTTPS)
 
-	// Step 8: Claude authentication
+	// Step 10: Claude authentication
 	nextStep("Claude authentication")
 	fmt.Println()
 	fmt.Println("  Claude is the AI that powers ALF. You need to authenticate once")
@@ -242,7 +245,21 @@ func RunInit() {
 	fmt.Println()
 	RunLogin()
 
-	// Step 9: Generate magic link for Control Center
+	// Step 11: LLM backends (optional)
+	nextStep("LLM backends (optional)")
+	fmt.Println()
+	fmt.Println("  ALF can also use other LLMs (GPT, Gemini, Llama, etc.) via OpenAI-compatible APIs.")
+	fmt.Println("  This is optional — you can always configure backends later in the Control Center.")
+	fmt.Print("\n  Configure LLM backends now? [y/N]: ")
+	backendInput, _ := reader.ReadString('\n')
+	backendInput = strings.TrimSpace(strings.ToLower(backendInput))
+	if backendInput == "y" || backendInput == "yes" {
+		promptBackends(reader, dir, &profile)
+	} else {
+		PrintInfo("Skipped — configure backends anytime in the Control Center")
+	}
+
+	// Step 12: Generate magic link for Control Center
 	nextStep("Control Center access link")
 	magicURL := generateInitMagicLink(dir)
 

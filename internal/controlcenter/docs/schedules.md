@@ -111,7 +111,9 @@ Current managed jobs:
 
 The heartbeat is a managed job that executes custom instructions you define in `context/heartbeat.md`. This lets you set up periodic checks without creating a full scheduled job.
 
-**Setup:** Create or edit `context/heartbeat.md`:
+A default `context/heartbeat.md` is created automatically with an empty body (heartbeat disabled). Edit it to enable.
+
+**Setup:** Open `context/heartbeat.md` from the Workspace tab and add your instructions:
 
 ```yaml
 ---
@@ -124,9 +126,44 @@ Check if there are any pending tasks in my todo list and summarize them.
 - **tier** — which model to use (optional, defaults to lowest available)
 - **body** — the prompt to execute. Leave empty to skip.
 
-The schedule is managed by the heartbeat managed job and can be changed via the Control Center Settings button.
+The schedule is managed by the heartbeat managed job and can be changed via the Control Center Settings button. The heartbeat file is preserved across upgrades — ALF never overwrites it.
 
-The heartbeat file is preserved across upgrades — ALF never overwrites it.
+#### Examples
+
+**Daily task summary:**
+```yaml
+---
+tier: haiku
+---
+
+Check my todo list and workspace for pending tasks. Summarize what needs attention today.
+```
+
+**Git activity digest:**
+```yaml
+---
+tier: sonnet
+---
+
+Run `git log --oneline --since="6 hours ago"` in the workspace. If there are new commits, summarize what changed. If nothing changed, stay silent.
+```
+
+**System resource check:**
+```yaml
+---
+tier: haiku
+---
+
+Check disk usage and memory. Only report if disk is above 80% or available memory is below 500MB.
+```
+
+**Empty body = disabled (default):**
+```yaml
+---
+tier: haiku
+---
+
+```
 
 ### System jobs
 

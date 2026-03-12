@@ -180,6 +180,18 @@ func RunUninstall() {
 	PrintCheck("ALF uninstalled")
 }
 
+// PrintDockerVersion prints the running Docker image version.
+func PrintDockerVersion() {
+	out, err := exec.Command("docker", "ps", "--filter", "name=alf", "--format", "{{.Image}}").Output()
+	if err != nil {
+		return
+	}
+	img := strings.TrimSpace(string(out))
+	if img != "" {
+		fmt.Printf("image %s\n", img)
+	}
+}
+
 func RunStatus() {
 	dir := alfDir()
 

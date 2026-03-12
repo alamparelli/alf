@@ -64,6 +64,7 @@ func main() {
 		cli.RunUninstall()
 	case "version":
 		fmt.Printf("alf %s\n", version)
+		cli.PrintDockerVersion()
 	case "help", "--help", "-h":
 		printUsage()
 	default:

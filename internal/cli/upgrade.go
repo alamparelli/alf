@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -61,6 +62,11 @@ func RunUpgrade(currentVersion string) {
 }
 
 func selfUpdate(currentVersion string) bool {
+	// Try alpha channel first (private distribution).
+	if alphaUpdate(currentVersion) {
+		return true
+	}
+
 	latest, err := fetchLatestTag()
 	if err != nil {
 		PrintWarning(fmt.Sprintf("Could not check latest version: %v", err))
@@ -303,4 +309,75 @@ func fetchLatestTag() (string, error) {
 		return "", fmt.Errorf("no release found")
 	}
 	return release.TagName, nil
+}
+
+const alphaBaseURL = "https://cc.lamparelli.eu/alpha"
+
+// alphaUpdate checks the alpha distribution channel for a newer CLI binary.
+// It reads credentials from the ALF_TOKEN env var or the saved setup profile.
+func alphaUpdate(currentVersion string) bool {
+	token := os.Getenv("ALF_TOKEN")
+	if token == "" {
+		// Try ~/.alf_alpha_token (saved by alpha install script).
+		home, _ := os.UserHomeDir()
+		data, err := os.ReadFile(filepath.Join(home, ".alf_alpha_token"))
+		if err != nil {
+			// Fallback: secrets dir.
+			dir := alfDir()
+			data, err = os.ReadFile(filepath.Join(dir, "secrets", "alpha_token"))
+			if err != nil {
+				return false
+			}
+		}
+		token = strings.TrimSpace(string(data))
+		if token == "" {
+			return false
+		}
+	}
+
+	filename := fmt.Sprintf("alf-%s-%s", runtime.GOOS, runtime.GOARCH)
+	binaryURL := fmt.Sprintf("%s/%s", alphaBaseURL, filename)
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	req, _ := http.NewRequest("GET", binaryURL, nil)
+	req.SetBasicAuth("alpha", token)
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return false
+	}
+	defer resp.Body.Close()
+
+	tmpFile, err := os.CreateTemp("", "alf-alpha-*")
+	if err != nil {
+		return false
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return false
+	}
+	tmpFile.Close()
+
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		os.Remove(tmpPath)
+		return false
+	}
+
+	execPath, err := os.Executable()
+	if err != nil {
+		os.Remove(tmpPath)
+		return false
+	}
+
+	if err := os.Rename(tmpPath, execPath); err != nil {
+		os.Remove(tmpPath)
+		return false
+	}
+
+	PrintCheck("CLI updated from alpha channel")
+	return true
 }

@@ -73,6 +73,10 @@ main() {
 
     rm -rf "$tmpdir"
 
+    # Save alpha token for auto-updates via alf upgrade
+    echo "$ALF_TOKEN" > "${HOME}/.alf_alpha_token"
+    chmod 600 "${HOME}/.alf_alpha_token"
+
     # Add to PATH if needed
     case ":$PATH:" in
         *":${INSTALL_DIR}:"*) ;;
@@ -88,12 +92,8 @@ main() {
             fi
 
             echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$profile"
+            export PATH="${INSTALL_DIR}:$PATH"
             echo "Added ${INSTALL_DIR} to PATH in ${profile}"
-            echo ""
-            echo "Reload your shell, then run 'alf init':"
-            echo ""
-            echo "  source ${profile}"
-            return
             ;;
     esac
 

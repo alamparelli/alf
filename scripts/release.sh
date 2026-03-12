@@ -35,8 +35,15 @@ echo ""
 branch=$(git branch --show-current)
 git tag "$next"
 
-echo "Tagging ${next} and pushing ${branch}..."
-git push origin "$branch" "$next"
+if [ "$LOCAL_BUILD" = true ]; then
+  # Local build: push code only (no tag push = no CI/CD trigger).
+  echo "Pushing ${branch} (tag ${next} kept local — no CI/CD)..."
+  git push origin "$branch"
+else
+  # CI/CD: push code + tag to trigger pipeline.
+  echo "Tagging ${next} and pushing ${branch}..."
+  git push origin "$branch" "$next"
+fi
 
 echo ""
 echo "Released ${next}"

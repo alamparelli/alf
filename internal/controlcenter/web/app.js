@@ -2750,14 +2750,15 @@ function schedulesRender() {
       contentValue = j.prompt || '--';
     }
 
-    const canEdit = !j.managed;
+    const canFullEdit = !j.managed && !j.system;
     const runBtn = j.enabled ? '<button class="btn-sm sched-run-btn" data-idx="' + i + '" title="Run now">Run</button>' : '';
-    const actions = canEdit
+    const toggleBtn = '<button class="btn-sm sched-toggle-btn" data-idx="' + i + '">' + (j.enabled ? 'Disable' : 'Enable') + '</button>';
+    const actions = canFullEdit
       ? runBtn +
         '<button class="btn-sm sched-edit-btn" data-idx="' + i + '">Edit</button>' +
         '<button class="btn-sm btn-danger sched-delete-btn" data-idx="' + i + '">Delete</button>'
-      : runBtn +
-        '<button class="btn-sm sched-toggle-btn" data-idx="' + i + '">' + (j.enabled ? 'Disable' : 'Enable') + '</button>';
+      : runBtn + toggleBtn +
+        (j.managed ? '<button class="btn-sm sched-managed-edit-btn" data-idx="' + i + '">Settings</button>' : '');
 
     const isCollapsed = schedCollapsedSet.has(j.id);
     return '<div class="tier-card' + (isCollapsed ? ' collapsed' : '') + '" data-idx="' + i + '" data-sched-id="' + esc(j.id) + '">' +
@@ -2823,7 +2824,46 @@ function schedulesRender() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: j.id, fields: { enabled: j.enabled ? 'false' : 'true' } }),
       }).then(() => { toast(j.enabled ? 'Job disabled' : 'Job enabled'); schedulesLoad(); })
-        .catch(err => toast('Toggle failed: ' + err.message, 'error'));
+        .catch(err => toast('Toggle failed: ' + (err.error || err.message), 'error'));
+    });
+  });
+  // Managed job settings (output + tier only).
+  list.querySelectorAll('.sched-managed-edit-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const j = schedulesVisible[+btn.dataset.idx];
+      const outputOpts = OUTPUTS.map(o => '<option value="' + o + '"' + (j.output === o ? ' selected' : '') + '>' + o + '</option>').join('');
+      const old = document.getElementById('schedModal');
+      if (old) old.remove();
+      const html = '<div class="modal-backdrop" id="schedModal">' +
+        '<div class="modal tier-modal">' +
+          '<h3>Settings: ' + esc(j.name) + '</h3>' +
+          '<div class="tier-form">' +
+            '<div class="form-row"><label>Tier</label><input type="text" id="sjMTier" value="' + esc(j.tier || '') + '" placeholder="haiku, sonnet..."></div>' +
+            '<div class="form-row"><label>Output</label><select id="sjMOutput">' + outputOpts + '</select></div>' +
+          '</div>' +
+          '<div class="modal-actions">' +
+            '<button class="btn" id="sjMSave">Save</button>' +
+            '<button class="btn btn-secondary" id="sjMCancel">Cancel</button>' +
+          '</div>' +
+        '</div></div>';
+      document.body.insertAdjacentHTML('beforeend', html);
+      document.getElementById('sjMCancel').onclick = () => document.getElementById('schedModal').remove();
+      document.getElementById('schedModal').addEventListener('click', ev => { if (ev.target.id === 'schedModal') document.getElementById('schedModal').remove(); });
+      document.getElementById('sjMSave').onclick = () => {
+        const fields = {};
+        const tier = document.getElementById('sjMTier').value.trim();
+        const output = document.getElementById('sjMOutput').value;
+        if (tier !== (j.tier || '')) fields.tier = tier;
+        if (output !== (j.output || 'telegram')) fields.output = output;
+        if (!Object.keys(fields).length) { document.getElementById('schedModal').remove(); return; }
+        api('/api/schedules', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: j.id, fields }),
+        }).then(() => { toast('Settings updated'); document.getElementById('schedModal').remove(); schedulesLoad(); })
+          .catch(err => toast('Update failed: ' + (err.error || err.message), 'error'));
+      };
     });
   });
   // Collapse/expand individual cards.

@@ -327,8 +327,14 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 	if j.System {
 		return nil, fmt.Errorf("cannot modify system job %s", id)
 	}
+	// Managed jobs allow only enabled, output, and tier changes.
+	managedAllowed := map[string]bool{"enabled": true, "output": true, "tier": true}
 	if j.Managed {
-		return nil, fmt.Errorf("cannot modify managed job %s", id)
+		for k := range fields {
+			if !managedAllowed[k] {
+				return nil, fmt.Errorf("cannot modify field %q on managed job %s (allowed: enabled, output, tier)", k, id)
+			}
+		}
 	}
 
 	// Validate before applying.

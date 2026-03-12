@@ -282,6 +282,46 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		routeResult = rr
 	}
 
+	// Register trigger-matched skills in the session.
+	if cs.SkillStore != nil {
+		if triggerMatched := skills.MatchTriggers(cs.SkillStore, req.Message); len(triggerMatched) > 0 {
+			triggerNames := make([]string, len(triggerMatched))
+			for i, sk := range triggerMatched {
+				triggerNames[i] = sk.Name
+			}
+			log.Printf("[chat-api] skills: trigger-matched %v", triggerNames)
+			cs.Sessions.AddSkills(apiChatID, triggerNames)
+		}
+	}
+
+	// Skill tier override: if an active skill requires a higher tier, force it.
+	if activeSkills := cs.Sessions.GetSkills(apiChatID); len(activeSkills) > 0 {
+		if minTier := skills.ResolveMinTier(cs.SkillStore, activeSkills); minTier != "" {
+			if routeResult.Response != "" && routeResult.Tier == "" {
+				// Direct response → force to skill tier.
+				routeResult = RouteResult{Tier: minTier, Reason: "skill-tier: " + minTier}
+				log.Printf("[chat-api] skill tier override: direct→%s", minTier)
+			} else if routeResult.Tier != "" && routeResult.Tier != minTier {
+				// Check if current tier has lower priority than required tier.
+				currentPri, requiredPri := -1, -1
+				for _, t := range cs.TierStore.Current().Tiers {
+					if t.Name == routeResult.Tier {
+						currentPri = t.Priority
+					}
+					if t.Name == minTier {
+						requiredPri = t.Priority
+					}
+				}
+				if requiredPri >= 0 && currentPri < requiredPri {
+					old := routeResult.Tier
+					routeResult.Tier = minTier
+					routeResult.Reason = fmt.Sprintf("skill-tier: %s→%s", old, minTier)
+					log.Printf("[chat-api] skill tier override: %s→%s", old, minTier)
+				}
+			}
+		}
+	}
+
 	// During onboarding, force a capable tier — direct responses and
 	// instant tiers are too weak for the onboarding conversation.
 	// During onboarding, force a capable conversational tier.
@@ -484,14 +524,12 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		if catalog := skills.BuildCatalog(cs.SkillStore); catalog != "" {
 			sysPromptTexts = append(sysPromptTexts, catalog)
 		}
-		// Auto-inject skills whose triggers match the user message.
-		if matched := skills.MatchTriggers(cs.SkillStore, req.Message); len(matched) > 0 {
-			names := make([]string, len(matched))
-			for i, sk := range matched {
-				names[i] = sk.Name
+		// Inject session-persisted skills (includes trigger-matched from earlier messages).
+		if activeSkills := cs.Sessions.GetSkills(apiChatID); len(activeSkills) > 0 {
+			log.Printf("[chat-api] skills: injecting session skills %v", activeSkills)
+			if block := skills.BuildInjectionByName(cs.SkillStore, activeSkills); block != "" {
+				sysPromptTexts = append(sysPromptTexts, block)
 			}
-			log.Printf("[chat-api] skills: auto-injected %v", names)
-			sysPromptTexts = append(sysPromptTexts, skills.BuildInjection(matched))
 		}
 	}
 	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))

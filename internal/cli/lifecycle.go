@@ -164,10 +164,31 @@ func RunUninstall() {
 	cmd.Stderr = os.Stderr
 	cmd.Run()
 
-	// Remove data directory
+	// Remove data directory, preserving letsencrypt certs to avoid rate limits.
+	letsencryptDir := filepath.Join(dir, "letsencrypt")
+	hasLE := false
+	if _, err := os.Stat(letsencryptDir); err == nil {
+		tmpLE := filepath.Join(os.TempDir(), "alf-letsencrypt-backup")
+		os.RemoveAll(tmpLE)
+		if err := os.Rename(letsencryptDir, tmpLE); err == nil {
+			hasLE = true
+		}
+	}
+
 	PrintInfo("Removing " + dir + "...")
 	if err := os.RemoveAll(dir); err != nil {
 		PrintWarning(fmt.Sprintf("Could not remove %s: %v", dir, err))
+	}
+
+	// Restore letsencrypt certs so next alf init reuses them.
+	if hasLE {
+		tmpLE := filepath.Join(os.TempDir(), "alf-letsencrypt-backup")
+		os.MkdirAll(dir, 0o755)
+		if err := os.Rename(tmpLE, letsencryptDir); err != nil {
+			PrintWarning(fmt.Sprintf("Could not restore letsencrypt certs: %v", err))
+		} else {
+			PrintInfo("Preserved letsencrypt/ certificates for reuse.")
+		}
 	}
 
 	// Remove binary

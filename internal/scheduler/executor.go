@@ -146,6 +146,12 @@ func (e *Engine) executeJob(j *Job) {
 	if j.Message != "" {
 		// Reminder: push message directly, no LLM/command execution.
 		text = j.Message
+	} else if j.Prompt == "__heartbeat__" {
+		// Heartbeat: read context/heartbeat.md, skip if empty body.
+		text, execResult, err = e.executeHeartbeat(j)
+	} else if j.Command != "" && j.Prompt != "" && j.Tier != "direct" {
+		// Two-phase job: run command first, only invoke LLM if output has issues.
+		text, execResult, err = e.runTwoPhase(j)
 	} else if j.Tier == "direct" {
 		if j.Command != "" {
 			text, err = e.runCommand(j)
@@ -305,6 +311,42 @@ func (e *Engine) runCommand(j *Job) (string, error) {
 	}
 
 	return strings.TrimSpace(output), nil
+}
+
+// errorPatterns are strings that indicate a command output contains issues worth analyzing.
+var errorPatterns = []string{"error", "panic", "fatal", "failed", "timeout", "killed", "ERR", "CRITICAL", "WARNING"}
+
+// runTwoPhase executes a command first, then only invokes the LLM if the output
+// contains error-like patterns. This avoids wasting LLM calls on healthy states.
+func (e *Engine) runTwoPhase(j *Job) (string, *execResult, error) {
+	cmdOutput, err := e.runCommand(j)
+	if err != nil {
+		// Command itself failed — send error directly, no LLM needed.
+		return "", nil, err
+	}
+
+	// Check if the output contains any error patterns.
+	lower := strings.ToLower(cmdOutput)
+	hasIssues := false
+	for _, p := range errorPatterns {
+		if strings.Contains(lower, strings.ToLower(p)) {
+			hasIssues = true
+			break
+		}
+	}
+
+	if !hasIssues {
+		log.Printf("scheduler: [%s] two-phase: no issues detected, skipping LLM", j.ID)
+		return "", nil, nil // empty = healthy = no notification
+	}
+
+	// Issues found — invoke LLM to analyze.
+	log.Printf("scheduler: [%s] two-phase: issues detected, invoking LLM for analysis", j.ID)
+	analysisJob := *j
+	analysisJob.Command = "" // clear command so invokeLLM uses prompt only
+	analysisJob.Prompt = j.Prompt + "\n\n## Command Output\n```\n" + cmdOutput + "\n```"
+	text, result, err := e.invokeLLMWithMeta(&analysisJob)
+	return text, result, err
 }
 
 // invokeLLM calls the Claude provider with tier-appropriate params.

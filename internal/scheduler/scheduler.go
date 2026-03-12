@@ -327,12 +327,12 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 	if j.System {
 		return nil, fmt.Errorf("cannot modify system job %s", id)
 	}
-	// Managed jobs allow only enabled, output, and tier changes.
-	managedAllowed := map[string]bool{"enabled": true, "output": true, "tier": true}
+	// Managed jobs allow only enabled, output, tier, and schedule changes.
+	managedAllowed := map[string]bool{"enabled": true, "output": true, "tier": true, "schedule": true}
 	if j.Managed {
 		for k := range fields {
 			if !managedAllowed[k] {
-				return nil, fmt.Errorf("cannot modify field %q on managed job %s (allowed: enabled, output, tier)", k, id)
+				return nil, fmt.Errorf("cannot modify field %q on managed job %s (allowed: enabled, output, tier, schedule)", k, id)
 			}
 		}
 	}
@@ -443,6 +443,38 @@ func (e *Engine) EnsureManaged(id, name, schedule, tier, prompt, output string, 
 	}
 
 	log.Printf("scheduler: seeded managed job %s (%s)", id, name)
+	return j, nil
+}
+
+// EnsureManagedFull is like EnsureManaged but also sets a Command field,
+// enabling two-phase execution (command runs first, LLM only if issues detected).
+func (e *Engine) EnsureManagedFull(id, name, schedule, tier, prompt, command, output string, skills []string) (*Job, error) {
+	if existing := e.store.Get(id); existing != nil {
+		return existing, nil
+	}
+
+	j := &Job{
+		ID:        id,
+		Name:      name,
+		Schedule:  schedule,
+		Tier:      tier,
+		Prompt:    prompt,
+		Command:   command,
+		Output:    output,
+		Skills:    skills,
+		Managed:   true,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+	}
+
+	if err := e.scheduleJob(j); err != nil {
+		return nil, fmt.Errorf("invalid schedule: %w", err)
+	}
+	if err := e.store.Add(j); err != nil {
+		return nil, err
+	}
+
+	log.Printf("scheduler: seeded managed job %s (%s) [two-phase]", id, name)
 	return j, nil
 }
 

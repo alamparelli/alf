@@ -698,20 +698,26 @@ func main() {
 		}
 	}
 
-	// Seed health check job — runs every 2h silently, only reports when issues found.
+	// Seed health check job — two-phase: runs bash command deterministically,
+	// only invokes LLM if error patterns are detected in the output.
 	if _, ok := skillStore.Get("health-check"); ok {
-		if _, err := sched.EnsureManaged(
+		if _, err := sched.EnsureManagedFull(
 			"health-check",
 			"Health Check",
 			"0 0 */2 * * *", // every 2 hours
 			firstFallbackTier(tierStore),
-			"Execute each bash command from the health-check skill using the Bash tool. Analyze the results. If no issues, respond with empty string (no text). Only output a report if real problems are found.",
+			"Analyze the command output below. If no real issues, respond with empty string. Only output a concise report if real problems are found (under 500 chars). Format: severity, description, recommended action.",
+			`echo "=== ERRORS ===" && tail -500 /home/alf/data/logs/daemon.log 2>/dev/null | grep -iE "error|panic|fatal|failed|timeout|killed" | tail -30; echo "=== EVENTS ===" && find /home/alf/data/logs/events/ -name "*.jsonl" -newer /tmp/.health-last 2>/dev/null -exec tail -50 {} \; | tail -100; touch /tmp/.health-last; echo "=== SCHEDULER ===" && find /home/alf/data/logs/scheduler/ -name "*.jsonl" -newer /tmp/.health-last-sched 2>/dev/null -exec tail -20 {} \;; touch /tmp/.health-last-sched; echo "=== DISK ===" && df -h /home/alf/data/ | tail -1; echo "=== PROCS ===" && ps aux | grep -c "[c]laude" || true`,
 			"telegram",
 			[]string{"health-check"},
 		); err != nil {
 			log.Printf("warning: failed to seed health-check job: %v", err)
 		}
 	}
+
+	// Seed heartbeat job — reads context/heartbeat.md, skips if empty body.
+	// The tier is read from the heartbeat.md frontmatter at execution time.
+	sched.RegisterHeartbeat(contextDir)
 
 	// When Telegram is not configured, run a CC-only event loop.
 	if !telegramEnabled {

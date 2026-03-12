@@ -7,37 +7,6 @@ import (
 	"strings"
 )
 
-const (
-	heartbeatJobID   = "heartbeat"
-	heartbeatJobName = "Heartbeat"
-	heartbeatFile    = "heartbeat.md"
-)
-
-// RegisterHeartbeat seeds a managed heartbeat job that reads context/heartbeat.md.
-// The heartbeat is skipped at execution time if the file body is empty.
-// The tier and schedule are read from the frontmatter.
-func (e *Engine) RegisterHeartbeat(contextDir string) {
-	hbPath := filepath.Join(contextDir, heartbeatFile)
-
-	// Parse frontmatter to get tier and schedule.
-	tier, schedule := parseHeartbeatMeta(hbPath)
-	if schedule == "" {
-		schedule = "0 0 */6 * * *" // default: every 6 hours
-	}
-
-	if _, err := e.EnsureManaged(
-		heartbeatJobID,
-		heartbeatJobName,
-		schedule,
-		tier,
-		"__heartbeat__", // sentinel — executeJob detects this and runs heartbeat logic
-		"telegram",
-		nil,
-	); err != nil {
-		log.Printf("warning: failed to seed heartbeat job: %v", err)
-	}
-}
-
 // executeHeartbeat reads context/heartbeat.md, skips if empty body,
 // otherwise invokes the LLM with the body as prompt.
 func (e *Engine) executeHeartbeat(j *Job) (string, *execResult, error) {
@@ -45,7 +14,7 @@ func (e *Engine) executeHeartbeat(j *Job) (string, *execResult, error) {
 	if contextDir == "" {
 		contextDir = filepath.Join(e.cfg.DataDir, "context")
 	}
-	hbPath := filepath.Join(contextDir, heartbeatFile)
+	hbPath := filepath.Join(contextDir, "heartbeat.md")
 
 	data, err := os.ReadFile(hbPath)
 	if err != nil {
@@ -74,18 +43,21 @@ func (e *Engine) executeHeartbeat(j *Job) (string, *execResult, error) {
 	return e.invokeLLMWithMeta(&hbJob)
 }
 
-// parseHeartbeatMeta reads tier and schedule from heartbeat.md frontmatter.
+// ParseHeartbeatMeta reads tier and schedule from context/heartbeat.md frontmatter.
+// Exported for use by the daemon when seeding the managed job.
+func ParseHeartbeatMeta(contextDir string) (tier, schedule string) {
+	return parseHeartbeatMeta(filepath.Join(contextDir, "heartbeat.md"))
+}
+
 func parseHeartbeatMeta(path string) (tier, schedule string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", ""
 	}
-
 	tier, schedule, _ = parseHeartbeatFull(string(data))
 	return
 }
 
-// parseHeartbeatFull parses frontmatter and returns tier, schedule, and body.
 func parseHeartbeatFull(content string) (tier, schedule, body string) {
 	content = strings.TrimLeft(content, "\xef\xbb\xbf")
 	trimmed := strings.TrimSpace(content)

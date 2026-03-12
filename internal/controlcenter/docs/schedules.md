@@ -77,6 +77,7 @@ Use the filter bar at the top of the list:
 | **Today** | Jobs with next run within today |
 | **This Week** | Jobs with next run within this week |
 | **Later** | Jobs with next run beyond this week |
+| **Managed** | Jobs created by ALF (health-check, heartbeat, etc.) |
 
 Jobs are sorted by next run time — soonest first.
 
@@ -97,7 +98,35 @@ Jobs with the `auto_delete` flag run once and delete themselves. ALF creates the
 
 ### Managed jobs
 
-Jobs created by ALF during a conversation. These have a `managed` badge. You can enable/disable them but not edit them directly.
+Built-in jobs bundled with ALF. These have a `managed` badge. You can change their **schedule**, **tier**, and **output** via the Settings button, and enable/disable them. You cannot edit their prompt or delete them.
+
+Current managed jobs:
+
+| Job | Schedule | What it does |
+|-----|----------|-------------|
+| **Health Check** | Every 2 hours | Runs system diagnostics (logs, disk, processes). Only invokes the LLM if errors are detected. |
+| **Heartbeat** | Every 6 hours (default) | Reads `context/heartbeat.md`. Skips if the file body is empty. Executes the body as an LLM prompt when content is present. |
+
+### Heartbeat
+
+The heartbeat is a managed job that executes custom instructions you define in `context/heartbeat.md`. This lets you set up periodic checks without creating a full scheduled job.
+
+**Setup:** Create or edit `context/heartbeat.md`:
+
+```yaml
+---
+tier: haiku
+schedule: "0 0 */6 * * *"
+---
+
+Check if there are any pending tasks in my todo list and summarize them.
+```
+
+- **tier** — which model to use (optional, defaults to lowest available)
+- **schedule** — cron expression (optional, editable via CC Settings button)
+- **body** — the prompt to execute. Leave empty to skip.
+
+The heartbeat file is preserved across upgrades — ALF never overwrites it.
 
 ### System jobs
 

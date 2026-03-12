@@ -716,8 +716,26 @@ func main() {
 	}
 
 	// Seed heartbeat job — reads context/heartbeat.md, skips if empty body.
-	// The tier is read from the heartbeat.md frontmatter at execution time.
-	sched.RegisterHeartbeat(contextDir)
+	if _, ok := skillStore.Get("heartbeat"); ok {
+		hbTier, hbSchedule := scheduler.ParseHeartbeatMeta(contextDir)
+		if hbTier == "" {
+			hbTier = firstFallbackTier(tierStore)
+		}
+		if hbSchedule == "" {
+			hbSchedule = "0 0 */6 * * *" // every 6 hours
+		}
+		if _, err := sched.EnsureManaged(
+			"heartbeat",
+			"Heartbeat",
+			hbSchedule,
+			hbTier,
+			"__heartbeat__", // sentinel — executor reads context/heartbeat.md at runtime
+			"telegram",
+			[]string{"heartbeat"},
+		); err != nil {
+			log.Printf("warning: failed to seed heartbeat job: %v", err)
+		}
+	}
 
 	// When Telegram is not configured, run a CC-only event loop.
 	if !telegramEnabled {

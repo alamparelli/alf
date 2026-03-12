@@ -42,6 +42,12 @@ echo "Released ${next}"
 
 if [ "$LOCAL_BUILD" = true ]; then
   echo ""
+  echo "Vendoring vault-proxy source..."
+  rm -rf third_party/vault-proxy
+  mkdir -p third_party/vault-proxy
+  rsync -a --exclude .git --exclude vault-data --exclude '/vault-server' --exclude '/vault-cli' \
+    ../Projects/vault-proxy/ third_party/vault-proxy/
+
   echo "Building Docker image locally (linux/amd64 + linux/arm64)..."
   # Ensure a multi-platform builder exists.
   if ! docker buildx inspect multiarch >/dev/null 2>&1; then
@@ -54,6 +60,8 @@ if [ "$LOCAL_BUILD" = true ]; then
     -t "${REGISTRY}:${version}" \
     -t "${REGISTRY}:latest" \
     .
+
+  rm -rf third_party/vault-proxy
   echo ""
   echo "Pushed ${REGISTRY}:${version} + :latest"
 fi

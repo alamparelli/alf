@@ -608,7 +608,19 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		log.Printf("[chat-api] session %s failed (%v), starting fresh", resumeID, err)
 		cs.Sessions.Archive(apiChatID)
 		params.ResumeID = ""
-		result, err = prov.Invoke(ctx, prompt, params, nil)
+		// Inject conversation history since we lost --resume context.
+		if cs.ConvStore != nil {
+			convMsgs := conversation.BuildContext(cs.ConvStore.Recent(conversation.ChannelCC, 0), conversation.DefaultMaxMessages)
+			if histPrompt := conversation.FormatAsSystemPrompt(convMsgs); histPrompt != "" {
+				params.SystemPrompts = append(params.SystemPrompts, histPrompt)
+			}
+		}
+		// Reset accumulator for the retry.
+		if acc != nil {
+			acc = conversation.NewAccumulator()
+			progressFn = acc.OnProgress(rawProgressFn)
+		}
+		result, err = prov.Invoke(ctx, prompt, params, progressFn)
 	}
 	duration := time.Since(start)
 

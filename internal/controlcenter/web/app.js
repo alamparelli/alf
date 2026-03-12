@@ -171,8 +171,6 @@ function loadStatus() {
 // --- Admin Actions ---
 (function() {
   const restartBtn = document.getElementById('adminRestartBtn');
-  const bootstrapBtn = document.getElementById('adminBootstrapBtn');
-  const claudeAuthBtn = document.getElementById('adminClaudeAuthBtn');
   const outputEl = document.getElementById('adminOutput');
   const outputText = document.getElementById('adminOutputText');
 
@@ -194,47 +192,6 @@ function loadStatus() {
     }
   });
 
-  bootstrapBtn.addEventListener('click', async () => {
-    if (!confirm('Run bootstrap.sh? This may install packages and take a while.')) return;
-    bootstrapBtn.disabled = true;
-    showOutput('Running bootstrap.sh...');
-    try {
-      const r = await api('/api/bash', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'bash /home/alf/data/bootstrap.sh 2>&1' })
-      });
-      showOutput(r.output || (r.exit_code === 0 ? 'Done.' : 'Failed (exit ' + r.exit_code + ')'));
-      if (r.exit_code !== 0 && r.error) showOutput(r.output + '\n\nError: ' + r.error);
-    } catch (e) {
-      showOutput('Error: ' + (e.message || e.error || 'request failed'));
-    } finally {
-      bootstrapBtn.disabled = false;
-    }
-  });
-
-  claudeAuthBtn.addEventListener('click', async () => {
-    claudeAuthBtn.disabled = true;
-    showOutput('Checking Claude auth status...');
-    try {
-      const r = await api('/api/bash', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'HOME=/home/alf claude -p "ping" --output-format json --max-turns 1 --model haiku --allowedTools "" 2>&1 | head -5' })
-      });
-      if (r.exit_code === 0) {
-        showOutput('Claude is authenticated.');
-      } else {
-        showOutput('Claude is NOT authenticated.\n\n' +
-          'To authenticate, run on the host machine:\n  alf login\n\n' +
-          'Or inside the container:\n  docker exec -it -e HOME=/home/alf alf claude\n  Then type /login');
-      }
-    } catch (e) {
-      showOutput('Error: ' + (e.message || e.error || 'request failed'));
-    } finally {
-      claudeAuthBtn.disabled = false;
-    }
-  });
 })();
 
 function esc(s) {
@@ -2851,6 +2808,7 @@ function schedulesRender() {
         '<div class="modal tier-modal">' +
           '<h3>Settings: ' + esc(j.name) + '</h3>' +
           '<div class="tier-form">' +
+            '<div class="form-row"><label>Schedule</label><input type="text" id="sjMSchedule" value="' + esc(j.schedule || '') + '" placeholder="0 0 */2 * * *"></div>' +
             '<div class="form-row"><label>Tier</label><input type="text" id="sjMTier" value="' + esc(j.tier || '') + '" placeholder="haiku, sonnet..."></div>' +
             '<div class="form-row"><label>Output</label><select id="sjMOutput">' + outputOpts + '</select></div>' +
           '</div>' +
@@ -2864,8 +2822,10 @@ function schedulesRender() {
       document.getElementById('schedModal').addEventListener('click', ev => { if (ev.target.id === 'schedModal') document.getElementById('schedModal').remove(); });
       document.getElementById('sjMSave').onclick = () => {
         const fields = {};
+        const schedule = document.getElementById('sjMSchedule').value.trim();
         const tier = document.getElementById('sjMTier').value.trim();
         const output = document.getElementById('sjMOutput').value;
+        if (schedule !== (j.schedule || '')) fields.schedule = schedule;
         if (tier !== (j.tier || '')) fields.tier = tier;
         if (output !== (j.output || 'telegram')) fields.output = output;
         if (!Object.keys(fields).length) { document.getElementById('schedModal').remove(); return; }

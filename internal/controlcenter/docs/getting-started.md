@@ -6,13 +6,26 @@ order: 1
 
 # Getting Started
 
-Welcome to ALF's documentation. If you're reading this, you're already set up and logged in — so let's skip the installation and get straight to what you can do.
+Welcome to ALF. This guide walks you through everything you need to know to get the most out of your setup.
 
-## Talking to ALF
+## First things first
 
-Send a message on Telegram or use the Chat tab here. ALF reads your message, picks the right model, and replies.
+If you haven't already, talk to ALF — on Telegram or in the **Chat** tab here. The first conversation is a quick onboarding where ALF learns who you are, what you need help with, and how you want it to communicate. This shapes its personality and behavior going forward.
+
+After that, just send messages. ALF reads what you write, picks the right model, and replies.
 
 That's the basic loop. But there's a lot more going on under the hood.
+
+## First steps checklist
+
+Here's what to do after your initial setup:
+
+1. **Complete the onboarding** — send a message to ALF (Telegram or Chat tab). It will ask a few questions to personalize itself.
+2. **Set up the Vault** — go to the **Vault** tab and create a master password. The vault stores API keys, credentials, and secrets encrypted at rest. ALF uses it to securely manage service integrations.
+3. **Review your tiers** — open the **Tiers** tab to see which models ALF uses. The defaults work well, but you can tune them.
+4. **Explore the workspace** — the **Home** tab has a file browser where you can see and edit ALF's configuration, context files, and skills.
+
+Everything else — scheduling, skills, agent teams — you can explore as you need it.
 
 ## How ALF picks the right model
 

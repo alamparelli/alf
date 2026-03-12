@@ -2574,7 +2574,7 @@ function docsShowArticle(id) {
   const content = document.getElementById('docsContent');
   content.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Loading...</div>';
   api('/api/docs/' + encodeURIComponent(id)).then(doc => {
-    const rendered = DOMPurify.sanitize(marked.parse(doc.content, { breaks: false, gfm: true }));
+    const rendered = DOMPurify.sanitize(marked.parse(doc.content, { breaks: false, gfm: true }), { ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|docs):)/i });
 
     // Build TOC from headings
     const tmp = document.createElement('div');

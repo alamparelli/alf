@@ -405,7 +405,8 @@ done:
 				if errDetail == "" {
 					errDetail = "unknown error"
 				}
-				log.Printf("provider: error subtype=%s", parsed.Subtype)
+				stderrStr := strings.TrimSpace(stderr.String())
+				log.Printf("provider: error subtype=%s stderr=%q raw=%s", parsed.Subtype, truncStderr(stderrStr, 500), string(lastEvent))
 				return nil, fmt.Errorf("claude: %s", errDetail)
 			}
 			if text == "" {

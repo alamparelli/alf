@@ -5250,12 +5250,15 @@ async function vaultDeleteFile(name) {
     } catch (_) {}
     fetchBackendModels(backendSelect.value, 'skillImportModel');
     // Restore saved model once the dropdown is populated (poll up to 3s).
+    // renderModelField replaces the DOM, so re-query the element each attempt.
     if (savedPrefs && savedPrefs.model) {
       let attempts = 0;
       const tryRestore = setInterval(() => {
         attempts++;
-        if (modelSelect.querySelector('option[value="' + savedPrefs.model + '"]')) {
-          modelSelect.value = savedPrefs.model;
+        const sel = document.getElementById('skillImportModel');
+        if (sel && sel.querySelector('option[value="' + savedPrefs.model + '"]')) {
+          sel.value = savedPrefs.model;
+          modelSelect = sel;
           clearInterval(tryRestore);
         } else if (attempts > 15) {
           clearInterval(tryRestore);

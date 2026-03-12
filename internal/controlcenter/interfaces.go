@@ -14,6 +14,11 @@ type TierStore interface {
 	Save(cfg *TiersConfig) error
 	Current() *TiersConfig // in-memory snapshot, no disk I/O
 	Reload() error
+	// SetPath changes the backing file and reloads tiers from it.
+	// Used when tiers_file in config.json is updated at runtime.
+	SetPath(path string) error
+	// Path returns the current backing file path.
+	Path() string
 }
 
 // LogReader reads log files by name.

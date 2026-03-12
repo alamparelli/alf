@@ -77,6 +77,69 @@ func TestTiersPath(t *testing.T) {
 	}
 }
 
+func TestTiersPathFromConfig(t *testing.T) {
+	configDir := "/opt/alf/config.d"
+
+	tests := []struct {
+		name     string
+		cfg      *Config
+		wantPath string
+	}{
+		{"nil config", nil, "/opt/alf/config.d/tiers.json"},
+		{"empty TiersFile", &Config{}, "/opt/alf/config.d/tiers.json"},
+		{"relative TiersFile", &Config{TiersFile: "tiers2.json"}, "/opt/alf/config.d/tiers2.json"},
+		{"absolute TiersFile", &Config{TiersFile: "/custom/path/tiers.json"}, "/custom/path/tiers.json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TiersPathFromConfig(configDir, tt.cfg)
+			if got != tt.wantPath {
+				t.Errorf("TiersPathFromConfig() = %q, want %q", got, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestFileTierStore_PathAndSetPath(t *testing.T) {
+	dir := t.TempDir()
+	path1 := filepath.Join(dir, "tiers.json")
+	path2 := filepath.Join(dir, "tiers2.json")
+
+	store := NewFileTierStore(path1)
+	if got := store.Path(); got != path1 {
+		t.Fatalf("Path() = %q, want %q", got, path1)
+	}
+
+	// Write different tiers to tiers2.json.
+	writeJSON(t, path2, &TiersConfig{
+		Tiers: []Tier{{Name: "alt", Model: "sonnet", Priority: 0, Enabled: true}},
+	})
+
+	if err := store.SetPath(path2); err != nil {
+		t.Fatalf("SetPath() error: %v", err)
+	}
+	if got := store.Path(); got != path2 {
+		t.Fatalf("Path() after SetPath = %q, want %q", got, path2)
+	}
+	if store.Current().Tiers[0].Name != "alt" {
+		t.Errorf("Current() after SetPath: expected tier 'alt', got %q", store.Current().Tiers[0].Name)
+	}
+}
+
+func TestFileTierStore_SetPath_NonExistentFallsBackToDefault(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFileTierStore(filepath.Join(dir, "tiers.json"))
+
+	// SetPath to a non-existent file: should succeed and load defaults.
+	if err := store.SetPath(filepath.Join(dir, "ghost.json")); err != nil {
+		t.Fatalf("SetPath() to non-existent file should not error: %v", err)
+	}
+	cur := store.Current()
+	if len(cur.Tiers) < 4 {
+		t.Errorf("expected default tiers after SetPath to missing file, got %d tiers", len(cur.Tiers))
+	}
+}
+
 func TestFileTierStore_SaveCreatesDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.d", "tiers.json")

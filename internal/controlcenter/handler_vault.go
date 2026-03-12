@@ -18,6 +18,7 @@ type VaultHandler struct {
 	Manager    *vault.Manager // nil = vault binaries not present
 	ContextDir string         // path to context/ dir for toolbox regeneration
 	DataDir    string         // path to data dir for toolbox regeneration
+	OnUnlock   func()         // called after successful unlock (e.g. to migrate secrets)
 }
 
 func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +158,10 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	// Regenerate toolbox so LLM sees vault as "ready".
 	if h.ContextDir != "" {
 		memory.GenerateToolbox(h.ContextDir, h.DataDir)
+	}
+	// Run post-unlock hook (e.g. migrate Telegram credentials into vault).
+	if h.OnUnlock != nil {
+		h.OnUnlock()
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

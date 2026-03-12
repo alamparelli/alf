@@ -41,6 +41,7 @@ type Deps struct {
 	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
 	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
 	ModelCache       *ModelCache           // nil if model cache unavailable
+	OnVaultUnlock    func()                // called after vault unlock (e.g. secret migration)
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS
@@ -214,6 +215,7 @@ func HandlerFactory(deps Deps) http.Handler {
 		Manager:    deps.VaultManager,
 		ContextDir: filepath.Join(deps.DataDir, "context"),
 		DataDir:    deps.DataDir,
+		OnUnlock:   deps.OnVaultUnlock,
 	}
 	mux.Handle("/api/vault/", vaultH)
 	mux.Handle("/api/vault", vaultH)

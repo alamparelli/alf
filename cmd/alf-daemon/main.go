@@ -541,12 +541,24 @@ func main() {
 	chatService.SkillStore = skillStore
 	chatService.Orchestrator = orch
 	chatService.ConvStore = convStore
-	chatService.ToolRegistry = tooling.NewRegistry(dataDir)
-	chatService.ToolExecutor = &tooling.Executor{
+	toolRegistry := tooling.NewRegistry(dataDir)
+	nativeTools := []tooling.NativeTool{
+		tooling.BashNativeTool{},
+		tooling.GrepNativeTool{},
+		tooling.GlobNativeTool{},
+		tooling.ReadFileNativeTool{},
+	}
+	toolExecutor := &tooling.Executor{
 		DataDir: dataDir,
 		HomeDir: homeDir,
 		Timeout: 30 * time.Second,
 	}
+	for _, t := range nativeTools {
+		toolRegistry.RegisterNative(t)
+		toolExecutor.RegisterNative(t)
+	}
+	chatService.ToolRegistry = toolRegistry
+	chatService.ToolExecutor = toolExecutor
 	if memDB != nil {
 		chatService.Recaller = &memStoreRecaller{store: memDB}
 	}

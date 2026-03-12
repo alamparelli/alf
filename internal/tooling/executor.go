@@ -11,12 +11,21 @@ import (
 	"time"
 )
 
-// Executor runs tool binaries as subprocesses.
+// Executor runs tools: native Go tools first, subprocess fallback for user tools.
 type Executor struct {
 	DataDir string
 	HomeDir string
 	Env     []string      // base env vars to inject
 	Timeout time.Duration // per-tool timeout; 0 = 30s
+	natives map[string]NativeTool
+}
+
+// RegisterNative adds a Go-native tool. Native tools take priority over subprocess tools.
+func (e *Executor) RegisterNative(t NativeTool) {
+	if e.natives == nil {
+		e.natives = make(map[string]NativeTool)
+	}
+	e.natives[t.ToolName()] = t
 }
 
 // CallRequest represents a single tool call from the LLM.
@@ -33,8 +42,15 @@ type CallResult struct {
 	IsError bool
 }
 
-// Execute runs a tool binary, piping Arguments to stdin and capturing stdout.
+// Execute runs a tool. Native Go tools are tried first, then subprocess binaries.
 func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
+	if n, ok := e.natives[call.Name]; ok {
+		out, err := n.Run(ctx, call.Arguments)
+		if err != nil {
+			return CallResult{ID: call.ID, Output: err.Error(), IsError: true}
+		}
+		return CallResult{ID: call.ID, Output: out}
+	}
 	timeout := e.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second

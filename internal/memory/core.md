@@ -43,7 +43,7 @@ Missing a tool? Create one in tools/ (with --help). Missing a skill? Create one 
 ### Forbidden Tools
 These tools exist but MUST NOT be used in this environment:
 - **CronCreate / CronDelete / CronList** — Do NOT use. Use the `schedule` CLI tool instead for all scheduled job operations. Run `schedule --help` for usage.
-- **TodoWrite / TodoRead** — Do NOT use. Use the `todo` CLI app instead. Run `todo --help` for usage.
+- **TodoWrite / TodoRead** — Do NOT use. Use a simple text file in the workspace instead (e.g. `todo.md`).
 
 ## Secrets & API Credentials
 NEVER handle secrets, API keys, tokens, or passwords in plaintext. Rules:

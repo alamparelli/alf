@@ -45,6 +45,17 @@ body {
   padding: 10px 0; border-radius: 8px;
   color: var(--text-dim); cursor: pointer; text-decoration: none;
   transition: background 0.15s, color 0.15s;
+  position: relative;
+}
+.nav-icon.has-badge::after {
+  content: ''; position: absolute; top: 6px; right: calc(50% - 14px);
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--danger, #e53e3e); border: 2px solid var(--bg);
+  animation: badge-pulse 2s ease-in-out infinite;
+}
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 .nav-icon:hover { background: var(--border); color: var(--text); }
 .nav-icon.active { background: var(--accent); color: var(--on-accent); }
@@ -696,6 +707,8 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .chat-send-btn i { width: 18px; height: 18px; pointer-events: none; }
 .chat-send-btn:disabled { opacity: 0.4; cursor: default; }
+.chat-send-btn.chat-stop-mode { color: var(--danger, #e53e3e); }
+.chat-send-btn.chat-stop-mode:hover { background: rgba(229, 62, 62, 0.1); }
 .btn-icon.chat-attach-btn {
   background: none; border: none; color: var(--text-secondary); cursor: pointer;
   padding: 6px; flex-shrink: 0; display: flex; align-items: center;

@@ -109,6 +109,7 @@ function navigateTo(view) {
   } else if (view === 'chat') {
     chatView.style.display = '';
     pageFrame.src = '';
+    chatClearBadge();
     chatLoadHistory();
   } else if (view.startsWith('page:')) {
     const name = view.slice(5);
@@ -1304,6 +1305,21 @@ teachSubmit.addEventListener('click', () => {
   });
 });
 
+// --- Chat badge (unread indicator) ---
+function chatIsChatActive() {
+  const navEl = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
+  return navEl && navEl.classList.contains('active');
+}
+function chatShowBadge() {
+  if (chatIsChatActive()) return;
+  const navEl = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
+  if (navEl) navEl.classList.add('has-badge');
+}
+function chatClearBadge() {
+  const navEl = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
+  if (navEl) navEl.classList.remove('has-badge');
+}
+
 // --- Chat ---
 let chatHistoryLoaded = false;
 let chatSending = false;
@@ -1320,6 +1336,35 @@ const chatFileInput = document.getElementById('chatFileInput');
 const chatDropOverlay = document.getElementById('chatDropOverlay');
 let chatPendingFiles = [];
 let chatDragCounter = 0;
+
+// Stop/Send button toggle
+function chatSetStopMode(active) {
+  if (active) {
+    chatSendBtn.innerHTML = '<i data-lucide="square"></i>';
+    chatSendBtn.title = 'Stop';
+    chatSendBtn.classList.add('chat-stop-mode');
+    chatSendBtn.disabled = false;
+  } else {
+    chatSendBtn.innerHTML = '<i data-lucide="send"></i>';
+    chatSendBtn.title = 'Send';
+    chatSendBtn.classList.remove('chat-stop-mode');
+    chatSendBtn.disabled = false;
+  }
+  if (window.lucide) lucide.createIcons();
+}
+function chatStopJob() {
+  fetch('/api/chat/job', { method: 'DELETE', credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(() => {
+      chatAppendBubble('assistant', 'Request cancelled.', { tier: 'system' });
+      chatScrollBottom();
+      if (chatSending) chatFinishSend();
+    })
+    .catch(() => {
+      chatAppendBubble('assistant', 'Failed to cancel.', { tier: 'system' });
+      chatScrollBottom();
+    });
+}
 
 // --- Chat media: attach button ---
 chatAttachBtn.addEventListener('click', () => chatFileInput.click());
@@ -1481,7 +1526,7 @@ async function chatCheckActiveJob() {
       chatJobId = data.job_id;
       chatEventOffset = 0;
       chatSending = true;
-      chatSendBtn.disabled = true;
+      chatSetStopMode(true);
       chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Reconnecting...');
       await chatStreamFromJob(chatJobId, 0);
       chatFinishSend();
@@ -1983,9 +2028,10 @@ function chatFinalizeBubble() {
 
 function chatFinishSend() {
   chatFinalizeBubble();
+  chatShowBadge();
   chatClearStatus();
   chatSending = false;
-  chatSendBtn.disabled = false;
+  chatSetStopMode(false);
   chatInput.focus();
   chatAssistantBubble = null;
   chatFullText = '';
@@ -2018,7 +2064,7 @@ async function chatSend() {
     chatScrollBottom();
     chatSetStatus('Executing...');
     chatSending = true;
-    chatSendBtn.disabled = true;
+    chatSetStopMode(true);
     try {
       const res = await fetch('/api/bash', {
         method: 'POST',
@@ -2037,7 +2083,7 @@ async function chatSend() {
     }
     chatClearStatus();
     chatSending = false;
-    chatSendBtn.disabled = false;
+    chatSetStopMode(false);
     chatScrollBottom();
     return;
   }
@@ -2054,7 +2100,7 @@ async function chatSend() {
   }
 
   chatSending = true;
-  chatSendBtn.disabled = true;
+  chatSetStopMode(true);
   chatInput.value = '';
   chatInput.style.height = '';
 
@@ -2285,7 +2331,13 @@ function chatAppendSystemMessage(text) {
   chatMessages.appendChild(el);
 }
 
-chatSendBtn.addEventListener('click', chatSend);
+chatSendBtn.addEventListener('click', () => {
+  if (chatSendBtn.classList.contains('chat-stop-mode')) {
+    chatStopJob();
+  } else {
+    chatSend();
+  }
+});
 chatInput.addEventListener('keydown', (e) => {
   // Command picker navigation
   if (cmdPickerEl) {

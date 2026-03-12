@@ -492,14 +492,16 @@ func main() {
 		return infos
 	}
 
-	// classifyMessage uses the configured router backend for classification.
-	classifyMessage := func(message string, tiers *cc.TiersConfig) router.Result {
+	// classifyMessageFull includes session context for continuity routing.
+	classifyMessageFull := func(message string, tiers *cc.TiersConfig, lastTier string, msgCount int) router.Result {
 		prompt := router.BuildClassifyPrompt(router.ClassifyInput{
-			Message:    message,
-			Tiers:      tiers,
-			DataDir:    dataDir,
-			ConfigDir:  configDir,
-			AgentTeams: agentTeamsForRouter(),
+			Message:      message,
+			Tiers:        tiers,
+			DataDir:      dataDir,
+			ConfigDir:    configDir,
+			AgentTeams:   agentTeamsForRouter(),
+			LastTier:     lastTier,
+			MessageCount: msgCount,
 		})
 		routerProv := registry.ForBackend(routerBackend)
 		params := provider.Params{
@@ -517,9 +519,14 @@ func main() {
 		return router.InterpretRaw(result.Text, tiers, message)
 	}
 
+	// classifyMessage wraps classifyMessageFull without session context.
+	classifyMessage := func(message string, tiers *cc.TiersConfig) router.Result {
+		return classifyMessageFull(message, tiers, "", 0)
+	}
+
 	// Chat service for mobile app API (shares Claude invocation with Telegram bot).
 	classifyFn := func(message, lastTier string, msgCount int) cc.RouteResult {
-		rr := classifyMessage(message, tierStore.Current())
+		rr := classifyMessageFull(message, tierStore.Current(), lastTier, msgCount)
 		return cc.RouteResult{
 			Tier:     rr.Tier,
 			Response: rr.Response,

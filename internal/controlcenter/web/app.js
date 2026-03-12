@@ -2720,6 +2720,8 @@ function schedulesRender() {
     filtered = filtered.filter(j => !j.next_run || new Date(j.next_run) > weekEnd);
   } else if (schedulesFilter === 'oneshot') {
     filtered = filtered.filter(j => j.auto_delete);
+  } else if (schedulesFilter === 'managed') {
+    filtered = filtered.filter(j => j.managed);
   } else if (schedulesFilter === 'obsolete') {
     filtered = filtered.filter(j => j.auto_delete && (!j.next_run || new Date(j.next_run) < now));
   }

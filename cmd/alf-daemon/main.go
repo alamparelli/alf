@@ -689,7 +689,7 @@ func main() {
 	}
 	defer sched.Stop()
 
-	// Seed security audit job if the skill exists (managed = protected from tool modifications).
+	// Seed security audit job if the skill exists (disabled by default).
 	if _, ok := skillStore.Get("security-audit"); ok {
 		if _, err := sched.EnsureManaged(
 			"security-audit",
@@ -699,6 +699,7 @@ func main() {
 			"Execute the bash commands from the security-audit skill using the Bash tool to discover files, then use the Read tool to analyze each one. Output your security report.",
 			"telegram",
 			[]string{"security-audit"},
+			false, // disabled by default
 		); err != nil {
 			log.Printf("warning: failed to seed security-audit job: %v", err)
 		}
@@ -716,6 +717,7 @@ func main() {
 			`echo "=== ERRORS ===" && tail -500 /home/alf/data/logs/daemon.log 2>/dev/null | grep -iE "error|panic|fatal|failed|timeout|killed" | tail -30; echo "=== EVENTS ===" && find /home/alf/data/logs/events/ -name "*.jsonl" -newer /tmp/.health-last 2>/dev/null -exec tail -50 {} \; | tail -100; touch /tmp/.health-last; echo "=== SCHEDULER ===" && find /home/alf/data/logs/scheduler/ -name "*.jsonl" -newer /tmp/.health-last-sched 2>/dev/null -exec tail -20 {} \;; touch /tmp/.health-last-sched; echo "=== DISK ===" && df -h /home/alf/data/ | tail -1; echo "=== PROCS ===" && ps aux | grep -c "[c]laude" || true`,
 			"telegram",
 			[]string{"health-check"},
+			false, // disabled by default
 		); err != nil {
 			log.Printf("warning: failed to seed health-check job: %v", err)
 		}
@@ -738,6 +740,7 @@ func main() {
 			"__heartbeat__", // sentinel — executor reads context/heartbeat.md at runtime
 			"telegram",
 			[]string{"heartbeat"},
+			true, // enabled by default
 		); err != nil {
 			log.Printf("warning: failed to seed heartbeat job: %v", err)
 		}

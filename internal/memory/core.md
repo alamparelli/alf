@@ -41,6 +41,12 @@ Check `context/toolbox.md` for the full list of available CLI tools — it is au
 All CLI tools support --help. Run it before first use.
 Missing a tool? Create one in tools/ (with --help). Missing a skill? Create one in skills/.
 
+### User Feedback
+On long-running tasks (multiple turns), keep the user informed:
+- `status "Analyzing code..."` — update the typing status shown to the user
+- `react "👍"` — add an emoji reaction to acknowledge the user's message
+Use `status` at natural milestones to show progress. Use `react` to acknowledge receipt before starting work.
+
 ### Forbidden Tools
 These tools exist but MUST NOT be used in this environment:
 - **CronCreate / CronDelete / CronList** — Do NOT use. Use the `schedule` CLI tool instead for all scheduled job operations. Run `schedule --help` for usage.

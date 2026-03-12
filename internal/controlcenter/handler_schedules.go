@@ -6,6 +6,41 @@ import (
 	"time"
 )
 
+// ScheduleRunHandler triggers an immediate one-shot execution of a job.
+type ScheduleRunHandler struct {
+	Engine ScheduleEngine
+}
+
+func (h *ScheduleRunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.Engine == nil {
+		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scheduler not available"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.ID == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+
+	if err := h.Engine.RunNow(req.ID); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // SchedulesHandler serves GET/POST/PUT/DELETE for scheduled jobs.
 type SchedulesHandler struct {
 	Engine ScheduleEngine

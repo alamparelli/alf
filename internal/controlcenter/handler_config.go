@@ -81,6 +81,17 @@ func (h *ConfigHandler) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for name, b := range cfg.Backends {
+		if b.BaseURL == "" {
+			http.Error(w, jsonErr(fmt.Sprintf("backend %q: base_url is required", name)), http.StatusBadRequest)
+			return
+		}
+		if b.Auth != "" && b.Auth != "bearer" && b.Auth != "none" {
+			http.Error(w, jsonErr(fmt.Sprintf("backend %q: invalid auth %q (must be \"bearer\" or \"none\")", name, b.Auth)), http.StatusBadRequest)
+			return
+		}
+	}
+
 	if err := h.Store.Save(&cfg); err != nil {
 		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
 		return

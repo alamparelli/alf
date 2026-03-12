@@ -20,6 +20,14 @@ For example:
 
 Sessions also keep **skills active**. If you ask ALF to draft a tweet, the X/Twitter skill loads and stays active for the rest of the session. Follow-up messages like "schedule it" still have access to the skill.
 
+## Context across backends
+
+ALF preserves conversation context even when switching between different LLM backends (Claude CLI, OpenRouter, Ollama, etc.). A unified conversation store captures rich message history — including tool calls and their results — so the next LLM knows what was done regardless of which provider handled the previous message.
+
+- **API tiers** (OpenRouter, Ollama): conversation history is sent as structured messages in the API request
+- **CLI tiers with active session**: Claude's built-in `--resume` provides richer context (preferred when available)
+- **CLI tiers after a backend switch**: conversation history is injected as a system prompt since the CLI session from the previous backend is stale
+
 ## When sessions expire
 
 Sessions don't last forever. They expire after a period of inactivity (default: 30 minutes, configurable in `config.json`).
@@ -82,10 +90,13 @@ Use `/start` if you want ALF to re-introduce itself, or after a major update.
 ## Common questions
 
 **Can I go back to a previous session?**
-No. Once a session is archived or expired, the conversation context is gone. Important information should be saved to memory or context files.
+No. Once a session is archived or expired, the conversation context is gone. Important information should be saved to memory or context files. The full message history (including tool calls) is still stored on disk in `logs/conversation.jsonl` for debugging.
 
 **How do I know if my session is still active?**
 If ALF responds with context from your recent messages, your session is active. If it seems to have forgotten, the session likely expired.
+
+**Does switching tiers lose context?**
+No. ALF tracks conversation history across all backends. If you're chatting on a Claude CLI tier and the router switches to an OpenRouter tier, the new provider receives the conversation history automatically.
 
 **Does /new affect scheduled jobs?**
 No. Scheduled jobs run independently of your chat sessions.

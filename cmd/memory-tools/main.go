@@ -47,6 +47,14 @@ func main() {
 	}
 	sockPath := filepath.Join(dataDir, "context", "memstore.sock")
 
+	// If no CLI args, try reading JSON from stdin (for agentic tool loop).
+	if len(os.Args) < 2 {
+		if input := readStdinJSON(); input != nil {
+			handleJSONInput(cmd, sockPath, input)
+			return
+		}
+	}
+
 	switch cmd {
 	case "recall":
 		doSearch(sockPath)
@@ -73,6 +81,112 @@ func main() {
 			}
 		}
 		fmt.Fprintf(os.Stderr, "Usage: recall <query> [--limit N]\n       remember <text> [--type fact|preference|decision]\n       forget <id>\n")
+		os.Exit(1)
+	}
+}
+
+// readStdinJSON reads JSON from stdin if data is available (non-blocking check).
+func readStdinJSON() map[string]any {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return nil
+	}
+	// Check if stdin has data (pipe or redirect, not a terminal).
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return nil
+	}
+	var input map[string]any
+	dec := json.NewDecoder(os.Stdin)
+	if err := dec.Decode(&input); err != nil {
+		return nil
+	}
+	return input
+}
+
+// handleJSONInput dispatches a JSON-parsed stdin request to the appropriate action.
+func handleJSONInput(cmd, sockPath string, input map[string]any) {
+	switch cmd {
+	case "recall":
+		query, _ := input["query"].(string)
+		if query == "" {
+			// Try "args" fallback (generic schema).
+			query, _ = input["args"].(string)
+		}
+		if query == "" {
+			fmt.Fprintln(os.Stderr, "Error: missing 'query' field")
+			os.Exit(1)
+		}
+		limit := 5
+		if l, ok := input["limit"].(float64); ok && l > 0 {
+			limit = int(l)
+		}
+		resp := socketCall(sockPath, socketRequest{
+			Action: "search",
+			Query:  query,
+			Limit:  limit,
+		})
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+		if len(resp.Results) == 0 {
+			fmt.Println("Nothing found.")
+			return
+		}
+		fmt.Printf("Found %d results:\n\n", len(resp.Results))
+		for _, m := range resp.Results {
+			date := parseDate(m.CreatedAt)
+			fmt.Printf("[#%d] (%s, %s) %s\n", m.ID, m.Type, date, m.Text)
+		}
+
+	case "remember":
+		text, _ := input["text"].(string)
+		if text == "" {
+			text, _ = input["args"].(string)
+		}
+		if text == "" {
+			fmt.Fprintln(os.Stderr, "Error: missing 'text' field")
+			os.Exit(1)
+		}
+		memType, _ := input["type"].(string)
+		if memType == "" {
+			memType = "fact"
+		}
+		resp := socketCall(sockPath, socketRequest{
+			Action: "store",
+			Text:   text,
+			Type:   memType,
+		})
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+		fmt.Printf("Remembered #%d\n", resp.ID)
+
+	case "forget":
+		var id int64
+		switch v := input["id"].(type) {
+		case float64:
+			id = int64(v)
+		case string:
+			id, _ = strconv.ParseInt(v, 10, 64)
+		}
+		if id == 0 {
+			fmt.Fprintln(os.Stderr, "Error: missing or invalid 'id' field")
+			os.Exit(1)
+		}
+		resp := socketCall(sockPath, socketRequest{
+			Action: "delete",
+			ID:     id,
+		})
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+		fmt.Printf("Forgotten #%d\n", id)
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		os.Exit(1)
 	}
 }

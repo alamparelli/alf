@@ -72,18 +72,19 @@ var emailRegex = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
 // setupProfile stores previous init values so re-running `alf init` pre-fills them.
 type setupProfile struct {
-	Dir            string   `json:"dir,omitempty"`
-	BotToken       string   `json:"bot_token,omitempty"`
-	ChatID         string   `json:"chat_id,omitempty"`
-	HTTPS          bool     `json:"https,omitempty"`
-	Domain         string   `json:"domain,omitempty"`
-	AcmeEmail      string   `json:"acme_email,omitempty"`
-	Port           string   `json:"port,omitempty"`
-	Host           string   `json:"host,omitempty"`
-	Timezone       string   `json:"timezone,omitempty"`
-	OpenRouterKey  bool     `json:"openrouter_key,omitempty"` // true if key was set
-	Workspaces     []string `json:"workspaces,omitempty"`     // host paths to mount
-	JSRuntime      string   `json:"js_runtime,omitempty"`     // "node", "deno", "bun", or ""
+	Dir                string   `json:"dir,omitempty"`
+	BotToken           string   `json:"bot_token,omitempty"`
+	ChatID             string   `json:"chat_id,omitempty"`
+	HTTPS              bool     `json:"https,omitempty"`
+	Domain             string   `json:"domain,omitempty"`
+	AcmeEmail          string   `json:"acme_email,omitempty"`
+	Port               string   `json:"port,omitempty"`
+	Host               string   `json:"host,omitempty"`
+	Timezone           string   `json:"timezone,omitempty"`
+	OpenRouterKey      bool     `json:"openrouter_key,omitempty"`      // true if key was set (backward compat)
+	ConfiguredBackends []string `json:"configured_backends,omitempty"` // ["openrouter", "openai"]
+	Workspaces         []string `json:"workspaces,omitempty"`          // host paths to mount
+	JSRuntime          string   `json:"js_runtime,omitempty"`          // "node", "deno", "bun", or ""
 }
 
 func setupProfilePath() string {
@@ -113,33 +114,54 @@ func RunInit() {
 	reader := bufio.NewReader(os.Stdin)
 	prev := loadSetupProfile()
 
-	// Step 0: Welcome
+	// Welcome
 	PrintBanner()
-	fmt.Println("  This wizard will set up ALF on your machine.")
+	fmt.Println("  Welcome to ALF — your personal AI assistant running on your own server.")
+	fmt.Println()
 	if prev.Dir != "" {
 		fmt.Println("  Previous setup detected — press Enter to keep existing values.")
 	} else {
+		fmt.Println("  This wizard will guide you through the initial setup:")
+		fmt.Println()
+		fmt.Println("    1. Check prerequisites (Docker)")
+		fmt.Println("    2. Choose where to install ALF")
+		fmt.Println("    3. Connect Telegram (optional — for chatting with ALF via your phone)")
+		fmt.Println("    4. Set up your Control Center (web dashboard to manage ALF)")
+		fmt.Println("    5. Configure timezone, LLM backends, workspaces")
+		fmt.Println("    6. Authenticate with Claude")
+		fmt.Println()
 		fmt.Println("  It takes about 2 minutes.")
 	}
 
+	step := 0
+	nextStep := func(title string) {
+		step++
+		PrintStep(step, title)
+	}
+
 	// Step 1: Prerequisites
-	PrintStep(1, "Checking prerequisites")
+	nextStep("Checking prerequisites")
 	checkPrerequisites()
 
 	// Step 2: Install directory
-	PrintStep(2, "Choose install directory")
+	nextStep("Choose install directory")
 	dir := promptDirectory(reader, prev.Dir)
 
-	// Step 3: Telegram Bot Token
-	PrintStep(3, "Telegram Bot Token")
-	botToken, botName := promptBotToken(reader, prev.BotToken)
+	// Step 3: Telegram (optional)
+	nextStep("Telegram integration (optional)")
+	botToken, botName, chatID := promptTelegram(reader, prev.BotToken, prev.ChatID)
+	telegramEnabled := botToken != "" && chatID != ""
+	if telegramEnabled {
+		PrintCheck(fmt.Sprintf("Telegram enabled — bot @%s, chat %s", botName, chatID))
+	} else {
+		PrintInfo("Telegram skipped — you can configure it later via the Control Center")
+	}
 
-	// Step 4: Telegram Chat ID
-	PrintStep(4, "Telegram Chat ID")
-	chatID := promptChatID(reader, botToken, prev.ChatID)
-
-	// Step 5: Dashboard access
-	PrintStep(5, "Dashboard access")
+	// Step 4: Control Center access
+	nextStep("Control Center access")
+	fmt.Println()
+	fmt.Println("  The Control Center is your web dashboard to manage ALF:")
+	fmt.Println("  chat, configure tiers, schedule tasks, manage skills, and more.")
 	var composeData ComposeData
 	if promptHTTPS(reader, prev.HTTPS) {
 		domain := promptDomain(reader, prev.Domain)
@@ -151,12 +173,9 @@ func RunInit() {
 			AcmeEmail:     acmeEmail,
 			CCExternalURL: fmt.Sprintf("https://%s", domain),
 		}
-		// Create letsencrypt directory for ACME certificates
 		if err := os.MkdirAll(filepath.Join(dir, "letsencrypt"), 0o755); err != nil {
 			Fatal(fmt.Sprintf("Failed to create letsencrypt/: %v", err))
 		}
-
-		// Save profile
 		saveSetupProfile(setupProfile{
 			Dir: dir, BotToken: botToken, ChatID: chatID,
 			HTTPS: true, Domain: domain, AcmeEmail: acmeEmail,
@@ -168,58 +187,64 @@ func RunInit() {
 			CCPort:        ccPort,
 			CCExternalURL: fmt.Sprintf("http://%s:%s", ccHost, ccPort),
 		}
-
-		// Save profile
 		saveSetupProfile(setupProfile{
 			Dir: dir, BotToken: botToken, ChatID: chatID,
 			Port: ccPort, Host: ccHost,
 		})
 	}
 
-	// Step 5b: Timezone
+	// Step 5: Additional configuration
+	nextStep("Configuration")
+
+	// Timezone
 	tz := promptTimezone(reader, prev.Timezone)
 	composeData.Timezone = tz
-
-	// Update saved profile with timezone.
 	profile := loadSetupProfile()
 	profile.Timezone = tz
 	saveSetupProfile(profile)
 
-	// Step 5c: Optional OpenRouter API key
-	promptOpenRouter(reader, dir, prev.OpenRouterKey)
+	// LLM backends
+	promptBackends(reader, dir, &profile)
 
-	// Step 5d: Workspaces (host directories to mount)
+	// Workspaces
 	workspaces := promptWorkspaces(reader, prev.Workspaces)
 	composeData.Workspaces = workspaces
 	profile = loadSetupProfile()
 	profile.Workspaces = workspaces
 	saveSetupProfile(profile)
 
-	// Step 5e: JS Runtime
+	// JS Runtime
 	jsRuntime := promptJSRuntime(reader, prev.JSRuntime)
 	composeData.JSRuntime = jsRuntime
 	profile = loadSetupProfile()
 	profile.JSRuntime = jsRuntime
 	saveSetupProfile(profile)
 
-	// Set default image, allow override via ALF_IMAGE env var.
+	// Set default image
 	composeData.Image = "ghcr.io/alamparelli/alf:latest"
 	if img := os.Getenv("ALF_IMAGE"); img != "" {
 		composeData.Image = img
 	}
 
 	// Step 6: Generate files
-	PrintStep(6, "Generating configuration files")
+	nextStep("Generating configuration files")
 	generateFiles(dir, botToken, chatID, composeData)
 
 	// Step 7: Pull & Start
-	PrintStep(7, "Starting ALF")
+	nextStep("Starting ALF")
 	pullAndStart(dir, botName, composeData.EnableHTTPS)
 
 	// Step 8: Claude authentication
-	PrintStep(8, "Claude authentication")
+	nextStep("Claude authentication")
+	fmt.Println()
+	fmt.Println("  Claude is the AI that powers ALF. You need to authenticate once")
+	fmt.Println("  so ALF can use Claude on your behalf.")
 	fmt.Println()
 	RunLogin()
+
+	// Step 9: Generate magic link for Control Center
+	nextStep("Control Center access link")
+	magicURL := generateInitMagicLink(dir)
 
 	// Summary
 	fmt.Println()
@@ -227,10 +252,21 @@ func RunInit() {
 	fmt.Println("  Setup complete!")
 	fmt.Println()
 	PrintCheck(fmt.Sprintf("Install directory: %s", dir))
-	PrintCheck(fmt.Sprintf("Bot: @%s", botName))
-	PrintCheck(fmt.Sprintf("Dashboard: %s", composeData.CCExternalURL))
+	if telegramEnabled {
+		PrintCheck(fmt.Sprintf("Telegram bot: @%s", botName))
+	}
+	PrintCheck(fmt.Sprintf("Control Center: %s", composeData.CCExternalURL))
+	if magicURL != "" {
+		fmt.Println()
+		fmt.Println("  Open your Control Center with this link (valid 30 days):")
+		fmt.Println("  " + colorBold + magicURL + colorReset)
+	}
 	fmt.Println()
-	PrintSuccess("Message @" + botName + " on Telegram to start.")
+	if telegramEnabled {
+		PrintSuccess("You're all set! Message @" + botName + " on Telegram, or open the Control Center.")
+	} else {
+		PrintSuccess("You're all set! Open the Control Center link above to start using ALF.")
+	}
 	fmt.Println()
 }
 
@@ -344,6 +380,38 @@ func promptDirectory(reader *bufio.Reader, previous string) string {
 
 	PrintCheck(fmt.Sprintf("Directory ready: %s", dir))
 	return dir
+}
+
+func promptTelegram(reader *bufio.Reader, prevToken, prevChatID string) (token, botName, chatID string) {
+	fmt.Println()
+	fmt.Println("  Telegram lets you chat with ALF from your phone.")
+	fmt.Println("  You can skip this and use the Control Center web interface instead.")
+
+	hasPrevious := prevToken != "" && prevChatID != ""
+	if hasPrevious {
+		fmt.Print("\n  Telegram was previously configured. Keep it? [Y/n]: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(strings.ToLower(input))
+		if input == "" || input == "y" || input == "yes" {
+			token, botName = promptBotToken(reader, prevToken)
+			chatID = promptChatID(reader, token, prevChatID)
+			return
+		}
+		// User wants to reconfigure or skip
+	}
+
+	if !hasPrevious {
+		fmt.Print("\n  Set up Telegram? [y/N]: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(strings.ToLower(input))
+		if input != "y" && input != "yes" {
+			return "", "", ""
+		}
+	}
+
+	token, botName = promptBotToken(reader, "")
+	chatID = promptChatID(reader, token, "")
+	return
 }
 
 func promptBotToken(reader *bufio.Reader, previous string) (string, string) {
@@ -662,15 +730,19 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	}
 
 	// Store secrets as files (chmod 600, used via Docker Compose secrets)
-	if err := SetSecret(dir, "telegram_bot_token", botToken); err != nil {
-		Fatal(fmt.Sprintf("Failed to write secret: %v", err))
+	if botToken != "" {
+		if err := SetSecret(dir, "telegram_bot_token", botToken); err != nil {
+			Fatal(fmt.Sprintf("Failed to write secret: %v", err))
+		}
+		PrintCheck("secrets/telegram_bot_token")
 	}
-	PrintCheck("secrets/telegram_bot_token")
 
-	if err := SetSecret(dir, "telegram_chat_id", chatID); err != nil {
-		Fatal(fmt.Sprintf("Failed to write secret: %v", err))
+	if chatID != "" {
+		if err := SetSecret(dir, "telegram_chat_id", chatID); err != nil {
+			Fatal(fmt.Sprintf("Failed to write secret: %v", err))
+		}
+		PrintCheck("secrets/telegram_chat_id")
 	}
-	PrintCheck("secrets/telegram_chat_id")
 
 	// Generate Control Center auth token.
 	ccToken, err := generateAuthToken()
@@ -770,7 +842,11 @@ func pullAndStart(dir, botName string, httpsEnabled bool) {
 				if httpsEnabled {
 					PrintCheck("Traefik is running")
 				}
-				PrintSuccess(fmt.Sprintf("Setup complete! Send a message to @%s on Telegram.", botName))
+				if botName != "" {
+					PrintSuccess(fmt.Sprintf("Setup complete! Send a message to @%s on Telegram.", botName))
+				} else {
+					PrintSuccess("Setup complete!")
+				}
 				return
 			}
 		}
@@ -779,47 +855,152 @@ func pullAndStart(dir, botName string, httpsEnabled bool) {
 	PrintWarning("ALF started but health check inconclusive. Check with: alf status")
 }
 
-func promptOpenRouter(reader *bufio.Reader, dir string, hadKey bool) {
-	hint := "N"
-	if hadKey {
-		hint = "Y"
+// backendOption defines a backend choice in the init wizard.
+type backendOption struct {
+	Key       string // "openrouter", "openai", "custom"
+	Name      string
+	BaseURL   string // pre-filled for known backends
+	SecretName string // secret file name for the API key
+	KeyPrefix string // expected key prefix for validation hint
+}
+
+var knownBackends = []backendOption{
+	{Key: "openrouter", Name: "OpenRouter (GPT, Gemini, Llama, etc.)", BaseURL: "https://openrouter.ai/api/v1", SecretName: "openrouter_api_key", KeyPrefix: "sk-or-"},
+	{Key: "openai", Name: "OpenAI (GPT-4o, o1, etc.)", BaseURL: "https://api.openai.com/v1", SecretName: "openai_api_key", KeyPrefix: "sk-"},
+	{Key: "custom", Name: "Custom OpenAI-compatible endpoint"},
+}
+
+func promptBackends(reader *bufio.Reader, dir string, profile *setupProfile) {
+	fmt.Println("\n  ALF supports multiple LLM backends via OpenAI-compatible APIs.")
+	fmt.Println("  Configure backends now, or skip and set them later via the Control Center.")
+	fmt.Println()
+
+	// Show previous config.
+	if len(profile.ConfiguredBackends) > 0 {
+		fmt.Printf("  Previously configured: %s\n", strings.Join(profile.ConfiguredBackends, ", "))
+	} else if profile.OpenRouterKey {
+		fmt.Println("  Previously configured: openrouter")
 	}
-	fmt.Printf("\n  OpenRouter gives access to all LLM models (GPT, Gemini, Llama, etc.) via a single API key.")
-	fmt.Printf("\n  Use OpenRouter as an alternative backend? [%s]: ", hint)
+
+	for i, opt := range knownBackends {
+		fmt.Printf("    [%d] %s\n", i+1, opt.Name)
+	}
+	fmt.Printf("    [%d] Skip\n", len(knownBackends)+1)
+	fmt.Println()
+	fmt.Println("  Enter numbers separated by commas (e.g. 1,2) or press Enter to skip.")
+	fmt.Print("  Choice: ")
+
 	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(strings.ToLower(input))
+	input = strings.TrimSpace(input)
 	if input == "" {
-		if !hadKey {
-			return
+		// Keep existing backends.
+		if profile.OpenRouterKey || len(profile.ConfiguredBackends) > 0 {
+			PrintCheck("Keeping existing backend configuration")
 		}
-		input = "y"
-	}
-	if input != "y" && input != "yes" {
 		return
 	}
 
-	fmt.Print("  OpenRouter API key (sk-or-...): ")
+	var configured []string
+	parts := strings.Split(input, ",")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		var idx int
+		if _, err := fmt.Sscanf(p, "%d", &idx); err != nil || idx < 1 || idx > len(knownBackends)+1 {
+			PrintWarning(fmt.Sprintf("Invalid choice: %s (skipped)", p))
+			continue
+		}
+		if idx == len(knownBackends)+1 {
+			// Skip
+			return
+		}
+		opt := knownBackends[idx-1]
+		if opt.Key == "custom" {
+			promptCustomBackend(reader, dir, &configured)
+		} else {
+			promptKnownBackend(reader, dir, opt, &configured)
+		}
+	}
+
+	profile.ConfiguredBackends = configured
+	// Backward compat: set OpenRouterKey if openrouter was configured.
+	for _, name := range configured {
+		if name == "openrouter" {
+			profile.OpenRouterKey = true
+		}
+	}
+	saveSetupProfile(*profile)
+}
+
+func promptKnownBackend(reader *bufio.Reader, dir string, opt backendOption, configured *[]string) {
+	existing := secretExists(dir, opt.SecretName)
+	fmt.Printf("\n  %s API key", opt.Name)
+	if existing {
+		fmt.Print(" (press Enter to keep existing): ")
+	} else {
+		fmt.Print(": ")
+	}
+
 	key, _ := reader.ReadString('\n')
 	key = strings.TrimSpace(key)
 	if key == "" {
-		if hadKey {
-			PrintCheck("Keeping existing OpenRouter key")
+		if existing {
+			PrintCheck(fmt.Sprintf("Keeping existing %s key", opt.Key))
+			*configured = append(*configured, opt.Key)
+		} else {
+			PrintWarning(fmt.Sprintf("No %s API key provided — skipped", opt.Key))
 		}
 		return
 	}
-	if !strings.HasPrefix(key, "sk-or-") {
-		PrintWarning("Key doesn't start with sk-or- — saving anyway")
+
+	if opt.KeyPrefix != "" && !strings.HasPrefix(key, opt.KeyPrefix) {
+		PrintWarning(fmt.Sprintf("Key doesn't start with %s — saving anyway", opt.KeyPrefix))
 	}
-	if err := SetSecret(dir, "openrouter_api_key", key); err != nil {
-		PrintError(fmt.Sprintf("Failed to save OpenRouter key: %v", err))
+	if err := SetSecret(dir, opt.SecretName, key); err != nil {
+		PrintError(fmt.Sprintf("Failed to save %s key: %v", opt.Key, err))
 		return
 	}
-	PrintCheck("OpenRouter API key saved")
+	PrintCheck(fmt.Sprintf("%s API key saved", opt.Name))
+	*configured = append(*configured, opt.Key)
+}
 
-	// Update profile.
-	profile := loadSetupProfile()
-	profile.OpenRouterKey = true
-	saveSetupProfile(profile)
+func promptCustomBackend(reader *bufio.Reader, dir string, configured *[]string) {
+	fmt.Print("\n  Backend name (e.g. ollama, together): ")
+	name, _ := reader.ReadString('\n')
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		PrintWarning("No name provided — skipped")
+		return
+	}
+
+	fmt.Print("  Base URL (e.g. http://localhost:11434/v1): ")
+	baseURL, _ := reader.ReadString('\n')
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		PrintWarning("No base URL provided — skipped")
+		return
+	}
+
+	fmt.Print("  Requires API key? [y/N]: ")
+	authInput, _ := reader.ReadString('\n')
+	authInput = strings.TrimSpace(strings.ToLower(authInput))
+
+	if authInput == "y" || authInput == "yes" {
+		secretName := name + "_api_key"
+		fmt.Printf("  API key for %s: ", name)
+		key, _ := reader.ReadString('\n')
+		key = strings.TrimSpace(key)
+		if key != "" {
+			if err := SetSecret(dir, secretName, key); err != nil {
+				PrintError(fmt.Sprintf("Failed to save %s key: %v", name, err))
+				return
+			}
+			PrintCheck(fmt.Sprintf("%s API key saved", name))
+		}
+	}
+
+	PrintCheck(fmt.Sprintf("Custom backend %q configured (base_url: %s)", name, baseURL))
+	PrintInfo(fmt.Sprintf("Add this to config.json backends section: %q: {\"base_url\": \"%s\"}", name, baseURL))
+	*configured = append(*configured, name)
 }
 
 func promptWorkspaces(reader *bufio.Reader, previous []string) []string {
@@ -945,6 +1126,37 @@ func promptJSRuntime(reader *bufio.Reader, previous string) string {
 		PrintCheck("JS runtime: " + choice)
 	}
 	return choice
+}
+
+// generateInitMagicLink generates a 30-day magic link via the daemon API.
+// Returns the URL or empty string on failure (non-fatal).
+func generateInitMagicLink(dir string) string {
+	tokenFile := filepath.Join(dir, "secrets", "cc_auth_token")
+	tokenBytes, err := os.ReadFile(tokenFile)
+	if err != nil || strings.TrimSpace(string(tokenBytes)) == "" {
+		PrintWarning("Could not read cc_auth_token — skipping magic link")
+		return ""
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+
+	cmd := exec.Command("docker", "exec", "alf",
+		"curl", "-sf", "-X", "POST",
+		"-H", "Authorization: Bearer "+token,
+		"http://127.0.0.1:8080/api/magic-link?days=30")
+	out, err := cmd.Output()
+	if err != nil {
+		PrintWarning("Could not generate magic link — try: alf magic-link")
+		return ""
+	}
+
+	var resp struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil || resp.URL == "" {
+		PrintWarning("Invalid magic link response — try: alf magic-link")
+		return ""
+	}
+	return resp.URL
 }
 
 // RunLogin launches Claude Code interactively so the user can authenticate

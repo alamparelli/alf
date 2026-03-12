@@ -16,6 +16,7 @@ import (
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
 	scheduler_pkg "github.com/alamparelli/alf/internal/scheduler"
+	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
 )
 
@@ -32,7 +33,7 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, vaultMgr *vault.Manager) (*Server, *ScheduleEventBroker, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, vaultMgr *vault.Manager, providerRegistry *provider.Registry) (*Server, *ScheduleEventBroker, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore, appStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	var chatStore *ChatStore
@@ -86,6 +87,9 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		FirewallProxy:  fwProxy,
 		VaultManager:     vaultMgr,
 		ScheduleEvents:  schedEventBroker,
+		ToolRegistry:     chatServiceToolRegistry(chatService),
+		ProviderRegistry: providerRegistry,
+		ModelCache:       newModelCacheIfRegistry(providerRegistry),
 		AuthToken:      authToken,
 		AllowedOrigin:    strings.TrimRight(externalURL, "/"),
 		SecureCookies:    strings.HasPrefix(externalURL, "https://"),
@@ -123,4 +127,20 @@ func (s *Server) Start() error {
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
+}
+
+// newModelCacheIfRegistry creates a ModelCache if a registry is available.
+func newModelCacheIfRegistry(reg *provider.Registry) *ModelCache {
+	if reg == nil {
+		return nil
+	}
+	return NewModelCache(reg, 12*time.Hour)
+}
+
+// chatServiceToolRegistry extracts the ToolRegistry from a ChatService, or nil.
+func chatServiceToolRegistry(cs *ChatService) *tooling.Registry {
+	if cs == nil {
+		return nil
+	}
+	return cs.ToolRegistry
 }

@@ -243,6 +243,181 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// --- Activity Monitor ---
+(function() {
+  const bar = document.getElementById('activityBar');
+  const label = document.getElementById('activityLabel');
+  const itemsEl = document.getElementById('activityItems');
+  if (!bar) return;
+
+  const typeIcons = {
+    chat: 'message-circle',
+    schedule: 'clock',
+    task: 'cpu',
+  };
+  const typeLabels = {
+    chat: 'Chat',
+    schedule: 'Schedule',
+    task: 'Task',
+  };
+
+  let lastJSON = '';
+
+  async function poll() {
+    try {
+      const data = await api('/api/activity');
+      const json = JSON.stringify(data.items || []);
+      if (json === lastJSON) return; // skip DOM update if unchanged
+      lastJSON = json;
+
+      if (!data.items || data.items.length === 0) {
+        bar.style.display = 'none';
+        return;
+      }
+
+      bar.style.display = '';
+      const n = data.items.length;
+      label.textContent = n + ' active operation' + (n > 1 ? 's' : '');
+
+      itemsEl.innerHTML = data.items.map(item => {
+        const icon = typeIcons[item.type] || 'activity';
+        const badge = typeLabels[item.type] || item.type;
+        const elapsed = item.elapsed ? ' — ' + esc(item.elapsed) : '';
+        return '<div class="activity-item">' +
+          '<i data-lucide="' + icon + '"></i>' +
+          '<span class="activity-badge">' + esc(badge) + '</span>' +
+          '<span class="activity-name">' + esc(item.name) + '</span>' +
+          '<span class="activity-elapsed">' + elapsed + '</span>' +
+          '</div>';
+      }).join('');
+      lucide.createIcons();
+    } catch (e) {
+      // silent — don't disrupt UI on transient errors
+    }
+  }
+
+  poll();
+  setInterval(poll, 5000);
+})();
+
+// --- Telegram Integration ---
+(function() {
+  const statusEl = document.getElementById('telegramStatus');
+  const formEl = document.getElementById('telegramForm');
+  const tokenInput = document.getElementById('tgBotToken');
+  const chatIDInput = document.getElementById('tgChatID');
+  const saveBtn = document.getElementById('tgSaveBtn');
+  const cancelBtn = document.getElementById('tgCancelBtn');
+  const disconnectBtn = document.getElementById('tgDisconnectBtn');
+  const editBtn = document.getElementById('tgEditBtn');
+  const resultEl = document.getElementById('tgResult');
+
+  if (!statusEl) return;
+
+  let isConfigured = false;
+
+  function collapse() {
+    formEl.style.display = 'none';
+    editBtn.style.display = '';
+    resultEl.style.display = 'none';
+  }
+
+  function expand() {
+    formEl.style.display = '';
+    editBtn.style.display = 'none';
+    if (isConfigured) {
+      cancelBtn.style.display = '';
+      disconnectBtn.style.display = '';
+    }
+  }
+
+  async function loadStatus() {
+    try {
+      const data = await api('/api/telegram');
+      isConfigured = !!data.configured;
+      if (data.configured) {
+        statusEl.innerHTML = '<div class="tg-status tg-connected"><i data-lucide="check-circle"></i> Connected' +
+          (data.bot_name ? ' — @' + esc(data.bot_name) : '') +
+          (data.chat_id ? ' <span class="tg-detail">(chat ' + esc(data.chat_id) + ')</span>' : '') +
+          '</div>';
+        tokenInput.placeholder = data.bot_token_masked || '***';
+        tokenInput.value = '';
+        chatIDInput.value = data.chat_id || '';
+        // Collapsed by default when configured.
+        collapse();
+        lucide.createIcons();
+      } else {
+        statusEl.innerHTML = '<div class="tg-status tg-disconnected"><i data-lucide="circle-off"></i> Not configured</div>';
+        editBtn.style.display = 'none';
+        cancelBtn.style.display = 'none';
+        disconnectBtn.style.display = 'none';
+        formEl.style.display = '';
+        lucide.createIcons();
+      }
+    } catch (e) {
+      statusEl.innerHTML = '<div class="tg-status tg-disconnected">Could not load Telegram status</div>';
+      formEl.style.display = '';
+    }
+  }
+
+  editBtn.addEventListener('click', expand);
+  cancelBtn.addEventListener('click', () => {
+    collapse();
+    resultEl.style.display = 'none';
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    const token = tokenInput.value.trim();
+    const chatID = chatIDInput.value.trim();
+    if (!token || !chatID) {
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-error';
+      resultEl.textContent = 'Both bot token and chat ID are required.';
+      return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Verifying...';
+    try {
+      const data = await api('/api/telegram', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_token: token, chat_id: chatID })
+      });
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-success';
+      resultEl.innerHTML = 'Telegram connected to @' + esc(data.bot_name) + '.<br>' +
+        '<strong>Restart ALF to activate.</strong> ' +
+        '<button class="btn btn-sm" onclick="document.getElementById(\'adminRestartBtn\').click()">Restart now</button>';
+      loadStatus();
+    } catch (e) {
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-error';
+      resultEl.textContent = e.error || e.message || 'Failed to save Telegram config.';
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save & Verify';
+    }
+  });
+
+  disconnectBtn.addEventListener('click', async () => {
+    if (!confirm('Disconnect Telegram? ALF will run in Control Center-only mode after restart.')) return;
+    try {
+      await api('/api/telegram', { method: 'DELETE' });
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-success';
+      resultEl.innerHTML = 'Telegram disconnected. <strong>Restart ALF to apply.</strong> ' +
+        '<button class="btn btn-sm" onclick="document.getElementById(\'adminRestartBtn\').click()">Restart now</button>';
+      loadStatus();
+    } catch (e) {
+      resultEl.style.display = '';
+      resultEl.className = 'tg-result tg-error';
+      resultEl.textContent = 'Failed to disconnect.';
+    }
+  });
+
+  loadStatus();
+})();
+
 // --- Workspace Explorer (Tree) ---
 let wsOpenPath = null;
 let wsTree = {};  // { [dirPath]: { loaded, expanded, entries[] } }
@@ -1177,6 +1352,145 @@ const chatMessages = document.getElementById('chatMessages');
 const chatInput = document.getElementById('chatInput');
 const chatSendBtn = document.getElementById('chatSendBtn');
 const chatStatus = document.getElementById('chatStatus');
+const chatMediaPreview = document.getElementById('chatMediaPreview');
+const chatAttachBtn = document.getElementById('chatAttachBtn');
+const chatFileInput = document.getElementById('chatFileInput');
+const chatDropOverlay = document.getElementById('chatDropOverlay');
+let chatPendingFiles = [];
+let chatDragCounter = 0;
+
+// --- Chat media: attach button ---
+chatAttachBtn.addEventListener('click', () => chatFileInput.click());
+chatFileInput.addEventListener('change', () => {
+  if (chatFileInput.files.length) {
+    chatAddFiles(Array.from(chatFileInput.files));
+    chatFileInput.value = '';
+  }
+});
+
+// --- Chat media: drag and drop ---
+const chatView = document.getElementById('chatView');
+chatView.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  chatDragCounter++;
+  if (chatDragCounter === 1) chatDropOverlay.classList.add('active');
+});
+chatView.addEventListener('dragover', (e) => e.preventDefault());
+chatView.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  chatDragCounter--;
+  if (chatDragCounter <= 0) { chatDragCounter = 0; chatDropOverlay.classList.remove('active'); }
+});
+chatView.addEventListener('drop', (e) => {
+  e.preventDefault();
+  chatDragCounter = 0;
+  chatDropOverlay.classList.remove('active');
+  if (e.dataTransfer.files.length) chatAddFiles(Array.from(e.dataTransfer.files));
+});
+
+// --- Chat media: clipboard paste ---
+chatInput.addEventListener('paste', (e) => {
+  const files = [];
+  for (const item of (e.clipboardData || {}).items || []) {
+    if (item.kind === 'file') files.push(item.getAsFile());
+  }
+  if (files.length) {
+    e.preventDefault();
+    chatAddFiles(files);
+  }
+});
+
+// --- Chat media: pending files management ---
+function chatAddFiles(files) {
+  for (const f of files) {
+    // Generate thumbnail for images, null for others.
+    const entry = { file: f, url: null };
+    if (f.type.startsWith('image/')) {
+      entry.url = URL.createObjectURL(f);
+    }
+    chatPendingFiles.push(entry);
+  }
+  chatRenderPendingFiles();
+}
+
+function chatRemoveFile(idx) {
+  const entry = chatPendingFiles[idx];
+  if (entry.url) URL.revokeObjectURL(entry.url);
+  chatPendingFiles.splice(idx, 1);
+  chatRenderPendingFiles();
+}
+
+function chatRenderPendingFiles() {
+  chatMediaPreview.innerHTML = '';
+  if (!chatPendingFiles.length) {
+    chatMediaPreview.classList.remove('has-files');
+    return;
+  }
+  chatMediaPreview.classList.add('has-files');
+  chatPendingFiles.forEach((entry, i) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'chat-media-thumb';
+    if (entry.url) {
+      const img = document.createElement('img');
+      img.src = entry.url;
+      thumb.appendChild(img);
+    }
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = entry.file.name;
+    thumb.appendChild(name);
+    const rm = document.createElement('button');
+    rm.className = 'remove';
+    rm.textContent = '\u00d7';
+    rm.onclick = () => chatRemoveFile(i);
+    thumb.appendChild(rm);
+    chatMediaPreview.appendChild(thumb);
+  });
+}
+
+// Upload pending files and return array of upload_ids.
+async function chatUploadPendingFiles() {
+  const ids = [];
+  for (const entry of chatPendingFiles) {
+    const form = new FormData();
+    form.append('file', entry.file);
+    form.append('type', entry.file.type.startsWith('image/') ? 'photo' : 'document');
+    const res = await fetch('/api/chat/upload', { method: 'POST', credentials: 'same-origin', body: form });
+    if (!res.ok) throw new Error('Upload failed: ' + entry.file.name);
+    const data = await res.json();
+    ids.push(data.upload_id);
+  }
+  // Cleanup previews.
+  chatPendingFiles.forEach(e => { if (e.url) URL.revokeObjectURL(e.url); });
+  chatPendingFiles = [];
+  chatRenderPendingFiles();
+  return ids;
+}
+
+// Render media refs inside a chat bubble (for history & live messages).
+function chatRenderMediaInBubble(bubble, mediaRefs) {
+  if (!mediaRefs || !mediaRefs.length) return;
+  const container = document.createElement('div');
+  container.className = 'chat-bubble-media';
+  mediaRefs.forEach(ref => {
+    if (ref.mime_type && ref.mime_type.startsWith('image/')) {
+      const img = document.createElement('img');
+      const serverUrl = '/api/chat/media/' + ref.upload_id;
+      img.src = ref._localUrl || serverUrl;
+      img.alt = ref.file_name || 'image';
+      img.title = ref.file_name || '';
+      img.onerror = () => { img.style.display = 'none'; };
+      img.addEventListener('click', () => window.open(serverUrl, '_blank'));
+      container.appendChild(img);
+    } else {
+      const badge = document.createElement('span');
+      badge.className = 'file-badge';
+      badge.textContent = ref.file_name || 'file';
+      container.appendChild(badge);
+    }
+  });
+  bubble.prepend(container);
+}
 
 function chatLoadHistory() {
   if (chatHistoryLoaded) return;
@@ -1354,7 +1668,11 @@ function chatAppendBubble(role, text, meta) {
   const bubble = document.createElement('div');
   bubble.className = 'chat-bubble ' + role;
   if (meta && meta.id) bubble.dataset.msgId = meta.id;
-  bubble.innerHTML = role === 'user' ? esc(text) : chatRenderMd(text);
+  if (text) bubble.innerHTML = role === 'user' ? esc(text) : chatRenderMd(text);
+  // Render media attachments (from history or live send).
+  if (meta && meta.media && meta.media.length) {
+    chatRenderMediaInBubble(bubble, meta.media);
+  }
 
   const metaEl = document.createElement('div');
   metaEl.className = 'chat-bubble-meta';
@@ -1724,7 +2042,8 @@ function chatFinishSend() {
 
 async function chatSend() {
   const text = chatInput.value.trim();
-  if (!text || chatSending) return;
+  const hasFiles = chatPendingFiles.length > 0;
+  if ((!text && !hasFiles) || chatSending) return;
 
   // Handle /bash command locally.
   if (text.startsWith('/bash ')) {
@@ -1792,16 +2111,41 @@ async function chatSend() {
   chatAgentTrackerBody = null;
   chatAgentStepCount = 0;
 
-  chatAppendBubble('user', text, {});
+  // Upload pending files first.
+  let mediaIds = [];
+  let pendingBlobUrls = [];
+  if (hasFiles) {
+    // Save blob URLs before upload (upload clears chatPendingFiles).
+    pendingBlobUrls = chatPendingFiles.map(e => ({ url: e.url, mime: e.file.type, name: e.file.name }));
+    chatSetStatus('Uploading files...');
+    try {
+      mediaIds = await chatUploadPendingFiles();
+    } catch (e) {
+      toast('Upload failed: ' + e.message, 'error');
+      chatFinishSend();
+      return;
+    }
+  }
+
+  // Build local media refs with blob URLs for instant thumbnail display.
+  const localMedia = pendingBlobUrls.map((p, i) => ({
+    upload_id: mediaIds[i],
+    mime_type: p.mime || '',
+    file_name: p.name || '',
+    _localUrl: p.url,
+  }));
+  chatAppendBubble('user', text, { media: localMedia.length ? localMedia : undefined });
   chatScrollBottom();
   chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
 
   try {
+    const payload = { message: text };
+    if (mediaIds.length) payload.media_ids = mediaIds;
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify(payload),
     });
 
     if (res.status === 401) {
@@ -2407,10 +2751,13 @@ function schedulesRender() {
     }
 
     const canEdit = !j.managed;
+    const runBtn = j.enabled ? '<button class="btn-sm sched-run-btn" data-idx="' + i + '" title="Run now">Run</button>' : '';
     const actions = canEdit
-      ? '<button class="btn-sm sched-edit-btn" data-idx="' + i + '">Edit</button>' +
+      ? runBtn +
+        '<button class="btn-sm sched-edit-btn" data-idx="' + i + '">Edit</button>' +
         '<button class="btn-sm btn-danger sched-delete-btn" data-idx="' + i + '">Delete</button>'
-      : '<button class="btn-sm sched-toggle-btn" data-idx="' + i + '">' + (j.enabled ? 'Disable' : 'Enable') + '</button>';
+      : runBtn +
+        '<button class="btn-sm sched-toggle-btn" data-idx="' + i + '">' + (j.enabled ? 'Disable' : 'Enable') + '</button>';
 
     const isCollapsed = schedCollapsedSet.has(j.id);
     return '<div class="tier-card' + (isCollapsed ? ' collapsed' : '') + '" data-idx="' + i + '" data-sched-id="' + esc(j.id) + '">' +
@@ -2449,6 +2796,22 @@ function schedulesRender() {
       api('/api/schedules?id=' + encodeURIComponent(j.id), { method: 'DELETE' })
         .then(() => { toast('Job deleted'); schedulesLoad(); })
         .catch(err => toast('Delete failed: ' + err.message, 'error'));
+    });
+  });
+  list.querySelectorAll('.sched-run-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const j = schedulesVisible[+btn.dataset.idx];
+      if (!confirm('Run "' + j.name + '" now?\n\nThis will execute the job immediately as a one-shot.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Running...';
+      api('/api/schedules/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: j.id }),
+      }).then(() => { toast('Job triggered: ' + j.name); })
+        .catch(err => toast('Run failed: ' + err.message, 'error'))
+        .finally(() => { btn.disabled = false; btn.textContent = 'Run'; });
     });
   });
   list.querySelectorAll('.sched-toggle-btn').forEach(btn => {
@@ -3251,22 +3614,105 @@ function logsLineClass(line) {
 
 // --- Tiers ---
 
-const AVAILABLE_TOOLS = [
-  { name: 'Read', desc: 'Read files (code, config, logs, images, PDF)' },
-  { name: 'Write', desc: 'Create or overwrite files' },
-  { name: 'Edit', desc: 'Modify existing files (text replacement)' },
-  { name: 'Bash', desc: 'Execute shell commands' },
-  { name: 'Glob', desc: 'Search files by pattern (e.g. **/*.go)' },
-  { name: 'Grep', desc: 'Search file contents with regex' },
-  { name: 'WebSearch', desc: 'Search the web for information' },
-  { name: 'WebFetch', desc: 'Fetch content from a URL' },
-  { name: 'NotebookEdit', desc: 'Edit Jupyter notebooks' },
-  { name: 'Agent', desc: 'Launch a sub-agent for complex tasks' },
-];
+// Populated dynamically from tiers API response (available_tools field).
+let AVAILABLE_TOOLS = [];
+function toolsRefresh(data) {
+  if (data && data.available_tools) {
+    AVAILABLE_TOOLS = data.available_tools;
+  }
+}
 
-const MODELS = ['haiku', 'sonnet', 'opus'];
+const CLI_MODELS = ['haiku', 'sonnet', 'opus'];
 const EFFORTS = ['low', 'medium', 'high'];
-const BACKENDS = ['', 'cli', 'openrouter'];
+let BACKENDS = ['', 'cli'];
+// Cache of fetched models per backend name: { backendName: [{id, name}] }
+const BACKEND_MODELS_CACHE = { '': CLI_MODELS.map(m => ({id: m})), 'cli': CLI_MODELS.map(m => ({id: m})) };
+// Populated from tiers API response (available_backends + backend_models fields).
+function backendsRefresh(data) {
+  if (data && data.available_backends) {
+    const names = [''];
+    data.available_backends.forEach(n => names.push(n));
+    BACKENDS = [...new Set(names)];
+  }
+  // Pre-populate model cache from backend_models (fetched at daemon startup).
+  if (data && data.backend_models) {
+    for (const [backend, models] of Object.entries(data.backend_models)) {
+      if (models && models.length > 0) {
+        // Sort models alphabetically by id.
+        models.sort((a, b) => a.id.localeCompare(b.id));
+        BACKEND_MODELS_CACHE[backend] = models;
+      }
+    }
+  }
+}
+
+// Fetch models for a backend and update the model field in the form.
+function fetchBackendModels(backendName, targetSelectId) {
+  const key = backendName || 'cli';
+  if (BACKEND_MODELS_CACHE[key]) {
+    renderModelField(key, BACKEND_MODELS_CACHE[key], targetSelectId);
+    return;
+  }
+  // Cache miss: fetch on demand (fallback if daemon cache not ready yet).
+  const el = document.getElementById(targetSelectId);
+  const row = el ? el.closest('.form-row') : null;
+  if (row) row.innerHTML = '<label>Model</label><span class="tier-tool-desc">Loading models...</span><input type="hidden" id="' + targetSelectId + '">';
+  api('/api/backends/' + encodeURIComponent(key) + '/models').then(data => {
+    const models = (data.models || []).sort((a, b) => a.id.localeCompare(b.id));
+    BACKEND_MODELS_CACHE[key] = models;
+    renderModelField(key, models, targetSelectId);
+  }).catch(() => {
+    if (row) row.innerHTML = '<label>Model</label><input type="text" id="' + targetSelectId + '" placeholder="e.g. gpt-4o">';
+  });
+}
+
+// Model library URLs for each backend type.
+const MODEL_LIBRARY_URLS = {
+  'ollama': 'https://ollama.com/library',
+  'openrouter': 'https://openrouter.ai/models',
+};
+
+function modelLibraryLink(backendKey) {
+  const url = MODEL_LIBRARY_URLS[backendKey];
+  if (!url) return '';
+  return ' <a href="' + url + '" target="_blank" rel="noopener" class="model-library-link" title="Browse models">Browse models &#8599;</a>';
+}
+
+function renderModelField(backendKey, models, targetId) {
+  const el = document.getElementById(targetId);
+  const row = el ? el.closest('.form-row') : null;
+  if (!row) return;
+  const isCLI = !backendKey || backendKey === 'cli';
+  const curVal = el ? el.value : '';
+  const libLink = modelLibraryLink(backendKey);
+  if (models.length > 0) {
+    // Show model ID as label (the actual variable name, not display title).
+    const opts = models.map(m => {
+      const sel = (m.id === curVal) ? ' selected' : '';
+      return '<option value="' + esc(m.id) + '"' + sel + '>' + esc(m.id) + '</option>';
+    }).join('');
+    // Add current value if not in list (user may have typed a custom model).
+    const ids = models.map(m => m.id);
+    const extra = (curVal && !ids.includes(curVal)) ? '<option value="' + esc(curVal) + '" selected>' + esc(curVal) + ' (custom)</option>' : '';
+    const hasFilter = !isCLI && models.length > 10;
+    row.innerHTML = '<label>Model' + libLink + '</label><select id="' + targetId + '">' + extra + opts + '</select>' +
+      (hasFilter ? '<input type="text" class="model-filter" placeholder="Filter models...">' : '');
+    if (hasFilter) {
+      const filterInput = row.querySelector('.model-filter');
+      const select = document.getElementById(targetId);
+      if (filterInput && select) {
+        filterInput.addEventListener('input', function() {
+          const q = this.value.toLowerCase();
+          Array.from(select.options).forEach(opt => {
+            opt.style.display = opt.text.toLowerCase().includes(q) || !q ? '' : 'none';
+          });
+        });
+      }
+    }
+  } else {
+    row.innerHTML = '<label>Model' + libLink + '</label><input type="text" id="' + targetId + '" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
+  }
+}
 
 let tiersCache = null;
 let tiersInitialized = false;
@@ -3281,6 +3727,8 @@ function tiersInit() {
 
 function tiersLoad() {
   api('/api/tiers').then(data => {
+    backendsRefresh(data);
+    toolsRefresh(data);
     tiersCache = data;
     tiersRender();
   }).catch(() => toast('Failed to load tiers', 'error'));
@@ -3292,7 +3740,7 @@ function tiersRender() {
   const cfg = document.getElementById('tiersRouterConfig');
 
   // Router config summary
-  const routerBackendLabel = tiersCache.router_backend === 'openrouter' ? 'openrouter' : 'cli';
+  const routerBackendLabel = tiersCache.router_backend && tiersCache.router_backend !== 'cli' ? tiersCache.router_backend : 'cli';
   cfg.innerHTML = '<div class="tiers-router-card">' +
     '<div class="tiers-router-row"><span class="tiers-router-label">Router backend</span><span class="tiers-router-value">' + esc(routerBackendLabel) + '</span></div>' +
     '<div class="tiers-router-row"><span class="tiers-router-label">Router model</span><span class="tiers-router-value">' + esc(tiersCache.router_model || 'haiku') + '</span></div>' +
@@ -3315,8 +3763,9 @@ function tiersRender() {
     if (t.write_capable) badges.push('<span class="tier-badge tier-badge-write">write</span>');
     if (t.force_command) badges.push('<span class="tier-badge tier-badge-force">force</span>');
     if (t.routable) badges.push('<span class="tier-badge tier-badge-routable">routable</span>');
-    if (t.backend === 'openrouter') badges.push('<span class="tier-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">openrouter</span>');
-    const tools = (t.tools || []).join(', ') || (t.write_capable ? 'all (write-capable)' : 'none');
+    if (t.backend && t.backend !== 'cli') badges.push('<span class="tier-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">' + esc(t.backend) + '</span>');
+    const toolsList = t.tools || [];
+    const tools = toolsList.includes('*') ? 'all (wildcard)' : toolsList.join(', ') || (t.write_capable ? 'all (write-capable)' : 'none');
     return '<div class="tier-card" data-idx="' + i + '">' +
       '<div class="tier-card-header">' +
         '<div class="tier-card-title">' + statusDot + '<strong>' + esc(t.name) + '</strong></div>' +
@@ -3365,15 +3814,26 @@ function tiersShowModal(tier) {
   const old = document.getElementById('tierModal');
   if (old) old.remove();
 
-  const toolChecks = AVAILABLE_TOOLS.map(tool => {
-    const checked = (t.tools || []).includes(tool.name) ? ' checked' : '';
-    return '<label class="tier-tool-check"><input type="checkbox" value="' + tool.name + '"' + checked + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">— ' + esc(tool.desc) + '</span></label>';
+  const isWildcard = (t.tools || []).includes('*');
+  const cliToolsList = AVAILABLE_TOOLS.filter(tool => tool.source === 'cli');
+  const alfToolsList = AVAILABLE_TOOLS.filter(tool => tool.source === 'alf');
+  const wildcardCheck = '<label class="tier-tool-check tier-tool-wildcard"><input type="checkbox" id="tfToolsWildcard" value="*"' + (isWildcard ? ' checked' : '') + '> <strong>* (all tools)</strong> <span class="tier-tool-desc">— enable all available tools</span></label>';
+  const cliChecks = cliToolsList.map(tool => {
+    const checked = !isWildcard && (t.tools || []).includes(tool.name) ? ' checked' : '';
+    return '<label class="tier-tool-check tier-tool-cli"><input type="checkbox" value="' + tool.name + '"' + checked + (isWildcard ? ' disabled' : '') + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">— ' + esc(tool.desc) + '</span></label>';
   }).join('');
+  const alfChecks = alfToolsList.length ? alfToolsList.map(tool => {
+    const checked = !isWildcard && (t.tools || []).includes(tool.name) ? ' checked' : '';
+    return '<label class="tier-tool-check tier-tool-alf"><input type="checkbox" value="' + tool.name + '"' + checked + (isWildcard ? ' disabled' : '') + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">— ' + esc(tool.desc) + '</span></label>';
+  }).join('') : '';
+  const toolChecks = wildcardCheck +
+    (cliChecks ? '<div class="tier-tools-group-label">CLI tools</div>' + cliChecks : '') +
+    (alfChecks ? '<div class="tier-tools-group-label">ALF tools</div>' + alfChecks : '');
 
-  const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (t.model === m ? ' selected' : '') + '>' + m + '</option>').join('');
   const effortOpts = ['', ...EFFORTS].map(e => '<option value="' + e + '"' + (t.effort === e ? ' selected' : '') + '>' + (e || '—') + '</option>').join('');
   const backendOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((t.backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
-  const isOR = t.backend === 'openrouter';
+  // Initial model field: temporary placeholder, will be populated by fetchBackendModels after modal renders
+  const modelPlaceholder = '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="Loading...">';
 
   const html = '<div class="modal-backdrop" id="tierModal">' +
     '<div class="modal tier-modal">' +
@@ -3381,7 +3841,7 @@ function tiersShowModal(tier) {
       '<div class="tier-form">' +
         '<div class="form-row"><label>Name</label><input type="text" id="tfName" value="' + esc(t.name) + '"' + (isEdit ? ' readonly style="opacity:0.6"' : '') + '></div>' +
         '<div class="form-row"><label>Backend</label><select id="tfBackend">' + backendOpts + '</select></div>' +
-        '<div class="form-row" id="tfModelRow"><label>Model</label>' + (isOR ? '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="tfModel">' + modelOpts + '</select>') + '</div>' +
+        '<div class="form-row" id="tfModelRow"><label>Model</label>' + modelPlaceholder + '</div>' +
         '<div class="form-row"><label>Priority</label><input type="number" id="tfPriority" value="' + t.priority + '" min="0" max="99"></div>' +
         '<div class="form-row"><label>Effort</label><select id="tfEffort">' + effortOpts + '</select></div>' +
         '<div class="form-row"><label>Router label</label><textarea id="tfLabel" class="input tier-label-textarea" rows="2" placeholder="Description for the router">' + esc(t.router_label || '') + '</textarea></div>' +
@@ -3396,7 +3856,7 @@ function tiersShowModal(tier) {
           '<label class="tier-flag-check"><input type="checkbox" id="tfForceCmd"' + (t.force_command ? ' checked' : '') + '> Force command</label>' +
         '</div>' +
         '<div class="tier-tools-section">' +
-          '<div class="tier-tools-header">Tools <span class="tier-tools-hint">(only for read-only tiers — write-capable tiers get all tools)</span></div>' +
+          '<div class="tier-tools-header">Tools <span class="tier-tools-hint">(CLI tools for Claude CLI tiers, ALF tools for API tiers with tool loop)</span></div>' +
           '<div class="tier-tools-list" id="tfTools">' + toolChecks + '</div>' +
         '</div>' +
       '</div>' +
@@ -3409,6 +3869,9 @@ function tiersShowModal(tier) {
 
   document.body.insertAdjacentHTML('beforeend', html);
 
+  // Fetch and render models for the current backend
+  fetchBackendModels(t.backend || '', 'tfModel');
+
   // Toggle tools visibility based on write_capable
   const wcCheck = document.getElementById('tfWriteCapable');
   const toolsSection = document.querySelector('.tier-tools-section');
@@ -3416,16 +3879,31 @@ function tiersShowModal(tier) {
   toggleTools();
   wcCheck.addEventListener('change', toggleTools);
 
-  // Swap model select/input when backend changes
+  // Wildcard toggle: disable individual tool checkboxes when * is checked.
+  const wildcardCb = document.getElementById('tfToolsWildcard');
+  function toggleWildcard() {
+    const indivCbs = document.querySelectorAll('#tfTools input[type=checkbox]:not(#tfToolsWildcard)');
+    indivCbs.forEach(cb => {
+      cb.disabled = wildcardCb.checked;
+      if (wildcardCb.checked) cb.checked = false;
+    });
+  }
+  if (wildcardCb) wildcardCb.addEventListener('change', toggleWildcard);
+
+  // Swap model select/input when backend changes + toggle CLI tools visibility
+  function updateToolsVisibility(backendVal) {
+    const isCLI = !backendVal || backendVal === 'cli';
+    document.querySelectorAll('.tier-tool-cli').forEach(el => el.style.display = isCLI ? '' : 'none');
+    const cliGroupLabel = document.querySelector('.tier-tools-group-label');
+    if (cliGroupLabel && cliGroupLabel.textContent === 'CLI tools') cliGroupLabel.style.display = isCLI ? '' : 'none';
+    const hint = document.querySelector('.tier-tools-hint');
+    if (hint) hint.textContent = isCLI ? 'CLI tools for Claude CLI tiers' : 'ALF tools for API tiers with tool loop';
+  }
+  updateToolsVisibility(t.backend);
+
   document.getElementById('tfBackend').addEventListener('change', function() {
-    const row = document.getElementById('tfModelRow');
-    const curVal = document.getElementById('tfModel').value;
-    if (this.value === 'openrouter') {
-      row.innerHTML = '<label>Model</label><input type="text" id="tfModel" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
-    } else {
-      const opts = MODELS.map(m => '<option value="' + m + '"' + (curVal === m ? ' selected' : '') + '>' + m + '</option>').join('');
-      row.innerHTML = '<label>Model</label><select id="tfModel">' + opts + '</select>';
-    }
+    fetchBackendModels(this.value, 'tfModel');
+    updateToolsVisibility(this.value);
   });
 
   document.getElementById('tierModalCancel').addEventListener('click', () => document.getElementById('tierModal').remove());
@@ -3451,7 +3929,12 @@ function tiersShowModal(tier) {
       tools: [],
     };
     if (!newTier.write_capable) {
-      document.querySelectorAll('#tfTools input:checked').forEach(cb => newTier.tools.push(cb.value));
+      const wc = document.getElementById('tfToolsWildcard');
+      if (wc && wc.checked) {
+        newTier.tools = ['*'];
+      } else {
+        document.querySelectorAll('#tfTools input:checked:not(#tfToolsWildcard)').forEach(cb => newTier.tools.push(cb.value));
+      }
     }
     // Clean zero values
     if (!newTier.max_turns) delete newTier.max_turns;
@@ -3482,17 +3965,16 @@ function tiersShowRouterModal() {
   if (old) old.remove();
 
   const c = tiersCache;
-  const isOR = c.router_backend === 'openrouter';
-  const modelOpts = MODELS.map(m => '<option value="' + m + '"' + (c.router_model === m ? ' selected' : '') + '>' + m + '</option>').join('');
   const fbOpts = (c.tiers || []).map(t => '<option value="' + t.name + '"' + (c.default_fallback === t.name ? ' selected' : '') + '>' + t.name + '</option>').join('');
   const rbOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((c.router_backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
+  const modelPlaceholder = '<input type="text" id="trModel" value="' + esc(c.router_model || '') + '" placeholder="Loading...">';
 
   const html = '<div class="modal-backdrop" id="tierRouterModal">' +
     '<div class="modal tier-modal">' +
       '<h3>Router Settings</h3>' +
       '<div class="tier-form">' +
         '<div class="form-row"><label>Router backend</label><select id="trBackend">' + rbOpts + '</select></div>' +
-        '<div class="form-row" id="trModelRow"><label>Router model</label>' + (isOR ? '<input type="text" id="trModel" value="' + esc(c.router_model || '') + '" placeholder="e.g. anthropic/claude-haiku-4-5">' : '<select id="trModel">' + modelOpts + '</select>') + '</div>' +
+        '<div class="form-row" id="trModelRow"><label>Router model</label>' + modelPlaceholder + '</div>' +
         '<div class="form-row"><label>Default fallback</label><select id="trFallback">' + fbOpts + '</select></div>' +
         '<div class="form-row"><label>Distinctions</label><textarea class="json-editor" id="trDistinctions" rows="4">' + esc(c.router_distinctions || '') + '</textarea></div>' +
       '</div>' +
@@ -3505,16 +3987,12 @@ function tiersShowRouterModal() {
 
   document.body.insertAdjacentHTML('beforeend', html);
 
-  // Swap model select/input when backend changes
+  // Fetch and render models for the current router backend
+  fetchBackendModels(c.router_backend || '', 'trModel');
+
+  // Swap model dropdown when backend changes
   document.getElementById('trBackend').addEventListener('change', function() {
-    const row = document.getElementById('trModelRow');
-    const curVal = document.getElementById('trModel').value;
-    if (this.value === 'openrouter') {
-      row.innerHTML = '<label>Router model</label><input type="text" id="trModel" value="' + esc(curVal) + '" placeholder="e.g. anthropic/claude-haiku-4-5">';
-    } else {
-      const opts = MODELS.map(m => '<option value="' + m + '"' + (curVal === m ? ' selected' : '') + '>' + m + '</option>').join('');
-      row.innerHTML = '<label>Router model</label><select id="trModel">' + opts + '</select>';
-    }
+    fetchBackendModels(this.value, 'trModel');
   });
 
   document.getElementById('trCancel').addEventListener('click', () => document.getElementById('tierRouterModal').remove());
@@ -3980,21 +4458,27 @@ function termShowUrlBar(url) {
   setTimeout(() => { if (bar.parentNode) bar.remove(); }, 60000);
 }
 
-// --- Terminal mobile support ---
+// --- Terminal input support ---
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-if (isTouchDevice) {
-  document.getElementById('termInputBar').style.display = 'flex';
-  document.querySelectorAll('.term-mobile-btn').forEach(b => b.style.display = '');
-}
 
 // Paste button — read clipboard and send to terminal.
+// Uses Clipboard API with fallback for mobile browsers that deny readText().
 document.getElementById('termPasteBtn').addEventListener('click', async () => {
-  if (!termInstance || !termWS || termWS.readyState !== WebSocket.OPEN) return;
+  if (!termWS || termWS.readyState !== WebSocket.OPEN) return;
+  // Try Clipboard API first (works on desktop + Android Chrome + iOS 16+).
   try {
     const text = await navigator.clipboard.readText();
-    if (text) termWS.send(text);
-    termInstance.focus();
-  } catch { /* clipboard permission denied */ }
+    if (text) {
+      termWS.send(text);
+      if (termInstance) termInstance.focus();
+      return;
+    }
+  } catch { /* permission denied or not supported */ }
+  // Fallback: focus the input bar so the user can long-press > paste natively.
+  const inp = document.getElementById('termInput');
+  inp.value = '';
+  inp.focus();
+  toast('Paste into the input field below', 'info');
 });
 
 // Copy button — copy xterm selection to clipboard.
@@ -4019,6 +4503,12 @@ function termSendInput() {
 }
 
 termSendBtn.addEventListener('click', termSendInput);
+// Auto-send pasted content (no need to press Enter after pasting).
+termInput.addEventListener('paste', (e) => {
+  setTimeout(() => {
+    if (termInput.value) termSendInput();
+  }, 0);
+});
 termInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); termSendInput(); }
   // Send Ctrl+C
@@ -4059,8 +4549,13 @@ function termShowContextMenu(x, y) {
         if (termWS && termWS.readyState === WebSocket.OPEN) {
           try {
             const text = await navigator.clipboard.readText();
-            if (text) termWS.send(text);
+            if (text) { termWS.send(text); return; }
           } catch {}
+          // Fallback: focus input bar for native paste.
+          const inp = document.getElementById('termInput');
+          inp.value = '';
+          inp.focus();
+          toast('Paste into the input field below', 'info');
         }
       } else if (item.action === 'selectall') {
         if (termInstance) termInstance.selectAll();
@@ -4673,6 +5168,263 @@ async function vaultDeleteFile(name) {
     alert('Delete failed: ' + (err?.error || err?.message || 'unknown error'));
   }
 }
+
+// --- Skills Store ---
+(function() {
+  const STORE_PREF_KEY = 'alf_skill_import_prefs';
+  const phase1 = document.getElementById('skillImportPhase1');
+  const phase2 = document.getElementById('skillImportPhase2');
+  const loading = document.getElementById('skillImportLoading');
+  const cmdInput = document.getElementById('skillImportCmd');
+  const backendSelect = document.getElementById('skillImportBackend');
+  const modelSelect = document.getElementById('skillImportModel');
+  const rememberCheck = document.getElementById('skillImportRemember');
+
+  let scanData = null;
+
+  // Populate backend/model on page load.
+  function initSkillStore() {
+    backendSelect.innerHTML = BACKENDS.map(b =>
+      '<option value="' + b + '">' + (b || 'cli (default)') + '</option>'
+    ).join('');
+    // Restore saved preferences.
+    let savedPrefs = null;
+    try {
+      savedPrefs = JSON.parse(localStorage.getItem(STORE_PREF_KEY));
+      if (savedPrefs) {
+        if (savedPrefs.backend && BACKENDS.includes(savedPrefs.backend)) backendSelect.value = savedPrefs.backend;
+        rememberCheck.checked = true;
+      }
+    } catch (_) {}
+    fetchBackendModels(backendSelect.value, 'skillImportModel');
+    // Restore saved model once the dropdown is populated (poll up to 3s).
+    if (savedPrefs && savedPrefs.model) {
+      let attempts = 0;
+      const tryRestore = setInterval(() => {
+        attempts++;
+        if (modelSelect.querySelector('option[value="' + savedPrefs.model + '"]')) {
+          modelSelect.value = savedPrefs.model;
+          clearInterval(tryRestore);
+        } else if (attempts > 15) {
+          clearInterval(tryRestore);
+        }
+      }, 200);
+    }
+  }
+  // Init after tiers are loaded (BACKENDS populated).
+  setTimeout(initSkillStore, 800);
+
+  backendSelect.addEventListener('change', function() {
+    fetchBackendModels(this.value, 'skillImportModel');
+    if (rememberCheck.checked) {
+      localStorage.setItem(STORE_PREF_KEY, JSON.stringify({ backend: backendSelect.value, model: modelSelect.value }));
+    }
+  });
+
+  modelSelect.addEventListener('change', function() {
+    if (rememberCheck.checked) {
+      localStorage.setItem(STORE_PREF_KEY, JSON.stringify({ backend: backendSelect.value, model: modelSelect.value }));
+    }
+  });
+
+  rememberCheck.addEventListener('change', function() {
+    if (this.checked) {
+      localStorage.setItem(STORE_PREF_KEY, JSON.stringify({ backend: backendSelect.value, model: modelSelect.value }));
+    } else {
+      localStorage.removeItem(STORE_PREF_KEY);
+    }
+  });
+
+  function resetToPhase1() {
+    scanData = null;
+    phase1.style.display = '';
+    phase2.style.display = 'none';
+    loading.style.display = 'none';
+  }
+
+  document.getElementById('skillImportCancel2').addEventListener('click', resetToPhase1);
+
+  document.getElementById('skillImportScan').addEventListener('click', async () => {
+    const cmd = cmdInput.value.trim();
+    if (!cmd) { toast('Paste a skills.sh command or owner/repo', 'error'); return; }
+
+    phase1.style.display = 'none';
+    loading.style.display = 'flex';
+
+    // Save preferences if checked.
+    if (rememberCheck.checked) {
+      localStorage.setItem(STORE_PREF_KEY, JSON.stringify({ backend: backendSelect.value, model: modelSelect.value }));
+    } else {
+      localStorage.removeItem(STORE_PREF_KEY);
+    }
+
+    try {
+      const data = await api('/api/skills/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'scan',
+          command: cmd,
+          backend: backendSelect.value,
+          model: modelSelect.value
+        })
+      });
+      scanData = data;
+      showReview(data);
+    } catch (err) {
+      loading.style.display = 'none';
+      phase1.style.display = '';
+      // If repo has multiple skills, show picker.
+      if (err.available_skills && err.available_skills.length > 0) {
+        const skills = err.available_skills;
+        const hint = err.hint || '';
+        const listHTML = skills.map(s =>
+          '<button class="btn btn-sm skill-pick-btn" data-skill="' + esc(s) + '">' + esc(s) + '</button>'
+        ).join(' ');
+        const pickerHTML = '<div class="skill-picker">' +
+          '<p><strong>This repo contains multiple skills.</strong> Pick one:</p>' +
+          '<div class="skill-pick-list">' + listHTML + '</div></div>';
+        // Insert picker above the command input.
+        let picker = document.getElementById('skillPickerWrap');
+        if (!picker) {
+          picker = document.createElement('div');
+          picker.id = 'skillPickerWrap';
+          cmdInput.parentNode.insertBefore(picker, cmdInput);
+        }
+        picker.innerHTML = pickerHTML;
+        picker.querySelectorAll('.skill-pick-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const base = cmdInput.value.replace(/\s+--skill\s+\S+/, '').trim();
+            cmdInput.value = base + ' --skill ' + btn.dataset.skill;
+            picker.innerHTML = '';
+            toast('Selected "' + btn.dataset.skill + '" — click Scan & Review');
+          });
+        });
+        if (window.lucide) lucide.createIcons();
+      } else {
+        toast(err.error || 'Scan failed', 'error');
+      }
+    }
+  });
+
+  function showReview(data) {
+    loading.style.display = 'none';
+    phase2.style.display = '';
+
+    document.getElementById('skillImportName').textContent = data.name;
+    document.getElementById('skillImportSource').textContent = data.source;
+    document.getElementById('skillImportDesc').textContent = data.description || '—';
+
+    const badge = document.getElementById('skillImportVerdict');
+    badge.textContent = data.verdict;
+    badge.className = 'verdict-badge verdict-' + data.verdict.toLowerCase();
+
+    const issuesEl = document.getElementById('skillImportIssues');
+    if (data.issues && data.issues.length > 0) {
+      issuesEl.style.display = '';
+      issuesEl.innerHTML = '<strong>Issues found:</strong><ul>' +
+        data.issues.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>';
+    } else {
+      issuesEl.style.display = 'none';
+    }
+
+    document.getElementById('skillImportTriggers').value = (data.triggers || []).join(', ');
+
+    // Populate tier dropdown from tiersCache.
+    const tierSelect = document.getElementById('skillImportTier');
+    let tierOpts = '<option value="">(any tier)</option>';
+    if (tiersCache && tiersCache.tiers) {
+      tiersCache.tiers.filter(t => t.enabled).forEach(t => {
+        tierOpts += '<option value="' + esc(t.name) + '"' + (t.name === data.tier ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+      });
+    }
+    tierSelect.innerHTML = tierOpts;
+
+    document.getElementById('skillImportContent').value = data.content;
+
+    const installBtn = document.getElementById('skillImportInstall');
+    if (data.verdict === 'FAIL') {
+      installBtn.textContent = 'Install Anyway';
+      installBtn.classList.add('btn-danger');
+    } else if (data.verdict === 'WARN') {
+      installBtn.textContent = 'Install Anyway';
+      installBtn.classList.remove('btn-danger');
+    } else {
+      installBtn.textContent = 'Install';
+      installBtn.classList.remove('btn-danger');
+    }
+  }
+
+  // Disclaimer toggle.
+  document.getElementById('skillStoreInfoBtn').addEventListener('click', () => {
+    const d = document.getElementById('skillStoreDisclaimer');
+    d.style.display = d.style.display === 'none' ? '' : 'none';
+  });
+
+  // Correct with AI.
+  document.getElementById('skillImportCorrect').addEventListener('click', async () => {
+    if (!scanData) return;
+    const btn = document.getElementById('skillImportCorrect');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width:13px;height:13px"></div> Correcting...';
+
+    const issues = (scanData.issues || []).join('\n- ');
+    try {
+      const data = await api('/api/skills/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'correct',
+          content: document.getElementById('skillImportContent').value,
+          triggers: issues, // pass issues via triggers field
+          backend: backendSelect.value,
+          model: modelSelect.value
+        })
+      });
+      document.getElementById('skillImportContent').value = data.content;
+      scanData.content = data.content;
+      toast('Skill corrected — review the changes before installing');
+    } catch (err) {
+      toast(err.error || 'Correction failed', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="wand-2" style="width:13px;height:13px"></i> Correct with AI';
+      if (window.lucide) lucide.createIcons();
+    }
+  });
+
+  document.getElementById('skillImportInstall').addEventListener('click', async () => {
+    if (!scanData) return;
+
+    const installBtn = document.getElementById('skillImportInstall');
+    installBtn.disabled = true;
+    installBtn.textContent = 'Installing...';
+
+    try {
+      const data = await api('/api/skills/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'install',
+          name: scanData.name,
+          content: document.getElementById('skillImportContent').value,
+          triggers: document.getElementById('skillImportTriggers').value,
+          tier: document.getElementById('skillImportTier').value,
+          source: scanData.source
+        })
+      });
+      toast('Skill "' + data.name + '" installed successfully');
+      resetToPhase1();
+      cmdInput.value = '';
+      wsInit();
+    } catch (err) {
+      toast(err.error || 'Install failed', 'error');
+    } finally {
+      installBtn.disabled = false;
+      installBtn.textContent = 'Install';
+    }
+  });
+})();
 
 async function vaultPopulateFileRefs() {
   const select = document.getElementById('vaultSvcSAFileRef');

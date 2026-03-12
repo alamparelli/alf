@@ -51,34 +51,26 @@ type socketResponse struct {
 }
 
 func main() {
-	cmd := filepath.Base(os.Args[0])
-
 	dataDir := os.Getenv("HOME")
 	if d := os.Getenv("ALF_DATA_DIR"); d != "" {
 		dataDir = d
 	}
 	sockPath := filepath.Join(dataDir, "context", "scheduler.sock")
 
-	// Support both symlink-based dispatch and subcommand dispatch.
-	switch cmd {
-	case "schedule":
-		if len(os.Args) < 2 {
-			printUsage()
-			os.Exit(1)
+	// If no CLI args, try reading JSON from stdin (for agentic tool loop).
+	if len(os.Args) < 2 {
+		if input := readStdinJSON(); input != nil {
+			handleJSONInput(sockPath, input)
+			return
 		}
-		subCmd := os.Args[1]
-		os.Args = append(os.Args[:1], os.Args[2:]...)
-		runSubcommand(subCmd, sockPath)
-	default:
-		// Direct binary name (schedule-tools) with subcommand.
-		if len(os.Args) < 2 {
-			printUsage()
-			os.Exit(1)
-		}
-		subCmd := os.Args[1]
-		os.Args = append(os.Args[:1], os.Args[2:]...)
-		runSubcommand(subCmd, sockPath)
+		printUsage()
+		os.Exit(1)
 	}
+
+	// Support both symlink-based dispatch and subcommand dispatch.
+	subCmd := os.Args[1]
+	os.Args = append(os.Args[:1], os.Args[2:]...)
+	runSubcommand(subCmd, sockPath)
 }
 
 func runSubcommand(sub, sockPath string) {
@@ -356,6 +348,141 @@ func socketCall(sockPath string, req socketRequest) socketResponse {
 	}
 
 	return resp
+}
+
+// readStdinJSON reads JSON from stdin if data is available (pipe, not terminal).
+func readStdinJSON() map[string]any {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return nil
+	}
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return nil
+	}
+	var input map[string]any
+	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
+		return nil
+	}
+	return input
+}
+
+func str(m map[string]any, key string) string {
+	v, _ := m[key].(string)
+	return v
+}
+
+// handleJSONInput dispatches a JSON stdin request to the appropriate action.
+func handleJSONInput(sockPath string, input map[string]any) {
+	action := str(input, "action")
+	if action == "" {
+		action = "list" // safe default
+	}
+
+	switch action {
+	case "create":
+		name := str(input, "name")
+		schedule := str(input, "schedule")
+		if name == "" || schedule == "" {
+			fmt.Fprintln(os.Stderr, "Error: 'name' and 'schedule' are required")
+			os.Exit(1)
+		}
+		req := socketRequest{
+			Action:   "create",
+			Name:     name,
+			Schedule: schedule,
+			Tier:     str(input, "tier"),
+			Prompt:   str(input, "prompt"),
+			Command:  str(input, "command"),
+			Message:  str(input, "message"),
+			Output:   str(input, "output"),
+			Timeout:  str(input, "timeout"),
+		}
+		if s := str(input, "skills"); s != "" {
+			for _, sk := range strings.Split(s, ",") {
+				sk = strings.TrimSpace(sk)
+				if sk != "" {
+					req.Skills = append(req.Skills, sk)
+				}
+			}
+		}
+		resp := socketCall(sockPath, req)
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+		if resp.Job != nil {
+			fmt.Printf("Created job %s (%s)\n", resp.Job.ID, resp.Job.Name)
+			if resp.Job.NextRun != nil {
+				fmt.Printf("Next run: %s\n", resp.Job.NextRun.Format("2006-01-02 15:04:05"))
+			}
+		}
+
+	case "list":
+		userOnly := false
+		if v, ok := input["user_only"].(bool); ok {
+			userOnly = v
+		}
+		resp := socketCall(sockPath, socketRequest{Action: "list", UserOnly: userOnly})
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+		if len(resp.Jobs) == 0 {
+			fmt.Println("No scheduled jobs.")
+			return
+		}
+		for _, j := range resp.Jobs {
+			tier := j.Tier
+			if j.Message != "" {
+				tier = "reminder"
+			}
+			nextRun := "-"
+			if j.NextRun != nil {
+				nextRun = j.NextRun.Format("2006-01-02 15:04")
+			}
+			enabled := "yes"
+			if !j.Enabled {
+				enabled = "no"
+			}
+			fmt.Printf("[%s] %s | schedule=%s tier=%s enabled=%s next=%s\n", j.ID, j.Name, j.Schedule, tier, enabled, nextRun)
+		}
+
+	case "delete":
+		id := str(input, "id")
+		if id == "" {
+			fmt.Fprintln(os.Stderr, "Error: 'id' is required")
+			os.Exit(1)
+		}
+		resp := socketCall(sockPath, socketRequest{Action: "delete", ID: id})
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+		fmt.Printf("Deleted job %s\n", id)
+
+	case "update":
+		id := str(input, "id")
+		if id == "" {
+			fmt.Fprintln(os.Stderr, "Error: 'id' is required")
+			os.Exit(1)
+		}
+		fields := make(map[string]string)
+		for _, k := range []string{"name", "schedule", "prompt", "command", "message", "output", "timeout", "enabled"} {
+			if v := str(input, k); v != "" {
+				fields[k] = v
+			}
+		}
+		resp := socketCall(sockPath, socketRequest{Action: "update", ID: id, Fields: fields})
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+		fmt.Printf("Updated job %s\n", id)
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown action: %s\n", action)
+		os.Exit(1)
+	}
 }
 
 func printUsage() {

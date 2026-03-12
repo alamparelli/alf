@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/memory"
@@ -19,6 +20,7 @@ import (
 	"github.com/alamparelli/alf/internal/provider"
 	chatsession "github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/skills"
+	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/voice"
 )
 
@@ -66,11 +68,13 @@ type ChatService struct {
 	ResolveModel ResolveModelFunc     // injected model resolver
 	Provider     provider.Provider    // injected Claude provider (default)
 	Registry     *provider.Registry   // may be nil — multi-backend dispatch
-	APIHistory   *provider.History    // may be nil — API provider history
 	Recaller     MemoryRecaller       // may be nil — auto-injects relevant memories
 	SkillStore   skills.Store         // may be nil — injects skill catalog into system prompts
-	Orchestrator *agents.Orchestrator // may be nil — multi-agent orchestrator
-	mu           sync.Mutex           // serialize Claude calls (single user v1)
+	Orchestrator  *agents.Orchestrator        // may be nil — multi-agent orchestrator
+	ConvStore     *conversation.Store         // may be nil — unified conversation store (Phase 1: parallel write)
+	ToolRegistry  *tooling.Registry           // may be nil — tool schemas for API agentic loop
+	ToolExecutor  *tooling.Executor           // may be nil — tool subprocess runner
+	mu            sync.Mutex                  // serialize Claude calls (single user v1)
 
 	// Background job tracking.
 	activeJob *chatJob
@@ -204,8 +208,9 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	}
 
 	// Save user message.
+	userMsgID := NewMessageID()
 	userMsg := ChatMessage{
-		ID:        NewMessageID(),
+		ID:        userMsgID,
 		Role:      "user",
 		Text:      req.Message,
 		Timestamp: time.Now(),
@@ -213,6 +218,31 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		Media:     cs.resolveMediaRefs(req.MediaIDs),
 	}
 	cs.ChatStore.Append(userMsg)
+
+	// Parallel write to unified conversation store.
+	var ccConvID string
+	if cs.ConvStore != nil {
+		ccConvID = cs.ConvStore.ConvID(conversation.ChannelCC)
+		convUser := conversation.Message{
+			ID:        userMsgID,
+			ConvID:    ccConvID,
+			Channel:   conversation.ChannelCC,
+			Role:      "user",
+			Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: req.Message}},
+			Timestamp: userMsg.Timestamp,
+			ReplyTo:   req.ReplyTo,
+		}
+		for _, mr := range userMsg.Media {
+			convUser.Media = append(convUser.Media, conversation.MediaRef{
+				UploadID: mr.UploadID,
+				Type:     mr.Type,
+				FileName: mr.FileName,
+				MimeType: mr.MimeType,
+				URL:      mr.URL,
+			})
+		}
+		cs.ConvStore.Append(convUser)
+	}
 
 	// Route message.
 	hasMedia := len(req.MediaIDs) > 0
@@ -269,8 +299,9 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		if routeResult.React != "" {
 			onEvent(ChatEvent{Type: "reaction", Data: map[string]string{"emoji": routeResult.React}})
 		}
+		routerMsgID := NewMessageID()
 		assistantMsg := ChatMessage{
-			ID:        NewMessageID(),
+			ID:        routerMsgID,
 			Role:      "assistant",
 			Text:      routeResult.Response,
 			Timestamp: time.Now(),
@@ -278,6 +309,18 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			Tier:      "router",
 		}
 		cs.ChatStore.Append(assistantMsg)
+		if cs.ConvStore != nil {
+			cs.ConvStore.Append(conversation.Message{
+				ID:        routerMsgID,
+				ConvID:    ccConvID,
+				Channel:   conversation.ChannelCC,
+				Role:      "assistant",
+				Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: routeResult.Response}},
+				Timestamp: assistantMsg.Timestamp,
+				Model:     "router",
+				Tier:      "router",
+			})
+		}
 		onEvent(ChatEvent{Type: "text", Data: map[string]string{"text": routeResult.Response}})
 		onEvent(ChatEvent{Type: "done", Data: ChatDoneData{
 			MsgID: assistantMsg.ID,
@@ -365,8 +408,9 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			return fmt.Errorf("agent: %w", orchErr)
 		}
 
+		agentMsgID := NewMessageID()
 		assistantMsg := ChatMessage{
-			ID:        NewMessageID(),
+			ID:        agentMsgID,
 			Role:      "assistant",
 			Text:      orchResult,
 			Timestamp: time.Now(),
@@ -375,6 +419,19 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			CostUSD:   orchMeta.TotalCost,
 		}
 		cs.ChatStore.Append(assistantMsg)
+		if cs.ConvStore != nil {
+			cs.ConvStore.Append(conversation.Message{
+				ID:        agentMsgID,
+				ConvID:    ccConvID,
+				Channel:   conversation.ChannelCC,
+				Role:      "assistant",
+				Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: orchResult}},
+				Timestamp: assistantMsg.Timestamp,
+				Model:     "agent",
+				Tier:      "agent",
+				CostUSD:   orchMeta.TotalCost,
+			})
+		}
 
 		onEvent(ChatEvent{Type: "text", Data: map[string]string{"text": orchResult}})
 		onEvent(ChatEvent{Type: "done", Data: ChatDoneData{
@@ -439,15 +496,41 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		sysPromptTexts = append(sysPromptTexts, reminder)
 	}
 
+	// Inject session/conversation ID so the LLM can provide it when asked.
+	if ccConvID != "" {
+		sysPromptTexts = append(sysPromptTexts, fmt.Sprintf("Current session ID: %s (channel: cc)", ccConvID))
+	}
+
 	// Select provider based on tier backend.
 	prov := cs.Provider
-	isAPITier := tp.Backend == "openrouter"
+	isAPITier := tp.Backend != "" && tp.Backend != "cli"
 	if cs.Registry != nil {
 		prov = cs.Registry.ForBackend(tp.Backend)
 	}
 
+	// Wrap API provider with agentic tool loop when tier has tools.
+	if isAPITier && cs.ToolRegistry != nil && cs.ToolExecutor != nil && len(tp.Tools) > 0 {
+		if apiProv, ok := prov.(*provider.APIProvider); ok {
+			schemas := cs.ToolRegistry.ForTools(tp.Tools)
+			if len(schemas) > 0 {
+				tools := tooling.ToOpenAI(schemas)
+				maxTurns := tp.MaxTurns
+				if maxTurns <= 0 {
+					maxTurns = 10
+				}
+				executor := &toolExecutorAdapter{exec: cs.ToolExecutor}
+				prov = provider.NewToolLoop(apiProv, executor, tools, maxTurns)
+				log.Printf("[chat-api] tool loop enabled: %d tools, max_turns=%d", len(schemas), maxTurns)
+			}
+		}
+	}
+
 	// Invoke via selected Provider.
 	resumeID := cs.Sessions.Get(apiChatID)
+	_, lastBackend, _ := cs.Sessions.ContextFull(apiChatID)
+	backendChanged := lastBackend != "" && lastBackend != tp.Backend
+
+	// Build conversation context from unified store.
 	params := provider.Params{
 		Model:         tp.Model,
 		Tools:         tp.Tools,
@@ -459,12 +542,38 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		DataDir:       cs.DataDir,
 	}
 	if isAPITier {
-		params.SessionKey = fmt.Sprintf("cc:%d", apiChatID)
-		params.ResumeID = "" // API tiers use history, not --resume
+		params.ResumeID = "" // API tiers use ConvMessages, not --resume
+	}
+	if backendChanged {
+		// Backend switch: CLI --resume is stale, start fresh with injected context.
+		log.Printf("[chat-api] backend switch %s→%s, dropping resume", lastBackend, tp.Backend)
+		params.ResumeID = ""
 	}
 
-	var progressFn provider.OnProgress
-	progressFn = func(event provider.StreamEvent) {
+	// Inject conversation history from unified store.
+	if cs.ConvStore != nil {
+		convMsgs := conversation.BuildContext(cs.ConvStore.Recent(conversation.ChannelCC, 0), conversation.DefaultMaxMessages)
+		if isAPITier || params.ResumeID == "" {
+			if isAPITier {
+				// API providers: pass as structured messages.
+				flat := conversation.FlattenForAPI(convMsgs)
+				ctxMsgs := make([]provider.ContextMessage, len(flat))
+				for i, m := range flat {
+					ctxMsgs[i] = provider.ContextMessage{Role: m.Role, Content: m.Content}
+				}
+				params.ConvMessages = ctxMsgs
+			} else {
+				// CLI without resume: inject as system prompt.
+				if histPrompt := conversation.FormatAsSystemPrompt(convMsgs); histPrompt != "" {
+					params.SystemPrompts = append(params.SystemPrompts, histPrompt)
+				}
+			}
+		}
+		// CLI with --resume: skip injection, CLI has its own richer context.
+	}
+
+	var rawProgressFn provider.OnProgress
+	rawProgressFn = func(event provider.StreamEvent) {
 		switch event.Type {
 		case "thinking":
 			if event.Text != "" {
@@ -481,6 +590,14 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		case "text_delta":
 			onEvent(ChatEvent{Type: "text_delta", Data: map[string]string{"text": event.Text}})
 		}
+	}
+
+	// Wrap with accumulator to capture content blocks for the conversation store.
+	var acc *conversation.Accumulator
+	progressFn := rawProgressFn
+	if cs.ConvStore != nil {
+		acc = conversation.NewAccumulator()
+		progressFn = acc.OnProgress(rawProgressFn)
 	}
 
 	start := time.Now()
@@ -507,7 +624,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 	// Update session.
 	if result.SessionID != "" {
-		cs.Sessions.SetWithContext(apiChatID, result.SessionID, tierName)
+		cs.Sessions.SetWithBackend(apiChatID, result.SessionID, tierName, tp.Backend)
 	} else if isAPITier {
 		cs.Sessions.TouchContext(apiChatID, tierName)
 	}
@@ -531,8 +648,9 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	}
 
 	// Save assistant message.
+	assistantMsgID := NewMessageID()
 	assistantMsg := ChatMessage{
-		ID:        NewMessageID(),
+		ID:        assistantMsgID,
 		Role:      "assistant",
 		Text:      cleanText,
 		Timestamp: time.Now(),
@@ -542,6 +660,31 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		SessionID: result.SessionID,
 	}
 	cs.ChatStore.Append(assistantMsg)
+
+	// Parallel write to unified conversation store with rich content blocks.
+	if cs.ConvStore != nil {
+		var blocks []conversation.ContentBlock
+		if acc != nil {
+			blocks = acc.Blocks()
+		}
+		if len(blocks) == 0 {
+			// Fallback: store as plain text block.
+			blocks = []conversation.ContentBlock{{Type: conversation.BlockText, Text: cleanText}}
+		}
+		cs.ConvStore.Append(conversation.Message{
+			ID:        assistantMsgID,
+			ConvID:    ccConvID,
+			Channel:   conversation.ChannelCC,
+			Role:      "assistant",
+			Blocks:    blocks,
+			Timestamp: assistantMsg.Timestamp,
+			Model:     result.Model,
+			Tier:      tierName,
+			Backend:   tp.Backend,
+			CostUSD:   result.CostUSD,
+			SessionID: result.SessionID,
+		})
+	}
 
 	// Send text to client.
 	onEvent(ChatEvent{Type: "text", Data: map[string]string{"text": cleanText}})
@@ -605,8 +748,8 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 // NewSession archives the current API chat session and optionally triggers onboarding.
 func (cs *ChatService) NewSession(onboard bool) string {
 	old := cs.Sessions.Archive(apiChatID)
-	if cs.APIHistory != nil {
-		cs.APIHistory.Clear(fmt.Sprintf("cc:%d", apiChatID))
+	if cs.ConvStore != nil {
+		cs.ConvStore.NewConversation(conversation.ChannelCC)
 	}
 	if onboard {
 		memory.SetOnboarding(cs.ContextDir)
@@ -757,13 +900,21 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			model := t.Model
-			// For CLI backend, resolve short names; for openrouter, use as-is.
-			if t.Backend != "openrouter" && cs.ResolveModel != nil {
+			// For CLI backend, resolve short names; for API backends, use model string as-is.
+			if (t.Backend == "" || t.Backend == "cli") && cs.ResolveModel != nil {
 				model = cs.ResolveModel(t.Model)
+			}
+			// Resolve ["*"] into all available tool names.
+			tools := t.Tools
+			if len(tools) == 1 && tools[0] == "*" {
+				tools = tooling.DiscoverToolNames(cs.DataDir)
+				if len(tools) > 0 {
+					log.Printf("[chat] tier %q: wildcard resolved to %d tools", tierName, len(tools))
+				}
 			}
 			return tierParams{
 				Model:                model,
-				Tools:                t.Tools,
+				Tools:                tools,
 				Effort:               t.Effort,
 				Backend:              t.Backend,
 				WriteCapable:         t.WriteCapable,
@@ -1089,4 +1240,22 @@ func recallMemories(recaller MemoryRecaller, message string) string {
 	}
 	log.Printf("[chat-api] recall: injected %d memories for %q", len(relevant), q)
 	return sb.String()
+}
+
+// toolExecutorAdapter bridges tooling.Executor to provider.ToolExecutor.
+type toolExecutorAdapter struct {
+	exec *tooling.Executor
+}
+
+func (a *toolExecutorAdapter) Execute(ctx context.Context, call provider.ToolCallRequest) provider.ToolCallResult {
+	result := a.exec.Execute(ctx, tooling.CallRequest{
+		ID:        call.ID,
+		Name:      call.Name,
+		Arguments: call.Arguments,
+	})
+	return provider.ToolCallResult{
+		ID:      result.ID,
+		Output:  result.Output,
+		IsError: result.IsError,
+	}
 }

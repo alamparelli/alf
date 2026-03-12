@@ -1,6 +1,6 @@
 ---
 category: Development
-tags: skills, triggers, auto-inject, SKILL.md, frontmatter, reference files
+tags: skills, triggers, auto-inject, SKILL.md, frontmatter, reference files, import, skills.sh
 order: 11
 ---
 
@@ -239,6 +239,64 @@ skills/
     references/
       brand-voice.md       # NOT auto-loaded (in subdirectory)
       examples.md          # NOT auto-loaded (in subdirectory)
+```
+
+## Importing skills from skills.sh
+
+[skills.sh](https://skills.sh) is a community marketplace of ready-made skills. You can import any skill directly into ALF from the Control Center.
+
+### How to import
+
+1. Browse [skills.sh](https://skills.sh) and find a skill you want
+2. Copy the install command (e.g. `npx skills add vercel-labs/skills --skill find-skills`)
+3. In the Control Center, click **Import Skill** in the Workspace header
+4. Paste the command, select a backend/model for the security scan
+5. Click **Scan & Import**
+6. Review the results:
+   - **Verdict**: PASS (safe), WARN (review issues), or FAIL (security concerns)
+   - **Issues**: any problems found by the security scanner
+   - **Triggers**: suggested keywords (editable before install)
+   - **Content**: full SKILL.md preview
+7. Adjust triggers and tier if needed, then click **Install**
+
+The skill is saved to `~/data/skills/{name}/SKILL.md` and reloaded automatically.
+
+### Command formats
+
+All of these work in the import dialog:
+
+```
+npx skills add owner/repo --skill skill-name
+owner/repo --skill skill-name
+owner/repo
+```
+
+If `--skill` is omitted, the repo name is used as the skill name.
+
+### Security scanning
+
+Every imported skill is analyzed by an LLM before installation. The scan checks for:
+
+- **Prompt injection** — attempts to override system behavior
+- **Secret access** — reading credentials or environment variables
+- **Data exfiltration** — sending data to external services
+- **Privilege escalation** — requesting elevated permissions
+- **Destructive operations** — deleting files or modifying system config
+
+You can still install skills with WARN or FAIL verdicts, but review the issues carefully first.
+
+### Where imported skills live
+
+Imported skills go to `~/data/skills/` (the user skills directory), not `skills.d/` (bundled). They include a `source` field in the frontmatter tracking the original GitHub repo:
+
+```yaml
+---
+name: find-skills
+description: Helps discover relevant skills
+triggers: [find, discover, search skills]
+tier: smart
+source: vercel-labs/skills
+---
 ```
 
 ## Overriding bundled skills

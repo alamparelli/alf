@@ -17,7 +17,7 @@ type RunRecord struct {
 	Tier       string        `json:"tier"`
 	StartedAt  time.Time     `json:"started_at"`
 	DurationMs int64         `json:"duration_ms"`
-	Status     string        `json:"status"` // "ok", "error", "timeout", "skipped"
+	Status     string        `json:"status"` // "ok", "error", "timeout", "turn_limit", "skipped"
 	Error      string        `json:"error,omitempty"`
 	OutputLen  int           `json:"output_len"` // response length in chars
 	CostUSD    float64       `json:"cost_usd,omitempty"`

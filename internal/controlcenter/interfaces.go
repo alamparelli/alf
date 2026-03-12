@@ -52,6 +52,7 @@ type ScheduleJob struct {
 	LastRun    string  `json:"last_run,omitempty"`
 	NextRun    string  `json:"next_run,omitempty"`
 	LastError  string  `json:"last_error,omitempty"`
+	Running    bool    `json:"running,omitempty"`
 }
 
 // ScheduleEngine is the subset of scheduler.Engine used by the CC schedules tab.
@@ -61,4 +62,5 @@ type ScheduleEngine interface {
 	CreateReminder(name, schedule, message, output string, timeout time.Duration) (*ScheduleJob, error)
 	Delete(id string) error
 	Update(id string, fields map[string]string) (*ScheduleJob, error)
+	RunNow(id string) error
 }

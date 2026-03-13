@@ -70,6 +70,7 @@ type agentResultJSON struct {
 // RunConfig holds tier-level settings for an orchestrator run.
 type RunConfig struct {
 	Model                string   // full model name for the orchestrator brain
+	Backend              string   // backend for the orchestrator brain ("" or "cli" = default CLI)
 	Effort               string   // effort level (e.g. "high")
 	MaxIterations        int      // max orchestrate→delegate cycles (0 = default 10)
 	MaxTurns             int      // max turns per sub-agent call (0 = use agent config)

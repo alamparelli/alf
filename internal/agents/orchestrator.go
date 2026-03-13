@@ -33,12 +33,17 @@ type RunningTask struct {
 	Meta      *TaskMeta
 }
 
+// ResolveProviderFunc maps a backend name to a provider.
+// Empty string or "cli" should return the default CLI provider.
+type ResolveProviderFunc func(backend string) provider.Provider
+
 type Orchestrator struct {
-	provider     provider.Provider
-	store        Store
-	dataDir      string
-	resolveModel ResolveModelFunc
-	resolveTier  ResolveTierFunc
+	provider        provider.Provider
+	store           Store
+	dataDir         string
+	resolveModel    ResolveModelFunc
+	resolveTier     ResolveTierFunc
+	resolveProvider ResolveProviderFunc // optional: resolve provider by backend name
 
 	mu       sync.Mutex
 	running  map[string]*RunningTask
@@ -54,6 +59,11 @@ func NewOrchestrator(prov provider.Provider, store Store, dataDir string, resolv
 		resolveTier:  resolveTier,
 		running:      make(map[string]*RunningTask),
 	}
+}
+
+// SetResolveProvider sets the function used to resolve providers by backend name.
+func (o *Orchestrator) SetResolveProvider(fn ResolveProviderFunc) {
+	o.resolveProvider = fn
 }
 
 // Running returns a snapshot of all currently running tasks.
@@ -97,6 +107,14 @@ func (o *Orchestrator) CancelAll() int {
 		rt.Cancel()
 	}
 	return len(tasks)
+}
+
+// providerFor returns the provider for the given backend, falling back to the default.
+func (o *Orchestrator) providerFor(backend string) provider.Provider {
+	if o.resolveProvider != nil && backend != "" && backend != "cli" {
+		return o.resolveProvider(backend)
+	}
+	return o.provider
 }
 
 // ProgressFunc reports status during orchestration.
@@ -204,6 +222,9 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	prompt := userMessage
 	turnLimitRetries := 0
 	const maxTurnLimitRetries = 2
+	consecutiveNonJSON := 0
+	const maxConsecutiveNonJSON = 2
+	lastRawOutput := ""
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
 		meta.Iterations = iteration + 1
@@ -220,7 +241,9 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		orchSessionID := sm.Get(orchestratorKey)
 
 		hasResume := orchSessionID != ""
-		log.Printf("[orchestrator] invoking model=%s effort=%s resume=%v", orchModel, orchEffort, hasResume)
+		log.Printf("[orchestrator] invoking model=%s backend=%s effort=%s resume=%v", orchModel, rc.Backend, orchEffort, hasResume)
+
+		orchProvider := o.providerFor(rc.Backend)
 
 		params := provider.Params{
 			Model:         orchModel,
@@ -233,14 +256,14 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			// Tools are for sub-agents, not the coordinator.
 		}
 
-		result, err := o.provider.Invoke(ctx, prompt, params, nil)
+		result, err := orchProvider.Invoke(ctx, prompt, params, nil)
 
 		// Retry without resume if session expired.
 		if err != nil && orchSessionID != "" && strings.Contains(err.Error(), "No conversation found") {
 			log.Printf("[orchestrator] session expired, retrying without resume")
 			sm.Clear(orchestratorKey)
 			params.ResumeID = ""
-			result, err = o.provider.Invoke(ctx, prompt, params, nil)
+			result, err = orchProvider.Invoke(ctx, prompt, params, nil)
 		}
 
 		if err != nil {
@@ -294,6 +317,21 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 
 		// No delegates and no response — treat as empty iteration.
 		if len(output.Delegates) == 0 {
+			// Detect repeated identical non-JSON output (e.g. model error loops).
+			if result.Text == lastRawOutput {
+				consecutiveNonJSON++
+			} else {
+				consecutiveNonJSON = 1
+				lastRawOutput = result.Text
+			}
+			if consecutiveNonJSON >= maxConsecutiveNonJSON {
+				log.Printf("[orchestrator] ✗ brain returned same non-JSON output %d times — aborting: %s",
+					consecutiveNonJSON, truncate(result.Text, 200))
+				meta.Status = "failed"
+				o.saveMeta(taskDir, meta)
+				return "", meta, fmt.Errorf("orchestrator brain error (repeated %d times): %s",
+					consecutiveNonJSON, truncate(result.Text, 200))
+			}
 			log.Printf("[orchestrator] ⚠ no delegates and no response — nudging")
 			prompt = `{"agent_results": [], "note": "No delegates provided. Either delegate to agents or provide a final response."}`
 			continue
@@ -535,8 +573,8 @@ func (o *Orchestrator) invokeAgentWithKey(
 
 	sessionID := sm.Get(sessionKey)
 	hasResume := sessionID != ""
-	log.Printf("[orchestrator] → agent %s/%s: tier=%s model=%s effort=%s write=%v max_turns=%d resume=%v",
-		teamName, agentName, ac.Tier, model, tp.Effort, tp.WriteCapable, tp.MaxTurns, hasResume)
+	log.Printf("[orchestrator] → agent %s/%s: tier=%s model=%s backend=%s effort=%s write=%v max_turns=%d resume=%v",
+		teamName, agentName, ac.Tier, model, tp.Backend, tp.Effort, tp.WriteCapable, tp.MaxTurns, hasResume)
 	log.Printf("[orchestrator]   task: %s", truncate(d.Task, 150))
 
 	// Build system prompts: tier prompt + agent's own prompt + memory context + skill prompts.
@@ -579,14 +617,15 @@ func (o *Orchestrator) invokeAgentWithKey(
 		}
 	}
 
-	result, err := o.provider.Invoke(ctx, d.Task, params, agentProgress)
+	agentProv := o.providerFor(tp.Backend)
+	result, err := agentProv.Invoke(ctx, d.Task, params, agentProgress)
 
 	// Retry without resume if session expired.
 	if err != nil && sessionID != "" && strings.Contains(err.Error(), "No conversation found") {
 		log.Printf("[orchestrator]   agent %s/%s session expired, retrying", teamName, agentName)
 		sm.Clear(sessionKey)
 		params.ResumeID = ""
-		result, err = o.provider.Invoke(ctx, d.Task, params, agentProgress)
+		result, err = agentProv.Invoke(ctx, d.Task, params, agentProgress)
 	}
 
 	dur := time.Since(start)

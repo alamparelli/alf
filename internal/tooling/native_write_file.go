@@ -48,8 +48,9 @@ func (t WriteFileNativeTool) Run(_ context.Context, argsJSON string) (string, er
 	if args.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	if t.DataDir != "" && !filepath.IsAbs(args.Path) {
-		args.Path = filepath.Join(t.DataDir, args.Path)
+	args.Path = ResolvePath(t.DataDir, args.Path)
+	if _, err := CheckBoundary(t.DataDir, args.Path); err != nil {
+		return "", err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(args.Path), 0755); err != nil {

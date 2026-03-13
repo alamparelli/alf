@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -59,8 +58,9 @@ func (t ReadFileNativeTool) Run(_ context.Context, argsJSON string) (string, err
 	if args.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	if t.DataDir != "" && !filepath.IsAbs(args.Path) {
-		args.Path = filepath.Join(t.DataDir, args.Path)
+	args.Path = ResolvePath(t.DataDir, args.Path)
+	if _, err := CheckBoundary(t.DataDir, args.Path); err != nil {
+		return "", err
 	}
 
 	info, err := os.Stat(args.Path)

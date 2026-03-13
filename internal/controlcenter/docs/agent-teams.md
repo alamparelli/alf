@@ -6,9 +6,9 @@ order: 15
 
 # Agent Teams
 
-ALF can coordinate multiple specialized AI agents to tackle complex tasks. An agent (powered by Opus) breaks down your request, delegates sub-tasks to agents, reviews their results, and synthesizes a final answer.
+ALF can coordinate multiple specialized AI agents to tackle complex tasks. An orchestrator brain breaks down your request, delegates sub-tasks to specialized agents, reviews their results, and synthesizes a final answer.
 
-Each agent works in an isolated session — it only sees the specific sub-task assigned to it. No context bleeds between agents.
+The orchestrator brain runs on the tier named `agent` in your `tiers.json` — its model, effort, and turn limits are all configurable there. Each sub-agent runs on its own tier, with its own model, tools, and permissions. No context bleeds between agents.
 
 ## How to use it
 
@@ -64,7 +64,7 @@ ALF ships with a bundled starter team of 3 agents. Each agent references a tier 
 
 The tier defines the model, tools, write permissions, max turns, and effort level. You can customize agent capabilities by creating dedicated tiers (e.g. a "researcher" tier with web search tools and 15 turns).
 
-The agent (Opus) decides which agents to call, what to ask them, and whether the results are good enough — or if another round of delegation is needed.
+The orchestrator brain decides which agents to call, what to ask them, and whether the results are good enough — or if another round of delegation is needed.
 
 ## Creating custom teams
 
@@ -155,39 +155,58 @@ ALF will generate the JSON. You can then save it via the **Workspace Explorer** 
 ## Tips
 
 - **Give agents clear, specific system prompts.** Vague prompts produce vague results. Tell each agent exactly what it should do and what format to use.
-- **Create tiers for different agent roles.** A researcher tier with web search tools and 15 turns, a writer tier with write permissions, a reviewer tier with haiku and few turns.
-- **Give agents enough turns (via the tier).** Start with 10-15 for agents that use tools. Use 5-10 for review-only agents. Too few turns → "turn limit reached" errors.
-- **The agent can re-delegate.** If an agent's result is poor, the agent sends it back with feedback. You don't need to handle retries yourself.
-- **You can have multiple team files.** Drop as many JSON files into `config.d/agents/` as you want. The agent sees all teams and picks the right agents for each task.
+- **Create dedicated tiers for agent roles.** A "researcher" tier with web search tools and 15 turns, a "writer" tier with write permissions, a "reviewer" tier on haiku with 5 turns. Multiple agents can share the same tier.
+- **Give agents enough turns (via their tier).** Start with 10-15 for agents that use tools. Use 5-10 for review-only agents. Too few turns → "turn limit reached" errors.
+- **Use tier system prompts for shared instructions.** If all agents in a role need the same base instructions, put them in the tier's `system_prompt`. The agent's own `system_prompt` is appended after.
+- **The orchestrator can re-delegate.** If an agent's result is poor, the brain sends it back with feedback. You don't need to handle retries yourself.
+- **You can have multiple team files.** Drop as many JSON files into `config.d/agents/` as you want. The orchestrator sees all teams and picks the right agents for each task.
+- **API backends work too.** Set `backend` on a tier to route agents through an API provider (e.g. OpenRouter). This lets you mix CLI and API models in the same team.
 
 ## How it works under the hood
 
-1. The agent receives your message along with ALF context and the full agent catalog.
+1. The orchestrator brain receives your message along with ALF context and the full agent catalog.
 2. It outputs a JSON delegation plan: `{"delegates": [{"agent": "team/agent", "task": "..."}]}`
-3. ALF runs the delegated agents in parallel, each in an isolated working directory.
-4. Agent results are sent back to the agent.
-5. The agent either delegates more work or outputs the final answer: `{"response": "..."}`
-6. This loop continues for up to 10 iterations (configurable via the `max_turns` field in the agent tier).
+3. ALF runs the delegated agents in parallel, each in an isolated working directory under `data/agents/<taskID>/`.
+4. Each sub-agent runs on **its own tier** — with its own model, tools, effort, and turn limits.
+5. Agent results are sent back to the orchestrator brain.
+6. The brain either delegates more work or outputs the final answer: `{"response": "..."}`
+7. This loop continues for up to `max_iterations` cycles (default 10).
 
-The agent runs **non-blocking** — you can continue chatting with ALF while it works in the background. Progress updates appear as animated status messages in Telegram.
+The orchestrator runs **non-blocking** — you can continue chatting with ALF while it works in the background. Progress updates appear as animated status messages in Telegram.
 
-### Agent tier settings
+### Orchestrator tier settings
 
-The agent tier in `tiers.json` controls how the agent brain behaves:
+The `agent` tier in `tiers.json` controls the orchestrator brain:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `model` | `opus` | Model used for the agent brain (reasoning and delegation). |
-| `effort` | `medium` | Thinking effort for the agent brain. `medium` is recommended — `high` uses extended thinking which consumes more turns. |
-| `max_turns` | `10` | Max turns per agent brain call. The brain outputs JSON text only (no tools). |
-| `max_iterations` | `10` | How many delegate→synthesize cycles. Each cycle = one agent call + agent delegation. |
-| `timeout_minutes` | `60` | Hard timeout for the entire agent run. Also bounded by each team's `global_timeout_minutes`. |
+| `model` | `opus` | Model used for the orchestrator brain (reasoning and delegation). |
+| `effort` | `medium` | Thinking effort for the brain. `medium` is recommended. |
+| `orchestrator_max_turns` | `3` | Max turns per brain call. The brain outputs JSON text only (no tools), so few turns suffice. |
+| `max_iterations` | `10` | How many delegate→synthesize cycles. Each cycle = one brain call + parallel agent delegation. |
+| `timeout_minutes` | `60` | Hard timeout for the entire run. Also bounded by each team's `global_timeout_minutes`. |
 
-To enable the agent, set `"enabled": true` in `tiers.json`. The agent is disabled by default.
+### Sub-agent execution
 
-> The agent brain has no tools — it only outputs JSON text. If the brain repeatedly hits "turn limit reached", increase `max_turns`. If tasks time out before completing, increase `max_iterations` or `timeout_minutes`.
+Each sub-agent inherits execution parameters from **its own tier** (not the `agent` tier):
 
-> The entire flow is automatic. You send one message, and the agent handles all the coordination. You only see the final synthesized answer.
+| Tier field | Effect on the sub-agent |
+|------------|------------------------|
+| `model` | Which model runs the agent (e.g. haiku, sonnet, opus). |
+| `tools` | Which tools the agent can use. Use `["*"]` for all, `["*native"]` for native-only. |
+| `max_turns` | How many turns the agent gets. 10-15 for tool-heavy agents, 5-10 for review-only. |
+| `effort` | Thinking effort level. |
+| `write_capable` | Whether the agent can write files. |
+| `system_prompt` | Tier-level prompt, combined with the agent's `system_prompt`. Tier prompt comes first. |
+| `backend` | Which LLM backend to use (empty = default CLI, or a configured API backend). |
+
+To enable the orchestrator, set `"enabled": true` on the `agent` tier. It is disabled by default.
+
+> The orchestrator brain has no tools — it only outputs JSON text. If the brain repeatedly hits "turn limit reached", increase `orchestrator_max_turns`. If tasks time out before completing, increase `max_iterations` or `timeout_minutes`.
+
+> Sub-agent "turn limit reached" errors → increase `max_turns` on that agent's tier.
+
+> The entire flow is automatic. You send one message, and the orchestrator handles all the coordination. You only see the final synthesized answer.
 
 ## What's next?
 

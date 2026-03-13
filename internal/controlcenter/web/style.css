@@ -1732,6 +1732,19 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .settings-view > h2 { margin: 0 0 16px; }
 .settings-view .card { margin-bottom: 16px; }
 
+/* Theme Picker */
+.theme-picker { display: flex; gap: 10px; flex-wrap: wrap; }
+.theme-swatch {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: none; border: 2px solid var(--border); border-radius: 10px;
+  padding: 10px 14px; cursor: pointer; transition: border-color 0.15s;
+}
+.theme-swatch:hover { border-color: var(--text-dim); }
+.theme-swatch.active { border-color: var(--accent); }
+.swatch-preview { display: flex; }
+.swatch-half { display: block; width: 20px; height: 32px; }
+.swatch-label { font-size: 0.72rem; font-weight: 500; color: var(--text-dim); }
+
 .firewall-view {
   display: flex; flex-direction: column; height: 0; flex: 1;
   padding: 24px; overflow-y: auto;

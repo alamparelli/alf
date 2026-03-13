@@ -1980,3 +1980,52 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .skill-pick-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .skill-pick-btn { cursor: pointer; }
 .skill-pick-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Welcome Screen */
+.welcome-backdrop {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  animation: welcomeFadeIn 0.3s ease-out;
+}
+.welcome-backdrop.welcome-closing {
+  animation: welcomeFadeOut 0.3s ease-in forwards;
+}
+.welcome-modal {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 40px; max-width: 460px; width: 90%; text-align: center;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.3);
+  animation: welcomeSlideUp 0.4s ease-out;
+}
+.welcome-closing .welcome-modal {
+  animation: welcomeSlideDown 0.3s ease-in forwards;
+}
+.welcome-logo {
+  font-size: 2rem; font-weight: 800; letter-spacing: 2px;
+  color: var(--accent); margin-bottom: 4px;
+}
+.welcome-modal h2 {
+  font-size: 1.15rem; font-weight: 600; margin: 8px 0 12px; color: var(--text);
+}
+.welcome-modal > p {
+  font-size: 0.85rem; color: var(--text-dim); line-height: 1.5; margin: 0 0 24px;
+}
+.welcome-steps {
+  text-align: left; display: flex; flex-direction: column; gap: 14px; margin-bottom: 28px;
+}
+.welcome-step {
+  display: flex; align-items: flex-start; gap: 12px; font-size: 0.84rem; line-height: 1.45;
+  color: var(--text);
+}
+.welcome-step-num {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: var(--on-accent); font-size: 0.75rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; margin-top: 1px;
+}
+.welcome-cta {
+  padding: 10px 32px; font-size: 0.9rem; font-weight: 600; border-radius: 8px;
+}
+@keyframes welcomeFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes welcomeFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes welcomeSlideUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes welcomeSlideDown { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(16px); } }

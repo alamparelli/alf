@@ -4937,10 +4937,10 @@ const termThemes = {
   },
 };
 
-let termInstance = null;
-let termWS = null;
-let termFitAddon = null;
-let termResizeObserver = null;
+var termInstance = null;
+var termWS = null;
+var termFitAddon = null;
+var termResizeObserver = null;
 
 // Populate theme selector.
 (function() {

@@ -1,25 +1,29 @@
-/* ALF CC Theme — Catppuccin Latte (light) / Mocha (dark).
-   Follows OS preference via prefers-color-scheme. No manual toggle.
-   Usage: <link rel="stylesheet" href="/static/theme.css">
-   Palette: https://catppuccin.com
+/* ALF CC Theme System
+   Palettes: Catppuccin (default), Sage.
+   Light/dark follows OS via prefers-color-scheme.
+   Palette override via [data-palette] on <html>.
 */
 
-/* Catppuccin Latte (light) */
+/* ---- Catppuccin (default) ---- */
+
+/* Latte (light) */
 :root {
-  --bg: #e6e9ef;        /* mantle */
-  --bg-card: #eff1f5;   /* base */
-  --bg-input: #dce0e8;  /* crust */
-  --text: #4c4f69;      /* text */
-  --text-dim: #6c6f85;  /* subtext0 */
-  --accent: #1e66f5;    /* blue */
+  --bg: #e6e9ef;
+  --bg-card: #eff1f5;
+  --bg-input: #dce0e8;
+  --text: #4c4f69;
+  --text-dim: #6c6f85;
+  --accent: #1e66f5;
   --green: #40a02b;
   --red: #d20f39;
   --yellow: #df8e1d;
-  --border: #bcc0cc;    /* surface1 */
+  --border: #bcc0cc;
   --radius: 12px;
-  --on-accent: #eff1f5; /* base */
+  --on-accent: #eff1f5;
+  --danger: #d20f39;
+  --success: #40a02b;
+  --error: #d20f39;
 
-  /* Semantic — used by CC internal components */
   --mauve: #8839ef;
   --pink: #ea76cb;
   --teal: #179299;
@@ -28,27 +32,84 @@
   --lavender: #7287fd;
 }
 
-/* Catppuccin Mocha (dark) */
+/* Mocha (dark) */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #181825;        /* mantle */
-    --bg-card: #1e1e2e;   /* base */
-    --bg-input: #313244;  /* surface0 */
-    --text: #cdd6f4;      /* text */
-    --text-dim: #7f849c;  /* overlay1 */
-    --accent: #89b4fa;    /* blue */
+    --bg: #181825;
+    --bg-card: #1e1e2e;
+    --bg-input: #313244;
+    --text: #cdd6f4;
+    --text-dim: #7f849c;
+    --accent: #89b4fa;
     --green: #a6e3a1;
     --red: #f38ba8;
     --yellow: #f9e2af;
-    --border: #45475a;    /* surface1 */
-    --on-accent: #1e1e2e; /* base */
+    --border: #45475a;
+    --on-accent: #1e1e2e;
+    --danger: #f38ba8;
+    --success: #a6e3a1;
+    --error: #f38ba8;
 
-    /* Semantic */
     --mauve: #cba6f7;
     --pink: #f5c2e7;
     --teal: #94e2d5;
     --sapphire: #74c7ec;
     --peach: #fab387;
     --lavender: #b4befe;
+  }
+}
+
+/* ---- Sage ---- */
+
+/* Sage Light */
+[data-palette="sage"] {
+  --bg: #e4e8e0;
+  --bg-card: #f0f3ec;
+  --bg-input: #d8ddd3;
+  --text: #3a4a3a;
+  --text-dim: #6b7b6b;
+  --accent: #5a8f5a;
+  --green: #3d8b3d;
+  --red: #c4392a;
+  --yellow: #b8860b;
+  --border: #bcc5b8;
+  --radius: 12px;
+  --on-accent: #f0f3ec;
+  --danger: #c4392a;
+  --success: #3d8b3d;
+  --error: #c4392a;
+
+  --mauve: #7a5cad;
+  --pink: #c76fa0;
+  --teal: #2d8a7a;
+  --sapphire: #3a8da8;
+  --peach: #c87537;
+  --lavender: #7082c4;
+}
+
+/* Sage Dark */
+@media (prefers-color-scheme: dark) {
+  [data-palette="sage"] {
+    --bg: #1a1e1a;
+    --bg-card: #222822;
+    --bg-input: #2e342e;
+    --text: #c5cfbf;
+    --text-dim: #7a8a74;
+    --accent: #7cb87c;
+    --green: #8ec48e;
+    --red: #e07060;
+    --yellow: #d4a84b;
+    --border: #3a4638;
+    --on-accent: #222822;
+    --danger: #e07060;
+    --success: #8ec48e;
+    --error: #e07060;
+
+    --mauve: #b89adb;
+    --pink: #dea0c4;
+    --teal: #6ec4b0;
+    --sapphire: #6ab4cc;
+    --peach: #dba070;
+    --lavender: #9eaade;
   }
 }

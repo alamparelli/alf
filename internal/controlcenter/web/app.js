@@ -35,8 +35,31 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.className = 'toast', 3000);
 }
 
-// --- Theme toggle ---
-// Inject theme.css into iframe when it loads an app page.
+// --- Palette system (light/dark follows OS) ---
+function applyPalette(palette) {
+  if (!palette || palette === 'catppuccin') {
+    document.documentElement.removeAttribute('data-palette');
+  } else {
+    document.documentElement.setAttribute('data-palette', palette);
+  }
+  syncIframeTheme();
+}
+
+(function initPalette() {
+  const saved = localStorage.getItem('alf-palette') ?? 'sage';
+  applyPalette(saved);
+  document.querySelectorAll('.theme-swatch').forEach(btn => {
+    if (btn.dataset.palette === saved) btn.classList.add('active');
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.theme-swatch').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      localStorage.setItem('alf-palette', btn.dataset.palette);
+      applyPalette(btn.dataset.palette);
+    });
+  });
+})();
+
+// Inject theme.css + palette into iframe when it loads an app page.
 function syncIframeTheme() {
   const frame = document.getElementById('pageFrame');
   try {
@@ -49,6 +72,9 @@ function syncIframeTheme() {
       link.href = '/static/theme.css';
       doc.head.appendChild(link);
     }
+    const p = localStorage.getItem('alf-palette');
+    if (!p || p === 'catppuccin') doc.documentElement.removeAttribute('data-palette');
+    else doc.documentElement.setAttribute('data-palette', p);
   } catch (_) { /* cross-origin or not loaded */ }
 }
 document.getElementById('pageFrame').addEventListener('load', syncIframeTheme);
@@ -4375,6 +4401,22 @@ const termThemes = {
     brightBlack: '#4c566a', brightRed: '#bf616a', brightGreen: '#a3be8c', brightYellow: '#ebcb8b',
     brightBlue: '#81a1c1', brightMagenta: '#b48ead', brightCyan: '#8fbcbb', brightWhite: '#eceff4',
   },
+  'Sage Light': {
+    background: '#f0f3ec', foreground: '#3a4a3a', cursor: '#5a8f5a', cursorAccent: '#f0f3ec',
+    selectionBackground: 'rgba(90,143,90,0.25)', selectionForeground: '#1a2a1a',
+    black: '#3a4a3a', red: '#c4392a', green: '#3d8b3d', yellow: '#b8860b',
+    blue: '#3a8da8', magenta: '#7a5cad', cyan: '#2d8a7a', white: '#bcc5b8',
+    brightBlack: '#6b7b6b', brightRed: '#c4392a', brightGreen: '#3d8b3d', brightYellow: '#b8860b',
+    brightBlue: '#3a8da8', brightMagenta: '#7a5cad', brightCyan: '#2d8a7a', brightWhite: '#d8ddd3',
+  },
+  'Sage Dark': {
+    background: '#222822', foreground: '#c5cfbf', cursor: '#7cb87c', cursorAccent: '#222822',
+    selectionBackground: 'rgba(124,184,124,0.3)', selectionForeground: '#e0e8da',
+    black: '#2e342e', red: '#e07060', green: '#8ec48e', yellow: '#d4a84b',
+    blue: '#6ab4cc', magenta: '#b89adb', cyan: '#6ec4b0', white: '#9aa894',
+    brightBlack: '#3a4638', brightRed: '#e07060', brightGreen: '#8ec48e', brightYellow: '#d4a84b',
+    brightBlue: '#6ab4cc', brightMagenta: '#b89adb', brightCyan: '#6ec4b0', brightWhite: '#c5cfbf',
+  },
 };
 
 let termInstance = null;
@@ -4393,7 +4435,12 @@ let termResizeObserver = null;
   });
   const saved = localStorage.getItem('alf-term-theme');
   if (saved && termThemes[saved]) sel.value = saved;
-  else sel.value = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'Catppuccin Mocha' : 'Catppuccin Latte';
+  else {
+    const palette = localStorage.getItem('alf-palette') ?? 'sage';
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (palette === 'sage') sel.value = dark ? 'Sage Dark' : 'Sage Light';
+    else sel.value = dark ? 'Catppuccin Mocha' : 'Catppuccin Latte';
+  }
 
   sel.addEventListener('change', () => {
     localStorage.setItem('alf-term-theme', sel.value);
@@ -4405,7 +4452,12 @@ let termResizeObserver = null;
 
 function termGetTheme() {
   const sel = document.getElementById('termThemeSelect');
-  return termThemes[sel.value] || termThemes[window.matchMedia('(prefers-color-scheme: dark)').matches ? 'Catppuccin Mocha' : 'Catppuccin Latte'];
+  if (termThemes[sel.value]) return termThemes[sel.value];
+  const palette = localStorage.getItem('alf-palette') ?? 'sage';
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return palette === 'sage'
+    ? termThemes[dark ? 'Sage Dark' : 'Sage Light']
+    : termThemes[dark ? 'Catppuccin Mocha' : 'Catppuccin Latte'];
 }
 
 function terminalInit() {

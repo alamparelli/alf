@@ -80,9 +80,52 @@ func main() {
 				return
 			}
 		}
-		fmt.Fprintf(os.Stderr, "Usage: recall <query> [--limit N]\n       remember <text> [--type fact|preference|decision]\n       forget <id>\n")
+		fmt.Fprintf(os.Stderr, "Usage: recall <query> [--limit N]\n       remember <text> [--type fact|preference|decision]\n       forget <id> [id2 id3 ...]\n")
 		os.Exit(1)
 	}
+}
+
+// parseIDList extracts a list of int64 IDs from JSON input.
+// Supports: {"ids": [1,2,3]}, {"ids": "1 2 3"}, {"id": 5} (legacy single).
+func parseIDList(input map[string]any) []int64 {
+	var ids []int64
+	if arr, ok := input["ids"]; ok {
+		switch v := arr.(type) {
+		case []any:
+			for _, item := range v {
+				switch n := item.(type) {
+				case float64:
+					ids = append(ids, int64(n))
+				case string:
+					if id, err := strconv.ParseInt(n, 10, 64); err == nil {
+						ids = append(ids, id)
+					}
+				}
+			}
+		case string:
+			for _, part := range strings.Fields(v) {
+				if id, err := strconv.ParseInt(part, 10, 64); err == nil {
+					ids = append(ids, id)
+				}
+			}
+		case float64:
+			ids = append(ids, int64(v))
+		}
+	}
+	// Legacy: single "id" field
+	if len(ids) == 0 {
+		if v, ok := input["id"]; ok {
+			switch n := v.(type) {
+			case float64:
+				ids = append(ids, int64(n))
+			case string:
+				if id, err := strconv.ParseInt(n, 10, 64); err == nil {
+					ids = append(ids, id)
+				}
+			}
+		}
+	}
+	return ids
 }
 
 // readStdinJSON reads JSON from stdin if data is available (non-blocking check).
@@ -164,26 +207,22 @@ func handleJSONInput(cmd, sockPath string, input map[string]any) {
 		fmt.Printf("Remembered #%d\n", resp.ID)
 
 	case "forget":
-		var id int64
-		switch v := input["id"].(type) {
-		case float64:
-			id = int64(v)
-		case string:
-			id, _ = strconv.ParseInt(v, 10, 64)
-		}
-		if id == 0 {
-			fmt.Fprintln(os.Stderr, "Error: missing or invalid 'id' field")
+		ids := parseIDList(input)
+		if len(ids) == 0 {
+			fmt.Fprintln(os.Stderr, "Error: missing or invalid 'ids' field")
 			os.Exit(1)
 		}
-		resp := socketCall(sockPath, socketRequest{
-			Action: "delete",
-			ID:     id,
-		})
-		if resp.Error != "" {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
-			os.Exit(1)
+		for _, id := range ids {
+			resp := socketCall(sockPath, socketRequest{
+				Action: "delete",
+				ID:     id,
+			})
+			if resp.Error != "" {
+				fmt.Fprintf(os.Stderr, "Error deleting #%d: %s\n", id, resp.Error)
+			} else {
+				fmt.Printf("Forgotten #%d\n", id)
+			}
 		}
-		fmt.Printf("Forgotten #%d\n", id)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
@@ -271,27 +310,26 @@ func doStore(sockPath string) {
 
 func doDelete(sockPath string) {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: forget <id>\n")
+		fmt.Fprintf(os.Stderr, "Usage: forget <id> [id2 id3 ...]\n")
 		os.Exit(1)
 	}
 
-	id, err := strconv.ParseInt(os.Args[1], 10, 64)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: invalid id %q\n", os.Args[1])
-		os.Exit(1)
+	for _, arg := range os.Args[1:] {
+		id, err := strconv.ParseInt(arg, 10, 64)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid id %q\n", arg)
+			continue
+		}
+		resp := socketCall(sockPath, socketRequest{
+			Action: "delete",
+			ID:     id,
+		})
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error deleting #%d: %s\n", id, resp.Error)
+		} else {
+			fmt.Printf("Forgotten #%d\n", id)
+		}
 	}
-
-	resp := socketCall(sockPath, socketRequest{
-		Action: "delete",
-		ID:     id,
-	})
-
-	if resp.Error != "" {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Forgotten #%d\n", id)
 }
 
 const extractionInterval = 3 * time.Hour

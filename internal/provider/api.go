@@ -370,9 +370,15 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 				}
 				if tc.Function.Name != "" {
 					existing.Function.Name += tc.Function.Name
+					if onProgress != nil {
+						onProgress(StreamEvent{Type: "tool_use", Detail: existing.Function.Name})
+					}
 				}
 				if tc.Function.Arguments != "" {
 					existing.Function.Arguments += tc.Function.Arguments
+					if onProgress != nil {
+						onProgress(StreamEvent{Type: "tool_input", Detail: existing.Function.Name, Text: tc.Function.Arguments})
+					}
 				}
 			}
 		}

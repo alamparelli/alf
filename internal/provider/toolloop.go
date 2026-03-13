@@ -120,6 +120,7 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 		for _, tc := range resp.ToolCalls {
 			if onProgress != nil {
 				onProgress(StreamEvent{Type: "tool_use", Detail: tc.Function.Name})
+				onProgress(StreamEvent{Type: "tool_input", Detail: tc.Function.Name, Text: tc.Function.Arguments})
 			}
 
 			result := tl.executor.Execute(ctx, ToolCallRequest{

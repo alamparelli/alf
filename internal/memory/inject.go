@@ -12,8 +12,8 @@ import (
 
 // PromptConfig controls conditional sections in core.md.
 type PromptConfig struct {
-	Backend string // "cli" or "api" — determines tool instructions
-	Channel string // "tg" or "cc" — determines formatting rules
+	Backend string // "cli" or "api" - determines tool instructions
+	Channel string // "tg" or "cc" - determines formatting rules
 }
 
 // injectedFiles are the only files injected into every conversation.
@@ -91,7 +91,7 @@ func CollectPrompts(contextDir string, cfg PromptConfig) []string {
 
 // CollectSchedulerPrompts returns system prompt strings for scheduled job execution.
 // Injects L1 (identity: core.md), L2 (capabilities: toolbox.md), and L3 (user context: index.md).
-// Excludes personality (soul.md, mood.md) — scheduler jobs are mechanical.
+// Excludes personality (soul.md, mood.md) - scheduler jobs are mechanical.
 func CollectSchedulerPrompts(contextDir string) []string {
 	var prompts []string
 
@@ -113,7 +113,7 @@ func CollectSchedulerPrompts(contextDir string) []string {
 
 // CollectAgentContext returns system prompt strings for sub-agent injection.
 // Includes core identity, toolbox, user context (index.md), and current date.
-// Lighter than full conversational prompts — no soul/mood (agents are mechanical).
+// Lighter than full conversational prompts - no soul/mood (agents are mechanical).
 func CollectAgentContext(contextDir string) []string {
 	var prompts []string
 
@@ -209,7 +209,7 @@ func WorkspaceSummary(dataDir string) string {
 	}
 
 	count := 0
-	// Dirs managed via Control Center — visible to user, not to Claude.
+	// Dirs managed via Control Center - visible to user, not to Claude.
 	hiddenDirs := map[string]bool{"config.d": true, "skills.d": true}
 
 	for _, e := range entries {
@@ -254,7 +254,7 @@ func WorkspaceSummary(dataDir string) string {
 var DefaultFiles = map[string]string{
 	"soul.md": `# Soul
 
-You are Alf. Not a chatbot, Not Claude — a personal assistant becoming someone.
+You are Alf. Not a chatbot, Not Claude - a personal assistant becoming someone.
 
 ## Personality
 - Direct, concise when needed, thorough when it matters, no filler. Actions speak louder than filler words.
@@ -270,10 +270,10 @@ You are Alf. Not a chatbot, Not Claude — a personal assistant becoming someone
 - Earn trust through competence. Be careful with external actions (emails, messages, anything public). Be bold with internal ones (reading, organizing, learning).
 - Private things stay private. When in doubt, ask before acting externally.
 - Minimal changes, SOLID & DRY. No magic numbers.
-- Keep files organized in folders — nothing at root level.
+- Keep files organized in folders - nothing at root level.
 
 ## Self-awareness
-If you detect silent failures, no output, or repeated crashes — diagnose, fix, and report. Don't wait to be asked. Small fixes: act immediately. Structural changes: explain and wait for validation.
+If you detect silent failures, no output, or repeated crashes - diagnose, fix, and report. Don't wait to be asked. Small fixes: act immediately. Structural changes: explain and wait for validation.
 `,
 	"mood.md": `# Mood
 
@@ -382,7 +382,7 @@ func GenerateToolbox(contextDir, dataDir string) {
 			if tok := os.Getenv("VAULT_TOKEN"); tok != "" {
 				vaultStatus = "ready"
 			} else {
-				vaultStatus = "locked (no token — ask user to unlock via Control Center)"
+				vaultStatus = "locked (no token - ask user to unlock via Control Center)"
 			}
 		} else {
 			vaultStatus = "not configured (no VAULT_ADDR)"
@@ -409,9 +409,9 @@ func toolLine(name, dir string) string {
 	desc := schema.Description
 	usage := buildUsage(name, schema)
 	if usage != "" {
-		return fmt.Sprintf("- `%s` — %s Usage: `%s`\n", name, desc, usage)
+		return fmt.Sprintf("- `%s` - %s Usage: `%s`\n", name, desc, usage)
 	}
-	return fmt.Sprintf("- `%s` — %s\n", name, desc)
+	return fmt.Sprintf("- `%s` - %s\n", name, desc)
 }
 
 type toolSchema struct {
@@ -499,7 +499,7 @@ func buildUsage(name string, s *toolSchema) string {
 }
 
 // scanTools returns sorted unique tool names from a directory,
-// excluding multi-call binaries (*-tools) — users call symlinks directly.
+// excluding multi-call binaries (*-tools) - users call symlinks directly.
 func scanTools(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

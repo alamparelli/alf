@@ -35,7 +35,7 @@ func (t *Tracker) Init() error {
 	// Always mark directory as safe (required when daemon runs as root but dir is owned by another user).
 	_ = t.git("config", "--global", "--add", "safe.directory", t.dir)
 	if _, err := os.Stat(gitDir); err == nil {
-		// Repo exists — ensure .gitignore is up-to-date.
+		// Repo exists - ensure .gitignore is up-to-date.
 		_ = t.writeGitignore()
 		return nil
 	}

@@ -94,7 +94,7 @@ When you run `alf upgrade`, the container image is rebuilt. Everything outside v
 
 ## Pre-installed packages
 
-These are already in the container image — no need to add them to `packages.txt`.
+These are already in the container image - no need to add them to `packages.txt`.
 
 | Category | Packages |
 |----------|----------|

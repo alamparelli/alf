@@ -83,7 +83,7 @@ func (e *Extractor) Stop() {
 
 func (e *Extractor) loop() {
 	// Delay first extraction to avoid competing with classifier for memory
-	// at boot time. Both spawn Claude CLI processes — running them
+	// at boot time. Both spawn Claude CLI processes - running them
 	// simultaneously can OOM on constrained hosts.
 	select {
 	case <-time.After(3 * time.Minute):
@@ -124,7 +124,7 @@ func (e *Extractor) RunOnce(since time.Time) error {
 	}
 
 	if len(conversations) < 3 {
-		log.Printf("memstore: skipping extraction — only %d message pairs (advancing state)", len(conversations))
+		log.Printf("memstore: skipping extraction - only %d message pairs (advancing state)", len(conversations))
 		e.saveState() // advance LastRun so we don't stay permanently overdue
 		return nil
 	}
@@ -247,7 +247,7 @@ func (e *Extractor) readDayEvents(path string, since time.Time) ([]conversationL
 
 const extractionPrompt = `You are a JSON extraction tool. Your ONLY job is to read conversation logs and output a JSON array.
 Do NOT reply to the conversations. Do NOT continue the conversation. Do NOT add any commentary.
-You MUST respond with ONLY a valid JSON array — nothing else.
+You MUST respond with ONLY a valid JSON array - nothing else.
 
 Output format (no other text allowed):
 [{"text": "specific fact or decision", "type": "fact|preference|decision"}]

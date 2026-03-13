@@ -20,11 +20,11 @@ Every time you send a message, ALF's **router** reads it and picks the best tier
 
 ## Where to edit tiers
 
-**Option 1 — Tiers tab (recommended).** Open the Control Center sidebar and click **Tiers**. You'll see all tiers in a visual list. Click **Add Tier** or **Edit** to use the form with dropdowns, checkboxes, and tool selection.
+**Option 1 - Tiers tab (recommended).** Open the Control Center sidebar and click **Tiers**. You'll see all tiers in a visual list. Click **Add Tier** or **Edit** to use the form with dropdowns, checkboxes, and tool selection.
 
-**Option 2 — Workspace editor.** Go to **Home > Workspace**, navigate to `config.d/tiers.json`, and edit the JSON directly.
+**Option 2 - Workspace editor.** Go to **Home > Workspace**, navigate to `config.d/tiers.json`, and edit the JSON directly.
 
-Changes take effect immediately — no restart needed.
+Changes take effect immediately - no restart needed.
 
 ## The default setup
 
@@ -40,13 +40,13 @@ ALF comes with 5 tiers out of the box. Here's what each one does:
 
 The agent tier is **disabled by default**. Enable it in `tiers.json` to let the router automatically delegate complex tasks to agent teams. See [Agent Teams](docs:agent-teams) for setup.
 
-> Most of your messages will be handled by Haiku — it's fast and cheap. Sonnet and Opus only kick in when needed.
+> Most of your messages will be handled by Haiku - it's fast and cheap. Sonnet and Opus only kick in when needed.
 
 ## How the router decides
 
 The router follows these rules:
 
-1. **Simple question?** Use Haiku. Chat, facts, jokes, translations — all Haiku.
+1. **Simple question?** Use Haiku. Chat, facts, jokes, translations - all Haiku.
 2. **Needs thinking?** Use Sonnet. Code review, analysis, writing structured content.
 3. **Really complex?** Use Opus. Only for system-wide architecture or holding many constraints at once.
 4. **Need to change files?** Each tier is write-capable. The router picks the right model based on complexity.
@@ -97,7 +97,7 @@ Here's what a `tiers.json` file looks like:
 | `router_label` | Describes what this tier is good at. The router reads this to decide. **This is the most important field.** | `"Code review, debugging"` |
 | `description` | Optional longer description. Falls back to `router_label` if not set. Used in router prompt. | `"Deep code analysis"` |
 | `write_capable` | Can this tier create, edit, or delete files? | `false` |
-| `effort` | How hard the model thinks: `low`, `medium`, or `high`. **CLI tiers only** — this maps to Claude's `--effort` flag. Ignored for API/OpenRouter backends (most API models don't support effort control). | `"medium"` |
+| `effort` | How hard the model thinks: `low`, `medium`, or `high`. **CLI tiers only** - this maps to Claude's `--effort` flag. Ignored for API/OpenRouter backends (most API models don't support effort control). | `"medium"` |
 | `force_command` | Enable `/<tier_name> <message>` to bypass routing and force this tier. Works in Telegram and CC Chat. | `true` |
 | `max_turns` | Max steps for tool use. Prevents runaway loops. 0 = unlimited. | `10` |
 | `max_iterations` | (Agent only) Max delegate→synthesize cycles. | `10` |
@@ -106,7 +106,7 @@ Here's what a `tiers.json` file looks like:
 
 ## Example: simple two-tier setup
 
-If you want to keep things minimal — one fast tier, one powerful tier:
+If you want to keep things minimal - one fast tier, one powerful tier:
 
 ```json
 {
@@ -159,7 +159,7 @@ Want an Opus tier you can trigger manually, but the router never picks it automa
 }
 ```
 
-Add this to your `tiers` array. Now type `/power analyze this system` in Telegram or CC Chat to use it. The router will never pick it on its own. Note: you must include a message after the command — `/power` alone shows a usage hint.
+Add this to your `tiers` array. Now type `/power analyze this system` in Telegram or CC Chat to use it. The router will never pick it on its own. Note: you must include a message after the command - `/power` alone shows a usage hint.
 
 ## Available tools
 
@@ -167,11 +167,11 @@ The `tools` field controls which tools are available to a tier. Behavior differs
 
 ### CLI tiers (`backend: "cli"` or unset)
 
-CLI tiers run Claude Code as a subprocess. Tools are managed by Claude Code itself — `toolbox.md` describes all available tools to the model. Write-capable tiers (`write_capable: true`) get all tools automatically via `--dangerously-skip-permissions`.
+CLI tiers run Claude Code as a subprocess. Tools are managed by Claude Code itself - `toolbox.md` describes all available tools to the model. Write-capable tiers (`write_capable: true`) get all tools automatically via `--dangerously-skip-permissions`.
 
 | Tool | What it does |
 |------|-------------|
-| `Read` | Read files — code, config, logs, images, PDFs |
+| `Read` | Read files - code, config, logs, images, PDFs |
 | `Write` | Create or overwrite files |
 | `Edit` | Modify existing files (text replacement) |
 | `Bash` | Execute shell commands |
@@ -184,7 +184,7 @@ CLI tiers run Claude Code as a subprocess. Tools are managed by Claude Code itse
 
 ### API tiers (`backend: "openrouter"`, `"ollama"`, etc.)
 
-API tiers use a **tool loop** — ALF sends tool schemas to the model and executes tool calls in a loop until the model produces a text response or hits `max_turns`.
+API tiers use a **tool loop** - ALF sends tool schemas to the model and executes tool calls in a loop until the model produces a text response or hits `max_turns`.
 
 Available tools for API tiers:
 
@@ -202,7 +202,7 @@ Available tools for API tiers:
 | `["*native"]` | Only native tools (`bash`, `read_file`, `grep`, `glob`, `write_file`). Best for weaker/free models that struggle with tool selection. |
 | `["bash", "grep"]` | Only the listed tools, if they have a schema. |
 
-> **Tip:** Free or lightweight models (e.g. `step-3.5-flash:free`) work best with `["*native"]`. Giving them too many tools causes confusion — they pick random tools instead of the right one.
+> **Tip:** Free or lightweight models (e.g. `step-3.5-flash:free`) work best with `["*native"]`. Giving them too many tools causes confusion - they pick random tools instead of the right one.
 
 ### Making a user tool available to API tiers
 
@@ -226,7 +226,7 @@ Create a JSON manifest next to your script. For example, if you have `tools/my-t
 }
 ```
 
-The description is critical — it's the only context the API model has to decide whether to call your tool.
+The description is critical - it's the only context the API model has to decide whether to call your tool.
 
 ### Typical combinations
 
@@ -245,11 +245,11 @@ Make your `router_label` for Haiku tiers more descriptive. Be specific:
 - Bad: `"Simple tasks"`
 - Good: `"Casual conversation, greetings, yes/no questions, translations, jokes, weather"`
 
-Also check `router_distinctions` — add a rule like "Default to haiku for anything conversational."
+Also check `router_distinctions` - add a rule like "Default to haiku for anything conversational."
 
 **What's the difference between `enabled: false` and `routable: false`?**
-- `enabled: false` — tier is completely off. Nobody can use it.
-- `routable: false` — router ignores it, but you can still force it with a command.
+- `enabled: false` - tier is completely off. Nobody can use it.
+- `routable: false` - router ignores it, but you can still force it with a command.
 
 **Should I use `max_turns`?**
 Yes, always on write-capable tiers. Without it, a write tier could loop endlessly trying to complete a task. Start with 5-10 for most tiers, 20 for complex ones.
@@ -257,14 +257,14 @@ Yes, always on write-capable tiers. Without it, a write tier could loop endlessl
 **What does `effort` actually do?**
 It controls how much "thinking" the model does before answering. `low` = quick gut reaction. `medium` = balanced. `high` = deep reasoning. Higher effort means slower (and slightly more expensive) responses.
 
-> **Note:** `effort` only works with **CLI tiers** (Claude's `--effort` flag). For API/OpenRouter backends, this field is ignored — most API models (Grok, DeepSeek, Gemini, etc.) don't support effort control. To differentiate API tiers, use different models or adjust `max_turns` and `router_label` instead.
+> **Note:** `effort` only works with **CLI tiers** (Claude's `--effort` flag). For API/OpenRouter backends, this field is ignored - most API models (Grok, DeepSeek, Gemini, etc.) don't support effort control. To differentiate API tiers, use different models or adjust `max_turns` and `router_label` instead.
 
 ## Media routing
 
 When you send a photo, document, or video:
 
-- **With a caption** — the router classifies the caption to pick the right tier, then verifies the tier can view images (has Read tool or is write-capable). If not, it upgrades to the cheapest image-capable tier.
-- **Without a caption** — goes directly to the cheapest non-instant tier with image support.
+- **With a caption** - the router classifies the caption to pick the right tier, then verifies the tier can view images (has Read tool or is write-capable). If not, it upgrades to the cheapest image-capable tier.
+- **Without a caption** - goes directly to the cheapest non-instant tier with image support.
 
 This means sending a screenshot with "fix this bug" routes to `sonnet`, not `haiku`.
 
@@ -281,7 +281,7 @@ Set `tiers_file` in `config.json` (via **Settings → Configuration**):
 ```
 
 Relative paths are resolved inside `config.d/`. Absolute paths are used as-is.
-When you save the change, ALF reloads immediately from the new file — no restart needed.
+When you save the change, ALF reloads immediately from the new file - no restart needed.
 The file watcher also tracks the new path, so future edits to it hot-reload as expected.
 
 To go back to the default, set `"tiers_file": "tiers.json"`.
@@ -298,6 +298,6 @@ See [Configuration Reference](docs:config) for all `config.json` fields.
 
 ## What's next?
 
-- [Getting Started](docs:getting-started) — ALF setup and overview
-- [Agent Teams](docs:agent-teams) — coordinate multiple agents for complex tasks
-- [Creating Skills](docs:creating-skills) — teach ALF new abilities with auto-injection
+- [Getting Started](docs:getting-started) - ALF setup and overview
+- [Agent Teams](docs:agent-teams) - coordinate multiple agents for complex tasks
+- [Creating Skills](docs:creating-skills) - teach ALF new abilities with auto-injection

@@ -24,7 +24,7 @@ func SaveInstallDir(dir string) {
 }
 
 func alfDir() string {
-	// 1. Check current directory — if it has a docker-compose.yml, use it.
+	// 1. Check current directory - if it has a docker-compose.yml, use it.
 	// But never use a git repository (source code) as install dir.
 	if _, err := os.Stat("docker-compose.yml"); err == nil {
 		cwd, _ := os.Getwd()

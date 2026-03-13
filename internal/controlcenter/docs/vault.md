@@ -10,12 +10,12 @@ Store API credentials securely and let Alf use them without seeing the secrets.
 
 ## How it works
 
-Vault is a built-in secrets manager that runs inside the Alf container. It encrypts all credentials at rest using AES-256-GCM with a master password. When Alf needs to call an API, it uses the `vault` tool which proxies the request through vault-server — the credentials are injected server-side and never exposed to the AI.
+Vault is a built-in secrets manager that runs inside the Alf container. It encrypts all credentials at rest using AES-256-GCM with a master password. When Alf needs to call an API, it uses the `vault` tool which proxies the request through vault-server - the credentials are injected server-side and never exposed to the AI.
 
 **Architecture:**
-- `vault-server` — background process managing encrypted storage + HTTP proxy
-- `vault` CLI tool — available to Alf via `tools.d/` for proxied API calls
-- Control Center vault page — admin UI for unlock, services CRUD, and token management
+- `vault-server` - background process managing encrypted storage + HTTP proxy
+- `vault` CLI tool - available to Alf via `tools.d/` for proxied API calls
+- Control Center vault page - admin UI for unlock, services CRUD, and token management
 
 ## Setup
 
@@ -46,7 +46,7 @@ Both methods achieve the same result. The Control Center method is recommended f
 
 ### Edit services
 
-Click the pencil icon next to any service to update its configuration. The service name cannot be changed — update the base URL, auth credentials, or TLS settings as needed. Leave password fields empty to keep existing credentials.
+Click the pencil icon next to any service to update its configuration. The service name cannot be changed - update the base URL, auth credentials, or TLS settings as needed. Leave password fields empty to keep existing credentials.
 
 ### Alf uses the vault
 
@@ -75,13 +75,13 @@ Three setup modes, same `oauth2_client` type:
 
 | Mode | What you need | Best for |
 |------|---------------|----------|
-| **Browser flow** | `client_secret_*.json` only | Simplest — no token.json needed |
+| **Browser flow** | `client_secret_*.json` only | Simplest - no token.json needed |
 | **File-based** | `client_secret_*.json` + `token.json` | When you already have a token.json |
 | **Manual** | client_id, client_secret, refresh_token, token_url | Any OAuth2 provider |
 
 **Browser flow (recommended for Google APIs):**
 
-Prerequisites — in Google Cloud Console:
+Prerequisites - in Google Cloud Console:
 1. Create an OAuth Client ID of type **Web application** (not "Desktop app")
 2. Add `https://<your-cc-domain>/api/vault/oauth2/callback` as an **Authorized redirect URI**
 3. Download the `client_secret_*.json` file
@@ -111,8 +111,8 @@ Upload a Google service account key JSON file, then create a service referencing
 
 Vault uses scoped tokens for access control:
 
-- **Admin** — full access (unlock, lock, service CRUD, token management). Used by the Control Center.
-- **Proxy** — read-only, can only list services and proxy requests. This is what Alf gets.
+- **Admin** - full access (unlock, lock, service CRUD, token management). Used by the Control Center.
+- **Proxy** - read-only, can only list services and proxy requests. This is what Alf gets.
 
 Alf's `VAULT_TOKEN` environment variable contains a proxy-scoped token, so it cannot modify services, create tokens, or lock/unlock the vault. Tokens have a 1-year TTL and are automatically re-created if vault-server restarts.
 
@@ -121,7 +121,7 @@ Alf's `VAULT_TOKEN` environment variable contains a proxy-scoped token, so it ca
 - Credentials are encrypted at rest in `vault-data/vault.enc` using AES-256-GCM
 - Master password derives the encryption key via Argon2id
 - Alf subprocess only receives `VAULT_ADDR` and `VAULT_TOKEN` (proxy scope)
-- `vault-data/` volume is separate from the data directory — Alf cannot access the encrypted file
+- `vault-data/` volume is separate from the data directory - Alf cannot access the encrypted file
 - SSRF protection: vault-server blocks requests to private/link-local IP ranges (DNS-level validation, ignores system HTTP proxy)
 - TLS skip verify: allows HTTP and private IPs only when explicitly enabled per service (still blocks link-local/metadata IPs)
 
@@ -133,11 +133,11 @@ Use lock only when you need to immediately cut off all API access (e.g., comprom
 
 ## Reset vault
 
-The master password is the encryption key — it cannot be changed. To start fresh with a new password:
+The master password is the encryption key - it cannot be changed. To start fresh with a new password:
 
 **Via Control Center:**
 1. Go to the **Vault** tab
-2. Click **Reset** — this deletes all stored credentials and the persisted password
+2. Click **Reset** - this deletes all stored credentials and the persisted password
 3. Choose a new master password
 
 > **Warning:** Resetting deletes all stored API credentials. Services must be re-added.
@@ -145,7 +145,7 @@ The master password is the encryption key — it cannot be changed. To start fre
 ## Lifecycle
 
 - **Container start:** vault-server starts automatically. If a master password is persisted (from a previous CC unlock or Docker secret), the vault auto-unlocks and creates proxy tokens.
-- **Crash recovery:** vault-server restarts automatically with exponential backoff (1s → 30s max). After restart, it re-unlocks and re-creates all tokens automatically — no manual intervention needed.
+- **Crash recovery:** vault-server restarts automatically with exponential backoff (1s → 30s max). After restart, it re-unlocks and re-creates all tokens automatically - no manual intervention needed.
 - **CC unlock:** persists the master password so future restarts auto-unlock.
 - **CC lock:** revokes all tokens, clears `VAULT_TOKEN` from environment. The persisted password is kept so you can unlock again easily.
 - **CC reset:** deletes `vault.enc`, clears persisted password, restarts vault-server fresh.
@@ -162,7 +162,7 @@ The `vault` symlink in `tools.d/` may be missing. Check `/opt/alf/tools.d/vault`
 Vault-server stores tokens in memory. If it restarted, all tokens were invalidated. The watchdog should re-create them automatically. Check logs for `[vault] re-authenticated after restart`. If not present, unlock the vault via CC.
 
 **"No VAULT_TOKEN found" in scheduled jobs:**
-The vault must be unlocked for Alf to use it. Check vault status in CC. If locked, unlock it — the token propagates to all future subprocess invocations immediately.
+The vault must be unlocked for Alf to use it. Check vault status in CC. If locked, unlock it - the token propagates to all future subprocess invocations immediately.
 
 **Scheduled jobs fail after container restart:**
-The master password may not be persisted. Unlock the vault once via the Control Center — the password is saved automatically for future restarts.
+The master password may not be persisted. Unlock the vault once via the Control Center - the password is saved automatically for future restarts.

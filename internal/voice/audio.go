@@ -38,7 +38,7 @@ func convertToWAV(audioPath string) (string, error) {
 
 // readWAVSamples reads a 16-bit PCM WAV file and returns normalized float32 samples.
 // Expects mono 16kHz PCM produced by convertToWAV.
-// Properly scans for chunks — handles WAV files with extra chunks (LIST, fact, etc.)
+// Properly scans for chunks - handles WAV files with extra chunks (LIST, fact, etc.)
 // that ffmpeg may insert between fmt and data.
 func readWAVSamples(wavPath string) ([]float32, error) {
 	data, err := os.ReadFile(wavPath)

@@ -30,7 +30,7 @@ type Transcriber struct {
 	ready  bool
 }
 
-// New creates a new Transcriber. Does NOT start the process — call Start().
+// New creates a new Transcriber. Does NOT start the process - call Start().
 func New(scriptPath, model, modelsDir string, timeout time.Duration) (*Transcriber, error) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		return nil, fmt.Errorf("python3 not found in PATH: %w", err)

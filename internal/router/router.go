@@ -168,7 +168,7 @@ func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 		return result
 	}
 
-	// Router returned a direct response or unparseable text — fallback to default tier.
+	// Router returned a direct response or unparseable text - fallback to default tier.
 	fb := FallbackResult(tiers)
 	if result.Response != "" {
 		log.Printf("router: %s → direct response ignored, falling back to %s", truncate(message, 60), fb.Tier)
@@ -220,7 +220,7 @@ func FallbackResult(tiers *cc.TiersConfig) Result {
 			return Result{Tier: t.Name, Reason: "fallback"}
 		}
 	}
-	// All tiers disabled — use first tier regardless.
+	// All tiers disabled - use first tier regardless.
 	if len(tiers.Tiers) > 0 {
 		return Result{Tier: tiers.Tiers[0].Name, Reason: "fallback (all disabled)"}
 	}
@@ -277,7 +277,7 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 
 	if input.MessageCount > 0 && input.LastTier != "" {
 		b.WriteString(fmt.Sprintf("\nConversation context: Message #%d in session. Previous message handled by %q.\n", input.MessageCount+1, input.LastTier))
-		b.WriteString("If the message is a short reply (\"oui\", \"non\", \"ok\", \"yes\", \"no\", \"continue\") that clearly answers or continues the previous exchange, route to the same tier (\"" + input.LastTier + "\"). But if the message requests any action (fix, apply, create, modify, etc.) or is a new topic, route based on intent — do NOT stick to the previous tier if it lacks write capability.\n")
+		b.WriteString("If the message is a short reply (\"oui\", \"non\", \"ok\", \"yes\", \"no\", \"continue\") that clearly answers or continues the previous exchange, route to the same tier (\"" + input.LastTier + "\"). But if the message requests any action (fix, apply, create, modify, etc.) or is a new topic, route based on intent - do NOT stick to the previous tier if it lacks write capability.\n")
 	}
 
 	routerPromptPath := filepath.Join(input.ConfigDir, "router-prompt.md")
@@ -398,7 +398,7 @@ func buildAgentTeamsHint(teams []AgentTeamInfo) string {
 		b.WriteString("  - \"review this code and fix issues\" → agent (review + fix)\n")
 	}
 
-	b.WriteString("\nDo NOT route to sonnet/opus for tasks that match a team — only the \"agent\" tier can coordinate agents.\n")
+	b.WriteString("\nDo NOT route to sonnet/opus for tasks that match a team - only the \"agent\" tier can coordinate agents.\n")
 	b.WriteString("Do NOT route to \"agent\" for:\n")
 	b.WriteString("  - Conversational messages (\"ok\", \"merci\", \"on va focus sur X\", \"j'ai fini\", small talk)\n")
 	b.WriteString("  - Simple questions or status checks\n")

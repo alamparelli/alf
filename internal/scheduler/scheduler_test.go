@@ -14,7 +14,7 @@ func TestStoreLoadSave(t *testing.T) {
 
 	s := NewStore(path)
 
-	// Load non-existent file — should be fine.
+	// Load non-existent file - should be fine.
 	if err := s.Load(); err != nil {
 		t.Fatalf("Load non-existent: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestManagedJobPersistedInCronJSON(t *testing.T) {
 		t.Fatalf("EnsureManaged: %v", err)
 	}
 
-	// Load in a fresh store — managed job should be present.
+	// Load in a fresh store - managed job should be present.
 	s2 := NewStore(cronPath)
 	if err := s2.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -422,7 +422,7 @@ func TestSystemJobsSurviveStart(t *testing.T) {
 	e.RegisterSystem("sys1", "Git Sweep", "@every 5m", func() error { return nil })
 	e.RegisterSystem("sys2", "Update Check", "@every 1h", func() error { return nil })
 
-	// Start loads from disk — should not lose system jobs.
+	// Start loads from disk - should not lose system jobs.
 	if err := e.Start(sockPath); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

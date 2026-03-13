@@ -134,7 +134,7 @@ func IsAllowedReaction(emoji string) bool {
 	return AllowedReactionEmoji[emoji]
 }
 
-// Sentiment fallback pools for invalid emoji — safe subset of AllowedReactionEmoji.
+// Sentiment fallback pools for invalid emoji - safe subset of AllowedReactionEmoji.
 var sentimentFallbacks = map[string][]string{
 	"positive": {"🔥", "👏", "😁", "🎉", "💯", "🤩", "👌", "❤"},
 	"neutral":  {"👀", "🤔", "😐", "🤓", "👨\u200d💻"},

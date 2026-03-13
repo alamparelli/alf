@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>ALF OS — Control Center</title>
+  <title>ALF OS -Control Center</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5/css/xterm.css">
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -138,7 +138,7 @@
           <div class="skill-store-disclaimer" id="skillStoreDisclaimer" style="display:none">
             <strong>A word of caution</strong>
             <p>Importing skills from external sources carries inherent risk. Community skills may contain untested logic, outdated patterns, or subtle prompt issues that are hard to detect automatically.</p>
-            <p>For best results, <strong>create your own skills</strong> — use AI to help you write them based on your specific needs, or adapt existing scripts you already trust. Use this store as inspiration, not as a blind install source.</p>
+            <p>For best results, <strong>create your own skills</strong> -use AI to help you write them based on your specific needs, or adapt existing scripts you already trust. Use this store as inspiration, not as a blind install source.</p>
           </div>
           <p class="card-subtitle">Import community skills from <a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a>. Browse the catalog, copy a skill's install command, and paste it below. ALF will fetch the skill, run a security scan, and let you review before installing.</p>
 
@@ -256,6 +256,10 @@
       </div>
 
       <div id="chatView" class="chat-view" style="display:none">
+        <div class="chat-tabs" id="chatTabs">
+          <div class="chat-tabs-list" id="chatTabsList"></div>
+          <button class="chat-tab-add" id="chatTabAdd" title="New conversation"><i data-lucide="plus" style="width:14px;height:14px"></i></button>
+        </div>
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-status" id="chatStatus"></div>
         <div class="chat-media-preview" id="chatMediaPreview"></div>

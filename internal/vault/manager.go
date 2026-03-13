@@ -97,7 +97,7 @@ func (m *Manager) AutoUnlock(password string) error {
 // Returns nil if the admin token is valid, or re-unlocks using stored password.
 func (m *Manager) EnsureAuth() error {
 	c := m.Client()
-	// Quick check: try listing tokens — if 401, re-auth.
+	// Quick check: try listing tokens - if 401, re-auth.
 	if _, err := c.ListTokens(); err == nil {
 		return nil
 	}
@@ -139,7 +139,7 @@ func (m *Manager) ProxyToken() string {
 }
 
 // ClearTokens invalidates stored tokens and master password (e.g. after vault lock).
-// After this, EnsureAuth cannot re-unlock — user must unlock manually.
+// After this, EnsureAuth cannot re-unlock - user must unlock manually.
 func (m *Manager) ClearTokens() {
 	m.mu.Lock()
 	m.adminToken = ""
@@ -168,7 +168,7 @@ func (m *Manager) IsFirstTime() bool {
 // Reset stops vault-server, deletes vault.enc, clears tokens,
 // and restarts vault-server fresh with no encrypted store.
 func (m *Manager) Reset() error {
-	// Stop cancels the watchdog and kills the process — no respawn race.
+	// Stop cancels the watchdog and kills the process - no respawn race.
 	m.Stop()
 
 	// Delete the encrypted store while nothing is running.
@@ -183,7 +183,7 @@ func (m *Manager) Reset() error {
 		return fmt.Errorf("restart vault-server: %w", err)
 	}
 
-	log.Println("[vault] reset complete — vault.enc deleted, server restarted")
+	log.Println("[vault] reset complete - vault.enc deleted, server restarted")
 	return nil
 }
 
@@ -234,7 +234,7 @@ func (m *Manager) spawn() error {
 	cmd := exec.Command(bin,
 		"-listen", "127.0.0.1:8390",
 		"-data-dir", m.dataDir,
-		"-token-ttl", "8760h", // 1 year — daemon manages token lifecycle
+		"-token-ttl", "8760h", // 1 year - daemon manages token lifecycle
 	)
 	// Route subprocess output through Go's log package instead of raw os.Stdout.
 	// Direct pipe inheritance can cause SIGPIPE in containerized environments
@@ -252,7 +252,7 @@ func (m *Manager) spawn() error {
 	m.cmd = cmd
 	m.waitCh = make(chan struct{})
 
-	// Single goroutine owns cmd.Wait() — no other code calls it.
+	// Single goroutine owns cmd.Wait() - no other code calls it.
 	go func() {
 		_ = cmd.Wait()
 		close(m.waitCh)

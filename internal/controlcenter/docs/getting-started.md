@@ -10,7 +10,7 @@ Welcome to ALF. This guide walks you through everything you need to know to get 
 
 ## First things first
 
-If you haven't already, talk to ALF — on Telegram or in the **Chat** tab here. The first conversation is a quick onboarding where ALF learns who you are, what you need help with, and how you want it to communicate. This shapes its personality and behavior going forward.
+If you haven't already, talk to ALF - on Telegram or in the **Chat** tab here. The first conversation is a quick onboarding where ALF learns who you are, what you need help with, and how you want it to communicate. This shapes its personality and behavior going forward.
 
 After that, just send messages. ALF reads what you write, picks the right model, and replies.
 
@@ -20,16 +20,16 @@ That's the basic loop. But there's a lot more going on under the hood.
 
 Here's what to do after your initial setup:
 
-1. **Complete the onboarding** — send a message to ALF (Telegram or Chat tab). It will ask a few questions to personalize itself.
-2. **Set up the Vault** — go to the **Vault** tab and create a master password. The vault stores API keys, credentials, and secrets encrypted at rest. ALF uses it to securely manage service integrations.
-3. **Review your tiers** — open the **Tiers** tab to see which models ALF uses. The defaults work well, but you can tune them.
-4. **Explore the workspace** — the **Home** tab has a file browser where you can see and edit ALF's configuration, context files, and skills.
+1. **Complete the onboarding** - send a message to ALF (Telegram or Chat tab). It will ask a few questions to personalize itself.
+2. **Set up the Vault** - go to the **Vault** tab and create a master password. The vault stores API keys, credentials, and secrets encrypted at rest. ALF uses it to securely manage service integrations.
+3. **Review your tiers** - open the **Tiers** tab to see which models ALF uses. The defaults work well, but you can tune them.
+4. **Explore the workspace** - the **Home** tab has a file browser where you can see and edit ALF's configuration, context files, and skills.
 
-Everything else — scheduling, skills, agent teams — you can explore as you need it.
+Everything else - scheduling, skills, agent teams - you can explore as you need it.
 
 ## How ALF picks the right model
 
-ALF uses a system called **tiers**. Each tier is a different configuration — a Claude model with specific capabilities.
+ALF uses a system called **tiers**. Each tier is a different configuration - a Claude model with specific capabilities.
 
 When you send a message, a fast **router** classifies it and picks a tier:
 
@@ -52,7 +52,7 @@ Tiers with `force_command: true` can be called directly. Type `/<tier_name> <mes
 /opus explain the architecture of this project
 ```
 
-This bypasses the router entirely — useful when you know you need a specific model.
+This bypasses the router entirely - useful when you know you need a specific model.
 
 > See [Setting Up Tiers](docs:tier-setup) to customize which models ALF uses and when.
 
@@ -65,12 +65,12 @@ You're looking at it. Here's what each section does:
 | **Home** | Admin actions, Workspace Explorer, Teach |
 | **Chat** | Browser-based chat (same as Telegram, different interface) |
 | **Terminal** | Shell session inside the Docker container ([details](docs:terminal)) |
-| **Tasks** | Monitor agent tasks — running, completed, failed. Launch new tasks. |
+| **Tasks** | Monitor agent tasks - running, completed, failed. Launch new tasks. |
 | **Schedules** | Create, edit, and monitor scheduled jobs ([details](docs:schedules)) |
 | **Logs** | Daemon logs with search and session filtering ([details](docs:logs)) |
 | **Tiers** | Configure response tiers in real-time ([details](docs:tier-setup)) |
 | **Firewall** | Network firewall rules ([details](docs:firewall)) |
-| **Vault** | Secrets vault — store credentials, OAuth2 tokens, files ([details](docs:vault)) |
+| **Vault** | Secrets vault - store credentials, OAuth2 tokens, files ([details](docs:vault)) |
 | **Settings** | Configuration, Telegram setup, admin actions ([details](docs:config)) |
 | **Docs** | You are here |
 | **Apps** | Self-contained apps ALF generates (appears when apps exist) |
@@ -123,19 +123,19 @@ ALF will use the `schedule create` tool with the right parameters.
 
 Two types of scheduled jobs:
 
-**LLM jobs** — ALF thinks and responds using a prompt:
+**LLM jobs** - ALF thinks and responds using a prompt:
 ```bash
 schedule create --name "morning brief" --schedule "0 0 9 * * 1-5" \
   --tier sonnet --prompt "Summarize today's priorities" --output telegram
 ```
 
-**Direct jobs** — run a bash command, no LLM involved:
+**Direct jobs** - run a bash command, no LLM involved:
 ```bash
 schedule create --name "disk check" --schedule "0 0 */6 * * *" \
   --command "df -h" --output telegram
 ```
 
-**Agent jobs** — coordinate multiple agents for complex tasks:
+**Agent jobs** - coordinate multiple agents for complex tasks:
 ```bash
 schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
   --tier agent --prompt "Analyze this week's commits and write a report" \
@@ -202,7 +202,7 @@ These work in both Telegram and CC Chat:
 
 ## Customizing the deployment
 
-ALF's `docker-compose.yml` is auto-generated and regenerated on upgrades. **Do not edit it directly** — your changes will be overwritten.
+ALF's `docker-compose.yml` is auto-generated and regenerated on upgrades. **Do not edit it directly** - your changes will be overwritten.
 
 For custom configuration (extra volumes, networks, labels, environment variables), create a `docker-compose.override.yml` in the same directory. Docker Compose automatically merges both files:
 
@@ -220,9 +220,9 @@ To regenerate the base file manually (e.g. after adding a secret): `alf compose`
 
 ## What's next?
 
-- [Setting Up Tiers](docs:tier-setup) — customize which models ALF uses and when
-- [Configuration Reference](docs:config) — all `config.json` fields explained
-- [Managing Conversations](docs:sessions) — sessions, `/new`, and context management
-- [Creating Skills](docs:creating-skills) — teach ALF new abilities with auto-injection
-- [Agent Teams](docs:agent-teams) — coordinate multiple agents for complex tasks
-- [Building Tools & Extensions](docs:container-packages) — install packages, create tools, build apps
+- [Setting Up Tiers](docs:tier-setup) - customize which models ALF uses and when
+- [Configuration Reference](docs:config) - all `config.json` fields explained
+- [Managing Conversations](docs:sessions) - sessions, `/new`, and context management
+- [Creating Skills](docs:creating-skills) - teach ALF new abilities with auto-injection
+- [Agent Teams](docs:agent-teams) - coordinate multiple agents for complex tasks
+- [Building Tools & Extensions](docs:container-packages) - install packages, create tools, build apps

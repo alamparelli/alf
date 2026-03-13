@@ -13,7 +13,7 @@ import (
 func TestGoVulncheck(t *testing.T) {
 	path, err := findGovulncheck()
 	if err != nil {
-		t.Skip("govulncheck not installed — run: go install golang.org/x/vuln/cmd/govulncheck@latest")
+		t.Skip("govulncheck not installed - run: go install golang.org/x/vuln/cmd/govulncheck@latest")
 	}
 
 	cmd := exec.Command(path, "./...")
@@ -51,7 +51,7 @@ func TestPipAudit(t *testing.T) {
 	// Check if pip-audit is available as a module.
 	check := exec.Command(python, "-m", "pip_audit", "--version")
 	if err := check.Run(); err != nil {
-		t.Skip("pip-audit not installed — run: pip3 install pip-audit")
+		t.Skip("pip-audit not installed - run: pip3 install pip-audit")
 	}
 
 	// Write a temp requirements file scoped to ALF's Python deps only.
@@ -81,7 +81,7 @@ func TestPipAudit(t *testing.T) {
 		if hasVuln {
 			t.Fatalf("pip-audit found vulnerabilities:\n%s", output)
 		}
-		// Warnings only (e.g. packages not on PyPI) — log but don't fail.
+		// Warnings only (e.g. packages not on PyPI) - log but don't fail.
 		t.Logf("pip-audit warnings (no CVEs):\n%s", output)
 		return
 	}

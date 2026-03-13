@@ -111,7 +111,7 @@ func (h *TelegramHandler) put(w http.ResponseWriter, r *http.Request) {
 	// Validate bot token against Telegram API.
 	botName := validateBotTokenHTTP(req.BotToken)
 	if botName == "" {
-		http.Error(w, jsonErr("invalid bot token — could not verify with Telegram API"), http.StatusBadRequest)
+		http.Error(w, jsonErr("invalid bot token - could not verify with Telegram API"), http.StatusBadRequest)
 		return
 	}
 

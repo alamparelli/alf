@@ -99,7 +99,7 @@ func TestWatchConfigFiles_TeamsNewFile(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
-	// Add a new team file — simulates ALF writing via tool call.
+	// Add a new team file - simulates ALF writing via tool call.
 	os.WriteFile(filepath.Join(teamsDir, "crypto-bot-team.json"), []byte(`{"name":"crypto"}`), 0o644)
 
 	events := collectEvents(reloadCh, 4*time.Second)

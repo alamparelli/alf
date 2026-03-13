@@ -47,9 +47,9 @@ Auto-injection is the powerful one. When you say "draft a tweet", ALF detects th
 ```
 skills/
   my-skill/
-    SKILL.md              # Required — main instructions
-    reference-data.md     # Optional — extra context (auto-loaded)
-    style-guide.md        # Optional — more reference material
+    SKILL.md              # Required - main instructions
+    reference-data.md     # Optional - extra context (auto-loaded)
+    style-guide.md        # Optional - more reference material
 ```
 
 - `SKILL.md` is required. Everything else is optional.
@@ -96,10 +96,10 @@ triggers: tweet, draft, twitter, x post, publication
 ```
 
 Rules:
-- Case-insensitive — "Tweet" and "tweet" both match
-- Matched anywhere in the message — "can you draft something?" matches "draft"
-- Use specific words to avoid false positives — "x" alone would match too many messages
-- Multiple triggers are OR-based — any one match is enough
+- Case-insensitive - "Tweet" and "tweet" both match
+- Matched anywhere in the message - "can you draft something?" matches "draft"
+- Use specific words to avoid false positives - "x" alone would match too many messages
+- Multiple triggers are OR-based - any one match is enough
 
 > Pick triggers carefully. Too generic (like single letters) causes the skill to load when it shouldn't. Too specific and it never loads. Aim for 3-6 triggers that clearly relate to the skill's purpose.
 
@@ -131,13 +131,13 @@ If your skill exceeds 8KB, you'll see this warning in logs:
 skills: my-skill prompt is 14267B (soft limit 8192B)
 ```
 
-The skill still works — it's a warning, not an error. But you should optimize it.
+The skill still works - it's a warning, not an error. But you should optimize it.
 
 ### How to split large skills
 
 Instead of putting everything in `SKILL.md`, tell ALF to **read reference files on demand**:
 
-**Before (everything in SKILL.md — 14KB):**
+**Before (everything in SKILL.md - 14KB):**
 ```markdown
 ---
 name: x-manager
@@ -165,15 +165,15 @@ triggers: tweet, draft
 You are a tweet writer.
 
 **Before drafting any tweet, read these reference files:**
-- `references/STYLE_PROFILE.md` — personal voice analysis
-- `references/copywriting-guide.md` — hooks, CTA, frameworks
+- `references/STYLE_PROFILE.md` - personal voice analysis
+- `references/copywriting-guide.md` - hooks, CTA, frameworks
 ```
 
 Then create the reference files:
 ```
 skills/
   x-manager/
-    SKILL.md                          # Small — just instructions
+    SKILL.md                          # Small - just instructions
     references/
       STYLE_PROFILE.md               # ALF reads this when needed
       copywriting-guide.md           # ALF reads this when needed
@@ -191,7 +191,7 @@ skills/
 
 ## Examples
 
-### Simple skill — code reviewer
+### Simple skill - code reviewer
 
 ```markdown
 ---
@@ -205,7 +205,7 @@ You are a senior code reviewer. When asked to review code:
 1. Check for bugs and logic errors
 2. Flag security vulnerabilities (OWASP Top 10)
 3. Suggest performance improvements
-4. Keep feedback actionable — say what to fix, not just what's wrong
+4. Keep feedback actionable - say what to fix, not just what's wrong
 ```
 
 ### Skill with API access
@@ -277,11 +277,11 @@ If `--skill` is omitted, the repo name is used as the skill name.
 
 Every imported skill is analyzed by an LLM before installation. The scan checks for:
 
-- **Prompt injection** — attempts to override system behavior
-- **Secret access** — reading credentials or environment variables
-- **Data exfiltration** — sending data to external services
-- **Privilege escalation** — requesting elevated permissions
-- **Destructive operations** — deleting files or modifying system config
+- **Prompt injection** - attempts to override system behavior
+- **Secret access** - reading credentials or environment variables
+- **Data exfiltration** - sending data to external services
+- **Privilege escalation** - requesting elevated permissions
+- **Destructive operations** - deleting files or modifying system config
 
 You can still install skills with WARN or FAIL verdicts, but review the issues carefully first.
 
@@ -303,9 +303,9 @@ source: vercel-labs/skills
 
 ALF loads skills in this order:
 
-1. System skills (`/opt/alf/skills.d/`) — bundled with ALF
-2. Bundled copies (`~/data/skills.d/`) — read-only
-3. User skills (`~/data/skills/`) — your custom skills
+1. System skills (`/opt/alf/skills.d/`) - bundled with ALF
+2. Bundled copies (`~/data/skills.d/`) - read-only
+3. User skills (`~/data/skills/`) - your custom skills
 
 If you create a skill with the same name as a bundled one, yours wins. This lets you customize built-in behaviors without editing system files.
 
@@ -315,7 +315,7 @@ If you create a skill with the same name as a bundled one, yours wins. This lets
 Check three things:
 1. Does the skill have `triggers` in the frontmatter?
 2. Does your message contain one of the trigger keywords?
-3. Check logs for `skills: loaded N skills` — is your skill in the count?
+3. Check logs for `skills: loaded N skills` - is your skill in the count?
 
 **Can I use scripts or tools inside a skill?**
 Yes. Put scripts in the skill folder and reference them by path. ALF can run them with bash during a conversation.
@@ -324,9 +324,9 @@ Yes. Put scripts in the skill folder and reference them by path. ALF can run the
 Yes. When creating a scheduled job, use `--skills my-skill` to inject a skill into the job's prompt.
 
 **How do I reload skills after editing?**
-Skills reload automatically when ALF detects changes in the Workspace. You can also edit via the Control Center — save triggers a reload.
+Skills reload automatically when ALF detects changes in the Workspace. You can also edit via the Control Center - save triggers a reload.
 
 ## What's next?
 
-- [Building Tools & Extensions](docs:container-packages) — create tools, apps, and more
-- [Tools Reference](docs:tools-reference) — built-in CLI tools
+- [Building Tools & Extensions](docs:container-packages) - create tools, apps, and more
+- [Tools Reference](docs:tools-reference) - built-in CLI tools

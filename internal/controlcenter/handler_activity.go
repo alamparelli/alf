@@ -32,9 +32,10 @@ func (h *ActivityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var items []ActivityItem
 
-	// 1. Active chat job.
+	// 1. Active chat jobs.
 	if h.ChatService != nil {
-		if job := h.ChatService.ActiveJob(); job != nil {
+		for _, job := range h.ChatService.ActiveJobs() {
+			_ = job
 			items = append(items, ActivityItem{
 				Type: "chat",
 				Name: "Chat response",

@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	thumbWidth  = 320 // px per thumbnail — smaller = more frames fit
-	thumbHeight = 240 // px per thumbnail — 4:3 aspect ratio
+	thumbWidth  = 320 // px per thumbnail - smaller = more frames fit
+	thumbHeight = 240 // px per thumbnail - 4:3 aspect ratio
 )
 
 // ExtractFrames extracts evenly-spaced JPEG frames from a video or GIF,

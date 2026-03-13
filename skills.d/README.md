@@ -2,7 +2,7 @@
 
 These skills are bundled with ALF and managed by the system. They are updated automatically on each upgrade.
 
-**Do not edit files in this directory** — your changes will be overwritten on the next update.
+**Do not edit files in this directory** - your changes will be overwritten on the next update.
 
 ## User-editable files
 

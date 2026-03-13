@@ -8,7 +8,7 @@ order: 20
 
 ALF provides built-in CLI tools available in your PATH. These tools communicate with the daemon via Unix sockets.
 
-Both `~/data/tools.d/` (system tools) and `~/data/tools/` (user tools) are in PATH. All tools listed below can be called by name — no full path needed. User scripts placed in `~/data/tools/` with `chmod +x` are also callable by name.
+Both `~/data/tools.d/` (system tools) and `~/data/tools/` (user tools) are in PATH. All tools listed below can be called by name - no full path needed. User scripts placed in `~/data/tools/` with `chmod +x` are also callable by name.
 
 ## Memory Tools
 

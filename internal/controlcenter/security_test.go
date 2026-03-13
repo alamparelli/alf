@@ -11,7 +11,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// SEC-C2 / SEC-H4: Path traversal — directory boundary check
+// SEC-C2 / SEC-H4: Path traversal - directory boundary check
 // ---------------------------------------------------------------------------
 
 func TestPathWithinDir_ExactMatch(t *testing.T) {
@@ -256,7 +256,7 @@ func TestTerminalEndpoint_HasRateLimiting(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 
 		if i == 30 && rec.Code == http.StatusTooManyRequests {
-			return // rate limiter kicked in — pass
+			return // rate limiter kicked in - pass
 		}
 	}
 	t.Error("terminal endpoint should be rate limited after 30 requests")

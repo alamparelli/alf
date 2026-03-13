@@ -153,6 +153,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	// Chat API (mobile app).
 	if deps.ChatService != nil {
 		mux.Handle("/api/chat", &ChatHandler{Service: deps.ChatService})
+		mux.Handle("/api/chat/conversations", &ChatConversationsHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/job", &ChatJobHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/upload", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/media/", &ChatMediaHandler{Service: deps.ChatService})
@@ -186,7 +187,7 @@ func HandlerFactory(deps Deps) http.Handler {
 		mux.Handle("/api/schedules/events", deps.ScheduleEvents)
 	}
 
-	// Orchestrator tasks (independent of chat pipeline — no mutex contention).
+	// Orchestrator tasks (independent of chat pipeline - no mutex contention).
 	taskHandler := &TasksHandler{
 		Orchestrator: deps.Orchestrator,
 		DataDir:      deps.DataDir,
@@ -254,7 +255,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	// Health (exempt from auth).
 	mux.Handle("/health", &HealthHandler{})
 
-	// Magic link auth (exempt from auth — does its own validation).
+	// Magic link auth (exempt from auth - does its own validation).
 	// Strict rate limit (5/min per IP) + IP ban after repeated failures.
 	if deps.Magic != nil && deps.Sessions != nil {
 		authRL := newRateLimiter(5)
@@ -275,7 +276,7 @@ func HandlerFactory(deps Deps) http.Handler {
 		})
 	}
 
-	// Static assets (CSS, JS) — served from embedded web/ directory.
+	// Static assets (CSS, JS) - served from embedded web/ directory.
 	if deps.WebFS != nil {
 		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(deps.WebFS))))
 	}

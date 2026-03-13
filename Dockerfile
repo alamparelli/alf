@@ -6,7 +6,7 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libc6-dev libsqlite3-dev cmake make && rm -rf /var/lib/apt/lists/*
 
-# Build whisper.cpp static library (arm64 only — faster-whisper doesn't work on ARM).
+# Build whisper.cpp static library (arm64 only - faster-whisper doesn't work on ARM).
 WORKDIR /whisper
 RUN if [ "${TARGETARCH}" = "arm64" ]; then \
       git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git . \

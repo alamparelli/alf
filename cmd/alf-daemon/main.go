@@ -234,7 +234,7 @@ func main() {
 	fwStore := firewall.NewStore(configDir)
 	fwCfg, err := fwStore.Load()
 	if err != nil {
-		log.Printf("warning: failed to load firewall config: %v — using defaults", err)
+		log.Printf("warning: failed to load firewall config: %v - using defaults", err)
 		fwCfg = firewall.DefaultConfig()
 	}
 	fwProxy := firewall.NewProxy(fwCfg)
@@ -268,7 +268,7 @@ func main() {
 				log.Println("vault: unlocked, proxy token created")
 			}
 		} else {
-			log.Println("vault: started (locked — set vault_master_password or unlock via Control Center)")
+			log.Println("vault: started (locked - set vault_master_password or unlock via Control Center)")
 		}
 	}
 
@@ -290,7 +290,7 @@ func main() {
 		}
 	}
 	if !vaultChecked && (token == "" || chatID == "") {
-		// Vault not available — fall back to legacy sources.
+		// Vault not available - fall back to legacy sources.
 		if tgCfg := readTelegramConfig(configDir); tgCfg != nil {
 			if tgCfg.BotToken != "" && tgCfg.ChatID != "" {
 				token = tgCfg.BotToken
@@ -312,14 +312,14 @@ func main() {
 
 	telegramEnabled = token != "" && chatID != ""
 	if !telegramEnabled {
-		log.Println("Telegram not configured — running in Control Center-only mode")
+		log.Println("Telegram not configured - running in Control Center-only mode")
 	}
 
 	// Load initial tiers config. Honour optional tiers_file override in config.
 	tiersPath := cc.TiersPathFromConfig(configDir, cfg)
 	tierStore := cc.NewFileTierStore(tiersPath)
 	if err := tierStore.Reload(); err != nil {
-		log.Printf("ERROR: failed to load tiers: %v — using defaults (your tiers.json edits are IGNORED)", err)
+		log.Printf("ERROR: failed to load tiers: %v - using defaults (your tiers.json edits are IGNORED)", err)
 	}
 
 	// Load skill catalog: system → bundled copy → user (later overrides earlier).
@@ -347,15 +347,16 @@ func main() {
 	// Seed default heartbeat.md if missing.
 	seedHeartbeatFile(contextDir)
 
-	// Generate toolbox.md — explicit list of all available CLI tools.
+	// Generate toolbox.md - explicit list of all available CLI tools.
 	memory.GenerateToolbox(contextDir, dataDir)
 
 	// Generate daily mood (overwrites mood.md if date changed).
 	mood.GenerateDaily(contextDir)
 
 	// Session store for Claude --resume support.
+	// SessionTimeout: >0 = minutes, 0 = no timeout, <0 (absent) = default 30m.
 	sessionTimeout := time.Duration(cfg.SessionTimeout) * time.Minute
-	if sessionTimeout <= 0 {
+	if cfg.SessionTimeout < 0 {
 		sessionTimeout = 30 * time.Minute
 	}
 	chatSessions := session.New(dataDir, sessionTimeout)
@@ -634,7 +635,7 @@ func main() {
 			log.Printf("Control Center started on :8080 (allowed_chat_ids=%d, external_url=%s)", len(allowedChatIDs), ccExternalURL)
 		}
 	} else {
-		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set — Control Center disabled")
+		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set - Control Center disabled")
 	}
 
 	var offset int64
@@ -649,7 +650,7 @@ func main() {
 			eventLog.Log("telegram_rate_limit", map[string]any{
 				"wait_seconds": wait.Seconds(),
 			})
-			log.Printf("[telegram] rate limited — waiting %v before retry", wait)
+			log.Printf("[telegram] rate limited - waiting %v before retry", wait)
 		}
 	}
 
@@ -732,7 +733,7 @@ func main() {
 		}()
 	}
 
-	// Daily schedule digest — runs at 08:00 local time.
+	// Daily schedule digest - runs at 08:00 local time.
 	sched.RegisterSystem("sched-digest", "Schedule Digest", "0 0 8 * * *", sched.SendDailyDigest)
 
 	schedAdapter.engine = sched
@@ -761,7 +762,7 @@ func main() {
 		}
 	}
 
-	// Seed health check job — two-phase: runs bash command deterministically,
+	// Seed health check job - two-phase: runs bash command deterministically,
 	// only invokes LLM if error patterns are detected in the output.
 	if _, ok := skillStore.Get("health-check"); ok {
 		if _, err := sched.EnsureManagedFull(
@@ -779,7 +780,7 @@ func main() {
 		}
 	}
 
-	// Seed heartbeat job — reads context/heartbeat.md, skips if empty body.
+	// Seed heartbeat job - reads context/heartbeat.md, skips if empty body.
 	if _, ok := skillStore.Get("heartbeat"); ok {
 		hbTier, hbSchedule := scheduler.ParseHeartbeatMeta(contextDir)
 		if hbTier == "" {
@@ -793,7 +794,7 @@ func main() {
 			"Heartbeat",
 			hbSchedule,
 			hbTier,
-			"__heartbeat__", // sentinel — executor reads context/heartbeat.md at runtime
+			"__heartbeat__", // sentinel - executor reads context/heartbeat.md at runtime
 			"telegram",
 			[]string{"heartbeat"},
 			true, // enabled by default
@@ -812,9 +813,7 @@ func main() {
 					oldTZ := cfg.Timezone
 					oldTiersFile := cfg.TiersFile
 					cfg = newCfg
-					if cfg.SessionTimeout > 0 {
-						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
-					}
+					chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
 					if cfg.MaxSessions > 0 {
 						sessions.SetMaxSessions(cfg.MaxSessions)
 					}
@@ -825,7 +824,7 @@ func main() {
 					if cfg.TiersFile != oldTiersFile {
 						newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
 						if err := tierStore.SetPath(newTiersPath); err != nil {
-							log.Printf("ERROR: tiers reload from new path %q failed: %v — keeping previous tiers", newTiersPath, err)
+							log.Printf("ERROR: tiers reload from new path %q failed: %v - keeping previous tiers", newTiersPath, err)
 						} else {
 							log.Printf("config: tiers_file changed to %q", newTiersPath)
 						}
@@ -904,9 +903,7 @@ func main() {
 					oldTZ := cfg.Timezone
 					oldTiersFile := cfg.TiersFile
 					cfg = newCfg
-					if cfg.SessionTimeout > 0 {
-						chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
-					}
+					chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
 					if cfg.MaxSessions > 0 {
 						sessions.SetMaxSessions(cfg.MaxSessions)
 					}
@@ -918,7 +915,7 @@ func main() {
 					if cfg.TiersFile != oldTiersFile {
 						newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
 						if err := tierStore.SetPath(newTiersPath); err != nil {
-							log.Printf("ERROR: tiers reload from new path %q failed: %v — keeping previous tiers", newTiersPath, err)
+							log.Printf("ERROR: tiers reload from new path %q failed: %v - keeping previous tiers", newTiersPath, err)
 						} else {
 							log.Printf("config: tiers_file changed to %q", newTiersPath)
 						}
@@ -932,7 +929,7 @@ func main() {
 				}
 			case cc.ReloadTiers:
 				if err := tierStore.Reload(); err != nil {
-					log.Printf("ERROR: tiers reload failed: %v — keeping previous config", err)
+					log.Printf("ERROR: tiers reload failed: %v - keeping previous config", err)
 				} else {
 					log.Println("tiers reloaded")
 				}
@@ -1027,9 +1024,9 @@ func main() {
 				continue
 			}
 
-			// Authorize sender — reject anyone not in allowedChatIDs.
+			// Authorize sender - reject anyone not in allowedChatIDs.
 			if len(allowedChatIDs) > 0 && !allowedChatIDs[u.Message.Chat.ID] {
-				log.Printf("unauthorized message from chat_id=%d user=%s — dropped", u.Message.Chat.ID, u.Message.From.Username)
+				log.Printf("unauthorized message from chat_id=%d user=%s - dropped", u.Message.Chat.ID, u.Message.From.Username)
 				continue
 			}
 
@@ -1153,7 +1150,7 @@ func main() {
 				var files []fileRef
 
 				if len(u.Message.Photo) > 0 {
-					// Albums: each photo pair (sizes) in Photo slice — pick largest per photo.
+					// Albums: each photo pair (sizes) in Photo slice - pick largest per photo.
 					// After mergeMediaGroups, multiple photos from an album are concatenated.
 					// Telegram sends multiple sizes per photo; pick the largest of each.
 					// For a single photo: last element. For albums: every N-th element.
@@ -1247,7 +1244,7 @@ func main() {
 							frames, err := media.ExtractFrames(tmpPath, 16)
 							if err != nil {
 								log.Printf("frame extraction failed: %v", err)
-								allParts = append(allParts, fmt.Sprintf("[%s from Telegram, %ds — frame extraction failed]", mediaType, f.Duration))
+								allParts = append(allParts, fmt.Sprintf("[%s from Telegram, %ds - frame extraction failed]", mediaType, f.Duration))
 							} else {
 								cleanupPaths = append(cleanupPaths, frames...)
 
@@ -1269,9 +1266,9 @@ func main() {
 								}
 
 								if len(frames) == 1 {
-									allParts = append(allParts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) — contact sheet with key frames. Use Read tool to view: %s]", mediaType, f.FileName, f.Duration, frames[0]))
+									allParts = append(allParts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) - contact sheet with key frames. Use Read tool to view: %s]", mediaType, f.FileName, f.Duration, frames[0]))
 								} else {
-									allParts = append(allParts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) — %d frames extracted. Use Read tool to view: %s]", mediaType, f.FileName, f.Duration, len(frames), strings.Join(frames, ", ")))
+									allParts = append(allParts, fmt.Sprintf("[%s \"%s\" from Telegram (%ds) - %d frames extracted. Use Read tool to view: %s]", mediaType, f.FileName, f.Duration, len(frames), strings.Join(frames, ", ")))
 								}
 								if transcript != "" {
 									allParts = append(allParts, fmt.Sprintf("[Audio transcript: %s]", transcript))
@@ -1284,12 +1281,12 @@ func main() {
 							if len(files) > 1 {
 								label = fmt.Sprintf("PHOTO %d/%d", fi+1, len(files))
 							}
-							allParts = append(allParts, fmt.Sprintf("[%s from Telegram chat — use Read tool to view: %s]", label, tmpPath))
+							allParts = append(allParts, fmt.Sprintf("[%s from Telegram chat - use Read tool to view: %s]", label, tmpPath))
 						} else if media.IsTextContent(mimeType) || mimeType == "application/pdf" {
 							textContent := media.ExtractTextFromDocument(data, mimeType)
 							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s", f.FileName, textContent))
 						} else {
-							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s — use Read tool to view: %s]", f.FileName, tmpPath))
+							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s - use Read tool to view: %s]", f.FileName, tmpPath))
 						}
 
 						log.Printf("media: saved %s (%s, %d bytes) → %s", f.FileName, mimeType, len(data), tmpPath)
@@ -1323,13 +1320,13 @@ func main() {
 							ctxLines = append(ctxLines, "]")
 							allParts = append(allParts, strings.Join(ctxLines, "\n"))
 						}
-						allParts = append(allParts, "The user sent this GIF as a reaction to the conversation. GIFs express emotions, humor, or reactions — don't describe the GIF literally. Instead, understand the feeling/mood it conveys and respond to that emotion naturally, matching the vibe. Keep it short.")
+						allParts = append(allParts, "The user sent this GIF as a reaction to the conversation. GIFs express emotions, humor, or reactions - don't describe the GIF literally. Instead, understand the feeling/mood it conveys and respond to that emotion naturally, matching the vibe. Keep it short.")
 					} else if len(files) > 1 {
 						allParts = append(allParts, fmt.Sprintf("The user sent %d files/photos together as an album. Analyze all of them and respond naturally.", len(files)))
 					} else if hasVideo {
 						allParts = append(allParts, "The user shared this video in chat. Describe what you see in the frames and the audio context. React naturally.")
 					} else {
-						allParts = append(allParts, "The user shared this in chat. React naturally as you would in a personal conversation — comment on what you see, the mood, the context.")
+						allParts = append(allParts, "The user shared this in chat. React naturally as you would in a personal conversation - comment on what you see, the mood, the context.")
 					}
 
 					u.Message.Text = strings.Join(allParts, "\n")
@@ -1443,7 +1440,7 @@ func main() {
 				routeResult = classifyMessage(routerMsg, tierStore.Current())
 			}
 
-			// Router answered directly — no second LLM call needed.
+			// Router answered directly - no second LLM call needed.
 			if forcedTierName == "" && !hasMedia {
 				routingAnim.Stop()
 			}
@@ -1452,7 +1449,7 @@ func main() {
 			// gave a direct response, re-classify with full context.
 			if isReply && forcedTierName == "" && routeResult.Response != "" && routeResult.Tier == "" {
 				originalResult := routeResult
-				replyHint := msgWithReplyContext + "\n[CONTEXT: This is a reply to a previous assistant message. Route to an appropriate tier — do not respond directly.]"
+				replyHint := msgWithReplyContext + "\n[CONTEXT: This is a reply to a previous assistant message. Route to an appropriate tier - do not respond directly.]"
 				reclassified := classifyMessage(replyHint, tierStore.Current())
 				if reclassified.Tier != "" {
 					routeResult = reclassified
@@ -1472,7 +1469,7 @@ func main() {
 			}
 
 			// If highly relevant memories were recalled (distance < 0.6), override
-			// direct responses — the user is asking about something personal.
+			// direct responses - the user is asking about something personal.
 			if preRecallBlock != "" && recallBestDist < 0.6 && routeResult.Response != "" && routeResult.Tier == "" {
 				log.Printf("→ memory override: direct response upgraded to tier (best_dist=%.2f)", recallBestDist)
 				fallback := firstFallbackTier(tierStore)
@@ -1584,7 +1581,7 @@ func main() {
 			})
 
 			// Agent dispatch: delegate to multi-agent coordinator (non-blocking).
-			// The orchestrator brain is delegation-only — skip core/soul/toolbox
+			// The orchestrator brain is delegation-only - skip core/soul/toolbox
 			// prompts which contain file-writing instructions for conversational mode.
 			if routeResult.Tier == "agent" && len(agentStore.All()) > 0 {
 				var orchSysPrompts []string
@@ -1768,7 +1765,7 @@ func main() {
 			}
 			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
 
-			// Documentation index — lets the model discover and read docs.
+			// Documentation index - lets the model discover and read docs.
 			if _, err := os.Stat(filepath.Join(dataDir, "llms.txt")); err == nil {
 				sysPromptTexts = append(sysPromptTexts, "Documentation is available in ~/data/docs/. Read ~/data/llms.txt for the index. When you install packages, read the container-packages doc first.")
 			}
@@ -1893,7 +1890,7 @@ func main() {
 			}
 
 			// Clear onboarding flag after first successful response.
-			// Don't clear immediately — wait until next /new so system prompts
+			// Don't clear immediately - wait until next /new so system prompts
 			// stay consistent within a resumed session.
 			if onboarding != "" {
 				onboarding = "" // prevent re-clearing on subsequent messages
@@ -1915,7 +1912,7 @@ func main() {
 					})
 				}
 			} else if isAPITier {
-				// API tiers don't return session IDs — just track context.
+				// API tiers don't return session IDs - just track context.
 				chatSessions.TouchContext(chatID, routeResult.Tier)
 			}
 			chatSessions.Touch(chatID)
@@ -2131,7 +2128,7 @@ func resolveBackendAPIKey(name string, bcfg cc.BackendConfig, vaultMgr *vault.Ma
 	}
 	// Try vault first if vault_service is specified.
 	if bcfg.VaultService != "" && vaultMgr != nil {
-		// Vault proxy doesn't expose raw keys — the proxy approach means
+		// Vault proxy doesn't expose raw keys - the proxy approach means
 		// requests go through vault. For now, fall through to Docker secret.
 		// Future: vault-proxy integration for direct API proxying.
 	}
@@ -2403,7 +2400,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 		memory.SetOnboarding(contextDir)
 		chatSessions.Archive(msg.Chat.ID) // fresh session so onboarding prompt takes effect
 		convStore.NewConversation(conversation.ChannelTelegram)
-		// Auto-trigger onboarding conversation — fall through to normal message processing.
+		// Auto-trigger onboarding conversation - fall through to normal message processing.
 		msg.Text = "hello"
 		return false
 	case "/restart":
@@ -2445,20 +2442,20 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 			if rt.Meta != nil {
 				iter = rt.Meta.Iterations
 			}
-			lines = append(lines, fmt.Sprintf("• <code>%s</code> — %s, iteration %d", rt.ID, elapsed, iter))
+			lines = append(lines, fmt.Sprintf("• <code>%s</code> - %s, iteration %d", rt.ID, elapsed, iter))
 		}
 		tg.SendHTML(msg.Chat.ID, "<b>Running agent jobs:</b>\n"+strings.Join(lines, "\n"))
 		return true
 	case "/help":
 		help := "<b>Available commands:</b>\n" +
-			"/help — Show this message\n" +
-			"/new — Start a new conversation session\n" +
-			"/bash — Execute a bash command directly\n" +
-			"/jobs — List running agent jobs\n" +
-			"/cancel — Cancel all running agent jobs\n" +
-			"/restart — Restart the ALF daemon\n" +
-			"/login — Get a login link for the Control Center\n" +
-			"/start — Re-run onboarding (get to know each other)"
+			"/help - Show this message\n" +
+			"/new - Start a new conversation session\n" +
+			"/bash - Execute a bash command directly\n" +
+			"/jobs - List running agent jobs\n" +
+			"/cancel - Cancel all running agent jobs\n" +
+			"/restart - Restart the ALF daemon\n" +
+			"/login - Get a login link for the Control Center\n" +
+			"/start - Re-run onboarding (get to know each other)"
 		tg.SendHTML(msg.Chat.ID, help)
 		return true
 	case "/bash":
@@ -2617,7 +2614,7 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, r
 			}
 		}
 	}
-	// Tier not found — use defaults.
+	// Tier not found - use defaults.
 	return tierParams{Model: "claude-haiku-4-5"}
 }
 
@@ -2853,7 +2850,7 @@ func seedDefaultTiers(configDir string) {
 }
 
 // autoEnableAgentTier enables the agent tier in-memory when agent teams are configured.
-// Does NOT modify the tiers.json file — only affects the runtime state.
+// Does NOT modify the tiers.json file - only affects the runtime state.
 func autoEnableAgentTier(tierStore cc.TierStore) {
 	tiers := tierStore.Current()
 	for i := range tiers.Tiers {
@@ -2874,7 +2871,7 @@ func syncClaudeJSON(homeDir string) {
 	realFile := filepath.Join(homeDir, ".claude.json")
 	volumeCopy := filepath.Join(homeDir, ".claude", "claude.json")
 
-	// If .claude.json is a symlink (from Dockerfile), remove it — we use copies now.
+	// If .claude.json is a symlink (from Dockerfile), remove it - we use copies now.
 	if fi, err := os.Lstat(realFile); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		os.Remove(realFile)
 	}
@@ -3305,11 +3302,11 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 
 	// Strong negative → always follow up. Mild negative → 50% chance.
 	if !mood.IsStrongNegative(emoji) && rand.Float64() > 0.5 {
-		log.Printf("mild negative %s — skipping follow-up (coin flip)", emoji)
+		log.Printf("mild negative %s - skipping follow-up (coin flip)", emoji)
 		return
 	}
 
-	log.Printf("negative reaction %s — triggering follow-up", emoji)
+	log.Printf("negative reaction %s - triggering follow-up", emoji)
 
 	// Small delay so mirror reaction lands first.
 	time.Sleep(2 * time.Second)

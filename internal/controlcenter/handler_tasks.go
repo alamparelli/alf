@@ -15,7 +15,7 @@ import (
 )
 
 // TasksHandler serves running and completed agent tasks, and launches new ones.
-// Task launches bypass ChatService entirely — they run in their own goroutine
+// Task launches bypass ChatService entirely - they run in their own goroutine
 // and are tracked by the Orchestrator, not the chat mutex.
 type TasksHandler struct {
 	Orchestrator *agents.Orchestrator
@@ -89,7 +89,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 	rc.SkillPrompts = skillInjections
 	rc.MemoryContext = memory.CollectAgentContext(h.ContextDir)
 
-	// Fire and forget — task is tracked by orchestrator.running map.
+	// Fire and forget - task is tracked by orchestrator.running map.
 	go func() {
 		_, _, err := h.Orchestrator.Run(context.Background(), req.Message, sysPrompts, rc, nil)
 		if err != nil {
@@ -161,7 +161,7 @@ func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// Orphaned "running" tasks (on disk but not in memory) were interrupted
-		// by a daemon restart — mark them so they appear in the completed list.
+		// by a daemon restart - mark them so they appear in the completed list.
 		if meta.Status == "running" {
 			meta.Status = "interrupted"
 		}

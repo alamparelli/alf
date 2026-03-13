@@ -37,7 +37,7 @@ var moods = []Mood{
 }
 
 // GenerateDaily writes mood.md if the date has changed.
-// Resets Live Feedback state — score starts fresh each day.
+// Resets Live Feedback state - score starts fresh each day.
 func GenerateDaily(contextDir string) {
 	path := filepath.Join(contextDir, "mood.md")
 	today := time.Now().Format("2006-01-02")

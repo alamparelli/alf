@@ -9,6 +9,7 @@ import (
 // Events are buffered so clients can disconnect and reconnect without losing data.
 type chatJob struct {
 	ID     string
+	ConvID string // conversation tab this job belongs to
 	cancel context.CancelFunc
 
 	mu     sync.Mutex

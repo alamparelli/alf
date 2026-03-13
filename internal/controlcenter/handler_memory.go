@@ -120,7 +120,7 @@ func (h *MemoryIngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	resp, err := h.extractAndStore(req.Content, req.Instruction, req.Tier)
 	if err != nil {
 		log.Printf("[CC] memory ingest error: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "extraction failed — check server logs"})
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "extraction failed - check server logs"})
 		return
 	}
 
@@ -234,7 +234,7 @@ Rules: self-contained items, concise, skip trivial info.`, instruction, content)
 		return nil, fmt.Errorf("claude extraction failed: %w", err)
 	}
 
-	// Parse JSON array from response — Claude may wrap it in prose or code blocks.
+	// Parse JSON array from response - Claude may wrap it in prose or code blocks.
 	raw := strings.TrimSpace(result.Text)
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
@@ -305,7 +305,7 @@ func (h *MemoryIngestHandler) handleContextDestination(w http.ResponseWriter, re
 	resp, err := h.saveToContext(req.Content, req.Instruction, name, req.Tier)
 	if err != nil {
 		log.Printf("[CC] context save error: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "save failed — check server logs"})
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "save failed - check server logs"})
 		return
 	}
 	respondJSON(w, http.StatusOK, resp)
@@ -319,7 +319,7 @@ func (h *MemoryIngestHandler) saveToContext(content, instruction, fileName, tier
 	} else {
 		// Summarize: Claude distills content into clean markdown.
 		prompt := fmt.Sprintf(`Summarize the following content into concise, well-structured markdown.
-Use bullet points for key items. Keep only important information. No preamble or explanation — output ONLY the markdown summary.
+Use bullet points for key items. Keep only important information. No preamble or explanation - output ONLY the markdown summary.
 
 Content:
 ---

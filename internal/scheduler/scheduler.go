@@ -18,10 +18,10 @@ type Config struct {
 	TG         TelegramSender
 	Provider   ProviderInvoker
 	TierStore  TierStoreReader
-	SkillStore   SkillStoreReader   // optional — injects skill prompts into jobs
-	Orchestrator OrchestratorRunner // optional — multi-agent orchestration
+	SkillStore   SkillStoreReader   // optional - injects skill prompts into jobs
+	Orchestrator OrchestratorRunner // optional - multi-agent orchestration
 	ChatLogger   ChatLogger
-	EventLog     EventLogger        // optional — writes schedule_run events to daily logs
+	EventLog     EventLogger        // optional - writes schedule_run events to daily logs
 	CronPath   string
 	Location   *time.Location
 }
@@ -255,7 +255,7 @@ func (e *Engine) Create(name, schedule, tier, prompt, command, output string, ti
 	return j, nil
 }
 
-// CreateReminder adds a push-notification job (no LLM, no command — just a message).
+// CreateReminder adds a push-notification job (no LLM, no command - just a message).
 func (e *Engine) CreateReminder(name, schedule, message, output string, timeout time.Duration) (*Job, error) {
 	if output == "" {
 		output = "telegram"
@@ -576,7 +576,7 @@ func (e *Engine) scheduleJob(j *Job) error {
 }
 
 // onceSchedule fires exactly once at the given time.
-// After the target time passes, Next returns zero — cron considers it expired.
+// After the target time passes, Next returns zero - cron considers it expired.
 type onceSchedule struct {
 	at time.Time
 }

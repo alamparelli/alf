@@ -21,7 +21,7 @@ func (m *mockProvider) Invoke(_ context.Context, _ string, _ provider.Params, _ 
 }
 
 // newTestChatService creates a ChatService with real stores backed by temp dirs.
-// No Claude CLI, router, or transcriber — tests that need those should mock them.
+// No Claude CLI, router, or transcriber - tests that need those should mock them.
 func newTestChatService(t *testing.T) *ChatService {
 	t.Helper()
 	dataDir := t.TempDir()
@@ -161,7 +161,7 @@ func TestChatService_History(t *testing.T) {
 		Timestamp: now.Add(-time.Minute),
 	})
 
-	msgs := svc.History(50, time.Time{})
+	msgs := svc.History(50, time.Time{}, "")
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2, got %d", len(msgs))
 	}
@@ -174,7 +174,7 @@ func TestChatService_HistoryLimitCap(t *testing.T) {
 	svc := newTestChatService(t)
 
 	// Requesting limit > 200 should be capped and return empty slice.
-	msgs := svc.History(999, time.Time{})
+	msgs := svc.History(999, time.Time{}, "")
 	if len(msgs) != 0 {
 		t.Errorf("expected empty history, got %d", len(msgs))
 	}

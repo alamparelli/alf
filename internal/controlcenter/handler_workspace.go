@@ -14,10 +14,10 @@ import (
 const maxFileSize = 1 << 20  // 1 MB
 const maxUploadTotal = 10 << 20 // 10 MB total for multi-file upload
 
-// editableExts is no longer used for write gating — all non-binary text files
+// editableExts is no longer used for write gating - all non-binary text files
 // under the workspace are editable. Kept only for backward compat in readFile
 // (the "editable" JSON field hint to the frontend).
-var editableExts map[string]bool // nil — unused
+var editableExts map[string]bool // nil - unused
 
 // WorkspaceHandler serves the data directory as a browsable workspace.
 // Files under config.d/ are read via the :ro bind mount in DataDir but
@@ -128,7 +128,7 @@ func pathWithinDir(path, dir string) bool {
 }
 
 // isReadOnly returns true if relPath falls inside a read-only directory.
-// Currently no directories are read-only — config.d and skills.d writes are
+// Currently no directories are read-only - config.d and skills.d writes are
 // remapped to their rw mounts by resolveWrite.
 func (h *WorkspaceHandler) isReadOnly(relPath string) bool {
 	return false
@@ -198,7 +198,7 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 			continue
 		}
 
-		// Use os.Stat (not Lstat) to follow symlinks — so symlinked dirs
+		// Use os.Stat (not Lstat) to follow symlinks - so symlinked dirs
 		// appear as directories in the file browser, not as tiny files.
 		fullPath := filepath.Join(absPath, name)
 
@@ -282,7 +282,7 @@ func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath, relPath stri
 			"name":     info.Name(),
 			"size":     info.Size(),
 			"editable": false,
-			"message":  "Binary file — cannot display",
+			"message":  "Binary file - cannot display",
 		})
 		w.Write(data)
 		return

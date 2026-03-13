@@ -71,7 +71,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 			// even with --dangerously-skip-permissions.
 			args = append(args, "--tools", strings.Join(params.Tools, ","))
 		} else {
-			// No tools requested — disable all tools so Claude produces
+			// No tools requested - disable all tools so Claude produces
 			// text output only, without wasting turns on tool calls.
 			args = append(args, "--tools", "")
 		}
@@ -142,7 +142,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		preCmd.SysProcAttr = &syscall.SysProcAttr{Credential: p.Credential}
 	}
 	if preOut, preErr := preCmd.CombinedOutput(); preErr != nil {
-		return nil, fmt.Errorf("claude preflight check failed: %w — %s", preErr, truncStderr(string(preOut), 300))
+		return nil, fmt.Errorf("claude preflight check failed: %w - %s", preErr, truncStderr(string(preOut), 300))
 	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -231,7 +231,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 				copy(lastEvent, line)
 				goto processEvent
 			case <-firstTimer.C:
-				// No events within timeout — kill and report stderr.
+				// No events within timeout - kill and report stderr.
 				cmd.Process.Kill()
 				<-stderrDone
 				cmd.Wait()
@@ -297,7 +297,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 
 		if onProgress != nil {
 			switch {
-			// content_block_start: thinking — emit for each new thinking block
+			// content_block_start: thinking - emit for each new thinking block
 			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "thinking":
 				if !inThinking {
 					onProgress(StreamEvent{Type: "thinking"})
@@ -329,7 +329,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 			// content_block_delta: text
 			case evtType == "content_block_delta" && event.Event.Delta.Type == "text_delta":
 				onProgress(StreamEvent{Type: "text_delta", Text: event.Event.Delta.Text})
-			// content_block_start: text — reset thinking state
+			// content_block_start: text - reset thinking state
 			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "text":
 				inThinking = false
 			// content_block_stop
@@ -412,7 +412,7 @@ done:
 			if text == "" {
 				switch parsed.Subtype {
 				case "error_max_turns":
-					text = "Turn limit reached — try breaking this into smaller steps."
+					text = "Turn limit reached - try breaking this into smaller steps."
 				default:
 					if parsed.IsError {
 						text = "An error occurred processing your request."
@@ -477,7 +477,7 @@ var safeEnvPrefixes = []string{
 	"LC_",
 	"TZ=",
 	// Note: HTTP_PROXY/HTTPS_PROXY deliberately excluded. The firewall proxy
-	// at 127.0.0.1:4751 causes Claude CLI to hang — its HTTPS CONNECT handling
+	// at 127.0.0.1:4751 causes Claude CLI to hang - its HTTPS CONNECT handling
 	// is incompatible with Claude's OAuth/API flows. Claude Code's own tool
 	// invocations (web fetches, etc.) will still respect the proxy if needed,
 	// but the CLI subprocess itself must connect directly.

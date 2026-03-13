@@ -115,7 +115,7 @@ func TestStoreEmptyTextRejected(t *testing.T) {
 	// Empty text should still be inserted (no constraint), but dedup may
 	// catch identical empties. We just verify no panic.
 	_, err := s.Store("", "fact", "test", nil)
-	// sqlite CHECK doesn't prevent empty — this is allowed.
+	// sqlite CHECK doesn't prevent empty - this is allowed.
 	if err != nil {
 		t.Logf("empty text store result: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestDelete(t *testing.T) {
 
 func TestDeleteNonexistent(t *testing.T) {
 	s := newTestStore(t)
-	// Should not error — idempotent.
+	// Should not error - idempotent.
 	if err := s.Delete(999); err != nil {
 		t.Fatalf("Delete nonexistent: %v", err)
 	}
@@ -658,7 +658,7 @@ func TestServerRecentDefaults(t *testing.T) {
 	if resp.Error != "" {
 		t.Fatalf("recent error: %s", resp.Error)
 	}
-	// No results is fine — defaults should not crash.
+	// No results is fine - defaults should not crash.
 }
 
 func TestServerUnknownAction(t *testing.T) {

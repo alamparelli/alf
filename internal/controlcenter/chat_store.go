@@ -21,6 +21,7 @@ type ChatMessage struct {
 	Tier      string      `json:"tier,omitempty"`
 	CostUSD   float64     `json:"cost_usd,omitempty"`
 	SessionID string      `json:"session_id,omitempty"`
+	ConvID    string      `json:"conv_id,omitempty"` // conversation tab ID
 	ReplyTo   string      `json:"reply_to,omitempty"`
 	Media     []MediaRef  `json:"media,omitempty"`
 	Reactions []Reaction  `json:"reactions,omitempty"`
@@ -125,12 +126,16 @@ func (cs *ChatStore) Recent(n int) []ChatMessage {
 }
 
 // History returns messages before a given timestamp, limited to n messages.
-func (cs *ChatStore) History(limit int, before time.Time) []ChatMessage {
+// If convID is non-empty, only messages from that conversation are returned.
+func (cs *ChatStore) History(limit int, before time.Time, convID string) []ChatMessage {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 	all := cs.ringMessages()
 	var result []ChatMessage
 	for i := len(all) - 1; i >= 0 && len(result) < limit; i-- {
+		if convID != "" && all[i].ConvID != convID {
+			continue
+		}
 		if before.IsZero() || all[i].Timestamp.Before(before) {
 			result = append(result, all[i])
 		}
@@ -138,6 +143,48 @@ func (cs *ChatStore) History(limit int, before time.Time) []ChatMessage {
 	// Reverse to chronological order.
 	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
 		result[i], result[j] = result[j], result[i]
+	}
+	return result
+}
+
+// Conversations returns a summary of all known conversation IDs from the ring buffer.
+type ConversationInfo struct {
+	ConvID      string    `json:"conv_id"`
+	Title       string    `json:"title"`
+	LastMessage time.Time `json:"last_message"`
+	MsgCount    int       `json:"msg_count"`
+}
+
+func (cs *ChatStore) Conversations() []ConversationInfo {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	all := cs.ringMessages()
+	convs := make(map[string]*ConversationInfo)
+	order := []string{}
+	for _, m := range all {
+		cid := m.ConvID
+		info, ok := convs[cid]
+		if !ok {
+			info = &ConversationInfo{ConvID: cid}
+			convs[cid] = info
+			order = append(order, cid)
+		}
+		info.MsgCount++
+		if m.Timestamp.After(info.LastMessage) {
+			info.LastMessage = m.Timestamp
+		}
+		// Use first user message as title.
+		if info.Title == "" && m.Role == "user" && m.Text != "" {
+			title := m.Text
+			if len(title) > 60 {
+				title = title[:60] + "..."
+			}
+			info.Title = title
+		}
+	}
+	result := make([]ConversationInfo, 0, len(order))
+	for _, cid := range order {
+		result = append(result, *convs[cid])
 	}
 	return result
 }

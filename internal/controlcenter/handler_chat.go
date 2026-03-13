@@ -44,9 +44,9 @@ func (h *ChatHandler) sendMessage(w http.ResponseWriter, r *http.Request) {
 
 func (h *ChatHandler) newSession(w http.ResponseWriter, r *http.Request) {
 	onboard := r.URL.Query().Get("onboard") == "1"
-	old := h.Service.NewSession(onboard)
+	old, newConvID := h.Service.NewSession(onboard)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": true, "previous_session": old})
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "previous_session": old, "conv_id": newConvID})
 }
 
 func (h *ChatHandler) history(w http.ResponseWriter, r *http.Request) {
@@ -64,9 +64,30 @@ func (h *ChatHandler) history(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	msgs := h.Service.History(limit, before)
+	convID := r.URL.Query().Get("conv_id")
+	msgs := h.Service.History(limit, before, convID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(msgs)
+}
+
+// ChatConversationsHandler handles GET /api/chat/conversations.
+type ChatConversationsHandler struct {
+	Service *ChatService
+}
+
+func (h *ChatConversationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		convs := h.Service.Conversations()
+		// Also include the current active conv_id.
+		currentConvID := h.Service.CurrentConvID()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"conversations":  convs,
+			"active_conv_id": currentConvID,
+		})
+		return
+	}
+	http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 }
 
 // ChatJobHandler handles GET /api/chat/job (status + reconnect) and DELETE (cancel).
@@ -94,8 +115,9 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Status check.
-		j := h.Service.ActiveJob()
+		// Status check - scoped by conv_id.
+		convID := r.URL.Query().Get("conv_id")
+		j := h.Service.ActiveJob(convID)
 		w.Header().Set("Content-Type", "application/json")
 		if j == nil {
 			json.NewEncoder(w).Encode(map[string]any{"active": false})
@@ -108,7 +130,8 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case http.MethodDelete:
-		j := h.Service.ActiveJob()
+		convID := r.URL.Query().Get("conv_id")
+		j := h.Service.ActiveJob(convID)
 		if j != nil {
 			j.cancel()
 		}

@@ -37,7 +37,7 @@ func (r *Registry) scan() {
 }
 
 // Rescan re-reads tool schemas from disk (tools.d/*.json, tools/*.json).
-// Native Go tools are preserved — only file-based schemas are refreshed.
+// Native Go tools are preserved - only file-based schemas are refreshed.
 func (r *Registry) Rescan() {
 	r.scanFiles(false)
 }

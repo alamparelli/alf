@@ -230,7 +230,7 @@ func TestAgentSessionResume(t *testing.T) {
 
 func TestPlainTextTriggersNudge(t *testing.T) {
 	mp := newMockProvider([]*provider.Result{
-		// First: plain text (invalid) — should trigger nudge
+		// First: plain text (invalid) - should trigger nudge
 		{Text: "Just a plain answer without JSON"},
 		// After nudge: proper delegation
 		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find info"}]}`},
@@ -496,7 +496,7 @@ func TestNoTeamsConfigured(t *testing.T) {
 
 func TestMalformedJSONTriggersNudge(t *testing.T) {
 	mp := newMockProvider([]*provider.Result{
-		// Malformed JSON — triggers nudge
+		// Malformed JSON - triggers nudge
 		{Text: `not json at all`},
 		// After nudge: proper response
 		{Text: `{"response": "ok after nudge"}`},
@@ -718,7 +718,7 @@ func TestRunConfigModelAndEffort(t *testing.T) {
 }
 
 func TestRunConfigMaxIterations(t *testing.T) {
-	// Provider always delegates, never returns a response — should stop at MaxIterations.
+	// Provider always delegates, never returns a response - should stop at MaxIterations.
 	mp := newMockProvider(nil, nil) // falls through to fallback
 	store := testStore(testTeam)
 	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
@@ -771,10 +771,10 @@ func TestRunNonBlocking(t *testing.T) {
 		close(done)
 	}()
 
-	// The goroutine should not block — we should be able to do other work.
+	// The goroutine should not block - we should be able to do other work.
 	select {
 	case <-done:
-		// Completed — good.
+		// Completed - good.
 	case <-time.After(5 * time.Second):
 		t.Fatal("orchestrator Run blocked for too long")
 	}
@@ -877,7 +877,7 @@ func TestCancelStopsTask(t *testing.T) {
 
 	select {
 	case <-done:
-		// Good — task stopped.
+		// Good - task stopped.
 	case <-time.After(5 * time.Second):
 		t.Fatal("task didn't stop after Cancel")
 	}

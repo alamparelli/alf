@@ -132,7 +132,7 @@ func TestSessionStore_CustomTTL(t *testing.T) {
 	ttl := 7 * 24 * time.Hour
 	id, _ := ss.Issue(100, ttl)
 
-	// Advance past default 24h but within 7 days — should still be valid.
+	// Advance past default 24h but within 7 days - should still be valid.
 	now = now.Add(48 * time.Hour)
 	ss.nowFn = func() time.Time { return now }
 
@@ -140,7 +140,7 @@ func TestSessionStore_CustomTTL(t *testing.T) {
 		t.Error("session with 7d TTL should be valid after 48h")
 	}
 
-	// Advance past 7 days — should be expired.
+	// Advance past 7 days - should be expired.
 	now = now.Add(6 * 24 * time.Hour)
 	ss.nowFn = func() time.Time { return now }
 
@@ -186,7 +186,7 @@ func TestSessionStore_MaxSessionsEvictsOldest(t *testing.T) {
 		t.Fatal("both sessions should be valid")
 	}
 
-	// Issue a 3rd — oldest (id1) should be evicted.
+	// Issue a 3rd - oldest (id1) should be evicted.
 	now = now.Add(time.Minute)
 	id3, _ := ss.Issue(100, 24*time.Hour)
 

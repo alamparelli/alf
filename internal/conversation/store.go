@@ -11,7 +11,7 @@ import (
 
 // Store persists rich conversation messages as JSONL and keeps a ring buffer in memory.
 // One Store instance is shared across all frontends (Telegram, CC).
-// Messages are scoped by Channel+ConvID — each channel (tg, cc) has its own
+// Messages are scoped by Channel+ConvID - each channel (tg, cc) has its own
 // active conversation. NewConversation(channel) rotates that channel's ID.
 type Store struct {
 	mu       sync.RWMutex

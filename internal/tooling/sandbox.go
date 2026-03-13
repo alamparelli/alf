@@ -35,7 +35,7 @@ func CheckBoundary(dataDir, path string) (string, error) {
 		if !os.IsNotExist(err) {
 			return "", fmt.Errorf("cannot resolve path: %w", err)
 		}
-		// File doesn't exist yet — resolve parent dir + keep the filename.
+		// File doesn't exist yet - resolve parent dir + keep the filename.
 		parentReal, err2 := filepath.EvalSymlinks(filepath.Dir(path))
 		if err2 != nil {
 			// Parent also doesn't exist, fall back to lexical check.

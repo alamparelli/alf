@@ -157,7 +157,7 @@ func (e *Engine) executeJob(j *Job) {
 		if j.Command != "" {
 			text, err = e.runCommand(j)
 		} else {
-			log.Printf("scheduler: [%s] DEPRECATION: direct job using prompt instead of command — migrate to --command", j.ID)
+			log.Printf("scheduler: [%s] DEPRECATION: direct job using prompt instead of command - migrate to --command", j.ID)
 			text = j.Prompt
 		}
 	} else if j.Tier == "agent" && e.cfg.Orchestrator != nil {
@@ -205,7 +205,7 @@ func (e *Engine) executeJob(j *Job) {
 		return
 	}
 
-	// Detect turn limit as a soft failure — enrich with job context.
+	// Detect turn limit as a soft failure - enrich with job context.
 	if strings.Contains(text, "Turn limit reached") || strings.Contains(text, "turn limit") {
 		rec.Status = "turn_limit"
 		promptSnippet := j.Prompt
@@ -322,7 +322,7 @@ var errorPatterns = []string{"error", "panic", "fatal", "failed", "timeout", "ki
 func (e *Engine) runTwoPhase(j *Job) (string, *execResult, error) {
 	cmdOutput, err := e.runCommand(j)
 	if err != nil {
-		// Command itself failed — send error directly, no LLM needed.
+		// Command itself failed - send error directly, no LLM needed.
 		return "", nil, err
 	}
 
@@ -341,7 +341,7 @@ func (e *Engine) runTwoPhase(j *Job) (string, *execResult, error) {
 		return "", nil, nil // empty = healthy = no notification
 	}
 
-	// Issues found — invoke LLM to analyze.
+	// Issues found - invoke LLM to analyze.
 	log.Printf("scheduler: [%s] two-phase: issues detected, invoking LLM for analysis", j.ID)
 	analysisJob := *j
 	analysisJob.Command = "" // clear command so invokeLLM uses prompt only
@@ -424,7 +424,7 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 func (e *Engine) SendDailyDigest() error {
 	digest := e.runLog.DailyDigest(time.Now().Add(-24 * time.Hour))
 	if digest == "" {
-		log.Println("scheduler: daily digest — no runs in last 24h, skipping")
+		log.Println("scheduler: daily digest - no runs in last 24h, skipping")
 		return nil
 	}
 	if e.cfg.TG != nil && e.cfg.ChatID != 0 {

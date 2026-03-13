@@ -12,7 +12,7 @@ The Terminal tab opens a shell session **inside the Docker container** where ALF
 
 When you open a terminal, you get a bash session inside the ALF container (node:22-slim) as the `node` user. You can switch to root with `su -` if needed.
 
-The container's filesystem is ephemeral — most of it is rebuilt on every `alf upgrade`.
+The container's filesystem is ephemeral - most of it is rebuilt on every `alf upgrade`.
 
 ## Persistence
 
@@ -45,7 +45,7 @@ Files inside `~/data/` are mounted as a Docker volume and survive rebuilds:
 ## Tips
 
 - Use the terminal to test commands before adding them to `bootstrap.sh`
-- The terminal supports themes — use the dropdown in the toolbar to switch color schemes
+- The terminal supports themes - use the dropdown in the toolbar to switch color schemes
 - Click **New Session** to open a fresh shell
 - The terminal auto-resizes to fit your browser window
 

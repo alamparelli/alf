@@ -8,7 +8,7 @@ order: 15
 
 ALF can coordinate multiple specialized AI agents to tackle complex tasks. An orchestrator brain breaks down your request, delegates sub-tasks to specialized agents, reviews their results, and synthesizes a final answer.
 
-The orchestrator brain runs on the tier named `agent` in your `tiers.json` — its model, effort, and turn limits are all configurable there. Each sub-agent runs on its own tier, with its own model, tools, and permissions. No context bleeds between agents.
+The orchestrator brain runs on the tier named `agent` in your `tiers.json` - its model, effort, and turn limits are all configurable there. Each sub-agent runs on its own tier, with its own model, tools, and permissions. No context bleeds between agents.
 
 ## How to use it
 
@@ -50,7 +50,7 @@ Use the agent for:
 - Tasks that benefit from specialization (one agent researches, another writes)
 - Multi-step workflows where quality matters more than speed
 
-> Don't use the agent for simple questions or quick tasks. Regular tiers handle those faster and cheaper. The agent adds overhead — it's worth it only when the task is complex enough to benefit from delegation.
+> Don't use the agent for simple questions or quick tasks. Regular tiers handle those faster and cheaper. The agent adds overhead - it's worth it only when the task is complex enough to benefit from delegation.
 
 ## The starter team
 
@@ -64,7 +64,7 @@ ALF ships with a bundled starter team of 3 agents. Each agent references a tier 
 
 The tier defines the model, tools, write permissions, max turns, and effort level. You can customize agent capabilities by creating dedicated tiers (e.g. a "researcher" tier with web search tools and 15 turns).
 
-The orchestrator brain decides which agents to call, what to ask them, and whether the results are good enough — or if another round of delegation is needed.
+The orchestrator brain decides which agents to call, what to ask them, and whether the results are good enough - or if another round of delegation is needed.
 
 ## Creating custom teams
 
@@ -150,7 +150,7 @@ Instead of writing JSON by hand, ask ALF to generate the configuration for you:
 
 ALF will generate the JSON. You can then save it via the **Workspace Explorer** in the Control Center: navigate to `config.d/agents/`, click the upload or create button, and paste the JSON.
 
-> ALF cannot write directly to `config.d/` — it's a read-only directory for security. Use the Control Center to manage agent team files.
+> ALF cannot write directly to `config.d/` - it's a read-only directory for security. Use the Control Center to manage agent team files.
 
 ## Tips
 
@@ -167,12 +167,12 @@ ALF will generate the JSON. You can then save it via the **Workspace Explorer** 
 1. The orchestrator brain receives your message along with ALF context and the full agent catalog.
 2. It outputs a JSON delegation plan: `{"delegates": [{"agent": "team/agent", "task": "..."}]}`
 3. ALF runs the delegated agents in parallel, each in an isolated working directory under `data/agents/<taskID>/`.
-4. Each sub-agent runs on **its own tier** — with its own model, tools, effort, and turn limits.
+4. Each sub-agent runs on **its own tier** - with its own model, tools, effort, and turn limits.
 5. Agent results are sent back to the orchestrator brain.
 6. The brain either delegates more work or outputs the final answer: `{"response": "..."}`
 7. This loop continues for up to `max_iterations` cycles (default 10).
 
-The orchestrator runs **non-blocking** — you can continue chatting with ALF while it works in the background. Progress updates appear as animated status messages in Telegram.
+The orchestrator runs **non-blocking** - you can continue chatting with ALF while it works in the background. Progress updates appear as animated status messages in Telegram.
 
 ### Orchestrator tier settings
 
@@ -202,7 +202,7 @@ Each sub-agent inherits execution parameters from **its own tier** (not the `age
 
 To enable the orchestrator, set `"enabled": true` on the `agent` tier. It is disabled by default.
 
-> The orchestrator brain has no tools — it only outputs JSON text. If the brain repeatedly hits "turn limit reached", increase `orchestrator_max_turns`. If tasks time out before completing, increase `max_iterations` or `timeout_minutes`.
+> The orchestrator brain has no tools - it only outputs JSON text. If the brain repeatedly hits "turn limit reached", increase `orchestrator_max_turns`. If tasks time out before completing, increase `max_iterations` or `timeout_minutes`.
 
 > Sub-agent "turn limit reached" errors → increase `max_turns` on that agent's tier.
 
@@ -210,5 +210,5 @@ To enable the orchestrator, set `"enabled": true` on the `agent` tier. It is dis
 
 ## What's next?
 
-- [Creating Skills](docs:creating-skills) — teach ALF new abilities with auto-injection
-- [Setting Up Tiers](docs:tier-setup) — customize how ALF picks the right model
+- [Creating Skills](docs:creating-skills) - teach ALF new abilities with auto-injection
+- [Setting Up Tiers](docs:tier-setup) - customize how ALF picks the right model

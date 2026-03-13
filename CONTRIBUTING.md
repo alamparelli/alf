@@ -67,28 +67,28 @@ docker compose up --build
 
 ### Architecture patterns
 
-- **Provider interface** — all LLM interaction goes through `provider.Provider` and `provider.Classifier`
-- **Persistent subprocesses** — long-lived processes (Whisper, classifier) follow the same pattern: mutex, stdin/stdout JSON lines, auto-restart on crash, idle timeout
-- **Hybrid voice** — faster-whisper on x86, whisper.cpp (CGO) on arm64, auto-detected at build time
-- **Go-native inference** — ONNX embeddings run in-process via `onnxruntime_go` (no sidecar)
-- **Embedded core instructions** — `internal/memory/core.md` compiled into the binary via `go:embed`, injected first in every conversation
-- **Router is pure logic** — `internal/router/` builds prompts and parses responses, never spawns processes
-- **Signal system** — `internal/signal/` provides a Unix-socket server for Claude sessions to send Telegram messages/reactions. System tools (`cmd/signal`, `cmd/schedule-tools`) use this socket
-- **Unix user isolation** — Claude runs as uid 1001, config is read-only, tools are rx-only
+- **Provider interface** - all LLM interaction goes through `provider.Provider` and `provider.Classifier`
+- **Persistent subprocesses** - long-lived processes (Whisper, classifier) follow the same pattern: mutex, stdin/stdout JSON lines, auto-restart on crash, idle timeout
+- **Hybrid voice** - faster-whisper on x86, whisper.cpp (CGO) on arm64, auto-detected at build time
+- **Go-native inference** - ONNX embeddings run in-process via `onnxruntime_go` (no sidecar)
+- **Embedded core instructions** - `internal/memory/core.md` compiled into the binary via `go:embed`, injected first in every conversation
+- **Router is pure logic** - `internal/router/` builds prompts and parses responses, never spawns processes
+- **Signal system** - `internal/signal/` provides a Unix-socket server for Claude sessions to send Telegram messages/reactions. System tools (`cmd/signal`, `cmd/schedule-tools`) use this socket
+- **Unix user isolation** - Claude runs as uid 1001, config is read-only, tools are rx-only
 
 ### File organization
 
-- `cmd/` — entry points only, minimal logic (includes system tools: `schedule-tools`, `signal`)
-- `internal/` — all business logic, one package per domain
-- `scripts/` — deployment, release, and local dev automation (`dev-deploy.sh`, `dev-local.sh`, `release.sh`)
-- `internal/controlcenter/web/` — embedded web assets for Control Center (HTML, JS, CSS)
+- `cmd/` - entry points only, minimal logic (includes system tools: `schedule-tools`, `signal`)
+- `internal/` - all business logic, one package per domain
+- `scripts/` - deployment, release, and local dev automation (`dev-deploy.sh`, `dev-local.sh`, `release.sh`)
+- `internal/controlcenter/web/` - embedded web assets for Control Center (HTML, JS, CSS)
 
 ### Testing
 
 - Tests live next to the code they test (`foo.go` → `foo_test.go`)
 - Use table-driven tests where it makes sense
 - Mock at interfaces, not at implementation details
-- `internal/controlcenter/` has the most comprehensive test coverage — use it as a reference
+- `internal/controlcenter/` has the most comprehensive test coverage - use it as a reference
 
 ## Making changes
 
@@ -122,16 +122,16 @@ ALF currently supports Telegram. To add a new platform:
 
 1. Create `internal/<platform>/` with send/receive logic
 2. Add polling or webhook handler in `cmd/alf-daemon/main.go`
-3. Wire messages through the existing router — the classification and tier system is platform-agnostic
+3. Wire messages through the existing router - the classification and tier system is platform-agnostic
 4. Add platform-specific formatting in the new package (the router returns plain text)
 
 ## Adding a new tool
 
-There are two ways to add tools — one requires rebuilding the image, the other doesn't.
+There are two ways to add tools - one requires rebuilding the image, the other doesn't.
 
 ### User tools (no rebuild)
 
-Drop any executable (script, binary) into the `data/tools/` directory on your host. It's a mounted volume, so changes are immediate — no Docker rebuild needed.
+Drop any executable (script, binary) into the `data/tools/` directory on your host. It's a mounted volume, so changes are immediate - no Docker rebuild needed.
 
 ```sh
 # Example: add a shell script tool

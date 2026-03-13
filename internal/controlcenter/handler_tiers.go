@@ -13,7 +13,7 @@ type TiersHandler struct {
 	Notifier     Notifier
 	DataDir      string             // for tool discovery
 	ToolRegistry *tooling.Registry  // may be nil
-	ModelCache   *ModelCache        // may be nil — pre-fetched models per backend
+	ModelCache   *ModelCache        // may be nil - pre-fetched models per backend
 }
 
 // toolInfo describes an available tool for the frontend.
@@ -57,8 +57,8 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Build tool list: CLI tools + ALF tools.
 		tools := append([]toolInfo{}, cliTools...)
 		if h.ToolRegistry != nil {
-			// Native Go tools + user tools with JSON schemas — curated list only.
-			// Only tools with a JSON schema — LLMs need a definition to invoke them.
+			// Native Go tools + user tools with JSON schemas - curated list only.
+			// Only tools with a JSON schema - LLMs need a definition to invoke them.
 			for _, schema := range h.ToolRegistry.AllSchemas() {
 				tools = append(tools, toolInfo{Name: schema.Name, Desc: schema.Description, Source: "alf"})
 			}

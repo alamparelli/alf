@@ -50,7 +50,7 @@ main() {
         7f454c46) ;; # ELF
         cafebabe|feedface|feedfacf|cffaedfe|cefaedfe) ;; # Mach-O
         *)
-            echo "Download failed — invalid binary (got HTML or bad response)."
+            echo "Download failed - invalid binary (got HTML or bad response)."
             rm -rf "$tmpdir"
             exit 1
             ;;

@@ -32,7 +32,7 @@ Main daemon configuration.
 | Field | Description |
 |-------|-------------|
 | log_level | "info", "debug", or "warn" |
-| quiet_hours | { "start": 22, "end": 7 } — suppress notifications |
+| quiet_hours | { "start": 22, "end": 7 } - suppress notifications |
 | session_timeout | Minutes of inactivity before session reset |
 | system_prompt | Custom system prompt injected into all Claude calls |
 | git_track | Enable git tracking of data directory |
@@ -118,10 +118,10 @@ func RunInit() {
 
 	// Welcome
 	PrintBanner()
-	fmt.Println("  Welcome to ALF — your personal AI assistant running on your own server.")
+	fmt.Println("  Welcome to ALF - your personal AI assistant running on your own server.")
 	fmt.Println()
 	if prev.Dir != "" {
-		fmt.Println("  Previous setup detected — press Enter to keep existing values.")
+		fmt.Println("  Previous setup detected - press Enter to keep existing values.")
 	} else {
 		fmt.Println("  This wizard will guide you through the initial setup:")
 		fmt.Println()
@@ -157,9 +157,9 @@ func RunInit() {
 	botToken, botName, chatID := promptTelegram(reader, prev.BotToken, prev.ChatID)
 	telegramEnabled := botToken != "" && chatID != ""
 	if telegramEnabled {
-		PrintCheck(fmt.Sprintf("Telegram enabled — bot @%s, chat %s", botName, chatID))
+		PrintCheck(fmt.Sprintf("Telegram enabled - bot @%s, chat %s", botName, chatID))
 	} else {
-		PrintInfo("Telegram skipped — you can configure it later via the Control Center")
+		PrintInfo("Telegram skipped - you can configure it later via the Control Center")
 	}
 
 	// Step 4: Control Center access
@@ -582,7 +582,7 @@ func promptPort(reader *bufio.Reader, previous string) string {
 		PrintWarning(fmt.Sprintf("Port %s is already in use.", defaultPort))
 	}
 
-	// Port unavailable — ask for alternative
+	// Port unavailable - ask for alternative
 	for {
 		fmt.Print("  Enter an available port: ")
 		input, _ := reader.ReadString('\n')
@@ -748,7 +748,7 @@ func promptTimezone(reader *bufio.Reader, previous string) string {
 	}
 
 	if _, err := time.LoadLocation(input); err != nil {
-		PrintWarning(fmt.Sprintf("Invalid timezone %q — expected format like Europe/Paris or America/New_York", input))
+		PrintWarning(fmt.Sprintf("Invalid timezone %q - expected format like Europe/Paris or America/New_York", input))
 		PrintCheck(fmt.Sprintf("Using: %s", hint))
 		return hint
 	}
@@ -837,7 +837,7 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 		os.WriteFile(readmePath, []byte(configReadme), 0o644)
 	}
 
-	// Fix volume permissions last — after all files are written.
+	// Fix volume permissions last - after all files are written.
 	// chown to uid 1000 (node user inside container) so Docker volumes work.
 	fixVolumePermissions(dir)
 }
@@ -1027,13 +1027,13 @@ func promptKnownBackend(reader *bufio.Reader, dir string, opt backendOption, con
 			PrintCheck(fmt.Sprintf("Keeping existing %s key", opt.Key))
 			*configured = append(*configured, opt.Key)
 		} else {
-			PrintWarning(fmt.Sprintf("No %s API key provided — skipped", opt.Key))
+			PrintWarning(fmt.Sprintf("No %s API key provided - skipped", opt.Key))
 		}
 		return
 	}
 
 	if opt.KeyPrefix != "" && !strings.HasPrefix(key, opt.KeyPrefix) {
-		PrintWarning(fmt.Sprintf("Key doesn't start with %s — saving anyway", opt.KeyPrefix))
+		PrintWarning(fmt.Sprintf("Key doesn't start with %s - saving anyway", opt.KeyPrefix))
 	}
 	if err := SetSecret(dir, opt.SecretName, key); err != nil {
 		PrintError(fmt.Sprintf("Failed to save %s key: %v", opt.Key, err))
@@ -1048,7 +1048,7 @@ func promptCustomBackend(reader *bufio.Reader, dir string, configured *[]string)
 	name, _ := reader.ReadString('\n')
 	name = strings.TrimSpace(strings.ToLower(name))
 	if name == "" {
-		PrintWarning("No name provided — skipped")
+		PrintWarning("No name provided - skipped")
 		return
 	}
 
@@ -1056,7 +1056,7 @@ func promptCustomBackend(reader *bufio.Reader, dir string, configured *[]string)
 	baseURL, _ := reader.ReadString('\n')
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
-		PrintWarning("No base URL provided — skipped")
+		PrintWarning("No base URL provided - skipped")
 		return
 	}
 
@@ -1231,7 +1231,7 @@ func generateInitMagicLink(dir string) string {
 	tokenFile := filepath.Join(dir, "secrets", "cc_auth_token")
 	tokenBytes, err := os.ReadFile(tokenFile)
 	if err != nil || strings.TrimSpace(string(tokenBytes)) == "" {
-		PrintWarning("Could not read cc_auth_token — skipping magic link")
+		PrintWarning("Could not read cc_auth_token - skipping magic link")
 		return ""
 	}
 	token := strings.TrimSpace(string(tokenBytes))
@@ -1242,7 +1242,7 @@ func generateInitMagicLink(dir string) string {
 		"http://127.0.0.1:8080/api/magic-link?days=30")
 	out, err := cmd.Output()
 	if err != nil {
-		PrintWarning("Could not generate magic link — try: alf magic-link")
+		PrintWarning("Could not generate magic link - try: alf magic-link")
 		return ""
 	}
 
@@ -1250,7 +1250,7 @@ func generateInitMagicLink(dir string) string {
 		URL string `json:"url"`
 	}
 	if err := json.Unmarshal(out, &resp); err != nil || resp.URL == "" {
-		PrintWarning("Invalid magic link response — try: alf magic-link")
+		PrintWarning("Invalid magic link response - try: alf magic-link")
 		return ""
 	}
 	return resp.URL

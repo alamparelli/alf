@@ -75,7 +75,7 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 			return nil, err
 		}
 
-		// No tool calls — return text response.
+		// No tool calls - return text response.
 		if len(resp.ToolCalls) == 0 {
 			log.Printf("toolloop: no tool calls (finish=%s)\n--- model output ---\n%s\n--- end ---", resp.FinishReason, resp.Text)
 			return &Result{

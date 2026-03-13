@@ -18,7 +18,7 @@ function api(path, opts = {}) {
   const headers = { 'X-Requested-With': 'XMLHttpRequest', ...(opts.headers || {}) };
   return fetch(path, { ...opts, headers, credentials: 'same-origin' }).then(r => {
     if (r.status === 401) {
-      toast('Session expired — send /login to your bot', 'error');
+      toast('Session expired -send /login to your bot', 'error');
       throw new Error('401');
     }
     if (!r.ok && r.status !== 200) {
@@ -128,7 +128,7 @@ function navigateTo(view) {
   const terminalView = document.getElementById('terminalView');
   const settingsView = document.getElementById('settingsView');
 
-  // Update active nav item — docs:id should highlight the docs nav item
+  // Update active nav item -docs:id should highlight the docs nav item
   const navView = view.startsWith('docs:') ? 'docs' : (view.startsWith('page:') ? view : view);
   logsStopAutoRefresh();
   tasksStopAutoRefresh();
@@ -292,7 +292,7 @@ function esc(s) {
       itemsEl.innerHTML = data.items.map(item => {
         const icon = typeIcons[item.type] || 'activity';
         const badge = typeLabels[item.type] || item.type;
-        const elapsed = item.elapsed ? ' — ' + esc(item.elapsed) : '';
+        const elapsed = item.elapsed ? ' -' + esc(item.elapsed) : '';
         return '<div class="activity-item">' +
           '<i data-lucide="' + icon + '"></i>' +
           '<span class="activity-badge">' + esc(badge) + '</span>' +
@@ -302,7 +302,7 @@ function esc(s) {
       }).join('');
       lucide.createIcons();
     } catch (e) {
-      // silent — don't disrupt UI on transient errors
+      // silent -don't disrupt UI on transient errors
     }
   }
 
@@ -347,7 +347,7 @@ function esc(s) {
       isConfigured = !!data.configured;
       if (data.configured) {
         statusEl.innerHTML = '<div class="tg-status tg-connected"><i data-lucide="check-circle"></i> Connected' +
-          (data.bot_name ? ' — @' + esc(data.bot_name) : '') +
+          (data.bot_name ? ' -@' + esc(data.bot_name) : '') +
           (data.chat_id ? ' <span class="tg-detail">(chat ' + esc(data.chat_id) + ')</span>' : '') +
           '</div>';
         tokenInput.placeholder = data.bot_token_masked || '***';
@@ -1367,6 +1367,236 @@ function chatClearBadge() {
   if (navEl) navEl.classList.remove('has-badge');
 }
 
+// --- Chat Tabs ---
+// Each tab stores its own state. The "active" tab's state is the live global vars below.
+// On tab switch we snapshot globals → old tab, restore globals ← new tab.
+let chatTabList = []; // [{id, convId, title}]
+let chatActiveTabId = null;
+// DOM cache: tabId → { html, scrollTop }
+const chatTabDOMCache = {};
+
+function chatGenerateTabId() {
+  return 'tab-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function chatSaveTabs() {
+  localStorage.setItem('alf-chat-tabs', JSON.stringify(chatTabList));
+  localStorage.setItem('alf-chat-active-tab', chatActiveTabId || '');
+}
+
+function chatLoadTabs() {
+  try {
+    const raw = localStorage.getItem('alf-chat-tabs');
+    if (raw) chatTabList = JSON.parse(raw);
+  } catch { chatTabList = []; }
+  chatActiveTabId = localStorage.getItem('alf-chat-active-tab') || '';
+}
+
+// Snapshot current global chat state into DOM cache for the active tab.
+function chatSnapshotTab() {
+  if (!chatActiveTabId) return;
+  chatTabDOMCache[chatActiveTabId] = {
+    html: chatMessages.innerHTML,
+    scrollTop: chatMessages.scrollTop,
+    // Stream state -preserved so in-flight streams survive tab switches.
+    sending: chatSending,
+    jobId: chatJobId,
+    eventOffset: chatEventOffset,
+    historyLoaded: chatHistoryLoaded,
+  };
+}
+
+// Restore global state from DOM cache for a tab.
+function chatRestoreTab(tabId) {
+  const cached = chatTabDOMCache[tabId];
+  if (cached) {
+    chatMessages.innerHTML = cached.html;
+    chatMessages.scrollTop = cached.scrollTop;
+    chatSending = cached.sending || false;
+    chatJobId = cached.jobId || null;
+    chatEventOffset = cached.eventOffset || 0;
+    chatHistoryLoaded = cached.historyLoaded || false;
+  } else {
+    chatMessages.innerHTML = '';
+    chatSending = false;
+    chatJobId = null;
+    chatEventOffset = 0;
+    chatHistoryLoaded = false;
+  }
+  // Reset stream DOM refs (they belong to the old tab's DOM).
+  chatAssistantBubble = null;
+  chatFullText = '';
+  chatDoneData = null;
+  chatReaction = null;
+  chatStreamingText = false;
+  chatThinkingEl = null;
+  chatCurrentToolBlock = null;
+  chatCurrentToolInput = '';
+  chatAgentTracker = null;
+  chatAgentTrackerBody = null;
+  chatAgentStepCount = 0;
+  chatCurrentTier = '';
+  chatNeedNewBubble = false;
+}
+
+function chatRenderTabs() {
+  const list = document.getElementById('chatTabsList');
+  list.innerHTML = '';
+  chatTabList.forEach(tab => {
+    const el = document.createElement('button');
+    el.className = 'chat-tab' + (tab.id === chatActiveTabId ? ' active' : '');
+    el.dataset.tabId = tab.id;
+    const label = document.createElement('span');
+    label.className = 'chat-tab-label';
+    label.textContent = tab.title || 'New chat';
+    el.appendChild(label);
+    // Close button (only if more than 1 tab).
+    if (chatTabList.length > 1) {
+      const close = document.createElement('span');
+      close.className = 'chat-tab-close';
+      close.textContent = '\u00d7';
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        chatCloseTab(tab.id);
+      });
+      el.appendChild(close);
+    }
+    el.addEventListener('click', () => chatSwitchTab(tab.id));
+    el.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      chatRenameTab(tab.id, label);
+    });
+    list.appendChild(el);
+  });
+}
+
+function chatRenameTab(tabId, labelEl) {
+  const tab = chatTabList.find(t => t.id === tabId);
+  if (!tab) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'chat-tab-rename';
+  input.value = tab.title || '';
+  input.style.cssText = 'width:' + Math.max(60, labelEl.offsetWidth + 8) + 'px;font-size:inherit;padding:0 2px;border:1px solid var(--accent);border-radius:3px;background:var(--bg-input);color:var(--text);outline:none;';
+  labelEl.replaceWith(input);
+  input.focus();
+  input.select();
+  const commit = () => {
+    const val = input.value.trim();
+    if (val) tab.title = val;
+    chatRenderTabs();
+    chatSaveTabs();
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = tab.title || ''; input.blur(); }
+  });
+}
+
+function chatSwitchTab(tabId) {
+  if (tabId === chatActiveTabId) return;
+  chatSnapshotTab();
+  chatActiveTabId = tabId;
+  chatRestoreTab(tabId);
+  chatRenderTabs();
+  chatSaveTabs();
+  // Load history if not yet loaded for this tab.
+  const tab = chatTabList.find(t => t.id === tabId);
+  if (tab && !chatHistoryLoaded) {
+    chatLoadHistory();
+  }
+  // Check for active job in this conversation.
+  if (!chatSending) {
+    chatCheckActiveJob();
+  }
+  chatSetStopMode(chatSending);
+  chatInput.focus();
+}
+
+function chatCreateTab(convId, title) {
+  const id = chatGenerateTabId();
+  const tab = { id, convId: convId || '', title: title || 'New chat' };
+  chatTabList.push(tab);
+  chatRenderTabs();
+  chatSaveTabs();
+  return tab;
+}
+
+function chatCloseTab(tabId) {
+  if (chatTabList.length <= 1) return; // keep at least one
+  const idx = chatTabList.findIndex(t => t.id === tabId);
+  if (idx < 0) return;
+  chatTabList.splice(idx, 1);
+  delete chatTabDOMCache[tabId];
+  if (chatActiveTabId === tabId) {
+    // Switch to nearest tab.
+    const newIdx = Math.min(idx, chatTabList.length - 1);
+    chatActiveTabId = chatTabList[newIdx].id;
+    chatRestoreTab(chatActiveTabId);
+    if (!chatHistoryLoaded) chatLoadHistory();
+  }
+  chatRenderTabs();
+  chatSaveTabs();
+}
+
+async function chatNewTab() {
+  // Create a new session on the backend.
+  try {
+    const res = await api('/api/chat', { method: 'DELETE' });
+    const convId = res.conv_id || '';
+    chatSnapshotTab();
+    const tab = chatCreateTab(convId, 'New chat');
+    chatActiveTabId = tab.id;
+    chatMessages.innerHTML = '';
+    chatSending = false;
+    chatJobId = null;
+    chatEventOffset = 0;
+    chatHistoryLoaded = true; // new session = empty
+    chatRenderTabs();
+    chatSaveTabs();
+    chatClearStatus();
+    chatInput.focus();
+  } catch {
+    toast('Failed to create new chat', 'error');
+  }
+}
+
+// Update tab title from the first user message.
+function chatUpdateTabTitle(text) {
+  const tab = chatTabList.find(t => t.id === chatActiveTabId);
+  if (tab && tab.title === 'New chat' && text) {
+    tab.title = text.length > 40 ? text.slice(0, 40) + '...' : text;
+    chatRenderTabs();
+    chatSaveTabs();
+  }
+}
+
+// Get the conv_id for the current active tab.
+function chatActiveConvId() {
+  const tab = chatTabList.find(t => t.id === chatActiveTabId);
+  return (tab && tab.convId) || '';
+}
+
+// Initialize tabs on load.
+function chatInitTabs() {
+  chatLoadTabs();
+  if (!chatTabList.length) {
+    // First time -create default tab.
+    const tab = chatCreateTab('', 'New chat');
+    chatActiveTabId = tab.id;
+  }
+  // Ensure active tab exists.
+  if (!chatTabList.find(t => t.id === chatActiveTabId)) {
+    chatActiveTabId = chatTabList[0].id;
+  }
+  chatRenderTabs();
+}
+chatInitTabs();
+if (window.lucide) lucide.createIcons();
+
+document.getElementById('chatTabAdd').addEventListener('click', chatNewTab);
+
 // --- Chat ---
 let chatHistoryLoaded = false;
 let chatSending = false;
@@ -1400,7 +1630,9 @@ function chatSetStopMode(active) {
   if (window.lucide) lucide.createIcons();
 }
 function chatStopJob() {
-  fetch('/api/chat/job', { method: 'DELETE', credentials: 'same-origin' })
+  const convId = chatActiveConvId();
+  const url = '/api/chat/job' + (convId ? '?conv_id=' + encodeURIComponent(convId) : '');
+  fetch(url, { method: 'DELETE', credentials: 'same-origin' })
     .then(r => r.json())
     .then(() => {
       chatAppendBubble('assistant', 'Request cancelled.', { tier: 'system' });
@@ -1549,7 +1781,9 @@ function chatRenderMediaInBubble(bubble, mediaRefs) {
 function chatLoadHistory() {
   if (chatHistoryLoaded) return;
   chatHistoryLoaded = true;
-  fetch('/api/chat?limit=50', { credentials: 'same-origin' })
+  const convId = chatActiveConvId();
+  const url = '/api/chat?limit=50' + (convId ? '&conv_id=' + encodeURIComponent(convId) : '');
+  fetch(url, { credentials: 'same-origin' })
     .then(r => {
       if (r.status === 401) { toast('Session expired', 'error'); throw new Error('401'); }
       return r.json();
@@ -1567,7 +1801,9 @@ function chatLoadHistory() {
 // Check for in-flight background job on page load / reconnect.
 async function chatCheckActiveJob() {
   try {
-    const res = await fetch('/api/chat/job', { credentials: 'same-origin' });
+    const convId = chatActiveConvId();
+    const url = '/api/chat/job' + (convId ? '?conv_id=' + encodeURIComponent(convId) : '');
+    const res = await fetch(url, { credentials: 'same-origin' });
     const data = await res.json();
     if (data.active) {
       chatJobId = data.job_id;
@@ -1587,13 +1823,13 @@ async function chatStreamFromJob(jobId, offset) {
   try {
     const res = await fetch(url, { credentials: 'same-origin' });
     if (!res.ok) {
-      // Job gone (server restart, expired) — clean up.
+      // Job gone (server restart, expired) -clean up.
       chatJobId = null;
       return;
     }
     await chatProcessStream(res);
   } catch (e) {
-    // Network error — auto-reconnect after delay.
+    // Network error -auto-reconnect after delay.
     if (chatJobId) {
       await new Promise(r => setTimeout(r, 2000));
       if (chatJobId) return chatStreamFromJob(chatJobId, chatEventOffset);
@@ -1603,7 +1839,7 @@ async function chatStreamFromJob(jobId, offset) {
 
 const QUICK_REACTIONS = ['👍', '❤', '🔥', '😁', '🤔', '👎'];
 
-// Legacy state vars removed — see chatThinkingEl, chatCurrentToolBlock, chatAgentTracker below.
+// Legacy state vars removed -see chatThinkingEl, chatCurrentToolBlock, chatAgentTracker below.
 
 // --- Thinking blocks (legacy-style <details> disclosures) ---
 
@@ -2120,6 +2356,8 @@ function chatFinishSend() {
   chatAgentStepCount = 0;
   chatCurrentTier = '';
   chatNeedNewBubble = false;
+  // Snapshot after send completes so tab DOM cache is up to date.
+  chatSnapshotTab();
 }
 
 async function chatSend() {
@@ -2221,8 +2459,9 @@ async function chatSend() {
   chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Thinking...');
 
   try {
-    const payload = { message: text };
+    const payload = { message: text, conv_id: chatActiveConvId() };
     if (mediaIds.length) payload.media_ids = mediaIds;
+    chatUpdateTabTitle(text);
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2243,7 +2482,7 @@ async function chatSend() {
 
     await chatProcessStream(res);
   } catch (e) {
-    // Connection lost — try to reconnect to background job.
+    // Connection lost -try to reconnect to background job.
     if (chatJobId) {
       chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Reconnecting...');
       await chatStreamFromJob(chatJobId, chatEventOffset);
@@ -2264,8 +2503,8 @@ document.addEventListener('visibilitychange', () => {
 
 // --- Chat Commands ---
 const CHAT_COMMANDS = [
-  { name: '/clear', description: 'Clear chat and start fresh', icon: 'trash-2' },
-  { name: '/new', description: 'Start a new conversation', icon: 'refresh-cw' },
+  { name: '/clear', description: 'Clear current chat messages', icon: 'trash-2' },
+  { name: '/new', description: 'Open a new conversation tab', icon: 'plus' },
   { name: '/stop', description: 'Cancel the running request', icon: 'square' },
   { name: '/start', description: 'Re-run onboarding', icon: 'play' },
   { name: '/restart', description: 'Restart ALF daemon', icon: 'power' },
@@ -2339,37 +2578,31 @@ function chatExecCommand(cmd) {
 
   switch (cmd) {
     case '/help':
-      chatAppendBubble('assistant', 'Available commands:\n' + CHAT_COMMANDS.map(c => '**' + c.name + '** — ' + c.description).join('\n'), { tier: 'system' });
+      chatAppendBubble('assistant', 'Available commands:\n' + CHAT_COMMANDS.map(c => '**' + c.name + '** -' + c.description).join('\n'), { tier: 'system' });
       chatScrollBottom();
       break;
     case '/clear':
-      fetch('/api/chat', { method: 'DELETE', credentials: 'same-origin' })
-        .then(r => r.json())
-        .then(r => {
-          if (r.ok) {
-            chatMessages.innerHTML = '';
-          } else {
-            chatAppendBubble('assistant', 'Failed to clear chat.', { tier: 'system' });
-            chatScrollBottom();
-          }
-        })
-        .catch(() => { chatAppendBubble('assistant', 'Failed to clear chat.', { tier: 'system' }); chatScrollBottom(); });
+      chatMessages.innerHTML = '';
       break;
     case '/new':
-      fetch('/api/chat', { method: 'DELETE', credentials: 'same-origin' })
-        .then(r => r.json())
-        .then(r => {
-          chatAppendBubble('assistant', r.ok ? 'New session started.' : 'Failed to start new session.', { tier: 'system' });
-          chatScrollBottom();
-        })
-        .catch(() => { chatAppendBubble('assistant', 'Failed to start new session.', { tier: 'system' }); chatScrollBottom(); });
+      chatNewTab();
       break;
     case '/start':
       fetch('/api/chat?onboard=1', { method: 'DELETE', credentials: 'same-origin' })
         .then(r => r.json())
         .then(r => {
           if (r.ok) {
-            // Auto-trigger onboarding conversation.
+            const convId = r.conv_id || '';
+            chatSnapshotTab();
+            const tab = chatCreateTab(convId, 'Onboarding');
+            chatActiveTabId = tab.id;
+            chatMessages.innerHTML = '';
+            chatSending = false;
+            chatJobId = null;
+            chatEventOffset = 0;
+            chatHistoryLoaded = true;
+            chatRenderTabs();
+            chatSaveTabs();
             chatInput.value = 'hello';
             chatSend();
           } else {
@@ -2380,14 +2613,7 @@ function chatExecCommand(cmd) {
         .catch(() => { chatAppendBubble('assistant', 'Failed.', { tier: 'system' }); chatScrollBottom(); });
       break;
     case '/stop':
-      fetch('/api/chat/job', { method: 'DELETE', credentials: 'same-origin' })
-        .then(r => r.json())
-        .then(() => {
-          chatAppendBubble('assistant', 'Request cancelled.', { tier: 'system' });
-          chatScrollBottom();
-          if (chatSending) chatFinishSend();
-        })
-        .catch(() => { chatAppendBubble('assistant', 'Failed to cancel.', { tier: 'system' }); chatScrollBottom(); });
+      chatStopJob();
       break;
     case '/restart':
       if (!confirm('Restart ALF daemon?')) return;
@@ -2461,7 +2687,7 @@ chatInput.addEventListener('keydown', (e) => {
         chatExecCommand(cmd.name);
         return;
       }
-      // Dynamic commands (force tiers) are sent as regular messages — backend handles them.
+      // Dynamic commands (force tiers) are sent as regular messages -backend handles them.
     }
     chatSend();
   }
@@ -2781,7 +3007,7 @@ function schedulesLoad() {
 function schedulesRender() {
   const list = document.getElementById('schedulesList');
 
-  // Filter out internal system jobs — only show user/Alf-created ones.
+  // Filter out internal system jobs -only show user/Alf-created ones.
   let filtered = (schedulesCache || []).filter(j => !j.system);
 
   // Sort by next_run descending (soonest first, no next_run at bottom).
@@ -3126,7 +3352,7 @@ async function taskLauncherLoadTeams() {
     for (const t of teams) {
       const opt = document.createElement('option');
       opt.value = t.name;
-      opt.textContent = t.name + (t.description ? ' — ' + t.description : '');
+      opt.textContent = t.name + (t.description ? ' -' + t.description : '');
       sel.appendChild(opt);
     }
   } catch {}
@@ -3938,9 +4164,9 @@ function tiersRender() {
         '</div>' +
       '</div>' +
       '<div class="tier-card-details">' +
-        '<div class="tier-detail-row"><span class="tier-detail-label">Label</span><span class="tier-detail-value">' + esc(t.router_label || t.description || '—') + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">Label</span><span class="tier-detail-value">' + esc(t.router_label || t.description || '-') + '</span></div>' +
         '<div class="tier-detail-row"><span class="tier-detail-label">Tools</span><span class="tier-detail-value">' + esc(tools) + '</span></div>' +
-        '<div class="tier-detail-row"><span class="tier-detail-label">Effort</span><span class="tier-detail-value">' + esc(t.effort || '—') + '</span></div>' +
+        '<div class="tier-detail-row"><span class="tier-detail-label">Effort</span><span class="tier-detail-value">' + esc(t.effort || '-') + '</span></div>' +
         (t.max_turns ? '<div class="tier-detail-row"><span class="tier-detail-label">Max turns</span><span class="tier-detail-value">' + t.max_turns + '</span></div>' : '') +
         (t.max_iterations ? '<div class="tier-detail-row"><span class="tier-detail-label">Max iterations</span><span class="tier-detail-value">' + t.max_iterations + '</span></div>' : '') +
         (t.timeout_minutes ? '<div class="tier-detail-row"><span class="tier-detail-label">Timeout</span><span class="tier-detail-value">' + t.timeout_minutes + ' min</span></div>' : '') +
@@ -3978,20 +4204,20 @@ function tiersShowModal(tier) {
   const isWildcard = (t.tools || []).includes('*');
   const cliToolsList = AVAILABLE_TOOLS.filter(tool => tool.source === 'cli');
   const alfToolsList = AVAILABLE_TOOLS.filter(tool => tool.source === 'alf');
-  const wildcardCheck = '<label class="tier-tool-check tier-tool-wildcard"><input type="checkbox" id="tfToolsWildcard" value="*"' + (isWildcard ? ' checked' : '') + '> <strong>* (all tools)</strong> <span class="tier-tool-desc">— enable all available tools</span></label>';
+  const wildcardCheck = '<label class="tier-tool-check tier-tool-wildcard"><input type="checkbox" id="tfToolsWildcard" value="*"' + (isWildcard ? ' checked' : '') + '> <strong>* (all tools)</strong> <span class="tier-tool-desc">-enable all available tools</span></label>';
   const cliChecks = cliToolsList.map(tool => {
     const checked = !isWildcard && (t.tools || []).includes(tool.name) ? ' checked' : '';
-    return '<label class="tier-tool-check tier-tool-cli"><input type="checkbox" value="' + tool.name + '"' + checked + (isWildcard ? ' disabled' : '') + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">— ' + esc(tool.desc) + '</span></label>';
+    return '<label class="tier-tool-check tier-tool-cli"><input type="checkbox" value="' + tool.name + '"' + checked + (isWildcard ? ' disabled' : '') + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">-' + esc(tool.desc) + '</span></label>';
   }).join('');
   const alfChecks = alfToolsList.length ? alfToolsList.map(tool => {
     const checked = !isWildcard && (t.tools || []).includes(tool.name) ? ' checked' : '';
-    return '<label class="tier-tool-check tier-tool-alf"><input type="checkbox" value="' + tool.name + '"' + checked + (isWildcard ? ' disabled' : '') + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">— ' + esc(tool.desc) + '</span></label>';
+    return '<label class="tier-tool-check tier-tool-alf"><input type="checkbox" value="' + tool.name + '"' + checked + (isWildcard ? ' disabled' : '') + '> <strong>' + tool.name + '</strong> <span class="tier-tool-desc">-' + esc(tool.desc) + '</span></label>';
   }).join('') : '';
   const toolChecks = wildcardCheck +
     (cliChecks ? '<div class="tier-tools-group-label">CLI tools</div>' + cliChecks : '') +
     (alfChecks ? '<div class="tier-tools-group-label">ALF tools</div>' + alfChecks : '');
 
-  const effortOpts = ['', ...EFFORTS].map(e => '<option value="' + e + '"' + (t.effort === e ? ' selected' : '') + '>' + (e || '—') + '</option>').join('');
+  const effortOpts = ['', ...EFFORTS].map(e => '<option value="' + e + '"' + (t.effort === e ? ' selected' : '') + '>' + (e || '-') + '</option>').join('');
   const backendOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((t.backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
   // Initial model field: temporary placeholder, will be populated by fetchBackendModels after modal renders
   const modelPlaceholder = '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="Loading...">';
@@ -4206,19 +4432,19 @@ if (!localStorage.getItem('alf-welcomed')) {
   wb.innerHTML = '<div class="welcome-modal">' +
     '<div class="welcome-logo">ALF</div>' +
     '<h2>Welcome to your Control Center</h2>' +
-    '<p>This is your personal command hub — manage schedules, agent teams, tools, and more from here.</p>' +
+    '<p>This is your personal command hub -manage schedules, agent teams, tools, and more from here.</p>' +
     '<div class="welcome-steps">' +
       '<div class="welcome-step">' +
         '<span class="welcome-step-num">1</span>' +
-        '<span><strong>Say hello in the Chat</strong> — ALF will learn about you through a short onboarding conversation.</span>' +
+        '<span><strong>Say hello in the Chat</strong> -ALF will learn about you through a short onboarding conversation.</span>' +
       '</div>' +
       '<div class="welcome-step">' +
         '<span class="welcome-step-num">2</span>' +
-        '<span><strong>Explore the Docs</strong> — check the getting started guide to discover what ALF can do.</span>' +
+        '<span><strong>Explore the Docs</strong> -check the getting started guide to discover what ALF can do.</span>' +
       '</div>' +
       '<div class="welcome-step">' +
         '<span class="welcome-step-num">3</span>' +
-        '<span><strong>Make it yours</strong> — configure tiers, add skills, and connect your services in the Vault.</span>' +
+        '<span><strong>Make it yours</strong> -configure tiers, add skills, and connect your services in the Vault.</span>' +
       '</div>' +
     '</div>' +
     '<button class="btn btn-primary welcome-cta" id="welcomeStartBtn">Get started</button>' +
@@ -4639,7 +4865,7 @@ function terminalStart() {
     };
 
     ws.onclose = () => {
-      term.write('\r\n\x1b[90m[session ended — click New Session to reconnect]\x1b[0m\r\n');
+      term.write('\r\n\x1b[90m[session ended -click New Session to reconnect]\x1b[0m\r\n');
     };
 
     term.onData((data) => {
@@ -4667,7 +4893,7 @@ function terminalStart() {
 
 document.getElementById('termNewBtn').addEventListener('click', terminalStart);
 
-// URL action bar — shown when a long URL is detected in terminal output.
+// URL action bar -shown when a long URL is detected in terminal output.
 function termShowUrlBar(url) {
   let bar = document.getElementById('termUrlBar');
   if (bar) bar.remove();
@@ -4691,7 +4917,7 @@ function termShowUrlBar(url) {
 // --- Terminal input support ---
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 
-// Paste button — read clipboard and send to terminal.
+// Paste button -read clipboard and send to terminal.
 // Uses Clipboard API with fallback for mobile browsers that deny readText().
 document.getElementById('termPasteBtn').addEventListener('click', async () => {
   if (!termWS || termWS.readyState !== WebSocket.OPEN) return;
@@ -4711,7 +4937,7 @@ document.getElementById('termPasteBtn').addEventListener('click', async () => {
   toast('Paste into the input field below', 'info');
 });
 
-// Copy button — copy xterm selection to clipboard.
+// Copy button -copy xterm selection to clipboard.
 document.getElementById('termCopyBtn').addEventListener('click', async () => {
   if (!termInstance) return;
   const sel = termInstance.getSelection();
@@ -4720,7 +4946,7 @@ document.getElementById('termCopyBtn').addEventListener('click', async () => {
   }
 });
 
-// Mobile input bar — type/paste text and send with Enter or button.
+// Mobile input bar -type/paste text and send with Enter or button.
 const termInput = document.getElementById('termInput');
 const termSendBtn = document.getElementById('termSendBtn');
 
@@ -5069,11 +5295,11 @@ function vaultShowServiceModal(edit) {
   document.getElementById('vaultSvcSATokenUrl').value = '';
   document.getElementById('vaultSvcTLSSkip').checked = edit ? !!edit.tls_skip_verify : false;
   if (edit) {
-    document.getElementById('vaultSvcToken').placeholder = '(unchanged — leave empty to keep)';
-    document.getElementById('vaultSvcHeaderValue').placeholder = '(unchanged — leave empty to keep)';
-    document.getElementById('vaultSvcPassword').placeholder = '(unchanged — leave empty to keep)';
-    document.getElementById('vaultSvcOAuthClientSecret').placeholder = '(unchanged — leave empty to keep)';
-    document.getElementById('vaultSvcOAuthRefreshToken').placeholder = '(unchanged — leave empty to keep)';
+    document.getElementById('vaultSvcToken').placeholder = '(unchanged -leave empty to keep)';
+    document.getElementById('vaultSvcHeaderValue').placeholder = '(unchanged -leave empty to keep)';
+    document.getElementById('vaultSvcPassword').placeholder = '(unchanged -leave empty to keep)';
+    document.getElementById('vaultSvcOAuthClientSecret').placeholder = '(unchanged -leave empty to keep)';
+    document.getElementById('vaultSvcOAuthRefreshToken').placeholder = '(unchanged -leave empty to keep)';
   } else {
     document.getElementById('vaultSvcToken').placeholder = 'Bearer token';
     document.getElementById('vaultSvcHeaderValue').placeholder = 'Value';
@@ -5216,11 +5442,11 @@ async function vaultSaveService() {
   } else if (authType === 'oauth2_client') {
     const oauth2Mode = document.querySelector('.oauth2-tab.active')?.dataset.mode || 'manual';
     if (oauth2Mode === 'browser') {
-      // Browser flow is handled by vaultOAuth2StartFlow — nothing to save here.
+      // Browser flow is handled by vaultOAuth2StartFlow -nothing to save here.
       alert('Use the "Authorize in Browser" button for browser flow');
       return;
     }
-    // Manual mode — only send non-empty fields (edit leaves secrets empty to keep existing).
+    // Manual mode -only send non-empty fields (edit leaves secrets empty to keep existing).
     const cid = document.getElementById('vaultSvcOAuthClientId').value;
     const csec = document.getElementById('vaultSvcOAuthClientSecret').value;
     const turl = document.getElementById('vaultSvcOAuthTokenUrl').value;
@@ -5300,7 +5526,7 @@ async function vaultCreateToken() {
       body: JSON.stringify({ scope })
     });
     if (result.id) {
-      alert('Key created:\n' + result.id + '\n\nSave this — it won\'t be shown again.');
+      alert('Key created:\n' + result.id + '\n\nSave this -it won\'t be shown again.');
     }
     vaultLoadTokens();
   } catch (err) {
@@ -5530,7 +5756,7 @@ async function vaultDeleteFile(name) {
             const base = cmdInput.value.replace(/\s+--skill\s+\S+/, '').trim();
             cmdInput.value = base + ' --skill ' + btn.dataset.skill;
             picker.innerHTML = '';
-            toast('Selected "' + btn.dataset.skill + '" — click Scan & Review');
+            toast('Selected "' + btn.dataset.skill + '" -click Scan & Review');
           });
         });
         if (window.lucide) lucide.createIcons();
@@ -5546,7 +5772,7 @@ async function vaultDeleteFile(name) {
 
     document.getElementById('skillImportName').textContent = data.name;
     document.getElementById('skillImportSource').textContent = data.source;
-    document.getElementById('skillImportDesc').textContent = data.description || '—';
+    document.getElementById('skillImportDesc').textContent = data.description || '-';
 
     const badge = document.getElementById('skillImportVerdict');
     badge.textContent = data.verdict;
@@ -5616,7 +5842,7 @@ async function vaultDeleteFile(name) {
       });
       document.getElementById('skillImportContent').value = data.content;
       scanData.content = data.content;
-      toast('Skill corrected — review the changes before installing');
+      toast('Skill corrected -review the changes before installing');
     } catch (err) {
       toast(err.error || 'Correction failed', 'error');
     } finally {

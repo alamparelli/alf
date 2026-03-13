@@ -128,7 +128,7 @@ func TestTasksHandler_LaunchIsNonBlocking(t *testing.T) {
 
 	select {
 	case <-done:
-		// Good — returned before provider finished.
+		// Good - returned before provider finished.
 	case <-time.After(2 * time.Second):
 		t.Fatal("launch blocked waiting for orchestrator to complete")
 	}

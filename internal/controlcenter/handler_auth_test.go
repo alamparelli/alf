@@ -134,7 +134,7 @@ func TestAuthHandler_DoubleConsume(t *testing.T) {
 
 	code, _ := magic.Issue(100, 24*time.Hour)
 
-	// First consume — should succeed.
+	// First consume - should succeed.
 	req1 := httptest.NewRequest("GET", "/auth?code="+code, nil)
 	rec1 := httptest.NewRecorder()
 	h.ServeHTTP(rec1, req1)
@@ -142,7 +142,7 @@ func TestAuthHandler_DoubleConsume(t *testing.T) {
 		t.Errorf("first use: expected 303, got %d", rec1.Code)
 	}
 
-	// Second consume — should fail.
+	// Second consume - should fail.
 	req2 := httptest.NewRequest("GET", "/auth?code="+code, nil)
 	rec2 := httptest.NewRecorder()
 	h.ServeHTTP(rec2, req2)

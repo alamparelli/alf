@@ -10,19 +10,19 @@ How ALF remembers context within a conversation, and when to start fresh.
 
 ## What is a session?
 
-Every time you chat with ALF, you're inside a **session**. A session is like a thread — ALF remembers what you said earlier and keeps the context flowing.
+Every time you chat with ALF, you're inside a **session**. A session is like a thread - ALF remembers what you said earlier and keeps the context flowing.
 
 For example:
 - You: "Review this code"
 - ALF: reviews the code
 - You: "Now fix the bug you found"
-- ALF knows which bug you mean — same session.
+- ALF knows which bug you mean - same session.
 
 Sessions also keep **skills active**. If you ask ALF to draft a tweet, the X/Twitter skill loads and stays active for the rest of the session. Follow-up messages like "schedule it" still have access to the skill.
 
 ## Context across backends
 
-ALF preserves conversation context even when switching between different LLM backends (Claude CLI, OpenRouter, Ollama, etc.). A unified conversation store captures rich message history — including tool calls and their results — so the next LLM knows what was done regardless of which provider handled the previous message.
+ALF preserves conversation context even when switching between different LLM backends (Claude CLI, OpenRouter, Ollama, etc.). A unified conversation store captures rich message history - including tool calls and their results - so the next LLM knows what was done regardless of which provider handled the previous message.
 
 - **API tiers** (OpenRouter, Ollama): conversation history is sent as structured messages in the API request
 - **CLI tiers with active session**: Claude's built-in `--resume` provides richer context (preferred when available)
@@ -54,7 +54,7 @@ Type `/new` in Telegram or CC Chat to manually end your session and start fresh.
 
 ### Start fresh when you switch topics
 
-If you just finished debugging code and now want to plan your week — type `/new` first. Without it, ALF carries over the code context, wasting space and potentially confusing the response.
+If you just finished debugging code and now want to plan your week - type `/new` first. Without it, ALF carries over the code context, wasting space and potentially confusing the response.
 
 ### Use /new before complex tasks
 
@@ -68,11 +68,11 @@ Big tasks (architecture review, long writing, multi-step automation) need contex
 - Skills (auto-loaded when triggered again)
 - All your files and tools
 
-Think of it as closing a browser tab — your bookmarks and history are still there.
+Think of it as closing a browser tab - your bookmarks and history are still there.
 
 ### Let natural sessions flow
 
-You don't need to `/new` after every message. Sessions are useful — they let you have back-and-forth conversations, iterate on drafts, and build on previous context.
+You don't need to `/new` after every message. Sessions are useful - they let you have back-and-forth conversations, iterate on drafts, and build on previous context.
 
 A good rhythm:
 - One session per task or topic
@@ -106,5 +106,5 @@ The skill clears from the session. Next time you mention a trigger keyword, it r
 
 ## What's next?
 
-- [Getting Started](docs:getting-started) — ALF setup and overview
-- [Creating Skills](docs:creating-skills) — teach ALF new abilities
+- [Getting Started](docs:getting-started) - ALF setup and overview
+- [Creating Skills](docs:creating-skills) - teach ALF new abilities

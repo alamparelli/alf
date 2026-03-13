@@ -263,7 +263,7 @@ func TestStoreConvIDResumesFromDisk(t *testing.T) {
 	cid := s1.ConvID(ch)
 	s1.Append(Message{ID: "p1", ConvID: cid, Channel: ch, Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "hi"}}})
 
-	// Reload from disk — should resume the same conv ID.
+	// Reload from disk - should resume the same conv ID.
 	s2 := NewStore(dir)
 	if s2.ConvID(ch) != cid {
 		t.Errorf("expected convID %q after reload, got %q", cid, s2.ConvID(ch))

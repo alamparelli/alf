@@ -67,18 +67,18 @@ type ChatService struct {
 	Classify     ClassifyFunc         // injected router
 	ResolveModel ResolveModelFunc     // injected model resolver
 	Provider     provider.Provider    // injected Claude provider (default)
-	Registry     *provider.Registry   // may be nil — multi-backend dispatch
-	Recaller     MemoryRecaller       // may be nil — auto-injects relevant memories
-	SkillStore   skills.Store         // may be nil — injects skill catalog into system prompts
-	Orchestrator  *agents.Orchestrator        // may be nil — multi-agent orchestrator
-	ConvStore     *conversation.Store         // may be nil — unified conversation store (Phase 1: parallel write)
-	ToolRegistry  *tooling.Registry           // may be nil — tool schemas for API agentic loop
-	ToolExecutor  *tooling.Executor           // may be nil — tool subprocess runner
+	Registry     *provider.Registry   // may be nil - multi-backend dispatch
+	Recaller     MemoryRecaller       // may be nil - auto-injects relevant memories
+	SkillStore   skills.Store         // may be nil - injects skill catalog into system prompts
+	Orchestrator  *agents.Orchestrator        // may be nil - multi-agent orchestrator
+	ConvStore     *conversation.Store         // may be nil - unified conversation store (Phase 1: parallel write)
+	ToolRegistry  *tooling.Registry           // may be nil - tool schemas for API agentic loop
+	ToolExecutor  *tooling.Executor           // may be nil - tool subprocess runner
 	mu            sync.Mutex                  // serialize Claude calls (single user v1)
 
-	// Background job tracking.
-	activeJob *chatJob
-	jobMu     sync.Mutex
+	// Background job tracking - one active job per conversation.
+	activeJobs map[string]*chatJob // conv_id → job
+	jobMu      sync.Mutex
 
 	// Upload registry: upload_id → UploadEntry
 	uploads   map[string]*UploadEntry
@@ -97,6 +97,7 @@ type ChatRequest struct {
 	ReplyTo  string   `json:"reply_to,omitempty"`
 	MediaIDs []string `json:"media_ids,omitempty"`
 	Model    string   `json:"model,omitempty"` // force specific tier/model
+	ConvID   string   `json:"conv_id,omitempty"` // conversation tab ID (empty = default)
 }
 
 // ChatDoneData is sent with the "done" event.
@@ -160,6 +161,7 @@ func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, 
 		ResolveModel: resolveModel,
 		Provider:     prov,
 		uploads:      make(map[string]*UploadEntry),
+		activeJobs:   make(map[string]*chatJob),
 	}
 	// Start upload cleanup goroutine.
 	go cs.cleanupUploads()
@@ -214,6 +216,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		Role:      "user",
 		Text:      req.Message,
 		Timestamp: time.Now(),
+		ConvID:    req.ConvID,
 		ReplyTo:   req.ReplyTo,
 		Media:     cs.resolveMediaRefs(req.MediaIDs),
 	}
@@ -322,7 +325,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		}
 	}
 
-	// During onboarding, force a capable tier — direct responses and
+	// During onboarding, force a capable tier - direct responses and
 	// instant tiers are too weak for the onboarding conversation.
 	// During onboarding, force a capable conversational tier.
 	// The lowest-priority tier (e.g. haiku) is too weak for multi-turn onboarding.
@@ -345,6 +348,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			Role:      "assistant",
 			Text:      routeResult.Response,
 			Timestamp: time.Now(),
+			ConvID:    req.ConvID,
 			Model:     "router",
 			Tier:      "router",
 		}
@@ -383,7 +387,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	})
 
 	// Agent dispatch: delegate to multi-agent coordinator.
-	// The orchestrator brain is delegation-only — it does NOT need core/soul/toolbox
+	// The orchestrator brain is delegation-only - it does NOT need core/soul/toolbox
 	// prompts which contain file-writing instructions meant for conversational mode.
 	// Only inject memory recall and skill catalog.
 	if tierName == "agent" && cs.Orchestrator != nil {
@@ -455,6 +459,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			Role:      "assistant",
 			Text:      orchResult,
 			Timestamp: time.Now(),
+			ConvID:    req.ConvID,
 			Model:     "agent",
 			Tier:      "agent",
 			CostUSD:   orchMeta.TotalCost,
@@ -531,10 +536,10 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			}
 		}
 	}
-	// Reaction instruction — CC doesn't use Telegram reactions but keeps the [[react:]] tag
+	// Reaction instruction - CC doesn't use Telegram reactions but keeps the [[react:]] tag
 	// for emoji acknowledgment parsing by the daemon.
 	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
-	// Tool reminder at end of context — model pays more attention to recent prompts.
+	// Tool reminder at end of context - model pays more attention to recent prompts.
 	if reminder := memory.ToolReminder(cs.ContextDir); reminder != "" {
 		sysPromptTexts = append(sysPromptTexts, reminder)
 	}
@@ -724,6 +729,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		Role:      "assistant",
 		Text:      cleanText,
 		Timestamp: time.Now(),
+		ConvID:    req.ConvID,
 		Model:     result.Model,
 		Tier:      tierName,
 		CostUSD:   result.CostUSD,
@@ -816,32 +822,51 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 }
 
 // NewSession archives the current API chat session and optionally triggers onboarding.
-func (cs *ChatService) NewSession(onboard bool) string {
+// Returns (oldSessionID, newConvID).
+func (cs *ChatService) NewSession(onboard bool) (string, string) {
 	old := cs.Sessions.Archive(apiChatID)
+	var newConvID string
 	if cs.ConvStore != nil {
 		cs.ConvStore.NewConversation(conversation.ChannelCC)
+		newConvID = cs.ConvStore.ConvID(conversation.ChannelCC)
+	}
+	if newConvID == "" {
+		newConvID = NewMessageID() // fallback if ConvStore is nil
 	}
 	if onboard {
 		memory.SetOnboarding(cs.ContextDir)
 	} else {
 		memory.ClearOnboarding(cs.ContextDir)
 	}
-	return old
+	return old, newConvID
 }
 
-// History returns paginated chat history.
-func (cs *ChatService) History(limit int, before time.Time) []ChatMessage {
+// CurrentConvID returns the active conversation ID for the CC channel.
+func (cs *ChatService) CurrentConvID() string {
+	if cs.ConvStore != nil {
+		return cs.ConvStore.ConvID(conversation.ChannelCC)
+	}
+	return ""
+}
+
+// History returns paginated chat history, optionally filtered by conversation.
+func (cs *ChatService) History(limit int, before time.Time, convID string) []ChatMessage {
 	if limit <= 0 {
 		limit = 50
 	}
 	if limit > 200 {
 		limit = 200
 	}
-	msgs := cs.ChatStore.History(limit, before)
+	msgs := cs.ChatStore.History(limit, before, convID)
 	if msgs == nil {
 		return []ChatMessage{}
 	}
 	return msgs
+}
+
+// Conversations returns all known conversation summaries.
+func (cs *ChatService) Conversations() []ConversationInfo {
+	return cs.ChatStore.Conversations()
 }
 
 // buildPrompt constructs the full prompt from a ChatRequest.
@@ -863,12 +888,12 @@ func (cs *ChatService) buildPrompt(req ChatRequest) string {
 		}
 		switch {
 		case media.IsImageContent(entry.MimeType):
-			parts = append(parts, fmt.Sprintf("[PHOTO — use Read tool to view: %s]", entry.TempPath))
+			parts = append(parts, fmt.Sprintf("[PHOTO - use Read tool to view: %s]", entry.TempPath))
 		case media.IsVideoContent(entry.MimeType, entry.FileName):
 			if len(entry.FramePaths) > 0 {
-				parts = append(parts, fmt.Sprintf("[VIDEO \"%s\" — contact sheet with key frames. Use Read tool to view: %s]", entry.FileName, strings.Join(entry.FramePaths, ", ")))
+				parts = append(parts, fmt.Sprintf("[VIDEO \"%s\" - contact sheet with key frames. Use Read tool to view: %s]", entry.FileName, strings.Join(entry.FramePaths, ", ")))
 			} else {
-				parts = append(parts, fmt.Sprintf("[VIDEO \"%s\" — use Read tool to view: %s]", entry.FileName, entry.TempPath))
+				parts = append(parts, fmt.Sprintf("[VIDEO \"%s\" - use Read tool to view: %s]", entry.FileName, entry.TempPath))
 			}
 			if entry.Transcript != "" {
 				parts = append(parts, fmt.Sprintf("[Audio transcript: %s]", entry.Transcript))
@@ -879,10 +904,10 @@ func (cs *ChatService) buildPrompt(req ChatRequest) string {
 			if entry.TextContent != "" {
 				parts = append(parts, fmt.Sprintf("[FILE: %s]\nContent:\n%s", entry.FileName, entry.TextContent))
 			} else {
-				parts = append(parts, fmt.Sprintf("[FILE: %s — use Read tool to view: %s]", entry.FileName, entry.TempPath))
+				parts = append(parts, fmt.Sprintf("[FILE: %s - use Read tool to view: %s]", entry.FileName, entry.TempPath))
 			}
 		default:
-			parts = append(parts, fmt.Sprintf("[FILE: %s — use Read tool to view: %s]", entry.FileName, entry.TempPath))
+			parts = append(parts, fmt.Sprintf("[FILE: %s - use Read tool to view: %s]", entry.FileName, entry.TempPath))
 		}
 	}
 
@@ -1260,17 +1285,25 @@ const recallDistanceThreshold = 1.2
 const recallLimit = 3
 
 // StartJob launches Ask in a background goroutine and returns the job for streaming.
-// If a job is already running, returns it for reconnection.
+// If a job is already running for the same conversation, returns it for reconnection.
 func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
+	convID := req.ConvID
 	cs.jobMu.Lock()
-	if j := cs.activeJob; j != nil && !j.isDone() {
+	if j := cs.activeJobs[convID]; j != nil && !j.isDone() {
 		cs.jobMu.Unlock()
 		return j
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	job := newChatJob(cancel)
-	cs.activeJob = job
+	job.ConvID = convID
+	cs.activeJobs[convID] = job
+	// Prune completed jobs from other conversations.
+	for k, j := range cs.activeJobs {
+		if j.isDone() && k != convID {
+			delete(cs.activeJobs, k)
+		}
+	}
 	cs.jobMu.Unlock()
 
 	go func() {
@@ -1283,12 +1316,12 @@ func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
 	return job
 }
 
-// ActiveJob returns the current in-flight job, or nil if none.
-func (cs *ChatService) ActiveJob() *chatJob {
+// ActiveJob returns the current in-flight job for a conversation, or nil if none.
+func (cs *ChatService) ActiveJob(convID string) *chatJob {
 	cs.jobMu.Lock()
 	defer cs.jobMu.Unlock()
-	if cs.activeJob != nil && !cs.activeJob.isDone() {
-		return cs.activeJob
+	if j := cs.activeJobs[convID]; j != nil && !j.isDone() {
+		return j
 	}
 	return nil
 }
@@ -1297,10 +1330,25 @@ func (cs *ChatService) ActiveJob() *chatJob {
 func (cs *ChatService) GetJob(id string) *chatJob {
 	cs.jobMu.Lock()
 	defer cs.jobMu.Unlock()
-	if cs.activeJob != nil && cs.activeJob.ID == id {
-		return cs.activeJob
+	for _, j := range cs.activeJobs {
+		if j.ID == id {
+			return j
+		}
 	}
 	return nil
+}
+
+// ActiveJobs returns all currently running jobs across all conversations.
+func (cs *ChatService) ActiveJobs() []*chatJob {
+	cs.jobMu.Lock()
+	defer cs.jobMu.Unlock()
+	var jobs []*chatJob
+	for _, j := range cs.activeJobs {
+		if !j.isDone() {
+			jobs = append(jobs, j)
+		}
+	}
+	return jobs
 }
 
 func recallMemories(recaller MemoryRecaller, message string) string {

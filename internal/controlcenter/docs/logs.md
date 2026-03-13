@@ -44,13 +44,13 @@ The log auto-scrolls to the bottom so you always see the latest entries.
 
 ALF logs everything about its operation:
 
-- **Router decisions** — which tier was picked for each message and why
-- **Provider calls** — Claude CLI invocations, timeouts, errors
-- **Scheduler activity** — job starts, completions, failures
-- **Agent orchestration** — task delegation, agent progress, results
-- **Firewall events** — blocked requests (when in enforce mode)
-- **Session management** — new sessions, expirations, evictions
-- **Config changes** — tier reloads, hot-reload events
+- **Router decisions** - which tier was picked for each message and why
+- **Provider calls** - Claude CLI invocations, timeouts, errors
+- **Scheduler activity** - job starts, completions, failures
+- **Agent orchestration** - task delegation, agent progress, results
+- **Firewall events** - blocked requests (when in enforce mode)
+- **Session management** - new sessions, expirations, evictions
+- **Config changes** - tier reloads, hot-reload events
 
 ## Useful search patterns
 
@@ -80,5 +80,5 @@ Try reducing to 200 lines and using the search filter to find what you need. The
 
 ## What's next
 
-- [Firewall](firewall.md) — check the firewall request log for network-level debugging
-- [Getting Started](getting-started.md) — overview of all ALF features
+- [Firewall](firewall.md) - check the firewall request log for network-level debugging
+- [Getting Started](getting-started.md) - overview of all ALF features

@@ -563,6 +563,18 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 				executor := &toolExecutorAdapter{exec: cs.ToolExecutor}
 				prov = provider.NewToolLoop(apiProv, executor, tools, maxTurns)
 				log.Printf("[chat-api] tool loop enabled: %d tools, max_turns=%d", len(schemas), maxTurns)
+				toolNames := make([]string, len(schemas))
+				for i, s := range schemas {
+					toolNames[i] = s.Name
+				}
+				toolInstruction := fmt.Sprintf(
+					"You have access to the following tools: %s.\n"+
+						"IMPORTANT: You MUST call the appropriate tool for every action. "+
+						"Never simulate, assume, or hallucinate the result of a tool call. "+
+						"Always invoke the tool and wait for the actual result before responding.",
+					strings.Join(toolNames, ", "),
+				)
+				sysPromptTexts = append([]string{toolInstruction}, sysPromptTexts...)
 			}
 		}
 	}

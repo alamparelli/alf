@@ -543,11 +543,11 @@ func main() {
 	chatService.ConvStore = convStore
 	toolRegistry := tooling.NewRegistry(dataDir)
 	nativeTools := []tooling.NativeTool{
-		tooling.BashNativeTool{},
-		tooling.GrepNativeTool{},
-		tooling.GlobNativeTool{},
-		tooling.ReadFileNativeTool{},
-		tooling.WriteFileNativeTool{},
+		tooling.BashNativeTool{DataDir: dataDir},
+		tooling.GrepNativeTool{DataDir: dataDir},
+		tooling.GlobNativeTool{DataDir: dataDir},
+		tooling.ReadFileNativeTool{DataDir: dataDir},
+		tooling.WriteFileNativeTool{DataDir: dataDir},
 	}
 	toolExecutor := &tooling.Executor{
 		DataDir: dataDir,
@@ -1757,6 +1757,18 @@ func main() {
 						}
 						tierProv = provider.NewToolLoop(apiProv, &tgToolExecutorAdapter{exec: chatService.ToolExecutor}, tools, maxTurns)
 						log.Printf("[chat:%d] tool loop enabled: %d tools, max_turns=%d", chatID, len(schemas), maxTurns)
+						toolNames := make([]string, len(schemas))
+						for i, s := range schemas {
+							toolNames[i] = s.Name
+						}
+						toolInstruction := fmt.Sprintf(
+							"You have access to the following tools: %s.\n"+
+								"IMPORTANT: You MUST call the appropriate tool for every action. "+
+								"Never simulate, assume, or hallucinate the result of a tool call. "+
+								"Always invoke the tool and wait for the actual result before responding.",
+							strings.Join(toolNames, ", "),
+						)
+						sysPromptTexts = append([]string{toolInstruction}, sysPromptTexts...)
 					}
 				}
 			}

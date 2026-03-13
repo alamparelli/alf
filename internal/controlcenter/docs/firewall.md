@@ -10,7 +10,7 @@ Control which external domains ALF can reach from inside the container.
 
 ## Why a firewall?
 
-ALF runs Claude Code inside a Docker container. Claude can make HTTP requests — fetching APIs, installing packages, calling webhooks. The firewall sits between Claude and the internet, letting you see and control every outbound connection.
+ALF runs Claude Code inside a Docker container. Claude can make HTTP requests - fetching APIs, installing packages, calling webhooks. The firewall sits between Claude and the internet, letting you see and control every outbound connection.
 
 Think of it as a bouncer for network traffic. You decide who gets through.
 
@@ -18,7 +18,7 @@ Think of it as a bouncer for network traffic. You decide who gets through.
 
 1. Open the **Firewall** tab in the sidebar.
 2. You'll see two sections: **Rules** (empty by default) and **Request Log**.
-3. The mode starts as **Log Only** — nothing is blocked, but every request is recorded.
+3. The mode starts as **Log Only** - nothing is blocked, but every request is recorded.
 4. Watch the log fill up as ALF works. You'll see which domains Claude contacts.
 5. Add rules to allow or deny specific domains.
 
@@ -52,13 +52,13 @@ Each rule has two parts:
 |---------|---------|---------------|
 | `api.telegram.org` | `api.telegram.org` | `telegram.org`, `web.telegram.org` |
 | `*.github.com` | `api.github.com`, `raw.github.com` | `github.com` (no subdomain) |
-| `*` | Everything | — |
+| `*` | Everything | - |
 
 ### Rule order matters
 
 Rules are evaluated in order. Put specific rules first, broad rules last.
 
-**Example — allow only essential services:**
+**Example - allow only essential services:**
 
 | # | Pattern | Action |
 |---|---------|--------|
@@ -70,7 +70,7 @@ Rules are evaluated in order. Put specific rules first, broad rules last.
 
 This blocks everything except Anthropic APIs, Telegram, GitHub, and npm.
 
-**Example — block a specific domain:**
+**Example - block a specific domain:**
 
 | # | Pattern | Action |
 |---|---------|--------|
@@ -89,7 +89,7 @@ Each entry shows:
 | **Time** | When the request was made |
 | **Method** | HTTP method (`GET`, `POST`, `CONNECT` for HTTPS) |
 | **Host** | Target domain |
-| **Path** | URL path (HTTP only — HTTPS shows `CONNECT`) |
+| **Path** | URL path (HTTP only - HTTPS shows `CONNECT`) |
 | **Status** | Response status code, or `403` if blocked |
 | **Blocked** | Whether the request was denied |
 
@@ -101,7 +101,7 @@ Use the **Clear** button (trash icon) to wipe the log.
 
 1. Click **Add Rule** to create a new rule.
 2. Enter the domain pattern and select allow or deny.
-3. Rules appear in the list — drag to reorder, click to edit, delete with the trash icon.
+3. Rules appear in the list - drag to reorder, click to edit, delete with the trash icon.
 4. Click the mode toggle to switch between Log Only and Enforce.
 
 Changes save automatically and take effect immediately. No restart needed.
@@ -110,8 +110,8 @@ Changes save automatically and take effect immediately. No restart needed.
 
 The firewall is an HTTP proxy running on port `4751` inside the container. Claude Code's outbound traffic is routed through it via the `HTTP_PROXY` and `HTTPS_PROXY` environment variables.
 
-- **HTTP requests** — the proxy inspects the `Host` header, matches rules, and either forwards or blocks.
-- **HTTPS requests** — the proxy handles `CONNECT` tunnels at the domain level. It does **not** perform TLS interception (no MITM). It can only see the target domain, not the request path or body.
+- **HTTP requests** - the proxy inspects the `Host` header, matches rules, and either forwards or blocks.
+- **HTTPS requests** - the proxy handles `CONNECT` tunnels at the domain level. It does **not** perform TLS interception (no MITM). It can only see the target domain, not the request path or body.
 
 Configuration is stored in `config.d/firewall.json`:
 
@@ -138,9 +138,9 @@ No. It only sees the domain name for HTTPS connections. Request paths, headers, 
 Yes. Go to **Home > Workspace**, navigate to `config.d/firewall.json`, and edit the JSON. Changes are picked up on next reload.
 
 **What if I lock myself out?**
-If you accidentally block Anthropic's API, ALF won't be able to respond. Switch back to **Log Only** mode from the Control Center UI — the UI doesn't go through the proxy.
+If you accidentally block Anthropic's API, ALF won't be able to respond. Switch back to **Log Only** mode from the Control Center UI - the UI doesn't go through the proxy.
 
 ## What's next
 
-- [Setting Up Tiers](tier-setup.md) — control which models ALF uses
-- [Getting Started](getting-started.md) — overview of all ALF features
+- [Setting Up Tiers](tier-setup.md) - control which models ALF uses
+- [Getting Started](getting-started.md) - overview of all ALF features

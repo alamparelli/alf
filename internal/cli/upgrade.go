@@ -30,10 +30,10 @@ func RunUpgrade(currentVersion string) {
 	// Migrate config from data/config/ to config.d/ if needed.
 	migrateConfigDir(dir)
 
-	// Fix volume ownership — previous versions ran as root, now runs as alf (uid 1000).
+	// Fix volume ownership - previous versions ran as root, now runs as alf (uid 1000).
 	fixVolumePermissions(dir)
 
-	// Fix secret file permissions — previous versions wrote 0o644 (world-readable).
+	// Fix secret file permissions - previous versions wrote 0o644 (world-readable).
 	HardenSecrets(dir)
 
 	// Ensure optional secret files exist (even empty) so docker-compose
@@ -139,7 +139,7 @@ func selfUpdate(currentVersion string) bool {
 }
 
 func fixVolumePermissions(dir string) {
-	// macOS Docker Desktop uses VirtioFS — handles permission mapping automatically.
+	// macOS Docker Desktop uses VirtioFS - handles permission mapping automatically.
 	if runtime.GOOS != "linux" {
 		return
 	}
@@ -176,7 +176,7 @@ func migrateConfigDir(dir string) {
 	configD := filepath.Join(dir, "config.d")
 	oldConfigDir := filepath.Join(dir, "data", "config")
 
-	// Check if config.d already has config.json — no migration needed.
+	// Check if config.d already has config.json - no migration needed.
 	if _, err := os.Stat(filepath.Join(configD, "config.json")); err == nil {
 		return
 	}
@@ -249,7 +249,7 @@ func copyDir(src, dst string) error {
 func regenerateCompose(dir string) {
 	profile := loadSetupProfile()
 	if profile.Dir == "" {
-		// No saved profile — can't regenerate.
+		// No saved profile - can't regenerate.
 		return
 	}
 

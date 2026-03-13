@@ -89,7 +89,7 @@ func BuildInjection(matched []*Skill) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("=== [ACTIVE SKILLS — YOU MUST USE THESE] ===\n")
+	sb.WriteString("=== [ACTIVE SKILLS - YOU MUST USE THESE] ===\n")
 	sb.WriteString("The following skills are active for this conversation.\n")
 	sb.WriteString("MANDATORY: Read each skill's SKILL.md file NOW and follow its instructions.\n")
 	sb.WriteString("Do NOT claim you cannot do something if an active skill provides the capability.\n\n")

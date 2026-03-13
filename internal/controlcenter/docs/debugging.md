@@ -23,11 +23,11 @@ Fields: `→ MODEL DURATIONms TURNSt $COST sid:SESSION_SHORT_ID`
 ```
 
 **Log levels:**
-- `ERROR` — requires attention
-- `WARN` — may need investigation
-- `→` — response summary
-- `[chat-api]` prefix — Control Center web chat
-- No prefix — Telegram bot
+- `ERROR` - requires attention
+- `WARN` - may need investigation
+- `→` - response summary
+- `[chat-api]` prefix - Control Center web chat
+- No prefix - Telegram bot
 
 ---
 
@@ -143,8 +143,8 @@ cat logs/scheduler/*/*.txt 2>/dev/null | head -100
 ```
 Common causes:
 - Prompt too complex for the tier's `max_turns` setting
-- Skill not providing enough structure — the model wastes turns figuring out what to do
-- Missing tools — the model loops trying alternative approaches
+- Skill not providing enough structure - the model wastes turns figuring out what to do
+- Missing tools - the model loops trying alternative approaches
 
 Fix: simplify the prompt, increase `max_turns` in the tier config, or add targeted skills.
 

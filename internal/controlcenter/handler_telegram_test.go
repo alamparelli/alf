@@ -56,7 +56,7 @@ func TestTelegramHandler_PutEmptyBody(t *testing.T) {
 }
 
 func TestTelegramHandler_Delete(t *testing.T) {
-	h := &TelegramHandler{} // nil vault — delete is a no-op but should return 200
+	h := &TelegramHandler{} // nil vault - delete is a no-op but should return 200
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/telegram", nil)
 	w := httptest.NewRecorder()

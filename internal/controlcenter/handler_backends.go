@@ -125,8 +125,8 @@ func (mc *ModelCache) refreshAll() {
 }
 
 // BackendsModelsHandler serves the available models for a specific backend.
-// GET /api/backends/{name}/models          — return cached models
-// POST /api/backends/{name}/models/refresh — force refresh
+// GET /api/backends/{name}/models          - return cached models
+// POST /api/backends/{name}/models/refresh - force refresh
 type BackendsModelsHandler struct {
 	Registry *provider.Registry
 	Cache    *ModelCache
@@ -142,7 +142,7 @@ func (h *BackendsModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	name := parts[0]
 
-	// POST .../refresh — force refresh a single backend
+	// POST .../refresh - force refresh a single backend
 	if r.Method == http.MethodPost && len(parts) >= 3 && parts[2] == "refresh" {
 		if h.Cache != nil {
 			go h.Cache.RefreshBackend(name)

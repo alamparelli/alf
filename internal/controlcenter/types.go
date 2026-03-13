@@ -26,7 +26,7 @@ type Config struct {
 	AllowedChatIDs []int64    `json:"allowed_chat_ids"`
 	SystemPrompt   string     `json:"system_prompt"`
 	QuietHours     QuietHours `json:"quiet_hours"`
-	SessionTimeout   int        `json:"session_timeout"`    // minutes, 0 = use default (30)
+	SessionTimeout   int        `json:"session_timeout"`    // minutes, 0 = no timeout
 	GitTrack         bool       `json:"git_track"`          // enable git tracking of data dir
 	GitSweepInterval int        `json:"git_sweep_interval"` // minutes between auto-commits, 0 = disabled
 	AutoUpdateCheck         bool `json:"auto_update_check"`          // check for Docker image updates periodically
@@ -116,7 +116,7 @@ type TiersConfig struct {
 func DefaultTiersConfig() *TiersConfig {
 	var cfg TiersConfig
 	if err := json.Unmarshal(defaultTiersJSON, &cfg); err != nil {
-		// Should never happen — embedded file is validated at build time.
+		// Should never happen - embedded file is validated at build time.
 		panic("controlcenter: invalid embedded tiers.json: " + err.Error())
 	}
 	return &cfg

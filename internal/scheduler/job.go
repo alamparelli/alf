@@ -85,7 +85,7 @@ func (s *Store) Load() error {
 }
 
 // Save writes non-system jobs to disk using atomic rename.
-// System jobs are transient — re-registered at every boot via RegisterSystem.
+// System jobs are transient - re-registered at every boot via RegisterSystem.
 func (s *Store) Save() error {
 	s.mu.RLock()
 	var userJobs []*Job

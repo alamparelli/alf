@@ -268,7 +268,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			DataDir:       taskDir,
 			Effort:        orchEffort,
 			MaxTurns:      orchMaxTurns,
-			// No tools for orchestrator brain — it must only produce JSON delegation output.
+			// No tools for orchestrator brain - it must only produce JSON delegation output.
 			// Tools are for sub-agents, not the coordinator.
 		}
 
@@ -299,16 +299,16 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			iterDur.Milliseconds(), result.CostUSD, len(result.Text), truncate(result.SessionID, 12))
 		log.Printf("[orchestrator] raw output: %s", truncate(result.Text, 300))
 
-		// Detect orchestrator turn limit — retry a limited number of times.
+		// Detect orchestrator turn limit - retry a limited number of times.
 		if strings.Contains(result.Text, "Turn limit reached") {
 			turnLimitRetries++
 			if turnLimitRetries > maxTurnLimitRetries {
-				log.Printf("[orchestrator] ✗ orchestrator hit turn limit %d times — aborting", turnLimitRetries)
+				log.Printf("[orchestrator] ✗ orchestrator hit turn limit %d times - aborting", turnLimitRetries)
 				meta.Status = "failed"
 				o.saveMeta(taskDir, meta)
-				return "", meta, fmt.Errorf("orchestrator repeatedly hit turn limit (%d retries) — try increasing max_turns in the orchestrator tier config", maxTurnLimitRetries)
+				return "", meta, fmt.Errorf("orchestrator repeatedly hit turn limit (%d retries) - try increasing max_turns in the orchestrator tier config", maxTurnLimitRetries)
 			}
-			log.Printf("[orchestrator] ⚠ orchestrator hit turn limit (%d/%d retries) — clearing session", turnLimitRetries, maxTurnLimitRetries)
+			log.Printf("[orchestrator] ⚠ orchestrator hit turn limit (%d/%d retries) - clearing session", turnLimitRetries, maxTurnLimitRetries)
 			sm.Clear(orchestratorKey)
 			prompt = userMessage
 			continue
@@ -317,7 +317,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		// Parse orchestrator output.
 		output := parseOrchestratorOutput(result.Text)
 
-		// Final response — done.
+		// Final response - done.
 		if output.Response != "" {
 			log.Printf("[orchestrator] ✓ final response received (%d chars)", len(output.Response))
 			meta.Status = "completed"
@@ -331,7 +331,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			return output.Response, meta, nil
 		}
 
-		// No delegates and no response — treat as empty iteration.
+		// No delegates and no response - treat as empty iteration.
 		if len(output.Delegates) == 0 {
 			// Detect repeated identical non-JSON output (e.g. model error loops).
 			if result.Text == lastRawOutput {
@@ -341,14 +341,14 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 				lastRawOutput = result.Text
 			}
 			if consecutiveNonJSON >= maxConsecutiveNonJSON {
-				log.Printf("[orchestrator] ✗ brain returned same non-JSON output %d times — aborting: %s",
+				log.Printf("[orchestrator] ✗ brain returned same non-JSON output %d times - aborting: %s",
 					consecutiveNonJSON, truncate(result.Text, 200))
 				meta.Status = "failed"
 				o.saveMeta(taskDir, meta)
 				return "", meta, fmt.Errorf("orchestrator brain error (repeated %d times): %s",
 					consecutiveNonJSON, truncate(result.Text, 200))
 			}
-			log.Printf("[orchestrator] ⚠ no delegates and no response — nudging")
+			log.Printf("[orchestrator] ⚠ no delegates and no response - nudging")
 			prompt = `{"agent_results": [], "note": "No delegates provided. Either delegate to agents or provide a final response."}`
 			continue
 		}
@@ -754,7 +754,7 @@ func parseOrchestratorOutput(text string) OrchestratorOutput {
 parse:
 	var out OrchestratorOutput
 	if err := json.Unmarshal([]byte(jsonStr), &out); err != nil {
-		// Not valid JSON — do NOT treat as response; force re-delegation.
+		// Not valid JSON - do NOT treat as response; force re-delegation.
 		log.Printf("[orchestrator] ⚠ output is not valid JSON, will nudge for proper delegation")
 		return OrchestratorOutput{} // empty = triggers nudge loop
 	}

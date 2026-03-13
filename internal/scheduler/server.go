@@ -109,7 +109,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		// Reminder mode: --message is mutually exclusive with --prompt, --command, --tier.
 		if req.Message != "" {
 			if req.Prompt != "" || req.Command != "" || req.Tier != "" {
-				resp.Error = "--message is a direct push notification — cannot be combined with --prompt, --command, or --tier"
+				resp.Error = "--message is a direct push notification - cannot be combined with --prompt, --command, or --tier"
 				break
 			}
 			var timeout time.Duration

@@ -11,7 +11,7 @@ import (
 
 // fileTierStore implements TierStore with hot-reload support.
 type fileTierStore struct {
-	pathVal atomic.Value // stores string — use Path()/SetPath() accessors
+	pathVal atomic.Value // stores string - use Path()/SetPath() accessors
 	mu      sync.RWMutex
 	current atomic.Pointer[TiersConfig]
 }

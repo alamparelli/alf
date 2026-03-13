@@ -48,7 +48,7 @@ func (a *Accumulator) processEvent(event provider.StreamEvent) {
 	switch event.Type {
 	case "thinking":
 		if event.Text != "" {
-			// Thinking delta — accumulate.
+			// Thinking delta - accumulate.
 			if !a.inThinking {
 				a.flushText()
 				a.inThinking = true
@@ -82,7 +82,7 @@ func (a *Accumulator) processEvent(event provider.StreamEvent) {
 		a.curToolInput.WriteString(event.Text)
 
 	case "tool_result":
-		// Tool result — finalize the tool_use block and add tool_result.
+		// Tool result - finalize the tool_use block and add tool_result.
 		toolID := event.Detail
 		if a.curToolName != "" {
 			if a.curToolID == "" {
@@ -108,7 +108,7 @@ func (a *Accumulator) processEvent(event provider.StreamEvent) {
 		})
 
 	case "block_stop":
-		// Generic block stop — flush any pending state.
+		// Generic block stop - flush any pending state.
 		a.flushThinking()
 		a.flushText()
 	}

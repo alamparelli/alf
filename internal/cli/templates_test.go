@@ -90,7 +90,7 @@ func TestSeedBundledAgentsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Seed again — should NOT overwrite.
+	// Seed again - should NOT overwrite.
 	if err := SeedBundledAgents(dir); err != nil {
 		t.Fatal(err)
 	}

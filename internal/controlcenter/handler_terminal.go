@@ -19,7 +19,7 @@ import (
 type TerminalHandler struct {
 	AuthToken     string
 	Sessions      *SessionStore
-	AllowedOrigin string // e.g. "https://cc.lamparelli.eu" — restricts WebSocket origin
+	AllowedOrigin string // e.g. "https://cc.lamparelli.eu" - restricts WebSocket origin
 }
 
 func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +59,7 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		homeDir = d
 	}
 	cmd.Dir = homeDir
-	// Build a safe environment — exclude daemon secrets (OAuth tokens, API keys, etc.).
+	// Build a safe environment - exclude daemon secrets (OAuth tokens, API keys, etc.).
 	env := termSafeEnv(homeDir)
 	cmd.Env = env
 

@@ -35,7 +35,7 @@ func BuildContext(messages []Message, maxMessages int) []Message {
 		for _, b := range m.Blocks {
 			switch b.Type {
 			case BlockThinking:
-				// Drop thinking blocks entirely — they're internal.
+				// Drop thinking blocks entirely - they're internal.
 				continue
 			case BlockToolResult:
 				// Truncate old tool results.

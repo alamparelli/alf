@@ -362,7 +362,7 @@ func (rl *RunLog) RecentAll(limit int) []RunRecord {
 
 // sortRecords sorts records by StartedAt descending (newest first).
 func sortRecords(recs []RunRecord) {
-	// Simple insertion sort — records are already mostly sorted per-file.
+	// Simple insertion sort - records are already mostly sorted per-file.
 	for i := 1; i < len(recs); i++ {
 		for j := i; j > 0 && recs[j].StartedAt.After(recs[j-1].StartedAt); j-- {
 			recs[j], recs[j-1] = recs[j-1], recs[j]

@@ -18,7 +18,7 @@ ALF runs in a Docker container. The `data/` volume is persistent across restarts
 | `~/data/apps/` | Yes (volume) | App directories served at `/apps/<name>` |
 | `~/data/skills/` | Yes (volume) | Custom skills (SKILL.md folders) |
 | `~/data/context/` | Yes (volume) | Context files injected into every conversation |
-| `~/data/tools.d/` | Yes (volume) | Symlinks to system tools — auto-generated, do not edit |
+| `~/data/tools.d/` | Yes (volume) | Symlinks to system tools - auto-generated, do not edit |
 | `~/data/skills.d/` | Read-only mount | Bundled skills (read-only copy) |
 | `~/data/config.d/` | Read-only mount | Configuration (tiers.json, config.json, agents/) |
 
@@ -35,7 +35,7 @@ SCRIPT
 chmod +x ~/data/tools/my-tool
 ```
 
-Your tool is now available immediately — both `~/data/tools/` and `~/data/tools.d/` are in ALF's PATH, so you can call it by name:
+Your tool is now available immediately - both `~/data/tools/` and `~/data/tools.d/` are in ALF's PATH, so you can call it by name:
 
 ```bash
 my-tool --help
@@ -97,13 +97,13 @@ HTML
 ### App rules
 
 **Security (Content Security Policy):**
-- No external scripts — `<script src="https://...">` is blocked
-- No inline event handlers — `onclick="..."` is blocked. Use `addEventListener()` instead
-- No external stylesheets — `<link rel="stylesheet" href="https://...">` is blocked
+- No external scripts - `<script src="https://...">` is blocked
+- No inline event handlers - `onclick="..."` is blocked. Use `addEventListener()` instead
+- No external stylesheets - `<link rel="stylesheet" href="https://...">` is blocked
 - Fetch/XHR is restricted to same origin (`/api/*` endpoints work fine)
 
 **CSS:**
-- All CSS must be in `<style>` blocks (inline) — external stylesheets are blocked
+- All CSS must be in `<style>` blocks (inline) - external stylesheets are blocked
 - Use CC theme variables to match the current theme automatically:
 
 | Variable | What it styles |
@@ -115,7 +115,7 @@ HTML
 | `var(--border)` | Border and divider color |
 | `var(--bg-card)` | Card/panel background |
 
-- Avoid using the `.empty` class name — it conflicts with CC internals
+- Avoid using the `.empty` class name - it conflicts with CC internals
 
 **Other limits:**
 - Maximum file size: 5MB
@@ -176,13 +176,13 @@ npm install -g --silent typescript
 nohup python3 ~/data/tools/my-api serve &
 ```
 
-> **Do not** put `apt install` commands in bootstrap.sh — it runs as a non-root user. Use `config.d/packages.txt` instead.
+> **Do not** put `apt install` commands in bootstrap.sh - it runs as a non-root user. Use `config.d/packages.txt` instead.
 
 ### Rules
 
 1. Use quiet/non-interactive flags (`--quiet`, `-y`, `-qq`, `--silent`)
-2. Append new lines — do not overwrite existing content
-3. bootstrap.sh runs as user `alf` — no `sudo`, no `apt`
+2. Append new lines - do not overwrite existing content
+3. bootstrap.sh runs as user `alf` - no `sudo`, no `apt`
 4. If bootstrap fails, the daemon still starts (warnings logged)
 
 ## What survives a rebuild
@@ -200,5 +200,5 @@ nohup python3 ~/data/tools/my-api serve &
 
 ## What's next?
 
-- [Creating Skills](docs:creating-skills) — full guide on skill creation
-- [Tools Reference](docs:tools-reference) — built-in CLI tools
+- [Creating Skills](docs:creating-skills) - full guide on skill creation
+- [Tools Reference](docs:tools-reference) - built-in CLI tools

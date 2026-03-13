@@ -31,7 +31,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/vault")
 	path = strings.TrimPrefix(path, "/")
 
-	// Routes that need a valid admin token — auto-recover if revoked.
+	// Routes that need a valid admin token - auto-recover if revoked.
 	needsAuth := path != "" && path != "status" && path != "unlock" && path != "reset" && path != "oauth2/callback"
 	if needsAuth {
 		if err := h.Manager.EnsureAuth(); err != nil {
@@ -254,7 +254,7 @@ func (h *VaultHandler) handleRevokeToken(w http.ResponseWriter, _ *http.Request,
 }
 
 func (h *VaultHandler) handleReset(w http.ResponseWriter, r *http.Request) {
-	// Lock first if unlocked (ignore errors — may already be locked).
+	// Lock first if unlocked (ignore errors - may already be locked).
 	c := h.Manager.Client()
 	_ = c.Lock()
 	if err := h.Manager.Reset(); err != nil {
@@ -348,7 +348,7 @@ func (h *VaultHandler) handleDeleteFile(w http.ResponseWriter, _ *http.Request, 
 
 func (h *VaultHandler) handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
 	// Proxy the Google OAuth2 callback to vault-server.
-	// This is a browser redirect — no auth token, just query params (code, state).
+	// This is a browser redirect - no auth token, just query params (code, state).
 	addr := h.Manager.Addr()
 	proxyURL := addr + "/auth/oauth2/callback?" + r.URL.RawQuery
 	resp, err := http.Get(proxyURL)

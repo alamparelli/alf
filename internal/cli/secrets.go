@@ -15,7 +15,7 @@ type Secret struct {
 }
 
 // SecretRegistry lists all secrets ALF knows about.
-// Add new entries here as ALF grows — `alf secret list` picks them up automatically.
+// Add new entries here as ALF grows - `alf secret list` picks them up automatically.
 var SecretRegistry = []Secret{
 	{Name: "telegram_bot_token", Description: "Telegram bot token from @BotFather", Required: false},
 	{Name: "telegram_chat_id", Description: "Your Telegram chat ID", Required: false},

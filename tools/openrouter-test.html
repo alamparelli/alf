@@ -533,16 +533,16 @@ function analyzeResponse(data, withTools, model, elapsed) {
     verdictEl.textContent = 'REAL tool calls via API';
   } else if (hasRealToolCalls && hasHallucinated) {
     verdictEl.className = 'verdict fake';
-    verdictEl.textContent = 'MIXED -real tool_calls + hallucinated text';
+    verdictEl.textContent = 'MIXED - real tool_calls + hallucinated text';
   } else if (hasHallucinated) {
     verdictEl.className = 'verdict fake';
-    verdictEl.textContent = 'HALLUCINATED -faked tool calls in text';
+    verdictEl.textContent = 'HALLUCINATED - faked tool calls in text';
   } else if (!text && !hasRealToolCalls) {
     verdictEl.className = 'verdict error';
     verdictEl.textContent = 'EMPTY RESPONSE';
   } else {
     verdictEl.className = 'verdict none';
-    verdictEl.textContent = 'TEXT ONLY -no tool calls';
+    verdictEl.textContent = 'TEXT ONLY - no tool calls';
   }
 
   addHistory(model, verdictEl.textContent, elapsed);

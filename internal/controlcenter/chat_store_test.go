@@ -103,7 +103,7 @@ func TestChatStore_History(t *testing.T) {
 	}
 
 	// History before the 3rd message → should return first 2.
-	msgs := store.History(10, now.Add(2*time.Minute))
+	msgs := store.History(10, now.Add(2*time.Minute), "")
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2, got %d", len(msgs))
 	}
@@ -112,7 +112,7 @@ func TestChatStore_History(t *testing.T) {
 	}
 
 	// History with limit.
-	msgs = store.History(1, time.Time{})
+	msgs = store.History(1, time.Time{}, "")
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 with limit, got %d", len(msgs))
 	}

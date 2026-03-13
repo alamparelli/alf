@@ -6,13 +6,13 @@ order: 3
 
 # Configuration Reference
 
-All runtime settings live in `config.d/config.json`. Edit them via **Settings → Configuration** in the Control Center — changes take effect immediately without restarting.
+All runtime settings live in `config.d/config.json`. Edit them via **Settings → Configuration** in the Control Center - changes take effect immediately without restarting.
 
 ## How to edit
 
-**Option 1 — Settings tab (recommended).** Open **Settings** in the sidebar. The Configuration card shows all fields in a JSON editor with live validation.
+**Option 1 - Settings tab (recommended).** Open **Settings** in the sidebar. The Configuration card shows all fields in a JSON editor with live validation.
 
-**Option 2 — Workspace.** Go to **Home → Workspace**, navigate to `config.d/config.json`, and edit directly.
+**Option 2 - Workspace.** Go to **Home → Workspace**, navigate to `config.d/config.json`, and edit directly.
 
 ---
 
@@ -30,7 +30,7 @@ All runtime settings live in `config.d/config.json`. Edit them via **Settings �
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `session_timeout` | int (minutes) | `30` | Inactivity timeout before a conversation session expires. `0` = use default (30 min). |
+| `session_timeout` | int (minutes) | `30` | Inactivity timeout before a conversation session expires. `0` = no timeout (sessions never expire). |
 | `max_sessions` | int | `2` | Maximum concurrent sessions per user. `0` = use default (2). |
 
 See [Managing Conversations](docs:sessions) for details on session lifecycle.
@@ -44,7 +44,7 @@ See [Managing Conversations](docs:sessions) for details on session lifecycle.
 | `tiers_file` | string | `"tiers.json"` | Filename (or absolute path) of the active tiers configuration. Relative paths are resolved inside `config.d/`. Change this to switch between tier profiles without modifying the default file. |
 | `tiers_timeout` | int (seconds) | `300` | Maximum execution time for Claude tier invocations. `0` = use default (300 s). |
 
-**Example — switching to an alternate tier profile:**
+**Example - switching to an alternate tier profile:**
 ```json
 {
   "tiers_file": "tiers-minimal.json"
@@ -65,7 +65,7 @@ Quiet hours prevent ALF from responding during a defined window. Useful for supp
 | `quiet_hours.start` | int (hour, 0–23) | `0` | Start of the quiet window (inclusive). |
 | `quiet_hours.end` | int (hour, 0–23) | `0` | End of the quiet window (exclusive). `0`/`0` = disabled. |
 
-**Example — silence from 23:00 to 07:00:**
+**Example - silence from 23:00 to 07:00:**
 ```json
 {
   "quiet_hours": { "start": 23, "end": 7 }
@@ -148,7 +148,7 @@ See [Backends & Models](docs:backends) for full setup instructions.
 
 ## What's next?
 
-- [Setting Up Tiers](docs:tier-setup) — configure models, routing, and tier profiles
-- [Backends & Models](docs:backends) — connect Ollama, OpenRouter, or any OpenAI-compatible API
-- [Schedules](docs:schedules) — automate recurring tasks
-- [Vault](docs:vault) — store API keys and secrets securely
+- [Setting Up Tiers](docs:tier-setup) - configure models, routing, and tier profiles
+- [Backends & Models](docs:backends) - connect Ollama, OpenRouter, or any OpenAI-compatible API
+- [Schedules](docs:schedules) - automate recurring tasks
+- [Vault](docs:vault) - store API keys and secrets securely

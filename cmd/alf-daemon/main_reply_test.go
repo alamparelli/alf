@@ -32,7 +32,7 @@ func TestExtractReplyContext(t *testing.T) {
 			msg: &Message{
 				Text: "hello",
 				ReplyToMessage: &Message{
-					Text: "a" + string(make([]byte, 600)), // 601 chars — no longer truncated
+					Text: "a" + string(make([]byte, 600)), // 601 chars - no longer truncated
 				},
 			},
 			want: "a" + string(make([]byte, 600)), // extractReplyContext returns full text

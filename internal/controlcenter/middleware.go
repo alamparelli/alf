@@ -45,7 +45,7 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 					clientIP(r), r.Method, r.URL.Path, auth != "", len(auth), len(token))
 			}
 
-			// Show login page only for root path — all other unauthenticated paths get 401.
+			// Show login page only for root path - all other unauthenticated paths get 401.
 			if (r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/apps/")) && strings.Contains(r.Header.Get("Accept"), "text/html") {
 				renderLoginPage(w)
 				return
@@ -63,7 +63,7 @@ func renderLoginPage(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>ALF Control Center — Login</title>
+<html><head><meta charset="utf-8"><title>ALF Control Center - Login</title>
 <style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
 .box{text-align:center;padding:2rem 3rem;border:1px solid #333;border-radius:8px;max-width:420px}
 h2{margin-bottom:.5rem}code{background:#2d2d44;padding:.2em .5em;border-radius:4px;font-size:1.1em}
@@ -110,7 +110,7 @@ func jsonMiddleware(next http.Handler) http.Handler {
 // csrfMiddleware requires a X-Requested-With header on state-changing requests.
 // HTML forms cannot set custom headers, so this prevents cross-site form submissions.
 // JavaScript from allowed origins can set this header, and CORS preflight enforces the origin check.
-// Same-origin requests (verified via Referer) are also allowed — this covers CC apps
+// Same-origin requests (verified via Referer) are also allowed - this covers CC apps
 // served at /apps/* which have their own JS context without the fetch override.
 func csrfMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

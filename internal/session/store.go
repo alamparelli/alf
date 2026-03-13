@@ -21,7 +21,7 @@ type Entry struct {
 }
 
 // Store manages per-chat Claude session IDs with timeout-based expiry.
-// Session IDs come from the Claude CLI — this store only persists them.
+// Session IDs come from the Claude CLI - this store only persists them.
 type Store struct {
 	dir     string
 	timeout time.Duration
@@ -51,7 +51,7 @@ func (s *Store) Get(chatID int64) string {
 	if !ok {
 		return ""
 	}
-	if time.Since(e.LastActive) >= s.timeout {
+	if s.timeout > 0 && time.Since(e.LastActive) >= s.timeout {
 		delete(s.entries, chatID)
 		s.persist()
 		return ""
@@ -158,7 +158,7 @@ func (s *Store) Context(chatID int64) (lastTier string, msgCount int) {
 	if !ok {
 		return "", 0
 	}
-	if time.Since(e.LastActive) >= s.timeout {
+	if s.timeout > 0 && time.Since(e.LastActive) >= s.timeout {
 		return "", 0
 	}
 	return e.LastTier, e.MessageCount
@@ -173,7 +173,7 @@ func (s *Store) ContextFull(chatID int64) (lastTier, lastBackend string, msgCoun
 	if !ok {
 		return "", "", 0
 	}
-	if time.Since(e.LastActive) >= s.timeout {
+	if s.timeout > 0 && time.Since(e.LastActive) >= s.timeout {
 		return "", "", 0
 	}
 	return e.LastTier, e.LastBackend, e.MessageCount
@@ -232,7 +232,7 @@ func (s *Store) GetSkills(chatID int64) []string {
 	if !ok {
 		return nil
 	}
-	if time.Since(e.LastActive) >= s.timeout {
+	if s.timeout > 0 && time.Since(e.LastActive) >= s.timeout {
 		return nil
 	}
 	return e.ActiveSkills

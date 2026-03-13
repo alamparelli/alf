@@ -232,7 +232,7 @@ func isTableSeparator(line string) bool {
 	if !strings.Contains(trimmed, "|") || !strings.Contains(trimmed, "-") {
 		return false
 	}
-	// Remove pipes, dashes, colons, and spaces — should leave nothing.
+	// Remove pipes, dashes, colons, and spaces - should leave nothing.
 	inner := strings.ReplaceAll(trimmed, "|", "")
 	inner = strings.ReplaceAll(inner, "-", "")
 	inner = strings.ReplaceAll(inner, ":", "")

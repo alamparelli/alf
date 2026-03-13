@@ -18,7 +18,7 @@ Every tool MUST follow these conventions:
 chmod +x ~/data/tools/{tool-name}
 ```
 
-Tools are in PATH — callable by name immediately after creation. No restart needed.
+Tools are in PATH - callable by name immediately after creation. No restart needed.
 
 ### 2. Shebang line (REQUIRED)
 
@@ -68,7 +68,7 @@ if "--help" in sys.argv:
 - Exit 0 on success, non-zero on failure
 - Print errors to stderr: `echo "Error: message" >&2`
 - Validate required arguments before doing work
-- Fail fast — check preconditions at the top
+- Fail fast - check preconditions at the top
 
 ```bash
 #!/bin/bash
@@ -86,7 +86,7 @@ fi
 - Normal output goes to stdout (so it can be piped)
 - Progress/status messages go to stderr
 - JSON output for structured data (use `jq` for formatting)
-- Keep output concise — no decorative banners or emojis
+- Keep output concise - no decorative banners or emojis
 
 ```bash
 # Good: pipeable output
@@ -182,7 +182,7 @@ Create `~/data/tools/{tool-name}.json` alongside the tool binary:
 - **`x-positional`**: Array of field names that become positional CLI args (in order). All other fields become `--key value` flags.
 - **`required`**: Only truly mandatory fields (e.g. the subcommand). Optional fields are omitted from required.
 - **Boolean fields**: `true` emits `--flag` (no value), `false` omits the flag entirely.
-- **Enum fields**: Use `enum` to constrain valid values — helps weaker models pick correct options.
+- **Enum fields**: Use `enum` to constrain valid values - helps weaker models pick correct options.
 
 #### How it works
 
@@ -247,7 +247,7 @@ Before delivering:
 
 - Do NOT create tools outside `~/data/tools/`
 - Do NOT require `apt install` for the tool to work (use `config.d/packages.txt` for system deps)
-- Do NOT create wrapper scripts around single commands — just tell the user the command
-- Do NOT hardcode paths that might change — use `$HOME`, `$ALF_DATA_DIR`
+- Do NOT create wrapper scripts around single commands - just tell the user the command
+- Do NOT hardcode paths that might change - use `$HOME`, `$ALF_DATA_DIR`
 - Do NOT create tools that duplicate existing system tools (check `--help` first)
-- Do NOT store API keys, tokens, or credentials anywhere — use `vault proxy`
+- Do NOT store API keys, tokens, or credentials anywhere - use `vault proxy`

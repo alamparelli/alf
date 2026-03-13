@@ -91,7 +91,7 @@ func (t RemoveNativeTool) Run(_ context.Context, argsJSON string) (string, error
 
 	// Require recursive flag for directories.
 	if isDir && !args.Recursive {
-		return "", fmt.Errorf("%s is a directory — set recursive=true to delete it and its contents", args.Path)
+		return "", fmt.Errorf("%s is a directory - set recursive=true to delete it and its contents", args.Path)
 	}
 
 	// Perform deletion.

@@ -89,7 +89,7 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Reminder mode: message is mutually exclusive with prompt/command/tier.
 		if req.Message != "" {
 			if req.Prompt != "" || req.Command != "" || req.Tier != "" {
-				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "message is a direct push notification — cannot be combined with prompt, command, or tier"})
+				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "message is a direct push notification - cannot be combined with prompt, command, or tier"})
 				return
 			}
 			job, err := h.Engine.CreateReminder(req.Name, req.Schedule, req.Message, req.Output, timeout)

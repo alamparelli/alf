@@ -112,7 +112,7 @@ func doCreate(sockPath string) {
 	// Reminder mode: --message is mutually exclusive with --prompt, --command, --tier.
 	if message != "" {
 		if prompt != "" || command != "" || tier != "" {
-			fmt.Fprintf(os.Stderr, "Error: --message is a direct push notification — cannot be combined with --prompt, --command, or --tier\n")
+			fmt.Fprintf(os.Stderr, "Error: --message is a direct push notification - cannot be combined with --prompt, --command, or --tier\n")
 			os.Exit(1)
 		}
 
@@ -500,7 +500,7 @@ Create options:
   --tier <tier>           LLM tier (e.g. haiku, sonnet, opus) or "direct" for bash
   --prompt <text>         Prompt for LLM tiers (required for LLM jobs)
   --command <cmd>         Bash command for direct tier (required for direct jobs)
-  --message <text>        Direct push notification (no LLM, no command — just sends the message)
+  --message <text>        Direct push notification (no LLM, no command - just sends the message)
   --output <dest>         telegram | file | both | silent (default: telegram)
   --timeout <duration>    Execution timeout (e.g. 5m, 10m, 1h). Defaults: direct=2m, LLM=5m, agent=30m
   --skills <s1,s2>        Comma-separated skill names (LLM jobs only)

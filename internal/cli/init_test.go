@@ -39,7 +39,7 @@ func TestPromptBackends_EmptyInput_WithPreviousOpenRouterKey(t *testing.T) {
 	if !profile.OpenRouterKey {
 		t.Error("expected OpenRouterKey to remain true")
 	}
-	// ConfiguredBackends is not modified on empty input — only OpenRouterKey
+	// ConfiguredBackends is not modified on empty input - only OpenRouterKey
 	// signals existing config via backward compat.
 }
 

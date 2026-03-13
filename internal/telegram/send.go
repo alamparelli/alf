@@ -207,7 +207,7 @@ func (c *Client) postRaw(method string, payload []byte) ([]byte, error) {
 		return body, nil
 	}
 
-	// Check if it's a rate limit error — wait and retry once.
+	// Check if it's a rate limit error - wait and retry once.
 	wait := parseRetryAfter(body)
 	if wait <= 0 {
 		return nil, err

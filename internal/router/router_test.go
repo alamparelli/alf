@@ -302,7 +302,7 @@ func TestFallbackResult(t *testing.T) {
 
 func TestInterpretRaw_DirectResponseFallsBack(t *testing.T) {
 	tiers := defaultTiers()
-	// Simulate router returning a direct response — should fallback to default tier
+	// Simulate router returning a direct response - should fallback to default tier
 	raw := `{"response": "Hello!", "reason": "greeting"}`
 	r := InterpretRaw(raw, tiers, "hi")
 	if r.Tier == "" {

@@ -27,7 +27,7 @@ tier: haiku
 ---
 ```
 
-- `tier` — which LLM tier to use (default: lowest available)
+- `tier` - which LLM tier to use (default: lowest available)
 
 The schedule is managed by the heartbeat managed job and can be changed via the Control Center.
 
@@ -36,4 +36,4 @@ The body below the frontmatter is the actual prompt/instructions to execute.
 ## Important constraints
 - Empty body = skip entirely = no LLM call = no notification.
 - Keep output under 500 chars when possible (Telegram readability).
-- Do NOT report "heartbeat ok" — silence means nothing to do.
+- Do NOT report "heartbeat ok" - silence means nothing to do.

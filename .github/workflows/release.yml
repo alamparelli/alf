@@ -27,7 +27,7 @@ jobs:
           STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/alamparelli/alf/manifests/${VERSION}")
           if [ "$STATUS" = "200" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Image ${VERSION} already exists — skipping Docker build"
+            echo "Image ${VERSION} already exists - skipping Docker build"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi

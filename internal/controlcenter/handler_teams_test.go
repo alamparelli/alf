@@ -123,7 +123,7 @@ func TestTeams_SaveThenListShowsTeam(t *testing.T) {
 		t.Fatalf("save: expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// List immediately — should contain the new team (bug fix: store reloaded synchronously).
+	// List immediately - should contain the new team (bug fix: store reloaded synchronously).
 	req = httptest.NewRequest("GET", "/api/teams", nil)
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

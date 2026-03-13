@@ -68,7 +68,7 @@ When you select a backend in the Tiers configuration, ALF automatically fetches 
 - **OpenAI**: queries `GET /v1/models` for available models
 - **OpenRouter**: queries `GET /api/v1/models` for the full model catalog
 
-The model dropdown is populated dynamically — no need to type model IDs manually. Results are cached per session.
+The model dropdown is populated dynamically - no need to type model IDs manually. Results are cached per session.
 
 You can also query models programmatically:
 ```
@@ -118,7 +118,7 @@ This means users don't lose context when the router switches tiers mid-conversat
 ## Limitations
 
 - API backends support ALF tools (via tool loop) but **not CLI tools** (Read, Write, Bash, etc.). Use CLI tiers for agentic work requiring Claude Code capabilities.
-- No streaming of thinking/tool_use events — only text deltas
+- No streaming of thinking/tool_use events - only text deltas
 - Cost tracking not available for API backends (shows $0.00)
 - Tool selection: when editing a tier with an API backend, only ALF tools are shown. CLI tools are exclusive to CLI-based tiers.
 
@@ -127,8 +127,8 @@ This means users don't lose context when the router switches tiers mid-conversat
 | Issue | Solution |
 |-------|----------|
 | "backend X: skipped (no API key available)" | Set the secret: `alf secret set <name>_api_key <key>` |
-| API error 401 | Invalid API key — regenerate it |
-| API error 429 | Rate limited — ALF retries automatically (3x with backoff) |
+| API error 401 | Invalid API key - regenerate it |
+| API error 429 | Rate limited - ALF retries automatically (3x with backoff) |
 | API error 400: context too long | ALF auto-truncates history and retries once |
 | Tier falls back to CLI | Backend not configured or API key missing |
 | Backend not in dropdown | Add it to `config.json` backends and restart |

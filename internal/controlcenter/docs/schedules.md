@@ -23,7 +23,7 @@ Three types of jobs:
 |------|------|-------------|
 | **LLM prompt** | Any tier (e.g. `sonnet`) | Sends a prompt to Claude, same as sending a Telegram message |
 | **Bash command** | `direct` | Runs a shell command inside the container, no LLM involved |
-| **Reminder** | `reminder` | Sends a message directly to Telegram — no LLM, no bash, just a notification |
+| **Reminder** | `reminder` | Sends a message directly to Telegram - no LLM, no bash, just a notification |
 
 ## Creating a job
 
@@ -79,11 +79,11 @@ Use the filter bar at the top of the list:
 | **Later** | Jobs with next run beyond this week |
 | **Managed** | Jobs created by ALF (health-check, heartbeat, etc.) |
 
-Jobs are sorted by next run time — soonest first.
+Jobs are sorted by next run time - soonest first.
 
 ## Editing and deleting
 
-- Click **Run** to trigger an immediate execution of the job. A confirmation popup appears before running. The job runs as a one-shot in the background — the original schedule is unaffected.
+- Click **Run** to trigger an immediate execution of the job. A confirmation popup appears before running. The job runs as a one-shot in the background - the original schedule is unaffected.
 - Click **Edit** to change the schedule, tier, prompt, or output.
 - Click **Delete** to remove the job permanently.
 - Click **Disable** / **Enable** to pause a job without deleting it.
@@ -123,10 +123,10 @@ tier: haiku
 Check if there are any pending tasks in my todo list and summarize them.
 ```
 
-- **tier** — which model to use (optional, defaults to lowest available)
-- **body** — the prompt to execute. Leave empty to skip.
+- **tier** - which model to use (optional, defaults to lowest available)
+- **body** - the prompt to execute. Leave empty to skip.
 
-The schedule is managed by the heartbeat managed job and can be changed via the Control Center Settings button. The heartbeat file is preserved across upgrades — ALF never overwrites it.
+The schedule is managed by the heartbeat managed job and can be changed via the Control Center Settings button. The heartbeat file is preserved across upgrades - ALF never overwrites it.
 
 #### Examples
 
@@ -214,19 +214,19 @@ Logs include the job name, execution time, success/failure status, and output (t
 
 When a scheduled job hits the turn limit, ALF sends a detailed notification to Telegram with:
 
-- **Job name and ID** — which job failed
-- **Tier** — which tier was used
-- **Prompt snippet** — the beginning of the prompt that was sent
+- **Job name and ID** - which job failed
+- **Tier** - which tier was used
+- **Prompt snippet** - the beginning of the prompt that was sent
 
 The job card also shows `turn limit reached` in the Last Error field.
 
 ### How to fix turn limit issues
 
-1. **Simplify the prompt** — break complex instructions into smaller, focused steps. If a prompt asks to "research, analyze, and write a report", split it into separate jobs.
-2. **Increase max_turns** — go to the Tiers tab, edit the tier used by this job, and increase the `Max turns` value.
-3. **Switch tier** — use a tier with more turns or a more capable model.
-4. **Use the `agent` tier** — for complex multi-step tasks, route to the orchestrator which handles iteration loops natively.
-5. **Add skills** — providing structured skill prompts reduces wasted turns on figuring out how to do things.
+1. **Simplify the prompt** - break complex instructions into smaller, focused steps. If a prompt asks to "research, analyze, and write a report", split it into separate jobs.
+2. **Increase max_turns** - go to the Tiers tab, edit the tier used by this job, and increase the `Max turns` value.
+3. **Switch tier** - use a tier with more turns or a more capable model.
+4. **Use the `agent` tier** - for complex multi-step tasks, route to the orchestrator which handles iteration loops natively.
+5. **Add skills** - providing structured skill prompts reduces wasted turns on figuring out how to do things.
 
 ## Daily digest
 
@@ -254,5 +254,5 @@ Yes. Enter skill names in the Skills field (comma-separated). The skills will be
 
 ## What's next
 
-- [Setting Up Tiers](tier-setup.md) — understand which tiers are available for scheduled jobs
-- [Creating Skills](creating-skills.md) — create skills to use with scheduled prompts
+- [Setting Up Tiers](tier-setup.md) - understand which tiers are available for scheduled jobs
+- [Creating Skills](creating-skills.md) - create skills to use with scheduled prompts

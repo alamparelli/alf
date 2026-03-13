@@ -16,7 +16,7 @@ if [ -f "$PACKAGES" ]; then
             DEBIAN_FRONTEND=noninteractive apt-get update -qq \
                 && apt-get install -y --no-install-recommends -qq $PKGS \
                 && rm -rf /var/lib/apt/lists/* \
-                || echo "entrypoint: WARNING — package install failed, continuing"
+                || echo "entrypoint: WARNING - package install failed, continuing"
         fi
         cp "$PACKAGES" "$STAMP"
     fi
@@ -35,18 +35,18 @@ if [ -f "$RUNTIME" ]; then
                 DEBIAN_FRONTEND=noninteractive apt-get update -qq \
                     && apt-get install -y --no-install-recommends -qq nodejs npm \
                     && rm -rf /var/lib/apt/lists/* \
-                    || echo "entrypoint: WARNING — node install failed"
+                    || echo "entrypoint: WARNING - node install failed"
                 ;;
             deno)
                 curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
-                    || echo "entrypoint: WARNING — deno install failed"
+                    || echo "entrypoint: WARNING - deno install failed"
                 ;;
             bun)
                 curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash \
-                    || echo "entrypoint: WARNING — bun install failed"
+                    || echo "entrypoint: WARNING - bun install failed"
                 ;;
             *)
-                echo "entrypoint: WARNING — unknown JS runtime: $RT"
+                echo "entrypoint: WARNING - unknown JS runtime: $RT"
                 ;;
         esac
         echo "$RT" > "$STAMP"
@@ -54,13 +54,13 @@ if [ -f "$RUNTIME" ]; then
 fi
 
 # Phase 2: Run user bootstrap as alf (pip install, start services, etc.).
-# Never runs as root — no apt, no writes to /usr, /etc, /root.
+# Never runs as root - no apt, no writes to /usr, /etc, /root.
 if [ -f "$BOOTSTRAP" ]; then
     echo "entrypoint: running bootstrap.sh ..."
     chmod +x "$BOOTSTRAP"
     chown alf:alf "$BOOTSTRAP"
     DEBIAN_FRONTEND=noninteractive su -s /bin/bash alf -c "bash -x $BOOTSTRAP" 2>&1 || \
-        echo "entrypoint: WARNING — bootstrap.sh exited with code $?, continuing anyway"
+        echo "entrypoint: WARNING - bootstrap.sh exited with code $?, continuing anyway"
     echo "entrypoint: bootstrap.sh done"
 fi
 

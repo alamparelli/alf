@@ -78,7 +78,7 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 	cliArgs := e.jsonToCLI(call.Name, call.Arguments)
 	cmd := exec.CommandContext(ctx, toolPath, cliArgs...)
 	if len(cliArgs) == 0 {
-		// No schema or conversion failed — fall back to JSON on stdin.
+		// No schema or conversion failed - fall back to JSON on stdin.
 		cmd.Stdin = strings.NewReader(call.Arguments)
 	}
 

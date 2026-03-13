@@ -16,6 +16,6 @@ func (n *channelNotifier) Notify(event ReloadEvent) {
 	select {
 	case n.ch <- event:
 	default:
-		// Channel full — drop event. Daemon will pick up changes next cycle.
+		// Channel full - drop event. Daemon will pick up changes next cycle.
 	}
 }

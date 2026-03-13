@@ -35,7 +35,7 @@
       },
       "message": {
         "type": "string",
-        "description": "Direct push notification text (no LLM, no command — mutually exclusive with prompt/command)"
+        "description": "Direct push notification text (no LLM, no command - mutually exclusive with prompt/command)"
       },
       "output": {
         "type": "string",

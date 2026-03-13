@@ -145,7 +145,7 @@ func TestGenerateToolbox_WithSchemas(t *testing.T) {
 		t.Errorf("expected positional arg in usage, got:\n%s", s)
 	}
 	if !strings.Contains(s, "[limit]") || !strings.Contains(s, "[--limit") {
-		// limit is optional — either positional or flag form.
+		// limit is optional - either positional or flag form.
 	}
 
 	// mytool should be plain (no schema).

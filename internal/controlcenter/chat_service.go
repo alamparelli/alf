@@ -436,6 +436,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchSysPrompts, agents.RunConfig{
 			Model:                tp.Model,
+			Backend:              tp.Backend,
 			Effort:               tp.Effort,
 			MaxTurns:             tp.MaxTurns,
 			OrchestratorMaxTurns: tp.OrchestratorMaxTurns,

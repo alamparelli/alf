@@ -474,6 +474,9 @@ func main() {
 		return agents.TierParams{}, false
 	}
 	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel, resolveTier)
+	orch.SetResolveProvider(func(backend string) provider.Provider {
+		return registry.ForBackend(backend)
+	})
 
 	// Router model for message classification.
 	routerBackend := tierStore.Current().RouterBackend
@@ -1616,6 +1619,7 @@ func main() {
 				orchMediaCleanup := mediaCleanup
 				orchRC := agents.RunConfig{
 					Model:                tp.Model,
+					Backend:              tp.Backend,
 					Effort:               tp.Effort,
 					MaxTurns:             tp.MaxTurns,
 					OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
@@ -3486,6 +3490,7 @@ func (s *schedulerOrchestrator) Run(ctx context.Context, userMessage string, sys
 
 	text, meta, err := s.o.Run(ctx, userMessage, systemPrompts, agents.RunConfig{
 		Model:                rc.Model,
+		Backend:              rc.Backend,
 		Effort:               rc.Effort,
 		MaxIterations:        rc.MaxIterations,
 		MaxTurns:             rc.MaxTurns,

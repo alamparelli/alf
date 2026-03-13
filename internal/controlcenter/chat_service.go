@@ -497,23 +497,21 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		return nil
 	}
 
-	// Build system prompts.
-	systemPrompts := memory.CollectPrompts(cs.ContextDir)
-	// Convert --append-system-prompt flags to flat strings.
-	var sysPromptTexts []string
+	// Build system prompts with backend/channel-aware filtering.
+	isAPITier := tp.Backend != "" && tp.Backend != "cli"
+	backend := "cli"
+	if isAPITier {
+		backend = "api"
+	}
+	promptCfg := memory.PromptConfig{Backend: backend, Channel: "cc"}
+	sysPromptTexts := memory.CollectPrompts(cs.ContextDir, promptCfg)
 	// Inject per-tier system prompt first so it has high priority.
 	if tp.SystemPrompt != "" {
-		sysPromptTexts = append(sysPromptTexts, tp.SystemPrompt)
+		sysPromptTexts = append([]string{tp.SystemPrompt}, sysPromptTexts...)
 	}
-	// Inject onboarding prompt FIRST so it becomes the primary --system-prompt.
-	// This ensures Claude follows the onboarding instructions over all other prompts.
+	// Inject onboarding prompt so Claude follows the onboarding instructions.
 	if onboarding := memory.OnboardingPrompt(cs.ContextDir); onboarding != "" {
 		sysPromptTexts = append(sysPromptTexts, onboarding)
-	}
-	for i := 0; i < len(systemPrompts)-1; i += 2 {
-		if systemPrompts[i] == "--append-system-prompt" {
-			sysPromptTexts = append(sysPromptTexts, systemPrompts[i+1])
-		}
 	}
 	// Auto-inject relevant memories from long-term store.
 	if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {
@@ -532,6 +530,8 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			}
 		}
 	}
+	// Reaction instruction — CC doesn't use Telegram reactions but keeps the [[react:]] tag
+	// for emoji acknowledgment parsing by the daemon.
 	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
 	// Tool reminder at end of context — model pays more attention to recent prompts.
 	if reminder := memory.ToolReminder(cs.ContextDir); reminder != "" {
@@ -545,7 +545,6 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 	// Select provider based on tier backend.
 	prov := cs.Provider
-	isAPITier := tp.Backend != "" && tp.Backend != "cli"
 	if cs.Registry != nil {
 		prov = cs.Registry.ForBackend(tp.Backend)
 	}
@@ -568,14 +567,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 				for i, s := range schemas {
 					toolNames[i] = s.Name
 				}
-				toolInstruction := fmt.Sprintf(
-					"You have access to the following tools: %s.\n"+
-						"IMPORTANT: You MUST call the appropriate tool for every action. "+
-						"Never simulate, assume, or hallucinate the result of a tool call. "+
-						"Always invoke the tool and wait for the actual result before responding.",
-					strings.Join(toolNames, ", "),
-				)
-				sysPromptTexts = append([]string{toolInstruction}, sysPromptTexts...)
+				sysPromptTexts = append([]string{memory.ToolInstruction(toolNames)}, sysPromptTexts...)
 			}
 		}
 	}

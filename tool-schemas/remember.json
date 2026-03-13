@@ -10,9 +10,11 @@
       },
       "type": {
         "type": "string",
-        "description": "Memory type: fact, preference, decision, event"
+        "enum": ["fact", "preference", "decision", "event"],
+        "description": "Memory type (default: fact)"
       }
     },
-    "required": ["text"]
+    "required": ["text"],
+    "x-positional": ["text"]
   }
 }

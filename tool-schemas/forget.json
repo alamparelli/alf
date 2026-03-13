@@ -9,6 +9,7 @@
         "description": "Memory ID to delete"
       }
     },
-    "required": ["id"]
+    "required": ["id"],
+    "x-positional": ["id"]
   }
 }

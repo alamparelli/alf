@@ -9,25 +9,72 @@ import (
 	"time"
 )
 
+// PromptConfig controls conditional sections in core.md.
+type PromptConfig struct {
+	Backend string // "cli" or "api" — determines tool instructions
+	Channel string // "tg" or "cc" — determines formatting rules
+}
+
 // injectedFiles are the only files injected into every conversation.
 // All other context/*.md files must be read on-demand by the model.
 var injectedFiles = []string{"soul.md", "mood.md", "index.md", "toolbox.md"}
 
-// CollectPrompts returns CLI arg pairs for system prompt injection.
-// Only core instructions + system files (soul, mood, index, toolbox) are injected.
-// User-created context files are NOT injected — the model reads them on-demand.
-func CollectPrompts(contextDir string) []string {
-	var args []string
+// knownTags lists the conditional section tags we support.
+var knownTags = []string{"cli", "api", "tg", "cc"}
 
-	// Inject immutable core instructions first.
-	args = append(args, "--append-system-prompt", strings.TrimSpace(coreMD))
+// filterSections processes conditional blocks in prompt text.
+// Blocks tagged with <!-- @begin X --> ... <!-- @end X --> are included only
+// if X matches the backend or channel in cfg. Untagged content is always included.
+func filterSections(content string, cfg PromptConfig) string {
+	result := content
+	for _, tag := range knownTags {
+		beginMarker := "<!-- @begin " + tag + " -->"
+		endMarker := "<!-- @end " + tag + " -->"
+		include := (tag == cfg.Backend) || (tag == cfg.Channel)
+
+		for {
+			start := strings.Index(result, beginMarker)
+			if start == -1 {
+				break
+			}
+			end := strings.Index(result[start:], endMarker)
+			if end == -1 {
+				break
+			}
+			end += start + len(endMarker)
+			body := result[start+len(beginMarker) : end-len(endMarker)]
+			body = strings.TrimPrefix(body, "\n")
+			body = strings.TrimRight(body, "\n")
+
+			if include {
+				result = result[:start] + body + result[end:]
+			} else {
+				result = result[:start] + result[end:]
+			}
+		}
+	}
+	// Clean up multiple blank lines left by removed sections.
+	for strings.Contains(result, "\n\n\n") {
+		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
+	}
+	return result
+}
+
+// CollectPrompts returns system prompt strings for injection.
+// cfg controls which conditional sections are included.
+func CollectPrompts(contextDir string, cfg PromptConfig) []string {
+	var prompts []string
+
+	// Inject immutable core instructions (filtered by backend/channel).
+	filtered := filterSections(strings.TrimSpace(coreMD), cfg)
+	prompts = append(prompts, filtered)
 
 	// Inject current date/time so the model always knows "now".
 	now := time.Now()
 	clock := fmt.Sprintf("Current date: %s %d %s %d\nTime: %s",
 		now.Format("Monday"), now.Day(), now.Format("January"), now.Year(),
 		now.Format("15:04"))
-	args = append(args, "--append-system-prompt", clock)
+	prompts = append(prompts, clock)
 
 	// Inject only system files.
 	for _, f := range injectedFiles {
@@ -36,9 +83,9 @@ func CollectPrompts(contextDir string) []string {
 			continue
 		}
 		block := fmt.Sprintf("=== [%s] ===\n%s", f, strings.TrimSpace(string(content)))
-		args = append(args, "--append-system-prompt", block)
+		prompts = append(prompts, block)
 	}
-	return args
+	return prompts
 }
 
 // CollectSchedulerPrompts returns system prompt strings for scheduled job execution.
@@ -47,8 +94,9 @@ func CollectPrompts(contextDir string) []string {
 func CollectSchedulerPrompts(contextDir string) []string {
 	var prompts []string
 
-	// L1: Core identity + rules (tools, vault, forbidden tools, etc.)
-	prompts = append(prompts, strings.TrimSpace(coreMD))
+	// Scheduler always runs via CLI backend, no specific channel.
+	filtered := filterSections(strings.TrimSpace(coreMD), PromptConfig{Backend: "cli"})
+	prompts = append(prompts, filtered)
 
 	// L2: Available tools + L3: User context.
 	for _, f := range []string{"toolbox.md", "index.md"} {
@@ -68,8 +116,9 @@ func CollectSchedulerPrompts(contextDir string) []string {
 func CollectAgentContext(contextDir string) []string {
 	var prompts []string
 
-	// Core identity + rules.
-	prompts = append(prompts, strings.TrimSpace(coreMD))
+	// Agents run via CLI backend, no specific channel.
+	filtered := filterSections(strings.TrimSpace(coreMD), PromptConfig{Backend: "cli"})
+	prompts = append(prompts, filtered)
 
 	// Current date/time.
 	now := time.Now()
@@ -117,11 +166,23 @@ func ToolReminder(contextDir string) string {
 	return fmt.Sprintf("=== [Reminder] ===\nYou have CLI tools available: %s. Run <tool> --help before first use. Use `vault proxy` for external API calls. Check context/ for stored knowledge.", strings.Join(tools, ", "))
 }
 
+// ToolInstruction returns the API-tier tool instruction prepended to system prompts.
+// Only relevant for API tiers where tools are declared via JSON schema.
+func ToolInstruction(toolNames []string) string {
+	return fmt.Sprintf(
+		"You have access to the following tools: %s.\n"+
+			"IMPORTANT: You MUST call the appropriate tool for every action. "+
+			"Never simulate, assume, or hallucinate the result of a tool call. "+
+			"Always invoke the tool and wait for the actual result before responding.",
+		strings.Join(toolNames, ", "),
+	)
+}
+
 // CollectInline reads soul.md + mood.md and returns their content
 // concatenated with separators, for use as a router prompt prefix.
 func CollectInline(contextDir string) string {
 	var parts []string
-	// Prepend immutable core instructions.
+	// Prepend immutable core instructions (no channel/backend filtering for router).
 	parts = append(parts, strings.TrimSpace(coreMD))
 	for _, f := range []string{"soul.md", "mood.md"} {
 		content, err := os.ReadFile(filepath.Join(contextDir, f))
@@ -311,7 +372,7 @@ func GenerateToolbox(contextDir, dataDir string) {
 		sb.WriteString("\n")
 	}
 
-	// Vault usage instructions (only if vault tool is present).
+	// Vault status indicator (rules are in core.md, not duplicated here).
 	if hasVault {
 		vaultStatus := "unknown"
 		if addr := os.Getenv("VAULT_ADDR"); addr != "" {
@@ -325,20 +386,11 @@ func GenerateToolbox(contextDir, dataDir string) {
 		}
 		sb.WriteString("## Vault (Secrets Proxy)\n\n")
 		sb.WriteString(fmt.Sprintf("Status: **%s**\n\n", vaultStatus))
-		sb.WriteString("The vault stores API credentials securely. Use it to call external APIs without seeing the secrets.\n\n")
 		sb.WriteString("```\n")
 		sb.WriteString("vault proxy <service> <method> <path> [body]\n")
-		sb.WriteString("vault proxy github GET /user\n")
-		sb.WriteString("vault proxy slack POST /chat.postMessage '{\"channel\":\"#general\",\"text\":\"hello\"}'\n")
 		sb.WriteString("vault list                    # list configured services\n")
 		sb.WriteString("vault health                  # check vault status\n")
-		sb.WriteString("```\n\n")
-		sb.WriteString("Rules:\n")
-		sb.WriteString("- ALWAYS use `vault proxy` for external API calls when a service is configured.\n")
-		sb.WriteString("- NEVER ask the user for API keys — tell them to add the service via the Control Center vault page.\n")
-		sb.WriteString("- If vault is locked or unreachable, tell the user: \"The vault is locked. Please unlock it in the Control Center.\"\n")
-		sb.WriteString("- Run `vault list` to check which services are available before making API calls.\n")
-		sb.WriteString("\n")
+		sb.WriteString("```\n")
 	}
 
 	os.WriteFile(filepath.Join(contextDir, "toolbox.md"), []byte(sb.String()), 0o644)

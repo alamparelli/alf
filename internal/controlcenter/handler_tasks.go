@@ -51,7 +51,8 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Message string `json:"message"`
+		Message        string `json:"message"`
+		NeedValidation bool   `json:"need_validation"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -88,6 +89,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 	rc := h.resolveAgentConfig()
 	rc.SkillPrompts = skillInjections
 	rc.MemoryContext = memory.CollectAgentContext(h.ContextDir)
+	rc.NeedValidation = req.NeedValidation
 
 	// Fire and forget - task is tracked by orchestrator.running map.
 	go func() {
@@ -160,9 +162,9 @@ func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {
 		if runningIDs[meta.ID] {
 			continue
 		}
-		// Orphaned "running" tasks (on disk but not in memory) were interrupted
-		// by a daemon restart - mark them so they appear in the completed list.
-		if meta.Status == "running" {
+		// Orphaned "running" or "awaiting_approval" tasks (on disk but not in memory)
+		// were interrupted by a daemon restart - mark them accordingly.
+		if meta.Status == "running" || meta.Status == "awaiting_approval" {
 			meta.Status = "interrupted"
 		}
 		completed = append(completed, meta)
@@ -194,4 +196,39 @@ func (h *TasksHandler) cancel(w http.ResponseWriter, r *http.Request) {
 	}
 	ok := h.Orchestrator.Cancel(id)
 	json.NewEncoder(w).Encode(map[string]any{"cancelled": ok})
+}
+
+// TaskApproveHandler handles approval/rejection of orchestrator plans.
+type TaskApproveHandler struct {
+	Orchestrator *agents.Orchestrator
+}
+
+func (h *TaskApproveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.Orchestrator == nil {
+		http.Error(w, "agent not available", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		ID       string `json:"id"`
+		Approved bool   `json:"approved"`
+		Feedback string `json:"feedback"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.ID == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	ok := h.Orchestrator.Approve(req.ID, agents.ApprovalDecision{
+		Approved: req.Approved,
+		Feedback: req.Feedback,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": ok})
 }

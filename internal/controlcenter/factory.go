@@ -200,6 +200,7 @@ func HandlerFactory(deps Deps) http.Handler {
 		taskHandler.ResolveModel = deps.ChatService.ResolveModel
 	}
 	mux.Handle("/api/tasks", taskHandler)
+	mux.Handle("/api/tasks/approve", &TaskApproveHandler{Orchestrator: deps.Orchestrator})
 
 	// Agent teams management.
 	mux.Handle("/api/teams", &TeamsHandler{

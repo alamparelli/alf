@@ -33,6 +33,19 @@ type TierParams struct {
 // ResolveTierFunc maps a tier name to its execution parameters.
 type ResolveTierFunc func(tierName string) (TierParams, bool)
 
+// PlanStep represents a single step in the orchestrator's execution plan.
+type PlanStep struct {
+	Step        int      `json:"step"`
+	Description string   `json:"description"`
+	Agents      []string `json:"agents,omitempty"`
+}
+
+// ApprovalDecision is the user's response to a plan awaiting validation.
+type ApprovalDecision struct {
+	Approved bool   `json:"approved"`
+	Feedback string `json:"feedback,omitempty"`
+}
+
 // DelegateRequest is a single delegation instruction from the orchestrator.
 type DelegateRequest struct {
 	Agent string `json:"agent"` // "team/agent" format
@@ -44,6 +57,7 @@ type OrchestratorOutput struct {
 	Delegates []DelegateRequest `json:"delegates,omitempty"`
 	Response  string            `json:"response,omitempty"`
 	Thinking  string            `json:"thinking,omitempty"`
+	Plan      []PlanStep        `json:"plan,omitempty"`
 }
 
 // AgentResult holds the outcome of a single sub-agent invocation.
@@ -72,23 +86,27 @@ type RunConfig struct {
 	Model                string   // full model name for the orchestrator brain
 	Backend              string   // backend for the orchestrator brain ("" or "cli" = default CLI)
 	Effort               string   // effort level (e.g. "high")
-	MaxIterations        int      // max orchestrate→delegate cycles (0 = default 10)
+	MaxIterations        int      // max orchestrate→delegate cycles (0 = default 20)
 	MaxTurns             int      // max turns per sub-agent call (0 = use agent config)
 	OrchestratorMaxTurns int      // max turns per orchestrator brain call (0 = default 3)
 	TimeoutMin           int      // global timeout in minutes (0 = default 60)
 	SkillPrompts         []string // skill prompts injected into every sub-agent
 	MemoryContext        []string // memory/context prompts injected into every sub-agent
+	NeedValidation       bool     // if true, block after plan output and wait for user approval
 }
 
 // TaskMeta tracks the lifecycle of an orchestration run.
 type TaskMeta struct {
-	ID          string        `json:"id"`
-	Prompt      string        `json:"prompt,omitempty"`
-	Response    string        `json:"response,omitempty"`
-	StartedAt   time.Time     `json:"started_at"`
-	CompletedAt *time.Time    `json:"completed_at,omitempty"`
-	Iterations  int           `json:"iterations"`
-	TotalCost   float64       `json:"total_cost_usd"`
-	AgentCalls  []AgentResult `json:"agent_calls"`
-	Status      string        `json:"status"` // running, completed, failed, timeout
+	ID                 string        `json:"id"`
+	Prompt             string        `json:"prompt,omitempty"`
+	Response           string        `json:"response,omitempty"`
+	StartedAt          time.Time     `json:"started_at"`
+	CompletedAt        *time.Time    `json:"completed_at,omitempty"`
+	Iterations         int           `json:"iterations"`
+	TotalCost          float64       `json:"total_cost_usd"`
+	AgentCalls         []AgentResult `json:"agent_calls"`
+	Status             string        `json:"status"` // running, completed, failed, timeout, awaiting_approval
+	Plan               []PlanStep    `json:"plan,omitempty"`
+	NeedValidation     bool          `json:"need_validation,omitempty"`
+	ValidationFeedback string        `json:"validation_feedback,omitempty"`
 }

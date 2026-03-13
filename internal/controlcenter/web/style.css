@@ -1,4 +1,4 @@
-@import url('theme.css');
+/* Theme CSS is loaded dynamically via <link id="alf-theme-link"> in index.html */
 
 :root {
   --sidebar-width: 220px;
@@ -777,24 +777,39 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 
 /* Chat media preview bar */
 .chat-media-preview {
-  display: none; flex-wrap: wrap; gap: 6px; padding: 8px 16px 0;
+  display: none; flex-wrap: wrap; gap: 8px; padding: 10px 16px 0;
 }
 .chat-media-preview.has-files { display: flex; }
 .chat-media-thumb {
-  position: relative; display: inline-flex; align-items: center; gap: 4px;
-  background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px;
-  padding: 4px 8px; font-size: 0.78rem; color: var(--text-secondary);
-  max-width: 160px; overflow: hidden;
+  position: relative; display: flex; flex-direction: column; align-items: center;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px; font-size: 0.72rem; color: var(--text-secondary);
+  width: 80px; overflow: hidden;
+}
+.chat-media-thumb.has-image {
+  width: auto; max-width: 120px;
 }
 .chat-media-thumb img {
-  width: 32px; height: 32px; object-fit: cover; border-radius: 4px; flex-shrink: 0;
+  width: 100%; max-width: 108px; max-height: 80px; object-fit: cover;
+  border-radius: 6px; flex-shrink: 0;
 }
-.chat-media-thumb .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-media-thumb .file-icon {
+  font-size: 1.6rem; padding: 6px 0 2px;
+}
+.chat-media-thumb .name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  width: 100%; text-align: center; margin-top: 3px;
+}
 .chat-media-thumb .remove {
-  background: none; border: none; color: var(--text-secondary); cursor: pointer;
-  font-size: 1rem; line-height: 1; padding: 0 2px; flex-shrink: 0;
+  position: absolute; top: 2px; right: 2px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 50%;
+  color: var(--text-secondary); cursor: pointer;
+  font-size: 0.8rem; line-height: 1; width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s;
 }
-.chat-media-thumb .remove:hover { color: var(--danger); }
+.chat-media-thumb:hover .remove { opacity: 1; }
+.chat-media-thumb .remove:hover { color: var(--danger); border-color: var(--danger); }
 
 /* Chat drop overlay */
 .chat-drop-overlay {
@@ -809,12 +824,14 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 
 /* Media in chat bubbles */
 .chat-bubble-media {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
 }
 .chat-bubble-media img {
-  max-width: 200px; max-height: 160px; border-radius: 6px; cursor: pointer;
+  max-width: 240px; max-height: 180px; border-radius: 8px; cursor: pointer;
   object-fit: cover; border: 1px solid var(--border);
+  transition: opacity 0.15s;
 }
+.chat-bubble-media img:hover { opacity: 0.85; }
 .chat-bubble-media .file-badge {
   display: inline-flex; align-items: center; gap: 4px;
   background: var(--bg-input); border: 1px solid var(--border);
@@ -1131,6 +1148,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .task-status-badge.failed { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
 .task-status-badge.timeout { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
 .task-status-badge.interrupted { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
+.task-status-badge.awaiting_approval { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
 
 .task-card-details { padding: 10px 16px; }
 .task-detail-row {
@@ -1291,6 +1309,34 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .task-chevron i, .task-chevron .lucide { width: 16px; height: 16px; }
 .task-card.expanded .task-chevron { transform: rotate(90deg); }
+
+/* Plan display */
+.task-plan { padding: 8px 0; }
+.task-plan-step { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 0.82rem; }
+.task-plan-step .step-num { font-weight: 700; color: var(--accent); min-width: 20px; }
+.task-plan-step .step-agents { font-size: 0.72rem; color: var(--text-dim); }
+
+/* Approval section */
+.task-approval { padding: 12px 16px; border-top: 1px solid var(--border); }
+.task-approval-feedback {
+  width: 100%; background: var(--bg-input, var(--bg)); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+  resize: vertical; font-size: 0.82rem; font-family: inherit;
+}
+.task-approval-actions { display: flex; gap: 8px; margin-top: 8px; }
+.btn-green {
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+  color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+}
+.btn-green:hover { background: color-mix(in srgb, var(--green) 25%, transparent); }
+
+/* Launcher options */
+.task-launcher-options { padding: 4px 0; }
+.task-launcher-validation {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.78rem; color: var(--text-dim); cursor: pointer;
+}
+.task-launcher-validation input { margin: 0; }
 
 /* Docs */
 .docs-view {
@@ -1773,10 +1819,20 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   .logs-view { padding: 8px 10px; }
   .logs-output { font-size: 0.72rem; }
   .tasks-view { padding: 12px 10px; }
-  .task-card-header { gap: 8px; padding: 10px 12px; }
+  .task-card-header { gap: 8px; padding: 10px 12px; flex-wrap: wrap; }
+  .task-card-title { min-width: 100%; }
+  .task-card-actions { width: 100%; justify-content: flex-end; margin-top: 4px; }
   .task-card-details { padding: 8px 12px; }
   .task-steps { padding: 0 12px 10px; }
   .task-section { padding: 0 12px 10px; }
+  .task-launcher-header { flex-direction: column; gap: 8px; }
+  .task-launcher-select { width: 100%; }
+  .team-card { padding: 10px 12px; }
+  .team-card-header { flex-wrap: wrap; }
+  .team-card-agents { gap: 4px; }
+  .task-detail-row { flex-direction: column; gap: 2px; }
+  .task-approval-actions { flex-direction: column; }
+  .task-step-header { flex-wrap: wrap; }
   .docs-view { padding: 12px 10px; }
   .docs-sidebar { display: none; }
   .docs-toc { display: none; }

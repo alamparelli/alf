@@ -56,13 +56,11 @@ function notify(title, body) {
   setTimeout(() => n.close(), 8000);
 }
 
-// --- Palette system (light/dark follows OS) ---
+// --- Palette system (light/dark follows OS, per-file theme loading) ---
 function applyPalette(palette) {
-  if (!palette || palette === 'catppuccin') {
-    document.documentElement.removeAttribute('data-palette');
-  } else {
-    document.documentElement.setAttribute('data-palette', palette);
-  }
+  if (!palette) palette = 'sage';
+  const link = document.getElementById('alf-theme-link');
+  if (link) link.href = '/static/theme-' + palette + '.css';
   syncIframeTheme();
 }
 
@@ -80,22 +78,22 @@ function applyPalette(palette) {
   });
 })();
 
-// Inject theme.css + palette into iframe when it loads an app page.
+// Inject theme CSS into iframe when it loads an app page.
 function syncIframeTheme() {
   const frame = document.getElementById('pageFrame');
   try {
     const doc = frame.contentDocument;
     if (!doc || !doc.documentElement) return;
-    if (!doc.getElementById('alf-theme')) {
-      const link = doc.createElement('link');
+    const palette = localStorage.getItem('alf-palette') || 'sage';
+    const themeHref = '/static/theme-' + palette + '.css';
+    let link = doc.getElementById('alf-theme');
+    if (!link) {
+      link = doc.createElement('link');
       link.id = 'alf-theme';
       link.rel = 'stylesheet';
-      link.href = '/static/theme.css';
       doc.head.appendChild(link);
     }
-    const p = localStorage.getItem('alf-palette');
-    if (!p || p === 'catppuccin') doc.documentElement.removeAttribute('data-palette');
-    else doc.documentElement.setAttribute('data-palette', p);
+    link.href = themeHref;
   } catch (_) { /* cross-origin or not loaded */ }
 }
 document.getElementById('pageFrame').addEventListener('load', syncIframeTheme);
@@ -443,8 +441,16 @@ const FILE_ICON_MAP = {
   '.mp4': 'file-video', '.webm': 'file-video',
 };
 
+// Validate a Lucide icon name; return fallback if not found in the loaded icon set.
+function safeLucideIcon(name, fallback) {
+  if (window.lucide && window.lucide.icons && !window.lucide.icons[name]) {
+    return fallback || 'box';
+  }
+  return name;
+}
+
 function wsIcon(name, cls) {
-  return '<i data-lucide="' + name + '"' + (cls ? ' class="' + cls + '"' : '') + '></i>';
+  return '<i data-lucide="' + safeLucideIcon(name) + '"' + (cls ? ' class="' + cls + '"' : '') + '></i>';
 }
 
 function fileIcon(filename) {
@@ -1423,20 +1429,24 @@ function chatRestoreTab(tabId) {
     chatEventOffset = 0;
     chatHistoryLoaded = false;
   }
-  // Reset stream DOM refs (they belong to the old tab's DOM).
-  chatAssistantBubble = null;
-  chatFullText = '';
-  chatDoneData = null;
-  chatReaction = null;
-  chatStreamingText = false;
-  chatThinkingEl = null;
-  chatCurrentToolBlock = null;
-  chatCurrentToolInput = '';
-  chatAgentTracker = null;
-  chatAgentTrackerBody = null;
-  chatAgentStepCount = 0;
-  chatCurrentTier = '';
-  chatNeedNewBubble = false;
+  // Reset stream DOM refs ONLY if there is no active stream running in the
+  // background (detached container). If a stream is detached, its DOM refs
+  // must stay intact so chatProcessStream can keep writing to them.
+  if (!chatDetachedContainer) {
+    chatAssistantBubble = null;
+    chatFullText = '';
+    chatDoneData = null;
+    chatReaction = null;
+    chatStreamingText = false;
+    chatThinkingEl = null;
+    chatCurrentToolBlock = null;
+    chatCurrentToolInput = '';
+    chatAgentTracker = null;
+    chatAgentTrackerBody = null;
+    chatAgentStepCount = 0;
+    chatCurrentTier = '';
+    chatNeedNewBubble = false;
+  }
 }
 
 function chatRenderTabs() {
@@ -1496,9 +1506,55 @@ function chatRenameTab(tabId, labelEl) {
 
 function chatSwitchTab(tabId) {
   if (tabId === chatActiveTabId) return;
-  chatSnapshotTab();
+  const oldTabId = chatActiveTabId;
+  const streamingOnOldTab = chatStreamTabId === oldTabId && chatSending;
+
+  if (streamingOnOldTab) {
+    // Detach stream: move DOM children to a detached container so stream
+    // writes continue there instead of polluting the new tab's view.
+    chatDetachedContainer = document.createElement('div');
+    while (chatMessages.firstChild) {
+      chatDetachedContainer.appendChild(chatMessages.firstChild);
+    }
+    // Save snapshot from detached content (stream DOM refs remain valid).
+    chatTabDOMCache[oldTabId] = {
+      html: chatDetachedContainer.innerHTML,
+      scrollTop: chatMessages.scrollTop,
+      sending: true,
+      jobId: chatJobId,
+      eventOffset: chatEventOffset,
+      historyLoaded: chatHistoryLoaded,
+    };
+    // Do NOT reset stream DOM refs — they still point to nodes inside
+    // chatDetachedContainer and the running chatProcessStream needs them.
+  } else {
+    chatSnapshotTab();
+  }
+
   chatActiveTabId = tabId;
-  chatRestoreTab(tabId);
+
+  // Check if we're switching TO the tab that owns the running stream.
+  const switchingToStreamTab = chatStreamTabId === tabId && chatDetachedContainer;
+
+  if (switchingToStreamTab) {
+    // Reattach: move detached stream content back into visible chatMessages.
+    chatMessages.innerHTML = '';
+    while (chatDetachedContainer.firstChild) {
+      chatMessages.appendChild(chatDetachedContainer.firstChild);
+    }
+    chatDetachedContainer = null;
+    chatScrollBottom();
+    // Stream DOM refs still point to the now re-attached nodes — no reset needed.
+    // Restore per-tab state that was NOT stream-related.
+    const cached = chatTabDOMCache[tabId];
+    if (cached) {
+      chatHistoryLoaded = cached.historyLoaded || false;
+    }
+  } else {
+    // Normal restore (either no stream, or switching away from streaming tab).
+    chatRestoreTab(tabId);
+  }
+
   chatRenderTabs();
   chatSaveTabs();
   // Load history if not yet loaded for this tab.
@@ -1525,6 +1581,8 @@ function chatCreateTab(convId, title) {
 
 function chatCloseTab(tabId) {
   if (chatTabList.length <= 1) return; // keep at least one
+  // Don't close a tab that has an active stream.
+  if (chatStreamTabId === tabId && chatSending) return;
   const idx = chatTabList.findIndex(t => t.id === tabId);
   if (idx < 0) return;
   chatTabList.splice(idx, 1);
@@ -1715,11 +1773,16 @@ function chatRenderPendingFiles() {
   chatMediaPreview.classList.add('has-files');
   chatPendingFiles.forEach((entry, i) => {
     const thumb = document.createElement('div');
-    thumb.className = 'chat-media-thumb';
+    thumb.className = 'chat-media-thumb' + (entry.url ? ' has-image' : '');
     if (entry.url) {
       const img = document.createElement('img');
       img.src = entry.url;
       thumb.appendChild(img);
+    } else {
+      const icon = document.createElement('div');
+      icon.className = 'file-icon';
+      icon.textContent = '\uD83D\uDCC4';
+      thumb.appendChild(icon);
     }
     const name = document.createElement('span');
     name.className = 'name';
@@ -1746,8 +1809,8 @@ async function chatUploadPendingFiles() {
     const data = await res.json();
     ids.push(data.upload_id);
   }
-  // Cleanup previews.
-  chatPendingFiles.forEach(e => { if (e.url) URL.revokeObjectURL(e.url); });
+  // Clear pending list and hide preview bar. Don't revoke blob URLs yet —
+  // they're reused as _localUrl in the user bubble for instant display.
   chatPendingFiles = [];
   chatRenderPendingFiles();
   return ids;
@@ -1809,6 +1872,8 @@ async function chatCheckActiveJob() {
       chatJobId = data.job_id;
       chatEventOffset = 0;
       chatSending = true;
+      chatStreamTabId = chatActiveTabId;
+      chatDetachedContainer = null;
       chatSetStopMode(true);
       chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Reconnecting...');
       await chatStreamFromJob(chatJobId, 0);
@@ -1854,7 +1919,7 @@ function chatNewThinkingBlock() {
   content.className = 'chat-thinking-content';
   det.appendChild(summary);
   det.appendChild(content);
-  chatMessages.appendChild(det);
+  chatStreamTarget().appendChild(det);
   chatThinkingEl = { det: det, summary: summary, content: content, text: '' };
   chatNeedNewBubble = true;
   if (window.lucide) lucide.createIcons({ nodes: [summary] });
@@ -1892,7 +1957,7 @@ function chatNewToolBlock(name) {
   var resultEl = document.createElement('div');
   resultEl.className = 'chat-tool-result-inline';
   det.appendChild(resultEl);
-  chatMessages.appendChild(det);
+  chatStreamTarget().appendChild(det);
   chatCurrentToolBlock = det;
   chatCurrentToolInput = '';
   chatNeedNewBubble = true;
@@ -1918,7 +1983,7 @@ function chatGetOrCreateAgentTracker() {
   chatAgentTracker.appendChild(toggle);
   chatAgentTracker.appendChild(chatAgentTrackerBody);
   chatAgentTracker.classList.add('open');
-  chatMessages.appendChild(chatAgentTracker);
+  chatStreamTarget().appendChild(chatAgentTracker);
   chatAgentStepCount = 0;
   return chatAgentTracker;
 }
@@ -1966,10 +2031,14 @@ function chatAppendBubble(role, text, meta) {
   const bubble = document.createElement('div');
   bubble.className = 'chat-bubble ' + role;
   if (meta && meta.id) bubble.dataset.msgId = meta.id;
-  if (text) bubble.innerHTML = role === 'user' ? esc(text) : chatRenderMd(text);
-  // Render media attachments (from history or live send).
+  // Render media attachments BEFORE text so images appear above the message.
   if (meta && meta.media && meta.media.length) {
     chatRenderMediaInBubble(bubble, meta.media);
+  }
+  if (text) {
+    const textEl = document.createElement('div');
+    textEl.innerHTML = role === 'user' ? esc(text) : chatRenderMd(text);
+    bubble.appendChild(textEl);
   }
 
   const metaEl = document.createElement('div');
@@ -2067,15 +2136,19 @@ function chatSendReaction(bubble, msgId, emoji) {
 }
 
 function chatScrollBottom() {
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+  // Only scroll if the stream is rendering on the visible tab.
+  if (!chatDetachedContainer) {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
 }
 
 function chatSetStatus(html) {
-  chatStatus.innerHTML = html;
+  // Only show status bar updates when the stream tab is active.
+  if (!chatDetachedContainer) chatStatus.innerHTML = html;
 }
 
 function chatClearStatus() {
-  chatStatus.innerHTML = '';
+  if (!chatDetachedContainer) chatStatus.innerHTML = '';
 }
 
 function chatRenderMd(text) {
@@ -2117,6 +2190,15 @@ let chatAgentTrackerBody = null;
 let chatAgentStepCount = 0;
 let chatCurrentTier = '';         // tier name from routing
 let chatNeedNewBubble = false;   // true when tool/thinking happened mid-stream → next text creates fresh bubble
+
+// Tab-aware stream isolation: tracks which tab owns the running stream.
+let chatStreamTabId = null;          // tab that initiated the current stream
+let chatDetachedContainer = null;    // detached DOM container when stream tab is not active
+
+// Returns the correct DOM container for stream output (chatMessages if active, detached if not).
+function chatStreamTarget() {
+  return chatDetachedContainer || chatMessages;
+}
 
 // Process an SSE stream response (shared by send and reconnect).
 async function chatProcessStream(res) {
@@ -2263,7 +2345,7 @@ async function chatProcessStream(res) {
             reactionsEl.className = 'chat-reactions';
             metaEl.appendChild(reactionsEl);
             chatAssistantBubble.appendChild(metaEl);
-            chatMessages.appendChild(chatAssistantBubble);
+            chatStreamTarget().appendChild(chatAssistantBubble);
           }
           chatFullText += (data.text || '');
           chatUpdateBubbleContent(chatAssistantBubble, chatFullText);
@@ -2273,7 +2355,18 @@ async function chatProcessStream(res) {
           // Final full text (fallback for non-streaming or final confirmation).
           chatFullText = data.text || chatFullText;
           if (!chatAssistantBubble) {
-            chatAssistantBubble = chatAppendBubble('assistant', chatFullText, {});
+            // Create bubble in the stream target (may be detached).
+            chatAssistantBubble = document.createElement('div');
+            chatAssistantBubble.className = 'chat-bubble assistant';
+            chatAssistantBubble.innerHTML = chatRenderMd(chatFullText);
+            var tm = document.createElement('div');
+            tm.className = 'chat-bubble-meta';
+            tm.textContent = new Date().toLocaleTimeString();
+            var tr = document.createElement('span');
+            tr.className = 'chat-reactions';
+            tm.appendChild(tr);
+            chatAssistantBubble.appendChild(tm);
+            chatStreamTarget().appendChild(chatAssistantBubble);
           } else {
             chatUpdateBubbleContent(chatAssistantBubble, chatFullText);
           }
@@ -2342,6 +2435,27 @@ function chatFinishSend() {
   chatSending = false;
   chatSetStopMode(false);
   chatInput.focus();
+
+  // If the stream finished while we were on a different tab, persist
+  // the detached container's content into the originating tab's DOM cache.
+  if (chatDetachedContainer && chatStreamTabId) {
+    chatTabDOMCache[chatStreamTabId] = {
+      html: chatDetachedContainer.innerHTML,
+      scrollTop: 0,
+      sending: false,
+      jobId: null,
+      eventOffset: 0,
+      historyLoaded: chatTabDOMCache[chatStreamTabId]
+        ? chatTabDOMCache[chatStreamTabId].historyLoaded
+        : false,
+    };
+    chatDetachedContainer = null;
+  } else {
+    // Stream finished on the active tab — snapshot normally.
+    chatSnapshotTab();
+  }
+
+  chatStreamTabId = null;
   chatAssistantBubble = null;
   chatFullText = '';
   chatDoneData = null;
@@ -2356,8 +2470,6 @@ function chatFinishSend() {
   chatAgentStepCount = 0;
   chatCurrentTier = '';
   chatNeedNewBubble = false;
-  // Snapshot after send completes so tab DOM cache is up to date.
-  chatSnapshotTab();
 }
 
 async function chatSend() {
@@ -2417,6 +2529,8 @@ async function chatSend() {
   chatInput.style.height = '';
 
   // Reset stream state.
+  chatStreamTabId = chatActiveTabId;
+  chatDetachedContainer = null;
   chatAssistantBubble = null;
   chatFullText = '';
   chatDoneData = null;
@@ -2720,7 +2834,7 @@ function loadApps() {
       const a = document.createElement('a');
       a.className = 'nav-item';
       a.dataset.view = 'page:' + app.name;
-      const icon = app.icon || 'app-window';
+      const icon = safeLucideIcon(app.icon || 'app-window', 'app-window');
       const label = app.display_name || capitalizeName(app.name);
       a.innerHTML = '<i data-lucide="' + esc(icon) + '"></i> ' + esc(label);
       a.addEventListener('click', () => navigateTo(a.dataset.view));
@@ -3396,6 +3510,7 @@ function tasksInit() {
       if (!prompt) return;
       const team = launchTeam.value;
       const message = team ? '[Use team: ' + team + ']\n' + prompt : prompt;
+      const needValidation = document.getElementById('taskNeedValidation').checked;
       launchBtn.disabled = true;
       launchBtn.innerHTML = '<span class="dot-pulse"><span></span><span></span><span></span></span> Launching...';
       try {
@@ -3403,7 +3518,7 @@ function tasksInit() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ message: message }),
+          body: JSON.stringify({ message: message, need_validation: needValidation }),
         });
         if (!res.ok) throw new Error('status ' + res.status);
         launchInput.value = '';
@@ -3460,9 +3575,21 @@ let tasksCompletedVisible = false;
 function tasksRender(running, completed) {
   const container = document.getElementById('tasksList');
 
+  // Save focus/scroll state before rebuild.
+  const tasksPane = document.getElementById('tasksRunsPane');
+  const savedScrollTop = tasksPane ? tasksPane.scrollTop : 0;
+  const activeEl = document.activeElement;
+  const savedActiveId = activeEl ? activeEl.id : null;
+  const savedActiveValue = activeEl && activeEl.tagName === 'TEXTAREA' ? activeEl.value : null;
+
   if (running.length === 0 && completed.length === 0) {
     container.innerHTML = '<div class="task-empty"><i data-lucide="bot" style="width:40px;height:40px;opacity:0.3;margin-bottom:8px"></i><br>No agent tasks yet.<br><span style="font-size:0.8rem;opacity:0.7">Tasks appear here when you use the agent tier.</span></div>';
     return;
+  }
+
+  // Auto-expand tasks awaiting approval.
+  for (const task of running) {
+    if (task.status === 'awaiting_approval') tasksExpandedSet.add(task.id);
   }
 
   let html = '';
@@ -3550,7 +3677,30 @@ function tasksRender(running, completed) {
     };
   });
 
+  // Bind approval buttons.
+  container.querySelectorAll('.task-approve-btn').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); tasksApprove(btn.dataset.id, true, ''); };
+  });
+  container.querySelectorAll('.task-reject-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const textarea = btn.closest('.task-approval').querySelector('.task-approval-feedback');
+      const feedback = textarea ? textarea.value.trim() : '';
+      tasksApprove(btn.dataset.id, false, feedback);
+    };
+  });
+
   lucide.createIcons({ attrs: { class: ['lucide'] }, nameAttr: 'data-lucide' });
+
+  // Restore focus/scroll state after rebuild.
+  if (tasksPane) tasksPane.scrollTop = savedScrollTop;
+  if (savedActiveId) {
+    const el = document.getElementById(savedActiveId);
+    if (el) {
+      el.focus();
+      if (savedActiveValue !== null && el.tagName === 'TEXTAREA') el.value = savedActiveValue;
+    }
+  }
 }
 
 function taskRenderMd(text) {
@@ -3566,8 +3716,9 @@ function taskCard(task, isRunning) {
   const elapsed = isRunning
     ? taskElapsed(task.started_at, null)
     : taskElapsed(task.started_at, task.completed_at);
-  const statusClass = isRunning ? 'running' : (task.status === 'completed' ? 'completed' : (task.status === 'timeout' ? 'timeout' : (task.status === 'interrupted' ? 'interrupted' : 'failed')));
-  const statusLabel = isRunning ? 'running' : task.status;
+  const isAwaiting = task.status === 'awaiting_approval';
+  const statusClass = isAwaiting ? 'awaiting_approval' : (isRunning ? 'running' : (task.status === 'completed' ? 'completed' : (task.status === 'timeout' ? 'timeout' : (task.status === 'interrupted' ? 'interrupted' : 'failed'))));
+  const statusLabel = isAwaiting ? 'awaiting approval' : (isRunning ? 'running' : task.status);
   const cost = task.total_cost_usd ? '$' + task.total_cost_usd.toFixed(4) : '--';
   const promptPreview = taskEscapeHtml(task.prompt || 'No prompt').substring(0, 200);
   const agentCount = (task.agent_calls && task.agent_calls.length) || 0;
@@ -3575,6 +3726,31 @@ function taskCard(task, isRunning) {
 
   // Full request section.
   const fullPrompt = task.prompt ? '<div class="task-section"><div class="task-section-title"><i data-lucide="message-square" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Request</div><div class="task-section-body">' + taskEscapeHtml(task.prompt) + '</div></div>' : '';
+
+  // Plan section.
+  let planSection = '';
+  if (task.plan && task.plan.length > 0) {
+    let planSteps = '';
+    task.plan.forEach(function(step) {
+      const agentList = step.agents && step.agents.length > 0
+        ? ' <span class="step-agents">' + step.agents.map(a => taskEscapeHtml(a)).join(', ') + '</span>'
+        : '';
+      planSteps += '<div class="task-plan-step"><span class="step-num">' + step.step + '.</span><span>' + taskEscapeHtml(step.description) + agentList + '</span></div>';
+    });
+    planSection = '<div class="task-section"><div class="task-section-title"><i data-lucide="list-ordered" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Plan</div><div class="task-plan">' + planSteps + '</div></div>';
+  }
+
+  // Approval section (only when awaiting approval).
+  let approvalSection = '';
+  if (isAwaiting) {
+    approvalSection = '<div class="task-approval">' +
+      '<textarea class="task-approval-feedback" id="taskFeedback_' + taskEscapeHtml(task.id) + '" placeholder="Optional feedback for revision..." rows="2"></textarea>' +
+      '<div class="task-approval-actions">' +
+        '<button class="btn btn-sm btn-green task-approve-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="check" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Approve</button>' +
+        '<button class="btn btn-sm btn-danger task-reject-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="message-square-x" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Request Changes</button>' +
+      '</div>' +
+    '</div>';
+  }
 
   // Output section (rendered as markdown via marked).
   const output = task.response ? '<div class="task-section"><div class="task-section-title"><i data-lucide="file-text" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Output</div><div class="task-section-body task-md">' + taskRenderMd(task.response) + '</div></div>' : '';
@@ -3596,7 +3772,7 @@ function taskCard(task, isRunning) {
       const isWorking = call.status === 'working';
       const callStatus = isWorking ? 'working' : (call.error ? 'failed' : 'completed');
       const callCost = call.cost_usd ? '$' + call.cost_usd.toFixed(4) : '';
-      const callTask = call.task ? '<div class="task-step-task">' + taskEscapeHtml(call.task).substring(0, 300) + '</div>' : '';
+      const callTask = call.task ? '<div class="task-step-task">' + taskEscapeHtml(call.task) + '</div>' : '';
       const callResult = isWorking ? ''
         : (call.error ? '<pre class="task-step-error">' + taskEscapeHtml(call.error) + '</pre>' : taskRenderMd(call.text || ''));
       // Meta badges: team, model.
@@ -3645,6 +3821,8 @@ function taskCard(task, isRunning) {
       (agentCount > 0 ? '<div class="task-detail-row"><span class="task-detail-label"><i data-lucide="users" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Agents</span><span class="task-detail-value">' + agentCount + '</span></div>' : '') +
     '</div>' +
     fullPrompt +
+    planSection +
+    approvalSection +
     output +
     agentSteps +
   '</div>';
@@ -3687,6 +3865,22 @@ async function tasksRelaunch(prompt) {
     }
   } catch (e) {
     toast('Relaunch failed: ' + e.message, 'error');
+  }
+}
+
+async function tasksApprove(id, approved, feedback) {
+  try {
+    const res = await fetch('/api/tasks/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ id, approved, feedback }),
+    });
+    if (!res.ok) throw new Error('status ' + res.status);
+    toast(approved ? 'Plan approved' : 'Changes requested');
+    setTimeout(() => tasksFetch(), 500);
+  } catch (e) {
+    toast('Approval failed: ' + e.message, 'error');
   }
 }
 
@@ -4808,6 +5002,8 @@ function terminalStart() {
     fontSize: 14,
     fontFamily: 'Menlo, Monaco, Consolas, monospace',
     theme: termGetTheme(),
+    scrollback: 5000,
+    fastScrollModifier: 'alt',
     allowProposedApi: true,
   });
   const fitAddon = new FitAddon.FitAddon();
@@ -4875,12 +5071,21 @@ function terminalStart() {
     });
 
     let resizeTimeout = null;
+    let lastTermWidth = container.clientWidth;
+    let lastTermHeight = container.clientHeight;
     function onResize() {
       clearTimeout(resizeTimeout);
       resizeTimeout = setTimeout(() => {
+        // Only re-fit if the container actually changed size.
+        // Avoids scroll jumps from spurious ResizeObserver events.
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (w === lastTermWidth && h === lastTermHeight) return;
+        lastTermWidth = w;
+        lastTermHeight = h;
         fitAddon.fit();
         sendSize();
-      }, 100);
+      }, 150);
     }
 
     window.addEventListener('resize', onResize);

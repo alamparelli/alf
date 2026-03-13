@@ -1,0 +1,54 @@
+/* Sage palette — Light + Dark */
+
+/* Sage Light */
+:root {
+  --bg: #e4e8e0;
+  --bg-card: #f0f3ec;
+  --bg-input: #d8ddd3;
+  --text: #3a4a3a;
+  --text-dim: #6b7b6b;
+  --accent: #5a8f5a;
+  --green: #3d8b3d;
+  --red: #c4392a;
+  --yellow: #b8860b;
+  --border: #bcc5b8;
+  --radius: 12px;
+  --on-accent: #f0f3ec;
+  --danger: #c4392a;
+  --success: #3d8b3d;
+  --error: #c4392a;
+
+  --mauve: #7a5cad;
+  --pink: #c76fa0;
+  --teal: #2d8a7a;
+  --sapphire: #3a8da8;
+  --peach: #c87537;
+  --lavender: #7082c4;
+}
+
+/* Sage Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #080a08;
+    --bg-card: #111413;
+    --bg-input: #181d19;
+    --text: #c8d0c6;
+    --text-dim: #6a7568;
+    --accent: #6b8f71;
+    --green: #6b8f71;
+    --red: #e07060;
+    --yellow: #d4a84b;
+    --border: #1a1f1b;
+    --on-accent: #080a08;
+    --danger: #e07060;
+    --success: #6b8f71;
+    --error: #e07060;
+
+    --mauve: #b89adb;
+    --pink: #dea0c4;
+    --teal: #6ec4b0;
+    --sapphire: #6ab4cc;
+    --peach: #dba070;
+    --lavender: #9eaade;
+  }
+}

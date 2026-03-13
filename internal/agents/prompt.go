@@ -27,6 +27,9 @@ func BuildOrchestratorPrompt(teams []*TeamConfig, taskDir string) string {
 	sb.WriteString("## Available Agents\n\n")
 	for _, tc := range teams {
 		sb.WriteString(fmt.Sprintf("### Team: %s\n%s\n\n", tc.Name, tc.Description))
+		if tc.OrchestratorPrompt != "" {
+			sb.WriteString(fmt.Sprintf("#### Instructions for team %s\n%s\n\n", tc.Name, tc.OrchestratorPrompt))
+		}
 		for _, a := range tc.Agents {
 			sb.WriteString(fmt.Sprintf("- **%s/%s**: %s (tier: %s)\n", tc.Name, a.Name, a.Description, a.Tier))
 		}

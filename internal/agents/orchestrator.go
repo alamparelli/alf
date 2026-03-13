@@ -11,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/provider"
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
 const (
@@ -44,6 +46,8 @@ type Orchestrator struct {
 	resolveModel    ResolveModelFunc
 	resolveTier     ResolveTierFunc
 	resolveProvider ResolveProviderFunc // optional: resolve provider by backend name
+	toolRegistry    *tooling.Registry   // optional: tool schemas for API agentic loop
+	toolExecutor    *tooling.Executor   // optional: tool subprocess runner
 
 	mu       sync.Mutex
 	running  map[string]*RunningTask
@@ -64,6 +68,12 @@ func NewOrchestrator(prov provider.Provider, store Store, dataDir string, resolv
 // SetResolveProvider sets the function used to resolve providers by backend name.
 func (o *Orchestrator) SetResolveProvider(fn ResolveProviderFunc) {
 	o.resolveProvider = fn
+}
+
+// SetTooling configures the tool registry and executor for API-tier agentic tool loops.
+func (o *Orchestrator) SetTooling(registry *tooling.Registry, executor *tooling.Executor) {
+	o.toolRegistry = registry
+	o.toolExecutor = executor
 }
 
 // Running returns a snapshot of all currently running tasks.
@@ -624,6 +634,29 @@ func (o *Orchestrator) invokeAgentWithKey(
 	}
 
 	agentProv := o.providerFor(tp.Backend, model)
+
+	// Wrap API provider with agentic tool loop when tier has tools.
+	if o.toolRegistry != nil && o.toolExecutor != nil && len(tp.Tools) > 0 {
+		if apiProv, ok := agentProv.(*provider.APIProvider); ok {
+			o.toolRegistry.Rescan()
+			schemas := o.toolRegistry.ForToolsStrict(tp.Tools)
+			if len(schemas) > 0 {
+				tools := tooling.ToOpenAI(schemas)
+				maxTurns := tp.MaxTurns
+				if maxTurns <= 0 {
+					maxTurns = 10
+				}
+				agentProv = provider.NewToolLoop(apiProv, &orchestratorToolAdapter{exec: o.toolExecutor}, tools, maxTurns)
+				toolNames := make([]string, len(schemas))
+				for i, s := range schemas {
+					toolNames[i] = s.Name
+				}
+				params.SystemPrompts = append([]string{memory.ToolInstruction(toolNames)}, params.SystemPrompts...)
+				log.Printf("[orchestrator]   tool loop enabled for %s/%s: %d tools, max_turns=%d", teamName, agentName, len(schemas), maxTurns)
+			}
+		}
+	}
+
 	result, err := agentProv.Invoke(ctx, d.Task, params, agentProgress)
 
 	// Retry without resume if session expired.
@@ -736,6 +769,24 @@ func (o *Orchestrator) saveTeams(taskDir string, teams []*TeamConfig) {
 	}
 	if err := os.WriteFile(filepath.Join(taskDir, "teams.json"), data, 0o644); err != nil {
 		log.Printf("[orchestrator] failed to write teams.json: %v", err)
+	}
+}
+
+// orchestratorToolAdapter bridges tooling.Executor to provider.ToolExecutor.
+type orchestratorToolAdapter struct {
+	exec *tooling.Executor
+}
+
+func (a *orchestratorToolAdapter) Execute(ctx context.Context, call provider.ToolCallRequest) provider.ToolCallResult {
+	result := a.exec.Execute(ctx, tooling.CallRequest{
+		ID:        call.ID,
+		Name:      call.Name,
+		Arguments: call.Arguments,
+	})
+	return provider.ToolCallResult{
+		ID:      result.ID,
+		Output:  result.Output,
+		IsError: result.IsError,
 	}
 }
 

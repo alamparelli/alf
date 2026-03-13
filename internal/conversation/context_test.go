@@ -126,6 +126,156 @@ func TestFormatAsSystemPromptEmpty(t *testing.T) {
 	}
 }
 
+func TestFlattenForOpenAI_UserOnly(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "hello"}}},
+	}
+	result := FlattenForOpenAI(msgs)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].Role != "user" || result[0].Content != "hello" {
+		t.Errorf("unexpected result: %+v", result[0])
+	}
+}
+
+func TestFlattenForOpenAI_AssistantTextOnly(t *testing.T) {
+	msgs := []Message{
+		{Role: "assistant", Blocks: []ContentBlock{{Type: BlockText, Text: "answer"}}},
+	}
+	result := FlattenForOpenAI(msgs)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].Role != "assistant" || result[0].Content != "answer" {
+		t.Errorf("unexpected result: %+v", result[0])
+	}
+	if len(result[0].ToolCalls) > 0 {
+		t.Error("unexpected tool calls in text-only message")
+	}
+}
+
+func TestFlattenForOpenAI_ToolCalls(t *testing.T) {
+	msgs := []Message{
+		{
+			Role: "assistant",
+			Blocks: []ContentBlock{
+				{Type: BlockText, Text: "Let me check."},
+				{Type: BlockToolUse, ToolID: "call_1", Name: "read_file", Input: `{"path":"test.go"}`},
+				{Type: BlockToolResult, ToolID: "call_1", Output: "file contents here"},
+			},
+		},
+	}
+	result := FlattenForOpenAI(msgs)
+
+	// Should produce: 1 assistant message with tool_calls + 1 tool result message.
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
+	}
+
+	assistant := result[0]
+	if assistant.Role != "assistant" {
+		t.Errorf("expected assistant role, got %s", assistant.Role)
+	}
+	if assistant.Content != "Let me check." {
+		t.Errorf("expected text content, got %q", assistant.Content)
+	}
+	if len(assistant.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(assistant.ToolCalls))
+	}
+	if assistant.ToolCalls[0].Name != "read_file" {
+		t.Errorf("expected read_file, got %s", assistant.ToolCalls[0].Name)
+	}
+	if assistant.ToolCalls[0].ID != "call_1" {
+		t.Errorf("expected call_1, got %s", assistant.ToolCalls[0].ID)
+	}
+
+	toolMsg := result[1]
+	if toolMsg.Role != "tool" {
+		t.Errorf("expected tool role, got %s", toolMsg.Role)
+	}
+	if toolMsg.ToolCallID != "call_1" {
+		t.Errorf("expected call_1 tool call ID, got %s", toolMsg.ToolCallID)
+	}
+	if toolMsg.Content != "file contents here" {
+		t.Errorf("expected tool output, got %q", toolMsg.Content)
+	}
+}
+
+func TestFlattenForOpenAI_MultipleToolCalls(t *testing.T) {
+	msgs := []Message{
+		{
+			Role: "assistant",
+			Blocks: []ContentBlock{
+				{Type: BlockToolUse, ToolID: "c1", Name: "grep", Input: `{"pattern":"foo"}`},
+				{Type: BlockToolResult, ToolID: "c1", Output: "match1"},
+				{Type: BlockToolUse, ToolID: "c2", Name: "glob", Input: `{"pattern":"*.go"}`},
+				{Type: BlockToolResult, ToolID: "c2", Output: "match2"},
+			},
+		},
+	}
+	result := FlattenForOpenAI(msgs)
+
+	// 1 assistant with 2 tool_calls + 2 tool results.
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+	}
+	if len(result[0].ToolCalls) != 2 {
+		t.Errorf("expected 2 tool calls, got %d", len(result[0].ToolCalls))
+	}
+	if result[1].ToolCallID != "c1" || result[2].ToolCallID != "c2" {
+		t.Error("tool call IDs don't match")
+	}
+}
+
+func TestFlattenForOpenAI_EmptyToolUseArgs(t *testing.T) {
+	msgs := []Message{
+		{
+			Role: "assistant",
+			Blocks: []ContentBlock{
+				{Type: BlockToolUse, ToolID: "c1", Name: "list", Input: ""},
+				{Type: BlockToolResult, ToolID: "c1", Output: "ok"},
+			},
+		},
+	}
+	result := FlattenForOpenAI(msgs)
+	if result[0].ToolCalls[0].Arguments != "{}" {
+		t.Errorf("expected empty args to default to {}, got %q", result[0].ToolCalls[0].Arguments)
+	}
+}
+
+func TestFlattenForOpenAI_SkipsEmptyMessages(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Blocks: nil},
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "real"}}},
+	}
+	result := FlattenForOpenAI(msgs)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message (empty skipped), got %d", len(result))
+	}
+}
+
+func TestFlattenForOpenAI_LargeToolResultTruncated(t *testing.T) {
+	bigOutput := strings.Repeat("x", MaxToolResultBytes+100)
+	msgs := []Message{
+		{
+			Role: "assistant",
+			Blocks: []ContentBlock{
+				{Type: BlockToolUse, ToolID: "c1", Name: "bash", Input: "{}"},
+				{Type: BlockToolResult, ToolID: "c1", Output: bigOutput},
+			},
+		},
+	}
+	result := FlattenForOpenAI(msgs)
+	toolMsg := result[1]
+	if len(toolMsg.Content) > MaxToolResultBytes+10 {
+		t.Errorf("expected truncated output, got length %d", len(toolMsg.Content))
+	}
+	if !strings.HasSuffix(toolMsg.Content, "...") {
+		t.Error("expected truncation suffix '...'")
+	}
+}
+
 func TestTextContent(t *testing.T) {
 	m := Message{
 		Blocks: []ContentBlock{

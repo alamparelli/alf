@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -349,12 +350,13 @@ func GenerateToolbox(contextDir, dataDir string) {
 	sb.WriteString("CLI tools on PATH. Run via Bash.\n\n")
 
 	// Scan system tools (tools.d/).
-	systemTools := scanTools(filepath.Join(dataDir, "tools.d"))
+	systemDir := filepath.Join(dataDir, "tools.d")
+	systemTools := scanTools(systemDir)
 	hasVault := false
 	if len(systemTools) > 0 {
 		sb.WriteString("## System Tools (tools.d/)\n\n")
 		for _, t := range systemTools {
-			sb.WriteString(fmt.Sprintf("- `%s`\n", t))
+			sb.WriteString(toolLine(t, systemDir))
 			if t == "vault" {
 				hasVault = true
 			}
@@ -363,11 +365,12 @@ func GenerateToolbox(contextDir, dataDir string) {
 	}
 
 	// Scan user tools (tools/).
-	userTools := scanTools(filepath.Join(dataDir, "tools"))
+	userDir := filepath.Join(dataDir, "tools")
+	userTools := scanTools(userDir)
 	if len(userTools) > 0 {
 		sb.WriteString("## User Tools (tools/)\n\n")
 		for _, t := range userTools {
-			sb.WriteString(fmt.Sprintf("- `%s`\n", t))
+			sb.WriteString(toolLine(t, userDir))
 		}
 		sb.WriteString("\n")
 	}
@@ -394,6 +397,105 @@ func GenerateToolbox(contextDir, dataDir string) {
 	}
 
 	os.WriteFile(filepath.Join(contextDir, "toolbox.md"), []byte(sb.String()), 0o644)
+}
+
+// toolLine returns a markdown line for a tool, enriched with schema info if available.
+func toolLine(name, dir string) string {
+	schema := loadToolSchema(name, dir)
+	if schema == nil {
+		return fmt.Sprintf("- `%s`\n", name)
+	}
+
+	desc := schema.Description
+	usage := buildUsage(name, schema)
+	if usage != "" {
+		return fmt.Sprintf("- `%s` — %s Usage: `%s`\n", name, desc, usage)
+	}
+	return fmt.Sprintf("- `%s` — %s\n", name, desc)
+}
+
+type toolSchema struct {
+	Description string         `json:"description"`
+	Parameters  toolParameters `json:"parameters"`
+}
+
+type toolParameters struct {
+	Properties  map[string]toolProperty `json:"properties"`
+	Required    []string               `json:"required"`
+	XPositional []string               `json:"x-positional"`
+}
+
+type toolProperty struct {
+	Type        any      `json:"type"`
+	Description string   `json:"description"`
+	Enum        []string `json:"enum"`
+}
+
+func loadToolSchema(name, dir string) *toolSchema {
+	// Try exact name, then with underscores→hyphens.
+	candidates := []string{name + ".json"}
+	alt := strings.ReplaceAll(name, "-", "_") + ".json"
+	if alt != candidates[0] {
+		candidates = append(candidates, alt)
+	}
+	alt2 := strings.ReplaceAll(name, "_", "-") + ".json"
+	if alt2 != candidates[0] {
+		candidates = append(candidates, alt2)
+	}
+
+	for _, c := range candidates {
+		data, err := os.ReadFile(filepath.Join(dir, c))
+		if err != nil {
+			continue
+		}
+		var s toolSchema
+		if json.Unmarshal(data, &s) == nil && s.Description != "" {
+			return &s
+		}
+	}
+	return nil
+}
+
+func buildUsage(name string, s *toolSchema) string {
+	if len(s.Parameters.Properties) == 0 {
+		return ""
+	}
+
+	var parts []string
+	parts = append(parts, name)
+
+	requiredSet := make(map[string]bool)
+	for _, r := range s.Parameters.Required {
+		requiredSet[r] = true
+	}
+
+	// Positional args first.
+	seen := make(map[string]bool)
+	for _, p := range s.Parameters.XPositional {
+		seen[p] = true
+		if requiredSet[p] {
+			parts = append(parts, "<"+p+">")
+		} else {
+			parts = append(parts, "["+p+"]")
+		}
+	}
+
+	// Remaining as flags.
+	var flags []string
+	for k := range s.Parameters.Properties {
+		if seen[k] {
+			continue
+		}
+		if requiredSet[k] {
+			flags = append(flags, "--"+k+" <val>")
+		} else {
+			flags = append(flags, "[--"+k+" ...]")
+		}
+	}
+	sort.Strings(flags)
+	parts = append(parts, flags...)
+
+	return strings.Join(parts, " ")
 }
 
 // scanTools returns sorted unique tool names from a directory,

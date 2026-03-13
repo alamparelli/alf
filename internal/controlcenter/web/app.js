@@ -1583,6 +1583,7 @@ function chatCloseTab(tabId) {
   if (chatTabList.length <= 1) return; // keep at least one
   // Don't close a tab that has an active stream.
   if (chatStreamTabId === tabId && chatSending) return;
+  if (!confirm('Close this conversation tab?')) return;
   const idx = chatTabList.findIndex(t => t.id === tabId);
   if (idx < 0) return;
   chatTabList.splice(idx, 1);

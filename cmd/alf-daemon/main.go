@@ -327,7 +327,7 @@ func main() {
 
 	// Watch config files for changes and auto-reload.
 	// The tiers path function is a closure so the watcher always tracks the live path.
-	go watchConfigFiles(configDir, func() string { return tierStore.Path() }, reloadCh)
+	go watchConfigFiles(configDir, dataDir, func() string { return tierStore.Path() }, reloadCh)
 
 	// Load agent team configurations.
 	agentStore := agents.NewFileAgentStore(filepath.Join(dataDir, "agents", "teams"))
@@ -465,7 +465,7 @@ func main() {
 						backend = names[0]
 					}
 				}
-				if (backend == "" || backend == "cli") && router.ResolveModel != nil {
+				if backend == "" || backend == "cli" {
 					model = router.ResolveModel(t.Model)
 				}
 				return agents.TierParams{
@@ -3833,15 +3833,17 @@ func lowestMediaTier(tiers *cc.TiersConfig) string {
 
 // watchConfigFiles polls config files for changes and sends reload events.
 // tiersPathFn is called each tick so the watcher follows runtime tiers_file changes.
-func watchConfigFiles(configDir string, tiersPathFn func() string, reloadCh chan cc.ReloadEvent) {
+func watchConfigFiles(configDir string, dataDir string, tiersPathFn func() string, reloadCh chan cc.ReloadEvent) {
 	type watchEntry struct {
 		path  string
 		event cc.ReloadEvent
+		isDir bool // watch directory modtime (file add/remove)
 	}
 
 	staticEntries := []watchEntry{
-		{filepath.Join(configDir, "config.json"), cc.ReloadConfig},
-		{filepath.Join(configDir, "firewall.json"), cc.ReloadFirewall},
+		{filepath.Join(configDir, "config.json"), cc.ReloadConfig, false},
+		{filepath.Join(configDir, "firewall.json"), cc.ReloadFirewall, false},
+		{filepath.Join(dataDir, "agents", "teams"), cc.ReloadAgents, true},
 	}
 
 	modTimes := make(map[string]time.Time)
@@ -3861,7 +3863,7 @@ func watchConfigFiles(configDir string, tiersPathFn func() string, reloadCh chan
 
 	for range ticker.C {
 		// Build the full entry list each tick so tiers path changes are picked up.
-		entries := append(staticEntries, watchEntry{tiersPathFn(), cc.ReloadTiers})
+		entries := append(staticEntries, watchEntry{tiersPathFn(), cc.ReloadTiers, false})
 
 		for _, e := range entries {
 			info, err := os.Stat(e.path)
@@ -3871,9 +3873,20 @@ func watchConfigFiles(configDir string, tiersPathFn func() string, reloadCh chan
 				}
 				continue
 			}
+			// For directories, use the latest modtime of the dir itself or any file inside.
+			mt := info.ModTime()
+			if e.isDir {
+				if dirEntries, err := os.ReadDir(e.path); err == nil {
+					for _, de := range dirEntries {
+						if fi, err := de.Info(); err == nil && fi.ModTime().After(mt) {
+							mt = fi.ModTime()
+						}
+					}
+				}
+			}
 			prev := modTimes[e.path]
-			if !info.ModTime().Equal(prev) {
-				modTimes[e.path] = info.ModTime()
+			if !mt.Equal(prev) {
+				modTimes[e.path] = mt
 				if !prev.IsZero() {
 					log.Printf("config watcher: %s changed, reloading", filepath.Base(e.path))
 					select {

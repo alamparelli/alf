@@ -91,10 +91,57 @@ type apiRequest struct {
 }
 
 type apiMessage struct {
-	Role       string        `json:"role"`
-	Content    string        `json:"content,omitempty"`
-	ToolCalls  []apiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string        `json:"tool_call_id,omitempty"`
+	Role       string        `json:"-"`
+	Content    string        `json:"-"`
+	ToolCalls  []apiToolCall `json:"-"`
+	ToolCallID string        `json:"-"`
+}
+
+// MarshalJSON implements custom JSON encoding for OpenAI-compatible messages.
+// - Assistant messages with tool_calls emit "content": null (required by OpenRouter).
+// - Tool result messages always emit "content" (even if empty).
+// - Other messages omit "content" when empty.
+func (m apiMessage) MarshalJSON() ([]byte, error) {
+	msg := make(map[string]any)
+	msg["role"] = m.Role
+
+	switch {
+	case len(m.ToolCalls) > 0:
+		// Assistant with tool_calls: content must be null, not absent.
+		msg["content"] = nil
+		msg["tool_calls"] = m.ToolCalls
+		if m.Content != "" {
+			msg["content"] = m.Content
+		}
+	case m.ToolCallID != "":
+		// Tool result: always include content + tool_call_id.
+		msg["content"] = m.Content
+		msg["tool_call_id"] = m.ToolCallID
+	default:
+		// System/user/assistant text: omit content only if empty.
+		if m.Content != "" {
+			msg["content"] = m.Content
+		}
+	}
+	return json.Marshal(msg)
+}
+
+// UnmarshalJSON implements custom JSON decoding for apiMessage.
+func (m *apiMessage) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Role       string        `json:"role"`
+		Content    string        `json:"content"`
+		ToolCalls  []apiToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string        `json:"tool_call_id,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	m.Role = raw.Role
+	m.Content = raw.Content
+	m.ToolCalls = raw.ToolCalls
+	m.ToolCallID = raw.ToolCallID
+	return nil
 }
 
 type apiToolCall struct {

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -186,6 +187,98 @@ func TestAPIProvider_OnProgress(t *testing.T) {
 		if e.Type != "text_delta" {
 			t.Errorf("expected 'text_delta' event type, got %q", e.Type)
 		}
+	}
+}
+
+func TestApiMessage_MarshalJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		msg     apiMessage
+		wantKey string // key that must exist
+		wantVal string // expected value for wantKey ("null" for JSON null)
+	}{
+		{
+			name:    "assistant with tool_calls emits content null",
+			msg:     apiMessage{Role: "assistant", ToolCalls: []apiToolCall{{ID: "1", Type: "function", Function: apiToolCallFn{Name: "bash", Arguments: `{}`}}}},
+			wantKey: "content",
+			wantVal: "null",
+		},
+		{
+			name:    "assistant with tool_calls and text emits content string",
+			msg:     apiMessage{Role: "assistant", Content: "thinking...", ToolCalls: []apiToolCall{{ID: "1", Type: "function", Function: apiToolCallFn{Name: "bash", Arguments: `{}`}}}},
+			wantKey: "content",
+			wantVal: `"thinking..."`,
+		},
+		{
+			name:    "tool result always emits content",
+			msg:     apiMessage{Role: "tool", Content: "output", ToolCallID: "1"},
+			wantKey: "content",
+			wantVal: `"output"`,
+		},
+		{
+			name:    "tool result emits content even if empty",
+			msg:     apiMessage{Role: "tool", Content: "", ToolCallID: "1"},
+			wantKey: "content",
+			wantVal: `""`,
+		},
+		{
+			name:    "user message omits content when empty",
+			msg:     apiMessage{Role: "user"},
+			wantKey: "content",
+			wantVal: "", // absent
+		},
+		{
+			name:    "user message includes content when set",
+			msg:     apiMessage{Role: "user", Content: "hello"},
+			wantKey: "content",
+			wantVal: `"hello"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.msg)
+			if err != nil {
+				t.Fatalf("marshal error: %v", err)
+			}
+			var raw map[string]json.RawMessage
+			json.Unmarshal(data, &raw)
+
+			val, exists := raw[tt.wantKey]
+			if tt.wantVal == "" {
+				if exists {
+					t.Errorf("expected %q to be absent, got %s", tt.wantKey, string(val))
+				}
+				return
+			}
+			if !exists {
+				t.Fatalf("expected %q in JSON, got: %s", tt.wantKey, string(data))
+			}
+			if string(val) != tt.wantVal {
+				t.Errorf("expected %s=%s, got %s", tt.wantKey, tt.wantVal, string(val))
+			}
+		})
+	}
+}
+
+func TestApiMessage_RoundTrip(t *testing.T) {
+	original := apiMessage{
+		Role:      "assistant",
+		ToolCalls: []apiToolCall{{ID: "call_1", Type: "function", Function: apiToolCallFn{Name: "grep", Arguments: `{"pattern":"foo"}`}}},
+	}
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded apiMessage
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Role != "assistant" {
+		t.Errorf("role: got %q", decoded.Role)
+	}
+	if len(decoded.ToolCalls) != 1 || decoded.ToolCalls[0].Function.Name != "grep" {
+		t.Errorf("tool_calls not preserved: %+v", decoded.ToolCalls)
 	}
 }
 

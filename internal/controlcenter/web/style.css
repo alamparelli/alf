@@ -1944,6 +1944,7 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .vault-status-off { background: var(--text-dim); }
 .vault-setup-card { margin-bottom: 16px; }
 .vault-setup-text { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--text-dim); line-height: 1.5; }
+.vault-warning { margin: 0 0 0.75rem; font-size: 0.82rem; color: var(--red); line-height: 1.5; font-weight: 500; }
 .vault-setup-hint { margin: 0.75rem 0 0; font-size: 0.75rem; color: var(--text-dim); }
 .vault-setup-hint code { font-size: 0.7rem; padding: 1px 4px; border-radius: 3px; background: var(--bg-input); }
 .vault-unlock-card { margin-bottom: 16px; }

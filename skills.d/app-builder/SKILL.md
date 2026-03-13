@@ -62,13 +62,15 @@ Browse https://lucide.dev/icons for the full list.
 - The ONLY acceptable hardcoded colors are: `transparent`, `currentColor`, and `rgba(0,0,0,0.02)` for subtle hovers
 - If you catch yourself writing a hex color, STOP and use the matching CSS variable instead
 
-**Step 1: Link the CC theme** - every `index.html` must include:
+**Step 1: Link the CC theme** - every `index.html` must include in `<head>`:
 ```html
 <link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="assets/style.css">
 ```
-This gives you the full CC variable set. The theme **automatically adapts to the user's OS light/dark preference** via `prefers-color-scheme`. You do NOT need to handle theme switching - just use `var(--*)` and it works.
+- `/static/theme.css` provides all CC color variables (`var(--bg)`, `var(--text)`, etc.). It adapts to light/dark automatically.
+- `assets/style.css` is YOUR app's stylesheet. Put all component styles, layout, and overrides there. **Never use inline `<style>` blocks in index.html** - all CSS goes in `assets/style.css`.
 
-**Step 2: CC Design System variables** - use these, never hardcode colors:
+**Step 2: CC Design System variables** - use these in `assets/style.css`, never hardcode colors:
 
 The CC uses **Catppuccin** - Latte (light) and Mocha (dark), switching automatically with the OS.
 
@@ -89,7 +91,7 @@ The CC uses **Catppuccin** - Latte (light) and Mocha (dark), switching automatic
 
 The values above are for reference only. **Always use `var(--*)`, never the hex values directly.** The theme handles light/dark automatically via `prefers-color-scheme`.
 
-**Step 3: CC component patterns** - copy these exactly:
+**Step 3: CC component patterns** - put these in `assets/style.css`:
 
 ```css
 /* Base */
@@ -188,17 +190,18 @@ tr:hover { background: rgba(0,0,0,0.02); }
 - **ZERO hardcoded colors** - every color must come from `var(--*)` CSS variables
 - The CC theme auto-adapts to OS dark/light - do NOT write your own theme logic
 - No external dependencies (CSP blocks external scripts/styles)
-- All JS must be inline or in `assets/app.js` loaded via relative path
-- All CSS must be inline or in `assets/style.css` loaded via relative path
+- All JS must be in `assets/app.js` loaded via relative path (no inline `<script>` blocks in HTML)
+- All CSS must be in `assets/style.css` loaded via relative path (no inline `<style>` blocks in HTML)
 - API calls use relative paths (`/api/bash`, `/api/apps/...`)
-- Use `<link rel="stylesheet" href="/static/theme.css">` for CC variables
+- Use `<link rel="stylesheet" href="/static/theme.css">` for CC color variables
+- Use `<link rel="stylesheet" href="assets/style.css">` for app component styles
 - Design MUST look like a native CC page, not a generic web app
 
 ### Mobile Responsiveness (REQUIRED)
 
 Every app MUST be fully usable on mobile (375px–430px). This is not optional.
 
-**Responsive patterns to always include:**
+**Responsive patterns to always include in `assets/style.css`:**
 
 ```css
 /* Mobile-first base - then scale UP */
@@ -273,9 +276,9 @@ Apps must be visually polished - not generic AI output. Apply these principles w
 
 **CSP constraints:**
 - NO `<script src="https://...">` - blocked
-- NO `<link rel="stylesheet" href="https://...">` - blocked (except `/static/theme.css`)
+- NO `<link rel="stylesheet" href="https://...">` - blocked (except `/static/theme.css` and relative paths like `assets/style.css`)
 - Fetch/XHR restricted to same origin (`/api/*` works)
-- Inline scripts and styles ARE allowed
+- Inline scripts and styles are allowed but discouraged - use `assets/app.js` and `assets/style.css` instead
 
 ### 5. Data storage
 

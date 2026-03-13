@@ -34,8 +34,13 @@ SSH="ssh -S $SSH_SOCK"
 SCP="scp -o ControlPath=$SSH_SOCK"
 RSYNC="rsync -az -e 'ssh -S $SSH_SOCK'"
 
+GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 GIT_HASH=$(git rev-parse --short HEAD)
-VERSION="alpha-${GIT_HASH}"
+if [ -n "$GIT_TAG" ]; then
+  VERSION="${GIT_TAG#v}"
+else
+  VERSION="alpha-${GIT_HASH}"
+fi
 
 # --- Build CLI binaries for all platforms ---
 echo "==> Building CLI binaries (${VERSION})..."

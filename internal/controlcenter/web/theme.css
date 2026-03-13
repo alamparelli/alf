@@ -90,19 +90,19 @@
 /* Sage Dark */
 @media (prefers-color-scheme: dark) {
   [data-palette="sage"] {
-    --bg: #1a1e1a;
-    --bg-card: #222822;
-    --bg-input: #2e342e;
-    --text: #c5cfbf;
-    --text-dim: #7a8a74;
-    --accent: #7cb87c;
-    --green: #8ec48e;
+    --bg: #080a08;
+    --bg-card: #111413;
+    --bg-input: #181d19;
+    --text: #c8d0c6;
+    --text-dim: #6a7568;
+    --accent: #6b8f71;
+    --green: #6b8f71;
     --red: #e07060;
     --yellow: #d4a84b;
-    --border: #3a4638;
-    --on-accent: #222822;
+    --border: #1a1f1b;
+    --on-accent: #080a08;
     --danger: #e07060;
-    --success: #8ec48e;
+    --success: #6b8f71;
     --error: #e07060;
 
     --mauve: #b89adb;

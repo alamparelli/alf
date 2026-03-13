@@ -552,8 +552,9 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 	// Wrap API provider with agentic tool loop when tier has tools.
 	if isAPITier && cs.ToolRegistry != nil && cs.ToolExecutor != nil && len(tp.Tools) > 0 {
+		cs.ToolRegistry.Rescan() // pick up new tool schemas created since startup
 		if apiProv, ok := prov.(*provider.APIProvider); ok {
-			schemas := cs.ToolRegistry.ForTools(tp.Tools)
+			schemas := cs.ToolRegistry.ForToolsStrict(tp.Tools)
 			if len(schemas) > 0 {
 				tools := tooling.ToOpenAI(schemas)
 				maxTurns := tp.MaxTurns
@@ -609,11 +610,21 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		convMsgs := conversation.BuildContext(cs.ConvStore.Recent(conversation.ChannelCC, 0), conversation.DefaultMaxMessages)
 		if isAPITier || params.ResumeID == "" {
 			if isAPITier {
-				// API providers: pass as structured messages.
-				flat := conversation.FlattenForAPI(convMsgs)
-				ctxMsgs := make([]provider.ContextMessage, len(flat))
-				for i, m := range flat {
-					ctxMsgs[i] = provider.ContextMessage{Role: m.Role, Content: m.Content}
+				// API providers: pass as structured OpenAI-format messages
+				// that preserve tool_calls and tool results, preventing
+				// weaker models from hallucinating tool usage from text patterns.
+				oaiMsgs := conversation.FlattenForOpenAI(convMsgs)
+				ctxMsgs := make([]provider.ContextMessage, len(oaiMsgs))
+				for i, m := range oaiMsgs {
+					cm := provider.ContextMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+					for _, tc := range m.ToolCalls {
+						cm.ToolCalls = append(cm.ToolCalls, provider.ContextToolCall{
+							ID:        tc.ID,
+							Name:      tc.Name,
+							Arguments: tc.Arguments,
+						})
+					}
+					ctxMsgs[i] = cm
 				}
 				params.ConvMessages = ctxMsgs
 			} else {
@@ -970,12 +981,25 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 			if (t.Backend == "" || t.Backend == "cli") && cs.ResolveModel != nil {
 				model = cs.ResolveModel(t.Model)
 			}
-			// Resolve ["*"] into all available tool names.
+			// Resolve tool wildcards into concrete tool names.
 			tools := t.Tools
 			if len(tools) == 1 && tools[0] == "*" {
 				tools = tooling.DiscoverToolNames(cs.DataDir)
+				if cs.ToolRegistry != nil {
+					tools = append(tools, cs.ToolRegistry.NativeToolNames()...)
+				}
 				if len(tools) > 0 {
 					log.Printf("[chat] tier %q: wildcard resolved to %d tools", tierName, len(tools))
+				}
+			} else if len(tools) == 1 && tools[0] == "*native" {
+				// Only native Go tools (bash, read_file, grep, glob, write_file).
+				if cs.ToolRegistry != nil {
+					tools = cs.ToolRegistry.NativeToolNames()
+				} else {
+					tools = nil
+				}
+				if len(tools) > 0 {
+					log.Printf("[chat] tier %q: native wildcard resolved to %d tools", tierName, len(tools))
 				}
 			}
 			return tierParams{

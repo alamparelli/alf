@@ -163,7 +163,11 @@ Add this to your `tiers` array. Now type `/power analyze this system` in Telegra
 
 ## Available tools
 
-The `tools` field controls which Claude Code tools a read-only tier can use. Write-capable tiers (`write_capable: true`) get all tools automatically.
+The `tools` field controls which tools are available to a tier. Behavior differs between CLI and API backends.
+
+### CLI tiers (`backend: "cli"` or unset)
+
+CLI tiers run Claude Code as a subprocess. Tools are managed by Claude Code itself — `toolbox.md` describes all available tools to the model. Write-capable tiers (`write_capable: true`) get all tools automatically via `--dangerously-skip-permissions`.
 
 | Tool | What it does |
 |------|-------------|
@@ -178,12 +182,58 @@ The `tools` field controls which Claude Code tools a read-only tier can use. Wri
 | `NotebookEdit` | Edit Jupyter notebooks |
 | `Agent` | Launch a sub-agent for complex tasks |
 
-**Typical combinations:**
-- Read-only analysis: `["Read"]`
-- Read + web research: `["Read", "WebSearch"]`
-- Full read access: `["Read", "Glob", "Grep", "WebSearch", "WebFetch"]`
+### API tiers (`backend: "openrouter"`, `"ollama"`, etc.)
 
-> Write-capable tiers don't need a `tools` list — they get everything via `--dangerously-skip-permissions`.
+API tiers use a **tool loop** — ALF sends tool schemas to the model and executes tool calls in a loop until the model produces a text response or hits `max_turns`.
+
+Available tools for API tiers:
+
+| Type | Examples | How they work |
+|------|----------|---------------|
+| **Native tools** | `bash`, `read_file`, `grep`, `glob`, `write_file` | Built-in Go implementations. Always have proper schemas with full descriptions. |
+| **User tools with schema** | Any script in `tools/` that has a matching `.json` manifest | The JSON manifest provides the tool name, description, and parameter schema. |
+| **User tools without schema** | Scripts in `tools/` or `tools.d/` without a `.json` file | **Not available to API tiers.** These tools lack descriptions, so API models can't reason about when to use them. They remain available to CLI tiers via `toolbox.md`. |
+
+### Tool wildcards
+
+| Value | Resolves to |
+|-------|-------------|
+| `["*"]` | All native tools + user tools **that have a `.json` schema**. Best for capable models. |
+| `["*native"]` | Only native tools (`bash`, `read_file`, `grep`, `glob`, `write_file`). Best for weaker/free models that struggle with tool selection. |
+| `["bash", "grep"]` | Only the listed tools, if they have a schema. |
+
+> **Tip:** Free or lightweight models (e.g. `step-3.5-flash:free`) work best with `["*native"]`. Giving them too many tools causes confusion — they pick random tools instead of the right one.
+
+### Making a user tool available to API tiers
+
+Create a JSON manifest next to your script. For example, if you have `tools/my-tool`, create `tools/my-tool.json`:
+
+```json
+{
+  "name": "my_tool",
+  "description": "Clear description of what this tool does and when to use it",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "args": {
+        "type": "string",
+        "description": "Command-line arguments"
+      }
+    },
+    "required": ["args"],
+    "additionalProperties": false
+  }
+}
+```
+
+The description is critical — it's the only context the API model has to decide whether to call your tool.
+
+### Typical combinations
+
+- **Weak model, basic tasks:** `["*native"]`
+- **Capable model, full access:** `["*"]`
+- **Read-only analysis (CLI):** `["Read", "Glob", "Grep"]`
+- **Specific tools only:** `["bash", "read_file", "remember"]`
 
 ## Common questions
 

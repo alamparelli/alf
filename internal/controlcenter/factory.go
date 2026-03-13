@@ -239,6 +239,12 @@ func HandlerFactory(deps Deps) http.Handler {
 	// Docs (embedded markdown).
 	mux.Handle("/api/docs/", &DocsHandler{})
 
+	// Debug: tier prompt inspector API + tool tester page.
+	if deps.ChatService != nil {
+		mux.Handle("/api/debug/prompt", &DebugPromptHandler{ChatService: deps.ChatService})
+	}
+	mux.Handle("/debug/tools", &DebugToolsPageHandler{})
+
 	// Bash command execution.
 	mux.Handle("/api/bash", &BashHandler{})
 

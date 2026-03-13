@@ -550,9 +550,10 @@ func main() {
 		tooling.WriteFileNativeTool{DataDir: dataDir},
 	}
 	toolExecutor := &tooling.Executor{
-		DataDir: dataDir,
-		HomeDir: homeDir,
-		Timeout: 30 * time.Second,
+		DataDir:  dataDir,
+		HomeDir:  homeDir,
+		Registry: toolRegistry,
+		Timeout:  30 * time.Second,
 	}
 	for _, t := range nativeTools {
 		toolRegistry.RegisterNative(t)
@@ -1539,7 +1540,7 @@ func main() {
 			}
 
 			// Resolve tier to params.
-			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), dataDir)
+			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), dataDir, toolRegistry)
 
 			eventLog.Log("router_classify", map[string]any{
 				"chat_id":          chatID,
@@ -1747,8 +1748,9 @@ func main() {
 
 			// Wrap API provider with agentic tool loop when tier has tools.
 			if isAPITier && chatService.ToolRegistry != nil && chatService.ToolExecutor != nil && len(tp.Tools) > 0 {
+				chatService.ToolRegistry.Rescan() // pick up new tool schemas created since startup
 				if apiProv, ok := tierProv.(*provider.APIProvider); ok {
-					schemas := chatService.ToolRegistry.ForTools(tp.Tools)
+					schemas := chatService.ToolRegistry.ForToolsStrict(tp.Tools)
 					if len(schemas) > 0 {
 						tools := tooling.ToOpenAI(schemas)
 						maxTurns := tp.MaxTurns
@@ -1799,10 +1801,18 @@ func main() {
 			tgConvMsgs := conversation.BuildContext(convStore.Recent(conversation.ChannelTelegram, 0), conversation.DefaultMaxMessages)
 			if isAPITier || invokeParams.ResumeID == "" {
 				if isAPITier {
-					flat := conversation.FlattenForAPI(tgConvMsgs)
-					ctxMsgs := make([]provider.ContextMessage, len(flat))
-					for i, m := range flat {
-						ctxMsgs[i] = provider.ContextMessage{Role: m.Role, Content: m.Content}
+					oaiMsgs := conversation.FlattenForOpenAI(tgConvMsgs)
+					ctxMsgs := make([]provider.ContextMessage, len(oaiMsgs))
+					for i, m := range oaiMsgs {
+						cm := provider.ContextMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+						for _, tc := range m.ToolCalls {
+							cm.ToolCalls = append(cm.ToolCalls, provider.ContextToolCall{
+								ID:        tc.ID,
+								Name:      tc.Name,
+								Arguments: tc.Arguments,
+							})
+						}
+						ctxMsgs[i] = cm
 					}
 					invokeParams.ConvMessages = ctxMsgs
 				} else {
@@ -2526,7 +2536,7 @@ func answerCallbackQuery(client *http.Client, token string, callbackID string) {
 	defer resp.Body.Close()
 }
 
-func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string) tierParams {
+func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, reg *tooling.Registry) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			model := t.Model
@@ -2535,12 +2545,25 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string) t
 			if t.Backend == "" || t.Backend == "cli" {
 				model = router.ResolveModel(t.Model)
 			}
-			// Resolve ["*"] into all available tool names.
+			// Resolve tool wildcards into concrete tool names.
 			tools := t.Tools
 			if len(tools) == 1 && tools[0] == "*" {
 				tools = tooling.DiscoverToolNames(dataDir)
+				if reg != nil {
+					tools = append(tools, reg.NativeToolNames()...)
+				}
 				if len(tools) > 0 {
 					log.Printf("[chat] tier %q: wildcard resolved to %d tools", tierName, len(tools))
+				}
+			} else if len(tools) == 1 && tools[0] == "*native" {
+				// Only native Go tools (bash, read_file, grep, glob, write_file).
+				if reg != nil {
+					tools = reg.NativeToolNames()
+				} else {
+					tools = nil
+				}
+				if len(tools) > 0 {
+					log.Printf("[chat] tier %q: native wildcard resolved to %d tools", tierName, len(tools))
 				}
 			}
 			return tierParams{

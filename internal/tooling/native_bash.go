@@ -3,11 +3,12 @@ package tooling
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"os/exec"
-	"time"
-
 	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"time"
 )
 
 const (
@@ -70,6 +71,10 @@ func (t BashNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", args.Command)
 	if t.DataDir != "" {
 		cmd.Dir = t.DataDir
+		// Prepend tools.d/ and tools/ to PATH so user/system CLI tools are callable.
+		toolPaths := filepath.Join(t.DataDir, "tools.d") + ":" + filepath.Join(t.DataDir, "tools")
+		sysPath := os.Getenv("PATH")
+		cmd.Env = append(os.Environ(), "PATH="+toolPaths+":"+sysPath)
 	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf

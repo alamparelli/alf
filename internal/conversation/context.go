@@ -79,6 +79,106 @@ type APIMessage struct {
 	Content string `json:"content"`
 }
 
+// OpenAIToolCall represents a tool invocation in OpenAI message format.
+type OpenAIToolCall struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+// OpenAIMessage is a structured message for OpenAI-compatible APIs.
+// Unlike APIMessage, it preserves tool_calls and tool results as structured
+// data so models don't learn to simulate tool calls from text patterns.
+type OpenAIMessage struct {
+	Role       string           // "user", "assistant", "tool"
+	Content    string           // text content
+	ToolCalls  []OpenAIToolCall // assistant messages: tool invocations
+	ToolCallID string           // tool messages: links result to its call
+}
+
+// FlattenForOpenAI converts rich messages into structured OpenAI-format
+// messages that preserve tool calls and results as proper API structures.
+// This prevents weaker models from learning to hallucinate tool calls
+// by mimicking text patterns like "[Used tool: X]" in conversation history.
+func FlattenForOpenAI(messages []Message) []OpenAIMessage {
+	var result []OpenAIMessage
+	for _, m := range messages {
+		if m.Role == "user" {
+			text := textFromBlocks(m.Blocks)
+			if text != "" {
+				result = append(result, OpenAIMessage{Role: "user", Content: text})
+			}
+			continue
+		}
+
+		// Assistant messages: split into structured parts.
+		var textParts []string
+		var toolCalls []OpenAIToolCall
+		var toolResults []struct{ id, output string }
+
+		for _, b := range m.Blocks {
+			switch b.Type {
+			case BlockText:
+				if b.Text != "" {
+					textParts = append(textParts, b.Text)
+				}
+			case BlockToolUse:
+				args := b.Input
+				if args == "" {
+					args = "{}"
+				}
+				toolCalls = append(toolCalls, OpenAIToolCall{
+					ID:        b.ToolID,
+					Name:      b.Name,
+					Arguments: args,
+				})
+			case BlockToolResult:
+				output := b.Output
+				if len(output) > MaxToolResultBytes {
+					output = output[:MaxToolResultBytes] + "..."
+				}
+				toolResults = append(toolResults, struct{ id, output string }{b.ToolID, output})
+			}
+		}
+
+		if len(toolCalls) > 0 {
+			// Assistant message with tool calls.
+			msg := OpenAIMessage{Role: "assistant", ToolCalls: toolCalls}
+			if len(textParts) > 0 {
+				msg.Content = strings.Join(textParts, "\n")
+			}
+			result = append(result, msg)
+
+			// Each tool result becomes a separate "tool" message.
+			for _, tr := range toolResults {
+				result = append(result, OpenAIMessage{
+					Role:       "tool",
+					Content:    tr.output,
+					ToolCallID: tr.id,
+				})
+			}
+		} else if len(textParts) > 0 {
+			// Pure text assistant message.
+			result = append(result, OpenAIMessage{
+				Role:    "assistant",
+				Content: strings.Join(textParts, "\n"),
+			})
+		}
+	}
+	return result
+}
+
+// textFromBlocks extracts only text content from blocks.
+func textFromBlocks(blocks []ContentBlock) string {
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == BlockText && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 // FormatAsSystemPrompt renders conversation history as a system prompt
 // injection for CLI providers that don't support message arrays.
 func FormatAsSystemPrompt(messages []Message) string {

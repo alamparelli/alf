@@ -140,14 +140,93 @@ These tools are already in PATH and available for your scripts to call:
 - Short, descriptive, verb-first when possible: `check-disk`, `fetch-data`, `sync-notes`
 - No generic names: avoid `run`, `do`, `helper`, `util`
 
+### 10. JSON Schema manifest (REQUIRED)
+
+Every tool MUST have a companion `.json` file that describes its interface for API-based LLM tiers. Without this file, the tool is invisible to API models (only CLI tiers can use it via toolbox.md).
+
+Create `~/data/tools/{tool-name}.json` alongside the tool binary:
+
+```json
+{
+  "name": "tool-name",
+  "description": "Short description of what the tool does.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["create", "list", "delete"],
+        "description": "Action to perform"
+      },
+      "name": {
+        "type": "string",
+        "description": "Item name (required for create)"
+      },
+      "id": {
+        "type": "integer",
+        "description": "Item ID (required for delete)"
+      },
+      "verbose": {
+        "type": "boolean",
+        "description": "Enable verbose output"
+      }
+    },
+    "required": ["action"],
+    "x-positional": ["action", "name", "id"]
+  }
+}
+```
+
+#### Schema conventions
+
+- **`x-positional`**: Array of field names that become positional CLI args (in order). All other fields become `--key value` flags.
+- **`required`**: Only truly mandatory fields (e.g. the subcommand). Optional fields are omitted from required.
+- **Boolean fields**: `true` emits `--flag` (no value), `false` omits the flag entirely.
+- **Enum fields**: Use `enum` to constrain valid values — helps weaker models pick correct options.
+
+#### How it works
+
+The executor converts JSON from the LLM into CLI arguments:
+- `{"action": "create", "name": "hello", "verbose": true}` with `x-positional: ["action", "name"]`
+- Becomes: `tool-name create hello --verbose`
+
+#### Flag-only tools (no subcommand)
+
+For tools without a subcommand, use `x-positional` only for value arguments:
+
+```json
+{
+  "name": "disk-check",
+  "description": "Check disk usage for a path.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path to check"
+      },
+      "human": {
+        "type": "boolean",
+        "description": "Human-readable output"
+      }
+    },
+    "required": ["path"],
+    "x-positional": ["path"]
+  }
+}
+```
+
+→ `{"path": "/home", "human": true}` becomes `disk-check /home --human`
+
 ## Workflow
 
 1. **Clarify** what the tool does and what inputs/outputs it needs
 2. **Check** if a similar tool already exists: `ls ~/data/tools/`
 3. **Write** the script following all standards above
-4. **Set permissions**: `chmod +x ~/data/tools/{name}`
-5. **Test** it: run with `--help`, then with sample args
-6. **Verify** ALF discovers it: the tool appears in the next toolbox refresh
+4. **Write the JSON schema** manifest with `x-positional` convention
+5. **Set permissions**: `chmod +x ~/data/tools/{name}`
+6. **Test** it: run with `--help`, then with sample args
+7. **Verify** ALF discovers it: the tool appears in the next toolbox refresh (auto-detected, no restart needed)
 
 ## Quality checklist
 
@@ -161,6 +240,7 @@ Before delivering:
 - [ ] No hardcoded secrets or API keys
 - [ ] Tool name follows naming conventions
 - [ ] Executable bit set (`chmod +x`)
+- [ ] JSON schema `.json` file created with `x-positional`
 - [ ] Tested with sample input
 
 ## What NOT to do

@@ -3,6 +3,7 @@ package tooling
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -14,11 +15,12 @@ import (
 
 // Executor runs tools: native Go tools first, subprocess fallback for user tools.
 type Executor struct {
-	DataDir string
-	HomeDir string
-	Env     []string      // base env vars to inject
-	Timeout time.Duration // per-tool timeout; 0 = 30s
-	natives map[string]NativeTool
+	DataDir  string
+	HomeDir  string
+	Registry *Registry     // optional: enables JSON→CLI arg conversion for user tools
+	Env      []string      // base env vars to inject
+	Timeout  time.Duration // per-tool timeout; 0 = 30s
+	natives  map[string]NativeTool
 }
 
 // RegisterNative adds a Go-native tool. Native tools take priority over subprocess tools.
@@ -72,8 +74,13 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, toolPath)
-	cmd.Stdin = strings.NewReader(call.Arguments)
+	// Convert JSON args to CLI arguments using schema conventions.
+	cliArgs := e.jsonToCLI(call.Name, call.Arguments)
+	cmd := exec.CommandContext(ctx, toolPath, cliArgs...)
+	if len(cliArgs) == 0 {
+		// No schema or conversion failed — fall back to JSON on stdin.
+		cmd.Stdin = strings.NewReader(call.Arguments)
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -149,4 +156,108 @@ func (e *Executor) buildEnv() []string {
 	}
 	env = append(env, e.Env...)
 	return env
+}
+
+// jsonToCLI converts JSON arguments to CLI arguments using the tool's schema.
+// Uses x-positional from the schema to determine positional args vs flags.
+//
+// Convention:
+//   - Fields listed in "x-positional" are emitted as positional args (in order).
+//   - Remaining fields become --key value flags.
+//   - Boolean true → --key (no value). Boolean false → omitted.
+//   - Null/empty values → omitted.
+//
+// Example: {"action":"add","text":"hello","priority":"high"} with x-positional:["action","text"]
+//   → ["add", "hello", "--priority", "high"]
+func (e *Executor) jsonToCLI(toolName, argsJSON string) []string {
+	if e.Registry == nil {
+		return nil
+	}
+	schema, ok := e.Registry.Get(toolName)
+	if !ok {
+		return nil
+	}
+
+	// Parse the JSON arguments.
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return nil
+	}
+	if len(args) == 0 {
+		return nil
+	}
+
+	// Extract x-positional from schema parameters.
+	var positional []string
+	if params, ok := schema.Parameters["x-positional"]; ok {
+		if arr, ok := params.([]any); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					positional = append(positional, s)
+				}
+			}
+		}
+	}
+
+	positionalSet := make(map[string]bool, len(positional))
+	for _, p := range positional {
+		positionalSet[p] = true
+	}
+
+	var result []string
+
+	// Emit positional args in order.
+	for _, key := range positional {
+		val, exists := args[key]
+		if !exists || val == nil {
+			continue
+		}
+		s := formatValue(val)
+		if s != "" {
+			result = append(result, s)
+		}
+	}
+
+	// Emit remaining fields as --key value flags.
+	for key, val := range args {
+		if positionalSet[key] || val == nil {
+			continue
+		}
+		switch v := val.(type) {
+		case bool:
+			if v {
+				result = append(result, "--"+key)
+			}
+		case string:
+			if v != "" {
+				result = append(result, "--"+key, v)
+			}
+		default:
+			s := formatValue(val)
+			if s != "" {
+				result = append(result, "--"+key, s)
+			}
+		}
+	}
+
+	return result
+}
+
+func formatValue(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		if val == float64(int(val)) {
+			return fmt.Sprintf("%d", int(val))
+		}
+		return fmt.Sprintf("%g", val)
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }

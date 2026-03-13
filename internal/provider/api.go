@@ -177,7 +177,18 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 	// Conversation history: prefer unified ConvMessages, fall back to per-key History.
 	if len(params.ConvMessages) > 0 {
 		for _, m := range params.ConvMessages {
-			messages = append(messages, apiMessage{Role: m.Role, Content: m.Content})
+			msg := apiMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+			for _, tc := range m.ToolCalls {
+				msg.ToolCalls = append(msg.ToolCalls, apiToolCall{
+					ID:   tc.ID,
+					Type: "function",
+					Function: apiToolCallFn{
+						Name:      tc.Name,
+						Arguments: tc.Arguments,
+					},
+				})
+			}
+			messages = append(messages, msg)
 		}
 	} else if params.SessionKey != "" && p.history != nil {
 		hist := p.history.Get(params.SessionKey)
@@ -381,8 +392,12 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 	log.Printf("api[%s]: response %dms %d chars %d tool_calls finish=%s model=%s",
 		p.name, duration.Milliseconds(), len(text), len(calls), finishReason, reqBody.Model)
 
-	// For non-tool responses, empty text is an error.
+	// For non-tool responses, empty text is an error. Retry once.
 	if text == "" && len(calls) == 0 {
+		if attempt < 1 {
+			log.Printf("api[%s]: empty response (attempt %d), retrying", p.name, attempt)
+			return p.doStreamRequest(ctx, reqBody, onProgress, attempt+1)
+		}
 		return nil, fmt.Errorf("api[%s] returned empty response", p.name)
 	}
 

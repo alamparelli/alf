@@ -36,11 +36,22 @@ type Params struct {
 	ConvMessages  []ContextMessage  // conversation history from unified store; takes priority over SessionKey history
 }
 
-// ContextMessage is a simple role+content pair used to pass conversation
-// history to providers. Produced by conversation.FlattenForAPI().
+// ContextToolCall represents a tool invocation within a ContextMessage.
+type ContextToolCall struct {
+	ID        string // tool call ID
+	Name      string // tool name
+	Arguments string // JSON arguments
+}
+
+// ContextMessage carries conversation history to providers.
+// For API providers, ToolCalls and ToolCallID enable proper OpenAI-format
+// messages instead of flattening tool calls to text (which causes weaker
+// models to hallucinate tool usage instead of making real function calls).
 type ContextMessage struct {
-	Role    string
-	Content string
+	Role       string
+	Content    string
+	ToolCalls  []ContextToolCall // assistant messages: tool invocations
+	ToolCallID string            // tool role messages: links result to call
 }
 
 // Provider invokes Claude and returns a result.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,10 +45,14 @@ type CallResult struct {
 
 // Execute runs a tool. Native Go tools are tried first, then subprocess binaries.
 func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
+	log.Printf("tooling: executing tool %s args=%s", call.Name, call.Arguments)
 	if n, ok := e.natives[call.Name]; ok {
 		out, err := n.Run(ctx, call.Arguments)
 		if err != nil {
 			return CallResult{ID: call.ID, Output: err.Error(), IsError: true}
+		}
+		if out == "" {
+			out = "(no output)"
 		}
 		return CallResult{ID: call.ID, Output: out}
 	}

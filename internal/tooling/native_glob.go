@@ -13,7 +13,9 @@ import (
 const globMaxResults = 500
 
 // GlobNativeTool lists files matching a glob pattern.
-type GlobNativeTool struct{}
+type GlobNativeTool struct {
+	DataDir string // base dir; used as default when path is empty
+}
 
 func (GlobNativeTool) ToolName() string { return "glob" }
 
@@ -29,16 +31,17 @@ func (GlobNativeTool) Schema() ToolSchema {
 					"description": "Glob pattern to match (e.g. '**/*.go', 'src/**/*.ts', '*.md').",
 				},
 				"path": map[string]any{
-					"type":        "string",
-					"description": "Base directory to search in. Defaults to current directory.",
+					"type":        []string{"string", "null"},
+					"description": "Base directory to search in. Null for current directory.",
 				},
 			},
-			"required": []string{"pattern"},
+			"required":             []string{"pattern", "path"},
+			"additionalProperties": false,
 		},
 	}
 }
 
-func (GlobNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
+func (t GlobNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
 	var args struct {
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
@@ -52,7 +55,13 @@ func (GlobNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
 
 	base := args.Path
 	if base == "" {
-		base = "."
+		if t.DataDir != "" {
+			base = t.DataDir
+		} else {
+			base = "."
+		}
+	} else if t.DataDir != "" && !filepath.IsAbs(base) {
+		base = filepath.Join(t.DataDir, base)
 	}
 
 	type entry struct {

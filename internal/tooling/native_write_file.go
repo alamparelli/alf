@@ -9,7 +9,9 @@ import (
 )
 
 // WriteFileNativeTool writes content to a file, creating parent directories as needed.
-type WriteFileNativeTool struct{}
+type WriteFileNativeTool struct {
+	DataDir string // base dir for resolving relative paths
+}
 
 func (WriteFileNativeTool) ToolName() string { return "write_file" }
 
@@ -29,12 +31,13 @@ func (WriteFileNativeTool) Schema() ToolSchema {
 					"description": "Content to write to the file.",
 				},
 			},
-			"required": []string{"path", "content"},
+			"required":             []string{"path", "content"},
+			"additionalProperties": false,
 		},
 	}
 }
 
-func (WriteFileNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
+func (t WriteFileNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
 	var args struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -44,6 +47,9 @@ func (WriteFileNativeTool) Run(_ context.Context, argsJSON string) (string, erro
 	}
 	if args.Path == "" {
 		return "", fmt.Errorf("path is required")
+	}
+	if t.DataDir != "" && !filepath.IsAbs(args.Path) {
+		args.Path = filepath.Join(t.DataDir, args.Path)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(args.Path), 0755); err != nil {

@@ -16,7 +16,9 @@ const (
 )
 
 // BashNativeTool executes shell commands.
-type BashNativeTool struct{}
+type BashNativeTool struct {
+	DataDir string // working directory for commands; defaults to /
+}
 
 func (BashNativeTool) ToolName() string { return "bash" }
 
@@ -32,16 +34,17 @@ func (BashNativeTool) Schema() ToolSchema {
 					"description": "The shell command to execute.",
 				},
 				"timeout": map[string]any{
-					"type":        "integer",
-					"description": fmt.Sprintf("Timeout in seconds (default %d, max 300).", bashDefaultTimeout),
+					"type":        []string{"integer", "null"},
+					"description": fmt.Sprintf("Timeout in seconds (default %d, max 300). Null for default.", bashDefaultTimeout),
 				},
 			},
-			"required": []string{"command"},
+			"required":             []string{"command", "timeout"},
+			"additionalProperties": false,
 		},
 	}
 }
 
-func (BashNativeTool) Run(ctx context.Context, argsJSON string) (string, error) {
+func (t BashNativeTool) Run(ctx context.Context, argsJSON string) (string, error) {
 	var args struct {
 		Command string `json:"command"`
 		Timeout int    `json:"timeout"`
@@ -65,6 +68,9 @@ func (BashNativeTool) Run(ctx context.Context, argsJSON string) (string, error) 
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", args.Command)
+	if t.DataDir != "" {
+		cmd.Dir = t.DataDir
+	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf

@@ -35,6 +35,27 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.className = 'toast', 3000);
 }
 
+// --- Desktop Notifications ---
+// Request permission on first user interaction.
+document.addEventListener('click', function reqNotif() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+  document.removeEventListener('click', reqNotif);
+}, { once: true });
+
+function notify(title, body) {
+  if (!document.hidden) return; // tab is focused, no need
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const n = new Notification(title, {
+    body: body ? body.substring(0, 200) : '',
+    icon: '/static/icon.png',
+    tag: 'alf-' + Date.now(),
+  });
+  n.onclick = () => { window.focus(); n.close(); };
+  setTimeout(() => n.close(), 8000);
+}
+
 // --- Palette system (light/dark follows OS) ---
 function applyPalette(palette) {
   if (!palette || palette === 'catppuccin') {
@@ -2080,6 +2101,7 @@ function chatFinalizeBubble() {
 function chatFinishSend() {
   chatFinalizeBubble();
   chatShowBadge();
+  notify('ALF', chatFullText || 'Response ready');
   chatClearStatus();
   chatSending = false;
   chatSetStopMode(false);
@@ -3092,6 +3114,7 @@ function schedRelTime(iso) {
 
 // ─── Tasks ──────────────────────────────────────────
 let tasksInitialized = false;
+var tasksRunningIds = new Set(); // track running task IDs for completion detection
 
 async function taskLauncherLoadTeams() {
   const sel = document.getElementById('taskLauncherTeam');
@@ -3182,7 +3205,21 @@ async function tasksFetch() {
   try {
     const res = await fetch('/api/tasks');
     const data = await res.json();
-    tasksRender(data.running || [], data.completed || []);
+    const running = data.running || [];
+    const completed = data.completed || [];
+
+    // Detect newly completed tasks (were running, now in completed).
+    const newRunningIds = new Set(running.map(t => t.id));
+    for (const t of completed) {
+      if (tasksRunningIds.has(t.id)) {
+        const status = t.status === 'completed' ? 'completed' : 'failed';
+        const preview = (t.prompt || '').substring(0, 80);
+        notify('Agent Task ' + status, preview);
+      }
+    }
+    tasksRunningIds = newRunningIds;
+
+    tasksRender(running, completed);
   } catch (e) {
     document.getElementById('tasksList').innerHTML = '<div class="task-empty">Failed to load tasks</div>';
   }
@@ -4161,6 +4198,39 @@ const savedView = localStorage.getItem('alf-view');
 navigateTo(savedView || 'chat');
 lucide.createIcons();
 document.body.classList.add('app-ready');
+
+// --- Welcome screen (first visit only) ---
+if (!localStorage.getItem('alf-welcomed')) {
+  const wb = document.createElement('div');
+  wb.className = 'welcome-backdrop';
+  wb.innerHTML = '<div class="welcome-modal">' +
+    '<div class="welcome-logo">ALF</div>' +
+    '<h2>Welcome to your Control Center</h2>' +
+    '<p>This is your personal command hub — manage schedules, agent teams, tools, and more from here.</p>' +
+    '<div class="welcome-steps">' +
+      '<div class="welcome-step">' +
+        '<span class="welcome-step-num">1</span>' +
+        '<span><strong>Say hello in the Chat</strong> — ALF will learn about you through a short onboarding conversation.</span>' +
+      '</div>' +
+      '<div class="welcome-step">' +
+        '<span class="welcome-step-num">2</span>' +
+        '<span><strong>Explore the Docs</strong> — check the getting started guide to discover what ALF can do.</span>' +
+      '</div>' +
+      '<div class="welcome-step">' +
+        '<span class="welcome-step-num">3</span>' +
+        '<span><strong>Make it yours</strong> — configure tiers, add skills, and connect your services in the Vault.</span>' +
+      '</div>' +
+    '</div>' +
+    '<button class="btn btn-primary welcome-cta" id="welcomeStartBtn">Get started</button>' +
+  '</div>';
+  document.body.appendChild(wb);
+  document.getElementById('welcomeStartBtn').addEventListener('click', () => {
+    localStorage.setItem('alf-welcomed', '1');
+    wb.classList.add('welcome-closing');
+    setTimeout(() => wb.remove(), 300);
+    navigateTo('chat');
+  });
+}
 
 loadStatus();
 loadTeachTiers();

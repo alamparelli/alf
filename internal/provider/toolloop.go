@@ -76,7 +76,8 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 		}
 
 		// No tool calls — return text response.
-		if len(resp.ToolCalls) == 0 || resp.FinishReason == "stop" {
+		if len(resp.ToolCalls) == 0 {
+			log.Printf("toolloop: no tool calls (finish=%s)\n--- model output ---\n%s\n--- end ---", resp.FinishReason, resp.Text)
 			return &Result{
 				Text:     resp.Text,
 				Model:    model,
@@ -107,6 +108,13 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 			assistantMsg.Content = resp.Text
 		}
 		messages = append(messages, assistantMsg)
+
+		// Log which tools the model is calling.
+		callNames := make([]string, len(resp.ToolCalls))
+		for i, tc := range resp.ToolCalls {
+			callNames[i] = tc.Function.Name
+		}
+		log.Printf("toolloop: turn %d, calling tools: %v", turns, callNames)
 
 		// Execute each tool call sequentially.
 		for _, tc := range resp.ToolCalls {

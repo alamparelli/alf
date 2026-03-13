@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,7 +15,9 @@ const (
 )
 
 // ReadFileNativeTool reads file contents with optional line range.
-type ReadFileNativeTool struct{}
+type ReadFileNativeTool struct {
+	DataDir string // base dir for resolving relative paths
+}
 
 func (ReadFileNativeTool) ToolName() string { return "read_file" }
 
@@ -30,20 +33,21 @@ func (ReadFileNativeTool) Schema() ToolSchema {
 					"description": "Absolute path to the file to read.",
 				},
 				"offset": map[string]any{
-					"type":        "integer",
-					"description": "Line number to start reading from (1-based, default 1).",
+					"type":        []string{"integer", "null"},
+					"description": "Line number to start reading from (1-based). Null for line 1.",
 				},
 				"limit": map[string]any{
-					"type":        "integer",
-					"description": fmt.Sprintf("Maximum number of lines to return (default %d).", readFileMaxLines),
+					"type":        []string{"integer", "null"},
+					"description": fmt.Sprintf("Maximum lines to return. Null for %d.", readFileMaxLines),
 				},
 			},
-			"required": []string{"path"},
+			"required":             []string{"path", "offset", "limit"},
+			"additionalProperties": false,
 		},
 	}
 }
 
-func (ReadFileNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
+func (t ReadFileNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
 	var args struct {
 		Path   string `json:"path"`
 		Offset int    `json:"offset"`
@@ -54,6 +58,9 @@ func (ReadFileNativeTool) Run(_ context.Context, argsJSON string) (string, error
 	}
 	if args.Path == "" {
 		return "", fmt.Errorf("path is required")
+	}
+	if t.DataDir != "" && !filepath.IsAbs(args.Path) {
+		args.Path = filepath.Join(t.DataDir, args.Path)
 	}
 
 	info, err := os.Stat(args.Path)

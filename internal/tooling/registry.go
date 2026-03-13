@@ -160,6 +160,8 @@ func fallbackSchema(name string) ToolSchema {
 					"description": "Command-line arguments",
 				},
 			},
+			"required":             []string{"args"},
+			"additionalProperties": false,
 		},
 	}
 }
@@ -190,6 +192,7 @@ func ToOpenAI(schemas []ToolSchema) []map[string]any {
 				"name":        SanitizeToolName(s.Name),
 				"description": s.Description,
 				"parameters":  params,
+				"strict":      true,
 			},
 		}
 	}

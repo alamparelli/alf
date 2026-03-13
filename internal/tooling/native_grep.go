@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
 const grepMaxOutput = 10_000
 
 // GrepNativeTool searches file contents using ripgrep with regex support.
-type GrepNativeTool struct{}
+type GrepNativeTool struct {
+	DataDir string // base dir for resolving relative paths
+}
 
 func (GrepNativeTool) ToolName() string { return "grep" }
 
@@ -27,32 +30,33 @@ func (GrepNativeTool) Schema() ToolSchema {
 					"description": "Regex pattern to search for.",
 				},
 				"path": map[string]any{
-					"type":        "string",
-					"description": "File or directory to search in. Defaults to current directory.",
+					"type":        []string{"string", "null"},
+					"description": "File or directory to search in. Null for current directory.",
 				},
 				"glob": map[string]any{
-					"type":        "string",
-					"description": "Glob pattern to filter files (e.g. '*.go', '**/*.md').",
+					"type":        []string{"string", "null"},
+					"description": "Glob pattern to filter files (e.g. '*.go', '**/*.md'). Null for all files.",
 				},
 				"case_insensitive": map[string]any{
-					"type":        "boolean",
-					"description": "Case-insensitive search (default false).",
+					"type":        []string{"boolean", "null"},
+					"description": "Case-insensitive search. Null for false.",
 				},
 				"context_lines": map[string]any{
-					"type":        "integer",
-					"description": "Lines of context to show before and after each match (default 0).",
+					"type":        []string{"integer", "null"},
+					"description": "Lines of context before and after each match. Null for 0.",
 				},
 				"files_only": map[string]any{
-					"type":        "boolean",
-					"description": "Return only file paths with matches, not the matching lines (default false).",
+					"type":        []string{"boolean", "null"},
+					"description": "Return only file paths, not matching lines. Null for false.",
 				},
 			},
-			"required": []string{"pattern"},
+			"required":             []string{"pattern", "path", "glob", "case_insensitive", "context_lines", "files_only"},
+			"additionalProperties": false,
 		},
 	}
 }
 
-func (GrepNativeTool) Run(ctx context.Context, argsJSON string) (string, error) {
+func (t GrepNativeTool) Run(ctx context.Context, argsJSON string) (string, error) {
 	var args struct {
 		Pattern         string `json:"pattern"`
 		Path            string `json:"path"`
@@ -66,6 +70,11 @@ func (GrepNativeTool) Run(ctx context.Context, argsJSON string) (string, error) 
 	}
 	if args.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")
+	}
+	if t.DataDir != "" && args.Path != "" && !filepath.IsAbs(args.Path) {
+		args.Path = filepath.Join(t.DataDir, args.Path)
+	} else if args.Path == "" && t.DataDir != "" {
+		args.Path = t.DataDir
 	}
 
 	rgArgs := []string{"--color=never"}

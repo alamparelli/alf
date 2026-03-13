@@ -76,6 +76,7 @@ Here's the full format:
 {
   "name": "my-team",
   "description": "What this team does",
+  "orchestrator_prompt": "Optional instructions for the orchestrator when using this team",
   "max_agents_per_request": 3,
   "global_timeout_minutes": 15,
   "agents": [
@@ -96,7 +97,8 @@ Each agent references a tier from `tiers.json`. The tier defines the model, tool
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Team name. Used as the `team/` prefix when the agent delegates. |
-| `description` | Yes | What the team does. The agent reads this to decide when to use the team. |
+| `description` | Yes | What the team does. The orchestrator reads this to decide when to use the team. |
+| `orchestrator_prompt` | No | Extra instructions injected into the orchestrator's system prompt for this team. Use this to guide how the orchestrator coordinates agents — e.g. enforcing workflows, quality gates, or output formats. |
 | `max_agents_per_request` | No | Max agents running in parallel. Default: 3 |
 | `global_timeout_minutes` | No | Max time for the entire agent run. Default: 60 |
 
@@ -154,6 +156,7 @@ ALF will generate the JSON. You can then save it via the **Workspace Explorer** 
 
 ## Tips
 
+- **Use `orchestrator_prompt` to steer coordination.** This field tells the orchestrator *how* to use the team — e.g. "always run the reviewer after the writer" or "output results in French". Unlike `description` (which is a short label), `orchestrator_prompt` can contain detailed workflow rules.
 - **Give agents clear, specific system prompts.** Vague prompts produce vague results. Tell each agent exactly what it should do and what format to use.
 - **Create dedicated tiers for agent roles.** A "researcher" tier with web search tools and 15 turns, a "writer" tier with write permissions, a "reviewer" tier on haiku with 5 turns. Multiple agents can share the same tier.
 - **Give agents enough turns (via their tier).** Start with 10-15 for agents that use tools. Use 5-10 for review-only agents. Too few turns → "turn limit reached" errors.
@@ -170,7 +173,7 @@ ALF will generate the JSON. You can then save it via the **Workspace Explorer** 
 4. Each sub-agent runs on **its own tier** - with its own model, tools, effort, and turn limits.
 5. Agent results are sent back to the orchestrator brain.
 6. The brain either delegates more work or outputs the final answer: `{"response": "..."}`
-7. This loop continues for up to `max_iterations` cycles (default 10).
+7. This loop continues for up to `max_iterations` cycles (default 20).
 
 The orchestrator runs **non-blocking** - you can continue chatting with ALF while it works in the background. Progress updates appear as animated status messages in Telegram.
 
@@ -183,7 +186,7 @@ The `agent` tier in `tiers.json` controls the orchestrator brain:
 | `model` | `opus` | Model used for the orchestrator brain (reasoning and delegation). |
 | `effort` | `medium` | Thinking effort for the brain. `medium` is recommended. |
 | `orchestrator_max_turns` | `3` | Max turns per brain call. The brain outputs JSON text only (no tools), so few turns suffice. |
-| `max_iterations` | `10` | How many delegate→synthesize cycles. Each cycle = one brain call + parallel agent delegation. |
+| `max_iterations` | `20` | How many delegate→synthesize cycles. Each cycle = one brain call + parallel agent delegation. |
 | `timeout_minutes` | `60` | Hard timeout for the entire run. Also bounded by each team's `global_timeout_minutes`. |
 
 ### Sub-agent execution

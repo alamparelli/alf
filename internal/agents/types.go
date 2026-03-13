@@ -4,11 +4,12 @@ import "time"
 
 // TeamConfig defines a group of specialized agents.
 type TeamConfig struct {
-	Name             string        `json:"name"`
-	Description      string        `json:"description"`
-	MaxAgentsPerReq  int           `json:"max_agents_per_request"`
-	GlobalTimeoutMin int           `json:"global_timeout_minutes"`
-	Agents           []AgentConfig `json:"agents"`
+	Name                string        `json:"name"`
+	Description         string        `json:"description"`
+	OrchestratorPrompt  string        `json:"orchestrator_prompt,omitempty"`
+	MaxAgentsPerReq     int           `json:"max_agents_per_request"`
+	GlobalTimeoutMin    int           `json:"global_timeout_minutes"`
+	Agents              []AgentConfig `json:"agents"`
 }
 
 // AgentConfig defines a single sub-agent within a team.

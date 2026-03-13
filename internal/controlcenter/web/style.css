@@ -719,13 +719,16 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .chat-input-bar textarea:focus { outline: none; border-color: var(--accent); }
 .chat-send-btn {
-  padding: 8px 12px; flex-shrink: 0; display: flex; align-items: center;
-  justify-content: center; cursor: pointer;
+  padding: 0; width: 36px; height: 36px; flex-shrink: 0; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+  border-radius: var(--radius); transition: background 0.15s, color 0.15s, opacity 0.15s;
 }
-.chat-send-btn i { width: 18px; height: 18px; pointer-events: none; }
+.chat-send-btn:hover { opacity: 0.85; }
+.chat-send-btn i, .chat-send-btn svg { width: 18px; height: 18px; pointer-events: none; }
 .chat-send-btn:disabled { opacity: 0.4; cursor: default; }
-.chat-send-btn.chat-stop-mode { color: var(--danger, #e53e3e); }
-.chat-send-btn.chat-stop-mode:hover { background: rgba(229, 62, 62, 0.1); }
+.chat-send-btn:disabled:hover { opacity: 0.4; }
+.chat-send-btn.chat-stop-mode { background: none; color: var(--danger, #e53e3e); }
+.chat-send-btn.chat-stop-mode:hover { background: rgba(229, 62, 62, 0.12); opacity: 1; }
 .btn-icon.chat-attach-btn {
   background: none; border: none; color: var(--text-secondary); cursor: pointer;
   padding: 6px; flex-shrink: 0; display: flex; align-items: center;

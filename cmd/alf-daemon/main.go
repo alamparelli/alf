@@ -593,6 +593,7 @@ func main() {
 	}
 	chatService.ToolRegistry = toolRegistry
 	chatService.ToolExecutor = toolExecutor
+	orch.SetTooling(toolRegistry, toolExecutor)
 	if memDB != nil {
 		chatService.Recaller = &memStoreRecaller{store: memDB}
 	}

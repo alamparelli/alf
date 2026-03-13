@@ -63,7 +63,7 @@ You're looking at it. Here's what each section does:
 | Tab | What it does |
 |-----|-------------|
 | **Home** | Admin actions, Workspace Explorer, Teach |
-| **Chat** | Browser-based chat (same as Telegram, different interface) |
+| **Chat** | Browser-based chat with multiple conversation tabs. Each tab is a separate thread with its own history. |
 | **Terminal** | Shell session inside the Docker container ([details](docs:terminal)) |
 | **Tasks** | Monitor agent tasks - running, completed, failed. Launch new tasks. |
 | **Schedules** | Create, edit, and monitor scheduled jobs ([details](docs:schedules)) |
@@ -74,6 +74,21 @@ You're looking at it. Here's what each section does:
 | **Settings** | Configuration, Telegram setup, admin actions ([details](docs:config)) |
 | **Docs** | You are here |
 | **Apps** | Self-contained apps ALF generates (appears when apps exist) |
+
+## Chat conversations
+
+The **Chat** tab supports multiple conversations at once, like browser tabs.
+
+| Action | How |
+|--------|-----|
+| **Start a new conversation** | Click the **+** button next to the tabs |
+| **Switch between conversations** | Click a tab |
+| **Rename a conversation** | Double-click the tab name and type a new one |
+| **Close a conversation** | Click the **x** on the tab |
+
+Each conversation has its own message history and runs independently. Your tabs are saved automatically - they'll still be there when you come back.
+
+> **Tip:** Use `/new` inside a tab to clear it and start fresh without creating a new tab. The tab stays, but the conversation resets.
 
 ## The Workspace Explorer
 
@@ -158,9 +173,7 @@ schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
 
 ### Schedule expressions
 
-```
-Seconds Minutes Hours DayOfMonth Month DayOfWeek
-```
+Schedules use a 6-part format: `seconds minutes hours day month weekday`
 
 | Expression | Meaning |
 |-----------|---------|
@@ -189,6 +202,7 @@ These work in both Telegram and CC Chat:
 | `/start` | Run the welcome onboarding again |
 | `/new` | Clear the conversation and start fresh |
 | `/login` | Get a new magic link for the Control Center |
+| **Desktop notifications** | ALF sends a browser notification when a response arrives while the Control Center is in the background. Allow notifications when your browser asks. |
 | `/<tier_name>` | Force a specific tier (e.g. `/opus fix this bug`) |
 
 ## Something not working?

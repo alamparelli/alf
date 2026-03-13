@@ -66,15 +66,29 @@ func testStore(teams ...*TeamConfig) Store {
 	return NewFileAgentStore(dir)
 }
 
+// testTierResolver maps tier names to test params for orchestrator tests.
+var testTierResolver = func(tierName string) (TierParams, bool) {
+	switch tierName {
+	case "sonnet":
+		return TierParams{Model: "claude-sonnet-4-6", Effort: "high", WriteCapable: true}, true
+	case "haiku":
+		return TierParams{Model: "claude-haiku-4-5", Effort: "low"}, true
+	case "default":
+		return TierParams{Model: "claude-haiku-4-5"}, true
+	default:
+		return TierParams{}, false
+	}
+}
+
 var testTeam = &TeamConfig{
 	Name:             "content",
 	Description:      "Content team",
 	MaxAgentsPerReq:  3,
 	GlobalTimeoutMin: 1,
 	Agents: []AgentConfig{
-		{Name: "researcher", Description: "Researches", Model: "sonnet", SystemPrompt: "Research."},
-		{Name: "writer", Description: "Writes", Model: "sonnet", SystemPrompt: "Write."},
-		{Name: "reviewer", Description: "Reviews", Model: "haiku", SystemPrompt: "Review."},
+		{Name: "researcher", Description: "Researches", Tier: "sonnet", SystemPrompt: "Research."},
+		{Name: "writer", Description: "Writes", Tier: "sonnet", SystemPrompt: "Write."},
+		{Name: "reviewer", Description: "Reviews", Tier: "haiku", SystemPrompt: "Review."},
 	},
 }
 
@@ -83,7 +97,7 @@ func TestDirectResponse(t *testing.T) {
 		{Text: `{"response": "Here is your answer."}`, SessionID: "s1", CostUSD: 0.01},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, meta, err := orch.Run(context.Background(), "hello", nil, RunConfig{}, nil)
 	if err != nil {
@@ -110,7 +124,7 @@ func TestSingleDelegation(t *testing.T) {
 		{Text: `{"response": "Based on research: answer"}`, SessionID: "s1", CostUSD: 0.01},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, meta, err := orch.Run(context.Background(), "research this", nil, RunConfig{}, nil)
 	if err != nil {
@@ -139,7 +153,7 @@ func TestParallelDelegation(t *testing.T) {
 		{Text: `{"response": "combined"}`, SessionID: "s1"},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, meta, err := orch.Run(context.Background(), "do everything", nil, RunConfig{}, nil)
 	if err != nil {
@@ -165,7 +179,7 @@ func TestMultiIteration(t *testing.T) {
 		{Text: `{"response": "polished article"}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, meta, err := orch.Run(context.Background(), "write article", nil, RunConfig{}, nil)
 	if err != nil {
@@ -191,7 +205,7 @@ func TestAgentSessionResume(t *testing.T) {
 		{Text: `{"response": "final"}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -224,7 +238,7 @@ func TestPlainTextTriggersNudge(t *testing.T) {
 		{Text: `{"response": "done"}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, _, err := orch.Run(context.Background(), "hi", nil, RunConfig{}, nil)
 	if err != nil {
@@ -249,7 +263,7 @@ func TestReDelegateOnBadResult(t *testing.T) {
 		{Text: `{"response": "answer from proper result"}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -274,7 +288,7 @@ func TestSwitchAgentOnFailure(t *testing.T) {
 		{Text: `{"response": "done"}`},
 	}, []error{nil, fmt.Errorf("agent failed"), nil, nil, nil})
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -304,7 +318,7 @@ func TestPartialSuccess(t *testing.T) {
 		{Text: `{"response": "combined"}`},
 	}, []error{nil, nil, fmt.Errorf("writer crashed"), nil, nil, nil})
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -323,7 +337,7 @@ func TestAgentErrorPassthrough(t *testing.T) {
 		{Text: `{"response": "handled the error"}`},
 	}, []error{nil, fmt.Errorf("provider error"), nil})
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -346,7 +360,7 @@ func TestMaxIterationsExceeded(t *testing.T) {
 	}
 	mp := newMockProvider(responses, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	_, meta, err := orch.Run(context.Background(), "infinite", nil, RunConfig{}, nil)
 	if err == nil {
@@ -369,7 +383,7 @@ func TestGlobalTimeout(t *testing.T) {
 		{Text: `{"delegates": [{"agent": "content/researcher", "task": "slow"}]}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	_, _, err := orch.Run(ctx, "test", nil, RunConfig{}, nil)
 	if err == nil {
@@ -385,9 +399,9 @@ func TestMaxAgentsPerRequest(t *testing.T) {
 		Description:     "Small team",
 		MaxAgentsPerReq: 2,
 		Agents: []AgentConfig{
-			{Name: "a", Model: "haiku", SystemPrompt: "a"},
-			{Name: "b", Model: "haiku", SystemPrompt: "b"},
-			{Name: "c", Model: "haiku", SystemPrompt: "c"},
+			{Name: "a", Tier: "haiku", SystemPrompt: "a"},
+			{Name: "b", Tier: "haiku", SystemPrompt: "b"},
+			{Name: "c", Tier: "haiku", SystemPrompt: "c"},
 		},
 	}
 	mp := newMockProvider([]*provider.Result{
@@ -397,7 +411,7 @@ func TestMaxAgentsPerRequest(t *testing.T) {
 		{Text: `{"response": "done"}`},
 	}, nil)
 	store := testStore(team)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -414,7 +428,7 @@ func TestInvalidAgentName(t *testing.T) {
 		{Text: `{"response": "handled"}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -437,7 +451,7 @@ func TestInvalidTeamName(t *testing.T) {
 		{Text: `{"response": "handled"}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -454,7 +468,7 @@ func TestEmptyDelegates(t *testing.T) {
 		{Text: `{"response": "ok"}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -469,7 +483,7 @@ func TestNoTeamsConfigured(t *testing.T) {
 	mp := newMockProvider(nil, nil)
 	dir := t.TempDir()
 	store := NewFileAgentStore(dir)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err == nil {
@@ -488,7 +502,7 @@ func TestMalformedJSONTriggersNudge(t *testing.T) {
 		{Text: `{"response": "ok after nudge"}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -519,7 +533,7 @@ func TestSessionExpired(t *testing.T) {
 	}
 
 	store := testStore(testTeam)
-	orch := NewOrchestrator(customProv, store, t.TempDir(), nil)
+	orch := NewOrchestrator(customProv, store, t.TempDir(), nil, testTierResolver)
 	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -550,7 +564,7 @@ func TestTaskMetaTracking(t *testing.T) {
 	}, nil)
 	store := testStore(testTeam)
 	dataDir := t.TempDir()
-	orch := NewOrchestrator(mp, store, dataDir, nil)
+	orch := NewOrchestrator(mp, store, dataDir, nil, testTierResolver)
 
 	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -584,7 +598,7 @@ func TestWorkingDirCreated(t *testing.T) {
 	}, nil)
 	store := testStore(testTeam)
 	dataDir := t.TempDir()
-	orch := NewOrchestrator(mp, store, dataDir, nil)
+	orch := NewOrchestrator(mp, store, dataDir, nil, testTierResolver)
 
 	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -614,7 +628,7 @@ func TestTimeoutDuringAgent(t *testing.T) {
 	blockProv := &blockingProvider{inner: mp}
 
 	store := testStore(testTeam)
-	orch := NewOrchestrator(blockProv, store, t.TempDir(), nil)
+	orch := NewOrchestrator(blockProv, store, t.TempDir(), nil, testTierResolver)
 
 	_, _, err := orch.Run(ctx, "test", nil, RunConfig{}, nil)
 	// Should error due to timeout.
@@ -646,7 +660,7 @@ func TestRunConfigOrchestratorMaxTurnsPassedToBrain(t *testing.T) {
 		{Text: `{"response": "done"}`, CostUSD: 0.01},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{OrchestratorMaxTurns: 5}, nil)
 	if err != nil {
@@ -667,7 +681,7 @@ func TestRunConfigMaxTurnsDefault(t *testing.T) {
 		{Text: `{"response": "done"}`, CostUSD: 0.01},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{}, nil)
 	if err != nil {
@@ -685,7 +699,7 @@ func TestRunConfigModelAndEffort(t *testing.T) {
 		{Text: `{"response": "done"}`, CostUSD: 0.01},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{
 		Model:  "claude-sonnet-4-6",
@@ -707,7 +721,7 @@ func TestRunConfigMaxIterations(t *testing.T) {
 	// Provider always delegates, never returns a response — should stop at MaxIterations.
 	mp := newMockProvider(nil, nil) // falls through to fallback
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	// Override fallback to always delegate.
 	delegateProvider := &alwaysDelegateProvider{}
@@ -749,7 +763,7 @@ func TestRunNonBlocking(t *testing.T) {
 		},
 	}
 	store := testStore(testTeam)
-	orch := NewOrchestrator(slowProvider, store, t.TempDir(), nil)
+	orch := NewOrchestrator(slowProvider, store, t.TempDir(), nil, testTierResolver)
 
 	done := make(chan struct{})
 	go func() {
@@ -781,7 +795,7 @@ func TestRunningTracksTask(t *testing.T) {
 	blocker := make(chan struct{})
 	bp := &channelProvider{ch: blocker}
 	store := testStore(testTeam)
-	orch := NewOrchestrator(bp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(bp, store, t.TempDir(), nil, testTierResolver)
 
 	// No running tasks initially.
 	if len(orch.Running()) != 0 {
@@ -832,7 +846,7 @@ func TestCancelStopsTask(t *testing.T) {
 	blocker := make(chan struct{})
 	bp := &channelProvider{ch: blocker}
 	store := testStore(testTeam)
-	orch := NewOrchestrator(bp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(bp, store, t.TempDir(), nil, testTierResolver)
 
 	done := make(chan struct{})
 	go func() {
@@ -873,7 +887,7 @@ func TestCancelAllStopsTasks(t *testing.T) {
 	blocker := make(chan struct{})
 	bp := &channelProvider{ch: blocker}
 	store := testStore(testTeam)
-	orch := NewOrchestrator(bp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(bp, store, t.TempDir(), nil, testTierResolver)
 
 	// Start two tasks.
 	done1 := make(chan struct{})
@@ -935,7 +949,7 @@ func TestProgressCallbacks(t *testing.T) {
 		{Text: `{"response": "here you go"}`},
 	}, nil)
 	store := testStore(testTeam)
-	orch := NewOrchestrator(mp, store, t.TempDir(), nil)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
 
 	var phases []string
 	progress := func(phase, detail string) {

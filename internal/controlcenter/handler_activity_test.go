@@ -79,7 +79,7 @@ func TestActivityHandler_WithRunningSchedule(t *testing.T) {
 }
 
 func TestActivityHandler_WithRunningTasks(t *testing.T) {
-	orch := agents.NewOrchestrator(nil, nil, t.TempDir(), nil)
+	orch := agents.NewOrchestrator(nil, nil, t.TempDir(), nil, nil)
 
 	// Simulate a running task by accessing internals isn't possible,
 	// so we verify that with no running tasks, count is 0.

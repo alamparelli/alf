@@ -36,8 +36,8 @@ func TestBundledAgentsValid(t *testing.T) {
 			if a.Name == "" {
 				t.Errorf("%s: agent missing name", e.Name())
 			}
-			if a.Model == "" {
-				t.Errorf("%s/%s: agent missing model", tc.Name, a.Name)
+			if a.Tier == "" {
+				t.Errorf("%s/%s: agent missing tier", tc.Name, a.Name)
 			}
 			if a.SystemPrompt == "" {
 				t.Errorf("%s/%s: agent missing system_prompt", tc.Name, a.Name)

@@ -53,10 +53,10 @@ func newTestOrchestrator(t *testing.T, prov provider.Provider) *agents.Orchestra
 	os.WriteFile(filepath.Join(teamsDir, "default.json"), []byte(`{
 		"name": "default",
 		"description": "test team",
-		"agents": [{"name": "worker", "description": "test", "model": "mock"}]
+		"agents": [{"name": "worker", "description": "test", "tier": "mock"}]
 	}`), 0o644)
 	store := agents.NewFileAgentStore(teamsDir)
-	return agents.NewOrchestrator(prov, store, dataDir, nil)
+	return agents.NewOrchestrator(prov, store, dataDir, nil, nil)
 }
 
 // --- POST /api/tasks ---

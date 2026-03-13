@@ -28,14 +28,7 @@ func BuildOrchestratorPrompt(teams []*TeamConfig, taskDir string) string {
 	for _, tc := range teams {
 		sb.WriteString(fmt.Sprintf("### Team: %s\n%s\n\n", tc.Name, tc.Description))
 		for _, a := range tc.Agents {
-			sb.WriteString(fmt.Sprintf("- **%s/%s**: %s (model: %s", tc.Name, a.Name, a.Description, a.Model))
-			if a.WriteCapable {
-				sb.WriteString(", can write files")
-			}
-			if len(a.Tools) > 0 {
-				sb.WriteString(fmt.Sprintf(", tools: %s", strings.Join(a.Tools, ", ")))
-			}
-			sb.WriteString(")\n")
+			sb.WriteString(fmt.Sprintf("- **%s/%s**: %s (tier: %s)\n", tc.Name, a.Name, a.Description, a.Tier))
 		}
 		sb.WriteString("\n")
 	}

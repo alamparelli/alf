@@ -19,8 +19,8 @@ const validTeamA = `{
 	"max_agents_per_request": 2,
 	"global_timeout_minutes": 30,
 	"agents": [
-		{"name": "writer", "description": "Writes content", "model": "sonnet", "system_prompt": "You write."},
-		{"name": "reviewer", "description": "Reviews content", "model": "haiku", "system_prompt": "You review."}
+		{"name": "writer", "description": "Writes content", "tier": "sonnet", "system_prompt": "You write."},
+		{"name": "reviewer", "description": "Reviews content", "tier": "haiku", "system_prompt": "You review."}
 	]
 }`
 
@@ -28,7 +28,7 @@ const validTeamB = `{
 	"name": "beta",
 	"description": "Beta team",
 	"max_agents_per_request": 1,
-	"agents": [{"name": "coder", "description": "Codes", "model": "opus", "system_prompt": "You code.", "write_capable": true}]
+	"agents": [{"name": "coder", "description": "Codes", "tier": "opus", "system_prompt": "You code."}]
 }`
 
 func TestLoadValidTeams(t *testing.T) {
@@ -106,8 +106,8 @@ func TestGetAgent(t *testing.T) {
 	if tc.Name != "alpha" {
 		t.Errorf("unexpected team: %s", tc.Name)
 	}
-	if ac.Model != "sonnet" {
-		t.Errorf("unexpected model: %s", ac.Model)
+	if ac.Tier != "sonnet" {
+		t.Errorf("unexpected tier: %s", ac.Tier)
 	}
 }
 
@@ -169,7 +169,7 @@ func TestDuplicateTeamName(t *testing.T) {
 
 func TestTeamDefaults(t *testing.T) {
 	dir := t.TempDir()
-	writeTeamFile(t, dir, "minimal.json", `{"name":"min","agents":[{"name":"a","model":"haiku","system_prompt":"hi"}]}`)
+	writeTeamFile(t, dir, "minimal.json", `{"name":"min","agents":[{"name":"a","tier":"haiku","system_prompt":"hi"}]}`)
 
 	s := NewFileAgentStore(dir)
 	tc, ok := s.Get("min")

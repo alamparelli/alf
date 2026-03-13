@@ -1929,6 +1929,19 @@ async function chatProcessStream(res) {
                   var vs = typeof e[1] === 'string' ? e[1] : JSON.stringify(e[1]);
                   return e[0] + ': ' + (vs.length > 120 ? vs.slice(0, 120) + '\u2026' : vs);
                 }).join('\n');
+                // Show key param preview in the summary line.
+                var preview = parsed.command || parsed.file_path || parsed.pattern || parsed.path || '';
+                if (preview) {
+                  var summaryEl = chatCurrentToolBlock.querySelector('.chat-tool-summary');
+                  if (summaryEl) {
+                    var strongEl = summaryEl.querySelector('strong');
+                    var toolName = strongEl ? strongEl.textContent : '';
+                    var iconEl = summaryEl.querySelector('.chat-block-icon');
+                    var iconHtml = iconEl ? iconEl.outerHTML : '';
+                    var short = preview.length > 60 ? preview.slice(0, 60) + '\u2026' : preview;
+                    summaryEl.innerHTML = iconHtml + ' <strong>' + esc(toolName) + '</strong> <span class="chat-tool-preview">' + esc(short) + '</span>';
+                  }
+                }
               } catch(ex) { /* still accumulating JSON */ }
               inputEl.textContent = display;
             }
@@ -3458,7 +3471,7 @@ function teamsRender(teams) {
   let html = '';
   for (const team of teams) {
     const agentBadges = (team.agents || []).map(a =>
-      '<span class="team-agent-badge">' + taskEscapeHtml(a.name) + ' (' + taskEscapeHtml(a.model || '?') + ')</span>'
+      '<span class="team-agent-badge">' + taskEscapeHtml(a.name) + ' (' + taskEscapeHtml(a.tier || '?') + ')</span>'
     ).join('');
     html += '<div class="team-card" data-team-name="' + taskEscapeHtml(team.name) + '">' +
       '<div class="team-card-header">' +

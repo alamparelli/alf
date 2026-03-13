@@ -453,7 +453,27 @@ func main() {
 	registerBackends(registry, cfg, apiHistory, vaultMgr)
 
 	// Multi-agent coordinator.
-	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel)
+	resolveTier := func(tierName string) (agents.TierParams, bool) {
+		for _, t := range tierStore.Current().Tiers {
+			if t.Name == tierName {
+				model := t.Model
+				if (t.Backend == "" || t.Backend == "cli") && router.ResolveModel != nil {
+					model = router.ResolveModel(t.Model)
+				}
+				return agents.TierParams{
+					Model:        model,
+					Backend:      t.Backend,
+					Tools:        t.Tools,
+					Effort:       t.Effort,
+					WriteCapable: t.WriteCapable,
+					MaxTurns:     t.MaxTurns,
+					SystemPrompt: t.SystemPrompt,
+				}, true
+			}
+		}
+		return agents.TierParams{}, false
+	}
+	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel, resolveTier)
 
 	// Router model for message classification.
 	routerBackend := tierStore.Current().RouterBackend

@@ -54,15 +54,15 @@ Use the agent for:
 
 ## The starter team
 
-ALF ships with a bundled starter team of 3 agents, all with full tool access (`write_capable: true`):
+ALF ships with a bundled starter team of 3 agents. Each agent references a tier from your `tiers.json`:
 
-| Agent | What it does | Model | Max turns |
-|-------|-------------|-------|-----------|
-| **researcher** | Gathers information, searches the web, reads files | Sonnet | 15 |
-| **writer** | Drafts text, writes files, creates content | Sonnet | 15 |
-| **reviewer** | Reviews quality, finds issues, suggests improvements | Sonnet | 10 |
+| Agent | What it does | Tier |
+|-------|-------------|------|
+| **researcher** | Gathers information, searches the web, reads files | sonnet |
+| **writer** | Drafts text, writes files, creates content | sonnet |
+| **reviewer** | Reviews quality, finds issues, suggests improvements | sonnet |
 
-All starter agents have unrestricted tool access (Read, Write, Edit, Bash, WebSearch, etc.). This ensures they can complete their tasks without hitting tool restrictions. You can fine-tune permissions later by setting `write_capable: false` and specifying a `tools` whitelist per agent.
+The tier defines the model, tools, write permissions, max turns, and effort level. You can customize agent capabilities by creating dedicated tiers (e.g. a "researcher" tier with web search tools and 15 turns).
 
 The agent (Opus) decides which agents to call, what to ask them, and whether the results are good enough — or if another round of delegation is needed.
 
@@ -82,16 +82,14 @@ Here's the full format:
     {
       "name": "agent-name",
       "description": "What this agent does",
-      "model": "sonnet",
-      "system_prompt": "You are a specialist in...",
-      "tools": ["WebSearch"],
-      "write_capable": false,
-      "max_turns": 3,
-      "effort": "medium"
+      "tier": "sonnet",
+      "system_prompt": "You are a specialist in..."
     }
   ]
 }
 ```
+
+Each agent references a tier from `tiers.json`. The tier defines the model, tools, write permissions, effort level, and max turns. This means you can reuse existing tiers across agents and change execution parameters in one place.
 
 ### Team fields
 
@@ -108,12 +106,8 @@ Here's the full format:
 |-------|----------|-------------|
 | `name` | Yes | Agent identifier. Used in `team/agent` format when delegating. |
 | `description` | Yes | What the agent does. The agent reads this to decide who gets which task. |
-| `model` | Yes | Which model to use: `haiku`, `sonnet`, or `opus`. |
-| `system_prompt` | Yes | Instructions the agent follows. Be specific about what it should do and how. |
-| `tools` | No | List of tools the agent can use (e.g. `WebSearch`, `Read`, `Edit`, `Write`, `Bash`). |
-| `write_capable` | No | Can the agent create or modify files? Default: `false` |
-| `max_turns` | No | Max conversation turns per delegation. Default: 3. Use 5-10 for agents that need to read files or search the web. |
-| `effort` | No | Thinking effort: `low`, `medium`, `high`. Default: `medium` |
+| `tier` | Yes | Which tier to use (from `tiers.json`). The tier defines model, tools, effort, max_turns, and write permissions. |
+| `system_prompt` | Yes | Instructions the agent follows. Be specific about what it should do and how. Combined with the tier's system prompt if any. |
 
 ### Example: SEO content team
 
@@ -127,29 +121,20 @@ Here's the full format:
     {
       "name": "keyword-researcher",
       "description": "Researches keywords, search volume, and competition",
-      "model": "sonnet",
-      "system_prompt": "You are an SEO keyword researcher. Find relevant keywords, analyze search intent, and suggest targeting opportunities.",
-      "tools": ["WebSearch"],
-      "max_turns": 5,
-      "effort": "medium"
+      "tier": "sonnet",
+      "system_prompt": "You are an SEO keyword researcher. Find relevant keywords, analyze search intent, and suggest targeting opportunities."
     },
     {
       "name": "content-writer",
       "description": "Writes SEO-optimized articles and blog posts",
-      "model": "sonnet",
-      "system_prompt": "You are an SEO content writer. Write engaging, well-structured content optimized for the given keywords. Use proper heading hierarchy, natural keyword placement, and clear meta descriptions.",
-      "tools": ["Write"],
-      "write_capable": true,
-      "max_turns": 3,
-      "effort": "medium"
+      "tier": "sonnet",
+      "system_prompt": "You are an SEO content writer. Write engaging, well-structured content optimized for the given keywords. Use proper heading hierarchy, natural keyword placement, and clear meta descriptions."
     },
     {
       "name": "seo-auditor",
       "description": "Reviews content for SEO best practices",
-      "model": "haiku",
-      "system_prompt": "You are an SEO auditor. Check content for keyword density, heading structure, readability, internal linking opportunities, and meta tag quality. Be specific about what to fix.",
-      "max_turns": 2,
-      "effort": "low"
+      "tier": "haiku",
+      "system_prompt": "You are an SEO auditor. Check content for keyword density, heading structure, readability, internal linking opportunities, and meta tag quality. Be specific about what to fix."
     }
   ]
 }
@@ -170,8 +155,8 @@ ALF will generate the JSON. You can then save it via the **Workspace Explorer** 
 ## Tips
 
 - **Give agents clear, specific system prompts.** Vague prompts produce vague results. Tell each agent exactly what it should do and what format to use.
-- **Use the cheapest model that can do the job.** Haiku for simple extraction or formatting. Sonnet for most tasks. Opus only when you truly need deep reasoning.
-- **Give agents enough turns.** Start with 10-15 for agents that use tools. Use 5-10 for review-only agents. Too few turns → "turn limit reached" errors.
+- **Create tiers for different agent roles.** A researcher tier with web search tools and 15 turns, a writer tier with write permissions, a reviewer tier with haiku and few turns.
+- **Give agents enough turns (via the tier).** Start with 10-15 for agents that use tools. Use 5-10 for review-only agents. Too few turns → "turn limit reached" errors.
 - **The agent can re-delegate.** If an agent's result is poor, the agent sends it back with feedback. You don't need to handle retries yourself.
 - **You can have multiple team files.** Drop as many JSON files into `config.d/agents/` as you want. The agent sees all teams and picks the right agents for each task.
 

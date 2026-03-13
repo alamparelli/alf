@@ -49,7 +49,7 @@ func TestTeams_ListEmpty(t *testing.T) {
 func TestTeams_SaveAndList(t *testing.T) {
 	h, agentsDir := newTestTeamsHandler(t)
 
-	team := `{"name":"test-team","description":"A test team","agents":[{"name":"worker","model":"sonnet"}]}`
+	team := `{"name":"test-team","description":"A test team","agents":[{"name":"worker","tier":"sonnet"}]}`
 	req := httptest.NewRequest("PUT", "/api/teams", strings.NewReader(team))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -115,7 +115,7 @@ func TestTeams_SaveThenListShowsTeam(t *testing.T) {
 	h, _ := newTestTeamsHandler(t)
 
 	// Save a team.
-	team := `{"name":"new-team","description":"fresh","agents":[{"name":"bot","model":"haiku"}]}`
+	team := `{"name":"new-team","description":"fresh","agents":[{"name":"bot","tier":"haiku"}]}`
 	req := httptest.NewRequest("PUT", "/api/teams", strings.NewReader(team))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

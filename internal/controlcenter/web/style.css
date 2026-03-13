@@ -636,6 +636,10 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 }
 .chat-tool-block[open] > .chat-tool-summary::before { transform: rotate(90deg); }
 .chat-tool-summary strong { font-weight: 600; }
+.chat-tool-preview {
+  font-weight: 400; opacity: 0.6; margin-left: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .chat-tool-input {
   font-size: 0.63rem; color: var(--text-dim); opacity: 0.6;
   padding: 2px 0 0 22px; white-space: pre-wrap; word-break: break-all;

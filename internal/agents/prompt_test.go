@@ -24,8 +24,8 @@ func TestBuildPromptContainsAgents(t *testing.T) {
 		{
 			Name: "content",
 			Agents: []AgentConfig{
-				{Name: "researcher", Description: "Researches things", Model: "sonnet", Tools: []string{"WebSearch"}},
-				{Name: "writer", Description: "Writes content", Model: "opus", WriteCapable: true},
+				{Name: "researcher", Description: "Researches things", Tier: "research"},
+				{Name: "writer", Description: "Writes content", Tier: "writing"},
 			},
 		},
 	}
@@ -36,16 +36,16 @@ func TestBuildPromptContainsAgents(t *testing.T) {
 	if !strings.Contains(prompt, "content/writer") {
 		t.Error("prompt missing writer agent")
 	}
-	if !strings.Contains(prompt, "can write files") {
-		t.Error("prompt missing write capability")
+	if !strings.Contains(prompt, "tier: research") {
+		t.Error("prompt missing tier reference for researcher")
 	}
-	if !strings.Contains(prompt, "WebSearch") {
-		t.Error("prompt missing tools")
+	if !strings.Contains(prompt, "tier: writing") {
+		t.Error("prompt missing tier reference for writer")
 	}
 }
 
 func TestBuildPromptContainsProtocol(t *testing.T) {
-	teams := []*TeamConfig{{Name: "t", Agents: []AgentConfig{{Name: "a", Model: "h", SystemPrompt: "hi"}}}}
+	teams := []*TeamConfig{{Name: "t", Agents: []AgentConfig{{Name: "a", Tier: "default", SystemPrompt: "hi"}}}}
 	prompt := BuildOrchestratorPrompt(teams, "")
 	if !strings.Contains(prompt, "delegates") {
 		t.Error("prompt missing delegation protocol")
@@ -63,7 +63,7 @@ func TestBuildPromptEmptyTeams(t *testing.T) {
 }
 
 func TestBuildPromptGoalDriven(t *testing.T) {
-	teams := []*TeamConfig{{Name: "t", Agents: []AgentConfig{{Name: "a", Model: "h", SystemPrompt: "hi"}}}}
+	teams := []*TeamConfig{{Name: "t", Agents: []AgentConfig{{Name: "a", Tier: "default", SystemPrompt: "hi"}}}}
 	prompt := BuildOrchestratorPrompt(teams, "")
 	if !strings.Contains(prompt, "NEVER DO THE WORK YOURSELF") {
 		t.Error("prompt should contain strict delegation instruction")

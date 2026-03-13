@@ -13,15 +13,25 @@ type TeamConfig struct {
 
 // AgentConfig defines a single sub-agent within a team.
 type AgentConfig struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Model        string   `json:"model"`
-	SystemPrompt string   `json:"system_prompt"`
-	Tools        []string `json:"tools,omitempty"`
-	WriteCapable bool     `json:"write_capable"`
-	MaxTurns     int      `json:"max_turns,omitempty"`
-	Effort       string   `json:"effort,omitempty"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Tier         string `json:"tier"`
+	SystemPrompt string `json:"system_prompt"`
 }
+
+// TierParams holds resolved execution parameters from a tier.
+type TierParams struct {
+	Model        string
+	Backend      string
+	Tools        []string
+	Effort       string
+	WriteCapable bool
+	MaxTurns     int
+	SystemPrompt string // tier-level system prompt (combined with agent's)
+}
+
+// ResolveTierFunc maps a tier name to its execution parameters.
+type ResolveTierFunc func(tierName string) (TierParams, bool)
 
 // DelegateRequest is a single delegation instruction from the orchestrator.
 type DelegateRequest struct {

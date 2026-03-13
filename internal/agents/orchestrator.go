@@ -38,18 +38,20 @@ type Orchestrator struct {
 	store        Store
 	dataDir      string
 	resolveModel ResolveModelFunc
+	resolveTier  ResolveTierFunc
 
 	mu       sync.Mutex
 	running  map[string]*RunningTask
 }
 
 // NewOrchestrator creates a new orchestrator.
-func NewOrchestrator(prov provider.Provider, store Store, dataDir string, resolveModel ResolveModelFunc) *Orchestrator {
+func NewOrchestrator(prov provider.Provider, store Store, dataDir string, resolveModel ResolveModelFunc, resolveTier ResolveTierFunc) *Orchestrator {
 	return &Orchestrator{
 		provider:     prov,
 		store:        store,
 		dataDir:      dataDir,
 		resolveModel: resolveModel,
+		resolveTier:  resolveTier,
 		running:      make(map[string]*RunningTask),
 	}
 }
@@ -494,6 +496,28 @@ func (o *Orchestrator) invokeAgentWithKey(
 		}
 	}
 
+	// Resolve tier to get execution parameters.
+	var tp TierParams
+	if o.resolveTier != nil && ac.Tier != "" {
+		var found bool
+		tp, found = o.resolveTier(ac.Tier)
+		if !found {
+			log.Printf("[orchestrator] tier %q not found for agent %s/%s", ac.Tier, teamName, agentName)
+			return AgentResult{
+				Agent:    d.Agent,
+				Error:    fmt.Sprintf("tier %q not found", ac.Tier),
+				Duration: time.Since(start),
+			}
+		}
+	} else {
+		log.Printf("[orchestrator] agent %s/%s has no tier configured", teamName, agentName)
+		return AgentResult{
+			Agent:    d.Agent,
+			Error:    fmt.Sprintf("agent %q has no tier configured", d.Agent),
+			Duration: time.Since(start),
+		}
+	}
+
 	if onProgress != nil {
 		onProgress("agent", fmt.Sprintf("%s/%s", teamName, agentName))
 	}
@@ -507,20 +531,22 @@ func (o *Orchestrator) invokeAgentWithKey(
 	os.Chmod(agentDir, 0o775)
 	os.Chown(agentDir, 1000, 1000) // alf:alf so claude (gid 1000) can write
 
-	model := ac.Model
-	if o.resolveModel != nil {
-		model = o.resolveModel(ac.Model)
-	}
+	model := tp.Model
 
 	sessionID := sm.Get(sessionKey)
 	hasResume := sessionID != ""
-	log.Printf("[orchestrator] → agent %s/%s: model=%s effort=%s write=%v max_turns=%d resume=%v",
-		teamName, agentName, model, ac.Effort, ac.WriteCapable, ac.MaxTurns, hasResume)
+	log.Printf("[orchestrator] → agent %s/%s: tier=%s model=%s effort=%s write=%v max_turns=%d resume=%v",
+		teamName, agentName, ac.Tier, model, tp.Effort, tp.WriteCapable, tp.MaxTurns, hasResume)
 	log.Printf("[orchestrator]   task: %s", truncate(d.Task, 150))
 
-	// Build system prompts: agent's own prompt + memory context + skill prompts.
-	sysPrompts := make([]string, 0, 1+len(memoryContext)+len(skillPrompts))
-	sysPrompts = append(sysPrompts, ac.SystemPrompt)
+	// Build system prompts: tier prompt + agent's own prompt + memory context + skill prompts.
+	sysPrompts := make([]string, 0, 2+len(memoryContext)+len(skillPrompts))
+	if tp.SystemPrompt != "" {
+		sysPrompts = append(sysPrompts, tp.SystemPrompt)
+	}
+	if ac.SystemPrompt != "" {
+		sysPrompts = append(sysPrompts, ac.SystemPrompt)
+	}
 	sysPrompts = append(sysPrompts, memoryContext...)
 	sysPrompts = append(sysPrompts, skillPrompts...)
 	if len(memoryContext) > 0 || len(skillPrompts) > 0 {
@@ -529,10 +555,10 @@ func (o *Orchestrator) invokeAgentWithKey(
 
 	params := provider.Params{
 		Model:         model,
-		Tools:         ac.Tools,
-		WriteCapable:  ac.WriteCapable,
-		Effort:        ac.Effort,
-		MaxTurns:      ac.MaxTurns,
+		Tools:         tp.Tools,
+		WriteCapable:  tp.WriteCapable,
+		Effort:        tp.Effort,
+		MaxTurns:      tp.MaxTurns,
 		SystemPrompts: sysPrompts,
 		ResumeID:      sessionID,
 		DataDir:       agentDir,

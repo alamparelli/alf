@@ -1,15 +1,16 @@
 {
   "name": "forget",
-  "description": "Delete a memory by ID. Use recall first to find the ID.",
+  "description": "Delete one or more memories by ID. Use recall first to find IDs.",
   "parameters": {
     "type": "object",
     "properties": {
-      "id": {
-        "type": "integer",
-        "description": "Memory ID to delete"
+      "ids": {
+        "type": "array",
+        "items": { "type": "integer" },
+        "description": "Memory IDs to delete"
       }
     },
-    "required": ["id"],
-    "x-positional": ["id"]
+    "required": ["ids"],
+    "x-positional": ["ids"]
   }
 }

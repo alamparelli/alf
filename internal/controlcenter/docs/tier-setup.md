@@ -97,7 +97,7 @@ Here's what a `tiers.json` file looks like:
 | `router_label` | Describes what this tier is good at. The router reads this to decide. **This is the most important field.** | `"Code review, debugging"` |
 | `description` | Optional longer description. Falls back to `router_label` if not set. Used in router prompt. | `"Deep code analysis"` |
 | `write_capable` | Can this tier create, edit, or delete files? | `false` |
-| `effort` | How hard the model thinks: `low`, `medium`, or `high`. | `"medium"` |
+| `effort` | How hard the model thinks: `low`, `medium`, or `high`. **CLI tiers only** — this maps to Claude's `--effort` flag. Ignored for API/OpenRouter backends (most API models don't support effort control). | `"medium"` |
 | `force_command` | Enable `/<tier_name> <message>` to bypass routing and force this tier. Works in Telegram and CC Chat. | `true` |
 | `max_turns` | Max steps for tool use. Prevents runaway loops. 0 = unlimited. | `10` |
 | `max_iterations` | (Agent only) Max delegate→synthesize cycles. | `10` |
@@ -206,6 +206,8 @@ Yes, always on write-capable tiers. Without it, a write tier could loop endlessl
 
 **What does `effort` actually do?**
 It controls how much "thinking" the model does before answering. `low` = quick gut reaction. `medium` = balanced. `high` = deep reasoning. Higher effort means slower (and slightly more expensive) responses.
+
+> **Note:** `effort` only works with **CLI tiers** (Claude's `--effort` flag). For API/OpenRouter backends, this field is ignored — most API models (Grok, DeepSeek, Gemini, etc.) don't support effort control. To differentiate API tiers, use different models or adjust `max_turns` and `router_label` instead.
 
 ## Media routing
 

@@ -3917,7 +3917,7 @@ function tiersShowModal(tier) {
         '<div class="form-row"><label>Backend</label><select id="tfBackend">' + backendOpts + '</select></div>' +
         '<div class="form-row" id="tfModelRow"><label>Model</label>' + modelPlaceholder + '</div>' +
         '<div class="form-row"><label>Priority</label><input type="number" id="tfPriority" value="' + t.priority + '" min="0" max="99"></div>' +
-        '<div class="form-row"><label>Effort</label><select id="tfEffort">' + effortOpts + '</select></div>' +
+        '<div class="form-row" id="tfEffortRow"><label>Effort</label><select id="tfEffort">' + effortOpts + '</select></div>' +
         '<div class="form-row"><label>Router label</label><textarea id="tfLabel" class="input tier-label-textarea" rows="2" placeholder="Description for the router">' + esc(t.router_label || '') + '</textarea></div>' +
         '<div class="form-row"><label>Description</label><input type="text" id="tfDesc" value="' + esc(t.description || '') + '" placeholder="Optional description"></div>' +
         '<div class="form-row"><label>Max turns</label><input type="number" id="tfMaxTurns" value="' + (t.max_turns || 0) + '" min="0"></div>' +
@@ -3926,7 +3926,7 @@ function tiersShowModal(tier) {
         '<div class="tier-flags">' +
           '<label class="tier-flag-check"><input type="checkbox" id="tfEnabled"' + (t.enabled ? ' checked' : '') + '> Enabled</label>' +
           '<label class="tier-flag-check"><input type="checkbox" id="tfRoutable"' + (t.routable ? ' checked' : '') + '> Routable</label>' +
-          '<label class="tier-flag-check"><input type="checkbox" id="tfWriteCapable"' + (t.write_capable ? ' checked' : '') + '> Write capable</label>' +
+          '<label class="tier-flag-check" id="tfWriteCapableLabel"><input type="checkbox" id="tfWriteCapable"' + (t.write_capable ? ' checked' : '') + '> Write capable</label>' +
           '<label class="tier-flag-check"><input type="checkbox" id="tfForceCmd"' + (t.force_command ? ' checked' : '') + '> Force command</label>' +
         '</div>' +
         '<div class="form-row"><label>System prompt</label><textarea id="tfSystemPrompt" class="input tier-label-textarea" rows="3" placeholder="Extra instructions prepended for this tier (optional)">' + esc(t.system_prompt || '') + '</textarea></div>' +
@@ -3973,6 +3973,10 @@ function tiersShowModal(tier) {
     if (cliGroupLabel && cliGroupLabel.textContent === 'CLI tools') cliGroupLabel.style.display = isCLI ? '' : 'none';
     const hint = document.querySelector('.tier-tools-hint');
     if (hint) hint.textContent = isCLI ? 'CLI tools for Claude CLI tiers' : 'ALF tools for API tiers with tool loop';
+    const wcLabel = document.getElementById('tfWriteCapableLabel');
+    if (wcLabel) wcLabel.style.display = isCLI ? '' : 'none';
+    const effortRow = document.getElementById('tfEffortRow');
+    if (effortRow) effortRow.style.display = isCLI ? '' : 'none';
   }
   updateToolsVisibility(t.backend);
 

@@ -122,8 +122,17 @@ func (r *Registry) UserToolNames() []string {
 	return names
 }
 
+// signalTools are CLI-only tools that require ALF_SIGNAL_SOCK (unix socket
+// from the daemon). They must not be exposed to API/OpenRouter tiers.
+var signalTools = map[string]bool{
+	"react":  true,
+	"status": true,
+}
+
 // DiscoverToolNames returns all executable tool names found in tools.d/ and tools/.
 // This includes tools with and without JSON manifests.
+// Signal tools (react, status) are excluded because they require ALF_SIGNAL_SOCK
+// which is only available in CLI subprocess context.
 func DiscoverToolNames(dataDir string) []string {
 	seen := make(map[string]bool)
 	for _, dir := range []string{
@@ -136,6 +145,9 @@ func DiscoverToolNames(dataDir string) []string {
 		}
 		for _, e := range entries {
 			if e.IsDir() || strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			if signalTools[e.Name()] {
 				continue
 			}
 			seen[e.Name()] = true

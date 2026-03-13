@@ -205,6 +205,8 @@ func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, mode
 }
 
 // Invoke sends a prompt to the API and returns the result.
+// Uses the full streaming parser so tool_calls are handled gracefully
+// even when no ToolLoop is configured (tool_calls text is returned as-is).
 func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, onProgress OnProgress) (*Result, error) {
 	model := params.Model
 	if model == "" {
@@ -223,10 +225,24 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		MaxTokens: p.maxTokens,
 	}
 
-	result, err := p.doRequest(ctx, reqBody, onProgress)
+	resp, err := p.doStreamRequest(ctx, reqBody, onProgress, 0)
 	if err != nil {
 		return nil, err
 	}
+
+	text := resp.Text
+	// If the model returned tool_calls but no text (no ToolLoop to handle them),
+	// surface the tool call info as text instead of returning empty.
+	if text == "" && len(resp.ToolCalls) > 0 {
+		var parts []string
+		for _, tc := range resp.ToolCalls {
+			parts = append(parts, fmt.Sprintf("[tool_call: %s(%s)]", tc.Function.Name, tc.Function.Arguments))
+		}
+		text = "Model attempted tool calls but no tool loop is configured: " + strings.Join(parts, ", ")
+		log.Printf("api[%s]: model returned tool_calls without ToolLoop: %v", p.name, parts)
+	}
+
+	result := &Result{Text: text, Model: model}
 
 	// Append to legacy history (only for keyed sessions without ConvMessages).
 	if len(params.ConvMessages) == 0 && params.SessionKey != "" && p.history != nil {
@@ -234,144 +250,7 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		p.history.Append(params.SessionKey, Message{Role: "assistant", Content: result.Text})
 	}
 
-	result.Model = model
 	return result, nil
-}
-
-func (p *APIProvider) doRequest(ctx context.Context, reqBody apiRequest, onProgress OnProgress) (*Result, error) {
-	return p.doRequestWithRetry(ctx, reqBody, onProgress, 0)
-}
-
-func (p *APIProvider) doRequestWithRetry(ctx context.Context, reqBody apiRequest, onProgress OnProgress, attempt int) (*Result, error) {
-	data, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	// Auth header.
-	if p.auth != "none" && p.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
-
-	// Custom headers from config.
-	for k, v := range p.headers {
-		req.Header.Set(k, v)
-	}
-
-	start := time.Now()
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("api request (%s): %w", p.name, err)
-	}
-	defer resp.Body.Close()
-
-	// Rate limit retry.
-	if resp.StatusCode == 429 && attempt < 3 {
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("api[%s]: 429 rate limited (attempt %d/3): %s", p.name, attempt+1, truncBody(body))
-		wait := time.Duration(1<<uint(attempt)) * time.Second
-		select {
-		case <-time.After(wait):
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		return p.doRequestWithRetry(ctx, reqBody, onProgress, attempt+1)
-	}
-
-	// Context overflow: truncate history and retry once.
-	if resp.StatusCode == 400 && attempt == 0 {
-		body, _ := io.ReadAll(resp.Body)
-		bodyStr := string(body)
-		if strings.Contains(bodyStr, "context") && (strings.Contains(bodyStr, "length") || strings.Contains(bodyStr, "too long") || strings.Contains(bodyStr, "maximum")) {
-			log.Printf("api[%s]: context overflow, truncating history and retrying", p.name)
-			// Drop first half of non-system messages.
-			var trimmed []apiMessage
-			for _, m := range reqBody.Messages {
-				if m.Role == "system" {
-					trimmed = append(trimmed, m)
-				}
-			}
-			var nonSystem []apiMessage
-			for _, m := range reqBody.Messages {
-				if m.Role != "system" {
-					nonSystem = append(nonSystem, m)
-				}
-			}
-			half := len(nonSystem) / 2
-			if half%2 != 0 {
-				half++ // keep pairs aligned
-			}
-			if half < len(nonSystem) {
-				trimmed = append(trimmed, nonSystem[half:]...)
-			} else {
-				// Keep at least the last message.
-				trimmed = append(trimmed, nonSystem[len(nonSystem)-1])
-			}
-			reqBody.Messages = trimmed
-			return p.doRequestWithRetry(ctx, reqBody, onProgress, 1)
-		}
-	}
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("api[%s] error %d: %s", p.name, resp.StatusCode, truncBody(body))
-	}
-
-	// Parse SSE stream.
-	var resultText strings.Builder
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 256*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		payload := line[6:]
-		if payload == "[DONE]" {
-			break
-		}
-
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
-		}
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			continue
-		}
-
-		for _, choice := range chunk.Choices {
-			if choice.Delta.Content != "" {
-				resultText.WriteString(choice.Delta.Content)
-				if onProgress != nil {
-					onProgress(StreamEvent{Type: "text_delta", Text: choice.Delta.Content})
-				}
-			}
-		}
-	}
-
-	duration := time.Since(start)
-	text := strings.TrimSpace(resultText.String())
-	log.Printf("api[%s]: response %dms %d chars model=%s", p.name, duration.Milliseconds(), len(text), reqBody.Model)
-
-	if text == "" {
-		return nil, fmt.Errorf("api[%s] returned empty response", p.name)
-	}
-
-	return &Result{
-		Text:  text,
-		Model: reqBody.Model,
-	}, nil
 }
 
 // doStreamRequest sends a request and parses the SSE response into an

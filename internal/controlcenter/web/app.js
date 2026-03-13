@@ -4854,7 +4854,7 @@ function esc(s) {
 }
 
 // --- Terminal (xterm.js + WebSocket PTY) ---
-const termThemes = {
+var termThemes = {
   'Catppuccin Mocha': {
     background: '#1e1e2e', foreground: '#cdd6f4', cursor: '#f5e0dc', cursorAccent: '#1e1e2e',
     selectionBackground: 'rgba(108,123,196,0.4)', selectionForeground: '#ffffff',

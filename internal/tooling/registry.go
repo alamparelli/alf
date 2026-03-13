@@ -17,8 +17,9 @@ type ToolSchema struct {
 
 // Registry discovers and holds tool schemas from JSON manifests.
 type Registry struct {
-	schemas map[string]ToolSchema
-	dataDir string
+	schemas     map[string]ToolSchema
+	nativeNames []string
+	dataDir     string
 }
 
 // NewRegistry scans tools.d/*.json and tools/*.json under dataDir for tool manifests.
@@ -32,6 +33,28 @@ func NewRegistry(dataDir string) *Registry {
 }
 
 func (r *Registry) scan() {
+	r.scanFiles(true)
+}
+
+// Rescan re-reads tool schemas from disk (tools.d/*.json, tools/*.json).
+// Native Go tools are preserved — only file-based schemas are refreshed.
+func (r *Registry) Rescan() {
+	r.scanFiles(false)
+}
+
+func (r *Registry) scanFiles(initial bool) {
+	// Preserve native tool schemas during rescan.
+	nativeSchemas := make(map[string]ToolSchema)
+	if !initial {
+		for _, name := range r.nativeNames {
+			if s, ok := r.schemas[name]; ok {
+				nativeSchemas[name] = s
+			}
+		}
+		// Reset to only native schemas.
+		r.schemas = nativeSchemas
+	}
+
 	dirs := []string{
 		filepath.Join(r.dataDir, "tools.d"),
 		filepath.Join(r.dataDir, "tools"),
@@ -72,7 +95,7 @@ func (r *Registry) scan() {
 }
 
 // ForTools returns schemas for the named tools. Tools without a JSON manifest
-// get a generic fallback schema.
+// get a generic fallback schema (used by CLI tiers where toolbox.md provides context).
 func (r *Registry) ForTools(names []string) []ToolSchema {
 	var result []ToolSchema
 	for _, name := range names {
@@ -81,6 +104,25 @@ func (r *Registry) ForTools(names []string) []ToolSchema {
 		} else {
 			result = append(result, fallbackSchema(name))
 		}
+	}
+	return result
+}
+
+// ForToolsStrict returns schemas only for tools that have a proper schema
+// (JSON manifest or native registration). Tools without schemas are skipped.
+// Use this for API tiers where the model has no other context about tools.
+func (r *Registry) ForToolsStrict(names []string) []ToolSchema {
+	var result []ToolSchema
+	var skipped []string
+	for _, name := range names {
+		if s, ok := r.schemas[name]; ok {
+			result = append(result, s)
+		} else {
+			skipped = append(skipped, name)
+		}
+	}
+	if len(skipped) > 0 {
+		log.Printf("tooling: skipped %d tools without schema for API tier: %v", len(skipped), skipped)
 	}
 	return result
 }
@@ -94,6 +136,12 @@ func (r *Registry) Get(name string) (ToolSchema, bool) {
 // RegisterNative adds a native Go tool's schema to the registry.
 func (r *Registry) RegisterNative(t NativeTool) {
 	r.schemas[t.ToolName()] = t.Schema()
+	r.nativeNames = append(r.nativeNames, t.ToolName())
+}
+
+// NativeToolNames returns only the names of native Go tools (not user tools).
+func (r *Registry) NativeToolNames() []string {
+	return r.nativeNames
 }
 
 // AllSchemas returns all registered schemas (native + file-based user tools).
@@ -191,6 +239,8 @@ func SanitizeToolName(name string) string {
 
 // ToOpenAI converts tool schemas to the OpenAI function calling format.
 // Tool names are sanitized for Anthropic API compatibility.
+// Schemas are patched for strict mode: all properties added to required,
+// optional properties made nullable, additionalProperties set to false.
 func ToOpenAI(schemas []ToolSchema) []map[string]any {
 	tools := make([]map[string]any, len(schemas))
 	for i, s := range schemas {
@@ -198,6 +248,7 @@ func ToOpenAI(schemas []ToolSchema) []map[string]any {
 		if params == nil {
 			params = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
+		params = enforceStrictSchema(params)
 		tools[i] = map[string]any{
 			"type": "function",
 			"function": map[string]any{
@@ -209,4 +260,76 @@ func ToOpenAI(schemas []ToolSchema) []map[string]any {
 		}
 	}
 	return tools
+}
+
+// enforceStrictSchema patches a JSON Schema object for OpenAI strict mode:
+// - additionalProperties = false
+// - all property names added to required
+// - properties not originally required get nullable type
+func enforceStrictSchema(params map[string]any) map[string]any {
+	// Shallow-copy to avoid mutating the original.
+	out := make(map[string]any, len(params))
+	for k, v := range params {
+		out[k] = v
+	}
+
+	props, _ := out["properties"].(map[string]any)
+	if props == nil {
+		out["properties"] = map[string]any{}
+		out["required"] = []string{}
+		out["additionalProperties"] = false
+		return out
+	}
+
+	// Build set of originally required fields.
+	origRequired := map[string]bool{}
+	if req, ok := out["required"].([]any); ok {
+		for _, r := range req {
+			if s, ok := r.(string); ok {
+				origRequired[s] = true
+			}
+		}
+	}
+	if req, ok := out["required"].([]string); ok {
+		for _, s := range req {
+			origRequired[s] = true
+		}
+	}
+
+	// All properties must be in required; optional ones become nullable.
+	allRequired := make([]string, 0, len(props))
+	for name, propRaw := range props {
+		allRequired = append(allRequired, name)
+		if origRequired[name] {
+			continue
+		}
+		// Make optional property nullable.
+		prop, ok := propRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, ok := prop["type"]; ok {
+			switch tv := t.(type) {
+			case string:
+				if tv != "null" {
+					prop["type"] = []any{tv, "null"}
+				}
+			case []any:
+				hasNull := false
+				for _, v := range tv {
+					if v == "null" {
+						hasNull = true
+						break
+					}
+				}
+				if !hasNull {
+					prop["type"] = append(tv, "null")
+				}
+			}
+		}
+	}
+
+	out["required"] = allRequired
+	out["additionalProperties"] = false
+	return out
 }

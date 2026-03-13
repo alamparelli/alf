@@ -639,7 +639,17 @@ func (o *Orchestrator) invokeAgentWithKey(
 	if o.toolRegistry != nil && o.toolExecutor != nil && len(tp.Tools) > 0 {
 		if apiProv, ok := agentProv.(*provider.APIProvider); ok {
 			o.toolRegistry.Rescan()
-			schemas := o.toolRegistry.ForToolsStrict(tp.Tools)
+			// Expand tool wildcards into concrete tool names.
+			resolvedTools := tp.Tools
+			if len(resolvedTools) == 1 && resolvedTools[0] == "*" {
+				resolvedTools = tooling.DiscoverToolNames(o.dataDir)
+				resolvedTools = append(resolvedTools, o.toolRegistry.NativeToolNames()...)
+				log.Printf("[orchestrator]   wildcard resolved to %d tools for %s/%s", len(resolvedTools), teamName, agentName)
+			} else if len(resolvedTools) == 1 && resolvedTools[0] == "*native" {
+				resolvedTools = o.toolRegistry.NativeToolNames()
+				log.Printf("[orchestrator]   native wildcard resolved to %d tools for %s/%s", len(resolvedTools), teamName, agentName)
+			}
+			schemas := o.toolRegistry.ForToolsStrict(resolvedTools)
 			if len(schemas) > 0 {
 				tools := tooling.ToOpenAI(schemas)
 				maxTurns := tp.MaxTurns

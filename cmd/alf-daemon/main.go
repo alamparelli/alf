@@ -713,7 +713,7 @@ func main() {
 		)
 	}
 	if memDB != nil {
-		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, tiersTimeout, &extractorAdapter{prov: cliProvider})
+		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, tiersTimeout, &extractorAdapter{prov: cliProvider, registry: registry})
 		sched.RegisterSystem("mem-extract", "Memory Extraction", "@every 3h", func() error {
 			state := extractor.LoadState()
 			return extractor.RunOnce(state.LastRun)
@@ -2991,12 +2991,37 @@ func migrateConfig(dataDir, configDir string) {
 	}
 }
 
-// extractorAdapter bridges provider.CLIProvider to memstore.ExtractorProvider.
+// extractorAdapter bridges provider.CLIProvider to memstore.ExtractorProvider,
+// with optional fallback to an API backend when CLI is unavailable.
 type extractorAdapter struct {
-	prov *provider.CLIProvider
+	prov     *provider.CLIProvider
+	registry *provider.Registry // optional: fallback to API backend
 }
 
 func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params memstore.ExtractorParams) (string, error) {
+	// Try API backend first if registry has backends (avoids spawning CLI process).
+	if a.registry != nil {
+		names := a.registry.BackendNames()
+		if len(names) > 0 {
+			apiProv := a.registry.ForBackend(names[0])
+			model := params.Model
+			// CLI model names need "anthropic/" prefix for API backends.
+			if !strings.Contains(model, "/") {
+				model = "anthropic/" + model
+			}
+			result, err := apiProv.Invoke(ctx, prompt, provider.Params{
+				Model:    model,
+				MaxTurns: params.MaxTurns,
+				DataDir:  params.DataDir,
+			}, nil)
+			if err == nil {
+				return result.Text, nil
+			}
+			log.Printf("memstore: API extraction failed (%v), falling back to CLI", err)
+		}
+	}
+
+	// Fallback to CLI provider.
 	result, err := a.prov.Invoke(ctx, prompt, provider.Params{
 		Model:    params.Model,
 		MaxTurns: params.MaxTurns,

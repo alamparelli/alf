@@ -350,7 +350,7 @@ func TestAgentErrorPassthrough(t *testing.T) {
 
 func TestMaxIterationsExceeded(t *testing.T) {
 	// Create a provider that always delegates (never returns final response).
-	responses := make([]*provider.Result, 30)
+	responses := make([]*provider.Result, 60)
 	for i := range responses {
 		if i%2 == 0 {
 			responses[i] = &provider.Result{Text: `{"delegates": [{"agent": "content/researcher", "task": "more"}]}`}
@@ -976,5 +976,309 @@ func TestProgressCallbacks(t *testing.T) {
 		if !seen {
 			t.Errorf("missing progress phase: %s (got phases: %v)", phase, phases)
 		}
+	}
+}
+
+func TestRun_PlanOutput(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// First call: plan
+		{Text: `{"plan": [{"step": 1, "description": "research", "agents": ["content/researcher"]}, {"step": 2, "description": "write", "agents": ["content/writer"]}]}`},
+		// After plan_approved: delegate
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find info"}]}`},
+		// Agent result
+		{Text: "research results"},
+		// Final response
+		{Text: `{"response": "done with plan"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "plan test", nil, RunConfig{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "done with plan" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if len(meta.Plan) != 2 {
+		t.Errorf("expected 2 plan steps, got %d", len(meta.Plan))
+	}
+	if meta.Plan[0].Description != "research" {
+		t.Errorf("unexpected plan step: %s", meta.Plan[0].Description)
+	}
+}
+
+func TestRun_PlanWithValidation_Approved(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Plan
+		{Text: `{"plan": [{"step": 1, "description": "do stuff"}]}`},
+		// After approval: delegate
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+		{Text: "result"},
+		{Text: `{"response": "completed"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	var phases []string
+	progress := func(phase, _ string) { phases = append(phases, phase) }
+
+	done := make(chan struct{})
+	var text string
+	var meta *TaskMeta
+	var runErr error
+	go func() {
+		text, meta, runErr = orch.Run(context.Background(), "validate test", nil, RunConfig{NeedValidation: true}, progress)
+		close(done)
+	}()
+
+	// Wait for awaiting_approval status.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_approval" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Approve the plan.
+	running := orch.Running()
+	ok := orch.Approve(running[0].ID, ApprovalDecision{Approved: true})
+	if !ok {
+		t.Fatal("Approve returned false")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete after approval")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if text != "completed" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if meta.Status != "completed" {
+		t.Errorf("expected completed, got %s", meta.Status)
+	}
+
+	// Check phases include awaiting_approval.
+	hasAwaiting := false
+	for _, p := range phases {
+		if p == "awaiting_approval" {
+			hasAwaiting = true
+		}
+	}
+	if !hasAwaiting {
+		t.Errorf("expected awaiting_approval phase, got: %v", phases)
+	}
+}
+
+func TestRun_PlanWithValidation_Rejected(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// First plan
+		{Text: `{"plan": [{"step": 1, "description": "bad plan"}]}`},
+		// After rejection: revised plan
+		{Text: `{"plan": [{"step": 1, "description": "better plan"}]}`},
+		// After auto-approved: delegate
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+		{Text: "result"},
+		{Text: `{"response": "done"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	done := make(chan struct{})
+	var meta *TaskMeta
+	var runErr error
+	go func() {
+		_, meta, runErr = orch.Run(context.Background(), "reject test", nil, RunConfig{NeedValidation: true}, nil)
+		close(done)
+	}()
+
+	// Wait for awaiting_approval.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_approval" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Reject with feedback.
+	running := orch.Running()
+	ok := orch.Approve(running[0].ID, ApprovalDecision{Approved: false, Feedback: "add more detail"})
+	if !ok {
+		t.Fatal("Approve returned false")
+	}
+
+	// After rejection, the second plan won't need validation (NeedValidation only blocks once,
+	// but our code re-enters the plan block with NeedValidation still true).
+	// Wait for the second awaiting_approval.
+	deadline = time.After(2 * time.Second)
+	for {
+		running = orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_approval" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached second awaiting_approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Approve the second plan.
+	ok = orch.Approve(running[0].ID, ApprovalDecision{Approved: true})
+	if !ok {
+		t.Fatal("second Approve returned false")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if meta.ValidationFeedback != "add more detail" {
+		t.Errorf("expected feedback, got %q", meta.ValidationFeedback)
+	}
+}
+
+func TestRun_PlanWithValidation_ContextCancelled(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"plan": [{"step": 1, "description": "plan"}]}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var meta *TaskMeta
+	go func() {
+		_, meta, _ = orch.Run(ctx, "cancel test", nil, RunConfig{NeedValidation: true}, nil)
+		close(done)
+	}()
+
+	// Wait for awaiting_approval.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_approval" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Cancel context instead of approving.
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't exit after cancel")
+	}
+
+	if meta.Status != "interrupted" {
+		t.Errorf("expected interrupted, got %s", meta.Status)
+	}
+}
+
+func TestApprove_NotAwaitingApproval(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	// Start a task that's running (not awaiting approval).
+	blocker := make(chan struct{})
+	blockProv := &channelProvider{ch: blocker}
+	orch.provider = blockProv
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		orch.Run(ctx, "test", nil, RunConfig{}, nil)
+		close(done)
+	}()
+
+	// Wait for running.
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(orch.Running()) > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("task never started")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	running := orch.Running()
+	ok := orch.Approve(running[0].ID, ApprovalDecision{Approved: true})
+	if ok {
+		t.Error("Approve should return false for non-awaiting task")
+	}
+
+	cancel()
+	<-done
+}
+
+func TestApprove_UnknownTaskID(t *testing.T) {
+	store := testStore(testTeam)
+	orch := NewOrchestrator(nil, store, t.TempDir(), nil, testTierResolver)
+	ok := orch.Approve("nonexistent", ApprovalDecision{Approved: true})
+	if ok {
+		t.Error("Approve should return false for unknown task")
+	}
+}
+
+func TestRun_NoPlan_BackwardsCompatible(t *testing.T) {
+	// Model goes straight to delegates (no plan) - existing behavior.
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find"}]}`},
+		{Text: "result"},
+		{Text: `{"response": "done"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "no plan", nil, RunConfig{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "done" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if len(meta.Plan) != 0 {
+		t.Errorf("expected no plan, got %d steps", len(meta.Plan))
 	}
 }

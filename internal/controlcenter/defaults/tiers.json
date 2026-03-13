@@ -52,7 +52,7 @@
       "write_capable": false,
       "effort": "medium",
       "orchestrator_max_turns": 3,
-      "max_iterations": 10,
+      "max_iterations": 20,
       "timeout_minutes": 60,
       "force_command": true
     }

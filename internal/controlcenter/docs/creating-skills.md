@@ -307,7 +307,9 @@ ALF loads skills in this order:
 2. Bundled copies (`~/data/skills.d/`) - read-only
 3. User skills (`~/data/skills/`) - your custom skills
 
-If you create a skill with the same name as a bundled one, yours wins. This lets you customize built-in behaviors without editing system files.
+If you create a skill with the same name as a bundled one, **yours completely replaces it**. This is a full override, not a merge — the bundled skill's instructions, triggers, tier, and reference files are all discarded. Only your version exists in memory.
+
+To customize a bundled skill, duplicate it from the Workspace view in the Control Center first, then edit your copy. This preserves the original instructions as a starting point.
 
 ## Common questions
 

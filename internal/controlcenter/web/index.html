@@ -8,6 +8,11 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>ALF OS -Control Center</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" id="alf-theme-link" href="/static/theme-sage.css">
+  <script>
+    // Apply saved palette immediately to prevent FOUC.
+    (function(){var p=localStorage.getItem('alf-palette')||'sage';document.getElementById('alf-theme-link').href='/static/theme-'+p+'.css';})();
+  </script>
   <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5/css/xterm.css">
   <script src="https://unpkg.com/lucide@latest"></script>
   <style>.app-layout{opacity:0}.app-ready .app-layout{opacity:1;transition:opacity .15s ease-in}</style>
@@ -316,6 +321,11 @@
               </select>
             </div>
             <textarea id="taskLauncherInput" class="task-launcher-input" placeholder="Describe the task for the agent team..." rows="4"></textarea>
+            <div class="task-launcher-options">
+              <label class="task-launcher-validation">
+                <input type="checkbox" id="taskNeedValidation"> Review plan before execution
+              </label>
+            </div>
             <div class="task-launcher-actions">
               <button class="btn btn-sm btn-accent" id="taskLaunchBtn"><i data-lucide="play" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Launch</button>
             </div>

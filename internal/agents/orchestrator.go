@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	defaultMaxIterations  = 10
+	defaultMaxIterations     = 20
 	defaultOrchestratorTurns = 3 // low: orchestrator should output JSON quickly, not do deep tool work
-	defaultGlobalTimeout  = 60 * time.Minute
-	orchestratorKey       = "agent"
+	defaultGlobalTimeout     = 60 * time.Minute
+	orchestratorKey          = "agent"
 )
 
 // ResolveModelFunc maps short model names to full CLI model names.
@@ -29,10 +29,11 @@ type ResolveModelFunc func(short string) string
 // Orchestrator coordinates sub-agents via a resume loop.
 // RunningTask tracks a live orchestrator task for cancellation.
 type RunningTask struct {
-	ID        string
-	StartedAt time.Time
-	Cancel    context.CancelFunc
-	Meta      *TaskMeta
+	ID         string
+	StartedAt  time.Time
+	Cancel     context.CancelFunc
+	Meta       *TaskMeta
+	ApprovalCh chan ApprovalDecision
 }
 
 // ResolveProviderFunc maps a backend name to a provider.
@@ -119,6 +120,23 @@ func (o *Orchestrator) CancelAll() int {
 	return len(tasks)
 }
 
+// Approve sends an approval decision to a task awaiting validation.
+// Returns true if the decision was delivered.
+func (o *Orchestrator) Approve(taskID string, decision ApprovalDecision) bool {
+	o.mu.Lock()
+	rt, ok := o.running[taskID]
+	o.mu.Unlock()
+	if !ok || rt.Meta.Status != "awaiting_approval" {
+		return false
+	}
+	select {
+	case rt.ApprovalCh <- decision:
+		return true
+	default:
+		return false
+	}
+}
+
 // providerFor returns the provider for the given backend, falling back to the default.
 // If backend is empty but model contains "/" (e.g. "x-ai/grok-4"), it's an API model
 // and we auto-detect the backend via resolveProvider.
@@ -188,16 +206,19 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	// Register for cancellation tracking.
 	o.mu.Lock()
 	o.running[taskID] = &RunningTask{
-		ID:        taskID,
-		StartedAt: meta.StartedAt,
-		Cancel:    cancel,
-		Meta:      meta,
+		ID:         taskID,
+		StartedAt:  meta.StartedAt,
+		Cancel:     cancel,
+		Meta:       meta,
+		ApprovalCh: make(chan ApprovalDecision, 1),
 	}
+	rt := o.running[taskID]
 	o.mu.Unlock()
 	defer func() {
-		// If status is still "running" when we exit (e.g. context cancelled,
-		// panic recovery), update disk so the task isn't orphaned as invisible.
-		if meta.Status == "running" {
+		// If status is still "running" or "awaiting_approval" when we exit
+		// (e.g. context cancelled, panic recovery), update disk so the task
+		// isn't orphaned as invisible.
+		if meta.Status == "running" || meta.Status == "awaiting_approval" {
 			meta.Status = "interrupted"
 			now := time.Now()
 			meta.CompletedAt = &now
@@ -316,6 +337,42 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 
 		// Parse orchestrator output.
 		output := parseOrchestratorOutput(result.Text)
+
+		// Plan output - display and optionally block for approval.
+		if len(output.Plan) > 0 {
+			meta.Plan = output.Plan
+			o.saveMeta(taskDir, meta)
+			if onProgress != nil {
+				onProgress("plan_ready", "")
+			}
+
+			if rc.NeedValidation {
+				meta.Status = "awaiting_approval"
+				o.saveMeta(taskDir, meta)
+				if onProgress != nil {
+					onProgress("awaiting_approval", "")
+				}
+				// Block until user approves or context cancels.
+				select {
+				case <-ctx.Done():
+					return "", meta, ctx.Err()
+				case decision := <-rt.ApprovalCh:
+					if !decision.Approved {
+						meta.Status = "running"
+						meta.ValidationFeedback = decision.Feedback
+						meta.Plan = nil
+						o.saveMeta(taskDir, meta)
+						prompt = `{"plan_rejected":true,"feedback":"` + escapeJSON(decision.Feedback) + `","instruction":"revise your plan based on the feedback and output a new plan"}`
+						continue
+					}
+					meta.Status = "running"
+					o.saveMeta(taskDir, meta)
+				}
+			}
+			// Tell orchestrator to execute the plan.
+			prompt = `{"plan_approved":true,"instruction":"execute the plan now by delegating to agents"}`
+			continue
+		}
 
 		// Final response - done.
 		if output.Response != "" {
@@ -760,6 +817,16 @@ parse:
 	}
 
 	return out
+}
+
+// escapeJSON escapes a string for safe embedding in a JSON string literal.
+func escapeJSON(s string) string {
+	b, _ := json.Marshal(s)
+	// Strip surrounding quotes.
+	if len(b) >= 2 {
+		return string(b[1 : len(b)-1])
+	}
+	return s
 }
 
 // truncate shortens a string to maxLen, appending "…" if truncated.

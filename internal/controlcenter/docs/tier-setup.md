@@ -90,16 +90,16 @@ Here's what a `tiers.json` file looks like:
 |---------|-------------|---------|
 | `name` | Unique name. Shows up in logs and status messages. | `"sonnet"` |
 | `model` | Which Claude model to use: `haiku`, `sonnet`, or `opus`. | `"sonnet"` |
-| `priority` | Lower number = higher priority. Used for fallback selection and media routing. | `3` |
+| `priority` | Ranking order (1 = first choice, 2 = second, etc.). When ALF can't decide, it picks the lowest number. | `3` |
 | `enabled` | Set to `false` to turn off a tier completely. | `true` |
 | `routable` | Set to `false` to hide from the router (manual-only). | `true` |
-| `instant` | Router answers directly without spawning a Claude session. Used for greetings and one-liners. | `false` |
+| `instant` | Reply instantly without starting a full AI session. Best for simple greetings like "hi" or "thanks". | `false` |
 | `router_label` | Describes what this tier is good at. The router reads this to decide. **This is the most important field.** | `"Code review, debugging"` |
 | `description` | Optional longer description. Falls back to `router_label` if not set. Used in router prompt. | `"Deep code analysis"` |
 | `write_capable` | Can this tier create, edit, or delete files? | `false` |
 | `effort` | How hard the model thinks: `low`, `medium`, or `high`. **CLI tiers only** - this maps to Claude's `--effort` flag. Ignored for API/OpenRouter backends (most API models don't support effort control). | `"medium"` |
 | `force_command` | Enable `/<tier_name> <message>` to bypass routing and force this tier. Works in Telegram and CC Chat. | `true` |
-| `max_turns` | Max steps for tool use. Prevents runaway loops. 0 = unlimited. | `10` |
+| `max_turns` | Maximum number of actions ALF can take in one response (reading files, running commands, etc.). Keeps things from running too long. 0 = no limit. | `10` |
 | `max_iterations` | (Agent only) Max delegate→synthesize cycles. | `10` |
 | `timeout_minutes` | (Agent only) Hard timeout in minutes. | `60` |
 | `tools` | List of allowed tools for read-only tiers (e.g. `["Read"]`, `["Read", "WebSearch"]`). Write-capable tiers get all tools. | `["Read"]` |
@@ -184,7 +184,7 @@ CLI tiers run Claude Code as a subprocess. Tools are managed by Claude Code itse
 
 ### API tiers (`backend: "openrouter"`, `"ollama"`, etc.)
 
-API tiers use a **tool loop** - ALF sends tool schemas to the model and executes tool calls in a loop until the model produces a text response or hits `max_turns`.
+API tiers work differently from CLI tiers. ALF gives the model a list of available tools, and the model can call them one at a time until it has enough information to respond (or reaches the `max_turns` limit).
 
 Available tools for API tiers:
 

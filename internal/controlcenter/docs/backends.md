@@ -1,6 +1,12 @@
+---
+category: Configuration
+tags: backends, openrouter, ollama, openai, api, models
+order: 4
+---
+
 # LLM Backends
 
-ALF supports any OpenAI-compatible API backend for both message routing and tier execution. You can use multiple backends simultaneously, routing different tiers to different providers.
+ALF can use different AI providers beyond Claude. You can connect services like OpenRouter (access to 200+ models), OpenAI (GPT-4), or Ollama (free local models) - and use them alongside Claude.
 
 ## Quick Setup
 
@@ -115,12 +121,12 @@ Conversation history flows seamlessly across backends. When the router switches 
 
 This means users don't lose context when the router switches tiers mid-conversation.
 
-## Limitations
+## Good to know
 
-- API backends support ALF tools (via tool loop) but **not CLI tools** (Read, Write, Bash, etc.). Use CLI tiers for agentic work requiring Claude Code capabilities.
-- No streaming of thinking/tool_use events - only text deltas
-- Cost tracking not available for API backends (shows $0.00)
-- Tool selection: when editing a tier with an API backend, only ALF tools are shown. CLI tools are exclusive to CLI-based tiers.
+- API models can use ALF's built-in tools (reading files, running commands, etc.), but some advanced features only work with Claude. Use Claude tiers for complex multi-step work.
+- Responses from API models stream text only - you won't see the "thinking" or "using tool" indicators that Claude shows
+- Cost tracking isn't available for API models (always shows $0.00)
+- When setting up tools for an API tier, only compatible tools are shown in the list
 
 ## Troubleshooting
 

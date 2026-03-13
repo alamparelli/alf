@@ -1,6 +1,26 @@
+---
+category: Operations
+tags: debugging, logs, errors, troubleshooting, sessions
+order: 8
+---
+
 # Debugging
 
-Reference for diagnosing issues in ALF. All paths are relative to the daemon's HOME (`/home/alf`).
+When something isn't working right, this page helps you figure out what happened. Most debugging can be done from the **Logs** tab in the Control Center - but for deeper investigation, the terminal gives you access to detailed log files.
+
+## Start here
+
+Before diving into log files, try these quick checks:
+
+| Symptom | What to check |
+|---------|--------------|
+| ALF doesn't reply | **Logs** tab - look for ERROR entries |
+| Wrong model used | **Logs** tab - search for "router:" to see routing decisions |
+| Slow responses | **Logs** tab - check the response time (shown in milliseconds after each reply) |
+| Scheduled job didn't run | **Schedules** tab - check the job's Last Error field |
+| "Turn limit reached" | The model ran out of steps. Edit the tier and increase Max Turns, or simplify your prompt. |
+
+If these don't help, read on for detailed debugging.
 
 ---
 

@@ -10,7 +10,7 @@ The Terminal tab opens a shell session **inside the Docker container** where ALF
 
 ## What you're connected to
 
-When you open a terminal, you get a bash session inside the ALF container (node:22-slim) as the `node` user. You can switch to root with `su -` if needed.
+When you open a terminal, you get a bash session inside the ALF container as the `alf` user. The container runs Debian (bookworm-slim) with many tools pre-installed - see [Bootstrap & Packages](docs:bootstrap) for the full list.
 
 The container's filesystem is ephemeral - most of it is rebuilt on every `alf upgrade`.
 
@@ -51,5 +51,5 @@ Files inside `~/data/` are mounted as a Docker volume and survive rebuilds:
 
 ## What's next?
 
-- [Bootstrap Script](docs:bootstrap) -- automate container setup on every startup
-- [Building Tools & Extensions](docs:container-packages) -- create tools and install packages
+- [Bootstrap Script](docs:bootstrap) - automate container setup on every startup
+- [Building Tools & Extensions](docs:container-packages) - create tools and install packages

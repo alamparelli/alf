@@ -32,10 +32,24 @@ ALF preserves conversation context even when switching between different LLM bac
 
 Sessions don't last forever. They expire after a period of inactivity (default: 30 minutes, configurable in `config.json`).
 
+You can change this in **Settings → Configuration** by editing `session_timeout`. Set it to `0` to disable the timeout entirely - your sessions will never expire on their own.
+
 When a session expires:
 - ALF loses the conversation context
 - Active skills are cleared
 - The next message starts a fresh session
+
+## Multiple conversations
+
+In the Control Center Chat, you can open **multiple conversation tabs** - each one is an independent session with its own history and context.
+
+- Click **+** to start a new conversation in a fresh tab
+- Switch tabs to jump between different topics
+- Each tab keeps its own session alive independently
+
+This means you don't need to `/new` as often in the Control Center - just open a new tab when switching topics, and keep the old one for reference.
+
+> On Telegram, there's only one conversation thread. Use `/new` to switch topics there.
 
 ## Starting fresh with /new
 
@@ -90,7 +104,7 @@ Use `/start` if you want ALF to re-introduce itself, or after a major update.
 ## Common questions
 
 **Can I go back to a previous session?**
-No. Once a session is archived or expired, the conversation context is gone. Important information should be saved to memory or context files. The full message history (including tool calls) is still stored on disk in `logs/conversation.jsonl` for debugging.
+Not directly. Once a session expires, the conversation context is gone. However, in the Control Center Chat, your **conversation tabs preserve the visible message history** - you can scroll back and read previous exchanges even after a session expires. For important information, save it to memory or context files so ALF remembers it across sessions.
 
 **How do I know if my session is still active?**
 If ALF responds with context from your recent messages, your session is active. If it seems to have forgotten, the session likely expired.
@@ -100,6 +114,9 @@ No. ALF tracks conversation history across all backends. If you're chatting on a
 
 **Does /new affect scheduled jobs?**
 No. Scheduled jobs run independently of your chat sessions.
+
+**Do conversation tabs share sessions?**
+No. Each tab in the Control Center Chat is fully independent - its own session, its own context, its own skills. Switching tabs doesn't affect other conversations.
 
 **What happens if a skill was active and the session expires?**
 The skill clears from the session. Next time you mention a trigger keyword, it reloads automatically.

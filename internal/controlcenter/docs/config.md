@@ -20,9 +20,9 @@ All runtime settings live in `config.d/config.json`. Edit them via **Settings â†
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `log_level` | string | `"info"` | Log verbosity: `"debug"`, `"info"`, `"warn"`, `"error"` |
-| `system_prompt` | string | `""` | Extra instructions prepended to every conversation. Appended after the core system prompt. |
-| `timezone` | string | `""` | IANA timezone for scheduler and quiet hours (e.g. `"Europe/Paris"`). Empty = `TZ` env var or UTC. |
+| `log_level` | text | `"info"` | How much detail to show in the Logs tab. `"error"` = only problems, `"warn"` = problems + warnings, `"info"` = normal activity, `"debug"` = everything (very verbose). |
+| `system_prompt` | text | `""` | Custom instructions added to every conversation. Use this to give ALF standing orders like "always reply in French" or "keep responses short". |
+| `timezone` | text | `""` | Your timezone for schedules and quiet hours (e.g. `"Europe/Paris"`, `"America/New_York"`). Leave empty to use UTC. |
 
 ---
 
@@ -30,8 +30,8 @@ All runtime settings live in `config.d/config.json`. Edit them via **Settings â†
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `session_timeout` | int (minutes) | `30` | Inactivity timeout before a conversation session expires. `0` = no timeout (sessions never expire). |
-| `max_sessions` | int | `2` | Maximum concurrent sessions per user. `0` = use default (2). |
+| `session_timeout` | number (minutes) | `30` | How long ALF waits before forgetting the current conversation. After this many minutes of silence, the next message starts fresh. Set to `0` to keep conversations alive forever (they never expire on their own). |
+| `max_sessions` | number | `2` | How many separate conversations can be active at the same time. Each chat tab in the Control Center uses one session. `0` = use default (2). |
 
 See [Managing Conversations](docs:sessions) for details on session lifecycle.
 

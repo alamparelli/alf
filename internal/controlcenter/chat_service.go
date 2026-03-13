@@ -970,8 +970,20 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			model := t.Model
+			backend := t.Backend
+			// Auto-detect API backend from model name (e.g. "x-ai/grok-4" → openrouter).
+			if (backend == "" || backend == "cli") && strings.Contains(model, "/") {
+				if cs.Registry != nil {
+					// Pick first registered API backend that might serve this model.
+					names := cs.Registry.BackendNames()
+					if len(names) > 0 {
+						backend = names[0]
+						log.Printf("[chat] tier %q: auto-detected backend=%s for model=%s", tierName, backend, model)
+					}
+				}
+			}
 			// For CLI backend, resolve short names; for API backends, use model string as-is.
-			if (t.Backend == "" || t.Backend == "cli") && cs.ResolveModel != nil {
+			if (backend == "" || backend == "cli") && cs.ResolveModel != nil {
 				model = cs.ResolveModel(t.Model)
 			}
 			// Resolve tool wildcards into concrete tool names.
@@ -999,7 +1011,7 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 				Model:                model,
 				Tools:                tools,
 				Effort:               t.Effort,
-				Backend:              t.Backend,
+				Backend:              backend,
 				WriteCapable:         t.WriteCapable,
 				MaxTurns:             t.MaxTurns,
 				OrchestratorMaxTurns: t.OrchestratorMaxTurns,

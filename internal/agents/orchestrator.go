@@ -110,7 +110,13 @@ func (o *Orchestrator) CancelAll() int {
 }
 
 // providerFor returns the provider for the given backend, falling back to the default.
-func (o *Orchestrator) providerFor(backend string) provider.Provider {
+// If backend is empty but model contains "/" (e.g. "x-ai/grok-4"), it's an API model
+// and we auto-detect the backend via resolveProvider.
+func (o *Orchestrator) providerFor(backend, model string) provider.Provider {
+	if backend == "" && strings.Contains(model, "/") {
+		backend = "openrouter" // convention: slash in model name = API model
+		log.Printf("[orchestrator] auto-detected backend=%s for model=%s", backend, model)
+	}
 	if o.resolveProvider != nil && backend != "" && backend != "cli" {
 		return o.resolveProvider(backend)
 	}
@@ -243,7 +249,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		hasResume := orchSessionID != ""
 		log.Printf("[orchestrator] invoking model=%s backend=%s effort=%s resume=%v", orchModel, rc.Backend, orchEffort, hasResume)
 
-		orchProvider := o.providerFor(rc.Backend)
+		orchProvider := o.providerFor(rc.Backend, orchModel)
 
 		params := provider.Params{
 			Model:         orchModel,
@@ -617,7 +623,7 @@ func (o *Orchestrator) invokeAgentWithKey(
 		}
 	}
 
-	agentProv := o.providerFor(tp.Backend)
+	agentProv := o.providerFor(tp.Backend, model)
 	result, err := agentProv.Invoke(ctx, d.Task, params, agentProgress)
 
 	// Retry without resume if session expired.

@@ -457,12 +457,20 @@ func main() {
 		for _, t := range tierStore.Current().Tiers {
 			if t.Name == tierName {
 				model := t.Model
-				if (t.Backend == "" || t.Backend == "cli") && router.ResolveModel != nil {
+				backend := t.Backend
+				// Auto-detect API backend from model name.
+				if (backend == "" || backend == "cli") && strings.Contains(model, "/") {
+					names := registry.BackendNames()
+					if len(names) > 0 {
+						backend = names[0]
+					}
+				}
+				if (backend == "" || backend == "cli") && router.ResolveModel != nil {
 					model = router.ResolveModel(t.Model)
 				}
 				return agents.TierParams{
 					Model:        model,
-					Backend:      t.Backend,
+					Backend:      backend,
 					Tools:        t.Tools,
 					Effort:       t.Effort,
 					WriteCapable: t.WriteCapable,
@@ -1564,7 +1572,7 @@ func main() {
 			}
 
 			// Resolve tier to params.
-			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), dataDir, toolRegistry)
+			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), dataDir, toolRegistry, registry)
 
 			eventLog.Log("router_classify", map[string]any{
 				"chat_id":          chatID,
@@ -2553,13 +2561,24 @@ func answerCallbackQuery(client *http.Client, token string, callbackID string) {
 	defer resp.Body.Close()
 }
 
-func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, reg *tooling.Registry) tierParams {
+func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, reg *tooling.Registry, provRegistry *provider.Registry) tierParams {
 	for _, t := range tiers.Tiers {
 		if t.Name == tierName {
 			model := t.Model
+			backend := t.Backend
+			// Auto-detect API backend from model name (e.g. "x-ai/grok-4" → first registered backend).
+			if (backend == "" || backend == "cli") && strings.Contains(model, "/") {
+				if provRegistry != nil {
+					names := provRegistry.BackendNames()
+					if len(names) > 0 {
+						backend = names[0]
+						log.Printf("[chat] tier %q: auto-detected backend=%s for model=%s", tierName, backend, model)
+					}
+				}
+			}
 			// For CLI backend, resolve short names to full model IDs.
 			// For API backends, use the model string as-is.
-			if t.Backend == "" || t.Backend == "cli" {
+			if backend == "" || backend == "cli" {
 				model = router.ResolveModel(t.Model)
 			}
 			// Resolve tool wildcards into concrete tool names.
@@ -2592,7 +2611,7 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, r
 				OrchestratorMaxTurns: t.OrchestratorMaxTurns,
 				MaxIterations:        t.MaxIterations,
 				TimeoutMin:           t.TimeoutMin,
-				Backend:              t.Backend,
+				Backend:              backend,
 				SystemPrompt:         t.SystemPrompt,
 			}
 		}

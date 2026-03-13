@@ -77,17 +77,15 @@ func (h *DebugPromptHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tp := cs.resolveTierParams(tierName)
 
 	// Build system prompts (same as Ask()).
-	systemPrompts := memory.CollectPrompts(cs.ContextDir)
-	var sysPromptTexts []string
+	isAPITier := tp.Backend != "" && tp.Backend != "cli"
+	backend := "cli"
+	if isAPITier {
+		backend = "api"
+	}
+	sysPromptTexts := memory.CollectPrompts(cs.ContextDir, memory.PromptConfig{Backend: backend, Channel: "cc"})
 
 	if tp.SystemPrompt != "" {
-		sysPromptTexts = append(sysPromptTexts, tp.SystemPrompt)
-	}
-
-	for i := 0; i < len(systemPrompts)-1; i += 2 {
-		if systemPrompts[i] == "--append-system-prompt" {
-			sysPromptTexts = append(sysPromptTexts, systemPrompts[i+1])
-		}
+		sysPromptTexts = append([]string{tp.SystemPrompt}, sysPromptTexts...)
 	}
 
 	if cs.Recaller != nil {
@@ -109,7 +107,6 @@ func (h *DebugPromptHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build tool schemas.
-	isAPITier := tp.Backend != "" && tp.Backend != "cli"
 	var toolSchemas []map[string]any
 	var toolNames []string
 
@@ -122,14 +119,7 @@ func (h *DebugPromptHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				toolNames[i] = s.Name
 			}
 			// Add tool instruction (same as Ask()).
-			toolInstruction := fmt.Sprintf(
-				"You have access to the following tools: %s.\n"+
-					"IMPORTANT: You MUST call the appropriate tool for every action. "+
-					"Never simulate, assume, or hallucinate the result of a tool call. "+
-					"Always invoke the tool and wait for the actual result before responding.",
-				strings.Join(toolNames, ", "),
-			)
-			sysPromptTexts = append([]string{toolInstruction}, sysPromptTexts...)
+			sysPromptTexts = append([]string{memory.ToolInstruction(toolNames)}, sysPromptTexts...)
 		}
 	}
 

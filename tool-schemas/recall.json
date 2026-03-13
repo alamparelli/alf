@@ -1,6 +1,6 @@
 {
   "name": "recall",
-  "description": "Search long-term memory by semantic similarity. Returns relevant memories.",
+  "description": "Search long-term memory by semantic similarity. Returns relevant memories with IDs.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -13,6 +13,7 @@
         "description": "Max number of results (default 5)"
       }
     },
-    "required": ["query"]
+    "required": ["query"],
+    "x-positional": ["query"]
   }
 }

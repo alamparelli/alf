@@ -548,6 +548,7 @@ func main() {
 		tooling.GlobNativeTool{DataDir: dataDir},
 		tooling.ReadFileNativeTool{DataDir: dataDir},
 		tooling.WriteFileNativeTool{DataDir: dataDir},
+		tooling.RemoveNativeTool{DataDir: dataDir},
 	}
 	toolExecutor := &tooling.Executor{
 		DataDir:  dataDir,
@@ -1700,22 +1701,22 @@ func main() {
 			tgAcc := conversation.NewAccumulator()
 			onProgress := tgAcc.OnProgress(rawOnProgress)
 
-			// Build system prompts (context files + reaction instruction).
-			sysPrompts := memory.CollectPrompts(contextDir)
-			var sysPromptTexts []string
+			// Build system prompts with backend/channel-aware filtering.
+			isAPITier := tp.Backend != "" && tp.Backend != "cli"
+			backend := "cli"
+			if isAPITier {
+				backend = "api"
+			}
+			promptCfg := memory.PromptConfig{Backend: backend, Channel: "tg"}
+			sysPromptTexts := memory.CollectPrompts(contextDir, promptCfg)
 			// Inject per-tier system prompt first so it has high priority.
 			if tp.SystemPrompt != "" {
-				sysPromptTexts = append(sysPromptTexts, tp.SystemPrompt)
+				sysPromptTexts = append([]string{tp.SystemPrompt}, sysPromptTexts...)
 			}
-			// Inject onboarding prompt FIRST so it becomes the primary --system-prompt.
+			// Inject onboarding prompt so Claude follows the onboarding instructions.
 			onboarding := memory.OnboardingPrompt(contextDir)
 			if onboarding != "" {
 				sysPromptTexts = append(sysPromptTexts, onboarding)
-			}
-			for i := 0; i < len(sysPrompts)-1; i += 2 {
-				if sysPrompts[i] == "--append-system-prompt" {
-					sysPromptTexts = append(sysPromptTexts, sysPrompts[i+1])
-				}
 			}
 			// Inject pre-recalled memories (computed before routing).
 			if preRecallBlock != "" {
@@ -1744,7 +1745,6 @@ func main() {
 
 			// Select provider based on tier backend.
 			var tierProv provider.Provider = registry.ForBackend(tp.Backend)
-			isAPITier := tp.Backend != "" && tp.Backend != "cli"
 
 			// Wrap API provider with agentic tool loop when tier has tools.
 			if isAPITier && chatService.ToolRegistry != nil && chatService.ToolExecutor != nil && len(tp.Tools) > 0 {
@@ -1763,14 +1763,7 @@ func main() {
 						for i, s := range schemas {
 							toolNames[i] = s.Name
 						}
-						toolInstruction := fmt.Sprintf(
-							"You have access to the following tools: %s.\n"+
-								"IMPORTANT: You MUST call the appropriate tool for every action. "+
-								"Never simulate, assume, or hallucinate the result of a tool call. "+
-								"Always invoke the tool and wait for the actual result before responding.",
-							strings.Join(toolNames, ", "),
-						)
-						sysPromptTexts = append([]string{toolInstruction}, sysPromptTexts...)
+						sysPromptTexts = append([]string{memory.ToolInstruction(toolNames)}, sysPromptTexts...)
 					}
 				}
 			}

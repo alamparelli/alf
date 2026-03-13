@@ -9,6 +9,10 @@
         "enum": ["create", "list", "delete", "update"],
         "description": "Action to perform"
       },
+      "id": {
+        "type": "string",
+        "description": "Job ID (required for delete/update)"
+      },
       "name": {
         "type": "string",
         "description": "Job name (required for create)"
@@ -31,22 +35,32 @@
       },
       "message": {
         "type": "string",
-        "description": "Direct push notification text (no LLM, no command)"
+        "description": "Direct push notification text (no LLM, no command — mutually exclusive with prompt/command)"
       },
       "output": {
         "type": "string",
         "enum": ["telegram", "file", "both", "silent"],
         "description": "Output destination (default: telegram)"
       },
-      "id": {
+      "timeout": {
         "type": "string",
-        "description": "Job ID (required for delete/update)"
+        "description": "Execution timeout (e.g. 5m, 10m, 1h). Defaults: direct=2m, LLM=5m"
+      },
+      "skills": {
+        "type": "string",
+        "description": "Comma-separated skill names (LLM jobs only)"
+      },
+      "enabled": {
+        "type": "string",
+        "enum": ["true", "false"],
+        "description": "Enable/disable job (for update)"
       },
       "user_only": {
         "type": "boolean",
-        "description": "List only user-created jobs (not system jobs)"
+        "description": "List only user-created jobs (not system/managed jobs)"
       }
     },
-    "required": ["action"]
+    "required": ["action"],
+    "x-positional": ["action", "id"]
   }
 }

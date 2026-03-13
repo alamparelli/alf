@@ -128,7 +128,11 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 // resolveTool finds a tool binary in tools.d/ then tools/.
 // Tries the exact name first, then the original name with hyphens restored
 // (since tool names are sanitized for API compatibility: hyphens → underscores).
+// Defense-in-depth: rejects names containing path separators or traversal sequences.
 func (e *Executor) resolveTool(name string) string {
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		return ""
+	}
 	// Try exact name, then with underscores replaced by hyphens.
 	candidates := []string{name}
 	if strings.Contains(name, "_") {

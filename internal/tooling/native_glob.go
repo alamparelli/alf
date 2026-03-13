@@ -60,8 +60,11 @@ func (t GlobNativeTool) Run(_ context.Context, argsJSON string) (string, error) 
 		} else {
 			base = "."
 		}
-	} else if t.DataDir != "" && !filepath.IsAbs(base) {
-		base = filepath.Join(t.DataDir, base)
+	} else {
+		base = ResolvePath(t.DataDir, base)
+		if _, err := CheckBoundary(t.DataDir, base); err != nil {
+			return "", err
+		}
 	}
 
 	type entry struct {

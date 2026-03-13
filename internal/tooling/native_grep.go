@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -71,10 +70,13 @@ func (t GrepNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 	if args.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")
 	}
-	if t.DataDir != "" && args.Path != "" && !filepath.IsAbs(args.Path) {
-		args.Path = filepath.Join(t.DataDir, args.Path)
-	} else if args.Path == "" && t.DataDir != "" {
+	if args.Path == "" && t.DataDir != "" {
 		args.Path = t.DataDir
+	} else if args.Path != "" {
+		args.Path = ResolvePath(t.DataDir, args.Path)
+		if _, err := CheckBoundary(t.DataDir, args.Path); err != nil {
+			return "", err
+		}
 	}
 
 	rgArgs := []string{"--color=never"}

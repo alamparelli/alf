@@ -4979,6 +4979,8 @@ function termGetTheme() {
 }
 
 function terminalInit() {
+  // termThemes is declared later in the file; if not yet initialized, defer.
+  if (!termThemes) { setTimeout(terminalInit, 0); return; }
   if (termInstance && termWS && termWS.readyState === WebSocket.OPEN) {
     termFitAddon.fit();
     termInstance.focus();

@@ -112,7 +112,7 @@ function navigateTo(view) {
   logsStopAutoRefresh();
   tasksStopAutoRefresh();
   fwStopAutoRefresh();
-  document.querySelectorAll('#navGrid .nav-icon, #navPagesSection .nav-item').forEach(el => {
+  document.querySelectorAll('#navGrid .nav-icon, #navAppsSection .nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === navView);
   });
 
@@ -3092,7 +3092,6 @@ function schedRelTime(iso) {
 
 // ─── Tasks ──────────────────────────────────────────
 let tasksInitialized = false;
-let tasksAutoTimer = null;
 
 async function taskLauncherLoadTeams() {
   const sel = document.getElementById('taskLauncherTeam');
@@ -3598,7 +3597,6 @@ async function teamsDelete(name) {
 }
 
 // --- Logs ---
-let logsAutoTimer = null;
 let logsInitialized = false;
 
 function logsStopAutoRefresh() {
@@ -4155,20 +4153,24 @@ function tiersSave() {
   });
 }
 
+// Hoist auto-refresh timers so navigateTo can safely call stop* functions.
+var tasksAutoTimer = null, logsAutoTimer = null, fwAutoTimer = null;
+
 // --- Init ---
+const savedView = localStorage.getItem('alf-view');
+navigateTo(savedView || 'chat');
+lucide.createIcons();
+document.body.classList.add('app-ready');
+
 loadStatus();
 loadTeachTiers();
-loadApps().then(() => {
-  const saved = localStorage.getItem('alf-view');
-  navigateTo(saved || 'chat');
-});
+loadApps();
 wsInit();
 setInterval(loadStatus, 30000);
 setInterval(loadApps, 30000);
 
 // --- Firewall ---
 let fwInitialized = false;
-let fwAutoTimer = null;
 let fwCache = null;
 
 function fwInit() {

@@ -1589,16 +1589,18 @@ const QUICK_REACTIONS = ['👍', '❤', '🔥', '😁', '🤔', '👎'];
 function chatNewThinkingBlock() {
   const det = document.createElement('details');
   det.className = 'chat-thinking-block';
-  det.open = true;
+  det.open = false;
   const summary = document.createElement('summary');
   summary.className = 'chat-thinking-summary';
-  summary.textContent = '🧠 Thinking...';
+  summary.innerHTML = '<i data-lucide="brain" class="chat-block-icon"></i> Thinking...';
   const content = document.createElement('div');
   content.className = 'chat-thinking-content';
   det.appendChild(summary);
   det.appendChild(content);
   chatMessages.appendChild(det);
   chatThinkingEl = { det: det, summary: summary, content: content, text: '' };
+  chatNeedNewBubble = true;
+  if (window.lucide) lucide.createIcons({ nodes: [summary] });
   chatScrollBottom();
   return chatThinkingEl;
 }
@@ -1608,7 +1610,8 @@ function chatAppendThinkingText(text) {
   chatThinkingEl.text += text;
   chatThinkingEl.content.textContent = chatThinkingEl.text;
   var preview = chatThinkingEl.text.slice(0, 100).replace(/\n/g, ' ');
-  chatThinkingEl.summary.textContent = '🧠 ' + preview + (chatThinkingEl.text.length > 100 ? '…' : '');
+  var iconHtml = chatThinkingEl.summary.querySelector('.chat-block-icon') ? chatThinkingEl.summary.querySelector('.chat-block-icon').outerHTML : '';
+  chatThinkingEl.summary.innerHTML = iconHtml + ' ' + esc(preview) + (chatThinkingEl.text.length > 100 ? '…' : '');
   chatThinkingEl.content.scrollTop = chatThinkingEl.content.scrollHeight;
   chatScrollBottom();
 }
@@ -1620,20 +1623,25 @@ function chatNewToolBlock(name) {
   if (chatThinkingEl && chatThinkingEl.det.open) {
     chatThinkingEl.det.open = false;
   }
-  var el = document.createElement('div');
-  el.className = 'chat-tool-block';
-  el.innerHTML = '<div class="chat-tool-header"><span class="chat-tool-icon">⚙️</span> <strong>' + esc(name) + '</strong></div>';
+  var det = document.createElement('details');
+  det.className = 'chat-tool-block';
+  var summary = document.createElement('summary');
+  summary.className = 'chat-tool-summary';
+  summary.innerHTML = '<i data-lucide="wrench" class="chat-block-icon"></i> <strong>' + esc(name) + '</strong>';
+  det.appendChild(summary);
   var inputEl = document.createElement('div');
   inputEl.className = 'chat-tool-input';
-  el.appendChild(inputEl);
+  det.appendChild(inputEl);
   var resultEl = document.createElement('div');
   resultEl.className = 'chat-tool-result-inline';
-  el.appendChild(resultEl);
-  chatMessages.appendChild(el);
-  chatCurrentToolBlock = el;
+  det.appendChild(resultEl);
+  chatMessages.appendChild(det);
+  chatCurrentToolBlock = det;
   chatCurrentToolInput = '';
+  chatNeedNewBubble = true;
+  if (window.lucide) lucide.createIcons({ nodes: [summary] });
   chatScrollBottom();
-  return el;
+  return det;
 }
 
 // --- Agent tracker (compact group for orchestrator phase events) ---
@@ -1851,6 +1859,7 @@ let chatAgentTracker = null;      // agent events container
 let chatAgentTrackerBody = null;
 let chatAgentStepCount = 0;
 let chatCurrentTier = '';         // tier name from routing
+let chatNeedNewBubble = false;   // true when tool/thinking happened mid-stream → next text creates fresh bubble
 
 // Process an SSE stream response (shared by send and reconnect).
 async function chatProcessStream(res) {
@@ -1965,16 +1974,19 @@ async function chatProcessStream(res) {
           chatSetStatus('<span class="dot-pulse"><span></span><span></span><span></span></span> Synthesizing...');
           break;
         case 'text_delta':
-          if (!chatStreamingText) {
+          if (!chatStreamingText || chatNeedNewBubble) {
             chatStreamingText = true;
+            chatNeedNewBubble = false;
             chatClearStatus();
             // Collapse thinking block when text starts arriving.
             if (chatThinkingEl && chatThinkingEl.det.open) chatThinkingEl.det.open = false;
             // Collapse agent tracker when text starts arriving.
             if (chatAgentTracker) chatAgentTracker.classList.remove('open');
+            // Start a fresh bubble (new bubble per text section after tools/thinking)
             chatAssistantBubble = document.createElement('div');
             chatAssistantBubble.className = 'chat-bubble assistant';
             chatAssistantBubble.innerHTML = '';
+            chatFullText = '';
             var metaEl = document.createElement('div');
             metaEl.className = 'chat-bubble-meta';
             var reactionsEl = document.createElement('span');
@@ -2072,6 +2084,7 @@ function chatFinishSend() {
   chatAgentTrackerBody = null;
   chatAgentStepCount = 0;
   chatCurrentTier = '';
+  chatNeedNewBubble = false;
 }
 
 async function chatSend() {

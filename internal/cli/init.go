@@ -314,6 +314,41 @@ func checkPrerequisites() {
 		PrintCheck("Docker found")
 	}
 
+	// Check gVisor (runsc) for container sandboxing.
+	if isLinux {
+		if _, err := exec.LookPath("runsc"); err != nil {
+			fmt.Println("\n  gVisor (runsc) provides kernel-level container isolation.")
+			fmt.Print("  Install gVisor now? [Y/n]: ")
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(strings.ToLower(input))
+			if input == "" || input == "y" || input == "yes" {
+				PrintInfo("Installing gVisor...")
+				install := exec.Command("sh", "-c", strings.Join([]string{
+					`set -e`,
+					`ARCH=$(uname -m)`,
+					`URL="https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}"`,
+					`curl -fsSL "${URL}/runsc" -o /tmp/runsc`,
+					`curl -fsSL "${URL}/containerd-shim-runsc-v1" -o /tmp/containerd-shim-runsc-v1`,
+					`chmod +x /tmp/runsc /tmp/containerd-shim-runsc-v1`,
+					`sudo mv /tmp/runsc /tmp/containerd-shim-runsc-v1 /usr/local/bin/`,
+					`sudo /usr/local/bin/runsc install`,
+					`sudo systemctl reload docker`,
+				}, "\n"))
+				install.Stdout = os.Stdout
+				install.Stderr = os.Stderr
+				if err := install.Run(); err != nil {
+					PrintWarning(fmt.Sprintf("gVisor installation failed: %v - continuing without sandbox", err))
+				} else {
+					PrintCheck("gVisor installed - containers will use runsc runtime")
+				}
+			} else {
+				PrintInfo("Skipped gVisor - containers will use default runtime (runc)")
+			}
+		} else {
+			PrintCheck("gVisor (runsc) found")
+		}
+	}
+
 	// Check Docker Compose plugin.
 	cmd := exec.Command("docker", "compose", "version")
 	if err := cmd.Run(); err != nil {
@@ -848,6 +883,19 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	readmePath := filepath.Join(dir, "config.d", "README.md")
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
 		os.WriteFile(readmePath, []byte(configReadme), 0o644)
+	}
+
+	// Write .env for docker compose with runtime detection.
+	envPath := filepath.Join(dir, ".env")
+	alfRuntime := "runc"
+	if _, err := exec.LookPath("runsc"); err == nil {
+		alfRuntime = "runsc"
+	}
+	envContent := fmt.Sprintf("ALF_RUNTIME=%s\n", alfRuntime)
+	if err := os.WriteFile(envPath, []byte(envContent), 0o644); err != nil {
+		PrintWarning(fmt.Sprintf("Failed to write .env: %v", err))
+	} else {
+		PrintCheck(fmt.Sprintf(".env (runtime: %s)", alfRuntime))
 	}
 
 	// Fix volume permissions last - after all files are written.

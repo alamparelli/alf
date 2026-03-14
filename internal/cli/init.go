@@ -925,10 +925,11 @@ func pullAndStart(dir, botName string, httpsEnabled bool) {
 	if entries, _ := os.ReadDir(modelsDir); len(entries) == 0 {
 		PrintInfo("Downloading whisper model (first run only)...")
 		dl := exec.Command("docker", "run", "--rm",
+			"--user", "root",
 			"-v", modelsDir+":/models",
 			"ghcr.io/alamparelli/whisper-service:latest",
-			"python3", "-c",
-			`from faster_whisper import WhisperModel; WhisperModel("small", download_root="/models")`)
+			"sh", "-c",
+			`python3 -c 'from faster_whisper import WhisperModel; WhisperModel("small", download_root="/models")' && chown -R 1000:1000 /models`)
 		dl.Stdout = os.Stdout
 		dl.Stderr = os.Stderr
 		if err := dl.Run(); err != nil {

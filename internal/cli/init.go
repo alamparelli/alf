@@ -865,9 +865,6 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	// Write .env for docker compose with runtime detection.
 	envPath := filepath.Join(dir, ".env")
 	alfRuntime := "runc"
-	if _, err := exec.LookPath("runsc"); err == nil {
-		alfRuntime = "runsc"
-	}
 	envContent := fmt.Sprintf("ALF_RUNTIME=%s\n", alfRuntime)
 	if err := os.WriteFile(envPath, []byte(envContent), 0o644); err != nil {
 		PrintWarning(fmt.Sprintf("Failed to write .env: %v", err))

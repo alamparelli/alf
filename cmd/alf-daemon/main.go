@@ -393,9 +393,15 @@ func main() {
 			log.Printf("voice transcription disabled: %v", err)
 		} else {
 			go func() {
-				if err := transcriber.Start(); err != nil {
-					log.Printf("voice: failed to register with whisper service: %v", err)
+				for attempt := 1; attempt <= 30; attempt++ {
+					if err := transcriber.Start(); err == nil {
+						return
+					} else {
+						log.Printf("voice: registration attempt %d/30 failed: %v", attempt, err)
+					}
+					time.Sleep(10 * time.Second)
 				}
+				log.Println("voice: gave up registering with whisper service after 30 attempts")
 			}()
 		}
 	} else {

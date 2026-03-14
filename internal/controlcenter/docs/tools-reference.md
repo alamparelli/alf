@@ -149,4 +149,4 @@ Output:
 }
 ```
 
-Requires: `ffmpeg`, `ffprobe`. Audio transcription uses faster-whisper (amd64) or whisper.cpp (arm64).
+Requires: `ffmpeg`, `ffprobe`. Audio transcription uses the whisper-service container.

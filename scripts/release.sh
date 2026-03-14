@@ -49,6 +49,8 @@ echo ""
 echo "Released ${next}"
 
 if [ "$LOCAL_BUILD" = true ]; then
+  WHISPER_REGISTRY="ghcr.io/alamparelli/whisper-service"
+
   echo ""
   echo "Vendoring vault-proxy source..."
   rm -rf third_party/vault-proxy
@@ -70,6 +72,17 @@ if [ "$LOCAL_BUILD" = true ]; then
     .
 
   rm -rf third_party/vault-proxy
+
+  echo "Building whisper-service Docker image (linux/amd64 + linux/arm64)..."
+  docker buildx build \
+    --builder multiarch \
+    --platform linux/amd64,linux/arm64 \
+    --push \
+    -t "${WHISPER_REGISTRY}:${version}" \
+    -t "${WHISPER_REGISTRY}:latest" \
+    ./whisper-service
+
   echo ""
   echo "Pushed ${REGISTRY}:${version} + :latest"
+  echo "Pushed ${WHISPER_REGISTRY}:${version} + :latest"
 fi

@@ -57,7 +57,7 @@ func TestPipAudit(t *testing.T) {
 	// Write a temp requirements file scoped to ALF's Python deps only.
 	// This avoids false positives from unrelated packages in the local env.
 	reqFile := filepath.Join(t.TempDir(), "requirements.txt")
-	alfPythonDeps := "faster-whisper\nsentence-transformers\n"
+	alfPythonDeps := "sentence-transformers\n"
 	if err := os.WriteFile(reqFile, []byte(alfPythonDeps), 0o644); err != nil {
 		t.Fatalf("write requirements: %v", err)
 	}

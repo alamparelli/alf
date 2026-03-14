@@ -72,6 +72,62 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # Build and push whisper-service Docker image
+  docker-whisper:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if image already exists
+        id: check
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          TOKEN=$(curl -s "https://ghcr.io/token?service=ghcr.io&scope=repository:alamparelli/whisper-service:pull" | jq -r .token)
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/alamparelli/whisper-service/manifests/${VERSION}")
+          if [ "$STATUS" = "200" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Log in to GHCR
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker metadata
+        if: steps.check.outputs.exists != 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/alamparelli/whisper-service
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      - name: Build and push whisper-service
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./whisper-service
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=whisper
+          cache-to: type=gha,mode=max,scope=whisper
+
   # Build CLI binaries and create GitHub Release (tags only)
   cli:
     if: startsWith(github.ref, 'refs/tags/v')

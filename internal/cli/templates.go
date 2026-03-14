@@ -31,10 +31,14 @@ type ComposeData struct {
 	Timezone      string   // IANA timezone (e.g. "Europe/Brussels")
 	Workspaces    []string // Host paths mounted as workspaces under /workspaces/<basename>
 	JSRuntime     string   // "node", "deno", "bun", or "" (none)
+	WhisperModel  string   // Whisper model name (default: "small")
 }
 
 // RenderDockerCompose writes docker-compose.yml with the given port.
 func RenderDockerCompose(dir string, data ComposeData) error {
+	if data.WhisperModel == "" {
+		data.WhisperModel = "small"
+	}
 	src, err := templateFS.ReadFile("templates/docker-compose.yml.tmpl")
 	if err != nil {
 		return err

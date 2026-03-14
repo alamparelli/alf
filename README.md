@@ -118,7 +118,7 @@ The LLM classifier reads your message and picks the right tier. Greetings get in
 
 ### Voice transcription
 
-Send a voice message on Telegram. ALF transcribes it locally and processes the text as a regular message. Uses faster-whisper on x86 and whisper.cpp on arm64 - auto-detected at startup, model downloaded on first voice message.
+Send a voice message on Telegram. ALF transcribes it via the whisper-service container and processes the text as a regular message. The whisper-service runs faster-whisper and is deployed as a separate Docker container, keeping the main ALF image lean.
 
 ### Media processing
 
@@ -213,7 +213,7 @@ internal/
   router/          LLM-based message classification + tier routing
   memstore/        Semantic memory (SQLite + sqlite-vec + FTS5 + ONNX embedder)
   media/           Download, MIME detection, frame extraction, contact sheets, PDF parsing
-  voice/           Hybrid transcription (faster-whisper x86 / whisper.cpp arm64)
+  voice/           HTTP client for whisper-service transcription container
   scheduler/       Cron-based job scheduling with timezone support + execution logging
   vault/           Vault-proxy subprocess management + master password persistence
   mood/            Daily mood rotation + live feedback

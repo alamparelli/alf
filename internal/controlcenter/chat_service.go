@@ -1236,7 +1236,11 @@ func (cs *ChatService) Upload(file io.Reader, fileName, mediaType string) (*Uplo
 				if err == nil && result.Text != "" {
 					entry.Transcript = result.Text
 				}
-				os.Remove(audioPath)
+				// Delete audio after 5 minutes (keeps it for debugging).
+				go func(p string) {
+					time.Sleep(5 * time.Minute)
+					os.Remove(p)
+				}(audioPath)
 			}
 		}
 

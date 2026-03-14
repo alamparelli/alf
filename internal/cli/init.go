@@ -804,6 +804,19 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	}
 	PrintCheck("secrets/cc_auth_token")
 
+	// Auto-generate whisper shared secret if missing (internal plumbing, not user-facing).
+	whisperSecretPath := filepath.Join(secretsDir(dir), "whisper_shared_secret")
+	if _, err := os.Stat(whisperSecretPath); os.IsNotExist(err) {
+		whisperToken, err := generateAuthToken()
+		if err != nil {
+			Fatal(fmt.Sprintf("Failed to generate whisper secret: %v", err))
+		}
+		if err := SetSecret(dir, "whisper_shared_secret", whisperToken); err != nil {
+			Fatal(fmt.Sprintf("Failed to write whisper secret: %v", err))
+		}
+		PrintCheck("secrets/whisper_shared_secret (auto-generated)")
+	}
+
 	// Ensure optional secret files exist (even empty) so docker-compose
 	// doesn't fail on missing file references.
 	ensureOptionalSecrets(dir)

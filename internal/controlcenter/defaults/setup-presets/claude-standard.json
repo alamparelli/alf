@@ -1,0 +1,66 @@
+{
+  "id": "claude-standard",
+  "name": "Claude Standard",
+  "description": "Balanced 3-tier setup using Claude CLI: Haiku for quick tasks, Sonnet for development, Opus for architecture. Includes agent tier for parallel workstreams.",
+  "backend": "claude",
+  "router_config": {
+    "router_model": "haiku",
+    "router_backend": "",
+    "default_fallback": "haiku",
+    "router_distinctions": "Pick the tier that best balances capability and cost for the task. Do not default to the cheapest option - choose the right tool for the job.\n\nLow-priority tiers: simple direct actions (greetings, lookups, quick answers). Mid-priority tiers: investigation, analysis, code changes, debugging, multi-step work. High-priority tiers: architecture, deep reasoning, large-scale refactoring.\n\nCRITICAL: The 'agent' tier spawns multiple AI agents in parallel - ONLY use it for tasks with independent parallel workstreams. Most tasks, even complex ones, should go to a single-model tier."
+  },
+  "tiers": [
+    {
+      "name": "haiku",
+      "model": "haiku",
+      "priority": 1,
+      "enabled": true,
+      "routable": true,
+      "router_label": "Casual conversation, simple factual questions, short summaries, translations, web searches, running scheduled jobs, toggling settings, simple file reads, quick edits",
+      "max_turns": 30,
+      "write_capable": true,
+      "effort": "low",
+      "force_command": true,
+      "system_prompt": "CRITICAL: You MUST fully embody the personality defined in soul.md. Use the user's name, match their preferred language, and stay in character at all times. Never fall back to generic assistant behavior."
+    },
+    {
+      "name": "sonnet",
+      "model": "sonnet",
+      "priority": 2,
+      "enabled": true,
+      "routable": true,
+      "router_label": "Code review, debugging, investigating issues, reading logs, understanding system behavior, explaining complex concepts, research synthesis, editing code files, implementing features, fixing bugs, creating scripts, writing tests, multi-file changes, create scheduled jobs, create reminders, multi-step tasks",
+      "max_turns": 30,
+      "write_capable": true,
+      "effort": "medium",
+      "force_command": true
+    },
+    {
+      "name": "opus",
+      "model": "opus",
+      "priority": 3,
+      "enabled": true,
+      "routable": true,
+      "router_label": "Architecture design, system-level reasoning, complex trade-off analysis, large-scale refactoring, implementing complex features, redesigning system architecture, building new modules from scratch",
+      "max_turns": 40,
+      "write_capable": true,
+      "effort": "medium",
+      "force_command": true
+    },
+    {
+      "name": "agent",
+      "model": "opus",
+      "priority": 4,
+      "enabled": true,
+      "routable": true,
+      "router_label": "ONLY for tasks explicitly requesting a team of agents, or requiring parallel independent workstreams that CANNOT be done sequentially by one model",
+      "max_turns": 10,
+      "write_capable": false,
+      "effort": "medium",
+      "orchestrator_max_turns": 3,
+      "max_iterations": 20,
+      "timeout_minutes": 60,
+      "force_command": true
+    }
+  ]
+}

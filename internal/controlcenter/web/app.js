@@ -1869,6 +1869,9 @@ function chatLoadHistory() {
 
 // Check for in-flight background job on page load / reconnect.
 async function chatCheckActiveJob() {
+  // If a stream is already running in a detached container (another tab owns it),
+  // skip — the detached stream is already processing the job.
+  if (chatDetachedContainer && chatStreamTabId && chatStreamTabId !== chatActiveTabId) return;
   try {
     const convId = chatActiveConvId();
     const url = '/api/chat/job' + (convId ? '?conv_id=' + encodeURIComponent(convId) : '');

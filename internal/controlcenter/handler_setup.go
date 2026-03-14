@@ -135,6 +135,9 @@ func (h *SetupHandler) handlePresets(w http.ResponseWriter, _ *http.Request) {
 	if err != nil {
 		log.Printf("[setup] warning: failed to load presets: %v", err)
 	}
+	if len(presets) == 0 {
+		presets = loadEmbeddedPresets()
+	}
 	if presets == nil {
 		presets = make(map[string][]TierPreset)
 	}
@@ -472,6 +475,14 @@ func (h *SetupHandler) findPreset(id string) (*TierPreset, error) {
 		return nil, fmt.Errorf("failed to load presets: %w", err)
 	}
 	for _, group := range presets {
+		for i := range group {
+			if group[i].ID == id {
+				return &group[i], nil
+			}
+		}
+	}
+	// Fallback to embedded presets.
+	for _, group := range loadEmbeddedPresets() {
 		for i := range group {
 			if group[i].ID == id {
 				return &group[i], nil

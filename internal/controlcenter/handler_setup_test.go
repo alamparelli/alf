@@ -283,8 +283,9 @@ func TestSetupPresets_EmptyDir(t *testing.T) {
 	}
 	json.NewDecoder(rec.Body).Decode(&resp)
 
-	if len(resp.Presets) != 0 {
-		t.Errorf("expected empty presets, got %d backends", len(resp.Presets))
+	// Empty dir falls back to embedded presets (claude + openrouter).
+	if len(resp.Presets) < 1 {
+		t.Errorf("expected embedded presets as fallback, got %d backends", len(resp.Presets))
 	}
 }
 

@@ -45,9 +45,8 @@ func (s *Server) ListenUnix(sockPath string) (net.Listener, error) {
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 
-	// Accessible to claude subprocess (uid 1001, gid 1000 = node group).
+	// Daemon runs as uid 1000 — socket is already owned correctly.
 	os.Chmod(sockPath, 0660)
-	os.Chown(sockPath, 1001, 1000)
 
 	return ln, nil
 }

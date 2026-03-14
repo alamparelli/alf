@@ -156,11 +156,8 @@ func main() {
 	for _, sub := range []string{"config", "tools", "skills", "context"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o755)
 	}
-	// Directories where claude (uid 1001, gid 1000) needs write access.
 	for _, sub := range []string{"agents", "apps"} {
 		os.MkdirAll(filepath.Join(dataDir, sub), 0o775)
-		os.Chmod(filepath.Join(dataDir, sub), 0o775)
-		os.Chown(filepath.Join(dataDir, sub), 1000, 1000)
 	}
 	os.MkdirAll(filepath.Join(dataDir, "agents", "teams"), 0o775)
 
@@ -197,17 +194,7 @@ func main() {
 	// Set up user-packages paths.
 	setupUserPackagesPaths()
 
-	// Fix directory permissions so the claude subprocess (uid 1001, gid 1000)
-	// can read/write files created before the permission refactoring.
-	fixDataPermissions(dataDir)
-	lockDirReadOnly(configDir)
-	lockDirReadOnly(skillsDir)
-	// Fix HOME subdirectories that root may have written to (claude CLI
-	// config, npm/pip local installs). Without this, claude -p hangs with
-	// EACCES because it cannot write to .claude/ or .local/.
-	// Use explicit uid:gid (alf=1001, alf-group=1000) because these dirs
-	// may be owned by root, and fixDataPermissions infers from the dir owner.
-	fixHomeDirPermissions(homeDir, 1001, 1000)
+	// Permissions are fixed by the entrypoint (Phase 2.5) before dropping to uid 1000.
 
 	// Migrate config from old data/config/ to configDir (before loading).
 	migrateConfig(dataDir, configDir)
@@ -448,12 +435,10 @@ func main() {
 	// Unified conversation store (rich messages with content blocks).
 	convStore := conversation.NewStore(dataDir)
 
-	// Claude subprocess credential (run as claude user uid 1001, gid 1000/alf).
-	claudeCred := &syscall.Credential{Uid: 1001, Gid: 1000}
-
 	// Provider: spawn-per-call Claude CLI for responses.
+	// Credential is nil — daemon already runs as uid 1000 (dropped by entrypoint).
 	tiersTimeout := time.Duration(cfg.TiersTimeout) * time.Second // 0 → default 5m inside NewCLIProvider
-	cliProvider := provider.NewCLIProvider(homeDir, dataDir, tiersTimeout, claudeCred)
+	cliProvider := provider.NewCLIProvider(homeDir, dataDir, tiersTimeout, nil)
 
 	// API backends: config-driven registration.
 	apiHistory := provider.NewHistory(dataDir, 100, sessionTimeout)
@@ -2648,9 +2633,6 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, r
 	return tierParams{Model: "claude-haiku-4-5"}
 }
 
-// migrateConfig copies config files from old data/config/ to configDir on first run.
-// fixDataPermissions ensures all files and directories under dataDir are
-// group-readable/writable so the claude subprocess (uid 1001, gid alf/1000)
 // ensureBashrcPath adds ~/.local/bin to PATH in .bashrc if not already present.
 // This fixes the "native installation exists but ~/.local/bin is not in your PATH" warning
 // for interactive shells (CC terminal, docker exec).
@@ -2678,150 +2660,9 @@ func ensureBashrcPath(home string) {
 	log.Printf("bashrc: added .local/bin to PATH")
 }
 
-// fixHomeDirPermissions ensures all files under HOME/.claude and HOME/.local
-// are owned by the given uid:gid with correct permissions. The daemon runs as
-// root and writes files (syncClaudeJSON, npm install, etc.) that the claude
-// subprocess (uid 1001) must be able to read/write.
-func fixHomeDirPermissions(homeDir string, uid, gid int) {
-	// Fix individual files in HOME that root may have written.
-	for _, name := range []string{".claude.json", ".gitconfig"} {
-		p := filepath.Join(homeDir, name)
-		if fi, err := os.Stat(p); err == nil {
-			if sys, ok := fi.Sys().(*syscall.Stat_t); ok {
-				if int(sys.Uid) != uid || int(sys.Gid) != gid {
-					os.Chown(p, uid, gid)
-				}
-			}
-		}
-	}
-	dirs := []string{
-		filepath.Join(homeDir, ".claude"),
-		filepath.Join(homeDir, ".local"),
-		filepath.Join(homeDir, ".cache"),
-		filepath.Join(homeDir, ".npm"),
-	}
-	fixed := 0
-	for _, dir := range dirs {
-		if _, err := os.Stat(dir); err != nil {
-			continue
-		}
-		// Fix the directory itself first.
-		os.Chown(dir, uid, gid)
-		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil
-			}
-			if sys, ok := info.Sys().(*syscall.Stat_t); ok {
-				if int(sys.Uid) != uid || int(sys.Gid) != gid {
-					os.Chown(path, uid, gid)
-					fixed++
-				}
-			}
-			mode := info.Mode()
-			if info.IsDir() {
-				if mode.Perm()&0o070 != 0o070 {
-					os.Chmod(path, mode.Perm()|0o070)
-				}
-			} else {
-				if mode.Perm()&0o060 != 0o060 {
-					os.Chmod(path, mode.Perm()|0o060)
-				}
-			}
-			return nil
-		})
-	}
-	if fixed > 0 {
-		log.Printf("fixed ownership on %d files in HOME subdirs", fixed)
-	}
-}
-
-// can access files created by root or node before the permission refactoring.
-func fixDataPermissions(dataDir string) {
-	// Determine the expected uid:gid from the data dir itself.
-	var targetUID, targetGID int
-	if stat, err := os.Stat(dataDir); err == nil {
-		if sys, ok := stat.Sys().(*syscall.Stat_t); ok {
-			targetUID = int(sys.Uid)
-			targetGID = int(sys.Gid)
-		}
-	}
-
-	fixed := 0
-	docsDir := filepath.Join(dataDir, "docs")
-	llmsFile := filepath.Join(dataDir, "llms.txt")
-	filepath.Walk(dataDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		// Skip read-only system files.
-		if path == llmsFile {
-			return nil
-		}
-		if path == docsDir || strings.HasPrefix(path, docsDir+string(filepath.Separator)) {
-			return nil
-		}
-		mode := info.Mode()
-		if info.IsDir() {
-			if mode.Perm()&0o070 != 0o070 {
-				os.Chmod(path, mode.Perm()|0o070)
-				fixed++
-			}
-		} else {
-			if mode.Perm()&0o060 != 0o060 {
-				os.Chmod(path, mode.Perm()|0o060)
-				fixed++
-			}
-		}
-		// Fix ownership to match the data dir's owner.
-		if targetUID > 0 {
-			if sys, ok := info.Sys().(*syscall.Stat_t); ok {
-				if int(sys.Uid) != targetUID || int(sys.Gid) != targetGID {
-					os.Chown(path, targetUID, targetGID)
-					fixed++
-				}
-			}
-		}
-		return nil
-	})
-	if fixed > 0 {
-		log.Printf("fixed permissions on %d files/dirs in %s", fixed, dataDir)
-	}
-}
-
-// lockDirReadOnly ensures a directory under /opt/alf/ is owned by alf (uid 1000)
-// and group-readable but NOT group-writable. The claude subprocess (uid 1001,
-// gid 1000) can read but not modify files. Used for config.d and skills.d.
-func lockDirReadOnly(configDir string) {
-	fixed := 0
-	filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		// Ensure owned by alf:alf (1000:1000).
-		if sys, ok := info.Sys().(*syscall.Stat_t); ok {
-			if int(sys.Uid) != 1000 || int(sys.Gid) != 1000 {
-				os.Chown(path, 1000, 1000)
-				fixed++
-			}
-		}
-		// Dirs: rwxr-x--- (750), Files: rw-r----- (640).
-		mode := info.Mode().Perm()
-		var want os.FileMode
-		if info.IsDir() {
-			want = 0o750
-		} else {
-			want = 0o640
-		}
-		if mode != want {
-			os.Chmod(path, want)
-			fixed++
-		}
-		return nil
-	})
-	if fixed > 0 {
-		log.Printf("locked %s permissions on %d files/dirs (group=ro)", configDir, fixed)
-	}
-}
+// Permission functions (fixDataPermissions, fixHomeDirPermissions, lockDirReadOnly)
+// removed — the entrypoint handles all permission fixing as root before dropping
+// to uid 1000 via setpriv.
 
 // linkSystemTools recreates symlinks in toolsDir for each binary in srcDir.
 // Removes all existing symlinks first to clean up tools removed after an upgrade.
@@ -2854,9 +2695,8 @@ func linkSystemTools(toolsDir, srcDir string) {
 		}
 	}
 
-	// Lock down: tools.d is system-managed, Claude subprocess must not write here.
+	// Lock down: tools.d is system-managed, read+execute only.
 	os.Chmod(toolsDir, 0o755)
-	os.Chown(toolsDir, 0, 0) // root:root
 }
 
 // seedDefaultTiers copies /opt/alf/defaults/tiers.json into the config dir
@@ -2896,7 +2736,6 @@ func autoEnableAgentTier(tierStore cc.TierStore) {
 // Claude CLI replaces symlinks with real files, so we can't use a symlink.
 // Strategy: on startup, restore from the .claude/ volume if the file is missing;
 // after restoring (or if already present), back it up into the volume.
-// Also ensures group-readable permissions so the claude subprocess (uid 1001) can read it.
 func syncClaudeJSON(homeDir string) {
 	realFile := filepath.Join(homeDir, ".claude.json")
 	volumeCopy := filepath.Join(homeDir, ".claude", "claude.json")
@@ -2935,24 +2774,7 @@ func syncClaudeJSON(homeDir string) {
 		os.WriteFile(volumeCopy, data, 0o640)
 	}
 
-	// Owned by alf (uid 1000) so CLI provider can resume sessions.
-	// Group alf (gid 1000) gives claude subprocess (uid 1001) read access.
-	os.Chown(realFile, 1000, 1000)
-	os.Chmod(realFile, 0o640)
-
-	// Fix .claude/ directory permissions: group needs read+traverse.
-	claudeDir := filepath.Join(homeDir, ".claude")
-	filepath.Walk(claudeDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if info.IsDir() {
-			os.Chmod(path, info.Mode()|0o050) // g+rx
-		} else {
-			os.Chmod(path, info.Mode()|0o040) // g+r
-		}
-		return nil
-	})
+	// Permissions are handled by entrypoint (Phase 2.5) before dropping to uid 1000.
 }
 
 // cleanClaudeSettings removes .claude/settings.json at startup.

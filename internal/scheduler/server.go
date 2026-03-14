@@ -59,9 +59,8 @@ func (s *Server) Serve() error {
 	}
 	s.listener = ln
 
-	// Make socket accessible to claude subprocess (uid 1001, gid 1000 = node group).
+	// Daemon runs as uid 1000 — socket is already owned correctly.
 	os.Chmod(s.sockPath, 0660)
-	os.Chown(s.sockPath, 1001, 1000)
 
 	log.Printf("scheduler: socket server listening on %s", s.sockPath)
 

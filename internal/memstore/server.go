@@ -39,9 +39,8 @@ func (s *Store) ServeUnix(sockPath string) error {
 		return fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 
-	// Make socket accessible to claude subprocess (uid 1001, gid 1000 = node group).
+	// Daemon runs as uid 1000 — socket is already owned correctly.
 	os.Chmod(sockPath, 0660)
-	os.Chown(sockPath, 1001, 1000)
 
 	log.Printf("memstore: socket server listening on %s", sockPath)
 

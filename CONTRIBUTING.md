@@ -74,7 +74,7 @@ docker compose up --build
 - **Embedded core instructions** - `internal/memory/core.md` compiled into the binary via `go:embed`, injected first in every conversation
 - **Router is pure logic** - `internal/router/` builds prompts and parses responses, never spawns processes
 - **Signal system** - `internal/signal/` provides a Unix-socket server for Claude sessions to send Telegram messages/reactions. System tools (`cmd/signal`, `cmd/schedule-tools`) use this socket
-- **Unix user isolation** - Claude runs as uid 1001, config is read-only, tools are rx-only
+- **Non-root daemon** - Daemon drops to uid 1000 via setpriv with zero capabilities, config is read-only, tools are rx-only
 
 ### File organization
 

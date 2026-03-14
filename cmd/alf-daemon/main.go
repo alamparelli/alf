@@ -378,30 +378,28 @@ func main() {
 		}
 	}
 
-	// Voice transcriber (faster-whisper on amd64, whisper.cpp on arm64).
-	transcriptScriptPath := "/opt/alf/transcribe.py"
-	if p := os.Getenv("ALF_TRANSCRIBE_SCRIPT"); p != "" {
-		transcriptScriptPath = p
-	}
-	whisperModel := "small"
-	if m := os.Getenv("WHISPER_MODEL"); m != "" {
-		whisperModel = m
-	}
+	// Voice transcriber (HTTP client to whisper-service container).
+	whisperURL := os.Getenv("WHISPER_URL")
+	whisperSecret := readSecret("WHISPER_SHARED_SECRET")
 	var transcriber *voice.Transcriber
-	if voice.IsAvailable(transcriptScriptPath) {
+	if whisperURL != "" && whisperSecret != "" {
+		instanceID, _ := os.Hostname()
+		if instanceID == "" {
+			instanceID = "alf-default"
+		}
 		var err error
-		transcriber, err = voice.New(transcriptScriptPath, whisperModel, filepath.Join(dataDir, "models"), 120*time.Second)
+		transcriber, err = voice.New(whisperURL, instanceID, whisperSecret, 120*time.Second)
 		if err != nil {
 			log.Printf("voice transcription disabled: %v", err)
 		} else {
 			go func() {
 				if err := transcriber.Start(); err != nil {
-					log.Printf("voice: failed to start: %v", err)
+					log.Printf("voice: failed to register with whisper service: %v", err)
 				}
 			}()
 		}
 	} else {
-		log.Println("voice transcription disabled (prerequisites not found)")
+		log.Println("voice transcription disabled (WHISPER_URL or WHISPER_SHARED_SECRET not set)")
 	}
 
 	// ONNX embedding engine (Go native, no Python sidecar).
@@ -620,6 +618,22 @@ func main() {
 			if err := vaultMgr.SetSecret("telegram_bot_token", token); err == nil {
 				vaultMgr.SetSecret("telegram_chat_id", chatID)
 				log.Println("Telegram credentials migrated to vault on first unlock")
+			}
+			// Migrate backend API keys from Docker secrets to vault.
+			for name, bcfg := range cfg.Backends {
+				if bcfg.Auth == "none" {
+					continue
+				}
+				vaultKey := name + "_api_key"
+				if existing, _ := vaultMgr.GetSecret(vaultKey); existing != "" {
+					continue
+				}
+				secretName := strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
+				if key := readSecret(secretName); key != "" {
+					if err := vaultMgr.SetSecret(vaultKey, key); err == nil {
+						log.Printf("Backend %s API key migrated to vault", name)
+					}
+				}
 			}
 		}
 		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock)
@@ -1332,9 +1346,13 @@ func main() {
 					u.Message.Text = strings.Join(allParts, "\n")
 
 					mediaCleanup = func() {
-						for _, p := range cleanupPaths {
-							os.Remove(p)
-						}
+						// Delay cleanup by 5 minutes to keep audio files for debugging.
+						go func(paths []string) {
+							time.Sleep(5 * time.Minute)
+							for _, p := range paths {
+								os.Remove(p)
+							}
+						}(cleanupPaths)
 					}
 				}
 			}
@@ -2126,13 +2144,14 @@ func resolveBackendAPIKey(name string, bcfg cc.BackendConfig, vaultMgr *vault.Ma
 	if bcfg.Auth == "none" {
 		return ""
 	}
-	// Try vault first if vault_service is specified.
-	if bcfg.VaultService != "" && vaultMgr != nil {
-		// Vault proxy doesn't expose raw keys - the proxy approach means
-		// requests go through vault. For now, fall through to Docker secret.
-		// Future: vault-proxy integration for direct API proxying.
+	// 1. Vault-first: try secret named "<backend>_api_key".
+	vaultKey := name + "_api_key"
+	if vaultMgr != nil {
+		if v, err := vaultMgr.GetSecret(vaultKey); err == nil && v != "" {
+			return v
+		}
 	}
-	// Fall back to Docker secret: <UPPERCASE_NAME>_API_KEY
+	// 2. Fallback: Docker secret <UPPERCASE_NAME>_API_KEY.
 	secretName := strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
 	if key := readSecret(secretName); key != "" {
 		return key

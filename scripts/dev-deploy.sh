@@ -149,8 +149,10 @@ services:
     container_name: alf
     restart: unless-stopped
     networks:
-      - default
-      - whisper-internal
+      default:
+      whisper-internal:
+    extra_hosts:
+      - "whisper:10.99.0.10"
     expose:
       - "8080"
     environment:
@@ -183,12 +185,10 @@ services:
       - ./cache/cache:/home/alf/.cache
       - ./local:/opt/alf/user-packages
       - ./vault-data:/opt/alf/vault-data
+      - ./resolv.conf:/etc/resolv.conf:ro
     mem_limit: 2g
     cpus: "2.0"
     runtime: ${ALF_RUNTIME:-runc}
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -206,7 +206,8 @@ services:
     pull_policy: never
     restart: unless-stopped
     networks:
-      - whisper-internal
+      whisper-internal:
+        ipv4_address: 10.99.0.10
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -224,6 +225,9 @@ services:
 networks:
   whisper-internal:
     internal: true
+    ipam:
+      config:
+        - subnet: 10.99.0.0/24
 
 secrets:
   telegram_bot_token:
@@ -251,6 +255,9 @@ else
   echo "    Using default runtime (runc)"
   $SSH "${REMOTE_HOST}" "echo 'ALF_RUNTIME=runc' > ${REMOTE_DIR}/.env"
 fi
+
+# Write resolv.conf for gVisor DNS compatibility.
+$SSH "${REMOTE_HOST}" "echo -e 'nameserver 8.8.8.8\nnameserver 1.1.1.1' > ${REMOTE_DIR}/resolv.conf"
 
 if [ "$NO_RESTART" = true ]; then
   echo "==> Image transferred. Skipping restart (--no-restart)."

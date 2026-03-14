@@ -43,6 +43,10 @@ type Config struct {
 	// resolved against config.d/. Absolute paths are used as-is.
 	// Empty (default) means tiers.json.
 	TiersFile string `json:"tiers_file,omitempty"`
+	// DNSServers overrides /etc/resolv.conf nameservers. Required for gVisor
+	// which cannot use Docker's internal DNS (127.0.0.11).
+	// Empty = ["8.8.8.8", "1.1.1.1"].
+	DNSServers []string `json:"dns_servers,omitempty"`
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -73,6 +77,17 @@ func DefaultConfig() *Config {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// DefaultDNSServers are used when Config.DNSServers is empty.
+var DefaultDNSServers = []string{"8.8.8.8", "1.1.1.1"}
+
+// EffectiveDNS returns the DNS servers to use, falling back to defaults.
+func (c *Config) EffectiveDNS() []string {
+	if len(c.DNSServers) > 0 {
+		return c.DNSServers
+	}
+	return DefaultDNSServers
+}
 
 // Tier defines a routing tier for message processing.
 type Tier struct {

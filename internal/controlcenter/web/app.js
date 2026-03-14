@@ -4761,9 +4761,28 @@ function showSetupWizard(status) {
     if (current === 2) renderTiers();
   }
 
-  prevBtn.addEventListener('click', () => { if (current > 0) goTo(current - 1); });
+  prevBtn.addEventListener('click', () => {
+    if (backendConfigPhase && current === 0) {
+      // Go back from config phase to selection phase.
+      backendConfigPhase = false;
+      backendRendered = false;
+      renderBackend();
+      prevBtn.style.visibility = 'hidden';
+    } else if (current > 0) {
+      goTo(current - 1);
+    }
+  });
   skipBtn.addEventListener('click', () => { state.telegram = null; goTo(current + 1); });
   nextBtn.addEventListener('click', () => {
+    if (current === 0 && !backendConfigPhase && selectedBackendsNeedConfig()) {
+      // Show config sub-step before advancing.
+      renderBackendConfig();
+      prevBtn.style.visibility = 'visible';
+      return;
+    }
+    if (current === 0 && backendConfigPhase) {
+      backendConfigPhase = false;
+    }
     if (current < steps.length - 1) {
       goTo(current + 1);
     } else {
@@ -4771,59 +4790,39 @@ function showSetupWizard(status) {
     }
   });
 
-  // --- Step 0: Backend ---
+  // --- Step 0: Backend Selection (pick which backends) ---
+  const backendDefs = [
+    { id: 'claude', name: 'Claude CLI', desc: 'Anthropic via local CLI', fields: [] },
+    { id: 'openrouter', name: 'OpenRouter', desc: 'Multi-model gateway', fields: [
+      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-or-...' }
+    ]},
+    { id: 'openai', name: 'OpenAI', desc: 'GPT models', fields: [
+      { key: 'base_url', label: 'Base URL', type: 'text', placeholder: 'https://api.openai.com/v1', defaultVal: 'https://api.openai.com/v1' },
+      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-...' }
+    ]},
+    { id: 'ollama', name: 'Ollama', desc: 'Local models', fields: [
+      { key: 'base_url', label: 'Base URL', type: 'text', placeholder: 'http://host.docker.internal:11434/v1', defaultVal: 'http://host.docker.internal:11434/v1' }
+    ]},
+    { id: 'custom', name: 'Custom', desc: 'OpenAI-compatible endpoint', fields: [
+      { key: 'base_url', label: 'Base URL', type: 'text', placeholder: 'https://...' },
+      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-...' },
+      { key: 'default_model', label: 'Default model', type: 'text', placeholder: 'model-name' }
+    ]}
+  ];
+
   let backendRendered = false;
   function renderBackend() {
     if (backendRendered) return;
     backendRendered = true;
     const el = modal.querySelector('[data-step="0"]');
-    const backends = [
-      { id: 'claude', name: 'Claude CLI', desc: 'Anthropic via local CLI', fields: [] },
-      { id: 'openrouter', name: 'OpenRouter', desc: 'Multi-model gateway', fields: [
-        { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-or-...' }
-      ]},
-      { id: 'openai', name: 'OpenAI', desc: 'GPT models', fields: [
-        { key: 'base_url', label: 'Base URL', type: 'text', placeholder: 'https://api.openai.com/v1', defaultVal: 'https://api.openai.com/v1' },
-        { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-...' }
-      ]},
-      { id: 'ollama', name: 'Ollama', desc: 'Local models', fields: [
-        { key: 'base_url', label: 'Base URL', type: 'text', placeholder: 'http://host.docker.internal:11434/v1', defaultVal: 'http://host.docker.internal:11434/v1' }
-      ]},
-      { id: 'custom', name: 'Custom', desc: 'OpenAI-compatible endpoint', fields: [
-        { key: 'base_url', label: 'Base URL', type: 'text', placeholder: 'https://...' },
-        { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-...' },
-        { key: 'default_model', label: 'Default model', type: 'text', placeholder: 'model-name' }
-      ]}
-    ];
 
     let html = '<p style="font-size:0.82rem;color:var(--text-dim);margin:0 0 12px">Select one or more LLM backends to connect.</p>';
     html += '<div class="setup-backend-grid">';
-    backends.forEach(b => {
+    backendDefs.forEach(b => {
       html += '<div class="setup-backend-card" data-backend="' + b.id + '">' +
         '<h4>' + b.name + '</h4><p>' + b.desc + '</p>';
       if (b.id === 'claude') {
         html += '<div class="setup-claude-status pending" id="setupClaudeStatus">Checking...</div>';
-      }
-      if (b.fields.length) {
-        html += '<div class="setup-backend-fields">';
-        b.fields.forEach(f => {
-          const val = f.defaultVal || '';
-          html += '<div class="form-group"><label>' + f.label + '</label>' +
-            '<input type="' + f.type + '" class="input" data-field="' + f.key + '" placeholder="' + f.placeholder + '" value="' + val + '"></div>';
-        });
-        html += '<div class="test-row"><button class="btn btn-sm" data-test="' + b.id + '">Test</button><span class="test-result" data-result="' + b.id + '"></span></div>';
-        html += '</div>';
-      }
-      if (b.id === 'ollama') {
-        html += '<div class="setup-backend-fields">';
-        b.fields.forEach(f => {
-          const val = f.defaultVal || '';
-          html += '<div class="form-group"><label>' + f.label + '</label>' +
-            '<input type="' + f.type + '" class="input" data-field="' + f.key + '" placeholder="' + f.placeholder + '" value="' + val + '"></div>';
-        });
-        html += '<div class="test-row"><button class="btn btn-sm" data-test="ollama">Test</button><span class="test-result" data-result="ollama"></span></div>';
-        html += '<div class="setup-ollama-models" id="setupOllamaModels"></div>';
-        html += '</div>';
       }
       html += '</div>';
     });
@@ -4832,55 +4831,14 @@ function showSetupWizard(status) {
 
     // Card selection toggle
     el.querySelectorAll('.setup-backend-card').forEach(card => {
-      card.addEventListener('click', (e) => {
-        if (e.target.closest('input, button, a')) return;
+      card.addEventListener('click', () => {
         card.classList.toggle('selected');
         const bid = card.dataset.backend;
         if (!card.classList.contains('selected')) {
           delete state.backends[bid];
         } else {
-          collectBackendFields(card, bid);
-        }
-      });
-    });
-
-    // Input change collection
-    el.querySelectorAll('.setup-backend-card input').forEach(inp => {
-      inp.addEventListener('input', () => {
-        const card = inp.closest('.setup-backend-card');
-        const bid = card.dataset.backend;
-        if (card.classList.contains('selected')) collectBackendFields(card, bid);
-      });
-    });
-
-    // Test buttons
-    el.querySelectorAll('[data-test]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const bid = btn.dataset.test;
-        const card = btn.closest('.setup-backend-card');
-        const result = card.querySelector('[data-result="' + bid + '"]');
-        result.textContent = 'Testing...';
-        result.className = 'test-result';
-        collectBackendFields(card, bid);
-        try {
-          const body = { type: bid };
-          if (state.backends[bid]) {
-            body.base_url = state.backends[bid].base_url || '';
-            body.api_key = state.backends[bid].api_key || '';
-          }
-          const res = await api('/api/setup/backend/test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-          });
-          result.textContent = res.ok ? 'Connected' : (res.error || 'Failed');
-          result.className = 'test-result ' + (res.ok ? 'ok' : 'fail');
-          // Load Ollama models on success
-          if (bid === 'ollama' && res.ok) loadOllamaModels(card);
-        } catch (err) {
-          result.textContent = err.error || 'Connection failed';
-          result.className = 'test-result fail';
+          state.backends[bid] = {};
+          if (bid === 'openrouter') state.backends[bid].base_url = 'https://openrouter.ai/api/v1';
         }
       });
     });
@@ -4900,19 +4858,93 @@ function showSetupWizard(status) {
     }).catch(() => {});
   }
 
-  function collectBackendFields(card, bid) {
-    const data = {};
-    card.querySelectorAll('[data-field]').forEach(inp => {
-      if (inp.value.trim()) data[inp.dataset.field] = inp.value.trim();
+  // --- Step 0b: Backend Config (configure selected backends) ---
+  // This is an internal sub-step that reuses step-content[data-step="0"].
+  let backendConfigPhase = false;
+
+  function selectedBackendsNeedConfig() {
+    return Object.keys(state.backends).some(bid => {
+      const def = backendDefs.find(d => d.id === bid);
+      return def && def.fields.length > 0;
     });
-    // Set defaults
+  }
+
+  function renderBackendConfig() {
+    backendConfigPhase = true;
+    const el = modal.querySelector('[data-step="0"]');
+    const selected = Object.keys(state.backends);
+
+    let html = '<p style="font-size:0.82rem;color:var(--text-dim);margin:0 0 12px">Configure your selected backends.</p>';
+    selected.forEach(bid => {
+      const def = backendDefs.find(d => d.id === bid);
+      if (!def || def.fields.length === 0) return;
+      html += '<div class="setup-config-section" data-config="' + bid + '">';
+      html += '<h4>' + def.name + '</h4>';
+      def.fields.forEach(f => {
+        const val = (state.backends[bid] && state.backends[bid][f.key]) || f.defaultVal || '';
+        html += '<div class="form-group"><label>' + f.label + '</label>' +
+          '<input type="' + f.type + '" class="input" data-field="' + f.key + '" placeholder="' + f.placeholder + '" value="' + val + '"></div>';
+      });
+      html += '<div class="test-row"><button class="btn btn-sm" data-test="' + bid + '">Test</button><span class="test-result" data-result="' + bid + '"></span></div>';
+      if (bid === 'ollama') {
+        html += '<div class="setup-ollama-models" id="setupOllamaModels"></div>';
+      }
+      html += '</div>';
+    });
+    el.innerHTML = html;
+
+    // Collect on input change
+    el.querySelectorAll('.setup-config-section').forEach(section => {
+      const bid = section.dataset.config;
+      section.querySelectorAll('input').forEach(inp => {
+        inp.addEventListener('input', () => collectConfigFields(section, bid));
+      });
+    });
+
+    // Test buttons
+    el.querySelectorAll('[data-test]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const bid = btn.dataset.test;
+        const section = btn.closest('.setup-config-section');
+        const result = section.querySelector('[data-result="' + bid + '"]');
+        result.textContent = 'Testing...';
+        result.className = 'test-result';
+        collectConfigFields(section, bid);
+        try {
+          const body = { type: bid };
+          if (state.backends[bid]) {
+            body.base_url = state.backends[bid].base_url || '';
+            body.api_key = state.backends[bid].api_key || '';
+          }
+          const res = await api('/api/setup/backend/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          result.textContent = res.ok ? 'Connected' : (res.error || 'Failed');
+          result.className = 'test-result ' + (res.ok ? 'ok' : 'fail');
+          if (bid === 'ollama' && res.ok) loadOllamaModels();
+        } catch (err) {
+          result.textContent = err.error || 'Connection failed';
+          result.className = 'test-result fail';
+        }
+      });
+    });
+  }
+
+  function collectConfigFields(section, bid) {
+    const data = state.backends[bid] || {};
+    section.querySelectorAll('[data-field]').forEach(inp => {
+      if (inp.value.trim()) data[inp.dataset.field] = inp.value.trim();
+      else delete data[inp.dataset.field];
+    });
     if (bid === 'openrouter' && !data.base_url) data.base_url = 'https://openrouter.ai/api/v1';
-    if (bid === 'claude') { /* no fields needed */ }
     state.backends[bid] = data;
   }
 
-  async function loadOllamaModels(card) {
-    const el = card.querySelector('#setupOllamaModels');
+  async function loadOllamaModels() {
+    const el = document.getElementById('setupOllamaModels');
     if (!el) return;
     const baseUrl = state.backends.ollama?.base_url || 'http://host.docker.internal:11434/v1';
     try {
@@ -5051,7 +5083,7 @@ function showSetupWizard(status) {
           '<div class="setup-vault-inline">' +
           '<label>Vault Password' + (isNew ? ' (new)' : '') + '</label>' +
           '<input type="password" class="input" id="setupVaultPw" placeholder="' +
-            (isNew ? 'Choose a password (min. 12 characters)' : 'Enter your vault password') + '">' +
+            (isNew ? 'Choose a password (min. 8 characters)' : 'Enter your vault password') + '">' +
           '<p class="form-hint">' +
             (isNew ? 'This creates your encrypted vault for API keys, tokens, and secrets.' :
                      'Unlock your vault to store secrets.') + '</p></div>');
@@ -5105,7 +5137,15 @@ function showSetupWizard(status) {
     } catch (err) {
       nextBtn.disabled = false;
       nextBtn.textContent = 'Apply & Start';
-      toast(err.error || 'Setup failed', 'error');
+      const msg = err.error || 'Setup failed';
+      // Show error inline in the wizard (toast is hidden behind backdrop).
+      let errEl = modal.querySelector('.setup-apply-error');
+      if (!errEl) {
+        errEl = document.createElement('div');
+        errEl.className = 'setup-apply-error';
+        nextBtn.parentElement.parentElement.insertBefore(errEl, nextBtn.parentElement);
+      }
+      errEl.textContent = msg;
     }
   }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // TranscribeResult holds the output from the transcription.
@@ -19,8 +20,8 @@ type TranscribeResult struct {
 	Error               string  `json:"error,omitempty"`
 }
 
-// downloadAndTranscribe is the shared implementation for DownloadAndTranscribe.
-// Both backends delegate to this, passing their Transcribe method.
+// downloadAndTranscribe downloads a Telegram voice file, transcribes it,
+// and schedules the temp file for deletion after 5 minutes.
 func downloadAndTranscribe(transcribeFn func(string) (*TranscribeResult, error), client *http.Client, botToken, fileID string) (*TranscribeResult, error) {
 	filePath, err := telegramGetFilePath(client, botToken, fileID)
 	if err != nil {
@@ -31,7 +32,11 @@ func downloadAndTranscribe(transcribeFn func(string) (*TranscribeResult, error),
 	if err != nil {
 		return nil, fmt.Errorf("download file: %w", err)
 	}
-	defer os.Remove(tmpFile)
+	// Delete audio file after 5 minutes (keeps it around for debugging).
+	go func() {
+		time.Sleep(5 * time.Minute)
+		os.Remove(tmpFile)
+	}()
 
 	log.Printf("voice: downloaded %s → %s", fileID, tmpFile)
 

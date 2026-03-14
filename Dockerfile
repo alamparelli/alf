@@ -1,21 +1,10 @@
-# Stage 1: Build Go binaries with CGO (sqlite-vec, whisper.cpp on arm64).
+# Stage 1: Build Go binaries with CGO (sqlite-vec).
 FROM golang:1.25-bookworm AS builder
 
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ libc6-dev libsqlite3-dev cmake make && rm -rf /var/lib/apt/lists/*
-
-# Build whisper.cpp static library (arm64 only - faster-whisper doesn't work on ARM).
-WORKDIR /whisper
-RUN if [ "${TARGETARCH}" = "arm64" ]; then \
-      git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git . \
-      && cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
-         -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF \
-         -DGGML_CPU=ON -DGGML_NATIVE=OFF \
-      && cmake --build build -j$(nproc) \
-      && cmake --install build --prefix /usr/local; \
-    fi
+    gcc g++ libc6-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
 
 # Copy vault-proxy source (needed as Go module dependency + standalone binaries).
 WORKDIR /vault-proxy
@@ -32,17 +21,8 @@ COPY . .
 RUN go mod edit -replace github.com/alessandrolamparelli/vault-proxy=/vault-proxy
 
 # Build Go binaries.
-# arm64: link whisper.cpp for native transcription.
-# amd64: no whisper.cpp needed (uses faster-whisper Python subprocess).
-RUN if [ "${TARGETARCH}" = "arm64" ]; then \
-      export CGO_CFLAGS="-I/usr/local/include" && \
-      export CGO_LDFLAGS="-L/usr/local/lib -lwhisper -lggml -lggml-base -lggml-cpu -lstdc++ -lm -lpthread" && \
-      CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon && \
-      CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video; \
-    else \
-      CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon && \
-      CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video; \
-    fi \
+RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
+    && CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /telegram-tools ./cmd/signal \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /schedule-tools ./cmd/schedule-tools
@@ -57,8 +37,7 @@ FROM debian:bookworm-slim
 
 ARG TARGETARCH
 
-# Base packages. python3-pip only on amd64 (for faster-whisper).
-# libgomp1 only on arm64 (for whisper.cpp/ggml OpenMP).
+# Base packages.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
@@ -88,11 +67,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     net-tools \
     procps \
     iproute2 \
-    && if [ "${TARGETARCH}" = "arm64" ]; then \
-         apt-get install -y --no-install-recommends libgomp1; \
-       else \
-         apt-get install -y --no-install-recommends python3-pip; \
-       fi \
     && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI.
@@ -127,11 +101,6 @@ RUN mkdir -p /opt/alf/models/all-MiniLM-L6-v2 \
     && curl -fsSL -o /opt/alf/models/all-MiniLM-L6-v2/tokenizer.json \
        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
 
-# Pre-install faster-whisper (amd64 only, arm64 uses whisper.cpp).
-RUN if [ "${TARGETARCH}" = "amd64" ]; then \
-      pip3 install --break-system-packages --no-cache-dir faster-whisper; \
-    fi
-
 # Claude Code native binary.
 # Keep ~/.local/bin/claude so Claude Code recognises the native install.
 RUN curl -fsSL https://claude.ai/install.sh | bash \
@@ -150,9 +119,6 @@ COPY --from=builder /telegram-tools /opt/alf/bin/telegram-tools
 COPY --from=builder /schedule-tools /opt/alf/bin/schedule-tools
 COPY --from=builder /vault-server /opt/alf/bin/vault-server
 COPY --from=builder /vault-cli /opt/alf/bin/vault-cli
-
-# Transcription script (used on amd64 with faster-whisper, ignored on arm64).
-COPY scripts/transcribe.py /opt/alf/transcribe.py
 
 # Tool symlinks: clean names only, pointing to binaries in /opt/alf/bin/.
 RUN mkdir -p /opt/alf/tools.d \

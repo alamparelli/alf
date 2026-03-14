@@ -15,7 +15,7 @@
 //	}
 //
 // The caller is responsible for cleaning up the frame files.
-// Requires: ffmpeg, ffprobe. Optional: whisper (faster-whisper on amd64, whisper.cpp on arm64).
+// Requires: ffmpeg, ffprobe. Optional: whisper-service (via WHISPER_URL + WHISPER_SHARED_SECRET).
 package main
 
 import (
@@ -191,8 +191,9 @@ func collectFiles(prefix string, n int) ([]string, error) {
 // --- audio transcription ---
 
 func transcribeAudio(videoPath string) (string, string) {
-	scriptPath := envOr("ALF_TRANSCRIBE_SCRIPT", "/opt/alf/transcribe.py")
-	if !voice.IsAvailable(scriptPath) {
+	whisperURL := os.Getenv("WHISPER_URL")
+	whisperSecret := readSecret("WHISPER_SHARED_SECRET")
+	if whisperURL == "" || whisperSecret == "" {
 		return "", ""
 	}
 
@@ -227,10 +228,12 @@ func transcribeAudio(videoPath string) (string, string) {
 		return "", ""
 	}
 
-	model := envOr("WHISPER_MODEL", "small")
-	modelsDir := envOr("ALF_MODELS_DIR", filepath.Join(os.Getenv("HOME"), "data", "models"))
+	instanceID, _ := os.Hostname()
+	if instanceID == "" {
+		instanceID = "extract-video"
+	}
 
-	t, err := voice.New(scriptPath, model, modelsDir, 120*time.Second)
+	t, err := voice.New(whisperURL, instanceID, whisperSecret, 120*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "voice init failed: %v\n", err)
 		return "", ""
@@ -254,4 +257,16 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// readSecret reads a secret from a Docker secret file (NAME_FILE env var)
+// or falls back to the plain environment variable.
+func readSecret(envVar string) string {
+	if filePath := os.Getenv(envVar + "_FILE"); filePath != "" {
+		data, err := os.ReadFile(filePath)
+		if err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return strings.TrimSpace(os.Getenv(envVar))
 }

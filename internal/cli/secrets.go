@@ -24,6 +24,7 @@ var SecretRegistry = []Secret{
 	{Name: "openai_api_key", Description: "OpenAI API key (sk-...)", Required: false},
 	{Name: "claude_oauth_token", Description: "Claude Code OAuth token (via alf login)", Required: false},
 	{Name: "vault_master_password", Description: "Vault master password (enables secrets vault)", Required: false},
+	{Name: "whisper_shared_secret", Description: "Whisper service shared secret (auto-generated)", Required: false},
 }
 
 func secretsDir(baseDir string) string {

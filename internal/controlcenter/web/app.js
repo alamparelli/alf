@@ -219,6 +219,11 @@ function loadStatus() {
 }
 
 
+// --- Settings: Re-run Setup Wizard ---
+document.getElementById('settingsRerunSetup').addEventListener('click', () => {
+  api('/api/setup/status').then(status => showSetupWizard(status)).catch(() => toast('Could not load setup status', 'error'));
+});
+
 // --- Admin Actions ---
 (function() {
   const restartBtn = document.getElementById('adminRestartBtn');
@@ -4620,8 +4625,18 @@ navigateTo(savedView || 'chat');
 lucide.createIcons();
 document.body.classList.add('app-ready');
 
-// --- Welcome screen (first visit only) ---
+// --- Welcome / Setup Wizard ---
 if (!localStorage.getItem('alf-welcomed')) {
+  api('/api/setup/status').then(status => {
+    if (!status.completed) {
+      showSetupWizard(status);
+    } else {
+      showWelcomeModal();
+    }
+  }).catch(() => showWelcomeModal());
+}
+
+function showWelcomeModal() {
   const wb = document.createElement('div');
   wb.className = 'welcome-backdrop';
   wb.innerHTML = '<div class="welcome-modal">' +
@@ -4629,18 +4644,9 @@ if (!localStorage.getItem('alf-welcomed')) {
     '<h2>Welcome to your Control Center</h2>' +
     '<p>This is your personal command hub -manage schedules, agent teams, tools, and more from here.</p>' +
     '<div class="welcome-steps">' +
-      '<div class="welcome-step">' +
-        '<span class="welcome-step-num">1</span>' +
-        '<span><strong>Say hello in the Chat</strong> -ALF will learn about you through a short onboarding conversation.</span>' +
-      '</div>' +
-      '<div class="welcome-step">' +
-        '<span class="welcome-step-num">2</span>' +
-        '<span><strong>Explore the Docs</strong> -check the getting started guide to discover what ALF can do.</span>' +
-      '</div>' +
-      '<div class="welcome-step">' +
-        '<span class="welcome-step-num">3</span>' +
-        '<span><strong>Make it yours</strong> -configure tiers, add skills, and connect your services in the Vault.</span>' +
-      '</div>' +
+      '<div class="welcome-step"><span class="welcome-step-num">1</span><span><strong>Say hello in the Chat</strong> -ALF will learn about you through a short onboarding conversation.</span></div>' +
+      '<div class="welcome-step"><span class="welcome-step-num">2</span><span><strong>Explore the Docs</strong> -check the getting started guide to discover what ALF can do.</span></div>' +
+      '<div class="welcome-step"><span class="welcome-step-num">3</span><span><strong>Make it yours</strong> -configure tiers, add skills, and connect your services in the Vault.</span></div>' +
     '</div>' +
     '<button class="btn btn-primary welcome-cta" id="welcomeStartBtn">Get started</button>' +
   '</div>';
@@ -4651,6 +4657,434 @@ if (!localStorage.getItem('alf-welcomed')) {
     setTimeout(() => wb.remove(), 300);
     navigateTo('chat');
   });
+}
+
+function showSetupWizard(status) {
+  const steps = ['Backend', 'Telegram', 'Tiers', 'Done'];
+  let current = 0;
+  const state = { backends: {}, telegram: null, presetId: '', vaultPassword: '' };
+
+  // Build modal
+  const wb = document.createElement('div');
+  wb.className = 'welcome-backdrop';
+
+  let stepperHTML = '<div class="setup-stepper">';
+  steps.forEach((s, i) => {
+    if (i > 0) stepperHTML += '<div class="setup-step-line" data-line="' + i + '"></div>';
+    stepperHTML += '<div class="setup-step-item"><div class="setup-step-dot" data-dot="' + i + '">' + (i + 1) + '</div></div>';
+  });
+  stepperHTML += '</div>';
+
+  wb.innerHTML = '<div class="welcome-modal setup-wizard-modal">' +
+    '<div class="welcome-logo">ALF</div>' +
+    '<h2>Setup Wizard</h2>' +
+    stepperHTML +
+    '<div class="setup-step-content" data-step="0"></div>' +
+    '<div class="setup-step-content" data-step="1"></div>' +
+    '<div class="setup-step-content" data-step="2"></div>' +
+    '<div class="setup-step-content" data-step="3"></div>' +
+    '<div class="setup-nav">' +
+      '<button class="btn btn-secondary" id="setupPrev" style="visibility:hidden">Back</button>' +
+      '<div class="setup-nav-right">' +
+        '<button class="btn btn-secondary" id="setupSkip" style="display:none">Skip</button>' +
+        '<button class="btn btn-primary" id="setupNext">Next</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+  document.body.appendChild(wb);
+
+  const modal = wb.querySelector('.setup-wizard-modal');
+  const prevBtn = document.getElementById('setupPrev');
+  const nextBtn = document.getElementById('setupNext');
+  const skipBtn = document.getElementById('setupSkip');
+
+  function goTo(step) {
+    current = step;
+    // Update stepper
+    modal.querySelectorAll('.setup-step-dot').forEach((d, i) => {
+      d.className = 'setup-step-dot' + (i === current ? ' active' : i < current ? ' done' : '');
+    });
+    modal.querySelectorAll('.setup-step-line').forEach((l, i) => {
+      l.className = 'setup-step-line' + (i < current ? ' done' : '');
+    });
+    // Show current step
+    modal.querySelectorAll('.setup-step-content').forEach((c, i) => {
+      c.className = 'setup-step-content' + (i === current ? ' active' : '');
+    });
+    // Navigation
+    prevBtn.style.visibility = current === 0 ? 'hidden' : 'visible';
+    skipBtn.style.display = current === 1 ? '' : 'none'; // only Telegram is skippable
+    if (current === steps.length - 1) {
+      nextBtn.textContent = 'Apply & Start';
+      renderDone();
+    } else {
+      nextBtn.textContent = 'Next';
+    }
+    // Init step content
+    if (current === 0) renderBackend();
+    if (current === 1) renderTelegram();
+    if (current === 2) renderTiers();
+  }
+
+  prevBtn.addEventListener('click', () => { if (current > 0) goTo(current - 1); });
+  skipBtn.addEventListener('click', () => { state.telegram = null; goTo(current + 1); });
+  nextBtn.addEventListener('click', () => {
+    if (current < steps.length - 1) {
+      goTo(current + 1);
+    } else {
+      applySetup();
+    }
+  });
+
+  // --- Step 0: Backend ---
+  let backendRendered = false;
+  function renderBackend() {
+    if (backendRendered) return;
+    backendRendered = true;
+    const el = modal.querySelector('[data-step="0"]');
+    const backends = [
+      { id: 'claude', name: 'Claude CLI', desc: 'Anthropic via local CLI', fields: [] },
+      { id: 'openrouter', name: 'OpenRouter', desc: 'Multi-model gateway', fields: [
+        { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-or-...' }
+      ]},
+      { id: 'openai', name: 'OpenAI', desc: 'GPT models', fields: [
+        { key: 'base_url', label: 'Base URL', type: 'text', placeholder: 'https://api.openai.com/v1', defaultVal: 'https://api.openai.com/v1' },
+        { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-...' }
+      ]},
+      { id: 'ollama', name: 'Ollama', desc: 'Local models', fields: [
+        { key: 'base_url', label: 'Base URL', type: 'text', placeholder: 'http://host.docker.internal:11434/v1', defaultVal: 'http://host.docker.internal:11434/v1' }
+      ]},
+      { id: 'custom', name: 'Custom', desc: 'OpenAI-compatible endpoint', fields: [
+        { key: 'base_url', label: 'Base URL', type: 'text', placeholder: 'https://...' },
+        { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-...' },
+        { key: 'default_model', label: 'Default model', type: 'text', placeholder: 'model-name' }
+      ]}
+    ];
+
+    let html = '<p style="font-size:0.82rem;color:var(--text-dim);margin:0 0 12px">Select one or more LLM backends to connect.</p>';
+    html += '<div class="setup-backend-grid">';
+    backends.forEach(b => {
+      html += '<div class="setup-backend-card" data-backend="' + b.id + '">' +
+        '<h4>' + b.name + '</h4><p>' + b.desc + '</p>';
+      if (b.id === 'claude') {
+        html += '<div class="setup-claude-status pending" id="setupClaudeStatus">Checking...</div>';
+      }
+      if (b.fields.length) {
+        html += '<div class="setup-backend-fields">';
+        b.fields.forEach(f => {
+          const val = f.defaultVal || '';
+          html += '<div class="form-group"><label>' + f.label + '</label>' +
+            '<input type="' + f.type + '" class="input" data-field="' + f.key + '" placeholder="' + f.placeholder + '" value="' + val + '"></div>';
+        });
+        html += '<div class="test-row"><button class="btn btn-sm" data-test="' + b.id + '">Test</button><span class="test-result" data-result="' + b.id + '"></span></div>';
+        html += '</div>';
+      }
+      if (b.id === 'ollama') {
+        html += '<div class="setup-backend-fields">';
+        b.fields.forEach(f => {
+          const val = f.defaultVal || '';
+          html += '<div class="form-group"><label>' + f.label + '</label>' +
+            '<input type="' + f.type + '" class="input" data-field="' + f.key + '" placeholder="' + f.placeholder + '" value="' + val + '"></div>';
+        });
+        html += '<div class="test-row"><button class="btn btn-sm" data-test="ollama">Test</button><span class="test-result" data-result="ollama"></span></div>';
+        html += '<div class="setup-ollama-models" id="setupOllamaModels"></div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+
+    // Card selection toggle
+    el.querySelectorAll('.setup-backend-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('input, button, a')) return;
+        card.classList.toggle('selected');
+        const bid = card.dataset.backend;
+        if (!card.classList.contains('selected')) {
+          delete state.backends[bid];
+        } else {
+          collectBackendFields(card, bid);
+        }
+      });
+    });
+
+    // Input change collection
+    el.querySelectorAll('.setup-backend-card input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const card = inp.closest('.setup-backend-card');
+        const bid = card.dataset.backend;
+        if (card.classList.contains('selected')) collectBackendFields(card, bid);
+      });
+    });
+
+    // Test buttons
+    el.querySelectorAll('[data-test]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const bid = btn.dataset.test;
+        const card = btn.closest('.setup-backend-card');
+        const result = card.querySelector('[data-result="' + bid + '"]');
+        result.textContent = 'Testing...';
+        result.className = 'test-result';
+        collectBackendFields(card, bid);
+        try {
+          const body = { type: bid };
+          if (state.backends[bid]) {
+            body.base_url = state.backends[bid].base_url || '';
+            body.api_key = state.backends[bid].api_key || '';
+          }
+          const res = await api('/api/setup/backend/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          result.textContent = res.ok ? 'Connected' : (res.error || 'Failed');
+          result.className = 'test-result ' + (res.ok ? 'ok' : 'fail');
+          // Load Ollama models on success
+          if (bid === 'ollama' && res.ok) loadOllamaModels(card);
+        } catch (err) {
+          result.textContent = err.error || 'Connection failed';
+          result.className = 'test-result fail';
+        }
+      });
+    });
+
+    // Check Claude auth
+    api('/api/setup/claude/check').then(r => {
+      const cs = document.getElementById('setupClaudeStatus');
+      if (cs) {
+        cs.textContent = r.authenticated ? 'Authenticated' : 'Not authenticated - run alf login on server';
+        cs.className = 'setup-claude-status ' + (r.authenticated ? 'ok' : 'pending');
+      }
+    }).catch(() => {});
+  }
+
+  function collectBackendFields(card, bid) {
+    const data = {};
+    card.querySelectorAll('[data-field]').forEach(inp => {
+      if (inp.value.trim()) data[inp.dataset.field] = inp.value.trim();
+    });
+    // Set defaults
+    if (bid === 'openrouter' && !data.base_url) data.base_url = 'https://openrouter.ai/api/v1';
+    if (bid === 'claude') { /* no fields needed */ }
+    state.backends[bid] = data;
+  }
+
+  async function loadOllamaModels(card) {
+    const el = card.querySelector('#setupOllamaModels');
+    if (!el) return;
+    const baseUrl = state.backends.ollama?.base_url || 'http://host.docker.internal:11434/v1';
+    try {
+      const res = await api('/api/setup/ollama/models?base_url=' + encodeURIComponent(baseUrl));
+      if (res.models && res.models.length) {
+        el.innerHTML = 'Models: ' + res.models.map(m => '<span>' + m + '</span>').join('');
+      } else {
+        el.textContent = 'No models found';
+      }
+    } catch { el.textContent = ''; }
+  }
+
+  // --- Step 1: Telegram ---
+  let telegramRendered = false;
+  function renderTelegram() {
+    if (telegramRendered) return;
+    telegramRendered = true;
+    const el = modal.querySelector('[data-step="1"]');
+    el.innerHTML =
+      '<p style="font-size:0.82rem;color:var(--text-dim);margin:0 0 12px">Connect Telegram to chat with ALF from your phone. This step is optional.</p>' +
+      '<div class="setup-tg-toggle"><input type="checkbox" id="setupTgEnable"><label for="setupTgEnable">Enable Telegram</label></div>' +
+      '<div class="setup-tg-fields" id="setupTgFields" style="display:none">' +
+        '<div class="form-group"><label>Bot Token</label><input type="text" class="input" id="setupTgToken" placeholder="123456789:ABCdef..."></div>' +
+        '<div class="test-row"><button class="btn btn-sm" id="setupTgValidate">Validate</button><span class="setup-tg-result" id="setupTgResult"></span></div>' +
+        '<div class="form-group" style="margin-top:10px"><label>Chat ID</label><input type="text" class="input" id="setupTgChatId" placeholder="Your chat ID"></div>' +
+        '<small class="form-hint">Create a bot via @BotFather. Get your chat ID by sending /start to the bot.</small>' +
+      '</div>';
+
+    const toggle = document.getElementById('setupTgEnable');
+    const fields = document.getElementById('setupTgFields');
+    toggle.addEventListener('change', () => {
+      fields.style.display = toggle.checked ? '' : 'none';
+      if (!toggle.checked) state.telegram = null;
+    });
+
+    document.getElementById('setupTgValidate').addEventListener('click', async () => {
+      const token = document.getElementById('setupTgToken').value.trim();
+      const result = document.getElementById('setupTgResult');
+      if (!token) { result.textContent = 'Enter a token'; result.className = 'setup-tg-result fail'; return; }
+      result.textContent = 'Validating...';
+      result.className = 'setup-tg-result';
+      try {
+        const res = await api('/api/setup/telegram/validate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bot_token: token })
+        });
+        result.textContent = res.ok ? 'Bot: @' + res.bot_name : (res.error || 'Invalid');
+        result.className = 'setup-tg-result ' + (res.ok ? 'ok' : 'fail');
+      } catch (err) {
+        result.textContent = err.error || 'Validation failed';
+        result.className = 'setup-tg-result fail';
+      }
+    });
+
+    // Collect on any input change
+    el.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        if (toggle.checked) {
+          const token = document.getElementById('setupTgToken').value.trim();
+          const chatId = document.getElementById('setupTgChatId').value.trim();
+          state.telegram = (token && chatId) ? { bot_token: token, chat_id: chatId } : null;
+        }
+      });
+    });
+  }
+
+  // --- Step 2: Tiers ---
+  let tiersRendered = false;
+  function renderTiers() {
+    if (tiersRendered) return;
+    tiersRendered = true;
+    const el = modal.querySelector('[data-step="2"]');
+    el.innerHTML = '<p style="font-size:0.82rem;color:var(--text-dim);margin:0 0 12px">Choose a tier preset or keep your current configuration.</p>' +
+      '<div id="setupPresetList"><p style="font-size:0.8rem;color:var(--text-dim)">Loading presets...</p></div>';
+
+    api('/api/setup/presets').then(data => {
+      const presets = data.presets || {};
+      const all = [];
+      Object.values(presets).forEach(arr => arr.forEach(p => all.push(p)));
+
+      let html = '';
+      if (all.length === 0) {
+        html = '<div class="setup-preset-option selected" data-preset="">' +
+          '<h4>Keep current tiers</h4><p>No presets available. Your current tier configuration will be preserved.</p></div>';
+        state.presetId = '';
+      } else {
+        all.forEach((p, i) => {
+          const sel = i === 0 ? ' selected' : '';
+          html += '<div class="setup-preset-option' + sel + '" data-preset="' + p.id + '">' +
+            '<h4>' + p.name + '</h4><p>' + p.description + '</p>';
+          if (p.tiers && p.tiers.length) {
+            html += '<div class="setup-preset-preview"><table><tr><th>Tier</th><th>Model</th><th>Priority</th></tr>';
+            p.tiers.forEach(t => {
+              html += '<tr><td>' + t.name + '</td><td>' + (t.model || '') + '</td><td>' + (t.priority || '') + '</td></tr>';
+            });
+            html += '</table></div>';
+          }
+          html += '</div>';
+        });
+        html += '<div class="setup-preset-option" data-preset="">' +
+          '<h4>Keep current tiers</h4><p>Preserve your existing tier configuration.</p></div>';
+        if (all.length > 0) state.presetId = all[0].id;
+      }
+
+      document.getElementById('setupPresetList').innerHTML = html;
+      el.querySelectorAll('.setup-preset-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+          el.querySelectorAll('.setup-preset-option').forEach(o => o.classList.remove('selected'));
+          opt.classList.add('selected');
+          state.presetId = opt.dataset.preset;
+        });
+      });
+    }).catch(() => {
+      document.getElementById('setupPresetList').innerHTML =
+        '<div class="setup-preset-option selected" data-preset=""><h4>Keep current tiers</h4><p>Could not load presets.</p></div>';
+    });
+  }
+
+  // --- Step 3: Done ---
+  function renderDone() {
+    const el = modal.querySelector('[data-step="3"]');
+    const backendNames = Object.keys(state.backends);
+    let html = '<p style="font-size:0.82rem;color:var(--text-dim);margin:0 0 12px">Review your configuration and apply.</p>';
+    html += '<dl class="setup-recap">';
+    html += '<dt>Backends</dt><dd>' + (backendNames.length ? backendNames.join(', ') : 'None selected') + '</dd>';
+    html += '<dt>Telegram</dt><dd>' + (state.telegram ? 'Enabled' : 'Skipped') + '</dd>';
+    html += '<dt>Tiers</dt><dd>' + (state.presetId ? 'Preset: ' + state.presetId : 'Keep current') + '</dd>';
+    html += '</dl>';
+
+    // Check if vault is needed (any secrets to store)
+    const hasSecrets = backendNames.some(b => state.backends[b].api_key) || state.telegram;
+    if (hasSecrets) {
+      // Check vault status
+      api('/api/vault/status').then(vs => {
+        if (vs.status === 'locked' || vs.status === 'not_initialized') {
+          const vaultHTML = '<div class="setup-vault-inline">' +
+            '<label>Vault Password</label>' +
+            '<input type="password" class="input" id="setupVaultPw" placeholder="Enter vault password to store secrets">' +
+            '<p class="form-hint">Secrets will be stored in the encrypted vault.' +
+            (vs.status === 'not_initialized' ? ' This will initialize your vault.' : '') + '</p></div>';
+          el.querySelector('.setup-vault-inline')?.remove();
+          el.insertAdjacentHTML('beforeend', vaultHTML);
+        }
+      }).catch(() => {});
+    }
+    el.innerHTML = html;
+    // Re-check vault after setting innerHTML
+    if (hasSecrets) {
+      api('/api/vault/status').then(vs => {
+        if (vs.status === 'locked' || vs.status === 'not_initialized') {
+          el.insertAdjacentHTML('beforeend',
+            '<div class="setup-vault-inline">' +
+            '<label>Vault Password</label>' +
+            '<input type="password" class="input" id="setupVaultPw" placeholder="Enter vault password to store secrets">' +
+            '<p class="form-hint">Secrets will be stored in the encrypted vault.' +
+            (vs.status === 'not_initialized' ? ' This will initialize your vault.' : '') + '</p></div>');
+        }
+      }).catch(() => {});
+    }
+  }
+
+  // --- Apply ---
+  async function applySetup() {
+    nextBtn.disabled = true;
+    nextBtn.textContent = 'Applying...';
+    const body = {};
+
+    // Backends
+    const backendNames = Object.keys(state.backends);
+    if (backendNames.length) {
+      body.backends = {};
+      backendNames.forEach(bid => {
+        if (bid === 'claude') return; // Claude uses CLI auth, not API key
+        const b = state.backends[bid];
+        body.backends[bid] = {};
+        if (b.base_url) body.backends[bid].base_url = b.base_url;
+        if (b.api_key) body.backends[bid].api_key = b.api_key;
+        if (b.default_model) body.backends[bid].default_model = b.default_model;
+        if (bid === 'ollama') body.backends[bid].auth = 'none';
+      });
+    }
+
+    // Telegram
+    if (state.telegram) body.telegram = state.telegram;
+
+    // Preset
+    if (state.presetId) body.preset_id = state.presetId;
+
+    // Vault password
+    const vpEl = document.getElementById('setupVaultPw');
+    if (vpEl && vpEl.value.trim()) body.vault_password = vpEl.value.trim();
+
+    try {
+      const res = await api('/api/setup/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      localStorage.setItem('alf-welcomed', '1');
+      wb.classList.add('welcome-closing');
+      setTimeout(() => wb.remove(), 300);
+      toast('Setup complete');
+      if (res.restart_required) toast('Restart required for Telegram', 'error');
+      navigateTo('chat');
+    } catch (err) {
+      nextBtn.disabled = false;
+      nextBtn.textContent = 'Apply & Start';
+      toast(err.error || 'Setup failed', 'error');
+    }
+  }
+
+  goTo(0);
 }
 
 loadStatus();

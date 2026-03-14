@@ -1287,6 +1287,17 @@ func generateInitMagicLink(dir string) string {
 	}
 	token := strings.TrimSpace(string(tokenBytes))
 
+	// Wait for daemon health endpoint before requesting magic link.
+	PrintInfo("Waiting for daemon to be ready...")
+	for i := 0; i < 30; i++ {
+		health := exec.Command("docker", "exec", "alf",
+			"curl", "-sf", "http://127.0.0.1:8080/health")
+		if health.Run() == nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
 	cmd := exec.Command("docker", "exec", "alf",
 		"curl", "-sf", "-X", "POST",
 		"-H", "Authorization: Bearer "+token,

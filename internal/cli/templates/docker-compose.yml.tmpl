@@ -115,13 +115,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    cap_add:
-      - DAC_READ_SEARCH
     environment:
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
       - WHISPER_MODEL={{.WhisperModel}}
     secrets:
-      - whisper_shared_secret
+      - source: whisper_shared_secret
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
     volumes:
       - ./data/models:/models
     mem_limit: 2g

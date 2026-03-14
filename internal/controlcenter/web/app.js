@@ -4889,8 +4889,13 @@ function showSetupWizard(status) {
     api('/api/setup/claude/check').then(r => {
       const cs = document.getElementById('setupClaudeStatus');
       if (cs) {
-        cs.textContent = r.authenticated ? 'Authenticated' : 'Not authenticated - run alf login on server';
-        cs.className = 'setup-claude-status ' + (r.authenticated ? 'ok' : 'pending');
+        if (r.authenticated) {
+          cs.textContent = 'Authenticated';
+          cs.className = 'setup-claude-status ok';
+        } else {
+          cs.innerHTML = 'Not authenticated — run <code>alf login</code> on server or use the <a href="#" onclick="navigateTo(\'terminal\');return false" style="color:var(--accent)">Terminal</a>';
+          cs.className = 'setup-claude-status pending';
+        }
       }
     }).catch(() => {});
   }
@@ -5036,37 +5041,22 @@ function showSetupWizard(status) {
     html += '<dt>Telegram</dt><dd>' + (state.telegram ? 'Enabled' : 'Skipped') + '</dd>';
     html += '<dt>Tiers</dt><dd>' + (state.presetId ? 'Preset: ' + state.presetId : 'Keep current') + '</dd>';
     html += '</dl>';
-
-    // Check if vault is needed (any secrets to store)
-    const hasSecrets = backendNames.some(b => state.backends[b].api_key) || state.telegram;
-    if (hasSecrets) {
-      // Check vault status
-      api('/api/vault/status').then(vs => {
-        if (vs.status === 'locked' || vs.status === 'not_initialized') {
-          const vaultHTML = '<div class="setup-vault-inline">' +
-            '<label>Vault Password</label>' +
-            '<input type="password" class="input" id="setupVaultPw" placeholder="Enter vault password to store secrets">' +
-            '<p class="form-hint">Secrets will be stored in the encrypted vault.' +
-            (vs.status === 'not_initialized' ? ' This will initialize your vault.' : '') + '</p></div>';
-          el.querySelector('.setup-vault-inline')?.remove();
-          el.insertAdjacentHTML('beforeend', vaultHTML);
-        }
-      }).catch(() => {});
-    }
     el.innerHTML = html;
-    // Re-check vault after setting innerHTML
-    if (hasSecrets) {
-      api('/api/vault/status').then(vs => {
-        if (vs.status === 'locked' || vs.status === 'not_initialized') {
-          el.insertAdjacentHTML('beforeend',
-            '<div class="setup-vault-inline">' +
-            '<label>Vault Password</label>' +
-            '<input type="password" class="input" id="setupVaultPw" placeholder="Enter vault password to store secrets">' +
-            '<p class="form-hint">Secrets will be stored in the encrypted vault.' +
-            (vs.status === 'not_initialized' ? ' This will initialize your vault.' : '') + '</p></div>');
-        }
-      }).catch(() => {});
-    }
+
+    // Always show vault password — vault is needed for all secret storage.
+    api('/api/vault/status').then(vs => {
+      if (vs.status === 'locked' || vs.status === 'not_initialized') {
+        const isNew = vs.status === 'not_initialized' || vs.first_time;
+        el.insertAdjacentHTML('beforeend',
+          '<div class="setup-vault-inline">' +
+          '<label>Vault Password' + (isNew ? ' (new)' : '') + '</label>' +
+          '<input type="password" class="input" id="setupVaultPw" placeholder="' +
+            (isNew ? 'Choose a password (min. 12 characters)' : 'Enter your vault password') + '">' +
+          '<p class="form-hint">' +
+            (isNew ? 'This creates your encrypted vault for API keys, tokens, and secrets.' :
+                     'Unlock your vault to store secrets.') + '</p></div>');
+      }
+    }).catch(() => {});
   }
 
   // --- Apply ---

@@ -5075,6 +5075,19 @@ function showSetupWizard(status) {
     html += '</dl>';
     el.innerHTML = html;
 
+    // Claude CLI auth warning
+    if (backendNames.includes('claude')) {
+      api('/api/setup/claude/check').then(r => {
+        if (!r.authenticated) {
+          el.insertAdjacentHTML('beforeend',
+            '<div class="setup-apply-warning">' +
+            '<strong>Claude CLI not authenticated</strong><br>' +
+            'After setup, run <code>alf login</code> on the host server to connect your Anthropic account.' +
+            '</div>');
+        }
+      }).catch(() => {});
+    }
+
     // Always show vault password — vault is needed for all secret storage.
     api('/api/vault/status').then(vs => {
       if (vs.status === 'locked' || vs.status === 'not_initialized') {

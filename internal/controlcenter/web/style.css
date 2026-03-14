@@ -2232,6 +2232,11 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .setup-vault-inline input { width: 100%; box-sizing: border-box; }
 .setup-vault-inline .form-hint { margin-top: 4px; }
 
+/* Setup warnings */
+.setup-apply-warning { margin-top: 12px; padding: 10px 12px; font-size: 0.82rem; border-radius: var(--radius); background: color-mix(in srgb, #e8a735 12%, var(--bg)); border: 1px solid color-mix(in srgb, #e8a735 30%, var(--border)); }
+.setup-apply-warning strong { display: block; margin-bottom: 4px; }
+.setup-apply-warning code { background: var(--bg-card); padding: 1px 5px; border-radius: 3px; font-size: 0.78rem; }
+
 /* Setup apply error */
 .setup-apply-error { color: #e55; font-size: 0.82rem; padding: 8px 12px; background: color-mix(in srgb, #e55 8%, var(--bg)); border-radius: var(--radius); margin-bottom: 12px; }
 

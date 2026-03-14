@@ -239,6 +239,16 @@ COMPOSEOF
 $SCP /tmp/alf-compose-direct.yml "${REMOTE_HOST}:${REMOTE_DIR}/docker-compose.yml"
 rm -f /tmp/alf-compose-direct.yml
 
+# Detect gVisor and write .env for runtime selection.
+echo "==> Detecting container runtime..."
+if $SSH "${REMOTE_HOST}" "which runsc >/dev/null 2>&1"; then
+  echo "    gVisor (runsc) detected"
+  $SSH "${REMOTE_HOST}" "echo 'ALF_RUNTIME=runsc' > ${REMOTE_DIR}/.env"
+else
+  echo "    Using default runtime (runc)"
+  $SSH "${REMOTE_HOST}" "echo 'ALF_RUNTIME=runc' > ${REMOTE_DIR}/.env"
+fi
+
 if [ "$NO_RESTART" = true ]; then
   echo "==> Image transferred. Skipping restart (--no-restart)."
 else

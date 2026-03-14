@@ -917,6 +917,27 @@ func pullAndStart(dir, botName string, httpsEnabled bool) {
 		PrintCheck("Image pulled")
 	}
 
+	// Pre-download whisper model if not cached. The whisper container runs
+	// on an internal network without internet access, so the model must be
+	// available locally before startup.
+	modelsDir := filepath.Join(dir, "data", "models")
+	os.MkdirAll(modelsDir, 0o755)
+	if entries, _ := os.ReadDir(modelsDir); len(entries) == 0 {
+		PrintInfo("Downloading whisper model (first run only)...")
+		dl := exec.Command("docker", "run", "--rm",
+			"-v", modelsDir+":/models",
+			"ghcr.io/alamparelli/whisper-service:latest",
+			"python3", "-c",
+			`from faster_whisper import WhisperModel; WhisperModel("small", download_root="/models")`)
+		dl.Stdout = os.Stdout
+		dl.Stderr = os.Stderr
+		if err := dl.Run(); err != nil {
+			PrintWarning(fmt.Sprintf("Whisper model download failed: %v - voice features may not work", err))
+		} else {
+			PrintCheck("Whisper model cached")
+		}
+	}
+
 	PrintInfo("Starting ALF...")
 	up := exec.Command("docker", "compose", "up", "-d")
 	up.Dir = dir

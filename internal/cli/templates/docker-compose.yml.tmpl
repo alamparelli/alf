@@ -89,6 +89,7 @@ services:
 {{- end}}
     mem_limit: 2g
     cpus: "2.0"
+    runtime: ${ALF_RUNTIME:-runc}
     security_opt:
       - no-new-privileges:true
     cap_drop:

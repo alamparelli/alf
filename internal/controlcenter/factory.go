@@ -307,7 +307,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
 	handler = securityHeadersMiddleware(handler)
-	handler = newRateLimiter(120).middleware(handler) // 120 req/min per IP
+	handler = newRateLimiter(15).withAuthLimit(600, deps.Sessions).middleware(handler) // 15/min anonymous, 600/min authenticated
 	handler = loggingMiddleware(handler)
 
 	// Terminal WebSocket: registered outside the main middleware stack so the

@@ -898,6 +898,19 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 		PrintCheck(fmt.Sprintf(".env (runtime: %s)", alfRuntime))
 	}
 
+	// Write resolv.conf for gVisor compatibility.
+	// gVisor's netstack cannot use Docker's internal DNS (127.0.0.11),
+	// so we provide public DNS servers directly.
+	resolvPath := filepath.Join(dir, "resolv.conf")
+	if _, err := os.Stat(resolvPath); os.IsNotExist(err) {
+		resolvContent := "nameserver 8.8.8.8\nnameserver 1.1.1.1\n"
+		if err := os.WriteFile(resolvPath, []byte(resolvContent), 0o644); err != nil {
+			PrintWarning(fmt.Sprintf("Failed to write resolv.conf: %v", err))
+		} else {
+			PrintCheck("resolv.conf (gVisor DNS)")
+		}
+	}
+
 	// Fix volume permissions last - after all files are written.
 	// chown to uid 1000 (node user inside container) so Docker volumes work.
 	fixVolumePermissions(dir)

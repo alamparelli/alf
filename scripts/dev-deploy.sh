@@ -186,6 +186,9 @@ services:
     mem_limit: 2g
     cpus: "2.0"
     runtime: ${ALF_RUNTIME:-runc}
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     security_opt:
       - no-new-privileges:true
     cap_drop:

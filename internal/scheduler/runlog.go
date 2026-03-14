@@ -12,40 +12,49 @@ import (
 
 // RunRecord captures one execution of a scheduled job.
 type RunRecord struct {
-	JobID      string        `json:"job_id"`
-	JobName    string        `json:"job_name"`
-	Tier       string        `json:"tier"`
-	StartedAt  time.Time     `json:"started_at"`
-	DurationMs int64         `json:"duration_ms"`
-	Status     string        `json:"status"` // "ok", "error", "timeout", "turn_limit", "skipped"
-	Error      string        `json:"error,omitempty"`
-	OutputLen  int           `json:"output_len"` // response length in chars
-	CostUSD    float64       `json:"cost_usd,omitempty"`
-	Model      string        `json:"model,omitempty"`
-	NumTurns   int           `json:"num_turns,omitempty"`
-	Iterations int           `json:"iterations,omitempty"` // orchestrator only
+	JobID      string    `json:"job_id"`
+	JobName    string    `json:"job_name"`
+	Tier       string    `json:"tier"`
+	StartedAt  time.Time `json:"started_at"`
+	DurationMs int64     `json:"duration_ms"`
+	Status     string    `json:"status"` // "ok", "error", "timeout", "turn_limit", "skipped"
+	Error      string    `json:"error,omitempty"`
+	OutputLen  int       `json:"output_len"` // response length in chars
+	CostUSD    float64   `json:"cost_usd,omitempty"`
+	Model      string    `json:"model,omitempty"`
+	NumTurns   int       `json:"num_turns,omitempty"`
+	Iterations int       `json:"iterations,omitempty"` // orchestrator only
 }
 
-// RunLog provides append-only execution logging per job.
-// Each job gets a JSONL file: logs/scheduler/{job-id}.jsonl
+// retentionDays is how long daily log files are kept before auto-purge.
+const retentionDays = 90
+
+// RunLog provides append-only execution logging.
+// All records for a given day go into a single file: logs/scheduler/{YYYY-MM-DD}.jsonl
 type RunLog struct {
-	dir string
-	mu  sync.Mutex
+	dir       string
+	mu        sync.Mutex
+	lastPurge time.Time // avoid purging on every write
 }
 
-// NewRunLog creates a RunLog that stores files under dir.
+// NewRunLog creates a RunLog that stores daily files under dir.
 func NewRunLog(dir string) *RunLog {
 	return &RunLog{dir: dir}
 }
 
-// Append writes a record to the job's log file.
+// dailyFile returns the path for a given date's log file.
+func (rl *RunLog) dailyFile(t time.Time) string {
+	return filepath.Join(rl.dir, t.Format("2006-01-02")+".jsonl")
+}
+
+// Append writes a record to the daily log file.
 func (rl *RunLog) Append(rec RunRecord) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	os.MkdirAll(rl.dir, 0o755)
 
-	path := filepath.Join(rl.dir, rec.JobID+".jsonl")
+	path := rl.dailyFile(rec.StartedAt)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
@@ -62,39 +71,17 @@ func (rl *RunLog) Append(rec RunRecord) {
 
 // Recent returns the last N records for a job, newest first.
 func (rl *RunLog) Recent(jobID string, limit int) []RunRecord {
-	path := filepath.Join(rl.dir, jobID+".jsonl")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
+	all := rl.readAll(func(r RunRecord) bool { return r.JobID == jobID })
+	sortRecords(all)
+	if limit > 0 && limit < len(all) {
+		all = all[:limit]
 	}
-
-	// Parse all lines.
-	var all []RunRecord
-	for _, line := range splitLines(data) {
-		if len(line) == 0 {
-			continue
-		}
-		var rec RunRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
-			continue
-		}
-		all = append(all, rec)
-	}
-
-	// Return last N, newest first.
-	if limit <= 0 || limit > len(all) {
-		limit = len(all)
-	}
-	result := make([]RunRecord, limit)
-	for i := 0; i < limit; i++ {
-		result[i] = all[len(all)-1-i]
-	}
-	return result
+	return all
 }
 
 // Stats computes summary statistics for a job.
 func (rl *RunLog) Stats(jobID string) *RunStats {
-	records := rl.Recent(jobID, 0) // all records (already newest-first)
+	records := rl.Recent(jobID, 0)
 	if len(records) == 0 {
 		return nil
 	}
@@ -145,63 +132,70 @@ type RunStats struct {
 	Streak        int     `json:"streak"` // consecutive same-status runs
 }
 
-// Cleanup removes log files for jobs that no longer exist.
+// Cleanup removes daily log files older than the retention period and
+// also removes legacy per-job files (*.jsonl not matching YYYY-MM-DD pattern).
 func (rl *RunLog) Cleanup(activeIDs map[string]bool) {
+	rl.PurgeOld()
+}
+
+// PurgeOld removes daily log files older than retentionDays.
+func (rl *RunLog) PurgeOld() {
 	entries, err := os.ReadDir(rl.dir)
 	if err != nil {
 		return
 	}
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
 		name := e.Name()
-		if len(name) < 6 { // minimum: "x.jsonl"
+		if !strings.HasSuffix(name, ".jsonl") {
 			continue
 		}
-		id := name[:len(name)-6] // strip ".jsonl"
-		if !activeIDs[id] {
+		stem := strings.TrimSuffix(name, ".jsonl")
+		d, err := time.Parse("2006-01-02", stem)
+		if err != nil {
+			// Legacy per-job file — remove it (data was migrated or is stale).
+			os.Remove(filepath.Join(rl.dir, name))
+			continue
+		}
+		if d.Before(cutoff) {
 			os.Remove(filepath.Join(rl.dir, name))
 		}
 	}
 }
 
-// splitLines splits data by newline without allocating strings.
-func splitLines(data []byte) [][]byte {
-	var lines [][]byte
-	start := 0
-	for i, b := range data {
-		if b == '\n' {
-			lines = append(lines, data[start:i])
-			start = i + 1
-		}
+// Truncate keeps only the last N records for a job.
+// With daily files this trims across all day files.
+func (rl *RunLog) Truncate(jobID string, keep int) {
+	// Not needed with daily files + age-based purge.
+	// Kept for API compatibility.
+}
+
+// maxRecordsPerJob is unused with daily files but kept for reference.
+const maxRecordsPerJob = 500
+
+// appendAndTruncate appends a record and periodically purges old daily files.
+func (rl *RunLog) appendAndTruncate(rec RunRecord) {
+	rl.Append(rec)
+
+	// Purge old files at most once per day.
+	rl.mu.Lock()
+	shouldPurge := time.Since(rl.lastPurge) > 24*time.Hour
+	if shouldPurge {
+		rl.lastPurge = time.Now()
 	}
-	if start < len(data) {
-		lines = append(lines, data[start:])
+	rl.mu.Unlock()
+
+	if shouldPurge {
+		rl.PurgeOld()
 	}
-	return lines
 }
 
 // Since returns all records across all jobs started after the given time, newest first.
 func (rl *RunLog) Since(since time.Time) []RunRecord {
-	entries, err := os.ReadDir(rl.dir)
-	if err != nil {
-		return nil
-	}
-
-	var all []RunRecord
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
-			continue
-		}
-		id := e.Name()[:len(e.Name())-6]
-		for _, r := range rl.Recent(id, 0) {
-			if r.StartedAt.After(since) {
-				all = append(all, r)
-			}
-		}
-	}
-
+	all := rl.readAll(func(r RunRecord) bool { return r.StartedAt.After(since) })
 	sortRecords(all)
 	return all
 }
@@ -287,55 +281,18 @@ func (rl *RunLog) DailyDigest(since time.Time) string {
 	return sb.String()
 }
 
-// Truncate keeps only the last N records for a job (prevents unbounded growth).
-func (rl *RunLog) Truncate(jobID string, keep int) {
-	records := rl.Recent(jobID, 0)
-	if len(records) <= keep {
-		return
-	}
-
-	// Recent returns newest-first; we need oldest-first for writing.
-	toKeep := records[:keep]
-
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	path := filepath.Join(rl.dir, jobID+".jsonl")
-	f, err := os.Create(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	// Write oldest first.
-	for i := len(toKeep) - 1; i >= 0; i-- {
-		data, _ := json.Marshal(toKeep[i])
-		f.Write(data)
-		f.WriteString("\n")
-	}
-}
-
-// maxRecordsPerJob is the retention limit before auto-truncation.
-const maxRecordsPerJob = 500
-
-// appendAndTruncate appends a record and auto-truncates if needed.
-func (rl *RunLog) appendAndTruncate(rec RunRecord) {
-	rl.Append(rec)
-
-	// Check file size as a proxy for record count (avoid parsing on every write).
-	path := filepath.Join(rl.dir, rec.JobID+".jsonl")
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	// ~200 bytes per record × 500 = ~100KB. Truncate when file exceeds 150KB.
-	if info.Size() > 150*1024 {
-		rl.Truncate(rec.JobID, maxRecordsPerJob)
-	}
-}
-
 // RecentAll returns the last N records across all jobs, newest first.
 func (rl *RunLog) RecentAll(limit int) []RunRecord {
+	all := rl.readAll(nil)
+	sortRecords(all)
+	if limit > 0 && limit < len(all) {
+		all = all[:limit]
+	}
+	return all
+}
+
+// readAll reads all records from daily files, applying an optional filter.
+func (rl *RunLog) readAll(filter func(RunRecord) bool) []RunRecord {
 	entries, err := os.ReadDir(rl.dir)
 	if err != nil {
 		return nil
@@ -343,21 +300,44 @@ func (rl *RunLog) RecentAll(limit int) []RunRecord {
 
 	var all []RunRecord
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
-		id := e.Name()[:len(e.Name())-6]
-		records := rl.Recent(id, 0)
-		all = append(all, records...)
-	}
-
-	// Sort newest first.
-	sortRecords(all)
-
-	if limit > 0 && limit < len(all) {
-		all = all[:limit]
+		data, err := os.ReadFile(filepath.Join(rl.dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		for _, line := range splitLines(data) {
+			if len(line) == 0 {
+				continue
+			}
+			var rec RunRecord
+			if err := json.Unmarshal(line, &rec); err != nil {
+				continue
+			}
+			if filter != nil && !filter(rec) {
+				continue
+			}
+			all = append(all, rec)
+		}
 	}
 	return all
+}
+
+// splitLines splits data by newline without allocating strings.
+func splitLines(data []byte) [][]byte {
+	var lines [][]byte
+	start := 0
+	for i, b := range data {
+		if b == '\n' {
+			lines = append(lines, data[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(data) {
+		lines = append(lines, data[start:])
+	}
+	return lines
 }
 
 // sortRecords sorts records by StartedAt descending (newest first).

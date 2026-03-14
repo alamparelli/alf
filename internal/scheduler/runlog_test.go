@@ -12,16 +12,23 @@ func TestRunLogAppendAndRecent(t *testing.T) {
 	rl := NewRunLog(dir)
 
 	// Append 3 records.
+	now := time.Now()
 	for i := 0; i < 3; i++ {
 		rl.Append(RunRecord{
 			JobID:      "test-job",
 			JobName:    "Test Job",
 			Tier:       "direct",
-			StartedAt:  time.Now().Add(time.Duration(i) * time.Minute),
+			StartedAt:  now.Add(time.Duration(i) * time.Minute),
 			DurationMs: int64(100 + i*50),
 			Status:     "ok",
 			OutputLen:  42,
 		})
+	}
+
+	// Should write to a single daily file.
+	dailyFile := filepath.Join(dir, now.Format("2006-01-02")+".jsonl")
+	if _, err := os.Stat(dailyFile); err != nil {
+		t.Fatalf("expected daily file %s to exist", dailyFile)
 	}
 
 	// Recent should return newest first.
@@ -40,14 +47,46 @@ func TestRunLogAppendAndRecent(t *testing.T) {
 	}
 }
 
+func TestRunLogMultipleJobsSameDay(t *testing.T) {
+	dir := t.TempDir()
+	rl := NewRunLog(dir)
+
+	now := time.Now()
+	rl.Append(RunRecord{JobID: "job-a", StartedAt: now, Status: "ok", DurationMs: 100})
+	rl.Append(RunRecord{JobID: "job-b", StartedAt: now.Add(time.Minute), Status: "error", DurationMs: 200})
+	rl.Append(RunRecord{JobID: "job-a", StartedAt: now.Add(2 * time.Minute), Status: "ok", DurationMs: 300})
+
+	// All in one file.
+	entries, _ := os.ReadDir(dir)
+	jsonlCount := 0
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".jsonl" {
+			jsonlCount++
+		}
+	}
+	if jsonlCount != 1 {
+		t.Fatalf("expected 1 daily file, got %d", jsonlCount)
+	}
+
+	// Recent filters by job.
+	recsA := rl.Recent("job-a", 0)
+	if len(recsA) != 2 {
+		t.Fatalf("expected 2 records for job-a, got %d", len(recsA))
+	}
+	recsB := rl.Recent("job-b", 0)
+	if len(recsB) != 1 {
+		t.Fatalf("expected 1 record for job-b, got %d", len(recsB))
+	}
+}
+
 func TestRunLogStats(t *testing.T) {
 	dir := t.TempDir()
 	rl := NewRunLog(dir)
 
-	// 2 ok, 1 error.
-	rl.Append(RunRecord{JobID: "j1", StartedAt: time.Now(), DurationMs: 100, Status: "ok"})
-	rl.Append(RunRecord{JobID: "j1", StartedAt: time.Now(), DurationMs: 200, Status: "ok"})
-	rl.Append(RunRecord{JobID: "j1", StartedAt: time.Now(), DurationMs: 300, Status: "error", Error: "boom"})
+	now := time.Now()
+	rl.Append(RunRecord{JobID: "j1", StartedAt: now, DurationMs: 100, Status: "ok"})
+	rl.Append(RunRecord{JobID: "j1", StartedAt: now.Add(time.Minute), DurationMs: 200, Status: "ok"})
+	rl.Append(RunRecord{JobID: "j1", StartedAt: now.Add(2 * time.Minute), DurationMs: 300, Status: "error", Error: "boom"})
 
 	stats := rl.Stats("j1")
 	if stats == nil {
@@ -73,38 +112,14 @@ func TestRunLogStats(t *testing.T) {
 	}
 }
 
-func TestRunLogTruncate(t *testing.T) {
-	dir := t.TempDir()
-	rl := NewRunLog(dir)
-
-	for i := 0; i < 10; i++ {
-		rl.Append(RunRecord{
-			JobID:      "j2",
-			StartedAt:  time.Now().Add(time.Duration(i) * time.Minute),
-			DurationMs: int64(i * 10),
-			Status:     "ok",
-		})
-	}
-
-	rl.Truncate("j2", 5)
-
-	recs := rl.Recent("j2", 0)
-	if len(recs) != 5 {
-		t.Fatalf("expected 5 records after truncate, got %d", len(recs))
-	}
-	// Should keep the 5 newest.
-	if recs[0].DurationMs != 90 {
-		t.Errorf("expected newest record (90ms), got %d", recs[0].DurationMs)
-	}
-}
-
 func TestRunLogRecentAll(t *testing.T) {
 	dir := t.TempDir()
 	rl := NewRunLog(dir)
 
-	rl.Append(RunRecord{JobID: "a", StartedAt: time.Now().Add(-2 * time.Minute), Status: "ok"})
-	rl.Append(RunRecord{JobID: "b", StartedAt: time.Now().Add(-1 * time.Minute), Status: "ok"})
-	rl.Append(RunRecord{JobID: "a", StartedAt: time.Now(), Status: "error"})
+	now := time.Now()
+	rl.Append(RunRecord{JobID: "a", StartedAt: now.Add(-2 * time.Minute), Status: "ok"})
+	rl.Append(RunRecord{JobID: "b", StartedAt: now.Add(-1 * time.Minute), Status: "ok"})
+	rl.Append(RunRecord{JobID: "a", StartedAt: now, Status: "error"})
 
 	all := rl.RecentAll(10)
 	if len(all) != 3 {
@@ -116,21 +131,76 @@ func TestRunLogRecentAll(t *testing.T) {
 	}
 }
 
-func TestRunLogCleanup(t *testing.T) {
+func TestRunLogPurgeOld(t *testing.T) {
 	dir := t.TempDir()
 	rl := NewRunLog(dir)
 
-	rl.Append(RunRecord{JobID: "active", Status: "ok", StartedAt: time.Now()})
-	rl.Append(RunRecord{JobID: "deleted", Status: "ok", StartedAt: time.Now()})
+	// Create a "today" file.
+	today := time.Now()
+	rl.Append(RunRecord{JobID: "j1", StartedAt: today, Status: "ok"})
 
-	// Only "active" is still a real job.
+	// Create an "old" file (100 days ago).
+	oldDate := today.AddDate(0, 0, -100)
+	oldFile := filepath.Join(dir, oldDate.Format("2006-01-02")+".jsonl")
+	os.WriteFile(oldFile, []byte(`{"job_id":"old","status":"ok"}`+"\n"), 0o644)
+
+	// Create a "recent" file (30 days ago).
+	recentDate := today.AddDate(0, 0, -30)
+	recentFile := filepath.Join(dir, recentDate.Format("2006-01-02")+".jsonl")
+	os.WriteFile(recentFile, []byte(`{"job_id":"recent","status":"ok"}`+"\n"), 0o644)
+
+	// Create a legacy per-job file (non-date name).
+	legacyFile := filepath.Join(dir, "some-job-id.jsonl")
+	os.WriteFile(legacyFile, []byte(`{"job_id":"legacy","status":"ok"}`+"\n"), 0o644)
+
+	rl.PurgeOld()
+
+	// Old file should be gone.
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Error("expected old file to be purged")
+	}
+	// Legacy file should be gone.
+	if _, err := os.Stat(legacyFile); !os.IsNotExist(err) {
+		t.Error("expected legacy per-job file to be purged")
+	}
+	// Recent file should remain.
+	if _, err := os.Stat(recentFile); err != nil {
+		t.Error("expected recent file to still exist")
+	}
+	// Today's file should remain.
+	todayFile := filepath.Join(dir, today.Format("2006-01-02")+".jsonl")
+	if _, err := os.Stat(todayFile); err != nil {
+		t.Error("expected today file to still exist")
+	}
+}
+
+func TestRunLogCleanupCallsPurge(t *testing.T) {
+	dir := t.TempDir()
+	rl := NewRunLog(dir)
+
+	// Legacy per-job file.
+	legacyFile := filepath.Join(dir, "deleted.jsonl")
+	os.WriteFile(legacyFile, []byte(`{"job_id":"deleted","status":"ok"}`+"\n"), 0o644)
+
+	// Cleanup still works (delegates to PurgeOld).
 	rl.Cleanup(map[string]bool{"active": true})
 
-	// "deleted" log should be gone.
-	if _, err := os.Stat(filepath.Join(dir, "deleted.jsonl")); !os.IsNotExist(err) {
-		t.Error("expected deleted.jsonl to be removed")
+	if _, err := os.Stat(legacyFile); !os.IsNotExist(err) {
+		t.Error("expected legacy file to be removed by Cleanup")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "active.jsonl")); err != nil {
-		t.Error("expected active.jsonl to still exist")
+}
+
+func TestRunLogSince(t *testing.T) {
+	dir := t.TempDir()
+	rl := NewRunLog(dir)
+
+	now := time.Now()
+	rl.Append(RunRecord{JobID: "j1", StartedAt: now.Add(-2 * time.Hour), Status: "ok"})
+	rl.Append(RunRecord{JobID: "j1", StartedAt: now.Add(-30 * time.Minute), Status: "error"})
+	rl.Append(RunRecord{JobID: "j2", StartedAt: now.Add(-10 * time.Minute), Status: "ok"})
+
+	recs := rl.Since(now.Add(-1 * time.Hour))
+	if len(recs) != 2 {
+		t.Fatalf("expected 2 records since 1h ago, got %d", len(recs))
 	}
 }

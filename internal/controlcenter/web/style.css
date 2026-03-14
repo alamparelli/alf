@@ -582,6 +582,10 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   pointer-events: none;
 }
+.chat-tab-badge {
+  width: 7px; height: 7px; border-radius: 50%; background: #e55;
+  flex-shrink: 0; margin-left: 2px;
+}
 .chat-tab-close {
   display: none; width: 16px; height: 16px; padding: 0; border: none;
   background: none; color: var(--text-dim); cursor: pointer;
@@ -728,8 +732,9 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   display: inline-block; font-size: 1.1rem; margin-top: 2px;
 }
 .chat-status {
-  padding: 0 16px; font-size: 0.78rem; color: var(--text-dim);
-  min-height: 20px; display: flex; align-items: center; gap: 6px;
+  padding: 4px 16px; font-size: 0.78rem; color: var(--text-dim);
+  min-height: 24px; display: flex; align-items: center; gap: 6px;
+  flex-shrink: 0;
 }
 .chat-status:empty { min-height: 0; padding: 0; }
 .chat-status .dot-pulse {

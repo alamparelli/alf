@@ -40,14 +40,16 @@ func secretExists(baseDir, name string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// SetSecret writes a secret file with mode 600 (owner-only).
+// SetSecret writes a secret file with mode 644 so containers running as
+// non-root (e.g. whisper uid 1000) can read bind-mounted secrets.
+// The secrets directory itself stays 700 (owner-only traversal on the host).
 func SetSecret(baseDir, name, value string) error {
 	dir := secretsDir(baseDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	path := secretPath(baseDir, name)
-	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o644); err != nil {
 		return err
 	}
 	return nil

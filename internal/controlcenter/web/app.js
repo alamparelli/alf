@@ -1389,6 +1389,7 @@ function chatClearBadge() {
 // On tab switch we snapshot globals → old tab, restore globals ← new tab.
 let chatTabList = []; // [{id, convId, title}]
 let chatActiveTabId = null;
+const chatTabUnread = new Set(); // tab IDs with unread responses
 // DOM cache: tabId → { html, scrollTop }
 const chatTabDOMCache = {};
 
@@ -2226,7 +2227,6 @@ let chatNeedNewBubble = false;   // true when tool/thinking happened mid-stream 
 // Tab-aware stream isolation: tracks which tab owns the running stream.
 let chatStreamTabId = null;          // tab that initiated the current stream
 let chatDetachedContainer = null;    // detached DOM container when stream tab is not active
-const chatTabUnread = new Set();     // tab IDs with unread responses
 
 // Returns the correct DOM container for stream output (chatMessages if active, detached if not).
 function chatStreamTarget() {

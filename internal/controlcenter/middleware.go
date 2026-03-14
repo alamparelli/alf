@@ -319,9 +319,11 @@ func (b *ipBan) middleware(next http.Handler) http.Handler {
 
 // rateLimitMiddleware limits requests per IP per minute.
 type rateLimiter struct {
-	mu       sync.Mutex
-	counters map[string]int
-	limit    int
+	mu        sync.Mutex
+	counters  map[string]int
+	limit     int
+	authLimit int          // higher limit for authenticated requests (0 = same as limit)
+	sessions  *SessionStore // optional — used to detect authenticated requests
 }
 
 func newRateLimiter(limit int) *rateLimiter {
@@ -340,6 +342,13 @@ func newRateLimiter(limit int) *rateLimiter {
 	return rl
 }
 
+// withAuthLimit sets a higher limit for authenticated requests.
+func (rl *rateLimiter) withAuthLimit(authLimit int, sessions *SessionStore) *rateLimiter {
+	rl.authLimit = authLimit
+	rl.sessions = sessions
+	return rl
+}
+
 func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
@@ -349,7 +358,14 @@ func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 		count := rl.counters[ip]
 		rl.mu.Unlock()
 
-		if count > rl.limit {
+		effective := rl.limit
+		if rl.authLimit > 0 && rl.sessions != nil {
+			if cookie, err := r.Cookie("cc_session"); err == nil && rl.sessions.Valid(cookie.Value) {
+				effective = rl.authLimit
+			}
+		}
+
+		if count > effective {
 			http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
 			return
 		}

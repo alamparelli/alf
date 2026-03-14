@@ -233,6 +233,18 @@ func HandlerFactory(deps Deps) http.Handler {
 		Orchestrator: deps.Orchestrator,
 	})
 
+	// Setup wizard (onboarding).
+	mux.Handle("/api/setup/", &SetupHandler{
+		ConfigStore:   deps.ConfigStore,
+		TierStore:     deps.TierStore,
+		Vault:         deps.VaultManager,
+		PresetsDir:    filepath.Join(deps.ConfigDir, "setup-presets"),
+		Notifier:      deps.Notifier,
+		ConfigDir:     deps.ConfigDir,
+		OnVaultUnlock: deps.OnVaultUnlock,
+		DataDir:       deps.DataDir,
+	})
+
 	// Telegram integration.
 	mux.Handle("/api/telegram", &TelegramHandler{
 		Vault: deps.VaultManager,

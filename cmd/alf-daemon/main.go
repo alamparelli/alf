@@ -340,6 +340,9 @@ func main() {
 	// Set process-wide timezone from config so log timestamps are correct.
 	time.Local = resolveTimezone(cfg.Timezone)
 
+	// Apply DNS servers from config (gVisor compatibility).
+	applyDNS(cfg)
+
 	// Bootstrap default memory files (soul.md, mood.md, index.md).
 	contextDir := filepath.Join(dataDir, "context")
 	memory.Bootstrap(contextDir)
@@ -849,6 +852,7 @@ func main() {
 							log.Printf("config: tiers_file changed to %q", newTiersPath)
 						}
 					}
+					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
@@ -941,6 +945,7 @@ func main() {
 						}
 					}
 					// Re-register backends if config changed.
+					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
@@ -3655,6 +3660,22 @@ func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 	sj.LastError = j.LastError
 	sj.Running = j.IsRunning()
 	return sj
+}
+
+// applyDNS writes /etc/resolv.conf with the configured DNS servers.
+// Required for gVisor runtime which cannot use Docker's internal DNS (127.0.0.11).
+func applyDNS(cfg *cc.Config) {
+	servers := cfg.EffectiveDNS()
+	var content string
+	for _, s := range servers {
+		content += "nameserver " + s + "\n"
+	}
+	if err := os.WriteFile("/etc/resolv.conf", []byte(content), 0o644); err != nil {
+		// Read-only mount or permission denied — not fatal, just log.
+		log.Printf("dns: could not write /etc/resolv.conf: %v (using existing)", err)
+		return
+	}
+	log.Printf("dns: resolv.conf updated (%s)", strings.Join(servers, ", "))
 }
 
 // resolveTimezone loads an IANA timezone from config, falling back to TZ env then UTC.

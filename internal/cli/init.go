@@ -123,17 +123,18 @@ func RunInit() {
 	if prev.Dir != "" {
 		fmt.Println("  Previous setup detected - press Enter to keep existing values.")
 	} else {
-		fmt.Println("  This wizard will guide you through the initial setup:")
+		fmt.Println("  This wizard will set up the infrastructure:")
 		fmt.Println()
-		fmt.Println("    1. Check prerequisites (Docker)")
+		fmt.Println("    1. Check prerequisites (Docker, gVisor)")
 		fmt.Println("    2. Choose where to install ALF")
-		fmt.Println("    3. Connect Telegram (optional)")
-		fmt.Println("    4. Set up your Control Center (web dashboard)")
-		fmt.Println("    5. Timezone")
-		fmt.Println("    6. Workspaces")
-		fmt.Println("    7. JavaScript runtime")
-		fmt.Println("    8. Start ALF")
-		fmt.Println("    9. LLM providers")
+		fmt.Println("    3. Set up your Control Center (web dashboard)")
+		fmt.Println("    4. Timezone")
+		fmt.Println("    5. Workspaces")
+		fmt.Println("    6. JavaScript runtime")
+		fmt.Println("    7. Start ALF")
+		fmt.Println()
+		fmt.Println("  LLM backends, Telegram, and tiers are configured")
+		fmt.Println("  via the Control Center Setup Wizard after startup.")
 		fmt.Println()
 		fmt.Println("  It takes about 2 minutes.")
 	}
@@ -152,17 +153,7 @@ func RunInit() {
 	nextStep("Choose install directory")
 	dir := promptDirectory(reader, prev.Dir)
 
-	// Step 3: Telegram (optional)
-	nextStep("Telegram integration (optional)")
-	botToken, botName, chatID := promptTelegram(reader, prev.BotToken, prev.ChatID)
-	telegramEnabled := botToken != "" && chatID != ""
-	if telegramEnabled {
-		PrintCheck(fmt.Sprintf("Telegram enabled - bot @%s, chat %s", botName, chatID))
-	} else {
-		PrintInfo("Telegram skipped - you can configure it later via the Control Center")
-	}
-
-	// Step 4: Control Center access
+	// Step 3: Control Center access
 	nextStep("Control Center access")
 	fmt.Println()
 	fmt.Println("  The Control Center is your web dashboard to manage ALF:")
@@ -185,8 +176,7 @@ func RunInit() {
 			Fatal(fmt.Sprintf("Failed to create letsencrypt/: %v", err))
 		}
 		saveSetupProfile(setupProfile{
-			Dir: dir, BotToken: botToken, ChatID: chatID,
-			HTTPS: true, Domain: domain, AcmeEmail: acmeEmail,
+			Dir: dir, HTTPS: true, Domain: domain, AcmeEmail: acmeEmail,
 		})
 	} else {
 		ccPort := promptPort(reader, prev.Port)
@@ -196,12 +186,11 @@ func RunInit() {
 			CCExternalURL: fmt.Sprintf("http://%s:%s", ccHost, ccPort),
 		}
 		saveSetupProfile(setupProfile{
-			Dir: dir, BotToken: botToken, ChatID: chatID,
-			Port: ccPort, Host: ccHost,
+			Dir: dir, Port: ccPort, Host: ccHost,
 		})
 	}
 
-	// Step 5: Timezone
+	// Step 4: Timezone
 	nextStep("Timezone")
 	tz := promptTimezone(reader, prev.Timezone)
 	composeData.Timezone = tz
@@ -209,7 +198,7 @@ func RunInit() {
 	profile.Timezone = tz
 	saveSetupProfile(profile)
 
-	// Step 6: Workspaces
+	// Step 5: Workspaces
 	nextStep("Workspaces")
 	workspaces := promptWorkspaces(reader, prev.Workspaces)
 	composeData.Workspaces = workspaces
@@ -217,7 +206,7 @@ func RunInit() {
 	profile.Workspaces = workspaces
 	saveSetupProfile(profile)
 
-	// Step 7: JS Runtime
+	// Step 6: JS Runtime
 	nextStep("JavaScript runtime")
 	jsRuntime := promptJSRuntime(reader, prev.JSRuntime)
 	composeData.JSRuntime = jsRuntime
@@ -239,19 +228,14 @@ func RunInit() {
 	profile.ImageTag = imageTag
 	saveSetupProfile(profile)
 
-	// Step 8: Generate files
+	// Step 7: Generate files & Start
 	nextStep("Generating configuration files")
-	generateFiles(dir, botToken, chatID, composeData)
+	generateFiles(dir, "", "", composeData)
 
-	// Step 9: Pull & Start
 	nextStep("Starting ALF")
-	pullAndStart(dir, botName, composeData.EnableHTTPS)
+	pullAndStart(dir, "", composeData.EnableHTTPS)
 
-	// Step 10: LLM Providers
-	nextStep("LLM Providers")
-	promptLLMProviders(reader, dir, &profile)
-
-	// Step 12: Generate magic link for Control Center
+	// Generate magic link for Control Center
 	nextStep("Control Center access link")
 	magicURL := generateInitMagicLink(dir)
 
@@ -261,21 +245,14 @@ func RunInit() {
 	fmt.Println("  Setup complete!")
 	fmt.Println()
 	PrintCheck(fmt.Sprintf("Install directory: %s", dir))
-	if telegramEnabled {
-		PrintCheck(fmt.Sprintf("Telegram bot: @%s", botName))
-	}
 	PrintCheck(fmt.Sprintf("Control Center: %s", composeData.CCExternalURL))
 	if magicURL != "" {
 		fmt.Println()
-		fmt.Println("  Open your Control Center with this link (valid 30 days):")
+		fmt.Println("  Open the Control Center to complete setup (backends, Telegram, tiers):")
 		fmt.Println("  " + colorBold + magicURL + colorReset)
 	}
 	fmt.Println()
-	if telegramEnabled {
-		PrintSuccess("You're all set! Message @" + botName + " on Telegram, or open the Control Center.")
-	} else {
-		PrintSuccess("You're all set! Open the Control Center link above to start using ALF.")
-	}
+	PrintSuccess("Open the link above to finish configuring ALF via the Setup Wizard.")
 	fmt.Println()
 	PrintInfo("Run 'alf help' to see all available commands.")
 	fmt.Println()

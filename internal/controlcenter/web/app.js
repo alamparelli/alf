@@ -156,6 +156,9 @@ function navigateTo(view) {
     pageFrame.src = '';
     chatClearBadge();
     chatLoadHistory();
+    // Deferred scroll: the element was display:none so scrollHeight was 0
+    // during any stream updates. Scroll to bottom now that it's visible.
+    requestAnimationFrame(() => chatScrollBottom());
   } else if (view.startsWith('page:')) {
     const name = view.slice(5);
     pageFrame.style.display = '';
@@ -448,7 +451,10 @@ const FILE_ICON_MAP = {
 
 // Validate a Lucide icon name; return fallback if not found in the loaded icon set.
 function safeLucideIcon(name, fallback) {
-  if (window.lucide && window.lucide.icons && !window.lucide.icons[name]) {
+  if (!window.lucide || !window.lucide.icons) return name;
+  // Lucide stores icons in PascalCase; convert kebab-case for lookup.
+  const pascal = name.replace(/(^|-)(\w)/g, (_, __, c) => c.toUpperCase());
+  if (!window.lucide.icons[pascal]) {
     return fallback || 'box';
   }
   return name;
@@ -1465,6 +1471,12 @@ function chatRenderTabs() {
     label.className = 'chat-tab-label';
     label.textContent = tab.title || 'New chat';
     el.appendChild(label);
+    // Unread badge.
+    if (chatTabUnread.has(tab.id)) {
+      const badge = document.createElement('span');
+      badge.className = 'chat-tab-badge';
+      el.appendChild(badge);
+    }
     // Close button (only if more than 1 tab).
     if (chatTabList.length > 1) {
       const close = document.createElement('span');
@@ -1562,6 +1574,13 @@ function chatSwitchTab(tabId) {
 
   chatRenderTabs();
   chatSaveTabs();
+  // Clear badge on the tab we're switching to.
+  chatTabUnread.delete(tabId);
+  chatRenderTabs();
+  // Clear status if the active tab is not the streaming tab.
+  if (!chatStreamTabId || chatStreamTabId !== tabId) {
+    chatStatus.innerHTML = '';
+  }
   // Load history if not yet loaded for this tab.
   const tab = chatTabList.find(t => t.id === tabId);
   if (tab && !chatHistoryLoaded) {
@@ -1573,6 +1592,7 @@ function chatSwitchTab(tabId) {
   }
   chatSetStopMode(chatSending);
   chatInput.focus();
+  requestAnimationFrame(() => chatScrollBottom());
 }
 
 function chatCreateTab(convId, title) {
@@ -1863,15 +1883,15 @@ function chatLoadHistory() {
       msgs.forEach(m => chatAppendBubble(m.role, m.text, m));
       chatScrollBottom();
     })
-    .then(() => chatCheckActiveJob())
+    .then(() => { if (!chatStreamTabId) chatCheckActiveJob(); })
     .catch(() => {});
 }
 
 // Check for in-flight background job on page load / reconnect.
 async function chatCheckActiveJob() {
-  // If a stream is already running in a detached container (another tab owns it),
-  // skip — the detached stream is already processing the job.
-  if (chatDetachedContainer && chatStreamTabId && chatStreamTabId !== chatActiveTabId) return;
+  // If a stream is already running (on this tab or detached on another),
+  // skip — reconnecting would duplicate events.
+  if (chatStreamTabId) return;
   try {
     const convId = chatActiveConvId();
     const url = '/api/chat/job' + (convId ? '?conv_id=' + encodeURIComponent(convId) : '');
@@ -2152,12 +2172,15 @@ function chatScrollBottom() {
 }
 
 function chatSetStatus(html) {
-  // Only show status bar updates when the stream tab is active.
-  if (!chatDetachedContainer) chatStatus.innerHTML = html;
+  // Only show status bar when the streaming tab is the active tab.
+  if (chatStreamTabId && chatStreamTabId !== chatActiveTabId) return;
+  chatStatus.innerHTML = html;
+  // Status bar appearing shrinks chat-messages; re-scroll to keep bottom visible.
+  requestAnimationFrame(() => { chatMessages.scrollTop = chatMessages.scrollHeight; });
 }
 
 function chatClearStatus() {
-  if (!chatDetachedContainer) chatStatus.innerHTML = '';
+  chatStatus.innerHTML = '';
 }
 
 function chatRenderMd(text) {
@@ -2203,6 +2226,7 @@ let chatNeedNewBubble = false;   // true when tool/thinking happened mid-stream 
 // Tab-aware stream isolation: tracks which tab owns the running stream.
 let chatStreamTabId = null;          // tab that initiated the current stream
 let chatDetachedContainer = null;    // detached DOM container when stream tab is not active
+const chatTabUnread = new Set();     // tab IDs with unread responses
 
 // Returns the correct DOM container for stream output (chatMessages if active, detached if not).
 function chatStreamTarget() {
@@ -2445,6 +2469,12 @@ function chatFinishSend() {
   chatSetStopMode(false);
   chatInput.focus();
 
+  // If the stream finished while we were on a different tab, mark unread.
+  if (chatStreamTabId && chatStreamTabId !== chatActiveTabId) {
+    chatTabUnread.add(chatStreamTabId);
+    chatRenderTabs();
+  }
+
   // If the stream finished while we were on a different tab, persist
   // the detached container's content into the originating tab's DOM cache.
   if (chatDetachedContainer && chatStreamTabId) {
@@ -2619,8 +2649,10 @@ async function chatSend() {
 
 // Auto-reconnect when tab becomes visible again.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !chatSending) {
-    chatCheckActiveJob();
+  if (document.visibilityState === 'visible') {
+    // Scroll to bottom — scrollHeight was 0 while the browser tab was hidden.
+    requestAnimationFrame(() => chatScrollBottom());
+    if (!chatSending) chatCheckActiveJob();
   }
 });
 

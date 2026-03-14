@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -45,6 +47,38 @@ func (BashNativeTool) Schema() ToolSchema {
 	}
 }
 
+// bashSafeEnv builds a filtered environment for bash tool calls.
+// Only passes safe variables — excludes secrets, tokens, and proxy settings.
+func bashSafeEnv(dataDir string) []string {
+	safePrefixes := []string{
+		"PATH=", "TERM=", "LANG=", "LC_", "TZ=", "TMPDIR=",
+		"HOME=", "USER=", "LOGNAME=", "SHELL=",
+		"GIT_AUTHOR_", "GIT_COMMITTER_",
+	}
+	env := make([]string, 0, 16)
+	for _, e := range os.Environ() {
+		for _, prefix := range safePrefixes {
+			if strings.HasPrefix(e, prefix) {
+				env = append(env, e)
+				break
+			}
+		}
+	}
+	// Override HOME/USER for the claude user.
+	homeDir := "/home/alf"
+	if h := os.Getenv("HOME"); h != "" {
+		homeDir = h
+	}
+	env = append(env, "HOME="+homeDir, "USER=claude", "LOGNAME=claude", "TERM=xterm-256color")
+	// Prepend tools dirs to PATH.
+	if dataDir != "" {
+		toolPaths := filepath.Join(dataDir, "tools.d") + ":" + filepath.Join(dataDir, "tools")
+		sysPath := os.Getenv("PATH")
+		env = append(env, "PATH="+toolPaths+":"+homeDir+"/.local/bin:"+sysPath)
+	}
+	return env
+}
+
 func (t BashNativeTool) Run(ctx context.Context, argsJSON string) (string, error) {
 	var args struct {
 		Command string `json:"command"`
@@ -69,12 +103,15 @@ func (t BashNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", args.Command)
+	// Run as claude user (uid 1001), not the daemon's root user.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
+	}
+	// Use a safe env allowlist — never pass os.Environ() which contains
+	// secrets (VAULT_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, API keys).
+	cmd.Env = bashSafeEnv(t.DataDir)
 	if t.DataDir != "" {
 		cmd.Dir = t.DataDir
-		// Prepend tools.d/ and tools/ to PATH so user/system CLI tools are callable.
-		toolPaths := filepath.Join(t.DataDir, "tools.d") + ":" + filepath.Join(t.DataDir, "tools")
-		sysPath := os.Getenv("PATH")
-		cmd.Env = append(os.Environ(), "PATH="+toolPaths+":"+sysPath)
 	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf

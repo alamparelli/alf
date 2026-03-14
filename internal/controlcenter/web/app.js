@@ -4893,7 +4893,7 @@ function showSetupWizard(status) {
           cs.textContent = 'Authenticated';
           cs.className = 'setup-claude-status ok';
         } else {
-          cs.innerHTML = 'Not authenticated — run <code>alf login</code> on server or use the <a href="#" onclick="navigateTo(\'terminal\');return false" style="color:var(--accent)">Terminal</a>';
+          cs.innerHTML = 'Not authenticated — run <code>alf login</code> on the host server';
           cs.className = 'setup-claude-status pending';
         }
       }

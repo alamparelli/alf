@@ -308,7 +308,7 @@ func checkPrerequisites() {
 					`curl -fsSL "${URL}/containerd-shim-runsc-v1" -o /tmp/containerd-shim-runsc-v1`,
 					`chmod +x /tmp/runsc /tmp/containerd-shim-runsc-v1`,
 					`sudo mv /tmp/runsc /tmp/containerd-shim-runsc-v1 /usr/local/bin/`,
-					`sudo /usr/local/bin/runsc install`,
+					`sudo /usr/local/bin/runsc install -- --platform=systrap`,
 					`sudo systemctl reload docker`,
 				}, "\n"))
 				install.Stdout = os.Stdout

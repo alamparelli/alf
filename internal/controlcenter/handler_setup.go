@@ -302,43 +302,41 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check if we need vault (any secrets to store).
+	// Unlock/initialize vault if password provided (always, not just when secrets are needed).
 	needsVault := h.applyNeedsVault(req)
 	vaultUnlocked := false
 
-	if needsVault {
-		if h.Vault == nil {
-			http.Error(w, jsonErr("vault not available — cannot store API keys"), http.StatusServiceUnavailable)
+	if req.VaultPassword != "" && h.Vault != nil && h.Vault.AdminToken() == "" {
+		if err := h.Vault.AutoUnlock(req.VaultPassword); err != nil {
+			http.Error(w, jsonErr("vault unlock failed: "+err.Error()), http.StatusBadRequest)
 			return
 		}
-		// Check if vault is locked.
-		if h.Vault.AdminToken() == "" {
-			if req.VaultPassword == "" {
-				http.Error(w, jsonErr("vault is locked — provide vault_password to unlock"), http.StatusServiceUnavailable)
-				return
-			}
-			// Unlock vault inline.
-			if err := h.Vault.AutoUnlock(req.VaultPassword); err != nil {
-				http.Error(w, jsonErr("vault unlock failed: "+err.Error()), http.StatusBadRequest)
-				return
-			}
-			if _, err := h.Vault.CreateProxyToken(); err != nil {
-				http.Error(w, jsonErr("vault proxy token failed: "+err.Error()), http.StatusInternalServerError)
-				return
-			}
-			// Persist password for auto-unlock on restart.
-			if pwFile := h.Vault.PasswordFile(); pwFile != "" {
-				if err := os.WriteFile(pwFile, []byte(req.VaultPassword), 0o600); err != nil {
-					log.Printf("[setup] warning: failed to persist vault password: %v", err)
-				}
-			}
-			os.Setenv("VAULT_ADDR", h.Vault.Addr())
-			os.Setenv("VAULT_TOKEN", h.Vault.ProxyToken())
-			vaultUnlocked = true
-			if h.OnVaultUnlock != nil {
-				h.OnVaultUnlock()
+		if _, err := h.Vault.CreateProxyToken(); err != nil {
+			http.Error(w, jsonErr("vault proxy token failed: "+err.Error()), http.StatusInternalServerError)
+			return
+		}
+		// Persist password for auto-unlock on restart.
+		if pwFile := h.Vault.PasswordFile(); pwFile != "" {
+			if err := os.WriteFile(pwFile, []byte(req.VaultPassword), 0o600); err != nil {
+				log.Printf("[setup] warning: failed to persist vault password: %v", err)
 			}
 		}
+		os.Setenv("VAULT_ADDR", h.Vault.Addr())
+		os.Setenv("VAULT_TOKEN", h.Vault.ProxyToken())
+		vaultUnlocked = true
+		if h.OnVaultUnlock != nil {
+			h.OnVaultUnlock()
+		}
+	}
+
+	// If secrets need storing but vault is still locked, fail early.
+	if needsVault && h.Vault != nil && h.Vault.AdminToken() == "" {
+		http.Error(w, jsonErr("vault is locked — provide vault_password to unlock"), http.StatusServiceUnavailable)
+		return
+	}
+	if needsVault && h.Vault == nil {
+		http.Error(w, jsonErr("vault not available — cannot store API keys"), http.StatusServiceUnavailable)
+		return
 	}
 
 	// Store API keys in vault.

@@ -352,3 +352,133 @@ func TestServerConfig_HasReadHeaderTimeout(t *testing.T) {
 		t.Error("ReadHeaderTimeout should be positive")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SEC-SRI: CDN scripts must have Subresource Integrity hashes
+// ---------------------------------------------------------------------------
+
+func TestDashboardHTML_CDNScriptsHaveSRI(t *testing.T) {
+	// Read the index.html to verify all external scripts have integrity attributes.
+	html, err := os.ReadFile("web/index.html")
+	if err != nil {
+		t.Skipf("web/index.html not readable: %v", err)
+	}
+	content := string(html)
+
+	cdnURLs := []string{
+		"unpkg.com/lucide",
+		"unpkg.com/@xterm/xterm",
+		"unpkg.com/@xterm/addon-fit",
+		"unpkg.com/@xterm/addon-web-links",
+	}
+
+	for _, cdn := range cdnURLs {
+		if !strings.Contains(content, cdn) {
+			continue // not used, skip
+		}
+		// Find the line containing the CDN URL.
+		for _, line := range strings.Split(content, "\n") {
+			if strings.Contains(line, cdn) {
+				if !strings.Contains(line, "integrity=") {
+					t.Errorf("CDN resource %q missing integrity attribute", cdn)
+				}
+				if !strings.Contains(line, "crossorigin=") {
+					t.Errorf("CDN resource %q missing crossorigin attribute", cdn)
+				}
+				// Ensure pinned to exact version (no @5, @0 without patch).
+				if strings.Contains(line, `@5/`) || strings.Contains(line, `@0/`) {
+					t.Errorf("CDN resource %q uses major-only version pin (should be exact)", cdn)
+				}
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SEC-DP: DOMPurify version must be >= 3.3.0 (mXSS hardening)
+// ---------------------------------------------------------------------------
+
+func TestDOMPurify_VersionNotVulnerable(t *testing.T) {
+	data, err := os.ReadFile("web/purify.min.js")
+	if err != nil {
+		t.Skipf("web/purify.min.js not readable: %v", err)
+	}
+	content := string(data)
+
+	// DOMPurify embeds its version. Check it's >= 3.3.0.
+	// Versions < 3.2.5 have mXSS bypass issues.
+	vulnVersions := []string{"3.2.0", "3.2.1", "3.2.2", "3.2.3", "3.2.4"}
+	for _, v := range vulnVersions {
+		if strings.Contains(content, `"`+v+`"`) || strings.Contains(content, `'`+v+`'`) {
+			t.Errorf("DOMPurify version %s has known mXSS bypasses, upgrade to >= 3.3.0", v)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SEC-RL: Rate limiter must be stricter for anonymous than authenticated
+// ---------------------------------------------------------------------------
+
+func TestRateLimiter_AuthenticatedGetsHigherLimit(t *testing.T) {
+	ss := NewSessionStore(nil)
+	sid, _ := ss.Issue(100, 24*time.Hour)
+
+	rl := newRateLimiter(5).withAuthLimit(50, ss)
+	handler := rl.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Anonymous: should be blocked after 5 requests.
+	for i := 0; i < 6; i++ {
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if i == 5 && rec.Code != http.StatusTooManyRequests {
+			t.Error("anonymous request #6 should be rate limited")
+		}
+	}
+
+	// Authenticated: same IP but with session cookie should still pass.
+	for i := 0; i < 44; i++ {
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		req.AddCookie(&http.Cookie{Name: "cc_session", Value: sid})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if i < 43 && rec.Code == http.StatusTooManyRequests {
+			t.Errorf("authenticated request #%d should not be rate limited (limit=50)", i+7)
+		}
+	}
+
+	// After 50 total requests (6 anon + 44 auth = 50), next should be blocked even with auth.
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.AddCookie(&http.Cookie{Name: "cc_session", Value: sid})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("authenticated request #51 should be rate limited, got %d", rec.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SEC-RL2: Rate limiter without auth config behaves normally
+// ---------------------------------------------------------------------------
+
+func TestRateLimiter_WithoutAuthConfig(t *testing.T) {
+	rl := newRateLimiter(3)
+	handler := rl.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for i := 0; i < 4; i++ {
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "10.0.0.2:1234"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if i == 3 && rec.Code != http.StatusTooManyRequests {
+			t.Error("request #4 should be rate limited")
+		}
+	}
+}

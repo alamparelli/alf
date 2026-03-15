@@ -14,11 +14,13 @@ type OnProgress func(event StreamEvent)
 
 // Result holds the parsed output from a Claude invocation.
 type Result struct {
-	SessionID string
-	Text      string
-	Model     string
-	CostUSD   float64
-	NumTurns  int
+	SessionID    string
+	Text         string
+	Model        string
+	CostUSD      float64
+	NumTurns     int
+	InputTokens  int
+	OutputTokens int
 }
 
 // Params configures a Claude invocation.

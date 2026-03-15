@@ -524,13 +524,14 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		return nil
 	}
 
-	// Build system prompts with backend/channel-aware filtering.
+	// Build system prompts with backend/channel/weight-aware filtering.
 	isAPITier := tp.Backend != "" && tp.Backend != "cli"
 	backend := "cli"
 	if isAPITier {
 		backend = "api"
 	}
-	promptCfg := memory.PromptConfig{Backend: backend, Channel: "cc"}
+	ctxWeight := tp.EffectiveContextWeight()
+	promptCfg := memory.PromptConfig{Backend: backend, Channel: "cc", Weight: ctxWeight}
 	sysPromptTexts := memory.CollectPrompts(cs.ContextDir, promptCfg)
 	// Inject per-tier system prompt first so it has high priority.
 	if tp.SystemPrompt != "" {
@@ -544,8 +545,8 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {
 		sysPromptTexts = append(sysPromptTexts, recallBlock)
 	}
-	// Inject skill catalog so the model knows available skills.
-	if cs.SkillStore != nil {
+	// Inject skill catalog so the model knows available skills (skip for light tiers).
+	if ctxWeight != "light" && cs.SkillStore != nil {
 		if catalog := skills.BuildCatalog(cs.SkillStore); catalog != "" {
 			sysPromptTexts = append(sysPromptTexts, catalog)
 		}
@@ -557,12 +558,15 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			}
 		}
 	}
-	// Reaction instruction - CC doesn't use Telegram reactions but keeps the [[react:]] tag
-	// for emoji acknowledgment parsing by the daemon.
-	sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
-	// Tool reminder at end of context - model pays more attention to recent prompts.
-	if reminder := memory.ToolReminder(cs.ContextDir); reminder != "" {
-		sysPromptTexts = append(sysPromptTexts, reminder)
+	// Reaction instruction (skip for light tiers - they don't need the full format).
+	if ctxWeight != "light" {
+		sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
+	}
+	// Tool reminder at end of context (skip for light tiers).
+	if ctxWeight != "light" {
+		if reminder := memory.ToolReminder(cs.ContextDir); reminder != "" {
+			sysPromptTexts = append(sysPromptTexts, reminder)
+		}
 	}
 
 	// Inject session/conversation ID so the LLM can provide it when asked.
@@ -648,7 +652,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 				params.ConvMessages = ctxMsgs
 			} else {
 				// CLI without resume: inject as system prompt.
-				if histPrompt := conversation.FormatAsSystemPrompt(convMsgs); histPrompt != "" {
+				if histPrompt := conversation.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
 					params.SystemPrompts = append(params.SystemPrompts, histPrompt)
 				}
 			}
@@ -695,7 +699,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		// Inject conversation history since we lost --resume context.
 		if cs.ConvStore != nil {
 			convMsgs := conversation.BuildContext(cs.ConvStore.Recent(conversation.ChannelCC, 0), conversation.DefaultMaxMessages)
-			if histPrompt := conversation.FormatAsSystemPrompt(convMsgs); histPrompt != "" {
+			if histPrompt := conversation.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
 				params.SystemPrompts = append(params.SystemPrompts, histPrompt)
 			}
 		}
@@ -1104,6 +1108,7 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 				MaxIterations:        t.MaxIterations,
 				TimeoutMin:           t.TimeoutMin,
 				SystemPrompt:         t.SystemPrompt,
+				ContextWeight:        t.EffectiveContextWeight(),
 			}
 		}
 	}
@@ -1126,6 +1131,17 @@ type tierParams struct {
 	MaxIterations        int
 	TimeoutMin           int
 	SystemPrompt         string
+	ContextWeight        string
+}
+
+// EffectiveContextWeight returns the context weight, defaulting to "full".
+func (tp tierParams) EffectiveContextWeight() string {
+	switch tp.ContextWeight {
+	case "light", "standard", "full":
+		return tp.ContextWeight
+	default:
+		return "full"
+	}
 }
 
 // extractReactionTag parses [[react:EMOJI]] from the start of text.

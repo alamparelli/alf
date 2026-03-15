@@ -21,6 +21,7 @@
       "write_capable": false,
       "tools": ["*"],
       "effort": "low",
+      "context_weight": "light",
       "timeout_minutes": 10,
       "force_command": true,
       "backend": "openrouter"

@@ -145,6 +145,7 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, r
 				TimeoutMin:           t.TimeoutMin,
 				Backend:              backend,
 				SystemPrompt:         t.SystemPrompt,
+				ContextWeight:        t.EffectiveContextWeight(),
 			}
 		}
 	}

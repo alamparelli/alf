@@ -20,6 +20,17 @@ type tierParams struct {
 	TimeoutMin           int      // global timeout in minutes (0 = default)
 	Backend              string   // "cli" (default), or registered backend name
 	SystemPrompt         string   // extra system prompt for this tier
+	ContextWeight        string   // "light", "standard", "full" (default)
+}
+
+// EffectiveContextWeight returns the context weight, defaulting to "full".
+func (tp tierParams) EffectiveContextWeight() string {
+	switch tp.ContextWeight {
+	case "light", "standard", "full":
+		return tp.ContextWeight
+	default:
+		return "full"
+	}
 }
 
 type Update struct {

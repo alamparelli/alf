@@ -367,7 +367,9 @@ func main() {
 	// ONNX embedding engine (Go native, no Python sidecar).
 	modelDir := "/opt/alf/models/all-MiniLM-L6-v2"
 	var memDB *memstore.Store
-	if memstore.IsAvailable(modelDir) {
+	if !cfg.EffectiveMemoryEnabled() {
+		log.Println("memstore: disabled by config (memory_enabled=false)")
+	} else if memstore.IsAvailable(modelDir) {
 		embedder, err := memstore.NewEmbedder(modelDir)
 		if err != nil {
 			log.Printf("memstore: embedder disabled: %v", err)
@@ -378,7 +380,11 @@ func main() {
 				defer embedder.Stop()
 			}
 
-			memDB, err = memstore.New(filepath.Join(contextDir, "memory.db"), embedder)
+			dedupCfg := memstore.DedupConfig{
+				TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
+				CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
+			}
+			memDB, err = memstore.New(filepath.Join(contextDir, "memory.db"), embedder, dedupCfg)
 			if err != nil {
 				log.Printf("warning: memory store init failed: %v", err)
 			} else {
@@ -691,17 +697,28 @@ func main() {
 			}
 			return ""
 		}
-		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, 3*time.Hour, tiersTimeout, &extractorAdapter{prov: cliProvider, registry: registry}, extractorTierResolver)
-		sched.RegisterSystem("mem-extract", "Memory Extraction", "@every 3h", func() error {
+		extractInterval := time.Duration(cfg.EffectiveMemoryExtractInterval()) * time.Minute
+		extractTimeout := time.Duration(cfg.EffectiveMemoryExtractTimeout()) * time.Second
+		extractBootDelay := time.Duration(cfg.EffectiveMemoryExtractBootDelay()) * time.Second
+		extractMinMsg := cfg.EffectiveMemoryExtractMinMessages()
+
+		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, memstore.ExtractorConfig{
+			Interval:    extractInterval,
+			Timeout:     extractTimeout,
+			BootDelay:   extractBootDelay,
+			MinMessages: extractMinMsg,
+		}, &extractorAdapter{prov: cliProvider, registry: registry}, extractorTierResolver)
+		cronExpr := fmt.Sprintf("@every %dm", cfg.EffectiveMemoryExtractInterval())
+		sched.RegisterSystem("mem-extract", "Memory Extraction", cronExpr, func() error {
 			state := extractor.LoadState()
 			return extractor.RunOnce(state.LastRun)
 		})
 		// Run initial extraction after a delay (avoids competing with other
 		// startup processes for resources on constrained hosts).
 		go func() {
-			time.Sleep(10 * time.Minute)
+			time.Sleep(extractBootDelay)
 			state := extractor.LoadState()
-			if time.Since(state.LastRun) >= 3*time.Hour {
+			if time.Since(state.LastRun) >= extractInterval {
 				log.Println("memstore: running initial extraction (overdue)")
 				if err := extractor.RunOnce(state.LastRun); err != nil {
 					log.Printf("memstore: initial extraction failed: %v", err)
@@ -1741,7 +1758,8 @@ func main() {
 			if isAPITier {
 				backend = "api"
 			}
-			promptCfg := memory.PromptConfig{Backend: backend, Channel: "tg"}
+			tgCtxWeight := tp.EffectiveContextWeight()
+			promptCfg := memory.PromptConfig{Backend: backend, Channel: "tg", Weight: tgCtxWeight}
 			sysPromptTexts := memory.CollectPrompts(contextDir, promptCfg)
 			// Inject per-tier system prompt first so it has high priority.
 			if tp.SystemPrompt != "" {
@@ -1756,18 +1774,22 @@ func main() {
 			if preRecallBlock != "" {
 				sysPromptTexts = append(sysPromptTexts, preRecallBlock)
 			}
-			// Inject skill catalog so the model knows available skills.
-			if catalog := skills.BuildCatalog(skillStore); catalog != "" {
-				sysPromptTexts = append(sysPromptTexts, catalog)
-			}
-			// Inject all session-active skills (trigger-matched earlier + persisted from previous messages).
-			if activeSkills := chatSessions.GetSkills(chatID); len(activeSkills) > 0 {
-				if injection := skills.BuildInjectionByName(skillStore, activeSkills); injection != "" {
-					log.Printf("skills: session-active %v", activeSkills)
-					sysPromptTexts = append(sysPromptTexts, injection)
+			// Inject skill catalog and skills (skip for light tiers).
+			if tgCtxWeight != "light" {
+				if catalog := skills.BuildCatalog(skillStore); catalog != "" {
+					sysPromptTexts = append(sysPromptTexts, catalog)
+				}
+				if activeSkills := chatSessions.GetSkills(chatID); len(activeSkills) > 0 {
+					if injection := skills.BuildInjectionByName(skillStore, activeSkills); injection != "" {
+						log.Printf("skills: session-active %v", activeSkills)
+						sysPromptTexts = append(sysPromptTexts, injection)
+					}
 				}
 			}
-			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
+			// Reaction instruction (skip for light tiers).
+			if tgCtxWeight != "light" {
+				sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
+			}
 
 			// Documentation index - lets the model discover and read docs.
 			if _, err := os.Stat(filepath.Join(dataDir, "llms.txt")); err == nil {
@@ -1843,7 +1865,7 @@ func main() {
 					}
 					invokeParams.ConvMessages = ctxMsgs
 				} else {
-					if histPrompt := conversation.FormatAsSystemPrompt(tgConvMsgs); histPrompt != "" {
+					if histPrompt := conversation.FormatAsSystemPrompt(tgConvMsgs, tgCtxWeight); histPrompt != "" {
 						invokeParams.SystemPrompts = append(invokeParams.SystemPrompts, histPrompt)
 					}
 				}

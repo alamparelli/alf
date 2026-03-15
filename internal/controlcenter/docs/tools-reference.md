@@ -127,6 +127,33 @@ status "Analyzing code..."
 status "Running tests..."
 ```
 
+## Vault Tools
+
+### vault proxy
+
+Make authenticated API requests through the vault proxy. Credentials are injected server-side - ALF never sees the actual API keys.
+
+```bash
+vault proxy <service> <method> <path> [body]
+vault proxy github GET /user
+vault proxy slack POST /chat.postMessage '{"channel":"#general","text":"hello"}'
+```
+
+| Argument | Description |
+|----------|-------------|
+| `service` | Name of the vault service (registered in the Vault tab) |
+| `method` | HTTP method (GET, POST, PUT, DELETE, PATCH) |
+| `path` | API path (appended to the service's base URL) |
+| `body` | Optional JSON body for POST/PUT/PATCH requests |
+
+### vault list
+
+List all registered vault services.
+
+```bash
+vault list
+```
+
 ## Media Tools
 
 ### extract-video

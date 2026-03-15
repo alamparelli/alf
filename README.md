@@ -21,7 +21,7 @@ Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies
 ```
 Host machine                         Docker container
 ┌──────────────┐                     ┌──────────────────────────────────┐
-│  alf CLI     │  docker compose     │  alf-daemon (PID 1)              │
+│  alf CLI     │  docker compose     │  alf-daemon (PID 1, uid 1000)    │
 │              │ ──────────────────► │                                  │
 │  init/start/ │                     │  ┌──────────┐ ┌──────────────┐   │
 │  stop/upgrade│                     │  │Telegram  │ │Control Center│   │
@@ -29,13 +29,19 @@ Host machine                         Docker container
 │              │                     │  └────┬─────┘ └──────┬───────┘   │
 │              │                     │       ▼              ▼           │
 │              │                     │  ┌──────────┐  ┌──────────┐      │
-│              │                     │  │Claude    │  │ Whisper  │      │
-│              │                     │  │(uid 1000)│  │ (python) │      │
+│              │                     │  │Claude    │  │vault-srv │      │
+│              │                     │  │(uid 1001)│  │ (secrets)│      │
 │              │                     │  └──────────┘  └──────────┘      │
 └──────────────┘                     └──────────────────────────────────┘
+
+                                     Separate container (optional)
+                                     ┌──────────────────────────────────┐
+                                     │  whisper-service (voice)          │
+                                     │  faster-whisper + FastAPI          │
+                                     └──────────────────────────────────┘
 ```
 
-**Host CLI** (`alf`) manages the container lifecycle. **Daemon** runs inside Docker, polling Telegram for messages and serving the Control Center web UI on port 8080.
+**Host CLI** (`alf`) manages the container lifecycle. **Daemon** runs inside Docker as uid 1000, polling Telegram for messages and serving the Control Center web UI on port 8080. Claude subprocesses run as uid 1001 with restricted permissions. Voice transcription runs in a separate `whisper-service` container.
 
 Messages flow through a **router** that classifies intent and selects a response tier. Each tier defines which Claude model to use, what tools are available, and whether write access is granted. Simple messages get instant responses from the classifier itself. Complex requests spawn a full Claude session with the appropriate capabilities.
 
@@ -70,9 +76,11 @@ The interactive wizard walks you through:
 1. Choosing an install directory
 2. Configuring Telegram credentials
 3. Setting up dashboard access (HTTP or HTTPS with Let's Encrypt)
-4. Selecting a JavaScript runtime (Node.js, Deno, Bun, or none)
+4. Selecting a container runtime (standard Docker or gVisor for sandboxing)
 5. Starting the container
 6. Authenticating Claude
+
+After the container is running, the Control Center **Setup Wizard** guides you through backend selection (Claude CLI, OpenRouter, OpenAI, Ollama), tier presets, and optional Telegram configuration - all from the browser.
 
 ### After setup
 
@@ -116,6 +124,10 @@ Define response tiers with different capabilities:
 
 The LLM classifier reads your message and picks the right tier. Greetings get instant haiku responses. Complex tasks get multi-turn opus sessions with full tool access.
 
+### Multi-backend support
+
+ALF isn't limited to Claude. Connect OpenRouter (200+ models), OpenAI (GPT-4), Ollama (local models), or any OpenAI-compatible API. Mix backends in the same tier configuration - route simple messages to a free model and complex tasks to Claude. Conversation context flows seamlessly across backend switches.
+
 ### Voice transcription
 
 Send a voice message on Telegram. ALF transcribes it via the whisper-service container and processes the text as a regular message. The whisper-service runs faster-whisper and is deployed as a separate Docker container, keeping the main ALF image lean.
@@ -152,23 +164,40 @@ Configurable per-job timeouts. Execution logs recorded for every run. Daily dige
 
 Web dashboard at port 8080 with sidebar navigation:
 
-- **Chat** - web-based chat with SSE streaming, media upload, reactions
+- **Chat** - web-based chat with SSE streaming, media upload, reactions, multiple conversation tabs, markdown rendering
 - **Home** - workspace file explorer, teach (memory ingestion), admin actions
 - **Terminal** - interactive shell session inside the container
-- **Tasks** - monitor and launch agent tasks (orchestrator workflows)
-- **Schedules** - create, edit, and monitor scheduled jobs with execution logs
+- **Tasks** - monitor and launch agent tasks, approve/reject, delete completed tasks
+- **Schedules** - create, edit, and monitor scheduled jobs with execution logs and filters
 - **Logs** - daemon logs with search and session-based filtering
 - **Tiers** - configure response tiers in real-time
-- **Firewall** - network firewall rules for outbound access
+- **Firewall** - network firewall rules for outbound access (log-only or enforce mode)
 - **Vault** - secrets vault with OAuth2 browser flow, file storage, service credentials
+- **Settings** - configuration editor, Telegram setup, backend registration
 - **Docs** - built-in documentation
-- **Apps** - self-contained apps generated by ALF, auto-discovered in the sidebar
+- **Apps** - self-contained apps generated by ALF with optional background services, auto-discovered in the sidebar
 
-Authentication via Telegram magic link (`/login` command) with session cookies. Issuing a new magic link revokes all previous sessions. IP ban after repeated auth failures (configurable threshold and duration).
+Supports dark/light themes (default, catppuccin, sage) and a mobile-first responsive layout with bottom navigation bar. Authentication via Telegram magic link (`/login` command) or bearer token with session cookies. Issuing a new magic link revokes all previous sessions. IP ban after repeated auth failures (configurable threshold and duration).
+
+### Conversation engine
+
+A unified conversation store captures rich message history (text, tool calls, tool results, thinking blocks) in a JSONL ring buffer. Context is preserved across backend switches - switching from a CLI tier to an API tier mid-conversation carries history forward automatically.
+
+### Force commands & session locking
+
+Tiers with `force_command: true` can be invoked directly (e.g., `/opus analyze this`). The session locks to that tier for all subsequent messages until `/new` or session timeout. You can also lock without sending a message (`/opus` alone).
+
+### Reaction-based learning
+
+Emoji reactions on messages (positive or negative) trigger behavioral learning. Negative reactions prompt ALF to ask what went wrong and extract learnings. Positive reactions reinforce good behaviors.
+
+### App framework
+
+ALF can generate self-contained web apps in `data/apps/`. Each app gets a sidebar entry, CSP-sandboxed serving, and optional background services supervised by the daemon (auto-restart on crash, exponential backoff).
 
 ### Onboarding
 
-First-time users get an automatic onboarding prompt injected into their first conversation. The `/start` Telegram command re-triggers it. Re-running `alf init` pre-fills previous configuration values (install dir, port, timezone) from a saved setup profile.
+First-time users get an automatic onboarding prompt injected into their first conversation. The `/start` Telegram command re-triggers it. The Control Center Setup Wizard guides backend and tier configuration from the browser.
 
 ### Daily mood
 
@@ -177,13 +206,13 @@ ALF has a rotating personality layer - 16 moods (sharp, philosophical, sardonic,
 ## CLI reference
 
 ```
-alf init          Interactive setup wizard
+alf init          Interactive setup wizard (gVisor install, Docker setup, secrets)
 alf start         Start the container
 alf stop          Stop the container
 alf restart       Restart the container
-alf upgrade       Pull latest image and restart
+alf upgrade       Pull latest image and restart (update alias works too)
 alf login         Authenticate Claude inside the container
-alf status        Show container status
+alf status        Show container status and versions
 alf logs          Tail container logs
 alf secret        Manage secrets (list, set, remove)
 alf magic-link    Generate a Control Center login link
@@ -198,7 +227,7 @@ alf version       Print version
 
 ```
 cmd/
-  alf/             Host CLI (init, start, stop, upgrade, login)
+  alf/             Host CLI (init, start, stop, upgrade, login, secret, compose)
   alf-daemon/      Container daemon (Telegram bot + Control Center + Claude management)
   extract-video/   System tool: video frame extraction + audio transcription
   memory-tools/    System tool: recall, remember, forget (semantic memory)
@@ -207,38 +236,46 @@ cmd/
 
 internal/
   agents/          Multi-agent orchestrator, team config store, session isolation
-  cli/             CLI command implementations + embedded templates
-  controlcenter/   HTTP server, auth, config CRUD, chat API, workspace, pages, teach
-  provider/        Provider/Classifier interfaces + Claude CLI implementations
+  cli/             CLI command implementations + embedded templates + bundled skills
+  controlcenter/   HTTP server, auth, config CRUD, chat API, workspace, setup wizard, docs
+  conversation/    Unified conversation store (JSONL ring buffer, ContentBlocks, cross-backend)
+  provider/        Provider/Classifier interfaces + CLI + API implementations
   router/          LLM-based message classification + tier routing
   memstore/        Semantic memory (SQLite + sqlite-vec + FTS5 + ONNX embedder)
   media/           Download, MIME detection, frame extraction, contact sheets, PDF parsing
   voice/           HTTP client for whisper-service transcription container
   scheduler/       Cron-based job scheduling with timezone support + execution logging
+  supervisor/      App background service supervisor (restart policies, exponential backoff)
   vault/           Vault-proxy subprocess management + master password persistence
-  mood/            Daily mood rotation + live feedback
-  session/         Claude session persistence (resume IDs)
+  firewall/        Outbound HTTP/HTTPS traffic filtering proxy
+  tooling/         Tool registry (native + user-defined) + subprocess executor
+  skills/          Skill loader, trigger matching, catalog builder
+  mood/            Daily mood rotation + live feedback + reaction learning
+  session/         Claude session persistence (resume IDs, forced tier locking)
   telegram/        Telegram Bot API client + Markdown→HTML
   memory/          System prompt assembly (embedded core + soul, mood, context, onboarding)
   signal/          Unix-socket server for Claude→Telegram message delivery
   gittrack/        Git versioning for data directory
   eventlog/        JSONL event logging with daily rotation
   updater/         GHCR image update checker
+  secrets/         Docker secrets reader
 ```
 
 ## Security model
 
-The entrypoint runs as root for package installation and permission setup, then drops to uid 1000 (alf) with zero capabilities via `setpriv`:
+The entrypoint runs as root for package installation and permission setup, then drops to uid 1000 (`alf`) with zero capabilities via `setpriv`. Claude subprocesses run as uid 1001 (`claude`) with further restrictions:
 
-- `/opt/alf/config.d/` - read-only for Claude
-- `/opt/alf/tools.d/` - read + execute only
-- `/home/alf/data/` - read + write (group-writable via umask)
-- Secrets via Docker secrets mechanism, never in environment variables
-- Security headers (HSTS, X-Frame-Options DENY, CSP, X-Content-Type-Options nosniff)
-- Rate limiting (60 req/min global, 5 req/min on auth) + CORS on the Control Center API
-- Auth via magic link (time-limited, rotating) with session cookies
-- Session revocation - new magic link invalidates all previous sessions
-- IP ban after repeated auth failures (configurable threshold and duration)
+- **User separation** - daemon runs as `alf` (uid 1000), Claude runs as `claude` (uid 1001) with sanitized environment (allowlist-only)
+- **Filesystem isolation** - `/opt/alf/config.d/` read-only, `/opt/alf/tools.d/` read+execute only, `/home/alf/data/` read+write
+- **gVisor support** - optional container runtime sandboxing via `runsc` (installed by `alf init`)
+- **Secrets** - Docker secrets mechanism, never in environment variables
+- **Security headers** - HSTS, X-Frame-Options DENY, CSP with SRI on CDN dependencies, X-Content-Type-Options nosniff
+- **Rate limiting** - 60 req/min global (120 for authenticated users), 5 req/min on auth, CORS on the Control Center API
+- **Authentication** - magic link (time-limited, rotating) or bearer token with session cookies
+- **Session revocation** - new magic link invalidates all previous sessions
+- **IP ban** - after repeated auth failures (configurable threshold and duration)
+- **SSRF protection** - vault-proxy blocks requests to private/link-local IP ranges with DNS-level validation
+- **Outbound firewall** - HTTP/HTTPS proxy with allow/deny rules per domain
 
 ## Requirements
 

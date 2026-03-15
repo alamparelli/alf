@@ -239,6 +239,19 @@ func (s *Store) GetSkills(chatID int64) []string {
 	return e.ActiveSkills
 }
 
+// ClearSkills removes all active skills from the session without archiving it.
+func (s *Store) ClearSkills(chatID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.entries[chatID]
+	if !ok {
+		return
+	}
+	e.ActiveSkills = nil
+	s.persist()
+}
+
 // SetForcedTier sets a persistent tier override for the session.
 // The override is cleared by Archive (i.e. /new) or session timeout.
 func (s *Store) SetForcedTier(chatID int64, tier string) {

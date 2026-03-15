@@ -87,6 +87,24 @@ func (h *ChatConversationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	methodNotAllowed(w)
 }
 
+// ChatSkillsHandler handles GET /api/chat/skills (list) and DELETE /api/chat/skills (clear).
+type ChatSkillsHandler struct {
+	Service *ChatService
+}
+
+func (h *ChatSkillsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		skills := h.Service.ActiveSkills()
+		respondJSON(w, http.StatusOK, map[string]any{"skills": skills})
+	case http.MethodDelete:
+		h.Service.ClearActiveSkills()
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
 // ChatJobHandler handles GET /api/chat/job (status + reconnect) and DELETE (cancel).
 type ChatJobHandler struct {
 	Service *ChatService

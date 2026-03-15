@@ -468,6 +468,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			TimeoutMin:           tp.TimeoutMin,
 			SkillPrompts:         skillInjections,
 			MemoryContext:        memory.CollectAgentContext(cs.ContextDir),
+			Source:               "router",
 		}, onProgress)
 		if orchErr != nil {
 			return fmt.Errorf("agent: %w", orchErr)

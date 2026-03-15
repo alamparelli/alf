@@ -3890,6 +3890,7 @@ function taskCard(task, isRunning) {
       '<div class="task-detail-row"><span class="task-detail-label"><i data-lucide="coins" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Cost</span><span class="task-detail-value">' + cost + '</span></div>' +
       '<div class="task-detail-row"><span class="task-detail-label"><i data-lucide="repeat" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Iterations</span><span class="task-detail-value">' + (task.iterations || 0) + '</span></div>' +
       (agentCount > 0 ? '<div class="task-detail-row"><span class="task-detail-label"><i data-lucide="users" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Agents</span><span class="task-detail-value">' + agentCount + '</span></div>' : '') +
+      (task.source ? '<div class="task-detail-row"><span class="task-detail-label"><i data-lucide="zap" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Source</span><span class="task-detail-value">' + taskEscapeHtml(task.source) + (task.team ? ' / ' + taskEscapeHtml(task.team) : '') + '</span></div>' : '') +
     '</div>' +
     fullPrompt +
     planSection +

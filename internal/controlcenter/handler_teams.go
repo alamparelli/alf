@@ -1,6 +1,8 @@
 package controlcenter
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -65,20 +67,54 @@ func (h *TeamsHandler) save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize filename: only allow alphanumeric, hyphens, underscores.
-	safeName := sanitizeTeamName(tc.Name)
-	if safeName == "" {
-		http.Error(w, jsonErr("invalid team name"), http.StatusBadRequest)
-		return
-	}
-
 	dir := h.agentsDir()
 	os.MkdirAll(dir, 0o755)
+
+	// Generate ID for new teams; existing teams keep their ID.
+	if tc.ID == "" {
+		b := make([]byte, 8)
+		rand.Read(b)
+		tc.ID = hex.EncodeToString(b)
+	}
+
+	// Use ID as filename for stable storage (supports rename).
+	filename := tc.ID + ".json"
+
+	// Clean up old name-based file if it exists and differs from ID-based file.
+	// This handles migration from name-based to ID-based storage.
+	safeName := sanitizeTeamName(tc.Name)
+	if safeName != "" {
+		oldPath := filepath.Join(dir, safeName+".json")
+		newPath := filepath.Join(dir, filename)
+		if oldPath != newPath {
+			// Check if old name-based file exists.
+			if _, err := os.Stat(oldPath); err == nil {
+				os.Remove(oldPath)
+			}
+		}
+	}
+
+	// Also clean up any other file with the same ID (different old name).
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.Name() == filename {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var existing agents.TeamConfig
+		if json.Unmarshal(data, &existing) == nil && existing.ID == tc.ID {
+			os.Remove(path) // remove old file with same ID but different name
+		}
+	}
 
 	// Pretty-print the JSON before saving.
 	pretty, _ := json.MarshalIndent(tc, "", "  ")
 
-	dest := filepath.Join(dir, safeName+".json")
+	dest := filepath.Join(dir, filename)
 	if err := os.WriteFile(dest, pretty, 0o644); err != nil {
 		http.Error(w, jsonErr("write failed: "+err.Error()), http.StatusInternalServerError)
 		return
@@ -92,29 +128,63 @@ func (h *TeamsHandler) save(w http.ResponseWriter, r *http.Request) {
 		h.Notifier.Notify(ReloadAgents)
 	}
 
-	json.NewEncoder(w).Encode(map[string]any{"ok": true, "file": safeName + ".json"})
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "id": tc.ID, "file": filename})
 }
 
 func (h *TeamsHandler) del(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
-	if name == "" {
-		http.Error(w, jsonErr("missing name parameter"), http.StatusBadRequest)
+	id := r.URL.Query().Get("id")
+	if name == "" && id == "" {
+		http.Error(w, jsonErr("missing name or id parameter"), http.StatusBadRequest)
 		return
 	}
 
-	safeName := sanitizeTeamName(name)
-	if safeName == "" {
-		http.Error(w, jsonErr("invalid team name"), http.StatusBadRequest)
-		return
-	}
+	dir := h.agentsDir()
+	var removed bool
 
-	dest := filepath.Join(h.agentsDir(), safeName+".json")
-	if err := os.Remove(dest); err != nil {
-		if os.IsNotExist(err) {
-			http.Error(w, jsonErr("team not found"), http.StatusNotFound)
-		} else {
-			http.Error(w, jsonErr("delete failed: "+err.Error()), http.StatusInternalServerError)
+	// Try ID-based file first.
+	if id != "" {
+		dest := filepath.Join(dir, id+".json")
+		if err := os.Remove(dest); err == nil {
+			removed = true
 		}
+	}
+
+	// Fall back to name-based file.
+	if !removed && name != "" {
+		safeName := sanitizeTeamName(name)
+		if safeName == "" {
+			http.Error(w, jsonErr("invalid team name"), http.StatusBadRequest)
+			return
+		}
+		dest := filepath.Join(dir, safeName+".json")
+		if err := os.Remove(dest); err == nil {
+			removed = true
+		}
+	}
+
+	// Last resort: scan for matching ID or name in files.
+	if !removed {
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			path := filepath.Join(dir, e.Name())
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			var tc agents.TeamConfig
+			if json.Unmarshal(data, &tc) == nil {
+				if (id != "" && tc.ID == id) || (name != "" && tc.Name == name) {
+					os.Remove(path)
+					removed = true
+					break
+				}
+			}
+		}
+	}
+
+	if !removed {
+		http.Error(w, jsonErr("team not found"), http.StatusNotFound)
 		return
 	}
 

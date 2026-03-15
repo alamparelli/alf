@@ -90,6 +90,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 	rc.SkillPrompts = skillInjections
 	rc.MemoryContext = memory.CollectAgentContext(h.ContextDir)
 	rc.NeedValidation = req.NeedValidation
+	rc.Source = "chat"
 
 	// Fire and forget - task is tracked by orchestrator.running map.
 	go func() {

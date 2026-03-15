@@ -58,8 +58,19 @@ func TestTeams_SaveAndList(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// Verify file was created.
-	data, err := os.ReadFile(filepath.Join(agentsDir, "test-team.json"))
+	// Extract generated ID from response.
+	var resp struct {
+		OK   bool   `json:"ok"`
+		ID   string `json:"id"`
+		File string `json:"file"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.ID == "" {
+		t.Fatal("expected non-empty id in response")
+	}
+
+	// Verify file was created using ID-based filename.
+	data, err := os.ReadFile(filepath.Join(agentsDir, resp.File))
 	if err != nil {
 		t.Fatalf("team file not created: %v", err)
 	}

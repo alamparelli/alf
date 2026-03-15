@@ -4,6 +4,7 @@ import "time"
 
 // TeamConfig defines a group of specialized agents.
 type TeamConfig struct {
+	ID                  string        `json:"id,omitempty"`
 	Name                string        `json:"name"`
 	Description         string        `json:"description"`
 	OrchestratorPrompt  string        `json:"orchestrator_prompt,omitempty"`
@@ -94,6 +95,8 @@ type RunConfig struct {
 	SkillPrompts         []string // skill prompts injected into every sub-agent
 	MemoryContext        []string // memory/context prompts injected into every sub-agent
 	NeedValidation       bool     // if true, block after plan output and wait for user approval
+	Source               string   // how the task was triggered: "router", "chat", "schedule", "telegram"
+	Team                 string   // team name if launched via a specific team
 }
 
 // TaskMeta tracks the lifecycle of an orchestration run.
@@ -110,4 +113,6 @@ type TaskMeta struct {
 	Plan               []PlanStep    `json:"plan,omitempty"`
 	NeedValidation     bool          `json:"need_validation,omitempty"`
 	ValidationFeedback string        `json:"validation_feedback,omitempty"`
+	Source             string        `json:"source,omitempty"` // "router", "chat", "schedule", "telegram" — how this task was triggered
+	Team               string        `json:"team,omitempty"`   // team name if launched via a specific team
 }

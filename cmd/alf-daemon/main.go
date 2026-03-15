@@ -485,15 +485,16 @@ func main() {
 	}
 
 	// classifyMessageFull includes session context for continuity routing.
-	classifyMessageFull := func(message string, tiers *cc.TiersConfig, lastTier string, msgCount int) router.Result {
+	classifyMessageFull := func(message string, tiers *cc.TiersConfig, lastTier string, msgCount int, recentContext string) router.Result {
 		prompt := router.BuildClassifyPrompt(router.ClassifyInput{
-			Message:      message,
-			Tiers:        tiers,
-			DataDir:      dataDir,
-			ConfigDir:    configDir,
-			AgentTeams:   agentTeamsForRouter(),
-			LastTier:     lastTier,
-			MessageCount: msgCount,
+			Message:       message,
+			Tiers:         tiers,
+			DataDir:       dataDir,
+			ConfigDir:     configDir,
+			AgentTeams:    agentTeamsForRouter(),
+			LastTier:      lastTier,
+			MessageCount:  msgCount,
+			RecentContext: recentContext,
 		})
 		routerProv := registry.ForBackend(routerBackend)
 		params := provider.Params{
@@ -511,14 +512,11 @@ func main() {
 		return router.InterpretRaw(result.Text, tiers, message)
 	}
 
-	// classifyMessage wraps classifyMessageFull without session context.
-	classifyMessage := func(message string, tiers *cc.TiersConfig) router.Result {
-		return classifyMessageFull(message, tiers, "", 0)
-	}
-
 	// Chat service for mobile app API (shares Claude invocation with Telegram bot).
 	classifyFn := func(message, lastTier string, msgCount int) cc.RouteResult {
-		rr := classifyMessageFull(message, tierStore.Current(), lastTier, msgCount)
+		// Build recent context from conversation history (cross-session for continuity).
+		recentCtx := conversation.BuildRouterContext(convStore.RecentAll(6), 3)
+		rr := classifyMessageFull(message, tierStore.Current(), lastTier, msgCount, recentCtx)
 		return cc.RouteResult{
 			Tier:     rr.Tier,
 			Response: rr.Response,
@@ -1402,6 +1400,10 @@ func main() {
 			var tp tierParams
 			var routeResult router.Result
 
+			// Build conversation context for router (last 3 exchanges, cross-session).
+			lastTier, msgCount := chatSessions.Context(chatID)
+			recentCtx := conversation.BuildRouterContext(convStore.RecentAll(6), 3)
+
 			// Force command bypasses routing entirely.
 			if forcedTierName != "" {
 				routingAnim.Stop()
@@ -1412,7 +1414,7 @@ func main() {
 				// If caption present, classify to pick the right tier then
 				// ensure it can view images; otherwise cheapest with Read.
 				if routerMsg != "" {
-					routeResult = classifyMessage(routerMsg, tierStore.Current())
+					routeResult = classifyMessageFull(routerMsg, tierStore.Current(), lastTier, msgCount, recentCtx)
 					log.Printf("→ media+caption: router chose tier=%q reason=%q", routeResult.Tier, routeResult.Reason)
 
 					needsUpgrade := false
@@ -1438,7 +1440,7 @@ func main() {
 				}
 				routingAnim.Stop()
 			} else {
-				routeResult = classifyMessage(routerMsg, tierStore.Current())
+				routeResult = classifyMessageFull(routerMsg, tierStore.Current(), lastTier, msgCount, recentCtx)
 			}
 
 			// Router answered directly - no second LLM call needed.
@@ -1451,7 +1453,7 @@ func main() {
 			if isReply && forcedTierName == "" && routeResult.Response != "" && routeResult.Tier == "" {
 				originalResult := routeResult
 				replyHint := msgWithReplyContext + "\n[CONTEXT: This is a reply to a previous assistant message. Route to an appropriate tier - do not respond directly.]"
-				reclassified := classifyMessage(replyHint, tierStore.Current())
+				reclassified := classifyMessageFull(replyHint, tierStore.Current(), lastTier, msgCount, recentCtx)
 				if reclassified.Tier != "" {
 					routeResult = reclassified
 					routeResult.Reason = "reply-reclassify: " + reclassified.Reason

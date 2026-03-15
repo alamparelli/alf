@@ -98,6 +98,7 @@ Here's what a `tiers.json` file looks like:
 | `description` | Optional longer description. Falls back to `router_label` if not set. Used in router prompt. | `"Deep code analysis"` |
 | `write_capable` | Can this tier create, edit, or delete files? | `false` |
 | `effort` | How hard the model thinks: `low`, `medium`, or `high`. **CLI tiers only** - this maps to Claude's `--effort` flag. Ignored for API/OpenRouter backends (most API models don't support effort control). | `"medium"` |
+| `context_weight` | Controls how much system context is injected into the prompt: `"light"`, `"standard"`, or `"full"`. See [Context weight](#context-weight) below. Default: `"full"`. | `"light"` |
 | `force_command` | Enable `/<tier_name> <message>` to bypass routing and lock the session to this tier. The override persists until `/new` or session timeout. Works in Telegram and CC Chat. | `true` |
 | `max_turns` | Maximum number of actions ALF can take in one response (reading files, running commands, etc.). Keeps things from running too long. 0 = no limit. | `10` |
 | `max_iterations` | (Agent only) Max delegate→synthesize cycles. | `10` |
@@ -259,6 +260,32 @@ The description is critical - it's the only context the API model has to decide 
 - **Capable model, full access:** `["*"]`
 - **Read-only analysis (CLI):** `["Read", "Glob", "Grep"]`
 - **Specific tools only:** `["bash", "read_file", "remember"]`
+
+## Context weight
+
+The `context_weight` field controls how much system prompt content is injected for a tier. Lighter models (Haiku, GPT-4o-mini, small Grok variants) perform better with less noise in the context — they focus on the conversation instead of drowning in instructions.
+
+| Weight | What's injected | What's skipped | Best for |
+|--------|----------------|----------------|----------|
+| `"light"` | Identity, filesystem basics, secrets rule, soul.md, mood.md, index.md | Toolbox, skill catalog, storage/lookup protocols, memory tools, tool reminder, reaction format, tool_use/result in conversation history | Fast/cheap models handling simple tasks |
+| `"standard"` | Everything except `@weight full` tagged sections | Only sections explicitly tagged for full weight | Mid-range models |
+| `"full"` (default) | Everything | Nothing | Capable models (Sonnet, Opus, GPT-4) |
+
+**How it affects the router:** The router sees which tiers are light and labels them as "light model — simple tasks only" in its classification prompt. It also has a programmatic guardrail: if a message shows complexity markers (question words like "why"/"how", length > 150 chars, multiple questions), it automatically upgrades from a light tier to the next one.
+
+**Example - Haiku as a light tier:**
+```json
+{
+  "name": "haiku",
+  "model": "haiku",
+  "context_weight": "light",
+  "effort": "low"
+}
+```
+
+> **Tip:** Set `context_weight` to `"light"` on any tier using a small/cheap model. The reduction from ~4500 to ~2000 system tokens noticeably improves coherence on the last 5-10 messages.
+
+---
 
 ## Common questions
 

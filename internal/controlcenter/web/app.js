@@ -3734,15 +3734,26 @@ let tasksStepExpandedSet = new Set();
 // Track whether completed section is collapsed (default: collapsed).
 let tasksCompletedVisible = false;
 
+// Last JSON snapshot to detect actual changes.
+let tasksLastJSON = '';
+
 function tasksRender(running, completed) {
   const container = document.getElementById('tasksList');
 
-  // Save focus/scroll state before rebuild.
+  // Skip rebuild if a textarea inside the tasks pane has focus (user is typing).
   const tasksPane = document.getElementById('tasksRunsPane');
-  const savedScrollTop = tasksPane ? tasksPane.scrollTop : 0;
   const activeEl = document.activeElement;
-  const savedActiveId = activeEl ? activeEl.id : null;
-  const savedActiveValue = activeEl && activeEl.tagName === 'TEXTAREA' ? activeEl.value : null;
+  if (activeEl && activeEl.tagName === 'TEXTAREA' && tasksPane && tasksPane.contains(activeEl)) {
+    return;
+  }
+
+  // Skip rebuild if nothing changed (avoids flicker and scroll jumps).
+  const snapshot = JSON.stringify({ r: running, c: completed });
+  if (snapshot === tasksLastJSON) return;
+  tasksLastJSON = snapshot;
+
+  // Save scroll state before rebuild.
+  const savedScrollTop = tasksPane ? tasksPane.scrollTop : 0;
 
   if (running.length === 0 && completed.length === 0) {
     container.innerHTML = '<div class="task-empty"><i data-lucide="bot" style="width:40px;height:40px;opacity:0.3;margin-bottom:8px"></i><br>No agent tasks yet.<br><span style="font-size:0.8rem;opacity:0.7">Tasks appear here when you use the agent tier.</span></div>';
@@ -3797,7 +3808,12 @@ function tasksRender(running, completed) {
   });
 
   container.querySelectorAll('.task-relaunch-btn').forEach(btn => {
-    btn.onclick = (e) => { e.stopPropagation(); tasksRelaunch(btn.dataset.prompt); };
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const status = btn.dataset.status || '';
+      const hint = (status === 'timeout' || status === 'failed') ? '\n\n[Note: previous attempt ' + status + '. ' : '';
+      agentModalShow(btn.dataset.prompt, hint);
+    };
   });
 
   container.querySelectorAll('.task-delete-btn').forEach(btn => {
@@ -3858,15 +3874,8 @@ function tasksRender(running, completed) {
 
   lucide.createIcons({ attrs: { class: ['lucide'] }, nameAttr: 'data-lucide' });
 
-  // Restore focus/scroll state after rebuild.
+  // Restore scroll position after rebuild.
   if (tasksPane) tasksPane.scrollTop = savedScrollTop;
-  if (savedActiveId) {
-    const el = document.getElementById(savedActiveId);
-    if (el) {
-      el.focus();
-      if (savedActiveValue !== null && el.tagName === 'TEXTAREA') el.value = savedActiveValue;
-    }
-  }
 }
 
 function taskRenderMd(text) {
@@ -3890,10 +3899,10 @@ function taskCard(task, isRunning) {
   const agentCount = (task.agent_calls && task.agent_calls.length) || 0;
   const shortId = task.id ? task.id.substring(0, 8) : '--';
 
-  // Full request section.
-  const fullPrompt = task.prompt ? '<div class="task-section"><div class="task-section-title"><i data-lucide="message-square" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Request</div><div class="task-section-body task-md">' + taskRenderMd(task.prompt) + '</div></div>' : '';
+  // Full request section (collapsible).
+  const fullPrompt = task.prompt ? '<div class="task-section"><details><summary class="task-section-title"><i data-lucide="message-square" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Request</summary><div class="task-section-body task-md">' + taskRenderMd(task.prompt) + '</div></details></div>' : '';
 
-  // Plan section.
+  // Plan section (collapsible).
   let planSection = '';
   if (task.plan && task.plan.length > 0) {
     let planSteps = '';
@@ -3903,7 +3912,7 @@ function taskCard(task, isRunning) {
         : '';
       planSteps += '<div class="task-plan-step"><span class="step-num">' + step.step + '.</span><span>' + taskRenderMd(step.description) + agentList + '</span></div>';
     });
-    planSection = '<div class="task-section"><div class="task-section-title"><i data-lucide="list-ordered" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Plan</div><div class="task-plan">' + planSteps + '</div></div>';
+    planSection = '<div class="task-section"><details><summary class="task-section-title"><i data-lucide="list-ordered" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Plan (' + task.plan.length + ' steps)</summary><div class="task-plan">' + planSteps + '</div></details></div>';
   }
 
   // Approval / arbitration section.
@@ -3975,7 +3984,7 @@ function taskCard(task, isRunning) {
     ? '<button class="btn-sm btn-danger task-cancel-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="square" style="width:12px;height:12px;vertical-align:middle;margin-right:2px"></i>Cancel</button>'
     : '';
   const relaunchBtn = !isRunning && task.prompt
-    ? '<button class="btn-sm task-relaunch-btn" data-prompt="' + taskEscapeHtml(task.prompt).replace(/"/g, '&quot;') + '"><i data-lucide="rotate-cw" style="width:12px;height:12px;vertical-align:middle;margin-right:2px"></i>Relaunch</button>'
+    ? '<button class="btn-sm task-relaunch-btn" data-prompt="' + taskEscapeHtml(task.prompt).replace(/"/g, '&quot;') + '" data-status="' + taskEscapeHtml(task.status) + '"><i data-lucide="rotate-cw" style="width:12px;height:12px;vertical-align:middle;margin-right:2px"></i>Relaunch</button>'
     : '';
   const deleteBtn = !isRunning
     ? '<button class="btn-sm btn-danger task-delete-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="trash-2" style="width:12px;height:12px;vertical-align:middle;margin-right:2px"></i></button>'
@@ -4039,24 +4048,6 @@ async function tasksDelete(id) {
   }
 }
 
-async function tasksRelaunch(prompt) {
-  try {
-    const res = await fetch('/api/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: prompt }),
-    });
-    if (res.ok) {
-      toast('Task relaunched');
-      setTimeout(() => tasksFetch(), 1000);
-    } else {
-      toast('Relaunch failed', 'error');
-    }
-  } catch (e) {
-    toast('Relaunch failed: ' + e.message, 'error');
-  }
-}
-
 async function tasksApprove(id, approved, feedback) {
   try {
     const res = await fetch('/api/tasks/approve', {
@@ -4080,9 +4071,11 @@ function taskEscapeHtml(s) {
 }
 
 // --- Agent Send Modal ---
-async function agentModalShow(prompt) {
+async function agentModalShow(prompt, hint) {
   const modal = document.getElementById('agentModal');
-  document.getElementById('agentModalPrompt').value = prompt;
+  const textarea = document.getElementById('agentModalPrompt');
+  textarea.value = prompt + (hint || '');
+  textarea.readOnly = false;
   document.getElementById('agentModalValidation').checked = false;
   // Load teams into dropdown.
   const sel = document.getElementById('agentModalTeam');

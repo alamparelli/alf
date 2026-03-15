@@ -13,20 +13,23 @@ import (
 
 // Embedder manages ONNX Runtime inference for semantic embeddings.
 // The model is loaded once and kept in memory for fast embedding generation.
+// For E5 models, text is prefixed with "passage: " (storage) or "query: " (search).
 type Embedder struct {
-	mu        sync.Mutex
-	modelDir  string
-	dims      int
-	maxLen    int
-	tokenizer *Tokenizer
-	session   *ort.DynamicAdvancedSession
-	ready     bool
+	mu            sync.Mutex
+	modelDir      string
+	dims          int
+	maxLen        int
+	queryPrefix   string
+	passagePrefix string
+	tokenizer     *Tokenizer
+	session       *ort.DynamicAdvancedSession
+	ready         bool
 }
 
 // NewEmbedder creates a new Embedder. Call Start() to load the model.
 func NewEmbedder(modelDir string) (*Embedder, error) {
 	if modelDir == "" {
-		modelDir = "/opt/alf/models/all-MiniLM-L6-v2"
+		modelDir = "/opt/alf/models/multilingual-e5-small"
 	}
 
 	modelPath := filepath.Join(modelDir, "model.onnx")
@@ -39,8 +42,10 @@ func NewEmbedder(modelDir string) (*Embedder, error) {
 	}
 
 	return &Embedder{
-		modelDir: modelDir,
-		maxLen:   256,
+		modelDir:      modelDir,
+		maxLen:        512,
+		queryPrefix:   "query: ",
+		passagePrefix: "passage: ",
 	}, nil
 }
 
@@ -122,7 +127,7 @@ func (e *Embedder) warmup() (int, error) {
 	}
 	defer tokenTypeIDs.Destroy()
 
-	output, err := ort.NewEmptyTensor[float32](ort.NewShape(1, int64(e.maxLen), 384))
+	output, err := ort.NewEmptyTensor[float32](ort.NewShape(1, int64(e.maxLen), 384)) // both MiniLM and E5-small output 384 dims
 	if err != nil {
 		return 0, err
 	}
@@ -168,9 +173,20 @@ func (e *Embedder) Dims() int {
 	return e.dims
 }
 
-// Embed generates an embedding for a single text.
+// Embed generates an embedding for a single text, prefixed with "passage: " for E5 models.
+// Use this for storing/indexing content.
 func (e *Embedder) Embed(text string) ([]float32, error) {
-	vecs, err := e.EmbedBatch([]string{text})
+	vecs, err := e.EmbedBatch([]string{e.passagePrefix + text})
+	if err != nil {
+		return nil, err
+	}
+	return vecs[0], nil
+}
+
+// EmbedQuery generates an embedding for a search query, prefixed with "query: " for E5 models.
+// Use this for search/retrieval operations.
+func (e *Embedder) EmbedQuery(text string) ([]float32, error) {
+	vecs, err := e.EmbedBatch([]string{e.queryPrefix + text})
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +297,7 @@ func meanPoolNormalize(embeddings []float32, mask []int64, batch, seqLen, dims i
 // IsAvailable checks if the ONNX model files exist at the given directory.
 func IsAvailable(modelDir string) bool {
 	if modelDir == "" {
-		modelDir = "/opt/alf/models/all-MiniLM-L6-v2"
+		modelDir = "/opt/alf/models/multilingual-e5-small"
 	}
 	for _, name := range []string{"model.onnx", "tokenizer.json"} {
 		if _, err := os.Stat(filepath.Join(modelDir, name)); err != nil {

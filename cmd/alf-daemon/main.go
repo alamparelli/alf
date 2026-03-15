@@ -365,7 +365,7 @@ func main() {
 	}
 
 	// ONNX embedding engine (Go native, no Python sidecar).
-	modelDir := "/opt/alf/models/all-MiniLM-L6-v2"
+	modelDir := "/opt/alf/models/multilingual-e5-small"
 	var memDB *memstore.Store
 	if !cfg.EffectiveMemoryEnabled() {
 		log.Println("memstore: disabled by config (memory_enabled=false)")

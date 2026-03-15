@@ -807,6 +807,18 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	}
 	onEvent(ChatEvent{Type: "done", Data: doneData})
 
+	// Warn when context is getting large (message count proxy).
+	if _, msgCount := cs.Sessions.Context(apiChatID); msgCount >= 20 {
+		level := "high"
+		if msgCount >= 40 {
+			level = "critical"
+		}
+		onEvent(ChatEvent{Type: "system", Data: map[string]string{
+			"text": fmt.Sprintf("⚠️ Context is getting large (%d messages). Consider using /new to start fresh.", msgCount),
+			"level": level,
+		}})
+	}
+
 	outText := cleanText
 	if len(outText) > 500 {
 		outText = outText[:500]
@@ -1278,16 +1290,17 @@ Rules:
 	}
 }
 
-// cleanupUploads periodically removes expired upload entries.
+// cleanupUploads periodically removes expired upload entries from the registry.
+// Files on disk are kept for persistent access; only the in-memory registry is pruned.
 func (cs *ChatService) cleanupUploads() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(30 * time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
 		cs.uploadsMu.Lock()
 		now := time.Now()
 		for id, entry := range cs.uploads {
-			if now.Sub(entry.CreatedAt) > 10*time.Minute {
-				os.Remove(entry.TempPath)
+			if now.Sub(entry.CreatedAt) > 24*time.Hour {
+				// Clean up extracted video frames (ephemeral), keep main media file.
 				for _, p := range entry.FramePaths {
 					os.Remove(p)
 				}
@@ -1324,18 +1337,21 @@ func (cs *ChatService) Upload(file io.Reader, fileName, mediaType string) (*Uplo
 	mimeType := media.DetectMimeType(data, fileName)
 	ext := extFromMimeMap(mimeType, fileName)
 
-	tmpFile, err := os.CreateTemp("", "alf-media-*"+ext)
+	// Save to persistent media directory (survives container restart).
+	mediaDir := filepath.Join(cs.DataDir, "media")
+	os.MkdirAll(mediaDir, 0o755)
+	tmpFile, err := os.CreateTemp(mediaDir, "alf-media-*"+ext)
 	if err != nil {
-		return nil, fmt.Errorf("create temp: %w", err)
+		return nil, fmt.Errorf("create media file: %w", err)
 	}
 	if _, err := tmpFile.Write(data); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpFile.Name())
-		return nil, fmt.Errorf("write temp file: %w", err)
+		return nil, fmt.Errorf("write media file: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
 		os.Remove(tmpFile.Name())
-		return nil, fmt.Errorf("close temp file: %w", err)
+		return nil, fmt.Errorf("close media file: %w", err)
 	}
 	os.Chmod(tmpFile.Name(), 0o644)
 

@@ -882,6 +882,22 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   transition: opacity 0.15s; display: flex; align-items: center;
   justify-content: center; padding: 0; line-height: 1;
 }
+.chat-bubble-actions {
+  position: absolute; bottom: -8px; right: 8px;
+  display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s;
+}
+.chat-bubble:hover .chat-bubble-actions { opacity: 1; }
+.chat-bubble-actions .chat-react-btn {
+  position: static; opacity: 1;
+}
+.chat-agent-btn {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg-card);
+  font-size: 0.75rem; cursor: pointer; display: flex; align-items: center;
+  justify-content: center; padding: 0; color: var(--text-dim);
+  transition: color 0.15s, border-color 0.15s;
+}
+.chat-agent-btn:hover { color: var(--accent); border-color: var(--accent); }
 .chat-bubble:hover .chat-react-btn { opacity: 1; }
 .chat-react-picker {
   position: absolute; bottom: -40px; right: 0; z-index: 10;

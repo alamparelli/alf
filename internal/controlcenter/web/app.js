@@ -2129,8 +2129,11 @@ function chatAppendBubble(role, text, meta) {
 
   bubble.appendChild(metaEl);
 
-  // React button for assistant bubbles
+  // Action buttons for assistant bubbles
   if (role === 'assistant' && meta && meta.id) {
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'chat-bubble-actions';
+
     const reactBtn = document.createElement('button');
     reactBtn.className = 'chat-react-btn';
     reactBtn.textContent = '😊';
@@ -2139,7 +2142,35 @@ function chatAppendBubble(role, text, meta) {
       e.stopPropagation();
       chatShowReactPicker(bubble, meta.id, reactBtn);
     });
-    bubble.appendChild(reactBtn);
+    actionsWrap.appendChild(reactBtn);
+
+    // "Send to agents" button — delegates the assistant's response to the orchestrator.
+    if (text && text.length > 10) {
+      const agentBtn = document.createElement('button');
+      agentBtn.className = 'chat-agent-btn';
+      agentBtn.innerHTML = '<i data-lucide="users" style="width:14px;height:14px"></i>';
+      agentBtn.title = 'Send to agents';
+      agentBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const prompt = text.substring(0, 2000);
+        fetch('/api/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: prompt }),
+        }).then(r => {
+          if (r.ok) {
+            toast('Sent to agents');
+            // Refresh lucide icons for the new button
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+          } else {
+            toast('Failed to send to agents', 'error');
+          }
+        }).catch(() => toast('Failed to send to agents', 'error'));
+      });
+      actionsWrap.appendChild(agentBtn);
+    }
+
+    bubble.appendChild(actionsWrap);
   }
 
   chatMessages.appendChild(bubble);

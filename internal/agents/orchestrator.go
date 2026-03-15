@@ -120,6 +120,24 @@ func (o *Orchestrator) CancelAll() int {
 	return len(tasks)
 }
 
+// DeleteTask removes a completed task's directory from disk.
+// Returns true if the task was found and deleted. Cannot delete running tasks.
+func (o *Orchestrator) DeleteTask(taskID string) bool {
+	o.mu.Lock()
+	_, running := o.running[taskID]
+	o.mu.Unlock()
+	if running {
+		return false
+	}
+	taskDir := filepath.Join(o.dataDir, "agents", taskID)
+	if _, err := os.Stat(taskDir); os.IsNotExist(err) {
+		return false
+	}
+	os.RemoveAll(taskDir)
+	log.Printf("[orchestrator] deleted task %s", taskID)
+	return true
+}
+
 // Approve sends an approval decision to a task awaiting validation.
 // Returns true if the decision was delivered.
 func (o *Orchestrator) Approve(taskID string, decision ApprovalDecision) bool {

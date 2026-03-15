@@ -194,6 +194,14 @@ func (h *TasksHandler) cancel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent not available", http.StatusServiceUnavailable)
 		return
 	}
+
+	// action=delete removes the task from disk (completed only).
+	if r.URL.Query().Get("action") == "delete" {
+		ok := h.Orchestrator.DeleteTask(id)
+		respondJSON(w, http.StatusOK, map[string]any{"deleted": ok})
+		return
+	}
+
 	ok := h.Orchestrator.Cancel(id)
 	respondJSON(w, http.StatusOK, map[string]any{"cancelled": ok})
 }

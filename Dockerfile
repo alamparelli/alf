@@ -135,11 +135,10 @@ RUN mkdir -p /opt/alf/tools.d \
 # Tool schemas for API-tier agentic tool loop.
 COPY tool-schemas/*.json /opt/alf/tools.d/
 
-# Create users for two-user privilege model.
+# Create alf user (uid 1000). The daemon drops from root to this user via setpriv
+# in the entrypoint. No separate subprocess user — container boundary is the isolation.
 RUN groupadd --gid 1000 alf \
-    && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf \
-    && useradd -u 1001 -g alf -s /bin/bash -M claude \
-    && mkdir -p /home/claude && chown claude:alf /home/claude
+    && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf
 
 # Directory structure for volumes.
 RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
@@ -159,7 +158,7 @@ RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
     && chmod -R 755 /opt/alf/tools.d \
     && chmod -R 755 /opt/alf/bin
 
-# Git safe directory for all users (data dir is root:alf, accessed by alf+claude).
+# Git safe directory (data dir is a volume mount, may have different ownership).
 RUN git config --system --add safe.directory /home/alf/data
 
 WORKDIR /home/alf

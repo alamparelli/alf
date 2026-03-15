@@ -98,6 +98,8 @@ services:
     cap_drop:
       - ALL
     cap_add:
+      # Required for entrypoint only (apt-get, chown, setpriv). The daemon
+      # process runs as uid 1000 with zero capabilities (stripped by setpriv).
       - CHOWN
       - SETUID
       - SETGID
@@ -118,13 +120,9 @@ services:
     environment:
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
       - WHISPER_MODEL={{.WhisperModel}}
-    secrets:
-      - source: whisper_shared_secret
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
     volumes:
       - ./data/models:/models
+      - ./secrets/whisper_shared_secret:/run/secrets/whisper_shared_secret:ro
     mem_limit: 2g
     cpus: "2.0"
 

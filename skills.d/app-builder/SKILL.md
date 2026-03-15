@@ -37,7 +37,9 @@ Every app follows this structure - no exceptions:
     {job-name}.sh
 ```
 
-### 3. Create app.json
+### 3. Create app.json (CRITICAL for discovery)
+
+**app.json is mandatory.** It is scanned at boot and injected into the LLM's context via toolbox.md. Without it, the app is invisible — the LLM won't know it exists in future conversations.
 
 ```json
 {

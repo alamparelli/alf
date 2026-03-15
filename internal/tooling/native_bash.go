@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -64,12 +63,12 @@ func bashSafeEnv(dataDir string) []string {
 			}
 		}
 	}
-	// Override HOME/USER for the claude user.
+	// Override HOME/USER for the alf user.
 	homeDir := "/home/alf"
 	if h := os.Getenv("HOME"); h != "" {
 		homeDir = h
 	}
-	env = append(env, "HOME="+homeDir, "USER=claude", "LOGNAME=claude", "TERM=xterm-256color")
+	env = append(env, "HOME="+homeDir, "USER=alf", "LOGNAME=alf", "TERM=xterm-256color")
 	// Prepend tools dirs to PATH.
 	if dataDir != "" {
 		toolPaths := filepath.Join(dataDir, "tools.d") + ":" + filepath.Join(dataDir, "tools")
@@ -102,11 +101,8 @@ func (t BashNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
+	// Daemon already runs as uid 1000 (alf) — no credential switch needed.
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", args.Command)
-	// Run as claude user (uid 1001), not the daemon's root user.
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
-	}
 	// Use a safe env allowlist — never pass os.Environ() which contains
 	// secrets (VAULT_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, API keys).
 	cmd.Env = bashSafeEnv(t.DataDir)

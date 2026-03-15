@@ -100,15 +100,20 @@ func TiersPath(configDir string) string {
 }
 
 // TiersPathFromConfig returns the tiers file path from Config.TiersFile.
-// Relative paths are resolved against configDir; absolute paths are used as-is.
-// Falls back to TiersPath when cfg is nil or TiersFile is empty (e.g. old config.json
-// written before this field existed).
+// Resolution order for relative paths: configDir/tiers/<name> first, then configDir/<name>.
+// Absolute paths are used as-is.
+// Falls back to TiersPath when cfg is nil or TiersFile is empty.
 func TiersPathFromConfig(configDir string, cfg *Config) string {
 	if cfg == nil || cfg.TiersFile == "" {
 		return TiersPath(configDir)
 	}
 	if filepath.IsAbs(cfg.TiersFile) {
 		return cfg.TiersFile
+	}
+	// Prefer tiers/ subdirectory if the file exists there.
+	tiersSubdir := filepath.Join(configDir, "tiers", cfg.TiersFile)
+	if _, err := os.Stat(tiersSubdir); err == nil {
+		return tiersSubdir
 	}
 	return filepath.Join(configDir, cfg.TiersFile)
 }

@@ -25,13 +25,14 @@ Add backends to the `backends` section in `config.json`:
 }
 ```
 
-Then set the API key as a Docker secret:
-```
-alf secret set openrouter_api_key sk-or-v1-...
-alf secret set openai_api_key sk-...
-```
+Then store the API key in the vault:
 
-Restart ALF after adding secrets: `alf restart`
+1. Open **Vault** tab in the Control Center
+2. In the **Secrets** section, click **Add**
+3. Name: `openrouter_api_key`, Value: your API key
+4. Repeat for other backends (e.g. `openai_api_key`)
+
+The daemon loads API keys from the vault automatically — no restart needed after vault unlock.
 
 ## Built-in Presets
 
@@ -56,13 +57,15 @@ Restart ALF after adding secrets: `alf restart`
 
 ## Authentication
 
-API keys are stored as Docker secrets with the naming convention `<backend_name>_api_key`:
+API keys are stored in the vault with the naming convention `<backend_name>_api_key`:
 
 - `openrouter_api_key` → OpenRouter
 - `openai_api_key` → OpenAI
 - `custom_name_api_key` → custom backend named "custom_name"
 
-Set via `alf secret set <name> <value>` or during `alf init`.
+Add keys via the **Vault** tab → **Secrets** → **Add** in the Control Center.
+
+The daemon loads API keys from the vault on startup and after vault unlock. When the vault is locked, backends without keys are skipped.
 
 Backends with `"auth": "none"` (e.g. Ollama) skip authentication entirely.
 
@@ -132,7 +135,7 @@ This means users don't lose context when the router switches tiers mid-conversat
 
 | Issue | Solution |
 |-------|----------|
-| "backend X: skipped (no API key available)" | Set the secret: `alf secret set <name>_api_key <key>` |
+| "backend X: skipped (no API key in vault)" | Add the key in Vault → Secrets → Add (`<name>_api_key`) |
 | API error 401 | Invalid API key - regenerate it |
 | API error 429 | Rate limited - ALF retries automatically (3x with backoff) |
 | API error 400: context too long | ALF auto-truncates history and retries once |

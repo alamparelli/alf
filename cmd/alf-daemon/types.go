@@ -22,12 +22,6 @@ type tierParams struct {
 	SystemPrompt         string   // extra system prompt for this tier
 }
 
-// telegramJSONConfig mirrors controlcenter.TelegramConfig for reading.
-type telegramJSONConfig struct {
-	BotToken string `json:"bot_token"`
-	ChatID   string `json:"chat_id"`
-}
-
 type Update struct {
 	UpdateID        int64                   `json:"update_id"`
 	Message         *Message                `json:"message"`

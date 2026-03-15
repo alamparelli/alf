@@ -46,8 +46,7 @@ func main() {
 	// Ensure daemon-created files are group-writable (umask 002 = rwxrwxr-x).
 	syscall.Umask(0o002)
 
-	token := secrets.ReadSecret("TELEGRAM_BOT_TOKEN")
-	chatID := secrets.ReadSecret("TELEGRAM_CHAT_ID")
+	var token, chatID string // resolved from vault after unlock
 	authToken := secrets.ReadSecret("CC_AUTH_TOKEN")
 
 	// Set Claude OAuth token as env var if available (picked up by safeEnv for subprocesses).
@@ -73,8 +72,8 @@ func main() {
 		configDir = d
 	}
 
-	// telegramEnabled is finalized after vault is available (see below).
-	telegramEnabled := token != "" && chatID != ""
+	// telegramEnabled is finalized after vault credentials are loaded.
+	telegramEnabled := false
 
 	// Skills directory (RW for CC, separate from data volume).
 	skillsDir := "/opt/alf/skills.d"
@@ -96,16 +95,8 @@ func main() {
 		log.Printf("cleaned up %d stale signal sockets", len(matches))
 	}
 
-	// Parse allowed chat IDs for login authorization.
-	// Default to TELEGRAM_CHAT_ID if ALLOWED_CHAT_IDS not explicitly set.
+	// allowedChatIDs is resolved after vault loads Telegram credentials.
 	var allowedChatIDs map[int64]bool
-	if telegramEnabled {
-		allowedRaw := secrets.ReadSecret("ALLOWED_CHAT_IDS")
-		if allowedRaw == "" {
-			allowedRaw = chatID
-		}
-		allowedChatIDs = parseAllowedChatIDs(allowedRaw)
-	}
 
 	// Shared stats for CC status endpoint.
 	stats := cc.NewStats()
@@ -257,13 +248,8 @@ func main() {
 		}
 	}
 
-	// Load Telegram config: vault is authoritative when unlocked.
-	// If vault is unlocked and credentials are absent, do NOT fall back to Docker secrets
-	// (the user may have deliberately removed them). Fallback sources are only used
-	// when the vault is locked or not yet set up.
-	vaultChecked := false
+	// Load Telegram credentials from vault.
 	if vaultMgr != nil && vaultMgr.AdminToken() != "" {
-		vaultChecked = true
 		if v, err := vaultMgr.GetSecret("telegram_bot_token"); err == nil && v != "" {
 			token = v
 		}
@@ -274,29 +260,11 @@ func main() {
 			log.Println("Telegram config loaded from vault")
 		}
 	}
-	if !vaultChecked && (token == "" || chatID == "") {
-		// Vault not available - fall back to legacy sources.
-		if tgCfg := readTelegramConfig(configDir); tgCfg != nil {
-			if tgCfg.BotToken != "" && tgCfg.ChatID != "" {
-				token = tgCfg.BotToken
-				chatID = tgCfg.ChatID
-				log.Println("Telegram config loaded from config.d/telegram.json")
-			}
-		}
-	}
-	// Migrate: if vault is unlocked and credentials came from Docker secrets, persist them.
-	if token != "" && chatID != "" && vaultChecked {
-		existing, _ := vaultMgr.GetSecret("telegram_bot_token")
-		if existing == "" {
-			if err := vaultMgr.SetSecret("telegram_bot_token", token); err == nil {
-				vaultMgr.SetSecret("telegram_chat_id", chatID)
-				log.Println("Telegram credentials migrated to vault")
-			}
-		}
-	}
 
 	telegramEnabled = token != "" && chatID != ""
-	if !telegramEnabled {
+	if telegramEnabled {
+		allowedChatIDs = parseAllowedChatIDs(chatID)
+	} else {
 		log.Println("Telegram not configured - running in Control Center-only mode")
 	}
 
@@ -597,37 +565,27 @@ func main() {
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
-		// On vault unlock, migrate Telegram credentials from Docker secrets into vault.
+		// On vault unlock, re-register backends and load Telegram credentials.
 		onVaultUnlock := func() {
 			if vaultMgr == nil || vaultMgr.AdminToken() == "" {
 				return
 			}
-			existing, _ := vaultMgr.GetSecret("telegram_bot_token")
-			if existing != "" {
-				return // already in vault
-			}
-			if token == "" || chatID == "" {
-				return // nothing to migrate
-			}
-			if err := vaultMgr.SetSecret("telegram_bot_token", token); err == nil {
-				vaultMgr.SetSecret("telegram_chat_id", chatID)
-				log.Println("Telegram credentials migrated to vault on first unlock")
-			}
-			// Migrate backend API keys from Docker secrets to vault.
-			for name, bcfg := range cfg.Backends {
-				if bcfg.Auth == "none" {
-					continue
+			// Re-register backends now that vault is unlocked and API keys are accessible.
+			registerBackends(registry, cfg, apiHistory, vaultMgr)
+			// Load Telegram credentials from vault if not already set.
+			if token == "" {
+				if v, err := vaultMgr.GetSecret("telegram_bot_token"); err == nil && v != "" {
+					token = v
 				}
-				vaultKey := name + "_api_key"
-				if existing, _ := vaultMgr.GetSecret(vaultKey); existing != "" {
-					continue
+			}
+			if chatID == "" {
+				if v, err := vaultMgr.GetSecret("telegram_chat_id"); err == nil && v != "" {
+					chatID = v
 				}
-				secretName := strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
-				if key := secrets.ReadSecret(secretName); key != "" {
-					if err := vaultMgr.SetSecret(vaultKey, key); err == nil {
-						log.Printf("Backend %s API key migrated to vault", name)
-					}
-				}
+			}
+			if token != "" && chatID != "" && !telegramEnabled {
+				telegramEnabled = true
+				log.Println("Telegram config loaded from vault (post-unlock)")
 			}
 		}
 		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock)

@@ -2,7 +2,11 @@ package controlcenter
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/alamparelli/alf/internal/tooling"
 )
@@ -135,3 +139,123 @@ type valError struct{ msg string }
 
 func (e *valError) Error() string { return e.msg }
 func errVal(msg string) error    { return &valError{msg: msg} }
+
+// TierConfigsHandler manages tier configuration files in config.d/tiers/.
+// GET  /api/tiers/configs        — list available configs
+// POST /api/tiers/configs/switch  — switch active config
+type TierConfigsHandler struct {
+	ConfigDir   string
+	TierStore   TierStore
+	ConfigStore ConfigStore
+	Notifier    Notifier
+}
+
+type tierConfigEntry struct {
+	Name   string `json:"name"`   // filename without .json
+	Path   string `json:"path"`   // relative path from configDir
+	Active bool   `json:"active"` // true if currently loaded
+	Tiers  int    `json:"tiers"`  // number of tiers in this config
+}
+
+func (h *TierConfigsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/tiers/configs")
+	path = strings.TrimPrefix(path, "/")
+
+	switch {
+	case path == "" && r.Method == http.MethodGet:
+		h.handleList(w, r)
+	case path == "switch" && r.Method == http.MethodPost:
+		h.handleSwitch(w, r)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (h *TierConfigsHandler) handleList(w http.ResponseWriter, _ *http.Request) {
+	tiersDir := filepath.Join(h.ConfigDir, "tiers")
+	entries, err := os.ReadDir(tiersDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			respondJSON(w, http.StatusOK, []tierConfigEntry{})
+			return
+		}
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	activePath := h.TierStore.Path()
+	var configs []tierConfigEntry
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		fullPath := filepath.Join(tiersDir, e.Name())
+		name := strings.TrimSuffix(e.Name(), ".json")
+		relPath := filepath.Join("tiers", e.Name())
+
+		// Count tiers in this config.
+		tierCount := 0
+		if data, err := os.ReadFile(fullPath); err == nil {
+			var tc TiersConfig
+			if json.Unmarshal(data, &tc) == nil {
+				tierCount = len(tc.Tiers)
+			}
+		}
+
+		configs = append(configs, tierConfigEntry{
+			Name:   name,
+			Path:   relPath,
+			Active: fullPath == activePath,
+			Tiers:  tierCount,
+		})
+	}
+	respondJSON(w, http.StatusOK, configs)
+}
+
+func (h *TierConfigsHandler) handleSwitch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"` // filename, e.g. "grok.json"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		return
+	}
+
+	// Validate: no path traversal, must be a simple filename.
+	if strings.Contains(req.Name, "/") || strings.Contains(req.Name, "..") || !strings.HasSuffix(req.Name, ".json") {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+		return
+	}
+
+	fullPath := filepath.Join(h.ConfigDir, "tiers", req.Name)
+	if _, err := os.Stat(fullPath); err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "config not found"})
+		return
+	}
+
+	// Update tiers_file in config.json (just the filename, resolved via tiers/ subdir).
+	cfg, err := h.ConfigStore.Load()
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "load config: " + err.Error()})
+		return
+	}
+	cfg.TiersFile = req.Name
+	if err := h.ConfigStore.Save(cfg); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "save config: " + err.Error()})
+		return
+	}
+
+	// Switch the tier store to the new path.
+	if err := h.TierStore.SetPath(fullPath); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload tiers: " + err.Error()})
+		return
+	}
+
+	if h.Notifier != nil {
+		h.Notifier.Notify(ReloadTiers)
+		h.Notifier.Notify(ReloadConfig)
+	}
+
+	log.Printf("[tiers] switched to %s", req.Name)
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}

@@ -49,6 +49,21 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleLock(w, r)
 	case path == "reset" && r.Method == http.MethodPost:
 		h.handleReset(w, r)
+	case path == "export" && r.Method == http.MethodGet:
+		h.handleExport(w, r)
+	case path == "import" && r.Method == http.MethodPost:
+		h.handleImport(w, r)
+	case path == "secrets" && r.Method == http.MethodGet:
+		h.handleListSecrets(w, r)
+	case path == "secrets" && r.Method == http.MethodPost:
+		h.handleSetSecret(w, r)
+	case strings.HasPrefix(path, "secrets/") && r.Method == http.MethodDelete:
+		name := strings.TrimPrefix(path, "secrets/")
+		if !isVaultSafeName(name) {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			return
+		}
+		h.handleDeleteSecret(w, r, name)
 	case path == "services" && r.Method == http.MethodGet:
 		h.handleListServices(w, r)
 	case path == "services" && r.Method == http.MethodPost:
@@ -394,6 +409,120 @@ func (h *VaultHandler) handleOAuth2Authorize(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
+}
+
+// --- Export / Import ---
+
+func (h *VaultHandler) handleExport(w http.ResponseWriter, r *http.Request) {
+	c := h.Manager.Client()
+	files, err := c.ListFiles()
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	type exportEntry struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	var entries []exportEntry
+	for _, f := range files {
+		data, err := c.GetFile(f.Name)
+		if err != nil {
+			log.Printf("[vault] export: skip %s: %v", f.Name, err)
+			continue
+		}
+		entries = append(entries, exportEntry{Name: f.Name, Value: string(data)})
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename=vault-export.json")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"secrets": entries})
+}
+
+func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Secrets []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"secrets"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if len(req.Secrets) == 0 {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "no secrets to import"})
+		return
+	}
+	imported := 0
+	for _, s := range req.Secrets {
+		if s.Name == "" || !isVaultSafeName(s.Name) {
+			log.Printf("[vault] import: skip invalid name %q", s.Name)
+			continue
+		}
+		if err := h.Manager.SetSecret(s.Name, s.Value); err != nil {
+			log.Printf("[vault] import: failed %s: %v", s.Name, err)
+			continue
+		}
+		imported++
+	}
+	log.Printf("[vault] imported %d/%d secrets", imported, len(req.Secrets))
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "imported": imported})
+}
+
+// --- Secret (key-value) management ---
+
+func (h *VaultHandler) handleListSecrets(w http.ResponseWriter, r *http.Request) {
+	c := h.Manager.Client()
+	files, err := c.ListFiles()
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// Return secret names (values are never exposed).
+	type secretEntry struct {
+		Name string `json:"name"`
+		Set  bool   `json:"set"`
+	}
+	var secrets []secretEntry
+	for _, f := range files {
+		secrets = append(secrets, secretEntry{Name: f.Name, Set: true})
+	}
+	respondJSON(w, http.StatusOK, secrets)
+}
+
+func (h *VaultHandler) handleSetSecret(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.Name == "" || !isVaultSafeName(req.Name) {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+		return
+	}
+	if req.Value == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "value required"})
+		return
+	}
+	if err := h.Manager.SetSecret(req.Name, req.Value); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[vault] secret %q set via API", req.Name)
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (h *VaultHandler) handleDeleteSecret(w http.ResponseWriter, _ *http.Request, name string) {
+	c := h.Manager.Client()
+	if err := c.DeleteFile(name); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[vault] secret %q deleted via API", name)
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // isVaultSafeName validates that a name/id has no path traversal characters.

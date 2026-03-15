@@ -33,7 +33,8 @@ Presets are ready-made tier configurations. Each preset sets up which models ALF
 |--------|-------------|
 | **Claude Default** | Full Claude stack (Haiku, Sonnet, Opus) with smart routing |
 | **Claude Standard** | Balanced setup with fewer tiers |
-| **OpenRouter Standard** | Uses OpenRouter models with routing |
+| **OpenRouter Standard** | Uses Claude models via OpenRouter with routing |
+| **Grok Standard** | Uses Grok models (4.1 Fast, 4.20, 4) via OpenRouter |
 
 You can always customize tiers later in the **Tiers** tab. Presets are just a starting point.
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -144,7 +145,7 @@ func (o *Orchestrator) Approve(taskID string, decision ApprovalDecision) bool {
 	o.mu.Lock()
 	rt, ok := o.running[taskID]
 	o.mu.Unlock()
-	if !ok || rt.Meta.Status != "awaiting_approval" {
+	if !ok || (rt.Meta.Status != "awaiting_approval" && rt.Meta.Status != "awaiting_arbitration") {
 		return false
 	}
 	select {
@@ -235,10 +236,10 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	rt := o.running[taskID]
 	o.mu.Unlock()
 	defer func() {
-		// If status is still "running" or "awaiting_approval" when we exit
-		// (e.g. context cancelled, panic recovery), update disk so the task
-		// isn't orphaned as invisible.
-		if meta.Status == "running" || meta.Status == "awaiting_approval" {
+		// If status is still "running", "awaiting_approval", or "awaiting_arbitration"
+		// when we exit (e.g. context cancelled, panic recovery), update disk so the
+		// task isn't orphaned as invisible.
+		if meta.Status == "running" || meta.Status == "awaiting_approval" || meta.Status == "awaiting_arbitration" {
 			meta.Status = "interrupted"
 			now := time.Now()
 			meta.CompletedAt = &now
@@ -394,6 +395,28 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			continue
 		}
 
+		// Questions from orchestrator — enter arbitration mode.
+		if len(output.Questions) > 0 {
+			log.Printf("[orchestrator] orchestrator has %d question(s) for the user", len(output.Questions))
+			meta.Questions = output.Questions
+			meta.Status = "awaiting_arbitration"
+			o.saveMeta(taskDir, meta)
+			if onProgress != nil {
+				onProgress("awaiting_arbitration", taskID)
+			}
+			// Block until user responds or context cancels.
+			select {
+			case <-ctx.Done():
+				return "", meta, ctx.Err()
+			case decision := <-rt.ApprovalCh:
+				meta.Status = "running"
+				meta.Questions = nil
+				o.saveMeta(taskDir, meta)
+				prompt = `{"arbitration_response":"` + escapeJSON(decision.Feedback) + `","instruction":"the user has answered your questions, continue with the task"}`
+				continue
+			}
+		}
+
 		// Final response - done.
 		if output.Response != "" {
 			log.Printf("[orchestrator] ✓ final response received (%d chars)", len(output.Response))
@@ -466,6 +489,32 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 				CostUSD:    ar.CostUSD,
 				DurationMs: ar.Duration.Milliseconds(),
 			})
+		}
+
+		// Extract [[QUESTION: ...]] markers from agent results.
+		var agentQuestions []string
+		for _, ar := range agentResults {
+			agentQuestions = append(agentQuestions, extractQuestions(ar.Text)...)
+		}
+		if len(agentQuestions) > 0 {
+			log.Printf("[orchestrator] agents raised %d question(s) for the user", len(agentQuestions))
+			meta.Questions = agentQuestions
+			meta.Status = "awaiting_arbitration"
+			o.saveMeta(taskDir, meta)
+			if onProgress != nil {
+				onProgress("awaiting_arbitration", taskID)
+			}
+			select {
+			case <-ctx.Done():
+				return "", meta, ctx.Err()
+			case decision := <-rt.ApprovalCh:
+				meta.Status = "running"
+				meta.Questions = nil
+				o.saveMeta(taskDir, meta)
+				// Inject user answers into the next resume prompt alongside agent results.
+				prompt = `{"arbitration_response":"` + escapeJSON(decision.Feedback) + `","instruction":"the user answered the agents' questions, incorporate their answers and continue"}`
+				continue
+			}
 		}
 
 		// Check if any agents failed.
@@ -901,6 +950,22 @@ func (a *orchestratorToolAdapter) Execute(ctx context.Context, call provider.Too
 		Output:  result.Output,
 		IsError: result.IsError,
 	}
+}
+
+// questionRegex matches [[QUESTION: ...]] markers in agent output text.
+var questionRegex = regexp.MustCompile(`\[\[QUESTION:\s*(.*?)\]\]`)
+
+// extractQuestions parses [[QUESTION: ...]] markers from text.
+func extractQuestions(text string) []string {
+	matches := questionRegex.FindAllStringSubmatch(text, -1)
+	var questions []string
+	for _, m := range matches {
+		q := strings.TrimSpace(m[1])
+		if q != "" {
+			questions = append(questions, q)
+		}
+	}
+	return questions
 }
 
 // saveMeta writes task.json to the task directory.

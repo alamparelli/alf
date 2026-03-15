@@ -2144,7 +2144,7 @@ function chatAppendBubble(role, text, meta) {
     });
     actionsWrap.appendChild(reactBtn);
 
-    // "Send to agents" button — delegates the assistant's response to the orchestrator.
+    // "Send to agents" button — opens modal to configure and delegate.
     if (text && text.length > 10) {
       const agentBtn = document.createElement('button');
       agentBtn.className = 'chat-agent-btn';
@@ -2152,20 +2152,7 @@ function chatAppendBubble(role, text, meta) {
       agentBtn.title = 'Send to agents';
       agentBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const prompt = text.substring(0, 2000);
-        fetch('/api/tasks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: prompt }),
-        }).then(r => {
-          if (r.ok) {
-            toast('Sent to agents');
-            // Refresh lucide icons for the new button
-            if (typeof lucide !== 'undefined') lucide.createIcons();
-          } else {
-            toast('Failed to send to agents', 'error');
-          }
-        }).catch(() => toast('Failed to send to agents', 'error'));
+        agentModalShow(text.substring(0, 2000));
       });
       actionsWrap.appendChild(agentBtn);
     }
@@ -3616,6 +3603,7 @@ function schedRelTime(iso) {
 // ─── Tasks ──────────────────────────────────────────
 let tasksInitialized = false;
 var tasksRunningIds = new Set(); // track running task IDs for completion detection
+var tasksArbitrationNotified = new Set(); // track tasks we've already notified about
 
 async function taskLauncherLoadTeams() {
   const sel = document.getElementById('taskLauncherTeam');
@@ -3716,7 +3704,20 @@ async function tasksFetch() {
       if (tasksRunningIds.has(t.id)) {
         const status = t.status === 'completed' ? 'completed' : 'failed';
         const preview = (t.prompt || '').substring(0, 80);
+        toast('Task ' + status + ': ' + preview.substring(0, 60));
         notify('Agent Task ' + status, preview);
+      }
+    }
+    // Detect arbitration/approval status changes on running tasks.
+    for (const t of running) {
+      if (t.status === 'awaiting_arbitration' && !tasksArbitrationNotified.has(t.id)) {
+        tasksArbitrationNotified.add(t.id);
+        toast('Task needs your input');
+        notify('Agent Task needs input', (t.prompt || '').substring(0, 80));
+      } else if (t.status === 'awaiting_approval' && !tasksArbitrationNotified.has(t.id + ':approval')) {
+        tasksArbitrationNotified.add(t.id + ':approval');
+        toast('Task plan ready for review');
+        notify('Agent Task plan ready', (t.prompt || '').substring(0, 80));
       }
     }
     tasksRunningIds = newRunningIds;
@@ -3748,9 +3749,9 @@ function tasksRender(running, completed) {
     return;
   }
 
-  // Auto-expand tasks awaiting approval.
+  // Auto-expand tasks awaiting approval or arbitration.
   for (const task of running) {
-    if (task.status === 'awaiting_approval') tasksExpandedSet.add(task.id);
+    if (task.status === 'awaiting_approval' || task.status === 'awaiting_arbitration') tasksExpandedSet.add(task.id);
   }
 
   let html = '';
@@ -3881,9 +3882,9 @@ function taskCard(task, isRunning) {
   const elapsed = isRunning
     ? taskElapsed(task.started_at, null)
     : taskElapsed(task.started_at, task.completed_at);
-  const isAwaiting = task.status === 'awaiting_approval';
-  const statusClass = isAwaiting ? 'awaiting_approval' : (isRunning ? 'running' : (task.status === 'completed' ? 'completed' : (task.status === 'timeout' ? 'timeout' : (task.status === 'interrupted' ? 'interrupted' : 'failed'))));
-  const statusLabel = isAwaiting ? 'awaiting approval' : (isRunning ? 'running' : task.status);
+  const isAwaiting = task.status === 'awaiting_approval' || task.status === 'awaiting_arbitration';
+  const statusClass = isAwaiting ? task.status : (isRunning ? 'running' : (task.status === 'completed' ? 'completed' : (task.status === 'timeout' ? 'timeout' : (task.status === 'interrupted' ? 'interrupted' : 'failed'))));
+  const statusLabel = task.status === 'awaiting_approval' ? 'awaiting approval' : (task.status === 'awaiting_arbitration' ? 'needs input' : (isRunning ? 'running' : task.status));
   const cost = task.total_cost_usd ? '$' + task.total_cost_usd.toFixed(4) : '--';
   const promptPreview = taskEscapeHtml(task.prompt || 'No prompt').substring(0, 200);
   const agentCount = (task.agent_calls && task.agent_calls.length) || 0;
@@ -3905,14 +3906,22 @@ function taskCard(task, isRunning) {
     planSection = '<div class="task-section"><div class="task-section-title"><i data-lucide="list-ordered" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Plan</div><div class="task-plan">' + planSteps + '</div></div>';
   }
 
-  // Approval section (only when awaiting approval).
+  // Approval / arbitration section.
   let approvalSection = '';
   if (isAwaiting) {
+    let questionsHtml = '';
+    if (task.status === 'awaiting_arbitration' && task.questions && task.questions.length > 0) {
+      questionsHtml = '<div class="task-questions"><div class="task-questions-title">Questions from agents</div><ol>' +
+        task.questions.map(q => '<li>' + taskEscapeHtml(q) + '</li>').join('') + '</ol></div>';
+    }
+    const placeholder = task.status === 'awaiting_arbitration' ? 'Your answers...' : 'Optional feedback for revision...';
+    const approveLabel = task.status === 'awaiting_arbitration' ? 'Submit' : 'Approve';
     approvalSection = '<div class="task-approval">' +
-      '<textarea class="task-approval-feedback" id="taskFeedback_' + taskEscapeHtml(task.id) + '" placeholder="Optional feedback for revision..." rows="2"></textarea>' +
+      questionsHtml +
+      '<textarea class="task-approval-feedback" id="taskFeedback_' + taskEscapeHtml(task.id) + '" placeholder="' + placeholder + '" rows="2"></textarea>' +
       '<div class="task-approval-actions">' +
-        '<button class="btn btn-sm btn-green task-approve-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="check" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Approve</button>' +
-        '<button class="btn btn-sm btn-danger task-reject-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="message-square-x" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Request Changes</button>' +
+        '<button class="btn btn-sm btn-green task-approve-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="check" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>' + approveLabel + '</button>' +
+        (task.status !== 'awaiting_arbitration' ? '<button class="btn btn-sm btn-danger task-reject-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="message-square-x" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Request Changes</button>' : '') +
       '</div>' +
     '</div>';
   }
@@ -3937,7 +3946,7 @@ function taskCard(task, isRunning) {
       const isWorking = call.status === 'working';
       const callStatus = isWorking ? 'working' : (call.error ? 'failed' : 'completed');
       const callCost = call.cost_usd ? '$' + call.cost_usd.toFixed(4) : '';
-      const callTask = call.task ? '<div class="task-step-task task-md">' + taskRenderMd(call.task) + '</div>' : '';
+      const callTask = call.task ? '<div class="task-step-task"><details><summary>Instructions</summary><div class="task-step-task-body task-md">' + taskRenderMd(call.task) + '</div></details></div>' : '';
       const callResult = isWorking ? ''
         : (call.error ? '<pre class="task-step-error">' + taskEscapeHtml(call.error) + '</pre>' : taskRenderMd(call.text || ''));
       // Meta badges: team, model.
@@ -4069,6 +4078,60 @@ function taskEscapeHtml(s) {
   d.textContent = s;
   return d.innerHTML;
 }
+
+// --- Agent Send Modal ---
+async function agentModalShow(prompt) {
+  const modal = document.getElementById('agentModal');
+  document.getElementById('agentModalPrompt').value = prompt;
+  document.getElementById('agentModalValidation').checked = false;
+  // Load teams into dropdown.
+  const sel = document.getElementById('agentModalTeam');
+  while (sel.options.length > 1) sel.remove(1);
+  try {
+    const data = await api('/api/teams');
+    for (const t of (data.teams || [])) {
+      const opt = document.createElement('option');
+      opt.value = t.name;
+      opt.textContent = t.name + (t.description ? ' - ' + t.description : '');
+      sel.appendChild(opt);
+    }
+  } catch {}
+  modal.style.display = 'flex';
+  lucide.createIcons({ nodes: [modal] });
+}
+
+(function initAgentModal() {
+  const modal = document.getElementById('agentModal');
+  const cancelBtn = document.getElementById('agentModalCancel');
+  const sendBtn = document.getElementById('agentModalSend');
+
+  cancelBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.style.display !== 'none') modal.style.display = 'none'; });
+
+  sendBtn.addEventListener('click', async () => {
+    const prompt = document.getElementById('agentModalPrompt').value;
+    const team = document.getElementById('agentModalTeam').value;
+    const needValidation = document.getElementById('agentModalValidation').checked;
+    const message = team ? '[Use team: ' + team + ']\n' + prompt : prompt;
+    sendBtn.disabled = true;
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ message: message, need_validation: needValidation }),
+      });
+      if (res.ok) {
+        toast('Task launched');
+        modal.style.display = 'none';
+      } else {
+        toast('Failed to launch task', 'error');
+      }
+    } catch { toast('Failed to launch task', 'error'); }
+    sendBtn.disabled = false;
+  });
+})();
 
 // --- Teams Management ---
 const teamsTemplate = {

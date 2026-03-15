@@ -60,6 +60,7 @@ type OrchestratorOutput struct {
 	Response  string            `json:"response,omitempty"`
 	Thinking  string            `json:"thinking,omitempty"`
 	Plan      []PlanStep        `json:"plan,omitempty"`
+	Questions []string          `json:"questions,omitempty"`
 }
 
 // AgentResult holds the outcome of a single sub-agent invocation.
@@ -109,8 +110,9 @@ type TaskMeta struct {
 	Iterations         int           `json:"iterations"`
 	TotalCost          float64       `json:"total_cost_usd"`
 	AgentCalls         []AgentResult `json:"agent_calls"`
-	Status             string        `json:"status"` // running, completed, failed, timeout, awaiting_approval
+	Status             string        `json:"status"` // running, completed, failed, timeout, awaiting_approval, awaiting_arbitration
 	Plan               []PlanStep    `json:"plan,omitempty"`
+	Questions          []string      `json:"questions,omitempty"`
 	NeedValidation     bool          `json:"need_validation,omitempty"`
 	ValidationFeedback string        `json:"validation_feedback,omitempty"`
 	Source             string        `json:"source,omitempty"` // "router", "chat", "schedule", "telegram" — how this task was triggered

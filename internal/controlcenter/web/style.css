@@ -1321,6 +1321,38 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   background: color-mix(in srgb, var(--text-dim) 10%, transparent);
   color: var(--text-dim); font-weight: 500; white-space: nowrap;
 }
+/* Collapsed agent instructions */
+.task-step-task details { margin: 0; }
+.task-step-task summary {
+  cursor: pointer; font-size: 0.7rem; color: var(--text-dim); user-select: none;
+  list-style: none; display: flex; align-items: center; gap: 4px;
+}
+.task-step-task summary::-webkit-details-marker { display: none; }
+.task-step-task summary::before { content: '\25B6'; font-size: 0.55rem; transition: transform 0.15s; }
+.task-step-task details[open] summary::before { transform: rotate(90deg); }
+.task-step-task details .task-step-task-body { padding: 4px 0 0; }
+/* Arbitration questions */
+.task-questions { padding: 8px 12px; margin: 4px 0; background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: 6px; border-left: 3px solid var(--accent); }
+.task-questions-title { font-size: 0.75rem; font-weight: 600; margin-bottom: 6px; }
+.task-questions ol { margin: 0; padding-left: 18px; font-size: 0.8rem; }
+.task-questions li { margin: 2px 0; }
+/* Agent send modal */
+.agent-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex;
+  align-items: center; justify-content: center; z-index: 1000;
+}
+.agent-modal {
+  background: var(--bg-card); border-radius: var(--radius); padding: 1.5rem;
+  width: min(90vw, 440px); box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+}
+.agent-modal h3 { margin: 0 0 1rem; font-size: 0.95rem; }
+.agent-modal .form-group { margin-bottom: 0.75rem; }
+.agent-modal .form-group label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.25rem; }
+.agent-modal .form-group select, .agent-modal .form-group textarea { width: 100%; }
+.agent-modal .form-group textarea { font-size: 0.85rem; min-height: 60px; resize: vertical; }
+.agent-modal .checkbox-label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; }
+.agent-modal .checkbox-label input { width: auto; margin: 0; }
+.agent-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 1rem; }
 
 .task-id {
   font-size: 0.7rem; color: var(--text-dim); font-weight: 500;

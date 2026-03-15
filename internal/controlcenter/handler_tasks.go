@@ -27,6 +27,10 @@ type TasksHandler struct {
 	SkillStore   skills.Store
 	Recaller     MemoryRecaller
 	ResolveModel func(short string) string
+
+	// OnTaskEvent is called when a task reaches a terminal or user-attention state.
+	// Arguments: taskID, status (completed/failed/awaiting_arbitration), summary.
+	OnTaskEvent func(taskID, status, summary string)
 }
 
 func (h *TasksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -92,11 +96,32 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 	rc.NeedValidation = req.NeedValidation
 	rc.Source = "chat"
 
+	// Progress callback: emit events for arbitration.
+	var taskID string
+	onProgress := func(phase, detail string) {
+		if phase == "task_started" {
+			taskID = detail
+		}
+		if h.OnTaskEvent != nil && (phase == "awaiting_arbitration" || phase == "awaiting_approval") {
+			h.OnTaskEvent(taskID, phase, "")
+		}
+	}
+
 	// Fire and forget - task is tracked by orchestrator.running map.
 	go func() {
-		_, _, err := h.Orchestrator.Run(context.Background(), req.Message, sysPrompts, rc, nil)
+		_, meta, err := h.Orchestrator.Run(context.Background(), req.Message, sysPrompts, rc, onProgress)
 		if err != nil {
 			log.Printf("[tasks] background task failed: %v", err)
+		}
+		// Notify on terminal state.
+		if h.OnTaskEvent != nil && meta != nil {
+			summary := meta.Response
+			if len(summary) > 200 {
+				summary = summary[:200] + "..."
+			}
+			if meta.Status == "completed" || meta.Status == "failed" || meta.Status == "timeout" {
+				h.OnTaskEvent(meta.ID, meta.Status, summary)
+			}
 		}
 	}()
 
@@ -162,9 +187,8 @@ func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {
 		if runningIDs[meta.ID] {
 			continue
 		}
-		// Orphaned "running" or "awaiting_approval" tasks (on disk but not in memory)
-		// were interrupted by a daemon restart - mark them accordingly.
-		if meta.Status == "running" || meta.Status == "awaiting_approval" {
+		// Orphaned tasks (on disk but not in memory) were interrupted by a daemon restart.
+		if meta.Status == "running" || meta.Status == "awaiting_approval" || meta.Status == "awaiting_arbitration" {
 			meta.Status = "interrupted"
 		}
 		completed = append(completed, meta)

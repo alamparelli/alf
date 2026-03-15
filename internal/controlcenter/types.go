@@ -41,6 +41,14 @@ type Config struct {
 	ShowSkillFooter         *bool  `json:"show_skill_footer"`          // show active skills in message footer, nil = true (default on)
 	MaxSessions             int    `json:"max_sessions"`               // max concurrent sessions per user, 0 = default (2)
 	Backends                map[string]BackendConfig `json:"backends,omitempty"` // named API backends
+	// Memory extraction settings.
+	MemoryEnabled              *bool   `json:"memory_enabled"`                // enable memory system, nil = true
+	MemoryExtractInterval      int     `json:"memory_extract_interval"`       // minutes between extractions, 0 = 180
+	MemoryExtractTimeout       int     `json:"memory_extract_timeout"`        // seconds for extraction call, 0 = 300
+	MemoryExtractBootDelay     int     `json:"memory_extract_boot_delay"`     // seconds before first extraction, 0 = 180
+	MemoryExtractMinMessages   int     `json:"memory_extract_min_messages"`   // min message pairs to trigger, 0 = 3
+	MemoryDedupTextThreshold   float64 `json:"memory_dedup_text_threshold"`   // Jaccard similarity threshold, 0 = 0.7
+	MemoryDedupCosineThreshold float64 `json:"memory_dedup_cosine_threshold"` // cosine distance threshold, 0 = 0.15
 	// TiersFile overrides the default tiers.json filename. Relative paths are
 	// resolved against config.d/. Absolute paths are used as-is.
 	// Empty (default) means tiers.json.
@@ -80,6 +88,62 @@ func DefaultConfig() *Config {
 
 func boolPtr(v bool) *bool { return &v }
 
+// EffectiveMemoryEnabled returns whether the memory system is enabled.
+func (c *Config) EffectiveMemoryEnabled() bool {
+	if c.MemoryEnabled != nil {
+		return *c.MemoryEnabled
+	}
+	return true
+}
+
+// EffectiveMemoryExtractInterval returns the extraction interval in minutes.
+func (c *Config) EffectiveMemoryExtractInterval() int {
+	if c.MemoryExtractInterval > 0 {
+		return c.MemoryExtractInterval
+	}
+	return 180
+}
+
+// EffectiveMemoryExtractTimeout returns the extraction timeout in seconds.
+func (c *Config) EffectiveMemoryExtractTimeout() int {
+	if c.MemoryExtractTimeout > 0 {
+		return c.MemoryExtractTimeout
+	}
+	return 300
+}
+
+// EffectiveMemoryExtractBootDelay returns the boot delay in seconds.
+func (c *Config) EffectiveMemoryExtractBootDelay() int {
+	if c.MemoryExtractBootDelay > 0 {
+		return c.MemoryExtractBootDelay
+	}
+	return 180
+}
+
+// EffectiveMemoryExtractMinMessages returns the minimum messages to trigger extraction.
+func (c *Config) EffectiveMemoryExtractMinMessages() int {
+	if c.MemoryExtractMinMessages > 0 {
+		return c.MemoryExtractMinMessages
+	}
+	return 3
+}
+
+// EffectiveMemoryDedupTextThreshold returns the Jaccard similarity threshold.
+func (c *Config) EffectiveMemoryDedupTextThreshold() float64 {
+	if c.MemoryDedupTextThreshold > 0 {
+		return c.MemoryDedupTextThreshold
+	}
+	return 0.7
+}
+
+// EffectiveMemoryDedupCosineThreshold returns the cosine distance threshold.
+func (c *Config) EffectiveMemoryDedupCosineThreshold() float64 {
+	if c.MemoryDedupCosineThreshold > 0 {
+		return c.MemoryDedupCosineThreshold
+	}
+	return 0.15
+}
+
 // DefaultDNSServers are used when Config.DNSServers is empty.
 var DefaultDNSServers = []string{"8.8.8.8", "1.1.1.1"}
 
@@ -107,9 +171,20 @@ type Tier struct {
 	Effort                string   `json:"effort,omitempty"`
 	MaxIterations         int      `json:"max_iterations,omitempty"`
 	TimeoutMin            int      `json:"timeout_minutes,omitempty"`
-	ForceCommand  bool     `json:"force_command"`
-	Backend       string   `json:"backend,omitempty"`      // "cli" (default), or registered backend name
-	SystemPrompt  string   `json:"system_prompt,omitempty"` // extra system prompt prepended for this tier
+	ForceCommand   bool     `json:"force_command"`
+	Backend        string   `json:"backend,omitempty"`        // "cli" (default), or registered backend name
+	SystemPrompt   string   `json:"system_prompt,omitempty"`  // extra system prompt prepended for this tier
+	ContextWeight  string   `json:"context_weight,omitempty"` // "light", "standard", "full" (default)
+}
+
+// EffectiveContextWeight returns the tier's context weight, defaulting to "full".
+func (t Tier) EffectiveContextWeight() string {
+	switch t.ContextWeight {
+	case "light", "standard", "full":
+		return t.ContextWeight
+	default:
+		return "full"
+	}
 }
 
 // RouterDescription returns Description if set, otherwise falls back to RouterLabel.

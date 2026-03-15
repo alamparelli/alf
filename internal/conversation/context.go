@@ -181,9 +181,15 @@ func textFromBlocks(blocks []ContentBlock) string {
 
 // FormatAsSystemPrompt renders conversation history as a system prompt
 // injection for CLI providers that don't support message arrays.
-func FormatAsSystemPrompt(messages []Message) string {
+// contextWeight controls verbosity: "light" strips tool blocks, "standard"/"full" include them.
+func FormatAsSystemPrompt(messages []Message, contextWeight ...string) string {
 	if len(messages) == 0 {
 		return ""
+	}
+
+	weight := "full"
+	if len(contextWeight) > 0 && contextWeight[0] != "" {
+		weight = contextWeight[0]
 	}
 
 	var sb strings.Builder
@@ -203,13 +209,18 @@ func FormatAsSystemPrompt(messages []Message) string {
 				sb.WriteString(b.Text)
 				sb.WriteString("\n")
 			case BlockToolUse:
-				sb.WriteString(fmt.Sprintf("[Used tool: %s]\n", b.Name))
-			case BlockToolResult:
-				output := b.Output
-				if len(output) > 200 {
-					output = output[:200] + "..."
+				// Light tiers: skip tool noise to maximize conversation signal.
+				if weight != "light" {
+					sb.WriteString(fmt.Sprintf("[Used tool: %s]\n", b.Name))
 				}
-				sb.WriteString(fmt.Sprintf("[Tool result: %s]\n", output))
+			case BlockToolResult:
+				if weight != "light" {
+					output := b.Output
+					if len(output) > 200 {
+						output = output[:200] + "..."
+					}
+					sb.WriteString(fmt.Sprintf("[Tool result: %s]\n", output))
+				}
 			}
 		}
 		sb.WriteString("\n")

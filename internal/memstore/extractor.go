@@ -34,6 +34,8 @@ type Extractor struct {
 	stateDir     string         // where to store state file (context dir)
 	interval     time.Duration
 	timeout      time.Duration  // timeout for Claude extraction call
+	bootDelay    time.Duration  // delay before first extraction
+	minMessages  int            // minimum message pairs to trigger extraction
 	statePath    string
 	stop         chan struct{}
 	provider     ExtractorProvider
@@ -53,23 +55,38 @@ type extractedFact struct {
 	Type string `json:"type"` // "fact", "preference", "decision"
 }
 
+// ExtractorConfig holds configurable parameters for the Extractor.
+type ExtractorConfig struct {
+	Interval    time.Duration // extraction interval (0 = 3h)
+	Timeout     time.Duration // Claude call timeout (0 = 5m)
+	BootDelay   time.Duration // delay before first extraction (0 = 3m)
+	MinMessages int           // min message pairs to trigger (0 = 3)
+}
+
 // NewExtractor creates a new periodic extraction job.
 // provider is used to invoke Claude for fact extraction.
-// timeout sets the max duration for each Claude extraction call (0 = default 5m).
 // tierResolver optionally resolves the cheapest tier model at runtime (nil = fallback to claude-haiku-4-5).
-func NewExtractor(store *Store, dataDir, contextDir string, interval, timeout time.Duration, prov ExtractorProvider, tierResolver TierResolver) *Extractor {
-	if interval <= 0 {
-		interval = 3 * time.Hour
+func NewExtractor(store *Store, dataDir, contextDir string, cfg ExtractorConfig, prov ExtractorProvider, tierResolver TierResolver) *Extractor {
+	if cfg.Interval <= 0 {
+		cfg.Interval = 3 * time.Hour
 	}
-	if timeout <= 0 {
-		timeout = 5 * time.Minute
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.BootDelay <= 0 {
+		cfg.BootDelay = 3 * time.Minute
+	}
+	if cfg.MinMessages <= 0 {
+		cfg.MinMessages = 3
 	}
 	return &Extractor{
 		store:        store,
 		dataDir:      dataDir,
 		stateDir:     contextDir,
-		interval:     interval,
-		timeout:      timeout,
+		interval:     cfg.Interval,
+		timeout:      cfg.Timeout,
+		bootDelay:    cfg.BootDelay,
+		minMessages:  cfg.MinMessages,
 		statePath:    filepath.Join(contextDir, "memory_extractor_state.json"),
 		stop:         make(chan struct{}),
 		provider:     prov,
@@ -92,7 +109,7 @@ func (e *Extractor) loop() {
 	// at boot time. Both spawn Claude CLI processes - running them
 	// simultaneously can OOM on constrained hosts.
 	select {
-	case <-time.After(3 * time.Minute):
+	case <-time.After(e.bootDelay):
 	case <-e.stop:
 		return
 	}
@@ -129,8 +146,8 @@ func (e *Extractor) RunOnce(since time.Time) error {
 		return fmt.Errorf("collect conversations: %w", err)
 	}
 
-	if len(conversations) < 3 {
-		log.Printf("memstore: skipping extraction - only %d message pairs (advancing state)", len(conversations))
+	if len(conversations) < e.minMessages {
+		log.Printf("memstore: skipping extraction - only %d message pairs, need %d (advancing state)", len(conversations), e.minMessages)
 		e.saveState() // advance LastRun so we don't stay permanently overdue
 		return nil
 	}

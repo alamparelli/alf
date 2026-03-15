@@ -86,8 +86,13 @@ func BuildSystemPrompt(tiers *cc.TiersConfig, dataDir, configDir string, agentTe
 		if t.WriteCapable {
 			access = "read-write"
 		}
+		weight := t.EffectiveContextWeight()
 		desc := t.RouterDescription()
-		b.WriteString(fmt.Sprintf("- %s (%s): %s\n", t.Name, access, desc))
+		if weight == "light" {
+			b.WriteString(fmt.Sprintf("- %s (%s, light model — simple tasks only): %s\n", t.Name, access, desc))
+		} else {
+			b.WriteString(fmt.Sprintf("- %s (%s): %s\n", t.Name, access, desc))
+		}
 	}
 
 	if tiers.RouterDistinctions != "" {
@@ -148,20 +153,30 @@ func ParseResponse(raw string, tiers *cc.TiersConfig) Result {
 
 // InterpretRaw applies the full interpretation logic to raw classifier output:
 // parse JSON, handle direct responses, fallback on text scan, fallback tier.
-// Includes a programmatic guardrail: if the selected tier is read-only but
-// the message has write intent, it upgrades to the lowest write-capable tier.
+// Includes programmatic guardrails:
+// 1. Read-only → write-capable upgrade if message has write intent.
+// 2. Light tier → standard upgrade if message shows complexity markers.
 func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 	valid := ValidTierSet(tiers)
 	result := parseResponse(raw, valid)
 
 	// Router routed to a valid tier.
 	if result.Tier != "" {
-		// Guardrail: upgrade read-only → write-capable if write intent detected.
+		// Guardrail 1: upgrade read-only → write-capable if write intent detected.
 		if !tierIsWriteCapable(result.Tier, tiers) && HasWriteIntent(message) {
 			if wt := lowestWriteTier(tiers); wt != "" {
 				log.Printf("router: %s → %s upgraded to %s (write intent detected)", truncate(message, 60), result.Tier, wt)
 				result.Tier = wt
 				result.Reason += " [upgraded: write intent]"
+				return result
+			}
+		}
+		// Guardrail 2: upgrade light → next tier if message is too complex.
+		if tierContextWeight(result.Tier, tiers) == "light" && hasComplexityMarkers(message) {
+			if nt := nextTierAbove(result.Tier, tiers); nt != "" {
+				log.Printf("router: %s → %s upgraded to %s (complexity markers)", truncate(message, 60), result.Tier, nt)
+				result.Tier = nt
+				result.Reason += " [upgraded: complexity]"
 				return result
 			}
 		}
@@ -264,8 +279,13 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 		if t.WriteCapable {
 			access = "read-write"
 		}
+		weight := t.EffectiveContextWeight()
 		desc := t.RouterDescription()
-		b.WriteString(fmt.Sprintf("- %s (%s): %s\n", t.Name, access, desc))
+		if weight == "light" {
+			b.WriteString(fmt.Sprintf("- %s (%s, light model — simple tasks only): %s\n", t.Name, access, desc))
+		} else {
+			b.WriteString(fmt.Sprintf("- %s (%s): %s\n", t.Name, access, desc))
+		}
 	}
 
 	if input.Tiers.RouterDistinctions != "" {
@@ -481,6 +501,62 @@ func lowestWriteTier(tiers *cc.TiersConfig) string {
 	bestPriority := int(^uint(0) >> 1)
 	for _, t := range tiers.Tiers {
 		if t.Enabled && t.Routable && t.WriteCapable && t.Priority < bestPriority {
+			best = t.Name
+			bestPriority = t.Priority
+		}
+	}
+	return best
+}
+
+// tierContextWeight returns the effective context weight for a tier name.
+func tierContextWeight(name string, tiers *cc.TiersConfig) string {
+	for _, t := range tiers.Tiers {
+		if t.Name == name {
+			return t.EffectiveContextWeight()
+		}
+	}
+	return "full"
+}
+
+// complexityMarkers are words/patterns that signal a message needs more than a light model.
+var complexityMarkers = []string{
+	"pourquoi", "comment", "explique", "explain", "why", "how",
+	"compare", "analyse", "analyze", "résume", "summarize",
+	"difference", "trade-off", "avantage", "inconvénient",
+	"debug", "error", "bug", "stack trace", "exception",
+}
+
+// hasComplexityMarkers returns true if the message shows signs of needing
+// reasoning capability beyond what a light model provides.
+func hasComplexityMarkers(message string) bool {
+	if len(message) > 150 {
+		return true // long messages generally need more reasoning
+	}
+	lower := strings.ToLower(message)
+	if strings.Count(lower, "?") >= 2 {
+		return true // multiple questions
+	}
+	for _, marker := range complexityMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// nextTierAbove returns the next enabled+routable tier above the given one by priority.
+func nextTierAbove(name string, tiers *cc.TiersConfig) string {
+	var currentPriority int
+	for _, t := range tiers.Tiers {
+		if t.Name == name {
+			currentPriority = t.Priority
+			break
+		}
+	}
+	best := ""
+	bestPriority := int(^uint(0) >> 1)
+	for _, t := range tiers.Tiers {
+		if t.Enabled && t.Routable && t.Priority > currentPriority && t.Priority < bestPriority {
 			best = t.Name
 			bestPriority = t.Priority
 		}

@@ -14,6 +14,7 @@ import (
 type PromptConfig struct {
 	Backend string // "cli" or "api" - determines tool instructions
 	Channel string // "tg" or "cc" - determines formatting rules
+	Weight  string // "light", "standard", "full" (default) - controls context density
 }
 
 // injectedFiles are the only files injected into every conversation.
@@ -23,11 +24,20 @@ var injectedFiles = []string{"soul.md", "mood.md", "index.md", "toolbox.md"}
 // knownTags lists the conditional section tags we support.
 var knownTags = []string{"cli", "api", "tg", "cc"}
 
+// weightOrder defines the inclusion hierarchy for context weights.
+// "light" < "standard" < "full" — a section tagged "standard" is included
+// when weight is "standard" or "full", but excluded for "light".
+var weightOrder = map[string]int{"light": 0, "standard": 1, "full": 2}
+
 // filterSections processes conditional blocks in prompt text.
 // Blocks tagged with <!-- @begin X --> ... <!-- @end X --> are included only
 // if X matches the backend or channel in cfg. Untagged content is always included.
+// Blocks tagged with <!-- @weight W --> ... <!-- @end weight --> are included
+// only if cfg.Weight >= W in the weight hierarchy.
 func filterSections(content string, cfg PromptConfig) string {
 	result := content
+
+	// Filter backend/channel tags.
 	for _, tag := range knownTags {
 		beginMarker := "<!-- @begin " + tag + " -->"
 		endMarker := "<!-- @end " + tag + " -->"
@@ -54,6 +64,40 @@ func filterSections(content string, cfg PromptConfig) string {
 			}
 		}
 	}
+
+	// Filter @weight tags.
+	cfgWeight := cfg.Weight
+	if cfgWeight == "" {
+		cfgWeight = "full"
+	}
+	cfgLevel := weightOrder[cfgWeight]
+	for _, w := range []string{"standard", "full"} {
+		beginMarker := "<!-- @weight " + w + " -->"
+		endMarker := "<!-- @end weight -->"
+		include := cfgLevel >= weightOrder[w]
+
+		for {
+			start := strings.Index(result, beginMarker)
+			if start == -1 {
+				break
+			}
+			end := strings.Index(result[start:], endMarker)
+			if end == -1 {
+				break
+			}
+			end += start + len(endMarker)
+			body := result[start+len(beginMarker) : end-len(endMarker)]
+			body = strings.TrimPrefix(body, "\n")
+			body = strings.TrimRight(body, "\n")
+
+			if include {
+				result = result[:start] + body + result[end:]
+			} else {
+				result = result[:start] + result[end:]
+			}
+		}
+	}
+
 	// Clean up multiple blank lines left by removed sections.
 	for strings.Contains(result, "\n\n\n") {
 		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
@@ -66,7 +110,7 @@ func filterSections(content string, cfg PromptConfig) string {
 func CollectPrompts(contextDir string, cfg PromptConfig) []string {
 	var prompts []string
 
-	// Inject immutable core instructions (filtered by backend/channel).
+	// Inject immutable core instructions (filtered by backend/channel/weight).
 	filtered := filterSections(strings.TrimSpace(coreMD), cfg)
 	prompts = append(prompts, filtered)
 
@@ -77,8 +121,14 @@ func CollectPrompts(contextDir string, cfg PromptConfig) []string {
 		now.Format("15:04"))
 	prompts = append(prompts, clock)
 
-	// Inject only system files.
-	for _, f := range injectedFiles {
+	// Determine which files to inject based on weight.
+	// Light tiers skip toolbox.md (tools are in the system prompt or not needed).
+	files := injectedFiles
+	if cfg.Weight == "light" {
+		files = []string{"soul.md", "mood.md", "index.md"}
+	}
+
+	for _, f := range files {
 		content, err := os.ReadFile(filepath.Join(contextDir, f))
 		if err != nil || len(strings.TrimSpace(string(content))) == 0 {
 			continue

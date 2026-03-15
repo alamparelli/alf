@@ -748,7 +748,7 @@ func TestExtractorCollectConversations(t *testing.T) {
 	}
 	f.Close()
 
-	e := NewExtractor(nil, dir, dir, 3*time.Hour, 0, nil, nil)
+	e := NewExtractor(nil, dir, dir, ExtractorConfig{}, nil, nil)
 	convs, err := e.collectConversations(now.Add(-2 * time.Hour))
 	if err != nil {
 		t.Fatalf("collectConversations: %v", err)
@@ -781,7 +781,7 @@ func TestExtractorFiltersNonMessageEvents(t *testing.T) {
 	}
 	f.Close()
 
-	e := NewExtractor(nil, dir, dir, 3*time.Hour, 0, nil, nil)
+	e := NewExtractor(nil, dir, dir, ExtractorConfig{}, nil, nil)
 	convs, err := e.collectConversations(now.Add(-2 * time.Hour))
 	if err != nil {
 		t.Fatalf("collectConversations: %v", err)
@@ -809,7 +809,7 @@ func TestExtractorRespectsSinceTime(t *testing.T) {
 	}
 	f.Close()
 
-	e := NewExtractor(nil, dir, dir, 3*time.Hour, 0, nil, nil)
+	e := NewExtractor(nil, dir, dir, ExtractorConfig{}, nil, nil)
 	// Only get messages from last hour.
 	convs, err := e.collectConversations(now.Add(-1 * time.Hour))
 	if err != nil {
@@ -827,7 +827,7 @@ func TestExtractorEmptyEventsDir(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "logs", "events"), 0o755)
 
-	e := NewExtractor(nil, dir, dir, 3*time.Hour, 0, nil, nil)
+	e := NewExtractor(nil, dir, dir, ExtractorConfig{}, nil, nil)
 	convs, err := e.collectConversations(time.Now().Add(-2 * time.Hour))
 	if err != nil {
 		t.Fatalf("collectConversations: %v", err)
@@ -851,7 +851,7 @@ func TestExtractorTruncatesLongMessages(t *testing.T) {
 	f.WriteString(line + "\n")
 	f.Close()
 
-	e := NewExtractor(nil, dir, dir, 3*time.Hour, 0, nil, nil)
+	e := NewExtractor(nil, dir, dir, ExtractorConfig{}, nil, nil)
 	convs, err := e.collectConversations(now.Add(-1 * time.Hour))
 	if err != nil {
 		t.Fatalf("collectConversations: %v", err)

@@ -28,15 +28,23 @@ type Memory struct {
 	Distance  float64        // populated by Search(), 0 otherwise
 }
 
+// DedupConfig holds configurable deduplication thresholds.
+type DedupConfig struct {
+	TextThreshold   float64 // Jaccard similarity threshold (default 0.7)
+	CosineThreshold float64 // cosine distance threshold (default 0.15)
+}
+
 // Store manages the semantic memory database with sqlite-vec + FTS5.
 type Store struct {
 	db       *sql.DB
 	embedder *Embedder
+	dedup    DedupConfig
 	mu       sync.RWMutex
 }
 
 // New opens (or creates) the memory database and initialises the schema.
-func New(dbPath string, embedder *Embedder) (*Store, error) {
+// Optional DedupConfig can be passed; if nil, defaults are used.
+func New(dbPath string, embedder *Embedder, dedupCfg ...DedupConfig) (*Store, error) {
 	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -48,14 +56,24 @@ func New(dbPath string, embedder *Embedder) (*Store, error) {
 		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
 
-	s := &Store{db: db, embedder: embedder}
+	dedup := DedupConfig{TextThreshold: 0.7, CosineThreshold: 0.15}
+	if len(dedupCfg) > 0 {
+		if dedupCfg[0].TextThreshold > 0 {
+			dedup.TextThreshold = dedupCfg[0].TextThreshold
+		}
+		if dedupCfg[0].CosineThreshold > 0 {
+			dedup.CosineThreshold = dedupCfg[0].CosineThreshold
+		}
+	}
+
+	s := &Store{db: db, embedder: embedder, dedup: dedup}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
 	count := s.Count()
-	log.Printf("memstore: opened %s (%d memories)", dbPath, count)
+	log.Printf("memstore: opened %s (%d memories, dedup: text=%.2f cosine=%.2f)", dbPath, count, dedup.TextThreshold, dedup.CosineThreshold)
 	return s, nil
 }
 
@@ -279,7 +297,7 @@ func (s *Store) hasDuplicate(text string) bool {
 		for rows.Next() {
 			var existing string
 			rows.Scan(&existing)
-			if textSimilarity(text, existing) >= 0.7 {
+			if textSimilarity(text, existing) >= s.dedup.TextThreshold {
 				return true
 			}
 		}
@@ -299,8 +317,8 @@ func (s *Store) hasDuplicate(text string) bool {
 				  AND k = 1
 				ORDER BY v.distance
 			`, string(vecJSON)).Scan(&dist)
-			if err == nil && dist < 0.15 {
-				return true // cosine distance < 0.15 → similarity > 0.85
+			if err == nil && dist < s.dedup.CosineThreshold {
+				return true // cosine distance below threshold → duplicate
 			}
 		}
 	}

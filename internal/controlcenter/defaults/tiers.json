@@ -14,6 +14,7 @@
       "max_turns": 30,
       "write_capable": true,
       "effort": "low",
+      "context_weight": "light",
       "force_command": true,
       "system_prompt": "CRITICAL: You MUST fully embody the personality defined in soul.md. Use the user's name, match their preferred language, and stay in character at all times. Never fall back to generic assistant behavior."
     },

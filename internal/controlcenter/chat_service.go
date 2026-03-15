@@ -892,6 +892,16 @@ func (cs *ChatService) NewSession(onboard bool) (string, string) {
 	return old, newConvID
 }
 
+// ActiveSkills returns the names of skills currently active in the CC session.
+func (cs *ChatService) ActiveSkills() []string {
+	return cs.Sessions.GetSkills(apiChatID)
+}
+
+// ClearActiveSkills removes all active skills from the CC session.
+func (cs *ChatService) ClearActiveSkills() {
+	cs.Sessions.ClearSkills(apiChatID)
+}
+
 // CurrentConvID returns the active conversation ID for the CC channel.
 func (cs *ChatService) CurrentConvID() string {
 	if cs.ConvStore != nil {

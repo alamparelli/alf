@@ -83,17 +83,17 @@ For deeper investigation, use the **Terminal** tab.
 
 ### Event log
 
-Structured events are stored in `logs/events.jsonl`:
+Structured events are stored in `logs/events/` with daily rotation (e.g., `logs/events/2026-03-15.jsonl`):
 
 ```bash
-# All errors
-cat logs/events.jsonl | jq 'select(.type | endswith("_error"))'
+# All errors (today)
+cat logs/events/$(date +%Y-%m-%d).jsonl | jq 'select(.type | endswith("_error"))'
 
 # Routing decisions for a session
-cat logs/events.jsonl | jq 'select(.type == "route" and .data.session_id == "TARGET")'
+cat logs/events/*.jsonl | jq 'select(.type == "route" and .data.session_id == "TARGET")'
 
 # Cost summary by model
-cat logs/events.jsonl | jq 'select(.type == "message_out") | {model: .data.model, cost: .data.cost}'
+cat logs/events/*.jsonl | jq 'select(.type == "message_out") | {model: .data.model, cost: .data.cost}'
 ```
 
 ### Container diagnostics

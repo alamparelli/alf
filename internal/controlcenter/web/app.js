@@ -2632,6 +2632,13 @@ async function chatSend() {
   // Handle other slash commands.
   if (text.startsWith('/') && !text.startsWith('//')) {
     const cmdName = text.split(' ')[0];
+    const fullCmd = text.trim();
+    // Check for subcommands (e.g. "/skills clear").
+    if (CHAT_COMMANDS.some(c => c.name === fullCmd)) {
+      chatDismissCommands();
+      chatExecCommand(fullCmd);
+      return;
+    }
     const isForceCmd = CHAT_COMMANDS.some(c => c.dynamic && c.name === cmdName);
     if (!isForceCmd && CHAT_COMMANDS.some(c => c.name === cmdName)) {
       chatDismissCommands();
@@ -2742,6 +2749,8 @@ const CHAT_COMMANDS = [
   { name: '/start', description: 'Re-run onboarding', icon: 'play' },
   { name: '/restart', description: 'Restart ALF daemon', icon: 'power' },
   { name: '/bash', description: 'Execute a bash command', icon: 'terminal', dynamic: true },
+  { name: '/skills', description: 'List active skills in this session', icon: 'sparkles' },
+  { name: '/skills clear', description: 'Remove all active skills from session', icon: 'sparkles' },
   { name: '/help', description: 'Show available commands', icon: 'help-circle' },
 ];
 
@@ -2860,6 +2869,23 @@ function chatExecCommand(cmd) {
           }
         })
         .catch(() => { chatAppendBubble('assistant', 'Failed.', { tier: 'system' }); chatScrollBottom(); });
+      break;
+    case '/skills':
+      api('/api/chat/skills').then(r => {
+        const skills = r.skills || [];
+        if (skills.length === 0) {
+          chatAppendBubble('assistant', 'No skills active in this session.\n\nUse **/skills clear** to reset after loading skills.', { tier: 'system' });
+        } else {
+          chatAppendBubble('assistant', '**Active skills:**\n' + skills.map(s => '- ' + s).join('\n') + '\n\nUse **/skills clear** to reset.', { tier: 'system' });
+        }
+        chatScrollBottom();
+      }).catch(() => { chatAppendBubble('assistant', 'Failed to fetch skills.', { tier: 'system' }); chatScrollBottom(); });
+      break;
+    case '/skills clear':
+      api('/api/chat/skills', { method: 'DELETE' }).then(() => {
+        chatAppendBubble('assistant', 'Active skills cleared from session.', { tier: 'system' });
+        chatScrollBottom();
+      }).catch(() => { chatAppendBubble('assistant', 'Failed to clear skills.', { tier: 'system' }); chatScrollBottom(); });
       break;
     case '/stop':
       chatStopJob();

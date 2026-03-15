@@ -200,10 +200,22 @@ These work in both Telegram and CC Chat:
 | Command | What it does |
 |---------|-------------|
 | `/start` | Run the welcome onboarding again |
-| `/new` | Clear the conversation and start fresh |
+| `/new` or `/clear` | Clear the conversation and start fresh |
 | `/login` | Get a new magic link for the Control Center |
-| **Desktop notifications** | ALF sends a browser notification when a response arrives while the Control Center is in the background. Allow notifications when your browser asks. |
-| `/<tier_name>` | Force a specific tier (e.g. `/opus fix this bug`) |
+| `/<tier_name>` | Force a specific tier (e.g. `/opus fix this bug`) - session locks to that tier |
+| `/<tier_name>` (no message) | Lock the session to a tier without sending a message |
+
+**Telegram-only commands:**
+
+| Command | What it does |
+|---------|-------------|
+| `/help` | Show all available commands |
+| `/bash <command>` | Execute a bash command directly (authorized users only) |
+| `/jobs` | List running agent jobs |
+| `/cancel` | Cancel all running agent jobs |
+| `/restart` | Restart the ALF daemon |
+
+**Desktop notifications** - ALF sends a browser notification when a response arrives while the Control Center is in the background. Allow notifications when your browser asks.
 
 ## Something not working?
 

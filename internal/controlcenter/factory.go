@@ -158,6 +158,7 @@ func HandlerFactory(deps Deps) http.Handler {
 		mux.Handle("/api/chat/upload", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/media/", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/react", &ChatReactHandler{Service: deps.ChatService})
+		mux.Handle("/api/chat/skills", &ChatSkillsHandler{Service: deps.ChatService})
 	}
 
 	// Memory ingest (Teach).

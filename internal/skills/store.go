@@ -107,6 +107,21 @@ func parseSkill(skillDir string) (*Skill, error) {
 		name = filepath.Base(skillDir)
 	}
 
+	// Auto-add skill name as a trigger if not already present.
+	if len(triggers) > 0 {
+		found := false
+		low := strings.ToLower(name)
+		for _, t := range triggers {
+			if strings.ToLower(t) == low {
+				found = true
+				break
+			}
+		}
+		if !found {
+			triggers = append(triggers, name)
+		}
+	}
+
 	// Flatten additional .md reference files.
 	var refs []string
 	entries, _ := os.ReadDir(skillDir)

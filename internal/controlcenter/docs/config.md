@@ -103,6 +103,14 @@ Quiet hours prevent ALF from responding during a defined window. Useful for supp
 
 ---
 
+## DNS
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `dns_servers` | string[] | `["8.8.8.8", "1.1.1.1"]` | DNS servers for the container. Useful when running with gVisor, which doesn't use the host's DNS resolver. |
+
+---
+
 ## Skills
 
 | Field | Type | Default | Description |

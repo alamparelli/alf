@@ -37,7 +37,7 @@ You can schedule agent jobs using the schedule tool:
 ```bash
 schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
   --tier agent --prompt "Analyze this week's git commits and write a summary report" \
-  --output telegram
+  --output chat
 ```
 
 This runs every Monday at 9 AM, using the full agent team pipeline.

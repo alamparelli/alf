@@ -67,14 +67,17 @@ docker compose up --build
 
 ### Architecture patterns
 
-- **Provider interface** - all LLM interaction goes through `provider.Provider` and `provider.Classifier`
+- **Provider interface** - all LLM interaction goes through `provider.Provider` and `provider.Classifier` (CLI + API implementations)
+- **Unified conversation store** - `internal/conversation/` captures rich message history (text, tool_use, tool_result, thinking) in a JSONL ring buffer, shared across all backends
 - **Persistent subprocesses** - long-lived processes (classifier) follow the same pattern: mutex, stdin/stdout JSON lines, auto-restart on crash, idle timeout
 - **Whisper service** - voice transcription runs in a separate Docker container (`whisper-service`), ALF communicates via HTTP client with bearer token auth
 - **Go-native inference** - ONNX embeddings run in-process via `onnxruntime_go` (no sidecar)
 - **Embedded core instructions** - `internal/memory/core.md` compiled into the binary via `go:embed`, injected first in every conversation
 - **Router is pure logic** - `internal/router/` builds prompts and parses responses, never spawns processes
 - **Signal system** - `internal/signal/` provides a Unix-socket server for Claude sessions to send Telegram messages/reactions. System tools (`cmd/signal`, `cmd/schedule-tools`) use this socket
-- **Non-root daemon** - Daemon drops to uid 1000 via setpriv with zero capabilities, config is read-only, tools are rx-only
+- **App supervisor** - `internal/supervisor/` manages background services declared in `apps/*/service.json` with restart policies and exponential backoff
+- **Outbound firewall** - `internal/firewall/` proxies all HTTP/HTTPS traffic from Claude subprocesses with domain-level allow/deny rules
+- **Non-root daemon** - Daemon drops to uid 1000 (`alf`) via setpriv with zero capabilities, Claude runs as uid 1001 (`claude`) with sanitized environment, config is read-only, tools are rx-only
 
 ### File organization
 

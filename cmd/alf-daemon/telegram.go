@@ -197,11 +197,34 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 		}
 		tg.SendHTML(msg.Chat.ID, "<b>Running agent jobs:</b>\n"+strings.Join(lines, "\n"))
 		return true
+	case "/skills":
+		parts := strings.SplitN(msg.Text, " ", 2)
+		arg := ""
+		if len(parts) > 1 {
+			arg = strings.TrimSpace(parts[1])
+		}
+		if arg == "clear" || arg == "reset" {
+			chatSessions.ClearSkills(msg.Chat.ID)
+			tg.SendHTML(msg.Chat.ID, "Active skills cleared from session.")
+		} else {
+			active := chatSessions.GetSkills(msg.Chat.ID)
+			if len(active) == 0 {
+				tg.SendHTML(msg.Chat.ID, "No skills active in this session.\n\nUse <code>/skills clear</code> to reset.")
+			} else {
+				var lines []string
+				for _, s := range active {
+					lines = append(lines, "• "+s)
+				}
+				tg.SendHTML(msg.Chat.ID, "<b>Active skills:</b>\n"+strings.Join(lines, "\n")+"\n\nUse <code>/skills clear</code> to reset.")
+			}
+		}
+		return true
 	case "/help":
 		help := "<b>Available commands:</b>\n" +
 			"/help - Show this message\n" +
 			"/new - Start a new conversation session\n" +
 			"/clear - Clear and start a new session\n" +
+			"/skills - List active skills (/skills clear to reset)\n" +
 			"/bash - Execute a bash command directly\n" +
 			"/jobs - List running agent jobs\n" +
 			"/cancel - Cancel all running agent jobs\n" +

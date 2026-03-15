@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/alamparelli/alf/internal/provider"
 )
 
-var validFileName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+// validFileName uses the shared safeName pattern from validation.go.
+var validFileName = safeName
 
 // protectedContextFiles cannot be overwritten via Teach.
 var protectedContextFiles = map[string]bool{
@@ -235,11 +235,7 @@ Rules: self-contained items, concise, skip trivial info.`, instruction, content)
 	}
 
 	// Parse JSON array from response - Claude may wrap it in prose or code blocks.
-	raw := strings.TrimSpace(result.Text)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
+	raw := stripCodeBlock(result.Text)
 
 	// Extract JSON array even if surrounded by prose text.
 	if start := strings.Index(raw, "["); start >= 0 {

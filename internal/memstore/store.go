@@ -253,10 +253,11 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// hasDuplicate checks FTS5 for a near-exact text match.
+// hasDuplicate checks for near-duplicates using two strategies:
+// 1. FTS5 keyword search + Jaccard similarity (catches lexical near-matches)
+// 2. Cosine similarity on embeddings (catches semantic reformulations)
 func (s *Store) hasDuplicate(text string) bool {
-	// Use first 8 words with OR semantics to find candidates,
-	// then check Jaccard similarity to catch near-duplicates.
+	// Strategy 1: FTS5 + Jaccard for lexical near-matches.
 	words := strings.Fields(text)
 	if len(words) > 8 {
 		words = words[:8]
@@ -271,20 +272,39 @@ func (s *Store) hasDuplicate(text string) bool {
 		SELECT m.text FROM memory_fts f
 		JOIN memories m ON m.id = f.rowid
 		WHERE memory_fts MATCH ?
-		LIMIT 5
+		LIMIT 10
 	`, ftsQuery)
-	if err != nil {
-		return false
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var existing string
-		rows.Scan(&existing)
-		if textSimilarity(text, existing) >= 0.9 {
-			return true
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var existing string
+			rows.Scan(&existing)
+			if textSimilarity(text, existing) >= 0.7 {
+				return true
+			}
 		}
 	}
+
+	// Strategy 2: Cosine similarity on embeddings for semantic dedup.
+	if s.embedder != nil && s.embedder.IsReady() {
+		vec, err := s.embedder.Embed(text)
+		if err == nil {
+			vecJSON, _ := json.Marshal(vec)
+			// Find closest memory by cosine distance. sqlite-vec returns
+			// cosine distance (0 = identical, 2 = opposite).
+			var dist float64
+			err := s.db.QueryRow(`
+				SELECT v.distance FROM memory_vec v
+				WHERE v.embedding MATCH ?
+				  AND k = 1
+				ORDER BY v.distance
+			`, string(vecJSON)).Scan(&dist)
+			if err == nil && dist < 0.15 {
+				return true // cosine distance < 0.15 → similarity > 0.85
+			}
+		}
+	}
+
 	return false
 }
 

@@ -272,7 +272,7 @@ func TestStatePersistence_CorruptFile(t *testing.T) {
 
 func TestNewExtractor_Defaults(t *testing.T) {
 	prov := &mockProvider{}
-	e := NewExtractor(nil, "/data", "/ctx", 0, 0, prov)
+	e := NewExtractor(nil, "/data", "/ctx", 0, 0, prov, nil)
 
 	if e.interval != 3*time.Hour {
 		t.Errorf("expected 3h interval, got %s", e.interval)
@@ -287,7 +287,7 @@ func TestNewExtractor_Defaults(t *testing.T) {
 
 func TestNewExtractor_CustomValues(t *testing.T) {
 	prov := &mockProvider{}
-	e := NewExtractor(nil, "/data", "/ctx", 1*time.Hour, 2*time.Minute, prov)
+	e := NewExtractor(nil, "/data", "/ctx", 1*time.Hour, 2*time.Minute, prov, nil)
 
 	if e.interval != 1*time.Hour {
 		t.Errorf("expected 1h interval, got %s", e.interval)

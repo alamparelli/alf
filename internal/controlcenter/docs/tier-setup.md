@@ -98,7 +98,7 @@ Here's what a `tiers.json` file looks like:
 | `description` | Optional longer description. Falls back to `router_label` if not set. Used in router prompt. | `"Deep code analysis"` |
 | `write_capable` | Can this tier create, edit, or delete files? | `false` |
 | `effort` | How hard the model thinks: `low`, `medium`, or `high`. **CLI tiers only** - this maps to Claude's `--effort` flag. Ignored for API/OpenRouter backends (most API models don't support effort control). | `"medium"` |
-| `force_command` | Enable `/<tier_name> <message>` to bypass routing and force this tier. Works in Telegram and CC Chat. | `true` |
+| `force_command` | Enable `/<tier_name> <message>` to bypass routing and lock the session to this tier. The override persists until `/new` or session timeout. Works in Telegram and CC Chat. | `true` |
 | `max_turns` | Maximum number of actions ALF can take in one response (reading files, running commands, etc.). Keeps things from running too long. 0 = no limit. | `10` |
 | `max_iterations` | (Agent only) Max delegate→synthesize cycles. | `10` |
 | `timeout_minutes` | (Agent only) Hard timeout in minutes. | `60` |
@@ -160,6 +160,31 @@ Want an Opus tier you can trigger manually, but the router never picks it automa
 ```
 
 Add this to your `tiers` array. Now type `/power analyze this system` in Telegram or CC Chat to use it. The router will never pick it on its own. Note: you must include a message after the command - `/power` alone shows a usage hint.
+
+### Session locking
+
+When you use a force command, the session **locks to that tier** for all subsequent messages. You can either include a message or just lock the tier for later:
+
+```
+You: /opus                                 → locks session to opus (no message sent)
+You: analyze the auth module               → uses opus
+You: what about the error handling?        → still uses opus
+You: /new                                  → resets, back to normal routing
+```
+
+Or with a message in the same command:
+
+```
+You: /opus analyze the auth module         → locks session to opus + processes message
+You: can you refactor the retry logic?     → still uses opus
+```
+
+ALF confirms the lock with a message: `⚡ Session locked to opus. Use /new to reset.`
+
+The lock clears automatically when:
+- You type `/new` (manual reset)
+- The session times out (default: 30 minutes of inactivity)
+- You use a different force command (switches to the new tier)
 
 ## Available tools
 

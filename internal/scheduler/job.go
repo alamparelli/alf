@@ -74,9 +74,13 @@ func (s *Store) Load() error {
 		return fmt.Errorf("parse cron.json: %w", err)
 	}
 	// Filter out any system jobs that leaked into cron.json (legacy bug).
+	// Migrate legacy "telegram" output to "chat".
 	var userJobs []*Job
 	for _, j := range file.Jobs {
 		if !j.System {
+			if j.Output == "telegram" {
+				j.Output = "chat"
+			}
 			userJobs = append(userJobs, j)
 		}
 	}

@@ -16,6 +16,7 @@ type Config struct {
 	ContextDir string
 	ChatID     int64
 	TG         TelegramSender
+	CC         ChatNotifier       // optional - pushes notifications to Control Center chat
 	Provider   ProviderInvoker
 	TierStore  TierStoreReader
 	SkillStore   SkillStoreReader   // optional - injects skill prompts into jobs
@@ -191,19 +192,19 @@ func (e *Engine) notifyChange() {
 
 // validOutputs defines acceptable output values.
 var validOutputs = map[string]bool{
-	"telegram": true,
-	"file":     true,
-	"both":     true,
-	"silent":   true,
+	"chat":   true,
+	"file":   true,
+	"both":   true,
+	"silent": true,
 }
 
 // Create adds a new user job.
 func (e *Engine) Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string) (*Job, error) {
 	if output == "" {
-		output = "telegram"
+		output = "chat"
 	}
 	if !validOutputs[output] {
-		return nil, fmt.Errorf("invalid output %q (must be telegram, file, both, or silent)", output)
+		return nil, fmt.Errorf("invalid output %q (must be chat, file, both, or silent)", output)
 	}
 
 	// Validate tier: must be "direct" or exist in tier store.
@@ -258,10 +259,10 @@ func (e *Engine) Create(name, schedule, tier, prompt, command, output string, ti
 // CreateReminder adds a push-notification job (no LLM, no command - just a message).
 func (e *Engine) CreateReminder(name, schedule, message, output string, timeout time.Duration) (*Job, error) {
 	if output == "" {
-		output = "telegram"
+		output = "chat"
 	}
 	if !validOutputs[output] {
-		return nil, fmt.Errorf("invalid output %q (must be telegram, file, both, or silent)", output)
+		return nil, fmt.Errorf("invalid output %q (must be chat, file, both, or silent)", output)
 	}
 
 	j := &Job{
@@ -339,7 +340,7 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 
 	// Validate before applying.
 	if v, ok := fields["output"]; ok && !validOutputs[v] {
-		return nil, fmt.Errorf("invalid output %q (must be telegram, file, both, or silent)", v)
+		return nil, fmt.Errorf("invalid output %q (must be chat, file, both, or silent)", v)
 	}
 	if v, ok := fields["tier"]; ok && v != "direct" {
 		if e.cfg.TierStore != nil {

@@ -27,6 +27,11 @@ type TelegramSender interface {
 	SendMessage(chatID int64, text string) error
 }
 
+// ChatNotifier pushes notifications to the Control Center chat.
+type ChatNotifier interface {
+	Notify(text string)
+}
+
 // ProviderInvoker invokes Claude CLI.
 type ProviderInvoker interface {
 	Invoke(ctx context.Context, prompt string, params ProviderParams, onProgress interface{}) (*ProviderResult, error)
@@ -196,11 +201,9 @@ func (e *Engine) executeJob(j *Job) {
 		e.runLog.appendAndTruncate(rec)
 		e.logScheduleRun(rec, "")
 
-		// Notify on failure if output includes telegram.
-		if j.Output == "telegram" || j.Output == "both" {
-			if e.cfg.TG != nil && e.cfg.ChatID != 0 {
-				e.cfg.TG.SendMessage(e.cfg.ChatID, fmt.Sprintf("⚠️ Scheduled job \"%s\" failed: %s", j.Name, err))
-			}
+		// Notify on failure if output includes chat.
+		if j.Output == "chat" || j.Output == "both" {
+			e.sendChat(j, fmt.Sprintf("⚠️ Scheduled job \"%s\" failed: %s", j.Name, err))
 		}
 		return
 	}
@@ -230,10 +233,8 @@ func (e *Engine) executeJob(j *Job) {
 		e.runLog.appendAndTruncate(rec)
 		e.logScheduleRun(rec, text)
 
-		if j.Output == "telegram" || j.Output == "both" {
-			if e.cfg.TG != nil && e.cfg.ChatID != 0 {
-				e.cfg.TG.SendMessage(e.cfg.ChatID, detail)
-			}
+		if j.Output == "chat" || j.Output == "both" {
+			e.sendChat(j, detail)
 		}
 		if !j.System {
 			e.store.Save()
@@ -443,25 +444,34 @@ func (e *Engine) dispatch(j *Job, text string) {
 	}
 
 	switch j.Output {
-	case "telegram":
-		e.sendTelegram(j, text)
+	case "chat":
+		e.sendChat(j, text)
 	case "file":
 		e.writeFile(j, text)
 	case "both":
-		e.sendTelegram(j, text)
+		e.sendChat(j, text)
 		e.writeFile(j, text)
 	case "silent":
 		// no-op
 	}
 }
 
-func (e *Engine) sendTelegram(j *Job, text string) {
-	if e.cfg.TG == nil || e.cfg.ChatID == 0 {
-		log.Printf("scheduler: telegram not configured, skipping output for job %s", j.ID)
-		return
+// sendChat notifies all available chat channels (Telegram + Control Center).
+func (e *Engine) sendChat(j *Job, text string) {
+	sent := false
+	if e.cfg.TG != nil && e.cfg.ChatID != 0 {
+		if err := e.cfg.TG.SendMessage(e.cfg.ChatID, text); err != nil {
+			log.Printf("scheduler: telegram send failed for job %s: %v", j.ID, err)
+		} else {
+			sent = true
+		}
 	}
-	if err := e.cfg.TG.SendMessage(e.cfg.ChatID, text); err != nil {
-		log.Printf("scheduler: telegram send failed for job %s: %v", j.ID, err)
+	if e.cfg.CC != nil {
+		e.cfg.CC.Notify(text)
+		sent = true
+	}
+	if !sent {
+		log.Printf("scheduler: no chat channels configured, skipping output for job %s", j.ID)
 	}
 }
 

@@ -141,20 +141,20 @@ Two types of scheduled jobs:
 **LLM jobs** - ALF thinks and responds using a prompt:
 ```bash
 schedule create --name "morning brief" --schedule "0 0 9 * * 1-5" \
-  --tier sonnet --prompt "Summarize today's priorities" --output telegram
+  --tier sonnet --prompt "Summarize today's priorities" --output chat
 ```
 
 **Direct jobs** - run a bash command, no LLM involved:
 ```bash
 schedule create --name "disk check" --schedule "0 0 */6 * * *" \
-  --command "df -h" --output telegram
+  --command "df -h" --output chat
 ```
 
 **Agent jobs** - coordinate multiple agents for complex tasks:
 ```bash
 schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
   --tier agent --prompt "Analyze this week's commits and write a report" \
-  --output telegram
+  --output chat
 ```
 
 ### Schedule options
@@ -168,7 +168,7 @@ schedule create --name "weekly report" --schedule "0 0 9 * * 1" \
 | `--command` | For direct | Bash command to execute |
 | `--message` | For reminder | Text to send directly (no LLM, no bash) |
 | `--timeout` | No | Max execution time (e.g. `5m`, `30s`). Default varies by tier. |
-| `--output` | No | Where to send results: `telegram`, `file`, `both`, `silent` (default: `telegram`) |
+| `--output` | No | Where to send results: `chat`, `file`, `both`, `silent` (default: `chat`) |
 | `--skills` | No | Comma-separated skill names to inject |
 
 ### Schedule expressions

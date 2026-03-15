@@ -63,7 +63,7 @@ func (h *TelegramHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.del(w, r)
 	default:
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 
@@ -86,8 +86,7 @@ func (h *TelegramHandler) get(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (h *TelegramHandler) put(w http.ResponseWriter, r *http.Request) {
@@ -130,8 +129,7 @@ func (h *TelegramHandler) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"ok":               true,
 		"bot_name":         botName,
 		"restart_required": true,
@@ -143,8 +141,7 @@ func (h *TelegramHandler) del(w http.ResponseWriter, _ *http.Request) {
 		h.Vault.Client().DeleteFile(vaultKeyTGBotToken)
 		h.Vault.Client().DeleteFile(vaultKeyTGChatID)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // validateBotTokenHTTP validates a bot token via the Telegram API. Returns bot username or "".

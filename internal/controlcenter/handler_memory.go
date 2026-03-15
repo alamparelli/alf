@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/alamparelli/alf/internal/provider"
 )
 
-var validFileName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+// validFileName uses the shared safeName pattern from validation.go.
+var validFileName = safeName
 
 // protectedContextFiles cannot be overwritten via Teach.
 var protectedContextFiles = map[string]bool{
@@ -68,7 +68,7 @@ type ingestMemory struct {
 
 func (h *MemoryIngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		methodNotAllowed(w)
 		return
 	}
 
@@ -235,11 +235,7 @@ Rules: self-contained items, concise, skip trivial info.`, instruction, content)
 	}
 
 	// Parse JSON array from response - Claude may wrap it in prose or code blocks.
-	raw := strings.TrimSpace(result.Text)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
+	raw := stripCodeBlock(result.Text)
 
 	// Extract JSON array even if surrounded by prose text.
 	if start := strings.Index(raw, "["); start >= 0 {
@@ -368,7 +364,7 @@ type MemoryTiersHandler struct {
 
 func (h *MemoryTiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		methodNotAllowed(w)
 		return
 	}
 
@@ -401,8 +397,3 @@ func (h *MemoryTiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, tiers)
 }
 
-func respondJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}

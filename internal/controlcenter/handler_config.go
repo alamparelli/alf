@@ -20,7 +20,7 @@ func (h *ConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		h.put(w, r)
 	default:
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 
@@ -101,11 +101,6 @@ func (h *ConfigHandler) put(w http.ResponseWriter, r *http.Request) {
 		h.Notifier.Notify(h.Event)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func jsonErr(msg string) string {
-	data, _ := json.Marshal(map[string]string{"error": msg})
-	return string(data)
-}

@@ -13,7 +13,7 @@ type LogsHandler struct {
 
 func (h *LogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 

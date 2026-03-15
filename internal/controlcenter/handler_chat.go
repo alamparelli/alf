@@ -23,7 +23,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.newSession(w, r)
 	default:
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 
@@ -45,8 +45,7 @@ func (h *ChatHandler) sendMessage(w http.ResponseWriter, r *http.Request) {
 func (h *ChatHandler) newSession(w http.ResponseWriter, r *http.Request) {
 	onboard := r.URL.Query().Get("onboard") == "1"
 	old, newConvID := h.Service.NewSession(onboard)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": true, "previous_session": old, "conv_id": newConvID})
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "previous_session": old, "conv_id": newConvID})
 }
 
 func (h *ChatHandler) history(w http.ResponseWriter, r *http.Request) {
@@ -66,8 +65,7 @@ func (h *ChatHandler) history(w http.ResponseWriter, r *http.Request) {
 
 	convID := r.URL.Query().Get("conv_id")
 	msgs := h.Service.History(limit, before, convID)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(msgs)
+	respondJSON(w, http.StatusOK, msgs)
 }
 
 // ChatConversationsHandler handles GET /api/chat/conversations.
@@ -80,14 +78,13 @@ func (h *ChatConversationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		convs := h.Service.Conversations()
 		// Also include the current active conv_id.
 		currentConvID := h.Service.CurrentConvID()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		respondJSON(w, http.StatusOK, map[string]any{
 			"conversations":  convs,
 			"active_conv_id": currentConvID,
 		})
 		return
 	}
-	http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	methodNotAllowed(w)
 }
 
 // ChatJobHandler handles GET /api/chat/job (status + reconnect) and DELETE (cancel).
@@ -118,11 +115,10 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Status check - scoped by conv_id.
 		convID := r.URL.Query().Get("conv_id")
 		j := h.Service.ActiveJob(convID)
-		w.Header().Set("Content-Type", "application/json")
 		if j == nil {
-			json.NewEncoder(w).Encode(map[string]any{"active": false})
+			respondJSON(w, http.StatusOK, map[string]any{"active": false})
 		} else {
-			json.NewEncoder(w).Encode(map[string]any{
+			respondJSON(w, http.StatusOK, map[string]any{
 				"active": true,
 				"job_id": j.ID,
 				"events": j.eventCount(),
@@ -135,11 +131,10 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if j != nil {
 			j.cancel()
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 
 	default:
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 

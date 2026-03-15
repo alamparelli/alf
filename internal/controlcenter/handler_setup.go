@@ -47,7 +47,7 @@ func (h *SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case sub == "apply" && r.Method == http.MethodPost:
 		h.handleApply(w, r)
 	default:
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 

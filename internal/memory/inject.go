@@ -341,13 +341,42 @@ func SetOnboarding(contextDir string) {
 	os.WriteFile(filepath.Join(contextDir, ".onboarding"), []byte("1"), 0o644)
 }
 
-// GenerateToolbox scans tools.d/ and tools/ directories and writes a
-// toolbox.md to contextDir listing every available CLI tool.
+// GenerateToolbox scans apps/, tools/, tools.d/ directories and writes a
+// toolbox.md to contextDir listing user apps and all available CLI tools.
+// User creations are listed first (override system equivalents).
 // Regenerated at every boot so it's always accurate.
 func GenerateToolbox(contextDir, dataDir string) {
 	var sb strings.Builder
 	sb.WriteString("# Toolbox\n\n")
+
+	// Scan user apps (apps/) — listed first, highest priority.
+	appsDir := filepath.Join(dataDir, "apps")
+	apps := scanApps(appsDir)
+	if len(apps) > 0 {
+		sb.WriteString("## User Apps (apps/)\n\n")
+		sb.WriteString("Accessible in Control Center at /apps/{name}\n\n")
+		for _, a := range apps {
+			if a.Description != "" {
+				sb.WriteString(fmt.Sprintf("- **%s** (`%s`) - %s\n", a.Name, a.Slug, a.Description))
+			} else {
+				sb.WriteString(fmt.Sprintf("- **%s** (`%s`)\n", a.Name, a.Slug))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
 	sb.WriteString("CLI tools on PATH. Run via Bash.\n\n")
+
+	// Scan user tools (tools/) — listed before system tools (user overrides system).
+	userDir := filepath.Join(dataDir, "tools")
+	userTools := scanTools(userDir)
+	if len(userTools) > 0 {
+		sb.WriteString("## User Tools (tools/) — override system tools\n\n")
+		for _, t := range userTools {
+			sb.WriteString(toolLine(t, userDir))
+		}
+		sb.WriteString("\n")
+	}
 
 	// Scan system tools (tools.d/).
 	systemDir := filepath.Join(dataDir, "tools.d")
@@ -360,17 +389,6 @@ func GenerateToolbox(contextDir, dataDir string) {
 			if t == "vault" {
 				hasVault = true
 			}
-		}
-		sb.WriteString("\n")
-	}
-
-	// Scan user tools (tools/).
-	userDir := filepath.Join(dataDir, "tools")
-	userTools := scanTools(userDir)
-	if len(userTools) > 0 {
-		sb.WriteString("## User Tools (tools/)\n\n")
-		for _, t := range userTools {
-			sb.WriteString(toolLine(t, userDir))
 		}
 		sb.WriteString("\n")
 	}
@@ -496,6 +514,40 @@ func buildUsage(name string, s *toolSchema) string {
 	parts = append(parts, flags...)
 
 	return strings.Join(parts, " ")
+}
+
+// appEntry represents a discovered user app from apps/{name}/app.json.
+type appEntry struct {
+	Slug        string // directory name (URL slug)
+	Name        string `json:"name"`
+	Icon        string `json:"icon"`
+	Description string `json:"description"`
+}
+
+// scanApps reads apps/ subdirectories and parses app.json metadata.
+// Apps without app.json are still listed (slug only).
+func scanApps(appsDir string) []appEntry {
+	entries, err := os.ReadDir(appsDir)
+	if err != nil {
+		return nil
+	}
+	var apps []appEntry
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		app := appEntry{Slug: e.Name(), Name: e.Name()}
+		data, err := os.ReadFile(filepath.Join(appsDir, e.Name(), "app.json"))
+		if err == nil {
+			json.Unmarshal(data, &app)
+			if app.Name == "" {
+				app.Name = e.Name()
+			}
+		}
+		apps = append(apps, app)
+	}
+	sort.Slice(apps, func(i, j int) bool { return apps[i].Slug < apps[j].Slug })
+	return apps
 }
 
 // scanTools returns sorted unique tool names from a directory,

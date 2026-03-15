@@ -29,7 +29,7 @@ For each file, check against the threat model below.
 
 ## Threat model
 
-ALF runs as uid 1001 inside Docker with access to:
+ALF runs as uid 1000 (non-root) inside Docker with access to:
 - Telegram bot token and chat ID (via /run/secrets/)
 - Claude CLI with API access
 - Network access (outbound)

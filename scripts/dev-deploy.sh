@@ -194,6 +194,8 @@ services:
     cap_drop:
       - ALL
     cap_add:
+      # Required for entrypoint only (apt-get, chown, setpriv). The daemon
+      # process runs as uid 1000 with zero capabilities (stripped by setpriv).
       - CHOWN
       - SETUID
       - SETGID
@@ -246,15 +248,9 @@ COMPOSEOF
 $SCP /tmp/alf-compose-direct.yml "${REMOTE_HOST}:${REMOTE_DIR}/docker-compose.yml"
 rm -f /tmp/alf-compose-direct.yml
 
-# Detect gVisor and write .env for runtime selection.
-echo "==> Detecting container runtime..."
-if $SSH "${REMOTE_HOST}" "which runsc >/dev/null 2>&1"; then
-  echo "    gVisor (runsc) detected"
-  $SSH "${REMOTE_HOST}" "echo 'ALF_RUNTIME=runsc' > ${REMOTE_DIR}/.env"
-else
-  echo "    Using default runtime (runc)"
-  $SSH "${REMOTE_HOST}" "echo 'ALF_RUNTIME=runc' > ${REMOTE_DIR}/.env"
-fi
+# Force runc runtime — gVisor (runsc) is incompatible with PTY/terminal (xterm.js).
+echo "==> Setting container runtime to runc..."
+$SSH "${REMOTE_HOST}" "echo 'ALF_RUNTIME=runc' > ${REMOTE_DIR}/.env"
 
 # Write resolv.conf for gVisor DNS compatibility.
 $SSH "${REMOTE_HOST}" "echo -e 'nameserver 8.8.8.8\nnameserver 1.1.1.1' > ${REMOTE_DIR}/resolv.conf"

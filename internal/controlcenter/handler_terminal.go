@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/creack/pty"
 	"nhooyr.io/websocket"
@@ -49,11 +48,8 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if shell == "" {
 		shell = "/bin/bash"
 	}
-	// Run shell as alf user (uid=1001), not root.
+	// Daemon already runs as uid 1000 (alf) — no credential switch needed.
 	cmd := exec.CommandContext(ctx, shell, "--login")
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
-	}
 	homeDir := "/home/alf"
 	if d := os.Getenv("ALF_HOME_DIR"); d != "" {
 		homeDir = d

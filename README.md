@@ -12,7 +12,7 @@ Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies
 - **Semantic memory** - Go-native ONNX embeddings (sqlite-vec + FTS5) for real long-term recall, not just context window tricks
 - **Persistent classifier** - a long-lived Claude process handles message routing in ~0ms instead of spawning a new process per message
 - **Tier system** - configurable response tiers (model, tools, effort, read/write access) routed by an LLM classifier
-- **Defense-in-depth security** - Unix user isolation (uid 1001), read-only config, restricted tool execution, not just a container boundary
+- **Defense-in-depth security** - Non-root daemon (uid 1000, zero capabilities), read-only config, restricted tool execution, not just a container boundary
 - **No API costs** - runs on your Claude subscription (Pro/Max/Team), not pay-per-token API calls
 - **Self-hosted** - your hardware, your data, your rules. No cloud dependency beyond your Claude account
 
@@ -30,7 +30,7 @@ Host machine                         Docker container
 │              │                     │       ▼              ▼           │
 │              │                     │  ┌──────────┐  ┌──────────┐      │
 │              │                     │  │Claude    │  │ Whisper  │      │
-│              │                     │  │(uid 1001)│  │ (python) │      │
+│              │                     │  │(uid 1000)│  │ (python) │      │
 │              │                     │  └──────────┘  └──────────┘      │
 └──────────────┘                     └──────────────────────────────────┘
 ```
@@ -228,7 +228,7 @@ internal/
 
 ## Security model
 
-ALF runs as root inside the container to manage subprocess isolation. Claude runs as a restricted user (uid 1001):
+The entrypoint runs as root for package installation and permission setup, then drops to uid 1000 (alf) with zero capabilities via `setpriv`:
 
 - `/opt/alf/config.d/` - read-only for Claude
 - `/opt/alf/tools.d/` - read + execute only

@@ -21,6 +21,10 @@ Thumbs.db
 vendor/
 third_party/
 
+# Python
+__pycache__/
+*.pyc
+
 # User space (runtime data)
 user-space/
 .plans/

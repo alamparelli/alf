@@ -134,6 +134,7 @@ function navigateTo(view) {
   document.querySelectorAll('#navGrid .nav-icon, #navAppsSection .nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === navView);
   });
+  if (typeof syncBottomNav === 'function') syncBottomNav(navView);
 
   homeView.style.display = 'none';
   chatView.style.display = 'none';
@@ -215,6 +216,34 @@ function navigateTo(view) {
 document.querySelectorAll('#navGrid .nav-icon').forEach(el => {
   el.addEventListener('click', () => navigateTo(el.dataset.view));
 });
+
+// Bind bottom nav bar (mobile).
+document.querySelectorAll('#bottomNav .bottom-nav-item').forEach(el => {
+  el.addEventListener('click', (e) => {
+    e.preventDefault();
+    const view = el.dataset.view;
+    if (view === 'more') {
+      // Open sidebar for access to all views.
+      document.getElementById('sidebar').classList.add('open');
+      document.getElementById('sidebarOverlay').classList.add('open');
+    } else {
+      navigateTo(view);
+    }
+  });
+});
+
+// Sync bottom nav active state with navigation.
+function syncBottomNav(view) {
+  document.querySelectorAll('#bottomNav .bottom-nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.view === view);
+  });
+  // Sync chat badge.
+  const chatBottomNav = document.querySelector('#bottomNav .bottom-nav-item[data-view="chat"]');
+  const chatSideNav = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
+  if (chatBottomNav && chatSideNav) {
+    chatBottomNav.classList.toggle('has-badge', chatSideNav.classList.contains('has-badge'));
+  }
+}
 
 // --- Status ---
 function loadStatus() {
@@ -1378,10 +1407,14 @@ function chatShowBadge() {
   if (chatIsChatActive()) return;
   const navEl = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
   if (navEl) navEl.classList.add('has-badge');
+  const bottomEl = document.querySelector('#bottomNav .bottom-nav-item[data-view="chat"]');
+  if (bottomEl) bottomEl.classList.add('has-badge');
 }
 function chatClearBadge() {
   const navEl = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
   if (navEl) navEl.classList.remove('has-badge');
+  const bottomEl = document.querySelector('#bottomNav .bottom-nav-item[data-view="chat"]');
+  if (bottomEl) bottomEl.classList.remove('has-badge');
 }
 
 // --- Chat Tabs ---

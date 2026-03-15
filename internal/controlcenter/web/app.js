@@ -2100,7 +2100,7 @@ function chatAppendBubble(role, text, meta) {
   }
   if (text) {
     const textEl = document.createElement('div');
-    textEl.innerHTML = role === 'user' ? esc(text) : chatRenderMd(text);
+    textEl.innerHTML = chatRenderMd(text);
     bubble.appendChild(textEl);
   }
 
@@ -3742,6 +3742,10 @@ function tasksRender(running, completed) {
     btn.onclick = (e) => { e.stopPropagation(); tasksRelaunch(btn.dataset.prompt); };
   });
 
+  container.querySelectorAll('.task-delete-btn').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); tasksDelete(btn.dataset.id); };
+  });
+
   // Restore expanded state and bind click handlers.
   container.querySelectorAll('.task-card').forEach(card => {
     const id = card.dataset.taskId;
@@ -3907,6 +3911,9 @@ function taskCard(task, isRunning) {
   const relaunchBtn = !isRunning && task.prompt
     ? '<button class="btn-sm task-relaunch-btn" data-prompt="' + taskEscapeHtml(task.prompt).replace(/"/g, '&quot;') + '"><i data-lucide="rotate-cw" style="width:12px;height:12px;vertical-align:middle;margin-right:2px"></i>Relaunch</button>'
     : '';
+  const deleteBtn = !isRunning
+    ? '<button class="btn-sm btn-danger task-delete-btn" data-id="' + taskEscapeHtml(task.id) + '"><i data-lucide="trash-2" style="width:12px;height:12px;vertical-align:middle;margin-right:2px"></i></button>'
+    : '';
 
   return '<div class="task-card ' + statusClass + '" data-task-id="' + taskEscapeHtml(task.id) + '">' +
     '<div class="task-card-header">' +
@@ -3915,6 +3922,7 @@ function taskCard(task, isRunning) {
       '<div class="task-card-actions">' +
         relaunchBtn +
         cancelBtn +
+        deleteBtn +
         '<span class="task-chevron"><i data-lucide="chevron-right"></i></span>' +
       '</div>' +
     '</div>' +
@@ -3952,6 +3960,16 @@ async function tasksCancel(id) {
     tasksFetch();
   } catch (e) {
     toast('Cancel failed: ' + e.message, 'error');
+  }
+}
+
+async function tasksDelete(id) {
+  try {
+    await fetch('/api/tasks?id=' + encodeURIComponent(id) + '&action=delete', { method: 'DELETE' });
+    toast('Task deleted');
+    tasksFetch();
+  } catch (e) {
+    toast('Delete failed: ' + e.message, 'error');
   }
 }
 

@@ -19,7 +19,7 @@ type PromptConfig struct {
 
 // injectedFiles are the only files injected into every conversation.
 // All other context/*.md files must be read on-demand by the model.
-var injectedFiles = []string{"soul.md", "mood.md", "index.md", "toolbox.md"}
+var injectedFiles = []string{"soul.md", "mood.md", "index.md", "preferences.md", "toolbox.md"}
 
 // knownTags lists the conditional section tags we support.
 var knownTags = []string{"cli", "api", "tg", "cc"}
@@ -125,7 +125,7 @@ func CollectPrompts(contextDir string, cfg PromptConfig) []string {
 	// Light tiers skip toolbox.md (tools are in the system prompt or not needed).
 	files := injectedFiles
 	if cfg.Weight == "light" {
-		files = []string{"soul.md", "mood.md", "index.md"}
+		files = []string{"soul.md", "mood.md", "index.md", "preferences.md"}
 	}
 
 	for _, f := range files {

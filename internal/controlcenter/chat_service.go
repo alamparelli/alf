@@ -868,10 +868,8 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 		go cs.negativeFollowUp(emoji, req.MsgID)
 	}
 
-	// Async reaction learning: extract what the user liked/disliked.
-	if cs.MemStore != nil {
-		go cs.extractReactionLearning(emoji, req.MsgID)
-	}
+	// Async reaction learning: extract what the user liked/disliked → preferences.md.
+	go cs.extractReactionLearning(emoji, req.MsgID)
 
 	return result, nil
 }
@@ -1305,14 +1303,16 @@ Rules:
 		return
 	}
 
-	memType := "preference"
-	if learning.Type == "fact" || learning.Type == "decision" {
-		memType = learning.Type
-	}
+	// Append to preferences file (always injected in system prompt).
+	memory.AppendPreference(cs.ContextDir, learning.Learning, sentiment, emoji)
 
-	meta := map[string]any{"source_emoji": emoji, "sentiment": sentiment}
-	if id, err := cs.MemStore.Store(learning.Learning, memType, "reaction", meta); err == nil {
-		log.Printf("[chat-api] reaction learning stored: #%d %q (%s %s)", id, learning.Learning, emoji, sentiment)
+	// Consolidate if threshold exceeded.
+	if memory.CountEntries(cs.ContextDir) >= 20 {
+		tp := tierParams{Model: "claude-haiku-4-5"}
+		if fallback := cs.firstFallbackTier(); fallback != "" {
+			tp = cs.resolveTierParams(fallback)
+		}
+		go memory.ConsolidatePreferences(cs.ContextDir, cs.Provider, tp.Model)
 	}
 }
 

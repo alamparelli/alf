@@ -451,7 +451,7 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 	}
 
 	// Extract behavioral learning from the reaction (async, both positive and negative).
-	go extractReactionLearningTG(emoji, dataDir, prov, tierStore, memDB, convStore)
+	go extractReactionLearningTG(emoji, dataDir, prov, tierStore, convStore)
 
 	// Negative reaction follow-up: ask what went wrong.
 	if !mood.IsNegative(emoji) {
@@ -520,8 +520,8 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 }
 
 // extractReactionLearningTG extracts a behavioral learning from a reaction using conversation context.
-func extractReactionLearningTG(emoji, dataDir string, prov *provider.CLIProvider, tierStore cc.TierStore, memDB *memstore.Store, convStore *conversation.Store) {
-	if memDB == nil || convStore == nil {
+func extractReactionLearningTG(emoji, dataDir string, prov *provider.CLIProvider, tierStore cc.TierStore, convStore *conversation.Store) {
+	if convStore == nil {
 		return
 	}
 
@@ -626,14 +626,23 @@ Rules:
 		return
 	}
 
-	memType := "preference"
-	if learning.Type == "fact" || learning.Type == "decision" {
-		memType = learning.Type
-	}
+	// Append to preferences file (always injected in system prompt).
+	contextDir := filepath.Join(dataDir, "context")
+	memory.AppendPreference(contextDir, learning.Learning, sentiment, emoji)
 
-	meta := map[string]any{"source_emoji": emoji, "sentiment": sentiment}
-	if id, err := memDB.Store(learning.Learning, memType, "reaction", meta); err == nil {
-		log.Printf("reaction learning stored: #%d %q (%s %s)", id, learning.Learning, emoji, sentiment)
+	// Consolidate if threshold exceeded.
+	if memory.CountEntries(contextDir) >= 20 {
+		model := "claude-haiku-4-5"
+		fallback := firstFallbackTier(tierStore)
+		for _, t := range tierStore.Current().Tiers {
+			if t.Name == fallback {
+				if m := router.ResolveModel(t.Model); m != "" {
+					model = m
+				}
+				break
+			}
+		}
+		go memory.ConsolidatePreferences(contextDir, prov, model)
 	}
 }
 

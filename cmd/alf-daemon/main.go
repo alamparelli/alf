@@ -592,7 +592,32 @@ func main() {
 				log.Println("Telegram config loaded from vault (post-unlock)")
 			}
 		}
-		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock)
+		// Task event callback: notify via CC chat store (system message).
+		onTaskEvent := func(taskID, status, summary string) {
+			var text string
+			switch status {
+			case "completed":
+				text = "Task #" + taskID[:min(8, len(taskID))] + " completed"
+				if summary != "" {
+					text += "\n" + summary
+				}
+			case "failed", "timeout":
+				text = "Task #" + taskID[:min(8, len(taskID))] + " " + status
+			case "awaiting_arbitration":
+				text = "Task #" + taskID[:min(8, len(taskID))] + " needs your input - check the Tasks tab"
+			case "awaiting_approval":
+				text = "Task #" + taskID[:min(8, len(taskID))] + " plan ready for review - check the Tasks tab"
+			default:
+				return
+			}
+			chatStore.Append(cc.ChatMessage{
+				ID:   cc.NewMessageID(),
+				Role: "system",
+				Text: text,
+			})
+			log.Printf("[tasks] event: task=%s status=%s", taskID[:min(8, len(taskID))], status)
+		}
+		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock, onTaskEvent)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {

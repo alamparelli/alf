@@ -42,6 +42,7 @@ type Deps struct {
 	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
 	ModelCache       *ModelCache           // nil if model cache unavailable
 	OnVaultUnlock    func()                // called after vault unlock (e.g. secret migration)
+	OnTaskEvent      func(taskID, status, summary string) // called when a task completes or needs attention
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS
@@ -212,6 +213,7 @@ func HandlerFactory(deps Deps) http.Handler {
 		taskHandler.Recaller = deps.ChatService.Recaller
 		taskHandler.ResolveModel = deps.ChatService.ResolveModel
 	}
+	taskHandler.OnTaskEvent = deps.OnTaskEvent
 	mux.Handle("/api/tasks", taskHandler)
 	mux.Handle("/api/tasks/approve", &TaskApproveHandler{Orchestrator: deps.Orchestrator})
 

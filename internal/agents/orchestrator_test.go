@@ -1282,3 +1282,234 @@ func TestRun_NoPlan_BackwardsCompatible(t *testing.T) {
 		t.Errorf("expected no plan, got %d steps", len(meta.Plan))
 	}
 }
+
+// --- extractQuestions tests ---
+
+func TestExtractQuestions(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want []string
+	}{
+		{"single", "Before [[QUESTION: What color?]] after", []string{"What color?"}},
+		{"multiple", "[[QUESTION: A?]] and [[QUESTION: B?]]", []string{"A?", "B?"}},
+		{"none", "No questions here", nil},
+		{"empty marker", "[[QUESTION: ]]", nil},
+		{"with brackets", "[[QUESTION: Pick A or B?]]", []string{"Pick A or B?"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractQuestions(tt.text)
+			if len(got) != len(tt.want) {
+				t.Fatalf("extractQuestions(%q) = %v, want %v", tt.text, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("question[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestParseOrchestratorOutput_WithQuestions(t *testing.T) {
+	text := `{"questions": ["What format?", "Include examples?"]}`
+	out := parseOrchestratorOutput(text)
+	if len(out.Questions) != 2 {
+		t.Fatalf("expected 2 questions, got %d", len(out.Questions))
+	}
+	if out.Questions[0] != "What format?" {
+		t.Errorf("question[0] = %q", out.Questions[0])
+	}
+}
+
+func TestRun_ArbitrationFromOrchestrator(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator outputs questions.
+		{Text: `{"questions": ["Pick A or B?"]}`},
+		// After user answers: final response.
+		{Text: `{"response": "done with A"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	var phases []string
+	progress := func(phase, _ string) { phases = append(phases, phase) }
+
+	done := make(chan struct{})
+	var text string
+	var meta *TaskMeta
+	var runErr error
+	go func() {
+		text, meta, runErr = orch.Run(context.Background(), "choose", nil, RunConfig{}, progress)
+		close(done)
+	}()
+
+	// Wait for awaiting_arbitration.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_arbitration" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_arbitration")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Verify questions are stored.
+	running := orch.Running()
+	if len(running[0].Meta.Questions) != 1 {
+		t.Fatalf("expected 1 question, got %d", len(running[0].Meta.Questions))
+	}
+
+	// Send answer.
+	ok := orch.Approve(running[0].ID, ApprovalDecision{Approved: true, Feedback: "A"})
+	if !ok {
+		t.Fatal("Approve returned false")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete after arbitration response")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if text != "done with A" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if meta.Status != "completed" {
+		t.Errorf("expected completed, got %s", meta.Status)
+	}
+
+	// Verify awaiting_arbitration phase was emitted.
+	hasArbitration := false
+	for _, p := range phases {
+		if p == "awaiting_arbitration" {
+			hasArbitration = true
+		}
+	}
+	if !hasArbitration {
+		t.Errorf("expected awaiting_arbitration phase, got: %v", phases)
+	}
+}
+
+func TestRun_ArbitrationFromAgentMarkers(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator: delegate.
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find"}]}`},
+		// Agent returns result with QUESTION marker.
+		{Text: "Found data. [[QUESTION: Should I include charts?]]"},
+		// After user answers: orchestrator gets results and responds.
+		{Text: `{"response": "done with charts"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	done := make(chan struct{})
+	var text string
+	var runErr error
+	go func() {
+		text, _, runErr = orch.Run(context.Background(), "analyze", nil, RunConfig{}, nil)
+		close(done)
+	}()
+
+	// Wait for awaiting_arbitration.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_arbitration" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_arbitration")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Answer.
+	running := orch.Running()
+	orch.Approve(running[0].ID, ApprovalDecision{Approved: true, Feedback: "Yes, include charts"})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if text != "done with charts" {
+		t.Errorf("unexpected: %s", text)
+	}
+}
+
+func TestRun_ArbitrationThenApproval(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator asks questions first.
+		{Text: `{"questions": ["Which approach?"]}`},
+		// After user answers: plan.
+		{Text: `{"plan": [{"step": 1, "description": "do stuff"}]}`},
+		// After approval: delegate.
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+		{Text: "result"},
+		{Text: `{"response": "completed"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	done := make(chan struct{})
+	var text string
+	var runErr error
+	go func() {
+		text, _, runErr = orch.Run(context.Background(), "test", nil, RunConfig{NeedValidation: true}, nil)
+		close(done)
+	}()
+
+	// Wait for arbitration.
+	waitForStatus := func(status string) {
+		deadline := time.After(2 * time.Second)
+		for {
+			running := orch.Running()
+			if len(running) > 0 && running[0].Meta.Status == status {
+				return
+			}
+			select {
+			case <-deadline:
+				t.Fatalf("never reached %s", status)
+			default:
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+	}
+
+	waitForStatus("awaiting_arbitration")
+	running := orch.Running()
+	orch.Approve(running[0].ID, ApprovalDecision{Approved: true, Feedback: "approach A"})
+
+	waitForStatus("awaiting_approval")
+	running = orch.Running()
+	orch.Approve(running[0].ID, ApprovalDecision{Approved: true})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if text != "completed" {
+		t.Errorf("unexpected: %s", text)
+	}
+}

@@ -211,6 +211,42 @@ To enable the orchestrator, set `"enabled": true` on the `agent` tier. It is dis
 
 > The entire flow is automatic. You send one message, and the orchestrator handles all the coordination. You only see the final synthesized answer.
 
+## Arbitrage mode
+
+Agents can pause execution and ask the user questions using `[[QUESTION: ...]]` markers in their output. When the orchestrator detects these markers (or outputs questions itself via Option D), the task enters `awaiting_arbitration` status.
+
+In the Tasks tab, arbitration tasks auto-expand and display the questions with a text area for your answers. Click **Submit** to resume the task with your input.
+
+To use this in agent prompts, instruct agents to output markers when they need clarification:
+
+```
+If you are unsure about the user's preference, output: [[QUESTION: your question here]]
+```
+
+The orchestrator will detect these markers, pause execution, and relay the questions to the user.
+
+## Task notifications
+
+Tasks automatically report to the chat interface (CC Chat and system messages) when they:
+
+- **Complete** — a summary of the result is sent as a system message
+- **Fail** — failure notification with the task ID
+- **Need input** — when a task enters arbitration or awaits plan approval
+
+Browser notifications are also triggered when the Tasks tab detects status changes (requires notification permission).
+
+## Task splitting
+
+By default, the orchestrator prefers splitting tasks into small, well-defined subtasks. Each subtask is independently verifiable, and parallel delegation is preferred when possible.
+
+You can override this behavior per-team using the `orchestrator_prompt` field:
+
+```json
+{
+  "orchestrator_prompt": "Do NOT split this task. Execute it as a single delegation to one agent."
+}
+```
+
 ## What's next?
 
 - [Creating Skills](docs:creating-skills) - teach ALF new abilities with auto-injection

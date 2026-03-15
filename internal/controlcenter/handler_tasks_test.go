@@ -216,3 +216,67 @@ func TestTasksHandler_MethodNotAllowed(t *testing.T) {
 		t.Errorf("expected 405, got %d", rec.Code)
 	}
 }
+
+func TestTasksHandler_OnTaskEventCalledOnCompletion(t *testing.T) {
+	mp := &mockProvider{}
+	orch := newTestOrchestrator(t, mp)
+	var mu sync.Mutex
+	var events []string
+	h := &TasksHandler{
+		Orchestrator: orch,
+		DataDir:      t.TempDir(),
+		ContextDir:   t.TempDir(),
+		OnTaskEvent: func(taskID, status, summary string) {
+			mu.Lock()
+			events = append(events, status)
+			mu.Unlock()
+		},
+	}
+
+	req := httptest.NewRequest("POST", "/api/tasks", strings.NewReader(`{"message":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Wait for the background goroutine to complete.
+	time.Sleep(200 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	// The mock provider returns {"response":"done"} which triggers "completed".
+	found := false
+	for _, e := range events {
+		if e == "completed" || e == "failed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected completed or failed event, got %v", events)
+	}
+}
+
+func TestTasksHandler_ApproveArbitration(t *testing.T) {
+	// Verify the approve endpoint accepts awaiting_arbitration status.
+	// This is tested via the orchestrator Approve method which now accepts both statuses.
+	orch := newTestOrchestrator(t, &mockProvider{})
+	h := &TaskApproveHandler{Orchestrator: orch}
+
+	// Try approving a non-existent task.
+	req := httptest.NewRequest("POST", "/api/tasks/approve",
+		strings.NewReader(`{"id":"nonexistent","approved":true,"feedback":"answer"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["ok"] != false {
+		t.Errorf("expected ok=false for non-existent task, got %v", resp["ok"])
+	}
+}

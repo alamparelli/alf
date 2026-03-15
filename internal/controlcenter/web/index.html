@@ -702,6 +702,28 @@
     </nav>
   </div>
 
+  <!-- Send to agents modal -->
+  <div class="agent-modal-overlay" id="agentModal" style="display:none">
+    <div class="agent-modal">
+      <h3>Send to Agents</h3>
+      <div class="form-group">
+        <label>Prompt</label>
+        <textarea id="agentModalPrompt" rows="3" readonly></textarea>
+      </div>
+      <div class="form-group">
+        <label>Team</label>
+        <select id="agentModalTeam"><option value="">Auto (best fit)</option></select>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label"><input type="checkbox" id="agentModalValidation"> Review plan before execution</label>
+      </div>
+      <div class="agent-modal-actions">
+        <button class="btn btn-secondary" id="agentModalCancel">Cancel</button>
+        <button class="btn btn-primary" id="agentModalSend"><i data-lucide="play" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Launch</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
   <script src="/static/purify.min.js"></script>
   <script src="/static/marked.min.js"></script>

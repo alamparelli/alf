@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alamparelli/alf/internal/secrets"
 	"github.com/alamparelli/alf/internal/voice"
 )
 
@@ -192,7 +193,7 @@ func collectFiles(prefix string, n int) ([]string, error) {
 
 func transcribeAudio(videoPath string) (string, string) {
 	whisperURL := os.Getenv("WHISPER_URL")
-	whisperSecret := readSecret("WHISPER_SHARED_SECRET")
+	whisperSecret := secrets.ReadSecret("WHISPER_SHARED_SECRET")
 	if whisperURL == "" || whisperSecret == "" {
 		return "", ""
 	}
@@ -259,14 +260,3 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// readSecret reads a secret from a Docker secret file (NAME_FILE env var)
-// or falls back to the plain environment variable.
-func readSecret(envVar string) string {
-	if filePath := os.Getenv(envVar + "_FILE"); filePath != "" {
-		data, err := os.ReadFile(filePath)
-		if err == nil {
-			return strings.TrimSpace(string(data))
-		}
-	}
-	return strings.TrimSpace(os.Getenv(envVar))
-}

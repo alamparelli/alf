@@ -397,10 +397,5 @@ func (h *VaultHandler) handleOAuth2Authorize(w http.ResponseWriter, r *http.Requ
 }
 
 // isVaultSafeName validates that a name/id has no path traversal characters.
-func isVaultSafeName(s string) bool {
-	if s == "" || s == "." || s == ".." {
-		return false
-	}
-	return !strings.Contains(s, "/") && !strings.Contains(s, "\\")
-}
+var isVaultSafeName = isSafeName
 

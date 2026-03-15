@@ -24,8 +24,8 @@ func NewFileLogReader(logDir string, allowlist []string) LogReader {
 }
 
 func (r *fileLogReader) Tail(name string, n int) ([]string, error) {
-	// Validate: no path traversal, must be in allowlist or discoverable.
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+	// Validate: no path traversal.
+	if !isSafeName(name) {
 		return nil, fmt.Errorf("invalid log name %q", name)
 	}
 

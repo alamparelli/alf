@@ -105,11 +105,13 @@ type ChatRequest struct {
 
 // ChatDoneData is sent with the "done" event.
 type ChatDoneData struct {
-	MsgID     string  `json:"msg_id"`
-	SessionID string  `json:"session_id"`
-	Model     string  `json:"model"`
-	CostUSD   float64 `json:"cost_usd"`
-	Tier      string  `json:"tier"`
+	MsgID      string   `json:"msg_id"`
+	SessionID  string   `json:"session_id"`
+	Model      string   `json:"model"`
+	CostUSD    float64  `json:"cost_usd"`
+	Tier       string   `json:"tier"`
+	DurationMs int64    `json:"duration_ms,omitempty"`
+	Skills     []string `json:"skills,omitempty"`
 }
 
 // UploadEntry tracks an uploaded file.
@@ -782,13 +784,18 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	// Send text to client.
 	onEvent(ChatEvent{Type: "text", Data: map[string]string{"text": cleanText}})
 
-	onEvent(ChatEvent{Type: "done", Data: ChatDoneData{
-		MsgID:     assistantMsg.ID,
-		SessionID: result.SessionID,
-		Model:     result.Model,
-		CostUSD:   result.CostUSD,
-		Tier:      tierName,
-	}})
+	doneData := ChatDoneData{
+		MsgID:      assistantMsg.ID,
+		SessionID:  result.SessionID,
+		Model:      result.Model,
+		CostUSD:    result.CostUSD,
+		Tier:       tierName,
+		DurationMs: duration.Milliseconds(),
+	}
+	if sk := cs.Sessions.GetSkills(apiChatID); len(sk) > 0 {
+		doneData.Skills = sk
+	}
+	onEvent(ChatEvent{Type: "done", Data: doneData})
 
 	outText := cleanText
 	if len(outText) > 500 {

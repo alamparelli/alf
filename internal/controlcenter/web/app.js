@@ -2439,6 +2439,14 @@ function chatFinalizeBubble() {
       let parts = [new Date().toLocaleTimeString()];
       if (chatDoneData.tier) parts.push(chatDoneData.tier);
       if (chatDoneData.model) parts.push(chatDoneData.model);
+      if (chatDoneData.cost_usd) parts.push('$' + chatDoneData.cost_usd.toFixed(4));
+      if (chatDoneData.duration_ms) {
+        const secs = (chatDoneData.duration_ms / 1000).toFixed(1);
+        parts.push(secs + 's');
+      }
+      if (chatDoneData.skills && chatDoneData.skills.length > 0) {
+        parts.push(chatDoneData.skills.join(', '));
+      }
       metaEl.textContent = parts.join(' · ');
       if (reactionsEl) {
         metaEl.appendChild(reactionsEl);
@@ -2745,7 +2753,23 @@ function chatExecCommand(cmd) {
       chatScrollBottom();
       break;
     case '/clear':
-      chatMessages.innerHTML = '';
+      fetch('/api/chat', { method: 'DELETE', credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(r => {
+          if (r.ok) {
+            const convId = r.conv_id || '';
+            chatSnapshotTab();
+            const tab = chatCreateTab(convId, 'New Chat');
+            chatActiveTabId = tab.id;
+            chatMessages.innerHTML = '';
+            chatSending = false;
+            chatJobId = null;
+            chatEventOffset = 0;
+            chatHistoryLoaded = true;
+            chatRenderTabs();
+            chatSaveTabs();
+          }
+        });
       break;
     case '/new':
       chatNewTab();
@@ -3774,7 +3798,7 @@ function taskCard(task, isRunning) {
   const shortId = task.id ? task.id.substring(0, 8) : '--';
 
   // Full request section.
-  const fullPrompt = task.prompt ? '<div class="task-section"><div class="task-section-title"><i data-lucide="message-square" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Request</div><div class="task-section-body">' + taskEscapeHtml(task.prompt) + '</div></div>' : '';
+  const fullPrompt = task.prompt ? '<div class="task-section"><div class="task-section-title"><i data-lucide="message-square" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Request</div><div class="task-section-body task-md">' + taskRenderMd(task.prompt) + '</div></div>' : '';
 
   // Plan section.
   let planSection = '';
@@ -3784,7 +3808,7 @@ function taskCard(task, isRunning) {
       const agentList = step.agents && step.agents.length > 0
         ? ' <span class="step-agents">' + step.agents.map(a => taskEscapeHtml(a)).join(', ') + '</span>'
         : '';
-      planSteps += '<div class="task-plan-step"><span class="step-num">' + step.step + '.</span><span>' + taskEscapeHtml(step.description) + agentList + '</span></div>';
+      planSteps += '<div class="task-plan-step"><span class="step-num">' + step.step + '.</span><span>' + taskRenderMd(step.description) + agentList + '</span></div>';
     });
     planSection = '<div class="task-section"><div class="task-section-title"><i data-lucide="list-ordered" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>Plan</div><div class="task-plan">' + planSteps + '</div></div>';
   }
@@ -3821,7 +3845,7 @@ function taskCard(task, isRunning) {
       const isWorking = call.status === 'working';
       const callStatus = isWorking ? 'working' : (call.error ? 'failed' : 'completed');
       const callCost = call.cost_usd ? '$' + call.cost_usd.toFixed(4) : '';
-      const callTask = call.task ? '<div class="task-step-task">' + taskEscapeHtml(call.task) + '</div>' : '';
+      const callTask = call.task ? '<div class="task-step-task task-md">' + taskRenderMd(call.task) + '</div>' : '';
       const callResult = isWorking ? ''
         : (call.error ? '<pre class="task-step-error">' + taskEscapeHtml(call.error) + '</pre>' : taskRenderMd(call.text || ''));
       // Meta badges: team, model.

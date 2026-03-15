@@ -36,6 +36,23 @@ alf restart
 
 Both methods achieve the same result. The Control Center method is recommended for simplicity.
 
+### Add secrets (API keys)
+
+The **Secrets** section stores key-value pairs like API keys and tokens. All backend API keys and Telegram credentials are stored here.
+
+1. Open the **Vault** tab
+2. Click **Add** in the Secrets section
+3. Enter the name (e.g. `openrouter_api_key`) and value
+4. Click **Save**
+
+Naming convention for backend API keys: `<backend_name>_api_key` (e.g. `openrouter_api_key`, `openai_api_key`).
+
+Other secrets stored in the vault:
+- `telegram_bot_token` - Telegram bot authentication
+- `telegram_chat_id` - Telegram chat identifier
+
+> **Note:** All credentials (API keys, Telegram tokens) are stored exclusively in the vault. Docker secrets are only used for infrastructure bootstrap (`vault_master_password`, `cc_auth_token`).
+
 ### Add services
 
 1. Open the **Vault** tab in the sidebar
@@ -131,16 +148,35 @@ Locking the vault immediately revokes all tokens and disables API proxy access. 
 
 Use lock only when you need to immediately cut off all API access (e.g., compromised credentials). Under normal operation, the vault should stay unlocked.
 
+## Export / Import
+
+Back up all vault secrets before a reset or migration.
+
+**Export:**
+1. Open the **Vault** tab
+2. Click **Export** in the toolbar → downloads `vault-export.json`
+
+The export file contains all secret names and values in plain text. Keep it secure and delete after use.
+
+**Import:**
+1. Click **Import** in the toolbar
+2. Select a `vault-export.json` file
+3. Confirm → all secrets are restored (existing secrets with the same name are overwritten)
+
+This is useful when resetting the vault password or migrating to a new instance.
+
 ## Reset vault
 
 The master password is the encryption key - it cannot be changed. To start fresh with a new password:
 
 **Via Control Center:**
 1. Go to the **Vault** tab
-2. Click **Reset** - this deletes all stored credentials and the persisted password
-3. Choose a new master password
+2. **Export** your secrets first (see above)
+3. Click **Reset** - this deletes all stored credentials and the persisted password
+4. Choose a new master password
+5. **Import** your secrets back
 
-> **Warning:** Resetting deletes all stored API credentials. Services must be re-added.
+> **Warning:** Resetting deletes all stored API credentials. Export first to avoid data loss.
 
 ## Lifecycle
 

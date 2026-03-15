@@ -112,6 +112,18 @@ func HandlerFactory(deps Deps) http.Handler {
 		ToolRegistry: deps.ToolRegistry,
 		ModelCache:   deps.ModelCache,
 	})
+	mux.Handle("/api/tiers/configs", &TierConfigsHandler{
+		ConfigDir:   deps.ConfigDir,
+		TierStore:   deps.TierStore,
+		ConfigStore: deps.ConfigStore,
+		Notifier:    deps.Notifier,
+	})
+	mux.Handle("/api/tiers/configs/", &TierConfigsHandler{
+		ConfigDir:   deps.ConfigDir,
+		TierStore:   deps.TierStore,
+		ConfigStore: deps.ConfigStore,
+		Notifier:    deps.Notifier,
+	})
 
 	// Backend models discovery.
 	mux.Handle("/api/backends/", &BackendsModelsHandler{

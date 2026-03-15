@@ -4482,8 +4482,10 @@ function tiersInit() {
   if (!tiersInitialized) {
     tiersInitialized = true;
     document.getElementById('tiersAddBtn').addEventListener('click', () => tiersShowModal(null));
+    document.getElementById('tiersConfigSelect').addEventListener('change', tiersConfigSwitch);
   }
   tiersLoad();
+  tiersConfigsLoad();
 }
 
 function tiersLoad() {
@@ -4493,6 +4495,43 @@ function tiersLoad() {
     tiersCache = data;
     tiersRender();
   }).catch(() => toast('Failed to load tiers', 'error'));
+}
+
+async function tiersConfigsLoad() {
+  const select = document.getElementById('tiersConfigSelect');
+  try {
+    const configs = await api('/api/tiers/configs');
+    if (!configs || configs.length === 0) {
+      select.style.display = 'none';
+      return;
+    }
+    select.style.display = '';
+    select.innerHTML = configs.map(c =>
+      '<option value="' + esc(c.name) + '.json"' + (c.active ? ' selected' : '') + '>' +
+        esc(c.name) + ' (' + c.tiers + ' tiers)' +
+      '</option>'
+    ).join('');
+  } catch (e) {
+    select.style.display = 'none';
+  }
+}
+
+async function tiersConfigSwitch() {
+  const select = document.getElementById('tiersConfigSelect');
+  const name = select.value;
+  if (!name) return;
+  try {
+    await api('/api/tiers/configs/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    toast('Switched to ' + name.replace('.json', ''));
+    tiersLoad();
+  } catch (err) {
+    alert('Switch failed: ' + (err?.error || err?.message || 'unknown'));
+    tiersConfigsLoad();
+  }
 }
 
 function tiersRender() {
@@ -5945,6 +5984,12 @@ function vaultInit() {
   document.getElementById('vaultSvcAuthType').addEventListener('change', vaultToggleAuthFields);
   document.getElementById('vaultCreateTokenBtn').addEventListener('click', vaultCreateToken);
   document.getElementById('vaultFileInput').addEventListener('change', vaultUploadFile);
+  document.getElementById('vaultExportBtn').addEventListener('click', vaultExport);
+  document.getElementById('vaultImportBtn').addEventListener('click', () => document.getElementById('vaultImportFile').click());
+  document.getElementById('vaultImportFile').addEventListener('change', vaultImport);
+  document.getElementById('vaultAddSecretBtn').addEventListener('click', vaultShowSecretForm);
+  document.getElementById('vaultSecretCancelBtn').addEventListener('click', vaultHideSecretForm);
+  document.getElementById('vaultSecretSaveBtn').addEventListener('click', vaultSaveSecret);
   document.getElementById('vaultOAuth2TabBrowser').addEventListener('click', () => vaultOAuth2SetMode('browser'));
   document.getElementById('vaultOAuth2TabManual').addEventListener('click', () => vaultOAuth2SetMode('manual'));
   document.getElementById('vaultOAuth2AuthorizeBtn').addEventListener('click', vaultOAuth2StartFlow);
@@ -5963,14 +6008,20 @@ async function vaultRefresh() {
     const servicesCard = document.getElementById('vaultServicesCard');
     const filesCard = document.getElementById('vaultFilesCard');
     const tokensCard = document.getElementById('vaultTokensCard');
+    const secretsCard = document.getElementById('vaultSecretsCard');
+    const exportBtn = document.getElementById('vaultExportBtn');
+    const importBtn = document.getElementById('vaultImportBtn');
 
     // Hide everything first.
     setupCard.style.display = 'none';
     unlockCard.style.display = 'none';
     lockBtn.style.display = 'none';
+    exportBtn.style.display = 'none';
+    importBtn.style.display = 'none';
     servicesCard.style.display = 'none';
     filesCard.style.display = 'none';
     tokensCard.style.display = 'none';
+    secretsCard.style.display = 'none';
 
     if (!data || !data.available) {
       dot.className = 'vault-status-indicator vault-status-off';
@@ -5982,10 +6033,14 @@ async function vaultRefresh() {
       dot.className = 'vault-status-indicator vault-status-on';
       text.textContent = 'Unlocked';
       lockBtn.style.display = '';
+      exportBtn.style.display = '';
+      importBtn.style.display = '';
       servicesCard.style.display = '';
+      secretsCard.style.display = '';
       filesCard.style.display = '';
       tokensCard.style.display = '';
       vaultLoadServices();
+      vaultLoadSecrets();
       vaultLoadFiles();
       vaultLoadTokens();
     } else if (data.first_time) {
@@ -6406,6 +6461,129 @@ async function vaultRevokeKey(prefix) {
   }
 }
 
+// --- Vault Export / Import ---
+
+async function vaultExport() {
+  try {
+    const resp = await _nativeFetch('/api/vault/export', { credentials: 'same-origin' });
+    if (!resp.ok) throw await resp.json();
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'vault-export.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Vault exported');
+  } catch (err) {
+    alert('Export failed: ' + (err?.error || err?.message || 'unknown error'));
+  }
+}
+
+async function vaultImport() {
+  const input = document.getElementById('vaultImportFile');
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data.secrets || !Array.isArray(data.secrets)) {
+      alert('Invalid export file: missing "secrets" array');
+      input.value = '';
+      return;
+    }
+    if (!confirm('Import ' + data.secrets.length + ' secrets? Existing secrets with the same name will be overwritten.')) {
+      input.value = '';
+      return;
+    }
+    const result = await api('/api/vault/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: text
+    });
+    toast('Imported ' + (result.imported || 0) + ' secrets');
+    vaultLoadSecrets();
+    vaultLoadFiles();
+  } catch (err) {
+    alert('Import failed: ' + (err?.error || err?.message || 'unknown error'));
+  }
+  input.value = '';
+}
+
+// --- Vault Secrets (API Keys) ---
+
+async function vaultLoadSecrets() {
+  try {
+    const secrets = await api('/api/vault/secrets');
+    const list = document.getElementById('vaultSecretsList');
+    if (!secrets || secrets.length === 0) {
+      list.innerHTML = '<div class="vault-empty">No secrets stored. Add API keys for your backends here.</div>';
+      return;
+    }
+    // Filter: secrets are files without a file extension (api keys, tokens).
+    const filtered = secrets.filter(s => !s.name.includes('.'));
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="vault-empty">No secrets stored. Add API keys for your backends here.</div>';
+      return;
+    }
+    list.innerHTML = filtered.map(s => `
+      <div class="vault-item">
+        <div class="vault-item-info">
+          <span class="vault-item-name">${esc(s.name)}</span>
+        </div>
+        <div class="vault-item-actions">
+          <button class="btn btn-icon vault-secret-del-btn" data-name="${esc(s.name)}" title="Delete"><i data-lucide="trash-2"></i></button>
+        </div>
+      </div>
+    `).join('');
+    lucide.createIcons();
+    list.querySelectorAll('.vault-secret-del-btn').forEach(btn => {
+      btn.addEventListener('click', () => vaultDeleteSecret(btn.dataset.name));
+    });
+  } catch (err) {
+    document.getElementById('vaultSecretsList').innerHTML = '<div class="vault-empty">Error loading secrets</div>';
+  }
+}
+
+function vaultShowSecretForm() {
+  document.getElementById('vaultSecretForm').style.display = '';
+  document.getElementById('vaultSecretName').value = '';
+  document.getElementById('vaultSecretValue').value = '';
+  document.getElementById('vaultSecretName').focus();
+}
+
+function vaultHideSecretForm() {
+  document.getElementById('vaultSecretForm').style.display = 'none';
+}
+
+async function vaultSaveSecret() {
+  const name = document.getElementById('vaultSecretName').value.trim();
+  const value = document.getElementById('vaultSecretValue').value.trim();
+  if (!name || !value) { alert('Name and value are required.'); return; }
+  try {
+    await api('/api/vault/secrets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, value })
+    });
+    toast('Secret saved');
+    vaultHideSecretForm();
+    vaultLoadSecrets();
+  } catch (err) {
+    alert('Save failed: ' + (err?.error || err?.message || 'unknown error'));
+  }
+}
+
+async function vaultDeleteSecret(name) {
+  if (!confirm('Delete secret "' + name + '"?\n\nBackends using this key will stop working.')) return;
+  try {
+    await api('/api/vault/secrets/' + encodeURIComponent(name), { method: 'DELETE' });
+    vaultLoadSecrets();
+  } catch (err) {
+    alert('Delete failed: ' + (err?.error || err?.message || 'unknown error'));
+  }
+}
+
 // --- Vault Files ---
 
 let vaultFilesCache = [];
@@ -6419,7 +6597,13 @@ async function vaultLoadFiles() {
       list.innerHTML = '<div class="vault-empty">No files stored. Upload service account keys or certificates here.</div>';
       return;
     }
-    list.innerHTML = files.map(f => `
+    // Filter: files are entries with a file extension (exclude plain secrets).
+    const realFiles = files.filter(f => f.name.includes('.'));
+    if (realFiles.length === 0) {
+      list.innerHTML = '<div class="vault-empty">No files stored. Upload service account keys or certificates here.</div>';
+      return;
+    }
+    list.innerHTML = realFiles.map(f => `
       <div class="vault-item">
         <div class="vault-item-info">
           <span class="vault-item-name">${esc(f.name)}</span>

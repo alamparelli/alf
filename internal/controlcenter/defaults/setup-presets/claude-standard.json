@@ -7,7 +7,7 @@
     "router_model": "haiku",
     "router_backend": "",
     "default_fallback": "haiku",
-    "router_distinctions": "Pick the tier that best balances capability and cost for the task. Do not default to the cheapest option - choose the right tool for the job.\n\nLow-priority tiers: simple direct actions (greetings, lookups, quick answers). Mid-priority tiers: investigation, analysis, code changes, debugging, multi-step work. High-priority tiers: architecture, deep reasoning, large-scale refactoring.\n\nCRITICAL: The 'agent' tier spawns multiple AI agents in parallel - ONLY use it for tasks with independent parallel workstreams. Most tasks, even complex ones, should go to a single-model tier."
+    "router_distinctions": "Pick the tier that best balances capability and cost.\n\nhaiku: ONLY for trivial mechanical actions with no reasoning — greetings, toggling, listing, single-fact lookups. If the user asks WHY, HOW, or needs any judgment, explanation, or synthesis, do NOT use haiku.\n\nsonnet: Default for most work — questions, research, code, debugging, writing, summaries, web search, multi-step tasks.\n\nopus: Architecture, deep trade-offs, large refactors, building new modules from scratch.\n\nagent: ONLY when the user explicitly requests parallel independent workstreams. Most tasks, even complex ones, should go to a single-model tier."
   },
   "tiers": [
     {
@@ -16,7 +16,7 @@
       "priority": 1,
       "enabled": true,
       "routable": true,
-      "router_label": "Casual conversation, simple factual questions, short summaries, translations, web searches, running scheduled jobs, toggling settings, simple file reads, quick edits",
+      "router_label": "Greetings, small talk, yes/no questions, single-fact lookups (weather, time, date), toggling a setting on/off, running an existing scheduled job, listing items (files, jobs, skills, settings)",
       "max_turns": 30,
       "write_capable": true,
       "effort": "low",
@@ -29,7 +29,7 @@
       "priority": 2,
       "enabled": true,
       "routable": true,
-      "router_label": "Code review, debugging, investigating issues, reading logs, understanding system behavior, explaining complex concepts, research synthesis, editing code files, implementing features, fixing bugs, creating scripts, writing tests, multi-file changes, create scheduled jobs, create reminders, multi-step tasks",
+      "router_label": "Any question requiring explanation or reasoning, summarizing content, translations, web search and synthesis, code review, debugging, reading logs, editing files, implementing features, fixing bugs, writing scripts and tests, multi-file changes, creating scheduled jobs and reminders, research, multi-step sequential tasks",
       "max_turns": 30,
       "write_capable": true,
       "effort": "medium",

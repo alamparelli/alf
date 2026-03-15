@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -37,77 +36,61 @@ func vaultPassword(mgr *vault.Manager) string {
 	return ""
 }
 
-// readTelegramConfig reads Telegram settings from config.d/telegram.json (set via CC).
-func readTelegramConfig(configDir string) *telegramJSONConfig {
-	data, err := os.ReadFile(filepath.Join(configDir, "telegram.json"))
-	if err != nil {
-		return nil
-	}
-	var cfg telegramJSONConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil
-	}
-	return &cfg
-}
-
 // registerBackends registers API backends from config.json into the registry.
-// Backward compat: if no backends in config, check for OPENROUTER_API_KEY secret.
+// API keys are resolved from the vault only.
 func registerBackends(registry *provider.Registry, cfg *cc.Config, apiHistory *provider.History, vaultMgr *vault.Manager) {
-	if len(cfg.Backends) > 0 {
-		for name, bcfg := range cfg.Backends {
-			apiKey := resolveBackendAPIKey(name, bcfg, vaultMgr)
-			if bcfg.Auth != "none" && apiKey == "" {
-				log.Printf("backend %s: skipped (no API key available)", name)
-				continue
-			}
-			auth := bcfg.Auth
-			if auth == "" {
-				auth = "bearer"
-			}
-			prov := provider.NewAPIProviderFromConfig(provider.APIProviderConfig{
-				Name:         name,
-				BaseURL:      bcfg.BaseURL,
-				APIKey:       apiKey,
-				Headers:      bcfg.Headers,
-				DefaultModel: bcfg.DefaultModel,
-				MaxTokens:    bcfg.MaxTokens,
-				Auth:         auth,
-			}, apiHistory)
-			registry.Register(name, prov)
+	if len(cfg.Backends) == 0 {
+		log.Println("No API backends configured")
+		cc.SetAllowedBackends(registry.BackendNames())
+		return
+	}
+	for name, bcfg := range cfg.Backends {
+		apiKey := resolveBackendAPIKey(name, bcfg, vaultMgr)
+		if bcfg.Auth != "none" && apiKey == "" {
+			log.Printf("backend %s: skipped (no API key in vault)", name)
+			continue
 		}
-	} else {
-		// Backward compat: check for legacy OPENROUTER_API_KEY secret.
-		if orAPIKey := secrets.ReadSecret("OPENROUTER_API_KEY"); orAPIKey != "" {
-			prov := provider.NewAPIProvider(orAPIKey, apiHistory)
-			registry.Register("openrouter", prov)
-			log.Println("OpenRouter API provider enabled (legacy secret)")
-		} else {
-			log.Println("No API backends configured")
+		auth := bcfg.Auth
+		if auth == "" {
+			auth = "bearer"
 		}
+		prov := provider.NewAPIProviderFromConfig(provider.APIProviderConfig{
+			Name:         name,
+			BaseURL:      bcfg.BaseURL,
+			APIKey:       apiKey,
+			Headers:      bcfg.Headers,
+			DefaultModel: bcfg.DefaultModel,
+			MaxTokens:    bcfg.MaxTokens,
+			Auth:         auth,
+		}, apiHistory)
+		registry.Register(name, prov)
 	}
 	// Update AllowedBackends for tier validation.
 	cc.SetAllowedBackends(registry.BackendNames())
 }
 
-// resolveBackendAPIKey resolves the API key for a backend.
-// Priority: vault_service → Docker secret (BACKENDNAME_API_KEY) → empty.
+// resolveBackendAPIKey resolves the API key for a backend from the vault.
 func resolveBackendAPIKey(name string, bcfg cc.BackendConfig, vaultMgr *vault.Manager) string {
 	if bcfg.Auth == "none" {
+		log.Printf("backend %s: auth=none, no key needed", name)
 		return ""
 	}
-	// 1. Vault-first: try secret named "<backend>_api_key".
 	vaultKey := name + "_api_key"
-	if vaultMgr != nil {
-		if v, err := vaultMgr.GetSecret(vaultKey); err == nil && v != "" {
-			return v
-		}
+	if vaultMgr == nil {
+		log.Printf("backend %s: vault manager is nil, cannot resolve key", name)
+		return ""
 	}
-	// 2. Fallback: Docker secret <UPPERCASE_NAME>_API_KEY.
-	secretName := strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
-	if key := secrets.ReadSecret(secretName); key != "" {
-		return key
+	v, err := vaultMgr.GetSecret(vaultKey)
+	if err != nil {
+		log.Printf("backend %s: vault key %q error: %v", name, vaultKey, err)
+		return ""
 	}
-	return ""
+	if v == "" {
+		log.Printf("backend %s: vault key %q exists but is empty", name, vaultKey)
+		return ""
+	}
+	log.Printf("backend %s: API key loaded from vault (%d chars)", name, len(v))
+	return v
 }
 
 func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, reg *tooling.Registry, provRegistry *provider.Registry) tierParams {

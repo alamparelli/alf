@@ -1,0 +1,75 @@
+{
+  "id": "grok-standard",
+  "name": "Grok Standard",
+  "description": "Multi-tier Grok setup via OpenRouter: Grok 4.1 Fast for quick tasks, Grok 4.20 for development, Grok 4 for architecture. All tiers use the OpenRouter backend.",
+  "backend": "openrouter",
+  "router_config": {
+    "router_model": "google/gemma-3n-e4b-it",
+    "router_backend": "openrouter",
+    "default_fallback": "grok-fast",
+    "router_distinctions": "Pick the tier that best balances capability and cost.\n\ngrok-fast: ONLY for trivial mechanical actions with no reasoning — greetings, toggling, listing, single-fact lookups. If the user asks WHY, HOW, or needs any judgment, explanation, or synthesis, do NOT use grok-fast.\n\ngrok4-2: Default for most work — questions, research, code, debugging, writing, summaries, web search, multi-step tasks.\n\ngrok4: Architecture, deep trade-offs, large refactors, building new modules from scratch.\n\nagent: ONLY when the user explicitly requests parallel independent workstreams. Most tasks, even complex ones, should go to a single-model tier."
+  },
+  "tiers": [
+    {
+      "name": "grok-fast",
+      "model": "x-ai/grok-4.1-fast",
+      "priority": 1,
+      "enabled": true,
+      "routable": true,
+      "router_label": "Greetings, small talk, yes/no questions, single-fact lookups (weather, time, date), toggling a setting on/off, running an existing scheduled job, listing items (files, jobs, skills, settings)",
+      "max_turns": 30,
+      "write_capable": false,
+      "tools": ["*"],
+      "effort": "low",
+      "timeout_minutes": 10,
+      "force_command": true,
+      "backend": "openrouter"
+    },
+    {
+      "name": "grok4-2",
+      "model": "x-ai/grok-4.20-beta",
+      "priority": 2,
+      "enabled": true,
+      "routable": true,
+      "router_label": "Any question requiring explanation or reasoning, summarizing content, translations, web search and synthesis, code review, debugging, reading logs, editing files, implementing features, fixing bugs, writing scripts and tests, multi-file changes, creating scheduled jobs and reminders, research, multi-step sequential tasks",
+      "max_turns": 30,
+      "write_capable": false,
+      "tools": ["*"],
+      "effort": "medium",
+      "timeout_minutes": 10,
+      "force_command": true,
+      "backend": "openrouter"
+    },
+    {
+      "name": "grok4",
+      "model": "x-ai/grok-4",
+      "priority": 3,
+      "enabled": true,
+      "routable": true,
+      "router_label": "Architecture design, system-level reasoning, complex trade-off analysis, large-scale refactoring, implementing complex features, redesigning system architecture, building new modules from scratch, complex multi-step tasks requiring deep thinking",
+      "max_turns": 40,
+      "write_capable": false,
+      "tools": ["*"],
+      "effort": "high",
+      "timeout_minutes": 15,
+      "force_command": true,
+      "backend": "openrouter"
+    },
+    {
+      "name": "agent",
+      "model": "x-ai/grok-4",
+      "priority": 4,
+      "enabled": true,
+      "routable": true,
+      "router_label": "ONLY for tasks explicitly requesting a team of agents, or requiring parallel independent workstreams that CANNOT be done sequentially by one model (e.g. 'build a full app with frontend + backend + tests simultaneously', 'write 5 articles at once', 'research 3 topics in parallel'). If one model can handle it step-by-step, use grok4-2 or grok4 instead.",
+      "max_turns": 10,
+      "write_capable": false,
+      "tools": ["*"],
+      "effort": "medium",
+      "max_iterations": 10,
+      "timeout_minutes": 60,
+      "force_command": true,
+      "backend": "openrouter"
+    }
+  ]
+}

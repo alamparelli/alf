@@ -38,7 +38,7 @@ func (h *TasksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.cancel(w, r)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 
@@ -99,8 +99,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // resolveAgentConfig reads the "agent" tier config to get model/effort/timeout settings.
@@ -178,7 +177,7 @@ func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {
 		completed = completed[:20]
 	}
 
-	json.NewEncoder(w).Encode(map[string]any{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"running":   running,
 		"completed": completed,
 	})
@@ -195,7 +194,7 @@ func (h *TasksHandler) cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok := h.Orchestrator.Cancel(id)
-	json.NewEncoder(w).Encode(map[string]any{"cancelled": ok})
+	respondJSON(w, http.StatusOK, map[string]any{"cancelled": ok})
 }
 
 // TaskApproveHandler handles approval/rejection of orchestrator plans.
@@ -205,7 +204,7 @@ type TaskApproveHandler struct {
 
 func (h *TaskApproveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 	if h.Orchestrator == nil {
@@ -229,6 +228,5 @@ func (h *TaskApproveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Approved: req.Approved,
 		Feedback: req.Feedback,
 	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": ok})
+	respondJSON(w, http.StatusOK, map[string]any{"ok": ok})
 }

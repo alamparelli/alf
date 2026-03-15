@@ -17,7 +17,7 @@ type AppHandler struct {
 
 func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 
@@ -88,7 +88,7 @@ type AppListHandler struct {
 
 func (h *AppListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 
@@ -98,39 +98,5 @@ func (h *AppListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"items":`))
-	if len(apps) == 0 {
-		w.Write([]byte(`[]`))
-	} else {
-		first := true
-		w.Write([]byte(`[`))
-		for _, a := range apps {
-			if !first {
-				w.Write([]byte(`,`))
-			}
-			first = false
-			// Manual JSON to avoid import cycle or extra dependency.
-			w.Write([]byte(`{"name":` + jsonStr(a.Name)))
-			if a.DisplayName != "" {
-				w.Write([]byte(`,"display_name":` + jsonStr(a.DisplayName)))
-			}
-			if a.Icon != "" {
-				w.Write([]byte(`,"icon":` + jsonStr(a.Icon)))
-			}
-			if a.Description != "" {
-				w.Write([]byte(`,"description":` + jsonStr(a.Description)))
-			}
-			w.Write([]byte(`,"mod_time":` + jsonStr(a.ModTime) + `}`))
-		}
-		w.Write([]byte(`]`))
-	}
-	w.Write([]byte(`}`))
-}
-
-// jsonStr returns a JSON-encoded string value.
-func jsonStr(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return `"` + s + `"`
+	respondJSON(w, http.StatusOK, map[string]any{"items": apps})
 }

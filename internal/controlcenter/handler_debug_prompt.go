@@ -2,7 +2,6 @@ package controlcenter
 
 import (
 	"embed"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -54,7 +53,7 @@ type debugPromptResponse struct {
 
 func (h *DebugPromptHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 
@@ -68,8 +67,7 @@ func (h *DebugPromptHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				names = append(names, t.Name)
 			}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"tiers": names})
+		respondJSON(w, http.StatusOK, map[string]any{"tiers": names})
 		return
 	}
 
@@ -139,6 +137,5 @@ func (h *DebugPromptHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[debug-prompt] tier=%s model=%s backend=%s tools=%d prompts=%d prompt_len=%d",
 		tierName, tp.Model, tp.Backend, len(toolSchemas), len(sysPromptTexts), len(fullPrompt))
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	respondJSON(w, http.StatusOK, resp)
 }

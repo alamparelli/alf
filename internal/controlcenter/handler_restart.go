@@ -12,11 +12,10 @@ type RestartHandler struct{}
 
 func (h *RestartHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"ok":true,"message":"restarting"}`))
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "restarting"})
 	log.Println("restart requested via API")
 	go func() {
 		time.Sleep(500 * time.Millisecond)

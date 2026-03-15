@@ -98,7 +98,7 @@ type skillInstallResponse struct {
 
 func (h *SkillImportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		methodNotAllowed(w)
 		return
 	}
 

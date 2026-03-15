@@ -19,7 +19,7 @@ func (h *ScheduleLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if r.Method != http.MethodGet {
-		respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		methodNotAllowed(w)
 		return
 	}
 

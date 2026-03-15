@@ -95,7 +95,7 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 

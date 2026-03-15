@@ -67,7 +67,7 @@ func (h *WorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writePath := h.resolveWrite(relPath, absPath)
 		h.del(w, writePath, relPath)
 	default:
-		http.Error(w, jsonErr("method not allowed"), http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 
@@ -436,7 +436,7 @@ type UploadHandler struct {
 
 func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, jsonErr("method not allowed"), http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 

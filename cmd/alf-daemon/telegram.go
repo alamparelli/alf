@@ -133,7 +133,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 	case "/login":
 		handleLogin(tg, msg, magic, ccExternalURL, allowedChatIDs)
 		return true
-	case "/new":
+	case "/new", "/clear":
 		old := chatSessions.Archive(msg.Chat.ID)
 		convStore.NewConversation(conversation.ChannelTelegram)
 		memory.ClearOnboarding(contextDir)
@@ -201,6 +201,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 		help := "<b>Available commands:</b>\n" +
 			"/help - Show this message\n" +
 			"/new - Start a new conversation session\n" +
+			"/clear - Clear and start a new session\n" +
 			"/bash - Execute a bash command directly\n" +
 			"/jobs - List running agent jobs\n" +
 			"/cancel - Cancel all running agent jobs\n" +

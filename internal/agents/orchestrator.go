@@ -327,6 +327,8 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		if err != nil {
 			log.Printf("[orchestrator] FAILED iteration %d: %v", iteration+1, err)
 			meta.Status = "failed"
+			now := time.Now()
+			meta.CompletedAt = &now
 			o.saveMeta(taskDir, meta)
 			return "", meta, fmt.Errorf("orchestrator invoke: %w", err)
 		}
@@ -347,6 +349,8 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			if turnLimitRetries > maxTurnLimitRetries {
 				log.Printf("[orchestrator] ✗ orchestrator hit turn limit %d times - aborting", turnLimitRetries)
 				meta.Status = "failed"
+				now := time.Now()
+				meta.CompletedAt = &now
 				o.saveMeta(taskDir, meta)
 				return "", meta, fmt.Errorf("orchestrator repeatedly hit turn limit (%d retries) - try increasing max_turns in the orchestrator tier config", maxTurnLimitRetries)
 			}
@@ -444,6 +448,8 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 				log.Printf("[orchestrator] ✗ brain returned same non-JSON output %d times - aborting: %s",
 					consecutiveNonJSON, truncate(result.Text, 200))
 				meta.Status = "failed"
+				now := time.Now()
+				meta.CompletedAt = &now
 				o.saveMeta(taskDir, meta)
 				return "", meta, fmt.Errorf("orchestrator brain error (repeated %d times): %s",
 					consecutiveNonJSON, truncate(result.Text, 200))

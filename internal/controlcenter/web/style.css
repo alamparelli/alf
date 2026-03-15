@@ -1322,15 +1322,19 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   background: color-mix(in srgb, var(--text-dim) 10%, transparent);
   color: var(--text-dim); font-weight: 500; white-space: nowrap;
 }
-/* Collapsed agent instructions */
-.task-step-task details { margin: 0; }
-.task-step-task summary {
-  cursor: pointer; font-size: 0.7rem; color: var(--text-dim); user-select: none;
+/* Collapsible sections (agent instructions, request, plan) */
+.task-step-task details, .task-section details { margin: 0; }
+.task-step-task summary, .task-section > details > summary.task-section-title {
+  cursor: pointer; user-select: none;
   list-style: none; display: flex; align-items: center; gap: 4px;
 }
-.task-step-task summary::-webkit-details-marker { display: none; }
-.task-step-task summary::before { content: '\25B6'; font-size: 0.55rem; transition: transform 0.15s; }
-.task-step-task details[open] summary::before { transform: rotate(90deg); }
+.task-step-task summary { font-size: 0.7rem; color: var(--text-dim); }
+.task-step-task summary::-webkit-details-marker,
+.task-section > details > summary::-webkit-details-marker { display: none; }
+.task-step-task summary::before,
+.task-section > details > summary::before { content: '\25B6'; font-size: 0.55rem; transition: transform 0.15s; }
+.task-step-task details[open] summary::before,
+.task-section details[open] > summary::before { transform: rotate(90deg); }
 .task-step-task details .task-step-task-body { padding: 4px 0 0; }
 /* Arbitration questions */
 .task-questions { padding: 8px 12px; margin: 4px 0; background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: 6px; border-left: 3px solid var(--accent); }

@@ -76,8 +76,9 @@ type ChatService struct {
 	Orchestrator  *agents.Orchestrator        // may be nil - multi-agent orchestrator
 	ConvStore     *conversation.Store         // may be nil - unified conversation store (Phase 1: parallel write)
 	ToolRegistry  *tooling.Registry           // may be nil - tool schemas for API agentic loop
-	ToolExecutor  *tooling.Executor           // may be nil - tool subprocess runner
-	mu            sync.Mutex                  // serialize Claude calls (single user v1)
+	ToolExecutor    *tooling.Executor           // may be nil - tool subprocess runner
+	BackendConfigs  func() map[string]BackendConfig // may be nil - backend pricing lookup
+	mu              sync.Mutex                  // serialize Claude calls (single user v1)
 
 	// Background job tracking - one active job per conversation.
 	activeJobs map[string]*chatJob // conv_id → job
@@ -714,7 +715,15 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	if len(sessShort) > 8 {
 		sessShort = sessShort[:8]
 	}
-	log.Printf("[chat-api] → %s %dms %dt $%.4f sid:%s", result.Model, duration.Milliseconds(), result.NumTurns, result.CostUSD, sessShort)
+	// Compute cost from tokens if not already set (API backends).
+	if result.CostUSD == 0 && result.InputTokens > 0 && cs.BackendConfigs != nil {
+		if bc, ok := cs.BackendConfigs()[tp.Backend]; ok && (bc.InputPrice > 0 || bc.OutputPrice > 0) {
+			result.CostUSD = float64(result.InputTokens)/1e6*bc.InputPrice +
+				float64(result.OutputTokens)/1e6*bc.OutputPrice
+		}
+	}
+
+	log.Printf("[chat-api] → %s %dms %dt/%dt $%.4f sid:%s", result.Model, duration.Milliseconds(), result.InputTokens, result.OutputTokens, result.CostUSD, sessShort)
 
 	// Update session.
 	if result.SessionID != "" {

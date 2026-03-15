@@ -562,6 +562,7 @@ func main() {
 	chatService.Registry = registry
 	chatService.SkillStore = skillStore
 	chatService.Orchestrator = orch
+	chatService.BackendConfigs = func() map[string]cc.BackendConfig { return cfg.Backends }
 	chatService.ConvStore = convStore
 	toolRegistry := tooling.NewRegistry(dataDir)
 	nativeTools := []tooling.NativeTool{
@@ -1979,11 +1980,19 @@ func main() {
 				reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
 			}
 
+			// Compute cost from tokens for API backends.
+			if result.CostUSD == 0 && result.InputTokens > 0 {
+				if bc, ok := cfg.Backends[tp.Backend]; ok && (bc.InputPrice > 0 || bc.OutputPrice > 0) {
+					result.CostUSD = float64(result.InputTokens)/1e6*bc.InputPrice +
+						float64(result.OutputTokens)/1e6*bc.OutputPrice
+				}
+			}
+
 			sessShort := result.SessionID
 			if len(sessShort) > 8 {
 				sessShort = sessShort[:8]
 			}
-			log.Printf("→ %s %dms %dt $%.4f sid:%s", result.Model, duration.Milliseconds(), result.NumTurns, result.CostUSD, sessShort)
+			log.Printf("→ %s %dms %dt/%dt $%.4f sid:%s", result.Model, duration.Milliseconds(), result.InputTokens, result.OutputTokens, result.CostUSD, sessShort)
 
 			eventLog.Log("message_out", map[string]any{
 				"chat_id":          chatID,

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -83,11 +84,16 @@ func (p *APIProvider) Headers() map[string]string { return p.headers }
 
 // apiRequest is the OpenAI chat completions request body.
 type apiRequest struct {
-	Model     string          `json:"model"`
-	Messages  []apiMessage    `json:"messages"`
-	Stream    bool            `json:"stream"`
-	MaxTokens int             `json:"max_tokens,omitempty"`
-	Tools     json.RawMessage `json:"tools,omitempty"`
+	Model         string           `json:"model"`
+	Messages      []apiMessage     `json:"messages"`
+	Stream        bool             `json:"stream"`
+	MaxTokens     int              `json:"max_tokens,omitempty"`
+	Tools         json.RawMessage  `json:"tools,omitempty"`
+	StreamOptions *apiStreamOpts   `json:"stream_options,omitempty"`
+}
+
+type apiStreamOpts struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type apiMessage struct {
@@ -161,6 +167,8 @@ type apiStreamResult struct {
 	ToolCalls    []apiToolCall
 	FinishReason string // "stop", "tool_calls", "length"
 	Model        string
+	InputTokens  int
+	OutputTokens int
 }
 
 // BuildMessages constructs the messages array from a prompt and params.
@@ -230,10 +238,11 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	messages := p.BuildMessages(prompt, params)
 
 	reqBody := apiRequest{
-		Model:     model,
-		Messages:  messages,
-		Stream:    true,
-		MaxTokens: p.maxTokens,
+		Model:         model,
+		Messages:      messages,
+		Stream:        true,
+		MaxTokens:     p.maxTokens,
+		StreamOptions: &apiStreamOpts{IncludeUsage: true},
 	}
 
 	resp, err := p.doStreamRequest(ctx, reqBody, onProgress, 0)
@@ -253,7 +262,12 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		log.Printf("api[%s]: model returned tool_calls without ToolLoop: %v", p.name, parts)
 	}
 
-	result := &Result{Text: text, Model: model}
+	result := &Result{
+		Text:         text,
+		Model:        model,
+		InputTokens:  resp.InputTokens,
+		OutputTokens: resp.OutputTokens,
+	}
 
 	// Append to legacy history (only for keyed sessions without ConvMessages).
 	if len(params.ConvMessages) == 0 && params.SessionKey != "" && p.history != nil {
@@ -314,6 +328,20 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 	var resultText strings.Builder
 	toolCalls := make(map[int]*apiToolCall) // keyed by index for incremental assembly
 	var finishReason string
+	var inputTokens, outputTokens int
+
+	// Try to extract usage from response headers (OpenRouter sends these on non-streaming
+	// responses; for streaming they may appear after the body is consumed — see SSE parsing below).
+	if v := resp.Header.Get("X-Prompt-Tokens"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			inputTokens = n
+		}
+	}
+	if v := resp.Header.Get("X-Completion-Tokens"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			outputTokens = n
+		}
+	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 256*1024)
@@ -344,9 +372,23 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
+			Usage *struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+			} `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
+		}
+
+		// Extract usage from final SSE chunk (OpenAI/OpenRouter stream_options).
+		if chunk.Usage != nil {
+			if chunk.Usage.PromptTokens > 0 {
+				inputTokens = chunk.Usage.PromptTokens
+			}
+			if chunk.Usage.CompletionTokens > 0 {
+				outputTokens = chunk.Usage.CompletionTokens
+			}
 		}
 
 		for _, choice := range chunk.Choices {
@@ -412,6 +454,8 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 		ToolCalls:    calls,
 		FinishReason: finishReason,
 		Model:        reqBody.Model,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
 	}, nil
 }
 

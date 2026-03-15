@@ -18,6 +18,8 @@ type BackendConfig struct {
 	Auth         string            `json:"auth,omitempty"`          // "bearer" (default), "none" (Ollama)
 	DefaultModel string            `json:"default_model,omitempty"` // model if tier doesn't specify one
 	MaxTokens    int               `json:"max_tokens,omitempty"`    // 0 = 4096
+	InputPrice   float64           `json:"input_price,omitempty"`   // cost per 1M input tokens (USD)
+	OutputPrice  float64           `json:"output_price,omitempty"`  // cost per 1M output tokens (USD)
 }
 
 // Config holds non-secret runtime parameters.

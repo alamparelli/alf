@@ -2186,24 +2186,22 @@ function chatClearStatus() {
 
 function chatRenderMd(text) {
   if (!text) return '';
+  if (typeof marked !== 'undefined') {
+    const raw = marked.parse(text, { breaks: true, gfm: true });
+    return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(raw) : raw;
+  }
+  // Fallback if marked.js not loaded.
   let html = esc(text);
-  // Code blocks
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
     '<pre><code>' + code + '</code></pre>'
   );
-  // Inline code
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Bold
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // Italic
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  // Links
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  // Line breaks → paragraphs
   html = html.replace(/\n\n+/g, '</p><p>');
   html = '<p>' + html + '</p>';
   html = html.replace(/\n/g, '<br>');
-  // Clean empty paragraphs around pre blocks
   html = html.replace(/<p>\s*<pre>/g, '<pre>');
   html = html.replace(/<\/pre>\s*<\/p>/g, '</pre>');
   return html;

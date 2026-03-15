@@ -68,7 +68,7 @@ type ingestMemory struct {
 
 func (h *MemoryIngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		methodNotAllowed(w)
 		return
 	}
 
@@ -364,7 +364,7 @@ type MemoryTiersHandler struct {
 
 func (h *MemoryTiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		methodNotAllowed(w)
 		return
 	}
 
@@ -397,8 +397,3 @@ func (h *MemoryTiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, tiers)
 }
 
-func respondJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}

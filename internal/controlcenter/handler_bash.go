@@ -24,7 +24,7 @@ type bashResponse struct {
 
 func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 
@@ -62,6 +62,5 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Output = output
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	respondJSON(w, http.StatusOK, resp)
 }

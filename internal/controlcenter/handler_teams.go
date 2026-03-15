@@ -27,7 +27,7 @@ func (h *TeamsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.del(w, r)
 	default:
-		http.Error(w, jsonErr("method not allowed"), http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 

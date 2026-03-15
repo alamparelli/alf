@@ -2,7 +2,6 @@ package controlcenter
 
 import (
 	"embed"
-	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -35,7 +34,7 @@ type DocsHandler struct{}
 
 func (h *DocsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 
@@ -87,8 +86,7 @@ func (h *DocsHandler) serveList(w http.ResponseWriter) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(docs)
+	respondJSON(w, http.StatusOK, docs)
 }
 
 func (h *DocsHandler) serveDoc(w http.ResponseWriter, id string) {
@@ -107,8 +105,7 @@ func (h *DocsHandler) serveDoc(w http.ResponseWriter, id string) {
 	}
 
 	info := parseDocInfo(string(data))
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(docFull{
+	respondJSON(w, http.StatusOK, docFull{
 		ID:       id,
 		Title:    info.title,
 		Category: info.category,

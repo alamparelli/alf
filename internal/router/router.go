@@ -29,13 +29,14 @@ type AgentTeamInfo struct {
 
 // ClassifyInput holds all inputs for the router classifier.
 type ClassifyInput struct {
-	Message      string
-	Tiers        *cc.TiersConfig
-	DataDir      string
-	ConfigDir    string // RO config path (for router-prompt.md)
-	LastTier     string // from session store
-	MessageCount int    // from session store
-	AgentTeams   []AgentTeamInfo // available agent teams for routing hints
+	Message       string
+	Tiers         *cc.TiersConfig
+	DataDir       string
+	ConfigDir     string          // RO config path (for router-prompt.md)
+	LastTier      string          // from session store
+	MessageCount  int             // from session store
+	AgentTeams    []AgentTeamInfo // available agent teams for routing hints
+	RecentContext string          // compact summary of recent conversation turns
 }
 
 // ResolveModel maps short model names to full Claude model identifiers.
@@ -275,9 +276,15 @@ func buildPrompt(input ClassifyInput, valid map[string]bool) string {
 		b.WriteString(buildAgentTeamsHint(input.AgentTeams))
 	}
 
+	if input.RecentContext != "" {
+		b.WriteString("\nRecent conversation (for context — use this to understand whether the new message continues the conversation or starts a new topic):\n")
+		b.WriteString(input.RecentContext)
+		b.WriteString("\n")
+	}
+
 	if input.MessageCount > 0 && input.LastTier != "" {
 		b.WriteString(fmt.Sprintf("\nConversation context: Message #%d in session. Previous message handled by %q.\n", input.MessageCount+1, input.LastTier))
-		b.WriteString("If the message is a short reply (\"oui\", \"non\", \"ok\", \"yes\", \"no\", \"continue\") that clearly answers or continues the previous exchange, route to the same tier (\"" + input.LastTier + "\"). But if the message requests any action (fix, apply, create, modify, etc.) or is a new topic, route based on intent - do NOT stick to the previous tier if it lacks write capability.\n")
+		b.WriteString("If the new message is a continuation of the conversation above (short reply, follow-up comment, answer to a question, reference to previous topic), route to the same tier (\"" + input.LastTier + "\"). But if the message requests any action (fix, apply, create, modify, etc.) or is clearly a new topic, route based on intent - do NOT stick to the previous tier if it lacks write capability.\n")
 	}
 
 	routerPromptPath := filepath.Join(input.ConfigDir, "router-prompt.md")

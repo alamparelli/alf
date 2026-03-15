@@ -286,3 +286,104 @@ func TestStoreFileCreated(t *testing.T) {
 		t.Fatalf("expected JSONL file to exist: %v", err)
 	}
 }
+
+// --- BuildRouterContext tests ---
+
+func TestBuildRouterContext_Empty(t *testing.T) {
+	if result := BuildRouterContext(nil, 3); result != "" {
+		t.Errorf("expected empty for nil, got %q", result)
+	}
+	if result := BuildRouterContext([]Message{}, 3); result != "" {
+		t.Errorf("expected empty for empty slice, got %q", result)
+	}
+}
+
+func TestBuildRouterContext_BasicExchange(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "a regarder: https://youtube.com/watch?v=abc"}}},
+		{Role: "assistant", Tier: "sonnet", Blocks: []ContentBlock{{Type: BlockText, Text: "Ajouté, mais je n'ai pas pu récupérer le titre."}}},
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "1089 pixels pour comprendre que vous n'existez pas."}}},
+	}
+	result := BuildRouterContext(msgs, 3)
+	if result == "" {
+		t.Fatal("expected non-empty context")
+	}
+	for _, want := range []string{"[sonnet]", "[user]", "youtube.com"} {
+		if !strContains(result, want) {
+			t.Errorf("expected %q in context, got:\n%s", want, result)
+		}
+	}
+}
+
+func TestBuildRouterContext_Truncation(t *testing.T) {
+	longText := ""
+	for i := 0; i < 200; i++ {
+		longText += "x"
+	}
+	msgs := []Message{
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: longText}}},
+	}
+	result := BuildRouterContext(msgs, 3)
+	if !strContains(result, "...") {
+		t.Error("expected truncation marker '...'")
+	}
+	// Should not contain the full 200-char text.
+	if strContains(result, longText) {
+		t.Error("expected text to be truncated")
+	}
+}
+
+func TestBuildRouterContext_MaxTurns(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "msg1"}}},
+		{Role: "assistant", Tier: "haiku", Blocks: []ContentBlock{{Type: BlockText, Text: "resp1"}}},
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "msg2"}}},
+		{Role: "assistant", Tier: "sonnet", Blocks: []ContentBlock{{Type: BlockText, Text: "resp2"}}},
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "msg3"}}},
+		{Role: "assistant", Tier: "haiku", Blocks: []ContentBlock{{Type: BlockText, Text: "resp3"}}},
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "msg4"}}},
+		{Role: "assistant", Tier: "sonnet", Blocks: []ContentBlock{{Type: BlockText, Text: "resp4"}}},
+	}
+	// maxTurns=2 → last 4 messages only.
+	result := BuildRouterContext(msgs, 2)
+	if strContains(result, "msg1") || strContains(result, "resp1") {
+		t.Error("expected old messages to be excluded")
+	}
+	if !strContains(result, "msg3") || !strContains(result, "resp4") {
+		t.Errorf("expected recent messages, got:\n%s", result)
+	}
+}
+
+func TestBuildRouterContext_SkipsEmptyText(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "hello"}}},
+		{Role: "assistant", Blocks: []ContentBlock{{Type: BlockToolUse}}},
+		{Role: "user", Blocks: []ContentBlock{{Type: BlockText, Text: "world"}}},
+	}
+	result := BuildRouterContext(msgs, 3)
+	if strContains(result, "[assistant]") {
+		t.Errorf("tool-only assistant message should be skipped, got:\n%s", result)
+	}
+	if !strContains(result, "hello") || !strContains(result, "world") {
+		t.Errorf("expected user messages, got:\n%s", result)
+	}
+}
+
+func TestBuildRouterContext_TierInLabel(t *testing.T) {
+	msgs := []Message{
+		{Role: "assistant", Tier: "opus", Blocks: []ContentBlock{{Type: BlockText, Text: "deep analysis"}}},
+	}
+	result := BuildRouterContext(msgs, 3)
+	if !strContains(result, "[opus]") {
+		t.Errorf("expected [opus] label, got %q", result)
+	}
+}
+
+func strContains(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

@@ -98,3 +98,37 @@ const (
 	MaxThinkingBytes    = 1024
 	DefaultMaxMessages  = 50
 )
+
+// BuildRouterContext creates a compact conversation summary for the router
+// classifier. Returns the last few user/assistant exchanges truncated to
+// keep the classify prompt small. Returns "" if no relevant messages.
+func BuildRouterContext(msgs []Message, maxTurns int) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+	// Take the last maxTurns*2 messages (user+assistant pairs).
+	start := 0
+	if len(msgs) > maxTurns*2 {
+		start = len(msgs) - maxTurns*2
+	}
+	var b strings.Builder
+	for _, m := range msgs[start:] {
+		text := m.TextContent()
+		if text == "" {
+			continue
+		}
+		// Truncate each turn to keep the summary compact.
+		if len(text) > 150 {
+			text = text[:150] + "..."
+		}
+		role := "user"
+		if m.Role == "assistant" {
+			role = "assistant"
+			if m.Tier != "" {
+				role = m.Tier
+			}
+		}
+		b.WriteString(fmt.Sprintf("[%s]: %s\n", role, text))
+	}
+	return b.String()
+}

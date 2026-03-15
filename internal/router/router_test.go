@@ -312,3 +312,47 @@ func TestInterpretRaw_DirectResponseFallsBack(t *testing.T) {
 		t.Error("direct response should be cleared in favor of tier routing")
 	}
 }
+
+func TestBuildPrompt_IncludesRecentContext(t *testing.T) {
+	tiers := defaultTiers()
+	input := ClassifyInput{
+		Message:       "oui c'est le titre",
+		Tiers:         tiers,
+		DataDir:       t.TempDir(),
+		ConfigDir:     t.TempDir(),
+		LastTier:      "sonnet",
+		MessageCount:  3,
+		RecentContext: "[user]: a regarder: https://youtube.com/watch?v=abc\n[sonnet]: Ajouté, mais je n'ai pas pu récupérer le titre.\n",
+	}
+	valid := map[string]bool{"haiku": true, "sonnet": true}
+	prompt := buildPrompt(input, valid)
+
+	if !strings.Contains(prompt, "Recent conversation") {
+		t.Error("expected prompt to include 'Recent conversation' section")
+	}
+	if !strings.Contains(prompt, "youtube.com") {
+		t.Error("expected prompt to include recent context content")
+	}
+	if !strings.Contains(prompt, "[sonnet]") {
+		t.Error("expected prompt to include tier labels from context")
+	}
+	if !strings.Contains(prompt, "continuation of the conversation") {
+		t.Error("expected updated continuity instruction")
+	}
+}
+
+func TestBuildPrompt_NoRecentContextWhenEmpty(t *testing.T) {
+	tiers := defaultTiers()
+	input := ClassifyInput{
+		Message:   "bonjour",
+		Tiers:     tiers,
+		DataDir:   t.TempDir(),
+		ConfigDir: t.TempDir(),
+	}
+	valid := map[string]bool{"haiku": true, "sonnet": true}
+	prompt := buildPrompt(input, valid)
+
+	if strings.Contains(prompt, "Recent conversation") {
+		t.Error("should not include recent conversation section when no context")
+	}
+}

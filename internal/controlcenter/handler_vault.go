@@ -108,7 +108,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *VaultHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		methodNotAllowed(w)
 		return
 	}
 	status, err := h.Manager.Health()
@@ -397,10 +397,5 @@ func (h *VaultHandler) handleOAuth2Authorize(w http.ResponseWriter, r *http.Requ
 }
 
 // isVaultSafeName validates that a name/id has no path traversal characters.
-func isVaultSafeName(s string) bool {
-	if s == "" || s == "." || s == ".." {
-		return false
-	}
-	return !strings.Contains(s, "/") && !strings.Contains(s, "\\")
-}
+var isVaultSafeName = isSafeName
 

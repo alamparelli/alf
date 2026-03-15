@@ -1,7 +1,6 @@
 package controlcenter
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,7 +23,7 @@ func (h *ChatMediaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 	h.upload(w, r)
@@ -58,8 +57,7 @@ func (h *ChatMediaHandler) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	respondJSON(w, http.StatusOK, result)
 }
 
 func (h *ChatMediaHandler) serveMedia(w http.ResponseWriter, r *http.Request) {

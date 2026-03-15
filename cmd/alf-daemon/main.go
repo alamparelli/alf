@@ -22,6 +22,7 @@ import (
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/firewall"
+	"github.com/alamparelli/alf/internal/secrets"
 	"github.com/alamparelli/alf/internal/vault"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
@@ -48,12 +49,12 @@ func main() {
 	// Ensure daemon-created files are group-writable (umask 002 = rwxrwxr-x).
 	syscall.Umask(0o002)
 
-	token := readSecret("TELEGRAM_BOT_TOKEN")
-	chatID := readSecret("TELEGRAM_CHAT_ID")
-	authToken := readSecret("CC_AUTH_TOKEN")
+	token := secrets.ReadSecret("TELEGRAM_BOT_TOKEN")
+	chatID := secrets.ReadSecret("TELEGRAM_CHAT_ID")
+	authToken := secrets.ReadSecret("CC_AUTH_TOKEN")
 
 	// Set Claude OAuth token as env var if available (picked up by safeEnv for subprocesses).
-	if oauthToken := readSecret("CLAUDE_OAUTH_TOKEN"); oauthToken != "" {
+	if oauthToken := secrets.ReadSecret("CLAUDE_OAUTH_TOKEN"); oauthToken != "" {
 		os.Setenv("CLAUDE_CODE_OAUTH_TOKEN", oauthToken)
 		log.Println("Claude OAuth token loaded from secret")
 	}
@@ -102,7 +103,7 @@ func main() {
 	// Default to TELEGRAM_CHAT_ID if ALLOWED_CHAT_IDS not explicitly set.
 	var allowedChatIDs map[int64]bool
 	if telegramEnabled {
-		allowedRaw := readSecret("ALLOWED_CHAT_IDS")
+		allowedRaw := secrets.ReadSecret("ALLOWED_CHAT_IDS")
 		if allowedRaw == "" {
 			allowedRaw = chatID
 		}
@@ -370,7 +371,7 @@ func main() {
 
 	// Voice transcriber (HTTP client to whisper-service container).
 	whisperURL := os.Getenv("WHISPER_URL")
-	whisperSecret := readSecret("WHISPER_SHARED_SECRET")
+	whisperSecret := secrets.ReadSecret("WHISPER_SHARED_SECRET")
 	var transcriber *voice.Transcriber
 	if whisperURL != "" && whisperSecret != "" {
 		instanceID, _ := os.Hostname()
@@ -623,7 +624,7 @@ func main() {
 					continue
 				}
 				secretName := strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
-				if key := readSecret(secretName); key != "" {
+				if key := secrets.ReadSecret(secretName); key != "" {
 					if err := vaultMgr.SetSecret(vaultKey, key); err == nil {
 						log.Printf("Backend %s API key migrated to vault", name)
 					}
@@ -2052,7 +2053,7 @@ type tierParams struct {
 // then falls back to the persisted password file in the vault data directory
 // (written by CC unlock handler).
 func vaultPassword(mgr *vault.Manager) string {
-	if pw := readSecret("VAULT_MASTER_PASSWORD"); pw != "" {
+	if pw := secrets.ReadSecret("VAULT_MASTER_PASSWORD"); pw != "" {
 		return pw
 	}
 	if mgr != nil {
@@ -2064,16 +2065,6 @@ func vaultPassword(mgr *vault.Manager) string {
 		}
 	}
 	return ""
-}
-
-func readSecret(envVar string) string {
-	if path := os.Getenv(envVar + "_FILE"); path != "" {
-		data, err := os.ReadFile(path)
-		if err == nil {
-			return strings.TrimSpace(string(data))
-		}
-	}
-	return strings.TrimSpace(os.Getenv(envVar))
 }
 
 // telegramJSONConfig mirrors controlcenter.TelegramConfig for reading.
@@ -2122,7 +2113,7 @@ func registerBackends(registry *provider.Registry, cfg *cc.Config, apiHistory *p
 		}
 	} else {
 		// Backward compat: check for legacy OPENROUTER_API_KEY secret.
-		if orAPIKey := readSecret("OPENROUTER_API_KEY"); orAPIKey != "" {
+		if orAPIKey := secrets.ReadSecret("OPENROUTER_API_KEY"); orAPIKey != "" {
 			prov := provider.NewAPIProvider(orAPIKey, apiHistory)
 			registry.Register("openrouter", prov)
 			log.Println("OpenRouter API provider enabled (legacy secret)")
@@ -2149,7 +2140,7 @@ func resolveBackendAPIKey(name string, bcfg cc.BackendConfig, vaultMgr *vault.Ma
 	}
 	// 2. Fallback: Docker secret <UPPERCASE_NAME>_API_KEY.
 	secretName := strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
-	if key := readSecret(secretName); key != "" {
+	if key := secrets.ReadSecret(secretName); key != "" {
 		return key
 	}
 	return ""

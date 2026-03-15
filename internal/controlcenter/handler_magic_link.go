@@ -1,7 +1,6 @@
 package controlcenter
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -18,7 +17,7 @@ type MagicLinkHandler struct {
 
 func (h *MagicLinkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
 
@@ -38,6 +37,5 @@ func (h *MagicLinkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	url := fmt.Sprintf("%s/auth?code=%s", h.ExternalURL, code)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"url": url})
+	respondJSON(w, http.StatusOK, map[string]string{"url": url})
 }

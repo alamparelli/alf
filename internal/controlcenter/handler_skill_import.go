@@ -35,8 +35,8 @@ var commandPattern = regexp.MustCompile(`(?:npx\s+\S+\s+)?(?:skills?\s+add\s+)?(
 // githubURLPattern strips GitHub URLs to bare owner/repo.
 var githubURLPattern = regexp.MustCompile(`(?:https?://)?github\.com/([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)`)
 
-// safeSkillName validates skill names to prevent path traversal.
-var safeSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+// safeSkillName uses the shared safeName pattern from validation.go.
+var safeSkillName = safeName
 
 // securityScanPrompt is hardcoded to prevent user modification of the security analysis.
 const securityScanPrompt = `You are a security auditor for AI skill definitions. Analyze the SKILL.md content for security risks.
@@ -98,7 +98,7 @@ type skillInstallResponse struct {
 
 func (h *SkillImportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		methodNotAllowed(w)
 		return
 	}
 
@@ -251,13 +251,7 @@ func (h *SkillImportHandler) handleCorrect(w http.ResponseWriter, req skillImpor
 	}
 
 	// Clean response - strip code fences if the LLM wrapped it.
-	corrected := strings.TrimSpace(result.Text)
-	corrected = strings.TrimPrefix(corrected, "```markdown")
-	corrected = strings.TrimPrefix(corrected, "```md")
-	corrected = strings.TrimPrefix(corrected, "```yaml")
-	corrected = strings.TrimPrefix(corrected, "```")
-	corrected = strings.TrimSuffix(corrected, "```")
-	corrected = strings.TrimSpace(corrected)
+	corrected := stripCodeBlock(result.Text)
 
 	respondJSON(w, http.StatusOK, map[string]string{"content": corrected})
 }
@@ -268,13 +262,8 @@ func (h *SkillImportHandler) handleInstall(w http.ResponseWriter, req skillImpor
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	if !safeSkillName.MatchString(name) {
+	if !isSafeName(name) {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid skill name: must be alphanumeric with dashes/underscores"})
-		return
-	}
-	// Block path traversal.
-	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid skill name"})
 		return
 	}
 
@@ -490,11 +479,7 @@ func (h *SkillImportHandler) runSecurityScan(content, backend, model string) (*s
 	}
 
 	// Parse JSON from response.
-	raw := strings.TrimSpace(result.Text)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
+	raw := stripCodeBlock(result.Text)
 
 	// Extract JSON object even if surrounded by prose.
 	if start := strings.Index(raw, "{"); start >= 0 {

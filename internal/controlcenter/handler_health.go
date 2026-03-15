@@ -7,9 +7,8 @@ type HealthHandler struct{}
 
 func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"ok":true}`))
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

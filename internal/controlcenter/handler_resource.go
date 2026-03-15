@@ -49,7 +49,7 @@ func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		h.del(w, name)
 	default:
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		methodNotAllowed(w)
 	}
 }
 

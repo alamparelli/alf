@@ -174,6 +174,8 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		StartedAt: time.Now(),
 		Status:    "running",
 		Prompt:    userMessage,
+		Source:    rc.Source,
+		Team:      rc.Team,
 	}
 
 	// Persist team config and initial task state immediately.
@@ -448,14 +450,30 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			})
 		}
 
+		// Check if any agents failed.
+		hasErrors := false
+		for _, ar := range agentResults {
+			if ar.Error != "" {
+				hasErrors = true
+				break
+			}
+		}
+
+		reviewInstruction := "Review the agent results. If all results are satisfactory, produce your final response. If any result is incomplete, incorrect, or needs improvement, delegate again with corrective instructions."
+		if hasErrors {
+			reviewInstruction = "Some agents failed. Review the errors, decide if you need to retry with different instructions or if you can produce a final response with the successful results."
+		}
+
 		resumeData := struct {
 			AgentResults []agentResultJSON `json:"agent_results"`
 			Iteration    int               `json:"iteration"`
 			TotalCostUSD float64           `json:"total_cost_usd"`
+			Review       string            `json:"review_instruction"`
 		}{
 			AgentResults: resultsJSON,
 			Iteration:    iteration + 2,
 			TotalCostUSD: meta.TotalCost,
+			Review:       reviewInstruction,
 		}
 
 		data, _ := json.Marshal(resumeData)

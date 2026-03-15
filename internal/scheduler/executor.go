@@ -89,6 +89,7 @@ type RunConfig struct {
 	MaxTurns             int
 	OrchestratorMaxTurns int
 	Tools                []string
+	Source               string
 }
 
 // TaskMeta tracks orchestration lifecycle (mirrors agents.TaskMeta).
@@ -389,6 +390,13 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		}
 	}
 
+	// Inject scheduled job context so the LLM knows why it was triggered.
+	jobContext := fmt.Sprintf("You are executing scheduled job \"%s\" (ID: %s, schedule: %s).", j.Name, j.ID, j.Schedule)
+	if j.Message != "" {
+		jobContext += fmt.Sprintf(" The scheduled message is: %s", j.Message)
+	}
+	params.SystemPrompts = append(params.SystemPrompts, jobContext)
+
 	// Load system prompts: L1 (identity), L2 (tools), L3 (user context).
 	if e.cfg.ContextDir != "" {
 		params.SystemPrompts = append(params.SystemPrompts, memory.CollectSchedulerPrompts(e.cfg.ContextDir)...)
@@ -523,7 +531,7 @@ func (e *Engine) invokeOrchestratorWithMeta(j *Job) (string, *execResult, error)
 	ctx, cancel := context.WithTimeout(context.Background(), orchTimeout)
 	defer cancel()
 
-	text, meta, err := e.cfg.Orchestrator.Run(ctx, j.Prompt, sysPrompts, RunConfig{}, nil)
+	text, meta, err := e.cfg.Orchestrator.Run(ctx, j.Prompt, sysPrompts, RunConfig{Source: "schedule"}, nil)
 	if err != nil {
 		return "", nil, err
 	}

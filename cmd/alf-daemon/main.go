@@ -1672,6 +1672,7 @@ func main() {
 					Effort:               tp.Effort,
 					MaxTurns:             tp.MaxTurns,
 					OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
+					Source:               "telegram",
 					MaxIterations:        tp.MaxIterations,
 					TimeoutMin:           tp.TimeoutMin,
 					SkillPrompts:         skillInjections,

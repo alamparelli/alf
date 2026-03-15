@@ -186,6 +186,10 @@ func (s *schedulerOrchestrator) Run(ctx context.Context, userMessage string, sys
 		agentProgress = agents.ProgressFunc(onProgress)
 	}
 
+	source := rc.Source
+	if source == "" {
+		source = "schedule"
+	}
 	text, meta, err := s.o.Run(ctx, userMessage, systemPrompts, agents.RunConfig{
 		Model:                rc.Model,
 		Backend:              rc.Backend,
@@ -193,6 +197,7 @@ func (s *schedulerOrchestrator) Run(ctx context.Context, userMessage string, sys
 		MaxIterations:        rc.MaxIterations,
 		MaxTurns:             rc.MaxTurns,
 		OrchestratorMaxTurns: rc.OrchestratorMaxTurns,
+		Source:               source,
 	}, agentProgress)
 	if err != nil {
 		return "", nil, err

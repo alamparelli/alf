@@ -103,6 +103,31 @@ Quiet hours prevent ALF from responding during a defined window. Useful for supp
 
 ---
 
+## Memory extraction
+
+Controls how ALF automatically extracts facts from conversations into long-term memory. All fields default to sensible values when set to `0` — you only need to change them for fine-tuning.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `memory_enabled` | bool | `true` | Enable the memory system (embeddings + extraction). Set to `false` to disable entirely. |
+| `memory_extract_interval` | int (minutes) | `180` | How often the extractor scans recent conversations for new facts. |
+| `memory_extract_timeout` | int (seconds) | `300` | Max time for each extraction LLM call. |
+| `memory_extract_boot_delay` | int (seconds) | `180` | Delay before the first extraction after startup (avoids resource contention). |
+| `memory_extract_min_messages` | int | `3` | Minimum conversation message pairs before extraction triggers. Below this, the cycle is skipped. |
+| `memory_dedup_text_threshold` | float | `0.7` | Jaccard word-similarity threshold for deduplication. Higher = stricter (fewer duplicates stored). Range: 0.0–1.0. |
+| `memory_dedup_cosine_threshold` | float | `0.15` | Cosine distance threshold for semantic deduplication. Lower = stricter. A new memory with distance below this to an existing one is considered a duplicate. Range: 0.0–2.0. |
+
+**Example - extract more aggressively:**
+```json
+{
+  "memory_extract_interval": 60,
+  "memory_extract_min_messages": 2,
+  "memory_dedup_cosine_threshold": 0.10
+}
+```
+
+---
+
 ## DNS
 
 | Field | Type | Default | Description |

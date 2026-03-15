@@ -169,7 +169,7 @@ func (s *Store) Search(query string, limit int) ([]Memory, error) {
 		return s.textSearchLocked(query, limit)
 	}
 
-	vec, err := s.embedder.Embed(query)
+	vec, err := s.embedder.EmbedQuery(query)
 	if err != nil {
 		// Fall back to FTS5.
 		log.Printf("memstore: embed query failed, falling back to FTS5: %v", err)

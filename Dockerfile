@@ -94,12 +94,12 @@ RUN if [ "${TARGETARCH}" = "amd64" ]; then ARCH="x64"; \
          "onnxruntime-linux-${ARCH}-1.24.2/lib/libonnxruntime.so" \
     && ldconfig
 
-# Pre-download ONNX embedding model to avoid first-run delay.
-RUN mkdir -p /opt/alf/models/all-MiniLM-L6-v2 \
-    && curl -fsSL -o /opt/alf/models/all-MiniLM-L6-v2/model.onnx \
-       "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx" \
-    && curl -fsSL -o /opt/alf/models/all-MiniLM-L6-v2/tokenizer.json \
-       "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
+# Pre-download ONNX embedding model (multilingual-e5-small: 100 languages, 384 dims).
+RUN mkdir -p /opt/alf/models/multilingual-e5-small \
+    && curl -fsSL -o /opt/alf/models/multilingual-e5-small/model.onnx \
+       "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx" \
+    && curl -fsSL -o /opt/alf/models/multilingual-e5-small/tokenizer.json \
+       "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/tokenizer.json"
 
 # Claude Code native binary.
 # Keep ~/.local/bin/claude so Claude Code recognises the native install.

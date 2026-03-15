@@ -1770,20 +1770,50 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   letter-spacing: 0.05em; margin-top: 6px; margin-bottom: 2px;
 }
 
-/* Responsive */
-@media (max-width: 600px) {
+/* ========== Bottom Nav Bar (mobile) ========== */
+.bottom-nav {
+  display: none; /* shown on mobile via @media */
+}
+
+/* ========== Responsive ========== */
+@media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%); transition: transform 0.25s ease;
   }
   .sidebar.open { transform: translateX(0); }
   .sidebar-overlay.open { display: block; }
-  .main-content { margin-left: 0; overflow-x: hidden; max-width: 100vw; }
+  .main-content { margin-left: 0; overflow-x: hidden; max-width: 100vw; padding-bottom: 60px; }
   .hamburger { display: flex; }
 
-  #homeView { padding: 12px 10px; }
+  /* (A) Bottom navigation bar */
+  .bottom-nav {
+    display: flex; position: fixed; bottom: 0; left: 0; right: 0;
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--bg-card); border-top: 1px solid var(--border);
+    z-index: 100; justify-content: space-around; align-items: center;
+  }
+  .bottom-nav-item {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; padding: 6px 0; min-width: 56px; min-height: 44px;
+    color: var(--text-dim); text-decoration: none; font-size: 0.62rem;
+    transition: color 0.15s; position: relative; -webkit-tap-highlight-color: transparent;
+  }
+  .bottom-nav-item i, .bottom-nav-item .lucide { width: 20px; height: 20px; }
+  .bottom-nav-item.active { color: var(--accent); }
+  .bottom-nav-item.has-badge::after {
+    content: ''; position: absolute; top: 4px; right: calc(50% - 14px);
+    width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  }
 
+  /* (B) Touch-friendly sizing */
+  .nav-icon { min-height: 44px; min-width: 44px; }
+  .btn, .btn-secondary, .btn-sm { min-height: 44px; }
+  .chat-cmd-item { padding: 10px 14px; min-height: 44px; }
+
+  #homeView { padding: 12px 10px; }
   .card { padding: 14px; margin-bottom: 12px; }
-  .card h2 { font-size: 0.8rem; margin-bottom: 8px; }
+  .card h2 { font-size: 0.85rem; margin-bottom: 8px; }
 
   .terminal-view { padding: 6px; }
   #terminalContainer { padding: 0; }
@@ -1793,41 +1823,50 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   .stat-value { font-size: 1.2rem; }
 
   .form-row { flex-direction: column; align-items: stretch; gap: 6px; }
-  .form-row label { min-width: auto; font-size: 0.8rem; }
-  .form-row select, .form-row input[type="number"], .form-row input[type="text"] { width: 100%; }
+  .form-row label { min-width: auto; font-size: 0.82rem; }
+  .form-row select, .form-row input[type="number"], .form-row input[type="text"] { width: 100%; min-height: 40px; }
 
   .btn-row { flex-direction: column; gap: 8px; }
   .btn-row .btn, .btn-row .btn-secondary { width: 100%; text-align: center; }
 
-  .log-box { max-height: 200px; font-size: 0.72rem; padding: 8px; }
+  .log-box { max-height: 200px; font-size: 0.78rem; padding: 8px; }
 
-  .toast { left: 12px; right: 12px; bottom: 12px; text-align: center; }
+  .toast { left: 12px; right: 12px; bottom: 68px; text-align: center; } /* above bottom nav */
 
-  .chat-tabs { padding: 0 4px; min-height: 32px; }
-  .chat-tab { padding: 5px 8px; font-size: 0.72rem; max-width: 120px; }
-  .chat-bubble { max-width: 92%; font-size: 0.84rem; }
-  .chat-bubble pre { font-size: 0.75rem; padding: 6px 8px; }
+  /* (B+E) Chat — touch-friendly + better input */
+  .chat-tabs { padding: 0 4px; min-height: 36px; }
+  .chat-tab { padding: 6px 10px; font-size: 0.78rem; max-width: 130px; min-height: 36px; }
+  .chat-bubble { max-width: 94%; font-size: 0.9rem; }
+  .chat-bubble pre { font-size: 0.78rem; padding: 8px 10px; }
   .chat-input-bar {
-    padding: 8px 10px;
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    padding: 10px 12px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px) + 56px); /* space for bottom nav */
   }
-  .chat-input-bar textarea { font-size: 16px; } /* prevent iOS zoom on focus */
+  .chat-input-bar textarea {
+    font-size: 16px; /* prevent iOS zoom */
+    min-height: 44px; padding: 10px 14px;
+  }
+  .chat-send-btn { width: 44px; height: 44px; }
+  .chat-send-btn i, .chat-send-btn svg { width: 20px; height: 20px; }
   .chat-messages {
-    padding: 12px 8px; gap: 10px;
+    padding: 12px 10px; gap: 12px;
     -webkit-overflow-scrolling: touch;
   }
   .chat-thinking-block, .chat-tool-block, .chat-agent-tracker { margin: 3px 8px; }
-  .chat-step { font-size: 0.7rem; }
-  .chat-status { padding: 0 8px; }
-  .chat-cmd-picker { font-size: 0.8rem; }
-  .chat-cmd-item { padding: 6px 10px; }
+  .chat-step { font-size: 0.76rem; }
+  .chat-status { padding: 0 8px; font-size: 0.82rem; }
+  .chat-cmd-picker { font-size: 0.85rem; }
+  .chat-bubble-meta { font-size: 0.72rem; }
+  .chat-react-btn { width: 28px; height: 28px; }
 
   .explorer-split { flex-direction: column; min-height: auto; }
   .explorer-sidebar { width: 100%; min-width: auto; max-height: 150px; }
   .explorer-editor .json-editor { min-height: 180px; }
 
   .logs-view { padding: 8px 10px; }
-  .logs-output { font-size: 0.72rem; }
+  .logs-output { font-size: 0.76rem; }
+
+  /* Tasks */
   .tasks-view { padding: 12px 10px; }
   .task-card-header { gap: 8px; padding: 10px 12px; flex-wrap: wrap; }
   .task-card-title { min-width: 100%; }
@@ -1843,12 +1882,43 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   .task-detail-row { flex-direction: column; gap: 2px; }
   .task-approval-actions { flex-direction: column; }
   .task-step-header { flex-wrap: wrap; }
+
+  /* Docs */
   .docs-view { padding: 12px 10px; }
   .docs-sidebar { display: none; }
   .docs-toc { display: none; }
   .docs-article h1 { font-size: 1.2rem; }
-  .docs-article table { font-size: 0.78rem; }
+  .docs-article table { font-size: 0.82rem; }
   .docs-article th, .docs-article td { padding: 6px 8px; }
+
+  /* (D) Tiers — stack rows vertically */
+  .tiers-view { padding: 14px 10px; }
+  .tiers-toolbar { flex-wrap: wrap; gap: 8px; }
+  .tiers-router-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .tiers-router-label { min-width: auto; }
+
+  /* (D) Firewall — scrollable table + stacked toolbar */
+  .firewall-view { padding: 14px 10px; }
+  .firewall-toolbar { flex-wrap: wrap; gap: 8px; }
+  .firewall-mode-row { flex-wrap: wrap; }
+  .firewall-log-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .firewall-log-table { min-width: 500px; } /* force scroll rather than squeeze */
+  .fw-rule-row { flex-wrap: wrap; gap: 6px; }
+
+  /* (D) Vault — full-width modals + stacked items */
+  .vault-view { padding: 14px 10px; }
+  .vault-toolbar { flex-wrap: wrap; gap: 8px; }
+  .vault-item { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .vault-item-actions { width: 100%; justify-content: flex-end; }
+  .vault-unlock-form { flex-direction: column; }
+  .vault-unlock-form .input { width: 100%; }
+  .modal-overlay .modal { width: 95vw; max-height: 90vh; padding: 1.2rem; }
+  .oauth2-mode-tabs { flex-wrap: wrap; }
+
+  /* (D) Settings — full width */
+  .settings-view { max-width: 100%; padding: 14px 10px; }
+  .theme-picker { gap: 8px; }
+  .theme-swatch { padding: 8px 10px; }
 }
 
 /* Firewall */

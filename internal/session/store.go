@@ -18,6 +18,7 @@ type Entry struct {
 	LastBackend  string    `json:"last_backend,omitempty"` // last backend used (cli, openrouter, ollama, etc.)
 	MessageCount int       `json:"message_count,omitempty"`
 	ActiveSkills []string  `json:"active_skills,omitempty"` // skills active for this session
+	ForcedTier   string    `json:"forced_tier,omitempty"`   // tier override persisting until /new or timeout
 }
 
 // Store manages per-chat Claude session IDs with timeout-based expiry.
@@ -236,6 +237,44 @@ func (s *Store) GetSkills(chatID int64) []string {
 		return nil
 	}
 	return e.ActiveSkills
+}
+
+// SetForcedTier sets a persistent tier override for the session.
+// The override is cleared by Archive (i.e. /new) or session timeout.
+func (s *Store) SetForcedTier(chatID int64, tier string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	e, ok := s.entries[chatID]
+	if !ok {
+		e = &Entry{
+			ChatID:    chatID,
+			CreatedAt: now,
+			LastActive: now,
+		}
+		s.entries[chatID] = e
+	}
+	e.ForcedTier = tier
+	e.LastActive = now
+	s.persist()
+}
+
+// GetForcedTier returns the persistent tier override for a chat, or "" if none/expired.
+func (s *Store) GetForcedTier(chatID int64) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.entries[chatID]
+	if !ok {
+		return ""
+	}
+	if s.timeout > 0 && time.Since(e.LastActive) >= s.timeout {
+		delete(s.entries, chatID)
+		s.persist()
+		return ""
+	}
+	return e.ForcedTier
 }
 
 // SetTimeout updates the inactivity timeout. Safe for concurrent use.

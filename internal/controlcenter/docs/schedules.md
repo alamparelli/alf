@@ -61,9 +61,9 @@ seconds  minutes  hours  day-of-month  month  day-of-week
 
 | Option | What happens |
 |--------|-------------|
-| `telegram` | Result is sent as a Telegram message |
+| `chat` | Result is sent to all available channels (Telegram, Control Center) |
 | `file` | Result is saved to a file in the workspace |
-| `both` | Telegram message + file |
+| `both` | Chat notification + file |
 | `silent` | Job runs but output is discarded |
 
 ## Filtering jobs
@@ -179,7 +179,7 @@ Internal jobs (like config watchers or update checks) are hidden from the UI. Th
 | Schedule | `0 0 9 * * *` |
 | Tier | `sonnet` |
 | Prompt | `Summarize what changed in the workspace since yesterday. List new files, modified files, and any open tasks.` |
-| Output | `telegram` |
+| Output | `chat` |
 
 **Hourly git backup:**
 

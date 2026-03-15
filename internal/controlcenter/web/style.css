@@ -623,6 +623,11 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   align-self: flex-start; background: var(--bg-card); border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
 }
+.chat-bubble.system {
+  align-self: center; background: var(--bg-input); color: var(--text-dim);
+  font-size: 0.78rem; padding: 5px 12px; border-radius: 8px; max-width: 90%;
+  text-align: center;
+}
 .chat-bubble-meta {
   font-size: 0.7rem; color: var(--text-dim); margin-top: 4px;
   display: flex; gap: 8px; align-items: center;

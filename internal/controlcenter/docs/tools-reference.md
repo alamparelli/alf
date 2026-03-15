@@ -64,11 +64,11 @@ Create a scheduled job. Two modes: **direct** (bash command) or **LLM** (prompt 
 ```bash
 # Direct bash job
 schedule create --name "disk check" --schedule "0 0 */6 * * *" \
-  --command "df -h" --output telegram
+  --command "df -h" --output chat
 
 # LLM job
 schedule create --name "morning brief" --schedule "0 0 9 * * 1-5" \
-  --tier sonnet --prompt "Summarize today's priorities" --output telegram
+  --tier sonnet --prompt "Summarize today's priorities" --output chat
 
 # One-shot (RFC3339 timestamp)
 schedule create --name "deploy check" --schedule "2026-03-10T15:00:00Z" \
@@ -82,7 +82,7 @@ schedule create --name "deploy check" --schedule "2026-03-10T15:00:00Z" \
 | `--tier` | No | LLM tier name, or `direct` for bash. Auto-detected if `--command` given |
 | `--prompt` | LLM jobs | Prompt sent to the LLM |
 | `--command` | Direct jobs | Bash command to execute |
-| `--output` | No | `telegram` (default), `file`, `both`, `silent` |
+| `--output` | No | `chat` (default), `file`, `both`, `silent` |
 | `--skills` | No | Comma-separated skill names to inject (LLM jobs only) |
 
 ### schedule list

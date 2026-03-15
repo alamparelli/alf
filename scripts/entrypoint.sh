@@ -11,10 +11,9 @@ if [ -f "$PACKAGES" ]; then
     STAMP="/tmp/.packages-stamp"
     if [ ! -f "$STAMP" ] || ! cmp -s "$PACKAGES" "$STAMP"; then
         echo "entrypoint: installing system packages ..."
-        PKGS=$(grep -v '^\s*#' "$PACKAGES" | grep -v '^\s*$' | tr '\n' ' ')
-        if [ -n "$PKGS" ]; then
+        if grep -qvE '^\s*#|^\s*$' "$PACKAGES"; then
             DEBIAN_FRONTEND=noninteractive apt-get update -qq \
-                && apt-get install -y --no-install-recommends -qq $PKGS \
+                && grep -vE '^\s*#|^\s*$' "$PACKAGES" | xargs -r apt-get install -y --no-install-recommends -qq \
                 && rm -rf /var/lib/apt/lists/* \
                 || echo "entrypoint: WARNING - package install failed, continuing"
         fi
@@ -53,10 +52,11 @@ if [ -f "$RUNTIME" ]; then
     fi
 fi
 
-# Phase 2: Run user bootstrap as alf (pip install, start services, etc.).
-# Never runs as root - no apt, no writes to /usr, /etc, /root.
+# Phase 2: Run user bootstrap as alf (legacy — deprecated).
+# Use services.d/ for persistent processes and bash tool calls for one-time setup.
 if [ -f "$BOOTSTRAP" ]; then
-    echo "entrypoint: running bootstrap.sh ..."
+    echo "entrypoint: WARNING - bootstrap.sh is deprecated. Use services.d/ for background services."
+    echo "entrypoint: running bootstrap.sh (legacy) ..."
     chmod +x "$BOOTSTRAP"
     chown alf:alf "$BOOTSTRAP"
     DEBIAN_FRONTEND=noninteractive su -s /bin/bash alf -c "bash -x $BOOTSTRAP" 2>&1 || \

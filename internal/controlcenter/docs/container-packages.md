@@ -94,6 +94,44 @@ cat > ~/data/apps/status/index.html << 'HTML'
 HTML
 ```
 
+### Apps with background services
+
+If your app needs a backend process (API server, worker, etc.), add a `service.json` next to the `app.json`. The daemon supervises it automatically — restart on crash, restart on daemon reboot.
+
+```bash
+mkdir -p ~/data/apps/my-api
+cat > ~/data/apps/my-api/service.json << 'JSON'
+{
+  "name": "My API",
+  "command": "./server",
+  "args": ["--port", "8764"],
+  "env": {"PORT": "8764"},
+  "restart": "always",
+  "restart_delay": "3s",
+  "max_restarts": 10,
+  "enabled": true
+}
+JSON
+```
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `command` | Executable to run (relative to app dir, must stay within the app directory) | Required |
+| `args` | Command-line arguments | `[]` |
+| `env` | Environment variables | `{}` |
+| `restart` | `"always"`, `"on-failure"`, or `"no"` | `"always"` |
+| `restart_delay` | Base delay between restarts (exponential backoff up to 60s) | `"3s"` |
+| `max_restarts` | Maximum restart attempts before giving up | `100` |
+| `enabled` | Whether to start the service | `true` |
+
+The service runs under the same user as the daemon. Logs appear in the daemon log prefixed with `[app-slug]`.
+
+**Lifecycle:**
+- Daemon start → all enabled services start
+- Service crash → automatic restart with exponential backoff (resets after 5min stable)
+- Daemon stop → SIGTERM → 5s grace → SIGKILL
+- Edit `service.json` → restart daemon to pick up changes
+
 ### App rules
 
 **Security (Content Security Policy):**
@@ -158,45 +196,35 @@ pandoc
 
 Edit via: Workspace Explorer > `config.d/packages.txt`, then `alf restart`.
 
-### User bootstrap (`data/bootstrap.sh`)
+### User packages (pip, npm)
 
-Runs as the `alf` user (not root) at every startup. Use for pip/npm installs and starting services.
+Install packages directly via ALF's bash tool. Results persist in cache volumes across restarts:
 
 ```bash
-#!/bin/bash
-set -e
-
-# Python
 pip3 install --quiet --break-system-packages requests numpy
-
-# Node.js
 npm install -g --silent typescript
-
-# Start a background service
-nohup python3 ~/data/tools/my-api serve &
 ```
 
-> **Do not** put `apt install` commands in bootstrap.sh - it runs as a non-root user. Use `config.d/packages.txt` instead.
+No need for a bootstrap script — cache volumes (`~/.local`, `~/.npm`, `~/.cache`) survive restarts. Packages are only lost on image rebuild (`alf upgrade`), in which case ALF can reinstall them when needed.
 
-### Rules
+### Background services
 
-1. Use quiet/non-interactive flags (`--quiet`, `-y`, `-qq`, `--silent`)
-2. Append new lines - do not overwrite existing content
-3. bootstrap.sh runs as user `alf` - no `sudo`, no `apt`
-4. If bootstrap fails, the daemon still starts (warnings logged)
+Use `service.json` in app directories instead of `nohup ... &`. See [Apps with background services](#apps-with-background-services) above.
+
+> **Legacy:** `data/bootstrap.sh` is deprecated. It still runs once at container start for backward compatibility, but new setups should use `config.d/packages.txt` for system packages, pip/npm for user packages (cached in volumes), and `service.json` for background services.
 
 ## What survives a rebuild
 
-| Survives | Lost |
+| Survives | Lost on rebuild |
 |----------|------|
-| Everything in `~/data/` | pip/apt/npm packages (reinstalled automatically) |
+| Everything in `~/data/` | apt packages (reinstalled via `packages.txt`) |
 | `config.d/packages.txt` | Binaries in `/usr/local/bin` |
 | Scripts in `~/data/tools/` | System-level config changes |
-| Apps in `~/data/apps/` | Anything outside volumes |
+| Apps + services in `~/data/apps/` | Anything outside volumes |
 | Skills in `~/data/skills/` | |
-| `~/data/bootstrap.sh` | |
+| pip/npm packages (in cache volumes) | |
 
-**Rule of thumb:** system packages go in `config.d/packages.txt`, pip/npm go in `data/bootstrap.sh`, custom scripts go in `data/tools/`.
+**Rule of thumb:** system packages go in `config.d/packages.txt`, pip/npm install directly (cached in volumes), background services go in `apps/*/service.json`.
 
 ## What's next?
 

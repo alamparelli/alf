@@ -37,6 +37,7 @@ You can change this in **Settings → Configuration** by editing `session_timeou
 When a session expires:
 - ALF loses the conversation context
 - Active skills are cleared
+- Any tier lock from a force command is cleared
 - The next message starts a fresh session
 
 ## Multiple conversations
@@ -63,6 +64,7 @@ Type `/new` in Telegram or CC Chat to manually end your session and start fresh.
 | ALF seems confused | A fresh session clears any accumulated misunderstandings |
 | After a long task | Free up context space for the next thing |
 | Before an important request | Gives ALF maximum context window for your task |
+| After a force command session | Unlocks the tier and returns to normal routing |
 
 ## Best practices
 
@@ -120,6 +122,9 @@ No. Each tab in the Control Center Chat is fully independent - its own session, 
 
 **What happens if a skill was active and the session expires?**
 The skill clears from the session. Next time you mention a trigger keyword, it reloads automatically.
+
+**I used a force command (`/opus`) - do I need to keep prefixing every message?**
+No. Force commands lock the session to that tier. All subsequent messages use the same tier until you `/new` or the session times out. ALF tells you when a lock is active.
 
 ## What's next?
 

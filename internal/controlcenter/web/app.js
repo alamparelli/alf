@@ -2405,6 +2405,14 @@ async function chatProcessStream(res) {
           }
           chatScrollBottom();
           break;
+        case 'system': {
+          var sysBubble = document.createElement('div');
+          sysBubble.className = 'chat-bubble system';
+          sysBubble.textContent = data.text || '';
+          chatStreamTarget().appendChild(sysBubble);
+          chatScrollBottom();
+          break;
+        }
         case 'reaction':
           chatReaction = data.emoji;
           break;

@@ -24,16 +24,20 @@ type ExtractorParams struct {
 	DataDir  string
 }
 
+// TierResolver returns the model name for the lowest-priority enabled tier.
+type TierResolver func() string
+
 // Extractor periodically extracts facts from event logs and stores them.
 type Extractor struct {
-	store     *Store
-	dataDir   string         // root data dir (for logs, claude working dir)
-	stateDir  string         // where to store state file (context dir)
-	interval  time.Duration
-	timeout   time.Duration  // timeout for Claude extraction call
-	statePath string
-	stop      chan struct{}
-	provider  ExtractorProvider
+	store        *Store
+	dataDir      string         // root data dir (for logs, claude working dir)
+	stateDir     string         // where to store state file (context dir)
+	interval     time.Duration
+	timeout      time.Duration  // timeout for Claude extraction call
+	statePath    string
+	stop         chan struct{}
+	provider     ExtractorProvider
+	tierResolver TierResolver   // resolves cheapest tier model at runtime
 }
 
 // ExtractorState holds the persisted state of the extractor.
@@ -52,7 +56,8 @@ type extractedFact struct {
 // NewExtractor creates a new periodic extraction job.
 // provider is used to invoke Claude for fact extraction.
 // timeout sets the max duration for each Claude extraction call (0 = default 5m).
-func NewExtractor(store *Store, dataDir, contextDir string, interval, timeout time.Duration, prov ExtractorProvider) *Extractor {
+// tierResolver optionally resolves the cheapest tier model at runtime (nil = fallback to claude-haiku-4-5).
+func NewExtractor(store *Store, dataDir, contextDir string, interval, timeout time.Duration, prov ExtractorProvider, tierResolver TierResolver) *Extractor {
 	if interval <= 0 {
 		interval = 3 * time.Hour
 	}
@@ -60,14 +65,15 @@ func NewExtractor(store *Store, dataDir, contextDir string, interval, timeout ti
 		timeout = 5 * time.Minute
 	}
 	return &Extractor{
-		store:     store,
-		dataDir:   dataDir,
-		stateDir:  contextDir,
-		interval:  interval,
-		timeout:   timeout,
-		statePath: filepath.Join(contextDir, "memory_extractor_state.json"),
-		stop:      make(chan struct{}),
-		provider:  prov,
+		store:        store,
+		dataDir:      dataDir,
+		stateDir:     contextDir,
+		interval:     interval,
+		timeout:      timeout,
+		statePath:    filepath.Join(contextDir, "memory_extractor_state.json"),
+		stop:         make(chan struct{}),
+		provider:     prov,
+		tierResolver: tierResolver,
 	}
 }
 
@@ -274,8 +280,15 @@ func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, erro
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
+	model := "claude-haiku-4-5"
+	if e.tierResolver != nil {
+		if m := e.tierResolver(); m != "" {
+			model = m
+		}
+	}
+
 	raw, err := e.provider.Invoke(ctx, prompt, ExtractorParams{
-		Model:    "claude-haiku-4-5",
+		Model:    model,
 		MaxTurns: 1,
 		DataDir:  e.dataDir,
 	})

@@ -39,8 +39,8 @@
       },
       "output": {
         "type": "string",
-        "enum": ["telegram", "file", "both", "silent"],
-        "description": "Output destination (default: telegram)"
+        "enum": ["chat", "file", "both", "silent"],
+        "description": "Output destination (default: chat). 'chat' notifies all available channels (Telegram, Control Center)."
       },
       "timeout": {
         "type": "string",

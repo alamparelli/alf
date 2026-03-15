@@ -86,14 +86,12 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		args = append(args, "--max-turns", fmt.Sprintf("%d", params.MaxTurns))
 	}
 
-	// System prompts: first one replaces Claude Code's default identity
-	// (--system-prompt), rest are appended (--append-system-prompt).
-	for i, sp := range params.SystemPrompts {
-		if i == 0 {
-			args = append(args, "--system-prompt", sp)
-		} else {
-			args = append(args, "--append-system-prompt", sp)
-		}
+	// System prompts: concatenate all into a single --system-prompt.
+	// --append-system-prompt is unreliable (can cause both prompts to be
+	// ignored), so we join everything into one block.
+	if len(params.SystemPrompts) > 0 {
+		combined := strings.Join(params.SystemPrompts, "\n\n")
+		args = append(args, "--system-prompt", combined)
 	}
 
 	dataDir := params.DataDir

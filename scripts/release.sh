@@ -73,16 +73,29 @@ if [ "$LOCAL_BUILD" = true ]; then
 
   rm -rf third_party/vault-proxy
 
-  echo "Building whisper-service Docker image (linux/amd64 + linux/arm64)..."
-  docker buildx build \
-    --builder multiarch \
-    --platform linux/amd64,linux/arm64 \
-    --push \
-    -t "${WHISPER_REGISTRY}:${version}" \
-    -t "${WHISPER_REGISTRY}:latest" \
-    ./whisper-service
+  # Only rebuild whisper-service if its files changed since last tag.
+  if git diff --name-only "${latest}" HEAD -- whisper-service/ | grep -q .; then
+    echo "Building whisper-service Docker image (linux/amd64 + linux/arm64)..."
+    docker buildx build \
+      --builder multiarch \
+      --platform linux/amd64,linux/arm64 \
+      --push \
+      -t "${WHISPER_REGISTRY}:${version}" \
+      -t "${WHISPER_REGISTRY}:latest" \
+      ./whisper-service
+    echo "Pushed ${WHISPER_REGISTRY}:${version} + :latest"
+  else
+    echo "whisper-service unchanged since ${latest} — skipping build"
+  fi
 
   echo ""
   echo "Pushed ${REGISTRY}:${version} + :latest"
-  echo "Pushed ${WHISPER_REGISTRY}:${version} + :latest"
+
+  # Build and upload alpha CLI binaries.
+  ALPHA_SCRIPT="$(cd "$(dirname "$0")" && pwd)/alpha-deploy.sh"
+  if [ -f "$ALPHA_SCRIPT" ]; then
+    echo ""
+    echo "Building alpha CLI binaries..."
+    "$ALPHA_SCRIPT" --binaries-only
+  fi
 fi

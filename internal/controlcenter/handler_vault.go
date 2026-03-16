@@ -1,6 +1,7 @@
 package controlcenter
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log"
@@ -49,7 +50,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleLock(w, r)
 	case path == "reset" && r.Method == http.MethodPost:
 		h.handleReset(w, r)
-	case path == "export" && r.Method == http.MethodGet:
+	case path == "export" && r.Method == http.MethodPost:
 		h.handleExport(w, r)
 	case path == "import" && r.Method == http.MethodPost:
 		h.handleImport(w, r)
@@ -207,12 +208,60 @@ func (h *VaultHandler) handleListServices(w http.ResponseWriter, r *http.Request
 }
 
 func (h *VaultHandler) handleAddService(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "read body: " + err.Error()})
+		return
+	}
+	// Resolve secret refs: if auth contains *_ref fields, look up the secret value.
+	body = h.resolveSecretRefs(body)
 	c := h.Manager.Client()
-	if err := c.AddService(http.MaxBytesReader(w, r.Body, 1<<20)); err != nil {
+	if err := c.AddService(strings.NewReader(string(body))); err != nil {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// resolveSecretRefs replaces *_ref fields in service auth with actual secret values.
+// e.g. {"auth":{"type":"bearer","token_ref":"my_secret"}} → {"auth":{"type":"bearer","token":"<value>"}}
+func (h *VaultHandler) resolveSecretRefs(body []byte) []byte {
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body
+	}
+	auth, ok := raw["auth"].(map[string]any)
+	if !ok {
+		return body
+	}
+	refMap := map[string]string{
+		"token_ref":        "token",
+		"header_value_ref": "header_value",
+		"password_ref":     "password",
+	}
+	changed := false
+	for ref, field := range refMap {
+		if refName, ok := auth[ref].(string); ok && refName != "" {
+			val, err := h.Manager.GetSecret(refName)
+			if err == nil && val != "" {
+				auth[field] = val
+				delete(auth, ref)
+				changed = true
+				log.Printf("[vault] resolved secret ref %q for service field %q", refName, field)
+			} else {
+				log.Printf("[vault] warning: could not resolve secret ref %q: %v", refName, err)
+			}
+		}
+	}
+	if !changed {
+		return body
+	}
+	raw["auth"] = auth
+	result, err := json.Marshal(raw)
+	if err != nil {
+		return body
+	}
+	return result
 }
 
 func (h *VaultHandler) handleDeleteService(w http.ResponseWriter, _ *http.Request, name string) {
@@ -414,7 +463,16 @@ func (h *VaultHandler) handleOAuth2Authorize(w http.ResponseWriter, r *http.Requ
 // --- Export / Import ---
 
 func (h *VaultHandler) handleExport(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Password == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "password required"})
+		return
+	}
 	c := h.Manager.Client()
+
+	// Export secrets (files)
 	files, err := c.ListFiles()
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -433,28 +491,99 @@ func (h *VaultHandler) handleExport(w http.ResponseWriter, r *http.Request) {
 		}
 		entries = append(entries, exportEntry{Name: f.Name, Value: string(data)})
 	}
-	w.Header().Set("Content-Disposition", "attachment; filename=vault-export.json")
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"secrets": entries})
+
+	// Export service metadata (credentials are not exposed by vault-server API,
+	// but the secrets they reference are included in the entries above).
+	services, err := c.ListServices()
+	if err != nil {
+		log.Printf("[vault] export: skip services: %v", err)
+	}
+
+	exportData := map[string]any{"secrets": entries}
+	if len(services) > 0 {
+		exportData["services"] = services
+	}
+
+	jsonData, err := json.Marshal(exportData)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "marshal: " + err.Error()})
+		return
+	}
+	encrypted, err := EncryptVaultExport(jsonData, req.Password)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "encrypt: " + err.Error()})
+		return
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename=vault-export.enc")
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Write(encrypted)
 }
 
 func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Secrets []struct {
+		Password string `json:"password"`
+		Data     string `json:"data"` // base64-encoded encrypted data
+		Secrets  []struct {
 			Name  string `json:"name"`
 			Value string `json:"value"`
-		} `json:"secrets"`
+		} `json:"secrets"` // plain JSON import (backward compat)
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 5<<20)).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if len(req.Secrets) == 0 {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "no secrets to import"})
+
+	type secretEntry struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	type serviceEntry struct {
+		Name          string `json:"name"`
+		BaseURL       string `json:"base_url"`
+		AuthType      string `json:"auth_type"`
+		TLSSkipVerify bool   `json:"tls_skip_verify,omitempty"`
+	}
+
+	var secrets []secretEntry
+	var services []serviceEntry
+
+	if req.Data != "" {
+		// Encrypted import
+		raw, err := base64.StdEncoding.DecodeString(req.Data)
+		if err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid base64"})
+			return
+		}
+		decrypted, err := DecryptVaultExport(raw, req.Password)
+		if err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "decrypt failed: " + err.Error()})
+			return
+		}
+		var parsed struct {
+			Secrets  []secretEntry  `json:"secrets"`
+			Services []serviceEntry `json:"services"`
+		}
+		if err := json.Unmarshal(decrypted, &parsed); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid decrypted data"})
+			return
+		}
+		secrets = parsed.Secrets
+		services = parsed.Services
+	} else {
+		// Plain JSON import (backward compat)
+		for _, s := range req.Secrets {
+			secrets = append(secrets, secretEntry{Name: s.Name, Value: s.Value})
+		}
+	}
+
+	if len(secrets) == 0 && len(services) == 0 {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "no secrets or services to import"})
 		return
 	}
+
+	// Import secrets
 	imported := 0
-	for _, s := range req.Secrets {
+	for _, s := range secrets {
 		if s.Name == "" || !isVaultSafeName(s.Name) {
 			log.Printf("[vault] import: skip invalid name %q", s.Name)
 			continue
@@ -465,8 +594,41 @@ func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 		}
 		imported++
 	}
-	log.Printf("[vault] imported %d/%d secrets", imported, len(req.Secrets))
-	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "imported": imported})
+
+	// Import services (metadata only — credentials must be re-linked via secret picker).
+	// We create stub services with a placeholder token so vault-server accepts them.
+	svcImported := 0
+	c := h.Manager.Client()
+	for _, svc := range services {
+		if svc.Name == "" || svc.BaseURL == "" {
+			continue
+		}
+		authType := svc.AuthType
+		if authType == "" {
+			authType = "bearer"
+		}
+		payload := map[string]any{
+			"name":     svc.Name,
+			"base_url": svc.BaseURL,
+			"auth":     map[string]string{"type": authType, "token": "__imported_reconfigure_me__"},
+		}
+		if svc.TLSSkipVerify {
+			payload["tls_skip_verify"] = true
+		}
+		body, _ := json.Marshal(payload)
+		if err := c.AddService(strings.NewReader(string(body))); err != nil {
+			log.Printf("[vault] import service %s: %v", svc.Name, err)
+			continue
+		}
+		svcImported++
+	}
+
+	log.Printf("[vault] imported %d/%d secrets, %d/%d services", imported, len(secrets), svcImported, len(services))
+	respondJSON(w, http.StatusOK, map[string]any{
+		"ok":                true,
+		"imported":          imported,
+		"services_imported": svcImported,
+	})
 }
 
 // --- Secret (key-value) management ---

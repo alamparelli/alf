@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/secrets"
@@ -184,83 +182,6 @@ func firstFallbackTier(tierStore cc.TierStore) string {
 	return ""
 }
 
-// onboardingTier picks a capable tier for onboarding (second priority, e.g. sonnet).
-func onboardingTier(tierStore cc.TierStore) string {
-	cur := tierStore.Current()
-	type candidate struct {
-		name     string
-		priority int
-	}
-	var candidates []candidate
-	for _, t := range cur.Tiers {
-		if t.Enabled && t.Name != "agent" {
-			candidates = append(candidates, candidate{t.Name, t.Priority})
-		}
-	}
-	if len(candidates) >= 2 {
-		best := candidates[0]
-		second := candidates[1]
-		if second.priority < best.priority {
-			best, second = second, best
-		}
-		for _, c := range candidates[2:] {
-			if c.priority < best.priority {
-				second = best
-				best = c
-			} else if c.priority < second.priority {
-				second = c
-			}
-		}
-		return second.name
-	}
-	return firstFallbackTier(tierStore)
-}
-
-// tierHasRead returns true if the tier's tool list includes the Read tool.
-func tierHasRead(t cc.Tier) bool {
-	if t.WriteCapable {
-		return true // write-capable tiers have all tools including Read
-	}
-	for _, tool := range t.Tools {
-		if tool == "Read" {
-			return true
-		}
-	}
-	return false
-}
-
-// lowestMediaTier returns the cheapest enabled tier that has the Read tool.
-// Falls back to any enabled tier, then to the first tier.
-func lowestMediaTier(tiers *cc.TiersConfig) string {
-	bestName := ""
-	bestPriority := int(^uint(0) >> 1)
-	// First pass: prefer tiers with Read tool.
-	for _, t := range tiers.Tiers {
-		if t.Enabled && tierHasRead(t) && t.Priority < bestPriority {
-			bestName = t.Name
-			bestPriority = t.Priority
-		}
-	}
-	if bestName != "" {
-		return bestName
-	}
-	// Second pass: any enabled tier.
-	bestPriority = int(^uint(0) >> 1)
-	for _, t := range tiers.Tiers {
-		if t.Enabled && t.Priority < bestPriority {
-			bestName = t.Name
-			bestPriority = t.Priority
-		}
-	}
-	if bestName != "" {
-		return bestName
-	}
-	if len(tiers.Tiers) > 0 {
-		return tiers.Tiers[0].Name
-	}
-	return ""
-}
-
 // watchConfigFiles polls config files for changes and sends reload events.
 // tiersPathFn is called each tick so the watcher follows runtime tiers_file changes.
 func watchConfigFiles(configDir string, dataDir string, tiersPathFn func() string, reloadCh chan cc.ReloadEvent) {
@@ -358,50 +279,6 @@ func resolveTimezone(tz string) *time.Location {
 	}
 	// time.Local already respects the TZ environment variable.
 	return time.Local
-}
-
-// autoRecall searches the memory store for relevant context and returns
-// a formatted system prompt block plus the best (lowest) distance score.
-// Returns ("", 2.0) if nothing relevant.
-func autoRecall(store *memstore.Store, message string) (string, float64) {
-	if len(message) < 5 {
-		return "", 2.0
-	}
-	q := message
-	if len(q) > 60 {
-		q = q[:60] + "..."
-	}
-	results, err := store.Search(message, 3)
-	if err != nil {
-		log.Printf("auto-recall: search error for %q: %v", q, err)
-		return "", 2.0
-	}
-	if len(results) == 0 {
-		log.Printf("auto-recall: no results for %q", q)
-		return "", 2.0
-	}
-	var sb strings.Builder
-	bestDist := 2.0
-	filtered := 0
-	for _, r := range results {
-		if r.Distance >= 1.2 {
-			filtered++
-			continue
-		}
-		if r.Distance < bestDist {
-			bestDist = r.Distance
-		}
-		if sb.Len() == 0 {
-			sb.WriteString("=== [auto-recall] ===\nRelevant memories about the user (auto-retrieved):\n")
-		}
-		sb.WriteString(fmt.Sprintf("- [%s] %s\n", r.Type, r.Text))
-	}
-	if sb.Len() > 0 {
-		log.Printf("auto-recall: injected %d memories for %q (best=%.2f, filtered %d by distance)", strings.Count(sb.String(), "\n- "), q, bestDist, filtered)
-	} else {
-		log.Printf("auto-recall: %d results for %q but all filtered by distance (>=1.2)", len(results), q)
-	}
-	return sb.String(), bestDist
 }
 
 func parseAllowedChatIDs(s string) map[int64]bool {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/media"
@@ -78,6 +79,8 @@ type ChatService struct {
 	ToolRegistry  *tooling.Registry           // may be nil - tool schemas for API agentic loop
 	ToolExecutor    *tooling.Executor           // may be nil - tool subprocess runner
 	BackendConfigs  func() map[string]BackendConfig // may be nil - backend pricing lookup
+	Engine          *comms.ChatEngine              // may be nil - unified engine (Step 5+)
+	ccAdapter       *ccAdapter                     // bridges engine events to per-call callbacks
 	mu              sync.Mutex                  // serialize Claude calls (single user v1)
 
 	// Background job tracking - one active job per conversation.
@@ -174,6 +177,13 @@ func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, 
 	return cs
 }
 
+// SetEngine installs the unified comms engine and registers the CC adapter.
+func (cs *ChatService) SetEngine(engine *comms.ChatEngine) {
+	cs.Engine = engine
+	cs.ccAdapter = newCCAdapter()
+	engine.RegisterAdapter(cs.ccAdapter)
+}
+
 // RegisterUpload stores an upload entry for later reference.
 func (cs *ChatService) RegisterUpload(entry *UploadEntry) {
 	cs.uploadsMu.Lock()
@@ -192,6 +202,10 @@ func (cs *ChatService) GetUpload(id string) *UploadEntry {
 func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+
+	if cs.Engine != nil {
+		return cs.askViaEngine(ctx, req, onEvent)
+	}
 
 	// Detect force command: /<tier_name> <message> bypasses routing.
 	if strings.HasPrefix(req.Message, "/") && req.Model == "" {
@@ -821,6 +835,142 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		"tier":        tierName,
 		"source":      "api",
 	})
+
+	return nil
+}
+
+// askViaEngine delegates message processing to the unified comms engine.
+// ChatStore writes and ChatDoneData emission remain CC-specific.
+func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
+	channelID := comms.ChannelID("cc:" + req.ConvID)
+	if req.ConvID == "" {
+		channelID = "cc:default"
+	}
+
+	// 1. Force command detection (CC-specific: session lock notification).
+	if strings.HasPrefix(req.Message, "/") && req.Model == "" {
+		parts := strings.SplitN(req.Message, " ", 2)
+		cmdName := strings.TrimPrefix(parts[0], "/")
+		for _, t := range cs.TierStore.Current().Tiers {
+			if t.Enabled && t.ForceCommand && t.Name == cmdName {
+				cs.Sessions.SetForcedTier(apiChatID, t.Name)
+				onEvent(ChatEvent{Type: "system", Data: map[string]string{
+					"text": fmt.Sprintf("⚡ Session locked to **%s**. Use /new to reset.", t.Name),
+				}})
+				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{Model: t.Name, Tier: t.Name}})
+					return nil
+				}
+				req.Model = t.Name
+				req.Message = strings.TrimSpace(parts[1])
+				break
+			}
+		}
+	}
+
+	// Check persistent tier override.
+	if req.Model == "" {
+		if ft := cs.Sessions.GetForcedTier(apiChatID); ft != "" {
+			req.Model = ft
+		}
+	}
+
+	// 2. Build prompt (CC-specific: upload registry, reply context from ChatStore).
+	prompt := cs.buildPrompt(req)
+	if prompt == "" {
+		return fmt.Errorf("empty message")
+	}
+
+	// Build router text (raw message + brief quote hint for router).
+	routerMsg := req.Message
+	if req.ReplyTo != "" {
+		if orig := cs.ChatStore.Get(req.ReplyTo); orig != nil {
+			quoted := orig.Text
+			if len(quoted) > 100 {
+				quoted = quoted[:100] + "..."
+			}
+			routerMsg = fmt.Sprintf("[Replying to: \"%s\"]\n%s", quoted, req.Message)
+		}
+	}
+
+	// 3. Save user message to ChatStore (CC-specific parallel store).
+	userMsgID := NewMessageID()
+	userMsg := ChatMessage{
+		ID:        userMsgID,
+		Role:      "user",
+		Text:      req.Message,
+		Timestamp: time.Now(),
+		ConvID:    req.ConvID,
+		ReplyTo:   req.ReplyTo,
+		Media:     cs.resolveMediaRefs(req.MediaIDs),
+	}
+	cs.ChatStore.Append(userMsg)
+
+	// 4. Build InMessage for engine.
+	msg := comms.InMessage{
+		ChannelID:  channelID,
+		Text:       prompt,
+		RawText:    req.Message,
+		RouterText: routerMsg,
+		IsReply:    req.ReplyTo != "",
+		ForcedTier: req.Model,
+	}
+	if req.ReplyTo != "" {
+		if orig := cs.ChatStore.Get(req.ReplyTo); orig != nil {
+			msg.ReplyTo = orig.Text
+		}
+	}
+
+	// 5. Set up event bridge (suppress engine's "done", we emit our own).
+	cs.ccAdapter.setCallback(onEvent)
+	defer cs.ccAdapter.setCallback(nil)
+
+	// 6. Call engine.Process().
+	start := time.Now()
+	result, err := cs.Engine.Process(ctx, msg)
+	duration := time.Since(start)
+
+	if err != nil {
+		return err
+	}
+
+	// 7. Spontaneous mood reaction (CC-specific).
+	state := mood.GetCurrentState(cs.ContextDir)
+	if mood.ShouldReact(state) {
+		spontaneous := mood.ChooseSpontaneous(state)
+		if spontaneous != "" {
+			onEvent(ChatEvent{Type: "reaction", Data: map[string]string{"emoji": spontaneous}})
+		}
+	}
+
+	// 8. Save assistant message to ChatStore (CC-specific parallel store).
+	assistantMsgID := NewMessageID()
+	assistantMsg := ChatMessage{
+		ID:        assistantMsgID,
+		Role:      "assistant",
+		Text:      result.Text,
+		Timestamp: time.Now(),
+		ConvID:    req.ConvID,
+		Model:     result.Model,
+		Tier:      result.Tier,
+		CostUSD:   result.CostUSD,
+		SessionID: result.SessionID,
+	}
+	cs.ChatStore.Append(assistantMsg)
+
+	// 9. Emit "done" with ChatDoneData (CC-specific rich format).
+	doneData := ChatDoneData{
+		MsgID:      assistantMsgID,
+		SessionID:  result.SessionID,
+		Model:      result.Model,
+		CostUSD:    result.CostUSD,
+		Tier:       result.Tier,
+		DurationMs: duration.Milliseconds(),
+	}
+	if sk := result.Skills; len(sk) > 0 {
+		doneData.Skills = sk
+	}
+	onEvent(ChatEvent{Type: "done", Data: doneData})
 
 	return nil
 }

@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/comms"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
-	"github.com/alamparelli/alf/internal/tooling"
 )
 
 // extractorAdapter bridges provider.CLIProvider to memstore.ExtractorProvider,
@@ -72,6 +72,57 @@ func (r *memStoreRecaller) Search(query string, limit int) ([]cc.MemoryResult, e
 	out := make([]cc.MemoryResult, len(results))
 	for i, m := range results {
 		out[i] = cc.MemoryResult{Text: m.Text, Type: m.Type, Distance: m.Distance}
+	}
+	return out, nil
+}
+
+// commsTierStore adapts cc.TierStore to the comms.TierStoreReader interface.
+type commsTierStore struct {
+	ts cc.TierStore
+}
+
+func (c *commsTierStore) Snapshot() comms.TiersSnapshot {
+	cur := c.ts.Current()
+	snap := comms.TiersSnapshot{
+		DefaultFallback: cur.DefaultFallback,
+		Tiers:           make([]comms.TierInfo, len(cur.Tiers)),
+	}
+	for i, t := range cur.Tiers {
+		snap.Tiers[i] = comms.TierInfo{
+			Name:                 t.Name,
+			Model:                t.Model,
+			Priority:             t.Priority,
+			Enabled:              t.Enabled,
+			Routable:             t.Routable,
+			ForceCommand:         t.ForceCommand,
+			Tools:                t.Tools,
+			WriteCapable:         t.WriteCapable,
+			Effort:               t.Effort,
+			MaxTurns:             t.MaxTurns,
+			OrchestratorMaxTurns: t.OrchestratorMaxTurns,
+			MaxIterations:        t.MaxIterations,
+			TimeoutMin:           t.TimeoutMin,
+			Backend:              t.Backend,
+			SystemPrompt:         t.SystemPrompt,
+			ContextWeight:        t.EffectiveContextWeight(),
+		}
+	}
+	return snap
+}
+
+// commsRecaller adapts memstore.Store to the comms.MemoryRecaller interface.
+type commsRecaller struct {
+	store *memstore.Store
+}
+
+func (r *commsRecaller) Search(query string, limit int) ([]comms.MemoryResult, error) {
+	results, err := r.store.Search(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]comms.MemoryResult, len(results))
+	for i, m := range results {
+		out[i] = comms.MemoryResult{Text: m.Text, Type: m.Type, Distance: m.Distance}
 	}
 	return out, nil
 }
@@ -293,20 +344,3 @@ func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 	return sj
 }
 
-// tgToolExecutorAdapter bridges tooling.Executor to provider.ToolExecutor for the TG handler.
-type tgToolExecutorAdapter struct {
-	exec *tooling.Executor
-}
-
-func (a *tgToolExecutorAdapter) Execute(ctx context.Context, call provider.ToolCallRequest) provider.ToolCallResult {
-	result := a.exec.Execute(ctx, tooling.CallRequest{
-		ID:        call.ID,
-		Name:      call.Name,
-		Arguments: call.Arguments,
-	})
-	return provider.ToolCallResult{
-		ID:      result.ID,
-		Output:  result.Output,
-		IsError: result.IsError,
-	}
-}

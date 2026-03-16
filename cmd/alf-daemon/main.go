@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/secrets"
@@ -567,6 +568,43 @@ func main() {
 		chatService.MemStore = memDB
 	}
 
+	// Unified comms engine: shared pipeline for CC (and later TG).
+	engineClassify := func(message, lastTier string, msgCount int, recentCtx string) comms.RouteResult {
+		rr := classifyMessageFull(message, tierStore.Current(), lastTier, msgCount, recentCtx)
+		return comms.RouteResult{Tier: rr.Tier, Response: rr.Response, Reason: rr.Reason, React: rr.React}
+	}
+	engineBackendConfigs := func() map[string]comms.BackendConfig {
+		result := make(map[string]comms.BackendConfig, len(cfg.Backends))
+		for name, bc := range cfg.Backends {
+			result[name] = comms.BackendConfig{InputPrice: bc.InputPrice, OutputPrice: bc.OutputPrice}
+		}
+		return result
+	}
+	var engineRecaller comms.MemoryRecaller
+	if memDB != nil {
+		engineRecaller = &commsRecaller{store: memDB}
+	}
+	commEngine := comms.NewEngine(comms.EngineConfig{
+		DataDir:        dataDir,
+		ConfigDir:      configDir,
+		ContextDir:     contextDir,
+		Sessions:       chatSessions,
+		ConvStore:      convStore,
+		EventLog:       eventLog,
+		TierStore:      &commsTierStore{ts: tierStore},
+		SkillStore:     skillStore,
+		Registry:       registry,
+		Orchestrator:   orch,
+		Recaller:       engineRecaller,
+		ToolRegistry:   toolRegistry,
+		ToolExecutor:   toolExecutor,
+		ClassifyFull:   engineClassify,
+		ResolveModel:   router.ResolveModel,
+		BackendConfigs: engineBackendConfigs,
+	})
+	chatService.SetEngine(commEngine)
+	log.Println("comms engine: initialized for CC channel")
+
 	// Schedule adapter (engine set later after scheduler is created).
 	schedAdapter := &ccScheduleAdapter{}
 	var schedEventBroker *cc.ScheduleEventBroker
@@ -642,6 +680,8 @@ func main() {
 
 	// Telegram client for sending formatted messages (nil if TG disabled).
 	var tg *tgclient.Client
+	var tgAdapt *tgAdapter
+	tgChatSem := make(chan struct{}, 1) // serialize message processing per chat
 	if telegramEnabled {
 		tg = tgclient.NewClient(token)
 		tg.HTTP = client
@@ -651,6 +691,8 @@ func main() {
 			})
 			log.Printf("[telegram] rate limited - waiting %v before retry", wait)
 		}
+		tgAdapt = newTGAdapter(tg)
+		commEngine.RegisterAdapter(tgAdapt)
 	}
 
 	// Auto-update checker (initialized here, scheduled via unified scheduler below).
@@ -1084,18 +1126,6 @@ func main() {
 				chatHistory.Add(u.Message.Chat.ID, "user", userText)
 			}
 
-			// Write user message to unified conversation store.
-			tgUserMsgID := conversation.NewMessageID()
-			tgConvID := convStore.ConvID(conversation.ChannelTelegram)
-			convStore.Append(conversation.Message{
-				ID:        tgUserMsgID,
-				ConvID:    tgConvID,
-				Channel:   conversation.ChannelTelegram,
-				Role:      "user",
-				Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: userText}},
-				Timestamp: time.Now(),
-			})
-
 			// Extract reply context if this is a quoted reply.
 			isReply := u.Message.ReplyToMessage != nil
 			repliedToID := int64(0)
@@ -1424,645 +1454,111 @@ func main() {
 				}
 			}
 
-			chatID := u.Message.Chat.ID
-			resumeID := chatSessions.Get(chatID)
+			// --- Unified engine processing ---
+			tgChatID := u.Message.Chat.ID
+			tgChannelID := comms.ChannelID(fmt.Sprintf("tg:%d", tgChatID))
 
-			// Show typing indicator while classifying.
-			tg.SendChatAction(chatID, "typing")
-			routingAnim := newTypingIndicator(tg, chatID, "typing")
-
-			// Build complete message content including media captions and reply context.
 			msgWithReplyContext := buildMessageContent(u.Message)
-			// Build a short version for the router (user text + brief quote hint, no full quoted text).
 			routerMsg := buildRouterMessage(u.Message)
 
-			// Pre-route memory recall: check long-term store BEFORE routing
-			// so direct responses also have personal context.
-			var preRecallBlock string
-			recallBestDist := 2.0
-			if memDB != nil {
-				preRecallBlock, recallBestDist = autoRecall(memDB, u.Message.Text)
+			msg := comms.InMessage{
+				ChannelID:  tgChannelID,
+				Text:       msgWithReplyContext,
+				RawText:    userText,
+				RouterText: routerMsg,
+				IsReply:    isReply,
+				ForcedTier: forcedTierName,
+			}
+			if isReply {
+				msg.ReplyTo = extractReplyContext(u.Message)
 			}
 
-			// Route message to appropriate tier.
-			var tp tierParams
-			var routeResult router.Result
-
-			// Build conversation context for router (last 3 exchanges, cross-session).
-			lastTier, msgCount := chatSessions.Context(chatID)
-			recentCtx := conversation.BuildRouterContext(convStore.RecentAll(6), 3)
-
-			// Force command bypasses routing entirely.
-			if forcedTierName != "" {
-				routingAnim.Stop()
-				routeResult = router.Result{Tier: forcedTierName, Reason: "force_command"}
-				log.Printf("→ force command → tier %q", forcedTierName)
-			} else if hasMedia {
-				// Media needs a tier with Read tool access.
-				// If caption present, classify to pick the right tier then
-				// ensure it can view images; otherwise cheapest with Read.
-				if routerMsg != "" {
-					routeResult = classifyMessageFull(routerMsg, tierStore.Current(), lastTier, msgCount, recentCtx)
-					log.Printf("→ media+caption: router chose tier=%q reason=%q", routeResult.Tier, routeResult.Reason)
-
-					needsUpgrade := false
-					if routeResult.Tier == "" || routeResult.Response != "" {
-						needsUpgrade = true
-					} else {
-						for _, t := range tierStore.Current().Tiers {
-							if t.Name == routeResult.Tier && !tierHasRead(t) {
-								needsUpgrade = true
-								break
-							}
-						}
-					}
-					if needsUpgrade {
-						upgraded := lowestMediaTier(tierStore.Current())
-						log.Printf("→ media upgrade: %q → %q (needs Read tool)", routeResult.Tier, upgraded)
-						routeResult = router.Result{Tier: upgraded, Reason: fmt.Sprintf("media-upgrade: %s→%s", routeResult.Tier, upgraded)}
-					}
-				} else {
-					tierName := lowestMediaTier(tierStore.Current())
-					routeResult = router.Result{Tier: tierName, Reason: "media bypass (no caption)"}
-					log.Printf("→ media (no caption), bypassing router → tier %q", tierName)
-				}
-				routingAnim.Stop()
-			} else {
-				routeResult = classifyMessageFull(routerMsg, tierStore.Current(), lastTier, msgCount, recentCtx)
-			}
-
-			// Router answered directly - no second LLM call needed.
-			if forcedTierName == "" && !hasMedia {
-				routingAnim.Stop()
-			}
-
-			// Quote-reply upgrade: replies carry important context. If the router
-			// gave a direct response, re-classify with full context.
-			if isReply && forcedTierName == "" && routeResult.Response != "" && routeResult.Tier == "" {
-				originalResult := routeResult
-				replyHint := msgWithReplyContext + "\n[CONTEXT: This is a reply to a previous assistant message. Route to an appropriate tier - do not respond directly.]"
-				reclassified := classifyMessageFull(replyHint, tierStore.Current(), lastTier, msgCount, recentCtx)
-				if reclassified.Tier != "" {
-					routeResult = reclassified
-					routeResult.Reason = "reply-reclassify: " + reclassified.Reason
-				} else {
-					fallback := firstFallbackTier(tierStore)
-					routeResult = router.Result{Tier: fallback, Reason: fmt.Sprintf("reply-fallback: %s→%s", originalResult.Tier, fallback)}
-				}
-				log.Printf("→ reply re-routed: %s → %s (%s)", originalResult.Tier, routeResult.Tier, routeResult.Reason)
-			}
-
-			// During onboarding, always force a capable conversational tier.
-			if memory.OnboardingPrompt(contextDir) != "" {
-				fallback := onboardingTier(tierStore)
-				log.Printf("→ onboarding override: %q → tier %q", routeResult.Tier, fallback)
-				routeResult = router.Result{Tier: fallback, Reason: "onboarding-override: " + fallback}
-			}
-
-			// If highly relevant memories were recalled (distance < 0.6), override
-			// direct responses - the user is asking about something personal.
-			if preRecallBlock != "" && recallBestDist < 0.6 && routeResult.Response != "" && routeResult.Tier == "" {
-				log.Printf("→ memory override: direct response upgraded to tier (best_dist=%.2f)", recallBestDist)
-				fallback := firstFallbackTier(tierStore)
-				routeResult = router.Result{Tier: fallback, Reason: "memory-override: direct→" + fallback}
-			}
-			// Register trigger-matched skills in the session BEFORE tier override,
-			// so the first message in a session can also benefit from skill tier requirements.
-			if triggerMatched := skills.MatchTriggers(skillStore, u.Message.Text); len(triggerMatched) > 0 {
-				triggerNames := make([]string, len(triggerMatched))
-				for i, sk := range triggerMatched {
-					triggerNames[i] = sk.Name
-				}
-				log.Printf("skills: trigger-matched %v", triggerNames)
-				chatSessions.AddSkills(chatID, triggerNames)
-			}
-
-			// Skill tier override: if an active skill requires a specific tier,
-			// force routing to that tier (overrides direct responses and lower tiers).
-			if activeSkills := chatSessions.GetSkills(chatID); len(activeSkills) > 0 {
-				if minTier := skills.ResolveMinTier(skillStore, activeSkills); minTier != "" {
-					// Direct response → force to skill tier.
-					if routeResult.Response != "" && routeResult.Tier == "" {
-						routeResult = router.Result{Tier: minTier, Reason: "skill-tier: " + minTier}
-						log.Printf("→ skill tier override: direct→%s", minTier)
-					} else if routeResult.Tier != "" && routeResult.Tier != minTier {
-						// Check if current tier has lower priority than required tier.
-						currentPri, requiredPri := -1, -1
-						for _, t := range tierStore.Current().Tiers {
-							if t.Name == routeResult.Tier {
-								currentPri = t.Priority
-							}
-							if t.Name == minTier {
-								requiredPri = t.Priority
-							}
-						}
-						if requiredPri >= 0 && (currentPri < requiredPri) {
-							old := routeResult.Tier
-							routeResult.Tier = minTier
-							routeResult.Reason = fmt.Sprintf("skill-tier: %s→%s", old, minTier)
-							log.Printf("→ skill tier override: %s→%s", old, minTier)
-						}
-					}
-				}
-			}
-
-			if routeResult.Response != "" && routeResult.Tier == "" {
-				log.Printf("→ router direct response")
-				eventLog.Log("router_direct", map[string]any{
-					"chat_id":          chatID,
-					"reason":           routeResult.Reason,
-					"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
-				})
-				chatSessions.TouchContext(chatID, "router")
-				// Write router response to conversation store.
-				convStore.Append(conversation.Message{
-					ID:        conversation.NewMessageID(),
-					ConvID:    tgConvID,
-					Channel:   conversation.ChannelTelegram,
-					Role:      "assistant",
-					Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: routeResult.Response}},
-					Timestamp: time.Now(),
-					Model:     "router",
-					Tier:      "router",
-				})
-				// React to the user's message before sending the reply (more natural).
-				maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, routeResult.React, contextDir)
-				if mid, err := tg.SendMessageReturnID(chatID, routeResult.Response); err == nil && mid != 0 {
-					alfMsgIDs.Add(mid)
-					chatHistory.Add(chatID, "alf", routeResult.Response)
-					log.Printf("tracking alf msg %d (buffer=%d)", mid, alfMsgIDs.Size())
-					// Log outgoing message
-					eventLog.Log("message_out", map[string]any{
-						"chat_id":          chatID,
-						"route":            "router_direct",
-						"text":             routeResult.Response,
-						"text_length":      len(routeResult.Response),
-						"message_id":       mid,
-						"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
-					})
-				}
-				continue
-			}
-
-			// Validate selected tier is still enabled and routable.
-			if routeResult.Tier != "" && forcedTierName == "" {
-				valid := false
-				for _, t := range tierStore.Current().Tiers {
-					if t.Name == routeResult.Tier && t.Enabled && (t.Routable || t.ForceCommand) {
-						valid = true
-						break
-					}
-				}
-				if !valid {
-					fallback := firstFallbackTier(tierStore)
-					log.Printf("→ tier %q not routable/enabled, falling back → %s", routeResult.Tier, fallback)
-					routeResult = router.Result{Tier: fallback, Reason: fmt.Sprintf("tier-invalid: %s→%s", routeResult.Tier, fallback)}
-				}
-			}
-
-			// Resolve tier to params.
-			tp = resolveTierParams(routeResult.Tier, tierStore.Current(), dataDir, toolRegistry, registry)
-
-			eventLog.Log("router_classify", map[string]any{
-				"chat_id":          chatID,
-				"tier":             routeResult.Tier,
-				"reason":           routeResult.Reason,
-				"model":            tp.Model,
-				"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
-			})
-
-			// Agent dispatch: delegate to multi-agent coordinator (non-blocking).
-			// The orchestrator brain is delegation-only - skip core/soul/toolbox
-			// prompts which contain file-writing instructions for conversational mode.
-			if routeResult.Tier == "agent" && len(agentStore.All()) > 0 {
-				// Build conversation context from TG chat history.
-				var convCtx string
-				if recent := chatHistory.Recent(chatID, 5); len(recent) > 0 {
-					var histBuf strings.Builder
-					for _, e := range recent {
-						if e.Role == "user" {
-							histBuf.WriteString("[user]: " + e.Text + "\n")
-						} else {
-							histBuf.WriteString("[assistant]: " + e.Text + "\n")
-						}
-					}
-					convCtx = histBuf.String()
-				}
-
-				orchPrep := agents.PrepareOrchestration(agents.OrchestrationInputs{
-					UserMessage:          msgWithReplyContext,
-					DataDir:              dataDir,
-					ContextDir:           contextDir,
-					Source:               "telegram",
-					Model:                tp.Model,
-					Backend:              tp.Backend,
-					Effort:               tp.Effort,
-					MaxTurns:             tp.MaxTurns,
-					OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
-					MaxIterations:        tp.MaxIterations,
-					TimeoutMin:           tp.TimeoutMin,
-					RecallBlock:          preRecallBlock,
-					SkillStore:           skillStore,
-					ConversationContext:  convCtx,
-				})
-
-				// Capture loop variables for the goroutine.
-				orchChatID := chatID
-				orchMsg := msgWithReplyContext
-				orchMediaCleanup := mediaCleanup
-
-				go func() {
-					// Typing indicator for agent orchestration.
-					orchAnim := newTypingIndicator(tg, orchChatID, "choose_sticker")
-
-					orchProgress := func(phase, detail string) {
-						switch phase {
-						case "thinking":
-							orchAnim.SetAction("choose_sticker")
-						case "planning", "agent", "agent_done":
-							orchAnim.SetAction("upload_document")
-						case "synthesizing":
-							orchAnim.SetAction("typing")
-						}
-					}
-
-					start := time.Now()
-					orchResult, orchMeta, orchErr := orch.Run(context.Background(), orchMsg, orchPrep.SystemPrompts, orchPrep.Config, orchProgress)
-					duration := time.Since(start)
-
-					orchAnim.Stop()
-
-					if orchErr != nil {
-						log.Printf("agent error: %v", orchErr)
-						tg.SendHTML(orchChatID, fmt.Sprintf("Orchestrator error: %v", orchErr))
-						eventLog.Log("agent_error", map[string]any{
-							"chat_id":     orchChatID,
-							"error":       orchErr.Error(),
-							"iterations":  orchMeta.Iterations,
-							"total_cost":  orchMeta.TotalCost,
-							"duration_ms": duration.Milliseconds(),
-						})
-						return
-					}
-
-					orchSessShort := orchMeta.ID
-				if len(orchSessShort) > 8 {
-					orchSessShort = orchSessShort[:8]
-				}
-				log.Printf("→ agent %dms %d iterations $%.4f sid:%s", duration.Milliseconds(), orchMeta.Iterations, orchMeta.TotalCost, orchSessShort)
-
-					eventLog.Log("agent_out", map[string]any{
-						"chat_id":      orchChatID,
-						"iterations":   orchMeta.Iterations,
-						"total_cost":   orchMeta.TotalCost,
-						"agent_calls":  len(orchMeta.AgentCalls),
-						"duration_ms":  duration.Milliseconds(),
-						"text":         orchResult,
-						"text_length":  len(orchResult),
-						"task_id":      orchMeta.ID,
-					})
-
-					if msgID, err := tg.SendMessageReturnID(orchChatID, orchResult); err == nil && msgID != 0 {
-						alfMsgIDs.Add(msgID)
-						chatHistory.Add(orchChatID, "alf", orchResult)
-						convStore.Append(conversation.Message{
-							ID:        conversation.NewMessageID(),
-							ConvID:    tgConvID,
-							Channel:   conversation.ChannelTelegram,
-							Role:      "assistant",
-							Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: orchResult}},
-							Timestamp: time.Now(),
-							Model:     "agent",
-							Tier:      "agent",
-							CostUSD:   orchMeta.TotalCost,
-						})
-					}
-					if orchMediaCleanup != nil {
-						time.Sleep(10 * time.Minute)
-						orchMediaCleanup()
-					}
-				}()
-				continue
-			}
-
-			// Typing indicator during processing.
-			statusAnim := newTypingIndicator(tg, chatID, "choose_sticker")
-
-			lastPhase := ""
-			rawOnProgress := func(event provider.StreamEvent) {
-				if event.Type == lastPhase {
-					return
-				}
-				lastPhase = event.Type
-				switch event.Type {
-				case "thinking":
-					statusAnim.SetAction("choose_sticker")
-				case "tool_use":
-					statusAnim.SetAction("upload_document")
-				case "text_delta":
-					statusAnim.SetAction("typing")
-				}
-			}
-			// Wrap with accumulator to capture content blocks.
-			tgAcc := conversation.NewAccumulator()
-			onProgress := tgAcc.OnProgress(rawOnProgress)
-
-			// Build system prompts with backend/channel-aware filtering.
-			isAPITier := tp.Backend != "" && tp.Backend != "cli"
-			backend := "cli"
-			if isAPITier {
-				backend = "api"
-			}
-			tgCtxWeight := tp.EffectiveContextWeight()
-			promptCfg := memory.PromptConfig{Backend: backend, Channel: "tg", Weight: tgCtxWeight}
-			sysPromptTexts := memory.CollectPrompts(contextDir, promptCfg)
-			// Inject per-tier system prompt first so it has high priority.
-			if tp.SystemPrompt != "" {
-				sysPromptTexts = append([]string{tp.SystemPrompt}, sysPromptTexts...)
-			}
-			// Inject onboarding prompt so Claude follows the onboarding instructions.
-			onboarding := memory.OnboardingPrompt(contextDir)
-			if onboarding != "" {
-				sysPromptTexts = append(sysPromptTexts, onboarding)
-			}
-			// Inject pre-recalled memories (computed before routing).
-			if preRecallBlock != "" {
-				sysPromptTexts = append(sysPromptTexts, preRecallBlock)
-			}
-			// Inject skill catalog and skills (skip for light tiers).
-			if tgCtxWeight != "light" {
-				if catalog := skills.BuildCatalog(skillStore); catalog != "" {
-					sysPromptTexts = append(sysPromptTexts, catalog)
-				}
-				if activeSkills := chatSessions.GetSkills(chatID); len(activeSkills) > 0 {
-					if injection := skills.BuildInjectionByName(skillStore, activeSkills); injection != "" {
-						log.Printf("skills: session-active %v", activeSkills)
-						sysPromptTexts = append(sysPromptTexts, injection)
-					}
-				}
-			}
-			// Reaction instruction (skip for light tiers).
-			if tgCtxWeight != "light" {
-				sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
-			}
-
-			// Documentation index - lets the model discover and read docs.
-			if _, err := os.Stat(filepath.Join(dataDir, "llms.txt")); err == nil {
-				sysPromptTexts = append(sysPromptTexts, "Documentation is available in ~/data/docs/. Read ~/data/llms.txt for the index. When you install packages, read the container-packages doc first.")
-			}
-
-			// Inject session/conversation ID so the LLM can provide it when asked.
-			sysPromptTexts = append(sysPromptTexts, fmt.Sprintf("Current session ID: %s (channel: tg)", tgConvID))
-
-			// Select provider based on tier backend.
-			var tierProv provider.Provider = registry.ForBackend(tp.Backend)
-
-			// Wrap API provider with agentic tool loop when tier has tools.
-			if isAPITier && chatService.ToolRegistry != nil && chatService.ToolExecutor != nil && len(tp.Tools) > 0 {
-				chatService.ToolRegistry.Rescan() // pick up new tool schemas created since startup
-				if apiProv, ok := tierProv.(*provider.APIProvider); ok {
-					schemas := chatService.ToolRegistry.ForToolsStrict(tp.Tools)
-					if len(schemas) > 0 {
-						tools := tooling.ToOpenAI(schemas)
-						maxTurns := tp.MaxTurns
-						if maxTurns <= 0 {
-							maxTurns = 10
-						}
-						tierProv = provider.NewToolLoop(apiProv, &tgToolExecutorAdapter{exec: chatService.ToolExecutor}, tools, maxTurns)
-						log.Printf("[chat:%d] tool loop enabled: %d tools, max_turns=%d", chatID, len(schemas), maxTurns)
-						toolNames := make([]string, len(schemas))
-						for i, s := range schemas {
-							toolNames[i] = s.Name
-						}
-						sysPromptTexts = append([]string{memory.ToolInstruction(toolNames)}, sysPromptTexts...)
-					}
-				}
-			}
-
-			// Detect backend switch for context continuity.
-			_, lastBackend, _ := chatSessions.ContextFull(chatID)
-			backendChanged := lastBackend != "" && lastBackend != tp.Backend
-
-			invokeParams := provider.Params{
-				Model:         tp.Model,
-				Tools:         tp.Tools,
-				WriteCapable:  tp.WriteCapable,
-				Effort:        tp.Effort,
-				MaxTurns:      tp.MaxTurns,
-				SystemPrompts: sysPromptTexts,
-				ResumeID:      resumeID,
-				DataDir:       dataDir,
-			}
-			if isAPITier {
-				invokeParams.ResumeID = "" // API tiers use ConvMessages, not --resume
-			}
-			if backendChanged {
-				log.Printf("[chat:%d] backend switch %s→%s, dropping resume", chatID, lastBackend, tp.Backend)
-				invokeParams.ResumeID = ""
-			}
-
-			// Inject conversation context from unified store.
-			tgConvMsgs := conversation.BuildContext(convStore.Recent(conversation.ChannelTelegram, 0), conversation.DefaultMaxMessages)
-			if isAPITier || invokeParams.ResumeID == "" {
-				if isAPITier {
-					oaiMsgs := conversation.FlattenForOpenAI(tgConvMsgs)
-					ctxMsgs := make([]provider.ContextMessage, len(oaiMsgs))
-					for i, m := range oaiMsgs {
-						cm := provider.ContextMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
-						for _, tc := range m.ToolCalls {
-							cm.ToolCalls = append(cm.ToolCalls, provider.ContextToolCall{
-								ID:        tc.ID,
-								Name:      tc.Name,
-								Arguments: tc.Arguments,
-							})
-						}
-						ctxMsgs[i] = cm
-					}
-					invokeParams.ConvMessages = ctxMsgs
-				} else {
-					if histPrompt := conversation.FormatAsSystemPrompt(tgConvMsgs, tgCtxWeight); histPrompt != "" {
-						invokeParams.SystemPrompts = append(invokeParams.SystemPrompts, histPrompt)
-					}
-				}
-			}
-
-			// Signal server: per-invocation socket for react/status from Claude subprocess.
+			// Signal socket for mid-response reactions from Claude subprocess.
 			sigSockPath := filepath.Join(dataDir, fmt.Sprintf("signal-%d.sock", u.Message.MessageID))
-			sigServer := &signal.Server{TG: tg, ChatID: chatID, MessageID: u.Message.MessageID}
+			sigServer := &signal.Server{TG: tg, ChatID: tgChatID, MessageID: u.Message.MessageID}
 			var sigLn net.Listener
 			if ln, err := sigServer.ListenUnix(sigSockPath); err != nil {
 				log.Printf("signal: listen error: %v", err)
 			} else {
 				sigLn = ln
 				go sigServer.Serve(sigLn)
-				invokeParams.Env = append(invokeParams.Env, "ALF_SIGNAL_SOCK="+sigSockPath)
+				msg.Env = append(msg.Env, "ALF_SIGNAL_SOCK="+sigSockPath)
 			}
 
-			start := time.Now()
-			result, err := tierProv.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
-			// Retry without resume if session failed (CLI only).
-			if err != nil && resumeID != "" && !isAPITier {
-				log.Printf("session %s failed (%v), starting fresh", resumeID, err)
-				chatSessions.Archive(chatID)
-				invokeParams.ResumeID = ""
-				result, err = tierProv.Invoke(context.Background(), msgWithReplyContext, invokeParams, onProgress)
-			}
-			duration := time.Since(start)
+			// Typing indicator (managed by tgAdapter.OnEvent).
+			tg.SendChatAction(tgChatID, "typing")
+			indicator := newTypingIndicator(tg, tgChatID, "choose_sticker")
+			tgAdapt.SetIndicator(tgChannelID, indicator)
 
-			// Cleanup signal socket immediately (defer won't fire in this loop).
-			if sigLn != nil {
-				sigLn.Close()
-				os.Remove(sigSockPath)
-			}
+			// Capture loop variables for goroutine.
+			tgMsg := u.Message
+			tgMediaCleanup := mediaCleanup
 
-			// Stop typing indicator.
-			statusAnim.Stop()
-
-			if err != nil {
-				log.Printf("claude error: %v", err)
-				reply := fmt.Sprintf("Error: %v", err)
-				eventLog.Log("bot_error", map[string]any{
-					"context": "askClaude",
-					"error":   err.Error(),
-					"chat_id": chatID,
-				})
-				tg.SendHTML(chatID, reply)
-				continue
-			}
-
-			// Clear onboarding flag after first successful response.
-			// Don't clear immediately - wait until next /new so system prompts
-			// stay consistent within a resumed session.
-			if onboarding != "" {
-				onboarding = "" // prevent re-clearing on subsequent messages
-			}
-
-			// Store the session ID returned by Claude for future --resume.
-			if result.SessionID != "" {
-				isNew := resumeID == ""
-				chatSessions.SetWithBackend(chatID, result.SessionID, routeResult.Tier, tp.Backend)
-				if isNew {
-					reason := "first"
-					if resumeID == "" && len(chatSessions.Get(chatID)) > 0 {
-						reason = "timeout"
+			go func() {
+				tgChatSem <- struct{}{} // serialize per-chat
+				defer func() { <-tgChatSem }()
+				defer func() {
+					indicator.Stop()
+					tgAdapt.ClearIndicator(tgChannelID)
+					if sigLn != nil {
+						sigLn.Close()
+						os.Remove(sigSockPath)
 					}
-					eventLog.Log("session_new", map[string]any{
-						"chat_id":    chatID,
-						"session_id": result.SessionID,
-						"reason":     reason,
-					})
-				}
-			} else if isAPITier {
-				// API tiers don't return session IDs - just track context.
-				chatSessions.TouchContext(chatID, routeResult.Tier)
-			}
-			chatSessions.Touch(chatID)
-
-			// Schedule temp media cleanup after a delay so follow-up messages
-			// in the same session can still reference the file.
-			if mediaCleanup != nil {
-				cleanup := mediaCleanup
-				go func() {
-					time.Sleep(10 * time.Minute)
-					cleanup()
 				}()
-			}
 
-			// Extract inline reaction suggestion from Claude's response.
-			suggestedEmoji, cleanText := extractReaction(result.Text)
-			reply := cleanText
+				result, err := commEngine.Process(context.Background(), msg)
 
-			// Detect Claude not logged in.
-			lower := strings.ToLower(reply)
-			if strings.Contains(lower, "not logged in") || strings.Contains(lower, "authenticate") || strings.Contains(lower, "login required") {
-				reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
-			}
-
-			// Compute cost from tokens for API backends.
-			if result.CostUSD == 0 && result.InputTokens > 0 {
-				if bc, ok := cfg.Backends[tp.Backend]; ok && (bc.InputPrice > 0 || bc.OutputPrice > 0) {
-					result.CostUSD = float64(result.InputTokens)/1e6*bc.InputPrice +
-						float64(result.OutputTokens)/1e6*bc.OutputPrice
+				if err != nil {
+					log.Printf("engine error: %v", err)
+					tg.SendHTML(tgChatID, fmt.Sprintf("Error: %v", err))
+					return
 				}
-			}
 
-			sessShort := result.SessionID
-			if len(sessShort) > 8 {
-				sessShort = sessShort[:8]
-			}
-			log.Printf("→ %s %dms %dt/%dt $%.4f sid:%s", result.Model, duration.Milliseconds(), result.InputTokens, result.OutputTokens, result.CostUSD, sessShort)
+				reply := result.Text
 
-			eventLog.Log("message_out", map[string]any{
-				"chat_id":          chatID,
-				"model":            result.Model,
-				"duration_ms":      duration.Milliseconds(),
-				"cost_usd":         result.CostUSD,
-				"text":             reply,
-				"text_length":      len(reply),
-				"session_id":       result.SessionID,
-				"session_path":     filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID), "sessions", result.SessionID+".json"),
-				"tier":             routeResult.Tier,
-				"project_context":  filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
-			})
-
-			// React to the user's message before sending the reply (more natural).
-			maybeSpontaneousReact(tg, u.Message.Chat.ID, u.Message.MessageID, suggestedEmoji, contextDir)
-
-			// Suppress internal fallback messages that aren't useful to the user.
-			if reply == "Done (no text output)." {
-				log.Printf("suppressing empty response for chat %d", chatID)
-				continue
-			}
-
-			// Append footer with tier and active skills (if enabled in config).
-			if cfg.ShowSkillFooter == nil || *cfg.ShowSkillFooter {
-				var footerParts []string
-				if routeResult.Tier != "" {
-					footerParts = append(footerParts, "["+routeResult.Tier+"]")
+				// Suppress internal fallback messages.
+				if reply == "Done (no text output)." {
+					log.Printf("suppressing empty response for chat %d", tgChatID)
+					return
 				}
-				if activeSkills := chatSessions.GetSkills(chatID); len(activeSkills) > 0 {
-					footerParts = append(footerParts, strings.Join(activeSkills, ", "))
-				}
-				if len(footerParts) > 0 {
-					reply += "\n\n\u2699\ufe0f " + strings.Join(footerParts, " · ")
-				}
-			}
 
-			if msgID, err := tg.SendMessageReturnID(chatID, reply); err == nil && msgID != 0 {
-				alfMsgIDs.Add(msgID)
-				chatHistory.Add(chatID, "alf", reply)
-
-				// Write assistant message to unified conversation store.
-				var tgBlocks []conversation.ContentBlock
-				if tgAcc != nil {
-					tgBlocks = tgAcc.Blocks()
+				// Detect Claude not logged in.
+				lower := strings.ToLower(reply)
+				if strings.Contains(lower, "not logged in") || strings.Contains(lower, "authenticate") || strings.Contains(lower, "login required") {
+					reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
 				}
-				if len(tgBlocks) == 0 {
-					tgBlocks = []conversation.ContentBlock{{Type: conversation.BlockText, Text: cleanText}}
-				}
-				convStore.Append(conversation.Message{
-					ID:        conversation.NewMessageID(),
-					ConvID:    tgConvID,
-					Channel:   conversation.ChannelTelegram,
-					Role:      "assistant",
-					Blocks:    tgBlocks,
-					Timestamp: time.Now(),
-					Model:     result.Model,
-					Tier:      routeResult.Tier,
-					Backend:   tp.Backend,
-					CostUSD:   result.CostUSD,
-					SessionID: result.SessionID,
-				})
 
-				log.Printf("tracking alf msg %d (buffer=%d)", msgID, alfMsgIDs.Size())
-				// Log sent message ID
-				eventLog.Log("message_sent", map[string]any{
-					"chat_id":         chatID,
-					"message_id":      msgID,
-					"session_id":      result.SessionID,
-					"project_context": filepath.Join(".claude/projects", fmt.Sprintf("%d", chatID)),
-				})
-			}
+				// React to the user's message before sending the reply.
+				maybeSpontaneousReact(tg, tgMsg.Chat.ID, tgMsg.MessageID, result.Reaction, contextDir)
+
+				// Append footer with tier and active skills.
+				if cfg.ShowSkillFooter == nil || *cfg.ShowSkillFooter {
+					var footerParts []string
+					if result.Tier != "" {
+						footerParts = append(footerParts, "["+result.Tier+"]")
+					}
+					if len(result.Skills) > 0 {
+						footerParts = append(footerParts, strings.Join(result.Skills, ", "))
+					}
+					if len(footerParts) > 0 {
+						reply += "\n\n\u2699\ufe0f " + strings.Join(footerParts, " · ")
+					}
+				}
+
+				if msgID, err := tg.SendMessageReturnID(tgChatID, reply); err == nil && msgID != 0 {
+					alfMsgIDs.Add(msgID)
+					chatHistory.Add(tgChatID, "alf", reply)
+					log.Printf("tracking alf msg %d (buffer=%d)", msgID, alfMsgIDs.Size())
+				}
+
+				// Schedule media cleanup.
+				if tgMediaCleanup != nil {
+					go func() {
+						time.Sleep(10 * time.Minute)
+						tgMediaCleanup()
+					}()
+				}
+			}()
 		}
 	}
 }

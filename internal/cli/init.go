@@ -905,6 +905,7 @@ func pullAndStart(dir, botName string, httpsEnabled bool) {
 		}
 	}
 
+	fixPreStart(dir)
 	PrintInfo("Starting ALF...")
 	up := exec.Command("docker", "compose", "up", "-d")
 	up.Dir = dir

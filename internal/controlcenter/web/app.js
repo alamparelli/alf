@@ -3219,7 +3219,7 @@ let schedulesSSE = null;
 let schedCollapsedSet = new Set(); // track collapsed job IDs
 let schedAllCollapsed = false;
 
-const OUTPUTS = ['telegram', 'file', 'both', 'silent'];
+const OUTPUTS = ['chat', 'file', 'both', 'silent'];
 
 function schedulesInit() {
   if (!schedulesInitialized) {

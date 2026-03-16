@@ -83,16 +83,16 @@ func fixPreStart(dir string) {
 	}
 
 	// Fix empty secrets: auto-generate if missing or empty.
-	whisperPath := filepath.Join(secretsDir(dir), "whisper_shared_secret")
-	if needsSecret(whisperPath) {
-		if token, err := generateAuthToken(); err == nil {
-			SetSecret(dir, "whisper_shared_secret", token)
-		}
-	}
-	ccPath := filepath.Join(secretsDir(dir), "cc_auth_token")
-	if needsSecret(ccPath) {
-		if token, err := generateAuthToken(); err == nil {
-			SetSecret(dir, "cc_auth_token", token)
+	for _, name := range []string{"whisper_shared_secret", "cc_auth_token"} {
+		p := filepath.Join(secretsDir(dir), name)
+		if needsSecret(p) {
+			if token, err := generateAuthToken(); err == nil {
+				if err := SetSecret(dir, name, token); err != nil {
+					fmt.Fprintf(os.Stderr, "  warning: failed to write %s: %v\n", name, err)
+				} else {
+					PrintCheck(fmt.Sprintf("secrets/%s (auto-generated)", name))
+				}
+			}
 		}
 	}
 }

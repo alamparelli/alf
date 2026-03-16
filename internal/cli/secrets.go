@@ -40,6 +40,18 @@ func secretExists(baseDir, name string) bool {
 	return err == nil && !info.IsDir()
 }
 
+// needsSecret returns true if the file is missing, empty, or a directory.
+func needsSecret(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return true
+	}
+	if info.IsDir() {
+		return true
+	}
+	return info.Size() == 0
+}
+
 // SetSecret writes a secret file with mode 644 so containers running as
 // non-root (e.g. whisper uid 1000) can read bind-mounted secrets.
 // The secrets directory itself stays 700 (owner-only traversal on the host).

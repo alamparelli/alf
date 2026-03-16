@@ -63,16 +63,16 @@ func dockerCompose(dir string, args ...string) {
 
 func RunStart() {
 	dir := alfDir()
-	fixResolvConf(dir)
+	fixPreStart(dir)
 	PrintInfo("Starting ALF...")
 	dockerCompose(dir, "up", "-d")
 	PrintCheck("ALF started")
 }
 
-// fixResolvConf ensures resolv.conf is a file, not a directory.
-// Docker auto-creates a directory placeholder when the bind-mount target
-// doesn't exist, which then causes "not a directory" errors on start.
-func fixResolvConf(dir string) {
+// fixPreStart repairs common issues before docker compose up.
+func fixPreStart(dir string) {
+	// Fix resolv.conf: Docker auto-creates a directory placeholder when the
+	// bind-mount target doesn't exist, causing "not a directory" errors.
 	p := filepath.Join(dir, "resolv.conf")
 	info, err := os.Stat(p)
 	if err == nil && info.IsDir() {
@@ -80,6 +80,20 @@ func fixResolvConf(dir string) {
 	}
 	if err != nil || (err == nil && info.IsDir()) {
 		os.WriteFile(p, []byte("nameserver 8.8.8.8\nnameserver 1.1.1.1\n"), 0o644)
+	}
+
+	// Fix empty secrets: auto-generate if missing or empty.
+	whisperPath := filepath.Join(secretsDir(dir), "whisper_shared_secret")
+	if needsSecret(whisperPath) {
+		if token, err := generateAuthToken(); err == nil {
+			SetSecret(dir, "whisper_shared_secret", token)
+		}
+	}
+	ccPath := filepath.Join(secretsDir(dir), "cc_auth_token")
+	if needsSecret(ccPath) {
+		if token, err := generateAuthToken(); err == nil {
+			SetSecret(dir, "cc_auth_token", token)
+		}
 	}
 }
 

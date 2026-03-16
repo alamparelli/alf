@@ -63,9 +63,24 @@ func dockerCompose(dir string, args ...string) {
 
 func RunStart() {
 	dir := alfDir()
+	fixResolvConf(dir)
 	PrintInfo("Starting ALF...")
 	dockerCompose(dir, "up", "-d")
 	PrintCheck("ALF started")
+}
+
+// fixResolvConf ensures resolv.conf is a file, not a directory.
+// Docker auto-creates a directory placeholder when the bind-mount target
+// doesn't exist, which then causes "not a directory" errors on start.
+func fixResolvConf(dir string) {
+	p := filepath.Join(dir, "resolv.conf")
+	info, err := os.Stat(p)
+	if err == nil && info.IsDir() {
+		os.Remove(p)
+	}
+	if err != nil || (err == nil && info.IsDir()) {
+		os.WriteFile(p, []byte("nameserver 8.8.8.8\nnameserver 1.1.1.1\n"), 0o644)
+	}
 }
 
 func RunStop() {

@@ -401,16 +401,16 @@ func stripMarkdownFences(s string) string {
 }
 
 // buildAgentTeamsHint generates a routing hint paragraph describing available agent teams.
-// If no teams are configured, falls back to a generic orchestrator hint.
+// Conservative: only route to agent when explicitly requested or clearly parallel work.
 func buildAgentTeamsHint(teams []AgentTeamInfo) string {
 	var b strings.Builder
-	b.WriteString("IMPORTANT: Route to \"agent\" tier when:\n")
-	b.WriteString("  1. The task matches an available agent team's specialty (see list below)\n")
-	b.WriteString("  2. The user explicitly asks to use agents/teams (\"lance une équipe\", \"use agents\")\n")
-	b.WriteString("  3. The task requires research+writing, or multiple steps that benefit from parallel work\n")
+	b.WriteString("The \"agent\" tier coordinates parallel workstreams. Route to it ONLY when:\n")
+	b.WriteString("  1. The user explicitly asks to use agents or teams (\"lance les agents\", \"use agents\", \"lance une équipe\")\n")
+	b.WriteString("  2. The task explicitly requires PARALLEL independent workstreams that cannot be done step-by-step\n")
+	b.WriteString("     (e.g. \"build frontend + backend + tests simultaneously\", \"write 5 articles at once\")\n")
 
 	if len(teams) > 0 {
-		b.WriteString("\nAvailable agent teams:\n")
+		b.WriteString("\nAvailable agent teams (for reference only — do NOT auto-route based on topic match):\n")
 		for _, t := range teams {
 			b.WriteString(fmt.Sprintf("  - \"%s\": %s", t.Name, t.Description))
 			if len(t.Agents) > 0 {
@@ -418,18 +418,13 @@ func buildAgentTeamsHint(teams []AgentTeamInfo) string {
 			}
 			b.WriteString("\n")
 		}
-		b.WriteString("\nExamples that MUST route to \"agent\":\n")
-		b.WriteString("  - \"rédige un article sur X\" → agent (writer team)\n")
-		b.WriteString("  - \"write a blog post about Y\" → agent (research + writing)\n")
-		b.WriteString("  - \"research Z and write a report\" → agent (multi-step)\n")
-		b.WriteString("  - \"review this code and fix issues\" → agent (review + fix)\n")
 	}
 
-	b.WriteString("\nDo NOT route to sonnet/opus for tasks that match a team - only the \"agent\" tier can coordinate agents.\n")
-	b.WriteString("Do NOT route to \"agent\" for:\n")
-	b.WriteString("  - Conversational messages (\"ok\", \"merci\", \"on va focus sur X\", \"j'ai fini\", small talk)\n")
-	b.WriteString("  - Simple questions or status checks\n")
-	b.WriteString("  - Topic changes or expressions of intent without an actionable instruction\n")
+	b.WriteString("\nDo NOT route to \"agent\" for:\n")
+	b.WriteString("  - Any task a single model can handle sequentially (writing, research, code review, debugging, etc.)\n")
+	b.WriteString("  - Conversational messages, questions, status checks\n")
+	b.WriteString("  - Tasks that merely match a team's topic — topic match alone is NOT enough\n")
+	b.WriteString("When in doubt, route to a standard conversational tier. The user will explicitly ask for agents if they want them.\n")
 	return b.String()
 }
 

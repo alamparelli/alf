@@ -10,7 +10,6 @@ import (
 	"sort"
 
 	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/skills"
 )
 
@@ -67,34 +66,29 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build orchestrator system prompts (same logic as chat_service agent path).
-	var sysPrompts []string
+	// Resolve agent tier params and build orchestration inputs.
+	agentRC := h.resolveAgentConfig()
+	var recallBlock string
 	if h.Recaller != nil {
-		if block := recallMemories(h.Recaller, req.Message); block != "" {
-			sysPrompts = append(sysPrompts, block)
-		}
+		recallBlock = recallMemories(h.Recaller, req.Message)
 	}
 
-	var skillInjections []string
-	if h.SkillStore != nil {
-		if catalog := skills.BuildCatalog(h.SkillStore); catalog != "" {
-			sysPrompts = append(sysPrompts, catalog)
-		}
-		if matched := skills.MatchTriggers(h.SkillStore, req.Message); len(matched) > 0 {
-			for _, sk := range matched {
-				if sk.Prompt != "" {
-					skillInjections = append(skillInjections, sk.Prompt)
-				}
-			}
-		}
-	}
-
-	// Resolve agent tier params from tier config.
-	rc := h.resolveAgentConfig()
-	rc.SkillPrompts = skillInjections
-	rc.MemoryContext = memory.CollectAgentContext(h.ContextDir)
-	rc.NeedValidation = req.NeedValidation
-	rc.Source = "chat"
+	orchPrep := agents.PrepareOrchestration(agents.OrchestrationInputs{
+		UserMessage:          req.Message,
+		DataDir:              h.DataDir,
+		ContextDir:           h.ContextDir,
+		Source:               "chat",
+		Model:                agentRC.Model,
+		Backend:              agentRC.Backend,
+		Effort:               agentRC.Effort,
+		MaxTurns:             agentRC.MaxTurns,
+		OrchestratorMaxTurns: agentRC.OrchestratorMaxTurns,
+		MaxIterations:        agentRC.MaxIterations,
+		TimeoutMin:           agentRC.TimeoutMin,
+		RecallBlock:          recallBlock,
+		SkillStore:           h.SkillStore,
+		NeedValidation:       req.NeedValidation,
+	})
 
 	// Progress callback: emit events for arbitration.
 	var taskID string
@@ -109,7 +103,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 
 	// Fire and forget - task is tracked by orchestrator.running map.
 	go func() {
-		_, meta, err := h.Orchestrator.Run(context.Background(), req.Message, sysPrompts, rc, onProgress)
+		_, meta, err := h.Orchestrator.Run(context.Background(), req.Message, orchPrep.SystemPrompts, orchPrep.Config, onProgress)
 		if err != nil {
 			log.Printf("[tasks] background task failed: %v", err)
 		}

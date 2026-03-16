@@ -407,35 +407,31 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	})
 
 	// Agent dispatch: delegate to multi-agent coordinator.
-	// The orchestrator brain is delegation-only - it does NOT need core/soul/toolbox
-	// prompts which contain file-writing instructions meant for conversational mode.
-	// Only inject memory recall and skill catalog.
 	if tierName == "agent" && cs.Orchestrator != nil {
-		var orchSysPrompts []string
-		if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {
-			orchSysPrompts = append(orchSysPrompts, recallBlock)
-		}
-		// Match skills for orchestrator catalog + sub-agent injection.
-		var skillInjections []string
-		if cs.SkillStore != nil {
-			if catalog := skills.BuildCatalog(cs.SkillStore); catalog != "" {
-				orchSysPrompts = append(orchSysPrompts, catalog)
+		// Build conversation context from unified store.
+		var convCtx string
+		if cs.ConvStore != nil {
+			if msgs := cs.ConvStore.Recent(conversation.ChannelCC, 0); len(msgs) > 0 {
+				convCtx = conversation.BuildRouterContext(msgs, 5)
 			}
-			if matched := skills.MatchTriggers(cs.SkillStore, req.Message); len(matched) > 0 {
-				names := make([]string, len(matched))
-				for i, sk := range matched {
-					names[i] = sk.Name
-					if sk.Prompt != "" {
-						skillInjections = append(skillInjections, sk.Prompt)
-					}
-				}
-				log.Printf("[chat-api] agent: matched skills %v (%d prompts injected)", names, len(skillInjections))
-			} else {
-				log.Printf("[chat-api] agent: no skill triggers matched in message")
-			}
-		} else {
-			log.Printf("[chat-api] agent: SkillStore is nil, skipping skill injection")
 		}
+
+		orchPrep := agents.PrepareOrchestration(agents.OrchestrationInputs{
+			UserMessage:          req.Message,
+			DataDir:              cs.DataDir,
+			ContextDir:           cs.ContextDir,
+			Source:               "router",
+			Model:                tp.Model,
+			Backend:              tp.Backend,
+			Effort:               tp.Effort,
+			MaxTurns:             tp.MaxTurns,
+			OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
+			MaxIterations:        tp.MaxIterations,
+			TimeoutMin:           tp.TimeoutMin,
+			RecallBlock:          recallMemories(cs.Recaller, req.Message),
+			SkillStore:           cs.SkillStore,
+			ConversationContext:  convCtx,
+		})
 
 		onProgress := func(phase, detail string) {
 			switch phase {
@@ -458,18 +454,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			}
 		}
 
-		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchSysPrompts, agents.RunConfig{
-			Model:                tp.Model,
-			Backend:              tp.Backend,
-			Effort:               tp.Effort,
-			MaxTurns:             tp.MaxTurns,
-			OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
-			MaxIterations:        tp.MaxIterations,
-			TimeoutMin:           tp.TimeoutMin,
-			SkillPrompts:         skillInjections,
-			MemoryContext:        memory.CollectAgentContext(cs.ContextDir),
-			Source:               "router",
-		}, onProgress)
+		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchPrep.SystemPrompts, orchPrep.Config, onProgress)
 		if orchErr != nil {
 			return fmt.Errorf("agent: %w", orchErr)
 		}

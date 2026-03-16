@@ -11,12 +11,14 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.34
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/yalue/onnxruntime_go v1.26.0
+	golang.org/x/crypto v0.49.0
 	nhooyr.io/websocket v1.8.17
 )
 
 require (
 	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
 )
 
 replace github.com/alessandrolamparelli/vault-proxy => /Users/alessandrolamparelli/Dev/Projects/vault-proxy

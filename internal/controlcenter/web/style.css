@@ -2125,6 +2125,31 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   background: color-mix(in srgb, var(--text-dim) 15%, transparent); color: var(--text-dim);
   vertical-align: middle; margin-left: 4px;
 }
+.vault-backend-badge {
+  font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 1px 6px; border-radius: 8px; font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent);
+  vertical-align: middle; margin-left: 6px;
+}
+.vault-ref-badge {
+  font-size: 0.7rem; font-weight: 500;
+  color: var(--text-dim); margin-left: 6px;
+}
+.vault-secret-picker { margin-bottom: 6px; }
+.vault-picker-tabs {
+  display: flex; gap: 0; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+}
+.vault-picker-tab {
+  flex: 1; padding: 4px 8px; font-size: 0.75rem; text-align: center;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-dim); transition: all 0.15s;
+}
+.vault-picker-tab.active {
+  background: var(--accent); color: #fff; font-weight: 600;
+}
+.vault-picker-ref { margin-bottom: 4px; }
+.vault-picker-select { width: 100%; }
 .vault-test-ok { color: var(--green) !important; }
 .vault-test-fail { color: var(--red) !important; }
 .vault-files-card { margin-bottom: 16px; }

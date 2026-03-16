@@ -6016,6 +6016,7 @@ if (isTouchDevice) {
 // ========== Vault ==========
 
 var vaultInited = false;
+var vaultSecretsCache = []; // cached secret names for secret pickers
 
 function vaultInit() {
   if (vaultInited) { vaultRefresh(); return; }
@@ -6038,19 +6039,131 @@ function vaultInit() {
   });
   document.getElementById('vaultSvcSaveBtn').addEventListener('click', vaultSaveService);
   document.getElementById('vaultSvcAuthType').addEventListener('change', vaultToggleAuthFields);
-  document.getElementById('vaultCreateTokenBtn').addEventListener('click', vaultCreateToken);
-  document.getElementById('vaultFileInput').addEventListener('change', vaultUploadFile);
-  document.getElementById('vaultExportBtn').addEventListener('click', vaultExport);
+  document.getElementById('vaultCreateTokenBtn').addEventListener('click', () => vaultCreateTokenModal());
+  document.getElementById('vaultFileInput').addEventListener('change', vaultUploadFileModal);
+  document.getElementById('vaultExportBtn').addEventListener('click', vaultExportModal);
   document.getElementById('vaultImportBtn').addEventListener('click', () => document.getElementById('vaultImportFile').click());
-  document.getElementById('vaultImportFile').addEventListener('change', vaultImport);
-  document.getElementById('vaultAddSecretBtn').addEventListener('click', vaultShowSecretForm);
-  document.getElementById('vaultSecretCancelBtn').addEventListener('click', vaultHideSecretForm);
-  document.getElementById('vaultSecretSaveBtn').addEventListener('click', vaultSaveSecret);
+  document.getElementById('vaultImportFile').addEventListener('change', vaultImportModal);
+  document.getElementById('vaultAddSecretBtn').addEventListener('click', () => vaultAddSecretModal());
   document.getElementById('vaultOAuth2TabBrowser').addEventListener('click', () => vaultOAuth2SetMode('browser'));
   document.getElementById('vaultOAuth2TabManual').addEventListener('click', () => vaultOAuth2SetMode('manual'));
   document.getElementById('vaultOAuth2AuthorizeBtn').addEventListener('click', vaultOAuth2StartFlow);
 
+  // Generic modal cancel/close
+  document.getElementById('vaultGenericModalCancel').addEventListener('click', vaultModalClose);
+
   vaultRefresh();
+}
+
+// ========== Generic Vault Modal ==========
+
+function vaultModal(opts) {
+  // opts: { title, fields: [{id, label, type, placeholder, options?, value?, disabled?, hint?}], saveLabel?, onSave }
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('vaultGenericModal');
+    const titleEl = document.getElementById('vaultGenericModalTitle');
+    const body = document.getElementById('vaultGenericModalBody');
+    const saveBtn = document.getElementById('vaultGenericModalSave');
+
+    titleEl.textContent = opts.title || 'Action';
+    saveBtn.textContent = opts.saveLabel || 'Save';
+    body.innerHTML = '';
+
+    for (const f of (opts.fields || [])) {
+      const group = document.createElement('div');
+      group.className = 'form-group';
+      group.style.marginBottom = '12px';
+
+      if (f.label) {
+        const label = document.createElement('label');
+        label.textContent = f.label;
+        group.appendChild(label);
+      }
+
+      if (f.type === 'select') {
+        const sel = document.createElement('select');
+        sel.className = 'input';
+        sel.id = 'vm_' + f.id;
+        for (const o of (f.options || [])) {
+          const opt = document.createElement('option');
+          opt.value = typeof o === 'object' ? o.value : o;
+          opt.textContent = typeof o === 'object' ? o.label : o;
+          sel.appendChild(opt);
+        }
+        if (f.value) sel.value = f.value;
+        if (f.disabled) sel.disabled = true;
+        if (f.onChange) sel.addEventListener('change', () => f.onChange(sel.value));
+        group.appendChild(sel);
+      } else if (f.type === 'file') {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.className = 'input';
+        inp.id = 'vm_' + f.id;
+        if (f.accept) inp.accept = f.accept;
+        group.appendChild(inp);
+      } else if (f.type === 'info') {
+        const p = document.createElement('p');
+        p.style.cssText = 'font-size:0.85rem;color:var(--text-dim);margin:4px 0';
+        p.textContent = f.value || '';
+        p.id = 'vm_' + f.id;
+        group.appendChild(p);
+      } else {
+        const inp = document.createElement('input');
+        inp.type = f.type || 'text';
+        inp.className = 'input';
+        inp.id = 'vm_' + f.id;
+        inp.placeholder = f.placeholder || '';
+        if (f.value) inp.value = f.value;
+        if (f.disabled) inp.readOnly = true;
+        group.appendChild(inp);
+      }
+
+      if (f.hint) {
+        const hint = document.createElement('span');
+        hint.className = 'form-hint';
+        hint.textContent = f.hint;
+        group.appendChild(hint);
+      }
+
+      body.appendChild(group);
+    }
+
+    function cleanup() {
+      overlay.style.display = 'none';
+      saveBtn.removeEventListener('click', onSave);
+    }
+
+    function onSave() {
+      const values = {};
+      for (const f of (opts.fields || [])) {
+        const el = document.getElementById('vm_' + f.id);
+        if (!el) continue;
+        if (f.type === 'file') {
+          values[f.id] = el.files[0] || null;
+        } else {
+          values[f.id] = el.value;
+        }
+      }
+      cleanup();
+      resolve(values);
+    }
+
+    // Override cancel to reject
+    const cancelBtn = document.getElementById('vaultGenericModalCancel');
+    const origCancel = cancelBtn.onclick;
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
+
+    saveBtn.addEventListener('click', onSave);
+    overlay.style.display = '';
+
+    // Focus first input
+    const firstInput = body.querySelector('input:not([type="file"]), select');
+    if (firstInput) setTimeout(() => firstInput.focus(), 50);
+  });
+}
+
+function vaultModalClose() {
+  document.getElementById('vaultGenericModal').style.display = 'none';
 }
 
 async function vaultRefresh() {
@@ -6193,10 +6306,19 @@ async function vaultLoadServices() {
       return;
     }
     vaultServicesCache = services;
-    list.innerHTML = services.map(s => `
+    // Load ref mappings for display
+    let serviceRefs = {};
+    try { serviceRefs = JSON.parse(localStorage.getItem('alf_vault_service_refs') || '{}'); } catch (_) {}
+    list.innerHTML = services.map(s => {
+      const refs = serviceRefs[s.name] || {};
+      const refLabels = Object.entries(refs).filter(([,v]) => v).map(([k,v]) => esc(v));
+      const refBadge = refLabels.length > 0
+        ? ' <span class="vault-ref-badge">via ' + refLabels.join(', ') + '</span>'
+        : '';
+      return `
       <div class="vault-item">
         <div class="vault-item-info">
-          <span class="vault-item-name">${esc(s.name)}</span>
+          <span class="vault-item-name">${esc(s.name)}${refBadge}</span>
           <span class="vault-item-detail">${esc(s.base_url)} &middot; ${esc(s.auth_type)}${s.tls_skip_verify ? ' &middot; TLS skip' : ''}</span>
         </div>
         <div class="vault-item-actions">
@@ -6204,8 +6326,8 @@ async function vaultLoadServices() {
           <button class="btn btn-icon vault-test-btn" data-name="${esc(s.name)}" title="Test"><i data-lucide="zap"></i></button>
           <button class="btn btn-icon vault-del-btn" data-name="${esc(s.name)}" title="Delete"><i data-lucide="trash-2"></i></button>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
     lucide.createIcons();
     list.querySelectorAll('.vault-edit-btn').forEach(btn => {
       btn.addEventListener('click', () => vaultEditService(btn.dataset.name));
@@ -6277,8 +6399,93 @@ function vaultShowServiceModal(edit) {
     document.getElementById('vaultSvcOAuthClientSecret').placeholder = 'Client Secret';
     document.getElementById('vaultSvcOAuthRefreshToken').placeholder = 'Refresh token';
   }
+  // Inject secret picker toggles for sensitive auth fields
+  vaultInjectSecretPickers(edit);
   vaultToggleAuthFields();
   document.getElementById('vaultServiceModal').style.display = '';
+}
+
+// Inject secret picker tabs into service modal auth fields
+function vaultInjectSecretPickers(edit) {
+  const pickerFields = [
+    { inputId: 'vaultSvcToken', refKey: 'token_ref', groupId: 'vaultSvcBearerGroup' },
+    { inputId: 'vaultSvcHeaderValue', refKey: 'header_value_ref', groupId: 'vaultSvcHeaderGroup' },
+    { inputId: 'vaultSvcPassword', refKey: 'password_ref', groupId: 'vaultSvcBasicGroup' },
+  ];
+
+  // Load service refs from localStorage (sidecar for UI state)
+  let serviceRefs = {};
+  try { serviceRefs = JSON.parse(localStorage.getItem('alf_vault_service_refs') || '{}'); } catch (_) {}
+  const svcName = edit ? edit.name : '';
+
+  for (const pf of pickerFields) {
+    const group = document.getElementById(pf.groupId);
+    // Remove any existing picker
+    const existing = group.querySelector('.vault-secret-picker');
+    if (existing) existing.remove();
+
+    const input = document.getElementById(pf.inputId);
+    const picker = document.createElement('div');
+    picker.className = 'vault-secret-picker';
+
+    const savedRef = svcName && serviceRefs[svcName] ? serviceRefs[svcName][pf.refKey] : '';
+
+    picker.innerHTML =
+      '<div class="vault-picker-tabs">' +
+        '<button type="button" class="vault-picker-tab' + (savedRef ? '' : ' active') + '" data-mode="direct">Enter value</button>' +
+        '<button type="button" class="vault-picker-tab' + (savedRef ? ' active' : '') + '" data-mode="ref">From vault secret</button>' +
+      '</div>' +
+      '<div class="vault-picker-ref" style="' + (savedRef ? '' : 'display:none') + '">' +
+        '<select class="input vault-picker-select">' +
+          '<option value="">Select secret...</option>' +
+          vaultSecretsCache.map(s => '<option value="' + esc(s.name) + '"' + (s.name === savedRef ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('') +
+          '<option value="__new__">+ New secret...</option>' +
+        '</select>' +
+      '</div>';
+
+    // Insert picker before the input
+    input.parentNode.insertBefore(picker, input);
+
+    // Tab switching
+    const tabs = picker.querySelectorAll('.vault-picker-tab');
+    const refDiv = picker.querySelector('.vault-picker-ref');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const isRef = tab.dataset.mode === 'ref';
+        refDiv.style.display = isRef ? '' : 'none';
+        input.style.display = isRef ? 'none' : '';
+      });
+    });
+
+    // If ref mode active, hide the input
+    if (savedRef) input.style.display = 'none';
+
+    // "New secret..." option
+    const sel = picker.querySelector('.vault-picker-select');
+    sel.addEventListener('change', async () => {
+      if (sel.value === '__new__') {
+        sel.value = '';
+        // Open the add secret modal, then add the new secret to dropdown
+        const newResult = await vaultAddSecretModal();
+        // Refresh secrets cache and repopulate
+        try {
+          const secrets = await api('/api/vault/secrets');
+          vaultSecretsCache = (secrets || []).filter(s => !s.name.includes('.'));
+        } catch (_) {}
+        // Repopulate all pickers
+        document.querySelectorAll('.vault-picker-select').forEach(s => {
+          const currentVal = s.value;
+          const optHtml = '<option value="">Select secret...</option>' +
+            vaultSecretsCache.map(sc => '<option value="' + esc(sc.name) + '">' + esc(sc.name) + '</option>').join('') +
+            '<option value="__new__">+ New secret...</option>';
+          s.innerHTML = optHtml;
+          if (currentVal) s.value = currentVal;
+        });
+      }
+    });
+  }
 }
 
 function vaultEditService(name) {
@@ -6401,22 +6608,50 @@ async function vaultSaveService() {
   const tlsSkip = document.getElementById('vaultSvcTLSSkip').checked;
   const payload = { name, base_url: baseURL, auth: { type: authType } };
   if (tlsSkip) payload.tls_skip_verify = true;
+
+  // Helper: check if a field uses a secret ref instead of direct value
+  function getFieldOrRef(inputId, refKey, directKey) {
+    const group = document.getElementById(inputId).closest('.form-group');
+    const picker = group ? group.querySelector('.vault-secret-picker') : null;
+    if (picker) {
+      const activeTab = picker.querySelector('.vault-picker-tab.active');
+      if (activeTab && activeTab.dataset.mode === 'ref') {
+        const sel = picker.querySelector('.vault-picker-select');
+        if (sel && sel.value && sel.value !== '__new__') {
+          payload.auth[refKey] = sel.value;
+          // Save ref mapping to localStorage
+          let refs = {};
+          try { refs = JSON.parse(localStorage.getItem('alf_vault_service_refs') || '{}'); } catch (_) {}
+          if (!refs[name]) refs[name] = {};
+          refs[name][refKey] = sel.value;
+          localStorage.setItem('alf_vault_service_refs', JSON.stringify(refs));
+          return;
+        }
+      }
+    }
+    // Direct value
+    const val = document.getElementById(inputId).value;
+    if (val) payload.auth[directKey] = val;
+    // Clear any stale ref
+    let refs = {};
+    try { refs = JSON.parse(localStorage.getItem('alf_vault_service_refs') || '{}'); } catch (_) {}
+    if (refs[name]) { delete refs[name][refKey]; localStorage.setItem('alf_vault_service_refs', JSON.stringify(refs)); }
+  }
+
   if (authType === 'bearer') {
-    payload.auth.token = document.getElementById('vaultSvcToken').value;
+    getFieldOrRef('vaultSvcToken', 'token_ref', 'token');
   } else if (authType === 'header') {
     payload.auth.header_name = document.getElementById('vaultSvcHeaderName').value;
-    payload.auth.header_value = document.getElementById('vaultSvcHeaderValue').value;
+    getFieldOrRef('vaultSvcHeaderValue', 'header_value_ref', 'header_value');
   } else if (authType === 'basic') {
     payload.auth.username = document.getElementById('vaultSvcUsername').value;
-    payload.auth.password = document.getElementById('vaultSvcPassword').value;
+    getFieldOrRef('vaultSvcPassword', 'password_ref', 'password');
   } else if (authType === 'oauth2_client') {
     const oauth2Mode = document.querySelector('.oauth2-tab.active')?.dataset.mode || 'manual';
     if (oauth2Mode === 'browser') {
-      // Browser flow is handled by vaultOAuth2StartFlow -nothing to save here.
       alert('Use the "Authorize in Browser" button for browser flow');
       return;
     }
-    // Manual mode -only send non-empty fields (edit leaves secrets empty to keep existing).
     const cid = document.getElementById('vaultSvcOAuthClientId').value;
     const csec = document.getElementById('vaultSvcOAuthClientSecret').value;
     const turl = document.getElementById('vaultSvcOAuthTokenUrl').value;
@@ -6486,22 +6721,36 @@ async function vaultLoadTokens() {
   }
 }
 
-async function vaultCreateToken() {
-  const scope = prompt('Key scope (proxy or admin):', 'proxy');
-  if (!scope) return;
+async function vaultCreateTokenModal() {
+  const result = await vaultModal({
+    title: 'Create Access Key',
+    fields: [
+      { id: 'scope', label: 'Scope', type: 'select', value: 'proxy', options: [
+        { value: 'proxy', label: 'LLM Access (read-only)' },
+        { value: 'admin', label: 'Full Access' },
+      ]},
+    ],
+    saveLabel: 'Create',
+  });
+  if (!result) return;
   try {
-    const result = await api('/api/vault/tokens', {
+    const res = await api('/api/vault/tokens', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope })
+      body: JSON.stringify({ scope: result.scope })
     });
-    if (result.id) {
-      alert('Key created:\n' + result.id + '\n\nSave this -it won\'t be shown again.');
+    if (res.id) {
+      await vaultModal({
+        title: 'Access Key Created',
+        fields: [
+          { id: 'key', label: 'Key (copy now — shown only once)', type: 'text', value: res.id, disabled: true },
+        ],
+        saveLabel: 'Done',
+      });
     }
     vaultLoadTokens();
   } catch (err) {
-    const msg = err?.error || err?.message || 'unknown error';
-    alert('Create key failed: ' + msg);
+    toast('Create key failed: ' + (err?.error || err?.message || 'unknown error'), 'error');
   }
 }
 
@@ -6519,51 +6768,103 @@ async function vaultRevokeKey(prefix) {
 
 // --- Vault Export / Import ---
 
-async function vaultExport() {
+async function vaultExportModal() {
+  const result = await vaultModal({
+    title: 'Export Vault',
+    fields: [
+      { id: 'info', type: 'info', value: 'Your vault will be encrypted with the password you provide.' },
+      { id: 'password', label: 'Password', type: 'password', placeholder: 'Encryption password' },
+      { id: 'confirm', label: 'Confirm password', type: 'password', placeholder: 'Repeat password' },
+    ],
+    saveLabel: 'Export',
+  });
+  if (!result) return;
+  const pw = (result.password || '').trim();
+  const pw2 = (result.confirm || '').trim();
+  if (!pw) { toast('Password required', 'error'); return; }
+  if (pw !== pw2) { toast('Passwords do not match', 'error'); return; }
   try {
-    const resp = await _nativeFetch('/api/vault/export', { credentials: 'same-origin' });
-    if (!resp.ok) throw await resp.json();
+    const resp = await _nativeFetch('/api/vault/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ password: pw }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw err;
+    }
     const blob = await resp.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'vault-export.json';
+    a.download = 'vault-export.enc';
     a.click();
     URL.revokeObjectURL(url);
-    toast('Vault exported');
+    toast('Vault exported (encrypted)');
   } catch (err) {
-    alert('Export failed: ' + (err?.error || err?.message || 'unknown error'));
+    toast('Export failed: ' + (err?.error || err?.message || 'unknown error'), 'error');
   }
 }
 
-async function vaultImport() {
+async function vaultImportModal() {
   const input = document.getElementById('vaultImportFile');
   const file = input.files[0];
   if (!file) return;
-  try {
-    const text = await file.text();
-    const data = JSON.parse(text);
-    if (!data.secrets || !Array.isArray(data.secrets)) {
-      alert('Invalid export file: missing "secrets" array');
-      input.value = '';
-      return;
-    }
-    if (!confirm('Import ' + data.secrets.length + ' secrets? Existing secrets with the same name will be overwritten.')) {
-      input.value = '';
-      return;
-    }
-    const result = await api('/api/vault/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: text
-    });
-    toast('Imported ' + (result.imported || 0) + ' secrets');
-    vaultLoadSecrets();
-    vaultLoadFiles();
-  } catch (err) {
-    alert('Import failed: ' + (err?.error || err?.message || 'unknown error'));
-  }
   input.value = '';
+
+  const isEncrypted = file.name.endsWith('.enc');
+
+  if (isEncrypted) {
+    const result = await vaultModal({
+      title: 'Import Encrypted Vault',
+      fields: [
+        { id: 'info', type: 'info', value: 'This file is encrypted. Enter the password used during export.' },
+        { id: 'password', label: 'Password', type: 'password', placeholder: 'Decryption password' },
+      ],
+      saveLabel: 'Import',
+    });
+    if (!result) return;
+    const pw = (result.password || '').trim();
+    if (!pw) { toast('Password required', 'error'); return; }
+    try {
+      const buf = await file.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const res = await api('/api/vault/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: b64, password: pw }),
+      });
+      toast('Imported ' + (res.imported || 0) + ' secrets' + (res.services_imported ? ', ' + res.services_imported + ' services' : ''));
+      vaultLoadSecrets();
+      vaultLoadFiles();
+      vaultLoadServices();
+    } catch (err) {
+      toast('Import failed: ' + (err?.error || err?.message || 'unknown error'), 'error');
+    }
+  } else {
+    // Plain JSON import (backward compat)
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data.secrets || !Array.isArray(data.secrets)) {
+        toast('Invalid file: missing "secrets" array', 'error');
+        return;
+      }
+      if (!confirm('Import ' + data.secrets.length + ' secrets? Existing secrets with the same name will be overwritten.')) return;
+      const res = await api('/api/vault/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: text,
+      });
+      toast('Imported ' + (res.imported || 0) + ' secrets' + (res.services_imported ? ', ' + res.services_imported + ' services' : ''));
+      vaultLoadSecrets();
+      vaultLoadFiles();
+      vaultLoadServices();
+    } catch (err) {
+      toast('Import failed: ' + (err?.error || err?.message || 'unknown error'), 'error');
+    }
+  }
 }
 
 // --- Vault Secrets (API Keys) ---
@@ -6572,26 +6873,30 @@ async function vaultLoadSecrets() {
   try {
     const secrets = await api('/api/vault/secrets');
     const list = document.getElementById('vaultSecretsList');
-    if (!secrets || secrets.length === 0) {
-      list.innerHTML = '<div class="vault-empty">No secrets stored. Add API keys for your backends here.</div>';
-      return;
-    }
     // Filter: secrets are files without a file extension (api keys, tokens).
-    const filtered = secrets.filter(s => !s.name.includes('.'));
+    const filtered = (secrets || []).filter(s => !s.name.includes('.'));
+    vaultSecretsCache = filtered;
     if (filtered.length === 0) {
       list.innerHTML = '<div class="vault-empty">No secrets stored. Add API keys for your backends here.</div>';
       return;
     }
-    list.innerHTML = filtered.map(s => `
+    // Detect backend-linked secrets
+    const backendNames = BACKENDS.filter(b => b);
+    list.innerHTML = filtered.map(s => {
+      const linkedBackend = backendNames.find(b => s.name === b + '_api_key');
+      const badge = linkedBackend
+        ? ' <span class="vault-backend-badge">' + esc(linkedBackend) + '</span>'
+        : '';
+      return `
       <div class="vault-item">
         <div class="vault-item-info">
-          <span class="vault-item-name">${esc(s.name)}</span>
+          <span class="vault-item-name">${esc(s.name)}${badge}</span>
         </div>
         <div class="vault-item-actions">
           <button class="btn btn-icon vault-secret-del-btn" data-name="${esc(s.name)}" title="Delete"><i data-lucide="trash-2"></i></button>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
     lucide.createIcons();
     list.querySelectorAll('.vault-secret-del-btn').forEach(btn => {
       btn.addEventListener('click', () => vaultDeleteSecret(btn.dataset.name));
@@ -6601,21 +6906,34 @@ async function vaultLoadSecrets() {
   }
 }
 
-function vaultShowSecretForm() {
-  document.getElementById('vaultSecretForm').style.display = '';
-  document.getElementById('vaultSecretName').value = '';
-  document.getElementById('vaultSecretValue').value = '';
-  document.getElementById('vaultSecretName').focus();
-}
+async function vaultAddSecretModal() {
+  const backendNames = BACKENDS.filter(b => b);
+  const backendOpts = [{ value: '', label: 'None (manual name)' }].concat(
+    backendNames.map(b => ({ value: b, label: b + ' API key' }))
+  );
 
-function vaultHideSecretForm() {
-  document.getElementById('vaultSecretForm').style.display = 'none';
-}
+  const fields = [
+    { id: 'backend', label: 'Link to backend', type: 'select', options: backendOpts,
+      onChange: function(val) {
+        const nameEl = document.getElementById('vm_name');
+        if (val) {
+          nameEl.value = val + '_api_key';
+          nameEl.readOnly = true;
+        } else {
+          nameEl.value = '';
+          nameEl.readOnly = false;
+        }
+      }
+    },
+    { id: 'name', label: 'Name', type: 'text', placeholder: 'e.g. openrouter_api_key' },
+    { id: 'value', label: 'Value', type: 'password', placeholder: 'sk-or-...' },
+  ];
 
-async function vaultSaveSecret() {
-  const name = document.getElementById('vaultSecretName').value.trim();
-  const value = document.getElementById('vaultSecretValue').value.trim();
-  if (!name || !value) { alert('Name and value are required.'); return; }
+  const result = await vaultModal({ title: 'Add Secret', fields, saveLabel: 'Save' });
+  if (!result) return;
+  const name = (result.name || '').trim();
+  const value = (result.value || '').trim();
+  if (!name || !value) { toast('Name and value are required', 'error'); return; }
   try {
     await api('/api/vault/secrets', {
       method: 'POST',
@@ -6623,10 +6941,9 @@ async function vaultSaveSecret() {
       body: JSON.stringify({ name, value })
     });
     toast('Secret saved');
-    vaultHideSecretForm();
     vaultLoadSecrets();
   } catch (err) {
-    alert('Save failed: ' + (err?.error || err?.message || 'unknown error'));
+    toast('Save failed: ' + (err?.error || err?.message || 'unknown error'), 'error');
   }
 }
 
@@ -6636,7 +6953,7 @@ async function vaultDeleteSecret(name) {
     await api('/api/vault/secrets/' + encodeURIComponent(name), { method: 'DELETE' });
     vaultLoadSecrets();
   } catch (err) {
-    alert('Delete failed: ' + (err?.error || err?.message || 'unknown error'));
+    toast('Delete failed: ' + (err?.error || err?.message || 'unknown error'), 'error');
   }
 }
 
@@ -6685,12 +7002,22 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-async function vaultUploadFile() {
+async function vaultUploadFileModal() {
   const input = document.getElementById('vaultFileInput');
   const file = input.files[0];
   if (!file) return;
-  const name = prompt('File name in vault:', file.name);
-  if (!name) { input.value = ''; return; }
+  input.value = '';
+
+  const result = await vaultModal({
+    title: 'Upload File',
+    fields: [
+      { id: 'name', label: 'File name in vault', type: 'text', value: file.name, placeholder: 'e.g. credentials.json' },
+    ],
+    saveLabel: 'Upload',
+  });
+  if (!result) return;
+  const name = (result.name || '').trim();
+  if (!name) { toast('Name required', 'error'); return; }
 
   const form = new FormData();
   form.append('name', name);
@@ -6709,9 +7036,8 @@ async function vaultUploadFile() {
     toast('File uploaded');
     vaultLoadFiles();
   } catch (err) {
-    alert('Upload failed: ' + (err?.error || err?.message || 'unknown error'));
+    toast('Upload failed: ' + (err?.error || err?.message || 'unknown error'), 'error');
   }
-  input.value = '';
 }
 
 async function vaultDeleteFile(name) {

@@ -383,7 +383,7 @@
             <span class="vault-status-indicator" id="vaultStatusDot"></span>
             <span id="vaultStatusText">Checking...</span>
             <button class="btn btn-secondary" id="vaultExportBtn" style="display:none" title="Export all secrets"><i data-lucide="download" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Export</button>
-            <button class="btn btn-secondary" id="vaultImportBtn" style="display:none" title="Import secrets"><i data-lucide="upload" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Import<input type="file" id="vaultImportFile" accept=".json" style="display:none"></button>
+            <button class="btn btn-secondary" id="vaultImportBtn" style="display:none" title="Import secrets"><i data-lucide="upload" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Import<input type="file" id="vaultImportFile" accept=".json,.enc" style="display:none"></button>
             <button class="btn btn-secondary" id="vaultLockBtn" style="display:none">Lock</button>
             <button class="btn btn-icon" id="vaultRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
           </div>
@@ -517,20 +517,6 @@
             <button class="btn" id="vaultAddSecretBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Add</button>
           </div>
           <div id="vaultSecretsList" class="vault-list"></div>
-          <div id="vaultSecretForm" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px">
-            <div class="form-group" style="margin-bottom:8px">
-              <label>Name</label>
-              <input type="text" class="input" id="vaultSecretName" placeholder="e.g. openrouter_api_key">
-            </div>
-            <div class="form-group" style="margin-bottom:8px">
-              <label>Value</label>
-              <input type="password" class="input" id="vaultSecretValue" placeholder="sk-or-...">
-            </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end">
-              <button class="btn btn-secondary" id="vaultSecretCancelBtn">Cancel</button>
-              <button class="btn" id="vaultSecretSaveBtn">Save</button>
-            </div>
-          </div>
         </div>
 
         <!-- Files -->
@@ -552,6 +538,18 @@
             <button class="btn" id="vaultCreateTokenBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Create</button>
           </div>
           <div id="vaultTokensList" class="vault-list"></div>
+        </div>
+
+        <!-- Generic Vault Modal -->
+        <div class="modal-overlay" id="vaultGenericModal" style="display:none">
+          <div class="modal">
+            <h3 id="vaultGenericModalTitle">Action</h3>
+            <div id="vaultGenericModalBody"></div>
+            <div class="modal-actions">
+              <button class="btn btn-secondary" id="vaultGenericModalCancel">Cancel</button>
+              <button class="btn" id="vaultGenericModalSave">Save</button>
+            </div>
+          </div>
         </div>
       </div>
 

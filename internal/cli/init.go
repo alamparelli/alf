@@ -125,7 +125,7 @@ func RunInit() {
 	} else {
 		fmt.Println("  This wizard will set up the infrastructure:")
 		fmt.Println()
-		fmt.Println("    1. Check prerequisites (Docker, gVisor)")
+		fmt.Println("    1. Check prerequisites (Docker)")
 		fmt.Println("    2. Choose where to install ALF")
 		fmt.Println("    3. Set up your Control Center (web dashboard)")
 		fmt.Println("    4. Timezone")
@@ -289,41 +289,6 @@ func checkPrerequisites() {
 		}
 	} else {
 		PrintCheck("Docker found")
-	}
-
-	// Check gVisor (runsc) for container sandboxing.
-	if isLinux {
-		if _, err := exec.LookPath("runsc"); err != nil {
-			fmt.Println("\n  gVisor (runsc) provides kernel-level container isolation.")
-			fmt.Print("  Install gVisor now? [Y/n]: ")
-			input, _ := reader.ReadString('\n')
-			input = strings.TrimSpace(strings.ToLower(input))
-			if input == "" || input == "y" || input == "yes" {
-				PrintInfo("Installing gVisor...")
-				install := exec.Command("sh", "-c", strings.Join([]string{
-					`set -e`,
-					`ARCH=$(uname -m)`,
-					`URL="https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}"`,
-					`curl -fsSL "${URL}/runsc" -o /tmp/runsc`,
-					`curl -fsSL "${URL}/containerd-shim-runsc-v1" -o /tmp/containerd-shim-runsc-v1`,
-					`chmod +x /tmp/runsc /tmp/containerd-shim-runsc-v1`,
-					`sudo mv /tmp/runsc /tmp/containerd-shim-runsc-v1 /usr/local/bin/`,
-					`sudo /usr/local/bin/runsc install -- --platform=systrap`,
-					`sudo systemctl reload docker`,
-				}, "\n"))
-				install.Stdout = os.Stdout
-				install.Stderr = os.Stderr
-				if err := install.Run(); err != nil {
-					PrintWarning(fmt.Sprintf("gVisor installation failed: %v - continuing without sandbox", err))
-				} else {
-					PrintCheck("gVisor installed - containers will use runsc runtime")
-				}
-			} else {
-				PrintInfo("Skipped gVisor - containers will use default runtime (runc)")
-			}
-		} else {
-			PrintCheck("gVisor (runsc) found")
-		}
 	}
 
 	// Check Docker Compose plugin.
@@ -876,8 +841,12 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	// gVisor's netstack cannot use Docker's internal DNS (127.0.0.11),
 	// so we provide public DNS servers directly.
 	resolvPath := filepath.Join(dir, "resolv.conf")
-	if _, err := os.Stat(resolvPath); os.IsNotExist(err) {
-		resolvContent := "nameserver 8.8.8.8\nnameserver 1.1.1.1\n"
+	resolvContent := "nameserver 8.8.8.8\nnameserver 1.1.1.1\n"
+	if info, err := os.Stat(resolvPath); err != nil || info.IsDir() {
+		// Remove directory if Docker auto-created it as a mount placeholder.
+		if err == nil && info.IsDir() {
+			os.Remove(resolvPath)
+		}
 		if err := os.WriteFile(resolvPath, []byte(resolvContent), 0o644); err != nil {
 			PrintWarning(fmt.Sprintf("Failed to write resolv.conf: %v", err))
 		} else {

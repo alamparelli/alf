@@ -1635,57 +1635,41 @@ func main() {
 			// The orchestrator brain is delegation-only - skip core/soul/toolbox
 			// prompts which contain file-writing instructions for conversational mode.
 			if routeResult.Tier == "agent" && len(agentStore.All()) > 0 {
-				var orchSysPrompts []string
-				if preRecallBlock != "" {
-					orchSysPrompts = append(orchSysPrompts, preRecallBlock)
-				}
-				if catalog := skills.BuildCatalog(skillStore); catalog != "" {
-					orchSysPrompts = append(orchSysPrompts, catalog)
-				}
-				// Match skills for sub-agent injection.
-				var skillInjections []string
-				if matched := skills.MatchTriggers(skillStore, msgWithReplyContext); len(matched) > 0 {
-					names := make([]string, len(matched))
-					for i, sk := range matched {
-						names[i] = sk.Name
-						if sk.Prompt != "" {
-							skillInjections = append(skillInjections, sk.Prompt)
-						}
-					}
-					log.Printf("[chat:%d] agent: matched skills %v (%d prompts)", chatID, names, len(skillInjections))
-				}
-
-				// Enrich agent with workspace awareness and chat history.
-				orchSysPrompts = append(orchSysPrompts, memory.WorkspaceSummary(dataDir))
+				// Build conversation context from TG chat history.
+				var convCtx string
 				if recent := chatHistory.Recent(chatID, 5); len(recent) > 0 {
 					var histBuf strings.Builder
-					histBuf.WriteString("=== [Recent conversation] ===\n")
 					for _, e := range recent {
 						if e.Role == "user" {
-							histBuf.WriteString("User: " + e.Text + "\n")
+							histBuf.WriteString("[user]: " + e.Text + "\n")
 						} else {
-							histBuf.WriteString("Alf: " + e.Text + "\n")
+							histBuf.WriteString("[assistant]: " + e.Text + "\n")
 						}
 					}
-					orchSysPrompts = append(orchSysPrompts, histBuf.String())
+					convCtx = histBuf.String()
 				}
 
-				// Capture loop variables for the goroutine.
-				orchChatID := chatID
-				orchMsg := msgWithReplyContext
-				orchMediaCleanup := mediaCleanup
-				orchRC := agents.RunConfig{
+				orchPrep := agents.PrepareOrchestration(agents.OrchestrationInputs{
+					UserMessage:          msgWithReplyContext,
+					DataDir:              dataDir,
+					ContextDir:           contextDir,
+					Source:               "telegram",
 					Model:                tp.Model,
 					Backend:              tp.Backend,
 					Effort:               tp.Effort,
 					MaxTurns:             tp.MaxTurns,
 					OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
-					Source:               "telegram",
 					MaxIterations:        tp.MaxIterations,
 					TimeoutMin:           tp.TimeoutMin,
-					SkillPrompts:         skillInjections,
-					MemoryContext:        memory.CollectAgentContext(contextDir),
-				}
+					RecallBlock:          preRecallBlock,
+					SkillStore:           skillStore,
+					ConversationContext:  convCtx,
+				})
+
+				// Capture loop variables for the goroutine.
+				orchChatID := chatID
+				orchMsg := msgWithReplyContext
+				orchMediaCleanup := mediaCleanup
 
 				go func() {
 					// Typing indicator for agent orchestration.
@@ -1703,7 +1687,7 @@ func main() {
 					}
 
 					start := time.Now()
-					orchResult, orchMeta, orchErr := orch.Run(context.Background(), orchMsg, orchSysPrompts, orchRC, orchProgress)
+					orchResult, orchMeta, orchErr := orch.Run(context.Background(), orchMsg, orchPrep.SystemPrompts, orchPrep.Config, orchProgress)
 					duration := time.Since(start)
 
 					orchAnim.Stop()

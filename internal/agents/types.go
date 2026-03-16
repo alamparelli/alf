@@ -98,6 +98,8 @@ type RunConfig struct {
 	NeedValidation       bool     // if true, block after plan output and wait for user approval
 	Source               string   // how the task was triggered: "router", "chat", "schedule", "telegram"
 	Team                 string   // team name if launched via a specific team
+	OriginalRequest      string   // raw user message forwarded to agents as context fallback
+	ConversationContext  string   // recent conversation summary injected into orchestrator + agents
 }
 
 // TaskMeta tracks the lifecycle of an orchestration run.

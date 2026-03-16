@@ -473,7 +473,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		}
 
 		// Execute delegates.
-		agentResults := o.executeDelegates(ctx, output.Delegates, teams, sm, taskDir, meta, rc.SkillPrompts, rc.MemoryContext, onProgress)
+		agentResults := o.executeDelegates(ctx, output.Delegates, teams, sm, taskDir, meta, rc, onProgress)
 
 		// Log results summary.
 		log.Printf("[orchestrator] delegates completed:")
@@ -575,8 +575,7 @@ func (o *Orchestrator) executeDelegates(
 	sm *SessionManager,
 	taskDir string,
 	meta *TaskMeta,
-	skillPrompts []string,
-	memoryContext []string,
+	rc RunConfig,
 	onProgress ProgressFunc,
 ) []AgentResult {
 	// Find max concurrent limit from the relevant teams.
@@ -648,7 +647,7 @@ func (o *Orchestrator) executeDelegates(
 			if agentCount[d.Agent] > 1 {
 				sessionKey = fmt.Sprintf("%s#%d", d.Agent, idx)
 			}
-			ar := o.invokeAgentWithKey(ctx, d, sessionKey, sm, taskDir, skillPrompts, memoryContext, onProgress)
+			ar := o.invokeAgentWithKey(ctx, d, sessionKey, sm, taskDir, rc, onProgress)
 
 			// Set final status.
 			if ar.Error != "" {
@@ -681,8 +680,7 @@ func (o *Orchestrator) invokeAgentWithKey(
 	sessionKey string,
 	sm *SessionManager,
 	taskDir string,
-	skillPrompts []string,
-	memoryContext []string,
+	rc RunConfig,
 	onProgress ProgressFunc,
 ) AgentResult {
 	start := time.Now()
@@ -741,18 +739,37 @@ func (o *Orchestrator) invokeAgentWithKey(
 		teamName, agentName, ac.Tier, model, tp.Backend, tp.Effort, tp.WriteCapable, tp.MaxTurns, hasResume)
 	log.Printf("[orchestrator]   task: %s", truncate(d.Task, 150))
 
-	// Build system prompts: tier prompt + agent's own prompt + memory context + skill prompts.
-	sysPrompts := make([]string, 0, 2+len(memoryContext)+len(skillPrompts))
+	// Build system prompts: tier prompt + agent's own prompt + workspace + context + memory + skills.
+	sysPrompts := make([]string, 0, 5+len(rc.MemoryContext)+len(rc.SkillPrompts))
 	if tp.SystemPrompt != "" {
 		sysPrompts = append(sysPrompts, tp.SystemPrompt)
 	}
 	if ac.SystemPrompt != "" {
 		sysPrompts = append(sysPrompts, ac.SystemPrompt)
 	}
-	sysPrompts = append(sysPrompts, memoryContext...)
-	sysPrompts = append(sysPrompts, skillPrompts...)
-	if len(memoryContext) > 0 || len(skillPrompts) > 0 {
-		log.Printf("[orchestrator]   injecting %d memory + %d skill prompt(s) into agent %s/%s", len(memoryContext), len(skillPrompts), teamName, agentName)
+
+	// Workspace directory enforcement: tell agent exactly where to write.
+	sysPrompts = append(sysPrompts, fmt.Sprintf(
+		"## Your Workspace\nYour working directory is: %s\n"+
+			"ALL files you create MUST be written inside this directory using RELATIVE paths (e.g. ./output.md).\n"+
+			"Do NOT write files anywhere else — not in /home/alf/data/, not in the root, not in any other agent's directory.\n"+
+			"Exception: if your task explicitly instructs you to write to /home/alf/data/apps/<app-name>/, follow that instruction.",
+		agentDir))
+
+	// Original user request: agents get the raw message as fallback context.
+	if rc.OriginalRequest != "" {
+		sysPrompts = append(sysPrompts, "=== [Original User Request] ===\n"+rc.OriginalRequest)
+	}
+
+	// Conversation context: recent exchanges so agents understand the broader discussion.
+	if rc.ConversationContext != "" {
+		sysPrompts = append(sysPrompts, "=== [Recent Conversation] ===\n"+rc.ConversationContext)
+	}
+
+	sysPrompts = append(sysPrompts, rc.MemoryContext...)
+	sysPrompts = append(sysPrompts, rc.SkillPrompts...)
+	if len(rc.MemoryContext) > 0 || len(rc.SkillPrompts) > 0 {
+		log.Printf("[orchestrator]   injecting %d memory + %d skill prompt(s) into agent %s/%s", len(rc.MemoryContext), len(rc.SkillPrompts), teamName, agentName)
 	}
 
 	params := provider.Params{

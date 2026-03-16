@@ -156,7 +156,9 @@ func ParseResponse(raw string, tiers *cc.TiersConfig) Result {
 // Includes programmatic guardrails:
 // 1. Read-only → write-capable upgrade if message has write intent.
 // 2. Light tier → standard upgrade if message shows complexity markers.
-func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
+// 3. Force agent tier if message explicitly names an agent team.
+// teamNames is optional — pass agent team names for guardrail 3.
+func InterpretRaw(raw string, tiers *cc.TiersConfig, message string, teamNames ...string) Result {
 	valid := ValidTierSet(tiers)
 	result := parseResponse(raw, valid)
 
@@ -179,6 +181,13 @@ func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 				result.Reason += " [upgraded: complexity]"
 				return result
 			}
+		}
+		// Guardrail 3: force agent tier if message explicitly names a team.
+		if result.Tier != "agent" && hasOrchestrator(tiers) && mentionsTeam(message, teamNames) {
+			log.Printf("router: %s → %s upgraded to agent (team name mentioned)", truncate(message, 60), result.Tier)
+			result.Tier = "agent"
+			result.Reason += " [upgraded: team mentioned]"
+			return result
 		}
 		log.Printf("router: %s → %s (%s)", truncate(message, 60), result.Tier, result.Reason)
 		return result
@@ -404,13 +413,13 @@ func stripMarkdownFences(s string) string {
 // Conservative: only route to agent when explicitly requested or clearly parallel work.
 func buildAgentTeamsHint(teams []AgentTeamInfo) string {
 	var b strings.Builder
-	b.WriteString("The \"agent\" tier coordinates parallel workstreams. Route to it ONLY when:\n")
-	b.WriteString("  1. The user explicitly asks to use agents or teams (\"lance les agents\", \"use agents\", \"lance une équipe\")\n")
-	b.WriteString("  2. The task explicitly requires PARALLEL independent workstreams that cannot be done step-by-step\n")
-	b.WriteString("     (e.g. \"build frontend + backend + tests simultaneously\", \"write 5 articles at once\")\n")
+	b.WriteString("The \"agent\" tier coordinates parallel workstreams. Route to it when:\n")
+	b.WriteString("  1. The user explicitly mentions a team by name (see list below)\n")
+	b.WriteString("  2. The user asks to use agents or teams (\"lance les agents\", \"use agents\", \"use team X\")\n")
+	b.WriteString("  3. The task explicitly requires PARALLEL independent workstreams\n")
 
 	if len(teams) > 0 {
-		b.WriteString("\nAvailable agent teams (for reference only — do NOT auto-route based on topic match):\n")
+		b.WriteString("\nAvailable agent teams:\n")
 		for _, t := range teams {
 			b.WriteString(fmt.Sprintf("  - \"%s\": %s", t.Name, t.Description))
 			if len(t.Agents) > 0 {
@@ -421,10 +430,9 @@ func buildAgentTeamsHint(teams []AgentTeamInfo) string {
 	}
 
 	b.WriteString("\nDo NOT route to \"agent\" for:\n")
-	b.WriteString("  - Any task a single model can handle sequentially (writing, research, code review, debugging, etc.)\n")
-	b.WriteString("  - Conversational messages, questions, status checks\n")
-	b.WriteString("  - Tasks that merely match a team's topic — topic match alone is NOT enough\n")
-	b.WriteString("When in doubt, route to a standard conversational tier. The user will explicitly ask for agents if they want them.\n")
+	b.WriteString("  - Conversational messages, questions, status checks, simple follow-ups\n")
+	b.WriteString("  - Tasks that don't mention a team and don't need parallel work\n")
+	b.WriteString("When in doubt and no team is mentioned, route to a standard conversational tier.\n")
 	return b.String()
 }
 
@@ -557,6 +565,17 @@ func nextTierAbove(name string, tiers *cc.TiersConfig) string {
 		}
 	}
 	return best
+}
+
+// mentionsTeam returns true if the message contains an agent team name (case-insensitive).
+func mentionsTeam(message string, teamNames []string) bool {
+	lower := strings.ToLower(message)
+	for _, name := range teamNames {
+		if name != "" && strings.Contains(lower, strings.ToLower(name)) {
+			return true
+		}
+	}
+	return false
 }
 
 func truncate(s string, n int) string {

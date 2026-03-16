@@ -60,7 +60,11 @@ func SetSecret(baseDir, name, value string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	// Remove directory placeholder if Docker auto-created one.
 	path := secretPath(baseDir, name)
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		os.Remove(path)
+	}
 	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o644); err != nil {
 		return err
 	}

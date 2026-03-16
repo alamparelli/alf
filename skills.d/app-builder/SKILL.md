@@ -7,14 +7,27 @@ triggers: create app, new app, build app, make app, web app, align app, migrate 
 
 # ALF App Framework — Standard Directives
 
-## Before building — clarify scope
+## Before building — MANDATORY scope check
 
-If the user's request is vague (e.g. "create a crypto app", "build me a todo app"), do NOT start building immediately. First ask 2-3 targeted questions to understand:
-- **What exactly** does the app do? (core features, not a full spec)
-- **What data** does it need? (external APIs, user input, scheduled feeds?)
-- **Any preferences?** (specific APIs, design details, existing data to import)
+**NEVER start building unless the user has described at least one concrete feature or data field.**
 
-Only skip questions if the request is already specific enough to build (e.g. "create a reading list app with title, author, status columns and a form to add books").
+A request like "create a habit tracker app" or "build me a crypto app" is NOT enough. These are just app names — you have no idea what the user actually wants.
+
+**Rule: if the request contains fewer than 2 concrete details (specific features, data fields, behaviors, or API sources), you MUST ask questions first.** Do not assume or invent features.
+
+Ask 2-3 short, targeted questions:
+- What are the core features? (e.g. "track daily habits with streaks" vs "habit templates with categories and reminders")
+- What data does it work with? (user input only? external API? scheduled feed?)
+- Any must-haves? (specific columns, calculations, integrations)
+
+**Examples that require questions first:**
+- "create a crypto app" → ask: portfolio tracker? price alerts? trading journal? which coins/APIs?
+- "build a habit tracker" → ask: what do you track? streaks? categories? reminders?
+- "make a fitness app" → ask: workout logging? meal tracking? progress charts?
+
+**Examples specific enough to build directly:**
+- "create a reading list with title, author, status, rating columns and a form to add books"
+- "build a crypto portfolio tracker showing holdings, current price from CoinGecko, and P&L"
 
 ---
 

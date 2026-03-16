@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
+	"github.com/alamparelli/alf/internal/skills"
 )
 
 // ensureBashrcPath adds ~/.local/bin to PATH in .bashrc if not already present.
@@ -377,4 +379,36 @@ func setupUserPackagesPaths() {
 		}
 	}
 	log.Printf("user-packages: PATH includes %s, LD_LIBRARY_PATH includes %s", binDir, libDir)
+}
+
+// injectAppTriggers scans the apps directory and adds each app's name and slug
+// as dynamic triggers to the app-builder skill. This way "update the crypto app"
+// or "fix reading-list" auto-matches the app-builder skill.
+func injectAppTriggers(store skills.Store, appsDir string) {
+	entries, err := os.ReadDir(appsDir)
+	if err != nil {
+		return
+	}
+	var triggers []string
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		slug := e.Name()
+		triggers = append(triggers, slug)
+		// Also add human name from app.json if different from slug.
+		data, err := os.ReadFile(filepath.Join(appsDir, slug, "app.json"))
+		if err == nil {
+			var meta struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(data, &meta) == nil && meta.Name != "" && strings.ToLower(meta.Name) != strings.ToLower(slug) {
+				triggers = append(triggers, meta.Name)
+			}
+		}
+	}
+	if len(triggers) > 0 {
+		store.AddDynamicTriggers("app-builder", triggers)
+		log.Printf("skills: injected %d app triggers into app-builder: %v", len(triggers), triggers)
+	}
 }

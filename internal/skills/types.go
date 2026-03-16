@@ -16,4 +16,7 @@ type Store interface {
 	All() []*Skill
 	Get(name string) (*Skill, bool)
 	Reload() error
+	// AddDynamicTriggers appends extra triggers to a skill at runtime.
+	// Used to inject app names so "update crypto app" matches app-builder.
+	AddDynamicTriggers(skillName string, triggers []string)
 }

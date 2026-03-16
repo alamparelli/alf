@@ -186,6 +186,8 @@ services:
       - ./local:/opt/alf/user-packages
       - ./vault-data:/opt/alf/vault-data
       - ./resolv.conf:/etc/resolv.conf:ro
+      - /OBSIDIAN:/home/alf/data/external/obsidian
+      - /mnt/DATA/ALF:/home/alf/data/external/alf-storage
     mem_limit: 2g
     cpus: "2.0"
     runtime: ${ALF_RUNTIME:-runc}

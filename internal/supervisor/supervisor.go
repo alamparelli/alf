@@ -296,6 +296,40 @@ func (s *Supervisor) supervise(p *managedProc) {
 	}
 }
 
+// safePrefixes lists environment variable prefixes safe to inherit from the daemon.
+// This mirrors the allowlists in provider/cli.go and tooling/native_bash.go.
+var safePrefixes = []string{
+	"PATH=", "HOME=", "LANG=", "LC_", "TZ=", "TMPDIR=",
+	"USER=", "LOGNAME=",
+	"VAULT_TOKEN=", "VAULT_ADDR=",
+	"ANTHROPIC_",
+}
+
+// inheritSafeEnv builds a child environment by filtering the daemon's env through safePrefixes.
+func inheritSafeEnv() []string {
+	env := make([]string, 0, 16)
+	for _, e := range os.Environ() {
+		for _, prefix := range safePrefixes {
+			if strings.HasPrefix(e, prefix) {
+				env = append(env, e)
+				break
+			}
+		}
+	}
+	// Ensure minimum defaults.
+	hasLang := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "LANG=") {
+			hasLang = true
+			break
+		}
+	}
+	if !hasLang {
+		env = append(env, "LANG=C.UTF-8")
+	}
+	return env
+}
+
 // blockedEnvKeys prevents service.json from overriding security-sensitive env vars.
 var blockedEnvKeys = map[string]bool{
 	"PATH": true, "HOME": true, "SHELL": true, "USER": true,
@@ -320,12 +354,8 @@ func (s *Supervisor) buildCmd(p *managedProc) (*exec.Cmd, error) {
 
 	cmd.Dir = p.workDir
 
-	// Build environment: inherit safe defaults + service-specific env.
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
-		"LANG=C.UTF-8",
-	}
+	// Build environment: inherit safe vars from daemon + service-specific env.
+	cmd.Env = inheritSafeEnv()
 	// SEC-002: Block dangerous env overrides.
 	for k, v := range p.config.Env {
 		if blockedEnvKeys[strings.ToUpper(k)] || strings.HasPrefix(strings.ToUpper(k), "LD_") {

@@ -108,7 +108,7 @@ func parseSkill(skillDir string) (*Skill, error) {
 	}
 
 	// Auto-add skill name as a trigger if not already present.
-	if len(triggers) > 0 {
+	{
 		found := false
 		low := strings.ToLower(name)
 		for _, t := range triggers {

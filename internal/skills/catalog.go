@@ -38,7 +38,9 @@ func BuildCatalog(store Store) string {
 }
 
 // MatchTriggers returns skills whose trigger keywords appear in the message.
-// Matching is case-insensitive, word-boundary aware.
+// Matching is case-insensitive. Single-word triggers use word-boundary matching.
+// Multi-word triggers match if ALL words appear in the message (not necessarily adjacent),
+// so "create app" matches "create an app" or "create a todo app".
 func MatchTriggers(store Store, message string) []*Skill {
 	msg := strings.ToLower(message)
 
@@ -49,7 +51,7 @@ func MatchTriggers(store Store, message string) []*Skill {
 			continue
 		}
 		for _, t := range sk.Triggers {
-			if containsWord(msg, strings.ToLower(t)) {
+			if matchTrigger(msg, strings.ToLower(t)) {
 				matched = append(matched, sk)
 				seen[sk.Name] = true
 				break
@@ -57,6 +59,23 @@ func MatchTriggers(store Store, message string) []*Skill {
 		}
 	}
 	return matched
+}
+
+// matchTrigger checks if a trigger matches the message.
+// Single-word triggers use exact word-boundary matching.
+// Multi-word triggers match if ALL words appear in the message.
+func matchTrigger(msg, trigger string) bool {
+	words := strings.Fields(trigger)
+	if len(words) <= 1 {
+		return containsWord(msg, trigger)
+	}
+	// Multi-word: all words must appear (word-boundary aware).
+	for _, w := range words {
+		if !containsWord(msg, w) {
+			return false
+		}
+	}
+	return true
 }
 
 // containsWord checks if needle appears in haystack as a whole word/phrase,

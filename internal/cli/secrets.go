@@ -75,14 +75,16 @@ func SetSecret(baseDir, name, value string) error {
 // Call during upgrade to fix installs that used 0o644.
 func HardenSecrets(baseDir string) {
 	dir := secretsDir(baseDir)
-	os.Chmod(dir, 0o700)
+	os.Chmod(dir, 0o755)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
+	// Secrets must be 0644 so containers running as non-root (uid 1000)
+	// can read bind-mounted files even when the host runs as root.
 	for _, e := range entries {
 		if !e.IsDir() {
-			os.Chmod(filepath.Join(dir, e.Name()), 0o600)
+			os.Chmod(filepath.Join(dir, e.Name()), 0o644)
 		}
 	}
 }
@@ -181,7 +183,7 @@ func ensureOptionalSecrets(baseDir string) {
 		}
 		p := filepath.Join(dir, s.Name)
 		if _, err := os.Stat(p); os.IsNotExist(err) {
-			os.WriteFile(p, []byte(""), 0o600)
+			os.WriteFile(p, []byte(""), 0o644)
 		}
 	}
 }

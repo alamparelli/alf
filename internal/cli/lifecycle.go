@@ -82,6 +82,9 @@ func fixPreStart(dir string) {
 		os.WriteFile(p, []byte("nameserver 8.8.8.8\nnameserver 1.1.1.1\n"), 0o644)
 	}
 
+	// Fix secret permissions (must be 644 for container uid 1000 to read).
+	HardenSecrets(dir)
+
 	// Fix empty secrets: auto-generate if missing or empty.
 	for _, name := range []string{"whisper_shared_secret", "cc_auth_token"} {
 		p := filepath.Join(secretsDir(dir), name)

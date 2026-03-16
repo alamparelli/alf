@@ -7,6 +7,17 @@ triggers: create app, new app, build app, make app, web app, align app, migrate 
 
 # ALF App Framework — Standard Directives
 
+## Before building — clarify scope
+
+If the user's request is vague (e.g. "create a crypto app", "build me a todo app"), do NOT start building immediately. First ask 2-3 targeted questions to understand:
+- **What exactly** does the app do? (core features, not a full spec)
+- **What data** does it need? (external APIs, user input, scheduled feeds?)
+- **Any preferences?** (specific APIs, design details, existing data to import)
+
+Only skip questions if the request is already specific enough to build (e.g. "create a reading list app with title, author, status columns and a form to add books").
+
+---
+
 When creating or modifying a web app in ALF, follow this framework **exactly**. No exceptions.
 
 ---

@@ -2,6 +2,7 @@ package controlcenter
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 )
@@ -70,10 +71,12 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Skills   []string `json:"skills"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("[schedules] POST decode error: %v", err)
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 			return
 		}
 		if req.Name == "" || req.Schedule == "" {
+			log.Printf("[schedules] POST missing fields: name=%q schedule=%q", req.Name, req.Schedule)
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name and schedule are required"})
 			return
 		}
@@ -102,6 +105,7 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		job, err := h.Engine.Create(req.Name, req.Schedule, req.Tier, req.Prompt, req.Command, req.Output, timeout, req.Skills)
 		if err != nil {
+			log.Printf("[schedules] POST create error: %v (name=%q schedule=%q tier=%q)", err, req.Name, req.Schedule, req.Tier)
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}

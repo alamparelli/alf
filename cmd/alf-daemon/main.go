@@ -278,6 +278,10 @@ func main() {
 	// Load skill catalog: system → bundled copy → user (later overrides earlier).
 	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills.d"), filepath.Join(dataDir, "skills"))
 
+	// Inject existing app names as dynamic triggers for app-builder skill.
+	// This lets "update the crypto app" match app-builder automatically.
+	injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
+
 	// Watch config files for changes and auto-reload.
 	// The tiers path function is a closure so the watcher always tracks the live path.
 	go watchConfigFiles(configDir, dataDir, func() string { return tierStore.Path() }, reloadCh)
@@ -888,6 +892,7 @@ func main() {
 				if err := skillStore.Reload(); err != nil {
 					log.Printf("skills reload error: %v", err)
 				} else {
+					injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
 					log.Println("skills reloaded")
 				}
 				if git != nil {
@@ -986,6 +991,7 @@ func main() {
 				if err := skillStore.Reload(); err != nil {
 					log.Printf("skills reload error: %v", err)
 				} else {
+					injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
 					log.Println("skills reloaded")
 				}
 				if git != nil {

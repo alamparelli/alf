@@ -63,6 +63,25 @@ func (s *fileSkillStore) Reload() error {
 	return nil
 }
 
+func (s *fileSkillStore) AddDynamicTriggers(skillName string, triggers []string) {
+	m := s.current.Load()
+	sk, ok := (*m)[skillName]
+	if !ok || len(triggers) == 0 {
+		return
+	}
+	// Deduplicate: only add triggers not already present.
+	existing := make(map[string]bool)
+	for _, t := range sk.Triggers {
+		existing[strings.ToLower(t)] = true
+	}
+	for _, t := range triggers {
+		if t != "" && !existing[strings.ToLower(t)] {
+			sk.Triggers = append(sk.Triggers, t)
+			existing[strings.ToLower(t)] = true
+		}
+	}
+}
+
 // loadDir scans a directory for skill subdirectories containing SKILL.md.
 func loadDir(dir string) map[string]*Skill {
 	out := make(map[string]*Skill)

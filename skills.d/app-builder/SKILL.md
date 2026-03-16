@@ -29,6 +29,8 @@ Ask 2-3 short, targeted questions:
 - "create a reading list with title, author, status, rating columns and a form to add books"
 - "build a crypto portfolio tracker showing holdings, current price from CoinGecko, and P&L"
 
+**When the user references an existing app** (by name or slug), work on that app — don't create a new one. Check `~/data/apps/` for existing app directories.
+
 ---
 
 When creating or modifying a web app in ALF, follow this framework **exactly**. No exceptions.

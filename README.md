@@ -147,7 +147,7 @@ ALF discovers CLI tools and skills at boot. System tools live in `tools.d/` (rea
 
 ALF can coordinate multiple specialized agents for complex tasks. An **orchestrator** (Opus) breaks down requests, delegates sub-tasks to agents (researcher, writer, reviewer...), reviews results, and synthesizes a final answer. Agents work in isolated sessions - no context bleeds between them.
 
-Teams are defined as JSON files in `config.d/agents/`. A bundled "starter" team ships with ALF. Invoke manually via `/orchestrator <task>` or schedule with `--tier orchestrator`.
+Teams are defined as JSON files in `config.d/agents/`. A bundled "starter" team ships with ALF. Invoke by asking ALF to "use agents" or "lance les agents", or schedule with `--tier agent`.
 
 ### Scheduler
 

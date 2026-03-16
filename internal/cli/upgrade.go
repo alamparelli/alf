@@ -55,6 +55,7 @@ func RunUpgrade(currentVersion string) {
 	}
 
 	PrintInfo("Restarting ALF...")
+	fixPreStart(dir)
 	dockerCompose(dir, "up", "-d")
 	PrintCheck("ALF restarted")
 

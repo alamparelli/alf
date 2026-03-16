@@ -515,12 +515,7 @@ func main() {
 			return router.FallbackResult(tiers)
 		}
 		log.Printf("router: classify took %dms (backend=%s)", time.Since(start).Milliseconds(), routerBackend)
-		// Collect team names for guardrail (force agent tier when team is mentioned).
-		var teamNames []string
-		for _, t := range agentTeamsForRouter() {
-			teamNames = append(teamNames, t.Name)
-		}
-		return router.InterpretRaw(result.Text, tiers, message, teamNames...)
+		return router.InterpretRaw(result.Text, tiers, message)
 	}
 
 	// Chat service for mobile app API (shares Claude invocation with Telegram bot).

@@ -156,9 +156,7 @@ func ParseResponse(raw string, tiers *cc.TiersConfig) Result {
 // Includes programmatic guardrails:
 // 1. Read-only → write-capable upgrade if message has write intent.
 // 2. Light tier → standard upgrade if message shows complexity markers.
-// 3. Force agent tier if message explicitly names an agent team.
-// teamNames is optional — pass agent team names for guardrail 3.
-func InterpretRaw(raw string, tiers *cc.TiersConfig, message string, teamNames ...string) Result {
+func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 	valid := ValidTierSet(tiers)
 	result := parseResponse(raw, valid)
 
@@ -181,13 +179,6 @@ func InterpretRaw(raw string, tiers *cc.TiersConfig, message string, teamNames .
 				result.Reason += " [upgraded: complexity]"
 				return result
 			}
-		}
-		// Guardrail 3: force agent tier if message explicitly names a team.
-		if result.Tier != "agent" && hasOrchestrator(tiers) && mentionsTeam(message, teamNames) {
-			log.Printf("router: %s → %s upgraded to agent (team name mentioned)", truncate(message, 60), result.Tier)
-			result.Tier = "agent"
-			result.Reason += " [upgraded: team mentioned]"
-			return result
 		}
 		log.Printf("router: %s → %s (%s)", truncate(message, 60), result.Tier, result.Reason)
 		return result
@@ -565,17 +556,6 @@ func nextTierAbove(name string, tiers *cc.TiersConfig) string {
 		}
 	}
 	return best
-}
-
-// mentionsTeam returns true if the message contains an agent team name (case-insensitive).
-func mentionsTeam(message string, teamNames []string) bool {
-	lower := strings.ToLower(message)
-	for _, name := range teamNames {
-		if name != "" && strings.Contains(lower, strings.ToLower(name)) {
-			return true
-		}
-	}
-	return false
 }
 
 func truncate(s string, n int) string {

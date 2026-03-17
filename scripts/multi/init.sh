@@ -22,10 +22,51 @@ source "$SCRIPT_DIR/lib.sh"
 info "Initializing multi-tenant ALF at: ${BOLD}$ALF_MULTI_DIR${RESET}"
 echo
 
+# ── Configure Docker userns-remap ────────────────────────────────────
+# Maps container root (uid 0) → unprivileged host uid, reducing container
+# escape blast radius. Must be done before any containers are started.
+configure_userns_remap() {
+    local cfg=/etc/docker/daemon.json
+
+    # Already active?
+    if docker info 2>/dev/null | grep -q "userns"; then
+        info "userns-remap already active — skipping"
+        return 0
+    fi
+
+    info "Configuring Docker userns-remap (container root isolation)..."
+
+    # Ensure dockremap user exists with subuid/subgid
+    if ! id dockremap &>/dev/null; then
+        useradd -r -s /bin/false dockremap 2>/dev/null || true
+    fi
+    if ! grep -q "^dockremap:" /etc/subuid 2>/dev/null; then
+        echo "dockremap:100000:65536" >> /etc/subuid
+    fi
+    if ! grep -q "^dockremap:" /etc/subgid 2>/dev/null; then
+        echo "dockremap:100000:65536" >> /etc/subgid
+    fi
+
+    # Merge into daemon.json
+    if [[ -f "$cfg" ]]; then
+        local tmp; tmp=$(mktemp)
+        jq '. + {"userns-remap": "default"}' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+    else
+        echo '{"userns-remap": "default"}' > "$cfg"
+    fi
+
+    systemctl restart docker
+    sleep 3
+    info "Docker restarted with userns-remap"
+}
+
+configure_userns_remap
+
 # Create directory structure
 ensure_registry
 mkdir -p "$ALF_MULTI_DIR/letsencrypt"
 mkdir -p "$SHARED_DIR/models"
+chown -R 1000:1000 "$SHARED_DIR/models"
 
 # Generate shared whisper secret
 ensure_shared_whisper_secret

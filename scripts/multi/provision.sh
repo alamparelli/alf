@@ -62,6 +62,17 @@ echo
 info "Pulling images..."
 docker compose -f "$COMPOSE_FILE" pull "alf-$USER" whisper 2>/dev/null || true
 
+# Pin image to digest for reproducibility (replaces :latest with @sha256:...)
+PULLED_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null || true)
+if [[ -n "$PULLED_DIGEST" ]]; then
+    tmp=$(mktemp)
+    jq --arg u "$USER" --arg img "$PULLED_DIGEST" \
+        'map(if .user == $u then .image = $img else . end)' \
+        "$TENANTS_FILE" > "$tmp" && mv "$tmp" "$TENANTS_FILE"
+    generate_compose
+    info "Pinned image to digest: ${PULLED_DIGEST##*@}"
+fi
+
 info "Starting alf-$USER..."
 docker compose -f "$COMPOSE_FILE" up -d "alf-$USER"
 

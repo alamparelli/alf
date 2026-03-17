@@ -573,9 +573,6 @@ func (e *Engine) logScheduleRun(rec RunRecord, output string) {
 		fields["iterations"] = rec.Iterations
 	}
 	if output != "" {
-		if len(output) > 500 {
-			output = output[:500]
-		}
 		fields["output"] = output
 	}
 	fields["output_len"] = rec.OutputLen

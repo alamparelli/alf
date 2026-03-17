@@ -107,10 +107,11 @@ services:
       - FOWNER
 
   whisper:
-    image: ghcr.io/alamparelli/whisper-service:latest
+    image: {{.WhisperImage}}
     container_name: alf-whisper
     restart: unless-stopped
     networks:
+      default:
       whisper-internal:
         ipv4_address: 10.99.0.10
     security_opt:

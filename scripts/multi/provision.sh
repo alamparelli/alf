@@ -73,6 +73,9 @@ if [[ -n "$PULLED_DIGEST" ]]; then
     info "Pinned image to digest: ${PULLED_DIGEST##*@}"
 fi
 
+# Fix any Docker directory placeholders before starting containers
+preflight_fix_placeholders
+
 info "Starting alf-$USER..."
 docker compose -f "$COMPOSE_FILE" up -d "alf-$USER"
 

@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 ensure_registry
 generate_compose
+preflight_fix_placeholders
 
 echo
 info "To apply changes:"

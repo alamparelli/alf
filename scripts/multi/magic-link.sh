@@ -25,11 +25,24 @@ fi
 
 domain=$(get_tenant_field "$USER" "domain")
 
-# Call the daemon's magic-link endpoint inside the container
-link=$(docker exec "alf-$USER" \
-    curl -sf -X POST http://localhost:8080/api/magic-link 2>/dev/null) || {
+# Read the tenant's auth token
+token_file="$TENANTS_DIR/$USER/secrets/cc_auth_token"
+if [[ ! -s "$token_file" ]]; then
+    fatal "No cc_auth_token found for $USER"
+fi
+token=$(cat "$token_file")
+
+# Wait for daemon to be ready (up to 30s)
+for i in $(seq 1 15); do
+    link=$(docker exec "alf-$USER" \
+        curl -sf -X POST http://localhost:8080/api/magic-link \
+        -H "Authorization: Bearer $token" 2>/dev/null) && break
+    sleep 2
+done
+
+if [[ -z "$link" ]]; then
     fatal "Failed to generate magic link. Is alf-$USER running?"
-}
+fi
 
 echo
 info "Magic link for ${BOLD}$USER${RESET}:"

@@ -102,8 +102,24 @@ scaffold_tenant() {
         chmod 644 "$dir/secrets/whisper_shared_secret"
     fi
 
-    # Fix ownership (containers run as uid 1000)
-    chown -R 1000:1000 "$dir/data" "$dir/cache" "$dir/vault-data" "$dir/config.d" "$dir/skills.d" "$dir/local" 2>/dev/null || true
+    # Fix ownership — use remapped host UID if userns-remap is active
+    local host_uid
+    host_uid=$(host_uid_for 1000)
+    chown -R "$host_uid:$host_uid" "$dir/data" "$dir/cache" "$dir/vault-data" "$dir/config.d" "$dir/skills.d" "$dir/local" 2>/dev/null || true
+}
+
+# ── userns-remap UID resolution ──────────────────────────────────────
+# Returns the host UID that corresponds to a given container UID,
+# accounting for Docker userns-remap (if active).
+host_uid_for() {
+    local container_uid="${1:-1000}"
+    if docker info 2>/dev/null | grep -q "userns"; then
+        local offset
+        offset=$(awk -F: '/^dockremap/{print $2}' /etc/subuid 2>/dev/null || echo 0)
+        echo $((offset + container_uid))
+    else
+        echo "$container_uid"
+    fi
 }
 
 # ── Shared infrastructure ────────────────────────────────────────────
@@ -115,6 +131,9 @@ ensure_shared_whisper_secret() {
         chmod 644 "$path"
         info "Generated shared whisper secret"
     fi
+    # Ensure models dir exists and is writable by whisper container
+    mkdir -p "$SHARED_DIR/models"
+    chown -R "$(host_uid_for 1000):$(host_uid_for 1000)" "$SHARED_DIR/models"
 }
 
 # ── Compose generation ───────────────────────────────────────────────
@@ -167,6 +186,7 @@ services:
     container_name: alf-whisper
     restart: unless-stopped
     networks:
+      default:
       whisper-internal:
         ipv4_address: 10.99.0.10
     security_opt:

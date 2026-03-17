@@ -45,7 +45,7 @@ if [ -n "$PASSWORD" ]; then
     echo "==> Generating htpasswd-s..."
     HTPASSWD=$(docker run --rm httpd:alpine htpasswd -nb s "$PASSWORD" 2>/dev/null || htpasswd -nb s "$PASSWORD")
     echo "$HTPASSWD" | $SSH "$REMOTE_HOST" "cat > $REMOTE_ALPHA_DIR/htpasswd-s"
-    $SSH "$REMOTE_HOST" "chmod 600 $REMOTE_ALPHA_DIR/htpasswd-s"
+    $SSH "$REMOTE_HOST" "chmod 644 $REMOTE_ALPHA_DIR/htpasswd-s"
 elif ! $SSH "$REMOTE_HOST" "test -f $REMOTE_ALPHA_DIR/htpasswd-s"; then
     echo "WARNING: No htpasswd-s found on remote. Use --password to set one."
 fi

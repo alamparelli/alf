@@ -18,7 +18,7 @@ mkdir -p "$DIST_DIR"
 BUNDLE=$(mktemp)
 tar -czf "$BUNDLE" -C "$MULTI_DIR" \
     lib.sh init.sh provision.sh teardown.sh \
-    list.sh magic-link.sh secret.sh generate-compose.sh
+    list.sh magic-link.sh secret.sh generate-compose.sh uninstall.sh apply.sh
 
 BUNDLE_B64=$(base64 < "$BUNDLE")
 rm -f "$BUNDLE"

@@ -66,6 +66,7 @@ configure_userns_remap
 ensure_registry
 mkdir -p "$ALF_MULTI_DIR/letsencrypt"
 mkdir -p "$SHARED_DIR/models"
+# whisper runs as uid 1000 (user 'whisper') with userns_mode: host
 chown -R 1000:1000 "$SHARED_DIR/models"
 
 # Generate shared whisper secret

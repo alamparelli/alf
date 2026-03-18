@@ -82,6 +82,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.alf-cc.rule=Host(\`cc.lamparelli.eu\`)"
+      - "traefik.http.routers.alf-cc.priority=200"
       - "traefik.http.routers.alf-cc.entrypoints=websecure"
       - "traefik.http.routers.alf-cc.tls.certresolver=myresolver"
       - "traefik.http.services.alf-cc.loadbalancer.server.port=8080"

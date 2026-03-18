@@ -40,6 +40,8 @@ func (h *SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleBackendTest(w, r)
 	case sub == "telegram/validate" && r.Method == http.MethodPost:
 		h.handleTelegramValidate(w, r)
+	case sub == "telegram/chatid" && r.Method == http.MethodPost:
+		h.handleTelegramChatID(w, r)
 	case sub == "claude/check" && r.Method == http.MethodGet:
 		h.handleClaudeCheck(w, r)
 	case sub == "ollama/models" && r.Method == http.MethodGet:
@@ -488,6 +490,68 @@ func (h *SetupHandler) findPreset(id string) (*TierPreset, error) {
 		}
 	}
 	return nil, fmt.Errorf("preset %q not found", id)
+}
+
+// handleTelegramChatID calls Telegram getUpdates to retrieve the chat ID of the
+// most recent message sent to the bot. The user should send a message to the bot
+// before clicking "Get Chat ID".
+func (h *SetupHandler) handleTelegramChatID(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BotToken string `json:"bot_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, jsonErr("invalid JSON"), http.StatusBadRequest)
+		return
+	}
+	req.BotToken = strings.TrimSpace(req.BotToken)
+	if req.BotToken == "" {
+		http.Error(w, jsonErr("bot_token is required"), http.StatusBadRequest)
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?limit=5&offset=-5", req.BotToken))
+	if err != nil {
+		respondJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "failed to reach Telegram API"})
+		return
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		OK     bool `json:"ok"`
+		Result []struct {
+			Message struct {
+				Chat struct {
+					ID        int64  `json:"id"`
+					FirstName string `json:"first_name"`
+					Username  string `json:"username"`
+				} `json:"chat"`
+			} `json:"message"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || !result.OK {
+		respondJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "invalid response from Telegram"})
+		return
+	}
+
+	if len(result.Result) == 0 {
+		respondJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "No messages found. Send a message to the bot first, then retry."})
+		return
+	}
+
+	// Return the most recent chat ID.
+	last := result.Result[len(result.Result)-1]
+	chatID := last.Message.Chat.ID
+	name := last.Message.Chat.FirstName
+	if name == "" {
+		name = last.Message.Chat.Username
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"chat_id": fmt.Sprintf("%d", chatID),
+		"name":    name,
+	})
 }
 
 // loadPresetsFromDir reads all *.json files from dir and groups them by backend.

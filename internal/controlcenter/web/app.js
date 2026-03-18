@@ -4989,6 +4989,8 @@ function showSetupWizard(status) {
     } else {
       nextBtn.textContent = 'Next';
     }
+    // Reset tiers when navigating backward (backends may have changed)
+    if (current < 2) tiersRendered = false;
     // Init step content
     if (current === 0) renderBackend();
     if (current === 1) renderTelegram();
@@ -5203,8 +5205,15 @@ function showSetupWizard(status) {
       '<div class="setup-tg-fields" id="setupTgFields" style="display:none">' +
         '<div class="form-group"><label>Bot Token</label><input type="text" class="input" id="setupTgToken" placeholder="123456789:ABCdef..."></div>' +
         '<div class="test-row"><button class="btn btn-sm" id="setupTgValidate">Validate</button><span class="setup-tg-result" id="setupTgResult"></span></div>' +
-        '<div class="form-group" style="margin-top:10px"><label>Chat ID</label><input type="text" class="input" id="setupTgChatId" placeholder="Your chat ID"></div>' +
-        '<small class="form-hint">Create a bot via @BotFather. Get your chat ID by sending /start to the bot.</small>' +
+        '<div id="setupTgBotLink" style="display:none;margin:8px 0"></div>' +
+        '<div class="form-group" style="margin-top:10px"><label>Chat ID</label>' +
+          '<div style="display:flex;gap:8px;align-items:center">' +
+            '<input type="text" class="input" id="setupTgChatId" placeholder="Your chat ID" style="flex:1">' +
+            '<button class="btn btn-sm" id="setupTgGetChatId" style="white-space:nowrap">Get Chat ID</button>' +
+          '</div>' +
+        '</div>' +
+        '<div id="setupTgChatIdResult" style="display:none;margin:-4px 0 8px"></div>' +
+        '<small class="form-hint">Create a bot via <strong>@BotFather</strong>. After validating, open the bot link above, send a message, then click <em>Get Chat ID</em>.</small>' +
       '</div>';
 
     const toggle = document.getElementById('setupTgEnable');
@@ -5217,19 +5226,57 @@ function showSetupWizard(status) {
     document.getElementById('setupTgValidate').addEventListener('click', async () => {
       const token = document.getElementById('setupTgToken').value.trim();
       const result = document.getElementById('setupTgResult');
+      const botLinkEl = document.getElementById('setupTgBotLink');
       if (!token) { result.textContent = 'Enter a token'; result.className = 'setup-tg-result fail'; return; }
       result.textContent = 'Validating...';
       result.className = 'setup-tg-result';
+      botLinkEl.style.display = 'none';
       try {
         const res = await api('/api/setup/telegram/validate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ bot_token: token })
         });
-        result.textContent = res.ok ? 'Bot: @' + res.bot_name : (res.error || 'Invalid');
-        result.className = 'setup-tg-result ' + (res.ok ? 'ok' : 'fail');
+        if (res.ok) {
+          result.textContent = 'Bot: @' + res.bot_name;
+          result.className = 'setup-tg-result ok';
+          botLinkEl.innerHTML = '<a href="https://t.me/' + res.bot_name + '" target="_blank" style="color:var(--accent);font-size:0.85rem">Open @' + res.bot_name + ' in Telegram</a>' +
+            '<span style="font-size:0.8rem;color:var(--text-dim);margin-left:8px">— send a message, then click Get Chat ID</span>';
+          botLinkEl.style.display = '';
+        } else {
+          result.textContent = res.error || 'Invalid';
+          result.className = 'setup-tg-result fail';
+        }
       } catch (err) {
         result.textContent = err.error || 'Validation failed';
         result.className = 'setup-tg-result fail';
+      }
+    });
+
+    document.getElementById('setupTgGetChatId').addEventListener('click', async () => {
+      const token = document.getElementById('setupTgToken').value.trim();
+      const chatIdInput = document.getElementById('setupTgChatId');
+      const resultEl = document.getElementById('setupTgChatIdResult');
+      if (!token) { resultEl.textContent = 'Validate the bot token first'; resultEl.className = 'setup-tg-result fail'; resultEl.style.display = ''; return; }
+      resultEl.textContent = 'Checking for messages...';
+      resultEl.className = 'setup-tg-result';
+      resultEl.style.display = '';
+      try {
+        const res = await api('/api/setup/telegram/chatid', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bot_token: token })
+        });
+        if (res.ok) {
+          chatIdInput.value = res.chat_id;
+          chatIdInput.dispatchEvent(new Event('input', { bubbles: true }));
+          resultEl.textContent = 'Found: ' + (res.name || res.chat_id);
+          resultEl.className = 'setup-tg-result ok';
+        } else {
+          resultEl.textContent = res.error || 'No messages found';
+          resultEl.className = 'setup-tg-result fail';
+        }
+      } catch (err) {
+        resultEl.textContent = err.error || 'Failed to retrieve chat ID';
+        resultEl.className = 'setup-tg-result fail';
       }
     });
 
@@ -5256,13 +5303,19 @@ function showSetupWizard(status) {
 
     api('/api/setup/presets').then(data => {
       const presets = data.presets || {};
+      // Filter presets to only show those matching selected backends.
+      const selectedBackends = Object.keys(state.backends);
       const all = [];
-      Object.values(presets).forEach(arr => arr.forEach(p => all.push(p)));
+      Object.entries(presets).forEach(([backend, arr]) => {
+        arr.forEach(p => {
+          if (selectedBackends.includes(backend)) all.push(p);
+        });
+      });
 
       let html = '';
       if (all.length === 0) {
         html = '<div class="setup-preset-option selected" data-preset="">' +
-          '<h4>Keep current tiers</h4><p>No presets available. Your current tier configuration will be preserved.</p></div>';
+          '<h4>Keep current tiers</h4><p>No presets available for your selected backends. Your current tier configuration will be preserved.</p></div>';
         state.presetId = '';
       } else {
         all.forEach((p, i) => {
@@ -5309,14 +5362,20 @@ function showSetupWizard(status) {
     html += '</dl>';
     el.innerHTML = html;
 
-    // Claude CLI auth warning
+    // Claude CLI: show auth status + terminal link (only if selected)
     if (backendNames.includes('claude')) {
       api('/api/setup/claude/check').then(r => {
-        if (!r.authenticated) {
+        if (r.authenticated) {
+          el.insertAdjacentHTML('beforeend',
+            '<div class="setup-apply-info">' +
+            '<strong>Claude CLI</strong> — authenticated. ' +
+            'Use the <a href="#" onclick="event.preventDefault();navigateTo(\'terminal\');" style="color:var(--accent)">Terminal</a> tab to interact with Claude directly.' +
+            '</div>');
+        } else {
           el.insertAdjacentHTML('beforeend',
             '<div class="setup-apply-warning">' +
             '<strong>Claude CLI not authenticated</strong><br>' +
-            'After setup, run <code>alf login</code> on the host server to connect your Anthropic account.' +
+            'After setup, open the <a href="#" onclick="event.preventDefault();navigateTo(\'terminal\');" style="color:var(--accent)">Terminal</a> tab and run <code>claude login</code> to connect your Anthropic account.' +
             '</div>');
         }
       }).catch(() => {});
@@ -5326,14 +5385,36 @@ function showSetupWizard(status) {
     api('/api/vault/status').then(vs => {
       if (vs.status === 'locked' || vs.status === 'not_initialized') {
         const isNew = vs.status === 'not_initialized' || vs.first_time;
-        el.insertAdjacentHTML('beforeend',
-          '<div class="setup-vault-inline">' +
+        let vaultHTML = '<div class="setup-vault-inline">' +
           '<label>Vault Password' + (isNew ? ' (new)' : '') + '</label>' +
           '<input type="password" class="input" id="setupVaultPw" placeholder="' +
-            (isNew ? 'Choose a password (min. 8 characters)' : 'Enter your vault password') + '">' +
-          '<p class="form-hint">' +
+            (isNew ? 'Choose a password (min. 8 characters)' : 'Enter your vault password') + '">';
+        if (isNew) {
+          vaultHTML += '<input type="password" class="input" id="setupVaultPwConfirm" placeholder="Confirm password" style="margin-top:6px">' +
+            '<p class="form-hint" id="setupVaultPwMismatch" style="color:var(--danger);display:none">Passwords do not match</p>';
+        }
+        vaultHTML += '<p class="form-hint">' +
             (isNew ? 'This creates your encrypted vault for API keys, tokens, and secrets.' :
-                     'Unlock your vault to store secrets.') + '</p></div>');
+                     'Unlock your vault to store secrets.') + '</p></div>';
+        el.insertAdjacentHTML('beforeend', vaultHTML);
+
+        // Live validation for password confirmation
+        if (isNew) {
+          const pw = () => document.getElementById('setupVaultPw');
+          const confirm = () => document.getElementById('setupVaultPwConfirm');
+          const mismatch = () => document.getElementById('setupVaultPwMismatch');
+          const check = () => {
+            const c = confirm(), p = pw(), m = mismatch();
+            if (c && p && m) {
+              m.style.display = (c.value && c.value !== p.value) ? '' : 'none';
+            }
+          };
+          setTimeout(() => {
+            const c = confirm(), p = pw();
+            if (c) c.addEventListener('input', check);
+            if (p) p.addEventListener('input', check);
+          }, 50);
+        }
       }
     }).catch(() => {});
   }
@@ -5367,7 +5448,22 @@ function showSetupWizard(status) {
 
     // Vault password
     const vpEl = document.getElementById('setupVaultPw');
-    if (vpEl && vpEl.value.trim()) body.vault_password = vpEl.value.trim();
+    const vpConfirmEl = document.getElementById('setupVaultPwConfirm');
+    if (vpEl && vpEl.value.trim()) {
+      if (vpConfirmEl && vpConfirmEl.value.trim() !== vpEl.value.trim()) {
+        nextBtn.disabled = false;
+        nextBtn.textContent = 'Apply & Start';
+        let errEl = modal.querySelector('.setup-apply-error');
+        if (!errEl) {
+          errEl = document.createElement('div');
+          errEl.className = 'setup-apply-error';
+          nextBtn.parentElement.parentElement.insertBefore(errEl, nextBtn.parentElement);
+        }
+        errEl.textContent = 'Vault passwords do not match';
+        return;
+      }
+      body.vault_password = vpEl.value.trim();
+    }
 
     try {
       const res = await api('/api/setup/apply', {

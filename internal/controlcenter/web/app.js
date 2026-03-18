@@ -6489,9 +6489,9 @@ function vaultShowServiceModal(edit) {
   document.getElementById('vaultSvcOAuthClientSecret').value = '';
   document.getElementById('vaultSvcOAuthTokenUrl').value = '';
   document.getElementById('vaultSvcOAuthRefreshToken').value = '';
-  document.getElementById('vaultSvcOAuthScopes').value = '';
+  document.getElementById('vaultSvcOAuthScopes').value = edit && edit.scopes ? edit.scopes.join(', ') : '';
   document.getElementById('vaultSvcSAFileRef').value = '';
-  document.getElementById('vaultSvcSAScopes').value = '';
+  document.getElementById('vaultSvcSAScopes').value = edit && edit.scopes ? edit.scopes.join(', ') : '';
   document.getElementById('vaultSvcSATokenUrl').value = '';
   document.getElementById('vaultSvcTLSSkip').checked = edit ? !!edit.tls_skip_verify : false;
   if (edit) {

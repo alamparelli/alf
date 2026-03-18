@@ -52,12 +52,17 @@ if [ "$LOCAL_BUILD" = true ]; then
   WHISPER_REGISTRY="ghcr.io/alamparelli/whisper-service"
 
   echo ""
-  echo "Vendoring vault-proxy source..."
-  test -d /Volumes/ALF_NFS/repos/vault-proxy || { echo "ERROR: NFS share not mounted (vault-proxy not found)"; exit 1; }
+  # Vendor vault-proxy — prefer local dev, fallback to NFS
+  VAULT_PROXY_SRC="${VAULT_PROXY_SRC:-$HOME/Dev/Projects/vault-proxy}"
+  if [ ! -d "${VAULT_PROXY_SRC}" ]; then
+    VAULT_PROXY_SRC="/Volumes/ALF_NFS/repos/vault-proxy"
+  fi
+  test -d "${VAULT_PROXY_SRC}" || { echo "ERROR: vault-proxy not found (tried ~/Dev/Projects and NFS)"; exit 1; }
+  echo "Vendoring vault-proxy from ${VAULT_PROXY_SRC}..."
   rm -rf third_party/vault-proxy
   mkdir -p third_party/vault-proxy
   rsync -a --exclude .git --exclude vault-data --exclude '/vault-server' --exclude '/vault-cli' \
-    /Volumes/ALF_NFS/repos/vault-proxy/ third_party/vault-proxy/
+    "${VAULT_PROXY_SRC}/" third_party/vault-proxy/
 
   echo "Building Docker image locally (linux/amd64 + linux/arm64)..."
   # Ensure a multi-platform builder exists.

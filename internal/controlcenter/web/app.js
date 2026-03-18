@@ -65,7 +65,9 @@ function applyPalette(palette) {
 }
 
 (function initPalette() {
-  const saved = localStorage.getItem('alf-palette') ?? 'sage';
+  let saved = localStorage.getItem('alf-palette') ?? 'sage';
+  // Migrate removed catppuccin palette to studio
+  if (saved === 'catppuccin') { saved = 'studio'; localStorage.setItem('alf-palette', saved); }
   applyPalette(saved);
   document.querySelectorAll('.theme-swatch').forEach(btn => {
     if (btn.dataset.palette === saved) btn.classList.add('active');
@@ -74,6 +76,46 @@ function applyPalette(palette) {
       btn.classList.add('active');
       localStorage.setItem('alf-palette', btn.dataset.palette);
       applyPalette(btn.dataset.palette);
+    });
+  });
+})();
+
+// --- Collapsible nav sections + favorites (persistent) ---
+(function initNavSections() {
+  const stored = JSON.parse(localStorage.getItem('alf-nav-collapsed') || '{}');
+  const favs = JSON.parse(localStorage.getItem('alf-nav-favs') || '[]');
+
+  // Add pin buttons to system nav items and restore favorites
+  document.querySelectorAll('#navGrid .nav-item').forEach(item => {
+    const view = item.dataset.view;
+    if (favs.includes(view)) item.classList.add('nav-fav');
+    const pin = document.createElement('button');
+    pin.className = 'nav-fav-btn';
+    pin.title = 'Pin to favorites';
+    pin.innerHTML = '<i data-lucide="pin"></i>';
+    pin.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      item.classList.toggle('nav-fav');
+      const current = JSON.parse(localStorage.getItem('alf-nav-favs') || '[]');
+      const v = item.dataset.view;
+      const updated = item.classList.contains('nav-fav')
+        ? [...current.filter(f => f !== v), v]
+        : current.filter(f => f !== v);
+      localStorage.setItem('alf-nav-favs', JSON.stringify(updated));
+    });
+    item.appendChild(pin);
+  });
+
+  document.querySelectorAll('.nav-section-toggle').forEach(btn => {
+    const key = btn.dataset.section;
+    const section = btn.closest('.nav-section');
+    if (stored[key]) section.classList.add('collapsed');
+    btn.addEventListener('click', () => {
+      section.classList.toggle('collapsed');
+      const state = JSON.parse(localStorage.getItem('alf-nav-collapsed') || '{}');
+      state[key] = section.classList.contains('collapsed');
+      localStorage.setItem('alf-nav-collapsed', JSON.stringify(state));
     });
   });
 })();
@@ -131,7 +173,7 @@ function navigateTo(view) {
   logsStopAutoRefresh();
   tasksStopAutoRefresh();
   fwStopAutoRefresh();
-  document.querySelectorAll('#navGrid .nav-icon, #navAppsSection .nav-item').forEach(el => {
+  document.querySelectorAll('#navGrid .nav-item, #navAppsSection .nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === navView);
   });
   if (typeof syncBottomNav === 'function') syncBottomNav(navView);
@@ -213,7 +255,7 @@ function navigateTo(view) {
 }
 
 // Bind system nav icons
-document.querySelectorAll('#navGrid .nav-icon').forEach(el => {
+document.querySelectorAll('#navGrid .nav-item').forEach(el => {
   el.addEventListener('click', () => navigateTo(el.dataset.view));
 });
 
@@ -239,7 +281,7 @@ function syncBottomNav(view) {
   });
   // Sync chat badge.
   const chatBottomNav = document.querySelector('#bottomNav .bottom-nav-item[data-view="chat"]');
-  const chatSideNav = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
+  const chatSideNav = document.querySelector('#navGrid .nav-item[data-view="chat"]');
   if (chatBottomNav && chatSideNav) {
     chatBottomNav.classList.toggle('has-badge', chatSideNav.classList.contains('has-badge'));
   }
@@ -1400,18 +1442,18 @@ teachSubmit.addEventListener('click', () => {
 
 // --- Chat badge (unread indicator) ---
 function chatIsChatActive() {
-  const navEl = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
+  const navEl = document.querySelector('#navGrid .nav-item[data-view="chat"]');
   return navEl && navEl.classList.contains('active');
 }
 function chatShowBadge() {
   if (chatIsChatActive()) return;
-  const navEl = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
+  const navEl = document.querySelector('#navGrid .nav-item[data-view="chat"]');
   if (navEl) navEl.classList.add('has-badge');
   const bottomEl = document.querySelector('#bottomNav .bottom-nav-item[data-view="chat"]');
   if (bottomEl) bottomEl.classList.add('has-badge');
 }
 function chatClearBadge() {
-  const navEl = document.querySelector('#navGrid .nav-icon[data-view="chat"]');
+  const navEl = document.querySelector('#navGrid .nav-item[data-view="chat"]');
   if (navEl) navEl.classList.remove('has-badge');
   const bottomEl = document.querySelector('#bottomNav .bottom-nav-item[data-view="chat"]');
   if (bottomEl) bottomEl.classList.remove('has-badge');

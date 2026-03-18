@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALF OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Sora:wght@400;500;600&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #171717;
+    --text: #e5e5e5;
+    --text-muted: #737373;
+    --accent: #22c55e;
+    --border: #262626;
+    --radius: 8px;
+    --font-heading: 'Sora', sans-serif;
+    --font-body: 'Work Sans', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 14px;
+    overflow: hidden;
+  }
+
+  .app {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ── Left Panel: Chat ── */
+  .panel-left {
+    width: 50%;
+    min-width: 320px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .chat-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .chat-header-left h1 {
+    font-family: var(--font-heading);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .model-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--surface);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  .chat-header-right {
+    display: flex;
+    gap: 4px;
+  }
+
+  .icon-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, background 0.15s;
+  }
+  .icon-btn:hover {
+    color: var(--text);
+    background: var(--surface);
+  }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .chat-messages::-webkit-scrollbar { width: 4px; }
+  .chat-messages::-webkit-scrollbar-track { background: transparent; }
+  .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .message {
+    display: flex;
+    gap: 10px;
+    max-width: 85%;
+    line-height: 1.7;
+  }
+  .message.user { align-self: flex-end; flex-direction: row-reverse; }
+  .message.alf { align-self: flex-start; }
+
+  .message-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-heading);
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .message.alf .message-avatar { background: var(--accent); color: #0f0f0f; }
+  .message.user .message-avatar { background: #3b82f6; color: #fff; }
+
+  .message-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .message-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .message.user .message-name { text-align: right; }
+
+  .message-text {
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .message.alf .message-text { background: var(--surface); color: var(--text); }
+  .message.user .message-text { background: #1a2332; color: var(--text); }
+
+  .message-text code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: rgba(255,255,255,0.06);
+    padding: 2px 5px;
+    border-radius: 3px;
+  }
+
+  .chat-input-area {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .chat-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px 4px 4px 14px;
+    transition: border-color 0.15s;
+  }
+  .chat-input-wrap:focus-within { border-color: var(--accent); }
+
+  .chat-input-wrap input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 14px;
+  }
+  .chat-input-wrap input::placeholder { color: var(--text-muted); }
+
+  .send-btn {
+    background: var(--accent);
+    border: none;
+    color: #0f0f0f;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.15s;
+  }
+  .send-btn:hover { opacity: 0.85; }
+
+  /* ── Right Panel ── */
+  .panel-right {
+    width: 50%;
+    min-width: 320px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+  }
+
+  .tab-bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+  .tab-bar::-webkit-scrollbar { display: none; }
+
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 14px 14px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .tab-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+  }
+  .tab-content::-webkit-scrollbar { width: 4px; }
+  .tab-content::-webkit-scrollbar-track { background: transparent; }
+  .tab-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  /* ── Home Tab ── */
+  .section-title {
+    font-family: var(--font-heading);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 12px;
+  }
+  .section-title:not(:first-child) { margin-top: 28px; }
+
+  .kv-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .kv-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-radius: 6px;
+  }
+
+  .kv-key {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .kv-value {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .kv-value.online { color: var(--accent); }
+
+  .activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .activity-item {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 0;
+  }
+
+  .activity-time {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    width: 48px;
+  }
+
+  .activity-text {
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.5;
+  }
+
+  .action-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .action-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    text-decoration: none;
+  }
+  .action-link:hover { background: var(--surface); }
+  .action-link .arrow { color: var(--text-muted); font-size: 14px; }
+
+  /* ── Placeholder tabs ── */
+  .placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    color: var(--text-muted);
+    gap: 8px;
+  }
+  .placeholder-title {
+    font-family: var(--font-heading);
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .placeholder-sub {
+    font-size: 13px;
+  }
+
+  /* ── Terminal tab ── */
+  .terminal-view {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.8;
+    color: var(--text-muted);
+  }
+  .terminal-view .prompt { color: var(--accent); }
+  .terminal-view .output { color: var(--text); opacity: 0.7; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Left Panel: Chat -->
+  <div class="panel-left">
+    <div class="chat-header">
+      <div class="chat-header-left">
+        <h1>ALF</h1>
+        <span class="status-dot"></span>
+        <span class="model-tag">sonnet</span>
+      </div>
+      <div class="chat-header-right">
+        <button class="icon-btn" title="New chat"><i data-lucide="plus" style="width:16px;height:16px"></i></button>
+        <button class="icon-btn" title="Settings"><i data-lucide="settings" style="width:16px;height:16px"></i></button>
+      </div>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+      <div class="message alf">
+        <div class="message-avatar">A</div>
+        <div class="message-body">
+          <span class="message-name">ALF</span>
+          <div class="message-text">Hey. I've finished the deployment analysis you asked for. The staging environment is clean — no drift detected. Want me to push to prod?</div>
+        </div>
+      </div>
+      <div class="message user">
+        <div class="message-avatar">Y</div>
+        <div class="message-body">
+          <span class="message-name">You</span>
+          <div class="message-text">Yes, go ahead. Also check the logs for any 5xx errors in the last hour.</div>
+        </div>
+      </div>
+      <div class="message alf">
+        <div class="message-avatar">A</div>
+        <div class="message-body">
+          <span class="message-name">ALF</span>
+          <div class="message-text">Done. Production deploy completed in 34s. Log scan found 2 errors — both <code>502 Bad Gateway</code> from the edge proxy at 14:12 and 14:17. Looks like a transient upstream timeout, already recovered. Nothing actionable.</div>
+        </div>
+      </div>
+      <div class="message user">
+        <div class="message-avatar">Y</div>
+        <div class="message-body">
+          <span class="message-name">You</span>
+          <div class="message-text">Good. Schedule a disk usage report for tomorrow morning.</div>
+        </div>
+      </div>
+      <div class="message alf">
+        <div class="message-avatar">A</div>
+        <div class="message-body">
+          <span class="message-name">ALF</span>
+          <div class="message-text">Scheduled. I'll send the disk usage report at 08:00 via chat. Anything else?</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="chat-input-wrap">
+        <input type="text" id="chatInput" placeholder="Message ALF..." autocomplete="off">
+        <button class="send-btn" id="sendBtn"><i data-lucide="arrow-up" style="width:16px;height:16px"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="panel-right">
+    <div class="tab-bar" id="tabBar">
+      <button class="tab-btn active" data-tab="home">Home</button>
+      <button class="tab-btn" data-tab="tasks">Tasks</button>
+      <button class="tab-btn" data-tab="skills">Skills</button>
+      <button class="tab-btn" data-tab="vault">Vault</button>
+      <button class="tab-btn" data-tab="tiers">Tiers</button>
+      <button class="tab-btn" data-tab="files">Files</button>
+      <button class="tab-btn" data-tab="logs">Logs</button>
+      <button class="tab-btn" data-tab="terminal">Terminal</button>
+    </div>
+
+    <div class="tab-content">
+
+      <!-- Home -->
+      <div class="tab-pane active" id="tab-home">
+        <div class="section-title">Status</div>
+        <div class="kv-list">
+          <div class="kv-row">
+            <span class="kv-key">Status</span>
+            <span class="kv-value online">Online</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">Model</span>
+            <span class="kv-value">claude-sonnet</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">Tasks</span>
+            <span class="kv-value">3 running</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">Uptime</span>
+            <span class="kv-value" id="uptimeValue">14h 32m</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">Memory</span>
+            <span class="kv-value">124 MB</span>
+          </div>
+        </div>
+
+        <div class="section-title">Activity</div>
+        <div class="activity-list">
+          <div class="activity-item">
+            <span class="activity-time">2m ago</span>
+            <span class="activity-text">Disk usage report scheduled for 08:00</span>
+          </div>
+          <div class="activity-item">
+            <span class="activity-time">3m ago</span>
+            <span class="activity-text">Production deploy completed — v2.4.1</span>
+          </div>
+          <div class="activity-item">
+            <span class="activity-time">5m ago</span>
+            <span class="activity-text">Log scan: 2 transient 502 errors detected</span>
+          </div>
+          <div class="activity-item">
+            <span class="activity-time">18m ago</span>
+            <span class="activity-text">Staging drift check — clean</span>
+          </div>
+          <div class="activity-item">
+            <span class="activity-time">1h ago</span>
+            <span class="activity-text">Skill "deploy-analyzer" updated to v1.3</span>
+          </div>
+        </div>
+
+        <div class="section-title">Actions</div>
+        <div class="action-list">
+          <a class="action-link"><span>Restart daemon</span><span class="arrow">&rarr;</span></a>
+          <a class="action-link"><span>View full logs</span><span class="arrow">&rarr;</span></a>
+          <a class="action-link"><span>Manage secrets</span><span class="arrow">&rarr;</span></a>
+          <a class="action-link"><span>Update configuration</span><span class="arrow">&rarr;</span></a>
+          <a class="action-link"><span>Check for updates</span><span class="arrow">&rarr;</span></a>
+        </div>
+      </div>
+
+      <!-- Tasks -->
+      <div class="tab-pane" id="tab-tasks">
+        <div class="section-title">Running</div>
+        <div class="kv-list">
+          <div class="kv-row"><span class="kv-key">disk-report</span><span class="kv-value" style="color:var(--accent)">scheduled 08:00</span></div>
+          <div class="kv-row"><span class="kv-key">log-monitor</span><span class="kv-value" style="color:var(--accent)">active</span></div>
+          <div class="kv-row"><span class="kv-key">backup-sync</span><span class="kv-value" style="color:var(--accent)">running</span></div>
+        </div>
+        <div class="section-title">Completed</div>
+        <div class="activity-list">
+          <div class="activity-item"><span class="activity-time">3m ago</span><span class="activity-text">deploy-prod — success (34s)</span></div>
+          <div class="activity-item"><span class="activity-time">18m ago</span><span class="activity-text">drift-check — clean</span></div>
+        </div>
+      </div>
+
+      <!-- Skills -->
+      <div class="tab-pane" id="tab-skills">
+        <div class="section-title">Installed Skills</div>
+        <div class="kv-list">
+          <div class="kv-row"><span class="kv-key">deploy-analyzer</span><span class="kv-value">v1.3</span></div>
+          <div class="kv-row"><span class="kv-key">log-scanner</span><span class="kv-value">v2.0</span></div>
+          <div class="kv-row"><span class="kv-key">disk-reporter</span><span class="kv-value">v1.1</span></div>
+          <div class="kv-row"><span class="kv-key">git-summarizer</span><span class="kv-value">v0.9</span></div>
+          <div class="kv-row"><span class="kv-key">secret-rotator</span><span class="kv-value">v1.0</span></div>
+        </div>
+      </div>
+
+      <!-- Vault -->
+      <div class="tab-pane" id="tab-vault">
+        <div class="section-title">Secrets</div>
+        <div class="kv-list">
+          <div class="kv-row"><span class="kv-key">TELEGRAM_TOKEN</span><span class="kv-value" style="color:var(--text-muted)">••••••••</span></div>
+          <div class="kv-row"><span class="kv-key">ANTHROPIC_KEY</span><span class="kv-value" style="color:var(--text-muted)">••••••••</span></div>
+          <div class="kv-row"><span class="kv-key">DEPLOY_SSH_KEY</span><span class="kv-value" style="color:var(--text-muted)">••••••••</span></div>
+          <div class="kv-row"><span class="kv-key">DB_PASSWORD</span><span class="kv-value" style="color:var(--text-muted)">••••••••</span></div>
+        </div>
+      </div>
+
+      <!-- Tiers -->
+      <div class="tab-pane" id="tab-tiers">
+        <div class="section-title">Response Tiers</div>
+        <div class="kv-list">
+          <div class="kv-row"><span class="kv-key">T1 — instant</span><span class="kv-value">regex match, &lt;100ms</span></div>
+          <div class="kv-row"><span class="kv-key">T2 — fast</span><span class="kv-value">classifier, &lt;2s</span></div>
+          <div class="kv-row"><span class="kv-key">T3 — full</span><span class="kv-value">sonnet, ~10s</span></div>
+          <div class="kv-row"><span class="kv-key">T4 — deep</span><span class="kv-value">opus, ~30s</span></div>
+        </div>
+      </div>
+
+      <!-- Files -->
+      <div class="tab-pane" id="tab-files">
+        <div class="section-title">Workspace</div>
+        <div class="activity-list">
+          <div class="activity-item"><span class="activity-time" style="width:auto;font-size:12px;margin-right:4px">&#128193;</span><span class="activity-text">config.d/</span></div>
+          <div class="activity-item"><span class="activity-time" style="width:auto;font-size:12px;margin-right:4px">&#128193;</span><span class="activity-text">skills.d/</span></div>
+          <div class="activity-item"><span class="activity-time" style="width:auto;font-size:12px;margin-right:4px">&#128193;</span><span class="activity-text">logs/</span></div>
+          <div class="activity-item"><span class="activity-time" style="width:auto;font-size:12px;margin-right:4px">&#128196;</span><span class="activity-text">soul.md</span></div>
+          <div class="activity-item"><span class="activity-time" style="width:auto;font-size:12px;margin-right:4px">&#128196;</span><span class="activity-text">schedule.json</span></div>
+        </div>
+      </div>
+
+      <!-- Logs -->
+      <div class="tab-pane" id="tab-logs">
+        <div class="terminal-view">
+          <div><span class="prompt">14:22:01</span> <span class="output">Disk usage report scheduled for 08:00</span></div>
+          <div><span class="prompt">14:19:44</span> <span class="output">Production deploy completed — v2.4.1 (34s)</span></div>
+          <div><span class="prompt">14:19:10</span> <span class="output">Starting production deploy...</span></div>
+          <div><span class="prompt">14:17:03</span> <span class="output">[WARN] 502 Bad Gateway — edge proxy upstream timeout</span></div>
+          <div><span class="prompt">14:12:47</span> <span class="output">[WARN] 502 Bad Gateway — edge proxy upstream timeout</span></div>
+          <div><span class="prompt">14:05:22</span> <span class="output">Staging drift check — no changes detected</span></div>
+          <div><span class="prompt">13:48:11</span> <span class="output">Skill "deploy-analyzer" updated v1.2 → v1.3</span></div>
+          <div><span class="prompt">13:30:00</span> <span class="output">Backup sync completed — 12 files, 84 MB</span></div>
+          <div><span class="prompt">12:55:19</span> <span class="output">Health check passed — all services nominal</span></div>
+        </div>
+      </div>
+
+      <!-- Terminal -->
+      <div class="tab-pane" id="tab-terminal">
+        <div class="terminal-view">
+          <div><span class="prompt">alf@daemon:~$</span> <span class="output">uptime</span></div>
+          <div><span class="output"> 14:22:01 up 14:32, 1 user, load average: 0.12, 0.08, 0.05</span></div>
+          <div style="margin-top:8px"><span class="prompt">alf@daemon:~$</span> <span class="output">df -h /home/alf/data</span></div>
+          <div><span class="output">Filesystem      Size  Used Avail Use% Mounted on</span></div>
+          <div><span class="output">/dev/sda1        50G   12G   38G  24% /home/alf/data</span></div>
+          <div style="margin-top:8px"><span class="prompt">alf@daemon:~$</span> <span class="output" id="terminalCursor">_</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  lucide.createIcons();
+
+  // Tab navigation
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabPanes = document.querySelectorAll('.tab-pane');
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabPanes.forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  // Chat input
+  const chatInput = document.getElementById('chatInput');
+  const chatMessages = document.getElementById('chatMessages');
+  const sendBtn = document.getElementById('sendBtn');
+
+  function sendMessage() {
+    const text = chatInput.value.trim();
+    if (!text) return;
+
+    // User message
+    const userMsg = document.createElement('div');
+    userMsg.className = 'message user';
+    userMsg.innerHTML = `
+      <div class="message-avatar">Y</div>
+      <div class="message-body">
+        <span class="message-name">You</span>
+        <div class="message-text">${escapeHtml(text)}</div>
+      </div>`;
+    chatMessages.appendChild(userMsg);
+    chatInput.value = '';
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    // ALF response after short delay
+    setTimeout(() => {
+      const alfMsg = document.createElement('div');
+      alfMsg.className = 'message alf';
+      const responses = [
+        "On it. Give me a moment.",
+        "Done.",
+        "I'll handle that. Anything else?",
+        "Got it. Running now.",
+        "Already taken care of.",
+        "Processing. I'll update you when it's done.",
+      ];
+      const resp = responses[Math.floor(Math.random() * responses.length)];
+      alfMsg.innerHTML = `
+        <div class="message-avatar">A</div>
+        <div class="message-body">
+          <span class="message-name">ALF</span>
+          <div class="message-text">${resp}</div>
+        </div>`;
+      chatMessages.appendChild(alfMsg);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }, 600 + Math.random() * 800);
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  chatInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendMessage();
+  });
+
+  function escapeHtml(t) {
+    const d = document.createElement('div');
+    d.textContent = t;
+    return d.innerHTML;
+  }
+
+  // Live uptime counter
+  const uptimeEl = document.getElementById('uptimeValue');
+  let uptimeMinutes = 14 * 60 + 32;
+
+  function formatUptime(mins) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h + 'h ' + String(m).padStart(2, '0') + 'm';
+  }
+
+  setInterval(() => {
+    uptimeMinutes++;
+    uptimeEl.textContent = formatUptime(uptimeMinutes);
+  }, 60000);
+
+  // Blinking cursor in terminal
+  const cursor = document.getElementById('terminalCursor');
+  setInterval(() => {
+    cursor.style.opacity = cursor.style.opacity === '0' ? '1' : '0';
+  }, 530);
+</script>
+</body>
+</html>

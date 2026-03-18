@@ -47,11 +47,13 @@ echo "==> Transferring CLI binary to homelab..."
 $SCP /tmp/alf-deploy "${REMOTE_HOST}:/tmp/alf-bin"
 $SSH "${REMOTE_HOST}" "sudo install -m 755 /tmp/alf-bin /usr/local/bin/alf && install -m 755 /tmp/alf-bin /home/alessandro/.local/bin/alf && rm /tmp/alf-bin"
 
-echo "==> Vendoring vault-proxy source..."
+VAULT_PROXY_SRC="${VAULT_PROXY_SRC:-$HOME/Dev/Projects/vault-proxy}"
+echo "==> Vendoring vault-proxy source from ${VAULT_PROXY_SRC}..."
+test -d "${VAULT_PROXY_SRC}" || { echo "ERROR: vault-proxy not found at ${VAULT_PROXY_SRC}"; exit 1; }
 rm -rf third_party/vault-proxy
 mkdir -p third_party/vault-proxy
 rsync -a --exclude .git --exclude vault-data --exclude '/vault-server' --exclude '/vault-cli' \
-  ../Projects/vault-proxy/ third_party/vault-proxy/
+  "${VAULT_PROXY_SRC}/" third_party/vault-proxy/
 
 echo "==> Syncing source to homelab for native build..."
 rsync -az --delete \

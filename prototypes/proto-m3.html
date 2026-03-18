@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALF OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,300;1,9..144,500;1,9..144,700&family=Literata:opsz,wght@7..72,400;7..72,500&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #111111;
+    --surface: #1a1a1a;
+    --text: #d4d4d4;
+    --text-muted: #737373;
+    --accent: #10b981;
+    --border: #262626;
+    --sidebar-w: 240px;
+    --radius: 4px;
+  }
+
+  body {
+    font-family: 'Literata', Georgia, serif;
+    font-weight: 400;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text);
+    background: var(--bg);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: var(--sidebar-w);
+    min-width: var(--sidebar-w);
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 24px 0 16px;
+    overflow-y: auto;
+  }
+
+  .sidebar-brand {
+    padding: 0 20px 20px;
+  }
+
+  .sidebar-brand h1 {
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 700;
+    font-style: italic;
+    font-size: 22px;
+    color: var(--text);
+    letter-spacing: -0.5px;
+  }
+
+  .sidebar-brand h1::after {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    background: var(--accent);
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: middle;
+    position: relative;
+    top: -2px;
+  }
+
+  .sidebar-search {
+    padding: 0 16px 16px;
+  }
+
+  .sidebar-search input {
+    width: 100%;
+    height: 32px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: 'Literata', Georgia, serif;
+    font-size: 13px;
+    padding: 0 10px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .sidebar-search input::placeholder { color: var(--text-muted); }
+  .sidebar-search input:focus { border-color: var(--accent); }
+
+  .sidebar-nav {
+    flex: 1;
+    padding: 0;
+  }
+
+  .nav-section {
+    margin-bottom: 8px;
+  }
+
+  .nav-section-title {
+    font-family: 'Literata', Georgia, serif;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    padding: 12px 20px 6px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 20px;
+    font-family: 'Literata', Georgia, serif;
+    font-size: 14px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s;
+    border-left: 2px solid transparent;
+    text-decoration: none;
+    user-select: none;
+  }
+
+  .nav-item:hover { color: var(--text); }
+
+  .nav-item.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+  }
+
+  .nav-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--surface);
+    padding: 1px 6px;
+    border-radius: var(--radius);
+    min-width: 20px;
+    text-align: center;
+  }
+
+  .nav-item.active .nav-badge {
+    color: var(--accent);
+    background: rgba(16, 185, 129, 0.1);
+  }
+
+  .sidebar-footer {
+    padding: 16px 20px 0;
+    border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .sidebar-footer .status-dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    background: var(--accent);
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+  }
+
+  /* ── Main ── */
+  .main {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--surface);
+  }
+
+  .page {
+    display: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    padding: 48px 48px 32px;
+    max-width: 960px;
+  }
+
+  .page.visible {
+    display: block;
+    opacity: 1;
+  }
+
+  /* ── Home ── */
+  .home-header {
+    margin-bottom: 0;
+  }
+
+  .home-header h2 {
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 300;
+    font-style: italic;
+    font-size: 36px;
+    color: var(--text);
+    letter-spacing: -0.5px;
+  }
+
+  .home-header p {
+    font-size: 16px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  .accent-line {
+    width: 100%;
+    height: 1px;
+    background: var(--accent);
+    margin: 16px 0;
+    opacity: 0.6;
+  }
+
+  .home-columns {
+    display: flex;
+    gap: 48px;
+  }
+
+  .home-col-left { flex: 6; }
+  .home-col-right { flex: 4; }
+
+  .section-title {
+    font-family: 'Literata', Georgia, serif;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+  }
+
+  /* Conversation messages — editorial style */
+  .message {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .message:last-child { border-bottom: none; }
+
+  .message-author {
+    font-family: 'Literata', Georgia, serif;
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--text);
+  }
+
+  .message-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: 8px;
+    vertical-align: baseline;
+  }
+
+  .message-body {
+    margin-top: 4px;
+    font-size: 14.5px;
+    line-height: 1.65;
+    color: var(--text);
+  }
+
+  .message-body code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    background: var(--bg);
+    padding: 2px 5px;
+    border-radius: var(--radius);
+  }
+
+  /* System panel */
+  .sys-list {
+    margin-bottom: 24px;
+  }
+
+  .sys-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+
+  .sys-row:last-child { border-bottom: none; }
+
+  .sys-label {
+    color: var(--text-muted);
+    font-family: 'Literata', Georgia, serif;
+  }
+
+  .sys-value {
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+  }
+
+  .sys-value.online { color: var(--accent); }
+
+  .quick-action {
+    display: block;
+    font-family: 'Literata', Georgia, serif;
+    font-size: 14px;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 5px 0;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+
+  .quick-action:hover { color: var(--accent); }
+  .quick-action span { margin-left: 4px; font-size: 12px; }
+
+  /* ── Input ── */
+  .input-bar {
+    position: fixed;
+    bottom: 0;
+    left: var(--sidebar-w);
+    right: 0;
+    padding: 16px 48px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+
+  .input-bar input {
+    width: 100%;
+    max-width: 912px;
+    height: 44px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: 'Literata', Georgia, serif;
+    font-size: 15px;
+    padding: 0 16px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .input-bar input::placeholder { color: var(--text-muted); }
+  .input-bar input:focus { border-color: var(--accent); }
+
+  /* ── Chat page ── */
+  .chat-flow .message {
+    max-width: 720px;
+  }
+
+  .chat-flow .message-time {
+    float: right;
+    margin-top: 2px;
+  }
+
+  /* ── Generic page ── */
+  .page-title {
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 500;
+    font-size: 24px;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+
+  .page-desc {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-bottom: 24px;
+  }
+
+  .empty-state {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 14px;
+    padding: 32px 0;
+  }
+
+  /* ── Tasks page ── */
+  .task-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .task-name { font-size: 14px; }
+
+  .task-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: var(--radius);
+  }
+
+  .task-status.running {
+    color: var(--accent);
+    background: rgba(16, 185, 129, 0.1);
+  }
+
+  .task-status.queued {
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+  }
+
+  /* ── Clock ── */
+  .clock {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 6px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #333; }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <h1>ALF</h1>
+  </div>
+
+  <div class="sidebar-search">
+    <input type="text" placeholder="Search...">
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section">
+      <div class="nav-section-title">System</div>
+      <div class="nav-item active" data-page="home">Home</div>
+      <div class="nav-item" data-page="chat">Chat <span class="nav-badge">2</span></div>
+      <div class="nav-item" data-page="tasks">Tasks</div>
+      <div class="nav-item" data-page="skills">Skills</div>
+      <div class="nav-item" data-page="vault">Vault</div>
+      <div class="nav-item" data-page="tiers">Tiers <span class="nav-badge">3</span></div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">Data</div>
+      <div class="nav-item" data-page="files">Files</div>
+      <div class="nav-item" data-page="logs">Logs</div>
+      <div class="nav-item" data-page="terminal">Terminal</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">Apps</div>
+      <div class="nav-item" data-page="later">Later</div>
+      <div class="nav-item" data-page="reddit">Reddit Leads</div>
+      <div class="nav-item" data-page="seo">SEO Dashboard</div>
+      <div class="nav-item" data-page="xpost">XPost</div>
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div>v2.1 <span class="status-dot"></span> online</div>
+    <div class="clock" id="clock"></div>
+  </div>
+</aside>
+
+<!-- ── Main content ── -->
+<div class="main">
+
+  <!-- Home -->
+  <div class="page visible" id="page-home">
+    <div class="home-header">
+      <h2>ALF</h2>
+      <p>Your AI assistant is ready.</p>
+    </div>
+    <div class="accent-line"></div>
+    <div class="home-columns">
+      <div class="home-col-left">
+        <div class="section-title">Conversation</div>
+        <div class="message">
+          <span class="message-author">You</span>
+          <span class="message-time">14:23</span>
+          <div class="message-body">Run the SEO audit on the landing page and summarize the top issues. Focus on Core Web Vitals.</div>
+        </div>
+        <div class="message">
+          <span class="message-author">ALF</span>
+          <span class="message-time">14:23</span>
+          <div class="message-body">Audit complete. Three main issues: LCP at 3.8s (target &lt;2.5s) caused by an unoptimized hero image, CLS of 0.18 from dynamically injected ad slots, and FID at 180ms due to a blocking <code>analytics.js</code> bundle. I've queued a task to generate the optimized assets.</div>
+        </div>
+        <div class="message">
+          <span class="message-author">You</span>
+          <span class="message-time">14:25</span>
+          <div class="message-body">Good. Also check if the sitemap was updated after last week's deploy.</div>
+        </div>
+        <div class="message">
+          <span class="message-author">ALF</span>
+          <span class="message-time">14:25</span>
+          <div class="message-body">Sitemap was last generated on March 11. The deploy on March 14 added 3 new pages that are missing. I'll regenerate and submit to Search Console.</div>
+        </div>
+      </div>
+      <div class="home-col-right">
+        <div class="section-title">System</div>
+        <div class="sys-list">
+          <div class="sys-row">
+            <span class="sys-label">Status</span>
+            <span class="sys-value online">Online</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-label">Model</span>
+            <span class="sys-value">claude-sonnet</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-label">Tasks</span>
+            <span class="sys-value">3 running</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-label">Uptime</span>
+            <span class="sys-value" id="uptime">14h 32m</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-label">Memory</span>
+            <span class="sys-value">284 MB</span>
+          </div>
+        </div>
+
+        <div class="section-title">Quick Actions</div>
+        <a class="quick-action" data-page="chat">New conversation <span>&rarr;</span></a>
+        <a class="quick-action" data-page="tasks">View running tasks <span>&rarr;</span></a>
+        <a class="quick-action" data-page="logs">Recent logs <span>&rarr;</span></a>
+        <a class="quick-action" data-page="skills">Manage skills <span>&rarr;</span></a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div class="page" id="page-chat">
+    <div class="page-title">Chat</div>
+    <div class="page-desc">Ongoing conversations with ALF.</div>
+    <div class="accent-line"></div>
+    <div class="chat-flow">
+      <div class="message">
+        <span class="message-author">You</span>
+        <span class="message-time">09:12</span>
+        <div class="message-body">Check the deployment status for the staging environment.</div>
+      </div>
+      <div class="message">
+        <span class="message-author">ALF</span>
+        <span class="message-time">09:12</span>
+        <div class="message-body">Staging deployment completed successfully at 08:47. All 12 health checks pass. The new auth middleware is live. Database migrations ran without issues&mdash;3 tables altered, 1 index added.</div>
+      </div>
+      <div class="message">
+        <span class="message-author">You</span>
+        <span class="message-time">09:14</span>
+        <div class="message-body">Run the integration tests against staging.</div>
+      </div>
+      <div class="message">
+        <span class="message-author">ALF</span>
+        <span class="message-time">09:15</span>
+        <div class="message-body">Running test suite. 47 passed, 2 skipped (feature-flagged), 0 failed. Coverage at 84%. The <code>/api/v2/users</code> endpoint response time improved from 320ms to 180ms after the auth refactor.</div>
+      </div>
+      <div class="message">
+        <span class="message-author">You</span>
+        <span class="message-time">14:23</span>
+        <div class="message-body">Run the SEO audit on the landing page and summarize the top issues. Focus on Core Web Vitals.</div>
+      </div>
+      <div class="message">
+        <span class="message-author">ALF</span>
+        <span class="message-time">14:23</span>
+        <div class="message-body">Audit complete. Three main issues: LCP at 3.8s (target &lt;2.5s) caused by an unoptimized hero image, CLS of 0.18 from dynamically injected ad slots, and FID at 180ms due to a blocking <code>analytics.js</code> bundle. I've queued a task to generate the optimized assets.</div>
+      </div>
+      <div class="message">
+        <span class="message-author">You</span>
+        <span class="message-time">14:25</span>
+        <div class="message-body">Good. Also check if the sitemap was updated after last week's deploy.</div>
+      </div>
+      <div class="message">
+        <span class="message-author">ALF</span>
+        <span class="message-time">14:25</span>
+        <div class="message-body">Sitemap was last generated on March 11. The deploy on March 14 added 3 new pages that are missing. I'll regenerate and submit to Search Console.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tasks -->
+  <div class="page" id="page-tasks">
+    <div class="page-title">Tasks</div>
+    <div class="page-desc">Background processes and queued work.</div>
+    <div class="accent-line"></div>
+    <div class="task-item">
+      <span class="task-name">SEO asset optimization</span>
+      <span class="task-status running">running</span>
+    </div>
+    <div class="task-item">
+      <span class="task-name">Sitemap regeneration</span>
+      <span class="task-status running">running</span>
+    </div>
+    <div class="task-item">
+      <span class="task-name">Reddit keyword scan</span>
+      <span class="task-status running">running</span>
+    </div>
+    <div class="task-item">
+      <span class="task-name">Weekly analytics digest</span>
+      <span class="task-status queued">queued</span>
+    </div>
+  </div>
+
+  <!-- Skills -->
+  <div class="page" id="page-skills">
+    <div class="page-title">Skills</div>
+    <div class="page-desc">Installed skill modules.</div>
+    <div class="accent-line"></div>
+    <div class="sys-list">
+      <div class="sys-row"><span class="sys-label">seo-audit</span><span class="sys-value online">active</span></div>
+      <div class="sys-row"><span class="sys-label">reddit-leads</span><span class="sys-value online">active</span></div>
+      <div class="sys-row"><span class="sys-label">deploy-manager</span><span class="sys-value online">active</span></div>
+      <div class="sys-row"><span class="sys-label">content-writer</span><span class="sys-value">inactive</span></div>
+    </div>
+  </div>
+
+  <!-- Vault -->
+  <div class="page" id="page-vault">
+    <div class="page-title">Vault</div>
+    <div class="page-desc">Secrets and credentials management.</div>
+    <div class="accent-line"></div>
+    <div class="sys-list">
+      <div class="sys-row"><span class="sys-label">TELEGRAM_TOKEN</span><span class="sys-value">••••••••</span></div>
+      <div class="sys-row"><span class="sys-label">ANTHROPIC_API_KEY</span><span class="sys-value">••••••••</span></div>
+      <div class="sys-row"><span class="sys-label">SEARCH_CONSOLE_KEY</span><span class="sys-value">••••••••</span></div>
+    </div>
+  </div>
+
+  <!-- Tiers -->
+  <div class="page" id="page-tiers">
+    <div class="page-title">Tiers</div>
+    <div class="page-desc">Routing tiers and classification rules.</div>
+    <div class="accent-line"></div>
+    <div class="sys-list">
+      <div class="sys-row"><span class="sys-label">Tier 1 &mdash; Quick</span><span class="sys-value">haiku</span></div>
+      <div class="sys-row"><span class="sys-label">Tier 2 &mdash; Standard</span><span class="sys-value">sonnet</span></div>
+      <div class="sys-row"><span class="sys-label">Tier 3 &mdash; Deep</span><span class="sys-value">opus</span></div>
+    </div>
+  </div>
+
+  <!-- Files -->
+  <div class="page" id="page-files">
+    <div class="page-title">Files</div>
+    <div class="page-desc">Workspace file browser.</div>
+    <div class="accent-line"></div>
+    <div class="empty-state">File browser not yet connected.</div>
+  </div>
+
+  <!-- Logs -->
+  <div class="page" id="page-logs">
+    <div class="page-title">Logs</div>
+    <div class="page-desc">System and conversation logs.</div>
+    <div class="accent-line"></div>
+    <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.8; color: var(--text-muted);">
+      <div><span style="color: var(--text-muted);">14:25:03</span> <span style="color: var(--accent);">INFO</span> Sitemap regeneration started</div>
+      <div><span style="color: var(--text-muted);">14:25:01</span> <span style="color: var(--accent);">INFO</span> SEO audit completed &mdash; 3 issues found</div>
+      <div><span style="color: var(--text-muted);">14:23:48</span> <span style="color: var(--accent);">INFO</span> Task queued: asset optimization</div>
+      <div><span style="color: var(--text-muted);">14:23:12</span> <span style="color: #737373;">DEBUG</span> LCP measurement: 3.8s</div>
+      <div><span style="color: var(--text-muted);">09:15:22</span> <span style="color: var(--accent);">INFO</span> Integration tests passed: 47/49</div>
+      <div><span style="color: var(--text-muted);">08:47:01</span> <span style="color: var(--accent);">INFO</span> Staging deploy completed</div>
+    </div>
+  </div>
+
+  <!-- Terminal -->
+  <div class="page" id="page-terminal">
+    <div class="page-title">Terminal</div>
+    <div class="page-desc">Remote shell access.</div>
+    <div class="accent-line"></div>
+    <div class="empty-state">Terminal session not connected.</div>
+  </div>
+
+  <!-- Later -->
+  <div class="page" id="page-later">
+    <div class="page-title">Later</div>
+    <div class="page-desc">Saved items and bookmarks.</div>
+    <div class="accent-line"></div>
+    <div class="empty-state">No saved items.</div>
+  </div>
+
+  <!-- Reddit -->
+  <div class="page" id="page-reddit">
+    <div class="page-title">Reddit Leads</div>
+    <div class="page-desc">Keyword monitoring and lead detection.</div>
+    <div class="accent-line"></div>
+    <div class="empty-state">Scan in progress...</div>
+  </div>
+
+  <!-- SEO -->
+  <div class="page" id="page-seo">
+    <div class="page-title">SEO Dashboard</div>
+    <div class="page-desc">Search performance and site health.</div>
+    <div class="accent-line"></div>
+    <div class="empty-state">Dashboard loading...</div>
+  </div>
+
+  <!-- XPost -->
+  <div class="page" id="page-xpost">
+    <div class="page-title">XPost</div>
+    <div class="page-desc">Cross-platform post scheduling.</div>
+    <div class="accent-line"></div>
+    <div class="empty-state">No scheduled posts.</div>
+  </div>
+
+</div>
+
+<!-- Input bar -->
+<div class="input-bar">
+  <input type="text" placeholder="Write something...">
+</div>
+
+<script>
+  // ── Navigation ──
+  const navItems = document.querySelectorAll('.nav-item[data-page]');
+  const quickActions = document.querySelectorAll('.quick-action[data-page]');
+  const pages = document.querySelectorAll('.page');
+
+  function navigate(pageId) {
+    // Remove active from all nav items
+    navItems.forEach(n => n.classList.remove('active'));
+    // Set active on matching nav item
+    navItems.forEach(n => {
+      if (n.dataset.page === pageId) n.classList.add('active');
+    });
+
+    // Fade out current, fade in target
+    pages.forEach(p => {
+      if (p.classList.contains('visible')) {
+        p.style.opacity = '0';
+        setTimeout(() => {
+          p.classList.remove('visible');
+          p.style.display = 'none';
+
+          const target = document.getElementById('page-' + pageId);
+          if (target) {
+            target.style.display = 'block';
+            target.style.opacity = '0';
+            target.classList.add('visible');
+            requestAnimationFrame(() => {
+              target.style.opacity = '1';
+            });
+          }
+        }, 150);
+      }
+    });
+  }
+
+  navItems.forEach(item => {
+    item.addEventListener('click', () => navigate(item.dataset.page));
+  });
+
+  quickActions.forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      navigate(item.dataset.page);
+    });
+  });
+
+  // ── Live clock ──
+  function updateClock() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+    document.getElementById('clock').textContent = h + ':' + m + ':' + s;
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+</script>
+
+</body>
+</html>

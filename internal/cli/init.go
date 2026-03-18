@@ -1291,7 +1291,7 @@ func generateInitMagicLink(dir string) string {
 	cmd := exec.Command("docker", "exec", "alf",
 		"curl", "-sf", "-X", "POST",
 		"-H", "Authorization: Bearer "+token,
-		"http://127.0.0.1:8080/api/magic-link?days=30")
+		"http://127.0.0.1:8080/api/magic-link?days=0")
 	out, err := cmd.Output()
 	if err != nil {
 		PrintWarning("Could not generate magic link - try: alf magic-link")

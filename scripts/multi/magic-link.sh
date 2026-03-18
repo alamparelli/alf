@@ -35,7 +35,7 @@ token=$(cat "$token_file")
 # Wait for daemon to be ready (up to 30s)
 for i in $(seq 1 15); do
     link=$(docker exec "alf-$USER" \
-        curl -sf -X POST http://localhost:8080/api/magic-link \
+        curl -sf -X POST "http://localhost:8080/api/magic-link?days=0" \
         -H "Authorization: Bearer $token" 2>/dev/null) && break
     sleep 2
 done

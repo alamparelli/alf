@@ -603,6 +603,9 @@ func main() {
 		BackendConfigs: engineBackendConfigs,
 	})
 	chatService.SetEngine(commEngine)
+	if cfg.BroadcastChannel != "" {
+		comms.BroadcastChannel = cfg.BroadcastChannel
+	}
 	log.Println("comms engine: initialized for CC channel")
 
 	// Schedule adapter (engine set later after scheduler is created).
@@ -804,6 +807,14 @@ func main() {
 
 	// Daily schedule digest - runs at 08:00 local time.
 	sched.RegisterSystem("sched-digest", "Schedule Digest", "0 0 8 * * *", sched.SendDailyDigest)
+
+	// Vault token health check — every hour, alerts on expired/expiring tokens.
+	if vaultMgr != nil {
+		checker := newVaultTokenChecker(vaultMgr, commEngine.Broadcast)
+		sched.RegisterSystem("vault-token-check", "Vault Token Health", "@every 60m", func() error {
+			return checker.Check()
+		})
+	}
 
 	schedAdapter.engine = sched
 	if schedEventBroker != nil {

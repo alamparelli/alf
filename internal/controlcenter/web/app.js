@@ -6416,11 +6416,18 @@ async function vaultLoadServices() {
       const refBadge = refLabels.length > 0
         ? ' <span class="vault-ref-badge">via ' + refLabels.join(', ') + '</span>'
         : '';
+      const tokenBadge = s.token_status === 'expired'
+        ? ' <span class="vault-token-badge vault-token-expired">expired</span>'
+        : s.token_status === 'expiring'
+        ? ' <span class="vault-token-badge vault-token-expiring">expiring</span>'
+        : s.token_status === 'valid'
+        ? ' <span class="vault-token-badge vault-token-valid">valid</span>'
+        : '';
       return `
       <div class="vault-item">
         <div class="vault-item-info">
-          <span class="vault-item-name">${esc(s.name)}${refBadge}</span>
-          <span class="vault-item-detail">${esc(s.base_url)} &middot; ${esc(s.auth_type)}${s.tls_skip_verify ? ' &middot; TLS skip' : ''}</span>
+          <span class="vault-item-name">${esc(s.name)}${refBadge}${tokenBadge}</span>
+          <span class="vault-item-detail">${esc(s.base_url)} &middot; ${esc(s.auth_type)}${s.tls_skip_verify ? ' &middot; TLS skip' : ''}${s.expires_at ? ' &middot; expires ' + new Date(s.expires_at * 1000).toLocaleTimeString() : ''}</span>
         </div>
         <div class="vault-item-actions">
           <button class="btn btn-icon vault-edit-btn" data-name="${esc(s.name)}" title="Edit"><i data-lucide="pencil"></i></button>

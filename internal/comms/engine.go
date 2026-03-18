@@ -1,6 +1,7 @@
 package comms
 
 import (
+	"log"
 	"sync"
 
 	"github.com/alamparelli/alf/internal/agents"
@@ -113,6 +114,25 @@ func (e *ChatEngine) emit(channelID ChannelID, event OutEvent) {
 	adapter := e.Adapter(channelID.Prefix())
 	if adapter != nil {
 		adapter.OnEvent(channelID, event)
+	}
+}
+
+// BroadcastChannel controls which adapters receive system alerts.
+// "all" (default) sends to all, "tg" or "cc" targets a specific channel.
+var BroadcastChannel string
+
+// Broadcast sends a text message to adapters based on BroadcastChannel config.
+// Used for system alerts (e.g., vault token expiry).
+func (e *ChatEngine) Broadcast(text string) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for channel, adapter := range e.adapters {
+		if BroadcastChannel != "" && BroadcastChannel != "all" && channel != BroadcastChannel {
+			continue
+		}
+		if _, err := adapter.SendText(ChannelID(channel+":system"), text); err != nil {
+			log.Printf("[comms] broadcast to %s failed: %v", channel, err)
+		}
 	}
 }
 

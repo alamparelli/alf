@@ -3065,9 +3065,21 @@ function docsRenderListLayout(docs) {
   content.innerHTML = html;
 
   // Bind search
+  let docsSearchTimeout;
   document.getElementById('docsSearchInput').addEventListener('input', (e) => {
     docsActiveFilter.text = e.target.value.trim().toLowerCase();
-    docsUpdateList();
+    clearTimeout(docsSearchTimeout);
+    if (docsActiveFilter.text) {
+      // Debounce server-side search for content matching.
+      docsSearchTimeout = setTimeout(() => {
+        fetch('/api/docs/?q=' + encodeURIComponent(docsActiveFilter.text))
+          .then(r => r.json())
+          .then(data => { docsCache = data; docsUpdateList(); });
+      }, 300);
+    } else {
+      // Empty query: reload full list.
+      fetch('/api/docs/').then(r => r.json()).then(data => { docsCache = data; docsUpdateList(); });
+    }
   });
 
   // Bind filter buttons
@@ -3115,14 +3127,7 @@ function docsUpdateList() {
   if (docsActiveFilter.tag) {
     filtered = filtered.filter(d => (d.tags || []).includes(docsActiveFilter.tag));
   }
-  if (docsActiveFilter.text) {
-    const q = docsActiveFilter.text;
-    filtered = filtered.filter(d =>
-      d.title.toLowerCase().includes(q) ||
-      (d.summary || '').toLowerCase().includes(q) ||
-      (d.tags || []).some(t => t.toLowerCase().includes(q))
-    );
-  }
+  // Text search is handled server-side via /api/docs/?q= (searches content too).
 
   let html = '';
   if (!filtered.length) {

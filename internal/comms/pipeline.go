@@ -38,6 +38,17 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 		})
 	}
 
+	// 1b. Log incoming message to EventLog for mem-extract.
+	if e.EventLog != nil {
+		e.EventLog.Log("message_in", map[string]any{
+			"channel":    string(channel),
+			"session_id": sessionKey,
+			"text":       msg.DisplayText(),
+			"is_reply":   msg.IsReply,
+			"has_media":  len(msg.Media) > 0,
+		})
+	}
+
 	// 2. Check force command / session tier override.
 	forcedTier := msg.ForcedTier
 	if forcedTier == "" {
@@ -640,6 +651,11 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			"channel":     channelID.Prefix(),
 			"duration_ms": duration.Milliseconds(),
 		})
+	}
+
+	// Notify memory extractor of new message.
+	if e.OnMessage != nil && result.SessionID != "" {
+		e.OnMessage(result.SessionID)
 	}
 
 	var resultBlocks []conversation.ContentBlock

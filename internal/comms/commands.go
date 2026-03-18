@@ -74,6 +74,9 @@ func cmdNew(e *ChatEngine, channelID ChannelID, args string) string {
 	}
 
 	if old != "" {
+		if e.OnSessionEnd != nil {
+			e.OnSessionEnd(old)
+		}
 		return "Previous session archived. New session started."
 	}
 	return "New session started."

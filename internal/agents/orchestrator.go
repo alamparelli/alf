@@ -363,6 +363,36 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		// Parse orchestrator output.
 		output := parseOrchestratorOutput(result.Text)
 
+		// Gather output - read files and return content to orchestrator.
+		if len(output.Gather) > 0 {
+			log.Printf("[orchestrator] gathering %d file(s) for context", len(output.Gather))
+			var gatherResult strings.Builder
+			gatherResult.WriteString(`{"gathered_files":{`)
+			first := true
+			for _, path := range output.Gather {
+				// Sanitize: only allow paths under data dir.
+				fullPath := filepath.Join(o.dataDir, path)
+				data, err := os.ReadFile(fullPath)
+				content := ""
+				if err != nil {
+					content = "(file not found: " + path + ")"
+				} else {
+					content = string(data)
+					if len(content) > 10000 {
+						content = content[:10000] + "\n... (truncated)"
+					}
+				}
+				if !first {
+					gatherResult.WriteString(",")
+				}
+				first = false
+				gatherResult.WriteString(`"` + escapeJSON(path) + `":"` + escapeJSON(content) + `"`)
+			}
+			gatherResult.WriteString(`},"instruction":"now analyze this context and output a plan (Option A)"}`)
+			prompt = gatherResult.String()
+			continue
+		}
+
 		// Plan output - display and optionally block for approval.
 		if len(output.Plan) > 0 {
 			meta.Plan = output.Plan

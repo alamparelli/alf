@@ -82,7 +82,7 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS memories (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			text TEXT NOT NULL,
-			type TEXT NOT NULL CHECK(type IN ('fact','summary','preference','decision')),
+			type TEXT NOT NULL CHECK(type IN ('fact','summary','preference','decision','contact')),
 			source TEXT NOT NULL DEFAULT 'extractor',
 			metadata TEXT NOT NULL DEFAULT '{}',
 			created_at TEXT NOT NULL

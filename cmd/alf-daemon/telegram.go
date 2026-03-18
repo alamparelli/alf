@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/conversation"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
@@ -127,30 +128,23 @@ func hasMedia(msg *Message) bool {
 }
 
 // handleCommand processes known /commands. Returns true if handled.
-func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Store, eventLog *eventlog.Logger, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, contextDir string, orch *agents.Orchestrator, convStore *conversation.Store) bool {
+func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, orch *agents.Orchestrator) bool {
 	cmd := strings.SplitN(msg.Text, " ", 2)[0]
+	channelID := comms.ChannelID(fmt.Sprintf("tg:%d", msg.Chat.ID))
 	switch cmd {
 	case "/login":
 		handleLogin(tg, msg, magic, ccExternalURL, allowedChatIDs)
 		return true
 	case "/new", "/clear":
-		old := chatSessions.Archive(msg.Chat.ID)
-		convStore.NewConversation(conversation.ChannelTelegram)
-		memory.ClearOnboarding(contextDir)
+		old := engine.NewSession(channelID, false)
 		reply := "New session started."
 		if old != "" {
 			reply = "Previous session archived. New session started."
-			eventLog.Log("session_archived", map[string]any{
-				"chat_id":        msg.Chat.ID,
-				"old_session_id": old,
-			})
 		}
 		tg.SendHTML(msg.Chat.ID, reply)
 		return true
 	case "/start":
-		memory.SetOnboarding(contextDir)
-		chatSessions.Archive(msg.Chat.ID) // fresh session so onboarding prompt takes effect
-		convStore.NewConversation(conversation.ChannelTelegram)
+		engine.NewSession(channelID, true)
 		// Auto-trigger onboarding conversation - fall through to normal message processing.
 		msg.Text = "hello"
 		return false
@@ -203,11 +197,12 @@ func handleCommand(tg *tgclient.Client, msg *Message, chatSessions *session.Stor
 		if len(parts) > 1 {
 			arg = strings.TrimSpace(parts[1])
 		}
+		sessionKey := channelID.SessionKey()
 		if arg == "clear" || arg == "reset" {
-			chatSessions.ClearSkills(msg.Chat.ID)
+			engine.Sessions.ClearSkills(sessionKey)
 			tg.SendHTML(msg.Chat.ID, "Active skills cleared from session.")
 		} else {
-			active := chatSessions.GetSkills(msg.Chat.ID)
+			active := engine.Sessions.GetSkills(sessionKey)
 			if len(active) == 0 {
 				tg.SendHTML(msg.Chat.ID, "No skills active in this session.\n\nUse <code>/skills clear</code> to reset.")
 			} else {

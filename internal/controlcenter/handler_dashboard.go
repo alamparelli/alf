@@ -20,7 +20,8 @@ func (h *DashboardHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; "+
 			"script-src 'self' https://unpkg.com; "+
-			"style-src 'self' 'unsafe-inline' https://unpkg.com; "+
+			"style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; "+
+			"font-src 'self' https://fonts.gstatic.com; "+
 			"connect-src 'self' wss: https://unpkg.com; "+
 			"img-src 'self' data: blob:; "+
 			"frame-ancestors 'self'")

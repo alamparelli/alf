@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alamparelli/alf/internal/comms"
 )
 
 func TestChatHandler_PostEmpty(t *testing.T) {
@@ -51,6 +53,60 @@ func TestChatHandler_DeleteNewSession(t *testing.T) {
 	}
 	if result["ok"] != true {
 		t.Errorf("expected ok=true, got %v", result["ok"])
+	}
+}
+
+func TestChatHandler_DeleteFiresOnSessionEnd(t *testing.T) {
+	svc := newTestChatService(t)
+	// Set a session so there's something to archive.
+	svc.Sessions.Set(apiChatID, "test-session-xyz")
+
+	// Wire a minimal engine with OnSessionEnd hook.
+	sessions := svc.Sessions
+	var firedWith string
+	eng := &comms.ChatEngine{
+		Sessions:     sessions,
+		ContextDir:   svc.ContextDir,
+		OnSessionEnd: func(sid string) { firedWith = sid },
+	}
+	svc.Engine = eng
+
+	h := &ChatHandler{Service: svc}
+	req := httptest.NewRequest("DELETE", "/api/chat", nil)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if firedWith != "test-session-xyz" {
+		t.Errorf("expected OnSessionEnd('test-session-xyz'), got %q", firedWith)
+	}
+}
+
+func TestChatHandler_DeleteNoFireWhenNoSession(t *testing.T) {
+	svc := newTestChatService(t)
+
+	fired := false
+	eng := &comms.ChatEngine{
+		Sessions:     svc.Sessions,
+		ContextDir:   svc.ContextDir,
+		OnSessionEnd: func(sid string) { fired = true },
+	}
+	svc.Engine = eng
+
+	h := &ChatHandler{Service: svc}
+	req := httptest.NewRequest("DELETE", "/api/chat", nil)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if fired {
+		t.Error("OnSessionEnd should not fire when no session was active")
 	}
 }
 

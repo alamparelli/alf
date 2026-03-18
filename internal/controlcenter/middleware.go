@@ -196,15 +196,24 @@ func clientIP(r *http.Request) string {
 	return ip
 }
 
+// quietPostPaths are POST endpoints excluded from logging on success (high-frequency app calls).
+var quietPostPaths = map[string]bool{
+	"/api/bash": true,
+}
+
 // isQuietRequest returns true for requests that should not be logged on success.
 func isQuietRequest(r *http.Request) bool {
+	p := r.URL.Path
+	if r.Method == http.MethodPost {
+		return quietPostPaths[p]
+	}
 	if r.Method != http.MethodGet {
 		return false
 	}
-	p := r.URL.Path
 	return quietPaths[p] ||
 		strings.HasPrefix(p, "/api/") ||
 		strings.HasPrefix(p, "/static/") ||
+		strings.HasPrefix(p, "/apps/") ||
 		p == "/" ||
 		p == "/favicon.ico"
 }

@@ -110,6 +110,32 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("exec %q: %w", stmt[:60], err)
 		}
 	}
+
+	// Migration: widen CHECK constraint if DB was created with older schema.
+	// SQLite doesn't support ALTER CHECK, so we recreate the table.
+	var checkSQL string
+	row := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'`)
+	if err := row.Scan(&checkSQL); err == nil {
+		if !strings.Contains(checkSQL, "'contact'") {
+			log.Println("memstore: migrating memories table to add 'contact' type")
+			migrationStmts := []string{
+				`ALTER TABLE memories RENAME TO memories_old`,
+				stmts[0], // recreate with new CHECK
+				`INSERT INTO memories SELECT * FROM memories_old`,
+				`DROP TABLE memories_old`,
+			}
+			for _, m := range migrationStmts {
+				if _, err := s.db.Exec(m); err != nil {
+					return fmt.Errorf("migration: %w", err)
+				}
+			}
+			// Recreate triggers (dropped with table rename)
+			for _, stmt := range stmts[3:5] { // the two triggers
+				s.db.Exec(stmt)
+			}
+		}
+	}
+
 	return nil
 }
 

@@ -2,6 +2,7 @@
 FROM golang:1.25-bookworm AS builder
 
 ARG TARGETARCH
+ARG BUILD_VERSION=dev
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libc6-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
@@ -21,7 +22,7 @@ COPY . .
 RUN go mod edit -replace github.com/alessandrolamparelli/vault-proxy=/vault-proxy
 
 # Build Go binaries.
-RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /alf-daemon ./cmd/alf-daemon \
+RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w -X main.version=${BUILD_VERSION}" -o /alf-daemon ./cmd/alf-daemon \
     && CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /telegram-tools ./cmd/signal \

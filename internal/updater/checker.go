@@ -22,9 +22,10 @@ type Checker struct {
 	notify   NotifyFunc
 	client   *http.Client
 
-	mu      sync.Mutex
-	stopCh  chan struct{}
-	stopped bool
+	mu            sync.Mutex
+	stopCh        chan struct{}
+	stopped       bool
+	latestVersion string // last detected latest version (empty = not checked yet)
 }
 
 // New creates an update checker.
@@ -88,6 +89,14 @@ func (c *Checker) Stop() {
 	}
 }
 
+// LatestVersion returns the latest available version if an update was detected,
+// or empty string if current is up-to-date or not checked yet.
+func (c *Checker) LatestVersion() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.latestVersion
+}
+
 func (c *Checker) check() {
 	latest, err := c.latestTag()
 	if err != nil {
@@ -101,8 +110,13 @@ func (c *Checker) check() {
 	// Normalize: compare without "v" prefix.
 	cur := strings.TrimPrefix(c.current, "v")
 	lat := strings.TrimPrefix(latest, "v")
-	if cur != lat && compareSemver(lat, cur) > 0 && c.notify != nil {
-		c.notify(c.current, latest)
+	if cur != lat && compareSemver(lat, cur) > 0 {
+		c.mu.Lock()
+		c.latestVersion = latest
+		c.mu.Unlock()
+		if c.notify != nil {
+			c.notify(c.current, latest)
+		}
 	}
 }
 

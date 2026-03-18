@@ -57,27 +57,61 @@ function notify(title, body) {
 }
 
 // --- Palette system (light/dark follows OS, per-file theme loading) ---
+// --- Theme Factory ---
+// Single registry: each entry defines an app palette + its matching terminal themes.
+const ALF_THEMES = {
+  sage:          { label: 'Sage',        light: '#f0f3ec', dark: '#222822', lightBorder: '#bcc5b8', darkBorder: '#3a4638', termLight: 'Sage Light',        termDark: 'Sage Dark' },
+  studio:        { label: 'Studio',      light: '#f5f3f0', dark: '#1c1c1c', lightBorder: '#d6d3cf', darkBorder: '#333',    termLight: 'Studio Light',      termDark: 'Studio Dark' },
+  catppuccin:    { label: 'Catppuccin',  light: '#eff1f5', dark: '#1e1e2e', lightBorder: '#ccd0da', darkBorder: '#45475a', termLight: 'Catppuccin Latte',  termDark: 'Catppuccin Mocha' },
+  dracula:       { label: 'Dracula',     light: '#f8f8f2', dark: '#282a36', lightBorder: '#d8d8d0', darkBorder: '#44475a', termLight: 'Dracula',           termDark: 'Dracula' },
+  solarized:     { label: 'Solarized',   light: '#fdf6e3', dark: '#002b36', lightBorder: '#d3cbb7', darkBorder: '#073642', termLight: 'Solarized Light',   termDark: 'Solarized Dark' },
+  'tokyo-night': { label: 'Tokyo Night', light: '#d5d6db', dark: '#1a1b26', lightBorder: '#b8b9be', darkBorder: '#292e42', termLight: 'Tokyo Night',       termDark: 'Tokyo Night' },
+  github:        { label: 'GitHub',      light: '#ffffff', dark: '#0d1117', lightBorder: '#d0d7de', darkBorder: '#30363d', termLight: 'GitHub Dark',       termDark: 'GitHub Dark' },
+  nord:          { label: 'Nord',        light: '#eceff4', dark: '#2e3440', lightBorder: '#c8cdd5', darkBorder: '#434c5e', termLight: 'Nord',              termDark: 'Nord' },
+};
+
 function applyPalette(palette) {
-  if (!palette) palette = 'sage';
+  if (!palette || !ALF_THEMES[palette]) palette = 'sage';
   const link = document.getElementById('alf-theme-link');
   if (link) link.href = '/static/theme-' + palette + '.css';
   syncIframeTheme();
 }
 
+function syncTerminalTheme(palette) {
+  const theme = ALF_THEMES[palette];
+  if (!theme) return;
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const termName = dark ? theme.termDark : theme.termLight;
+  const sel = document.getElementById('termThemeSelect');
+  if (sel && termName && typeof termThemes !== 'undefined' && termThemes[termName]) {
+    sel.value = termName;
+    if (typeof termInstance !== 'undefined' && termInstance) termInstance.options.theme = termThemes[termName];
+  }
+}
+
 (function initPalette() {
   let saved = localStorage.getItem('alf-palette') ?? 'sage';
-  // Migrate removed catppuccin palette to studio
-  if (saved === 'catppuccin') { saved = 'studio'; localStorage.setItem('alf-palette', saved); }
+  if (!ALF_THEMES[saved]) saved = 'sage';
   applyPalette(saved);
-  document.querySelectorAll('.theme-swatch').forEach(btn => {
-    if (btn.dataset.palette === saved) btn.classList.add('active');
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.theme-swatch').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      localStorage.setItem('alf-palette', btn.dataset.palette);
-      applyPalette(btn.dataset.palette);
+
+  // Build theme picker dropdown from registry.
+  const picker = document.getElementById('themePicker');
+  if (picker) {
+    Object.entries(ALF_THEMES).forEach(([key, t]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = t.label;
+      if (key === saved) opt.selected = true;
+      picker.appendChild(opt);
     });
-  });
+    picker.addEventListener('change', () => {
+      const key = picker.value;
+      localStorage.setItem('alf-palette', key);
+      localStorage.removeItem('alf-term-theme');
+      applyPalette(key);
+      syncTerminalTheme(key);
+    });
+  }
 })();
 
 // --- Collapsible nav sections + favorites (persistent) ---
@@ -159,6 +193,7 @@ function navigateTo(view) {
   const chatView = document.getElementById('chatView');
   const schedulesView = document.getElementById('schedulesView');
   const tasksView = document.getElementById('tasksView');
+  const teamsView = document.getElementById('teamsView');
   const pageFrame = document.getElementById('pageFrame');
   const docsView = document.getElementById('docsView');
   const logsView = document.getElementById('logsView');
@@ -182,6 +217,7 @@ function navigateTo(view) {
   chatView.style.display = 'none';
   schedulesView.style.display = 'none';
   tasksView.style.display = 'none';
+  if (teamsView) teamsView.style.display = 'none';
   pageFrame.style.display = 'none';
   docsView.style.display = 'none';
   logsView.style.display = 'none';
@@ -214,6 +250,10 @@ function navigateTo(view) {
     tasksView.style.display = '';
     pageFrame.src = '';
     tasksInit();
+  } else if (view === 'teams') {
+    if (teamsView) teamsView.style.display = '';
+    pageFrame.src = '';
+    teamsInit();
   } else if (view === 'logs') {
     logsView.style.display = '';
     pageFrame.src = '';
@@ -288,8 +328,32 @@ function syncBottomNav(view) {
 }
 
 // --- Status ---
+let _updateDismissed = false;
 function loadStatus() {
-  api('/api/status').catch(() => {});
+  api('/api/status').then(data => {
+    if (data && data.version) {
+      const el = document.getElementById('sidebarVersion');
+      if (el) el.textContent = data.version.startsWith('v') ? data.version : 'v' + data.version;
+    }
+    if (data && data.update_available && !_updateDismissed) {
+      showUpdateBanner(data.version, data.update_available);
+    }
+  }).catch(() => {});
+}
+
+function showUpdateBanner(current, latest) {
+  if (document.getElementById('updateBanner')) return; // already showing
+  const banner = document.createElement('div');
+  banner.id = 'updateBanner';
+  banner.className = 'update-banner';
+  banner.innerHTML = '<span><strong>Update available:</strong> ' + esc(current) + ' → ' + esc(latest) +
+    ' — Run <code>alf upgrade</code> on the host.</span>' +
+    '<button class="update-banner-close" title="Dismiss">&times;</button>';
+  banner.querySelector('.update-banner-close').addEventListener('click', () => {
+    banner.remove();
+    _updateDismissed = true;
+  });
+  document.body.prepend(banner);
 }
 
 
@@ -629,17 +693,54 @@ function wsRenderDir(dirPath, depth) {
 }
 
 let wsViewMode = false;
+let wsMdMode = 'preview'; // 'preview' or 'edit'
 
 function wsResetViewer() {
   wsViewMode = false;
+  wsMdMode = 'preview';
   const viewBtn = document.getElementById('wsViewBtn');
   const viewer = document.getElementById('wsViewer');
+  const mdPreview = document.getElementById('wsMdPreview');
+  const mdEditBtn = document.getElementById('wsMdEditBtn');
   viewBtn.style.display = 'none';
   viewer.style.display = 'none';
   viewer.innerHTML = '';
+  mdPreview.style.display = 'none';
+  mdPreview.innerHTML = '';
+  mdEditBtn.style.display = 'none';
   jvLiveData = null;
   viewBtn.innerHTML = '<i data-lucide="sliders"></i>';
   viewBtn.title = 'Form view';
+}
+
+function wsIsMdFile(path) {
+  return path && path.toLowerCase().endsWith('.md');
+}
+
+function wsShowMdPreview(content) {
+  const mdPreview = document.getElementById('wsMdPreview');
+  const editor = document.getElementById('wsEditor');
+  mdPreview.innerHTML = chatRenderMd(content || '');
+  mdPreview.style.display = '';
+  editor.style.display = 'none';
+  wsMdMode = 'preview';
+  const btn = document.getElementById('wsMdEditBtn');
+  btn.innerHTML = '<i data-lucide="pencil"></i>';
+  btn.title = 'Edit';
+  if (window.lucide) lucide.createIcons();
+}
+
+function wsShowMdEditor() {
+  const mdPreview = document.getElementById('wsMdPreview');
+  const editor = document.getElementById('wsEditor');
+  mdPreview.style.display = 'none';
+  editor.style.display = '';
+  editor.focus();
+  wsMdMode = 'edit';
+  const btn = document.getElementById('wsMdEditBtn');
+  btn.innerHTML = '<i data-lucide="eye"></i>';
+  btn.title = 'Preview';
+  if (window.lucide) lucide.createIcons();
 }
 
 function wsIsJsonFile(path) {
@@ -689,6 +790,12 @@ function wsOpenFile(filePath) {
     if (wsIsJsonFile(filePath)) {
       document.getElementById('wsViewBtn').style.display = '';
       if (window.lucide) lucide.createIcons();
+    }
+
+    // Markdown files: show preview by default with edit toggle
+    if (wsIsMdFile(filePath)) {
+      document.getElementById('wsMdEditBtn').style.display = '';
+      wsShowMdPreview(r.content || '');
     }
   }).catch(() => toast('Failed to load file', 'error'));
 }
@@ -819,6 +926,39 @@ document.getElementById('wsSaveBtn').addEventListener('click', () => {
     if (r.ok) toast('Saved');
     else toast(r.error || 'Save failed', 'error');
   }).catch(e => toast(e.error || 'Save failed', 'error'));
+});
+
+// --- Markdown Edit Toggle ---
+document.getElementById('wsMdEditBtn').addEventListener('click', () => {
+  if (wsMdMode === 'preview') {
+    wsShowMdEditor();
+  } else {
+    // Switching to preview: auto-save first
+    const editor = document.getElementById('wsEditor');
+    wsShowMdPreview(editor.value);
+    if (wsOpenPath && !editor.disabled) {
+      // Auto-save in background
+      api('/api/workspace', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: wsOpenPath, content: editor.value }),
+      }).catch(() => {}); // silent save
+    }
+  }
+});
+
+// Auto-save markdown on blur (switching away from editor)
+document.getElementById('wsEditor').addEventListener('blur', () => {
+  if (wsIsMdFile(wsOpenPath) && wsMdMode === 'edit') {
+    const editor = document.getElementById('wsEditor');
+    if (!editor.disabled) {
+      api('/api/workspace', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: wsOpenPath, content: editor.value }),
+      }).catch(() => {});
+    }
+  }
 });
 
 // --- JSON Pretty Viewer ---
@@ -1565,6 +1705,12 @@ function chatRenderTabs() {
       el.appendChild(close);
     }
     el.addEventListener('click', () => chatSwitchTab(tab.id));
+    el.addEventListener('auxclick', (e) => {
+      if (e.button === 1 && chatTabList.length > 1) {
+        e.preventDefault();
+        chatCloseTab(tab.id);
+      }
+    });
     el.addEventListener('dblclick', (e) => {
       e.preventDefault();
       chatRenameTab(tab.id, label);
@@ -1760,6 +1906,7 @@ document.getElementById('chatTabAdd').addEventListener('click', chatNewTab);
 // --- Chat ---
 let chatHistoryLoaded = false;
 let chatSending = false;
+let chatMessageQueue = []; // { id, text, files[], el } — pending messages waiting to be sent
 let chatJobId = null;
 let chatEventOffset = 0;
 let chatReconnectTimer = null;
@@ -2554,16 +2701,41 @@ function chatFinalizeBubble() {
         if (rEl) rEl.appendChild(span);
       }
     }
-    const reactBtn = document.createElement('button');
-    reactBtn.className = 'chat-react-btn';
-    reactBtn.textContent = '\u{1F60A}';
-    reactBtn.title = 'React';
+    // Add action buttons (react + send to agents) in proper wrapper.
+    // Capture references in locals — chatAssistantBubble and chatFullText are
+    // reset to null/'' in chatFinishSend() right after this function returns.
     const msgId = chatDoneData.msg_id;
-    reactBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      chatShowReactPicker(chatAssistantBubble, msgId, reactBtn);
-    });
-    chatAssistantBubble.appendChild(reactBtn);
+    const bubble = chatAssistantBubble;
+    const fullText = chatFullText;
+    if (msgId) {
+      const actionsWrap = document.createElement('div');
+      actionsWrap.className = 'chat-bubble-actions';
+
+      const reactBtn = document.createElement('button');
+      reactBtn.className = 'chat-react-btn';
+      reactBtn.textContent = '\u{1F60A}';
+      reactBtn.title = 'React';
+      reactBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        chatShowReactPicker(bubble, msgId, reactBtn);
+      });
+      actionsWrap.appendChild(reactBtn);
+
+      if (fullText && fullText.length > 10) {
+        const agentBtn = document.createElement('button');
+        agentBtn.className = 'chat-agent-btn';
+        agentBtn.innerHTML = '<i data-lucide="users" style="width:14px;height:14px"></i>';
+        agentBtn.title = 'Send to agents';
+        agentBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          agentModalShow(fullText.substring(0, 2000));
+        });
+        actionsWrap.appendChild(agentBtn);
+      }
+
+      bubble.appendChild(actionsWrap);
+      if (typeof lucide !== 'undefined') lucide.createIcons({ nodes: [actionsWrap] });
+    }
   }
 }
 
@@ -2616,12 +2788,83 @@ function chatFinishSend() {
   chatAgentStepCount = 0;
   chatCurrentTier = '';
   chatNeedNewBubble = false;
+
+  // Process next queued message if any.
+  chatSendNextQueued();
+}
+
+// --- Message Queue ---
+let chatQueueIdCounter = 0;
+
+function chatQueueMessage(text, files) {
+  const id = 'q-' + (++chatQueueIdCounter);
+  const el = document.createElement('div');
+  el.className = 'chat-bubble user chat-queued';
+  el.dataset.queueId = id;
+
+  const textEl = document.createElement('div');
+  textEl.textContent = text || (files.length ? files.length + ' file(s)' : '');
+  el.appendChild(textEl);
+
+  const actions = document.createElement('div');
+  actions.className = 'chat-queued-actions';
+
+  const label = document.createElement('span');
+  label.className = 'chat-queued-label';
+  label.textContent = 'Queued';
+  actions.appendChild(label);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'chat-queued-cancel';
+  cancelBtn.title = 'Cancel';
+  cancelBtn.innerHTML = '<i data-lucide="x" style="width:14px;height:14px"></i>';
+  cancelBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    chatDequeueMessage(id);
+  });
+  actions.appendChild(cancelBtn);
+  el.appendChild(actions);
+
+  document.getElementById('chatQueue').appendChild(el);
+  if (typeof lucide !== 'undefined') lucide.createIcons({ nodes: [el] });
+  chatScrollBottom();
+
+  chatMessageQueue.push({ id, text, files, el });
+}
+
+function chatDequeueMessage(id) {
+  const idx = chatMessageQueue.findIndex(m => m.id === id);
+  if (idx === -1) return;
+  const item = chatMessageQueue.splice(idx, 1)[0];
+  if (item.el && item.el.parentNode) item.el.remove();
+}
+
+async function chatSendNextQueued() {
+  if (chatSending || chatMessageQueue.length === 0) return;
+
+  const next = chatMessageQueue.shift();
+  if (next.el && next.el.parentNode) next.el.remove();
+
+  // Inject into input and trigger send.
+  chatInput.value = next.text || '';
+  chatPendingFiles = next.files || [];
+  if (chatPendingFiles.length) chatRenderPendingFiles();
+  await chatSend();
 }
 
 async function chatSend() {
   const text = chatInput.value.trim();
   const hasFiles = chatPendingFiles.length > 0;
-  if ((!text && !hasFiles) || chatSending) return;
+  if (!text && !hasFiles) return;
+
+  // If already sending, queue the message instead of blocking.
+  if (chatSending) {
+    chatQueueMessage(text, hasFiles ? [...chatPendingFiles] : []);
+    chatInput.value = '';
+    chatInput.style.height = '';
+    if (hasFiles) { chatPendingFiles = []; chatRenderPendingFiles(); }
+    return;
+  }
 
   // Handle /bash command locally.
   if (text.startsWith('/bash ')) {
@@ -3020,13 +3263,31 @@ function loadApps() {
 
     section.innerHTML = '';
 
+    const favs = JSON.parse(localStorage.getItem('alf-nav-favs') || '[]');
     items.forEach(app => {
       const a = document.createElement('a');
       a.className = 'nav-item';
       a.dataset.view = 'page:' + app.name;
       const icon = safeLucideIcon(app.icon || 'app-window', 'app-window');
       const label = app.display_name || capitalizeName(app.name);
-      a.innerHTML = '<i data-lucide="' + esc(icon) + '"></i> ' + esc(label);
+      a.innerHTML = '<i data-lucide="' + esc(icon) + '"></i><span>' + esc(label) + '</span>';
+      if (favs.includes(a.dataset.view)) a.classList.add('nav-fav');
+      const pin = document.createElement('button');
+      pin.className = 'nav-fav-btn';
+      pin.title = 'Pin to favorites';
+      pin.innerHTML = '<i data-lucide="pin"></i>';
+      pin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        a.classList.toggle('nav-fav');
+        const current = JSON.parse(localStorage.getItem('alf-nav-favs') || '[]');
+        const v = a.dataset.view;
+        const updated = a.classList.contains('nav-fav')
+          ? [...current.filter(f => f !== v), v]
+          : current.filter(f => f !== v);
+        localStorage.setItem('alf-nav-favs', JSON.stringify(updated));
+      });
+      a.appendChild(pin);
       a.addEventListener('click', () => navigateTo(a.dataset.view));
       section.appendChild(a);
     });
@@ -3264,7 +3525,8 @@ let schedulesInitialized = false;
 let schedulesFilter = 'all';
 let schedulesSSE = null;
 let schedCollapsedSet = new Set(); // track collapsed job IDs
-let schedAllCollapsed = false;
+let schedAllCollapsed = true; // default: all collapsed
+let schedExpandedSet = new Set(); // track individually expanded job IDs
 
 const OUTPUTS = ['chat', 'file', 'both', 'silent'];
 
@@ -3274,11 +3536,8 @@ function schedulesInit() {
     document.getElementById('schedulesAddBtn').addEventListener('click', () => schedulesShowModal(null));
     document.getElementById('schedCollapseAllBtn').addEventListener('click', () => {
       schedAllCollapsed = !schedAllCollapsed;
-      if (schedAllCollapsed) {
-        (schedulesVisible || []).forEach(j => schedCollapsedSet.add(j.id));
-      } else {
-        schedCollapsedSet.clear();
-      }
+      schedExpandedSet.clear();
+      schedCollapsedSet.clear();
       schedulesRender();
     });
     document.getElementById('schedFilters').addEventListener('click', e => {
@@ -3290,6 +3549,7 @@ function schedulesInit() {
       schedulesRender();
     });
     schedulesConnectSSE();
+    document.getElementById('schedSearch').addEventListener('input', () => schedulesRender());
   }
   schedulesLoad();
 }
@@ -3349,6 +3609,18 @@ function schedulesRender() {
     filtered = filtered.filter(j => j.auto_delete && (!j.next_run || new Date(j.next_run) < now));
   }
 
+  // Apply search filter.
+  const schedQ = (document.getElementById('schedSearch')?.value || '').toLowerCase();
+  if (schedQ) {
+    filtered = filtered.filter(j => {
+      return (j.name || '').toLowerCase().includes(schedQ) ||
+        (j.prompt || '').toLowerCase().includes(schedQ) ||
+        (j.message || '').toLowerCase().includes(schedQ) ||
+        (j.command || '').toLowerCase().includes(schedQ) ||
+        (j.id || '').toLowerCase().includes(schedQ);
+    });
+  }
+
   schedulesVisible = filtered;
   const visible = schedulesVisible;
 
@@ -3394,13 +3666,13 @@ function schedulesRender() {
     const runBtn = j.enabled ? '<button class="btn-sm sched-run-btn" data-idx="' + i + '" title="Run now">Run</button>' : '';
     const toggleBtn = '<button class="btn-sm sched-toggle-btn" data-idx="' + i + '">' + (j.enabled ? 'Disable' : 'Enable') + '</button>';
     const actions = canFullEdit
-      ? runBtn +
+      ? runBtn + toggleBtn +
         '<button class="btn-sm sched-edit-btn" data-idx="' + i + '">Edit</button>' +
         '<button class="btn-sm btn-danger sched-delete-btn" data-idx="' + i + '">Delete</button>'
       : runBtn + toggleBtn +
         (j.managed ? '<button class="btn-sm sched-managed-edit-btn" data-idx="' + i + '">Settings</button>' : '');
 
-    const isCollapsed = schedCollapsedSet.has(j.id);
+    const isCollapsed = schedAllCollapsed ? !schedExpandedSet.has(j.id) : schedCollapsedSet.has(j.id);
     return '<div class="tier-card' + (isCollapsed ? ' collapsed' : '') + '" data-idx="' + i + '" data-sched-id="' + esc(j.id) + '">' +
       '<div class="tier-card-header">' +
         '<i data-lucide="chevron-down" class="sched-collapse-chevron" style="width:14px;height:14px"></i>' +
@@ -3509,17 +3781,21 @@ function schedulesRender() {
       };
     });
   });
-  // Collapse/expand individual cards.
-  list.querySelectorAll('.sched-collapse-chevron').forEach(chevron => {
-    chevron.addEventListener('click', e => {
-      e.stopPropagation();
-      const card = chevron.closest('.tier-card');
+  // Collapse/expand individual cards — click anywhere on the header row.
+  list.querySelectorAll('.tier-card-header').forEach(header => {
+    header.style.cursor = 'pointer';
+    header.addEventListener('click', e => {
+      // Don't toggle if clicking a button inside the header.
+      if (e.target.closest('button')) return;
+      const card = header.closest('.tier-card');
       const id = card.dataset.schedId;
-      if (schedCollapsedSet.has(id)) {
+      const isCurrentlyCollapsed = card.classList.contains('collapsed');
+      if (isCurrentlyCollapsed) {
+        schedExpandedSet.add(id);
         schedCollapsedSet.delete(id);
-        schedAllCollapsed = false;
       } else {
         schedCollapsedSet.add(id);
+        schedExpandedSet.delete(id);
       }
       card.classList.toggle('collapsed');
     });
@@ -3684,18 +3960,6 @@ function tasksInit() {
     document.getElementById('tasksAutoRefresh').addEventListener('change', (e) => {
       if (e.target.checked) tasksStartAutoRefresh(); else tasksStopAutoRefresh();
     });
-    // Tab bar switching.
-    document.querySelectorAll('.tasks-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        document.querySelectorAll('.tasks-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        const target = tab.dataset.tab;
-        document.getElementById('tasksRunsPane').style.display = target === 'tasks-runs' ? '' : 'none';
-        document.getElementById('tasksTeamsPane').style.display = target === 'tasks-teams' ? '' : 'none';
-        if (target === 'tasks-teams') teamsFetch();
-      });
-    });
-    teamsInitEditor();
     // Task launcher: send prompt to agent tier.
     const launchBtn = document.getElementById('taskLaunchBtn');
     const launchInput = document.getElementById('taskLauncherInput');
@@ -4191,6 +4455,15 @@ const teamsTemplate = {
   }]
 };
 
+let teamsInitialized = false;
+function teamsInit() {
+  if (!teamsInitialized) {
+    teamsInitialized = true;
+    teamsInitEditor();
+  }
+  teamsFetch();
+}
+
 async function teamsFetch() {
   try {
     const data = await api('/api/teams');
@@ -4385,7 +4658,10 @@ async function logsFetch() {
   try {
     const res = await fetch(`/api/logs?name=${encodeURIComponent(name)}&n=${n}`);
     const data = await res.json();
-    _logsAllLines = data.lines || [];
+    const newLines = data.lines || [];
+    // Skip DOM update if lines haven't changed (avoids focus loss on auto-refresh).
+    if (newLines.length === _logsAllLines.length && newLines[newLines.length - 1] === _logsAllLines[_logsAllLines.length - 1]) return;
+    _logsAllLines = newLines;
     logsBuildFilters();
     logsApplyFilter();
   } catch {
@@ -5825,6 +6101,22 @@ var termThemes = {
     brightBlack: '#3a4638', brightRed: '#e07060', brightGreen: '#8ec48e', brightYellow: '#d4a84b',
     brightBlue: '#6ab4cc', brightMagenta: '#b89adb', brightCyan: '#6ec4b0', brightWhite: '#c5cfbf',
   },
+  'Studio Light': {
+    background: '#f5f3f0', foreground: '#2c2a28', cursor: '#d97706', cursorAccent: '#f5f3f0',
+    selectionBackground: 'rgba(217,119,6,0.2)', selectionForeground: '#2c2a28',
+    black: '#2c2a28', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04',
+    blue: '#3a8da8', magenta: '#7a5cad', cyan: '#2d8a7a', white: '#d6d3cf',
+    brightBlack: '#8a8580', brightRed: '#dc2626', brightGreen: '#16a34a', brightYellow: '#ca8a04',
+    brightBlue: '#3a8da8', brightMagenta: '#c76fa0', brightCyan: '#2d8a7a', brightWhite: '#f5f3f0',
+  },
+  'Studio Dark': {
+    background: '#1c1c1c', foreground: '#e7e5e4', cursor: '#f59e0b', cursorAccent: '#1c1c1c',
+    selectionBackground: 'rgba(245,158,11,0.25)', selectionForeground: '#e7e5e4',
+    black: '#262626', red: '#ef4444', green: '#22c55e', yellow: '#eab308',
+    blue: '#6ab4cc', magenta: '#b89adb', cyan: '#6ec4b0', white: '#a8a29e',
+    brightBlack: '#333333', brightRed: '#ef4444', brightGreen: '#22c55e', brightYellow: '#eab308',
+    brightBlue: '#6ab4cc', brightMagenta: '#dea0c4', brightCyan: '#6ec4b0', brightWhite: '#e7e5e4',
+  },
 };
 
 var termInstance = null;
@@ -5846,8 +6138,8 @@ var termResizeObserver = null;
   else {
     const palette = localStorage.getItem('alf-palette') ?? 'sage';
     const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (palette === 'sage') sel.value = dark ? 'Sage Dark' : 'Sage Light';
-    else sel.value = dark ? 'Catppuccin Mocha' : 'Catppuccin Latte';
+    const t = ALF_THEMES[palette];
+    if (t) sel.value = dark ? t.termDark : t.termLight;
   }
 
   sel.addEventListener('change', () => {
@@ -5863,9 +6155,12 @@ function termGetTheme() {
   if (termThemes[sel.value]) return termThemes[sel.value];
   const palette = localStorage.getItem('alf-palette') ?? 'sage';
   const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  return palette === 'sage'
-    ? termThemes[dark ? 'Sage Dark' : 'Sage Light']
-    : termThemes[dark ? 'Catppuccin Mocha' : 'Catppuccin Latte'];
+  const t = ALF_THEMES[palette];
+  if (t) {
+    const name = dark ? t.termDark : t.termLight;
+    if (termThemes[name]) return termThemes[name];
+  }
+  return termThemes[dark ? 'Catppuccin Mocha' : 'Catppuccin Latte'];
 }
 
 function terminalInit() {

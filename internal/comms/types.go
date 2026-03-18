@@ -118,6 +118,7 @@ type TierParams struct {
 	MaxIterations        int
 	TimeoutMin           int
 	SystemPrompt         string
+	RouterLabel          string
 	ContextWeight        string
 }
 

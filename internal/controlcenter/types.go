@@ -286,12 +286,13 @@ func (s *Stats) RecordMessage() {
 
 // DaemonStatus is a snapshot of daemon state for the API.
 type DaemonStatus struct {
-	Status       string         `json:"status"`
-	Uptime       string         `json:"uptime"`
-	MessageCount int64          `json:"message_count"`
-	LastMessage  *string        `json:"last_message"`
-	Version      string         `json:"version"`
-	Session      *SessionStatus `json:"session,omitempty"`
+	Status          string         `json:"status"`
+	Uptime          string         `json:"uptime"`
+	MessageCount    int64          `json:"message_count"`
+	LastMessage     *string        `json:"last_message"`
+	Version         string         `json:"version"`
+	UpdateAvailable string         `json:"update_available,omitempty"` // latest version if newer release detected
+	Session         *SessionStatus `json:"session,omitempty"`
 }
 
 // SessionStatus summarizes the current chat session.

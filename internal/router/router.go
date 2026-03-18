@@ -171,7 +171,16 @@ func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 				return result
 			}
 		}
-		// Guardrail 2: upgrade light → next tier if message is too complex.
+		// Guardrail 2: downgrade non-light → light if reason says greeting/trivial.
+		if tierContextWeight(result.Tier, tiers) != "light" && isGreetingReason(result.Reason) && !hasComplexityMarkers(message) {
+			if lt := lowestLightTier(tiers); lt != "" {
+				log.Printf("router: %s → %s downgraded to %s (greeting detected)", truncate(message, 60), result.Tier, lt)
+				result.Tier = lt
+				result.Reason += " [downgraded: greeting]"
+				return result
+			}
+		}
+		// Guardrail 3: upgrade light → next tier if message is too complex.
 		if tierContextWeight(result.Tier, tiers) == "light" && hasComplexityMarkers(message) {
 			if nt := nextTierAbove(result.Tier, tiers); nt != "" {
 				log.Printf("router: %s → %s upgraded to %s (complexity markers)", truncate(message, 60), result.Tier, nt)
@@ -495,6 +504,36 @@ func lowestWriteTier(tiers *cc.TiersConfig) string {
 	bestPriority := int(^uint(0) >> 1)
 	for _, t := range tiers.Tiers {
 		if t.Enabled && t.Routable && t.WriteCapable && t.Priority < bestPriority {
+			best = t.Name
+			bestPriority = t.Priority
+		}
+	}
+	return best
+}
+
+// greetingReasonMarkers are substrings in classifier reasons that indicate trivial messages.
+var greetingReasonMarkers = []string{
+	"greeting", "greet", "small talk", "farewell", "acknowledge",
+	"non-actionable", "casual", "salutation", "chitchat", "pleasantr",
+}
+
+// isGreetingReason checks if the classifier's reason text indicates a greeting/trivial message.
+func isGreetingReason(reason string) bool {
+	lower := strings.ToLower(reason)
+	for _, marker := range greetingReasonMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// lowestLightTier returns the lowest-priority enabled+routable tier with context_weight=light.
+func lowestLightTier(tiers *cc.TiersConfig) string {
+	best := ""
+	bestPriority := int(^uint(0) >> 1)
+	for _, t := range tiers.Tiers {
+		if t.Enabled && t.Routable && t.EffectiveContextWeight() == "light" && t.Priority < bestPriority {
 			best = t.Name
 			bestPriority = t.Priority
 		}

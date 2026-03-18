@@ -6,16 +6,27 @@ import (
 	"time"
 )
 
+// UpdateChecker provides the latest available version (if any).
+type UpdateChecker interface {
+	LatestVersion() string
+}
+
 // daemonStatusProvider implements StatusProvider using shared Stats.
 type daemonStatusProvider struct {
 	stats     *Stats
 	version   string
 	chatStore *ChatStore
+	updater   UpdateChecker // may be nil
 }
 
 // NewStatusProvider creates a StatusProvider from shared stats.
-func NewStatusProvider(stats *Stats, version string, chatStore *ChatStore) StatusProvider {
+func NewStatusProvider(stats *Stats, version string, chatStore *ChatStore) *daemonStatusProvider {
 	return &daemonStatusProvider{stats: stats, version: version, chatStore: chatStore}
+}
+
+// SetUpdater attaches the update checker for version status reporting.
+func (p *daemonStatusProvider) SetUpdater(u UpdateChecker) {
+	p.updater = u
 }
 
 func (p *daemonStatusProvider) Status() DaemonStatus {
@@ -33,6 +44,12 @@ func (p *daemonStatusProvider) Status() DaemonStatus {
 		MessageCount: p.stats.MessageCount.Load(),
 		LastMessage:  lastMsg,
 		Version:      p.version,
+	}
+
+	if p.updater != nil {
+		if latest := p.updater.LatestVersion(); latest != "" {
+			ds.UpdateAvailable = latest
+		}
 	}
 
 	// Compute current session stats from recent messages.

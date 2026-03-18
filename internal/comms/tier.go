@@ -25,6 +25,7 @@ type TierInfo struct {
 	TimeoutMin   int
 	Backend      string
 	SystemPrompt string
+	RouterLabel  string
 	ContextWeight string // "light", "standard", "full"
 }
 
@@ -95,6 +96,7 @@ func ResolveTierParams(tierName string, tiers TiersSnapshot, dataDir string, too
 				TimeoutMin:           t.TimeoutMin,
 				Backend:              backend,
 				SystemPrompt:         t.SystemPrompt,
+				RouterLabel:          t.RouterLabel,
 				ContextWeight:        cw,
 			}, true
 		}

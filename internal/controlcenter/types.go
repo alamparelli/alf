@@ -49,6 +49,9 @@ type Config struct {
 	MemoryExtractMinMessages   int     `json:"memory_extract_min_messages"`   // min message pairs to trigger, 0 = 3
 	MemoryDedupTextThreshold   float64 `json:"memory_dedup_text_threshold"`   // Jaccard similarity threshold, 0 = 0.7
 	MemoryDedupCosineThreshold float64 `json:"memory_dedup_cosine_threshold"` // cosine distance threshold, 0 = 0.15
+	// BroadcastChannel sets the default channel for system alerts (e.g., vault token expiry).
+	// Values: "all" (default, sends to all adapters), "tg", "cc".
+	BroadcastChannel string `json:"broadcast_channel,omitempty"`
 	// TiersFile overrides the default tiers.json filename. Relative paths are
 	// resolved against config.d/. Absolute paths are used as-is.
 	// Empty (default) means tiers.json.

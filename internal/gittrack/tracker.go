@@ -146,7 +146,6 @@ func (t *Tracker) writeGitignore() error {
 .claude/settings.local.json
 .claude/plugins/
 .claude/shell-snapshots/
-agents/
 tmp/
 models/
 sessions/

@@ -755,6 +755,7 @@ func main() {
 			uc.CheckOnce,
 		)
 	}
+	var memExtractor *memstore.Extractor
 	if memDB != nil {
 		extractorTierResolver := func() string {
 			tierName := firstFallbackTier(tierStore)
@@ -768,34 +769,37 @@ func main() {
 			}
 			return ""
 		}
-		extractInterval := time.Duration(cfg.EffectiveMemoryExtractInterval()) * time.Minute
 		extractTimeout := time.Duration(cfg.EffectiveMemoryExtractTimeout()) * time.Second
-		extractBootDelay := time.Duration(cfg.EffectiveMemoryExtractBootDelay()) * time.Second
-		extractMinMsg := cfg.EffectiveMemoryExtractMinMessages()
+		extractAdapter := &extractorAdapter{prov: cliProvider, registry: registry}
 
-		extractor := memstore.NewExtractor(memDB, dataDir, contextDir, memstore.ExtractorConfig{
-			Interval:    extractInterval,
-			Timeout:     extractTimeout,
-			BootDelay:   extractBootDelay,
-			MinMessages: extractMinMsg,
-		}, &extractorAdapter{prov: cliProvider, registry: registry}, extractorTierResolver)
-		cronExpr := fmt.Sprintf("@every %dm", cfg.EffectiveMemoryExtractInterval())
-		sched.RegisterSystem("mem-extract", "Memory Extraction", cronExpr, func() error {
-			state := extractor.LoadState()
-			return extractor.RunOnce(state.LastRun)
+		memExtractor = memstore.NewExtractor(memDB, dataDir, contextDir, memstore.ExtractorConfig{
+			Timeout:      extractTimeout,
+			MsgThreshold: cfg.EffectiveMemoryExtractMinMessages(),
+		}, extractAdapter, extractorTierResolver)
+
+		// Consolidator: dedup + fallback extraction every 6h.
+		consolidator := memstore.NewConsolidator(memDB, memExtractor, extractAdapter, extractTimeout)
+		sched.RegisterSystem("mem-consolidate", "Memory Consolidation", "@every 360m", func() error {
+			return consolidator.RunOnce()
 		})
-		// Run initial extraction after a delay (avoids competing with other
-		// startup processes for resources on constrained hosts).
+
+		// Run initial extraction after boot delay.
+		extractBootDelay := time.Duration(cfg.EffectiveMemoryExtractBootDelay()) * time.Second
 		go func() {
 			time.Sleep(extractBootDelay)
-			state := extractor.LoadState()
-			if time.Since(state.LastRun) >= extractInterval {
-				log.Println("memstore: running initial extraction (overdue)")
-				if err := extractor.RunOnce(state.LastRun); err != nil {
+			if memExtractor.HasChanges() {
+				log.Println("memstore: running initial extraction (pending changes)")
+				if err := memExtractor.Extract(); err != nil {
 					log.Printf("memstore: initial extraction failed: %v", err)
 				}
 			}
 		}()
+	}
+
+	// Wire memory extraction hooks into comms engine.
+	if memExtractor != nil {
+		commEngine.OnSessionEnd = memExtractor.OnSessionEnd
+		commEngine.OnMessage = memExtractor.OnMessage
 	}
 
 	// Daily schedule digest - runs at 08:00 local time.
@@ -1128,27 +1132,8 @@ func main() {
 
 			// Extract reply context if this is a quoted reply.
 			isReply := u.Message.ReplyToMessage != nil
-			repliedToID := int64(0)
-			if isReply {
-				repliedToID = u.Message.ReplyToMessage.MessageID
-			}
 
-			// Note: hasText, hasMedia, hasVoice already determined above
-
-			truncated := userText // includes caption for media messages
-			if len(truncated) > 200 {
-				truncated = truncated[:200]
-			}
-			eventLog.Log("message_in", map[string]any{
-				"chat_id":       u.Message.Chat.ID,
-				"username":      u.Message.From.Username,
-				"text":          truncated,
-				"is_reply":      isReply,
-				"replied_to_id": repliedToID,
-				"has_media":     hasMedia,
-				"has_voice":     hasVoice,
-				"session_id":    chatSessions.Get(u.Message.Chat.ID),
-			})
+			// message_in is now logged centrally by comms.Process()
 
 			// Handle voice messages: transcribe and treat as text.
 			if hasVoice && transcriber != nil && !transcriber.IsReady() {

@@ -42,14 +42,15 @@ func (h *DocsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id = strings.TrimSuffix(id, "/")
 
 	if id == "" {
-		h.serveList(w)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		h.serveList(w, strings.ToLower(q))
 		return
 	}
 
 	h.serveDoc(w, id)
 }
 
-func (h *DocsHandler) serveList(w http.ResponseWriter) {
+func (h *DocsHandler) serveList(w http.ResponseWriter, query string) {
 	entries, err := docsFS.ReadDir("docs")
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -67,6 +68,25 @@ func (h *DocsHandler) serveList(w http.ResponseWriter) {
 			continue
 		}
 		info := parseDocInfo(string(data))
+
+		// If query is provided, search in title, summary, tags AND body content.
+		if query != "" {
+			match := strings.Contains(strings.ToLower(info.title), query) ||
+				strings.Contains(strings.ToLower(info.summary), query) ||
+				strings.Contains(strings.ToLower(info.body), query)
+			if !match {
+				for _, t := range info.tags {
+					if strings.Contains(strings.ToLower(t), query) {
+						match = true
+						break
+					}
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+
 		docs = append(docs, docMeta{
 			ID:       id,
 			Title:    info.title,

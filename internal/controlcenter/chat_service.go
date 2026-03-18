@@ -256,6 +256,16 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	}
 	cs.ChatStore.Append(userMsg)
 
+	// Log incoming message for mem-extract (legacy path without engine).
+	if cs.EventLog != nil {
+		cs.EventLog.Log("message_in", map[string]any{
+			"channel":   "cc",
+			"text":      req.Message,
+			"is_reply":  req.ReplyTo != "",
+			"has_media": len(req.MediaIDs) > 0,
+		})
+	}
+
 	// Parallel write to unified conversation store.
 	var ccConvID string
 	if cs.ConvStore != nil {

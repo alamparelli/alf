@@ -1,14 +1,15 @@
 package memstore
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,24 +28,28 @@ type ExtractorParams struct {
 // TierResolver returns the model name for the lowest-priority enabled tier.
 type TierResolver func() string
 
-// Extractor periodically extracts facts from event logs and stores them.
+// Extractor extracts facts from git diffs of the data directory.
+// It is triggered event-driven (session end, message threshold) and
+// also runs as a fallback via the consolidator cron.
 type Extractor struct {
 	store        *Store
-	dataDir      string         // root data dir (for logs, claude working dir)
-	stateDir     string         // where to store state file (context dir)
-	interval     time.Duration
-	timeout      time.Duration  // timeout for Claude extraction call
-	bootDelay    time.Duration  // delay before first extraction
-	minMessages  int            // minimum message pairs to trigger extraction
+	dataDir      string        // root data dir (git repo)
+	stateDir     string        // where to store state file (context dir)
+	timeout      time.Duration // timeout for Claude extraction call
+	msgThreshold int           // message count before mid-session extraction
 	statePath    string
-	stop         chan struct{}
 	provider     ExtractorProvider
-	tierResolver TierResolver   // resolves cheapest tier model at runtime
+	tierResolver TierResolver // resolves cheapest tier model at runtime
+
+	// Per-session message counters for mid-session extraction.
+	msgCounts map[string]int
+	mu        sync.Mutex
 }
 
 // ExtractorState holds the persisted state of the extractor.
 type ExtractorState struct {
-	LastRun time.Time `json:"last_run"`
+	LastHash string    `json:"last_hash"`
+	LastRun  time.Time `json:"last_run"`
 }
 
 // Keep unexported alias for internal use.
@@ -52,122 +57,179 @@ type extractorState = ExtractorState
 
 type extractedFact struct {
 	Text string `json:"text"`
-	Type string `json:"type"` // "fact", "preference", "decision"
+	Type string `json:"type"` // "fact", "preference", "decision", "contact"
 }
 
 // ExtractorConfig holds configurable parameters for the Extractor.
 type ExtractorConfig struct {
-	Interval    time.Duration // extraction interval (0 = 3h)
-	Timeout     time.Duration // Claude call timeout (0 = 5m)
-	BootDelay   time.Duration // delay before first extraction (0 = 3m)
-	MinMessages int           // min message pairs to trigger (0 = 3)
+	Timeout      time.Duration // Claude call timeout (0 = 5m)
+	MsgThreshold int           // messages before mid-session extraction (0 = 10)
 }
 
-// NewExtractor creates a new periodic extraction job.
-// provider is used to invoke Claude for fact extraction.
-// tierResolver optionally resolves the cheapest tier model at runtime (nil = fallback to claude-haiku-4-5).
+// NewExtractor creates a new event-driven extractor.
 func NewExtractor(store *Store, dataDir, contextDir string, cfg ExtractorConfig, prov ExtractorProvider, tierResolver TierResolver) *Extractor {
-	if cfg.Interval <= 0 {
-		cfg.Interval = 3 * time.Hour
-	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
 	}
-	if cfg.BootDelay <= 0 {
-		cfg.BootDelay = 3 * time.Minute
+	if cfg.MsgThreshold <= 0 {
+		cfg.MsgThreshold = 10
 	}
-	if cfg.MinMessages <= 0 {
-		cfg.MinMessages = 3
+	// Ensure extraction guide exists on disk for user customization.
+	guidePath := filepath.Join(contextDir, "extraction-guide.md")
+	if _, err := os.Stat(guidePath); os.IsNotExist(err) {
+		os.WriteFile(guidePath, []byte(defaultExtractionGuide), 0o644)
 	}
+
 	return &Extractor{
 		store:        store,
 		dataDir:      dataDir,
 		stateDir:     contextDir,
-		interval:     cfg.Interval,
 		timeout:      cfg.Timeout,
-		bootDelay:    cfg.BootDelay,
-		minMessages:  cfg.MinMessages,
+		msgThreshold: cfg.MsgThreshold,
 		statePath:    filepath.Join(contextDir, "memory_extractor_state.json"),
-		stop:         make(chan struct{}),
 		provider:     prov,
 		tierResolver: tierResolver,
+		msgCounts:    make(map[string]int),
 	}
 }
 
-// Start begins the periodic extraction goroutine.
-func (e *Extractor) Start() {
-	go e.loop()
-}
-
-// Stop signals the extraction loop to exit.
-func (e *Extractor) Stop() {
-	close(e.stop)
-}
-
-func (e *Extractor) loop() {
-	// Delay first extraction to avoid competing with classifier for memory
-	// at boot time. Both spawn Claude CLI processes - running them
-	// simultaneously can OOM on constrained hosts.
-	select {
-	case <-time.After(e.bootDelay):
-	case <-e.stop:
+// OnMessage is called after each message_out. Increments the per-session
+// counter and triggers extraction when the threshold is reached.
+func (e *Extractor) OnMessage(sessionID string) {
+	if sessionID == "" {
 		return
 	}
+	e.mu.Lock()
+	e.msgCounts[sessionID]++
+	count := e.msgCounts[sessionID]
+	e.mu.Unlock()
 
-	state := e.loadState()
-	if time.Since(state.LastRun) >= e.interval {
-		if err := e.RunOnce(state.LastRun); err != nil {
-			log.Printf("memstore: extraction failed: %v", err)
-		}
-	}
+	if count >= e.msgThreshold {
+		e.mu.Lock()
+		e.msgCounts[sessionID] = 0
+		e.mu.Unlock()
 
-	ticker := time.NewTicker(e.interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-e.stop:
-			return
-		case <-ticker.C:
-			state := e.loadState()
-			if err := e.RunOnce(state.LastRun); err != nil {
-				log.Printf("memstore: extraction failed: %v", err)
+		log.Printf("memstore: message threshold reached (%d) for session %s, triggering extraction", count, sessionID[:min(12, len(sessionID))])
+		go func() {
+			if err := e.Extract(); err != nil {
+				log.Printf("memstore: threshold extraction failed: %v", err)
 			}
-		}
+		}()
 	}
 }
 
-// RunOnce extracts facts from event logs since the given time.
-func (e *Extractor) RunOnce(since time.Time) error {
-	log.Printf("memstore: starting extraction (since=%s, timeout=%s)", since.Format(time.RFC3339), e.timeout)
+// OnSessionEnd is called when a session is archived (/new, /clear, timeout).
+// Triggers extraction asynchronously.
+func (e *Extractor) OnSessionEnd(sessionID string) {
+	e.mu.Lock()
+	delete(e.msgCounts, sessionID)
+	e.mu.Unlock()
 
-	conversations, err := e.collectConversations(since)
+	log.Printf("memstore: session ended (%s), triggering extraction", sessionID[:min(12, len(sessionID))])
+	go func() {
+		if err := e.Extract(); err != nil {
+			log.Printf("memstore: session-end extraction failed: %v", err)
+		}
+	}()
+}
+
+// Extract runs the two-pass git diff extraction.
+// Safe to call concurrently — serialized internally.
+func (e *Extractor) Extract() error {
+	e.mu.Lock()
+	// Prevent concurrent extractions.
+	e.mu.Unlock()
+
+	state := e.loadState()
+	lastHash := state.LastHash
+
+	// Get current HEAD.
+	currentHash, err := e.gitCommand("rev-parse", "HEAD")
 	if err != nil {
-		return fmt.Errorf("collect conversations: %w", err)
+		return fmt.Errorf("git rev-parse HEAD: %w", err)
 	}
+	currentHash = strings.TrimSpace(currentHash)
 
-	if len(conversations) < e.minMessages {
-		log.Printf("memstore: skipping extraction - only %d message pairs, need %d (advancing state)", len(conversations), e.minMessages)
-		e.saveState() // advance LastRun so we don't stay permanently overdue
+	if currentHash == lastHash {
+		log.Printf("memstore: no new commits since last extraction")
 		return nil
 	}
 
-	// Build conversation text for Claude.
-	var sb strings.Builder
-	for _, c := range conversations {
-		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", c.ts, c.role, c.text))
+	// Pass 1: get diff stat.
+	var statArgs []string
+	if lastHash != "" {
+		statArgs = []string{"diff", "--stat", "--no-color", lastHash + ".." + currentHash,
+			"--", ":!*.png", ":!*.jpg", ":!*.wav", ":!*.mp3", ":!*.bin",
+			":!*.db", ":!*.db-shm", ":!*.db-wal"}
+	} else {
+		// First run: diff last 6 hours of commits.
+		since := time.Now().Add(-6 * time.Hour).Format("2006-01-02T15:04:05")
+		sinceHash, err := e.gitCommand("log", "--oneline", "--format=%h", "--since="+since, "--reverse")
+		if err != nil || strings.TrimSpace(sinceHash) == "" {
+			log.Printf("memstore: no commits found in last 6h, using HEAD~20")
+			sinceHash = "HEAD~20"
+		} else {
+			// Take the first commit hash.
+			lines := strings.Split(strings.TrimSpace(sinceHash), "\n")
+			sinceHash = lines[0]
+		}
+		statArgs = []string{"diff", "--stat", "--no-color", sinceHash + ".." + currentHash,
+			"--", ":!*.png", ":!*.jpg", ":!*.wav", ":!*.mp3", ":!*.bin",
+			":!*.db", ":!*.db-shm", ":!*.db-wal"}
 	}
-	promptText := sb.String()
-	log.Printf("memstore: extracting from %d messages (%d bytes prompt)", len(conversations), len(promptText))
 
-	start := time.Now()
-	facts, err := e.extractFacts(promptText)
-	elapsed := time.Since(start)
+	diffStat, err := e.gitCommand(statArgs...)
 	if err != nil {
-		log.Printf("memstore: extraction failed after %s", elapsed.Round(time.Millisecond))
+		return fmt.Errorf("git diff --stat: %w", err)
+	}
+
+	if strings.TrimSpace(diffStat) == "" {
+		log.Printf("memstore: empty diff stat, advancing state")
+		e.saveState(currentHash)
+		return nil
+	}
+
+	log.Printf("memstore: pass 1 — diff stat:\n%s", diffStat)
+
+	// Pass 1: ask LLM which files to examine.
+	selectedFiles, err := e.selectFiles(diffStat)
+	if err != nil {
+		return fmt.Errorf("select files: %w", err)
+	}
+
+	if len(selectedFiles) == 0 {
+		log.Printf("memstore: LLM selected no files, advancing state")
+		e.saveState(currentHash)
+		return nil
+	}
+
+	log.Printf("memstore: pass 1 — LLM selected %d files: %v", len(selectedFiles), selectedFiles)
+
+	// Pass 2: get actual diff for selected files.
+	diffRef := lastHash + ".." + currentHash
+	if lastHash == "" {
+		diffRef = "HEAD~20.." + currentHash
+	}
+	diffArgs := []string{"diff", "--no-color", diffRef, "--"}
+	diffArgs = append(diffArgs, selectedFiles...)
+
+	diffContent, err := e.gitCommand(diffArgs...)
+	if err != nil {
+		return fmt.Errorf("git diff selected files: %w", err)
+	}
+
+	if strings.TrimSpace(diffContent) == "" {
+		log.Printf("memstore: empty diff content for selected files")
+		e.saveState(currentHash)
+		return nil
+	}
+
+	// Pass 2: extract facts from the diff.
+	log.Printf("memstore: pass 2 — extracting from %d bytes of diff", len(diffContent))
+	facts, err := e.extractFacts(diffContent)
+	if err != nil {
 		return fmt.Errorf("extract facts: %w", err)
 	}
-	log.Printf("memstore: claude responded in %s", elapsed.Round(time.Millisecond))
 
 	stored := 0
 	for _, fact := range facts {
@@ -175,7 +237,7 @@ func (e *Extractor) RunOnce(since time.Time) error {
 			continue
 		}
 		memType := fact.Type
-		if memType != "fact" && memType != "preference" && memType != "decision" {
+		if memType != "fact" && memType != "preference" && memType != "decision" && memType != "contact" {
 			memType = "fact"
 		}
 		_, err := e.store.Store(fact.Text, memType, "extractor", nil)
@@ -189,123 +251,80 @@ func (e *Extractor) RunOnce(since time.Time) error {
 		stored++
 	}
 
-	log.Printf("memstore: extracted %d facts, stored %d (from %d message pairs)", len(facts), stored, len(conversations))
-	e.saveState()
+	log.Printf("memstore: extracted %d facts, stored %d", len(facts), stored)
+	e.saveState(currentHash)
 	return nil
 }
 
-type conversationLine struct {
-	ts   string
-	role string
-	text string
-}
-
-func (e *Extractor) collectConversations(since time.Time) ([]conversationLine, error) {
-	eventsDir := filepath.Join(e.dataDir, "logs", "events")
-
-	// Collect relevant day files.
-	now := time.Now()
-	var lines []conversationLine
-
-	for d := since; !d.After(now); d = d.AddDate(0, 0, 1) {
-		dayFile := filepath.Join(eventsDir, d.Format("2006-01-02")+".jsonl")
-		dayLines, err := e.readDayEvents(dayFile, since)
-		if err != nil {
-			continue // file may not exist
-		}
-		lines = append(lines, dayLines...)
+// HasChanges returns true if there are git changes since the last extraction.
+func (e *Extractor) HasChanges() bool {
+	state := e.loadState()
+	if state.LastHash == "" {
+		return true
 	}
-
-	return lines, nil
-}
-
-func (e *Extractor) readDayEvents(path string, since time.Time) ([]conversationLine, error) {
-	f, err := os.Open(path)
+	currentHash, err := e.gitCommand("rev-parse", "HEAD")
 	if err != nil {
-		return nil, err
+		return true
 	}
-	defer f.Close()
-
-	var lines []conversationLine
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
-
-	for scanner.Scan() {
-		var event struct {
-			Event string `json:"event"`
-			TS    string `json:"ts"`
-			Text  string `json:"text"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			continue
-		}
-
-		ts, err := time.Parse(time.RFC3339, event.TS)
-		if err != nil || ts.Before(since) {
-			continue
-		}
-
-		switch event.Event {
-		case "message_in":
-			if event.Text != "" {
-				lines = append(lines, conversationLine{
-					ts:   event.TS,
-					role: "user",
-					text: event.Text,
-				})
-			}
-		case "message_out", "orchestrator_out":
-			if event.Text != "" {
-				lines = append(lines, conversationLine{
-					ts:   event.TS,
-					role: "assistant",
-					text: truncateText(event.Text, 500),
-				})
-			}
-		}
-	}
-
-	return lines, scanner.Err()
+	return strings.TrimSpace(currentHash) != state.LastHash
 }
 
-const extractionPrompt = `You are a JSON extraction tool. Your ONLY job is to read conversation logs and output a JSON array.
-Do NOT reply to the conversations. Do NOT continue the conversation. Do NOT add any commentary.
-You MUST respond with ONLY a valid JSON array - nothing else.
+// --- Pass 1: File selection ---
 
-Output format (no other text allowed):
-[{"text": "specific fact or decision", "type": "fact|preference|decision"}]
+const fileSelectionPrompt = `You are a memory extraction assistant. Given a git diff --stat summary, select which files to examine.
+Respond with ONLY a JSON array of file paths. If none worth examining, respond with: []
+%s
+<diff_stat>
+%s
+</diff_stat>`
 
-Rules:
-- Only extract genuinely useful, specific information
-- Skip greetings, small talk, and pleasantries
-- "preference" = user likes/dislikes, style choices, workflow preferences
-- "decision" = architectural choices, tech decisions, agreed approaches
-- "fact" = everything else worth remembering (project details, names, context)
-- Each fact should be self-contained and understandable without conversation context
-- Always write facts in English regardless of conversation language
-- Be concise but precise
-- If no useful facts exist, return an empty array: []
-
-<conversation_logs>
-`
-
-func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, error) {
-	// Sanitize XML boundary markers to prevent prompt injection via user messages.
-	sanitized := strings.ReplaceAll(conversationText, "</conversation_logs>", "")
-	prompt := extractionPrompt + sanitized + "\n</conversation_logs>"
+func (e *Extractor) selectFiles(diffStat string) ([]string, error) {
+	guide := e.loadExtractionGuide()
+	prompt := fmt.Sprintf(fileSelectionPrompt, guide, diffStat)
 
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
-	model := "claude-haiku-4-5"
-	if e.tierResolver != nil {
-		if m := e.tierResolver(); m != "" {
-			model = m
-		}
+	raw, err := e.provider.Invoke(ctx, prompt, ExtractorParams{
+		Model:    e.resolveModel(),
+		MaxTurns: 1,
+		DataDir:  e.dataDir,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("LLM file selection: %w", err)
 	}
 
+	return parseJSONStringArray(raw)
+}
+
+// --- Pass 2: Fact extraction ---
+
+const extractionPrompt = `You are a JSON extraction tool. Read a git diff and extract facts worth remembering.
+Do NOT reply to conversations. Do NOT add commentary.
+Respond with ONLY a valid JSON array.
+
+Output format:
+[{"text": "specific fact or decision", "type": "fact|preference|decision|contact"}]
+
+Rules:
+- Each fact must be self-contained and understandable without the diff
+- Always write facts in English regardless of source language
+- If no useful facts exist, return: []
+%s
+<git_diff>
+`
+
+func (e *Extractor) extractFacts(diffContent string) ([]extractedFact, error) {
+	guide := e.loadExtractionGuide()
+	// Sanitize XML boundary markers.
+	sanitized := strings.ReplaceAll(diffContent, "</git_diff>", "")
+	prompt := fmt.Sprintf(extractionPrompt, guide) + sanitized + "\n</git_diff>"
+
+	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
+	defer cancel()
+
 	raw, err := e.provider.Invoke(ctx, prompt, ExtractorParams{
-		Model:    model,
+		Model:    e.resolveModel(),
 		MaxTurns: 1,
 		DataDir:  e.dataDir,
 	})
@@ -313,8 +332,135 @@ func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, erro
 		return nil, fmt.Errorf("claude extraction: %w", err)
 	}
 
-	// Parse JSON array from response. Claude may wrap it in markdown code blocks
-	// or add surrounding text despite instructions.
+	return parseJSONFactArray(raw)
+}
+
+// --- Extraction guide ---
+
+const defaultExtractionGuide = `# Memory Extraction Guide
+
+## What to extract
+- People names, contacts, emails, companies, roles
+- Decisions and choices made
+- User preferences, likes/dislikes, workflow habits
+- Plans, deadlines, milestones
+- New tools, skills, or capabilities added
+- Project context, stats, metrics worth remembering
+
+## What to skip
+- Trivial changes (whitespace, formatting)
+- Auto-generated data (digests, trending data, pipeline logs)
+- Binary files
+- Heartbeat, scheduler, or cache changes
+- Repetitive log entries
+
+## File selection hints
+- Event logs (*.jsonl) contain conversations — always examine
+- Markdown files often contain plans, analyses, and decisions
+- Config changes may reflect important preference shifts
+- Skill definitions describe new capabilities
+
+## Fact types
+- "contact" = people names, emails, companies, roles
+- "preference" = likes/dislikes, style choices, workflow preferences
+- "decision" = choices made, approaches agreed upon
+- "fact" = everything else worth remembering
+
+## Style
+- Be concise but precise
+- Each fact must be self-contained
+- Always write facts in English regardless of source language
+`
+
+// loadExtractionGuide loads the user-customizable extraction guide.
+// Creates a default one if it doesn't exist.
+func (e *Extractor) loadExtractionGuide() string {
+	path := filepath.Join(e.stateDir, "extraction-guide.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// Create default guide.
+		os.WriteFile(path, []byte(defaultExtractionGuide), 0o644)
+		data = []byte(defaultExtractionGuide)
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return ""
+	}
+	return "\n<extraction_guide>\n" + content + "\n</extraction_guide>\n"
+}
+
+// --- Git helpers ---
+
+func (e *Extractor) gitCommand(args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", e.dataDir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("%s: %s", err, string(exitErr.Stderr))
+		}
+		return "", err
+	}
+	return string(out), nil
+}
+
+// --- State management ---
+
+func (e *Extractor) loadState() extractorState {
+	data, err := os.ReadFile(e.statePath)
+	if err != nil {
+		return extractorState{}
+	}
+	var state extractorState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return extractorState{}
+	}
+	return state
+}
+
+// LoadState returns the current extractor state (exported).
+func (e *Extractor) LoadState() extractorState {
+	return e.loadState()
+}
+
+func (e *Extractor) saveState(hash string) {
+	state := extractorState{LastHash: hash, LastRun: time.Now()}
+	data, _ := json.Marshal(state)
+	os.WriteFile(e.statePath, data, 0o644)
+}
+
+func (e *Extractor) resolveModel() string {
+	if e.tierResolver != nil {
+		if m := e.tierResolver(); m != "" {
+			return m
+		}
+	}
+	return "claude-haiku-4-5"
+}
+
+// --- JSON parsing helpers ---
+
+func parseJSONStringArray(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
+
+	var result []string
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		if start := strings.Index(raw, "["); start != -1 {
+			if end := strings.LastIndex(raw, "]"); end > start {
+				if err2 := json.Unmarshal([]byte(raw[start:end+1]), &result); err2 == nil {
+					return result, nil
+				}
+			}
+		}
+		return nil, fmt.Errorf("parse file selection: %w (raw: %s)", err, truncateText(raw, 200))
+	}
+	return result, nil
+}
+
+func parseJSONFactArray(raw string) ([]extractedFact, error) {
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
@@ -323,7 +469,6 @@ func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, erro
 
 	var facts []extractedFact
 	if err := json.Unmarshal([]byte(raw), &facts); err != nil {
-		// Fallback: try to find a JSON array embedded in the response.
 		if start := strings.Index(raw, "["); start != -1 {
 			if end := strings.LastIndex(raw, "]"); end > start {
 				if err2 := json.Unmarshal([]byte(raw[start:end+1]), &facts); err2 == nil {
@@ -333,32 +478,7 @@ func (e *Extractor) extractFacts(conversationText string) ([]extractedFact, erro
 		}
 		return nil, fmt.Errorf("parse extraction response: %w (raw: %s)", err, truncateText(raw, 200))
 	}
-
 	return facts, nil
-}
-
-// LoadState returns the current extractor state (last run time).
-func (e *Extractor) LoadState() extractorState {
-	return e.loadState()
-}
-
-func (e *Extractor) loadState() extractorState {
-	data, err := os.ReadFile(e.statePath)
-	if err != nil {
-		// Default to 3 hours ago so first run covers recent history.
-		return extractorState{LastRun: time.Now().Add(-3 * time.Hour)}
-	}
-	var state extractorState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return extractorState{LastRun: time.Now().Add(-3 * time.Hour)}
-	}
-	return state
-}
-
-func (e *Extractor) saveState() {
-	state := extractorState{LastRun: time.Now()}
-	data, _ := json.Marshal(state)
-	os.WriteFile(e.statePath, data, 0o644)
 }
 
 func truncateText(s string, max int) string {

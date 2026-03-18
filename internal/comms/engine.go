@@ -39,6 +39,10 @@ type ChatEngine struct {
 	ResolveModel   func(short string) string // maps "haiku" → full model ID
 	BackendConfigs func() map[string]BackendConfig
 
+	// Memory extraction hooks (optional).
+	OnSessionEnd func(sessionID string)
+	OnMessage    func(sessionID string)
+
 	// Adapters
 	adapters map[string]ChannelAdapter
 	mu       sync.RWMutex

@@ -61,6 +61,7 @@ type OrchestratorOutput struct {
 	Thinking  string            `json:"thinking,omitempty"`
 	Plan      []PlanStep        `json:"plan,omitempty"`
 	Questions []string          `json:"questions,omitempty"`
+	Gather    []string          `json:"gather,omitempty"` // file paths to read before planning
 }
 
 // AgentResult holds the outcome of a single sub-agent invocation.

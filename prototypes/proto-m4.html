@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALF OS — Control Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Lexend:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0c0c0c;
+    --surface: #161616;
+    --text: #ebebeb;
+    --text-muted: #666666;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --border: #222222;
+    --radius: 6px;
+    --sidebar-collapsed: 56px;
+    --sidebar-expanded: 200px;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+  }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: var(--sidebar-collapsed);
+    min-width: var(--sidebar-collapsed);
+    height: 100vh;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    transition: width 0.2s ease, min-width 0.2s ease;
+    overflow: hidden;
+    position: relative;
+    z-index: 10;
+  }
+
+  .sidebar:hover {
+    width: var(--sidebar-expanded);
+    min-width: var(--sidebar-expanded);
+  }
+
+  .sidebar-logo {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .sidebar-logo .logo-mark {
+    width: 24px;
+    height: 24px;
+    background: var(--accent);
+    border-radius: 6px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Lexend', sans-serif;
+    font-weight: 600;
+    font-size: 11px;
+    color: #fff;
+  }
+
+  .sidebar-logo .logo-text {
+    font-family: 'Lexend', sans-serif;
+    font-weight: 500;
+    font-size: 15px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .sidebar:hover .logo-text { opacity: 1; }
+
+  .sidebar-nav {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    gap: 2px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .nav-separator {
+    height: 1px;
+    background: var(--border);
+    margin: 8px 0;
+    flex-shrink: 0;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
+    height: 40px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: color 0.15s, background 0.15s;
+    text-decoration: none;
+  }
+
+  .nav-item:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+  .nav-item.active { color: var(--text); background: var(--accent); }
+
+  .nav-item .nav-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nav-item .nav-label {
+    white-space: nowrap;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .sidebar:hover .nav-label { opacity: 1; }
+
+  /* Tooltip — collapsed only */
+  .nav-item .nav-tooltip {
+    position: absolute;
+    left: calc(var(--sidebar-collapsed) - 4px);
+    background: #222;
+    color: var(--text);
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s;
+    z-index: 100;
+  }
+
+  .sidebar:not(:hover) .nav-item:hover .nav-tooltip { opacity: 1; }
+
+  .sidebar-bottom {
+    padding: 8px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  /* ── Main ── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Top Bar ── */
+  .topbar {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .topbar-title {
+    font-family: 'Lexend', sans-serif;
+    font-weight: 500;
+    font-size: 18px;
+  }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .status-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+  }
+
+  .status-dot.offline { background: var(--red); }
+
+  .model-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: rgba(255,255,255,0.05);
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  .topbar-icon {
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .topbar-icon:hover { color: var(--text); }
+
+  .clock {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* ── Content Area ── */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+  }
+
+  .content::-webkit-scrollbar { width: 6px; }
+  .content::-webkit-scrollbar-track { background: transparent; }
+  .content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Views ── */
+  .view { display: none; height: 100%; }
+  .view.active { display: flex; flex-direction: column; }
+
+  /* ── Dashboard Grid ── */
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+
+  .card-header {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+
+  .stat-value {
+    font-family: 'Lexend', sans-serif;
+    font-weight: 500;
+    font-size: 28px;
+  }
+
+  .stat-sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  .span-2 { grid-column: span 2; }
+  .span-3 { grid-column: span 3; }
+
+  /* Chat preview */
+  .chat-preview-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .chat-preview-msg {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .chat-preview-msg .avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: 'Lexend', sans-serif;
+  }
+
+  .avatar.user { background: rgba(99,102,241,0.2); color: var(--accent); }
+  .avatar.alf { background: rgba(34,197,94,0.15); color: var(--green); }
+
+  .chat-preview-msg .msg-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .msg-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+
+  .msg-text {
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.5;
+  }
+
+  .chat-link {
+    display: inline-block;
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .chat-link:hover { color: var(--accent-hover); }
+
+  /* Activity */
+  .activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .activity-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .activity-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex-shrink: 0;
+  }
+
+  .activity-dot.green { background: var(--green); }
+  .activity-dot.yellow { background: var(--yellow); }
+  .activity-dot.red { background: var(--red); }
+
+  .activity-text {
+    font-size: 13px;
+    color: var(--text);
+    flex: 1;
+    line-height: 1.4;
+  }
+
+  .activity-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Quick actions */
+  .quick-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .action-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  .action-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .action-btn i { width: 16px; height: 16px; }
+
+  /* ── Chat View ── */
+  .chat-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .chat-messages::-webkit-scrollbar { width: 6px; }
+  .chat-messages::-webkit-scrollbar-track { background: transparent; }
+  .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .chat-msg {
+    display: flex;
+    gap: 12px;
+    max-width: 720px;
+  }
+
+  .chat-msg.from-user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+  }
+
+  .chat-msg .avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: 'Lexend', sans-serif;
+  }
+
+  .chat-msg .msg-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .chat-msg.from-user .msg-content { align-items: flex-end; }
+
+  .chat-msg .msg-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .chat-msg.from-user .msg-meta { flex-direction: row-reverse; }
+
+  .chat-msg .msg-meta .name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  .chat-msg .msg-meta .time {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .chat-msg .msg-bubble {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+
+  .chat-msg .msg-bubble code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: rgba(255,255,255,0.06);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .chat-input-area {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .chat-input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .chat-input::placeholder { color: var(--text-muted); }
+  .chat-input:focus { border-color: var(--accent); }
+
+  .send-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius);
+    background: var(--accent);
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+    flex-shrink: 0;
+  }
+  .send-btn:hover { background: var(--accent-hover); }
+
+  /* ── Placeholder views ── */
+  .placeholder-view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    gap: 12px;
+  }
+
+  .placeholder-view i { width: 40px; height: 40px; opacity: 0.3; }
+  .placeholder-view span { font-size: 14px; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">A</div>
+    <span class="logo-text">ALF OS</span>
+  </div>
+  <div class="sidebar-nav">
+    <a class="nav-item active" data-view="home" data-title="Dashboard">
+      <span class="nav-icon"><i data-lucide="layout-dashboard"></i></span>
+      <span class="nav-label">Dashboard</span>
+      <span class="nav-tooltip">Dashboard</span>
+    </a>
+    <a class="nav-item" data-view="chat" data-title="Chat">
+      <span class="nav-icon"><i data-lucide="message-square"></i></span>
+      <span class="nav-label">Chat</span>
+      <span class="nav-tooltip">Chat</span>
+    </a>
+    <a class="nav-item" data-view="tasks" data-title="Tasks">
+      <span class="nav-icon"><i data-lucide="check-square"></i></span>
+      <span class="nav-label">Tasks</span>
+      <span class="nav-tooltip">Tasks</span>
+    </a>
+    <a class="nav-item" data-view="skills" data-title="Skills">
+      <span class="nav-icon"><i data-lucide="puzzle"></i></span>
+      <span class="nav-label">Skills</span>
+      <span class="nav-tooltip">Skills</span>
+    </a>
+    <a class="nav-item" data-view="vault" data-title="Vault">
+      <span class="nav-icon"><i data-lucide="lock"></i></span>
+      <span class="nav-label">Vault</span>
+      <span class="nav-tooltip">Vault</span>
+    </a>
+    <a class="nav-item" data-view="tiers" data-title="Tiers">
+      <span class="nav-icon"><i data-lucide="layers"></i></span>
+      <span class="nav-label">Tiers</span>
+      <span class="nav-tooltip">Tiers</span>
+    </a>
+    <a class="nav-item" data-view="files" data-title="Files">
+      <span class="nav-icon"><i data-lucide="folder"></i></span>
+      <span class="nav-label">Files</span>
+      <span class="nav-tooltip">Files</span>
+    </a>
+    <a class="nav-item" data-view="logs" data-title="Logs">
+      <span class="nav-icon"><i data-lucide="scroll-text"></i></span>
+      <span class="nav-label">Logs</span>
+      <span class="nav-tooltip">Logs</span>
+    </a>
+    <a class="nav-item" data-view="terminal" data-title="Terminal">
+      <span class="nav-icon"><i data-lucide="terminal"></i></span>
+      <span class="nav-label">Terminal</span>
+      <span class="nav-tooltip">Terminal</span>
+    </a>
+
+    <div class="nav-separator"></div>
+
+    <a class="nav-item" data-view="later" data-title="Later">
+      <span class="nav-icon"><i data-lucide="bookmark"></i></span>
+      <span class="nav-label">Later</span>
+      <span class="nav-tooltip">Later</span>
+    </a>
+    <a class="nav-item" data-view="reddit" data-title="Reddit">
+      <span class="nav-icon"><i data-lucide="radio"></i></span>
+      <span class="nav-label">Reddit</span>
+      <span class="nav-tooltip">Reddit</span>
+    </a>
+    <a class="nav-item" data-view="seo" data-title="SEO">
+      <span class="nav-icon"><i data-lucide="search"></i></span>
+      <span class="nav-label">SEO</span>
+      <span class="nav-tooltip">SEO</span>
+    </a>
+    <a class="nav-item" data-view="xpost" data-title="XPost">
+      <span class="nav-icon"><i data-lucide="send"></i></span>
+      <span class="nav-label">XPost</span>
+      <span class="nav-tooltip">XPost</span>
+    </a>
+  </div>
+  <div class="sidebar-bottom">
+    <a class="nav-item" data-view="settings" data-title="Settings">
+      <span class="nav-icon"><i data-lucide="settings"></i></span>
+      <span class="nav-label">Settings</span>
+      <span class="nav-tooltip">Settings</span>
+    </a>
+  </div>
+</nav>
+
+<!-- Main -->
+<div class="main">
+  <div class="topbar">
+    <span class="topbar-title" id="topbar-title">Dashboard</span>
+    <div class="topbar-right">
+      <span class="clock" id="clock"></span>
+      <span class="status-badge"><span class="status-dot"></span> Online</span>
+      <span class="model-tag">sonnet</span>
+      <span class="topbar-icon"><i data-lucide="search" style="width:18px;height:18px"></i></span>
+    </div>
+  </div>
+
+  <!-- Home / Dashboard -->
+  <div class="content">
+    <div class="view active" id="view-home">
+      <div class="dashboard-grid">
+        <!-- Stats -->
+        <div class="card">
+          <div class="card-header">Tasks</div>
+          <div class="stat-value">3</div>
+          <div class="stat-sub">running</div>
+        </div>
+        <div class="card">
+          <div class="card-header">Model</div>
+          <div class="stat-value" style="font-size:24px; font-family:'JetBrains Mono',monospace;">sonnet</div>
+          <div class="stat-sub">4.2k tok/min</div>
+        </div>
+        <div class="card">
+          <div class="card-header">Uptime</div>
+          <div class="stat-value" style="font-size:22px;">14h 32m</div>
+          <div class="stat-sub">since yesterday</div>
+        </div>
+
+        <!-- Chat preview -->
+        <div class="card span-2">
+          <div class="card-header">Recent conversation</div>
+          <div class="chat-preview-list">
+            <div class="chat-preview-msg">
+              <div class="avatar user">A</div>
+              <div class="msg-body">
+                <div class="msg-name">Alessandro</div>
+                <div class="msg-text">Summarize what happened with the SEO campaign yesterday</div>
+              </div>
+            </div>
+            <div class="chat-preview-msg">
+              <div class="avatar alf">F</div>
+              <div class="msg-body">
+                <div class="msg-name">ALF</div>
+                <div class="msg-text">Published 3 articles targeting long-tail keywords. Avg position improved from 18 to 12 on tracked terms. One piece on "micro-SaaS pricing" got 240 impressions in 6 hours.</div>
+              </div>
+            </div>
+            <div class="chat-preview-msg">
+              <div class="avatar user">A</div>
+              <div class="msg-body">
+                <div class="msg-name">Alessandro</div>
+                <div class="msg-text">Nice. Queue up the next batch and prioritize conversion-focused content.</div>
+              </div>
+            </div>
+            <div class="chat-preview-msg">
+              <div class="avatar alf">F</div>
+              <div class="msg-body">
+                <div class="msg-name">ALF</div>
+                <div class="msg-text">On it. I'll draft 4 comparison posts and 2 landing page variants. ETA: 3 hours.</div>
+              </div>
+            </div>
+          </div>
+          <a class="chat-link" data-nav="chat">Open Chat &rarr;</a>
+        </div>
+
+        <!-- Activity -->
+        <div class="card">
+          <div class="card-header">Activity</div>
+          <div class="activity-list">
+            <div class="activity-item">
+              <span class="activity-dot green"></span>
+              <span class="activity-text">SEO batch completed</span>
+              <span class="activity-time">2m</span>
+            </div>
+            <div class="activity-item">
+              <span class="activity-dot green"></span>
+              <span class="activity-text">Reddit scan finished</span>
+              <span class="activity-time">14m</span>
+            </div>
+            <div class="activity-item">
+              <span class="activity-dot yellow"></span>
+              <span class="activity-text">Token budget at 78%</span>
+              <span class="activity-time">31m</span>
+            </div>
+            <div class="activity-item">
+              <span class="activity-dot green"></span>
+              <span class="activity-text">XPost draft saved</span>
+              <span class="activity-time">1h</span>
+            </div>
+            <div class="activity-item">
+              <span class="activity-dot red"></span>
+              <span class="activity-text">Vault sync failed (retry ok)</span>
+              <span class="activity-time">2h</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="card span-3">
+          <div class="card-header">Quick Actions</div>
+          <div class="quick-actions">
+            <button class="action-btn"><i data-lucide="plus" style="width:16px;height:16px"></i> New Task</button>
+            <button class="action-btn"><i data-lucide="message-square" style="width:16px;height:16px"></i> New Chat</button>
+            <button class="action-btn"><i data-lucide="upload" style="width:16px;height:16px"></i> Upload File</button>
+            <button class="action-btn"><i data-lucide="refresh-cw" style="width:16px;height:16px"></i> Restart Daemon</button>
+            <button class="action-btn"><i data-lucide="download" style="width:16px;height:16px"></i> Export Logs</button>
+            <button class="action-btn"><i data-lucide="key" style="width:16px;height:16px"></i> Rotate Secrets</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat View -->
+    <div class="view" id="view-chat">
+      <div class="chat-view">
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-msg from-alf">
+            <div class="avatar alf">F</div>
+            <div class="msg-content">
+              <div class="msg-meta"><span class="name">ALF</span><span class="time">09:12</span></div>
+              <div class="msg-bubble">Morning. 3 tasks from last night completed. Reddit scan found 2 relevant threads in r/SaaS. Want me to draft replies?</div>
+            </div>
+          </div>
+          <div class="chat-msg from-user">
+            <div class="avatar user">A</div>
+            <div class="msg-content">
+              <div class="msg-meta"><span class="name">You</span><span class="time">09:14</span></div>
+              <div class="msg-bubble">Yeah, go ahead. Keep the tone casual and helpful, no hard sell.</div>
+            </div>
+          </div>
+          <div class="chat-msg from-alf">
+            <div class="avatar alf">F</div>
+            <div class="msg-content">
+              <div class="msg-meta"><span class="name">ALF</span><span class="time">09:14</span></div>
+              <div class="msg-bubble">Done. Two replies drafted and queued. I mentioned the free tier naturally in both. Want to review before posting?</div>
+            </div>
+          </div>
+          <div class="chat-msg from-user">
+            <div class="avatar user">A</div>
+            <div class="msg-content">
+              <div class="msg-meta"><span class="name">You</span><span class="time">09:16</span></div>
+              <div class="msg-bubble">Post them. Also check if there's anything new on the <code>xlens-extension</code> repo — any open issues?</div>
+            </div>
+          </div>
+          <div class="chat-msg from-alf">
+            <div class="avatar alf">F</div>
+            <div class="msg-content">
+              <div class="msg-meta"><span class="name">ALF</span><span class="time">09:17</span></div>
+              <div class="msg-bubble">Posted. Checking the repo now... 2 open issues: one is a bug in the popup layout on Firefox, the other is a feature request for bulk export. Want me to triage?</div>
+            </div>
+          </div>
+        </div>
+        <div class="chat-input-area">
+          <input type="text" class="chat-input" id="chat-input" placeholder="Message ALF..." autocomplete="off">
+          <button class="send-btn" id="send-btn"><i data-lucide="arrow-up" style="width:18px;height:18px"></i></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Placeholder views -->
+    <div class="view" id="view-tasks"><div class="placeholder-view"><i data-lucide="check-square"></i><span>Tasks — coming soon</span></div></div>
+    <div class="view" id="view-skills"><div class="placeholder-view"><i data-lucide="puzzle"></i><span>Skills — coming soon</span></div></div>
+    <div class="view" id="view-vault"><div class="placeholder-view"><i data-lucide="lock"></i><span>Vault — coming soon</span></div></div>
+    <div class="view" id="view-tiers"><div class="placeholder-view"><i data-lucide="layers"></i><span>Tiers — coming soon</span></div></div>
+    <div class="view" id="view-files"><div class="placeholder-view"><i data-lucide="folder"></i><span>Files — coming soon</span></div></div>
+    <div class="view" id="view-logs"><div class="placeholder-view"><i data-lucide="scroll-text"></i><span>Logs — coming soon</span></div></div>
+    <div class="view" id="view-terminal"><div class="placeholder-view"><i data-lucide="terminal"></i><span>Terminal — coming soon</span></div></div>
+    <div class="view" id="view-later"><div class="placeholder-view"><i data-lucide="bookmark"></i><span>Later — coming soon</span></div></div>
+    <div class="view" id="view-reddit"><div class="placeholder-view"><i data-lucide="radio"></i><span>Reddit — coming soon</span></div></div>
+    <div class="view" id="view-seo"><div class="placeholder-view"><i data-lucide="search"></i><span>SEO — coming soon</span></div></div>
+    <div class="view" id="view-xpost"><div class="placeholder-view"><i data-lucide="send"></i><span>XPost — coming soon</span></div></div>
+    <div class="view" id="view-settings"><div class="placeholder-view"><i data-lucide="settings"></i><span>Settings — coming soon</span></div></div>
+  </div>
+</div>
+
+<script>
+  lucide.createIcons();
+
+  // Clock
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('clock').textContent =
+      now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // Navigation
+  const navItems = document.querySelectorAll('.nav-item[data-view]');
+  const views = document.querySelectorAll('.view');
+  const topbarTitle = document.getElementById('topbar-title');
+
+  function navigate(viewId, title) {
+    views.forEach(v => v.classList.remove('active'));
+    navItems.forEach(n => n.classList.remove('active'));
+
+    const target = document.getElementById('view-' + viewId);
+    if (target) target.classList.add('active');
+
+    document.querySelectorAll(`.nav-item[data-view="${viewId}"]`).forEach(n => n.classList.add('active'));
+    topbarTitle.textContent = title || viewId;
+  }
+
+  navItems.forEach(item => {
+    item.addEventListener('click', () => {
+      navigate(item.dataset.view, item.dataset.title);
+    });
+  });
+
+  // Chat link in dashboard
+  document.querySelectorAll('[data-nav]').forEach(el => {
+    el.addEventListener('click', () => navigate(el.dataset.nav, 'Chat'));
+  });
+
+  // Chat send
+  const chatInput = document.getElementById('chat-input');
+  const chatMessages = document.getElementById('chat-messages');
+  const sendBtn = document.getElementById('send-btn');
+
+  function sendMessage() {
+    const text = chatInput.value.trim();
+    if (!text) return;
+
+    const now = new Date();
+    const time = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+    const msg = document.createElement('div');
+    msg.className = 'chat-msg from-user';
+    msg.innerHTML = `
+      <div class="avatar user">A</div>
+      <div class="msg-content">
+        <div class="msg-meta"><span class="name">You</span><span class="time">${time}</span></div>
+        <div class="msg-bubble">${text.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+      </div>
+    `;
+    chatMessages.appendChild(msg);
+    chatInput.value = '';
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    // Simulated response
+    setTimeout(() => {
+      const reply = document.createElement('div');
+      reply.className = 'chat-msg from-alf';
+      const rTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      reply.innerHTML = `
+        <div class="avatar alf">F</div>
+        <div class="msg-content">
+          <div class="msg-meta"><span class="name">ALF</span><span class="time">${rTime}</span></div>
+          <div class="msg-bubble">Got it. I'll take care of that.</div>
+        </div>
+      `;
+      chatMessages.appendChild(reply);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }, 800);
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  chatInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+</script>
+</body>
+</html>

@@ -12,7 +12,7 @@
   --red: #c4392a;
   --yellow: #b8860b;
   --border: #bcc5b8;
-  --radius: 12px;
+  --radius: 8px;
   --on-accent: #f0f3ec;
   --danger: #c4392a;
   --success: #3d8b3d;
@@ -26,15 +26,15 @@
   --lavender: #7082c4;
 }
 
-/* Sage Dark */
+/* Sage Dark — aligned with alf-website */
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #080a08;
     --bg-card: #111413;
     --bg-input: #181d19;
-    --text: #c8d0c6;
+    --text: #d4dbd2;
     --text-dim: #6a7568;
-    --accent: #6b8f71;
+    --accent: #92c298;
     --green: #6b8f71;
     --red: #e07060;
     --yellow: #d4a84b;

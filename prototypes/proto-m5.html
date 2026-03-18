@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALF OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #000000;
+  --surface: #0a0a0a;
+  --text: #ededed;
+  --text-muted: #888888;
+  --accent: #0070f3;
+  --border: #333333;
+  --font-heading: 'Outfit', sans-serif;
+  --font-body: 'Work Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Header ── */
+.header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 140px;
+}
+
+.logo {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+  color: var(--text);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  background: rgba(0, 200, 83, 0.1);
+  color: #00c853;
+  border: 1px solid rgba(0, 200, 83, 0.2);
+}
+
+.status-pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00c853;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 100%;
+}
+
+.nav-tab {
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  white-space: nowrap;
+}
+
+.nav-tab:hover { color: var(--text); }
+
+.nav-tab.active {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.nav-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  background: var(--text);
+  border-radius: 2px 2px 0 0;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 140px;
+  justify-content: flex-end;
+}
+
+.search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.search-trigger:hover { border-color: #555; }
+
+.search-trigger .kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+}
+
+/* ── Main Content ── */
+.main {
+  padding-top: 56px;
+  min-height: 100vh;
+}
+
+.page {
+  display: none;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 40px 24px 60px;
+  animation: fadeIn 0.2s ease;
+}
+
+.page.active { display: block; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Home Page ── */
+.hero h1 {
+  font-family: var(--font-heading);
+  font-weight: 300;
+  font-size: 28px;
+  color: var(--text);
+  letter-spacing: -0.5px;
+}
+
+.hero .date {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.stats-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 28px;
+}
+
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.stat-pill .val {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ── Conversation Section ── */
+.section-title {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  margin-bottom: 12px;
+  letter-spacing: -0.3px;
+}
+
+.conversation-section { margin-top: 36px; }
+
+.msg-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.msg-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 16px;
+  gap: 16px;
+  transition: background 0.1s ease;
+}
+
+.msg-row:nth-child(even) { background: var(--surface); }
+.msg-row:hover { background: rgba(255,255,255,0.03); }
+
+.msg-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.msg-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.msg-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+/* ── Actions Grid ── */
+.actions-section { margin-top: 36px; }
+
+.actions-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.action-card {
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.action-card:hover {
+  border-color: var(--accent);
+  background: rgba(0, 112, 243, 0.04);
+}
+
+.action-card .icon {
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  transition: color 0.15s ease;
+}
+
+.action-card:hover .icon { color: var(--accent); }
+
+.action-card h3 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.action-card p {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ── Footer ── */
+.footer {
+  margin-top: 48px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  opacity: 0.5;
+}
+
+/* ── Chat Page ── */
+.chat-container {
+  max-width: 700px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 56px - 80px);
+}
+
+.chat-messages {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 24px;
+}
+
+.chat-bubble {
+  max-width: 85%;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.chat-bubble.user {
+  align-self: flex-end;
+  text-align: right;
+  color: var(--text);
+}
+
+.chat-bubble.alf {
+  align-self: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 18px;
+  color: var(--text);
+}
+
+.chat-bubble .bubble-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.chat-bubble .bubble-text { white-space: pre-wrap; }
+
+.chat-input-wrap {
+  position: sticky;
+  bottom: 0;
+  padding: 16px 0 24px;
+  background: linear-gradient(to top, var(--bg) 60%, transparent);
+}
+
+.chat-input-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: border-color 0.15s ease;
+}
+
+.chat-input-box:focus-within { border-color: var(--accent); }
+
+.chat-input-box input {
+  flex: 1;
+  height: 100%;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+
+.chat-input-box input::placeholder { color: var(--text-muted); }
+
+.chat-send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.chat-send:hover { opacity: 0.85; }
+
+/* ── Placeholder Pages ── */
+.placeholder-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: 12px;
+  color: var(--text-muted);
+}
+
+.placeholder-page .ph-icon { opacity: 0.3; }
+
+.placeholder-page h2 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 18px;
+  color: var(--text);
+}
+
+.placeholder-page p {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── Terminal ── */
+.terminal-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 500px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.terminal-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.terminal-body {
+  padding: 16px;
+  color: var(--text);
+  line-height: 1.7;
+}
+
+.terminal-body .prompt { color: var(--accent); }
+.terminal-body .output { color: var(--text-muted); }
+
+.terminal-input-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.terminal-input-line .prompt { color: var(--accent); }
+
+.terminal-input-line input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* ── Logs ── */
+.log-line {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 0;
+  display: flex;
+  gap: 12px;
+  color: var(--text-muted);
+}
+
+.log-line .log-ts { color: #555; flex-shrink: 0; }
+.log-line .log-level { flex-shrink: 0; font-weight: 500; }
+.log-line .log-level.info { color: var(--accent); }
+.log-line .log-level.warn { color: #f5a623; }
+.log-line .log-level.error { color: #e00; }
+.log-line .log-msg { color: var(--text-muted); }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .actions-grid { grid-template-columns: repeat(2, 1fr); }
+  .header-nav { gap: 0; overflow-x: auto; }
+  .nav-tab { padding: 0 10px; font-size: 12px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header class="header">
+  <div class="header-left">
+    <span class="logo">ALF</span>
+    <span class="status-pill"><span class="dot"></span>online</span>
+  </div>
+  <nav class="header-nav">
+    <button class="nav-tab active" data-tab="home">Home</button>
+    <button class="nav-tab" data-tab="chat">Chat</button>
+    <button class="nav-tab" data-tab="tasks">Tasks</button>
+    <button class="nav-tab" data-tab="skills">Skills</button>
+    <button class="nav-tab" data-tab="vault">Vault</button>
+    <button class="nav-tab" data-tab="tiers">Tiers</button>
+    <button class="nav-tab" data-tab="files">Files</button>
+    <button class="nav-tab" data-tab="logs">Logs</button>
+    <button class="nav-tab" data-tab="terminal">Terminal</button>
+  </nav>
+  <div class="header-right">
+    <button class="search-trigger">
+      <i data-lucide="search" style="width:14px;height:14px"></i>
+      <span class="kbd">⌘K</span>
+    </button>
+  </div>
+</header>
+
+<!-- ── Main ── -->
+<main class="main">
+
+  <!-- Home -->
+  <div class="page active" id="page-home">
+    <div class="hero">
+      <h1>Welcome back.</h1>
+      <div class="date" id="live-date"></div>
+    </div>
+    <div class="stats-bar">
+      <span class="stat-pill"><span class="val">3</span> tasks</span>
+      <span class="stat-pill"><span class="val">sonnet</span> model</span>
+      <span class="stat-pill"><span class="val" id="uptime">14h</span> uptime</span>
+      <span class="stat-pill"><span class="val">12</span> skills</span>
+    </div>
+
+    <div class="conversation-section">
+      <div class="section-title">Conversation</div>
+      <div class="msg-list">
+        <div class="msg-row">
+          <div class="msg-left">
+            <span class="msg-name">You</span>
+            <span class="msg-text">Deploy the latest changes to production</span>
+          </div>
+          <span class="msg-time">2m ago</span>
+        </div>
+        <div class="msg-row">
+          <div class="msg-left">
+            <span class="msg-name">ALF</span>
+            <span class="msg-text">Deployed v2.1.4 to production. All health checks passing. No rollback needed.</span>
+          </div>
+          <span class="msg-time">2m ago</span>
+        </div>
+        <div class="msg-row">
+          <div class="msg-left">
+            <span class="msg-name">You</span>
+            <span class="msg-text">Run the test suite for internal/provider</span>
+          </div>
+          <span class="msg-time">18m ago</span>
+        </div>
+        <div class="msg-row">
+          <div class="msg-left">
+            <span class="msg-name">ALF</span>
+            <span class="msg-text">All 47 tests passed. Coverage at 82%. No regressions detected.</span>
+          </div>
+          <span class="msg-time">17m ago</span>
+        </div>
+        <div class="msg-row">
+          <div class="msg-left">
+            <span class="msg-name">You</span>
+            <span class="msg-text">Check disk usage on the data volume</span>
+          </div>
+          <span class="msg-time">1h ago</span>
+        </div>
+        <div class="msg-row">
+          <div class="msg-left">
+            <span class="msg-name">ALF</span>
+            <span class="msg-text">Data volume: 4.2 GB / 20 GB used (21%). Cache: 1.8 GB, reclaimable.</span>
+          </div>
+          <span class="msg-time">1h ago</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions-section">
+      <div class="section-title">Actions</div>
+      <div class="actions-grid">
+        <div class="action-card" data-action="chat">
+          <div class="icon"><i data-lucide="message-square" style="width:20px;height:20px"></i></div>
+          <h3>New Chat</h3>
+          <p>Start a conversation with ALF</p>
+        </div>
+        <div class="action-card" data-action="tasks">
+          <div class="icon"><i data-lucide="play" style="width:20px;height:20px"></i></div>
+          <h3>Run Task</h3>
+          <p>Execute a scheduled or ad-hoc task</p>
+        </div>
+        <div class="action-card" data-action="files">
+          <div class="icon"><i data-lucide="folder" style="width:20px;height:20px"></i></div>
+          <h3>Browse Files</h3>
+          <p>Explore the data workspace</p>
+        </div>
+        <div class="action-card" data-action="terminal">
+          <div class="icon"><i data-lucide="terminal" style="width:20px;height:20px"></i></div>
+          <h3>Open Terminal</h3>
+          <p>Direct shell access to the container</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">ALF v2.1 &middot; Built by Alessandro</div>
+  </div>
+
+  <!-- Chat -->
+  <div class="page" id="page-chat">
+    <div class="chat-container">
+      <div class="chat-messages">
+        <div class="chat-bubble alf">
+          <div class="bubble-name">ALF</div>
+          <div class="bubble-text">Ready. What do you need?</div>
+        </div>
+        <div class="chat-bubble user">
+          <div class="bubble-name">You</div>
+          <div class="bubble-text">Deploy the latest changes to production</div>
+        </div>
+        <div class="chat-bubble alf">
+          <div class="bubble-name">ALF</div>
+          <div class="bubble-text">Deployed v2.1.4 to production successfully.
+
+3 containers updated, all health checks passing.
+Zero downtime — no rollback needed.</div>
+        </div>
+        <div class="chat-bubble user">
+          <div class="bubble-name">You</div>
+          <div class="bubble-text">What's the current resource usage?</div>
+        </div>
+        <div class="chat-bubble alf">
+          <div class="bubble-name">ALF</div>
+          <div class="bubble-text">CPU: 12% avg (4 cores)
+Memory: 1.4 GB / 4 GB (35%)
+Disk: 4.2 GB / 20 GB (21%)
+Network: 2.3 MB/s in, 840 KB/s out
+
+Everything within normal range.</div>
+        </div>
+      </div>
+      <div class="chat-input-wrap">
+        <div class="chat-input-box">
+          <input type="text" placeholder="Message ALF..." id="chat-input">
+          <button class="chat-send"><i data-lucide="arrow-up" style="width:16px;height:16px"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tasks -->
+  <div class="page" id="page-tasks">
+    <div class="section-title" style="margin-bottom:20px">Tasks</div>
+    <div class="msg-list">
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name" style="color:#00c853">●</span>
+          <span class="msg-name">backup-daily</span>
+          <span class="msg-text">Incremental backup of data volume</span>
+        </div>
+        <span class="msg-time">ran 3h ago</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name" style="color:#00c853">●</span>
+          <span class="msg-name">health-check</span>
+          <span class="msg-text">Container health and resource monitoring</span>
+        </div>
+        <span class="msg-time">ran 5m ago</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name" style="color:var(--text-muted)">○</span>
+          <span class="msg-name">log-rotate</span>
+          <span class="msg-text">Rotate and compress old log files</span>
+        </div>
+        <span class="msg-time">scheduled 04:00</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skills -->
+  <div class="page" id="page-skills">
+    <div class="section-title" style="margin-bottom:20px">Skills</div>
+    <div class="actions-grid">
+      <div class="action-card">
+        <div class="icon"><i data-lucide="git-branch" style="width:20px;height:20px"></i></div>
+        <h3>Git Operations</h3>
+        <p>Commit, push, branch management</p>
+      </div>
+      <div class="action-card">
+        <div class="icon"><i data-lucide="database" style="width:20px;height:20px"></i></div>
+        <h3>Database</h3>
+        <p>Query, migrate, backup databases</p>
+      </div>
+      <div class="action-card">
+        <div class="icon"><i data-lucide="shield" style="width:20px;height:20px"></i></div>
+        <h3>Security Scan</h3>
+        <p>Vulnerability and dependency audit</p>
+      </div>
+      <div class="action-card">
+        <div class="icon"><i data-lucide="bar-chart-2" style="width:20px;height:20px"></i></div>
+        <h3>Analytics</h3>
+        <p>Usage metrics and reporting</p>
+      </div>
+      <div class="action-card">
+        <div class="icon"><i data-lucide="cloud" style="width:20px;height:20px"></i></div>
+        <h3>Deploy</h3>
+        <p>Production deployment pipeline</p>
+      </div>
+      <div class="action-card">
+        <div class="icon"><i data-lucide="file-text" style="width:20px;height:20px"></i></div>
+        <h3>Docs Gen</h3>
+        <p>Auto-generate documentation</p>
+      </div>
+      <div class="action-card">
+        <div class="icon"><i data-lucide="test-tubes" style="width:20px;height:20px"></i></div>
+        <h3>Test Runner</h3>
+        <p>Execute and report test suites</p>
+      </div>
+      <div class="action-card">
+        <div class="icon"><i data-lucide="send" style="width:20px;height:20px"></i></div>
+        <h3>Notify</h3>
+        <p>Send alerts via Telegram</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vault -->
+  <div class="page" id="page-vault">
+    <div class="section-title" style="margin-bottom:20px">Vault</div>
+    <div class="msg-list">
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name"><i data-lucide="key" style="width:14px;height:14px;vertical-align:-2px"></i></span>
+          <span class="msg-name">TELEGRAM_TOKEN</span>
+          <span class="msg-text">••••••••••4f2a</span>
+        </div>
+        <span class="msg-time">set 3d ago</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name"><i data-lucide="key" style="width:14px;height:14px;vertical-align:-2px"></i></span>
+          <span class="msg-name">ANTHROPIC_API_KEY</span>
+          <span class="msg-text">••••••••••9x1b</span>
+        </div>
+        <span class="msg-time">set 5d ago</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name"><i data-lucide="key" style="width:14px;height:14px;vertical-align:-2px"></i></span>
+          <span class="msg-name">GITHUB_TOKEN</span>
+          <span class="msg-text">••••••••••mp7k</span>
+        </div>
+        <span class="msg-time">set 12d ago</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tiers -->
+  <div class="page" id="page-tiers">
+    <div class="section-title" style="margin-bottom:20px">Tiers</div>
+    <div class="msg-list">
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name" style="color:var(--accent)">T1</span>
+          <span class="msg-name">Instant</span>
+          <span class="msg-text">Pattern match — no LLM call. Status, help, time.</span>
+        </div>
+        <span class="msg-time">&lt;50ms</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name" style="color:var(--accent)">T2</span>
+          <span class="msg-name">Fast</span>
+          <span class="msg-text">Haiku classifier — quick tasks, lookups, Q&A.</span>
+        </div>
+        <span class="msg-time">~2s</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name" style="color:var(--accent)">T3</span>
+          <span class="msg-name">Standard</span>
+          <span class="msg-text">Sonnet — code gen, analysis, multi-step work.</span>
+        </div>
+        <span class="msg-time">~15s</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name" style="color:var(--accent)">T4</span>
+          <span class="msg-name">Deep</span>
+          <span class="msg-text">Opus — complex reasoning, architecture, long context.</span>
+        </div>
+        <span class="msg-time">~60s</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Files -->
+  <div class="page" id="page-files">
+    <div class="section-title" style="margin-bottom:20px">Files</div>
+    <div class="msg-list">
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name"><i data-lucide="folder" style="width:14px;height:14px;vertical-align:-2px;color:var(--accent)"></i></span>
+          <span class="msg-name">config.d/</span>
+          <span class="msg-text">Configuration files</span>
+        </div>
+        <span class="msg-time">4 items</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name"><i data-lucide="folder" style="width:14px;height:14px;vertical-align:-2px;color:var(--accent)"></i></span>
+          <span class="msg-name">skills.d/</span>
+          <span class="msg-text">Skill definitions</span>
+        </div>
+        <span class="msg-time">12 items</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name"><i data-lucide="folder" style="width:14px;height:14px;vertical-align:-2px;color:var(--accent)"></i></span>
+          <span class="msg-name">logs/</span>
+          <span class="msg-text">Application logs</span>
+        </div>
+        <span class="msg-time">8 items</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name"><i data-lucide="file" style="width:14px;height:14px;vertical-align:-2px"></i></span>
+          <span class="msg-name">soul.md</span>
+          <span class="msg-text">System prompt and personality</span>
+        </div>
+        <span class="msg-time">2.4 KB</span>
+      </div>
+      <div class="msg-row">
+        <div class="msg-left">
+          <span class="msg-name"><i data-lucide="file" style="width:14px;height:14px;vertical-align:-2px"></i></span>
+          <span class="msg-name">conversation.jsonl</span>
+          <span class="msg-text">Conversation log</span>
+        </div>
+        <span class="msg-time">18 KB</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Logs -->
+  <div class="page" id="page-logs">
+    <div class="section-title" style="margin-bottom:20px">Logs</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;overflow-x:auto;">
+      <div class="log-line"><span class="log-ts">14:32:01</span><span class="log-level info">INFO</span><span class="log-msg">Health check passed — all services healthy</span></div>
+      <div class="log-line"><span class="log-ts">14:31:58</span><span class="log-level info">INFO</span><span class="log-msg">Incoming message from Telegram user 481920</span></div>
+      <div class="log-line"><span class="log-ts">14:31:44</span><span class="log-level info">INFO</span><span class="log-msg">Classified as T3 (sonnet) — routing to provider</span></div>
+      <div class="log-line"><span class="log-ts">14:31:12</span><span class="log-level warn">WARN</span><span class="log-msg">Rate limit approaching: 42/50 requests in window</span></div>
+      <div class="log-line"><span class="log-ts">14:30:55</span><span class="log-level info">INFO</span><span class="log-msg">Task backup-daily completed in 12.4s</span></div>
+      <div class="log-line"><span class="log-ts">14:28:03</span><span class="log-level info">INFO</span><span class="log-msg">Provider response: 847 tokens, 3.2s latency</span></div>
+      <div class="log-line"><span class="log-ts">14:25:11</span><span class="log-level error">ERR </span><span class="log-msg">Connection timeout to upstream — retrying (1/3)</span></div>
+      <div class="log-line"><span class="log-ts">14:25:14</span><span class="log-level info">INFO</span><span class="log-msg">Upstream reconnected successfully</span></div>
+      <div class="log-line"><span class="log-ts">14:20:00</span><span class="log-level info">INFO</span><span class="log-msg">Conversation store rotated — new conv ID c_8f2a</span></div>
+      <div class="log-line"><span class="log-ts">14:15:33</span><span class="log-level info">INFO</span><span class="log-msg">Skill git-ops loaded (v1.2)</span></div>
+    </div>
+  </div>
+
+  <!-- Terminal -->
+  <div class="page" id="page-terminal">
+    <div class="terminal-wrap">
+      <div class="terminal-topbar">
+        <span>alf@container:~</span>
+        <span style="opacity:0.4">bash</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="prompt">alf@container:~$</span> uname -a</div>
+        <div class="output">Linux alf-container 6.1.0 #1 SMP Debian 6.1.90-1 x86_64 GNU/Linux</div>
+        <div style="margin-top:8px"><span class="prompt">alf@container:~$</span> df -h /home/alf/data</div>
+        <div class="output">Filesystem      Size  Used Avail Use% Mounted on</div>
+        <div class="output">/dev/sda1        20G  4.2G   16G  21% /home/alf/data</div>
+        <div style="margin-top:8px"><span class="prompt">alf@container:~$</span> ls -la data/</div>
+        <div class="output">total 28</div>
+        <div class="output">drwxr-xr-x  5 alf alf 4096 Mar 18 14:00 .</div>
+        <div class="output">lrwxrwxrwx  1 alf alf   18 Mar 18 10:00 config.d -> /opt/alf/config.d</div>
+        <div class="output">lrwxrwxrwx  1 alf alf   18 Mar 18 10:00 skills.d -> /opt/alf/skills.d</div>
+        <div class="output">drwxr-xr-x  2 alf alf 4096 Mar 18 14:20 logs</div>
+        <div class="output">-rw-r--r--  1 alf alf 2451 Mar 17 09:12 soul.md</div>
+        <div class="terminal-input-line">
+          <span class="prompt">alf@container:~$</span>
+          <input type="text" id="terminal-input" spellcheck="false" autofocus>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Tab Navigation ──
+const tabs = document.querySelectorAll('.nav-tab');
+const pages = document.querySelectorAll('.page');
+
+function switchTab(tabName) {
+  tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+  pages.forEach(p => {
+    p.classList.remove('active');
+    if (p.id === `page-${tabName}`) {
+      // Re-trigger animation
+      void p.offsetWidth;
+      p.classList.add('active');
+    }
+  });
+}
+
+tabs.forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
+
+// Action cards navigate to tabs
+document.querySelectorAll('.action-card[data-action]').forEach(card => {
+  card.addEventListener('click', () => switchTab(card.dataset.action));
+});
+
+// ── Live Date/Time ──
+function updateDateTime() {
+  const now = new Date();
+  const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+  const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  document.getElementById('live-date').textContent =
+    now.toLocaleDateString('en-US', opts) + ' — ' + time;
+}
+updateDateTime();
+setInterval(updateDateTime, 1000);
+
+// ── Chat Input ──
+const chatInput = document.getElementById('chat-input');
+const chatMessages = document.querySelector('.chat-messages');
+
+function addChatMessage(text, type) {
+  const bubble = document.createElement('div');
+  bubble.className = `chat-bubble ${type}`;
+  bubble.innerHTML = `<div class="bubble-name">${type === 'user' ? 'You' : 'ALF'}</div><div class="bubble-text">${text}</div>`;
+  chatMessages.appendChild(bubble);
+  bubble.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+document.querySelector('.chat-send').addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+
+function sendChat() {
+  const text = chatInput.value.trim();
+  if (!text) return;
+  addChatMessage(text, 'user');
+  chatInput.value = '';
+  setTimeout(() => addChatMessage('Acknowledged. Processing your request.', 'alf'), 600);
+}
+
+// ── Terminal Input ──
+const termInput = document.getElementById('terminal-input');
+const termBody = document.querySelector('.terminal-body');
+
+termInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const cmd = termInput.value.trim();
+    if (!cmd) return;
+    const inputLine = termInput.closest('.terminal-input-line');
+    const cmdDiv = document.createElement('div');
+    cmdDiv.style.marginTop = '8px';
+    cmdDiv.innerHTML = `<span class="prompt">alf@container:~$</span> ${cmd}`;
+    termBody.insertBefore(cmdDiv, inputLine);
+    const outDiv = document.createElement('div');
+    outDiv.className = 'output';
+    outDiv.textContent = `bash: ${cmd}: command simulated`;
+    termBody.insertBefore(outDiv, inputLine);
+    termInput.value = '';
+    termInput.scrollIntoView({ behavior: 'smooth' });
+  }
+});
+
+// ── Init Lucide Icons ──
+lucide.createIcons();
+</script>
+</body>
+</html>

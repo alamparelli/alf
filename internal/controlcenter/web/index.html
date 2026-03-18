@@ -6,7 +6,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>ALF OS -Control Center</title>
+  <title>ALF OS — Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Sora:wght@300;400;500;600;700&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" id="alf-theme-link" href="/static/theme-sage.css">
   <script src="/static/theme-init.js"></script>
@@ -18,30 +21,36 @@
   <div class="app-layout">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
-        <h1><span>ALF</span> OS</h1>
-        <span class="sidebar-subtitle">Control Center</span>
+        <h1><span>ALF</span> OS<span class="sidebar-dot"></span></h1>
       </div>
       <nav class="sidebar-nav" id="sidebarNav">
-        <div class="nav-grid" id="navGrid">
-          <a class="nav-icon active" data-view="chat" title="Chat"><i data-lucide="message-circle"></i></a>
-          <a class="nav-icon" data-view="home" title="Home"><i data-lucide="home"></i></a>
-          <a class="nav-icon" data-view="terminal" title="Terminal"><i data-lucide="terminal"></i></a>
-          <a class="nav-icon" data-view="tasks" title="Tasks"><i data-lucide="layers"></i></a>
-          <a class="nav-icon" data-view="schedules" title="Schedules"><i data-lucide="calendar-clock"></i></a>
-          <a class="nav-icon" data-view="tiers" title="Tiers"><i data-lucide="sliders-horizontal"></i></a>
-          <a class="nav-icon" data-view="firewall" title="Firewall"><i data-lucide="shield"></i></a>
-          <a class="nav-icon" data-view="vault" title="Vault"><i data-lucide="lock"></i></a>
-          <a class="nav-icon" data-view="settings" title="Settings"><i data-lucide="settings"></i></a>
-          <a class="nav-icon" data-view="logs" title="Logs"><i data-lucide="scroll-text"></i></a>
-          <a class="nav-icon" data-view="docs" title="Docs"><i data-lucide="book-open"></i></a>
+        <div class="nav-section" id="navSystemSection">
+          <button class="nav-section-toggle" data-section="system"><i data-lucide="chevron-down" class="nav-chevron"></i><span>System</span></button>
+          <div class="nav-section-items" id="navGrid">
+            <a class="nav-item active" data-view="chat"><i data-lucide="message-circle"></i><span>Chat</span></a>
+            <a class="nav-item" data-view="home"><i data-lucide="home"></i><span>Home</span></a>
+            <a class="nav-item" data-view="terminal"><i data-lucide="terminal"></i><span>Terminal</span></a>
+            <a class="nav-item" data-view="tasks"><i data-lucide="layers"></i><span>Tasks</span></a>
+            <a class="nav-item" data-view="schedules"><i data-lucide="calendar-clock"></i><span>Schedules</span></a>
+            <a class="nav-item" data-view="tiers"><i data-lucide="sliders-horizontal"></i><span>Tiers</span></a>
+            <a class="nav-item" data-view="firewall"><i data-lucide="shield"></i><span>Firewall</span></a>
+            <a class="nav-item" data-view="vault"><i data-lucide="lock"></i><span>Vault</span></a>
+            <a class="nav-item" data-view="settings"><i data-lucide="settings"></i><span>Settings</span></a>
+            <a class="nav-item" data-view="logs"><i data-lucide="scroll-text"></i><span>Logs</span></a>
+            <a class="nav-item" data-view="docs"><i data-lucide="book-open"></i><span>Docs</span></a>
+          </div>
         </div>
-        <div class="nav-apps-section" id="navAppsSection"></div>
-        <div class="nav-spacer" id="navSpacer"></div>
+        <div class="nav-section" id="navAppsWrapper">
+          <button class="nav-section-toggle" data-section="apps"><i data-lucide="chevron-down" class="nav-chevron"></i><span>Apps</span></button>
+          <div class="nav-section-items" id="navAppsSection"></div>
+        </div>
+      </nav>
+      <div class="sidebar-bottom">
         <div class="sidebar-report">
           <a href="mailto:al@obsidina-it.be?subject=ALF%20Bug%20Report" class="nav-item report-issue"><i data-lucide="bug"></i> Report Issue</a>
         </div>
         <div class="sidebar-footer">
-          <p>Made with ❤️ by Alessandro</p>
+          <p>Made with ❤️</p>
           <div class="sidebar-footer-socials">
             <a href="https://x.com/a_lamparelli" target="_blank" title="X / Twitter"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
             <a href="https://github.com/alamparelli" target="_blank" title="GitHub"><i data-lucide="github"></i></a>
@@ -53,7 +62,7 @@
             <a href="https://contacthive.app?utm_source=alf&amp;utm_medium=bio&amp;utm_campaign=generic" target="_blank">ContactHive</a>
           </div>
         </div>
-      </nav>
+      </div>
     </aside>
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
@@ -567,11 +576,11 @@
               </span>
               <span class="swatch-label">Sage</span>
             </button>
-            <button class="theme-swatch" data-palette="catppuccin" title="Catppuccin">
+            <button class="theme-swatch" data-palette="studio" title="Studio">
               <span class="swatch-preview">
-                <span class="swatch-half" style="background:#eff1f5;border:1px solid #bcc0cc;border-right:none;border-radius:6px 0 0 6px"></span><span class="swatch-half" style="background:#1e1e2e;border:1px solid #45475a;border-left:none;border-radius:0 6px 6px 0"></span>
+                <span class="swatch-half" style="background:#f5f3f0;border:1px solid #d6d3cf;border-right:none;border-radius:6px 0 0 6px"></span><span class="swatch-half" style="background:#1c1c1c;border:1px solid #333;border-left:none;border-radius:0 6px 6px 0"></span>
               </span>
-              <span class="swatch-label">Catppuccin</span>
+              <span class="swatch-label">Studio</span>
             </button>
           </div>
         </div>

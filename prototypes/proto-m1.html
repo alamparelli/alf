@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALF OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #09090b;
+  --surface: #18181b;
+  --text: #fafafa;
+  --text-muted: #71717a;
+  --accent: #fafafa;
+  --border: #27272a;
+  --green: #22c55e;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Layout */
+.shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 200px;
+  min-width: 200px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 24px 0 16px;
+  user-select: none;
+}
+
+.sidebar-brand {
+  font-family: 'Outfit', sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  padding: 0 20px;
+  margin-bottom: 32px;
+  color: var(--text-muted);
+}
+
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 8px;
+}
+
+.nav-section + .nav-section {
+  margin-top: 24px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease;
+  position: relative;
+  border-radius: 0;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+.nav-item:hover {
+  color: var(--text);
+}
+
+.nav-item.active {
+  color: var(--text);
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--accent);
+}
+
+.nav-item i {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.5;
+}
+
+.sidebar-spacer {
+  flex: 1;
+}
+
+.sidebar-clock {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 20px;
+  margin-top: 8px;
+}
+
+/* Main */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Views */
+.view {
+  display: none;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  animation: viewIn 0.2s ease;
+}
+
+.view.active {
+  display: flex;
+}
+
+@keyframes viewIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Home View */
+.home-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 32px 40px 0;
+}
+
+.home-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 32px;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+
+.home-status-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--green);
+  display: inline-block;
+}
+
+.home-stats {
+  padding: 16px 40px 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 0;
+}
+
+.home-stats span + span::before {
+  content: '\00b7';
+  margin: 0 10px;
+}
+
+.home-recent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 40px 40px 0;
+}
+
+.home-recent-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
+.message-item {
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+
+.message-item:first-of-type {
+  border-top: none;
+}
+
+.message-author {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.message-author.alf {
+  color: var(--text);
+}
+
+.message-author.user {
+  color: var(--text-muted);
+}
+
+.message-body {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.message-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.5;
+  margin-top: 6px;
+}
+
+/* Input bar */
+.input-bar {
+  padding: 16px 40px 32px;
+}
+
+.input-bar input {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  padding: 12px 16px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.input-bar input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.input-bar input:focus {
+  border-color: #3f3f46;
+}
+
+/* Chat View */
+.chat-header {
+  padding: 32px 40px 24px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 40px;
+}
+
+.chat-msg {
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+
+.chat-msg:first-child {
+  border-top: none;
+}
+
+.chat-msg.from-user {
+  text-align: right;
+}
+
+.chat-msg-name {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.chat-msg.from-user .chat-msg-name {
+  color: var(--text);
+}
+
+.chat-msg-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.chat-msg.from-user .chat-msg-text {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+/* Tasks View */
+.page-header {
+  padding: 32px 40px 8px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.page-subtitle {
+  padding: 0 40px 24px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.page-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 40px;
+}
+
+.task-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.task-item:first-child {
+  border-top: none;
+}
+
+.task-name {
+  font-size: 13px;
+}
+
+.task-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.task-status-badge {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  margin-left: 8px;
+}
+
+.task-status-badge.running {
+  color: var(--green);
+  border-color: #22c55e40;
+}
+
+/* Skills View */
+.skill-item {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.skill-item:first-child {
+  border-top: none;
+}
+
+.skill-name {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.skill-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Generic list view (Vault, Files, Logs) */
+.list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.list-item:first-child {
+  border-top: none;
+}
+
+.list-item-right {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Tiers View */
+.tier-block {
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+
+.tier-block:first-child {
+  border-top: none;
+}
+
+.tier-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+.tier-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.tier-model {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Terminal View */
+.terminal-area {
+  flex: 1;
+  background: var(--bg);
+  padding: 24px 40px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.terminal-line {
+  white-space: pre-wrap;
+}
+
+.terminal-line .prompt {
+  color: var(--text);
+}
+
+.terminal-input-wrap {
+  padding: 0 40px 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.terminal-input-wrap .prompt-char {
+  color: var(--text);
+}
+
+.terminal-input-wrap input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+/* Empty state */
+.empty-state {
+  padding: 60px 40px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">ALF OS</div>
+
+    <nav class="nav-section">
+      <button class="nav-item active" data-view="home">
+        <i data-lucide="home"></i> Home
+      </button>
+      <button class="nav-item" data-view="chat">
+        <i data-lucide="message-square"></i> Chat
+      </button>
+      <button class="nav-item" data-view="tasks">
+        <i data-lucide="square-check"></i> Tasks
+      </button>
+      <button class="nav-item" data-view="skills">
+        <i data-lucide="zap"></i> Skills
+      </button>
+      <button class="nav-item" data-view="vault">
+        <i data-lucide="lock"></i> Vault
+      </button>
+      <button class="nav-item" data-view="tiers">
+        <i data-lucide="layers"></i> Tiers
+      </button>
+      <button class="nav-item" data-view="files">
+        <i data-lucide="folder"></i> Files
+      </button>
+      <button class="nav-item" data-view="logs">
+        <i data-lucide="scroll-text"></i> Logs
+      </button>
+      <button class="nav-item" data-view="terminal">
+        <i data-lucide="terminal"></i> Terminal
+      </button>
+    </nav>
+
+    <nav class="nav-section" style="margin-top: 28px;">
+      <button class="nav-item" data-view="later">
+        <i data-lucide="bookmark"></i> Later
+      </button>
+      <button class="nav-item" data-view="reddit">
+        <i data-lucide="radar"></i> Reddit Leads
+      </button>
+      <button class="nav-item" data-view="seo">
+        <i data-lucide="bar-chart-3"></i> SEO Dashboard
+      </button>
+      <button class="nav-item" data-view="xpost">
+        <i data-lucide="send"></i> XPost
+      </button>
+    </nav>
+
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-clock" id="clock"></div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main">
+
+    <!-- Home -->
+    <div class="view active" id="view-home">
+      <div class="home-header">
+        <span class="home-title">ALF</span>
+        <div class="home-status-right">
+          <span class="status-dot"></span>
+          <span>online</span>
+          <span style="color: var(--text);">sonnet</span>
+        </div>
+      </div>
+      <div class="home-stats">
+        <span>3 tasks</span>
+        <span>12 skills</span>
+        <span>14h uptime</span>
+        <span>124 MB</span>
+      </div>
+      <div class="home-recent">
+        <div class="home-recent-label">Recent</div>
+        <div class="message-item">
+          <div class="message-author alf">ALF</div>
+          <div class="message-body">Finished scraping 47 Reddit threads. Found 8 high-intent leads matching your ICP. Saved to vault under "reddit-leads-0318".</div>
+          <div class="message-time">2 min ago</div>
+        </div>
+        <div class="message-item">
+          <div class="message-author user">you</div>
+          <div class="message-body">Check r/SaaS and r/indiehackers for people struggling with social media scheduling</div>
+          <div class="message-time">18 min ago</div>
+        </div>
+        <div class="message-item">
+          <div class="message-author alf">ALF</div>
+          <div class="message-body">SEO audit complete. 3 pages dropped from top 10 since last week. Draft recovery plan ready for review in tasks.</div>
+          <div class="message-time">1h ago</div>
+        </div>
+        <div class="message-item">
+          <div class="message-author alf">ALF</div>
+          <div class="message-body">Deployed v2.4.1 to production. All health checks passing. Memory usage stable at 124 MB.</div>
+          <div class="message-time">3h ago</div>
+        </div>
+      </div>
+      <div class="input-bar">
+        <input type="text" placeholder="Message ALF..." id="home-input">
+      </div>
+    </div>
+
+    <!-- Chat -->
+    <div class="view" id="view-chat">
+      <div class="chat-header">Chat</div>
+      <div class="chat-messages">
+        <div class="chat-msg from-user">
+          <div class="chat-msg-name">you</div>
+          <div class="chat-msg-text">Check r/SaaS and r/indiehackers for people struggling with social media scheduling</div>
+        </div>
+        <div class="chat-msg">
+          <div class="chat-msg-name">ALF</div>
+          <div class="chat-msg-text">On it. Scanning both subreddits for posts mentioning scheduling pain points, tool frustration, or switching intent. I'll filter for posts from the last 7 days with meaningful engagement.</div>
+        </div>
+        <div class="chat-msg from-user">
+          <div class="chat-msg-name">you</div>
+          <div class="chat-msg-text">Also check r/EntrepreneurRideAlong</div>
+        </div>
+        <div class="chat-msg">
+          <div class="chat-msg-name">ALF</div>
+          <div class="chat-msg-text">Added to the scan. Running all three now. Will tag results by intent level: high, medium, low. ETA about 4 minutes for the full sweep.</div>
+        </div>
+        <div class="chat-msg">
+          <div class="chat-msg-name">ALF</div>
+          <div class="chat-msg-text">Done. Found 47 threads total, 8 high-intent leads. Three of them posted in the last 24 hours and haven't received many replies yet — good window for outreach. Results saved to vault.</div>
+        </div>
+      </div>
+      <div class="input-bar">
+        <input type="text" placeholder="Message ALF..." id="chat-input">
+      </div>
+    </div>
+
+    <!-- Tasks -->
+    <div class="view" id="view-tasks">
+      <div class="page-header">Tasks</div>
+      <div class="page-subtitle">3 active</div>
+      <div class="page-content">
+        <div class="task-item">
+          <div>
+            <div class="task-name">Reddit lead scan</div>
+            <div class="task-meta">started 18m ago</div>
+          </div>
+          <div><span class="task-status-badge running">running</span></div>
+        </div>
+        <div class="task-item">
+          <div>
+            <div class="task-name">SEO recovery plan draft</div>
+            <div class="task-meta">started 1h ago</div>
+          </div>
+          <div><span class="task-status-badge">pending review</span></div>
+        </div>
+        <div class="task-item">
+          <div>
+            <div class="task-name">Weekly analytics digest</div>
+            <div class="task-meta">scheduled 06:00</div>
+          </div>
+          <div><span class="task-status-badge">scheduled</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skills -->
+    <div class="view" id="view-skills">
+      <div class="page-header">Skills</div>
+      <div class="page-subtitle">12 installed</div>
+      <div class="page-content">
+        <div class="skill-item"><div class="skill-name">reddit-scraper</div><div class="skill-desc">Scan subreddits for leads matching ICP criteria</div></div>
+        <div class="skill-item"><div class="skill-name">seo-audit</div><div class="skill-desc">Run technical SEO audit and rank tracking</div></div>
+        <div class="skill-item"><div class="skill-name">content-writer</div><div class="skill-desc">Draft blog posts, tweets, and marketing copy</div></div>
+        <div class="skill-item"><div class="skill-name">deploy</div><div class="skill-desc">Build, test, and deploy to production</div></div>
+        <div class="skill-item"><div class="skill-name">email-outreach</div><div class="skill-desc">Personalized cold email sequences</div></div>
+        <div class="skill-item"><div class="skill-name">analytics</div><div class="skill-desc">Aggregate and summarize product analytics</div></div>
+        <div class="skill-item"><div class="skill-name">competitor-watch</div><div class="skill-desc">Monitor competitor changes and pricing</div></div>
+        <div class="skill-item"><div class="skill-name">code-review</div><div class="skill-desc">Review PRs for bugs, style, and security</div></div>
+      </div>
+    </div>
+
+    <!-- Vault -->
+    <div class="view" id="view-vault">
+      <div class="page-header">Vault</div>
+      <div class="page-subtitle">Encrypted secrets and saved data</div>
+      <div class="page-content">
+        <div class="list-item"><span>reddit-leads-0318</span><span class="list-item-right">2 min ago</span></div>
+        <div class="list-item"><span>OPENAI_API_KEY</span><span class="list-item-right">secret</span></div>
+        <div class="list-item"><span>TELEGRAM_BOT_TOKEN</span><span class="list-item-right">secret</span></div>
+        <div class="list-item"><span>seo-baseline-0311</span><span class="list-item-right">7d ago</span></div>
+        <div class="list-item"><span>icp-criteria-v2</span><span class="list-item-right">12d ago</span></div>
+        <div class="list-item"><span>SMTP_PASSWORD</span><span class="list-item-right">secret</span></div>
+      </div>
+    </div>
+
+    <!-- Tiers -->
+    <div class="view" id="view-tiers">
+      <div class="page-header">Tiers</div>
+      <div class="page-subtitle">Routing configuration</div>
+      <div class="page-content">
+        <div class="tier-block">
+          <div class="tier-label">Tier 1 — Quick</div>
+          <div class="tier-desc">Fast classification, simple Q&A, routing decisions</div>
+          <div class="tier-model">haiku</div>
+        </div>
+        <div class="tier-block">
+          <div class="tier-label">Tier 2 — Standard</div>
+          <div class="tier-desc">General tasks, writing, analysis, code generation</div>
+          <div class="tier-model">sonnet</div>
+        </div>
+        <div class="tier-block">
+          <div class="tier-label">Tier 3 — Deep</div>
+          <div class="tier-desc">Complex reasoning, architecture, long-context tasks</div>
+          <div class="tier-model">opus</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Files -->
+    <div class="view" id="view-files">
+      <div class="page-header">Files</div>
+      <div class="page-subtitle">/home/alf/data</div>
+      <div class="page-content">
+        <div class="list-item"><span><i data-lucide="folder" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px;stroke-width:1.5;color:var(--text-muted)"></i>config.d</span><span class="list-item-right">dir</span></div>
+        <div class="list-item"><span><i data-lucide="folder" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px;stroke-width:1.5;color:var(--text-muted)"></i>skills.d</span><span class="list-item-right">dir</span></div>
+        <div class="list-item"><span><i data-lucide="folder" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px;stroke-width:1.5;color:var(--text-muted)"></i>logs</span><span class="list-item-right">dir</span></div>
+        <div class="list-item"><span><i data-lucide="file-text" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px;stroke-width:1.5;color:var(--text-muted)"></i>soul.md</span><span class="list-item-right">4.2 KB</span></div>
+        <div class="list-item"><span><i data-lucide="file-text" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px;stroke-width:1.5;color:var(--text-muted)"></i>schedule.json</span><span class="list-item-right">1.1 KB</span></div>
+        <div class="list-item"><span><i data-lucide="file-text" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px;stroke-width:1.5;color:var(--text-muted)"></i>tiers.json</span><span class="list-item-right">0.8 KB</span></div>
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="view" id="view-logs">
+      <div class="page-header">Logs</div>
+      <div class="page-subtitle">Recent daemon output</div>
+      <div class="page-content" style="font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.8;">
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">18:42:01</span> &nbsp;[router] classified message as tier-2</div>
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">18:42:01</span> &nbsp;[provider] spawning sonnet session</div>
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">18:41:58</span> &nbsp;[telegram] received message from user 1</div>
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">18:40:12</span> &nbsp;[scheduler] reddit-scan completed in 247s</div>
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">18:36:05</span> &nbsp;[scheduler] starting reddit-scan task</div>
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">18:35:00</span> &nbsp;[health] memory: 124MB, goroutines: 14</div>
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">18:30:00</span> &nbsp;[health] memory: 118MB, goroutines: 12</div>
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">18:25:00</span> &nbsp;[health] memory: 121MB, goroutines: 12</div>
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">17:58:33</span> &nbsp;[deploy] v2.4.1 health checks passed</div>
+        <div style="color:var(--text-muted)"><span style="color:var(--text);opacity:0.4">17:57:41</span> &nbsp;[deploy] pushing image to registry</div>
+      </div>
+    </div>
+
+    <!-- Terminal -->
+    <div class="view" id="view-terminal">
+      <div class="terminal-area">
+        <div class="terminal-line"><span class="prompt">alf $</span> status</div>
+        <div class="terminal-line">daemon: running (pid 1847)</div>
+        <div class="terminal-line">uptime: 14h 23m</div>
+        <div class="terminal-line">memory: 124 MB</div>
+        <div class="terminal-line">tasks: 3 active, 0 failed</div>
+        <div class="terminal-line">&nbsp;</div>
+        <div class="terminal-line"><span class="prompt">alf $</span> skills list</div>
+        <div class="terminal-line">12 skills installed</div>
+        <div class="terminal-line">&nbsp;</div>
+      </div>
+      <div class="terminal-input-wrap">
+        <span class="prompt-char">alf $</span>
+        <input type="text" placeholder="" id="terminal-input">
+      </div>
+    </div>
+
+    <!-- Later -->
+    <div class="view" id="view-later">
+      <div class="page-header">Later</div>
+      <div class="page-subtitle">Saved for follow-up</div>
+      <div class="page-content">
+        <div class="list-item"><span>Research Resend for transactional emails</span><span class="list-item-right">2d ago</span></div>
+        <div class="list-item"><span>Write comparison page: xlens vs Buffer</span><span class="list-item-right">4d ago</span></div>
+        <div class="list-item"><span>Set up PostHog funnel tracking</span><span class="list-item-right">5d ago</span></div>
+      </div>
+    </div>
+
+    <!-- Reddit Leads -->
+    <div class="view" id="view-reddit">
+      <div class="page-header">Reddit Leads</div>
+      <div class="page-subtitle">8 high-intent leads found</div>
+      <div class="page-content">
+        <div class="list-item"><span>"Frustrated with Buffer's scheduling limits"</span><span class="list-item-right">r/SaaS &middot; 2h</span></div>
+        <div class="list-item"><span>"Looking for a cheaper Hootsuite alternative"</span><span class="list-item-right">r/indiehackers &middot; 5h</span></div>
+        <div class="list-item"><span>"My social media workflow is broken"</span><span class="list-item-right">r/EntrepreneurRideAlong &middot; 8h</span></div>
+        <div class="list-item"><span>"Best tool for scheduling across 5 platforms?"</span><span class="list-item-right">r/SaaS &middot; 12h</span></div>
+        <div class="list-item"><span>"Switched from Later, need recommendations"</span><span class="list-item-right">r/indiehackers &middot; 1d</span></div>
+      </div>
+    </div>
+
+    <!-- SEO Dashboard -->
+    <div class="view" id="view-seo">
+      <div class="page-header">SEO Dashboard</div>
+      <div class="page-subtitle">Last crawl: 4h ago</div>
+      <div class="page-content">
+        <div class="list-item"><span>/pricing</span><span class="list-item-right">#4 &rarr; #7</span></div>
+        <div class="list-item"><span>/blog/scheduling-guide</span><span class="list-item-right">#8 &rarr; #12</span></div>
+        <div class="list-item"><span>/features</span><span class="list-item-right">#6 &rarr; #9</span></div>
+        <div class="list-item"><span>/blog/social-media-tips</span><span class="list-item-right">#3 &rarr; #3</span></div>
+        <div class="list-item"><span>/comparison/buffer</span><span class="list-item-right">#11 &rarr; #8</span></div>
+      </div>
+    </div>
+
+    <!-- XPost -->
+    <div class="view" id="view-xpost">
+      <div class="page-header">XPost</div>
+      <div class="page-subtitle">Scheduled posts</div>
+      <div class="page-content">
+        <div class="empty-state">No scheduled posts. Use chat to draft and schedule content.</div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// Nav switching
+document.querySelectorAll('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    const viewId = 'view-' + btn.dataset.view;
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById(viewId).classList.add('active');
+  });
+});
+
+// Clock
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  const s = String(now.getSeconds()).padStart(2, '0');
+  document.getElementById('clock').textContent = h + ':' + m + ':' + s;
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// Init Lucide icons
+lucide.createIcons();
+
+// Reinit icons on view switch (for inline icons)
+const observer = new MutationObserver(() => lucide.createIcons());
+document.querySelectorAll('.view').forEach(v => {
+  observer.observe(v, { attributes: true, attributeFilter: ['class'] });
+});
+</script>
+
+</body>
+</html>

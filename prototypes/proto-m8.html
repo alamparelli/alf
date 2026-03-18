@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALF OS</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0c0c0c;
+    --surface: #141414;
+    --text: #b4b4b4;
+    --text-muted: #555555;
+    --accent: #4ade80;
+    --border: #1e1e1e;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --blue: #60a5fa;
+  }
+
+  html, body {
+    height: 100%;
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow: hidden;
+  }
+
+  .layout {
+    display: flex;
+    height: 100vh;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 180px;
+    min-width: 180px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 16px 0;
+    user-select: none;
+  }
+
+  .sidebar-brand {
+    padding: 0 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sidebar-brand span {
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text);
+  }
+
+  .sidebar-brand .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+  }
+
+  .nav-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .nav-item {
+    padding: 6px 16px;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .nav-item:hover {
+    color: var(--text);
+  }
+
+  .nav-item.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+  }
+
+  .nav-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 10px 16px;
+  }
+
+  .sidebar-footer {
+    padding: 12px 16px 0;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
+  }
+
+  .sidebar-footer .clock {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sidebar-footer .status {
+    font-size: 10px;
+    color: var(--accent);
+    margin-top: 2px;
+  }
+
+  /* ── Main ── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .view {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .view.active {
+    display: flex;
+  }
+
+  /* ── Status Bar ── */
+  .status-bar {
+    padding: 10px 20px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .status-bar .val {
+    color: var(--accent);
+  }
+
+  .status-bar .sep {
+    margin: 0 10px;
+    color: var(--border);
+  }
+
+  /* ── Sections ── */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .content::-webkit-scrollbar { width: 4px; }
+  .content::-webkit-scrollbar-track { background: transparent; }
+  .content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .section {
+    margin-bottom: 24px;
+  }
+
+  .section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  /* ── Recent ── */
+  .msg-line {
+    display: flex;
+    gap: 10px;
+    padding: 3px 0;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .msg-line .time {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .msg-line .who {
+    flex-shrink: 0;
+    width: 28px;
+    text-transform: uppercase;
+    font-weight: 700;
+    font-size: 11px;
+  }
+
+  .msg-line .who.you { color: var(--text); }
+  .msg-line .who.alf { color: var(--accent); }
+
+  .msg-line .body {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Tasks ── */
+  .task-line {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 12px;
+    align-items: baseline;
+  }
+
+  .task-line .tid {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .task-line .tstatus {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .task-line .tstatus.running { color: var(--yellow); }
+  .task-line .tstatus.done { color: var(--accent); }
+  .task-line .tstatus.failed { color: var(--red); }
+  .task-line .tstatus.queued { color: var(--text-muted); }
+
+  .task-line .tname {
+    color: var(--text);
+    flex: 1;
+  }
+
+  .task-line .tpct {
+    color: var(--text-muted);
+    flex-shrink: 0;
+    width: 40px;
+    text-align: right;
+  }
+
+  /* ── Actions ── */
+  .actions-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .action-cmd {
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s;
+    font-size: 12px;
+  }
+
+  .action-cmd:hover {
+    color: var(--accent);
+  }
+
+  .action-cmd::before {
+    content: '> ';
+    color: var(--accent);
+  }
+
+  /* ── Command Input ── */
+  .cmd-bar {
+    padding: 10px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+
+  .cmd-bar .prompt {
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .cmd-bar input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    caret-color: var(--accent);
+  }
+
+  .cmd-bar input::placeholder {
+    color: var(--text-muted);
+  }
+
+  /* ── Chat View ── */
+  .chat-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .chat-log::-webkit-scrollbar { width: 4px; }
+  .chat-log::-webkit-scrollbar-track { background: transparent; }
+  .chat-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .chat-line {
+    padding: 2px 0;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .chat-line .ct { color: var(--text-muted); }
+  .chat-line .cn { font-weight: 700; }
+  .chat-line .cn.you { color: var(--text); }
+  .chat-line .cn.alf { color: var(--accent); }
+
+  /* ── Tasks View ── */
+  .tasks-view-list {
+    padding: 20px;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .task-row {
+    display: flex;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    align-items: baseline;
+  }
+
+  .task-row:last-child { border-bottom: none; }
+
+  .progress-bar-wrap {
+    width: 80px;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
+    align-self: center;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+
+  /* ── Skills View ── */
+  .skills-grid {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .skill-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+
+  .skill-row .sk-name { color: var(--text); }
+  .skill-row .sk-tag { color: var(--text-muted); font-size: 10px; }
+
+  /* ── Vault View ── */
+  .vault-list {
+    padding: 20px;
+  }
+
+  .vault-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+
+  .vault-row .vk { color: var(--text); }
+  .vault-row .vv { color: var(--text-muted); }
+
+  /* ── Tiers View ── */
+  .tiers-list { padding: 20px; }
+
+  .tier-row {
+    display: flex;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    align-items: baseline;
+  }
+
+  .tier-row .tr-name { color: var(--accent); width: 80px; }
+  .tier-row .tr-model { color: var(--text); flex: 1; }
+  .tier-row .tr-cost { color: var(--text-muted); }
+
+  /* ── Files View ── */
+  .files-list { padding: 20px; }
+
+  .file-row {
+    display: flex;
+    gap: 12px;
+    padding: 4px 0;
+    font-size: 12px;
+  }
+
+  .file-row .fp { color: var(--text-muted); }
+  .file-row .fn { color: var(--text); }
+  .file-row .fs { color: var(--text-muted); margin-left: auto; }
+
+  /* ── Logs View ── */
+  .logs-output {
+    padding: 20px;
+    flex: 1;
+    overflow-y: auto;
+    font-size: 11px;
+    line-height: 1.7;
+  }
+
+  .logs-output::-webkit-scrollbar { width: 4px; }
+  .logs-output::-webkit-scrollbar-track { background: transparent; }
+  .logs-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .log-entry { padding: 1px 0; }
+  .log-entry .lt { color: var(--text-muted); }
+  .log-entry .ll { font-weight: 500; }
+  .log-entry .ll.info { color: var(--blue); }
+  .log-entry .ll.warn { color: var(--yellow); }
+  .log-entry .ll.err { color: var(--red); }
+  .log-entry .lm { color: var(--text); }
+
+  /* ── Term View ── */
+  .term-output {
+    padding: 20px;
+    flex: 1;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .term-output::-webkit-scrollbar { width: 4px; }
+  .term-output::-webkit-scrollbar-track { background: transparent; }
+  .term-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .term-line { color: var(--text-muted); }
+  .term-line.out { color: var(--text); }
+
+  /* ── Placeholder Views ── */
+  .placeholder-view {
+    padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .placeholder-view .pv-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+  }
+
+  .placeholder-view .pv-body {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <span>ALF</span>
+      <div class="dot"></div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-item active" data-view="home">CHAT</div>
+      <div class="nav-item" data-view="tasks">TASKS</div>
+      <div class="nav-item" data-view="skills">SKILLS</div>
+      <div class="nav-item" data-view="vault">VAULT</div>
+      <div class="nav-item" data-view="tiers">TIERS</div>
+      <div class="nav-item" data-view="files">FILES</div>
+      <div class="nav-item" data-view="logs">LOGS</div>
+      <div class="nav-item" data-view="term">TERM</div>
+      <div class="nav-sep"></div>
+      <div class="nav-item" data-view="later">LATER</div>
+      <div class="nav-item" data-view="reddit">REDDIT</div>
+      <div class="nav-item" data-view="seo">SEO</div>
+      <div class="nav-item" data-view="xpost">XPOST</div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="clock" id="clock">00:00:00</div>
+      <div class="status">system nominal</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- ── HOME / CHAT ── -->
+    <div class="view active" id="view-home">
+      <div class="status-bar">
+        STATUS:<span class="val">ONLINE</span><span class="sep">|</span>TIER:<span class="val">sonnet</span><span class="sep">|</span>TASKS:<span class="val">3</span><span class="sep">|</span>MEM:<span class="val">124M</span><span class="sep">|</span>UP:<span class="val" id="uptime">14h32m</span>
+      </div>
+
+      <div class="content" id="home-content">
+        <!-- Recent -->
+        <div class="section">
+          <div class="section-title">Recent</div>
+          <div class="msg-line"><span class="time">09:14</span><span class="who you">YOU</span><span class="body">Deploy the latest build to staging</span></div>
+          <div class="msg-line"><span class="time">09:16</span><span class="who alf">ALF</span><span class="body">Build deployed. 42/42 tests passed.</span></div>
+          <div class="msg-line"><span class="time">09:22</span><span class="who you">YOU</span><span class="body">Run SEO audit on the landing page</span></div>
+          <div class="msg-line"><span class="time">09:24</span><span class="who alf">ALF</span><span class="body">SEO audit queued as task #43. Starting now.</span></div>
+        </div>
+
+        <!-- Tasks -->
+        <div class="section">
+          <div class="section-title">Tasks</div>
+          <div class="task-line"><span class="tid">#43</span><span class="tstatus running">[RUNNING]</span><span class="tname">SEO audit — landing</span><span class="tpct">12%</span></div>
+          <div class="task-line"><span class="tid">#42</span><span class="tstatus running">[RUNNING]</span><span class="tname">SEO analysis</span><span class="tpct">34%</span></div>
+          <div class="task-line"><span class="tid">#41</span><span class="tstatus done">[DONE]</span><span class="tname">Reddit scrape</span><span class="tpct">100%</span></div>
+          <div class="task-line"><span class="tid">#40</span><span class="tstatus done">[DONE]</span><span class="tname">Deploy staging</span><span class="tpct">100%</span></div>
+        </div>
+
+        <!-- Actions -->
+        <div class="section">
+          <div class="section-title">Actions</div>
+          <div class="actions-row">
+            <span class="action-cmd" data-action="new-chat">new-chat</span>
+            <span class="action-cmd" data-action="run-task">run-task</span>
+            <span class="action-cmd" data-action="open-files">open-files</span>
+            <span class="action-cmd" data-action="terminal">terminal</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" id="home-input" placeholder="type a command..." autofocus>
+      </div>
+    </div>
+
+    <!-- ── CHAT VIEW (switches when you send a message) ── -->
+    <div class="view" id="view-chat">
+      <div class="status-bar">
+        CHAT<span class="sep">|</span>SESSION:<span class="val">conv_7f3a</span><span class="sep">|</span>MESSAGES:<span class="val" id="chat-count">6</span>
+      </div>
+
+      <div class="chat-log" id="chat-log">
+        <div class="chat-line"><span class="ct">[09:14]</span> <span class="cn you">you:</span> Deploy the latest build to staging</div>
+        <div class="chat-line"><span class="ct">[09:15]</span> <span class="cn alf">alf:</span> Starting deployment pipeline...</div>
+        <div class="chat-line"><span class="ct">[09:16]</span> <span class="cn alf">alf:</span> Build deployed. 42/42 tests passed.</div>
+        <div class="chat-line"><span class="ct">[09:22]</span> <span class="cn you">you:</span> Run SEO audit on the landing page</div>
+        <div class="chat-line"><span class="ct">[09:23]</span> <span class="cn alf">alf:</span> SEO audit queued as task #43.</div>
+        <div class="chat-line"><span class="ct">[09:24]</span> <span class="cn alf">alf:</span> Crawling landing page... 12% complete.</div>
+      </div>
+
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" id="chat-input" placeholder="send a message...">
+      </div>
+    </div>
+
+    <!-- ── TASKS VIEW ── -->
+    <div class="view" id="view-tasks">
+      <div class="status-bar">
+        TASKS<span class="sep">|</span>RUNNING:<span class="val">2</span><span class="sep">|</span>QUEUED:<span class="val">1</span><span class="sep">|</span>DONE:<span class="val">38</span>
+      </div>
+      <div class="tasks-view-list">
+        <div class="section-title">Active</div>
+        <div class="task-row"><span class="tid">#43</span><span class="tstatus running">[RUNNING]</span><span class="tname">SEO audit — landing</span><div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:12%"></div></div><span class="tpct">12%</span></div>
+        <div class="task-row"><span class="tid">#42</span><span class="tstatus running">[RUNNING]</span><span class="tname">SEO analysis — competitors</span><div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:34%"></div></div><span class="tpct">34%</span></div>
+        <div class="task-row"><span class="tid">#44</span><span class="tstatus queued">[QUEUED]</span><span class="tname">Generate weekly report</span><div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:0%"></div></div><span class="tpct">0%</span></div>
+        <div style="margin-top:20px"></div>
+        <div class="section-title">Completed</div>
+        <div class="task-row"><span class="tid">#41</span><span class="tstatus done">[DONE]</span><span class="tname">Reddit scrape — r/saas</span><div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:100%"></div></div><span class="tpct">100%</span></div>
+        <div class="task-row"><span class="tid">#40</span><span class="tstatus done">[DONE]</span><span class="tname">Deploy staging build v2.4.1</span><div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:100%"></div></div><span class="tpct">100%</span></div>
+        <div class="task-row"><span class="tid">#39</span><span class="tstatus failed">[FAILED]</span><span class="tname">Twitter API sync</span><div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:67%;background:var(--red)"></div></div><span class="tpct">67%</span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="run-task, cancel #id, retry #id...">
+      </div>
+    </div>
+
+    <!-- ── SKILLS VIEW ── -->
+    <div class="view" id="view-skills">
+      <div class="status-bar">
+        SKILLS<span class="sep">|</span>LOADED:<span class="val">8</span><span class="sep">|</span>CUSTOM:<span class="val">3</span>
+      </div>
+      <div class="skills-grid">
+        <div class="section-title">Installed</div>
+        <div class="skill-row"><span class="sk-name">seo-audit</span><span class="sk-tag">builtin</span></div>
+        <div class="skill-row"><span class="sk-name">reddit-scraper</span><span class="sk-tag">builtin</span></div>
+        <div class="skill-row"><span class="sk-name">deploy-pipeline</span><span class="sk-tag">builtin</span></div>
+        <div class="skill-row"><span class="sk-name">code-review</span><span class="sk-tag">builtin</span></div>
+        <div class="skill-row"><span class="sk-name">twitter-poster</span><span class="sk-tag">builtin</span></div>
+        <div class="skill-row"><span class="sk-name">weekly-report</span><span class="sk-tag">custom</span></div>
+        <div class="skill-row"><span class="sk-name">competitor-watch</span><span class="sk-tag">custom</span></div>
+        <div class="skill-row"><span class="sk-name">link-builder</span><span class="sk-tag">custom</span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="install, remove, info...">
+      </div>
+    </div>
+
+    <!-- ── VAULT VIEW ── -->
+    <div class="view" id="view-vault">
+      <div class="status-bar">
+        VAULT<span class="sep">|</span>SECRETS:<span class="val">6</span><span class="sep">|</span>ENCRYPTED:<span class="val">AES-256</span>
+      </div>
+      <div class="vault-list">
+        <div class="section-title">Secrets</div>
+        <div class="vault-row"><span class="vk">OPENAI_API_KEY</span><span class="vv">sk-...7f3a</span></div>
+        <div class="vault-row"><span class="vk">TELEGRAM_TOKEN</span><span class="vv">••••••4829</span></div>
+        <div class="vault-row"><span class="vk">REDDIT_CLIENT_ID</span><span class="vv">••••••ab12</span></div>
+        <div class="vault-row"><span class="vk">REDDIT_SECRET</span><span class="vv">••••••9e4f</span></div>
+        <div class="vault-row"><span class="vk">TWITTER_BEARER</span><span class="vv">••••••c3d8</span></div>
+        <div class="vault-row"><span class="vk">ANTHROPIC_API_KEY</span><span class="vv">sk-...2b9e</span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="set KEY=value, delete KEY, rotate...">
+      </div>
+    </div>
+
+    <!-- ── TIERS VIEW ── -->
+    <div class="view" id="view-tiers">
+      <div class="status-bar">
+        TIERS<span class="sep">|</span>ACTIVE:<span class="val">sonnet</span><span class="sep">|</span>FALLBACK:<span class="val">haiku</span>
+      </div>
+      <div class="tiers-list">
+        <div class="section-title">Configuration</div>
+        <div class="tier-row"><span class="tr-name">opus</span><span class="tr-model">claude-opus-4-0520</span><span class="tr-cost">$15/1M</span></div>
+        <div class="tier-row"><span class="tr-name" style="color:var(--accent)">sonnet</span><span class="tr-model">claude-sonnet-4-0520</span><span class="tr-cost">$3/1M</span></div>
+        <div class="tier-row"><span class="tr-name">haiku</span><span class="tr-model">claude-haiku-3-5</span><span class="tr-cost">$0.25/1M</span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="set-tier, costs, usage...">
+      </div>
+    </div>
+
+    <!-- ── FILES VIEW ── -->
+    <div class="view" id="view-files">
+      <div class="status-bar">
+        FILES<span class="sep">|</span>CWD:<span class="val">/home/alf/data</span><span class="sep">|</span>ITEMS:<span class="val">7</span>
+      </div>
+      <div class="files-list">
+        <div class="section-title">/home/alf/data</div>
+        <div class="file-row"><span class="fp">drwx</span><span class="fn">config.d/</span><span class="fs">—</span></div>
+        <div class="file-row"><span class="fp">drwx</span><span class="fn">skills.d/</span><span class="fs">—</span></div>
+        <div class="file-row"><span class="fp">drwx</span><span class="fn">logs/</span><span class="fs">—</span></div>
+        <div class="file-row"><span class="fp">-rw-</span><span class="fn">soul.md</span><span class="fs">2.4K</span></div>
+        <div class="file-row"><span class="fp">-rw-</span><span class="fn">schedule.json</span><span class="fs">1.1K</span></div>
+        <div class="file-row"><span class="fp">-rw-</span><span class="fn">tasks.db</span><span class="fs">48K</span></div>
+        <div class="file-row"><span class="fp">-rw-</span><span class="fn">conversation.jsonl</span><span class="fs">312K</span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="cd, ls, cat, edit...">
+      </div>
+    </div>
+
+    <!-- ── LOGS VIEW ── -->
+    <div class="view" id="view-logs">
+      <div class="status-bar">
+        LOGS<span class="sep">|</span>LEVEL:<span class="val">INFO</span><span class="sep">|</span>TAIL:<span class="val">live</span>
+      </div>
+      <div class="logs-output" id="logs-output">
+        <div class="log-entry"><span class="lt">09:24:01</span> <span class="ll info">INF</span> <span class="lm">task #43 started: seo-audit</span></div>
+        <div class="log-entry"><span class="lt">09:23:58</span> <span class="ll info">INF</span> <span class="lm">classifier routed to tier:sonnet</span></div>
+        <div class="log-entry"><span class="lt">09:22:14</span> <span class="ll info">INF</span> <span class="lm">message received from telegram user:alessandro</span></div>
+        <div class="log-entry"><span class="lt">09:16:42</span> <span class="ll info">INF</span> <span class="lm">deploy completed: 42/42 tests passed</span></div>
+        <div class="log-entry"><span class="lt">09:15:03</span> <span class="ll info">INF</span> <span class="lm">deploy pipeline started for staging</span></div>
+        <div class="log-entry"><span class="lt">09:14:58</span> <span class="ll info">INF</span> <span class="lm">classifier routed to tier:sonnet</span></div>
+        <div class="log-entry"><span class="lt">09:14:55</span> <span class="ll info">INF</span> <span class="lm">message received from telegram user:alessandro</span></div>
+        <div class="log-entry"><span class="lt">09:00:01</span> <span class="ll warn">WRN</span> <span class="lm">rate limit approaching: 82/100 requests this minute</span></div>
+        <div class="log-entry"><span class="lt">08:45:12</span> <span class="ll info">INF</span> <span class="lm">log rotation completed: archived 3 files</span></div>
+        <div class="log-entry"><span class="lt">08:30:00</span> <span class="ll info">INF</span> <span class="lm">health check passed — all services nominal</span></div>
+        <div class="log-entry"><span class="lt">07:12:33</span> <span class="ll err">ERR</span> <span class="lm">twitter API: 429 too many requests — backing off 60s</span></div>
+        <div class="log-entry"><span class="lt">06:00:00</span> <span class="ll info">INF</span> <span class="lm">daemon started — pid 1, version 2.4.1</span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="filter, level, clear...">
+      </div>
+    </div>
+
+    <!-- ── TERM VIEW ── -->
+    <div class="view" id="view-term">
+      <div class="status-bar">
+        TERMINAL<span class="sep">|</span>SHELL:<span class="val">bash</span><span class="sep">|</span>USER:<span class="val">alf@container</span>
+      </div>
+      <div class="term-output" id="term-output">
+        <div class="term-line">alf@alf:~$ whoami</div>
+        <div class="term-line out">alf</div>
+        <div class="term-line">alf@alf:~$ uptime</div>
+        <div class="term-line out"> 09:24:15 up 14:32, 1 user, load average: 0.42, 0.38, 0.31</div>
+        <div class="term-line">alf@alf:~$ df -h /home/alf/data</div>
+        <div class="term-line out">Filesystem      Size  Used Avail Use% Mounted on</div>
+        <div class="term-line out">/dev/sda1        50G   12G   38G  24% /home/alf/data</div>
+        <div class="term-line">alf@alf:~$ </div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf@alf:~$</span>
+        <input type="text" id="term-input" placeholder="">
+      </div>
+    </div>
+
+    <!-- ── LATER VIEW ── -->
+    <div class="view" id="view-later">
+      <div class="status-bar">LATER<span class="sep">|</span>ITEMS:<span class="val">4</span></div>
+      <div class="placeholder-view">
+        <div class="section-title">Read Later Queue</div>
+        <div class="msg-line"><span class="time">Mar 17</span><span class="who alf">ALF</span><span class="body">Interesting thread on LLM fine-tuning techniques</span></div>
+        <div class="msg-line"><span class="time">Mar 16</span><span class="who alf">ALF</span><span class="body">New Claude API features — tool use improvements</span></div>
+        <div class="msg-line"><span class="time">Mar 15</span><span class="who alf">ALF</span><span class="body">Competitor launched new pricing tier</span></div>
+        <div class="msg-line"><span class="time">Mar 14</span><span class="who alf">ALF</span><span class="body">Go 1.23 release notes — relevant changes</span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="open #, archive, clear...">
+      </div>
+    </div>
+
+    <!-- ── REDDIT VIEW ── -->
+    <div class="view" id="view-reddit">
+      <div class="status-bar">REDDIT<span class="sep">|</span>SUBS:<span class="val">3</span><span class="sep">|</span>LAST SCAN:<span class="val">2m ago</span></div>
+      <div class="placeholder-view">
+        <div class="section-title">Monitored Threads</div>
+        <div class="msg-line"><span class="time">09:22</span><span class="who alf">r/saas</span><span class="body">"How I got my first 100 users" — 234 upvotes, 89 comments</span></div>
+        <div class="msg-line"><span class="time">09:18</span><span class="who alf">r/seo</span><span class="body">"Google March core update rolling out" — 567 upvotes</span></div>
+        <div class="msg-line"><span class="time">09:10</span><span class="who alf">r/indie</span><span class="body">"Show HN: my weekend project got 10k visits" — 45 upvotes</span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="scan, add-sub, summarize...">
+      </div>
+    </div>
+
+    <!-- ── SEO VIEW ── -->
+    <div class="view" id="view-seo">
+      <div class="status-bar">SEO<span class="sep">|</span>DOMAINS:<span class="val">2</span><span class="sep">|</span>SCORE:<span class="val">78/100</span></div>
+      <div class="placeholder-view">
+        <div class="section-title">Latest Audit</div>
+        <div class="task-line"><span class="tid">META</span><span class="tstatus done">[PASS]</span><span class="tname">Title tags present on all pages</span><span class="tpct"></span></div>
+        <div class="task-line"><span class="tid">PERF</span><span class="tstatus running">[WARN]</span><span class="tname">LCP 3.2s — target &lt;2.5s</span><span class="tpct"></span></div>
+        <div class="task-line"><span class="tid">LINK</span><span class="tstatus done">[PASS]</span><span class="tname">No broken internal links</span><span class="tpct"></span></div>
+        <div class="task-line"><span class="tid">A11Y</span><span class="tstatus failed">[FAIL]</span><span class="tname">Missing alt text on 3 images</span><span class="tpct"></span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="audit, keywords, backlinks...">
+      </div>
+    </div>
+
+    <!-- ── XPOST VIEW ── -->
+    <div class="view" id="view-xpost">
+      <div class="status-bar">XPOST<span class="sep">|</span>SCHEDULED:<span class="val">2</span><span class="sep">|</span>POSTED TODAY:<span class="val">1</span></div>
+      <div class="placeholder-view">
+        <div class="section-title">Queue</div>
+        <div class="msg-line"><span class="time">10:00</span><span class="who alf">SCH</span><span class="body">Thread: 5 lessons from building in public</span></div>
+        <div class="msg-line"><span class="time">14:00</span><span class="who alf">SCH</span><span class="body">Reply: engagement post on AI tooling</span></div>
+        <div style="margin-top:16px"></div>
+        <div class="section-title">Recent</div>
+        <div class="msg-line"><span class="time">08:30</span><span class="who alf" style="color:var(--accent)">OK</span><span class="body">Posted: "Why I replaced 3 SaaS tools with one CLI" — 12 likes</span></div>
+      </div>
+      <div class="cmd-bar">
+        <span class="prompt">alf&gt;</span>
+        <input type="text" placeholder="draft, schedule, analytics...">
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── Navigation ──
+const navItems = document.querySelectorAll('.nav-item');
+const views = document.querySelectorAll('.view');
+let currentView = 'home';
+
+navItems.forEach(item => {
+  item.addEventListener('click', () => {
+    const target = item.dataset.view;
+    if (!target) return;
+    switchView(target);
+  });
+});
+
+function switchView(target) {
+  navItems.forEach(n => n.classList.toggle('active', n.dataset.view === target));
+  views.forEach(v => v.classList.toggle('active', v.id === 'view-' + target));
+  currentView = target;
+  // Focus the input in the new view
+  const input = document.querySelector('#view-' + target + ' .cmd-bar input');
+  if (input) setTimeout(() => input.focus(), 50);
+}
+
+// ── Action commands ──
+document.querySelectorAll('.action-cmd').forEach(cmd => {
+  cmd.addEventListener('click', () => {
+    const action = cmd.dataset.action;
+    if (action === 'new-chat') switchView('home');
+    else if (action === 'run-task') switchView('tasks');
+    else if (action === 'open-files') switchView('files');
+    else if (action === 'terminal') switchView('term');
+  });
+});
+
+// ── Clock ──
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toTimeString().slice(0, 8);
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ── Chat input (home) ──
+document.getElementById('home-input').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const val = e.target.value.trim();
+  if (!val) return;
+  e.target.value = '';
+
+  // Add to chat log
+  const now = new Date();
+  const ts = now.toTimeString().slice(0, 5);
+
+  // Switch to chat view and add message
+  switchView('home');
+
+  // Add to recent section
+  const recent = document.querySelector('#view-home .section:first-child');
+  const line = document.createElement('div');
+  line.className = 'msg-line';
+  line.innerHTML = `<span class="time">${ts}</span><span class="who you">YOU</span><span class="body">${esc(val)}</span>`;
+  recent.appendChild(line);
+
+  // Add to chat log
+  const chatLog = document.getElementById('chat-log');
+  const cl = document.createElement('div');
+  cl.className = 'chat-line';
+  cl.innerHTML = `<span class="ct">[${ts}]</span> <span class="cn you">you:</span> ${esc(val)}`;
+  chatLog.appendChild(cl);
+
+  // Simulate ALF response
+  setTimeout(() => {
+    const resp = getResponse(val);
+    const rts = new Date().toTimeString().slice(0, 5);
+
+    const rline = document.createElement('div');
+    rline.className = 'msg-line';
+    rline.innerHTML = `<span class="time">${rts}</span><span class="who alf">ALF</span><span class="body">${esc(resp)}</span>`;
+    recent.appendChild(rline);
+
+    const rcl = document.createElement('div');
+    rcl.className = 'chat-line';
+    rcl.innerHTML = `<span class="ct">[${rts}]</span> <span class="cn alf">alf:</span> ${esc(resp)}`;
+    chatLog.appendChild(rcl);
+    chatLog.scrollTop = chatLog.scrollHeight;
+
+    updateChatCount();
+  }, 600);
+
+  updateChatCount();
+});
+
+// ── Chat input (chat view) ──
+document.getElementById('chat-input').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const val = e.target.value.trim();
+  if (!val) return;
+  e.target.value = '';
+
+  const now = new Date();
+  const ts = now.toTimeString().slice(0, 5);
+  const chatLog = document.getElementById('chat-log');
+
+  const cl = document.createElement('div');
+  cl.className = 'chat-line';
+  cl.innerHTML = `<span class="ct">[${ts}]</span> <span class="cn you">you:</span> ${esc(val)}`;
+  chatLog.appendChild(cl);
+  chatLog.scrollTop = chatLog.scrollHeight;
+
+  setTimeout(() => {
+    const resp = getResponse(val);
+    const rts = new Date().toTimeString().slice(0, 5);
+    const rcl = document.createElement('div');
+    rcl.className = 'chat-line';
+    rcl.innerHTML = `<span class="ct">[${rts}]</span> <span class="cn alf">alf:</span> ${esc(resp)}`;
+    chatLog.appendChild(rcl);
+    chatLog.scrollTop = chatLog.scrollHeight;
+    updateChatCount();
+  }, 600);
+
+  updateChatCount();
+});
+
+// ── Terminal input ──
+document.getElementById('term-input').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const val = e.target.value.trim();
+  if (!val) return;
+  e.target.value = '';
+
+  const output = document.getElementById('term-output');
+
+  // Remove the last empty prompt line
+  const lastLine = output.querySelector('.term-line:last-child');
+  if (lastLine && lastLine.textContent.endsWith('$ ')) lastLine.remove();
+
+  const cmd = document.createElement('div');
+  cmd.className = 'term-line';
+  cmd.textContent = `alf@alf:~$ ${val}`;
+  output.appendChild(cmd);
+
+  const result = document.createElement('div');
+  result.className = 'term-line out';
+  result.textContent = getTermResponse(val);
+  output.appendChild(result);
+
+  const prompt = document.createElement('div');
+  prompt.className = 'term-line';
+  prompt.textContent = 'alf@alf:~$ ';
+  output.appendChild(prompt);
+
+  output.scrollTop = output.scrollHeight;
+});
+
+// ── Helpers ──
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function updateChatCount() {
+  const count = document.querySelectorAll('#chat-log .chat-line').length;
+  document.getElementById('chat-count').textContent = count;
+}
+
+function getResponse(input) {
+  const lower = input.toLowerCase();
+  if (lower.includes('status')) return 'All systems operational. 2 tasks running, 0 errors in last hour.';
+  if (lower.includes('deploy')) return 'Initiating deployment pipeline. Running tests first...';
+  if (lower.includes('help')) return 'Commands: status, deploy, task, logs, tier, skill, vault, files';
+  if (lower.includes('task')) return 'Task queued. Check TASKS view for progress.';
+  if (lower.includes('hello') || lower.includes('hi')) return 'Ready. What do you need?';
+  return 'Acknowledged. Processing request...';
+}
+
+function getTermResponse(cmd) {
+  const lower = cmd.toLowerCase();
+  if (lower === 'ls') return 'config.d  data  logs  skills.d  soul.md  tasks.db';
+  if (lower === 'pwd') return '/home/alf';
+  if (lower.startsWith('echo')) return cmd.slice(5);
+  if (lower === 'date') return new Date().toString();
+  if (lower === 'hostname') return 'alf-container';
+  return `bash: ${cmd.split(' ')[0]}: command not found`;
+}
+</script>
+</body>
+</html>

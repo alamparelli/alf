@@ -217,7 +217,7 @@ Every new app MUST start from this template:
     .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
     h1 { color: var(--accent); margin-top: 0; }
     .loading { text-align: center; color: var(--text-dim); padding: 40px; }
-    .error { text-align: center; color: #e74c3c; padding: 40px; }
+    .error { text-align: center; color: var(--red); padding: 40px; }
   </style>
 </head>
 <body>

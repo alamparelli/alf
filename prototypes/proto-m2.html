@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALF OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=Work+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #1c1c1c;
+    --surface: #262626;
+    --text: #e7e5e4;
+    --text-muted: #a8a29e;
+    --accent: #f59e0b;
+    --border: #333333;
+    --sidebar-w: 220px;
+    --radius: 8px;
+    --radius-sm: 6px;
+  }
+
+  body {
+    font-family: 'Work Sans', sans-serif;
+    font-weight: 400;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: var(--sidebar-w);
+    min-width: var(--sidebar-w);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    user-select: none;
+  }
+
+  .sidebar-brand {
+    padding: 20px 16px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sidebar-brand h1 {
+    font-family: 'Sora', sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 1px;
+    color: var(--text);
+  }
+
+  .online-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    flex-shrink: 0;
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    padding: 4px 0;
+    overflow-y: auto;
+  }
+
+  .nav-section {
+    padding: 0 8px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    cursor: pointer;
+    font-size: 13.5px;
+    color: var(--text-muted);
+    transition: background 200ms, color 200ms;
+    border-left: 3px solid transparent;
+    margin-bottom: 1px;
+  }
+
+  .nav-item:hover {
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+  }
+
+  .nav-item.active {
+    border-left-color: var(--accent);
+    background: rgba(255,255,255,0.06);
+    color: var(--text);
+  }
+
+  .nav-item i { width: 16px; height: 16px; flex-shrink: 0; }
+
+  .nav-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 8px 16px;
+  }
+
+  .nav-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+    padding: 8px 16px 4px 24px;
+    font-weight: 500;
+  }
+
+  .sidebar-status {
+    padding: 12px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+    opacity: 0.7;
+  }
+
+  /* ── Main ── */
+  .main {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .view {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .view.active {
+    display: flex;
+  }
+
+  /* ── Home ── */
+  .home {
+    padding: 32px 40px;
+    max-width: 820px;
+  }
+
+  .greeting h2 {
+    font-family: 'Sora', sans-serif;
+    font-weight: 500;
+    font-size: 24px;
+    color: var(--text);
+  }
+
+  .greeting p {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-top: 4px;
+  }
+
+  .section-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    font-weight: 500;
+  }
+
+  .cards-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 28px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    transition: transform 200ms;
+    cursor: default;
+  }
+
+  .card:hover { transform: translateY(-1px); }
+
+  .card-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  .card-value {
+    font-family: 'Sora', sans-serif;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .card-detail {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  /* Recent */
+  .recent {
+    margin-top: 32px;
+  }
+
+  .recent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .recent-item {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .recent-item:last-child { border-bottom: none; }
+
+  .recent-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    min-width: 48px;
+  }
+
+  .recent-text {
+    font-size: 13.5px;
+    color: var(--text);
+    line-height: 1.4;
+  }
+
+  /* Quick actions */
+  .quick-actions {
+    margin-top: 28px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .quick-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    font-family: 'Work Sans', sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 200ms, color 200ms, border-color 200ms;
+  }
+
+  .quick-btn:hover {
+    background: var(--surface);
+    color: var(--text);
+    border-color: #444;
+  }
+
+  .quick-btn i { width: 14px; height: 14px; }
+
+  /* ── Chat View ── */
+  .chat-view {
+    height: 100%;
+  }
+
+  .chat-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'Sora', sans-serif;
+    font-weight: 500;
+    font-size: 15px;
+  }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .msg {
+    max-width: 72%;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .msg.user { align-self: flex-end; }
+  .msg.alf { align-self: flex-start; }
+
+  .msg-name {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  .msg.user .msg-name { text-align: right; }
+
+  .msg-bubble {
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .msg.user .msg-bubble {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.15);
+  }
+
+  .msg.alf .msg-bubble {
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+
+  .msg-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    opacity: 0.6;
+  }
+
+  .msg.user .msg-time { text-align: right; }
+
+  .chat-input-bar {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+  }
+
+  .chat-input-bar input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 10px 16px;
+    color: var(--text);
+    font-family: 'Work Sans', sans-serif;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 200ms;
+  }
+
+  .chat-input-bar input::placeholder { color: var(--text-muted); opacity: 0.5; }
+  .chat-input-bar input:focus { border-color: #444; }
+
+  .send-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: #1c1c1c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: opacity 200ms;
+    flex-shrink: 0;
+  }
+
+  .send-btn:hover { opacity: 0.85; }
+  .send-btn i { width: 16px; height: 16px; }
+
+  /* ── Placeholder views ── */
+  .placeholder-view {
+    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 12px;
+    color: var(--text-muted);
+  }
+
+  .placeholder-view i { width: 32px; height: 32px; opacity: 0.4; }
+  .placeholder-view span {
+    font-family: 'Sora', sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+  }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #444; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <h1>ALF</h1>
+    <span class="online-dot"></span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section">
+      <div class="nav-item active" data-view="home">
+        <i data-lucide="home"></i><span>Home</span>
+      </div>
+      <div class="nav-item" data-view="chat">
+        <i data-lucide="message-square"></i><span>Chat</span>
+      </div>
+      <div class="nav-item" data-view="tasks">
+        <i data-lucide="check-square"></i><span>Tasks</span>
+      </div>
+      <div class="nav-item" data-view="skills">
+        <i data-lucide="zap"></i><span>Skills</span>
+      </div>
+      <div class="nav-item" data-view="vault">
+        <i data-lucide="lock"></i><span>Vault</span>
+      </div>
+      <div class="nav-item" data-view="tiers">
+        <i data-lucide="layers"></i><span>Tiers</span>
+      </div>
+      <div class="nav-item" data-view="files">
+        <i data-lucide="folder"></i><span>Files</span>
+      </div>
+      <div class="nav-item" data-view="logs">
+        <i data-lucide="scroll-text"></i><span>Logs</span>
+      </div>
+      <div class="nav-item" data-view="terminal">
+        <i data-lucide="terminal"></i><span>Terminal</span>
+      </div>
+    </div>
+
+    <div class="nav-divider"></div>
+    <div class="nav-label">Apps</div>
+
+    <div class="nav-section">
+      <div class="nav-item" data-view="later">
+        <i data-lucide="bookmark"></i><span>Later</span>
+      </div>
+      <div class="nav-item" data-view="reddit">
+        <i data-lucide="radio"></i><span>Reddit Leads</span>
+      </div>
+      <div class="nav-item" data-view="seo">
+        <i data-lucide="bar-chart-2"></i><span>SEO Dashboard</span>
+      </div>
+      <div class="nav-item" data-view="xpost">
+        <i data-lucide="send"></i><span>XPost</span>
+      </div>
+    </div>
+  </nav>
+
+  <div class="sidebar-status" id="sidebar-status">sonnet &middot; 14h &middot; 124 MB</div>
+</aside>
+
+<!-- Main -->
+<main class="main">
+
+  <!-- Home -->
+  <div class="view active" id="view-home">
+    <div class="home">
+      <div class="greeting">
+        <h2 id="greeting-text">Good morning, Alessandro</h2>
+        <p>3 tasks running &middot; All systems healthy</p>
+      </div>
+
+      <div class="cards-grid">
+        <div class="section-label" style="grid-column: 1 / -1;">Overview</div>
+        <div class="card">
+          <div class="card-label">System</div>
+          <div class="card-value">Online</div>
+          <div class="card-detail">debian · bookworm-slim</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Tier</div>
+          <div class="card-value">claude-sonnet</div>
+          <div class="card-detail">ctx 200k · temp 0.7</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Tasks</div>
+          <div class="card-value">3 running</div>
+          <div class="card-detail">2 queued · 0 failed</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Uptime</div>
+          <div class="card-value" id="uptime-value">14h 32m</div>
+          <div class="card-detail">started 03:28 UTC</div>
+        </div>
+      </div>
+
+      <div class="recent">
+        <div class="section-label">Recent</div>
+        <div class="recent-list">
+          <div class="recent-item">
+            <span class="recent-time">09:41</span>
+            <span class="recent-text">Deployed SEO dashboard update to production, all health checks passing.</span>
+          </div>
+          <div class="recent-item">
+            <span class="recent-time">09:12</span>
+            <span class="recent-text">Scraped 47 new Reddit leads matching "side project" keywords.</span>
+          </div>
+          <div class="recent-item">
+            <span class="recent-time">08:55</span>
+            <span class="recent-text">Rotated API keys for xlens-backend. Old keys revoked.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="quick-actions">
+        <button class="quick-btn" data-nav="chat"><i data-lucide="plus"></i>New Chat</button>
+        <button class="quick-btn" data-nav="tasks"><i data-lucide="play"></i>Run Task</button>
+        <button class="quick-btn" data-nav="files"><i data-lucide="folder-open"></i>Open Files</button>
+        <button class="quick-btn" data-nav="terminal"><i data-lucide="terminal"></i>Terminal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div class="view chat-view" id="view-chat">
+    <div class="chat-header">Chat</div>
+    <div class="chat-messages" id="chat-messages">
+      <div class="msg user">
+        <span class="msg-name">Alessandro</span>
+        <div class="msg-bubble">Deploy the SEO dashboard update to prod.</div>
+        <span class="msg-time">09:38</span>
+      </div>
+      <div class="msg alf">
+        <span class="msg-name">ALF</span>
+        <div class="msg-bubble">Building image, running tests. I'll push to production once the health check passes. Should take about 2 minutes.</div>
+        <span class="msg-time">09:38</span>
+      </div>
+      <div class="msg alf">
+        <span class="msg-name">ALF</span>
+        <div class="msg-bubble">Deployed successfully. All 4 health checks passing. Dashboard is live.</div>
+        <span class="msg-time">09:41</span>
+      </div>
+      <div class="msg user">
+        <span class="msg-name">Alessandro</span>
+        <div class="msg-bubble">Nice. Check the Reddit leads scraper too, anything new?</div>
+        <span class="msg-time">09:42</span>
+      </div>
+      <div class="msg alf">
+        <span class="msg-name">ALF</span>
+        <div class="msg-bubble">Found 47 new posts matching your keywords. 12 high-intent leads saved to the queue. Want me to draft outreach for the top 5?</div>
+        <span class="msg-time">09:43</span>
+      </div>
+    </div>
+    <div class="chat-input-bar">
+      <input type="text" placeholder="Message ALF..." id="chat-input">
+      <button class="send-btn" id="send-btn"><i data-lucide="arrow-up"></i></button>
+    </div>
+  </div>
+
+  <!-- Placeholder views -->
+  <div class="view" id="view-tasks"><div class="placeholder-view"><i data-lucide="check-square"></i><span>Tasks</span></div></div>
+  <div class="view" id="view-skills"><div class="placeholder-view"><i data-lucide="zap"></i><span>Skills</span></div></div>
+  <div class="view" id="view-vault"><div class="placeholder-view"><i data-lucide="lock"></i><span>Vault</span></div></div>
+  <div class="view" id="view-tiers"><div class="placeholder-view"><i data-lucide="layers"></i><span>Tiers</span></div></div>
+  <div class="view" id="view-files"><div class="placeholder-view"><i data-lucide="folder"></i><span>Files</span></div></div>
+  <div class="view" id="view-logs"><div class="placeholder-view"><i data-lucide="scroll-text"></i><span>Logs</span></div></div>
+  <div class="view" id="view-terminal"><div class="placeholder-view"><i data-lucide="terminal"></i><span>Terminal</span></div></div>
+  <div class="view" id="view-later"><div class="placeholder-view"><i data-lucide="bookmark"></i><span>Later</span></div></div>
+  <div class="view" id="view-reddit"><div class="placeholder-view"><i data-lucide="radio"></i><span>Reddit Leads</span></div></div>
+  <div class="view" id="view-seo"><div class="placeholder-view"><i data-lucide="bar-chart-2"></i><span>SEO Dashboard</span></div></div>
+  <div class="view" id="view-xpost"><div class="placeholder-view"><i data-lucide="send"></i><span>XPost</span></div></div>
+</main>
+
+<script>
+  lucide.createIcons();
+
+  // ── Navigation ──
+  const navItems = document.querySelectorAll('.nav-item[data-view]');
+  const views = document.querySelectorAll('.view');
+  const quickBtns = document.querySelectorAll('.quick-btn[data-nav]');
+
+  function navigate(viewId) {
+    navItems.forEach(n => n.classList.toggle('active', n.dataset.view === viewId));
+    views.forEach(v => v.classList.toggle('active', v.id === 'view-' + viewId));
+  }
+
+  navItems.forEach(item => item.addEventListener('click', () => navigate(item.dataset.view)));
+  quickBtns.forEach(btn => btn.addEventListener('click', () => navigate(btn.dataset.nav)));
+
+  // ── Greeting ──
+  function updateGreeting() {
+    const h = new Date().getHours();
+    const part = h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening';
+    document.getElementById('greeting-text').textContent = `Good ${part}, Alessandro`;
+  }
+  updateGreeting();
+
+  // ── Live clock in status ──
+  function updateStatus() {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    document.getElementById('sidebar-status').textContent = `sonnet \u00b7 14h \u00b7 124 MB \u00b7 ${hh}:${mm}:${ss}`;
+  }
+  updateStatus();
+  setInterval(updateStatus, 1000);
+
+  // ── Chat send ──
+  const chatInput = document.getElementById('chat-input');
+  const chatMessages = document.getElementById('chat-messages');
+  const sendBtn = document.getElementById('send-btn');
+
+  function sendMessage() {
+    const text = chatInput.value.trim();
+    if (!text) return;
+    const now = new Date();
+    const time = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
+    const msgEl = document.createElement('div');
+    msgEl.className = 'msg user';
+    msgEl.innerHTML = `<span class="msg-name">Alessandro</span><div class="msg-bubble">${escapeHtml(text)}</div><span class="msg-time">${time}</span>`;
+    chatMessages.appendChild(msgEl);
+    chatInput.value = '';
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    setTimeout(() => {
+      const reply = document.createElement('div');
+      reply.className = 'msg alf';
+      reply.innerHTML = `<span class="msg-name">ALF</span><div class="msg-bubble">Got it. Working on that now.</div><span class="msg-time">${time}</span>`;
+      chatMessages.appendChild(reply);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }, 600);
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+
+  function escapeHtml(t) {
+    const d = document.createElement('div');
+    d.textContent = t;
+    return d.innerHTML;
+  }
+</script>
+</body>
+</html>

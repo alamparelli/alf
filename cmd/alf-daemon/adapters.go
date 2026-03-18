@@ -104,6 +104,7 @@ func (c *commsTierStore) Snapshot() comms.TiersSnapshot {
 			TimeoutMin:           t.TimeoutMin,
 			Backend:              t.Backend,
 			SystemPrompt:         t.SystemPrompt,
+			RouterLabel:          t.RouterLabel,
 			ContextWeight:        t.EffectiveContextWeight(),
 		}
 	}

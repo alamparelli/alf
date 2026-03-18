@@ -25,8 +25,9 @@ var webFS embed.FS
 
 // Server is the Control Center HTTP server.
 type Server struct {
-	httpServer *http.Server
-	addr       string
+	httpServer     *http.Server
+	addr           string
+	statusProvider *daemonStatusProvider
 }
 
 // New creates a Control Center server.
@@ -116,8 +117,16 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 			WriteTimeout:      10 * time.Minute, // long for SSE streaming
 			MaxHeaderBytes:    1 << 20,           // 1MB
 		},
-		addr: addr,
+		addr:           addr,
+		statusProvider: statusProvider,
 	}, schedEventBroker, nil
+}
+
+// SetUpdater attaches the update checker so /api/status can report available updates.
+func (s *Server) SetUpdater(u UpdateChecker) {
+	if s.statusProvider != nil {
+		s.statusProvider.SetUpdater(u)
+	}
 }
 
 // Start begins listening. Blocks until the server stops.

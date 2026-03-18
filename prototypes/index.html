@@ -177,16 +177,27 @@
     position: relative;
   }
 
-  .proto-card:nth-child(1)  { animation-delay: 0.05s; }
-  .proto-card:nth-child(2)  { animation-delay: 0.10s; }
-  .proto-card:nth-child(3)  { animation-delay: 0.15s; }
-  .proto-card:nth-child(4)  { animation-delay: 0.20s; }
-  .proto-card:nth-child(5)  { animation-delay: 0.25s; }
-  .proto-card:nth-child(6)  { animation-delay: 0.30s; }
-  .proto-card:nth-child(7)  { animation-delay: 0.35s; }
-  .proto-card:nth-child(8)  { animation-delay: 0.40s; }
-  .proto-card:nth-child(9)  { animation-delay: 0.45s; }
-  .proto-card:nth-child(10) { animation-delay: 0.50s; }
+  .proto-card:nth-child(1)  { animation-delay: 0.03s; }
+  .proto-card:nth-child(2)  { animation-delay: 0.06s; }
+  .proto-card:nth-child(3)  { animation-delay: 0.09s; }
+  .proto-card:nth-child(4)  { animation-delay: 0.12s; }
+  .proto-card:nth-child(5)  { animation-delay: 0.15s; }
+  .proto-card:nth-child(6)  { animation-delay: 0.18s; }
+  .proto-card:nth-child(7)  { animation-delay: 0.21s; }
+  .proto-card:nth-child(8)  { animation-delay: 0.24s; }
+  .proto-card:nth-child(9)  { animation-delay: 0.27s; }
+  .proto-card:nth-child(10) { animation-delay: 0.30s; }
+  .proto-card:nth-child(11) { animation-delay: 0.33s; }
+  .proto-card:nth-child(12) { animation-delay: 0.36s; }
+  .proto-card:nth-child(13) { animation-delay: 0.39s; }
+  .proto-card:nth-child(14) { animation-delay: 0.42s; }
+  .proto-card:nth-child(15) { animation-delay: 0.45s; }
+  .proto-card:nth-child(16) { animation-delay: 0.48s; }
+  .proto-card:nth-child(17) { animation-delay: 0.51s; }
+  .proto-card:nth-child(18) { animation-delay: 0.54s; }
+  .proto-card:nth-child(19) { animation-delay: 0.57s; }
+  .proto-card:nth-child(20) { animation-delay: 0.60s; }
+  .proto-card:nth-child(21) { animation-delay: 0.63s; }
 
   .proto-card:hover {
     transform: translateY(-4px);
@@ -505,12 +516,12 @@
     ALF OS — Prototype Gallery
   </div>
   <nav class="topbar-nav" id="topnav"></nav>
-  <div class="topbar-count">11 prototypes</div>
+  <div class="topbar-count">21 prototypes</div>
 </div>
 
 <section class="hero">
   <h1>ALF <span>OS</span> Redesign</h1>
-  <p>Soft Studio — 11 variations. Cliquez pour voir en plein ecran.</p>
+  <p>21 variations — Minimal + Soft Studio. Cliquez pour voir en plein ecran.</p>
 </section>
 
 <section class="gallery" id="gallery"></section>
@@ -544,13 +555,78 @@
 
 <script>
 const prototypes = [
+  // — Minimal / Modern series —
+  {
+    num: 'm1',
+    name: 'Ink Minimal',
+    desc: 'Ultra clean, epure. Typographie nette, espaces genereux.',
+    tags: ['minimal', 'clean', 'ink', 'typography'],
+    file: 'proto-m1.html'
+  },
   {
     num: 'm2',
-    name: 'Soft Studio (Base)',
+    name: 'Soft Studio',
     desc: 'Charcoal chaud, accent ambre, coins doux. Le design de reference.',
     tags: ['baseline', 'amber', 'warm', 'reference'],
     file: 'proto-m2.html'
   },
+  {
+    num: 'm3',
+    name: 'Paper Dark',
+    desc: 'Esthetique editoriale avec typographie serif. Ambiance journal.',
+    tags: ['serif', 'editorial', 'paper', 'dark'],
+    file: 'proto-m3.html'
+  },
+  {
+    num: 'm4',
+    name: 'Slate Grid',
+    desc: 'Sidebar pliable + dashboard en grille. Structuree et modulaire.',
+    tags: ['grid', 'collapsible', 'modular', 'dashboard'],
+    file: 'proto-m4.html'
+  },
+  {
+    num: 'm5',
+    name: 'Vercel Clean',
+    desc: 'Navigation horizontale header, pas de sidebar. Style Vercel/Next.',
+    tags: ['no-sidebar', 'header-nav', 'vercel', 'horizontal'],
+    file: 'proto-m5.html'
+  },
+  {
+    num: 'm6',
+    name: 'Split Duo',
+    desc: 'Chat persistant + panneaux de contenu switchables. Dual panel.',
+    tags: ['split', 'chat', 'dual-panel', 'persistent'],
+    file: 'proto-m6.html'
+  },
+  {
+    num: 'm7',
+    name: 'Pill Nav',
+    desc: 'Navigation flottante en bas, inspiree mobile. Bottom dock.',
+    tags: ['bottom-nav', 'floating', 'mobile', 'pill'],
+    file: 'proto-m7.html'
+  },
+  {
+    num: 'm8',
+    name: 'Dense Terminal',
+    desc: 'Full monospace, esthetique terminal/hacker. Information dense.',
+    tags: ['monospace', 'terminal', 'hacker', 'dense'],
+    file: 'proto-m8.html'
+  },
+  {
+    num: 'm9',
+    name: 'Status Pills',
+    desc: 'Design avec pills de statut, accent bleu ciel, typographie Karla.',
+    tags: ['pills', 'sky-blue', 'status', 'karla'],
+    file: 'proto-m9.html'
+  },
+  {
+    num: 'm10',
+    name: 'Control Center',
+    desc: 'Layout centre de controle complet avec sections detaillees.',
+    tags: ['control-center', 'full', 'sections', 'detailed'],
+    file: 'proto-m10.html'
+  },
+  // — Soft Studio variations —
   {
     num: 's1',
     name: 'Sage Green',

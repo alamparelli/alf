@@ -1020,21 +1020,31 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 }
 
 // NewSession archives the current API chat session and optionally triggers onboarding.
+// Delegates to the unified comms engine which handles session archival, skill clearing,
+// onboarding state, event logging, and memory extraction hooks.
 // Returns (oldSessionID, newConvID).
 func (cs *ChatService) NewSession(onboard bool) (string, string) {
-	old := cs.Sessions.Archive(apiChatID)
+	var old string
+	if cs.Engine != nil {
+		old = cs.Engine.NewSession(comms.ChannelID("cc:"+fmt.Sprint(apiChatID)), onboard)
+	} else {
+		// Legacy fallback when engine is not wired.
+		old = cs.Sessions.Archive(apiChatID)
+		if cs.ConvStore != nil {
+			cs.ConvStore.NewConversation(conversation.ChannelCC)
+		}
+		if onboard {
+			memory.SetOnboarding(cs.ContextDir)
+		} else {
+			memory.ClearOnboarding(cs.ContextDir)
+		}
+	}
 	var newConvID string
 	if cs.ConvStore != nil {
-		cs.ConvStore.NewConversation(conversation.ChannelCC)
 		newConvID = cs.ConvStore.ConvID(conversation.ChannelCC)
 	}
 	if newConvID == "" {
-		newConvID = NewMessageID() // fallback if ConvStore is nil
-	}
-	if onboard {
-		memory.SetOnboarding(cs.ContextDir)
-	} else {
-		memory.ClearOnboarding(cs.ContextDir)
+		newConvID = NewMessageID()
 	}
 	return old, newConvID
 }

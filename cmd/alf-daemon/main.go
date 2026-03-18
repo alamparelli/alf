@@ -611,6 +611,7 @@ func main() {
 	// Schedule adapter (engine set later after scheduler is created).
 	schedAdapter := &ccScheduleAdapter{}
 	var schedEventBroker *cc.ScheduleEventBroker
+	var ccServerRef *cc.Server
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
@@ -662,18 +663,19 @@ func main() {
 			})
 			log.Printf("[tasks] event: task=%s status=%s", taskID[:min(8, len(taskID))], status)
 		}
-		server, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock, onTaskEvent)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock, onTaskEvent)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
 			schedEventBroker = broker
 			go func() {
-				if err := server.Start(); err != nil && err != http.ErrServerClosed {
+				if err := ccServer.Start(); err != nil && err != http.ErrServerClosed {
 					log.Printf("Control Center error: %v", err)
 				}
 			}()
 			log.Printf("Control Center started on :8080 (allowed_chat_ids=%d, external_url=%s)", len(allowedChatIDs), ccExternalURL)
 		}
+		ccServerRef = ccServer
 	} else {
 		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set - Control Center disabled")
 	}
@@ -757,6 +759,9 @@ func main() {
 			fmt.Sprintf("@every %ds", updateInterval),
 			uc.CheckOnce,
 		)
+		if ccServerRef != nil {
+			ccServerRef.SetUpdater(uc)
+		}
 	}
 	var memExtractor *memstore.Extractor
 	if memDB != nil {
@@ -1410,7 +1415,7 @@ func main() {
 				cmdSource = u.Message.Caption
 			}
 			if strings.HasPrefix(cmdSource, "/") {
-				if handleCommand(tg, u.Message, chatSessions, eventLog, magic, ccExternalURL, allowedChatIDs, contextDir, orch, convStore) {
+				if handleCommand(tg, u.Message, commEngine, magic, ccExternalURL, allowedChatIDs, orch) {
 					continue
 				}
 				// Check for force command: /<tier_name> <message>

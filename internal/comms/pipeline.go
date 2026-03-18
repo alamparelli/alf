@@ -389,6 +389,11 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	if tp.SystemPrompt != "" {
 		sysPrompts = append([]string{tp.SystemPrompt}, sysPrompts...)
 	}
+	// Inject router label as role context so the tier knows its assigned role.
+	if tp.RouterLabel != "" {
+		rolePrompt := "Your assigned role: " + tp.RouterLabel
+		sysPrompts = append([]string{rolePrompt}, sysPrompts...)
+	}
 	// Onboarding prompt.
 	if onboarding := memory.OnboardingPrompt(e.ContextDir); onboarding != "" {
 		sysPrompts = append(sysPrompts, onboarding)

@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/alamparelli/alf/internal/conversation"
-	"github.com/alamparelli/alf/internal/memory"
 )
 
 // CommandHandler processes a slash command. Returns a text response.
@@ -54,29 +53,10 @@ func (r *CommandRegistry) Get(name string) (CommandDef, bool) {
 	return def, ok
 }
 
-// cmdNew handles /new and /clear: archives session, starts fresh.
+// cmdNew handles /new and /clear: delegates to engine.NewSession.
 func cmdNew(e *ChatEngine, channelID ChannelID, args string) string {
-	sessionKey := channelID.SessionKey()
-	old := e.Sessions.Archive(sessionKey)
-	e.Sessions.ClearSkills(sessionKey)
-
-	if e.ConvStore != nil {
-		e.ConvStore.NewConversation(channelID.ConvChannel())
-	}
-
-	memory.ClearOnboarding(e.ContextDir)
-
-	if e.EventLog != nil && old != "" {
-		e.EventLog.Log("session_archived", map[string]any{
-			"channel":        channelID.Prefix(),
-			"old_session_id": old,
-		})
-	}
-
+	old := e.NewSession(channelID, false)
 	if old != "" {
-		if e.OnSessionEnd != nil {
-			e.OnSessionEnd(old)
-		}
 		return "Previous session archived. New session started."
 	}
 	return "New session started."
@@ -84,15 +64,7 @@ func cmdNew(e *ChatEngine, channelID ChannelID, args string) string {
 
 // cmdStart handles /start: onboarding variant of /new.
 func cmdStart(e *ChatEngine, channelID ChannelID, args string) string {
-	sessionKey := channelID.SessionKey()
-	e.Sessions.Archive(sessionKey)
-	e.Sessions.ClearSkills(sessionKey)
-
-	if e.ConvStore != nil {
-		e.ConvStore.NewConversation(channelID.ConvChannel())
-	}
-
-	memory.SetOnboarding(e.ContextDir)
+	e.NewSession(channelID, true)
 	return "" // empty = fall through to process "hello" as onboarding
 }
 

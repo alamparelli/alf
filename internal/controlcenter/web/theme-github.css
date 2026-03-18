@@ -1,0 +1,54 @@
+/* GitHub palette — Light + Dark */
+
+/* GitHub Light */
+:root {
+  --bg: #ffffff;
+  --bg-card: #f6f8fa;
+  --bg-input: #eef1f4;
+  --text: #1f2328;
+  --text-dim: #656d76;
+  --accent: #0969da;
+  --green: #1a7f37;
+  --red: #cf222e;
+  --yellow: #9a6700;
+  --border: #d0d7de;
+  --radius: 6px;
+  --on-accent: #ffffff;
+  --danger: #cf222e;
+  --success: #1a7f37;
+  --error: #cf222e;
+
+  --mauve: #8250df;
+  --pink: #bf3989;
+  --teal: #0550ae;
+  --sapphire: #0969da;
+  --peach: #bc4c00;
+  --lavender: #8250df;
+}
+
+/* GitHub Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --bg-input: #21262d;
+    --text: #e6edf3;
+    --text-dim: #7d8590;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --border: #30363d;
+    --on-accent: #0d1117;
+    --danger: #f85149;
+    --success: #3fb950;
+    --error: #f85149;
+
+    --mauve: #bc8cff;
+    --pink: #db61a2;
+    --teal: #388bfd;
+    --sapphire: #58a6ff;
+    --peach: #d18616;
+    --lavender: #bc8cff;
+  }
+}

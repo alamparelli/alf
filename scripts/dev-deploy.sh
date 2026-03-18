@@ -33,13 +33,14 @@ SCP="scp -o ControlPath=$SSH_SOCK"
 GIT_HASH=$(git rev-parse --short HEAD)
 TAG="dev-${GIT_HASH}"
 FULL_TAG="${IMAGE_NAME}:${TAG}"
+BUILD_VERSION=$(git describe --tags --always 2>/dev/null || echo "${TAG}")
 
 echo "==> Pruning old ${IMAGE_NAME} images..."
 docker images "${IMAGE_NAME}" --format '{{.ID}} {{.Tag}}' | grep -v latest | awk '{print $1}' | xargs -r docker rmi 2>/dev/null || true
 
 echo "==> Building CLI (linux/amd64)..."
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -ldflags "-s -w -X main.version=${TAG}" \
+  -ldflags "-s -w -X main.version=${BUILD_VERSION}" \
   -o /tmp/alf-deploy \
   ./cmd/alf/
 
@@ -64,7 +65,7 @@ rsync -az --delete \
 rm -rf third_party/vault-proxy
 
 echo "==> Building Docker image natively on homelab..."
-$SSH "${REMOTE_HOST}" "cd /tmp/alf-build && docker build -t '${FULL_TAG}' -t '${IMAGE_NAME}:latest' ."
+$SSH "${REMOTE_HOST}" "cd /tmp/alf-build && docker build --build-arg BUILD_VERSION='${BUILD_VERSION}' -t '${FULL_TAG}' -t '${IMAGE_NAME}:latest' ."
 
 echo "==> Building whisper-service image on homelab..."
 $SSH "${REMOTE_HOST}" "cd /tmp/alf-build/whisper-service && docker build -t alf-whisper:latest ."
@@ -150,6 +151,7 @@ services:
     image: alf-homelab:latest
     pull_policy: never
     container_name: alf
+    hostname: workspace
     restart: unless-stopped
     networks:
       default:

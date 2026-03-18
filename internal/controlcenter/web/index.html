@@ -32,6 +32,7 @@
             <a class="nav-item" data-view="terminal"><i data-lucide="terminal"></i><span>Terminal</span></a>
             <a class="nav-item" data-view="tasks"><i data-lucide="layers"></i><span>Tasks</span></a>
             <a class="nav-item" data-view="schedules"><i data-lucide="calendar-clock"></i><span>Schedules</span></a>
+            <a class="nav-item" data-view="teams"><i data-lucide="users"></i><span>Teams</span></a>
             <a class="nav-item" data-view="tiers"><i data-lucide="sliders-horizontal"></i><span>Tiers</span></a>
             <a class="nav-item" data-view="firewall"><i data-lucide="shield"></i><span>Firewall</span></a>
             <a class="nav-item" data-view="vault"><i data-lucide="lock"></i><span>Vault</span></a>
@@ -48,6 +49,7 @@
       <div class="sidebar-bottom">
         <div class="sidebar-report">
           <a href="mailto:al@obsidina-it.be?subject=ALF%20Bug%20Report" class="nav-item report-issue"><i data-lucide="bug"></i> Report Issue</a>
+          <span class="sidebar-version" id="sidebarVersion"></span>
         </div>
         <div class="sidebar-footer">
           <p>Made with ❤️</p>
@@ -95,6 +97,7 @@
               <div class="explorer-editor-header">
                 <span class="explorer-filename" id="wsFileName">Select a file</span>
                 <div class="ws-editor-actions">
+                  <button class="btn btn-icon ws-edit-toggle" id="wsMdEditBtn" style="display:none" title="Edit"><i data-lucide="pencil"></i></button>
                   <button class="btn btn-icon" id="wsViewBtn" style="display:none" title="Pretty view"><i data-lucide="eye"></i></button>
                   <button class="btn btn-icon btn-danger-icon" id="wsDeleteBtn" disabled title="Delete file"><i data-lucide="trash-2"></i></button>
                   <button class="btn" id="wsSaveBtn" disabled>Save</button>
@@ -102,6 +105,7 @@
               </div>
               <div class="ws-message" id="wsMessage" style="display:none"></div>
               <textarea class="json-editor" id="wsEditor" rows="12" placeholder="Select a file to view..." disabled style="display:none"></textarea>
+              <div id="wsMdPreview" class="ws-md-preview" style="display:none"></div>
               <div id="wsViewer" class="ws-viewer" style="display:none"></div>
             </div>
           </div>
@@ -273,6 +277,7 @@
         </div>
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-status" id="chatStatus"></div>
+        <div class="chat-queue" id="chatQueue"></div>
         <div class="chat-media-preview" id="chatMediaPreview"></div>
         <div class="chat-input-bar">
           <button class="btn-icon chat-attach-btn" id="chatAttachBtn" title="Attach image"><i data-lucide="paperclip"></i></button>
@@ -301,64 +306,58 @@
           <button class="sched-filter" data-filter="obsolete">Obsolete</button>
           <span style="flex:1"></span>
           <button class="sched-filter" id="schedCollapseAllBtn" title="Collapse/expand all"><i data-lucide="minimize-2" style="width:14px;height:14px"></i></button>
+          <input type="text" id="schedSearch" class="sched-search" placeholder="Search schedules...">
         </div>
         <div class="schedules-list" id="schedulesList"></div>
       </div>
 
       <div id="tasksView" class="tasks-view" style="display:none">
-        <div class="tasks-tab-bar">
-          <button class="tasks-tab active" data-tab="tasks-runs">Tasks</button>
-          <button class="tasks-tab" data-tab="tasks-teams">Teams</button>
+        <div class="tasks-toolbar">
+          <h2>Agent Tasks</h2>
+          <div class="tasks-toolbar-right">
+            <label class="logs-auto-label"><input type="checkbox" id="tasksAutoRefresh" checked> Auto</label>
+            <button class="btn btn-icon" id="tasksRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+          </div>
         </div>
-
-        <div id="tasksRunsPane" class="tasks-pane">
-          <div class="tasks-toolbar">
-            <h2>Agent Tasks</h2>
-            <div class="tasks-toolbar-right">
-              <label class="logs-auto-label"><input type="checkbox" id="tasksAutoRefresh" checked> Auto</label>
-              <button class="btn btn-icon" id="tasksRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
-            </div>
+        <div class="task-launcher" id="taskLauncher">
+          <div class="task-launcher-header">
+            <label class="task-launcher-label" for="taskLauncherTeam">Team</label>
+            <select id="taskLauncherTeam" class="task-launcher-select">
+              <option value="">Auto (best fit)</option>
+            </select>
           </div>
-          <div class="task-launcher" id="taskLauncher">
-            <div class="task-launcher-header">
-              <label class="task-launcher-label" for="taskLauncherTeam">Team</label>
-              <select id="taskLauncherTeam" class="task-launcher-select">
-                <option value="">Auto (best fit)</option>
-              </select>
-            </div>
-            <textarea id="taskLauncherInput" class="task-launcher-input" placeholder="Describe the task for the agent team..." rows="4"></textarea>
-            <div class="task-launcher-options">
-              <label class="task-launcher-validation">
-                <input type="checkbox" id="taskNeedValidation"> Review plan before execution
-              </label>
-            </div>
-            <div class="task-launcher-actions">
-              <button class="btn btn-sm btn-accent" id="taskLaunchBtn"><i data-lucide="play" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Launch</button>
-            </div>
+          <textarea id="taskLauncherInput" class="task-launcher-input" placeholder="Describe the task for the agent team..." rows="4"></textarea>
+          <div class="task-launcher-options">
+            <label class="task-launcher-validation">
+              <input type="checkbox" id="taskNeedValidation"> Review plan before execution
+            </label>
           </div>
-          <div class="tasks-list" id="tasksList"></div>
+          <div class="task-launcher-actions">
+            <button class="btn btn-sm btn-accent" id="taskLaunchBtn"><i data-lucide="play" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>Launch</button>
+          </div>
         </div>
+        <div class="tasks-list" id="tasksList"></div>
+      </div>
 
-        <div id="tasksTeamsPane" class="tasks-pane" style="display:none">
-          <div class="tasks-toolbar">
-            <h2>Agent Teams</h2>
-            <div class="tasks-toolbar-right">
-              <button class="btn btn-sm" id="teamsAddBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:2px"></i>New Team</button>
-              <button class="btn btn-icon" id="teamsRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+      <div id="teamsView" class="tasks-view" style="display:none">
+        <div class="tasks-toolbar">
+          <h2>Agent Teams</h2>
+          <div class="tasks-toolbar-right">
+            <button class="btn btn-sm" id="teamsAddBtn"><i data-lucide="plus" style="width:14px;height:14px;vertical-align:middle;margin-right:2px"></i>New Team</button>
+            <button class="btn btn-icon" id="teamsRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+          </div>
+        </div>
+        <div class="teams-list" id="teamsList"></div>
+        <div class="teams-editor" id="teamsEditor" style="display:none">
+          <div class="teams-editor-header">
+            <span id="teamsEditorTitle">New Team</span>
+            <div>
+              <button class="btn btn-sm" id="teamsEditorSave">Save</button>
+              <button class="btn btn-sm btn-ghost" id="teamsEditorCancel">Cancel</button>
             </div>
           </div>
-          <div class="teams-list" id="teamsList"></div>
-          <div class="teams-editor" id="teamsEditor" style="display:none">
-            <div class="teams-editor-header">
-              <span id="teamsEditorTitle">New Team</span>
-              <div>
-                <button class="btn btn-sm" id="teamsEditorSave">Save</button>
-                <button class="btn btn-sm btn-ghost" id="teamsEditorCancel">Cancel</button>
-              </div>
-            </div>
-            <textarea id="teamsEditorJson" class="teams-json-editor" spellcheck="false" placeholder='Paste team JSON here...'></textarea>
-            <div class="teams-editor-hint" id="teamsEditorHint"></div>
-          </div>
+          <textarea id="teamsEditorJson" class="teams-json-editor" spellcheck="false" placeholder='Paste team JSON here...'></textarea>
+          <div class="teams-editor-hint" id="teamsEditorHint"></div>
         </div>
       </div>
 
@@ -567,36 +566,19 @@
 
         <!-- Theme -->
         <div class="card">
-          <h3>Theme</h3>
-          <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:10px">Light/dark follows your system. Pick a palette:</p>
-          <div class="theme-picker">
-            <button class="theme-swatch" data-palette="sage" title="Sage">
-              <span class="swatch-preview">
-                <span class="swatch-half" style="background:#f0f3ec;border:1px solid #bcc5b8;border-right:none;border-radius:6px 0 0 6px"></span><span class="swatch-half" style="background:#222822;border:1px solid #3a4638;border-left:none;border-radius:0 6px 6px 0"></span>
-              </span>
-              <span class="swatch-label">Sage</span>
-            </button>
-            <button class="theme-swatch" data-palette="studio" title="Studio">
-              <span class="swatch-preview">
-                <span class="swatch-half" style="background:#f5f3f0;border:1px solid #d6d3cf;border-right:none;border-radius:6px 0 0 6px"></span><span class="swatch-half" style="background:#1c1c1c;border:1px solid #333;border-left:none;border-radius:0 6px 6px 0"></span>
-              </span>
-              <span class="swatch-label">Studio</span>
-            </button>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <h3 style="margin:0">Theme</h3>
+            <select id="themePicker" class="settings-select"></select>
+            <span style="font-size:0.75rem;color:var(--text-dim)">Light/dark follows your system.</span>
           </div>
         </div>
 
-        <!-- Setup -->
+        <!-- Setup & System -->
         <div class="card">
-          <h3>Setup</h3>
-          <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:10px">Re-run the setup wizard to change backends, Telegram, or tiers.</p>
-          <button class="btn" id="settingsRerunSetup"><i data-lucide="settings-2"></i> Re-run Setup Wizard</button>
-        </div>
-
-        <!-- Admin Actions -->
-        <div class="card" id="adminCard">
-          <h3>System</h3>
-          <div class="admin-actions">
-            <button class="btn admin-btn" id="adminRestartBtn"><i data-lucide="rotate-cw"></i> Restart</button>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <h3 style="margin:0">System</h3>
+            <button class="btn btn-sm" id="settingsRerunSetup"><i data-lucide="settings-2" style="width:13px;height:13px"></i> Setup Wizard</button>
+            <button class="btn btn-sm" id="adminRestartBtn"><i data-lucide="rotate-cw" style="width:13px;height:13px"></i> Restart</button>
           </div>
           <div class="admin-output" id="adminOutput" style="display:none">
             <pre id="adminOutputText"></pre>

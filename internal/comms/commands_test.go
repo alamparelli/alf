@@ -1,9 +1,14 @@
 package comms
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/session"
 )
 
@@ -92,6 +97,175 @@ func TestCommand_SkillsClear(t *testing.T) {
 
 	if sk := sessions.GetSkills(-1); len(sk) > 0 {
 		t.Errorf("expected skills to be cleared, got %v", sk)
+	}
+}
+
+func TestNewSession_FiresOnSessionEnd(t *testing.T) {
+	dir := t.TempDir()
+	sessions := session.New(dir, 30*time.Minute)
+	sessions.Set(-1, "session-abc")
+	sessions.AddSkills(-1, []string{"test-skill"})
+
+	var firedWith string
+	e := &ChatEngine{
+		Sessions:     sessions,
+		ContextDir:   t.TempDir(),
+		OnSessionEnd: func(sid string) { firedWith = sid },
+	}
+
+	old := e.NewSession("cc:-1", false)
+
+	if old != "session-abc" {
+		t.Errorf("expected old session 'session-abc', got %q", old)
+	}
+	if firedWith != "session-abc" {
+		t.Errorf("expected OnSessionEnd fired with 'session-abc', got %q", firedWith)
+	}
+	// Skills should be cleared.
+	if sk := sessions.GetSkills(-1); len(sk) > 0 {
+		t.Errorf("expected skills cleared, got %v", sk)
+	}
+}
+
+func TestNewSession_NoFireWhenNoOldSession(t *testing.T) {
+	dir := t.TempDir()
+	sessions := session.New(dir, 30*time.Minute)
+
+	fired := false
+	e := &ChatEngine{
+		Sessions:     sessions,
+		ContextDir:   t.TempDir(),
+		OnSessionEnd: func(sid string) { fired = true },
+	}
+
+	old := e.NewSession("cc:-1", false)
+
+	if old != "" {
+		t.Errorf("expected empty old session, got %q", old)
+	}
+	if fired {
+		t.Error("OnSessionEnd should not fire when there's no old session")
+	}
+}
+
+func TestNewSession_CmdNewDelegatesToEngine(t *testing.T) {
+	dir := t.TempDir()
+	sessions := session.New(dir, 30*time.Minute)
+	sessions.Set(-1, "old-sess")
+
+	var firedWith string
+	e := &ChatEngine{
+		Sessions:     sessions,
+		ContextDir:   t.TempDir(),
+		OnSessionEnd: func(sid string) { firedWith = sid },
+	}
+
+	result := cmdNew(e, "cc:-1", "")
+
+	if result != "Previous session archived. New session started." {
+		t.Errorf("unexpected result: %q", result)
+	}
+	if firedWith != "old-sess" {
+		t.Errorf("expected OnSessionEnd via cmdNew, got %q", firedWith)
+	}
+}
+
+func TestNewSession_EventLog(t *testing.T) {
+	dir := t.TempDir()
+	sessions := session.New(dir, 30*time.Minute)
+	sessions.Set(-1, "session-log-test")
+
+	dataDir := t.TempDir()
+	el := eventlog.New(dataDir)
+	defer el.Close()
+
+	e := &ChatEngine{
+		Sessions:   sessions,
+		ContextDir: t.TempDir(),
+		EventLog:   el,
+	}
+
+	old := e.NewSession("cc:-1", false)
+	if old != "session-log-test" {
+		t.Fatalf("expected old session 'session-log-test', got %q", old)
+	}
+
+	el.Close() // flush
+
+	// Read the event log file and verify the session_archived event.
+	entries, err := filepath.Glob(filepath.Join(dataDir, "logs", "events", "*.jsonl"))
+	if err != nil || len(entries) == 0 {
+		t.Fatal("expected event log file to exist")
+	}
+
+	data, err := os.ReadFile(entries[0])
+	if err != nil {
+		t.Fatalf("read event log: %v", err)
+	}
+
+	var found bool
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var rec map[string]any
+		if json.Unmarshal([]byte(line), &rec) != nil {
+			continue
+		}
+		if rec["event"] == "session_archived" && rec["old_session_id"] == "session-log-test" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected session_archived event in log, not found")
+	}
+}
+
+func TestNewSession_NoEventLogWhenNoOldSession(t *testing.T) {
+	dir := t.TempDir()
+	sessions := session.New(dir, 30*time.Minute)
+	// No session set -- old will be empty.
+
+	dataDir := t.TempDir()
+	el := eventlog.New(dataDir)
+	defer el.Close()
+
+	e := &ChatEngine{
+		Sessions:   sessions,
+		ContextDir: t.TempDir(),
+		EventLog:   el,
+	}
+
+	old := e.NewSession("cc:-1", false)
+	if old != "" {
+		t.Fatalf("expected empty old session, got %q", old)
+	}
+
+	el.Close()
+
+	entries, _ := filepath.Glob(filepath.Join(dataDir, "logs", "events", "*.jsonl"))
+	if len(entries) > 0 {
+		data, _ := os.ReadFile(entries[0])
+		if strings.Contains(string(data), "session_archived") {
+			t.Error("session_archived should not be logged when no old session exists")
+		}
+	}
+}
+
+func TestNewSession_OnboardSetsOnboarding(t *testing.T) {
+	dir := t.TempDir()
+	sessions := session.New(dir, 30*time.Minute)
+	contextDir := t.TempDir()
+
+	e := &ChatEngine{
+		Sessions:   sessions,
+		ContextDir: contextDir,
+	}
+
+	e.NewSession("cc:-1", true)
+
+	// Verify onboarding file exists (memory.SetOnboarding creates a marker file).
+	onboardPath := filepath.Join(contextDir, ".onboarding")
+	if _, err := os.Stat(onboardPath); os.IsNotExist(err) {
+		t.Error("expected onboarding marker file to be created")
 	}
 }
 

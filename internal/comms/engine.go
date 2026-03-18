@@ -7,6 +7,7 @@ import (
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/skills"
@@ -136,12 +137,35 @@ func (e *ChatEngine) Broadcast(text string) {
 	}
 }
 
-// NewSession archives the current session for a channel and rotates the conversation ID.
+// NewSession archives the current session for a channel, rotates the conversation ID,
+// clears skills, manages onboarding state, and fires the OnSessionEnd hook.
+// This is the single authoritative path — all channels (CC, TG) must use this.
 func (e *ChatEngine) NewSession(channelID ChannelID, onboard bool) (oldSessionID string) {
 	key := channelID.SessionKey()
 	old := e.Sessions.Archive(key)
+	e.Sessions.ClearSkills(key)
+
 	if e.ConvStore != nil {
 		e.ConvStore.NewConversation(channelID.ConvChannel())
 	}
+
+	if onboard {
+		memory.SetOnboarding(e.ContextDir)
+	} else {
+		memory.ClearOnboarding(e.ContextDir)
+	}
+
+	if old != "" {
+		if e.EventLog != nil {
+			e.EventLog.Log("session_archived", map[string]any{
+				"channel":        channelID.Prefix(),
+				"old_session_id": old,
+			})
+		}
+		if e.OnSessionEnd != nil {
+			e.OnSessionEnd(old)
+		}
+	}
+
 	return old
 }

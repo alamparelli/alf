@@ -382,6 +382,33 @@ func seedBundledTeams(dataDir string) {
 	}
 }
 
+// seedBundledApps copies missing app directories from /opt/alf/defaults/apps
+// into the user apps directory. Existing apps are never overwritten.
+func seedBundledApps(dataDir string) {
+	const defaultsDir = "/opt/alf/defaults/apps"
+	appsDir := filepath.Join(dataDir, "apps")
+	entries, err := os.ReadDir(defaultsDir)
+	if err != nil {
+		return
+	}
+	os.MkdirAll(appsDir, 0o755)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dst := filepath.Join(appsDir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		src := filepath.Join(defaultsDir, e.Name())
+		if err := copyDir(src, dst); err != nil {
+			log.Printf("seed app %s: %v", e.Name(), err)
+		} else {
+			log.Printf("seeded bundled app: %s", e.Name())
+		}
+	}
+}
+
 // copyDir recursively copies a directory tree.
 func copyDir(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {

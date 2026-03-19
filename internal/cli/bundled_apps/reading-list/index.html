@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Later</title>
+  <link rel="stylesheet" id="alf-theme-link" href="/static/theme-sage.css" />
+  <script src="/static/theme-init.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 24px 16px 48px;
+    }
+
+    header {
+      max-width: 800px;
+      margin: 0 auto 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 12px; }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--text-heading, var(--text));
+    }
+
+    .badge {
+      background: var(--accent);
+      color: var(--on-accent, #fff);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+
+    .badge.zero { background: var(--bg-card); color: var(--text-dim); border: 1px solid var(--border); }
+
+    /* ── Tabs ─────────────────────────────── */
+    .tabs {
+      max-width: 800px;
+      margin: 0 auto 20px;
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 8px 16px;
+      margin-bottom: -1px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { border-bottom-color: var(--accent); color: var(--accent); }
+
+    /* ── Filters ──────────────────────────── */
+    .controls {
+      max-width: 800px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .filters { display: flex; gap: 8px; }
+
+    .filter-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 0.8rem;
+      padding: 5px 14px;
+      border-radius: 99px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .filter-btn.active, .filter-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .stats-bar {
+      display: flex;
+      gap: 16px;
+    }
+
+    .stat { font-size: 0.8rem; color: var(--text-dim); }
+    .stat strong { color: var(--text-heading, var(--text)); }
+
+    /* ── Add form ─────────────────────────── */
+    .add-section { max-width: 800px; margin: 0 auto 20px; }
+
+    .add-toggle {
+      background: var(--bg-card);
+      border: 1px dashed var(--border);
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      padding: 10px 18px;
+      border-radius: 10px;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+      transition: all 0.15s;
+    }
+
+    .add-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+    .add-form {
+      display: none;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-top: 8px;
+      gap: 12px;
+      flex-direction: column;
+    }
+
+    .add-form.open { display: flex; }
+
+    .form-row { display: flex; gap: 10px; }
+
+    .form-row input, .form-row textarea {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 0.85rem;
+      padding: 8px 12px;
+      border-radius: 8px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .form-row input:focus, .form-row textarea:focus { border-color: var(--accent); }
+    .form-row textarea { resize: vertical; min-height: 70px; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--on-accent, #fff);
+      border: none;
+      padding: 9px 20px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .btn-primary:hover { opacity: 0.85; }
+
+    .btn-cancel {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* ── Cards ────────────────────────────── */
+    .list {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      transition: border-color 0.15s, opacity 0.2s;
+    }
+
+    .card:hover { border-color: var(--accent); }
+    .card.done { opacity: 0.45; }
+
+    .card-check {
+      flex-shrink: 0;
+      margin-top: 2px;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      border: 2px solid var(--border);
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      color: transparent;
+      font-size: 13px;
+    }
+
+    .card-check:hover { border-color: var(--accent); }
+    .card.done .card-check {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .card-body { flex: 1; min-width: 0; }
+
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-heading, var(--text));
+      margin-bottom: 4px;
+      line-height: 1.4;
+    }
+
+    .card-title a { color: inherit; text-decoration: none; }
+    .card-title a:hover { color: var(--accent); }
+    .card-title span { color: inherit; }
+
+    .card-show {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+
+    .card-desc {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+
+    .card-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .card-source { font-size: 0.75rem; color: var(--text-dim); }
+
+    .card-date {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      padding: 1px 7px;
+      border-radius: 99px;
+    }
+
+    .card-duration {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      padding: 1px 7px;
+      border-radius: 99px;
+    }
+
+    .tag {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 99px;
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      color: var(--accent);
+    }
+
+    .card-delete {
+      flex-shrink: 0;
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+    }
+
+    .card:hover .card-delete { opacity: 1; }
+    .card-delete:hover { color: var(--red); }
+
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+    .empty span { font-size: 2rem; display: block; margin-bottom: 8px; }
+
+    .section { display: none; }
+    .section.active { display: block; }
+
+    /* ── Notes ────────────────────────────── */
+    .card-notes {
+      margin-top: 10px;
+      border-top: 1px solid var(--border);
+      padding-top: 8px;
+    }
+
+    .card-notes-area {
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-size: 0.8rem;
+      padding: 0;
+      resize: none;
+      outline: none;
+      font-family: inherit;
+      line-height: 1.5;
+      overflow: hidden;
+      min-height: 20px;
+    }
+
+    .card-notes-area:focus { color: var(--text); }
+
+    .card-notes-area::placeholder {
+      color: color-mix(in srgb, var(--text-dim) 40%, transparent);
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>Later</h1>
+    <span class="badge" id="unread-badge">0</span>
+  </div>
+</header>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab-btn active" data-tab="articles">Articles</button>
+  <button class="tab-btn" data-tab="podcasts">Podcasts</button>
+</div>
+
+<!-- ── ARTICLES section ─────────────────────────── -->
+<div class="section active" id="section-articles">
+
+  <div class="controls">
+    <div class="filters">
+      <button class="filter-btn" data-filter="all">Tous</button>
+      <button class="filter-btn active" data-filter="unread">À lire</button>
+      <button class="filter-btn" data-filter="read">Reads</button>
+    </div>
+    <div class="stats-bar">
+      <span class="stat"><strong id="a-stat-unread">0</strong> à lire</span>
+      <span class="stat"><strong id="a-stat-read">0</strong> lus</span>
+    </div>
+  </div>
+
+  <div class="add-section">
+    <button class="add-toggle" id="a-add-toggle">+ Add article</button>
+    <div class="add-form" id="a-add-form">
+      <div class="form-row">
+        <input type="url" id="a-url" placeholder="URL *" />
+      </div>
+      <div class="form-row">
+        <input type="text" id="a-title" placeholder="Titre *" />
+      </div>
+      <div class="form-row">
+        <input type="text" id="a-source" placeholder="Source (ex: Newsletter SPF)" />
+        <input type="text" id="a-tags" placeholder="Tags (virgule)" />
+      </div>
+      <div class="form-row">
+        <textarea id="a-desc" placeholder="Description / résumé"></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn-cancel" id="a-cancel-btn">Cancel</button>
+        <button class="btn-primary" id="a-save-btn">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="list" id="articles-list"></div>
+</div>
+
+<!-- ── PODCASTS section ─────────────────────────── -->
+<div class="section" id="section-podcasts">
+
+  <div class="controls">
+    <div class="filters">
+      <button class="filter-btn" data-filter="all">Tous</button>
+      <button class="filter-btn active" data-filter="unlistened">À écouter</button>
+      <button class="filter-btn" data-filter="listened">Listeneds</button>
+    </div>
+    <div class="stats-bar">
+      <span class="stat"><strong id="p-stat-unlistened">0</strong> à écouter</span>
+      <span class="stat"><strong id="p-stat-listened">0</strong> écoutés</span>
+    </div>
+  </div>
+
+  <div class="add-section">
+    <button class="add-toggle" id="p-add-toggle">+ Add podcast</button>
+    <div class="add-form" id="p-add-form">
+      <div class="form-row">
+        <input type="text" id="p-show" placeholder="Podcast (ex: Latent Space)" />
+        <input type="text" id="p-duration" placeholder="Durée (ex: 1h30)" />
+      </div>
+      <div class="form-row">
+        <input type="text" id="p-title" placeholder="Épisode *" />
+      </div>
+      <div class="form-row">
+        <input type="url" id="p-url" placeholder="URL (optionnel)" />
+      </div>
+      <div class="form-row">
+        <textarea id="p-desc" placeholder="Notes / description"></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn-cancel" id="p-cancel-btn">Cancel</button>
+        <button class="btn-primary" id="p-save-btn">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="list" id="podcasts-list"></div>
+</div>
+
+<script>
+  /* ── API helper ─────────────────────────────────────────────── */
+  async function api(method, path, body, silent = false) {
+    try {
+      let cmd = `curl -s -X ${method} http://127.0.0.1:8764${path}`;
+      cmd += " -H 'Content-Type: application/json'";
+      if (body !== undefined) cmd += ` -d '${JSON.stringify(body).replace(/'/g, "'\\''")}'`;
+      const res = await fetch('/api/bash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return JSON.parse(data.output);
+    } catch (e) {
+      if (!silent) console.error(e);
+      return null;
+    }
+  }
+
+  function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  /* ── State ─────────────────────────────────────────────────── */
+  let currentTab = 'articles';
+  let articles = [];
+  let podcasts = [];
+  let articleFilter = 'unread';
+  let podcastFilter = 'unlistened';
+
+  /* ── Tabs ──────────────────────────────────────────────────── */
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      btn.classList.add('active');
+      currentTab = btn.dataset.tab;
+      document.getElementById(`section-${currentTab}`).classList.add('active');
+      updateBadge();
+    });
+  });
+
+  /* ── Badge ─────────────────────────────────────────────────── */
+  function updateBadge() {
+    let count = 0;
+    if (currentTab === 'articles') {
+      count = articles.filter(i => i.status === 'unread').length;
+    } else {
+      count = podcasts.filter(i => i.status === 'unlistened').length;
+    }
+    const badge = document.getElementById('unread-badge');
+    badge.textContent = count;
+    badge.className = 'badge' + (count === 0 ? ' zero' : '');
+  }
+
+  /* ── Articles ──────────────────────────────────────────────── */
+  async function loadArticles() {
+    const data = await api('GET', '/api/reading-list', undefined, true);
+    if (!data) {
+      document.getElementById('articles-list').innerHTML =
+        '<div class="error" style="text-align:center;color:var(--red);padding:40px;">Impossible de charger. Vérifiez que alf-api tourne.</div>';
+      return;
+    }
+    articles = data;
+    renderArticles();
+  }
+
+  function renderArticles() {
+    const filtered = articles.filter(i => {
+      if (articleFilter === 'all') return true;
+      return i.status === articleFilter;
+    });
+
+    document.getElementById('a-stat-unread').textContent = articles.filter(i => i.status === 'unread').length;
+    document.getElementById('a-stat-read').textContent = articles.filter(i => i.status === 'read').length;
+    updateBadge();
+
+    const list = document.getElementById('articles-list');
+    if (filtered.length === 0) {
+      list.innerHTML = `<div class="empty"><span>📄</span>${articleFilter === 'read' ? 'Rien de lu encore.' : 'No articles à lire.'}</div>`;
+      return;
+    }
+
+    list.innerHTML = filtered.map(item => `
+      <div class="card ${item.status === 'read' ? 'done' : ''}" data-id="${item.id}">
+        <button class="card-check" data-toggle="${item.id}" title="${item.status === 'read' ? 'Marquer non-lu' : 'Mark as read'}">
+          ${item.status === 'read' ? '&#10003;' : ''}
+        </button>
+        <div class="card-body">
+          <div class="card-title"><a href="${escHtml(item.url)}" target="_blank" rel="noopener">${escHtml(item.title)}</a></div>
+          ${item.description ? `<div class="card-desc">${escHtml(item.description)}</div>` : ''}
+          <div class="card-meta">
+            ${item.source ? `<span class="card-source">${escHtml(item.source)}</span>` : ''}
+            <span class="card-date">${escHtml(item.added)}</span>
+            ${(item.tags || []).map(t => `<span class="tag">${escHtml(t)}</span>`).join('')}
+          </div>
+          <div class="card-notes">
+            <textarea class="card-notes-area" data-notes-id="${item.id}" data-notes-type="article" placeholder="Ajouter des notes…" rows="1">${escHtml(item.notes || '')}</textarea>
+          </div>
+        </div>
+        <button class="card-delete" data-delete="${item.id}" title="Delete">×</button>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('[data-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => toggleArticle(parseInt(btn.dataset.toggle, 10)));
+    });
+    list.querySelectorAll('[data-delete]').forEach(btn => {
+      btn.addEventListener('click', () => deleteArticle(parseInt(btn.dataset.delete, 10)));
+    });
+    list.querySelectorAll('.card-notes-area').forEach(autoResizeTextarea);
+  }
+
+  async function toggleArticle(id) {
+    const ok = await api('PATCH', `/api/reading-list/${id}/toggle`);
+    if (!ok) return;
+    const item = articles.find(i => i.id === id);
+    if (item) item.status = item.status === 'read' ? 'unread' : 'read';
+    renderArticles();
+  }
+
+  async function deleteArticle(id) {
+    const ok = await api('DELETE', `/api/reading-list/${id}`);
+    if (!ok) return;
+    articles = articles.filter(i => i.id !== id);
+    renderArticles();
+  }
+
+  // Article filters
+  document.querySelectorAll('#section-articles .filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#section-articles .filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      articleFilter = btn.dataset.filter;
+      renderArticles();
+    });
+  });
+
+  // Article add form
+  const aToggle = document.getElementById('a-add-toggle');
+  const aForm = document.getElementById('a-add-form');
+
+  aToggle.addEventListener('click', () => {
+    aForm.classList.toggle('open');
+    aToggle.style.display = aForm.classList.contains('open') ? 'none' : 'block';
+  });
+
+  document.getElementById('a-cancel-btn').addEventListener('click', () => {
+    aForm.classList.remove('open');
+    aToggle.style.display = 'block';
+    ['a-url','a-title','a-source','a-tags','a-desc'].forEach(id => document.getElementById(id).value = '');
+  });
+
+  document.getElementById('a-save-btn').addEventListener('click', async () => {
+    const url = document.getElementById('a-url').value.trim();
+    const title = document.getElementById('a-title').value.trim();
+    if (!url || !title) { alert('URL et titre requis.'); return; }
+    const tags = document.getElementById('a-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+    const article = await api('POST', '/api/reading-list', {
+      title, url,
+      source: document.getElementById('a-source').value.trim(),
+      description: document.getElementById('a-desc').value.trim(),
+      tags
+    });
+    if (article) {
+      articles.unshift(article);
+      renderArticles();
+    }
+    aForm.classList.remove('open');
+    aToggle.style.display = 'block';
+    ['a-url','a-title','a-source','a-tags','a-desc'].forEach(id => document.getElementById(id).value = '');
+  });
+
+  /* ── Podcasts ──────────────────────────────────────────────── */
+  async function loadPodcasts() {
+    const data = await api('GET', '/api/reading-list/podcasts', undefined, true);
+    if (!data) {
+      document.getElementById('podcasts-list').innerHTML =
+        '<div class="error" style="text-align:center;color:var(--red);padding:40px;">Impossible de charger.</div>';
+      return;
+    }
+    podcasts = data;
+    renderPodcasts();
+  }
+
+  function renderPodcasts() {
+    const filtered = podcasts.filter(i => {
+      if (podcastFilter === 'all') return true;
+      return i.status === podcastFilter;
+    });
+
+    document.getElementById('p-stat-unlistened').textContent = podcasts.filter(i => i.status === 'unlistened').length;
+    document.getElementById('p-stat-listened').textContent = podcasts.filter(i => i.status === 'listened').length;
+    updateBadge();
+
+    const list = document.getElementById('podcasts-list');
+    if (filtered.length === 0) {
+      list.innerHTML = `<div class="empty"><span>🎙️</span>${podcastFilter === 'listened' ? 'Rien d\'écouté encore.' : 'No podcasts en attente.'}</div>`;
+      return;
+    }
+
+    list.innerHTML = filtered.map(item => `
+      <div class="card ${item.status === 'listened' ? 'done' : ''}" data-id="${item.id}">
+        <button class="card-check" data-toggle="${item.id}" title="${item.status === 'listened' ? 'Marquer non-écouté' : 'Mark as listened'}">
+          ${item.status === 'listened' ? '&#10003;' : ''}
+        </button>
+        <div class="card-body">
+          ${item.show ? `<div class="card-show">${escHtml(item.show)}</div>` : ''}
+          <div class="card-title">
+            ${item.url ? `<a href="${escHtml(item.url)}" target="_blank" rel="noopener">${escHtml(item.title)}</a>` : `<span>${escHtml(item.title)}</span>`}
+          </div>
+          ${item.description ? `<div class="card-desc">${escHtml(item.description)}</div>` : ''}
+          <div class="card-meta">
+            ${item.duration ? `<span class="card-duration">⏱ ${escHtml(item.duration)}</span>` : ''}
+            <span class="card-date">${escHtml(item.added)}</span>
+          </div>
+          <div class="card-notes">
+            <textarea class="card-notes-area" data-notes-id="${item.id}" data-notes-type="podcast" placeholder="Ajouter des notes…" rows="1">${escHtml(item.notes || '')}</textarea>
+          </div>
+        </div>
+        <button class="card-delete" data-delete="${item.id}" title="Delete">×</button>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('[data-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => togglePodcast(parseInt(btn.dataset.toggle, 10)));
+    });
+    list.querySelectorAll('[data-delete]').forEach(btn => {
+      btn.addEventListener('click', () => deletePodcast(parseInt(btn.dataset.delete, 10)));
+    });
+    list.querySelectorAll('.card-notes-area').forEach(autoResizeTextarea);
+  }
+
+  async function togglePodcast(id) {
+    const ok = await api('PATCH', `/api/reading-list/podcasts/${id}/toggle`);
+    if (!ok) return;
+    const item = podcasts.find(i => i.id === id);
+    if (item) item.status = item.status === 'listened' ? 'unlistened' : 'listened';
+    renderPodcasts();
+  }
+
+  async function deletePodcast(id) {
+    const ok = await api('DELETE', `/api/reading-list/podcasts/${id}`);
+    if (!ok) return;
+    podcasts = podcasts.filter(i => i.id !== id);
+    renderPodcasts();
+  }
+
+  // Podcast filters
+  document.querySelectorAll('#section-podcasts .filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#section-podcasts .filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      podcastFilter = btn.dataset.filter;
+      renderPodcasts();
+    });
+  });
+
+  // Podcast add form
+  const pToggle = document.getElementById('p-add-toggle');
+  const pForm = document.getElementById('p-add-form');
+
+  pToggle.addEventListener('click', () => {
+    pForm.classList.toggle('open');
+    pToggle.style.display = pForm.classList.contains('open') ? 'none' : 'block';
+  });
+
+  document.getElementById('p-cancel-btn').addEventListener('click', () => {
+    pForm.classList.remove('open');
+    pToggle.style.display = 'block';
+    ['p-show','p-title','p-url','p-desc','p-duration'].forEach(id => document.getElementById(id).value = '');
+  });
+
+  document.getElementById('p-save-btn').addEventListener('click', async () => {
+    const title = document.getElementById('p-title').value.trim();
+    if (!title) { alert('Le titre de l\'épisode est requis.'); return; }
+    const podcast = await api('POST', '/api/reading-list/podcasts', {
+      title,
+      show:        document.getElementById('p-show').value.trim(),
+      url:         document.getElementById('p-url').value.trim(),
+      description: document.getElementById('p-desc').value.trim(),
+      duration:    document.getElementById('p-duration').value.trim(),
+    });
+    if (podcast) {
+      podcasts.unshift(podcast);
+      renderPodcasts();
+    }
+    pForm.classList.remove('open');
+    pToggle.style.display = 'block';
+    ['p-show','p-title','p-url','p-desc','p-duration'].forEach(id => document.getElementById(id).value = '');
+  });
+
+  /* ── Notes ─────────────────────────────────────────────────── */
+  async function saveArticleNotes(id, notes) {
+    await api('PATCH', `/api/reading-list/${id}/notes`, { notes }, true);
+  }
+
+  async function savePodcastNotes(id, notes) {
+    await api('PATCH', `/api/reading-list/podcasts/${id}/notes`, { notes }, true);
+  }
+
+  function autoResizeTextarea(el) {
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  }
+
+  // Event delegation on list containers (persists across re-renders)
+  ['articles-list', 'podcasts-list'].forEach(listId => {
+    const container = document.getElementById(listId);
+
+    // Auto-resize on input
+    container.addEventListener('input', (e) => {
+      if (e.target.classList.contains('card-notes-area')) {
+        autoResizeTextarea(e.target);
+      }
+    });
+
+    // Save on blur (capture mode — blur doesn't bubble)
+    container.addEventListener('blur', (e) => {
+      if (e.target.classList.contains('card-notes-area')) {
+        const id = parseInt(e.target.dataset.notesId, 10);
+        const type = e.target.dataset.notesType;
+        const notes = e.target.value;
+        if (type === 'article') saveArticleNotes(id, notes);
+        else if (type === 'podcast') savePodcastNotes(id, notes);
+      }
+    }, true);
+  });
+
+  // Auto-resize existing textareas after render
+  function resizeAllNotes() {
+    document.querySelectorAll('.card-notes-area').forEach(autoResizeTextarea);
+  }
+
+  /* ── Init ──────────────────────────────────────────────────── */
+  loadArticles().then(resizeAllNotes);
+  loadPodcasts().then(resizeAllNotes);
+</script>
+</body>
+</html>

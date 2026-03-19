@@ -1,0 +1,1573 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Tasks</title>
+  <!-- Palette detection MUST be before theme link -->
+  <script>
+    const palette = document.documentElement.getAttribute('data-palette');
+    if (palette) document.documentElement.setAttribute('data-palette', palette);
+  </script>
+  <link rel="stylesheet" id="alf-theme-link" href="/static/theme-sage.css">
+  <script src="/static/theme-init.js"></script>
+  <style>
+    /* === Aliases & derived vars === */
+    :root {
+      --text-muted:   var(--text-dim);
+      --accent-fg:    var(--on-accent);
+      --border-focus: var(--accent);
+      --success:      var(--green);
+      --danger:       var(--red);
+      --warning:      var(--yellow);
+    }
+
+    /* === Reset === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 12px 8px;
+      min-height: 100vh;
+    }
+
+    .container { max-width: 860px; margin: 0 auto; }
+    a { color: var(--accent); }
+
+    /* ==============================
+       HEADER
+    ============================== */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .header-left h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+
+    .header-stats {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    /* Bulk delete button — shown when done > 0 */
+    .btn-bulk {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 0 14px;
+      height: 36px;
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      cursor: pointer;
+      display: none;           /* hidden until done > 0 */
+      align-items: center;
+      gap: 5px;
+      transition: all 0.13s;
+      white-space: nowrap;
+    }
+    .btn-bulk:hover { color: var(--danger); border-color: var(--danger); }
+    .btn-bulk.visible { display: inline-flex; }
+
+    .btn-new {
+      background: var(--accent);
+      color: var(--on-accent);
+      border: none;
+      padding: 0 18px;
+      height: 40px;
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn-new:hover { opacity: 0.87; }
+
+    /* ==============================
+       API WARNING BANNER
+    ============================== */
+    .api-warn {
+      display: none;
+      background: color-mix(in srgb, var(--warning) 12%, transparent);
+      border: 1px solid var(--warning);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      font-size: 0.82rem;
+      color: var(--text);
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    .api-warn strong { color: var(--warning); }
+    .api-warn.show { display: block; }
+
+    /* ==============================
+       PROGRESS BAR  (BUG-6 fixed: proper ARIA on the bar)
+    ============================== */
+    .progress-wrap { margin-bottom: 14px; }
+
+    .progress-bg {
+      background: var(--border);
+      border-radius: 999px;
+      height: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--success);
+      border-radius: 999px;
+      transition: width 0.45s ease;
+      width: 0%;
+    }
+
+    /* ==============================
+       FILTER BAR
+    ============================== */
+    .filterbar {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      margin-bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .filter-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    /* Status tabs */
+    .tabs { display: flex; gap: 3px; }
+
+    .tab {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 0 12px;
+      height: 30px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: all 0.13s;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .tab .tab-count {
+      background: var(--border);
+      color: var(--text-muted);
+      font-size: 0.67rem;
+      padding: 0 5px;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+    .tab.active {
+      background: var(--accent);
+      color: var(--on-accent);
+      border-color: var(--accent);
+    }
+    .tab.active .tab-count {
+      background: color-mix(in srgb, var(--on-accent) 20%, transparent);
+      color: var(--on-accent);
+    }
+    .tab:not(.active):hover { border-color: var(--accent); color: var(--text); }
+
+    /* Search */
+    .search-wrap {
+      flex: 1;
+      min-width: 140px;
+      position: relative;
+    }
+    .search-icon {
+      position: absolute;
+      left: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+    .search-input {
+      width: 100%;
+      height: 30px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0 10px 0 28px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+    }
+    .search-input:focus { outline: none; border-color: var(--accent); }
+    .search-input::placeholder { color: var(--text-muted); }
+
+    /* Sort select */
+    .sel {
+      height: 30px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0 8px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    .sel:focus { outline: none; border-color: var(--accent); }
+
+    /* BUG-4: Category filter tab strip (replaces dropdown) */
+    .cat-tabs-wrap {
+      position: relative;
+    }
+    .cat-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding-bottom: 1px;
+    }
+
+    .cat-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 0 9px;
+      height: 28px;
+      border-radius: 5px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.13s;
+      flex-shrink: 0;
+    }
+    .cat-tab.active {
+      background: color-mix(in srgb, var(--accent) 15%, transparent);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .cat-tab:not(.active):hover { border-color: var(--accent); color: var(--text); }
+
+    /* The × remove button inside each category tab */
+    .cat-tab-rm {
+      font-size: 0.65rem;
+      opacity: 0.55;
+      margin-left: 2px;
+      padding: 1px 2px;
+      border-radius: 2px;
+      line-height: 1;
+      transition: opacity 0.1s;
+    }
+    .cat-tab-rm:hover { opacity: 1; }
+
+    /* ==============================
+       TASK LIST
+    ============================== */
+    #task-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* ==============================
+       TASK CARD
+    ============================== */
+    .task-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      transition: box-shadow 0.15s;
+      animation: taskIn 0.2s ease both;
+      position: relative;
+    }
+    .task-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
+
+    .task-card.pri-high   { border-left-color: var(--danger); }
+    .task-card.pri-medium { border-left-color: var(--warning); }
+    .task-card.pri-low    { border-left-color: var(--success); }
+    .task-card.is-done    { opacity: 0.6; }
+
+    @keyframes taskIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to   { opacity: 1; transform: none; }
+    }
+    .task-card:nth-child(1)  { animation-delay: 0.00s; }
+    .task-card:nth-child(2)  { animation-delay: 0.03s; }
+    .task-card:nth-child(3)  { animation-delay: 0.06s; }
+    .task-card:nth-child(4)  { animation-delay: 0.09s; }
+    .task-card:nth-child(5)  { animation-delay: 0.12s; }
+    .task-card:nth-child(6)  { animation-delay: 0.15s; }
+    .task-card:nth-child(7)  { animation-delay: 0.17s; }
+    .task-card:nth-child(8)  { animation-delay: 0.19s; }
+    .task-card:nth-child(9)  { animation-delay: 0.21s; }
+    .task-card:nth-child(10) { animation-delay: 0.23s; }
+
+    /* Checkbox */
+    .chk {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-radius: 4px;
+      flex-shrink: 0;
+      margin-top: 1px;
+      cursor: pointer;
+      background: none;
+      transition: all 0.13s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .chk:hover { border-color: var(--accent); }
+    .chk.on { background: var(--success); border-color: var(--success); }
+    .chk.on::after {
+      content: '';
+      width: 9px;
+      height: 5px;
+      border-left: 2px solid var(--on-accent);
+      border-bottom: 2px solid var(--on-accent);
+      transform: rotate(-45deg) translateY(-1px);
+      display: block;
+    }
+
+    /* Task body */
+    .task-body { flex: 1; min-width: 0; }
+
+    /* BUG-3: Sequential ID label */
+    .task-id {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-weight: 500;
+      margin-right: 4px;
+      flex-shrink: 0;
+    }
+
+    .task-title-row {
+      display: flex;
+      align-items: baseline;
+      gap: 0;
+      flex-wrap: nowrap;
+    }
+
+    .task-text {
+      font-size: 0.88rem;
+      font-weight: 500;
+      color: var(--text);
+      word-break: break-word;
+      line-height: 1.4;
+    }
+    .is-done .task-text {
+      text-decoration: line-through;
+      color: var(--text-muted);
+    }
+
+    .task-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 5px;
+      align-items: center;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      letter-spacing: 0.02em;
+    }
+    .b-cat    { background: color-mix(in srgb, var(--accent)  14%, transparent); color: var(--accent); }
+    .b-high   { background: color-mix(in srgb, var(--danger)  14%, transparent); color: var(--danger); }
+    .b-medium { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+    .b-low    { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+    .b-due    { font-size: 0.7rem; font-weight: 500; }
+    .b-due.overdue { color: var(--danger); }
+    .b-due.today   { color: var(--warning); font-weight: 600; }
+    .b-due.soon    { color: var(--warning); }
+    .b-due.future  { color: var(--text-muted); }
+
+    /* Comment */
+    .task-note {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      line-height: 1.4;
+    }
+
+    /* Actions */
+    .task-actions {
+      display: flex;
+      gap: 3px;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.13s;
+    }
+    .task-card:hover .task-actions { opacity: 1; }
+
+    .act {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      width: 28px;
+      height: 28px;
+      border-radius: 5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.13s;
+    }
+    .act:hover { color: var(--text); border-color: var(--accent); }
+    .act.del:hover { color: var(--danger); border-color: var(--danger); }
+
+    /* ==============================
+       EMPTY / LOADING
+    ============================== */
+    .empty-state {
+      text-align: center;
+      padding: 52px 16px;
+      color: var(--text-muted);
+    }
+    .empty-state p { font-size: 0.88rem; margin-top: 10px; }
+    .empty-state svg { opacity: 0.35; }
+
+    .loading-msg {
+      text-align: center;
+      padding: 32px;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    /* ==============================
+       MODAL
+    ============================== */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 300;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      animation: ovIn 0.15s ease;
+    }
+    .overlay.hidden { display: none; }
+
+    @keyframes ovIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes mIn  { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+    .modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 20px;
+      width: 100%;
+      max-width: 510px;
+      max-height: 90vh;
+      overflow-y: auto;
+      animation: mIn 0.2s ease;
+    }
+
+    .modal-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .modal-hdr h2 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .btn-x {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      width: 28px;
+      height: 28px;
+      border-radius: 5px;
+      font-size: 1.1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn-x:hover { background: var(--border); color: var(--text); }
+
+    .field { margin-bottom: 13px; }
+
+    .field label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 7px;
+      font-size: 0.87rem;
+      font-family: inherit;
+      transition: border-color 0.13s;
+    }
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus { outline: none; border-color: var(--accent); }
+    .field textarea { resize: vertical; min-height: 70px; line-height: 1.5; }
+
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .err {
+      font-size: 0.75rem;
+      color: var(--danger);
+      margin-top: 3px;
+      display: none;
+    }
+    .err.show { display: block; }
+
+    .new-cat-wrap {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .new-cat-wrap input {
+      flex: 1;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 9px;
+      border-radius: 6px;
+      font-size: 0.84rem;
+      font-family: inherit;
+    }
+    .new-cat-wrap input:focus { outline: none; border-color: var(--accent); }
+
+    /* ==============================
+       MULTI-CATEGORY PICKER
+    ============================== */
+    .cat-select-box {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 5px 10px;
+      cursor: pointer;
+      min-height: 38px;
+      gap: 6px;
+      transition: border-color 0.13s;
+    }
+    .cat-select-box:focus { outline: none; border-color: var(--accent); }
+    .cat-select-box.open  {
+      border-color: var(--accent);
+      border-radius: 7px 7px 0 0;
+      outline: none;
+    }
+
+    .cat-pills-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      flex: 1;
+    }
+
+    .cat-placeholder { font-size: 0.87rem; color: var(--text-muted); }
+
+    .cat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      color: var(--accent);
+      font-size: 0.73rem;
+      font-weight: 600;
+      padding: 2px 7px 2px 7px;
+      border-radius: 4px;
+    }
+    .cat-pill-rm {
+      background: none;
+      border: none;
+      color: inherit;
+      font-size: 0.68rem;
+      cursor: pointer;
+      opacity: 0.6;
+      padding: 0 1px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+    }
+    .cat-pill-rm:hover { opacity: 1; }
+
+    .cat-chevron { font-size: 0.7rem; color: var(--text-muted); flex-shrink: 0; margin-left: auto; }
+
+    .cat-dropdown {
+      border: 1px solid var(--accent);
+      border-top: none;
+      border-radius: 0 0 7px 7px;
+      background: var(--bg-card);
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    .cat-checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: var(--text);
+      transition: background 0.1s;
+      user-select: none;
+    }
+    .cat-checkbox-item:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+    .cat-checkbox-item input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+      accent-color: var(--accent);
+      flex-shrink: 0;
+    }
+
+    .cat-dropdown-sep { height: 1px; background: var(--border); }
+
+    .cat-new-option {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      padding: 7px 11px;
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 0.83rem;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: left;
+    }
+    .cat-new-option:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+    .modal-ftr {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 18px;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--on-accent);
+      border: none;
+      padding: 0 20px;
+      height: 36px;
+      border-radius: 7px;
+      font-size: 0.84rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.13s;
+    }
+    .btn-primary:hover { opacity: 0.87; }
+
+    .btn-ghost {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 0 16px;
+      height: 36px;
+      border-radius: 7px;
+      font-size: 0.84rem;
+      cursor: pointer;
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--text-muted); }
+
+    /* ==============================
+       TOAST  (Minor-1: slide-out before removal)
+    ============================== */
+    #toasts {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      z-index: 9999;
+    }
+
+    .toast {
+      padding: 9px 15px;
+      border-radius: 8px;
+      font-size: 0.81rem;
+      font-weight: 500;
+      color: var(--on-accent);
+      max-width: 270px;
+      animation: toastIn 0.22s ease;
+    }
+    .toast.ok  { background: var(--success); }
+    .toast.err { background: var(--danger); }
+    .toast.inf { background: var(--accent); }
+    .toast.out { animation: toastOut 0.25s ease forwards; }
+
+    @keyframes toastIn  { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+    @keyframes toastOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(16px); } }
+
+    /* ==============================
+       RESPONSIVE
+    ============================== */
+    @media (min-width: 769px) {
+      body { padding: 24px 16px; }
+    }
+
+    @media (max-width: 768px) {
+      .filter-row { flex-direction: column; align-items: stretch; }
+      .tabs { flex-wrap: wrap; }
+      .task-actions { opacity: 1; }
+      /* Minor-2: 44px touch targets on mobile */
+      .act { min-width: 44px; min-height: 44px; width: 44px; height: 44px; }
+      .overlay { align-items: flex-end; padding: 0; }
+      .modal { max-width: 100%; border-radius: 16px 16px 0 0; max-height: 92vh; }
+      .field-row { grid-template-columns: 1fr; }
+      #toasts { left: 12px; right: 12px; bottom: 12px; }
+      .toast { max-width: none; }
+      .field input, .field select, .field textarea { font-size: 16px; }
+      .btn-new { height: 44px; }
+      .header-actions { width: 100%; justify-content: flex-end; }
+    }
+
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="header-left">
+        <h1>My Tasks</h1>
+        <div class="header-stats" id="stats-txt">—</div>
+      </div>
+      <div class="header-actions">
+        <!-- BUG-2: Bulk delete button — visible only when done > 0 -->
+        <button class="btn-bulk" id="btn-bulk"
+          aria-label="Archiver toutes les tâches terminées">
+          🗑 Vider terminées (<span id="cnt-done-bulk">0</span>)
+        </button>
+        <button class="btn-new" id="btn-new" aria-label="Nouvelle tâche (N)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Nouvelle tâche
+        </button>
+      </div>
+    </div>
+
+    <!-- BUG-6: Progress bar with proper ARIA (no aria-hidden) -->
+    <div class="progress-wrap">
+      <div class="progress-bg"
+           id="progress-bar"
+           role="progressbar"
+           aria-valuenow="0"
+           aria-valuemin="0"
+           aria-valuemax="100"
+           aria-label="Avancement des tâches">
+        <div class="progress-fill" id="prog-fill"></div>
+      </div>
+    </div>
+
+    <!-- Minor-3: API warning banner -->
+    <div class="api-warn" id="api-warn" role="alert">
+      <strong>⚠ Serveur inaccessible</strong> — Impossible de contacter l'API.
+      Vérifiez que <code>alf-api</code> est démarré.
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filterbar">
+      <div class="filter-row">
+        <div class="tabs" role="group" aria-label="Filtre statut">
+          <button class="tab active" data-sf="active"  role="tab" tabindex="0" aria-selected="true">Active  <span class="tab-count" id="cnt-active">0</span></button>
+          <button class="tab"        data-sf="done"    role="tab" tabindex="0" aria-selected="false">Done <span class="tab-count" id="cnt-done">0</span></button>
+          <button class="tab"        data-sf="all"     role="tab" tabindex="0" aria-selected="false">Toutes    <span class="tab-count" id="cnt-all">0</span></button>
+        </div>
+        <div class="search-wrap">
+          <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input class="search-input" type="text" id="search" placeholder="Search... (/ or #id)" aria-label="Search">
+        </div>
+      </div>
+      <!-- BUG-4: Category filter as horizontal tab strip -->
+      <div class="cat-tabs-wrap">
+        <div id="cat-tabs" class="cat-tabs" role="group" aria-label="Filter by category">
+          <button class="cat-tab active" data-cat="">Toutes</button>
+        </div>
+      </div>
+      <div class="filter-row" style="justify-content:flex-end">
+        <select class="sel" id="sort-sel" aria-label="Trier par">
+          <option value="created">↓ Date création</option>
+          <option value="priority">↓ Priority</option>
+          <option value="deadline">↓ Deadline</option>
+          <option value="alpha">↓ A–Z</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Task list -->
+    <div id="task-list" role="list" aria-label="Liste des tâches">
+      <div class="loading-msg">Chargement des tâches…</div>
+    </div>
+
+  </div><!-- /.container -->
+
+  <!-- Modal -->
+  <div class="overlay hidden" id="overlay" role="dialog" aria-modal="true" aria-labelledby="modal-h">
+    <div class="modal" id="modal">
+      <div class="modal-hdr">
+        <h2 id="modal-h">Nouvelle tâche</h2>
+        <button class="btn-x" id="btn-x" aria-label="Fermer">✕</button>
+      </div>
+
+      <div class="field">
+        <label for="f-text">Task <span aria-hidden="true" style="color:var(--danger)">*</span></label>
+        <input type="text" id="f-text" placeholder="Que faut-il faire ?" maxlength="500" aria-required="true">
+        <div class="err" id="err-text" role="alert">Ce champ est requis.</div>
+      </div>
+
+      <div class="field">
+        <label for="f-note">Notes / Description</label>
+        <textarea id="f-note" placeholder="Détails, contexte, liens…" rows="3"></textarea>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="f-pri">Priority</label>
+          <select id="f-pri">
+            <option value="medium">🟡 Moyenne</option>
+            <option value="high">🔴 Haute</option>
+            <option value="low">🟢 Basse</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-dl">Deadline</label>
+          <input type="date" id="f-dl">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Categories</label>
+        <!-- Trigger box — shows selected pills -->
+        <div class="cat-select-box" id="cat-select-box"
+             tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox"
+             aria-label="Sélectionner les catégories">
+          <div class="cat-pills-wrap" id="cat-pills-wrap">
+            <span class="cat-placeholder" id="cat-placeholder">— None —</span>
+          </div>
+          <span class="cat-chevron" aria-hidden="true">▾</span>
+        </div>
+        <!-- Dropdown with checkboxes -->
+        <div class="cat-dropdown" id="cat-dropdown" style="display:none" role="listbox" aria-multiselectable="true">
+          <div id="cat-checkbox-list"></div>
+          <div class="cat-dropdown-sep"></div>
+          <button type="button" class="cat-new-option" id="cat-new-trigger">＋ Nouvelle catégorie…</button>
+        </div>
+        <!-- Inline new-category form -->
+        <div class="new-cat-wrap" id="new-cat-wrap" style="display:none">
+          <input type="text" id="new-cat-inp" placeholder="Nom de la catégorie…" maxlength="50" autocomplete="off">
+          <button class="btn-primary" id="btn-add-cat" style="padding:0 12px;height:34px;font-size:0.8rem">Add</button>
+        </div>
+      </div>
+
+      <div class="modal-ftr">
+        <button class="btn-ghost" id="btn-cancel">Cancel</button>
+        <button class="btn-primary" id="btn-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toasts" aria-live="polite" aria-atomic="true"></div>
+
+<script>
+'use strict';
+
+/* ============================================================
+   1. CONSTANTS
+============================================================ */
+const API = '';
+
+const PRI_ORDER = { high: 0, medium: 1, low: 2 };
+const PRI_LABEL = { high: '🔴 Haute', medium: '🟡 Moyenne', low: '🟢 Basse' };
+const PRI_CLS   = { high: 'b-high',   medium: 'b-medium',   low: 'b-low'   };
+
+/* ============================================================
+   2. STATE
+============================================================ */
+let todos      = [];
+let categories = [];
+let ui = {
+  filter:    'active',
+  search:    '',
+  catFilter: '',
+  sort:      'created',
+  editId:    null,
+};
+let _trigger        = null;  // button that opened modal (focus restore)
+let modalCats       = [];    // selected categories in the open modal
+let catDropdownOpen = false;
+
+/* ============================================================
+   3. API HELPERS
+============================================================ */
+async function api(method, path, body, silent = false) {
+  try {
+    let cmd = `curl -s -X ${method} http://127.0.0.1:8764${path}`;
+    cmd += " -H 'Content-Type: application/json'";
+    if (body !== undefined) cmd += ` -d '${JSON.stringify(body).replace(/'/g, "'\\''")}'`;
+    const res = await fetch('/api/bash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd })
+    });
+    if (!res.ok) throw new Error(`Erreur ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return JSON.parse(data.output);
+  } catch (e) {
+    if (!silent) toast(e.message || 'Erreur réseau', 'err');
+    return null;
+  }
+}
+
+
+/* ============================================================
+   4. CRUD
+============================================================ */
+async function loadAll() {
+  const [t, c] = await Promise.all([
+    api('GET', '/api/todos',      undefined, true),
+    api('GET', '/api/categories', undefined, true),
+  ]);
+  const warn = document.getElementById('api-warn');
+  // Minor-3: show warning banner if server unreachable
+  if (Array.isArray(t)) {
+    // Normalize: backend sends category (string), frontend uses categories (array)
+    todos = t.map(todo => ({
+      ...todo,
+      categories: todo.category ? todo.category.split(',').map(s => s.trim()).filter(Boolean) : []
+    }));
+    warn.classList.remove('show');
+  } else {
+    warn.classList.add('show');
+  }
+  if (Array.isArray(c)) categories = c;
+}
+
+async function createTodo(data) {
+  const t = await api('POST', '/api/todos', data);
+  if (!t) return;
+  t.categories = t.category ? t.category.split(',').map(s => s.trim()).filter(Boolean) : [];
+  todos.unshift(t);
+  render();
+  toast('Task created ✓', 'ok');
+}
+
+async function updateTodo(id, data) {
+  const t = await api('PATCH', `/api/todos/${id}`, data);
+  if (!t) return;
+  t.categories = t.category ? t.category.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const i = todos.findIndex(x => x.id === id);
+  if (i !== -1) todos[i] = t;
+  render();
+  toast('Task updated ✓', 'ok');
+}
+
+async function toggleTodo(id) {
+  const t = await api('PATCH', `/api/todos/${id}/toggle`);
+  if (!t) return;
+  t.categories = t.category ? t.category.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const i = todos.findIndex(x => x.id === id);
+  if (i !== -1) todos[i] = t;
+  render();
+}
+
+async function deleteTodo(id) {
+  const r = await api('DELETE', `/api/todos/${id}`);
+  if (!r) return;
+  todos = todos.filter(x => x.id !== id);
+  render();
+  toast('Task archived', 'inf');
+}
+
+async function bulkDone() {
+  const doneCount = todos.filter(t => t.done).length;
+  if (!doneCount) return;
+  const r = await api('DELETE', '/api/todos/done');
+  if (!r) return;
+  todos = todos.filter(x => !x.done);
+  render();
+  toast(`${doneCount} tâche${doneCount > 1 ? 's' : ''} archivée${doneCount > 1 ? 's' : ''} ✓`, 'ok');
+}
+
+/* ============================================================
+   5. CATEGORIES
+============================================================ */
+async function addCategory(name) {
+  const r = await api('POST', '/api/categories', { name });
+  if (!r) return false;
+  if (!categories.includes(name)) { categories.push(name); categories.sort(); }
+  renderCatFilterTabs();
+  return true;
+}
+
+async function removeCategory(name) {
+  if (!confirm(`Delete category « ${name} » ?\n\nTasks with this category will be updated.`)) return;
+  const r = await api('DELETE', `/api/categories/${encodeURIComponent(name)}`);
+  if (!r) return;
+  categories = categories.filter(c => c !== name);
+  todos = todos.map(t => ({ ...t, categories: (t.categories || []).filter(c => c !== name) }));
+  if (ui.catFilter === name) { ui.catFilter = ''; }
+  renderCatFilterTabs();
+  render();
+  toast(`Category « ${name}" deleted`, 'ok');
+}
+
+/* ============================================================
+   6. FILTERING & SORTING
+============================================================ */
+function getVisible() {
+  let list = [...todos];
+
+  if (ui.filter === 'active') list = list.filter(t => !t.done);
+  else if (ui.filter === 'done') list = list.filter(t => t.done);
+
+  if (ui.catFilter) list = list.filter(t => (t.categories || []).includes(ui.catFilter));
+
+  if (ui.search) {
+    const q = ui.search.toLowerCase();
+    // Support #id search (e.g. "#45" or "45")
+    const idMatch = q.match(/^#?(\d+)$/);
+    if (idMatch) {
+      const searchId = parseInt(idMatch[1], 10);
+      list = list.filter(t => t.id === searchId);
+    } else {
+      list = list.filter(t =>
+        t.text.toLowerCase().includes(q) ||
+        (t.comment || '').toLowerCase().includes(q) ||
+        (t.categories || []).some(c => c.toLowerCase().includes(q))
+      );
+    }
+  }
+
+  list.sort((a, b) => {
+    switch (ui.sort) {
+      case 'priority':
+        return (PRI_ORDER[a.priority] ?? 1) - (PRI_ORDER[b.priority] ?? 1);
+      case 'deadline': {
+        const da = a.deadline || '9999-99-99';
+        const db = b.deadline || '9999-99-99';
+        return da < db ? -1 : da > db ? 1 : 0;
+      }
+      case 'alpha':
+        return a.text.localeCompare(b.text, 'fr');
+      default: // created — newest first
+        return b.id - a.id;
+    }
+  });
+
+  return list;
+}
+
+/* ============================================================
+   7. UTILITIES
+============================================================ */
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Minor-4: format future dates with toLocaleDateString
+function fmtDeadline(dl) {
+  if (!dl) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(dl + 'T00:00:00');
+  const diff = Math.round((d - today) / 86400000);
+  if (diff < 0)   return { label: `En retard (${Math.abs(diff)}j)`, cls: 'overdue' };
+  if (diff === 0) return { label: "Aujourd'hui", cls: 'today' };
+  if (diff === 1) return { label: 'Demain', cls: 'soon' };
+  if (diff <= 3)  return { label: `Dans ${diff} jours`, cls: 'soon' };
+  // Minor-4: localized date for far-future deadlines
+  return { label: d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }), cls: 'future' };
+}
+
+/* ============================================================
+   8. RENDER
+============================================================ */
+function renderStats() {
+  const total  = todos.length;
+  const done   = todos.filter(t => t.done).length;
+  const active = total - done;
+  const pct    = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  document.getElementById('stats-txt').textContent =
+    `${done} / ${total} terminée${done !== 1 ? 's' : ''}`;
+  document.getElementById('prog-fill').style.width = `${pct}%`;
+
+  // BUG-6: update ARIA on progress bar
+  const pb = document.getElementById('progress-bar');
+  pb.setAttribute('aria-valuenow', pct);
+
+  document.getElementById('cnt-active').textContent  = active;
+  document.getElementById('cnt-done').textContent    = done;
+  document.getElementById('cnt-all').textContent     = total;
+
+  // BUG-2: show/hide bulk delete button
+  document.getElementById('cnt-done-bulk').textContent = done;
+  document.getElementById('btn-bulk').classList.toggle('visible', done > 0);
+}
+
+// BUG-4: render category filter tab strip
+function renderCatFilterTabs() {
+  const el = document.getElementById('cat-tabs');
+  const allTab = `<button class="cat-tab${ui.catFilter === '' ? ' active' : ''}" data-cat="">Toutes</button>`;
+  const catTabs = categories.map(c =>
+    `<button class="cat-tab${ui.catFilter === c ? ' active' : ''}" data-cat="${esc(c)}">` +
+      `${esc(c)}` +
+      `<span class="cat-tab-rm" data-rmcat="${esc(c)}" role="img" aria-label="Delete category ${esc(c)}">×</span>` +
+    `</button>`
+  ).join('');
+  el.innerHTML = allTab + catTabs;
+}
+
+function renderList() {
+  const list = getVisible();
+  const el = document.getElementById('task-list');
+
+  if (list.length === 0) {
+    let msg;
+    if (ui.search)         msg = `No results for «&nbsp;${esc(ui.search)}&nbsp;».`;
+    else if (ui.catFilter) msg = `No tasks in category «&nbsp;${esc(ui.catFilter)}&nbsp;».`;
+    else if (ui.filter === 'active') msg = 'No active tasks.<br><small>Press <kbd style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:0.75rem">N</kbd> to create one.</small>';
+    else if (ui.filter === 'done')   msg = 'No completed tasks.';
+    else                             msg = 'No tasks.';
+
+    el.innerHTML = `<div class="empty-state">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="13" y2="13"/>
+        <line x1="9" y1="17" x2="11" y2="17"/>
+      </svg>
+      <p>${msg}</p></div>`;
+    return;
+  }
+
+  el.innerHTML = list.map(t => taskHtml(t)).join('');
+}
+
+function taskHtml(t) {
+  const pri = t.priority || 'medium';
+  const dl  = fmtDeadline(t.deadline);
+
+  // BUG-3: #ID label
+  const idLabel   = `<span class="task-id">#${t.id}</span>`;
+  const catBadges = (t.categories || []).map(c => `<span class="badge b-cat">${esc(c)}</span>`).join('');
+  const priBadge  = `<span class="badge ${PRI_CLS[pri]}">${esc(PRI_LABEL[pri])}</span>`;
+  const dlBadge  = dl ? `<span class="b-due ${dl.cls}">📅 ${esc(dl.label)}</span>` : '';
+  const note     = t.comment
+    ? `<div class="task-note" title="${esc(t.comment)}">${esc(t.comment)}</div>` : '';
+
+  return `<div class="task-card pri-${esc(pri)}${t.done ? ' is-done' : ''}" role="listitem" data-id="${t.id}">
+    <button class="chk${t.done ? ' on' : ''}" data-toggle="${t.id}"
+      aria-label="${t.done ? 'Marquer non terminée' : 'Marquer terminée'}"></button>
+    <div class="task-body">
+      <div class="task-title-row">
+        ${idLabel}<span class="task-text">${esc(t.text)}</span>
+      </div>
+      <div class="task-meta">${catBadges}${priBadge}${dlBadge}</div>
+      ${note}
+    </div>
+    <div class="task-actions">
+      <button class="act" data-edit="${t.id}" aria-label="Edit" title="Edit">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+          <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/>
+        </svg>
+      </button>
+      <button class="act del" data-del="${t.id}"
+        aria-label="Delete" title="Delete">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+          <path d="M10 11v6M14 11v6"/>
+          <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+        </svg>
+      </button>
+    </div>
+  </div>`;
+}
+
+// Render selected category pills inside the trigger box
+function updateCatPills() {
+  const wrap = document.getElementById('cat-pills-wrap');
+  if (modalCats.length === 0) {
+    wrap.innerHTML = '<span class="cat-placeholder" id="cat-placeholder">— None —</span>';
+    return;
+  }
+  wrap.innerHTML = modalCats.map(c =>
+    `<span class="cat-pill">${esc(c)}<button type="button" class="cat-pill-rm" data-rmcat="${esc(c)}" aria-label="Retirer ${esc(c)}">×</button></span>`
+  ).join('');
+}
+
+// Render checkboxes in the open dropdown
+function populateCatCheckboxes() {
+  const list = document.getElementById('cat-checkbox-list');
+  if (categories.length === 0) {
+    list.innerHTML = '<div style="padding:8px 11px;font-size:0.82rem;color:var(--text-muted)">No categories</div>';
+    return;
+  }
+  list.innerHTML = categories.map(c => {
+    const checked = modalCats.includes(c);
+    return `<label class="cat-checkbox-item">
+      <input type="checkbox" value="${esc(c)}"${checked ? ' checked' : ''}>
+      ${esc(c)}
+    </label>`;
+  }).join('');
+}
+
+function openCatDropdown() {
+  catDropdownOpen = true;
+  populateCatCheckboxes();
+  document.getElementById('cat-dropdown').style.display = '';
+  document.getElementById('cat-select-box').classList.add('open');
+  document.getElementById('cat-select-box').setAttribute('aria-expanded', 'true');
+}
+
+function closeCatDropdown() {
+  catDropdownOpen = false;
+  document.getElementById('cat-dropdown').style.display = 'none';
+  document.getElementById('cat-select-box').classList.remove('open');
+  document.getElementById('cat-select-box').setAttribute('aria-expanded', 'false');
+}
+
+function render() {
+  renderStats();
+  renderCatFilterTabs();
+  renderList();
+}
+
+/* ============================================================
+   9. MODAL
+============================================================ */
+function openModal(todo) {
+  ui.editId = todo ? todo.id : null;
+  modalCats = todo ? [...(todo.categories || [])] : [];
+  document.getElementById('modal-h').textContent = todo ? 'Edit la tâche' : 'Nouvelle tâche';
+  document.getElementById('f-text').value        = todo ? todo.text             : '';
+  document.getElementById('f-note').value        = todo ? (todo.comment   || '') : '';
+  document.getElementById('f-pri').value         = todo ? (todo.priority   || 'medium') : 'medium';
+  document.getElementById('f-dl').value          = todo ? (todo.deadline   || '') : '';
+  document.getElementById('err-text').classList.remove('show');
+  document.getElementById('new-cat-wrap').style.display = 'none';
+  document.getElementById('new-cat-inp').value = '';
+  closeCatDropdown();
+  updateCatPills();
+  document.getElementById('overlay').classList.remove('hidden');
+  setTimeout(() => document.getElementById('f-text').focus(), 60);
+}
+
+function closeModal() {
+  closeCatDropdown();
+  document.getElementById('overlay').classList.add('hidden');
+  ui.editId = null;
+  if (_trigger) { _trigger.focus(); _trigger = null; }
+}
+
+async function saveModal() {
+  const text = document.getElementById('f-text').value.trim();
+  if (!text) {
+    document.getElementById('err-text').classList.add('show');
+    document.getElementById('f-text').focus();
+    return;
+  }
+  document.getElementById('err-text').classList.remove('show');
+
+  const data = {
+    text,
+    comment:    document.getElementById('f-note').value.trim() || null,
+    priority:   document.getElementById('f-pri').value,
+    deadline:   document.getElementById('f-dl').value || null,
+    category:   modalCats.join(', '),
+  };
+
+  const editId = ui.editId;
+  closeModal();
+  if (editId) await updateTodo(editId, data);
+  else        await createTodo(data);
+}
+
+function trapFocus(e) {
+  const ov = document.getElementById('overlay');
+  if (ov.classList.contains('hidden')) return;
+  const els = [...ov.querySelectorAll('button:not([disabled]), input, select, textarea, [tabindex="0"]')];
+  const first = els[0], last = els[els.length - 1];
+  if (e.key !== 'Tab') return;
+  if (e.shiftKey  && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last)  { e.preventDefault(); first.focus(); }
+}
+
+/* ============================================================
+   10. TOAST  (Minor-1: slide-out animation before removal)
+============================================================ */
+function toast(msg, type = 'inf') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  // Start slide-out at 2.7s, remove after animation completes (250ms)
+  setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 260);
+  }, 2700);
+}
+
+/* ============================================================
+   11. EVENT BINDING
+============================================================ */
+function bindEvents() {
+
+  /* New todo */
+  document.getElementById('btn-new').addEventListener('click', e => {
+    _trigger = e.currentTarget;
+    openModal(null);
+  });
+
+  /* BUG-2: Bulk delete button */
+  document.getElementById('btn-bulk').addEventListener('click', () => {
+    if (confirm(`Archiver toutes les tâches terminées ?`)) bulkDone();
+  });
+
+  /* Status tabs */
+  document.querySelector('.tabs').addEventListener('click', e => {
+    const tab = e.target.closest('[data-sf]');
+    if (!tab) return;
+    document.querySelectorAll('.tab').forEach(t => {
+      const on = t === tab;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    ui.filter = tab.dataset.sf;
+    renderList();
+  });
+
+  document.querySelector('.tabs').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.target.click(); }
+  });
+
+  /* Search */
+  document.getElementById('search').addEventListener('input', e => {
+    ui.search = e.target.value;
+    renderList();
+  });
+
+  /* BUG-4: Category tab strip delegation */
+  document.getElementById('cat-tabs').addEventListener('click', e => {
+    // Check for × remove button first
+    const rmBtn = e.target.closest('[data-rmcat]');
+    if (rmBtn) {
+      removeCategory(rmBtn.dataset.rmcat);
+      return;
+    }
+    // Then tab click
+    const tab = e.target.closest('[data-cat]');
+    if (tab) {
+      ui.catFilter = tab.dataset.cat;
+      renderCatFilterTabs();
+      renderList();
+    }
+  });
+
+  /* Sort */
+  document.getElementById('sort-sel').addEventListener('change', e => {
+    ui.sort = e.target.value;
+    renderList();
+  });
+
+  /* Task list — event delegation */
+  document.getElementById('task-list').addEventListener('click', e => {
+    const toggle = e.target.closest('[data-toggle]');
+    const edit   = e.target.closest('[data-edit]');
+    const del    = e.target.closest('[data-del]');
+
+    if (toggle) { toggleTodo(+toggle.dataset.toggle); return; }
+
+    if (edit) {
+      const todo = todos.find(t => t.id === +edit.dataset.edit);
+      if (todo) { _trigger = edit; openModal(todo); }
+      return;
+    }
+
+    if (del) {
+      deleteTodo(+del.dataset.del);
+    }
+  });
+
+  /* Modal close */
+  document.getElementById('btn-x').addEventListener('click', closeModal);
+  document.getElementById('btn-cancel').addEventListener('click', closeModal);
+  document.getElementById('overlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('overlay')) closeModal();
+  });
+
+  /* Modal save */
+  document.getElementById('btn-save').addEventListener('click', saveModal);
+
+  /* Category picker — toggle dropdown */
+  document.getElementById('cat-select-box').addEventListener('click', () => {
+    if (catDropdownOpen) closeCatDropdown();
+    else openCatDropdown();
+  });
+  document.getElementById('cat-select-box').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (catDropdownOpen) closeCatDropdown(); else openCatDropdown(); }
+    if (e.key === 'Escape') { e.preventDefault(); closeCatDropdown(); }
+  });
+
+  /* Checkbox list — toggle individual categories */
+  document.getElementById('cat-checkbox-list').addEventListener('change', e => {
+    const cb = e.target;
+    if (cb.type !== 'checkbox') return;
+    const name = cb.value;
+    if (cb.checked) { if (!modalCats.includes(name)) modalCats.push(name); }
+    else { modalCats = modalCats.filter(c => c !== name); }
+    updateCatPills();
+  });
+
+  /* Pills remove button */
+  document.getElementById('cat-pills-wrap').addEventListener('click', e => {
+    const rmBtn = e.target.closest('[data-rmcat]');
+    if (!rmBtn) return;
+    e.stopPropagation(); // don't toggle the dropdown
+    const name = rmBtn.dataset.rmcat;
+    modalCats = modalCats.filter(c => c !== name);
+    updateCatPills();
+    // Uncheck in dropdown if open
+    if (catDropdownOpen) {
+      const cb = document.querySelector(`#cat-checkbox-list input[value="${CSS.escape(name)}"]`);
+      if (cb) cb.checked = false;
+    }
+  });
+
+  /* "＋ Nouvelle catégorie…" inside dropdown */
+  document.getElementById('cat-new-trigger').addEventListener('click', () => {
+    closeCatDropdown();
+    document.getElementById('new-cat-wrap').style.display = 'flex';
+    setTimeout(() => document.getElementById('new-cat-inp').focus(), 40);
+  });
+
+  /* Add category */
+  document.getElementById('btn-add-cat').addEventListener('click', async () => {
+    const name = document.getElementById('new-cat-inp').value.trim();
+    if (!name) return;
+    const ok = await addCategory(name);
+    if (ok) {
+      if (!modalCats.includes(name)) modalCats.push(name);
+      updateCatPills();
+      document.getElementById('new-cat-wrap').style.display = 'none';
+      document.getElementById('new-cat-inp').value = '';
+      toast('Category ajoutée ✓', 'ok');
+    }
+  });
+
+  document.getElementById('new-cat-inp').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById('btn-add-cat').click(); }
+  });
+
+  /* Close cat dropdown when clicking outside */
+  document.getElementById('overlay').addEventListener('click', e => {
+    if (catDropdownOpen &&
+        !e.target.closest('#cat-select-box') &&
+        !e.target.closest('#cat-dropdown') &&
+        !e.target.closest('#new-cat-wrap')) {
+      closeCatDropdown();
+    }
+  }, true); // capture phase so it fires before other handlers
+
+  /* Global keyboard shortcuts */
+  document.addEventListener('keydown', e => {
+    const inInput   = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
+    const modalOpen = !document.getElementById('overlay').classList.contains('hidden');
+
+    if (modalOpen) {
+      trapFocus(e);
+      if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveModal(); }
+      return;
+    }
+
+    if (!inInput) {
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        _trigger = document.getElementById('btn-new');
+        openModal(null);
+      }
+      if (e.key === '/') {
+        e.preventDefault();
+        document.getElementById('search').focus();
+      }
+    }
+    if (e.key === 'Escape' && inInput) document.activeElement.blur();
+  });
+}
+
+/* ============================================================
+   12. INIT
+============================================================ */
+async function init() {
+  bindEvents();
+  await loadAll();
+  render();
+}
+
+init();
+</script>
+</body>
+</html>

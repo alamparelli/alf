@@ -494,9 +494,10 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .explorer-split { display: flex; gap: 12px; min-height: 280px; }
 
 .explorer-sidebar {
-  width: 220px; min-width: 160px; display: flex; flex-direction: column;
+  width: 260px; min-width: 200px; display: flex; flex-direction: column;
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-input);
+  overflow-x: auto;
 }
 .explorer-file-list { flex: 1; overflow-y: auto; padding: 4px 0; }
 .explorer-file-item {

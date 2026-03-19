@@ -26,7 +26,9 @@ func (s *fileConfigStore) Load() (*Config, error) {
 
 	if err != nil {
 		if os.IsNotExist(err) {
-			return DefaultConfig(), nil
+			cfg := DefaultConfig()
+			_ = s.Save(cfg) // seed the file on first run
+			return cfg, nil
 		}
 		return nil, fmt.Errorf("read config: %w", err)
 	}

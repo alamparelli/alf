@@ -483,6 +483,9 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		DataDir:       e.DataDir,
 		Env:           e.signalEnv(msg.Env),
 	}
+	if e.SignalSockPath != "" {
+		log.Printf("[comms] signal sock injected: %s (env has %d vars)", e.SignalSockPath, len(params.Env))
+	}
 	if isAPITier {
 		params.ResumeID = ""
 	}

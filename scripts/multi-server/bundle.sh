@@ -14,14 +14,24 @@ DIST_DIR="$SCRIPT_DIR/dist"
 
 mkdir -p "$DIST_DIR"
 
-# Create a tar.gz of all multi scripts
+# Create a tar.gz of all multi scripts + bundled defaults
+REPO_ROOT="$SCRIPT_DIR/../.."
+STAGING=$(mktemp -d)
+
+# Scripts
+cp "$MULTI_DIR"/{lib,init,provision,teardown,upgrade,list,magic-link,secret,generate-compose,uninstall,apply}.sh "$STAGING/"
+
+# Bundled defaults (for upgrade.sh tenant seeding)
+mkdir -p "$STAGING/defaults/skills.d" "$STAGING/defaults/agents"
+cp -r "$REPO_ROOT/skills.d"/*/ "$STAGING/defaults/skills.d/" 2>/dev/null || true
+cp "$REPO_ROOT/internal/cli/bundled_agents"/*.json "$STAGING/defaults/agents/" 2>/dev/null || true
+
 BUNDLE=$(mktemp)
-tar -czf "$BUNDLE" -C "$MULTI_DIR" \
-    lib.sh init.sh provision.sh teardown.sh \
-    list.sh magic-link.sh secret.sh generate-compose.sh uninstall.sh apply.sh
+tar --no-xattrs -czf "$BUNDLE" -C "$STAGING" .
 
 BUNDLE_B64=$(base64 < "$BUNDLE")
 rm -f "$BUNDLE"
+rm -rf "$STAGING"
 
 # Write the bootstrap script (what gets curl-piped).
 # This downloads the full self-extracting script, then runs it.
@@ -93,6 +103,13 @@ main() {
     cp "$tmpdir"/*.sh "$SCRIPTS_DIR/"
     chmod +x "$SCRIPTS_DIR"/*.sh
 
+    # Install bundled defaults (skills, agents) for upgrade seeding
+    if [ -d "$tmpdir/defaults" ]; then
+        sudo mkdir -p "$INSTALL_DIR/defaults"
+        sudo cp -r "$tmpdir/defaults"/* "$INSTALL_DIR/defaults/"
+        sudo chown -R "$(id -u):$(id -g)" "$INSTALL_DIR/defaults"
+    fi
+
     rm -rf "$tmpdir"
 
     # Save token for future updates
@@ -104,12 +121,41 @@ main() {
     echo ""
     echo "Installed to: $SCRIPTS_DIR"
     echo ""
-    echo "Quick start:"
-    echo "  export ACME_EMAIL=you@example.com"
-    echo "  $SCRIPTS_DIR/init.sh"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  ALF Multi-Tenant Management"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "Then provision a tenant:"
-    echo "  $SCRIPTS_DIR/provision.sh --user alice --domain alice.example.com"
+    echo "  Setup"
+    echo "    init.sh                First-time infrastructure setup"
+    echo "                           Requires: ACME_EMAIL=you@example.com"
+    echo ""
+    echo "  Tenant lifecycle"
+    echo "    provision.sh           Add a new tenant"
+    echo "      --user <name> --domain <fqdn> [--timezone <tz>] [--image <tag>]"
+    echo "    teardown.sh            Remove a tenant"
+    echo "      --user <name> [--keep-data]"
+    echo "    magic-link.sh          Generate login link"
+    echo "      --user <name>"
+    echo ""
+    echo "  Operations"
+    echo "    upgrade.sh             Upgrade all tenants (pull, permissions, seed, restart)"
+    echo "      [--skip-pull] [--no-restart]"
+    echo "    apply.sh               Regenerate compose and restart"
+    echo "      [--pull]"
+    echo "    list.sh                Show all tenants and status"
+    echo "    secret.sh              Manage tenant secrets"
+    echo "      --user <name> set <key> <value>"
+    echo "      --user <name> list"
+    echo ""
+    echo "  Maintenance"
+    echo "    generate-compose.sh    Regenerate docker-compose.yml only"
+    echo "    uninstall.sh           Remove everything"
+    echo "      [--keep-data]"
+    echo ""
+    echo "  Quick start:"
+    echo "    export ACME_EMAIL=you@example.com"
+    echo "    $SCRIPTS_DIR/init.sh"
+    echo "    $SCRIPTS_DIR/provision.sh --user alice --domain alice.example.com"
     echo ""
 }
 

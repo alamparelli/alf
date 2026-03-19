@@ -35,13 +35,6 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.className = 'toast', 3000);
 }
 
-// --- Share on X ---
-function shareOnX(e) {
-  e.preventDefault();
-  const text = encodeURIComponent('Powered by ALF OS, my personal AI Operating System');
-  window.open('https://x.com/intent/tweet?text=' + text, '_blank');
-}
-
 // --- Desktop Notifications ---
 // Request permission on first user interaction.
 document.addEventListener('click', function reqNotif() {

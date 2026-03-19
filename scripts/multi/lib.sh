@@ -9,7 +9,7 @@ ALF_MULTI_DIR="${ALF_MULTI_DIR:-/opt/alf-multi}"
 ALF_IMAGE="${ALF_IMAGE:-ghcr.io/alamparelli/alf:latest}"
 WHISPER_IMAGE="${WHISPER_IMAGE:-ghcr.io/alamparelli/whisper-service:latest}"
 WHISPER_MODEL="${WHISPER_MODEL:-small}"
-ACME_EMAIL="${ACME_EMAIL:-}"
+ACME_EMAIL="${ACME_EMAIL:-a.lamparelli@gmail.com}"
 
 TENANTS_FILE="$ALF_MULTI_DIR/tenants.json"
 TENANTS_DIR="$ALF_MULTI_DIR/tenants"

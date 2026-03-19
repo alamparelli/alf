@@ -1045,13 +1045,16 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 
 /* Report issue */
 .sidebar-report { padding: 8px 12px; }
+.sidebar-report .share-x,
 .sidebar-report .report-issue {
   display: flex; align-items: center; gap: 6px; padding: 6px 10px;
   font-size: 0.78rem; color: var(--text-dim); border: 1px solid var(--border);
   border-radius: 6px; text-decoration: none; justify-content: center;
 }
+.sidebar-report .share-x:hover,
 .sidebar-report .report-issue:hover { color: var(--accent); border-color: var(--accent); }
 .sidebar-report .report-issue .lucide, .sidebar-report .report-issue i { width: 14px; height: 14px; }
+.sidebar-report .share-x { margin-bottom: 6px; }
 .sidebar-version { display: block; font-size: 0.65rem; color: var(--text-dim); text-align: center; margin-top: 4px; opacity: 0.6; }
 
 /* Sidebar footer */

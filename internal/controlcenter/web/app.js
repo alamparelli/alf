@@ -3836,7 +3836,7 @@ function schedulesShowModal(job) {
       '<h3>' + (isEdit ? 'Edit Job' : 'Add Job') + '</h3>' +
       '<div class="tier-form">' +
         '<div class="form-row"><label>Name</label><input type="text" id="sjName" value="' + esc(j.name) + '"' + (isEdit ? ' readonly style="opacity:0.6"' : '') + '></div>' +
-        '<div class="form-row"><label>Schedule</label><input type="text" id="sjSchedule" value="' + esc(j.schedule) + '" placeholder="0 30 9 * * * (cron with seconds)"></div>' +
+        '<div class="form-row"><label>Schedule <span title="6-field cron: sec min hour day month weekday\n\n*  = every value\n*/N = every N units\n1-5 = range\n1,3,5 = list\n\nExamples:\n0 30 9 * * *    daily at 9:30am\n0 0 */2 * * *   every 2 hours\n0 0 9 * * 1-5   weekdays at 9am\n0 */15 * * * *  every 15 minutes\n30 0 0 * * *    daily at midnight +30s" style="opacity:0.5;cursor:help">&#9432;</span></label><input type="text" id="sjSchedule" value="' + esc(j.schedule) + '" placeholder="0 30 9 * * * (cron with seconds)"></div>' +
         '<div class="form-row"><label>Tier</label><input type="text" id="sjTier" value="' + esc(j.tier || '') + '" placeholder="haiku, sonnet, direct..."></div>' +
         '<div class="form-row" id="sjPromptRow"><label>Prompt</label><textarea id="sjPrompt" rows="3" placeholder="What should the LLM do?">' + esc(j.prompt || '') + '</textarea></div>' +
         '<div class="form-row" id="sjCommandRow" style="display:none"><label>Command</label><textarea id="sjCommand" rows="3" placeholder="Bash command to execute">' + esc(j.command || '') + '</textarea></div>' +

@@ -329,6 +329,32 @@ func seedBundledSkills(skillsDir string) {
 	}
 }
 
+// seedBundledTeams copies missing team JSON files from /opt/alf/defaults/teams
+// into the active teams directory. Existing teams are never overwritten.
+func seedBundledTeams(dataDir string) {
+	const defaultsDir = "/opt/alf/defaults/teams"
+	teamsDir := filepath.Join(dataDir, "agents", "teams")
+	entries, err := os.ReadDir(defaultsDir)
+	if err != nil {
+		return
+	}
+	os.MkdirAll(teamsDir, 0o755)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		dst := filepath.Join(teamsDir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(defaultsDir, e.Name()))
+		if err == nil {
+			os.WriteFile(dst, data, 0o644)
+			log.Printf("seeded bundled team: %s", e.Name())
+		}
+	}
+}
+
 // copyDir recursively copies a directory tree.
 func copyDir(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {

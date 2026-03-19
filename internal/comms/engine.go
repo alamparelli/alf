@@ -45,6 +45,9 @@ type ChatEngine struct {
 	OnSessionEnd func(sessionID string)
 	OnMessage    func(sessionID string)
 
+	// Signal socket path (persistent, set by daemon after StartSignal).
+	SignalSockPath string
+
 	// Adapters
 	adapters map[string]ChannelAdapter
 	mu       sync.RWMutex
@@ -135,6 +138,20 @@ func (e *ChatEngine) Broadcast(text string) {
 			log.Printf("[comms] broadcast to %s failed: %v", channel, err)
 		}
 	}
+}
+
+// signalEnv appends ALF_SIGNAL_SOCK to the env if a persistent signal server is running
+// and the env doesn't already have it (TG path sets it per-request).
+func (e *ChatEngine) signalEnv(env []string) []string {
+	if e.SignalSockPath == "" {
+		return env
+	}
+	for _, v := range env {
+		if len(v) > 16 && v[:16] == "ALF_SIGNAL_SOCK=" {
+			return env // already set (TG per-request socket takes priority)
+		}
+	}
+	return append(env, "ALF_SIGNAL_SOCK="+e.SignalSockPath)
 }
 
 // NewSession archives the current session for a channel, rotates the conversation ID,

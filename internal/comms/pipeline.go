@@ -481,7 +481,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		SystemPrompts: sysPrompts,
 		ResumeID:      resumeID,
 		DataDir:       e.DataDir,
-		Env:           msg.Env,
+		Env:           e.signalEnv(msg.Env),
 	}
 	if isAPITier {
 		params.ResumeID = ""

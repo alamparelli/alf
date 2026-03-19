@@ -98,8 +98,8 @@ func (s *Store) rebuildVectors(newDims int) {
 		s.clearRebuildProgress()
 		return
 	}
-	// Create new vec table.
-	newTable := fmt.Sprintf("memory_vec_new")
+	// Create new vec table (constant name — never derived from user input).
+	const newTable = "memory_vec_new"
 	s.db.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s`, newTable))
 	_, err := s.db.Exec(fmt.Sprintf(`CREATE VIRTUAL TABLE %s USING vec0(
 		id INTEGER PRIMARY KEY,

@@ -85,7 +85,7 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Env = e.buildEnv()
+	cmd.Env = e.buildEnvForTool(toolPath)
 
 	err := cmd.Run()
 
@@ -153,13 +153,44 @@ func (e *Executor) resolveTool(name string) string {
 }
 
 func (e *Executor) buildEnv() []string {
+	return e.buildEnvForTool("")
+}
+
+// buildEnvForTool creates the environment for tool execution.
+// If toolPath is within apps/{slug}/, ALF_APP_DATA_DIR is injected.
+func (e *Executor) buildEnvForTool(toolPath string) []string {
 	env := []string{
 		"HOME=" + e.HomeDir,
 		"ALF_DATA_DIR=" + e.DataDir,
 		"PATH=" + filepath.Join(e.DataDir, "tools.d") + ":" + filepath.Join(e.DataDir, "tools") + ":/usr/local/bin:/usr/bin:/bin",
 	}
 	env = append(env, e.Env...)
+
+	// Inject ALF_APP_DATA_DIR for marketplace app tools.
+	if toolPath != "" {
+		if slug := appSlugFromPath(toolPath); slug != "" {
+			appDataDir := filepath.Join(e.DataDir, "apps", slug, "data")
+			env = append(env, "ALF_APP_DATA_DIR="+appDataDir)
+		}
+	}
+
 	return env
+}
+
+// appSlugFromPath extracts the app slug if toolPath resolves into apps/{slug}/.
+func appSlugFromPath(toolPath string) string {
+	resolved, err := filepath.EvalSymlinks(toolPath)
+	if err != nil {
+		return ""
+	}
+	// Look for /apps/{slug}/bin/ pattern in the resolved path.
+	parts := strings.Split(filepath.ToSlash(resolved), "/")
+	for i, p := range parts {
+		if p == "apps" && i+2 < len(parts) && parts[i+2] == "bin" {
+			return parts[i+1]
+		}
+	}
+	return ""
 }
 
 // jsonToCLI converts JSON arguments to CLI arguments using the tool's schema.

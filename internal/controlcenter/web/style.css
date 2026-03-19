@@ -2559,3 +2559,59 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 /* Ollama model list */
 .setup-ollama-models { font-size: 0.75rem; color: var(--text-dim); margin-top: 6px; }
 .setup-ollama-models span { display: inline-block; background: var(--bg); padding: 2px 6px; border-radius: 3px; margin: 2px 2px 2px 0; }
+
+/* Marketplace */
+.marketplace-view { padding: 16px 20px; }
+.mp-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.mp-toolbar h2 { margin: 0; font-family: 'Sora', sans-serif; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 600; }
+.mp-toolbar-right { display: flex; gap: 8px; align-items: center; }
+
+.mp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.mp-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; transition: transform 0.15s, border-color 0.2s;
+}
+.mp-card:hover { transform: translateY(-1px); }
+.mp-card-enabled { border-color: var(--accent); }
+
+.mp-card-header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.mp-card-icon {
+  width: 40px; height: 40px; border-radius: 10px; background: var(--bg);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  color: var(--accent);
+}
+.mp-card-icon i, .mp-card-icon svg { width: 20px; height: 20px; }
+.mp-card-info { flex: 1; min-width: 0; }
+.mp-card-title { font-weight: 600; font-size: 0.95rem; color: var(--text); }
+.mp-card-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.mp-card-version { font-size: 0.7rem; color: var(--text-dim); }
+.mp-card-cat { font-size: 0.7rem; color: var(--text-dim); text-transform: capitalize; }
+
+.mp-badge {
+  font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 2px 7px; border-radius: 4px;
+}
+.mp-state-enabled { background: rgba(var(--accent-rgb, 100,200,150), 0.15); color: var(--accent); }
+.mp-state-available { background: var(--bg); color: var(--accent); border: 1px solid var(--accent); }
+.mp-state-installed { background: var(--bg); color: var(--text-dim); }
+.mp-state-disabled { background: var(--bg); color: var(--text-dim); }
+
+.mp-card-desc { font-size: 0.8rem; color: var(--text-dim); margin: 0 0 12px; line-height: 1.5; }
+
+.mp-card-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+.mp-tool-tag {
+  font-size: 0.7rem; font-family: 'JetBrains Mono', monospace;
+  background: var(--bg); color: var(--text-dim); padding: 2px 8px;
+  border-radius: 4px; border: 1px solid var(--border);
+}
+
+.mp-card-actions { display: flex; gap: 8px; }
+.mp-empty { color: var(--text-dim); font-size: 0.85rem; padding: 24px; text-align: center; }
+
+/* Marketplace apps in sidebar — accent-tinted icon */
+.nav-item-mp i, .nav-item-mp svg { color: var(--accent); opacity: 0.75; }
+
+@media (max-width: 768px) {
+  .marketplace-view { padding: 12px 10px; }
+  .mp-grid { grid-template-columns: 1fr; }
+}

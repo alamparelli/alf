@@ -19,6 +19,7 @@ import (
 	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/firewall"
+	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/secrets"
 	"github.com/alamparelli/alf/internal/vault"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
@@ -178,9 +179,10 @@ func main() {
 	// Create data directory symlinks for config and skills.
 	setupDataSymlinks(dataDir, configDir, skillsDir)
 
-	// Seed bundled skills and teams from Docker image defaults (no-op if already present).
+	// Seed bundled skills, teams, and apps from Docker image defaults (no-op if already present).
 	seedBundledSkills(skillsDir)
 	seedBundledTeams(dataDir)
+	seedBundledApps(dataDir)
 
 	// Set up user-packages paths.
 	setupUserPackagesPaths()
@@ -618,6 +620,24 @@ func main() {
 		defer func() { ln.Close(); os.Remove(persistentSigPath) }()
 	}
 
+	// Marketplace: app lifecycle management.
+	// Only enabled when ALF_MARKETPLACE_URL is set (homelab only for now).
+	var mpManager *marketplace.Manager
+	if os.Getenv("ALF_MARKETPLACE_URL") != "" || os.Getenv("ALF_MARKETPLACE_ENABLED") == "true" {
+		mpManager = marketplace.NewManager(dataDir)
+		mpManager.SetOnChange(func() {
+			toolRegistry.Rescan()
+		})
+		if err := mpManager.RestoreEnabled(); err != nil {
+			log.Printf("[marketplace] restore enabled apps: %v", err)
+		} else {
+			toolRegistry.Rescan()
+		}
+		log.Printf("[marketplace] enabled (registry=%s)", os.Getenv("ALF_MARKETPLACE_URL"))
+	} else {
+		log.Println("[marketplace] disabled (set ALF_MARKETPLACE_URL or ALF_MARKETPLACE_ENABLED=true to enable)")
+	}
+
 	// Schedule adapter (engine set later after scheduler is created).
 	schedAdapter := &ccScheduleAdapter{}
 	var schedEventBroker *cc.ScheduleEventBroker
@@ -674,7 +694,7 @@ func main() {
 			})
 			log.Printf("[tasks] event: task=%s status=%s", taskID[:min(8, len(taskID))], status)
 		}
-		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock, onTaskEvent)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {

@@ -1,0 +1,15 @@
+{
+  "name": "notify",
+  "description": "Send a message to the user across all configured channels (Telegram, Control Center chat). Use this to proactively inform the user about results, alerts, or completed tasks.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "message": {
+        "type": "string",
+        "description": "The message to send to the user"
+      }
+    },
+    "required": ["message"],
+    "x-positional": ["message"]
+  }
+}

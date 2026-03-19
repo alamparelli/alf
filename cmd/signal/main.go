@@ -36,6 +36,8 @@ func main() {
 		doReact(sockPath)
 	case "status":
 		doStatus(sockPath)
+	case "notify":
+		doNotify(sockPath)
 	default:
 		// Fallback: check first argument.
 		if len(os.Args) >= 2 {
@@ -48,9 +50,13 @@ func main() {
 				os.Args = append(os.Args[:1], os.Args[2:]...)
 				doStatus(sockPath)
 				return
+			case "notify":
+				os.Args = append(os.Args[:1], os.Args[2:]...)
+				doNotify(sockPath)
+				return
 			}
 		}
-		fmt.Fprintf(os.Stderr, "Usage: react <emoji>\n       status <message>\n")
+		fmt.Fprintf(os.Stderr, "Usage: react <emoji>\n       status <message>\n       notify <message>\n")
 		os.Exit(1)
 	}
 }
@@ -75,6 +81,20 @@ func doStatus(sockPath string) {
 	}
 	text := strings.Join(os.Args[1:], " ")
 	resp := socketCall(sockPath, request{Action: "status", Text: text})
+	if resp.Error != "" {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+		os.Exit(1)
+	}
+	fmt.Println("OK")
+}
+
+func doNotify(sockPath string) {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "Usage: notify <message>")
+		os.Exit(1)
+	}
+	text := strings.Join(os.Args[1:], " ")
+	resp := socketCall(sockPath, request{Action: "notify", Text: text})
 	if resp.Error != "" {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
 		os.Exit(1)

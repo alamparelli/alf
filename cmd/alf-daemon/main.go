@@ -1478,7 +1478,10 @@ func main() {
 
 			// Signal socket for mid-response reactions from Claude subprocess.
 			sigSockPath := filepath.Join(dataDir, fmt.Sprintf("signal-%d.sock", u.Message.MessageID))
-			sigServer := &signal.Server{TG: tg, ChatID: tgChatID, MessageID: u.Message.MessageID}
+			sigServer := &signal.Server{
+				TG: tg, ChatID: tgChatID, MessageID: u.Message.MessageID,
+				Notify: commEngine.Broadcast,
+			}
 			var sigLn net.Listener
 			if ln, err := sigServer.ListenUnix(sigSockPath); err != nil {
 				log.Printf("signal: listen error: %v", err)

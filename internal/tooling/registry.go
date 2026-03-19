@@ -175,6 +175,7 @@ func (r *Registry) UserToolNames() []string {
 var signalTools = map[string]bool{
 	"react":  true,
 	"status": true,
+	"notify": true,
 }
 
 // DiscoverToolNames returns all executable tool names found in tools.d/ and tools/.

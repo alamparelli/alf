@@ -73,6 +73,8 @@ chown -R alf:alf /opt/alf/config.d /opt/alf/vault-data
 chown alf:alf /etc/resolv.conf 2>/dev/null || true
 
 # Phase 3: Drop to alf (uid 1000) and start daemon with zero capabilities.
-# setpriv strips all inheritable capabilities — combined with no-new-privileges:true,
+# setpriv strips all inheritable capabilities - combined with no-new-privileges:true,
 # the daemon process cannot regain any capabilities after this point.
+# GOMEMLIMIT caps Go heap and makes GC aggressive near the limit.
+export GOMEMLIMIT=512MiB
 exec setpriv --reuid=1000 --regid=1000 --init-groups --inh-caps=-all /opt/alf/alf-daemon "$@"

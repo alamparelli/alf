@@ -32,6 +32,7 @@ function toast(msg, type = 'success') {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast show ' + type;
+  if (type === 'error') console.error('[toast]', msg, new Error().stack);
   setTimeout(() => el.className = 'toast', 3000);
 }
 

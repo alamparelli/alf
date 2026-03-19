@@ -82,6 +82,17 @@ func (a *App) Action(name string, fn ActionFunc) {
 //  1. Binary name: take filepath.Base(os.Args[0]), find first '-', use everything after it.
 //  2. Fallback: read the "action" field from the JSON input.
 func (a *App) Run() {
+	// Handle --help for ALF toolbox discovery.
+	if len(os.Args) > 1 && os.Args[1] == "--help" {
+		actions := make([]string, 0, len(a.Actions))
+		for name := range a.Actions {
+			actions = append(actions, name)
+		}
+		fmt.Fprintf(os.Stdout, "%s — ALF marketplace app\n\nActions: %s\n\nInput: JSON on stdin with \"action\" field.\n",
+			a.Name, strings.Join(actions, ", "))
+		os.Exit(0)
+	}
+
 	// Determine action from binary name.
 	action := actionFromBinary(os.Args[0])
 

@@ -31,6 +31,7 @@ services:
   alf:
     image: {{.Image}}
     container_name: alf
+    hostname: workspace
     restart: unless-stopped
     networks:
       default:

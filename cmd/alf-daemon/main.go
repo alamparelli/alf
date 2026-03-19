@@ -178,8 +178,9 @@ func main() {
 	// Create data directory symlinks for config and skills.
 	setupDataSymlinks(dataDir, configDir, skillsDir)
 
-	// Seed bundled skills from Docker image defaults (no-op if already present).
+	// Seed bundled skills and teams from Docker image defaults (no-op if already present).
 	seedBundledSkills(skillsDir)
+	seedBundledTeams(dataDir)
 
 	// Set up user-packages paths.
 	setupUserPackagesPaths()

@@ -5365,7 +5365,7 @@ function showSetupWizard(status) {
   const backendDefs = [
     { id: 'claude', name: 'Claude', desc: 'Anthropic via local CLI', fields: [] },
     { id: 'codex', name: 'OpenAI Codex', desc: 'OpenAI via local CLI', fields: [
-      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-...' }
+      { key: 'api_key', label: 'API Key (optional)', type: 'password', placeholder: 'sk-... or leave empty for codex login' }
     ]},
     { id: 'openrouter', name: 'OpenRouter', desc: 'Multi-model gateway', fields: [
       { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-or-...' }
@@ -5717,6 +5717,18 @@ function showSetupWizard(status) {
             '</div>');
         }
       }).catch(() => {});
+    }
+
+    // Codex: show login hint if selected without API key
+    if (backendNames.includes('codex')) {
+      const codexKey = state.backends.codex && state.backends.codex.api_key;
+      if (!codexKey) {
+        el.insertAdjacentHTML('beforeend',
+          '<div class="setup-apply-info">' +
+          '<strong>OpenAI Codex</strong> — no API key provided. ' +
+          'After setup, open the <a href="#" onclick="event.preventDefault();navigateTo(\'terminal\');" style="color:var(--accent)">Terminal</a> tab and run <code>codex login --device-auth</code> to authenticate with your ChatGPT subscription.' +
+          '</div>');
+      }
     }
 
     // Always show vault password — vault is needed for all secret storage.

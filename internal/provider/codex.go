@@ -276,6 +276,7 @@ type codexEvent struct {
 }
 
 // codexEnv builds a minimal environment for the codex subprocess.
+// If apiKey is empty, Codex falls back to ~/.codex/auth.json (ChatGPT login).
 func codexEnv(apiKey string) []string {
 	env := make([]string, 0, 8)
 	// Pass through essential variables.
@@ -284,6 +285,8 @@ func codexEnv(apiKey string) []string {
 			env = append(env, key+"="+v)
 		}
 	}
-	env = append(env, "CODEX_API_KEY="+apiKey)
+	if apiKey != "" {
+		env = append(env, "CODEX_API_KEY="+apiKey)
+	}
 	return env
 }

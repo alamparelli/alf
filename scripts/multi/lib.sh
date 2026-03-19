@@ -8,6 +8,7 @@ set -euo pipefail
 ALF_MULTI_DIR="${ALF_MULTI_DIR:-/opt/alf-multi}"
 ALF_IMAGE="${ALF_IMAGE:-ghcr.io/alamparelli/alf:latest}"
 WHISPER_IMAGE="${WHISPER_IMAGE:-ghcr.io/alamparelli/whisper-service:latest}"
+EMBED_IMAGE="${EMBED_IMAGE:-ghcr.io/alamparelli/embed-service:latest}"
 WHISPER_MODEL="${WHISPER_MODEL:-small}"
 ACME_EMAIL="${ACME_EMAIL:-a.lamparelli@gmail.com}"
 
@@ -82,7 +83,8 @@ scaffold_tenant() {
 
     # Ensure all secret files exist (empty placeholders for Docker Compose)
     local secrets=(telegram_bot_token telegram_chat_id cc_auth_token openrouter_api_key
-                   openai_api_key claude_oauth_token vault_master_password whisper_shared_secret)
+                   openai_api_key claude_oauth_token vault_master_password whisper_shared_secret
+                   embed_shared_secret)
     for s in "${secrets[@]}"; do
         # Remove directory placeholder Docker may have created
         [[ -d "$dir/secrets/$s" ]] && rm -rf "$dir/secrets/$s"
@@ -103,6 +105,12 @@ scaffold_tenant() {
     if [[ -f "$SHARED_DIR/whisper_shared_secret" ]]; then
         cp "$SHARED_DIR/whisper_shared_secret" "$dir/secrets/whisper_shared_secret"
         chmod 644 "$dir/secrets/whisper_shared_secret"
+    fi
+
+    # Copy shared embed secret
+    if [[ -f "$SHARED_DIR/embed_shared_secret" ]]; then
+        cp "$SHARED_DIR/embed_shared_secret" "$dir/secrets/embed_shared_secret"
+        chmod 644 "$dir/secrets/embed_shared_secret"
     fi
 
     # Fix ownership — use remapped host UID if userns-remap is active
@@ -130,7 +138,7 @@ host_uid_for() {
 # This must run BEFORE every `docker compose up`.
 preflight_fix_placeholders() {
     # Shared files
-    local shared_files=("$SHARED_DIR/whisper_shared_secret")
+    local shared_files=("$SHARED_DIR/whisper_shared_secret" "$SHARED_DIR/embed_shared_secret")
     for f in "${shared_files[@]}"; do
         if [[ -d "$f" ]]; then
             rm -rf "$f"
@@ -153,6 +161,7 @@ preflight_fix_placeholders() {
 
     # Recreate all required files
     ensure_shared_whisper_secret
+    ensure_shared_embed_secret
 
     for tenant_dir in "$TENANTS_DIR"/*/; do
         [[ ! -d "$tenant_dir" ]] && continue
@@ -165,7 +174,8 @@ preflight_fix_placeholders() {
         fi
         # secrets
         local secrets=(telegram_bot_token telegram_chat_id cc_auth_token openrouter_api_key
-                       openai_api_key claude_oauth_token vault_master_password whisper_shared_secret)
+                       openai_api_key claude_oauth_token vault_master_password whisper_shared_secret
+                       embed_shared_secret)
         for s in "${secrets[@]}"; do
             if [[ ! -f "${tenant_dir}secrets/$s" ]]; then
                 touch "${tenant_dir}secrets/$s"
@@ -176,6 +186,11 @@ preflight_fix_placeholders() {
         if [[ ! -s "${tenant_dir}secrets/whisper_shared_secret" ]] && [[ -f "$SHARED_DIR/whisper_shared_secret" ]]; then
             cp "$SHARED_DIR/whisper_shared_secret" "${tenant_dir}secrets/whisper_shared_secret"
             chmod 644 "${tenant_dir}secrets/whisper_shared_secret"
+        fi
+        # Copy embed secret if missing
+        if [[ ! -s "${tenant_dir}secrets/embed_shared_secret" ]] && [[ -f "$SHARED_DIR/embed_shared_secret" ]]; then
+            cp "$SHARED_DIR/embed_shared_secret" "${tenant_dir}secrets/embed_shared_secret"
+            chmod 644 "${tenant_dir}secrets/embed_shared_secret"
         fi
     done
 }
@@ -194,6 +209,17 @@ ensure_shared_whisper_secret() {
     # Ensure models dir exists — whisper runs as uid 1000 (user 'whisper') with userns_mode: host
     mkdir -p "$SHARED_DIR/models"
     chown -R 1000:1000 "$SHARED_DIR/models"
+}
+
+ensure_shared_embed_secret() {
+    local path="$SHARED_DIR/embed_shared_secret"
+    [[ -d "$path" ]] && rm -rf "$path"
+    if [[ ! -s "$path" ]]; then
+        mkdir -p "$SHARED_DIR"
+        openssl rand -hex 32 > "$path"
+        chmod 644 "$path"
+        info "Generated shared embed secret"
+    fi
 }
 
 # ── Compose generation ───────────────────────────────────────────────
@@ -287,6 +313,29 @@ ${traefik_tenant_nets}    userns_mode: "host"
         max-size: "20m"
         max-file: "3"
 
+  embed:
+    image: ${EMBED_IMAGE}
+    container_name: alf-embed
+    restart: unless-stopped
+    networks:
+      embed-internal:
+        ipv4_address: 10.99.1.10
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
+    volumes:
+      - ./shared/embed_shared_secret:/run/secrets/embed_shared_secret:ro
+    mem_limit: 768m
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 EOF
 
     # Emit one service block per tenant
@@ -307,8 +356,10 @@ EOF
     networks:
       net-${user}:
       whisper-internal:
+      embed-internal:
     extra_hosts:
       - "whisper:10.99.0.10"
+      - "embed:10.99.1.10"
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=alf-multi_net-${user}"
@@ -330,6 +381,8 @@ EOF
       - VAULT_MASTER_PASSWORD_FILE=/run/secrets/vault_master_password
       - WHISPER_URL=http://whisper:8000
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
+      - EMBED_URL=http://embed:8090
+      - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
       - CC_EXTERNAL_URL=https://${domain}
       - TZ=${timezone}
     secrets:
@@ -349,6 +402,11 @@ EOF
         target: vault_master_password
       - source: ${user}_whisper_shared_secret
         target: whisper_shared_secret
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: ${user}_embed_shared_secret
+        target: embed_shared_secret
         uid: "1000"
         gid: "1000"
         mode: 0400
@@ -393,6 +451,11 @@ networks:
     ipam:
       config:
         - subnet: 10.99.0.0/24
+  embed-internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.99.1.0/24
 ${tenant_net_decls}
 EOF
 
@@ -404,7 +467,8 @@ EOF
         user=$(echo "$tenant" | jq -r '.user')
 
         local secrets=(telegram_bot_token telegram_chat_id cc_auth_token openrouter_api_key
-                       openai_api_key claude_oauth_token vault_master_password whisper_shared_secret)
+                       openai_api_key claude_oauth_token vault_master_password whisper_shared_secret
+                       embed_shared_secret)
         for s in "${secrets[@]}"; do
             cat >> "$COMPOSE_FILE" <<EOF
   ${user}_${s}:

@@ -37,14 +37,14 @@ type DedupConfig struct {
 // Store manages the semantic memory database with sqlite-vec + FTS5.
 type Store struct {
 	db       *sql.DB
-	embedder *Embedder
+	embedder EmbedderI
 	dedup    DedupConfig
 	mu       sync.RWMutex
 }
 
 // New opens (or creates) the memory database and initialises the schema.
 // Optional DedupConfig can be passed; if nil, defaults are used.
-func New(dbPath string, embedder *Embedder, dedupCfg ...DedupConfig) (*Store, error) {
+func New(dbPath string, embedder EmbedderI, dedupCfg ...DedupConfig) (*Store, error) {
 	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -290,6 +290,15 @@ func (s *Store) Delete(id int64) error {
 	// Delete from memories (triggers FTS5 sync).
 	_, err := s.db.Exec("DELETE FROM memories WHERE id = ?", id)
 	return err
+}
+
+// SetEmbedder swaps the embedder implementation (e.g. on tier switch).
+// Triggers a dims check which may start a background vector rebuild.
+func (s *Store) SetEmbedder(embedder EmbedderI) {
+	s.mu.Lock()
+	s.embedder = embedder
+	s.mu.Unlock()
+	s.CheckDims()
 }
 
 // Close releases the database connection.

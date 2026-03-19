@@ -70,6 +70,9 @@ $SSH "${REMOTE_HOST}" "cd /tmp/alf-build && docker build --build-arg BUILD_VERSI
 echo "==> Building whisper-service image on homelab..."
 $SSH "${REMOTE_HOST}" "cd /tmp/alf-build/whisper-service && docker build -t alf-whisper:latest ."
 
+echo "==> Building embed-service image on homelab..."
+$SSH "${REMOTE_HOST}" "cd /tmp/alf-build && docker build -f embed-service/Dockerfile -t alf-embed:latest ."
+
 $SSH "${REMOTE_HOST}" "rm -rf /tmp/alf-build"
 
 # Generate Traefik override locally then SCP to remote
@@ -118,8 +121,13 @@ if [ ! -s ${REMOTE_DIR}/secrets/whisper_shared_secret ]; then
   openssl rand -hex 32 > ${REMOTE_DIR}/secrets/whisper_shared_secret
   echo \"  generated whisper_shared_secret\"
 fi
+# Auto-generate embed shared secret if missing.
+if [ ! -s ${REMOTE_DIR}/secrets/embed_shared_secret ]; then
+  openssl rand -hex 32 > ${REMOTE_DIR}/secrets/embed_shared_secret
+  echo \"  generated embed_shared_secret\"
+fi
 # Ensure all secret files exist (Docker Compose requires them even if empty).
-for s in telegram_bot_token telegram_chat_id cc_auth_token openrouter_api_key vault_master_password whisper_shared_secret; do
+for s in telegram_bot_token telegram_chat_id cc_auth_token openrouter_api_key vault_master_password whisper_shared_secret embed_shared_secret; do
   touch ${REMOTE_DIR}/secrets/\$s
 done"
 
@@ -156,8 +164,10 @@ services:
     networks:
       default:
       whisper-internal:
+      embed-internal:
     extra_hosts:
       - "whisper:10.99.0.10"
+      - "embed:10.99.1.10"
     expose:
       - "8080"
     environment:
@@ -168,6 +178,8 @@ services:
       - VAULT_MASTER_PASSWORD_FILE=/run/secrets/vault_master_password
       - WHISPER_URL=http://whisper:8000
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
+      - EMBED_URL=http://embed:8090
+      - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
       - TZ=Europe/Rome
     secrets:
       - telegram_bot_token
@@ -177,6 +189,11 @@ services:
       - vault_master_password
       - source: whisper_shared_secret
         target: /run/secrets/whisper_shared_secret
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: embed_shared_secret
+        target: /run/secrets/embed_shared_secret
         uid: "1000"
         gid: "1000"
         mode: 0400
@@ -231,12 +248,38 @@ services:
     mem_limit: 2g
     cpus: "2.0"
 
+  embed:
+    image: alf-embed:latest
+    container_name: alf-embed
+    pull_policy: never
+    restart: unless-stopped
+    profiles:
+      - embed
+    networks:
+      embed-internal:
+        ipv4_address: 10.99.1.10
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
+    secrets:
+      - embed_shared_secret
+    mem_limit: 768m
+    cpus: "1.0"
+
 networks:
   whisper-internal:
     internal: true
     ipam:
       config:
         - subnet: 10.99.0.0/24
+  embed-internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.99.1.0/24
 
 secrets:
   telegram_bot_token:
@@ -251,6 +294,8 @@ secrets:
     file: ./secrets/vault_master_password
   whisper_shared_secret:
     file: ./secrets/whisper_shared_secret
+  embed_shared_secret:
+    file: ./secrets/embed_shared_secret
 COMPOSEOF
 $SCP /tmp/alf-compose-direct.yml "${REMOTE_HOST}:${REMOTE_DIR}/docker-compose.yml"
 rm -f /tmp/alf-compose-direct.yml
@@ -266,7 +311,7 @@ if [ "$NO_RESTART" = true ]; then
   echo "==> Image transferred. Skipping restart (--no-restart)."
 else
   echo "==> Restarting ALF on homelab..."
-  $SSH "${REMOTE_HOST}" "cd ${REMOTE_DIR} && docker compose up -d"
+  $SSH "${REMOTE_HOST}" "cd ${REMOTE_DIR} && docker compose --profile embed up -d"
   echo "==> Waiting for daemon startup..."
   for i in $(seq 1 20); do
     if $SSH "${REMOTE_HOST}" "cd ${REMOTE_DIR} && docker compose exec -T alf curl -sf http://localhost:8080/health" >/dev/null 2>&1; then

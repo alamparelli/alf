@@ -50,8 +50,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     htop \
     jq \
-    imagemagick \
-    pandoc \
     build-essential \
     unzip \
     zip \
@@ -84,23 +82,6 @@ RUN if [ "${TARGETARCH}" = "arm64" ]; then FFARCH="arm64"; else FFARCH="amd64"; 
        | tar xJ --strip-components=1 --wildcards -C /usr/local/bin '*/ffmpeg' '*/ffprobe' \
     && ffmpeg -version > /dev/null
 
-# Download ONNX Runtime shared library (CPU-only, ~20 MB).
-RUN if [ "${TARGETARCH}" = "amd64" ]; then ARCH="x64"; \
-    elif [ "${TARGETARCH}" = "arm64" ]; then ARCH="aarch64"; \
-    else ARCH="${TARGETARCH}"; fi \
-    && curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-linux-${ARCH}-1.24.2.tgz" \
-       | tar xz --strip-components=2 -C /usr/local/lib \
-         "onnxruntime-linux-${ARCH}-1.24.2/lib/libonnxruntime.so.1.24.2" \
-         "onnxruntime-linux-${ARCH}-1.24.2/lib/libonnxruntime.so.1" \
-         "onnxruntime-linux-${ARCH}-1.24.2/lib/libonnxruntime.so" \
-    && ldconfig
-
-# Pre-download ONNX embedding model (multilingual-e5-small: 100 languages, 384 dims).
-RUN mkdir -p /opt/alf/models/multilingual-e5-small \
-    && curl -fsSL -o /opt/alf/models/multilingual-e5-small/model.onnx \
-       "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx" \
-    && curl -fsSL -o /opt/alf/models/multilingual-e5-small/tokenizer.json \
-       "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/tokenizer.json"
 
 # Claude Code native binary.
 # Keep ~/.local/bin/claude so Claude Code recognises the native install.
@@ -108,13 +89,6 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
     && cp "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
     && rm -rf /root/.local/share/claude /root/.claude \
     && claude --version
-
-# Node.js (required for OpenAI Codex CLI).
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm i -g @openai/codex \
-    && codex --version
 
 ENV PATH="/opt/alf/tools.d:${PATH}"
 

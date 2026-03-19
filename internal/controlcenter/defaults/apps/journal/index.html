@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Journal</title>
+  <link rel="stylesheet" id="alf-theme-link" href="/static/theme-sage.css">
+  <script src="/static/theme-init.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px 24px; }
+
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .header h1 { font-size: 1.1rem; font-weight: 600; color: var(--accent); }
+    .header-actions { display: flex; gap: 8px; }
+
+    .tabs { display: flex; gap: 2px; margin-bottom: 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
+    .tab { flex: 1; padding: 7px 12px; border: none; background: none; color: var(--text-dim); font-size: 0.8rem; font-weight: 500; cursor: pointer; border-radius: 6px; transition: all 0.15s; }
+    .tab:hover { color: var(--text); }
+    .tab.active { background: var(--accent); color: var(--on-accent); }
+
+    .btn { padding: 7px 14px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); font-size: 0.8rem; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+    .btn:hover { border-color: var(--text-dim); }
+    .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+    .btn-ghost { background: none; border: none; color: var(--text-dim); padding: 4px 8px; }
+    .btn-ghost:hover { color: var(--text); }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* Write panel */
+    .write-form { display: flex; flex-direction: column; gap: 12px; }
+    .write-form textarea { width: 100%; min-height: 150px; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.85rem; font-family: inherit; resize: vertical; line-height: 1.6; }
+    .write-form textarea:focus { outline: none; border-color: var(--accent); }
+    .write-meta { display: flex; gap: 10px; flex-wrap: wrap; }
+    .write-meta input { flex: 1; min-width: 120px; padding: 8px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.8rem; }
+    .write-meta input:focus { outline: none; border-color: var(--accent); }
+    .write-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .write-status { font-size: 0.8rem; color: var(--green); margin-top: -4px; min-height: 20px; }
+
+    /* Entries */
+    .entries { display: flex; flex-direction: column; gap: 10px; }
+    .entry { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; transition: transform 0.15s; }
+    .entry:hover { transform: translateY(-1px); }
+    .entry-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .entry-date { font-size: 0.7rem; color: var(--text-dim); font-family: monospace; }
+    .entry-mood { font-size: 0.7rem; padding: 2px 8px; background: var(--bg); border-radius: 4px; color: var(--accent); }
+    .entry-content { font-size: 0.85rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+    .entry-tags { margin-top: 8px; display: flex; gap: 4px; flex-wrap: wrap; }
+    .entry-tag { font-size: 0.65rem; padding: 2px 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; color: var(--text-dim); }
+
+    /* Search */
+    .search-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+    .search-bar input { flex: 1; padding: 8px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.85rem; }
+    .search-bar input:focus { outline: none; border-color: var(--accent); }
+
+    /* Reflect */
+    .reflect-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .reflect-stat { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .reflect-stat:last-child { border-bottom: none; }
+    .reflect-stat .label { color: var(--text-dim); }
+    .reflect-stat .value { font-weight: 600; }
+    .reflect-section { margin-top: 16px; }
+    .reflect-section h3 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 8px; }
+    .mood-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 0.8rem; }
+    .mood-bar .mood-name { min-width: 80px; color: var(--text-dim); }
+    .mood-bar .mood-fill { height: 6px; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+    .mood-bar .mood-count { font-size: 0.7rem; color: var(--text-dim); min-width: 20px; }
+
+    .entry-delete-btn { font-size: 1.1rem; line-height: 1; opacity: 0; transition: opacity 0.15s; color: var(--text-dim); }
+    .entry-delete-btn:hover { color: var(--red); }
+    .entry:hover .entry-delete-btn { opacity: 1; }
+
+    .empty { text-align: center; color: var(--text-dim); padding: 40px 20px; font-size: 0.85rem; }
+    .loading { text-align: center; color: var(--text-dim); padding: 20px; font-size: 0.8rem; }
+
+    @media (max-width: 600px) {
+      body { padding: 14px; }
+      .write-meta { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Journal</h1>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-panel="write">Write</button>
+    <button class="tab" data-panel="read">Entries</button>
+    <button class="tab" data-panel="search">Search</button>
+    <button class="tab" data-panel="reflect">Reflect</button>
+  </div>
+
+  <!-- Write Panel -->
+  <div class="panel active" id="panelWrite">
+    <div class="write-form">
+      <textarea id="writeContent" placeholder="What's on your mind?"></textarea>
+      <div class="write-meta">
+        <input type="text" id="writeMood" placeholder="Mood (e.g. happy, calm)">
+        <input type="text" id="writeTags" placeholder="Tags (comma-separated)">
+      </div>
+      <div class="write-status" id="writeStatus"></div>
+      <div class="write-actions">
+        <button class="btn btn-primary" id="writeBtn">Save Entry</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Read Panel -->
+  <div class="panel" id="panelRead">
+    <div class="entries" id="entriesList">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Search Panel -->
+  <div class="panel" id="panelSearch">
+    <div class="search-bar">
+      <input type="text" id="searchInput" placeholder="Search entries...">
+      <button class="btn" id="searchBtn">Search</button>
+    </div>
+    <div class="entries" id="searchResults">
+      <div class="empty">Type a query and press Search</div>
+    </div>
+  </div>
+
+  <!-- Reflect Panel -->
+  <div class="panel" id="panelReflect">
+    <div id="reflectContent">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <script>
+    var JOURNAL_BIN = '/home/alf/data/apps/journal/bin/journal';
+    var JOURNAL_DATA = '/home/alf/data/apps/journal/data';
+
+    function bash(cmd) {
+      return fetch('/api/bash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ command: cmd })
+      }).then(function(r) { return r.json(); });
+    }
+
+    function journalCmd(action, args) {
+      var payload = Object.assign({ action: action }, args || {});
+      var input = JSON.stringify(payload);
+      var cmd = "echo '" + input.replace(/'/g, "'\\''") + "' | ALF_APP_DATA_DIR=" + JOURNAL_DATA + " " + JOURNAL_BIN;
+      return bash(cmd).then(function(res) {
+        if (res.exit_code !== 0) throw new Error(res.error || res.output || 'Command failed');
+        return res.output || '';
+      });
+    }
+
+    // --- Tabs ---
+    document.querySelectorAll('.tab').forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+        document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+        tab.classList.add('active');
+        var panel = document.getElementById('panel' + capitalize(tab.dataset.panel));
+        panel.classList.add('active');
+
+        if (tab.dataset.panel === 'read') loadEntries();
+        if (tab.dataset.panel === 'reflect') loadReflect();
+      });
+    });
+
+    function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+    // --- Write ---
+    document.getElementById('writeBtn').addEventListener('click', function() {
+      var content = document.getElementById('writeContent').value.trim();
+      if (!content) return;
+      var mood = document.getElementById('writeMood').value.trim();
+      var tags = document.getElementById('writeTags').value.trim();
+      var args = { content: content };
+      if (mood) args.mood = mood;
+      if (tags) args.tags = tags;
+
+      var btn = document.getElementById('writeBtn');
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+
+      journalCmd('write', args).then(function(out) {
+        document.getElementById('writeStatus').textContent = out;
+        document.getElementById('writeContent').value = '';
+        document.getElementById('writeMood').value = '';
+        document.getElementById('writeTags').value = '';
+        setTimeout(function() { document.getElementById('writeStatus').textContent = ''; }, 3000);
+      }).catch(function(e) {
+        document.getElementById('writeStatus').textContent = 'Error: ' + e.message;
+        document.getElementById('writeStatus').style.color = 'var(--red)';
+      }).finally(function() {
+        btn.disabled = false;
+        btn.textContent = 'Save Entry';
+      });
+    });
+
+    // --- Read ---
+    function loadEntries() {
+      var list = document.getElementById('entriesList');
+      list.innerHTML = '<div class="loading">Loading...</div>';
+      journalCmd('read', { limit: 50 }).then(function(out) {
+        if (!out || out === 'No entries yet.') {
+          list.innerHTML = '<div class="empty">No entries yet. Write your first one!</div>';
+          return;
+        }
+        renderEntries(list, out);
+      }).catch(function(e) {
+        list.innerHTML = '<div class="empty">Failed to load entries</div>';
+      });
+    }
+
+    function renderEntries(container, text) {
+      var blocks = text.split('\n---\n');
+      container.innerHTML = '';
+      blocks.forEach(function(block) {
+        block = block.trim();
+        if (!block) return;
+        var lines = block.split('\n');
+        var headerMatch = lines[0].match(/^\[(\d+)\]\s+(.+)$/);
+        var id = headerMatch ? headerMatch[1] : '';
+        var date = headerMatch ? headerMatch[2] : lines[0];
+        var mood = '';
+        var tags = [];
+        var contentLines = [];
+        var pastHeader = false;
+
+        for (var i = 1; i < lines.length; i++) {
+          if (!pastHeader && lines[i].startsWith('Mood: ')) {
+            mood = lines[i].substring(6);
+          } else if (!pastHeader && lines[i].startsWith('Tags: ')) {
+            tags = lines[i].substring(6).split(', ');
+          } else {
+            pastHeader = true;
+            contentLines.push(lines[i]);
+          }
+        }
+
+        var el = document.createElement('div');
+        el.className = 'entry';
+        var html = '<div class="entry-header"><span class="entry-date">' + escHtml(formatDate(date)) + '</span>';
+        html += '<div style="display:flex;gap:6px;align-items:center">';
+        if (mood) html += '<span class="entry-mood">' + escHtml(mood) + '</span>';
+        if (id) html += '<button class="btn-ghost entry-delete-btn" data-id="' + escHtml(id) + '" title="Delete">&times;</button>';
+        html += '</div></div>';
+        html += '<div class="entry-content">' + escHtml(contentLines.join('\n')) + '</div>';
+        if (tags.length > 0 && tags[0]) {
+          html += '<div class="entry-tags">';
+          tags.forEach(function(t) { html += '<span class="entry-tag">' + escHtml(t) + '</span>'; });
+          html += '</div>';
+        }
+        el.innerHTML = html;
+        container.appendChild(el);
+      });
+      if (!container.children.length) {
+        container.innerHTML = '<div class="empty">No entries found.</div>';
+      }
+      // Bind delete buttons.
+      container.querySelectorAll('.entry-delete-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          if (!confirm('Delete this entry?')) return;
+          var entryId = btn.dataset.id;
+          btn.disabled = true;
+          journalCmd('delete', { id: entryId }).then(function() {
+            btn.closest('.entry').remove();
+          }).catch(function(e) {
+            alert('Delete failed: ' + e.message);
+            btn.disabled = false;
+          });
+        });
+      });
+    }
+
+    function formatDate(iso) {
+      try {
+        var d = new Date(iso);
+        if (isNaN(d)) return iso;
+        return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) +
+               ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      } catch (e) { return iso; }
+    }
+
+    // --- Search ---
+    document.getElementById('searchBtn').addEventListener('click', doSearch);
+    document.getElementById('searchInput').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') doSearch();
+    });
+
+    function doSearch() {
+      var query = document.getElementById('searchInput').value.trim();
+      if (!query) return;
+      var results = document.getElementById('searchResults');
+      results.innerHTML = '<div class="loading">Searching...</div>';
+      journalCmd('search', { query: query }).then(function(out) {
+        if (!out || out === 'No matching entries.') {
+          results.innerHTML = '<div class="empty">No matching entries.</div>';
+          return;
+        }
+        // Strip "Found N matching entries:" header
+        var text = out.replace(/^Found \d+ matching entr(?:y|ies):\n\n/, '');
+        renderEntries(results, text);
+      }).catch(function(e) {
+        results.innerHTML = '<div class="empty">Search failed</div>';
+      });
+    }
+
+    // --- Reflect ---
+    function loadReflect() {
+      var container = document.getElementById('reflectContent');
+      container.innerHTML = '<div class="loading">Loading reflection...</div>';
+      journalCmd('reflect', { days: 30 }).then(function(out) {
+        if (!out || out.includes('No entries in the last')) {
+          container.innerHTML = '<div class="empty">' + escHtml(out || 'No entries yet.') + '</div>';
+          return;
+        }
+        renderReflect(container, out);
+      }).catch(function(e) {
+        container.innerHTML = '<div class="empty">Failed to load reflection</div>';
+      });
+    }
+
+    function renderReflect(container, text) {
+      var lines = text.split('\n');
+      var total = 0;
+      var days = 30;
+      var moods = {};
+      var tags = {};
+      var section = '';
+
+      lines.forEach(function(line) {
+        line = line.trim();
+        if (!line) return;
+        var m;
+        if ((m = line.match(/^Reflection.*last (\d+) days/))) days = parseInt(m[1]);
+        else if ((m = line.match(/^Total entries:\s*(\d+)/))) total = parseInt(m[1]);
+        else if (line === 'Mood distribution:') section = 'moods';
+        else if (line === 'Top tags:') section = 'tags';
+        else if (section === 'moods' && (m = line.match(/^\s*(.+?):\s*(\d+)/))) moods[m[1]] = parseInt(m[2]);
+        else if (section === 'tags' && (m = line.match(/^\s*(.+?):\s*(\d+)/))) tags[m[1]] = parseInt(m[2]);
+      });
+
+      var maxMood = Math.max.apply(null, Object.values(moods).concat([1]));
+
+      var html = '<div class="reflect-card">';
+      html += '<div class="reflect-stat"><span class="label">Period</span><span class="value">Last ' + days + ' days</span></div>';
+      html += '<div class="reflect-stat"><span class="label">Total entries</span><span class="value">' + total + '</span></div>';
+      html += '</div>';
+
+      if (Object.keys(moods).length) {
+        html += '<div class="reflect-section"><h3>Mood Distribution</h3>';
+        Object.keys(moods).forEach(function(mood) {
+          var pct = Math.round((moods[mood] / maxMood) * 100);
+          html += '<div class="mood-bar"><span class="mood-name">' + escHtml(mood) + '</span>' +
+                  '<div style="flex:1"><div class="mood-fill" style="width:' + pct + '%"></div></div>' +
+                  '<span class="mood-count">' + moods[mood] + '</span></div>';
+        });
+        html += '</div>';
+      }
+
+      if (Object.keys(tags).length) {
+        html += '<div class="reflect-section"><h3>Top Tags</h3><div style="display:flex;flex-wrap:wrap;gap:6px">';
+        Object.keys(tags).forEach(function(tag) {
+          html += '<span class="entry-tag" style="font-size:0.75rem;padding:3px 8px">' + escHtml(tag) + ' (' + tags[tag] + ')</span>';
+        });
+        html += '</div></div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    function escHtml(s) {
+      if (!s) return '';
+      var d = document.createElement('div');
+      d.appendChild(document.createTextNode(s));
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>

@@ -8,6 +8,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/firewall"
+	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/tooling"
@@ -41,6 +42,7 @@ type Deps struct {
 	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
 	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
 	ModelCache       *ModelCache           // nil if model cache unavailable
+	Marketplace      *marketplace.Manager   // nil if marketplace unavailable
 	OnVaultUnlock    func()                // called after vault unlock (e.g. secret migration)
 	OnTaskEvent      func(taskID, status, summary string) // called when a task completes or needs attention
 	AuthToken        string
@@ -161,6 +163,13 @@ func HandlerFactory(deps Deps) http.Handler {
 		mux.Handle("/apps/", &AppHandler{
 			Store: deps.AppStore,
 		})
+	}
+
+	// Marketplace: app lifecycle management.
+	if deps.Marketplace != nil {
+		mpHandler := &MarketplaceHandler{Manager: deps.Marketplace}
+		mux.Handle("/api/marketplace", mpHandler)
+		mux.Handle("/api/marketplace/", mpHandler)
 	}
 
 	// Chat API (mobile app).

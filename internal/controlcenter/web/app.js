@@ -7900,20 +7900,59 @@ function mpInit() {
 function mpLoad() {
   const grid = document.getElementById('mpGrid');
   grid.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem;padding:8px">Loading...</div>';
-  api('/api/marketplace').then(apps => {
-    if (!apps || apps.length === 0) {
+
+  // Fetch local state and remote catalog in parallel.
+  Promise.all([
+    api('/api/marketplace').catch(() => []),
+    api('/api/marketplace/catalog').catch(() => [])
+  ]).then(([localApps, remoteApps]) => {
+    // Build local state map: slug → app info
+    const localMap = {};
+    (localApps || []).forEach(a => { localMap[a.slug] = a; });
+
+    // Merge: remote apps enriched with local state, plus local-only apps
+    const merged = [];
+    const seen = {};
+
+    // Remote apps first
+    (remoteApps || []).forEach(remote => {
+      seen[remote.slug] = true;
+      const local = localMap[remote.slug];
+      merged.push({
+        slug: remote.slug,
+        name: remote.name,
+        version: remote.version,
+        description: remote.description,
+        author: remote.author,
+        category: remote.category,
+        icon: remote.icon,
+        tools: local ? local.tools : [],
+        state: local ? local.state : 'available',
+        source: 'remote'
+      });
+    });
+
+    // Local-only apps (bundled, not in remote)
+    (localApps || []).forEach(local => {
+      if (seen[local.slug]) return;
+      merged.push(Object.assign({}, local, { source: 'local' }));
+    });
+
+    if (merged.length === 0) {
       grid.innerHTML = '<div class="mp-empty">No apps available yet.</div>';
       return;
     }
+
     grid.innerHTML = '';
-    apps.forEach(app => {
+    merged.forEach(app => {
       const card = document.createElement('div');
       card.className = 'mp-card';
       if (app.state === 'enabled') card.classList.add('mp-card-enabled');
 
       const iconName = app.icon || 'package';
       const toolCount = (app.tools || []).length;
-      const stateLabel = app.state === 'enabled' ? 'Enabled' : app.state === 'disabled' ? 'Disabled' : 'Installed';
+      const isAvailable = app.state === 'available';
+      const stateLabel = isAvailable ? 'Available' : app.state === 'enabled' ? 'Enabled' : app.state === 'disabled' ? 'Disabled' : 'Installed';
       const stateCls = 'mp-state-' + app.state;
 
       card.innerHTML =
@@ -7924,6 +7963,7 @@ function mpLoad() {
             '<div class="mp-card-meta">' +
               '<span class="mp-badge ' + stateCls + '">' + stateLabel + '</span>' +
               '<span class="mp-card-version">v' + esc(app.version || '?') + '</span>' +
+              (app.author ? '<span class="mp-card-cat">by ' + esc(app.author) + '</span>' : '') +
               (app.category ? '<span class="mp-card-cat">' + esc(app.category) + '</span>' : '') +
             '</div>' +
           '</div>' +
@@ -7933,10 +7973,12 @@ function mpLoad() {
           '<span class="mp-tool-tag" title="' + esc(t.description || '') + '">' + esc(t.name) + '</span>'
         ).join('') + '</div>' : '') +
         '<div class="mp-card-actions">' +
-          (app.state === 'enabled'
-            ? '<button class="btn btn-sm mp-disable-btn" data-slug="' + esc(app.slug) + '">Disable</button>'
-            : '<button class="btn btn-sm btn-primary mp-enable-btn" data-slug="' + esc(app.slug) + '">Enable</button>') +
-          (app.state !== 'enabled'
+          (isAvailable
+            ? '<button class="btn btn-sm btn-primary mp-install-btn" data-slug="' + esc(app.slug) + '">Install</button>'
+            : app.state === 'enabled'
+              ? '<button class="btn btn-sm mp-disable-btn" data-slug="' + esc(app.slug) + '">Disable</button>'
+              : '<button class="btn btn-sm btn-primary mp-enable-btn" data-slug="' + esc(app.slug) + '">Enable</button>') +
+          (!isAvailable && app.state !== 'enabled'
             ? '<button class="btn btn-sm btn-ghost mp-uninstall-btn" data-slug="' + esc(app.slug) + '">Uninstall</button>'
             : '') +
         '</div>';
@@ -7945,6 +7987,13 @@ function mpLoad() {
     });
 
     // Bind actions
+    grid.querySelectorAll('.mp-install-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.disabled = true;
+        btn.textContent = 'Installing...';
+        mpAction(btn.dataset.slug, 'install');
+      });
+    });
     grid.querySelectorAll('.mp-enable-btn').forEach(btn => {
       btn.addEventListener('click', () => mpAction(btn.dataset.slug, 'enable'));
     });

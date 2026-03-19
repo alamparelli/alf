@@ -165,9 +165,11 @@ services:
       default:
       whisper-internal:
       embed-internal:
+      proxy:
     extra_hosts:
       - "whisper:10.99.0.10"
       - "embed:10.99.1.10"
+      - "marketplace:10.0.3.7"
     expose:
       - "8080"
     environment:
@@ -180,6 +182,7 @@ services:
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
       - EMBED_URL=http://embed:8090
       - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
+      - ALF_MARKETPLACE_URL=http://marketplace:8090
       - TZ=Europe/Rome
     secrets:
       - telegram_bot_token
@@ -280,6 +283,8 @@ networks:
     ipam:
       config:
         - subnet: 10.99.1.0/24
+  proxy:
+    external: true
 
 secrets:
   telegram_bot_token:

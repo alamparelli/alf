@@ -36,6 +36,7 @@
             <a class="nav-item" data-view="tiers"><i data-lucide="sliders-horizontal"></i><span>Tiers</span></a>
             <a class="nav-item" data-view="firewall"><i data-lucide="shield"></i><span>Firewall</span></a>
             <a class="nav-item" data-view="vault"><i data-lucide="lock"></i><span>Vault</span></a>
+            <a class="nav-item" data-view="marketplace"><i data-lucide="store"></i><span>Marketplace</span></a>
             <a class="nav-item" data-view="settings"><i data-lucide="settings"></i><span>Settings</span></a>
             <a class="nav-item" data-view="logs"><i data-lucide="scroll-text"></i><span>Logs</span></a>
             <a class="nav-item" data-view="docs"><i data-lucide="book-open"></i><span>Docs</span></a>
@@ -669,6 +670,16 @@
           <input type="text" id="termInput" placeholder="Type or paste command..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
           <button class="btn" id="termSendBtn"><i data-lucide="corner-down-left" style="width:14px;height:14px;vertical-align:middle"></i></button>
         </div>
+      </div>
+
+      <div id="marketplaceView" class="marketplace-view" style="display:none">
+        <div class="mp-toolbar">
+          <h2>Marketplace</h2>
+          <div class="mp-toolbar-right">
+            <button class="btn btn-icon" id="mpRefreshBtn" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+          </div>
+        </div>
+        <div class="mp-grid" id="mpGrid"></div>
       </div>
 
       <div id="tiersView" class="tiers-view" style="display:none">

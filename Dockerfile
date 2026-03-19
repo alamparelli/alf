@@ -26,7 +26,8 @@ RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w -X main.version=${BUILD_VE
     && CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w" -o /extract-video ./cmd/extract-video \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /telegram-tools ./cmd/signal \
-    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /schedule-tools ./cmd/schedule-tools
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /schedule-tools ./cmd/schedule-tools \
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /journal ./cmd/journal
 
 # Build vault-proxy binaries (secrets vault for AI agents).
 WORKDIR /vault-proxy
@@ -93,6 +94,8 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 ENV PATH="/opt/alf/tools.d:${PATH}"
 
 COPY internal/controlcenter/defaults/tiers.json /opt/alf/defaults/tiers.json
+COPY internal/controlcenter/defaults/apps/journal/ /opt/alf/defaults/apps/journal/
+COPY --from=builder /journal /opt/alf/defaults/apps/journal/bin/journal
 COPY skills.d/ /opt/alf/defaults/skills.d/
 COPY internal/cli/bundled_agents/ /opt/alf/defaults/teams/
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon

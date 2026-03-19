@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	magicCodeTTL  = 5 * time.Minute
-	sessionTTL    = 24 * time.Hour
+	magicCodeTTL  = 24 * time.Hour
+	sessionTTL    = 10 * 365 * 24 * time.Hour // ~10 years (no expiry)
 	magicCodeLen  = 32 // bytes → 64 hex chars
 	sessionIDLen  = 32
 )

@@ -69,19 +69,24 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 	var toolsRaw json.RawMessage = toolsJSON
 
 	turns := 0
+	var totalInput, totalOutput int
 	for {
 		resp, err := tl.api.DoRequest(ctx, messages, model, toolsRaw, onProgress)
 		if err != nil {
 			return nil, err
 		}
+		totalInput += resp.InputTokens
+		totalOutput += resp.OutputTokens
 
 		// No tool calls - return text response.
 		if len(resp.ToolCalls) == 0 {
 			log.Printf("toolloop: no tool calls (finish=%s)\n--- model output ---\n%s\n--- end ---", resp.FinishReason, resp.Text)
 			return &Result{
-				Text:     resp.Text,
-				Model:    model,
-				NumTurns: turns,
+				Text:         resp.Text,
+				Model:        model,
+				NumTurns:     turns,
+				InputTokens:  totalInput,
+				OutputTokens: totalOutput,
 			}, nil
 		}
 
@@ -93,9 +98,11 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 			}
 			log.Printf("toolloop: max turns (%d) reached", tl.maxTurns)
 			return &Result{
-				Text:     text,
-				Model:    model,
-				NumTurns: turns,
+				Text:         text,
+				Model:        model,
+				NumTurns:     turns,
+				InputTokens:  totalInput,
+				OutputTokens: totalOutput,
 			}, nil
 		}
 
@@ -119,7 +126,7 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 		// Execute each tool call sequentially.
 		for _, tc := range resp.ToolCalls {
 			if onProgress != nil {
-				onProgress(StreamEvent{Type: "tool_use", Detail: tc.Function.Name})
+				// tool_use already emitted during SSE streaming; only send input here.
 				onProgress(StreamEvent{Type: "tool_input", Detail: tc.Function.Name, Text: tc.Function.Arguments})
 			}
 

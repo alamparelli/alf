@@ -588,6 +588,9 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	}
 
 	sessShort := result.SessionID
+	if sessShort == "" && convID != "" {
+		sessShort = convID
+	}
 	if len(sessShort) > 8 {
 		sessShort = sessShort[:8]
 	}
@@ -597,7 +600,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	if result.SessionID != "" {
 		e.Sessions.SetWithBackend(sessionKey, result.SessionID, route.Tier, tp.Backend)
 	} else if isAPITier {
-		e.Sessions.TouchContext(sessionKey, route.Tier)
+		e.Sessions.SetWithBackend(sessionKey, convID, route.Tier, tp.Backend)
 	}
 
 	// Extract reaction tag.

@@ -214,11 +214,12 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 // returning a rich result with tool_calls if present.
 func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, model string, tools json.RawMessage, onProgress OnProgress) (*apiStreamResult, error) {
 	reqBody := apiRequest{
-		Model:     model,
-		Messages:  messages,
-		Stream:    true,
-		MaxTokens: p.maxTokens,
-		Tools:     tools,
+		Model:         model,
+		Messages:      messages,
+		Stream:        true,
+		MaxTokens:     p.maxTokens,
+		Tools:         tools,
+		StreamOptions: &apiStreamOpts{IncludeUsage: true},
 	}
 	return p.doStreamRequest(ctx, reqBody, onProgress, 0)
 }

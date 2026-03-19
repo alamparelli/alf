@@ -70,6 +70,19 @@ func (ms *MagicStore) Issue(chatID int64, sessTTL time.Duration) (string, error)
 	return code, nil
 }
 
+// Peek checks if a magic code exists and is not expired, without consuming it.
+// Used by GET /auth to validate before showing the login form.
+func (ms *MagicStore) Peek(code string) bool {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	entry, ok := ms.entries[code]
+	if !ok {
+		return false
+	}
+	return !ms.nowFn().After(entry.expiresAt)
+}
+
 // Consume atomically retrieves and deletes a magic code.
 // Returns the associated chat ID, the requested session TTL, and true if the code was valid and not expired.
 func (ms *MagicStore) Consume(code string) (int64, time.Duration, bool) {

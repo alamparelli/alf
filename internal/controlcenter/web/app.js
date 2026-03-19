@@ -7901,11 +7901,15 @@ function mpLoad() {
   const grid = document.getElementById('mpGrid');
   grid.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem;padding:8px">Loading...</div>';
 
-  // Fetch local state and remote catalog in parallel.
+  // Fetch local state, remote catalog, and updates in parallel.
   Promise.all([
     api('/api/marketplace').catch(() => []),
-    api('/api/marketplace/catalog').catch(() => [])
-  ]).then(([localApps, remoteApps]) => {
+    api('/api/marketplace/catalog').catch(() => []),
+    api('/api/marketplace/updates').catch(() => [])
+  ]).then(([localApps, remoteApps, updates]) => {
+    // Build update map: slug → remote_version
+    var updateMap = {};
+    (updates || []).forEach(function(u) { updateMap[u.slug] = u.remote_version; });
     // Build local state map: slug → app info
     const localMap = {};
     (localApps || []).forEach(a => { localMap[a.slug] = a; });
@@ -7952,6 +7956,7 @@ function mpLoad() {
       const iconName = app.icon || 'package';
       const toolCount = (app.tools || []).length;
       const isAvailable = app.state === 'available';
+      const hasUpdate = !!updateMap[app.slug];
       const stateLabel = isAvailable ? 'Available' : app.state === 'enabled' ? 'Enabled' : app.state === 'disabled' ? 'Disabled' : 'Installed';
       const stateCls = 'mp-state-' + app.state;
 
@@ -7978,6 +7983,9 @@ function mpLoad() {
             : app.state === 'enabled'
               ? '<button class="btn btn-sm mp-disable-btn" data-slug="' + esc(app.slug) + '">Disable</button>'
               : '<button class="btn btn-sm btn-primary mp-enable-btn" data-slug="' + esc(app.slug) + '">Enable</button>') +
+          (hasUpdate
+            ? '<button class="btn btn-sm mp-update-btn" data-slug="' + esc(app.slug) + '" style="border-color:var(--accent);color:var(--accent)">Update to v' + esc(updateMap[app.slug]) + '</button>'
+            : '') +
           (!isAvailable && app.state !== 'enabled'
             ? '<button class="btn btn-sm btn-ghost mp-uninstall-btn" data-slug="' + esc(app.slug) + '">Uninstall</button>'
             : '') +
@@ -7987,6 +7995,13 @@ function mpLoad() {
     });
 
     // Bind actions
+    grid.querySelectorAll('.mp-update-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.disabled = true;
+        btn.textContent = 'Updating...';
+        mpAction(btn.dataset.slug, 'update');
+      });
+    });
     grid.querySelectorAll('.mp-install-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         btn.disabled = true;

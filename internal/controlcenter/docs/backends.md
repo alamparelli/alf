@@ -6,7 +6,7 @@ order: 4
 
 # LLM Backends
 
-ALF can use different AI providers beyond Claude. You can connect services like OpenRouter (access to 200+ models), OpenAI (GPT-4), or Ollama (free local models) - and use them alongside Claude.
+ALF can use different AI providers beyond Claude. You can connect services like OpenRouter (access to 200+ models), OpenAI (GPT-4), Ollama (free local models), or OpenAI Codex (agentic coding CLI) - and use them alongside Claude.
 
 ## Quick Setup
 
@@ -41,6 +41,7 @@ The daemon loads API keys from the vault automatically — no restart needed aft
 | OpenRouter | `https://openrouter.ai/api/v1` | bearer | Access to 200+ models via single key |
 | OpenAI | `https://api.openai.com/v1` | bearer | GPT-4o, o1, o3, etc. |
 | Ollama | `http://host.docker.internal:11434/v1` | none | Local models, no API key needed |
+| Codex | — (CLI provider) | API key | GPT-5-codex via `codex exec` — see docs:codex-setup |
 
 ## Backend Config Fields
 
@@ -61,6 +62,7 @@ API keys are stored in the vault with the naming convention `<backend_name>_api_
 
 - `openrouter_api_key` → OpenRouter
 - `openai_api_key` → OpenAI
+- `codex_api_key` → OpenAI Codex
 - `custom_name_api_key` → custom backend named "custom_name"
 
 Add keys via the **Vault** tab → **Secrets** → **Add** in the Control Center.

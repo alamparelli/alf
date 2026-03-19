@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -16,8 +17,9 @@ import (
 )
 
 const (
-	maxBodySize  = 1 << 20 // 1 MB
-	maxBatchSize = 100
+	maxBodySize     = 1 << 20 // 1 MB
+	maxBatchSize    = 100
+	maxInstances    = 50
 )
 
 type server struct {
@@ -80,13 +82,23 @@ func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Secret != s.secret {
+	if subtle.ConstantTimeCompare([]byte(req.Secret), []byte(s.secret)) != 1 {
 		http.Error(w, "invalid secret", http.StatusUnauthorized)
 		return
 	}
 	if req.InstanceID == "" {
 		http.Error(w, "instance_id required", http.StatusBadRequest)
 		return
+	}
+
+	// Check instance cap (re-registration of existing ID is always allowed).
+	if _, exists := s.tokens.Load(req.InstanceID); !exists {
+		count := 0
+		s.tokens.Range(func(_, _ any) bool { count++; return true })
+		if count >= maxInstances {
+			http.Error(w, "max instances reached", http.StatusTooManyRequests)
+			return
+		}
 	}
 
 	token := generateToken()
@@ -207,11 +219,10 @@ func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		valid := false
 		s.tokens.Range(func(_, v any) bool {
-			if v.(string) == token {
+			if subtle.ConstantTimeCompare([]byte(v.(string)), []byte(token)) == 1 {
 				valid = true
-				return false
 			}
-			return true
+			return true // always iterate all entries to prevent timing leak
 		})
 
 		if !valid {

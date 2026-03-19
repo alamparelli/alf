@@ -91,7 +91,7 @@ func (e *HTTPEmbedder) register() error {
 		return fmt.Errorf("register: invalid shared secret")
 	}
 	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		return fmt.Errorf("register: unexpected status %d: %s", resp.StatusCode, respBody)
 	}
 
@@ -217,11 +217,11 @@ func (e *HTTPEmbedder) rawRequest(path string, body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("embed service not ready (503)")
 	}
 	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		return nil, fmt.Errorf("embed: status %d: %s", resp.StatusCode, respBody)
 	}
 
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, 4<<20)) // 4 MB max
 }
 
 type embedAuthError struct{}

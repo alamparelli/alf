@@ -947,6 +947,12 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .chat-bubble.user :not(pre) > code { background: rgba(0,0,0,0.15); }
 .chat-bubble p { margin: 4px 0; }
 .chat-bubble ul, .chat-bubble ol { margin: 4px 0; padding-left: 20px; }
+.chat-bubble table { border-collapse: collapse; font-size: 0.85rem; margin: 6px 0; }
+.chat-bubble th, .chat-bubble td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
+.chat-bubble th { background: var(--bg-input); font-weight: 600; font-size: 0.8rem; }
+.chat-bubble a { color: var(--accent); text-decoration: none; }
+.chat-bubble a:hover { text-decoration: underline; }
+.chat-bubble blockquote { border-left: 3px solid var(--accent); padding: 6px 12px; margin: 6px 0; color: var(--text-dim); background: var(--bg-input); border-radius: 0 4px 4px 0; }
 
 /* Reactions */
 .chat-reactions { display: inline-flex; gap: 2px; margin-left: 4px; }

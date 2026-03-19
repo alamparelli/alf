@@ -94,8 +94,13 @@ func (s *fileTierStore) Reload() error {
 	return nil
 }
 
-// TiersPath returns the standard tiers.json path for a config directory.
+// TiersPath returns the default tiers path for a config directory.
+// Prefers tiers/claude.json (new convention), falls back to tiers.json (legacy).
 func TiersPath(configDir string) string {
+	newPath := filepath.Join(configDir, "tiers", "claude.json")
+	if _, err := os.Stat(newPath); err == nil {
+		return newPath
+	}
 	return filepath.Join(configDir, "tiers.json")
 }
 

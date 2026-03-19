@@ -74,12 +74,27 @@ func linkSystemTools(toolsDir, srcDir string) {
 	os.Chmod(toolsDir, 0o755)
 }
 
-// seedDefaultTiers copies /opt/alf/defaults/tiers.json into the config dir
-// if no user tiers.json exists yet.
+// seedDefaultTiers copies /opt/alf/defaults/tiers.json into config.d/tiers/claude.json
+// if no tiers profiles exist yet. Also migrates legacy config.d/tiers.json to the new location.
 func seedDefaultTiers(configDir string) {
-	dest := cc.TiersPath(configDir)
+	tiersDir := filepath.Join(configDir, "tiers")
+	os.MkdirAll(tiersDir, 0o755)
+
+	dest := filepath.Join(tiersDir, "claude.json")
+
+	// Migrate legacy config.d/tiers.json → config.d/tiers/claude.json
+	legacyPath := filepath.Join(configDir, "tiers.json")
+	if _, err := os.Stat(legacyPath); err == nil {
+		if _, err := os.Stat(dest); os.IsNotExist(err) {
+			if data, err := os.ReadFile(legacyPath); err == nil {
+				os.WriteFile(dest, data, 0o644)
+				log.Printf("seed-tiers: migrated %s → %s", legacyPath, dest)
+			}
+		}
+	}
+
 	if _, err := os.Stat(dest); err == nil {
-		return // user file already exists
+		return // already exists
 	}
 	const defaultPath = "/opt/alf/defaults/tiers.json"
 	data, err := os.ReadFile(defaultPath)

@@ -410,7 +410,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 		configChanged = true
 	}
 
-	// Write tiers.json from preset.
+	// Write tiers config from preset into config.d/tiers/<name>.json and switch to it.
 	tiersChanged := false
 	if req.PresetID != "" {
 		preset, err := h.findPreset(req.PresetID)
@@ -425,11 +425,33 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 			tc.DefaultFallback = preset.RouterConfig.DefaultFallback
 			tc.RouterDistinctions = preset.RouterConfig.Distinctions
 		}
-		if err := h.TierStore.Save(tc); err != nil {
-			http.Error(w, jsonErr("failed to save tiers: "+err.Error()), http.StatusInternalServerError)
+
+		// Save as named profile in tiers/ subdirectory.
+		tiersDir := filepath.Join(h.ConfigDir, "tiers")
+		os.MkdirAll(tiersDir, 0o755)
+		profileName := preset.ID + ".json"
+		profilePath := filepath.Join(tiersDir, profileName)
+		data, _ := json.MarshalIndent(tc, "", "  ")
+		if err := os.WriteFile(profilePath, data, 0o644); err != nil {
+			http.Error(w, jsonErr("failed to save tier profile: "+err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		// Update tiers_file in config.json to point to the new profile.
+		if tierCfg, err := h.ConfigStore.Load(); err == nil {
+			tierCfg.TiersFile = profileName
+			if err := h.ConfigStore.Save(tierCfg); err != nil {
+				log.Printf("[setup] warning: failed to update tiers_file in config: %v", err)
+			}
+		}
+
+		// Switch the tier store to the new profile.
+		if err := h.TierStore.SetPath(profilePath); err != nil {
+			http.Error(w, jsonErr("failed to switch tiers: "+err.Error()), http.StatusInternalServerError)
 			return
 		}
 		tiersChanged = true
+		log.Printf("[setup] tier profile %s saved and activated", profileName)
 	}
 
 	// Notify daemon for hot-reload.

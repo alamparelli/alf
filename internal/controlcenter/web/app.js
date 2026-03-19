@@ -5022,7 +5022,7 @@ function tiersShowModal(tier) {
     (alfChecks ? '<div class="tier-tools-group-label">ALF tools</div>' + alfChecks : '');
 
   const effortOpts = ['', ...EFFORTS].map(e => '<option value="' + e + '"' + (t.effort === e ? ' selected' : '') + '>' + (e || '-') + '</option>').join('');
-  const backendOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((t.backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
+  const backendOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((t.backend || '') === b ? ' selected' : '') + '>' + (b || 'claude (default)') + '</option>').join('');
   // Initial model field: temporary placeholder, will be populated by fetchBackendModels after modal renders
   const modelPlaceholder = '<input type="text" id="tfModel" value="' + esc(t.model) + '" placeholder="Loading...">';
 
@@ -5048,7 +5048,7 @@ function tiersShowModal(tier) {
         '</div>' +
         '<div class="form-row"><label>System prompt</label><textarea id="tfSystemPrompt" class="input tier-label-textarea" rows="3" placeholder="Extra instructions prepended for this tier (optional)">' + esc(t.system_prompt || '') + '</textarea></div>' +
         '<div class="tier-tools-section">' +
-          '<div class="tier-tools-header">Tools <span class="tier-tools-hint">(CLI tools for Claude CLI tiers, ALF tools for API tiers with tool loop)</span></div>' +
+          '<div class="tier-tools-header">Tools <span class="tier-tools-hint">(CLI tools for Claude tiers, ALF tools for API tiers with tool loop)</span></div>' +
           '<div class="tier-tools-list" id="tfTools">' + toolChecks + '</div>' +
         '</div>' +
       '</div>' +
@@ -5089,7 +5089,7 @@ function tiersShowModal(tier) {
     const cliGroupLabel = document.querySelector('.tier-tools-group-label');
     if (cliGroupLabel && cliGroupLabel.textContent === 'CLI tools') cliGroupLabel.style.display = isCLI ? '' : 'none';
     const hint = document.querySelector('.tier-tools-hint');
-    if (hint) hint.textContent = isCLI ? 'CLI tools for Claude CLI tiers' : 'ALF tools for API tiers with tool loop';
+    if (hint) hint.textContent = isCLI ? 'CLI tools for Claude tiers' : 'ALF tools for API tiers with tool loop';
     const wcLabel = document.getElementById('tfWriteCapableLabel');
     if (wcLabel) wcLabel.style.display = isCLI ? '' : 'none';
     const effortRow = document.getElementById('tfEffortRow');
@@ -5163,7 +5163,7 @@ function tiersShowRouterModal() {
 
   const c = tiersCache;
   const fbOpts = (c.tiers || []).map(t => '<option value="' + t.name + '"' + (c.default_fallback === t.name ? ' selected' : '') + '>' + t.name + '</option>').join('');
-  const rbOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((c.router_backend || '') === b ? ' selected' : '') + '>' + (b || 'cli (default)') + '</option>').join('');
+  const rbOpts = BACKENDS.map(b => '<option value="' + b + '"' + ((c.router_backend || '') === b ? ' selected' : '') + '>' + (b || 'claude (default)') + '</option>').join('');
   const modelPlaceholder = '<input type="text" id="trModel" value="' + esc(c.router_model || '') + '" placeholder="Loading...">';
 
   const html = '<div class="modal-backdrop" id="tierRouterModal">' +
@@ -5363,7 +5363,10 @@ function showSetupWizard(status) {
 
   // --- Step 0: Backend Selection (pick which backends) ---
   const backendDefs = [
-    { id: 'claude', name: 'Claude CLI', desc: 'Anthropic via local CLI', fields: [] },
+    { id: 'claude', name: 'Claude', desc: 'Anthropic via local CLI', fields: [] },
+    { id: 'codex', name: 'OpenAI Codex', desc: 'OpenAI via local CLI', fields: [
+      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-...' }
+    ]},
     { id: 'openrouter', name: 'OpenRouter', desc: 'Multi-model gateway', fields: [
       { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'sk-or-...' }
     ]},
@@ -5703,13 +5706,13 @@ function showSetupWizard(status) {
         if (r.authenticated) {
           el.insertAdjacentHTML('beforeend',
             '<div class="setup-apply-info">' +
-            '<strong>Claude CLI</strong> - authenticated. ' +
+            '<strong>Claude</strong> - authenticated. ' +
             'Use the <a href="#" onclick="event.preventDefault();navigateTo(\'terminal\');" style="color:var(--accent)">Terminal</a> tab to interact with Claude directly.' +
             '</div>');
         } else {
           el.insertAdjacentHTML('beforeend',
             '<div class="setup-apply-warning">' +
-            '<strong>Claude CLI not authenticated</strong><br>' +
+            '<strong>Claude not authenticated</strong><br>' +
             'After setup, open the <a href="#" onclick="event.preventDefault();navigateTo(\'terminal\');" style="color:var(--accent)">Terminal</a> tab and run <code>claude login</code> to connect your Anthropic account.' +
             '</div>');
         }
@@ -7524,7 +7527,7 @@ async function vaultDeleteFile(name) {
   // Populate backend/model on page load.
   function initSkillStore() {
     backendSelect.innerHTML = BACKENDS.map(b =>
-      '<option value="' + b + '">' + (b || 'cli (default)') + '</option>'
+      '<option value="' + b + '">' + (b || 'claude (default)') + '</option>'
     ).join('');
     // Restore saved preferences.
     let savedPrefs = null;

@@ -27,8 +27,7 @@
           "query": { "type": "string", "description": "Search query (search)" },
           "days": { "type": "integer", "description": "Days to reflect on (reflect, default 7)" }
         },
-        "required": ["action"],
-        "x-positional": ["action"]
+        "required": ["action"]
       }
     }
   ]

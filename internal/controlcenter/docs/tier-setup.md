@@ -1,6 +1,6 @@
 ---
 category: Configuration
-tags: tiers, routing, models, haiku, sonnet, opus
+tags: tiers, routing, models, haiku, sonnet, opus, backends, codex
 order: 2
 ---
 
@@ -187,6 +187,29 @@ The lock clears automatically when:
 - The session times out (default: 30 minutes of inactivity)
 - You use a different force command (switches to the new tier)
 
+## Backend types
+
+ALF supports three types of backends for tiers. Each has different capabilities:
+
+| | Claude (CLI) | API backends | Codex (CLI) |
+|---|---|---|---|
+| **How it runs** | `claude -p` subprocess | HTTP API calls | `codex exec` subprocess |
+| **Examples** | Default backend | OpenRouter, OpenAI, Ollama | OpenAI Codex CLI |
+| **`backend` value** | `""` or `"cli"` | `"openrouter"`, `"openai"`, etc. | `"codex"` |
+| **`effort` field** | Yes (`low`/`medium`/`high`) | Ignored | Ignored |
+| **`write_capable`** | Controls `--tools` whitelist | Controls tool availability | Ignored (always full-auto sandbox) |
+| **`tools` field** | Managed by Claude Code | `["*"]`, `["*native"]`, or explicit list | Ignored (sandbox-based) |
+| **System prompts** | `--system-prompt` flag | API system message | Prepended to user prompt |
+| **Thinking events** | Yes (visible in UI) | No | No |
+| **Cost tracking** | Yes | Token counts only | Token counts only |
+| **Session resume** | `--resume <id>` | Conversation history | Not yet supported |
+
+When configuring tiers, the fields that matter depend on the backend:
+
+- **Claude tiers** — all fields apply. See examples throughout this doc.
+- **API tiers** — `effort` is ignored, `tools` uses ALF's tool loop. See [LLM Backends](docs:backends).
+- **Codex tiers** — `effort`, `tools`, and `write_capable` are ignored. Codex runs in `--full-auto` mode with workspace-write sandbox. See [OpenAI Codex](docs:codex-setup).
+
 ## Available tools
 
 The `tools` field controls which tools are available to a tier. Behavior differs between CLI and API backends.
@@ -351,5 +374,7 @@ See [Configuration Reference](docs:config) for all `config.json` fields.
 ## What's next?
 
 - [Getting Started](docs:getting-started) - ALF setup and overview
+- [LLM Backends](docs:backends) - connect OpenRouter, OpenAI, Ollama, and other API providers
+- [OpenAI Codex](docs:codex-setup) - set up Codex as an alternative CLI backend
 - [Agent Teams](docs:agent-teams) - coordinate multiple agents for complex tasks
 - [Creating Skills](docs:creating-skills) - teach ALF new abilities with auto-injection

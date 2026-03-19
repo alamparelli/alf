@@ -166,6 +166,8 @@ func (h *TierConfigsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleList(w, r)
 	case path == "switch" && r.Method == http.MethodPost:
 		h.handleSwitch(w, r)
+	case path == "duplicate" && r.Method == http.MethodPost:
+		h.handleDuplicate(w, r)
 	default:
 		methodNotAllowed(w)
 	}
@@ -257,5 +259,48 @@ func (h *TierConfigsHandler) handleSwitch(w http.ResponseWriter, r *http.Request
 	}
 
 	log.Printf("[tiers] switched to %s", req.Name)
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (h *TierConfigsHandler) handleDuplicate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Source string `json:"source"` // e.g. "claude.json"
+		Name   string `json:"name"`   // e.g. "claude-copy.json"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Source == "" || req.Name == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "source and name required"})
+		return
+	}
+	for _, n := range []string{req.Source, req.Name} {
+		if strings.Contains(n, "/") || strings.Contains(n, "..") || !strings.HasSuffix(n, ".json") {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			return
+		}
+	}
+
+	tiersDir := filepath.Join(h.ConfigDir, "tiers")
+	srcPath := filepath.Join(tiersDir, req.Source)
+	dstPath := filepath.Join(tiersDir, req.Name)
+
+	if _, err := os.Stat(srcPath); err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "source not found"})
+		return
+	}
+	if _, err := os.Stat(dstPath); err == nil {
+		respondJSON(w, http.StatusConflict, map[string]string{"error": "name already exists"})
+		return
+	}
+
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "read source: " + err.Error()})
+		return
+	}
+	if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write copy: " + err.Error()})
+		return
+	}
+
+	log.Printf("[tiers] duplicated %s → %s", req.Source, req.Name)
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

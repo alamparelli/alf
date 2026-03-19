@@ -4892,6 +4892,7 @@ function tiersInit() {
     tiersInitialized = true;
     document.getElementById('tiersAddBtn').addEventListener('click', () => tiersShowModal(null));
     document.getElementById('tiersConfigSelect').addEventListener('change', tiersConfigSwitch);
+    document.getElementById('tiersDuplicateBtn').addEventListener('click', tiersConfigDuplicate);
   }
   tiersLoad();
   tiersConfigsLoad();
@@ -4940,6 +4941,27 @@ async function tiersConfigSwitch() {
   } catch (err) {
     alert('Switch failed: ' + (err?.error || err?.message || 'unknown'));
     tiersConfigsLoad();
+  }
+}
+
+async function tiersConfigDuplicate() {
+  const select = document.getElementById('tiersConfigSelect');
+  const current = select.value;
+  if (!current) return;
+  const baseName = current.replace('.json', '');
+  const newName = prompt('New config name:', baseName + '-copy');
+  if (!newName || !newName.trim()) return;
+  const safeName = newName.trim().replace(/[^a-zA-Z0-9_-]/g, '-');
+  try {
+    await api('/api/tiers/configs/duplicate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: current, name: safeName + '.json' })
+    });
+    toast('Duplicated as ' + safeName);
+    tiersConfigsLoad();
+  } catch (err) {
+    toast('Duplicate failed: ' + (err?.error || err?.message || 'unknown'), 'error');
   }
 }
 

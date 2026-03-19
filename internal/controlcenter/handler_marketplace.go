@@ -23,6 +23,13 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET /api/marketplace/updates → check for available updates
+	if r.Method == http.MethodGet && path == "updates" {
+		updates := h.Manager.CheckUpdates()
+		respondJSON(w, http.StatusOK, updates)
+		return
+	}
+
 	// GET /api/marketplace/catalog → list remote registry apps
 	if r.Method == http.MethodGet && path == "catalog" {
 		remote, err := h.Manager.FetchCatalog()
@@ -53,6 +60,8 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "install":
 		err = h.Manager.Install(slug)
+	case "update":
+		err = h.Manager.Update(slug)
 	case "enable":
 		err = h.Manager.Enable(slug)
 	case "disable":

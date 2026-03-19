@@ -52,6 +52,18 @@ if [ -f "$RUNTIME" ]; then
     fi
 fi
 
+# Phase 1c: Install npm global packages (if runtime is node and npm-global.txt exists).
+NPM_GLOBAL="/opt/alf/config.d/npm-global.txt"
+if [ -f "$NPM_GLOBAL" ] && command -v npm >/dev/null 2>&1; then
+    STAMP="/tmp/.npm-global-stamp"
+    if [ ! -f "$STAMP" ] || ! cmp -s "$NPM_GLOBAL" "$STAMP"; then
+        echo "entrypoint: installing npm global packages ..."
+        grep -vE '^\s*#|^\s*$' "$NPM_GLOBAL" | xargs -r npm i -g --silent \
+            || echo "entrypoint: WARNING - npm global install failed, continuing"
+        cp "$NPM_GLOBAL" "$STAMP"
+    fi
+fi
+
 # Phase 2: Run user bootstrap as alf (legacy — deprecated).
 # Use services.d/ for persistent processes and bash tool calls for one-time setup.
 if [ -f "$BOOTSTRAP" ]; then

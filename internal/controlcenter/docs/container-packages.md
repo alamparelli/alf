@@ -190,8 +190,7 @@ Add one Debian package name per line. Installed as root at startup, only when th
 
 ```
 jq
-imagemagick
-pandoc
+ffmpeg
 ```
 
 Edit via: Workspace Explorer > `config.d/packages.txt`, then `alf restart`.

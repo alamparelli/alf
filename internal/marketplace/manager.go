@@ -410,3 +410,125 @@ func (m *Manager) httpGet(url, dst string) error {
 	_, err = io.Copy(f, io.LimitReader(resp.Body, 256<<20)) // 256MB max
 	return err
 }
+
+// --- Auto-update ---
+
+// UpdateInfo describes an app with a newer version available remotely.
+type UpdateInfo struct {
+	Slug          string `json:"slug"`
+	Name          string `json:"name"`
+	LocalVersion  string `json:"local_version"`
+	RemoteVersion string `json:"remote_version"`
+}
+
+// CheckUpdates compares local app versions against the remote catalog.
+// Returns a list of apps that have a newer version available.
+func (m *Manager) CheckUpdates() []UpdateInfo {
+	if m.registryURL == "" {
+		return nil
+	}
+
+	catalog, err := m.FetchCatalog()
+	if err != nil || len(catalog) == 0 {
+		return nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var updates []UpdateInfo
+	for _, remote := range catalog {
+		state, ok := m.states[remote.Slug]
+		if !ok {
+			continue
+		}
+		// Only check installed or enabled apps, skip disabled/available.
+		if state != StateInstalled && state != StateEnabled {
+			continue
+		}
+
+		manifest, err := m.loadManifest(remote.Slug)
+		if err != nil {
+			continue
+		}
+
+		if remote.Version > manifest.Version {
+			updates = append(updates, UpdateInfo{
+				Slug:          remote.Slug,
+				Name:          remote.Name,
+				LocalVersion:  manifest.Version,
+				RemoteVersion: remote.Version,
+			})
+		}
+	}
+
+	return updates
+}
+
+// Update re-downloads an app from the registry, preserving its data/ directory
+// and current state (enabled/installed).
+func (m *Manager) Update(slug string) error {
+	if m.registryURL == "" {
+		return fmt.Errorf("no registry configured")
+	}
+
+	m.mu.Lock()
+	prevState, hasState := m.states[slug]
+	m.mu.Unlock()
+
+	if !hasState {
+		return fmt.Errorf("app %q is not installed", slug)
+	}
+
+	appDir := filepath.Join(m.dataDir, "apps", slug)
+
+	// Remove everything except data/ (preserve user data).
+	entries, err := os.ReadDir(appDir)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read app dir: %w", err)
+	}
+	for _, e := range entries {
+		if e.Name() == "data" {
+			continue
+		}
+		os.RemoveAll(filepath.Join(appDir, e.Name()))
+	}
+
+	// Re-download from registry (same logic as Install).
+	os.MkdirAll(appDir, 0o755)
+
+	if err := m.downloadFile(slug, "manifest", filepath.Join(appDir, "manifest.json")); err != nil {
+		return fmt.Errorf("download manifest: %w", err)
+	}
+
+	arch := runtime.GOARCH
+	binDir := filepath.Join(appDir, "bin")
+	os.MkdirAll(binDir, 0o755)
+	binPath := filepath.Join(binDir, slug)
+	if err := m.downloadBinary(slug, arch, binPath); err != nil {
+		os.Remove(binPath)
+	} else {
+		os.Chmod(binPath, 0o755)
+	}
+
+	webFiles := []string{"index.html", "app.json"}
+	for _, f := range webFiles {
+		dst := filepath.Join(appDir, f)
+		if err := m.downloadWebAsset(slug, f, dst); err != nil {
+			continue
+		}
+	}
+
+	// Restore previous state.
+	m.mu.Lock()
+	m.states[slug] = prevState
+	m.saveState()
+	m.mu.Unlock()
+
+	// If the app was enabled, re-enable to refresh symlinks/schemas.
+	if prevState == StateEnabled {
+		return m.Enable(slug)
+	}
+
+	return nil
+}

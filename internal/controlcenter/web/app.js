@@ -5940,9 +5940,11 @@ function showSetupWizard(status) {
 loadStatus();
 loadTeachTiers();
 loadApps();
+mpCheckBadge();
 wsInit();
 setInterval(loadStatus, 30000);
 setInterval(loadApps, 30000);
+setInterval(mpCheckBadge, 60000);
 
 // --- Firewall ---
 let fwInitialized = false;
@@ -8035,9 +8037,18 @@ function mpAction(slug, action) {
       toast(slug + ' ' + action + 'd', 'success');
       mpLoad();
       loadApps(); // refresh sidebar
+      mpCheckBadge();
     })
     .catch(e => {
       toast((e && e.error) || 'Action failed', 'error');
     });
+}
+
+// Badge: red dot on Marketplace nav when updates are available.
+function mpCheckBadge() {
+  api('/api/marketplace/updates').then(function(updates) {
+    var navEl = document.querySelector('#navGrid .nav-item[data-view="marketplace"]');
+    if (navEl) navEl.classList.toggle('has-badge', updates && updates.length > 0);
+  }).catch(function() {});
 }
 

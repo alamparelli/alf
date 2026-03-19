@@ -371,38 +371,33 @@ func main() {
 		log.Println("voice transcription disabled (WHISPER_URL or WHISPER_SHARED_SECRET not set)")
 	}
 
-	// ONNX embedding engine (Go native, no Python sidecar).
-	modelDir := "/opt/alf/models/multilingual-e5-small"
+	// Embedding engine: resolve from tier config or EMBED_URL env (sidecar container).
 	var memDB *memstore.Store
 	if !cfg.EffectiveMemoryEnabled() {
 		log.Println("memstore: disabled by config (memory_enabled=false)")
-	} else if memstore.IsAvailable(modelDir) {
-		embedder, err := memstore.NewEmbedder(modelDir)
-		if err != nil {
-			log.Printf("memstore: embedder disabled: %v", err)
-		} else {
-			if err := embedder.Start(); err != nil {
-				log.Printf("memstore: embedder start failed: %v", err)
-			} else {
-				defer embedder.Stop()
-			}
-
-			dedupCfg := memstore.DedupConfig{
-				TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
-				CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
-			}
-			memDB, err = memstore.New(filepath.Join(contextDir, "memory.db"), embedder, dedupCfg)
-			if err != nil {
-				log.Printf("warning: memory store init failed: %v", err)
-			} else {
-				defer memDB.Close()
-				sockPath := filepath.Join(contextDir, "memstore.sock")
-				go memDB.ServeUnix(sockPath)
-				log.Printf("memstore: ready (db=%s, socket=%s)", filepath.Join(contextDir, "memory.db"), sockPath)
+	} else {
+		embedder := resolveEmbedder(tierStore)
+		if embedder != nil {
+			if stopper, ok := embedder.(interface{ Stop() }); ok {
+				defer stopper.Stop()
 			}
 		}
-	} else {
-		log.Println("memstore: embedder disabled (model files not found)")
+
+		dedupCfg := memstore.DedupConfig{
+			TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
+			CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
+		}
+		var err error
+		memDB, err = memstore.New(filepath.Join(contextDir, "memory.db"), embedder, dedupCfg)
+		if err != nil {
+			log.Printf("warning: memory store init failed: %v", err)
+		} else {
+			defer memDB.Close()
+			memDB.CheckDims()
+			sockPath := filepath.Join(contextDir, "memstore.sock")
+			go memDB.ServeUnix(sockPath)
+			log.Printf("memstore: ready (db=%s, socket=%s)", filepath.Join(contextDir, "memory.db"), sockPath)
+		}
 	}
 
 	// Ring buffer tracking Alf's sent message IDs for reaction matching.
@@ -1583,4 +1578,47 @@ func main() {
 			}()
 		}
 	}
+}
+
+// resolveEmbedder picks the best available embedder implementation.
+// Priority: 1) tier profile embedding.url, 2) EMBED_URL env, 3) nil (FTS5-only).
+func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
+	// 1. From active tier profile.
+	if tc := tierStore.Current(); tc != nil && tc.Embedding != nil && tc.Embedding.URL != "" {
+		instanceID, _ := os.Hostname()
+		secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
+		emb := memstore.NewHTTPEmbedder(tc.Embedding.URL, instanceID, secret, 30*time.Second)
+		go startHTTPEmbedder(emb)
+		log.Printf("memstore: using HTTP embedder from tier config (url=%s)", tc.Embedding.URL)
+		return emb
+	}
+
+	// 2. From env var (embed sidecar container, same pattern as whisper).
+	if url := os.Getenv("EMBED_URL"); url != "" {
+		instanceID, _ := os.Hostname()
+		secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
+		emb := memstore.NewHTTPEmbedder(url, instanceID, secret, 30*time.Second)
+		go startHTTPEmbedder(emb)
+		log.Printf("memstore: using HTTP embedder (url=%s)", url)
+		return emb
+	}
+
+	// 3. Disabled — no embed service configured.
+	log.Println("memstore: embedder disabled (EMBED_URL not set)")
+	return nil
+}
+
+// startHTTPEmbedder registers with the embed service, retrying up to 30 times.
+// Falls back to FTS5-only search if embed service is unavailable.
+func startHTTPEmbedder(emb *memstore.HTTPEmbedder) {
+	for attempt := 1; attempt <= 30; attempt++ {
+		if err := emb.Start(); err == nil {
+			return
+		} else if attempt <= 3 || attempt%10 == 0 {
+			// Log first 3 attempts and then every 10th to reduce noise.
+			log.Printf("embed: registration attempt %d/30 failed: %v", attempt, err)
+		}
+		time.Sleep(10 * time.Second)
+	}
+	log.Println("embed: gave up registering after 30 attempts — falling back to FTS5-only search")
 }

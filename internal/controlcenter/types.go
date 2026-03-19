@@ -198,13 +198,20 @@ func (t Tier) RouterDescription() string {
 	return t.RouterLabel
 }
 
+// EmbeddingConfig defines the embedding service for semantic memory search.
+type EmbeddingConfig struct {
+	URL   string `json:"url,omitempty"`   // e.g. "http://embed:8090" or vault-proxy URL
+	Model string `json:"model,omitempty"` // for external APIs: "text-embedding-3-small"
+}
+
 // TiersConfig wraps a list of tiers plus router-level settings.
 type TiersConfig struct {
-	Tiers              []Tier `json:"tiers"`
-	RouterModel        string `json:"router_model,omitempty"`
-	DefaultFallback    string `json:"default_fallback,omitempty"`
-	RouterDistinctions string `json:"router_distinctions,omitempty"`
-	RouterBackend      string `json:"router_backend,omitempty"` // "cli" (default), or registered backend name
+	Tiers              []Tier           `json:"tiers"`
+	RouterModel        string           `json:"router_model,omitempty"`
+	DefaultFallback    string           `json:"default_fallback,omitempty"`
+	RouterDistinctions string           `json:"router_distinctions,omitempty"`
+	RouterBackend      string           `json:"router_backend,omitempty"` // "cli" (default), or registered backend name
+	Embedding          *EmbeddingConfig `json:"embedding,omitempty"`
 }
 
 // DefaultTiersConfig returns a TiersConfig parsed from the embedded defaults/tiers.json.

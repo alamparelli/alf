@@ -24,6 +24,7 @@ var bundledAgentsFS embed.FS
 type ComposeData struct {
 	Image         string   // Docker image (default: ghcr.io/alamparelli/alf:latest)
 	WhisperImage  string   // Whisper image (default: ghcr.io/alamparelli/whisper-service:latest)
+	EmbedImage    string   // Embed service image (default: ghcr.io/alamparelli/embed-service:latest)
 	CCPort        string
 	CCExternalURL string
 	EnableHTTPS   bool
@@ -42,6 +43,9 @@ func RenderDockerCompose(dir string, data ComposeData) error {
 	}
 	if data.WhisperImage == "" {
 		data.WhisperImage = "ghcr.io/alamparelli/whisper-service:latest"
+	}
+	if data.EmbedImage == "" {
+		data.EmbedImage = "ghcr.io/alamparelli/embed-service:latest"
 	}
 	src, err := templateFS.ReadFile("templates/docker-compose.yml.tmpl")
 	if err != nil {

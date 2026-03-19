@@ -694,4 +694,108 @@ func TestServerInvalidJSON(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Mock embedder for Store tests
+// ---------------------------------------------------------------------------
+
+type mockEmbedder struct {
+	dims   int
+	ready  bool
+	embeds int // count of Embed calls
+}
+
+func (m *mockEmbedder) Embed(text string) ([]float32, error) {
+	m.embeds++
+	vec := make([]float32, m.dims)
+	// Deterministic embedding based on text content (not just length).
+	var hash uint32
+	for _, c := range text {
+		hash = hash*31 + uint32(c)
+	}
+	for i := range vec {
+		hash = hash*1103515245 + 12345
+		vec[i] = float32(int32(hash)) / float32(1<<31)
+	}
+	return vec, nil
+}
+
+func (m *mockEmbedder) EmbedQuery(text string) ([]float32, error) {
+	return m.Embed(text)
+}
+
+func (m *mockEmbedder) EmbedBatch(texts []string) ([][]float32, error) {
+	vecs := make([][]float32, len(texts))
+	for i, t := range texts {
+		v, _ := m.Embed(t)
+		vecs[i] = v
+	}
+	return vecs, nil
+}
+
+func (m *mockEmbedder) IsReady() bool { return m.ready }
+func (m *mockEmbedder) Dims() int     { return m.dims }
+
+func newTestStoreWithEmbedder(t *testing.T) (*Store, *mockEmbedder) {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test_memory.db")
+
+	emb := &mockEmbedder{dims: 384, ready: true}
+	store, err := New(dbPath, emb)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store, emb
+}
+
+func TestStoreWithMockEmbedder(t *testing.T) {
+	s, emb := newTestStoreWithEmbedder(t)
+
+	id, err := s.Store("test memory with embedder", "fact", "test", nil)
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if id <= 0 {
+		t.Fatal("expected positive ID")
+	}
+
+	// Embed should have been called (once for dedup check + once for insert).
+	if emb.embeds < 1 {
+		t.Fatalf("expected embed calls, got %d", emb.embeds)
+	}
+}
+
+func TestStoreSearchWithMockEmbedder(t *testing.T) {
+	s, _ := newTestStoreWithEmbedder(t)
+
+	s.Store("Go programming language is great for systems", "fact", "test", nil)
+	s.Store("Python is popular for data science", "fact", "test", nil)
+
+	results, err := s.Search("programming", 5)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	// With mock embedder, KNN should return results (not FTS5 fallback).
+	if len(results) == 0 {
+		t.Fatal("expected search results with mock embedder")
+	}
+}
+
+func TestSetEmbedder(t *testing.T) {
+	s := newTestStore(t) // starts with nil embedder
+
+	emb := &mockEmbedder{dims: 384, ready: true}
+	s.SetEmbedder(emb)
+
+	// Now Store should use the embedder.
+	_, err := s.Store("fact after embedder swap", "fact", "test", nil)
+	if err != nil {
+		t.Fatalf("Store after SetEmbedder: %v", err)
+	}
+	if emb.embeds < 1 {
+		t.Fatal("expected embed calls after SetEmbedder")
+	}
+}
+
 // Extractor tests are in extractor_test.go

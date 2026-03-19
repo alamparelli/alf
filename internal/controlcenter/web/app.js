@@ -5398,6 +5398,9 @@ function showSetupWizard(status) {
       if (b.id === 'claude') {
         html += '<div class="setup-claude-status pending" id="setupClaudeStatus">Checking...</div>';
       }
+      if (b.id === 'codex') {
+        html += '<div class="setup-claude-status pending" id="setupCodexStatus">Checking...</div>';
+      }
       html += '</div>';
     });
     html += '</div>';
@@ -5430,6 +5433,13 @@ function showSetupWizard(status) {
         }
       }
     }).catch(() => {});
+
+    // Codex auth hint
+    const cxs = document.getElementById('setupCodexStatus');
+    if (cxs) {
+      cxs.innerHTML = 'API key <em>or</em> <code>codex login --device-auth</code> in Terminal';
+      cxs.className = 'setup-claude-status pending';
+    }
   }
 
   // --- Step 0b: Backend Config (configure selected backends) ---

@@ -15,9 +15,12 @@ type Sender interface {
 	SendMessage(chatID int64, text string) error
 }
 
+// Notifier broadcasts a message to all configured channels.
+type Notifier func(text string)
+
 // Request is the JSON protocol from CLI tool → daemon.
 type Request struct {
-	Action string `json:"action"` // "react" | "status"
+	Action string `json:"action"` // "react" | "status" | "notify"
 	Emoji  string `json:"emoji,omitempty"`
 	Text   string `json:"text,omitempty"`
 }
@@ -33,6 +36,7 @@ type Server struct {
 	TG        Sender
 	ChatID    int64
 	MessageID int64
+	Notify    Notifier // optional: broadcast to all channels
 }
 
 // ListenUnix creates a Unix socket listener with correct permissions.
@@ -96,6 +100,16 @@ func (s *Server) handleConn(conn net.Conn) {
 		} else if err := s.TG.SendMessage(s.ChatID, req.Text); err != nil {
 			resp.Error = err.Error()
 		} else {
+			resp.OK = true
+		}
+
+	case "notify":
+		if req.Text == "" {
+			resp.Error = "text required"
+		} else if s.Notify == nil {
+			resp.Error = "notify not configured"
+		} else {
+			s.Notify(req.Text)
 			resp.OK = true
 		}
 

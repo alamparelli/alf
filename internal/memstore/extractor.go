@@ -150,17 +150,29 @@ func (e *Extractor) Extract() error {
 	}
 	currentHash = strings.TrimSpace(currentHash)
 
+	// Check for uncommitted working tree changes (staged + unstaged).
+	worktreeMode := false
 	if currentHash == lastHash {
-		log.Printf("memstore: no new commits since last extraction")
-		return nil
+		wtStat, _ := e.gitCommand("diff", "--stat", "--no-color", "HEAD",
+			"--", ":!*.png", ":!*.jpg", ":!*.wav", ":!*.mp3", ":!*.bin",
+			":!*.db", ":!*.db-shm", ":!*.db-wal")
+		if strings.TrimSpace(wtStat) == "" {
+			log.Printf("memstore: no new commits or working tree changes since last extraction")
+			return nil
+		}
+		log.Printf("memstore: no new commits but found uncommitted changes")
+		worktreeMode = true
 	}
 
 	// Pass 1: get diff stat.
+	binaryExcludes := []string{":!*.png", ":!*.jpg", ":!*.wav", ":!*.mp3", ":!*.bin",
+		":!*.db", ":!*.db-shm", ":!*.db-wal"}
 	var statArgs []string
-	if lastHash != "" {
-		statArgs = []string{"diff", "--stat", "--no-color", lastHash + ".." + currentHash,
-			"--", ":!*.png", ":!*.jpg", ":!*.wav", ":!*.mp3", ":!*.bin",
-			":!*.db", ":!*.db-shm", ":!*.db-wal"}
+	if worktreeMode {
+		// Diff working tree against HEAD.
+		statArgs = append([]string{"diff", "--stat", "--no-color", "HEAD", "--"}, binaryExcludes...)
+	} else if lastHash != "" {
+		statArgs = append([]string{"diff", "--stat", "--no-color", lastHash + ".." + currentHash, "--"}, binaryExcludes...)
 	} else {
 		// First run: diff last 6 hours of commits.
 		since := time.Now().Add(-6 * time.Hour).Format("2006-01-02T15:04:05")
@@ -169,13 +181,10 @@ func (e *Extractor) Extract() error {
 			log.Printf("memstore: no commits found in last 6h, using HEAD~20")
 			sinceHash = "HEAD~20"
 		} else {
-			// Take the first commit hash.
 			lines := strings.Split(strings.TrimSpace(sinceHash), "\n")
 			sinceHash = lines[0]
 		}
-		statArgs = []string{"diff", "--stat", "--no-color", sinceHash + ".." + currentHash,
-			"--", ":!*.png", ":!*.jpg", ":!*.wav", ":!*.mp3", ":!*.bin",
-			":!*.db", ":!*.db-shm", ":!*.db-wal"}
+		statArgs = append([]string{"diff", "--stat", "--no-color", sinceHash + ".." + currentHash, "--"}, binaryExcludes...)
 	}
 
 	diffStat, err := e.gitCommand(statArgs...)
@@ -206,12 +215,16 @@ func (e *Extractor) Extract() error {
 	log.Printf("memstore: pass 1 — LLM selected %d files: %v", len(selectedFiles), selectedFiles)
 
 	// Pass 2: get actual diff for selected files.
-	diffRef := lastHash + ".." + currentHash
-	if lastHash == "" {
-		diffRef = "HEAD~20.." + currentHash
+	var diffArgs []string
+	if worktreeMode {
+		diffArgs = append([]string{"diff", "--no-color", "HEAD", "--"}, selectedFiles...)
+	} else {
+		diffRef := lastHash + ".." + currentHash
+		if lastHash == "" {
+			diffRef = "HEAD~20.." + currentHash
+		}
+		diffArgs = append([]string{"diff", "--no-color", diffRef, "--"}, selectedFiles...)
 	}
-	diffArgs := []string{"diff", "--no-color", diffRef, "--"}
-	diffArgs = append(diffArgs, selectedFiles...)
 
 	diffContent, err := e.gitCommand(diffArgs...)
 	if err != nil {
@@ -256,7 +269,7 @@ func (e *Extractor) Extract() error {
 	return nil
 }
 
-// HasChanges returns true if there are git changes since the last extraction.
+// HasChanges returns true if there are git changes (committed or uncommitted) since the last extraction.
 func (e *Extractor) HasChanges() bool {
 	state := e.loadState()
 	if state.LastHash == "" {
@@ -266,7 +279,15 @@ func (e *Extractor) HasChanges() bool {
 	if err != nil {
 		return true
 	}
-	return strings.TrimSpace(currentHash) != state.LastHash
+	if strings.TrimSpace(currentHash) != state.LastHash {
+		return true
+	}
+	// Also check uncommitted working tree changes.
+	wtStat, err := e.gitCommand("diff", "--stat", "--no-color", "HEAD")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(wtStat) != ""
 }
 
 // --- Pass 1: File selection ---

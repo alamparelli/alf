@@ -68,7 +68,7 @@ scaffold_tenant() {
     local user="$1"
     local dir="$TENANTS_DIR/$user"
 
-    mkdir -p "$dir"/{data/{logs,sessions,tools,skills,pages,models,agents/teams},config.d,skills.d,local}
+    mkdir -p "$dir"/{data/{logs,sessions,tools,skills,agents/teams},config.d,skills.d,local}
     mkdir -p "$dir"/cache/{claude,local,npm,cache}
     mkdir -p "$dir"/vault-data
     mkdir -p "$dir"/secrets

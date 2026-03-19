@@ -113,6 +113,19 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 		route = RouteResult{Tier: fallback, Reason: "memory-override: direct→" + fallback}
 	}
 
+	// Skill force command: /skillname [message]
+	if e.SkillStore != nil && strings.HasPrefix(msg.Text, "/") {
+		parts := strings.SplitN(msg.Text, " ", 2)
+		cmdName := strings.TrimPrefix(parts[0], "/")
+		if sk, ok := e.SkillStore.Get(cmdName); ok {
+			e.Sessions.AddSkills(sessionKey, []string{sk.Name})
+			log.Printf("[comms] skills: force-activated %q via /%s", sk.Name, cmdName)
+			if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
+				msg.Text = strings.TrimSpace(parts[1])
+			}
+		}
+	}
+
 	// Skill trigger matching.
 	if e.SkillStore != nil {
 		if triggerMatched := skills.MatchTriggers(e.SkillStore, msg.Text); len(triggerMatched) > 0 {

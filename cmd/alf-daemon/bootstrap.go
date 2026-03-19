@@ -236,7 +236,7 @@ func writeLLMSIndex(dataDir string) {
 
 	// Write docs to filesystem so LLM can read them (read-only).
 	docsDir := filepath.Join(dataDir, "docs")
-	os.MkdirAll(docsDir, 0o555)
+	os.MkdirAll(docsDir, 0o755)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue

@@ -109,6 +109,13 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
     && rm -rf /root/.local/share/claude /root/.claude \
     && claude --version
 
+# Node.js (required for OpenAI Codex CLI).
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm i -g @openai/codex \
+    && codex --version
+
 ENV PATH="/opt/alf/tools.d:${PATH}"
 
 COPY internal/controlcenter/defaults/tiers.json /opt/alf/defaults/tiers.json

@@ -43,6 +43,9 @@ func registerBackends(registry *provider.Registry, cfg *cc.Config, apiHistory *p
 		return
 	}
 	for name, bcfg := range cfg.Backends {
+		if name == "codex" {
+			continue // Codex is a CLI provider, not an API backend; registered separately.
+		}
 		apiKey := resolveBackendAPIKey(name, bcfg, vaultMgr)
 		if bcfg.Auth != "none" && apiKey == "" {
 			log.Printf("backend %s: skipped (no API key in vault)", name)
@@ -89,6 +92,24 @@ func resolveBackendAPIKey(name string, bcfg cc.BackendConfig, vaultMgr *vault.Ma
 	}
 	log.Printf("backend %s: API key loaded from vault (%d chars)", name, len(v))
 	return v
+}
+
+// registerCodex registers the OpenAI Codex CLI provider if a vault key is available.
+func registerCodex(registry *provider.Registry, dataDir string, timeout time.Duration, vaultMgr *vault.Manager) {
+	if vaultMgr == nil {
+		return
+	}
+	apiKey, err := vaultMgr.GetSecret("codex_api_key")
+	if err != nil || apiKey == "" {
+		log.Println("codex: skipped (no API key in vault)")
+		return
+	}
+	prov := provider.NewCodexProvider(dataDir, timeout, apiKey)
+	registry.RegisterProvider("codex", prov)
+	log.Printf("codex: registered (key %d chars)", len(apiKey))
+
+	// Update allowed backends so tiers UI shows codex.
+	cc.SetAllowedBackends(registry.BackendNames())
 }
 
 func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, reg *tooling.Registry, provRegistry *provider.Registry) tierParams {

@@ -423,6 +423,7 @@ func main() {
 	apiHistory := provider.NewHistory(dataDir, 100, sessionTimeout)
 	registry := provider.NewRegistry(cliProvider)
 	registerBackends(registry, cfg, apiHistory, vaultMgr)
+	registerCodex(registry, dataDir, tiersTimeout, vaultMgr)
 
 	// Multi-agent coordinator.
 	resolveTier := func(tierName string) (agents.TierParams, bool) {
@@ -636,6 +637,7 @@ func main() {
 			}
 			// Re-register backends now that vault is unlocked and API keys are accessible.
 			registerBackends(registry, cfg, apiHistory, vaultMgr)
+			registerCodex(registry, dataDir, tiersTimeout, vaultMgr)
 			// Load Telegram credentials from vault if not already set.
 			if token == "" {
 				if v, err := vaultMgr.GetSecret("telegram_bot_token"); err == nil && v != "" {
@@ -935,6 +937,7 @@ func main() {
 					}
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
+					registerCodex(registry, dataDir, tiersTimeout, vaultMgr)
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {
@@ -1029,6 +1032,7 @@ func main() {
 					// Re-register backends if config changed.
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
+					registerCodex(registry, dataDir, tiersTimeout, vaultMgr)
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {

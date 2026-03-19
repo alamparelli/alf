@@ -116,6 +116,55 @@ func isClaudeAuthFile() bool {
 	return info.Size() > 2 // non-empty (not just "{}")
 }
 
+// ensureClaudeOnboarding patches .claude.json to mark onboarding as complete.
+// Claude CLI requires hasCompletedOnboarding=true before accepting -p invocations.
+// Users who authenticate via "claude login" in the terminal get a valid OAuth token
+// but skip the interactive onboarding, leaving this flag unset.
+func ensureClaudeOnboarding() {
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/home/alf"
+	}
+	path := filepath.Join(home, ".claude.json")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+
+	var cfg map[string]any
+	if json.Unmarshal(data, &cfg) != nil {
+		return
+	}
+
+	changed := false
+
+	if v, ok := cfg["hasCompletedOnboarding"]; !ok || v != true {
+		cfg["hasCompletedOnboarding"] = true
+		changed = true
+	}
+
+	if _, ok := cfg["numStartups"]; !ok {
+		cfg["numStartups"] = 1
+		changed = true
+	}
+
+	if !changed {
+		return
+	}
+
+	patched, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return
+	}
+
+	if err := os.WriteFile(path, patched, 0o640); err != nil {
+		log.Printf("[setup] failed to patch .claude.json onboarding: %v", err)
+	} else {
+		log.Printf("[setup] patched .claude.json: hasCompletedOnboarding=true")
+	}
+}
+
 // isTelegramConfigured checks vault then Docker secrets for both token and chat ID.
 func (h *SetupHandler) isTelegramConfigured() bool {
 	token := h.loadTelegramSecret(vaultKeyTGBotToken, "TELEGRAM_BOT_TOKEN")
@@ -223,7 +272,11 @@ func (h *SetupHandler) handleTelegramValidate(w http.ResponseWriter, r *http.Req
 
 // handleClaudeCheck returns whether Claude CLI is authenticated.
 func (h *SetupHandler) handleClaudeCheck(w http.ResponseWriter, _ *http.Request) {
-	respondJSON(w, http.StatusOK, map[string]bool{"authenticated": isClaudeAuthFile()})
+	auth := isClaudeAuthFile()
+	if auth {
+		ensureClaudeOnboarding()
+	}
+	respondJSON(w, http.StatusOK, map[string]bool{"authenticated": auth})
 }
 
 // handleOllamaModels lists models installed on an Ollama instance.
@@ -452,6 +505,19 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 		}
 		tiersChanged = true
 		log.Printf("[setup] tier profile %s saved and activated", profileName)
+
+		// If the preset uses codex backend, ensure Node.js runtime and codex CLI are requested.
+		if preset.Backend == "codex" {
+			h.ensureCodexRuntime()
+			restartRequired = true
+		}
+	}
+
+	// Ensure Claude onboarding is marked complete when Claude backend is selected.
+	// Users who authenticate via "claude login" in the terminal get a valid OAuth
+	// token but skip the interactive onboarding that sets hasCompletedOnboarding.
+	if isClaudeAuthFile() {
+		ensureClaudeOnboarding()
 	}
 
 	// Notify daemon for hot-reload.
@@ -574,6 +640,21 @@ func (h *SetupHandler) handleTelegramChatID(w http.ResponseWriter, r *http.Reque
 		"chat_id": fmt.Sprintf("%d", chatID),
 		"name":    name,
 	})
+}
+
+// ensureCodexRuntime writes runtime.txt and npm-global.txt so the entrypoint
+// installs Node.js and the Codex CLI on next container start.
+func (h *SetupHandler) ensureCodexRuntime() {
+	runtimePath := filepath.Join(h.ConfigDir, "runtime.txt")
+	npmPath := filepath.Join(h.ConfigDir, "npm-global.txt")
+
+	if err := os.WriteFile(runtimePath, []byte("node\n"), 0o644); err != nil {
+		log.Printf("[setup] warning: failed to write runtime.txt: %v", err)
+	}
+	if err := os.WriteFile(npmPath, []byte("@openai/codex\n"), 0o644); err != nil {
+		log.Printf("[setup] warning: failed to write npm-global.txt: %v", err)
+	}
+	log.Println("[setup] codex runtime files written (restart required)")
 }
 
 // loadPresetsFromDir reads all *.json files from dir and groups them by backend.

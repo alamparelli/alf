@@ -146,6 +146,30 @@ func syncClaudeJSON(homeDir string) {
 		}
 	}
 
+	// Ensure hasCompletedOnboarding is set. Users who authenticate via
+	// "claude login" get a valid OAuth token but skip the interactive
+	// onboarding that sets this flag. Without it, "claude -p" invocations fail.
+	if data, err := os.ReadFile(realFile); err == nil && len(data) > 2 {
+		var cfg map[string]any
+		if json.Unmarshal(data, &cfg) == nil {
+			changed := false
+			if v, ok := cfg["hasCompletedOnboarding"]; !ok || v != true {
+				cfg["hasCompletedOnboarding"] = true
+				changed = true
+			}
+			if _, ok := cfg["numStartups"]; !ok {
+				cfg["numStartups"] = 1
+				changed = true
+			}
+			if changed {
+				if patched, err := json.MarshalIndent(cfg, "", "  "); err == nil {
+					os.WriteFile(realFile, patched, 0o640)
+					log.Printf("claude-json: patched hasCompletedOnboarding=true")
+				}
+			}
+		}
+	}
+
 	// Back up current file into volume for next rebuild.
 	if data, err := os.ReadFile(realFile); err == nil && len(data) > 0 {
 		os.WriteFile(volumeCopy, data, 0o640)
@@ -395,6 +419,72 @@ func seedBundledTeams(dataDir string) {
 			log.Printf("seeded bundled team: %s", e.Name())
 		}
 	}
+}
+
+// seedBundledApps copies marketplace app defaults from /opt/alf/defaults/apps/
+// into the active apps directory. Each app gets its binary, manifest, and web files seeded.
+// On upgrade, new files (e.g. index.html, app.json) are added without overwriting user data.
+// The data/ subdirectory is never touched.
+func seedBundledApps(dataDir string) {
+	const defaultsDir = "/opt/alf/defaults/apps"
+	appsDir := filepath.Join(dataDir, "apps")
+	entries, err := os.ReadDir(defaultsDir)
+	if err != nil {
+		return // no defaults directory (e.g. running outside Docker)
+	}
+	os.MkdirAll(appsDir, 0o755)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		slug := e.Name()
+		src := filepath.Join(defaultsDir, slug)
+		dest := filepath.Join(appsDir, slug)
+
+		// Always sync bundled files (bin/, manifest.json, index.html, app.json).
+		// Skip the data/ subdirectory to preserve user data.
+		if err := seedAppFiles(src, dest); err != nil {
+			log.Printf("seed app %s: %v", slug, err)
+		} else {
+			log.Printf("seeded bundled app: %s", slug)
+		}
+	}
+}
+
+// seedAppFiles copies files from src to dest, creating directories as needed.
+// Skips the data/ subdirectory to preserve user data.
+// Preserves execute permission on binaries.
+func seedAppFiles(src, dest string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	os.MkdirAll(dest, 0o755)
+	for _, e := range entries {
+		s := filepath.Join(src, e.Name())
+		d := filepath.Join(dest, e.Name())
+		if e.IsDir() {
+			if e.Name() == "data" {
+				continue // never overwrite user data
+			}
+			if err := seedAppFiles(s, d); err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(s)
+			if err != nil {
+				return err
+			}
+			perm := os.FileMode(0o644)
+			if info, err := e.Info(); err == nil && info.Mode()&0o111 != 0 {
+				perm = 0o755
+			}
+			if err := os.WriteFile(d, data, perm); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // copyDir recursively copies a directory tree.

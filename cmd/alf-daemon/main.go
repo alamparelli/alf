@@ -190,8 +190,9 @@ func main() {
 	// Migrate config from old data/config/ to configDir (before loading).
 	migrateConfig(dataDir, configDir)
 
-	// Generate llms.txt index of available documentation.
+	// Generate llms.txt index and seed README.md files.
 	writeLLMSIndex(dataDir)
+	seedREADMEs(dataDir)
 
 	// Load initial config.
 	configStore := cc.NewFileConfigStore(cc.ConfigPath(configDir))

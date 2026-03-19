@@ -202,6 +202,33 @@ func migrateConfig(dataDir, configDir string) {
 	}
 }
 
+// seedREADMEs creates a README.md in each data subdirectory explaining its purpose.
+// Only writes if the file doesn't already exist.
+func seedREADMEs(dataDir string) {
+	readmes := map[string]string{
+		"config.d": "# config.d\n\nALF configuration files.\n\n- `config.json` - main configuration (backends, DNS, broadcast channel)\n- `tiers.json` - LLM tier definitions (models, routing, tools access)\n- `cron.json` - scheduled jobs\n- `router-prompt.md` - custom router prompt (optional)\n",
+		"context": "# context\n\nLLM context files injected into every conversation.\n\n- `soul.md` - personality and behavior instructions\n- `preferences.md` - learned user preferences (auto-updated from reactions)\n- `heartbeat.md` - heartbeat check template\n- `memory.db` - semantic memory store (SQLite + vector embeddings)\n",
+		"docs": "# docs\n\nBuilt-in documentation (auto-generated from embedded docs on each startup).\nThese files are read-only and will be overwritten on restart.\n\nBrowse in the Docs tab of the Control Center.\n",
+		"logs": "# logs\n\nConversation and event logs.\n\n- `conversation.jsonl` - unified conversation store (all channels)\n- `events.jsonl` - system event log (messages, reactions, sessions)\n",
+		"sessions": "# sessions\n\nClaude CLI session files for conversation continuity.\nManaged automatically. Safe to delete to reset sessions.\n",
+		"tools": "# tools\n\nUser-created tools (JSON schema + executable).\nEach tool is a JSON file defining its schema and a matching executable.\n\nSee the docs on creating tools for more info.\n",
+		"skills": "# skills\n\nUser-created skills. Each skill is a directory with a SKILL.md file.\nSkills extend ALF's capabilities with custom prompts and workflows.\n\nActivate with `/skillname` in chat.\n",
+		"skills.d": "# skills.d\n\nSystem skills (bundled with ALF). Seeded on first boot.\nYou can override a system skill by creating one with the same name in `skills/`.\n",
+		"agents/teams": "# agents/teams\n\nAgent team definitions (JSON). Each file defines a team of specialized agents\nthat can collaborate on complex tasks.\n\nManage teams in the Teams tab of the Control Center.\n",
+		"apps": "# apps\n\nUser-created web applications. Each app is a directory with an index.html.\nBuild apps using the app-builder skill or create them manually.\n\nAccessible in the Apps section of the sidebar.\n",
+	}
+
+	for dir, content := range readmes {
+		fullDir := filepath.Join(dataDir, dir)
+		os.MkdirAll(fullDir, 0o755)
+		readme := filepath.Join(fullDir, "README.md")
+		if _, err := os.Stat(readme); err == nil {
+			continue
+		}
+		os.WriteFile(readme, []byte(content), 0o644)
+	}
+}
+
 // writeLLMSIndex generates a llms.txt file in dataDir with an index of all embedded docs.
 // This lets the LLM quickly discover available documentation.
 func writeLLMSIndex(dataDir string) {

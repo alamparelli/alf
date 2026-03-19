@@ -145,7 +145,7 @@ func RunMagicLink() {
 	}
 
 	fmt.Println()
-	PrintCheck("Magic link generated (valid for 7 days):")
+	PrintCheck("Magic link generated:")
 	fmt.Println()
 	fmt.Println("  " + resp.URL)
 	fmt.Println()

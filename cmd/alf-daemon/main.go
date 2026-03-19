@@ -610,6 +610,18 @@ func main() {
 	}
 	log.Println("comms engine: initialized for CC channel")
 
+	// Persistent signal server for notify/react/status tools (all channels).
+	persistentSigPath := filepath.Join(dataDir, "signal.sock")
+	persistentSigServer := &signal.Server{Notify: commEngine.Broadcast}
+	if ln, err := persistentSigServer.ListenUnix(persistentSigPath); err != nil {
+		log.Printf("signal: persistent listen error: %v", err)
+	} else {
+		go persistentSigServer.Serve(ln)
+		commEngine.SignalSockPath = persistentSigPath
+		log.Printf("signal: persistent socket ready at %s", persistentSigPath)
+		defer func() { ln.Close(); os.Remove(persistentSigPath) }()
+	}
+
 	// Schedule adapter (engine set later after scheduler is created).
 	schedAdapter := &ccScheduleAdapter{}
 	var schedEventBroker *cc.ScheduleEventBroker

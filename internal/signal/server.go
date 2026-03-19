@@ -88,6 +88,8 @@ func (s *Server) handleConn(conn net.Conn) {
 	case "react":
 		if req.Emoji == "" {
 			resp.Error = "emoji required"
+		} else if s.TG == nil {
+			resp.Error = "react not available on this channel"
 		} else if err := s.TG.SetMessageReaction(s.ChatID, s.MessageID, req.Emoji); err != nil {
 			resp.Error = err.Error()
 		} else {
@@ -97,6 +99,8 @@ func (s *Server) handleConn(conn net.Conn) {
 	case "status":
 		if req.Text == "" {
 			resp.Error = "text required"
+		} else if s.TG == nil {
+			resp.Error = "status not available on this channel"
 		} else if err := s.TG.SendMessage(s.ChatID, req.Text); err != nil {
 			resp.Error = err.Error()
 		} else {

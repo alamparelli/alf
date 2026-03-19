@@ -383,15 +383,18 @@ func seedBundledTeams(dataDir string) {
 }
 
 // seedBundledApps copies missing app directories from /opt/alf/defaults/apps
-// into the user apps directory. Existing apps are never overwritten.
+// into the user apps directory. If an app includes a CLI tool (tool + tool.json),
+// those are installed into data/tools/ as well. Existing apps are never overwritten.
 func seedBundledApps(dataDir string) {
 	const defaultsDir = "/opt/alf/defaults/apps"
 	appsDir := filepath.Join(dataDir, "apps")
+	toolsDir := filepath.Join(dataDir, "tools")
 	entries, err := os.ReadDir(defaultsDir)
 	if err != nil {
 		return
 	}
 	os.MkdirAll(appsDir, 0o755)
+	os.MkdirAll(toolsDir, 0o755)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -403,8 +406,27 @@ func seedBundledApps(dataDir string) {
 		src := filepath.Join(defaultsDir, e.Name())
 		if err := copyDir(src, dst); err != nil {
 			log.Printf("seed app %s: %v", e.Name(), err)
-		} else {
-			log.Printf("seeded bundled app: %s", e.Name())
+			continue
+		}
+		log.Printf("seeded bundled app: %s", e.Name())
+
+		// Install companion CLI tool if present (tool + tool.json).
+		toolSrc := filepath.Join(src, "tool")
+		schemaSrc := filepath.Join(src, "tool.json")
+		if _, err := os.Stat(toolSrc); err == nil {
+			toolDst := filepath.Join(toolsDir, e.Name())
+			if _, err := os.Stat(toolDst); err != nil {
+				data, _ := os.ReadFile(toolSrc)
+				os.WriteFile(toolDst, data, 0o755)
+				log.Printf("seeded app tool: %s", e.Name())
+			}
+		}
+		if _, err := os.Stat(schemaSrc); err == nil {
+			schemaDst := filepath.Join(toolsDir, e.Name()+".json")
+			if _, err := os.Stat(schemaDst); err != nil {
+				data, _ := os.ReadFile(schemaSrc)
+				os.WriteFile(schemaDst, data, 0o644)
+			}
 		}
 	}
 }

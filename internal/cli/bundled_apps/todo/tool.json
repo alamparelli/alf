@@ -1,0 +1,46 @@
+{
+  "name": "todo",
+  "description": "Task manager with SQLite backend. Add, list, complete, edit or delete tasks.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["add", "list", "done", "undone", "edit", "delete"],
+        "description": "Action to perform on the todo"
+      },
+      "text": {
+        "type": "string",
+        "description": "The task text (required for add and edit)"
+      },
+      "id": {
+        "type": "integer",
+        "description": "Task ID (required for done, undone, edit, delete)"
+      },
+      "priority": {
+        "type": "string",
+        "enum": ["high", "medium", "low"],
+        "description": "Priority level"
+      },
+      "category": {
+        "type": "string",
+        "description": "Category of the task"
+      },
+      "comment": {
+        "type": "string",
+        "description": "Additional comment"
+      },
+      "deadline": {
+        "type": "string",
+        "description": "Deadline in YYYY-MM-DD format"
+      },
+      "filter": {
+        "type": "string",
+        "enum": ["pending", "done", "all"],
+        "description": "Filter for list action (default: pending)"
+      }
+    },
+    "required": ["action"],
+    "x-positional": ["action", "text", "id"]
+  }
+}

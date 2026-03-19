@@ -111,6 +111,12 @@ func (e *ChatEngine) ProcessCommand(channelID ChannelID, text string, commands *
 	return response, handled
 }
 
+// HandleCommand checks if a message is a built-in command and handles it.
+// Returns (response, handled). Convenience wrapper around ProcessCommand with default registry.
+func (e *ChatEngine) HandleCommand(channelID ChannelID, text string) (string, bool) {
+	return e.ProcessCommand(channelID, text, NewCommandRegistry())
+}
+
 // CheckForceCommand checks if a message is a /<tier_name> force command.
 // Returns the tier name and remaining message, or ("", "") if not a force command.
 func CheckForceCommand(text string, tiers []TierInfo) (tierName, remaining string) {

@@ -1109,7 +1109,7 @@ func main() {
 				}
 				emoji := mr.NewReaction[0].Emoji
 				log.Printf("← reaction %s on msg %d", emoji, mr.MessageID)
-				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, contextDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider, memDB, convStore)
+				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, contextDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider, memDB, convStore, commEngine)
 				continue
 			}
 

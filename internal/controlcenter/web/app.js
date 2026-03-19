@@ -1846,6 +1846,31 @@ function chatCloseTab(tabId) {
   chatSaveTabs();
 }
 
+// Reset the current tab: clear messages, create new backend session, keep same tab.
+async function chatResetCurrentTab() {
+  try {
+    const res = await api('/api/chat', { method: 'DELETE' });
+    const convId = res.conv_id || '';
+    // Update the current tab's convId instead of creating a new one.
+    const tab = chatTabList.find(t => t.id === chatActiveTabId);
+    if (tab) {
+      tab.convId = convId;
+      tab.title = 'New chat';
+    }
+    chatMessages.innerHTML = '';
+    chatSending = false;
+    chatJobId = null;
+    chatEventOffset = 0;
+    chatHistoryLoaded = true;
+    chatRenderTabs();
+    chatSaveTabs();
+    chatClearStatus();
+    chatInput.focus();
+  } catch {
+    toast('Failed to reset chat', 'error');
+  }
+}
+
 async function chatNewTab() {
   // Create a new session on the backend.
   try {
@@ -2829,7 +2854,7 @@ function chatQueueMessage(text, files) {
   if (typeof lucide !== 'undefined') lucide.createIcons({ nodes: [el] });
   chatScrollBottom();
 
-  chatMessageQueue.push({ id, text, files, el });
+  chatMessageQueue.push({ id, text, files, el, tabId: chatActiveTabId });
 }
 
 function chatDequeueMessage(id) {
@@ -2844,6 +2869,11 @@ async function chatSendNextQueued() {
 
   const next = chatMessageQueue.shift();
   if (next.el && next.el.parentNode) next.el.remove();
+
+  // Switch to the tab where the message was queued, if different.
+  if (next.tabId && next.tabId !== chatActiveTabId) {
+    chatSwitchTab(next.tabId);
+  }
 
   // Inject into input and trigger send.
   chatInput.value = next.text || '';
@@ -3096,26 +3126,8 @@ function chatExecCommand(cmd) {
       chatScrollBottom();
       break;
     case '/clear':
-      fetch('/api/chat', { method: 'DELETE', credentials: 'same-origin' })
-        .then(r => r.json())
-        .then(r => {
-          if (r.ok) {
-            const convId = r.conv_id || '';
-            chatSnapshotTab();
-            const tab = chatCreateTab(convId, 'New Chat');
-            chatActiveTabId = tab.id;
-            chatMessages.innerHTML = '';
-            chatSending = false;
-            chatJobId = null;
-            chatEventOffset = 0;
-            chatHistoryLoaded = true;
-            chatRenderTabs();
-            chatSaveTabs();
-          }
-        });
-      break;
     case '/new':
-      chatNewTab();
+      chatResetCurrentTab();
       break;
     case '/start':
       fetch('/api/chat?onboard=1', { method: 'DELETE', credentials: 'same-origin' })
@@ -5410,7 +5422,7 @@ function showSetupWizard(status) {
           cs.textContent = 'Authenticated';
           cs.className = 'setup-claude-status ok';
         } else {
-          cs.innerHTML = 'Not authenticated — run <code>alf login</code> on the host server';
+          cs.innerHTML = 'Not authenticated — run <code>claude login</code> in the Terminal tab';
           cs.className = 'setup-claude-status pending';
         }
       }
@@ -5717,7 +5729,8 @@ function showSetupWizard(status) {
             '<p class="form-hint" id="setupVaultPwMismatch" style="color:var(--danger);display:none">Passwords do not match</p>';
         }
         vaultHTML += '<p class="form-hint">' +
-            (isNew ? 'This creates your encrypted vault for API keys, tokens, and secrets.' :
+            (isNew ? 'This creates your encrypted vault for API keys, tokens, and secrets.' +
+                     '<br><strong style="color:var(--danger)">Remember this password! If lost, the entire vault must be reset.</strong>' :
                      'Unlock your vault to store secrets.') + '</p></div>';
         el.insertAdjacentHTML('beforeend', vaultHTML);
 

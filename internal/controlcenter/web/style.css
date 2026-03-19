@@ -59,13 +59,14 @@ h1, h2, h3, h4 { font-family: 'Sora', sans-serif; }
 
 /* Nav sections (collapsible) */
 .nav-section { margin-bottom: 4px; }
+.nav-section + .nav-section { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; }
 .nav-section-toggle {
-  display: flex; align-items: center; gap: 4px;
-  width: 100%; padding: 4px 12px;
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 6px 12px;
   background: none; border: none; cursor: pointer;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.65rem; font-weight: 500; text-transform: uppercase;
-  letter-spacing: 0.08em; color: var(--text-dim);
+  font-family: 'Sora', 'JetBrains Mono', monospace;
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--accent);
   transition: color 0.15s;
 }
 .nav-section-toggle:hover { color: var(--text); }
@@ -1990,7 +1991,8 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   }
 
   /* (B) Touch-friendly sizing */
-  .nav-item { min-height: 44px; }
+  .nav-item { min-height: 44px; font-size: 0.85rem; }
+  .nav-item i, .nav-item .lucide { width: 20px; height: 20px; }
   .btn, .btn-secondary, .btn-sm { min-height: 44px; }
   .chat-cmd-item { padding: 10px 14px; min-height: 44px; }
 

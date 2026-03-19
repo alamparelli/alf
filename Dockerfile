@@ -144,7 +144,6 @@ RUN groupadd --gid 1000 alf \
 # Directory structure for volumes.
 RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
     && mkdir -p /home/alf/data/tools /home/alf/data/skills \
-    && mkdir -p /home/alf/data/pages \
     && mkdir -p /home/alf/data/.claude \
     && mkdir -p /home/alf/data/config.d /home/alf/data/skills.d \
     && mkdir -p /opt/alf/config.d \

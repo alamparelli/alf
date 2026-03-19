@@ -36,11 +36,8 @@ function toast(msg, type = 'success') {
 }
 
 // --- Share on X ---
-async function shareOnX(e) {
+function shareOnX(e) {
   e.preventDefault();
-  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const key = isMac ? '\u2318V' : 'Ctrl+V';
-  toast('Take a screenshot, then paste it in the tweet (' + key + ')');
   const text = encodeURIComponent('Powered by ALF OS, my personal AI Operating System');
   window.open('https://x.com/intent/tweet?text=' + text, '_blank');
 }
@@ -2316,7 +2313,7 @@ function chatUpdateBubbleContent(bubble, text) {
 
 function chatAppendBubble(role, text, meta) {
   const bubble = document.createElement('div');
-  bubble.className = 'chat-bubble ' + role + (role === 'assistant' ? ' docs-article' : '');
+  bubble.className = 'chat-bubble ' + role;
   if (meta && meta.id) bubble.dataset.msgId = meta.id;
   // Render media attachments BEFORE text so images appear above the message.
   if (meta && meta.media && meta.media.length) {
@@ -2642,7 +2639,7 @@ async function chatProcessStream(res) {
             if (chatAgentTracker) chatAgentTracker.classList.remove('open');
             // Start a fresh bubble (new bubble per text section after tools/thinking)
             chatAssistantBubble = document.createElement('div');
-            chatAssistantBubble.className = 'chat-bubble assistant docs-article';
+            chatAssistantBubble.className = 'chat-bubble assistant';
             chatAssistantBubble.innerHTML = '';
             chatFullText = '';
             var metaEl = document.createElement('div');
@@ -2663,7 +2660,7 @@ async function chatProcessStream(res) {
           if (!chatAssistantBubble) {
             // Create bubble in the stream target (may be detached).
             chatAssistantBubble = document.createElement('div');
-            chatAssistantBubble.className = 'chat-bubble assistant docs-article';
+            chatAssistantBubble.className = 'chat-bubble assistant';
             chatAssistantBubble.innerHTML = chatRenderMd(chatFullText);
             var tm = document.createElement('div');
             tm.className = 'chat-bubble-meta';

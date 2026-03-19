@@ -131,6 +131,9 @@ func (m *Manager) Enable(slug string) error {
 		}
 	}
 
+	// Link bundled skills: apps/<slug>/skills/<name>/ → data/skills/<name>/
+	m.linkAppSkills(slug)
+
 	m.states[slug] = StateEnabled
 	if err := m.saveState(); err != nil {
 		return err
@@ -157,6 +160,9 @@ func (m *Manager) Disable(slug string) error {
 		os.Remove(filepath.Join(toolsDir, tool.Name))
 		os.Remove(filepath.Join(toolsDir, tool.Name+".json"))
 	}
+
+	// Unlink bundled skills.
+	m.unlinkAppSkills(slug)
 
 	m.states[slug] = StateDisabled
 	if err := m.saveState(); err != nil {
@@ -228,6 +234,42 @@ func (m *Manager) RestoreEnabled() error {
 	}
 
 	return nil
+}
+
+// linkAppSkills symlinks skill directories from apps/<slug>/skills/ into data/skills/.
+func (m *Manager) linkAppSkills(slug string) {
+	skillsSrc := filepath.Join(m.dataDir, "apps", slug, "skills")
+	entries, err := os.ReadDir(skillsSrc)
+	if err != nil {
+		return // no skills directory
+	}
+	skillsDst := filepath.Join(m.dataDir, "skills")
+	os.MkdirAll(skillsDst, 0o755)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		link := filepath.Join(skillsDst, e.Name())
+		target := filepath.Join("..", "apps", slug, "skills", e.Name())
+		os.Remove(link) // remove stale
+		os.Symlink(target, link)
+	}
+}
+
+// unlinkAppSkills removes skill symlinks that point to this app.
+func (m *Manager) unlinkAppSkills(slug string) {
+	skillsSrc := filepath.Join(m.dataDir, "apps", slug, "skills")
+	entries, err := os.ReadDir(skillsSrc)
+	if err != nil {
+		return
+	}
+	skillsDst := filepath.Join(m.dataDir, "skills")
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		os.Remove(filepath.Join(skillsDst, e.Name()))
+	}
 }
 
 func (m *Manager) loadManifest(slug string) (*Manifest, error) {
@@ -360,10 +402,12 @@ func (m *Manager) Install(slug string) error {
 	for _, f := range webFiles {
 		dst := filepath.Join(appDir, f)
 		if err := m.downloadWebAsset(slug, f, dst); err != nil {
-			// Web assets are optional.
 			continue
 		}
 	}
+
+	// Download bundled skills.
+	m.downloadSkills(slug, appDir)
 
 	m.mu.Lock()
 	m.states[slug] = StateInstalled
@@ -381,6 +425,47 @@ func (m *Manager) downloadFile(slug, endpoint, dst string) error {
 func (m *Manager) downloadBinary(slug, arch, dst string) error {
 	url := fmt.Sprintf("%s/api/apps/%s/download?arch=%s", m.registryURL, slug, arch)
 	return m.httpGet(url, dst)
+}
+
+// downloadSkills fetches the skill list from the registry and downloads each skill's files.
+func (m *Manager) downloadSkills(slug, appDir string) {
+	if m.registryURL == "" {
+		return
+	}
+	url := fmt.Sprintf("%s/api/apps/%s/skills", m.registryURL, slug)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("X-Alf-Instance", "true")
+	resp, err := m.http.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	type skillInfo struct {
+		Name  string   `json:"name"`
+		Files []string `json:"files"`
+	}
+	var skills []skillInfo
+	if json.Unmarshal(body, &skills) != nil || len(skills) == 0 {
+		return
+	}
+
+	for _, sk := range skills {
+		skillDir := filepath.Join(appDir, "skills", sk.Name)
+		os.MkdirAll(skillDir, 0o755)
+		for _, f := range sk.Files {
+			dst := filepath.Join(skillDir, f)
+			fileURL := fmt.Sprintf("%s/api/apps/%s/skill/%s/%s", m.registryURL, slug, sk.Name, f)
+			_ = m.httpGet(fileURL, dst)
+		}
+	}
 }
 
 func (m *Manager) downloadWebAsset(slug, file, dst string) error {

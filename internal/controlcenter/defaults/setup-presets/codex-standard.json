@@ -1,0 +1,67 @@
+{
+  "id": "codex-standard",
+  "name": "Codex Standard",
+  "description": "Multi-tier Codex setup: GPT-5-codex for all tiers. Uses OpenAI Codex CLI backend with API key or codex login.",
+  "backend": "codex",
+  "router_config": {
+    "router_model": "haiku",
+    "router_backend": "",
+    "default_fallback": "codex-fast",
+    "router_distinctions": "Pick the tier that best balances capability and cost.\n\ncodex-fast: ONLY for trivial mechanical actions with no reasoning — greetings, toggling, listing, single-fact lookups. If the user asks WHY, HOW, or needs any judgment, explanation, or synthesis, do NOT use codex-fast.\n\ncodex-dev: Default for most work — questions, research, code, debugging, writing, summaries, web search, multi-step tasks.\n\ncodex-arch: Architecture, deep trade-offs, large refactors, building new modules from scratch.\n\nagent: ONLY when the user explicitly requests parallel independent workstreams. Most tasks, even complex ones, should go to a single-model tier."
+  },
+  "tiers": [
+    {
+      "name": "codex-fast",
+      "model": "gpt-5-codex",
+      "priority": 1,
+      "enabled": true,
+      "routable": true,
+      "router_label": "Greetings, small talk, yes/no questions, single-fact lookups (weather, time, date), toggling a setting on/off, running an existing scheduled job, listing items (files, jobs, skills, settings)",
+      "max_turns": 30,
+      "write_capable": false,
+      "context_weight": "light",
+      "force_command": true,
+      "backend": "codex",
+      "system_prompt": "CRITICAL: You MUST fully embody the personality defined in soul.md. Use the user's name, match their preferred language, and stay in character at all times. Never fall back to generic assistant behavior."
+    },
+    {
+      "name": "codex-dev",
+      "model": "gpt-5-codex",
+      "priority": 2,
+      "enabled": true,
+      "routable": true,
+      "router_label": "Any question requiring explanation or reasoning, summarizing content, translations, web search and synthesis, code review, debugging, reading logs, editing files, implementing features, fixing bugs, writing scripts and tests, multi-file changes, creating scheduled jobs and reminders, research, multi-step sequential tasks",
+      "max_turns": 30,
+      "write_capable": false,
+      "force_command": true,
+      "backend": "codex"
+    },
+    {
+      "name": "codex-arch",
+      "model": "gpt-5-codex",
+      "priority": 3,
+      "enabled": true,
+      "routable": true,
+      "router_label": "Architecture design, system-level reasoning, complex trade-off analysis, large-scale refactoring, implementing complex features, redesigning system architecture, building new modules from scratch, complex multi-step tasks requiring deep thinking",
+      "max_turns": 40,
+      "write_capable": false,
+      "force_command": true,
+      "backend": "codex"
+    },
+    {
+      "name": "agent",
+      "model": "gpt-5-codex",
+      "priority": 4,
+      "enabled": true,
+      "routable": true,
+      "router_label": "ONLY for tasks explicitly requesting a team of agents, or requiring parallel independent workstreams that CANNOT be done sequentially by one model (e.g. 'build a full app with frontend + backend + tests simultaneously', 'write 5 articles at once', 'research 3 topics in parallel'). If one model can handle it step-by-step, use codex-dev or codex-arch instead.",
+      "max_turns": 10,
+      "write_capable": false,
+      "orchestrator_max_turns": 3,
+      "max_iterations": 20,
+      "timeout_minutes": 60,
+      "force_command": true,
+      "backend": "codex"
+    }
+  ]
+}

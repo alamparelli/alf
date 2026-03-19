@@ -12,22 +12,52 @@ Unlike API backends (OpenRouter, OpenAI), Codex is a **CLI provider** — ALF sp
 
 ## Prerequisites
 
-- Codex CLI is pre-installed in the ALF container (`codex-cli`)
-- An OpenAI API key (from [platform.openai.com](https://platform.openai.com/api-keys))
-- A ChatGPT Plus ($20/mo), Pro ($200/mo), or Business ($30/seat/mo) plan — or just an API key with credits
+- Codex CLI is pre-installed in the ALF container
+- **Either** a ChatGPT subscription (Plus, Pro, Business) **or** an OpenAI API key with credits
+
+## Authentication
+
+ALF supports both Codex auth methods:
+
+### Option A: ChatGPT subscription (codex login)
+
+If you have a ChatGPT Plus ($20/mo), Pro ($200/mo), or Business plan:
+
+1. Open the **Terminal** tab in the Control Center
+2. Run `codex login --device-auth`
+3. A one-time code is displayed — open the URL in your browser and enter the code
+4. Once authenticated, Codex stores credentials in `~/.codex/auth.json`
+
+No API key needed. ALF detects the login automatically.
+
+This method gives you access to subscription credits and features like fast mode.
+
+### Option B: API key
+
+If you prefer using an OpenAI Platform API key:
+
+1. Get a key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+2. Open the **Vault** tab in the Control Center
+3. Click **Add** in the Secrets section
+4. Name: `codex_api_key`, Value: your key (starts with `sk-`)
+5. Save
+
+The daemon picks up the key automatically — no restart needed.
+
+API key usage is billed at standard OpenAI API rates (separate from ChatGPT subscription).
+
+### Which to choose?
+
+| | ChatGPT login | API key |
+|---|---|---|
+| **Billing** | ChatGPT subscription credits | Pay-per-use API rates |
+| **Fast mode** | Available | Not available |
+| **Setup** | `codex login` in Terminal | Store key in Vault |
+| **Best for** | Users with ChatGPT subscription | CI/automation, pay-per-use |
 
 ## Setup
 
-### 1. Store your API key
-
-Open the **Vault** tab in the Control Center, then:
-
-1. Click **Add** in the Secrets section
-2. Name: `codex_api_key`
-3. Value: your OpenAI API key (starts with `sk-`)
-4. Save
-
-The daemon picks up the key automatically after vault unlock — no restart needed.
+### 1. Authenticate (see above)
 
 ### 2. Configure a tier
 
@@ -60,7 +90,7 @@ Configure the router to send coding-related messages to your Codex tier, or set 
 When a message is routed to a Codex tier, ALF:
 
 1. Spawns `codex exec --json --full-auto --model <model> "<prompt>"`
-2. Injects `CODEX_API_KEY` from the vault into the subprocess environment
+2. Uses `CODEX_API_KEY` from vault (if set) or `~/.codex/auth.json` (if logged in)
 3. Parses the JSONL event stream in real-time
 4. Streams progress events (tool use, text output) to the chat UI
 
@@ -78,27 +108,16 @@ Codex runs in `--full-auto` mode with workspace-write sandbox, meaning it can re
 | Cost tracking | Yes (from CLI metadata) | Token counts only |
 | Session resume | `--resume <id>` | `codex exec resume <id>` |
 
-## Authentication
-
-Codex supports two auth methods. ALF uses **API key only**:
-
-| Method | How | Used by ALF? |
-|--------|-----|-------------|
-| API key | `CODEX_API_KEY` env var | Yes — stored in vault |
-| ChatGPT login | `codex login` → `~/.codex/auth.json` | No |
-
-No `codex login` is needed. The API key from the vault is injected automatically.
-
 ## Setup Wizard
 
-If you use the **Setup Wizard** during onboarding, select "OpenAI Codex" as a backend and enter your API key. The wizard stores it in the vault and makes the `codex` backend available in tier configuration.
+If you use the **Setup Wizard** during onboarding, select "OpenAI Codex" as a backend. You can either enter an API key (stored in vault) or skip the key and use `codex login` afterwards in the Terminal tab.
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| "codex: skipped (no API key in vault)" | Add `codex_api_key` in Vault > Secrets |
-| "start codex: exec: codex: not found" | Codex CLI not installed in container — update to latest image |
-| "codex startup timeout" | API key may be invalid, or network issue reaching OpenAI |
+| "start codex: exec: codex: not found" | Codex CLI not installed — update to latest ALF image |
+| "codex startup timeout" | Auth issue — run `codex login --device-auth` in Terminal, or check API key |
 | "codex: rate limit exceeded" | OpenAI rate limit — wait or upgrade plan |
-| Codex not in backend dropdown | Key not in vault, or vault is locked |
+| Codex not in backend dropdown | Codex binary not found in container — update image |
+| Auth expired | Run `codex login` again in Terminal to refresh tokens |

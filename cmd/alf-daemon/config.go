@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -94,19 +95,27 @@ func resolveBackendAPIKey(name string, bcfg cc.BackendConfig, vaultMgr *vault.Ma
 	return v
 }
 
-// registerCodex registers the OpenAI Codex CLI provider if a vault key is available.
+// registerCodex registers the OpenAI Codex CLI provider.
+// Uses API key from vault if available; otherwise relies on codex login (auth.json).
 func registerCodex(registry *provider.Registry, dataDir string, timeout time.Duration, vaultMgr *vault.Manager) {
-	if vaultMgr == nil {
+	var apiKey string
+	if vaultMgr != nil {
+		apiKey, _ = vaultMgr.GetSecret("codex_api_key")
+	}
+
+	// Check if codex binary exists before registering.
+	if _, err := exec.LookPath("codex"); err != nil {
+		log.Println("codex: skipped (binary not found)")
 		return
 	}
-	apiKey, err := vaultMgr.GetSecret("codex_api_key")
-	if err != nil || apiKey == "" {
-		log.Println("codex: skipped (no API key in vault)")
-		return
-	}
+
 	prov := provider.NewCodexProvider(dataDir, timeout, apiKey)
 	registry.RegisterProvider("codex", prov)
-	log.Printf("codex: registered (key %d chars)", len(apiKey))
+	if apiKey != "" {
+		log.Printf("codex: registered (API key %d chars)", len(apiKey))
+	} else {
+		log.Println("codex: registered (using codex login auth)")
+	}
 
 	// Update allowed backends so tiers UI shows codex.
 	cc.SetAllowedBackends(registry.BackendNames())

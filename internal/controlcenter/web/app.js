@@ -2316,7 +2316,7 @@ function chatUpdateBubbleContent(bubble, text) {
 
 function chatAppendBubble(role, text, meta) {
   const bubble = document.createElement('div');
-  bubble.className = 'chat-bubble ' + role;
+  bubble.className = 'chat-bubble ' + role + (role === 'assistant' ? ' docs-article' : '');
   if (meta && meta.id) bubble.dataset.msgId = meta.id;
   // Render media attachments BEFORE text so images appear above the message.
   if (meta && meta.media && meta.media.length) {
@@ -2642,7 +2642,7 @@ async function chatProcessStream(res) {
             if (chatAgentTracker) chatAgentTracker.classList.remove('open');
             // Start a fresh bubble (new bubble per text section after tools/thinking)
             chatAssistantBubble = document.createElement('div');
-            chatAssistantBubble.className = 'chat-bubble assistant';
+            chatAssistantBubble.className = 'chat-bubble assistant docs-article';
             chatAssistantBubble.innerHTML = '';
             chatFullText = '';
             var metaEl = document.createElement('div');
@@ -2663,7 +2663,7 @@ async function chatProcessStream(res) {
           if (!chatAssistantBubble) {
             // Create bubble in the stream target (may be detached).
             chatAssistantBubble = document.createElement('div');
-            chatAssistantBubble.className = 'chat-bubble assistant';
+            chatAssistantBubble.className = 'chat-bubble assistant docs-article';
             chatAssistantBubble.innerHTML = chatRenderMd(chatFullText);
             var tm = document.createElement('div');
             tm.className = 'chat-bubble-meta';

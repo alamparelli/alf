@@ -701,6 +701,9 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   align-self: flex-start; background: var(--bg-card); border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
 }
+.chat-bubble.chat-error {
+  border-color: var(--error, #e53935); background: rgba(229,57,53,0.08);
+}
 .chat-bubble.system {
   align-self: center; background: var(--bg-input); color: var(--text-dim);
   font-size: 0.78rem; padding: 5px 12px; border-radius: 8px; max-width: 90%;

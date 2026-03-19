@@ -192,6 +192,7 @@ func streamJob(w http.ResponseWriter, r *http.Request, job *chatJob, offset int)
 
 		if done {
 			if jobErr != nil {
+				log.Printf("[chat] job %s error: %v", job.ID, jobErr)
 				errData, _ := json.Marshal(map[string]string{"error": jobErr.Error()})
 				fmt.Fprintf(w, "event: error\ndata: %s\n\n", errData)
 				flusher.Flush()

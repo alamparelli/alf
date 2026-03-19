@@ -2685,7 +2685,24 @@ async function chatProcessStream(res) {
           chatJobId = null; // job complete
           break;
         case 'error':
-          toast(data.error || 'Chat error', 'error');
+          // Show error inline in chat bubble instead of disruptive toast.
+          var errMsg = data.error || 'Chat error';
+          console.error('[chat] stream error:', errMsg);
+          if (!chatAssistantBubble) {
+            chatAssistantBubble = document.createElement('div');
+            chatAssistantBubble.className = 'chat-bubble assistant';
+            var metaEl = document.createElement('div');
+            metaEl.className = 'chat-bubble-meta';
+            var reactionsEl = document.createElement('span');
+            reactionsEl.className = 'chat-reactions';
+            metaEl.appendChild(reactionsEl);
+            chatAssistantBubble.appendChild(metaEl);
+            chatStreamTarget().appendChild(chatAssistantBubble);
+          }
+          chatAssistantBubble.classList.add('chat-error');
+          chatFullText += (chatFullText ? '\n\n' : '') + errMsg;
+          chatUpdateBubbleContent(chatAssistantBubble, chatFullText);
+          chatScrollBottom();
           chatJobId = null;
           break;
       }

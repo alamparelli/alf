@@ -36,6 +36,28 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.className = 'toast', 3000);
 }
 
+// --- Restart: poll until daemon is back, then reload ---
+function waitForDaemonAndReload(onStatus) {
+  var dots = 0;
+  var elapsed = 0;
+  var interval = 1500;
+  var maxWait = 120000;
+  if (onStatus) onStatus('Restarting...');
+  var timer = setInterval(function() {
+    elapsed += interval;
+    dots = (dots + 1) % 4;
+    if (onStatus) onStatus('Waiting for daemon' + '.'.repeat(dots + 1) + ' (' + Math.round(elapsed / 1000) + 's)');
+    if (elapsed >= maxWait) {
+      clearInterval(timer);
+      if (onStatus) onStatus('Daemon did not come back after ' + Math.round(maxWait / 1000) + 's. Try refreshing manually.');
+      return;
+    }
+    fetch('/api/status', { credentials: 'same-origin' })
+      .then(function(r) { if (r.ok) { clearInterval(timer); location.reload(); } })
+      .catch(function() { /* still down, keep polling */ });
+  }, interval);
+}
+
 // --- Desktop Notifications ---
 // Request permission on first user interaction.
 document.addEventListener('click', function reqNotif() {
@@ -203,6 +225,7 @@ function navigateTo(view) {
   const vaultView = document.getElementById('vaultView');
   const terminalView = document.getElementById('terminalView');
   const settingsView = document.getElementById('settingsView');
+  const marketplaceView = document.getElementById('marketplaceView');
 
   // Update active nav item -docs:id should highlight the docs nav item
   const navView = view.startsWith('docs:') ? 'docs' : (view.startsWith('page:') ? view : view);
@@ -227,6 +250,7 @@ function navigateTo(view) {
   vaultView.style.display = 'none';
   terminalView.style.display = 'none';
   settingsView.style.display = 'none';
+  if (marketplaceView) marketplaceView.style.display = 'none';
 
   if (view === 'home') {
     homeView.style.display = '';
@@ -283,6 +307,10 @@ function navigateTo(view) {
     terminalView.style.display = '';
     pageFrame.src = '';
     terminalInit();
+  } else if (view === 'marketplace') {
+    if (marketplaceView) marketplaceView.style.display = '';
+    pageFrame.src = '';
+    mpInit();
   } else if (view === 'settings') {
     settingsView.style.display = '';
     pageFrame.src = '';
@@ -379,12 +407,8 @@ document.getElementById('settingsRerunSetup').addEventListener('click', () => {
     restartBtn.disabled = true;
     try {
       await fetch('/api/restart', { method: 'POST', credentials: 'same-origin' });
-      showOutput('Restarting... the page will reload shortly.');
-      setTimeout(() => location.reload(), 4000);
-    } catch (e) {
-      showOutput('Restart request sent. Reloading...');
-      setTimeout(() => location.reload(), 4000);
-    }
+    } catch (e) { /* expected — server is shutting down */ }
+    waitForDaemonAndReload(showOutput);
   });
 
 })();
@@ -3194,9 +3218,11 @@ function chatExecCommand(cmd) {
       break;
     case '/restart':
       if (!confirm('Restart ALF daemon?')) return;
-      fetch('/api/restart', { method: 'POST', credentials: 'same-origin' })
-        .then(() => { chatAppendBubble('assistant', 'Restart signal sent.', { tier: 'system' }); chatScrollBottom(); })
-        .catch(() => { chatAppendBubble('assistant', 'Restart failed.', { tier: 'system' }); chatScrollBottom(); });
+      fetch('/api/restart', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+      chatAppendBubble('assistant', 'Restarting...', { tier: 'system' }); chatScrollBottom();
+      waitForDaemonAndReload(function(msg) {
+        chatAppendBubble('assistant', msg, { tier: 'system' }); chatScrollBottom();
+      });
       break;
   }
 }
@@ -3287,16 +3313,31 @@ function capitalizeName(name) {
 }
 
 function loadApps() {
-  return api('/api/apps/').then(r => {
+  // Fetch apps and marketplace state in parallel.
+  return Promise.all([
+    api('/api/apps/').catch(() => ({ items: [] })),
+    api('/api/marketplace').catch(() => [])
+  ]).then(([r, mpApps]) => {
     const section = document.getElementById('navAppsSection');
     const items = r.items || [];
+
+    // Build marketplace state map: slug → state
+    const mpState = {};
+    (mpApps || []).forEach(mp => { mpState[mp.slug] = mp.state; });
+
+    // Filter out marketplace apps that are not enabled.
+    const visibleItems = items.filter(app => {
+      if (mpState[app.name] !== undefined && mpState[app.name] !== 'enabled') return false;
+      return true;
+    });
 
     section.innerHTML = '';
 
     const favs = JSON.parse(localStorage.getItem('alf-nav-favs') || '[]');
-    items.forEach(app => {
+    visibleItems.forEach(app => {
       const a = document.createElement('a');
       a.className = 'nav-item';
+      if (mpState[app.name] === 'enabled') a.classList.add('nav-item-mp');
       a.dataset.view = 'page:' + app.name;
       const icon = safeLucideIcon(app.icon || 'app-window', 'app-window');
       const label = app.display_name || capitalizeName(app.name);
@@ -7843,5 +7884,96 @@ async function vaultPopulateFileRefs() {
   select.innerHTML = '<option value="">-- select key file --</option>' +
     vaultFilesCache.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('');
   if (current) select.value = current;
+}
+
+// --- Marketplace ---
+var mpInitialized = false;
+
+function mpInit() {
+  if (!mpInitialized) {
+    mpInitialized = true;
+    document.getElementById('mpRefreshBtn').addEventListener('click', mpLoad);
+  }
+  mpLoad();
+}
+
+function mpLoad() {
+  const grid = document.getElementById('mpGrid');
+  grid.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem;padding:8px">Loading...</div>';
+  api('/api/marketplace').then(apps => {
+    if (!apps || apps.length === 0) {
+      grid.innerHTML = '<div class="mp-empty">No apps available yet.</div>';
+      return;
+    }
+    grid.innerHTML = '';
+    apps.forEach(app => {
+      const card = document.createElement('div');
+      card.className = 'mp-card';
+      if (app.state === 'enabled') card.classList.add('mp-card-enabled');
+
+      const iconName = app.icon || 'package';
+      const toolCount = (app.tools || []).length;
+      const stateLabel = app.state === 'enabled' ? 'Enabled' : app.state === 'disabled' ? 'Disabled' : 'Installed';
+      const stateCls = 'mp-state-' + app.state;
+
+      card.innerHTML =
+        '<div class="mp-card-header">' +
+          '<div class="mp-card-icon"><i data-lucide="' + esc(iconName) + '"></i></div>' +
+          '<div class="mp-card-info">' +
+            '<div class="mp-card-title">' + esc(app.name) + '</div>' +
+            '<div class="mp-card-meta">' +
+              '<span class="mp-badge ' + stateCls + '">' + stateLabel + '</span>' +
+              '<span class="mp-card-version">v' + esc(app.version || '?') + '</span>' +
+              (app.category ? '<span class="mp-card-cat">' + esc(app.category) + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<p class="mp-card-desc">' + esc(app.description || '') + '</p>' +
+        (toolCount > 0 ? '<div class="mp-card-tools">' + (app.tools || []).map(t =>
+          '<span class="mp-tool-tag" title="' + esc(t.description || '') + '">' + esc(t.name) + '</span>'
+        ).join('') + '</div>' : '') +
+        '<div class="mp-card-actions">' +
+          (app.state === 'enabled'
+            ? '<button class="btn btn-sm mp-disable-btn" data-slug="' + esc(app.slug) + '">Disable</button>'
+            : '<button class="btn btn-sm btn-primary mp-enable-btn" data-slug="' + esc(app.slug) + '">Enable</button>') +
+          (app.state !== 'enabled'
+            ? '<button class="btn btn-sm btn-ghost mp-uninstall-btn" data-slug="' + esc(app.slug) + '">Uninstall</button>'
+            : '') +
+        '</div>';
+
+      grid.appendChild(card);
+    });
+
+    // Bind actions
+    grid.querySelectorAll('.mp-enable-btn').forEach(btn => {
+      btn.addEventListener('click', () => mpAction(btn.dataset.slug, 'enable'));
+    });
+    grid.querySelectorAll('.mp-disable-btn').forEach(btn => {
+      btn.addEventListener('click', () => mpAction(btn.dataset.slug, 'disable'));
+    });
+    grid.querySelectorAll('.mp-uninstall-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (confirm('Uninstall ' + btn.dataset.slug + '? App data will be preserved.')) {
+          mpAction(btn.dataset.slug, 'uninstall');
+        }
+      });
+    });
+
+    if (window.lucide) lucide.createIcons();
+  }).catch(e => {
+    grid.innerHTML = '<div class="mp-empty">Failed to load marketplace.</div>';
+  });
+}
+
+function mpAction(slug, action) {
+  api('/api/marketplace/' + slug + '/' + action, { method: 'POST' })
+    .then(() => {
+      toast(slug + ' ' + action + 'd', 'success');
+      mpLoad();
+      loadApps(); // refresh sidebar
+    })
+    .catch(e => {
+      toast((e && e.error) || 'Action failed', 'error');
+    });
 }
 

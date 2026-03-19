@@ -35,6 +35,16 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.className = 'toast', 3000);
 }
 
+// --- Share on X ---
+async function shareOnX(e) {
+  e.preventDefault();
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const key = isMac ? '\u2318V' : 'Ctrl+V';
+  toast('Take a screenshot, then paste it in the tweet (' + key + ')');
+  const text = encodeURIComponent('Powered by ALF OS, my personal AI Operating System');
+  window.open('https://x.com/intent/tweet?text=' + text, '_blank');
+}
+
 // --- Desktop Notifications ---
 // Request permission on first user interaction.
 document.addEventListener('click', function reqNotif() {
@@ -347,7 +357,7 @@ function showUpdateBanner(current, latest) {
   banner.id = 'updateBanner';
   banner.className = 'update-banner';
   banner.innerHTML = '<span><strong>Update available:</strong> ' + esc(current) + ' → ' + esc(latest) +
-    ' — Run <code>alf upgrade</code> on the host.</span>' +
+    ' - Run <code>alf upgrade</code> on the host.</span>' +
     '<button class="update-banner-close" title="Dismiss">&times;</button>';
   banner.querySelector('.update-banner-close').addEventListener('click', () => {
     banner.remove();
@@ -5422,7 +5432,7 @@ function showSetupWizard(status) {
           cs.textContent = 'Authenticated';
           cs.className = 'setup-claude-status ok';
         } else {
-          cs.innerHTML = 'Not authenticated — run <code>claude login</code> in the Terminal tab';
+          cs.innerHTML = 'Not authenticated - run <code>claude login</code> in the Terminal tab';
           cs.className = 'setup-claude-status pending';
         }
       }
@@ -5703,7 +5713,7 @@ function showSetupWizard(status) {
         if (r.authenticated) {
           el.insertAdjacentHTML('beforeend',
             '<div class="setup-apply-info">' +
-            '<strong>Claude CLI</strong> — authenticated. ' +
+            '<strong>Claude CLI</strong> - authenticated. ' +
             'Use the <a href="#" onclick="event.preventDefault();navigateTo(\'terminal\');" style="color:var(--accent)">Terminal</a> tab to interact with Claude directly.' +
             '</div>');
         } else {
@@ -7201,7 +7211,7 @@ async function vaultCreateTokenModal() {
       await vaultModal({
         title: 'Access Key Created',
         fields: [
-          { id: 'key', label: 'Key (copy now — shown only once)', type: 'text', value: res.id, disabled: true },
+          { id: 'key', label: 'Key (copy now - shown only once)', type: 'text', value: res.id, disabled: true },
         ],
         saveLabel: 'Done',
       });

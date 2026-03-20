@@ -2567,6 +2567,8 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
 .mp-toolbar-right { display: flex; gap: 8px; align-items: center; }
 
 .mp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.mp-category-heading { grid-column: 1 / -1; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); padding: 8px 0 2px; border-bottom: 1px solid var(--border); margin-top: 8px; }
+.mp-category-heading:first-child { margin-top: 0; }
 .mp-card {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 16px; transition: transform 0.15s, border-color 0.2s;

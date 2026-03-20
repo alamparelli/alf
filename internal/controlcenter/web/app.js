@@ -7931,11 +7931,25 @@ function mpLoad() {
       return;
     }
 
-    // Stable sort: alphabetical by name.
-    merged.sort((a, b) => (a.name || a.slug || '').localeCompare(b.name || b.slug || ''));
+    // Sort: by category then alphabetical by name.
+    merged.sort((a, b) => {
+      var catA = (a.category || 'other').toLowerCase();
+      var catB = (b.category || 'other').toLowerCase();
+      if (catA !== catB) return catA.localeCompare(catB);
+      return (a.name || a.slug || '').localeCompare(b.name || b.slug || '');
+    });
 
     grid.innerHTML = '';
+    var lastCategory = null;
     merged.forEach(app => {
+      var cat = (app.category || 'Other');
+      if (cat !== lastCategory) {
+        lastCategory = cat;
+        var heading = document.createElement('div');
+        heading.className = 'mp-category-heading';
+        heading.textContent = cat.charAt(0).toUpperCase() + cat.slice(1);
+        grid.appendChild(heading);
+      }
       const card = document.createElement('div');
       card.className = 'mp-card';
       if (app.state === 'enabled') card.classList.add('mp-card-enabled');

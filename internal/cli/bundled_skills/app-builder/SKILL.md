@@ -202,8 +202,7 @@ import (
 var appDir string
 
 func init() {
-	exe, _ := os.Executable()
-	appDir = filepath.Dir(exe)
+	appDir = filepath.Dir(os.Args[0])
 	if appDir == "" || appDir == "." {
 		appDir, _ = os.Getwd()
 	}
@@ -329,11 +328,11 @@ with get_db() as conn:
     )""")
 
 class Handler(BaseHTTPRequestHandler):
-    def _body(self):
-        n = int(self.headers.get("Content-Length", 0))
-        return json.loads(self.rfile.read(n)) if n else {}
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length", 0))
+        return json.loads(self.rfile.read(length)) if length else {}
 
-    def _json(self, code, data):
+    def _respond(self, code, data):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -341,36 +340,39 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/SLUG":
-            with get_db() as c:
-                rows = c.execute("SELECT * FROM items ORDER BY id DESC").fetchall()
-            self._json(200, [dict(r) for r in rows])
+            with get_db() as conn:
+                rows = conn.execute("SELECT * FROM items ORDER BY id DESC").fetchall()
+            self._respond(200, [dict(r) for r in rows])
         else:
-            self._json(404, {"error": "not found"})
+            self._respond(404, {"error": "not found"})
 
     def do_POST(self):
         if self.path == "/api/SLUG":
-            body = self._body()
-            with get_db() as c:
-                cur = c.execute("INSERT INTO items (title) VALUES (?)", (body.get("title", ""),))
-            self._json(201, {"id": cur.lastrowid})
+            body = self._read_body()
+            with get_db() as conn:
+                cur = conn.execute("INSERT INTO items (title) VALUES (?)", (body.get("title", ""),))
+            self._respond(201, {"id": cur.lastrowid})
         else:
-            self._json(404, {"error": "not found"})
+            self._respond(404, {"error": "not found"})
 
     def do_DELETE(self):
         if self.path.startswith("/api/SLUG/"):
             item_id = self.path.split("/")[-1]
-            with get_db() as c:
-                c.execute("DELETE FROM items WHERE id=?", (item_id,))
-            self._json(200, {"ok": True})
+            with get_db() as conn:
+                conn.execute("DELETE FROM items WHERE id=?", (item_id,))
+            self._respond(200, {"ok": True})
         else:
-            self._json(404, {"error": "not found"})
+            self._respond(404, {"error": "not found"})
 
     def log_message(self, fmt, *args): pass
 
-if __name__ == "__main__":
+def find_free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
+        return s.getsockname()[1]
+
+if __name__ == "__main__":
+    port = find_free_port()
     with open(os.path.join(DATA_DIR, "port"), "w") as f:
         f.write(str(port))
     print(f"SLUG server listening on :{port}")
@@ -432,7 +434,7 @@ async function getPort() {
 async function api(method, path, body) {
   const port = await getPort();
   if (!port) throw new Error('Backend not running');
-  let cmd = `curl -sf -X ${method} http://127.0.0.1:${port}${path}`;
+  let cmd = `curl -s -X ${method} http://127.0.0.1:${port}${path}`;
   cmd += " -H 'Content-Type: application/json'";
   if (body !== undefined) {
     cmd += ` -d '${JSON.stringify(body).replace(/'/g, "'\\''")}'`;
@@ -511,7 +513,7 @@ async function api(method, path, body) {
     async function api(method, path, body) {
       const port = await getPort();
       if (!port) throw new Error('Backend not running');
-      let cmd = 'curl -sf -X ' + method + ' http://127.0.0.1:' + port + path;
+      let cmd = 'curl -s -X ' + method + ' http://127.0.0.1:' + port + path;
       cmd += " -H 'Content-Type: application/json'";
       if (body !== undefined) cmd += " -d '" + JSON.stringify(body).replace(/'/g, "'\\''" ) + "'";
       const res = await fetch('/api/bash', {

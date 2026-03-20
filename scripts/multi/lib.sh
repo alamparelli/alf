@@ -90,27 +90,27 @@ scaffold_tenant() {
         [[ -d "$dir/secrets/$s" ]] && rm -rf "$dir/secrets/$s"
         if [[ ! -f "$dir/secrets/$s" ]]; then
             touch "$dir/secrets/$s"
-            chmod 600 "$dir/secrets/$s"
+            chmod 644 "$dir/secrets/$s"
         fi
     done
 
     # Auto-generate cc_auth_token if empty
     if [[ ! -s "$dir/secrets/cc_auth_token" ]]; then
         openssl rand -hex 32 > "$dir/secrets/cc_auth_token"
-        chmod 600 "$dir/secrets/cc_auth_token"
+        chmod 644 "$dir/secrets/cc_auth_token"
         info "Generated cc_auth_token for $user"
     fi
 
     # Copy shared whisper secret
     if [[ -f "$SHARED_DIR/whisper_shared_secret" ]]; then
         cp "$SHARED_DIR/whisper_shared_secret" "$dir/secrets/whisper_shared_secret"
-        chmod 600 "$dir/secrets/whisper_shared_secret"
+        chmod 644 "$dir/secrets/whisper_shared_secret"
     fi
 
     # Copy shared embed secret
     if [[ -f "$SHARED_DIR/embed_shared_secret" ]]; then
         cp "$SHARED_DIR/embed_shared_secret" "$dir/secrets/embed_shared_secret"
-        chmod 600 "$dir/secrets/embed_shared_secret"
+        chmod 644 "$dir/secrets/embed_shared_secret"
     fi
 
     # Fix ownership — use remapped host UID if userns-remap is active
@@ -179,18 +179,18 @@ preflight_fix_placeholders() {
         for s in "${secrets[@]}"; do
             if [[ ! -f "${tenant_dir}secrets/$s" ]]; then
                 touch "${tenant_dir}secrets/$s"
-                chmod 600 "${tenant_dir}secrets/$s"
+                chmod 644 "${tenant_dir}secrets/$s"
             fi
         done
         # Copy whisper secret if missing
         if [[ ! -s "${tenant_dir}secrets/whisper_shared_secret" ]] && [[ -f "$SHARED_DIR/whisper_shared_secret" ]]; then
             cp "$SHARED_DIR/whisper_shared_secret" "${tenant_dir}secrets/whisper_shared_secret"
-            chmod 600 "${tenant_dir}secrets/whisper_shared_secret"
+            chmod 644 "${tenant_dir}secrets/whisper_shared_secret"
         fi
         # Copy embed secret if missing
         if [[ ! -s "${tenant_dir}secrets/embed_shared_secret" ]] && [[ -f "$SHARED_DIR/embed_shared_secret" ]]; then
             cp "$SHARED_DIR/embed_shared_secret" "${tenant_dir}secrets/embed_shared_secret"
-            chmod 600 "${tenant_dir}secrets/embed_shared_secret"
+            chmod 644 "${tenant_dir}secrets/embed_shared_secret"
         fi
     done
 }

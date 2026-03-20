@@ -19,36 +19,81 @@ import (
 // extractorAdapter bridges provider.CLIProvider to memstore.ExtractorProvider,
 // with optional fallback to an API backend when CLI is unavailable.
 type extractorAdapter struct {
-	prov     *provider.CLIProvider
-	registry *provider.Registry // optional: fallback to API backend
+	prov      *provider.CLIProvider
+	registry  *provider.Registry // optional: fallback to API backend
+	tierStore cc.TierStore       // read memory.extract_backend preference
 }
 
 func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params memstore.ExtractorParams) (string, error) {
-	// Try API backend first if registry has backends (avoids spawning CLI process).
+	// Check tier profile for explicit extract_backend preference.
+	var forceBackend, forceModel string
+	if tc := a.tierStore.Current(); tc != nil && tc.Memory != nil {
+		forceBackend = tc.Memory.ExtractBackend
+		forceModel = tc.Memory.ExtractModel
+	}
+
+	model := params.Model
+	if forceModel != "" {
+		model = forceModel
+	}
+
+	// If explicitly set to "cli", skip API backends entirely.
+	if forceBackend == "cli" {
+		return a.invokeCLI(ctx, prompt, model, params)
+	}
+
+	// If a specific backend is configured, use only that one.
+	if forceBackend != "" && a.registry != nil && a.registry.HasBackend(forceBackend) {
+		apiProv := a.registry.ForBackend(forceBackend)
+		apiModel := model
+		if !strings.Contains(apiModel, "/") {
+			apiModel = "anthropic/" + apiModel
+		}
+		result, err := apiProv.Invoke(ctx, prompt, provider.Params{
+			Model: apiModel, MaxTurns: params.MaxTurns, DataDir: params.DataDir,
+		}, nil)
+		if err == nil {
+			return result.Text, nil
+		}
+		log.Printf("memstore: extraction via %s failed (%v), falling back to CLI", forceBackend, err)
+		return a.invokeCLI(ctx, prompt, model, params)
+	}
+
+	// Auto mode: try API backends (prefer authenticated over local), fallback CLI.
 	if a.registry != nil {
 		names := a.registry.BackendNames()
-		if len(names) > 0 {
-			apiProv := a.registry.ForBackend(names[0])
-			model := params.Model
-			// CLI model names need "anthropic/" prefix for API backends.
-			if !strings.Contains(model, "/") {
-				model = "anthropic/" + model
+		preferred := make([]string, 0, len(names))
+		local := make([]string, 0)
+		for _, n := range names {
+			if ap := a.registry.GetAPIBackend(n); ap != nil && !ap.IsOllamaCompat() {
+				preferred = append(preferred, n)
+			} else {
+				local = append(local, n)
+			}
+		}
+		ordered := append(preferred, local...)
+		for _, name := range ordered {
+			apiProv := a.registry.ForBackend(name)
+			apiModel := model
+			if !strings.Contains(apiModel, "/") {
+				apiModel = "anthropic/" + apiModel
 			}
 			result, err := apiProv.Invoke(ctx, prompt, provider.Params{
-				Model:    model,
-				MaxTurns: params.MaxTurns,
-				DataDir:  params.DataDir,
+				Model: apiModel, MaxTurns: params.MaxTurns, DataDir: params.DataDir,
 			}, nil)
 			if err == nil {
 				return result.Text, nil
 			}
-			log.Printf("memstore: API extraction failed (%v), falling back to CLI", err)
+			log.Printf("memstore: API extraction via %s failed (%v), trying next", name, err)
 		}
 	}
 
-	// Fallback to CLI provider.
+	return a.invokeCLI(ctx, prompt, model, params)
+}
+
+func (a *extractorAdapter) invokeCLI(ctx context.Context, prompt, model string, params memstore.ExtractorParams) (string, error) {
 	result, err := a.prov.Invoke(ctx, prompt, provider.Params{
-		Model:    params.Model,
+		Model:    model,
 		MaxTurns: params.MaxTurns,
 		DataDir:  params.DataDir,
 		Tools:    []string{""}, // explicit empty to disable all tools

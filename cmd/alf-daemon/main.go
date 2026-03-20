@@ -104,7 +104,7 @@ func main() {
 	stats := cc.NewStats()
 
 	// Reload channel: CC writes, daemon reads.
-	reloadCh := make(chan cc.ReloadEvent, 4)
+	reloadCh := make(chan cc.ReloadEvent, 16)
 
 	// Magic link auth stores (shared between CC and daemon).
 	magic := cc.NewMagicStore(nil)
@@ -809,7 +809,7 @@ func main() {
 			return ""
 		}
 		extractTimeout := time.Duration(cfg.EffectiveMemoryExtractTimeout()) * time.Second
-		extractAdapter := &extractorAdapter{prov: cliProvider, registry: registry}
+		extractAdapter := &extractorAdapter{prov: cliProvider, registry: registry, tierStore: tierStore}
 
 		memExtractor = memstore.NewExtractor(memDB, dataDir, contextDir, memstore.ExtractorConfig{
 			Timeout:      extractTimeout,
@@ -1601,16 +1601,27 @@ func main() {
 }
 
 // resolveEmbedder picks the best available embedder implementation.
-// Priority: 1) tier profile embedding.url, 2) EMBED_URL env, 3) nil (FTS5-only).
+// Priority: 1) tier profile memory.embedding, 2) legacy tier embedding, 3) EMBED_URL env, 4) nil (FTS5-only).
 func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
-	// 1. From active tier profile.
-	if tc := tierStore.Current(); tc != nil && tc.Embedding != nil && tc.Embedding.URL != "" {
-		instanceID, _ := os.Hostname()
-		secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
-		emb := memstore.NewHTTPEmbedder(tc.Embedding.URL, instanceID, secret, 30*time.Second)
-		go startHTTPEmbedder(emb)
-		log.Printf("memstore: using HTTP embedder from tier config (url=%s)", tc.Embedding.URL)
-		return emb
+	if tc := tierStore.Current(); tc != nil {
+		// 1. New: memory.embedding config.
+		if tc.Memory != nil && tc.Memory.Embedding != nil && tc.Memory.Embedding.URL != "" {
+			instanceID, _ := os.Hostname()
+			secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
+			emb := memstore.NewHTTPEmbedder(tc.Memory.Embedding.URL, instanceID, secret, 30*time.Second)
+			go startHTTPEmbedder(emb)
+			log.Printf("memstore: using HTTP embedder from memory config (url=%s)", tc.Memory.Embedding.URL)
+			return emb
+		}
+		// 2. Legacy: embedding config at tier root (backward compat).
+		if tc.Embedding != nil && tc.Embedding.URL != "" {
+			instanceID, _ := os.Hostname()
+			secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
+			emb := memstore.NewHTTPEmbedder(tc.Embedding.URL, instanceID, secret, 30*time.Second)
+			go startHTTPEmbedder(emb)
+			log.Printf("memstore: using HTTP embedder from tier config (url=%s)", tc.Embedding.URL)
+			return emb
+		}
 	}
 
 	// 2. From env var (embed sidecar container, same pattern as whisper).

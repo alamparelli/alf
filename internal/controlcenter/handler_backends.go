@@ -16,8 +16,10 @@ import (
 
 // modelInfo describes a model available on a backend.
 type modelInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"` // display name (OpenRouter only)
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`       // display name (OpenRouter only)
+	ToolCalls *bool  `json:"tool_calls,omitempty"` // nil = unknown, true/false = detected
+	Reasoning *bool  `json:"reasoning,omitempty"`  // nil = unknown, true/false = detected
 }
 
 // ModelCache caches available models per backend with background refresh.
@@ -290,12 +292,38 @@ func fetchModels(ap *provider.APIProvider) ([]modelInfo, error) {
 	return []modelInfo{}, nil
 }
 
-// parseOllamaModels parses {"models": [{"name": "..."}]}
+// ollamaToolFamilies lists model families known to support tool calling in Ollama.
+var ollamaToolFamilies = map[string]bool{
+	"llama3.1": true, "llama3.2": true, "llama3.3": true, "llama4": true,
+	"qwen2.5": true, "qwen2.5-coder": true, "qwen3": true,
+	"mistral-small": true, "mistral-large": true, "mistral-nemo": true, "mixtral": true,
+	"command-r": true, "command-r-plus": true,
+	"gemma2": true, "gemma3": true,
+	"deepseek-r1": true, "deepseek-v3": true,
+	"phi4": true,
+}
+
+// ollamaToolModels lists model name prefixes known to support tool calling.
+var ollamaToolModels = []string{
+	"llama3.1", "llama3.2", "llama3.3", "llama4",
+	"qwen2.5", "qwen3",
+	"mistral-small", "mistral-large", "mistral-nemo", "mixtral",
+	"command-r",
+	"gemma2", "gemma3",
+	"deepseek-r1", "deepseek-v3",
+	"phi4",
+}
+
+// parseOllamaModels parses {"models": [{"name": "...", "details": {...}}]}
 func parseOllamaModels(data []byte) []modelInfo {
 	var resp struct {
 		Models []struct {
-			Name  string `json:"name"`
-			Model string `json:"model"`
+			Name    string `json:"name"`
+			Model   string `json:"model"`
+			Details struct {
+				Family   string   `json:"family"`
+				Families []string `json:"families"`
+			} `json:"details"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil || len(resp.Models) == 0 {
@@ -307,19 +335,52 @@ func parseOllamaModels(data []byte) []modelInfo {
 		if id == "" {
 			id = m.Model
 		}
-		if id != "" {
-			models = append(models, modelInfo{ID: id})
+		if id == "" {
+			continue
 		}
+		mi := modelInfo{ID: id}
+		// Detect tool call support from model family or name prefix.
+		if tc := ollamaDetectToolCalls(id, m.Details.Family, m.Details.Families); tc != nil {
+			mi.ToolCalls = tc
+		}
+		models = append(models, mi)
 	}
 	return models
 }
 
+func ollamaDetectToolCalls(name, family string, families []string) *bool {
+	// Check family field.
+	if family != "" && ollamaToolFamilies[family] {
+		t := true
+		return &t
+	}
+	// Check families list.
+	for _, f := range families {
+		if ollamaToolFamilies[f] {
+			t := true
+			return &t
+		}
+	}
+	// Fallback: check model name prefix.
+	lower := strings.ToLower(name)
+	for _, prefix := range ollamaToolModels {
+		if strings.HasPrefix(lower, prefix) {
+			t := true
+			return &t
+		}
+	}
+	return nil // unknown
+}
+
 // parseOpenAIModels parses {"data": [{"id": "...", "name": "..."}]}
+// Also detects tool call support from OpenRouter's supported_parameters field.
 func parseOpenAIModels(data []byte) []modelInfo {
 	var resp struct {
 		Data []struct {
-			ID   string `json:"id"`
-			Name string `json:"name,omitempty"`
+			ID                  string   `json:"id"`
+			Name                string   `json:"name,omitempty"`
+			SupportedParameters []string `json:"supported_parameters,omitempty"` // OpenRouter
+			SupportedFeatures   []string `json:"supported_features,omitempty"`   // OpenRouter
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil || len(resp.Data) == 0 {
@@ -327,9 +388,29 @@ func parseOpenAIModels(data []byte) []modelInfo {
 	}
 	models := make([]modelInfo, 0, len(resp.Data))
 	for _, m := range resp.Data {
-		if m.ID != "" {
-			models = append(models, modelInfo{ID: m.ID, Name: m.Name})
+		if m.ID == "" {
+			continue
 		}
+		mi := modelInfo{ID: m.ID, Name: m.Name}
+		// OpenRouter provides supported_parameters/features — detect capabilities.
+		allCaps := append(m.SupportedParameters, m.SupportedFeatures...)
+		if len(allCaps) > 0 {
+			tc := containsStr(allCaps, "tools")
+			mi.ToolCalls = &tc
+			rs := containsStr(allCaps, "reasoning") || containsStr(allCaps, "include_reasoning")
+			mi.Reasoning = &rs
+		}
+		models = append(models, mi)
 	}
 	return models
+}
+
+// containsStr checks if a string slice contains a value.
+func containsStr(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

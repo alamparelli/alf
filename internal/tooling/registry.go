@@ -243,21 +243,34 @@ func SanitizeToolName(name string) string {
 // Schemas are patched for strict mode: all properties added to required,
 // optional properties made nullable, additionalProperties set to false.
 func ToOpenAI(schemas []ToolSchema) []map[string]any {
+	return toOpenAI(schemas, true)
+}
+
+// ToOpenAICompat converts tool schemas without strict mode.
+// Use this for Ollama and other backends that don't support OpenAI strict schemas.
+func ToOpenAICompat(schemas []ToolSchema) []map[string]any {
+	return toOpenAI(schemas, false)
+}
+
+func toOpenAI(schemas []ToolSchema, strict bool) []map[string]any {
 	tools := make([]map[string]any, len(schemas))
 	for i, s := range schemas {
 		params := s.Parameters
 		if params == nil {
 			params = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		params = enforceStrictSchema(params)
+		fn := map[string]any{
+			"name":        SanitizeToolName(s.Name),
+			"description": s.Description,
+			"parameters":  params,
+		}
+		if strict {
+			fn["parameters"] = enforceStrictSchema(params)
+			fn["strict"] = true
+		}
 		tools[i] = map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        SanitizeToolName(s.Name),
-				"description": s.Description,
-				"parameters":  params,
-				"strict":      true,
-			},
+			"type":     "function",
+			"function": fn,
 		}
 	}
 	return tools

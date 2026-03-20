@@ -204,6 +204,18 @@ type EmbeddingConfig struct {
 	Model string `json:"model,omitempty"` // for external APIs: "text-embedding-3-small"
 }
 
+// MemoryConfig defines memory extraction and embedding settings at the profile level.
+type MemoryConfig struct {
+	// ExtractBackend selects which backend to use for LLM-based fact extraction.
+	// Empty = auto (prefer authenticated API, fallback to CLI).
+	// "cli" = always use Claude CLI. Any registered backend name = use that.
+	ExtractBackend string `json:"extract_backend,omitempty"`
+	// ExtractModel overrides the model used for extraction (e.g. "anthropic/claude-haiku-4-5").
+	ExtractModel string `json:"extract_model,omitempty"`
+	// Embedding configures the vector embedding service.
+	Embedding *EmbeddingConfig `json:"embedding,omitempty"`
+}
+
 // TiersConfig wraps a list of tiers plus router-level settings.
 type TiersConfig struct {
 	Tiers              []Tier           `json:"tiers"`
@@ -211,7 +223,8 @@ type TiersConfig struct {
 	DefaultFallback    string           `json:"default_fallback,omitempty"`
 	RouterDistinctions string           `json:"router_distinctions,omitempty"`
 	RouterBackend      string           `json:"router_backend,omitempty"` // "cli" (default), or registered backend name
-	Embedding          *EmbeddingConfig `json:"embedding,omitempty"`
+	Embedding          *EmbeddingConfig `json:"embedding,omitempty"`      // deprecated: use Memory.Embedding
+	Memory             *MemoryConfig    `json:"memory,omitempty"`
 }
 
 // DefaultTiersConfig returns a TiersConfig parsed from the embedded defaults/tiers.json.

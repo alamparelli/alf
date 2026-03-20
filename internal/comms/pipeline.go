@@ -451,7 +451,12 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		if apiProv, ok := prov.(*provider.APIProvider); ok {
 			schemas := e.ToolRegistry.ForToolsStrict(tp.Tools)
 			if len(schemas) > 0 {
-				tools := tooling.ToOpenAI(schemas)
+				var tools []map[string]any
+				if apiProv.IsDirectOpenAI() {
+					tools = tooling.ToOpenAI(schemas)
+				} else {
+					tools = tooling.ToOpenAICompat(schemas)
+				}
 				maxTurns := tp.MaxTurns
 				if maxTurns <= 0 {
 					maxTurns = 10

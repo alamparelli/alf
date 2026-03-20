@@ -343,6 +343,10 @@ document.querySelectorAll('#bottomNav .bottom-nav-item').forEach(el => {
   });
 });
 
+// Sidebar "more" link -> settings
+const _moreLink = document.querySelector('.sidebar-more-link');
+if (_moreLink) _moreLink.addEventListener('click', (e) => { e.preventDefault(); navigateTo('settings'); });
+
 // Sync bottom nav active state with navigation.
 function syncBottomNav(view) {
   document.querySelectorAll('#bottomNav .bottom-nav-item').forEach(el => {
@@ -361,8 +365,9 @@ let _updateDismissed = false;
 function loadStatus() {
   api('/api/status').then(data => {
     if (data && data.version) {
-      const el = document.getElementById('sidebarVersion');
-      if (el) el.textContent = data.version.startsWith('v') ? data.version : 'v' + data.version;
+      const ver = data.version.startsWith('v') ? data.version : 'v' + data.version;
+      const el = document.getElementById('settingsVersion');
+      if (el) el.textContent = ver;
     }
     if (data && data.update_available && !_updateDismissed) {
       showUpdateBanner(data.version, data.update_available);
@@ -3230,7 +3235,10 @@ function chatExecCommand(cmd) {
 function chatAppendSystemMessage(text) {
   const el = document.createElement('div');
   el.className = 'chat-system-msg';
-  el.textContent = text;
+  // Minimal markdown: **bold** and `code`.
+  el.innerHTML = esc(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.+?)`/g, '<code>$1</code>');
   chatMessages.appendChild(el);
 }
 
@@ -4898,16 +4906,49 @@ function renderModelField(backendKey, models, targetId) {
   const curVal = el ? el.value : '';
   const libLink = modelLibraryLink(backendKey);
   if (models.length > 0) {
-    // Show model ID as label (the actual variable name, not display title).
-    const opts = models.map(m => {
+    // Check if any model has capability info (backend provides it).
+    const hasToolInfo = models.some(m => m.tool_calls !== undefined && m.tool_calls !== null);
+    const hasReasoningInfo = models.some(m => m.reasoning !== undefined && m.reasoning !== null);
+    const hasCaps = hasToolInfo || hasReasoningInfo;
+
+    // Sort: most capable first (tools+reasoning > tools > reasoning > unknown > none).
+    const sorted = [...models];
+    if (hasCaps) {
+      sorted.sort((a, b) => {
+        const aScore = (a.tool_calls === true ? 2 : 0) + (a.reasoning === true ? 1 : 0);
+        const bScore = (b.tool_calls === true ? 2 : 0) + (b.reasoning === true ? 1 : 0);
+        if (aScore !== bScore) return bScore - aScore;
+        // Within same capability level: no-info before explicit-false.
+        const aHas = (a.tool_calls === false || a.reasoning === false) ? 1 : 0;
+        const bHas = (b.tool_calls === false || b.reasoning === false) ? 1 : 0;
+        if (aHas !== bHas) return aHas - bHas;
+        return a.id.localeCompare(b.id);
+      });
+    }
+
+    // Build options with capability indicators.
+    const opts = sorted.map(m => {
       const sel = (m.id === curVal) ? ' selected' : '';
-      return '<option value="' + esc(m.id) + '"' + sel + '>' + esc(m.id) + '</option>';
+      let label = esc(m.id);
+      let badges = '';
+      let cls = '';
+      if (hasCaps) {
+        if (m.tool_calls === true) badges += '\u{1F527}';
+        if (m.reasoning === true) badges += '\u{1F9E0}';
+        if (badges) label = badges + ' ' + label;
+        if (m.tool_calls === false && m.reasoning === false) cls = ' class="model-opt-notools"';
+      }
+      return '<option value="' + esc(m.id) + '"' + sel + cls + '>' + label + '</option>';
     }).join('');
     // Add current value if not in list (user may have typed a custom model).
-    const ids = models.map(m => m.id);
+    const ids = sorted.map(m => m.id);
     const extra = (curVal && !ids.includes(curVal)) ? '<option value="' + esc(curVal) + '" selected>' + esc(curVal) + ' (custom)</option>' : '';
-    const hasFilter = !isCLI && models.length > 10;
-    row.innerHTML = '<label>Model' + libLink + '</label><select id="' + targetId + '">' + extra + opts + '</select>' +
+    const hasFilter = !isCLI && sorted.length > 10;
+    var legendParts = [];
+    if (hasToolInfo) legendParts.push('\u{1F527} tools');
+    if (hasReasoningInfo) legendParts.push('\u{1F9E0} reasoning');
+    const legend = legendParts.length ? '<span class="model-legend">' + legendParts.join(' &nbsp; ') + '</span>' : '';
+    row.innerHTML = '<label>Model' + libLink + '</label>' + legend + '<select id="' + targetId + '">' + extra + opts + '</select>' +
       (hasFilter ? '<input type="text" class="model-filter" placeholder="Filter models...">' : '');
     if (hasFilter) {
       const filterInput = row.querySelector('.model-filter');
@@ -4980,6 +5021,7 @@ async function tiersConfigSwitch() {
     });
     toast('Switched to ' + name.replace('.json', ''));
     tiersLoad();
+    tiersConfigsLoad();
   } catch (err) {
     alert('Switch failed: ' + (err?.error || err?.message || 'unknown'));
     tiersConfigsLoad();
@@ -5021,6 +5063,22 @@ function tiersRender() {
     '<div class="tiers-router-row"><button class="btn-sm" id="tiersEditRouterBtn">Edit router settings</button></div>' +
     '</div>';
   document.getElementById('tiersEditRouterBtn').addEventListener('click', () => tiersShowRouterModal());
+
+  // Memory config summary
+  const mem = tiersCache.memory || {};
+  const embUrl = (mem.embedding && mem.embedding.url) || (tiersCache.embedding && tiersCache.embedding.url) || '';
+  const extractBackend = mem.extract_backend || 'auto';
+  const extractModel = mem.extract_model || '';
+  const memCfg = document.getElementById('tiersMemoryConfig');
+  if (memCfg) {
+    memCfg.innerHTML = '<div class="tiers-router-card">' +
+      '<div class="tiers-router-row"><span class="tiers-router-label">Extraction backend</span><span class="tiers-router-value">' + esc(extractBackend) + '</span></div>' +
+      (extractModel ? '<div class="tiers-router-row"><span class="tiers-router-label">Extraction model</span><span class="tiers-router-value">' + esc(extractModel) + '</span></div>' : '') +
+      '<div class="tiers-router-row"><span class="tiers-router-label">Embedding URL</span><span class="tiers-router-value">' + esc(embUrl || 'none') + '</span></div>' +
+      '<div class="tiers-router-row"><button class="btn-sm" id="tiersEditMemoryBtn">Edit memory settings</button></div>' +
+      '</div>';
+    document.getElementById('tiersEditMemoryBtn').addEventListener('click', () => tiersShowMemoryModal());
+  }
 
   // Tier cards
   const tiers = tiersCache.tiers || [];
@@ -5174,8 +5232,8 @@ function tiersShowModal(tier) {
     if (hint) hint.textContent = isCLI ? 'CLI tools for Claude tiers' : 'ALF tools for API tiers with tool loop';
     const wcLabel = document.getElementById('tfWriteCapableLabel');
     if (wcLabel) wcLabel.style.display = isCLI ? '' : 'none';
-    const effortRow = document.getElementById('tfEffortRow');
-    if (effortRow) effortRow.style.display = isCLI ? '' : 'none';
+    // Effort is available for all backends (CLI: --effort flag, API: reasoning.effort).
+    // Always visible.
   }
   updateToolsVisibility(t.backend);
 
@@ -5288,6 +5346,65 @@ function tiersShowRouterModal() {
   });
 }
 
+function tiersShowMemoryModal() {
+  const old = document.getElementById('tierMemoryModal');
+  if (old) old.remove();
+
+  const mem = tiersCache.memory || {};
+  const emb = (mem.embedding) || (tiersCache.embedding) || {};
+  const backendOpts = ['', 'cli', ...BACKENDS.filter(b => b && b !== 'cli')].map(b => {
+    const label = !b ? 'auto (prefer API, fallback CLI)' : b;
+    const sel = (mem.extract_backend || '') === b ? ' selected' : '';
+    return '<option value="' + b + '"' + sel + '>' + label + '</option>';
+  }).join('');
+
+  const html = '<div class="modal-backdrop" id="tierMemoryModal">' +
+    '<div class="modal tier-modal">' +
+      '<h3>Memory Settings</h3>' +
+      '<div class="tier-form">' +
+        '<h4 style="margin:0 0 8px;font-size:0.82rem;color:var(--text-dim)">Extraction (LLM)</h4>' +
+        '<div class="form-row"><label>Backend</label><select id="tmExtractBackend">' + backendOpts + '</select></div>' +
+        '<div class="form-row"><label>Model override</label><input type="text" id="tmExtractModel" value="' + esc(mem.extract_model || '') + '" placeholder="default (from extractor)"></div>' +
+        '<h4 style="margin:12px 0 8px;font-size:0.82rem;color:var(--text-dim)">Embedding (vectors)</h4>' +
+        '<div class="form-row"><label>Embed service URL</label><input type="text" id="tmEmbedUrl" value="' + esc(emb.url || '') + '" placeholder="http://embed:8090 or empty to disable"></div>' +
+        '<div class="form-row"><label>Embed model</label><input type="text" id="tmEmbedModel" value="' + esc(emb.model || '') + '" placeholder="default"></div>' +
+      '</div>' +
+      '<div class="upload-actions">' +
+        '<button class="btn" id="tmCancel">Cancel</button>' +
+        '<button class="btn btn-primary" id="tmSave">Save</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  document.getElementById('tmCancel').addEventListener('click', () => document.getElementById('tierMemoryModal').remove());
+  document.getElementById('tierMemoryModal').addEventListener('click', e => { if (e.target.id === 'tierMemoryModal') document.getElementById('tierMemoryModal').remove(); });
+
+  document.getElementById('tmSave').addEventListener('click', () => {
+    const extractBackend = document.getElementById('tmExtractBackend').value;
+    const extractModel = document.getElementById('tmExtractModel').value.trim();
+    const embedUrl = document.getElementById('tmEmbedUrl').value.trim();
+    const embedModel = document.getElementById('tmEmbedModel').value.trim();
+
+    // Build memory config.
+    var mem = {};
+    if (extractBackend) mem.extract_backend = extractBackend;
+    if (extractModel) mem.extract_model = extractModel;
+    if (embedUrl || embedModel) {
+      mem.embedding = {};
+      if (embedUrl) mem.embedding.url = embedUrl;
+      if (embedModel) mem.embedding.model = embedModel;
+    }
+    tiersCache.memory = Object.keys(mem).length ? mem : undefined;
+    // Clear legacy embedding if migrated to memory.embedding.
+    if (mem.embedding) delete tiersCache.embedding;
+
+    document.getElementById('tierMemoryModal').remove();
+    tiersSave();
+  });
+}
+
 function tiersSave() {
   api('/api/tiers', {
     method: 'PUT',
@@ -5295,10 +5412,12 @@ function tiersSave() {
     body: JSON.stringify(tiersCache),
   }).then(() => {
     toast('Tiers saved');
-    tiersRender();
+    tiersLoad();
+    tiersConfigsLoad();
   }).catch(err => {
     toast('Save failed: ' + (err.error || err.message || 'unknown'), 'error');
-    tiersLoad(); // reload from server
+    tiersLoad();
+    tiersConfigsLoad();
   });
 }
 

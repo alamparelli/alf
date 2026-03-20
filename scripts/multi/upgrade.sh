@@ -59,7 +59,9 @@ echo
 # ── Step 2: Pull latest images ──────────────────────────────────────
 if [[ "$SKIP_PULL" == false ]]; then
     info "Pulling latest images..."
-    docker compose -f "$COMPOSE_FILE" pull
+    docker compose -f "$COMPOSE_FILE" pull --ignore-buildable 2>&1 || {
+        warn "Some images failed to pull (may not exist in registry yet). Continuing..."
+    }
     echo
 else
     warn "Skipping image pull (--skip-pull)"
@@ -127,11 +129,13 @@ while IFS= read -r tenant; do
         done
     fi
 
-    # 3e. Ensure shared whisper secret is propagated
-    if [[ -f "$SHARED_DIR/whisper_shared_secret" ]]; then
-        cp "$SHARED_DIR/whisper_shared_secret" "$tenant_dir/secrets/whisper_shared_secret"
-        chmod 644 "$tenant_dir/secrets/whisper_shared_secret"
-    fi
+    # 3e. Ensure shared secrets are propagated
+    for shared_secret in whisper_shared_secret embed_shared_secret; do
+        if [[ -f "$SHARED_DIR/$shared_secret" ]]; then
+            cp "$SHARED_DIR/$shared_secret" "$tenant_dir/secrets/$shared_secret"
+            chmod 644 "$tenant_dir/secrets/$shared_secret"
+        fi
+    done
 
 done <<< "$(jq -c '.[]' "$TENANTS_FILE")"
 

@@ -110,6 +110,7 @@ Each agent references a tier from `tiers.json`. The tier defines the model, tool
 | `description` | Yes | What the agent does. The agent reads this to decide who gets which task. |
 | `tier` | Yes | Which tier to use (from `tiers.json`). The tier defines model, tools, effort, max_turns, and write permissions. |
 | `system_prompt` | Yes | Instructions the agent follows. Be specific about what it should do and how. Combined with the tier's system prompt if any. |
+| `skills` | No | List of skill names to inject into this agent (e.g. `["app-builder", "tool-creator"]`). When set, only these skills are injected — not the globally matched ones. When omitted, the agent receives all skills matched by the user's message (default behavior). |
 
 ### Example: SEO content team
 
@@ -142,6 +143,41 @@ Each agent references a tier from `tiers.json`. The tier defines the model, tool
 }
 ```
 
+### Example: marketplace app team with per-agent skills
+
+```json
+{
+  "name": "app-factory",
+  "description": "Build and publish ALF marketplace apps",
+  "max_agents_per_request": 3,
+  "global_timeout_minutes": 30,
+  "agents": [
+    {
+      "name": "developer",
+      "description": "Builds the app (server, frontend, manifest)",
+      "tier": "sonnet",
+      "system_prompt": "You build ALF marketplace apps. Follow the skill instructions exactly.",
+      "skills": ["app-builder", "tool-creator"]
+    },
+    {
+      "name": "reviewer",
+      "description": "Reviews code quality and security",
+      "tier": "haiku",
+      "system_prompt": "Review the app code for bugs, security issues, and marketplace compliance."
+    },
+    {
+      "name": "publisher",
+      "description": "Publishes the app to the marketplace",
+      "tier": "sonnet",
+      "system_prompt": "Package and publish the app to the ALF marketplace.",
+      "skills": ["marketplace-developer"]
+    }
+  ]
+}
+```
+
+The `developer` agent always gets `app-builder` and `tool-creator` skills injected, regardless of what the user's message triggers. The `reviewer` has no explicit skills — it receives whatever skills match the user's message (default behavior).
+
 ## Ask ALF to help you create a team
 
 Instead of writing JSON by hand, ask ALF to generate the configuration for you:
@@ -163,6 +199,7 @@ ALF will generate the JSON. You can then save it via the **Workspace Explorer** 
 - **Use tier system prompts for shared instructions.** If all agents in a role need the same base instructions, put them in the tier's `system_prompt`. The agent's own `system_prompt` is appended after.
 - **The orchestrator can re-delegate.** If an agent's result is poor, the brain sends it back with feedback. You don't need to handle retries yourself.
 - **You can have multiple team files.** Drop as many JSON files into `config.d/agents/` as you want. The orchestrator sees all teams and picks the right agents for each task.
+- **Assign skills to agents.** Use the `skills` field to give an agent specific capabilities (e.g. `"skills": ["app-builder"]`). This injects the skill prompt into that agent only — other agents in the team won't receive it. Useful for specialized workflows.
 - **API backends work too.** Set `backend` on a tier to route agents through an API provider (e.g. OpenRouter). This lets you mix CLI and API models in the same team.
 
 ## How it works under the hood

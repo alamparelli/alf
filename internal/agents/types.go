@@ -15,10 +15,11 @@ type TeamConfig struct {
 
 // AgentConfig defines a single sub-agent within a team.
 type AgentConfig struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Tier         string `json:"tier"`
-	SystemPrompt string `json:"system_prompt"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Tier         string   `json:"tier"`
+	SystemPrompt string   `json:"system_prompt"`
+	Skills       []string `json:"skills,omitempty"` // explicit skill names to inject (empty = all matched skills)
 }
 
 // TierParams holds resolved execution parameters from a tier.
@@ -85,22 +86,28 @@ type agentResultJSON struct {
 	DurationMs int64   `json:"duration_ms"`
 }
 
+// SkillLookup resolves a skill prompt by name.
+type SkillLookup interface {
+	Get(name string) (prompt string, ok bool)
+}
+
 // RunConfig holds tier-level settings for an orchestrator run.
 type RunConfig struct {
-	Model                string   // full model name for the orchestrator brain
-	Backend              string   // backend for the orchestrator brain ("" or "cli" = default CLI)
-	Effort               string   // effort level (e.g. "high")
-	MaxIterations        int      // max orchestrate→delegate cycles (0 = default 20)
-	MaxTurns             int      // max turns per sub-agent call (0 = use agent config)
-	OrchestratorMaxTurns int      // max turns per orchestrator brain call (0 = default 3)
-	TimeoutMin           int      // global timeout in minutes (0 = default 60)
-	SkillPrompts         []string // skill prompts injected into every sub-agent
-	MemoryContext        []string // memory/context prompts injected into every sub-agent
-	NeedValidation       bool     // if true, block after plan output and wait for user approval
-	Source               string   // how the task was triggered: "router", "chat", "schedule", "telegram"
-	Team                 string   // team name if launched via a specific team
-	OriginalRequest      string   // raw user message forwarded to agents as context fallback
-	ConversationContext  string   // recent conversation summary injected into orchestrator + agents
+	Model                string       // full model name for the orchestrator brain
+	Backend              string       // backend for the orchestrator brain ("" or "cli" = default CLI)
+	Effort               string       // effort level (e.g. "high")
+	MaxIterations        int          // max orchestrate→delegate cycles (0 = default 20)
+	MaxTurns             int          // max turns per sub-agent call (0 = use agent config)
+	OrchestratorMaxTurns int          // max turns per orchestrator brain call (0 = default 3)
+	TimeoutMin           int          // global timeout in minutes (0 = default 60)
+	SkillPrompts         []string     // skill prompts injected into sub-agents (global matched)
+	SkillLookup          SkillLookup  // resolves skill prompts by name (for per-agent skills)
+	MemoryContext        []string     // memory/context prompts injected into every sub-agent
+	NeedValidation       bool         // if true, block after plan output and wait for user approval
+	Source               string       // how the task was triggered: "router", "chat", "schedule", "telegram"
+	Team                 string       // team name if launched via a specific team
+	OriginalRequest      string       // raw user message forwarded to agents as context fallback
+	ConversationContext  string       // recent conversation summary injected into orchestrator + agents
 }
 
 // TaskMeta tracks the lifecycle of an orchestration run.

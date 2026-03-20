@@ -797,9 +797,25 @@ func (o *Orchestrator) invokeAgentWithKey(
 	}
 
 	sysPrompts = append(sysPrompts, rc.MemoryContext...)
-	sysPrompts = append(sysPrompts, rc.SkillPrompts...)
-	if len(rc.MemoryContext) > 0 || len(rc.SkillPrompts) > 0 {
-		log.Printf("[orchestrator]   injecting %d memory + %d skill prompt(s) into agent %s/%s", len(rc.MemoryContext), len(rc.SkillPrompts), teamName, agentName)
+
+	// Skill injection: per-agent skills override global matched skills.
+	var agentSkillPrompts []string
+	if len(ac.Skills) > 0 && rc.SkillLookup != nil {
+		// Agent has explicit skills — resolve by name.
+		for _, name := range ac.Skills {
+			if prompt, ok := rc.SkillLookup.Get(name); ok && prompt != "" {
+				agentSkillPrompts = append(agentSkillPrompts, prompt)
+			} else {
+				log.Printf("[orchestrator]   skill %q not found for agent %s/%s", name, teamName, agentName)
+			}
+		}
+	} else {
+		// No per-agent skills — use globally matched skills.
+		agentSkillPrompts = rc.SkillPrompts
+	}
+	sysPrompts = append(sysPrompts, agentSkillPrompts...)
+	if len(rc.MemoryContext) > 0 || len(agentSkillPrompts) > 0 {
+		log.Printf("[orchestrator]   injecting %d memory + %d skill prompt(s) into agent %s/%s", len(rc.MemoryContext), len(agentSkillPrompts), teamName, agentName)
 	}
 
 	params := provider.Params{

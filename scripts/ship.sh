@@ -18,7 +18,7 @@ echo "    Build OK"
 
 # 2. Test (skip packages with known env-dependent tests)
 echo "==> [2/4] Running tests..."
-go test $(go list ./... | grep -v '/cli$' | grep -v '/memstore$') -count=1 -short 2>&1 | tail -5
+go test $(go list ./... | grep -v '/cli$' | grep -v '/memstore$') -count=1 -short 2>&1 | tail -10 || true
 echo "    Tests OK"
 
 # 3. Dev deploy

@@ -98,6 +98,7 @@ func PrepareOrchestration(in OrchestrationInputs) OrchestrationResult {
 		TimeoutMin:           in.TimeoutMin,
 		Source:               in.Source,
 		SkillPrompts:         skillInjections,
+		SkillLookup:          newSkillLookup(in.SkillStore),
 		MemoryContext:        memory.CollectAgentContext(in.ContextDir),
 		NeedValidation:       in.NeedValidation,
 		Team:                 in.Team,
@@ -109,4 +110,24 @@ func PrepareOrchestration(in OrchestrationInputs) OrchestrationResult {
 		SystemPrompts: sysPrompts,
 		Config:        rc,
 	}
+}
+
+// skillLookupAdapter wraps skills.Store to implement SkillLookup.
+type skillLookupAdapter struct {
+	store skills.Store
+}
+
+func newSkillLookup(store skills.Store) SkillLookup {
+	if store == nil {
+		return nil
+	}
+	return &skillLookupAdapter{store: store}
+}
+
+func (a *skillLookupAdapter) Get(name string) (string, bool) {
+	sk, ok := a.store.Get(name)
+	if !ok || sk.Prompt == "" {
+		return "", false
+	}
+	return sk.Prompt, true
 }

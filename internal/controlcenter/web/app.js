@@ -7983,12 +7983,10 @@ function mpLoad() {
             ? '<button class="btn btn-sm btn-primary mp-install-btn" data-slug="' + esc(app.slug) + '">Install</button>'
             : app.state === 'enabled'
               ? '<button class="btn btn-sm mp-disable-btn" data-slug="' + esc(app.slug) + '">Disable</button>'
-              : '<button class="btn btn-sm btn-primary mp-enable-btn" data-slug="' + esc(app.slug) + '">Enable</button>') +
+              : '<button class="btn btn-sm btn-primary mp-enable-btn" data-slug="' + esc(app.slug) + '">Enable</button>' +
+                '<button class="btn btn-sm btn-ghost mp-uninstall-btn" data-slug="' + esc(app.slug) + '">Uninstall</button>') +
           (hasUpdate
             ? '<button class="btn btn-sm mp-update-btn" data-slug="' + esc(app.slug) + '" style="border-color:var(--accent);color:var(--accent)">Update to v' + esc(updateMap[app.slug]) + '</button>'
-            : '') +
-          (!isAvailable && app.state !== 'enabled'
-            ? '<button class="btn btn-sm btn-ghost mp-uninstall-btn" data-slug="' + esc(app.slug) + '">Uninstall</button>'
             : '') +
         '</div>';
 

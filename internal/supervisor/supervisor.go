@@ -356,6 +356,12 @@ func (s *Supervisor) buildCmd(p *managedProc) (*exec.Cmd, error) {
 
 	// Build environment: inherit safe vars from daemon + service-specific env.
 	cmd.Env = inheritSafeEnv()
+
+	// Provide app data directory so services know where to store persistent data.
+	dataDir := filepath.Join(p.workDir, "data")
+	os.MkdirAll(dataDir, 0o755)
+	cmd.Env = append(cmd.Env, "ALF_APP_DATA_DIR="+dataDir)
+
 	// SEC-002: Block dangerous env overrides.
 	for k, v := range p.config.Env {
 		if blockedEnvKeys[strings.ToUpper(k)] || strings.HasPrefix(strings.ToUpper(k), "LD_") {

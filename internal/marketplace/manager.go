@@ -119,9 +119,16 @@ func (m *Manager) Enable(slug string) error {
 		return fmt.Errorf("create tools dir: %w", err)
 	}
 
+	// Resolve the binary path: try bin/{slug}, bin/{arch}/{slug}, then server at root.
+	binRel := m.resolveAppBinary(slug)
+
 	for _, tool := range manifest.Tools {
 		symlinkPath := filepath.Join(toolsDir, tool.Name)
-		target := filepath.Join("..", "apps", slug, "bin", slug)
+		target := filepath.Join("..", "apps", slug, binRel)
+
+		// Ensure the binary is executable.
+		absTarget := filepath.Join(m.dataDir, "apps", slug, binRel)
+		os.Chmod(absTarget, 0o755)
 
 		// Remove existing symlink if any.
 		os.Remove(symlinkPath)
@@ -153,6 +160,27 @@ func (m *Manager) Enable(slug string) error {
 	}
 
 	return nil
+}
+
+// resolveAppBinary finds the binary for an app, checking multiple locations.
+// Returns relative path from the app directory.
+func (m *Manager) resolveAppBinary(slug string) string {
+	appDir := filepath.Join(m.dataDir, "apps", slug)
+	// Preferred: bin/{slug}
+	if fi, err := os.Stat(filepath.Join(appDir, "bin", slug)); err == nil && !fi.IsDir() {
+		return filepath.Join("bin", slug)
+	}
+	// Bundle format: bin/{arch}/{slug}
+	archBin := filepath.Join("bin", runtime.GOARCH, slug)
+	if fi, err := os.Stat(filepath.Join(appDir, archBin)); err == nil && !fi.IsDir() {
+		return archBin
+	}
+	// Tarball format: server at root
+	if fi, err := os.Stat(filepath.Join(appDir, "server")); err == nil && !fi.IsDir() {
+		return "server"
+	}
+	// Fallback
+	return filepath.Join("bin", slug)
 }
 
 func (m *Manager) Disable(slug string) error {
@@ -288,17 +316,23 @@ func (m *Manager) unlinkAppSkills(slug string) {
 // Skips the data/ subdirectory (user data stays writable).
 func (m *Manager) lockAppFiles(slug string) {
 	appDir := filepath.Join(m.dataDir, "apps", slug)
+
+	// Ensure data/ exists and stays writable before locking everything else.
+	os.MkdirAll(filepath.Join(appDir, "data"), 0o755)
+
 	filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
 		// Skip data/ — user data must stay writable.
 		rel, _ := filepath.Rel(appDir, path)
-		if rel == "data" || strings.HasPrefix(rel, "data/") || strings.HasPrefix(rel, "data\\") {
+		if rel == "data" || strings.HasPrefix(rel, "data/") || strings.HasPrefix(rel, "data"+string(filepath.Separator)) {
 			return nil
 		}
 		if info.IsDir() {
 			os.Chmod(path, 0o555)
+		} else if info.Mode()&0o111 != 0 {
+			os.Chmod(path, 0o555) // preserve executable bit
 		} else {
 			os.Chmod(path, 0o444)
 		}

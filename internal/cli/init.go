@@ -782,16 +782,19 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	PrintCheck("secrets/cc_auth_token")
 
 	// Auto-generate whisper shared secret if missing or empty.
-	whisperSecretPath := filepath.Join(secretsDir(dir), "whisper_shared_secret")
-	if needsSecret(whisperSecretPath) {
-		whisperToken, err := generateAuthToken()
-		if err != nil {
-			Fatal(fmt.Sprintf("Failed to generate whisper secret: %v", err))
+	// Auto-generate shared secrets for sidecar services.
+	for _, sidecarSecret := range []string{"whisper_shared_secret", "embed_shared_secret"} {
+		secretPath := filepath.Join(secretsDir(dir), sidecarSecret)
+		if needsSecret(secretPath) {
+			token, err := generateAuthToken()
+			if err != nil {
+				Fatal(fmt.Sprintf("Failed to generate %s: %v", sidecarSecret, err))
+			}
+			if err := SetSecret(dir, sidecarSecret, token); err != nil {
+				Fatal(fmt.Sprintf("Failed to write %s: %v", sidecarSecret, err))
+			}
+			PrintCheck("secrets/" + sidecarSecret + " (auto-generated)")
 		}
-		if err := SetSecret(dir, "whisper_shared_secret", whisperToken); err != nil {
-			Fatal(fmt.Sprintf("Failed to write whisper secret: %v", err))
-		}
-		PrintCheck("secrets/whisper_shared_secret (auto-generated)")
 	}
 
 	// Ensure optional secret files exist (even empty) so docker-compose

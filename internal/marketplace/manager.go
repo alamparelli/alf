@@ -39,12 +39,20 @@ type RemoteApp struct {
 	Icon        string `json:"icon"`
 }
 
+// AppSupervisor is the interface for starting/stopping app services.
+type AppSupervisor interface {
+	StartApp(slug string)
+	StopApp(slug string)
+	RestartApp(slug string)
+}
+
 type Manager struct {
 	dataDir     string
 	registryURL string // e.g. http://alf-marketplace:8090
 	mu          sync.Mutex
 	states      map[string]AppState
 	onChange    func()
+	supervisor  AppSupervisor
 	http       *http.Client
 }
 
@@ -67,6 +75,12 @@ func (m *Manager) SetOnChange(fn func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onChange = fn
+}
+
+func (m *Manager) SetSupervisor(sv AppSupervisor) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.supervisor = sv
 }
 
 func (m *Manager) List() []AppInfo {
@@ -159,6 +173,11 @@ func (m *Manager) Enable(slug string) error {
 		m.onChange()
 	}
 
+	// Start the app's service if it has one.
+	if m.supervisor != nil {
+		m.supervisor.StartApp(slug)
+	}
+
 	return nil
 }
 
@@ -184,6 +203,11 @@ func (m *Manager) resolveAppBinary(slug string) string {
 }
 
 func (m *Manager) Disable(slug string) error {
+	// Stop the app's service before disabling.
+	if m.supervisor != nil {
+		m.supervisor.StopApp(slug)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -761,6 +785,11 @@ func (m *Manager) Update(slug string) error {
 
 	if !hasState {
 		return fmt.Errorf("app %q is not installed", slug)
+	}
+
+	// Stop service before updating files.
+	if m.supervisor != nil {
+		m.supervisor.StopApp(slug)
 	}
 
 	appDir := filepath.Join(m.dataDir, "apps", slug)

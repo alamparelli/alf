@@ -203,9 +203,10 @@ ensure_shared_whisper_secret() {
     if [[ ! -s "$path" ]]; then
         mkdir -p "$SHARED_DIR"
         openssl rand -hex 32 > "$path"
-        chmod 600 "$path"
         info "Generated shared whisper secret"
     fi
+    # Containers run as uid 1000 and read secrets via bind mount.
+    chmod 644 "$path"
     # Ensure models dir exists — whisper runs as uid 1000 (user 'whisper') with userns_mode: host
     mkdir -p "$SHARED_DIR/models"
     chown -R 1000:1000 "$SHARED_DIR/models"
@@ -217,9 +218,10 @@ ensure_shared_embed_secret() {
     if [[ ! -s "$path" ]]; then
         mkdir -p "$SHARED_DIR"
         openssl rand -hex 32 > "$path"
-        chmod 600 "$path"
         info "Generated shared embed secret"
     fi
+    # Containers run as uid 1000 and read secrets via bind mount.
+    chmod 644 "$path"
 }
 
 # ── Compose generation ───────────────────────────────────────────────

@@ -36,6 +36,23 @@ func RunUpgrade(currentVersion string) {
 	// Fix secret file permissions - previous versions wrote 0o644 (world-readable).
 	HardenSecrets(dir)
 
+	// Auto-generate sidecar secrets if missing (existing installs upgrading).
+	for _, sidecarSecret := range []string{"whisper_shared_secret", "embed_shared_secret"} {
+		secretPath := filepath.Join(secretsDir(dir), sidecarSecret)
+		if needsSecret(secretPath) {
+			token, err := generateAuthToken()
+			if err != nil {
+				PrintInfo(fmt.Sprintf("Warning: failed to generate %s: %v", sidecarSecret, err))
+				continue
+			}
+			if err := SetSecret(dir, sidecarSecret, token); err != nil {
+				PrintInfo(fmt.Sprintf("Warning: failed to write %s: %v", sidecarSecret, err))
+				continue
+			}
+			PrintCheck("secrets/" + sidecarSecret + " (auto-generated)")
+		}
+	}
+
 	// Ensure optional secret files exist (even empty) so docker-compose
 	// doesn't fail when secrets are always declared in the template.
 	ensureOptionalSecrets(dir)

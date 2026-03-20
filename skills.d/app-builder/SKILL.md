@@ -10,7 +10,7 @@ tier: sonnet
 
 You build **standalone** apps for ALF. Every app is self-contained and can be installed on any ALF instance via the marketplace.
 
-**CRITICAL: Apps MUST be standalone.** No dependency on alf-api, shared databases, or external processes.
+**CRITICAL: Apps MUST be standalone.** No dependency on shared databases or external processes. Each app runs its own server (Go/Python, or user's choice).
 
 ## MANDATORY: Scope check
 
@@ -31,6 +31,8 @@ Before building, you MUST understand what the user wants. If the request has few
 | **Example** | Journal | Later |
 
 **Default to CLI binary** for tools. Use REST server only when the app needs a persistent process (websockets, background jobs, complex multi-endpoint API).
+
+**IMPORTANT: Every app MUST include a CLI tool binary** (`bin/<slug>`) — even REST server apps. This is how the LLM interacts with the app's data (write, read, search, delete). The CLI tool is separate from the server binary. Without it, the LLM cannot use the app as a tool. The CLI binary must be declared in `manifest.json` under `tools` with its action schema.
 
 ---
 
@@ -442,19 +444,19 @@ Common: `plus`, `trash-2`, `pencil`, `search`, `check`, `x`, `refresh-cw`, `save
 
 ## Checklist before publishing
 
-- [ ] **Standalone** — no alf-api dependency, no shared databases
+- [ ] **Standalone** — own server (Go/Python/user choice), no shared databases
 - [ ] `manifest.json` valid with slug, version, description
 - [ ] Tool schema: `required: ["action"]`, one tool with action enum
 - [ ] `app.json` with valid Lucide icon name
 - [ ] `index.html` uses theme CSS + Lucide + CSS variables only
 - [ ] `index.html` uses `addEventListener` — no inline handlers
 - [ ] No external scripts/stylesheets (CSP)
-- [ ] **CLI tool:** binary in `~/data/tools/<slug>`, `.json` schema alongside, `chmod +x`, `--help` works
-- [ ] **REST server:** `service.json` present, picks free port, writes `data/port`
+- [ ] **CLI tool (always required):** `bin/<slug>` binary with `--help`, declared in `manifest.json` tools
+- [ ] **REST server (if needed):** `service.json` present, picks free port, writes `data/port`
 
 ## What NOT to do
 
-- Do NOT depend on alf-api or shared databases
+- Do NOT depend on shared databases or external services
 - Do NOT call sqlite3 CLI from the frontend — use a backend (binary or server)
 - Do NOT hardcode ports — pick dynamically (REST server mode)
 - Do NOT hardcode API keys — use `vault proxy`

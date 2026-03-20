@@ -96,6 +96,7 @@ ENV PATH="/opt/alf/tools.d:${PATH}"
 COPY internal/controlcenter/defaults/tiers.json /opt/alf/defaults/tiers.json
 COPY internal/controlcenter/defaults/apps/journal/ /opt/alf/defaults/apps/journal/
 COPY --from=builder /journal /opt/alf/defaults/apps/journal/bin/journal
+COPY internal/controlcenter/defaults/apps/developer/ /opt/alf/defaults/apps/developer/
 COPY skills.d/ /opt/alf/defaults/skills.d/
 COPY internal/cli/bundled_agents/ /opt/alf/defaults/teams/
 COPY --from=builder /alf-daemon /opt/alf/alf-daemon

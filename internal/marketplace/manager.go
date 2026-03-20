@@ -133,15 +133,21 @@ func (m *Manager) Enable(slug string) error {
 		return fmt.Errorf("create tools dir: %w", err)
 	}
 
-	// Resolve the binary path: try bin/{slug}, bin/{arch}/{slug}, then server at root.
-	binRel := m.resolveAppBinary(slug)
+	// Resolve the CLI tool binary (bin/{slug} or bin/{arch}/{slug}).
+	// Do NOT fall back to "server" — that's the HTTP service, not the CLI tool.
+	toolBinRel := m.resolveToolBinary(slug)
 
 	for _, tool := range manifest.Tools {
+		if toolBinRel == "" {
+			log.Printf("marketplace: [%s] tool %q skipped — no CLI binary found in bin/", slug, tool.Name)
+			continue
+		}
+
 		symlinkPath := filepath.Join(toolsDir, tool.Name)
-		target := filepath.Join("..", "apps", slug, binRel)
+		target := filepath.Join("..", "apps", slug, toolBinRel)
 
 		// Ensure the binary is executable.
-		absTarget := filepath.Join(m.dataDir, "apps", slug, binRel)
+		absTarget := filepath.Join(m.dataDir, "apps", slug, toolBinRel)
 		os.Chmod(absTarget, 0o755)
 
 		// Remove existing symlink if any.
@@ -181,9 +187,9 @@ func (m *Manager) Enable(slug string) error {
 	return nil
 }
 
-// resolveAppBinary finds the binary for an app, checking multiple locations.
-// Returns relative path from the app directory.
-func (m *Manager) resolveAppBinary(slug string) string {
+// resolveToolBinary finds the CLI tool binary for an app (bin/{slug} or bin/{arch}/{slug}).
+// Returns empty string if no CLI binary found — never falls back to "server".
+func (m *Manager) resolveToolBinary(slug string) string {
 	appDir := filepath.Join(m.dataDir, "apps", slug)
 	// Preferred: bin/{slug}
 	if fi, err := os.Stat(filepath.Join(appDir, "bin", slug)); err == nil && !fi.IsDir() {
@@ -194,12 +200,7 @@ func (m *Manager) resolveAppBinary(slug string) string {
 	if fi, err := os.Stat(filepath.Join(appDir, archBin)); err == nil && !fi.IsDir() {
 		return archBin
 	}
-	// Tarball format: server at root
-	if fi, err := os.Stat(filepath.Join(appDir, "server")); err == nil && !fi.IsDir() {
-		return "server"
-	}
-	// Fallback
-	return filepath.Join("bin", slug)
+	return "" // no CLI binary available
 }
 
 func (m *Manager) Disable(slug string) error {

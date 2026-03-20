@@ -1,0 +1,9 @@
+{
+  "name": "Developer",
+  "slug": "developer",
+  "version": "0.3.5",
+  "description": "Publish apps to the ALF Marketplace",
+  "category": "developer",
+  "icon": "code-2",
+  "tools": []
+}

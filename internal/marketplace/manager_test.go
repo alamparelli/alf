@@ -234,6 +234,124 @@ func TestUninstall(t *testing.T) {
 	}
 }
 
+func TestInstallDoesNotActivateToolsOrSkills(t *testing.T) {
+	base := setupTestEnv(t, "myapp")
+	m := NewManager(base)
+
+	// Simulate install by setting state to installed (like Install() does).
+	m.mu.Lock()
+	m.states["myapp"] = StateInstalled
+	m.saveState()
+	m.mu.Unlock()
+
+	// Tools should NOT exist after install-only.
+	symlinkPath := filepath.Join(base, "tools", "myapp-action")
+	if _, err := os.Lstat(symlinkPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no tool symlink after install, got: %v", err)
+	}
+	schemaPath := filepath.Join(base, "tools", "myapp-action.json")
+	if _, err := os.Stat(schemaPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no tool schema after install, got: %v", err)
+	}
+
+	// State should be installed, not enabled.
+	apps := m.List()
+	for _, a := range apps {
+		if a.Slug == "myapp" && a.State != StateInstalled {
+			t.Fatalf("expected state %q, got %q", StateInstalled, a.State)
+		}
+	}
+}
+
+func TestFullLifecycle(t *testing.T) {
+	base := setupTestEnv(t, "lifecycle")
+	m := NewManager(base)
+
+	toolSym := filepath.Join(base, "tools", "lifecycle-action")
+	toolSchema := filepath.Join(base, "tools", "lifecycle-action.json")
+
+	// 1. Install — no tools, state=installed
+	m.mu.Lock()
+	m.states["lifecycle"] = StateInstalled
+	m.saveState()
+	m.mu.Unlock()
+
+	if _, err := os.Lstat(toolSym); !os.IsNotExist(err) {
+		t.Fatal("tools should not exist after install")
+	}
+
+	// 2. Enable — tools created, state=enabled
+	if err := m.Enable("lifecycle"); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if _, err := os.Lstat(toolSym); err != nil {
+		t.Fatalf("tool symlink missing after enable: %v", err)
+	}
+	if _, err := os.Stat(toolSchema); err != nil {
+		t.Fatalf("tool schema missing after enable: %v", err)
+	}
+
+	// 3. Disable — tools removed, state=disabled
+	if err := m.Disable("lifecycle"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if _, err := os.Lstat(toolSym); !os.IsNotExist(err) {
+		t.Fatal("tool symlink should be removed after disable")
+	}
+	if _, err := os.Stat(toolSchema); !os.IsNotExist(err) {
+		t.Fatal("tool schema should be removed after disable")
+	}
+
+	// 4. Re-enable — tools back
+	if err := m.Enable("lifecycle"); err != nil {
+		t.Fatalf("Re-enable: %v", err)
+	}
+	if _, err := os.Lstat(toolSym); err != nil {
+		t.Fatalf("tool symlink missing after re-enable: %v", err)
+	}
+
+	// 5. Disable then Uninstall — everything cleaned
+	if err := m.Disable("lifecycle"); err != nil {
+		t.Fatalf("Disable before uninstall: %v", err)
+	}
+	if err := m.Uninstall("lifecycle"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	if _, err := os.Lstat(toolSym); !os.IsNotExist(err) {
+		t.Fatal("tool symlink should be gone after uninstall")
+	}
+	// App dir should be gone (except data/).
+	binDir := filepath.Join(base, "apps", "lifecycle", "bin")
+	if _, err := os.Stat(binDir); !os.IsNotExist(err) {
+		t.Fatal("bin/ should be removed after uninstall")
+	}
+}
+
+func TestDisabledAppNotInRestoreEnabled(t *testing.T) {
+	base := setupTestEnv(t, "app1", "app2")
+	m := NewManager(base)
+
+	// Enable both, then disable app2.
+	m.Enable("app1")
+	m.Enable("app2")
+	m.Disable("app2")
+
+	// Remove all tool symlinks to simulate restart.
+	os.Remove(filepath.Join(base, "tools", "app1-action"))
+	os.Remove(filepath.Join(base, "tools", "app1-action.json"))
+
+	// RestoreEnabled should only restore app1, not app2.
+	m2 := NewManager(base)
+	m2.RestoreEnabled()
+
+	if _, err := os.Lstat(filepath.Join(base, "tools", "app1-action")); err != nil {
+		t.Fatal("app1 tools should be restored")
+	}
+	if _, err := os.Lstat(filepath.Join(base, "tools", "app2-action")); !os.IsNotExist(err) {
+		t.Fatal("app2 tools should NOT be restored (disabled)")
+	}
+}
+
 func TestOnChange(t *testing.T) {
 	base := setupTestEnv(t, "testapp")
 

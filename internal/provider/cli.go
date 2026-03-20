@@ -47,14 +47,8 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		model = "claude-haiku-4-5"
 	}
 
-	// Prevent prompt from being parsed as a CLI flag.
-	safePrompt := prompt
-	if strings.HasPrefix(prompt, "-") {
-		safePrompt = "\u200B" + prompt
-	}
-
 	args := []string{
-		"-p", safePrompt,
+		"-p", "-",
 		"--model", model,
 		"--output-format", "stream-json",
 		"--verbose",
@@ -143,6 +137,12 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		return nil, fmt.Errorf("claude preflight check failed: %w - %s", preErr, truncStderr(string(preOut), 300))
 	}
 
+	// Pipe prompt via stdin (-p -) to avoid OS argument list size limits.
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -158,6 +158,12 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
 	invokeStart := time.Now()
+
+	// Write prompt to stdin and close to signal EOF.
+	go func() {
+		stdinPipe.Write([]byte(prompt))
+		stdinPipe.Close()
+	}()
 
 	// Capture stderr for error reporting.
 	stderrDone := make(chan struct{})

@@ -1,65 +1,64 @@
 package marketplace
 
 import (
-	"archive/tar"
+	"archive/zip"
 	"bytes"
-	"compress/gzip"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-// makeTarGz builds a tar.gz in memory with the given files.
-func makeTarGz(t *testing.T, files map[string][]byte) *bytes.Buffer {
+// makeZip builds a ZIP in memory with the given files.
+func makeZip(t *testing.T, files map[string][]byte) *bytes.Reader {
 	t.Helper()
 	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
+	zw := zip.NewWriter(&buf)
 	for name, content := range files {
-		hdr := &tar.Header{Name: name, Mode: 0644, Size: int64(len(content))}
-		if err := tw.WriteHeader(hdr); err != nil {
+		fw, err := zw.Create(name)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tw.Write(content); err != nil {
+		if _, err := fw.Write(content); err != nil {
 			t.Fatal(err)
 		}
 	}
-	tw.Close()
-	gz.Close()
-	return &buf
+	zw.Close()
+	b := buf.Bytes()
+	return bytes.NewReader(b)
 }
 
-func makeTarGzWithMode(t *testing.T, files map[string]struct {
+func makeZipWithMode(t *testing.T, files map[string]struct {
 	content []byte
-	mode    int64
-}) *bytes.Buffer {
+	mode    os.FileMode
+}) *bytes.Reader {
 	t.Helper()
 	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
+	zw := zip.NewWriter(&buf)
 	for name, f := range files {
-		hdr := &tar.Header{Name: name, Mode: f.mode, Size: int64(len(f.content))}
-		if err := tw.WriteHeader(hdr); err != nil {
+		hdr := &zip.FileHeader{Name: name}
+		hdr.SetMode(f.mode)
+		fw, err := zw.CreateHeader(hdr)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tw.Write(f.content); err != nil {
+		if _, err := fw.Write(f.content); err != nil {
 			t.Fatal(err)
 		}
 	}
-	tw.Close()
-	gz.Close()
-	return &buf
+	zw.Close()
+	b := buf.Bytes()
+	return bytes.NewReader(b)
 }
 
 func TestExtractBundle_BasicFiles(t *testing.T) {
 	dir := t.TempDir()
-	bundle := makeTarGz(t, map[string][]byte{
+	r := makeZip(t, map[string][]byte{
 		"manifest.json": []byte(`{"slug":"test"}`),
 		"index.html":    []byte(`<html></html>`),
 		"app.json":      []byte(`{"name":"Test"}`),
 	})
 
-	if err := extractBundle(bundle, dir); err != nil {
+	if err := extractBundle(r, r.Size(), dir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -82,13 +81,13 @@ func TestExtractBundle_SkipsDataDir(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, "data"), 0755)
 	os.WriteFile(filepath.Join(dir, "data", "user.db"), []byte("precious"), 0644)
 
-	bundle := makeTarGz(t, map[string][]byte{
-		"manifest.json":  []byte(`{}`),
-		"data/app.db":    []byte("should be skipped"),
-		"data/port":      []byte("9999"),
+	r := makeZip(t, map[string][]byte{
+		"manifest.json": []byte(`{}`),
+		"data/app.db":   []byte("should be skipped"),
+		"data/port":     []byte("9999"),
 	})
 
-	if err := extractBundle(bundle, dir); err != nil {
+	if err := extractBundle(r, r.Size(), dir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,12 +105,12 @@ func TestExtractBundle_SkipsDataDir(t *testing.T) {
 
 func TestExtractBundle_SkipsPathTraversal(t *testing.T) {
 	dir := t.TempDir()
-	bundle := makeTarGz(t, map[string][]byte{
-		"../evil.txt":    []byte("bad"),
-		"manifest.json":  []byte(`{}`),
+	r := makeZip(t, map[string][]byte{
+		"../evil.txt":   []byte("bad"),
+		"manifest.json": []byte(`{}`),
 	})
 
-	if err := extractBundle(bundle, dir); err != nil {
+	if err := extractBundle(r, r.Size(), dir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,15 +124,15 @@ func TestExtractBundle_SkipsPathTraversal(t *testing.T) {
 
 func TestExtractBundle_PreservesExecutableBit(t *testing.T) {
 	dir := t.TempDir()
-	bundle := makeTarGzWithMode(t, map[string]struct {
+	r := makeZipWithMode(t, map[string]struct {
 		content []byte
-		mode    int64
+		mode    os.FileMode
 	}{
 		"bin/myapp": {content: []byte("binary"), mode: 0755},
 		"app.json":  {content: []byte(`{}`), mode: 0644},
 	})
 
-	if err := extractBundle(bundle, dir); err != nil {
+	if err := extractBundle(r, r.Size(), dir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -156,10 +155,10 @@ func TestExtractBundle_TooManyFiles(t *testing.T) {
 	for i := 0; i < 101; i++ {
 		files[filepath.Join("files", string(rune('a'+i/26))+string(rune('a'+i%26)))] = []byte("x")
 	}
-	bundle := makeTarGz(t, files)
+	r := makeZip(t, files)
 	dir := t.TempDir()
 
-	err := extractBundle(bundle, dir)
+	err := extractBundle(r, r.Size(), dir)
 	if err == nil {
 		t.Error("expected error for too many files")
 	}
@@ -167,12 +166,12 @@ func TestExtractBundle_TooManyFiles(t *testing.T) {
 
 func TestExtractBundle_CreatesSubdirs(t *testing.T) {
 	dir := t.TempDir()
-	bundle := makeTarGz(t, map[string][]byte{
+	r := makeZip(t, map[string][]byte{
 		"skills/my-skill/SKILL.md": []byte("# Skill"),
 		"bin/tool":                 []byte("binary"),
 	})
 
-	if err := extractBundle(bundle, dir); err != nil {
+	if err := extractBundle(r, r.Size(), dir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -182,37 +181,5 @@ func TestExtractBundle_CreatesSubdirs(t *testing.T) {
 	}
 	if string(data) != "# Skill" {
 		t.Errorf("content = %q", data)
-	}
-}
-
-func TestExtractBundle_SkipsSymlinks(t *testing.T) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-
-	// Add a symlink.
-	tw.WriteHeader(&tar.Header{
-		Name:     "evil-link",
-		Typeflag: tar.TypeSymlink,
-		Linkname: "/etc/passwd",
-	})
-	// Add a regular file.
-	content := []byte(`{"ok":true}`)
-	tw.WriteHeader(&tar.Header{Name: "app.json", Mode: 0644, Size: int64(len(content))})
-	tw.Write(content)
-
-	tw.Close()
-	gz.Close()
-
-	dir := t.TempDir()
-	if err := extractBundle(&buf, dir); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := os.Lstat(filepath.Join(dir, "evil-link")); err == nil {
-		t.Error("symlink should not have been extracted")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "app.json")); err != nil {
-		t.Error("regular file should have been extracted")
 	}
 }

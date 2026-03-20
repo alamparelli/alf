@@ -1,8 +1,7 @@
 package marketplace
 
 import (
-	"archive/tar"
-	"compress/gzip"
+	"archive/zip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -475,10 +474,10 @@ func (m *Manager) installLegacy(slug, appDir string) error {
 	return nil
 }
 
-// downloadAndExtractBundle downloads a tarball from the registry and extracts it.
+// downloadAndExtractBundle downloads a ZIP bundle from the registry and extracts it.
 // Skips data/ entries to preserve user data.
 func (m *Manager) downloadAndExtractBundle(slug, appDir string) error {
-	url := fmt.Sprintf("%s/api/apps/%s/bundle", m.registryURL, slug)
+	url := fmt.Sprintf("%s/api/apps/%s/bundle?arch=%s", m.registryURL, slug, runtime.GOARCH)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
@@ -493,44 +492,47 @@ func (m *Manager) downloadAndExtractBundle(slug, appDir string) error {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	return extractBundle(resp.Body, appDir)
+	// ZIP requires random access — spool to temp file.
+	tmp, err := os.CreateTemp("", "alf-bundle-*.zip")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	const maxBundleSize int64 = 200 << 20 // 200MB
+	if _, err := io.Copy(tmp, io.LimitReader(resp.Body, maxBundleSize)); err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+
+	info, err := tmp.Stat()
+	if err != nil {
+		return err
+	}
+
+	return extractBundle(tmp, info.Size(), appDir)
 }
 
-// extractBundle extracts a tar.gz stream into appDir, skipping data/ entries.
-func extractBundle(r io.Reader, appDir string) error {
-	gz, err := gzip.NewReader(r)
+// extractBundle extracts a ZIP into appDir, skipping data/ entries.
+func extractBundle(ra io.ReaderAt, size int64, appDir string) error {
+	zr, err := zip.NewReader(ra, size)
 	if err != nil {
-		return fmt.Errorf("gzip: %w", err)
+		return fmt.Errorf("zip: %w", err)
 	}
-	defer gz.Close()
 
-	tr := tar.NewReader(gz)
 	const maxFiles = 100
 	const maxFileSize int64 = 50 << 20 // 50MB
 	count := 0
 
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("tar: %w", err)
-		}
-
+	for _, zf := range zr.File {
 		// Security: reject path traversal and absolute paths.
-		clean := filepath.Clean(hdr.Name)
+		clean := filepath.Clean(zf.Name)
 		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 			continue
 		}
 
 		// Skip data/ directory (preserve user data).
 		if clean == "data" || strings.HasPrefix(clean, "data/") || strings.HasPrefix(clean, "data"+string(filepath.Separator)) {
-			continue
-		}
-
-		// Skip symlinks.
-		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
 			continue
 		}
 
@@ -541,7 +543,7 @@ func extractBundle(r io.Reader, appDir string) error {
 			continue
 		}
 
-		if hdr.Typeflag == tar.TypeDir {
+		if zf.FileInfo().IsDir() {
 			os.MkdirAll(target, 0o755)
 			continue
 		}
@@ -554,7 +556,7 @@ func extractBundle(r io.Reader, appDir string) error {
 		os.MkdirAll(filepath.Dir(target), 0o755)
 
 		mode := os.FileMode(0o644)
-		if hdr.Mode&0o111 != 0 {
+		if zf.Mode()&0o111 != 0 {
 			mode = 0o755 // preserve executable bit
 		}
 
@@ -562,7 +564,14 @@ func extractBundle(r io.Reader, appDir string) error {
 		if err != nil {
 			return fmt.Errorf("create %s: %w", clean, err)
 		}
-		_, copyErr := io.Copy(f, io.LimitReader(tr, maxFileSize))
+
+		rc, err := zf.Open()
+		if err != nil {
+			f.Close()
+			return fmt.Errorf("open %s: %w", clean, err)
+		}
+		_, copyErr := io.Copy(f, io.LimitReader(rc, maxFileSize))
+		rc.Close()
 		f.Close()
 		if copyErr != nil {
 			return fmt.Errorf("write %s: %w", clean, copyErr)

@@ -5510,7 +5510,7 @@ function showSetupWizard(status) {
           cs.textContent = 'Authenticated';
           cs.className = 'setup-claude-status ok';
         } else {
-          cs.innerHTML = 'Not authenticated - run <code>claude login</code> in the Terminal tab';
+          cs.innerHTML = 'Not authenticated — open the Terminal tab, type <code>claude</code>, then run <code>/login</code>. Type <code>/exit</code> when done.';
           cs.className = 'setup-claude-status pending';
         }
       }
@@ -5805,7 +5805,7 @@ function showSetupWizard(status) {
           el.insertAdjacentHTML('beforeend',
             '<div class="setup-apply-warning">' +
             '<strong>Claude not authenticated</strong><br>' +
-            'After setup, open the <a href="#" onclick="event.preventDefault();navigateTo(\'terminal\');" style="color:var(--accent)">Terminal</a> tab and run <code>claude login</code> to connect your Anthropic account.' +
+            'After setup, open the <a href="#" onclick="event.preventDefault();navigateTo(\'terminal\');" style="color:var(--accent)">Terminal</a> tab, type <code>claude</code>, then run <code>/login</code> to connect your Anthropic account. Type <code>/exit</code> when done.' +
             '</div>');
         }
       }).catch(() => {});

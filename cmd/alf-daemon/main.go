@@ -1562,7 +1562,7 @@ func main() {
 				// Detect Claude not logged in.
 				lower := strings.ToLower(reply)
 				if strings.Contains(lower, "not logged in") || strings.Contains(lower, "authenticate") || strings.Contains(lower, "login required") {
-					reply = "Not logged in \u00b7 Please run /login on the host with: alf login"
+					reply = "Not logged in \u00b7 Go to the Terminal tab, type `claude`, then run `/login` to authenticate. Type `/exit` when done."
 				}
 
 				// React to the user's message before sending the reply.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -134,6 +135,12 @@ func (m *Manager) Enable(slug string) error {
 	// Link bundled skills: apps/<slug>/skills/<name>/ → data/skills/<name>/
 	m.linkAppSkills(slug)
 
+	// Lock app files (read-only) to prevent LLM from modifying marketplace apps.
+	// Only lock if this is a registry-installed app (has a remote entry in state).
+	if m.registryURL != "" {
+		m.lockAppFiles(slug)
+	}
+
 	m.states[slug] = StateEnabled
 	if err := m.saveState(); err != nil {
 		return err
@@ -149,6 +156,9 @@ func (m *Manager) Enable(slug string) error {
 func (m *Manager) Disable(slug string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Unlock files first so they can be cleaned up.
+	m.unlockAppFiles(slug)
 
 	manifest, err := m.loadManifest(slug)
 	if err != nil {
@@ -270,6 +280,44 @@ func (m *Manager) unlinkAppSkills(slug string) {
 		}
 		os.Remove(filepath.Join(skillsDst, e.Name()))
 	}
+}
+
+// lockAppFiles makes app files read-only to prevent LLM modifications.
+// Skips the data/ subdirectory (user data stays writable).
+func (m *Manager) lockAppFiles(slug string) {
+	appDir := filepath.Join(m.dataDir, "apps", slug)
+	filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		// Skip data/ — user data must stay writable.
+		rel, _ := filepath.Rel(appDir, path)
+		if rel == "data" || strings.HasPrefix(rel, "data/") || strings.HasPrefix(rel, "data\\") {
+			return nil
+		}
+		if info.IsDir() {
+			os.Chmod(path, 0o555)
+		} else {
+			os.Chmod(path, 0o444)
+		}
+		return nil
+	})
+}
+
+// unlockAppFiles restores write permissions on app files.
+func (m *Manager) unlockAppFiles(slug string) {
+	appDir := filepath.Join(m.dataDir, "apps", slug)
+	filepath.Walk(appDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			os.Chmod(path, 0o755)
+		} else {
+			os.Chmod(path, 0o644)
+		}
+		return nil
+	})
 }
 
 func (m *Manager) loadManifest(slug string) (*Manifest, error) {

@@ -186,7 +186,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	os.Chmod(taskDir, 0o775)
 	os.Chown(taskDir, 1000, 1000) // alf:alf so claude (gid 1000) can write
 
-	log.Printf("[orchestrator] task %s started | teams=%d | message=%q", taskID, len(teams), truncate(userMessage, 120))
+	log.Printf("[orchestrator] task %s started | teams=%d | message_len=%d", taskID, len(teams), len(userMessage))
 
 	meta := &TaskMeta{
 		ID:        taskID,
@@ -289,7 +289,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		iterStart := time.Now()
 
 		log.Printf("[orchestrator] ── iteration %d/%d ──", iteration+1, maxIterations)
-		log.Printf("[orchestrator] prompt to orchestrator: %s", truncate(prompt, 200))
+		log.Printf("[orchestrator] prompt to orchestrator: %d chars", len(prompt))
 
 		if onProgress != nil {
 			onProgress("thinking", fmt.Sprintf("iteration %d", iteration+1))
@@ -341,7 +341,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 
 		log.Printf("[orchestrator] response received: %dms $%.4f %d chars session=%s",
 			iterDur.Milliseconds(), result.CostUSD, len(result.Text), truncate(result.SessionID, 12))
-		log.Printf("[orchestrator] raw output: %s", truncate(result.Text, 300))
+		log.Printf("[orchestrator] raw output: %d chars", len(result.Text))
 
 		// Detect orchestrator turn limit - retry a limited number of times.
 		if strings.Contains(result.Text, "Turn limit reached") {
@@ -767,7 +767,7 @@ func (o *Orchestrator) invokeAgentWithKey(
 	hasResume := sessionID != ""
 	log.Printf("[orchestrator] → agent %s/%s: tier=%s model=%s backend=%s effort=%s write=%v max_turns=%d resume=%v",
 		teamName, agentName, ac.Tier, model, tp.Backend, tp.Effort, tp.WriteCapable, tp.MaxTurns, hasResume)
-	log.Printf("[orchestrator]   task: %s", truncate(d.Task, 150))
+	log.Printf("[orchestrator]   task: %d chars", len(d.Task))
 
 	// Build system prompts: tier prompt + agent's own prompt + workspace + context + memory + skills.
 	sysPrompts := make([]string, 0, 5+len(rc.MemoryContext)+len(rc.SkillPrompts))

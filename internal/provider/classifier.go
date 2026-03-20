@@ -318,7 +318,7 @@ func (c *CLIClassifier) readResponse(ctx context.Context) (*ClassifyResult, erro
 				if text == "" {
 					text = resultText.String()
 				}
-				log.Printf("classifier: result event (resultField=%q, accumulated=%q)", truncate(event.ResultText, 100), truncate(resultText.String(), 100))
+				log.Printf("classifier: result event (resultField=%d chars, accumulated=%d chars)", len(event.ResultText), resultText.Len())
 				return &ClassifyResult{Response: strings.TrimSpace(text)}, nil
 			}
 

@@ -80,8 +80,9 @@ if [ "$LOCAL_BUILD" = true ]; then
 
   rm -rf third_party/vault-proxy
 
-  # Only rebuild whisper-service if its files changed since last tag.
-  if git diff --name-only "${latest}" HEAD -- whisper-service/ | grep -q .; then
+  # Rebuild whisper-service if files changed OR image doesn't exist in registry yet.
+  WHISPER_EXISTS=$(docker manifest inspect "${WHISPER_REGISTRY}:latest" >/dev/null 2>&1 && echo yes || echo no)
+  if [ "$WHISPER_EXISTS" = "no" ] || git diff --name-only "${latest}" HEAD -- whisper-service/ | grep -q .; then
     echo "Building whisper-service Docker image (linux/amd64 + linux/arm64)..."
     docker buildx build \
       --builder multiarch \
@@ -95,8 +96,9 @@ if [ "$LOCAL_BUILD" = true ]; then
     echo "whisper-service unchanged since ${latest} — skipping build"
   fi
 
-  # Only rebuild embed-service if its files changed since last tag.
-  if git diff --name-only "${latest}" HEAD -- embed-service/ cmd/embed-server/ internal/memstore/ | grep -q .; then
+  # Rebuild embed-service if files changed OR image doesn't exist in registry yet.
+  EMBED_EXISTS=$(docker manifest inspect "${EMBED_REGISTRY}:latest" >/dev/null 2>&1 && echo yes || echo no)
+  if [ "$EMBED_EXISTS" = "no" ] || git diff --name-only "${latest}" HEAD -- embed-service/ cmd/embed-server/ internal/memstore/ | grep -q .; then
     echo "Building embed-service Docker image (linux/amd64 + linux/arm64)..."
     docker buildx build \
       --builder multiarch \

@@ -7931,6 +7931,9 @@ function mpLoad() {
       return;
     }
 
+    // Stable sort: alphabetical by name.
+    merged.sort((a, b) => (a.name || a.slug || '').localeCompare(b.name || b.slug || ''));
+
     grid.innerHTML = '';
     merged.forEach(app => {
       const card = document.createElement('div');

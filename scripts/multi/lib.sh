@@ -383,6 +383,7 @@ EOF
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
       - EMBED_URL=http://embed:8090
       - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
+      - ALF_MARKETPLACE_ENABLED=true
       - CC_EXTERNAL_URL=https://${domain}
       - TZ=${timezone}
     secrets:

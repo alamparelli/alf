@@ -50,6 +50,7 @@ echo "Released ${next}"
 
 if [ "$LOCAL_BUILD" = true ]; then
   WHISPER_REGISTRY="ghcr.io/alamparelli/whisper-service"
+  EMBED_REGISTRY="ghcr.io/alamparelli/embed-service"
 
   echo ""
   # Vendor vault-proxy — prefer local dev, fallback to NFS
@@ -92,6 +93,22 @@ if [ "$LOCAL_BUILD" = true ]; then
     echo "Pushed ${WHISPER_REGISTRY}:${version} + :latest"
   else
     echo "whisper-service unchanged since ${latest} — skipping build"
+  fi
+
+  # Only rebuild embed-service if its files changed since last tag.
+  if git diff --name-only "${latest}" HEAD -- embed-service/ cmd/embed-server/ internal/memstore/ | grep -q .; then
+    echo "Building embed-service Docker image (linux/amd64 + linux/arm64)..."
+    docker buildx build \
+      --builder multiarch \
+      --platform linux/amd64,linux/arm64 \
+      --push \
+      -t "${EMBED_REGISTRY}:${version}" \
+      -t "${EMBED_REGISTRY}:latest" \
+      -f embed-service/Dockerfile \
+      .
+    echo "Pushed ${EMBED_REGISTRY}:${version} + :latest"
+  else
+    echo "embed-service unchanged since ${latest} — skipping build"
   fi
 
   echo ""

@@ -924,6 +924,11 @@ func main() {
 	appsSupervisor.Start()
 	defer appsSupervisor.Stop()
 
+	// Wire supervisor into marketplace so install/enable/disable/update manage services.
+	if mpManager != nil {
+		mpManager.SetSupervisor(appsSupervisor)
+	}
+
 	// When Telegram is not configured, run a CC-only event loop.
 	if !telegramEnabled {
 		log.Println("Running in Control Center-only mode (no Telegram polling)")

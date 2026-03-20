@@ -88,6 +88,74 @@ func (s *Supervisor) Start() {
 	}
 }
 
+// StartApp loads and starts a single app's service (e.g. after marketplace install/enable).
+// No-op if the app has no service.json or is already running.
+func (s *Supervisor) StartApp(slug string) {
+	s.mu.Lock()
+	if _, running := s.procs[slug]; running {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+
+	path := filepath.Join(s.appsDir, slug, "service.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // no service.json
+	}
+	var cfg ServiceConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		log.Printf("supervisor: [%s] invalid service.json: %v", slug, err)
+		return
+	}
+	if cfg.Command == "" {
+		return
+	}
+	if cfg.Name == "" {
+		cfg.Name = slug
+	}
+	if cfg.Restart == "" {
+		cfg.Restart = "always"
+	}
+	if cfg.MaxRestarts == 0 {
+		cfg.MaxRestarts = 100
+	}
+	if !cfg.Enabled {
+		log.Printf("supervisor: [%s] disabled in service.json, skipping", slug)
+		return
+	}
+	s.startService(slug, cfg)
+}
+
+// StopApp stops a single app's service (e.g. after marketplace disable/uninstall).
+func (s *Supervisor) StopApp(slug string) {
+	s.mu.Lock()
+	p, ok := s.procs[slug]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.procs, slug)
+	s.mu.Unlock()
+
+	close(p.stopCh)
+	if p.cmd != nil && p.cmd.Process != nil {
+		p.cmd.Process.Signal(syscall.SIGTERM)
+		time.AfterFunc(5*time.Second, func() {
+			if p.cmd.ProcessState == nil {
+				p.cmd.Process.Kill()
+			}
+		})
+	}
+	log.Printf("supervisor: [%s] stopped", slug)
+}
+
+// RestartApp stops then starts an app service (e.g. after marketplace update).
+func (s *Supervisor) RestartApp(slug string) {
+	s.StopApp(slug)
+	s.StartApp(slug)
+}
+
 // Stop sends SIGTERM to all managed services and waits for them to exit.
 func (s *Supervisor) Stop() {
 	close(s.stop)

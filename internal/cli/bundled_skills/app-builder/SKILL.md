@@ -440,20 +440,6 @@ Common: `plus`, `trash-2`, `pencil`, `search`, `check`, `x`, `refresh-cw`, `save
 
 ---
 
-## Publishing to marketplace
-
-Via the **Developer** app in sidebar, or CLI:
-```bash
-vault proxy marketplace POST /api/apps/<slug>/publish \
-  -F "manifest=<~/data/apps/<slug>/manifest.json" \
-  -F "binary_amd64=@~/data/apps/<slug>/server" \
-  -F "web_index.html=@~/data/apps/<slug>/index.html" \
-  -F "web_app.json=@~/data/apps/<slug>/app.json" \
-  -F "web_service.json=@~/data/apps/<slug>/service.json"
-```
-
----
-
 ## Checklist before publishing
 
 - [ ] **Standalone** — no alf-api dependency, no shared databases

@@ -169,6 +169,7 @@ The frontend calls the tool **by name** (it's in PATH). Data dir is passed via e
 
 ```javascript
 var SLUG = 'my-app';
+var BIN = '/home/alf/data/tools/' + SLUG;
 var DATA = '/home/alf/data/apps/' + SLUG + '/data';
 
 function bash(cmd) {
@@ -183,7 +184,7 @@ function bash(cmd) {
 function appCmd(action, args) {
   var payload = Object.assign({ action: action }, args || {});
   var input = JSON.stringify(payload);
-  var cmd = "echo '" + input.replace(/'/g, "'\\''") + "' | ALF_APP_DATA_DIR=" + DATA + " " + SLUG;
+  var cmd = "echo '" + input.replace(/'/g, "'\\''") + "' | ALF_APP_DATA_DIR=" + DATA + " " + BIN;
   return bash(cmd).then(function(res) {
     if (res.exit_code !== 0) throw new Error(res.error || res.output || 'Command failed');
     return res.output || '';

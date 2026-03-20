@@ -91,7 +91,7 @@ func (m *Manager) List() []AppInfo {
 
 		state, ok := m.states[slug]
 		if !ok {
-			state = StateInstalled
+			continue // local app — not marketplace-managed
 		}
 
 		apps = append(apps, AppInfo{

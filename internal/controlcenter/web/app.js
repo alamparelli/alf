@@ -3313,31 +3313,17 @@ function capitalizeName(name) {
 }
 
 function loadApps() {
-  // Fetch apps and marketplace state in parallel.
-  return Promise.all([
-    api('/api/apps/').catch(() => ({ items: [] })),
-    api('/api/marketplace').catch(() => [])
-  ]).then(([r, mpApps]) => {
+  // Fetch local apps for sidebar — no marketplace filtering.
+  return api('/api/apps/').catch(() => ({ items: [] })).then(r => {
     const section = document.getElementById('navAppsSection');
     const items = r.items || [];
-
-    // Build marketplace state map: slug → state
-    const mpState = {};
-    (mpApps || []).forEach(mp => { mpState[mp.slug] = mp.state; });
-
-    // Filter out marketplace apps that are not enabled.
-    const visibleItems = items.filter(app => {
-      if (mpState[app.name] !== undefined && mpState[app.name] !== 'enabled') return false;
-      return true;
-    });
 
     section.innerHTML = '';
 
     const favs = JSON.parse(localStorage.getItem('alf-nav-favs') || '[]');
-    visibleItems.forEach(app => {
+    items.forEach(app => {
       const a = document.createElement('a');
       a.className = 'nav-item';
-      if (mpState[app.name] === 'enabled') a.classList.add('nav-item-mp');
       a.dataset.view = 'page:' + app.name;
       const icon = safeLucideIcon(app.icon || 'app-window', 'app-window');
       const label = app.display_name || capitalizeName(app.name);
@@ -7938,11 +7924,7 @@ function mpLoad() {
       });
     });
 
-    // Local-only apps (bundled, not in remote)
-    (localApps || []).forEach(local => {
-      if (seen[local.slug]) return;
-      merged.push(Object.assign({}, local, { source: 'local' }));
-    });
+    // Local-only apps are NOT shown in marketplace — they appear in the sidebar only.
 
     if (merged.length === 0) {
       grid.innerHTML = '<div class="mp-empty">No apps available yet.</div>';

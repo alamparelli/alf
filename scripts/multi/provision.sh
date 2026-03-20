@@ -46,6 +46,7 @@ echo
 # Shared infra
 mkdir -p "$ALF_MULTI_DIR/letsencrypt"
 ensure_shared_whisper_secret
+ensure_shared_embed_secret
 
 # Scaffold tenant directories + secrets
 scaffold_tenant "$USER"

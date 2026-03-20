@@ -221,25 +221,26 @@ func fetchModels(ap *provider.APIProvider) ([]modelInfo, error) {
 	baseURL := ap.BaseURL()
 	baseStripped := strings.TrimSuffix(strings.TrimSuffix(baseURL, "/"), "/v1")
 
-	// Try each known models endpoint path.
-	endpoints := []struct {
+	// Build endpoint list. Only try Ollama /api/tags for local backends (auth=none).
+	type endpoint struct {
 		label string
 		url   string
 		parse func([]byte) []modelInfo
-	}{
-		// Ollama native: strip /v1 from base and call /api/tags
-		{
+	}
+	var endpoints []endpoint
+	if ap.IsOllamaCompat() {
+		endpoints = append(endpoints, endpoint{
 			label: "ollama /api/tags",
 			url:   baseStripped + "/api/tags",
 			parse: parseOllamaModels,
-		},
-		// OpenAI-compatible: base + /models (works for OpenAI, OpenRouter, and Ollama /v1/models)
-		{
-			label: "openai /models",
-			url:   strings.TrimSuffix(baseURL, "/") + "/models",
-			parse: parseOpenAIModels,
-		},
+		})
 	}
+	// OpenAI-compatible: works for OpenAI, OpenRouter, and Ollama /v1/models
+	endpoints = append(endpoints, endpoint{
+		label: "openai /models",
+		url:   strings.TrimSuffix(baseURL, "/") + "/models",
+		parse: parseOpenAIModels,
+	})
 
 	client := &http.Client{Timeout: 15 * time.Second}
 

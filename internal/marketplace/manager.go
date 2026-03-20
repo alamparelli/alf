@@ -1,9 +1,12 @@
 package marketplace
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -419,7 +422,7 @@ func (m *Manager) FetchCatalog() ([]RemoteApp, error) {
 }
 
 // Install downloads an app from the remote registry and installs it locally.
-// Downloads: manifest, binary (for current arch), web assets.
+// Tries bundle (tarball) first, falls back to individual file downloads.
 func (m *Manager) Install(slug string) error {
 	if m.registryURL == "" {
 		return fmt.Errorf("no registry configured")
@@ -432,39 +435,139 @@ func (m *Manager) Install(slug string) error {
 
 	os.MkdirAll(appDir, 0o755)
 
-	// Download manifest.
-	if err := m.downloadFile(slug, "manifest", filepath.Join(appDir, "manifest.json")); err != nil {
-		return fmt.Errorf("download manifest: %w", err)
-	}
-
-	// Download binary for current arch (optional — web-only apps have no binary).
-	arch := runtime.GOARCH
-	binDir := filepath.Join(appDir, "bin")
-	os.MkdirAll(binDir, 0o755)
-	binPath := filepath.Join(binDir, slug)
-	if err := m.downloadBinary(slug, arch, binPath); err != nil {
-		// Binary is optional — web-only apps don't have one.
-		os.Remove(binPath)
-	} else {
-		os.Chmod(binPath, 0o755)
-	}
-
-	// Download web assets (index.html, app.json).
-	webFiles := []string{"index.html", "app.json"}
-	for _, f := range webFiles {
-		dst := filepath.Join(appDir, f)
-		if err := m.downloadWebAsset(slug, f, dst); err != nil {
-			continue
+	// Try bundle download first (single tarball with everything).
+	if err := m.downloadAndExtractBundle(slug, appDir); err != nil {
+		log.Printf("marketplace: bundle download for %s failed (%v), trying legacy", slug, err)
+		if err := m.installLegacy(slug, appDir); err != nil {
+			return err
 		}
 	}
-
-	// Download bundled skills.
-	m.downloadSkills(slug, appDir)
 
 	m.mu.Lock()
 	m.states[slug] = StateInstalled
 	m.saveState()
 	m.mu.Unlock()
+
+	return nil
+}
+
+// installLegacy downloads app files individually (pre-tarball servers).
+func (m *Manager) installLegacy(slug, appDir string) error {
+	if err := m.downloadFile(slug, "manifest", filepath.Join(appDir, "manifest.json")); err != nil {
+		return fmt.Errorf("download manifest: %w", err)
+	}
+
+	binDir := filepath.Join(appDir, "bin")
+	os.MkdirAll(binDir, 0o755)
+	binPath := filepath.Join(binDir, slug)
+	if err := m.downloadBinary(slug, runtime.GOARCH, binPath); err != nil {
+		os.Remove(binPath)
+	} else {
+		os.Chmod(binPath, 0o755)
+	}
+
+	webFiles := []string{"index.html", "app.json", "service.json"}
+	for _, f := range webFiles {
+		_ = m.downloadWebAsset(slug, f, filepath.Join(appDir, f))
+	}
+
+	m.downloadSkills(slug, appDir)
+	return nil
+}
+
+// downloadAndExtractBundle downloads a tarball from the registry and extracts it.
+// Skips data/ entries to preserve user data.
+func (m *Manager) downloadAndExtractBundle(slug, appDir string) error {
+	url := fmt.Sprintf("%s/api/apps/%s/bundle", m.registryURL, slug)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Alf-Instance", "true")
+	resp, err := m.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	return extractBundle(resp.Body, appDir)
+}
+
+// extractBundle extracts a tar.gz stream into appDir, skipping data/ entries.
+func extractBundle(r io.Reader, appDir string) error {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return fmt.Errorf("gzip: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	const maxFiles = 100
+	const maxFileSize int64 = 50 << 20 // 50MB
+	count := 0
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("tar: %w", err)
+		}
+
+		// Security: reject path traversal and absolute paths.
+		clean := filepath.Clean(hdr.Name)
+		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+			continue
+		}
+
+		// Skip data/ directory (preserve user data).
+		if clean == "data" || strings.HasPrefix(clean, "data/") || strings.HasPrefix(clean, "data"+string(filepath.Separator)) {
+			continue
+		}
+
+		// Skip symlinks.
+		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
+			continue
+		}
+
+		target := filepath.Join(appDir, clean)
+
+		// Verify target stays within appDir.
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(appDir)+string(filepath.Separator)) && target != filepath.Clean(appDir) {
+			continue
+		}
+
+		if hdr.Typeflag == tar.TypeDir {
+			os.MkdirAll(target, 0o755)
+			continue
+		}
+
+		count++
+		if count > maxFiles {
+			return fmt.Errorf("too many files in bundle (max %d)", maxFiles)
+		}
+
+		os.MkdirAll(filepath.Dir(target), 0o755)
+
+		mode := os.FileMode(0o644)
+		if hdr.Mode&0o111 != 0 {
+			mode = 0o755 // preserve executable bit
+		}
+
+		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+		if err != nil {
+			return fmt.Errorf("create %s: %w", clean, err)
+		}
+		_, copyErr := io.Copy(f, io.LimitReader(tr, maxFileSize))
+		f.Close()
+		if copyErr != nil {
+			return fmt.Errorf("write %s: %w", clean, copyErr)
+		}
+	}
 
 	return nil
 }
@@ -634,28 +737,13 @@ func (m *Manager) Update(slug string) error {
 		os.RemoveAll(filepath.Join(appDir, e.Name()))
 	}
 
-	// Re-download from registry (same logic as Install).
+	// Re-download from registry: try bundle first, fallback to legacy.
 	os.MkdirAll(appDir, 0o755)
 
-	if err := m.downloadFile(slug, "manifest", filepath.Join(appDir, "manifest.json")); err != nil {
-		return fmt.Errorf("download manifest: %w", err)
-	}
-
-	arch := runtime.GOARCH
-	binDir := filepath.Join(appDir, "bin")
-	os.MkdirAll(binDir, 0o755)
-	binPath := filepath.Join(binDir, slug)
-	if err := m.downloadBinary(slug, arch, binPath); err != nil {
-		os.Remove(binPath)
-	} else {
-		os.Chmod(binPath, 0o755)
-	}
-
-	webFiles := []string{"index.html", "app.json"}
-	for _, f := range webFiles {
-		dst := filepath.Join(appDir, f)
-		if err := m.downloadWebAsset(slug, f, dst); err != nil {
-			continue
+	if err := m.downloadAndExtractBundle(slug, appDir); err != nil {
+		log.Printf("marketplace: bundle download for %s failed (%v), trying legacy", slug, err)
+		if err := m.installLegacy(slug, appDir); err != nil {
+			return err
 		}
 	}
 

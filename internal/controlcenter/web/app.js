@@ -3313,15 +3313,30 @@ function capitalizeName(name) {
 }
 
 function loadApps() {
-  // Fetch local apps for sidebar — no marketplace filtering.
-  return api('/api/apps/').catch(() => ({ items: [] })).then(r => {
+  // Fetch apps and marketplace state in parallel.
+  return Promise.all([
+    api('/api/apps/').catch(() => ({ items: [] })),
+    api('/api/marketplace').catch(() => [])
+  ]).then(([r, mpApps]) => {
     const section = document.getElementById('navAppsSection');
     const items = r.items || [];
+
+    // Build marketplace state map: slug → state
+    var mpState = {};
+    (mpApps || []).forEach(mp => { mpState[mp.slug] = mp.state; });
+
+    // Filter: marketplace apps (have manifest) only shown if enabled.
+    // Local apps (no manifest/not in marketplace) always shown.
+    var visibleItems = items.filter(app => {
+      var state = mpState[app.name];
+      if (state === undefined) return true; // local app, no marketplace entry
+      return state === 'enabled';
+    });
 
     section.innerHTML = '';
 
     const favs = JSON.parse(localStorage.getItem('alf-nav-favs') || '[]');
-    items.forEach(app => {
+    visibleItems.forEach(app => {
       const a = document.createElement('a');
       a.className = 'nav-item';
       a.dataset.view = 'page:' + app.name;

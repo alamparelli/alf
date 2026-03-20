@@ -87,6 +87,23 @@ chmod -R g+ws /home/alf/data
 chown -R alf:alf /opt/alf/config.d /opt/alf/vault-data
 chown alf:alf /etc/resolv.conf 2>/dev/null || true
 
+# Phase 2.6: Lock protected apps (root-owned, read-only for alf user).
+# The developer app has marketplace publishing capabilities and must not be
+# modifiable by the LLM which runs as uid 1000.
+for protected_app in developer; do
+    app_dir="/home/alf/data/apps/${protected_app}"
+    if [ -d "$app_dir" ]; then
+        chown -R root:root "$app_dir"
+        find "$app_dir" -type f -exec chmod 444 {} +
+        find "$app_dir" -type d -exec chmod 555 {} +
+        # data/ must remain writable by alf
+        if [ -d "$app_dir/data" ]; then
+            chown -R alf:alf "$app_dir/data"
+            chmod 755 "$app_dir/data"
+        fi
+    fi
+done
+
 # Phase 3: Drop to alf (uid 1000) and start daemon with zero capabilities.
 # setpriv strips all inheritable capabilities - combined with no-new-privileges:true,
 # the daemon process cannot regain any capabilities after this point.

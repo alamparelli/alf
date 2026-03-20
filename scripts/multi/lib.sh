@@ -330,7 +330,7 @@ ${traefik_tenant_nets}    userns_mode: "host"
       - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
     volumes:
       - ./shared/embed_shared_secret:/run/secrets/embed_shared_secret:ro
-    mem_limit: 768m
+    mem_limit: 1536m
     cpus: "1.0"
     logging:
       driver: json-file

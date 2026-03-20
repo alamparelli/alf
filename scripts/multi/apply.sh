@@ -20,6 +20,7 @@ done
 
 ensure_registry
 ensure_shared_whisper_secret
+ensure_shared_embed_secret
 generate_compose
 preflight_fix_placeholders
 

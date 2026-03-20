@@ -69,8 +69,9 @@ mkdir -p "$SHARED_DIR/models"
 # whisper runs as uid 1000 (user 'whisper') with userns_mode: host
 chown -R 1000:1000 "$SHARED_DIR/models"
 
-# Generate shared whisper secret
+# Generate shared sidecar secrets
 ensure_shared_whisper_secret
+ensure_shared_embed_secret
 
 # Write env file for persistence
 cat > "$ALF_MULTI_DIR/.env" <<EOF

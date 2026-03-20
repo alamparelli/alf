@@ -438,6 +438,14 @@ func seedBundledApps(dataDir string) {
 			continue
 		}
 		slug := e.Name()
+
+		// Protected apps (e.g. developer) are not auto-seeded.
+		// They must be installed explicitly via the marketplace.
+		// The entrypoint locks them after install.
+		if isProtectedApp(slug) {
+			continue
+		}
+
 		src := filepath.Join(defaultsDir, slug)
 		dest := filepath.Join(appsDir, slug)
 
@@ -449,6 +457,16 @@ func seedBundledApps(dataDir string) {
 			log.Printf("seeded bundled app: %s", slug)
 		}
 	}
+}
+
+// protectedApps are not auto-seeded at startup. They are installed via marketplace
+// and locked by the entrypoint to prevent LLM modification.
+var protectedApps = map[string]bool{
+	"developer": true,
+}
+
+func isProtectedApp(slug string) bool {
+	return protectedApps[slug]
 }
 
 // seedAppFiles copies files from src to dest, creating directories as needed.

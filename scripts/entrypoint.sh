@@ -4,11 +4,13 @@ set -e
 PACKAGES="/opt/alf/config.d/packages.txt"
 RUNTIME="/opt/alf/config.d/runtime.txt"
 BOOTSTRAP="/home/alf/data/bootstrap.sh"
+STAMP_DIR="/opt/alf/config.d/.stamps"
+mkdir -p "$STAMP_DIR"
 
 # Phase 1: Install system packages as root (if packages.txt exists).
 # One package name per line. Lines starting with # are ignored.
 if [ -f "$PACKAGES" ]; then
-    STAMP="/tmp/.packages-stamp"
+    STAMP="$STAMP_DIR/packages"
     if [ ! -f "$STAMP" ] || ! cmp -s "$PACKAGES" "$STAMP"; then
         echo "entrypoint: installing system packages ..."
         if grep -qvE '^\s*#|^\s*$' "$PACKAGES"; then
@@ -25,7 +27,7 @@ fi
 # Supports: node, deno, bun. Installs once (stamp check).
 if [ -f "$RUNTIME" ]; then
     RT=$(grep -v '^\s*#' "$RUNTIME" | grep -v '^\s*$' | head -1 | tr -d '[:space:]')
-    STAMP="/tmp/.runtime-stamp"
+    STAMP="$STAMP_DIR/runtime"
     PREV=$(cat "$STAMP" 2>/dev/null || echo "")
     if [ -n "$RT" ] && [ "$RT" != "$PREV" ]; then
         echo "entrypoint: installing JS runtime: $RT ..."
@@ -52,13 +54,14 @@ if [ -f "$RUNTIME" ]; then
     fi
 fi
 
-# Phase 1c: Install npm global packages (if runtime is node and npm-global.txt exists).
+# Phase 1c: Install npm global packages into persistent volume.
 NPM_GLOBAL="/opt/alf/config.d/npm-global.txt"
+NPM_PREFIX="/opt/alf/user-packages"
 if [ -f "$NPM_GLOBAL" ] && command -v npm >/dev/null 2>&1; then
-    STAMP="/tmp/.npm-global-stamp"
+    STAMP="$STAMP_DIR/npm-global"
     if [ ! -f "$STAMP" ] || ! cmp -s "$NPM_GLOBAL" "$STAMP"; then
-        echo "entrypoint: installing npm global packages ..."
-        grep -vE '^\s*#|^\s*$' "$NPM_GLOBAL" | xargs -r npm i -g --silent \
+        echo "entrypoint: installing npm global packages to $NPM_PREFIX ..."
+        grep -vE '^\s*#|^\s*$' "$NPM_GLOBAL" | xargs -r npm i -g --prefix "$NPM_PREFIX" --silent \
             || echo "entrypoint: WARNING - npm global install failed, continuing"
         cp "$NPM_GLOBAL" "$STAMP"
     fi

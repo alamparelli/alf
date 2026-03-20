@@ -846,7 +846,12 @@ func (o *Orchestrator) invokeAgentWithKey(
 			}
 			schemas := o.toolRegistry.ForToolsStrict(resolvedTools)
 			if len(schemas) > 0 {
-				tools := tooling.ToOpenAI(schemas)
+				var tools []map[string]any
+				if apiProv.IsDirectOpenAI() {
+					tools = tooling.ToOpenAI(schemas)
+				} else {
+					tools = tooling.ToOpenAICompat(schemas)
+				}
 				maxTurns := tp.MaxTurns
 				if maxTurns <= 0 {
 					maxTurns = 10

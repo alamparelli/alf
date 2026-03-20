@@ -174,8 +174,8 @@ func TestAuthMiddleware_LoginPage(t *testing.T) {
 		t.Errorf("expected text/html content type, got %q", ct)
 	}
 	body := rec.Body.String()
-	if !contains(body, "/login") {
-		t.Error("login page should mention /login command")
+	if !contains(body, "Not authorized") {
+		t.Error("login page should indicate unauthorized access")
 	}
 }
 

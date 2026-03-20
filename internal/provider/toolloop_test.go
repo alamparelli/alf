@@ -208,7 +208,7 @@ func TestAPIProvider_DoRequest_ToolCallsParsing(t *testing.T) {
 	})
 
 	messages := []apiMessage{{Role: "user", Content: "test"}}
-	result, err := api.DoRequest(context.Background(), messages, "test-model", tools, nil)
+	result, err := api.DoRequest(context.Background(), messages, "test-model", tools, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

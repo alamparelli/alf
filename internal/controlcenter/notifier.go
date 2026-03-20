@@ -1,5 +1,7 @@
 package controlcenter
 
+import "log"
+
 // channelNotifier implements Notifier using a buffered channel.
 type channelNotifier struct {
 	ch chan ReloadEvent
@@ -16,6 +18,6 @@ func (n *channelNotifier) Notify(event ReloadEvent) {
 	select {
 	case n.ch <- event:
 	default:
-		// Channel full - drop event. Daemon will pick up changes next cycle.
+		log.Printf("WARNING: reload event %d dropped (channel full)", event)
 	}
 }

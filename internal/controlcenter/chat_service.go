@@ -594,7 +594,12 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		if apiProv, ok := prov.(*provider.APIProvider); ok {
 			schemas := cs.ToolRegistry.ForToolsStrict(tp.Tools)
 			if len(schemas) > 0 {
-				tools := tooling.ToOpenAI(schemas)
+				var tools []map[string]any
+				if apiProv.IsDirectOpenAI() {
+					tools = tooling.ToOpenAI(schemas)
+				} else {
+					tools = tooling.ToOpenAICompat(schemas)
+				}
 				maxTurns := tp.MaxTurns
 				if maxTurns <= 0 {
 					maxTurns = 10

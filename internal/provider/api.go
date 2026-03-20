@@ -82,14 +82,35 @@ func (p *APIProvider) Auth() string               { return p.auth }
 func (p *APIProvider) APIKey() string             { return p.apiKey }
 func (p *APIProvider) Headers() map[string]string { return p.headers }
 
+// IsOllamaCompat returns true if this backend appears to be Ollama
+// (no auth required, typically local).
+func (p *APIProvider) IsOllamaCompat() bool {
+	return p.auth == "none"
+}
+
+// IsDirectOpenAI returns true if this backend points directly at the OpenAI API
+// (not a proxy like OpenRouter that serves multiple providers).
+func (p *APIProvider) IsDirectOpenAI() bool {
+	return strings.Contains(p.baseURL, "api.openai.com")
+}
+
 // apiRequest is the OpenAI chat completions request body.
 type apiRequest struct {
-	Model         string           `json:"model"`
-	Messages      []apiMessage     `json:"messages"`
-	Stream        bool             `json:"stream"`
-	MaxTokens     int              `json:"max_tokens,omitempty"`
-	Tools         json.RawMessage  `json:"tools,omitempty"`
-	StreamOptions *apiStreamOpts   `json:"stream_options,omitempty"`
+	Model              string            `json:"model"`
+	Messages           []apiMessage      `json:"messages"`
+	Stream             bool              `json:"stream"`
+	MaxTokens          int               `json:"max_tokens,omitempty"`
+	Tools              json.RawMessage   `json:"tools,omitempty"`
+	ToolChoice         string            `json:"tool_choice,omitempty"`
+	ParallelToolCalls  *bool             `json:"parallel_tool_calls,omitempty"`
+	Reasoning          *apiReasoning     `json:"reasoning,omitempty"`
+	StreamOptions      *apiStreamOpts    `json:"stream_options,omitempty"`
+}
+
+// apiReasoning configures reasoning/thinking for OpenRouter-compatible models.
+type apiReasoning struct {
+	Effort string `json:"effort,omitempty"`    // "low", "medium", "high"
+	Enabled bool  `json:"enabled,omitempty"`   // true to enable with defaults
 }
 
 type apiStreamOpts struct {
@@ -212,7 +233,7 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 
 // DoRequest sends a request with pre-built messages and optional tools,
 // returning a rich result with tool_calls if present.
-func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, model string, tools json.RawMessage, onProgress OnProgress) (*apiStreamResult, error) {
+func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, model string, tools json.RawMessage, effort string, onProgress OnProgress) (*apiStreamResult, error) {
 	reqBody := apiRequest{
 		Model:         model,
 		Messages:      messages,
@@ -220,6 +241,18 @@ func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, mode
 		MaxTokens:     p.maxTokens,
 		Tools:         tools,
 		StreamOptions: &apiStreamOpts{IncludeUsage: true},
+	}
+	// Ollama-specific: disable parallel tool calls and explicitly set tool_choice.
+	if p.IsOllamaCompat() && len(tools) > 0 {
+		f := false
+		reqBody.ParallelToolCalls = &f
+		reqBody.ToolChoice = "auto"
+		// Ollama doesn't support stream_options.
+		reqBody.StreamOptions = nil
+	}
+	// Reasoning support (OpenRouter / OpenAI-compatible).
+	if effort != "" && !p.IsOllamaCompat() {
+		reqBody.Reasoning = &apiReasoning{Effort: effort, Enabled: true}
 	}
 	return p.doStreamRequest(ctx, reqBody, onProgress, 0)
 }
@@ -244,6 +277,10 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		Stream:        true,
 		MaxTokens:     p.maxTokens,
 		StreamOptions: &apiStreamOpts{IncludeUsage: true},
+	}
+	// Reasoning support (OpenRouter / OpenAI-compatible).
+	if params.Effort != "" && !p.IsOllamaCompat() {
+		reqBody.Reasoning = &apiReasoning{Effort: params.Effort, Enabled: true}
 	}
 
 	resp, err := p.doStreamRequest(ctx, reqBody, onProgress, 0)
@@ -361,6 +398,7 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 			Choices []struct {
 				Delta struct {
 					Content   *string `json:"content"`
+					Reasoning *string `json:"reasoning"` // OpenRouter reasoning delta
 					ToolCalls []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id,omitempty"`
@@ -395,6 +433,12 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 		for _, choice := range chunk.Choices {
 			if choice.FinishReason != nil {
 				finishReason = *choice.FinishReason
+			}
+			// Reasoning/thinking delta (OpenRouter).
+			if choice.Delta.Reasoning != nil && *choice.Delta.Reasoning != "" {
+				if onProgress != nil {
+					onProgress(StreamEvent{Type: "thinking", Text: *choice.Delta.Reasoning})
+				}
 			}
 			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 				resultText.WriteString(*choice.Delta.Content)

@@ -76,8 +76,7 @@ The interactive wizard walks you through:
 1. Choosing an install directory
 2. Configuring Telegram credentials
 3. Setting up dashboard access (HTTP or HTTPS with Let's Encrypt)
-4. Selecting a container runtime (standard Docker or gVisor for sandboxing)
-5. Starting the container
+4. Starting the container
 6. Authenticating Claude
 
 After the container is running, the Control Center **Setup Wizard** guides you through backend selection (Claude CLI, OpenRouter, OpenAI, Ollama), tier presets, and optional Telegram configuration - all from the browser.
@@ -206,7 +205,7 @@ ALF has a rotating personality layer - 16 moods (sharp, philosophical, sardonic,
 ## CLI reference
 
 ```
-alf init          Interactive setup wizard (gVisor install, Docker setup, secrets)
+alf init          Interactive setup wizard (Docker setup, secrets)
 alf start         Start the container
 alf stop          Stop the container
 alf restart       Restart the container
@@ -267,7 +266,6 @@ The entrypoint runs as root for package installation and permission setup, then 
 
 - **User separation** - daemon runs as `alf` (uid 1000), Claude runs as `claude` (uid 1001) with sanitized environment (allowlist-only)
 - **Filesystem isolation** - `/opt/alf/config.d/` read-only, `/opt/alf/tools.d/` read+execute only, `/home/alf/data/` read+write
-- **gVisor support** - optional container runtime sandboxing via `runsc` (installed by `alf init`)
 - **Secrets** - Docker secrets mechanism, never in environment variables
 - **Security headers** - HSTS, X-Frame-Options DENY, CSP with SRI on CDN dependencies, X-Content-Type-Options nosniff
 - **Rate limiting** - 60 req/min global (120 for authenticated users), 5 req/min on auth, CORS on the Control Center API

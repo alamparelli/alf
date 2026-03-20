@@ -71,7 +71,7 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 	turns := 0
 	var totalInput, totalOutput int
 	for {
-		resp, err := tl.api.DoRequest(ctx, messages, model, toolsRaw, onProgress)
+		resp, err := tl.api.DoRequest(ctx, messages, model, toolsRaw, params.Effort, onProgress)
 		if err != nil {
 			return nil, err
 		}

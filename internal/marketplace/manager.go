@@ -426,6 +426,10 @@ func (m *Manager) Install(slug string) error {
 	}
 
 	appDir := filepath.Join(m.dataDir, "apps", slug)
+
+	// Unlock existing files in case of reinstall over a locked app.
+	m.unlockAppFiles(slug)
+
 	os.MkdirAll(appDir, 0o755)
 
 	// Download manifest.
@@ -614,6 +618,9 @@ func (m *Manager) Update(slug string) error {
 	}
 
 	appDir := filepath.Join(m.dataDir, "apps", slug)
+
+	// Unlock files first so they can be removed/overwritten.
+	m.unlockAppFiles(slug)
 
 	// Remove everything except data/ (preserve user data).
 	entries, err := os.ReadDir(appDir)

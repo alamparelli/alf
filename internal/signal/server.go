@@ -113,7 +113,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		} else if s.Notify == nil {
 			resp.Error = "notify not configured"
 		} else {
-			log.Printf("signal: notify received: %q", req.Text)
+			log.Printf("signal: notify received (%d chars)", len(req.Text))
 			s.Notify(req.Text)
 			resp.OK = true
 		}

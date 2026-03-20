@@ -56,20 +56,20 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 	}
 }
 
-// renderLoginPage returns a minimal HTML page instructing the user to send /login to the bot.
+// renderLoginPage returns a minimal HTML page for unauthenticated visitors.
 func renderLoginPage(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// Override restrictive default CSP for the login page HTML.
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>ALF Control Center - Login</title>
+<html><head><meta charset="utf-8"><title>ALF Control Center</title>
 <style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
 .box{text-align:center;padding:2rem 3rem;border:1px solid #333;border-radius:8px;max-width:420px}
-h2{margin-bottom:.5rem}code{background:#2d2d44;padding:.2em .5em;border-radius:4px;font-size:1.1em}
+h2{margin-bottom:.5rem}
 p{color:#aaa;line-height:1.6}</style></head>
 <body><div class="box"><h2>ALF Control Center</h2>
-<p>Send <code>/login</code> to your Telegram bot to get a login link.</p>
+<p>Not authorized.</p>
 </div></body></html>`))
 }
 

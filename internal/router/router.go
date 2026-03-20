@@ -165,7 +165,7 @@ func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 		// Guardrail 1: upgrade read-only → write-capable if write intent detected.
 		if !tierIsWriteCapable(result.Tier, tiers) && HasWriteIntent(message) {
 			if wt := lowestWriteTier(tiers); wt != "" {
-				log.Printf("router: %s → %s upgraded to %s (write intent detected)", truncate(message, 60), result.Tier, wt)
+				log.Printf("router: (%d chars) → %s upgraded to %s (write intent detected)", len(message), result.Tier, wt)
 				result.Tier = wt
 				result.Reason += " [upgraded: write intent]"
 				return result
@@ -174,7 +174,7 @@ func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 		// Guardrail 2: downgrade non-light → light if reason says greeting/trivial.
 		if tierContextWeight(result.Tier, tiers) != "light" && isGreetingReason(result.Reason) && !hasComplexityMarkers(message) {
 			if lt := lowestLightTier(tiers); lt != "" {
-				log.Printf("router: %s → %s downgraded to %s (greeting detected)", truncate(message, 60), result.Tier, lt)
+				log.Printf("router: (%d chars) → %s downgraded to %s (greeting detected)", len(message), result.Tier, lt)
 				result.Tier = lt
 				result.Reason += " [downgraded: greeting]"
 				return result
@@ -183,22 +183,22 @@ func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 		// Guardrail 3: upgrade light → next tier if message is too complex.
 		if tierContextWeight(result.Tier, tiers) == "light" && hasComplexityMarkers(message) {
 			if nt := nextTierAbove(result.Tier, tiers); nt != "" {
-				log.Printf("router: %s → %s upgraded to %s (complexity markers)", truncate(message, 60), result.Tier, nt)
+				log.Printf("router: (%d chars) → %s upgraded to %s (complexity markers)", len(message), result.Tier, nt)
 				result.Tier = nt
 				result.Reason += " [upgraded: complexity]"
 				return result
 			}
 		}
-		log.Printf("router: %s → %s (%s)", truncate(message, 60), result.Tier, result.Reason)
+		log.Printf("router: (%d chars) → %s (%s)", len(message), result.Tier, result.Reason)
 		return result
 	}
 
 	// Router returned a direct response or unparseable text - fallback to default tier.
 	fb := FallbackResult(tiers)
 	if result.Response != "" {
-		log.Printf("router: %s → direct response ignored, falling back to %s", truncate(message, 60), fb.Tier)
+		log.Printf("router: (%d chars) → direct response ignored, falling back to %s", len(message), fb.Tier)
 	} else {
-		log.Printf("router: parse failed (%s), falling back to %s", truncate(raw, 100), fb.Tier)
+		log.Printf("router: parse failed (%d chars), falling back to %s", len(raw), fb.Tier)
 	}
 	return fb
 }

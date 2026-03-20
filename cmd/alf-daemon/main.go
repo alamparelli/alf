@@ -1167,7 +1167,7 @@ func main() {
 				continue
 			}
 
-			log.Printf("← %s: %s", u.Message.From.Username, u.Message.Text)
+			log.Printf("← %s: (%d chars)", u.Message.From.Username, len(u.Message.Text))
 			stats.RecordMessage()
 
 			// Record user message in chat history buffer (for GIF/media context).
@@ -1225,7 +1225,7 @@ func main() {
 						"duration_s": duration,
 						"language":   result.Language,
 					})
-					log.Printf("voice: %q (%s)", result.Text, result.Language)
+					log.Printf("voice: transcribed %d chars (%s)", len(result.Text), result.Language)
 				}
 			} else if hasVoice && transcriber == nil {
 				tg.SendHTML(u.Message.Chat.ID, "Voice messages are not supported yet. Please send text.")
@@ -1356,7 +1356,7 @@ func main() {
 											log.Printf("video audio transcription failed: %v", err)
 										} else if result.Text != "" {
 											transcript = result.Text
-											log.Printf("video audio: %q (%s)", transcript, result.Language)
+											log.Printf("video audio: transcribed %d chars (%s)", len(transcript), result.Language)
 										}
 									}
 								}

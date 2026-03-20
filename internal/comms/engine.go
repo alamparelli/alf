@@ -130,7 +130,7 @@ var BroadcastChannel string
 func (e *ChatEngine) Broadcast(text string) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	log.Printf("[comms] broadcast: %d adapters, filter=%q, text=%q", len(e.adapters), BroadcastChannel, text)
+	log.Printf("[comms] broadcast: %d adapters, filter=%q, text_len=%d", len(e.adapters), BroadcastChannel, len(text))
 	for channel, adapter := range e.adapters {
 		if BroadcastChannel != "" && BroadcastChannel != "all" && channel != BroadcastChannel {
 			continue

@@ -171,6 +171,13 @@ func TestList(t *testing.T) {
 
 	m := NewManager(base)
 
+	// Simulate marketplace install for both (sets state entry).
+	m.mu.Lock()
+	m.states["alpha"] = StateInstalled
+	m.states["beta"] = StateInstalled
+	m.saveState()
+	m.mu.Unlock()
+
 	if err := m.Enable("alpha"); err != nil {
 		t.Fatalf("Enable alpha: %v", err)
 	}
@@ -188,9 +195,19 @@ func TestList(t *testing.T) {
 	if states["alpha"] != StateEnabled {
 		t.Errorf("alpha: expected %q, got %q", StateEnabled, states["alpha"])
 	}
-	// beta was never enabled/disabled, so it should be "installed"
 	if states["beta"] != StateInstalled {
 		t.Errorf("beta: expected %q, got %q", StateInstalled, states["beta"])
+	}
+
+	// Local app (no state entry) should NOT appear in List().
+	localDir := filepath.Join(base, "apps", "localapp")
+	os.MkdirAll(localDir, 0o755)
+	os.WriteFile(filepath.Join(localDir, "manifest.json"),
+		[]byte(`{"slug":"localapp","name":"Local App","version":"1.0.0"}`), 0o644)
+
+	apps = m.List()
+	if len(apps) != 2 {
+		t.Fatalf("local app should not appear in marketplace list, got %d apps", len(apps))
 	}
 }
 

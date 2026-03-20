@@ -156,6 +156,10 @@ logs/daemon.log
 *.db-wal
 *.sock
 
+# Go toolchain (downloaded at runtime).
+tools/go-path/
+tools/go-sdk/
+
 # Secrets.
 **/client_secret_*.json
 **/token.json

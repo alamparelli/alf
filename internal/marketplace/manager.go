@@ -556,8 +556,8 @@ func extractBundle(ra io.ReaderAt, size int64, appDir string) error {
 		os.MkdirAll(filepath.Dir(target), 0o755)
 
 		mode := os.FileMode(0o644)
-		if zf.Mode()&0o111 != 0 {
-			mode = 0o755 // preserve executable bit
+		if zf.Mode()&0o111 != 0 || strings.HasPrefix(clean, "bin/") || clean == "server" {
+			mode = 0o755 // preserve executable bit; force for binaries
 		}
 
 		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)

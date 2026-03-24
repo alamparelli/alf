@@ -93,7 +93,7 @@
   let importPassword = $state('')
   let importFileInput: HTMLInputElement | undefined
 
-  let isUnlocked = $derived(vaultStatus === 'active')
+  let isUnlocked = $derived(vaultStatus === 'unlocked')
 
   async function loadStatus() {
     // Only show loading spinner on first load
@@ -130,7 +130,7 @@
       vaultStatus = data.status
       firstTime = data.first_time
       loading = false
-      if (vaultStatus === 'active') loadAll()
+      if (vaultStatus === 'unlocked') loadAll()
     } catch (e: any) {
       toasts.show(e.error || 'Failed to unlock vault', 'error')
     } finally {
@@ -512,7 +512,7 @@
 
   onMount(async () => {
     await loadStatus()
-    if (vaultStatus === 'active') loadAll()
+    if (vaultStatus === 'unlocked') loadAll()
   })
 
   onDestroy(() => {
@@ -530,7 +530,7 @@
     <Card><p class="dim">Loading vault status...</p></Card>
   {:else if !available}
     <Card><p class="dim">Vault is not available on this installation.</p></Card>
-  {:else if firstTime && vaultStatus !== 'active'}
+  {:else if firstTime && vaultStatus !== 'unlocked'}
     <!-- Setup: create vault -->
     <Card>
       <h3><Shield size={16} /> Set Up Vault</h3>
@@ -543,7 +543,7 @@
         {unlocking ? 'Creating...' : 'Create Vault'}
       </button>
     </Card>
-  {:else if vaultStatus !== 'active'}
+  {:else if vaultStatus !== 'unlocked'}
     <!-- Unlock -->
     <Card>
       <h3><Lock size={16} /> Unlock Vault</h3>

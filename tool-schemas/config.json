@@ -1,0 +1,16 @@
+{
+  "name": "config",
+  "description": "Read the current system configuration (log level, quiet hours, backends, etc.).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["get"],
+        "description": "Action to perform"
+      }
+    },
+    "required": ["action"],
+    "x-positional": ["action"]
+  }
+}

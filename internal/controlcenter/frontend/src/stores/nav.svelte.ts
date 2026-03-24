@@ -13,7 +13,7 @@ export interface OpenTab {
 
 export const SYSTEM_TABS: NavItem[] = [
   { view: 'chat', label: 'Chat', icon: 'message-circle' },
-  { view: 'home', label: 'Home', icon: 'home' },
+  { view: 'home', label: 'Workspace', icon: 'folder-open' },
   { view: 'terminal', label: 'Terminal', icon: 'terminal' },
   { view: 'tasks', label: 'Tasks', icon: 'layers' },
   { view: 'schedules', label: 'Schedules', icon: 'calendar-clock' },

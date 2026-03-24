@@ -23,7 +23,7 @@
       },
       "tier": {
         "type": "string",
-        "description": "LLM tier (haiku, sonnet, opus) or 'direct' for bash commands"
+        "description": "LLM tier name (run 'tier list' to see options) or 'direct' for bash commands"
       },
       "prompt": {
         "type": "string",

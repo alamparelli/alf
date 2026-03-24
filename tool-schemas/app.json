@@ -1,0 +1,20 @@
+{
+  "name": "app",
+  "description": "Manage installed apps and marketplace: list, browse catalog, install, update, enable, disable, or uninstall.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["list", "catalog", "install", "update", "enable", "disable", "uninstall"],
+        "description": "Action to perform"
+      },
+      "slug": {
+        "type": "string",
+        "description": "App slug (required for install/update/enable/disable/uninstall)"
+      }
+    },
+    "required": ["action"],
+    "x-positional": ["action", "slug"]
+  }
+}

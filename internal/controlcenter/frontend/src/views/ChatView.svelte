@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
-  import { Plus, X, MessageCircle, RotateCw, ListX } from 'lucide-svelte'
+  import { onMount, onDestroy, tick } from 'svelte'
+  import { Plus, X, MessageCircle, RotateCw, ListX, Play } from 'lucide-svelte'
   import ChatMessageComponent from '../components/chat/ChatMessage.svelte'
   import ChatInput from '../components/chat/ChatInput.svelte'
+  import Modal from '../components/shared/Modal.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
   import { nav } from '../stores/nav.svelte'
@@ -23,6 +24,8 @@
     model?: string
     tier?: string
     cost_usd?: number
+    duration_ms?: number
+    skills?: string[]
     conv_id?: string
     media?: any[]
     reactions?: any[]
@@ -36,7 +39,7 @@
 
   // --- Tab state ---
   let tabs = $state<ChatTab[]>(loadTabs())
-  let activeTabId = $state(tabs[0]?.id || '')
+  let activeTabId = $state(loadActiveTabId(tabs))
 
   let activeTab = $derived(tabs.find(t => t.id === activeTabId))
 
@@ -51,8 +54,17 @@
     return [{ id: genId(), label: 'Chat', convId: '', unread: 0 }]
   }
 
+  function loadActiveTabId(tabs: ChatTab[]): string {
+    try {
+      const stored = localStorage.getItem('alf-chat-active-tab')
+      if (stored && tabs.some(t => t.id === stored)) return stored
+    } catch { /* ignore */ }
+    return tabs[0]?.id || ''
+  }
+
   function saveTabs() {
     localStorage.setItem('alf-chat-tabs', JSON.stringify(tabs))
+    localStorage.setItem('alf-chat-active-tab', activeTabId)
   }
 
   function genId(): string {
@@ -98,7 +110,12 @@
       tabs = [...tabs]
       saveTabs()
     }
-    loadHistory()
+    // Only load from API if we don't already have messages cached for this tab
+    if (!tabMessages[tabId] || tabMessages[tabId].length === 0) {
+      loadHistory()
+    } else {
+      scrollToBottom()
+    }
   }
 
   function renameTab(tabId: string) {
@@ -124,6 +141,49 @@
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let activeJobId = $state<string | null>(null)
   let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string; tabId: string }[]>([])
+  let tabDrafts = $state<Record<string, string>>({})
+  let currentDraft = $derived(tabDrafts[activeTabId] || '')
+
+  function updateDraft(text: string) {
+    tabDrafts[activeTabId] = text
+    tabDrafts = { ...tabDrafts }
+  }
+
+  // Send to agents modal
+  let showAgentModal = $state(false)
+  let agentModalPrompt = $state('')
+  let agentModalTeam = $state('')
+  let agentModalValidation = $state(false)
+  let agentModalTeams = $state<{ name: string; description?: string }[]>([])
+  let agentModalLaunching = $state(false)
+
+  function openAgentModal(text: string) {
+    agentModalPrompt = text
+    agentModalTeam = ''
+    agentModalValidation = false
+    agentModalLaunching = false
+    // Load teams
+    api<{ teams: { name: string; description?: string }[] }>('/api/teams')
+      .then(data => { agentModalTeams = data?.teams || [] })
+      .catch(() => { agentModalTeams = [] })
+    showAgentModal = true
+  }
+
+  async function launchAgentTask() {
+    agentModalLaunching = true
+    const message = agentModalTeam
+      ? `[Use team: ${agentModalTeam}]\n${agentModalPrompt}`
+      : agentModalPrompt
+    try {
+      await api('POST', '/api/tasks', { message, need_validation: agentModalValidation })
+      toasts.show('Task launched')
+      showAgentModal = false
+    } catch {
+      toasts.show('Failed to launch task', 'error')
+    } finally {
+      agentModalLaunching = false
+    }
+  }
 
   function setMessages(tabId: string, msgs: ChatMsg[]) {
     tabMessages[tabId] = msgs
@@ -136,7 +196,8 @@
     tabMessages = { ...tabMessages }
   }
 
-  function scrollToBottom() {
+  async function scrollToBottom() {
+    await tick()
     if (messagesContainer) {
       requestAnimationFrame(() => {
         messagesContainer.scrollTop = messagesContainer.scrollHeight
@@ -179,6 +240,7 @@
       if (data.active && data.job_id) {
         activeJobId = data.job_id
         sending = true
+        sendingTabId = activeTabId
         reconnectToStream(data.job_id, data.events || 0)
       }
     } catch { /* no active job */ }
@@ -192,6 +254,10 @@
 
   // --- Send message ---
   async function handleSend(message: string, mediaFiles: MediaFile[], model: string) {
+    // Clear draft for current tab
+    tabDrafts[activeTabId] = ''
+    tabDrafts = { ...tabDrafts }
+
     // Client-side command handling
     const trimmed = message.trim()
     if (trimmed === '/new' || trimmed === '/clear') {
@@ -347,6 +413,19 @@
           }
 
           if (eventType === 'done') {
+            // Apply metadata from done event to the last assistant message
+            if (sendingTabId && data) {
+              const msgs = tabMessages[sendingTabId] || []
+              const lastAssistant = [...msgs].reverse().find(m => m.role === 'assistant')
+              if (lastAssistant) {
+                if (data.model) lastAssistant.model = data.model
+                if (data.tier) lastAssistant.tier = data.tier
+                if (data.cost_usd) lastAssistant.cost_usd = data.cost_usd
+                if (data.duration_ms) lastAssistant.duration_ms = data.duration_ms
+                if (data.skills) lastAssistant.skills = data.skills
+                tabMessages = { ...tabMessages }
+              }
+            }
             continue
           }
 
@@ -587,7 +666,7 @@
     {/if}
 
     {#each messages as msg (msg.id)}
-      <ChatMessageComponent {msg} convId={activeTab?.convId || ''} />
+      <ChatMessageComponent {msg} convId={activeTab?.convId || ''} onSendToTask={openAgentModal} />
     {/each}
 
     <!-- Streaming response (only on the tab that initiated the send) -->
@@ -609,21 +688,58 @@
         <span class="dot"></span>
       </div>
     {/if}
+
+    <!-- Queued messages (shown as pending user bubbles) -->
+    {#each messageQueue as queued, i}
+      {#if queued.tabId === activeTabId}
+        <div class="chat-msg chat-msg-user queued-msg">
+          <div class="msg-text">{queued.message}</div>
+          <div class="msg-footer">
+            <span class="msg-time queued-label">queued</span>
+            <button class="queued-cancel" onclick={() => { messageQueue = messageQueue.filter((_, idx) => idx !== i) }} title="Cancel">
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+      {/if}
+    {/each}
   </div>
 
-  <!-- Queue indicator -->
-  {#if messageQueue.length > 0}
-    <div class="queue-indicator">
-      <span>{messageQueue.length} queued</span>
-      <button class="queue-clear" onclick={() => { messageQueue = [] }} title="Clear queue">
-        <ListX size={14} />
+  <!-- Input -->
+  <ChatInput onSend={handleSend} onStop={stopCall} sending={sending && sendingTabId === activeTabId} {tiers} draft={currentDraft} onDraftChange={updateDraft} />
+</div>
+
+<!-- Send to Agents Modal -->
+<Modal open={showAgentModal} onclose={() => showAgentModal = false}>
+  <h3 style="margin:0 0 12px">Send to Agents</h3>
+  <div class="agent-modal-form">
+    <div class="form-group">
+      <label for="agent-prompt">Prompt</label>
+      <textarea id="agent-prompt" class="input" rows="4" bind:value={agentModalPrompt}></textarea>
+    </div>
+    <div class="form-group">
+      <label for="agent-team">Team</label>
+      <select id="agent-team" class="input" bind:value={agentModalTeam}>
+        <option value="">Auto (best fit)</option>
+        {#each agentModalTeams as team}
+          <option value={team.name}>{team.name}{team.description ? ` - ${team.description}` : ''}</option>
+        {/each}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="checkbox-label">
+        <input type="checkbox" bind:checked={agentModalValidation} />
+        Review plan before execution
+      </label>
+    </div>
+    <div class="agent-modal-actions">
+      <button class="btn btn-secondary" onclick={() => showAgentModal = false}>Cancel</button>
+      <button class="btn btn-primary" onclick={launchAgentTask} disabled={agentModalLaunching}>
+        <Play size={14} /> {agentModalLaunching ? 'Launching...' : 'Launch'}
       </button>
     </div>
-  {/if}
-
-  <!-- Input -->
-  <ChatInput onSend={handleSend} onStop={stopCall} sending={sending && sendingTabId === activeTabId} {tiers} />
-</div>
+  </div>
+</Modal>
 
 <style>
   .chat-view {
@@ -690,8 +806,8 @@
   }
 
   .tab-unread {
-    background: var(--accent);
-    color: var(--on-accent);
+    background: var(--red, #e53935);
+    color: #fff;
     font-size: 0.6rem;
     font-weight: 600;
     padding: 1px 5px;
@@ -814,33 +930,71 @@
     40% { transform: scale(1); opacity: 1; }
   }
 
-  /* Queue indicator */
-  .queue-indicator {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 4px 12px;
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    background: var(--bg-input);
-    border-top: 1px solid var(--border);
+  /* Queued messages */
+  .queued-msg {
+    opacity: 0.55;
+    border: 1px dashed var(--border);
   }
 
-  .queue-clear {
+  .queued-label {
+    font-style: italic;
+  }
+
+  .queued-cancel {
     display: flex;
     align-items: center;
     background: none;
     border: none;
-    color: var(--text-dim);
+    color: inherit;
+    opacity: 0.4;
     cursor: pointer;
     padding: 2px;
     border-radius: 4px;
-    transition: color 0.15s;
+    transition: opacity 0.15s;
   }
 
-  .queue-clear:hover {
+  .queued-cancel:hover {
+    opacity: 1;
     color: var(--red, #e53935);
+  }
+
+  /* Agent modal */
+  .agent-modal-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .agent-modal-form .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .agent-modal-form label {
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+
+  .agent-modal-form textarea,
+  .agent-modal-form select {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .agent-modal-form .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .agent-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
   }
 
   @media (max-width: 768px) {

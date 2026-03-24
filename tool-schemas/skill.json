@@ -1,0 +1,20 @@
+{
+  "name": "skill",
+  "description": "List available skills or get skill details. Skills provide specialized capabilities for tasks and conversations.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["list", "get"],
+        "description": "Action to perform"
+      },
+      "name": {
+        "type": "string",
+        "description": "Skill name (required for get)"
+      }
+    },
+    "required": ["action"],
+    "x-positional": ["action", "name"]
+  }
+}

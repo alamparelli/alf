@@ -1,8 +1,9 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
 
-  let { open = false, onclose, children }: {
+  let { open = false, wide = false, onclose, children }: {
     open?: boolean
+    wide?: boolean
     onclose?: () => void
     children: Snippet
   } = $props()
@@ -10,7 +11,7 @@
 
 {#if open}
   <div class="modal-backdrop" onclick={onclose} role="presentation">
-    <div class="modal" onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog">
+    <div class="modal" class:wide onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog">
       {@render children()}
     </div>
   </div>
@@ -34,8 +35,13 @@
     padding: 1.5rem;
     min-width: 360px;
     max-width: 90vw;
-    max-height: 80vh;
+    max-height: 85vh;
     overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  }
+
+  .modal.wide {
+    width: 80vw;
+    max-width: 1000px;
   }
 </style>

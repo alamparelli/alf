@@ -1,7 +1,7 @@
 ---
 name: sdk-app-builder
-description: Build standalone ALF apps — CLI binary (appsdk) or REST server + AlfSDK frontend + manifest + marketplace publishing
-version: "3"
+description: Build standalone ALF apps — source-only (compiled at install), AlfSDK frontend, manifest, marketplace publishing
+version: "4"
 triggers: create app, new app, build app, make app, web app, marketplace app, publish app, standalone app, webapp, build application, create application, marketplace tool, app sdk, sdk app, new app with sdk, app with theme, interactive app
 tier: sonnet
 ---
@@ -10,51 +10,58 @@ tier: sonnet
 
 You build **standalone** apps for ALF. Every app is self-contained and can be installed on any ALF instance via the marketplace.
 
-**CRITICAL: Apps MUST be standalone.** No dependency on shared databases or external processes. Each app runs its own server (Go/Python, or user's choice).
+**CRITICAL RULES:**
+- Apps MUST be **standalone** — no dependency on shared databases or external processes
+- Apps are **source-only** — NEVER compile or generate binaries. Source is shipped as-is; the ALF installer compiles Go at install time on the target instance
+- Use **SQLite** for all data storage — keeps apps self-contained with zero external dependencies
+- Use **vanilla JS** for frontends — no frameworks, no build step, CSP-safe
 
 ## MANDATORY: Scope check
 
 Before building, you MUST understand what the user wants. If the request has fewer than 2 concrete details, ask:
-- What actions should the tool support?
+- What should the app do? What actions?
 - Does it need a web UI? What should it show?
 - What data does it store?
 
-## Two modes — pick the right one
+## Two architectures — pick the right one
 
-| | CLI binary (appsdk) | REST server |
+| | CLI tool (appsdk) | REST server |
 |---|---|---|
-| **Best for** | Simple tools, LLM-callable actions | Complex apps with rich web UIs |
-| **Backend** | Single Go binary in `bin/<slug>` | Go/Python server with `service.json` |
-| **Data access** | `$ALF_APP_DATA_DIR` env var | Relative `data/` directory |
-| **Frontend calls** | Via `AlfSDK.tool()` | Via `AlfSDK.bash()` + curl |
+| **Best for** | Simple data tools the LLM calls | Rich web UIs, games, complex apps |
+| **Backend** | Go source in `main.go` | Go/Python source with `service.json` |
+| **Data** | SQLite via `$ALF_APP_DATA_DIR` | SQLite in `data/` directory |
+| **Frontend** | Via `AlfSDK.tool()` | Direct fetch to server endpoints |
 | **Port** | None (stdin/stdout) | Dynamic, written to `data/port` |
-| **Example** | Journal | Later |
+| **LLM tool** | Always (that's the point) | Only if LLM needs to interact |
+| **Example** | Journal, Todo | Later, 2048, Wordle |
 
-**Default to CLI binary** for tools. Use REST server only when the app needs a persistent process (websockets, background jobs, complex multi-endpoint API).
+### When to use which
 
-**IMPORTANT: Every app MUST include a CLI tool binary** (`bin/<slug>`) — even REST server apps. This is how the LLM interacts with the app's data (write, read, search, delete). The CLI tool is separate from the server binary. Without it, the LLM cannot use the app as a tool. The CLI binary must be declared in `manifest.json` under `tools` with its action schema.
+**CLI tool**: The LLM needs to create, read, update, or delete data (todo items, journal entries, bookmarks). The app may optionally have a web UI.
+
+**REST server**: The app is primarily interactive for the user — games, dashboards, visual tools. The server handles all logic. A CLI tool is only needed if the LLM should also interact with the data.
+
+**Do NOT create a CLI tool** for apps where the LLM has no reason to interact — games (wordle, 2048, snake), calculators, visual tools, etc. Omit the `tools` array from `manifest.json` entirely.
 
 ---
 
-## Mode A: CLI Tool
+## Architecture A: CLI Tool (appsdk)
 
-### Directory structure
+### Directory structure (source-only)
 ```
 apps/<slug>/
   manifest.json      # REQUIRED — metadata + tool schema
   app.json           # REQUIRED if web UI
   index.html         # OPTIONAL — web UI (AlfSDK)
+  main.go            # Go source (appsdk)
+  go.mod             # Go module
   data/
-    <slug>.db        # SQLite database
-
-tools/
-  <slug>             # Executable binary or script (in PATH)
-  <slug>.json        # JSON schema for API-based LLM tiers
+    <slug>.db        # SQLite database (created at runtime)
 ```
 
-The CLI tool binary goes in `~/data/tools/` (NOT inside the app directory). It is automatically in PATH and callable by name. The companion `.json` schema makes it visible to API-based LLM tiers.
+At install time, ALF compiles `main.go` and places the binary in `~/data/tools/<slug>`. You NEVER do this yourself — just write the source.
 
-If the app has data, the tool reads/writes `~/data/apps/<slug>/data/` via `$ALF_APP_DATA_DIR` or by convention.
+A companion `<slug>.json` schema is also generated from `manifest.json` tools and placed in `~/data/tools/`. This makes the tool visible to API-based LLM tiers.
 
 ### manifest.json
 
@@ -83,7 +90,8 @@ One tool per app, with `action` enum for sub-commands:
           "name": { "type": "string", "description": "Item name (create)" },
           "id": { "type": "string", "description": "Item ID (delete)" }
         },
-        "required": ["action"]
+        "required": ["action"],
+        "x-positional": ["action", "name", "id"]
       }
     }
   ]
@@ -93,35 +101,9 @@ One tool per app, with `action` enum for sub-commands:
 Rules:
 - **One tool with action enum** — not separate tools per action
 - **`required: ["action"]`** — always require the action field
+- **`x-positional`** — fields that become positional CLI args (in order); rest become `--key value` flags
 
-### Tool binary and JSON schema (in ~/data/tools/)
-
-**The CLI tool MUST follow the `tool-creator` skill conventions.** Read the `tool-creator` skill (in `skills.d/tool-creator/SKILL.md`) for the full standard: shebang, `--help` flag, error handling, output conventions, naming, and JSON schema with `x-positional`.
-
-Create `~/data/tools/<slug>` (the binary) and `~/data/tools/<slug>.json` (the schema) alongside it:
-
-```json
-{
-  "name": "my-app",
-  "description": "Short description of what the tool does.",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "action": {
-        "type": "string",
-        "enum": ["create", "list", "delete"],
-        "description": "Action to perform"
-      },
-      "name": { "type": "string", "description": "Item name (create)" },
-      "id": { "type": "string", "description": "Item ID (delete)" }
-    },
-    "required": ["action"],
-    "x-positional": ["action", "name", "id"]
-  }
-}
-```
-
-### Go binary (appsdk)
+### Go source (main.go)
 
 ```go
 package main
@@ -144,6 +126,7 @@ func actionCreate(ctx *appsdk.Context) error {
     if name == "" {
         return fmt.Errorf("name is required")
     }
+    // Use ctx.DataDir for SQLite path
     appsdk.Respond(fmt.Sprintf("Created: %s", name))
     return nil
 }
@@ -157,32 +140,27 @@ SDK patterns:
 - `appsdk.RespondJSON(v)` — JSON output
 - `appsdk.Fail(msg)` — error to stderr + exit 1
 
-Build and install:
-```bash
-export PATH="/home/alf/data/tools/go-sdk/bin:$PATH"
-export GOPATH="/home/alf/data/tools/go-path"
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ~/data/tools/<slug> .
-chmod +x ~/data/tools/<slug>
-```
+**The CLI tool MUST also follow the `tool-creator` skill conventions** (read `skills.d/tool-creator/SKILL.md`): `--help` flag, error handling, output conventions, JSON schema with `x-positional`.
 
 ---
 
-## Mode B: REST Server
+## Architecture B: REST Server
 
-### Directory structure
+### Directory structure (source-only)
 ```
-<slug>/
-  manifest.json      # REQUIRED — metadata
-  app.json           # REQUIRED if web UI
+apps/<slug>/
+  manifest.json      # REQUIRED — metadata (no tools unless LLM needs access)
+  app.json           # REQUIRED — web UI metadata
   service.json       # REQUIRED — daemon supervises the server
-  index.html         # OPTIONAL — web UI (AlfSDK)
-  server.go          # Go backend (or server.py for Python)
-  go.mod             # Go module (Go apps only)
-  server             # Compiled binary
+  index.html         # Web UI (AlfSDK)
+  main.go            # Go server source
+  go.mod             # Go module
   data/
-    <slug>.db        # SQLite database
+    <slug>.db        # SQLite database (created at runtime)
     port             # Port file (written by server at startup)
 ```
+
+At install time, ALF compiles `main.go` into a `server` binary in the app directory. You NEVER compile it yourself.
 
 ### service.json
 
@@ -197,7 +175,7 @@ chmod +x ~/data/tools/<slug>
 }
 ```
 
-For Python: `"command": "python3", "args": ["server.py"]`
+For Python apps: `"command": "python3", "args": ["server.py"]` — no compilation needed.
 
 The daemon auto-supervises: restart on crash, start on boot, SIGTERM on shutdown.
 
@@ -205,11 +183,11 @@ The daemon auto-supervises: restart on crash, start on boot, SIGTERM on shutdown
 
 The backend MUST:
 - Pick a free port and write it to `data/port`
-- Create/manage its own SQLite database in `data/`
+- Use **SQLite** in `data/` for all persistent storage
 - Expose JSON REST endpoints
 - Listen on `127.0.0.1` only
 
-### Go server template
+### Go server template (main.go)
 
 ```go
 package main
@@ -268,15 +246,7 @@ func main() {
 }
 ```
 
-Build:
-```bash
-export PATH="/home/alf/data/tools/go-sdk/bin:$PATH"
-export GOPATH="/home/alf/data/tools/go-path"
-cd ~/data/apps/<slug>
-go mod init app && go mod tidy && go build -o server .
-```
-
-### Python server template
+### Python server template (server.py)
 
 ```python
 #!/usr/bin/env python3
@@ -359,7 +329,7 @@ All app frontends use the **AlfSDK** for parent SPA communication (theme sync, t
   <script src="/static/theme-init.js"></script>
   <script src="/static/alf-app-sdk.js"></script>
   <style>
-    body { padding: 1.5rem; }
+    body { padding: 1.5rem; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius, 8px); padding: 1.25rem; margin-bottom: 1rem; }
     .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--border); border-radius: var(--radius, 8px); background: var(--bg-input); color: var(--text); font-family: inherit; font-size: 0.85rem; cursor: pointer; }
     .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
@@ -394,14 +364,21 @@ All app frontends use the **AlfSDK** for parent SPA communication (theme sync, t
 
     var items = [];
 
+    // For CLI tool apps: use AlfSDK.tool()
     function load() {
       AlfSDK.tool('list').then(function(out) {
         try { items = JSON.parse(out); } catch(e) { items = []; }
         renderList();
-      }).catch(function(e) {
-        document.getElementById('list').innerHTML = '<p class="empty">Error: ' + esc(e.message) + '</p>';
       });
     }
+
+    // For REST server apps: use direct fetch to local server
+    // function load() {
+    //   fetch('/apps/SLUG/api/items').then(r => r.json()).then(function(data) {
+    //     items = data;
+    //     renderList();
+    //   });
+    // }
 
     function renderList() {
       var el = document.getElementById('list');
@@ -410,30 +387,8 @@ All app frontends use the **AlfSDK** for parent SPA communication (theme sync, t
         return;
       }
       el.innerHTML = items.map(function(item) {
-        return '<div class="card" onclick="editItem(' + item.id + ')">' +
-          '<strong>' + esc(item.name) + '</strong>' +
-          '</div>';
+        return '<div class="card"><strong>' + esc(item.name) + '</strong></div>';
       }).join('');
-    }
-
-    function save(id) {
-      var name = document.getElementById('fName').value.trim();
-      if (!name) { AlfSDK.toast('Name required', 'error'); return; }
-      var action = id ? 'update' : 'create';
-      var args = { name: name };
-      if (id) args.id = String(id);
-      AlfSDK.tool(action, args).then(function() {
-        AlfSDK.toast('Saved', 'success');
-        backToList();
-      }).catch(function(e) { AlfSDK.toast(e.message, 'error'); });
-    }
-
-    function remove(id) {
-      if (!confirm('Delete this item?')) return;
-      AlfSDK.tool('delete', { id: String(id) }).then(function() {
-        AlfSDK.toast('Deleted');
-        backToList();
-      }).catch(function(e) { AlfSDK.toast(e.message, 'error'); });
     }
 
     function esc(s) {
@@ -463,35 +418,6 @@ The SDK is loaded from `/static/alf-app-sdk.js`. Available methods:
 | `AlfSDK.toast(msg, type)` | Show toast in parent (`'success'`, `'error'`, `'info'`). |
 | `AlfSDK.getTheme()` | Returns `{ palette, dark }`. |
 
-### Frontend for REST server apps
-
-For REST server apps, use `AlfSDK.bash()` with curl to call the local server:
-
-```javascript
-var _port = null;
-function getPort() {
-  if (_port) return Promise.resolve(_port);
-  return AlfSDK.bash('cat ~/data/apps/SLUG/data/port').then(function(out) {
-    _port = out.trim();
-    return _port;
-  });
-}
-
-function apiCall(method, path, body) {
-  return getPort().then(function(port) {
-    if (!port) throw new Error('Backend not running');
-    var cmd = "curl -s -X " + method + " 'http://127.0.0.1:" + port + path + "'";
-    cmd += " -H 'Content-Type: application/json'";
-    if (body !== undefined) {
-      cmd += " -d '" + JSON.stringify(body).replace(/'/g, "'\\''") + "'";
-    }
-    return AlfSDK.bash(cmd);
-  }).then(function(out) {
-    return JSON.parse(out);
-  });
-}
-```
-
 ---
 
 ## Common rules — ALL apps
@@ -502,14 +428,20 @@ function apiCall(method, path, body) {
 ```
 `icon` MUST be a valid **Lucide** icon name in kebab-case.
 
+### Data storage — SQLite only
+- Use **SQLite** (`modernc.org/sqlite` for Go, `sqlite3` for Python) for all persistent data
+- Store the database in `data/<slug>.db` within the app directory
+- Always use `WAL` journal mode for concurrent access
+- No external databases (Postgres, Redis, etc.) — apps must be fully standalone
+
 ### CSS — theme variables only
-`var(--bg)`, `var(--text)`, `var(--accent)`, `var(--bg-card)`, `var(--border)`, `var(--text-dim)`, `var(--on-accent)`, `var(--radius)`, `var(--green)`, `var(--red)`, `var(--yellow)`. NO hardcoded colors. Inline `<style>` only.
+`var(--bg)`, `var(--text)`, `var(--accent)`, `var(--bg-card)`, `var(--border)`, `var(--text-dim)`, `var(--on-accent)`, `var(--radius)`, `var(--green)`, `var(--red)`, `var(--yellow)`, `var(--mauve)`, `var(--sapphire)`. NO hardcoded colors. Inline `<style>` only.
 
 ### Frontend rules
-1. **Always use AlfSDK.tool()** for CLI tool calls — never raw `fetch('/api/bash')`
-2. **Always init AlfSDK** at the top of your script
-3. **Always include onThemeChange** to sync theme from parent
-4. **Use CSS variables** from the theme — never hardcode colors
+1. **Always init AlfSDK** at the top of your script
+2. **Always include onThemeChange** to sync theme from parent
+3. **Use CSS variables** from the theme — never hardcode colors
+4. **Set font-family explicitly**: `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` (Google Fonts blocked by CSP in iframes)
 5. **Load `/static/style.css`** for base styles and `/static/theme-*.css` for theme colors
 6. **Load `/static/theme-init.js`** for FOUC prevention
 7. **No build step** — single HTML file, vanilla JS only
@@ -523,22 +455,27 @@ function apiCall(method, path, body) {
 
 ## Checklist before publishing
 
-- [ ] **Standalone** — own server (Go/Python/user choice), no shared databases
+- [ ] **Source-only** — no compiled binaries in the app directory
+- [ ] **Standalone** — own server/tool, SQLite for data, no shared databases
 - [ ] `manifest.json` valid with slug, version, description
-- [ ] Tool schema: `required: ["action"]`, one tool with action enum
-- [ ] `app.json` with valid Lucide icon name
-- [ ] `index.html` uses AlfSDK + theme CSS + CSS variables only
+- [ ] `app.json` with valid Lucide icon name (if web UI)
+- [ ] `index.html` uses AlfSDK + theme CSS + CSS variables + explicit font-family
 - [ ] No external scripts/stylesheets (CSP)
-- [ ] **CLI tool (always required):** `bin/<slug>` binary with `--help`, declared in `manifest.json` tools
+- [ ] Go source has `go.mod` with all dependencies declared
+- [ ] **CLI tool (if LLM needs access):** `main.go` with appsdk, tool schema in `manifest.json` tools
 - [ ] **REST server (if needed):** `service.json` present, picks free port, writes `data/port`
 
 ## What NOT to do
 
+- Do NOT compile binaries — source ships as-is, ALF compiles at install time
 - Do NOT depend on shared databases or external services
-- Do NOT call sqlite3 CLI from the frontend — use a backend (binary or server)
+- Do NOT use databases other than SQLite — no Postgres, Redis, etc.
+- Do NOT call sqlite3 CLI from the frontend — use a backend (source or server)
 - Do NOT hardcode ports — pick dynamically (REST server mode)
 - Do NOT hardcode API keys — use `vault proxy`
 - Do NOT use external CDN scripts or stylesheets
 - Do NOT hardcode colors — always use CSS variables
+- Do NOT use `font-family: inherit` — set fonts explicitly (Google Fonts not available in iframes)
 - Do NOT use `nohup` or shell wrappers — use `service.json` (REST server mode)
 - Do NOT use frameworks that need `unsafe-eval` (Petite Vue, Vue, Angular)
+- Do NOT create a CLI tool for apps the LLM doesn't need to interact with (games, visual tools)

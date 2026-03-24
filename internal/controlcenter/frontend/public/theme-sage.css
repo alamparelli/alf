@@ -29,16 +29,16 @@
 /* Sage Dark — aligned with alf-website */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #080a08;
-    --bg-card: #111413;
-    --bg-input: #181d19;
+    --bg: #1a1f1a;
+    --bg-card: #222822;
+    --bg-input: #2a312a;
     --text: #d4dbd2;
-    --text-dim: #6a7568;
+    --text-dim: #7a8a78;
     --accent: #92c298;
     --green: #6b8f71;
     --red: #e07060;
     --yellow: #d4a84b;
-    --border: #1a1f1b;
+    --border: #333d33;
     --on-accent: #080a08;
     --danger: #e07060;
     --success: #6b8f71;

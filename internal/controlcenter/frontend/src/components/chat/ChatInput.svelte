@@ -15,17 +15,29 @@
     onStop?: () => void
     sending: boolean
     tiers?: { name: string; model: string }[]
+    draft?: string
+    onDraftChange?: (text: string) => void
   }
 
-  let { onSend, onStop, sending, tiers = [] }: Props = $props()
+  let { onSend, onStop, sending, tiers = [], draft = '', onDraftChange }: Props = $props()
 
-  let text = $state('')
+  let text = $state(draft)
   let files = $state<UploadedFile[]>([])
   let uploading = $state(false)
   let selectedModel = $state('')
   let textarea: HTMLTextAreaElement
   let fileInput: HTMLInputElement
   let dragOver = $state(false)
+
+  // Sync text when draft prop changes (tab switch)
+  $effect(() => {
+    text = draft
+  })
+
+  // Notify parent of text changes
+  function onInput() {
+    if (onDraftChange) onDraftChange(text)
+  }
 
   // Slash commands
   let showCommands = $state(false)
@@ -253,7 +265,7 @@
       placeholder={sending ? 'Type to queue...' : 'Type a message...'}
       class="chat-textarea"
       rows="1"
-      oninput={autoResize}
+      oninput={() => { autoResize(); onInput(); }}
       onkeydown={handleKeydown}
       onpaste={handlePaste}
     ></textarea>

@@ -69,7 +69,7 @@ Every Petite Vue app follows this template. The **AlfSDK** handles API calls, to
   </style>
 </head>
 <body>
-  <div v-scope="App()">
+  <div v-scope="App()" @vue:mounted="init">
     <h2>{{ title }}</h2>
 
     <div class="card" v-if="loading">
@@ -142,7 +142,6 @@ Every Petite Vue app follows this template. The **AlfSDK** handles API calls, to
           }).catch(function(e) { AlfSDK.toast(e.message, 'error'); });
         },
 
-        $mounted: function() { this.init(); }
       };
     }
 
@@ -169,7 +168,7 @@ The SDK is loaded from `/static/alf-app-sdk.js` (served by the parent SPA). Avai
 ## Key Rules
 
 1. **Always use AlfSDK.tool()** for backend calls — never raw `fetch('/api/bash')` with manual command building
-2. **Always init AlfSDK** in the app's `$mounted` or `init()` function
+2. **CRITICAL: Use `@vue:mounted="init"` on the root element** — NOT `$mounted` in the scope object. Petite Vue does NOT support `$mounted` as a scope property. The `init()` function must be defined in the scope and referenced via `@vue:mounted`.
 3. **Always include onThemeChange** to sync theme from parent
 4. **Use CSS variables** from the theme (`--bg`, `--text`, `--accent`, `--border`, etc.) — never hardcode colors
 5. **No build step** — single HTML file, loads Petite Vue + SDK from CDN/static

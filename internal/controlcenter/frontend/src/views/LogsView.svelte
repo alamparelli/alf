@@ -190,17 +190,8 @@
     {/if}
   </Card>
 
-  <pre class="log-output" bind:this={logContainer}>
-    {#each filteredLines as line}
-      <span class={lineClass(line)}>{line}</span>{'\n'}
-    {:else}
-      {#if loading}
-        <span class="log-debug">Loading...</span>
-      {:else}
-        <span class="log-debug">No log lines</span>
-      {/if}
-    {/each}
-  </pre>
+  <pre class="log-output" bind:this={logContainer}>{#each filteredLines as line}<span class={lineClass(line)}>{line}
+</span>{/each}{#if filteredLines.length === 0}{#if loading}<span class="log-debug">Loading...</span>{:else}<span class="log-debug">No log lines</span>{/if}{/if}</pre>
 </div>
 
 <style>

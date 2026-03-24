@@ -100,10 +100,13 @@
     if (!vaultStatus) loading = true
     try {
       const data = await api<any>('/api/vault/status')
+      console.log('[vault] status response:', JSON.stringify(data))
       available = data.available
       vaultStatus = data.status
       firstTime = data.first_time
-    } catch {
+      console.log('[vault] state:', { available, vaultStatus, firstTime, isUnlocked })
+    } catch (e) {
+      console.error('[vault] loadStatus error:', e)
       available = false
     } finally {
       loading = false
@@ -507,12 +510,9 @@
     return map[type] || type
   }
 
-  onMount(() => {
-    loadStatus()
-  })
-
-  $effect(() => {
-    if (isUnlocked) loadAll()
+  onMount(async () => {
+    await loadStatus()
+    if (vaultStatus === 'active') loadAll()
   })
 
   onDestroy(() => {

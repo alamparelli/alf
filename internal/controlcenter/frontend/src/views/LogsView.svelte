@@ -8,7 +8,7 @@
   let availableFiles = $state<string[]>([])
   let selectedFile = $state('')
   let lineCount = $state(200)
-  let autoRefresh = $state(false)
+  let autoRefresh = $state(true)
   let searchQuery = $state('')
   let lines = $state<string[]>([])
   let loading = $state(false)

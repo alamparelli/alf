@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
+  import { onMount, onDestroy, tick } from 'svelte'
   import { nav, SYSTEM_TABS } from '../stores/nav.svelte'
   import { api } from '../lib/api'
   import {
     MessageCircle, Home, Terminal, Layers, CalendarClock, Users,
     SlidersHorizontal, Shield, Lock, Store, Settings, ScrollText,
     BookOpen, Search, FileText, FileCode, FileImage, FileSpreadsheet,
-    File, Package, X
+    File, Package, X, FolderOpen
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
 
@@ -81,7 +81,7 @@
     try {
       const data = await api<any>(`/api/search?q=${encodeURIComponent(q)}`)
       appResults = data.apps || []
-      marketplaceResults = data.marketplace || []
+      marketplaceResults = (data.marketplace || []).filter((a: any) => a.state !== 'disabled')
       fileResults = data.files || []
       docResults = data.docs || []
     } catch {
@@ -114,6 +114,11 @@
         break
       case 'file':
         nav.navigateTo('home')
+        // Dispatch event so HomeView can open the file or directory
+        setTimeout(() => {
+          const eventName = item.data.is_dir ? 'alf:open-dir' : 'alf:open-file'
+          window.dispatchEvent(new CustomEvent(eventName, { detail: { path: item.data.path } }))
+        }, 100)
         break
       case 'doc':
         nav.navigateTo(`docs:${item.data.id || item.data.name}`)
@@ -151,6 +156,7 @@
       e.preventDefault()
       if (allResults.length > 0) {
         selectedIndex = (selectedIndex + 1) % allResults.length
+        tick().then(() => document.querySelector('.spotlight-item.selected')?.scrollIntoView({ block: 'nearest' }))
       }
       return
     }
@@ -159,6 +165,7 @@
       e.preventDefault()
       if (allResults.length > 0) {
         selectedIndex = (selectedIndex - 1 + allResults.length) % allResults.length
+        tick().then(() => document.querySelector('.spotlight-item.selected')?.scrollIntoView({ block: 'nearest' }))
       }
       return
     }
@@ -302,7 +309,7 @@
           <div class="spotlight-category">Files</div>
           {#each fileResults as file}
             {@const globalIdx = allResults.findIndex(r => r.type === 'file' && r.data === file)}
-            {@const Icon = fileIcon(file.extension || '')}
+            {@const Icon = file.is_dir ? FolderOpen : fileIcon(file.extension || '')}
             <button
               class="spotlight-item" class:selected={selectedIndex === globalIdx}
               onclick={() => selectResult({ type: 'file', data: file })}
@@ -312,7 +319,7 @@
                 <svelte:component this={Icon} size={16} />
               </span>
               <span class="spotlight-label">{file.name}</span>
-              <span class="spotlight-hint spotlight-path">{file.path}</span>
+              <span class="spotlight-hint spotlight-path">{file.path.length > 40 ? '...' + file.path.slice(-37) : file.path}</span>
             </button>
           {/each}
         {/if}
@@ -328,9 +335,9 @@
               onmouseenter={() => selectedIndex = globalIdx}
             >
               <span class="spotlight-icon"><BookOpen size={16} /></span>
-              <span class="spotlight-label">{doc.title}</span>
+              <span class="spotlight-label">{doc.title.length > 60 ? doc.title.slice(0, 60) + '...' : doc.title}</span>
               {#if doc.summary}
-                <span class="spotlight-hint">{doc.summary}</span>
+                <span class="spotlight-hint">{doc.summary.length > 80 ? doc.summary.slice(0, 80) + '...' : doc.summary}</span>
               {/if}
             </button>
           {/each}
@@ -429,6 +436,7 @@
     cursor: pointer;
     text-align: left;
     transition: background 0.1s;
+    overflow: hidden;
   }
 
   .spotlight-item:hover,
@@ -459,6 +467,8 @@
     font-size: 0.72rem;
     color: var(--text-dim);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .spotlight-path {

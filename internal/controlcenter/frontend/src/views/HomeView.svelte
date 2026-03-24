@@ -440,15 +440,21 @@
     }
   }
 
+  function handleOpenFile(e: CustomEvent<{ path: string }>) {
+    openFile(e.detail.path)
+  }
+
   onMount(() => {
     loadDir('')
     loadActivity()
     loadTiers()
     activityTimer = setInterval(loadActivity, 5000)
+    window.addEventListener('alf:open-file', handleOpenFile as EventListener)
   })
 
   onDestroy(() => {
     if (activityTimer) clearInterval(activityTimer)
+    window.removeEventListener('alf:open-file', handleOpenFile as EventListener)
   })
 </script>
 
@@ -480,7 +486,8 @@
     </Card>
   {/if}
 
-  <!-- Workspace file tree -->
+  <!-- Workspace (two-column) -->
+  <div class="workspace-layout">
   <Card>
     <div class="section-header">
       <h3><Folder size={16} /> Workspace</h3>
@@ -503,53 +510,58 @@
     <!-- Breadcrumbs -->
     <div class="breadcrumbs">
       <button class="breadcrumb" onclick={() => loadDir('')}>data</button>
-      {#each breadcrumbs() as crumb}
-        <span class="breadcrumb-sep">/</span>
-        <button class="breadcrumb" onclick={() => loadDir(crumb.path)}>{crumb.name}</button>
-      {/each}
     </div>
 
-    <!-- Directory listing -->
+    <!-- Directory listing (tree view) -->
     {#if loadingDir}
       <p class="dim">Loading...</p>
     {:else}
-      <div class="file-list">
-        {#if currentPath}
-          <div class="file-row" onclick={() => loadDir(currentPath.split('/').slice(0, -1).join('/'))} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && loadDir(currentPath.split('/').slice(0, -1).join('/'))}>
-            <Folder size={14} />
-            <span class="file-name">..</span>
-          </div>
-        {/if}
-        {#each dirEntries as entry}
-          {#if entry.is_dir}
-            <div class="file-row dir-row">
-              <div class="file-row-main" onclick={() => loadDir(currentPath ? `${currentPath}/${entry.name}` : entry.name)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && loadDir(currentPath ? `${currentPath}/${entry.name}` : entry.name)}>
-                <FolderOpen size={14} />
-                <span class="file-name">{entry.name}</span>
-                {#if isProtected(entry.name)}
-                  <span class="protected-badge">protected</span>
+      <div class="file-tree">
+        {#snippet treeNode(entries: WsEntry[], parentPath: string, depth: number)}
+          {#each entries as entry}
+            {#if entry.is_dir}
+              {@const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name}
+              {@const isExpanded = !!expandedDirs[fullPath]}
+              <div class="tree-row dir-row" style="padding-left:{depth * 16 + 8}px">
+                <div class="file-row-main" onclick={() => loadSubDir(parentPath, entry.name)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && loadSubDir(parentPath, entry.name)}>
+                  {#if isExpanded}
+                    <ChevronDown size={14} />
+                    <FolderOpen size={14} />
+                  {:else}
+                    <ChevronRight size={14} />
+                    <Folder size={14} />
+                  {/if}
+                  <span class="file-name">{entry.name}</span>
+                  {#if isProtected(entry.name) && depth === 0}
+                    <span class="protected-badge">protected</span>
+                  {/if}
+                </div>
+                {#if !(isProtected(entry.name) && depth === 0)}
+                  <button class="btn-icon" onclick={() => deleteEntry(fullPath)} title="Delete">
+                    <Trash2 size={12} />
+                  </button>
                 {/if}
               </div>
-              {#if !isProtected(entry.name)}
-                <button class="btn-icon" onclick={() => deleteEntry(currentPath ? `${currentPath}/${entry.name}` : entry.name)} title="Delete">
+              {#if isExpanded && expandedDirs[fullPath]}
+                {@render treeNode(expandedDirs[fullPath], fullPath, depth + 1)}
+              {/if}
+            {:else}
+              {@const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name}
+              <div class="tree-row" style="padding-left:{depth * 16 + 8}px">
+                <div class="file-row-main" onclick={() => openFile(fullPath)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && openFile(fullPath)}>
+                  <FileText size={14} />
+                  <span class="file-name">{entry.name}</span>
+                  <span class="file-size">{formatSize(entry.size)}</span>
+                </div>
+                <button class="btn-icon" onclick={() => deleteEntry(fullPath)} title="Delete">
                   <Trash2 size={12} />
                 </button>
-              {/if}
-            </div>
-          {:else}
-            <div class="file-row">
-              <div class="file-row-main" onclick={() => openFile(currentPath ? `${currentPath}/${entry.name}` : entry.name)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && openFile(currentPath ? `${currentPath}/${entry.name}` : entry.name)}>
-                <FileText size={14} />
-                <span class="file-name">{entry.name}</span>
-                <span class="file-size">{formatSize(entry.size)}</span>
               </div>
-              <button class="btn-icon" onclick={() => deleteEntry(currentPath ? `${currentPath}/${entry.name}` : entry.name)} title="Delete">
-                <Trash2 size={12} />
-              </button>
-            </div>
-          {/if}
-        {/each}
-        {#if dirEntries.length === 0 && !currentPath}
+            {/if}
+          {/each}
+        {/snippet}
+        {@render treeNode(dirEntries, currentPath, 0)}
+        {#if dirEntries.length === 0}
           <p class="dim">Empty workspace.</p>
         {/if}
       </div>
@@ -693,7 +705,13 @@
         {/if}
       {/if}
     </Card>
+  {:else}
+    <div class="file-viewer-placeholder">
+      <Eye size={24} />
+      <p>Select a file to view</p>
+    </div>
   {/if}
+  </div>
 
   <!-- Teach -->
   <Card>
@@ -904,6 +922,40 @@
   }
 
   .home-view h2 { margin-bottom: 16px; }
+
+  /* Two-column workspace layout */
+  .workspace-layout {
+    display: grid;
+    grid-template-columns: minmax(200px, 0.7fr) 1.3fr;
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .file-viewer-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem;
+    color: var(--text-dim);
+    gap: 8px;
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius, 8px);
+    min-height: 200px;
+  }
+
+  .file-viewer-placeholder p {
+    font-size: 0.85rem;
+    margin: 0;
+  }
+
+  @media (max-width: 768px) {
+    .workspace-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
   .home-view h3 {
     display: flex;
     align-items: center;
@@ -986,25 +1038,27 @@
   .breadcrumb:hover { background: var(--bg-input); }
   .breadcrumb-sep { color: var(--text-dim); }
 
-  /* File list */
-  .file-list {
+  /* File tree */
+  .file-tree {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
+    overflow-y: auto;
+    max-height: 70vh;
   }
 
-  .file-row {
+  .tree-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 8px;
+    padding: 5px 8px;
     border-radius: var(--radius, 8px);
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     transition: background 0.1s;
   }
 
-  .file-row:hover { background: var(--bg-input); }
+  .tree-row:hover { background: var(--bg-input); }
 
   .file-row-main {
     display: flex;
@@ -1047,7 +1101,7 @@
     transition: opacity 0.15s;
   }
 
-  .file-row:hover .btn-icon { opacity: 1; }
+  .tree-row:hover .btn-icon { opacity: 1; }
   .btn-icon:hover { color: var(--red, #c4392a); background: var(--bg-input); }
 
   /* File viewer */
@@ -1061,7 +1115,8 @@
 
   .file-editor {
     resize: vertical;
-    min-height: 200px;
+    min-height: 400px;
+    height: calc(100vh - 300px);
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.82rem;
   }
@@ -1371,21 +1426,77 @@
   .btn-primary:hover { opacity: 0.9; }
   .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
 
+  :global(.markdown-body) {
+    font-size: 0.88rem;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  :global(.markdown-body h1),
+  :global(.markdown-body h2),
+  :global(.markdown-body h3) {
+    margin: 1em 0 0.5em;
+  }
+
+  :global(.markdown-body h1) {
+    font-size: 1.4rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.3em;
+  }
+
+  :global(.markdown-body h2) { font-size: 1.2rem; }
+  :global(.markdown-body h3) { font-size: 1.05rem; }
+  :global(.markdown-body p) { margin: 0.5em 0; }
+
   :global(.markdown-body pre) {
     background: var(--bg-input);
-    padding: 8px 12px;
-    border-radius: var(--radius, 8px);
+    padding: 12px;
+    border-radius: 6px;
     overflow-x: auto;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
   }
 
   :global(.markdown-body code) {
     font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+  }
+
+  :global(.markdown-body :not(pre) > code) {
+    background: var(--bg-input);
+    padding: 2px 5px;
+    border-radius: 3px;
+  }
+
+  :global(.markdown-body ul),
+  :global(.markdown-body ol) {
+    padding-left: 1.5em;
+    margin: 0.5em 0;
+  }
+
+  :global(.markdown-body blockquote) {
+    border-left: 3px solid var(--border);
+    padding-left: 1em;
+    color: var(--text-dim);
+    margin: 0.5em 0;
+  }
+
+  :global(.markdown-body table) {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.5em 0;
+  }
+
+  :global(.markdown-body th),
+  :global(.markdown-body td) {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
     font-size: 0.82rem;
   }
 
-  :global(.markdown-body p) { margin-bottom: 8px; }
-  :global(.markdown-body ul, .markdown-body ol) { padding-left: 20px; margin-bottom: 8px; }
-  :global(.markdown-body h1, .markdown-body h2, .markdown-body h3) { margin: 12px 0 6px; }
+  :global(.markdown-body img) {
+    max-width: 100%;
+    border-radius: 6px;
+  }
+
+  :global(.markdown-body a) { color: var(--accent); }
 </style>

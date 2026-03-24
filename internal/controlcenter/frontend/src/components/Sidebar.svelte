@@ -51,6 +51,9 @@
               <svelte:component this={ICON_MAP[tab.icon]} size={16} />
             {/if}
             <span>{tab.label}</span>
+            {#if nav.badges[tab.view]}
+              <span class="nav-badge">{nav.badges[tab.view]}</span>
+            {/if}
             <button
               class="nav-fav-btn"
               onclick={(e: MouseEvent) => { e.stopPropagation(); nav.toggleFavorite(tab.view) }}
@@ -233,6 +236,21 @@
     border-left-color: var(--accent);
     color: var(--text);
     background: rgba(255, 255, 255, 0.06);
+  }
+
+  .nav-badge {
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+    font-size: 0.6rem;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    line-height: 1;
   }
 
   .nav-fav-btn {

@@ -5,6 +5,7 @@
   import ChatInput from '../components/chat/ChatInput.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
+  import { nav } from '../stores/nav.svelte'
 
   // --- Types ---
   interface ChatTab {
@@ -58,22 +59,33 @@
     return Math.random().toString(36).slice(2, 10)
   }
 
-  function addTab() {
+  async function addTab() {
     const tab: ChatTab = { id: genId(), label: `Chat ${tabs.length + 1}`, convId: '', unread: 0 }
     tabs = [...tabs, tab]
     activeTabId = tab.id
+    setMessages(tab.id, [])
+    // Create a new backend session for this tab
+    try {
+      const data = await api<any>('/api/chat', { method: 'DELETE' })
+      if (data.conv_id) {
+        tab.convId = data.conv_id
+        tabs = [...tabs]
+      }
+    } catch { /* will get conv_id on first message */ }
     saveTabs()
-    messages = []
   }
 
   function closeTab(tabId: string) {
     if (tabs.length <= 1) return
+    // Clean up tab messages
+    delete tabMessages[tabId]
+    tabMessages = { ...tabMessages }
     tabs = tabs.filter(t => t.id !== tabId)
     if (activeTabId === tabId) {
       activeTabId = tabs[0].id
+      loadHistory()
     }
     saveTabs()
-    loadHistory()
   }
 
   function switchTab(tabId: string) {
@@ -100,16 +112,29 @@
     }
   }
 
-  // --- Messages ---
-  let messages = $state<ChatMsg[]>([])
+  // --- Messages (per-tab) ---
+  let tabMessages = $state<Record<string, ChatMsg[]>>({})
+  let messages = $derived(tabMessages[activeTabId] || [])
   let sending = $state(false)
+  let sendingTabId = $state('') // track which tab initiated the send
   let tiers = $state<Tier[]>([])
   let messagesContainer: HTMLDivElement
   let streamingBlocks = $state<any[]>([])
   let streamingText = $state('')
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let activeJobId = $state<string | null>(null)
-  let messageQueue = $state<{ message: string; mediaIds: string[]; model: string }[]>([])
+  let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string; tabId: string }[]>([])
+
+  function setMessages(tabId: string, msgs: ChatMsg[]) {
+    tabMessages[tabId] = msgs
+    tabMessages = { ...tabMessages }
+  }
+
+  function appendMessage(tabId: string, msg: ChatMsg) {
+    const current = tabMessages[tabId] || []
+    tabMessages[tabId] = [...current, msg]
+    tabMessages = { ...tabMessages }
+  }
 
   function scrollToBottom() {
     if (messagesContainer) {
@@ -119,14 +144,21 @@
     }
   }
 
-  async function loadHistory() {
-    const convId = activeTab?.convId || ''
+  async function loadHistory(tabId?: string) {
+    const tid = tabId || activeTabId
+    const tab = tabs.find(t => t.id === tid)
+    const convId = tab?.convId || ''
+    // Don't load history for tabs without a conversation ID (new empty tabs)
+    if (!convId) {
+      setMessages(tid, [])
+      return
+    }
     try {
-      const data = await api<ChatMsg[]>(`/api/chat?limit=100${convId ? '&conv_id=' + convId : ''}`)
-      messages = data || []
-      scrollToBottom()
+      const data = await api<ChatMsg[]>(`/api/chat?limit=100&conv_id=${convId}`)
+      setMessages(tid, data || [])
+      if (tid === activeTabId) scrollToBottom()
     } catch {
-      messages = []
+      setMessages(tid, [])
     }
   }
 
@@ -152,36 +184,45 @@
     } catch { /* no active job */ }
   }
 
+  interface MediaFile {
+    upload_id: string
+    file_name: string
+    mime_type: string
+  }
+
   // --- Send message ---
-  async function handleSend(message: string, mediaIds: string[], model: string) {
-    if (sending) {
-      // Queue the message
-      messageQueue = [...messageQueue, { message, mediaIds, model }]
+  async function handleSend(message: string, mediaFiles: MediaFile[], model: string) {
+    // If this tab is already sending, queue it
+    if (sending && sendingTabId === activeTabId) {
+      messageQueue = [...messageQueue, { message, mediaFiles, model, tabId: activeTabId }]
       return
     }
 
-    await doSend(message, mediaIds, model)
+    await doSend(message, mediaFiles, model, activeTabId)
   }
 
-  async function doSend(message: string, mediaIds: string[], model: string) {
+  async function doSend(message: string, mediaFiles: MediaFile[], model: string, tabId: string) {
     sending = true
+    sendingTabId = tabId
     streamingBlocks = []
     streamingText = ''
 
-    const convId = activeTab?.convId || ''
+    const tab = tabs.find(t => t.id === tabId)
+    const convId = tab?.convId || ''
+    const mediaIds = mediaFiles.map(f => f.upload_id)
 
-    // Add user message optimistically
-    if (message) {
+    // Add user message optimistically to the originating tab
+    if (message || mediaFiles.length > 0) {
       const userMsg: ChatMsg = {
         id: 'temp-' + Date.now(),
         role: 'user',
         text: message,
         ts: new Date().toISOString(),
         conv_id: convId,
-        media: mediaIds.map(id => ({ upload_id: id, type: 'document', file_name: '', mime_type: '' })),
+        media: mediaFiles.map(f => ({ upload_id: f.upload_id, type: f.mime_type?.startsWith('image/') ? 'photo' : 'document', file_name: f.file_name, mime_type: f.mime_type })),
       }
-      messages = [...messages, userMsg]
-      scrollToBottom()
+      appendMessage(tabId, userMsg)
+      if (tabId === activeTabId) scrollToBottom()
     }
 
     try {
@@ -264,6 +305,15 @@
 
           if (eventType === 'job') {
             activeJobId = data.job_id
+            // Capture conv_id for tab association
+            if (data.conv_id && sendingTabId) {
+              const tab = tabs.find(t => t.id === sendingTabId)
+              if (tab && !tab.convId) {
+                tab.convId = data.conv_id
+                tabs = [...tabs]
+                saveTabs()
+              }
+            }
             continue
           }
 
@@ -289,19 +339,36 @@
     } catch {
       // Stream ended or errored
     } finally {
-      // Finalize: reload history to get the proper persisted messages
+      // Finalize: reload history for the originating tab
+      const originTab = sendingTabId
       sending = false
+      sendingTabId = ''
       activeJobId = null
       streamingBlocks = []
       streamingText = ''
-      await loadHistory()
-      scrollToBottom()
+      await loadHistory(originTab)
+      if (originTab === activeTabId) scrollToBottom()
+
+      // Notify sidebar badge if user isn't viewing chat
+      if (nav.currentView !== 'chat') {
+        nav.incrementBadge('chat')
+      }
+
+      // Bump unread on originating tab if user switched away
+      if (originTab !== activeTabId) {
+        const t = tabs.find(t => t.id === originTab)
+        if (t) {
+          t.unread = (t.unread || 0) + 1
+          tabs = [...tabs]
+          saveTabs()
+        }
+      }
 
       // Process queue
       if (messageQueue.length > 0) {
         const next = messageQueue[0]
         messageQueue = messageQueue.slice(1)
-        doSend(next.message, next.mediaIds, next.model)
+        doSend(next.message, next.mediaFiles, next.model, next.tabId)
       }
     }
   }
@@ -390,6 +457,14 @@
     setText(fullText)
   }
 
+  // --- Stop active call ---
+  async function stopCall() {
+    if (!activeJobId) return
+    try {
+      await api('DELETE', '/api/chat/job')
+    } catch { /* ignore */ }
+  }
+
   // --- New conversation ---
   async function newConversation() {
     try {
@@ -399,7 +474,7 @@
         tabs = [...tabs]
         saveTabs()
       }
-      messages = []
+      setMessages(activeTabId, [])
       toasts.show('New conversation started', 'success')
     } catch (e: any) {
       toasts.show(e.error || 'Failed to start new conversation', 'error')
@@ -409,7 +484,10 @@
   // --- Lifecycle ---
   onMount(async () => {
     await loadTiers()
-    await loadHistory()
+    // Only load history if the tab has a saved convId (restored session)
+    if (activeTab?.convId) {
+      await loadHistory()
+    }
     await checkActiveJob()
   })
 
@@ -454,7 +532,7 @@
 
   <!-- Messages -->
   <div class="chat-messages" bind:this={messagesContainer}>
-    {#if messages.length === 0 && !sending}
+    {#if messages.length === 0 && !(sending && sendingTabId === activeTabId)}
       <div class="chat-empty">
         <MessageCircle size={32} />
         <p>No messages yet. Start a conversation.</p>
@@ -465,8 +543,8 @@
       <ChatMessageComponent {msg} convId={activeTab?.convId || ''} />
     {/each}
 
-    <!-- Streaming response -->
-    {#if sending && streamingBlocks.length > 0}
+    <!-- Streaming response (only on the tab that initiated the send) -->
+    {#if sending && sendingTabId === activeTabId && streamingBlocks.length > 0}
       <ChatMessageComponent
         msg={{
           id: 'streaming',
@@ -477,7 +555,7 @@
         }}
         convId={activeTab?.convId || ''}
       />
-    {:else if sending}
+    {:else if sending && sendingTabId === activeTabId}
       <div class="chat-msg chat-msg-assistant typing-indicator">
         <span class="dot"></span>
         <span class="dot"></span>
@@ -487,7 +565,7 @@
   </div>
 
   <!-- Input -->
-  <ChatInput onSend={handleSend} {sending} {tiers} />
+  <ChatInput onSend={handleSend} onStop={stopCall} sending={sending && sendingTabId === activeTabId} {tiers} />
 </div>
 
 <style>

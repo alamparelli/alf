@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { api, esc } from '../lib/api';
+  import { api } from '../lib/api';
   import { toasts } from '../stores/toast.svelte';
   import { nav } from '../stores/nav.svelte';
   import Card from '../components/shared/Card.svelte';
@@ -75,9 +75,18 @@
   async function doAction(slug, action, confirmMsg) {
     if (confirmMsg && !confirm(confirmMsg)) return;
     try {
-      await api('POST', `/api/marketplace/${esc(slug)}/${action}`);
+      await api('POST', `/api/marketplace/${encodeURIComponent(slug)}/${action}`);
       toasts.success(`${action} successful: ${slug}`);
-      await loadAll();
+      // Retry loading until state actually changes or max retries
+      const oldState = apps.find(a => a.slug === slug)?.state;
+      let retries = 0;
+      while (retries < 5) {
+        await new Promise(r => setTimeout(r, 600));
+        await loadAll();
+        const newState = apps.find(a => a.slug === slug)?.state;
+        if (newState !== oldState) break;
+        retries++;
+      }
       nav.refreshApps?.();
       checkBadge();
     } catch (e) {
@@ -132,9 +141,11 @@
                   </span>
                   <div class="app-title">
                     <strong>{app.name}</strong>
-                    <span class="badge" style="background:{stateColors[app.state] || stateColors.available}">
-                      {stateLabel(app.state)}
-                    </span>
+                    {#if app.state && app.state !== 'available'}
+                      <span class="badge" style="background:{stateColors[app.state] || stateColors.available}">
+                        {stateLabel(app.state)}
+                      </span>
+                    {/if}
                   </div>
                 </div>
 

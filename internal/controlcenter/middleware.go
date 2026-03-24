@@ -150,7 +150,12 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		h.Set("X-Frame-Options", "DENY")
+		// Allow iframing for /apps/ (user apps loaded in AppFrame), deny for everything else.
+		if strings.HasPrefix(r.URL.Path, "/apps/") {
+			h.Set("X-Frame-Options", "SAMEORIGIN")
+		} else {
+			h.Set("X-Frame-Options", "DENY")
+		}
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		// CSP for HTML responses is set by DashboardHandler with page-specific policy.

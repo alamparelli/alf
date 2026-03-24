@@ -1,8 +1,8 @@
 ---
-name: app-builder
-description: Build standalone ALF apps — two modes: CLI binary (appsdk) or REST server (Go/Python) + web UI + manifest + marketplace publishing
-version: "5"
-triggers: create app, new app, build app, make app, web app, marketplace app, publish app, standalone app, webapp, build application, create application, marketplace tool, app sdk
+name: sdk-app-builder
+description: Build standalone ALF apps — CLI binary (appsdk) or REST server + AlfSDK frontend + manifest + marketplace publishing
+version: "3"
+triggers: create app, new app, build app, make app, web app, marketplace app, publish app, standalone app, webapp, build application, create application, marketplace tool, app sdk, sdk app, new app with sdk, app with theme, interactive app
 tier: sonnet
 ---
 
@@ -26,7 +26,7 @@ Before building, you MUST understand what the user wants. If the request has few
 | **Best for** | Simple tools, LLM-callable actions | Complex apps with rich web UIs |
 | **Backend** | Single Go binary in `bin/<slug>` | Go/Python server with `service.json` |
 | **Data access** | `$ALF_APP_DATA_DIR` env var | Relative `data/` directory |
-| **Frontend calls** | `echo JSON \| bin/<slug>` via `/api/bash` | `curl localhost:<port>` via `/api/bash` |
+| **Frontend calls** | Via `AlfSDK.tool()` | Via `AlfSDK.bash()` + curl |
 | **Port** | None (stdin/stdout) | Dynamic, written to `data/port` |
 | **Example** | Journal | Later |
 
@@ -43,7 +43,7 @@ Before building, you MUST understand what the user wants. If the request has few
 apps/<slug>/
   manifest.json      # REQUIRED — metadata + tool schema
   app.json           # REQUIRED if web UI
-  index.html         # OPTIONAL — web UI
+  index.html         # OPTIONAL — web UI (AlfSDK)
   data/
     <slug>.db        # SQLite database
 
@@ -165,37 +165,6 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ~/data/tools/
 chmod +x ~/data/tools/<slug>
 ```
 
-### Frontend — CLI tool helper
-
-The frontend calls the tool **by name** (it's in PATH). Data dir is passed via env var:
-
-```javascript
-var SLUG = 'my-app';
-var BIN = '/home/alf/data/tools/' + SLUG;
-var DATA = '/home/alf/data/apps/' + SLUG + '/data';
-
-function bash(cmd) {
-  return fetch('/api/bash', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-    credentials: 'same-origin',
-    body: JSON.stringify({ command: cmd })
-  }).then(function(r) { return r.json(); });
-}
-
-function appCmd(action, args) {
-  var payload = Object.assign({ action: action }, args || {});
-  var input = JSON.stringify(payload);
-  var cmd = "echo '" + input.replace(/'/g, "'\\''") + "' | ALF_APP_DATA_DIR=" + DATA + " " + BIN;
-  return bash(cmd).then(function(res) {
-    if (res.exit_code !== 0) throw new Error(res.error || res.output || 'Command failed');
-    return res.output || '';
-  });
-}
-```
-
-Note: CLI tool responses use `res.exit_code`, `res.error`, and `res.output` (text, not JSON — parse if needed).
-
 ---
 
 ## Mode B: REST Server
@@ -206,7 +175,7 @@ Note: CLI tool responses use `res.exit_code`, `res.error`, and `res.output` (tex
   manifest.json      # REQUIRED — metadata
   app.json           # REQUIRED if web UI
   service.json       # REQUIRED — daemon supervises the server
-  index.html         # OPTIONAL — web UI
+  index.html         # OPTIONAL — web UI (AlfSDK)
   server.go          # Go backend (or server.py for Python)
   go.mod             # Go module (Go apps only)
   server             # Compiled binary
@@ -370,43 +339,158 @@ if __name__ == "__main__":
 
 For Python: `"command": "python3", "args": ["server.py"]` in service.json.
 
-### Frontend — REST server helper
+---
 
-```javascript
-let _port = null;
-async function getPort() {
-  if (_port) return _port;
-  const res = await fetch('/api/bash', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: 'cat ~/data/apps/SLUG/data/port' })
-  });
-  const data = await res.json();
-  _port = (data.output || '').trim();
-  return _port;
-}
+## Frontend — AlfSDK (REQUIRED for all apps with UI)
 
-async function api(method, path, body) {
-  const port = await getPort();
-  if (!port) throw new Error('Backend not running');
-  let cmd = `curl -s -X ${method} 'http://127.0.0.1:${port}${path}'`;
-  cmd += " -H 'Content-Type: application/json'";
-  if (body !== undefined) {
-    cmd += ` -d '${JSON.stringify(body).replace(/'/g, "'\\''")}'`;
-  }
-  const res = await fetch('/api/bash', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: cmd })
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
-  return JSON.parse(data.output);
-}
+All app frontends use the **AlfSDK** for parent SPA communication (theme sync, toast, navigation). Uses **vanilla JS** — no framework, no build step, CSP-safe.
+
+### Frontend Template
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My App</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
+  <script src="/static/theme-init.js"></script>
+  <script src="/static/alf-app-sdk.js"></script>
+  <style>
+    body { padding: 1.5rem; }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius, 8px); padding: 1.25rem; margin-bottom: 1rem; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--border); border-radius: var(--radius, 8px); background: var(--bg-input); color: var(--text); font-family: inherit; font-size: 0.85rem; cursor: pointer; }
+    .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .form-row { margin-bottom: 0.75rem; }
+    .form-row label { display: block; font-size: 0.8rem; font-weight: 500; margin-bottom: 4px; }
+    .form-row input, .form-row textarea { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius, 8px); background: var(--bg-input); color: var(--text); font-family: inherit; font-size: 0.85rem; }
+    .form-row textarea { min-height: 100px; resize: vertical; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 0.75rem; }
+    .empty { color: var(--text-dim); padding: 2rem; text-align: center; }
+    /* app-specific styles below */
+  </style>
+</head>
+<body>
+  <h2>My App</h2>
+  <div id="list"></div>
+  <div id="editor" style="display:none"></div>
+  <div class="actions" id="toolbar">
+    <button class="btn btn-primary" onclick="showEditor()">Add Item</button>
+  </div>
+
+  <script>
+    var SLUG = 'my-app'; // REPLACE with actual slug
+
+    AlfSDK.init({
+      slug: SLUG,
+      onThemeChange: function(palette) {
+        var link = document.getElementById('alf-theme');
+        if (link) link.href = '/static/theme-' + palette + '.css';
+      }
+    });
+
+    var items = [];
+
+    function load() {
+      AlfSDK.tool('list').then(function(out) {
+        try { items = JSON.parse(out); } catch(e) { items = []; }
+        renderList();
+      }).catch(function(e) {
+        document.getElementById('list').innerHTML = '<p class="empty">Error: ' + esc(e.message) + '</p>';
+      });
+    }
+
+    function renderList() {
+      var el = document.getElementById('list');
+      if (!items || !items.length) {
+        el.innerHTML = '<p class="empty">No items yet.</p>';
+        return;
+      }
+      el.innerHTML = items.map(function(item) {
+        return '<div class="card" onclick="editItem(' + item.id + ')">' +
+          '<strong>' + esc(item.name) + '</strong>' +
+          '</div>';
+      }).join('');
+    }
+
+    function save(id) {
+      var name = document.getElementById('fName').value.trim();
+      if (!name) { AlfSDK.toast('Name required', 'error'); return; }
+      var action = id ? 'update' : 'create';
+      var args = { name: name };
+      if (id) args.id = String(id);
+      AlfSDK.tool(action, args).then(function() {
+        AlfSDK.toast('Saved', 'success');
+        backToList();
+      }).catch(function(e) { AlfSDK.toast(e.message, 'error'); });
+    }
+
+    function remove(id) {
+      if (!confirm('Delete this item?')) return;
+      AlfSDK.tool('delete', { id: String(id) }).then(function() {
+        AlfSDK.toast('Deleted');
+        backToList();
+      }).catch(function(e) { AlfSDK.toast(e.message, 'error'); });
+    }
+
+    function esc(s) {
+      if (!s) return '';
+      var d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    load();
+  </script>
+</body>
+</html>
 ```
 
-Note: REST server responses go through curl, so errors come from `/api/bash` as `data.error` / `data.output` (JSON string to parse).
+### AlfSDK Reference
+
+The SDK is loaded from `/static/alf-app-sdk.js`. Available methods:
+
+| Method | Description |
+|---|---|
+| `AlfSDK.init({ slug, onThemeChange })` | Initialize. Call once on load. |
+| `AlfSDK.tool(action, args)` | Run CLI tool with action + args. Returns output string. |
+| `AlfSDK.api(path, opts)` | Authenticated fetch (same-origin cookies). |
+| `AlfSDK.bash(cmd)` | Execute shell command via `/api/bash`. |
+| `AlfSDK.navigate(view)` | Navigate parent SPA (e.g. `'chat'`, `'settings'`). |
+| `AlfSDK.toast(msg, type)` | Show toast in parent (`'success'`, `'error'`, `'info'`). |
+| `AlfSDK.getTheme()` | Returns `{ palette, dark }`. |
+
+### Frontend for REST server apps
+
+For REST server apps, use `AlfSDK.bash()` with curl to call the local server:
+
+```javascript
+var _port = null;
+function getPort() {
+  if (_port) return Promise.resolve(_port);
+  return AlfSDK.bash('cat ~/data/apps/SLUG/data/port').then(function(out) {
+    _port = out.trim();
+    return _port;
+  });
+}
+
+function apiCall(method, path, body) {
+  return getPort().then(function(port) {
+    if (!port) throw new Error('Backend not running');
+    var cmd = "curl -s -X " + method + " 'http://127.0.0.1:" + port + path + "'";
+    cmd += " -H 'Content-Type: application/json'";
+    if (body !== undefined) {
+      cmd += " -d '" + JSON.stringify(body).replace(/'/g, "'\\''") + "'";
+    }
+    return AlfSDK.bash(cmd);
+  }).then(function(out) {
+    return JSON.parse(out);
+  });
+}
+```
 
 ---
 
@@ -418,24 +502,19 @@ Note: REST server responses go through curl, so errors come from `/api/bash` as 
 ```
 `icon` MUST be a valid **Lucide** icon name in kebab-case.
 
-### HTML head (REQUIRED)
-```html
-<link rel="stylesheet" id="alf-theme-link" href="/static/theme-sage.css">
-<script src="/static/theme-init.js"></script>
-<script src="/static/vendor/lucide.min.js"></script>
-```
-
 ### CSS — theme variables only
 `var(--bg)`, `var(--text)`, `var(--accent)`, `var(--bg-card)`, `var(--border)`, `var(--text-dim)`, `var(--on-accent)`, `var(--radius)`, `var(--green)`, `var(--red)`, `var(--yellow)`. NO hardcoded colors. Inline `<style>` only.
 
-### JS rules
-- NO external scripts (CSP blocks them)
-- NO inline handlers (`onclick="..."`) — use `addEventListener()`
-- Call `lucide.createIcons()` after every DOM update
-- Icons: `<i data-lucide="icon-name"></i>`
-
-### Icons (Lucide)
-Common: `plus`, `trash-2`, `pencil`, `search`, `check`, `x`, `refresh-cw`, `save`, `download`, `upload`, `settings`, `calendar`, `clock`, `star`, `eye`, `filter`, `list`, `grid`, `bar-chart-2`, `alert-triangle`, `info`, `external-link`, `copy`, `archive`, `inbox`, `folder`, `tag`
+### Frontend rules
+1. **Always use AlfSDK.tool()** for CLI tool calls — never raw `fetch('/api/bash')`
+2. **Always init AlfSDK** at the top of your script
+3. **Always include onThemeChange** to sync theme from parent
+4. **Use CSS variables** from the theme — never hardcode colors
+5. **Load `/static/style.css`** for base styles and `/static/theme-*.css` for theme colors
+6. **Load `/static/theme-init.js`** for FOUC prevention
+7. **No build step** — single HTML file, vanilla JS only
+8. **No `unsafe-eval`** — do NOT use frameworks that require `new Function()` (Petite Vue, Vue, Angular). CSP blocks them.
+9. **No external scripts/stylesheets** (CSP blocks them)
 
 ### External APIs — Vault Proxy
 **NEVER hardcode API keys.** Use `vault proxy <service> <method> <path> [body]`. Check `vault list` for available services.
@@ -448,8 +527,7 @@ Common: `plus`, `trash-2`, `pencil`, `search`, `check`, `x`, `refresh-cw`, `save
 - [ ] `manifest.json` valid with slug, version, description
 - [ ] Tool schema: `required: ["action"]`, one tool with action enum
 - [ ] `app.json` with valid Lucide icon name
-- [ ] `index.html` uses theme CSS + Lucide + CSS variables only
-- [ ] `index.html` uses `addEventListener` — no inline handlers
+- [ ] `index.html` uses AlfSDK + theme CSS + CSS variables only
 - [ ] No external scripts/stylesheets (CSP)
 - [ ] **CLI tool (always required):** `bin/<slug>` binary with `--help`, declared in `manifest.json` tools
 - [ ] **REST server (if needed):** `service.json` present, picks free port, writes `data/port`
@@ -462,6 +540,5 @@ Common: `plus`, `trash-2`, `pencil`, `search`, `check`, `x`, `refresh-cw`, `save
 - Do NOT hardcode API keys — use `vault proxy`
 - Do NOT use external CDN scripts or stylesheets
 - Do NOT hardcode colors — always use CSS variables
-- Do NOT use inline event handlers — use `addEventListener()`
 - Do NOT use `nohup` or shell wrappers — use `service.json` (REST server mode)
-- Do NOT forget `lucide.createIcons()` after inserting HTML with `data-lucide`
+- Do NOT use frameworks that need `unsafe-eval` (Petite Vue, Vue, Angular)

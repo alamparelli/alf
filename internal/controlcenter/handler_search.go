@@ -255,7 +255,7 @@ func (h *SearchHandler) remoteCatalogAppMatches(app marketplace.RemoteApp, query
 		strings.Contains(strings.ToLower(app.Category), query)
 }
 
-const maxFileResults = 50
+const maxFileResults = 20
 
 func (h *SearchHandler) searchFiles(query string) []any {
 	var results []any
@@ -264,16 +264,10 @@ func (h *SearchHandler) searchFiles(query string) []any {
 	skipDirs := map[string]bool{
 		"apps":          true, // app internals not useful in file search
 		"tools":         true, // tool binaries and go module cache
-		"config.d":      true,
-		"skills.d":      true,
 		"tools.d":       true,
-		"agents":        true,
 		"logs":          true,
 		"sessions":      true,
-		"context":       true,
-		"docs":          true,
-		"config":        true,
-		"skills":        true,
+		"docs":          true, // indexed separately via searchDocs
 		".git":          true,
 		".claude":       true,
 		".cache":        true,
@@ -319,6 +313,20 @@ func (h *SearchHandler) walkDir(basePath, relPath string, query string, skipDirs
 		}
 
 		if entry.IsDir() {
+			// Add matching directories to results
+			if h.fileMatches(name, fullRelPath, query) {
+				info, err := entry.Info()
+				if err == nil {
+					result := searchFileResult{
+						Path:    fullRelPath,
+						Name:    name,
+						Size:    info.Size(),
+						IsDir:   true,
+						ModTime: info.ModTime().UTC().Format(time.RFC3339),
+					}
+					*results = append(*results, result)
+				}
+			}
 			h.walkDir(basePath, fullRelPath, query, skipDirs, results)
 			continue
 		}

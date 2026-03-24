@@ -332,7 +332,17 @@ func (s *Store) hasDuplicate(text string) bool {
 		for rows.Next() {
 			var existing string
 			rows.Scan(&existing)
-			if textSimilarity(text, existing) >= s.dedup.TextThreshold {
+			sim := textSimilarity(text, existing)
+			if sim >= s.dedup.TextThreshold {
+				truncNew := text
+				if len(truncNew) > 80 {
+					truncNew = truncNew[:80] + "..."
+				}
+				truncOld := existing
+				if len(truncOld) > 80 {
+					truncOld = truncOld[:80] + "..."
+				}
+				log.Printf("memstore: dedup-text rejected (sim=%.2f >= %.2f): %q ~ %q", sim, s.dedup.TextThreshold, truncNew, truncOld)
 				return true
 			}
 		}
@@ -353,6 +363,11 @@ func (s *Store) hasDuplicate(text string) bool {
 				ORDER BY v.distance
 			`, string(vecJSON)).Scan(&dist)
 			if err == nil && dist < s.dedup.CosineThreshold {
+				truncNew := text
+				if len(truncNew) > 80 {
+					truncNew = truncNew[:80] + "..."
+				}
+				log.Printf("memstore: dedup-cosine rejected (dist=%.4f < %.2f): %q", dist, s.dedup.CosineThreshold, truncNew)
 				return true // cosine distance below threshold → duplicate
 			}
 		}

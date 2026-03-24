@@ -84,6 +84,16 @@ RUN if [ "${TARGETARCH}" = "arm64" ]; then FFARCH="arm64"; else FFARCH="amd64"; 
     && ffmpeg -version > /dev/null
 
 
+# Node.js LTS (required for Codex CLI and npm-based tools).
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version && npm --version
+
+# OpenAI Codex CLI.
+RUN npm install -g @openai/codex \
+    && codex --version
+
 # Claude Code native binary.
 # Keep ~/.local/bin/claude so Claude Code recognises the native install.
 RUN curl -fsSL https://claude.ai/install.sh | bash \

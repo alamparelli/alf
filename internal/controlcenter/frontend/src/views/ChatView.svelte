@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { Plus, X, MessageCircle, RotateCw } from 'lucide-svelte'
+  import { Plus, X, MessageCircle, RotateCw, ListX } from 'lucide-svelte'
   import ChatMessageComponent from '../components/chat/ChatMessage.svelte'
   import ChatInput from '../components/chat/ChatInput.svelte'
   import { api } from '../lib/api'
@@ -192,6 +192,17 @@
 
   // --- Send message ---
   async function handleSend(message: string, mediaFiles: MediaFile[], model: string) {
+    // Client-side command handling
+    const trimmed = message.trim()
+    if (trimmed === '/new' || trimmed === '/clear') {
+      await newConversation()
+      return
+    }
+    if (trimmed === '/skills') {
+      nav.navigateTo('skills')
+      return
+    }
+
     // If this tab is already sending, queue it
     if (sending && sendingTabId === activeTabId) {
       messageQueue = [...messageQueue, { message, mediaFiles, model, tabId: activeTabId }]
@@ -322,6 +333,23 @@
             continue
           }
 
+          if (eventType === 'system') {
+            // System message from command handling (e.g. /new, /skills)
+            if (data.text && sendingTabId) {
+              appendMessage(sendingTabId, {
+                id: 'sys-' + Date.now(),
+                role: 'system',
+                text: data.text,
+                ts: new Date().toISOString(),
+              })
+            }
+            continue
+          }
+
+          if (eventType === 'done') {
+            continue
+          }
+
           // Inject the event type into data for the handler
           data.type = data.type || eventType
           handleStreamEvent(data, currentBlocks, (updated) => {
@@ -341,6 +369,7 @@
     } finally {
       // Finalize: reload history for the originating tab
       const originTab = sendingTabId
+      const finalText = streamingText
       sending = false
       sendingTabId = ''
       activeJobId = null
@@ -348,6 +377,11 @@
       streamingText = ''
       await loadHistory(originTab)
       if (originTab === activeTabId) scrollToBottom()
+
+      // Desktop notification if tab is not visible
+      if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && finalText) {
+        new Notification('ALF', { body: finalText.slice(0, 100) })
+      }
 
       // Notify sidebar badge if user isn't viewing chat
       if (nav.currentView !== 'chat') {
@@ -463,6 +497,15 @@
     try {
       await api('DELETE', '/api/chat/job')
     } catch { /* ignore */ }
+    // Immediately reset UI state — don't wait for stream to end
+    const originTab = sendingTabId
+    sending = false
+    sendingTabId = ''
+    activeJobId = null
+    streamingBlocks = []
+    streamingText = ''
+    await loadHistory(originTab)
+    if (originTab === activeTabId) scrollToBottom()
   }
 
   // --- New conversation ---
@@ -483,6 +526,10 @@
 
   // --- Lifecycle ---
   onMount(async () => {
+    // Request notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
     await loadTiers()
     // Only load history if the tab has a saved convId (restored session)
     if (activeTab?.convId) {
@@ -564,6 +611,16 @@
     {/if}
   </div>
 
+  <!-- Queue indicator -->
+  {#if messageQueue.length > 0}
+    <div class="queue-indicator">
+      <span>{messageQueue.length} queued</span>
+      <button class="queue-clear" onclick={() => { messageQueue = [] }} title="Clear queue">
+        <ListX size={14} />
+      </button>
+    </div>
+  {/if}
+
   <!-- Input -->
   <ChatInput onSend={handleSend} onStop={stopCall} sending={sending && sendingTabId === activeTabId} {tiers} />
 </div>
@@ -572,7 +629,9 @@
   .chat-view {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 60px);
+    height: calc(100vh - 48px);
+    max-height: calc(100vh - 48px);
+    margin-bottom: -24px;
   }
 
   /* Tabs */
@@ -753,6 +812,35 @@
   @keyframes bounce {
     0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
     40% { transform: scale(1); opacity: 1; }
+  }
+
+  /* Queue indicator */
+  .queue-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    background: var(--bg-input);
+    border-top: 1px solid var(--border);
+  }
+
+  .queue-clear {
+    display: flex;
+    align-items: center;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    transition: color 0.15s;
+  }
+
+  .queue-clear:hover {
+    color: var(--red, #e53935);
   }
 
   @media (max-width: 768px) {

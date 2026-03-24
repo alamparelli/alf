@@ -7,6 +7,7 @@
     upload_id: string
     file_name: string
     mime_type: string
+    previewUrl?: string
   }
 
   interface Props {
@@ -105,6 +106,9 @@
 
     onSend(msg, [...files], selectedModel)
     text = ''
+    for (const f of files) {
+      if (f.previewUrl) URL.revokeObjectURL(f.previewUrl)
+    }
     files = []
     if (textarea) {
       textarea.style.height = 'auto'
@@ -133,11 +137,15 @@
       if (!res.ok) throw new Error('Upload failed')
 
       const data = await res.json()
-      files = [...files, {
+      const uploaded: UploadedFile = {
         upload_id: data.upload_id,
         file_name: data.file_name,
         mime_type: data.mime_type,
-      }]
+      }
+      if (file.type.startsWith('image/')) {
+        uploaded.previewUrl = URL.createObjectURL(file)
+      }
+      files = [...files, uploaded]
     } catch (e: any) {
       toasts.show(e.message || 'Upload failed', 'error')
     } finally {
@@ -166,7 +174,21 @@
     dragOver = true
   }
 
+  function handlePaste(e: ClipboardEvent) {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const file = item.getAsFile()
+        if (file) uploadFile(file)
+      }
+    }
+  }
+
   function removeFile(idx: number) {
+    const removed = files[idx]
+    if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
     files = files.filter((_, i) => i !== idx)
   }
 </script>
@@ -184,6 +206,9 @@
     <div class="file-chips">
       {#each files as file, i}
         <div class="file-chip">
+          {#if file.previewUrl}
+            <img src={file.previewUrl} alt={file.file_name} class="file-chip-thumb" />
+          {/if}
           <span class="file-chip-name">{file.file_name}</span>
           <button class="file-chip-remove" onclick={() => removeFile(i)}><X size={12} /></button>
         </div>
@@ -230,6 +255,7 @@
       rows="1"
       oninput={autoResize}
       onkeydown={handleKeydown}
+      onpaste={handlePaste}
     ></textarea>
 
     <!-- Tier selector -->
@@ -387,6 +413,13 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     font-size: 0.75rem;
+  }
+
+  .file-chip-thumb {
+    width: 28px;
+    height: 28px;
+    object-fit: cover;
+    border-radius: 4px;
   }
 
   .file-chip-name {

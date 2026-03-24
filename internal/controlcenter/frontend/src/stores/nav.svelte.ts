@@ -4,6 +4,13 @@ export interface NavItem {
   icon: string
 }
 
+export interface OpenTab {
+  id: string
+  view: string
+  label: string
+  icon: string
+}
+
 export const SYSTEM_TABS: NavItem[] = [
   { view: 'chat', label: 'Chat', icon: 'message-circle' },
   { view: 'home', label: 'Home', icon: 'home' },
@@ -11,6 +18,7 @@ export const SYSTEM_TABS: NavItem[] = [
   { view: 'tasks', label: 'Tasks', icon: 'layers' },
   { view: 'schedules', label: 'Schedules', icon: 'calendar-clock' },
   { view: 'teams', label: 'Teams', icon: 'users' },
+  { view: 'skills', label: 'Skills', icon: 'zap' },
   { view: 'tiers', label: 'Tiers', icon: 'sliders-horizontal' },
   { view: 'firewall', label: 'Firewall', icon: 'shield' },
   { view: 'vault', label: 'Vault', icon: 'lock' },
@@ -26,6 +34,11 @@ class NavStore {
 
   // Badges: view -> count (0 = hidden, >0 = shown)
   badges = $state<Record<string, number>>({})
+
+  // Open tabs (bookmark-style)
+  openTabs = $state<OpenTab[]>(
+    JSON.parse(localStorage.getItem('alf-open-tabs') || '[]')
+  )
 
   favorites = $state<string[]>(
     JSON.parse(localStorage.getItem('alf-nav-favs') || '[]')
@@ -43,6 +56,34 @@ class NavStore {
     if (this.badges[view]) {
       this.badges[view] = 0
     }
+  }
+
+  openTab(view: string, label: string, icon: string) {
+    // Don't duplicate
+    if (this.openTabs.some(t => t.view === view)) {
+      this.navigateTo(view)
+      return
+    }
+    const id = view + '-' + Date.now()
+    this.openTabs = [...this.openTabs, { id, view, label, icon }]
+    localStorage.setItem('alf-open-tabs', JSON.stringify(this.openTabs))
+    this.navigateTo(view)
+  }
+
+  closeTab(id: string) {
+    const tab = this.openTabs.find(t => t.id === id)
+    this.openTabs = this.openTabs.filter(t => t.id !== id)
+    localStorage.setItem('alf-open-tabs', JSON.stringify(this.openTabs))
+    // If closing the active tab, navigate to first remaining tab or chat
+    if (tab && tab.view === this.currentView) {
+      const next = this.openTabs[0]
+      this.navigateTo(next ? next.view : 'chat')
+    }
+  }
+
+  closeAllTabs() {
+    this.openTabs = []
+    localStorage.setItem('alf-open-tabs', '[]')
   }
 
   setBadge(view: string, count: number) {

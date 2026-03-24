@@ -103,6 +103,26 @@
   let teachResult = $state<any>(null)
   let teachContentLen = $derived(teachContent.length)
 
+  const memoryPresets = [
+    { value: 'extract key facts', label: 'Extract key facts' },
+    { value: 'extract action items', label: 'Extract action items' },
+    { value: 'bullet summary', label: 'Bullet summary' },
+    { value: 'store-as-is', label: 'Store as-is' },
+  ]
+  const contextPresets = [
+    { value: 'store-as-is', label: 'Store as-is' },
+  ]
+  let teachPresets = $derived(teachDestination === 'context' ? contextPresets : memoryPresets)
+  let teachNeedsLLM = $derived(teachInstruction !== 'store-as-is')
+
+  // Reset instruction when destination changes and current instruction isn't valid
+  $effect(() => {
+    const valid = (teachDestination === 'context' ? contextPresets : memoryPresets).some(p => p.value === teachInstruction)
+    if (!valid) {
+      teachInstruction = teachDestination === 'context' ? 'store-as-is' : 'extract key facts'
+    }
+  })
+
   // Skill store
   let skillCommand = $state('')
   let scanning = $state(false)
@@ -737,15 +757,13 @@
     <div class="form-group">
       <label>Instruction</label>
       <select class="input" bind:value={teachInstruction}>
-        <option value="extract key facts">Extract key facts</option>
-        <option value="extract preferences">Extract preferences</option>
-        <option value="extract decisions">Extract decisions</option>
-        <option value="store-as-is">Store as-is</option>
-        <option value="summarize">Summarize</option>
+        {#each teachPresets as preset}
+          <option value={preset.value}>{preset.label}</option>
+        {/each}
       </select>
     </div>
 
-    {#if teachTiers.length > 0}
+    {#if teachNeedsLLM && teachTiers.length > 0}
       <div class="form-group">
         <label>Tier (optional)</label>
         <select class="input" bind:value={teachTier}>
@@ -929,6 +947,12 @@
     grid-template-columns: minmax(200px, 0.7fr) 1.3fr;
     gap: 1rem;
     align-items: start;
+    max-height: calc(100vh - 160px);
+  }
+
+  .workspace-layout > :global(:last-child) {
+    max-height: calc(100vh - 180px);
+    overflow: auto;
   }
 
   .file-viewer-placeholder {
@@ -1124,6 +1148,7 @@
   .file-content {
     white-space: pre-wrap;
     word-break: break-word;
+    overflow-x: auto;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.8rem;
     line-height: 1.5;
@@ -1430,6 +1455,8 @@
     font-size: 0.88rem;
     line-height: 1.7;
     color: var(--text);
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
 
   :global(.markdown-body h1),

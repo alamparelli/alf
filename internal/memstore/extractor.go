@@ -255,7 +255,7 @@ func (e *Extractor) Extract() error {
 	}
 
 	stored := 0
-	for _, fact := range facts {
+	for i, fact := range facts {
 		if fact.Text == "" {
 			continue
 		}
@@ -263,14 +263,21 @@ func (e *Extractor) Extract() error {
 		if memType != "fact" && memType != "preference" && memType != "decision" && memType != "contact" {
 			memType = "fact"
 		}
+		truncText := fact.Text
+		if len(truncText) > 100 {
+			truncText = truncText[:100] + "..."
+		}
+		log.Printf("memstore: fact[%d/%d] type=%s text=%q", i+1, len(facts), memType, truncText)
 		_, err := e.store.Store(fact.Text, memType, "extractor", nil)
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate") {
+				log.Printf("memstore: fact[%d] → duplicate, skipped", i+1)
 				continue
 			}
-			log.Printf("memstore: store fact failed: %v", err)
+			log.Printf("memstore: fact[%d] → store failed: %v", i+1, err)
 			continue
 		}
+		log.Printf("memstore: fact[%d] → stored OK", i+1)
 		stored++
 	}
 

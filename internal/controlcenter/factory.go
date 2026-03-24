@@ -11,6 +11,7 @@ import (
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
+	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
 )
@@ -22,6 +23,7 @@ type Deps struct {
 	ContextStore    ResourceStore
 	ToolStore      ResourceStore
 	SkillStore     ResourceStore
+	SkillCatalog   skills.Store // runtime skill catalog (all dirs)
 	AppStore       AppStore
 	LogReader      LogReader
 	StatusProvider StatusProvider
@@ -143,6 +145,14 @@ func HandlerFactory(deps Deps) http.Handler {
 		Notifier: deps.Notifier,
 		Event:    ReloadTools,
 	})
+	// Skill catalog (all runtime skills from all directories).
+	if deps.SkillCatalog != nil {
+		mux.Handle("/api/skills/catalog", &SkillsCatalogHandler{
+			SkillStore: deps.SkillCatalog,
+			SkillsDir:  deps.SkillsDir,
+			DataDir:    deps.DataDir,
+		})
+	}
 	mux.Handle("/api/skills/import", &SkillImportHandler{
 		DataDir:          deps.DataDir,
 		ProviderRegistry: deps.ProviderRegistry,

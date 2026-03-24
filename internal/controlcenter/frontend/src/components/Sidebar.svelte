@@ -4,7 +4,7 @@
   import {
     MessageCircle, Home, Terminal, Layers, CalendarClock,
     Users, SlidersHorizontal, Shield, Lock, Store,
-    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package
+    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package, Zap
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
 
@@ -15,6 +15,7 @@
     'layers': Layers,
     'calendar-clock': CalendarClock,
     'users': Users,
+    'zap': Zap,
     'sliders-horizontal': SlidersHorizontal,
     'shield': Shield,
     'lock': Lock,
@@ -46,6 +47,7 @@
             class:active={nav.currentView === tab.view}
             class:nav-fav={isFav}
             onclick={() => nav.navigateTo(tab.view)}
+            onauxclick={(e: MouseEvent) => { if (e.button === 1) { e.preventDefault(); nav.openTab(tab.view, tab.label, tab.icon) } }}
           >
             {#if ICON_MAP[tab.icon]}
               <svelte:component this={ICON_MAP[tab.icon]} size={16} />
@@ -83,6 +85,7 @@
               class:active={nav.currentView === appView}
               class:nav-fav={isFav}
               onclick={() => nav.navigateTo(appView)}
+              onauxclick={(e: MouseEvent) => { if (e.button === 1) { e.preventDefault(); nav.openTab(appView, app.display_name || app.name, app.icon || 'package') } }}
             >
               {#if getIcon(app.icon)}
                 <svelte:component this={getIcon(app.icon)} size={16} />

@@ -447,6 +447,7 @@ The SDK is loaded from `/static/alf-app-sdk.js`. Available methods:
 7. **No build step** — single HTML file, vanilla JS only
 8. **No `unsafe-eval`** — do NOT use frameworks that require `new Function()` (Petite Vue, Vue, Angular). CSP blocks them.
 9. **No external scripts/stylesheets** (CSP blocks them)
+10. **Use Lucide SVG icons** for all UI icons — inline SVG from [lucide.dev](https://lucide.dev). Do NOT use emoji as icons unless the user explicitly asks. No icon fonts (Font Awesome, etc.) — CSP blocks external resources.
 
 ### External APIs — Vault Proxy
 **NEVER hardcode API keys.** Use `vault proxy <service> <method> <path> [body]`. Check `vault list` for available services.

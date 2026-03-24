@@ -51,6 +51,13 @@
   let autoRefresh = $state(true)
   let refreshTimer: ReturnType<typeof setInterval> | undefined
 
+  // Expandable agent outputs
+  let expandedOutputs = $state<Record<string, boolean>>({})
+
+  function toggleOutput(key: string) {
+    expandedOutputs[key] = !expandedOutputs[key]
+  }
+
   // Approval
   let approvalFeedback = $state<Record<string, string>>({})
 
@@ -288,6 +295,9 @@
             <span class="task-name">{task.prompt ? (task.prompt.length > 80 ? task.prompt.slice(0, 77) + '...' : task.prompt) : 'Agent task'}</span>
             <div class="task-meta">
               <span class="badge {statusBadgeClass(task.status)}">{task.status.replace(/_/g, ' ')}</span>
+              {#if task.total_cost_usd > 0}
+                <span class="cost-badge">${task.total_cost_usd.toFixed(4)}</span>
+              {/if}
               <span class="task-elapsed"><Clock size={12} /> {elapsed(task.started_at)}</span>
               {#if task.team}
                 <span class="task-team"><Users size={12} /> {task.team}</span>
@@ -306,6 +316,10 @@
 
         {#if expandedTasks[task.id]}
           <div class="task-detail">
+            {#if task.prompt}
+              <div class="task-prompt-box">{task.prompt}</div>
+            {/if}
+
             {#if task.plan && task.plan.length > 0}
               <div class="task-plan">
                 <h4>Plan</h4>
@@ -325,7 +339,8 @@
               <div class="agent-steps">
                 <h4>Agent Steps</h4>
                 {#each task.agent_calls as call, i}
-                  <div class="agent-step">
+                  {@const outputKey = `${task.id}-${i}`}
+                  <div class="agent-step agent-step-{call.status === 'completed' ? 'completed' : call.status === 'failed' || call.status === 'timeout' ? 'failed' : 'working'}">
                     <div class="agent-step-header">
                       <span class="agent-name">{call.agent}</span>
                       <span class="badge {statusBadgeClass(call.status)}">{call.status}</span>
@@ -334,10 +349,21 @@
                       {/if}
                     </div>
                     {#if call.task}
-                      <div class="agent-task">{call.task}</div>
+                      {@const taskKey = `${outputKey}-task`}
+                      <div class="agent-task markdown-body" class:agent-output-collapsed={!expandedOutputs[taskKey]}>{@html renderMarkdown(call.task)}</div>
+                      {#if call.task.length > 200}
+                        <button class="btn btn-sm btn-toggle-output" onclick={() => toggleOutput(taskKey)}>
+                          {expandedOutputs[taskKey] ? 'Hide instructions' : 'Show instructions'}
+                        </button>
+                      {/if}
                     {/if}
                     {#if call.text}
-                      <div class="agent-output markdown-body">{@html renderMarkdown(call.text)}</div>
+                      <div class="agent-output markdown-body" class:agent-output-collapsed={!expandedOutputs[outputKey]}>{@html renderMarkdown(call.text)}</div>
+                      {#if call.text.length > 300}
+                        <button class="btn btn-sm btn-toggle-output" onclick={() => toggleOutput(outputKey)}>
+                          {expandedOutputs[outputKey] ? 'Show less' : 'Show more'}
+                        </button>
+                      {/if}
                     {/if}
                     {#if call.error}
                       <div class="agent-error">{call.error}</div>
@@ -408,11 +434,11 @@
               <span class="task-name">{task.prompt ? (task.prompt.length > 80 ? task.prompt.slice(0, 77) + '...' : task.prompt) : 'Agent task'}</span>
               <div class="task-meta">
                 <span class="badge {statusBadgeClass(task.status)}">{task.status.replace(/_/g, ' ')}</span>
+                {#if task.total_cost_usd > 0}
+                  <span class="cost-badge">${task.total_cost_usd.toFixed(4)}</span>
+                {/if}
                 {#if task.team}
                   <span class="task-team"><Users size={12} /> {task.team}</span>
-                {/if}
-                {#if task.total_cost_usd > 0}
-                  <span class="cost">${task.total_cost_usd.toFixed(4)}</span>
                 {/if}
               </div>
             </div>
@@ -425,11 +451,16 @@
 
           {#if expandedTasks[task.id]}
             <div class="task-detail">
+              {#if task.prompt}
+                <div class="task-prompt-box">{task.prompt}</div>
+              {/if}
+
               {#if task.agent_calls && task.agent_calls.length > 0}
                 <div class="agent-steps">
                   <h4>Agent Steps</h4>
-                  {#each task.agent_calls as call}
-                    <div class="agent-step">
+                  {#each task.agent_calls as call, i}
+                    {@const outputKey = `${task.id}-${i}`}
+                    <div class="agent-step agent-step-{call.status === 'completed' ? 'completed' : call.status === 'failed' || call.status === 'timeout' ? 'failed' : 'working'}">
                       <div class="agent-step-header">
                         <span class="agent-name">{call.agent}</span>
                         <span class="badge {statusBadgeClass(call.status)}">{call.status}</span>
@@ -441,7 +472,12 @@
                         <div class="agent-task">{call.task}</div>
                       {/if}
                       {#if call.text}
-                        <div class="agent-output markdown-body">{@html renderMarkdown(call.text)}</div>
+                        <div class="agent-output markdown-body" class:agent-output-collapsed={!expandedOutputs[outputKey]}>{@html renderMarkdown(call.text)}</div>
+                        {#if call.text.length > 300}
+                          <button class="btn btn-sm btn-toggle-output" onclick={() => toggleOutput(outputKey)}>
+                            {expandedOutputs[outputKey] ? 'Show less' : 'Show more'}
+                          </button>
+                        {/if}
                       {/if}
                       {#if call.error}
                         <div class="agent-error">{call.error}</div>
@@ -626,6 +662,29 @@
     border-top: 1px solid var(--border);
   }
 
+  .task-prompt-box {
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.08);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius, 8px);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .cost-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 500;
+    background: var(--bg-input);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+
   .task-detail h4 {
     font-size: 0.82rem;
     margin-bottom: 6px;
@@ -670,6 +729,19 @@
     padding: 8px 12px;
     background: var(--bg-input);
     border-radius: var(--radius, 8px);
+    border-left: 3px solid var(--border);
+  }
+
+  .agent-step-completed {
+    border-left-color: var(--green, #3d8b3d);
+  }
+
+  .agent-step-failed {
+    border-left-color: var(--red, #c4392a);
+  }
+
+  .agent-step-working {
+    border-left-color: var(--accent);
   }
 
   .agent-step-header {
@@ -682,10 +754,13 @@
   .agent-task {
     font-size: 0.8rem;
     color: var(--text-dim);
-    padding: 4px 10px;
+    padding: 8px 12px;
     margin-bottom: 6px;
+    background: rgba(0, 0, 0, 0.04);
     border-left: 2px solid var(--border);
-    font-style: italic;
+    border-radius: 0 var(--radius, 8px) var(--radius, 8px) 0;
+    line-height: 1.5;
+    word-break: break-word;
   }
 
   .agent-name {
@@ -698,6 +773,28 @@
     line-height: 1.5;
     overflow-x: auto;
     word-break: break-word;
+  }
+
+  .agent-output-collapsed {
+    max-height: 200px;
+    overflow: hidden;
+    position: relative;
+    mask-image: linear-gradient(to bottom, black 150px, transparent 200px);
+    -webkit-mask-image: linear-gradient(to bottom, black 150px, transparent 200px);
+  }
+
+  .btn-toggle-output {
+    margin-top: 4px;
+    border: none;
+    background: none;
+    color: var(--accent);
+    padding: 2px 0;
+    font-size: 0.75rem;
+  }
+
+  .btn-toggle-output:hover {
+    background: none;
+    text-decoration: underline;
   }
 
   .agent-error {

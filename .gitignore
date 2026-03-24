@@ -2,6 +2,7 @@
 /alf
 /alf-daemon
 /memory-tools
+/system-tools
 *.exe
 
 # Environment
@@ -27,6 +28,7 @@ __pycache__/
 
 # Frontend (Svelte/Vite)
 internal/controlcenter/frontend/node_modules/
+internal/controlcenter/frontend/.vite/
 
 # User space (runtime data)
 user-space/
@@ -44,3 +46,4 @@ scripts/dev-deploy.sh
 scripts/dev-local.sh
 technical/
 journal
+video-factory-output/

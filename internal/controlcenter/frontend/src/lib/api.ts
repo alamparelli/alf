@@ -3,7 +3,27 @@ import { toasts } from '../stores/toast.svelte'
 /**
  * Authenticated API call with CSRF protection and 401 handling.
  */
-export async function api<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
+export async function api<T = any>(pathOrMethod: string, optsOrPath?: RequestInit | string, body?: any): Promise<T> {
+  // Support both signatures:
+  //   api('/path', opts?)           — standard
+  //   api('GET', '/path', body?)    — method-first (compat)
+  let path: string
+  let opts: RequestInit = {}
+
+  if (typeof optsOrPath === 'string') {
+    // Method-first: api('POST', '/api/foo', body?)
+    const method = pathOrMethod.toUpperCase()
+    path = optsOrPath
+    opts = { method }
+    if (body !== undefined) {
+      opts.headers = { 'Content-Type': 'application/json' }
+      opts.body = JSON.stringify(body)
+    }
+  } else {
+    path = pathOrMethod
+    opts = optsOrPath || {}
+  }
+
   const method = (opts.method || 'GET').toUpperCase()
   const headers: Record<string, string> = {
     'X-Requested-With': 'XMLHttpRequest',

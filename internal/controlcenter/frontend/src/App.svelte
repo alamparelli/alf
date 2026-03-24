@@ -50,7 +50,7 @@
     <div class="sidebar-overlay" onclick={() => nav.sidebarOpen = false} role="presentation"></div>
   {/if}
 
-  <div class="main-content">
+  <div class="main-content" class:main-content--app={nav.currentView.startsWith('page:')}>
     <div class="main-header">
       <button class="hamburger-btn" onclick={() => nav.toggleSidebar()} aria-label="Toggle menu">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -147,6 +147,16 @@
     padding: 0 24px 24px;
     overflow-y: auto;
     min-height: 100vh;
+  }
+
+  .main-content--app {
+    padding: 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .main-content--app .main-header {
+    display: none;
   }
 
   .main-header {

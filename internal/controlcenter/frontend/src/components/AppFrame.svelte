@@ -6,7 +6,6 @@
   let iframe: HTMLIFrameElement
 
   onMount(() => {
-    // Sync theme when iframe loads
     if (iframe) {
       iframe.addEventListener('load', () => {
         theme.syncIframe(iframe)
@@ -14,10 +13,9 @@
     }
   })
 
-  // Re-sync theme when palette changes
   $effect(() => {
     if (iframe) {
-      theme.palette // track dependency
+      theme.palette
       theme.syncIframe(iframe)
     }
   })
@@ -32,9 +30,11 @@
 
 <style>
   .page-frame {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
-    height: calc(100vh - 60px);
+    height: 100%;
     border: none;
-    border-radius: var(--radius, 8px);
   }
 </style>

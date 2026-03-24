@@ -8183,3 +8183,303 @@ function mpCheckBadge() {
   }).catch(function() {});
 }
 
+
+// --- Spotlight Search ---
+(function initSpotlight() {
+  const backdropEl = document.getElementById('spotlightBackdrop');
+  const modalEl = document.getElementById('spotlightModal');
+  const inputEl = document.getElementById('spotlightInput');
+  const resultsEl = document.getElementById('spotlightResults');
+
+  let searchTimeout;
+  let selectedIndex = -1;
+  let currentResults = [];
+
+  // Detect platform for keyboard shortcut
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  const defaultKeyCombo = isMac ? 'MetaLeft' : 'ControlLeft';
+  const defaultKeybind = isMac ? 'Cmd+G' : 'Ctrl+G';
+
+  function showSpotlight() {
+    backdropEl.style.display = 'block';
+    modalEl.style.display = 'block';
+    inputEl.value = '';
+    inputEl.focus();
+    resultsEl.innerHTML = '';
+    selectedIndex = -1;
+    currentResults = [];
+    lucide.createIcons();
+  }
+
+  function hideSpotlight() {
+    backdropEl.style.display = 'none';
+    modalEl.style.display = 'none';
+    inputEl.value = '';
+    selectedIndex = -1;
+    currentResults = [];
+  }
+
+  // System tabs — searched client-side
+  const SYSTEM_TABS = [
+    { view: 'chat', label: 'Chat', icon: 'message-circle' },
+    { view: 'home', label: 'Home', icon: 'home' },
+    { view: 'terminal', label: 'Terminal', icon: 'terminal' },
+    { view: 'tasks', label: 'Tasks', icon: 'layers' },
+    { view: 'schedules', label: 'Schedules', icon: 'calendar-clock' },
+    { view: 'teams', label: 'Teams', icon: 'users' },
+    { view: 'tiers', label: 'Tiers', icon: 'sliders-horizontal' },
+    { view: 'firewall', label: 'Firewall', icon: 'shield' },
+    { view: 'vault', label: 'Vault', icon: 'lock' },
+    { view: 'marketplace', label: 'Marketplace', icon: 'store' },
+    { view: 'settings', label: 'Settings', icon: 'settings' },
+    { view: 'logs', label: 'Logs', icon: 'scroll-text' },
+    { view: 'docs', label: 'Docs', icon: 'book-open' },
+  ];
+
+  function handleSearch(query) {
+    clearTimeout(searchTimeout);
+
+    if (!query.trim()) {
+      resultsEl.innerHTML = '';
+      selectedIndex = -1;
+      currentResults = [];
+      return;
+    }
+
+    // Search system tabs immediately (client-side)
+    const q = query.toLowerCase();
+    const matchedTabs = SYSTEM_TABS.filter(t => t.label.toLowerCase().includes(q));
+
+    resultsEl.innerHTML = '<div class="spotlight-empty">Searching...</div>';
+
+    searchTimeout = setTimeout(() => {
+      api('/api/search?q=' + encodeURIComponent(query) + '&types=apps,files,docs')
+        .then(data => {
+          currentResults = [];
+          let html = '';
+
+          // 1. System tabs
+          if (matchedTabs.length > 0) {
+            html += '<div class="spotlight-section">';
+            html += '<div class="spotlight-section-title">System</div>';
+            matchedTabs.forEach(tab => {
+              html += '<button class="spotlight-item" data-type="system" data-index="' + currentResults.length + '">';
+              html += '<div class="spotlight-item-icon"><i data-lucide="' + tab.icon + '"></i></div>';
+              html += '<div class="spotlight-item-info">';
+              html += '<div class="spotlight-item-title">' + escapeHtml(tab.label) + '</div>';
+              html += '</div></button>';
+              currentResults.push({ type: 'system', data: tab });
+            });
+            html += '</div>';
+          }
+
+          // 2. Apps (local + enabled marketplace)
+          if (data.apps && data.apps.length > 0) {
+            html += '<div class="spotlight-section">';
+            html += '<div class="spotlight-section-title">Apps</div>';
+            data.apps.forEach(app => {
+              const icon = app.icon || 'app-window-2';
+              html += '<button class="spotlight-item" data-type="app" data-index="' + currentResults.length + '">';
+              html += '<div class="spotlight-item-icon"><i data-lucide="' + icon + '"></i></div>';
+              html += '<div class="spotlight-item-info">';
+              html += '<div class="spotlight-item-title">' + escapeHtml(app.display_name || app.name) + '</div>';
+              html += '</div></button>';
+              currentResults.push({ type: 'app', data: app });
+            });
+            html += '</div>';
+          }
+
+          // 3. Marketplace (disabled, installed, available)
+          if (data.marketplace && data.marketplace.length > 0) {
+            html += '<div class="spotlight-section">';
+            html += '<div class="spotlight-section-title">Marketplace</div>';
+            data.marketplace.forEach(app => {
+              const icon = app.icon || 'store';
+              html += '<button class="spotlight-item" data-type="marketplace" data-index="' + currentResults.length + '">';
+              html += '<div class="spotlight-item-icon"><i data-lucide="' + icon + '"></i></div>';
+              html += '<div class="spotlight-item-info">';
+              html += '<div class="spotlight-item-title">' + escapeHtml(app.display_name || app.name) + '</div>';
+              html += '<div class="spotlight-item-meta">';
+              if (app.category) html += '<span class="spotlight-badge">' + escapeHtml(app.category) + '</span>';
+              if (app.state) html += '<span class="spotlight-badge">' + escapeHtml(app.state) + '</span>';
+              html += '</div>';
+              html += '</div></button>';
+              currentResults.push({ type: 'marketplace', data: app });
+            });
+            html += '</div>';
+          }
+
+          // 4. Files
+          if (data.files && data.files.length > 0) {
+            html += '<div class="spotlight-section">';
+            html += '<div class="spotlight-section-title">Files</div>';
+            data.files.forEach(file => {
+              const icon = getFileIcon(file.extension);
+              html += '<button class="spotlight-item" data-type="file" data-index="' + currentResults.length + '">';
+              html += '<div class="spotlight-item-icon"><i data-lucide="' + icon + '"></i></div>';
+              html += '<div class="spotlight-item-info">';
+              html += '<div class="spotlight-item-title">' + escapeHtml(file.name) + '</div>';
+              html += '<div class="spotlight-item-subtitle">' + escapeHtml(file.path) + '</div>';
+              html += '</div></button>';
+              currentResults.push({ type: 'file', data: file });
+            });
+            html += '</div>';
+          }
+
+          // 5. Docs
+          if (data.docs && data.docs.length > 0) {
+            html += '<div class="spotlight-section">';
+            html += '<div class="spotlight-section-title">Docs</div>';
+            data.docs.forEach(doc => {
+              html += '<button class="spotlight-item" data-type="doc" data-index="' + currentResults.length + '">';
+              html += '<div class="spotlight-item-icon"><i data-lucide="book-open"></i></div>';
+              html += '<div class="spotlight-item-info">';
+              html += '<div class="spotlight-item-title">' + escapeHtml(doc.title) + '</div>';
+              html += '<div class="spotlight-item-subtitle">' + escapeHtml(doc.summary || '') + '</div>';
+              html += '</div></button>';
+              currentResults.push({ type: 'doc', data: doc });
+            });
+            html += '</div>';
+          }
+
+          if (currentResults.length === 0) {
+            html = '<div class="spotlight-empty">No results found.</div>';
+          }
+
+          resultsEl.innerHTML = html;
+          lucide.createIcons();
+          selectedIndex = -1;
+
+          resultsEl.querySelectorAll('.spotlight-item').forEach(item => {
+            item.addEventListener('click', () => selectResult(parseInt(item.dataset.index)));
+          });
+        })
+        .catch(e => {
+          resultsEl.innerHTML = '<div class="spotlight-empty">Search failed.</div>';
+          console.error('Spotlight search error:', e);
+        });
+    }, 300);
+  }
+
+  function selectResult(index) {
+    if (index < 0 || index >= currentResults.length) return;
+
+    const result = currentResults[index];
+    hideSpotlight();
+
+    if (result.type === 'system') {
+      navigateTo(result.data.view);
+    } else if (result.type === 'app') {
+      navigateTo('page:' + result.data.name);
+    } else if (result.type === 'marketplace') {
+      // Go to marketplace view (user can install/enable from there)
+      navigateTo('marketplace');
+    } else if (result.type === 'file') {
+      navigateTo('home');
+      setTimeout(() => wsOpenFile(result.data.path), 100);
+    } else if (result.type === 'doc') {
+      navigateTo('docs');
+      setTimeout(() => {
+        const docLink = document.querySelector('[data-doc-id="' + result.data.id + '"]');
+        if (docLink) docLink.click();
+      }, 100);
+    }
+  }
+
+  function handleKeydown(e) {
+    if (!inputEl.value) return;
+
+    if (e.key === 'Escape') {
+      hideSpotlight();
+      e.preventDefault();
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = Math.min(selectedIndex + 1, currentResults.length - 1);
+      updateSelection();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = Math.max(selectedIndex - 1, -1);
+      updateSelection();
+    } else if (e.key === 'Enter' && selectedIndex >= 0) {
+      e.preventDefault();
+      selectResult(selectedIndex);
+    }
+  }
+
+  function updateSelection() {
+    resultsEl.querySelectorAll('.spotlight-item').forEach((item, idx) => {
+      if (idx === selectedIndex) {
+        item.classList.add('focus');
+        item.scrollIntoView({ block: 'nearest' });
+      } else {
+        item.classList.remove('focus');
+      }
+    });
+  }
+
+  // Keyboard shortcut listener
+  document.addEventListener('keydown', e => {
+    // Cmd+G or Ctrl+G to open spotlight
+    const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+    if (cmdOrCtrl && e.key.toLowerCase() === 'g') {
+      if (backdropEl.style.display !== 'block') {
+        e.preventDefault();
+        showSpotlight();
+      }
+    }
+  });
+
+  // Backdrop click to close
+  backdropEl.addEventListener('click', e => {
+    if (e.target === backdropEl) hideSpotlight();
+  });
+
+  // Input listener for search
+  inputEl.addEventListener('input', e => {
+    handleSearch(e.target.value);
+  });
+
+  // Keyboard navigation in search
+  inputEl.addEventListener('keydown', handleKeydown);
+
+  // Escape key
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && backdropEl.style.display === 'block') {
+      hideSpotlight();
+    }
+  });
+})();
+
+function getFileIcon(ext) {
+  const iconMap = {
+    'md': 'file-text',
+    'txt': 'file-text',
+    'json': 'code-2',
+    'js': 'code-2',
+    'ts': 'code-2',
+    'go': 'code-2',
+    'py': 'code-2',
+    'html': 'code-2',
+    'css': 'code-2',
+    'pdf': 'file-pdf',
+    'zip': 'archive',
+    'tar': 'archive',
+    'gz': 'archive',
+  };
+  return iconMap[ext] || 'file';
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}

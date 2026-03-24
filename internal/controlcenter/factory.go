@@ -277,6 +277,15 @@ func HandlerFactory(deps Deps) http.Handler {
 	// Docs (embedded markdown).
 	mux.Handle("/api/docs/", &DocsHandler{})
 
+	// Search (apps, files, docs).
+	mux.Handle("/api/search", &SearchHandler{
+		AppStore:    deps.AppStore,
+		Marketplace: deps.Marketplace,
+		DataDir:     deps.DataDir,
+		ConfigDir:   deps.ConfigDir,
+		SkillsDir:   deps.SkillsDir,
+	})
+
 	// Debug: tier prompt inspector API + tool tester page.
 	if deps.ChatService != nil {
 		mux.Handle("/api/debug/prompt", &DebugPromptHandler{ChatService: deps.ChatService})
@@ -331,7 +340,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
 	handler = securityHeadersMiddleware(handler)
-	handler = newRateLimiter(15).withAuthLimit(600, deps.Sessions).middleware(handler) // 15/min anonymous, 600/min authenticated
+	handler = newRateLimiter(15).withAuthLimit(600, deps.Sessions).withToken(deps.AuthToken).middleware(handler) // 15/min anonymous, 600/min authenticated (session or bearer)
 	handler = loggingMiddleware(handler)
 
 	// Terminal WebSocket: registered outside the main middleware stack so the

@@ -730,6 +730,20 @@
     </div>
   </div>
 
+  <!-- Spotlight Search Modal -->
+  <div class="spotlight-backdrop" id="spotlightBackdrop" style="display:none"></div>
+  <div class="spotlight-modal" id="spotlightModal" style="display:none">
+    <div class="spotlight-container">
+      <div class="spotlight-search-box">
+        <i data-lucide="search" class="spotlight-search-icon"></i>
+        <input type="text" id="spotlightInput" class="spotlight-input" placeholder="Search apps, files, docs..." autocomplete="off">
+      </div>
+      <div class="spotlight-results" id="spotlightResults">
+        <div class="spotlight-empty">Start typing to search...</div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
   <script src="/static/purify.min.js"></script>
   <script src="/static/marked.min.js"></script>

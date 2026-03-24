@@ -96,7 +96,8 @@
   let isUnlocked = $derived(vaultStatus === 'active')
 
   async function loadStatus() {
-    loading = true
+    // Only show loading spinner on first load
+    if (!vaultStatus) loading = true
     try {
       const data = await api<any>('/api/vault/status')
       available = data.available
@@ -120,8 +121,13 @@
       })
       password = ''
       toasts.show('Vault unlocked', 'success')
-      await loadStatus()
-      if (isUnlocked) loadAll()
+      // Reload status without setting loading=true (avoids flash)
+      const data = await api<any>('/api/vault/status')
+      available = data.available
+      vaultStatus = data.status
+      firstTime = data.first_time
+      loading = false
+      if (vaultStatus === 'active') loadAll()
     } catch (e: any) {
       toasts.show(e.error || 'Failed to unlock vault', 'error')
     } finally {

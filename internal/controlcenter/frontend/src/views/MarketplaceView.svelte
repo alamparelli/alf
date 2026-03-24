@@ -4,7 +4,8 @@
   import { toasts } from '../stores/toast.svelte';
   import { nav } from '../stores/nav.svelte';
   import Card from '../components/shared/Card.svelte';
-  import { Download, Power, PowerOff, Trash2, RefreshCw, Tag, User, FolderOpen } from 'lucide-svelte';
+  import { Download, Power, PowerOff, Trash2, RefreshCw, Tag, User, FolderOpen, Package } from 'lucide-svelte';
+  import { getIcon } from '../lib/icons';
 
   let apps = $state([]);
   let updates = $state([]);
@@ -122,7 +123,13 @@
             <Card>
               <div class="app-card">
                 <div class="app-header">
-                  <span class="app-icon">{app.icon || '📦'}</span>
+                  <span class="app-icon">
+                    {#if getIcon(app.icon)}
+                      <svelte:component this={getIcon(app.icon)} size={20} />
+                    {:else}
+                      <Package size={20} />
+                    {/if}
+                  </span>
                   <div class="app-title">
                     <strong>{app.name}</strong>
                     <span class="badge" style="background:{stateColors[app.state] || stateColors.available}">

@@ -15,7 +15,7 @@ class AppsStore {
   async load() {
     try {
       const data = await api<AppInfo[]>('/api/apps/')
-      this.items = data.filter(a => a.has_ui)
+      this.items = Array.isArray(data) ? data : []
       this.loaded = true
     } catch {
       // silent

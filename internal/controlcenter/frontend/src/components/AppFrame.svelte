@@ -24,7 +24,7 @@
 <iframe
   bind:this={iframe}
   class="page-frame"
-  src="/apps/{slug}/"
+  src={`/apps/${slug}/`}
   title={slug}
 ></iframe>
 

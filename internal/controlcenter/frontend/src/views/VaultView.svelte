@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { Lock, Unlock, Shield, Key, FileText, Plus, Trash2, Download, Upload, Eye, EyeOff, Copy, RefreshCw, AlertTriangle, CheckCircle, ExternalLink, Loader2 } from 'lucide-svelte'
+  import { Lock, Unlock, Shield, Key, FileText, Plus, Trash2, Download, Upload, Eye, EyeOff, Copy, RefreshCw, AlertTriangle, CheckCircle, ExternalLink, Loader2, Zap, Pencil } from 'lucide-svelte'
   import Card from '../components/shared/Card.svelte'
   import Modal from '../components/shared/Modal.svelte'
   import { api } from '../lib/api'
@@ -20,6 +20,9 @@
     base_url: string
     auth_type: string
     tls_skip_verify?: boolean
+    scopes?: string[]
+    expires_at?: string
+    token_status?: string
   }
   let services = $state<Service[]>([])
 
@@ -65,12 +68,15 @@
   let svcBasicUseRef = $state(false)
   let svcClientId = $state('')
   let svcClientSecret = $state('')
-  let svcAuthUrl = $state('')
   let svcTokenUrl = $state('')
+  let svcRefreshToken = $state('')
   let svcScopes = $state('')
-  let svcRedirectUri = $state('')
-  let svcJsonKey = $state('')
+  let svcOAuthFileRef = $state('')
+  let svcOAuthBrowserScopes = $state('')
+  let svcOAuthTab = $state('browser') // 'browser' or 'manual'
+  let svcSaFileRef = $state('')
   let svcSaScopes = $state('')
+  let svcSaTokenUrl = $state('')
   let svcTlsSkip = $state(false)
   let savingService = $state(false)
 
@@ -88,6 +94,15 @@
   let fileInput: HTMLInputElement | undefined
   let uploadingFile = $state(false)
 
+  // Built-in tokens (from status)
+  let adminToken = $state('')
+  let proxyToken = $state('')
+
+  // Token creation
+  let tokenScope = $state<'proxy' | 'admin'>('proxy')
+  let newTokenId = $state('')
+  let showTokenModal = $state(false)
+
   // Export/Import
   let exportPassword = $state('')
   let importPassword = $state('')
@@ -103,6 +118,8 @@
       available = data.available
       vaultStatus = data.status
       firstTime = data.first_time
+      adminToken = data.admin_token || ''
+      proxyToken = data.proxy_token || ''
     } catch {
       available = false
     } finally {
@@ -126,6 +143,8 @@
       available = data.available
       vaultStatus = data.status
       firstTime = data.first_time
+      adminToken = data.admin_token || ''
+      proxyToken = data.proxy_token || ''
       loading = false
       if (vaultStatus === 'unlocked') loadAll()
     } catch (e: any) {
@@ -161,8 +180,12 @@
   async function loadServices() {
     try {
       const data = await api<Service[]>('/api/vault/services')
-      services = data || []
+      services = (data || []).sort((a, b) => a.name.localeCompare(b.name))
     } catch { /* silent */ }
+  }
+
+  function splitScopes(s: string): string[] {
+    return s.split(/[,\s]+/).map(x => x.trim()).filter(Boolean)
   }
 
   function openServiceModal(svc?: Service) {
@@ -184,12 +207,16 @@
     svcBasicUseRef = false
     svcClientId = ''
     svcClientSecret = ''
-    svcAuthUrl = ''
     svcTokenUrl = ''
-    svcScopes = ''
-    svcRedirectUri = window.location.origin + '/api/vault/oauth2/callback'
-    svcJsonKey = ''
-    svcSaScopes = ''
+    svcRefreshToken = ''
+    const scopeStr = (svc?.scopes || []).join(', ')
+    svcScopes = scopeStr
+    svcOAuthFileRef = ''
+    svcOAuthBrowserScopes = scopeStr
+    svcOAuthTab = 'browser'
+    svcSaFileRef = ''
+    svcSaScopes = scopeStr
+    svcSaTokenUrl = ''
     showServiceModal = true
   }
 
@@ -217,16 +244,21 @@
           else auth.password = svcPassword
           break
         case 'oauth2_client':
-          auth.client_id = svcClientId
-          auth.client_secret = svcClientSecret
-          auth.auth_url = svcAuthUrl
-          auth.token_url = svcTokenUrl
-          auth.scopes = svcScopes
-          auth.redirect_uri = svcRedirectUri
+          if (svcOAuthTab === 'browser' && svcOAuthFileRef) {
+            auth.client_secret_file = svcOAuthFileRef
+            auth.scopes = splitScopes(svcOAuthBrowserScopes)
+          } else {
+            auth.client_id = svcClientId
+            auth.client_secret = svcClientSecret
+            auth.token_url = svcTokenUrl
+            if (svcRefreshToken) auth.refresh_token = svcRefreshToken
+            auth.scopes = splitScopes(svcScopes)
+          }
           break
         case 'service_account':
-          auth.json_key = svcJsonKey
-          auth.scopes = svcSaScopes
+          auth.file_ref = svcSaFileRef
+          auth.sa_scopes = splitScopes(svcSaScopes)
+          if (svcSaTokenUrl) auth.sa_token_url = svcSaTokenUrl
           break
       }
       await api('/api/vault/services', {
@@ -270,40 +302,54 @@
     }
   }
 
-  // OAuth2 flow
+  // OAuth2 flow (matches legacy vaultOAuth2StartFlow)
+  let oauthAttempts = 0
   async function startOAuth2Flow() {
+    if (!svcName.trim() || !svcBaseUrl.trim()) { toasts.show('Name and Base URL are required', 'error'); return }
+    if (!svcOAuthFileRef) { toasts.show('Select a client secret file', 'error'); return }
+
+    const payload: Record<string, any> = {
+      client_secret_file: svcOAuthFileRef,
+      service_name: svcName.trim(),
+      base_url: svcBaseUrl.trim(),
+      redirect_uri: window.location.origin + '/api/vault/oauth2/callback',
+    }
+    const scopes = splitScopes(svcOAuthBrowserScopes)
+    if (scopes.length > 0) payload.scopes = scopes
+    if (svcTlsSkip) payload.tls_skip_verify = true
+
     try {
       const data = await api<any>('/api/vault/oauth2/authorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: svcName.trim(),
-          base_url: svcBaseUrl.trim(),
-          client_id: svcClientId,
-          client_secret: svcClientSecret,
-          auth_url: svcAuthUrl,
-          token_url: svcTokenUrl,
-          scopes: svcScopes,
-          redirect_uri: svcRedirectUri
-        })
+        body: JSON.stringify(payload),
       })
-      if (data.authorize_url) {
-        window.open(data.authorize_url, '_blank')
+      if (data.auth_url) {
+        window.open(data.auth_url, '_blank')
         oauthPolling = true
-        // Poll for completion
+        oauthAttempts = 0
+        // Poll for service creation (5 min timeout like legacy)
         oauthPollTimer = setInterval(async () => {
+          oauthAttempts++
+          if (oauthAttempts > 60) {
+            clearInterval(oauthPollTimer)
+            oauthPolling = false
+            toasts.show('OAuth2 flow timed out', 'error')
+            return
+          }
           try {
             const svcList = await api<Service[]>('/api/vault/services')
-            const found = svcList.find(s => s.name === svcName.trim())
-            if (found) {
+            if ((svcList || []).some(s => s.name === svcName.trim())) {
               clearInterval(oauthPollTimer)
               oauthPolling = false
-              toasts.show('OAuth2 flow completed', 'success')
+              toasts.show(`OAuth2 service "${svcName}" created`, 'success')
               showServiceModal = false
               loadServices()
             }
           } catch { /* keep polling */ }
-        }, 3000)
+        }, 5000)
+      } else {
+        toasts.show('Error: no auth_url returned', 'error')
       }
     } catch (e: any) {
       toasts.show(e.error || 'OAuth2 flow failed', 'error')
@@ -314,7 +360,7 @@
   async function loadSecrets() {
     try {
       const data = await api<Secret[]>('/api/vault/secrets')
-      secrets = data || []
+      secrets = (data || []).sort((a, b) => a.name.localeCompare(b.name))
     } catch { /* silent */ }
   }
 
@@ -361,7 +407,7 @@
   async function loadFiles() {
     try {
       const data = await api<VaultFile[]>('/api/vault/files')
-      files = data || []
+      files = (data || []).sort((a, b) => a.name.localeCompare(b.name))
     } catch { /* silent */ }
   }
 
@@ -408,7 +454,7 @@
   async function loadTokens() {
     try {
       const data = await api<AccessToken[]>('/api/vault/tokens')
-      tokens = data || []
+      tokens = (data || []).sort((a, b) => (a.scope || '').localeCompare(b.scope || ''))
     } catch { /* silent */ }
   }
 
@@ -417,12 +463,22 @@
       const data = await api<{ id: string }>('/api/vault/tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: 'proxy' })
+        body: JSON.stringify({ scope: tokenScope })
       })
-      toasts.show('Token created: ' + data.id, 'success')
+      newTokenId = data.id
+      showTokenModal = true
       loadTokens()
     } catch (e: any) {
       toasts.show(e.error || 'Failed', 'error')
+    }
+  }
+
+  async function copyNewToken() {
+    try {
+      await navigator.clipboard.writeText(newTokenId)
+      toasts.show('Token copied to clipboard', 'success')
+    } catch {
+      toasts.show('Failed to copy', 'error')
     }
   }
 
@@ -573,13 +629,21 @@
                 <span class="item-name">{svc.name}</span>
                 <span class="item-url">{svc.base_url}</span>
                 <span class="auth-badge">{authTypeBadge(svc.auth_type)}</span>
+                {#if svc.token_status === 'expired'}
+                  <span class="token-badge token-expired">expired</span>
+                {:else if svc.token_status === 'expiring_soon'}
+                  <span class="token-badge token-expiring">expiring</span>
+                {/if}
+                {#if svc.expires_at}
+                  <span class="expires-date">{new Date(svc.expires_at).toLocaleDateString()}</span>
+                {/if}
               </div>
               <div class="item-actions">
-                <button class="btn btn-sm" onclick={() => testService(svc.name)} title="Test">
-                  <CheckCircle size={12} />
+                <button class="btn btn-sm" onclick={() => testService(svc.name)} title="Test connection">
+                  <Zap size={12} />
                 </button>
                 <button class="btn btn-sm" onclick={() => openServiceModal(svc)} title="Edit">
-                  <RefreshCw size={12} />
+                  <Pencil size={12} />
                 </button>
                 <button class="btn btn-sm" onclick={() => deleteService(svc.name)} title="Delete">
                   <Trash2 size={12} />
@@ -611,7 +675,7 @@
               </div>
               <div class="item-actions">
                 <button class="btn btn-sm" onclick={() => openSecretModal(secret)} title="Update">
-                  <RefreshCw size={12} />
+                  <Pencil size={12} />
                 </button>
                 <button class="btn btn-sm" onclick={() => deleteSecret(secret.name)} title="Delete">
                   <Trash2 size={12} />
@@ -661,29 +725,52 @@
     <Card>
       <div class="section-header">
         <h3><Shield size={16} /> Access Keys</h3>
-        <button class="btn btn-sm" onclick={createToken}>
-          <Plus size={13} /> Create
-        </button>
-      </div>
-      {#if tokens.length === 0}
-        <p class="dim">No access keys.</p>
-      {:else}
-        <div class="item-list">
-          {#each tokens as tok}
-            <div class="item-row">
-              <div class="item-info">
-                <span class="item-name mono">{tok.id.length > 16 ? tok.id.slice(0, 16) + '...' : tok.id}</span>
-                <span class="auth-badge">{tok.scope}</span>
-              </div>
-              <div class="item-actions">
-                <button class="btn btn-sm" onclick={() => revokeToken(tok.id)} title="Revoke">
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            </div>
-          {/each}
+        <div class="token-create-row">
+          <select class="input input-sm token-scope-select" bind:value={tokenScope}>
+            <option value="proxy">proxy</option>
+            <option value="admin">admin</option>
+          </select>
+          <button class="btn btn-sm" onclick={createToken}>
+            <Plus size={13} /> Create
+          </button>
         </div>
-      {/if}
+      </div>
+      <div class="item-list">
+        {#if adminToken}
+          <div class="item-row item-row-builtin">
+            <div class="item-info">
+              <span class="item-name mono">{adminToken}</span>
+              <span class="auth-badge">admin</span>
+            </div>
+            <div class="item-actions"><span class="dim" style="font-size:0.7rem">built-in</span></div>
+          </div>
+        {/if}
+        {#if proxyToken}
+          <div class="item-row item-row-builtin">
+            <div class="item-info">
+              <span class="item-name mono">{proxyToken}</span>
+              <span class="auth-badge">proxy</span>
+            </div>
+            <div class="item-actions"><span class="dim" style="font-size:0.7rem">built-in</span></div>
+          </div>
+        {/if}
+        {#each tokens as tok}
+          <div class="item-row">
+            <div class="item-info">
+              <span class="item-name mono">{tok.id.length > 16 ? tok.id.slice(0, 16) + '...' : tok.id}</span>
+              <span class="auth-badge">{tok.scope}</span>
+            </div>
+            <div class="item-actions">
+              <button class="btn btn-sm" onclick={() => revokeToken(tok.id)} title="Revoke">
+                <Trash2 size={12} />
+              </button>
+            </div>
+          </div>
+        {/each}
+        {#if !adminToken && !proxyToken && tokens.length === 0}
+          <p class="dim">No access keys.</p>
+        {/if}
+      </div>
     </Card>
 
     <!-- Export / Import -->
@@ -810,45 +897,72 @@
         {/if}
       </div>
     {:else if svcAuthType === 'oauth2_client'}
-      <div class="form-group">
-        <label>Client ID</label>
-        <input class="input" bind:value={svcClientId} placeholder="Client ID" />
+      <div class="oauth-tabs">
+        <button class="oauth-tab" class:active={svcOAuthTab === 'browser'} onclick={() => svcOAuthTab = 'browser'}>Browser Flow</button>
+        <button class="oauth-tab" class:active={svcOAuthTab === 'manual'} onclick={() => svcOAuthTab = 'manual'}>Manual</button>
       </div>
-      <div class="form-group">
-        <label>Client Secret</label>
-        <input class="input" type="password" bind:value={svcClientSecret} placeholder="Client Secret" />
-      </div>
-      <div class="form-group">
-        <label>Auth URL</label>
-        <input class="input" bind:value={svcAuthUrl} placeholder="https://accounts.google.com/o/oauth2/v2/auth" />
-      </div>
-      <div class="form-group">
-        <label>Token URL</label>
-        <input class="input" bind:value={svcTokenUrl} placeholder="https://oauth2.googleapis.com/token" />
-      </div>
-      <div class="form-group">
-        <label>Scopes (space-separated)</label>
-        <input class="input" bind:value={svcScopes} placeholder="https://www.googleapis.com/auth/calendar" />
-      </div>
-      <div class="form-group">
-        <label>Redirect URI</label>
-        <input class="input" bind:value={svcRedirectUri} />
-      </div>
-      <button class="btn btn-sm" onclick={startOAuth2Flow} disabled={oauthPolling}>
-        {#if oauthPolling}
-          <Loader2 size={13} class="spin" /> Waiting for authorization...
-        {:else}
-          <ExternalLink size={13} /> Start OAuth2 Flow
-        {/if}
-      </button>
+      {#if svcOAuthTab === 'browser'}
+        <div class="form-group">
+          <label>Client Secret File</label>
+          <select class="input" bind:value={svcOAuthFileRef}>
+            <option value="">Select uploaded file...</option>
+            {#each files.filter(f => f.name.startsWith('client_secret')) as f}
+              <option value={f.name}>{f.name}</option>
+            {/each}
+          </select>
+          <p class="form-hint">Upload a <code>client_secret_*.json</code> file from Google Cloud Console in the Files section below.</p>
+        </div>
+        <div class="form-group">
+          <label>Scopes (comma-separated)</label>
+          <input class="input" bind:value={svcOAuthBrowserScopes} placeholder="https://www.googleapis.com/auth/calendar" />
+        </div>
+        <button class="btn btn-sm" onclick={startOAuth2Flow} disabled={oauthPolling || !svcOAuthFileRef}>
+          {#if oauthPolling}
+            <Loader2 size={13} class="spin" /> Waiting for authorization...
+          {:else}
+            <ExternalLink size={13} /> Authorize in Browser
+          {/if}
+        </button>
+      {:else}
+        <div class="form-group">
+          <label>Client ID</label>
+          <input class="input" bind:value={svcClientId} placeholder="Client ID" />
+        </div>
+        <div class="form-group">
+          <label>Client Secret</label>
+          <input class="input" type="password" bind:value={svcClientSecret} placeholder="Client Secret" />
+        </div>
+        <div class="form-group">
+          <label>Token URL</label>
+          <input class="input" bind:value={svcTokenUrl} placeholder="https://oauth2.googleapis.com/token" />
+        </div>
+        <div class="form-group">
+          <label>Refresh Token</label>
+          <input class="input" type="password" bind:value={svcRefreshToken} placeholder="Refresh token (if already obtained)" />
+        </div>
+        <div class="form-group">
+          <label>Scopes (comma-separated)</label>
+          <input class="input" bind:value={svcScopes} placeholder="https://www.googleapis.com/auth/calendar" />
+        </div>
+      {/if}
     {:else if svcAuthType === 'service_account'}
       <div class="form-group">
-        <label>JSON Key</label>
-        <textarea class="input" bind:value={svcJsonKey} placeholder='Paste JSON key file contents...' rows={5}></textarea>
+        <label>JSON Key File</label>
+        <select class="input" bind:value={svcSaFileRef}>
+          <option value="">Select uploaded file...</option>
+          {#each files as f}
+            <option value={f.name}>{f.name}</option>
+          {/each}
+        </select>
+        <p class="form-hint">Upload the service account JSON key file in the Files section below.</p>
       </div>
       <div class="form-group">
-        <label>Scopes (space-separated)</label>
+        <label>Scopes (comma-separated)</label>
         <input class="input" bind:value={svcSaScopes} placeholder="https://www.googleapis.com/auth/spreadsheets" />
+      </div>
+      <div class="form-group">
+        <label>Token URL (optional)</label>
+        <input class="input" bind:value={svcSaTokenUrl} placeholder="https://oauth2.googleapis.com/token" />
       </div>
     {/if}
 
@@ -862,6 +976,21 @@
       </button>
       <button class="btn" onclick={() => showServiceModal = false}>Cancel</button>
     </div>
+  </div>
+</Modal>
+
+<!-- Token Created Modal -->
+<Modal open={showTokenModal} onclose={() => showTokenModal = false}>
+  <h3><Key size={16} /> Token Created</h3>
+  <p class="form-hint">Copy this token now. It will not be shown again.</p>
+  <div class="token-display">
+    <code class="token-value">{newTokenId}</code>
+    <button class="btn btn-sm" onclick={copyNewToken} title="Copy">
+      <Copy size={13} /> Copy
+    </button>
+  </div>
+  <div class="modal-actions">
+    <button class="btn" onclick={() => showTokenModal = false}>Close</button>
   </div>
 </Modal>
 
@@ -936,6 +1065,10 @@
     background: var(--bg-input);
     border-radius: var(--radius, 8px);
     gap: 8px;
+  }
+
+  .item-row-builtin {
+    opacity: 0.7;
   }
 
   .item-info {
@@ -1032,6 +1165,51 @@
     margin-top: 12px;
   }
 
+  .form-hint {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin: 4px 0 0;
+  }
+
+  .form-hint code {
+    background: var(--bg-input);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+  }
+
+  .oauth-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+
+  .oauth-tab {
+    padding: 4px 12px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .oauth-tab:hover {
+    color: var(--text);
+    background: var(--bg-input);
+  }
+
+  .oauth-tab.active {
+    color: var(--text);
+    background: var(--bg-card);
+    border-color: var(--border);
+    font-weight: 500;
+  }
+
   .modal-actions {
     display: flex;
     gap: 8px;
@@ -1095,4 +1273,62 @@
   .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
   .btn-primary:hover { opacity: 0.9; }
   .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+
+  /* Token create row */
+  .token-create-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .token-scope-select {
+    width: auto;
+    min-width: 80px;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+  }
+
+  /* Token status badges */
+  .token-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 0.68rem;
+    font-weight: 500;
+  }
+
+  .token-expired {
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--red, #ef4444);
+  }
+
+  .token-expiring {
+    background: rgba(234, 179, 8, 0.12);
+    color: var(--yellow, #eab308);
+  }
+
+  .expires-date {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+  }
+
+  /* Token display modal */
+  .token-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 10px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+  }
+
+  .token-value {
+    flex: 1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    word-break: break-all;
+    user-select: all;
+  }
 </style>

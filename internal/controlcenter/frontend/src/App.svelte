@@ -13,12 +13,14 @@
   import TeamsView from './views/TeamsView.svelte'
   import FirewallView from './views/FirewallView.svelte'
   import MarketplaceView from './views/MarketplaceView.svelte'
+  import SkillsView from './views/SkillsView.svelte'
   import TiersView from './views/TiersView.svelte'
   import SchedulesView from './views/SchedulesView.svelte'
   import TerminalView from './views/TerminalView.svelte'
   import ChatView from './views/ChatView.svelte'
   import SpotlightSearch from './components/SpotlightSearch.svelte'
-  import { nav } from './stores/nav.svelte'
+  import { X } from 'lucide-svelte'
+  import { nav, SYSTEM_TABS } from './stores/nav.svelte'
   import { apps } from './stores/apps.svelte'
   import { theme } from './stores/theme.svelte'
   import { toasts } from './stores/toast.svelte'
@@ -61,6 +63,25 @@
       </button>
     </div>
 
+    <!-- Open tabs bar -->
+    {#if nav.openTabs.length > 0}
+      <div class="open-tabs-bar">
+        {#each nav.openTabs as tab (tab.id)}
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div
+            class="open-tab"
+            class:active={nav.currentView === tab.view}
+            onclick={() => nav.navigateTo(tab.view)}
+          >
+            <span class="open-tab-label">{tab.label}</span>
+            <button class="open-tab-close" onclick={(e) => { e.stopPropagation(); nav.closeTab(tab.id) }}>
+              <X size={11} />
+            </button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
     <!-- Chat + Terminal always mounted (preserve state) -->
     <div style:display={nav.currentView === 'chat' ? '' : 'none'}>
       <ChatView />
@@ -79,6 +100,8 @@
       <SchedulesView />
     {:else if nav.currentView === 'teams'}
       <TeamsView />
+    {:else if nav.currentView === 'skills'}
+      <SkillsView />
     {:else if nav.currentView === 'tiers'}
       <TiersView />
     {:else if nav.currentView === 'firewall'}
@@ -356,6 +379,70 @@
     font-size: 0.8rem;
     font-weight: 500;
     margin-bottom: 4px;
+  }
+
+  /* Open tabs bar */
+  .open-tabs-bar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 0 8px;
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .open-tabs-bar::-webkit-scrollbar { height: 0; }
+
+  .open-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .open-tab:hover {
+    background: var(--bg-input);
+    color: var(--text);
+  }
+
+  .open-tab.active {
+    color: var(--text);
+    border-color: var(--accent);
+    font-weight: 500;
+  }
+
+  .open-tab-label {
+    pointer-events: none;
+  }
+
+  .open-tab-close {
+    display: flex;
+    align-items: center;
+    padding: 1px;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .open-tab:hover .open-tab-close {
+    opacity: 0.7;
+  }
+
+  .open-tab-close:hover {
+    opacity: 1 !important;
+    background: var(--border);
   }
 
   .placeholder-view {

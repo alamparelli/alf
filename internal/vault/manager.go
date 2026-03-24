@@ -226,6 +226,16 @@ func (m *Manager) SetSecret(name, value string) error {
 
 // spawn starts vault-server and sets up waitCh. Must be called with m.mu held.
 func (m *Manager) spawn() error {
+	// Kill any lingering process before spawning a new one.
+	if m.cmd != nil && m.cmd.Process != nil {
+		_ = m.cmd.Process.Kill()
+		if m.waitCh != nil {
+			<-m.waitCh
+		}
+		m.cmd = nil
+		m.waitCh = nil
+	}
+
 	bin, err := exec.LookPath("vault-server")
 	if err != nil {
 		return fmt.Errorf("vault-server not found: %w", err)
@@ -326,6 +336,12 @@ func (m *Manager) watchdog(ctx context.Context) {
 			return
 		case <-time.After(backoff):
 		}
+
+		// Ensure port is released before respawning.
+		m.mu.Lock()
+		m.kill() // force-kill any lingering process
+		m.mu.Unlock()
+		time.Sleep(500 * time.Millisecond) // let OS release the port (TIME_WAIT)
 
 		m.mu.Lock()
 		err := m.spawn()

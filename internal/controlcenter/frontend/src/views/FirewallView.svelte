@@ -29,7 +29,7 @@
 
   let config = $state<FirewallConfig>({ mode: 'log-only', port: 4751, rules: [] })
   let log = $state<RequestEntry[]>([])
-  let autoRefresh = $state(false)
+  let autoRefresh = $state(true)
   let loading = $state(false)
 
   // Add rule modal

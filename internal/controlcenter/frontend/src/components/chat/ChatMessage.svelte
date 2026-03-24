@@ -1,7 +1,7 @@
 <script lang="ts">
   import { marked } from 'marked'
   import DOMPurify from 'dompurify'
-  import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image } from 'lucide-svelte'
+  import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check } from 'lucide-svelte'
   import { api } from '../../lib/api'
   import { toasts } from '../../stores/toast.svelte'
 
@@ -46,7 +46,24 @@
   let { msg, convId }: Props = $props()
 
   let showEmojiPicker = $state(false)
+  let copied = $state(false)
   const quickEmojis = ['👍', '❤️', '😂', '🎯', '🔥', '💡', '✅', '❌', '🤔', '👀']
+
+  async function copyText() {
+    const blocks = msg.content_blocks
+    let text = ''
+    if (blocks && blocks.length > 0) {
+      text = blocks.filter(b => b.type === 'text').map(b => b.text || '').join('\n')
+    }
+    if (!text) text = msg.text || ''
+    try {
+      await navigator.clipboard.writeText(text)
+      copied = true
+      setTimeout(() => { copied = false }, 1500)
+    } catch {
+      toasts.show('Failed to copy', 'error')
+    }
+  }
 
   // Collapsible blocks
   let expandedBlocks = $state<Record<number, boolean>>({})
@@ -64,18 +81,23 @@
   async function react(emoji: string) {
     showEmojiPicker = false
     try {
-      await api('POST', '/api/chat/react', { msg_id: msg.id, emoji })
-      // Optimistically add reaction locally
+      const result = await api('POST', '/api/chat/react', { msg_id: msg.id, emoji })
+      // Optimistically add user reaction locally
       const newReaction: Reaction = { emoji, from: 'user' }
       if (msg.reactions) {
         msg.reactions = [...msg.reactions, newReaction]
       } else {
         msg.reactions = [newReaction]
       }
+      // Add ALF's mirror reaction if returned
+      if (result.mirror) {
+        msg.reactions = [...msg.reactions, { emoji: result.mirror, from: 'alf' }]
+      }
     } catch (e: any) {
       toasts.show(e.error || 'Failed to react', 'error')
     }
   }
+
 
   function formatTime(ts: string): string {
     try {
@@ -89,6 +111,12 @@
     return mime?.startsWith('image/')
   }
 </script>
+
+{#if showEmojiPicker}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="emoji-backdrop" onclick={() => showEmojiPicker = false}></div>
+{/if}
 
 <div class="chat-msg chat-msg-{msg.role}">
   <!-- Media attachments (user) -->
@@ -186,8 +214,15 @@
       </div>
     {/if}
 
-    <!-- React button (assistant messages only) -->
+    <!-- Copy + React buttons (assistant messages only) -->
     {#if msg.role === 'assistant'}
+      <button class="copy-btn" onclick={copyText} title="Copy message">
+        {#if copied}
+          <Check size={13} />
+        {:else}
+          <Clipboard size={13} />
+        {/if}
+      </button>
       <div class="react-container">
         <button class="react-btn" onclick={() => showEmojiPicker = !showEmojiPicker}>
           <SmilePlus size={13} />
@@ -212,6 +247,7 @@
     margin-bottom: 8px;
     position: relative;
     word-wrap: break-word;
+    overflow: visible;
   }
 
   .chat-msg-user {
@@ -392,6 +428,23 @@
     background: rgba(0, 0, 0, 0.15);
   }
 
+  /* Copy button */
+  .copy-btn {
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.3;
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    transition: opacity 0.15s;
+  }
+
+  .copy-btn:hover {
+    opacity: 0.8;
+  }
+
   /* React button */
   .react-container {
     position: relative;
@@ -413,6 +466,12 @@
     opacity: 0.8;
   }
 
+  .emoji-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+  }
+
   .emoji-picker {
     position: absolute;
     bottom: 100%;
@@ -426,7 +485,8 @@
     gap: 2px;
     width: 200px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    z-index: 10;
+    z-index: 100;
+    margin-bottom: 4px;
   }
 
   .emoji-btn {

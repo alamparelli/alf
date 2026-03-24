@@ -92,12 +92,14 @@
 
   // --- Version ---
   let version = $state('')
+  let updateAvailable = $state('')
 
   onMount(async () => {
     loadTelegram()
     try {
       const status = await api<any>('/api/status')
       version = status.version || ''
+      updateAvailable = status.update_available || ''
     } catch {
       // silent
     }
@@ -106,6 +108,13 @@
 
 <div class="view-layout">
   <h2>Settings</h2>
+
+  {#if updateAvailable}
+    <div class="update-banner">
+      <span>Update available: <strong>{updateAvailable}</strong></span>
+      <span class="update-current">Current: {version}</span>
+    </div>
+  {/if}
 
   <!-- Theme -->
   <Card>
@@ -224,6 +233,24 @@
 <style>
   .settings-view h2 {
     margin-bottom: 16px;
+  }
+
+  .update-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    background: rgba(234, 179, 8, 0.1);
+    border: 1px solid var(--yellow, #eab308);
+    border-radius: var(--radius, 8px);
+    font-size: 0.85rem;
+    color: var(--text);
+  }
+
+  .update-current {
+    font-size: 0.75rem;
+    color: var(--text-dim);
   }
 
   .row {

@@ -6,7 +6,7 @@
     MessageCircle, Home, Terminal, Layers, CalendarClock, Users,
     SlidersHorizontal, Shield, Lock, Store, Settings, ScrollText,
     BookOpen, Search, FileText, FileCode, FileImage, FileSpreadsheet,
-    File, Package, X, FolderOpen
+    File, Package, X, FolderOpen, Zap
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
 
@@ -32,6 +32,7 @@
     layers: Layers,
     'calendar-clock': CalendarClock,
     users: Users,
+    zap: Zap,
     'sliders-horizontal': SlidersHorizontal,
     shield: Shield,
     lock: Lock,

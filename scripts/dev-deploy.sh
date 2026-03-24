@@ -38,6 +38,9 @@ BUILD_VERSION=$(git describe --tags --always 2>/dev/null || echo "${TAG}")
 echo "==> Pruning old ${IMAGE_NAME} images..."
 docker images "${IMAGE_NAME}" --format '{{.ID}} {{.Tag}}' | grep -v latest | awk '{print $1}' | xargs -r docker rmi 2>/dev/null || true
 
+echo "==> Building frontend (Svelte)..."
+(cd internal/controlcenter/frontend && npm install --silent && npm run build)
+
 echo "==> Building CLI (linux/amd64)..."
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
   -ldflags "-s -w -X main.version=${BUILD_VERSION}" \

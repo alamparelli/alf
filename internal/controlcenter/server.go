@@ -17,6 +17,7 @@ import (
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/provider"
 	scheduler_pkg "github.com/alamparelli/alf/internal/scheduler"
+	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
 )
@@ -72,6 +73,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		ContextStore:    contextStore,
 		ToolStore:      toolStore,
 		SkillStore:     skillStore,
+		SkillCatalog:   chatServiceSkillCatalog(chatService),
 		AppStore:       appStore,
 		LogReader:      logReader,
 		StatusProvider: statusProvider,
@@ -156,4 +158,12 @@ func chatServiceToolRegistry(cs *ChatService) *tooling.Registry {
 		return nil
 	}
 	return cs.ToolRegistry
+}
+
+// chatServiceSkillCatalog extracts the skills.Store from a ChatService, or nil.
+func chatServiceSkillCatalog(cs *ChatService) skills.Store {
+	if cs == nil {
+		return nil
+	}
+	return cs.SkillStore
 }

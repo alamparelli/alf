@@ -1,0 +1,54 @@
+/* Nord palette — Snow (Light) + Polar Night (Dark) */
+
+/* Nord Light (Snow Storm) */
+:root {
+  --bg: #eceff4;
+  --bg-card: #e5e9f0;
+  --bg-input: #d8dee9;
+  --text: #2e3440;
+  --text-dim: #4c566a;
+  --accent: #5e81ac;
+  --green: #a3be8c;
+  --red: #bf616a;
+  --yellow: #ebcb8b;
+  --border: #c8cdd5;
+  --radius: 8px;
+  --on-accent: #eceff4;
+  --danger: #bf616a;
+  --success: #a3be8c;
+  --error: #bf616a;
+
+  --mauve: #b48ead;
+  --pink: #b48ead;
+  --teal: #88c0d0;
+  --sapphire: #5e81ac;
+  --peach: #d08770;
+  --lavender: #81a1c1;
+}
+
+/* Nord Dark (Polar Night) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #2e3440;
+    --bg-card: #3b4252;
+    --bg-input: #434c5e;
+    --text: #eceff4;
+    --text-dim: #7b88a1;
+    --accent: #88c0d0;
+    --green: #a3be8c;
+    --red: #bf616a;
+    --yellow: #ebcb8b;
+    --border: #434c5e;
+    --on-accent: #2e3440;
+    --danger: #bf616a;
+    --success: #a3be8c;
+    --error: #bf616a;
+
+    --mauve: #b48ead;
+    --pink: #b48ead;
+    --teal: #88c0d0;
+    --sapphire: #81a1c1;
+    --peach: #d08770;
+    --lavender: #81a1c1;
+  }
+}

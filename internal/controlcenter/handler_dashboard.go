@@ -19,7 +19,7 @@ func (h *DashboardHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Override the restrictive default CSP from middleware with dashboard-specific policy.
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; "+
-			"script-src 'self' https://unpkg.com; "+
+			"script-src 'self' 'unsafe-inline' https://unpkg.com; "+
 			"style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; "+
 			"font-src 'self' https://fonts.gstatic.com; "+
 			"connect-src 'self' wss: https://unpkg.com; "+

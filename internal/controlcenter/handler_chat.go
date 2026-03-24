@@ -171,8 +171,8 @@ func streamJob(w http.ResponseWriter, r *http.Request, job *chatJob, offset int)
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	// First event: job ID for reconnection.
-	jobData, _ := json.Marshal(map[string]string{"job_id": job.ID})
+	// First event: job ID for reconnection + conv_id for tab association.
+	jobData, _ := json.Marshal(map[string]string{"job_id": job.ID, "conv_id": job.ConvID})
 	fmt.Fprintf(w, "event: job\ndata: %s\n\n", jobData)
 	flusher.Flush()
 

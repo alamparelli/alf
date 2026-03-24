@@ -137,11 +137,21 @@ func (h *VaultHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"available":  true,
 		"status":     status,
 		"first_time": h.Manager.IsFirstTime(),
-	})
+	}
+	// Include obfuscated built-in tokens when unlocked.
+	if status == "unlocked" {
+		if at := h.Manager.AdminToken(); at != "" {
+			resp["admin_token"] = obfuscateToken(at)
+		}
+		if pt := h.Manager.ProxyToken(); pt != "" {
+			resp["proxy_token"] = obfuscateToken(pt)
+		}
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
@@ -689,4 +699,12 @@ func (h *VaultHandler) handleDeleteSecret(w http.ResponseWriter, _ *http.Request
 
 // isVaultSafeName validates that a name/id has no path traversal characters.
 var isVaultSafeName = isSafeName
+
+// obfuscateToken shows the first 8 and last 4 chars of a token, masking the rest.
+func obfuscateToken(t string) string {
+	if len(t) <= 16 {
+		return t[:4] + "..." + t[len(t)-4:]
+	}
+	return t[:8] + "..." + t[len(t)-4:]
+}
 

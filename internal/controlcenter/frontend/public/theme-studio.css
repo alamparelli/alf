@@ -1,0 +1,54 @@
+/* Studio palette — Warm amber Light + Dark */
+
+/* Studio Light */
+:root {
+  --bg: #f5f3f0;
+  --bg-card: #ffffff;
+  --bg-input: #ebe8e4;
+  --text: #2c2a28;
+  --text-dim: #8a8580;
+  --accent: #d97706;
+  --green: #16a34a;
+  --red: #dc2626;
+  --yellow: #ca8a04;
+  --border: #d6d3cf;
+  --radius: 8px;
+  --on-accent: #ffffff;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --error: #dc2626;
+
+  --mauve: #7a5cad;
+  --pink: #c76fa0;
+  --teal: #2d8a7a;
+  --sapphire: #3a8da8;
+  --peach: #c87537;
+  --lavender: #7082c4;
+}
+
+/* Studio Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1c;
+    --bg-card: #262626;
+    --bg-input: #2a2a2a;
+    --text: #e7e5e4;
+    --text-dim: #a8a29e;
+    --accent: #f59e0b;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --border: #333333;
+    --on-accent: #1c1c1c;
+    --danger: #ef4444;
+    --success: #22c55e;
+    --error: #ef4444;
+
+    --mauve: #b89adb;
+    --pink: #dea0c4;
+    --teal: #6ec4b0;
+    --sapphire: #6ab4cc;
+    --peach: #dba070;
+    --lavender: #9eaade;
+  }
+}

@@ -1,0 +1,641 @@
+<script>
+  import { onMount } from 'svelte';
+  import { api, esc } from '../lib/api';
+  import { toasts } from '../stores/toast.svelte';
+  import Card from '../components/shared/Card.svelte';
+  import { Plus, Pencil, Trash2, Save, Copy, Router, Brain, ChevronDown } from 'lucide-svelte';
+
+  // --- State ---
+  let tiersConfig = $state(null);
+  let availableBackends = $state([]);
+  let availableTools = $state([]);
+  let backendModels = $state({});
+  let loading = $state(true);
+
+  // Config profiles
+  let configs = $state([]);
+  let activeConfigName = $state('');
+
+  // Modals
+  let showTierModal = $state(false);
+  let showRouterModal = $state(false);
+  let showMemoryModal = $state(false);
+  let editingTierIndex = $state(-1);
+
+  // Tier form
+  let tierForm = $state({
+    name: '', backend: '', model: '', routable: true, enabled: true,
+    router_label: '', description: '', effort: '', max_turns: 0,
+    write_capable: false, tools: [], system_prompt: '', context_weight: 'full',
+    priority: 0, force_command: false, max_iterations: 0, timeout_minutes: 0,
+    orchestrator_max_turns: 0,
+  });
+
+  // Router form
+  let routerForm = $state({ router_model: '', router_backend: '', default_fallback: '', router_distinctions: '' });
+
+  // Memory form
+  let memoryForm = $state({ extract_backend: '', extract_model: '' });
+
+  // --- Derived ---
+  let modelsForBackend = $derived(
+    tierForm.backend && backendModels[tierForm.backend]
+      ? backendModels[tierForm.backend]
+      : []
+  );
+
+  let routerModelsForBackend = $derived(
+    routerForm.router_backend && backendModels[routerForm.router_backend]
+      ? backendModels[routerForm.router_backend]
+      : []
+  );
+
+  let memoryModelsForBackend = $derived(
+    memoryForm.extract_backend && backendModels[memoryForm.extract_backend]
+      ? backendModels[memoryForm.extract_backend]
+      : []
+  );
+
+  // --- Load ---
+  async function loadTiers() {
+    loading = true;
+    try {
+      const data = await api('GET', '/api/tiers');
+      tiersConfig = { tiers: data.tiers || [], router_model: data.router_model || '', default_fallback: data.default_fallback || '', router_distinctions: data.router_distinctions || '', router_backend: data.router_backend || '', memory: data.memory || {} };
+      availableBackends = data.available_backends || [];
+      availableTools = data.available_tools || [];
+      backendModels = data.backend_models || {};
+    } catch (e) {
+      toasts.error('Failed to load tiers: ' + e.message);
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function loadConfigs() {
+    try {
+      const data = await api('GET', '/api/tiers/configs');
+      configs = Array.isArray(data) ? data : [];
+      const active = configs.find(c => c.active);
+      if (active) activeConfigName = active.name;
+    } catch {}
+  }
+
+  async function switchConfig(name) {
+    try {
+      await api('POST', '/api/tiers/configs/switch', { name: name + '.json' });
+      toasts.success(`Switched to profile: ${name}`);
+      await Promise.all([loadTiers(), loadConfigs()]);
+    } catch (e) {
+      toasts.error('Switch failed: ' + e.message);
+    }
+  }
+
+  async function duplicateConfig() {
+    const source = configs.find(c => c.active);
+    if (!source) return;
+    const newName = prompt('New profile name:', source.name + '-copy');
+    if (!newName) return;
+    try {
+      await api('POST', '/api/tiers/configs/duplicate', { source: source.name + '.json', name: newName + '.json' });
+      toasts.success(`Duplicated to: ${newName}`);
+      await loadConfigs();
+    } catch (e) {
+      toasts.error('Duplicate failed: ' + e.message);
+    }
+  }
+
+  // --- Tier CRUD ---
+  function openAddTier() {
+    editingTierIndex = -1;
+    tierForm = { name: '', backend: 'cli', model: 'sonnet', routable: true, enabled: true, router_label: '', description: '', effort: '', max_turns: 0, write_capable: false, tools: [], system_prompt: '', context_weight: 'full', priority: 0, force_command: false, max_iterations: 0, timeout_minutes: 0, orchestrator_max_turns: 0 };
+    showTierModal = true;
+  }
+
+  function openEditTier(idx) {
+    editingTierIndex = idx;
+    const t = tiersConfig.tiers[idx];
+    tierForm = { ...t, tools: [...(t.tools || [])] };
+    showTierModal = true;
+  }
+
+  function saveTierForm() {
+    if (!tierForm.name.trim()) { toasts.error('Name is required'); return; }
+    const tier = { ...tierForm };
+    if (editingTierIndex >= 0) {
+      tiersConfig.tiers[editingTierIndex] = tier;
+    } else {
+      tiersConfig.tiers.push(tier);
+    }
+    showTierModal = false;
+  }
+
+  function deleteTier(idx) {
+    if (!confirm(`Delete tier "${tiersConfig.tiers[idx].name}"?`)) return;
+    tiersConfig.tiers.splice(idx, 1);
+    tiersConfig = tiersConfig; // trigger reactivity
+  }
+
+  // --- Router modal ---
+  function openRouterModal() {
+    routerForm = { router_model: tiersConfig.router_model || '', router_backend: tiersConfig.router_backend || '', default_fallback: tiersConfig.default_fallback || '', router_distinctions: tiersConfig.router_distinctions || '' };
+    showRouterModal = true;
+  }
+
+  function saveRouterForm() {
+    tiersConfig.router_model = routerForm.router_model;
+    tiersConfig.router_backend = routerForm.router_backend;
+    tiersConfig.default_fallback = routerForm.default_fallback;
+    tiersConfig.router_distinctions = routerForm.router_distinctions;
+    showRouterModal = false;
+  }
+
+  // --- Memory modal ---
+  function openMemoryModal() {
+    const m = tiersConfig.memory || {};
+    memoryForm = { extract_backend: m.extract_backend || '', extract_model: m.extract_model || '' };
+    showMemoryModal = true;
+  }
+
+  function saveMemoryForm() {
+    tiersConfig.memory = { ...tiersConfig.memory, extract_backend: memoryForm.extract_backend, extract_model: memoryForm.extract_model };
+    showMemoryModal = false;
+  }
+
+  // --- Save all ---
+  async function saveAll() {
+    try {
+      const payload = {
+        tiers: tiersConfig.tiers,
+        router_model: tiersConfig.router_model,
+        default_fallback: tiersConfig.default_fallback,
+        router_distinctions: tiersConfig.router_distinctions,
+        router_backend: tiersConfig.router_backend,
+        memory: tiersConfig.memory,
+      };
+      await api('PUT', '/api/tiers', payload);
+      toasts.success('Tiers saved — hot-reload triggered');
+    } catch (e) {
+      toasts.error('Save failed: ' + e.message);
+    }
+  }
+
+  function toggleTool(toolName) {
+    const idx = tierForm.tools.indexOf(toolName);
+    if (idx >= 0) {
+      tierForm.tools.splice(idx, 1);
+    } else {
+      tierForm.tools.push(toolName);
+    }
+    tierForm.tools = [...tierForm.tools];
+  }
+
+  function tierTypeBadge(tier) {
+    if (!tier.routable) return 'system';
+    if (tier.force_command) return 'command';
+    return 'general';
+  }
+
+  onMount(() => {
+    loadTiers();
+    loadConfigs();
+  });
+</script>
+
+<div class="view-tiers">
+  <h2>Tiers</h2>
+  <div class="toolbar">
+    {#if configs.length > 0}
+      <select class="select" value={activeConfigName} onchange={(e) => switchConfig(e.target.value)}>
+        {#each configs as cfg}
+          <option value={cfg.name}>{cfg.name} ({cfg.tiers} tiers){cfg.active ? ' ●' : ''}</option>
+        {/each}
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick={duplicateConfig} title="Duplicate profile">
+        <Copy size={14} />
+      </button>
+    {/if}
+    <button class="btn btn-ghost btn-sm" onclick={openRouterModal} title="Router config">
+      <Router size={14} /> Router
+    </button>
+    <button class="btn btn-ghost btn-sm" onclick={openMemoryModal} title="Memory config">
+      <Brain size={14} /> Memory
+    </button>
+    <button class="btn btn-primary btn-sm" onclick={openAddTier}>
+      <Plus size={14} /> Add Tier
+    </button>
+    <button class="btn btn-success btn-sm" onclick={saveAll}>
+      <Save size={14} /> Save All
+    </button>
+  </div>
+
+  {#if loading}
+    <div class="loading">Loading tiers...</div>
+  {:else if !tiersConfig}
+    <div class="empty">No tier configuration loaded.</div>
+  {:else}
+    <div class="tier-grid">
+      {#each tiersConfig.tiers as tier, idx (tier.name + idx)}
+        <Card>
+          <div class="tier-card">
+            <div class="tier-header">
+              <strong>{tier.name}</strong>
+              <span class="badge badge-type">{tierTypeBadge(tier)}</span>
+              {#if !tier.enabled}
+                <span class="badge badge-disabled">disabled</span>
+              {/if}
+            </div>
+            <div class="tier-meta">
+              <span>Backend: <strong>{tier.backend || 'cli'}</strong></span>
+              <span>Model: <strong>{tier.model}</strong></span>
+              {#if tier.effort}
+                <span>Effort: {tier.effort}</span>
+              {/if}
+              {#if tier.max_turns}
+                <span>Max turns: {tier.max_turns}</span>
+              {/if}
+            </div>
+            {#if tier.description || tier.router_label}
+              <p class="tier-desc">{tier.description || tier.router_label}</p>
+            {/if}
+            <div class="tier-actions">
+              <button class="btn btn-ghost btn-sm" onclick={() => openEditTier(idx)}>
+                <Pencil size={12} /> Edit
+              </button>
+              <button class="btn btn-ghost btn-sm btn-danger" onclick={() => deleteTier(idx)}>
+                <Trash2 size={12} /> Delete
+              </button>
+            </div>
+          </div>
+        </Card>
+      {/each}
+    </div>
+  {/if}
+</div>
+
+<!-- Tier Add/Edit Modal -->
+{#if showTierModal}
+  <div class="modal-overlay" onclick={() => showTierModal = false}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h3>{editingTierIndex >= 0 ? 'Edit' : 'Add'} Tier</h3>
+      <div class="form-grid">
+        <label>
+          Name
+          <input type="text" bind:value={tierForm.name} placeholder="e.g. fast-tier" />
+        </label>
+        <label>
+          Backend
+          <select bind:value={tierForm.backend}>
+            <option value="">cli (default)</option>
+            <option value="cli">cli</option>
+            {#each availableBackends as b}
+              {#if b !== 'cli' && b !== ''}
+                <option value={b}>{b}</option>
+              {/if}
+            {/each}
+          </select>
+        </label>
+        <label>
+          Model
+          {#if modelsForBackend.length > 0}
+            <select bind:value={tierForm.model}>
+              <option value="">-- select --</option>
+              {#each modelsForBackend as m}
+                <option value={m.id}>{m.id}</option>
+              {/each}
+            </select>
+          {:else}
+            <input type="text" bind:value={tierForm.model} placeholder="e.g. sonnet, haiku, opus" />
+          {/if}
+        </label>
+        <label>
+          Effort
+          <select bind:value={tierForm.effort}>
+            <option value="">default</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </label>
+        <label>
+          Max Turns
+          <input type="number" bind:value={tierForm.max_turns} min="0" />
+        </label>
+        <label>
+          Priority
+          <input type="number" bind:value={tierForm.priority} />
+        </label>
+        <label>
+          Context Weight
+          <select bind:value={tierForm.context_weight}>
+            <option value="full">full</option>
+            <option value="standard">standard</option>
+            <option value="light">light</option>
+          </select>
+        </label>
+        <label>
+          Timeout (min)
+          <input type="number" bind:value={tierForm.timeout_minutes} min="0" />
+        </label>
+        <label class="full-width">
+          Router Label
+          <input type="text" bind:value={tierForm.router_label} placeholder="Short label for classifier" />
+        </label>
+        <label class="full-width">
+          Description
+          <input type="text" bind:value={tierForm.description} placeholder="Description for the router" />
+        </label>
+        <label class="full-width">
+          System Prompt
+          <textarea bind:value={tierForm.system_prompt} rows="3" placeholder="Extra system prompt for this tier"></textarea>
+        </label>
+        <div class="checkbox-row">
+          <label class="checkbox"><input type="checkbox" bind:checked={tierForm.enabled} /> Enabled</label>
+          <label class="checkbox"><input type="checkbox" bind:checked={tierForm.routable} /> Routable</label>
+          <label class="checkbox"><input type="checkbox" bind:checked={tierForm.write_capable} /> Write Capable</label>
+          <label class="checkbox"><input type="checkbox" bind:checked={tierForm.force_command} /> Force Command</label>
+        </div>
+        {#if availableTools.length > 0}
+          <div class="full-width">
+            <strong>Tools</strong>
+            <div class="tool-checkboxes">
+              {#each availableTools as tool}
+                <label class="checkbox tool-check" title={tool.desc}>
+                  <input type="checkbox" checked={tierForm.tools.includes(tool.name)} onchange={() => toggleTool(tool.name)} />
+                  {tool.name} <span class="tool-source">({tool.source})</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick={() => showTierModal = false}>Cancel</button>
+        <button class="btn btn-primary" onclick={saveTierForm}>
+          {editingTierIndex >= 0 ? 'Update' : 'Add'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Router Config Modal -->
+{#if showRouterModal}
+  <div class="modal-overlay" onclick={() => showRouterModal = false}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h3><Router size={18} /> Router Configuration</h3>
+      <div class="form-grid">
+        <label>
+          Router Backend
+          <select bind:value={routerForm.router_backend}>
+            <option value="">cli (default)</option>
+            <option value="cli">cli</option>
+            {#each availableBackends as b}
+              {#if b !== 'cli' && b !== ''}
+                <option value={b}>{b}</option>
+              {/if}
+            {/each}
+          </select>
+        </label>
+        <label>
+          Router Model
+          {#if routerModelsForBackend.length > 0}
+            <select bind:value={routerForm.router_model}>
+              <option value="">-- select --</option>
+              {#each routerModelsForBackend as m}
+                <option value={m.id}>{m.id}</option>
+              {/each}
+            </select>
+          {:else}
+            <input type="text" bind:value={routerForm.router_model} placeholder="e.g. haiku" />
+          {/if}
+        </label>
+        <label class="full-width">
+          Default Fallback Tier
+          <select bind:value={routerForm.default_fallback}>
+            <option value="">none</option>
+            {#if tiersConfig}
+              {#each tiersConfig.tiers as t}
+                <option value={t.name}>{t.name}</option>
+              {/each}
+            {/if}
+          </select>
+        </label>
+        <label class="full-width">
+          Router Distinctions
+          <textarea bind:value={routerForm.router_distinctions} rows="3" placeholder="Extra instructions for the classifier"></textarea>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick={() => showRouterModal = false}>Cancel</button>
+        <button class="btn btn-primary" onclick={saveRouterForm}>Save</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Memory Config Modal -->
+{#if showMemoryModal}
+  <div class="modal-overlay" onclick={() => showMemoryModal = false}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h3><Brain size={18} /> Memory Extraction Config</h3>
+      <div class="form-grid">
+        <label>
+          Extract Backend
+          <select bind:value={memoryForm.extract_backend}>
+            <option value="">auto</option>
+            <option value="cli">cli</option>
+            {#each availableBackends as b}
+              {#if b !== 'cli' && b !== ''}
+                <option value={b}>{b}</option>
+              {/if}
+            {/each}
+          </select>
+        </label>
+        <label>
+          Extract Model
+          {#if memoryModelsForBackend.length > 0}
+            <select bind:value={memoryForm.extract_model}>
+              <option value="">default</option>
+              {#each memoryModelsForBackend as m}
+                <option value={m.id}>{m.id}</option>
+              {/each}
+            </select>
+          {:else}
+            <input type="text" bind:value={memoryForm.extract_model} placeholder="e.g. anthropic/claude-haiku-4-5" />
+          {/if}
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick={() => showMemoryModal = false}>Cancel</button>
+        <button class="btn btn-primary" onclick={saveMemoryForm}>Save</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<style>
+  .view-tiers {
+    padding: 8px 0;
+    width: 100%;
+  }
+  .view-tiers h2 {
+    margin-bottom: 16px;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+  }
+  .loading, .empty {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-dim);
+  }
+  .tier-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 1rem;
+  }
+  .tier-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .tier-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .badge {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge-type {
+    background: var(--sapphire);
+    color: #fff;
+  }
+  .badge-disabled {
+    background: var(--yellow);
+    color: #fff;
+  }
+  .tier-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+  .tier-desc {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin: 0;
+  }
+  .tier-actions {
+    display: flex;
+    gap: 0.3rem;
+    margin-top: 0.2rem;
+  }
+  .select {
+    padding: 0.3rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+    font-size: 0.8rem;
+  }
+
+  /* Modal styles */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    max-width: 600px;
+    width: 90vw;
+    max-height: 85vh;
+    overflow-y: auto;
+  }
+  .modal h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0 1rem;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.8rem;
+  }
+  .form-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    font-size: 0.8rem;
+  }
+  .form-grid input, .form-grid select, .form-grid textarea {
+    padding: 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+  .full-width {
+    grid-column: 1 / -1;
+  }
+  .checkbox-row {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  .checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .tool-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.3rem;
+    margin-top: 0.3rem;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .tool-check {
+    font-size: 0.75rem;
+  }
+  .tool-source {
+    color: var(--text-dim);
+    font-size: 0.65rem;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+</style>

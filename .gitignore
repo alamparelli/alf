@@ -25,6 +25,9 @@ third_party/
 __pycache__/
 *.pyc
 
+# Frontend (Svelte/Vite)
+internal/controlcenter/frontend/node_modules/
+
 # User space (runtime data)
 user-space/
 .plans/

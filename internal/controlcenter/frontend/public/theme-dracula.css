@@ -1,0 +1,54 @@
+/* Dracula palette — Dark only (light uses muted variant) */
+
+/* Dracula Light (muted) */
+:root {
+  --bg: #f8f8f2;
+  --bg-card: #f0f0e8;
+  --bg-input: #e8e8e0;
+  --text: #282a36;
+  --text-dim: #6272a4;
+  --accent: #bd93f9;
+  --green: #50fa7b;
+  --red: #ff5555;
+  --yellow: #f1fa8c;
+  --border: #d8d8d0;
+  --radius: 8px;
+  --on-accent: #282a36;
+  --danger: #ff5555;
+  --success: #50fa7b;
+  --error: #ff5555;
+
+  --mauve: #bd93f9;
+  --pink: #ff79c6;
+  --teal: #8be9fd;
+  --sapphire: #6272a4;
+  --peach: #ffb86c;
+  --lavender: #bd93f9;
+}
+
+/* Dracula Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #282a36;
+    --bg-card: #343746;
+    --bg-input: #44475a;
+    --text: #f8f8f2;
+    --text-dim: #6272a4;
+    --accent: #bd93f9;
+    --green: #50fa7b;
+    --red: #ff5555;
+    --yellow: #f1fa8c;
+    --border: #44475a;
+    --on-accent: #282a36;
+    --danger: #ff5555;
+    --success: #50fa7b;
+    --error: #ff5555;
+
+    --mauve: #bd93f9;
+    --pink: #ff79c6;
+    --teal: #8be9fd;
+    --sapphire: #6272a4;
+    --peach: #ffb86c;
+    --lavender: #bd93f9;
+  }
+}

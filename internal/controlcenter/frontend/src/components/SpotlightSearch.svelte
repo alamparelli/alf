@@ -8,6 +8,7 @@
     BookOpen, Search, FileText, FileCode, FileImage, FileSpreadsheet,
     File, Package, X
   } from 'lucide-svelte'
+  import { getIcon } from '../lib/icons'
 
   let open = $state(false)
   let query = $state('')
@@ -106,17 +107,16 @@
         nav.navigateTo(item.data.view)
         break
       case 'app':
-        nav.navigateTo(`page:${item.data.name}`)
+        nav.navigateTo(`page:${item.data.slug || item.data.name}`)
         break
       case 'marketplace':
         nav.navigateTo('marketplace')
         break
       case 'file':
-        // Navigate to a file viewer or terminal
-        nav.navigateTo('terminal')
+        nav.navigateTo('home')
         break
       case 'doc':
-        nav.navigateTo('docs')
+        nav.navigateTo(`docs:${item.data.id || item.data.name}`)
         break
     }
   }
@@ -255,8 +255,8 @@
               onmouseenter={() => selectedIndex = globalIdx}
             >
               <span class="spotlight-icon">
-                {#if app.icon}
-                  <span class="emoji-icon">{app.icon}</span>
+                {#if getIcon(app.icon)}
+                  <svelte:component this={getIcon(app.icon)} size={16} />
                 {:else}
                   <Package size={16} />
                 {/if}
@@ -280,8 +280,8 @@
               onmouseenter={() => selectedIndex = globalIdx}
             >
               <span class="spotlight-icon">
-                {#if app.icon}
-                  <span class="emoji-icon">{app.icon}</span>
+                {#if getIcon(app.icon)}
+                  <svelte:component this={getIcon(app.icon)} size={16} />
                 {:else}
                   <Store size={16} />
                 {/if}

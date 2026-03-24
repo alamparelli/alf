@@ -1,0 +1,54 @@
+/* Tokyo Night palette — Light (Storm) + Dark */
+
+/* Tokyo Night Light (Day variant) */
+:root {
+  --bg: #d5d6db;
+  --bg-card: #e4e5ea;
+  --bg-input: #cbccd1;
+  --text: #343b58;
+  --text-dim: #9699a3;
+  --accent: #7aa2f7;
+  --green: #9ece6a;
+  --red: #f7768e;
+  --yellow: #e0af68;
+  --border: #b8b9be;
+  --radius: 8px;
+  --on-accent: #1a1b26;
+  --danger: #f7768e;
+  --success: #9ece6a;
+  --error: #f7768e;
+
+  --mauve: #bb9af7;
+  --pink: #f7768e;
+  --teal: #73daca;
+  --sapphire: #7aa2f7;
+  --peach: #ff9e64;
+  --lavender: #bb9af7;
+}
+
+/* Tokyo Night Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1b26;
+    --bg-card: #24283b;
+    --bg-input: #292e42;
+    --text: #a9b1d6;
+    --text-dim: #565f89;
+    --accent: #7aa2f7;
+    --green: #9ece6a;
+    --red: #f7768e;
+    --yellow: #e0af68;
+    --border: #292e42;
+    --on-accent: #1a1b26;
+    --danger: #f7768e;
+    --success: #9ece6a;
+    --error: #f7768e;
+
+    --mauve: #bb9af7;
+    --pink: #f7768e;
+    --teal: #73daca;
+    --sapphire: #7aa2f7;
+    --peach: #ff9e64;
+    --lavender: #bb9af7;
+  }
+}

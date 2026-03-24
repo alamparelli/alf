@@ -31,6 +31,14 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				return
 			}
 
+			// Check cc_bearer cookie (used by mobile WebViews for sub-resource auth).
+			if token != "" {
+				if cookie, err := r.Cookie("cc_bearer"); err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(token)) == 1 {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
 			// Check session cookie.
 			if sessions != nil {
 				if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
@@ -331,8 +339,9 @@ type rateLimiter struct {
 	mu        sync.Mutex
 	counters  map[string]int
 	limit     int
-	authLimit int          // higher limit for authenticated requests (0 = same as limit)
+	authLimit int           // higher limit for authenticated requests (0 = same as limit)
 	sessions  *SessionStore // optional — used to detect authenticated requests
+	token     string        // optional — Bearer token also gets authLimit
 }
 
 func newRateLimiter(limit int) *rateLimiter {
@@ -351,10 +360,16 @@ func newRateLimiter(limit int) *rateLimiter {
 	return rl
 }
 
-// withAuthLimit sets a higher limit for authenticated requests.
+// withAuthLimit sets a higher limit for authenticated requests (session cookie or Bearer token).
 func (rl *rateLimiter) withAuthLimit(authLimit int, sessions *SessionStore) *rateLimiter {
 	rl.authLimit = authLimit
 	rl.sessions = sessions
+	return rl
+}
+
+// withToken allows Bearer-token requests to use the authLimit.
+func (rl *rateLimiter) withToken(token string) *rateLimiter {
+	rl.token = token
 	return rl
 }
 
@@ -368,8 +383,28 @@ func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 		rl.mu.Unlock()
 
 		effective := rl.limit
-		if rl.authLimit > 0 && rl.sessions != nil {
-			if cookie, err := r.Cookie("cc_session"); err == nil && rl.sessions.Valid(cookie.Value) {
+		if rl.authLimit > 0 {
+			authenticated := false
+			if rl.sessions != nil {
+				if cookie, err := r.Cookie("cc_session"); err == nil && rl.sessions.Valid(cookie.Value) {
+					authenticated = true
+				}
+			}
+			if !authenticated && rl.token != "" {
+				// Check Authorization: Bearer header
+				if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+					if subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(rl.token)) == 1 {
+						authenticated = true
+					}
+				}
+				// Check cc_bearer cookie (mobile WebView sub-resources)
+				if !authenticated {
+					if cookie, err := r.Cookie("cc_bearer"); err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(rl.token)) == 1 {
+						authenticated = true
+					}
+				}
+			}
+			if authenticated {
 				effective = rl.authLimit
 			}
 		}

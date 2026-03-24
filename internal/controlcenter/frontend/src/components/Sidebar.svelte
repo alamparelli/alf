@@ -4,8 +4,9 @@
   import {
     MessageCircle, Home, Terminal, Layers, CalendarClock,
     Users, SlidersHorizontal, Shield, Lock, Store,
-    Settings, ScrollText, BookOpen, ChevronDown, Pin
+    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package
   } from 'lucide-svelte'
+  import { getIcon } from '../lib/icons'
 
   const ICON_MAP: Record<string, any> = {
     'message-circle': MessageCircle,
@@ -71,14 +72,29 @@
         </button>
         <div class="nav-section-items">
           {#each apps.items as app}
-            <button
+            {@const appView = 'page:' + app.name}
+            {@const isFav = nav.favorites.includes(appView)}
+            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+            <div
               class="nav-item"
-              class:active={nav.currentView === 'page:' + app.name}
-              onclick={() => nav.navigateTo('page:' + app.name)}
+              class:active={nav.currentView === appView}
+              class:nav-fav={isFav}
+              onclick={() => nav.navigateTo(appView)}
             >
-              <Store size={16} />
+              {#if getIcon(app.icon)}
+                <svelte:component this={getIcon(app.icon)} size={16} />
+              {:else}
+                <Package size={16} />
+              {/if}
               <span>{app.display_name || app.name}</span>
-            </button>
+              <button
+                class="nav-fav-btn"
+                onclick={(e: MouseEvent) => { e.stopPropagation(); nav.toggleFavorite(appView) }}
+                title={isFav ? 'Unpin' : 'Pin'}
+              >
+                <Pin size={12} />
+              </button>
+            </div>
           {/each}
         </div>
       </div>

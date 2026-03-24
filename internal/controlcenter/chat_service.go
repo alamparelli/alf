@@ -39,9 +39,28 @@ type ClassifyFunc func(message string, lastTier string, msgCount int) RouteResul
 // ResolveModelFunc maps short model names (e.g. "sonnet") to full names.
 type ResolveModelFunc func(short string) string
 
-// apiChatID is the session key for API clients. Negative to avoid collision
-// with Telegram IDs (always positive for users/groups).
+// apiChatID is the default session key for API clients. Negative to avoid
+// collision with Telegram IDs (always positive for users/groups).
 const apiChatID int64 = -1
+
+// convSessionID returns a unique session key for a given conversation tab.
+// Each conv_id gets its own session so tabs don't share Claude CLI resume state.
+// Empty conv_id falls back to the default apiChatID (-1).
+func convSessionID(convID string) int64 {
+	if convID == "" {
+		return apiChatID
+	}
+	// FNV-1a hash of conv_id, negated to stay in negative range (avoid TG collision).
+	var h int64 = -2166136261
+	for i := 0; i < len(convID); i++ {
+		h ^= int64(convID[i])
+		h *= 16777619
+	}
+	if h >= 0 {
+		h = -h - 2 // ensure negative, avoid -1 (apiChatID) and 0
+	}
+	return h
+}
 
 // MemoryRecaller searches long-term memory by semantic similarity.
 type MemoryRecaller interface {
@@ -202,6 +221,8 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
+	sessID := convSessionID(req.ConvID)
+
 	if cs.Engine != nil {
 		return cs.askViaEngine(ctx, req, onEvent)
 	}
@@ -213,7 +234,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		for _, t := range cs.TierStore.Current().Tiers {
 			if t.Enabled && t.ForceCommand && t.Name == cmdName {
 				// Persist tier override for the session.
-				cs.Sessions.SetForcedTier(apiChatID, t.Name)
+				cs.Sessions.SetForcedTier(sessID, t.Name)
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{
 					"text": fmt.Sprintf("⚡ Session locked to **%s**. Use /new to reset.", t.Name),
 				}})
@@ -231,7 +252,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 	// Check for persistent tier override from a previous force command.
 	if req.Model == "" {
-		if ft := cs.Sessions.GetForcedTier(apiChatID); ft != "" {
+		if ft := cs.Sessions.GetForcedTier(sessID); ft != "" {
 			req.Model = ft
 		}
 	}
@@ -323,7 +344,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			}
 		}
 
-		lastTier, msgCount := cs.Sessions.Context(apiChatID)
+		lastTier, msgCount := cs.Sessions.Context(sessID)
 		rr := cs.Classify(routerMsg, lastTier, msgCount)
 		routeResult = rr
 	}
@@ -336,12 +357,12 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 				triggerNames[i] = sk.Name
 			}
 			log.Printf("[chat-api] skills: trigger-matched %v", triggerNames)
-			cs.Sessions.AddSkills(apiChatID, triggerNames)
+			cs.Sessions.AddSkills(sessID, triggerNames)
 		}
 	}
 
 	// Skill tier override: if an active skill requires a higher tier, force it.
-	if activeSkills := cs.Sessions.GetSkills(apiChatID); len(activeSkills) > 0 {
+	if activeSkills := cs.Sessions.GetSkills(sessID); len(activeSkills) > 0 {
 		if minTier := skills.ResolveMinTier(cs.SkillStore, activeSkills); minTier != "" {
 			if routeResult.Response != "" && routeResult.Tier == "" {
 				// Direct response → force to skill tier.
@@ -381,7 +402,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 	// Router direct response.
 	if routeResult.Response != "" && routeResult.Tier == "" {
-		cs.Sessions.TouchContext(apiChatID, "router")
+		cs.Sessions.TouchContext(sessID, "router")
 		if routeResult.React != "" {
 			onEvent(ChatEvent{Type: "reaction", Data: map[string]string{"emoji": routeResult.React}})
 		}
@@ -559,7 +580,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 			sysPromptTexts = append(sysPromptTexts, catalog)
 		}
 		// Inject session-persisted skills (includes trigger-matched from earlier messages).
-		if activeSkills := cs.Sessions.GetSkills(apiChatID); len(activeSkills) > 0 {
+		if activeSkills := cs.Sessions.GetSkills(sessID); len(activeSkills) > 0 {
 			log.Printf("[chat-api] skills: injecting session skills %v", activeSkills)
 			if block := skills.BuildInjectionByName(cs.SkillStore, activeSkills); block != "" {
 				sysPromptTexts = append(sysPromptTexts, block)
@@ -617,8 +638,8 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	}
 
 	// Invoke via selected Provider.
-	resumeID := cs.Sessions.Get(apiChatID)
-	_, lastBackend, _ := cs.Sessions.ContextFull(apiChatID)
+	resumeID := cs.Sessions.Get(sessID)
+	_, lastBackend, _ := cs.Sessions.ContextFull(sessID)
 	backendChanged := lastBackend != "" && lastBackend != tp.Backend
 
 	// Build conversation context from unified store.
@@ -707,7 +728,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 	// Retry without resume if session failed (CLI only).
 	if err != nil && resumeID != "" && !isAPITier {
 		log.Printf("[chat-api] session %s failed (%v), starting fresh", resumeID, err)
-		cs.Sessions.Archive(apiChatID)
+		cs.Sessions.Archive(sessID)
 		params.ResumeID = ""
 		// Inject conversation history since we lost --resume context.
 		if cs.ConvStore != nil {
@@ -745,9 +766,9 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 
 	// Update session.
 	if result.SessionID != "" {
-		cs.Sessions.SetWithBackend(apiChatID, result.SessionID, tierName, tp.Backend)
+		cs.Sessions.SetWithBackend(sessID, result.SessionID, tierName, tp.Backend)
 	} else if isAPITier {
-		cs.Sessions.TouchContext(apiChatID, tierName)
+		cs.Sessions.TouchContext(sessID, tierName)
 	}
 
 	// Extract reaction.
@@ -819,13 +840,13 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 		Tier:       tierName,
 		DurationMs: duration.Milliseconds(),
 	}
-	if sk := cs.Sessions.GetSkills(apiChatID); len(sk) > 0 {
+	if sk := cs.Sessions.GetSkills(sessID); len(sk) > 0 {
 		doneData.Skills = sk
 	}
 	onEvent(ChatEvent{Type: "done", Data: doneData})
 
 	// Warn when context is getting large (message count proxy).
-	if _, msgCount := cs.Sessions.Context(apiChatID); msgCount >= 20 {
+	if _, msgCount := cs.Sessions.Context(sessID); msgCount >= 20 {
 		level := "high"
 		if msgCount >= 40 {
 			level = "critical"
@@ -856,6 +877,7 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 // askViaEngine delegates message processing to the unified comms engine.
 // ChatStore writes and ChatDoneData emission remain CC-specific.
 func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
+	sessID := convSessionID(req.ConvID)
 	channelID := comms.ChannelID("cc:" + req.ConvID)
 	if req.ConvID == "" {
 		channelID = "cc:default"
@@ -880,7 +902,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		// 1a. Tier force commands.
 		for _, t := range cs.TierStore.Current().Tiers {
 			if t.Enabled && t.ForceCommand && t.Name == cmdName {
-				cs.Sessions.SetForcedTier(apiChatID, t.Name)
+				cs.Sessions.SetForcedTier(sessID, t.Name)
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{
 					"text": fmt.Sprintf("⚡ Session locked to **%s**. Use /new to reset.", t.Name),
 				}})
@@ -917,7 +939,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 
 	// Check persistent tier override.
 	if req.Model == "" {
-		if ft := cs.Sessions.GetForcedTier(apiChatID); ft != "" {
+		if ft := cs.Sessions.GetForcedTier(sessID); ft != "" {
 			req.Model = ft
 		}
 	}

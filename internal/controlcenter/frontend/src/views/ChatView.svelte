@@ -48,10 +48,10 @@
       const stored = localStorage.getItem('alf-chat-tabs')
       if (stored) {
         const parsed = JSON.parse(stored)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        if (Array.isArray(parsed)) return parsed
       }
     } catch { /* ignore */ }
-    return [{ id: genId(), label: 'Chat', convId: '', unread: 0 }]
+    return []
   }
 
   function loadActiveTabId(tabs: ChatTab[]): string {
@@ -88,14 +88,14 @@
   }
 
   function closeTab(tabId: string) {
-    if (tabs.length <= 1) return
-    // Clean up tab messages
+    // Clean up tab messages and drafts
     delete tabMessages[tabId]
     tabMessages = { ...tabMessages }
+    delete tabDrafts[tabId]
+    tabDrafts = { ...tabDrafts }
     tabs = tabs.filter(t => t.id !== tabId)
     if (activeTabId === tabId) {
-      activeTabId = tabs[0].id
-      loadHistory()
+      activeTabId = tabs[0]?.id || ''
     }
     saveTabs()
   }
@@ -254,6 +254,11 @@
 
   // --- Send message ---
   async function handleSend(message: string, mediaFiles: MediaFile[], model: string) {
+    // Auto-create a tab if none exist
+    if (tabs.length === 0) {
+      await addTab()
+    }
+
     // Clear draft for current tab
     tabDrafts[activeTabId] = ''
     tabDrafts = { ...tabDrafts }
@@ -627,7 +632,8 @@
   <div class="chat-tabs">
     <div class="tab-list">
       {#each tabs as tab}
-        <button
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div
           class="tab-item"
           class:active={tab.id === activeTabId}
           onclick={() => switchTab(tab.id)}
@@ -638,15 +644,13 @@
           {#if tab.unread > 0}
             <span class="tab-unread">{tab.unread}</span>
           {/if}
-          {#if tabs.length > 1}
-            <button
-              class="tab-close"
-              onclick={(e: MouseEvent) => { e.stopPropagation(); closeTab(tab.id) }}
-            >
-              <X size={11} />
-            </button>
-          {/if}
-        </button>
+          <button
+            class="tab-close"
+            onclick={(e: MouseEvent) => { e.stopPropagation(); closeTab(tab.id) }}
+          >
+            <X size={11} />
+          </button>
+        </div>
       {/each}
       <button class="tab-add" onclick={addTab}><Plus size={14} /></button>
     </div>

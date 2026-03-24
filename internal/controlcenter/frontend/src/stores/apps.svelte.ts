@@ -2,10 +2,10 @@ import { api } from '../lib/api'
 
 export interface AppInfo {
   name: string
-  slug: string
+  display_name?: string
   icon?: string
   description?: string
-  has_ui?: boolean
+  mod_time?: string
 }
 
 class AppsStore {

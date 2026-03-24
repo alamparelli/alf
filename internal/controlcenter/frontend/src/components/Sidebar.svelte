@@ -73,11 +73,11 @@
           {#each apps.items as app}
             <button
               class="nav-item"
-              class:active={nav.currentView === 'page:' + app.slug}
-              onclick={() => nav.navigateTo('page:' + app.slug)}
+              class:active={nav.currentView === 'page:' + app.name}
+              onclick={() => nav.navigateTo('page:' + app.name)}
             >
               <Store size={16} />
-              <span>{app.name}</span>
+              <span>{app.display_name || app.name}</span>
             </button>
           {/each}
         </div>

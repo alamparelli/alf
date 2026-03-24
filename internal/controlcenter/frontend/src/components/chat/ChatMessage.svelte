@@ -1,7 +1,7 @@
 <script lang="ts">
   import { marked } from 'marked'
   import DOMPurify from 'dompurify'
-  import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check } from 'lucide-svelte'
+  import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check, Users } from 'lucide-svelte'
   import { api } from '../../lib/api'
   import { toasts } from '../../stores/toast.svelte'
 
@@ -36,17 +36,21 @@
       model?: string
       tier?: string
       cost_usd?: number
+      duration_ms?: number
+      skills?: string[]
       media?: MediaRef[]
       reactions?: Reaction[]
       content_blocks?: ContentBlock[]
     }
     convId: string
+    onSendToTask?: (text: string) => void
   }
 
-  let { msg, convId }: Props = $props()
+  let { msg, convId, onSendToTask }: Props = $props()
 
   let showEmojiPicker = $state(false)
   let copied = $state(false)
+  let lightboxSrc = $state('')
   const quickEmojis = ['👍', '❤️', '😂', '🎯', '🔥', '💡', '✅', '❌', '🤔', '👀']
 
   async function copyText() {
@@ -76,6 +80,21 @@
     if (!text) return ''
     const raw = marked.parse(text, { async: false }) as string
     return DOMPurify.sanitize(raw)
+  }
+
+  function getFullText(): string {
+    const blocks = msg.content_blocks
+    if (blocks && blocks.length > 0) {
+      return blocks.filter(b => b.type === 'text').map(b => b.text || '').join('\n')
+    }
+    return msg.text || ''
+  }
+
+  function handleSendToTask() {
+    const text = getFullText()
+    if (text.length > 10 && onSendToTask) {
+      onSendToTask(text.substring(0, 2000))
+    }
   }
 
   async function react(emoji: string) {
@@ -124,10 +143,12 @@
     <div class="msg-media">
       {#each msg.media as m}
         {#if isImageMime(m.mime_type)}
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
           <img
             src={m.url || `/api/chat/media/${m.upload_id}`}
             alt={m.file_name}
             class="msg-media-img"
+            onclick={() => lightboxSrc = m.url || `/api/chat/media/${m.upload_id}`}
           />
         {:else}
           <div class="msg-media-file">
@@ -204,6 +225,12 @@
     {#if msg.cost_usd && msg.cost_usd > 0}
       <span class="msg-cost">${msg.cost_usd.toFixed(4)}</span>
     {/if}
+    {#if msg.duration_ms}
+      <span class="msg-duration">{(msg.duration_ms / 1000).toFixed(1)}s</span>
+    {/if}
+    {#if msg.skills && msg.skills.length > 0}
+      <span class="msg-skills">{msg.skills.join(', ')}</span>
+    {/if}
 
     <!-- Reactions -->
     {#if msg.reactions && msg.reactions.length > 0}
@@ -235,9 +262,22 @@
           </div>
         {/if}
       </div>
+      {#if onSendToTask && getFullText().length > 10}
+        <button class="copy-btn" onclick={handleSendToTask} title="Send to agents">
+          <Users size={13} />
+        </button>
+      {/if}
     {/if}
   </div>
 </div>
+
+<!-- Lightbox -->
+{#if lightboxSrc}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="lightbox" onclick={() => lightboxSrc = ''}>
+    <img src={lightboxSrc} alt="Full size" />
+  </div>
+{/if}
 
 <style>
   .chat-msg {
@@ -278,6 +318,7 @@
   .msg-text {
     font-size: 0.88rem;
     line-height: 1.6;
+    white-space: pre-wrap;
   }
 
   .msg-text :global(pre) {
@@ -381,6 +422,24 @@
     object-fit: cover;
   }
 
+  .lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    cursor: zoom-out;
+  }
+
+  .lightbox img {
+    max-width: 90vw;
+    max-height: 90vh;
+    border-radius: 8px;
+    object-fit: contain;
+  }
+
   .msg-media-file {
     display: flex;
     align-items: center;
@@ -405,7 +464,7 @@
     opacity: 0.5;
   }
 
-  .msg-model, .msg-cost {
+  .msg-model, .msg-cost, .msg-duration, .msg-skills {
     font-size: 0.65rem;
     opacity: 0.5;
     font-family: 'JetBrains Mono', monospace;

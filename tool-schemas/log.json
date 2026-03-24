@@ -1,0 +1,24 @@
+{
+  "name": "log",
+  "description": "List available log files or tail a specific log for debugging and monitoring.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["list", "tail"],
+        "description": "Action to perform"
+      },
+      "name": {
+        "type": "string",
+        "description": "Log file name (required for tail)"
+      },
+      "lines": {
+        "type": "integer",
+        "description": "Number of lines to return (default 100, max 500)"
+      }
+    },
+    "required": ["action"],
+    "x-positional": ["action", "name"]
+  }
+}

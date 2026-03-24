@@ -1,0 +1,19 @@
+{
+  "name": "search",
+  "description": "Search across apps, workspace files, and documentation.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query"
+      },
+      "types": {
+        "type": "string",
+        "description": "Comma-separated result types: apps, files, docs (default: all)"
+      }
+    },
+    "required": ["query"],
+    "x-positional": ["query"]
+  }
+}

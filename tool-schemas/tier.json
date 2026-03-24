@@ -1,0 +1,16 @@
+{
+  "name": "tier",
+  "description": "List available LLM tiers with their models, backends, tools, and capabilities.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["list"],
+        "description": "Action to perform"
+      }
+    },
+    "required": ["action"],
+    "x-positional": ["action"]
+  }
+}

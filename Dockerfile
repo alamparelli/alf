@@ -27,6 +27,7 @@ RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w -X main.version=${BUILD_VE
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /recall-tools ./cmd/memory-tools \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /telegram-tools ./cmd/signal \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /schedule-tools ./cmd/schedule-tools \
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /system-tools ./cmd/system-tools \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /journal ./cmd/journal
 
 # Build vault-proxy binaries (secrets vault for AI agents).
@@ -114,6 +115,7 @@ COPY --from=builder /extract-video /opt/alf/bin/extract-video
 COPY --from=builder /recall-tools /opt/alf/bin/recall-tools
 COPY --from=builder /telegram-tools /opt/alf/bin/telegram-tools
 COPY --from=builder /schedule-tools /opt/alf/bin/schedule-tools
+COPY --from=builder /system-tools /opt/alf/bin/system-tools
 COPY --from=builder /vault-server /opt/alf/bin/vault-server
 COPY --from=builder /vault-cli /opt/alf/bin/vault-cli
 
@@ -127,6 +129,15 @@ RUN mkdir -p /opt/alf/tools.d \
     && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools.d/status \
     && ln -s /opt/alf/bin/telegram-tools /opt/alf/tools.d/notify \
     && ln -s /opt/alf/bin/schedule-tools /opt/alf/tools.d/schedule \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/task \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/team \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/skill \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/app \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/config \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/tier \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/log \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/search \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/llm \
     && ln -s /opt/alf/bin/vault-cli /opt/alf/tools.d/vault \
     && ln -s /opt/alf/bin/vault-server /usr/local/bin/vault-server
 

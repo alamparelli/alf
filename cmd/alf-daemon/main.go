@@ -51,6 +51,11 @@ func main() {
 	var token, chatID string // resolved from vault after unlock
 	authToken := secrets.ReadSecret("CC_AUTH_TOKEN")
 
+	// Set CC auth token as env var (picked up by safeEnv for system-tools CLI in subprocesses).
+	if authToken != "" {
+		os.Setenv("CC_AUTH_TOKEN", authToken)
+	}
+
 	// Set Claude OAuth token as env var if available (picked up by safeEnv for subprocesses).
 	if oauthToken := secrets.ReadSecret("CLAUDE_OAUTH_TOKEN"); oauthToken != "" {
 		os.Setenv("CLAUDE_CODE_OAUTH_TOKEN", oauthToken)
@@ -555,6 +560,7 @@ func main() {
 		HomeDir:  homeDir,
 		Registry: toolRegistry,
 		Timeout:  30 * time.Second,
+		Env:      []string{"CC_AUTH_TOKEN=" + authToken},
 	}
 	for _, t := range nativeTools {
 		toolRegistry.RegisterNative(t)
@@ -710,6 +716,53 @@ func main() {
 	} else {
 		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set - Control Center disabled")
 	}
+
+	// Register system native tools — gives the LLM structured access to ALF subsystems.
+	// Registered after CC init so mpManager and other deps are available.
+	toolAppStore := cc.NewFileAppStore(filepath.Join(dataDir, "apps"))
+	toolLogReader := cc.LogReaderFactory(dataDir)
+	systemTools := []tooling.NativeTool{
+		tooling.TaskNativeTool{Service: &taskAdapter{
+			orch:         orch,
+			dataDir:      dataDir,
+			contextDir:   contextDir,
+			tierStore:    tierStore,
+			skillStore:   skillStore,
+			resolveModel: router.ResolveModel,
+		}},
+		tooling.TeamNativeTool{Service: &teamAdapter{
+			store:   agentStore,
+			dataDir: dataDir,
+		}},
+		tooling.SkillNativeTool{Service: &skillAdapter{
+			store:     skillStore,
+			skillsDir: skillsDir,
+			dataDir:   dataDir,
+		}},
+		tooling.AppNativeTool{Service: &appAdapter{
+			appStore:    toolAppStore,
+			marketplace: mpManager,
+		}},
+		tooling.ConfigNativeTool{Service: &configAdapter{store: configStore}},
+		tooling.TierNativeTool{Service: &tierAdapter{store: tierStore}},
+		tooling.LogNativeTool{Service: &logAdapter{reader: toolLogReader}},
+		tooling.SearchNativeTool{Service: &searchAdapter{
+			appStore:    toolAppStore,
+			marketplace: mpManager,
+			dataDir:     dataDir,
+		}},
+		tooling.LLMNativeTool{Service: &llmAdapter{
+			tierStore:        tierStore,
+			providerRegistry: registry,
+			resolveModel:     router.ResolveModel,
+			dataDir:          dataDir,
+		}},
+	}
+	for _, t := range systemTools {
+		toolRegistry.RegisterNative(t)
+		toolExecutor.RegisterNative(t)
+	}
+	log.Printf("tooling: registered %d system native tools", len(systemTools))
 
 	var offset int64
 	client := &http.Client{Timeout: 35 * time.Second}

@@ -1,0 +1,23 @@
+{
+  "name": "llm",
+  "description": "Invoke a specific LLM tier with a prompt. One-shot text processing: summarize, classify, extract, translate.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tier": {
+        "type": "string",
+        "description": "LLM tier name. Run 'tier list' to see available tiers."
+      },
+      "prompt": {
+        "type": "string",
+        "description": "The prompt to send"
+      },
+      "system": {
+        "type": "string",
+        "description": "Optional system prompt"
+      }
+    },
+    "required": ["tier", "prompt"],
+    "x-positional": ["tier", "prompt"]
+  }
+}

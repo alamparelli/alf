@@ -159,7 +159,7 @@
     {#if tgConfigured}
       <div class="tg-status tg-connected">
         <CheckCircle size={14} />
-        Connected{tgBotName ? ' — @' + tgBotName : ''}{tgChatId ? ' (chat ' + tgChatId + ')' : ''}
+        Connected
       </div>
     {:else}
       <div class="tg-status tg-disconnected">

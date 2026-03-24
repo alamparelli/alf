@@ -1,0 +1,48 @@
+{
+  "name": "task",
+  "description": "Launch, list, cancel, or approve autonomous agent tasks. Tasks run in the background and can use teams for multi-agent orchestration.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["launch", "list", "cancel", "delete", "approve"],
+        "description": "Action to perform"
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Task objective (required for launch)"
+      },
+      "tier": {
+        "type": "string",
+        "description": "LLM tier for execution (optional)"
+      },
+      "team": {
+        "type": "string",
+        "description": "Team name to run with (optional, enables multi-agent)"
+      },
+      "skills": {
+        "type": "string",
+        "description": "Comma-separated skill names to inject (optional)"
+      },
+      "need_validation": {
+        "type": "boolean",
+        "description": "Require user approval before execution (default false)"
+      },
+      "id": {
+        "type": "string",
+        "description": "Task ID (required for cancel/delete/approve)"
+      },
+      "approved": {
+        "type": "boolean",
+        "description": "Approval decision (required for approve)"
+      },
+      "feedback": {
+        "type": "string",
+        "description": "Feedback for approval/rejection (optional)"
+      }
+    },
+    "required": ["action"],
+    "x-positional": ["action", "id"]
+  }
+}

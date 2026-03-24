@@ -4,7 +4,7 @@
   import {
     MessageCircle, Home, Terminal, Layers, CalendarClock,
     Users, SlidersHorizontal, Shield, Lock, Store,
-    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package, Zap
+    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package, Zap, FolderOpen
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
 
@@ -23,6 +23,7 @@
     'settings': Settings,
     'scroll-text': ScrollText,
     'book-open': BookOpen,
+    'folder-open': FolderOpen,
   }
 </script>
 

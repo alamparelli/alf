@@ -1,14 +1,137 @@
 ---
 category: Reference
-tags: tools, recall, remember, forget, schedule, react, status, extract-video
+tags: tools, recall, remember, forget, schedule, react, status, extract-video, task, team, skill, app, config, tier, log, search
 order: 20
 ---
 
 # Tools Reference
 
-ALF provides built-in CLI tools available in your PATH. These tools communicate with the daemon via Unix sockets.
+ALF provides built-in CLI tools available in your PATH. These tools communicate with the daemon via native Go calls (API tiers) or CLI bridge (CLI tiers).
 
 Both `~/data/tools.d/` (system tools) and `~/data/tools/` (user tools) are in PATH. All tools listed below can be called by name - no full path needed. User scripts placed in `~/data/tools/` with `chmod +x` are also callable by name.
+
+## System Tools
+
+These tools give you structured access to ALF's subsystems. On API tiers, they run as native Go tool calls (in-process, fast). On CLI tiers, they are available as CLI commands.
+
+### task
+
+Launch, list, cancel, or approve autonomous agent tasks. Tasks run in the background and can use teams for multi-agent orchestration.
+
+```bash
+task launch --prompt "Analyze the access logs and write a report"
+task launch --prompt "Build the landing page" --team dev-team --skills app-builder
+task launch --prompt "Review security" --need_validation
+task list
+task cancel <id>
+task delete <id>
+task approve <id> --approved true
+task approve <id> --approved false --feedback "Split into smaller tasks"
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--prompt` | launch | The task objective |
+| `--tier` | No | LLM tier for execution (default: agent tier) |
+| `--team` | No | Team name for multi-agent execution |
+| `--skills` | No | Comma-separated skill names to inject |
+| `--need_validation` | No | Pause for user approval before executing |
+| `--id` | cancel/delete/approve | Task ID |
+| `--approved` | approve | `true` or `false` |
+| `--feedback` | No | Message for the approval/rejection |
+
+### team
+
+Manage agent team configurations. Teams define groups of specialized agents for multi-agent task execution.
+
+```bash
+team list
+team get ops-team
+team save --name dev --description "Dev team" \
+  --agents '[{"name":"coder","tier":"sonnet"},{"name":"reviewer","tier":"haiku"}]'
+team delete old-team
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--name` | get/save/delete | Team name |
+| `--description` | No | Team description (for save) |
+| `--agents` | save | JSON array of `{name, tier, description?, skills?}` |
+
+### skill
+
+List available skills or get skill details. Skills provide specialized capabilities that auto-inject into conversations and tasks.
+
+```bash
+skill list
+skill get tool-creator
+```
+
+### app
+
+Manage installed apps and the marketplace.
+
+```bash
+app list                  # Installed apps with state
+app catalog               # Browse remote marketplace
+app install weather       # Install from marketplace
+app update weather        # Update to latest version
+app enable weather        # Activate app
+app disable weather       # Deactivate app
+app uninstall weather     # Remove app
+```
+
+### config
+
+Read current system configuration (read-only).
+
+```bash
+config get
+```
+
+### tier
+
+List available LLM tiers with models, backends, tools, and capabilities.
+
+```bash
+tier list
+```
+
+### log
+
+Access daemon log files for debugging and monitoring.
+
+```bash
+log list                    # Available log files
+log tail daemon.log         # Last 100 lines
+log tail daemon.log 500     # Last 500 lines
+```
+
+### search
+
+Search across apps, workspace files, and documentation.
+
+```bash
+search "weather"                     # Search everything
+search "deploy" --types files        # Files only
+search "oauth" --types apps,docs     # Apps and docs
+```
+
+### llm
+
+Invoke a specific LLM tier for one-shot text processing. Use this when you need a different model for a specific subtask (summarize, classify, extract, translate) without launching a full agent task.
+
+```bash
+llm <tier> "Classify this support ticket: ..."
+llm <tier> "Summarize this document in 3 bullets: ..."
+llm <tier> "Translate to French: Hello world" --system "You are a professional translator"
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `tier` | Yes | LLM tier name (run `tier list` to see available tiers) |
+| `prompt` | Yes | The prompt to send |
+| `--system` | No | Optional system prompt for persona or constraints |
 
 ## Memory Tools
 

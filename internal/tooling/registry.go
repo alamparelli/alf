@@ -18,6 +18,7 @@ type ToolSchema struct {
 // Registry discovers and holds tool schemas from JSON manifests.
 type Registry struct {
 	schemas     map[string]ToolSchema
+	natives     map[string]NativeTool
 	nativeNames []string
 	dataDir     string
 }
@@ -133,10 +134,19 @@ func (r *Registry) Get(name string) (ToolSchema, bool) {
 	return s, ok
 }
 
-// RegisterNative adds a native Go tool's schema to the registry.
+// RegisterNative adds a native Go tool's schema and instance to the registry.
 func (r *Registry) RegisterNative(t NativeTool) {
 	r.schemas[t.ToolName()] = t.Schema()
+	if r.natives == nil {
+		r.natives = make(map[string]NativeTool)
+	}
+	r.natives[t.ToolName()] = t
 	r.nativeNames = append(r.nativeNames, t.ToolName())
+}
+
+// GetNative returns a native tool by name, or nil if not found.
+func (r *Registry) GetNative(name string) NativeTool {
+	return r.natives[name]
 }
 
 // NativeToolNames returns only the names of native Go tools (not user tools).

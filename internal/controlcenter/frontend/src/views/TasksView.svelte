@@ -26,7 +26,7 @@
     total_cost_usd: number
     agent_calls: AgentCall[]
     status: string
-    plan?: { name: string; status: string }[]
+    plan?: { step: number; description: string; agents?: string[] }[]
     questions?: string[]
     need_validation?: boolean
     validation_feedback?: string
@@ -80,7 +80,7 @@
 
   function renderMarkdown(text: string): string {
     if (!text) return ''
-    return DOMPurify.sanitize(marked.parse(text) as string)
+    return DOMPurify.sanitize(marked.parse(text, { breaks: true }) as string)
   }
 
   async function loadTeams() {
@@ -311,9 +311,11 @@
                 <h4>Plan</h4>
                 {#each task.plan as step, i}
                   <div class="plan-step">
-                    <span class="plan-num">{i + 1}.</span>
-                    <span class="plan-name">{step.name}</span>
-                    <span class="badge {statusBadgeClass(step.status)}">{step.status}</span>
+                    <span class="plan-num">{step.step || i + 1}.</span>
+                    <span class="plan-name">{step.description}</span>
+                    {#if step.agents && step.agents.length > 0}
+                      <span class="plan-agents">{step.agents.join(', ')}</span>
+                    {/if}
                   </div>
                 {/each}
               </div>
@@ -331,6 +333,9 @@
                         <span class="cost">${call.cost_usd.toFixed(4)}</span>
                       {/if}
                     </div>
+                    {#if call.task}
+                      <div class="agent-task">{call.task}</div>
+                    {/if}
                     {#if call.text}
                       <div class="agent-output markdown-body">{@html renderMarkdown(call.text)}</div>
                     {/if}
@@ -432,6 +437,9 @@
                           <span class="cost">${call.cost_usd.toFixed(4)}</span>
                         {/if}
                       </div>
+                      {#if call.task}
+                        <div class="agent-task">{call.task}</div>
+                      {/if}
                       {#if call.text}
                         <div class="agent-output markdown-body">{@html renderMarkdown(call.text)}</div>
                       {/if}
@@ -645,6 +653,14 @@
     flex: 1;
   }
 
+  .plan-agents {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    padding: 1px 6px;
+    background: var(--bg-input);
+    border-radius: 8px;
+  }
+
   .agent-steps {
     margin-bottom: 12px;
   }
@@ -663,6 +679,15 @@
     margin-bottom: 4px;
   }
 
+  .agent-task {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    padding: 4px 10px;
+    margin-bottom: 6px;
+    border-left: 2px solid var(--border);
+    font-style: italic;
+  }
+
   .agent-name {
     font-weight: 500;
     font-size: 0.82rem;
@@ -672,6 +697,7 @@
     font-size: 0.82rem;
     line-height: 1.5;
     overflow-x: auto;
+    word-break: break-word;
   }
 
   .agent-error {
@@ -774,6 +800,8 @@
     padding: 8px 12px;
     border-radius: var(--radius, 8px);
     overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.8rem;
   }
@@ -781,6 +809,17 @@
   :global(.markdown-body code) {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.82rem;
+  }
+
+  :global(.markdown-body code:not(pre code)) {
+    background: var(--bg-input);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  :global(.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4) {
+    margin: 12px 0 6px;
+    font-weight: 600;
   }
 
   :global(.markdown-body p) {

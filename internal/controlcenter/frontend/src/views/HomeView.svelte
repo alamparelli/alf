@@ -1,48 +1,22 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import {
-    Activity, Folder, FolderOpen, File, FileText, FilePlus, FolderPlus,
+    Folder, FolderOpen, File, FileText, FilePlus, FolderPlus,
     Trash2, Download, Upload, Save, Eye, Pencil, ChevronRight, ChevronDown,
-    X, BookOpen, Brain, Zap, Package, Loader2, RefreshCw, Clock, MessageCircle, Calendar, Layers
+    X, ArrowLeft, Loader2, RefreshCw, MoreVertical
   } from 'lucide-svelte'
-  import Card from '../components/shared/Card.svelte'
   import Modal from '../components/shared/Modal.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
   import { marked } from 'marked'
   import DOMPurify from 'dompurify'
 
-  // --- Activity ---
-  interface ActivityItem {
-    type: string
-    name: string
-    started_at?: string
-    elapsed?: string
-  }
-  let activityItems = $state<ActivityItem[]>([])
-  let activityTimer: ReturnType<typeof setInterval> | undefined
-
-  function activityIcon(type: string) {
-    switch (type) {
-      case 'chat': return MessageCircle
-      case 'schedule': return Calendar
-      case 'task': return Layers
-      default: return Activity
-    }
-  }
-
-  async function loadActivity() {
-    try {
-      const data = await api<{ items: ActivityItem[]; count: number }>('/api/activity')
-      activityItems = data.items || []
-    } catch { /* silent */ }
-  }
-
-  // --- Workspace ---
+  // --- Workspace types ---
   interface WsEntry {
     name: string
     is_dir: boolean
     size: number
+    mod_time?: string
   }
   interface WsDir {
     type: 'directory'
@@ -60,13 +34,18 @@
     message?: string
   }
 
+  // --- State ---
   let currentPath = $state('')
   let dirEntries = $state<WsEntry[]>([])
   let protectedDirs = $state<string[]>([])
-  let expandedDirs = $state<Record<string, WsEntry[]>>({})
   let loadingDir = $state(false)
 
-  // File viewer
+  // Sidebar tree
+  let expandedDirs = $state<Record<string, WsEntry[]>>({})
+  let sidebarRootEntries = $state<WsEntry[]>([])
+
+  // File modal
+  let showFileModal = $state(false)
   let viewingFile = $state<WsFile | null>(null)
   let viewingPath = $state('')
   let fileEditMode = $state(false)
@@ -77,14 +56,13 @@
   // JSON viewer
   let jsonExpanded = $state<Record<string, boolean>>({})
 
+  // Context menu
+  let ctxMenu = $state<{ x: number; y: number; entry: WsEntry; path: string } | null>(null)
+
   // Create file/dir
   let showCreateModal = $state(false)
   let createType = $state<'file' | 'dir'>('file')
   let createName = $state('')
-  let createPath = $state('')
-
-  // Delete confirm
-  let deleteTarget = $state('')
 
   // Upload
   let showUploadModal = $state(false)
@@ -92,45 +70,7 @@
   let uploading = $state(false)
   let dragOver = $state(false)
 
-  // Teach
-  let teachContent = $state('')
-  let teachInstruction = $state('extract key facts')
-  let teachDestination = $state('memory')
-  let teachFileName = $state('')
-  let teachTier = $state('')
-  let teachTiers = $state<{ name: string; model: string; tools: boolean }[]>([])
-  let teaching = $state(false)
-  let teachResult = $state<any>(null)
-  let teachContentLen = $derived(teachContent.length)
-
-  const memoryPresets = [
-    { value: 'extract key facts', label: 'Extract key facts' },
-    { value: 'extract action items', label: 'Extract action items' },
-    { value: 'bullet summary', label: 'Bullet summary' },
-    { value: 'store-as-is', label: 'Store as-is' },
-  ]
-  const contextPresets = [
-    { value: 'store-as-is', label: 'Store as-is' },
-  ]
-  let teachPresets = $derived(teachDestination === 'context' ? contextPresets : memoryPresets)
-  let teachNeedsLLM = $derived(teachInstruction !== 'store-as-is')
-
-  // Reset instruction when destination changes and current instruction isn't valid
-  $effect(() => {
-    const valid = (teachDestination === 'context' ? contextPresets : memoryPresets).some(p => p.value === teachInstruction)
-    if (!valid) {
-      teachInstruction = teachDestination === 'context' ? 'store-as-is' : 'extract key facts'
-    }
-  })
-
-  // Skill store
-  let skillCommand = $state('')
-  let scanning = $state(false)
-  let scanResult = $state<any>(null)
-  let installing = $state(false)
-  let skillOverwrite = $state(false)
-
-  // Path breadcrumbs
+  // Breadcrumbs
   let breadcrumbs = $derived(() => {
     if (!currentPath) return []
     const parts = currentPath.split('/')
@@ -141,6 +81,15 @@
     return crumbs
   })
 
+  // Sorted entries: dirs first, then files
+  let sortedEntries = $derived(
+    [...dirEntries].sort((a, b) => {
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+  )
+
+  // --- Helpers ---
   function fileExt(name: string): string {
     const idx = name.lastIndexOf('.')
     return idx >= 0 ? name.slice(idx + 1).toLowerCase() : ''
@@ -150,17 +99,9 @@
     return ['md', 'markdown'].includes(fileExt(name))
   }
 
-  function isJson(name: string): boolean {
-    return fileExt(name) === 'json'
-  }
-
-  function isJsonl(name: string): boolean {
-    return fileExt(name) === 'jsonl'
-  }
-
-  function isCsv(name: string): boolean {
-    return fileExt(name) === 'csv'
-  }
+  function isJson(name: string): boolean { return fileExt(name) === 'json' }
+  function isJsonl(name: string): boolean { return fileExt(name) === 'jsonl' }
+  function isCsv(name: string): boolean { return fileExt(name) === 'csv' }
 
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
@@ -168,10 +109,28 @@
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  function formatDate(dateStr?: string): string {
+    if (!dateStr) return ''
+    try {
+      const d = new Date(dateStr)
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    } catch { return '' }
+  }
+
   function renderMd(text: string): string {
     return DOMPurify.sanitize(marked.parse(text) as string)
   }
 
+  function isProtected(name: string): boolean {
+    return protectedDirs.includes(name)
+  }
+
+  function parentPath(path: string): string {
+    const idx = path.lastIndexOf('/')
+    return idx > 0 ? path.slice(0, idx) : ''
+  }
+
+  // --- Directory loading ---
   async function loadDir(path: string) {
     loadingDir = true
     try {
@@ -180,7 +139,6 @@
         dirEntries = data.entries || []
         currentPath = path
         if (data.protected) protectedDirs = data.protected
-        viewingFile = null
       }
     } catch (e: any) {
       toasts.show(e.error || 'Failed to load directory', 'error')
@@ -189,23 +147,36 @@
     }
   }
 
-  async function loadSubDir(parentPath: string, dirName: string) {
-    const fullPath = parentPath ? `${parentPath}/${dirName}` : dirName
-    const key = fullPath
-    if (expandedDirs[key]) {
-      delete expandedDirs[key]
-      expandedDirs = { ...expandedDirs }
-      return
-    }
+  async function loadSidebarRoot() {
     try {
-      const data = await api<WsDir>(`/api/workspace?path=${encodeURIComponent(fullPath)}`)
+      const data = await api<WsDir>('/api/workspace?path=')
       if (data.type === 'directory') {
-        expandedDirs[key] = data.entries || []
-        expandedDirs = { ...expandedDirs }
+        sidebarRootEntries = (data.entries || []).filter(e => e.is_dir).sort((a, b) => a.name.localeCompare(b.name))
+        if (data.protected) protectedDirs = data.protected
       }
     } catch { /* silent */ }
   }
 
+  async function toggleSidebarDir(path: string) {
+    if (expandedDirs[path]) {
+      delete expandedDirs[path]
+      expandedDirs = { ...expandedDirs }
+    } else {
+      try {
+        const data = await api<WsDir>(`/api/workspace?path=${encodeURIComponent(path)}`)
+        if (data.type === 'directory') {
+          expandedDirs[path] = (data.entries || []).filter(e => e.is_dir).sort((a, b) => a.name.localeCompare(b.name))
+          expandedDirs = { ...expandedDirs }
+        }
+      } catch { /* silent */ }
+    }
+  }
+
+  function navigateToDir(path: string) {
+    loadDir(path)
+  }
+
+  // --- File operations ---
   async function openFile(path: string) {
     try {
       const data = await api<WsFile>(`/api/workspace?path=${encodeURIComponent(path)}`)
@@ -216,6 +187,7 @@
         fileEditContent = data.content || ''
         mdPreview = isMarkdown(data.name)
         jsonExpanded = {}
+        showFileModal = true
       }
     } catch (e: any) {
       toasts.show(e.error || 'Failed to open file', 'error')
@@ -242,28 +214,71 @@
   }
 
   async function deleteEntry(path: string) {
-    if (!confirm(`Delete "${path}"?`)) return
     try {
       await api(`/api/workspace?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
       toasts.show('Deleted', 'success')
-      if (viewingPath === path) viewingFile = null
+      if (viewingPath === path) { showFileModal = false; viewingFile = null }
       loadDir(currentPath)
     } catch (e: any) {
       toasts.show(e.error || 'Failed to delete', 'error')
     }
   }
 
-  function isProtected(name: string): boolean {
-    return protectedDirs.includes(name)
+  // --- Context menu ---
+  function handleContextMenu(e: MouseEvent, entry: WsEntry) {
+    e.preventDefault()
+    const fullPath = currentPath ? `${currentPath}/${entry.name}` : entry.name
+    ctxMenu = { x: e.clientX, y: e.clientY, entry, path: fullPath }
+  }
+
+  function closeContextMenu() {
+    ctxMenu = null
+  }
+
+  function ctxOpen() {
+    if (!ctxMenu) return
+    if (ctxMenu.entry.is_dir) {
+      navigateToDir(ctxMenu.path)
+    } else {
+      openFile(ctxMenu.path)
+    }
+    closeContextMenu()
+  }
+
+  function ctxEdit() {
+    if (!ctxMenu || ctxMenu.entry.is_dir) return
+    openFile(ctxMenu.path).then(() => {
+      setTimeout(() => { fileEditMode = true }, 100)
+    })
+    closeContextMenu()
+  }
+
+  function ctxDownload() {
+    if (!ctxMenu) return
+    window.open(`/api/workspace?path=${encodeURIComponent(ctxMenu.path)}`, '_blank')
+    closeContextMenu()
+  }
+
+  function ctxDelete() {
+    if (!ctxMenu) return
+    if (confirm(`Delete "${ctxMenu.entry.name}"?`)) {
+      deleteEntry(ctxMenu.path)
+    }
+    closeContextMenu()
+  }
+
+  // --- Create ---
+  function openCreateDialog(type: 'file' | 'dir') {
+    createType = type
+    createName = ''
+    showCreateModal = true
   }
 
   async function createEntry() {
     if (!createName.trim()) return
-    const path = createPath ? `${createPath}/${createName.trim()}` : createName.trim()
+    const path = currentPath ? `${currentPath}/${createName.trim()}` : createName.trim()
     try {
       if (createType === 'dir') {
-        // Create dir by creating a placeholder file and deleting it? No, PUT with empty body creates parent dirs.
-        // Actually the workspace handler expects PUT for files. For dirs, we create a .keep file.
         await api(`/api/workspace?path=${encodeURIComponent(path + '/.keep')}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/octet-stream' },
@@ -278,21 +293,14 @@
       }
       toasts.show(`${createType === 'dir' ? 'Directory' : 'File'} created`, 'success')
       showCreateModal = false
-      createName = ''
       loadDir(currentPath)
+      loadSidebarRoot()
     } catch (e: any) {
       toasts.show(e.error || 'Failed to create', 'error')
     }
   }
 
-  function openCreateDialog(type: 'file' | 'dir') {
-    createType = type
-    createPath = currentPath
-    createName = ''
-    showCreateModal = true
-  }
-
-  // Upload
+  // --- Upload ---
   async function handleUpload() {
     if (!uploadFiles?.length) return
     uploading = true
@@ -319,15 +327,8 @@
     }
   }
 
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault()
-    dragOver = true
-  }
-
-  function handleDragLeave() {
-    dragOver = false
-  }
-
+  function handleDragOver(e: DragEvent) { e.preventDefault(); dragOver = true }
+  function handleDragLeave() { dragOver = false }
   function handleDrop(e: DragEvent) {
     e.preventDefault()
     dragOver = false
@@ -347,21 +348,13 @@
     jsonExpanded = { ...jsonExpanded }
   }
 
-  function jsonTypeLabel(val: any): string {
-    if (val === null) return 'null'
-    if (Array.isArray(val)) return `array[${val.length}]`
-    if (typeof val === 'object') return `object{${Object.keys(val).length}}`
-    return typeof val
-  }
-
-  // --- JSONL ---
+  // --- JSONL / CSV ---
   function parseJsonl(content: string): any[] {
     return content.split('\n').filter(l => l.trim()).map(l => {
       try { return JSON.parse(l) } catch { return { _raw: l } }
     })
   }
 
-  // --- CSV ---
   function parseCsv(content: string): { headers: string[]; rows: string[][] } {
     const lines = content.split('\n').filter(l => l.trim())
     if (lines.length === 0) return { headers: [], rows: [] }
@@ -370,115 +363,29 @@
     return { headers, rows }
   }
 
-  // --- Teach ---
-  async function loadTiers() {
-    try {
-      const data = await api<any[]>('/api/memory/tiers')
-      teachTiers = data || []
-    } catch { /* silent */ }
-  }
-
-  async function teach() {
-    if (!teachContent.trim()) return
-    if (teachDestination === 'context' && !teachFileName.trim()) {
-      toasts.show('File name is required for context destination', 'error')
-      return
-    }
-    teaching = true
-    teachResult = null
-    try {
-      const body: any = {
-        content: teachContent,
-        instruction: teachInstruction,
-        destination: teachDestination
-      }
-      if (teachTier) body.tier = teachTier
-      if (teachDestination === 'context') body.file_name = teachFileName.trim()
-
-      const data = await api<any>('/api/memory/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      })
-      teachResult = data
-      toasts.show(`Imported ${data.imported || 0} items${data.skipped ? `, ${data.skipped} skipped` : ''}`, 'success')
-      teachContent = ''
-    } catch (e: any) {
-      toasts.show(e.error || 'Ingest failed', 'error')
-    } finally {
-      teaching = false
-    }
-  }
-
-  // --- Skill store ---
-  async function scanSkill() {
-    if (!skillCommand.trim()) return
-    scanning = true
-    scanResult = null
-    try {
-      const data = await api<any>('/api/skills/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'scan', command: skillCommand.trim() })
-      })
-      scanResult = data
-    } catch (e: any) {
-      if (e.available_skills) {
-        scanResult = { error: e.error, available_skills: e.available_skills, hint: e.hint }
-      } else {
-        toasts.show(e.error || 'Scan failed', 'error')
-      }
-    } finally {
-      scanning = false
-    }
-  }
-
-  async function installSkill() {
-    if (!scanResult) return
-    installing = true
-    try {
-      const data = await api<any>('/api/skills/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'install',
-          name: scanResult.name,
-          content: scanResult.content,
-          triggers: (scanResult.triggers || []).join(', '),
-          tier: scanResult.tier || '',
-          source: scanResult.source || '',
-          overwrite: skillOverwrite
-        })
-      })
-      toasts.show(`Skill "${data.name}" installed at ${data.path}`, 'success')
-      scanResult = null
-      skillCommand = ''
-    } catch (e: any) {
-      toasts.show(e.error || 'Install failed', 'error')
-    } finally {
-      installing = false
-    }
-  }
-
+  // --- Events ---
   function handleOpenFile(e: CustomEvent<{ path: string }>) {
     openFile(e.detail.path)
   }
 
+  function handleGlobalClick() {
+    if (ctxMenu) closeContextMenu()
+  }
+
   onMount(() => {
     loadDir('')
-    loadActivity()
-    loadTiers()
-    activityTimer = setInterval(loadActivity, 5000)
+    loadSidebarRoot()
     window.addEventListener('alf:open-file', handleOpenFile as EventListener)
+    window.addEventListener('click', handleGlobalClick)
   })
 
   onDestroy(() => {
-    if (activityTimer) clearInterval(activityTimer)
     window.removeEventListener('alf:open-file', handleOpenFile as EventListener)
+    window.removeEventListener('click', handleGlobalClick)
   })
 </script>
 
-<div class="home-view" ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="main">
+<div class="ws-root" ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="main">
   {#if dragOver}
     <div class="drag-overlay">
       <Upload size={48} />
@@ -486,158 +393,202 @@
     </div>
   {/if}
 
-  <h2>Home</h2>
-
-  <!-- Activity bar -->
-  {#if activityItems.length > 0}
-    <Card>
-      <div class="activity-bar">
-        {#each activityItems as item}
-          <div class="activity-item">
-            <svelte:component this={activityIcon(item.type)} size={14} />
-            <span class="activity-name">{item.name}</span>
-            {#if item.elapsed}
-              <span class="activity-elapsed"><Clock size={11} /> {item.elapsed}</span>
-            {/if}
-            <span class="activity-badge">{item.type}</span>
-          </div>
-        {/each}
-      </div>
-    </Card>
-  {/if}
-
-  <!-- Workspace (two-column) -->
-  <div class="workspace-layout">
-  <Card>
-    <div class="section-header">
-      <h3><Folder size={16} /> Workspace</h3>
-      <div class="ws-actions">
-        <button class="btn btn-sm" onclick={() => openCreateDialog('file')} title="New file">
-          <FilePlus size={13} />
-        </button>
-        <button class="btn btn-sm" onclick={() => openCreateDialog('dir')} title="New directory">
-          <FolderPlus size={13} />
-        </button>
-        <button class="btn btn-sm" onclick={() => { showUploadModal = true }} title="Upload">
-          <Upload size={13} />
-        </button>
-        <button class="btn btn-sm" onclick={() => loadDir(currentPath)} title="Refresh">
-          <RefreshCw size={13} />
-        </button>
-      </div>
+  <!-- Header bar -->
+  <div class="ws-header">
+    <span class="ws-title">Files</span>
+    <div class="ws-toolbar">
+      <button class="ws-btn" onclick={() => openCreateDialog('file')} title="New file"><FilePlus size={15} /></button>
+      <button class="ws-btn" onclick={() => openCreateDialog('dir')} title="New folder"><FolderPlus size={15} /></button>
+      <button class="ws-btn" onclick={() => { showUploadModal = true }} title="Upload"><Upload size={15} /></button>
+      <button class="ws-btn" onclick={() => { loadDir(currentPath); loadSidebarRoot() }} title="Refresh"><RefreshCw size={15} /></button>
     </div>
+  </div>
 
-    <!-- Breadcrumbs -->
-    <div class="breadcrumbs">
-      <button class="breadcrumb" onclick={() => loadDir('')}>data</button>
-    </div>
+  <div class="ws-layout">
+    <!-- Left sidebar: folder tree -->
+    <div class="ws-sidebar">
+      <div class="sidebar-tree">
+        <div
+          class="sidebar-item root-item"
+          class:active={currentPath === ''}
+          onclick={() => navigateToDir('')}
+          role="button"
+          tabindex="0"
+          onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && navigateToDir('')}
+        >
+          <FolderOpen size={14} />
+          <span>data</span>
+        </div>
 
-    <!-- Directory listing (tree view) -->
-    {#if loadingDir}
-      <p class="dim">Loading...</p>
-    {:else}
-      <div class="file-tree">
-        {#snippet treeNode(entries: WsEntry[], parentPath: string, depth: number)}
+        {#snippet sidebarNode(entries: WsEntry[], parentPath: string, depth: number)}
           {#each entries as entry}
-            {#if entry.is_dir}
-              {@const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name}
-              {@const isExpanded = !!expandedDirs[fullPath]}
-              <div class="tree-row dir-row" style="padding-left:{depth * 16 + 8}px">
-                <div class="file-row-main" onclick={() => loadSubDir(parentPath, entry.name)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && loadSubDir(parentPath, entry.name)}>
-                  {#if isExpanded}
-                    <ChevronDown size={14} />
-                    <FolderOpen size={14} />
-                  {:else}
-                    <ChevronRight size={14} />
-                    <Folder size={14} />
-                  {/if}
-                  <span class="file-name">{entry.name}</span>
-                  {#if isProtected(entry.name) && depth === 0}
-                    <span class="protected-badge">protected</span>
-                  {/if}
-                </div>
-                {#if !(isProtected(entry.name) && depth === 0)}
-                  <button class="btn-icon" onclick={() => deleteEntry(fullPath)} title="Delete">
-                    <Trash2 size={12} />
-                  </button>
+            {@const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name}
+            {@const isExpanded = !!expandedDirs[fullPath]}
+            <div
+              class="sidebar-item"
+              class:active={currentPath === fullPath}
+              style="padding-left:{(depth + 1) * 14 + 8}px"
+              onclick={() => { navigateToDir(fullPath); if (!isExpanded) toggleSidebarDir(fullPath) }}
+              role="button"
+              tabindex="0"
+              onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && navigateToDir(fullPath)}
+            >
+              <button class="expand-btn" onclick={(e: MouseEvent) => { e.stopPropagation(); toggleSidebarDir(fullPath) }}>
+                {#if isExpanded}
+                  <ChevronDown size={12} />
+                {:else}
+                  <ChevronRight size={12} />
                 {/if}
-              </div>
-              {#if isExpanded && expandedDirs[fullPath]}
-                {@render treeNode(expandedDirs[fullPath], fullPath, depth + 1)}
+              </button>
+              {#if isExpanded}
+                <FolderOpen size={14} />
+              {:else}
+                <Folder size={14} />
               {/if}
-            {:else}
-              {@const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name}
-              <div class="tree-row" style="padding-left:{depth * 16 + 8}px">
-                <div class="file-row-main" onclick={() => openFile(fullPath)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && openFile(fullPath)}>
-                  <FileText size={14} />
-                  <span class="file-name">{entry.name}</span>
-                  <span class="file-size">{formatSize(entry.size)}</span>
-                </div>
-                <button class="btn-icon" onclick={() => deleteEntry(fullPath)} title="Delete">
-                  <Trash2 size={12} />
-                </button>
-              </div>
+              <span>{entry.name}</span>
+            </div>
+            {#if isExpanded && expandedDirs[fullPath]}
+              {@render sidebarNode(expandedDirs[fullPath], fullPath, depth + 1)}
             {/if}
           {/each}
         {/snippet}
-        {@render treeNode(dirEntries, currentPath, 0)}
-        {#if dirEntries.length === 0}
-          <p class="dim">Empty workspace.</p>
-        {/if}
+        {@render sidebarNode(sidebarRootEntries, '', 0)}
       </div>
-    {/if}
-  </Card>
+    </div>
 
-  <!-- File viewer -->
-  {#if viewingFile}
-    <Card>
-      <div class="section-header">
-        <h3><FileText size={16} /> {viewingFile.name}</h3>
-        <div class="ws-actions">
-          {#if viewingFile.editable && viewingFile.content !== undefined}
-            {#if fileEditMode}
-              <button class="btn btn-sm btn-primary" onclick={saveFile} disabled={savingFile}>
-                <Save size={13} /> {savingFile ? 'Saving...' : 'Save'}
-              </button>
-              <button class="btn btn-sm" onclick={() => { fileEditMode = false; fileEditContent = viewingFile!.content || '' }}>Cancel</button>
-            {:else}
-              <button class="btn btn-sm" onclick={() => fileEditMode = true}>
-                <Pencil size={13} /> Edit
-              </button>
+    <!-- Right panel: file list -->
+    <div class="ws-main">
+      <!-- Breadcrumbs -->
+      <div class="ws-breadcrumbs">
+        <button class="crumb" onclick={() => navigateToDir('')}>data</button>
+        {#each breadcrumbs() as crumb}
+          <span class="crumb-sep">&rsaquo;</span>
+          <button class="crumb" onclick={() => navigateToDir(crumb.path)}>{crumb.name}</button>
+        {/each}
+      </div>
+
+      <!-- File table -->
+      {#if loadingDir}
+        <div class="ws-loading"><Loader2 size={20} class="spin" /> Loading...</div>
+      {:else}
+        <table class="file-table">
+          <thead>
+            <tr>
+              <th class="col-name">Name</th>
+              <th class="col-size">Size</th>
+              <th class="col-date">Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#if currentPath}
+              <tr class="file-row back-row" onclick={() => navigateToDir(parentPath(currentPath))}>
+                <td colspan="3">
+                  <div class="cell-name">
+                    <ArrowLeft size={14} />
+                    <span>Back to parent folder</span>
+                  </div>
+                </td>
+              </tr>
             {/if}
-          {/if}
-          {#if isMarkdown(viewingFile.name) && !fileEditMode}
-            <button class="btn btn-sm" onclick={() => mdPreview = !mdPreview}>
-              {#if mdPreview}
-                <Pencil size={13} /> Source
-              {:else}
-                <Eye size={13} /> Preview
-              {/if}
+            {#each sortedEntries as entry}
+              {@const fullPath = currentPath ? `${currentPath}/${entry.name}` : entry.name}
+              <tr
+                class="file-row"
+                onclick={() => entry.is_dir ? navigateToDir(fullPath) : openFile(fullPath)}
+                oncontextmenu={(e) => handleContextMenu(e, entry)}
+              >
+                <td>
+                  <div class="cell-name">
+                    {#if entry.is_dir}
+                      <Folder size={15} class="icon-folder" />
+                    {:else}
+                      <File size={15} class="icon-file" />
+                    {/if}
+                    <span>{entry.name}</span>
+                    {#if entry.is_dir && isProtected(entry.name)}
+                      <span class="badge-protected">protected</span>
+                    {/if}
+                  </div>
+                </td>
+                <td class="cell-size">{entry.is_dir ? '' : formatSize(entry.size)}</td>
+                <td class="cell-date">{formatDate(entry.mod_time)}</td>
+              </tr>
+            {/each}
+            {#if sortedEntries.length === 0 && !currentPath}
+              <tr><td colspan="3" class="empty-msg">Empty workspace</td></tr>
+            {/if}
+          </tbody>
+        </table>
+      {/if}
+    </div>
+  </div>
+</div>
+
+<!-- Context menu -->
+{#if ctxMenu}
+  <div class="ctx-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
+    <button class="ctx-item" onclick={ctxOpen}>
+      <Eye size={13} /> Open
+    </button>
+    {#if !ctxMenu.entry.is_dir}
+      <button class="ctx-item" onclick={ctxEdit}>
+        <Pencil size={13} /> Edit
+      </button>
+      <button class="ctx-item" onclick={ctxDownload}>
+        <Download size={13} /> Download
+      </button>
+    {/if}
+    {#if !(ctxMenu.entry.is_dir && isProtected(ctxMenu.entry.name))}
+      <div class="ctx-sep"></div>
+      <button class="ctx-item ctx-danger" onclick={ctxDelete}>
+        <Trash2 size={13} /> Delete
+      </button>
+    {/if}
+  </div>
+{/if}
+
+<!-- File viewer modal -->
+<Modal open={showFileModal} onclose={() => { showFileModal = false; viewingFile = null }} wide>
+  {#if viewingFile}
+    <div class="modal-file-header">
+      <h3><FileText size={16} /> {viewingFile.name}</h3>
+      <div class="modal-file-actions">
+        {#if viewingFile.editable && viewingFile.content !== undefined}
+          {#if fileEditMode}
+            <button class="ws-btn primary" onclick={saveFile} disabled={savingFile}>
+              <Save size={13} /> {savingFile ? 'Saving...' : 'Save'}
+            </button>
+            <button class="ws-btn" onclick={() => { fileEditMode = false; fileEditContent = viewingFile!.content || '' }}>Cancel</button>
+          {:else}
+            <button class="ws-btn" onclick={() => fileEditMode = true}>
+              <Pencil size={13} /> Edit
             </button>
           {/if}
-          <button class="btn btn-sm" onclick={() => viewingFile = null}>
-            <X size={13} />
+        {/if}
+        {#if isMarkdown(viewingFile.name) && !fileEditMode}
+          <button class="ws-btn" onclick={() => mdPreview = !mdPreview}>
+            {mdPreview ? 'Source' : 'Preview'}
           </button>
-        </div>
-      </div>
-
-      <div class="file-meta">
-        <span>{formatSize(viewingFile.size)}</span>
-        {#if !viewingFile.editable}
-          <span class="dim">read-only</span>
         {/if}
       </div>
+    </div>
 
+    <div class="file-meta">
+      <span>{formatSize(viewingFile.size)}</span>
+      {#if !viewingFile.editable}<span class="dim">read-only</span>{/if}
+    </div>
+
+    <div class="modal-file-body">
       {#if viewingFile.message}
         <p class="dim">{viewingFile.message}</p>
         {#if viewingFile.message.includes('Binary')}
-          <a href={`/api/workspace?path=${encodeURIComponent(viewingPath)}`} download class="btn btn-sm" style="margin-top:8px">
+          <a href={`/api/workspace?path=${encodeURIComponent(viewingPath)}`} download class="ws-btn" style="margin-top:8px">
             <Download size={13} /> Download
           </a>
         {/if}
       {:else if viewingFile.content !== undefined}
         {#if fileEditMode}
-          <textarea class="input file-editor" bind:value={fileEditContent} rows={20}></textarea>
+          <textarea class="file-editor" bind:value={fileEditContent} rows={24}></textarea>
         {:else if isMarkdown(viewingFile.name) && mdPreview}
           <div class="markdown-body">{@html renderMd(viewingFile.content)}</div>
         {:else if isJson(viewingFile.name)}
@@ -655,29 +606,23 @@
                   <span class="json-str">"{val.length > 200 ? val.slice(0, 200) + '...' : val}"</span>
                 {:else if Array.isArray(val)}
                   <span class="json-toggle" onclick={() => toggleJsonKey(path)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && toggleJsonKey(path)}>
-                    {jsonExpanded[path] ? '[-]' : '[+]'} <span class="json-type">array[{val.length}]</span>
+                    {jsonExpanded[path] ? '▾' : '▸'} <span class="json-type">array[{val.length}]</span>
                   </span>
                   {#if jsonExpanded[path]}
-                    <div class="json-children" style="margin-left:{Math.min(depth, 4) * 16}px">
+                    <div class="json-children" style="margin-left:{Math.min(depth, 4) * 14}px">
                       {#each val as item, i}
-                        <div class="json-entry">
-                          <span class="json-key">{i}:</span>
-                          {@render jsonNode(item, `${path}.${i}`, depth + 1)}
-                        </div>
+                        <div class="json-entry"><span class="json-key">{i}:</span> {@render jsonNode(item, `${path}.${i}`, depth + 1)}</div>
                       {/each}
                     </div>
                   {/if}
                 {:else if typeof val === 'object'}
                   <span class="json-toggle" onclick={() => toggleJsonKey(path)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && toggleJsonKey(path)}>
-                    {jsonExpanded[path] ? '{-}' : '{+}'} <span class="json-type">object&lbrace;{Object.keys(val).length}&rbrace;</span>
+                    {jsonExpanded[path] ? '▾' : '▸'} <span class="json-type">object&lbrace;{Object.keys(val).length}&rbrace;</span>
                   </span>
                   {#if jsonExpanded[path]}
-                    <div class="json-children" style="margin-left:{Math.min(depth, 4) * 16}px">
+                    <div class="json-children" style="margin-left:{Math.min(depth, 4) * 14}px">
                       {#each Object.entries(val) as [k, v]}
-                        <div class="json-entry">
-                          <span class="json-key">"{k}":</span>
-                          {@render jsonNode(v, `${path}.${k}`, depth + 1)}
-                        </div>
+                        <div class="json-entry"><span class="json-key">"{k}":</span> {@render jsonNode(v, `${path}.${k}`, depth + 1)}</div>
                       {/each}
                     </div>
                   {/if}
@@ -700,214 +645,34 @@
           </div>
         {:else if isCsv(viewingFile.name)}
           {@const { headers, rows } = parseCsv(viewingFile.content)}
-          <div class="csv-table-wrap">
+          <div class="csv-wrap">
             <table class="csv-table">
-              <thead>
-                <tr>
-                  {#each headers as h}
-                    <th>{h}</th>
-                  {/each}
-                </tr>
-              </thead>
-              <tbody>
-                {#each rows as row}
-                  <tr>
-                    {#each row as cell}
-                      <td>{cell}</td>
-                    {/each}
-                  </tr>
-                {/each}
-              </tbody>
+              <thead><tr>{#each headers as h}<th>{h}</th>{/each}</tr></thead>
+              <tbody>{#each rows as row}<tr>{#each row as cell}<td>{cell}</td>{/each}</tr>{/each}</tbody>
             </table>
           </div>
         {:else}
           <pre class="file-content">{viewingFile.content}</pre>
         {/if}
       {/if}
-    </Card>
-  {:else}
-    <div class="file-viewer-placeholder">
-      <Eye size={24} />
-      <p>Select a file to view</p>
     </div>
   {/if}
-  </div>
+</Modal>
 
-  <!-- Teach -->
-  <Card>
-    <h3><Brain size={16} /> Teach</h3>
-    <p class="form-hint">Feed knowledge into ALF's memory or context files.</p>
-
-    <div class="teach-toggles">
-      <label class="radio-label">
-        <input type="radio" value="memory" bind:group={teachDestination} /> Memory
-      </label>
-      <label class="radio-label">
-        <input type="radio" value="context" bind:group={teachDestination} /> Context file
-      </label>
-    </div>
-
-    {#if teachDestination === 'context'}
-      <div class="form-group">
-        <label>File name (without extension)</label>
-        <input class="input" bind:value={teachFileName} placeholder="my-knowledge" />
-      </div>
-    {/if}
-
-    <div class="form-group">
-      <label>Instruction</label>
-      <select class="input" bind:value={teachInstruction}>
-        {#each teachPresets as preset}
-          <option value={preset.value}>{preset.label}</option>
-        {/each}
-      </select>
-    </div>
-
-    {#if teachNeedsLLM && teachTiers.length > 0}
-      <div class="form-group">
-        <label>Tier (optional)</label>
-        <select class="input" bind:value={teachTier}>
-          <option value="">Auto</option>
-          {#each teachTiers as tier}
-            <option value={tier.name}>{tier.name} ({tier.model})</option>
-          {/each}
-        </select>
-      </div>
-    {/if}
-
-    <div class="form-group">
-      <label>Content <span class="content-counter">{teachContentLen}/51200</span></label>
-      <textarea class="input" bind:value={teachContent} rows={6} placeholder="Paste text, notes, documentation..."></textarea>
-    </div>
-
-    <button class="btn btn-primary" onclick={teach} disabled={teaching || !teachContent.trim()}>
-      {#if teaching}
-        <Loader2 size={14} class="spin" /> Ingesting...
-      {:else}
-        <Zap size={14} /> Ingest
-      {/if}
-    </button>
-
-    {#if teachResult}
-      <div class="teach-result">
-        {#if teachResult.imported !== undefined}
-          <p>Imported: {teachResult.imported}{teachResult.skipped ? `, Skipped: ${teachResult.skipped}` : ''}</p>
-        {/if}
-        {#if teachResult.file_name}
-          <p>Saved to: {teachResult.file_name}</p>
-        {/if}
-        {#if teachResult.memories}
-          <div class="teach-memories">
-            {#each teachResult.memories as mem}
-              <div class="teach-mem">
-                <span class="auth-badge">{mem.type}</span>
-                <span>{mem.text}</span>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-  </Card>
-
-  <!-- Skill store -->
-  <Card>
-    <h3><Package size={16} /> Skill Store</h3>
-    <p class="form-hint">Import skills from GitHub repositories.</p>
-
-    <div class="form-group">
-      <label>Repository or URL</label>
-      <input class="input" bind:value={skillCommand} placeholder="owner/repo or https://github.com/owner/repo" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && scanSkill()} />
-    </div>
-
-    <button class="btn btn-primary" onclick={scanSkill} disabled={scanning || !skillCommand.trim()}>
-      {#if scanning}
-        <Loader2 size={14} class="spin" /> Scanning...
-      {:else}
-        <Zap size={14} /> Scan
-      {/if}
-    </button>
-
-    {#if scanResult}
-      {#if scanResult.available_skills}
-        <div class="scan-pick">
-          <p>Available skills in this repo:</p>
-          {#each scanResult.available_skills as sk}
-            <button class="btn btn-sm" onclick={() => { skillCommand = skillCommand.replace(/\s+--skill.*$/, '') + ' --skill ' + sk; scanSkill() }}>
-              {sk}
-            </button>
-          {/each}
-        </div>
-      {:else}
-        <div class="scan-result">
-          <div class="scan-header">
-            <h4>{scanResult.name}</h4>
-            {#if scanResult.description}
-              <p class="dim">{scanResult.description}</p>
-            {/if}
-          </div>
-
-          <div class="scan-verdict">
-            <span class="verdict-badge verdict-{(scanResult.verdict || '').toLowerCase()}">{scanResult.verdict}</span>
-            {#if scanResult.source}
-              <span class="dim">{scanResult.source}</span>
-            {/if}
-          </div>
-
-          {#if scanResult.issues && scanResult.issues.length > 0}
-            <div class="scan-issues">
-              <h5>Issues</h5>
-              {#each scanResult.issues as issue}
-                <div class="issue-item"><AlertTriangle size={12} /> {issue}</div>
-              {/each}
-            </div>
-          {/if}
-
-          {#if scanResult.triggers && scanResult.triggers.length > 0}
-            <div class="scan-triggers">
-              <span class="dim">Triggers:</span>
-              {#each scanResult.triggers as t}
-                <span class="trigger-tag">{t}</span>
-              {/each}
-            </div>
-          {/if}
-
-          {#if scanResult.tier}
-            <p class="dim">Suggested tier: {scanResult.tier}</p>
-          {/if}
-
-          <div class="install-actions">
-            <label class="checkbox-label">
-              <input type="checkbox" bind:checked={skillOverwrite} /> Overwrite if exists
-            </label>
-            <button class="btn btn-primary" onclick={installSkill} disabled={installing || scanResult.verdict === 'FAIL'}>
-              {#if installing}
-                <Loader2 size={14} class="spin" /> Installing...
-              {:else}
-                <Package size={14} /> Install
-              {/if}
-            </button>
-          </div>
-        </div>
-      {/if}
-    {/if}
-  </Card>
-</div>
-
-<!-- Create file/dir modal -->
+<!-- Create modal -->
 <Modal open={showCreateModal} onclose={() => showCreateModal = false}>
-  <h3>Create {createType === 'dir' ? 'Directory' : 'File'}</h3>
+  <h3>Create {createType === 'dir' ? 'Folder' : 'File'}</h3>
   <div class="modal-form">
     <div class="form-group">
       <label>Name</label>
       <input class="input" bind:value={createName} placeholder={createType === 'dir' ? 'new-folder' : 'file.txt'} onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && createEntry()} />
     </div>
-    {#if createPath}
-      <p class="dim">In: {createPath}/</p>
+    {#if currentPath}
+      <p class="dim">In: {currentPath}/</p>
     {/if}
     <div class="modal-actions">
-      <button class="btn btn-primary" onclick={createEntry}>Create</button>
-      <button class="btn" onclick={() => showCreateModal = false}>Cancel</button>
+      <button class="ws-btn primary" onclick={createEntry}>Create</button>
+      <button class="ws-btn" onclick={() => showCreateModal = false}>Cancel</button>
     </div>
   </div>
 </Modal>
@@ -924,325 +689,246 @@
       <p class="dim">To: {currentPath}/</p>
     {/if}
     <div class="modal-actions">
-      <button class="btn btn-primary" onclick={handleUpload} disabled={uploading || !uploadFiles?.length}>
+      <button class="ws-btn primary" onclick={handleUpload} disabled={uploading || !uploadFiles?.length}>
         {uploading ? 'Uploading...' : 'Upload'}
       </button>
-      <button class="btn" onclick={() => showUploadModal = false}>Cancel</button>
+      <button class="ws-btn" onclick={() => showUploadModal = false}>Cancel</button>
     </div>
   </div>
 </Modal>
 
 <style>
-  .home-view {
+  .ws-root {
     width: 100%;
-    padding: 8px 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
     position: relative;
+    overflow: hidden;
   }
 
-  .home-view h2 { margin-bottom: 16px; }
-
-  /* Two-column workspace layout */
-  .workspace-layout {
-    display: grid;
-    grid-template-columns: minmax(200px, 0.7fr) 1.3fr;
-    gap: 1rem;
-    align-items: start;
-    max-height: calc(100vh - 160px);
-  }
-
-  .workspace-layout > :global(:last-child) {
-    max-height: calc(100vh - 180px);
-    overflow: auto;
-  }
-
-  .file-viewer-placeholder {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 3rem;
-    color: var(--text-dim);
-    gap: 8px;
-    background: var(--bg-card);
-    border: 1px dashed var(--border);
-    border-radius: var(--radius, 8px);
-    min-height: 200px;
-  }
-
-  .file-viewer-placeholder p {
-    font-size: 0.85rem;
-    margin: 0;
-  }
-
-  @media (max-width: 768px) {
-    .workspace-layout {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .home-view h3 {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 8px;
-  }
-
-  .dim { color: var(--text-dim); font-size: 0.85rem; }
-
-  /* Activity */
-  .activity-bar {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .activity-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    background: var(--bg-input);
-    border-radius: var(--radius, 8px);
-    font-size: 0.82rem;
-  }
-
-  .activity-name { flex: 1; }
-  .activity-elapsed {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    font-size: 0.75rem;
-    color: var(--text-dim);
-  }
-
-  .activity-badge {
-    font-size: 0.68rem;
-    padding: 1px 6px;
-    border-radius: 10px;
-    background: rgba(59, 130, 246, 0.12);
-    color: var(--blue, #3b82f6);
-  }
-
-  /* Section header */
-  .section-header {
+  /* Header */
+  .ws-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
 
-  .section-header h3 { margin: 0; }
+  .ws-title {
+    font-size: 1rem;
+    font-weight: 600;
+  }
 
-  .ws-actions {
+  .ws-toolbar {
     display: flex;
     gap: 4px;
   }
 
-  /* Breadcrumbs */
-  .breadcrumbs {
+  /* Two-column layout */
+  .ws-layout {
     display: flex;
-    align-items: center;
-    gap: 2px;
-    margin-bottom: 10px;
-    font-size: 0.8rem;
-    flex-wrap: wrap;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
-  .breadcrumb {
+  /* Sidebar */
+  .ws-sidebar {
+    width: 220px;
+    min-width: 180px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 8px 0;
+    flex-shrink: 0;
+  }
+
+  .sidebar-tree {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    user-select: none;
+    border-radius: 0;
+    transition: background 0.1s;
+  }
+
+  .sidebar-item:hover { background: var(--bg-input); }
+  .sidebar-item.active { background: var(--accent); color: var(--on-accent); }
+  .sidebar-item.active :global(svg) { color: var(--on-accent); }
+
+  .root-item { padding-left: 12px; font-weight: 500; }
+
+  .expand-btn {
     background: none;
     border: none;
-    color: var(--accent);
+    padding: 0;
+    cursor: pointer;
+    color: inherit;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Main panel */
+  .ws-main {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .ws-breadcrumbs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 16px;
+    font-size: 0.82rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .crumb {
+    background: none;
+    border: none;
+    color: var(--text);
     cursor: pointer;
     font-family: inherit;
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     padding: 2px 4px;
     border-radius: 4px;
   }
 
-  .breadcrumb:hover { background: var(--bg-input); }
-  .breadcrumb-sep { color: var(--text-dim); }
+  .crumb:hover { background: var(--bg-input); }
+  .crumb-sep { color: var(--text-dim); }
 
-  /* File tree */
-  .file-tree {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    overflow-y: auto;
-    max-height: 70vh;
-  }
-
-  .tree-row {
+  .ws-loading {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 8px;
-    border-radius: var(--radius, 8px);
+    padding: 24px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+
+  /* File table */
+  .file-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .file-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .file-table th {
+    text-align: left;
+    padding: 8px 16px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .col-name { width: auto; }
+  .col-size { width: 90px; }
+  .col-date { width: 120px; }
+
+  .file-row {
     cursor: pointer;
-    font-size: 0.82rem;
     transition: background 0.1s;
   }
 
-  .tree-row:hover { background: var(--bg-input); }
+  .file-row:hover { background: var(--bg-input); }
 
-  .file-row-main {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 1;
-    min-width: 0;
-    cursor: pointer;
+  .file-row td {
+    padding: 7px 16px;
+    font-size: 0.82rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
   }
 
-  .file-name {
-    flex: 1;
+  .back-row td { color: var(--accent); }
+
+  .cell-name {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .cell-name span {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .file-size {
-    font-size: 0.72rem;
+  .cell-size, .cell-date {
+    font-size: 0.78rem;
     color: var(--text-dim);
-    flex-shrink: 0;
   }
 
-  .protected-badge {
+  :global(.icon-folder) { color: var(--accent); }
+  :global(.icon-file) { color: var(--text-dim); }
+
+  .badge-protected {
     font-size: 0.65rem;
     padding: 0 5px;
     border-radius: 8px;
     background: rgba(234, 179, 8, 0.12);
     color: var(--yellow, #eab308);
-  }
-
-  .btn-icon {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
-    opacity: 0;
-    transition: opacity 0.15s;
-  }
-
-  .tree-row:hover .btn-icon { opacity: 1; }
-  .btn-icon:hover { color: var(--red, #c4392a); background: var(--bg-input); }
-
-  /* File viewer */
-  .file-meta {
-    display: flex;
-    gap: 8px;
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    margin-bottom: 10px;
-  }
-
-  .file-editor {
-    resize: vertical;
-    min-height: 400px;
-    height: calc(100vh - 300px);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.82rem;
-  }
-
-  .file-content {
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-x: auto;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
-    line-height: 1.5;
-    max-height: 500px;
-    overflow-y: auto;
-    padding: 8px 12px;
-    background: var(--bg-input);
-    border-radius: var(--radius, 8px);
-  }
-
-  /* JSON viewer */
-  .json-viewer {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
-    line-height: 1.6;
-    max-height: 500px;
-    overflow-y: auto;
-    padding: 8px 12px;
-    background: var(--bg-input);
-    border-radius: var(--radius, 8px);
-  }
-
-  .json-toggle {
-    cursor: pointer;
-    color: var(--accent);
-  }
-
-  .json-type { color: var(--text-dim); font-size: 0.72rem; }
-  .json-key { color: var(--blue, #3b82f6); }
-  .json-str { color: var(--green, #3d8b3d); }
-  .json-num { color: var(--yellow, #eab308); }
-  .json-bool { color: var(--accent); }
-  .json-null { color: var(--text-dim); font-style: italic; }
-
-  .json-children {
-    border-left: 1px solid var(--border);
-    padding-left: 8px;
-  }
-
-  .json-entry { padding: 1px 0; }
-
-  /* JSONL */
-  .jsonl-viewer {
-    max-height: 500px;
-    overflow-y: auto;
-  }
-
-  .jsonl-line {
-    display: flex;
-    gap: 8px;
-    padding: 4px 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .jsonl-num {
-    color: var(--text-dim);
-    font-size: 0.72rem;
-    width: 30px;
-    text-align: right;
     flex-shrink: 0;
   }
 
-  .jsonl-content {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
-    white-space: pre-wrap;
-    word-break: break-word;
-    flex: 1;
+  .empty-msg {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 24px !important;
   }
 
-  /* CSV */
-  .csv-table-wrap {
-    max-height: 500px;
-    overflow: auto;
-  }
-
-  .csv-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.8rem;
-  }
-
-  .csv-table th, .csv-table td {
-    padding: 4px 8px;
+  /* Context menu */
+  .ctx-menu {
+    position: fixed;
+    z-index: 1000;
+    background: var(--bg-card);
     border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  }
+
+  .ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 12px;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    border-radius: 5px;
     text-align: left;
   }
 
-  .csv-table th {
-    background: var(--bg-input);
-    font-weight: 500;
-    position: sticky;
-    top: 0;
-  }
+  .ctx-item:hover { background: var(--bg-input); }
+  .ctx-danger { color: var(--red, #c4392a); }
+  .ctx-sep { height: 1px; background: var(--border); margin: 4px 8px; }
 
   /* Drag overlay */
   .drag-overlay {
@@ -1260,270 +946,156 @@
     gap: 8px;
   }
 
-  /* Teach */
-  .teach-toggles {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 12px;
-  }
-
-  .radio-label {
-    display: flex;
+  /* Shared button */
+  .ws-btn {
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    font-size: 0.82rem;
-    cursor: pointer;
-  }
-
-  .content-counter {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    font-weight: 400;
-  }
-
-  .teach-result {
-    margin-top: 12px;
-    padding: 8px 12px;
-    background: rgba(61, 139, 61, 0.08);
-    border-radius: var(--radius, 8px);
-    font-size: 0.82rem;
-  }
-
-  .teach-memories {
-    margin-top: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .teach-mem {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    font-size: 0.8rem;
-  }
-
-  /* Skill store */
-  .scan-pick {
-    margin-top: 12px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
-  }
-
-  .scan-result {
-    margin-top: 12px;
-    padding: 12px;
-    background: var(--bg-input);
-    border-radius: var(--radius, 8px);
-  }
-
-  .scan-header h4 { margin: 0 0 4px; }
-
-  .scan-verdict {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 8px 0;
-  }
-
-  .verdict-badge {
-    padding: 2px 10px;
-    border-radius: 12px;
-    font-size: 0.72rem;
-    font-weight: 600;
-  }
-
-  .verdict-pass { background: rgba(61, 139, 61, 0.15); color: var(--green, #3d8b3d); }
-  .verdict-warn { background: rgba(234, 179, 8, 0.15); color: var(--yellow, #eab308); }
-  .verdict-fail { background: rgba(196, 57, 42, 0.15); color: var(--red, #c4392a); }
-
-  .scan-issues {
-    margin: 8px 0;
-  }
-
-  .scan-issues h5 { margin-bottom: 4px; font-size: 0.8rem; }
-
-  .issue-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8rem;
-    color: var(--yellow, #eab308);
-    padding: 2px 0;
-  }
-
-  .scan-triggers {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin: 8px 0;
-  }
-
-  .trigger-tag {
-    padding: 1px 8px;
-    border-radius: 10px;
-    font-size: 0.72rem;
-    background: var(--bg-card);
+    gap: 5px;
+    padding: 5px 12px;
     border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s;
   }
 
-  .install-actions {
+  .ws-btn:hover { background: var(--bg-input); }
+  .ws-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .ws-btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .ws-btn.primary:hover { opacity: 0.9; }
+
+  /* File modal */
+  .modal-file-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 12px;
-    gap: 8px;
+    margin-bottom: 8px;
   }
 
-  .auth-badge {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: 10px;
-    font-size: 0.68rem;
-    font-weight: 500;
-    background: rgba(59, 130, 246, 0.12);
-    color: var(--blue, #3b82f6);
+  .modal-file-header h3 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
   }
+
+  .modal-file-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .file-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  .modal-file-body {
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  .file-editor {
+    width: 100%;
+    resize: vertical;
+    min-height: 300px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-input);
+    color: var(--text);
+  }
+
+  .file-content {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+
+  /* JSON */
+  .json-viewer {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border-radius: 6px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .json-toggle { cursor: pointer; color: var(--accent); }
+  .json-type { color: var(--text-dim); font-size: 0.72rem; }
+  .json-key { color: var(--blue, #3b82f6); }
+  .json-str { color: var(--green, #3d8b3d); }
+  .json-num { color: var(--yellow, #eab308); }
+  .json-bool { color: var(--accent); }
+  .json-null { color: var(--text-dim); font-style: italic; }
+  .json-children { border-left: 1px solid var(--border); padding-left: 8px; }
+  .json-entry { padding: 1px 0; }
+
+  /* JSONL */
+  .jsonl-viewer { max-height: 60vh; overflow-y: auto; }
+  .jsonl-line { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .jsonl-num { color: var(--text-dim); font-size: 0.72rem; width: 30px; text-align: right; flex-shrink: 0; }
+  .jsonl-content { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; white-space: pre-wrap; word-break: break-word; flex: 1; }
+
+  /* CSV */
+  .csv-wrap { max-height: 60vh; overflow: auto; }
+  .csv-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .csv-table th, .csv-table td { padding: 4px 8px; border: 1px solid var(--border); text-align: left; }
+  .csv-table th { background: var(--bg-input); font-weight: 500; position: sticky; top: 0; }
+
+  /* Markdown */
+  :global(.markdown-body) { font-size: 0.88rem; line-height: 1.7; color: var(--text); overflow-wrap: break-word; }
+  :global(.markdown-body h1), :global(.markdown-body h2), :global(.markdown-body h3) { margin: 1em 0 0.5em; }
+  :global(.markdown-body h1) { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  :global(.markdown-body h2) { font-size: 1.2rem; }
+  :global(.markdown-body h3) { font-size: 1.05rem; }
+  :global(.markdown-body p) { margin: 0.5em 0; }
+  :global(.markdown-body pre) { background: var(--bg-input); padding: 12px; border-radius: 6px; overflow-x: auto; }
+  :global(.markdown-body code) { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }
+  :global(.markdown-body :not(pre) > code) { background: var(--bg-input); padding: 2px 5px; border-radius: 3px; }
+  :global(.markdown-body ul), :global(.markdown-body ol) { padding-left: 1.5em; margin: 0.5em 0; }
+  :global(.markdown-body blockquote) { border-left: 3px solid var(--border); padding-left: 1em; color: var(--text-dim); margin: 0.5em 0; }
+  :global(.markdown-body table) { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+  :global(.markdown-body th), :global(.markdown-body td) { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 0.82rem; }
+  :global(.markdown-body img) { max-width: 100%; border-radius: 6px; }
+  :global(.markdown-body a) { color: var(--accent); }
 
   /* Form */
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-bottom: 12px;
-  }
-
-  .form-group label {
-    font-size: 0.8rem;
-    font-weight: 500;
-  }
-
-  .form-hint {
-    font-size: 0.82rem;
-    color: var(--text-dim);
-    margin-bottom: 12px;
-  }
+  .dim { color: var(--text-dim); font-size: 0.85rem; }
+  .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .form-group label { font-size: 0.8rem; font-weight: 500; }
+  .modal-form { margin-top: 12px; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
 
   .input {
     width: 100%;
     padding: 8px 12px;
     border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
+    border-radius: 6px;
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
     font-size: 0.85rem;
   }
 
-  .checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.82rem;
-    cursor: pointer;
+  @media (max-width: 768px) {
+    .ws-sidebar { display: none; }
+    .col-date { display: none; }
   }
-
-  .modal-form { margin-top: 12px; }
-  .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    background: var(--bg-input);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.8rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-
-  .btn:hover { background: var(--border); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-  .btn-primary:hover { opacity: 0.9; }
-  .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
-
-  :global(.markdown-body) {
-    font-size: 0.88rem;
-    line-height: 1.7;
-    color: var(--text);
-    overflow-wrap: break-word;
-    word-break: break-word;
-  }
-
-  :global(.markdown-body h1),
-  :global(.markdown-body h2),
-  :global(.markdown-body h3) {
-    margin: 1em 0 0.5em;
-  }
-
-  :global(.markdown-body h1) {
-    font-size: 1.4rem;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0.3em;
-  }
-
-  :global(.markdown-body h2) { font-size: 1.2rem; }
-  :global(.markdown-body h3) { font-size: 1.05rem; }
-  :global(.markdown-body p) { margin: 0.5em 0; }
-
-  :global(.markdown-body pre) {
-    background: var(--bg-input);
-    padding: 12px;
-    border-radius: 6px;
-    overflow-x: auto;
-  }
-
-  :global(.markdown-body code) {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85em;
-  }
-
-  :global(.markdown-body :not(pre) > code) {
-    background: var(--bg-input);
-    padding: 2px 5px;
-    border-radius: 3px;
-  }
-
-  :global(.markdown-body ul),
-  :global(.markdown-body ol) {
-    padding-left: 1.5em;
-    margin: 0.5em 0;
-  }
-
-  :global(.markdown-body blockquote) {
-    border-left: 3px solid var(--border);
-    padding-left: 1em;
-    color: var(--text-dim);
-    margin: 0.5em 0;
-  }
-
-  :global(.markdown-body table) {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 0.5em 0;
-  }
-
-  :global(.markdown-body th),
-  :global(.markdown-body td) {
-    border: 1px solid var(--border);
-    padding: 6px 10px;
-    text-align: left;
-    font-size: 0.82rem;
-  }
-
-  :global(.markdown-body img) {
-    max-width: 100%;
-    border-radius: 6px;
-  }
-
-  :global(.markdown-body a) { color: var(--accent); }
 </style>

@@ -1,0 +1,28 @@
+{
+  "name": "team",
+  "description": "Manage agent teams: list, get, create/update, or delete. Teams define groups of agents with roles and tiers for multi-agent task execution.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["list", "get", "save", "delete"],
+        "description": "Action to perform"
+      },
+      "name": {
+        "type": "string",
+        "description": "Team name (required for get/save/delete)"
+      },
+      "description": {
+        "type": "string",
+        "description": "Team description (for save)"
+      },
+      "agents": {
+        "type": "string",
+        "description": "JSON array of agents: [{name, tier, description?, skills?}] (required for save)"
+      }
+    },
+    "required": ["action"],
+    "x-positional": ["action", "name"]
+  }
+}

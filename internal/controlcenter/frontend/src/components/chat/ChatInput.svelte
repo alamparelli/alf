@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Paperclip, Send, X } from 'lucide-svelte'
+  import { Paperclip, Send, Square, X } from 'lucide-svelte'
   import { api } from '../../lib/api'
   import { toasts } from '../../stores/toast.svelte'
 
@@ -10,12 +10,13 @@
   }
 
   interface Props {
-    onSend: (message: string, mediaIds: string[], model: string) => void
+    onSend: (message: string, mediaFiles: UploadedFile[], model: string) => void
+    onStop?: () => void
     sending: boolean
     tiers?: { name: string; model: string }[]
   }
 
-  let { onSend, sending, tiers = [] }: Props = $props()
+  let { onSend, onStop, sending, tiers = [] }: Props = $props()
 
   let text = $state('')
   let files = $state<UploadedFile[]>([])
@@ -25,13 +26,73 @@
   let fileInput: HTMLInputElement
   let dragOver = $state(false)
 
+  // Slash commands
+  let showCommands = $state(false)
+  let commandFilter = $state('')
+  let selectedCommandIdx = $state(0)
+
+  const builtinCommands = [
+    { name: 'new', desc: 'Start a new conversation' },
+    { name: 'clear', desc: 'Clear conversation (alias for /new)' },
+    { name: 'skills', desc: 'List available skills' },
+  ]
+
+  // Add tier force commands
+  let allCommands = $derived.by(() => {
+    const cmds = [...builtinCommands]
+    for (const t of tiers) {
+      cmds.push({ name: t.name, desc: `Force tier: ${t.model}` })
+    }
+    return cmds
+  })
+
+  let filteredCommands = $derived.by(() => {
+    if (!commandFilter) return allCommands
+    const q = commandFilter.toLowerCase()
+    return allCommands.filter(c => c.name.toLowerCase().includes(q))
+  })
+
   function autoResize() {
     if (!textarea) return
     textarea.style.height = 'auto'
     textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px'
+
+    // Detect slash command input
+    const val = textarea.value
+    if (val.startsWith('/') && !val.includes(' ')) {
+      commandFilter = val.slice(1)
+      showCommands = true
+      selectedCommandIdx = 0
+    } else {
+      showCommands = false
+    }
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    if (showCommands && filteredCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        selectedCommandIdx = (selectedCommandIdx + 1) % filteredCommands.length
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        selectedCommandIdx = (selectedCommandIdx - 1 + filteredCommands.length) % filteredCommands.length
+        return
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault()
+        const cmd = filteredCommands[selectedCommandIdx]
+        text = '/' + cmd.name + ' '
+        showCommands = false
+        autoResize()
+        return
+      }
+      if (e.key === 'Escape') {
+        showCommands = false
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
@@ -41,10 +102,8 @@
   function send() {
     const msg = text.trim()
     if (!msg && files.length === 0) return
-    if (sending) return
 
-    const mediaIds = files.map(f => f.upload_id)
-    onSend(msg, mediaIds, selectedModel)
+    onSend(msg, [...files], selectedModel)
     text = ''
     files = []
     if (textarea) {
@@ -132,6 +191,23 @@
     </div>
   {/if}
 
+  <!-- Slash command suggestions -->
+  {#if showCommands && filteredCommands.length > 0}
+    <div class="command-list">
+      {#each filteredCommands as cmd, i}
+        <button
+          class="command-item"
+          class:selected={i === selectedCommandIdx}
+          onclick={() => { text = '/' + cmd.name + ' '; showCommands = false; textarea?.focus() }}
+          onmouseenter={() => selectedCommandIdx = i}
+        >
+          <span class="command-name">/{cmd.name}</span>
+          <span class="command-desc">{cmd.desc}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="input-row">
     <!-- Attach button -->
     <button class="attach-btn" onclick={() => fileInput.click()} disabled={uploading}>
@@ -149,10 +225,9 @@
     <textarea
       bind:this={textarea}
       bind:value={text}
-      placeholder={sending ? 'Sending...' : 'Type a message...'}
+      placeholder={sending ? 'Type to queue...' : 'Type a message...'}
       class="chat-textarea"
       rows="1"
-      disabled={sending}
       oninput={autoResize}
       onkeydown={handleKeydown}
     ></textarea>
@@ -167,10 +242,16 @@
       </select>
     {/if}
 
-    <!-- Send button -->
-    <button class="send-btn" onclick={send} disabled={sending || (!text.trim() && files.length === 0)}>
-      <Send size={16} />
-    </button>
+    <!-- Send / Stop button -->
+    {#if sending}
+      <button class="stop-btn" onclick={() => onStop?.()} title="Stop generation">
+        <Square size={16} />
+      </button>
+    {:else}
+      <button class="send-btn" onclick={send} disabled={!text.trim() && files.length === 0}>
+        <Send size={16} />
+      </button>
+    {/if}
   </div>
 
   {#if uploading}
@@ -251,6 +332,23 @@
     color: var(--on-accent);
   }
 
+  .stop-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+    flex-shrink: 0;
+    background: var(--red, #e53935);
+    color: #fff;
+    transition: opacity 0.15s;
+  }
+
+  .stop-btn:hover { opacity: 0.85; }
+
   .send-btn:hover:not(:disabled) {
     opacity: 0.9;
   }
@@ -312,5 +410,48 @@
     font-size: 0.72rem;
     color: var(--text-dim);
     padding: 4px 0 0;
+  }
+
+  /* Slash command suggestions */
+  .command-list {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .command-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .command-item:hover,
+  .command-item.selected {
+    background: var(--bg-input);
+  }
+
+  .command-name {
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    min-width: 80px;
+  }
+
+  .command-desc {
+    color: var(--text-dim);
+    font-size: 0.78rem;
   }
 </style>

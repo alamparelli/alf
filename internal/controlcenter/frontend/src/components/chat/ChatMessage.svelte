@@ -64,11 +64,14 @@
   async function react(emoji: string) {
     showEmojiPicker = false
     try {
-      await api('/api/chat/react', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ msg_id: msg.id, emoji })
-      })
+      await api('POST', '/api/chat/react', { msg_id: msg.id, emoji })
+      // Optimistically add reaction locally
+      const newReaction: Reaction = { emoji, from: 'user' }
+      if (msg.reactions) {
+        msg.reactions = [...msg.reactions, newReaction]
+      } else {
+        msg.reactions = [newReaction]
+      }
     } catch (e: any) {
       toasts.show(e.error || 'Failed to react', 'error')
     }

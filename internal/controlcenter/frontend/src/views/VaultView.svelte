@@ -100,13 +100,10 @@
     if (!vaultStatus) loading = true
     try {
       const data = await api<any>('/api/vault/status')
-      console.log('[vault] status response:', JSON.stringify(data))
       available = data.available
       vaultStatus = data.status
       firstTime = data.first_time
-      console.log('[vault] state:', { available, vaultStatus, firstTime, isUnlocked })
-    } catch (e) {
-      console.error('[vault] loadStatus error:', e)
+    } catch {
       available = false
     } finally {
       loading = false

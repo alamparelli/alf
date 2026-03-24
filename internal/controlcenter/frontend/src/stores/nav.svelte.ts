@@ -24,6 +24,9 @@ class NavStore {
   currentView = $state(localStorage.getItem('alf-view') || 'chat')
   sidebarOpen = $state(false)
 
+  // Badges: view -> count (0 = hidden, >0 = shown)
+  badges = $state<Record<string, number>>({})
+
   favorites = $state<string[]>(
     JSON.parse(localStorage.getItem('alf-nav-favs') || '[]')
   )
@@ -36,6 +39,18 @@ class NavStore {
     this.currentView = view
     localStorage.setItem('alf-view', view)
     this.sidebarOpen = false
+    // Clear badge when navigating to the view
+    if (this.badges[view]) {
+      this.badges[view] = 0
+    }
+  }
+
+  setBadge(view: string, count: number) {
+    this.badges[view] = count
+  }
+
+  incrementBadge(view: string) {
+    this.badges[view] = (this.badges[view] || 0) + 1
   }
 
   toggleSection(section: string) {

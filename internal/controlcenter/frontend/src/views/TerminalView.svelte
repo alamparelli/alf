@@ -111,6 +111,8 @@
         fitAddon.fit()
         sendResize(term.cols, term.rows)
       }
+      // Default to data directory
+      setTimeout(() => sendInput('cd /home/alf/data && clear\n'), 100)
     }
 
     ws.onmessage = (ev) => {

@@ -287,7 +287,7 @@ func doRequest(method, path string, body []byte) (string, error) {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)

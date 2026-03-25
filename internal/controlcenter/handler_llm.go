@@ -14,6 +14,7 @@ import (
 // its own Anthropic token — the daemon's provider registry handles auth.
 type LLMInvokeHandler struct {
 	ToolRegistry *tooling.Registry
+	TierStore    TierStore
 }
 
 type llmInvokeRequest struct {
@@ -55,7 +56,19 @@ func (h *LLMInvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"system": req.System,
 	})
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	// Resolve timeout from tier definition, fall back to 5 minutes.
+	timeout := 5 * time.Minute
+	if h.TierStore != nil {
+		tiers := h.TierStore.Current()
+		for _, t := range tiers.Tiers {
+			if t.Name == req.Tier && t.Enabled && t.TimeoutMin > 0 {
+				timeout = time.Duration(t.TimeoutMin) * time.Minute
+				break
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
 	result, err := tool.Run(ctx, string(argsJSON))

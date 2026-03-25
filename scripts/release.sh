@@ -73,6 +73,7 @@ if [ "$LOCAL_BUILD" = true ]; then
   docker buildx build \
     --builder multiarch \
     --platform linux/amd64,linux/arm64 \
+    --build-arg BUILD_VERSION="${version}" \
     --push \
     -t "${REGISTRY}:${version}" \
     -t "${REGISTRY}:latest" \

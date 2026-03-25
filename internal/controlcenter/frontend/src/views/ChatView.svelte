@@ -49,7 +49,7 @@
   async function loadConversations() {
     try {
       const data = await api<any>('/api/chat/conversations')
-      const convs = (data.conversations || []).filter((c: any) => c.msg_count > 0 || c.id === data.active_conv_id).reverse()
+      const convs = (data.conversations || []).filter((c: any) => c.msg_count > 0 || c.id === data.active_conv_id)
       tabs = convs.map((c: any) => ({
         id: c.id,
         label: c.title || `Chat`,
@@ -75,16 +75,15 @@
   }
 
   async function addTab() {
+    const convId = genId()
     const label = `Chat ${tabs.length + 1}`
-    // Create a new backend session — returns a conv_id.
-    let convId = genId()
-    try {
-      const data = await api<any>('/api/chat', { method: 'DELETE' })
-      if (data.conv_id) convId = data.conv_id
-    } catch { /* use generated id */ }
     // Register conversation in ChatDB for persistence.
     try {
       await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: convId, title: label }) })
+    } catch { /* best effort */ }
+    // Reset LLM session state (--resume), but keep our own convId.
+    try {
+      await api<any>('/api/chat', { method: 'DELETE' })
     } catch { /* best effort */ }
     const tab: ChatTab = { id: convId, label, convId, unread: 0 }
     tabs = [...tabs, tab]
@@ -295,9 +294,12 @@
     }
   }
 
-  // Check for active job on load (reconnect)
+  // Check for active job on load (reconnect to stream for THIS tab only)
   async function checkActiveJob() {
+    // Don't interfere if already sending on another tab.
+    if (sending) return
     const convId = activeTab?.convId || ''
+    if (!convId) return
     try {
       const data = await api<any>(`/api/chat/job?conv_id=${convId}`)
       if (data.active && data.job_id) {
@@ -665,9 +667,15 @@
   // --- New conversation ---
   async function newConversation() {
     try {
-      const data = await api<any>('/api/chat', { method: 'DELETE' })
-      if (data.conv_id && activeTab) {
-        activeTab.convId = data.conv_id
+      // Reset LLM session state.
+      await api<any>('/api/chat', { method: 'DELETE' })
+      // Give the current tab a fresh convId.
+      if (activeTab) {
+        const newId = genId()
+        await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: newId, title: activeTab.label }) }).catch(() => {})
+        activeTab.id = newId
+        activeTab.convId = newId
+        activeTabId = newId
         tabs = [...tabs]
       }
       setMessages(activeTabId, [])

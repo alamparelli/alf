@@ -457,11 +457,8 @@ func GenerateToolbox(contextDir, dataDir string) {
 		}
 		sb.WriteString("## Vault (Secrets Proxy)\n\n")
 		sb.WriteString(fmt.Sprintf("Status: **%s**\n\n", vaultStatus))
-		sb.WriteString("```\n")
-		sb.WriteString("vault proxy <service> <method> <path> [body]\n")
-		sb.WriteString("vault list                    # list configured services\n")
-		sb.WriteString("vault health                  # check vault status\n")
-		sb.WriteString("```\n")
+		sb.WriteString("`vault proxy <svc> <method> <path> [body]` | `vault list` | `vault health`\n\n")
+		sb.WriteString("Adding services: user configures in Control Center → Vault. Never add services via CLI.\n")
 	}
 
 	os.WriteFile(filepath.Join(contextDir, "toolbox.md"), []byte(sb.String()), 0o644)

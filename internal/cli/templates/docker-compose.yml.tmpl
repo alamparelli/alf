@@ -142,8 +142,6 @@ services:
     image: {{.EmbedImage}}
     container_name: alf-embed
     restart: unless-stopped
-    profiles:
-      - embed
     networks:
       embed-internal:
         ipv4_address: 10.99.1.10

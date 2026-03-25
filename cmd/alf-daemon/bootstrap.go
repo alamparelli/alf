@@ -460,9 +460,7 @@ func seedBundledApps(dataDir string) {
 		}
 		slug := e.Name()
 
-		// Protected apps (e.g. developer) are not auto-seeded.
-		// They must be installed explicitly via the marketplace.
-		// The entrypoint locks them after install.
+		// Protected apps are not auto-seeded.
 		if isProtectedApp(slug) {
 			continue
 		}
@@ -478,11 +476,50 @@ func seedBundledApps(dataDir string) {
 			log.Printf("seeded bundled app: %s", slug)
 		}
 	}
+
+	// Set default-disabled apps to "disabled" in .state.json if they have no state yet.
+	seedDefaultDisabledState(appsDir)
+}
+
+// seedDefaultDisabledState ensures default-disabled apps start as "disabled"
+// in .state.json. Apps that already have a state (e.g. user enabled them) are not touched.
+func seedDefaultDisabledState(appsDir string) {
+	statePath := filepath.Join(appsDir, ".state.json")
+
+	// Load existing state.
+	var sf struct {
+		States map[string]string `json:"states"`
+	}
+	if data, err := os.ReadFile(statePath); err == nil {
+		json.Unmarshal(data, &sf)
+	}
+	if sf.States == nil {
+		sf.States = make(map[string]string)
+	}
+
+	changed := false
+	for slug := range defaultDisabledApps {
+		if _, exists := sf.States[slug]; !exists {
+			sf.States[slug] = "disabled"
+			changed = true
+			log.Printf("seed-state: %s set to disabled (default)", slug)
+		}
+	}
+
+	if changed {
+		data, _ := json.MarshalIndent(sf, "", "  ")
+		os.WriteFile(statePath, data, 0o644)
+	}
 }
 
 // protectedApps are not auto-seeded at startup. They are installed via marketplace
 // and locked by the entrypoint to prevent LLM modification.
-var protectedApps = map[string]bool{
+// protectedApps are not auto-seeded at startup.
+var protectedApps = map[string]bool{}
+
+// defaultDisabledApps are seeded but start with state "disabled" in .state.json.
+// They appear in the Marketplace but not in the sidebar until the user enables them.
+var defaultDisabledApps = map[string]bool{
 	"developer": true,
 }
 

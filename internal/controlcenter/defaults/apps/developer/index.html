@@ -62,18 +62,20 @@
     <span id="connLabel">Checking...</span>
   </div>
 
-  <!-- Setup form, shown when not connected -->
+  <!-- Setup instructions, shown when not connected -->
   <div id="vaultSetup" style="display:none; margin-top: 1rem;">
-    <p style="font-size:0.82rem; color:var(--text-dim); margin-bottom:0.75rem;">Configure the vault service to connect to the marketplace registry.</p>
-    <label>Registry URL</label>
-    <input type="text" id="setupUrl" class="mono" placeholder="https://marketplace.lamparelli.eu" value="https://marketplace.lamparelli.eu">
-    <label>Bearer Token (dev key)</label>
-    <input type="text" id="setupToken" class="mono" placeholder="your-developer-api-key">
-    <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
-      <button class="btn-sm" id="setupSkipBtn">Open Vault</button>
+    <p style="font-size:0.82rem; color:var(--text-dim); margin-bottom:0.75rem;">Create a <code>marketplace</code> service in your Vault to connect to the registry.</p>
+    <div style="font-size:0.82rem; line-height:1.7; margin-bottom:0.75rem;">
+      <strong>Steps:</strong>
+      <ol style="padding-left:1.2rem; margin:0.4rem 0 0;">
+        <li>Open <a href="#" id="vaultLink2" style="color:var(--accent)">Vault</a></li>
+        <li>Add a new service named <code class="mono">marketplace</code></li>
+        <li>Base URL: <code class="mono">https://marketplace.lamparelli.eu</code></li>
+        <li>Auth type: <code class="mono">bearer</code></li>
+        <li>Token: your developer API key (from the marketplace admin)</li>
+      </ol>
     </div>
-    <p class="hint">Add a <code>marketplace</code> service manually in your vault with: base URL above, auth type <code>bearer</code>, and your developer token.</p>
-    <div id="setupStatus" class="status"></div>
+    <button class="btn-sm" id="setupSkipBtn">Open Vault</button>
   </div>
 
   <!-- Shown when connected -->
@@ -155,15 +157,20 @@
   function $(id) { return document.getElementById(id); }
   function setStatus(el, msg, type) { el.textContent = msg; el.className = 'status ' + type; }
 
-  var vaultLink = $('vaultLink');
-  if (vaultLink) vaultLink.addEventListener('click', function(e) {
-    e.preventDefault();
+  function goVault(e) {
+    if (e) e.preventDefault();
     if (window.parent && window.parent.navigateTo) window.parent.navigateTo('vault');
-  });
+  }
+
+  var vaultLink = $('vaultLink');
+  if (vaultLink) vaultLink.addEventListener('click', goVault);
+
+  var vaultLink2 = $('vaultLink2');
+  if (vaultLink2) vaultLink2.addEventListener('click', goVault);
 
   $('setupSkipBtn').addEventListener('click', function() {
     $('vaultSetup').style.display = 'none';
-    if (window.parent && window.parent.navigateTo) window.parent.navigateTo('vault');
+    goVault();
   });
 
   // --- Connection ---
@@ -305,10 +312,12 @@
   });
 
   // --- Skills dropdown ---
+  // System skills in /opt/alf/skills.d/ are excluded — only user skills shown.
+  var SYSTEM_SKILLS_DIR = '/opt/alf/skills.d/';
   function loadSkillsDropdown() {
     var sel = $('pubSkill');
-    // Scan both skills.d and data/skills for directories with SKILL.md
-    bash("(ls -1d /opt/alf/skills.d/*/ /home/alf/data/skills.d/*/ /home/alf/data/skills/*/ 2>/dev/null) | sort -u").then(function(res) {
+    // Only scan user skill directories (not system skills)
+    bash("(ls -1d /home/alf/data/skills/*/ 2>/dev/null) | sort -u").then(function(res) {
       var paths = (res.output || '').trim().split('\n').filter(function(p) { return p && p !== ''; });
       sel.innerHTML = '<option value="">None</option>';
       paths.forEach(function(p) {

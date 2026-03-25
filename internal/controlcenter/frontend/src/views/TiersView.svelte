@@ -233,8 +233,8 @@
     <button class="btn btn-ghost btn-sm" onclick={openRouterModal} title="Router config">
       <Router size={14} /> Router
     </button>
-    <button class="btn btn-ghost btn-sm" onclick={openMemoryModal} title="Memory config">
-      <Brain size={14} /> Memory
+    <button class="btn btn-ghost btn-sm" onclick={openMemoryModal} title="Memory extraction LLM">
+      <Brain size={14} /> Memory LLM
     </button>
     <button class="btn btn-primary btn-sm" onclick={openAddTier}>
       <Plus size={14} /> Add Tier
@@ -459,13 +459,14 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h3><Brain size={18} /> Memory Extraction Config</h3>
+      <h3><Brain size={18} /> Memory Extraction LLM</h3>
+      <p class="modal-hint">Which LLM analyzes conversations to extract facts and learnings into long-term memory. By default, uses the same backend and model as the router (cheap and fast).</p>
       <div class="form-grid">
         <label>
-          Extract Backend
+          Backend
           <select bind:value={memoryForm.extract_backend}>
-            <option value="">auto</option>
-            <option value="cli">cli</option>
+            <option value="">same as router</option>
+            <option value="cli">cli (Claude Code)</option>
             {#each availableBackends as b}
               {#if b !== 'cli' && b !== ''}
                 <option value={b}>{b}</option>
@@ -474,16 +475,16 @@
           </select>
         </label>
         <label>
-          Extract Model
+          Model
           {#if memoryModelsForBackend.length > 0}
             <select bind:value={memoryForm.extract_model}>
-              <option value="">default</option>
+              <option value="">same as router</option>
               {#each memoryModelsForBackend as m}
                 <option value={m.id}>{m.id}</option>
               {/each}
             </select>
           {:else}
-            <input type="text" bind:value={memoryForm.extract_model} placeholder="e.g. anthropic/claude-haiku-4-5" />
+            <input type="text" bind:value={memoryForm.extract_model} placeholder="leave empty to use router model" />
           {/if}
         </label>
       </div>
@@ -646,6 +647,12 @@
   .tool-source {
     color: var(--text-dim);
     font-size: 0.65rem;
+  }
+  .modal-hint {
+    font-size: 0.8rem;
+    color: var(--text-muted, #888);
+    margin: 0 0 1rem 0;
+    line-height: 1.4;
   }
   .modal-actions {
     display: flex;

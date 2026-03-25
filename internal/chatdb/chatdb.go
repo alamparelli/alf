@@ -372,7 +372,7 @@ func (d *DB) Conversations(source string, includeArchived bool) ([]ConversationI
 	if len(conditions) > 0 {
 		q += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	q += " ORDER BY COALESCE(s.last_msg, c.created_at) DESC"
+	q += " ORDER BY c.created_at ASC"
 
 	rows, err := d.db.Query(q, args...)
 	if err != nil {

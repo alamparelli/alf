@@ -17,21 +17,26 @@
     tiers?: { name: string; model: string }[]
     draft?: string
     onDraftChange?: (text: string) => void
+    selectedModel?: string
+    onModelChange?: (model: string) => void
   }
 
-  let { onSend, onStop, sending, tiers = [], draft = '', onDraftChange }: Props = $props()
+  let { onSend, onStop, sending, tiers = [], draft = '', onDraftChange, selectedModel: selectedModelProp = '', onModelChange }: Props = $props()
 
   let text = $state(draft)
   let files = $state<UploadedFile[]>([])
   let uploading = $state(false)
-  let selectedModel = $state('')
+  let selectedModel = $state(selectedModelProp)
   let textarea: HTMLTextAreaElement
   let fileInput: HTMLInputElement
   let dragOver = $state(false)
 
-  // Sync text when draft prop changes (tab switch)
+  // Sync text and model when props change (tab switch)
   $effect(() => {
     text = draft
+  })
+  $effect(() => {
+    selectedModel = selectedModelProp
   })
 
   // Notify parent of text changes
@@ -272,7 +277,7 @@
 
     <!-- Tier selector -->
     {#if tiers.length > 0}
-      <select class="tier-select" bind:value={selectedModel}>
+      <select class="tier-select" bind:value={selectedModel} onchange={() => onModelChange?.(selectedModel)}>
         <option value="">Auto</option>
         {#each tiers as tier}
           <option value={tier.name}>{tier.name}</option>

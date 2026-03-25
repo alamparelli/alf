@@ -180,8 +180,15 @@ func (e *Extractor) Extract() error {
 		since := time.Now().Add(-6 * time.Hour).Format("2006-01-02T15:04:05")
 		sinceHash, err := e.gitCommand("log", "--oneline", "--format=%h", "--since="+since, "--reverse")
 		if err != nil || strings.TrimSpace(sinceHash) == "" {
-			log.Printf("memstore: no commits found in last 6h, using HEAD~20")
-			sinceHash = "HEAD~20"
+			// Fallback: use root commit (safe for repos with any number of commits).
+			rootHash, rootErr := e.gitCommand("rev-list", "--max-parents=0", "HEAD")
+			if rootErr != nil || strings.TrimSpace(rootHash) == "" {
+				log.Printf("memstore: cannot determine root commit, skipping extraction")
+				e.saveState(currentHash)
+				return nil
+			}
+			sinceHash = strings.TrimSpace(strings.Split(strings.TrimSpace(rootHash), "\n")[0])
+			log.Printf("memstore: no commits found in last 6h, using root commit %s", sinceHash)
 		} else {
 			lines := strings.Split(strings.TrimSpace(sinceHash), "\n")
 			sinceHash = lines[0]
@@ -231,7 +238,12 @@ func (e *Extractor) Extract() error {
 	} else {
 		diffRef := lastHash + ".." + currentHash
 		if lastHash == "" {
-			diffRef = "HEAD~20.." + currentHash
+			rootHash, _ := e.gitCommand("rev-list", "--max-parents=0", "HEAD")
+			root := strings.TrimSpace(strings.Split(strings.TrimSpace(rootHash), "\n")[0])
+			if root == "" {
+				root = currentHash + "~1" // last resort
+			}
+			diffRef = root + ".." + currentHash
 		}
 		diffArgs = append([]string{"diff", "--no-color", diffRef, "--"}, selectedFiles...)
 	}

@@ -1,10 +1,10 @@
 {
   "id": "codex-standard",
   "name": "Codex Standard",
-  "description": "Multi-tier Codex setup: GPT-5-codex for all tiers. Uses OpenAI Codex CLI backend with API key or codex login.",
+  "description": "Multi-tier Codex setup: GPT-5.4-mini (fast/router), GPT-5.4 (dev), GPT-5.3-codex (arch/agent). Uses OpenAI Codex CLI backend.",
   "backend": "codex",
   "router_config": {
-    "router_model": "haiku",
+    "router_model": "gpt-5.4-mini",
     "router_backend": "",
     "default_fallback": "codex-fast",
     "router_distinctions": "Pick the tier that best balances capability and cost.\n\ncodex-fast: ONLY for trivial mechanical actions with no reasoning — greetings, toggling, listing, single-fact lookups. If the user asks WHY, HOW, or needs any judgment, explanation, or synthesis, do NOT use codex-fast.\n\ncodex-dev: Default for most work — questions, research, code, debugging, writing, summaries, web search, multi-step tasks.\n\ncodex-arch: Architecture, deep trade-offs, large refactors, building new modules from scratch.\n\nagent: ONLY when the user explicitly requests parallel independent workstreams. Most tasks, even complex ones, should go to a single-model tier."
@@ -12,7 +12,7 @@
   "tiers": [
     {
       "name": "codex-fast",
-      "model": "gpt-5-codex",
+      "model": "gpt-5.4-mini",
       "priority": 1,
       "enabled": true,
       "routable": true,
@@ -26,7 +26,7 @@
     },
     {
       "name": "codex-dev",
-      "model": "gpt-5-codex",
+      "model": "gpt-5.4",
       "priority": 2,
       "enabled": true,
       "routable": true,
@@ -38,7 +38,7 @@
     },
     {
       "name": "codex-arch",
-      "model": "gpt-5-codex",
+      "model": "gpt-5.3-codex",
       "priority": 3,
       "enabled": true,
       "routable": true,
@@ -50,7 +50,7 @@
     },
     {
       "name": "agent",
-      "model": "gpt-5-codex",
+      "model": "gpt-5.3-codex",
       "priority": 4,
       "enabled": true,
       "routable": true,

@@ -132,6 +132,7 @@ func HandlerFactory(deps Deps) http.Handler {
 		TierStore:   deps.TierStore,
 		ConfigStore: deps.ConfigStore,
 		Notifier:    deps.Notifier,
+		EventBroker: deps.EventBroker,
 	})
 
 	// Backend models discovery.

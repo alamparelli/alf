@@ -853,8 +853,7 @@ func (o *Orchestrator) invokeAgentWithKey(
 			// Expand tool wildcards into concrete tool names.
 			resolvedTools := tp.Tools
 			if len(resolvedTools) == 1 && resolvedTools[0] == "*" {
-				resolvedTools = tooling.DiscoverToolNames(o.dataDir)
-				resolvedTools = append(resolvedTools, o.toolRegistry.NativeToolNames()...)
+				resolvedTools = tooling.ResolveWildcard(o.dataDir, o.toolRegistry)
 				log.Printf("[orchestrator]   wildcard resolved to %d tools for %s/%s", len(resolvedTools), teamName, agentName)
 			} else if len(resolvedTools) == 1 && resolvedTools[0] == "*native" {
 				resolvedTools = o.toolRegistry.NativeToolNames()

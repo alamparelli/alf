@@ -188,6 +188,28 @@ var signalTools = map[string]bool{
 	"notify": true,
 }
 
+// ResolveWildcard expands a "*" tool wildcard into all CLI + native tools, deduplicated.
+// When a tool name exists both as a CLI binary and a native Go tool, native wins (same schema key).
+func ResolveWildcard(dataDir string, reg *Registry) []string {
+	seen := make(map[string]bool)
+	var tools []string
+	for _, n := range DiscoverToolNames(dataDir) {
+		if !seen[n] {
+			seen[n] = true
+			tools = append(tools, n)
+		}
+	}
+	if reg != nil {
+		for _, n := range reg.NativeToolNames() {
+			if !seen[n] {
+				seen[n] = true
+				tools = append(tools, n)
+			}
+		}
+	}
+	return tools
+}
+
 // DiscoverToolNames returns all executable tool names found in tools.d/ and tools/.
 // This includes tools with and without JSON manifests.
 // Signal tools (react, status) are excluded because they require ALF_SIGNAL_SOCK

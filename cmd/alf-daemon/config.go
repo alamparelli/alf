@@ -144,10 +144,7 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, r
 			// Resolve tool wildcards into concrete tool names.
 			tools := t.Tools
 			if len(tools) == 1 && tools[0] == "*" {
-				tools = tooling.DiscoverToolNames(dataDir)
-				if reg != nil {
-					tools = append(tools, reg.NativeToolNames()...)
-				}
+				tools = tooling.ResolveWildcard(dataDir, reg)
 				if len(tools) > 0 {
 					log.Printf("[chat] tier %q: wildcard resolved to %d tools", tierName, len(tools))
 				}

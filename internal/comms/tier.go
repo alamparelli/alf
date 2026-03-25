@@ -64,10 +64,7 @@ func ResolveTierParams(tierName string, tiers TiersSnapshot, dataDir string, too
 			}
 			tools := t.Tools
 			if len(tools) == 1 && tools[0] == "*" {
-				tools = tooling.DiscoverToolNames(dataDir)
-				if toolReg != nil {
-					tools = append(tools, toolReg.NativeToolNames()...)
-				}
+				tools = tooling.ResolveWildcard(dataDir, toolReg)
 				if len(tools) > 0 {
 					log.Printf("[comms] tier %q: wildcard resolved to %d tools", tierName, len(tools))
 				}

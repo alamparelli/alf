@@ -1,6 +1,7 @@
 package tooling
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -75,6 +76,53 @@ func TestToOpenAI(t *testing.T) {
 		t.Errorf("expected name 'recall', got %v", fn["name"])
 	}
 }
+
+func TestResolveWildcard_Deduplicates(t *testing.T) {
+	dir := t.TempDir()
+	toolsD := filepath.Join(dir, "tools.d")
+	os.MkdirAll(toolsD, 0o755)
+
+	// Create CLI tool binaries: "task" and "recall".
+	os.WriteFile(filepath.Join(toolsD, "task"), []byte("#!/bin/sh"), 0o755)
+	os.WriteFile(filepath.Join(toolsD, "recall"), []byte("#!/bin/sh"), 0o755)
+
+	// Register "task" as a native tool too (simulating the duplicate).
+	reg := NewRegistry(dir)
+	reg.RegisterNative(&fakeNativeTool{name: "task"})
+	reg.RegisterNative(&fakeNativeTool{name: "search"})
+
+	tools := ResolveWildcard(dir, reg)
+
+	// Count occurrences of "task".
+	count := 0
+	for _, n := range tools {
+		if n == "task" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 'task' once, got %d times in %v", count, tools)
+	}
+
+	// All 3 unique tools should be present: task, recall, search.
+	seen := make(map[string]bool)
+	for _, n := range tools {
+		seen[n] = true
+	}
+	for _, expected := range []string{"task", "recall", "search"} {
+		if !seen[expected] {
+			t.Errorf("expected tool %q in result, got %v", expected, tools)
+		}
+	}
+}
+
+type fakeNativeTool struct {
+	name string
+}
+
+func (f *fakeNativeTool) ToolName() string                                        { return f.name }
+func (f *fakeNativeTool) Schema() ToolSchema                                      { return ToolSchema{Name: f.name, Description: "fake"} }
+func (f *fakeNativeTool) Run(_ context.Context, _ string) (string, error)         { return "", nil }
 
 func TestRegistry_ForTools_MixedManifestAndFallback(t *testing.T) {
 	dir := t.TempDir()

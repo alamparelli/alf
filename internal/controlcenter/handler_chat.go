@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -74,17 +75,79 @@ type ChatConversationsHandler struct {
 }
 
 func (h *ChatConversationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
 		convs := h.Service.Conversations()
-		// Also include the current active conv_id.
 		currentConvID := h.Service.CurrentConvID()
 		respondJSON(w, http.StatusOK, map[string]any{
 			"conversations":  convs,
 			"active_conv_id": currentConvID,
 		})
+	case http.MethodPost:
+		// Create a new conversation (new tab).
+		var req struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+			http.Error(w, `{"error":"id required"}`, http.StatusBadRequest)
+			return
+		}
+		if h.Service.ChatDB != nil {
+			h.Service.ChatDB.EnsureConversation(req.ID, req.Title, "cc")
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true, "id": req.ID})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+// ChatConversationHandler handles PATCH/DELETE on a single conversation.
+type ChatConversationHandler struct {
+	Service *ChatService
+}
+
+func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Extract conversation ID from path: /api/chat/conversations/<id>
+	parts := splitPath(r.URL.Path)
+	if len(parts) < 4 {
+		http.Error(w, `{"error":"conversation id required"}`, http.StatusBadRequest)
 		return
 	}
-	methodNotAllowed(w)
+	convID := parts[len(parts)-1]
+
+	switch r.Method {
+	case http.MethodPatch:
+		var req struct {
+			Title string `json:"title"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+		if h.Service.ChatDB != nil {
+			h.Service.ChatDB.UpdateConversation(convID, req.Title)
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case http.MethodDelete:
+		if h.Service.ChatDB != nil {
+			h.Service.ChatDB.ArchiveConversation(convID)
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+// splitPath splits a URL path into segments.
+func splitPath(path string) []string {
+	var parts []string
+	for _, p := range strings.Split(path, "/") {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return parts
 }
 
 // ChatSkillsHandler handles GET /api/chat/skills (list) and DELETE /api/chat/skills (clear).

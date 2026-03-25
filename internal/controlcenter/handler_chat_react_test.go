@@ -6,16 +6,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/alamparelli/alf/internal/chatdb"
 )
 
 func TestChatReactHandler_ValidReaction(t *testing.T) {
 	svc := newTestChatService(t)
 
 	// Add a message to react to.
-	svc.ChatStore.Append(ChatMessage{
-		ID: "msg-1", Role: "assistant", Text: "hello",
-		Timestamp: time.Now(),
+	svc.ChatDB.EnsureConversation("test", "", "cc")
+	svc.ChatDB.InsertMessage(chatdb.Message{
+		ID: "msg-1", ConvID: "test", Role: "assistant", Text: "hello",
 	})
 
 	h := &ChatReactHandler{Service: svc}
@@ -93,9 +94,9 @@ func TestChatReactHandler_MethodNotAllowed(t *testing.T) {
 
 func TestChatReactHandler_ReactionStored(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatStore.Append(ChatMessage{
-		ID: "msg-react", Role: "assistant", Text: "test",
-		Timestamp: time.Now(),
+	svc.ChatDB.EnsureConversation("test", "", "cc")
+	svc.ChatDB.InsertMessage(chatdb.Message{
+		ID: "msg-react", ConvID: "test", Role: "assistant", Text: "test",
 	})
 
 	h := &ChatReactHandler{Service: svc}
@@ -105,14 +106,14 @@ func TestChatReactHandler_ReactionStored(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	// Verify reaction was stored in chat store.
-	msg := svc.ChatStore.Get("msg-react")
+	// Verify reaction was stored in chat DB.
+	msg, _ := svc.ChatDB.Get("msg-react")
 	if msg == nil {
 		t.Fatal("message not found")
 	}
 	found := false
 	for _, r := range msg.Reactions {
-		if r.Emoji == "🔥" && r.From == "user" {
+		if r.Emoji == "🔥" && r.Source == "user" {
 			found = true
 			break
 		}

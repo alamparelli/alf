@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
@@ -25,16 +26,31 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	sessionKey := channelID.SessionKey()
 
 	// 1. Persist user message to ConvStore.
+	userMsgID := conversation.NewMessageID()
 	var convID string
 	if e.ConvStore != nil {
 		convID = e.ConvStore.ConvID(channel)
 		e.ConvStore.Append(conversation.Message{
-			ID:        conversation.NewMessageID(),
+			ID:        userMsgID,
 			ConvID:    convID,
 			Channel:   channel,
 			Role:      "user",
 			Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: msg.DisplayText()}},
 			Timestamp: time.Now(),
+		})
+	}
+
+	// 1a. Persist user message to ChatDB (UI persistence).
+	if e.ChatDB != nil && msg.ConvID != "" {
+		e.ChatDB.EnsureConversation(msg.ConvID, "", msg.Source)
+		e.ChatDB.InsertMessage(chatdb.Message{
+			ID:      userMsgID,
+			ConvID:  msg.ConvID,
+			Role:    "user",
+			Text:    msg.DisplayText(),
+			Source:  msg.Source,
+			ReplyTo: msg.ReplyToMsgID,
+			CreatedAt: time.Now(),
 		})
 	}
 
@@ -155,10 +171,11 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	// 6. Direct response — no second LLM call needed.
 	if route.Response != "" && route.Tier == "" {
 		e.Sessions.TouchContext(sessionKey, "router")
+		routerMsgID := conversation.NewMessageID()
 		// Persist to ConvStore.
 		if e.ConvStore != nil {
 			e.ConvStore.Append(conversation.Message{
-				ID:        conversation.NewMessageID(),
+				ID:        routerMsgID,
 				ConvID:    convID,
 				Channel:   channel,
 				Role:      "assistant",
@@ -166,6 +183,14 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 				Timestamp: time.Now(),
 				Model:     "router",
 				Tier:      "router",
+			})
+		}
+		// Persist to ChatDB.
+		if e.ChatDB != nil && msg.ConvID != "" {
+			e.ChatDB.InsertMessage(chatdb.Message{
+				ID: routerMsgID, ConvID: msg.ConvID, Role: "assistant",
+				Text: route.Response, Source: msg.Source, Model: "router",
+				Tier: "router", CreatedAt: time.Now(),
 			})
 		}
 		e.emit(channelID, OutEvent{Type: "text", Data: map[string]string{"text": route.Response}})
@@ -177,11 +202,13 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 			"tier":  "router",
 		}})
 		return &ProcessResult{
-			Text:     route.Response,
-			Model:    "router",
-			Tier:     "router",
-			Reason:   route.Reason,
-			Reaction: route.React,
+			Text:           route.Response,
+			Model:          "router",
+			Tier:           "router",
+			Reason:         route.Reason,
+			Reaction:       route.React,
+			UserMsgID:      userMsgID,
+			AssistantMsgID: routerMsgID,
 		}, nil
 	}
 
@@ -211,11 +238,11 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 
 	// 9. Agent dispatch.
 	if route.Tier == "agent" && e.Orchestrator != nil {
-		return e.processAgent(ctx, msg, tp, recall, convID)
+		return e.processAgent(ctx, msg, tp, recall, convID, userMsgID)
 	}
 
 	// 10-13. Standard provider invocation.
-	return e.processStandard(ctx, msg, tp, route, recall, convID)
+	return e.processStandard(ctx, msg, tp, route, recall, convID, userMsgID)
 }
 
 // routeMedia handles media routing: classify if caption, else cheapest with Read.
@@ -274,7 +301,7 @@ func (e *ChatEngine) applySkillTierOverride(route RouteResult, minTier string) R
 }
 
 // processAgent delegates to the multi-agent orchestrator.
-func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierParams, recall RecallResult, convID string) (*ProcessResult, error) {
+func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierParams, recall RecallResult, convID string, userMsgID string) (*ProcessResult, error) {
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
 
@@ -333,9 +360,10 @@ func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierPar
 	}
 
 	// Persist agent response.
+	agentMsgID := conversation.NewMessageID()
 	if e.ConvStore != nil {
 		e.ConvStore.Append(conversation.Message{
-			ID:        conversation.NewMessageID(),
+			ID:        agentMsgID,
 			ConvID:    convID,
 			Channel:   channel,
 			Role:      "assistant",
@@ -344,6 +372,14 @@ func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierPar
 			Model:     "agent",
 			Tier:      "agent",
 			CostUSD:   orchMeta.TotalCost,
+		})
+	}
+	if e.ChatDB != nil && msg.ConvID != "" {
+		e.ChatDB.InsertMessage(chatdb.Message{
+			ID: agentMsgID, ConvID: msg.ConvID, Role: "assistant",
+			Text: orchResult, Source: msg.Source, Model: "agent",
+			Tier: "agent", CostUSD: orchMeta.TotalCost,
+			DurationMs: duration.Milliseconds(), CreatedAt: time.Now(),
 		})
 	}
 
@@ -373,17 +409,19 @@ func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierPar
 	}
 
 	return &ProcessResult{
-		Text:     orchResult,
-		Model:    "agent",
-		Tier:     "agent",
-		CostUSD:  orchMeta.TotalCost,
-		IsAgent:  true,
-		Duration: duration.Milliseconds(),
+		Text:           orchResult,
+		Model:          "agent",
+		Tier:           "agent",
+		CostUSD:        orchMeta.TotalCost,
+		IsAgent:        true,
+		Duration:       duration.Milliseconds(),
+		UserMsgID:      userMsgID,
+		AssistantMsgID: agentMsgID,
 	}, nil
 }
 
 // processStandard handles non-agent tier invocation (CLI or API provider).
-func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp TierParams, route RouteResult, recall RecallResult, convID string) (*ProcessResult, error) {
+func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp TierParams, route RouteResult, recall RecallResult, convID string, userMsgID string) (*ProcessResult, error) {
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
 	sessionKey := channelID.SessionKey()
@@ -619,6 +657,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	}
 
 	// Persist assistant message.
+	assistantMsgID := conversation.NewMessageID()
 	if e.ConvStore != nil {
 		var blocks []conversation.ContentBlock
 		if acc != nil {
@@ -628,7 +667,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			blocks = []conversation.ContentBlock{{Type: conversation.BlockText, Text: cleanText}}
 		}
 		e.ConvStore.Append(conversation.Message{
-			ID:        conversation.NewMessageID(),
+			ID:        assistantMsgID,
 			ConvID:    convID,
 			Channel:   channel,
 			Role:      "assistant",
@@ -639,6 +678,26 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			Backend:   tp.Backend,
 			CostUSD:   result.CostUSD,
 			SessionID: result.SessionID,
+		})
+	}
+	// Persist to ChatDB with content blocks.
+	if e.ChatDB != nil && msg.ConvID != "" {
+		var dbBlocks []chatdb.ContentBlock
+		if acc != nil {
+			for i, b := range acc.Blocks() {
+				dbBlocks = append(dbBlocks, chatdb.ContentBlock{
+					BlockIndex: i, BlockType: string(b.Type),
+					Text: b.Text, Name: b.Name, Input: b.Input,
+					ToolID: b.ToolID, Output: b.Output,
+				})
+			}
+		}
+		e.ChatDB.InsertMessage(chatdb.Message{
+			ID: assistantMsgID, ConvID: msg.ConvID, Role: "assistant",
+			Text: cleanText, Source: msg.Source, Model: result.Model,
+			Tier: route.Tier, CostUSD: result.CostUSD, SessionID: result.SessionID,
+			DurationMs: duration.Milliseconds(), CreatedAt: time.Now(),
+			Blocks: dbBlocks,
 		})
 	}
 
@@ -693,16 +752,18 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	}
 
 	return &ProcessResult{
-		Text:      cleanText,
-		Model:     result.Model,
-		Tier:      route.Tier,
-		Reason:    route.Reason,
-		CostUSD:   result.CostUSD,
-		SessionID: result.SessionID,
-		Reaction:  suggestedEmoji,
-		Skills:    e.Sessions.GetSkills(sessionKey),
-		Blocks:    resultBlocks,
-		Duration:  duration.Milliseconds(),
+		Text:           cleanText,
+		Model:          result.Model,
+		Tier:           route.Tier,
+		Reason:         route.Reason,
+		CostUSD:        result.CostUSD,
+		SessionID:      result.SessionID,
+		Reaction:       suggestedEmoji,
+		Skills:         e.Sessions.GetSkills(sessionKey),
+		Blocks:         resultBlocks,
+		Duration:       duration.Milliseconds(),
+		UserMsgID:      userMsgID,
+		AssistantMsgID: assistantMsgID,
 	}, nil
 }
 

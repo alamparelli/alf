@@ -40,32 +40,33 @@
   }
 
   // --- Tab state ---
-  let tabs = $state<ChatTab[]>(loadTabs())
-  let activeTabId = $state(loadActiveTabId(tabs))
+  let tabs = $state<ChatTab[]>([])
+  let activeTabId = $state(localStorage.getItem('alf-chat-active-tab') || '')
 
   let activeTab = $derived(tabs.find(t => t.id === activeTabId))
 
-  function loadTabs(): ChatTab[] {
+  // Load conversations from server (replaces localStorage tabs).
+  async function loadConversations() {
     try {
-      const stored = localStorage.getItem('alf-chat-tabs')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        if (Array.isArray(parsed)) return parsed
-      }
-    } catch { /* ignore */ }
-    return []
-  }
-
-  function loadActiveTabId(tabs: ChatTab[]): string {
-    try {
+      const data = await api<any>('/api/chat/conversations')
+      const convs = data.conversations || []
+      tabs = convs.map((c: any) => ({
+        id: c.id,
+        label: c.title || `Chat`,
+        convId: c.id,
+        unread: 0,
+      }))
+      // Restore active tab from localStorage, fallback to first.
       const stored = localStorage.getItem('alf-chat-active-tab')
-      if (stored && tabs.some(t => t.id === stored)) return stored
-    } catch { /* ignore */ }
-    return tabs[0]?.id || ''
+      if (stored && tabs.some(t => t.id === stored)) {
+        activeTabId = stored
+      } else {
+        activeTabId = tabs[0]?.id || ''
+      }
+    } catch { /* server not ready yet */ }
   }
 
-  function saveTabs() {
-    localStorage.setItem('alf-chat-tabs', JSON.stringify(tabs))
+  function saveActiveTab() {
     localStorage.setItem('alf-chat-active-tab', activeTabId)
   }
 
@@ -74,23 +75,31 @@
   }
 
   async function addTab() {
-    const tab: ChatTab = { id: genId(), label: `Chat ${tabs.length + 1}`, convId: '', unread: 0 }
+    const id = genId()
+    const label = `Chat ${tabs.length + 1}`
+    // Create server-side conversation first.
+    try {
+      await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id, title: label }) })
+    } catch { /* best effort */ }
+    // Also create a new backend session.
+    let convId = id
+    try {
+      const data = await api<any>('/api/chat', { method: 'DELETE' })
+      if (data.conv_id) convId = data.conv_id
+    } catch { /* use generated id */ }
+    const tab: ChatTab = { id: convId, label, convId, unread: 0 }
     tabs = [...tabs, tab]
     activeTabId = tab.id
     setMessages(tab.id, [])
-    // Create a new backend session for this tab
-    try {
-      const data = await api<any>('/api/chat', { method: 'DELETE' })
-      if (data.conv_id) {
-        tab.convId = data.conv_id
-        tabs = [...tabs]
-      }
-    } catch { /* will get conv_id on first message */ }
-    saveTabs()
+    saveActiveTab()
   }
 
-  function closeTab(tabId: string) {
-    // Clean up tab messages and drafts
+  async function closeTab(tabId: string) {
+    // Archive on server.
+    try {
+      await api(`/api/chat/conversations/${tabId}`, { method: 'DELETE' })
+    } catch { /* best effort */ }
+    // Clean up locally.
     delete tabMessages[tabId]
     tabMessages = { ...tabMessages }
     delete tabDrafts[tabId]
@@ -99,7 +108,7 @@
     if (activeTabId === tabId) {
       activeTabId = tabs[0]?.id || ''
     }
-    saveTabs()
+    saveActiveTab()
   }
 
   function switchTab(tabId: string) {
@@ -110,8 +119,8 @@
     if (tab) {
       tab.unread = 0
       tabs = [...tabs]
-      saveTabs()
     }
+    saveActiveTab()
     // Only load from API if we don't already have messages cached for this tab
     if (!tabMessages[tabId] || tabMessages[tabId].length === 0) {
       loadHistory()
@@ -120,14 +129,20 @@
     }
   }
 
-  function renameTab(tabId: string) {
+  async function renameTab(tabId: string) {
     const tab = tabs.find(t => t.id === tabId)
     if (!tab) return
     const name = prompt('Rename tab:', tab.label)
     if (name && name.trim()) {
       tab.label = name.trim()
       tabs = [...tabs]
-      saveTabs()
+      // Persist to server.
+      try {
+        await api(`/api/chat/conversations/${tabId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ title: tab.label }),
+        })
+      } catch { /* best effort */ }
     }
   }
 
@@ -606,9 +621,9 @@
       if (data.conv_id && activeTab) {
         activeTab.convId = data.conv_id
         tabs = [...tabs]
-        saveTabs()
       }
       setMessages(activeTabId, [])
+      saveActiveTab()
       toasts.show('New conversation started', 'success')
     } catch (e: any) {
       toasts.show(e.error || 'Failed to start new conversation', 'error')
@@ -623,10 +638,12 @@
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
+    // Load conversations from server (replaces localStorage tabs).
+    await loadConversations()
     await loadTiers()
     // Reload tiers on profile switch (SSE event)
     unsubTiers = events.subscribe('tiers', () => loadTiers())
-    // Only load history if the tab has a saved convId (restored session)
+    // Load history for the active tab.
     if (activeTab?.convId) {
       await loadHistory()
     }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/provider"
 	chatsession "github.com/alamparelli/alf/internal/session"
@@ -36,11 +37,15 @@ func newTestChatService(t *testing.T) *ChatService {
 	eventLog := eventlog.New(dataDir)
 	t.Cleanup(func() { eventLog.Close() })
 
-	chatStore := NewChatStore(dataDir)
+	chatDB, err := chatdb.New(dataDir)
+	if err != nil {
+		t.Fatalf("chatdb: %v", err)
+	}
+	t.Cleanup(func() { chatDB.Close() })
 
 	return NewChatService(
 		dataDir, configDir, contextDir,
-		tierStore, sessions, eventLog, chatStore,
+		tierStore, sessions, eventLog, chatDB,
 		nil, // no transcriber
 		func(msg, lastTier string, msgCount int) RouteResult {
 			// Default test router: always route to "test_tier".
@@ -152,13 +157,14 @@ func TestChatService_History(t *testing.T) {
 	svc := newTestChatService(t)
 
 	now := time.Now()
-	svc.ChatStore.Append(ChatMessage{
-		ID: "h1", Role: "user", Text: "first",
-		Timestamp: now.Add(-2 * time.Minute),
+	svc.ChatDB.EnsureConversation("test", "", "cc")
+	svc.ChatDB.InsertMessage(chatdb.Message{
+		ID: "h1", ConvID: "test", Role: "user", Text: "first",
+		CreatedAt: now.Add(-2 * time.Minute),
 	})
-	svc.ChatStore.Append(ChatMessage{
-		ID: "h2", Role: "assistant", Text: "second",
-		Timestamp: now.Add(-time.Minute),
+	svc.ChatDB.InsertMessage(chatdb.Message{
+		ID: "h2", ConvID: "test", Role: "assistant", Text: "second",
+		CreatedAt: now.Add(-time.Minute),
 	})
 
 	msgs := svc.History(50, time.Time{}, "")
@@ -182,9 +188,9 @@ func TestChatService_HistoryLimitCap(t *testing.T) {
 
 func TestChatService_ReactValid(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatStore.Append(ChatMessage{
-		ID: "react-msg", Role: "assistant", Text: "test",
-		Timestamp: time.Now(),
+	svc.ChatDB.EnsureConversation("test", "", "cc")
+	svc.ChatDB.InsertMessage(chatdb.Message{
+		ID: "react-msg", ConvID: "test", Role: "assistant", Text: "test",
 	})
 
 	result, err := svc.React(ReactRequest{MsgID: "react-msg", Emoji: "👍"})
@@ -206,9 +212,9 @@ func TestChatService_BuildPrompt(t *testing.T) {
 	}
 
 	// Message with reply context.
-	svc.ChatStore.Append(ChatMessage{
-		ID: "orig", Role: "assistant", Text: "original message",
-		Timestamp: time.Now(),
+	svc.ChatDB.EnsureConversation("test", "", "cc")
+	svc.ChatDB.InsertMessage(chatdb.Message{
+		ID: "orig", ConvID: "test", Role: "assistant", Text: "original message",
 	})
 	prompt = svc.buildPrompt(ChatRequest{Message: "my reply", ReplyTo: "orig"})
 	if !strings.Contains(prompt, "original message") {

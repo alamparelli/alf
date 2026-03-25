@@ -319,7 +319,7 @@ func HandlerFactory(deps Deps) http.Handler {
 
 	// LLM invocation (used by system-tools CLI).
 	if deps.ToolRegistry != nil {
-		mux.Handle("/api/llm/invoke", &LLMInvokeHandler{ToolRegistry: deps.ToolRegistry})
+		mux.Handle("/api/llm/invoke", &LLMInvokeHandler{ToolRegistry: deps.ToolRegistry, TierStore: deps.TierStore})
 	}
 
 	// Bash command execution.

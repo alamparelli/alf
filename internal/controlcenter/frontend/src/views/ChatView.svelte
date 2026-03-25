@@ -151,6 +151,7 @@
   let sendingTabId = $state('') // track which tab initiated the send
   let tiers = $state<Tier[]>([])
   let messagesContainer: HTMLDivElement
+  let tabTierSelections = $state<Record<string, string>>({}) // per-tab tier selection
   let streamingBlocks = $state<any[]>([])
   let streamingText = $state('')
   let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -220,6 +221,9 @@
     }
   }
 
+  let loadingOlder = $state(false)
+  let hasOlderMessages = $state<Record<string, boolean>>({})
+
   async function loadHistory(tabId?: string) {
     const tid = tabId || activeTabId
     const tab = tabs.find(t => t.id === tid)
@@ -230,11 +234,52 @@
       return
     }
     try {
-      const data = await api<ChatMsg[]>(`/api/chat?limit=100&conv_id=${convId}`)
+      const data = await api<ChatMsg[]>(`/api/chat?limit=50&conv_id=${convId}`)
       setMessages(tid, data || [])
+      // If we got exactly 50, there might be older messages.
+      hasOlderMessages[tid] = (data?.length || 0) >= 50
+      hasOlderMessages = { ...hasOlderMessages }
       if (tid === activeTabId) scrollToBottom()
     } catch {
       setMessages(tid, [])
+    }
+  }
+
+  async function loadOlderMessages() {
+    if (loadingOlder || !activeTabId) return
+    const tab = tabs.find(t => t.id === activeTabId)
+    const convId = tab?.convId || ''
+    if (!convId) return
+    const currentMsgs = tabMessages[activeTabId] || []
+    if (currentMsgs.length === 0) return
+
+    loadingOlder = true
+    try {
+      const oldest = currentMsgs[0]
+      const data = await api<ChatMsg[]>(`/api/chat?limit=50&conv_id=${convId}&before=${oldest.ts}`)
+      if (data && data.length > 0) {
+        // Prepend older messages, preserving scroll position.
+        const container = messagesContainer
+        const prevHeight = container?.scrollHeight || 0
+        tabMessages[activeTabId] = [...data, ...currentMsgs]
+        tabMessages = { ...tabMessages }
+        // Restore scroll position so user doesn't jump.
+        await tick()
+        if (container) {
+          container.scrollTop = container.scrollHeight - prevHeight
+        }
+      }
+      hasOlderMessages[activeTabId] = (data?.length || 0) >= 50
+      hasOlderMessages = { ...hasOlderMessages }
+    } catch { /* ignore */ }
+    loadingOlder = false
+  }
+
+  function onMessagesScroll(e: Event) {
+    const el = e.target as HTMLDivElement
+    // Load older messages when scrolled near the top.
+    if (el.scrollTop < 100 && hasOlderMessages[activeTabId]) {
+      loadOlderMessages()
     }
   }
 
@@ -474,8 +519,10 @@
       activeJobId = null
       streamingBlocks = []
       streamingText = ''
+      // Small delay to ensure server has committed the message before we fetch.
+      await new Promise(r => setTimeout(r, 100))
       await loadHistory(originTab)
-      if (originTab === activeTabId) scrollToBottom()
+      scrollToBottom()
 
       // Desktop notification if tab is not visible
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && finalText) {
@@ -688,7 +735,11 @@
   </div>
 
   <!-- Messages -->
-  <div class="chat-messages" bind:this={messagesContainer}>
+  <div class="chat-messages" bind:this={messagesContainer} onscroll={onMessagesScroll}>
+    {#if loadingOlder}
+      <div class="loading-older">Loading older messages...</div>
+    {/if}
+
     {#if messages.length === 0 && !(sending && sendingTabId === activeTabId)}
       <div class="chat-empty">
         <MessageCircle size={32} />
@@ -737,7 +788,7 @@
   </div>
 
   <!-- Input -->
-  <ChatInput onSend={handleSend} onStop={stopCall} sending={sending && sendingTabId === activeTabId} {tiers} draft={currentDraft} onDraftChange={updateDraft} />
+  <ChatInput onSend={handleSend} onStop={stopCall} sending={sending && sendingTabId === activeTabId} {tiers} draft={currentDraft} onDraftChange={updateDraft} selectedModel={tabTierSelections[activeTabId] || ''} onModelChange={(m) => { tabTierSelections[activeTabId] = m; tabTierSelections = { ...tabTierSelections } }} />
 </div>
 
 <!-- Send to Agents Modal -->
@@ -931,6 +982,13 @@
 
   .chat-empty p {
     font-size: 0.85rem;
+  }
+
+  .loading-older {
+    text-align: center;
+    padding: 8px;
+    color: var(--text-dim);
+    font-size: 0.8rem;
   }
 
   /* Typing indicator */

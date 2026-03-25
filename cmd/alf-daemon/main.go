@@ -617,7 +617,21 @@ func main() {
 
 	// Persistent signal server for notify/react/status tools (all channels).
 	persistentSigPath := filepath.Join(dataDir, "signal.sock")
-	persistentSigServer := &signal.Server{Notify: commEngine.Broadcast}
+	persistentSigServer := &signal.Server{Notify: func(text string) {
+		// Inject into the active CC chat conversation so the user sees
+		// the notification inline, then also broadcast to other channels.
+		convID := chatService.CurrentConvID()
+		chatStore.Append(cc.ChatMessage{
+			ID:        cc.NewMessageID(),
+			Role:      "assistant",
+			Text:      text,
+			Tier:      "notify",
+			Timestamp: time.Now(),
+			ConvID:    convID,
+			SessionID: "signal:notify",
+		})
+		commEngine.Broadcast(text)
+	}}
 	if ln, err := persistentSigServer.ListenUnix(persistentSigPath); err != nil {
 		log.Printf("signal: persistent listen error: %v", err)
 	} else {

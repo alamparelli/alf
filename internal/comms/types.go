@@ -62,16 +62,19 @@ type MediaEntry struct {
 
 // InMessage is the unified input from an adapter to the engine.
 type InMessage struct {
-	ChannelID  ChannelID
-	Text       string       // full prompt for provider (includes media refs, reply context)
-	RawText    string       // raw user message for display/persistence; falls back to Text if empty
-	RouterText string       // shortened for router (adapter builds this)
-	ReplyTo    string       // quoted text (empty if not reply)
-	IsReply    bool
-	Media      []MediaEntry // pre-processed by adapter
-	ForcedTier string       // from force command or session override
-	Env        []string     // additional env vars for provider (e.g., ALF_SIGNAL_SOCK)
-	Metadata   map[string]any
+	ChannelID    ChannelID
+	Text         string       // full prompt for provider (includes media refs, reply context)
+	RawText      string       // raw user message for display/persistence; falls back to Text if empty
+	RouterText   string       // shortened for router (adapter builds this)
+	ReplyTo      string       // quoted text (empty if not reply)
+	IsReply      bool
+	Media        []MediaEntry // pre-processed by adapter
+	ForcedTier   string       // from force command or session override
+	Env          []string     // additional env vars for provider (e.g., ALF_SIGNAL_SOCK)
+	Metadata     map[string]any
+	ConvID       string // conversation ID for ChatDB persistence (CC tab ID, TG "tg-{chatID}")
+	Source       string // "cc", "telegram", "mobile", "scheduler"
+	ReplyToMsgID string // message ID for ChatDB reply tracking
 }
 
 // DisplayText returns RawText if set, otherwise Text.
@@ -93,17 +96,19 @@ type OutEvent struct {
 
 // ProcessResult is returned after engine.Process completes.
 type ProcessResult struct {
-	Text      string
-	Model     string
-	Tier      string
-	Reason    string
-	CostUSD   float64
-	SessionID string
-	Skills    []string
-	Reaction  string // suggested emoji (extracted from [[react:EMOJI]])
-	IsAgent   bool
-	Blocks    []conversation.ContentBlock
-	Duration  int64 // milliseconds
+	Text           string
+	Model          string
+	Tier           string
+	Reason         string
+	CostUSD        float64
+	SessionID      string
+	Skills         []string
+	Reaction       string // suggested emoji (extracted from [[react:EMOJI]])
+	IsAgent        bool
+	Blocks         []conversation.ContentBlock
+	Duration       int64  // milliseconds
+	UserMsgID      string // ID of persisted user message
+	AssistantMsgID string // ID of persisted assistant message
 }
 
 // TierParams holds resolved tier configuration for Claude invocation.

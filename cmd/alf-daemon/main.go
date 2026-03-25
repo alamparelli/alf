@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/firewall"
@@ -412,8 +413,14 @@ func main() {
 	alfMsgIDs := newRingBuffer(200)
 	chatHistory := newChatHistoryBuffer(10) // last 10 exchanges per chat
 
-	// Chat message store for mobile app API.
-	chatStore := cc.NewChatStore(dataDir)
+	// Chat message store (SQLite — replaces JSONL ring buffer).
+	chatDB, err := chatdb.New(dataDir)
+	if err != nil {
+		log.Fatalf("chatdb: %v", err)
+	}
+	defer chatDB.Close()
+	// One-time migration from legacy JSONL format.
+	chatDB.MigrateFromJSONL(filepath.Join(dataDir, "logs", "chat_messages.jsonl"))
 	// Unified conversation store (rich messages with content blocks).
 	convStore := conversation.NewStore(dataDir)
 
@@ -541,7 +548,7 @@ func main() {
 			React:    rr.React,
 		}
 	}
-	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
+	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatDB, transcriber, classifyFn, router.ResolveModel, cliProvider)
 	chatService.Registry = registry
 	chatService.SkillStore = skillStore
 	chatService.Orchestrator = orch
@@ -597,6 +604,7 @@ func main() {
 		ContextDir:     contextDir,
 		Sessions:       chatSessions,
 		ConvStore:      convStore,
+		ChatDB:         chatDB,
 		EventLog:       eventLog,
 		TierStore:      &commsTierStore{ts: tierStore},
 		SkillStore:     skillStore,
@@ -621,13 +629,17 @@ func main() {
 		// Inject into the active CC chat conversation so the user sees
 		// the notification inline, then also broadcast to other channels.
 		convID := chatService.CurrentConvID()
-		chatStore.Append(cc.ChatMessage{
+		if convID == "" {
+			convID = "_system"
+		}
+		chatDB.EnsureConversation(convID, "", "cc")
+		chatDB.InsertMessage(chatdb.Message{
 			ID:        cc.NewMessageID(),
+			ConvID:    convID,
 			Role:      "assistant",
 			Text:      text,
+			Source:    "cc",
 			Tier:      "notify",
-			Timestamp: time.Now(),
-			ConvID:    convID,
 			SessionID: "signal:notify",
 		})
 		commEngine.Broadcast(text)
@@ -708,10 +720,13 @@ func main() {
 			default:
 				return
 			}
-			chatStore.Append(cc.ChatMessage{
-				ID:   cc.NewMessageID(),
-				Role: "system",
-				Text: text,
+			chatDB.EnsureConversation("_system", "", "cc")
+			chatDB.InsertMessage(chatdb.Message{
+				ID:     cc.NewMessageID(),
+				ConvID: "_system",
+				Role:   "system",
+				Text:   text,
+				Source: "cc",
 			})
 			log.Printf("[tasks] event: task=%s status=%s", taskID[:min(8, len(taskID))], status)
 		}
@@ -831,12 +846,12 @@ func main() {
 		ContextDir:   contextDir,
 		ChatID:       parsedChatID,
 		TG:           tg,
-		CC:           &schedulerCCNotifier{store: chatStore},
+		CC:           &schedulerCCNotifier{db: chatDB},
 		Provider:     &schedulerProvider{p: cliProvider},
 		TierStore:    &schedulerTierStore{ts: tierStore},
 		SkillStore:   &schedulerSkillStore{s: skillStore},
 		Orchestrator: &schedulerOrchestrator{o: orch},
-		ChatLogger:   &schedulerChatLogger{store: chatStore},
+		ChatLogger:   &schedulerChatLogger{db: chatDB},
 		EventLog:     eventLog,
 		CronPath:     filepath.Join(configDir, "cron.json"),
 		Location:     schedLocation,
@@ -1575,6 +1590,8 @@ func main() {
 				RouterText: routerMsg,
 				IsReply:    isReply,
 				ForcedTier: forcedTierName,
+				ConvID:     fmt.Sprintf("tg-%d", tgChatID),
+				Source:     "telegram",
 			}
 			if isReply {
 				msg.ReplyTo = extractReplyContext(u.Message)

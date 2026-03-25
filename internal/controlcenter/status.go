@@ -2,8 +2,9 @@ package controlcenter
 
 import (
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/alamparelli/alf/internal/chatdb"
 )
 
 // UpdateChecker provides the latest available version (if any).
@@ -13,15 +14,15 @@ type UpdateChecker interface {
 
 // daemonStatusProvider implements StatusProvider using shared Stats.
 type daemonStatusProvider struct {
-	stats     *Stats
-	version   string
-	chatStore *ChatStore
-	updater   UpdateChecker // may be nil
+	stats   *Stats
+	version string
+	chatDB  *chatdb.DB
+	updater UpdateChecker // may be nil
 }
 
 // NewStatusProvider creates a StatusProvider from shared stats.
-func NewStatusProvider(stats *Stats, version string, chatStore *ChatStore) *daemonStatusProvider {
-	return &daemonStatusProvider{stats: stats, version: version, chatStore: chatStore}
+func NewStatusProvider(stats *Stats, version string, chatDB *chatdb.DB) *daemonStatusProvider {
+	return &daemonStatusProvider{stats: stats, version: version, chatDB: chatDB}
 }
 
 // SetUpdater attaches the update checker for version status reporting.
@@ -53,43 +54,20 @@ func (p *daemonStatusProvider) Status() DaemonStatus {
 	}
 
 	// Compute current session stats from recent messages.
-	if p.chatStore != nil {
+	if p.chatDB != nil {
 		ds.Session = p.currentSession()
 	}
 
 	return ds
 }
 
-// currentSession scans recent messages to find the latest session and compute stats.
+// currentSession queries ChatDB for the latest interactive session stats.
 func (p *daemonStatusProvider) currentSession() *SessionStatus {
-	msgs := p.chatStore.Recent(0) // all in ring buffer
-	if len(msgs) == 0 {
+	sessionID, count, cost, err := p.chatDB.SessionStats("scheduled:")
+	if err != nil || sessionID == "" {
 		return nil
 	}
 
-	// Find the latest interactive session ID (skip scheduled job sessions).
-	var sessionID string
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].SessionID != "" && !strings.HasPrefix(msgs[i].SessionID, "scheduled:") {
-			sessionID = msgs[i].SessionID
-			break
-		}
-	}
-	if sessionID == "" {
-		return nil
-	}
-
-	// Count messages and sum cost for this session.
-	var count int
-	var cost float64
-	for _, m := range msgs {
-		if m.SessionID == sessionID {
-			count++
-			cost += m.CostUSD
-		}
-	}
-
-	// Shorten session ID for display.
 	displayID := sessionID
 	if len(displayID) > 12 {
 		displayID = displayID[:12]

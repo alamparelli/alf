@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/comms"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/memstore"
@@ -233,34 +234,38 @@ func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
 	return snap
 }
 
-// schedulerChatLogger adapts cc.ChatStore to the scheduler.ChatLogger interface.
+// schedulerChatLogger adapts chatdb.DB to the scheduler.ChatLogger interface.
 type schedulerChatLogger struct {
-	store *cc.ChatStore
+	db *chatdb.DB
 }
 
 func (l *schedulerChatLogger) LogScheduledMessage(text, tier, jobName string) {
-	l.store.Append(cc.ChatMessage{
+	l.db.EnsureConversation("_scheduler", "", "scheduler")
+	l.db.InsertMessage(chatdb.Message{
 		ID:        cc.NewMessageID(),
+		ConvID:    "_scheduler",
 		Role:      "assistant",
 		Text:      text,
+		Source:    "scheduler",
 		Tier:      tier,
-		Timestamp: time.Now(),
 		SessionID: "scheduled:" + jobName,
 	})
 }
 
 // schedulerCCNotifier pushes schedule notifications to the Control Center chat.
 type schedulerCCNotifier struct {
-	store *cc.ChatStore
+	db *chatdb.DB
 }
 
 func (n *schedulerCCNotifier) Notify(text string) {
-	n.store.Append(cc.ChatMessage{
+	n.db.EnsureConversation("_scheduler", "", "scheduler")
+	n.db.InsertMessage(chatdb.Message{
 		ID:        cc.NewMessageID(),
+		ConvID:    "_scheduler",
 		Role:      "assistant",
 		Text:      text,
+		Source:    "scheduler",
 		Tier:      "scheduler",
-		Timestamp: time.Now(),
 		SessionID: "scheduler:notification",
 	})
 }

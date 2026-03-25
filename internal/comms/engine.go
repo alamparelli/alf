@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
@@ -25,6 +26,7 @@ type ChatEngine struct {
 	// Stores
 	Sessions  *session.Store
 	ConvStore *conversation.Store
+	ChatDB    *chatdb.DB // may be nil — UI chat persistence (SQLite)
 	EventLog  *eventlog.Logger
 	TierStore TierStoreReader
 	SkillStore skills.Store
@@ -61,6 +63,7 @@ func NewEngine(cfg EngineConfig) *ChatEngine {
 		ContextDir:     cfg.ContextDir,
 		Sessions:       cfg.Sessions,
 		ConvStore:      cfg.ConvStore,
+		ChatDB:         cfg.ChatDB,
 		EventLog:       cfg.EventLog,
 		TierStore:      cfg.TierStore,
 		SkillStore:     cfg.SkillStore,
@@ -84,6 +87,7 @@ type EngineConfig struct {
 
 	Sessions   *session.Store
 	ConvStore  *conversation.Store
+	ChatDB     *chatdb.DB
 	EventLog   *eventlog.Logger
 	TierStore  TierStoreReader
 	SkillStore skills.Store

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alamparelli/alf/internal/chatdb"
+
 	"github.com/alamparelli/alf/internal/comms"
 )
 
@@ -144,13 +146,14 @@ func TestChatHandler_HistoryEmpty(t *testing.T) {
 
 func TestChatHandler_HistoryWithMessages(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatStore.Append(ChatMessage{
-		ID: "msg-1", Role: "user", Text: "hello",
-		Timestamp: time.Now().Add(-time.Minute),
+	svc.ChatDB.EnsureConversation("test", "", "cc")
+	svc.ChatDB.InsertMessage(chatdb.Message{
+		ID: "msg-1", ConvID: "test", Role: "user", Text: "hello",
+		CreatedAt: time.Now().Add(-time.Minute),
 	})
-	svc.ChatStore.Append(ChatMessage{
-		ID: "msg-2", Role: "assistant", Text: "hi",
-		Timestamp: time.Now(),
+	svc.ChatDB.InsertMessage(chatdb.Message{
+		ID: "msg-2", ConvID: "test", Role: "assistant", Text: "hi",
+		CreatedAt: time.Now(),
 	})
 
 	h := &ChatHandler{Service: svc}
@@ -175,12 +178,14 @@ func TestChatHandler_HistoryWithMessages(t *testing.T) {
 func TestChatHandler_HistoryPagination(t *testing.T) {
 	svc := newTestChatService(t)
 	now := time.Now()
+	svc.ChatDB.EnsureConversation("test", "", "cc")
 	for i := 0; i < 10; i++ {
-		svc.ChatStore.Append(ChatMessage{
+		svc.ChatDB.InsertMessage(chatdb.Message{
 			ID:        NewMessageID(),
+			ConvID:    "test",
 			Role:      "user",
 			Text:      "msg",
-			Timestamp: now.Add(time.Duration(i) * time.Minute),
+			CreatedAt: now.Add(time.Duration(i) * time.Minute),
 		})
 	}
 

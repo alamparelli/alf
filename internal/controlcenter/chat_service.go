@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/eventlog"
@@ -83,7 +84,7 @@ type ChatService struct {
 	TierStore    TierStore
 	Sessions     *chatsession.Store
 	EventLog     *eventlog.Logger
-	ChatStore    *ChatStore
+	ChatDB       *chatdb.DB
 	Transcriber  *voice.Transcriber   // may be nil
 	Classify     ClassifyFunc         // injected router
 	ResolveModel ResolveModelFunc     // injected model resolver
@@ -174,7 +175,7 @@ type ReactResult struct {
 // reactionSystemPromptTmpl references the centralized prompt in memory/reaction.md.
 
 // NewChatService creates a new ChatService.
-func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatStore *ChatStore, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
+func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatDB *chatdb.DB, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
 	cs := &ChatService{
 		DataDir:      dataDir,
 		ConfigDir:    configDir,
@@ -182,7 +183,7 @@ func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, 
 		TierStore:    tierStore,
 		Sessions:     sessions,
 		EventLog:     eventLog,
-		ChatStore:    chatStore,
+		ChatDB:       chatDB,
 		Transcriber:  transcriber,
 		Classify:     classify,
 		ResolveModel: resolveModel,
@@ -220,662 +221,11 @@ func (cs *ChatService) GetUpload(id string) *UploadEntry {
 func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-
-	sessID := convSessionID(req.ConvID)
-
-	if cs.Engine != nil {
-		return cs.askViaEngine(ctx, req, onEvent)
-	}
-
-	// Detect force command: /<tier_name> <message> bypasses routing.
-	if strings.HasPrefix(req.Message, "/") && req.Model == "" {
-		parts := strings.SplitN(req.Message, " ", 2)
-		cmdName := strings.TrimPrefix(parts[0], "/")
-		for _, t := range cs.TierStore.Current().Tiers {
-			if t.Enabled && t.ForceCommand && t.Name == cmdName {
-				// Persist tier override for the session.
-				cs.Sessions.SetForcedTier(sessID, t.Name)
-				onEvent(ChatEvent{Type: "system", Data: map[string]string{
-					"text": fmt.Sprintf("⚡ Session locked to **%s**. Use /new to reset.", t.Name),
-				}})
-				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
-					// Bare /<tier> — lock session only, no message to process.
-					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{Model: t.Name, Tier: t.Name}})
-					return nil
-				}
-				req.Model = t.Name
-				req.Message = strings.TrimSpace(parts[1])
-				break
-			}
-		}
-	}
-
-	// Check for persistent tier override from a previous force command.
-	if req.Model == "" {
-		if ft := cs.Sessions.GetForcedTier(sessID); ft != "" {
-			req.Model = ft
-		}
-	}
-
-	// Build prompt from message + reply context + media.
-	prompt := cs.buildPrompt(req)
-	if prompt == "" {
-		return fmt.Errorf("empty message")
-	}
-
-	// Save user message.
-	userMsgID := NewMessageID()
-	userMsg := ChatMessage{
-		ID:        userMsgID,
-		Role:      "user",
-		Text:      req.Message,
-		Timestamp: time.Now(),
-		ConvID:    req.ConvID,
-		ReplyTo:   req.ReplyTo,
-		Media:     cs.resolveMediaRefs(req.MediaIDs),
-	}
-	cs.ChatStore.Append(userMsg)
-
-	// Log incoming message for mem-extract (legacy path without engine).
-	if cs.EventLog != nil {
-		cs.EventLog.Log("message_in", map[string]any{
-			"channel":   "cc",
-			"text":      req.Message,
-			"is_reply":  req.ReplyTo != "",
-			"has_media": len(req.MediaIDs) > 0,
-		})
-	}
-
-	// Parallel write to unified conversation store.
-	var ccConvID string
-	if cs.ConvStore != nil {
-		ccConvID = cs.ConvStore.ConvID(conversation.ChannelCC)
-		convUser := conversation.Message{
-			ID:        userMsgID,
-			ConvID:    ccConvID,
-			Channel:   conversation.ChannelCC,
-			Role:      "user",
-			Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: req.Message}},
-			Timestamp: userMsg.Timestamp,
-			ReplyTo:   req.ReplyTo,
-		}
-		for _, mr := range userMsg.Media {
-			convUser.Media = append(convUser.Media, conversation.MediaRef{
-				UploadID: mr.UploadID,
-				Type:     mr.Type,
-				FileName: mr.FileName,
-				MimeType: mr.MimeType,
-				URL:      mr.URL,
-			})
-		}
-		cs.ConvStore.Append(convUser)
-	}
-
-	// Route message.
-	hasMedia := len(req.MediaIDs) > 0
-	var tierName string
-	var routeResult RouteResult
-
-	if req.Model != "" {
-		tierName = req.Model
-		routeResult = RouteResult{Tier: tierName, Reason: "forced"}
-	} else if hasMedia {
-		tiers := cs.TierStore.Current()
-		bestPriority := int(^uint(0) >> 1)
-		for _, t := range tiers.Tiers {
-			if t.Enabled && t.Priority < bestPriority {
-				tierName = t.Name
-				bestPriority = t.Priority
-			}
-		}
-		if tierName == "" && len(tiers.Tiers) > 0 {
-			tierName = tiers.Tiers[0].Name
-		}
-		routeResult = RouteResult{Tier: tierName, Reason: "media bypass"}
-	} else {
-		routerMsg := req.Message
-		if req.ReplyTo != "" {
-			if orig := cs.ChatStore.Get(req.ReplyTo); orig != nil {
-				quoted := orig.Text
-				if len(quoted) > 100 {
-					quoted = quoted[:100] + "..."
-				}
-				routerMsg = fmt.Sprintf("[Replying to: \"%s\"]\n%s", quoted, req.Message)
-			}
-		}
-
-		lastTier, msgCount := cs.Sessions.Context(sessID)
-		rr := cs.Classify(routerMsg, lastTier, msgCount)
-		routeResult = rr
-	}
-
-	// Register trigger-matched skills in the session.
-	if cs.SkillStore != nil {
-		if triggerMatched := skills.MatchTriggers(cs.SkillStore, req.Message); len(triggerMatched) > 0 {
-			triggerNames := make([]string, len(triggerMatched))
-			for i, sk := range triggerMatched {
-				triggerNames[i] = sk.Name
-			}
-			log.Printf("[chat-api] skills: trigger-matched %v", triggerNames)
-			cs.Sessions.AddSkills(sessID, triggerNames)
-		}
-	}
-
-	// Skill tier override: if an active skill requires a higher tier, force it.
-	if activeSkills := cs.Sessions.GetSkills(sessID); len(activeSkills) > 0 {
-		if minTier := skills.ResolveMinTier(cs.SkillStore, activeSkills); minTier != "" {
-			if routeResult.Response != "" && routeResult.Tier == "" {
-				// Direct response → force to skill tier.
-				routeResult = RouteResult{Tier: minTier, Reason: "skill-tier: " + minTier}
-				log.Printf("[chat-api] skill tier override: direct→%s", minTier)
-			} else if routeResult.Tier != "" && routeResult.Tier != minTier {
-				// Check if current tier has lower priority than required tier.
-				currentPri, requiredPri := -1, -1
-				for _, t := range cs.TierStore.Current().Tiers {
-					if t.Name == routeResult.Tier {
-						currentPri = t.Priority
-					}
-					if t.Name == minTier {
-						requiredPri = t.Priority
-					}
-				}
-				if requiredPri >= 0 && currentPri < requiredPri {
-					old := routeResult.Tier
-					routeResult.Tier = minTier
-					routeResult.Reason = fmt.Sprintf("skill-tier: %s→%s", old, minTier)
-					log.Printf("[chat-api] skill tier override: %s→%s", old, minTier)
-				}
-			}
-		}
-	}
-
-	// During onboarding, force a capable tier - direct responses and
-	// instant tiers are too weak for the onboarding conversation.
-	// During onboarding, force a capable conversational tier.
-	// The lowest-priority tier (e.g. haiku) is too weak for multi-turn onboarding.
-	isOnboarding := memory.OnboardingPrompt(cs.ContextDir) != ""
-	if isOnboarding {
-		fallback := cs.onboardingTier()
-		log.Printf("[chat-api] onboarding override: %q → tier %q", routeResult.Tier, fallback)
-		routeResult = RouteResult{Tier: fallback, Reason: "onboarding-override"}
-	}
-
-	// Router direct response.
-	if routeResult.Response != "" && routeResult.Tier == "" {
-		cs.Sessions.TouchContext(sessID, "router")
-		if routeResult.React != "" {
-			onEvent(ChatEvent{Type: "reaction", Data: map[string]string{"emoji": routeResult.React}})
-		}
-		routerMsgID := NewMessageID()
-		assistantMsg := ChatMessage{
-			ID:        routerMsgID,
-			Role:      "assistant",
-			Text:      routeResult.Response,
-			Timestamp: time.Now(),
-			ConvID:    req.ConvID,
-			Model:     "router",
-			Tier:      "router",
-		}
-		cs.ChatStore.Append(assistantMsg)
-		if cs.ConvStore != nil {
-			cs.ConvStore.Append(conversation.Message{
-				ID:        routerMsgID,
-				ConvID:    ccConvID,
-				Channel:   conversation.ChannelCC,
-				Role:      "assistant",
-				Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: routeResult.Response}},
-				Timestamp: assistantMsg.Timestamp,
-				Model:     "router",
-				Tier:      "router",
-			})
-		}
-		onEvent(ChatEvent{Type: "text", Data: map[string]string{"text": routeResult.Response}})
-		onEvent(ChatEvent{Type: "done", Data: ChatDoneData{
-			MsgID: assistantMsg.ID,
-			Model: "router",
-			Tier:  "router",
-		}})
-		return nil
-	}
-
-	tierName = routeResult.Tier
-	tp := cs.resolveTierParams(tierName)
-
-	onEvent(ChatEvent{Type: "routed", Data: map[string]string{"tier": tierName, "model": tp.Model}})
-
-	cs.EventLog.Log("router_classify", map[string]any{
-		"tier":   tierName,
-		"reason": routeResult.Reason,
-		"model":  tp.Model,
-		"source": "api",
-	})
-
-	// Agent dispatch: delegate to multi-agent coordinator.
-	if tierName == "agent" && cs.Orchestrator != nil {
-		// Build conversation context from unified store.
-		var convCtx string
-		if cs.ConvStore != nil {
-			if msgs := cs.ConvStore.Recent(conversation.ChannelCC, 0); len(msgs) > 0 {
-				convCtx = conversation.BuildRouterContext(msgs, 5)
-			}
-		}
-
-		orchPrep := agents.PrepareOrchestration(agents.OrchestrationInputs{
-			UserMessage:          req.Message,
-			DataDir:              cs.DataDir,
-			ContextDir:           cs.ContextDir,
-			Source:               "router",
-			Model:                tp.Model,
-			Backend:              tp.Backend,
-			Effort:               tp.Effort,
-			MaxTurns:             tp.MaxTurns,
-			OrchestratorMaxTurns: tp.OrchestratorMaxTurns,
-			MaxIterations:        tp.MaxIterations,
-			TimeoutMin:           tp.TimeoutMin,
-			RecallBlock:          recallMemories(cs.Recaller, req.Message),
-			SkillStore:           cs.SkillStore,
-			ConversationContext:  convCtx,
-		})
-
-		onProgress := func(phase, detail string) {
-			switch phase {
-			case "task_started":
-				onEvent(ChatEvent{Type: "task_started", Data: map[string]string{"task_id": detail}})
-			case "thinking":
-				onEvent(ChatEvent{Type: "thinking", Data: map[string]string{}})
-			case "planning":
-				onEvent(ChatEvent{Type: "planning", Data: map[string]string{"detail": detail}})
-			case "agent":
-				onEvent(ChatEvent{Type: "agent_start", Data: map[string]string{"name": detail}})
-			case "agent_thinking":
-				onEvent(ChatEvent{Type: "agent_thinking", Data: map[string]string{"name": detail}})
-			case "agent_tool":
-				onEvent(ChatEvent{Type: "agent_tool", Data: map[string]string{"detail": detail}})
-			case "agent_done":
-				onEvent(ChatEvent{Type: "agent_done", Data: map[string]string{"detail": detail}})
-			case "synthesizing":
-				onEvent(ChatEvent{Type: "synthesizing", Data: map[string]string{}})
-			}
-		}
-
-		orchResult, orchMeta, orchErr := cs.Orchestrator.Run(ctx, prompt, orchPrep.SystemPrompts, orchPrep.Config, onProgress)
-		if orchErr != nil {
-			return fmt.Errorf("agent: %w", orchErr)
-		}
-
-		agentMsgID := NewMessageID()
-		assistantMsg := ChatMessage{
-			ID:        agentMsgID,
-			Role:      "assistant",
-			Text:      orchResult,
-			Timestamp: time.Now(),
-			ConvID:    req.ConvID,
-			Model:     "agent",
-			Tier:      "agent",
-			CostUSD:   orchMeta.TotalCost,
-		}
-		cs.ChatStore.Append(assistantMsg)
-		if cs.ConvStore != nil {
-			cs.ConvStore.Append(conversation.Message{
-				ID:        agentMsgID,
-				ConvID:    ccConvID,
-				Channel:   conversation.ChannelCC,
-				Role:      "assistant",
-				Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: orchResult}},
-				Timestamp: assistantMsg.Timestamp,
-				Model:     "agent",
-				Tier:      "agent",
-				CostUSD:   orchMeta.TotalCost,
-			})
-		}
-
-		onEvent(ChatEvent{Type: "text", Data: map[string]string{"text": orchResult}})
-		onEvent(ChatEvent{Type: "done", Data: ChatDoneData{
-			MsgID:   assistantMsg.ID,
-			Model:   "agent",
-			CostUSD: orchMeta.TotalCost,
-			Tier:    "agent",
-		}})
-
-		agentText := orchResult
-		if len(agentText) > 500 {
-			agentText = agentText[:500]
-		}
-		cs.EventLog.Log("agent_out", map[string]any{
-			"iterations":  orchMeta.Iterations,
-			"total_cost":  orchMeta.TotalCost,
-			"agent_calls": len(orchMeta.AgentCalls),
-			"task_id":     orchMeta.ID,
-			"text":        agentText,
-			"text_length": len(orchResult),
-			"source":      "api",
-		})
-		return nil
-	}
-
-	// Build system prompts with backend/channel/weight-aware filtering.
-	isAPITier := tp.Backend != "" && tp.Backend != "cli"
-	backend := "cli"
-	if isAPITier {
-		backend = "api"
-	}
-	ctxWeight := tp.EffectiveContextWeight()
-	promptCfg := memory.PromptConfig{Backend: backend, Channel: "cc", Weight: ctxWeight}
-	sysPromptTexts := memory.CollectPrompts(cs.ContextDir, promptCfg)
-	// Inject per-tier system prompt first so it has high priority.
-	if tp.SystemPrompt != "" {
-		sysPromptTexts = append([]string{tp.SystemPrompt}, sysPromptTexts...)
-	}
-	// Inject onboarding prompt so Claude follows the onboarding instructions.
-	if onboarding := memory.OnboardingPrompt(cs.ContextDir); onboarding != "" {
-		sysPromptTexts = append(sysPromptTexts, onboarding)
-	}
-	// Auto-inject relevant memories from long-term store.
-	if recallBlock := recallMemories(cs.Recaller, req.Message); recallBlock != "" {
-		sysPromptTexts = append(sysPromptTexts, recallBlock)
-	}
-	// Inject skill catalog so the model knows available skills (skip for light tiers).
-	if ctxWeight != "light" && cs.SkillStore != nil {
-		if catalog := skills.BuildCatalog(cs.SkillStore); catalog != "" {
-			sysPromptTexts = append(sysPromptTexts, catalog)
-		}
-		// Inject session-persisted skills (includes trigger-matched from earlier messages).
-		if activeSkills := cs.Sessions.GetSkills(sessID); len(activeSkills) > 0 {
-			log.Printf("[chat-api] skills: injecting session skills %v", activeSkills)
-			if block := skills.BuildInjectionByName(cs.SkillStore, activeSkills); block != "" {
-				sysPromptTexts = append(sysPromptTexts, block)
-			}
-		}
-	}
-	// Reaction instruction (skip for light tiers - they don't need the full format).
-	if ctxWeight != "light" {
-		sysPromptTexts = append(sysPromptTexts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
-	}
-	// Tool reminder at end of context (skip for light tiers).
-	if ctxWeight != "light" {
-		if reminder := memory.ToolReminder(cs.ContextDir); reminder != "" {
-			sysPromptTexts = append(sysPromptTexts, reminder)
-		}
-	}
-
-	// Inject session/conversation ID so the LLM can provide it when asked.
-	if ccConvID != "" {
-		sysPromptTexts = append(sysPromptTexts, fmt.Sprintf("Current session ID: %s (channel: cc)", ccConvID))
-	}
-
-	// Select provider based on tier backend.
-	prov := cs.Provider
-	if cs.Registry != nil {
-		prov = cs.Registry.ForBackend(tp.Backend)
-	}
-
-	// Wrap API provider with agentic tool loop when tier has tools.
-	if isAPITier && cs.ToolRegistry != nil && cs.ToolExecutor != nil && len(tp.Tools) > 0 {
-		cs.ToolRegistry.Rescan() // pick up new tool schemas created since startup
-		if apiProv, ok := prov.(*provider.APIProvider); ok {
-			schemas := cs.ToolRegistry.ForToolsStrict(tp.Tools)
-			if len(schemas) > 0 {
-				var tools []map[string]any
-				if apiProv.IsDirectOpenAI() {
-					tools = tooling.ToOpenAI(schemas)
-				} else {
-					tools = tooling.ToOpenAICompat(schemas)
-				}
-				maxTurns := tp.MaxTurns
-				if maxTurns <= 0 {
-					maxTurns = 10
-				}
-				executor := &toolExecutorAdapter{exec: cs.ToolExecutor}
-				prov = provider.NewToolLoop(apiProv, executor, tools, maxTurns)
-				log.Printf("[chat-api] tool loop enabled: %d tools, max_turns=%d", len(schemas), maxTurns)
-				toolNames := make([]string, len(schemas))
-				for i, s := range schemas {
-					toolNames[i] = s.Name
-				}
-				sysPromptTexts = append([]string{memory.ToolInstruction(toolNames)}, sysPromptTexts...)
-			}
-		}
-	}
-
-	// Invoke via selected Provider.
-	resumeID := cs.Sessions.Get(sessID)
-	_, lastBackend, _ := cs.Sessions.ContextFull(sessID)
-	backendChanged := lastBackend != "" && lastBackend != tp.Backend
-
-	// Build conversation context from unified store.
-	params := provider.Params{
-		Model:         tp.Model,
-		Tools:         tp.Tools,
-		WriteCapable:  tp.WriteCapable,
-		Effort:        tp.Effort,
-		MaxTurns:      tp.MaxTurns,
-		SystemPrompts: sysPromptTexts,
-		ResumeID:      resumeID,
-		DataDir:       cs.DataDir,
-	}
-	if isAPITier {
-		params.ResumeID = "" // API tiers use ConvMessages, not --resume
-	}
-	if backendChanged {
-		// Backend switch: CLI --resume is stale, start fresh with injected context.
-		log.Printf("[chat-api] backend switch %s→%s, dropping resume", lastBackend, tp.Backend)
-		params.ResumeID = ""
-	}
-
-	// Inject conversation history from unified store.
-	if cs.ConvStore != nil {
-		convMsgs := conversation.BuildContext(cs.ConvStore.Recent(conversation.ChannelCC, 0), conversation.DefaultMaxMessages)
-		if isAPITier || params.ResumeID == "" {
-			if isAPITier {
-				// API providers: pass as structured OpenAI-format messages
-				// that preserve tool_calls and tool results, preventing
-				// weaker models from hallucinating tool usage from text patterns.
-				oaiMsgs := conversation.FlattenForOpenAI(convMsgs)
-				ctxMsgs := make([]provider.ContextMessage, len(oaiMsgs))
-				for i, m := range oaiMsgs {
-					cm := provider.ContextMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
-					for _, tc := range m.ToolCalls {
-						cm.ToolCalls = append(cm.ToolCalls, provider.ContextToolCall{
-							ID:        tc.ID,
-							Name:      tc.Name,
-							Arguments: tc.Arguments,
-						})
-					}
-					ctxMsgs[i] = cm
-				}
-				params.ConvMessages = ctxMsgs
-			} else {
-				// CLI without resume: inject as system prompt.
-				if histPrompt := conversation.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
-					params.SystemPrompts = append(params.SystemPrompts, histPrompt)
-				}
-			}
-		}
-		// CLI with --resume: skip injection, CLI has its own richer context.
-	}
-
-	var rawProgressFn provider.OnProgress
-	rawProgressFn = func(event provider.StreamEvent) {
-		switch event.Type {
-		case "thinking":
-			if event.Text != "" {
-				onEvent(ChatEvent{Type: "thinking", Data: map[string]string{"text": event.Text}})
-			} else {
-				onEvent(ChatEvent{Type: "thinking", Data: map[string]string{}})
-			}
-		case "tool_use":
-			onEvent(ChatEvent{Type: "tool_use", Data: map[string]string{"name": event.Detail}})
-		case "tool_input":
-			onEvent(ChatEvent{Type: "tool_input", Data: map[string]string{"name": event.Detail, "chunk": event.Text}})
-		case "tool_result":
-			onEvent(ChatEvent{Type: "tool_result", Data: map[string]string{"tool_id": event.Detail, "result": event.Text}})
-		case "text_delta":
-			onEvent(ChatEvent{Type: "text_delta", Data: map[string]string{"text": event.Text}})
-		}
-	}
-
-	// Wrap with accumulator to capture content blocks for the conversation store.
-	var acc *conversation.Accumulator
-	progressFn := rawProgressFn
-	if cs.ConvStore != nil {
-		acc = conversation.NewAccumulator()
-		progressFn = acc.OnProgress(rawProgressFn)
-	}
-
-	start := time.Now()
-	result, err := prov.Invoke(ctx, prompt, params, progressFn)
-
-	// Retry without resume if session failed (CLI only).
-	if err != nil && resumeID != "" && !isAPITier {
-		log.Printf("[chat-api] session %s failed (%v), starting fresh", resumeID, err)
-		cs.Sessions.Archive(sessID)
-		params.ResumeID = ""
-		// Inject conversation history since we lost --resume context.
-		if cs.ConvStore != nil {
-			convMsgs := conversation.BuildContext(cs.ConvStore.Recent(conversation.ChannelCC, 0), conversation.DefaultMaxMessages)
-			if histPrompt := conversation.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
-				params.SystemPrompts = append(params.SystemPrompts, histPrompt)
-			}
-		}
-		// Reset accumulator for the retry.
-		if acc != nil {
-			acc = conversation.NewAccumulator()
-			progressFn = acc.OnProgress(rawProgressFn)
-		}
-		result, err = prov.Invoke(ctx, prompt, params, progressFn)
-	}
-	duration := time.Since(start)
-
-	if err != nil {
-		return fmt.Errorf("claude: %w", err)
-	}
-
-	sessShort := result.SessionID
-	if len(sessShort) > 8 {
-		sessShort = sessShort[:8]
-	}
-	// Compute cost from tokens if not already set (API backends).
-	if result.CostUSD == 0 && result.InputTokens > 0 && cs.BackendConfigs != nil {
-		if bc, ok := cs.BackendConfigs()[tp.Backend]; ok && (bc.InputPrice > 0 || bc.OutputPrice > 0) {
-			result.CostUSD = float64(result.InputTokens)/1e6*bc.InputPrice +
-				float64(result.OutputTokens)/1e6*bc.OutputPrice
-		}
-	}
-
-	log.Printf("[chat-api] → %s %dms %dt/%dt $%.4f sid:%s", result.Model, duration.Milliseconds(), result.InputTokens, result.OutputTokens, result.CostUSD, sessShort)
-
-	// Update session.
-	if result.SessionID != "" {
-		cs.Sessions.SetWithBackend(sessID, result.SessionID, tierName, tp.Backend)
-	} else if isAPITier {
-		cs.Sessions.TouchContext(sessID, tierName)
-	}
-
-	// Extract reaction.
-	suggestedEmoji, cleanText := extractReactionTag(result.Text)
-	if suggestedEmoji != "" {
-		emoji := mood.ValidateOrFallback(suggestedEmoji)
-		if emoji != "" {
-			onEvent(ChatEvent{Type: "reaction", Data: map[string]string{"emoji": emoji}})
-		}
-	}
-
-	// Maybe spontaneous react via mood system.
-	state := mood.GetCurrentState(cs.ContextDir)
-	if mood.ShouldReact(state) {
-		spontaneous := mood.ChooseSpontaneous(state)
-		if spontaneous != "" {
-			onEvent(ChatEvent{Type: "reaction", Data: map[string]string{"emoji": spontaneous}})
-		}
-	}
-
-	// Save assistant message.
-	assistantMsgID := NewMessageID()
-	assistantMsg := ChatMessage{
-		ID:        assistantMsgID,
-		Role:      "assistant",
-		Text:      cleanText,
-		Timestamp: time.Now(),
-		ConvID:    req.ConvID,
-		Model:     result.Model,
-		Tier:      tierName,
-		CostUSD:   result.CostUSD,
-		SessionID: result.SessionID,
-	}
-	cs.ChatStore.Append(assistantMsg)
-
-	// Parallel write to unified conversation store with rich content blocks.
-	if cs.ConvStore != nil {
-		var blocks []conversation.ContentBlock
-		if acc != nil {
-			blocks = acc.Blocks()
-		}
-		if len(blocks) == 0 {
-			// Fallback: store as plain text block.
-			blocks = []conversation.ContentBlock{{Type: conversation.BlockText, Text: cleanText}}
-		}
-		cs.ConvStore.Append(conversation.Message{
-			ID:        assistantMsgID,
-			ConvID:    ccConvID,
-			Channel:   conversation.ChannelCC,
-			Role:      "assistant",
-			Blocks:    blocks,
-			Timestamp: assistantMsg.Timestamp,
-			Model:     result.Model,
-			Tier:      tierName,
-			Backend:   tp.Backend,
-			CostUSD:   result.CostUSD,
-			SessionID: result.SessionID,
-		})
-	}
-
-	// Send text to client.
-	onEvent(ChatEvent{Type: "text", Data: map[string]string{"text": cleanText}})
-
-	doneData := ChatDoneData{
-		MsgID:      assistantMsg.ID,
-		SessionID:  result.SessionID,
-		Model:      result.Model,
-		CostUSD:    result.CostUSD,
-		Tier:       tierName,
-		DurationMs: duration.Milliseconds(),
-	}
-	if sk := cs.Sessions.GetSkills(sessID); len(sk) > 0 {
-		doneData.Skills = sk
-	}
-	onEvent(ChatEvent{Type: "done", Data: doneData})
-
-	// Warn when context is getting large (message count proxy).
-	if _, msgCount := cs.Sessions.Context(sessID); msgCount >= 20 {
-		level := "high"
-		if msgCount >= 40 {
-			level = "critical"
-		}
-		onEvent(ChatEvent{Type: "system", Data: map[string]string{
-			"text": fmt.Sprintf("⚠️ Context is getting large (%d messages). Consider using /new to start fresh.", msgCount),
-			"level": level,
-		}})
-	}
-
-	outText := cleanText
-	if len(outText) > 500 {
-		outText = outText[:500]
-	}
-	cs.EventLog.Log("message_out", map[string]any{
-		"model":       result.Model,
-		"cost_usd":    result.CostUSD,
-		"text":        outText,
-		"text_length": len(cleanText),
-		"session_id":  result.SessionID,
-		"tier":        tierName,
-		"source":      "api",
-	})
-
-	return nil
+	return cs.askViaEngine(ctx, req, onEvent)
 }
 
 // askViaEngine delegates message processing to the unified comms engine.
-// ChatStore writes and ChatDoneData emission remain CC-specific.
+// Engine handles persistence to ChatDB. CC-specific: SSE bridge, force commands, mood reactions.
 func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
 	sessID := convSessionID(req.ConvID)
 	channelID := comms.ChannelID("cc:" + req.ConvID)
@@ -884,7 +234,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 	}
 
 	// 0. Built-in command handling via comms engine (/new, /skills, etc.).
-	if cs.Engine != nil && strings.HasPrefix(req.Message, "/") {
+	if strings.HasPrefix(req.Message, "/") {
 		if response, handled := cs.Engine.HandleCommand(channelID, req.Message); handled {
 			if response != "" {
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": response}})
@@ -894,17 +244,16 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		}
 	}
 
-	// 1. Force command detection: /<tier> or /<skill> (CC-specific).
+	// 1. Force command detection: /<tier> or /<skill> (CC-specific UI feedback).
 	if strings.HasPrefix(req.Message, "/") && req.Model == "" {
 		parts := strings.SplitN(req.Message, " ", 2)
 		cmdName := strings.TrimPrefix(parts[0], "/")
 
-		// 1a. Tier force commands.
 		for _, t := range cs.TierStore.Current().Tiers {
 			if t.Enabled && t.ForceCommand && t.Name == cmdName {
 				cs.Sessions.SetForcedTier(sessID, t.Name)
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{
-					"text": fmt.Sprintf("⚡ Session locked to **%s**. Use /new to reset.", t.Name),
+					"text": fmt.Sprintf("Session locked to **%s**. Use /new to reset.", t.Name),
 				}})
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
 					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{Model: t.Name, Tier: t.Name}})
@@ -916,8 +265,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 			}
 		}
 
-		// 1b. Skill force commands: /skillname [message]
-		if cs.Engine != nil && cs.Engine.SkillStore != nil && req.Model == "" {
+		if cs.Engine.SkillStore != nil && req.Model == "" {
 			if sk, ok := cs.Engine.SkillStore.Get(cmdName); ok {
 				sessionKey := channelID.SessionKey()
 				cs.Engine.Sessions.AddSkills(sessionKey, []string{sk.Name})
@@ -926,7 +274,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 					desc = " — " + desc
 				}
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{
-					"text": fmt.Sprintf("🧩 Skill **%s** activated%s", sk.Name, desc),
+					"text": fmt.Sprintf("Skill **%s** activated%s", sk.Name, desc),
 				}})
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
 					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{}})
@@ -944,16 +292,16 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		}
 	}
 
-	// 2. Build prompt (CC-specific: upload registry, reply context from ChatStore).
+	// 2. Build prompt (CC-specific: upload registry, media paths, reply context).
 	prompt := cs.buildPrompt(req)
 	if prompt == "" {
 		return fmt.Errorf("empty message")
 	}
 
-	// Build router text (raw message + brief quote hint for router).
+	// Build router text with reply context hint.
 	routerMsg := req.Message
 	if req.ReplyTo != "" {
-		if orig := cs.ChatStore.Get(req.ReplyTo); orig != nil {
+		if orig, _ := cs.ChatDB.Get(req.ReplyTo); orig != nil {
 			quoted := orig.Text
 			if len(quoted) > 100 {
 				quoted = quoted[:100] + "..."
@@ -962,39 +310,29 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		}
 	}
 
-	// 3. Save user message to ChatStore (CC-specific parallel store).
-	userMsgID := NewMessageID()
-	userMsg := ChatMessage{
-		ID:        userMsgID,
-		Role:      "user",
-		Text:      req.Message,
-		Timestamp: time.Now(),
-		ConvID:    req.ConvID,
-		ReplyTo:   req.ReplyTo,
-		Media:     cs.resolveMediaRefs(req.MediaIDs),
-	}
-	cs.ChatStore.Append(userMsg)
-
-	// 4. Build InMessage for engine.
+	// 3. Build InMessage for engine (engine handles persistence to ChatDB).
 	msg := comms.InMessage{
-		ChannelID:  channelID,
-		Text:       prompt,
-		RawText:    req.Message,
-		RouterText: routerMsg,
-		IsReply:    req.ReplyTo != "",
-		ForcedTier: req.Model,
+		ChannelID:    channelID,
+		Text:         prompt,
+		RawText:      req.Message,
+		RouterText:   routerMsg,
+		IsReply:      req.ReplyTo != "",
+		ForcedTier:   req.Model,
+		ConvID:       req.ConvID,
+		Source:       "cc",
+		ReplyToMsgID: req.ReplyTo,
 	}
 	if req.ReplyTo != "" {
-		if orig := cs.ChatStore.Get(req.ReplyTo); orig != nil {
+		if orig, _ := cs.ChatDB.Get(req.ReplyTo); orig != nil {
 			msg.ReplyTo = orig.Text
 		}
 	}
 
-	// 5. Set up event bridge (suppress engine's "done", we emit our own).
+	// 4. Set up event bridge (suppress engine's "done", we emit our own).
 	cs.ccAdapter.setCallback(onEvent)
 	defer cs.ccAdapter.setCallback(nil)
 
-	// 6. Call engine.Process().
+	// 5. Call engine.Process().
 	start := time.Now()
 	result, err := cs.Engine.Process(ctx, msg)
 	duration := time.Since(start)
@@ -1003,7 +341,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		return err
 	}
 
-	// 7. Spontaneous mood reaction (CC-specific).
+	// 6. Spontaneous mood reaction (CC-specific).
 	state := mood.GetCurrentState(cs.ContextDir)
 	if mood.ShouldReact(state) {
 		spontaneous := mood.ChooseSpontaneous(state)
@@ -1012,24 +350,10 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		}
 	}
 
-	// 8. Save assistant message to ChatStore (CC-specific parallel store).
-	assistantMsgID := NewMessageID()
-	assistantMsg := ChatMessage{
-		ID:        assistantMsgID,
-		Role:      "assistant",
-		Text:      result.Text,
-		Timestamp: time.Now(),
-		ConvID:    req.ConvID,
-		Model:     result.Model,
-		Tier:      result.Tier,
-		CostUSD:   result.CostUSD,
-		SessionID: result.SessionID,
-	}
-	cs.ChatStore.Append(assistantMsg)
-
-	// 9. Emit "done" with ChatDoneData (CC-specific rich format).
+	// 7. Emit "done" with ChatDoneData (CC-specific rich format).
+	// Assistant message was already persisted by Engine via ChatDB.
 	doneData := ChatDoneData{
-		MsgID:      assistantMsgID,
+		MsgID:      result.AssistantMsgID,
 		SessionID:  result.SessionID,
 		Model:      result.Model,
 		CostUSD:    result.CostUSD,
@@ -1054,7 +378,7 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 	mood.LogReaction(cs.DataDir, emoji, 0)
 	mood.UpdateLiveFeedback(cs.ContextDir, cs.DataDir)
 
-	cs.ChatStore.AddReaction(req.MsgID, Reaction{Emoji: emoji, From: "user"})
+	cs.ChatDB.AddReaction(req.MsgID, emoji, "user")
 
 	result := &ReactResult{OK: true}
 
@@ -1063,7 +387,7 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 		mirror := mood.ChooseMirror(emoji, state)
 		if mirror != "" {
 			result.Mirror = mirror
-			cs.ChatStore.AddReaction(req.MsgID, Reaction{Emoji: mirror, From: "alf"})
+			cs.ChatDB.AddReaction(req.MsgID, mirror, "alf")
 		}
 	}
 
@@ -1129,23 +453,29 @@ func (cs *ChatService) CurrentConvID() string {
 }
 
 // History returns paginated chat history, optionally filtered by conversation.
-func (cs *ChatService) History(limit int, before time.Time, convID string) []ChatMessage {
+func (cs *ChatService) History(limit int, before time.Time, convID string) []chatdb.Message {
 	if limit <= 0 {
 		limit = 50
 	}
 	if limit > 200 {
 		limit = 200
 	}
-	msgs := cs.ChatStore.History(limit, before, convID)
-	if msgs == nil {
-		return []ChatMessage{}
+	msgs, err := cs.ChatDB.History(convID, limit, before)
+	if err != nil {
+		log.Printf("[chat-service] history error: %v", err)
+		return []chatdb.Message{}
 	}
 	return msgs
 }
 
 // Conversations returns all known conversation summaries.
-func (cs *ChatService) Conversations() []ConversationInfo {
-	return cs.ChatStore.Conversations()
+func (cs *ChatService) Conversations() []chatdb.ConversationInfo {
+	convs, err := cs.ChatDB.Conversations("", false)
+	if err != nil {
+		log.Printf("[chat-service] conversations error: %v", err)
+		return []chatdb.ConversationInfo{}
+	}
+	return convs
 }
 
 // buildPrompt constructs the full prompt from a ChatRequest.
@@ -1154,7 +484,7 @@ func (cs *ChatService) buildPrompt(req ChatRequest) string {
 
 	// Reply context.
 	if req.ReplyTo != "" {
-		if orig := cs.ChatStore.Get(req.ReplyTo); orig != nil {
+		if orig, _ := cs.ChatDB.Get(req.ReplyTo); orig != nil {
 			parts = append(parts, fmt.Sprintf("[The user is replying to this previous message:\n---\n%s\n---\n]", orig.Text))
 		}
 	}
@@ -1411,15 +741,18 @@ func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 	}
 
 	_, cleanText := extractReactionTag(result.Text)
-	followUpMsg := ChatMessage{
-		ID:        NewMessageID(),
-		Role:      "assistant",
-		Text:      cleanText,
-		Timestamp: time.Now(),
-		Model:     result.Model,
-		Tier:      "follow-up",
+	if cs.ChatDB != nil {
+		cs.ChatDB.EnsureConversation("_followup", "", "cc")
+		cs.ChatDB.InsertMessage(chatdb.Message{
+			ID:     NewMessageID(),
+			ConvID: "_followup",
+			Role:   "assistant",
+			Text:   cleanText,
+			Source: "cc",
+			Model:  result.Model,
+			Tier:   "follow-up",
+		})
 	}
-	cs.ChatStore.Append(followUpMsg)
 
 	cs.EventLog.Log("negative_followup", map[string]any{
 		"emoji":  emoji,

@@ -111,6 +111,70 @@ func TestFileConfigStore_SaveCreatesDir(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_NotificationSoundTrue(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.NotificationSound == nil {
+		t.Fatal("DefaultConfig().NotificationSound should not be nil")
+	}
+	if *cfg.NotificationSound != true {
+		t.Error("DefaultConfig().NotificationSound should be true")
+	}
+}
+
+func TestFileConfigStore_NotificationSound_JSONRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	store := NewFileConfigStore(path)
+
+	cfg := DefaultConfig()
+	*cfg.NotificationSound = false
+
+	if err := store.Save(cfg); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if loaded.NotificationSound == nil {
+		t.Fatal("NotificationSound should not be nil after round-trip")
+	}
+	if *loaded.NotificationSound != false {
+		t.Error("NotificationSound should be false after round-trip")
+	}
+}
+
+func TestFileConfigStore_AutoMigrate_NotificationSound(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	// Write an old config without notification_sound field.
+	writeJSON(t, path, map[string]any{
+		"log_level":        "info",
+		"allowed_chat_ids": []int64{},
+		"system_prompt":    "",
+		"quiet_hours":      map[string]int{"start": 0, "end": 0},
+		"session_timeout":  30,
+		"git_track":        true,
+		"git_sweep_interval": 15,
+	})
+
+	store := NewFileConfigStore(path)
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	// Auto-migration should fill in the default (true).
+	if loaded.NotificationSound == nil {
+		t.Fatal("NotificationSound should be set after auto-migration")
+	}
+	if *loaded.NotificationSound != true {
+		t.Error("NotificationSound should default to true after auto-migration")
+	}
+}
+
 func TestFileConfigStore_ConcurrentRead(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

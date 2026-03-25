@@ -1,6 +1,7 @@
 package controlcenter
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,5 +138,81 @@ func TestConfigHandler_DELETE_NotAllowed(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected 405, got %d", rec.Code)
+	}
+}
+
+func TestConfigHandler_PUT_NotificationSoundFalse(t *testing.T) {
+	store := &mockConfigStore{}
+	h := &ConfigHandler{Store: store}
+
+	body := `{"log_level":"info","notification_sound":false}`
+	req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.saved == nil {
+		t.Fatal("expected Save to be called")
+	}
+	if store.saved.NotificationSound == nil {
+		t.Fatal("NotificationSound should not be nil")
+	}
+	if *store.saved.NotificationSound != false {
+		t.Error("NotificationSound should be false")
+	}
+}
+
+func TestConfigHandler_PUT_WithoutBackends_PreservesExisting(t *testing.T) {
+	existing := DefaultConfig()
+	existing.Backends = map[string]BackendConfig{
+		"openai": {BaseURL: "https://api.openai.com/v1", Auth: "bearer"},
+	}
+	store := &mockConfigStore{cfg: existing}
+	h := &ConfigHandler{Store: store}
+
+	// PUT without backends field (frontend strips redacted backends).
+	body := `{"log_level":"debug"}`
+	req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.saved == nil {
+		t.Fatal("expected Save to be called")
+	}
+	if len(store.saved.Backends) != 1 {
+		t.Errorf("expected 1 preserved backend, got %d", len(store.saved.Backends))
+	}
+	if store.saved.Backends["openai"].BaseURL != "https://api.openai.com/v1" {
+		t.Error("preserved backend should retain its base_url")
+	}
+}
+
+func TestConfigHandler_GET_IncludesNotificationSound(t *testing.T) {
+	store := &mockConfigStore{}
+	h := &ConfigHandler{Store: store}
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	raw, ok := result["notification_sound"]
+	if !ok {
+		t.Fatal("response missing notification_sound field")
+	}
+	if string(raw) != "true" {
+		t.Errorf("default notification_sound should be true, got %s", string(raw))
 	}
 }

@@ -93,6 +93,15 @@ func (h *ConfigHandler) put(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Preserve backends from existing config when not provided in the request
+	// (frontend strips redacted backends to avoid sending masked secrets).
+	if cfg.Backends == nil {
+		existing, err := h.Store.Load()
+		if err == nil && existing.Backends != nil {
+			cfg.Backends = existing.Backends
+		}
+	}
+
 	if err := h.Store.Save(&cfg); err != nil {
 		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
 		return

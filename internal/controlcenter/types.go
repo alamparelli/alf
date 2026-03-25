@@ -60,6 +60,8 @@ type Config struct {
 	// which cannot use Docker's internal DNS (127.0.0.11).
 	// Empty = ["8.8.8.8", "1.1.1.1"].
 	DNSServers []string `json:"dns_servers,omitempty"`
+	// NotificationSound enables audio alerts for CC chat messages, nil = true.
+	NotificationSound *bool `json:"notification_sound"`
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -86,6 +88,7 @@ func DefaultConfig() *Config {
 		TiersTimeout:            300,
 		ShowSkillFooter:         boolPtr(true),
 		TiersFile:               "tiers.json",
+		NotificationSound:       boolPtr(true),
 	}
 }
 

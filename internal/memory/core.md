@@ -127,6 +127,9 @@ Plain text only. No markdown, no backticks, no bold, no bullet dashes.
 <!-- @end tg -->
 
 <!-- @begin cc -->
+## Control Center Environment
+The user interacts via the Control Center web UI which has a built-in Terminal tab with full shell access. When a command needs to be run manually, just provide the command — the user can execute it directly in the Terminal tab. Never say "if you have shell access" or "via the daemon" — they always have terminal access.
+
 ## Formatting
 Use markdown freely - the Control Center renders it fully (headers, bold, code blocks, lists, tables).
 <!-- @end cc -->

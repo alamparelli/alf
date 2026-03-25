@@ -357,6 +357,27 @@ func setupDataSymlinks(dataDir, configDir, skillsDir string) {
 	}
 }
 
+// deprecatedSkills lists skill directories that have been replaced and should be
+// removed on upgrade. Maps old name → replacement (for logging).
+var deprecatedSkills = map[string]string{
+	"app-builder": "sdk-app-builder",
+}
+
+// cleanDeprecatedSkills removes skills that have been superseded by newer versions.
+func cleanDeprecatedSkills(skillsDir string) {
+	for old, replacement := range deprecatedSkills {
+		p := filepath.Join(skillsDir, old)
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			continue
+		}
+		if err := os.RemoveAll(p); err != nil {
+			log.Printf("clean-skills: failed to remove deprecated %s: %v", old, err)
+		} else {
+			log.Printf("clean-skills: removed deprecated %s (replaced by %s)", old, replacement)
+		}
+	}
+}
+
 // seedBundledSkills copies missing skill directories from /opt/alf/defaults/skills.d
 // into the active skills directory. Existing skills are never overwritten.
 func seedBundledSkills(skillsDir string) {
@@ -584,7 +605,7 @@ func injectAppTriggers(store skills.Store, appsDir string) {
 		}
 	}
 	if len(triggers) > 0 {
-		store.AddDynamicTriggers("app-builder", triggers)
-		log.Printf("skills: injected %d app triggers into app-builder: %v", len(triggers), triggers)
+		store.AddDynamicTriggers("sdk-app-builder", triggers)
+		log.Printf("skills: injected %d app triggers into sdk-app-builder: %v", len(triggers), triggers)
 	}
 }

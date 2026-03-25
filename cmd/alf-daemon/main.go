@@ -184,7 +184,8 @@ func main() {
 	// Create data directory symlinks for config and skills.
 	setupDataSymlinks(dataDir, configDir, skillsDir)
 
-	// Seed bundled skills, teams, and apps from Docker image defaults (no-op if already present).
+	// Clean deprecated skills and seed bundled defaults from Docker image.
+	cleanDeprecatedSkills(skillsDir)
 	seedBundledSkills(skillsDir)
 	seedBundledTeams(dataDir)
 	seedBundledApps(dataDir)

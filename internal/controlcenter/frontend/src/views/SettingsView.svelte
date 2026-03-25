@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { RotateCw, CheckCircle, CircleOff, Pencil, Bug } from 'lucide-svelte'
+  import { RotateCw, CheckCircle, CircleOff, Pencil, Bug, Settings2 } from 'lucide-svelte'
   import Card from '../components/shared/Card.svelte'
   import { theme, ALF_THEMES } from '../stores/theme.svelte'
   import { toasts } from '../stores/toast.svelte'
@@ -135,6 +135,9 @@
       <h3>System</h3>
       <button class="btn btn-sm" onclick={restart}>
         <RotateCw size={13} /> Restart
+      </button>
+      <button class="btn btn-sm" onclick={() => window.dispatchEvent(new CustomEvent('alf:open-wizard'))}>
+        <Settings2 size={13} /> Re-run Setup Wizard
       </button>
     </div>
     {#if showOutput}

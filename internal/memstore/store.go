@@ -349,31 +349,130 @@ func (s *Store) hasDuplicate(text string) bool {
 	}
 
 	// Strategy 2: Cosine similarity on embeddings for semantic dedup.
+	// Query top-3 nearest neighbors. If only 1 of 3 is close, it's likely a
+	// false positive (shared keywords, different subject). All 3 close = true dup.
 	if s.embedder != nil && s.embedder.IsReady() {
 		vec, err := s.embedder.Embed(text)
 		if err == nil {
 			vecJSON, _ := json.Marshal(vec)
-			// Find closest memory by cosine distance. sqlite-vec returns
-			// cosine distance (0 = identical, 2 = opposite).
-			var dist float64
-			err := s.db.QueryRow(`
-				SELECT v.distance FROM memory_vec v
+			rows, err := s.db.Query(`
+				SELECT v.distance, m.text FROM memory_vec v
+				JOIN memories m ON m.id = v.id
 				WHERE v.embedding MATCH ?
-				  AND k = 1
+				  AND k = 3
 				ORDER BY v.distance
-			`, string(vecJSON)).Scan(&dist)
-			if err == nil && dist < s.dedup.CosineThreshold {
-				truncNew := text
-				if len(truncNew) > 80 {
-					truncNew = truncNew[:80] + "..."
+			`, string(vecJSON))
+			if err == nil {
+				defer rows.Close()
+				var closest []struct {
+					dist float64
+					text string
 				}
-				log.Printf("memstore: dedup-cosine rejected (dist=%.4f < %.2f): %q", dist, s.dedup.CosineThreshold, truncNew)
-				return true // cosine distance below threshold → duplicate
+				for rows.Next() {
+					var d float64
+					var t string
+					rows.Scan(&d, &t)
+					closest = append(closest, struct {
+						dist float64
+						text string
+					}{d, t})
+				}
+
+				if len(closest) > 0 && closest[0].dist < s.dedup.CosineThreshold {
+					// Entity check: if the new fact and closest match share
+					// fewer than half their proper nouns, it's a false positive.
+					newEntities := extractEntities(text)
+					oldEntities := extractEntities(closest[0].text)
+					if len(newEntities) > 0 && entityOverlap(newEntities, oldEntities) < 0.5 {
+						truncNew := truncate(text, 80)
+						truncOld := truncate(closest[0].text, 80)
+						log.Printf("memstore: dedup-cosine ALLOWED (dist=%.4f, entity overlap <50%%): %q vs %q", closest[0].dist, truncNew, truncOld)
+						return false
+					}
+
+					// Top-K consensus: if only 1 of 3 is below threshold, weaker signal.
+					belowCount := 0
+					for _, c := range closest {
+						if c.dist < s.dedup.CosineThreshold {
+							belowCount++
+						}
+					}
+					if belowCount == 1 && len(closest) >= 3 {
+						truncNew := truncate(text, 80)
+						truncOld := truncate(closest[0].text, 80)
+						log.Printf("memstore: dedup-cosine ALLOWED (dist=%.4f, only 1/3 below threshold): %q vs %q", closest[0].dist, truncNew, truncOld)
+						return false
+					}
+
+					truncNew := truncate(text, 80)
+					truncOld := truncate(closest[0].text, 80)
+					log.Printf("memstore: dedup-cosine rejected (dist=%.4f < %.2f, %d/3 below): %q vs %q", closest[0].dist, s.dedup.CosineThreshold, belowCount, truncNew, truncOld)
+					return true
+				}
 			}
 		}
 	}
 
 	return false
+}
+
+// extractEntities returns capitalized words that likely represent proper nouns.
+// Language-agnostic: uses position and word length heuristics instead of
+// language-specific stop word lists. Works for all Latin-script languages.
+func extractEntities(text string) map[string]bool {
+	entities := make(map[string]bool)
+	words := strings.Fields(text)
+	for i, w := range words {
+		// Strip trailing punctuation
+		clean := strings.TrimRight(w, ".,;:!?()[]{}\"'—–-")
+		if len(clean) < 2 {
+			continue
+		}
+		// Must start with uppercase ASCII
+		if clean[0] < 'A' || clean[0] > 'Z' {
+			continue
+		}
+		// Skip first word of text (always capitalized)
+		if i == 0 {
+			continue
+		}
+		// Skip words after sentence-ending punctuation (new sentence start)
+		prev := words[i-1]
+		if len(prev) > 0 {
+			last := prev[len(prev)-1]
+			if last == '.' || last == '!' || last == '?' || last == ':' {
+				continue
+			}
+		}
+		// Short capitalized words (≤3 chars) are usually articles/pronouns/
+		// prepositions in any Latin-script language (The, Le, La, Un, De, Il, ...)
+		if len(clean) <= 3 {
+			continue
+		}
+		entities[clean] = true
+	}
+	return entities
+}
+
+// entityOverlap returns the fraction of entities in a that also appear in b.
+func entityOverlap(a, b map[string]bool) float64 {
+	if len(a) == 0 {
+		return 0
+	}
+	var overlap int
+	for e := range a {
+		if b[e] {
+			overlap++
+		}
+	}
+	return float64(overlap) / float64(len(a))
+}
+
+func truncate(s string, n int) string {
+	if len(s) > n {
+		return s[:n] + "..."
+	}
+	return s
 }
 
 // textSimilarity returns word-level Jaccard similarity between two texts.

@@ -424,6 +424,97 @@ func TestTextSimilarity(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Entity extraction & overlap
+// ---------------------------------------------------------------------------
+
+func TestExtractEntities(t *testing.T) {
+	tests := []struct {
+		text     string
+		expected []string
+		absent   []string
+	}{
+		{
+			"Contact Pookie on YouTube for ALF testing",
+			[]string{"Pookie", "YouTube"},
+			[]string{"Contact", "ALF"}, // first word skipped; ALF is ≤3 chars
+		},
+		{
+			"User sent email to Alessandro about Dictato marketing",
+			[]string{"Alessandro", "Dictato"},
+			[]string{"User"}, // first word
+		},
+		{
+			"The quick brown Fox jumped. Next was the Cat",
+			nil,
+			[]string{"The", "Fox", "Next", "Cat"}, // first word; Fox/Cat ≤3 chars; Next after "."
+		},
+		{
+			"all lowercase text here",
+			nil, // no entities
+			nil,
+		},
+		{
+			"Meeting with John and Jane about ProjectX at Google",
+			[]string{"John", "Jane", "ProjectX", "Google"},
+			[]string{"Meeting"}, // first word
+		},
+		// French: articles/pronouns filtered by length
+		{
+			"Le projet avec Alessandro et Dictato fonctionne",
+			[]string{"Alessandro", "Dictato"},
+			[]string{"Le"}, // first word
+		},
+	}
+
+	for _, tt := range tests {
+		entities := extractEntities(tt.text)
+		for _, e := range tt.expected {
+			if !entities[e] {
+				t.Errorf("extractEntities(%q): missing %q, got %v", tt.text, e, entities)
+			}
+		}
+		for _, e := range tt.absent {
+			if entities[e] {
+				t.Errorf("extractEntities(%q): should not contain %q", tt.text, e)
+			}
+		}
+	}
+}
+
+func TestEntityOverlap(t *testing.T) {
+	tests := []struct {
+		a, b map[string]bool
+		min  float64
+		max  float64
+	}{
+		// Same entities
+		{map[string]bool{"Pookie": true, "YouTube": true}, map[string]bool{"Pookie": true, "YouTube": true}, 1.0, 1.0},
+		// No overlap
+		{map[string]bool{"Pookie": true, "ALF": true}, map[string]bool{"Dictato": true, "LinkedIn": true}, 0.0, 0.0},
+		// Partial overlap
+		{map[string]bool{"YouTube": true, "Pookie": true}, map[string]bool{"YouTube": true, "Dictato": true}, 0.49, 0.51},
+		// Empty a
+		{map[string]bool{}, map[string]bool{"Pookie": true}, 0.0, 0.0},
+	}
+
+	for _, tt := range tests {
+		overlap := entityOverlap(tt.a, tt.b)
+		if overlap < tt.min || overlap > tt.max {
+			t.Errorf("entityOverlap(%v, %v) = %f, want [%f, %f]", tt.a, tt.b, overlap, tt.min, tt.max)
+		}
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	if got := truncate("hello world", 5); got != "hello..." {
+		t.Errorf("truncate: got %q", got)
+	}
+	if got := truncate("short", 80); got != "short" {
+		t.Errorf("truncate: got %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Concurrent access
 // ---------------------------------------------------------------------------
 

@@ -15,9 +15,10 @@ import (
 
 // TeamsHandler serves agent team configurations (CRUD on agents/teams/*.json).
 type TeamsHandler struct {
-	AgentStore agents.Store
-	DataDir    string // data directory (e.g. /home/alf/data)
-	Notifier   Notifier
+	AgentStore  agents.Store
+	DataDir     string // data directory (e.g. /home/alf/data)
+	Notifier    Notifier
+	EventBroker *EventBroker
 }
 
 func (h *TeamsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +128,9 @@ func (h *TeamsHandler) save(w http.ResponseWriter, r *http.Request) {
 	if h.Notifier != nil {
 		h.Notifier.Notify(ReloadAgents)
 	}
+	if h.EventBroker != nil {
+		h.EventBroker.Emit(EventAgents)
+	}
 
 	json.NewEncoder(w).Encode(map[string]any{"ok": true, "id": tc.ID, "file": filename})
 }
@@ -193,6 +197,9 @@ func (h *TeamsHandler) del(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.Notifier != nil {
 		h.Notifier.Notify(ReloadAgents)
+	}
+	if h.EventBroker != nil {
+		h.EventBroker.Emit(EventAgents)
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})

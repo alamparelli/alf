@@ -9,7 +9,8 @@ import (
 
 // MarketplaceHandler handles /api/marketplace routes.
 type MarketplaceHandler struct {
-	Manager *marketplace.Manager
+	Manager     *marketplace.Manager
+	EventBroker *EventBroker
 }
 
 func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -82,5 +83,9 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.EventBroker != nil {
+		h.EventBroker.Emit(EventMarketplace)
+		h.EventBroker.Emit(EventApps)
+	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

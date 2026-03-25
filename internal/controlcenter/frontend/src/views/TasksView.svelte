@@ -4,6 +4,7 @@
   import Card from '../components/shared/Card.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
+  import { events } from '../stores/events.svelte'
   import { marked } from 'marked'
   import DOMPurify from 'dompurify'
 
@@ -185,19 +186,7 @@
     expandedTasks[id] = !expandedTasks[id]
   }
 
-  function startAutoRefresh() {
-    stopAutoRefresh()
-    if (autoRefresh) {
-      refreshTimer = setInterval(loadTasks, 5000)
-    }
-  }
-
-  function stopAutoRefresh() {
-    if (refreshTimer) {
-      clearInterval(refreshTimer)
-      refreshTimer = undefined
-    }
-  }
+  let unsubEvents: (() => void) | undefined
 
   // Request notification permission
   function requestNotifPerm() {
@@ -209,17 +198,12 @@
   onMount(() => {
     loadTeams()
     loadTasks()
-    startAutoRefresh()
+    unsubEvents = events.subscribe('tasks', loadTasks)
     requestNotifPerm()
   })
 
   onDestroy(() => {
-    stopAutoRefresh()
-  })
-
-  $effect(() => {
-    if (autoRefresh) startAutoRefresh()
-    else stopAutoRefresh()
+    unsubEvents?.()
   })
 </script>
 
@@ -269,10 +253,6 @@
 
   <!-- Controls -->
   <div class="task-controls">
-    <label class="checkbox-label">
-      <input type="checkbox" bind:checked={autoRefresh} />
-      Auto-refresh (5s)
-    </label>
     <button class="btn btn-sm" onclick={loadTasks}>
       <RefreshCw size={13} /> Refresh
     </button>
@@ -337,36 +317,35 @@
 
             {#if task.agent_calls && task.agent_calls.length > 0}
               <div class="agent-steps">
-                <h4>Agent Steps</h4>
+                <h4>Agent Steps ({task.agent_calls.length})</h4>
                 {#each task.agent_calls as call, i}
                   {@const outputKey = `${task.id}-${i}`}
+                  {@const isExpanded = expandedOutputs[outputKey]}
                   <div class="agent-step agent-step-{call.status === 'completed' ? 'completed' : call.status === 'failed' || call.status === 'timeout' ? 'failed' : 'working'}">
-                    <div class="agent-step-header">
+                    <div class="agent-step-header" onclick={() => toggleOutput(outputKey)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && toggleOutput(outputKey)}>
+                      {#if isExpanded}
+                        <ChevronDown size={13} />
+                      {:else}
+                        <ChevronRight size={13} />
+                      {/if}
                       <span class="agent-name">{call.agent}</span>
                       <span class="badge {statusBadgeClass(call.status)}">{call.status}</span>
                       {#if call.cost_usd > 0}
                         <span class="cost">${call.cost_usd.toFixed(4)}</span>
                       {/if}
                     </div>
-                    {#if call.task}
-                      {@const taskKey = `${outputKey}-task`}
-                      <div class="agent-task markdown-body" class:agent-output-collapsed={!expandedOutputs[taskKey]}>{@html renderMarkdown(call.task)}</div>
-                      {#if call.task.length > 200}
-                        <button class="btn btn-sm btn-toggle-output" onclick={() => toggleOutput(taskKey)}>
-                          {expandedOutputs[taskKey] ? 'Hide instructions' : 'Show instructions'}
-                        </button>
-                      {/if}
-                    {/if}
-                    {#if call.text}
-                      <div class="agent-output markdown-body" class:agent-output-collapsed={!expandedOutputs[outputKey]}>{@html renderMarkdown(call.text)}</div>
-                      {#if call.text.length > 300}
-                        <button class="btn btn-sm btn-toggle-output" onclick={() => toggleOutput(outputKey)}>
-                          {expandedOutputs[outputKey] ? 'Show less' : 'Show more'}
-                        </button>
-                      {/if}
-                    {/if}
-                    {#if call.error}
-                      <div class="agent-error">{call.error}</div>
+                    {#if isExpanded}
+                      <div class="agent-step-body">
+                        {#if call.task}
+                          <div class="agent-task markdown-body">{@html renderMarkdown(call.task)}</div>
+                        {/if}
+                        {#if call.text}
+                          <div class="agent-output markdown-body">{@html renderMarkdown(call.text)}</div>
+                        {/if}
+                        {#if call.error}
+                          <div class="agent-error">{call.error}</div>
+                        {/if}
+                      </div>
                     {/if}
                   </div>
                 {/each}
@@ -457,30 +436,35 @@
 
               {#if task.agent_calls && task.agent_calls.length > 0}
                 <div class="agent-steps">
-                  <h4>Agent Steps</h4>
+                  <h4>Agent Steps ({task.agent_calls.length})</h4>
                   {#each task.agent_calls as call, i}
                     {@const outputKey = `${task.id}-${i}`}
+                    {@const isExpanded = expandedOutputs[outputKey]}
                     <div class="agent-step agent-step-{call.status === 'completed' ? 'completed' : call.status === 'failed' || call.status === 'timeout' ? 'failed' : 'working'}">
-                      <div class="agent-step-header">
+                      <div class="agent-step-header" onclick={() => toggleOutput(outputKey)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && toggleOutput(outputKey)}>
+                        {#if isExpanded}
+                          <ChevronDown size={13} />
+                        {:else}
+                          <ChevronRight size={13} />
+                        {/if}
                         <span class="agent-name">{call.agent}</span>
                         <span class="badge {statusBadgeClass(call.status)}">{call.status}</span>
                         {#if call.cost_usd > 0}
                           <span class="cost">${call.cost_usd.toFixed(4)}</span>
                         {/if}
                       </div>
-                      {#if call.task}
-                        <div class="agent-task">{call.task}</div>
-                      {/if}
-                      {#if call.text}
-                        <div class="agent-output markdown-body" class:agent-output-collapsed={!expandedOutputs[outputKey]}>{@html renderMarkdown(call.text)}</div>
-                        {#if call.text.length > 300}
-                          <button class="btn btn-sm btn-toggle-output" onclick={() => toggleOutput(outputKey)}>
-                            {expandedOutputs[outputKey] ? 'Show less' : 'Show more'}
-                          </button>
-                        {/if}
-                      {/if}
-                      {#if call.error}
-                        <div class="agent-error">{call.error}</div>
+                      {#if isExpanded}
+                        <div class="agent-step-body">
+                          {#if call.task}
+                            <div class="agent-task markdown-body">{@html renderMarkdown(call.task)}</div>
+                          {/if}
+                          {#if call.text}
+                            <div class="agent-output markdown-body">{@html renderMarkdown(call.text)}</div>
+                          {/if}
+                          {#if call.error}
+                            <div class="agent-error">{call.error}</div>
+                          {/if}
+                        </div>
                       {/if}
                     </div>
                   {/each}
@@ -748,7 +732,19 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 4px;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+  }
+
+  .agent-step-header:hover {
+    opacity: 0.8;
+  }
+
+  .agent-step-body {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   }
 
   .agent-task {

@@ -18,6 +18,7 @@ type TiersHandler struct {
 	DataDir      string             // for tool discovery
 	ToolRegistry *tooling.Registry  // may be nil
 	ModelCache   *ModelCache        // may be nil - pre-fetched models per backend
+	EventBroker  *EventBroker
 }
 
 // toolInfo describes an available tool for the frontend.
@@ -96,6 +97,9 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.Notifier != nil {
 			h.Notifier.Notify(ReloadTiers)
 		}
+		if h.EventBroker != nil {
+			h.EventBroker.Emit(EventTiers)
+		}
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 
 	default:
@@ -148,6 +152,7 @@ type TierConfigsHandler struct {
 	TierStore   TierStore
 	ConfigStore ConfigStore
 	Notifier    Notifier
+	EventBroker *EventBroker
 }
 
 type tierConfigEntry struct {
@@ -256,6 +261,10 @@ func (h *TierConfigsHandler) handleSwitch(w http.ResponseWriter, r *http.Request
 	if h.Notifier != nil {
 		h.Notifier.Notify(ReloadTiers)
 		h.Notifier.Notify(ReloadConfig)
+	}
+	if h.EventBroker != nil {
+		h.EventBroker.Emit(EventTiers)
+		h.EventBroker.Emit(EventConfig)
 	}
 
 	log.Printf("[tiers] switched to %s", req.Name)

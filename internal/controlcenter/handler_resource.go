@@ -15,9 +15,10 @@ import (
 //	PUT  /api/{type}/{name}  → upsert
 //	DELETE /api/{type}/{name} → delete
 type ResourceHandler struct {
-	Store    ResourceStore
-	Notifier Notifier       // optional: notify daemon on change
-	Event    ReloadEvent    // which event to fire
+	Store       ResourceStore
+	Notifier    Notifier       // optional: notify daemon on change
+	Event       ReloadEvent    // which event to fire
+	EventBroker *EventBroker
 }
 
 func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +112,7 @@ func (h *ResourceHandler) put(w http.ResponseWriter, r *http.Request, name strin
 	if h.Notifier != nil {
 		h.Notifier.Notify(h.Event)
 	}
+	h.emitEvent()
 
 	w.Write([]byte(`{"ok":true}`))
 }
@@ -130,6 +132,20 @@ func (h *ResourceHandler) del(w http.ResponseWriter, name string) {
 	if h.Notifier != nil {
 		h.Notifier.Notify(h.Event)
 	}
+	h.emitEvent()
 
 	w.Write([]byte(`{"ok":true}`))
+}
+
+// emitEvent maps the ReloadEvent to the corresponding EventType for SSE.
+func (h *ResourceHandler) emitEvent() {
+	if h.EventBroker == nil {
+		return
+	}
+	switch h.Event {
+	case ReloadTools:
+		h.EventBroker.Emit(EventTools)
+	case ReloadSkills:
+		h.EventBroker.Emit(EventSkills)
+	}
 }

@@ -40,7 +40,8 @@ type Deps struct {
 	FirewallStore  *firewall.Store     // nil if firewall unavailable
 	FirewallProxy  *firewall.Proxy     // nil if firewall unavailable
 	VaultManager     *vault.Manager      // nil if vault unavailable
-	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable
+	EventBroker      *EventBroker           // global SSE event bus
+	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable (deprecated, use EventBroker)
 	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
 	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
 	ModelCache       *ModelCache           // nil if model cache unavailable
@@ -87,9 +88,10 @@ func HandlerFactory(deps Deps) http.Handler {
 
 	// API routes.
 	mux.Handle("/api/config", &ConfigHandler{
-		Store:    deps.ConfigStore,
-		Notifier: deps.Notifier,
-		Event:    ReloadConfig,
+		Store:       deps.ConfigStore,
+		Notifier:    deps.Notifier,
+		Event:       ReloadConfig,
+		EventBroker: deps.EventBroker,
 	})
 	mux.Handle("/api/workspace", &WorkspaceHandler{
 		DataDir:   deps.DataDir,
@@ -116,12 +118,14 @@ func HandlerFactory(deps Deps) http.Handler {
 		DataDir:      deps.DataDir,
 		ToolRegistry: deps.ToolRegistry,
 		ModelCache:   deps.ModelCache,
+		EventBroker:  deps.EventBroker,
 	})
 	mux.Handle("/api/tiers/configs", &TierConfigsHandler{
 		ConfigDir:   deps.ConfigDir,
 		TierStore:   deps.TierStore,
 		ConfigStore: deps.ConfigStore,
 		Notifier:    deps.Notifier,
+		EventBroker: deps.EventBroker,
 	})
 	mux.Handle("/api/tiers/configs/", &TierConfigsHandler{
 		ConfigDir:   deps.ConfigDir,
@@ -141,9 +145,10 @@ func HandlerFactory(deps Deps) http.Handler {
 		Store: deps.ContextStore,
 	})
 	mux.Handle("/api/tools/", &ResourceHandler{
-		Store:    deps.ToolStore,
-		Notifier: deps.Notifier,
-		Event:    ReloadTools,
+		Store:       deps.ToolStore,
+		Notifier:    deps.Notifier,
+		Event:       ReloadTools,
+		EventBroker: deps.EventBroker,
 	})
 	// Skill catalog (all runtime skills from all directories).
 	if deps.SkillCatalog != nil {
@@ -160,9 +165,10 @@ func HandlerFactory(deps Deps) http.Handler {
 		Notifier:         deps.Notifier,
 	})
 	mux.Handle("/api/skills/", &ResourceHandler{
-		Store:    deps.SkillStore,
-		Notifier: deps.Notifier,
-		Event:    ReloadSkills,
+		Store:       deps.SkillStore,
+		Notifier:    deps.Notifier,
+		Event:       ReloadSkills,
+		EventBroker: deps.EventBroker,
 	})
 
 	// Apps: directory-based apps with index.html + assets.
@@ -177,7 +183,7 @@ func HandlerFactory(deps Deps) http.Handler {
 
 	// Marketplace: app lifecycle management.
 	if deps.Marketplace != nil {
-		mpHandler := &MarketplaceHandler{Manager: deps.Marketplace}
+		mpHandler := &MarketplaceHandler{Manager: deps.Marketplace, EventBroker: deps.EventBroker}
 		mux.Handle("/api/marketplace", mpHandler)
 		mux.Handle("/api/marketplace/", mpHandler)
 	}
@@ -216,6 +222,11 @@ func HandlerFactory(deps Deps) http.Handler {
 	mux.Handle("/api/schedules/logs", &ScheduleLogsHandler{
 		RunLog: deps.ScheduleRunLog,
 	})
+	// Global SSE event bus (replaces per-feature SSE endpoints).
+	if deps.EventBroker != nil {
+		mux.Handle("/api/events", deps.EventBroker)
+	}
+	// Backward compat: keep /api/schedules/events for now.
 	if deps.ScheduleEvents != nil {
 		mux.Handle("/api/schedules/events", deps.ScheduleEvents)
 	}
@@ -233,29 +244,33 @@ func HandlerFactory(deps Deps) http.Handler {
 		taskHandler.ResolveModel = deps.ChatService.ResolveModel
 	}
 	taskHandler.OnTaskEvent = deps.OnTaskEvent
+	taskHandler.EventBroker = deps.EventBroker
 	mux.Handle("/api/tasks", taskHandler)
 	mux.Handle("/api/tasks/approve", &TaskApproveHandler{Orchestrator: deps.Orchestrator})
 
 	// Agent teams management.
 	mux.Handle("/api/teams", &TeamsHandler{
-		AgentStore: deps.AgentStore,
-		DataDir:    deps.DataDir,
-		Notifier:   deps.Notifier,
+		AgentStore:  deps.AgentStore,
+		DataDir:     deps.DataDir,
+		Notifier:    deps.Notifier,
+		EventBroker: deps.EventBroker,
 	})
 
 	// Firewall.
 	mux.Handle("/api/firewall", &FirewallHandler{
-		Store:    deps.FirewallStore,
-		Proxy:    deps.FirewallProxy,
-		Notifier: deps.Notifier,
+		Store:       deps.FirewallStore,
+		Proxy:       deps.FirewallProxy,
+		Notifier:    deps.Notifier,
+		EventBroker: deps.EventBroker,
 	})
 
 	// Vault (secrets proxy).
 	vaultH := &VaultHandler{
-		Manager:    deps.VaultManager,
-		ContextDir: filepath.Join(deps.DataDir, "context"),
-		DataDir:    deps.DataDir,
-		OnUnlock:   deps.OnVaultUnlock,
+		Manager:     deps.VaultManager,
+		ContextDir:  filepath.Join(deps.DataDir, "context"),
+		DataDir:     deps.DataDir,
+		OnUnlock:    deps.OnVaultUnlock,
+		EventBroker: deps.EventBroker,
 	}
 	mux.Handle("/api/vault/", vaultH)
 	mux.Handle("/api/vault", vaultH)

@@ -9,9 +9,10 @@ import (
 
 // FirewallHandler serves GET/PUT for firewall config and request log.
 type FirewallHandler struct {
-	Store    *firewall.Store
-	Proxy    *firewall.Proxy
-	Notifier Notifier
+	Store       *firewall.Store
+	Proxy       *firewall.Proxy
+	Notifier    Notifier
+	EventBroker *EventBroker
 }
 
 func (h *FirewallHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +49,9 @@ func (h *FirewallHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.Notifier != nil {
 			h.Notifier.Notify(ReloadFirewall)
+		}
+		if h.EventBroker != nil {
+			h.EventBroker.Emit(EventFirewall)
 		}
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 

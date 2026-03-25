@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { api, esc } from '../lib/api';
   import { toasts } from '../stores/toast.svelte';
+  import { events } from '../stores/events.svelte';
   import Card from '../components/shared/Card.svelte';
   import { Plus, Play, Trash2, Search, ChevronDown, ChevronRight, ChevronsUpDown, Clock, Power, PowerOff, Settings, Pencil } from 'lucide-svelte';
 
@@ -26,7 +27,7 @@
   let tierNames = $state([]);
 
   // SSE
-  let eventSource = $state(null);
+  let unsubEvents;
 
   const FILTERS = [
     { key: 'all', label: 'All' },
@@ -168,19 +169,6 @@
     } catch {}
   }
 
-  // --- SSE ---
-  function connectSSE() {
-    if (eventSource) eventSource.close();
-    const es = new EventSource('/api/schedules/events');
-    es.addEventListener('change', () => { loadJobs(); });
-    es.addEventListener('ping', () => {});
-    es.onerror = () => {
-      es.close();
-      setTimeout(connectSSE, 5000);
-    };
-    eventSource = es;
-  }
-
   // --- Actions ---
   async function runNow(id) {
     try {
@@ -302,8 +290,8 @@
   onMount(() => {
     loadJobs();
     loadTierNames();
-    connectSSE();
-    return () => { if (eventSource) eventSource.close(); };
+    unsubEvents = events.subscribe('schedules', loadJobs);
+    return () => { unsubEvents?.(); };
   });
 </script>
 

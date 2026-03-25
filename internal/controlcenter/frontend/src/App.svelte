@@ -23,6 +23,7 @@
   import { X } from 'lucide-svelte'
   import { nav, SYSTEM_TABS } from './stores/nav.svelte'
   import { apps } from './stores/apps.svelte'
+  import { events } from './stores/events.svelte'
   import { theme } from './stores/theme.svelte'
   import { toasts } from './stores/toast.svelte'
   import { api } from './lib/api'
@@ -32,6 +33,9 @@
 
   onMount(() => {
     apps.load()
+    events.connect()
+    events.subscribe('apps', () => apps.load())
+    events.subscribe('marketplace', () => apps.load())
 
     // Auto-show setup wizard on first visit if setup is incomplete
     if (!localStorage.getItem('alf-welcomed')) {

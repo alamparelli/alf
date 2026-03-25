@@ -647,7 +647,7 @@ func main() {
 
 	// Schedule adapter (engine set later after scheduler is created).
 	schedAdapter := &ccScheduleAdapter{}
-	var schedEventBroker *cc.ScheduleEventBroker
+	var eventBroker *cc.EventBroker
 	var ccServerRef *cc.Server
 
 	// Start Control Center HTTP server.
@@ -705,7 +705,7 @@ func main() {
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
-			schedEventBroker = broker
+			eventBroker = broker
 			go func() {
 				if err := ccServer.Start(); err != nil && err != http.ErrServerClosed {
 					log.Printf("Control Center error: %v", err)
@@ -907,8 +907,8 @@ func main() {
 	}
 
 	schedAdapter.engine = sched
-	if schedEventBroker != nil {
-		sched.OnChange = schedEventBroker.Notify
+	if eventBroker != nil {
+		sched.OnChange = func() { eventBroker.Emit(cc.EventSchedules) }
 	}
 
 	if err := sched.Start(filepath.Join(contextDir, "scheduler.sock")); err != nil {

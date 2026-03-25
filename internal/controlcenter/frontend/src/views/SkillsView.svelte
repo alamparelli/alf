@@ -420,11 +420,21 @@
       <h3><Download size={18} /> Import Skill from GitHub</h3>
 
       {#if importPhase === 'input' || importPhase === 'scanning'}
+        <p class="import-hint">
+          Browse community skills at <a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a>, then paste the repository here.
+        </p>
         <div class="form-grid">
           <label class="full-width">
             Repository
             <input type="text" bind:value={importForm.command} placeholder="owner/repo or owner/repo --skill name" disabled={importPhase === 'scanning'} />
           </label>
+        </div>
+        <div class="import-security-note">
+          <Shield size={14} />
+          <div>
+            <strong>Are community skills safe?</strong>
+            Every skill goes through an automated LLM security audit before installation. Skills run inside the same isolated container — no access to your host machine unless explicitly allowed.
+          </div>
         </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" onclick={() => showImportModal = false}>Cancel</button>
@@ -732,6 +742,39 @@
     word-break: break-word;
     max-height: 60vh;
     overflow-y: auto;
+  }
+
+  /* Import hints */
+  .import-hint {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 0.75rem;
+  }
+
+  .import-hint a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .import-hint a:hover { text-decoration: underline; }
+
+  .import-security-note {
+    display: flex;
+    gap: 10px;
+    padding: 10px 14px;
+    margin-top: 0.75rem;
+    background: rgba(61, 139, 61, 0.06);
+    border-radius: var(--radius, 8px);
+    border-left: 3px solid var(--green, #3d8b3d);
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .import-security-note strong {
+    color: var(--text);
+    display: block;
+    margin-bottom: 2px;
   }
 
   /* Scan result */

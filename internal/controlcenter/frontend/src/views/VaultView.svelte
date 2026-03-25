@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { Lock, Unlock, Shield, Key, FileText, Plus, Trash2, Download, Upload, Eye, EyeOff, Copy, RefreshCw, AlertTriangle, CheckCircle, ExternalLink, Loader2, Zap, Pencil } from 'lucide-svelte'
+  import { Lock, Unlock, Shield, Key, FileText, Plus, Trash2, Download, Upload, Eye, EyeOff, Copy, RefreshCw, AlertTriangle, CheckCircle, ExternalLink, Loader2, Zap, Pencil, Info } from 'lucide-svelte'
   import Card from '../components/shared/Card.svelte'
   import Modal from '../components/shared/Modal.svelte'
   import { api } from '../lib/api'
@@ -32,6 +32,7 @@
     set: boolean
   }
   let secrets = $state<Secret[]>([])
+  let vaultStorageTab = $state<'secrets' | 'files'>('secrets')
 
   // Files
   interface VaultFile {
@@ -684,23 +685,19 @@
             <div class="item-row">
               <div class="item-info">
                 <span class="item-name">{svc.name}</span>
-                <span class="item-url">{svc.base_url}</span>
                 <span class="auth-badge">{authTypeBadge(svc.auth_type)}</span>
                 {#if svc.token_status === 'expired'}
                   <span class="token-badge token-expired">expired</span>
                 {:else if svc.token_status === 'expiring_soon'}
                   <span class="token-badge token-expiring">expiring</span>
                 {/if}
-                {#if svc.expires_at}
-                  <span class="expires-date">{new Date(svc.expires_at).toLocaleDateString()}</span>
-                {/if}
               </div>
               <div class="item-actions">
+                <button class="btn btn-sm" onclick={() => openServiceModal(svc)} title="Details">
+                  <Info size={12} />
+                </button>
                 <button class="btn btn-sm" onclick={() => testService(svc.name)} title="Test connection">
                   <Zap size={12} />
-                </button>
-                <button class="btn btn-sm" onclick={() => openServiceModal(svc)} title="Edit">
-                  <Pencil size={12} />
                 </button>
                 <button class="btn btn-sm" onclick={() => deleteService(svc.name)} title="Delete">
                   <Trash2 size={12} />
@@ -712,111 +709,38 @@
       {/if}
     </Card>
 
-    <!-- Mobile API Token -->
+    <!-- Vault Storage (secrets + files are the same in vault-proxy) -->
     <Card>
       <div class="section-header">
-        <h3><Zap size={16} /> Mobile Access</h3>
-      </div>
-      <p class="dim" style="font-size:0.8rem;margin-bottom:10px">
-        Persistent bearer token for the mobile app. Use as <code style="font-size:0.75rem;padding:1px 4px;border-radius:3px;background:var(--bg-input)">Authorization: Bearer &lt;token&gt;</code>
-      </p>
-
-      {#if mobileTokenFull}
-        <!-- Token just generated — show it once -->
-        <div class="mobile-token-display">
-          <code class="mobile-token-value">{mobileTokenFull}</code>
-          <button class="btn btn-sm" onclick={copyMobileToken}>
-            {#if mobileTokenCopied}
-              <CheckCircle size={12} /> Copied
-            {:else}
-              <Copy size={12} /> Copy
-            {/if}
+        <h3><Key size={16} /> Secrets & Files</h3>
+        <div class="section-header-actions">
+          <button class="btn btn-sm" onclick={() => openSecretModal()}>
+            <Plus size={13} /> Add Secret
           </button>
-        </div>
-        <p class="mobile-token-warning">Copy this token now. It won't be shown again.</p>
-        <div class="mobile-token-actions">
-          <button class="btn btn-sm" onclick={revokeMobileToken}>
-            <Trash2 size={12} /> Revoke
-          </button>
-        </div>
-      {:else if mobileTokenExists}
-        <!-- Token exists but not shown -->
-        <div class="mobile-token-display">
-          <code class="mobile-token-value dim">{mobileTokenMasked}</code>
-        </div>
-        <div class="mobile-token-actions">
-          <button class="btn btn-sm" onclick={generateMobileToken} disabled={mobileGenerating}>
-            <RefreshCw size={12} /> Regenerate
-          </button>
-          <button class="btn btn-sm" onclick={revokeMobileToken}>
-            <Trash2 size={12} /> Revoke
-          </button>
-        </div>
-      {:else}
-        <!-- No token -->
-        <button class="btn btn-sm btn-primary" onclick={generateMobileToken} disabled={mobileGenerating}>
-          <Plus size={12} /> {mobileGenerating ? 'Generating...' : 'Generate Token'}
-        </button>
-      {/if}
-    </Card>
-
-    <!-- Secrets -->
-    <Card>
-      <div class="section-header">
-        <h3><Key size={16} /> Secrets</h3>
-        <button class="btn btn-sm" onclick={() => openSecretModal()}>
-          <Plus size={13} /> Add
-        </button>
-      </div>
-      {#if secrets.length === 0}
-        <p class="dim">No secrets stored.</p>
-      {:else}
-        <div class="item-list">
-          {#each secrets as secret}
-            <div class="item-row">
-              <div class="item-info">
-                <span class="item-name">{secret.name}</span>
-                <span class="dim" style="font-size:0.75rem">***</span>
-              </div>
-              <div class="item-actions">
-                <button class="btn btn-sm" onclick={() => openSecretModal(secret)} title="Update">
-                  <Pencil size={12} />
-                </button>
-                <button class="btn btn-sm" onclick={() => deleteSecret(secret.name)} title="Delete">
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </Card>
-
-    <!-- Files -->
-    <Card>
-      <div class="section-header">
-        <h3><FileText size={16} /> Encrypted Files</h3>
-        <div class="file-upload-inline">
           <input type="file" bind:this={fileInput} onchange={uploadFile} style="display:none" />
           <button class="btn btn-sm" onclick={() => fileInput?.click()} disabled={uploadingFile}>
             <Upload size={13} /> {uploadingFile ? 'Uploading...' : 'Upload'}
           </button>
         </div>
       </div>
-      {#if files.length === 0}
-        <p class="dim">No encrypted files.</p>
+      {#if secrets.length === 0}
+        <p class="dim">No secrets or files stored.</p>
       {:else}
         <div class="item-list">
-          {#each files as f}
+          {#each secrets as secret}
             <div class="item-row">
               <div class="item-info">
-                <span class="item-name">{f.name}</span>
+                <span class="item-name">{secret.name}</span>
+                <span class="secret-dots">{'•'.repeat(8)}</span>
               </div>
               <div class="item-actions">
-                <button class="btn btn-sm" onclick={() => downloadFile(f.name)} title="Download">
+                <button class="btn btn-sm" onclick={() => openSecretModal(secret)} title="Edit value">
+                  <Pencil size={12} />
+                </button>
+                <button class="btn btn-sm" onclick={() => downloadFile(secret.name)} title="Download">
                   <Download size={12} />
                 </button>
-                <button class="btn btn-sm" onclick={() => deleteFile(f.name)} title="Delete">
+                <button class="btn btn-sm" onclick={() => deleteSecret(secret.name)} title="Delete">
                   <Trash2 size={12} />
                 </button>
               </div>
@@ -844,7 +768,7 @@
         {#if adminToken}
           <div class="item-row item-row-builtin">
             <div class="item-info">
-              <span class="item-name mono">{adminToken}</span>
+              <span class="item-name mono">{'•'.repeat(8)}...{adminToken.slice(-4)}</span>
               <span class="auth-badge">admin</span>
             </div>
             <div class="item-actions"><span class="dim" style="font-size:0.7rem">built-in</span></div>
@@ -853,7 +777,7 @@
         {#if proxyToken}
           <div class="item-row item-row-builtin">
             <div class="item-info">
-              <span class="item-name mono">{proxyToken}</span>
+              <span class="item-name mono">{'•'.repeat(8)}...{proxyToken.slice(-4)}</span>
               <span class="auth-badge">proxy</span>
             </div>
             <div class="item-actions"><span class="dim" style="font-size:0.7rem">built-in</span></div>
@@ -862,7 +786,7 @@
         {#each tokens as tok}
           <div class="item-row">
             <div class="item-info">
-              <span class="item-name mono">{tok.id.length > 16 ? tok.id.slice(0, 16) + '...' : tok.id}</span>
+              <span class="item-name mono">{'•'.repeat(8)}...{tok.id.slice(-4)}</span>
               <span class="auth-badge">{tok.scope}</span>
             </div>
             <div class="item-actions">
@@ -876,6 +800,44 @@
           <p class="dim">No access keys.</p>
         {/if}
       </div>
+    </Card>
+
+    <!-- Mobile API Token -->
+    <Card>
+      <div class="section-header">
+        <h3><Zap size={16} /> Mobile Access</h3>
+      </div>
+      <p class="dim" style="font-size:0.8rem;margin-bottom:10px">
+        Bearer token for the mobile app.
+      </p>
+      {#if mobileTokenFull}
+        <div class="mobile-token-display">
+          <code class="mobile-token-value">{mobileTokenFull}</code>
+          <button class="btn btn-sm" onclick={copyMobileToken}>
+            {#if mobileTokenCopied}
+              <CheckCircle size={12} /> Copied
+            {:else}
+              <Copy size={12} /> Copy
+            {/if}
+          </button>
+        </div>
+        <p class="mobile-token-warning">Copy this token now. It won't be shown again.</p>
+        <div class="mobile-token-actions">
+          <button class="btn btn-sm" onclick={revokeMobileToken}><Trash2 size={12} /> Revoke</button>
+        </div>
+      {:else if mobileTokenExists}
+        <div class="mobile-token-display">
+          <code class="mobile-token-value dim">{mobileTokenMasked}</code>
+        </div>
+        <div class="mobile-token-actions">
+          <button class="btn btn-sm" onclick={generateMobileToken} disabled={mobileGenerating}><RefreshCw size={12} /> Regenerate</button>
+          <button class="btn btn-sm" onclick={revokeMobileToken}><Trash2 size={12} /> Revoke</button>
+        </div>
+      {:else}
+        <button class="btn btn-sm btn-primary" onclick={generateMobileToken} disabled={mobileGenerating}>
+          <Plus size={12} /> {mobileGenerating ? 'Generating...' : 'Generate Token'}
+        </button>
+      {/if}
     </Card>
 
     <!-- Export / Import -->
@@ -1166,10 +1128,16 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 10px;
-    background: var(--bg-input);
+    padding: 10px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
     gap: 8px;
+    transition: background 0.1s;
+  }
+
+  .item-row:hover {
+    background: var(--bg-input);
   }
 
   .item-row-builtin {
@@ -1187,6 +1155,7 @@
   .item-name {
     font-weight: 500;
     font-size: 0.85rem;
+    font-family: 'JetBrains Mono', monospace;
   }
 
   .item-url {
@@ -1209,6 +1178,51 @@
     font-weight: 500;
     background: rgba(59, 130, 246, 0.12);
     color: var(--blue, #3b82f6);
+  }
+
+  .vault-storage-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .storage-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .storage-tab:hover { color: var(--text); }
+  .storage-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-count {
+    font-size: 0.7rem;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: var(--bg-input);
+    color: var(--text-dim);
+  }
+
+  .section-header-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .secret-dots {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    letter-spacing: 2px;
   }
 
   .mono {

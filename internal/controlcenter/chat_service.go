@@ -1293,10 +1293,7 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 			// Resolve tool wildcards into concrete tool names.
 			tools := t.Tools
 			if len(tools) == 1 && tools[0] == "*" {
-				tools = tooling.DiscoverToolNames(cs.DataDir)
-				if cs.ToolRegistry != nil {
-					tools = append(tools, cs.ToolRegistry.NativeToolNames()...)
-				}
+				tools = tooling.ResolveWildcard(cs.DataDir, cs.ToolRegistry)
 				if len(tools) > 0 {
 					log.Printf("[chat] tier %q: wildcard resolved to %d tools", tierName, len(tools))
 				}

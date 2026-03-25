@@ -239,9 +239,6 @@
     <button class="btn btn-primary btn-sm" onclick={openAddTier}>
       <Plus size={14} /> Add Tier
     </button>
-    <button class="btn btn-success btn-sm" onclick={saveAll}>
-      <Save size={14} /> Save All
-    </button>
   </div>
 
   {#if loading}

@@ -17,7 +17,7 @@ var templateFS embed.FS
 //go:embed bundled_skills/*
 var bundledSkillsFS embed.FS
 
-//go:embed bundled_agents/*
+//go:embed all:bundled_agents
 var bundledAgentsFS embed.FS
 
 // ComposeData holds values for the docker-compose template.

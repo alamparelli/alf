@@ -15,7 +15,8 @@ import (
 // authMiddleware rejects requests without a valid Bearer token or session cookie.
 // Exempt paths (e.g. /health, /auth) bypass the check.
 // For unauthenticated browser requests to GET /, it returns a login page (200) instead of 401.
-func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool) func(http.Handler) http.Handler {
+// extraTokenFns are optional callbacks that return additional valid tokens (e.g. mobile API token from vault).
+func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool, extraTokenFns ...func() string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Exempt paths.
@@ -24,11 +25,22 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				return
 			}
 
-			// Check Authorization header.
+			// Check Authorization header against primary token.
 			auth := r.Header.Get("Authorization")
 			if token != "" && strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(token)) == 1 {
 				next.ServeHTTP(w, r)
 				return
+			}
+
+			// Check Authorization header against extra tokens (e.g. mobile API token).
+			if strings.HasPrefix(auth, "Bearer ") {
+				bearer := auth[7:]
+				for _, fn := range extraTokenFns {
+					if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(et)) == 1 {
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
 			}
 
 			// Check cc_bearer cookie (used by mobile WebViews for sub-resource auth).

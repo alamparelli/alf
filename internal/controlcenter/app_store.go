@@ -57,12 +57,20 @@ func (s *fileAppStore) List() ([]AppMeta, error) {
 		return nil, fmt.Errorf("read apps dir: %w", err)
 	}
 
+	// Load marketplace state to filter disabled apps.
+	disabled := loadDisabledApps(s.dir)
+
 	var apps []AppMeta
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		name := e.Name()
+
+		// Skip disabled apps (marketplace state).
+		if disabled[name] {
+			continue
+		}
 
 		// Must have index.html to be a valid app.
 		indexPath := filepath.Join(s.dir, name, "index.html")
@@ -95,6 +103,27 @@ func (s *fileAppStore) List() ([]AppMeta, error) {
 		apps = append(apps, meta)
 	}
 	return apps, nil
+}
+
+// loadDisabledApps reads .state.json and returns a set of disabled app slugs.
+func loadDisabledApps(appsDir string) map[string]bool {
+	data, err := os.ReadFile(filepath.Join(appsDir, ".state.json"))
+	if err != nil {
+		return nil
+	}
+	var sf struct {
+		States map[string]string `json:"states"`
+	}
+	if json.Unmarshal(data, &sf) != nil {
+		return nil
+	}
+	disabled := make(map[string]bool)
+	for slug, state := range sf.States {
+		if state == "disabled" {
+			disabled[slug] = true
+		}
+	}
+	return disabled
 }
 
 func (s *fileAppStore) ReadFile(app, path string) ([]byte, error) {

@@ -300,6 +300,7 @@
 </script>
 
 <Modal bind:open onclose={() => open = false}>
+  <div class="wizard-container">
   {#if mode === 'welcome'}
     <!-- Welcome modal (setup already complete, first visit) -->
     <div class="wizard-logo">ALF</div>
@@ -602,9 +603,15 @@
       </div>
     </div>
   {/if}
+  </div>
 </Modal>
 
 <style>
+  .wizard-container {
+    width: 560px;
+    max-width: 88vw;
+  }
+
   .wizard-logo {
     text-align: center;
     font-family: 'Sora', sans-serif;

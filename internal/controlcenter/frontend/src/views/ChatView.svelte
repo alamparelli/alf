@@ -49,7 +49,7 @@
   async function loadConversations() {
     try {
       const data = await api<any>('/api/chat/conversations')
-      const convs = (data.conversations || []).filter((c: any) => c.msg_count > 0 || c.id === data.active_conv_id)
+      const convs = (data.conversations || []).filter((c: any) => c.msg_count > 0 || c.id === data.active_conv_id).reverse()
       tabs = convs.map((c: any) => ({
         id: c.id,
         label: c.title || `Chat`,
@@ -120,9 +120,13 @@
       tabs = [...tabs]
     }
     saveActiveTab()
-    // Always reload history from server to get latest state.
+    // Don't reload if this tab has an active send — keep optimistic messages + stream.
+    if (sending && sendingTabId === tabId) {
+      scrollToBottom()
+      return
+    }
+    // Reload from server, then check for active jobs to reconnect.
     await loadHistory()
-    // Check if there's an active job running on this tab (reconnect to stream).
     await checkActiveJob()
   }
 

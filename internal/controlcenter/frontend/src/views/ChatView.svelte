@@ -49,7 +49,7 @@
   async function loadConversations() {
     try {
       const data = await api<any>('/api/chat/conversations')
-      const convs = data.conversations || []
+      const convs = (data.conversations || []).filter((c: any) => c.msg_count > 0 || c.id === data.active_conv_id)
       tabs = convs.map((c: any) => ({
         id: c.id,
         label: c.title || `Chat`,
@@ -75,18 +75,17 @@
   }
 
   async function addTab() {
-    const id = genId()
     const label = `Chat ${tabs.length + 1}`
-    // Create server-side conversation first.
-    try {
-      await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id, title: label }) })
-    } catch { /* best effort */ }
-    // Also create a new backend session.
-    let convId = id
+    // Create a new backend session — returns a conv_id.
+    let convId = genId()
     try {
       const data = await api<any>('/api/chat', { method: 'DELETE' })
       if (data.conv_id) convId = data.conv_id
     } catch { /* use generated id */ }
+    // Register conversation in ChatDB for persistence.
+    try {
+      await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: convId, title: label }) })
+    } catch { /* best effort */ }
     const tab: ChatTab = { id: convId, label, convId, unread: 0 }
     tabs = [...tabs, tab]
     activeTabId = tab.id

@@ -185,7 +185,6 @@ func (r *Registry) UserToolNames() []string {
 var signalTools = map[string]bool{
 	"react":  true,
 	"status": true,
-	"notify": true,
 }
 
 // ResolveWildcard expands a "*" tool wildcard into all CLI + native tools, deduplicated.

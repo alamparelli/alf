@@ -353,8 +353,18 @@
   async function testService(name: string) {
     try {
       const data = await api<any>(`/api/vault/services/${encodeURIComponent(name)}/test`, { method: 'POST' })
-      if (data.ok) toasts.show(`${name}: connection OK`, 'success')
-      else toasts.show(`${name}: ${data.error || 'test failed'}`, 'error')
+      if (data.ok) {
+        toasts.show(`${name}: connection OK`, 'success')
+      } else {
+        let msg = data.error || 'test failed'
+        // Make common upstream errors more user-friendly.
+        if (msg.includes('upstream request failed') || msg.includes('502')) {
+          msg = 'Could not reach the service. Check the Base URL is correct and the service is running.'
+        } else if (msg.includes('401') || msg.includes('403') || msg.includes('Unauthorized')) {
+          msg = 'Authentication rejected. Check your credentials.'
+        }
+        toasts.show(`${name}: ${msg}`, 'error')
+      }
     } catch (e: any) {
       toasts.show(e.error || 'Test failed', 'error')
     }

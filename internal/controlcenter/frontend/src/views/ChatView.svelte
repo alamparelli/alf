@@ -7,6 +7,7 @@
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
   import { nav } from '../stores/nav.svelte'
+  import { sound } from '../stores/sound.svelte'
 
   // --- Types ---
   interface ChatTab {
@@ -465,6 +466,11 @@
       // Desktop notification if tab is not visible
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && finalText) {
         new Notification('ALF', { body: finalText.slice(0, 100) })
+      }
+
+      // Sound notification
+      if (originTab) {
+        sound.play()
       }
 
       // Notify sidebar badge if user isn't viewing chat

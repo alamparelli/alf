@@ -4,6 +4,7 @@
   import Card from '../components/shared/Card.svelte'
   import { theme, ALF_THEMES } from '../stores/theme.svelte'
   import { toasts } from '../stores/toast.svelte'
+  import { sound } from '../stores/sound.svelte'
   import { api, esc, waitForDaemonAndReload } from '../lib/api'
 
   // --- Theme ---
@@ -126,6 +127,20 @@
         {/each}
       </select>
       <span class="hint">Light/dark follows your system.</span>
+    </div>
+  </Card>
+
+  <!-- Notifications -->
+  <Card>
+    <div class="row">
+      <h3>Notifications</h3>
+    </div>
+    <div class="notif-row">
+      <label class="toggle-label">
+        <input type="checkbox" bind:checked={sound.enabled} onchange={() => sound.persist()} />
+        <span>Chat sound</span>
+      </label>
+      <span class="hint">Play a sound when a chat message arrives</span>
     </div>
   </Card>
 
@@ -280,6 +295,28 @@
   .hint {
     font-size: 0.75rem;
     color: var(--text-dim);
+  }
+
+  .notif-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .toggle-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
   }
 
   .btn {

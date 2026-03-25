@@ -228,6 +228,30 @@ func TestDashboard_SecurityHeaders(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// SEC-H3b: Dashboard CSP includes media-src for notification sounds
+// ---------------------------------------------------------------------------
+
+func TestDashboard_CSP_IncludesMediaSrc(t *testing.T) {
+	h := &DashboardHandler{HTML: "<html></html>"}
+
+	req := httptest.NewRequest("GET", "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("missing Content-Security-Policy header")
+	}
+	if !strings.Contains(csp, "media-src 'self'") {
+		t.Errorf("CSP should contain media-src 'self', got: %s", csp)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // SEC-H1: Terminal endpoint rate limiting
 // ---------------------------------------------------------------------------
 

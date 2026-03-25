@@ -26,10 +26,16 @@ type extractorAdapter struct {
 
 func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params memstore.ExtractorParams) (string, error) {
 	// Check tier profile for explicit extract_backend preference.
+	// Default: use the router backend/model (cheap, fast, already configured).
 	var forceBackend, forceModel string
-	if tc := a.tierStore.Current(); tc != nil && tc.Memory != nil {
-		forceBackend = tc.Memory.ExtractBackend
-		forceModel = tc.Memory.ExtractModel
+	if tc := a.tierStore.Current(); tc != nil {
+		if tc.Memory != nil && tc.Memory.ExtractBackend != "" {
+			forceBackend = tc.Memory.ExtractBackend
+			forceModel = tc.Memory.ExtractModel
+		} else if tc.RouterBackend != "" {
+			forceBackend = tc.RouterBackend
+			forceModel = tc.RouterModel
+		}
 	}
 
 	model := params.Model

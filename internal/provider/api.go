@@ -242,12 +242,16 @@ func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, mode
 		Tools:         tools,
 		StreamOptions: &apiStreamOpts{IncludeUsage: true},
 	}
-	// Ollama-specific: disable parallel tool calls and explicitly set tool_choice.
-	if p.IsOllamaCompat() && len(tools) > 0 {
+	// Disable parallel tool calls for non-OpenAI backends.
+	// Many providers (xAI/Grok, Google, Ollama) generate malformed JSON when
+	// parallel_tool_calls is enabled. Only direct OpenAI handles it reliably.
+	if !p.IsDirectOpenAI() && len(tools) > 0 {
 		f := false
 		reqBody.ParallelToolCalls = &f
+	}
+	// Ollama-specific: set tool_choice and disable stream_options.
+	if p.IsOllamaCompat() && len(tools) > 0 {
 		reqBody.ToolChoice = "auto"
-		// Ollama doesn't support stream_options.
 		reqBody.StreamOptions = nil
 	}
 	// Reasoning support (OpenRouter / OpenAI-compatible).

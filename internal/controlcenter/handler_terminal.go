@@ -29,7 +29,9 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Restrict WebSocket origin to prevent cross-site WebSocket hijacking.
-	originPatterns := []string{"*"}
+	// When no AllowedOrigin is configured, reject all cross-origin connections
+	// (same-origin requests have no Origin header and are always accepted).
+	var originPatterns []string
 	if h.AllowedOrigin != "" {
 		originPatterns = []string{h.AllowedOrigin}
 	}

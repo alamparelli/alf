@@ -784,7 +784,11 @@ func GetMobileToken(vm *vault.Manager) string {
 var isVaultSafeName = isSafeName
 
 // obfuscateToken shows the first 8 and last 4 chars of a token, masking the rest.
+// Returns "***" for tokens too short to obfuscate safely.
 func obfuscateToken(t string) string {
+	if len(t) < 8 {
+		return "***"
+	}
 	if len(t) <= 16 {
 		return t[:4] + "..." + t[len(t)-4:]
 	}

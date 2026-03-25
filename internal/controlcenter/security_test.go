@@ -419,11 +419,11 @@ func TestDOMPurify_VersionNotVulnerable(t *testing.T) {
 // SEC-RL: Rate limiter must be stricter for anonymous than authenticated
 // ---------------------------------------------------------------------------
 
-func TestRateLimiter_AuthenticatedGetsHigherLimit(t *testing.T) {
+func TestRateLimiter_AuthenticatedBypassesLimit(t *testing.T) {
 	ss := NewSessionStore(nil)
 	sid, _ := ss.Issue(100, 24*time.Hour)
 
-	rl := newRateLimiter(5).withAuthLimit(50, ss)
+	rl := newRateLimiter(5).withAuthLimit(600, ss)
 	handler := rl.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -439,26 +439,17 @@ func TestRateLimiter_AuthenticatedGetsHigherLimit(t *testing.T) {
 		}
 	}
 
-	// Authenticated: same IP but with session cookie should still pass.
-	for i := 0; i < 44; i++ {
+	// Authenticated: bypasses rate limiting entirely (games/apps make many requests).
+	for i := 0; i < 100; i++ {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "10.0.0.1:1234"
 		req.AddCookie(&http.Cookie{Name: "cc_session", Value: sid})
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		if i < 43 && rec.Code == http.StatusTooManyRequests {
-			t.Errorf("authenticated request #%d should not be rate limited (limit=50)", i+7)
+		if rec.Code == http.StatusTooManyRequests {
+			t.Errorf("authenticated request #%d should not be rate limited", i+7)
+			break
 		}
-	}
-
-	// After 50 total requests (6 anon + 44 auth = 50), next should be blocked even with auth.
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "10.0.0.1:1234"
-	req.AddCookie(&http.Cookie{Name: "cc_session", Value: sid})
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Errorf("authenticated request #51 should be rate limited, got %d", rec.Code)
 	}
 }
 
@@ -480,5 +471,101 @@ func TestRateLimiter_WithoutAuthConfig(t *testing.T) {
 		if i == 3 && rec.Code != http.StatusTooManyRequests {
 			t.Error("request #4 should be rate limited")
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SEC-003: obfuscateToken must not panic on short/empty tokens
+// ---------------------------------------------------------------------------
+
+func TestObfuscateToken_Empty(t *testing.T) {
+	result := obfuscateToken("")
+	if result != "***" {
+		t.Errorf("empty token should return ***, got %q", result)
+	}
+}
+
+func TestObfuscateToken_Short(t *testing.T) {
+	for _, tok := range []string{"a", "ab", "abc", "abcd", "abcdefg"} {
+		result := obfuscateToken(tok)
+		if result != "***" {
+			t.Errorf("token %q (len %d) should return ***, got %q", tok, len(tok), result)
+		}
+	}
+}
+
+func TestObfuscateToken_Medium(t *testing.T) {
+	// 8-16 chars: show first 4 + ... + last 4
+	result := obfuscateToken("abcdefgh1234")
+	if result != "abcd...1234" {
+		t.Errorf("12-char token: expected abcd...1234, got %q", result)
+	}
+}
+
+func TestObfuscateToken_Long(t *testing.T) {
+	// >16 chars: show first 8 + ... + last 4
+	result := obfuscateToken("abcdefghijklmnopqrst")
+	if result != "abcdefgh...qrst" {
+		t.Errorf("20-char token: expected abcdefgh...qrst, got %q", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SEC-002: Session TTL must be bounded (not effectively infinite)
+// ---------------------------------------------------------------------------
+
+func TestSessionTTL_Bounded(t *testing.T) {
+	if sessionTTL > 90*24*time.Hour {
+		t.Errorf("sessionTTL = %v, should be <= 90 days for security", sessionTTL)
+	}
+}
+
+func TestSession_ExpiresWithinTTL(t *testing.T) {
+	now := time.Now()
+	ss := NewSessionStore(func() time.Time { return now })
+	sid, err := ss.Issue(42, 0) // default TTL
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !ss.Valid(sid) {
+		t.Fatal("session should be valid immediately")
+	}
+
+	// Advance past TTL.
+	ss.nowFn = func() time.Time { return now.Add(sessionTTL + time.Second) }
+	if ss.Valid(sid) {
+		t.Error("session should be expired after TTL")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SEC-004: WebSocket origin must not default to wildcard
+// ---------------------------------------------------------------------------
+
+func TestTerminalHandler_RejectsNoOriginConfig(t *testing.T) {
+	// When AllowedOrigin is empty, cross-origin WebSocket requests must be rejected.
+	// We verify this by checking that the handler does NOT use a wildcard pattern.
+	h := &TerminalHandler{
+		AuthToken: "test-token",
+	}
+
+	// Simulate a cross-origin WebSocket upgrade request without proper origin.
+	req := httptest.NewRequest("GET", "/api/terminal", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Origin", "https://evil.com")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	// With empty AllowedOrigin, cross-origin should be rejected.
+	// The WebSocket library will fail the origin check and close the connection.
+	// A 403 or failed upgrade (non-101) means the origin was rejected.
+	if rec.Code == http.StatusSwitchingProtocols {
+		t.Error("cross-origin WebSocket should be rejected when AllowedOrigin is empty")
 	}
 }

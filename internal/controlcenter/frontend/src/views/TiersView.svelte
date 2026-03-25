@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { api, esc } from '../lib/api';
   import { toasts } from '../stores/toast.svelte';
+  import { events } from '../stores/events.svelte';
   import Card from '../components/shared/Card.svelte';
   import { Plus, Pencil, Trash2, Save, Copy, Router, Brain, ChevronDown } from 'lucide-svelte';
 
@@ -77,20 +78,25 @@
       const data = await api('GET', '/api/tiers/configs');
       configs = Array.isArray(data) ? data : [];
       const active = configs.find(c => c.active);
-      if (active) activeConfigName = active.name;
+      if (active) {
+        activeConfigName = active.name;
+        lastSwitched = active.name;
+      }
     } catch {}
   }
 
+  let lastSwitched = ''
   async function switchConfig(name) {
-    if (name === activeConfigName) return;
+    if (!name || name === lastSwitched) return;
+    lastSwitched = name;
     try {
       await api('POST', '/api/tiers/configs/switch', { name: name + '.json' });
-      activeConfigName = name;
       toasts.success(`Switched to profile: ${name}`);
       await loadTiers();
       await loadConfigs();
     } catch (e) {
       toasts.error('Switch failed: ' + e.message);
+      await loadConfigs(); // restore select to actual active
     }
   }
 
@@ -122,7 +128,7 @@
     showTierModal = true;
   }
 
-  function saveTierForm() {
+  async function saveTierForm() {
     if (!tierForm.name.trim()) { toasts.error('Name is required'); return; }
     const tier = { ...tierForm };
     if (editingTierIndex >= 0) {
@@ -131,12 +137,14 @@
       tiersConfig.tiers.push(tier);
     }
     showTierModal = false;
+    await saveAll();
   }
 
-  function deleteTier(idx) {
+  async function deleteTier(idx) {
     if (!confirm(`Delete tier "${tiersConfig.tiers[idx].name}"?`)) return;
     tiersConfig.tiers.splice(idx, 1);
-    tiersConfig = tiersConfig; // trigger reactivity
+    tiersConfig = tiersConfig;
+    await saveAll();
   }
 
   // --- Router modal ---
@@ -145,12 +153,13 @@
     showRouterModal = true;
   }
 
-  function saveRouterForm() {
+  async function saveRouterForm() {
     tiersConfig.router_model = routerForm.router_model;
     tiersConfig.router_backend = routerForm.router_backend;
     tiersConfig.default_fallback = routerForm.default_fallback;
     tiersConfig.router_distinctions = routerForm.router_distinctions;
     showRouterModal = false;
+    await saveAll();
   }
 
   // --- Memory modal ---
@@ -160,9 +169,10 @@
     showMemoryModal = true;
   }
 
-  function saveMemoryForm() {
+  async function saveMemoryForm() {
     tiersConfig.memory = { ...tiersConfig.memory, extract_backend: memoryForm.extract_backend, extract_model: memoryForm.extract_model };
     showMemoryModal = false;
+    await saveAll();
   }
 
   // --- Save all ---
@@ -202,6 +212,8 @@
   onMount(() => {
     loadTiers();
     loadConfigs();
+    const unsub = events.subscribe('tiers', () => { loadTiers(); loadConfigs(); });
+    return () => unsub();
   });
 </script>
 

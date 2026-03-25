@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
   import { toasts } from '../stores/toast.svelte';
+  import { events } from '../stores/events.svelte';
   import { nav } from '../stores/nav.svelte';
   import Card from '../components/shared/Card.svelte';
   import { Download, Power, PowerOff, Trash2, RefreshCw, Tag, User, FolderOpen, Package } from 'lucide-svelte';
@@ -108,6 +109,8 @@
   onMount(() => {
     loadAll();
     checkBadge();
+    const unsub = events.subscribe('marketplace', loadAll);
+    return () => unsub();
   });
 </script>
 

@@ -36,7 +36,7 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, vaultMgr *vault.Manager, providerRegistry *provider.Registry, onVaultUnlock func(), onTaskEvent func(taskID, status, summary string), mp *marketplace.Manager) (*Server, *ScheduleEventBroker, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, vaultMgr *vault.Manager, providerRegistry *provider.Registry, onVaultUnlock func(), onTaskEvent func(taskID, status, summary string), mp *marketplace.Manager) (*Server, *EventBroker, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore, appStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	var chatStore *ChatStore
@@ -52,6 +52,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 	}
 
 	schedEventBroker := NewScheduleEventBroker()
+	eventBroker := NewEventBroker()
 
 	htmlBytes, err := webFS.ReadFile("web/index.html")
 	if err != nil {
@@ -90,6 +91,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		FirewallStore:  fwStore,
 		FirewallProxy:  fwProxy,
 		VaultManager:     vaultMgr,
+		EventBroker:     eventBroker,
 		ScheduleEvents:  schedEventBroker,
 		ToolRegistry:     chatServiceToolRegistry(chatService),
 		ProviderRegistry: providerRegistry,
@@ -123,7 +125,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		},
 		addr:           addr,
 		statusProvider: statusProvider,
-	}, schedEventBroker, nil
+	}, eventBroker, nil
 }
 
 // SetUpdater attaches the update checker so /api/status can report available updates.

@@ -8,9 +8,10 @@ import (
 
 // ConfigHandler handles GET and PUT /api/config.
 type ConfigHandler struct {
-	Store    ConfigStore
-	Notifier Notifier
-	Event    ReloadEvent
+	Store       ConfigStore
+	Notifier    Notifier
+	Event       ReloadEvent
+	EventBroker *EventBroker
 }
 
 func (h *ConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +100,9 @@ func (h *ConfigHandler) put(w http.ResponseWriter, r *http.Request) {
 
 	if h.Notifier != nil {
 		h.Notifier.Notify(h.Event)
+	}
+	if h.EventBroker != nil {
+		h.EventBroker.Emit(EventConfig)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})

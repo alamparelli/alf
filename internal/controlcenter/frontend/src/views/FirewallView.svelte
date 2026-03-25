@@ -4,6 +4,7 @@
   import Card from '../components/shared/Card.svelte'
   import Modal from '../components/shared/Modal.svelte'
   import { api } from '../lib/api'
+  import { events } from '../stores/events.svelte'
   import { toasts } from '../stores/toast.svelte'
 
   interface Rule {
@@ -113,20 +114,12 @@
     }
   }
 
-  $effect(() => {
-    if (autoRefresh) {
-      refreshTimer = setInterval(loadFirewall, 3000)
-    } else {
-      if (refreshTimer) clearInterval(refreshTimer)
-      refreshTimer = undefined
-    }
-    return () => {
-      if (refreshTimer) clearInterval(refreshTimer)
-    }
-  })
+  let unsubEvents: (() => void) | undefined
 
   onMount(() => {
     loadFirewall()
+    unsubEvents = events.subscribe('firewall', loadFirewall)
+    return () => { unsubEvents?.() }
   })
 </script>
 

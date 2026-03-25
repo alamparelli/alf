@@ -30,6 +30,8 @@ type TasksHandler struct {
 	// OnTaskEvent is called when a task reaches a terminal or user-attention state.
 	// Arguments: taskID, status (completed/failed/awaiting_arbitration), summary.
 	OnTaskEvent func(taskID, status, summary string)
+
+	EventBroker *EventBroker
 }
 
 func (h *TasksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +105,9 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 
 	// Fire and forget - task is tracked by orchestrator.running map.
 	go func() {
+		if h.EventBroker != nil {
+			h.EventBroker.Emit(EventTasks)
+		}
 		_, meta, err := h.Orchestrator.Run(context.Background(), req.Message, orchPrep.SystemPrompts, orchPrep.Config, onProgress)
 		if err != nil {
 			log.Printf("[tasks] background task failed: %v", err)
@@ -116,6 +121,9 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 			if meta.Status == "completed" || meta.Status == "failed" || meta.Status == "timeout" {
 				h.OnTaskEvent(meta.ID, meta.Status, summary)
 			}
+		}
+		if h.EventBroker != nil {
+			h.EventBroker.Emit(EventTasks)
 		}
 	}()
 
@@ -216,11 +224,17 @@ func (h *TasksHandler) cancel(w http.ResponseWriter, r *http.Request) {
 	// action=delete removes the task from disk (completed only).
 	if r.URL.Query().Get("action") == "delete" {
 		ok := h.Orchestrator.DeleteTask(id)
+		if ok && h.EventBroker != nil {
+			h.EventBroker.Emit(EventTasks)
+		}
 		respondJSON(w, http.StatusOK, map[string]any{"deleted": ok})
 		return
 	}
 
 	ok := h.Orchestrator.Cancel(id)
+	if ok && h.EventBroker != nil {
+		h.EventBroker.Emit(EventTasks)
+	}
 	respondJSON(w, http.StatusOK, map[string]any{"cancelled": ok})
 }
 

@@ -18,10 +18,17 @@ import (
 
 // VaultHandler proxies requests to the vault-server via the Manager.
 type VaultHandler struct {
-	Manager    *vault.Manager // nil = vault binaries not present
-	ContextDir string         // path to context/ dir for toolbox regeneration
-	DataDir    string         // path to data dir for toolbox regeneration
-	OnUnlock   func()         // called after successful unlock (e.g. to migrate secrets)
+	Manager     *vault.Manager // nil = vault binaries not present
+	ContextDir  string         // path to context/ dir for toolbox regeneration
+	DataDir     string         // path to data dir for toolbox regeneration
+	OnUnlock    func()         // called after successful unlock (e.g. to migrate secrets)
+	EventBroker *EventBroker
+}
+
+func (h *VaultHandler) emitVault() {
+	if h.EventBroker != nil {
+		h.EventBroker.Emit(EventVault)
+	}
 }
 
 func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -193,6 +200,7 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	if h.OnUnlock != nil {
 		h.OnUnlock()
 	}
+	h.emitVault()
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -208,6 +216,7 @@ func (h *VaultHandler) handleLock(w http.ResponseWriter, r *http.Request) {
 	if h.ContextDir != "" {
 		memory.GenerateToolbox(h.ContextDir, h.DataDir)
 	}
+	h.emitVault()
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

@@ -21,6 +21,20 @@ echo "==> [2/4] Running tests..."
 go test $(go list ./... | grep -v '/cli$' | grep -v '/memstore$') -count=1 -short 2>&1 | tail -10 || true
 echo "    Tests OK"
 
+# 2b. Vendor vault-proxy (needed for Docker build)
+VAULT_PROXY_SRC="${VAULT_PROXY_SRC:-$HOME/Dev/Projects/vault-proxy}"
+if [ ! -d "$VAULT_PROXY_SRC" ]; then
+  VAULT_PROXY_SRC="/Volumes/ALF_NFS/repos/vault-proxy"
+fi
+if [ -d "$VAULT_PROXY_SRC" ]; then
+  echo "==> Vendoring vault-proxy from $VAULT_PROXY_SRC..."
+  rm -rf third_party/vault-proxy
+  mkdir -p third_party/vault-proxy
+  rsync -a --exclude='.git/' --exclude='data/' "$VAULT_PROXY_SRC/" third_party/vault-proxy/
+else
+  echo "WARNING: vault-proxy not found, Docker builds may fail"
+fi
+
 # 3. Dev deploy
 echo "==> [3/4] Dev deploying to homelab..."
 "$SCRIPTS_DIR/dev-deploy.sh"

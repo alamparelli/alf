@@ -318,6 +318,9 @@
   .msg-text {
     font-size: 0.88rem;
     line-height: 1.6;
+  }
+
+  .chat-msg-user .msg-text {
     white-space: pre-wrap;
   }
 

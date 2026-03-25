@@ -35,7 +35,7 @@ go build \
   ./cmd/alf/
 
 echo "==> Building Docker image: ${IMAGE_NAME}:${LOCAL_TAG}..."
-docker build -t "${IMAGE_NAME}:${LOCAL_TAG}" -t "${IMAGE_NAME}:latest" .
+docker build --build-arg BUILD_VERSION="${GIT_VERSION}" -t "${IMAGE_NAME}:${LOCAL_TAG}" -t "${IMAGE_NAME}:latest" .
 
 echo "==> Running alf init with local image..."
 export ALF_IMAGE="${IMAGE_NAME}:latest"

@@ -136,9 +136,10 @@
       <h3>Notifications</h3>
     </div>
     <div class="notif-row">
-      <label class="toggle-label">
+      <label class="toggle-switch">
         <input type="checkbox" bind:checked={sound.enabled} onchange={() => sound.persist()} />
-        <span>Chat sound</span>
+        <span class="slider"></span>
+        <span class="toggle-text">Chat sound</span>
       </label>
       <span class="hint">Play a sound when a chat message arrives</span>
     </div>
@@ -305,18 +306,54 @@
     flex-wrap: wrap;
   }
 
-  .toggle-label {
+  .toggle-switch {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.85rem;
+    gap: 10px;
     cursor: pointer;
+    font-size: 0.85rem;
+    position: relative;
   }
 
-  .toggle-label input[type="checkbox"] {
+  .toggle-switch input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .slider {
+    width: 36px;
+    height: 20px;
+    background: var(--border);
+    border-radius: 10px;
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+
+  .slider::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
     width: 16px;
     height: 16px;
-    cursor: pointer;
+    background: var(--bg-card, #fff);
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+
+  .toggle-switch input:checked + .slider {
+    background: var(--accent);
+  }
+
+  .toggle-switch input:checked + .slider::after {
+    transform: translateX(16px);
+  }
+
+  .toggle-text {
+    user-select: none;
   }
 
   .btn {

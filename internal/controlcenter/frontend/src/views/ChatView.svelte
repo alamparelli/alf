@@ -111,7 +111,7 @@
     saveActiveTab()
   }
 
-  function switchTab(tabId: string) {
+  async function switchTab(tabId: string) {
     if (activeTabId === tabId) return
     activeTabId = tabId
     // Clear unread
@@ -121,12 +121,10 @@
       tabs = [...tabs]
     }
     saveActiveTab()
-    // Only load from API if we don't already have messages cached for this tab
-    if (!tabMessages[tabId] || tabMessages[tabId].length === 0) {
-      loadHistory()
-    } else {
-      scrollToBottom()
-    }
+    // Always reload history from server to get latest state.
+    await loadHistory()
+    // Check if there's an active job running on this tab (reconnect to stream).
+    await checkActiveJob()
   }
 
   async function renameTab(tabId: string) {
@@ -410,7 +408,7 @@
               if (tab && !tab.convId) {
                 tab.convId = data.conv_id
                 tabs = [...tabs]
-                saveTabs()
+                saveActiveTab()
               }
             }
             continue
@@ -500,7 +498,7 @@
         if (t) {
           t.unread = (t.unread || 0) + 1
           tabs = [...tabs]
-          saveTabs()
+          saveActiveTab()
         }
       }
 

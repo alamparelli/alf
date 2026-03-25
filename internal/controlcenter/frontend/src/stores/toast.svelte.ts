@@ -17,6 +17,10 @@ class ToastStore {
       this.items = this.items.filter(t => t.id !== id)
     }, 3000)
   }
+
+  success(msg: string) { this.show(msg, 'success') }
+  error(msg: string) { this.show(msg, 'error') }
+  info(msg: string) { this.show(msg, 'info') }
 }
 
 export const toasts = new ToastStore()

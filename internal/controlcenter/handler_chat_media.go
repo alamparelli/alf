@@ -31,7 +31,7 @@ func (h *ChatMediaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *ChatMediaHandler) upload(w http.ResponseWriter, r *http.Request) {
 	// 50MB max.
-	r.Body = http.MaxBytesReader(w, r.Body, 50*1024*1024)
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyUpload)
 	if err := r.ParseMultipartForm(50 * 1024 * 1024); err != nil {
 		http.Error(w, `{"error":"file too large or invalid multipart"}`, http.StatusBadRequest)
 		return

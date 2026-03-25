@@ -169,7 +169,7 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Password == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySmall)).Decode(&req); err != nil || req.Password == "" {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "password required"})
 		return
 	}
@@ -231,7 +231,7 @@ func (h *VaultHandler) handleListServices(w http.ResponseWriter, r *http.Request
 }
 
 func (h *VaultHandler) handleAddService(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyLarge))
 	if err != nil {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "read body: " + err.Error()})
 		return
@@ -319,7 +319,7 @@ func (h *VaultHandler) handleCreateToken(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		Scope string `json:"scope"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Scope == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySmall)).Decode(&req); err != nil || req.Scope == "" {
 		req.Scope = "proxy"
 	}
 	c := h.Manager.Client()
@@ -455,7 +455,7 @@ func (h *VaultHandler) handleOAuth2Callback(w http.ResponseWriter, r *http.Reque
 
 func (h *VaultHandler) handleOAuth2Authorize(w http.ResponseWriter, r *http.Request) {
 	// Proxy POST /auth/oauth2/authorize to vault-server.
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySmall))
 	if err != nil {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
@@ -489,7 +489,7 @@ func (h *VaultHandler) handleExport(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Password == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySmall)).Decode(&req); err != nil || req.Password == "" {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "password required"})
 		return
 	}
@@ -551,7 +551,7 @@ func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 			Value string `json:"value"`
 		} `json:"secrets"` // plain JSON import (backward compat)
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 5<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyImport)).Decode(&req); err != nil {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request: " + err.Error()})
 		return
 	}
@@ -680,7 +680,7 @@ func (h *VaultHandler) handleSetSecret(w http.ResponseWriter, r *http.Request) {
 		Name  string `json:"name"`
 		Value string `json:"value"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyMedium)).Decode(&req); err != nil {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}

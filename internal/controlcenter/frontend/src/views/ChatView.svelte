@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
-  import { Plus, X, MessageCircle, RotateCw, ListX, Play } from 'lucide-svelte'
+  import { X, MessageCircle, RotateCw, Play } from 'lucide-svelte'
   import ChatMessageComponent from '../components/chat/ChatMessage.svelte'
   import ChatInput from '../components/chat/ChatInput.svelte'
   import Modal from '../components/shared/Modal.svelte'
@@ -11,13 +11,6 @@
   import { events } from '../stores/events.svelte'
 
   // --- Types ---
-  interface ChatTab {
-    id: string
-    label: string
-    convId: string
-    unread: number
-  }
-
   interface ChatMsg {
     id: string
     role: string
@@ -39,132 +32,52 @@
     model: string
   }
 
-  // --- Tab state ---
-  let tabs = $state<ChatTab[]>([])
-  let activeTabId = $state(localStorage.getItem('alf-chat-active-tab') || '')
-
-  let activeTab = $derived(tabs.find(t => t.id === activeTabId))
-
-  // Load conversations from server (replaces localStorage tabs).
-  async function loadConversations() {
-    try {
-      const data = await api<any>('/api/chat/conversations')
-      const convs = (data.conversations || []).filter((c: any) => c.msg_count > 0 || c.id === data.active_conv_id)
-      tabs = convs.map((c: any) => ({
-        id: c.id,
-        label: c.title || `Chat`,
-        convId: c.id,
-        unread: 0,
-      }))
-      // Restore active tab from localStorage, fallback to first.
-      const stored = localStorage.getItem('alf-chat-active-tab')
-      if (stored && tabs.some(t => t.id === stored)) {
-        activeTabId = stored
-      } else {
-        activeTabId = tabs[0]?.id || ''
-      }
-    } catch { /* server not ready yet */ }
-  }
-
-  function saveActiveTab() {
-    localStorage.setItem('alf-chat-active-tab', activeTabId)
-  }
+  // --- Single conversation state ---
+  let convId = $state(localStorage.getItem('alf-chat-convid') || '')
 
   function genId(): string {
     return Math.random().toString(36).slice(2, 10)
   }
 
-  async function addTab() {
-    const convId = genId()
-    const label = `Chat ${tabs.length + 1}`
-    // Register conversation in ChatDB for persistence.
+  function saveConvId() {
+    localStorage.setItem('alf-chat-convid', convId)
+  }
+
+  // Load the active conversation from server on startup.
+  async function loadActiveConversation() {
     try {
-      await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: convId, title: label }) })
-    } catch { /* best effort */ }
-    // Reset LLM session state (--resume), but keep our own convId.
-    try {
-      await api<any>('/api/chat', { method: 'DELETE' })
-    } catch { /* best effort */ }
-    const tab: ChatTab = { id: convId, label, convId, unread: 0 }
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    setMessages(tab.id, [])
-    saveActiveTab()
+      const data = await api<any>('/api/chat/conversations')
+      const convs = (data.conversations || []).filter((c: any) => c.msg_count > 0)
+      // Restore saved convId if it still exists, otherwise use the most recent.
+      const saved = localStorage.getItem('alf-chat-convid')
+      if (saved && convs.some((c: any) => c.id === saved)) {
+        convId = saved
+      } else if (convs.length > 0) {
+        convId = convs[convs.length - 1].id // most recent (ASC order)
+      } else {
+        // No conversations yet — create one.
+        convId = genId()
+        await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: convId, title: 'Chat' }) }).catch(() => {})
+      }
+      saveConvId()
+    } catch { /* server not ready yet */ }
   }
 
-  async function closeTab(tabId: string) {
-    // Archive on server.
-    try {
-      await api(`/api/chat/conversations/${tabId}`, { method: 'DELETE' })
-    } catch { /* best effort */ }
-    // Clean up locally.
-    delete tabMessages[tabId]
-    tabMessages = { ...tabMessages }
-    delete tabDrafts[tabId]
-    tabDrafts = { ...tabDrafts }
-    tabs = tabs.filter(t => t.id !== tabId)
-    if (activeTabId === tabId) {
-      activeTabId = tabs[0]?.id || ''
-    }
-    saveActiveTab()
-  }
-
-  async function switchTab(tabId: string) {
-    if (activeTabId === tabId) return
-    activeTabId = tabId
-    // Clear unread
-    const tab = tabs.find(t => t.id === tabId)
-    if (tab) {
-      tab.unread = 0
-      tabs = [...tabs]
-    }
-    saveActiveTab()
-    // Don't reload if this tab has an active send — keep optimistic messages + stream.
-    if (sending && sendingTabId === tabId) {
-      scrollToBottom()
-      return
-    }
-    // Reload from server, then check for active jobs to reconnect.
-    await loadHistory()
-    await checkActiveJob()
-  }
-
-  async function renameTab(tabId: string) {
-    const tab = tabs.find(t => t.id === tabId)
-    if (!tab) return
-    const name = prompt('Rename tab:', tab.label)
-    if (name && name.trim()) {
-      tab.label = name.trim()
-      tabs = [...tabs]
-      // Persist to server.
-      try {
-        await api(`/api/chat/conversations/${tabId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ title: tab.label }),
-        })
-      } catch { /* best effort */ }
-    }
-  }
-
-  // --- Messages (per-tab) ---
-  let tabMessages = $state<Record<string, ChatMsg[]>>({})
-  let messages = $derived(tabMessages[activeTabId] || [])
+  // --- Messages ---
+  let messages = $state<ChatMsg[]>([])
   let sending = $state(false)
-  let sendingTabId = $state('') // track which tab initiated the send
   let tiers = $state<Tier[]>([])
   let messagesContainer: HTMLDivElement
-  let tabTierSelections = $state<Record<string, string>>({}) // per-tab tier selection
+  let selectedTier = $state('')
   let streamingBlocks = $state<any[]>([])
   let streamingText = $state('')
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let activeJobId = $state<string | null>(null)
-  let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string; tabId: string }[]>([])
-  let tabDrafts = $state<Record<string, string>>({})
-  let currentDraft = $derived(tabDrafts[activeTabId] || '')
+  let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string }[]>([])
+  let draft = $state('')
 
   function updateDraft(text: string) {
-    tabDrafts[activeTabId] = text
-    tabDrafts = { ...tabDrafts }
+    draft = text
   }
 
   // Send to agents modal
@@ -203,15 +116,12 @@
     }
   }
 
-  function setMessages(tabId: string, msgs: ChatMsg[]) {
-    tabMessages[tabId] = msgs
-    tabMessages = { ...tabMessages }
+  function setMessages(msgs: ChatMsg[]) {
+    messages = msgs
   }
 
-  function appendMessage(tabId: string, msg: ChatMsg) {
-    const current = tabMessages[tabId] || []
-    tabMessages[tabId] = [...current, msg]
-    tabMessages = { ...tabMessages }
+  function appendMessage(msg: ChatMsg) {
+    messages = [...messages, msg]
   }
 
   async function scrollToBottom() {
@@ -224,63 +134,46 @@
   }
 
   let loadingOlder = $state(false)
-  let hasOlderMessages = $state<Record<string, boolean>>({})
+  let hasOlderMessages = $state(false)
 
-  async function loadHistory(tabId?: string) {
-    const tid = tabId || activeTabId
-    const tab = tabs.find(t => t.id === tid)
-    const convId = tab?.convId || ''
-    // Don't load history for tabs without a conversation ID (new empty tabs)
+  async function loadHistory() {
     if (!convId) {
-      setMessages(tid, [])
+      setMessages([])
       return
     }
     try {
       const data = await api<ChatMsg[]>(`/api/chat?limit=50&conv_id=${convId}`)
-      setMessages(tid, data || [])
-      // If we got exactly 50, there might be older messages.
-      hasOlderMessages[tid] = (data?.length || 0) >= 50
-      hasOlderMessages = { ...hasOlderMessages }
-      if (tid === activeTabId) scrollToBottom()
+      setMessages(data || [])
+      hasOlderMessages = (data?.length || 0) >= 50
+      scrollToBottom()
     } catch {
-      setMessages(tid, [])
+      setMessages([])
     }
   }
 
   async function loadOlderMessages() {
-    if (loadingOlder || !activeTabId) return
-    const tab = tabs.find(t => t.id === activeTabId)
-    const convId = tab?.convId || ''
-    if (!convId) return
-    const currentMsgs = tabMessages[activeTabId] || []
-    if (currentMsgs.length === 0) return
-
+    if (loadingOlder || !convId || messages.length === 0) return
     loadingOlder = true
     try {
-      const oldest = currentMsgs[0]
+      const oldest = messages[0]
       const data = await api<ChatMsg[]>(`/api/chat?limit=50&conv_id=${convId}&before=${oldest.ts}`)
       if (data && data.length > 0) {
-        // Prepend older messages, preserving scroll position.
         const container = messagesContainer
         const prevHeight = container?.scrollHeight || 0
-        tabMessages[activeTabId] = [...data, ...currentMsgs]
-        tabMessages = { ...tabMessages }
-        // Restore scroll position so user doesn't jump.
+        messages = [...data, ...messages]
         await tick()
         if (container) {
           container.scrollTop = container.scrollHeight - prevHeight
         }
       }
-      hasOlderMessages[activeTabId] = (data?.length || 0) >= 50
-      hasOlderMessages = { ...hasOlderMessages }
+      hasOlderMessages = (data?.length || 0) >= 50
     } catch { /* ignore */ }
     loadingOlder = false
   }
 
   function onMessagesScroll(e: Event) {
     const el = e.target as HTMLDivElement
-    // Load older messages when scrolled near the top.
-    if (el.scrollTop < 100 && hasOlderMessages[activeTabId]) {
+    if (el.scrollTop < 100 && hasOlderMessages) {
       loadOlderMessages()
     }
   }
@@ -294,18 +187,14 @@
     }
   }
 
-  // Check for active job on load (reconnect to stream for THIS tab only)
+  // Check for active job on load (reconnect to stream)
   async function checkActiveJob() {
-    // Don't interfere if already sending on another tab.
-    if (sending) return
-    const convId = activeTab?.convId || ''
-    if (!convId) return
+    if (sending || !convId) return
     try {
       const data = await api<any>(`/api/chat/job?conv_id=${convId}`)
       if (data.active && data.job_id) {
         activeJobId = data.job_id
         sending = true
-        sendingTabId = activeTabId
         reconnectToStream(data.job_id, data.events || 0)
       }
     } catch { /* no active job */ }
@@ -319,14 +208,7 @@
 
   // --- Send message ---
   async function handleSend(message: string, mediaFiles: MediaFile[], model: string) {
-    // Auto-create a tab if none exist
-    if (tabs.length === 0) {
-      await addTab()
-    }
-
-    // Clear draft for current tab
-    tabDrafts[activeTabId] = ''
-    tabDrafts = { ...tabDrafts }
+    draft = ''
 
     // Client-side command handling
     const trimmed = message.trim()
@@ -339,26 +221,23 @@
       return
     }
 
-    // If this tab is already sending, queue it
-    if (sending && sendingTabId === activeTabId) {
-      messageQueue = [...messageQueue, { message, mediaFiles, model, tabId: activeTabId }]
+    // Queue if already sending
+    if (sending) {
+      messageQueue = [...messageQueue, { message, mediaFiles, model }]
       return
     }
 
-    await doSend(message, mediaFiles, model, activeTabId)
+    await doSend(message, mediaFiles, model)
   }
 
-  async function doSend(message: string, mediaFiles: MediaFile[], model: string, tabId: string) {
+  async function doSend(message: string, mediaFiles: MediaFile[], model: string) {
     sending = true
-    sendingTabId = tabId
     streamingBlocks = []
     streamingText = ''
 
-    const tab = tabs.find(t => t.id === tabId)
-    const convId = tab?.convId || ''
     const mediaIds = mediaFiles.map(f => f.upload_id)
 
-    // Add user message optimistically to the originating tab
+    // Add user message optimistically
     if (message || mediaFiles.length > 0) {
       const userMsg: ChatMsg = {
         id: 'temp-' + Date.now(),
@@ -368,8 +247,8 @@
         conv_id: convId,
         media: mediaFiles.map(f => ({ upload_id: f.upload_id, type: f.mime_type?.startsWith('image/') ? 'photo' : 'document', file_name: f.file_name, mime_type: f.mime_type })),
       }
-      appendMessage(tabId, userMsg)
-      if (tabId === activeTabId) scrollToBottom()
+      appendMessage(userMsg)
+      scrollToBottom()
     }
 
     try {
@@ -452,15 +331,6 @@
 
           if (eventType === 'job') {
             activeJobId = data.job_id
-            // Capture conv_id for tab association
-            if (data.conv_id && sendingTabId) {
-              const tab = tabs.find(t => t.id === sendingTabId)
-              if (tab && !tab.convId) {
-                tab.convId = data.conv_id
-                tabs = [...tabs]
-                saveActiveTab()
-              }
-            }
             continue
           }
 
@@ -470,9 +340,8 @@
           }
 
           if (eventType === 'system') {
-            // System message from command handling (e.g. /new, /skills)
-            if (data.text && sendingTabId) {
-              appendMessage(sendingTabId, {
+            if (data.text) {
+              appendMessage({
                 id: 'sys-' + Date.now(),
                 role: 'system',
                 text: data.text,
@@ -484,17 +353,14 @@
 
           if (eventType === 'done') {
             // Apply metadata from done event to the last assistant message
-            if (sendingTabId && data) {
-              const msgs = tabMessages[sendingTabId] || []
-              const lastAssistant = [...msgs].reverse().find(m => m.role === 'assistant')
-              if (lastAssistant) {
-                if (data.model) lastAssistant.model = data.model
-                if (data.tier) lastAssistant.tier = data.tier
-                if (data.cost_usd) lastAssistant.cost_usd = data.cost_usd
-                if (data.duration_ms) lastAssistant.duration_ms = data.duration_ms
-                if (data.skills) lastAssistant.skills = data.skills
-                tabMessages = { ...tabMessages }
-              }
+            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
+            if (lastAssistant && data) {
+              if (data.model) lastAssistant.model = data.model
+              if (data.tier) lastAssistant.tier = data.tier
+              if (data.cost_usd) lastAssistant.cost_usd = data.cost_usd
+              if (data.duration_ms) lastAssistant.duration_ms = data.duration_ms
+              if (data.skills) lastAssistant.skills = data.skills
+              messages = [...messages]
             }
             continue
           }
@@ -516,49 +382,30 @@
     } catch {
       // Stream ended or errored
     } finally {
-      // Finalize: reload history for the originating tab
-      const originTab = sendingTabId
       const finalText = streamingText
       sending = false
-      sendingTabId = ''
       activeJobId = null
       streamingBlocks = []
       streamingText = ''
       // Small delay to ensure server has committed the message before we fetch.
       await new Promise(r => setTimeout(r, 100))
-      await loadHistory(originTab)
+      await loadHistory()
       scrollToBottom()
 
-      // Desktop notification if tab is not visible
+      // Notifications
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && finalText) {
         new Notification('ALF', { body: finalText.slice(0, 100) })
       }
-
-      // Sound notification
-      if (originTab) {
-        sound.play()
-      }
-
-      // Notify sidebar badge if user isn't viewing chat
+      sound.play()
       if (nav.currentView !== 'chat') {
         nav.incrementBadge('chat')
-      }
-
-      // Bump unread on originating tab if user switched away
-      if (originTab !== activeTabId) {
-        const t = tabs.find(t => t.id === originTab)
-        if (t) {
-          t.unread = (t.unread || 0) + 1
-          tabs = [...tabs]
-          saveActiveTab()
-        }
       }
 
       // Process queue
       if (messageQueue.length > 0) {
         const next = messageQueue[0]
         messageQueue = messageQueue.slice(1)
-        doSend(next.message, next.mediaFiles, next.model, next.tabId)
+        doSend(next.message, next.mediaFiles, next.model)
       }
     }
   }
@@ -654,14 +501,12 @@
       await api('DELETE', '/api/chat/job')
     } catch { /* ignore */ }
     // Immediately reset UI state — don't wait for stream to end
-    const originTab = sendingTabId
     sending = false
-    sendingTabId = ''
     activeJobId = null
     streamingBlocks = []
     streamingText = ''
-    await loadHistory(originTab)
-    if (originTab === activeTabId) scrollToBottom()
+    await loadHistory()
+    scrollToBottom()
   }
 
   // --- New conversation ---
@@ -669,17 +514,11 @@
     try {
       // Reset LLM session state.
       await api<any>('/api/chat', { method: 'DELETE' })
-      // Give the current tab a fresh convId.
-      if (activeTab) {
-        const newId = genId()
-        await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: newId, title: activeTab.label }) }).catch(() => {})
-        activeTab.id = newId
-        activeTab.convId = newId
-        activeTabId = newId
-        tabs = [...tabs]
-      }
-      setMessages(activeTabId, [])
-      saveActiveTab()
+      // Fresh convId.
+      convId = genId()
+      await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: convId, title: 'Chat' }) }).catch(() => {})
+      saveConvId()
+      setMessages([])
       toasts.show('New conversation started', 'success')
     } catch (e: any) {
       toasts.show(e.error || 'Failed to start new conversation', 'error')
@@ -694,13 +533,11 @@
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
-    // Load conversations from server (replaces localStorage tabs).
-    await loadConversations()
+    // Load the active conversation from server.
+    await loadActiveConversation()
     await loadTiers()
-    // Reload tiers on profile switch (SSE event)
     unsubTiers = events.subscribe('tiers', () => loadTiers())
-    // Load history for the active tab.
-    if (activeTab?.convId) {
+    if (convId) {
       await loadHistory()
     }
     await checkActiveJob()
@@ -713,35 +550,11 @@
 </script>
 
 <div class="chat-view">
-  <!-- Tab bar -->
-  <div class="chat-tabs">
-    <div class="tab-list">
-      {#each tabs as tab}
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div
-          class="tab-item"
-          class:active={tab.id === activeTabId}
-          onclick={() => switchTab(tab.id)}
-          ondblclick={() => renameTab(tab.id)}
-        >
-          <MessageCircle size={13} />
-          <span class="tab-label">{tab.label}</span>
-          {#if tab.unread > 0}
-            <span class="tab-unread">{tab.unread}</span>
-          {/if}
-          <button
-            class="tab-close"
-            onclick={(e: MouseEvent) => { e.stopPropagation(); closeTab(tab.id) }}
-          >
-            <X size={11} />
-          </button>
-        </div>
-      {/each}
-      <button class="tab-add" onclick={addTab}><Plus size={14} /></button>
-    </div>
-
+  <!-- Header -->
+  <div class="chat-header">
     <button class="new-conv-btn" onclick={newConversation} title="New conversation">
       <RotateCw size={14} />
+      <span>New</span>
     </button>
   </div>
 
@@ -751,7 +564,7 @@
       <div class="loading-older">Loading older messages...</div>
     {/if}
 
-    {#if messages.length === 0 && !(sending && sendingTabId === activeTabId)}
+    {#if messages.length === 0 && !sending}
       <div class="chat-empty">
         <MessageCircle size={32} />
         <p>No messages yet. Start a conversation.</p>
@@ -759,11 +572,11 @@
     {/if}
 
     {#each messages as msg (msg.id)}
-      <ChatMessageComponent {msg} convId={activeTab?.convId || ''} onSendToTask={openAgentModal} />
+      <ChatMessageComponent {msg} {convId} onSendToTask={openAgentModal} />
     {/each}
 
-    <!-- Streaming response (only on the tab that initiated the send) -->
-    {#if sending && sendingTabId === activeTabId && streamingBlocks.length > 0}
+    <!-- Streaming response -->
+    {#if sending && streamingBlocks.length > 0}
       <ChatMessageComponent
         msg={{
           id: 'streaming',
@@ -772,9 +585,9 @@
           ts: new Date().toISOString(),
           content_blocks: streamingBlocks,
         }}
-        convId={activeTab?.convId || ''}
+        {convId}
       />
-    {:else if sending && sendingTabId === activeTabId}
+    {:else if sending}
       <div class="chat-msg chat-msg-assistant typing-indicator">
         <span class="dot"></span>
         <span class="dot"></span>
@@ -782,24 +595,22 @@
       </div>
     {/if}
 
-    <!-- Queued messages (shown as pending user bubbles) -->
+    <!-- Queued messages -->
     {#each messageQueue as queued, i}
-      {#if queued.tabId === activeTabId}
-        <div class="chat-msg chat-msg-user queued-msg">
-          <div class="msg-text">{queued.message}</div>
-          <div class="msg-footer">
-            <span class="msg-time queued-label">queued</span>
-            <button class="queued-cancel" onclick={() => { messageQueue = messageQueue.filter((_, idx) => idx !== i) }} title="Cancel">
-              <X size={12} />
-            </button>
-          </div>
+      <div class="chat-msg chat-msg-user queued-msg">
+        <div class="msg-text">{queued.message}</div>
+        <div class="msg-footer">
+          <span class="msg-time queued-label">queued</span>
+          <button class="queued-cancel" onclick={() => { messageQueue = messageQueue.filter((_, idx) => idx !== i) }} title="Cancel">
+            <X size={12} />
+          </button>
         </div>
-      {/if}
+      </div>
     {/each}
   </div>
 
   <!-- Input -->
-  <ChatInput onSend={handleSend} onStop={stopCall} sending={sending && sendingTabId === activeTabId} {tiers} draft={currentDraft} onDraftChange={updateDraft} selectedModel={tabTierSelections[activeTabId] || ''} onModelChange={(m) => { tabTierSelections[activeTabId] = m; tabTierSelections = { ...tabTierSelections } }} />
+  <ChatInput onSend={handleSend} onStop={stopCall} {sending} {tiers} {draft} onDraftChange={updateDraft} selectedModel={selectedTier} onModelChange={(m) => { selectedTier = m }} />
 </div>
 
 <!-- Send to Agents Modal -->
@@ -843,111 +654,14 @@
     margin-bottom: -24px;
   }
 
-  /* Tabs */
-  .chat-tabs {
+  /* Header */
+  .chat-header {
     display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: flex-end;
     padding: 4px 8px;
     border-bottom: 1px solid var(--border);
-    overflow-x: auto;
     flex-shrink: 0;
-  }
-
-  .tab-list {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    flex: 1;
-    overflow-x: auto;
-  }
-
-  .tab-list::-webkit-scrollbar { height: 0; }
-
-  .tab-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    background: none;
-    border: none;
-    border-radius: 6px;
-    color: var(--text-dim);
-    font-family: inherit;
-    font-size: 0.78rem;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.15s, color 0.15s;
-  }
-
-  .tab-item:hover {
-    background: var(--bg-input);
-    color: var(--text);
-  }
-
-  .tab-item.active {
-    background: var(--bg-card);
-    color: var(--text);
-    font-weight: 500;
-    border: 1px solid var(--border);
-  }
-
-  .tab-label {
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .tab-unread {
-    background: var(--red, #e53935);
-    color: #fff;
-    font-size: 0.6rem;
-    font-weight: 600;
-    padding: 1px 5px;
-    border-radius: 8px;
-    min-width: 16px;
-    text-align: center;
-  }
-
-  .tab-close {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 2px;
-    display: flex;
-    align-items: center;
-    border-radius: 3px;
-    opacity: 0;
-    transition: opacity 0.15s;
-  }
-
-  .tab-item:hover .tab-close {
-    opacity: 1;
-  }
-
-  .tab-close:hover {
-    background: var(--border);
-  }
-
-  .tab-add {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    background: none;
-    border: 1px dashed var(--border);
-    border-radius: 6px;
-    color: var(--text-dim);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background 0.15s;
-  }
-
-  .tab-add:hover {
-    background: var(--bg-input);
-    color: var(--text);
   }
 
   .new-conv-btn {

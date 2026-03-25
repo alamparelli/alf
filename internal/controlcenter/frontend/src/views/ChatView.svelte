@@ -8,6 +8,7 @@
   import { toasts } from '../stores/toast.svelte'
   import { nav } from '../stores/nav.svelte'
   import { sound } from '../stores/sound.svelte'
+  import { events } from '../stores/events.svelte'
 
   // --- Types ---
   interface ChatTab {
@@ -615,12 +616,16 @@
   }
 
   // --- Lifecycle ---
+  let unsubTiers: (() => void) | null = null
+
   onMount(async () => {
     // Request notification permission
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
     await loadTiers()
+    // Reload tiers on profile switch (SSE event)
+    unsubTiers = events.subscribe('tiers', () => loadTiers())
     // Only load history if the tab has a saved convId (restored session)
     if (activeTab?.convId) {
       await loadHistory()
@@ -630,6 +635,7 @@
 
   onDestroy(() => {
     if (pollTimer) clearTimeout(pollTimer)
+    unsubTiers?.()
   })
 </script>
 

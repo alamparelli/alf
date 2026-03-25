@@ -90,10 +90,20 @@ func RenderConfig(dir string, data ConfigData) error {
 	return os.WriteFile(filepath.Join(configD, "config.json"), buf.Bytes(), 0o644)
 }
 
+// deprecatedSkills maps old skill names to their replacement (for logging).
+var deprecatedSkills = map[string]string{
+	"app-builder": "sdk-app-builder",
+}
+
 // SeedBundledSkills copies embedded skills into the skills.d directory.
 // Existing files are not overwritten (preserves user modifications).
+// Deprecated skills are removed first.
 func SeedBundledSkills(dir string) error {
 	skillsDir := filepath.Join(dir, "skills.d")
+	// Clean up skills that have been replaced.
+	for old := range deprecatedSkills {
+		os.RemoveAll(filepath.Join(skillsDir, old))
+	}
 	return seedEmbedded(bundledSkillsFS, "bundled_skills", skillsDir)
 }
 

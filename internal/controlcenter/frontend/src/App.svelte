@@ -19,14 +19,41 @@
   import TerminalView from './views/TerminalView.svelte'
   import ChatView from './views/ChatView.svelte'
   import SpotlightSearch from './components/SpotlightSearch.svelte'
+  import SetupWizard from './components/SetupWizard.svelte'
   import { X } from 'lucide-svelte'
   import { nav, SYSTEM_TABS } from './stores/nav.svelte'
   import { apps } from './stores/apps.svelte'
   import { theme } from './stores/theme.svelte'
   import { toasts } from './stores/toast.svelte'
+  import { api } from './lib/api'
+
+  let showWizard = $state(false)
+  let wizardRef: any = $state(null)
 
   onMount(() => {
     apps.load()
+
+    // Auto-show setup wizard on first visit if setup is incomplete
+    if (!localStorage.getItem('alf-welcomed')) {
+      api<any>('/api/setup/status').then(status => {
+        if (!status.completed) {
+          wizardRef?.setMode('wizard')
+          showWizard = true
+        } else {
+          wizardRef?.setMode('welcome')
+          showWizard = true
+        }
+      }).catch(() => {
+        wizardRef?.setMode('welcome')
+        showWizard = true
+      })
+    }
+
+    // Listen for setup wizard re-run from Settings
+    window.addEventListener('alf:open-wizard', () => {
+      wizardRef?.setMode('wizard')
+      showWizard = true
+    })
 
     // Listen for SDK messages from iframe apps
     window.addEventListener('message', (e: MessageEvent) => {
@@ -130,6 +157,7 @@
 
 <Toast />
 <SpotlightSearch />
+<SetupWizard bind:open={showWizard} bind:this={wizardRef} />
 
 <style>
   :global(:root) {

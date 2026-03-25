@@ -1662,21 +1662,23 @@ func main() {
 // resolveEmbedder picks the best available embedder implementation.
 // Priority: 1) tier profile memory.embedding, 2) legacy tier embedding, 3) EMBED_URL env, 4) nil (FTS5-only).
 func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
+	// Use a stable instance ID so re-registrations reuse the same slot in the
+	// embed-server token map. Docker hostnames change on every container restart,
+	// which would leak slots and eventually hit the 50-instance cap.
+	const embedInstanceID = "alf-daemon"
+	secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
+
 	if tc := tierStore.Current(); tc != nil {
 		// 1. New: memory.embedding config.
 		if tc.Memory != nil && tc.Memory.Embedding != nil && tc.Memory.Embedding.URL != "" {
-			instanceID, _ := os.Hostname()
-			secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
-			emb := memstore.NewHTTPEmbedder(tc.Memory.Embedding.URL, instanceID, secret, 30*time.Second)
+			emb := memstore.NewHTTPEmbedder(tc.Memory.Embedding.URL, embedInstanceID, secret, 30*time.Second)
 			go startHTTPEmbedder(emb)
 			log.Printf("memstore: using HTTP embedder from memory config (url=%s)", tc.Memory.Embedding.URL)
 			return emb
 		}
 		// 2. Legacy: embedding config at tier root (backward compat).
 		if tc.Embedding != nil && tc.Embedding.URL != "" {
-			instanceID, _ := os.Hostname()
-			secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
-			emb := memstore.NewHTTPEmbedder(tc.Embedding.URL, instanceID, secret, 30*time.Second)
+			emb := memstore.NewHTTPEmbedder(tc.Embedding.URL, embedInstanceID, secret, 30*time.Second)
 			go startHTTPEmbedder(emb)
 			log.Printf("memstore: using HTTP embedder from tier config (url=%s)", tc.Embedding.URL)
 			return emb
@@ -1685,9 +1687,7 @@ func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
 
 	// 2. From env var (embed sidecar container, same pattern as whisper).
 	if url := os.Getenv("EMBED_URL"); url != "" {
-		instanceID, _ := os.Hostname()
-		secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
-		emb := memstore.NewHTTPEmbedder(url, instanceID, secret, 30*time.Second)
+		emb := memstore.NewHTTPEmbedder(url, embedInstanceID, secret, 30*time.Second)
 		go startHTTPEmbedder(emb)
 		log.Printf("memstore: using HTTP embedder (url=%s)", url)
 		return emb

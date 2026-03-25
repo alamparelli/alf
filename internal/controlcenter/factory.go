@@ -387,8 +387,20 @@ func HandlerFactory(deps Deps) http.Handler {
 	termHandler = termRL.middleware(termHandler)
 	termHandler = loggingMiddleware(termHandler)
 
+	// SSH WebSocket proxy: same pattern as terminal — outside middleware, inline auth.
+	sshRL := newRateLimiter(30)
+	var sshHandler http.Handler = &SSHHandler{
+		Manager:       deps.VaultManager,
+		AuthToken:     deps.AuthToken,
+		Sessions:      deps.Sessions,
+		AllowedOrigin: deps.AllowedOrigin,
+	}
+	sshHandler = sshRL.middleware(sshHandler)
+	sshHandler = loggingMiddleware(sshHandler)
+
 	outer := http.NewServeMux()
 	outer.Handle("/api/terminal", termHandler)
+	outer.Handle("/api/ssh/", sshHandler)
 	outer.Handle("/", handler)
 
 	return outer

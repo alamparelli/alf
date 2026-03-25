@@ -148,6 +148,9 @@
   let ws: WebSocket | null = null
   let resizeObserver: ResizeObserver | null = null
 
+  // SSH mode: parsed from URL hash ?ssh=service-name
+  let sshService = $state<string | null>(null)
+
   // URL bar overlay state
   let urlBarVisible = $state(false)
   let urlBarValue = $state('')
@@ -162,7 +165,9 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${proto}//${location.host}/api/terminal`
+    const url = sshService
+      ? `${proto}//${location.host}/api/ssh/${encodeURIComponent(sshService)}/session`
+      : `${proto}//${location.host}/api/terminal`
     ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
 
@@ -172,8 +177,10 @@
         fitAddon.fit()
         sendResize(term.cols, term.rows)
       }
-      // Default to data directory
-      setTimeout(() => sendInput('cd /home/alf/data && clear\n'), 100)
+      // Default to data directory (local terminal only)
+      if (!sshService) {
+        setTimeout(() => sendInput('cd /home/alf/data && clear\n'), 100)
+      }
     }
 
     ws.onmessage = (ev) => {
@@ -265,6 +272,13 @@
     detectMobile()
     window.addEventListener('resize', detectMobile)
 
+    // Parse SSH service from URL hash: #/terminal?ssh=service-name
+    const hash = window.location.hash
+    const sshMatch = hash.match(/[?&]ssh=([^&]+)/)
+    if (sshMatch) {
+      sshService = decodeURIComponent(sshMatch[1])
+    }
+
     const theme = getTermTheme()
 
     term = new Terminal({
@@ -334,10 +348,17 @@
 
 <div class="terminal-view">
   <div class="term-header">
-    <span class="term-title">Terminal</span>
-    <button class="term-btn" onclick={newSession} title="New session">
-      <RotateCw size={13} /> New Session
-    </button>
+    <span class="term-title">{sshService ? `SSH: ${sshService}` : 'Terminal'}</span>
+    <div class="term-header-actions">
+      {#if sshService}
+        <a class="term-btn" href="#/terminal" onclick={() => { sshService = null; newSession() }}>
+          Local Terminal
+        </a>
+      {/if}
+      <button class="term-btn" onclick={newSession} title="New session">
+        <RotateCw size={13} /> New Session
+      </button>
+    </div>
   </div>
 
   <!-- URL Bar overlay -->
@@ -405,6 +426,12 @@
     font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
+  }
+
+  .term-header-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
   }
 
   .term-btn:hover { background: var(--border); }

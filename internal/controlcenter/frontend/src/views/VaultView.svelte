@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { Lock, Unlock, Shield, Key, FileText, Plus, Trash2, Download, Upload, Eye, EyeOff, Copy, RefreshCw, AlertTriangle, CheckCircle, ExternalLink, Loader2, Zap, Pencil, Info } from 'lucide-svelte'
+  import { Lock, Unlock, Shield, Key, FileText, Plus, Trash2, Download, Upload, Eye, EyeOff, Copy, RefreshCw, AlertTriangle, CheckCircle, ExternalLink, Loader2, Zap, Pencil, Info, Terminal } from 'lucide-svelte'
   import Card from '../components/shared/Card.svelte'
   import Modal from '../components/shared/Modal.svelte'
   import { api } from '../lib/api'
@@ -78,6 +78,12 @@
   let svcSaFileRef = $state('')
   let svcSaScopes = $state('')
   let svcSaTokenUrl = $state('')
+  // SSH key
+  let svcSshHost = $state('')
+  let svcSshPort = $state(22)
+  let svcSshUser = $state('')
+  let svcSshKeyFileRef = $state('')
+  let svcSshPassphrase = $state('')
   let svcTlsSkip = $state(false)
   let savingService = $state(false)
 
@@ -279,8 +285,12 @@
   }
 
   async function saveService() {
-    if (!svcName.trim() || !svcBaseUrl.trim()) {
-      toasts.show('Name and base URL are required', 'error')
+    if (!svcName.trim()) {
+      toasts.show('Name is required', 'error')
+      return
+    }
+    if (svcAuthType !== 'ssh_key' && !svcBaseUrl.trim()) {
+      toasts.show('Base URL is required', 'error')
       return
     }
     savingService = true
@@ -318,16 +328,26 @@
           auth.sa_scopes = splitScopes(svcSaScopes)
           if (svcSaTokenUrl) auth.sa_token_url = svcSaTokenUrl
           break
+        case 'ssh_key':
+          auth.ssh_host = svcSshHost.trim()
+          auth.ssh_port = svcSshPort || 22
+          auth.ssh_user = svcSshUser.trim()
+          auth.ssh_key_file_ref = svcSshKeyFileRef
+          if (svcSshPassphrase) auth.ssh_key_passphrase = svcSshPassphrase
+          break
+      }
+      const payload: Record<string, any> = {
+        name: svcName.trim(),
+        auth,
+      }
+      if (svcAuthType !== 'ssh_key') {
+        payload.base_url = svcBaseUrl.trim()
+        payload.tls_skip_verify = svcTlsSkip
       }
       await api('/api/vault/services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: svcName.trim(),
-          base_url: svcBaseUrl.trim(),
-          auth,
-          tls_skip_verify: svcTlsSkip
-        })
+        body: JSON.stringify(payload)
       })
       toasts.show('Service saved', 'success')
       showServiceModal = false
@@ -628,7 +648,8 @@
       header: 'Header',
       basic: 'Basic',
       oauth2_client: 'OAuth2',
-      service_account: 'Service Acct'
+      service_account: 'Service Acct',
+      ssh_key: 'SSH'
     }
     return map[type] || type
   }
@@ -708,9 +729,15 @@
                 <button class="btn btn-sm" onclick={() => openServiceModal(svc)} title="Details">
                   <Info size={12} />
                 </button>
-                <button class="btn btn-sm" onclick={() => testService(svc.name)} title="Test connection">
-                  <Zap size={12} />
-                </button>
+                {#if svc.auth_type === 'ssh_key'}
+                  <a class="btn btn-sm" href="#/terminal?ssh={encodeURIComponent(svc.name)}" title="Connect SSH">
+                    <Terminal size={12} />
+                  </a>
+                {:else}
+                  <button class="btn btn-sm" onclick={() => testService(svc.name)} title="Test connection">
+                    <Zap size={12} />
+                  </button>
+                {/if}
                 <button class="btn btn-sm" onclick={() => deleteService(svc.name)} title="Delete">
                   <Trash2 size={12} />
                 </button>
@@ -895,10 +922,12 @@
       <label>Name</label>
       <input class="input" bind:value={svcName} placeholder="my-api" disabled={!!editingService} />
     </div>
-    <div class="form-group">
-      <label>Base URL</label>
-      <input class="input" bind:value={svcBaseUrl} placeholder="https://api.example.com" />
-    </div>
+    {#if svcAuthType !== 'ssh_key'}
+      <div class="form-group">
+        <label>Base URL</label>
+        <input class="input" bind:value={svcBaseUrl} placeholder="https://api.example.com" />
+      </div>
+    {/if}
     <div class="form-group">
       <label>Auth Type</label>
       <select class="input" bind:value={svcAuthType}>
@@ -907,6 +936,7 @@
         <option value="basic">Basic Auth</option>
         <option value="oauth2_client">OAuth2 Client</option>
         <option value="service_account">Service Account (JSON Key)</option>
+        <option value="ssh_key">SSH Key</option>
       </select>
     </div>
 
@@ -1043,11 +1073,40 @@
         <label>Token URL (optional)</label>
         <input class="input" bind:value={svcSaTokenUrl} placeholder="https://oauth2.googleapis.com/token" />
       </div>
+    {:else if svcAuthType === 'ssh_key'}
+      <div class="form-group">
+        <label>SSH Host</label>
+        <input class="input" bind:value={svcSshHost} placeholder="192.168.1.100 or hostname" />
+      </div>
+      <div class="form-group">
+        <label>SSH Port</label>
+        <input class="input" type="number" bind:value={svcSshPort} min="1" max="65535" />
+      </div>
+      <div class="form-group">
+        <label>SSH User</label>
+        <input class="input" bind:value={svcSshUser} placeholder="root" />
+      </div>
+      <div class="form-group">
+        <label>Private Key File</label>
+        <select class="input" bind:value={svcSshKeyFileRef}>
+          <option value="">Select uploaded file...</option>
+          {#each files as f}
+            <option value={f.name}>{f.name}</option>
+          {/each}
+        </select>
+        <p class="form-hint">Upload your SSH private key (PEM format) in the Files section below.</p>
+      </div>
+      <div class="form-group">
+        <label>Key Passphrase (optional)</label>
+        <input class="input" type="password" bind:value={svcSshPassphrase} placeholder="Leave empty if key is unprotected" />
+      </div>
     {/if}
 
-    <label class="checkbox-label">
-      <input type="checkbox" bind:checked={svcTlsSkip} /> Skip TLS verification
-    </label>
+    {#if svcAuthType !== 'ssh_key'}
+      <label class="checkbox-label">
+        <input type="checkbox" bind:checked={svcTlsSkip} /> Skip TLS verification
+      </label>
+    {/if}
 
     <div class="modal-actions">
       <button class="btn btn-primary" onclick={saveService} disabled={savingService}>

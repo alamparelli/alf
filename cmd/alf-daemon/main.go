@@ -1714,12 +1714,21 @@ func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
 
 // startHTTPEmbedder registers with the embed service, retrying up to 30 times.
 // Falls back to FTS5-only search if embed service is unavailable.
+// Gives up early on "no route to host" / "connection refused" (service not deployed).
 func startHTTPEmbedder(emb *memstore.HTTPEmbedder) {
 	for attempt := 1; attempt <= 30; attempt++ {
-		if err := emb.Start(); err == nil {
+		err := emb.Start()
+		if err == nil {
 			return
-		} else if attempt <= 3 || attempt%10 == 0 {
-			// Log first 3 attempts and then every 10th to reduce noise.
+		}
+		errStr := err.Error()
+		unreachable := strings.Contains(errStr, "no route to host") ||
+			strings.Contains(errStr, "connection refused")
+		if unreachable && attempt >= 3 {
+			log.Printf("embed: service unreachable after %d attempts — falling back to FTS5-only search", attempt)
+			return
+		}
+		if attempt <= 3 || attempt%10 == 0 {
 			log.Printf("embed: registration attempt %d/30 failed: %v", attempt, err)
 		}
 		time.Sleep(10 * time.Second)

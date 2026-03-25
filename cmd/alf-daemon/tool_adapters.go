@@ -17,7 +17,9 @@ import (
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/skills"
+	"github.com/alamparelli/alf/internal/supervisor"
 	"github.com/alamparelli/alf/internal/tooling"
+	"time"
 )
 
 // --- Task adapter ---
@@ -363,6 +365,7 @@ func (a *skillAdapter) Get(name string) (*tooling.SkillDetail, bool) {
 type appAdapter struct {
 	appStore    cc.AppStore
 	marketplace *marketplace.Manager
+	supervisor  *supervisor.Supervisor
 }
 
 func (a *appAdapter) List() []tooling.AppInfo {
@@ -458,6 +461,36 @@ func (a *appAdapter) Uninstall(slug string) error {
 		return fmt.Errorf("marketplace not available")
 	}
 	return a.marketplace.Uninstall(slug)
+}
+
+func (a *appAdapter) Restart(slug string) error {
+	if a.supervisor == nil {
+		return fmt.Errorf("supervisor not available")
+	}
+	a.supervisor.RestartApp(slug)
+	return nil
+}
+
+func (a *appAdapter) ServiceStatus() []tooling.ServiceStatusInfo {
+	if a.supervisor == nil {
+		return nil
+	}
+	var result []tooling.ServiceStatusInfo
+	for _, s := range a.supervisor.Status() {
+		info := tooling.ServiceStatusInfo{
+			AppSlug:  s.AppSlug,
+			Name:     s.Name,
+			Running:  s.Running,
+			PID:      s.PID,
+			Restarts: s.Restarts,
+		}
+		if !s.StartedAt.IsZero() {
+			info.StartedAt = s.StartedAt.Format(time.RFC3339)
+		}
+		info.LastError = s.LastError
+		result = append(result, info)
+	}
+	return result
 }
 
 // --- Config adapter ---

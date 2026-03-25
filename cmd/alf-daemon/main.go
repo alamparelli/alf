@@ -751,6 +751,7 @@ func main() {
 	// Registered after CC init so mpManager and other deps are available.
 	toolAppStore := cc.NewFileAppStore(filepath.Join(dataDir, "apps"))
 	toolLogReader := cc.LogReaderFactory(dataDir)
+	appToolAdapter := appAdapter{appStore: toolAppStore, marketplace: mpManager}
 	systemTools := []tooling.NativeTool{
 		tooling.TaskNativeTool{Service: &taskAdapter{
 			orch:         orch,
@@ -769,10 +770,7 @@ func main() {
 			skillsDir: skillsDir,
 			dataDir:   dataDir,
 		}},
-		tooling.AppNativeTool{Service: &appAdapter{
-			appStore:    toolAppStore,
-			marketplace: mpManager,
-		}},
+		tooling.AppNativeTool{Service: &appToolAdapter},
 		tooling.ConfigNativeTool{Service: &configAdapter{store: configStore}},
 		tooling.TierNativeTool{Service: &tierAdapter{store: tierStore}},
 		tooling.LogNativeTool{Service: &logAdapter{reader: toolLogReader}},
@@ -1007,10 +1005,11 @@ func main() {
 	appsSupervisor.Start()
 	defer appsSupervisor.Stop()
 
-	// Wire supervisor into marketplace so install/enable/disable/update manage services.
+	// Wire supervisor into marketplace and app tool so install/enable/disable/update/restart manage services.
 	if mpManager != nil {
 		mpManager.SetSupervisor(appsSupervisor)
 	}
+	appToolAdapter.supervisor = appsSupervisor
 
 	// When Telegram is not configured, run a CC-only event loop.
 	if !telegramEnabled {

@@ -20,11 +20,13 @@ func (m *mockAppService) Catalog() ([]RemoteAppInfo, error) {
 	return m.catalog, m.catErr
 }
 
-func (m *mockAppService) Install(slug string) error  { return m.opErr }
-func (m *mockAppService) Update(slug string) error   { return m.opErr }
-func (m *mockAppService) Enable(slug string) error   { return m.opErr }
-func (m *mockAppService) Disable(slug string) error  { return m.opErr }
-func (m *mockAppService) Uninstall(slug string) error { return m.opErr }
+func (m *mockAppService) Install(slug string) error       { return m.opErr }
+func (m *mockAppService) Update(slug string) error        { return m.opErr }
+func (m *mockAppService) Enable(slug string) error        { return m.opErr }
+func (m *mockAppService) Disable(slug string) error       { return m.opErr }
+func (m *mockAppService) Uninstall(slug string) error     { return m.opErr }
+func (m *mockAppService) Restart(slug string) error       { return m.opErr }
+func (m *mockAppService) ServiceStatus() []ServiceStatusInfo { return nil }
 
 func TestAppTool_List(t *testing.T) {
 	svc := &mockAppService{

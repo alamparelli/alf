@@ -16,14 +16,14 @@ func (AppNativeTool) ToolName() string { return "app" }
 func (AppNativeTool) Schema() ToolSchema {
 	return ToolSchema{
 		Name:        "app",
-		Description: "Manage installed apps and marketplace: list installed, browse catalog, install, update, enable, disable, or uninstall apps.",
+		Description: "Manage installed apps and marketplace: list, catalog, install, update, enable, disable, uninstall, restart services, or check service status.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"list", "catalog", "install", "update", "enable", "disable", "uninstall"},
-					"description": "Action to perform.",
+					"enum":        []string{"list", "catalog", "install", "update", "enable", "disable", "uninstall", "restart", "services"},
+					"description": "Action to perform. 'restart' restarts an app's background service. 'services' shows status of all running services.",
 				},
 				"slug": map[string]any{
 					"type":        []string{"string", "null"},
@@ -110,7 +110,24 @@ func (t AppNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
 		}
 		return fmt.Sprintf("App %q uninstalled.", args.Slug), nil
 
+	case "restart":
+		if args.Slug == "" {
+			return "", fmt.Errorf("slug is required for restart")
+		}
+		if err := t.Service.Restart(args.Slug); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("App %q service restarted.", args.Slug), nil
+
+	case "services":
+		statuses := t.Service.ServiceStatus()
+		if len(statuses) == 0 {
+			return "No background services running.", nil
+		}
+		data, _ := json.MarshalIndent(statuses, "", "  ")
+		return string(data), nil
+
 	default:
-		return "", fmt.Errorf("unknown action: %s (valid: list, catalog, install, update, enable, disable, uninstall)", args.Action)
+		return "", fmt.Errorf("unknown action: %s (valid: list, catalog, install, update, enable, disable, uninstall, restart, services)", args.Action)
 	}
 }

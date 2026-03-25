@@ -108,6 +108,13 @@
   let importPassword = $state('')
   let importFileInput: HTMLInputElement | undefined
 
+  // Mobile API token
+  let mobileTokenExists = $state(false)
+  let mobileTokenMasked = $state('')
+  let mobileTokenFull = $state('')
+  let mobileTokenCopied = $state(false)
+  let mobileGenerating = $state(false)
+
   let isUnlocked = $derived(vaultStatus === 'unlocked')
 
   async function loadStatus() {
@@ -174,6 +181,56 @@
     loadSecrets()
     loadFiles()
     loadTokens()
+    loadMobileToken()
+  }
+
+  async function loadMobileToken() {
+    try {
+      const d = await api<any>('/api/vault/mobile-token')
+      mobileTokenExists = !!d.exists
+      mobileTokenMasked = d.token_masked || ''
+      mobileTokenFull = '' // never persisted in frontend
+    } catch { /* silent */ }
+  }
+
+  async function generateMobileToken() {
+    mobileGenerating = true
+    mobileTokenCopied = false
+    try {
+      const d = await api<any>('POST', '/api/vault/mobile-token', {})
+      if (d.ok) {
+        mobileTokenExists = true
+        mobileTokenFull = d.token
+        mobileTokenMasked = ''
+        toasts.show('Mobile token generated', 'success')
+      }
+    } catch (e: any) {
+      toasts.show(e.error || 'Failed to generate token', 'error')
+    }
+    mobileGenerating = false
+  }
+
+  async function revokeMobileToken() {
+    if (!confirm('Revoke mobile API token? The mobile app will lose access.')) return
+    try {
+      await api('/api/vault/mobile-token', { method: 'DELETE' })
+      mobileTokenExists = false
+      mobileTokenFull = ''
+      mobileTokenMasked = ''
+      toasts.show('Mobile token revoked', 'success')
+    } catch (e: any) {
+      toasts.show(e.error || 'Failed to revoke token', 'error')
+    }
+  }
+
+  async function copyMobileToken() {
+    try {
+      await navigator.clipboard.writeText(mobileTokenFull)
+      mobileTokenCopied = true
+      setTimeout(() => { mobileTokenCopied = false }, 2000)
+    } catch {
+      toasts.show('Failed to copy', 'error')
+    }
   }
 
   // --- Services ---
@@ -652,6 +709,54 @@
             </div>
           {/each}
         </div>
+      {/if}
+    </Card>
+
+    <!-- Mobile API Token -->
+    <Card>
+      <div class="section-header">
+        <h3><Zap size={16} /> Mobile Access</h3>
+      </div>
+      <p class="dim" style="font-size:0.8rem;margin-bottom:10px">
+        Persistent bearer token for the mobile app. Use as <code style="font-size:0.75rem;padding:1px 4px;border-radius:3px;background:var(--bg-input)">Authorization: Bearer &lt;token&gt;</code>
+      </p>
+
+      {#if mobileTokenFull}
+        <!-- Token just generated — show it once -->
+        <div class="mobile-token-display">
+          <code class="mobile-token-value">{mobileTokenFull}</code>
+          <button class="btn btn-sm" onclick={copyMobileToken}>
+            {#if mobileTokenCopied}
+              <CheckCircle size={12} /> Copied
+            {:else}
+              <Copy size={12} /> Copy
+            {/if}
+          </button>
+        </div>
+        <p class="mobile-token-warning">Copy this token now. It won't be shown again.</p>
+        <div class="mobile-token-actions">
+          <button class="btn btn-sm" onclick={revokeMobileToken}>
+            <Trash2 size={12} /> Revoke
+          </button>
+        </div>
+      {:else if mobileTokenExists}
+        <!-- Token exists but not shown -->
+        <div class="mobile-token-display">
+          <code class="mobile-token-value dim">{mobileTokenMasked}</code>
+        </div>
+        <div class="mobile-token-actions">
+          <button class="btn btn-sm" onclick={generateMobileToken} disabled={mobileGenerating}>
+            <RefreshCw size={12} /> Regenerate
+          </button>
+          <button class="btn btn-sm" onclick={revokeMobileToken}>
+            <Trash2 size={12} /> Revoke
+          </button>
+        </div>
+      {:else}
+        <!-- No token -->
+        <button class="btn btn-sm btn-primary" onclick={generateMobileToken} disabled={mobileGenerating}>
+          <Plus size={12} /> {mobileGenerating ? 'Generating...' : 'Generate Token'}
+        </button>
       {/if}
     </Card>
 
@@ -1330,5 +1435,37 @@
     font-size: 0.78rem;
     word-break: break-all;
     user-select: all;
+  }
+
+  /* Mobile token */
+  .mobile-token-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    margin-bottom: 8px;
+  }
+
+  .mobile-token-value {
+    flex: 1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    word-break: break-all;
+    user-select: all;
+  }
+
+  .mobile-token-warning {
+    font-size: 0.75rem;
+    color: var(--red);
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+
+  .mobile-token-actions {
+    display: flex;
+    gap: 8px;
   }
 </style>

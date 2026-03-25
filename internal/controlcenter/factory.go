@@ -352,7 +352,9 @@ func HandlerFactory(deps Deps) http.Handler {
 	var handler http.Handler = mux
 	handler = jsonMiddleware(handler)
 	handler = csrfMiddleware(deps.AllowedOrigin)(handler)
-	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt)(handler)
+	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt, func() string {
+		return GetMobileToken(deps.VaultManager)
+	})(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
 	handler = securityHeadersMiddleware(handler)
 	handler = newRateLimiter(15).withAuthLimit(600, deps.Sessions).withToken(deps.AuthToken).middleware(handler) // 15/min anonymous, 600/min authenticated (session or bearer)

@@ -1,7 +1,9 @@
 package controlcenter
 
 import (
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
@@ -95,6 +97,8 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.handleRevokeToken(w, r, id)
+	case path == "mobile-token":
+		h.handleMobileToken(w, r)
 	case path == "oauth2/authorize" && r.Method == http.MethodPost:
 		h.handleOAuth2Authorize(w, r)
 	case path == "oauth2/callback" && r.Method == http.MethodGet:
@@ -695,6 +699,76 @@ func (h *VaultHandler) handleDeleteSecret(w http.ResponseWriter, _ *http.Request
 	}
 	log.Printf("[vault] secret %q deleted via API", name)
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// --- Mobile API Token ---
+
+const mobileTokenSecret = "cc_mobile_token"
+
+// handleMobileToken handles GET (check), POST (generate), DELETE (revoke) for mobile API tokens.
+func (h *VaultHandler) handleMobileToken(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.handleMobileTokenGet(w)
+	case http.MethodPost:
+		h.handleMobileTokenCreate(w)
+	case http.MethodDelete:
+		h.handleMobileTokenRevoke(w)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (h *VaultHandler) handleMobileTokenGet(w http.ResponseWriter) {
+	token, err := h.Manager.GetSecret(mobileTokenSecret)
+	if err != nil || token == "" {
+		respondJSON(w, http.StatusOK, map[string]any{"exists": false})
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"exists":    true,
+		"token_masked": obfuscateToken(token),
+	})
+}
+
+func (h *VaultHandler) handleMobileTokenCreate(w http.ResponseWriter) {
+	// Generate a cryptographically random 64-char hex token.
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
+		return
+	}
+	token := hex.EncodeToString(b)
+
+	if err := h.Manager.SetSecret(mobileTokenSecret, token); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store token: " + err.Error()})
+		return
+	}
+	log.Printf("[vault] mobile API token generated")
+	// Return the full token — shown only once.
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "token": token})
+}
+
+func (h *VaultHandler) handleMobileTokenRevoke(w http.ResponseWriter) {
+	c := h.Manager.Client()
+	if err := c.DeleteFile(mobileTokenSecret); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("[vault] mobile API token revoked")
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// GetMobileToken returns the current mobile token from vault, or empty string.
+func GetMobileToken(vm *vault.Manager) string {
+	if vm == nil {
+		return ""
+	}
+	token, err := vm.GetSecret(mobileTokenSecret)
+	if err != nil {
+		return ""
+	}
+	return token
 }
 
 // isVaultSafeName validates that a name/id has no path traversal characters.

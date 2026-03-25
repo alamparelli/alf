@@ -563,6 +563,12 @@
             </p>
           </div>
         {/if}
+
+        <!-- Mobile Access -->
+        <div class="apply-info coming-soon">
+          <strong>Mobile Access</strong> — coming soon<br>
+          <span class="form-help">Generate a persistent API token in <strong>Vault &gt; Mobile Access</strong> to connect the ALF mobile app.</span>
+        </div>
       </div>
     {/if}
 
@@ -847,6 +853,11 @@
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
     margin-bottom: 8px;
+  }
+
+  .coming-soon {
+    opacity: 0.6;
+    border-style: dashed;
   }
 
   .apply-warning {

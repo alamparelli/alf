@@ -29,7 +29,7 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req bashRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySmall)).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}

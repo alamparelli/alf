@@ -19,7 +19,7 @@
   async function restart() {
     if (!confirm('Restart the ALF daemon?')) return
     try {
-      await fetch('/api/restart', { method: 'POST', credentials: 'same-origin' })
+      await api('POST', '/api/restart')
     } catch {
       // expected
     }

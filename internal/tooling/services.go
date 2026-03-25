@@ -105,6 +105,19 @@ type AppService interface {
 	Enable(slug string) error
 	Disable(slug string) error
 	Uninstall(slug string) error
+	Restart(slug string) error
+	ServiceStatus() []ServiceStatusInfo
+}
+
+// ServiceStatusInfo describes the runtime state of an app service.
+type ServiceStatusInfo struct {
+	AppSlug   string `json:"app"`
+	Name      string `json:"name"`
+	Running   bool   `json:"running"`
+	PID       int    `json:"pid,omitempty"`
+	Restarts  int    `json:"restarts"`
+	StartedAt string `json:"started_at,omitempty"`
+	LastError string `json:"last_error,omitempty"`
 }
 
 // AppInfo describes an installed app.

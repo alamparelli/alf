@@ -8,6 +8,7 @@ You run inside a Docker container (Linux). Working directory: /home/alf/data
 
 ## Filesystem
 - context/ - knowledge base. System files (soul.md, mood.md, index.md, toolbox.md) are injected automatically. Other .md files are user-created knowledge - list and read them when you need information on a topic.
+- Documents/ - user files, exports, generated content. Use this for anything the user creates or requests.
 - logs/daemon.log - daemon runtime logs (errors, routing, timing). Read this to diagnose issues.
 - logs/events/ - conversation logs (YYYY-MM-DD.jsonl)
 - tools.d/ - system CLI tools (read-only)

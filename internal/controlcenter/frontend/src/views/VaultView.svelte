@@ -358,7 +358,9 @@
       } else {
         let msg = data.error || 'test failed'
         // Make common upstream errors more user-friendly.
-        if (msg.includes('upstream request failed') || msg.includes('502')) {
+        if (msg.includes('redirects disabled')) {
+          msg = 'Service redirected the request (blocked for security). Check that the Base URL points directly to the API, not a page that redirects.'
+        } else if (msg.includes('upstream request failed') || msg.includes('502')) {
           msg = 'Could not reach the service. Check the Base URL is correct and the service is running.'
         } else if (msg.includes('401') || msg.includes('403') || msg.includes('Unauthorized')) {
           msg = 'Authentication rejected. Check your credentials.'

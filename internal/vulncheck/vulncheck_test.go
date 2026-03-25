@@ -67,6 +67,11 @@ func TestPipAudit(t *testing.T) {
 	output := string(out)
 
 	// pip-audit exits non-zero for both vulns and warnings (e.g. packages not on PyPI).
+	// CVEs with no fix available — track until upstream releases a patch.
+	allowedCVEs := map[string]string{
+		"CVE-2026-4539": "pygments ReDoS in AdlLexer — local-only, no fix released",
+	}
+
 	// Only fail on actual vulnerability lines (format: "package  version  vuln-id  description").
 	if err != nil {
 		lines := strings.Split(output, "\n")
@@ -74,12 +79,28 @@ func TestPipAudit(t *testing.T) {
 		for _, line := range lines {
 			// Vulnerability lines contain CVE/PYSEC/GHSA IDs.
 			if strings.Contains(line, "PYSEC-") || strings.Contains(line, "CVE-") || strings.Contains(line, "GHSA-") {
-				hasVuln = true
-				break
+				// Check if all CVEs on this line are in the allowlist.
+				allowed := false
+				for cve := range allowedCVEs {
+					if strings.Contains(line, cve) {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					hasVuln = true
+					break
+				}
 			}
 		}
 		if hasVuln {
 			t.Fatalf("pip-audit found vulnerabilities:\n%s", output)
+		}
+		// Log allowed CVEs so they stay visible.
+		for cve, reason := range allowedCVEs {
+			if strings.Contains(output, cve) {
+				t.Logf("pip-audit: allowed CVE %s (%s)", cve, reason)
+			}
 		}
 		// Warnings only (e.g. packages not on PyPI) - log but don't fail.
 		t.Logf("pip-audit warnings (no CVEs):\n%s", output)

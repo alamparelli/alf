@@ -265,6 +265,7 @@ func (h *SearchHandler) searchFiles(query string) []any {
 		"apps":          true, // app internals not useful in file search
 		"tools":         true, // tool binaries and go module cache
 		"tools.d":       true,
+		"config.d":      true, // system config (tiers, presets)
 		"logs":          true,
 		"sessions":      true,
 		"docs":          true, // indexed separately via searchDocs

@@ -80,15 +80,14 @@
       const active = configs.find(c => c.active);
       if (active) {
         activeConfigName = active.name;
-        lastSwitched = active.name;
       }
     } catch {}
   }
 
-  let lastSwitched = ''
+  let switching = false
   async function switchConfig(name) {
-    if (!name || name === lastSwitched) return;
-    lastSwitched = name;
+    if (!name || switching) return;
+    switching = true;
     try {
       await api('POST', '/api/tiers/configs/switch', { name: name + '.json' });
       toasts.success(`Switched to profile: ${name}`);
@@ -97,6 +96,8 @@
     } catch (e) {
       toasts.error('Switch failed: ' + e.message);
       await loadConfigs(); // restore select to actual active
+    } finally {
+      switching = false;
     }
   }
 
@@ -221,7 +222,7 @@
   <h2>Tiers</h2>
   <div class="toolbar">
     {#if configs.length > 0}
-      <select class="select" bind:value={activeConfigName} onchange={(e) => switchConfig(e.target.value)}>
+      <select class="select" value={activeConfigName} onchange={(e) => { const v = e.target.value; activeConfigName = v; switchConfig(v); }}>
         {#each configs as cfg}
           <option value={cfg.name}>{cfg.name} ({cfg.tiers} tiers){cfg.active ? ' ●' : ''}</option>
         {/each}

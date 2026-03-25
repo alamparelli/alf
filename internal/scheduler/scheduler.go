@@ -420,9 +420,31 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 // If a job with the given ID already exists (managed or not), it is returned as-is.
 func (e *Engine) EnsureManaged(id, name, schedule, tier, prompt, output string, skills []string, enabled bool) (*Job, error) {
 	if existing := e.store.Get(id); existing != nil {
+		changed := false
 		// Backfill skills if the existing job is missing them (upgrade path).
 		if len(existing.Skills) == 0 && len(skills) > 0 {
 			existing.Skills = skills
+			changed = true
+		}
+		// Re-sync tier if the existing tier no longer exists in the tier store.
+		if tier != "" && existing.Tier != tier && e.cfg.TierStore != nil {
+			snap := e.cfg.TierStore.Current()
+			found := false
+			if snap != nil {
+				for _, t := range snap.Tiers {
+					if t.Name == existing.Tier {
+						found = true
+						break
+					}
+				}
+			}
+			if !found {
+				log.Printf("scheduler: managed job %s: tier %q no longer exists, updating to %q", id, existing.Tier, tier)
+				existing.Tier = tier
+				changed = true
+			}
+		}
+		if changed {
 			e.store.Update(existing)
 		}
 		return existing, nil
@@ -462,6 +484,24 @@ func (e *Engine) EnsureManaged(id, name, schedule, tier, prompt, output string, 
 // enabling two-phase execution (command runs first, LLM only if issues detected).
 func (e *Engine) EnsureManagedFull(id, name, schedule, tier, prompt, command, output string, skills []string, enabled bool) (*Job, error) {
 	if existing := e.store.Get(id); existing != nil {
+		// Re-sync tier if the existing tier no longer exists in the tier store.
+		if tier != "" && existing.Tier != tier && e.cfg.TierStore != nil {
+			snap := e.cfg.TierStore.Current()
+			found := false
+			if snap != nil {
+				for _, t := range snap.Tiers {
+					if t.Name == existing.Tier {
+						found = true
+						break
+					}
+				}
+			}
+			if !found {
+				log.Printf("scheduler: managed job %s: tier %q no longer exists, updating to %q", id, existing.Tier, tier)
+				existing.Tier = tier
+				e.store.Update(existing)
+			}
+		}
 		return existing, nil
 	}
 

@@ -16,6 +16,7 @@
     _ready: false,
     _slug: null,
     _listeners: {},
+    _authFailed: false, // stops all API calls after 401 until page reload
 
     /**
      * Initialize the SDK. Call once on page load.
@@ -59,13 +60,15 @@
      * @returns {Promise<any>}
      */
     api: function(path, opts) {
+      if (this._authFailed) return Promise.reject(new Error('Session expired — reload page'));
       opts = opts || {};
       opts.headers = opts.headers || {};
       opts.headers['X-Requested-With'] = 'XMLHttpRequest';
       opts.credentials = 'same-origin';
       return fetch(path, opts).then(function(r) {
         if (r.status === 401) {
-          SDK.toast('Session expired', 'error');
+          SDK._authFailed = true; // stop all future calls to avoid flooding
+          SDK.toast('Session expired — reload page to reconnect', 'error');
           throw new Error('401 Unauthorized');
         }
         if (!r.ok) {

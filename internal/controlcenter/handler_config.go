@@ -32,7 +32,7 @@ func (h *ConfigHandler) get(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := json.Marshal(cfg)
 	if err != nil {
 		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
 		return
@@ -44,6 +44,7 @@ func (h *ConfigHandler) get(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(redacted)
 }
 

@@ -10,6 +10,18 @@ import (
 //go:embed defaults/tiers.json
 var defaultTiersJSON []byte
 
+// Default values for memory configuration fallbacks.
+const (
+	DefaultMemoryExtractInterval    = 180  // minutes
+	DefaultMemoryExtractTimeout     = 300  // seconds
+	DefaultMemoryExtractBootDelay   = 180  // seconds
+	DefaultMemoryExtractMinMessages = 3
+	DefaultMemoryDedupTextThreshold   = 0.7
+	DefaultMemoryDedupCosineThreshold = 0.15
+	DefaultRecallTopK    = 3
+	DefaultRecallMinDist = 1.2
+)
+
 // BackendConfig defines an OpenAI-compatible LLM API endpoint.
 type BackendConfig struct {
 	BaseURL      string            `json:"base_url"`
@@ -111,7 +123,7 @@ func (c *Config) EffectiveMemoryExtractInterval() int {
 	if c.MemoryExtractInterval > 0 {
 		return c.MemoryExtractInterval
 	}
-	return 180
+	return DefaultMemoryExtractInterval
 }
 
 // EffectiveMemoryExtractTimeout returns the extraction timeout in seconds.
@@ -119,7 +131,7 @@ func (c *Config) EffectiveMemoryExtractTimeout() int {
 	if c.MemoryExtractTimeout > 0 {
 		return c.MemoryExtractTimeout
 	}
-	return 300
+	return DefaultMemoryExtractTimeout
 }
 
 // EffectiveMemoryExtractBootDelay returns the boot delay in seconds.
@@ -127,7 +139,7 @@ func (c *Config) EffectiveMemoryExtractBootDelay() int {
 	if c.MemoryExtractBootDelay > 0 {
 		return c.MemoryExtractBootDelay
 	}
-	return 180
+	return DefaultMemoryExtractBootDelay
 }
 
 // EffectiveMemoryExtractMinMessages returns the minimum messages to trigger extraction.
@@ -135,7 +147,7 @@ func (c *Config) EffectiveMemoryExtractMinMessages() int {
 	if c.MemoryExtractMinMessages > 0 {
 		return c.MemoryExtractMinMessages
 	}
-	return 3
+	return DefaultMemoryExtractMinMessages
 }
 
 // EffectiveMemoryDedupTextThreshold returns the Jaccard similarity threshold.
@@ -143,7 +155,7 @@ func (c *Config) EffectiveMemoryDedupTextThreshold() float64 {
 	if c.MemoryDedupTextThreshold > 0 {
 		return c.MemoryDedupTextThreshold
 	}
-	return 0.7
+	return DefaultMemoryDedupTextThreshold
 }
 
 // EffectiveMemoryDedupCosineThreshold returns the cosine distance threshold.
@@ -151,7 +163,7 @@ func (c *Config) EffectiveMemoryDedupCosineThreshold() float64 {
 	if c.MemoryDedupCosineThreshold > 0 {
 		return c.MemoryDedupCosineThreshold
 	}
-	return 0.15
+	return DefaultMemoryDedupCosineThreshold
 }
 
 // DefaultDNSServers are used when Config.DNSServers is empty.

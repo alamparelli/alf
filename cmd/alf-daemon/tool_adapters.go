@@ -22,6 +22,13 @@ import (
 	"time"
 )
 
+var (
+	errOrchestratorUnavailable = fmt.Errorf("orchestrator not available")
+	errMarketplaceUnavailable  = fmt.Errorf("marketplace not available")
+	errSupervisorUnavailable   = fmt.Errorf("supervisor not available")
+	errTierStoreUnavailable    = fmt.Errorf("tier store not available")
+)
+
 // --- Task adapter ---
 
 type taskAdapter struct {
@@ -36,7 +43,7 @@ type taskAdapter struct {
 
 func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (string, error) {
 	if a.orch == nil {
-		return "", fmt.Errorf("orchestrator not available")
+		return "", errOrchestratorUnavailable
 	}
 
 	// Resolve agent tier config.
@@ -82,7 +89,7 @@ func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (
 	go func() {
 		_, meta, err := a.orch.Run(context.Background(), opts.Prompt, orchPrep.SystemPrompts, orchPrep.Config, onProgress)
 		if err != nil {
-			log.Printf("[tool:task] background task failed: %v", err)
+			log.Printf("[tasks] background task failed: %v", err)
 		}
 		if a.onTaskEvent != nil && meta != nil {
 			summary := meta.Response
@@ -409,7 +416,7 @@ func (a *appAdapter) List() []tooling.AppInfo {
 
 func (a *appAdapter) Catalog() ([]tooling.RemoteAppInfo, error) {
 	if a.marketplace == nil {
-		return nil, fmt.Errorf("marketplace not available")
+		return nil, errMarketplaceUnavailable
 	}
 	remote, err := a.marketplace.FetchCatalog()
 	if err != nil {
@@ -430,42 +437,42 @@ func (a *appAdapter) Catalog() ([]tooling.RemoteAppInfo, error) {
 
 func (a *appAdapter) Install(slug string) error {
 	if a.marketplace == nil {
-		return fmt.Errorf("marketplace not available")
+		return errMarketplaceUnavailable
 	}
 	return a.marketplace.Install(slug)
 }
 
 func (a *appAdapter) Update(slug string) error {
 	if a.marketplace == nil {
-		return fmt.Errorf("marketplace not available")
+		return errMarketplaceUnavailable
 	}
 	return a.marketplace.Update(slug)
 }
 
 func (a *appAdapter) Enable(slug string) error {
 	if a.marketplace == nil {
-		return fmt.Errorf("marketplace not available")
+		return errMarketplaceUnavailable
 	}
 	return a.marketplace.Enable(slug)
 }
 
 func (a *appAdapter) Disable(slug string) error {
 	if a.marketplace == nil {
-		return fmt.Errorf("marketplace not available")
+		return errMarketplaceUnavailable
 	}
 	return a.marketplace.Disable(slug)
 }
 
 func (a *appAdapter) Uninstall(slug string) error {
 	if a.marketplace == nil {
-		return fmt.Errorf("marketplace not available")
+		return errMarketplaceUnavailable
 	}
 	return a.marketplace.Uninstall(slug)
 }
 
 func (a *appAdapter) Restart(slug string) error {
 	if a.supervisor == nil {
-		return fmt.Errorf("supervisor not available")
+		return errSupervisorUnavailable
 	}
 	a.supervisor.RestartApp(slug)
 	return nil
@@ -656,7 +663,7 @@ type llmAdapter struct {
 
 func (a *llmAdapter) Invoke(ctx context.Context, opts tooling.LLMInvokeOpts) (string, error) {
 	if a.tierStore == nil {
-		return "", fmt.Errorf("tier store not available")
+		return "", errTierStoreUnavailable
 	}
 
 	// Find the tier config.

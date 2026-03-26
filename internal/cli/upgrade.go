@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	cc "github.com/alamparelli/alf/internal/controlcenter"
 )
 
 const githubRepo = "alamparelli/alf"
@@ -282,7 +284,7 @@ func regenerateCompose(dir string) {
 	} else {
 		port := profile.Port
 		if port == "" {
-			port = "8080"
+			port = cc.DefaultPort
 		}
 		host := profile.Host
 		if host == "" {

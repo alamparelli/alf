@@ -40,14 +40,14 @@ func (h *TeamsHandler) agentsDir() string {
 
 func (h *TeamsHandler) list(w http.ResponseWriter) {
 	if h.AgentStore == nil {
-		json.NewEncoder(w).Encode(map[string]any{"teams": []any{}})
+		respondJSON(w, http.StatusOK, map[string]any{"teams": []any{}})
 		return
 	}
 	teams := h.AgentStore.All()
 	if teams == nil {
 		teams = []*agents.TeamConfig{}
 	}
-	json.NewEncoder(w).Encode(map[string]any{"teams": teams})
+	respondJSON(w, http.StatusOK, map[string]any{"teams": teams})
 }
 
 func (h *TeamsHandler) save(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +132,7 @@ func (h *TeamsHandler) save(w http.ResponseWriter, r *http.Request) {
 		h.EventBroker.Emit(EventAgents)
 	}
 
-	json.NewEncoder(w).Encode(map[string]any{"ok": true, "id": tc.ID, "file": filename})
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "id": tc.ID, "file": filename})
 }
 
 func (h *TeamsHandler) del(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +202,7 @@ func (h *TeamsHandler) del(w http.ResponseWriter, r *http.Request) {
 		h.EventBroker.Emit(EventAgents)
 	}
 
-	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // sanitizeTeamName returns a safe filename component from a team name.

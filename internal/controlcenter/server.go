@@ -23,6 +23,9 @@ import (
 	"github.com/alamparelli/alf/internal/vault"
 )
 
+// DefaultPort is the Control Center HTTP listen port.
+const DefaultPort = "8080"
+
 //go:embed web/*
 var webFS embed.FS
 
@@ -113,7 +116,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		WebFS:          webSub,
 	})
 
-	addr := "0.0.0.0:8080"
+	addr := "0.0.0.0:" + DefaultPort
 	return &Server{
 		httpServer: &http.Server{
 			Addr:              addr,

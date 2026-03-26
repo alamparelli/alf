@@ -28,6 +28,11 @@ func methodNotAllowed(w http.ResponseWriter) {
 
 // jsonErr returns a JSON-encoded error string for use with http.Error.
 func jsonErr(msg string) string {
-	data, _ := json.Marshal(map[string]string{"error": msg})
-	return string(data)
+	// Use manual JSON construction to avoid silent marshal failures.
+	// The message is escaped for safe JSON embedding.
+	b, err := json.Marshal(msg)
+	if err != nil {
+		return `{"error":"internal error"}`
+	}
+	return `{"error":` + string(b) + `}`
 }

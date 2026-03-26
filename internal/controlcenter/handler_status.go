@@ -1,7 +1,6 @@
 package controlcenter
 
 import (
-	"encoding/json"
 	"net/http"
 )
 
@@ -17,11 +16,5 @@ func (h *StatusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status := h.Provider.Status()
-	data, err := json.MarshalIndent(status, "", "  ")
-	if err != nil {
-		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	w.Write(data)
+	respondJSON(w, http.StatusOK, status)
 }

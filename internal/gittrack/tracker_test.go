@@ -89,6 +89,64 @@ func TestCommit_NoopWhenClean(t *testing.T) {
 	}
 }
 
+func TestCommit_StaleLockRecovery(t *testing.T) {
+	skipIfNoGit(t)
+	dir := t.TempDir()
+
+	tr := New(dir)
+	if err := tr.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Simulate a crash by creating a stale index.lock.
+	lock := filepath.Join(dir, ".git", "index.lock")
+	if err := os.WriteFile(lock, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("create lock: %v", err)
+	}
+
+	// Write a file so there's something to commit.
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("data"), 0o644)
+
+	// Commit should recover by removing the lock and retrying.
+	if err := tr.Commit("after crash"); err != nil {
+		t.Fatalf("Commit with stale lock should recover: %v", err)
+	}
+
+	// Lock should be gone.
+	if _, err := os.Stat(lock); err == nil {
+		t.Error("index.lock should have been removed")
+	}
+
+	// Commit should be in the log.
+	out, _ := exec.Command("git", "-C", dir, "log", "--oneline").CombinedOutput()
+	if !strings.Contains(string(out), "after crash") {
+		t.Errorf("commit should exist in log, got: %s", out)
+	}
+}
+
+func TestInit_StaleLockCleanup(t *testing.T) {
+	skipIfNoGit(t)
+	dir := t.TempDir()
+
+	tr := New(dir)
+	if err := tr.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Simulate stale lock from previous crash.
+	lock := filepath.Join(dir, ".git", "index.lock")
+	os.WriteFile(lock, []byte("stale"), 0o644)
+
+	// Second Init (like a daemon restart) should clean the lock.
+	if err := tr.Init(); err != nil {
+		t.Fatalf("Init with stale lock: %v", err)
+	}
+
+	if _, err := os.Stat(lock); err == nil {
+		t.Error("Init should have removed stale index.lock")
+	}
+}
+
 func TestGitignore_Content(t *testing.T) {
 	skipIfNoGit(t)
 	dir := t.TempDir()

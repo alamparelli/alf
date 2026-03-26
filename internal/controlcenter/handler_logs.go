@@ -1,7 +1,6 @@
 package controlcenter
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 )
@@ -19,10 +18,9 @@ func (h *LogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	name := r.URL.Query().Get("name")
 	if name == "" {
-		data, _ := json.MarshalIndent(map[string]any{
+		respondJSON(w, http.StatusOK, map[string]any{
 			"available": h.Reader.Available(),
-		}, "", "  ")
-		w.Write(data)
+		})
 		return
 	}
 
@@ -45,10 +43,9 @@ func (h *LogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, _ := json.MarshalIndent(map[string]any{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"name":  name,
 		"lines": lines,
 		"count": len(lines),
-	}, "", "  ")
-	w.Write(data)
+	})
 }

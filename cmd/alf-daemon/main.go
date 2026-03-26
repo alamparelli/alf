@@ -317,7 +317,7 @@ func main() {
 	memory.Bootstrap(contextDir)
 
 	// Ensure user-facing directories exist.
-	os.MkdirAll(filepath.Join(dataDir, "Documents"), 0o755)
+	os.MkdirAll(filepath.Join(dataDir, "documents"), 0o755)
 
 	// Seed default heartbeat.md if missing.
 	seedHeartbeatFile(contextDir)

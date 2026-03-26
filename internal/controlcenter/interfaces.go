@@ -39,9 +39,10 @@ type Notifier interface {
 
 // ScheduleJob is the CC-facing view of a scheduled job.
 type ScheduleJob struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Schedule   string  `json:"schedule"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description,omitempty"`
+	Schedule    string  `json:"schedule"`
 	Tier       string  `json:"tier"`
 	Prompt     string  `json:"prompt"`
 	Command    string  `json:"command,omitempty"`

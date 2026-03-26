@@ -1,11 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { theme } from '../stores/theme.svelte'
+  import { nav } from '../stores/nav.svelte'
 
   let { slug }: { slug: string } = $props()
   let iframe: HTMLIFrameElement
 
   onMount(() => {
+    // Expose navigateTo so apps can call window.parent.navigateTo('vault')
+    ;(window as any).navigateTo = (view: string) => nav.navigateTo(view)
+
     if (iframe) {
       iframe.addEventListener('load', () => {
         theme.syncIframe(iframe)

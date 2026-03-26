@@ -28,10 +28,14 @@ func (h *FirewallHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		respondJSON(w, http.StatusOK, map[string]any{
+		resp := map[string]any{
 			"config": cfg,
 			"log":    h.Proxy.Log.Entries(),
-		})
+		}
+		if h.Store != nil {
+			resp["hosts"] = h.Store.Hosts()
+		}
+		respondJSON(w, http.StatusOK, resp)
 
 	case http.MethodPut:
 		var cfg firewall.Config

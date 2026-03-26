@@ -13,7 +13,7 @@
 <style>
   .toast-container {
     position: fixed;
-    bottom: 24px;
+    top: 16px;
     right: 24px;
     z-index: 9999;
     display: flex;
@@ -41,7 +41,7 @@
   }
 
   @keyframes toast-in {
-    from { opacity: 0; transform: translateY(8px); }
+    from { opacity: 0; transform: translateY(-8px); }
     to { opacity: 1; transform: translateY(0); }
   }
 </style>

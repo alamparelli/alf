@@ -19,7 +19,7 @@
   let showModal = $state(false);
   let editingJob = $state(null);
   let form = $state({
-    name: '', schedule: '', prompt: '', tier: '', output: 'chat',
+    name: '', description: '', schedule: '', prompt: '', tier: '', output: 'chat',
     command: '', message: '', timeout: '', skills: [],
   });
 
@@ -233,6 +233,7 @@
     editingJob = job;
     form = {
       name: job.name,
+      description: job.description || '',
       schedule: job.schedule,
       prompt: job.prompt || '',
       tier: job.tier || '',
@@ -355,6 +356,9 @@
                 {#if job.system}
                   <span class="badge badge-system">system</span>
                 {/if}
+                {#if job.description}
+                  <span class="job-description">{job.description}</span>
+                {/if}
               </div>
               <div class="job-meta">
                 <span class="meta-item"><Clock size={12} /> {job.schedule}</span>
@@ -367,15 +371,15 @@
               </div>
             </div>
 
-            <div class="job-times">
-              <span>Last: {relativeTime(job.last_run)}</span>
-              <span>Next: {relativeTime(job.next_run)}</span>
-              {#if job.last_error}
-                <span class="error-text" title={job.last_error}>Error: {job.last_error.slice(0, 60)}</span>
-              {/if}
-            </div>
-
-            <div class="job-actions">
+            <div class="job-controls">
+              <div class="job-times">
+                <span>Last: {relativeTime(job.last_run)}</span>
+                <span>Next: {relativeTime(job.next_run)}</span>
+                {#if job.last_error}
+                  <span class="error-text" title={job.last_error}>Error: {job.last_error.slice(0, 60)}</span>
+                {/if}
+              </div>
+              <div class="job-actions">
               <button class="btn btn-ghost btn-sm" onclick={() => runNow(job.id)} title="Run now">
                 <Play size={12} />
               </button>
@@ -394,6 +398,7 @@
                   <Trash2 size={12} />
                 </button>
               {/if}
+              </div>
             </div>
 
             {#if expandedIds.has(job.id)}
@@ -466,6 +471,10 @@
         <label class="full-width">
           Name
           <input type="text" bind:value={form.name} placeholder="e.g. daily-report" />
+        </label>
+        <label class="full-width">
+          Description
+          <input type="text" bind:value={form.description} placeholder="Short description of what this job does" />
         </label>
         <label class="full-width">
           Schedule (cron or ISO date)
@@ -586,7 +595,7 @@
   .job-card {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.2rem;
   }
   .job-header {
     display: flex;
@@ -605,7 +614,16 @@
     gap: 0.4rem;
     flex: 1;
     min-width: 0;
+    flex-wrap: wrap;
   }
+
+  .job-description {
+    width: 100%;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    font-weight: normal;
+  }
+
   .job-meta {
     display: flex;
     align-items: center;
@@ -635,12 +653,17 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
   }
+  .job-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-left: 1.8rem;
+  }
   .job-times {
     display: flex;
     gap: 1rem;
     font-size: 0.75rem;
     color: var(--text-dim);
-    padding-left: 1.8rem;
   }
   .error-text {
     color: var(--red);
@@ -649,7 +672,6 @@
   .job-actions {
     display: flex;
     gap: 0.2rem;
-    padding-left: 1.8rem;
   }
   .job-body {
     padding: 0.5rem 0 0 1.8rem;

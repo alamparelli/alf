@@ -2,6 +2,7 @@ export interface NavItem {
   view: string
   label: string
   icon: string
+  comingSoon?: boolean
 }
 
 export interface OpenTab {

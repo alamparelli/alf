@@ -123,12 +123,14 @@ func (ms *MagicStore) StartCleanup() {
 type session struct {
 	chatID    int64
 	expiresAt time.Time
+	ttl       time.Duration // original TTL for sliding expiry
 }
 
 // persistedSession is the JSON-serializable form of session.
 type persistedSession struct {
-	ChatID    int64     `json:"chat_id"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ChatID    int64         `json:"chat_id"`
+	ExpiresAt time.Time     `json:"expires_at"`
+	TTL       time.Duration `json:"ttl,omitempty"`
 }
 
 const defaultMaxSessions = 2
@@ -202,6 +204,7 @@ func (ss *SessionStore) Issue(chatID int64, ttl time.Duration) (string, error) {
 	ss.sessions[id] = &session{
 		chatID:    chatID,
 		expiresAt: ss.nowFn().Add(ttl),
+		ttl:       ttl,
 	}
 	ss.saveLocked()
 	ss.mu.Unlock()
@@ -260,6 +263,8 @@ func (ss *SessionStore) RevokeChat(chatID int64) {
 }
 
 // Valid returns true if the session ID exists and has not expired.
+// Implements sliding expiry: when a session is past the halfway point of its TTL,
+// its expiration is extended by the original TTL from now.
 func (ss *SessionStore) Valid(id string) bool {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -268,7 +273,21 @@ func (ss *SessionStore) Valid(id string) bool {
 	if !ok {
 		return false
 	}
-	return !ss.nowFn().After(s.expiresAt)
+	now := ss.nowFn()
+	if now.After(s.expiresAt) {
+		return false
+	}
+
+	// Sliding expiry: renew when past halfway point.
+	if s.ttl > 0 {
+		remaining := s.expiresAt.Sub(now)
+		if remaining < s.ttl/2 {
+			s.expiresAt = now.Add(s.ttl)
+			ss.saveLocked()
+		}
+	}
+
+	return true
 }
 
 // StartCleanup runs a background goroutine that sweeps expired sessions every 15 minutes.
@@ -320,6 +339,7 @@ func (ss *SessionStore) load() error {
 		ss.sessions[id] = &session{
 			chatID:    ps.ChatID,
 			expiresAt: ps.ExpiresAt,
+			ttl:       ps.TTL,
 		}
 	}
 
@@ -338,6 +358,7 @@ func (ss *SessionStore) saveLocked() {
 		persisted[id] = &persistedSession{
 			ChatID:    s.chatID,
 			ExpiresAt: s.expiresAt,
+			TTL:       s.ttl,
 		}
 	}
 

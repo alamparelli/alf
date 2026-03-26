@@ -12,8 +12,9 @@ import (
 
 // Job represents a scheduled task (user-created or system).
 type Job struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
 	Schedule   string     `json:"schedule"`
 	Tier       string     `json:"tier"`
 	Prompt     string     `json:"prompt"`

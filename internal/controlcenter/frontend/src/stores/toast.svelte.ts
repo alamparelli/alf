@@ -15,7 +15,7 @@ class ToastStore {
     if (type === 'error') console.error('[toast]', msg)
     setTimeout(() => {
       this.items = this.items.filter(t => t.id !== id)
-    }, 3000)
+    }, 6000)
   }
 
   success(msg: string) { this.show(msg, 'success') }

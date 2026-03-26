@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alamparelli/alf/internal/vault"
@@ -19,22 +21,21 @@ type tokenHealth struct {
 	TokenStatus string `json:"token_status"`
 }
 
-// vaultTokenChecker periodically checks OAuth2/SA token health and alerts via Telegram.
+// vaultTokenChecker periodically checks OAuth2/SA token health.
 type vaultTokenChecker struct {
 	vaultMgr *vault.Manager
-	sendAlert func(msg string) // sends alert to user (e.g., Telegram)
-	alerted   map[string]time.Time // tracks last alert per service to avoid spam
+	alerted  map[string]time.Time // tracks last alert per service to avoid spam
 }
 
-func newVaultTokenChecker(mgr *vault.Manager, sendAlert func(string)) *vaultTokenChecker {
+func newVaultTokenChecker(mgr *vault.Manager) *vaultTokenChecker {
 	return &vaultTokenChecker{
-		vaultMgr:  mgr,
-		sendAlert: sendAlert,
-		alerted:   make(map[string]time.Time),
+		vaultMgr: mgr,
+		alerted:  make(map[string]time.Time),
 	}
 }
 
-// Check polls /health/tokens and sends alerts for expired/expiring tokens.
+// Check polls /health/tokens and returns an alert error for expired/expiring tokens.
+// Returns nil when all tokens are healthy.
 func (c *vaultTokenChecker) Check() error {
 	if c.vaultMgr == nil {
 		return nil
@@ -68,27 +69,33 @@ func (c *vaultTokenChecker) Check() error {
 		return fmt.Errorf("vault health check: parse: %w", err)
 	}
 
+	var alerts []string
 	for _, t := range tokens {
 		switch t.TokenStatus {
 		case "expired":
-			c.alert(t.Name, fmt.Sprintf("⚠️ Vault: token for **%s** (%s) has expired. Re-authenticate via the vault.", t.Name, t.AuthType))
+			if msg := c.throttledAlert(t.Name, fmt.Sprintf("⚠️ Vault: token for **%s** (%s) has expired. Re-authenticate via the vault.", t.Name, t.AuthType)); msg != "" {
+				alerts = append(alerts, msg)
+			}
 		case "expiring":
 			remaining := time.Until(time.Unix(t.ExpiresAt, 0)).Round(time.Minute)
-			c.alert(t.Name, fmt.Sprintf("⏳ Vault: token for **%s** (%s) expires in %s. Auto-refresh should handle this — if it persists, re-authenticate.", t.Name, t.AuthType, remaining))
+			if msg := c.throttledAlert(t.Name, fmt.Sprintf("⏳ Vault: token for **%s** (%s) expires in %s. Auto-refresh should handle this — if it persists, re-authenticate.", t.Name, t.AuthType, remaining)); msg != "" {
+				alerts = append(alerts, msg)
+			}
 		}
 	}
 
+	if len(alerts) > 0 {
+		return errors.New(strings.Join(alerts, "\n"))
+	}
 	return nil
 }
 
-// alert sends a message but avoids spamming the same service more than once per hour.
-func (c *vaultTokenChecker) alert(service, msg string) {
+// throttledAlert returns the message if the service hasn't been alerted in the last hour, empty otherwise.
+func (c *vaultTokenChecker) throttledAlert(service, msg string) string {
 	if lastAlert, ok := c.alerted[service]; ok && time.Since(lastAlert) < time.Hour {
-		return
+		return ""
 	}
 	c.alerted[service] = time.Now()
 	log.Printf("[vault] %s", msg)
-	if c.sendAlert != nil {
-		c.sendAlert(msg)
-	}
+	return msg
 }

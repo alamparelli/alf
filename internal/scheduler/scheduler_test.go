@@ -439,3 +439,69 @@ func TestSystemJobsSurviveStart(t *testing.T) {
 		t.Fatalf("expected 2 system jobs after Start, got %d (total=%d)", sysCount, len(all))
 	}
 }
+
+func TestUpdateSystemJob_AllowedFields(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+
+	e.RegisterSystem("sys-test", "System Test", "@every 1m", func() error { return nil })
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	// Update allowed fields: enabled, output, description.
+	updated, err := e.Update("sys-test", map[string]string{
+		"enabled":     "false",
+		"output":      "chat",
+		"description": "updated description",
+	})
+	if err != nil {
+		t.Fatalf("Update allowed fields: %v", err)
+	}
+	if updated.Enabled {
+		t.Error("expected enabled=false after update")
+	}
+	if updated.Output != "chat" {
+		t.Errorf("expected output=chat, got %s", updated.Output)
+	}
+	if updated.Description != "updated description" {
+		t.Errorf("expected description='updated description', got %s", updated.Description)
+	}
+}
+
+func TestUpdateSystemJob_BlockedFields(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+
+	e.RegisterSystem("sys-test", "System Test", "@every 1m", func() error { return nil })
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	// Attempt to update blocked field: name.
+	if _, err := e.Update("sys-test", map[string]string{"name": "hacked"}); err == nil {
+		t.Error("expected error when updating 'name' on system job")
+	}
+
+	// Attempt to update blocked field: prompt.
+	if _, err := e.Update("sys-test", map[string]string{"prompt": "new prompt"}); err == nil {
+		t.Error("expected error when updating 'prompt' on system job")
+	}
+
+	// Attempt to update blocked field: schedule.
+	if _, err := e.Update("sys-test", map[string]string{"schedule": "@every 5m"}); err == nil {
+		t.Error("expected error when updating 'schedule' on system job")
+	}
+
+	// Verify original values unchanged.
+	j := e.store.Get("sys-test")
+	if j.Name != "System Test" {
+		t.Errorf("name should be unchanged, got %s", j.Name)
+	}
+}

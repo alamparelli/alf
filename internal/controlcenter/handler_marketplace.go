@@ -1,16 +1,20 @@
 package controlcenter
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/alamparelli/alf/internal/marketplace"
+	"github.com/alamparelli/alf/internal/vault"
 )
 
 // MarketplaceHandler handles /api/marketplace routes.
 type MarketplaceHandler struct {
-	Manager     *marketplace.Manager
-	EventBroker *EventBroker
+	Manager      *marketplace.Manager
+	EventBroker  *EventBroker
+	VaultManager *vault.Manager
 }
 
 func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +32,12 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && path == "updates" {
 		updates := h.Manager.CheckUpdates()
 		respondJSON(w, http.StatusOK, updates)
+		return
+	}
+
+	// GET /api/marketplace/developer → check if user is a developer
+	if r.Method == http.MethodGet && path == "developer" {
+		h.developerStatus(w)
 		return
 	}
 
@@ -88,4 +98,60 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.EventBroker.Emit(EventApps)
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// developerStatus checks if the user has a marketplace vault service configured
+// and returns the developer name if connected.
+func (h *MarketplaceHandler) developerStatus(w http.ResponseWriter) {
+	notDev := map[string]any{"is_developer": false}
+
+	if h.VaultManager == nil {
+		respondJSON(w, http.StatusOK, notDev)
+		return
+	}
+
+	addr := h.VaultManager.Addr()
+	token := h.VaultManager.ProxyToken()
+	if addr == "" || token == "" {
+		respondJSON(w, http.StatusOK, notDev)
+		return
+	}
+
+	// Proxy health check through vault-proxy to the marketplace service.
+	req, err := http.NewRequest("GET", addr+"/proxy/marketplace/api/health", nil)
+	if err != nil {
+		respondJSON(w, http.StatusOK, notDev)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		respondJSON(w, http.StatusOK, notDev)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		respondJSON(w, http.StatusOK, notDev)
+		return
+	}
+
+	var health struct {
+		Status    string `json:"status"`
+		Developer string `json:"developer"`
+	}
+	if err := json.Unmarshal(body, &health); err != nil || health.Status != "connected" {
+		respondJSON(w, http.StatusOK, notDev)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"is_developer": true,
+		"developer":    health.Developer,
+	})
 }

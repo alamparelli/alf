@@ -220,7 +220,7 @@
     {/each}
   {:else}
     <!-- Plain text message -->
-    {#if msg.role === 'assistant'}
+    {#if msg.role === 'assistant' || msg.role === 'system'}
       <div class="msg-text">{@html renderMarkdown(msg.text)}</div>
     {:else}
       <div class="msg-text">{msg.text}</div>

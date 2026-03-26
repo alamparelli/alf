@@ -55,6 +55,7 @@
 
   // JSON viewer
   let jsonExpanded = $state<Record<string, boolean>>({})
+  let jsonTreeView = $state(false)
 
   // Context menu
   let ctxMenu = $state<{ x: number; y: number; entry: WsEntry; path: string } | null>(null)
@@ -186,6 +187,7 @@
         fileEditMode = false
         fileEditContent = data.content || ''
         mdPreview = isMarkdown(data.name)
+        jsonTreeView = false
         jsonExpanded = {}
         showFileModal = true
       }
@@ -277,14 +279,14 @@
       if (createType === 'dir') {
         await api(`/api/workspace?path=${encodeURIComponent(path + '/.keep')}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: ''
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: '' })
         })
       } else {
         await api(`/api/workspace?path=${encodeURIComponent(path)}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: ''
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: '' })
         })
       }
       toasts.show(`${createType === 'dir' ? 'Directory' : 'File'} created`, 'success')
@@ -364,6 +366,27 @@
     openFile(e.detail.path)
   }
 
+  async function handleOpenDir(e: CustomEvent<{ path: string }>) {
+    const targetPath = e.detail.path
+    loadDir(targetPath)
+
+    // Expand all parent directories in the sidebar tree.
+    const segments = targetPath.split('/').filter(Boolean)
+    let current = ''
+    for (const seg of segments) {
+      current = current ? `${current}/${seg}` : seg
+      if (!expandedDirs[current]) {
+        try {
+          const data = await api<WsDir>(`/api/workspace?path=${encodeURIComponent(current)}`)
+          if (data.type === 'directory') {
+            expandedDirs[current] = (data.entries || []).filter(e => e.is_dir).sort((a, b) => a.name.localeCompare(b.name))
+          }
+        } catch { /* silent */ }
+      }
+    }
+    expandedDirs = { ...expandedDirs }
+  }
+
   function handleGlobalClick() {
     if (ctxMenu) closeContextMenu()
   }
@@ -372,11 +395,13 @@
     loadDir('')
     loadSidebarRoot()
     window.addEventListener('alf:open-file', handleOpenFile as EventListener)
+    window.addEventListener('alf:open-dir', handleOpenDir as EventListener)
     window.addEventListener('click', handleGlobalClick)
   })
 
   onDestroy(() => {
     window.removeEventListener('alf:open-file', handleOpenFile as EventListener)
+    window.removeEventListener('alf:open-dir', handleOpenDir as EventListener)
     window.removeEventListener('click', handleGlobalClick)
   })
 </script>
@@ -566,6 +591,11 @@
             {mdPreview ? 'Source' : 'Preview'}
           </button>
         {/if}
+        {#if isJson(viewingFile.name) && !fileEditMode}
+          <button class="ws-btn" onclick={() => jsonTreeView = !jsonTreeView}>
+            {jsonTreeView ? 'Raw' : 'Tree'}
+          </button>
+        {/if}
       </div>
     </div>
 
@@ -588,44 +618,48 @@
         {:else if isMarkdown(viewingFile.name) && mdPreview}
           <div class="markdown-body">{@html renderMd(viewingFile.content)}</div>
         {:else if isJson(viewingFile.name)}
-          {@const parsed = parseJson(viewingFile.content)}
-          {#if parsed !== null}
-            <div class="json-viewer">
-              {#snippet jsonNode(val: any, path: string, depth: number)}
-                {#if val === null}
-                  <span class="json-null">null</span>
-                {:else if typeof val === 'boolean'}
-                  <span class="json-bool">{val.toString()}</span>
-                {:else if typeof val === 'number'}
-                  <span class="json-num">{val}</span>
-                {:else if typeof val === 'string'}
-                  <span class="json-str">"{val.length > 200 ? val.slice(0, 200) + '...' : val}"</span>
-                {:else if Array.isArray(val)}
-                  <span class="json-toggle" onclick={() => toggleJsonKey(path)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && toggleJsonKey(path)}>
-                    {jsonExpanded[path] ? '▾' : '▸'} <span class="json-type">array[{val.length}]</span>
-                  </span>
-                  {#if jsonExpanded[path]}
-                    <div class="json-children" style="margin-left:{Math.min(depth, 4) * 14}px">
-                      {#each val as item, i}
-                        <div class="json-entry"><span class="json-key">{i}:</span> {@render jsonNode(item, `${path}.${i}`, depth + 1)}</div>
-                      {/each}
-                    </div>
+          {#if jsonTreeView}
+            {@const parsed = parseJson(viewingFile.content)}
+            {#if parsed !== null}
+              <div class="json-viewer">
+                {#snippet jsonNode(val: any, path: string, depth: number)}
+                  {#if val === null}
+                    <span class="json-null">null</span>
+                  {:else if typeof val === 'boolean'}
+                    <span class="json-bool">{val.toString()}</span>
+                  {:else if typeof val === 'number'}
+                    <span class="json-num">{val}</span>
+                  {:else if typeof val === 'string'}
+                    <span class="json-str">"{val.length > 200 ? val.slice(0, 200) + '...' : val}"</span>
+                  {:else if Array.isArray(val)}
+                    <span class="json-toggle" onclick={() => toggleJsonKey(path)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && toggleJsonKey(path)}>
+                      {jsonExpanded[path] ? '▾' : '▸'} <span class="json-type">array[{val.length}]</span>
+                    </span>
+                    {#if jsonExpanded[path]}
+                      <div class="json-children" style="margin-left:{Math.min(depth, 4) * 14}px">
+                        {#each val as item, i}
+                          <div class="json-entry"><span class="json-key">{i}:</span> {@render jsonNode(item, `${path}.${i}`, depth + 1)}</div>
+                        {/each}
+                      </div>
+                    {/if}
+                  {:else if typeof val === 'object'}
+                    <span class="json-toggle" onclick={() => toggleJsonKey(path)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && toggleJsonKey(path)}>
+                      {jsonExpanded[path] ? '▾' : '▸'} <span class="json-type">object&lbrace;{Object.keys(val).length}&rbrace;</span>
+                    </span>
+                    {#if jsonExpanded[path]}
+                      <div class="json-children" style="margin-left:{Math.min(depth, 4) * 14}px">
+                        {#each Object.entries(val) as [k, v]}
+                          <div class="json-entry"><span class="json-key">"{k}":</span> {@render jsonNode(v, `${path}.${k}`, depth + 1)}</div>
+                        {/each}
+                      </div>
+                    {/if}
                   {/if}
-                {:else if typeof val === 'object'}
-                  <span class="json-toggle" onclick={() => toggleJsonKey(path)} role="button" tabindex="0" onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && toggleJsonKey(path)}>
-                    {jsonExpanded[path] ? '▾' : '▸'} <span class="json-type">object&lbrace;{Object.keys(val).length}&rbrace;</span>
-                  </span>
-                  {#if jsonExpanded[path]}
-                    <div class="json-children" style="margin-left:{Math.min(depth, 4) * 14}px">
-                      {#each Object.entries(val) as [k, v]}
-                        <div class="json-entry"><span class="json-key">"{k}":</span> {@render jsonNode(v, `${path}.${k}`, depth + 1)}</div>
-                      {/each}
-                    </div>
-                  {/if}
-                {/if}
-              {/snippet}
-              {@render jsonNode(parsed, 'root', 0)}
-            </div>
+                {/snippet}
+                {@render jsonNode(parsed, 'root', 0)}
+              </div>
+            {:else}
+              <pre class="file-content">{viewingFile.content}</pre>
+            {/if}
           {:else}
             <pre class="file-content">{viewingFile.content}</pre>
           {/if}

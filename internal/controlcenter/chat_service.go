@@ -253,9 +253,14 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		for _, t := range cs.TierStore.Current().Tiers {
 			if t.Enabled && t.ForceCommand && t.Name == cmdName {
 				cs.Sessions.SetForcedTier(sessID, t.Name)
-				onEvent(ChatEvent{Type: "system", Data: map[string]string{
-					"text": fmt.Sprintf("Session locked to **%s**. Use /new to reset.", t.Name),
-				}})
+				sysText := fmt.Sprintf("Session locked to **%s**. Use /new to reset.", t.Name)
+				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": sysText}})
+				if cs.ChatDB != nil && req.ConvID != "" {
+					cs.ChatDB.InsertMessage(chatdb.Message{
+						ID: NewMessageID(), ConvID: req.ConvID, Role: "system",
+						Text: sysText, Source: "cc",
+					})
+				}
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
 					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{Model: t.Name, Tier: t.Name}})
 					return nil

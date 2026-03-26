@@ -184,7 +184,7 @@ func HandlerFactory(deps Deps) http.Handler {
 
 	// Marketplace: app lifecycle management.
 	if deps.Marketplace != nil {
-		mpHandler := &MarketplaceHandler{Manager: deps.Marketplace, EventBroker: deps.EventBroker}
+		mpHandler := &MarketplaceHandler{Manager: deps.Marketplace, EventBroker: deps.EventBroker, VaultManager: deps.VaultManager}
 		mux.Handle("/api/marketplace", mpHandler)
 		mux.Handle("/api/marketplace/", mpHandler)
 	}

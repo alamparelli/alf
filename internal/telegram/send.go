@@ -59,6 +59,20 @@ func (c *Client) SendHTMLNoPreview(chatID int64, html string) error {
 	return c.post("sendMessage", payload)
 }
 
+// SendAnimation sends a GIF/animation by URL with an optional caption.
+func (c *Client) SendAnimation(chatID int64, animationURL, caption string) error {
+	msg := map[string]any{
+		"chat_id":   chatID,
+		"animation": animationURL,
+	}
+	if caption != "" {
+		msg["caption"] = caption
+		msg["parse_mode"] = "HTML"
+	}
+	payload, _ := json.Marshal(msg)
+	return c.post("sendAnimation", payload)
+}
+
 // SendKeyboard sends a message with an inline keyboard.
 func (c *Client) SendKeyboard(chatID int64, text string, keyboard any) error {
 	payload, _ := json.Marshal(map[string]any{

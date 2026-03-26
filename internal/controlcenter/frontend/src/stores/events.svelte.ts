@@ -1,7 +1,7 @@
 // Global SSE event bus. Single EventSource connection to /api/events.
 // Views subscribe to typed events and reload their data on push.
 
-type EventCallback = () => void
+type EventCallback = (data?: string) => void
 
 class EventBus {
   private es: EventSource | null = null
@@ -23,10 +23,10 @@ class EventBus {
     const types = [
       'schedules', 'tasks', 'firewall', 'apps',
       'marketplace', 'vault', 'config', 'tiers',
-      'tools', 'skills', 'agents'
+      'tools', 'skills', 'agents', 'new_message'
     ]
     for (const type of types) {
-      es.addEventListener(type, () => this.dispatch(type))
+      es.addEventListener(type, (e: MessageEvent) => this.dispatch(type, e.data))
     }
 
     es.onerror = () => {
@@ -62,9 +62,9 @@ class EventBus {
     return () => { this.subs.get(type)?.delete(cb) }
   }
 
-  private dispatch(type: string) {
+  private dispatch(type: string, data?: string) {
     const cbs = this.subs.get(type)
-    if (cbs) for (const cb of cbs) cb()
+    if (cbs) for (const cb of cbs) cb(data)
   }
 }
 

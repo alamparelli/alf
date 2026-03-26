@@ -21,7 +21,7 @@ func TestEventBroker_EmitNoClients(t *testing.T) {
 
 func TestEventBroker_EmitSingleClient(t *testing.T) {
 	b := NewEventBroker()
-	ch := make(chan EventType, 8)
+	ch := make(chan sseEvent, 8)
 	b.mu.Lock()
 	b.clients[ch] = struct{}{}
 	b.mu.Unlock()
@@ -30,8 +30,8 @@ func TestEventBroker_EmitSingleClient(t *testing.T) {
 
 	select {
 	case got := <-ch:
-		if got != EventTasks {
-			t.Fatalf("expected EventTasks, got %q", got)
+		if got.Type != EventTasks {
+			t.Fatalf("expected EventTasks, got %q", got.Type)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for event")
@@ -40,10 +40,10 @@ func TestEventBroker_EmitSingleClient(t *testing.T) {
 
 func TestEventBroker_EmitMultipleClients(t *testing.T) {
 	b := NewEventBroker()
-	channels := make([]chan EventType, 3)
+	channels := make([]chan sseEvent, 3)
 	b.mu.Lock()
 	for i := range channels {
-		channels[i] = make(chan EventType, 8)
+		channels[i] = make(chan sseEvent, 8)
 		b.clients[channels[i]] = struct{}{}
 	}
 	b.mu.Unlock()
@@ -53,8 +53,8 @@ func TestEventBroker_EmitMultipleClients(t *testing.T) {
 	for i, ch := range channels {
 		select {
 		case got := <-ch:
-			if got != EventFirewall {
-				t.Fatalf("client %d: expected EventFirewall, got %q", i, got)
+			if got.Type != EventFirewall {
+				t.Fatalf("client %d: expected EventFirewall, got %q", i, got.Type)
 			}
 		case <-time.After(time.Second):
 			t.Fatalf("client %d: timeout", i)
@@ -65,13 +65,13 @@ func TestEventBroker_EmitMultipleClients(t *testing.T) {
 func TestEventBroker_EmitDropsSlow(t *testing.T) {
 	b := NewEventBroker()
 	// Channel with buffer 1 — fill it, then emit should drop without blocking.
-	ch := make(chan EventType, 1)
+	ch := make(chan sseEvent, 1)
 	b.mu.Lock()
 	b.clients[ch] = struct{}{}
 	b.mu.Unlock()
 
 	// Fill the buffer.
-	ch <- EventTasks
+	ch <- sseEvent{Type: EventTasks, Data: "reload"}
 
 	// This should not block.
 	done := make(chan struct{})
@@ -90,7 +90,7 @@ func TestEventBroker_EmitDropsSlow(t *testing.T) {
 
 func TestEventBroker_ClientDisconnect(t *testing.T) {
 	b := NewEventBroker()
-	ch := make(chan EventType, 8)
+	ch := make(chan sseEvent, 8)
 	b.mu.Lock()
 	b.clients[ch] = struct{}{}
 	b.mu.Unlock()
@@ -120,7 +120,7 @@ func TestEventBroker_ClientDisconnect(t *testing.T) {
 
 func TestEventBroker_ConcurrentEmit(t *testing.T) {
 	b := NewEventBroker()
-	ch := make(chan EventType, 100)
+	ch := make(chan sseEvent, 100)
 	b.mu.Lock()
 	b.clients[ch] = struct{}{}
 	b.mu.Unlock()
@@ -158,7 +158,7 @@ func TestEventBroker_ConcurrentConnect(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ch := make(chan EventType, 8)
+			ch := make(chan sseEvent, 8)
 			b.mu.Lock()
 			b.clients[ch] = struct{}{}
 			b.mu.Unlock()
@@ -274,6 +274,72 @@ func TestEventBroker_SSEMultipleEvents(t *testing.T) {
 	ev2 := readSSEEvent(t, scanner)
 	if !strings.Contains(ev2, "event: schedules") {
 		t.Fatalf("second event should be schedules, got: %q", ev2)
+	}
+}
+
+func TestEventBroker_EmitWithData(t *testing.T) {
+	b := NewEventBroker()
+	ch := make(chan sseEvent, 8)
+	b.mu.Lock()
+	b.clients[ch] = struct{}{}
+	b.mu.Unlock()
+
+	b.EmitWithData(EventNewMessage, "hello world")
+
+	select {
+	case got := <-ch:
+		if got.Type != EventNewMessage {
+			t.Fatalf("expected EventNewMessage, got %q", got.Type)
+		}
+		if got.Data != "hello world" {
+			t.Fatalf("expected data %q, got %q", "hello world", got.Data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for event")
+	}
+}
+
+func TestEventBroker_EmitUsesReloadData(t *testing.T) {
+	b := NewEventBroker()
+	ch := make(chan sseEvent, 8)
+	b.mu.Lock()
+	b.clients[ch] = struct{}{}
+	b.mu.Unlock()
+
+	b.Emit(EventTasks)
+
+	select {
+	case got := <-ch:
+		if got.Data != "reload" {
+			t.Fatalf("Emit() should set data to 'reload', got %q", got.Data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestEventBroker_SSENewMessageFormat(t *testing.T) {
+	b := NewEventBroker()
+	srv := httptest.NewServer(b)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	readSSEEvent(t, scanner) // ping
+
+	b.EmitWithData(EventNewMessage, "scheduled job output preview")
+
+	event := readSSEEvent(t, scanner)
+	if !strings.Contains(event, "event: new_message") {
+		t.Fatalf("expected 'event: new_message', got: %q", event)
+	}
+	if !strings.Contains(event, "data: scheduled job output preview") {
+		t.Fatalf("expected custom data payload, got: %q", event)
 	}
 }
 

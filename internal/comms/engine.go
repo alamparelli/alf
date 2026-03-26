@@ -47,6 +47,9 @@ type ChatEngine struct {
 	OnSessionEnd func(sessionID string)
 	OnMessage    func(sessionID string)
 
+	// Recall configuration (from config.d).
+	RecallCfg RecallConfig
+
 	// Signal socket path (persistent, set by daemon after StartSignal).
 	SignalSockPath string
 
@@ -75,6 +78,7 @@ func NewEngine(cfg EngineConfig) *ChatEngine {
 		ClassifyFull:   cfg.ClassifyFull,
 		ResolveModel:   cfg.ResolveModel,
 		BackendConfigs: cfg.BackendConfigs,
+		RecallCfg:      cfg.RecallCfg,
 		adapters:       make(map[string]ChannelAdapter),
 	}
 }
@@ -101,6 +105,7 @@ type EngineConfig struct {
 	ClassifyFull   ClassifyFullFunc
 	ResolveModel   func(short string) string
 	BackendConfigs func() map[string]BackendConfig
+	RecallCfg      RecallConfig
 }
 
 // RegisterAdapter adds a channel adapter to the engine.

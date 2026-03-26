@@ -619,6 +619,10 @@ func main() {
 		ClassifyFull:   engineClassify,
 		ResolveModel:   router.ResolveModel,
 		BackendConfigs: engineBackendConfigs,
+		RecallCfg: comms.RecallConfig{
+			Limit:    cfg.RecallLimit,
+			Distance: cfg.RecallDistance,
+		},
 	})
 	chatService.SetEngine(commEngine)
 	if cfg.BroadcastChannel != "" {
@@ -847,7 +851,7 @@ func main() {
 		ContextDir:   contextDir,
 		ChatID:       parsedChatID,
 		TG:           tg,
-		CC:           &schedulerCCNotifier{db: chatDB},
+		CC:           &schedulerCCNotifier{db: chatDB, broker: eventBroker},
 		Provider:     &schedulerProvider{p: cliProvider},
 		TierStore:    &schedulerTierStore{ts: tierStore},
 		SkillStore:   &schedulerSkillStore{s: skillStore},

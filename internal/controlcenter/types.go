@@ -62,6 +62,10 @@ type Config struct {
 	DNSServers []string `json:"dns_servers,omitempty"`
 	// NotificationSound enables audio alerts for CC chat messages, nil = true.
 	NotificationSound *bool `json:"notification_sound"`
+	// RecallLimit is the max number of memories injected per message, 0 = default (5).
+	RecallLimit int `json:"recall_limit,omitempty"`
+	// RecallDistance is the max cosine distance for recall results, 0 = default (1.0).
+	RecallDistance float64 `json:"recall_distance,omitempty"`
 }
 
 // QuietHours defines a time window where the bot won't respond.

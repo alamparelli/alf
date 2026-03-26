@@ -74,7 +74,7 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	}
 
 	// 3. Pre-route memory recall.
-	recall := Recall(e.Recaller, msg.Text)
+	recall := RecallWithConfig(e.Recaller, msg.Text, e.RecallCfg)
 
 	// 4. Classify message.
 	lastTier, msgCount := e.Sessions.Context(sessionKey)

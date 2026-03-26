@@ -252,9 +252,11 @@ func (l *schedulerChatLogger) LogScheduledMessage(text, tier, jobName string) {
 	})
 }
 
-// schedulerCCNotifier pushes schedule notifications to the Control Center chat.
+// schedulerCCNotifier pushes schedule notifications to the Control Center chat
+// and emits an SSE event so the frontend can show a toast/sound.
 type schedulerCCNotifier struct {
-	db *chatdb.DB
+	db     *chatdb.DB
+	broker *cc.EventBroker
 }
 
 func (n *schedulerCCNotifier) Notify(text string) {
@@ -268,6 +270,14 @@ func (n *schedulerCCNotifier) Notify(text string) {
 		Tier:      "scheduler",
 		SessionID: "scheduler:notification",
 	})
+	if n.broker != nil {
+		// Truncate for the SSE payload (toast preview).
+		preview := text
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		n.broker.EmitWithData(cc.EventNewMessage, preview)
+	}
 }
 
 // schedulerSkillStore adapts skills.Store for the scheduler's SkillStoreReader interface.

@@ -203,8 +203,8 @@ func (e *Engine) executeJob(j *Job) {
 		e.logScheduleRun(rec, "")
 
 		// Notify on failure if output includes chat.
-		if j.Output == "chat" || j.Output == "both" {
-			e.sendChat(j, fmt.Sprintf("⚠️ Scheduled job \"%s\" failed: %s", j.Name, err))
+		if j.Output != "file" && j.Output != "silent" {
+			e.dispatch(j, fmt.Sprintf("⚠️ Scheduled job \"%s\" failed: %s", j.Name, err))
 		}
 		return
 	}
@@ -234,8 +234,8 @@ func (e *Engine) executeJob(j *Job) {
 		e.runLog.appendAndTruncate(rec)
 		e.logScheduleRun(rec, text)
 
-		if j.Output == "chat" || j.Output == "both" {
-			e.sendChat(j, detail)
+		if j.Output != "file" && j.Output != "silent" {
+			e.dispatch(j, detail)
 		}
 		if !j.System {
 			e.store.Save()
@@ -446,6 +446,8 @@ func (e *Engine) SendDailyDigest() error {
 }
 
 // dispatch routes job output to the configured destination.
+// Output modes: "chat" (tg+cc), "tg" (telegram only), "cc" (control center only),
+// "file" (log file), "both" (chat+file), "silent" (no output).
 func (e *Engine) dispatch(j *Job, text string) {
 	if text == "" {
 		return
@@ -453,33 +455,36 @@ func (e *Engine) dispatch(j *Job, text string) {
 
 	switch j.Output {
 	case "chat":
-		e.sendChat(j, text)
+		e.sendTG(j, text)
+		e.sendCC(j, text)
+	case "tg":
+		e.sendTG(j, text)
+	case "cc":
+		e.sendCC(j, text)
 	case "file":
 		e.writeFile(j, text)
 	case "both":
-		e.sendChat(j, text)
+		e.sendTG(j, text)
+		e.sendCC(j, text)
 		e.writeFile(j, text)
 	case "silent":
 		// no-op
 	}
 }
 
-// sendChat notifies all available chat channels (Telegram + Control Center).
-func (e *Engine) sendChat(j *Job, text string) {
-	sent := false
+// sendTG sends to Telegram if configured.
+func (e *Engine) sendTG(j *Job, text string) {
 	if e.cfg.TG != nil && e.cfg.ChatID != 0 {
 		if err := e.cfg.TG.SendMessage(e.cfg.ChatID, text); err != nil {
 			log.Printf("scheduler: telegram send failed for job %s: %v", j.ID, err)
-		} else {
-			sent = true
 		}
 	}
+}
+
+// sendCC sends to Control Center if configured.
+func (e *Engine) sendCC(j *Job, text string) {
 	if e.cfg.CC != nil {
 		e.cfg.CC.Notify(text)
-		sent = true
-	}
-	if !sent {
-		log.Printf("scheduler: no chat channels configured, skipping output for job %s", j.ID)
 	}
 }
 

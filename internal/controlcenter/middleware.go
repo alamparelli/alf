@@ -16,6 +16,11 @@ import (
 // Exempt paths (e.g. /health, /auth) bypass the check.
 // For unauthenticated browser requests to GET /, it returns a login page (200) instead of 401.
 // extraTokenFns are optional callbacks that return additional valid tokens (e.g. mobile API token from vault).
+//
+// When a valid Bearer token (primary or mobile) authenticates a browser page navigation
+// (GET with Accept: text/html) and no session cookie exists, a session is auto-created.
+// This enables mobile WebViews: the initial load carries the Bearer header, the session
+// cookie is set, and subsequent JS fetch() calls authenticate via cookie automatically.
 func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool, extraTokenFns ...func() string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +33,7 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 			// Check Authorization header against primary token.
 			auth := r.Header.Get("Authorization")
 			if token != "" && strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(token)) == 1 {
+				autoIssueSession(w, r, sessions)
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -37,17 +43,25 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				bearer := auth[7:]
 				for _, fn := range extraTokenFns {
 					if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(et)) == 1 {
+						autoIssueSession(w, r, sessions)
 						next.ServeHTTP(w, r)
 						return
 					}
 				}
 			}
 
-			// Check cc_bearer cookie (used by mobile WebViews for sub-resource auth).
-			if token != "" {
-				if cookie, err := r.Cookie("cc_bearer"); err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(token)) == 1 {
+			// Check cc_bearer cookie against primary and extra tokens.
+			if cookie, err := r.Cookie("cc_bearer"); err == nil {
+				cv := cookie.Value
+				if token != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(token)) == 1 {
 					next.ServeHTTP(w, r)
 					return
+				}
+				for _, fn := range extraTokenFns {
+					if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(et)) == 1 {
+						next.ServeHTTP(w, r)
+						return
+					}
 				}
 			}
 
@@ -59,7 +73,7 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				}
 			}
 
-			// Log after both auth methods failed.
+			// Log after all auth methods failed.
 			if strings.HasPrefix(r.URL.Path, "/api/") {
 				log.Printf("[CC] auth fail: ip=%s method=%s path=%s has_auth=%v auth_len=%d token_len=%d",
 					clientIP(r), r.Method, r.URL.Path, auth != "", len(auth), len(token))
@@ -74,6 +88,39 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		})
 	}
+}
+
+// autoIssueSession creates a session cookie when a Bearer-authenticated browser request
+// arrives without an existing session. This bridges Bearer auth (mobile app) to cookie auth
+// (WebView JS), so subsequent fetch() calls work automatically.
+func autoIssueSession(w http.ResponseWriter, r *http.Request, sessions *SessionStore) {
+	if sessions == nil {
+		return
+	}
+	// Only issue on browser page navigations, not API calls.
+	if !strings.Contains(r.Header.Get("Accept"), "text/html") {
+		return
+	}
+	// Skip if already has a valid session.
+	if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
+		return
+	}
+	sessionID, err := sessions.Issue(0, 24*time.Hour)
+	if err != nil {
+		log.Printf("[CC] auto-session issue failed: %v", err)
+		return
+	}
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	http.SetCookie(w, &http.Cookie{
+		Name:     "cc_session",
+		Value:    sessionID,
+		Path:     "/",
+		MaxAge:   86400,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+	log.Printf("[CC] auto-session issued for Bearer auth from %s", clientIP(r))
 }
 
 // renderLoginPage returns a minimal HTML page for unauthenticated visitors.
@@ -399,6 +446,14 @@ func (rl *rateLimiter) withExtraTokens(fns ...func() string) *rateLimiter {
 
 func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Never rate-limit static assets, the login page, or health checks — these
+		// must remain reachable even when a misbehaving app floods API endpoints.
+		p := r.URL.Path
+		if strings.HasPrefix(p, "/static/") || p == "/" || p == "/health" || p == "/favicon.ico" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		ip := clientIP(r)
 
 		rl.mu.Lock()
@@ -432,9 +487,20 @@ func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 					}
 				}
 				// Check cc_bearer cookie (mobile WebView sub-resources).
-				if !authenticated && rl.token != "" {
-					if cookie, err := r.Cookie("cc_bearer"); err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(rl.token)) == 1 {
-						authenticated = true
+				if !authenticated {
+					if cookie, err := r.Cookie("cc_bearer"); err == nil {
+						cv := cookie.Value
+						if rl.token != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(rl.token)) == 1 {
+							authenticated = true
+						}
+						if !authenticated {
+							for _, fn := range rl.extraTokenFns {
+								if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(et)) == 1 {
+									authenticated = true
+									break
+								}
+							}
+						}
 					}
 				}
 			}

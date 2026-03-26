@@ -476,6 +476,117 @@ func TestRateLimiter_SessionCookieBypass(t *testing.T) {
 	}
 }
 
+func TestRateLimiter_StaticFilesExempt(t *testing.T) {
+	rl := newRateLimiter(1)
+	handler := rl.middleware(okHandler())
+
+	// Exhaust anonymous quota on an API path.
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.RemoteAddr = "8.8.8.8:1"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first API request: expected 200, got %d", rec.Code)
+	}
+
+	// Second API request should be rate limited.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("second API request: expected 429, got %d", rec.Code)
+	}
+
+	// Static files, root, health, and favicon should still work.
+	for _, path := range []string{"/static/style.css", "/", "/health", "/favicon.ico"} {
+		req2 := httptest.NewRequest("GET", path, nil)
+		req2.RemoteAddr = "8.8.8.8:1"
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req2)
+		if rec.Code != http.StatusOK {
+			t.Errorf("path %s: expected 200, got %d", path, rec.Code)
+		}
+	}
+}
+
+func TestAuthMiddleware_BearerAutoSession(t *testing.T) {
+	ss := NewSessionStore(nil)
+	mobileToken := "mobile-token-abc123"
+	handler := authMiddleware("primary-token", ss, nil, func() string {
+		return mobileToken
+	})(okHandler())
+
+	// Browser page navigation with mobile Bearer token → should set cc_session cookie.
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer "+mobileToken)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Verify session cookie was set.
+	var sessionCookie *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "cc_session" {
+			sessionCookie = c
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("expected cc_session cookie to be set on Bearer page navigation")
+	}
+
+	// Subsequent request with just the session cookie (no Bearer) should work.
+	req2 := httptest.NewRequest("GET", "/api/status", nil)
+	req2.AddCookie(&http.Cookie{Name: "cc_session", Value: sessionCookie.Value})
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("session cookie from auto-issue: expected 200, got %d", rec2.Code)
+	}
+}
+
+func TestAuthMiddleware_BearerNoAutoSessionForAPI(t *testing.T) {
+	ss := NewSessionStore(nil)
+	handler := authMiddleware("test-token", ss, nil)(okHandler())
+
+	// API call with Bearer token → should NOT set session cookie.
+	req := httptest.NewRequest("POST", "/api/chat", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Accept", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "cc_session" {
+			t.Error("should not set session cookie on API call")
+		}
+	}
+}
+
+func TestAuthMiddleware_CcBearerCookieExtraToken(t *testing.T) {
+	mobileToken := "mobile-token-xyz"
+	handler := authMiddleware("primary-token", nil, nil, func() string {
+		return mobileToken
+	})(okHandler())
+
+	// cc_bearer cookie with mobile token should authenticate.
+	req := httptest.NewRequest("GET", "/api/status", nil)
+	req.AddCookie(&http.Cookie{Name: "cc_bearer", Value: mobileToken})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("cc_bearer with mobile token: expected 200, got %d", rec.Code)
+	}
+}
+
 // Ensure compile-time interface satisfaction.
 var _ http.Hijacker = (*statusWriter)(nil)
 var _ http.Flusher = (*statusWriter)(nil)

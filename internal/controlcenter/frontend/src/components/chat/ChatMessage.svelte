@@ -78,7 +78,13 @@
 
   function renderMarkdown(text: string): string {
     if (!text) return ''
-    const raw = marked.parse(text, { async: false }) as string
+    // Auto-convert bare image/gif/video URLs (on their own line) to markdown images
+    // so they render inline instead of as plain links.
+    const withMedia = text.replace(
+      /^(https?:\/\/\S+\.(?:gif|png|jpe?g|webp|svg)(?:\?[^\s]*)?)$/gim,
+      '![]($1)'
+    )
+    const raw = marked.parse(withMedia, { async: false }) as string
     // Convert <img> with video extensions to <video> elements.
     const withVideos = raw.replace(
       /<img\s+src="([^"]+\.(?:mp4|webm|mov)(?:\?[^"]*)?)"\s*(?:alt="([^"]*)")?\s*\/?>/gi,

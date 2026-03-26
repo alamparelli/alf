@@ -1620,8 +1620,8 @@ func main() {
 			sigServer := &signal.Server{
 				TG: tg, ChatID: tgChatID, MessageID: u.Message.MessageID,
 				Notify: func(text string) {
-					// Send notification to the same TG chat where the LLM was invoked.
-					if err := tg.SendMessage(tgChatID, text); err != nil {
+					// Detect media URLs and use appropriate TG method.
+					if err := sendTGNotify(tg, tgChatID, text); err != nil {
 						log.Printf("signal: notify to TG failed: %v", err)
 					}
 				},

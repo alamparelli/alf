@@ -1,7 +1,13 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	tgclient "github.com/alamparelli/alf/internal/telegram"
 )
 
 func TestBuildMessageContent(t *testing.T) {
@@ -118,4 +124,124 @@ func TestHasMedia(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fakeTGServer captures which TG API method was called.
+func fakeTGServer(t *testing.T) (*httptest.Server, *string) {
+	t.Helper()
+	var calledMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Extract method from path: /bot<token>/<method>
+		calledMethod = r.URL.Path[len("/bottest-token/"):]
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
+	}))
+	return srv, &calledMethod
+}
+
+func newTestTG(srv *httptest.Server) *tgclient.Client {
+	c := tgclient.NewClient("test-token")
+	c.HTTP = srv.Client()
+	// Override API base by swapping the token to include server URL.
+	// The client builds URLs as https://api.telegram.org/bot{token}/{method}
+	// We need to redirect to our test server instead.
+	return c
+}
+
+func TestSendTGNotify_PlainText(t *testing.T) {
+	srv, method := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	err := sendTGNotify(tg, 123, "hello world")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *method != "sendMessage" {
+		t.Errorf("expected sendMessage, got %s", *method)
+	}
+}
+
+func TestSendTGNotify_GifURL(t *testing.T) {
+	srv, method := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	err := sendTGNotify(tg, 123, "https://media.example.com/funny.gif")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *method != "sendAnimation" {
+		t.Errorf("expected sendAnimation for .gif URL, got %s", *method)
+	}
+}
+
+func TestSendTGNotify_VideoURL(t *testing.T) {
+	srv, method := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	err := sendTGNotify(tg, 123, "https://media.example.com/clip.mp4")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *method != "sendVideo" {
+		t.Errorf("expected sendVideo for .mp4 URL, got %s", *method)
+	}
+}
+
+func TestSendTGNotify_GifWithCaption(t *testing.T) {
+	srv, method := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	err := sendTGNotify(tg, 123, "https://media.example.com/funny.gif\nCheck this out!")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *method != "sendAnimation" {
+		t.Errorf("expected sendAnimation for .gif URL with caption, got %s", *method)
+	}
+}
+
+func TestSendTGNotify_TextWithURL(t *testing.T) {
+	srv, method := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	// Text containing a URL but not just a URL — should use sendMessage.
+	err := sendTGNotify(tg, 123, "Check this: https://example.com/image.gif is cool")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *method != "sendMessage" {
+		t.Errorf("expected sendMessage for text with embedded URL, got %s", *method)
+	}
+}
+
+// newTestTGWithBase creates a TG client that points to the test server.
+func newTestTGWithBase(t *testing.T, srv *httptest.Server) *tgclient.Client {
+	t.Helper()
+	c := &tgclient.Client{
+		Token: fmt.Sprintf("test-token"),
+		HTTP:  srv.Client(),
+	}
+	// Monkey-patch: the client uses https://api.telegram.org/bot{token}/{method}
+	// We override by setting the token to route through our server.
+	// Since we can't change the base URL, we use a transport redirect.
+	c.HTTP.Transport = &urlRewriter{base: srv.URL, inner: http.DefaultTransport}
+	return c
+}
+
+type urlRewriter struct {
+	base  string
+	inner http.RoundTripper
+}
+
+func (u *urlRewriter) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.URL.Scheme = "http"
+	// Extract path after api.telegram.org
+	path := req.URL.Path
+	req.URL.Host = u.base[len("http://"):]
+	req.URL.Path = path
+	return u.inner.RoundTrip(req)
 }

@@ -193,7 +193,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	if deps.ChatService != nil {
 		mux.Handle("/api/chat", &ChatHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/conversations", &ChatConversationsHandler{Service: deps.ChatService})
-		mux.Handle("/api/chat/conversations/", &ChatConversationHandler{Service: deps.ChatService})
+		mux.Handle("/api/chat/conversations/", &ChatConversationHandler{Service: deps.ChatService, ConfigStore: deps.ConfigStore})
 		mux.Handle("/api/chat/job", &ChatJobHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/upload", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/media/", &ChatMediaHandler{Service: deps.ChatService})

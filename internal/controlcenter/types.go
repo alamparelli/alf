@@ -78,6 +78,8 @@ type Config struct {
 	RecallLimit int `json:"recall_limit,omitempty"`
 	// RecallDistance is the max cosine distance for recall results, 0 = default (1.0).
 	RecallDistance float64 `json:"recall_distance,omitempty"`
+	// MediaRetentionDays is how many days media files are kept after a conversation is deleted, 0 = default (7).
+	MediaRetentionDays int `json:"media_retention_days,omitempty"`
 }
 
 // QuietHours defines a time window where the bot won't respond.

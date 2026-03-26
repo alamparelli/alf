@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ChatMediaHandler handles POST /api/chat/upload and GET /api/chat/media/:id.
@@ -67,20 +68,35 @@ func (h *ChatMediaHandler) serveMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fast path: in-memory upload registry.
 	entry := h.Service.GetUpload(id)
-	if entry == nil {
-		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+	if entry != nil {
+		serveLocalFile(w, r, entry.TempPath, entry.MimeType, entry.FileName, entry.CreatedAt)
 		return
 	}
 
-	f, err := os.Open(entry.TempPath)
+	// Fallback: persisted media ref in database.
+	if h.Service.ChatDB != nil {
+		ref, err := h.Service.ChatDB.GetMediaByUploadID(id)
+		if err == nil && ref != nil && ref.FilePath != "" {
+			serveLocalFile(w, r, ref.FilePath, ref.MimeType, ref.FileName, time.Time{})
+			return
+		}
+	}
+
+	http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+}
+
+func serveLocalFile(w http.ResponseWriter, r *http.Request, path, mimeType, fileName string, modTime time.Time) {
+	f, err := os.Open(path)
 	if err != nil {
 		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
 		return
 	}
 	defer f.Close()
 
-	w.Header().Set("Content-Type", entry.MimeType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename=%q`, filepath.Base(entry.FileName)))
-	http.ServeContent(w, r, entry.FileName, entry.CreatedAt, f)
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename=%q`, filepath.Base(fileName)))
+	w.Header().Set("Cache-Control", "private, max-age=604800, immutable")
+	http.ServeContent(w, r, fileName, modTime, f)
 }

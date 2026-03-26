@@ -471,6 +471,216 @@ func TestGet_NotFound(t *testing.T) {
 	}
 }
 
+func TestInsertMediaRef_Basic(t *testing.T) {
+	db := newTestDB(t)
+	db.EnsureConversation("c1", "", "cc")
+	db.InsertMessage(Message{ID: "m1", ConvID: "c1", Role: "user", Text: "check this"})
+
+	ref := MediaRef{
+		UploadID:  "up-100",
+		FileName:  "report.pdf",
+		MimeType:  "application/pdf",
+		MediaType: "document",
+		FilePath:  "/tmp/report.pdf",
+		URL:       "https://example.com/report.pdf",
+	}
+	if err := db.InsertMediaRef(ref, "m1", "c1"); err != nil {
+		t.Fatalf("InsertMediaRef: %v", err)
+	}
+
+	got, err := db.Get("m1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Media) != 1 {
+		t.Fatalf("media len = %d, want 1", len(got.Media))
+	}
+	if got.Media[0].UploadID != "up-100" {
+		t.Errorf("upload_id = %q, want %q", got.Media[0].UploadID, "up-100")
+	}
+	if got.Media[0].FileName != "report.pdf" {
+		t.Errorf("file_name = %q, want %q", got.Media[0].FileName, "report.pdf")
+	}
+}
+
+func TestGetMediaByUploadID_Found(t *testing.T) {
+	db := newTestDB(t)
+	db.EnsureConversation("c1", "", "cc")
+	db.InsertMessage(Message{ID: "m1", ConvID: "c1", Role: "user", Text: "pic"})
+
+	ref := MediaRef{
+		UploadID:  "up-200",
+		FileName:  "photo.jpg",
+		MimeType:  "image/jpeg",
+		MediaType: "photo",
+		FilePath:  "/data/uploads/photo.jpg",
+		URL:       "/api/chat/media/up-200",
+	}
+	if err := db.InsertMediaRef(ref, "m1", "c1"); err != nil {
+		t.Fatalf("InsertMediaRef: %v", err)
+	}
+
+	got, err := db.GetMediaByUploadID("up-200")
+	if err != nil {
+		t.Fatalf("GetMediaByUploadID: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil MediaRef")
+	}
+	if got.UploadID != "up-200" {
+		t.Errorf("upload_id = %q", got.UploadID)
+	}
+	if got.FileName != "photo.jpg" {
+		t.Errorf("file_name = %q", got.FileName)
+	}
+	if got.MimeType != "image/jpeg" {
+		t.Errorf("mime_type = %q", got.MimeType)
+	}
+	if got.MediaType != "photo" {
+		t.Errorf("media_type = %q", got.MediaType)
+	}
+	if got.FilePath != "/data/uploads/photo.jpg" {
+		t.Errorf("file_path = %q", got.FilePath)
+	}
+	if got.URL != "/api/chat/media/up-200" {
+		t.Errorf("url = %q", got.URL)
+	}
+}
+
+func TestGetMediaByUploadID_NotFound(t *testing.T) {
+	db := newTestDB(t)
+
+	got, err := db.GetMediaByUploadID("nonexistent-id")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil, got %+v", got)
+	}
+}
+
+func TestInsertMediaRef_Replace(t *testing.T) {
+	db := newTestDB(t)
+	db.EnsureConversation("c1", "", "cc")
+	db.InsertMessage(Message{ID: "m1", ConvID: "c1", Role: "user", Text: "file"})
+
+	ref1 := MediaRef{
+		UploadID:  "up-300",
+		FileName:  "draft.pdf",
+		MimeType:  "application/pdf",
+		MediaType: "document",
+		FilePath:  "/tmp/draft.pdf",
+	}
+	if err := db.InsertMediaRef(ref1, "m1", "c1"); err != nil {
+		t.Fatalf("InsertMediaRef (first): %v", err)
+	}
+
+	// Same upload_id, different file_name — second write should win.
+	ref2 := MediaRef{
+		UploadID:  "up-300",
+		FileName:  "final.pdf",
+		MimeType:  "application/pdf",
+		MediaType: "document",
+		FilePath:  "/tmp/final.pdf",
+	}
+	if err := db.InsertMediaRef(ref2, "m1", "c1"); err != nil {
+		t.Fatalf("InsertMediaRef (replace): %v", err)
+	}
+
+	got, err := db.GetMediaByUploadID("up-300")
+	if err != nil {
+		t.Fatalf("GetMediaByUploadID: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if got.FileName != "final.pdf" {
+		t.Errorf("file_name = %q, want %q (second write should win)", got.FileName, "final.pdf")
+	}
+	if got.FilePath != "/tmp/final.pdf" {
+		t.Errorf("file_path = %q, want %q", got.FilePath, "/tmp/final.pdf")
+	}
+}
+
+func TestInsertMediaRef_CascadeDelete(t *testing.T) {
+	db := newTestDB(t)
+	db.EnsureConversation("c1", "", "cc")
+	db.InsertMessage(Message{
+		ID: "m1", ConvID: "c1", Role: "user", Text: "with media",
+	})
+	db.InsertMediaRef(MediaRef{
+		UploadID: "up-400", FileName: "gone.jpg", MimeType: "image/jpeg", MediaType: "photo",
+	}, "m1", "c1")
+
+	// Verify it exists first.
+	got, _ := db.GetMediaByUploadID("up-400")
+	if got == nil {
+		t.Fatal("media ref should exist before delete")
+	}
+
+	// Delete conversation — should cascade to messages and media.
+	db.DeleteConversation("c1")
+
+	got, err := db.GetMediaByUploadID("up-400")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("media ref should be gone after cascade delete, got %+v", got)
+	}
+}
+
+func TestExpiredMediaForConversation(t *testing.T) {
+	db := newTestDB(t)
+	db.EnsureConversation("c1", "", "cc")
+	db.InsertMessage(Message{ID: "m1", ConvID: "c1", Role: "user", Text: "old media"})
+	db.InsertMessage(Message{ID: "m2", ConvID: "c1", Role: "user", Text: "new media"})
+
+	// Insert old media (manually set created_at in the past).
+	db.db.Exec(`INSERT INTO media (upload_id, message_id, conv_id, file_name, mime_type, media_type, file_path, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"old-1", "m1", "c1", "old.jpg", "image/jpeg", "photo", "/tmp/old.jpg",
+		time.Now().AddDate(0, 0, -10))
+
+	// Insert recent media.
+	db.InsertMediaRef(MediaRef{
+		UploadID: "new-1", FileName: "new.jpg", MimeType: "image/jpeg", MediaType: "photo", FilePath: "/tmp/new.jpg",
+	}, "m2", "c1")
+
+	cutoff := time.Now().AddDate(0, 0, -7)
+	expired := db.ExpiredMediaForConversation("c1", cutoff)
+	if len(expired) != 1 {
+		t.Fatalf("expected 1 expired media, got %d", len(expired))
+	}
+	if expired[0].UploadID != "old-1" {
+		t.Errorf("expected old-1, got %s", expired[0].UploadID)
+	}
+}
+
+func TestDeleteMedia(t *testing.T) {
+	db := newTestDB(t)
+	db.EnsureConversation("c1", "", "cc")
+	db.InsertMessage(Message{ID: "m1", ConvID: "c1", Role: "user", Text: "test"})
+	db.InsertMediaRef(MediaRef{
+		UploadID: "del-1", FileName: "bye.jpg", MimeType: "image/jpeg", MediaType: "photo",
+	}, "m1", "c1")
+
+	// Verify exists.
+	got, _ := db.GetMediaByUploadID("del-1")
+	if got == nil {
+		t.Fatal("media should exist before delete")
+	}
+
+	if err := db.DeleteMedia("del-1"); err != nil {
+		t.Fatalf("DeleteMedia: %v", err)
+	}
+
+	got, _ = db.GetMediaByUploadID("del-1")
+	if got != nil {
+		t.Error("media should be gone after DeleteMedia")
+	}
+}
+
 func TestEmptyState(t *testing.T) {
 	db := newTestDB(t)
 

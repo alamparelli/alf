@@ -517,6 +517,63 @@ func (d *DB) loadMedia(msgID string) []MediaRef {
 	return refs
 }
 
+// InsertMediaRef associates a media reference with an existing message.
+func (d *DB) InsertMediaRef(ref MediaRef, messageID, convID string) error {
+	_, err := d.db.Exec(
+		`INSERT OR REPLACE INTO media (upload_id, message_id, conv_id, file_name, mime_type, media_type, file_path, url)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		ref.UploadID, messageID, convID, ref.FileName, ref.MimeType, ref.MediaType, ref.FilePath, ref.URL,
+	)
+	return err
+}
+
+// GetMediaByUploadID retrieves a single media reference by upload ID.
+func (d *DB) GetMediaByUploadID(uploadID string) (*MediaRef, error) {
+	row := d.db.QueryRow(
+		`SELECT upload_id, file_name, mime_type, media_type, file_path, url
+		 FROM media WHERE upload_id = ?`, uploadID,
+	)
+	var m MediaRef
+	if err := row.Scan(&m.UploadID, &m.FileName, &m.MimeType, &m.MediaType, &m.FilePath, &m.URL); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &m, nil
+}
+
+// ExpiredMediaForConversation returns media refs older than the cutoff for a conversation.
+func (d *DB) ExpiredMediaForConversation(convID string, olderThan time.Time) []MediaRef {
+	rows, err := d.db.Query(
+		`SELECT upload_id, file_name, mime_type, media_type, file_path, url
+		 FROM media WHERE conv_id = ? AND created_at < ?`, convID, olderThan,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var refs []MediaRef
+	for rows.Next() {
+		var m MediaRef
+		rows.Scan(&m.UploadID, &m.FileName, &m.MimeType, &m.MediaType, &m.FilePath, &m.URL)
+		refs = append(refs, m)
+	}
+	return refs
+}
+
+// DeleteMedia removes a media row by upload ID.
+func (d *DB) DeleteMedia(uploadID string) error {
+	_, err := d.db.Exec(`DELETE FROM media WHERE upload_id = ?`, uploadID)
+	return err
+}
+
+// Exec runs a raw SQL statement. Intended for tests that need to backdate timestamps.
+func (d *DB) Exec(query string, args ...any) error {
+	_, err := d.db.Exec(query, args...)
+	return err
+}
+
 // jsonlMessage matches the old ChatStore JSONL format for migration.
 type jsonlMessage struct {
 	ID        string    `json:"id"`

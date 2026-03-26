@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -9,33 +10,47 @@ import (
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 )
 
-// sendTGNotify sends a notification to Telegram, detecting media URLs
+// mediaExts maps file extensions to their Telegram send method category.
+var videoExts = map[string]bool{".mp4": true, ".webm": true, ".mov": true}
+var animExts = map[string]bool{".gif": true, ".webp": true}
+
+// sendTGNotify sends a notification to Telegram, detecting media URLs/paths
 // and using SendAnimation/SendVideo for GIFs and videos.
+// Supports: bare URL, bare file path, or "url/path\ncaption" format.
 func sendTGNotify(tg *tgclient.Client, chatID int64, text string) error {
 	trimmed := strings.TrimSpace(text)
-	lower := strings.ToLower(trimmed)
 
-	// If the text is just a URL ending in a media extension, send as media.
-	if (strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://")) && !strings.Contains(trimmed, " ") {
-		switch {
-		case strings.HasSuffix(lower, ".gif") || strings.HasSuffix(lower, ".webp"):
-			return tg.SendAnimation(chatID, trimmed, "")
-		case strings.HasSuffix(lower, ".mp4") || strings.HasSuffix(lower, ".webm") || strings.HasSuffix(lower, ".mov"):
-			return tg.SendVideo(chatID, trimmed, "")
-		}
+	// Split into first line (potential media ref) and rest (caption).
+	first, caption := trimmed, ""
+	if lines := strings.SplitN(trimmed, "\n", 2); len(lines) == 2 {
+		first = strings.TrimSpace(lines[0])
+		caption = strings.TrimSpace(lines[1])
 	}
 
-	// Check for "url\ncaption" pattern (media URL on first line, caption on rest).
-	if lines := strings.SplitN(trimmed, "\n", 2); len(lines) == 2 {
-		url := strings.TrimSpace(lines[0])
-		caption := strings.TrimSpace(lines[1])
-		urlLower := strings.ToLower(url)
-		if strings.HasPrefix(url, "http") && !strings.Contains(url, " ") {
-			switch {
-			case strings.HasSuffix(urlLower, ".gif") || strings.HasSuffix(urlLower, ".webp"):
-				return tg.SendAnimation(chatID, url, caption)
-			case strings.HasSuffix(urlLower, ".mp4") || strings.HasSuffix(urlLower, ".webm") || strings.HasSuffix(urlLower, ".mov"):
-				return tg.SendVideo(chatID, url, caption)
+	// Must be a single token (no spaces) to be a media reference.
+	if !strings.Contains(first, " ") {
+		ext := strings.ToLower(filepath.Ext(first))
+		isURL := strings.HasPrefix(first, "http://") || strings.HasPrefix(first, "https://")
+		isFile := strings.HasPrefix(first, "/")
+
+		if isURL {
+			if animExts[ext] {
+				return tg.SendAnimation(chatID, first, caption)
+			}
+			if videoExts[ext] {
+				return tg.SendVideo(chatID, first, caption)
+			}
+		} else if isFile {
+			// Local file path — upload via multipart.
+			if animExts[ext] {
+				return tg.SendAnimationFile(chatID, first, caption)
+			}
+			if videoExts[ext] {
+				return tg.SendVideoFile(chatID, first, caption)
+			}
+			// Other file types → send as document.
+			if ext != "" {
+				return tg.SendDocumentFile(chatID, first, caption)
 			}
 		}
 	}

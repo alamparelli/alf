@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	tgclient "github.com/alamparelli/alf/internal/telegram"
@@ -215,6 +217,87 @@ func TestSendTGNotify_TextWithURL(t *testing.T) {
 	}
 	if *method != "sendMessage" {
 		t.Errorf("expected sendMessage for text with embedded URL, got %s", *method)
+	}
+}
+
+func TestSendTGNotify_LocalVideoFile(t *testing.T) {
+	srv, method := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	// Create a temp video file.
+	tmp := filepath.Join(t.TempDir(), "clip.mp4")
+	os.WriteFile(tmp, []byte("fake video"), 0o644)
+
+	err := sendTGNotify(tg, 123, tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *method != "sendVideo" {
+		t.Errorf("expected sendVideo for local .mp4, got %s", *method)
+	}
+}
+
+func TestSendTGNotify_LocalGifFile(t *testing.T) {
+	srv, method := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	tmp := filepath.Join(t.TempDir(), "anim.gif")
+	os.WriteFile(tmp, []byte("fake gif"), 0o644)
+
+	err := sendTGNotify(tg, 123, tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *method != "sendAnimation" {
+		t.Errorf("expected sendAnimation for local .gif, got %s", *method)
+	}
+}
+
+func TestSendTGNotify_LocalFileWithCaption(t *testing.T) {
+	srv, method := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	tmp := filepath.Join(t.TempDir(), "demo.mp4")
+	os.WriteFile(tmp, []byte("fake video"), 0o644)
+
+	err := sendTGNotify(tg, 123, tmp+"\nHere's the demo!")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *method != "sendVideo" {
+		t.Errorf("expected sendVideo for local .mp4 with caption, got %s", *method)
+	}
+}
+
+func TestSendTGNotify_LocalDocumentFile(t *testing.T) {
+	srv, method := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	tmp := filepath.Join(t.TempDir(), "report.pdf")
+	os.WriteFile(tmp, []byte("fake pdf"), 0o644)
+
+	err := sendTGNotify(tg, 123, tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *method != "sendDocument" {
+		t.Errorf("expected sendDocument for local .pdf, got %s", *method)
+	}
+}
+
+func TestSendTGNotify_NonexistentFile(t *testing.T) {
+	srv, _ := fakeTGServer(t)
+	defer srv.Close()
+	tg := newTestTGWithBase(t, srv)
+
+	// Path that doesn't exist — should error, not silently send as text.
+	err := sendTGNotify(tg, 123, "/tmp/nonexistent-file-12345.mp4")
+	if err == nil {
+		t.Error("expected error for nonexistent file")
 	}
 }
 

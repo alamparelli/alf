@@ -342,6 +342,23 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		return err
 	}
 
+	// 5b. Persist media refs for the user message.
+	if cs.ChatDB != nil && len(req.MediaIDs) > 0 {
+		for _, mid := range req.MediaIDs {
+			entry := cs.GetUpload(mid)
+			if entry == nil {
+				continue
+			}
+			cs.ChatDB.InsertMediaRef(chatdb.MediaRef{
+				UploadID:  entry.ID,
+				FileName:  entry.FileName,
+				MimeType:  entry.MimeType,
+				MediaType: entry.MediaType,
+				FilePath:  entry.TempPath,
+			}, result.UserMsgID, req.ConvID)
+		}
+	}
+
 	// 6. Spontaneous mood reaction (CC-specific).
 	state := mood.GetCurrentState(cs.ContextDir)
 	if mood.ShouldReact(state) {

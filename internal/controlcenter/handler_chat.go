@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -104,7 +105,8 @@ func (h *ChatConversationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 
 // ChatConversationHandler handles PATCH/DELETE on a single conversation.
 type ChatConversationHandler struct {
-	Service *ChatService
+	Service     *ChatService
+	ConfigStore ConfigStore
 }
 
 func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +133,21 @@ func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case http.MethodDelete:
 		if h.Service.ChatDB != nil {
+			// Clean up expired media files before archiving.
+			retentionDays := 7
+			if h.ConfigStore != nil {
+				if cfg, err := h.ConfigStore.Load(); err == nil && cfg.MediaRetentionDays > 0 {
+					retentionDays = cfg.MediaRetentionDays
+				}
+			}
+			cutoff := time.Now().AddDate(0, 0, -retentionDays)
+			expired := h.Service.ChatDB.ExpiredMediaForConversation(convID, cutoff)
+			for _, ref := range expired {
+				if ref.FilePath != "" {
+					os.Remove(ref.FilePath)
+				}
+				h.Service.ChatDB.DeleteMedia(ref.UploadID)
+			}
 			h.Service.ChatDB.ArchiveConversation(convID)
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true})

@@ -630,11 +630,13 @@ func main() {
 	}
 	log.Println("comms engine: initialized for CC channel")
 
+	// Declared early so the signal server closure can reference it.
+	var eventBroker *cc.EventBroker
+
 	// Persistent signal server for notify/react/status tools (all channels).
 	persistentSigPath := filepath.Join(dataDir, "signal.sock")
 	persistentSigServer := &signal.Server{Notify: func(text string) {
-		// Inject into the active CC chat conversation so the user sees
-		// the notification inline, then also broadcast to other channels.
+		// Inject into the active CC chat conversation (same channel as the LLM).
 		convID := chatService.CurrentConvID()
 		if convID == "" {
 			convID = "_system"
@@ -649,7 +651,10 @@ func main() {
 			Tier:      "notify",
 			SessionID: "signal:notify",
 		})
-		commEngine.Broadcast(text)
+		// Emit SSE so CC frontend reloads the conversation.
+		if eventBroker != nil {
+			eventBroker.Emit(cc.EventNewMessage)
+		}
 	}}
 	if ln, err := persistentSigServer.ListenUnix(persistentSigPath); err != nil {
 		log.Printf("signal: persistent listen error: %v", err)
@@ -680,7 +685,6 @@ func main() {
 
 	// Schedule adapter (engine set later after scheduler is created).
 	schedAdapter := &ccScheduleAdapter{}
-	var eventBroker *cc.EventBroker
 	var ccServerRef *cc.Server
 
 	// Start Control Center HTTP server.
@@ -816,6 +820,14 @@ func main() {
 			log.Printf("[telegram] rate limited - waiting %v before retry", wait)
 		}
 		tgAdapt = newTGAdapter(tg)
+		// Set broadcast targets so system notifications reach all allowed chats.
+		if len(allowedChatIDs) > 0 {
+			targets := make([]int64, 0, len(allowedChatIDs))
+			for id := range allowedChatIDs {
+				targets = append(targets, id)
+			}
+			tgAdapt.SetBroadcastTargets(targets)
+		}
 		commEngine.RegisterAdapter(tgAdapt)
 	}
 
@@ -1607,7 +1619,12 @@ func main() {
 			sigSockPath := filepath.Join(dataDir, fmt.Sprintf("signal-%d.sock", u.Message.MessageID))
 			sigServer := &signal.Server{
 				TG: tg, ChatID: tgChatID, MessageID: u.Message.MessageID,
-				Notify: commEngine.Broadcast,
+				Notify: func(text string) {
+					// Send notification to the same TG chat where the LLM was invoked.
+					if err := tg.SendMessage(tgChatID, text); err != nil {
+						log.Printf("signal: notify to TG failed: %v", err)
+					}
+				},
 			}
 			var sigLn net.Listener
 			if ln, err := sigServer.ListenUnix(sigSockPath); err != nil {

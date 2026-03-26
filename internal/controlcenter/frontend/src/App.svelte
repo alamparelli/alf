@@ -37,10 +37,7 @@
     events.connect()
     events.subscribe('apps', () => apps.load())
     events.subscribe('marketplace', () => apps.load())
-    events.subscribe('new_message', (data?: string) => {
-      const preview = data && data !== 'reload' ? data : 'New scheduled message'
-      const truncated = preview.length > 80 ? preview.slice(0, 80) + '...' : preview
-      toasts.info(truncated)
+    events.subscribe('new_message', () => {
       sound.play()
     })
 

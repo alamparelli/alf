@@ -527,6 +527,7 @@
 
   // --- Lifecycle ---
   let unsubTiers: (() => void) | null = null
+  let unsubNewMsg: (() => void) | null = null
 
   onMount(async () => {
     // Request notification permission
@@ -537,6 +538,11 @@
     await loadActiveConversation()
     await loadTiers()
     unsubTiers = events.subscribe('tiers', () => loadTiers())
+    unsubNewMsg = events.subscribe('new_message', () => {
+      if (convId && !sending) {
+        loadHistory().then(() => scrollToBottom())
+      }
+    })
     if (convId) {
       await loadHistory()
     }
@@ -546,6 +552,7 @@
   onDestroy(() => {
     if (pollTimer) clearTimeout(pollTimer)
     unsubTiers?.()
+    unsubNewMsg?.()
   })
 </script>
 

@@ -352,6 +352,14 @@
     text-decoration: underline;
   }
 
+  .msg-text :global(img) {
+    max-width: 300px;
+    max-height: 200px;
+    border-radius: 8px;
+    margin: 4px 0;
+    display: block;
+  }
+
   /* Content blocks */
   .content-block {
     margin: 6px 0;

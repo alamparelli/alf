@@ -103,8 +103,9 @@ type ChatService struct {
 	mu              sync.Mutex                  // serialize Claude calls (single user v1)
 
 	// Background job tracking - one active job per conversation.
-	activeJobs map[string]*chatJob // conv_id → job
-	jobMu      sync.Mutex
+	activeJobs   map[string]*chatJob // conv_id → job
+	jobMu        sync.Mutex
+	lastChatConv string // last conv_id used by the CC chat frontend
 
 	// Upload registry: upload_id → UploadEntry
 	uploads   map[string]*UploadEntry
@@ -444,8 +445,13 @@ func (cs *ChatService) ClearActiveSkills() {
 	cs.Sessions.ClearSkills(apiChatID)
 }
 
-// CurrentConvID returns the active conversation ID for the CC channel.
+// CurrentConvID returns the active conversation ID for the CC chat.
+// Uses the last conv_id from the frontend (set by StartJob), falling back
+// to the ConvStore channel ID.
 func (cs *ChatService) CurrentConvID() string {
+	if cs.lastChatConv != "" {
+		return cs.lastChatConv
+	}
 	if cs.ConvStore != nil {
 		return cs.ConvStore.ConvID(conversation.ChannelCC)
 	}
@@ -917,6 +923,7 @@ const recallLimit = 3
 // If a job is already running for the same conversation, returns it for reconnection.
 func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
 	convID := req.ConvID
+	cs.lastChatConv = convID // track for notify tool
 	cs.jobMu.Lock()
 	if j := cs.activeJobs[convID]; j != nil && !j.isDone() {
 		cs.jobMu.Unlock()

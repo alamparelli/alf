@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -85,6 +88,64 @@ func (c *Client) SendVideo(chatID int64, videoURL, caption string) error {
 	}
 	payload, _ := json.Marshal(msg)
 	return c.post("sendVideo", payload)
+}
+
+// SendVideoFile uploads a local video file to Telegram.
+func (c *Client) SendVideoFile(chatID int64, filePath, caption string) error {
+	return c.sendFileMultipart("sendVideo", "video", chatID, filePath, caption)
+}
+
+// SendAnimationFile uploads a local GIF/animation file to Telegram.
+func (c *Client) SendAnimationFile(chatID int64, filePath, caption string) error {
+	return c.sendFileMultipart("sendAnimation", "animation", chatID, filePath, caption)
+}
+
+// SendDocumentFile uploads a local file as a document to Telegram.
+func (c *Client) SendDocumentFile(chatID int64, filePath, caption string) error {
+	return c.sendFileMultipart("sendDocument", "document", chatID, filePath, caption)
+}
+
+// sendFileMultipart uploads a file via multipart/form-data to a Telegram API method.
+func (c *Client) sendFileMultipart(method, field string, chatID int64, filePath, caption string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", filePath, err)
+	}
+	defer f.Close()
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	w.WriteField("chat_id", fmt.Sprintf("%d", chatID))
+	if caption != "" {
+		w.WriteField("caption", caption)
+		w.WriteField("parse_mode", "HTML")
+	}
+
+	part, err := w.CreateFormFile(field, filepath.Base(filePath))
+	if err != nil {
+		return fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return fmt.Errorf("copy file: %w", err)
+	}
+	w.Close()
+
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", c.Token, method)
+	resp, err := c.HTTP.Post(url, w.FormDataContentType(), &buf)
+	if err != nil {
+		return fmt.Errorf("telegram %s: %w", method, err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	if json.Unmarshal(body, &result) == nil && !result.OK {
+		return fmt.Errorf("telegram %s: %s", method, result.Description)
+	}
+	return nil
 }
 
 // SendKeyboard sends a message with an inline keyboard.

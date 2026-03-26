@@ -544,7 +544,9 @@
       api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${convId}`).then(recent => {
         if (!recent?.length) return
         const existingIds = new Set(messages.map(m => m.id))
-        const newMsgs = recent.filter(m => !existingIds.has(m.id))
+        // Only append assistant messages — user messages are already in the UI
+        // via optimistic insert (with temp- IDs that won't match server IDs).
+        const newMsgs = recent.filter(m => !existingIds.has(m.id) && m.role === 'assistant')
         if (newMsgs.length > 0) {
           messages = [...messages, ...newMsgs]
           scrollToBottom()

@@ -46,6 +46,10 @@
         "type": "string",
         "description": "Execution timeout (e.g. 5m, 10m, 1h). Defaults: direct=2m, LLM=5m"
       },
+      "reason": {
+        "type": "string",
+        "description": "Free-text explanation of WHY this job exists (context injected into LLM at execution time)"
+      },
       "skills": {
         "type": "string",
         "description": "Comma-separated skill names (LLM jobs only)"

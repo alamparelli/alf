@@ -51,6 +51,7 @@ type RequestEntry struct {
 	Status  int       `json:"status"`
 	Blocked bool      `json:"blocked"`
 	Rule    string    `json:"rule"`
+	Source  string    `json:"source,omitempty"` // "" = direct proxy, "vault" = vault-proxy
 }
 
 // ringSize is the maximum number of logged requests.
@@ -100,10 +101,11 @@ func (r *RingBuffer) Clear() {
 
 // Proxy wraps a goproxy server with domain-based firewall rules.
 type Proxy struct {
-	server *goproxy.ProxyHttpServer
-	config atomic.Pointer[Config]
-	Log    *RingBuffer
-	Store  *Store // optional: persists host stats
+	server     *goproxy.ProxyHttpServer
+	config     atomic.Pointer[Config]
+	Log        *RingBuffer
+	Store      *Store // optional: persists host stats
+	vaultHosts atomic.Pointer[map[string]bool]
 }
 
 // NewProxy creates a firewall proxy with the given initial config.
@@ -194,10 +196,38 @@ func NewProxy(cfg *Config) *Proxy {
 
 // record logs an entry and updates persistent host stats.
 func (p *Proxy) record(entry RequestEntry) {
+	if entry.Source == "" {
+		if hosts := p.vaultHosts.Load(); hosts != nil && (*hosts)[entry.Host] {
+			entry.Source = "vault"
+		}
+	}
 	p.Log.Add(entry)
 	if p.Store != nil {
-		p.Store.RecordHost(entry.Host, entry.Blocked)
+		p.Store.RecordHost(entry.Host, entry.Blocked, entry.Source == "vault")
 	}
+}
+
+// SetVaultHosts updates the set of hostnames that belong to vault services.
+// Requests to these hosts are tagged with Source="vault" in the log.
+func (p *Proxy) SetVaultHosts(hosts []string) {
+	m := make(map[string]bool, len(hosts))
+	for _, h := range hosts {
+		m[h] = true
+	}
+	p.vaultHosts.Store(&m)
+}
+
+// Record logs an external entry (e.g. from vault-proxy) and updates host stats.
+func (p *Proxy) Record(entry RequestEntry) {
+	p.record(entry)
+}
+
+// Check evaluates a host against firewall rules and returns the matching rule
+// pattern, action, and whether the request would be blocked.
+func (p *Proxy) Check(host string) (pattern, action string, blocked bool) {
+	pattern, action = p.match(host)
+	blocked = action == "deny" && p.currentConfig().Mode == ModeEnforce
+	return
 }
 
 // Reload atomically swaps the config.

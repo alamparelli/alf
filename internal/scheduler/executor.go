@@ -392,6 +392,9 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 
 	// Inject scheduled job context so the LLM knows why it was triggered.
 	jobContext := fmt.Sprintf("You are executing scheduled job \"%s\" (ID: %s, schedule: %s).", j.Name, j.ID, j.Schedule)
+	if j.Reason != "" {
+		jobContext += fmt.Sprintf(" Reason this job was created: %s", j.Reason)
+	}
 	if j.Message != "" {
 		jobContext += fmt.Sprintf(" The scheduled message is: %s", j.Message)
 	}

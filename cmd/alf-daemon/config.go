@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
+	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/secrets"
@@ -306,6 +308,29 @@ func resolveTimezone(tz string) *time.Location {
 	}
 	// time.Local already respects the TZ environment variable.
 	return time.Local
+}
+
+// syncVaultHostsToFirewall fetches vault service base_urls and registers
+// their hostnames with the firewall so requests are tagged as "vault".
+func syncVaultHostsToFirewall(mgr *vault.Manager, fw *firewall.Proxy) {
+	if mgr == nil || fw == nil {
+		return
+	}
+	services, err := mgr.Client().ListServices()
+	if err != nil {
+		log.Printf("[firewall] failed to list vault services for host tagging: %v", err)
+		return
+	}
+	var hosts []string
+	for _, svc := range services {
+		if u, err := url.Parse(svc.BaseURL); err == nil && u.Hostname() != "" {
+			hosts = append(hosts, u.Hostname())
+		}
+	}
+	if len(hosts) > 0 {
+		fw.SetVaultHosts(hosts)
+		log.Printf("[firewall] vault hosts registered: %s", strings.Join(hosts, ", "))
+	}
 }
 
 func parseAllowedChatIDs(s string) map[int64]bool {

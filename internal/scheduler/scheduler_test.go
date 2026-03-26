@@ -158,7 +158,7 @@ func TestEngineCreateDelete(t *testing.T) {
 	defer e.cron.Stop()
 
 	// Create a job.
-	j, err := e.Create("test", "@every 1h", "direct", "", "echo hello", "silent", 0, nil)
+	j, err := e.Create("test", "@every 1h", "direct", "", "echo hello", "silent", 0, nil, "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestEngineUpdate(t *testing.T) {
 	e.cron.Start()
 	defer e.cron.Stop()
 
-	j, _ := e.Create("test", "@every 1h", "direct", "", "echo hello", "chat", 0, nil)
+	j, _ := e.Create("test", "@every 1h", "direct", "", "echo hello", "chat", 0, nil, "")
 
 	updated, err := e.Update(j.ID, map[string]string{
 		"name":   "renamed",
@@ -244,7 +244,7 @@ func TestEngineListUserOnly(t *testing.T) {
 	defer e.cron.Stop()
 
 	e.RegisterSystem("sys1", "System", "@every 1m", func() error { return nil })
-	e.Create("user1", "@every 2h", "direct", "", "echo hello", "silent", 0, nil)
+	e.Create("user1", "@every 2h", "direct", "", "echo hello", "silent", 0, nil, "")
 
 	all := e.List(false)
 	if len(all) != 2 {
@@ -382,7 +382,7 @@ func TestManagedJobVisibleInList(t *testing.T) {
 	defer e.cron.Stop()
 
 	e.EnsureManaged("sec-audit", "Security Audit", "@every 1h", "haiku", "audit", "chat", nil, true)
-	e.Create("user-job", "@every 2h", "direct", "", "echo hello", "silent", 0, nil)
+	e.Create("user-job", "@every 2h", "direct", "", "echo hello", "silent", 0, nil, "")
 
 	all := e.List(false)
 	found := false
@@ -503,5 +503,89 @@ func TestUpdateSystemJob_BlockedFields(t *testing.T) {
 	j := e.store.Get("sys-test")
 	if j.Name != "System Test" {
 		t.Errorf("name should be unchanged, got %s", j.Name)
+	}
+}
+
+func TestCreateJobWithReason(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	j, err := e.Create("api-monitor", "@every 30m", "direct", "", "curl -sf http://localhost/health", "silent", 0, nil, "API has been flaky since the March migration")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if j.Reason != "API has been flaky since the March migration" {
+		t.Errorf("expected reason to be set, got %q", j.Reason)
+	}
+
+	// Verify persistence.
+	got := e.store.Get(j.ID)
+	if got.Reason != j.Reason {
+		t.Errorf("reason not persisted: got %q", got.Reason)
+	}
+}
+
+func TestUpdateReason(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	j, _ := e.Create("test-job", "@every 1h", "direct", "", "echo ok", "silent", 0, nil, "")
+	updated, err := e.Update(j.ID, map[string]string{"reason": "now monitoring for compliance"})
+	if err != nil {
+		t.Fatalf("Update reason: %v", err)
+	}
+	if updated.Reason != "now monitoring for compliance" {
+		t.Errorf("expected updated reason, got %q", updated.Reason)
+	}
+}
+
+func TestUpdateSystemJob_ReasonAllowed(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+	e.RegisterSystem("sys-reason", "System Reason Test", "@every 1m", func() error { return nil })
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	updated, err := e.Update("sys-reason", map[string]string{"reason": "added for compliance audit"})
+	if err != nil {
+		t.Fatalf("Update reason on system job should be allowed: %v", err)
+	}
+	if updated.Reason != "added for compliance audit" {
+		t.Errorf("expected reason on system job, got %q", updated.Reason)
+	}
+}
+
+func TestCreateReminderWithReason(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	j, err := e.CreateReminder("standup", "@every 24h", "Daily standup in 5 minutes", "chat", 0, "team requested daily reminder")
+	if err != nil {
+		t.Fatalf("CreateReminder: %v", err)
+	}
+	if j.Reason != "team requested daily reminder" {
+		t.Errorf("expected reason on reminder, got %q", j.Reason)
 	}
 }

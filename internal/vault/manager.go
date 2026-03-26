@@ -17,13 +17,14 @@ import (
 
 // Manager manages the vault-server subprocess and provides access to tokens.
 type Manager struct {
-	dataDir    string
-	addr       string
-	adminToken string
-	proxyToken string
-	masterPass string // stored for re-authentication if admin token is revoked
-	mu         sync.Mutex
-	cancel     context.CancelFunc
+	dataDir          string
+	addr             string
+	httpProxyURL string // optional: HTTP proxy for outbound vault-proxy requests
+	adminToken       string
+	proxyToken       string
+	masterPass       string // stored for re-authentication if admin token is revoked
+	mu               sync.Mutex
+	cancel           context.CancelFunc
 
 	// Process management: cmd is only accessed via waitCh coordination.
 	// spawn() creates cmd + waitCh; watchdog owns Wait(); kill() signals + waits on waitCh.
@@ -153,6 +154,12 @@ func (m *Manager) Addr() string {
 	return m.addr
 }
 
+// SetHTTPProxy configures an HTTP proxy for outbound vault-proxy requests.
+// Must be called before Start().
+func (m *Manager) SetHTTPProxy(proxyURL string) {
+	m.httpProxyURL = proxyURL
+}
+
 // PasswordFile returns the path to the persisted master password file
 // in the vault data directory (writable, survives container restarts).
 func (m *Manager) PasswordFile() string {
@@ -241,11 +248,15 @@ func (m *Manager) spawn() error {
 		return fmt.Errorf("vault-server not found: %w", err)
 	}
 
-	cmd := exec.Command(bin,
+	args := []string{
 		"-listen", "127.0.0.1:8390",
 		"-data-dir", m.dataDir,
 		"-token-ttl", "8760h", // 1 year - daemon manages token lifecycle
-	)
+	}
+	if m.httpProxyURL != "" {
+		args = append(args, "-http-proxy", m.httpProxyURL)
+	}
+	cmd := exec.Command(bin, args...)
 	// Route subprocess output through Go's log package instead of raw os.Stdout.
 	// Direct pipe inheritance can cause SIGPIPE in containerized environments
 	// when the logging driver pipe breaks, killing the subprocess.

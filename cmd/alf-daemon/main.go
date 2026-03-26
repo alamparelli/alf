@@ -243,6 +243,7 @@ func main() {
 	var vaultMgr *vault.Manager
 	if _, err := exec.LookPath("vault-server"); err == nil {
 		vaultMgr = vault.NewManager("/opt/alf/vault-data")
+		vaultMgr.SetHTTPProxy(proxyURL)
 		if err := vaultMgr.Start(context.Background()); err != nil {
 			log.Printf("warning: vault-server failed to start: %v", err)
 			vaultMgr = nil
@@ -255,6 +256,7 @@ func main() {
 				os.Setenv("VAULT_ADDR", vaultMgr.Addr())
 				os.Setenv("VAULT_TOKEN", vaultMgr.ProxyToken())
 				log.Println("vault: unlocked, proxy token created")
+				syncVaultHostsToFirewall(vaultMgr, fwProxy)
 			}
 		} else {
 			log.Println("vault: started (locked - set vault_master_password or unlock via Control Center)")
@@ -713,6 +715,8 @@ func main() {
 				telegramEnabled = true
 				log.Println("Telegram config loaded from vault (post-unlock)")
 			}
+			// Tag vault service hosts in firewall log.
+			syncVaultHostsToFirewall(vaultMgr, fwProxy)
 		}
 		// Task event callback: notify via CC chat store (system message).
 		onTaskEvent := func(taskID, status, summary string) {

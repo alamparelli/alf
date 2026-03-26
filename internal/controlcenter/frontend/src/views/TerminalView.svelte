@@ -5,6 +5,7 @@
   import { WebLinksAddon } from '@xterm/addon-web-links'
   import { RotateCw } from 'lucide-svelte'
   import { toasts } from '../stores/toast.svelte'
+  import { theme } from '../stores/theme.svelte'
   import '@xterm/xterm/css/xterm.css'
 
   // --- Terminal Themes ---
@@ -121,24 +122,21 @@
     },
   }
 
+  // Map palette names to terminal theme keys (some have light/dark variants)
+  const themeMapping: Record<string, [string, string]> = {
+    sage:          ['sage', 'dark'],
+    studio:        ['studio', 'studio'],
+    catppuccin:    ['catppuccin-latte', 'catppuccin-mocha'],
+    dracula:       ['dracula', 'dracula'],
+    solarized:     ['solarized', 'solarized'],
+    'tokyo-night': ['tokyo-night', 'tokyo-night'],
+    github:        ['github', 'github'],
+    nord:          ['nord', 'nord'],
+  }
+
   function getTermTheme(): any {
-    const palette = localStorage.getItem('alf-palette') || 'sage'
-    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-
-    // Map palette names to terminal theme keys (some have light/dark variants)
-    const mapping: Record<string, [string, string]> = {
-      sage:          ['sage', 'dark'],
-      studio:        ['studio', 'studio'],
-      catppuccin:    ['catppuccin-latte', 'catppuccin-mocha'],
-      dracula:       ['dracula', 'dracula'],
-      solarized:     ['solarized', 'solarized'],
-      'tokyo-night': ['tokyo-night', 'tokyo-night'],
-      github:        ['github', 'github'],
-      nord:          ['nord', 'nord'],
-    }
-
-    const [lightKey, darkKey] = mapping[palette] || ['dark', 'dark']
-    const key = isDark ? darkKey : lightKey
+    const [lightKey, darkKey] = themeMapping[theme.palette] || ['dark', 'dark']
+    const key = theme.isDark ? darkKey : lightKey
     return termThemes[key] || termThemes.dark
   }
 
@@ -305,26 +303,29 @@
       sendInput(data)
     })
 
-    // ResizeObserver for auto-fit
+    // ResizeObserver for auto-fit (debounced to avoid rapid-fire during drag resize)
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined
     resizeObserver = new ResizeObserver(() => {
-      if (fitAddon && term) {
-        fitAddon.fit()
-        sendResize(term.cols, term.rows)
-      }
+      clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(() => {
+        if (fitAddon && term) {
+          fitAddon.fit()
+          sendResize(term.cols, term.rows)
+        }
+      }, 50)
     })
     resizeObserver.observe(termContainer)
 
     connect()
+  })
 
-    // Listen for theme changes
-    const themeObserver = new MutationObserver(() => {
-      if (term) {
-        term.options.theme = getTermTheme()
-      }
-    })
-    const themeLink = document.getElementById('alf-theme-link')
-    if (themeLink) {
-      themeObserver.observe(themeLink, { attributes: true, attributeFilter: ['href'] })
+  // Reactively sync terminal theme when CC palette or dark mode changes.
+  $effect(() => {
+    // Access reactive deps so Svelte tracks them.
+    const _ = theme.palette
+    const __ = theme.isDark
+    if (term) {
+      term.options.theme = getTermTheme()
     }
   })
 
@@ -371,7 +372,7 @@
     </div>
   {/if}
 
-  <div class="term-container" bind:this={termContainer}></div>
+  <div id="terminalContainer" class="term-container" bind:this={termContainer}></div>
 
   <!-- Mobile input bar -->
   {#if isMobile}
@@ -438,6 +439,7 @@
 
   .term-container {
     flex: 1;
+    min-height: 0;
     overflow: hidden;
     border-radius: var(--radius, 8px);
     padding: 4px;

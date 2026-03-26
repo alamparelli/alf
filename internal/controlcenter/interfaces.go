@@ -42,6 +42,7 @@ type ScheduleJob struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	Description string  `json:"description,omitempty"`
+	Reason      string  `json:"reason,omitempty"`
 	Schedule    string  `json:"schedule"`
 	Tier       string  `json:"tier"`
 	Prompt     string  `json:"prompt"`
@@ -64,8 +65,8 @@ type ScheduleJob struct {
 // ScheduleEngine is the subset of scheduler.Engine used by the CC schedules tab.
 type ScheduleEngine interface {
 	List(userOnly bool) []ScheduleJob
-	Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string) (*ScheduleJob, error)
-	CreateReminder(name, schedule, message, output string, timeout time.Duration) (*ScheduleJob, error)
+	Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string, reason string) (*ScheduleJob, error)
+	CreateReminder(name, schedule, message, output string, timeout time.Duration, reason string) (*ScheduleJob, error)
 	Delete(id string) error
 	Update(id string, fields map[string]string) (*ScheduleJob, error)
 	RunNow(id string) error

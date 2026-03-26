@@ -306,6 +306,9 @@
           if (svcHeaderUseRef && svcHeaderValueRef) auth.header_value_ref = svcHeaderValueRef
           else auth.header_value = svcHeaderValue
           break
+        case 'url':
+          auth.token = svcToken
+          break
         case 'basic':
           auth.username = svcUsername
           if (svcBasicUseRef && svcPasswordRef) auth.password_ref = svcPasswordRef
@@ -647,6 +650,7 @@
       bearer: 'Bearer',
       header: 'Header',
       basic: 'Basic',
+      url: 'URL Path',
       oauth2_client: 'OAuth2',
       service_account: 'Service Acct',
       ssh_key: 'SSH'
@@ -934,6 +938,7 @@
         <option value="bearer">Bearer Token</option>
         <option value="header">Custom Header</option>
         <option value="basic">Basic Auth</option>
+        <option value="url">URL Path Token</option>
         <option value="oauth2_client">OAuth2 Client</option>
         <option value="service_account">Service Account (JSON Key)</option>
         <option value="ssh_key">SSH Key</option>
@@ -981,6 +986,11 @@
         {:else}
           <input class="input" type="password" bind:value={svcHeaderValue} placeholder="Header value" />
         {/if}
+      </div>
+    {:else if svcAuthType === 'url'}
+      <div class="form-group">
+        <label>Token <span style="font-weight:normal;color:var(--text-dim)">(replaces <code>{'{token}'}</code> in Base URL)</span></label>
+        <input class="input" type="password" bind:value={svcToken} placeholder="API key" />
       </div>
     {:else if svcAuthType === 'basic'}
       <div class="form-group">

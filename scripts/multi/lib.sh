@@ -437,6 +437,7 @@ EOF
       - SETGID
       - DAC_OVERRIDE
       - FOWNER
+      - NET_ADMIN
     logging:
       driver: json-file
       options:

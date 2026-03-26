@@ -116,6 +116,7 @@ services:
       - SETGID
       - DAC_OVERRIDE
       - FOWNER
+      - NET_ADMIN  # nettrack-helper: conntrack events for network monitoring
 
   whisper:
     image: {{.WhisperImage}}

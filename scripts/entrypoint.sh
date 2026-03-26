@@ -121,6 +121,13 @@ for protected_app in developer; do
     fi
 done
 
+# Phase 2.9: Start nettrack helper (runs as root with CAP_NET_ADMIN for conntrack).
+# The helper writes connection events to a Unix socket that the daemon reads.
+if [ -x /opt/alf/bin/nettrack-helper ]; then
+    /opt/alf/bin/nettrack-helper &
+    echo "entrypoint: nettrack-helper started (pid=$!)"
+fi
+
 # Phase 3: Drop to alf (uid 1000) and start daemon with zero capabilities.
 # setpriv strips all inheritable capabilities - combined with no-new-privileges:true,
 # the daemon process cannot regain any capabilities after this point.

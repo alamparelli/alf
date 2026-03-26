@@ -239,6 +239,10 @@ func main() {
 	os.Setenv("HTTPS_PROXY", proxyURL)
 	os.Setenv("NO_PROXY", "127.0.0.1,localhost")
 
+	// Start network connection tracker (connects to nettrack-helper if available).
+	netTracker := firewall.NewNetTracker(fwProxy, "/run/alf-nettrack.sock")
+	go netTracker.Run(context.Background())
+
 	// Start vault-server if binary is available.
 	var vaultMgr *vault.Manager
 	if _, err := exec.LookPath("vault-server"); err == nil {
@@ -746,7 +750,7 @@ func main() {
 			})
 			log.Printf("[tasks] event: task=%s status=%s", taskID[:min(8, len(taskID))], status)
 		}
-		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {

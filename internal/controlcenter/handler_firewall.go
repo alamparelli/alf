@@ -11,6 +11,7 @@ import (
 type FirewallHandler struct {
 	Store       *firewall.Store
 	Proxy       *firewall.Proxy
+	NetTracker  *firewall.NetTracker
 	Notifier    Notifier
 	EventBroker *EventBroker
 }
@@ -34,6 +35,9 @@ func (h *FirewallHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.Store != nil {
 			resp["hosts"] = h.Store.Hosts()
+		}
+		if h.NetTracker != nil {
+			resp["kill_switch"] = h.NetTracker.KillSwitchActive()
 		}
 		respondJSON(w, http.StatusOK, resp)
 

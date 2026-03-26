@@ -44,6 +44,7 @@
 
   // Persistent host stats from backend
   let hosts = $state<any[]>([])
+  let killSwitch = $state(false)
 
   async function loadFirewall() {
     loading = true
@@ -52,6 +53,7 @@
       config = data.config || { mode: 'log-only', port: 4751, rules: [] }
       log = data.log || []
       hosts = (data.hosts || []).sort((a: any, b: any) => b.count - a.count)
+      if (data.kill_switch !== undefined) killSwitch = data.kill_switch
     } catch (e: any) {
       toasts.show(e.error || 'Failed to load firewall', 'error')
     } finally {
@@ -109,6 +111,20 @@
     saveConfig()
   }
 
+  async function toggleKillSwitch() {
+    try {
+      const result = await api<any>('/api/firewall/killswitch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !killSwitch })
+      })
+      killSwitch = result.enabled
+      toasts.show(killSwitch ? 'Kill switch ENABLED — all traffic blocked' : 'Kill switch disabled', killSwitch ? 'error' : 'success')
+    } catch (e: any) {
+      toasts.show(e.error || 'Failed to toggle kill switch', 'error')
+    }
+  }
+
   async function clearLog() {
     try {
       await api('/api/firewall', { method: 'DELETE' })
@@ -140,24 +156,34 @@
 <div class="firewall-view">
   <h2>Firewall</h2>
 
-  <!-- Mode toggle -->
+  <!-- Mode toggle + Kill switch -->
   <Card>
     <div class="mode-section">
       <h3>Mode</h3>
-      <div class="segmented">
+      <div class="mode-controls">
+        <div class="segmented">
+          <button
+            class="seg-btn"
+            class:active={config.mode === 'log-only'}
+            onclick={() => setMode('log-only')}
+          >
+            <ShieldOff size={14} /> Log Only
+          </button>
+          <button
+            class="seg-btn"
+            class:active={config.mode === 'enforce'}
+            onclick={() => setMode('enforce')}
+          >
+            <Shield size={14} /> Enforce
+          </button>
+        </div>
         <button
-          class="seg-btn"
-          class:active={config.mode === 'log-only'}
-          onclick={() => setMode('log-only')}
+          class="kill-switch-btn"
+          class:active={killSwitch}
+          onclick={toggleKillSwitch}
+          title={killSwitch ? 'Click to resume network' : 'Block ALL outbound traffic immediately'}
         >
-          <ShieldOff size={14} /> Log Only
-        </button>
-        <button
-          class="seg-btn"
-          class:active={config.mode === 'enforce'}
-          onclick={() => setMode('enforce')}
-        >
-          <Shield size={14} /> Enforce
+          {killSwitch ? '🔴 Kill Switch ON' : 'Kill Switch'}
         </button>
       </div>
     </div>
@@ -229,7 +255,7 @@
                 <tr class:blocked={entry.blocked}>
                   <td class="mono">{formatTime(entry.time)}</td>
                   <td><span class="method-badge">{entry.method}</span></td>
-                  <td class="mono">{entry.host}{#if entry.source === 'vault'} <span class="source-badge">vault</span>{/if}</td>
+                  <td class="mono">{entry.host}{#if entry.source}<span class="source-badge" class:nettrack={entry.source === 'nettrack'}>{entry.source}</span>{/if}</td>
                   <td class="mono path-cell">{entry.path}</td>
                   <td>
                     <span class="status-badge" class:status-ok={entry.status >= 200 && entry.status < 400} class:status-blocked={entry.blocked}>
@@ -335,6 +361,34 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+  }
+
+  .mode-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .kill-switch-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .kill-switch-btn:hover {
+    border-color: var(--red, #e55);
+    color: var(--red, #e55);
+  }
+
+  .kill-switch-btn.active {
+    background: rgba(230, 80, 80, 0.15);
+    border-color: var(--red, #e55);
+    color: var(--red, #e55);
   }
 
   .segmented {
@@ -612,6 +666,11 @@
     text-transform: uppercase;
     vertical-align: middle;
     margin-left: 4px;
+  }
+
+  .source-badge.nettrack {
+    background: rgba(80, 160, 220, 0.15);
+    color: #5090d0;
   }
 
   .empty-sm {

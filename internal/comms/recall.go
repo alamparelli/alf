@@ -7,10 +7,16 @@ import (
 )
 
 const (
-	recallDistanceThreshold = 1.2
-	recallLimit             = 3
-	recallMinMessageLength  = 5
+	defaultRecallDistance = 1.0
+	defaultRecallLimit   = 5
+	recallMinMessageLength = 5
 )
+
+// RecallConfig holds configurable recall parameters.
+type RecallConfig struct {
+	Limit    int     // max results, 0 = default (5)
+	Distance float64 // max cosine distance, 0 = default (1.0)
+}
 
 // RecallResult contains the formatted recall block and best distance score.
 type RecallResult struct {
@@ -22,8 +28,22 @@ type RecallResult struct {
 // Recall searches long-term memory for relevant context.
 // Returns ("", 2.0, 0) if nothing relevant or recaller is nil.
 func Recall(recaller MemoryRecaller, message string) RecallResult {
+	return RecallWithConfig(recaller, message, RecallConfig{})
+}
+
+// RecallWithConfig searches long-term memory with explicit configuration.
+func RecallWithConfig(recaller MemoryRecaller, message string, cfg RecallConfig) RecallResult {
 	if recaller == nil || len(message) < recallMinMessageLength {
 		return RecallResult{BestDist: 2.0}
+	}
+
+	limit := cfg.Limit
+	if limit <= 0 {
+		limit = defaultRecallLimit
+	}
+	distThreshold := cfg.Distance
+	if distThreshold <= 0 {
+		distThreshold = defaultRecallDistance
 	}
 
 	q := message
@@ -31,7 +51,7 @@ func Recall(recaller MemoryRecaller, message string) RecallResult {
 		q = q[:60] + "..."
 	}
 
-	results, err := recaller.Search(message, recallLimit)
+	results, err := recaller.Search(message, limit)
 	if err != nil {
 		log.Printf("[comms] recall: search error for %q: %v", q, err)
 		return RecallResult{BestDist: 2.0}
@@ -47,7 +67,7 @@ func Recall(recaller MemoryRecaller, message string) RecallResult {
 	count := 0
 
 	for _, r := range results {
-		if r.Distance >= recallDistanceThreshold {
+		if r.Distance >= distThreshold {
 			filtered++
 			continue
 		}
@@ -64,7 +84,7 @@ func Recall(recaller MemoryRecaller, message string) RecallResult {
 	if count > 0 {
 		log.Printf("[comms] recall: injected %d memories for %q (best=%.2f, filtered %d by distance)", count, q, bestDist, filtered)
 	} else {
-		log.Printf("[comms] recall: %d results for %q but all filtered by distance (>=%.1f)", len(results), q, recallDistanceThreshold)
+		log.Printf("[comms] recall: %d results for %q but all filtered by distance (>=%.1f)", len(results), q, distThreshold)
 	}
 
 	return RecallResult{

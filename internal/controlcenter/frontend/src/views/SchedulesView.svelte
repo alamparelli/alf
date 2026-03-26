@@ -487,10 +487,12 @@
         <label>
           Output Mode
           <select bind:value={form.output}>
-            <option value="chat">chat</option>
-            <option value="file">file</option>
-            <option value="both">both</option>
-            <option value="silent">silent</option>
+            <option value="chat">Chat (TG + CC)</option>
+            <option value="tg">Telegram only</option>
+            <option value="cc">Control Center only</option>
+            <option value="file">File</option>
+            <option value="both">Chat + File</option>
+            <option value="silent">Silent</option>
           </select>
         </label>
         <label>

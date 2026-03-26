@@ -26,6 +26,7 @@
   import { events } from './stores/events.svelte'
   import { theme } from './stores/theme.svelte'
   import { toasts } from './stores/toast.svelte'
+  import { sound } from './stores/sound.svelte'
   import { api } from './lib/api'
 
   let showWizard = $state(false)
@@ -36,6 +37,12 @@
     events.connect()
     events.subscribe('apps', () => apps.load())
     events.subscribe('marketplace', () => apps.load())
+    events.subscribe('new_message', (data?: string) => {
+      const preview = data && data !== 'reload' ? data : 'New scheduled message'
+      const truncated = preview.length > 80 ? preview.slice(0, 80) + '...' : preview
+      toasts.info(truncated)
+      sound.play()
+    })
 
     // Auto-show setup wizard on first visit if setup is incomplete
     if (!localStorage.getItem('alf-welcomed')) {

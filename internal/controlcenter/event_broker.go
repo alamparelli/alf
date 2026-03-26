@@ -11,40 +11,53 @@ import (
 type EventType string
 
 const (
-	EventSchedules   EventType = "schedules"
-	EventTasks       EventType = "tasks"
-	EventFirewall    EventType = "firewall"
-	EventApps        EventType = "apps"
+	EventSchedules  EventType = "schedules"
+	EventTasks      EventType = "tasks"
+	EventFirewall   EventType = "firewall"
+	EventApps       EventType = "apps"
 	EventMarketplace EventType = "marketplace"
-	EventVault       EventType = "vault"
-	EventConfig      EventType = "config"
-	EventTiers       EventType = "tiers"
-	EventTools       EventType = "tools"
-	EventSkills      EventType = "skills"
-	EventAgents      EventType = "agents"
+	EventVault      EventType = "vault"
+	EventConfig     EventType = "config"
+	EventTiers      EventType = "tiers"
+	EventTools      EventType = "tools"
+	EventSkills     EventType = "skills"
+	EventAgents     EventType = "agents"
+	EventNewMessage EventType = "new_message"
 )
+
+// sseEvent is an internal message carrying type + optional data payload.
+type sseEvent struct {
+	Type EventType
+	Data string // "reload" if empty
+}
 
 // EventBroker broadcasts typed events to all connected SSE clients.
 // Replaces ScheduleEventBroker with a multiplexed single-endpoint design.
 type EventBroker struct {
 	mu      sync.Mutex
-	clients map[chan EventType]struct{}
+	clients map[chan sseEvent]struct{}
 }
 
 // NewEventBroker creates a new broker.
 func NewEventBroker() *EventBroker {
 	return &EventBroker{
-		clients: make(map[chan EventType]struct{}),
+		clients: make(map[chan sseEvent]struct{}),
 	}
 }
 
 // Emit sends a typed event to all connected SSE clients. Non-blocking per client.
 func (b *EventBroker) Emit(event EventType) {
+	b.EmitWithData(event, "reload")
+}
+
+// EmitWithData sends a typed event with a custom data payload.
+func (b *EventBroker) EmitWithData(event EventType, data string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	msg := sseEvent{Type: event, Data: data}
 	for ch := range b.clients {
 		select {
-		case ch <- event:
+		case ch <- msg:
 		default: // drop if client is slow
 		}
 	}
@@ -80,7 +93,7 @@ func (b *EventBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "event: ping\ndata: connected\n\n")
 	flusher.Flush()
 
-	ch := make(chan EventType, 8)
+	ch := make(chan sseEvent, 8)
 	b.mu.Lock()
 	b.clients[ch] = struct{}{}
 	b.mu.Unlock()
@@ -97,8 +110,8 @@ func (b *EventBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
-		case event := <-ch:
-			fmt.Fprintf(w, "event: %s\ndata: reload\n\n", event)
+		case msg := <-ch:
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", msg.Type, msg.Data)
 			flusher.Flush()
 		}
 	}

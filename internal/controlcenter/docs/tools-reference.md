@@ -205,7 +205,7 @@ schedule create --name "deploy check" --schedule "2026-03-10T15:00:00Z" \
 | `--tier` | No | LLM tier name, or `direct` for bash. Auto-detected if `--command` given |
 | `--prompt` | LLM jobs | Prompt sent to the LLM |
 | `--command` | Direct jobs | Bash command to execute |
-| `--output` | No | `chat` (default), `file`, `both`, `silent` |
+| `--output` | No | `chat` (TG+CC, default), `tg`, `cc`, `file`, `both` (chat+file), `silent` |
 | `--skills` | No | Comma-separated skill names to inject (LLM jobs only) |
 
 ### schedule list

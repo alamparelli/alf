@@ -137,6 +137,15 @@ The file `context/extraction-guide.md` controls what the extractor looks for. AL
 | `decision` | Choices made, approaches agreed upon |
 | `contact` | People names, emails, companies, roles |
 
+### Recall (auto-inject)
+
+When you send a message, ALF automatically searches long-term memory for relevant context and injects matching memories into the conversation.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `recall_limit` | int | `5` | Max number of memories injected per message. |
+| `recall_distance` | float | `1.0` | Max cosine distance for recall results. Lower = stricter (only very relevant). Range: 0.0–2.0. |
+
 ---
 
 ## DNS

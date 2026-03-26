@@ -198,11 +198,7 @@
     if (!viewingPath) return
     savingFile = true
     try {
-      await api(`/api/workspace?path=${encodeURIComponent(viewingPath)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: fileEditContent
-      })
+      await api('PUT', `/api/workspace?path=${encodeURIComponent(viewingPath)}`, { content: fileEditContent })
       toasts.show('File saved', 'success')
       viewingFile = { ...viewingFile!, content: fileEditContent }
       fileEditMode = false

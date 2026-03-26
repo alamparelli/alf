@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	cc "github.com/alamparelli/alf/internal/controlcenter"
 )
 
 var tokenRegex = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
@@ -536,7 +538,7 @@ func isPortAvailable(port string) bool {
 }
 
 func promptPort(reader *bufio.Reader, previous string) string {
-	defaultPort := "8080"
+	defaultPort := cc.DefaultPort
 	if previous != "" {
 		defaultPort = previous
 	}
@@ -1284,7 +1286,7 @@ func generateInitMagicLink(dir string) string {
 	PrintInfo("Waiting for daemon to be ready...")
 	for i := 0; i < 60; i++ {
 		health := exec.Command("docker", "exec", "alf",
-			"curl", "-sf", "http://127.0.0.1:8080/health")
+			"curl", "-sf", "http://127.0.0.1:"+cc.DefaultPort+"/health")
 		if health.Run() == nil {
 			break
 		}
@@ -1294,7 +1296,7 @@ func generateInitMagicLink(dir string) string {
 	cmd := exec.Command("docker", "exec", "alf",
 		"curl", "-sf", "-X", "POST",
 		"-H", "Authorization: Bearer "+token,
-		"http://127.0.0.1:8080/api/magic-link?days=0")
+		"http://127.0.0.1:"+cc.DefaultPort+"/api/magic-link?days=0")
 	out, err := cmd.Output()
 	if err != nil {
 		PrintWarning("Could not generate magic link - try: alf magic-link")

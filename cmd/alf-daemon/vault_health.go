@@ -87,7 +87,7 @@ func (c *vaultTokenChecker) alert(service, msg string) {
 		return
 	}
 	c.alerted[service] = time.Now()
-	log.Printf("[vault-health] %s", msg)
+	log.Printf("[vault] %s", msg)
 	if c.sendAlert != nil {
 		c.sendAlert(msg)
 	}

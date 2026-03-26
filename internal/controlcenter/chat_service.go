@@ -916,8 +916,8 @@ func extFromMimeMap(mimeType, fileName string) string {
 
 // recallMemories searches long-term memory for relevant context.
 // Returns a formatted system prompt block, or "" if nothing relevant.
-const recallDistanceThreshold = 1.2
-const recallLimit = 3
+const recallDistanceThreshold = DefaultRecallMinDist
+const recallLimit = DefaultRecallTopK
 
 // StartJob launches Ask in a background goroutine and returns the job for streaming.
 // If a job is already running for the same conversation, returns it for reconnection.

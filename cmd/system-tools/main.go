@@ -16,9 +16,11 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	cc "github.com/alamparelli/alf/internal/controlcenter"
 )
 
-var ccBaseURL = "http://localhost:8080"
+var ccBaseURL = "http://localhost:" + cc.DefaultPort
 
 func main() {
 	if url := os.Getenv("ALF_CC_URL"); url != "" {

@@ -121,7 +121,7 @@ func main() {
 	// CC external URL for magic link generation.
 	ccExternalURL := os.Getenv("CC_EXTERNAL_URL")
 	if ccExternalURL == "" {
-		ccExternalURL = "http://localhost:8080"
+		ccExternalURL = "http://localhost:" + cc.DefaultPort
 	}
 
 	// Ensure log directory exists before setting up file logging.

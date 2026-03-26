@@ -35,7 +35,9 @@ func (t *Tracker) Init() error {
 	// Always mark directory as safe (required when daemon runs as root but dir is owned by another user).
 	_ = t.git("config", "--global", "--add", "safe.directory", t.dir)
 	if _, err := os.Stat(gitDir); err == nil {
-		// Repo exists - ensure .gitignore is up-to-date.
+		// Repo exists - clean up stale lock files left by a crash/restart.
+		t.removeStalelock()
+		// Ensure .gitignore is up-to-date.
 		_ = t.writeGitignore()
 		return nil
 	}
@@ -70,7 +72,14 @@ func (t *Tracker) Commit(msg string) error {
 	defer t.mu.Unlock()
 
 	if err := t.git("add", "-A"); err != nil {
-		return fmt.Errorf("git add: %w", err)
+		// Stale index.lock from a crash — remove and retry once.
+		if t.removeStalelock() {
+			if err2 := t.git("add", "-A"); err2 != nil {
+				return fmt.Errorf("git add (after lock cleanup): %w", err2)
+			}
+		} else {
+			return fmt.Errorf("git add: %w", err)
+		}
 	}
 
 	// Check if there are staged changes.
@@ -118,6 +127,17 @@ func (t *Tracker) Stop() {
 		t.stopped = true
 		close(t.stopCh)
 	}
+}
+
+// removeStalelock removes .git/index.lock if it exists (left behind by a crash).
+// Returns true if a lock was removed.
+func (t *Tracker) removeStalelock() bool {
+	lock := filepath.Join(t.dir, ".git", "index.lock")
+	if err := os.Remove(lock); err == nil {
+		fmt.Fprintf(os.Stderr, "gittrack: removed stale index.lock\n")
+		return true
+	}
+	return false
 }
 
 func (t *Tracker) git(args ...string) error {

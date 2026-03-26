@@ -31,9 +31,13 @@ echo "Current: ${latest}"
 echo "Next:    ${next}"
 echo ""
 
-# Tag and push
+# Tag (skip if already exists from a previous interrupted run)
 branch=$(git branch --show-current)
-git tag "$next"
+if git rev-parse "$next" >/dev/null 2>&1; then
+  echo "Tag ${next} already exists — reusing"
+else
+  git tag "$next"
+fi
 
 if [ "$LOCAL_BUILD" = true ]; then
   # Local build: push code only (no tag push = no CI/CD trigger).

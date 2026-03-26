@@ -229,6 +229,7 @@ services:
       - SETGID
       - DAC_OVERRIDE
       - FOWNER
+      - NET_ADMIN
 
   whisper:
     image: alf-whisper:latest

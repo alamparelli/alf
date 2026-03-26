@@ -37,8 +37,9 @@ type Deps struct {
 	MemProvider    provider.Provider  // nil if memory unavailable
 	Scheduler      ScheduleEngine     // nil if scheduler unavailable
 	ScheduleRunLog *scheduler.RunLog  // nil if scheduler unavailable
-	FirewallStore  *firewall.Store     // nil if firewall unavailable
+	FirewallStore  *firewall.Store      // nil if firewall unavailable
 	FirewallProxy  *firewall.Proxy     // nil if firewall unavailable
+	NetTracker     *firewall.NetTracker // nil if nettrack unavailable
 	VaultManager     *vault.Manager      // nil if vault unavailable
 	EventBroker      *EventBroker           // global SSE event bus
 	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable (deprecated, use EventBroker)
@@ -262,7 +263,12 @@ func HandlerFactory(deps Deps) http.Handler {
 	mux.Handle("/api/firewall", &FirewallHandler{
 		Store:       deps.FirewallStore,
 		Proxy:       deps.FirewallProxy,
+		NetTracker:  deps.NetTracker,
 		Notifier:    deps.Notifier,
+		EventBroker: deps.EventBroker,
+	})
+	mux.Handle("/api/firewall/killswitch", &FirewallKillSwitchHandler{
+		NetTracker:  deps.NetTracker,
 		EventBroker: deps.EventBroker,
 	})
 

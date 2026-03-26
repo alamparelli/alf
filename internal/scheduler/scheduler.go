@@ -207,7 +207,7 @@ var validOutputs = map[string]bool{
 }
 
 // Create adds a new user job.
-func (e *Engine) Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string) (*Job, error) {
+func (e *Engine) Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string, reason string) (*Job, error) {
 	if output == "" {
 		output = "chat"
 	}
@@ -242,6 +242,7 @@ func (e *Engine) Create(name, schedule, tier, prompt, command, output string, ti
 		Output:    output,
 		Timeout:   timeout,
 		Skills:    skills,
+		Reason:    reason,
 		Enabled:   true,
 		CreatedAt: time.Now(),
 	}
@@ -265,7 +266,7 @@ func (e *Engine) Create(name, schedule, tier, prompt, command, output string, ti
 }
 
 // CreateReminder adds a push-notification job (no LLM, no command - just a message).
-func (e *Engine) CreateReminder(name, schedule, message, output string, timeout time.Duration) (*Job, error) {
+func (e *Engine) CreateReminder(name, schedule, message, output string, timeout time.Duration, reason string) (*Job, error) {
 	if output == "" {
 		output = "chat"
 	}
@@ -280,6 +281,7 @@ func (e *Engine) CreateReminder(name, schedule, message, output string, timeout 
 		Message:   message,
 		Output:    output,
 		Timeout:   timeout,
+		Reason:    reason,
 		Enabled:   true,
 		CreatedAt: time.Now(),
 	}
@@ -335,7 +337,7 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 	}
 	// System jobs allow only enabled, output, and description changes.
 	if j.System {
-		systemAllowed := map[string]bool{"enabled": true, "output": true, "description": true}
+		systemAllowed := map[string]bool{"enabled": true, "output": true, "description": true, "reason": true}
 		for k := range fields {
 			if !systemAllowed[k] {
 				return nil, fmt.Errorf("cannot modify field %q on system job %s (allowed: enabled, output, description)", k, id)
@@ -343,7 +345,7 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 		}
 	}
 	// Managed jobs allow only enabled, output, tier, schedule, and description changes.
-	managedAllowed := map[string]bool{"enabled": true, "output": true, "tier": true, "schedule": true, "description": true}
+	managedAllowed := map[string]bool{"enabled": true, "output": true, "tier": true, "schedule": true, "description": true, "reason": true}
 	if j.Managed {
 		for k := range fields {
 			if !managedAllowed[k] {
@@ -392,6 +394,8 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 			j.Command = v
 		case "message":
 			j.Message = v
+		case "reason":
+			j.Reason = v
 		case "output":
 			j.Output = v
 		case "timeout":

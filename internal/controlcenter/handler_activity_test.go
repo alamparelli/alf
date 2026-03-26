@@ -103,10 +103,10 @@ type mockScheduleEngine struct {
 }
 
 func (m *mockScheduleEngine) List(userOnly bool) []ScheduleJob { return m.jobs }
-func (m *mockScheduleEngine) Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string) (*ScheduleJob, error) {
+func (m *mockScheduleEngine) Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string, reason string) (*ScheduleJob, error) {
 	return nil, nil
 }
-func (m *mockScheduleEngine) CreateReminder(name, schedule, message, output string, timeout time.Duration) (*ScheduleJob, error) {
+func (m *mockScheduleEngine) CreateReminder(name, schedule, message, output string, timeout time.Duration, reason string) (*ScheduleJob, error) {
 	return nil, nil
 }
 func (m *mockScheduleEngine) Delete(id string) error                              { return nil }

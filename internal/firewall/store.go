@@ -15,6 +15,7 @@ type HostStat struct {
 	Allowed  int       `json:"allowed"`
 	Blocked  int       `json:"blocked"`
 	LastSeen time.Time `json:"last_seen"`
+	Vault    bool      `json:"vault,omitempty"` // true if host is a vault-proxy service
 }
 
 // Store handles persistence of firewall config and host stats.
@@ -37,7 +38,7 @@ func NewStore(configDir string) *Store {
 }
 
 // RecordHost updates the cumulative stats for a host.
-func (s *Store) RecordHost(host string, blocked bool) {
+func (s *Store) RecordHost(host string, blocked bool, vault bool) {
 	s.mu.Lock()
 	h, ok := s.hosts[host]
 	if !ok {
@@ -49,6 +50,9 @@ func (s *Store) RecordHost(host string, blocked bool) {
 		h.Blocked++
 	} else {
 		h.Allowed++
+	}
+	if vault {
+		h.Vault = true
 	}
 	h.LastSeen = time.Now()
 	s.mu.Unlock()

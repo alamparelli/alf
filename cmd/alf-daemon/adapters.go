@@ -345,8 +345,8 @@ func (a *ccScheduleAdapter) List(userOnly bool) []cc.ScheduleJob {
 	return out
 }
 
-func (a *ccScheduleAdapter) Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string) (*cc.ScheduleJob, error) {
-	j, err := a.engine.Create(name, schedule, tier, prompt, command, output, timeout, skills)
+func (a *ccScheduleAdapter) Create(name, schedule, tier, prompt, command, output string, timeout time.Duration, skills []string, reason string) (*cc.ScheduleJob, error) {
+	j, err := a.engine.Create(name, schedule, tier, prompt, command, output, timeout, skills, reason)
 	if err != nil {
 		return nil, err
 	}
@@ -354,8 +354,8 @@ func (a *ccScheduleAdapter) Create(name, schedule, tier, prompt, command, output
 	return &sj, nil
 }
 
-func (a *ccScheduleAdapter) CreateReminder(name, schedule, message, output string, timeout time.Duration) (*cc.ScheduleJob, error) {
-	j, err := a.engine.CreateReminder(name, schedule, message, output, timeout)
+func (a *ccScheduleAdapter) CreateReminder(name, schedule, message, output string, timeout time.Duration, reason string) (*cc.ScheduleJob, error) {
+	j, err := a.engine.CreateReminder(name, schedule, message, output, timeout, reason)
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +385,7 @@ func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 		ID:          j.ID,
 		Name:        j.Name,
 		Description: j.Description,
+		Reason:      j.Reason,
 		Schedule:    j.Schedule,
 		Tier:       j.Tier,
 		Prompt:     j.Prompt,

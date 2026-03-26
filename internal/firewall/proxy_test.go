@@ -125,6 +125,65 @@ func TestModeLogOnlyDoesNotBlock(t *testing.T) {
 	}
 }
 
+func TestCheckAndRecord(t *testing.T) {
+	cfg := &Config{
+		Mode: ModeEnforce,
+		Rules: []Rule{
+			{Pattern: "blocked.com", Action: "deny"},
+			{Pattern: "allowed.com", Action: "allow"},
+		},
+	}
+	p := NewProxy(cfg)
+
+	// Check allowed host.
+	rule, action, blocked := p.Check("allowed.com")
+	if blocked || action != "allow" {
+		t.Errorf("Check(allowed.com) = rule=%q action=%q blocked=%v, want allowed", rule, action, blocked)
+	}
+
+	// Check blocked host.
+	rule, action, blocked = p.Check("blocked.com")
+	if !blocked || action != "deny" {
+		t.Errorf("Check(blocked.com) = rule=%q action=%q blocked=%v, want blocked", rule, action, blocked)
+	}
+
+	// Check unknown host (no matching rule).
+	_, action, blocked = p.Check("unknown.com")
+	if blocked {
+		t.Error("Check(unknown.com) should not block when no rule matches")
+	}
+
+	// Record external entry and verify it appears in log.
+	p.Record(RequestEntry{Host: "api.klipy.com", Method: "GET", Path: "/search", Source: "vault"})
+	entries := p.Log.Entries()
+	found := false
+	for _, e := range entries {
+		if e.Host == "api.klipy.com" && e.Source == "vault" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Record() entry with source=vault not found in log")
+	}
+}
+
+func TestCheckLogOnly(t *testing.T) {
+	cfg := &Config{
+		Mode: ModeLogOnly,
+		Rules: []Rule{
+			{Pattern: "evil.com", Action: "deny"},
+		},
+	}
+	p := NewProxy(cfg)
+
+	// In log-only mode, deny rules should NOT block.
+	_, _, blocked := p.Check("evil.com")
+	if blocked {
+		t.Error("Check in log-only mode should not block")
+	}
+}
+
 func TestStripPort(t *testing.T) {
 	tests := []struct {
 		input, want string

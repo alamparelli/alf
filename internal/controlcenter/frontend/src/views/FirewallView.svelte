@@ -26,6 +26,7 @@
     status: number
     blocked: boolean
     rule: string
+    source?: string  // "" = direct proxy, "vault" = vault-proxy
   }
 
   let config = $state<FirewallConfig>({ mode: 'log-only', port: 4751, rules: [] })
@@ -228,7 +229,7 @@
                 <tr class:blocked={entry.blocked}>
                   <td class="mono">{formatTime(entry.time)}</td>
                   <td><span class="method-badge">{entry.method}</span></td>
-                  <td class="mono">{entry.host}</td>
+                  <td class="mono">{entry.host}{#if entry.source === 'vault'} <span class="source-badge">vault</span>{/if}</td>
                   <td class="mono path-cell">{entry.path}</td>
                   <td>
                     <span class="status-badge" class:status-ok={entry.status >= 200 && entry.status < 400} class:status-blocked={entry.blocked}>
@@ -268,7 +269,7 @@
             <tbody>
               {#each hosts as h}
                 <tr class:blocked={h.blocked > 0 && h.allowed === 0}>
-                  <td class="mono">{h.host}</td>
+                  <td class="mono">{h.host}{#if h.vault} <span class="source-badge">vault</span>{/if}</td>
                   <td>{h.count}</td>
                   <td>{h.allowed}</td>
                   <td>{h.blocked || ''}</td>
@@ -599,6 +600,18 @@
   .status-blocked {
     background: rgba(230, 80, 80, 0.15);
     color: var(--red, #e55);
+  }
+
+  .source-badge {
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(160, 120, 220, 0.15);
+    color: #a078dc;
+    text-transform: uppercase;
+    vertical-align: middle;
+    margin-left: 4px;
   }
 
   .empty-sm {

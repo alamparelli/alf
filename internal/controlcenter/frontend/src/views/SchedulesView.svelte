@@ -19,7 +19,7 @@
   let showModal = $state(false);
   let editingJob = $state(null);
   let form = $state({
-    name: '', description: '', schedule: '', prompt: '', tier: '', output: 'chat',
+    name: '', description: '', reason: '', schedule: '', prompt: '', tier: '', output: 'chat',
     command: '', message: '', timeout: '', skills: [],
   });
 
@@ -225,7 +225,7 @@
   // --- Modal ---
   function openAddModal() {
     editingJob = null;
-    form = { name: '', schedule: '', prompt: '', tier: '', output: 'chat', command: '', message: '', timeout: '', skills: [] };
+    form = { name: '', description: '', reason: '', schedule: '', prompt: '', tier: '', output: 'chat', command: '', message: '', timeout: '', skills: [] };
     showModal = true;
   }
 
@@ -234,6 +234,7 @@
     form = {
       name: job.name,
       description: job.description || '',
+      reason: job.reason || '',
       schedule: job.schedule,
       prompt: job.prompt || '',
       tier: job.tier || '',
@@ -262,6 +263,7 @@
         if (form.output !== (editingJob.output || 'chat')) fields.output = form.output;
         if (form.command !== (editingJob.command || '')) fields.command = form.command;
         if (form.message !== (editingJob.message || '')) fields.message = form.message;
+        if (form.reason !== (editingJob.reason || '')) fields.reason = form.reason;
         if (form.timeout !== (editingJob.timeout || '')) fields.timeout = form.timeout;
 
         if (Object.keys(fields).length > 0) {
@@ -276,6 +278,7 @@
           output: form.output,
           command: form.command || undefined,
           message: form.message || undefined,
+          reason: form.reason || undefined,
           timeout: form.timeout || undefined,
           skills: form.skills.length ? form.skills : undefined,
         });
@@ -358,6 +361,9 @@
                 {/if}
                 {#if job.description}
                   <span class="job-description">{job.description}</span>
+                {/if}
+                {#if job.reason}
+                  <span class="job-reason">{job.reason}</span>
                 {/if}
               </div>
               <div class="job-meta">
@@ -479,6 +485,10 @@
         <label class="full-width">
           Schedule (cron or ISO date)
           <input type="text" bind:value={form.schedule} placeholder="0 9 * * * or 2026-03-25T10:00:00Z" />
+        </label>
+        <label class="full-width">
+          Reason
+          <input type="text" bind:value={form.reason} placeholder="Why does this job exist? (context for the LLM)" />
         </label>
         <label class="full-width">
           Prompt
@@ -621,6 +631,14 @@
     width: 100%;
     font-size: 0.78rem;
     color: var(--text-dim);
+    font-weight: normal;
+  }
+
+  .job-reason {
+    width: 100%;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-style: italic;
     font-weight: normal;
   }
 

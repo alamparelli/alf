@@ -18,6 +18,7 @@ type socketRequest struct {
 	Prompt   string            `json:"prompt,omitempty"`
 	Command  string            `json:"command,omitempty"`
 	Message  string            `json:"message,omitempty"`
+	Reason   string            `json:"reason,omitempty"`
 	Output   string            `json:"output,omitempty"`
 	Timeout  string            `json:"timeout,omitempty"`
 	ID       string            `json:"id,omitempty"`
@@ -99,6 +100,7 @@ func doCreate(sockPath string) {
 	prompt := args["prompt"]
 	command := args["command"]
 	message := args["message"]
+	reason := args["reason"]
 	output := args["output"]
 	timeout := args["timeout"]
 	skillsRaw := args["skills"]
@@ -121,6 +123,7 @@ func doCreate(sockPath string) {
 			Name:     name,
 			Schedule: schedule,
 			Message:  message,
+			Reason:   reason,
 			Output:   output,
 			Timeout:  timeout,
 		})
@@ -187,6 +190,7 @@ func doCreate(sockPath string) {
 		Tier:     tier,
 		Prompt:   prompt,
 		Command:  command,
+		Reason:   reason,
 		Output:   output,
 		Timeout:  timeout,
 		Skills:   skills,
@@ -394,6 +398,7 @@ func handleJSONInput(sockPath string, input map[string]any) {
 			Prompt:   str(input, "prompt"),
 			Command:  str(input, "command"),
 			Message:  str(input, "message"),
+			Reason:   str(input, "reason"),
 			Output:   str(input, "output"),
 			Timeout:  str(input, "timeout"),
 		}
@@ -467,7 +472,7 @@ func handleJSONInput(sockPath string, input map[string]any) {
 			os.Exit(1)
 		}
 		fields := make(map[string]string)
-		for _, k := range []string{"name", "schedule", "prompt", "command", "message", "output", "timeout", "enabled"} {
+		for _, k := range []string{"name", "schedule", "prompt", "command", "message", "reason", "output", "timeout", "enabled"} {
 			if v := str(input, k); v != "" {
 				fields[k] = v
 			}
@@ -501,6 +506,7 @@ Create options:
   --prompt <text>         Prompt for LLM tiers (required for LLM jobs)
   --command <cmd>         Bash command for direct tier (required for direct jobs)
   --message <text>        Direct push notification (no LLM, no command - just sends the message)
+  --reason <text>         Why this job exists (context injected into LLM at execution time)
   --output <dest>         telegram | file | both | silent (default: telegram)
   --timeout <duration>    Execution timeout (e.g. 5m, 10m, 1h). Defaults: direct=2m, LLM=5m, agent=30m
   --skills <s1,s2>        Comma-separated skill names (LLM jobs only)
@@ -534,7 +540,7 @@ Examples:
     --tier haiku --prompt "Check if v2.1 deployed correctly" --output telegram
 
 Update options:
-  schedule update <id> [--enabled true|false] [--schedule ...] [--prompt ...] [--command ...] [--message ...] [--name ...] [--output ...] [--timeout ...]
+  schedule update <id> [--enabled true|false] [--schedule ...] [--prompt ...] [--command ...] [--message ...] [--reason ...] [--name ...] [--output ...] [--timeout ...]
 
 Other:
   schedule list [--user]

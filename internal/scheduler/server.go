@@ -19,6 +19,7 @@ type socketRequest struct {
 	Prompt   string            `json:"prompt,omitempty"`
 	Command  string            `json:"command,omitempty"`
 	Message  string            `json:"message,omitempty"`
+	Reason   string            `json:"reason,omitempty"`
 	Output   string            `json:"output,omitempty"`
 	Timeout  string            `json:"timeout,omitempty"` // Go duration string (e.g. "10m", "1h")
 	ID       string            `json:"id,omitempty"`
@@ -120,7 +121,7 @@ func (s *Server) handleConn(conn net.Conn) {
 					break
 				}
 			}
-			job, err := s.engine.CreateReminder(req.Name, req.Schedule, req.Message, req.Output, timeout)
+			job, err := s.engine.CreateReminder(req.Name, req.Schedule, req.Message, req.Output, timeout, req.Reason)
 			if err != nil {
 				resp.Error = err.Error()
 			} else {
@@ -172,7 +173,7 @@ func (s *Server) handleConn(conn net.Conn) {
 				break
 			}
 		}
-		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Command, req.Output, timeout, req.Skills)
+		job, err := s.engine.Create(req.Name, req.Schedule, tier, req.Prompt, req.Command, req.Output, timeout, req.Skills, req.Reason)
 		if err != nil {
 			resp.Error = err.Error()
 		} else {

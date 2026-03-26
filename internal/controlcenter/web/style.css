@@ -252,7 +252,7 @@ h1, h2, h3, h4 { font-family: 'Sora', sans-serif; }
   border: none; border-radius: 0; padding: 0;
 }
 #terminalContainer .xterm { height: 100%; }
-#terminalContainer .xterm-viewport { overflow-y: auto !important; }
+#terminalContainer .xterm-screen { height: 100%; }
 #terminalContainer .xterm .xterm-selection div {
   background-color: rgba(108, 123, 196, 0.4) !important;
 }

@@ -100,7 +100,11 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Search files
 	if types["files"] {
-		resp.Files = h.searchFiles(q)
+		var extraExclude []string
+		if ex := r.URL.Query().Get("exclude"); ex != "" {
+			extraExclude = strings.Split(ex, ",")
+		}
+		resp.Files = h.searchFiles(q, extraExclude)
 	}
 
 	// Search docs
@@ -257,24 +261,26 @@ func (h *SearchHandler) remoteCatalogAppMatches(app marketplace.RemoteApp, query
 
 const maxFileResults = 20
 
-func (h *SearchHandler) searchFiles(query string) []any {
+// alwaysSkipDirs are internal dirs that are never searchable.
+var alwaysSkipDirs = map[string]bool{
+	"docs":         true, // indexed separately via searchDocs
+	".git":         true,
+	".claude":      true,
+	".cache":       true,
+	".local":       true,
+	"node_modules": true,
+	"go-path":      true,
+}
+
+func (h *SearchHandler) searchFiles(query string, extraExclude []string) []any {
 	var results []any
 
-	// Protected, system, and internal directories to skip
-	skipDirs := map[string]bool{
-		"apps":          true, // app internals not useful in file search
-		"tools":         true, // tool binaries and go module cache
-		"tools.d":       true,
-		"config.d":      true, // system config (tiers, presets)
-		"logs":          true,
-		"sessions":      true,
-		"docs":          true, // indexed separately via searchDocs
-		".git":          true,
-		".claude":       true,
-		".cache":        true,
-		".local":        true,
-		"node_modules":  true,
-		"go-path":       true,
+	skipDirs := make(map[string]bool, len(alwaysSkipDirs)+len(extraExclude))
+	for k := range alwaysSkipDirs {
+		skipDirs[k] = true
+	}
+	for _, d := range extraExclude {
+		skipDirs[d] = true
 	}
 
 	h.walkDir(h.DataDir, "", query, skipDirs, &results)
@@ -303,41 +309,40 @@ func (h *SearchHandler) walkDir(basePath, relPath string, query string, skipDirs
 			continue
 		}
 
-		// Skip protected directories
-		if entry.IsDir() && skipDirs[name] {
-			continue
-		}
-
 		fullRelPath := filepath.Join(relPath, name)
 		if relPath == "" {
 			fullRelPath = name
 		}
 
-		if entry.IsDir() {
-			// Add matching directories to results
+		// Use os.Stat to follow symlinks (DirEntry.IsDir returns false for symlinked dirs).
+		fullPath := filepath.Join(basePath, fullRelPath)
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			continue
+		}
+		isDir := info.IsDir()
+
+		// Skip protected directories
+		if isDir && skipDirs[name] {
+			continue
+		}
+
+		if isDir {
 			if h.fileMatches(name, fullRelPath, query) {
-				info, err := entry.Info()
-				if err == nil {
-					result := searchFileResult{
-						Path:    fullRelPath,
-						Name:    name,
-						Size:    info.Size(),
-						IsDir:   true,
-						ModTime: info.ModTime().UTC().Format(time.RFC3339),
-					}
-					*results = append(*results, result)
+				result := searchFileResult{
+					Path:    fullRelPath,
+					Name:    name,
+					Size:    info.Size(),
+					IsDir:   true,
+					ModTime: info.ModTime().UTC().Format(time.RFC3339),
 				}
+				*results = append(*results, result)
 			}
 			h.walkDir(basePath, fullRelPath, query, skipDirs, results)
 			continue
 		}
 
 		if h.fileMatches(name, fullRelPath, query) {
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-
 			result := searchFileResult{
 				Path:      fullRelPath,
 				Name:      name,

@@ -114,9 +114,14 @@ func TestSearchHandler_SearchFiles(t *testing.T) {
 func TestSearchHandler_ExcludesProtectedDirs(t *testing.T) {
 	h, dir := newTestSearchHandler(t)
 
-	// Create files in protected directories
-	protectedDirs := []string{"config.d", "logs", "sessions", ".git"}
-	for _, d := range protectedDirs {
+	// Create files in always-hidden directories
+	for _, d := range []string{".git", ".claude", ".cache"} {
+		pd := filepath.Join(dir, d)
+		os.MkdirAll(pd, 0o755)
+		os.WriteFile(filepath.Join(pd, "secret.txt"), []byte("secret"), 0o644)
+	}
+	// Create files in visible directories (config.d, logs are now searchable)
+	for _, d := range []string{"config.d", "logs"} {
 		pd := filepath.Join(dir, d)
 		os.MkdirAll(pd, 0o755)
 		os.WriteFile(filepath.Join(pd, "secret.txt"), []byte("secret"), 0o644)
@@ -136,9 +141,9 @@ func TestSearchHandler_ExcludesProtectedDirs(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("json unmarshal: %v", err)
 	}
-	// Should only find the normal file, not files in protected dirs
-	if len(resp.Files) != 1 {
-		t.Errorf("expected exactly 1 file result (excluding protected dirs), got %d", len(resp.Files))
+	// Should find normal file + visible dir files, but not hidden dir files
+	if len(resp.Files) != 3 {
+		t.Errorf("expected 3 file results (1 normal + 2 visible dirs), got %d", len(resp.Files))
 	}
 }
 
@@ -227,5 +232,91 @@ func TestSearchHandler_NoResults(t *testing.T) {
 	}
 	if len(resp.Apps) != 0 || len(resp.Files) != 0 {
 		t.Errorf("expected no results, got apps=%d files=%d", len(resp.Apps), len(resp.Files))
+	}
+}
+
+func TestSearchFiles_SymlinkDir(t *testing.T) {
+	h, dir := newTestSearchHandler(t)
+
+	// Create a real directory outside the data dir with a file inside.
+	realDir := filepath.Join(dir, "_external")
+	os.MkdirAll(realDir, 0o755)
+	os.WriteFile(filepath.Join(realDir, "symlinked-report.txt"), []byte("data"), 0o644)
+
+	// Create a symlink inside the data dir pointing to the real directory.
+	symlinkPath := filepath.Join(dir, "linked-project")
+	if err := os.Symlink(realDir, symlinkPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/search?q=linked-project&types=files", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp searchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+
+	// The symlinked directory should appear as a dir result.
+	found := false
+	for _, f := range resp.Files {
+		m, ok := f.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["name"] == "linked-project" {
+			if isDir, ok := m["is_dir"].(bool); !ok || !isDir {
+				t.Errorf("symlinked dir should have is_dir=true, got %v", m["is_dir"])
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected symlinked directory 'linked-project' in search results")
+	}
+}
+
+func TestSearchFiles_ExcludeParam(t *testing.T) {
+	h, dir := newTestSearchHandler(t)
+
+	// Create files in a "logs" directory and a normal file.
+	logsDir := filepath.Join(dir, "logs")
+	os.MkdirAll(logsDir, 0o755)
+	os.WriteFile(filepath.Join(logsDir, "app.log"), []byte("log data"), 0o644)
+	os.WriteFile(filepath.Join(dir, "app-notes.txt"), []byte("notes"), 0o644)
+
+	// Search for "app" with exclude=logs.
+	req := httptest.NewRequest("GET", "/api/search?q=app&types=files&exclude=logs", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp searchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+
+	// Should find app-notes.txt but NOT logs/app.log.
+	for _, f := range resp.Files {
+		m, ok := f.(map[string]any)
+		if !ok {
+			continue
+		}
+		path, _ := m["path"].(string)
+		if filepath.Dir(path) == "logs" || path == "logs" {
+			t.Errorf("file from excluded 'logs' dir should not appear: %s", path)
+		}
+	}
+	if len(resp.Files) == 0 {
+		t.Error("expected at least app-notes.txt in results")
 	}
 }

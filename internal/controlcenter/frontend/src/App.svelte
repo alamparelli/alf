@@ -20,7 +20,7 @@
   import ChatView from './views/ChatView.svelte'
   import SpotlightSearch from './components/SpotlightSearch.svelte'
   import SetupWizard from './components/SetupWizard.svelte'
-  import { X } from 'lucide-svelte'
+  import { X, Search } from 'lucide-svelte'
   import { nav, SYSTEM_TABS } from './stores/nav.svelte'
   import { apps } from './stores/apps.svelte'
   import { events } from './stores/events.svelte'
@@ -162,6 +162,15 @@
 
   <BottomNav />
 </div>
+
+{#if nav.currentView !== 'chat'}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <button class="spotlight-fab" onclick={() => window.dispatchEvent(new CustomEvent('alf:open-spotlight'))}>
+    <Search size={18} />
+    <span class="fab-tooltip">Search <kbd>{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+G</kbd></span>
+  </button>
+{/if}
 
 <Toast />
 <SpotlightSearch />
@@ -501,6 +510,67 @@
     }
     .sidebar-overlay {
       display: block;
+    }
+  }
+
+  :global(.spotlight-fab) {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 900;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  :global(.spotlight-fab:hover) {
+    transform: scale(1.08);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+  }
+
+  :global(.fab-tooltip) {
+    position: absolute;
+    right: 52px;
+    white-space: nowrap;
+    background: var(--bg-card, #2a2a2a);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  :global(.fab-tooltip kbd) {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    margin-left: 4px;
+  }
+
+  :global(.spotlight-fab:hover .fab-tooltip) {
+    opacity: 1;
+  }
+
+  @media (max-width: 768px) {
+    :global(.spotlight-fab) {
+      bottom: 72px;
+      right: 16px;
     }
   }
 </style>

@@ -262,3 +262,144 @@ func TestFileSessionStore_PrunesExpiredOnLoad(t *testing.T) {
 		t.Error("expired session should be pruned on load")
 	}
 }
+
+func TestSlidingExpiry_RenewsAfterHalfway(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	ss := NewSessionStore(func() time.Time { return now })
+
+	ttl := 10 * time.Hour
+	id, _ := ss.Issue(100, ttl)
+
+	originalExpiry := now.Add(ttl) // 10:00
+
+	// Advance 6h — past halfway (5h), remaining = 4h < 5h.
+	now = now.Add(6 * time.Hour)
+	ss.nowFn = func() time.Time { return now }
+
+	if !ss.Valid(id) {
+		t.Fatal("session should still be valid at 6h")
+	}
+
+	// After Valid(), expiresAt should be extended to now + ttl = 6h + 10h = 16:00.
+	ss.mu.Lock()
+	s := ss.sessions[id]
+	newExpiry := s.expiresAt
+	ss.mu.Unlock()
+
+	expectedExpiry := now.Add(ttl)
+	if !newExpiry.Equal(expectedExpiry) {
+		t.Errorf("expected expiresAt to be renewed to %v, got %v (original was %v)",
+			expectedExpiry, newExpiry, originalExpiry)
+	}
+}
+
+func TestSlidingExpiry_NoRenewBeforeHalfway(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	ss := NewSessionStore(func() time.Time { return now })
+
+	ttl := 10 * time.Hour
+	id, _ := ss.Issue(100, ttl)
+
+	originalExpiry := now.Add(ttl)
+
+	// Advance 3h — before halfway (5h), remaining = 7h > 5h.
+	now = now.Add(3 * time.Hour)
+	ss.nowFn = func() time.Time { return now }
+
+	if !ss.Valid(id) {
+		t.Fatal("session should be valid at 3h")
+	}
+
+	// expiresAt should be unchanged.
+	ss.mu.Lock()
+	s := ss.sessions[id]
+	currentExpiry := s.expiresAt
+	ss.mu.Unlock()
+
+	if !currentExpiry.Equal(originalExpiry) {
+		t.Errorf("expected expiresAt unchanged at %v, got %v", originalExpiry, currentExpiry)
+	}
+}
+
+func TestSlidingExpiry_ExpiredNotRenewed(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	ss := NewSessionStore(func() time.Time { return now })
+
+	ttl := 1 * time.Hour
+	id, _ := ss.Issue(100, ttl)
+
+	// Advance past TTL entirely.
+	now = now.Add(ttl + time.Second)
+	ss.nowFn = func() time.Time { return now }
+
+	if ss.Valid(id) {
+		t.Error("expired session should return false, not be renewed")
+	}
+}
+
+func TestSlidingExpiry_PersistsTTL(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/sessions.json"
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	ttl := 10 * time.Hour
+
+	// Create file-backed store, issue session with TTL.
+	ss1 := NewFileSessionStore(path, func() time.Time { return now })
+	id, _ := ss1.Issue(100, ttl)
+
+	// Simulate restart: load from same file.
+	ss2 := NewFileSessionStore(path, func() time.Time { return now })
+
+	// Advance past halfway (6h) and call Valid — TTL must have survived persistence.
+	now = now.Add(6 * time.Hour)
+	ss2.nowFn = func() time.Time { return now }
+
+	if !ss2.Valid(id) {
+		t.Fatal("session should be valid after reload at 6h")
+	}
+
+	// Verify sliding expiry kicked in (proves TTL survived).
+	ss2.mu.Lock()
+	s := ss2.sessions[id]
+	newExpiry := s.expiresAt
+	ss2.mu.Unlock()
+
+	expectedExpiry := now.Add(ttl)
+	if !newExpiry.Equal(expectedExpiry) {
+		t.Errorf("expected expiresAt renewed to %v after reload, got %v (TTL not persisted?)", expectedExpiry, newExpiry)
+	}
+}
+
+func TestSlidingExpiry_LegacySessionNoTTL(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	ss := NewSessionStore(func() time.Time { return now })
+
+	// Manually inject a legacy session with ttl=0 (simulating old data).
+	ss.mu.Lock()
+	ss.sessions["legacy-id"] = &session{
+		chatID:    100,
+		expiresAt: now.Add(24 * time.Hour),
+		ttl:       0, // legacy: no TTL stored
+	}
+	ss.mu.Unlock()
+
+	// Advance past halfway of the 24h window.
+	now = now.Add(13 * time.Hour)
+	ss.nowFn = func() time.Time { return now }
+
+	if !ss.Valid("legacy-id") {
+		t.Fatal("legacy session should still be valid at 13h")
+	}
+
+	// Verify expiresAt was NOT extended (ttl=0 skips sliding logic).
+	ss.mu.Lock()
+	s := ss.sessions["legacy-id"]
+	expiry := s.expiresAt
+	ss.mu.Unlock()
+
+	originalExpiry := time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)
+	if !expiry.Equal(originalExpiry) {
+		t.Errorf("legacy session (ttl=0) should not renew; expected %v, got %v", originalExpiry, expiry)
+	}
+}

@@ -87,9 +87,26 @@ chmod -R g+ws /home/alf/data
 chown -R alf:alf /opt/alf/config.d /opt/alf/vault-data
 chown alf:alf /etc/resolv.conf 2>/dev/null || true
 
-# Phase 2.6: Lock protected apps (root-owned, read-only for alf user).
+# Phase 2.6: Seed default apps from bundled defaults (as root, before locking).
+# This ensures bundled app updates are applied even when files are root-locked.
+DEFAULTS_DIR="/opt/alf/defaults/apps"
+APPS_DIR="/home/alf/data/apps"
+if [ -d "$DEFAULTS_DIR" ]; then
+    for app_src in "$DEFAULTS_DIR"/*/; do
+        slug=$(basename "$app_src")
+        app_dest="$APPS_DIR/$slug"
+        mkdir -p "$app_dest"
+        # Copy all files except data/ (preserve user data)
+        rsync -a --exclude='data/' "$app_src" "$app_dest/" 2>/dev/null || \
+            cp -r "$app_src"* "$app_dest/" 2>/dev/null || true
+        chown -R alf:alf "$app_dest"
+        echo "entrypoint: seeded app $slug"
+    done
+fi
+
+# Phase 2.7: Lock protected apps (root-owned, read-only for alf user).
 # The developer app has marketplace publishing capabilities and must not be
-# modifiable by the LLM which runs as uid 1000.
+# modifiable by the LLM which runs as uid 1000. Runs AFTER seeding.
 for protected_app in developer; do
     app_dir="/home/alf/data/apps/${protected_app}"
     if [ -d "$app_dir" ]; then

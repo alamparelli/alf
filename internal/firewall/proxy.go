@@ -103,6 +103,7 @@ type Proxy struct {
 	server *goproxy.ProxyHttpServer
 	config atomic.Pointer[Config]
 	Log    *RingBuffer
+	Store  *Store // optional: persists host stats
 }
 
 // NewProxy creates a firewall proxy with the given initial config.
@@ -142,12 +143,12 @@ func NewProxy(cfg *Config) *Proxy {
 
 		if blocked {
 			entry.Status = http.StatusForbidden
-			p.Log.Add(entry)
+			p.record(entry)
 			log.Printf("[firewall] BLOCKED %s %s (rule: %s)", req.Method, host, rule)
 			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, "blocked by firewall")
 		}
 
-		p.Log.Add(entry)
+		p.record(entry)
 		return req, nil
 	})
 
@@ -167,17 +168,36 @@ func NewProxy(cfg *Config) *Proxy {
 
 		if blocked {
 			entry.Status = http.StatusForbidden
-			p.Log.Add(entry)
+			p.record(entry)
 			log.Printf("[firewall] BLOCKED CONNECT %s (rule: %s)", hostname, rule)
 			return goproxy.RejectConnect, host
 		}
 
-		p.Log.Add(entry)
+		p.record(entry)
 		return goproxy.OkConnect, host
 	})
 
 	p.server = proxy
+
+	// Periodically save host stats to disk.
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			if p.Store != nil {
+				p.Store.SaveHosts()
+			}
+		}
+	}()
+
 	return p
+}
+
+// record logs an entry and updates persistent host stats.
+func (p *Proxy) record(entry RequestEntry) {
+	p.Log.Add(entry)
+	if p.Store != nil {
+		p.Store.RecordHost(entry.Host, entry.Blocked)
+	}
 }
 
 // Reload atomically swaps the config.

@@ -44,13 +44,13 @@ func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params mem
 		model = forceModel
 	}
 
-	// If explicitly set to "cli", skip API backends entirely.
-	if forceBackend == "cli" {
+	// If set to "cli" or not configured, use CLI directly (no API fallback cascade).
+	if forceBackend == "" || forceBackend == "cli" {
 		return a.invokeCLI(ctx, prompt, model, params)
 	}
 
 	// If a specific backend is configured, use only that one.
-	if forceBackend != "" && a.registry != nil && a.registry.HasBackend(forceBackend) {
+	if a.registry != nil && a.registry.HasBackend(forceBackend) {
 		apiProv := a.registry.ForBackend(forceBackend)
 		apiModel := model
 		if !strings.Contains(apiModel, "/") {
@@ -382,9 +382,10 @@ func (a *ccScheduleAdapter) Update(id string, fields map[string]string) (*cc.Sch
 
 func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 	sj := cc.ScheduleJob{
-		ID:         j.ID,
-		Name:       j.Name,
-		Schedule:   j.Schedule,
+		ID:          j.ID,
+		Name:        j.Name,
+		Description: j.Description,
+		Schedule:    j.Schedule,
 		Tier:       j.Tier,
 		Prompt:     j.Prompt,
 		Command:    j.Command,

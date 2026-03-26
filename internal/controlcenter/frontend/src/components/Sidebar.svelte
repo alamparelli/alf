@@ -4,7 +4,7 @@
   import {
     MessageCircle, Home, Terminal, Layers, CalendarClock,
     Users, SlidersHorizontal, Shield, Lock, Store,
-    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package, Zap, FolderOpen
+    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package, Zap, FolderOpen, Mail
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
 
@@ -24,6 +24,7 @@
     'scroll-text': ScrollText,
     'book-open': BookOpen,
     'folder-open': FolderOpen,
+    'mail': Mail,
   }
 </script>
 
@@ -47,16 +48,21 @@
             class="nav-item"
             class:active={nav.currentView === tab.view}
             class:nav-fav={isFav}
-            onclick={() => nav.navigateTo(tab.view)}
-            onauxclick={(e: MouseEvent) => { if (e.button === 1) { e.preventDefault(); nav.openTab(tab.view, tab.label, tab.icon) } }}
+            class:coming-soon={tab.comingSoon}
+            onclick={() => { if (!tab.comingSoon) nav.navigateTo(tab.view) }}
+            onauxclick={(e: MouseEvent) => { if (e.button === 1 && !tab.comingSoon) { e.preventDefault(); nav.openTab(tab.view, tab.label, tab.icon) } }}
+            title={tab.comingSoon ? 'Coming soon' : ''}
           >
             {#if ICON_MAP[tab.icon]}
               <svelte:component this={ICON_MAP[tab.icon]} size={16} />
             {/if}
             <span>{tab.label}</span>
-            {#if nav.badges[tab.view]}
+            {#if tab.comingSoon}
+              <span class="coming-soon-badge">soon</span>
+            {:else if nav.badges[tab.view]}
               <span class="nav-badge">{nav.badges[tab.view]}</span>
             {/if}
+            {#if !tab.comingSoon}
             <button
               class="nav-fav-btn"
               onclick={(e: MouseEvent) => { e.stopPropagation(); nav.toggleFavorite(tab.view) }}
@@ -64,6 +70,7 @@
             >
               <Pin size={12} />
             </button>
+            {/if}
           </div>
         {/each}
       </div>
@@ -255,6 +262,22 @@
     justify-content: center;
     padding: 0 4px;
     line-height: 1;
+  }
+
+  .nav-item.coming-soon {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .coming-soon-badge {
+    font-size: 0.55rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    background: var(--bg-input);
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: auto;
   }
 
   .nav-fav-btn {

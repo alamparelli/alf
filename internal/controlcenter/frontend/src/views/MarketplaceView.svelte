@@ -11,6 +11,8 @@
   let apps = $state([]);
   let updates = $state([]);
   let loading = $state(true);
+  let developerName = $state('');
+  let developerSlugs = $state(new Set());
 
   const stateColors = {
     enabled: 'var(--green)',
@@ -106,9 +108,33 @@
     return (state || 'available').charAt(0).toUpperCase() + (state || 'available').slice(1);
   }
 
+  async function loadDeveloperStatus() {
+    try {
+      const data = await api('GET', '/api/marketplace/developer');
+      if (data.is_developer) {
+        developerName = data.developer || '';
+        // Load catalog to find which apps the dev published
+        const catalog = await api('GET', '/api/marketplace/catalog').catch(() => []);
+        if (Array.isArray(catalog) && developerName) {
+          const devLower = developerName.toLowerCase();
+          developerSlugs = new Set(
+            catalog
+              .filter(function(a) { return (a.author || '').toLowerCase() === devLower || (a.developer || '').toLowerCase() === devLower; })
+              .map(function(a) { return a.slug; })
+          );
+        }
+      }
+    } catch {}
+  }
+
+  function isOwnApp(app) {
+    return developerSlugs.has(app.slug);
+  }
+
   onMount(() => {
     loadAll();
     checkBadge();
+    loadDeveloperStatus();
     const unsub = events.subscribe('marketplace', loadAll);
     return () => unsub();
   });
@@ -178,7 +204,7 @@
                     <button class="btn btn-sm btn-primary" onclick={() => doAction(app.slug, 'install')}>
                       <Download size={12} /> Install
                     </button>
-                  {:else if app.state === 'enabled'}
+                  {:else if app.state === 'enabled' && !isOwnApp(app)}
                     <button class="btn btn-sm btn-warning" onclick={() => doAction(app.slug, 'disable')}>
                       <PowerOff size={12} /> Disable
                     </button>
@@ -198,10 +224,14 @@
                     </button>
                   {/if}
 
-                  {#if app.state && app.state !== 'available'}
+                  {#if app.state && app.state !== 'available' && !isOwnApp(app)}
                     <button class="btn btn-sm btn-danger" onclick={() => doAction(app.slug, 'uninstall', `Uninstall "${app.name}"? This will remove all app data.`)}>
                       <Trash2 size={12} /> Uninstall
                     </button>
+                  {/if}
+
+                  {#if isOwnApp(app)}
+                    <span class="badge" style="background:var(--accent); font-size:0.7rem">Your app</span>
                   {/if}
                 </div>
               </div>

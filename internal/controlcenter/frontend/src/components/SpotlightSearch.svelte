@@ -6,7 +6,7 @@
     MessageCircle, Home, Terminal, Layers, CalendarClock, Users,
     SlidersHorizontal, Shield, Lock, Store, Settings, ScrollText,
     BookOpen, Search, FileText, FileCode, FileImage, FileSpreadsheet,
-    File, Package, X, FolderOpen, Zap
+    File, Package, X, FolderOpen, Zap, Filter, Mail
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
 
@@ -23,6 +23,47 @@
   let fileResults = $state<any[]>([])
   let docResults = $state<any[]>([])
   let loading = $state(false)
+  let showFilters = $state(false)
+
+  // Folder filter: user can exclude folders from file search
+  // Always-hidden dirs (internal, never useful in search)
+  const alwaysHidden = new Set(['.git', '.claude', '.cache', '.local', 'node_modules', 'go-path', 'docs'])
+  let availableFolders = $state<string[]>([])
+
+  async function loadFolders() {
+    try {
+      const data = await api<any>('/api/workspace?path=')
+      if (data.type === 'directory' && data.entries) {
+        availableFolders = data.entries
+          .filter((e: any) => e.is_dir && !e.name.startsWith('.') && !alwaysHidden.has(e.name))
+          .map((e: any) => e.name)
+          .sort()
+      }
+    } catch { /* silent */ }
+  }
+
+  function loadExcluded(): string[] {
+    try {
+      const v = localStorage.getItem('spotlight:exclude')
+      return v ? JSON.parse(v) : []
+    } catch { return [] }
+  }
+
+  function saveExcluded(dirs: string[]) {
+    localStorage.setItem('spotlight:exclude', JSON.stringify(dirs))
+  }
+
+  let excludedDirs = $state<string[]>(loadExcluded())
+
+  function toggleFolder(dir: string) {
+    if (excludedDirs.includes(dir)) {
+      excludedDirs = excludedDirs.filter(d => d !== dir)
+    } else {
+      excludedDirs = [...excludedDirs, dir]
+    }
+    saveExcluded(excludedDirs)
+    if (query) searchRemote(query)
+  }
 
   // Icon map for system tabs
   const iconMap: Record<string, any> = {
@@ -40,6 +81,7 @@
     settings: Settings,
     'scroll-text': ScrollText,
     'book-open': BookOpen,
+    'mail': Mail,
   }
 
   // File icon by extension
@@ -80,7 +122,8 @@
     }
     loading = true
     try {
-      const data = await api<any>(`/api/search?q=${encodeURIComponent(q)}`)
+      const excludeParam = excludedDirs.length > 0 ? `&exclude=${encodeURIComponent(excludedDirs.join(','))}` : ''
+      const data = await api<any>(`/api/search?q=${encodeURIComponent(q)}${excludeParam}`)
       appResults = data.apps || []
       marketplaceResults = (data.marketplace || []).filter((a: any) => a.state !== 'disabled')
       fileResults = data.files || []
@@ -180,12 +223,20 @@
     }
   }
 
+  function handleOpenSpotlight() {
+    open = true
+    setTimeout(() => searchInput?.focus(), 0)
+  }
+
   onMount(() => {
     window.addEventListener('keydown', handleKeydown)
+    window.addEventListener('alf:open-spotlight', handleOpenSpotlight)
+    loadFolders()
   })
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleKeydown)
+    window.removeEventListener('alf:open-spotlight', handleOpenSpotlight)
     if (debounceTimer) clearTimeout(debounceTimer)
   })
 
@@ -345,10 +396,31 @@
         {/if}
       </div>
 
+      {#if showFilters}
+        <div class="spotlight-filters">
+          <div class="filter-label">Folders to search</div>
+          <div class="filter-grid">
+            {#each availableFolders as dir}
+              <label class="filter-item">
+                <input type="checkbox" checked={!excludedDirs.includes(dir)} onchange={() => toggleFolder(dir)} />
+                {dir}
+              </label>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
       <div class="spotlight-footer">
         <span class="kbd">↑↓</span> Navigate
         <span class="kbd">↵</span> Open
         <span class="kbd">esc</span> Close
+        <span class="footer-spacer"></span>
+        <button class="filter-toggle" class:active={showFilters} onclick={() => showFilters = !showFilters} title="Filter folders">
+          <Filter size={12} />
+          {#if excludedDirs.length > 0}
+            <span class="filter-count">{excludedDirs.length}</span>
+          {/if}
+        </button>
       </div>
     </div>
   </div>
@@ -517,5 +589,72 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.65rem;
     margin-right: 2px;
+  }
+
+  .footer-spacer {
+    flex: 1;
+  }
+
+  .filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    padding: 2px 6px;
+    cursor: pointer;
+    font-size: 0.65rem;
+  }
+
+  .filter-toggle:hover,
+  .filter-toggle.active {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .filter-count {
+    background: var(--accent);
+    color: var(--bg);
+    border-radius: 50%;
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    font-weight: 600;
+  }
+
+  .spotlight-filters {
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .filter-label {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+
+  .filter-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+
+  .filter-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .filter-item input[type="checkbox"] {
+    accent-color: var(--accent);
   }
 </style>

@@ -63,18 +63,25 @@ func New(cfg Config) *Engine {
 
 // RegisterSystem adds a system job that isn't persisted to cron.json.
 // fn is called on each trigger. The job appears in schedule list.
-func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error) {
+// An optional description can be passed as the last variadic argument.
+func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error, description ...string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	desc := ""
+	if len(description) > 0 {
+		desc = description[0]
+	}
+
 	job := &Job{
-		ID:        id,
-		Name:      name,
-		Schedule:  schedule,
-		System:    true,
-		Enabled:   true,
-		Output:    "silent",
-		CreatedAt: time.Now(),
+		ID:          id,
+		Name:        name,
+		Description: desc,
+		Schedule:    schedule,
+		System:      true,
+		Enabled:     true,
+		Output:      "silent",
+		CreatedAt:   time.Now(),
 	}
 
 	entryID, err := e.cron.AddFunc(schedule, func() {
@@ -98,6 +105,7 @@ func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error) {
 				JobID: id, JobName: name, Tier: "system", StartedAt: start,
 				DurationMs: duration.Milliseconds(), Status: "error", Error: err.Error(),
 			})
+			e.dispatch(job, err.Error())
 		} else {
 			duration := time.Since(start)
 			job.LastError = ""
@@ -325,11 +333,17 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 	if j == nil {
 		return nil, fmt.Errorf("job %s not found", id)
 	}
+	// System jobs allow only enabled, output, and description changes.
 	if j.System {
-		return nil, fmt.Errorf("cannot modify system job %s", id)
+		systemAllowed := map[string]bool{"enabled": true, "output": true, "description": true}
+		for k := range fields {
+			if !systemAllowed[k] {
+				return nil, fmt.Errorf("cannot modify field %q on system job %s (allowed: enabled, output, description)", k, id)
+			}
+		}
 	}
-	// Managed jobs allow only enabled, output, tier, and schedule changes.
-	managedAllowed := map[string]bool{"enabled": true, "output": true, "tier": true, "schedule": true}
+	// Managed jobs allow only enabled, output, tier, schedule, and description changes.
+	managedAllowed := map[string]bool{"enabled": true, "output": true, "tier": true, "schedule": true, "description": true}
 	if j.Managed {
 		for k := range fields {
 			if !managedAllowed[k] {
@@ -365,6 +379,8 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 		switch k {
 		case "name":
 			j.Name = v
+		case "description":
+			j.Description = v
 		case "schedule":
 			j.Schedule = v
 			reschedule = true

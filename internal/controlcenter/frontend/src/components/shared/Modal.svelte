@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import type { Snippet } from 'svelte'
 
   let { open = false, wide = false, onclose, children }: {
@@ -7,11 +8,23 @@
     onclose?: () => void
     children: Snippet
   } = $props()
+
+  let modalEl: HTMLDivElement
+
+  // Auto-focus the first input/textarea/select when modal opens.
+  $effect(() => {
+    if (open && modalEl) {
+      tick().then(() => {
+        const input = modalEl.querySelector('input, textarea, select') as HTMLElement
+        input?.focus()
+      })
+    }
+  })
 </script>
 
 {#if open}
   <div class="modal-backdrop" onclick={onclose} role="presentation">
-    <div class="modal" class:wide onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog">
+    <div class="modal" class:wide onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" bind:this={modalEl}>
       {@render children()}
     </div>
   </div>

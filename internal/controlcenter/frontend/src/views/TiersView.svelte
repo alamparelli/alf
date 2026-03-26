@@ -354,7 +354,7 @@
         </label>
         <label class="full-width">
           Router Label
-          <input type="text" bind:value={tierForm.router_label} placeholder="Short label for classifier" />
+          <textarea bind:value={tierForm.router_label} rows="3" placeholder="Describe when the router should pick this tier"></textarea>
         </label>
         <label class="full-width">
           Description
@@ -585,7 +585,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 1.5rem;
-    max-width: 600px;
+    max-width: 800px;
     width: 90vw;
     max-height: 85vh;
     overflow-y: auto;

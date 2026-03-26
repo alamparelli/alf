@@ -555,6 +555,8 @@ func seedAppFiles(src, dest string) error {
 			if info, err := e.Info(); err == nil && info.Mode()&0o111 != 0 {
 				perm = 0o755
 			}
+			// Unlock read-only files before overwriting (marketplace lock).
+			os.Chmod(d, 0o644)
 			if err := os.WriteFile(d, data, perm); err != nil {
 				return err
 			}

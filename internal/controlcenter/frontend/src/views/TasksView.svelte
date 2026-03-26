@@ -43,6 +43,7 @@
   let prompt = $state('')
   let needValidation = $state(false)
   let launching = $state(false)
+  let showLauncher = $state(false)
 
   // Tasks
   let running = $state<TaskMeta[]>([])
@@ -210,6 +211,14 @@
 <div class="tasks-view">
   <h2>Tasks</h2>
 
+  <!-- Controls -->
+  <div class="task-controls" style="margin-bottom:0.5rem">
+    <button class="btn btn-primary btn-sm" onclick={() => showLauncher = !showLauncher}>
+      {showLauncher ? 'Cancel' : '+ Add Task'}
+    </button>
+  </div>
+
+  {#if showLauncher}
   <!-- Launcher -->
   <Card>
     <h3>Launch Task</h3>
@@ -250,6 +259,7 @@
       </div>
     </div>
   </Card>
+  {/if}
 
   <!-- Controls -->
   <div class="task-controls">

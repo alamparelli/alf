@@ -143,6 +143,7 @@
   var appsList = [];
   var catalogSlugs = null; // null = not loaded yet, [] = loaded but empty
   var foreignSlugs = []; // slugs owned by other developers (downloaded apps)
+  var marketplaceSlugs = []; // all slugs managed by the marketplace (installed from remote)
   var toolsReady = null; // Promise resolved when tool chips are loaded
 
   function bash(cmd) {
@@ -217,8 +218,12 @@
     var sel = $('pubApp');
     sel.innerHTML = '<option value="">-- Pick a local app --</option>';
     appsList = dirs;
-    // Only show apps that are locally developed: not in catalog, or in catalog and owned by me
-    var filtered = dirs.filter(function(name) { return foreignSlugs.indexOf(name) === -1; });
+    // Only show apps that are locally developed: not marketplace-installed, not foreign
+    var filtered = dirs.filter(function(name) {
+      if (foreignSlugs.indexOf(name) !== -1) return false;
+      if (marketplaceSlugs.indexOf(name) !== -1 && (catalogSlugs || []).indexOf(name) === -1) return false;
+      return true;
+    });
     filtered.forEach(function(name) {
       var opt = document.createElement('option');
       opt.value = '/home/alf/data/apps/' + name;
@@ -498,12 +503,32 @@
           left.appendChild(slugEl);
         }
         li.appendChild(left);
+        var right = document.createElement('div');
+        right.style.display = 'flex';
+        right.style.alignItems = 'center';
+        right.style.gap = '8px';
         if (app.version) {
           var ver = document.createElement('span');
           ver.className = 'app-ver';
           ver.textContent = 'v' + app.version;
-          li.appendChild(ver);
+          right.appendChild(ver);
         }
+        var unpubBtn = document.createElement('button');
+        unpubBtn.className = 'btn-sm';
+        unpubBtn.textContent = 'Unpublish';
+        unpubBtn.style.fontSize = '0.7rem';
+        unpubBtn.style.color = 'var(--red, #e55)';
+        unpubBtn.style.borderColor = 'var(--red, #e55)';
+        unpubBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (!confirm('Unpublish "' + (app.name || app.slug) + '" from the marketplace?')) return;
+          bash("vault proxy marketplace DELETE /api/apps/" + app.slug + " 2>&1").then(function(res) {
+            var out = (res.output || '').trim();
+            loadCatalog();
+          }).catch(function() { alert('Unpublish failed'); });
+        });
+        right.appendChild(unpubBtn);
+        li.appendChild(right);
         li.addEventListener('click', function() {
           // Fill form from catalog entry
           $('pubSlug').value = app.slug || '';
@@ -533,9 +558,21 @@
 
   $('refreshBtn').addEventListener('click', function() { checkConnection(); });
 
+  // Load marketplace-managed slugs so we can exclude them from the publish dropdown.
+  function loadMarketplaceSlugs() {
+    return fetch('/api/marketplace', { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(apps) {
+        if (Array.isArray(apps)) {
+          marketplaceSlugs = apps.map(function(a) { return a.slug; }).filter(Boolean);
+        }
+      })
+      .catch(function() { marketplaceSlugs = []; });
+  }
+
   // Init
   checkConnection();
-  loadAppsDropdown();
+  loadMarketplaceSlugs().then(function() { loadAppsDropdown(); });
   loadSkillsDropdown();
   loadTools();
 })();

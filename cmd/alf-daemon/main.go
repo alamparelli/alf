@@ -226,6 +226,7 @@ func main() {
 		fwCfg = firewall.DefaultConfig()
 	}
 	fwProxy := firewall.NewProxy(fwCfg)
+	fwProxy.Store = fwStore
 	go func() {
 		addr := fmt.Sprintf("127.0.0.1:%d", fwCfg.Port)
 		log.Printf("[firewall] proxy starting on %s (mode=%s, %d rules)", addr, fwCfg.Mode, len(fwCfg.Rules))
@@ -879,6 +880,7 @@ func main() {
 		sched.RegisterSystem("git-sweep", "Git Sweep",
 			fmt.Sprintf("@every %dm", cfg.GitSweepInterval),
 			func() error { return git.Commit("auto: periodic sweep") },
+			"Periodically commits changes in the data directory to the local git repo for backup and history tracking.",
 		)
 	}
 	if uc != nil {
@@ -889,6 +891,7 @@ func main() {
 		sched.RegisterSystem("update-check", "Update Check",
 			fmt.Sprintf("@every %ds", updateInterval),
 			uc.CheckOnce,
+			"Checks for new ALF Docker image versions and notifies when an update is available.",
 		)
 		if ccServerRef != nil {
 			ccServerRef.SetUpdater(uc)
@@ -920,7 +923,7 @@ func main() {
 		consolidator := memstore.NewConsolidator(memDB, memExtractor, extractAdapter, extractTimeout)
 		sched.RegisterSystem("mem-consolidate", "Memory Consolidation", "@every 360m", func() error {
 			return consolidator.RunOnce()
-		})
+		}, "Deduplicates and consolidates long-term memories. Merges similar facts and removes outdated entries.")
 
 		// Run initial extraction after boot delay.
 		extractBootDelay := time.Duration(cfg.EffectiveMemoryExtractBootDelay()) * time.Second
@@ -942,14 +945,14 @@ func main() {
 	}
 
 	// Daily schedule digest - runs at 08:00 local time.
-	sched.RegisterSystem("sched-digest", "Schedule Digest", "0 0 8 * * *", sched.SendDailyDigest)
+	sched.RegisterSystem("sched-digest", "Schedule Digest", "0 0 8 * * *", sched.SendDailyDigest,
+		"Sends a daily summary of scheduled jobs at 8am: upcoming runs, recent failures, and job stats.")
 
 	// Vault token health check — every hour, alerts on expired/expiring tokens.
 	if vaultMgr != nil {
-		checker := newVaultTokenChecker(vaultMgr, commEngine.Broadcast)
-		sched.RegisterSystem("vault-token-check", "Vault Token Health", "@every 60m", func() error {
-			return checker.Check()
-		})
+		checker := newVaultTokenChecker(vaultMgr)
+		sched.RegisterSystem("vault-token-check", "Vault Token Health", "@every 60m", checker.Check,
+			"Checks OAuth2 token expiry for all vault services. Alerts when tokens are expiring or expired.")
 	}
 
 	schedAdapter.engine = sched

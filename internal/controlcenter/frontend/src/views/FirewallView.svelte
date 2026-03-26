@@ -39,13 +39,18 @@
   let newAction = $state('allow')
 
   let refreshTimer: ReturnType<typeof setInterval> | undefined
+  let activeTab = $state<'log' | 'hosts'>('log')
+
+  // Persistent host stats from backend
+  let hosts = $state<any[]>([])
 
   async function loadFirewall() {
     loading = true
     try {
-      const data = await api<{ config: FirewallConfig; log: RequestEntry[] }>('/api/firewall')
+      const data = await api<any>('/api/firewall')
       config = data.config || { mode: 'log-only', port: 4751, rules: [] }
       log = data.log || []
+      hosts = (data.hosts || []).sort((a: any, b: any) => b.count - a.count)
     } catch (e: any) {
       toasts.show(e.error || 'Failed to load firewall', 'error')
     } finally {
@@ -86,12 +91,20 @@
   }
 
   function addDenyRule(host: string) {
-    // Check if rule already exists
     if (config.rules.some(r => r.pattern === host)) {
       toasts.show('Rule already exists for ' + host, 'info')
       return
     }
     config.rules = [...config.rules, { pattern: host, action: 'deny' }]
+    saveConfig()
+  }
+
+  function addAllowRule(host: string) {
+    if (config.rules.some(r => r.pattern === host)) {
+      toasts.show('Rule already exists for ' + host, 'info')
+      return
+    }
+    config.rules = [...config.rules, { pattern: host, action: 'allow' }]
     saveConfig()
   }
 
@@ -177,10 +190,13 @@
     {/if}
   </Card>
 
-  <!-- Request log -->
+  <!-- Request log / Hosts -->
   <Card>
     <div class="log-header">
-      <h3>Request Log</h3>
+      <div class="log-tabs">
+        <button class="log-tab" class:active={activeTab === 'log'} onclick={() => activeTab = 'log'}>Request Log</button>
+        <button class="log-tab" class:active={activeTab === 'hosts'} onclick={() => activeTab = 'hosts'}>Hosts ({hosts.length})</button>
+      </div>
       <div class="log-controls">
         <label class="auto-refresh">
           <input type="checkbox" bind:checked={autoRefresh} />
@@ -193,45 +209,86 @@
       </div>
     </div>
 
-    {#if log.length > 0}
-      <div class="log-table-wrap">
-        <table class="log-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Method</th>
-              <th>Host</th>
-              <th>Path</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each log as entry}
-              <tr class:blocked={entry.blocked}>
-                <td class="mono">{formatTime(entry.time)}</td>
-                <td><span class="method-badge">{entry.method}</span></td>
-                <td class="mono">{entry.host}</td>
-                <td class="mono path-cell">{entry.path}</td>
-                <td>
-                  <span class="status-badge" class:status-ok={entry.status >= 200 && entry.status < 400} class:status-blocked={entry.blocked}>
-                    {entry.blocked ? 'DENIED' : entry.status || 'OK'}
-                  </span>
-                </td>
-                <td>
-                  {#if !entry.blocked}
-                    <button class="btn-icon-sm" onclick={() => addDenyRule(entry.host)} title="Deny this host">
+    {#if activeTab === 'log'}
+      {#if log.length > 0}
+        <div class="log-table-wrap">
+          <table class="log-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Method</th>
+                <th>Host</th>
+                <th>Path</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each log as entry}
+                <tr class:blocked={entry.blocked}>
+                  <td class="mono">{formatTime(entry.time)}</td>
+                  <td><span class="method-badge">{entry.method}</span></td>
+                  <td class="mono">{entry.host}</td>
+                  <td class="mono path-cell">{entry.path}</td>
+                  <td>
+                    <span class="status-badge" class:status-ok={entry.status >= 200 && entry.status < 400} class:status-blocked={entry.blocked}>
+                      {entry.blocked ? 'DENIED' : entry.status || 'OK'}
+                    </span>
+                  </td>
+                  <td class="action-cell">
+                    <button class="btn-icon-sm btn-allow" onclick={() => addAllowRule(entry.host)} title="Allow this host">
+                      <ShieldOff size={12} />
+                    </button>
+                    <button class="btn-icon-sm btn-deny" onclick={() => addDenyRule(entry.host)} title="Deny this host">
                       <Shield size={12} />
                     </button>
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {:else}
+        <p class="empty-sm">{loading ? 'Loading...' : 'No requests logged'}</p>
+      {/if}
     {:else}
-      <p class="empty-sm">{loading ? 'Loading...' : 'No requests logged'}</p>
+      {#if hosts.length > 0}
+        <div class="log-table-wrap">
+          <table class="log-table">
+            <thead>
+              <tr>
+                <th>Host</th>
+                <th>Requests</th>
+                <th>Allowed</th>
+                <th>Denied</th>
+                <th>Last seen</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each hosts as h}
+                <tr class:blocked={h.blocked > 0 && h.allowed === 0}>
+                  <td class="mono">{h.host}</td>
+                  <td>{h.count}</td>
+                  <td>{h.allowed}</td>
+                  <td>{h.blocked || ''}</td>
+                  <td class="mono">{formatTime(h.last_seen)}</td>
+                  <td class="action-cell">
+                    <button class="btn-icon-sm btn-allow" onclick={() => addAllowRule(h.host)} title="Allow this host">
+                      <ShieldOff size={12} />
+                    </button>
+                    <button class="btn-icon-sm btn-deny" onclick={() => addDenyRule(h.host)} title="Deny this host">
+                      <Shield size={12} />
+                    </button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {:else}
+        <p class="empty-sm">No hosts recorded yet</p>
+      {/if}
     {/if}
   </Card>
 
@@ -384,8 +441,17 @@
     align-items: center;
   }
 
-  .btn-icon-sm:hover {
+  .btn-icon-sm.btn-allow:hover {
+    color: var(--green, #6a6);
+  }
+
+  .btn-icon-sm.btn-deny:hover {
     color: var(--red, #e55);
+  }
+
+  .action-cell {
+    display: flex;
+    gap: 2px;
   }
 
   .rules-list {
@@ -431,6 +497,31 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: 0.75rem;
+  }
+
+  .log-tabs {
+    display: flex;
+    gap: 0;
+  }
+
+  .log-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    font-weight: 500;
+    padding: 4px 12px 6px;
+    cursor: pointer;
+  }
+
+  .log-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+
+  .log-tab:hover:not(.active) {
+    color: var(--text);
   }
 
   .log-controls {

@@ -73,6 +73,20 @@ func (c *Client) SendAnimation(chatID int64, animationURL, caption string) error
 	return c.post("sendAnimation", payload)
 }
 
+// SendVideo sends a video by URL with an optional caption.
+func (c *Client) SendVideo(chatID int64, videoURL, caption string) error {
+	msg := map[string]any{
+		"chat_id": chatID,
+		"video":   videoURL,
+	}
+	if caption != "" {
+		msg["caption"] = caption
+		msg["parse_mode"] = "HTML"
+	}
+	payload, _ := json.Marshal(msg)
+	return c.post("sendVideo", payload)
+}
+
 // SendKeyboard sends a message with an inline keyboard.
 func (c *Client) SendKeyboard(chatID int64, text string, keyboard any) error {
 	payload, _ := json.Marshal(map[string]any{

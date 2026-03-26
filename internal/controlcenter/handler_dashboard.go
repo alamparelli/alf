@@ -24,7 +24,7 @@ func (h *DashboardHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"font-src 'self' https://fonts.gstatic.com; "+
 			"connect-src 'self' wss: https://unpkg.com; "+
 			"img-src 'self' data: blob: https:; "+
-			"media-src 'self'; "+
+			"media-src 'self' https:; "+
 			"frame-ancestors 'self'")
 	w.Write([]byte(h.HTML))
 }

@@ -79,7 +79,12 @@
   function renderMarkdown(text: string): string {
     if (!text) return ''
     const raw = marked.parse(text, { async: false }) as string
-    return DOMPurify.sanitize(raw)
+    // Convert <img> with video extensions to <video> elements.
+    const withVideos = raw.replace(
+      /<img\s+src="([^"]+\.(?:mp4|webm|mov)(?:\?[^"]*)?)"\s*(?:alt="([^"]*)")?\s*\/?>/gi,
+      '<video src="$1" controls playsinline class="chat-video">$2</video>'
+    )
+    return DOMPurify.sanitize(withVideos, { ADD_TAGS: ['video'], ADD_ATTR: ['controls', 'playsinline', 'autoplay', 'loop', 'muted'] })
   }
 
   function getFullText(): string {
@@ -355,6 +360,14 @@
   .msg-text :global(img) {
     max-width: 300px;
     max-height: 200px;
+    border-radius: 8px;
+    margin: 4px 0;
+    display: block;
+  }
+
+  .msg-text :global(video) {
+    max-width: 400px;
+    max-height: 300px;
     border-radius: 8px;
     margin: 4px 0;
     display: block;

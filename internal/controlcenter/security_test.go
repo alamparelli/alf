@@ -246,8 +246,11 @@ func TestDashboard_CSP_IncludesMediaSrc(t *testing.T) {
 	if csp == "" {
 		t.Fatal("missing Content-Security-Policy header")
 	}
-	if !strings.Contains(csp, "media-src 'self'") {
-		t.Errorf("CSP should contain media-src 'self', got: %s", csp)
+	if !strings.Contains(csp, "media-src 'self' https:") {
+		t.Errorf("CSP media-src should allow external HTTPS for videos, got: %s", csp)
+	}
+	if !strings.Contains(csp, "img-src 'self' data: blob: https:") {
+		t.Errorf("CSP img-src should allow external HTTPS for images/gifs, got: %s", csp)
 	}
 }
 

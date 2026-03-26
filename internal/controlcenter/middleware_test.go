@@ -362,6 +362,120 @@ func TestLoggingMiddleware_PreservesHijacker(t *testing.T) {
 	}
 }
 
+// --- Rate limiter auth bypass tests ---
+
+func TestRateLimiter_AuthenticatedBearerBypass(t *testing.T) {
+	ss := NewSessionStore(nil)
+	rl := newRateLimiter(1).withAuthLimit(100, ss).withToken("my-token")
+	handler := rl.middleware(okHandler())
+
+	// First request (anonymous) uses quota.
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.RemoteAddr = "1.2.3.4:1"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first anon request: expected 200, got %d", rec.Code)
+	}
+
+	// Second anonymous request should be rate limited.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second anon request: expected 429, got %d", rec.Code)
+	}
+
+	// Authenticated request with Bearer token from same IP bypasses limit.
+	req2 := httptest.NewRequest("GET", "/api/test", nil)
+	req2.RemoteAddr = "1.2.3.4:1"
+	req2.Header.Set("Authorization", "Bearer my-token")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req2)
+	if rec.Code != http.StatusOK {
+		t.Errorf("authenticated Bearer request: expected 200, got %d", rec.Code)
+	}
+}
+
+func TestRateLimiter_ExtraTokenBypass(t *testing.T) {
+	mobileToken := "mobile-secret-token"
+	rl := newRateLimiter(1).withAuthLimit(100, nil).withExtraTokens(func() string {
+		return mobileToken
+	})
+	handler := rl.middleware(okHandler())
+
+	// Exhaust anonymous quota.
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.RemoteAddr = "5.5.5.5:1"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first request: expected 200, got %d", rec.Code)
+	}
+
+	// Anonymous is now rate limited.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second anon request: expected 429, got %d", rec.Code)
+	}
+
+	// Extra token (mobile) bypasses rate limit.
+	req2 := httptest.NewRequest("GET", "/api/test", nil)
+	req2.RemoteAddr = "5.5.5.5:1"
+	req2.Header.Set("Authorization", "Bearer "+mobileToken)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req2)
+	if rec.Code != http.StatusOK {
+		t.Errorf("mobile token request: expected 200, got %d", rec.Code)
+	}
+}
+
+func TestRateLimiter_WrongExtraTokenStillLimited(t *testing.T) {
+	rl := newRateLimiter(1).withAuthLimit(100, nil).withExtraTokens(func() string {
+		return "real-mobile-token"
+	})
+	handler := rl.middleware(okHandler())
+
+	// Exhaust quota.
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.RemoteAddr = "6.6.6.6:1"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// Wrong token doesn't bypass.
+	req2 := httptest.NewRequest("GET", "/api/test", nil)
+	req2.RemoteAddr = "6.6.6.6:1"
+	req2.Header.Set("Authorization", "Bearer wrong-token")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req2)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("wrong extra token: expected 429, got %d", rec.Code)
+	}
+}
+
+func TestRateLimiter_SessionCookieBypass(t *testing.T) {
+	ss := NewSessionStore(nil)
+	sessionID, _ := ss.Issue(100, 24*time.Hour)
+	rl := newRateLimiter(1).withAuthLimit(100, ss)
+	handler := rl.middleware(okHandler())
+
+	// Exhaust quota.
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.RemoteAddr = "7.7.7.7:1"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// Session cookie bypasses.
+	req2 := httptest.NewRequest("GET", "/api/test", nil)
+	req2.RemoteAddr = "7.7.7.7:1"
+	req2.AddCookie(&http.Cookie{Name: "cc_session", Value: sessionID})
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req2)
+	if rec.Code != http.StatusOK {
+		t.Errorf("session cookie request: expected 200, got %d", rec.Code)
+	}
+}
+
 // Ensure compile-time interface satisfaction.
 var _ http.Hijacker = (*statusWriter)(nil)
 var _ http.Flusher = (*statusWriter)(nil)

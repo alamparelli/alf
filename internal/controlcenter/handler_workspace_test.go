@@ -39,8 +39,8 @@ func wsGet(h *WorkspaceHandler, path string) *httptest.ResponseRecorder {
 }
 
 func wsPut(h *WorkspaceHandler, path, content string) *httptest.ResponseRecorder {
-	body := `{"content":"` + content + `"}`
-	req := httptest.NewRequest("PUT", "/api/workspace?path="+path, strings.NewReader(body))
+	payload, _ := json.Marshal(map[string]string{"content": content})
+	req := httptest.NewRequest("PUT", "/api/workspace?path="+path, strings.NewReader(string(payload)))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
@@ -246,6 +246,45 @@ func TestWorkspace_NormalFileEditable(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &resp)
 	if !resp.Editable {
 		t.Error("normal .md files should be editable")
+	}
+}
+
+// --- PUT saves content correctly ---
+
+func TestWorkspace_PUT_SavesJSONContent(t *testing.T) {
+	h, _, configDir, _ := newTestWorkspaceHandler(t)
+	original := `{"log_level":"info","system_prompt":"hello"}`
+	os.WriteFile(filepath.Join(configDir, "config.json"), []byte(original), 0o644)
+
+	// Save with JSON payload (correct format).
+	rec := wsPut(h, "config.d/config.json", `{"log_level":"debug"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	data, _ := os.ReadFile(filepath.Join(configDir, "config.json"))
+	if string(data) != `{"log_level":"debug"}` {
+		t.Errorf("file content = %q, want %q", string(data), `{"log_level":"debug"}`)
+	}
+}
+
+func TestWorkspace_PUT_RawBodyRejected(t *testing.T) {
+	h, dataDir, _, _ := newTestWorkspaceHandler(t)
+	os.WriteFile(filepath.Join(dataDir, "test.txt"), []byte("original"), 0o644)
+
+	// Send raw text body without JSON wrapping — should be rejected, not empty the file.
+	req := httptest.NewRequest("PUT", "/api/workspace?path=test.txt", strings.NewReader("node"))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for raw body, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Original file must be preserved.
+	data, _ := os.ReadFile(filepath.Join(dataDir, "test.txt"))
+	if string(data) != "original" {
+		t.Errorf("file should be unchanged, got %q", string(data))
 	}
 }
 

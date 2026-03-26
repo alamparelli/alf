@@ -353,12 +353,13 @@ func (b *ipBan) middleware(next http.Handler) http.Handler {
 
 // rateLimitMiddleware limits requests per IP per minute.
 type rateLimiter struct {
-	mu        sync.Mutex
-	counters  map[string]int
-	limit     int
-	authLimit int           // higher limit for authenticated requests (0 = same as limit)
-	sessions  *SessionStore // optional — used to detect authenticated requests
-	token     string        // optional — Bearer token also gets authLimit
+	mu             sync.Mutex
+	counters       map[string]int
+	limit          int
+	authLimit      int              // higher limit for authenticated requests (0 = same as limit)
+	sessions       *SessionStore    // optional — used to detect authenticated requests
+	token          string           // optional — Bearer token also gets authLimit
+	extraTokenFns  []func() string  // optional — additional valid tokens (e.g. mobile API token)
 }
 
 func newRateLimiter(limit int) *rateLimiter {
@@ -390,6 +391,12 @@ func (rl *rateLimiter) withToken(token string) *rateLimiter {
 	return rl
 }
 
+// withExtraTokens adds additional token providers (e.g. mobile API token from vault).
+func (rl *rateLimiter) withExtraTokens(fns ...func() string) *rateLimiter {
+	rl.extraTokenFns = fns
+	return rl
+}
+
 func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
@@ -407,15 +414,25 @@ func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 					authenticated = true
 				}
 			}
-			if !authenticated && rl.token != "" {
-				// Check Authorization: Bearer header
+			if !authenticated {
 				if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-					if subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(rl.token)) == 1 {
+					bearer := auth[7:]
+					// Check primary token.
+					if rl.token != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(rl.token)) == 1 {
 						authenticated = true
 					}
+					// Check extra tokens (e.g. mobile API token from vault).
+					if !authenticated {
+						for _, fn := range rl.extraTokenFns {
+							if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(et)) == 1 {
+								authenticated = true
+								break
+							}
+						}
+					}
 				}
-				// Check cc_bearer cookie (mobile WebView sub-resources)
-				if !authenticated {
+				// Check cc_bearer cookie (mobile WebView sub-resources).
+				if !authenticated && rl.token != "" {
 					if cookie, err := r.Cookie("cc_bearer"); err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(rl.token)) == 1 {
 						authenticated = true
 					}

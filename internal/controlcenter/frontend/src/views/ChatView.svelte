@@ -539,9 +539,17 @@
     await loadTiers()
     unsubTiers = events.subscribe('tiers', () => loadTiers())
     unsubNewMsg = events.subscribe('new_message', () => {
-      if (convId && !sending) {
-        loadHistory().then(() => scrollToBottom())
-      }
+      if (!convId) return
+      // Fetch latest messages and append any new ones (safe during streaming).
+      api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${convId}`).then(recent => {
+        if (!recent?.length) return
+        const existingIds = new Set(messages.map(m => m.id))
+        const newMsgs = recent.filter(m => !existingIds.has(m.id))
+        if (newMsgs.length > 0) {
+          messages = [...messages, ...newMsgs]
+          scrollToBottom()
+        }
+      }).catch(() => {})
     })
     if (convId) {
       await loadHistory()

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { tick, onMount, onDestroy } from 'svelte'
   import type { Snippet } from 'svelte'
 
   let { open = false, wide = false, onclose, children }: {
@@ -10,6 +10,17 @@
   } = $props()
 
   let modalEl: HTMLDivElement
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && open && onclose) {
+      e.preventDefault()
+      e.stopPropagation()
+      onclose()
+    }
+  }
+
+  onMount(() => window.addEventListener('keydown', handleKeydown))
+  onDestroy(() => window.removeEventListener('keydown', handleKeydown))
 
   // Auto-focus the first input/textarea/select when modal opens.
   $effect(() => {
@@ -26,6 +37,9 @@
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="modal-backdrop" role="presentation">
     <div class="modal" class:wide onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" bind:this={modalEl}>
+      {#if onclose}
+        <button class="modal-close" onclick={onclose} aria-label="Close">&times;</button>
+      {/if}
       {@render children()}
     </div>
   </div>
@@ -43,6 +57,7 @@
   }
 
   .modal {
+    position: relative;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
@@ -57,5 +72,25 @@
   .modal.wide {
     width: 80vw;
     max-width: 1000px;
+  }
+
+  .modal-close {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius, 8px);
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .modal-close:hover {
+    color: var(--text);
+    background: var(--bg-input);
   }
 </style>

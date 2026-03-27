@@ -3,6 +3,7 @@
   import { api } from '../lib/api';
   import { toasts } from '../stores/toast.svelte';
   import Card from '../components/shared/Card.svelte';
+  import Modal from '../components/shared/Modal.svelte';
   import { Plus, Pencil, Trash2, Download, Zap, Shield, AlertTriangle, Check, Loader2, Eye, Lock, Copy } from 'lucide-svelte';
 
   // --- State ---
@@ -352,174 +353,152 @@
 </div>
 
 <!-- Create Modal -->
-{#if showCreateModal}
-  <div class="modal-overlay" onclick={() => showCreateModal = false}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h3><Plus size={18} /> New Skill</h3>
-      <div class="form-grid">
-        <label>
-          Name
-          <input type="text" bind:value={createForm.name} placeholder="e.g. my-skill" />
-        </label>
-        <label>
-          Tier
-          <select bind:value={createForm.tier}>
-            <option value="">auto</option>
-            {#each tierNames as t}
-              <option value={t}>{t}</option>
-            {/each}
-          </select>
-        </label>
-        <label class="full-width">
-          Description
-          <input type="text" bind:value={createForm.description} placeholder="What this skill does" />
-        </label>
-        <label class="full-width">
-          Triggers
-          <input type="text" bind:value={createForm.triggers} placeholder="comma-separated trigger words" />
-        </label>
-        <label class="full-width">
-          Content (Markdown)
-          <textarea bind:value={createForm.content} rows="12" placeholder="# My Skill&#10;&#10;Instructions for the LLM..."></textarea>
-        </label>
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" onclick={() => showCreateModal = false}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveCreate}>Create</button>
-      </div>
-    </div>
+<Modal open={showCreateModal} onclose={() => showCreateModal = false}>
+  <h3><Plus size={18} /> New Skill</h3>
+  <div class="form-grid">
+    <label>
+      Name
+      <input type="text" bind:value={createForm.name} placeholder="e.g. my-skill" />
+    </label>
+    <label>
+      Tier
+      <select bind:value={createForm.tier}>
+        <option value="">auto</option>
+        {#each tierNames as t}
+          <option value={t}>{t}</option>
+        {/each}
+      </select>
+    </label>
+    <label class="full-width">
+      Description
+      <input type="text" bind:value={createForm.description} placeholder="What this skill does" />
+    </label>
+    <label class="full-width">
+      Triggers
+      <input type="text" bind:value={createForm.triggers} placeholder="comma-separated trigger words" />
+    </label>
+    <label class="full-width">
+      Content (Markdown)
+      <textarea bind:value={createForm.content} rows="12" placeholder="# My Skill&#10;&#10;Instructions for the LLM..."></textarea>
+    </label>
   </div>
-{/if}
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick={() => showCreateModal = false}>Cancel</button>
+    <button class="btn btn-primary" onclick={saveCreate}>Create</button>
+  </div>
+</Modal>
 
 <!-- Edit Modal -->
-{#if showEditModal}
-  <div class="modal-overlay" onclick={() => showEditModal = false}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal modal-wide" onclick={(e) => e.stopPropagation()}>
-      <h3><Pencil size={18} /> Edit: {editForm.name}</h3>
-      <label class="full-width">
-        <textarea bind:value={editForm.content} rows="20" class="code-editor"></textarea>
-      </label>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" onclick={() => showEditModal = false}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveEdit}>Save</button>
-      </div>
-    </div>
+<Modal open={showEditModal} wide onclose={() => showEditModal = false}>
+  <h3><Pencil size={18} /> Edit: {editForm.name}</h3>
+  <label class="full-width">
+    <textarea bind:value={editForm.content} rows="20" class="code-editor"></textarea>
+  </label>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick={() => showEditModal = false}>Cancel</button>
+    <button class="btn btn-primary" onclick={saveEdit}>Save</button>
   </div>
-{/if}
+</Modal>
 
 <!-- Import Modal -->
-{#if showImportModal}
-  <div class="modal-overlay" onclick={() => showImportModal = false}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal modal-wide" onclick={(e) => e.stopPropagation()}>
-      <h3><Download size={18} /> Import Skill from GitHub</h3>
+<Modal open={showImportModal} wide onclose={() => showImportModal = false}>
+  <h3><Download size={18} /> Import Skill from GitHub</h3>
 
-      {#if importPhase === 'input' || importPhase === 'scanning'}
-        <p class="import-hint">
-          Browse community skills at <a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a>, then paste the repository here.
-        </p>
-        <div class="form-grid">
-          <label class="full-width">
-            Repository
-            <input type="text" bind:value={importForm.command} placeholder="owner/repo or owner/repo --skill name" disabled={importPhase === 'scanning'} />
-          </label>
-        </div>
-        <div class="import-security-note">
-          <Shield size={14} />
-          <div>
-            <strong>Are community skills safe?</strong>
-            Every skill goes through an automated LLM security audit before installation. Skills run inside the same isolated container — no access to your host machine unless explicitly allowed.
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn btn-ghost" onclick={() => showImportModal = false}>Cancel</button>
-          <button class="btn btn-primary" onclick={startScan} disabled={importPhase === 'scanning'}>
-            {#if importPhase === 'scanning'}
-              <Loader2 size={14} class="spin" /> Scanning...
-            {:else}
-              <Shield size={14} /> Scan & Preview
-            {/if}
-          </button>
-        </div>
-
-      {:else if importPhase === 'preview' && scanResult}
-        <div class="scan-result">
-          <div class="scan-header">
-            <strong>{scanResult.name}</strong>
-            <span class="badge" style:background={verdictColor(scanResult.verdict)} style:color="#fff">
-              {#if scanResult.verdict === 'PASS'}<Check size={12} />{:else}<AlertTriangle size={12} />{/if}
-              {scanResult.verdict}
-            </span>
-          </div>
-          {#if scanResult.description}
-            <p class="skill-desc">{scanResult.description}</p>
-          {/if}
-          {#if scanResult.source}
-            <p class="skill-meta">Source: {scanResult.source}</p>
-          {/if}
-          {#if scanResult.issues?.length}
-            <div class="scan-issues">
-              <strong>Issues:</strong>
-              <ul>
-                {#each scanResult.issues as issue}
-                  <li>{issue}</li>
-                {/each}
-              </ul>
-            </div>
-          {/if}
-          {#if scanResult.triggers?.length}
-            <div class="skill-triggers" style="margin-top: 0.5rem">
-              {#each scanResult.triggers as trigger}
-                <span class="trigger-tag">{trigger}</span>
-              {/each}
-            </div>
-          {/if}
-          {#if scanResult.tier}
-            <p class="skill-meta">Suggested tier: <strong>{scanResult.tier}</strong></p>
-          {/if}
-          <details class="content-preview">
-            <summary>View SKILL.md content</summary>
-            <pre>{scanResult.content}</pre>
-          </details>
-        </div>
-        <div class="modal-actions">
-          <button class="btn btn-ghost" onclick={() => showImportModal = false}>Cancel</button>
-          {#if scanResult.verdict === 'FAIL'}
-            <button class="btn btn-warning" onclick={installScanned}>Install Anyway</button>
-          {:else}
-            <button class="btn btn-primary" onclick={installScanned} disabled={importPhase === 'installing'}>
-              {#if importPhase === 'installing'}
-                <Loader2 size={14} class="spin" /> Installing...
-              {:else}
-                <Download size={14} /> Install
-              {/if}
-            </button>
-          {/if}
-        </div>
-      {/if}
+  {#if importPhase === 'input' || importPhase === 'scanning'}
+    <p class="import-hint">
+      Browse community skills at <a href="https://skills.sh" target="_blank" rel="noopener">skills.sh</a>, then paste the repository here.
+    </p>
+    <div class="form-grid">
+      <label class="full-width">
+        Repository
+        <input type="text" bind:value={importForm.command} placeholder="owner/repo or owner/repo --skill name" disabled={importPhase === 'scanning'} />
+      </label>
     </div>
-  </div>
-{/if}
-
-<!-- Preview Modal -->
-{#if showPreviewModal && previewSkill}
-  <div class="modal-overlay" onclick={() => showPreviewModal = false}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal modal-wide" onclick={(e) => e.stopPropagation()}>
-      <h3><Eye size={18} /> {previewSkill.name}</h3>
-      <pre class="content-pre">{previewSkill.rawContent}</pre>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" onclick={() => showPreviewModal = false}>Close</button>
-        <button class="btn btn-primary" onclick={() => { showPreviewModal = false; openEdit(previewSkill); }}>Edit</button>
+    <div class="import-security-note">
+      <Shield size={14} />
+      <div>
+        <strong>Are community skills safe?</strong>
+        Every skill goes through an automated LLM security audit before installation. Skills run inside the same isolated container — no access to your host machine unless explicitly allowed.
       </div>
     </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick={() => showImportModal = false}>Cancel</button>
+      <button class="btn btn-primary" onclick={startScan} disabled={importPhase === 'scanning'}>
+        {#if importPhase === 'scanning'}
+          <Loader2 size={14} class="spin" /> Scanning...
+        {:else}
+          <Shield size={14} /> Scan & Preview
+        {/if}
+      </button>
+    </div>
+
+  {:else if importPhase === 'preview' && scanResult}
+    <div class="scan-result">
+      <div class="scan-header">
+        <strong>{scanResult.name}</strong>
+        <span class="badge" style:background={verdictColor(scanResult.verdict)} style:color="#fff">
+          {#if scanResult.verdict === 'PASS'}<Check size={12} />{:else}<AlertTriangle size={12} />{/if}
+          {scanResult.verdict}
+        </span>
+      </div>
+      {#if scanResult.description}
+        <p class="skill-desc">{scanResult.description}</p>
+      {/if}
+      {#if scanResult.source}
+        <p class="skill-meta">Source: {scanResult.source}</p>
+      {/if}
+      {#if scanResult.issues?.length}
+        <div class="scan-issues">
+          <strong>Issues:</strong>
+          <ul>
+            {#each scanResult.issues as issue}
+              <li>{issue}</li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
+      {#if scanResult.triggers?.length}
+        <div class="skill-triggers" style="margin-top: 0.5rem">
+          {#each scanResult.triggers as trigger}
+            <span class="trigger-tag">{trigger}</span>
+          {/each}
+        </div>
+      {/if}
+      {#if scanResult.tier}
+        <p class="skill-meta">Suggested tier: <strong>{scanResult.tier}</strong></p>
+      {/if}
+      <details class="content-preview">
+        <summary>View SKILL.md content</summary>
+        <pre>{scanResult.content}</pre>
+      </details>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick={() => showImportModal = false}>Cancel</button>
+      {#if scanResult.verdict === 'FAIL'}
+        <button class="btn btn-warning" onclick={installScanned}>Install Anyway</button>
+      {:else}
+        <button class="btn btn-primary" onclick={installScanned} disabled={importPhase === 'installing'}>
+          {#if importPhase === 'installing'}
+            <Loader2 size={14} class="spin" /> Installing...
+          {:else}
+            <Download size={14} /> Install
+          {/if}
+        </button>
+      {/if}
+    </div>
+  {/if}
+</Modal>
+
+<!-- Preview Modal -->
+{#if previewSkill}
+<Modal open={showPreviewModal} wide onclose={() => showPreviewModal = false}>
+  <h3><Eye size={18} /> {previewSkill.name}</h3>
+  <pre class="content-pre">{previewSkill.rawContent}</pre>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick={() => showPreviewModal = false}>Close</button>
+    <button class="btn btn-primary" onclick={() => { showPreviewModal = false; openEdit(previewSkill); }}>Edit</button>
   </div>
+</Modal>
 {/if}
 
 <style>
@@ -661,35 +640,7 @@
     margin-top: 0.2rem;
   }
 
-  /* Modal styles */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-  .modal {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.5rem;
-    max-width: 600px;
-    width: 90vw;
-    max-height: 85vh;
-    overflow-y: auto;
-  }
-  .modal-wide {
-    max-width: 800px;
-  }
-  .modal h3 {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin: 0 0 1rem;
-  }
+  /* Modal content styles */
   .form-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

@@ -4,6 +4,7 @@
   import { toasts } from '../stores/toast.svelte';
   import { events } from '../stores/events.svelte';
   import Card from '../components/shared/Card.svelte';
+  import Modal from '../components/shared/Modal.svelte';
   import { Plus, Play, Trash2, Search, ChevronDown, ChevronRight, ChevronsUpDown, Clock, Power, PowerOff, Settings, Pencil } from 'lucide-svelte';
 
   // --- State ---
@@ -468,12 +469,8 @@
 </div>
 
 <!-- Add/Edit Modal -->
-{#if showModal}
-  <div class="modal-overlay" onclick={() => showModal = false}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h3>{editingJob ? 'Edit' : 'Add'} Schedule</h3>
+<Modal open={showModal} onclose={() => showModal = false}>
+  <h3>{editingJob ? 'Edit' : 'Add'} Schedule</h3>
       <div class="form-grid">
         <label class="full-width">
           Name
@@ -528,15 +525,13 @@
           <textarea bind:value={form.message} rows="2" placeholder="Direct notification text"></textarea>
         </label>
       </div>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" onclick={() => showModal = false}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveForm}>
-          {editingJob ? 'Update' : 'Create'}
-        </button>
-      </div>
-    </div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick={() => showModal = false}>Cancel</button>
+    <button class="btn btn-primary" onclick={saveForm}>
+      {editingJob ? 'Update' : 'Create'}
+    </button>
   </div>
-{/if}
+</Modal>
 
 <style>
   .view-schedules {
@@ -741,29 +736,7 @@
     font-size: 0.75rem;
   }
 
-  /* Modal */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-  .modal {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.5rem;
-    max-width: 550px;
-    width: 90vw;
-    max-height: 85vh;
-    overflow-y: auto;
-  }
-  .modal h3 {
-    margin: 0 0 1rem;
-  }
+  /* Modal content styles */
   .form-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

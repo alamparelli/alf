@@ -4,6 +4,7 @@
   import { toasts } from '../stores/toast.svelte';
   import { events } from '../stores/events.svelte';
   import Card from '../components/shared/Card.svelte';
+  import Modal from '../components/shared/Modal.svelte';
   import Toggle from '../components/shared/Toggle.svelte';
   import { Plus, Pencil, Trash2, Save, Copy, Router, Brain, ChevronDown } from 'lucide-svelte';
 
@@ -288,12 +289,8 @@
 </div>
 
 <!-- Tier Add/Edit Modal -->
-{#if showTierModal}
-  <div class="modal-overlay" onclick={() => showTierModal = false}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h3>{editingTierIndex >= 0 ? 'Edit' : 'Add'} Tier</h3>
+<Modal open={showTierModal} wide onclose={() => showTierModal = false}>
+  <h3>{editingTierIndex >= 0 ? 'Edit' : 'Add'} Tier</h3>
       <div class="form-grid">
         <label>
           Name
@@ -386,23 +383,17 @@
           </div>
         {/if}
       </div>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" onclick={() => showTierModal = false}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveTierForm}>
-          {editingTierIndex >= 0 ? 'Update' : 'Add'}
-        </button>
-      </div>
-    </div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick={() => showTierModal = false}>Cancel</button>
+    <button class="btn btn-primary" onclick={saveTierForm}>
+      {editingTierIndex >= 0 ? 'Update' : 'Add'}
+    </button>
   </div>
-{/if}
+</Modal>
 
 <!-- Router Config Modal -->
-{#if showRouterModal}
-  <div class="modal-overlay" onclick={() => showRouterModal = false}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h3><Router size={18} /> Router Configuration</h3>
+<Modal open={showRouterModal} onclose={() => showRouterModal = false}>
+  <h3><Router size={18} /> Router Configuration</h3>
       <div class="form-grid">
         <label>
           Router Backend
@@ -445,21 +436,15 @@
           <textarea bind:value={routerForm.router_distinctions} rows="3" placeholder="Extra instructions for the classifier"></textarea>
         </label>
       </div>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" onclick={() => showRouterModal = false}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveRouterForm}>Save</button>
-      </div>
-    </div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick={() => showRouterModal = false}>Cancel</button>
+    <button class="btn btn-primary" onclick={saveRouterForm}>Save</button>
   </div>
-{/if}
+</Modal>
 
 <!-- Memory Config Modal -->
-{#if showMemoryModal}
-  <div class="modal-overlay" onclick={() => showMemoryModal = false}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h3><Brain size={18} /> Memory Extraction LLM</h3>
+<Modal open={showMemoryModal} onclose={() => showMemoryModal = false}>
+  <h3><Brain size={18} /> Memory Extraction LLM</h3>
       <p class="modal-hint">Which LLM analyzes conversations to extract facts and learnings into long-term memory. By default, uses the same backend and model as the router (cheap and fast).</p>
       <div class="form-grid">
         <label>
@@ -488,13 +473,11 @@
           {/if}
         </label>
       </div>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" onclick={() => showMemoryModal = false}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveMemoryForm}>Save</button>
-      </div>
-    </div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick={() => showMemoryModal = false}>Cancel</button>
+    <button class="btn btn-primary" onclick={saveMemoryForm}>Save</button>
   </div>
-{/if}
+</Modal>
 
 <style>
   .view-tiers {
@@ -572,32 +555,7 @@
     font-size: 0.8rem;
   }
 
-  /* Modal styles */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-  .modal {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.5rem;
-    max-width: 800px;
-    width: 90vw;
-    max-height: 85vh;
-    overflow-y: auto;
-  }
-  .modal h3 {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin: 0 0 1rem;
-  }
+  /* Modal content styles */
   .form-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

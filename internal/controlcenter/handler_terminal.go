@@ -71,13 +71,19 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if d := os.Getenv("ALF_HOME_DIR"); d != "" {
 		homeDir = d
 	}
-	cmd.Dir = homeDir
+	if isAdmin {
+		cmd.Dir = "/opt/alf"
+	} else {
+		cmd.Dir = homeDir
+	}
 	// Build a safe environment - exclude daemon secrets (OAuth tokens, API keys, etc.).
 	user := "alf"
+	envHome := homeDir
 	if isAdmin {
 		user = "alfd"
+		envHome = "/opt/alf"
 	}
-	env := termSafeEnv(homeDir, user)
+	env := termSafeEnv(envHome, user)
 	cmd.Env = env
 
 	ptmx, err := pty.Start(cmd)

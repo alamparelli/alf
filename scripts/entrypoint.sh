@@ -102,12 +102,20 @@ chmod -R g+ws /opt/alf/user-packages
 # Ensure subprocess can read its own .claude/ auth.
 chmod -R g+rX /home/alf/.claude 2>/dev/null || true
 
-# Docker secrets: ensure daemon (alfd/uid 1001) can read them.
-# Docker Compose standalone may mount secrets as bind mounts or tmpfs.
-# tmpfs secrets are read-only — chown will fail silently.
+# Docker secrets: make them readable by daemon (alfd/uid 1001).
+# Docker Compose standalone mounts secrets as read-only tmpfs (chown impossible).
+# Copy to a writable location owned by alfd, then re-export *_FILE env vars.
 if [ -d /run/secrets ]; then
-    chown -R alfd:alf /run/secrets 2>/dev/null || true
-    chmod 0440 /run/secrets/* 2>/dev/null || true
+    mkdir -p /run/alf-secrets
+    cp /run/secrets/* /run/alf-secrets/ 2>/dev/null || true
+    chown -R alfd:alf /run/alf-secrets
+    chmod 0440 /run/alf-secrets/*
+    # Re-point *_FILE env vars to the copied secrets.
+    for f in /run/alf-secrets/*; do
+        name=$(basename "$f")
+        upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
+        export "${upper}_FILE=/run/alf-secrets/${name}"
+    done
 fi
 
 # Phase 2.6: Seed default apps from bundled defaults (as root, before locking).

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { Play, Square, Trash2, ChevronDown, ChevronRight, RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle, Users, Loader2 } from 'lucide-svelte'
+  import { Play, Square, Trash2, ChevronDown, ChevronRight, RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle, Users, Loader2, RotateCcw } from 'lucide-svelte'
   import Card from '../components/shared/Card.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
@@ -62,6 +62,11 @@
 
   // Approval
   let approvalFeedback = $state<Record<string, string>>({})
+
+  // Restart
+  let restartingTask = $state<string | null>(null)
+  let restartComment = $state('')
+  let restarting = $state(false)
 
   // Track completed task IDs for desktop notifications
   let knownCompletedIds = $state<Set<string>>(new Set())
@@ -165,6 +170,28 @@
       loadTasks()
     } catch (e: any) {
       toasts.show(e.error || 'Failed to delete', 'error')
+    }
+  }
+
+  async function restartTask(task: TaskMeta) {
+    restarting = true
+    try {
+      const message = restartComment.trim()
+        ? `[Restart note: ${restartComment.trim()}]\n\n${task.prompt}`
+        : task.prompt || ''
+      await api('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, ...(task.team ? { team: task.team } : {}) })
+      })
+      toasts.show('Task restarted', 'success')
+      restartingTask = null
+      restartComment = ''
+      loadTasks()
+    } catch (e: any) {
+      toasts.show(e.error || 'Failed to restart task', 'error')
+    } finally {
+      restarting = false
     }
   }
 
@@ -284,6 +311,7 @@
           <div class="task-info">
             <span class="task-name">{task.prompt ? (task.prompt.length > 80 ? task.prompt.slice(0, 77) + '...' : task.prompt) : 'Agent task'}</span>
             <div class="task-meta">
+              <span class="task-id">#{task.id.slice(0, 8)}</span>
               <span class="badge {statusBadgeClass(task.status)}">{task.status.replace(/_/g, ' ')}</span>
               {#if task.total_cost_usd > 0}
                 <span class="cost-badge">${task.total_cost_usd.toFixed(4)}</span>
@@ -422,6 +450,7 @@
             <div class="task-info">
               <span class="task-name">{task.prompt ? (task.prompt.length > 80 ? task.prompt.slice(0, 77) + '...' : task.prompt) : 'Agent task'}</span>
               <div class="task-meta">
+                <span class="task-id">#{task.id.slice(0, 8)}</span>
                 <span class="badge {statusBadgeClass(task.status)}">{task.status.replace(/_/g, ' ')}</span>
                 {#if task.total_cost_usd > 0}
                   <span class="cost-badge">${task.total_cost_usd.toFixed(4)}</span>
@@ -432,11 +461,35 @@
               </div>
             </div>
             <div class="task-actions">
+              <button class="btn btn-sm" onclick={(e: MouseEvent) => { e.stopPropagation(); restartingTask = restartingTask === task.id ? null : task.id; restartComment = '' }} title="Restart">
+                <RotateCcw size={13} />
+              </button>
               <button class="btn btn-sm" onclick={(e: MouseEvent) => { e.stopPropagation(); deleteTask(task.id) }} title="Delete">
                 <Trash2 size={13} />
               </button>
             </div>
           </div>
+
+          {#if restartingTask === task.id}
+            <div class="restart-ui">
+              <textarea
+                class="input"
+                placeholder="Optional comment (e.g. try a different approach)..."
+                rows={2}
+                bind:value={restartComment}
+              ></textarea>
+              <div class="restart-actions">
+                <button class="btn btn-primary btn-sm" onclick={() => restartTask(task)} disabled={restarting}>
+                  {#if restarting}
+                    <Loader2 size={13} class="spin" /> Restarting...
+                  {:else}
+                    <RotateCcw size={13} /> Restart
+                  {/if}
+                </button>
+                <button class="btn btn-sm" onclick={() => { restartingTask = null; restartComment = '' }}>Cancel</button>
+              </div>
+            </div>
+          {/if}
 
           {#if expandedTasks[task.id]}
             <div class="task-detail">
@@ -611,8 +664,34 @@
     gap: 3px;
   }
 
+  .task-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    opacity: 0.6;
+  }
+
   .task-actions {
     flex-shrink: 0;
+    display: flex;
+    gap: 4px;
+  }
+
+  .restart-ui {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.06);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: var(--radius, 8px);
+  }
+
+  .restart-ui textarea {
+    margin-bottom: 8px;
+  }
+
+  .restart-actions {
+    display: flex;
+    gap: 8px;
   }
 
   .badge {

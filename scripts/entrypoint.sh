@@ -133,6 +133,17 @@ if [ -d /run/secrets ]; then
         # Unset so daemon doesn't read from Docker secret path.
         unset VAULT_MASTER_PASSWORD_FILE
     fi
+
+    # CC auth token: migrate from Docker secret to vault-data (alfd-only).
+    if [ -f /run/secrets/cc_auth_token ]; then
+        tok=$(cat /run/secrets/cc_auth_token)
+        if [ -n "$tok" ]; then
+            tokfile="/opt/alf/vault-data/.cc_auth_token"
+            echo "$tok" > "$tokfile"
+            chown alfd:alf "$tokfile"
+            chmod 0400 "$tokfile"
+        fi
+    fi
 fi
 
 # Phase 2.6: Seed default apps from bundled defaults (as root, before locking).

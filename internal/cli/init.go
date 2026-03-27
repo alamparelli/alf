@@ -762,14 +762,22 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	// Telegram tokens are no longer stored as Docker secrets — configured via CC setup wizard.
 
 	// Generate Control Center auth token.
+	// Stored in vault-data (daemon-only, mode 700) so the LLM subprocess cannot read it.
+	// Also written to secrets/ for Docker Compose mount (entrypoint migrates to vault-data).
 	ccToken, err := generateAuthToken()
 	if err != nil {
 		Fatal(fmt.Sprintf("Failed to generate auth token: %v", err))
 	}
+	vaultDataDir := filepath.Join(dir, "vault-data")
+	os.MkdirAll(vaultDataDir, 0o700)
+	if err := os.WriteFile(filepath.Join(vaultDataDir, ".cc_auth_token"), []byte(ccToken+"\n"), 0o600); err != nil {
+		Fatal(fmt.Sprintf("Failed to write auth token to vault-data: %v", err))
+	}
+	// Also write to secrets/ for backwards compat with Docker Compose mount.
 	if err := SetSecret(dir, "cc_auth_token", ccToken); err != nil {
 		Fatal(fmt.Sprintf("Failed to write secret: %v", err))
 	}
-	PrintCheck("secrets/cc_auth_token")
+	PrintCheck("vault-data/.cc_auth_token")
 
 	// Auto-generate whisper shared secret if missing or empty.
 	// Auto-generate shared secrets for sidecar services.

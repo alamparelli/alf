@@ -82,7 +82,7 @@ scaffold_tenant() {
     fi
 
     # Ensure all secret files exist (empty placeholders for Docker Compose)
-    local secrets=(cc_auth_token claude_oauth_token whisper_shared_secret
+    local secrets=(claude_oauth_token whisper_shared_secret
                    embed_shared_secret)
     for s in "${secrets[@]}"; do
         # Remove directory placeholder Docker may have created
@@ -172,7 +172,7 @@ preflight_fix_placeholders() {
             echo "nameserver 1.1.1.1" >> "${tenant_dir}resolv.conf"
         fi
         # secrets
-        local secrets=(cc_auth_token claude_oauth_token whisper_shared_secret
+        local secrets=(claude_oauth_token whisper_shared_secret
                        embed_shared_secret)
         for s in "${secrets[@]}"; do
             if [[ ! -f "${tenant_dir}secrets/$s" ]]; then
@@ -372,7 +372,7 @@ EOF
       - "traefik.http.middlewares.alf-${user}-rl.ratelimit.burst=20"
       - "traefik.http.routers.alf-${user}.middlewares=alf-${user}-rl"
     environment:
-      - CC_AUTH_TOKEN_FILE=/run/secrets/cc_auth_token
+      - CC_AUTH_TOKEN_FILE=/opt/alf/vault-data/.cc_auth_token
       - CLAUDE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth_token
       - WHISPER_URL=http://whisper:8000
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
@@ -382,11 +382,6 @@ EOF
       - CC_EXTERNAL_URL=https://${domain}
       - TZ=${timezone}
     secrets:
-      - source: ${user}_cc_auth_token
-        target: cc_auth_token
-        uid: "1001"
-        gid: "1001"
-        mode: 0400
       - source: ${user}_claude_oauth_token
         target: claude_oauth_token
         uid: "1000"
@@ -459,7 +454,7 @@ EOF
         local user
         user=$(echo "$tenant" | jq -r '.user')
 
-        local secrets=(cc_auth_token claude_oauth_token whisper_shared_secret
+        local secrets=(claude_oauth_token whisper_shared_secret
                        embed_shared_secret)
         for s in "${secrets[@]}"; do
             cat >> "$COMPOSE_FILE" <<EOF

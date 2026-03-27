@@ -462,6 +462,11 @@ func (cs *ChatService) ActiveSkills() []string {
 	return cs.Sessions.GetSkills(apiChatID)
 }
 
+// RemoveActiveSkill removes a single skill from the CC session.
+func (cs *ChatService) RemoveActiveSkill(name string) {
+	cs.Sessions.RemoveSkill(apiChatID, name)
+}
+
 // ClearActiveSkills removes all active skills from the CC session.
 func (cs *ChatService) ClearActiveSkills() {
 	cs.Sessions.ClearSkills(apiChatID)

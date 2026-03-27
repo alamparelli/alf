@@ -239,6 +239,25 @@ func (s *Store) GetSkills(chatID int64) []string {
 	return e.ActiveSkills
 }
 
+// RemoveSkill removes a single skill from the active set.
+func (s *Store) RemoveSkill(chatID int64, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.entries[chatID]
+	if !ok {
+		return
+	}
+	filtered := e.ActiveSkills[:0]
+	for _, n := range e.ActiveSkills {
+		if n != name {
+			filtered = append(filtered, n)
+		}
+	}
+	e.ActiveSkills = filtered
+	s.persist()
+}
+
 // ClearSkills removes all active skills from the session without archiving it.
 func (s *Store) ClearSkills(chatID int64) {
 	s.mu.Lock()

@@ -178,7 +178,11 @@ func (h *ChatSkillsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		skills := h.Service.ActiveSkills()
 		respondJSON(w, http.StatusOK, map[string]any{"skills": skills})
 	case http.MethodDelete:
-		h.Service.ClearActiveSkills()
+		if name := r.URL.Query().Get("name"); name != "" {
+			h.Service.RemoveActiveSkill(name)
+		} else {
+			h.Service.ClearActiveSkills()
+		}
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
 		methodNotAllowed(w)

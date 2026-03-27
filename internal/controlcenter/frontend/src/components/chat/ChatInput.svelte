@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Paperclip, Send, Square, X } from 'lucide-svelte'
+  import { Paperclip, Send, Square, X, Sparkles } from 'lucide-svelte'
   import { api } from '../../lib/api'
   import { toasts } from '../../stores/toast.svelte'
 
@@ -19,9 +19,11 @@
     onDraftChange?: (text: string) => void
     selectedModel?: string
     onModelChange?: (model: string) => void
+    activeSkills?: string[]
+    onDismissSkill?: (name: string) => void
   }
 
-  let { onSend, onStop, sending, tiers = [], draft = '', onDraftChange, selectedModel: selectedModelProp = '', onModelChange }: Props = $props()
+  let { onSend, onStop, sending, tiers = [], draft = '', onDraftChange, selectedModel: selectedModelProp = '', onModelChange, activeSkills = [], onDismissSkill }: Props = $props()
 
   let text = $state(draft)
   let files = $state<UploadedFile[]>([])
@@ -229,6 +231,21 @@
           <span class="file-chip-name">{file.file_name}</span>
           <button class="file-chip-remove" onclick={() => removeFile(i)}><X size={12} /></button>
         </div>
+      {/each}
+    </div>
+  {/if}
+
+  <!-- Active skills pills -->
+  {#if activeSkills.length > 0}
+    <div class="skill-pills">
+      <Sparkles size={12} class="skill-icon" />
+      {#each activeSkills as skill}
+        <span class="skill-pill">
+          {skill}
+          <button class="skill-pill-remove" onclick={() => onDismissSkill?.(skill)} title="Dismiss {skill}">
+            <X size={10} />
+          </button>
+        </span>
       {/each}
     </div>
   {/if}
@@ -460,6 +477,49 @@
     font-size: 0.72rem;
     color: var(--text-dim);
     padding: 4px 0 0;
+  }
+
+  /* Active skills */
+  .skill-pills {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .skill-pills :global(.skill-icon) {
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .skill-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px 2px 10px;
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+    border: 1px solid rgba(var(--accent-rgb, 99, 102, 241), 0.25);
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--accent);
+  }
+
+  .skill-pill-remove {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+  }
+
+  .skill-pill-remove:hover {
+    opacity: 1;
   }
 
   /* Slash command suggestions */

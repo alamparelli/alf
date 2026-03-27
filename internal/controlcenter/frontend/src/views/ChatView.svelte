@@ -76,6 +76,21 @@
   let activeJobId = $state<string | null>(null)
   let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string }[]>([])
   let draft = $state('')
+  let activeSkills = $state<string[]>([])
+
+  async function loadActiveSkills() {
+    try {
+      const data = await api<{ skills: string[] }>('/api/chat/skills')
+      activeSkills = data.skills || []
+    } catch { /* silent */ }
+  }
+
+  async function dismissSkill(name: string) {
+    try {
+      await api(`/api/chat/skills?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+      activeSkills = activeSkills.filter(s => s !== name)
+    } catch { /* silent */ }
+  }
 
   function updateDraft(text: string) {
     draft = text
@@ -363,6 +378,7 @@
               if (data.skills) lastAssistant.skills = data.skills
               messages = [...messages]
             }
+            loadActiveSkills()
             continue
           }
 
@@ -538,6 +554,7 @@
     // Load the active conversation from server.
     await loadActiveConversation()
     await loadTiers()
+    loadActiveSkills()
     unsubTiers = events.subscribe('tiers', () => loadTiers())
     unsubNewMsg = events.subscribe('new_message', () => {
       if (!convId) return
@@ -628,7 +645,7 @@
   </div>
 
   <!-- Input -->
-  <ChatInput onSend={handleSend} onStop={stopCall} {sending} {tiers} {draft} onDraftChange={updateDraft} selectedModel={selectedTier} onModelChange={(m) => { selectedTier = m }} />
+  <ChatInput onSend={handleSend} onStop={stopCall} {sending} {tiers} {draft} onDraftChange={updateDraft} selectedModel={selectedTier} onModelChange={(m) => { selectedTier = m }} {activeSkills} onDismissSkill={dismissSkill} />
 </div>
 
 <!-- Send to Agents Modal -->

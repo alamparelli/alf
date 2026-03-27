@@ -181,6 +181,8 @@ func TestResolveModel(t *testing.T) {
 		{"haiku", "claude-haiku-4-5"},
 		{"sonnet", "claude-sonnet-4-6"},
 		{"opus", "claude-opus-4-6"},
+		{"sonnet-max", "claude-sonnet-4-6-max"},
+		{"opus-max", "claude-opus-4-6-max"},
 		{"Haiku", "claude-haiku-4-5"},
 		{"claude-sonnet-4-6", "claude-sonnet-4-6"},
 		{"unknown", ""},

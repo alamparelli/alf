@@ -265,9 +265,11 @@ func DefaultTiersJSON() []byte {
 
 // AllowedModels defines valid model names for tier validation.
 var AllowedModels = map[string]bool{
-	"haiku":  true,
-	"sonnet": true,
-	"opus":   true,
+	"haiku":      true,
+	"sonnet":     true,
+	"opus":       true,
+	"sonnet-max": true,
+	"opus-max":   true,
 }
 
 // AllowedBackends is populated at runtime from registered backends.
@@ -292,6 +294,7 @@ var AllowedEfforts = map[string]bool{
 	"low":    true,
 	"medium": true,
 	"high":   true,
+	"max":    true,
 }
 
 // ReloadEvent signals what changed.

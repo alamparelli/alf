@@ -81,6 +81,19 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name and schedule are required"})
 			return
 		}
+		// SEC-009: Enforce length limits to reduce prompt injection surface.
+		if len(req.Prompt) > 4096 {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "prompt exceeds maximum length (4096 chars)"})
+			return
+		}
+		if len(req.Reason) > 256 {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "reason exceeds maximum length (256 chars)"})
+			return
+		}
+		if len(req.Name) > 128 {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name exceeds maximum length (128 chars)"})
+			return
+		}
 		var timeout time.Duration
 		if req.Timeout != "" {
 			var err error

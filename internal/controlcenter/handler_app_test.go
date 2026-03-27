@@ -81,6 +81,23 @@ func TestAppHandler_ServesAssets(t *testing.T) {
 	}
 }
 
+// SEC-008: unsafe-eval must not appear in app CSP.
+func TestAppHandler_CSP_NoUnsafeEval(t *testing.T) {
+	h, dir := newTestAppHandler(t)
+	appDir := filepath.Join(dir, "myapp")
+	os.MkdirAll(appDir, 0o755)
+	os.WriteFile(filepath.Join(appDir, "index.html"), []byte("<html></html>"), 0o644)
+
+	req := httptest.NewRequest("GET", "/apps/myapp/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	if strings.Contains(csp, "'unsafe-eval'") {
+		t.Errorf("CSP must not contain 'unsafe-eval' (XSS risk): %s", csp)
+	}
+}
+
 func TestAppHandler_NotFound(t *testing.T) {
 	h, _ := newTestAppHandler(t)
 

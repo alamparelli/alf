@@ -65,8 +65,6 @@ rsync -az --delete \
   --exclude .git --exclude node_modules --exclude mobile --exclude .claude \
   ./ "${REMOTE_HOST}:/tmp/alf-build/"
 
-rm -rf third_party/vault-proxy
-
 echo "==> Building Docker image natively on homelab..."
 $SSH "${REMOTE_HOST}" "cd /tmp/alf-build && docker build --build-arg BUILD_VERSION='${BUILD_VERSION}' -t '${FULL_TAG}' -t '${IMAGE_NAME}:latest' ."
 

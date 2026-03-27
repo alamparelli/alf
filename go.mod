@@ -29,4 +29,4 @@ require (
 	golang.org/x/text v0.35.0 // indirect
 )
 
-replace github.com/alessandrolamparelli/vault-proxy => /Users/alessandrolamparelli/Dev/Projects/vault-proxy
+replace github.com/alessandrolamparelli/vault-proxy => ./third_party/vault-proxy

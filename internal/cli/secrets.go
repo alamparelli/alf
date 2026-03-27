@@ -61,7 +61,7 @@ func SetSecret(baseDir, name, value string) error {
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
 		os.Remove(path)
 	}
-	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o600); err != nil {
 		return err
 	}
 	return nil

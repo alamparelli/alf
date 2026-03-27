@@ -9,6 +9,7 @@
     File, Package, X, FolderOpen, Zap, Filter, Mail
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
+  import { spotlightSettings } from '../stores/spotlight.svelte'
 
   let open = $state(false)
   let query = $state('')
@@ -177,8 +178,8 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    // Global: Cmd+G / Ctrl+G
-    if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
+    // Global: Cmd+<key> / Ctrl+<key>
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === spotlightSettings.shortcutKey) {
       e.preventDefault()
       open = !open
       if (open) {

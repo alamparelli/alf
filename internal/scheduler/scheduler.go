@@ -38,6 +38,9 @@ type Engine struct {
 	// Map of job ID → cron entry ID for removal.
 	entries map[string]cron.EntryID
 
+	// Original cron functions for system jobs, used for re-enable.
+	systemFuncs map[string]func()
+
 	server *Server
 
 	// OnChange is called after any mutation (create/update/delete).
@@ -53,11 +56,12 @@ func New(cfg Config) *Engine {
 	}
 	logDir := filepath.Join(cfg.DataDir, "logs", "scheduler")
 	return &Engine{
-		cfg:     cfg,
-		store:   NewStore(cfg.CronPath),
-		cron:    cron.New(cron.WithLocation(loc), cron.WithSeconds()),
-		runLog:  NewRunLog(logDir),
-		entries: make(map[string]cron.EntryID),
+		cfg:         cfg,
+		store:       NewStore(cfg.CronPath),
+		cron:        cron.New(cron.WithLocation(loc), cron.WithSeconds()),
+		runLog:      NewRunLog(logDir),
+		entries:     make(map[string]cron.EntryID),
+		systemFuncs: make(map[string]func()),
 	}
 }
 
@@ -84,7 +88,7 @@ func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error, desc
 		CreatedAt:   time.Now(),
 	}
 
-	entryID, err := e.cron.AddFunc(schedule, func() {
+	cronFunc := func() {
 		if job.running {
 			log.Printf("scheduler: skipping %s (still running)", id)
 			e.runLog.appendAndTruncate(RunRecord{
@@ -115,7 +119,9 @@ func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error, desc
 				DurationMs: duration.Milliseconds(), Status: "ok",
 			})
 		}
-	})
+	}
+	e.systemFuncs[id] = cronFunc
+	entryID, err := e.cron.AddFunc(schedule, cronFunc)
 	if err != nil {
 		log.Printf("scheduler: failed to register system job %s: %v", id, err)
 		return
@@ -153,6 +159,38 @@ func (e *Engine) Start(sockPath string) error {
 	e.store.mu.Lock()
 	e.store.jobs = append(systemJobs, e.store.jobs...)
 	e.store.mu.Unlock()
+
+	// Apply persisted overrides to system jobs (enabled, output, description, reason).
+	overrides := e.store.SystemOverrides()
+	if len(overrides) > 0 {
+		e.mu.Lock()
+		for _, j := range systemJobs {
+			ov, ok := overrides[j.ID]
+			if !ok {
+				continue
+			}
+			if v, ok2 := ov["enabled"]; ok2 {
+				j.Enabled = v == "true"
+			}
+			if v, ok2 := ov["output"]; ok2 && v != "" {
+				j.Output = v
+			}
+			if v, ok2 := ov["description"]; ok2 {
+				j.Description = v
+			}
+			if v, ok2 := ov["reason"]; ok2 {
+				j.Reason = v
+			}
+			// If disabled, remove the cron entry added by RegisterSystem.
+			if !j.Enabled {
+				if eid, ok2 := e.entries[j.ID]; ok2 {
+					e.cron.Remove(eid)
+					delete(e.entries, j.ID)
+				}
+			}
+		}
+		e.mu.Unlock()
+	}
 
 	// Register all enabled persisted user jobs.
 	for _, j := range e.store.All() {
@@ -420,8 +458,19 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 		e.mu.Unlock()
 
 		if j.Enabled {
-			if err := e.scheduleJob(j); err != nil {
-				return nil, fmt.Errorf("invalid schedule: %w", err)
+			if j.System {
+				// Re-register using the original system job function (not the LLM pipeline).
+				e.mu.Lock()
+				if fn, ok := e.systemFuncs[id]; ok {
+					if entryID, err2 := e.cron.AddFunc(j.Schedule, fn); err2 == nil {
+						e.entries[id] = entryID
+					}
+				}
+				e.mu.Unlock()
+			} else {
+				if err := e.scheduleJob(j); err != nil {
+					return nil, fmt.Errorf("invalid schedule: %w", err)
+				}
 			}
 		}
 	}

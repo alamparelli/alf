@@ -45,9 +45,10 @@ func (j *Job) IsRunning() bool {
 
 // Store persists jobs to a JSON file with atomic rename.
 type Store struct {
-	path string
-	mu   sync.RWMutex
-	jobs []*Job
+	path            string
+	mu              sync.RWMutex
+	jobs            []*Job
+	systemOverrides map[string]map[string]string
 }
 
 // NewStore creates a Store backed by the given file path.
@@ -70,7 +71,8 @@ func (s *Store) Load() error {
 	}
 
 	var file struct {
-		Jobs []*Job `json:"jobs"`
+		Jobs            []*Job                       `json:"jobs"`
+		SystemOverrides map[string]map[string]string `json:"system_overrides,omitempty"`
 	}
 	if err := json.Unmarshal(data, &file); err != nil {
 		return fmt.Errorf("parse cron.json: %w", err)
@@ -87,22 +89,34 @@ func (s *Store) Load() error {
 		}
 	}
 	s.jobs = userJobs
+	s.systemOverrides = file.SystemOverrides
 	return nil
 }
 
 // Save writes non-system jobs to disk using atomic rename.
 // System jobs are transient - re-registered at every boot via RegisterSystem.
+// Mutable system job state (enabled, output, description, reason) is persisted
+// in system_overrides so it survives restarts.
 func (s *Store) Save() error {
 	s.mu.RLock()
 	var userJobs []*Job
+	sysOverrides := make(map[string]map[string]string)
 	for _, j := range s.jobs {
-		if !j.System {
+		if j.System {
+			sysOverrides[j.ID] = map[string]string{
+				"enabled":     fmt.Sprintf("%v", j.Enabled),
+				"output":      j.Output,
+				"description": j.Description,
+				"reason":      j.Reason,
+			}
+		} else {
 			userJobs = append(userJobs, j)
 		}
 	}
 	data, err := json.MarshalIndent(struct {
-		Jobs []*Job `json:"jobs"`
-	}{Jobs: userJobs}, "", "  ")
+		Jobs            []*Job                       `json:"jobs"`
+		SystemOverrides map[string]map[string]string `json:"system_overrides,omitempty"`
+	}{Jobs: userJobs, SystemOverrides: sysOverrides}, "", "  ")
 	s.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("marshal cron.json: %w", err)
@@ -120,6 +134,20 @@ func (s *Store) Save() error {
 		return fmt.Errorf("rename cron.json: %w", err)
 	}
 	return nil
+}
+
+// SystemOverrides returns a copy of the persisted system job overrides.
+func (s *Store) SystemOverrides() map[string]map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.systemOverrides == nil {
+		return nil
+	}
+	out := make(map[string]map[string]string, len(s.systemOverrides))
+	for k, v := range s.systemOverrides {
+		out[k] = v
+	}
+	return out
 }
 
 // All returns a copy of all jobs.

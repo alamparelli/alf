@@ -286,6 +286,12 @@
     nav.navigateTo('chat')
   }
 
+  function openGettingStarted() {
+    localStorage.setItem('alf-welcomed', '1')
+    open = false
+    nav.navigateTo('docs:getting-started')
+  }
+
   // Can proceed?
   let canNext = $derived(
     step === 0 ? selectedBackends.size > 0 :
@@ -320,7 +326,16 @@
         <span><strong>Make it yours</strong> — configure tiers, add skills, and connect your services in the Vault.</span>
       </div>
     </div>
-    <button class="btn btn-primary welcome-cta" onclick={dismissWelcome}>Get started</button>
+    <blockquote class="welcome-quote">
+      <p>"Toute technologie suffisamment avancée est indiscernable de la magie."</p>
+      <cite>— Arthur C. Clarke</cite>
+    </blockquote>
+    <div class="welcome-actions">
+      <button class="btn welcome-docs-btn" onclick={openGettingStarted}>
+        Read Getting Started
+      </button>
+      <button class="btn btn-primary welcome-cta" onclick={dismissWelcome}>Let's go</button>
+    </div>
   {:else}
     <!-- Setup Wizard -->
     <div class="wizard-logo">ALF</div>
@@ -665,9 +680,43 @@
     flex-shrink: 0;
   }
 
+  .welcome-quote {
+    margin: 0 0 20px;
+    padding: 12px 16px;
+    border-left: 3px solid var(--accent);
+    background: var(--bg-input);
+    border-radius: 0 var(--radius, 8px) var(--radius, 8px) 0;
+  }
+
+  .welcome-quote p {
+    margin: 0 0 4px;
+    font-size: 0.85rem;
+    font-style: italic;
+    color: var(--text);
+    line-height: 1.5;
+  }
+
+  .welcome-quote cite {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-style: normal;
+  }
+
+  .welcome-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  .welcome-docs-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 10px;
+    font-size: 0.9rem;
+  }
+
   .welcome-cta {
-    display: block;
-    width: 100%;
+    flex: 1;
+    justify-content: center;
     padding: 10px;
     font-size: 0.9rem;
   }

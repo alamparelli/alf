@@ -590,3 +590,99 @@ func TestAuthMiddleware_CcBearerCookieExtraToken(t *testing.T) {
 // Ensure compile-time interface satisfaction.
 var _ http.Hijacker = (*statusWriter)(nil)
 var _ http.Flusher = (*statusWriter)(nil)
+
+// ---------------------------------------------------------------------------
+// SEC-004: clientIP must not trust X-Forwarded-For from untrusted origins
+// ---------------------------------------------------------------------------
+
+func TestClientIP_TrustedProxy_HonorsXFF(t *testing.T) {
+	// Requests from loopback/private network may carry XFF (reverse proxy scenario).
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "127.0.0.1:12345" // loopback = trusted proxy
+	req.Header.Set("X-Forwarded-For", "203.0.113.5")
+
+	ip := clientIP(req)
+	if ip != "203.0.113.5" {
+		t.Errorf("loopback remote: expected XFF value '203.0.113.5', got %q", ip)
+	}
+}
+
+func TestClientIP_TrustedProxy_DockerBridge(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "172.20.0.1:5000" // Docker bridge = trusted
+	req.Header.Set("X-Forwarded-For", "203.0.113.99")
+
+	ip := clientIP(req)
+	if ip != "203.0.113.99" {
+		t.Errorf("docker bridge remote: expected XFF value, got %q", ip)
+	}
+}
+
+func TestClientIP_UntrustedOrigin_IgnoresXFF(t *testing.T) {
+	// An external IP spoofing XFF must be ignored — RemoteAddr is used instead.
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "203.0.113.10:9999" // public IP = NOT a trusted proxy
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+
+	ip := clientIP(req)
+	if ip == "1.2.3.4" {
+		t.Error("untrusted remote: XFF header should be ignored, but spoofed IP was accepted")
+	}
+	if ip != "203.0.113.10" {
+		t.Errorf("untrusted remote: expected RemoteAddr '203.0.113.10', got %q", ip)
+	}
+}
+
+func TestClientIP_UntrustedOrigin_IgnoresXRealIP(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "198.51.100.7:8080" // public IP
+	req.Header.Set("X-Real-IP", "10.0.0.1")
+
+	ip := clientIP(req)
+	if ip == "10.0.0.1" {
+		t.Error("untrusted remote: X-Real-IP should be ignored")
+	}
+	if ip != "198.51.100.7" {
+		t.Errorf("untrusted remote: expected RemoteAddr, got %q", ip)
+	}
+}
+
+func TestClientIP_NoHeaders_UsesRemoteAddr(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.5:4321"
+
+	ip := clientIP(req)
+	if ip != "10.0.0.5" {
+		t.Errorf("no headers: expected '10.0.0.5', got %q", ip)
+	}
+}
+
+func TestClientIP_MultiValueXFF_TakesFirst(t *testing.T) {
+	// XFF can be "client, proxy1, proxy2" — we want the first (real client).
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "127.0.0.1:1" // trusted proxy
+	req.Header.Set("X-Forwarded-For", "203.0.113.5, 10.0.0.1, 172.16.0.1")
+
+	ip := clientIP(req)
+	if ip != "203.0.113.5" {
+		t.Errorf("multi-value XFF: expected first value '203.0.113.5', got %q", ip)
+	}
+}
+
+func TestIsTrustedProxy_PrivateRanges(t *testing.T) {
+	trusted := []string{"127.0.0.1", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.100"}
+	for _, ip := range trusted {
+		if !isTrustedProxy(ip) {
+			t.Errorf("expected %s to be a trusted proxy IP", ip)
+		}
+	}
+}
+
+func TestIsTrustedProxy_PublicIPs(t *testing.T) {
+	untrusted := []string{"8.8.8.8", "203.0.113.1", "1.1.1.1", "185.0.0.1"}
+	for _, ip := range untrusted {
+		if isTrustedProxy(ip) {
+			t.Errorf("expected %s to NOT be a trusted proxy IP", ip)
+		}
+	}
+}

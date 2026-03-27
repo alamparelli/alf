@@ -215,13 +215,9 @@ services:
     mem_limit: 2g
     cpus: "2.0"
     runtime: ${ALF_RUNTIME:-runc}
-    security_opt:
-      - no-new-privileges:true
     cap_drop:
       - ALL
     cap_add:
-      # Required for entrypoint only (apt-get, chown, setpriv). The daemon
-      # process runs as uid 1000 with zero capabilities (stripped by setpriv).
       - CHOWN
       - SETUID
       - SETGID

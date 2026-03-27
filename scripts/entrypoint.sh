@@ -86,7 +86,7 @@ chown -R alf:alf /home/alf/data          # workspace (both users via group)
 chmod -R g+ws /home/alf/data
 chown -R alfd:alf /opt/alf/config.d      # daemon owns config, subprocess reads via group
 chmod 750 /opt/alf/config.d
-chown alfd:alf /opt/alf/vault-data       # daemon-only (mode 700)
+chown -R alfd:alf /opt/alf/vault-data    # daemon-only (mode 700), -R for files inside
 chmod 700 /opt/alf/vault-data
 chown alf:alf /etc/resolv.conf 2>/dev/null || true
 
@@ -176,10 +176,12 @@ if [ -x /opt/alf/bin/nettrack-helper ]; then
     echo "entrypoint: nettrack-helper started (pid=$!)"
 fi
 
-# Phase 3: Drop to alfd (uid 1001) and start daemon with zero capabilities.
-# setpriv strips all inheritable capabilities - combined with no-new-privileges:true,
-# the daemon process cannot regain any capabilities after this point.
-# regid=1000 keeps the alf group as primary for shared data access.
+# Phase 3: Drop to alfd (uid 1001) and start daemon.
+# Keep CAP_SETUID+CAP_SETGID so the daemon can spawn subprocesses as alf (uid 1000).
+# All other capabilities are stripped. regid=1000 keeps the alf group for shared access.
 # GOMEMLIMIT caps Go heap and makes GC aggressive near the limit.
 export GOMEMLIMIT=512MiB
-exec setpriv --reuid=1001 --regid=1000 --init-groups --inh-caps=-all /opt/alf/alf-daemon "$@"
+exec setpriv --reuid=1001 --regid=1000 --init-groups \
+    --inh-caps=-all,+setuid,+setgid \
+    --ambient-caps=+setuid,+setgid \
+    /opt/alf/alf-daemon "$@"

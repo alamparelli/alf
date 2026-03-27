@@ -100,19 +100,18 @@ services:
     mem_limit: 2g
     cpus: "2.0"
     runtime: ${ALF_RUNTIME:-runc}
-    security_opt:
-      - no-new-privileges:true
     cap_drop:
       - ALL
     cap_add:
-      # Required for entrypoint only (apt-get, chown, setpriv). The daemon
-      # process runs as uid 1000 with zero capabilities (stripped by setpriv).
+      # CHOWN/DAC_OVERRIDE/FOWNER: entrypoint (apt-get, chown, file permissions)
+      # SETUID/SETGID: entrypoint + daemon (credential switching for subprocess isolation)
+      # NET_ADMIN: nettrack-helper (conntrack events)
       - CHOWN
       - SETUID
       - SETGID
       - DAC_OVERRIDE
       - FOWNER
-      - NET_ADMIN  # nettrack-helper: conntrack events for network monitoring
+      - NET_ADMIN
 
   whisper:
     image: {{.WhisperImage}}

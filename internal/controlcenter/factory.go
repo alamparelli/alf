@@ -385,6 +385,9 @@ func HandlerFactory(deps Deps) http.Handler {
 		return GetMobileToken(deps.VaultManager)
 	}).middleware(handler) // 15/min anonymous, no limit authenticated (session, bearer, or mobile token)
 	handler = loggingMiddleware(handler)
+	// Strip X-Tools-Socket header from external TCP requests to prevent auth bypass.
+	// Only the ToolsProxy (Unix socket) is allowed to set this header.
+	handler = stripToolsSocketHeader(handler)
 
 	// Terminal WebSocket: registered outside the main middleware stack so the
 	// ResponseWriter keeps its http.Hijacker interface for the upgrade.

@@ -21,6 +21,16 @@ import (
 // (GET with Accept: text/html) and no session cookie exists, a session is auto-created.
 // This enables mobile WebViews: the initial load carries the Bearer header, the session
 // cookie is set, and subsequent JS fetch() calls authenticate via cookie automatically.
+// stripToolsSocketHeader removes the X-Tools-Socket header from incoming TCP
+// requests to prevent external clients from forging it to bypass auth.
+// The header is only legitimate when set by ToolsProxy on Unix socket connections.
+func stripToolsSocketHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Del("X-Tools-Socket")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool, extraTokenFns ...func() string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -31,8 +41,8 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 			}
 
 			// Tools socket: internal marker set by ToolsProxy (socket access = auth).
-			// This header can only be set by the daemon's tools proxy — external
-			// requests go through TCP where this header is ignored (stripped by proxy).
+			// Only trusted on Unix socket connections — the TCP server strips this
+			// header via stripToolsSocketHeader() to prevent external forgery.
 			if r.Header.Get("X-Tools-Socket") == "1" {
 				next.ServeHTTP(w, r)
 				return

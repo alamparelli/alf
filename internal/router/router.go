@@ -48,6 +48,10 @@ func ResolveModel(short string) string {
 		return "claude-sonnet-4-6"
 	case "opus":
 		return "claude-opus-4-6"
+	case "sonnet-max":
+		return "claude-sonnet-4-6-max"
+	case "opus-max":
+		return "claude-opus-4-6-max"
 	default:
 		if strings.HasPrefix(short, "claude-") {
 			return short

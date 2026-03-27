@@ -240,8 +240,11 @@ func main() {
 	os.Setenv("NO_PROXY", "127.0.0.1,localhost")
 
 	// Start network connection tracker (connects to nettrack-helper if available).
-	netTracker := firewall.NewNetTracker(fwProxy, "/run/alf-nettrack.sock")
-	go netTracker.Run(context.Background())
+	var netTracker *firewall.NetTracker
+	if _, err := exec.LookPath("nettrack-helper"); err == nil {
+		netTracker = firewall.NewNetTracker(fwProxy, "/run/alf-nettrack.sock")
+		go netTracker.Run(context.Background())
+	}
 
 	// Start vault-server if binary is available.
 	var vaultMgr *vault.Manager

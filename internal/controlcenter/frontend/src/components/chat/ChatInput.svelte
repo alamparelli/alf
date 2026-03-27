@@ -53,7 +53,6 @@
 
   const builtinCommands = [
     { name: 'new', desc: 'Start a new conversation' },
-    { name: 'clear', desc: 'Clear conversation (alias for /new)' },
     { name: 'skills', desc: 'List available skills' },
   ]
 

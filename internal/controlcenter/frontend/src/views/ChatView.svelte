@@ -228,7 +228,7 @@
 
     // Client-side command handling
     const trimmed = message.trim()
-    if (trimmed === '/new' || trimmed === '/clear') {
+    if (trimmed === '/new') {
       await newConversation()
       return
     }

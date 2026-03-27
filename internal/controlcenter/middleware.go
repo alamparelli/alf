@@ -30,6 +30,14 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				return
 			}
 
+			// Tools socket: internal marker set by ToolsProxy (socket access = auth).
+			// This header can only be set by the daemon's tools proxy — external
+			// requests go through TCP where this header is ignored (stripped by proxy).
+			if r.Header.Get("X-Tools-Socket") == "1" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Check Authorization header against primary token.
 			auth := r.Header.Get("Authorization")
 			if token != "" && strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(token)) == 1 {

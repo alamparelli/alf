@@ -8,9 +8,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -251,8 +253,20 @@ func handleSimpleGet(endpoint string) {
 
 // --- HTTP helpers ---
 
-func authToken() string {
-	return os.Getenv("CC_AUTH_TOKEN")
+// httpClient returns an HTTP client that connects via Unix socket (ALF_TOOLS_SOCK)
+// or falls back to TCP with Bearer auth (ALF_CC_URL / CC_AUTH_TOKEN).
+func httpClient() *http.Client {
+	if sock := os.Getenv("ALF_TOOLS_SOCK"); sock != "" {
+		return &http.Client{
+			Timeout: 10 * time.Minute,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", sock)
+				},
+			},
+		}
+	}
+	return &http.Client{Timeout: 10 * time.Minute}
 }
 
 func doGet(path string) (string, error) {
@@ -272,7 +286,12 @@ func doDelete(path string) (string, error) {
 }
 
 func doRequest(method, path string, body []byte) (string, error) {
-	url := ccBaseURL + path
+	// When using Unix socket, the host part is ignored — use a dummy host.
+	base := ccBaseURL
+	if os.Getenv("ALF_TOOLS_SOCK") != "" {
+		base = "http://tools"
+	}
+	url := base + path
 	var bodyReader io.Reader
 	if body != nil {
 		bodyReader = bytes.NewReader(body)
@@ -285,12 +304,14 @@ func doRequest(method, path string, body []byte) (string, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-Requested-With", "system-tools")
-	if tok := authToken(); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
+	// Fallback: Bearer auth when not using socket transport.
+	if os.Getenv("ALF_TOOLS_SOCK") == "" {
+		if tok := os.Getenv("CC_AUTH_TOKEN"); tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
 	}
 
-	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}

@@ -52,10 +52,7 @@ func main() {
 	var token, chatID string // resolved from vault after unlock
 	authToken := secrets.ReadSecret("CC_AUTH_TOKEN")
 
-	// Set CC auth token as env var (picked up by safeEnv for system-tools CLI in subprocesses).
-	if authToken != "" {
-		os.Setenv("CC_AUTH_TOKEN", authToken)
-	}
+	// CC_AUTH_TOKEN no longer passed to subprocess env — system-tools use ALF_TOOLS_SOCK instead.
 
 	// Set Claude OAuth token as env var if available (picked up by safeEnv for subprocesses).
 	if oauthToken := secrets.ReadSecret("CLAUDE_OAUTH_TOKEN"); oauthToken != "" {
@@ -582,7 +579,7 @@ func main() {
 		HomeDir:  homeDir,
 		Registry: toolRegistry,
 		Timeout:  30 * time.Second,
-		Env:      []string{"CC_AUTH_TOKEN=" + authToken},
+		Env:      nil, // Tools use ALF_TOOLS_SOCK (from safeEnv) instead of CC_AUTH_TOKEN
 	}
 	for _, t := range nativeTools {
 		toolRegistry.RegisterNative(t)
@@ -767,6 +764,16 @@ func main() {
 			log.Printf("Control Center started on :8080 (allowed_chat_ids=%d, external_url=%s)", len(allowedChatIDs), ccExternalURL)
 		}
 		ccServerRef = ccServer
+
+		// Tools proxy socket: system-tools connect here instead of HTTP+CC_AUTH_TOKEN.
+		// Socket access (mode 0660, group alf) = authentication. Dangerous endpoints blocked.
+		toolsSockPath := filepath.Join(contextDir, "tools.sock")
+		if toolsLn, err := cc.ListenAndServeTools(toolsSockPath, ccServer.Handler()); err != nil {
+			log.Printf("warning: tools proxy socket failed: %v", err)
+		} else {
+			os.Setenv("ALF_TOOLS_SOCK", toolsSockPath)
+			defer func() { toolsLn.Close(); os.Remove(toolsSockPath) }()
+		}
 	} else {
 		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set - Control Center disabled")
 	}

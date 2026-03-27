@@ -779,10 +779,7 @@
 
   /* Queued messages */
   .queued-msg {
-    opacity: 0.85;
-    border: 2px dashed var(--accent);
-    background: var(--bg-card) !important;
-    color: var(--text) !important;
+    opacity: 0.7;
   }
 
   .queued-footer {
@@ -791,7 +788,7 @@
     justify-content: space-between;
     margin-top: 6px;
     padding-top: 4px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
     gap: 8px;
   }
 

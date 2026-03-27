@@ -244,6 +244,16 @@ services:
 
 To regenerate the base file manually (e.g. after adding a secret): `alf compose`
 
+## Learn more
+
+- **[Chat](docs:chat)** — conversations, media upload, reactions, internal links
+- **[Workspace](docs:workspace)** — file browser, JSON viewer, editor
+- **[Tasks](docs:tasks)** — background agent work, approval flow, team delegation
+- **[Spotlight Search](docs:spotlight-search)** — quick search across apps, files, and docs
+- **[Schedules](docs:schedules)** — automate prompts and commands on a cron schedule
+- **[Marketplace](docs:marketplace-guide)** — browse and install apps
+- **[Telegram](docs:telegram)** — connect your phone for mobile chat and notifications
+
 ## What's next?
 
 - [Setting Up Tiers](docs:tier-setup) - customize which models ALF uses and when

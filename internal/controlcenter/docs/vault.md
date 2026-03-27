@@ -124,6 +124,39 @@ Upload a Google service account key JSON file, then create a service referencing
 
 > For detailed setup instructions, curl examples, and file format specs, see the [vault-proxy AUTH_SETUP guide](https://github.com/alamparelli/vault-proxy/blob/main/docs/AUTH_SETUP.md).
 
+## Session Cookies
+
+Some upstream APIs use cookies for session affinity (e.g., AWS ALB's `AWSALB` cookie for sticky sessions). Vault can persist these cookies server-side so that subsequent requests to the same service hit the same backend.
+
+**How to enable:**
+1. When adding or editing a service, toggle **Session cookies** on
+2. Save the service
+
+**Behavior:**
+- Cookies returned by the upstream service are captured and replayed on subsequent requests
+- Cookies are shared across all requests to that service (not per-caller)
+- Stored in memory only — lost on vault lock or container restart
+- Cookies are never sent to the client or exposed to Alf — they stay server-side in vault-server
+
+**Use case:** APIs behind AWS Application Load Balancers that require session affinity, or any service that uses `Set-Cookie` to pin requests to a specific backend instance.
+
+## SSH Services
+
+Vault can manage SSH connections alongside HTTP services.
+
+**Adding an SSH service:**
+1. Click **Add** in the Services section
+2. Select **SSH** as the service type
+3. Fill in the host, port, username, and upload or select a private key file
+4. Click **Save**
+
+**Features:**
+- **Browser terminal** — click the Terminal icon next to an SSH service to open an interactive shell session in the browser
+- **File transfer** — upload and download files via SFTP directly from the service detail view
+- **Remote command execution** — Alf can execute commands on remote hosts through the vault proxy without seeing the SSH credentials
+
+SSH keys are encrypted at rest alongside all other vault credentials. The private key never leaves vault-server.
+
 ## Tokens
 
 Vault uses scoped tokens for access control:

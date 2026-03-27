@@ -657,5 +657,8 @@
 
   .filter-item input[type="checkbox"] {
     accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
   }
 </style>

@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { Play, Square, Trash2, ChevronDown, ChevronRight, RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle, Users, Loader2, RotateCcw } from 'lucide-svelte'
   import Card from '../components/shared/Card.svelte'
+  import Toggle from '../components/shared/Toggle.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
   import { events } from '../stores/events.svelte'
@@ -272,10 +273,7 @@
         ></textarea>
       </div>
       <div class="launcher-footer">
-        <label class="checkbox-label">
-          <input type="checkbox" bind:checked={needValidation} />
-          Require approval before execution
-        </label>
+        <Toggle bind:checked={needValidation} label="Require approval before execution" />
         <button class="btn btn-primary" onclick={launch} disabled={launching || !prompt.trim()}>
           {#if launching}
             <Loader2 size={14} class="spin" /> Launching...

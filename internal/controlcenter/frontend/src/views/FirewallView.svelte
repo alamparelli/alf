@@ -3,6 +3,7 @@
   import { Plus, Trash2, RefreshCw, ShieldOff, Shield } from 'lucide-svelte'
   import Card from '../components/shared/Card.svelte'
   import Modal from '../components/shared/Modal.svelte'
+  import Toggle from '../components/shared/Toggle.svelte'
   import { api } from '../lib/api'
   import { events } from '../stores/events.svelte'
   import { toasts } from '../stores/toast.svelte'
@@ -314,10 +315,7 @@
         <button class="log-tab" class:active={activeTab === 'hosts'} onclick={() => activeTab = 'hosts'}>Hosts ({hosts.length})</button>
       </div>
       <div class="log-controls">
-        <label class="auto-refresh">
-          <input type="checkbox" bind:checked={autoRefresh} />
-          Auto-refresh
-        </label>
+        <Toggle bind:checked={autoRefresh} label="Auto-refresh" />
         <button class="btn-icon" onclick={() => loadFirewall()} title="Refresh">
           <RefreshCw size={14} />
         </button>
@@ -712,14 +710,6 @@
     gap: 8px;
   }
 
-  .auto-refresh {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
 
   .filter-bar {
     display: flex;

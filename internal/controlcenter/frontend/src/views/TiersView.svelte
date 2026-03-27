@@ -4,6 +4,7 @@
   import { toasts } from '../stores/toast.svelte';
   import { events } from '../stores/events.svelte';
   import Card from '../components/shared/Card.svelte';
+  import Toggle from '../components/shared/Toggle.svelte';
   import { Plus, Pencil, Trash2, Save, Copy, Router, Brain, ChevronDown } from 'lucide-svelte';
 
   // --- State ---
@@ -365,10 +366,10 @@
           <textarea bind:value={tierForm.system_prompt} rows="3" placeholder="Extra system prompt for this tier"></textarea>
         </label>
         <div class="checkbox-row">
-          <label class="checkbox"><input type="checkbox" bind:checked={tierForm.enabled} /> Enabled</label>
-          <label class="checkbox"><input type="checkbox" bind:checked={tierForm.routable} /> Routable</label>
-          <label class="checkbox"><input type="checkbox" bind:checked={tierForm.write_capable} /> Write Capable</label>
-          <label class="checkbox"><input type="checkbox" bind:checked={tierForm.force_command} /> Force Command</label>
+          <Toggle bind:checked={tierForm.enabled} label="Enabled" />
+          <Toggle bind:checked={tierForm.routable} label="Routable" />
+          <Toggle bind:checked={tierForm.write_capable} label="Write Capable" />
+          <Toggle bind:checked={tierForm.force_command} label="Force Command" />
         </div>
         {#if availableTools.length > 0}
           <div class="full-width">

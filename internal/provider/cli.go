@@ -491,9 +491,9 @@ var safeEnvPrefixes = []string{
 	"ANTHROPIC_",    // Claude API keys (needed for claude CLI)
 	"CLAUDE_",       // Claude Code config
 	"DISABLE_PROMPT", // Claude Code prompt settings
-	"VAULT_TOKEN=",    // Vault proxy-scoped token
-	"VAULT_ADDR=",     // Vault server address
-	"CC_AUTH_TOKEN=",  // Control Center auth for system-tools CLI
+	"VAULT_TOKEN=",     // Vault proxy-scoped token
+	"VAULT_ADDR=",      // Vault server address
+	"ALF_TOOLS_SOCK=",  // Tools proxy Unix socket (replaces CC_AUTH_TOKEN)
 }
 
 // safeEnv builds a subprocess environment with only safe variables plus HOME/ALF_DATA_DIR.

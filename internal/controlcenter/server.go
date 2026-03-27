@@ -140,6 +140,11 @@ func (s *Server) SetUpdater(u UpdateChecker) {
 	}
 }
 
+// Handler returns the HTTP handler for use by the tools proxy socket.
+func (s *Server) Handler() http.Handler {
+	return s.httpServer.Handler
+}
+
 // Start begins listening. Blocks until the server stops.
 func (s *Server) Start() error {
 	log.Printf("[CC] listening on %s", s.addr)

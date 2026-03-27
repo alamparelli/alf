@@ -183,3 +183,60 @@ func TestExtractBundle_CreatesSubdirs(t *testing.T) {
 		t.Errorf("content = %q", data)
 	}
 }
+
+// TestEnsureServiceBinExecutable_NoExecBit simulates the Later app incident:
+// a binary packed in the ZIP without the executable bit set.
+func TestEnsureServiceBinExecutable_NoExecBit(t *testing.T) {
+	dir := t.TempDir()
+
+	// Pack binary without +x (mode 0o644) — simulates broken bundle.
+	r := makeZipWithMode(t, map[string]struct {
+		content []byte
+		mode    os.FileMode
+	}{
+		"later":       {content: []byte("binary"), mode: 0o644},
+		"service.json": {content: []byte(`{"command":"./later","restart":"always","enabled":true}`), mode: 0o644},
+		"app.json":     {content: []byte(`{"name":"Later"}`), mode: 0o644},
+	})
+
+	if err := extractBundle(r, r.Size(), dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Binary should NOT be executable yet (no +x in zip, not in bin/, not named "server").
+	info, _ := os.Stat(filepath.Join(dir, "later"))
+	if info.Mode()&0o111 != 0 {
+		t.Skip("zip preserved +x unexpectedly — skipping")
+	}
+
+	if err := ensureServiceBinExecutable(dir); err != nil {
+		t.Fatalf("ensureServiceBinExecutable: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "later"))
+	if err != nil {
+		t.Fatal("binary not found after chmod")
+	}
+	if info.Mode()&0o111 == 0 {
+		t.Errorf("binary should be executable after ensureServiceBinExecutable, got %v", info.Mode())
+	}
+}
+
+func TestEnsureServiceBinExecutable_NoServiceJSON(t *testing.T) {
+	dir := t.TempDir()
+	// No service.json → should be a no-op.
+	if err := ensureServiceBinExecutable(dir); err != nil {
+		t.Errorf("expected nil for missing service.json, got: %v", err)
+	}
+}
+
+func TestEnsureServiceBinExecutable_EscapeAttempt(t *testing.T) {
+	dir := t.TempDir()
+	svcJSON := `{"command":"../../escape","restart":"always","enabled":true}`
+	if err := os.WriteFile(filepath.Join(dir, "service.json"), []byte(svcJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureServiceBinExecutable(dir); err == nil {
+		t.Error("expected error for command escaping app directory")
+	}
+}

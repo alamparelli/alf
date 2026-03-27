@@ -267,6 +267,7 @@ func HandlerFactory(deps Deps) http.Handler {
 		Notifier:    deps.Notifier,
 		EventBroker: deps.EventBroker,
 	})
+	mux.Handle("/api/firewall/lookup", &FirewallLookupHandler{})
 	mux.Handle("/api/firewall/killswitch", &FirewallKillSwitchHandler{
 		NetTracker:  deps.NetTracker,
 		EventBroker: deps.EventBroker,

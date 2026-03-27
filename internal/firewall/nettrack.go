@@ -136,6 +136,16 @@ func (t *NetTracker) connect(ctx context.Context) error {
 }
 
 func (t *NetTracker) processEvent(ev connEvent) {
+	// Detect private/internal IPs (Docker network services like whisper, embed).
+	ip := net.ParseIP(ev.DstIP)
+	isInternal := ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast())
+
+	// Infrastructure ports are always internal.
+	switch ev.DPort {
+	case 4751, 8080, 8390:
+		isInternal = true
+	}
+
 	key := connKey{DstIP: ev.DstIP, DPort: ev.DPort, Proto: ev.Proto}
 
 	// Dedup.
@@ -147,8 +157,21 @@ func (t *NetTracker) processEvent(ev connEvent) {
 	t.seen[key] = time.Now()
 	t.mu.Unlock()
 
-	// Reverse DNS (cached).
+	// Skip if the HTTP proxy already logged this host recently (within 5s).
 	host := t.resolveHost(ev.DstIP)
+	if ev.DPort == 443 || ev.DPort == 80 {
+		entries := t.proxy.Log.Entries()
+		now := time.Now()
+		for i := len(entries) - 1; i >= 0 && i >= len(entries)-20; i-- {
+			e := entries[i]
+			if e.Source == "nettrack" {
+				continue
+			}
+			if e.Host == host && now.Sub(e.Time) < 5*time.Second {
+				return // already captured by HTTP proxy
+			}
+		}
+	}
 
 	// Protocol label.
 	method := "TCP"
@@ -168,6 +191,11 @@ func (t *NetTracker) processEvent(ev connEvent) {
 		rule = "kill-switch"
 	}
 
+	source := "nettrack"
+	if isInternal {
+		source = "internal"
+	}
+
 	entry := RequestEntry{
 		Time:    time.Now(),
 		Method:  method,
@@ -176,7 +204,7 @@ func (t *NetTracker) processEvent(ev connEvent) {
 		Status:  0,
 		Blocked: blocked,
 		Rule:    rule,
-		Source:  "nettrack",
+		Source:  source,
 	}
 
 	t.proxy.Record(entry)

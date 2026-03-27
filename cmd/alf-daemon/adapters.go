@@ -10,6 +10,8 @@ import (
 	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/comms"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
+	"github.com/alamparelli/alf/internal/firewall"
+	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/router"
@@ -411,5 +413,52 @@ func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 	sj.LastError = j.LastError
 	sj.Running = j.IsRunning()
 	return sj
+}
+
+// firewallToolAdapter adapts firewall.Proxy to tooling.FirewallService.
+type firewallToolAdapter struct {
+	proxy *firewall.Proxy
+	store *firewall.Store
+}
+
+func (a *firewallToolAdapter) RecentEntries(limit int) []tooling.FirewallEntry {
+	if a.proxy == nil {
+		return nil
+	}
+	raw := a.proxy.Log.Entries()
+	// Return the last N entries.
+	if len(raw) > limit {
+		raw = raw[len(raw)-limit:]
+	}
+	out := make([]tooling.FirewallEntry, len(raw))
+	for i, e := range raw {
+		out[i] = tooling.FirewallEntry{
+			Time:    e.Time,
+			Method:  e.Method,
+			Host:    e.Host,
+			Path:    e.Path,
+			Blocked: e.Blocked,
+			Source:  e.Source,
+		}
+	}
+	return out
+}
+
+func (a *firewallToolAdapter) Hosts() []tooling.FirewallHostStat {
+	if a.store == nil {
+		return nil
+	}
+	raw := a.store.Hosts()
+	out := make([]tooling.FirewallHostStat, len(raw))
+	for i, h := range raw {
+		out[i] = tooling.FirewallHostStat{
+			Host:    h.Host,
+			Count:   h.Count,
+			Allowed: h.Allowed,
+			Blocked: h.Blocked,
+			Vault:   h.Vault,
+		}
+	}
+	return out
 }
 

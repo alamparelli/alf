@@ -794,6 +794,7 @@ func main() {
 		tooling.ConfigNativeTool{Service: &configAdapter{store: configStore}},
 		tooling.TierNativeTool{Service: &tierAdapter{store: tierStore}},
 		tooling.LogNativeTool{Service: &logAdapter{reader: toolLogReader}},
+		tooling.FirewallNativeTool{Service: &firewallToolAdapter{proxy: fwProxy, store: fwStore}},
 		tooling.SearchNativeTool{Service: &searchAdapter{
 			appStore:    toolAppStore,
 			marketplace: mpManager,

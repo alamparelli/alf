@@ -48,8 +48,8 @@ func TestNetTrackerProtocolLabels(t *testing.T) {
 	p := NewProxy(cfg)
 	tracker := NewNetTracker(p, "/nonexistent.sock")
 
-	tracker.processEvent(connEvent{Proto: 6, DstIP: "10.0.0.1", DPort: 443, TS: time.Now().Unix()})
-	tracker.processEvent(connEvent{Proto: 17, DstIP: "10.0.0.2", DPort: 53, TS: time.Now().Unix()})
+	tracker.processEvent(connEvent{Proto: 6, DstIP: "8.8.8.8", DPort: 443, TS: time.Now().Unix()})
+	tracker.processEvent(connEvent{Proto: 17, DstIP: "8.8.4.4", DPort: 53, TS: time.Now().Unix()})
 
 	entries := p.Log.Entries()
 	if entries[0].Method != "TCP" {
@@ -66,7 +66,7 @@ func TestNetTrackerKillSwitch(t *testing.T) {
 	tracker := NewNetTracker(p, "/nonexistent.sock")
 
 	// Without kill switch — not blocked.
-	tracker.processEvent(connEvent{Proto: 6, DstIP: "5.5.5.5", DPort: 443, TS: time.Now().Unix()})
+	tracker.processEvent(connEvent{Proto: 6, DstIP: "5.5.5.5", DPort: 8443, TS: time.Now().Unix()})
 	entries := p.Log.Entries()
 	if entries[0].Blocked {
 		t.Error("should not be blocked without kill switch")
@@ -115,6 +115,55 @@ func TestNetTrackerFirewallRules(t *testing.T) {
 	// The IP won't match "evil.com" pattern, so it should not be blocked.
 	if entries[0].Blocked {
 		t.Error("raw IP should not match domain pattern")
+	}
+}
+
+func TestNetTrackerTagsPrivateIPs(t *testing.T) {
+	cfg := &Config{Mode: ModeLogOnly, Rules: []Rule{}}
+	p := NewProxy(cfg)
+	tracker := NewNetTracker(p, "/nonexistent.sock")
+
+	// Private IPs should be tagged as "internal".
+	tracker.processEvent(connEvent{Proto: 6, DstIP: "10.99.0.10", DPort: 8000, TS: time.Now().Unix()})
+	tracker.processEvent(connEvent{Proto: 6, DstIP: "172.17.0.2", DPort: 9000, TS: time.Now().Unix()})
+
+	entries := p.Log.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries for private IPs, got %d", len(entries))
+	}
+	for _, e := range entries {
+		if e.Source != "internal" {
+			t.Errorf("expected source=internal for private IP %s, got %q", e.Host, e.Source)
+		}
+	}
+
+	// Public IP should be tagged as "nettrack".
+	tracker.processEvent(connEvent{Proto: 6, DstIP: "104.18.32.7", DPort: 8443, TS: time.Now().Unix()})
+	entries = p.Log.Entries()
+	last := entries[len(entries)-1]
+	if last.Source != "nettrack" {
+		t.Errorf("expected source=nettrack for public IP, got %q", last.Source)
+	}
+}
+
+func TestNetTrackerTagsInfraPorts(t *testing.T) {
+	cfg := &Config{Mode: ModeLogOnly, Rules: []Rule{}}
+	p := NewProxy(cfg)
+	tracker := NewNetTracker(p, "/nonexistent.sock")
+
+	// Infrastructure ports should be tagged as "internal".
+	tracker.processEvent(connEvent{Proto: 6, DstIP: "8.8.8.8", DPort: 4751, TS: time.Now().Unix()})
+	tracker.processEvent(connEvent{Proto: 6, DstIP: "8.8.4.4", DPort: 8080, TS: time.Now().Unix()})
+	tracker.processEvent(connEvent{Proto: 6, DstIP: "1.1.1.1", DPort: 8390, TS: time.Now().Unix()})
+
+	entries := p.Log.Entries()
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries for infra ports, got %d", len(entries))
+	}
+	for _, e := range entries {
+		if e.Source != "internal" {
+			t.Errorf("expected source=internal for infra port, got %q", e.Source)
+		}
 	}
 }
 

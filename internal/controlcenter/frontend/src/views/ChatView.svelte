@@ -616,10 +616,10 @@
     {#each messageQueue as queued, i}
       <div class="chat-msg chat-msg-user queued-msg">
         <div class="msg-text">{queued.message}</div>
-        <div class="msg-footer">
-          <span class="msg-time queued-label">queued</span>
-          <button class="queued-cancel" onclick={() => { messageQueue = messageQueue.filter((_, idx) => idx !== i) }} title="Cancel">
-            <X size={12} />
+        <div class="queued-footer">
+          <span class="queued-badge">queued #{i + 1}</span>
+          <button class="queued-cancel" onclick={() => { messageQueue = messageQueue.filter((_, idx) => idx !== i) }} title="Cancel queued message">
+            <X size={12} /> cancel
           </button>
         </div>
       </div>
@@ -763,30 +763,47 @@
 
   /* Queued messages */
   .queued-msg {
-    opacity: 0.55;
-    border: 1px dashed var(--border);
+    opacity: 0.65;
+    border: 1px dashed rgba(255, 255, 255, 0.25);
+    background: color-mix(in srgb, var(--accent) 60%, transparent) !important;
   }
 
-  .queued-label {
-    font-style: italic;
+  .queued-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 6px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    gap: 8px;
+  }
+
+  .queued-badge {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
   }
 
   .queued-cancel {
     display: flex;
     align-items: center;
+    gap: 3px;
     background: none;
     border: none;
     color: inherit;
-    opacity: 0.4;
+    opacity: 0.5;
     cursor: pointer;
-    padding: 2px;
+    padding: 2px 6px;
     border-radius: 4px;
-    transition: opacity 0.15s;
+    font-size: 0.68rem;
+    transition: opacity 0.15s, background 0.15s;
   }
 
   .queued-cancel:hover {
     opacity: 1;
-    color: var(--red, #e53935);
+    background: rgba(255, 255, 255, 0.15);
   }
 
   /* Agent modal */

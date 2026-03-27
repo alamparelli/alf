@@ -200,7 +200,7 @@
                 {/if}
 
                 <div class="app-actions">
-                  {#if app.state === 'available'}
+                  {#if app.state === 'available' && !isOwnApp(app)}
                     <button class="btn btn-sm btn-primary" onclick={() => doAction(app.slug, 'install')}>
                       <Download size={12} /> Install
                     </button>

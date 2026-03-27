@@ -593,6 +593,9 @@
       <div class="step-content" style="text-align:center">
         <h3>You're all set</h3>
         <p class="step-desc">ALF is configured and ready. Read the Getting Started guide to learn the basics.</p>
+        <div class="step-notice">
+          <strong>Firewall</strong> — The network firewall starts in <em>log-only</em> mode. All outbound requests are logged but not blocked. To enforce rules, go to <strong>Firewall</strong> and switch to <em>enforce</em> mode with an allowlist.
+        </div>
       </div>
     {/if}
 
@@ -688,6 +691,18 @@
     font-weight: 600;
     font-size: 0.8rem;
     flex-shrink: 0;
+  }
+
+  .step-notice {
+    margin: 16px 0 0;
+    padding: 10px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    line-height: 1.5;
+    text-align: left;
   }
 
   .welcome-quote {

@@ -10,7 +10,7 @@
   // Mode: 'wizard' (setup incomplete) or 'welcome' (setup complete, first visit)
   let mode = $state<'wizard' | 'welcome'>('wizard')
   let step = $state(0)
-  const STEPS = ['Backend', 'Telegram', 'Tiers', 'Done']
+  const STEPS = ['Backend', 'Telegram', 'Tiers', 'Apply', 'Get Started']
 
   // --- Step 0: Backends ---
   interface BackendField { key: string; label: string; placeholder: string; type?: string; defaultVal?: string }
@@ -236,8 +236,7 @@
         localStorage.setItem('alf-welcomed', '1')
         toasts.show('Setup complete', 'success')
         if (d.restart_required) toasts.show('Restart required for Telegram', 'error')
-        open = false
-        nav.navigateTo('chat')
+        step = 4 // advance to Get Started page
       }
     } catch (e: any) {
       applyError = e.error || 'Setup failed'
@@ -258,7 +257,8 @@
     if (step === 0 && backendConfigPhase) {
       backendConfigPhase = false
     }
-    if (step === STEPS.length - 1) { applySetup(); return }
+    if (step === 3) { applySetup(); return }
+    if (step === STEPS.length - 1) { open = false; nav.navigateTo('docs:getting-started'); return }
     step++
     if (step === 2) loadPresets()
     if (step === 3) checkDoneStep()
@@ -588,6 +588,36 @@
       </div>
     {/if}
 
+    <!-- Step 4: Get Started -->
+    {#if step === 4}
+      <div class="step-content" style="text-align:center">
+        <h3>You're all set</h3>
+        <p class="step-desc">ALF is configured and ready. Here's what to explore next:</p>
+        <div class="getstarted-links">
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div class="getstarted-item" onclick={() => { open = false; nav.navigateTo('chat') }}>
+            <strong>Chat</strong>
+            <span>Start talking to ALF</span>
+          </div>
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div class="getstarted-item" onclick={() => { open = false; nav.navigateTo('docs:getting-started') }}>
+            <strong>Getting Started Guide</strong>
+            <span>Learn the basics step by step</span>
+          </div>
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div class="getstarted-item" onclick={() => { open = false; nav.navigateTo('docs:chat') }}>
+            <strong>Chat Features</strong>
+            <span>Media, reactions, internal links</span>
+          </div>
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div class="getstarted-item" onclick={() => { open = false; nav.navigateTo('marketplace') }}>
+            <strong>Marketplace</strong>
+            <span>Browse and install apps</span>
+          </div>
+        </div>
+      </div>
+    {/if}
+
     <!-- Error display -->
     {#if applyError}
       <div class="apply-error">{applyError}</div>
@@ -609,8 +639,10 @@
           </button>
         {/if}
         <button class="btn btn-primary" onclick={nextStep} disabled={!canNext || applying}>
-          {#if step === STEPS.length - 1}
+          {#if step === 3}
             {applying ? 'Applying...' : 'Apply & Start'}
+          {:else if step === STEPS.length - 1}
+            Open Getting Started <ChevronRight size={14} />
           {:else}
             Next <ChevronRight size={14} />
           {/if}
@@ -968,4 +1000,38 @@
 
   :global(.spin) { animation: spin 1s linear infinite; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* Get Started links */
+  .getstarted-links {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+    text-align: left;
+  }
+
+  .getstarted-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 16px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .getstarted-item:hover {
+    border-color: var(--accent);
+  }
+
+  .getstarted-item strong {
+    font-size: 0.88rem;
+  }
+
+  .getstarted-item span {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
 </style>

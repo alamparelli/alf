@@ -103,10 +103,10 @@ chmod -R g+ws /opt/alf/user-packages
 chmod -R g+rX /home/alf/.claude 2>/dev/null || true
 
 # Docker secrets: ensure daemon (alfd/uid 1001) can read them.
-# Docker Compose standalone mounts secrets as bind mounts with host uid (1000).
-# chown to alfd so daemon can read; mode 0440 lets subprocess read claude_oauth_token via group.
+# Docker Compose standalone may mount secrets as bind mounts or tmpfs.
+# tmpfs secrets are read-only — chown will fail silently.
 if [ -d /run/secrets ]; then
-    chown -R alfd:alf /run/secrets
+    chown -R alfd:alf /run/secrets 2>/dev/null || true
     chmod 0440 /run/secrets/* 2>/dev/null || true
 fi
 

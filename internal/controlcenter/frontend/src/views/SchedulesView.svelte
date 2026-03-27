@@ -148,7 +148,7 @@
       const data = await api('GET', '/api/schedules');
       jobs = data.jobs || [];
     } catch (e) {
-      toasts.error('Failed to load schedules: ' + e.message);
+      toasts.error('Failed to load schedules: ' + (e.error || e.message));
     } finally {
       loading = false;
     }
@@ -175,7 +175,7 @@
       await api('POST', '/api/schedules/run', { id });
       toasts.success('Job triggered');
     } catch (e) {
-      toasts.error('Run failed: ' + e.message);
+      toasts.error('Run failed: ' + (e.error || e.message));
     }
   }
 
@@ -186,7 +186,7 @@
       toasts.success('Deleted');
       await loadJobs();
     } catch (e) {
-      toasts.error('Delete failed: ' + e.message);
+      toasts.error('Delete failed: ' + (e.error || e.message));
     }
   }
 
@@ -195,7 +195,7 @@
       await api('PUT', '/api/schedules', { id: job.id, fields: { enabled: job.enabled ? 'false' : 'true' } });
       await loadJobs();
     } catch (e) {
-      toasts.error('Toggle failed: ' + e.message);
+      toasts.error('Toggle failed: ' + (e.error || e.message));
     }
   }
 
@@ -264,6 +264,7 @@
         if (form.command !== (editingJob.command || '')) fields.command = form.command;
         if (form.message !== (editingJob.message || '')) fields.message = form.message;
         if (form.reason !== (editingJob.reason || '')) fields.reason = form.reason;
+        if (form.description !== (editingJob.description || '')) fields.description = form.description;
         if (form.timeout !== (editingJob.timeout || '')) fields.timeout = form.timeout;
 
         if (Object.keys(fields).length > 0) {
@@ -287,7 +288,7 @@
       toasts.success(editingJob ? 'Job updated' : 'Job created');
       await loadJobs();
     } catch (e) {
-      toasts.error('Save failed: ' + e.message);
+      toasts.error('Save failed: ' + (e.error || e.message));
     }
   }
 

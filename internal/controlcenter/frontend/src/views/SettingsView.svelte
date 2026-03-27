@@ -5,7 +5,28 @@
   import { theme, ALF_THEMES } from '../stores/theme.svelte'
   import { toasts } from '../stores/toast.svelte'
   import { sound } from '../stores/sound.svelte'
+  import { spotlightSettings } from '../stores/spotlight.svelte'
   import { api, esc, waitForDaemonAndReload } from '../lib/api'
+
+  // --- Spotlight shortcut ---
+  let shortcutCapturing = $state(false)
+  let shortcutDisplay = $derived(spotlightSettings.shortcutKey.toUpperCase())
+
+  function startCapture() {
+    shortcutCapturing = true
+  }
+
+  function onShortcutKeydown(e: KeyboardEvent) {
+    if (!shortcutCapturing) return
+    e.preventDefault()
+    const key = e.key
+    // Ignore modifier-only keys
+    if (['Meta', 'Control', 'Alt', 'Shift', 'Tab', 'Escape'].includes(key)) return
+    if (key.length === 1) {
+      spotlightSettings.setKey(key)
+    }
+    shortcutCapturing = false
+  }
 
   // --- Theme ---
   function onThemeChange(e: Event) {
@@ -91,6 +112,22 @@
     }
   }
 
+  // --- Updates ---
+  let autoUpdateCheck = $state(true)
+  let autoUpdateNotify = $state(false)
+
+  async function persistUpdateSettings() {
+    try {
+      const cfg = await api<any>('GET', '/api/config')
+      cfg.auto_update_check = autoUpdateCheck
+      cfg.auto_update_notify = autoUpdateNotify
+      delete cfg.backends
+      await api('PUT', '/api/config', cfg)
+    } catch {
+      // silent
+    }
+  }
+
   // --- Version ---
   let version = $state('')
   let updateAvailable = $state('')
@@ -98,9 +135,14 @@
   onMount(async () => {
     loadTelegram()
     try {
-      const status = await api<any>('/api/status')
+      const [status, cfg] = await Promise.all([
+        api<any>('/api/status'),
+        api<any>('/api/config'),
+      ])
       version = status.version || ''
       updateAvailable = status.update_available || ''
+      autoUpdateCheck = cfg.auto_update_check !== false
+      autoUpdateNotify = !!cfg.auto_update_notify
     } catch {
       // silent
     }
@@ -142,6 +184,46 @@
         <span class="toggle-text">Chat sound</span>
       </label>
       <span class="hint">Play a sound when a chat message arrives</span>
+    </div>
+    <div class="notif-row">
+      <label class="toggle-switch">
+        <input type="checkbox" bind:checked={autoUpdateCheck} onchange={persistUpdateSettings} />
+        <span class="slider"></span>
+        <span class="toggle-text">Check for updates</span>
+      </label>
+      <span class="hint">Periodically check if a newer version is available</span>
+    </div>
+    <div class="notif-row">
+      <label class="toggle-switch">
+        <input type="checkbox" bind:checked={autoUpdateNotify} onchange={persistUpdateSettings} disabled={!autoUpdateCheck} />
+        <span class="slider"></span>
+        <span class="toggle-text">Notify on update</span>
+      </label>
+      <span class="hint">Send a Telegram notification when an update is available</span>
+    </div>
+  </Card>
+
+  <!-- Shortcuts -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <Card>
+    <div class="row">
+      <h3>Shortcuts</h3>
+    </div>
+    <div class="notif-row">
+      <span class="shortcut-label">Spotlight</span>
+      <span class="hint">{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+</span>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <button
+        class="shortcut-key-btn"
+        class:capturing={shortcutCapturing}
+        onclick={startCapture}
+        onkeydown={onShortcutKeydown}
+        onblur={() => shortcutCapturing = false}
+        title="Click then press a key"
+      >
+        {shortcutCapturing ? '...' : shortcutDisplay}
+      </button>
+      <span class="hint">{shortcutCapturing ? 'Press a key' : 'Click to change'}</span>
     </div>
   </Card>
 
@@ -298,6 +380,38 @@
     color: var(--text-dim);
   }
 
+  .shortcut-label {
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+
+  .shortcut-key-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    padding: 2px 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .shortcut-key-btn:hover {
+    border-color: var(--accent);
+  }
+
+  .shortcut-key-btn.capturing {
+    border-color: var(--accent);
+    color: var(--accent);
+    outline: none;
+  }
+
   .notif-row {
     display: flex;
     align-items: center;
@@ -354,6 +468,11 @@
 
   .toggle-text {
     user-select: none;
+  }
+
+  .toggle-switch input:disabled + .slider {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   .btn {

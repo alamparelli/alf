@@ -27,6 +27,7 @@
   import { theme } from './stores/theme.svelte'
   import { toasts } from './stores/toast.svelte'
   import { sound } from './stores/sound.svelte'
+  import { spotlightSettings } from './stores/spotlight.svelte'
   import { api } from './lib/api'
 
   let showWizard = $state(false)
@@ -168,7 +169,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <button class="spotlight-fab" onclick={() => window.dispatchEvent(new CustomEvent('alf:open-spotlight'))}>
     <Search size={18} />
-    <span class="fab-tooltip">Search <kbd>{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+G</kbd></span>
+    <span class="fab-tooltip">Search <kbd>{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+{spotlightSettings.shortcutKey.toUpperCase()}</kbd></span>
   </button>
 {/if}
 

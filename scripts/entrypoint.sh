@@ -116,6 +116,23 @@ if [ -d /run/secrets ]; then
         upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
         export "${upper}_FILE=/run/alf-secrets/${name}"
     done
+
+    # Vault master password: migrate from Docker secret to vault-data (alfd-only).
+    # This is a one-time bridge — future installs use CC setup or alf init.
+    if [ -f /run/secrets/vault_master_password ]; then
+        pw=$(cat /run/secrets/vault_master_password)
+        if [ -n "$pw" ]; then
+            pwfile="/opt/alf/vault-data/.master-password"
+            if [ ! -f "$pwfile" ]; then
+                echo "$pw" > "$pwfile"
+                chown alfd:alf "$pwfile"
+                chmod 0400 "$pwfile"
+                echo "entrypoint: migrated vault master password to vault-data"
+            fi
+        fi
+        # Unset so daemon doesn't read from Docker secret path.
+        unset VAULT_MASTER_PASSWORD_FILE
+    fi
 fi
 
 # Phase 2.6: Seed default apps from bundled defaults (as root, before locking).

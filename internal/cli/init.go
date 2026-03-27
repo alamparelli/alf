@@ -758,20 +758,8 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 		}
 	}
 
-	// Store secrets as files (chmod 600, used via Docker Compose secrets)
-	if botToken != "" {
-		if err := SetSecret(dir, "telegram_bot_token", botToken); err != nil {
-			Fatal(fmt.Sprintf("Failed to write secret: %v", err))
-		}
-		PrintCheck("secrets/telegram_bot_token")
-	}
-
-	if chatID != "" {
-		if err := SetSecret(dir, "telegram_chat_id", chatID); err != nil {
-			Fatal(fmt.Sprintf("Failed to write secret: %v", err))
-		}
-		PrintCheck("secrets/telegram_chat_id")
-	}
+	// Store secrets as files (chmod 600, used via Docker Compose secrets).
+	// Telegram tokens are no longer stored as Docker secrets — configured via CC setup wizard.
 
 	// Generate Control Center auth token.
 	ccToken, err := generateAuthToken()

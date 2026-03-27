@@ -82,8 +82,7 @@ scaffold_tenant() {
     fi
 
     # Ensure all secret files exist (empty placeholders for Docker Compose)
-    local secrets=(telegram_bot_token telegram_chat_id cc_auth_token openrouter_api_key
-                   openai_api_key claude_oauth_token vault_master_password whisper_shared_secret
+    local secrets=(cc_auth_token claude_oauth_token whisper_shared_secret
                    embed_shared_secret)
     for s in "${secrets[@]}"; do
         # Remove directory placeholder Docker may have created
@@ -173,8 +172,7 @@ preflight_fix_placeholders() {
             echo "nameserver 1.1.1.1" >> "${tenant_dir}resolv.conf"
         fi
         # secrets
-        local secrets=(telegram_bot_token telegram_chat_id cc_auth_token openrouter_api_key
-                       openai_api_key claude_oauth_token vault_master_password whisper_shared_secret
+        local secrets=(cc_auth_token claude_oauth_token whisper_shared_secret
                        embed_shared_secret)
         for s in "${secrets[@]}"; do
             if [[ ! -f "${tenant_dir}secrets/$s" ]]; then
@@ -374,13 +372,8 @@ EOF
       - "traefik.http.middlewares.alf-${user}-rl.ratelimit.burst=20"
       - "traefik.http.routers.alf-${user}.middlewares=alf-${user}-rl"
     environment:
-      - TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
-      - TELEGRAM_CHAT_ID_FILE=/run/secrets/telegram_chat_id
       - CC_AUTH_TOKEN_FILE=/run/secrets/cc_auth_token
-      - OPENROUTER_API_KEY_FILE=/run/secrets/openrouter_api_key
-      - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
       - CLAUDE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth_token
-      - VAULT_MASTER_PASSWORD_FILE=/run/secrets/vault_master_password
       - WHISPER_URL=http://whisper:8000
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
       - EMBED_URL=http://embed:8090
@@ -389,28 +382,8 @@ EOF
       - CC_EXTERNAL_URL=https://${domain}
       - TZ=${timezone}
     secrets:
-      - source: ${user}_telegram_bot_token
-        target: telegram_bot_token
-        uid: "1001"
-        gid: "1001"
-        mode: 0400
-      - source: ${user}_telegram_chat_id
-        target: telegram_chat_id
-        uid: "1001"
-        gid: "1001"
-        mode: 0400
       - source: ${user}_cc_auth_token
         target: cc_auth_token
-        uid: "1001"
-        gid: "1001"
-        mode: 0400
-      - source: ${user}_openrouter_api_key
-        target: openrouter_api_key
-        uid: "1001"
-        gid: "1001"
-        mode: 0400
-      - source: ${user}_openai_api_key
-        target: openai_api_key
         uid: "1001"
         gid: "1001"
         mode: 0400
@@ -418,11 +391,6 @@ EOF
         target: claude_oauth_token
         uid: "1000"
         gid: "1000"
-        mode: 0400
-      - source: ${user}_vault_master_password
-        target: vault_master_password
-        uid: "1001"
-        gid: "1001"
         mode: 0400
       - source: ${user}_whisper_shared_secret
         target: whisper_shared_secret
@@ -491,8 +459,7 @@ EOF
         local user
         user=$(echo "$tenant" | jq -r '.user')
 
-        local secrets=(telegram_bot_token telegram_chat_id cc_auth_token openrouter_api_key
-                       openai_api_key claude_oauth_token vault_master_password whisper_shared_secret
+        local secrets=(cc_auth_token claude_oauth_token whisper_shared_secret
                        embed_shared_secret)
         for s in "${secrets[@]}"; do
             cat >> "$COMPOSE_FILE" <<EOF

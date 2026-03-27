@@ -3,6 +3,7 @@
   import { Lock, Unlock, Shield, Key, FileText, Plus, Trash2, Download, Upload, Eye, EyeOff, Copy, RefreshCw, AlertTriangle, CheckCircle, ExternalLink, Loader2, Zap, Pencil, Info, Terminal } from 'lucide-svelte'
   import Card from '../components/shared/Card.svelte'
   import Modal from '../components/shared/Modal.svelte'
+  import Toggle from '../components/shared/Toggle.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
 
@@ -949,9 +950,7 @@
       <div class="form-group">
         <div class="ref-toggle">
           <label>Token</label>
-          <label class="checkbox-label">
-            <input type="checkbox" bind:checked={svcUseRef} /> Use vault secret
-          </label>
+          <Toggle bind:checked={svcUseRef} label="Use vault secret" />
         </div>
         {#if svcUseRef}
           <select class="input" bind:value={svcTokenRef}>
@@ -972,9 +971,7 @@
       <div class="form-group">
         <div class="ref-toggle">
           <label>Header Value</label>
-          <label class="checkbox-label">
-            <input type="checkbox" bind:checked={svcHeaderUseRef} /> Use vault secret
-          </label>
+          <Toggle bind:checked={svcHeaderUseRef} label="Use vault secret" />
         </div>
         {#if svcHeaderUseRef}
           <select class="input" bind:value={svcHeaderValueRef}>
@@ -1000,9 +997,7 @@
       <div class="form-group">
         <div class="ref-toggle">
           <label>Password</label>
-          <label class="checkbox-label">
-            <input type="checkbox" bind:checked={svcBasicUseRef} /> Use vault secret
-          </label>
+          <Toggle bind:checked={svcBasicUseRef} label="Use vault secret" />
         </div>
         {#if svcBasicUseRef}
           <select class="input" bind:value={svcPasswordRef}>
@@ -1113,9 +1108,7 @@
     {/if}
 
     {#if svcAuthType !== 'ssh_key'}
-      <label class="checkbox-label">
-        <input type="checkbox" bind:checked={svcTlsSkip} /> Skip TLS verification
-      </label>
+      <Toggle bind:checked={svcTlsSkip} label="Skip TLS verification" />
     {/if}
 
     <div class="modal-actions">

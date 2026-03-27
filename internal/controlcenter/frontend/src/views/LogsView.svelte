@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { RefreshCw, Search, X } from 'lucide-svelte'
   import Card from '../components/shared/Card.svelte'
+  import Toggle from '../components/shared/Toggle.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
 
@@ -141,10 +142,7 @@
         <option value={1000}>1000 lines</option>
       </select>
 
-      <label class="auto-refresh">
-        <input type="checkbox" bind:checked={autoRefresh} />
-        Auto-refresh
-      </label>
+      <Toggle bind:checked={autoRefresh} label="Auto-refresh" />
 
       <button class="btn-icon" onclick={() => loadLogs()} title="Refresh">
         <RefreshCw size={16} />
@@ -220,14 +218,6 @@
     font-size: 0.85rem;
   }
 
-  .auto-refresh {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.85rem;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
 
   .btn-icon {
     background: none;

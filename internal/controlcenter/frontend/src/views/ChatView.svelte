@@ -4,6 +4,7 @@
   import ChatMessageComponent from '../components/chat/ChatMessage.svelte'
   import ChatInput from '../components/chat/ChatInput.svelte'
   import Modal from '../components/shared/Modal.svelte'
+  import Toggle from '../components/shared/Toggle.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
   import { nav } from '../stores/nav.svelte'
@@ -648,10 +649,7 @@
       </select>
     </div>
     <div class="form-group">
-      <label class="checkbox-label">
-        <input type="checkbox" bind:checked={agentModalValidation} />
-        Review plan before execution
-      </label>
+      <Toggle bind:checked={agentModalValidation} label="Review plan before execution" />
     </div>
     <div class="agent-modal-actions">
       <button class="btn btn-secondary" onclick={() => showAgentModal = false}>Cancel</button>

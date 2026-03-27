@@ -21,6 +21,7 @@
     base_url: string
     auth_type: string
     tls_skip_verify?: boolean
+    session_cookies?: boolean
     scopes?: string[]
     expires_at?: string
     token_status?: string
@@ -86,6 +87,7 @@
   let svcSshKeyFileRef = $state('')
   let svcSshPassphrase = $state('')
   let svcTlsSkip = $state(false)
+  let svcSessionCookies = $state(false)
   let savingService = $state(false)
 
   // OAuth2 flow
@@ -259,6 +261,7 @@
     svcBaseUrl = svc?.base_url || ''
     svcAuthType = svc?.auth_type || 'bearer'
     svcTlsSkip = svc?.tls_skip_verify || false
+    svcSessionCookies = svc?.session_cookies || false
     svcToken = ''
     svcTokenRef = ''
     svcUseRef = false
@@ -347,6 +350,7 @@
       if (svcAuthType !== 'ssh_key') {
         payload.base_url = svcBaseUrl.trim()
         payload.tls_skip_verify = svcTlsSkip
+        payload.session_cookies = svcSessionCookies
       }
       await api('/api/vault/services', {
         method: 'POST',
@@ -411,6 +415,7 @@
     const scopes = splitScopes(svcOAuthBrowserScopes)
     if (scopes.length > 0) payload.scopes = scopes
     if (svcTlsSkip) payload.tls_skip_verify = true
+    if (svcSessionCookies) payload.session_cookies = true
 
     try {
       const data = await api<any>('/api/vault/oauth2/authorize', {
@@ -724,6 +729,9 @@
               <div class="item-info">
                 <span class="item-name">{svc.name}</span>
                 <span class="auth-badge">{authTypeBadge(svc.auth_type)}</span>
+                {#if svc.session_cookies}
+                  <span class="auth-badge">cookies</span>
+                {/if}
                 {#if svc.token_status === 'expired'}
                   <span class="token-badge token-expired">expired</span>
                 {:else if svc.token_status === 'expiring_soon'}
@@ -1109,6 +1117,7 @@
 
     {#if svcAuthType !== 'ssh_key'}
       <Toggle bind:checked={svcTlsSkip} label="Skip TLS verification" />
+      <Toggle bind:checked={svcSessionCookies} label="Session cookies (sticky sessions)" />
     {/if}
 
     <div class="modal-actions">

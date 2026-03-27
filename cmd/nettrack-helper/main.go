@@ -6,10 +6,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -28,6 +30,93 @@ type ConnEvent struct {
 }
 
 const sockPath = "/run/alf-nettrack.sock"
+const ctrlSockPath = "/run/alf-nettrack-ctrl.sock"
+
+// killSwitchChain is the iptables chain used to enforce the kill switch.
+const killSwitchChain = "ALF_KILLSWITCH"
+
+// initKillSwitchChain creates the iptables chain and ensures it is jumped from OUTPUT.
+// Starts empty (all traffic allowed) — clean state on every restart.
+func initKillSwitchChain() {
+	exec.Command("iptables", "-N", killSwitchChain).Run() // ignore error if chain exists
+	exec.Command("iptables", "-F", killSwitchChain).Run() // flush to start clean
+	// Remove any stale jump rules, then add exactly one.
+	for {
+		if exec.Command("iptables", "-D", "OUTPUT", "-j", killSwitchChain).Run() != nil {
+			break
+		}
+	}
+	if err := exec.Command("iptables", "-I", "OUTPUT", "1", "-j", killSwitchChain).Run(); err != nil {
+		log.Printf("iptables chain setup: %v", err)
+	} else {
+		log.Printf("[nettrack] iptables %s chain ready (empty = traffic allowed)", killSwitchChain)
+	}
+}
+
+// applyKillSwitch enables or disables network blocking via iptables.
+// When enabled, all non-loopback outbound traffic is rejected.
+func applyKillSwitch(enable bool) error {
+	// Flush chain first to avoid duplicate rules.
+	if err := exec.Command("iptables", "-F", killSwitchChain).Run(); err != nil {
+		return err
+	}
+	if enable {
+		// Allow loopback, reject everything else outbound.
+		exec.Command("iptables", "-A", killSwitchChain, "-o", "lo", "-j", "RETURN").Run()
+		if err := exec.Command("iptables", "-A", killSwitchChain, "-j", "REJECT",
+			"--reject-with", "icmp-port-unreachable").Run(); err != nil {
+			return err
+		}
+		log.Println("[nettrack] KILL SWITCH ENABLED — iptables blocking all outbound traffic")
+	} else {
+		log.Println("[nettrack] kill switch disabled — outbound traffic restored")
+	}
+	return nil
+}
+
+// ctrlMsg is the JSON command sent by the daemon's NetTracker.
+type ctrlMsg struct {
+	KillSwitch bool `json:"kill_switch"`
+}
+
+// runControlSocket listens for kill switch commands from the daemon.
+func runControlSocket(ctx context.Context) {
+	os.Remove(ctrlSockPath)
+	ln, err := net.Listen("unix", ctrlSockPath)
+	if err != nil {
+		log.Printf("[nettrack] control socket: %v", err)
+		return
+	}
+	// Only the daemon (uid 1000) should connect.
+	os.Chmod(ctrlSockPath, 0o600)
+
+	go func() {
+		<-ctx.Done()
+		ln.Close()
+	}()
+
+	log.Printf("[nettrack] control socket ready at %s", ctrlSockPath)
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go func(c net.Conn) {
+			defer c.Close()
+			dec := json.NewDecoder(c)
+			for {
+				var msg ctrlMsg
+				if err := dec.Decode(&msg); err != nil {
+					return
+				}
+				if err := applyKillSwitch(msg.KillSwitch); err != nil {
+					log.Printf("[nettrack] killswitch iptables error: %v", err)
+				}
+			}
+		}(conn)
+	}
+}
 
 func main() {
 	log.SetPrefix("[nettrack] ")
@@ -46,6 +135,14 @@ func main() {
 	os.Chmod(sockPath, 0o666)
 
 	log.Printf("listening on %s", sockPath)
+
+	// Set up iptables kill switch chain (clean state on start).
+	initKillSwitchChain()
+
+	// Start control socket for kill switch commands from daemon.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go runControlSocket(ctx)
 
 	// Open conntrack netlink connection.
 	c, err := ct.Dial(nil)
@@ -138,6 +235,9 @@ func main() {
 
 		case <-sigCh:
 			log.Println("shutting down")
+			cancel()
+			// Ensure kill switch is off before exiting so traffic is restored.
+			applyKillSwitch(false)
 			return
 		}
 	}

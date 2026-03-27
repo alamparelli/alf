@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const nettrackCtrlSock = "/run/alf-nettrack-ctrl.sock"
+
 // connEvent mirrors the JSON from nettrack-helper.
 type connEvent struct {
 	Proto uint8  `json:"proto"`
@@ -35,9 +37,12 @@ type NetTracker struct {
 	seen     map[connKey]time.Time // dedup: skip if seen within window
 	dnsCache map[string]dnsCacheEntry
 
-	// Kill switch: when true, log but also mark as "blocked".
+	// Kill switch: when true, log and mark as "blocked".
+	// ctrlConn forwards the command to nettrack-helper for actual iptables enforcement.
 	killSwitch bool
 	killMu     sync.RWMutex
+	ctrlConn   net.Conn
+	ctrlMu     sync.Mutex
 }
 
 type dnsCacheEntry struct {
@@ -62,10 +67,43 @@ func NewNetTracker(proxy *Proxy, sockPath string) *NetTracker {
 	}
 }
 
+// connectCtrl attempts to connect to the nettrack-helper control socket for iptables enforcement.
+// Falls back gracefully (log-only) if the socket is unavailable.
+func (t *NetTracker) connectCtrl() {
+	t.ctrlMu.Lock()
+	defer t.ctrlMu.Unlock()
+	conn, err := net.DialTimeout("unix", nettrackCtrlSock, 2*time.Second)
+	if err != nil {
+		log.Printf("[nettrack] control socket unavailable — kill switch will be log-only: %v", err)
+		return
+	}
+	t.ctrlConn = conn
+	log.Println("[nettrack] connected to control socket (iptables enforcement enabled)")
+}
+
+// sendCtrl sends a kill switch command to the nettrack-helper.
+func (t *NetTracker) sendCtrl(on bool) {
+	t.ctrlMu.Lock()
+	defer t.ctrlMu.Unlock()
+	if t.ctrlConn == nil {
+		return
+	}
+	msg, _ := json.Marshal(map[string]bool{"kill_switch": on})
+	msg = append(msg, '\n')
+	if _, err := t.ctrlConn.Write(msg); err != nil {
+		log.Printf("[nettrack] control send error: %v — kill switch is log-only", err)
+		t.ctrlConn.Close()
+		t.ctrlConn = nil
+	}
+}
+
 // Run connects to the helper socket and processes events until ctx is cancelled.
 // Reconnects automatically if the connection drops.
 func (t *NetTracker) Run(ctx context.Context) {
 	log.Printf("[nettrack] starting (socket: %s)", t.sockPath)
+
+	// Connect to the control socket for iptables enforcement.
+	t.connectCtrl()
 
 	// Periodic cleanup of dedup map and DNS cache.
 	go t.cleanupLoop(ctx)
@@ -92,13 +130,16 @@ func (t *NetTracker) Run(ctx context.Context) {
 }
 
 // SetKillSwitch enables or disables the network kill switch.
-// When enabled, all new connections are marked as blocked.
+// Sends the command to nettrack-helper for actual iptables enforcement;
+// also updates local state so in-flight connections are logged as blocked.
 func (t *NetTracker) SetKillSwitch(on bool) {
 	t.killMu.Lock()
 	t.killSwitch = on
 	t.killMu.Unlock()
+	// Forward to nettrack-helper for real iptables enforcement.
+	t.sendCtrl(on)
 	if on {
-		log.Println("[nettrack] KILL SWITCH ENABLED — all new connections marked as blocked")
+		log.Println("[nettrack] KILL SWITCH ENABLED")
 	} else {
 		log.Println("[nettrack] kill switch disabled")
 	}

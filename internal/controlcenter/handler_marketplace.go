@@ -67,6 +67,12 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	slug := parts[0]
 	action := parts[1]
 
+	// Validate slug to prevent path traversal.
+	if !validName.MatchString(slug) {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid slug"})
+		return
+	}
+
 	var err error
 	switch action {
 	case "install":

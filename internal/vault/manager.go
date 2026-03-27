@@ -160,8 +160,11 @@ func (m *Manager) SetHTTPProxy(proxyURL string) {
 	m.httpProxyURL = proxyURL
 }
 
-// PasswordFile returns the path to the persisted master password file
-// in the vault data directory (writable, survives container restarts).
+// PasswordFile returns the path to the persisted master password file.
+// SECURITY: this file stores the master password in plaintext (mode 0600).
+// It is used for auto-unlock after container restart. Ensure the vault data
+// volume is not exported or snapshotted unencrypted. A future hardening step
+// should replace this with a key sealed via a Docker secret or env-derived KDF.
 func (m *Manager) PasswordFile() string {
 	return m.dataDir + "/.master-password"
 }

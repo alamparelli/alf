@@ -8,39 +8,70 @@ import (
 	"strings"
 )
 
-// blockedToolsPaths are CC endpoints that must NOT be accessible via the tools socket.
-// The tools socket is reachable by the LLM subprocess — these endpoints would
-// allow privilege escalation or admin-level access.
-var blockedToolsPaths = map[string]bool{
-	"/api/bash":       true, // shell execution as daemon user
-	"/api/restart":    true, // restart the daemon
-	"/api/magic-link": true, // generate login links
-	"/api/terminal":   true, // terminal WebSocket
+// allowedToolsPaths are the ONLY CC endpoints accessible via the tools socket.
+// Everything else is blocked. The tools socket is reachable by the LLM subprocess
+// — only safe, read-oriented or tool-specific endpoints are permitted.
+var allowedToolsPaths = map[string]bool{
+	"/api/tasks":             true, // task list/launch/get/cancel
+	"/api/teams":             true, // team list/get
+	"/api/skills/catalog":    true, // skill list
+	"/api/tiers":             true, // tier list (read-only)
+	"/api/config":            true, // config read (GET only, PUT blocked below)
+	"/api/logs":              true, // log list/tail
+	"/api/search":            true, // search
+	"/api/llm/invoke":        true, // LLM invocation (used by system-tools)
+	"/health":                true, // health check
 }
 
-// blockedToolsPrefixes are path prefixes blocked on the tools socket.
-var blockedToolsPrefixes = []string{
-	"/api/vault/", // vault management (unlock, lock, reset, secrets)
+// allowedToolsPrefixes are path prefixes allowed on the tools socket.
+var allowedToolsPrefixes = []string{
+	"/api/apps/",        // app list/details
+	"/api/marketplace/", // marketplace catalog/install
+}
+
+// blockedToolsMethods prevents write operations on read-only endpoints.
+var blockedToolsMethods = map[string][]string{
+	"/api/config": {"PUT", "POST", "DELETE"}, // config is read-only for LLM
 }
 
 // ToolsProxy serves a filtered subset of the CC HTTP API over a Unix socket.
 // System-tools connect here instead of using CC_AUTH_TOKEN + localhost:8080.
 // Socket access (mode 0660, group alf) IS the authentication.
+// Uses ALLOWLIST — only explicitly permitted endpoints are accessible.
 type ToolsProxy struct {
 	Handler http.Handler // the main CC mux
 }
 
 func (tp *ToolsProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
+	// Canonicalize path: strip trailing slashes to prevent bypass.
+	path := strings.TrimRight(r.URL.Path, "/")
+	if path == "" {
+		path = "/"
+	}
 
-	if blockedToolsPaths[path] {
+	// Check allowlist.
+	allowed := allowedToolsPaths[path]
+	if !allowed {
+		for _, prefix := range allowedToolsPrefixes {
+			if strings.HasPrefix(path+"/", prefix) {
+				allowed = true
+				break
+			}
+		}
+	}
+
+	if !allowed {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	for _, prefix := range blockedToolsPrefixes {
-		if strings.HasPrefix(path, prefix) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
+
+	// Check method restrictions.
+	if methods, ok := blockedToolsMethods[path]; ok {
+		for _, m := range methods {
+			if r.Method == m {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
 		}
 	}
 

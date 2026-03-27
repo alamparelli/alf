@@ -131,8 +131,8 @@ func main() {
 	}
 	defer ln.Close()
 
-	// Allow alf user (uid 1000) to connect.
-	os.Chmod(sockPath, 0o666)
+	// Allow alf group (gid 1000) to connect. Daemon (alfd) reads events.
+	os.Chmod(sockPath, 0o660)
 
 	log.Printf("listening on %s", sockPath)
 

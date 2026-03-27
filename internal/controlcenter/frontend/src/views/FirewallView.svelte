@@ -47,15 +47,22 @@
   let refreshTimer: ReturnType<typeof setInterval> | undefined
   let activeTab = $state<'log' | 'hosts'>('log')
 
+  // Pagination
+  let pageSize = $state(50)
+  let logPage = $state(1)
+  let hostsPage = $state(1)
+
   // Persistent host stats from backend
   let hosts = $state<any[]>([])
   let killSwitch = $state(false)
+  let hostsFilter = $state('')
 
-  // Derived: filtered log entries
+  // Derived: filtered log entries (most recent first)
   let filteredLog = $derived((() => {
-    if (!logFilter.trim()) return log
+    const reversed = [...log].reverse()
+    if (!logFilter.trim()) return reversed
     const q = logFilter.toLowerCase()
-    return log.filter((e: RequestEntry) =>
+    return reversed.filter((e: RequestEntry) =>
       e.host.toLowerCase().includes(q) ||
       e.method.toLowerCase().includes(q) ||
       (e.path && e.path.toLowerCase().includes(q)) ||
@@ -63,9 +70,21 @@
     )
   })())
 
+  // Derived: paginated log
+  let logTotalPages = $derived(Math.max(1, Math.ceil(filteredLog.length / pageSize)))
+  let clampedLogPage = $derived(Math.min(logPage, logTotalPages))
+  let paginatedLog = $derived(filteredLog.slice((clampedLogPage - 1) * pageSize, clampedLogPage * pageSize))
+
+  // Derived: filtered hosts
+  let filteredHosts = $derived((() => {
+    if (!hostsFilter.trim()) return hosts
+    const q = hostsFilter.toLowerCase()
+    return hosts.filter((h: any) => h.host.toLowerCase().includes(q))
+  })())
+
   // Derived: sorted hosts
   let sortedHosts = $derived((() => {
-    const sorted = [...hosts]
+    const sorted = [...filteredHosts]
     sorted.sort((a: any, b: any) => {
       let va = a[hostSortKey], vb = b[hostSortKey]
       if (typeof va === 'string') {
@@ -76,6 +95,18 @@
     })
     return sorted
   })())
+
+  // Derived: paginated hosts
+  let hostsTotalPages = $derived(Math.max(1, Math.ceil(sortedHosts.length / pageSize)))
+  let clampedHostsPage = $derived(Math.min(hostsPage, hostsTotalPages))
+  let paginatedHosts = $derived(sortedHosts.slice((clampedHostsPage - 1) * pageSize, clampedHostsPage * pageSize))
+
+  // Reset pages when filter or page size changes
+  function setPageSize(size: number) {
+    pageSize = size
+    logPage = 1
+    hostsPage = 1
+  }
 
   function sortHosts(key: typeof hostSortKey) {
     if (hostSortKey === key) {
@@ -193,6 +224,15 @@
     }
   }
 
+  function formatDateTime(iso: string): string {
+    try {
+      const d = new Date(iso)
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString()
+    } catch {
+      return iso
+    }
+  }
+
   let unsubEvents: (() => void) | undefined
 
   onMount(() => {
@@ -304,7 +344,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each filteredLog as entry}
+              {#each paginatedLog as entry}
                 <tr class:blocked={entry.blocked}>
                   <td class="mono">{formatTime(entry.time)}</td>
                   <td><span class="method-badge">{entry.method}</span></td>
@@ -328,11 +368,30 @@
             </tbody>
           </table>
         </div>
+        <div class="pagination">
+          <div class="page-size">
+            {#each [50, 100, 200] as size}
+              <button class="page-size-btn" class:active={pageSize === size} onclick={() => setPageSize(size)}>{size}</button>
+            {/each}
+          </div>
+          <span class="page-info">{filteredLog.length} entries</span>
+          {#if logTotalPages > 1}
+            <div class="page-nav">
+              <button class="page-btn" disabled={logPage <= 1} onclick={() => logPage--}>&laquo;</button>
+              <span class="page-info">{logPage} / {logTotalPages}</span>
+              <button class="page-btn" disabled={logPage >= logTotalPages} onclick={() => logPage++}>&raquo;</button>
+            </div>
+          {/if}
+        </div>
       {:else}
         <p class="empty-sm">{loading ? 'Loading...' : 'No requests logged'}</p>
       {/if}
     {:else}
-      {#if hosts.length > 0}
+      <div class="filter-bar">
+        <input type="text" class="filter-input" placeholder="Filter by host..." bind:value={hostsFilter} />
+        {#if hostsFilter}<span class="filter-count">{filteredHosts.length} / {hosts.length}</span>{/if}
+      </div>
+      {#if filteredHosts.length > 0}
         <div class="log-table-wrap">
           <table class="log-table">
             <thead>
@@ -346,13 +405,13 @@
               </tr>
             </thead>
             <tbody>
-              {#each sortedHosts as h}
+              {#each paginatedHosts as h}
                 <tr class:blocked={h.blocked > 0 && h.allowed === 0}>
                   <td class="mono">{h.host}{#if h.vault} <span class="source-badge">vault</span>{/if}</td>
                   <td>{h.count}</td>
                   <td>{h.allowed}</td>
                   <td>{h.blocked || ''}</td>
-                  <td class="mono">{formatTime(h.last_seen)}</td>
+                  <td class="mono">{formatDateTime(h.last_seen)}</td>
                   <td class="action-cell">
                     <button class="btn-icon-sm btn-allow" onclick={() => addAllowRule(h.host)} title="Allow this host">
                       <ShieldOff size={12} />
@@ -365,6 +424,21 @@
               {/each}
             </tbody>
           </table>
+        </div>
+        <div class="pagination">
+          <div class="page-size">
+            {#each [50, 100, 200] as size}
+              <button class="page-size-btn" class:active={pageSize === size} onclick={() => setPageSize(size)}>{size}</button>
+            {/each}
+          </div>
+          <span class="page-info">{filteredHosts.length} hosts</span>
+          {#if hostsTotalPages > 1}
+            <div class="page-nav">
+              <button class="page-btn" disabled={hostsPage <= 1} onclick={() => hostsPage--}>&laquo;</button>
+              <span class="page-info">{hostsPage} / {hostsTotalPages}</span>
+              <button class="page-btn" disabled={hostsPage >= hostsTotalPages} onclick={() => hostsPage++}>&raquo;</button>
+            </div>
+          {/if}
         </div>
       {:else}
         <p class="empty-sm">No hosts recorded yet</p>
@@ -769,6 +843,67 @@
     color: var(--text-dim);
     font-size: 0.85rem;
     padding: 1rem;
+  }
+
+  /* Pagination */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0 0;
+    gap: 12px;
+  }
+
+  .page-size {
+    display: flex;
+    gap: 2px;
+  }
+
+  .page-size-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 2px 8px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .page-size-btn.active {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+
+  .page-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .page-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .page-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .page-btn:not(:disabled):hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .page-info {
+    font-size: 0.75rem;
+    color: var(--text-dim);
   }
 
   /* Modal form */

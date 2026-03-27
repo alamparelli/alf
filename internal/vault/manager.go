@@ -20,10 +20,9 @@ type Manager struct {
 	dataDir          string
 	addr             string
 	httpProxyURL string // optional: HTTP proxy for outbound vault-proxy requests
-	adminToken       string
-	proxyToken       string
-	masterPass       string // stored for re-authentication if admin token is revoked
-	mu               sync.Mutex
+	adminToken   string
+	proxyToken   string
+	mu           sync.Mutex
 	cancel           context.CancelFunc
 
 	// Process management: cmd is only accessed via waitCh coordination.
@@ -80,7 +79,7 @@ func (m *Manager) Stop() error {
 }
 
 // AutoUnlock unlocks the vault with the given master password.
-// Stores the admin token and password for re-authentication if needed.
+// The password is NOT stored in memory — re-authentication reads from PasswordFile().
 func (m *Manager) AutoUnlock(password string) error {
 	c := vaultclient.NewWithToken(m.addr, "")
 	token, err := c.Unlock(password)
@@ -89,24 +88,21 @@ func (m *Manager) AutoUnlock(password string) error {
 	}
 	m.mu.Lock()
 	m.adminToken = token
-	m.masterPass = password
 	m.mu.Unlock()
 	return nil
 }
 
 // EnsureAuth re-authenticates if the admin token has been revoked.
-// Returns nil if the admin token is valid, or re-unlocks using stored password.
+// Returns nil if the admin token is valid, or re-unlocks using the password file.
 func (m *Manager) EnsureAuth() error {
 	c := m.Client()
 	// Quick check: try listing tokens - if 401, re-auth.
 	if _, err := c.ListTokens(); err == nil {
 		return nil
 	}
-	m.mu.Lock()
-	pw := m.masterPass
-	m.mu.Unlock()
+	pw := m.readPasswordFile()
 	if pw == "" {
-		return fmt.Errorf("admin token invalid and no master password stored")
+		return fmt.Errorf("admin token invalid and no master password file")
 	}
 	log.Println("[vault] admin token invalid, re-authenticating...")
 	return m.AutoUnlock(pw)
@@ -139,13 +135,12 @@ func (m *Manager) ProxyToken() string {
 	return m.proxyToken
 }
 
-// ClearTokens invalidates stored tokens and master password (e.g. after vault lock).
-// After this, EnsureAuth cannot re-unlock - user must unlock manually.
+// ClearTokens invalidates stored tokens (e.g. after vault lock).
+// After this, EnsureAuth re-reads from PasswordFile() to re-unlock.
 func (m *Manager) ClearTokens() {
 	m.mu.Lock()
 	m.adminToken = ""
 	m.proxyToken = ""
-	m.masterPass = ""
 	m.mu.Unlock()
 }
 
@@ -161,12 +156,20 @@ func (m *Manager) SetHTTPProxy(proxyURL string) {
 }
 
 // PasswordFile returns the path to the persisted master password file.
-// SECURITY: this file stores the master password in plaintext (mode 0600).
-// It is used for auto-unlock after container restart. Ensure the vault data
-// volume is not exported or snapshotted unencrypted. A future hardening step
-// should replace this with a key sealed via a Docker secret or env-derived KDF.
+// SECURITY: this file is in vault-data (mode 0700, owned by daemon/alfd).
+// The LLM subprocess (alf/uid 1000) cannot read it.
 func (m *Manager) PasswordFile() string {
 	return m.dataDir + "/.master-password"
+}
+
+// readPasswordFile reads the master password from the persisted file.
+// Returns empty string if the file doesn't exist or is unreadable.
+func (m *Manager) readPasswordFile() string {
+	data, err := os.ReadFile(m.PasswordFile())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // IsFirstTime returns true if no vault.enc exists yet (fresh setup).
@@ -379,9 +382,7 @@ func (m *Manager) watchdog(ctx context.Context) {
 		backoff = time.Second
 
 		// Re-authenticate after restart (token store is in-memory, lost on crash).
-		m.mu.Lock()
-		pw := m.masterPass
-		m.mu.Unlock()
+		pw := m.readPasswordFile()
 		if pw != "" {
 			if err := m.AutoUnlock(pw); err != nil {
 				log.Printf("[vault] re-unlock after restart failed: %v", err)

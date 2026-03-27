@@ -29,6 +29,8 @@
     ssh_port?: number
     ssh_user?: string
     ssh_connected?: boolean
+    header_name?: string
+    username?: string
   }
   let services = $state<Service[]>([])
 
@@ -269,11 +271,11 @@
     svcToken = ''
     svcTokenRef = ''
     svcUseRef = false
-    svcHeaderName = ''
+    svcHeaderName = svc?.header_name || ''
     svcHeaderValue = ''
     svcHeaderValueRef = ''
     svcHeaderUseRef = false
-    svcUsername = ''
+    svcUsername = svc?.username || ''
     svcPassword = ''
     svcPasswordRef = ''
     svcBasicUseRef = false

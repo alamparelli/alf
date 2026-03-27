@@ -144,10 +144,11 @@ RUN mkdir -p /opt/alf/tools.d \
 # Tool schemas for API-tier agentic tool loop.
 COPY tool-schemas/*.json /opt/alf/tools.d/
 
-# Create alf user (uid 1000). The daemon drops from root to this user via setpriv
-# in the entrypoint. No separate subprocess user — container boundary is the isolation.
+# Create alf user (uid 1000, LLM subprocess) and alfd (uid 1001, daemon).
+# Both share group alf (gid 1000) for data access. Daemon owns secrets and vault-data.
 RUN groupadd --gid 1000 alf \
-    && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf
+    && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf \
+    && useradd --uid 1001 --gid alf --shell /bin/bash --no-create-home alfd
 
 # Directory structure for volumes.
 RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
@@ -159,9 +160,9 @@ RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
     && mkdir -p /opt/alf/user-packages/bin /opt/alf/user-packages/lib \
     && chown -R root:alf /home/alf/data \
     && chmod -R g+ws /home/alf/data \
-    && chown -R alf:alf /opt/alf/config.d \
+    && chown -R alfd:alf /opt/alf/config.d \
     && chmod 750 /opt/alf/config.d \
-    && chown alf:alf /opt/alf/vault-data \
+    && chown alfd:alfd /opt/alf/vault-data \
     && chmod 700 /opt/alf/vault-data \
     && chmod -R 755 /opt/alf/tools.d \
     && chmod -R 755 /opt/alf/bin

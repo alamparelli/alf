@@ -8,14 +8,14 @@ import (
 )
 
 func TestNewCodexProvider_DefaultTimeout(t *testing.T) {
-	p := NewCodexProvider("/tmp", 0, "sk-test")
+	p := NewCodexProvider("/tmp", 0, "sk-test", nil)
 	if p.Timeout != 5*time.Minute {
 		t.Errorf("expected default timeout 5m, got %v", p.Timeout)
 	}
 }
 
 func TestNewCodexProvider_CustomTimeout(t *testing.T) {
-	p := NewCodexProvider("/tmp", 2*time.Minute, "sk-test")
+	p := NewCodexProvider("/tmp", 2*time.Minute, "sk-test", nil)
 	if p.Timeout != 2*time.Minute {
 		t.Errorf("expected timeout 2m, got %v", p.Timeout)
 	}
@@ -23,7 +23,7 @@ func TestNewCodexProvider_CustomTimeout(t *testing.T) {
 
 func TestCodexProvider_InvokeNoCodex(t *testing.T) {
 	dir := t.TempDir()
-	p := NewCodexProvider(dir, 5*time.Second, "sk-test")
+	p := NewCodexProvider(dir, 5*time.Second, "sk-test", nil)
 
 	t.Setenv("PATH", t.TempDir())
 
@@ -35,7 +35,7 @@ func TestCodexProvider_InvokeNoCodex(t *testing.T) {
 
 func TestCodexProvider_InvokeCancelled(t *testing.T) {
 	dir := t.TempDir()
-	p := NewCodexProvider(dir, 5*time.Second, "sk-test")
+	p := NewCodexProvider(dir, 5*time.Second, "sk-test", nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

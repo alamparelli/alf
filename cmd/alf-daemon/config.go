@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
@@ -99,7 +100,7 @@ func resolveBackendAPIKey(name string, bcfg cc.BackendConfig, vaultMgr *vault.Ma
 
 // registerCodex registers the OpenAI Codex CLI provider.
 // Uses API key from vault if available; otherwise relies on codex login (auth.json).
-func registerCodex(registry *provider.Registry, dataDir string, timeout time.Duration, vaultMgr *vault.Manager) {
+func registerCodex(registry *provider.Registry, dataDir string, timeout time.Duration, vaultMgr *vault.Manager, cred *syscall.Credential) {
 	var apiKey string
 	if vaultMgr != nil {
 		apiKey, _ = vaultMgr.GetSecret("codex_api_key")
@@ -111,7 +112,7 @@ func registerCodex(registry *provider.Registry, dataDir string, timeout time.Dur
 		return
 	}
 
-	prov := provider.NewCodexProvider(dataDir, timeout, apiKey)
+	prov := provider.NewCodexProvider(dataDir, timeout, apiKey, cred)
 	registry.RegisterProvider("codex", prov)
 	if apiKey != "" {
 		log.Printf("codex: registered (API key %d chars)", len(apiKey))

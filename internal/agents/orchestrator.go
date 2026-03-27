@@ -184,7 +184,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	taskDir := filepath.Join(o.dataDir, "agents", taskID)
 	os.MkdirAll(taskDir, 0o775)
 	os.Chmod(taskDir, 0o775)
-	os.Chown(taskDir, 1000, 1000) // alf:alf so claude (gid 1000) can write
+	os.Chown(taskDir, 1000, 1000) // alf (subprocess uid 1000) owns task dirs
 
 	log.Printf("[orchestrator] task %s started | teams=%d | message_len=%d", taskID, len(teams), len(userMessage))
 
@@ -759,7 +759,7 @@ func (o *Orchestrator) invokeAgentWithKey(
 	}
 	os.MkdirAll(agentDir, 0o775)
 	os.Chmod(agentDir, 0o775)
-	os.Chown(agentDir, 1000, 1000) // alf:alf so claude (gid 1000) can write
+	os.Chown(agentDir, 1000, 1000) // alf (subprocess uid 1000) owns agent dirs
 
 	model := tp.Model
 

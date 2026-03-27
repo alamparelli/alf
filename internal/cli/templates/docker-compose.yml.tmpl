@@ -70,22 +70,43 @@ services:
       - TZ={{.Timezone}}
 {{- end}}
     secrets:
-      - telegram_bot_token
-      - telegram_chat_id
-      - cc_auth_token
-      - openrouter_api_key
-      - openai_api_key
-      - claude_oauth_token
-      - vault_master_password
-      - source: whisper_shared_secret
-        target: /run/secrets/whisper_shared_secret
+      - source: telegram_bot_token
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+      - source: telegram_chat_id
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+      - source: cc_auth_token
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+      - source: openrouter_api_key
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+      - source: openai_api_key
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+      - source: claude_oauth_token
         uid: "1000"
         gid: "1000"
         mode: 0400
+      - source: vault_master_password
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+      - source: whisper_shared_secret
+        target: /run/secrets/whisper_shared_secret
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
       - source: embed_shared_secret
         target: /run/secrets/embed_shared_secret
-        uid: "1000"
-        gid: "1000"
+        uid: "1001"
+        gid: "1001"
         mode: 0400
     volumes:
       - ./data:/home/alf/data

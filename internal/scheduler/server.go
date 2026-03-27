@@ -60,7 +60,7 @@ func (s *Server) Serve() error {
 	}
 	s.listener = ln
 
-	// Daemon runs as uid 1000 — socket is already owned correctly.
+	// Daemon runs as alfd (uid 1001). Mode 0660 allows alf (gid 1000) subprocess access.
 	os.Chmod(s.sockPath, 0660)
 
 	log.Printf("scheduler: socket server listening on %s", s.sockPath)

@@ -39,7 +39,7 @@ func (s *Store) ServeUnix(sockPath string) error {
 		return fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 
-	// Daemon runs as uid 1000 — socket is already owned correctly.
+	// Daemon runs as alfd (uid 1001). Mode 0660 allows alf (gid 1000) subprocess access.
 	os.Chmod(sockPath, 0660)
 
 	log.Printf("memstore: socket server listening on %s", sockPath)

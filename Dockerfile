@@ -68,6 +68,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     net-tools \
     procps \
     iproute2 \
+    iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI.

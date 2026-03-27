@@ -149,6 +149,9 @@
   // SSH mode: parsed from URL hash ?ssh=service-name
   let sshService = $state<string | null>(null)
 
+  // Admin mode: runs terminal as alfd (uid 1001) with daemon-level access
+  let adminMode = $state(false)
+
   // URL bar overlay state
   let urlBarVisible = $state(false)
   let urlBarValue = $state('')
@@ -163,9 +166,10 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = sshService
+    const base = sshService
       ? `${proto}//${location.host}/api/ssh/${encodeURIComponent(sshService)}/session`
       : `${proto}//${location.host}/api/terminal`
+    const url = adminMode && !sshService ? base + '?mode=admin' : base
     ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
 
@@ -245,6 +249,11 @@
       term.reset()
     }
     connect()
+  }
+
+  function toggleAdmin() {
+    adminMode = !adminMode
+    newSession()
   }
 
   function handleMobileCopy() {
@@ -351,6 +360,11 @@
   <div class="term-header">
     <span class="term-title">{sshService ? `SSH: ${sshService}` : 'Terminal'}</span>
     <div class="term-header-actions">
+      {#if !sshService}
+        <button class="term-btn" class:admin-active={adminMode} onclick={toggleAdmin} title={adminMode ? 'Switch to alf (workspace)' : 'Switch to admin (daemon)'}>
+          {adminMode ? 'admin' : 'alf'}
+        </button>
+      {/if}
       {#if sshService}
         <a class="term-btn" href="#/terminal" onclick={() => { sshService = null; newSession() }}>
           Local Terminal
@@ -436,6 +450,7 @@
   }
 
   .term-btn:hover { background: var(--border); }
+  .term-btn.admin-active { border-color: var(--accent); color: var(--accent); }
 
   .term-container {
     flex: 1;

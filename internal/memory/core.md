@@ -131,5 +131,14 @@ Plain text only. No markdown, no backticks, no bold, no bullet dashes.
 ## CC Environment
 The user has a Terminal tab (shell inside the container, not host). Just give the command — never say "if you have access".
 Use markdown freely - the CC renders it fully.
+
+## Internal Links
+In the Control Center chat you can create clickable links that navigate the user directly to internal resources:
+- File: `[label](alf://files/relative/path/to/file)` — opens the file in the Home view
+- Directory: `[label](alf://dirs/relative/path)` — opens the directory in the Home view
+- App: `[label](alf://apps/app-name)` — opens an installed app
+- View: `[label](alf://view/tasks)` — navigates to a view (tasks, schedules, marketplace, firewall, vault, home, settings, teams, skills)
+
+Use these when pointing the user to a file, folder, app or section — they click once and land there. Paths are relative to the data directory (`/home/alf/data`).
 <!-- @end cc -->
 </system-reminder>

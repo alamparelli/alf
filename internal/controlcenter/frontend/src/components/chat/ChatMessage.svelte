@@ -4,6 +4,7 @@
   import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check, Users } from 'lucide-svelte'
   import { api } from '../../lib/api'
   import { toasts } from '../../stores/toast.svelte'
+  import { nav } from '../../stores/nav.svelte'
 
   interface ContentBlock {
     type: string
@@ -90,7 +91,45 @@
       /<img\s+src="([^"]+\.(?:mp4|webm|mov)(?:\?[^"]*)?)"\s*(?:alt="([^"]*)")?\s*\/?>/gi,
       '<video src="$1" controls playsinline class="chat-video">$2</video>'
     )
-    return DOMPurify.sanitize(withVideos, { ADD_TAGS: ['video'], ADD_ATTR: ['controls', 'playsinline', 'autoplay', 'loop', 'muted'] })
+    return DOMPurify.sanitize(withVideos, {
+      ADD_TAGS: ['video'],
+      ADD_ATTR: ['controls', 'playsinline', 'autoplay', 'loop', 'muted'],
+      ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|alf):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+    })
+  }
+
+  function handleLinkClick(e: MouseEvent) {
+    const target = (e.target as HTMLElement).closest('a')
+    if (!target?.href) return
+
+    let url: URL
+    try { url = new URL(target.href) } catch { return }
+    if (url.protocol !== 'alf:') return
+
+    e.preventDefault()
+    const type = url.hostname          // 'files', 'dirs', 'apps', 'view'
+    const path = url.pathname.slice(1) // strip leading /
+
+    switch (type) {
+      case 'files':
+        nav.navigateTo('home')
+        setTimeout(() => window.dispatchEvent(
+          new CustomEvent('alf:open-file', { detail: { path } })
+        ), 100)
+        break
+      case 'dirs':
+        nav.navigateTo('home')
+        setTimeout(() => window.dispatchEvent(
+          new CustomEvent('alf:open-dir', { detail: { path } })
+        ), 100)
+        break
+      case 'apps':
+        nav.navigateTo(`page:${path}`)
+        break
+      case 'view':
+        nav.navigateTo(path)
+        break
+    }
   }
 
   function getFullText(): string {
@@ -215,13 +254,15 @@
           </div>
         </div>
       {:else if block.type === 'text'}
-        <div class="msg-text">{@html renderMarkdown(block.text || '')}</div>
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div class="msg-text" onclick={handleLinkClick}>{@html renderMarkdown(block.text || '')}</div>
       {/if}
     {/each}
   {:else}
     <!-- Plain text message -->
     {#if msg.role === 'assistant' || msg.role === 'system'}
-      <div class="msg-text">{@html renderMarkdown(msg.text)}</div>
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="msg-text" onclick={handleLinkClick}>{@html renderMarkdown(msg.text)}</div>
     {:else}
       <div class="msg-text">{msg.text}</div>
     {/if}

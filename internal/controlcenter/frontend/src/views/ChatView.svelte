@@ -48,10 +48,11 @@
   async function loadActiveConversation() {
     try {
       const data = await api<any>('/api/chat/conversations')
-      const convs = (data.conversations || []).filter((c: any) => c.msg_count > 0)
-      // Restore saved convId if it still exists, otherwise use the most recent.
+      const allConvs = data.conversations || []
+      const convs = allConvs.filter((c: any) => c.msg_count > 0)
+      // Restore saved convId if it still exists (even if empty — e.g. after /new).
       const saved = localStorage.getItem('alf-chat-convid')
-      if (saved && convs.some((c: any) => c.id === saved)) {
+      if (saved && allConvs.some((c: any) => c.id === saved)) {
         convId = saved
       } else if (convs.length > 0) {
         convId = convs[convs.length - 1].id // most recent (ASC order)

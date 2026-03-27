@@ -569,7 +569,39 @@ func (m *Manager) downloadAndExtractBundle(slug, appDir string) error {
 		return err
 	}
 
-	return extractBundle(tmp, info.Size(), appDir)
+	if err := extractBundle(tmp, info.Size(), appDir); err != nil {
+		return err
+	}
+	// Ensure the service binary is executable, regardless of zip metadata.
+	if err := ensureServiceBinExecutable(appDir); err != nil {
+		log.Printf("marketplace: chmod service binary for %s: %v", slug, err)
+	}
+	return nil
+}
+
+// ensureServiceBinExecutable reads service.json and chmod +x's the declared command.
+// This is a safety net for bundles packed without the executable bit on the binary.
+func ensureServiceBinExecutable(appDir string) error {
+	data, err := os.ReadFile(filepath.Join(appDir, "service.json"))
+	if err != nil {
+		return nil // no service.json, nothing to do
+	}
+	var svc struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(data, &svc); err != nil || svc.Command == "" {
+		return nil
+	}
+	binPath := svc.Command
+	if !filepath.IsAbs(binPath) {
+		binPath = filepath.Join(appDir, binPath)
+	}
+	binPath = filepath.Clean(binPath)
+	// Security: binary must stay within appDir.
+	if !strings.HasPrefix(binPath, filepath.Clean(appDir)+string(filepath.Separator)) {
+		return fmt.Errorf("service command escapes app directory: %s", svc.Command)
+	}
+	return os.Chmod(binPath, 0o755)
 }
 
 // extractBundle extracts a ZIP into appDir, skipping data/ entries.

@@ -117,19 +117,18 @@ $SSH "${REMOTE_HOST}" "if [ -d ${EXISTING_ALF}/secrets ]; then
     fi
   done
 fi
-# Auto-generate whisper shared secret if missing.
-if [ ! -s ${REMOTE_DIR}/secrets/whisper_shared_secret ]; then
-  openssl rand -hex 32 > ${REMOTE_DIR}/secrets/whisper_shared_secret
-  echo \"  generated whisper_shared_secret\"
-fi
-# Auto-generate embed shared secret if missing.
-if [ ! -s ${REMOTE_DIR}/secrets/embed_shared_secret ]; then
-  openssl rand -hex 32 > ${REMOTE_DIR}/secrets/embed_shared_secret
-  echo \"  generated embed_shared_secret\"
-fi
-# Ensure all secret files exist (Docker Compose requires them even if empty).
-for s in telegram_bot_token telegram_chat_id cc_auth_token openrouter_api_key vault_master_password whisper_shared_secret embed_shared_secret; do
+# Auto-generate shared secrets if missing.
+for s in whisper_shared_secret embed_shared_secret; do
+  if [ ! -s ${REMOTE_DIR}/secrets/\$s ]; then
+    openssl rand -hex 32 > ${REMOTE_DIR}/secrets/\$s
+    chmod 600 ${REMOTE_DIR}/secrets/\$s
+    echo \"  generated \$s\"
+  fi
+done
+# Ensure required secret files exist (Docker Compose requires them even if empty).
+for s in cc_auth_token claude_oauth_token whisper_shared_secret embed_shared_secret; do
   touch ${REMOTE_DIR}/secrets/\$s
+  chmod 600 ${REMOTE_DIR}/secrets/\$s
 done"
 
 $SCP /tmp/alf-compose-override.yml "${REMOTE_HOST}:${REMOTE_DIR}/docker-compose.override.yml"
@@ -172,11 +171,8 @@ services:
     expose:
       - "8080"
     environment:
-      - TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
-      - TELEGRAM_CHAT_ID_FILE=/run/secrets/telegram_chat_id
       - CC_AUTH_TOKEN_FILE=/run/secrets/cc_auth_token
-      - OPENROUTER_API_KEY_FILE=/run/secrets/openrouter_api_key
-      - VAULT_MASTER_PASSWORD_FILE=/run/secrets/vault_master_password
+      - CLAUDE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth_token
       - WHISPER_URL=http://whisper:8000
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
       - EMBED_URL=http://embed:8090
@@ -184,21 +180,10 @@ services:
       - ALF_MARKETPLACE_URL=https://marketplace.lamparelli.eu
       - TZ=Europe/Rome
     secrets:
-      - telegram_bot_token
-      - telegram_chat_id
       - cc_auth_token
-      - openrouter_api_key
-      - vault_master_password
-      - source: whisper_shared_secret
-        target: /run/secrets/whisper_shared_secret
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
-      - source: embed_shared_secret
-        target: /run/secrets/embed_shared_secret
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
+      - claude_oauth_token
+      - whisper_shared_secret
+      - embed_shared_secret
     volumes:
       - ./data:/home/alf/data
       - ./config.d:/opt/alf/config.d
@@ -281,16 +266,10 @@ networks:
         - subnet: 10.99.1.0/24
 
 secrets:
-  telegram_bot_token:
-    file: ./secrets/telegram_bot_token
-  telegram_chat_id:
-    file: ./secrets/telegram_chat_id
   cc_auth_token:
     file: ./secrets/cc_auth_token
-  openrouter_api_key:
-    file: ./secrets/openrouter_api_key
-  vault_master_password:
-    file: ./secrets/vault_master_password
+  claude_oauth_token:
+    file: ./secrets/claude_oauth_token
   whisper_shared_secret:
     file: ./secrets/whisper_shared_secret
   embed_shared_secret:

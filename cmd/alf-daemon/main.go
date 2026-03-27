@@ -50,7 +50,8 @@ func main() {
 	syscall.Umask(0o002)
 
 	var token, chatID string // resolved from vault after unlock
-	authToken := secrets.ReadSecret("CC_AUTH_TOKEN")
+	// Read CC auth token: prefer vault-data (daemon-only), fallback to Docker secret.
+	authToken := readAuthToken()
 
 	// CC_AUTH_TOKEN no longer passed to subprocess env — system-tools use ALF_TOOLS_SOCK instead.
 

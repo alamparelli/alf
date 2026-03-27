@@ -126,7 +126,7 @@ for s in whisper_shared_secret embed_shared_secret; do
   fi
 done
 # Ensure required secret files exist (Docker Compose requires them even if empty).
-for s in cc_auth_token claude_oauth_token whisper_shared_secret embed_shared_secret; do
+for s in claude_oauth_token whisper_shared_secret embed_shared_secret; do
   touch ${REMOTE_DIR}/secrets/\$s
   chmod 600 ${REMOTE_DIR}/secrets/\$s
 done"
@@ -171,7 +171,6 @@ services:
     expose:
       - "8080"
     environment:
-      - CC_AUTH_TOKEN_FILE=/run/secrets/cc_auth_token
       - CLAUDE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth_token
       - WHISPER_URL=http://whisper:8000
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
@@ -180,7 +179,6 @@ services:
       - ALF_MARKETPLACE_URL=https://marketplace.lamparelli.eu
       - TZ=Europe/Rome
     secrets:
-      - cc_auth_token
       - claude_oauth_token
       - whisper_shared_secret
       - embed_shared_secret
@@ -266,8 +264,6 @@ networks:
         - subnet: 10.99.1.0/24
 
 secrets:
-  cc_auth_token:
-    file: ./secrets/cc_auth_token
   claude_oauth_token:
     file: ./secrets/claude_oauth_token
   whisper_shared_secret:

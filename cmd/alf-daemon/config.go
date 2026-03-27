@@ -15,9 +15,25 @@ import (
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/router"
+	"github.com/alamparelli/alf/internal/secrets"
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
 )
+
+// readAuthToken reads CC_AUTH_TOKEN from vault-data (daemon-only, mode 700)
+// first, then falls back to Docker secret. The vault-data path is not readable
+// by the LLM subprocess (alf/uid 1000).
+func readAuthToken() string {
+	// Primary: vault-data (protected by directory permissions).
+	data, err := os.ReadFile("/opt/alf/vault-data/.cc_auth_token")
+	if err == nil {
+		if tok := strings.TrimSpace(string(data)); tok != "" {
+			return tok
+		}
+	}
+	// Fallback: Docker secret (for backwards compatibility / migration).
+	return secrets.ReadSecret("CC_AUTH_TOKEN")
+}
 
 // vaultPassword reads the master password from the persisted password file
 // in the vault data directory (written by CC unlock/setup handler).

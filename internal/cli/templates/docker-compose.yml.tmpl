@@ -53,7 +53,6 @@ services:
       - "0.0.0.0:{{.CCPort}}:8080"
 {{- end}}
     environment:
-      - CC_AUTH_TOKEN_FILE=/run/secrets/cc_auth_token
       - CLAUDE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth_token
       - WHISPER_URL=http://whisper:8000
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
@@ -65,10 +64,6 @@ services:
       - TZ={{.Timezone}}
 {{- end}}
     secrets:
-      - source: cc_auth_token
-        uid: "1001"
-        gid: "1001"
-        mode: 0400
       - source: claude_oauth_token
         uid: "1000"
         gid: "1000"
@@ -165,8 +160,6 @@ networks:
         - subnet: 10.99.1.0/24
 
 secrets:
-  cc_auth_token:
-    file: ./secrets/cc_auth_token
   claude_oauth_token:
     file: ./secrets/claude_oauth_token
   whisper_shared_secret:

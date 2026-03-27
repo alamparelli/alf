@@ -172,9 +172,12 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 		eventCount++
 
 		var evt codexEvent
-		if json.Unmarshal(line, &evt) != nil {
+		if err := json.Unmarshal(line, &evt); err != nil {
+			log.Printf("codex: event #%d unmarshal error: %v (raw: %s)", eventCount, err, truncStderr(string(line), 200))
 			continue
 		}
+
+		log.Printf("codex: event #%d type=%s item.type=%s text_len=%d", eventCount, evt.Type, evt.Item.Type, len(evt.Item.Text))
 
 		switch evt.Type {
 		case "thread.started":
@@ -189,10 +192,13 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 			switch evt.Item.Type {
 			case "agent_message":
 				if evt.Item.Text != "" {
+					log.Printf("codex: agent_message text (%d chars): %s", len(evt.Item.Text), truncStderr(evt.Item.Text, 200))
 					resultText.WriteString(evt.Item.Text)
 					if onProgress != nil {
 						onProgress(StreamEvent{Type: "text_delta", Text: evt.Item.Text})
 					}
+				} else {
+					log.Printf("codex: agent_message with EMPTY text (raw: %s)", truncStderr(string(line), 500))
 				}
 			case "command_execution":
 				if onProgress != nil {
@@ -202,6 +208,8 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 					}
 					onProgress(StreamEvent{Type: "tool_result", Detail: evt.Item.ID, Text: output})
 				}
+			default:
+				log.Printf("codex: item.completed unknown item.type=%q (raw: %s)", evt.Item.Type, truncStderr(string(line), 300))
 			}
 
 		case "turn.completed":
@@ -217,6 +225,7 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 			if errMsg == "" {
 				errMsg = "unknown codex error"
 			}
+			log.Printf("codex: error event: %s", errMsg)
 			cmd.Process.Kill()
 			<-stderrDone
 			cmd.Wait()
@@ -229,7 +238,10 @@ done:
 	<-stderrDone
 	waitErr := cmd.Wait()
 	invokeDur := time.Since(invokeStart)
-	log.Printf("codex: done %dms events=%d", invokeDur.Milliseconds(), eventCount)
+	log.Printf("codex: done %dms events=%d accumulated=%d chars", invokeDur.Milliseconds(), eventCount, resultText.Len())
+	if errOut := strings.TrimSpace(stderr.String()); errOut != "" {
+		log.Printf("codex: stderr: %s", truncStderr(errOut, 500))
+	}
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("codex timed out after %v", timeout)
 	}

@@ -162,7 +162,7 @@ RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
     && chmod -R g+ws /home/alf/data \
     && chown -R alfd:alf /opt/alf/config.d \
     && chmod 750 /opt/alf/config.d \
-    && chown alfd:alfd /opt/alf/vault-data \
+    && chown alfd:alf /opt/alf/vault-data \
     && chmod 700 /opt/alf/vault-data \
     && chmod -R 755 /opt/alf/tools.d \
     && chmod -R 755 /opt/alf/bin

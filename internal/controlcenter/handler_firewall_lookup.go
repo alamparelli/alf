@@ -26,8 +26,11 @@ type lookupResult struct {
 }
 
 // Simple cache to avoid hammering the API.
+// Capped at 1000 entries to prevent unbounded memory growth.
+const lookupCacheMaxSize = 1000
+
 var (
-	lookupCache   = make(map[string]*lookupCacheEntry)
+	lookupCache   = make(map[string]*lookupCacheEntry, lookupCacheMaxSize)
 	lookupCacheMu sync.Mutex
 )
 
@@ -75,9 +78,12 @@ func (h *FirewallLookupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 
 	// Fetch from ip-api.com (free, no auth, 45 req/min).
+	// Skip for private/loopback/link-local IPs to prevent SSRF.
 	result := lookupResult{Host: host, IP: ip, Reverse: reverse}
-	if net.ParseIP(ip) != nil {
-		if info, err := fetchIPInfo(ip); err == nil {
+	if parsed := net.ParseIP(ip); parsed != nil {
+		if parsed.IsPrivate() || parsed.IsLoopback() || parsed.IsLinkLocalUnicast() {
+			result.Org = "internal"
+		} else if info, err := fetchIPInfo(ip); err == nil {
 			result.Org = info.Org
 			result.ISP = info.ISP
 			result.Country = info.Country
@@ -86,8 +92,15 @@ func (h *FirewallLookupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Cache for 1 hour.
+	// Cache for 1 hour (evict oldest entry if at capacity).
 	lookupCacheMu.Lock()
+	if len(lookupCache) >= lookupCacheMaxSize {
+		// Remove an arbitrary entry to make room.
+		for k := range lookupCache {
+			delete(lookupCache, k)
+			break
+		}
+	}
 	lookupCache[host] = &lookupCacheEntry{result: result, expires: time.Now().Add(time.Hour)}
 	lookupCacheMu.Unlock()
 

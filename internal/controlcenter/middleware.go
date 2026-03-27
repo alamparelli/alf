@@ -249,23 +249,64 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// clientIP extracts the client IP, preferring X-Forwarded-For/X-Real-IP from reverse proxies.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For may contain multiple IPs; first is the client.
-		if i := strings.Index(xff, ","); i != -1 {
-			return strings.TrimSpace(xff[:i])
+// trustedProxyCIDRs are networks whose X-Forwarded-For/X-Real-IP headers we trust.
+// Only connections from these addresses may override the client IP.
+// Includes Docker default bridge, common overlay networks, and loopback.
+var trustedProxyCIDRs = func() []*net.IPNet {
+	cidrs := []string{
+		"127.0.0.0/8",   // loopback
+		"10.0.0.0/8",    // Docker / private class A
+		"172.16.0.0/12", // Docker default bridge range
+		"192.168.0.0/16", // private class C
+		"::1/128",       // IPv6 loopback
+	}
+	var nets []*net.IPNet
+	for _, cidr := range cidrs {
+		_, n, err := net.ParseCIDR(cidr)
+		if err == nil {
+			nets = append(nets, n)
 		}
-		return xff
 	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+	return nets
+}()
+
+func isTrustedProxy(remoteIP string) bool {
+	ip := net.ParseIP(remoteIP)
+	if ip == nil {
+		return false
 	}
-	ip := r.RemoteAddr
-	if i := strings.LastIndex(ip, ":"); i != -1 {
-		ip = ip[:i]
+	for _, n := range trustedProxyCIDRs {
+		if n.Contains(ip) {
+			return true
+		}
 	}
-	return ip
+	return false
+}
+
+// clientIP extracts the client IP.
+// X-Forwarded-For / X-Real-IP are only trusted when the direct connection comes
+// from a known trusted proxy (loopback or private network), preventing IP spoofing
+// by external clients.
+func clientIP(r *http.Request) string {
+	remoteHost, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if remoteHost == "" {
+		remoteHost = r.RemoteAddr
+	}
+
+	if isTrustedProxy(remoteHost) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// X-Forwarded-For may contain multiple IPs; first is the client.
+			if i := strings.Index(xff, ","); i != -1 {
+				return strings.TrimSpace(xff[:i])
+			}
+			return xff
+		}
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			return xri
+		}
+	}
+
+	return remoteHost
 }
 
 // quietPostPaths are POST endpoints excluded from logging on success (high-frequency app calls).

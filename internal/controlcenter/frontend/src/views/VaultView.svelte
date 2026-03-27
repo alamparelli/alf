@@ -25,6 +25,10 @@
     scopes?: string[]
     expires_at?: string
     token_status?: string
+    ssh_host?: string
+    ssh_port?: number
+    ssh_user?: string
+    ssh_connected?: boolean
   }
   let services = $state<Service[]>([])
 
@@ -285,6 +289,12 @@
     svcSaFileRef = ''
     svcSaScopes = scopeStr
     svcSaTokenUrl = ''
+    // Restore SSH fields from service data
+    svcSshHost = svc?.ssh_host || ''
+    svcSshPort = svc?.ssh_port || 22
+    svcSshUser = svc?.ssh_user || ''
+    svcSshKeyFileRef = ''
+    svcSshPassphrase = ''
     showServiceModal = true
   }
 

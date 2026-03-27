@@ -438,15 +438,16 @@ func main() {
 	convStore := conversation.NewStore(dataDir)
 
 	// Provider: spawn-per-call Claude CLI for responses.
-	// Credential is nil — daemon already runs as uid 1000 (dropped by entrypoint).
+	// Process isolation: daemon runs as alfd (uid 1001), subprocess runs as alf (uid 1000).
+	alfCred := &syscall.Credential{Uid: 1000, Gid: 1000}
 	tiersTimeout := time.Duration(cfg.TiersTimeout) * time.Second // 0 → default 5m inside NewCLIProvider
-	cliProvider := provider.NewCLIProvider(homeDir, dataDir, tiersTimeout, nil)
+	cliProvider := provider.NewCLIProvider(homeDir, dataDir, tiersTimeout, alfCred)
 
 	// API backends: config-driven registration.
 	apiHistory := provider.NewHistory(dataDir, 100, sessionTimeout)
 	registry := provider.NewRegistry(cliProvider)
 	registerBackends(registry, cfg, apiHistory, vaultMgr)
-	registerCodex(registry, dataDir, tiersTimeout, vaultMgr)
+	registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
 
 	// Multi-agent coordinator.
 	resolveTier := func(tierName string) (agents.TierParams, bool) {
@@ -706,7 +707,7 @@ func main() {
 			}
 			// Re-register backends now that vault is unlocked and API keys are accessible.
 			registerBackends(registry, cfg, apiHistory, vaultMgr)
-			registerCodex(registry, dataDir, tiersTimeout, vaultMgr)
+			registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
 			// Load Telegram credentials from vault if not already set.
 			if token == "" {
 				if v, err := vaultMgr.GetSecret("telegram_bot_token"); err == nil && v != "" {
@@ -1073,7 +1074,7 @@ func main() {
 					}
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
-					registerCodex(registry, dataDir, tiersTimeout, vaultMgr)
+					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {
@@ -1168,7 +1169,7 @@ func main() {
 					// Re-register backends if config changed.
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
-					registerCodex(registry, dataDir, tiersTimeout, vaultMgr)
+					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {

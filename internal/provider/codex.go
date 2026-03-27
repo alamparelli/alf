@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -21,10 +22,12 @@ type CodexProvider struct {
 	Timeout time.Duration
 	// APIKey is the OpenAI/Codex API key from vault.
 	APIKey string
+	// Credential for subprocess isolation (uid/gid). Nil = inherit.
+	Credential *syscall.Credential
 }
 
 // NewCodexProvider creates a new CodexProvider.
-func NewCodexProvider(dataDir string, timeout time.Duration, apiKey string) *CodexProvider {
+func NewCodexProvider(dataDir string, timeout time.Duration, apiKey string, cred *syscall.Credential) *CodexProvider {
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
@@ -32,6 +35,7 @@ func NewCodexProvider(dataDir string, timeout time.Duration, apiKey string) *Cod
 		DefaultDataDir: dataDir,
 		Timeout:        timeout,
 		APIKey:         apiKey,
+		Credential:     cred,
 	}
 }
 
@@ -68,6 +72,11 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 
 	cmd := exec.CommandContext(cmdCtx, "codex", args...)
 	cmd.Dir = dataDir
+	if p.Credential != nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: p.Credential,
+		}
+	}
 	cmd.Env = codexEnv(p.APIKey)
 	cmd.Env = append(cmd.Env, params.Env...)
 

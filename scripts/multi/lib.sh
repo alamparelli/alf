@@ -391,27 +391,48 @@ EOF
     secrets:
       - source: ${user}_telegram_bot_token
         target: telegram_bot_token
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
       - source: ${user}_telegram_chat_id
         target: telegram_chat_id
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
       - source: ${user}_cc_auth_token
         target: cc_auth_token
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
       - source: ${user}_openrouter_api_key
         target: openrouter_api_key
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
       - source: ${user}_openai_api_key
         target: openai_api_key
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
       - source: ${user}_claude_oauth_token
         target: claude_oauth_token
-      - source: ${user}_vault_master_password
-        target: vault_master_password
-      - source: ${user}_whisper_shared_secret
-        target: whisper_shared_secret
         uid: "1000"
         gid: "1000"
         mode: 0400
+      - source: ${user}_vault_master_password
+        target: vault_master_password
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+      - source: ${user}_whisper_shared_secret
+        target: whisper_shared_secret
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
       - source: ${user}_embed_shared_secret
         target: embed_shared_secret
-        uid: "1000"
-        gid: "1000"
+        uid: "1001"
+        gid: "1001"
         mode: 0400
     volumes:
       - ./tenants/${user}/data:/home/alf/data

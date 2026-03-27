@@ -85,7 +85,7 @@ assert_equals() {
 
 echo "============================================"
 echo " SEC-001 Verification Protocol"
-echo " Drop daemon from root to uid 1000 (alf)"
+echo " Process isolation: alfd (1001) + alf (1000)"
 echo "============================================"
 echo ""
 
@@ -100,21 +100,20 @@ pass "Container '$CONTAINER' is running"
 echo ""
 
 # -------------------------------------------------------
-echo "[1] Dockerfile: uid 1001 user removed"
+echo "[1] User isolation: alf (subprocess) + alfd (daemon)"
 PASSWD=$(dexec "cat /etc/passwd" 2>/dev/null || echo "")
-assert_not_contains "$PASSWD" "claude" "No 'claude' user in /etc/passwd"
-assert_contains "$PASSWD" "alf" "User 'alf' (uid 1000) exists"
+assert_contains "$PASSWD" "alf:x:1000" "User 'alf' (uid 1000, subprocess) exists"
+assert_contains "$PASSWD" "alfd:x:1001" "User 'alfd' (uid 1001, daemon) exists"
 echo ""
 
 # -------------------------------------------------------
-echo "[2] Daemon process identity"
+echo "[2] Daemon process identity (should be alfd/uid 1001)"
 PS_OUT=$(dexec "ps -o user,pid,comm -p 1 --no-headers" 2>/dev/null || echo "")
-assert_contains "$PS_OUT" "alf" "PID 1 runs as user 'alf'"
 assert_not_contains "$PS_OUT" "root" "PID 1 is NOT root"
 
 # Cross-check via /proc (more reliable than ps).
 PROC_UID=$(dexec "awk '/^Uid:/{print \$2}' /proc/1/status" 2>/dev/null || echo "unknown")
-assert_equals "$PROC_UID" "1000" "PID 1 real UID = 1000 (via /proc)"
+assert_equals "$PROC_UID" "1001" "PID 1 real UID = 1001/alfd (via /proc)"
 echo ""
 
 # -------------------------------------------------------
@@ -130,34 +129,48 @@ assert_equals "$CAP_INH" "0000000000000000" "CapInh is 0 (no inheritable capabil
 echo ""
 
 # -------------------------------------------------------
-echo "[4] Daemon user context (as uid 1000)"
-ID_OUT=$(dexec_as 1000 "id" 2>/dev/null || echo "")
-assert_contains "$ID_OUT" "uid=1000" "id shows uid=1000"
-assert_contains "$ID_OUT" "gid=1000" "id shows gid=1000"
+echo "[4] User contexts"
+ID_DAEMON=$(dexec_as 1001 "id" 2>/dev/null || echo "")
+assert_contains "$ID_DAEMON" "uid=1001" "alfd: id shows uid=1001"
+assert_contains "$ID_DAEMON" "gid=1000" "alfd: id shows gid=1000 (alf group)"
+
+ID_SUBPROCESS=$(dexec_as 1000 "id" 2>/dev/null || echo "")
+assert_contains "$ID_SUBPROCESS" "uid=1000" "alf: id shows uid=1000"
+assert_contains "$ID_SUBPROCESS" "gid=1000" "alf: id shows gid=1000"
 echo ""
 
 # -------------------------------------------------------
-echo "[5] Data directory permissions"
-# Use test -w (writable check) instead of touch+rm to avoid hook issues.
+echo "[5] Data directory permissions (subprocess isolation)"
+# Subprocess (alf/uid 1000) can write to workspace.
 WRITE_TEST=$(dexec_as 1000 "test -w /home/alf/data && echo ok" 2>/dev/null || echo "FAIL")
-assert_equals "$WRITE_TEST" "ok" "uid 1000 can write to /home/alf/data/"
+assert_equals "$WRITE_TEST" "ok" "alf can write to /home/alf/data/"
 
+# Subprocess can read config but NOT write.
 READ_TEST=$(dexec_as 1000 "ls /opt/alf/config.d/ >/dev/null 2>&1 && echo ok" 2>/dev/null || echo "FAIL")
-assert_equals "$READ_TEST" "ok" "uid 1000 can read /opt/alf/config.d/"
+assert_equals "$READ_TEST" "ok" "alf can read /opt/alf/config.d/"
 
-VAULT_TEST=$(dexec_as 1000 "test -w /opt/alf/vault-data && echo ok" 2>/dev/null || echo "FAIL")
-assert_equals "$VAULT_TEST" "ok" "uid 1000 can write to /opt/alf/vault-data/"
+# Subprocess CANNOT access vault-data (daemon-only).
+VAULT_TEST=$(dexec_as 1000 "ls /opt/alf/vault-data/ 2>&1 || echo denied" 2>/dev/null)
+assert_contains "$VAULT_TEST" "denied\|Permission\|cannot" "alf CANNOT access /opt/alf/vault-data/"
 
+# Subprocess owns .claude/ auth directory.
 HOME_TEST=$(dexec_as 1000 "test -w /home/alf/.claude && echo ok" 2>/dev/null || echo "FAIL")
-assert_equals "$HOME_TEST" "ok" "uid 1000 can write to ~/.claude/"
+assert_equals "$HOME_TEST" "ok" "alf can write to ~/.claude/"
+
+# Daemon (alfd/uid 1001) can access vault-data.
+VAULT_DAEMON=$(dexec_as 1001 "test -w /opt/alf/vault-data && echo ok" 2>/dev/null || echo "FAIL")
+assert_equals "$VAULT_DAEMON" "ok" "alfd can write to /opt/alf/vault-data/"
 echo ""
 
 # -------------------------------------------------------
-echo "[6] Socket files accessible"
+echo "[6] Socket files accessible (daemon-owned, group-readable)"
 SOCK_FILE=$(dexec "find /home/alf/data -name '*.sock' -type s 2>/dev/null | head -1" || echo "")
 if [ -n "$SOCK_FILE" ]; then
   SOCK_OWNER=$(dexec "stat -c %u $SOCK_FILE" 2>/dev/null || echo "unknown")
-  assert_equals "$SOCK_OWNER" "1000" "Socket owned by uid 1000"
+  assert_equals "$SOCK_OWNER" "1001" "Socket owned by uid 1001 (alfd)"
+  # Subprocess (alf, gid 1000) should still be able to connect via group perms.
+  SOCK_PERMS=$(dexec "stat -c %a $SOCK_FILE" 2>/dev/null || echo "unknown")
+  assert_equals "$SOCK_PERMS" "660" "Socket perms are 0660 (group rw)"
 else
   skip "No socket files found (daemon may not have created them yet)"
 fi
@@ -202,8 +215,8 @@ echo ""
 # -------------------------------------------------------
 echo "[10] resolv.conf accessible"
 RESOLV_OWNER=$(dexec "stat -c %u /etc/resolv.conf" 2>/dev/null || echo "unknown")
-if [ "$RESOLV_OWNER" = "1000" ]; then
-  pass "resolv.conf owned by uid 1000 (applyDNS will work)"
+if [ "$RESOLV_OWNER" = "1000" ] || [ "$RESOLV_OWNER" = "1001" ]; then
+  pass "resolv.conf owned by uid $RESOLV_OWNER (applyDNS will work)"
 else
   # Not fatal — applyDNS has graceful fallback.
   skip "resolv.conf owned by uid $RESOLV_OWNER (applyDNS will use fallback)"
@@ -247,7 +260,24 @@ fi
 
 # Verify uid 1000 cannot su to root.
 SETUID_TEST=$(dexec_as 1000 "su -c id root 2>&1 || echo denied" 2>/dev/null || echo "denied")
-assert_contains "$SETUID_TEST" "denied\|failure\|cannot\|must be\|Permission" "Cannot su back to root"
+assert_contains "$SETUID_TEST" "denied\|failure\|cannot\|must be\|Permission" "alf cannot su back to root"
+echo ""
+
+# -------------------------------------------------------
+echo "[14] Secrets isolation (subprocess cannot read daemon secrets)"
+SECRET_TEST=$(dexec_as 1000 "cat /run/secrets/telegram_bot_token 2>&1 || echo denied" 2>/dev/null)
+assert_contains "$SECRET_TEST" "denied\|Permission\|No such" "alf CANNOT read telegram_bot_token"
+
+SECRET_VAULT=$(dexec_as 1000 "cat /run/secrets/vault_master_password 2>&1 || echo denied" 2>/dev/null)
+assert_contains "$SECRET_VAULT" "denied\|Permission\|No such" "alf CANNOT read vault_master_password"
+
+# claude_oauth_token should be readable by subprocess (uid 1000).
+SECRET_OAUTH=$(dexec_as 1000 "cat /run/secrets/claude_oauth_token 2>/dev/null && echo ok || echo denied" 2>/dev/null)
+if echo "$SECRET_OAUTH" | grep -q "No such"; then
+  skip "claude_oauth_token secret not mounted"
+else
+  assert_not_contains "$SECRET_OAUTH" "denied\|Permission" "alf CAN read claude_oauth_token"
+fi
 echo ""
 
 # -------------------------------------------------------

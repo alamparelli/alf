@@ -80,12 +80,27 @@ if [ -f "$BOOTSTRAP" ]; then
 fi
 
 # Phase 2.5: Fix all permissions as root (before dropping privileges).
-# The daemon runs as uid 1000 and cannot chown, so we do it here.
-chown -R alf:alf /home/alf
-chown -R alf:alf /home/alf/data
+# alf (uid 1000) = LLM subprocess, alfd (uid 1001) = daemon.
+chown -R alf:alf /home/alf               # subprocess HOME
+chown -R alf:alf /home/alf/data          # workspace (both users via group)
 chmod -R g+ws /home/alf/data
-chown -R alf:alf /opt/alf/config.d /opt/alf/vault-data
+chown -R alfd:alf /opt/alf/config.d      # daemon owns config, subprocess reads via group
+chmod 750 /opt/alf/config.d
+chown alfd:alfd /opt/alf/vault-data      # daemon-only (mode 700)
+chmod 700 /opt/alf/vault-data
 chown alf:alf /etc/resolv.conf 2>/dev/null || true
+
+# Allow subprocess (alf) to install packages (pip, npm).
+for d in /home/alf/.local /home/alf/.npm /home/alf/.cache; do
+    mkdir -p "$d"
+    chown -R alf:alf "$d"
+    chmod -R g+rwX "$d"
+done
+chown -R alf:alf /opt/alf/user-packages
+chmod -R g+ws /opt/alf/user-packages
+
+# Ensure subprocess can read its own .claude/ auth.
+chmod -R g+rX /home/alf/.claude 2>/dev/null || true
 
 # Phase 2.6: Seed default apps from bundled defaults (as root, before locking).
 # This ensures bundled app updates are applied even when files are root-locked.
@@ -128,9 +143,10 @@ if [ -x /opt/alf/bin/nettrack-helper ]; then
     echo "entrypoint: nettrack-helper started (pid=$!)"
 fi
 
-# Phase 3: Drop to alf (uid 1000) and start daemon with zero capabilities.
+# Phase 3: Drop to alfd (uid 1001) and start daemon with zero capabilities.
 # setpriv strips all inheritable capabilities - combined with no-new-privileges:true,
 # the daemon process cannot regain any capabilities after this point.
+# regid=1000 keeps the alf group as primary for shared data access.
 # GOMEMLIMIT caps Go heap and makes GC aggressive near the limit.
 export GOMEMLIMIT=512MiB
-exec setpriv --reuid=1000 --regid=1000 --init-groups --inh-caps=-all /opt/alf/alf-daemon "$@"
+exec setpriv --reuid=1001 --regid=1000 --init-groups --inh-caps=-all /opt/alf/alf-daemon "$@"

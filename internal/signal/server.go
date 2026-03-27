@@ -49,7 +49,7 @@ func (s *Server) ListenUnix(sockPath string) (net.Listener, error) {
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 
-	// Daemon runs as uid 1000 — socket is already owned correctly.
+	// Daemon runs as alfd (uid 1001). Mode 0660 allows alf (gid 1000) subprocess access.
 	os.Chmod(sockPath, 0660)
 
 	return ln, nil

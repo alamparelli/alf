@@ -33,6 +33,11 @@
   let log = $state<RequestEntry[]>([])
   let autoRefresh = $state(true)
   let loading = $state(false)
+  let logFilter = $state('')
+
+  // Hosts sorting
+  let hostSortKey = $state<'host' | 'count' | 'allowed' | 'blocked' | 'last_seen'>('count')
+  let hostSortAsc = $state(false)
 
   // Add rule modal
   let showAddRule = $state(false)
@@ -45,6 +50,46 @@
   // Persistent host stats from backend
   let hosts = $state<any[]>([])
   let killSwitch = $state(false)
+
+  // Derived: filtered log entries
+  let filteredLog = $derived((() => {
+    if (!logFilter.trim()) return log
+    const q = logFilter.toLowerCase()
+    return log.filter((e: RequestEntry) =>
+      e.host.toLowerCase().includes(q) ||
+      e.method.toLowerCase().includes(q) ||
+      (e.path && e.path.toLowerCase().includes(q)) ||
+      (e.source && e.source.toLowerCase().includes(q))
+    )
+  })())
+
+  // Derived: sorted hosts
+  let sortedHosts = $derived((() => {
+    const sorted = [...hosts]
+    sorted.sort((a: any, b: any) => {
+      let va = a[hostSortKey], vb = b[hostSortKey]
+      if (typeof va === 'string') {
+        va = va.toLowerCase(); vb = (vb || '').toLowerCase()
+        return hostSortAsc ? va.localeCompare(vb) : vb.localeCompare(va)
+      }
+      return hostSortAsc ? (va || 0) - (vb || 0) : (vb || 0) - (va || 0)
+    })
+    return sorted
+  })())
+
+  function sortHosts(key: typeof hostSortKey) {
+    if (hostSortKey === key) {
+      hostSortAsc = !hostSortAsc
+    } else {
+      hostSortKey = key
+      hostSortAsc = key === 'host' // alpha ascending by default, numbers descending
+    }
+  }
+
+  function sortIndicator(key: string): string {
+    if (hostSortKey !== key) return ''
+    return hostSortAsc ? ' ▲' : ' ▼'
+  }
 
   async function loadFirewall() {
     loading = true
@@ -112,11 +157,15 @@
   }
 
   async function toggleKillSwitch() {
+    const enabling = !killSwitch
+    if (enabling && !confirm('Block ALL outbound network traffic? This will prevent all external connections.')) {
+      return
+    }
     try {
       const result = await api<any>('/api/firewall/killswitch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !killSwitch })
+        body: JSON.stringify({ enabled: enabling })
       })
       killSwitch = result.enabled
       toasts.show(killSwitch ? 'Kill switch ENABLED — all traffic blocked' : 'Kill switch disabled', killSwitch ? 'error' : 'success')
@@ -237,7 +286,11 @@
     </div>
 
     {#if activeTab === 'log'}
-      {#if log.length > 0}
+      <div class="filter-bar">
+        <input type="text" class="filter-input" placeholder="Filter by host, method, source..." bind:value={logFilter} />
+        {#if logFilter}<span class="filter-count">{filteredLog.length} / {log.length}</span>{/if}
+      </div>
+      {#if filteredLog.length > 0}
         <div class="log-table-wrap">
           <table class="log-table">
             <thead>
@@ -251,11 +304,11 @@
               </tr>
             </thead>
             <tbody>
-              {#each log as entry}
+              {#each filteredLog as entry}
                 <tr class:blocked={entry.blocked}>
                   <td class="mono">{formatTime(entry.time)}</td>
                   <td><span class="method-badge">{entry.method}</span></td>
-                  <td class="mono">{entry.host}{#if entry.source}<span class="source-badge" class:nettrack={entry.source === 'nettrack'}>{entry.source}</span>{/if}</td>
+                  <td class="mono">{entry.host}{#if entry.source} <span class="source-badge {entry.source}">{entry.source}</span>{/if}</td>
                   <td class="mono path-cell">{entry.path}</td>
                   <td>
                     <span class="status-badge" class:status-ok={entry.status >= 200 && entry.status < 400} class:status-blocked={entry.blocked}>
@@ -284,16 +337,16 @@
           <table class="log-table">
             <thead>
               <tr>
-                <th>Host</th>
-                <th>Requests</th>
-                <th>Allowed</th>
-                <th>Denied</th>
-                <th>Last seen</th>
+                <th class="sortable" onclick={() => sortHosts('host')}>Host{sortIndicator('host')}</th>
+                <th class="sortable" onclick={() => sortHosts('count')}>Requests{sortIndicator('count')}</th>
+                <th class="sortable" onclick={() => sortHosts('allowed')}>Allowed{sortIndicator('allowed')}</th>
+                <th class="sortable" onclick={() => sortHosts('blocked')}>Denied{sortIndicator('blocked')}</th>
+                <th class="sortable" onclick={() => sortHosts('last_seen')}>Last seen{sortIndicator('last_seen')}</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {#each hosts as h}
+              {#each sortedHosts as h}
                 <tr class:blocked={h.blocked > 0 && h.allowed === 0}>
                   <td class="mono">{h.host}{#if h.vault} <span class="source-badge">vault</span>{/if}</td>
                   <td>{h.count}</td>
@@ -594,6 +647,39 @@
     cursor: pointer;
   }
 
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .filter-input {
+    flex: 1;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.8rem;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .filter-count {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .sortable {
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .sortable:hover {
+    color: var(--text);
+  }
+
   .log-table-wrap {
     overflow-x: auto;
   }
@@ -671,6 +757,11 @@
   .source-badge.nettrack {
     background: rgba(80, 160, 220, 0.15);
     color: #5090d0;
+  }
+
+  .source-badge.internal {
+    background: rgba(140, 140, 140, 0.15);
+    color: #999;
   }
 
   .empty-sm {

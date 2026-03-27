@@ -592,29 +592,7 @@
     {#if step === 4}
       <div class="step-content" style="text-align:center">
         <h3>You're all set</h3>
-        <p class="step-desc">ALF is configured and ready. Here's what to explore next:</p>
-        <div class="getstarted-links">
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <div class="getstarted-item" onclick={() => { open = false; nav.navigateTo('chat') }}>
-            <strong>Chat</strong>
-            <span>Start talking to ALF</span>
-          </div>
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <div class="getstarted-item" onclick={() => { open = false; nav.navigateTo('docs:getting-started') }}>
-            <strong>Getting Started Guide</strong>
-            <span>Learn the basics step by step</span>
-          </div>
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <div class="getstarted-item" onclick={() => { open = false; nav.navigateTo('docs:chat') }}>
-            <strong>Chat Features</strong>
-            <span>Media, reactions, internal links</span>
-          </div>
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <div class="getstarted-item" onclick={() => { open = false; nav.navigateTo('marketplace') }}>
-            <strong>Marketplace</strong>
-            <span>Browse and install apps</span>
-          </div>
-        </div>
+        <p class="step-desc">ALF is configured and ready. Read the Getting Started guide to learn the basics.</p>
       </div>
     {/if}
 
@@ -1001,37 +979,4 @@
   :global(.spin) { animation: spin 1s linear infinite; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-  /* Get Started links */
-  .getstarted-links {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 16px;
-    text-align: left;
-  }
-
-  .getstarted-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 12px 16px;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    cursor: pointer;
-    transition: border-color 0.15s;
-  }
-
-  .getstarted-item:hover {
-    border-color: var(--accent);
-  }
-
-  .getstarted-item strong {
-    font-size: 0.88rem;
-  }
-
-  .getstarted-item span {
-    font-size: 0.78rem;
-    color: var(--text-dim);
-  }
 </style>

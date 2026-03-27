@@ -51,10 +51,21 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if shell == "" {
 		shell = "/bin/bash"
 	}
-	// Terminal runs as alf (uid 1000) — the workspace/subprocess user.
+	// Terminal user: default alf (uid 1000, workspace), admin mode = alfd (uid 1001, daemon).
+	isAdmin := r.URL.Query().Get("mode") == "admin"
 	cmd := exec.CommandContext(ctx, shell, "--login")
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
+	if isAdmin {
+		// Admin terminal: runs as daemon user (alfd/uid 1001).
+		// Has access to vault-data, config, and daemon internals.
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
+		}
+	} else {
+		// Standard terminal: runs as alf (uid 1000).
+		// Same permissions as the LLM subprocess.
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
+		}
 	}
 	homeDir := "/home/alf"
 	if d := os.Getenv("ALF_HOME_DIR"); d != "" {
@@ -62,7 +73,11 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	cmd.Dir = homeDir
 	// Build a safe environment - exclude daemon secrets (OAuth tokens, API keys, etc.).
-	env := termSafeEnv(homeDir)
+	user := "alf"
+	if isAdmin {
+		user = "alfd"
+	}
+	env := termSafeEnv(homeDir, user)
 	cmd.Env = env
 
 	ptmx, err := pty.Start(cmd)
@@ -124,7 +139,7 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // termSafeEnv builds a filtered environment for terminal sessions,
 // excluding daemon secrets (OAuth tokens, API keys, auth tokens).
-func termSafeEnv(homeDir string) []string {
+func termSafeEnv(homeDir, user string) []string {
 	safePrefixes := []string{
 		"PATH=", "TERM=", "LANG=", "LC_", "TZ=", "TMPDIR=",
 		"XDG_", "OMP_NUM_THREADS=", "ANTHROPIC_", "CLAUDE_",
@@ -144,8 +159,8 @@ func termSafeEnv(homeDir string) []string {
 	}
 	env = append(env,
 		"HOME="+homeDir,
-		"USER=alf",
-		"LOGNAME=alf",
+		"USER="+user,
+		"LOGNAME="+user,
 		"TERM=xterm-256color",
 	)
 	return env

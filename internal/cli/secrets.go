@@ -17,13 +17,8 @@ type Secret struct {
 // SecretRegistry lists all secrets ALF knows about.
 // Add new entries here as ALF grows - `alf secret list` picks them up automatically.
 var SecretRegistry = []Secret{
-	{Name: "telegram_bot_token", Description: "Telegram bot token from @BotFather", Required: false},
-	{Name: "telegram_chat_id", Description: "Your Telegram chat ID", Required: false},
 	{Name: "cc_auth_token", Description: "Control Center auth token (auto-generated)", Required: false},
-	{Name: "openrouter_api_key", Description: "OpenRouter API key (sk-or-...)", Required: false},
-	{Name: "openai_api_key", Description: "OpenAI API key (sk-...)", Required: false},
 	{Name: "claude_oauth_token", Description: "Claude Code OAuth token (via alf login)", Required: false},
-	{Name: "vault_master_password", Description: "Vault master password (enables secrets vault)", Required: false},
 	{Name: "whisper_shared_secret", Description: "Whisper service shared secret (auto-generated)", Required: false},
 	{Name: "embed_shared_secret", Description: "Embed service shared secret (auto-generated)", Required: false},
 }

@@ -15,18 +15,15 @@ import (
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/router"
-	"github.com/alamparelli/alf/internal/secrets"
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
 )
 
-// vaultPassword reads the master password from Docker secret first,
-// then falls back to the persisted password file in the vault data directory
-// (written by CC unlock handler).
+// vaultPassword reads the master password from the persisted password file
+// in the vault data directory (written by CC unlock/setup handler).
+// Docker secrets are NOT used — vault-data is owned by alfd (mode 700),
+// so the LLM subprocess (alf/uid 1000) cannot read the password.
 func vaultPassword(mgr *vault.Manager) string {
-	if pw := secrets.ReadSecret("VAULT_MASTER_PASSWORD"); pw != "" {
-		return pw
-	}
 	if mgr != nil {
 		data, err := os.ReadFile(mgr.PasswordFile())
 		if err == nil {

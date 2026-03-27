@@ -35,9 +35,10 @@ type WorkspaceHandler struct {
 }
 
 type wsEntry struct {
-	Name  string `json:"name"`
-	IsDir bool   `json:"is_dir"`
-	Size  int64  `json:"size"`
+	Name    string `json:"name"`
+	IsDir   bool   `json:"is_dir"`
+	Size    int64  `json:"size"`
+	ModTime int64  `json:"mod_time"` // unix timestamp
 }
 
 func (h *WorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -219,7 +220,7 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 			continue
 		}
 		isDir := info.IsDir()
-		entry := wsEntry{Name: name, IsDir: isDir, Size: info.Size()}
+		entry := wsEntry{Name: name, IsDir: isDir, Size: info.Size(), ModTime: info.ModTime().Unix()}
 		if isDir {
 			dirs = append(dirs, entry)
 		} else {
@@ -292,6 +293,7 @@ func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath, relPath stri
 		"type":     "file",
 		"name":     info.Name(),
 		"size":     info.Size(),
+		"mod_time": info.ModTime().Unix(),
 		"editable": editable,
 		"content":  string(content),
 	})

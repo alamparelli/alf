@@ -16,7 +16,7 @@
     name: string
     is_dir: boolean
     size: number
-    mod_time?: string
+    mod_time?: number
   }
   interface WsDir {
     type: 'directory'
@@ -29,6 +29,7 @@
     type: 'file'
     name: string
     size: number
+    mod_time?: number
     editable: boolean
     content?: string
     message?: string
@@ -110,13 +111,15 @@
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
-  function formatDate(dateStr?: string): string {
-    if (!dateStr) return ''
-    try {
-      const d = new Date(dateStr)
-      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-    } catch { return '' }
+  function formatDate(ts?: number): string {
+    if (!ts) return ''
+    const d = new Date(ts * 1000)
+    const now = new Date()
+    const isToday = d.toDateString() === now.toDateString()
+    if (isToday) return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined })
   }
+
 
   function renderMd(text: string): string {
     return DOMPurify.sanitize(marked.parse(text) as string)
@@ -601,6 +604,7 @@
 
     <div class="file-meta">
       <span>{formatSize(viewingFile.size)}</span>
+      {#if viewingFile.mod_time}<span class="dim">Modified {formatDate(viewingFile.mod_time)}</span>{/if}
       {#if !viewingFile.editable}<span class="dim">read-only</span>{/if}
     </div>
 

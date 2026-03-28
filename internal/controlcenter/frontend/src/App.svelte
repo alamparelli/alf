@@ -32,6 +32,19 @@
 
   let showWizard = $state(false)
   let wizardRef: any = $state(null)
+  let mobileMenuOpen = $state(false)
+
+  function isMobile() {
+    return window.innerWidth <= 768
+  }
+
+  function handleFabClick() {
+    if (isMobile()) {
+      mobileMenuOpen = !mobileMenuOpen
+    } else {
+      window.dispatchEvent(new CustomEvent('alf:open-spotlight'))
+    }
+  }
 
   onMount(() => {
     apps.load()
@@ -161,17 +174,20 @@
     {/if}
   </div>
 
-  <BottomNav />
+  <BottomNav bind:open={mobileMenuOpen} />
 </div>
 
-{#if nav.currentView !== 'chat'}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <button class="spotlight-fab" onclick={() => window.dispatchEvent(new CustomEvent('alf:open-spotlight'))}>
+<!-- FAB: spotlight on desktop, mobile menu on mobile -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<button class="spotlight-fab" onclick={handleFabClick}>
+  {#if mobileMenuOpen}
+    <X size={18} />
+  {:else}
     <Search size={18} />
-    <span class="fab-tooltip">Search <kbd>{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+{spotlightSettings.shortcutKey.toUpperCase()}</kbd></span>
-  </button>
-{/if}
+  {/if}
+  <span class="fab-tooltip">Search <kbd>{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+{spotlightSettings.shortcutKey.toUpperCase()}</kbd></span>
+</button>
 
 <Toast />
 <SpotlightSearch />
@@ -505,12 +521,16 @@
   @media (max-width: 768px) {
     .main-content {
       margin-left: 0;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
+    /* App iframe handles its own safe-area offsets in AppFrame.svelte */
+    /* Hamburger + sidebar replaced by BottomNav grid on mobile */
     .hamburger-btn {
-      display: block;
+      display: none;
     }
     .sidebar-overlay {
-      display: block;
+      display: none;
     }
   }
 
@@ -570,8 +590,11 @@
 
   @media (max-width: 768px) {
     :global(.spotlight-fab) {
-      bottom: 72px;
+      bottom: calc(16px + env(safe-area-inset-bottom, 4px));
       right: 16px;
+    }
+    :global(.fab-tooltip) {
+      display: none;
     }
   }
 </style>

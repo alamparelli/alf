@@ -184,7 +184,7 @@
       open = !open
       if (open) {
         // Focus after DOM update
-        setTimeout(() => searchInput?.focus(), 0)
+        requestAnimationFrame(() => searchInput?.focus())
       }
       return
     }
@@ -412,9 +412,9 @@
       {/if}
 
       <div class="spotlight-footer">
-        <span class="kbd">↑↓</span> Navigate
-        <span class="kbd">↵</span> Open
-        <span class="kbd">esc</span> Close
+        <span class="kbd desktop-only">↑↓</span> <span class="desktop-only">Navigate</span>
+        <span class="kbd desktop-only">↵</span> <span class="desktop-only">Open</span>
+        <span class="kbd desktop-only">esc</span> <span class="desktop-only">Close</span>
         <span class="footer-spacer"></span>
         <button class="filter-toggle" class:active={showFilters} onclick={() => showFilters = !showFilters} title="Filter folders">
           <Filter size={12} />
@@ -613,6 +613,12 @@
   .filter-toggle.active {
     color: var(--accent);
     border-color: var(--accent);
+  }
+
+  @media (max-width: 768px) {
+    .desktop-only {
+      display: none;
+    }
   }
 
   .filter-count {

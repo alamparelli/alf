@@ -9,13 +9,22 @@ class SoundNotifier {
   constructor() {
     this.loadSetting()
     if (typeof document !== 'undefined') {
-      // Pre-init on first user interaction (unlocks AudioContext)
+      // iOS PWA requires AudioContext created during a user gesture.
+      // touchstart is critical — iOS doesn't always fire click on first tap.
       const unlock = () => {
+        if (!this.ctx) {
+          this.ctx = new AudioContext()
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume()
+        }
         this.ensureReady()
         document.removeEventListener('click', unlock)
+        document.removeEventListener('touchstart', unlock)
         document.removeEventListener('keydown', unlock)
       }
       document.addEventListener('click', unlock)
+      document.addEventListener('touchstart', unlock)
       document.addEventListener('keydown', unlock)
     }
   }
@@ -33,7 +42,8 @@ class SoundNotifier {
     if (this.ready) return this.ready
     this.ready = (async () => {
       try {
-        this.ctx = new AudioContext()
+        if (!this.ctx) this.ctx = new AudioContext()
+        if (this.ctx.state === 'suspended') await this.ctx.resume()
         const resp = await fetch('/static/notification.wav')
         if (!resp.ok) {
           console.warn('[sound] failed to fetch notification.wav:', resp.status)

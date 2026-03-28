@@ -41,4 +41,11 @@
     height: 100%;
     border: none;
   }
+
+  @media (max-width: 768px) {
+    .page-frame {
+      top: env(safe-area-inset-top, 0px);
+      height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    }
+  }
 </style>

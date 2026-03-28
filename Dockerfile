@@ -71,6 +71,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
+# Git: Debian Bookworm ships 2.39.x with CVE-2025-48384 (CISA KEV, arbitrary code exec
+# via config quoting). Build 2.50.1 from source to get the fix.
+ARG GIT_VERSION=2.50.1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libcurl4-gnutls-dev libexpat1-dev gettext zlib1g-dev libssl-dev \
+    && curl -fsSL "https://github.com/git/git/archive/refs/tags/v${GIT_VERSION}.tar.gz" \
+       | tar xz -C /tmp \
+    && cd "/tmp/git-${GIT_VERSION}" \
+    && make prefix=/usr/local -j"$(nproc)" NO_TCLTK=1 all \
+    && make prefix=/usr/local install \
+    && rm -rf "/tmp/git-${GIT_VERSION}" /var/lib/apt/lists/* \
+    && git --version
+
 # GitHub CLI.
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       -o /usr/share/keyrings/githubcli-archive-keyring.gpg \

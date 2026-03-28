@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -41,8 +42,11 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	// Daemon already runs as uid 1000 (alf) — no credential switch needed.
+	// Drop to alf (uid 1000) — daemon runs as alfd (uid 1001) which has secret access.
 	cmd := exec.CommandContext(ctx, "bash", "-c", req.Command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

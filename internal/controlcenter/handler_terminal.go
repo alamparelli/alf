@@ -58,7 +58,7 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Admin terminal: runs as daemon user (alfd/uid 1001).
 		// Has access to vault-data, config, and daemon internals.
 		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{Uid: 1001, Gid: 1000},
+			Credential: &syscall.Credential{Uid: 1001, Gid: 1001, Groups: []uint32{1001, 1000}},
 		}
 	} else {
 		// Standard terminal: runs as alf (uid 1000).

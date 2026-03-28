@@ -60,7 +60,8 @@ func (s *Server) Serve() error {
 	}
 	s.listener = ln
 
-	// Daemon runs as alfd (uid 1001). Mode 0660 allows alf (gid 1000) subprocess access.
+	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
+	os.Chown(s.sockPath, -1, 1000)
 	os.Chmod(s.sockPath, 0660)
 
 	log.Printf("scheduler: socket server listening on %s", s.sockPath)

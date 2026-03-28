@@ -39,7 +39,8 @@ func (s *Store) ServeUnix(sockPath string) error {
 		return fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 
-	// Daemon runs as alfd (uid 1001). Mode 0660 allows alf (gid 1000) subprocess access.
+	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
+	os.Chown(sockPath, -1, 1000)
 	os.Chmod(sockPath, 0660)
 
 	log.Printf("memstore: socket server listening on %s", sockPath)

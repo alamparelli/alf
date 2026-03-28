@@ -91,7 +91,8 @@ func ListenAndServeTools(sockPath string, handler http.Handler) (net.Listener, e
 		return nil, err
 	}
 
-	// Mode 0660: daemon (owner) + alf group (subprocess) can connect.
+	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
+	os.Chown(sockPath, -1, 1000)
 	os.Chmod(sockPath, 0660)
 
 	proxy := &ToolsProxy{Handler: handler}

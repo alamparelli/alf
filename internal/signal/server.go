@@ -49,7 +49,8 @@ func (s *Server) ListenUnix(sockPath string) (net.Listener, error) {
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 
-	// Daemon runs as alfd (uid 1001). Mode 0660 allows alf (gid 1000) subprocess access.
+	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
+	os.Chown(sockPath, -1, 1000)
 	os.Chmod(sockPath, 0660)
 
 	return ln, nil

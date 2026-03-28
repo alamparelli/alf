@@ -88,6 +88,9 @@ chown -R alfd:alf /opt/alf/config.d      # daemon owns config, subprocess reads 
 chmod 750 /opt/alf/config.d
 chown -R alfd:alf /opt/alf/vault-data    # daemon-only (mode 700), -R for files inside
 chmod 700 /opt/alf/vault-data
+# tools.d/ owned by daemon: LLM gets r-x via group, no write (anti-shadow CWE-94).
+chown alfd:alf /home/alf/data/tools.d
+chmod 755 /home/alf/data/tools.d
 chown alf:alf /etc/resolv.conf 2>/dev/null || true
 
 # Allow subprocess (alf) to install packages (pip, npm).

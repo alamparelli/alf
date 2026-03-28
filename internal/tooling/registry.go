@@ -56,10 +56,9 @@ func (r *Registry) scanFiles(initial bool) {
 		r.schemas = nativeSchemas
 	}
 
-	dirs := []string{
-		filepath.Join(r.dataDir, "tools.d"),
-		filepath.Join(r.dataDir, "tools"),
-	}
+	systemDir := filepath.Join(r.dataDir, "tools.d")
+	userDir := filepath.Join(r.dataDir, "tools")
+	dirs := []string{systemDir, userDir}
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -82,6 +81,13 @@ func (r *Registry) scanFiles(initial bool) {
 			}
 			if schema.Name == "" {
 				schema.Name = strings.TrimSuffix(e.Name(), ".json")
+			}
+			// Prevent user tools from shadowing system tool schemas.
+			if dir == userDir {
+				if _, exists := r.schemas[schema.Name]; exists {
+					log.Printf("tooling: BLOCKED schema shadow: tools/%s (system tool protected)", e.Name())
+					continue
+				}
 			}
 			r.schemas[schema.Name] = schema
 		}

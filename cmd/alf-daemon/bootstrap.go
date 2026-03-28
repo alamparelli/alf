@@ -70,7 +70,8 @@ func linkSystemTools(toolsDir, srcDir string) {
 		}
 	}
 
-	// Lock down: tools.d is system-managed, read+execute only.
+	// Lock down: tools.d is system-managed.
+	// Ownership set by entrypoint (root) — daemon cannot chown.
 	os.Chmod(toolsDir, 0o755)
 }
 

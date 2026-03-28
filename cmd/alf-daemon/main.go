@@ -41,6 +41,7 @@ import (
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/updater"
 	"github.com/alamparelli/alf/internal/voice"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var version = "dev"
@@ -125,18 +126,16 @@ func main() {
 	// Ensure log directory exists before setting up file logging.
 	os.MkdirAll(filepath.Join(dataDir, "logs"), 0o755)
 
-	// Tee log output to both stdout and a file so CC and Claude can read logs.
-	logPath := filepath.Join(dataDir, "logs", "daemon.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err == nil {
-		log.SetOutput(io.MultiWriter(os.Stderr, logFile))
-		defer logFile.Close()
-		// Rotate: truncate if over 2MB.
-		if info, err := logFile.Stat(); err == nil && info.Size() > 2<<20 {
-			logFile.Truncate(0)
-			logFile.Seek(0, 0)
-		}
+	// Tee log output to both stdout and a rotating file.
+	logWriter := &lumberjack.Logger{
+		Filename:   filepath.Join(dataDir, "logs", "daemon.log"),
+		MaxSize:    2,    // MB
+		MaxBackups: 3,
+		MaxAge:     30,   // days
+		Compress:   true,
 	}
+	log.SetOutput(io.MultiWriter(os.Stderr, logWriter))
+	defer logWriter.Close()
 
 	log.Printf("alf-daemon %s starting...", version)
 

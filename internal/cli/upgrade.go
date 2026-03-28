@@ -178,12 +178,13 @@ func fixVolumePermissions(dir string) {
 		}
 	}
 
-	// Everything owned by alf (1000:1000).
+	// Workspace + caches owned by alf (1000:1000).
 	chown("data", "1000:1000")
-	chown("config.d", "1000:1000")
 	chown("skills.d", "1000:1000")
 	chown("cache", "1000:1000")
 	chown("local", "1000:1000")
+	// config.d owned by daemon (1001:1000) — entrypoint enforces final ownership.
+	chown("config.d", "1001:1000")
 
 	// Secrets: readable by owner only. Docker Compose (non-Swarm) bind-mounts
 	// secrets preserving host permissions; container runs as same uid.

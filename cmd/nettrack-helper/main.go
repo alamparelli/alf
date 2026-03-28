@@ -87,8 +87,9 @@ func runControlSocket(ctx context.Context) {
 		log.Printf("[nettrack] control socket: %v", err)
 		return
 	}
-	// Only the daemon (uid 1000) should connect.
-	os.Chmod(ctrlSockPath, 0o600)
+	// Only the daemon (alfd, uid 1001) should connect.
+	os.Chown(ctrlSockPath, 0, 1001) // root:alfd
+	os.Chmod(ctrlSockPath, 0o660)
 
 	go func() {
 		<-ctx.Done()
@@ -131,7 +132,8 @@ func main() {
 	}
 	defer ln.Close()
 
-	// Allow alf group (gid 1000) to connect. Daemon (alfd) reads events.
+	// Allow daemon (alfd, gid 1001) to read events. LLM (alf) excluded.
+	os.Chown(sockPath, 0, 1001) // root:alfd
 	os.Chmod(sockPath, 0o660)
 
 	log.Printf("listening on %s", sockPath)

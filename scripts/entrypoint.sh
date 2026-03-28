@@ -86,7 +86,7 @@ chown -R alf:alf /home/alf/data          # workspace (both users via group)
 chmod -R g+ws /home/alf/data
 chown -R alfd:alf /opt/alf/config.d      # daemon owns config, subprocess reads via group
 chmod 750 /opt/alf/config.d
-chown -R alfd:alf /opt/alf/vault-data    # daemon-only (mode 700), -R for files inside
+chown -R alfd:alfd /opt/alf/vault-data   # daemon-only: group alfd, LLM cannot read
 chmod 700 /opt/alf/vault-data
 # tools.d/ owned by daemon: LLM gets r-x via group, no write (anti-shadow CWE-94).
 chown alfd:alf /home/alf/data/tools.d
@@ -111,8 +111,8 @@ chmod -R g+rX /home/alf/.claude 2>/dev/null || true
 if [ -d /run/secrets ]; then
     mkdir -p /run/alf-secrets
     cp /run/secrets/* /run/alf-secrets/ 2>/dev/null || true
-    chown -R alfd:alf /run/alf-secrets
-    chmod 0440 /run/alf-secrets/*
+    chown -R alfd:alfd /run/alf-secrets
+    chmod 0400 /run/alf-secrets/*
     # Re-point *_FILE env vars to the copied secrets.
     for f in /run/alf-secrets/*; do
         name=$(basename "$f")
@@ -128,7 +128,7 @@ if [ -d /run/secrets ]; then
             pwfile="/opt/alf/vault-data/.master-password"
             if [ ! -f "$pwfile" ]; then
                 echo "$pw" > "$pwfile"
-                chown alfd:alf "$pwfile"
+                chown alfd:alfd "$pwfile"
                 chmod 0400 "$pwfile"
                 echo "entrypoint: migrated vault master password to vault-data"
             fi
@@ -143,7 +143,7 @@ if [ -d /run/secrets ]; then
         if [ -n "$tok" ]; then
             tokfile="/opt/alf/vault-data/.cc_auth_token"
             echo "$tok" > "$tokfile"
-            chown alfd:alf "$tokfile"
+            chown alfd:alfd "$tokfile"
             chmod 0400 "$tokfile"
         fi
     fi
@@ -190,12 +190,12 @@ if [ -x /opt/alf/bin/nettrack-helper ]; then
     echo "entrypoint: nettrack-helper started (pid=$!)"
 fi
 
-# Phase 3: Drop to alfd (uid 1001) and start daemon.
+# Phase 3: Drop to alfd (uid 1001, gid 1001) and start daemon.
 # Keep CAP_SETUID+CAP_SETGID so the daemon can spawn subprocesses as alf (uid 1000).
-# All other capabilities are stripped. regid=1000 keeps the alf group for shared access.
+# --init-groups loads supplementary groups from /etc/group (alfd is also in group alf).
 # GOMEMLIMIT caps Go heap and makes GC aggressive near the limit.
 export GOMEMLIMIT=512MiB
-exec setpriv --reuid=1001 --regid=1000 --init-groups \
+exec setpriv --reuid=1001 --regid=1001 --init-groups \
     --inh-caps=-all,+setuid,+setgid \
     --ambient-caps=+setuid,+setgid \
     /opt/alf/alf-daemon "$@"

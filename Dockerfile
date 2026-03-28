@@ -145,10 +145,12 @@ RUN mkdir -p /opt/alf/tools.d \
 COPY tool-schemas/*.json /opt/alf/tools.d/
 
 # Create alf user (uid 1000, LLM subprocess) and alfd (uid 1001, daemon).
-# Both share group alf (gid 1000) for data access. Daemon owns secrets and vault-data.
+# Separate primary groups: alf(1000) for subprocess, alfd(1001) for daemon.
+# alfd has supplementary group alf for shared workspace access.
 RUN groupadd --gid 1000 alf \
+    && groupadd --gid 1001 alfd \
     && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf \
-    && useradd --uid 1001 --gid alf --shell /bin/bash --no-create-home alfd
+    && useradd --uid 1001 --gid alfd -G alf --shell /bin/bash --no-create-home alfd
 
 # Directory structure for volumes.
 RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
@@ -162,7 +164,7 @@ RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
     && chmod -R g+ws /home/alf/data \
     && chown -R alfd:alf /opt/alf/config.d \
     && chmod 750 /opt/alf/config.d \
-    && chown alfd:alf /opt/alf/vault-data \
+    && chown alfd:alfd /opt/alf/vault-data \
     && chmod 700 /opt/alf/vault-data \
     && chmod -R 755 /opt/alf/tools.d \
     && chmod -R 755 /opt/alf/bin

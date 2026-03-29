@@ -59,6 +59,12 @@ mount -t tmpfs -o size=0,ro tmpfs /opt/alf/config.d 2>/dev/null || true
 mount -t tmpfs -o size=0,ro tmpfs /home/alf/.claude 2>/dev/null || true
 mount -t tmpfs -o size=0,ro tmpfs /home/alf/data/context 2>/dev/null || true
 
+# Resource limits
+ulimit -v 131072 2>/dev/null || true  # 128MB virtual memory
+ulimit -u 50 2>/dev/null || true      # 50 processes
+ulimit -f 102400 2>/dev/null || true  # 100MB max file size
+ulimit -t 60 2>/dev/null || true      # 60s CPU time
+
 # SEC-001: Drop all capabilities before executing user command.
 # This prevents the child from using CAP_SYS_ADMIN to undo mount masking.
 exec capsh --drop=all -- -c %s
@@ -70,14 +76,6 @@ exec capsh --drop=all -- -c %s
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: flags,
 		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
-	}
-
-	// Resource limits
-	cmd.SysProcAttr.Rlimit = []syscall.Rlimit{
-		{Type: syscall.RLIMIT_AS, Cur: 128 << 20, Max: 128 << 20},    // 128MB virtual memory (50 procs * 128MB < 2GB container limit)
-		{Type: syscall.RLIMIT_NPROC, Cur: 50, Max: 50},               // 50 processes max
-		{Type: syscall.RLIMIT_FSIZE, Cur: 100 << 20, Max: 100 << 20}, // 100MB max file size
-		{Type: syscall.RLIMIT_CPU, Cur: 60, Max: 60},                 // 60s CPU time
 	}
 }
 

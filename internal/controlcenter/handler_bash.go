@@ -58,11 +58,12 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// If Referer indicates an app, enforce bash permission — regardless of app_slug in body.
 	// Non-app callers (LLM, terminal, tools-socket) have no /apps/ Referer.
 	appSlug := extractAppSlugFromReferer(r)
+	// SEC-003: System app bypass ONLY from verified Referer or tools socket.
+	// The body-provided app_slug is never trusted for privilege escalation.
+	isSystemApp := appSlug != "" && systemApps[appSlug]
 	if appSlug == "" {
-		appSlug = req.AppSlug // fallback to body for non-browser callers
+		appSlug = req.AppSlug // fallback to body for non-browser callers (no privilege gain)
 	}
-	// System apps (e.g. developer) bypass permission checks and sandboxing entirely.
-	isSystemApp := systemApps[appSlug]
 	if appSlug != "" && !isSystemApp && h.Perms != nil && !h.Perms.HasPermission(appSlug, "bash") {
 		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash"})
 		return

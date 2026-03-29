@@ -125,8 +125,11 @@ func (h *AppHandler) proxyAPI(w http.ResponseWriter, r *http.Request, slug, apiP
 			req.URL.Path = apiPath
 			req.URL.RawQuery = r.URL.RawQuery
 			req.Host = target.Host
-			// Don't forward auth cookies to app servers.
+			// SEC-004: Strip sensitive headers — app servers are untrusted.
 			req.Header.Del("Cookie")
+			req.Header.Del("Authorization")
+			req.Header.Del("X-Tools-Socket")
+			req.Header.Del("X-Requested-With")
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			http.Error(w, `{"error":"app server unreachable"}`, http.StatusBadGateway)

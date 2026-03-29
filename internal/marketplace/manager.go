@@ -52,13 +52,15 @@ type Manager struct {
 	mu          sync.Mutex
 	states      map[string]AppState
 	perms       map[string][]string // slug → declared permissions (nil = all allowed)
+	trusted     map[string]bool     // slug → true if installed from registry
 	onChange    func()
 	supervisor  AppSupervisor
 	http       *http.Client
 }
 
 type stateFile struct {
-	States map[string]AppState `json:"states"`
+	States  map[string]AppState `json:"states"`
+	Trusted map[string]bool     `json:"trusted,omitempty"` // slugs installed from registry
 }
 
 func NewManager(dataDir string) *Manager {
@@ -67,6 +69,7 @@ func NewManager(dataDir string) *Manager {
 		registryURL: os.Getenv("ALF_MARKETPLACE_URL"),
 		states:      make(map[string]AppState),
 		perms:       make(map[string][]string),
+		trusted:     make(map[string]bool),
 		http:        &http.Client{Timeout: 30 * time.Second},
 	}
 	m.loadState()
@@ -148,6 +151,9 @@ func (m *Manager) List() []AppInfo {
 			continue // local app — not marketplace-managed
 		}
 
+		// Set trust from manager state (not manifest — SEC-001)
+		manifest.Trusted = m.trusted[slug]
+
 		apps = append(apps, AppInfo{
 			Manifest: *manifest,
 			State:    state,
@@ -210,16 +216,22 @@ func (m *Manager) Enable(slug string) error {
 
 	m.states[slug] = StateEnabled
 
-	// Cache declared permissions (nil slice = field absent = all allowed).
-	// Untrusted apps have permissions capped to the safe set.
+	// Cache declared permissions.
+	// SEC-002: Untrusted apps with nil permissions get safe defaults, not "all allowed".
+	isTrusted := m.trusted[slug]
 	perms := manifest.Permissions
-	if !manifest.Trusted && perms != nil {
-		perms = CapPermissionsForUntrusted(perms)
+	if !isTrusted {
+		if perms == nil {
+			// Untrusted app with no permissions field → safe defaults only
+			perms = []string{"storage", "events", "clipboard"}
+		} else {
+			perms = CapPermissionsForUntrusted(perms)
+		}
 	}
 	if perms != nil {
 		m.perms[slug] = perms
 	} else {
-		delete(m.perms, slug) // no restrictions
+		delete(m.perms, slug) // trusted app, no restrictions
 	}
 
 	if err := m.saveState(); err != nil {
@@ -345,9 +357,14 @@ func (m *Manager) RestoreEnabled() error {
 		}
 
 		// Restore permission cache (cap for untrusted apps)
+		isTrusted := m.trusted[slug]
 		perms := manifest.Permissions
-		if !manifest.Trusted && perms != nil {
-			perms = CapPermissionsForUntrusted(perms)
+		if !isTrusted {
+			if perms == nil {
+				perms = []string{"storage", "events", "clipboard"}
+			} else {
+				perms = CapPermissionsForUntrusted(perms)
+			}
 		}
 		if perms != nil {
 			m.perms[slug] = perms
@@ -497,6 +514,9 @@ func (m *Manager) loadState() {
 	if sf.States != nil {
 		m.states = sf.States
 	}
+	if sf.Trusted != nil {
+		m.trusted = sf.Trusted
+	}
 }
 
 func (m *Manager) saveState() error {
@@ -505,7 +525,7 @@ func (m *Manager) saveState() error {
 		return fmt.Errorf("create apps dir: %w", err)
 	}
 
-	sf := stateFile{States: m.states}
+	sf := stateFile{States: m.states, Trusted: m.trusted}
 	data, err := json.MarshalIndent(sf, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
@@ -569,8 +589,12 @@ func (m *Manager) Install(slug string) error {
 		}
 	}
 
+	// SEC-004: Lock app files immediately after download to prevent TOCTOU tampering.
+	m.lockAppFiles(slug)
+
 	m.mu.Lock()
 	m.states[slug] = StateInstalled
+	m.trusted[slug] = true // SEC-001: trust determined by install source, not manifest
 	m.saveState()
 	m.mu.Unlock()
 

@@ -1,6 +1,9 @@
 package marketplace
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestValidatePermissions_Valid(t *testing.T) {
 	err := ValidatePermissions([]string{"storage", "bash", "upload", "clipboard", "events"})
@@ -146,13 +149,47 @@ func TestCapPermissionsForUntrusted(t *testing.T) {
 func TestManager_HasPermission_UntrustedCapped(t *testing.T) {
 	// Simulate an untrusted app that declared bash+storage but got capped
 	m := &Manager{
-		states: map[string]AppState{"untrusted-app": StateEnabled},
-		perms:  map[string][]string{"untrusted-app": CapPermissionsForUntrusted([]string{"storage", "bash"})},
+		states:  map[string]AppState{"untrusted-app": StateEnabled},
+		perms:   map[string][]string{"untrusted-app": CapPermissionsForUntrusted([]string{"storage", "bash"})},
+		trusted: map[string]bool{},
 	}
 	if !m.HasPermission("untrusted-app", "storage") {
 		t.Error("storage should be allowed for untrusted app")
 	}
 	if m.HasPermission("untrusted-app", "bash") {
 		t.Error("bash should be denied for untrusted app (capped)")
+	}
+}
+
+func TestManager_HasPermission_UntrustedNilPerms(t *testing.T) {
+	// SEC-002: Untrusted app with nil permissions must get safe defaults, not all-allow
+	m := &Manager{
+		states:  map[string]AppState{"evil-app": StateEnabled},
+		perms:   map[string][]string{"evil-app": {"storage", "events", "clipboard"}}, // what Enable() would set
+		trusted: map[string]bool{}, // not trusted
+	}
+	if m.HasPermission("evil-app", "bash") {
+		t.Error("bash should be denied for untrusted app with nil permissions")
+	}
+	if m.HasPermission("evil-app", "upload") {
+		t.Error("upload should be denied for untrusted app with nil permissions")
+	}
+	if !m.HasPermission("evil-app", "storage") {
+		t.Error("storage should be allowed for untrusted app")
+	}
+}
+
+func TestLoadManifest_StripsTrusted(t *testing.T) {
+	// SEC-001: Trusted field must be stripped from manifest on load
+	dir := t.TempDir()
+	path := dir + "/manifest.json"
+	os.WriteFile(path, []byte(`{"name":"evil","slug":"evil","trusted":true}`), 0o644)
+
+	m, err := LoadManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Trusted {
+		t.Error("LoadManifest should strip Trusted field from file")
 	}
 }

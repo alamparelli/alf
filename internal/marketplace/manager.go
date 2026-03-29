@@ -119,6 +119,14 @@ func (m *Manager) IsTracked(slug string) bool {
 	return tracked
 }
 
+// MarkTrusted marks a slug as trusted (e.g. bundled/default apps).
+// Trusted apps get their full declared permissions without capping.
+func (m *Manager) MarkTrusted(slug string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.trusted[slug] = true
+}
+
 // GetPermissions returns the declared permissions for an app.
 // Returns nil if the app has no restrictions (all allowed).
 func (m *Manager) GetPermissions(slug string) []string {

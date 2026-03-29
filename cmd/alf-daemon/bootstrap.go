@@ -588,6 +588,23 @@ func isProtectedApp(slug string) bool {
 	return protectedApps[slug]
 }
 
+// bundledAppSlugs returns slugs of all apps bundled in the daemon image.
+// These are trusted platform components and get full permissions.
+func bundledAppSlugs() []string {
+	const defaultsDir = "/opt/alf/defaults/apps"
+	entries, err := os.ReadDir(defaultsDir)
+	if err != nil {
+		return nil
+	}
+	var slugs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			slugs = append(slugs, e.Name())
+		}
+	}
+	return slugs
+}
+
 // seedAppFiles copies files from src to dest, creating directories as needed.
 // Skips the data/ subdirectory to preserve user data.
 // Preserves execute permission on binaries.

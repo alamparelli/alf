@@ -62,7 +62,7 @@ ulimit -f 102400 2>/dev/null || true
 ulimit -t 60 2>/dev/null || true
 
 # Drop all capabilities then execute user command
-exec capsh --drop=all -- -c %s
+exec /usr/sbin/capsh --drop=all -- -c %s
 `, shellQuote(cfg.AppSlug), shellQuote(originalCommand))
 
 	cmd.Path = "/bin/bash"

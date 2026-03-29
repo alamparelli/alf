@@ -60,13 +60,17 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Internal/default apps (not tracked by marketplace) bypass sandboxing.
+	// They are trusted platform components (e.g. "developer" app).
+	sandboxApp := appSlug != "" && (h.Perms == nil || h.Perms.IsTracked(appSlug))
+
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", req.Command)
 
-	if appSlug != "" {
-		// App-initiated bash: full namespace sandbox.
+	if sandboxApp {
+		// Marketplace app-initiated bash: full namespace sandbox.
 		appDataDir := filepath.Join("/home/alf/data/apps", appSlug, "data")
 		hasNetwork := h.Perms != nil && h.Perms.HasPermission(appSlug, "network")
 		tooling.SandboxedCmd(cmd, req.Command, tooling.SandboxConfig{
@@ -76,7 +80,7 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		cmd.Env = tooling.SandboxSafeEnv(appDataDir)
 	} else {
-		// LLM/terminal bash: no sandbox, just uid drop.
+		// LLM/terminal/internal-app bash: no sandbox, just uid drop.
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
 		}

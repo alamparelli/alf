@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -249,6 +250,11 @@ func (m *Manager) spawn() error {
 		m.waitCh = nil
 	}
 
+	// Kill orphaned vault-server processes from previous daemon runs.
+	// Setpgid keeps vault-server alive across daemon restarts, so we must
+	// find and kill any process still holding our listen port.
+	killOrphans()
+
 	bin, err := exec.LookPath("vault-server")
 	if err != nil {
 		return fmt.Errorf("vault-server not found: %w", err)
@@ -358,7 +364,9 @@ func (m *Manager) watchdog(ctx context.Context) {
 		m.mu.Lock()
 		m.kill() // force-kill any lingering process
 		m.mu.Unlock()
-		time.Sleep(500 * time.Millisecond) // let OS release the port (TIME_WAIT)
+
+		// Wait for port to become available (TIME_WAIT can hold it briefly).
+		waitPortFree("127.0.0.1:8390", 5*time.Second)
 
 		m.mu.Lock()
 		err := m.spawn()
@@ -397,6 +405,49 @@ func (m *Manager) watchdog(ctx context.Context) {
 			log.Printf("[vault] status after restart: %s", status)
 		}
 	}
+}
+
+// killOrphans finds and kills any vault-server processes not managed by this Manager.
+// This handles the case where a previous daemon died without cleaning up its vault-server
+// child (which runs in its own process group via Setpgid).
+func killOrphans() {
+	out, err := exec.Command("pgrep", "-f", "vault-server.*-listen").Output()
+	if err != nil || len(out) == 0 {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		pid := 0
+		if _, err := fmt.Sscanf(line, "%d", &pid); err != nil || pid <= 1 {
+			continue
+		}
+		p, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		log.Printf("[vault] killing orphaned vault-server (pid=%d)", pid)
+		_ = p.Signal(syscall.SIGTERM)
+		// Give it a moment to shut down gracefully.
+		time.Sleep(500 * time.Millisecond)
+		_ = p.Signal(syscall.SIGKILL)
+	}
+}
+
+// waitPortFree polls until the given TCP address is not in use.
+// Returns immediately if the port is already free.
+func waitPortFree(addr string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			ln.Close()
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	log.Printf("[vault] warning: port %s still in use after %v", addr, timeout)
 }
 
 // logWriter routes subprocess output through Go's log package line-by-line.

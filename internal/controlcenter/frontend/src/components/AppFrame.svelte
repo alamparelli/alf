@@ -444,6 +444,12 @@
     }
   }
 
+  /* Revert all inherited/global styles on buttons inside sheet HTML
+     so that inline styles from app-provided HTML take effect. */
+  .sdk-sheet-content :global(button) {
+    all: revert;
+  }
+
   .sdk-dialog {
     display: flex;
     flex-direction: column;

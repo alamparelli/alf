@@ -109,6 +109,16 @@ func (m *Manager) HasPermission(slug, perm string) bool {
 	return false
 }
 
+// IsTracked returns true if the app is managed by the marketplace.
+// Internal/default apps (like "developer") are not tracked and should
+// bypass sandboxing since they are trusted platform components.
+func (m *Manager) IsTracked(slug string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, tracked := m.perms[slug]
+	return tracked
+}
+
 // GetPermissions returns the declared permissions for an app.
 // Returns nil if the app has no restrictions (all allowed).
 func (m *Manager) GetPermissions(slug string) []string {

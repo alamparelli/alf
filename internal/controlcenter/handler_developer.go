@@ -1,9 +1,11 @@
 package controlcenter
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
@@ -352,7 +354,19 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Build multipart form and proxy to marketplace
+	// Build multipart form for the marketplace publish API.
+	// Uses Go net/http instead of shelling out to curl — avoids leaking
+	// the vault token in /proc/PID/cmdline (SEC-002).
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	// manifest field
+	if err := mw.WriteField("manifest", string(manifestJSON)); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "multipart: " + err.Error()})
+		return
+	}
+
+	// app_bundle field (tarball)
 	tarFile, err := os.Open(tarball)
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "open tarball: " + err.Error()})
@@ -360,44 +374,51 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	}
 	defer tarFile.Close()
 
-	// Use bash + curl for the multipart upload (vault proxy client doesn't support multipart)
-	curlArgs := []string{
-		"-s", "-w", "\n%{http_code}", "-X", "POST",
-		"-H", "Authorization: Bearer " + h.VaultManager.ProxyToken(),
-		"-F", "manifest=<" + filepath.Join(appDir, "manifest.json"),
-		"-F", "app_bundle=@" + tarball + ";type=application/gzip",
-	}
-	if req.Changelog != "" {
-		curlArgs = append(curlArgs, "-F", "whats_new="+req.Changelog)
-	}
-	if req.Skill != "" && validName.MatchString(req.Skill) {
-		skillPath := filepath.Join(h.DataDir, "skills", req.Skill, "SKILL.md")
-		if _, err := os.Stat(skillPath); err == nil {
-			curlArgs = append(curlArgs, "-F", "skill=@"+skillPath)
-		}
-	}
-	curlArgs = append(curlArgs, h.VaultManager.Addr()+"/proxy/marketplace/api/apps/"+req.Slug+"/publish")
-
-	ctx, cancel := time.AfterFunc(60*time.Second, func() {}).Stop, func() {}
-	_ = ctx
-	_ = cancel
-
-	curlCmd := exec.Command("curl", curlArgs...)
-	out, err := curlCmd.CombinedOutput()
+	bundlePart, err := mw.CreateFormFile("app_bundle", filepath.Base(tarball))
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "publish failed: " + err.Error()})
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "multipart: " + err.Error()})
+		return
+	}
+	if _, err := io.Copy(bundlePart, tarFile); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy tarball: " + err.Error()})
 		return
 	}
 
-	raw := strings.TrimSpace(string(out))
-	lines := strings.Split(raw, "\n")
-	httpCode := lines[len(lines)-1]
-	body := strings.Join(lines[:len(lines)-1], "\n")
+	// Optional fields
+	if req.Changelog != "" {
+		mw.WriteField("whats_new", req.Changelog)
+	}
+	if req.Skill != "" && validName.MatchString(req.Skill) {
+		skillPath := filepath.Join(h.DataDir, "skills", req.Skill, "SKILL.md")
+		if skillData, err := os.ReadFile(skillPath); err == nil {
+			skillPart, _ := mw.CreateFormFile("skill", "SKILL.md")
+			skillPart.Write(skillData)
+		}
+	}
+	mw.Close()
 
-	if strings.HasPrefix(httpCode, "20") {
-		respondJSON(w, http.StatusOK, map[string]any{"success": true, "message": body})
+	publishURL := h.VaultManager.Addr() + "/proxy/marketplace/api/apps/" + req.Slug + "/publish"
+	httpReq, err := http.NewRequestWithContext(r.Context(), "POST", publishURL, &buf)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "build request: " + err.Error()})
+		return
+	}
+	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
+	httpReq.Header.Set("Authorization", "Bearer "+h.VaultManager.ProxyToken())
+
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "publish failed: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		respondJSON(w, http.StatusOK, map[string]any{"success": true, "message": string(body)})
 	} else {
-		respondJSON(w, http.StatusBadGateway, map[string]any{"error": "HTTP " + httpCode, "detail": body})
+		respondJSON(w, http.StatusBadGateway, map[string]any{"error": fmt.Sprintf("HTTP %d", resp.StatusCode), "detail": string(body)})
 	}
 }
 
@@ -406,7 +427,7 @@ func (h *DeveloperHandler) handleUnpublish(w http.ResponseWriter, r *http.Reques
 	var req struct {
 		Slug string `json:"slug"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Slug == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Slug == "" || !validName.MatchString(req.Slug) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}

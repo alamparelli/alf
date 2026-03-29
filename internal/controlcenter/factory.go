@@ -370,6 +370,12 @@ func HandlerFactory(deps Deps) Handlers {
 		mux.Handle("/api/llm/invoke", &LLMInvokeHandler{ToolRegistry: deps.ToolRegistry, TierStore: deps.TierStore})
 	}
 
+	// Developer tools (publish to marketplace, validate, etc.)
+	mux.Handle("/api/developer/", &DeveloperHandler{
+		DataDir:      deps.DataDir,
+		VaultManager: deps.VaultManager,
+	})
+
 	// Bash command execution.
 	mux.Handle("/api/bash", &BashHandler{Perms: permChecker})
 

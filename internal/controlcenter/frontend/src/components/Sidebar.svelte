@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { nav, SYSTEM_TABS } from '../stores/nav.svelte'
+  import { nav, SYSTEM_TABS, DEVELOPER_TAB } from '../stores/nav.svelte'
   import { apps } from '../stores/apps.svelte'
   import { spotlightSettings } from '../stores/spotlight.svelte'
   import {
     MessageCircle, Home, Terminal, Layers, CalendarClock,
     Users, SlidersHorizontal, Shield, Lock, Store,
-    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package, Zap, FolderOpen, Mail, Search
+    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package, Zap, FolderOpen, Mail, Search, Code2
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
 
@@ -34,6 +34,7 @@
     'book-open': BookOpen,
     'folder-open': FolderOpen,
     'mail': Mail,
+    'code-2': Code2,
   }
 </script>
 
@@ -85,6 +86,28 @@
             {/if}
           </div>
         {/each}
+        {#if nav.developerMode}
+          {@const isFav = nav.favorites.includes(DEVELOPER_TAB.view)}
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div
+            class="nav-item"
+            class:active={nav.currentView === DEVELOPER_TAB.view}
+            class:nav-fav={isFav}
+            onclick={() => nav.navigateTo(DEVELOPER_TAB.view)}
+          >
+            {#if ICON_MAP[DEVELOPER_TAB.icon]}
+              <svelte:component this={ICON_MAP[DEVELOPER_TAB.icon]} size={16} />
+            {/if}
+            <span>{DEVELOPER_TAB.label}</span>
+            <button
+              class="nav-fav-btn"
+              onclick={(e: MouseEvent) => { e.stopPropagation(); nav.toggleFavorite(DEVELOPER_TAB.view) }}
+              title={isFav ? 'Unpin' : 'Pin'}
+            >
+              <Pin size={12} />
+            </button>
+          </div>
+        {/if}
       </div>
     </div>
 

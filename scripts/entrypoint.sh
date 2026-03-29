@@ -196,6 +196,6 @@ fi
 # GOMEMLIMIT caps Go heap and makes GC aggressive near the limit.
 export GOMEMLIMIT=512MiB
 exec setpriv --reuid=1001 --regid=1001 --init-groups \
-    --inh-caps=-all,+setuid,+setgid \
-    --ambient-caps=+setuid,+setgid \
+    --inh-caps=-all,+setuid,+setgid,+sys_admin \
+    --ambient-caps=+setuid,+setgid,+sys_admin \
     /opt/alf/alf-daemon "$@"

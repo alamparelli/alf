@@ -204,6 +204,7 @@ services:
       - CHOWN
       - SETUID
       - SETGID
+      - SYS_ADMIN
       - DAC_OVERRIDE
       - FOWNER
       - NET_ADMIN

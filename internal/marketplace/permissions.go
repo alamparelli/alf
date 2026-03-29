@@ -9,6 +9,7 @@ var ValidPermissions = map[string]bool{
 	"upload":    true, // upload files via /api/apps/{slug}/upload
 	"clipboard": true, // read/write clipboard (via parent postMessage)
 	"events":    true, // emit inter-app events (via parent postMessage)
+	"network":   true, // network access in sandboxed bash (skip CLONE_NEWNET)
 }
 
 // PermissionChecker determines whether an app has a given permission.

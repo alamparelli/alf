@@ -177,9 +177,19 @@ func HandlerFactory(deps Deps) http.Handler {
 	// Apps: directory-based apps with index.html + assets.
 	if deps.AppStore != nil {
 		appStorage := &AppStorageHandler{DataDir: deps.DataDir}
+		appUpload := &AppUploadHandler{DataDir: deps.DataDir}
+		appErrors := &AppErrorHandler{DataDir: deps.DataDir}
 		mux.Handle("/api/apps/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(r.URL.Path, "/storage") {
 				appStorage.ServeHTTP(w, r)
+				return
+			}
+			if strings.Contains(r.URL.Path, "/upload") {
+				appUpload.ServeHTTP(w, r)
+				return
+			}
+			if strings.Contains(r.URL.Path, "/errors") {
+				appErrors.ServeHTTP(w, r)
 				return
 			}
 			(&AppListHandler{Store: deps.AppStore}).ServeHTTP(w, r)

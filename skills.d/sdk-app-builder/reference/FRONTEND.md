@@ -127,10 +127,15 @@ AlfSDK.storage.clear()                 // Clear all
 AlfSDK.storage.keys()                  // List all keys → Promise<string[]>
 AlfSDK.storage.entries()               // List all entries → Promise<{key,value}[]>
 
+// Upload
+AlfSDK.upload(file)                    // Upload File to data/uploads/ → Promise<{path,name,size}>
+
 // Events (auto-namespaced by slug)
 AlfSDK.events.on(event, handler)       // Listen (bare name = own app, 'slug:event' = cross-app)
 AlfSDK.events.off(event, handler)      // Unsubscribe
 AlfSDK.events.emit(event, data)        // Emit (auto-prefixed with slug)
+
+// Error reporting (automatic — captured on init, logged to /api/apps/{slug}/errors)
 ```
 
 ---

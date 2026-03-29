@@ -16,6 +16,10 @@ var ValidPermissions = map[string]bool{
 // Handlers use this interface to avoid importing the full marketplace package.
 type PermissionChecker interface {
 	HasPermission(slug, perm string) bool
+	// IsTracked returns true if the app is managed by the marketplace
+	// (installed from registry or explicitly enabled). Internal/default apps
+	// are NOT tracked and should bypass sandboxing.
+	IsTracked(slug string) bool
 }
 
 // ValidatePermissions checks that all declared permissions are known.

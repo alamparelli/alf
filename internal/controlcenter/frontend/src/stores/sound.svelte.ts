@@ -3,22 +3,35 @@ import { api } from '../lib/api'
 class SoundNotifier {
   private ctx: AudioContext | null = null
   private buffer: AudioBuffer | null = null
-  private ready: Promise<void> | null = null
+  private unlocked = false
+  private bufferLoaded = false
   enabled = $state(true)
 
   constructor() {
     this.loadSetting()
     if (typeof document !== 'undefined') {
-      // iOS PWA requires AudioContext created during a user gesture.
-      // touchstart is critical — iOS doesn't always fire click on first tap.
+      // Mobile browsers require AudioContext created + resumed during a user gesture.
+      // We keep listening until we successfully unlock — a single failed attempt
+      // (e.g. iOS sometimes refuses the first touchstart) shouldn't stop retrying.
       const unlock = () => {
-        if (!this.ctx) {
-          this.ctx = new AudioContext()
+        try {
+          if (!this.ctx) this.ctx = new AudioContext()
+          if (this.ctx.state === 'suspended') {
+            this.ctx.resume().then(() => {
+              this.unlocked = true
+              this.loadBuffer()
+              removeListeners()
+            }).catch(() => { /* will retry on next gesture */ })
+          } else {
+            this.unlocked = true
+            this.loadBuffer()
+            removeListeners()
+          }
+        } catch {
+          // AudioContext constructor failed — will retry next gesture
         }
-        if (this.ctx.state === 'suspended') {
-          this.ctx.resume()
-        }
-        this.ensureReady()
+      }
+      const removeListeners = () => {
         document.removeEventListener('click', unlock)
         document.removeEventListener('touchstart', unlock)
         document.removeEventListener('keydown', unlock)
@@ -38,35 +51,37 @@ class SoundNotifier {
     }
   }
 
-  private ensureReady(): Promise<void> {
-    if (this.ready) return this.ready
-    this.ready = (async () => {
-      try {
-        if (!this.ctx) this.ctx = new AudioContext()
-        if (this.ctx.state === 'suspended') await this.ctx.resume()
-        const resp = await fetch('/static/notification.wav')
-        if (!resp.ok) {
-          console.warn('[sound] failed to fetch notification.wav:', resp.status)
-          this.ready = null // allow retry
-          return
-        }
-        const data = await resp.arrayBuffer()
-        this.buffer = await this.ctx.decodeAudioData(data)
-      } catch (e) {
-        console.warn('[sound] init failed:', e)
-        this.ready = null // allow retry
+  private async loadBuffer() {
+    if (this.bufferLoaded || !this.ctx) return
+    try {
+      const resp = await fetch('/static/notification.wav')
+      if (!resp.ok) {
+        console.warn('[sound] failed to fetch notification.wav:', resp.status)
+        return
       }
-    })()
-    return this.ready
+      const data = await resp.arrayBuffer()
+      this.buffer = await this.ctx.decodeAudioData(data)
+      this.bufferLoaded = true
+    } catch (e) {
+      console.warn('[sound] buffer load failed:', e)
+    }
   }
 
   async play() {
-    if (!this.enabled) return
-    await this.ensureReady()
-    if (!this.ctx || !this.buffer) return
+    if (!this.enabled || !this.unlocked) return
+    if (!this.ctx) return
+
+    // Ensure context is running (iOS can suspend it when tab is backgrounded)
     if (this.ctx.state === 'suspended') {
       try { await this.ctx.resume() } catch { return }
     }
+
+    // Load buffer if not yet loaded (race: unlock happened but fetch was slow)
+    if (!this.buffer) {
+      await this.loadBuffer()
+      if (!this.buffer) return
+    }
+
     const src = this.ctx.createBufferSource()
     src.buffer = this.buffer
     const gain = this.ctx.createGain()

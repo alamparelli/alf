@@ -13,6 +13,90 @@ Snake is the reference for tick-based games with a d-pad.
 
 ---
 
+## Audio (CRITICAL — use AlfSDK.audio)
+
+**NEVER create your own `AudioContext`.** Mobile browsers (especially iOS Safari in iframes) block audio unless the context is created and resumed during a user gesture. `AlfSDK.audio` handles this automatically.
+
+### Synthesized sounds (oscillator-based)
+
+```js
+// Preload: get the shared AudioContext after unlock
+var audioCtx;
+AlfSDK.audio.onUnlock(function() {
+  audioCtx = AlfSDK.audio.getContext();
+});
+
+function playTone(freq, dur, type, vol) {
+  if (!audioCtx) return;
+  var osc = audioCtx.createOscillator();
+  var g = audioCtx.createGain();
+  osc.type = type || 'square';
+  osc.frequency.value = freq;
+  g.gain.setValueAtTime(vol || 0.3, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  osc.connect(g);
+  g.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + dur);
+}
+
+// Sound effects
+function sfxPop()    { playTone(600, 0.08, 'square', 0.2); }
+function sfxBounce() { playTone(220, 0.04, 'square', 0.1); }
+function sfxShoot()  { playTone(350, 0.06, 'triangle', 0.2); }
+```
+
+### Audio file playback
+
+```js
+var sounds = {};
+AlfSDK.audio.onUnlock(function() {
+  AlfSDK.audio.load('assets/hit.wav').then(function(b) { sounds.hit = b; });
+  AlfSDK.audio.load('assets/bgm.mp3').then(function(b) {
+    sounds.bgm = AlfSDK.audio.play(b, { volume: 0.3, loop: true });
+  });
+});
+
+function sfxHit() { AlfSDK.audio.play(sounds.hit, { volume: 0.8 }); }
+```
+
+### Mute toggle
+
+```js
+var muted = false;
+var masterGain;
+AlfSDK.audio.onUnlock(function() {
+  var ctx = AlfSDK.audio.getContext();
+  masterGain = ctx.createGain();
+  masterGain.connect(ctx.destination);
+  // Route all audio through masterGain instead of ctx.destination
+});
+
+function toggleMute() {
+  muted = !muted;
+  if (masterGain) masterGain.gain.value = muted ? 0 : 1;
+}
+```
+
+### High score persistence (use SDK storage)
+
+```js
+var highScore = 0;
+AlfSDK.storage.get('highScore').then(function(val) {
+  highScore = val || 0;
+});
+
+function updateBest(score) {
+  if (score > highScore) {
+    highScore = score;
+    AlfSDK.storage.set('highScore', score);
+    AlfSDK.toast('New high score: ' + score + '!');
+  }
+}
+```
+
+---
+
 ## Meta viewport (REQUIRED)
 
 ```html
@@ -303,15 +387,19 @@ function hideOverlay() {
 
 ## High score persistence
 
-Use `localStorage`. Key convention: `<slug>_best`.
+Use `AlfSDK.storage` (server-side, survives app updates). Fallback to `localStorage` only if needed.
 
 ```js
-var highscore = parseInt(localStorage.getItem('SLUG_best') || '0', 10);
+var highscore = 0;
+AlfSDK.storage.get('highScore').then(function(val) {
+  highscore = val || 0;
+  document.getElementById('best').textContent = highscore;
+});
 
 function updateBest(s) {
   if (s > highscore) {
     highscore = s;
-    localStorage.setItem('SLUG_best', s);
+    AlfSDK.storage.set('highScore', s);
     document.getElementById('best').textContent = highscore;
   }
 }
@@ -357,6 +445,8 @@ Available palette vars: `--accent`, `--green`, `--red`, `--yellow`, `--mauve`, `
 - [ ] D-pad hidden on desktop via `@media (pointer: coarse)`
 - [ ] Keyboard hint hidden on mobile via `@media (pointer: fine)`
 - [ ] `refreshColors()` called in `resize()` and `onThemeChange`
-- [ ] localStorage key: `<slug>_best`
+- [ ] **Audio via `AlfSDK.audio`** — NEVER create your own AudioContext
+- [ ] High scores via `AlfSDK.storage` (not localStorage)
+- [ ] Game over dialog via `AlfSDK.confirm()` (not window.confirm)
 - [ ] Overlay pattern: title + msg + btn
 - [ ] No compiled binary -- REST server architecture, no CLI tool

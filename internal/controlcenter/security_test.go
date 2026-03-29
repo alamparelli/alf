@@ -306,7 +306,7 @@ func TestTermSafeEnv_ExcludesSecrets(t *testing.T) {
 		os.Unsetenv("OPENROUTER_API_KEY_FILE")
 	}()
 
-	env := termSafeEnv("/home/alf")
+	env := termSafeEnv("/home/alf", "alf")
 
 	envMap := make(map[string]string)
 	for _, e := range env {
@@ -348,7 +348,7 @@ func TestTermSafeEnv_IncludesSafePrefixes(t *testing.T) {
 		os.Unsetenv("LANG")
 	}()
 
-	env := termSafeEnv("/home/alf")
+	env := termSafeEnv("/home/alf", "alf")
 	envMap := make(map[string]string)
 	for _, e := range env {
 		parts := strings.SplitN(e, "=", 2)

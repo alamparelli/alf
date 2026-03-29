@@ -105,8 +105,9 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
 
 ---
 
-## AlfSDK reference
+## AlfSDK v2 reference
 
+### Core
 ```js
 AlfSDK.init({ slug, onThemeChange })  // Init. Call once on load. REQUIRED.
 AlfSDK.tool(action, args)             // Run CLI tool. Returns Promise<string>.
@@ -115,6 +116,85 @@ AlfSDK.bash(cmd)                      // Execute shell command via /api/bash.
 AlfSDK.navigate(view)                 // Navigate parent SPA ('chat', 'settings').
 AlfSDK.toast(msg, type)               // Toast in parent: 'success', 'error', 'info'.
 AlfSDK.getTheme()                     // Returns { palette, dark }.
+```
+
+### Audio (ALWAYS use this — never create your own AudioContext)
+```js
+AlfSDK.audio.load(url)               // Load & cache audio file → Promise<AudioBuffer>
+AlfSDK.audio.play(buffer, opts)      // Play buffer. opts: { volume: 0-1, loop: bool }. Returns source node.
+AlfSDK.audio.playUrl(url, opts)      // Load + play in one call.
+AlfSDK.audio.onUnlock(cb)            // Callback when audio is unlocked (after first user gesture).
+AlfSDK.audio.getContext()            // Get shared AudioContext (for advanced audio).
+AlfSDK.audio.isUnlocked()            // True if audio ready.
+```
+
+### Storage (persistent key/value, server-side)
+```js
+AlfSDK.storage.get()                 // Get all keys → Promise<object>
+AlfSDK.storage.get('key')            // Get single value → Promise<any>
+AlfSDK.storage.set('key', value)     // Set single key
+AlfSDK.storage.set({ k1: v1, k2: v2 }) // Set multiple keys
+AlfSDK.storage.remove('key')         // Delete key
+AlfSDK.storage.clear()               // Clear all app storage
+```
+
+### Dialogs (native CC modals — bottom sheet on mobile)
+```js
+AlfSDK.confirm(msg, opts)            // → Promise<boolean>. opts: { title, confirmText, cancelText }
+AlfSDK.prompt(msg, opts)             // → Promise<string|null>. opts: { title, defaultValue, placeholder, confirmText }
+AlfSDK.sheet(html)                   // Show static HTML in CC bottom sheet / modal
+AlfSDK.sheet(html, actions)          // Interactive sheet — actions map: { name: fn(params) }
+                                     // HTML uses data-action="name" data-foo="bar" on clickable elements
+AlfSDK.updateSheet(html)             // Update open sheet content (keeps action handlers)
+AlfSDK.closeSheet()                  // Close current sheet
+```
+
+### Events (inter-app pub/sub)
+```js
+AlfSDK.events.on(event, handler)     // Subscribe to event from other apps
+AlfSDK.events.off(event, handler)    // Unsubscribe
+AlfSDK.events.emit(event, data)      // Broadcast to all other apps
+```
+
+### Viewport
+```js
+AlfSDK.viewport.isMobile()           // True if width <= 768px
+AlfSDK.viewport.isPWA()              // True if standalone PWA
+AlfSDK.viewport.orientation()        // 'portrait' or 'landscape'
+AlfSDK.viewport.size()               // { width, height }
+AlfSDK.viewport.safeArea()           // { top, bottom, left, right } insets
+AlfSDK.viewport.onChange(cb)         // Callback on resize/rotation: cb({ mobile, orientation, size })
+```
+
+### Haptics
+```js
+AlfSDK.haptics.tap()                 // Light tap (10ms) — button presses
+AlfSDK.haptics.notify()              // Double pulse — notifications
+AlfSDK.haptics.success()             // Rising pattern — success actions
+AlfSDK.haptics.error()               // Heavy buzz — error feedback
+AlfSDK.haptics.vibrate([100,50,200]) // Custom pattern
+AlfSDK.haptics.isAvailable()         // True if device supports vibration
+```
+
+### Clipboard
+```js
+AlfSDK.clipboard.write(text)         // Copy to clipboard → Promise
+AlfSDK.clipboard.read()              // Read from clipboard → Promise<string>
+```
+
+### I18n
+```js
+AlfSDK.i18n.locale()                 // Full locale: 'en-US', 'fr-FR'
+AlfSDK.i18n.lang()                   // Language: 'en', 'fr'
+AlfSDK.i18n.dir()                    // 'ltr' or 'rtl'
+AlfSDK.i18n.languages()              // All preferred languages
+```
+
+### Badge
+```js
+AlfSDK.badge.set(count)              // Set badge on sidebar icon
+AlfSDK.badge.increment()             // Add 1
+AlfSDK.badge.clear()                 // Remove badge
 ```
 
 ---

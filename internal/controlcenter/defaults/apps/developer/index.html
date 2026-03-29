@@ -160,6 +160,14 @@
   function $(id) { return document.getElementById(id); }
   function setStatus(el, msg, type) { el.textContent = msg; el.className = 'status ' + type; }
 
+  // SEC-001: Shell-escape a path for safe interpolation into bash commands.
+  // Only allows /home/alf/data/apps/{alphanumeric-hyphen}... paths.
+  function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
+  function safePath(p) {
+    if (!/^\/home\/alf\/data\/apps\/[a-zA-Z0-9][a-zA-Z0-9_-]*/.test(p)) return null;
+    return sq(p);
+  }
+
   function goVault(e) {
     if (e) e.preventDefault();
     if (window.parent && window.parent.navigateTo) window.parent.navigateTo('vault');
@@ -252,7 +260,9 @@
     $('pubSlug').value = slug;
 
     // Try to read existing app.json for metadata
-    bash("cat " + path + "/app.json 2>/dev/null").then(function(res) {
+    var sp = safePath(path);
+    if (!sp) return;
+    bash("cat " + sp + "/app.json 2>/dev/null").then(function(res) {
       try {
         var meta = JSON.parse(res.output || '{}');
         if (meta.name) $('pubName').value = meta.name;
@@ -264,7 +274,7 @@
     // Try to read existing manifest.json for version/category
     // Wait for tool chips to be ready before selecting them
     Promise.all([
-      bash("cat " + path + "/manifest.json 2>/dev/null"),
+      bash("cat " + sp + "/manifest.json 2>/dev/null"),
       toolsReady || Promise.resolve()
     ]).then(function(results) {
       var res = results[0];
@@ -300,7 +310,7 @@
     });
 
     // Pre-select skill if the app has a bundled skill directory
-    bash("ls -1d " + path + "/skills/*/ 2>/dev/null | head -1").then(function(res) {
+    bash("ls -1d " + sp + "/skills/*/ 2>/dev/null | head -1").then(function(res) {
       var skillDir = (res.output || '').trim();
       if (!skillDir) { $('pubSkill').value = ''; return; }
       var skillName = skillDir.replace(/\/$/, '').split('/').pop();
@@ -406,11 +416,12 @@
 
     // Async checks
     var asyncChecks = [];
+    var sp = safePath(path);
 
     // Binary check
-    if (selectedTools.length > 0 && path && slug) {
+    if (selectedTools.length > 0 && sp && slug) {
       asyncChecks.push(
-        bash('test -x ' + path + '/bin/' + slug + ' && echo ok || echo missing').then(function(res) {
+        bash('test -x ' + sp + '/bin/' + sq(slug) + ' && echo ok || echo missing').then(function(res) {
           if ((res.output || '').trim() !== 'ok') {
             errors.push('Tool binary not found or not executable at bin/' + slug);
           }
@@ -419,9 +430,9 @@
     }
 
     // index.html check
-    if (path) {
+    if (sp) {
       asyncChecks.push(
-        bash('test -f ' + path + '/index.html && echo ok || echo missing').then(function(res) {
+        bash('test -f ' + sp + '/index.html && echo ok || echo missing').then(function(res) {
           if ((res.output || '').trim() !== 'ok') {
             warnings.push('No index.html — app will have no web UI');
           }
@@ -429,20 +440,20 @@
       );
     }
 
-    // Secrets scan
-    if (path) {
+    // Secrets scan (SEC-005: expanded patterns)
+    if (sp) {
       asyncChecks.push(
-        bash('find ' + path + ' -maxdepth 2 \\( -name ".env*" -o -name "credentials*" -o -name "*secret*" -o -name "*.pem" -o -name "*.key" \\) ! -path "*/data/*" 2>/dev/null | head -5').then(function(res) {
+        bash('find ' + sp + ' -maxdepth 3 \\( -name ".env*" -o -name "credentials*" -o -name "*secret*" -o -name "*.pem" -o -name "*.key" -o -name "*.p12" -o -name "*.pfx" -o -name "id_rsa" -o -name "id_ed25519" -o -name ".npmrc" -o -name ".pypirc" -o -name ".htpasswd" \\) ! -path "*/data/*" 2>/dev/null | head -5').then(function(res) {
           var found = (res.output || '').trim();
-          if (found) warnings.push('Potentially sensitive files found:\n' + found);
+          if (found) errors.push('Potentially sensitive files found (remove before publish):\n' + found);
         })
       );
     }
 
     // Permissions validation (read from existing manifest if present)
-    if (path) {
+    if (sp) {
       asyncChecks.push(
-        bash('cat ' + path + '/manifest.json 2>/dev/null').then(function(res) {
+        bash('cat ' + sp + '/manifest.json 2>/dev/null').then(function(res) {
           try {
             var m = JSON.parse(res.output);
             if (m.permissions && Array.isArray(m.permissions)) {
@@ -509,10 +520,23 @@
     if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) { setStatus(statusEl, 'Slug: lowercase alphanumeric + hyphens.', 'error'); return; }
     if (!name) { setStatus(statusEl, 'Name is required.', 'error'); return; }
     if (!path) { setStatus(statusEl, 'Select a source app.', 'error'); return; }
+    var sp = safePath(path);
+    if (!sp) { setStatus(statusEl, 'Invalid app path.', 'error'); return; }
 
     var btn = $('publishBtn');
     btn.disabled = true;
-    setStatus(statusEl, 'Preparing...', 'info');
+
+    // SEC-003: Re-run validation before publish
+    setStatus(statusEl, 'Validating...', 'info');
+    validateBeforePublish().then(function(result) {
+      if (result.errors.length > 0) {
+        setStatus(statusEl, 'Validation failed:\n' + result.errors.join('\n'), 'error');
+        btn.disabled = false;
+        return Promise.reject('validation failed');
+      }
+      setStatus(statusEl, 'Preparing...', 'info');
+      return Promise.resolve();
+    }).then(function() {
 
     // Generate manifest
     var manifest = {
@@ -523,7 +547,7 @@
 
     // Add selected tools to manifest
     var toolSchemaPromises = selectedTools.map(function(t) {
-      return bash("cat /home/alf/data/tools/" + t + ".json 2>/dev/null").then(function(res) {
+      return bash("cat /home/alf/data/tools/" + sq(t) + ".json 2>/dev/null").then(function(res) {
         try { return JSON.parse(res.output); } catch(e) { return null; }
       });
     });
@@ -535,13 +559,13 @@
 
       // Write manifest to source path
       var manifestJson = JSON.stringify(manifest, null, 2);
-      return bash("mkdir -p " + path + " && cat > " + path + "/manifest.json << 'MFEOF'\n" + manifestJson + "\nMFEOF");
+      return bash("mkdir -p " + sp + " && cat > " + sp + "/manifest.json << 'MFEOF'\n" + manifestJson + "\nMFEOF");
     }).then(function() {
       setStatus(statusEl, 'Bundling app directory...', 'info');
 
-      // Create a tarball of the entire app folder (excluding data/ dir to avoid shipping DBs)
-      var tarball = '/tmp/alf-publish-' + slug + '.tar.gz';
-      var tarCmd = 'tar -czf ' + tarball + ' -C ' + path + ' --exclude=./data .';
+      // SEC-004: Create tarball excluding data, .git, secrets, with --no-dereference
+      var tarball = '/tmp/alf-publish-' + sq(slug) + '.tar.gz';
+      var tarCmd = 'tar -czf ' + tarball + ' -C ' + sp + ' --exclude=./data --exclude=.git --exclude=.env* --exclude=*.pem --exclude=*.key --no-dereference .';
       return bash(tarCmd).then(function() {
         setStatus(statusEl, 'Publishing...', 'info');
 
@@ -549,12 +573,12 @@
         var curlParts = [
           'curl -s -w "\\n%{http_code}" -X POST',
           '-H "Authorization: Bearer $VAULT_TOKEN"',
-          "-F 'manifest=<" + path + "/manifest.json'",
+          "-F 'manifest=<" + sp + "/manifest.json'",
           "-F 'app_bundle=@" + tarball + ";type=application/gzip'"
         ];
         if (changelog) curlParts.push("-F 'whats_new=" + changelog.replace(/'/g, "'\\''") + "'");
-        if (skillPath) curlParts.push("-F 'skill=@" + skillPath + "/SKILL.md'");
-        curlParts.push("$VAULT_ADDR/proxy/marketplace/api/apps/" + slug + "/publish");
+        if (skillPath) curlParts.push("-F 'skill=@" + sq(skillPath) + "/SKILL.md'");
+        curlParts.push("$VAULT_ADDR/proxy/marketplace/api/apps/" + sq(slug) + "/publish");
 
         return bash(curlParts.join(' '));
       }).then(function(pubRes) {

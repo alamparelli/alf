@@ -172,6 +172,11 @@ func (m *Manager) Enable(slug string) error {
 		return err
 	}
 
+	// Server-side manifest validation safety net.
+	if errs, _ := ValidateManifest(manifest); len(errs) > 0 {
+		return fmt.Errorf("invalid manifest: %s", errs[0])
+	}
+
 	toolsDir := filepath.Join(m.dataDir, "tools")
 	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
 		return fmt.Errorf("create tools dir: %w", err)

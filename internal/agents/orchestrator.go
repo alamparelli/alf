@@ -181,10 +181,15 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	}
 
 	taskID := fmt.Sprintf("%d", time.Now().UnixNano())
-	taskDir := filepath.Join(o.dataDir, "agents", taskID)
+	agentsParent := filepath.Join(o.dataDir, "agents")
+	taskDir := filepath.Join(agentsParent, taskID)
 	os.MkdirAll(taskDir, 0o775)
+	// Ensure the agents/ parent and task dir are owned by alf (subprocess uid 1000)
+	// so the LLM process can write files inside.
+	os.Chmod(agentsParent, 0o775)
+	os.Chown(agentsParent, 1000, 1000)
 	os.Chmod(taskDir, 0o775)
-	os.Chown(taskDir, 1000, 1000) // alf (subprocess uid 1000) owns task dirs
+	os.Chown(taskDir, 1000, 1000)
 
 	log.Printf("[orchestrator] task %s started | teams=%d | message_len=%d", taskID, len(teams), len(userMessage))
 

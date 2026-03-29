@@ -100,10 +100,12 @@ services:
     cap_add:
       # CHOWN/DAC_OVERRIDE/FOWNER: entrypoint (apt-get, chown, file permissions)
       # SETUID/SETGID: entrypoint + daemon (credential switching for subprocess isolation)
+      # SYS_ADMIN: daemon (namespace sandbox for marketplace app bash)
       # NET_ADMIN: nettrack-helper (conntrack events)
       - CHOWN
       - SETUID
       - SETGID
+      - SYS_ADMIN
       - DAC_OVERRIDE
       - FOWNER
       - NET_ADMIN

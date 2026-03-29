@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/alamparelli/alf/internal/marketplace"
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
 // BashHandler executes a bash command and returns the output.
@@ -61,11 +63,25 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	// Drop to alf (uid 1000) — daemon runs as alfd (uid 1001) which has secret access.
 	cmd := exec.CommandContext(ctx, "bash", "-c", req.Command)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
+
+	if appSlug != "" {
+		// App-initiated bash: full namespace sandbox.
+		appDataDir := filepath.Join("/home/alf/data/apps", appSlug, "data")
+		hasNetwork := h.Perms != nil && h.Perms.HasPermission(appSlug, "network")
+		tooling.SandboxedCmd(cmd, req.Command, tooling.SandboxConfig{
+			AppSlug:    appSlug,
+			AppDataDir: appDataDir,
+			Network:    hasNetwork,
+		})
+		cmd.Env = tooling.SandboxSafeEnv(appDataDir)
+	} else {
+		// LLM/terminal bash: no sandbox, just uid drop.
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
+		}
 	}
+
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

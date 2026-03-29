@@ -69,6 +69,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     iproute2 \
     iputils-ping \
+    libcap2-bin \
     && rm -rf /var/lib/apt/lists/*
 
 # Git: Debian Bookworm ships 2.39.x with CVE-2025-48384 (CISA KEV, arbitrary code exec

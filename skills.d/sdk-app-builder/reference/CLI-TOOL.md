@@ -107,6 +107,9 @@ func actionDelete(ctx *appsdk.Context) error {
 |---|---|
 | `ctx.String("key")` | String arg or `""` |
 | `ctx.Int("key", default)` | Int arg with fallback |
+| `ctx.Bool("key", default)` | Bool arg — handles `true`/`false`, `"yes"`/`"no"`, `"1"`/`"0"` |
+| `ctx.Float64("key", default)` | Float arg with fallback |
+| `ctx.StringSlice("key")` | String array or `nil` |
 | `ctx.DataDir` | Persistent storage path (`$ALF_APP_DATA_DIR`) |
 | `appsdk.Respond(text)` | Text output to stdout |
 | `appsdk.RespondJSON(v)` | JSON output to stdout |
@@ -143,6 +146,54 @@ func getDB(ctx *appsdk.Context) (*sql.DB, error) {
     )`)
     return db, nil
 }
+```
+
+## SQLite schema migrations
+
+When updating an app, the database schema may need to evolve. Use a `schema_version` table to track and apply migrations incrementally. This prevents data loss and ensures smooth upgrades.
+
+```go
+func migrateDB(db *sql.DB) error {
+    db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`)
+
+    var v int
+    db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version").Scan(&v)
+
+    // Migration 1: initial schema
+    if v < 1 {
+        if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        )`); err != nil {
+            return err
+        }
+        db.Exec("INSERT INTO schema_version (version) VALUES (1)")
+    }
+
+    // Migration 2: add category column
+    if v < 2 {
+        if _, err := db.Exec(`ALTER TABLE items ADD COLUMN category TEXT DEFAULT ''`); err != nil {
+            return err
+        }
+        db.Exec("INSERT INTO schema_version (version) VALUES (2)")
+    }
+
+    // Migration 3: add index
+    if v < 3 {
+        db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_category ON items(category)`)
+        db.Exec("INSERT INTO schema_version (version) VALUES (3)")
+    }
+
+    return nil
+}
+```
+
+Call `migrateDB(db)` right after opening the database in `getDB()`. Rules:
+- **Never delete or rename migrations** — they must be append-only
+- **Each migration runs once** — the version check ensures idempotency
+- **Use `IF NOT EXISTS`** on CREATE statements for extra safety
+- **Test migrations** on a copy of real data before publishing updates
 ```
 
 ## Frontend for CLI tool apps

@@ -277,6 +277,35 @@ State transitions:
 
 State is persisted in `~/data/apps/.state.json`.
 
+## Data migrations
+
+When publishing an update that changes the database schema, use the **schema_version** pattern to apply migrations safely. This ensures existing user data is preserved across updates.
+
+```go
+func migrateDB(db *sql.DB) error {
+    db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`)
+    var v int
+    db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version").Scan(&v)
+
+    if v < 1 {
+        db.Exec(`CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, title TEXT NOT NULL)`)
+        db.Exec("INSERT INTO schema_version (version) VALUES (1)")
+    }
+    if v < 2 {
+        db.Exec(`ALTER TABLE items ADD COLUMN category TEXT DEFAULT ''`)
+        db.Exec("INSERT INTO schema_version (version) VALUES (2)")
+    }
+    return nil
+}
+```
+
+Rules:
+- Migrations are **append-only** — never modify or remove existing ones
+- Use `IF NOT EXISTS` and `ADD COLUMN` for safety
+- Call `migrateDB(db)` immediately after opening the database
+- Test migrations on a copy of real data before publishing
+- The `data/` directory is preserved across updates and uninstalls — schema evolution is your responsibility
+
 ## Example: the journal app
 
 The bundled journal app demonstrates the full pattern.

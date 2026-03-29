@@ -55,6 +55,71 @@ func (c *Context) Int(key string, def int) int {
 	}
 }
 
+// Bool returns the boolean value for key, or def if missing or not convertible.
+// Handles bool, string ("true"/"false"/"1"/"0"), and float64 (0=false, non-zero=true).
+func (c *Context) Bool(key string, def bool) bool {
+	v, ok := c.Args[key]
+	if !ok {
+		return def
+	}
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		switch strings.ToLower(b) {
+		case "true", "1", "yes":
+			return true
+		case "false", "0", "no":
+			return false
+		default:
+			return def
+		}
+	case float64:
+		return b != 0
+	default:
+		return def
+	}
+}
+
+// Float64 returns the float64 value for key, or def if missing or not convertible.
+func (c *Context) Float64(key string, def float64) float64 {
+	v, ok := c.Args[key]
+	if !ok {
+		return def
+	}
+	switch n := v.(type) {
+	case float64:
+		return n
+	case string:
+		f, err := strconv.ParseFloat(n, 64)
+		if err != nil {
+			return def
+		}
+		return f
+	default:
+		return def
+	}
+}
+
+// StringSlice returns a string slice for key. Returns nil if missing or not a slice.
+func (c *Context) StringSlice(key string) []string {
+	v, ok := c.Args[key]
+	if !ok {
+		return nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
 // App is the top-level container for an ALF app.
 type App struct {
 	Name    string

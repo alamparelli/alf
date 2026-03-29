@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { theme } from '../stores/theme.svelte'
   import { nav } from '../stores/nav.svelte'
   import { toasts } from '../stores/toast.svelte'
@@ -31,10 +31,18 @@
   let promptMultiline = $state(false)
   let promptReplyId = $state(0)
 
+  function postToIframe(action: string) {
+    iframe?.contentWindow?.postMessage({ type: 'alf', action }, location.origin)
+  }
+
+  function onVisibilityChange() {
+    postToIframe(document.hidden ? 'hidden' : 'visible')
+  }
+
   function reply(replyId: number, result: any, error?: string) {
     iframe?.contentWindow?.postMessage(
       { type: 'alf', action: 'reply', _replyId: replyId, result, error },
-      '*'
+      location.origin
     )
   }
 
@@ -97,6 +105,27 @@
     }
   }
 
+  // SEC-001: Sanitize HTML from iframe apps to prevent XSS in parent context.
+  // Strips script/style/iframe/object/embed tags and event handler attributes.
+  function sanitizeHtml(html: string): string {
+    const div = document.createElement('div')
+    div.innerHTML = html
+    // Remove dangerous elements
+    const dangerous = div.querySelectorAll('script,style,iframe,object,embed,link,meta,base,form')
+    dangerous.forEach(el => el.remove())
+    // Remove event handler attributes from all elements
+    div.querySelectorAll('*').forEach(el => {
+      for (const attr of Array.from(el.attributes)) {
+        if (attr.name.startsWith('on') || attr.name === 'formaction' ||
+            (attr.name === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')) ||
+            (attr.name === 'src' && attr.value.trim().toLowerCase().startsWith('javascript:'))) {
+          el.removeAttribute(attr.name)
+        }
+      }
+    })
+    return div.innerHTML
+  }
+
   function handleMessage(e: MessageEvent) {
     if (!e.data || e.data.type !== 'alf-app') return
     if (e.source !== iframe?.contentWindow) return
@@ -106,12 +135,12 @@
     switch (action) {
       // ── Sheet ──
       case 'sheet':
-        sheetHtml = e.data.html || ''
+        sheetHtml = sanitizeHtml(e.data.html || '')
         sheetHasActions = !!e.data.hasActions
         sheetOpen = true
         break
       case 'update-sheet':
-        sheetHtml = e.data.html || ''
+        sheetHtml = sanitizeHtml(e.data.html || '')
         break
       case 'close-sheet':
         sheetOpen = false
@@ -164,17 +193,23 @@
         break
 
       // ── Inter-app events ──
-      case 'event-emit':
+      case 'event-emit': {
+        // SEC-002: Force namespace to this frame's actual slug (parent-controlled)
+        const rawEvent = String(e.data.event || '')
+        const colonIdx = rawEvent.indexOf(':')
+        const eventName = colonIdx >= 0 ? rawEvent.slice(colonIdx + 1) : rawEvent
+        const namespacedEvent = slug + ':' + eventName
         // Broadcast to all other app iframes
         document.querySelectorAll<HTMLIFrameElement>('iframe.page-frame').forEach(f => {
           if (f !== iframe && f.contentWindow) {
             f.contentWindow.postMessage(
-              { type: 'alf', action: 'event-relay', event: e.data.event, payload: e.data.payload },
-              '*'
+              { type: 'alf', action: 'event-relay', event: namespacedEvent, payload: e.data.payload },
+              location.origin
             )
           }
         })
         break
+      }
 
       // ── Badge ──
       case 'badge-set':
@@ -216,7 +251,7 @@
     // Relay to iframe
     iframe?.contentWindow?.postMessage(
       { type: 'alf', action: 'sheet-action', name: actionName, params },
-      '*'
+      location.origin
     )
   }
 
@@ -247,7 +282,15 @@
       })
     }
 
+    // Forward browser visibility changes to iframe
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
     return () => window.removeEventListener('message', handleMessage)
+  })
+
+  onDestroy(() => {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    postToIframe('hidden')
   })
 
   $effect(() => {

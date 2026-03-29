@@ -681,11 +681,6 @@ func main() {
 		mpManager.SetOnChange(func() {
 			toolRegistry.Rescan()
 		})
-		// Mark bundled/default apps as trusted so they get full permissions
-		// even when tracked by the marketplace (e.g. user enabled them).
-		for _, slug := range bundledAppSlugs() {
-			mpManager.MarkTrusted(slug)
-		}
 		if err := mpManager.RestoreEnabled(); err != nil {
 			log.Printf("[marketplace] restore enabled apps: %v", err)
 		} else {

@@ -559,6 +559,17 @@ func seedDefaultDisabledState(appsDir string) {
 	}
 
 	changed := false
+
+	// Remove system apps from marketplace state — they are platform-level,
+	// not marketplace-managed. Prevents permission tracking issues.
+	for slug := range systemAppSlugs {
+		if _, exists := sf.States[slug]; exists {
+			delete(sf.States, slug)
+			changed = true
+			log.Printf("seed-state: removed system app %s from marketplace state", slug)
+		}
+	}
+
 	for slug := range defaultDisabledApps {
 		if _, exists := sf.States[slug]; !exists {
 			sf.States[slug] = "disabled"
@@ -580,7 +591,11 @@ var protectedApps = map[string]bool{}
 
 // defaultDisabledApps are seeded but start with state "disabled" in .state.json.
 // They appear in the Marketplace but not in the sidebar until the user enables them.
-var defaultDisabledApps = map[string]bool{
+var defaultDisabledApps = map[string]bool{}
+
+// systemApps are platform-level apps shown in the SYSTEM sidebar section.
+// They are removed from marketplace state on boot to avoid permission tracking.
+var systemAppSlugs = map[string]bool{
 	"developer": true,
 }
 

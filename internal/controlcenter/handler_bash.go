@@ -15,6 +15,12 @@ import (
 	"github.com/alamparelli/alf/internal/tooling"
 )
 
+// systemApps are platform-level apps that bypass sandbox and permission checks.
+// They are bundled in the daemon image and not marketplace-managed.
+var systemApps = map[string]bool{
+	"developer": true,
+}
+
 // BashHandler executes a bash command and returns the output.
 type BashHandler struct {
 	Perms marketplace.PermissionChecker
@@ -55,14 +61,15 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if appSlug == "" {
 		appSlug = req.AppSlug // fallback to body for non-browser callers
 	}
-	if appSlug != "" && h.Perms != nil && !h.Perms.HasPermission(appSlug, "bash") {
+	// System apps (e.g. developer) bypass permission checks and sandboxing entirely.
+	isSystemApp := systemApps[appSlug]
+	if appSlug != "" && !isSystemApp && h.Perms != nil && !h.Perms.HasPermission(appSlug, "bash") {
 		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash"})
 		return
 	}
 
-	// Internal/default apps (not tracked by marketplace) bypass sandboxing.
-	// They are trusted platform components (e.g. "developer" app).
-	sandboxApp := appSlug != "" && (h.Perms == nil || h.Perms.IsTracked(appSlug))
+	// Sandbox only marketplace-managed apps, not system/internal apps.
+	sandboxApp := appSlug != "" && !isSystemApp && (h.Perms == nil || h.Perms.IsTracked(appSlug))
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()

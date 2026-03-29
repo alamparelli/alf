@@ -198,13 +198,13 @@ func TestDashboard_SecurityHeaders(t *testing.T) {
 		Sessions:      ss,
 		DashboardHTML: "<html></html>",
 	}
-	handler := HandlerFactory(deps)
+	handlers := HandlerFactory(deps)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(&http.Cookie{Name: "cc_session", Value: sid})
 	rec := httptest.NewRecorder()
 
-	handler.ServeHTTP(rec, req)
+	handlers.Main.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -269,7 +269,7 @@ func TestTerminalEndpoint_HasRateLimiting(t *testing.T) {
 		Sessions:  ss,
 		DashboardHTML: "<html></html>",
 	}
-	handler := HandlerFactory(deps)
+	handlers := HandlerFactory(deps)
 
 	// Send requests to terminal endpoint. Since we can't do a real WebSocket
 	// upgrade in a test, we expect the rate limiter to kick in before the
@@ -280,7 +280,7 @@ func TestTerminalEndpoint_HasRateLimiting(t *testing.T) {
 		req.RemoteAddr = "10.0.0.1:12345"
 		req.AddCookie(&http.Cookie{Name: "cc_session", Value: sid})
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		handlers.Main.ServeHTTP(rec, req)
 
 		if i == 30 && rec.Code == http.StatusTooManyRequests {
 			return // rate limiter kicked in - pass

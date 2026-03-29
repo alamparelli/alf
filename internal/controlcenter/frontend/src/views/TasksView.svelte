@@ -51,8 +51,6 @@
   let completed = $state<TaskMeta[]>([])
   let expandedTasks = $state<Record<string, boolean>>({})
   let showCompleted = $state(false)
-  let autoRefresh = $state(true)
-  let refreshTimer: ReturnType<typeof setInterval> | undefined
 
   // Expandable agent outputs
   let expandedOutputs = $state<Record<string, boolean>>({})
@@ -216,6 +214,32 @@
   }
 
   let unsubEvents: (() => void) | undefined
+  let pollTimer: ReturnType<typeof setInterval> | undefined
+
+  // Poll running tasks every 5s for live progress (iterations, cost, agent steps).
+  // SSE 'tasks' events handle start/end transitions; polling fills the gap during execution.
+  function startPolling() {
+    stopPolling()
+    pollTimer = setInterval(() => {
+      if (running.length > 0) loadTasks()
+    }, 5000)
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = undefined
+    }
+  }
+
+  // Start/stop polling based on running tasks
+  $effect(() => {
+    if (running.length > 0) {
+      if (!pollTimer) startPolling()
+    } else {
+      stopPolling()
+    }
+  })
 
   // Request notification permission
   function requestNotifPerm() {
@@ -233,6 +257,7 @@
 
   onDestroy(() => {
     unsubEvents?.()
+    stopPolling()
   })
 </script>
 

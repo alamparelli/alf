@@ -85,8 +85,17 @@ func LogReaderFactory(dataDir string) LogReader {
 	return NewFileLogReader(logDir, nil)
 }
 
+// Handlers holds the HTTP handlers returned by HandlerFactory.
+type Handlers struct {
+	// Main is the full handler for TCP connections (includes stripToolsSocketHeader).
+	Main http.Handler
+	// Internal is the handler WITHOUT stripToolsSocketHeader, for the Unix tools proxy.
+	// ToolsProxy injects X-Tools-Socket which the auth middleware trusts.
+	Internal http.Handler
+}
+
 // HandlerFactory builds the HTTP mux with all routes and middleware.
-func HandlerFactory(deps Deps) http.Handler {
+func HandlerFactory(deps Deps) Handlers {
 	mux := http.NewServeMux()
 
 	// API routes.
@@ -415,9 +424,6 @@ func HandlerFactory(deps Deps) http.Handler {
 		return GetMobileToken(deps.VaultManager)
 	}).middleware(handler) // 15/min anonymous, no limit authenticated (session, bearer, or mobile token)
 	handler = loggingMiddleware(handler)
-	// Strip X-Tools-Socket header from external TCP requests to prevent auth bypass.
-	// Only the ToolsProxy (Unix socket) is allowed to set this header.
-	handler = stripToolsSocketHeader(handler)
 
 	// Terminal WebSocket: registered outside the main middleware stack so the
 	// ResponseWriter keeps its http.Hijacker interface for the upgrade.
@@ -442,12 +448,18 @@ func HandlerFactory(deps Deps) http.Handler {
 	sshHandler = sshRL.middleware(sshHandler)
 	sshHandler = loggingMiddleware(sshHandler)
 
-	outer := http.NewServeMux()
-	outer.Handle("/api/terminal", termHandler)
-	outer.Handle("/api/ssh/", sshHandler)
-	outer.Handle("/", handler)
+	// Internal handler: used by ToolsProxy (Unix socket). Does NOT strip
+	// X-Tools-Socket header, so the auth bypass works correctly.
+	internalOuter := http.NewServeMux()
+	internalOuter.Handle("/api/terminal", termHandler)
+	internalOuter.Handle("/api/ssh/", sshHandler)
+	internalOuter.Handle("/", handler)
 
-	return outer
+	// Main handler: for TCP connections. Strips X-Tools-Socket to prevent
+	// external clients from forging the header to bypass auth.
+	tcpHandler := stripToolsSocketHeader(internalOuter)
+
+	return Handlers{Main: tcpHandler, Internal: internalOuter}
 }
 
 // handleAppPermissions returns the permissions for an app.

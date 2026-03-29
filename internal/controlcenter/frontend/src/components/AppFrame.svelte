@@ -444,10 +444,87 @@
     }
   }
 
-  /* Revert all inherited/global styles on buttons inside sheet HTML
-     so that inline styles from app-provided HTML take effect. */
+  /* Base styles for sheet HTML content — apps provide raw HTML without
+     their own stylesheet, so we need sensible defaults. */
+  .sdk-sheet-content {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .sdk-sheet-content :global(h1),
+  .sdk-sheet-content :global(h2),
+  .sdk-sheet-content :global(h3),
+  .sdk-sheet-content :global(h4) {
+    margin: 0 0 0.5rem;
+    font-weight: 600;
+  }
+  .sdk-sheet-content :global(h3) { font-size: 1.05rem; }
+
+  .sdk-sheet-content :global(p) {
+    margin: 0 0 0.5rem;
+    color: var(--text-dim);
+  }
+
+  .sdk-sheet-content :global(img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius, 8px);
+    margin-bottom: 0.75rem;
+  }
+
   .sdk-sheet-content :global(button) {
-    all: revert;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    background: var(--bg-input);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .sdk-sheet-content :global(button:hover) {
+    border-color: var(--accent);
+    background: var(--border);
+  }
+
+  .sdk-sheet-content :global(input),
+  .sdk-sheet-content :global(select),
+  .sdk-sheet-content :global(textarea) {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    background: var(--bg-input);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+  .sdk-sheet-content :global(input:focus),
+  .sdk-sheet-content :global(select:focus),
+  .sdk-sheet-content :global(textarea:focus) {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .sdk-sheet-content :global(label) {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 2px;
+    font-weight: 500;
+  }
+
+  .sdk-sheet-content :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0.75rem 0;
   }
 
   .sdk-dialog {

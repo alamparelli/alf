@@ -28,6 +28,7 @@
   let promptValue = $state('')
   let promptPlaceholder = $state('')
   let promptOk = $state('OK')
+  let promptMultiline = $state(false)
   let promptReplyId = $state(0)
 
   function reply(replyId: number, result: any, error?: string) {
@@ -145,6 +146,7 @@
         promptValue = e.data.defaultValue || ''
         promptPlaceholder = e.data.placeholder || ''
         promptOk = e.data.confirmText || 'OK'
+        promptMultiline = !!e.data.multiline
         promptReplyId = _replyId || 0
         promptOpen = true
         break
@@ -195,6 +197,21 @@
     const params: Record<string, string> = {}
     for (const key of Object.keys(target.dataset)) {
       if (key !== 'action') params[key] = target.dataset[key]!
+    }
+    // Collect form input values from the sheet (inputs, selects, textareas with name or data-field)
+    const sheetContent = target.closest('.sdk-sheet-content')
+    if (sheetContent) {
+      sheetContent.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+        'input[name], select[name], textarea[name], input[data-field], select[data-field], textarea[data-field]'
+      ).forEach(el => {
+        const field = el.getAttribute('data-field') || el.name
+        if (!field) return
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+          params[field] = el.checked ? 'true' : 'false'
+        } else {
+          params[field] = el.value
+        }
+      })
     }
     // Relay to iframe
     iframe?.contentWindow?.postMessage(
@@ -273,13 +290,22 @@
   <div class="sdk-dialog">
     {#if promptTitle}<h3>{promptTitle}</h3>{/if}
     <p>{promptMsg}</p>
-    <input
-      type="text"
-      class="sdk-input"
-      bind:value={promptValue}
-      placeholder={promptPlaceholder}
-      onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') handlePromptSubmit() }}
-    />
+    {#if promptMultiline}
+      <textarea
+        class="sdk-input sdk-textarea"
+        bind:value={promptValue}
+        placeholder={promptPlaceholder}
+        rows={4}
+      ></textarea>
+    {:else}
+      <input
+        type="text"
+        class="sdk-input"
+        bind:value={promptValue}
+        placeholder={promptPlaceholder}
+        onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') handlePromptSubmit() }}
+      />
+    {/if}
     <div class="sdk-dialog-actions">
       <button class="btn-secondary" onclick={handlePromptCancel}>Cancel</button>
       <button class="btn-primary" onclick={handlePromptSubmit}>{promptOk}</button>
@@ -335,6 +361,12 @@
 
   .sdk-input:focus {
     border-color: var(--accent);
+  }
+
+  .sdk-textarea {
+    resize: vertical;
+    min-height: 80px;
+    font-family: inherit;
   }
 
   .sdk-dialog-actions {

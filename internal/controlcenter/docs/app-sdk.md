@@ -189,6 +189,24 @@ AlfSDK.sheet(
 );
 ```
 
+**Form inputs**: Action handlers automatically collect values from `input`, `select`, and `textarea` elements that have a `name` or `data-field` attribute:
+
+```js
+AlfSDK.sheet(
+  '<input name="date" type="date" value="2026-01-01" />' +
+  '<textarea data-field="notes" placeholder="Notes..."></textarea>' +
+  '<button data-action="save" data-id="12">Save</button>',
+  {
+    save: function(p) {
+      // p.id = "12" (from data-id)
+      // p.date = "2026-01-01" (from input[name="date"])
+      // p.notes = "user text" (from textarea[data-field="notes"])
+      updateBook(p.id, p.date, p.notes);
+    }
+  }
+);
+```
+
 ### `AlfSDK.updateSheet(html)`
 
 Update the currently open sheet's content without closing it. The action callbacks from the original `sheet()` call are preserved.
@@ -231,6 +249,7 @@ Returns a Promise that resolves to the input string, or `null` if cancelled.
 | `defaultValue` | string | Pre-filled input value |
 | `placeholder` | string | Input placeholder |
 | `confirmText` | string | Confirm button text |
+| `multiline` | boolean | Render a textarea instead of single-line input |
 
 ```js
 AlfSDK.prompt('Enter a name:', {

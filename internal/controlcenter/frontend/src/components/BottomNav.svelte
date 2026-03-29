@@ -29,6 +29,37 @@
   let { open = $bindable(false) }: { open?: boolean } = $props()
   let searchQuery = $state('')
   let searchInput: HTMLInputElement
+  let panelEl: HTMLDivElement
+
+  // Drag-to-dismiss
+  let dragStartY = 0
+  let dragCurrentY = 0
+  let dragging = false
+
+  function onTouchStart(e: TouchEvent) {
+    const target = e.target as HTMLElement
+    if (target.closest('.menu-search-input')) return
+    dragStartY = e.touches[0].clientY
+    dragging = true
+  }
+
+  function onTouchMove(e: TouchEvent) {
+    if (!dragging) return
+    dragCurrentY = e.touches[0].clientY - dragStartY
+    if (dragCurrentY < 0) dragCurrentY = 0
+    if (panelEl) panelEl.style.transform = `translateY(${dragCurrentY}px)`
+  }
+
+  function onTouchEnd() {
+    if (!dragging) return
+    dragging = false
+    if (dragCurrentY > 100) {
+      open = false
+      searchQuery = ''
+    }
+    if (panelEl) panelEl.style.transform = ''
+    dragCurrentY = 0
+  }
 
   // All items: system tabs + apps
   const allItems = $derived(() => {
@@ -75,7 +106,26 @@
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="menu-overlay" onclick={() => { open = false; searchQuery = '' }}></div>
-  <div class="menu-panel">
+  <div class="menu-panel"
+    ontouchstart={onTouchStart}
+    ontouchmove={onTouchMove}
+    ontouchend={onTouchEnd}
+    bind:this={panelEl}
+  >
+    <div class="sheet-handle"></div>
+
+    <div class="menu-search">
+      <Search size={16} />
+      <input
+        bind:this={searchInput}
+        bind:value={searchQuery}
+        onkeydown={handleSearchKeydown}
+        type="text"
+        placeholder="Search..."
+        class="menu-search-input"
+      />
+    </div>
+
     <div class="menu-grid">
       {#each filtered() as item}
         <button
@@ -101,18 +151,6 @@
         </button>
       {/each}
     </div>
-
-    <div class="menu-search">
-      <Search size={16} />
-      <input
-        bind:this={searchInput}
-        bind:value={searchQuery}
-        onkeydown={handleSearchKeydown}
-        type="text"
-        placeholder="Search..."
-        class="menu-search-input"
-      />
-    </div>
   </div>
 {/if}
 
@@ -129,30 +167,39 @@
   .menu-panel {
     display: none;
     position: fixed;
-    bottom: calc(24px + env(safe-area-inset-bottom, 4px));
-    left: 12px;
-    right: 12px;
-    max-height: 70vh;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 85vh;
     overflow-y: auto;
     background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: 16px 16px 0 0;
     z-index: 29;
-    padding: 16px;
-    animation: popUp 0.2s ease;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    animation: sheetUp 0.25s ease;
+    box-shadow: 0 -4px 32px rgba(0, 0, 0, 0.3);
+    touch-action: none;
   }
 
-  @keyframes popUp {
-    from { transform: translateY(20px) scale(0.95); opacity: 0; }
-    to { transform: translateY(0) scale(1); opacity: 1; }
+  .sheet-handle {
+    width: 36px;
+    height: 5px;
+    background: var(--text-dim);
+    opacity: 0.3;
+    border-radius: 3px;
+    margin: 10px auto 12px;
+  }
+
+  @keyframes sheetUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
   }
 
   .menu-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 8px;
-    margin-bottom: 12px;
+    margin-top: 12px;
   }
 
   .menu-grid-item {

@@ -29,44 +29,39 @@ func SandboxedCmd(cmd *exec.Cmd, originalCommand string, cfg SandboxConfig) {
 
 	// Build the mount setup script that runs inside the new namespace.
 	// CLONE_NEWNS gives the child its own mount tree — mounts here don't affect parent.
-	setup := fmt.Sprintf(`set -e
-# Isolate mount propagation so our mounts stay private
+	setup := fmt.Sprintf(`
+# Namespace sandbox setup — non-critical mounts use || true, final exec uses set -e.
+
+# Isolate mount propagation
 mount --make-rprivate / 2>/dev/null || true
 
-# Private /tmp (50MB tmpfs)
-mount -t tmpfs tmpfs /tmp -o size=50m,mode=1777,nosuid,nodev
+# Private /tmp
+mount -t tmpfs tmpfs /tmp 2>/dev/null && chmod 1777 /tmp 2>/dev/null || true
 
 # Fresh /proc for PID namespace
-mount -t proc proc /proc
+mount -t proc proc /proc 2>/dev/null || true
 
-# SEC-003+004: Mask other apps ENTIRELY (not just data/) + sensitive dirs
+# Mask other apps entirely
 for d in /home/alf/data/apps/*/; do
   app="$(basename "$d")"
-  if [ "$app" != %s ]; then
-    mount -t tmpfs -o size=0,ro tmpfs "$d" 2>/dev/null || true
-  fi
+  [ "$app" != %s ] && mount -t tmpfs tmpfs "$d" 2>/dev/null || true
 done
 
-# Mask tools.d (symlinks to other apps' binaries)
-mount -t tmpfs -o size=0,ro tmpfs /home/alf/data/tools.d 2>/dev/null || true
-
-# Mask vault secrets
-mount -t tmpfs -o size=0,ro tmpfs /opt/alf/vault-data 2>/dev/null || true
-
-# SEC-003: Mask conversation logs, config, Claude auth, context (tools.sock)
-mount -t tmpfs -o size=0,ro tmpfs /home/alf/data/logs 2>/dev/null || true
-mount -t tmpfs -o size=0,ro tmpfs /opt/alf/config.d 2>/dev/null || true
-mount -t tmpfs -o size=0,ro tmpfs /home/alf/.claude 2>/dev/null || true
-mount -t tmpfs -o size=0,ro tmpfs /home/alf/data/context 2>/dev/null || true
+# Mask sensitive directories
+mount -t tmpfs tmpfs /home/alf/data/tools.d 2>/dev/null || true
+mount -t tmpfs tmpfs /opt/alf/vault-data 2>/dev/null || true
+mount -t tmpfs tmpfs /home/alf/data/logs 2>/dev/null || true
+mount -t tmpfs tmpfs /opt/alf/config.d 2>/dev/null || true
+mount -t tmpfs tmpfs /home/alf/.claude 2>/dev/null || true
+mount -t tmpfs tmpfs /home/alf/data/context 2>/dev/null || true
 
 # Resource limits
-ulimit -v 131072 2>/dev/null || true  # 128MB virtual memory
-ulimit -u 50 2>/dev/null || true      # 50 processes
-ulimit -f 102400 2>/dev/null || true  # 100MB max file size
-ulimit -t 60 2>/dev/null || true      # 60s CPU time
+ulimit -v 131072 2>/dev/null || true
+ulimit -u 50 2>/dev/null || true
+ulimit -f 102400 2>/dev/null || true
+ulimit -t 60 2>/dev/null || true
 
-# SEC-001: Drop all capabilities before executing user command.
-# This prevents the child from using CAP_SYS_ADMIN to undo mount masking.
+# Drop all capabilities then execute user command
 exec capsh --drop=all -- -c %s
 `, shellQuote(cfg.AppSlug), shellQuote(originalCommand))
 

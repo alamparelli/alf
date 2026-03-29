@@ -585,7 +585,8 @@
     /**
      * Show a prompt dialog (CC-native bottom sheet on mobile).
      * @param {string} message
-     * @param {Object} [opts] - { title: string, defaultValue: string, placeholder: string, confirmText: string }
+     * @param {Object} [opts] - { title, defaultValue, placeholder, confirmText, multiline }
+     * @param {boolean} [opts.multiline=false] - Render a textarea instead of a single-line input
      * @returns {Promise<string|null>} - Input value, or null if cancelled
      */
     prompt: function(message, opts) {

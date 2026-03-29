@@ -15,7 +15,7 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>My App</title>
   <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
+  <link rel="stylesheet" id="alf-theme-link" href="/static/theme-sage.css">
   <script src="/static/theme-init.js"></script>
   <script src="/static/alf-app-sdk.js"></script>
   <style>
@@ -58,7 +58,7 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
     AlfSDK.init({
       slug: 'my-app',
       onThemeChange: function(palette) {
-        document.getElementById('alf-theme').href = '/static/theme-' + palette + '.css';
+        document.getElementById('alf-theme-link').href = '/static/theme-' + palette + '.css';
       }
     });
 
@@ -226,14 +226,35 @@ Only use these -- never hardcode colors:
 
 1. **Always init AlfSDK** at the top of the script block
 2. **Always include `onThemeChange`** to sync theme from parent SPA
-3. **Set `font-family` explicitly** -- `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. Google Fonts are blocked by CSP in iframes.
-4. **Load `/static/style.css`** + `/static/theme-*.css` + `/static/theme-init.js`
-5. **No external scripts/stylesheets** -- CSP blocks them
-6. **No `unsafe-eval`** -- no Vue, Angular, Petite Vue
-7. **Inline `<style>` only** -- no external CSS files you create
-8. **Lucide SVG icons** -- inline SVG from lucide.dev. No icon fonts. No emoji as icons (unless user asks).
-9. **XSS protection** -- always escape user content with a `div.textContent` wrapper (the `esc()` helper above)
-10. **`font-family: inherit`** is NOT sufficient -- always set explicitly (see rule 3)
+3. **Theme link id**: use `id="alf-theme-link"` (NOT `alf-theme`)
+4. **Set `font-family` explicitly** -- `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. Google Fonts are blocked by CSP in iframes.
+5. **Load `/static/style.css`** + `/static/theme-*.css` + `/static/theme-init.js`
+6. **No external scripts/stylesheets** -- CSP blocks them
+7. **No `unsafe-eval`** -- no Vue, Angular, Petite Vue
+8. **Inline `<style>` only** -- no external CSS files you create
+9. **Lucide SVG icons** -- inline SVG from lucide.dev. No icon fonts. No emoji as icons (unless user asks).
+10. **XSS protection** -- always escape user content with a `div.textContent` wrapper (the `esc()` helper above)
+11. **`font-family: inherit`** is NOT sufficient -- always set explicitly (see rule 4)
+12. **NEVER use `window.confirm()` or `window.prompt()`** -- use `AlfSDK.confirm()` and `AlfSDK.prompt()` instead (renders as iOS bottom sheet on mobile)
+13. **NEVER use `window.alert()`** -- use `AlfSDK.toast()` instead
+
+---
+
+## AlfSDK.bash() return format
+
+`AlfSDK.bash(cmd)` returns a Promise resolving to:
+```js
+{ output: "stdout text", exit_code: 0, error: "" }
+```
+
+Always use backtick template literals for commands with variables:
+```js
+// CORRECT — backticks for interpolation
+AlfSDK.bash('cat /home/alf/data/apps/' + slug + '/data/file.txt')
+
+// WRONG — never use string concat inside single quotes for shell vars
+// AlfSDK.bash('echo ${var}')  // ${var} is a shell variable, not JS
+```
 
 ---
 

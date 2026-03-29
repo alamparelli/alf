@@ -23,6 +23,7 @@ export const SYSTEM_TABS: NavItem[] = [
   { view: 'tiers', label: 'Tiers', icon: 'sliders-horizontal' },
   { view: 'firewall', label: 'Firewall', icon: 'shield' },
   { view: 'vault', label: 'Vault', icon: 'lock' },
+  { view: 'page:developer', label: 'Developer', icon: 'code-2' },
   { view: 'marketplace', label: 'Marketplace', icon: 'store' },
   { view: 'settings', label: 'Settings', icon: 'settings' },
   { view: 'logs', label: 'Logs', icon: 'scroll-text' },

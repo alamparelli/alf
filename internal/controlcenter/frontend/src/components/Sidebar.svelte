@@ -96,7 +96,7 @@
           <span>Apps</span>
         </button>
         <div class="nav-section-items">
-          {#each apps.items as app}
+          {#each apps.items.filter(a => a.name !== 'developer') as app}
             {@const appView = 'page:' + app.name}
             {@const isFav = nav.favorites.includes(appView)}
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->

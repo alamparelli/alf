@@ -121,7 +121,9 @@
   </select>
   <p class="hint">Optional skill directory (must contain SKILL.md).</p>
 
+  <button class="btn-secondary" id="validateBtn">Validate</button>
   <button class="btn-primary" id="publishBtn" disabled>Publish</button>
+  <div id="validateResults" class="status" style="display:none"></div>
   <div id="publishStatus" class="status"></div>
 </div>
 
@@ -369,6 +371,124 @@
       });
     });
   }
+
+  // --- Validate ---
+  var validPerms = ['storage', 'bash', 'upload', 'clipboard', 'events'];
+  var validCategories = ['productivity', 'dev-tools', 'games', 'media', 'utilities', 'finance', 'social', 'communication'];
+
+  function validateBeforePublish() {
+    var errors = [];
+    var warnings = [];
+    var slug = $('pubSlug').value.trim();
+    var name = $('pubName').value.trim();
+    var path = $('pubApp').value;
+    var version = $('pubVersion').value.trim() || '0.1.0';
+    var desc = $('pubDesc').value.trim();
+    var category = $('pubCategory').value.trim().toLowerCase();
+
+    // Required fields
+    if (!slug) errors.push('Slug is required');
+    if (slug && !/^[a-z0-9][a-z0-9-]*$/.test(slug)) errors.push('Slug: lowercase alphanumeric + hyphens, must start with letter/digit');
+    if (!name) errors.push('Name is required');
+    if (!path) errors.push('Select a source app');
+    if (!desc) warnings.push('Description is empty — recommended for marketplace listing');
+
+    // Semver
+    if (!/^\d+\.\d+\.\d+$/.test(version)) errors.push('Version must be semver (e.g. 1.0.0)');
+
+    // Category
+    if (category && validCategories.indexOf(category) < 0) {
+      warnings.push('Unknown category "' + category + '". Valid: ' + validCategories.join(', '));
+    }
+
+    // Tools selected
+    if (selectedTools.length === 0) warnings.push('No tools selected — app will have no CLI backend');
+
+    // Async checks
+    var asyncChecks = [];
+
+    // Binary check
+    if (selectedTools.length > 0 && path && slug) {
+      asyncChecks.push(
+        bash('test -x ' + path + '/bin/' + slug + ' && echo ok || echo missing').then(function(res) {
+          if ((res.output || '').trim() !== 'ok') {
+            errors.push('Tool binary not found or not executable at bin/' + slug);
+          }
+        })
+      );
+    }
+
+    // index.html check
+    if (path) {
+      asyncChecks.push(
+        bash('test -f ' + path + '/index.html && echo ok || echo missing').then(function(res) {
+          if ((res.output || '').trim() !== 'ok') {
+            warnings.push('No index.html — app will have no web UI');
+          }
+        })
+      );
+    }
+
+    // Secrets scan
+    if (path) {
+      asyncChecks.push(
+        bash('find ' + path + ' -maxdepth 2 \\( -name ".env*" -o -name "credentials*" -o -name "*secret*" -o -name "*.pem" -o -name "*.key" \\) ! -path "*/data/*" 2>/dev/null | head -5').then(function(res) {
+          var found = (res.output || '').trim();
+          if (found) warnings.push('Potentially sensitive files found:\n' + found);
+        })
+      );
+    }
+
+    // Permissions validation (read from existing manifest if present)
+    if (path) {
+      asyncChecks.push(
+        bash('cat ' + path + '/manifest.json 2>/dev/null').then(function(res) {
+          try {
+            var m = JSON.parse(res.output);
+            if (m.permissions && Array.isArray(m.permissions)) {
+              m.permissions.forEach(function(p) {
+                if (validPerms.indexOf(p) < 0) errors.push('Unknown permission: ' + p);
+              });
+            }
+          } catch(e) { /* no existing manifest — ok */ }
+        })
+      );
+    }
+
+    return Promise.all(asyncChecks).then(function() {
+      return { errors: errors, warnings: warnings };
+    });
+  }
+
+  $('validateBtn').addEventListener('click', function() {
+    var resultsEl = $('validateResults');
+    var publishBtn = $('publishBtn');
+    resultsEl.style.display = '';
+    resultsEl.className = 'status';
+    resultsEl.textContent = 'Validating...';
+    publishBtn.disabled = true;
+
+    validateBeforePublish().then(function(result) {
+      var lines = [];
+      result.errors.forEach(function(e) { lines.push('✗ ' + e); });
+      result.warnings.forEach(function(w) { lines.push('⚠ ' + w); });
+
+      if (result.errors.length === 0 && result.warnings.length === 0) {
+        lines.push('✓ All checks passed');
+      }
+
+      resultsEl.textContent = lines.join('\n');
+      resultsEl.style.whiteSpace = 'pre-wrap';
+
+      if (result.errors.length === 0) {
+        resultsEl.className = 'status ' + (result.warnings.length > 0 ? 'warning' : 'success');
+        publishBtn.disabled = !connected;
+      } else {
+        resultsEl.className = 'status error';
+        publishBtn.disabled = true;
+      }
+    });
+  });
 
   // --- Publish ---
   $('publishBtn').addEventListener('click', function() {

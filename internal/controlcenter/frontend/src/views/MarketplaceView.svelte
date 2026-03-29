@@ -5,7 +5,8 @@
   import { events } from '../stores/events.svelte';
   import { nav } from '../stores/nav.svelte';
   import Card from '../components/shared/Card.svelte';
-  import { Download, Power, PowerOff, Trash2, RefreshCw, Tag, User, FolderOpen, Package } from 'lucide-svelte';
+  import Toggle from '../components/shared/Toggle.svelte';
+  import { Download, Power, PowerOff, Trash2, RefreshCw, Tag, User, FolderOpen, Package, Code2 } from 'lucide-svelte';
   import { getIcon } from '../lib/icons';
 
   let apps = $state([]);
@@ -147,6 +148,20 @@
       <RefreshCw size={14} class={loading ? 'spin' : ''} /> Refresh
     </button>
   </div>
+
+  <!-- Developer mode toggle -->
+  <Card>
+    <div class="dev-toggle">
+      <div class="dev-toggle-info">
+        <Code2 size={18} />
+        <div>
+          <strong>Developer Tools</strong>
+          <span class="dev-toggle-desc">Publish apps to the marketplace registry</span>
+        </div>
+      </div>
+      <Toggle bind:checked={nav.developerMode} label="" onchange={() => nav.toggleDeveloperMode()} />
+    </div>
+  </Card>
 
   {#if loading}
     <div class="loading">Loading marketplace...</div>
@@ -348,5 +363,24 @@
   @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+  }
+  .dev-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .dev-toggle-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .dev-toggle-info strong {
+    display: block;
+    font-size: 0.9rem;
+  }
+  .dev-toggle-desc {
+    font-size: 0.78rem;
+    color: var(--text-dim);
   }
 </style>

@@ -27,6 +27,7 @@ var allowedToolsPaths = map[string]bool{
 var allowedToolsPrefixes = []string{
 	"/api/apps/",        // app list/details
 	"/api/marketplace/", // marketplace catalog/install
+	"/api/developer/",   // developer tools (publish, validate)
 }
 
 // blockedToolsMethods prevents write operations on read-only endpoints.

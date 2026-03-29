@@ -23,16 +23,23 @@ export const SYSTEM_TABS: NavItem[] = [
   { view: 'tiers', label: 'Tiers', icon: 'sliders-horizontal' },
   { view: 'firewall', label: 'Firewall', icon: 'shield' },
   { view: 'vault', label: 'Vault', icon: 'lock' },
-  { view: 'page:developer', label: 'Developer', icon: 'code-2' },
   { view: 'marketplace', label: 'Marketplace', icon: 'store' },
   { view: 'settings', label: 'Settings', icon: 'settings' },
   { view: 'logs', label: 'Logs', icon: 'scroll-text' },
   { view: 'docs', label: 'Docs', icon: 'book-open' },
 ]
 
+export const DEVELOPER_TAB: NavItem = { view: 'developer', label: 'Developer', icon: 'code-2' }
+
 class NavStore {
   currentView = $state(localStorage.getItem('alf-view') || 'chat')
   sidebarOpen = $state(false)
+  developerMode = $state(localStorage.getItem('alf-developer-mode') === 'true')
+
+  toggleDeveloperMode() {
+    this.developerMode = !this.developerMode
+    localStorage.setItem('alf-developer-mode', String(this.developerMode))
+  }
 
   // Badges: view -> count (0 = hidden, >0 = shown)
   badges = $state<Record<string, number>>({})

@@ -13,6 +13,7 @@
   import TeamsView from './views/TeamsView.svelte'
   import FirewallView from './views/FirewallView.svelte'
   import MarketplaceView from './views/MarketplaceView.svelte'
+  import DeveloperView from './views/DeveloperView.svelte'
   import SkillsView from './views/SkillsView.svelte'
   import TiersView from './views/TiersView.svelte'
   import SchedulesView from './views/SchedulesView.svelte'
@@ -146,6 +147,8 @@
       <VaultView />
     {:else if nav.currentView === 'marketplace'}
       <MarketplaceView />
+    {:else if nav.currentView === 'developer'}
+      <DeveloperView />
     {:else if nav.currentView === 'settings'}
       <SettingsView />
     {:else if nav.currentView === 'logs'}

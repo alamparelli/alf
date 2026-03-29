@@ -16,16 +16,29 @@ class SoundNotifier {
       const unlock = () => {
         try {
           if (!this.ctx) this.ctx = new AudioContext()
-          if (this.ctx.state === 'suspended') {
-            this.ctx.resume().then(() => {
+          const done = () => {
+            if (!this.unlocked) {
               this.unlocked = true
               this.loadBuffer()
               removeListeners()
+            }
+          }
+          if (this.ctx.state === 'suspended') {
+            this.ctx.resume()
+            // Fallback: poll state — resume() promise can hang on iOS webviews
+            const check = setInterval(() => {
+              if (this.ctx && this.ctx.state === 'running') {
+                clearInterval(check)
+                done()
+              }
+            }, 50)
+            this.ctx.resume().then(() => {
+              clearInterval(check)
+              done()
             }).catch(() => { /* will retry on next gesture */ })
+            setTimeout(() => clearInterval(check), 5000)
           } else {
-            this.unlocked = true
-            this.loadBuffer()
-            removeListeners()
+            done()
           }
         } catch {
           // AudioContext constructor failed — will retry next gesture

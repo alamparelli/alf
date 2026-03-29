@@ -39,19 +39,29 @@ mount -t tmpfs tmpfs /tmp -o size=50m,mode=1777,nosuid,nodev
 # Fresh /proc for PID namespace
 mount -t proc proc /proc
 
-# Mask other apps' data directories with empty tmpfs
-for d in /home/alf/data/apps/*/data; do
-  app="$(basename "$(dirname "$d")")"
+# SEC-003+004: Mask other apps ENTIRELY (not just data/) + sensitive dirs
+for d in /home/alf/data/apps/*/; do
+  app="$(basename "$d")"
   if [ "$app" != %s ]; then
     mount -t tmpfs -o size=0,ro tmpfs "$d" 2>/dev/null || true
   fi
 done
 
+# Mask tools.d (symlinks to other apps' binaries)
+mount -t tmpfs -o size=0,ro tmpfs /home/alf/data/tools.d 2>/dev/null || true
+
 # Mask vault secrets
 mount -t tmpfs -o size=0,ro tmpfs /opt/alf/vault-data 2>/dev/null || true
 
-# Execute the actual command
-exec /bin/bash -c %s
+# SEC-003: Mask conversation logs, config, Claude auth, context (tools.sock)
+mount -t tmpfs -o size=0,ro tmpfs /home/alf/data/logs 2>/dev/null || true
+mount -t tmpfs -o size=0,ro tmpfs /opt/alf/config.d 2>/dev/null || true
+mount -t tmpfs -o size=0,ro tmpfs /home/alf/.claude 2>/dev/null || true
+mount -t tmpfs -o size=0,ro tmpfs /home/alf/data/context 2>/dev/null || true
+
+# SEC-001: Drop all capabilities before executing user command.
+# This prevents the child from using CAP_SYS_ADMIN to undo mount masking.
+exec capsh --drop=all -- -c %s
 `, shellQuote(cfg.AppSlug), shellQuote(originalCommand))
 
 	cmd.Path = "/bin/bash"
@@ -64,7 +74,7 @@ exec /bin/bash -c %s
 
 	// Resource limits
 	cmd.SysProcAttr.Rlimit = []syscall.Rlimit{
-		{Type: syscall.RLIMIT_AS, Cur: 512 << 20, Max: 512 << 20},    // 512MB virtual memory
+		{Type: syscall.RLIMIT_AS, Cur: 128 << 20, Max: 128 << 20},    // 128MB virtual memory (50 procs * 128MB < 2GB container limit)
 		{Type: syscall.RLIMIT_NPROC, Cur: 50, Max: 50},               // 50 processes max
 		{Type: syscall.RLIMIT_FSIZE, Cur: 100 << 20, Max: 100 << 20}, // 100MB max file size
 		{Type: syscall.RLIMIT_CPU, Cur: 60, Max: 60},                 // 60s CPU time
@@ -88,6 +98,8 @@ func SandboxSafeEnv(appDataDir string) []string {
 }
 
 // shellQuote returns a POSIX shell single-quoted string.
+// Strips null bytes to prevent truncation attacks (SEC-010).
 func shellQuote(s string) string {
+	s = strings.ReplaceAll(s, "\x00", "")
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

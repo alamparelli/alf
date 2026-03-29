@@ -69,7 +69,7 @@ func (h *AuthHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   int(ttl.Seconds()),
 		HttpOnly: true,
 		Secure:   h.Secure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteNoneMode, // None required for iframe fetch (apps use POST from same-origin iframes)
 	})
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)

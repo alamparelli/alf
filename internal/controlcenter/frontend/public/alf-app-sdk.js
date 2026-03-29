@@ -494,6 +494,9 @@
         }
       });
 
+      // Auto-capture and report errors
+      _setupErrorReporting();
+
       // Notify parent that app is ready
       postToParent('ready', { slug: this._slug });
     },
@@ -640,8 +643,60 @@
      */
     prompt: function(message, opts) {
       return requestFromParent('prompt', Object.assign({ message: message }, opts || {}));
+    },
+
+    /**
+     * Upload a file to the app's storage.
+     * @param {File} file - File object (from input or drag-drop)
+     * @returns {Promise<{path: string, name: string, size: number}>}
+     */
+    upload: function(file) {
+      if (!_ensureReady('upload')) return Promise.reject(new Error('SDK not initialized'));
+      var formData = new FormData();
+      formData.append('file', file);
+      return SDK.api('/api/apps/' + SDK._slug + '/upload', {
+        method: 'POST',
+        body: formData
+        // Note: do NOT set Content-Type header — browser sets it with boundary
+      });
     }
   };
+
+  // ── Error reporting ───────────────────────────────────────────────
+  function _setupErrorReporting() {
+    function reportError(message, stack, source) {
+      if (!SDK._ready || !SDK._slug) return;
+      try {
+        var body = JSON.stringify({
+          message: String(message).slice(0, 1000),
+          stack: String(stack || '').slice(0, 4000),
+          source: source || 'unknown'
+        });
+        navigator.sendBeacon(
+          '/api/apps/' + SDK._slug + '/errors',
+          new Blob([body], { type: 'application/json' })
+        );
+      } catch(e) { /* swallow — don't cause more errors */ }
+    }
+
+    window.addEventListener('error', function(e) {
+      reportError(
+        e.message || 'Unknown error',
+        e.error && e.error.stack ? e.error.stack : (e.filename + ':' + e.lineno),
+        'onerror'
+      );
+    });
+
+    window.addEventListener('unhandledrejection', function(e) {
+      var msg = 'Unhandled promise rejection';
+      var stack = '';
+      if (e.reason) {
+        msg = e.reason.message || String(e.reason);
+        stack = e.reason.stack || '';
+      }
+      reportError(msg, stack, 'unhandledrejection');
+    });
+  }
 
   function _ensureReady(method) {
     if (!SDK._ready) {

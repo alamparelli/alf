@@ -325,6 +325,40 @@ AlfSDK.storage.entries().then(function(entries) {
 
 ---
 
+## Upload
+
+### `AlfSDK.upload(file)`
+
+Upload a file to the app's persistent storage. Returns `Promise<{path, name, size}>`.
+
+```js
+var input = document.querySelector('input[type=file]');
+input.addEventListener('change', function() {
+  AlfSDK.upload(input.files[0]).then(function(result) {
+    console.log('Uploaded:', result.path, result.size, 'bytes');
+  });
+});
+```
+
+Files are stored at `data/uploads/` within the app's data directory. Max size: 10MB. Filenames are sanitized (path traversal characters stripped).
+
+---
+
+## Error Reporting
+
+Errors are automatically captured and logged when the SDK is initialized. Both `window.onerror` and `unhandledrejection` events are forwarded to the daemon's per-app error log.
+
+### Viewing errors
+
+```
+GET /api/apps/{slug}/errors → { errors: [...], count: N }
+DELETE /api/apps/{slug}/errors → clears the log
+```
+
+The error log is a ring buffer (max 100 entries). Each entry contains `timestamp`, `message`, `stack`, and `source`.
+
+---
+
 ## Events
 
 Inter-app pub/sub with automatic slug namespacing. Events emitted by your app are prefixed with your slug (e.g. `my-app:updated`). Listening to a bare event name listens to your own app's events. Use `slug:event` format to listen to other apps.

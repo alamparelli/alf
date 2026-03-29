@@ -78,6 +78,13 @@ func (h *AppUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SEC-P01: Prevent symlink following — remove existing symlink before creating file
+	if info, err := os.Lstat(destPath); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			os.Remove(destPath)
+		}
+	}
+
 	dst, err := os.Create(destPath)
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "create file failed"})

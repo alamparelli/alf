@@ -105,25 +105,72 @@
     }
   }
 
-  // SEC-001: Sanitize HTML from iframe apps to prevent XSS in parent context.
-  // Strips script/style/iframe/object/embed tags and event handler attributes.
+  // SEC-001 + SEC-P02: Sanitize HTML from iframe apps to prevent XSS in parent context.
+  // Allowlist approach: only permit known-safe tags and attributes.
+  // Double-parse to defeat mutation XSS (mXSS) where first parse creates benign DOM
+  // but serialization + reparse creates dangerous elements.
+  const SAFE_TAGS = new Set([
+    'h1','h2','h3','h4','h5','h6','p','div','span','br','hr','pre','code','blockquote',
+    'ul','ol','li','dl','dt','dd','table','thead','tbody','tfoot','tr','th','td','caption',
+    'a','img','strong','em','b','i','u','s','small','sub','sup','mark','abbr',
+    'button','input','select','option','textarea','label','fieldset','legend',
+    'details','summary','figure','figcaption','time','svg','path','circle','rect','line',
+    'g','text','defs','use','symbol','polyline','polygon','ellipse'
+  ])
+  const SAFE_ATTRS = new Set([
+    'class','id','href','src','alt','title','width','height','colspan','rowspan',
+    'type','name','value','placeholder','checked','disabled','readonly','rows','cols',
+    'target','rel','role','aria-label','aria-hidden','aria-expanded',
+    'data-action','data-id','data-value','data-field','data-type',
+    'viewBox','d','fill','stroke','stroke-width','cx','cy','r','x','y','x1','y1','x2','y2',
+    'points','transform','xmlns','stroke-linecap','stroke-linejoin'
+  ])
+  const DATA_ATTR_PREFIX = 'data-'
+
   function sanitizeHtml(html: string): string {
+    // First pass: parse and strip
     const div = document.createElement('div')
     div.innerHTML = html
-    // Remove dangerous elements
-    const dangerous = div.querySelectorAll('script,style,iframe,object,embed,link,meta,base,form')
-    dangerous.forEach(el => el.remove())
-    // Remove event handler attributes from all elements
-    div.querySelectorAll('*').forEach(el => {
-      for (const attr of Array.from(el.attributes)) {
-        if (attr.name.startsWith('on') || attr.name === 'formaction' ||
-            (attr.name === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')) ||
-            (attr.name === 'src' && attr.value.trim().toLowerCase().startsWith('javascript:'))) {
-          el.removeAttribute(attr.name)
+
+    function cleanNode(parent: Element) {
+      for (const node of Array.from(parent.childNodes)) {
+        if (node.nodeType === Node.TEXT_NODE) continue
+        if (node.nodeType !== Node.ELEMENT_NODE) { node.remove(); continue }
+
+        const el = node as Element
+        const tag = el.tagName.toLowerCase()
+
+        if (!SAFE_TAGS.has(tag)) {
+          el.remove()
+          continue
         }
+
+        // Strip unsafe attributes
+        for (const attr of Array.from(el.attributes)) {
+          const name = attr.name.toLowerCase()
+          if (!SAFE_ATTRS.has(name) && !name.startsWith(DATA_ATTR_PREFIX)) {
+            el.removeAttribute(attr.name)
+            continue
+          }
+          // Block javascript: URIs in href/src
+          if ((name === 'href' || name === 'src') &&
+              attr.value.replace(/[\s\x00-\x1f]/g, '').toLowerCase().startsWith('javascript:')) {
+            el.removeAttribute(attr.name)
+          }
+        }
+
+        if (el.children.length > 0) cleanNode(el)
       }
-    })
-    return div.innerHTML
+    }
+
+    cleanNode(div)
+
+    // Second pass: re-parse serialized output to defeat mXSS
+    const div2 = document.createElement('div')
+    div2.innerHTML = div.innerHTML
+    cleanNode(div2)
+
+    return div2.innerHTML
   }
 
   function handleMessage(e: MessageEvent) {
@@ -211,12 +258,12 @@
         break
       }
 
-      // ── Badge ──
+      // ── Badge (SEC-P03: force to own slug, prevent cross-app spoofing) ──
       case 'badge-set':
-        nav.setBadge('page:' + (e.data.slug || slug), e.data.count || 0)
+        nav.setBadge('page:' + slug, e.data.count || 0)
         break
       case 'badge-increment':
-        nav.incrementBadge('page:' + (e.data.slug || slug))
+        nav.incrementBadge('page:' + slug)
         break
     }
   }

@@ -149,6 +149,16 @@
   // SSH mode: parsed from URL hash ?ssh=service-name
   let sshService = $state<string | null>(null)
 
+  function parseSSHFromHash() {
+    const hash = window.location.hash
+    const sshMatch = hash.match(/[?&]ssh=([^&]+)/)
+    const newSvc = sshMatch ? decodeURIComponent(sshMatch[1]) : null
+    if (newSvc && newSvc !== sshService) {
+      sshService = newSvc
+      newSession()
+    }
+  }
+
   // Admin mode: runs terminal as alfd (uid 1001) with daemon-level access
   let adminMode = $state(false)
 
@@ -280,11 +290,8 @@
     window.addEventListener('resize', detectMobile)
 
     // Parse SSH service from URL hash: #/terminal?ssh=service-name
-    const hash = window.location.hash
-    const sshMatch = hash.match(/[?&]ssh=([^&]+)/)
-    if (sshMatch) {
-      sshService = decodeURIComponent(sshMatch[1])
-    }
+    parseSSHFromHash()
+    window.addEventListener('hashchange', parseSSHFromHash)
 
     const theme = getTermTheme()
 
@@ -339,6 +346,7 @@
   })
 
   onDestroy(() => {
+    window.removeEventListener('hashchange', parseSSHFromHash)
     window.removeEventListener('resize', detectMobile)
     if (ws) {
       ws.close()

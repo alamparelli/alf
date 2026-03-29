@@ -86,6 +86,13 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.handleTestService(w, r, name)
+	case strings.HasPrefix(path, "services/") && r.Method == http.MethodPut:
+		name := strings.TrimPrefix(path, "services/")
+		if !isVaultSafeName(name) {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			return
+		}
+		h.handleUpdateService(w, r, name)
 	case strings.HasPrefix(path, "services/") && r.Method == http.MethodDelete:
 		name := strings.TrimPrefix(path, "services/")
 		if !isVaultSafeName(name) {
@@ -228,6 +235,21 @@ func (h *VaultHandler) handleListServices(w http.ResponseWriter, r *http.Request
 		return
 	}
 	respondJSON(w, http.StatusOK, services)
+}
+
+func (h *VaultHandler) handleUpdateService(w http.ResponseWriter, r *http.Request, name string) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyLarge))
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "read body: " + err.Error()})
+		return
+	}
+	body = h.resolveSecretRefs(body)
+	c := h.Manager.Client()
+	if err := c.UpdateService(name, strings.NewReader(string(body))); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (h *VaultHandler) handleAddService(w http.ResponseWriter, r *http.Request) {

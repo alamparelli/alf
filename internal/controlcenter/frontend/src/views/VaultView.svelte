@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { Lock, Unlock, Shield, Key, FileText, Plus, Trash2, Download, Upload, Eye, EyeOff, Copy, RefreshCw, AlertTriangle, CheckCircle, ExternalLink, Loader2, Zap, Pencil, Info, Terminal } from 'lucide-svelte'
+  import { nav } from '../stores/nav.svelte'
   import Card from '../components/shared/Card.svelte'
   import Modal from '../components/shared/Modal.svelte'
   import Toggle from '../components/shared/Toggle.svelte'
@@ -28,6 +29,7 @@
     ssh_host?: string
     ssh_port?: number
     ssh_user?: string
+    ssh_key_file_ref?: string
     ssh_connected?: boolean
     header_name?: string
     username?: string
@@ -295,7 +297,7 @@
     svcSshHost = svc?.ssh_host || ''
     svcSshPort = svc?.ssh_port || 22
     svcSshUser = svc?.ssh_user || ''
-    svcSshKeyFileRef = ''
+    svcSshKeyFileRef = svc?.ssh_key_file_ref || ''
     svcSshPassphrase = ''
     showServiceModal = true
   }
@@ -364,8 +366,12 @@
         payload.tls_skip_verify = svcTlsSkip
         payload.session_cookies = svcSessionCookies
       }
-      await api('/api/vault/services', {
-        method: 'POST',
+      const isUpdate = !!editingService
+      const url = isUpdate
+        ? `/api/vault/services/${encodeURIComponent(svcName.trim())}`
+        : '/api/vault/services'
+      await api(url, {
+        method: isUpdate ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
@@ -755,9 +761,9 @@
                   <Info size={12} />
                 </button>
                 {#if svc.auth_type === 'ssh_key'}
-                  <a class="btn btn-sm" href="#/terminal?ssh={encodeURIComponent(svc.name)}" title="Connect SSH">
+                  <button class="btn btn-sm" onclick={() => { window.location.hash = '#/terminal?ssh=' + encodeURIComponent(svc.name); nav.navigateTo('terminal') }} title="Connect SSH">
                     <Terminal size={12} />
-                  </a>
+                  </button>
                 {:else}
                   <button class="btn btn-sm" onclick={() => testService(svc.name)} title="Test connection">
                     <Zap size={12} />

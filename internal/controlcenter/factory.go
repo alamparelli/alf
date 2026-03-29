@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
@@ -175,9 +176,14 @@ func HandlerFactory(deps Deps) http.Handler {
 
 	// Apps: directory-based apps with index.html + assets.
 	if deps.AppStore != nil {
-		mux.Handle("/api/apps/", &AppListHandler{
-			Store: deps.AppStore,
-		})
+		appStorage := &AppStorageHandler{DataDir: deps.DataDir}
+		mux.Handle("/api/apps/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/storage") {
+				appStorage.ServeHTTP(w, r)
+				return
+			}
+			(&AppListHandler{Store: deps.AppStore}).ServeHTTP(w, r)
+		}))
 		mux.Handle("/apps/", &AppHandler{
 			Store: deps.AppStore,
 		})

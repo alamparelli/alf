@@ -1,12 +1,21 @@
 <script lang="ts">
   import { nav, SYSTEM_TABS } from '../stores/nav.svelte'
   import { apps } from '../stores/apps.svelte'
+  import { spotlightSettings } from '../stores/spotlight.svelte'
   import {
     MessageCircle, Home, Terminal, Layers, CalendarClock,
     Users, SlidersHorizontal, Shield, Lock, Store,
-    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package, Zap, FolderOpen, Mail
+    Settings, ScrollText, BookOpen, ChevronDown, Pin, Package, Zap, FolderOpen, Mail, Search
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
+
+  function openSpotlight() {
+    window.dispatchEvent(new CustomEvent('alf:open-spotlight'))
+  }
+
+  const shortcutLabel = $derived(
+    (navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl') + '+' + spotlightSettings.shortcutKey.toUpperCase()
+  )
 
   const ICON_MAP: Record<string, any> = {
     'message-circle': MessageCircle,
@@ -31,6 +40,9 @@
 <aside class="sidebar" class:open={nav.sidebarOpen}>
   <div class="sidebar-header">
     <h1><span>ALF</span> OS<span class="sidebar-dot"></span></h1>
+    <button class="sidebar-search" onclick={openSpotlight} title="Search ({shortcutLabel})">
+      <Search size={15} />
+    </button>
   </div>
 
   <nav class="sidebar-nav">
@@ -143,6 +155,25 @@
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
+    justify-content: space-between;
+  }
+
+  .sidebar-search {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 6px;
+    display: flex;
+    align-items: center;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+  }
+
+  .sidebar-search:hover {
+    color: var(--text);
+    background: var(--bg-input);
+    border-color: var(--border);
   }
 
   .sidebar-header h1 {

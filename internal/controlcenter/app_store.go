@@ -15,6 +15,7 @@ type AppMeta struct {
 	DisplayName string `json:"display_name,omitempty"`
 	Icon        string `json:"icon,omitempty"`
 	Description string `json:"description,omitempty"`
+	Category    string `json:"category,omitempty"`
 	ModTime     string `json:"mod_time"`
 }
 
@@ -23,6 +24,7 @@ type appJSON struct {
 	Name        string `json:"name"`
 	Icon        string `json:"icon"`
 	Description string `json:"description"`
+	Category    string `json:"category"`
 }
 
 // AppStore provides read access to directory-based apps.
@@ -97,6 +99,19 @@ func (s *fileAppStore) List() ([]AppMeta, error) {
 				}
 				meta.Icon = aj.Icon
 				meta.Description = aj.Description
+				meta.Category = aj.Category
+			}
+		}
+
+		// Fallback: read category from manifest.json if app.json didn't provide one.
+		if meta.Category == "" {
+			if data, err := os.ReadFile(filepath.Join(s.dir, name, "manifest.json")); err == nil {
+				var mf struct {
+					Category string `json:"category"`
+				}
+				if json.Unmarshal(data, &mf) == nil {
+					meta.Category = mf.Category
+				}
 			}
 		}
 

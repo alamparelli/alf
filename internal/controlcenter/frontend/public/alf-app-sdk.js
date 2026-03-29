@@ -1,34 +1,403 @@
 /**
- * ALF App SDK v1.0
- * Lightweight SDK for marketplace apps running in iframes.
- * Provides theme sync, authenticated API calls, CLI tool invocation,
- * parent navigation, and toast notifications.
+ * ALF App SDK v2.0
+ * Complete SDK for marketplace apps running in iframes.
+ *
+ * Modules:
+ *   Core      — init, api, bash, tool, navigate, toast, getTheme
+ *   Audio     — AlfSDK.audio.load/play/playUrl (mobile autoplay unlock)
+ *   Sheet     — AlfSDK.sheet/closeSheet (native CC bottom-sheet modals)
+ *   Storage   — AlfSDK.storage.get/set/remove/clear (per-app key/value)
+ *   Dialog    — AlfSDK.confirm/prompt (native CC dialog, bottom-sheet on mobile)
+ *   Events    — AlfSDK.events.on/off/emit (inter-app pub/sub via parent)
+ *   Viewport  — AlfSDK.viewport.isMobile/safeArea/orientation/onChange
+ *   Haptics   — AlfSDK.haptics.tap/notify/vibrate
+ *   Clipboard — AlfSDK.clipboard.write/read
+ *   I18n      — AlfSDK.i18n.locale/lang/dir
+ *   Badge     — AlfSDK.badge.set/increment/clear
  *
  * Usage:
  *   <script src="/static/alf-app-sdk.js"></script>
- *   AlfSDK.init({ slug: 'my-app', onThemeChange: function(palette, dark) { ... } });
- *   AlfSDK.tool('list').then(function(output) { ... });
+ *   AlfSDK.init({ slug: 'my-app', onThemeChange: fn });
  */
 (function(global) {
   'use strict';
 
+  var _msgId = 0;
+  var _pendingReplies = {}; // id -> { resolve, reject }
+
+  function postToParent(action, data) {
+    if (parent === window) return;
+    parent.postMessage(Object.assign({ type: 'alf-app', action: action }, data || {}), '*');
+  }
+
+  function requestFromParent(action, data) {
+    return new Promise(function(resolve, reject) {
+      var id = ++_msgId;
+      _pendingReplies[id] = { resolve: resolve, reject: reject };
+      postToParent(action, Object.assign({ _replyId: id }, data || {}));
+      // Timeout after 30s
+      setTimeout(function() {
+        if (_pendingReplies[id]) {
+          delete _pendingReplies[id];
+          reject(new Error('Parent reply timeout'));
+        }
+      }, 30000);
+    });
+  }
+
+  // ── Audio Manager ──────────────────────────────────────────────────
+  var AudioManager = {
+    _ctx: null,
+    _unlocked: false,
+    _bufferCache: {},
+    _pendingUnlock: [],
+
+    _tryUnlock: function() {
+      try {
+        if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (this._ctx.state === 'suspended') {
+          var self = this;
+          this._ctx.resume().then(function() {
+            self._unlocked = true;
+            self._flushPending();
+          });
+        } else {
+          this._unlocked = true;
+          this._flushPending();
+        }
+      } catch(e) { /* retry next gesture */ }
+    },
+
+    _flushPending: function() {
+      while (this._pendingUnlock.length) (this._pendingUnlock.shift())();
+    },
+
+    _installListeners: function() {
+      var self = this;
+      var done = false;
+      var handler = function() {
+        self._tryUnlock();
+        if (self._unlocked && !done) {
+          done = true;
+          ['click','touchstart','touchend','keydown'].forEach(function(evt) {
+            document.removeEventListener(evt, handler);
+          });
+        }
+      };
+      ['click','touchstart','touchend','keydown'].forEach(function(evt) {
+        document.addEventListener(evt, handler);
+      });
+    },
+
+    getContext: function() { return this._ctx; },
+    isUnlocked: function() { return this._unlocked; },
+
+    load: function(url) {
+      var self = this;
+      if (this._bufferCache[url]) return Promise.resolve(this._bufferCache[url]);
+      return fetch(url).then(function(r) {
+        if (!r.ok) throw new Error('Audio load failed: ' + r.status);
+        return r.arrayBuffer();
+      }).then(function(data) {
+        if (!self._ctx) throw new Error('AudioContext not ready');
+        return self._ctx.decodeAudioData(data);
+      }).then(function(buffer) {
+        self._bufferCache[url] = buffer;
+        return buffer;
+      });
+    },
+
+    play: function(buffer, opts) {
+      if (!this._ctx || !this._unlocked) return null;
+      opts = opts || {};
+      if (this._ctx.state === 'suspended') this._ctx.resume();
+      var src = this._ctx.createBufferSource();
+      src.buffer = buffer;
+      src.loop = !!opts.loop;
+      var gain = this._ctx.createGain();
+      gain.gain.value = opts.volume !== undefined ? opts.volume : 1.0;
+      src.connect(gain);
+      gain.connect(this._ctx.destination);
+      src.start();
+      return src;
+    },
+
+    playUrl: function(url, opts) {
+      var self = this;
+      return this.load(url).then(function(buf) { return self.play(buf, opts); });
+    },
+
+    onUnlock: function(cb) {
+      if (this._unlocked) { cb(); return; }
+      this._pendingUnlock.push(cb);
+    }
+  };
+
+  // ── Storage ────────────────────────────────────────────────────────
+  var StorageManager = {
+    _slug: null,
+
+    _path: function(key) {
+      var base = '/api/apps/' + this._slug + '/storage';
+      return key ? base + '?key=' + encodeURIComponent(key) : base;
+    },
+
+    /** Get all keys or a single key. */
+    get: function(key) {
+      return SDK.api(this._path(key)).then(function(data) {
+        return key ? data.value : data;
+      });
+    },
+
+    /** Set one or more keys (pass object). */
+    set: function(keyOrObj, value) {
+      var payload = {};
+      if (typeof keyOrObj === 'string') {
+        payload[keyOrObj] = value;
+      } else {
+        payload = keyOrObj;
+      }
+      return SDK.api(this._path(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    },
+
+    /** Remove a key. */
+    remove: function(key) {
+      return SDK.api(this._path(key), { method: 'DELETE' });
+    },
+
+    /** Clear all storage for this app. */
+    clear: function() {
+      return SDK.api(this._path(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+    }
+  };
+
+  // ── Events (inter-app pub/sub) ─────────────────────────────────────
+  var EventManager = {
+    _handlers: {},
+
+    /** Subscribe to a custom event from other apps or the CC. */
+    on: function(event, handler) {
+      if (!this._handlers[event]) this._handlers[event] = [];
+      this._handlers[event].push(handler);
+    },
+
+    /** Unsubscribe. */
+    off: function(event, handler) {
+      if (!this._handlers[event]) return;
+      this._handlers[event] = this._handlers[event].filter(function(h) { return h !== handler; });
+    },
+
+    /** Emit an event (relayed via parent to other apps). */
+    emit: function(event, data) {
+      postToParent('event-emit', { event: event, payload: data });
+    },
+
+    _dispatch: function(event, data) {
+      var list = this._handlers[event] || [];
+      for (var i = 0; i < list.length; i++) {
+        try { list[i](data); } catch(e) { console.warn('[AlfSDK] event handler error:', e); }
+      }
+    }
+  };
+
+  // ── Viewport ───────────────────────────────────────────────────────
+  var ViewportManager = {
+    _changeListeners: [],
+
+    /** True if viewport width <= 768px. */
+    isMobile: function() {
+      return window.innerWidth <= 768;
+    },
+
+    /** True if running as installed PWA (standalone). */
+    isPWA: function() {
+      return window.matchMedia('(display-mode: standalone)').matches ||
+             window.navigator.standalone === true;
+    },
+
+    /** Safe area insets (CSS env values, parsed to numbers). */
+    safeArea: function() {
+      var style = getComputedStyle(document.documentElement);
+      function px(prop) {
+        var val = style.getPropertyValue('env(' + prop + ', 0px)');
+        return parseFloat(val) || 0;
+      }
+      // Alternative: read from CSS custom properties if set
+      return {
+        top: px('safe-area-inset-top'),
+        bottom: px('safe-area-inset-bottom'),
+        left: px('safe-area-inset-left'),
+        right: px('safe-area-inset-right')
+      };
+    },
+
+    /** Current orientation: 'portrait' or 'landscape'. */
+    orientation: function() {
+      if (screen.orientation) return screen.orientation.type.indexOf('portrait') >= 0 ? 'portrait' : 'landscape';
+      return window.innerHeight > window.innerWidth ? 'portrait' : 'landscape';
+    },
+
+    /** Screen dimensions. */
+    size: function() {
+      return { width: window.innerWidth, height: window.innerHeight };
+    },
+
+    /** Register a callback for viewport changes (resize, orientation). */
+    onChange: function(cb) {
+      this._changeListeners.push(cb);
+    },
+
+    _notify: function() {
+      var info = { mobile: this.isMobile(), orientation: this.orientation(), size: this.size() };
+      for (var i = 0; i < this._changeListeners.length; i++) {
+        try { this._changeListeners[i](info); } catch(e) {}
+      }
+    },
+
+    _install: function() {
+      var self = this;
+      window.addEventListener('resize', function() { self._notify(); });
+      if (screen.orientation) {
+        screen.orientation.addEventListener('change', function() { self._notify(); });
+      }
+    }
+  };
+
+  // ── Haptics ────────────────────────────────────────────────────────
+  var HapticsManager = {
+    _available: typeof navigator !== 'undefined' && 'vibrate' in navigator,
+
+    /** Light tap feedback (10ms). */
+    tap: function() {
+      if (this._available) navigator.vibrate(10);
+    },
+
+    /** Notification feedback (double pulse). */
+    notify: function() {
+      if (this._available) navigator.vibrate([30, 50, 30]);
+    },
+
+    /** Success feedback (rising pattern). */
+    success: function() {
+      if (this._available) navigator.vibrate([10, 30, 20, 30, 40]);
+    },
+
+    /** Error feedback (heavy buzz). */
+    error: function() {
+      if (this._available) navigator.vibrate([50, 50, 100]);
+    },
+
+    /** Custom vibration pattern. */
+    vibrate: function(pattern) {
+      if (this._available) navigator.vibrate(pattern);
+    },
+
+    /** True if device supports vibration. */
+    isAvailable: function() {
+      return this._available;
+    }
+  };
+
+  // ── Clipboard ──────────────────────────────────────────────────────
+  var ClipboardManager = {
+    /** Copy text to clipboard (delegates to parent for cross-frame support). */
+    write: function(text) {
+      return requestFromParent('clipboard-write', { text: text });
+    },
+
+    /** Read text from clipboard (delegates to parent). */
+    read: function() {
+      return requestFromParent('clipboard-read');
+    }
+  };
+
+  // ── I18n ───────────────────────────────────────────────────────────
+  var I18nManager = {
+    /** Full locale string (e.g. 'en-US', 'fr-FR'). */
+    locale: function() {
+      return navigator.language || navigator.userLanguage || 'en';
+    },
+
+    /** Language code (e.g. 'en', 'fr'). */
+    lang: function() {
+      return this.locale().split('-')[0];
+    },
+
+    /** Text direction: 'ltr' or 'rtl'. */
+    dir: function() {
+      var rtlLangs = ['ar','he','fa','ur','ps','yi','sd'];
+      return rtlLangs.indexOf(this.lang()) >= 0 ? 'rtl' : 'ltr';
+    },
+
+    /** All preferred languages (navigator.languages). */
+    languages: function() {
+      return navigator.languages ? Array.from(navigator.languages) : [this.locale()];
+    }
+  };
+
+  // ── Badge ──────────────────────────────────────────────────────────
+  var BadgeManager = {
+    _slug: null,
+
+    /** Set badge count on the app's sidebar icon. */
+    set: function(count) {
+      postToParent('badge-set', { slug: this._slug, count: count });
+    },
+
+    /** Increment badge by 1. */
+    increment: function() {
+      postToParent('badge-increment', { slug: this._slug });
+    },
+
+    /** Clear the badge. */
+    clear: function() {
+      postToParent('badge-set', { slug: this._slug, count: 0 });
+    }
+  };
+
+  // ── Main SDK ───────────────────────────────────────────────────────
   var SDK = {
     _ready: false,
     _slug: null,
     _listeners: {},
-    _authFailed: false, // stops all API calls after 401 until page reload
+    _authFailed: false,
+
+    audio: AudioManager,
+    storage: StorageManager,
+    events: EventManager,
+    viewport: ViewportManager,
+    haptics: HapticsManager,
+    clipboard: ClipboardManager,
+    i18n: I18nManager,
+    badge: BadgeManager,
 
     /**
      * Initialize the SDK. Call once on page load.
      * @param {Object} opts
-     * @param {string} opts.slug - App slug (used for tool/data path resolution)
-     * @param {function} [opts.onThemeChange] - Called with (palette, isDark) when theme changes
-     * @param {function} [opts.onDestroy] - Called when app is being unloaded
+     * @param {string} opts.slug - App slug
+     * @param {function} [opts.onThemeChange] - Called with (palette, isDark)
+     * @param {function} [opts.onDestroy] - Called when app is unloaded
      */
     init: function(opts) {
       opts = opts || {};
       this._slug = opts.slug || '';
       this._ready = true;
+
+      // Bind slug to sub-managers
+      StorageManager._slug = this._slug;
+      BadgeManager._slug = this._slug;
+
+      // Install subsystem listeners
+      AudioManager._installListeners();
+      ViewportManager._install();
 
       if (opts.onThemeChange) this._listeners.theme = opts.onThemeChange;
       if (opts.onDestroy) this._listeners.destroy = opts.onDestroy;
@@ -39,23 +408,43 @@
         var msg = e.data;
         if (!msg || msg.type !== 'alf') return;
 
+        // Theme sync
         if (msg.action === 'theme' && self._listeners.theme) {
           self._listeners.theme(msg.palette, msg.dark);
         }
+        // Destroy
         if (msg.action === 'destroy' && self._listeners.destroy) {
           self._listeners.destroy();
         }
+        // Inter-app event relay
+        if (msg.action === 'event-relay') {
+          EventManager._dispatch(msg.event, msg.payload);
+        }
+        // Sheet action callback relay
+        if (msg.action === 'sheet-action' && msg.name && SDK._sheetActions) {
+          var handler = SDK._sheetActions[msg.name];
+          if (handler) {
+            try { handler(msg.params || {}); } catch(e) { console.warn('[AlfSDK] sheet action error:', e); }
+          }
+        }
+        // Reply to requestFromParent
+        if (msg.action === 'reply' && msg._replyId) {
+          var pending = _pendingReplies[msg._replyId];
+          if (pending) {
+            delete _pendingReplies[msg._replyId];
+            if (msg.error) pending.reject(new Error(msg.error));
+            else pending.resolve(msg.result);
+          }
+        }
       });
 
-      // Notify parent that app is ready, request current theme
-      if (parent !== window) {
-        parent.postMessage({ type: 'alf-app', action: 'ready', slug: this._slug }, '*');
-      }
+      // Notify parent that app is ready
+      postToParent('ready', { slug: this._slug });
     },
 
     /**
-     * Authenticated API call. Same-origin cookies are used automatically.
-     * @param {string} path - API path (e.g. '/api/vault/secrets')
+     * Authenticated API call.
+     * @param {string} path - API path
      * @param {Object} [opts] - fetch options
      * @returns {Promise<any>}
      */
@@ -67,7 +456,7 @@
       opts.credentials = 'same-origin';
       return fetch(path, opts).then(function(r) {
         if (r.status === 401) {
-          SDK._authFailed = true; // stop all future calls to avoid flooding
+          SDK._authFailed = true;
           SDK.toast('Session expired — reload page to reconnect', 'error');
           throw new Error('401 Unauthorized');
         }
@@ -76,13 +465,14 @@
             throw new Error(r.statusText);
           });
         }
-        return r.json();
+        var ct = r.headers.get('content-type') || '';
+        return ct.indexOf('json') >= 0 ? r.json() : r.text();
       });
     },
 
     /**
      * Execute a shell command via /api/bash.
-     * @param {string} cmd - Shell command to execute
+     * @param {string} cmd
      * @returns {Promise<{output: string, exit_code: number, error: string}>}
      */
     bash: function(cmd) {
@@ -94,10 +484,10 @@
     },
 
     /**
-     * Run the app's CLI tool with a given action and arguments.
-     * @param {string} action - Tool action name
-     * @param {Object} [args] - Additional arguments
-     * @returns {Promise<string>} - Tool output text
+     * Run the app's CLI tool.
+     * @param {string} action
+     * @param {Object} [args]
+     * @returns {Promise<string>}
      */
     tool: function(action, args) {
       var slug = this._slug;
@@ -112,36 +502,78 @@
       });
     },
 
-    /**
-     * Request the parent SPA to navigate to a view.
-     * @param {string} view - View name (e.g. 'chat', 'settings', 'page:my-app')
-     */
-    navigate: function(view) {
-      if (parent !== window) {
-        parent.postMessage({ type: 'alf-app', action: 'navigate', view: view }, '*');
-      }
-    },
+    /** Navigate the parent CC to a view. */
+    navigate: function(view) { postToParent('navigate', { view: view }); },
 
-    /**
-     * Show a toast notification in the parent SPA.
-     * @param {string} msg - Toast message
-     * @param {string} [type='success'] - Toast type: 'success', 'error', 'info'
-     */
-    toast: function(msg, type) {
-      if (parent !== window) {
-        parent.postMessage({ type: 'alf-app', action: 'toast', msg: msg, type: type || 'success' }, '*');
-      }
-    },
+    /** Show a toast in the parent CC. */
+    toast: function(msg, type) { postToParent('toast', { msg: msg, type: type || 'success' }); },
 
-    /**
-     * Get current theme information.
-     * @returns {{ palette: string, dark: boolean }}
-     */
+    /** Get current theme. */
     getTheme: function() {
       return {
         palette: localStorage.getItem('alf-palette') || 'sage',
         dark: window.matchMedia('(prefers-color-scheme: dark)').matches
       };
+    },
+
+    /**
+     * Show HTML in a native bottom sheet (mobile) / modal (desktop).
+     * Supports interactive callbacks via data-action attributes.
+     *
+     * @param {string} html - HTML content. Use data-action="name" on interactive elements.
+     *   Additional data-* attributes are passed as params to the callback.
+     * @param {Object} [actions] - Map of action name → callback function.
+     *   Callback receives an object with all data-* attributes from the clicked element.
+     *
+     * @example
+     *   AlfSDK.sheet(
+     *     '<h3>Book Detail</h3>' +
+     *     '<button data-action="delete" data-id="12">Delete</button>' +
+     *     '<button data-action="rate" data-id="12" data-stars="5">★★★★★</button>',
+     *     {
+     *       delete: function(p) { deleteBook(p.id); AlfSDK.closeSheet(); },
+     *       rate:   function(p) { setRating(p.id, p.stars); }
+     *     }
+     *   );
+     */
+    sheet: function(html, actions) {
+      SDK._sheetActions = actions || {};
+      postToParent('sheet', { html: html, hasActions: !!actions });
+    },
+
+    /**
+     * Update the content of the currently open sheet without closing it.
+     * Preserves scroll position. Actions map from the original sheet() call is kept.
+     * @param {string} html - New HTML content
+     */
+    updateSheet: function(html) {
+      postToParent('update-sheet', { html: html });
+    },
+
+    /** Close the current sheet. */
+    closeSheet: function() {
+      SDK._sheetActions = {};
+      postToParent('close-sheet');
+    },
+
+    /**
+     * Show a confirmation dialog (CC-native bottom sheet on mobile).
+     * @param {string} message
+     * @param {Object} [opts] - { title: string, confirmText: string, cancelText: string }
+     * @returns {Promise<boolean>}
+     */
+    confirm: function(message, opts) {
+      return requestFromParent('confirm', Object.assign({ message: message }, opts || {}));
+    },
+
+    /**
+     * Show a prompt dialog (CC-native bottom sheet on mobile).
+     * @param {string} message
+     * @param {Object} [opts] - { title: string, defaultValue: string, placeholder: string, confirmText: string }
+     * @returns {Promise<string|null>} - Input value, or null if cancelled
+     */
+    prompt: function(message, opts) {
+      return requestFromParent('prompt', Object.assign({ message: message }, opts || {}));
     }
   };
 

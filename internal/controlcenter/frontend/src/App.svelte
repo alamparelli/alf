@@ -52,7 +52,8 @@
     events.subscribe('apps', () => apps.load())
     events.subscribe('marketplace', () => apps.load())
     events.subscribe('new_message', () => {
-      sound.play()
+      // Only play sound when NOT on chat view — ChatView handles its own sound.play()
+      if (nav.currentView !== 'chat') sound.play()
     })
 
     // Auto-show setup wizard on first visit if setup is incomplete
@@ -77,13 +78,9 @@
       showWizard = true
     })
 
-    // Listen for SDK messages from iframe apps
+    // Listen for SDK ready message from iframe apps (theme sync)
     window.addEventListener('message', (e: MessageEvent) => {
       if (e.data?.type !== 'alf-app') return
-      if (e.data.action === 'navigate') nav.navigateTo(e.data.view)
-      if (e.data.action === 'toast') {
-        toasts.show(e.data.msg, e.data.type)
-      }
       if (e.data.action === 'ready' && e.source) {
         (e.source as Window).postMessage(
           { type: 'alf', action: 'theme', palette: theme.palette, dark: theme.isDark },
@@ -534,6 +531,7 @@
     }
   }
 
+  /* FAB: hidden on desktop (search is in sidebar), visible on mobile only */
   :global(.spotlight-fab) {
     position: fixed;
     bottom: 24px;
@@ -546,7 +544,7 @@
     color: var(--bg);
     border: none;
     cursor: pointer;
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: center;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
@@ -559,42 +557,14 @@
   }
 
   :global(.fab-tooltip) {
-    position: absolute;
-    right: 52px;
-    white-space: nowrap;
-    background: var(--bg-card, #2a2a2a);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-size: 0.75rem;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.15s;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  }
-
-  :global(.fab-tooltip kbd) {
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 0 4px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
-    margin-left: 4px;
-  }
-
-  :global(.spotlight-fab:hover .fab-tooltip) {
-    opacity: 1;
+    display: none;
   }
 
   @media (max-width: 768px) {
     :global(.spotlight-fab) {
+      display: flex;
       bottom: calc(16px + env(safe-area-inset-bottom, 4px));
       right: 16px;
-    }
-    :global(.fab-tooltip) {
-      display: none;
     }
   }
 </style>

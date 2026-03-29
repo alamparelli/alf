@@ -1,7 +1,7 @@
 ---
 name: sdk-app-builder
 description: Build standalone ALF apps — source-only (compiled at install), AlfSDK frontend, manifest, marketplace publishing
-version: "5"
+version: "6"
 triggers: app, sdk, create app, new app, build app, make app, web app, marketplace app, publish app, standalone app, webapp, build application, create application, marketplace tool, app sdk, sdk app, new app with sdk, app with theme, interactive app
 ---
 
@@ -60,6 +60,10 @@ Read the relevant reference file for templates, patterns, and API details:
 
 ### Frontend rules
 - Init `AlfSDK` with `onThemeChange` — see `reference/FRONTEND.md`
+- **Use SDK v2 APIs** — audio, storage, confirm/prompt, haptics, clipboard, badges, viewport, events
+- **Audio: always use `AlfSDK.audio`** — never create your own AudioContext (mobile unlock handled by SDK)
+- **Storage: use `AlfSDK.storage`** for persistent data — server-side key/value, survives app updates
+- **Dialogs: use `AlfSDK.confirm()` / `AlfSDK.prompt()`** — renders as iOS bottom sheet on mobile
 - CSS variables only: `--bg`, `--text`, `--accent`, `--bg-card`, `--border`, `--text-dim`, `--on-accent`, `--radius`, `--green`, `--red`, `--yellow`, `--mauve`, `--sapphire`
 - Set `font-family` explicitly (Google Fonts blocked by CSP in iframes)
 - No `unsafe-eval` frameworks (Vue, Angular, Petite Vue)

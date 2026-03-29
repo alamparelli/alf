@@ -379,8 +379,9 @@ func cleanDeprecatedSkills(skillsDir string) {
 	}
 }
 
-// seedBundledSkills copies missing skill directories from /opt/alf/defaults/skills.d
-// into the active skills directory. Existing skills are never overwritten.
+// seedBundledSkills copies skill directories from /opt/alf/defaults/skills.d
+// into the active skills directory. New skills are created; existing skills are
+// updated when the bundled version is newer (based on SKILL.md version field).
 func seedBundledSkills(skillsDir string) {
 	const defaultsDir = "/opt/alf/defaults/skills.d"
 	entries, err := os.ReadDir(defaultsDir)
@@ -403,18 +404,57 @@ func seedBundledSkills(skillsDir string) {
 			}
 			continue
 		}
+		src := filepath.Join(defaultsDir, e.Name())
 		dest := filepath.Join(skillsDir, e.Name())
 		if _, err := os.Stat(dest); err == nil {
-			continue // skill already exists
+			// Skill exists — check if bundled version is newer.
+			if !bundledSkillNewer(src, dest) {
+				continue
+			}
+			log.Printf("upgrading bundled skill: %s", e.Name())
+			os.RemoveAll(dest)
 		}
-		// Copy entire skill directory.
-		src := filepath.Join(defaultsDir, e.Name())
 		if err := copyDir(src, dest); err != nil {
 			log.Printf("seed skill %s: %v", e.Name(), err)
 		} else {
 			log.Printf("seeded bundled skill: %s", e.Name())
 		}
 	}
+}
+
+// bundledSkillNewer returns true if the bundled SKILL.md has a higher version than installed.
+func bundledSkillNewer(srcDir, destDir string) bool {
+	srcVer := readSkillVersion(filepath.Join(srcDir, "SKILL.md"))
+	destVer := readSkillVersion(filepath.Join(destDir, "SKILL.md"))
+	if srcVer == "" || destVer == "" {
+		return false
+	}
+	return srcVer > destVer
+}
+
+// readSkillVersion extracts the version field from SKILL.md frontmatter.
+func readSkillVersion(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	content := string(data)
+	if !strings.HasPrefix(content, "---\n") {
+		return ""
+	}
+	end := strings.Index(content[4:], "\n---")
+	if end < 0 {
+		return ""
+	}
+	for _, line := range strings.Split(content[4:4+end], "\n") {
+		line = strings.TrimSpace(line)
+		if k, v, ok := strings.Cut(line, ":"); ok {
+			if strings.TrimSpace(k) == "version" {
+				return strings.Trim(strings.TrimSpace(v), "\"'")
+			}
+		}
+	}
+	return ""
 }
 
 // seedBundledTeams copies missing team JSON files from /opt/alf/defaults/teams

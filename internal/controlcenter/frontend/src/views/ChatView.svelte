@@ -543,6 +543,13 @@
     }
   }
 
+  // Scroll to bottom when navigating back to chat view
+  $effect(() => {
+    if (nav.currentView === 'chat') {
+      scrollToBottom()
+    }
+  })
+
   // --- Lifecycle ---
   let unsubTiers: (() => void) | null = null
   let unsubNewMsg: (() => void) | null = null

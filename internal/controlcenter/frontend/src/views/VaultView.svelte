@@ -111,6 +111,7 @@
   // File upload
   let fileInput: HTMLInputElement | undefined
   let uploadingFile = $state(false)
+  let secretFileInput: HTMLInputElement | undefined
 
   // Built-in tokens (from status)
   let adminToken = $state('')
@@ -485,6 +486,20 @@
     secretName = secret?.name || ''
     secretValue = ''
     showSecretModal = true
+  }
+
+  function loadSecretFile() {
+    if (!secretFileInput?.files?.length) return
+    const file = secretFileInput.files[0]
+    const reader = new FileReader()
+    reader.onload = () => {
+      secretValue = reader.result as string
+      if (!secretName.trim()) {
+        secretName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '-')
+      }
+    }
+    reader.readAsText(file)
+    secretFileInput.value = ''
   }
 
   async function saveSecret() {
@@ -1172,7 +1187,9 @@
     </div>
     <div class="form-group">
       <label>Value</label>
-      <textarea class="input" bind:value={secretValue} placeholder="Secret value..." rows={3}></textarea>
+      <textarea class="input secret-textarea" bind:value={secretValue} placeholder="Secret value or paste a private key..." rows={6} style="font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; white-space: pre;"></textarea>
+      <input type="file" bind:this={secretFileInput} onchange={loadSecretFile} style="display:none" />
+      <button class="btn btn-sm" style="margin-top: 6px;" onclick={() => secretFileInput?.click()}>Load from file</button>
     </div>
     <div class="modal-actions">
       <button class="btn btn-primary" onclick={saveSecret} disabled={savingSecret}>

@@ -290,15 +290,35 @@ func writeLLMSIndex(dataDir string) {
 		if err != nil {
 			continue
 		}
-		// Extract title from first # heading.
-		title := id
+		// Extract title and summary from doc content.
+		title, summary := id, ""
+		foundTitle := false
 		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "# ") {
-				title = strings.TrimPrefix(strings.TrimSpace(line), "# ")
+			trimmed := strings.TrimSpace(line)
+			if !foundTitle {
+				if strings.HasPrefix(trimmed, "# ") {
+					title = strings.TrimPrefix(trimmed, "# ")
+					foundTitle = true
+				}
+				continue
+			}
+			if trimmed == "" || strings.HasPrefix(trimmed, "---") {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "#") {
 				break
 			}
+			summary = trimmed
+			if len(summary) > 120 {
+				summary = summary[:117] + "..."
+			}
+			break
 		}
-		b.WriteString(fmt.Sprintf("- %s: %s\n", id, title))
+		if summary != "" {
+			b.WriteString(fmt.Sprintf("- %s: %s — %s\n", id, title, summary))
+		} else {
+			b.WriteString(fmt.Sprintf("- %s: %s\n", id, title))
+		}
 	}
 
 	// Write docs to filesystem so LLM can read them (read-only).

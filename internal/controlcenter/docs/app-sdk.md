@@ -37,6 +37,8 @@ Initialize the SDK. Call once on page load.
 | `slug` | string | **Required.** Your app's slug (matches directory name) |
 | `onThemeChange` | function | Called with `(palette, isDark)` when user changes theme |
 | `onDestroy` | function | Called when app is being unloaded |
+| `onVisible` | function | Called when app tab becomes visible (browser or CC tab switch) |
+| `onHidden` | function | Called when app tab becomes hidden |
 
 ### `AlfSDK.api(path, opts)`
 
@@ -301,29 +303,56 @@ Delete a key.
 
 Clear all storage for this app.
 
+### `AlfSDK.storage.keys()`
+
+List all stored keys. Returns `Promise<string[]>`.
+
+```js
+AlfSDK.storage.keys().then(function(keys) {
+  console.log(keys); // ['highScore', 'level', 'theme']
+});
+```
+
+### `AlfSDK.storage.entries()`
+
+List all entries as key/value pairs. Returns `Promise<Array<{key, value}>>`.
+
+```js
+AlfSDK.storage.entries().then(function(entries) {
+  entries.forEach(function(e) { console.log(e.key, e.value); });
+});
+```
+
 ---
 
 ## Events
 
-Inter-app pub/sub. Events are relayed via the parent CC to all other loaded app iframes.
+Inter-app pub/sub with automatic slug namespacing. Events emitted by your app are prefixed with your slug (e.g. `my-app:updated`). Listening to a bare event name listens to your own app's events. Use `slug:event` format to listen to other apps.
 
 ### `AlfSDK.events.on(event, handler)`
 
 ```js
+// Listen to own events (auto-prefixed with your slug)
 AlfSDK.events.on('player-scored', function(data) {
   console.log(data.points);
+});
+
+// Listen to another app's events (explicit slug prefix)
+AlfSDK.events.on('leaderboard:updated', function(data) {
+  console.log('Leaderboard changed:', data);
 });
 ```
 
 ### `AlfSDK.events.off(event, handler)`
 
-Unsubscribe.
+Unsubscribe. Same namespacing rules as `on()`.
 
 ### `AlfSDK.events.emit(event, data)`
 
-Emit an event to all other apps.
+Emit an event (auto-prefixed with your slug, relayed to all other apps).
 
 ```js
+// Emitted as 'my-app:player-scored' to other apps
 AlfSDK.events.emit('player-scored', { points: 100 });
 ```
 

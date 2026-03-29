@@ -15,7 +15,7 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>My App</title>
   <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" id="alf-theme-link" href="/static/theme-sage.css">
+  <link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
   <script src="/static/theme-init.js"></script>
   <script src="/static/alf-app-sdk.js"></script>
   <style>
@@ -58,7 +58,7 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
     AlfSDK.init({
       slug: 'my-app',
       onThemeChange: function(palette) {
-        document.getElementById('alf-theme-link').href = '/static/theme-' + palette + '.css';
+        document.getElementById('alf-theme').href = '/static/theme-' + palette + '.css';
       }
     });
 
@@ -105,96 +105,32 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
 
 ---
 
-## AlfSDK v2 reference
+## AlfSDK reference
 
-### Core
 ```js
-AlfSDK.init({ slug, onThemeChange })  // Init. Call once on load. REQUIRED.
-AlfSDK.tool(action, args)             // Run CLI tool. Returns Promise<string>.
-AlfSDK.api(path, opts)                // Authenticated fetch (same-origin cookies).
-AlfSDK.bash(cmd)                      // Execute shell command via /api/bash.
-AlfSDK.navigate(view)                 // Navigate parent SPA ('chat', 'settings').
-AlfSDK.toast(msg, type)               // Toast in parent: 'success', 'error', 'info'.
-AlfSDK.getTheme()                     // Returns { palette, dark }.
-```
+// Core
+AlfSDK.VERSION                         // '3.0.0'
+AlfSDK.init({ slug, onThemeChange,     // Init. Call once on load. REQUIRED.
+  onVisible, onHidden })               //   Lifecycle: tab visible/hidden callbacks
+AlfSDK.tool(action, args)              // Run CLI tool. Returns Promise<string>.
+AlfSDK.api(path, opts)                 // Authenticated fetch (same-origin cookies).
+AlfSDK.bash(cmd)                       // Execute shell command via /api/bash.
+AlfSDK.navigate(view)                  // Navigate parent SPA ('chat', 'settings').
+AlfSDK.toast(msg, type)                // Toast in parent: 'success', 'error', 'info'.
+AlfSDK.getTheme()                      // Returns { palette, dark }.
 
-### Audio (ALWAYS use this — never create your own AudioContext)
-```js
-AlfSDK.audio.load(url)               // Load & cache audio file → Promise<AudioBuffer>
-AlfSDK.audio.play(buffer, opts)      // Play buffer. opts: { volume: 0-1, loop: bool }. Returns source node.
-AlfSDK.audio.playUrl(url, opts)      // Load + play in one call.
-AlfSDK.audio.onUnlock(cb)            // Callback when audio is unlocked (after first user gesture).
-AlfSDK.audio.getContext()            // Get shared AudioContext (for advanced audio).
-AlfSDK.audio.isUnlocked()            // True if audio ready.
-```
+// Storage (server-side, persists across updates)
+AlfSDK.storage.get(key?)               // Get value or full store
+AlfSDK.storage.set(key, value)         // Set value (or pass object for batch)
+AlfSDK.storage.remove(key)             // Delete key
+AlfSDK.storage.clear()                 // Clear all
+AlfSDK.storage.keys()                  // List all keys → Promise<string[]>
+AlfSDK.storage.entries()               // List all entries → Promise<{key,value}[]>
 
-### Storage (persistent key/value, server-side)
-```js
-AlfSDK.storage.get()                 // Get all keys → Promise<object>
-AlfSDK.storage.get('key')            // Get single value → Promise<any>
-AlfSDK.storage.set('key', value)     // Set single key
-AlfSDK.storage.set({ k1: v1, k2: v2 }) // Set multiple keys
-AlfSDK.storage.remove('key')         // Delete key
-AlfSDK.storage.clear()               // Clear all app storage
-```
-
-### Dialogs (native CC modals — bottom sheet on mobile)
-```js
-AlfSDK.confirm(msg, opts)            // → Promise<boolean>. opts: { title, confirmText, cancelText }
-AlfSDK.prompt(msg, opts)             // → Promise<string|null>. opts: { title, defaultValue, placeholder, confirmText }
-AlfSDK.sheet(html)                   // Show static HTML in CC bottom sheet / modal
-AlfSDK.sheet(html, actions)          // Interactive sheet — actions map: { name: fn(params) }
-                                     // HTML uses data-action="name" data-foo="bar" on clickable elements
-AlfSDK.updateSheet(html)             // Update open sheet content (keeps action handlers)
-AlfSDK.closeSheet()                  // Close current sheet
-```
-
-### Events (inter-app pub/sub)
-```js
-AlfSDK.events.on(event, handler)     // Subscribe to event from other apps
-AlfSDK.events.off(event, handler)    // Unsubscribe
-AlfSDK.events.emit(event, data)      // Broadcast to all other apps
-```
-
-### Viewport
-```js
-AlfSDK.viewport.isMobile()           // True if width <= 768px
-AlfSDK.viewport.isPWA()              // True if standalone PWA
-AlfSDK.viewport.orientation()        // 'portrait' or 'landscape'
-AlfSDK.viewport.size()               // { width, height }
-AlfSDK.viewport.safeArea()           // { top, bottom, left, right } insets
-AlfSDK.viewport.onChange(cb)         // Callback on resize/rotation: cb({ mobile, orientation, size })
-```
-
-### Haptics
-```js
-AlfSDK.haptics.tap()                 // Light tap (10ms) — button presses
-AlfSDK.haptics.notify()              // Double pulse — notifications
-AlfSDK.haptics.success()             // Rising pattern — success actions
-AlfSDK.haptics.error()               // Heavy buzz — error feedback
-AlfSDK.haptics.vibrate([100,50,200]) // Custom pattern
-AlfSDK.haptics.isAvailable()         // True if device supports vibration
-```
-
-### Clipboard
-```js
-AlfSDK.clipboard.write(text)         // Copy to clipboard → Promise
-AlfSDK.clipboard.read()              // Read from clipboard → Promise<string>
-```
-
-### I18n
-```js
-AlfSDK.i18n.locale()                 // Full locale: 'en-US', 'fr-FR'
-AlfSDK.i18n.lang()                   // Language: 'en', 'fr'
-AlfSDK.i18n.dir()                    // 'ltr' or 'rtl'
-AlfSDK.i18n.languages()              // All preferred languages
-```
-
-### Badge
-```js
-AlfSDK.badge.set(count)              // Set badge on sidebar icon
-AlfSDK.badge.increment()             // Add 1
-AlfSDK.badge.clear()                 // Remove badge
+// Events (auto-namespaced by slug)
+AlfSDK.events.on(event, handler)       // Listen (bare name = own app, 'slug:event' = cross-app)
+AlfSDK.events.off(event, handler)      // Unsubscribe
+AlfSDK.events.emit(event, data)        // Emit (auto-prefixed with slug)
 ```
 
 ---
@@ -222,39 +158,52 @@ Only use these -- never hardcode colors:
 
 ---
 
+## Design tokens
+
+Layout-agnostic tokens for spacing, typography, and shadows. Use these instead of hardcoded values.
+
+### Spacing
+
+| Variable | Value |
+|---|---|
+| `--space-xs` | 4px |
+| `--space-sm` | 8px |
+| `--space-md` | 16px |
+| `--space-lg` | 24px |
+| `--space-xl` | 32px |
+
+### Typography (font sizes)
+
+| Variable | Value |
+|---|---|
+| `--font-xs` | 11px |
+| `--font-sm` | 13px |
+| `--font-md` | 15px |
+| `--font-lg` | 18px |
+| `--font-xl` | 24px |
+
+### Shadows
+
+| Variable | Value |
+|---|---|
+| `--shadow-sm` | `0 1px 2px rgba(0,0,0,0.08)` |
+| `--shadow-md` | `0 4px 12px rgba(0,0,0,0.12)` |
+| `--shadow-lg` | `0 8px 24px rgba(0,0,0,0.16)` |
+
+---
+
 ## Rules
 
 1. **Always init AlfSDK** at the top of the script block
 2. **Always include `onThemeChange`** to sync theme from parent SPA
-3. **Theme link id**: use `id="alf-theme-link"` (NOT `alf-theme`)
-4. **Set `font-family` explicitly** -- `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. Google Fonts are blocked by CSP in iframes.
-5. **Load `/static/style.css`** + `/static/theme-*.css` + `/static/theme-init.js`
-6. **No external scripts/stylesheets** -- CSP blocks them
-7. **No `unsafe-eval`** -- no Vue, Angular, Petite Vue
-8. **Inline `<style>` only** -- no external CSS files you create
-9. **Lucide SVG icons** -- inline SVG from lucide.dev. No icon fonts. No emoji as icons (unless user asks).
-10. **XSS protection** -- always escape user content with a `div.textContent` wrapper (the `esc()` helper above)
-11. **`font-family: inherit`** is NOT sufficient -- always set explicitly (see rule 4)
-12. **NEVER use `window.confirm()` or `window.prompt()`** -- use `AlfSDK.confirm()` and `AlfSDK.prompt()` instead (renders as iOS bottom sheet on mobile)
-13. **NEVER use `window.alert()`** -- use `AlfSDK.toast()` instead
-
----
-
-## AlfSDK.bash() return format
-
-`AlfSDK.bash(cmd)` returns a Promise resolving to:
-```js
-{ output: "stdout text", exit_code: 0, error: "" }
-```
-
-Always use backtick template literals for commands with variables:
-```js
-// CORRECT — backticks for interpolation
-AlfSDK.bash('cat /home/alf/data/apps/' + slug + '/data/file.txt')
-
-// WRONG — never use string concat inside single quotes for shell vars
-// AlfSDK.bash('echo ${var}')  // ${var} is a shell variable, not JS
-```
+3. **Set `font-family` explicitly** -- `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. Google Fonts are blocked by CSP in iframes.
+4. **Load `/static/style.css`** + `/static/theme-*.css` + `/static/theme-init.js`
+5. **No external scripts/stylesheets** -- CSP blocks them
+6. **No `unsafe-eval`** -- no Vue, Angular, Petite Vue
+7. **Inline `<style>` only** -- no external CSS files you create
+8. **Lucide SVG icons** -- inline SVG from lucide.dev. No icon fonts. No emoji as icons (unless user asks).
+9. **XSS protection** -- always escape user content with a `div.textContent` wrapper (the `esc()` helper above)
+10. **`font-family: inherit`** is NOT sufficient -- always set explicitly (see rule 3)
 
 ---
 

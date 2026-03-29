@@ -255,6 +255,85 @@ func TestStoragePut_BodyLimit(t *testing.T) {
 	}
 }
 
+func TestStorage_ListKeys(t *testing.T) {
+	h := newTestStorageHandler(t)
+
+	// Seed data.
+	req := httptest.NewRequest("PUT", "/api/apps/test-app/storage",
+		strings.NewReader(`{"alpha":"1","beta":"2","gamma":"3"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	// List keys.
+	req = httptest.NewRequest("GET", "/api/apps/test-app/storage?list=keys", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result struct{ Keys []string }
+	json.NewDecoder(rec.Body).Decode(&result)
+	if len(result.Keys) != 3 {
+		t.Errorf("expected 3 keys, got %d: %v", len(result.Keys), result.Keys)
+	}
+}
+
+func TestStorage_ListEntries(t *testing.T) {
+	h := newTestStorageHandler(t)
+
+	// Seed data.
+	req := httptest.NewRequest("PUT", "/api/apps/test-app/storage",
+		strings.NewReader(`{"x":"hello","y":42}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	// List entries.
+	req = httptest.NewRequest("GET", "/api/apps/test-app/storage?list=entries", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result struct {
+		Entries []map[string]any
+	}
+	json.NewDecoder(rec.Body).Decode(&result)
+	if len(result.Entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(result.Entries))
+	}
+	// Verify each entry has key and value fields.
+	for _, e := range result.Entries {
+		if _, ok := e["key"]; !ok {
+			t.Error("entry missing 'key' field")
+		}
+		if _, ok := e["value"]; !ok {
+			t.Error("entry missing 'value' field")
+		}
+	}
+}
+
+func TestStorage_ListKeysEmpty(t *testing.T) {
+	h := newTestStorageHandler(t)
+
+	req := httptest.NewRequest("GET", "/api/apps/empty-app/storage?list=keys", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result struct{ Keys []string }
+	json.NewDecoder(rec.Body).Decode(&result)
+	if len(result.Keys) != 0 {
+		t.Errorf("expected 0 keys, got %d", len(result.Keys))
+	}
+}
+
 func TestStorage_IsolationBetweenApps(t *testing.T) {
 	h := newTestStorageHandler(t)
 

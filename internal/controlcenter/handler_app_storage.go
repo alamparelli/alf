@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sort"
 	"sync"
 )
 
@@ -18,7 +19,7 @@ import (
 //	DELETE /api/apps/{slug}/storage?key=foo → delete key
 type AppStorageHandler struct {
 	DataDir string
-	mu      sync.Mutex
+	mu      sync.RWMutex
 }
 
 func (h *AppStorageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -77,9 +78,31 @@ func (h *AppStorageHandler) save(slug string, store map[string]any) error {
 }
 
 func (h *AppStorageHandler) handleGet(w http.ResponseWriter, r *http.Request, slug string) {
+	h.mu.RLock()
 	store, err := h.load(slug)
+	h.mu.RUnlock()
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "read failed"})
+		return
+	}
+
+	// List mode: ?list=keys or ?list=entries
+	listMode := r.URL.Query().Get("list")
+	if listMode == "keys" {
+		keys := make([]string, 0, len(store))
+		for k := range store {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		respondJSON(w, http.StatusOK, map[string]any{"keys": keys})
+		return
+	}
+	if listMode == "entries" {
+		entries := make([]map[string]any, 0, len(store))
+		for k, v := range store {
+			entries = append(entries, map[string]any{"key": k, "value": v})
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"entries": entries})
 		return
 	}
 

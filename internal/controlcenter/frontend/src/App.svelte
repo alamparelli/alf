@@ -32,19 +32,6 @@
 
   let showWizard = $state(false)
   let wizardRef: any = $state(null)
-  let mobileMenuOpen = $state(false)
-
-  function isMobile() {
-    return window.innerWidth <= 768
-  }
-
-  function handleFabClick() {
-    if (isMobile()) {
-      mobileMenuOpen = !mobileMenuOpen
-    } else {
-      window.dispatchEvent(new CustomEvent('alf:open-spotlight'))
-    }
-  }
 
   onMount(() => {
     apps.load()
@@ -52,8 +39,7 @@
     events.subscribe('apps', () => apps.load())
     events.subscribe('marketplace', () => apps.load())
     events.subscribe('new_message', () => {
-      // Only play sound when NOT on chat view — ChatView handles its own sound.play()
-      if (nav.currentView !== 'chat') sound.play()
+      sound.play()
     })
 
     // Auto-show setup wizard on first visit if setup is incomplete
@@ -78,9 +64,13 @@
       showWizard = true
     })
 
-    // Listen for SDK ready message from iframe apps (theme sync)
+    // Listen for SDK messages from iframe apps
     window.addEventListener('message', (e: MessageEvent) => {
       if (e.data?.type !== 'alf-app') return
+      if (e.data.action === 'navigate') nav.navigateTo(e.data.view)
+      if (e.data.action === 'toast') {
+        toasts.show(e.data.msg, e.data.type)
+      }
       if (e.data.action === 'ready' && e.source) {
         (e.source as Window).postMessage(
           { type: 'alf', action: 'theme', palette: theme.palette, dark: theme.isDark },
@@ -171,20 +161,17 @@
     {/if}
   </div>
 
-  <BottomNav bind:open={mobileMenuOpen} />
+  <BottomNav />
 </div>
 
-<!-- FAB: spotlight on desktop, mobile menu on mobile -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<button class="spotlight-fab" onclick={handleFabClick}>
-  {#if mobileMenuOpen}
-    <X size={18} />
-  {:else}
+{#if nav.currentView !== 'chat'}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <button class="spotlight-fab" onclick={() => window.dispatchEvent(new CustomEvent('alf:open-spotlight'))}>
     <Search size={18} />
-  {/if}
-  <span class="fab-tooltip">Search <kbd>{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+{spotlightSettings.shortcutKey.toUpperCase()}</kbd></span>
-</button>
+    <span class="fab-tooltip">Search <kbd>{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+{spotlightSettings.shortcutKey.toUpperCase()}</kbd></span>
+  </button>
+{/if}
 
 <Toast />
 <SpotlightSearch />
@@ -193,6 +180,25 @@
 <style>
   :global(:root) {
     --sidebar-width: 220px;
+
+    /* Spacing tokens */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+
+    /* Typography tokens */
+    --font-xs: 11px;
+    --font-sm: 13px;
+    --font-md: 15px;
+    --font-lg: 18px;
+    --font-xl: 24px;
+
+    /* Shadow tokens */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.16);
   }
 
   :global(*) {
@@ -518,20 +524,15 @@
   @media (max-width: 768px) {
     .main-content {
       margin-left: 0;
-      padding-top: env(safe-area-inset-top, 0px);
-      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
-    /* App iframe handles its own safe-area offsets in AppFrame.svelte */
-    /* Hamburger + sidebar replaced by BottomNav grid on mobile */
     .hamburger-btn {
-      display: none;
+      display: block;
     }
     .sidebar-overlay {
-      display: none;
+      display: block;
     }
   }
 
-  /* FAB: hidden on desktop (search is in sidebar), visible on mobile only */
   :global(.spotlight-fab) {
     position: fixed;
     bottom: 24px;
@@ -544,7 +545,7 @@
     color: var(--bg);
     border: none;
     cursor: pointer;
-    display: none;
+    display: flex;
     align-items: center;
     justify-content: center;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
@@ -557,13 +558,38 @@
   }
 
   :global(.fab-tooltip) {
-    display: none;
+    position: absolute;
+    right: 52px;
+    white-space: nowrap;
+    background: var(--bg-card, #2a2a2a);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  :global(.fab-tooltip kbd) {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    margin-left: 4px;
+  }
+
+  :global(.spotlight-fab:hover .fab-tooltip) {
+    opacity: 1;
   }
 
   @media (max-width: 768px) {
     :global(.spotlight-fab) {
-      display: flex;
-      bottom: calc(16px + env(safe-area-inset-bottom, 4px));
+      bottom: 72px;
       right: 16px;
     }
   }

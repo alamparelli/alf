@@ -1,5 +1,5 @@
 /**
- * ALF App SDK v2.0
+ * ALF App SDK v3.0.0
  * Complete SDK for marketplace apps running in iframes.
  *
  * Modules:
@@ -192,28 +192,47 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
       });
+    },
+
+    /** List all keys. */
+    keys: function() {
+      return SDK.api(this._path() + '?list=keys').then(function(d) { return d.keys; });
+    },
+
+    /** List all entries as [{key, value}, ...]. */
+    entries: function() {
+      return SDK.api(this._path() + '?list=entries').then(function(d) { return d.entries; });
     }
   };
 
-  // ── Events (inter-app pub/sub) ─────────────────────────────────────
+  // ── Events (inter-app pub/sub, auto-namespaced by slug) ────────────
   var EventManager = {
     _handlers: {},
 
-    /** Subscribe to a custom event from other apps or the CC. */
+    /** Resolve event name: prefix with slug unless already namespaced (contains ':'). */
+    _resolveEvent: function(event) {
+      if (event.indexOf(':') >= 0) return event;
+      return SDK._slug ? SDK._slug + ':' + event : event;
+    },
+
+    /** Subscribe to a custom event. Use 'slug:event' for cross-app, 'event' for self. */
     on: function(event, handler) {
-      if (!this._handlers[event]) this._handlers[event] = [];
-      this._handlers[event].push(handler);
+      var resolved = this._resolveEvent(event);
+      if (!this._handlers[resolved]) this._handlers[resolved] = [];
+      this._handlers[resolved].push(handler);
     },
 
     /** Unsubscribe. */
     off: function(event, handler) {
-      if (!this._handlers[event]) return;
-      this._handlers[event] = this._handlers[event].filter(function(h) { return h !== handler; });
+      var resolved = this._resolveEvent(event);
+      if (!this._handlers[resolved]) return;
+      this._handlers[resolved] = this._handlers[resolved].filter(function(h) { return h !== handler; });
     },
 
-    /** Emit an event (relayed via parent to other apps). */
+    /** Emit an event (auto-prefixed with slug, relayed via parent to other apps). */
     emit: function(event, data) {
-      postToParent('event-emit', { event: event, payload: data });
+      var namespaced = SDK._slug ? SDK._slug + ':' + event : event;
+      postToParent('event-emit', { event: namespaced, payload: data });
     },
 
     _dispatch: function(event, data) {
@@ -381,6 +400,7 @@
 
   // ── Main SDK ───────────────────────────────────────────────────────
   var SDK = {
+    VERSION: '3.0.0',
     _ready: false,
     _slug: null,
     _listeners: {},
@@ -401,6 +421,8 @@
      * @param {string} opts.slug - App slug
      * @param {function} [opts.onThemeChange] - Called with (palette, isDark)
      * @param {function} [opts.onDestroy] - Called when app is unloaded
+     * @param {function} [opts.onVisible] - Called when app becomes visible (tab switch or browser focus)
+     * @param {function} [opts.onHidden] - Called when app becomes hidden (tab switch or browser blur)
      */
     init: function(opts) {
       opts = opts || {};
@@ -417,6 +439,8 @@
 
       if (opts.onThemeChange) this._listeners.theme = opts.onThemeChange;
       if (opts.onDestroy) this._listeners.destroy = opts.onDestroy;
+      if (opts.onVisible) this._listeners.visible = opts.onVisible;
+      if (opts.onHidden) this._listeners.hidden = opts.onHidden;
 
       var self = this;
       window.addEventListener('message', function(e) {
@@ -431,6 +455,13 @@
         // Destroy
         if (msg.action === 'destroy' && self._listeners.destroy) {
           self._listeners.destroy();
+        }
+        // Lifecycle visibility from parent
+        if (msg.action === 'visible' && self._listeners.visible) {
+          self._listeners.visible();
+        }
+        if (msg.action === 'hidden' && self._listeners.hidden) {
+          self._listeners.hidden();
         }
         // Inter-app event relay
         if (msg.action === 'event-relay') {
@@ -454,6 +485,15 @@
         }
       });
 
+      // Lifecycle: Page Visibility API
+      document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+          if (self._listeners.hidden) self._listeners.hidden();
+        } else {
+          if (self._listeners.visible) self._listeners.visible();
+        }
+      });
+
       // Notify parent that app is ready
       postToParent('ready', { slug: this._slug });
     },
@@ -465,6 +505,7 @@
      * @returns {Promise<any>}
      */
     api: function(path, opts) {
+      if (!_ensureReady('api')) return Promise.reject(new Error('SDK not initialized'));
       if (this._authFailed) return Promise.reject(new Error('Session expired — reload page'));
       opts = opts || {};
       opts.headers = opts.headers || {};
@@ -492,6 +533,7 @@
      * @returns {Promise<{output: string, exit_code: number, error: string}>}
      */
     bash: function(cmd) {
+      if (!_ensureReady('bash')) return Promise.reject(new Error('SDK not initialized'));
       return this.api('/api/bash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -506,6 +548,7 @@
      * @returns {Promise<string>}
      */
     tool: function(action, args) {
+      if (!_ensureReady('tool')) return Promise.reject(new Error('SDK not initialized'));
       var slug = this._slug;
       var bin = '/home/alf/data/tools/' + slug;
       var data = '/home/alf/data/apps/' + slug + '/data';
@@ -519,10 +562,16 @@
     },
 
     /** Navigate the parent CC to a view. */
-    navigate: function(view) { postToParent('navigate', { view: view }); },
+    navigate: function(view) {
+      if (!_ensureReady('navigate')) return;
+      postToParent('navigate', { view: view });
+    },
 
     /** Show a toast in the parent CC. */
-    toast: function(msg, type) { postToParent('toast', { msg: msg, type: type || 'success' }); },
+    toast: function(msg, type) {
+      if (!_ensureReady('toast')) return;
+      postToParent('toast', { msg: msg, type: type || 'success' });
+    },
 
     /** Get current theme. */
     getTheme: function() {
@@ -593,6 +642,14 @@
       return requestFromParent('prompt', Object.assign({ message: message }, opts || {}));
     }
   };
+
+  function _ensureReady(method) {
+    if (!SDK._ready) {
+      console.warn('[AlfSDK] ' + method + '() called before init(). Call AlfSDK.init() first.');
+      return false;
+    }
+    return true;
+  }
 
   global.AlfSDK = SDK;
 })(window);

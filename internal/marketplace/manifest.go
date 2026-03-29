@@ -16,6 +16,29 @@ type Manifest struct {
 	Icon        string     `json:"icon"`
 	Tools       []ToolDecl `json:"tools"`
 	Permissions []string   `json:"permissions,omitempty"`
+	Trusted     bool       `json:"trusted,omitempty"` // only settable by marketplace registry
+}
+
+// UntrustedMaxPermissions are the only permissions allowed for untrusted apps.
+var UntrustedMaxPermissions = map[string]bool{
+	"storage":   true,
+	"events":    true,
+	"clipboard": true,
+}
+
+// CapPermissionsForUntrusted restricts permissions to the safe set.
+// Returns the filtered list. If perms is nil (legacy/no field), returns nil unchanged.
+func CapPermissionsForUntrusted(perms []string) []string {
+	if perms == nil {
+		return nil
+	}
+	capped := make([]string, 0, len(perms))
+	for _, p := range perms {
+		if UntrustedMaxPermissions[p] {
+			capped = append(capped, p)
+		}
+	}
+	return capped
 }
 
 type ToolDecl struct {

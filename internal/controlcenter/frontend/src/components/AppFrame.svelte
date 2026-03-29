@@ -31,6 +31,9 @@
   let promptMultiline = $state(false)
   let promptReplyId = $state(0)
 
+  // App permissions (null = all allowed, string[] = restricted)
+  let appPermissions: string[] | null = $state(null)
+
   function postToIframe(action: string) {
     iframe?.contentWindow?.postMessage({ type: 'alf', action }, location.origin)
   }
@@ -227,16 +230,22 @@
         promptOpen = true
         break
 
-      // ── Clipboard ──
+      // ── Clipboard (SEC-002: parent-side permission check) ──
       case 'clipboard-write':
-        navigator.clipboard.writeText(e.data.text || '')
-          .then(() => reply(_replyId, true))
-          .catch(err => reply(_replyId, null, err.message))
-        break
       case 'clipboard-read':
-        navigator.clipboard.readText()
-          .then(text => reply(_replyId, text))
-          .catch(err => reply(_replyId, null, err.message))
+        if (appPermissions && !appPermissions.includes('clipboard')) {
+          reply(_replyId, null, 'Permission denied: clipboard')
+          break
+        }
+        if (action === 'clipboard-write') {
+          navigator.clipboard.writeText(e.data.text || '')
+            .then(() => reply(_replyId, true))
+            .catch(err => reply(_replyId, null, err.message))
+        } else {
+          navigator.clipboard.readText()
+            .then(text => reply(_replyId, text))
+            .catch(err => reply(_replyId, null, err.message))
+        }
         break
 
       // ── Inter-app events ──
@@ -330,11 +339,14 @@
         fetch('/api/apps/' + slug + '/permissions')
           .then(r => r.ok ? r.json() : null)
           .then(data => {
-            if (data && iframe?.contentWindow) {
-              iframe.contentWindow.postMessage(
-                { type: 'alf', action: 'permissions', permissions: data.permissions },
-                location.origin
-              )
+            if (data) {
+              appPermissions = data.permissions
+              if (iframe?.contentWindow) {
+                iframe.contentWindow.postMessage(
+                  { type: 'alf', action: 'permissions', permissions: data.permissions },
+                  location.origin
+                )
+              }
             }
           })
           .catch(() => {}) // fail silently — app gets all permissions

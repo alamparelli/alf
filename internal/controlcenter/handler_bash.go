@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,9 +45,15 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Permission check: if request identifies an app, verify bash permission.
-	// Absent app_slug = direct LLM/terminal call = always allowed.
-	if req.AppSlug != "" && h.Perms != nil && !h.Perms.HasPermission(req.AppSlug, "bash") {
+	// SEC-001: Server-side app identification via Referer header.
+	// Iframe apps at /apps/{slug}/ send Referer automatically.
+	// If Referer indicates an app, enforce bash permission — regardless of app_slug in body.
+	// Non-app callers (LLM, terminal, tools-socket) have no /apps/ Referer.
+	appSlug := extractAppSlugFromReferer(r)
+	if appSlug == "" {
+		appSlug = req.AppSlug // fallback to body for non-browser callers
+	}
+	if appSlug != "" && h.Perms != nil && !h.Perms.HasPermission(appSlug, "bash") {
 		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash"})
 		return
 	}
@@ -79,4 +86,28 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp.Output = output
 
 	respondJSON(w, http.StatusOK, resp)
+}
+
+// extractAppSlugFromReferer extracts the app slug from a Referer like
+// "https://host/apps/my-app/" or "https://host/apps/my-app/index.html".
+// Returns empty string if the Referer doesn't match the /apps/{slug}/ pattern.
+func extractAppSlugFromReferer(r *http.Request) string {
+	ref := r.Header.Get("Referer")
+	if ref == "" {
+		return ""
+	}
+	// Find /apps/ in the path
+	idx := strings.Index(ref, "/apps/")
+	if idx < 0 {
+		return ""
+	}
+	rest := ref[idx+len("/apps/"):]
+	// Extract slug (up to next / or end)
+	if slashIdx := strings.Index(rest, "/"); slashIdx > 0 {
+		rest = rest[:slashIdx]
+	}
+	if rest == "" || !validName.MatchString(rest) {
+		return ""
+	}
+	return rest
 }

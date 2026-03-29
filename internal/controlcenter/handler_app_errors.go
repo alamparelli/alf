@@ -44,6 +44,12 @@ func (h *AppErrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cross-app access check: app iframe may only write to its own error log.
+	if callerSlug := extractAppSlugFromReferer(r); callerSlug != "" && callerSlug != slug {
+		respondJSON(w, http.StatusForbidden, map[string]string{"error": "cross-app error access denied"})
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		h.handleGet(w, slug)

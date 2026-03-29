@@ -57,6 +57,12 @@ func (h *AppUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cross-app access check: app iframe may only upload to its own storage.
+	if callerSlug := extractAppSlugFromReferer(r); callerSlug != "" && callerSlug != slug {
+		respondJSON(w, http.StatusForbidden, map[string]string{"error": "cross-app upload access denied"})
+		return
+	}
+
 	// Limit total request size
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 

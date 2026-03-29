@@ -103,7 +103,20 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.EventBroker.Emit(EventMarketplace)
 		h.EventBroker.Emit(EventApps)
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+
+	// Include trust info in response for install/enable actions
+	resp := map[string]any{"ok": true}
+	if action == "install" || action == "enable" {
+		apps := h.Manager.List()
+		for _, app := range apps {
+			if app.Slug == slug {
+				resp["trusted"] = app.Trusted
+				resp["permissions"] = app.Permissions
+				break
+			}
+		}
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // developerStatus checks if the user has a marketplace vault service configured

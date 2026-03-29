@@ -210,9 +210,14 @@ func (m *Manager) Enable(slug string) error {
 
 	m.states[slug] = StateEnabled
 
-	// Cache declared permissions (nil slice = field absent = all allowed)
-	if manifest.Permissions != nil {
-		m.perms[slug] = manifest.Permissions
+	// Cache declared permissions (nil slice = field absent = all allowed).
+	// Untrusted apps have permissions capped to the safe set.
+	perms := manifest.Permissions
+	if !manifest.Trusted && perms != nil {
+		perms = CapPermissionsForUntrusted(perms)
+	}
+	if perms != nil {
+		m.perms[slug] = perms
 	} else {
 		delete(m.perms, slug) // no restrictions
 	}
@@ -339,9 +344,13 @@ func (m *Manager) RestoreEnabled() error {
 			continue
 		}
 
-		// Restore permission cache
-		if manifest.Permissions != nil {
-			m.perms[slug] = manifest.Permissions
+		// Restore permission cache (cap for untrusted apps)
+		perms := manifest.Permissions
+		if !manifest.Trusted && perms != nil {
+			perms = CapPermissionsForUntrusted(perms)
+		}
+		if perms != nil {
+			m.perms[slug] = perms
 		}
 
 		for _, tool := range manifest.Tools {

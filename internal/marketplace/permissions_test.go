@@ -114,3 +114,45 @@ func TestManager_GetPermissions_Nil(t *testing.T) {
 		t.Errorf("expected nil for untracked app, got %v", perms)
 	}
 }
+
+func TestCapPermissionsForUntrusted(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []string
+		want  int
+	}{
+		{"all safe", []string{"storage", "events", "clipboard"}, 3},
+		{"mixed", []string{"storage", "bash", "upload", "events"}, 2}, // bash + upload stripped
+		{"all dangerous", []string{"bash", "upload"}, 0},
+		{"nil passthrough", nil, -1}, // nil means no restrictions
+		{"empty", []string{}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CapPermissionsForUntrusted(tt.input)
+			if tt.want == -1 {
+				if got != nil {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != tt.want {
+				t.Errorf("expected %d perms, got %d: %v", tt.want, len(got), got)
+			}
+		})
+	}
+}
+
+func TestManager_HasPermission_UntrustedCapped(t *testing.T) {
+	// Simulate an untrusted app that declared bash+storage but got capped
+	m := &Manager{
+		states: map[string]AppState{"untrusted-app": StateEnabled},
+		perms:  map[string][]string{"untrusted-app": CapPermissionsForUntrusted([]string{"storage", "bash"})},
+	}
+	if !m.HasPermission("untrusted-app", "storage") {
+		t.Error("storage should be allowed for untrusted app")
+	}
+	if m.HasPermission("untrusted-app", "bash") {
+		t.Error("bash should be denied for untrusted app (capped)")
+	}
+}

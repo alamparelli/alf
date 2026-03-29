@@ -174,10 +174,17 @@ func HandlerFactory(deps Deps) http.Handler {
 		EventBroker: deps.EventBroker,
 	})
 
+	// Permission checker: marketplace manager implements the interface.
+	// nil when marketplace is not configured (all permissions allowed).
+	var permChecker marketplace.PermissionChecker
+	if deps.Marketplace != nil {
+		permChecker = deps.Marketplace
+	}
+
 	// Apps: directory-based apps with index.html + assets.
 	if deps.AppStore != nil {
-		appStorage := &AppStorageHandler{DataDir: deps.DataDir}
-		appUpload := &AppUploadHandler{DataDir: deps.DataDir}
+		appStorage := &AppStorageHandler{DataDir: deps.DataDir, Perms: permChecker}
+		appUpload := &AppUploadHandler{DataDir: deps.DataDir, Perms: permChecker}
 		appErrors := &AppErrorHandler{DataDir: deps.DataDir}
 		mux.Handle("/api/apps/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(r.URL.Path, "/storage") {
@@ -190,6 +197,10 @@ func HandlerFactory(deps Deps) http.Handler {
 			}
 			if strings.Contains(r.URL.Path, "/errors") {
 				appErrors.ServeHTTP(w, r)
+				return
+			}
+			if strings.Contains(r.URL.Path, "/permissions") {
+				handleAppPermissions(w, r, permChecker)
 				return
 			}
 			(&AppListHandler{Store: deps.AppStore}).ServeHTTP(w, r)
@@ -348,7 +359,7 @@ func HandlerFactory(deps Deps) http.Handler {
 	}
 
 	// Bash command execution.
-	mux.Handle("/api/bash", &BashHandler{})
+	mux.Handle("/api/bash", &BashHandler{Perms: permChecker})
 
 	// Restart.
 	mux.Handle("/api/restart", &RestartHandler{})
@@ -434,4 +445,37 @@ func HandlerFactory(deps Deps) http.Handler {
 	outer.Handle("/", handler)
 
 	return outer
+}
+
+// handleAppPermissions returns the permissions for an app.
+// GET /api/apps/{slug}/permissions → {"permissions": [...] or null}
+func handleAppPermissions(w http.ResponseWriter, r *http.Request, perms marketplace.PermissionChecker) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/api/apps/")
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 1 {
+		http.NotFound(w, r)
+		return
+	}
+	slug := parts[0]
+
+	if perms == nil {
+		respondJSON(w, http.StatusOK, map[string]any{"permissions": nil})
+		return
+	}
+
+	// Use GetPermissions if available (Manager implements it)
+	type permGetter interface {
+		GetPermissions(slug string) []string
+	}
+	if pg, ok := perms.(permGetter); ok {
+		p := pg.GetPermissions(slug)
+		respondJSON(w, http.StatusOK, map[string]any{"permissions": p})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"permissions": nil})
 }

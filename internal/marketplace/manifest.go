@@ -15,6 +15,7 @@ type Manifest struct {
 	Category    string     `json:"category"`
 	Icon        string     `json:"icon"`
 	Tools       []ToolDecl `json:"tools"`
+	Permissions []string   `json:"permissions,omitempty"`
 }
 
 type ToolDecl struct {

@@ -8,13 +8,18 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/alamparelli/alf/internal/marketplace"
 )
 
 // BashHandler executes a bash command and returns the output.
-type BashHandler struct{}
+type BashHandler struct {
+	Perms marketplace.PermissionChecker
+}
 
 type bashRequest struct {
 	Command string `json:"command"`
+	AppSlug string `json:"app_slug,omitempty"` // set by SDK to identify calling app
 }
 
 type bashResponse struct {
@@ -36,6 +41,13 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Command == "" {
 		http.Error(w, "command required", http.StatusBadRequest)
+		return
+	}
+
+	// Permission check: if request identifies an app, verify bash permission.
+	// Absent app_slug = direct LLM/terminal call = always allowed.
+	if req.AppSlug != "" && h.Perms != nil && !h.Perms.HasPermission(req.AppSlug, "bash") {
+		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash"})
 		return
 	}
 

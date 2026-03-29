@@ -144,16 +144,45 @@ Some upstream APIs use cookies for session affinity (e.g., AWS ALB's `AWSALB` co
 
 Vault can manage SSH connections alongside HTTP services.
 
-**Adding an SSH service:**
-1. Click **Add** in the Services section
-2. Select **SSH** as the service type
-3. Fill in the host, port, username, and upload or select a private key file
-4. Click **Save**
+### Preparing an SSH key
 
-**Features:**
-- **Browser terminal** — click the Terminal icon next to an SSH service to open an interactive shell session in the browser
-- **File transfer** — upload and download files via SFTP directly from the service detail view
-- **Remote command execution** — Alf can execute commands on remote hosts through the vault proxy without seeing the SSH credentials
+Generate a dedicated key on the remote host and authorize it:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/alf_vault -C "alf-vault-access" -N ""
+cat ~/.ssh/alf_vault.pub >> ~/.ssh/authorized_keys
+```
+
+The private key (`~/.ssh/alf_vault`) is already in PEM format — no conversion needed.
+
+### Adding an SSH service
+
+1. Go to **Vault → Secrets & Files** and click **Upload** to upload the private key file
+2. Click **Add** in the Services section
+3. Select **SSH Key** as the auth type
+4. Fill in the **Host**, **Port** (default 22), and **Username**
+5. Select the uploaded key from the **Private Key File** dropdown
+6. If the key has a passphrase, fill in the **Passphrase** field — leave empty otherwise
+7. Click **Save**
+
+On first connection, the remote host key is saved automatically (TOFU — Trust On First Use).
+
+### Features
+
+- **Browser terminal** — click the terminal icon (>_) next to an SSH service to open an interactive shell session
+- **Remote command execution** — Alf can run commands on remote hosts through the vault proxy:
+  ```bash
+  vault proxy homelab POST /ssh/exec '{"command":"hostname && uptime"}'
+  ```
+  Or directly via the vault API:
+  ```bash
+  curl -s http://127.0.0.1:8390/ssh/homelab/exec -X POST \
+    -H "Authorization: Bearer $VAULT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"command":"hostname"}'
+  ```
+- **File transfer** — upload and download files via SFTP
+- **Command allowlist** — optionally restrict which commands can be executed per service
 
 SSH keys are encrypted at rest alongside all other vault credentials. The private key never leaves vault-server.
 

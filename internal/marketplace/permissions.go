@@ -27,3 +27,35 @@ func ValidatePermissions(perms []string) error {
 	}
 	return nil
 }
+
+// ValidateManifest checks a manifest for common issues before publishing or enabling.
+// Returns a list of errors (blocking) and warnings (informational).
+func ValidateManifest(m *Manifest) (errors []string, warnings []string) {
+	if m.Name == "" {
+		errors = append(errors, "name is required")
+	}
+	if m.Slug == "" {
+		errors = append(errors, "slug is required")
+	}
+	if m.Version == "" {
+		errors = append(errors, "version is required")
+	} else {
+		// Basic semver check
+		parts := 0
+		for _, c := range m.Version {
+			if c == '.' {
+				parts++
+			}
+		}
+		if parts != 2 {
+			errors = append(errors, "version must be semver (e.g. 1.0.0)")
+		}
+	}
+	if m.Description == "" {
+		warnings = append(warnings, "description is empty")
+	}
+	if err := ValidatePermissions(m.Permissions); err != nil {
+		errors = append(errors, err.Error())
+	}
+	return
+}

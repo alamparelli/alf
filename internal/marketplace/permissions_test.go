@@ -179,6 +179,55 @@ func TestManager_HasPermission_UntrustedNilPerms(t *testing.T) {
 	}
 }
 
+func TestValidateManifest_Valid(t *testing.T) {
+	m := &Manifest{Name: "Test", Slug: "test", Version: "1.0.0", Description: "A test app"}
+	errs, warns := ValidateManifest(m)
+	if len(errs) != 0 {
+		t.Errorf("expected no errors, got %v", errs)
+	}
+	if len(warns) != 0 {
+		t.Errorf("expected no warnings, got %v", warns)
+	}
+}
+
+func TestValidateManifest_MissingFields(t *testing.T) {
+	m := &Manifest{}
+	errs, _ := ValidateManifest(m)
+	if len(errs) < 3 {
+		t.Errorf("expected at least 3 errors (name, slug, version), got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidateManifest_BadVersion(t *testing.T) {
+	m := &Manifest{Name: "T", Slug: "t", Version: "v1"}
+	errs, _ := ValidateManifest(m)
+	found := false
+	for _, e := range errs {
+		if e == "version must be semver (e.g. 1.0.0)" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected semver error, got %v", errs)
+	}
+}
+
+func TestValidateManifest_BadPermission(t *testing.T) {
+	m := &Manifest{Name: "T", Slug: "t", Version: "1.0.0", Permissions: []string{"storage", "hack"}}
+	errs, _ := ValidateManifest(m)
+	if len(errs) == 0 {
+		t.Error("expected error for unknown permission 'hack'")
+	}
+}
+
+func TestValidateManifest_EmptyDescription(t *testing.T) {
+	m := &Manifest{Name: "T", Slug: "t", Version: "1.0.0"}
+	_, warns := ValidateManifest(m)
+	if len(warns) == 0 {
+		t.Error("expected warning for empty description")
+	}
+}
+
 func TestLoadManifest_StripsTrusted(t *testing.T) {
 	// SEC-001: Trusted field must be stripped from manifest on load
 	dir := t.TempDir()

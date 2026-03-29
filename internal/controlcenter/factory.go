@@ -2,6 +2,7 @@ package controlcenter
 
 import (
 	"io/fs"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -175,10 +176,12 @@ func HandlerFactory(deps Deps) http.Handler {
 	})
 
 	// Permission checker: marketplace manager implements the interface.
-	// nil when marketplace is not configured (all permissions allowed).
+	// nil when marketplace is not configured — all permissions allowed (no third-party apps).
 	var permChecker marketplace.PermissionChecker
 	if deps.Marketplace != nil {
 		permChecker = deps.Marketplace
+	} else {
+		log.Println("[security] marketplace not configured — app permission enforcement disabled")
 	}
 
 	// Apps: directory-based apps with index.html + assets.

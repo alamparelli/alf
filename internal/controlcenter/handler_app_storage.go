@@ -44,6 +44,13 @@ func (h *AppStorageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cross-app access check: if request comes from an app iframe,
+	// it may only access its own storage (not another app's).
+	if callerSlug := extractAppSlugFromReferer(r); callerSlug != "" && callerSlug != slug {
+		respondJSON(w, http.StatusForbidden, map[string]string{"error": "cross-app storage access denied"})
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		h.handleGet(w, r, slug)

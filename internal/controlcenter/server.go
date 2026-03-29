@@ -31,9 +31,10 @@ var webFS embed.FS
 
 // Server is the Control Center HTTP server.
 type Server struct {
-	httpServer     *http.Server
-	addr           string
-	statusProvider *daemonStatusProvider
+	httpServer      *http.Server
+	internalHandler http.Handler // handler without stripToolsSocketHeader (for Unix tools proxy)
+	addr            string
+	statusProvider  *daemonStatusProvider
 }
 
 // New creates a Control Center server.
@@ -72,7 +73,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 	// Schedule run log uses the same logs/scheduler directory as the scheduler engine.
 	schedRunLog := scheduler_pkg.NewRunLog(filepath.Join(dataDir, "logs", "scheduler"))
 
-	handler := HandlerFactory(Deps{
+	handlers := HandlerFactory(Deps{
 		ConfigStore:    configStore,
 		TierStore:      tierStore,
 		ContextStore:    contextStore,
@@ -121,15 +122,16 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 	return &Server{
 		httpServer: &http.Server{
 			Addr:              addr,
-			Handler:           handler,
+			Handler:           handlers.Main,
 			ReadTimeout:       30 * time.Second,
 			ReadHeaderTimeout: 10 * time.Second,
 			IdleTimeout:       120 * time.Second,
 			WriteTimeout:      10 * time.Minute, // long for SSE streaming
 			MaxHeaderBytes:    1 << 20,           // 1MB
 		},
-		addr:           addr,
-		statusProvider: statusProvider,
+		internalHandler: handlers.Internal,
+		addr:            addr,
+		statusProvider:  statusProvider,
 	}, eventBroker, nil
 }
 
@@ -140,9 +142,11 @@ func (s *Server) SetUpdater(u UpdateChecker) {
 	}
 }
 
-// Handler returns the HTTP handler for use by the tools proxy socket.
-func (s *Server) Handler() http.Handler {
-	return s.httpServer.Handler
+// InternalHandler returns the handler without stripToolsSocketHeader,
+// for use by the Unix tools proxy socket. The tools proxy injects
+// X-Tools-Socket which the auth middleware trusts as authentication.
+func (s *Server) InternalHandler() http.Handler {
+	return s.internalHandler
 }
 
 // Start begins listening. Blocks until the server stops.

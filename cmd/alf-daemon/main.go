@@ -768,7 +768,7 @@ func main() {
 		// Tools proxy socket: system-tools connect here instead of HTTP+CC_AUTH_TOKEN.
 		// Socket access (mode 0660, group alf) = authentication. Dangerous endpoints blocked.
 		toolsSockPath := filepath.Join(contextDir, "tools.sock")
-		if toolsLn, err := cc.ListenAndServeTools(toolsSockPath, ccServer.Handler()); err != nil {
+		if toolsLn, err := cc.ListenAndServeTools(toolsSockPath, ccServer.InternalHandler()); err != nil {
 			log.Printf("warning: tools proxy socket failed: %v", err)
 		} else {
 			os.Setenv("ALF_TOOLS_SOCK", toolsSockPath)

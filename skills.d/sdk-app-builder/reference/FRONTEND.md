@@ -283,7 +283,7 @@ AlfSDK.init({
 ## Sheets (bottom-sheet modals)
 
 Sheets render HTML in a parent-level modal (bottom-sheet on mobile, centered on desktop).
-HTML is sanitized server-side -- safe tags and attributes only, no scripts.
+HTML is sanitized -- safe tags, attributes (including `style`), and `data-*` attributes are preserved. No scripts.
 
 ```js
 // Simple informational sheet
@@ -344,6 +344,40 @@ Marketplace apps declare permissions in `manifest.json`:
 - **Untrusted apps** are capped to `storage`, `events`, `clipboard` regardless of what they declare.
 - **Trusted apps** (verified in registry) can use all permissions.
 - APIs that require a permission return `403` with `{"error": "permission denied: <perm>"}`.
+
+---
+
+## REST server apps (API proxy)
+
+Apps with a backend server (`service.json`) get automatic API proxying.
+No `AlfSDK.bash()` needed — use direct `fetch`:
+
+```js
+// The CC proxies /apps/{slug}/api/... → localhost:{port}/api/...
+// Port is read from data/port (written by the server at startup).
+
+// GET items
+fetch('/apps/my-app/api/items', { credentials: 'same-origin' })
+  .then(function(r) { return r.json(); })
+  .then(function(items) { render(items); });
+
+// POST new item
+fetch('/apps/my-app/api/items', {
+  method: 'POST',
+  credentials: 'same-origin',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ title: 'New item' })
+}).then(function(r) { return r.json(); });
+
+// DELETE
+fetch('/apps/my-app/api/items/123', {
+  method: 'DELETE',
+  credentials: 'same-origin'
+});
+```
+
+All HTTP methods are proxied. Auth cookies are **not** forwarded to the app server.
+If the server is not running, the proxy returns `502 Bad Gateway`.
 
 ---
 

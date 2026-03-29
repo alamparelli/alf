@@ -120,7 +120,10 @@ func (s *fileAppStore) List() ([]AppMeta, error) {
 	return apps, nil
 }
 
-// loadDisabledApps reads .state.json and returns a set of disabled app slugs.
+// loadDisabledApps reads .state.json and returns a set of app slugs that should
+// NOT appear in the sidebar/spotlight. An app is hidden if it has a state entry
+// that is not "enabled" (i.e. "installed" or "disabled"). Apps without any state
+// entry are considered visible (non-marketplace apps).
 func loadDisabledApps(appsDir string) map[string]bool {
 	data, err := os.ReadFile(filepath.Join(appsDir, ".state.json"))
 	if err != nil {
@@ -132,13 +135,13 @@ func loadDisabledApps(appsDir string) map[string]bool {
 	if json.Unmarshal(data, &sf) != nil {
 		return nil
 	}
-	disabled := make(map[string]bool)
+	hidden := make(map[string]bool)
 	for slug, state := range sf.States {
-		if state == "disabled" {
-			disabled[slug] = true
+		if state != "enabled" {
+			hidden[slug] = true
 		}
 	}
-	return disabled
+	return hidden
 }
 
 func (s *fileAppStore) ReadFile(app, path string) ([]byte, error) {

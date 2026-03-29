@@ -159,7 +159,7 @@
           <span class="dev-toggle-desc">Publish apps to the marketplace registry</span>
         </div>
       </div>
-      <Toggle bind:checked={nav.developerMode} label="" onchange={() => nav.toggleDeveloperMode()} />
+      <Toggle checked={nav.developerMode} label="" onchange={() => nav.toggleDeveloperMode()} />
     </div>
   </Card>
 

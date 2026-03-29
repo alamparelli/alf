@@ -121,9 +121,9 @@
     'g','text','defs','use','symbol','polyline','polygon','ellipse'
   ])
   const SAFE_ATTRS = new Set([
-    'class','id','href','src','alt','title','width','height','colspan','rowspan',
+    'class','id','style','href','src','alt','title','width','height','colspan','rowspan',
     'type','name','value','placeholder','checked','disabled','readonly','rows','cols',
-    'target','rel','role','aria-label','aria-hidden','aria-expanded',
+    'target','rel','role','aria-label','aria-hidden','aria-expanded','for',
     'data-action','data-id','data-value','data-field','data-type',
     'viewBox','d','fill','stroke','stroke-width','cx','cy','r','x','y','x1','y1','x2','y2',
     'points','transform','xmlns','stroke-linecap','stroke-linejoin'

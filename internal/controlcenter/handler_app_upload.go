@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/alamparelli/alf/internal/marketplace"
 )
 
 const maxUploadSize = 10 << 20 // 10MB
@@ -28,6 +30,7 @@ func sanitizeFilename(name string) string {
 //	POST /api/apps/{slug}/upload → saves file to DataDir/apps/{slug}/data/uploads/
 type AppUploadHandler struct {
 	DataDir string
+	Perms   marketplace.PermissionChecker
 }
 
 func (h *AppUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +49,11 @@ func (h *AppUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	slug := parts[0]
 	if !validName.MatchString(slug) {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid app name"})
+		return
+	}
+
+	if h.Perms != nil && !h.Perms.HasPermission(slug, "upload") {
+		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: upload"})
 		return
 	}
 

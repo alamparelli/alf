@@ -326,6 +326,18 @@
       iframe.addEventListener('load', () => {
         theme.syncIframe(iframe)
         injectSheetCSS(iframe)
+        // Send permissions to iframe after load
+        fetch('/api/apps/' + slug + '/permissions')
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data && iframe?.contentWindow) {
+              iframe.contentWindow.postMessage(
+                { type: 'alf', action: 'permissions', permissions: data.permissions },
+                location.origin
+              )
+            }
+          })
+          .catch(() => {}) // fail silently — app gets all permissions
       })
     }
 

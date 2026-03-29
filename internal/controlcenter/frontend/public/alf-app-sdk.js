@@ -345,11 +345,13 @@
   var ClipboardManager = {
     /** Copy text to clipboard (delegates to parent for cross-frame support). */
     write: function(text) {
+      if (!_hasPerm('clipboard')) return Promise.reject(new Error('Permission denied: clipboard'));
       return requestFromParent('clipboard-write', { text: text });
     },
 
     /** Read text from clipboard (delegates to parent). */
     read: function() {
+      if (!_hasPerm('clipboard')) return Promise.reject(new Error('Permission denied: clipboard'));
       return requestFromParent('clipboard-read');
     }
   };
@@ -405,6 +407,7 @@
     _slug: null,
     _listeners: {},
     _authFailed: false,
+    _permissions: null, // null = all allowed, string[] = restricted set
 
     audio: AudioManager,
     storage: StorageManager,
@@ -474,6 +477,10 @@
             try { handler(msg.params || {}); } catch(e) { console.warn('[AlfSDK] sheet action error:', e); }
           }
         }
+        // Permissions received from parent
+        if (msg.action === 'permissions') {
+          SDK._permissions = msg.permissions; // null = all allowed, array = restricted
+        }
         // Reply to requestFromParent
         if (msg.action === 'reply' && msg._replyId) {
           var pending = _pendingReplies[msg._replyId];
@@ -540,7 +547,7 @@
       return this.api('/api/bash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: cmd })
+        body: JSON.stringify({ command: cmd, app_slug: this._slug })
       });
     },
 
@@ -704,6 +711,12 @@
       return false;
     }
     return true;
+  }
+
+  function _hasPerm(perm) {
+    // null = no restrictions (backward compat / internal app)
+    if (SDK._permissions === null || SDK._permissions === undefined) return true;
+    return SDK._permissions.indexOf(perm) >= 0;
   }
 
   global.AlfSDK = SDK;

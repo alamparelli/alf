@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sort"
+	"strings"
 	"sync"
+
+	"github.com/alamparelli/alf/internal/marketplace"
 )
 
 // AppStorageHandler provides per-app key/value JSON storage.
@@ -19,6 +21,7 @@ import (
 //	DELETE /api/apps/{slug}/storage?key=foo → delete key
 type AppStorageHandler struct {
 	DataDir string
+	Perms   marketplace.PermissionChecker
 	mu      sync.RWMutex
 }
 
@@ -33,6 +36,11 @@ func (h *AppStorageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	slug := parts[0]
 	if !validName.MatchString(slug) {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid app name"})
+		return
+	}
+
+	if h.Perms != nil && !h.Perms.HasPermission(slug, "storage") {
+		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: storage"})
 		return
 	}
 

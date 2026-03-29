@@ -51,6 +51,7 @@ type Manager struct {
 	registryURL string // e.g. http://alf-marketplace:8090
 	mu          sync.Mutex
 	states      map[string]AppState
+	perms       map[string][]string // slug → declared permissions (nil = all allowed)
 	onChange    func()
 	supervisor  AppSupervisor
 	http       *http.Client
@@ -65,6 +66,7 @@ func NewManager(dataDir string) *Manager {
 		dataDir:     dataDir,
 		registryURL: os.Getenv("ALF_MARKETPLACE_URL"),
 		states:      make(map[string]AppState),
+		perms:       make(map[string][]string),
 		http:        &http.Client{Timeout: 30 * time.Second},
 	}
 	m.loadState()
@@ -81,6 +83,42 @@ func (m *Manager) SetSupervisor(sv AppSupervisor) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.supervisor = sv
+}
+
+// HasPermission checks if an app has the given permission.
+// Returns true if:
+//   - app has no permissions field in manifest (backward compat: all allowed)
+//   - app is not tracked by the marketplace (internal app: all allowed)
+//   - the permission is explicitly listed
+func (m *Manager) HasPermission(slug, perm string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	perms, tracked := m.perms[slug]
+	if !tracked {
+		return true // not in cache = no restrictions (internal or legacy app)
+	}
+	for _, p := range perms {
+		if p == perm {
+			return true
+		}
+	}
+	return false
+}
+
+// GetPermissions returns the declared permissions for an app.
+// Returns nil if the app has no restrictions (all allowed).
+func (m *Manager) GetPermissions(slug string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	perms, tracked := m.perms[slug]
+	if !tracked {
+		return nil // all allowed
+	}
+	result := make([]string, len(perms))
+	copy(result, perms)
+	return result
 }
 
 func (m *Manager) List() []AppInfo {
@@ -171,6 +209,14 @@ func (m *Manager) Enable(slug string) error {
 	}
 
 	m.states[slug] = StateEnabled
+
+	// Cache declared permissions (nil slice = field absent = all allowed)
+	if manifest.Permissions != nil {
+		m.perms[slug] = manifest.Permissions
+	} else {
+		delete(m.perms, slug) // no restrictions
+	}
+
 	if err := m.saveState(); err != nil {
 		return err
 	}
@@ -230,6 +276,8 @@ func (m *Manager) Disable(slug string) error {
 	m.unlinkAppSkills(slug)
 
 	m.states[slug] = StateDisabled
+	delete(m.perms, slug)
+
 	if err := m.saveState(); err != nil {
 		return err
 	}
@@ -283,6 +331,11 @@ func (m *Manager) RestoreEnabled() error {
 		manifest, err := m.loadManifest(slug)
 		if err != nil {
 			continue
+		}
+
+		// Restore permission cache
+		if manifest.Permissions != nil {
+			m.perms[slug] = manifest.Permissions
 		}
 
 		for _, tool := range manifest.Tools {

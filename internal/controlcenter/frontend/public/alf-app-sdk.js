@@ -55,15 +55,31 @@
     _tryUnlock: function() {
       try {
         if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)();
-        if (this._ctx.state === 'suspended') {
-          var self = this;
-          this._ctx.resume().then(function() {
+        var self = this;
+        function markUnlocked() {
+          if (!self._unlocked) {
             self._unlocked = true;
             self._flushPending();
+          }
+        }
+        if (this._ctx.state === 'suspended') {
+          this._ctx.resume();
+          // Fallback: poll state — resume() promise can hang on iOS webviews
+          var check = setInterval(function() {
+            if (self._ctx && self._ctx.state === 'running') {
+              clearInterval(check);
+              markUnlocked();
+            }
+          }, 50);
+          // Also keep the promise path
+          this._ctx.resume().then(function() {
+            clearInterval(check);
+            markUnlocked();
           });
+          // Safety: stop polling after 5s to avoid leaks
+          setTimeout(function() { clearInterval(check); }, 5000);
         } else {
-          this._unlocked = true;
-          this._flushPending();
+          markUnlocked();
         }
       } catch(e) { /* retry next gesture */ }
     },

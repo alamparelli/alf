@@ -250,7 +250,12 @@ func (m *Manager) resolveToolBinary(slug string) string {
 }
 
 func (m *Manager) Disable(slug string) error {
-	// Stop the app's service before disabling.
+	// SEC-008: Clear permissions first (under lock) to prevent use during teardown.
+	m.mu.Lock()
+	delete(m.perms, slug)
+	m.mu.Unlock()
+
+	// Stop the app's service before further cleanup.
 	if m.supervisor != nil {
 		m.supervisor.StopApp(slug)
 	}
@@ -276,7 +281,6 @@ func (m *Manager) Disable(slug string) error {
 	m.unlinkAppSkills(slug)
 
 	m.states[slug] = StateDisabled
-	delete(m.perms, slug)
 
 	if err := m.saveState(); err != nil {
 		return err
@@ -330,6 +334,8 @@ func (m *Manager) RestoreEnabled() error {
 
 		manifest, err := m.loadManifest(slug)
 		if err != nil {
+			// SEC-007: fail-closed — deny all permissions if manifest can't be loaded
+			m.perms[slug] = []string{}
 			continue
 		}
 

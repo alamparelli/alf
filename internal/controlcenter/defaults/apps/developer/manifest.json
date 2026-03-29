@@ -1,9 +1,10 @@
 {
   "name": "Developer",
   "slug": "developer",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Publish apps to the ALF Marketplace",
   "category": "developer",
   "icon": "code-2",
+  "permissions": ["bash", "storage", "upload", "network"],
   "tools": []
 }

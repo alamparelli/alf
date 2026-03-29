@@ -59,5 +59,18 @@ func LoadManifest(path string) (*Manifest, error) {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
 
+	// SEC-001: Strip Trusted from file — trust is determined by the registry,
+	// not by the manifest on disk (which the LLM subprocess can edit).
+	m.Trusted = false
+
 	return &m, nil
+}
+
+func init() {
+	// SEC-006: Compile-time check that UntrustedMaxPermissions is a subset of ValidPermissions.
+	for p := range UntrustedMaxPermissions {
+		if !ValidPermissions[p] {
+			panic("UntrustedMaxPermissions contains unknown permission: " + p)
+		}
+	}
 }

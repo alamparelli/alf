@@ -285,7 +285,7 @@
     border-radius: 0 6px 6px 0;
     color: var(--text-dim);
     text-decoration: none;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
     cursor: pointer;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -306,7 +306,7 @@
   .nav-badge {
     background: var(--accent);
     color: var(--on-accent, #fff);
-    font-size: 0.6rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 700;
     min-width: 16px;
     height: 16px;
@@ -324,7 +324,7 @@
   }
 
   .coming-soon-badge {
-    font-size: 0.55rem;
+    font-size: var(--font-xs, 11px);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-dim);
@@ -371,7 +371,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
 

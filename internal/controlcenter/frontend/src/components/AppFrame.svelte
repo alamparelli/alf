@@ -465,7 +465,7 @@
      their own stylesheet, so we need sensible defaults. */
   .sdk-sheet-content {
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 0.9rem;
+    font-size: var(--font-sm, 13px);
     line-height: 1.5;
     color: var(--text);
     background: var(--bg);
@@ -479,7 +479,7 @@
     margin: 0 0 0.5rem;
     font-weight: 600;
   }
-  .sdk-sheet-content :global(h3) { font-size: 1.05rem; }
+  .sdk-sheet-content :global(h3) { font-size: var(--font-md, 15px); }
 
   .sdk-sheet-content :global(p) {
     margin: 0 0 0.5rem;
@@ -503,7 +503,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
     transition: background 0.15s;
   }
@@ -522,7 +522,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     margin-bottom: 0.5rem;
   }
   .sdk-sheet-content :global(input:focus),
@@ -534,7 +534,7 @@
 
   .sdk-sheet-content :global(label) {
     display: block;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin-bottom: 2px;
     font-weight: 500;

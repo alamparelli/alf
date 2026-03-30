@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -84,7 +85,7 @@ func (p *VaultProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Check service allowlist (nil = allow all for LLM tier).
 	if p.allowedServices != nil && !p.allowedServices[service] {
-		http.Error(w, `{"error":"service not allowed: `+service+`"}`, http.StatusForbidden)
+		http.Error(w, `{"error":"service not allowed"}`, http.StatusForbidden)
 		return
 	}
 
@@ -94,7 +95,9 @@ func (p *VaultProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		upstreamURL += "?" + r.URL.RawQuery
 	}
 
-	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, r.Body)
+	// SEC-006: Limit request body to 10MB to prevent resource exhaustion.
+	body := io.LimitReader(r.Body, 10<<20)
+	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, body)
 	if err != nil {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
@@ -139,14 +142,19 @@ func (p *VaultProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *VaultProxy) ListenAndServe(sockPath string) (net.Listener, error) {
 	os.Remove(sockPath) // clear stale
 
+	// SEC-002: Create socket in a restrictive directory or set umask before Listen
+	// to minimize the TOCTOU window between Listen and Chmod.
+	oldMask := syscall.Umask(0117) // results in 0660
 	ln, err := net.Listen("unix", sockPath)
+	syscall.Umask(oldMask)
 	if err != nil {
 		return nil, err
 	}
 
 	// Daemon runs as alfd (uid 1001). Set group to alf (1000) for subprocess access.
-	os.Chown(sockPath, -1, 1000)
-	os.Chmod(sockPath, 0660)
+	// Errors are non-fatal (e.g. running in tests without root).
+	_ = os.Chown(sockPath, -1, 1000)
+	_ = os.Chmod(sockPath, 0660)
 
 	srv := &http.Server{Handler: p}
 	go func() {

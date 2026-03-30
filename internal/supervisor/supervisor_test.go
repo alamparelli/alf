@@ -160,12 +160,12 @@ func TestInheritSafeEnv_PassesSafeVars(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
 	t.Setenv("HOME", "/home/test")
 	t.Setenv("LANG", "en_US.UTF-8")
-	t.Setenv("VAULT_TOKEN", "s.abc123")
+	t.Setenv("VAULT_PROXY_SOCK", "/run/vault-test.sock")
 
 	env := inheritSafeEnv()
 	envMap := envToMap(env)
 
-	for _, key := range []string{"PATH", "HOME", "LANG", "VAULT_TOKEN"} {
+	for _, key := range []string{"PATH", "HOME", "LANG", "VAULT_PROXY_SOCK"} {
 		if _, ok := envMap[key]; !ok {
 			t.Errorf("expected %s to be inherited", key)
 		}
@@ -708,7 +708,7 @@ func TestServiceConfig_NoSandboxFieldIgnored(t *testing.T) {
 
 // Ensure safePrefixes list is not empty and contains expected entries.
 func TestSafePrefixes_ContainsExpected(t *testing.T) {
-	expected := []string{"PATH=", "HOME=", "LANG=", "VAULT_TOKEN=", "ANTHROPIC_"}
+	expected := []string{"PATH=", "HOME=", "LANG=", "VAULT_PROXY_SOCK=", "ANTHROPIC_"}
 	for _, want := range expected {
 		found := false
 		for _, p := range safePrefixes {

@@ -696,6 +696,7 @@ func main() {
 	// Schedule adapter (engine set later after scheduler is created).
 	schedAdapter := &ccScheduleAdapter{}
 	var ccServerRef *cc.Server
+	var llmVaultProxy *vault.VaultProxy
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
@@ -796,10 +797,11 @@ func main() {
 
 		// LLM vault proxy socket: unfiltered proxy for all LLM subprocesses
 		// (Claude CLI, Codex, vault-cli). Token injected server-side.
+		// llmVaultProxy is hoisted so OnTokenUpdate can refresh it after vault restart.
 		if vaultMgr != nil && vaultMgr.ProxyToken() != "" {
 			llmVaultSock := filepath.Join(contextDir, "vault-llm.sock")
-			llmProxy := vault.NewVaultProxy(vaultMgr.SocketPath(), vaultMgr.ProxyToken(), nil)
-			if llmLn, err := llmProxy.ListenAndServe(llmVaultSock); err != nil {
+			llmVaultProxy = vault.NewVaultProxy(vaultMgr.SocketPath(), vaultMgr.ProxyToken(), nil)
+			if llmLn, err := llmVaultProxy.ListenAndServe(llmVaultSock); err != nil {
 				log.Printf("warning: LLM vault proxy socket failed: %v", err)
 			} else {
 				os.Setenv("VAULT_PROXY_SOCK", llmVaultSock)
@@ -1088,6 +1090,10 @@ func main() {
 		// Notify supervisor when vault restarts and gets a new proxy token.
 		vaultMgr.OnTokenUpdate = func(token string) {
 			appsSupervisor.UpdateProxyToken(token)
+			if llmVaultProxy != nil {
+				llmVaultProxy.UpdateToken(token)
+				log.Println("[vault] LLM proxy token updated")
+			}
 		}
 	}
 	appsSupervisor.Start()

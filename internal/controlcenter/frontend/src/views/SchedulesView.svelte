@@ -541,53 +541,6 @@
   .view-schedules h2 {
     margin-bottom: 16px;
   }
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin-bottom: 1rem;
-  }
-  .search-box {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.25rem 0.5rem;
-    background: var(--bg-card);
-  }
-  .search-box input {
-    border: none;
-    background: none;
-    color: var(--text);
-    font-size: 0.8rem;
-    outline: none;
-    width: 140px;
-  }
-  .filter-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.2rem;
-    margin-bottom: 1rem;
-  }
-  .tab {
-    padding: 0.3rem 0.7rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: none;
-    color: var(--text-dim);
-    font-size: 0.75rem;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .tab:hover {
-    background: var(--bg-input);
-  }
-  .tab.active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-  }
   .loading, .empty {
     text-align: center;
     padding: 3rem;
@@ -650,19 +603,11 @@
     align-items: center;
     gap: 0.2rem;
   }
-  .badge {
-    font-size: 0.6rem;
-    padding: 0.1rem 0.3rem;
-    border-radius: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: #fff;
-  }
-  .badge-tier { background: var(--sapphire); }
-  .badge-running { background: var(--green); animation: pulse 1.5s infinite; }
-  .badge-disabled { background: var(--yellow); }
-  .badge-managed { background: var(--mauve); }
-  .badge-system { background: var(--text-dim); }
+  .badge-tier { background: var(--sapphire); color: #fff; }
+  .badge-running { background: var(--green); color: #fff; animation: pulse 1.5s infinite; }
+  .badge-disabled { background: var(--yellow); color: #fff; }
+  .badge-managed { background: var(--mauve); color: #fff; }
+  .badge-system { background: var(--text-dim); color: #fff; }
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }

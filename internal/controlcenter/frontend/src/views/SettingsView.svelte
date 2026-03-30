@@ -475,47 +475,6 @@
     cursor: not-allowed;
   }
 
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    background: var(--bg-input);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.8rem;
-    font-weight: 500;
-    cursor: pointer;
-    text-decoration: none;
-    transition: background 0.15s;
-  }
-
-  .btn:hover {
-    background: var(--border);
-  }
-
-  .btn-primary {
-    background: var(--accent);
-    color: var(--on-accent);
-    border-color: var(--accent);
-  }
-
-  .btn-primary:hover {
-    opacity: 0.9;
-  }
-
-  .btn-sm {
-    padding: 4px 10px;
-    font-size: 0.75rem;
-  }
-
-  .btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
   .admin-output {
     margin-top: 12px;
     padding: 8px 12px;
@@ -563,28 +522,6 @@
     font-size: 0.82rem;
     color: var(--text-dim);
     margin-bottom: 12px;
-  }
-
-  .form-group {
-    margin-bottom: 12px;
-  }
-
-  .form-group label {
-    display: block;
-    font-size: 0.8rem;
-    font-weight: 500;
-    margin-bottom: 4px;
-  }
-
-  .input {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    background: var(--bg-input);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.85rem;
   }
 
   .form-help {

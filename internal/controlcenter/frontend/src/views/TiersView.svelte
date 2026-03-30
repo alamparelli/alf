@@ -487,13 +487,6 @@
   .view-tiers h2 {
     margin-bottom: 16px;
   }
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-    margin-bottom: 1.5rem;
-  }
   .loading, .empty {
     text-align: center;
     padding: 3rem;
@@ -513,13 +506,6 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-  }
-  .badge {
-    font-size: 0.65rem;
-    padding: 0.1rem 0.35rem;
-    border-radius: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
   }
   .badge-type {
     background: var(--sapphire);

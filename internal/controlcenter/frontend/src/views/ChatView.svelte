@@ -497,6 +497,56 @@
         } catch { /* keep as string */ }
       }
       setBlocks([...blocks])
+    } else if (type === 'text_delta') {
+      // Normalized event from comms pipeline (Codex, CLI, etc.)
+      const delta = data.text || data.data?.text || ''
+      if (delta) {
+        if (blocks.length === 0 || blocks[blocks.length - 1].type !== 'text') {
+          blocks.push({ type: 'text', text: '', thinking: '' })
+        }
+        blocks[blocks.length - 1].text += delta
+        setBlocks([...blocks])
+      }
+    } else if (type === 'text') {
+      // Final text event from comms pipeline
+      const text = data.text || data.data?.text || ''
+      if (text) {
+        if (blocks.length === 0 || blocks[blocks.length - 1].type !== 'text') {
+          blocks.push({ type: 'text', text: '', thinking: '' })
+        }
+        blocks[blocks.length - 1].text = text
+        setBlocks([...blocks])
+      }
+    } else if (type === 'thinking') {
+      // Normalized thinking event from comms pipeline
+      const text = data.text || data.data?.text || ''
+      if (text) {
+        if (blocks.length === 0 || blocks[blocks.length - 1].type !== 'thinking') {
+          blocks.push({ type: 'thinking', text: '', thinking: '' })
+        }
+        blocks[blocks.length - 1].thinking += text
+        setBlocks([...blocks])
+      }
+    } else if (type === 'tool_use') {
+      // Normalized tool_use start from comms pipeline
+      blocks.push({ type: 'tool_use', text: '', name: data.name || '', input: '', thinking: '' })
+      setBlocks([...blocks])
+    } else if (type === 'tool_input') {
+      // Normalized tool input chunk from comms pipeline
+      const last = blocks[blocks.length - 1]
+      if (last && last.type === 'tool_use') {
+        last.input = (typeof last.input === 'string' ? last.input : '') + (data.chunk || '')
+        setBlocks([...blocks])
+      }
+    } else if (type === 'tool_result') {
+      // Normalized tool result from comms pipeline
+      const last = blocks[blocks.length - 1]
+      if (last && last.type === 'tool_use') {
+        try {
+          if (typeof last.input === 'string') last.input = JSON.parse(last.input)
+        } catch { /* keep as string */ }
+      }
+      setBlocks([...blocks])
     } else if (type === 'message_delta' || type === 'message_stop') {
       // Done event — may contain cost, model, etc.
       // No action needed; stream will end and we reload history

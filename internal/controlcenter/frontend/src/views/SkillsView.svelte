@@ -506,26 +506,6 @@
     padding: 8px 0;
     width: 100%;
   }
-  .view-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 1rem;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-  .view-header h2 {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 0;
-    font-size: 1.25rem;
-  }
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
   .section-header {
     display: flex;
     align-items: center;
@@ -577,13 +557,6 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-  }
-  .badge {
-    font-size: 0.65rem;
-    padding: 0.1rem 0.35rem;
-    border-radius: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
   }
   .badge-tier {
     background: var(--mauve);
@@ -767,11 +740,4 @@
     margin-top: 0.3rem;
   }
 
-  :global(.spin) {
-    animation: spin 1s linear infinite;
-  }
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
 </style>

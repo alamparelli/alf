@@ -1112,21 +1112,8 @@
 
   /* Form */
   .dim { color: var(--text-dim); font-size: 0.85rem; }
-  .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-  .form-group label { font-size: 0.8rem; font-weight: 500; }
   .modal-form { margin-top: 12px; }
   .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
-
-  .input {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-input);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.85rem;
-  }
 
   @media (max-width: 768px) {
     .ws-sidebar { display: none; }

@@ -363,6 +363,22 @@
     color: var(--text);
   }
 
+  :global(.btn-lg) {
+    padding: 12px 24px;
+    font-size: 0.9rem;
+    min-height: 44px;
+  }
+
+  :global(.btn-block) {
+    width: 100%;
+  }
+
+  :global(.btn-group) {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
   /* Common input styles */
   :global(.input) {
     width: 100%;
@@ -435,6 +451,180 @@
     font-family: inherit;
     font-size: 0.85rem;
     resize: vertical;
+  }
+
+  /* ── AIG shared components ──*/
+
+  :global(.toolbar) {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+    margin-bottom: var(--space-md, 16px);
+    flex-wrap: wrap;
+  }
+
+  :global(.search-box) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    padding: 4px 10px;
+    background: var(--bg-card);
+    transition: border-color 0.15s;
+  }
+
+  :global(.search-box:focus-within) {
+    border-color: var(--accent);
+  }
+
+  :global(.search-box input) {
+    border: none;
+    background: none;
+    color: var(--text);
+    font-size: 0.85rem;
+    font-family: inherit;
+    outline: none;
+    min-width: 120px;
+  }
+
+  :global(.search-box svg) {
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+
+  :global(.filter-tabs) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 16px;
+  }
+
+  :global(.tab) {
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    background: none;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  :global(.tab:hover) {
+    background: var(--bg-input);
+  }
+
+  :global(.tab.active) {
+    background: var(--accent);
+    color: var(--on-accent);
+    border-color: var(--accent);
+  }
+
+  :global(.badge) {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  :global(.badge-success) {
+    background: color-mix(in srgb, var(--green) 15%, transparent);
+    color: var(--green);
+  }
+
+  :global(.badge-danger) {
+    background: color-mix(in srgb, var(--red) 15%, transparent);
+    color: var(--red);
+  }
+
+  :global(.badge-warning) {
+    background: color-mix(in srgb, var(--yellow) 15%, transparent);
+    color: var(--yellow);
+  }
+
+  :global(.badge-info) {
+    background: color-mix(in srgb, var(--sapphire) 15%, transparent);
+    color: var(--sapphire);
+  }
+
+  :global(.badge-accent) {
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
+  }
+
+  :global(.alert) {
+    padding: 8px 16px;
+    border-radius: var(--radius, 8px);
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+  }
+
+  :global(.alert-success) {
+    background: color-mix(in srgb, var(--green) 12%, var(--bg));
+    color: var(--green);
+    border-color: color-mix(in srgb, var(--green) 25%, transparent);
+  }
+
+  :global(.alert-danger) {
+    background: color-mix(in srgb, var(--red) 12%, var(--bg));
+    color: var(--red);
+    border-color: color-mix(in srgb, var(--red) 25%, transparent);
+  }
+
+  :global(.alert-warning) {
+    background: color-mix(in srgb, var(--yellow) 12%, var(--bg));
+    color: var(--yellow);
+    border-color: color-mix(in srgb, var(--yellow) 25%, transparent);
+  }
+
+  :global(.alert-info) {
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+    color: var(--text-dim);
+    border-color: var(--border);
+  }
+
+  :global(.meta) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+  }
+
+  @keyframes -global-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  :global(.spin) {
+    animation: spin 1s linear infinite;
+  }
+
+  :global(.empty-state) {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+    color: var(--text-dim);
+    text-align: center;
+    gap: 8px;
+  }
+
+  :global(.loading-state) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    gap: 8px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
   }
 
   /* Common form patterns */

@@ -190,6 +190,13 @@ if [ -x /opt/alf/bin/nettrack-helper ]; then
     echo "entrypoint: nettrack-helper started (pid=$!)"
 fi
 
+# Phase 2.95: Block vault TCP port for app processes (defense-in-depth).
+# vault-server uses Unix socket now; this blocks misconfigured fallback.
+if command -v iptables >/dev/null 2>&1; then
+    iptables -A OUTPUT -p tcp --dport 8390 -m owner --uid-owner 1000 -j REJECT 2>/dev/null || true
+    echo "entrypoint: blocked uid 1000 -> tcp/8390"
+fi
+
 # Phase 3: Drop to alfd (uid 1001, gid 1001) and start daemon.
 # Keep CAP_SETUID+CAP_SETGID so the daemon can spawn subprocesses as alf (uid 1000).
 # --init-groups loads supplementary groups from /etc/group (alfd is also in group alf).

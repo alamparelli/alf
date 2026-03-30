@@ -1,6 +1,9 @@
 package marketplace
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ValidPermissions is the set of permissions an app can declare.
 var ValidPermissions = map[string]bool{
@@ -62,5 +65,21 @@ func ValidateManifest(m *Manifest) (errors []string, warnings []string) {
 	if err := ValidatePermissions(m.Permissions); err != nil {
 		errors = append(errors, err.Error())
 	}
+	if err := ValidateServices(m.Services); err != nil {
+		errors = append(errors, err.Error())
+	}
 	return
+}
+
+// ValidateServices checks that declared vault service names are safe.
+func ValidateServices(services []string) error {
+	for _, s := range services {
+		if s == "" {
+			return fmt.Errorf("empty service name")
+		}
+		if strings.ContainsAny(s, "/.\\") {
+			return fmt.Errorf("service name %q contains path separator", s)
+		}
+	}
+	return nil
 }

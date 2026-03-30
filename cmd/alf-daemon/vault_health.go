@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/alamparelli/alf/internal/vault"
+	vaultclient "github.com/alessandrolamparelli/vault-proxy/pkg/client"
 )
 
 // tokenHealth mirrors the vault-proxy /health/tokens response.
@@ -41,25 +41,20 @@ func (c *vaultTokenChecker) Check() error {
 		return nil
 	}
 
-	addr := c.vaultMgr.Addr()
+	socketPath := c.vaultMgr.SocketPath()
 	token := c.vaultMgr.ProxyToken()
-	if addr == "" || token == "" {
+	if socketPath == "" || token == "" {
 		return nil // vault not ready
 	}
 
-	req, err := http.NewRequest("GET", addr+"/health/tokens", nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := http.DefaultClient.Do(req)
+	vc := vaultclient.NewWithSocket(socketPath, token)
+	resp, err := vc.Do("GET", "/health/tokens", nil)
 	if err != nil {
 		return fmt.Errorf("vault health check: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("vault health check: %s — %s", resp.Status, string(body))
 	}

@@ -174,8 +174,9 @@ func SandboxSafeEnv(appDataDir string) []string {
 
 // ServerSandboxConfig configures isolation for a long-running app server.
 type ServerSandboxConfig struct {
-	AppSlug string // app identifier
-	AppDir  string // full path to app directory (code + data, read-write)
+	AppSlug     string // app identifier
+	AppDir      string // full path to app directory (code + data, read-write)
+	VaultSocket string // optional: per-app vault proxy socket path to mount into chroot
 }
 
 // SandboxServerCmd configures cmd to run a server binary in an isolated chroot.
@@ -256,6 +257,7 @@ fi
 # HOME skeleton
 mkdir -p "$NEWROOT/home/alf"
 
+%s
 # --- Phase 3: chroot + drop to uid 1000 and exec server ---
 mount -t proc proc "$NEWROOT/proc" 2>/dev/null || true
 
@@ -265,6 +267,7 @@ exec /usr/sbin/chroot "$NEWROOT" \
   /bin/bash -c 'exec "$__SANDBOX_SERVER_CMD" $__SANDBOX_SERVER_ARGS'
 `,
 		shellQuote(cfg.AppDir),
+		vaultSocketMount(cfg.VaultSocket),
 	)
 
 	// Wrap: the original command becomes the setup script.
@@ -288,6 +291,21 @@ exec /usr/sbin/chroot "$NEWROOT" \
 		Cloneflags: flags,
 		Credential: &syscall.Credential{Uid: 0, Gid: 0},
 	}
+}
+
+// vaultSocketMount returns a shell snippet to bind-mount a vault proxy socket into the chroot.
+// Returns empty string if no vault socket is configured.
+func vaultSocketMount(socketPath string) string {
+	if socketPath == "" {
+		return "# No vault proxy socket"
+	}
+	return fmt.Sprintf(`# Vault proxy socket (per-app, service-filtered)
+VAULT_SOCK=%s
+if [ -S "$VAULT_SOCK" ]; then
+  mkdir -p "$(dirname "$NEWROOT$VAULT_SOCK")"
+  touch "$NEWROOT$VAULT_SOCK"
+  mount --bind "$VAULT_SOCK" "$NEWROOT$VAULT_SOCK"
+fi`, shellQuote(socketPath))
 }
 
 // ServerSafeEnv returns a minimal environment for sandboxed server processes.

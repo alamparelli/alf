@@ -52,6 +52,7 @@ type Manager struct {
 	mu          sync.Mutex
 	states      map[string]AppState
 	perms       map[string][]string // slug → declared permissions (nil = all allowed)
+	services    map[string][]string // slug → declared vault services
 	trusted     map[string]bool     // slug → true if installed from registry
 	onChange    func()
 	supervisor  AppSupervisor
@@ -69,6 +70,7 @@ func NewManager(dataDir string) *Manager {
 		registryURL: os.Getenv("ALF_MARKETPLACE_URL"),
 		states:      make(map[string]AppState),
 		perms:       make(map[string][]string),
+		services:    make(map[string][]string),
 		trusted:     make(map[string]bool),
 		http:        &http.Client{Timeout: 30 * time.Second},
 	}
@@ -125,6 +127,20 @@ func (m *Manager) MarkTrusted(slug string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.trusted[slug] = true
+}
+
+// GetServices returns the declared vault services for an app.
+// Returns nil if the app has no vault service declarations.
+func (m *Manager) GetServices(slug string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	svcs := m.services[slug]
+	if svcs == nil {
+		return nil
+	}
+	result := make([]string, len(svcs))
+	copy(result, svcs)
+	return result
 }
 
 // GetPermissions returns the declared permissions for an app.
@@ -255,6 +271,13 @@ func (m *Manager) Enable(slug string) error {
 		m.perms[slug] = perms
 	} else {
 		delete(m.perms, slug) // trusted app, no restrictions
+	}
+
+	// Cache declared vault services.
+	if len(manifest.Services) > 0 {
+		m.services[slug] = manifest.Services
+	} else {
+		delete(m.services, slug)
 	}
 
 	if err := m.saveState(); err != nil {
@@ -391,6 +414,11 @@ func (m *Manager) RestoreEnabled() error {
 		}
 		if perms != nil {
 			m.perms[slug] = perms
+		}
+
+		// Restore vault services cache.
+		if len(manifest.Services) > 0 {
+			m.services[slug] = manifest.Services
 		}
 
 		for _, tool := range manifest.Tools {

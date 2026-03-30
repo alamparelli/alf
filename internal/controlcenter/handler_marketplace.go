@@ -8,6 +8,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/vault"
+	vaultclient "github.com/alessandrolamparelli/vault-proxy/pkg/client"
 )
 
 // MarketplaceHandler handles /api/marketplace routes.
@@ -129,22 +130,16 @@ func (h *MarketplaceHandler) developerStatus(w http.ResponseWriter) {
 		return
 	}
 
-	addr := h.VaultManager.Addr()
+	socketPath := h.VaultManager.SocketPath()
 	token := h.VaultManager.ProxyToken()
-	if addr == "" || token == "" {
+	if socketPath == "" || token == "" {
 		respondJSON(w, http.StatusOK, notDev)
 		return
 	}
 
 	// Proxy health check through vault-proxy to the marketplace service.
-	req, err := http.NewRequest("GET", addr+"/proxy/marketplace/api/health", nil)
-	if err != nil {
-		respondJSON(w, http.StatusOK, notDev)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := http.DefaultClient.Do(req)
+	vc := vaultclient.NewWithSocket(socketPath, token)
+	resp, err := vc.Do("GET", "/proxy/marketplace/api/health", nil)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil {
 			resp.Body.Close()

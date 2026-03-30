@@ -15,7 +15,7 @@ import (
 // fakeVaultServer simulates the vault-server file API endpoints used by the
 // mobile token handlers: GET/POST /files (upload), GET /files/<name>,
 // DELETE /files/<name>, and GET /tokens (used by EnsureAuth).
-func fakeVaultServer() (*httptest.Server, *fakeVaultStore) {
+func fakeVaultHandler() (http.Handler, *fakeVaultStore) {
 	store := &fakeVaultStore{files: make(map[string]string)}
 	mux := http.NewServeMux()
 
@@ -75,8 +75,7 @@ func fakeVaultServer() (*httptest.Server, *fakeVaultStore) {
 		}
 	})
 
-	srv := httptest.NewServer(mux)
-	return srv, store
+	return mux, store
 }
 
 // fakeVaultStore is a thread-safe in-memory key-value store.
@@ -114,13 +113,13 @@ func (s *fakeVaultStore) All() map[string]string {
 	return cp
 }
 
-// newTestVaultHandler creates a VaultHandler backed by a fake vault-server.
+// newTestVaultHandler creates a VaultHandler backed by a fake vault-server on a Unix socket.
 func newTestVaultHandler(t *testing.T) (*VaultHandler, *fakeVaultStore, func()) {
 	t.Helper()
-	srv, store := fakeVaultServer()
-	mgr := vault.NewTestManager(srv.URL, "test-admin-token")
+	handler, store := fakeVaultHandler()
+	mgr, cleanup := vault.NewTestManager(t, handler, "test-admin-token")
 	h := &VaultHandler{Manager: mgr}
-	return h, store, srv.Close
+	return h, store, cleanup
 }
 
 // --- Handler Tests ---

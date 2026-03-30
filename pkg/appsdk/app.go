@@ -125,6 +125,7 @@ type App struct {
 	Name    string
 	DataDir string
 	Actions map[string]ActionFunc
+	vault   *VaultClient
 }
 
 // New creates an App with the given name. DataDir is read from ALF_APP_DATA_DIR.
@@ -134,6 +135,15 @@ func New(name string) *App {
 		DataDir: os.Getenv("ALF_APP_DATA_DIR"),
 		Actions: make(map[string]ActionFunc),
 	}
+}
+
+// Vault returns a client for the vault proxy socket. Lazy-initialized.
+// Returns nil if VAULT_PROXY_SOCK is not set (app has no vault services).
+func (a *App) Vault() *VaultClient {
+	if a.vault == nil {
+		a.vault, _ = NewVaultClient()
+	}
+	return a.vault
 }
 
 // Action registers a named action handler.

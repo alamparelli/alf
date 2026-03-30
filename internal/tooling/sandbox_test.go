@@ -3,6 +3,7 @@ package tooling
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -114,5 +115,156 @@ func TestCheckBoundary_SymlinkEscape(t *testing.T) {
 	_, err := CheckBoundary(dir, link)
 	if err == nil {
 		t.Error("expected error for symlink escaping boundary")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// shellQuote tests
+// ---------------------------------------------------------------------------
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"normal string", "hello", "'hello'"},
+		{"empty string", "", "''"},
+		{"with spaces", "hello world", "'hello world'"},
+		{"single quote", "it's", `'it'\''s'`},
+		{"multiple single quotes", "a'b'c", `'a'\''b'\''c'`},
+		{"null bytes stripped", "ab\x00cd", "'abcd'"},
+		{"only null byte", "\x00", "''"},
+		{"special shell chars", "a;b|c&d", "'a;b|c&d'"},
+		{"dollar sign", "$HOME", "'$HOME'"},
+		{"backticks", "`whoami`", "'`whoami`'"},
+		{"command substitution", "$(id)", "'$(id)'"},
+		{"double quotes", `"hello"`, `'"hello"'`},
+		{"newlines", "line1\nline2", "'line1\nline2'"},
+		{"tabs", "a\tb", "'a\tb'"},
+		{"backslash", `a\b`, `'a\b'`},
+		{"glob chars", "*.txt", "'*.txt'"},
+		{"semicolon injection", "ls; rm -rf /", "'ls; rm -rf /'"},
+		{"pipe injection", "echo | cat /etc/passwd", "'echo | cat /etc/passwd'"},
+		{"null before quote", "\x00'", "''\\'''"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shellQuote(tt.input)
+			if got != tt.want {
+				t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SandboxSafeEnv tests
+// ---------------------------------------------------------------------------
+
+func TestSandboxSafeEnv_ContainsExpectedVars(t *testing.T) {
+	env := SandboxSafeEnv("/data/apps/myapp")
+
+	expected := map[string]string{
+		"PATH":             "/usr/local/bin:/usr/bin:/bin",
+		"HOME":             "/home/alf",
+		"USER":             "alf",
+		"LOGNAME":          "alf",
+		"SHELL":            "/bin/bash",
+		"TERM":             "xterm-256color",
+		"LANG":             "en_US.UTF-8",
+		"ALF_APP_DATA_DIR": "/data/apps/myapp",
+		"TMPDIR":           "/tmp",
+	}
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	for k, v := range expected {
+		got, ok := envMap[k]
+		if !ok {
+			t.Errorf("missing env var %s", k)
+		} else if got != v {
+			t.Errorf("env %s = %q, want %q", k, got, v)
+		}
+	}
+
+	if len(env) != len(expected) {
+		t.Errorf("expected %d env vars, got %d", len(expected), len(env))
+	}
+}
+
+func TestSandboxSafeEnv_NoSensitiveVars(t *testing.T) {
+	env := SandboxSafeEnv("/data/apps/test")
+
+	sensitivePatterns := []string{
+		"VAULT_TOKEN",
+		"VAULT_ADDR",
+		"SECRET",
+		"PASSWORD",
+		"TOKEN",
+		"API_KEY",
+		"AWS_SECRET",
+		"PRIVATE_KEY",
+		"HTTP_PROXY",
+		"HTTPS_PROXY",
+		"http_proxy",
+		"https_proxy",
+		"NO_PROXY",
+		"DOCKER_HOST",
+	}
+
+	for _, e := range env {
+		key := strings.SplitN(e, "=", 2)[0]
+		for _, sensitive := range sensitivePatterns {
+			// ALF_APP_DATA_DIR contains no sensitive keyword, skip exact matches
+			if strings.EqualFold(key, sensitive) {
+				t.Errorf("env contains sensitive var %s", key)
+			}
+		}
+	}
+}
+
+func TestSandboxSafeEnv_AppDataDirPropagated(t *testing.T) {
+	dir := "/custom/app/path"
+	env := SandboxSafeEnv(dir)
+	found := false
+	for _, e := range env {
+		if e == "ALF_APP_DATA_DIR="+dir {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ALF_APP_DATA_DIR not set to %q", dir)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// dnsSnippet tests
+// ---------------------------------------------------------------------------
+
+func TestDnsSnippet_NetworkTrue(t *testing.T) {
+	got := dnsSnippet(true)
+	if !strings.Contains(got, "resolv.conf") {
+		t.Errorf("network=true should copy resolv.conf, got: %s", got)
+	}
+	if strings.HasPrefix(got, "#") {
+		t.Errorf("network=true should not be a comment, got: %s", got)
+	}
+}
+
+func TestDnsSnippet_NetworkFalse(t *testing.T) {
+	got := dnsSnippet(false)
+	if strings.Contains(got, "resolv.conf") {
+		t.Errorf("network=false should not reference resolv.conf, got: %s", got)
+	}
+	if !strings.HasPrefix(got, "#") {
+		t.Errorf("network=false should be a comment, got: %s", got)
 	}
 }

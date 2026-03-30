@@ -5,6 +5,7 @@ package tooling
 import (
 	"log"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -37,4 +38,20 @@ func SandboxSafeEnv(appDataDir string) []string {
 		"ALF_APP_DATA_DIR=" + appDataDir,
 		"TMPDIR=/tmp",
 	}
+}
+
+// dnsSnippet returns the shell snippet to copy resolv.conf into the new root.
+// Only included when the app has network permission.
+func dnsSnippet(network bool) string {
+	if network {
+		return `[ -f /etc/resolv.conf ] && cp /etc/resolv.conf "$NEWROOT/etc/resolv.conf"`
+	}
+	return "# no network — DNS not available"
+}
+
+// shellQuote returns a POSIX shell single-quoted string.
+// Strips null bytes to prevent truncation attacks (SEC-010).
+func shellQuote(s string) string {
+	s = strings.ReplaceAll(s, "\x00", "")
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

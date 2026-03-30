@@ -16,10 +16,10 @@
   let dragging = $state(false)
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && open && onclose) {
+    if (e.key === 'Escape' && open) {
       e.preventDefault()
       e.stopPropagation()
-      onclose()
+      handleClose()
     }
   }
 
@@ -55,20 +55,46 @@
     if (!dragging) return
     dragging = false
     if (dragCurrentY > 120 && onclose) {
-      onclose()
+      dismissSheet()
+      return
     }
     if (sheetEl) sheetEl.style.transform = ''
     dragCurrentY = 0
+  }
+
+  // Animate sheet down before closing
+  let closing = $state(false)
+  function dismissSheet() {
+    if (!sheetEl || closing) { onclose?.(); return }
+    closing = true
+    sheetEl.style.transform = ''
+    sheetEl.animate(
+      [{ transform: 'translateY(0)' }, { transform: 'translateY(100%)' }],
+      { duration: 200, easing: 'ease-in' }
+    ).onfinish = () => {
+      closing = false
+      onclose?.()
+    }
+  }
+
+  // Wrap onclose for backdrop tap and escape key
+  function handleClose() {
+    // On mobile, animate down; on desktop, close instantly
+    if (sheetEl && window.innerWidth <= 768) {
+      dismissSheet()
+    } else {
+      onclose?.()
+    }
   }
 </script>
 
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" role="presentation" onclick={onclose}>
+  <div class="modal-backdrop" role="presentation" onclick={handleClose}>
     <!-- Desktop: centered modal -->
     <div class="modal desktop-modal" class:wide onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" bind:this={modalEl}>
       {#if onclose}
-        <button class="modal-close" onclick={onclose} aria-label="Close">&times;</button>
+        <button class="modal-close" onclick={handleClose} aria-label="Close">&times;</button>
       {/if}
       {@render children()}
     </div>

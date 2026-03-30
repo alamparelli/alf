@@ -64,9 +64,13 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if appSlug == "" {
 		appSlug = req.AppSlug // fallback to body for non-browser callers (no privilege gain)
 	}
-	if appSlug != "" && !isSystemApp && h.Perms != nil && !h.Perms.HasPermission(appSlug, "bash") {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash"})
-		return
+	if appSlug != "" && !isSystemApp {
+		// Check bash permission: marketplace apps via Perms, local apps always allowed
+		// (local apps are created by the LLM and trusted by default).
+		if h.Perms != nil && h.Perms.IsTracked(appSlug) && !h.Perms.HasPermission(appSlug, "bash") {
+			respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash"})
+			return
+		}
 	}
 
 	// Sandbox ALL app-initiated bash except system apps.

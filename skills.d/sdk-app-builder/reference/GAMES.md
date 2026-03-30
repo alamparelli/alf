@@ -2,7 +2,9 @@
 
 Use this for canvas games, board games, and any interactive visual app.
 Architecture: **REST server** (no CLI tool unless the LLM needs data access).
-Also read `REST-SERVER.md` for the backend and `FRONTEND.md` for AlfSDK init.
+Also read `AIG.md` for the design system, `REST-SERVER.md` for the backend and `FRONTEND.md` for AlfSDK init.
+
+> **Design system**: `alf-ui.css` is auto-injected into all app iframes. Use its classes (`.btn`, `.btn-primary`, etc.) for UI elements outside the canvas (overlays, menus, HUD buttons). See `AIG.md`.
 
 ---
 
@@ -347,7 +349,7 @@ Consistent pattern across all games:
 <div id="overlay">
   <h2 id="ov-title">Game Name</h2>
   <p id="ov-msg">Tap to play</p>
-  <button class="btn" id="play-btn" onclick="startGame()">Play</button>
+  <button class="btn btn-primary btn-lg" id="play-btn" onclick="startGame()">Play</button>
 </div>
 ```
 
@@ -360,14 +362,9 @@ Consistent pattern across all games:
 }
 #overlay h2 { font-size: 1.7rem; font-weight: 700; color: #fff; margin-bottom: 0.4rem; }
 #overlay p  { color: rgba(255,255,255,0.7); font-size: 0.88rem; margin-bottom: 1.4rem; text-align: center; line-height: 1.5; }
-.btn {
-  padding: 10px 28px; border: none; min-width: 44px; min-height: 44px;
-  border-radius: var(--radius, 8px);
-  background: var(--accent); color: var(--on-accent);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 1rem; font-weight: 600; cursor: pointer;
-}
-.btn:hover { opacity: 0.85; }
+/* Use alf-ui.css .btn and .btn-primary classes — no need to redefine .btn here.
+   Only add game-specific overrides: */
+#overlay .btn { font-size: 1rem; padding: 10px 28px; }
 ```
 
 Show/hide:
@@ -426,7 +423,7 @@ function refreshColors() {
 
 Call `refreshColors()` inside `resize()` and inside `onThemeChange`.
 
-Available palette vars: `--accent`, `--green`, `--red`, `--yellow`, `--mauve`, `--sapphire`, `--bg`, `--bg-card`, `--border`, `--text`, `--text-dim`, `--on-accent`.
+Available palette vars: `--accent`, `--green`, `--red`, `--yellow`, `--mauve`, `--sapphire`, `--pink`, `--teal`, `--peach`, `--lavender`, `--bg`, `--bg-card`, `--bg-input`, `--border`, `--text`, `--text-dim`, `--on-accent`. Full reference in `AIG.md`.
 
 ---
 

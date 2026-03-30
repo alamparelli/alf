@@ -42,6 +42,7 @@ Read the relevant reference file for templates, patterns, and API details:
 
 | File | Read when |
 |---|---|
+| `reference/AIG.md` | **ALWAYS read first** — design system, components, spacing, colors, patterns |
 | `reference/CLI-TOOL.md` | Building a CLI tool app (appsdk, manifest, go source) |
 | `reference/REST-SERVER.md` | Building a REST server app (service.json, Go/Python server) |
 | `reference/FRONTEND.md` | Any app with a web UI (AlfSDK init, theme, CSS vars, template) |
@@ -59,12 +60,15 @@ Read the relevant reference file for templates, patterns, and API details:
 - Database in `data/<slug>.db`, WAL journal mode, `SetMaxOpenConns(1)`
 
 ### Frontend rules
+- **Follow AIG** — use `alf-ui.css` classes (auto-injected into iframes). See `reference/AIG.md`.
+- **Use `.btn`, `.card`, `.input`, `.form-group`** etc. — never write inline styles for standard components.
 - Init `AlfSDK` with `onThemeChange` — see `reference/FRONTEND.md`
 - **Use SDK v2 APIs** — audio, storage, confirm/prompt, haptics, clipboard, badges, viewport, events
 - **Audio: always use `AlfSDK.audio`** — never create your own AudioContext (mobile unlock handled by SDK)
 - **Storage: use `AlfSDK.storage`** for persistent data — server-side key/value, survives app updates
 - **Dialogs: use `AlfSDK.confirm()` / `AlfSDK.prompt()`** — renders as iOS bottom sheet on mobile
-- CSS variables only: `--bg`, `--text`, `--accent`, `--bg-card`, `--border`, `--text-dim`, `--on-accent`, `--radius`, `--green`, `--red`, `--yellow`, `--mauve`, `--sapphire`
+- CSS variables only: `--bg`, `--text`, `--accent`, `--bg-card`, `--bg-input`, `--border`, `--text-dim`, `--on-accent`, `--radius`, `--green`, `--red`, `--yellow`, `--mauve`, `--sapphire`, `--pink`, `--teal`, `--peach`, `--lavender`, `--danger`, `--success`
+- Spacing tokens: `--space-xs` (4px), `--space-sm` (8px), `--space-md` (16px), `--space-lg` (24px), `--space-xl` (32px)
 - Set `font-family` explicitly (Google Fonts blocked by CSP in iframes)
 - No `unsafe-eval` frameworks (Vue, Angular, Petite Vue)
 - No external scripts/stylesheets (CSP blocks them)
@@ -77,7 +81,7 @@ Read the relevant reference file for templates, patterns, and API details:
 - [ ] Standalone — SQLite, no shared databases
 - [ ] `manifest.json` with slug, version, description
 - [ ] `app.json` with Lucide icon (if web UI)
-- [ ] `index.html` with AlfSDK + theme CSS + explicit font-family
+- [ ] `index.html` with AlfSDK + theme CSS + explicit font-family + `alf-ui.css` classes
 - [ ] `go.mod` with all dependencies
 - [ ] CLI tool: `main.go` with appsdk + tool schema in manifest
 - [ ] REST server: `service.json` + free port + `data/port`

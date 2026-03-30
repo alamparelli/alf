@@ -411,6 +411,12 @@
   }
 
   :global(.btn-danger) {
+    background: color-mix(in srgb, var(--red) 12%, transparent);
+    color: var(--red);
+    border-color: color-mix(in srgb, var(--red) 30%, transparent);
+  }
+
+  :global(.btn-danger:hover) {
     background: var(--red);
     color: #fff;
     border-color: var(--red);
@@ -500,26 +506,36 @@
     margin-bottom: 16px;
   }
 
+  :global(.tabs) {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+
   :global(.tab) {
-    padding: 4px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
+    padding: 8px 16px;
+    border: none;
+    border-bottom: 2px solid transparent;
     background: none;
     color: var(--text-dim);
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
+    margin-bottom: -1px;
   }
 
   :global(.tab:hover) {
-    background: var(--bg-input);
+    color: var(--text);
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
   }
 
   :global(.tab.active) {
-    background: var(--accent);
-    color: var(--on-accent);
-    border-color: var(--accent);
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    background: none;
   }
 
   :global(.badge) {

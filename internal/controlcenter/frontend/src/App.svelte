@@ -297,7 +297,7 @@
     align-items: center;
     gap: var(--space-sm, 8px);
     margin: 0;
-    font-size: 1.25rem;
+    font-size: var(--font-xl, 24px);
   }
 
   /* Common button styles */
@@ -311,7 +311,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
     cursor: pointer;
     text-decoration: none;
@@ -343,7 +343,7 @@
 
   :global(.btn-sm) {
     padding: 4px 10px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
   }
 
   :global(.btn:disabled) {
@@ -365,7 +365,7 @@
 
   :global(.btn-lg) {
     padding: 12px 24px;
-    font-size: 0.9rem;
+    font-size: var(--font-sm, 13px);
     min-height: 44px;
   }
 
@@ -388,7 +388,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   /* Additional button variants */

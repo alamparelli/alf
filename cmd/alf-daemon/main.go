@@ -984,7 +984,7 @@ func main() {
 		consolidator := memstore.NewConsolidator(memDB, memExtractor, extractAdapter, extractTimeout)
 		sched.RegisterSystem("mem-consolidate", "Memory Consolidation", "@every 360m", func() error {
 			return consolidator.RunOnce()
-		}, "Deduplicates and consolidates long-term memories. Merges similar facts and removes outdated entries.")
+		}, "Review the long-term memory store for redundancy and quality. Use recall to sample memories across all types (fact, decision, preference, contact). For each group of similar or overlapping memories: keep the most accurate and complete version, delete duplicates with forget, and if needed consolidate into a single updated memory with remember. Do not remove unique information. Focus on reducing noise without data loss.")
 
 		// Run initial extraction after boot delay.
 		extractBootDelay := time.Duration(cfg.EffectiveMemoryExtractBootDelay()) * time.Second

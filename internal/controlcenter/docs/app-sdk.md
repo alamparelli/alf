@@ -26,6 +26,16 @@ Include the SDK in your app's `index.html`:
 
 The SDK auto-handles mobile audio unlock, viewport detection, and parent communication.
 
+## Sandbox
+
+All SDK operations (`bash()`, `tool()`, REST proxy calls) execute inside a chroot jail. Apps are isolated from each other and from system resources:
+
+- `AlfSDK.bash()` runs in a sandbox with access to `/home/alf/data/apps/<slug>/data/` only (read-write)
+- REST server apps see their full app directory but nothing outside it
+- No access to vault, secrets, other apps, or system config
+- HTTP API calls are restricted to own-slug endpoints; other `/api/*` paths return 403
+- Static files served only for web-safe extensions (`.html`, `.css`, `.js`, images, fonts, media, `.json`, `.xml`, `.txt`, `.csv`, `.map`)
+
 ## Core
 
 ### `AlfSDK.init(opts)`
@@ -58,7 +68,7 @@ AlfSDK.api('/api/bash', {
 
 ### `AlfSDK.bash(cmd)`
 
-Execute a shell command. Returns `{ output, exit_code, error }`.
+Execute a shell command in a sandboxed chroot. The sandbox exposes only the app's `data/` directory (read-write) and system binaries (read-only). Network access requires the `network` permission. Returns `{ output, exit_code, error }`.
 
 ```js
 AlfSDK.bash('echo hello').then(function(res) {

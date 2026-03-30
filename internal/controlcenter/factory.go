@@ -1,9 +1,11 @@
 package controlcenter
 
 import (
+	"encoding/json"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,6 +19,45 @@ import (
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
 )
+
+// unifiedPermChecker wraps the marketplace PermissionChecker with a fallback
+// to the local manifest.json for apps not tracked by the marketplace.
+// This ensures both local and marketplace apps use the same permission model.
+type unifiedPermChecker struct {
+	marketplace marketplace.PermissionChecker
+	dataDir     string
+}
+
+func (u *unifiedPermChecker) HasPermission(slug, perm string) bool {
+	if u.marketplace.IsTracked(slug) {
+		return u.marketplace.HasPermission(slug, perm)
+	}
+	// Local app — read permissions from manifest.json.
+	return u.localManifestHasPerm(slug, perm)
+}
+
+func (u *unifiedPermChecker) IsTracked(slug string) bool {
+	return u.marketplace.IsTracked(slug)
+}
+
+func (u *unifiedPermChecker) localManifestHasPerm(slug, perm string) bool {
+	data, err := os.ReadFile(filepath.Join(u.dataDir, "apps", slug, "manifest.json"))
+	if err != nil {
+		return false
+	}
+	var manifest struct {
+		Permissions []string `json:"permissions"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return false
+	}
+	for _, p := range manifest.Permissions {
+		if p == perm {
+			return true
+		}
+	}
+	return false
+}
 
 // Deps holds all dependencies needed to build the control center.
 type Deps struct {
@@ -184,11 +225,14 @@ func HandlerFactory(deps Deps) Handlers {
 		EventBroker: deps.EventBroker,
 	})
 
-	// Permission checker: marketplace manager implements the interface.
-	// nil when marketplace is not configured — all permissions allowed (no third-party apps).
+	// Permission checker: wraps marketplace manager with local manifest fallback.
+	// Marketplace-tracked apps use the permission system; local apps check manifest.json.
 	var permChecker marketplace.PermissionChecker
 	if deps.Marketplace != nil {
-		permChecker = deps.Marketplace
+		permChecker = &unifiedPermChecker{
+			marketplace: deps.Marketplace,
+			dataDir:     deps.DataDir,
+		}
 	} else {
 		log.Println("[security] marketplace not configured — app permission enforcement disabled")
 	}
@@ -377,7 +421,7 @@ func HandlerFactory(deps Deps) Handlers {
 	})
 
 	// Bash command execution.
-	mux.Handle("/api/bash", &BashHandler{Perms: permChecker, DataDir: deps.DataDir})
+	mux.Handle("/api/bash", &BashHandler{Perms: permChecker})
 
 	// Restart.
 	mux.Handle("/api/restart", &RestartHandler{})

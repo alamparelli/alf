@@ -511,7 +511,7 @@
   }
 
   .kill-switch-btn.active {
-    background: rgba(230, 80, 80, 0.15);
+    background: color-mix(in srgb, var(--red) 15%, transparent);
     border-color: var(--red, #e55);
     color: var(--red, #e55);
   }
@@ -663,12 +663,12 @@
   }
 
   .action-badge.allow {
-    background: rgba(100, 200, 100, 0.15);
+    background: color-mix(in srgb, var(--green) 15%, transparent);
     color: var(--green, #6a6);
   }
 
   .action-badge.deny {
-    background: rgba(230, 80, 80, 0.15);
+    background: color-mix(in srgb, var(--red) 15%, transparent);
     color: var(--red, #e55);
   }
 
@@ -769,7 +769,7 @@
   }
 
   .log-table tr.blocked {
-    background: rgba(230, 80, 80, 0.05);
+    background: color-mix(in srgb, var(--red) 5%, transparent);
   }
 
   .mono {
@@ -802,7 +802,7 @@
   }
 
   .status-blocked {
-    background: rgba(230, 80, 80, 0.15);
+    background: color-mix(in srgb, var(--red) 15%, transparent);
     color: var(--red, #e55);
   }
 
@@ -811,7 +811,7 @@
     font-weight: 600;
     padding: 1px 5px;
     border-radius: 3px;
-    background: rgba(160, 120, 220, 0.15);
+    background: color-mix(in srgb, var(--mauve) 15%, transparent);
     color: #a078dc;
     text-transform: uppercase;
     vertical-align: middle;
@@ -819,12 +819,12 @@
   }
 
   .source-badge.nettrack {
-    background: rgba(80, 160, 220, 0.15);
+    background: color-mix(in srgb, var(--sapphire) 15%, transparent);
     color: #5090d0;
   }
 
   .source-badge.internal {
-    background: rgba(140, 140, 140, 0.15);
+    background: color-mix(in srgb, var(--text-dim) 15%, transparent);
     color: #999;
   }
 

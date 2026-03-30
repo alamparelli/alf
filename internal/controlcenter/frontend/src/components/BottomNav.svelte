@@ -223,7 +223,7 @@
   }
 
   .menu-grid-item:active {
-    background: rgba(255, 255, 255, 0.08);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
   }
 
   .menu-grid-item.active {
@@ -239,7 +239,7 @@
     width: 48px;
     height: 48px;
     border-radius: 14px;
-    background: var(--bg-input, rgba(255, 255, 255, 0.06));
+    background: var(--bg-input, color-mix(in srgb, var(--text) 6%, transparent));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -268,7 +268,7 @@
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
-    background: var(--bg-input, rgba(255, 255, 255, 0.06));
+    background: var(--bg-input, color-mix(in srgb, var(--text) 6%, transparent));
     border-radius: 10px;
     color: var(--text-dim);
   }

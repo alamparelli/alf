@@ -559,9 +559,9 @@
     text-transform: uppercase;
   }
 
-  .badge-green { background: rgba(61,139,61,0.15); color: var(--green); }
-  .badge-blue { background: rgba(88,166,255,0.15); color: var(--accent); }
-  .badge-yellow { background: rgba(210,153,34,0.15); color: #d29922; }
+  .badge-green { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+  .badge-blue { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+  .badge-yellow { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
   .badge-dim { background: var(--bg-input); color: var(--text-dim); }
 
   .spotlight-empty {

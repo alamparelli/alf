@@ -293,14 +293,14 @@
   }
 
   .nav-item:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: color-mix(in srgb, var(--text) 6%, transparent);
     color: var(--text);
   }
 
   .nav-item.active {
     border-left-color: var(--accent);
     color: var(--text);
-    background: rgba(255, 255, 255, 0.06);
+    background: color-mix(in srgb, var(--text) 6%, transparent);
   }
 
   .nav-badge {

@@ -948,7 +948,7 @@
     border: 1px solid var(--yellow);
     border-radius: var(--radius, 8px);
     margin-bottom: 8px;
-    background: rgba(234, 179, 8, 0.05);
+    background: color-mix(in srgb, var(--yellow) 5%, transparent);
   }
 
   .vault-inline {
@@ -975,7 +975,7 @@
     padding: 8px 12px;
     border-radius: var(--radius, 8px);
     font-size: 0.82rem;
-    background: rgba(196, 57, 42, 0.1);
+    background: color-mix(in srgb, var(--red) 10%, transparent);
     color: var(--red);
   }
 

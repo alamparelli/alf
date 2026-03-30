@@ -687,7 +687,7 @@
     gap: 10px;
     padding: 10px 14px;
     margin-top: 0.75rem;
-    background: rgba(61, 139, 61, 0.06);
+    background: color-mix(in srgb, var(--green) 6%, transparent);
     border-radius: var(--radius, 8px);
     border-left: 3px solid var(--green, #3d8b3d);
     font-size: 0.82rem;

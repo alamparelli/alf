@@ -681,7 +681,7 @@
   .restart-ui {
     margin-top: 8px;
     padding: 10px 12px;
-    background: rgba(var(--accent-rgb, 99, 102, 241), 0.06);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-radius: var(--radius, 8px);
   }
@@ -696,22 +696,22 @@
   }
 
   .badge-running {
-    background: rgba(59, 130, 246, 0.15);
+    background: color-mix(in srgb, var(--sapphire) 15%, transparent);
     color: var(--blue, #3b82f6);
   }
 
   .badge-completed {
-    background: rgba(61, 139, 61, 0.15);
+    background: color-mix(in srgb, var(--green) 15%, transparent);
     color: var(--green, #3d8b3d);
   }
 
   .badge-failed, .badge-interrupted {
-    background: rgba(196, 57, 42, 0.15);
+    background: color-mix(in srgb, var(--red) 15%, transparent);
     color: var(--red, #c4392a);
   }
 
   .badge-waiting {
-    background: rgba(234, 179, 8, 0.15);
+    background: color-mix(in srgb, var(--yellow) 15%, transparent);
     color: var(--yellow, #eab308);
   }
 
@@ -730,7 +730,7 @@
   .task-prompt-box {
     padding: 10px 14px;
     margin-bottom: 12px;
-    background: rgba(var(--accent-rgb, 99, 102, 241), 0.08);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
     border-left: 3px solid var(--accent);
     border-radius: var(--radius, 8px);
     font-size: 0.85rem;
@@ -833,7 +833,7 @@
     color: var(--text-dim);
     padding: 8px 12px;
     margin-bottom: 6px;
-    background: rgba(0, 0, 0, 0.04);
+    background: color-mix(in srgb, var(--text) 4%, transparent);
     border-left: 2px solid var(--border);
     border-radius: 0 var(--radius, 8px) var(--radius, 8px) 0;
     line-height: 1.5;
@@ -886,8 +886,8 @@
   .approval-ui {
     margin-top: 12px;
     padding: 12px;
-    background: rgba(234, 179, 8, 0.08);
-    border: 1px solid rgba(234, 179, 8, 0.2);
+    background: color-mix(in srgb, var(--yellow) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--yellow) 20%, transparent);
     border-radius: var(--radius, 8px);
   }
 
@@ -928,7 +928,7 @@
   }
 
   .btn-danger:hover {
-    background: rgba(196, 57, 42, 0.1);
+    background: color-mix(in srgb, var(--red) 10%, transparent);
   }
 
   :global(.markdown-body pre) {

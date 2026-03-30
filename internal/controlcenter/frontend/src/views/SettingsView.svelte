@@ -342,7 +342,7 @@
     gap: 12px;
     padding: 10px 16px;
     margin-bottom: 16px;
-    background: rgba(234, 179, 8, 0.1);
+    background: color-mix(in srgb, var(--yellow) 10%, transparent);
     border: 1px solid var(--yellow, #eab308);
     border-radius: var(--radius, 8px);
     font-size: 0.85rem;
@@ -550,12 +550,12 @@
   }
 
   .tg-result.success {
-    background: rgba(61, 139, 61, 0.1);
+    background: color-mix(in srgb, var(--green) 10%, transparent);
     color: var(--green);
   }
 
   .tg-result.error {
-    background: rgba(196, 57, 42, 0.1);
+    background: color-mix(in srgb, var(--red) 10%, transparent);
     color: var(--red);
   }
 

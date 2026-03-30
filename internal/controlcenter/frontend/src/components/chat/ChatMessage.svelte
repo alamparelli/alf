@@ -377,7 +377,7 @@
   }
 
   .msg-text :global(pre) {
-    background: rgba(0, 0, 0, 0.15);
+    background: color-mix(in srgb, var(--text) 15%, transparent);
     padding: 8px 12px;
     border-radius: 6px;
     overflow-x: auto;
@@ -433,7 +433,7 @@
     gap: 6px;
     width: 100%;
     padding: 6px 10px;
-    background: rgba(0, 0, 0, 0.1);
+    background: color-mix(in srgb, var(--text) 10%, transparent);
     border: none;
     color: inherit;
     font-family: inherit;
@@ -450,7 +450,7 @@
 
   .block-body {
     padding: 8px 10px;
-    background: rgba(0, 0, 0, 0.08);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
     font-size: 0.78rem;
   }
 
@@ -496,7 +496,7 @@
   .lightbox {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.85);
+    background: color-mix(in srgb, #000 85%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -516,7 +516,7 @@
     align-items: center;
     gap: 4px;
     padding: 4px 8px;
-    background: rgba(0, 0, 0, 0.1);
+    background: color-mix(in srgb, var(--text) 10%, transparent);
     border-radius: 4px;
     font-size: 0.78rem;
   }
@@ -551,11 +551,11 @@
     font-size: 0.85rem;
     padding: 1px 4px;
     border-radius: 4px;
-    background: rgba(0, 0, 0, 0.08);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
   }
 
   .reaction-alf {
-    background: rgba(0, 0, 0, 0.15);
+    background: color-mix(in srgb, var(--text) 15%, transparent);
   }
 
   /* Copy button */

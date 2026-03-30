@@ -497,8 +497,8 @@
     align-items: center;
     gap: 4px;
     padding: 2px 8px 2px 10px;
-    background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
-    border: 1px solid rgba(var(--accent-rgb, 99, 102, 241), 0.25);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
     border-radius: 12px;
     font-size: 0.72rem;
     font-weight: 500;

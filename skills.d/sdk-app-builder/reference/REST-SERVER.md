@@ -44,6 +44,20 @@ The daemon auto-supervises: restart on crash, start on boot, SIGTERM on shutdown
 - Expose JSON REST endpoints
 - Listen on `127.0.0.1` only
 
+## Sandbox
+
+App servers run inside a chroot jail. The server process sees:
+
+- System binaries (`/bin`, `/usr`, `/lib`, `/sbin`, `/lib64`) — read-only
+- `/home/alf/data/apps/<slug>/` — full app directory (read-write)
+- `/home/alf/data/tools/` — shared tool binaries (read-only)
+- `/dev/{null,zero,urandom,random}`, `/proc`, private `/tmp`
+- TLS CA certs and DNS resolution
+
+The server does NOT see other apps, vault data, secrets, or `.claude/` config. `VAULT_TOKEN` is not in the environment.
+
+**Do not** use `exec.Command("vault", ...)` or access paths outside your app directory. Apps needing external data should expose REST endpoints and let the frontend fetch them — the server accesses only data within its own sandbox.
+
 ## Go server template (main.go)
 
 ```go

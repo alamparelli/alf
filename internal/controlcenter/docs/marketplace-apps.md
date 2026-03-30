@@ -199,6 +199,27 @@ Load the CC theme stylesheet and init script. Use CSS variables for all colors:
 - No external stylesheets — all CSS in `<style>` blocks
 - Fetch/XHR restricted to same origin (`/api/*` works)
 
+### Sandbox
+
+All app code runs inside a chroot jail with an allowlist filesystem:
+
+**What apps see:**
+- System binaries (`/bin`, `/usr`, `/lib`, `/sbin`, `/lib64`) — read-only
+- Minimal devices (`/dev/{null,zero,urandom,random}`), fresh `/proc`, private `/tmp`
+- TLS CA certs and DNS (servers always; bash only with `network` permission)
+- Own data: `/home/alf/data/apps/<slug>/data/` (bash) or full app dir (server)
+- Shared tools: `/home/alf/data/tools/` (read-only)
+
+**What apps don't see:**
+- Other apps' directories
+- `/opt/alf/vault-data/`, `/opt/alf/config.d/`, `/home/alf/.claude/`
+- `/home/alf/data/external/` (NFS mounts), `/run/secrets/`
+- No `VAULT_TOKEN` or secrets in environment
+
+**HTTP API isolation:** Apps in iframes can only access `/apps/{own-slug}/api/*` (own REST proxy), `/api/apps/{own-slug}/*` (own storage/upload/errors), `/api/bash` (sandboxed, permission checked), and `/api/events` (read-only). All other `/api/*` endpoints return 403.
+
+**Static file allowlist:** Only web-safe extensions are served via `/apps/{slug}/`: `.html`, `.css`, `.js`, `.mjs`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.ico`, `.webp`, `.avif`, `.woff`, `.woff2`, `.ttf`, `.otf`, `.eot`, `.mp3`, `.ogg`, `.wav`, `.mp4`, `.webm`, `.json`, `.xml`, `.txt`, `.csv`, `.map`. Source code, databases, and internal files return 404.
+
 ### Calling tools from the web UI
 
 Use the `/api/bash` endpoint to invoke app binaries:

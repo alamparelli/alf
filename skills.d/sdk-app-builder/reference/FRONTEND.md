@@ -342,6 +342,34 @@ Marketplace apps declare permissions in `manifest.json`:
 - **Trusted apps** (verified in registry) can use all permissions.
 - APIs that require a permission return `403` with `{"error": "permission denied: <perm>"}`.
 
+### Sandbox execution
+
+Both `AlfSDK.bash()` calls and app backend servers run inside a chroot jail with an allowlist filesystem. Apps see only:
+
+- System binaries (read-only): `/bin`, `/usr`, `/lib`, `/sbin`, `/lib64`
+- Minimal devices: `/dev/{null,zero,urandom,random}`
+- Fresh `/proc` mount (PID namespace isolated), private `/tmp` (tmpfs)
+- TLS CA certs, DNS (servers always; bash only with `network` permission)
+- Own data: `/home/alf/data/apps/<slug>/data/` (bash) or full app dir (server)
+- Shared tools: `/home/alf/data/tools/` (read-only)
+
+Apps do NOT see: other apps' directories, `/opt/alf/vault-data/`, `/home/alf/.claude/`, `/home/alf/data/external/`, `/run/secrets/`, or VAULT_TOKEN.
+
+### HTTP API isolation
+
+Apps in iframes can only access:
+
+- `/apps/{own-slug}/api/*` — own REST proxy
+- `/api/apps/{own-slug}/*` — own storage/upload/errors
+- `/api/bash` — sandboxed bash (permission checked)
+- `/api/events` — SSE events (read-only)
+
+All other `/api/*` endpoints return 403 from app context.
+
+### Static file allowlist
+
+Only web-safe extensions are served via `/apps/{slug}/`: `.html`, `.css`, `.js`, `.mjs`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.ico`, `.webp`, `.avif`, `.woff`, `.woff2`, `.ttf`, `.otf`, `.eot`, `.mp3`, `.ogg`, `.wav`, `.mp4`, `.webm`, `.json`, `.xml`, `.txt`, `.csv`, `.map`. Source code (`.go`, `.py`), databases (`.db`, `.sqlite`), and internal files return 404.
+
 ---
 
 ## REST server apps (API proxy)

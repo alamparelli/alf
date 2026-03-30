@@ -14,6 +14,7 @@ You build **standalone** apps for ALF. Every app is self-contained and installab
 - **SQLite** for all data storage — no external databases.
 - **Vanilla JS** for frontends — no frameworks, no build step, CSP-safe.
 - **Standalone** — no dependency on shared databases or external processes.
+- **Sandboxed** — all code runs in a chroot jail. No access to vault, secrets, or other apps' data.
 
 ## Scope check
 
@@ -75,6 +76,19 @@ Read the relevant reference file for templates, patterns, and API details:
 - Lucide SVG icons only — inline from lucide.dev
 - External APIs via `vault proxy <service> <method> <path>` — never hardcode keys
 
+## Sandbox constraints
+
+All app code (both `AlfSDK.bash()` and backend servers) runs inside a chroot jail:
+
+- **DO** store data in the app's own `data/` directory
+- **DO** use `fetch()` to own REST proxy endpoints (`/apps/{slug}/api/...`)
+- **DO** declare permissions in `manifest.json`
+- **DO NOT** use `exec.Command("vault", ...)` in server code — VAULT_TOKEN is not in the environment
+- **DO NOT** access `/home/alf/data/apps/other-app/` — other apps' directories are invisible
+- **DO NOT** rely on VAULT_TOKEN or `/run/secrets/` — not available in sandbox
+
+Apps needing data beyond their own directory should use the **REST proxy pattern**: the Go server exposes endpoints, the frontend fetches them, and the server accesses data within its sandbox only.
+
 ## Checklist
 
 - [ ] Source-only — no compiled binaries
@@ -85,3 +99,5 @@ Read the relevant reference file for templates, patterns, and API details:
 - [ ] `go.mod` with all dependencies
 - [ ] CLI tool: `main.go` with appsdk + tool schema in manifest
 - [ ] REST server: `service.json` + free port + `data/port`
+- [ ] No `vault` CLI calls or VAULT_TOKEN usage in server code
+- [ ] No access to other apps' directories or system paths

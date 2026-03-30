@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -16,31 +15,6 @@ import (
 	"github.com/alamparelli/alf/internal/tooling"
 )
 
-// localAppHasPermission checks if a local (non-marketplace) app declares
-// a permission in its manifest.json. This ensures local and marketplace
-// apps have consistent permission requirements.
-func (h *BashHandler) localAppHasPermission(slug, perm string) bool {
-	if h.DataDir == "" {
-		return false
-	}
-	data, err := os.ReadFile(filepath.Join(h.DataDir, "apps", slug, "manifest.json"))
-	if err != nil {
-		return false
-	}
-	var manifest struct {
-		Permissions []string `json:"permissions"`
-	}
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return false
-	}
-	for _, p := range manifest.Permissions {
-		if p == perm {
-			return true
-		}
-	}
-	return false
-}
-
 // systemApps are platform-level apps that bypass sandbox and permission checks.
 // They are bundled in the daemon image and not marketplace-managed.
 var systemApps = map[string]bool{
@@ -49,8 +23,7 @@ var systemApps = map[string]bool{
 
 // BashHandler executes a bash command and returns the output.
 type BashHandler struct {
-	Perms   marketplace.PermissionChecker
-	DataDir string // path to data dir (for reading local app manifests)
+	Perms marketplace.PermissionChecker
 }
 
 type bashRequest struct {
@@ -91,19 +64,9 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if appSlug == "" {
 		appSlug = req.AppSlug // fallback to body for non-browser callers (no privilege gain)
 	}
-	if appSlug != "" && !isSystemApp {
-		hasBash := false
-		if h.Perms != nil && h.Perms.IsTracked(appSlug) {
-			// Marketplace app — check via permission system.
-			hasBash = h.Perms.HasPermission(appSlug, "bash")
-		} else {
-			// Local app — check manifest.json permissions field.
-			hasBash = h.localAppHasPermission(appSlug, "bash")
-		}
-		if !hasBash {
-			respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash — add to manifest.json permissions"})
-			return
-		}
+	if appSlug != "" && !isSystemApp && h.Perms != nil && !h.Perms.HasPermission(appSlug, "bash") {
+		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash — add to manifest.json permissions"})
+		return
 	}
 
 	// Sandbox ALL app-initiated bash except system apps.

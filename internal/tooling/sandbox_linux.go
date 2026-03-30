@@ -79,7 +79,7 @@ mkdir -p "$NEWROOT/etc"
 for f in passwd group nsswitch.conf hosts; do
   [ -f "/etc/$f" ] && cp "/etc/$f" "$NEWROOT/etc/$f"
 done
-# DNS only if network is allowed
+# DNS + TLS certs only if network is allowed
 %s
 
 # App's own data directory (read-write)
@@ -146,9 +146,14 @@ exec /usr/sbin/chroot "$NEWROOT" \
 // Only included when the app has network permission.
 func dnsSnippet(network bool) string {
 	if network {
-		return `[ -f /etc/resolv.conf ] && cp /etc/resolv.conf "$NEWROOT/etc/resolv.conf"`
+		return `[ -f /etc/resolv.conf ] && cp /etc/resolv.conf "$NEWROOT/etc/resolv.conf"
+# TLS CA certificates for HTTPS
+if [ -d /etc/ssl ]; then
+  mkdir -p "$NEWROOT/etc/ssl"
+  cp -r /etc/ssl/certs "$NEWROOT/etc/ssl/certs" 2>/dev/null || true
+fi`
 	}
-	return "# no network — DNS not available"
+	return "# no network — DNS and TLS not available"
 }
 
 // SandboxSafeEnv returns a minimal environment for sandboxed app processes.
@@ -225,11 +230,16 @@ mkdir -p "$NEWROOT/tmp"
 mount -t tmpfs tmpfs "$NEWROOT/tmp"
 chmod 1777 "$NEWROOT/tmp"
 
-# Minimal /etc with DNS
+# Minimal /etc with DNS + TLS certificates
 mkdir -p "$NEWROOT/etc"
 for f in passwd group nsswitch.conf hosts resolv.conf; do
   [ -f "/etc/$f" ] && cp "/etc/$f" "$NEWROOT/etc/$f"
 done
+# TLS CA certificates — servers need HTTPS to call external APIs
+if [ -d /etc/ssl ]; then
+  mkdir -p "$NEWROOT/etc/ssl"
+  cp -r /etc/ssl/certs "$NEWROOT/etc/ssl/certs" 2>/dev/null || true
+fi
 
 # App directory (read-write) — contains binary, code, and data/
 APP_DIR=%s

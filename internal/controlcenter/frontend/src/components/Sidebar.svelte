@@ -201,7 +201,7 @@
 
   .sidebar-header h1 {
     font-family: 'Sora', sans-serif;
-    font-size: 1.2rem;
+    font-size: var(--font-lg, 18px);
     font-weight: 700;
     display: flex;
     align-items: center;
@@ -246,7 +246,7 @@
     border: none;
     cursor: pointer;
     font-family: 'Sora', 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;

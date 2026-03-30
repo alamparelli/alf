@@ -519,11 +519,11 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.8rem;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
   }
   .tier-desc {
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin: 0;
   }
@@ -538,7 +538,7 @@
     border: 1px solid var(--border);
     background: var(--bg-card);
     color: var(--text);
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
   }
 
   /* Modal content styles */
@@ -551,7 +551,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
   }
   .form-grid input, .form-grid select, .form-grid textarea {
     padding: 0.4rem;
@@ -559,7 +559,7 @@
     border-radius: 4px;
     background: var(--bg);
     color: var(--text);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
   .full-width {
     grid-column: 1 / -1;
@@ -574,7 +574,7 @@
     display: flex;
     align-items: center;
     gap: 0.3rem;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
   }
   .tool-checkboxes {
@@ -586,14 +586,14 @@
     overflow-y: auto;
   }
   .tool-check {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
   }
   .tool-source {
     color: var(--text-dim);
-    font-size: 0.65rem;
+    font-size: var(--font-xs, 11px);
   }
   .modal-hint {
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-muted, #888);
     margin: 0 0 1rem 0;
     line-height: 1.4;

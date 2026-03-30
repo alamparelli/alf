@@ -235,7 +235,7 @@
   .main-content {
     flex: 1;
     margin-left: var(--sidebar-width);
-    padding: 0 24px 24px;
+    padding: 0 var(--space-lg, 24px) var(--space-lg, 24px);
     overflow-y: auto;
     min-height: 100vh;
   }
@@ -276,26 +276,26 @@
   /* Shared view layout — aligned with Marketplace style */
   :global(.view-layout) {
     width: 100%;
-    padding: 8px 0;
+    padding: var(--space-sm, 8px) 0;
   }
 
   :global(.view-layout h2) {
-    margin-bottom: 16px;
+    margin-bottom: var(--space-md, 16px);
   }
 
   :global(.view-header) {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-md, 16px);
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--space-sm, 8px);
   }
 
   :global(.view-header h2) {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-sm, 8px);
     margin: 0;
     font-size: 1.25rem;
   }
@@ -375,7 +375,7 @@
 
   :global(.btn-group) {
     display: flex;
-    gap: 8px;
+    gap: var(--space-sm, 8px);
     flex-wrap: wrap;
   }
 
@@ -502,19 +502,19 @@
   :global(.filter-tabs) {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 16px;
+    gap: var(--space-xs, 4px);
+    margin-bottom: var(--space-md, 16px);
   }
 
   :global(.tabs) {
     display: flex;
     gap: 0;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 16px;
+    margin-bottom: var(--space-md, 16px);
   }
 
   :global(.tab) {
-    padding: 8px 16px;
+    padding: var(--space-sm, 8px) var(--space-md, 16px);
     border: none;
     border-bottom: 2px solid transparent;
     background: none;
@@ -575,7 +575,7 @@
   }
 
   :global(.alert) {
-    padding: 8px 16px;
+    padding: var(--space-sm, 8px) var(--space-md, 16px);
     border-radius: var(--radius, 8px);
     font-size: 0.85rem;
     border: 1px solid var(--border);
@@ -627,18 +627,18 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 32px 16px;
+    padding: var(--space-xl, 32px) var(--space-md, 16px);
     color: var(--text-dim);
     text-align: center;
-    gap: 8px;
+    gap: var(--space-sm, 8px);
   }
 
   :global(.loading-state) {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 32px;
-    gap: 8px;
+    padding: var(--space-xl, 32px);
+    gap: var(--space-sm, 8px);
     color: var(--text-dim);
     font-size: 0.85rem;
   }
@@ -660,7 +660,7 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 0 0 8px;
+    padding: 0 0 var(--space-sm, 8px);
     overflow-x: auto;
     flex-shrink: 0;
   }
@@ -726,7 +726,7 @@
   }
 
   .placeholder-view h2 {
-    margin-bottom: 8px;
+    margin-bottom: var(--space-sm, 8px);
     color: var(--text);
   }
 
@@ -744,8 +744,8 @@
 
   :global(.spotlight-fab) {
     position: fixed;
-    bottom: 24px;
-    right: 24px;
+    bottom: var(--space-lg, 24px);
+    right: var(--space-lg, 24px);
     z-index: 900;
     width: 44px;
     height: 44px;

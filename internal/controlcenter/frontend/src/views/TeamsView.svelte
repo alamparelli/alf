@@ -238,7 +238,7 @@
     border: none;
     border-radius: 6px;
     padding: 8px 16px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 600;
     cursor: pointer;
   }
@@ -253,7 +253,7 @@
     border-radius: 6px;
     color: var(--text-dim);
     padding: 8px 16px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
   }
 
@@ -296,12 +296,12 @@
   }
 
   .team-info h3 {
-    font-size: 1rem;
+    font-size: var(--font-md, 15px);
     margin-bottom: 0.25rem;
   }
 
   .team-desc {
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin-bottom: 0.5rem;
   }
@@ -326,11 +326,11 @@
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 2px 10px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
   }
 
   .tier-label {
-    font-size: 0.65rem;
+    font-size: var(--font-xs, 11px);
     opacity: 0.8;
   }
 
@@ -342,7 +342,7 @@
   }
 
   .editor-header h3 {
-    font-size: 1rem;
+    font-size: var(--font-md, 15px);
   }
 
   .json-editor {
@@ -353,14 +353,14 @@
     border-radius: 6px;
     padding: 12px;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     line-height: 1.5;
     resize: vertical;
   }
 
   .editor-error {
     color: var(--red, #e55);
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     margin-top: 0.5rem;
   }
 

@@ -169,6 +169,11 @@ func (h *AppHandler) proxyAPI(w http.ResponseWriter, r *http.Request, slug, apiP
 			req.Header.Del("Authorization")
 			req.Header.Del("X-Tools-Socket")
 			req.Header.Del("X-Requested-With")
+			// SEC-007: Strip forwarded headers to prevent host header injection.
+			req.Header.Del("X-Forwarded-Host")
+			req.Header.Del("X-Forwarded-For")
+			req.Header.Del("X-Forwarded-Proto")
+			req.Header.Del("X-Real-Ip")
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			http.Error(w, `{"error":"app server unreachable"}`, http.StatusBadGateway)

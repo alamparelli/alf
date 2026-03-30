@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
 // ServiceConfig is the on-disk format of service.json inside an app directory.
@@ -27,6 +29,7 @@ type ServiceConfig struct {
 	RestartDelay string            `json:"restart_delay"`  // e.g. "3s"
 	MaxRestarts  int               `json:"max_restarts"`   // 0 = unlimited
 	Enabled      bool              `json:"enabled"`
+	NoSandbox    bool              `json:"no_sandbox,omitempty"` // true = bypass chroot (system services only)
 }
 
 // ServiceStatus holds runtime state for a managed service.
@@ -422,13 +425,24 @@ func (s *Supervisor) buildCmd(p *managedProc) (*exec.Cmd, error) {
 
 	cmd.Dir = p.workDir
 
-	// Build environment: inherit safe vars from daemon + service-specific env.
-	cmd.Env = inheritSafeEnv()
-
-	// Provide app data directory so services know where to store persistent data.
+	// Build environment: sandboxed servers get a minimal safe env,
+	// non-sandboxed (system) servers inherit from the daemon.
 	dataDir := filepath.Join(p.workDir, "data")
 	os.MkdirAll(dataDir, 0o755)
-	cmd.Env = append(cmd.Env, "ALF_APP_DATA_DIR="+dataDir)
+
+	if p.config.NoSandbox {
+		// System/internal service — no sandbox, inherit daemon env.
+		cmd.Env = inheritSafeEnv()
+		cmd.Env = append(cmd.Env, "ALF_APP_DATA_DIR="+dataDir)
+	} else {
+		// App server — sandbox with chroot isolation.
+		cmd.Env = tooling.ServerSafeEnv(p.workDir)
+		tooling.SandboxServerCmd(cmd, tooling.ServerSandboxConfig{
+			AppSlug: p.appSlug,
+			AppDir:  p.workDir,
+		})
+		log.Printf("supervisor: [%s] sandbox enabled", p.appSlug)
+	}
 
 	// SEC-002: Block dangerous env overrides.
 	for k, v := range p.config.Env {

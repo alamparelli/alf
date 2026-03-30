@@ -5,6 +5,7 @@ package tooling
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -162,6 +163,134 @@ func SandboxSafeEnv(appDataDir string) []string {
 		"TERM=xterm-256color",
 		"LANG=en_US.UTF-8",
 		"ALF_APP_DATA_DIR=" + appDataDir,
+		"TMPDIR=/tmp",
+	}
+}
+
+// ServerSandboxConfig configures isolation for a long-running app server.
+type ServerSandboxConfig struct {
+	AppSlug string // app identifier
+	AppDir  string // full path to app directory (code + data, read-write)
+}
+
+// SandboxServerCmd configures cmd to run a server binary in an isolated chroot.
+// Similar to SandboxedCmd but adapted for long-running servers:
+//   - Mounts the entire app directory (not just data/) since the binary lives there
+//   - No network namespace — server must listen on a port
+//   - No ulimits — servers need sustained resources
+//   - DNS always available — servers typically need network
+//
+// The server sees only: system binaries (RO), its own app dir (RW),
+// tools (RO), /tmp, /proc, /dev, minimal /etc with DNS.
+func SandboxServerCmd(cmd *exec.Cmd, cfg ServerSandboxConfig) {
+	flags := uintptr(syscall.CLONE_NEWNS | syscall.CLONE_NEWPID)
+	// No CLONE_NEWNET — server needs to listen on a port.
+
+	setup := fmt.Sprintf(`
+set -e
+
+# --- Phase 1: Create new root on tmpfs ---
+NEWROOT=$(mktemp -d /tmp/sandbox-XXXXXX)
+mount -t tmpfs -o size=64m tmpfs "$NEWROOT"
+
+# --- Phase 2: Bind-mount only what the server needs ---
+
+# System binaries (read-only)
+for d in bin usr lib sbin; do
+  if [ -d "/$d" ]; then
+    mkdir -p "$NEWROOT/$d"
+    mount --rbind "/$d" "$NEWROOT/$d"
+    mount -o remount,ro,bind "$NEWROOT/$d" || { echo "FATAL: cannot make /$d read-only"; exit 1; }
+  fi
+done
+if [ -d /lib64 ]; then
+  mkdir -p "$NEWROOT/lib64"
+  mount --rbind /lib64 "$NEWROOT/lib64"
+  mount -o remount,ro,bind "$NEWROOT/lib64" 2>/dev/null || true
+fi
+
+# Minimal /dev
+mkdir -p "$NEWROOT/dev"
+for dev in null zero urandom random; do
+  touch "$NEWROOT/dev/$dev"
+  mount --bind "/dev/$dev" "$NEWROOT/dev/$dev"
+done
+ln -sf /proc/self/fd "$NEWROOT/dev/fd" 2>/dev/null || true
+
+# /proc
+mkdir -p "$NEWROOT/proc"
+
+# /tmp
+mkdir -p "$NEWROOT/tmp"
+mount -t tmpfs tmpfs "$NEWROOT/tmp"
+chmod 1777 "$NEWROOT/tmp"
+
+# Minimal /etc with DNS
+mkdir -p "$NEWROOT/etc"
+for f in passwd group nsswitch.conf hosts resolv.conf; do
+  [ -f "/etc/$f" ] && cp "/etc/$f" "$NEWROOT/etc/$f"
+done
+
+# App directory (read-write) — contains binary, code, and data/
+APP_DIR=%s
+mkdir -p "$NEWROOT$APP_DIR"
+mount --bind "$APP_DIR" "$NEWROOT$APP_DIR"
+
+# Tools directory (read-only)
+if [ -d /home/alf/data/tools ]; then
+  mkdir -p "$NEWROOT/home/alf/data/tools"
+  mount --rbind /home/alf/data/tools "$NEWROOT/home/alf/data/tools"
+  mount -o remount,ro,bind "$NEWROOT/home/alf/data/tools" || { echo "FATAL: cannot make tools read-only"; exit 1; }
+fi
+
+# HOME skeleton
+mkdir -p "$NEWROOT/home/alf"
+
+# --- Phase 3: chroot + drop to uid 1000 and exec server ---
+mount -t proc proc "$NEWROOT/proc" 2>/dev/null || true
+
+# Pass the original command and args via env to avoid quoting issues.
+exec /usr/sbin/chroot "$NEWROOT" \
+  setpriv --reuid=1000 --regid=1000 --init-groups --inh-caps=-all \
+  /bin/bash -c 'exec "$__SANDBOX_SERVER_CMD" $__SANDBOX_SERVER_ARGS'
+`,
+		shellQuote(cfg.AppDir),
+	)
+
+	// Wrap: the original command becomes the setup script.
+	// The actual server binary+args are passed via env vars.
+	origPath := cmd.Path
+	origArgs := ""
+	if len(cmd.Args) > 1 {
+		parts := make([]string, len(cmd.Args)-1)
+		for i, a := range cmd.Args[1:] {
+			parts[i] = shellQuote(a)
+		}
+		origArgs = strings.Join(parts, " ")
+	}
+
+	cmd.Env = append(cmd.Env, "__SANDBOX_SERVER_CMD="+origPath)
+	cmd.Env = append(cmd.Env, "__SANDBOX_SERVER_ARGS="+origArgs)
+	cmd.Path = "/bin/bash"
+	cmd.Args = []string{"bash", "-c", setup}
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags: flags,
+		Credential: &syscall.Credential{Uid: 0, Gid: 0},
+	}
+}
+
+// ServerSafeEnv returns a minimal environment for sandboxed server processes.
+// No vault token, no secrets — servers use REST proxy for data access.
+func ServerSafeEnv(appDir string) []string {
+	return []string{
+		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"HOME=/home/alf",
+		"USER=alf",
+		"LOGNAME=alf",
+		"SHELL=/bin/bash",
+		"LANG=en_US.UTF-8",
+		"ALF_APP_DATA_DIR=" + filepath.Join(appDir, "data"),
 		"TMPDIR=/tmp",
 	}
 }

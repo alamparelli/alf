@@ -5,6 +5,7 @@ package tooling
 import (
 	"log"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -36,6 +37,34 @@ func SandboxSafeEnv(appDataDir string) []string {
 		"TERM=xterm-256color",
 		"LANG=en_US.UTF-8",
 		"ALF_APP_DATA_DIR=" + appDataDir,
+		"TMPDIR=/tmp",
+	}
+}
+
+// ServerSandboxConfig configures isolation for a long-running app server.
+type ServerSandboxConfig struct {
+	AppSlug string
+	AppDir  string
+}
+
+// SandboxServerCmd is a no-op fallback on non-Linux systems.
+func SandboxServerCmd(cmd *exec.Cmd, cfg ServerSandboxConfig) {
+	log.Printf("[sandbox] WARNING: server sandbox not available on this OS — falling back to uid drop only")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
+	}
+}
+
+// ServerSafeEnv returns a minimal environment for sandboxed server processes.
+func ServerSafeEnv(appDir string) []string {
+	return []string{
+		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"HOME=/home/alf",
+		"USER=alf",
+		"LOGNAME=alf",
+		"SHELL=/bin/bash",
+		"LANG=en_US.UTF-8",
+		"ALF_APP_DATA_DIR=" + filepath.Join(appDir, "data"),
 		"TMPDIR=/tmp",
 	}
 }

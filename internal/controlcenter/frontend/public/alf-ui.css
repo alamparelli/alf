@@ -4,6 +4,11 @@
    Version: 1.0.0
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ── Layout tokens ────────────────────────────────────────────────────── */
+:root {
+  --page-padding: 2.5rem;
+}
+
 /* ── Reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -153,6 +158,13 @@
 .btn-icon:hover { color: var(--text); background: var(--bg-input); }
 
 .btn-block { width: 100%; }
+
+/* Active state modifier — use for toggle buttons in a group (e.g. speed selector) */
+.btn.active {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
 
 /* Button group */
 .btn-group {

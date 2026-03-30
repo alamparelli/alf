@@ -248,7 +248,40 @@ Only for games where the player controls a direction (Snake, Pac-Man).
 @media (pointer: coarse) { .dpad { display: flex; } }
 ```
 
-D-pad button sizing:
+### D-pad layout (sticky bottom)
+
+The D-pad must stick to the bottom of the screen. The board/canvas centers in the space between the HUD (top) and D-pad (bottom):
+
+```css
+/* Arrow pad — sticks to bottom of #app flex container */
+.arrow-pad {
+  margin-top: auto;      /* pushes down to bottom */
+  padding-top: 1.5rem;   /* breathing room above buttons */
+  gap: 12px;             /* between directional buttons */
+  display: grid;
+  grid-template-areas:
+    ".  up  ."
+    "lt  .  rt"
+    ". dn  .";
+  justify-content: center;
+}
+```
+
+### Board centering (between HUD and D-pad)
+
+The game board should center vertically in the remaining space:
+
+```css
+.board-wrap {
+  margin-top: auto;
+  margin-bottom: auto;   /* centers in flex space between HUD and D-pad */
+}
+```
+
+Layout order in `#app` (flex column): HUD → board-wrap (centered) → arrow-pad (sticky bottom).
+
+### D-pad button sizing
+
 ```css
 .dpad-btn {
   width: 64px; height: 64px;   /* 64px default, comfortable tap target */

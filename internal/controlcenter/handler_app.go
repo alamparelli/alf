@@ -53,6 +53,13 @@ func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// API proxy: /apps/{slug}/api/... → localhost:{port}/api/...
 	if strings.HasPrefix(subPath, "api/") || subPath == "api" {
+		// SEC-005: Block cross-app API access. Only the app's own iframe
+		// (or non-app callers) may use its API proxy.
+		callerApp := extractAppSlugFromReferer(r)
+		if callerApp != "" && callerApp != appName {
+			http.Error(w, `{"error":"cross-app API access denied"}`, http.StatusForbidden)
+			return
+		}
 		h.proxyAPI(w, r, appName, "/"+subPath)
 		return
 	}

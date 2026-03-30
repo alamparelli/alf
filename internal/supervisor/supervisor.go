@@ -303,8 +303,24 @@ func (s *Supervisor) supervise(p *managedProc) {
 
 		if err := cmd.Start(); err != nil {
 			p.lastErr = err.Error()
-			log.Printf("supervisor: [%s] failed to start: %v", p.appSlug, err)
-			return
+			p.restarts++
+			log.Printf("supervisor: [%s] failed to start (restarts=%d): %v", p.appSlug, p.restarts, err)
+			if p.config.MaxRestarts > 0 && p.restarts >= p.config.MaxRestarts {
+				log.Printf("supervisor: [%s] max restarts reached, giving up", p.appSlug)
+				return
+			}
+			select {
+			case <-time.After(delay):
+			case <-s.stop:
+				return
+			case <-p.stopCh:
+				return
+			}
+			delay = delay * 2
+			if delay > maxDelay {
+				delay = maxDelay
+			}
+			continue
 		}
 
 		log.Printf("supervisor: [%s] running (pid=%d)", p.appSlug, cmd.Process.Pid)

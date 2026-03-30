@@ -1294,7 +1294,7 @@
     border-radius: 10px;
     font-size: 0.68rem;
     font-weight: 500;
-    background: rgba(59, 130, 246, 0.12);
+    background: color-mix(in srgb, var(--sapphire) 12%, transparent);
     color: var(--blue, #3b82f6);
   }
 
@@ -1502,12 +1502,12 @@
   }
 
   .token-expired {
-    background: rgba(239, 68, 68, 0.12);
+    background: color-mix(in srgb, var(--red) 12%, transparent);
     color: var(--red, #ef4444);
   }
 
   .token-expiring {
-    background: rgba(234, 179, 8, 0.12);
+    background: color-mix(in srgb, var(--yellow) 12%, transparent);
     color: var(--yellow, #eab308);
   }
 

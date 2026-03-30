@@ -921,7 +921,7 @@
     font-size: 0.65rem;
     padding: 0 5px;
     border-radius: 8px;
-    background: rgba(234, 179, 8, 0.12);
+    background: color-mix(in srgb, var(--yellow) 12%, transparent);
     color: var(--yellow, #eab308);
     flex-shrink: 0;
   }
@@ -968,7 +968,7 @@
   .drag-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(59, 130, 246, 0.1);
+    background: color-mix(in srgb, var(--sapphire) 10%, transparent);
     border: 2px dashed var(--accent);
     border-radius: var(--radius, 8px);
     display: flex;

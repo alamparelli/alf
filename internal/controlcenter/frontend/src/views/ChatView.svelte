@@ -845,7 +845,7 @@
     justify-content: space-between;
     margin-top: 6px;
     padding-top: 4px;
-    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-top: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
     gap: 8px;
   }
 
@@ -874,7 +874,7 @@
 
   .queued-cancel:hover {
     opacity: 1;
-    background: rgba(255, 255, 255, 0.15);
+    background: color-mix(in srgb, var(--text) 15%, transparent);
   }
 
   /* Agent modal */

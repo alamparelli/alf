@@ -187,9 +187,13 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	// Ensure the agents/ parent and task dir are owned by alf (subprocess uid 1000)
 	// so the LLM process can write files inside.
 	os.Chmod(agentsParent, 0o775)
-	os.Chown(agentsParent, 1000, 1000)
+	if err := os.Chown(agentsParent, 1000, 1000); err != nil {
+		log.Printf("[orchestrator] chown agents dir: %v", err)
+	}
 	os.Chmod(taskDir, 0o775)
-	os.Chown(taskDir, 1000, 1000)
+	if err := os.Chown(taskDir, 1000, 1000); err != nil {
+		log.Printf("[orchestrator] chown task dir: %v", err)
+	}
 
 	log.Printf("[orchestrator] task %s started | teams=%d | message_len=%d", taskID, len(teams), len(userMessage))
 
@@ -764,7 +768,9 @@ func (o *Orchestrator) invokeAgentWithKey(
 	}
 	os.MkdirAll(agentDir, 0o775)
 	os.Chmod(agentDir, 0o775)
-	os.Chown(agentDir, 1000, 1000) // alf (subprocess uid 1000) owns agent dirs
+	if err := os.Chown(agentDir, 1000, 1000); err != nil {
+		log.Printf("[orchestrator] chown agent dir %s: %v", agentDir, err)
+	}
 
 	model := tp.Model
 

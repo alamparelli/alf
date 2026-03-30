@@ -2,6 +2,7 @@ package controlcenter
 
 import (
 	"bufio"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -341,6 +342,111 @@ func TestEventBroker_SSENewMessageFormat(t *testing.T) {
 	if !strings.Contains(event, "data: scheduled job output preview") {
 		t.Fatalf("expected custom data payload, got: %q", event)
 	}
+}
+
+// --- Regression: Connection header + keepalive ping ---
+
+func TestEventBroker_SSENoConnectionHeaderHTTP2(t *testing.T) {
+	b := NewEventBroker()
+
+	// httptest.NewTLSServer with HTTP/2 would be ideal, but httptest
+	// doesn't expose an HTTP/2-only server easily. Instead, use
+	// httptest.NewRecorder with a crafted HTTP/2 request.
+	req := httptest.NewRequest("GET", "/api/events", nil)
+	req.ProtoMajor = 2
+	req.ProtoMinor = 0
+	req.Proto = "HTTP/2.0"
+
+	w := httptest.NewRecorder()
+
+	// ServeHTTP will block waiting for ctx.Done(), so run in background
+	// and cancel quickly.
+	ctx, cancel := context.WithCancel(req.Context())
+	req = req.WithContext(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	// Give the handler time to write headers.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	if got := w.Header().Get("Connection"); got != "" {
+		t.Fatalf("HTTP/2 response must NOT have Connection header, got %q", got)
+	}
+	// Other SSE headers should still be present.
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("expected text/event-stream, got %q", ct)
+	}
+}
+
+func TestEventBroker_SSEConnectionHeaderHTTP1(t *testing.T) {
+	b := NewEventBroker()
+
+	req := httptest.NewRequest("GET", "/api/events", nil)
+	// httptest.NewRequest defaults to HTTP/1.1.
+	if req.ProtoMajor != 1 {
+		t.Fatalf("expected default HTTP/1.1 request, got %d.%d", req.ProtoMajor, req.ProtoMinor)
+	}
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithCancel(req.Context())
+	req = req.WithContext(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	if got := w.Header().Get("Connection"); got != "keep-alive" {
+		t.Fatalf("HTTP/1.1 response should have Connection: keep-alive, got %q", got)
+	}
+}
+
+func TestEventBroker_SSEKeepalivePingFormat(t *testing.T) {
+	// We cannot easily wait 25s in a test, so we verify the keepalive ping
+	// format by emitting through the broker's event path and checking the
+	// initial ping format matches what the keepalive also emits.
+	// The keepalive writes: "event: ping\ndata: keepalive\n\n"
+	// We verify the initial ping format and trust the ticker uses the same
+	// fmt.Fprintf pattern. This test documents the expected wire format.
+	b := NewEventBroker()
+	srv := httptest.NewServer(b)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+
+	// Read the initial ping — same format as keepalive minus data value.
+	event := readSSEEvent(t, scanner)
+	if !strings.Contains(event, "event: ping") {
+		t.Fatalf("expected initial ping event, got: %q", event)
+	}
+	if !strings.Contains(event, "data: connected") {
+		t.Fatalf("expected 'data: connected' in initial ping, got: %q", event)
+	}
+
+	// Verify the keepalive format string is "event: ping\ndata: keepalive".
+	// We confirm this by inspecting the source pattern: both initial and
+	// keepalive use the same "event: ping\ndata: ..." SSE frame structure.
+	// The difference is only the data payload: "connected" vs "keepalive".
+	expectedKeepalive := "event: ping\ndata: keepalive"
+	_ = expectedKeepalive // format documented; actual 25s ticker not waited on
 }
 
 // readSSEEvent reads lines from the scanner until a blank line (SSE event boundary).

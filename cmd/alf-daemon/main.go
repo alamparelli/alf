@@ -105,6 +105,10 @@ func main() {
 	// allowedChatIDs is resolved after vault loads Telegram credentials.
 	var allowedChatIDs map[int64]bool
 
+	// tg is the Telegram client — declared early so onTaskEvent closure can capture it.
+	// Assigned later when Telegram credentials are available.
+	var tg *tgclient.Client
+
 	// Shared stats for CC status endpoint.
 	stats := cc.NewStats()
 
@@ -750,6 +754,23 @@ func main() {
 				Source: "cc",
 			})
 			log.Printf("[tasks] event: task=%s status=%s", taskID[:min(8, len(taskID))], status)
+			// SSE: notify CC frontend so it plays a sound and reloads messages.
+			if eventBroker != nil {
+				preview := text
+				if len(preview) > 200 {
+					preview = preview[:200] + "..."
+				}
+				eventBroker.EmitWithData(cc.EventNewMessage, preview)
+			}
+			// Telegram: push notification for task events.
+			if tg != nil && chatID != "" {
+				tgID, _ := strconv.ParseInt(chatID, 10, 64)
+				if tgID != 0 {
+					if err := tg.SendHTML(tgID, text); err != nil {
+						log.Printf("[tasks] telegram notify failed: %v", err)
+					}
+				}
+			}
 		}
 		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager)
 		if err != nil {
@@ -828,7 +849,7 @@ func main() {
 	client := &http.Client{Timeout: 35 * time.Second}
 
 	// Telegram client for sending formatted messages (nil if TG disabled).
-	var tg *tgclient.Client
+	// var tg declared earlier (line ~107) so onTaskEvent closure can capture it.
 	var tgAdapt *tgAdapter
 	tgChatSem := make(chan struct{}, 1) // serialize message processing per chat
 	if telegramEnabled {
@@ -920,14 +941,20 @@ func main() {
 	var memExtractor *memstore.Extractor
 	if memDB != nil {
 		extractorTierResolver := func() string {
-			tierName := firstFallbackTier(tierStore)
+			// Find the first enabled tier with a CLI-compatible backend.
+			// Tiers with non-CLI backends (e.g. "codex") use models that
+			// the Claude CLI cannot invoke (e.g. gpt-5.4-mini).
 			for _, t := range tierStore.Current().Tiers {
-				if t.Name == tierName {
-					if m := router.ResolveModel(t.Model); m != "" {
-						return m
-					}
-					return t.Model
+				if !t.Enabled {
+					continue
 				}
+				if t.Backend != "" && t.Backend != "cli" {
+					continue
+				}
+				if m := router.ResolveModel(t.Model); m != "" {
+					return m
+				}
+				return t.Model
 			}
 			return ""
 		}

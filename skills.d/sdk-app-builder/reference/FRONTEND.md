@@ -318,6 +318,10 @@ AlfSDK.updateSheet('<h3>Loading...</h3><p>Please wait</p>');
 **Button click handling**: Elements with `data-action="name"` trigger the matching action callback.
 Form inputs with `name` or `data-field` attributes are collected into the `params` object.
 
+**Sheet styling**: The sheet container has `background: var(--bg)` and inherits the theme variables. Sheet HTML gets base styles for headings, paragraphs, inputs, buttons, and labels automatically. Use `alf-ui.css` classes (`.btn`, `.input`, `.form-group`, etc.) inside sheets for consistency with the rest of the workspace.
+
+**Dismiss animation**: On mobile, sheets slide down when dismissed (swipe down > 120px, tap backdrop, or `AlfSDK.closeSheet()`).
+
 ---
 
 ## Permissions

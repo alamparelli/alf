@@ -468,6 +468,8 @@
     font-size: 0.9rem;
     line-height: 1.5;
     color: var(--text);
+    background: var(--bg);
+    border-radius: var(--radius, 8px);
   }
 
   .sdk-sheet-content :global(h1),

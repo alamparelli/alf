@@ -259,6 +259,85 @@ func TestDnsSnippet_NetworkTrue(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ServerSafeEnv tests
+// ---------------------------------------------------------------------------
+
+func TestServerSafeEnv_ContainsExpectedVars(t *testing.T) {
+	env := ServerSafeEnv("/data/apps/myapp")
+
+	expected := map[string]string{
+		"PATH":             "/usr/local/bin:/usr/bin:/bin",
+		"HOME":             "/home/alf",
+		"USER":             "alf",
+		"LANG":             "en_US.UTF-8",
+		"ALF_APP_DATA_DIR": "/data/apps/myapp/data",
+		"TMPDIR":           "/tmp",
+	}
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	for k, v := range expected {
+		got, ok := envMap[k]
+		if !ok {
+			t.Errorf("missing env var %s", k)
+		} else if got != v {
+			t.Errorf("env %s = %q, want %q", k, got, v)
+		}
+	}
+}
+
+func TestServerSafeEnv_NoSensitiveVars(t *testing.T) {
+	env := ServerSafeEnv("/data/apps/test")
+
+	sensitivePatterns := []string{
+		"VAULT_TOKEN",
+		"VAULT_ADDR",
+		"SECRET",
+		"PASSWORD",
+	}
+
+	for _, e := range env {
+		key := strings.SplitN(e, "=", 2)[0]
+		upper := strings.ToUpper(key)
+		for _, sensitive := range sensitivePatterns {
+			if strings.Contains(upper, sensitive) {
+				t.Errorf("env contains sensitive var %s (matches %s)", key, sensitive)
+			}
+		}
+		// Also check for ANTHROPIC_ and CLAUDE_ prefixes.
+		if strings.HasPrefix(upper, "ANTHROPIC_") {
+			t.Errorf("env contains ANTHROPIC_ prefixed var: %s", key)
+		}
+		if strings.HasPrefix(upper, "CLAUDE_") {
+			t.Errorf("env contains CLAUDE_ prefixed var: %s", key)
+		}
+	}
+}
+
+func TestServerSafeEnv_AppDataDirCombinesWithData(t *testing.T) {
+	appDir := "/opt/apps/weather"
+	env := ServerSafeEnv(appDir)
+
+	want := filepath.Join(appDir, "data")
+	found := false
+	for _, e := range env {
+		if e == "ALF_APP_DATA_DIR="+want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ALF_APP_DATA_DIR should be %q (appDir + /data)", want)
+	}
+}
+
 func TestDnsSnippet_NetworkFalse(t *testing.T) {
 	got := dnsSnippet(false)
 	if strings.Contains(got, "resolv.conf") {

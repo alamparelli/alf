@@ -262,6 +262,195 @@ func TestSandboxedCmd_SetprivDropsAllCaps(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// SandboxServerCmd — helper
+// ---------------------------------------------------------------------------
+
+func buildSandboxServerCmd(t *testing.T, cfg ServerSandboxConfig) (*exec.Cmd, string) {
+	t.Helper()
+	cmd := exec.Command("/usr/bin/myserver", "--port", "8080")
+	cmd.Env = ServerSafeEnv(cfg.AppDir)
+	SandboxServerCmd(cmd, cfg)
+	if len(cmd.Args) < 3 {
+		t.Fatal("expected cmd.Args to have at least 3 elements")
+	}
+	return cmd, cmd.Args[2] // the setup script
+}
+
+// ---------------------------------------------------------------------------
+// SandboxServerCmd — script structure
+// ---------------------------------------------------------------------------
+
+func TestSandboxServerCmd_ScriptStructure(t *testing.T) {
+	_, script := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  "/data/apps/weather",
+	})
+
+	required := []struct {
+		desc    string
+		pattern string
+	}{
+		{"tmpfs mount", "mount -t tmpfs"},
+		{"bind-mount /bin /usr /lib", "for d in bin usr lib sbin"},
+		{"chroot", "chroot"},
+		{"setpriv", "setpriv"},
+		{"resolv.conf always included", "resolv.conf"},
+	}
+	for _, r := range required {
+		if !strings.Contains(script, r.pattern) {
+			t.Errorf("script missing %s (expected %q)", r.desc, r.pattern)
+		}
+	}
+}
+
+func TestSandboxServerCmd_MountsAppDir(t *testing.T) {
+	appDir := "/data/apps/weather"
+	_, script := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  appDir,
+	})
+
+	// The full app dir should be bind-mounted (not just data/).
+	quoted := shellQuote(appDir)
+	if !strings.Contains(script, "APP_DIR="+quoted) {
+		t.Errorf("script should set APP_DIR=%s", quoted)
+	}
+	if !strings.Contains(script, `mount --bind "$APP_DIR" "$NEWROOT$APP_DIR"`) {
+		t.Error("script should bind-mount the full app dir")
+	}
+}
+
+func TestSandboxServerCmd_NoNetworkNamespace(t *testing.T) {
+	cmd, _ := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  "/data/apps/weather",
+	})
+
+	flags := cmd.SysProcAttr.Cloneflags
+	if flags&syscall.CLONE_NEWNET != 0 {
+		t.Error("CLONE_NEWNET should NOT be set — server needs network access")
+	}
+}
+
+func TestSandboxServerCmd_HasPidNamespace(t *testing.T) {
+	cmd, _ := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  "/data/apps/weather",
+	})
+
+	flags := cmd.SysProcAttr.Cloneflags
+	if flags&syscall.CLONE_NEWPID == 0 {
+		t.Error("CLONE_NEWPID should be set for PID isolation")
+	}
+}
+
+func TestSandboxServerCmd_HasMountNamespace(t *testing.T) {
+	cmd, _ := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  "/data/apps/weather",
+	})
+
+	flags := cmd.SysProcAttr.Cloneflags
+	if flags&syscall.CLONE_NEWNS == 0 {
+		t.Error("CLONE_NEWNS should be set for mount isolation")
+	}
+}
+
+func TestSandboxServerCmd_RootCredential(t *testing.T) {
+	cmd, _ := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  "/data/apps/weather",
+	})
+
+	cred := cmd.SysProcAttr.Credential
+	if cred == nil {
+		t.Fatal("SysProcAttr.Credential should be set")
+	}
+	if cred.Uid != 0 {
+		t.Errorf("Credential.Uid = %d, want 0 (root for mount setup)", cred.Uid)
+	}
+	if cred.Gid != 0 {
+		t.Errorf("Credential.Gid = %d, want 0", cred.Gid)
+	}
+}
+
+func TestSandboxServerCmd_DropsAllCaps(t *testing.T) {
+	_, script := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  "/data/apps/weather",
+	})
+
+	if !strings.Contains(script, "--inh-caps=-all") {
+		t.Error("setpriv should drop ALL capabilities with --inh-caps=-all")
+	}
+}
+
+func TestSandboxServerCmd_NoSensitivePaths(t *testing.T) {
+	_, script := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "test",
+		AppDir:  "/data/apps/test",
+	})
+
+	sensitivePaths := []string{
+		"/opt/alf/vault-data",
+		"/home/alf/.claude",
+		"/run/secrets",
+	}
+
+	for _, p := range sensitivePaths {
+		if strings.Contains(script, "mount --bind \""+p) ||
+			strings.Contains(script, "mount --rbind \""+p) ||
+			strings.Contains(script, "mount --bind "+p) ||
+			strings.Contains(script, "mount --rbind "+p) {
+			t.Errorf("script should not bind-mount sensitive path: %s", p)
+		}
+	}
+}
+
+func TestSandboxServerCmd_PassesCommandViaEnv(t *testing.T) {
+	cmd, _ := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  "/data/apps/weather",
+	})
+
+	foundCmd := false
+	foundArgs := false
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "__SANDBOX_SERVER_CMD=") {
+			foundCmd = true
+			val := strings.TrimPrefix(e, "__SANDBOX_SERVER_CMD=")
+			if val != "/usr/bin/myserver" {
+				t.Errorf("__SANDBOX_SERVER_CMD = %q, want /usr/bin/myserver", val)
+			}
+		}
+		if strings.HasPrefix(e, "__SANDBOX_SERVER_ARGS=") {
+			foundArgs = true
+		}
+	}
+	if !foundCmd {
+		t.Error("cmd.Env should contain __SANDBOX_SERVER_CMD")
+	}
+	if !foundArgs {
+		t.Error("cmd.Env should contain __SANDBOX_SERVER_ARGS")
+	}
+}
+
+func TestSandboxServerCmd_NoUlimits(t *testing.T) {
+	_, script := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  "/data/apps/weather",
+	})
+
+	if strings.Contains(script, "ulimit") {
+		t.Error("server sandbox should not contain ulimit — servers need sustained resources")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SandboxedCmd — injection tests (existing)
+// ---------------------------------------------------------------------------
+
 func TestSandboxedCmd_ShellQuoteBlocksInjection(t *testing.T) {
 	injections := []struct {
 		name    string

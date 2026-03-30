@@ -871,7 +871,7 @@
         {#each tokens as tok}
           <div class="item-row">
             <div class="item-info">
-              <span class="item-name mono">{'•'.repeat(8)}...{tok.id.slice(-4)}</span>
+              <span class="item-name mono">{'•'.repeat(8)}...{(tok.id || '').slice(-4)}</span>
               <span class="auth-badge">{tok.scope}</span>
             </div>
             <div class="item-actions">

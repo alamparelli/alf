@@ -192,14 +192,28 @@ background: rgba(196, 57, 42, 0.1);
 **Padding**: `.p-xs` to `.p-xl`, `.px-sm` to `.px-lg`, `.py-sm` to `.py-lg`
 **Margin**: `.mb-xs` to `.mb-lg`, `.mt-sm` to `.mt-lg`, `.m-0`
 
+### Page padding token
+
+`--page-padding: 2.5rem` is defined in `alf-ui.css`. Use it for full-bleed app pages:
+
+```css
+body { padding: var(--page-padding); }
+/* Or with safe area insets (games, fullscreen): */
+padding: calc(var(--page-padding) + env(safe-area-inset-top))
+         calc(var(--page-padding) + env(safe-area-inset-right))
+         calc(var(--page-padding) + env(safe-area-inset-bottom))
+         calc(var(--page-padding) + env(safe-area-inset-left));
+```
+
 ### Rules
 
 - Card padding: `--space-md` (class `.card` provides this).
 - Gap between items in a list: `--space-sm`.
 - Between sections: `--space-md` to `--space-lg`.
-- Page body padding: `1.5rem` (24px) — matches `--space-lg`.
+- Page body padding: `var(--page-padding)` (2.5rem). Never hardcode `2.5rem` directly.
 - Toolbar gap: `--space-sm` (8px).
 - Never use arbitrary values like `0.65rem` or `13px` for spacing. Use tokens.
+- **Tokens vs exact values**: `--space-*` tokens are for general layout. For component-specific dimensions that must pixel-match across apps (e.g. score box padding, HUD height), use exact values documented in the component reference — don't force a token where the natural value doesn't align.
 
 ---
 
@@ -284,6 +298,16 @@ Button group:
   <button class="btn btn-primary">Save</button>
 </div>
 ```
+
+Toggle button group (e.g. speed selector):
+```html
+<div class="btn-group">
+  <button class="btn btn-sm active" onclick="setSpeed(1)">1x</button>
+  <button class="btn btn-sm" onclick="setSpeed(2)">2x</button>
+  <button class="btn btn-sm" onclick="setSpeed(5)">5x</button>
+</div>
+```
+Add/remove `.active` class via JS. The `.btn.active` style uses `--accent` background (same as `.btn-primary`).
 
 ### Cards
 
@@ -486,7 +510,7 @@ Standard pattern for view-level controls:
 Body style:
 ```css
 body {
-  padding: var(--space-lg, 24px);
+  padding: var(--page-padding, 2.5rem);
   max-width: 760px;
   margin: 0 auto;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

@@ -1,6 +1,7 @@
 # CLI Tool (appsdk) -- Reference
 
 Use this architecture when the LLM needs to create, read, update, or delete data (todo items, journal entries, bookmarks, etc.).
+If the app has a web UI, also read `AIG.md` for design system classes and `FRONTEND.md` for AlfSDK init.
 
 ## Directory structure
 

@@ -49,6 +49,22 @@
     )
   }
 
+  /** Inject alf-ui.css design system into iframe */
+  function injectUICSS(frame: HTMLIFrameElement) {
+    try {
+      const doc = frame.contentDocument
+      if (!doc) return
+      if (doc.getElementById('alf-ui-css')) return
+      const link = doc.createElement('link')
+      link.id = 'alf-ui-css'
+      link.rel = 'stylesheet'
+      link.href = '/static/alf-ui.css'
+      doc.head.appendChild(link)
+    } catch {
+      // cross-origin — skip
+    }
+  }
+
   /** Inject mobile-responsive sheet CSS into iframe */
   function injectSheetCSS(frame: HTMLIFrameElement) {
     try {
@@ -334,6 +350,7 @@
     if (iframe) {
       iframe.addEventListener('load', () => {
         theme.syncIframe(iframe)
+        injectUICSS(iframe)
         injectSheetCSS(iframe)
         // Send permissions to iframe after load
         fetch('/api/apps/' + slug + '/permissions')
@@ -541,7 +558,7 @@
 
   .sdk-dialog p {
     margin: 0;
-    color: var(--text-muted);
+    color: var(--text-dim);
     line-height: 1.5;
   }
 

@@ -1,6 +1,7 @@
 # REST Server -- Reference
 
 Use this architecture for rich web UIs, games, dashboards, and complex apps where the user interacts directly.
+Also read `AIG.md` for design system classes and `FRONTEND.md` for AlfSDK init.
 
 ## Directory structure
 

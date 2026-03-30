@@ -3,6 +3,8 @@
 All apps with a web UI use **AlfSDK** for theme sync, toasts, and parent SPA communication.
 Vanilla JS only -- no frameworks, no build step, CSP-safe.
 
+> **Design system**: `alf-ui.css` is auto-injected into all app iframes. Use its classes (`.btn`, `.card`, `.input`, `.form-group`, etc.) instead of writing inline styles. See `AIG.md` for the full component reference.
+
 ---
 
 ## Full template
@@ -18,41 +20,27 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
   <link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
   <script src="/static/theme-init.js"></script>
   <script src="/static/alf-app-sdk.js"></script>
+  <!-- alf-ui.css is auto-injected by the parent frame — no need to import -->
   <style>
     body {
-      padding: 1.5rem;
+      padding: var(--space-lg, 24px);
+      max-width: 760px;
+      margin: 0 auto;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
     }
-    .card {
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: var(--radius, 8px); padding: 1.25rem; margin-bottom: 1rem;
-    }
-    .btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 14px; border: 1px solid var(--border);
-      border-radius: var(--radius, 8px); background: var(--bg-input);
-      color: var(--text); font-family: inherit; font-size: 0.85rem; cursor: pointer;
-    }
-    .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .form-row { margin-bottom: 0.75rem; }
-    .form-row label { display: block; font-size: 0.8rem; font-weight: 500; margin-bottom: 4px; }
-    .form-row input, .form-row textarea {
-      width: 100%; padding: 8px; border: 1px solid var(--border);
-      border-radius: var(--radius, 8px); background: var(--bg-input);
-      color: var(--text); font-family: inherit; font-size: 0.85rem;
-    }
-    .form-row textarea { min-height: 100px; resize: vertical; }
-    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 0.75rem; }
-    .empty { color: var(--text-dim); padding: 2rem; text-align: center; }
+    h2 { margin-bottom: var(--space-md, 16px); }
   </style>
 </head>
 <body>
-  <h2>My App</h2>
-  <div id="list"></div>
-  <div class="actions">
-    <button class="btn btn-primary" onclick="showEditor()">Add Item</button>
+  <div class="flex justify-between items-center mb-md">
+    <h2 class="m-0">My App</h2>
+    <button class="btn btn-primary btn-sm" onclick="showEditor()">Add Item</button>
   </div>
+
+  <div id="list"></div>
 
   <script>
     AlfSDK.init({
@@ -82,12 +70,12 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
     function render() {
       var el = document.getElementById('list');
       if (!items || !items.length) {
-        el.innerHTML = '<p class="empty">No items yet.</p>';
+        el.innerHTML = '<div class="empty-state"><p>No items yet.</p></div>';
         return;
       }
-      el.innerHTML = items.map(function(item) {
-        return '<div class="card"><strong>' + esc(item.name) + '</strong></div>';
-      }).join('');
+      el.innerHTML = '<div class="card"><ul class="list">' + items.map(function(item) {
+        return '<li class="list-item"><strong>' + esc(item.name) + '</strong></li>';
+      }).join('') + '</ul></div>';
     }
 
     function esc(s) {
@@ -192,7 +180,7 @@ AlfSDK.i18n.languages()              // Array of preferred languages
 
 ## CSS variables (theme)
 
-Only use these -- never hardcode colors:
+Only use these -- never hardcode colors. Full reference in `AIG.md`.
 
 | Variable | Usage |
 |---|---|
@@ -206,10 +194,17 @@ Only use these -- never hardcode colors:
 | `--on-accent` | Text on accent background |
 | `--radius` | Border radius (default 8px) |
 | `--green` | Success / positive |
-| `--red` | Error / negative |
+| `--red` | Error / negative / destructive |
 | `--yellow` | Warning |
 | `--mauve` | Purple accent |
 | `--sapphire` | Blue accent |
+| `--pink` | Pink accent |
+| `--teal` | Teal accent |
+| `--peach` | Orange accent |
+| `--lavender` | Light purple accent |
+| `--danger` | Alias for red |
+| `--success` | Alias for green |
+| `--error` | Alias for red |
 
 ---
 
@@ -249,16 +244,18 @@ Layout-agnostic tokens for spacing, typography, and shadows. Use these instead o
 
 ## Rules
 
-1. **Always init AlfSDK** at the top of the script block
-2. **Always include `onThemeChange`** to sync theme from parent SPA
-3. **Set `font-family` explicitly** -- `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. Google Fonts are blocked by CSP in iframes.
-4. **Load `/static/style.css`** + `/static/theme-*.css` + `/static/theme-init.js`
-5. **No external scripts/stylesheets** -- CSP blocks them
-6. **No `unsafe-eval`** -- no Vue, Angular, Petite Vue
-7. **Inline `<style>` only** -- no external CSS files you create
-8. **Lucide SVG icons** -- inline SVG from lucide.dev. No icon fonts. No emoji as icons (unless user asks).
-9. **XSS protection** -- always escape user content with a `div.textContent` wrapper (the `esc()` helper above)
-10. **`font-family: inherit`** is NOT sufficient -- always set explicitly (see rule 3)
+1. **Follow AIG** -- use `alf-ui.css` classes for buttons, cards, forms, lists. See `AIG.md`.
+2. **Always init AlfSDK** at the top of the script block
+3. **Always include `onThemeChange`** to sync theme from parent SPA
+4. **Set `font-family` explicitly** -- `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. Google Fonts are blocked by CSP in iframes.
+5. **Load `/static/style.css`** + `/static/theme-*.css` + `/static/theme-init.js`
+6. **No external scripts/stylesheets** -- CSP blocks them. `alf-ui.css` is auto-injected.
+7. **No `unsafe-eval`** -- no Vue, Angular, Petite Vue
+8. **Inline `<style>` only** -- no external CSS files you create. Minimize inline styles — prefer `alf-ui.css` classes.
+9. **Lucide SVG icons** -- inline SVG from lucide.dev. No icon fonts. No emoji as icons (unless user asks).
+10. **XSS protection** -- always escape user content with a `div.textContent` wrapper (the `esc()` helper above)
+11. **`font-family: inherit`** is NOT sufficient -- always set explicitly (see rule 4)
+12. **Use spacing tokens** -- `--space-xs` to `--space-xl` or classes `.gap-sm`, `.p-md`, `.mb-lg` etc.
 
 ---
 

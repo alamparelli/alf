@@ -70,7 +70,7 @@
     sheetEl.style.transform = ''
     sheetEl.animate(
       [{ transform: 'translateY(0)' }, { transform: 'translateY(100%)' }],
-      { duration: 200, easing: 'ease-in' }
+      { duration: 200, easing: 'ease' }
     ).onfinish = () => {
       closing = false
       onclose?.()
@@ -190,7 +190,7 @@
       border-radius: 16px 16px 0 0;
       padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
       box-shadow: 0 -4px 32px rgba(0, 0, 0, 0.2);
-      animation: sheetUp 0.25s ease;
+      animation: sheetUp 0.2s ease;
       touch-action: none;
     }
 

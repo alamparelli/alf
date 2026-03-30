@@ -222,6 +222,62 @@ func csrfMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 	}
 }
 
+// appIsolationMiddleware restricts API access from app iframes.
+// When a request originates from an app iframe (Referer contains /apps/),
+// only the app's own endpoints are allowed. This prevents a malicious app
+// from accessing vault, config, other apps' APIs, or any CC admin endpoints.
+func appIsolationMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			referer := r.Header.Get("Referer")
+			if referer == "" || !strings.HasPrefix(r.URL.Path, "/api/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Extract the app slug from the Referer, if any.
+			// Referer: https://cc.example.com/apps/my-app/... → "my-app"
+			appSlug := extractAppSlugFromReferer(r)
+			if appSlug == "" {
+				// Not from an app iframe — allow all API access.
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// App iframe detected — restrict to allowed endpoints only.
+			path := r.URL.Path
+
+			// Allow: app's own proxy API
+			if strings.HasPrefix(path, "/apps/"+appSlug+"/api/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Allow: bash endpoint (permission checked by handler)
+			if path == "/api/bash" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Allow: app storage, upload, errors (handler validates app ownership)
+			if path == "/api/app-storage" || path == "/api/app-upload" || path == "/api/app-errors" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Allow: SSE events (read-only)
+			if path == "/api/events" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Block everything else from app iframes.
+			log.Printf("[CC] app-isolation: blocked %s %s from app %s", r.Method, path, appSlug)
+			http.Error(w, `{"error":"forbidden: app isolation"}`, http.StatusForbidden)
+		})
+	}
+}
+
 // securityHeadersMiddleware sets security headers on every response.
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

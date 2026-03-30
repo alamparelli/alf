@@ -420,6 +420,7 @@ func HandlerFactory(deps Deps) Handlers {
 	exempt := map[string]bool{"/health": true, "/auth": true, "/api/vault/oauth2/callback": true}
 	var handler http.Handler = mux
 	handler = jsonMiddleware(handler)
+	handler = appIsolationMiddleware(deps.AllowedOrigin)(handler)
 	handler = csrfMiddleware(deps.AllowedOrigin)(handler)
 	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt, func() string {
 		return GetMobileToken(deps.VaultManager)

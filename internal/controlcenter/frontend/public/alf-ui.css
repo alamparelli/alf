@@ -7,6 +7,7 @@
 /* ── Layout tokens ────────────────────────────────────────────────────── */
 :root {
   --page-padding: 2.5rem;
+  --page-padding-top: calc(2.5rem + env(safe-area-inset-top, 0px));
 }
 
 /* ── Reset ─────────────────────────────────────────────────────────────── */

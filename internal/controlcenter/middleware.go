@@ -281,6 +281,13 @@ func appIsolationMiddleware(allowedOrigin string) func(http.Handler) http.Handle
 // securityHeadersMiddleware sets security headers on every response.
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// SEC-007: Strip incoming forwarded headers to prevent host injection.
+		// These may be set by external reverse proxies or spoofed by clients.
+		r.Header.Del("X-Forwarded-Host")
+		r.Header.Del("X-Forwarded-For")
+		r.Header.Del("X-Forwarded-Proto")
+		r.Header.Del("X-Real-Ip")
+
 		h := w.Header()
 		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		// Allow iframing for /apps/ (user apps loaded in AppFrame), deny for everything else.

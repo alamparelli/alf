@@ -327,7 +327,7 @@
       </div>
     </div>
     <blockquote class="welcome-quote">
-      <p>"Toute technologie suffisamment avancée est indiscernable de la magie."</p>
+      <p>"Any sufficiently advanced technology is indistinguishable from magic."</p>
       <cite>— Arthur C. Clarke</cite>
     </blockquote>
     <div class="welcome-actions">

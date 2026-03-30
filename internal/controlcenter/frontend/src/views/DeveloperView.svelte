@@ -380,7 +380,6 @@
   .conn-dot.err { background: var(--red); }
   .conn-dot.pending { background: var(--yellow, orange); }
 
-  .form-group { margin-bottom: 0.75rem; }
   .form-group label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 2px; }
   .form-row { display: flex; gap: 0.75rem; }
   .form-row > * { flex: 1; }
@@ -388,13 +387,7 @@
   .mono { font-family: 'JetBrains Mono', 'SF Mono', monospace; font-size: 0.82rem; }
   .sep { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
-  .input {
-    width: 100%; padding: 0.5rem 0.65rem; background: var(--bg); color: var(--text);
-    border: 1px solid var(--border); border-radius: var(--radius, 8px);
-    font-size: 0.85rem; font-family: inherit;
-  }
   select.input { cursor: pointer; appearance: auto; }
-  .input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
   .tool-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .tool-chip {
@@ -405,16 +398,6 @@
   .tool-chip:hover { border-color: var(--accent); }
 
   .form-actions { display: flex; gap: 8px; margin-top: 0.75rem; }
-  .btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 0.45rem 1rem; border: 1px solid var(--border); border-radius: var(--radius, 8px);
-    background: var(--bg); color: var(--text); cursor: pointer; font-size: 0.82rem;
-  }
-  .btn:hover { border-color: var(--accent); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-  .btn-primary:hover { opacity: 0.9; }
-  .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.75rem; }
   .btn-danger { color: var(--red); border-color: var(--red); }
 
   .status-box {

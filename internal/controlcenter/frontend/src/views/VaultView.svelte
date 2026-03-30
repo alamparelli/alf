@@ -1368,17 +1368,6 @@
     margin-bottom: 12px;
   }
 
-  .input {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    background: var(--bg-input);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.85rem;
-  }
-
   .input-sm {
     padding: 5px 8px;
     font-size: 0.8rem;
@@ -1488,28 +1477,6 @@
     display: flex;
     align-items: center;
   }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    background: var(--bg-input);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.8rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-
-  .btn:hover { background: var(--border); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-  .btn-primary:hover { opacity: 0.9; }
-  .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
 
   /* Token create row */
   .token-create-row {

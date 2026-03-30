@@ -266,12 +266,6 @@
   .view-marketplace h2 {
     margin-bottom: 16px;
   }
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin-bottom: 1.5rem;
-  }
   .loading, .empty {
     text-align: center;
     padding: 3rem;
@@ -316,12 +310,7 @@
     gap: 0.5rem;
   }
   .badge {
-    font-size: 0.7rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 4px;
     color: #fff;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
   }
   .app-meta {
     display: flex;
@@ -356,13 +345,6 @@
     flex-wrap: wrap;
     gap: 0.4rem;
     margin-top: 0.3rem;
-  }
-  :global(.spin) {
-    animation: spin 1s linear infinite;
-  }
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
   }
   .dev-toggle {
     display: flex;

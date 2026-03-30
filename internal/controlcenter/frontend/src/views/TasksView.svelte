@@ -597,28 +597,6 @@
     gap: 12px;
   }
 
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .form-group label {
-    font-size: 0.8rem;
-    font-weight: 500;
-  }
-
-  .input {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    background: var(--bg-input);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.85rem;
-  }
-
   .task-textarea {
     resize: vertical;
     min-height: 60px;
@@ -715,15 +693,6 @@
   .restart-actions {
     display: flex;
     gap: 8px;
-  }
-
-  .badge {
-    display: inline-block;
-    padding: 1px 8px;
-    border-radius: 12px;
-    font-size: 0.7rem;
-    font-weight: 500;
-    text-transform: capitalize;
   }
 
   .badge-running {
@@ -951,44 +920,6 @@
 
   .completed-header h3 {
     margin: 0;
-  }
-
-  .empty-state {
-    text-align: center;
-    padding: 40px 0;
-    color: var(--text-dim);
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    background: var(--bg-input);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.8rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-
-  .btn:hover { background: var(--border); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .btn-primary {
-    background: var(--accent);
-    color: var(--on-accent);
-    border-color: var(--accent);
-  }
-
-  .btn-primary:hover { opacity: 0.9; }
-
-  .btn-sm {
-    padding: 4px 10px;
-    font-size: 0.75rem;
   }
 
   .btn-danger {

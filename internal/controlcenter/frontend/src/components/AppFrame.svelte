@@ -408,10 +408,10 @@
 <Modal open={confirmOpen} onclose={() => handleConfirm(false)}>
   <div class="sdk-dialog">
     {#if confirmTitle}<h3>{confirmTitle}</h3>{/if}
-    <p>{confirmMsg}</p>
-    <div class="sdk-dialog-actions">
-      <button class="btn-secondary" onclick={() => handleConfirm(false)}>{confirmCancel}</button>
-      <button class="btn-primary" onclick={() => handleConfirm(true)}>{confirmOk}</button>
+    <p class="text-dim">{confirmMsg}</p>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick={() => handleConfirm(false)}>{confirmCancel}</button>
+      <button class="btn btn-primary" onclick={() => handleConfirm(true)}>{confirmOk}</button>
     </div>
   </div>
 </Modal>
@@ -420,10 +420,10 @@
 <Modal open={promptOpen} onclose={handlePromptCancel}>
   <div class="sdk-dialog">
     {#if promptTitle}<h3>{promptTitle}</h3>{/if}
-    <p>{promptMsg}</p>
+    <p class="text-dim">{promptMsg}</p>
     {#if promptMultiline}
       <textarea
-        class="sdk-input sdk-textarea"
+        class="textarea"
         bind:value={promptValue}
         placeholder={promptPlaceholder}
         rows={4}
@@ -431,15 +431,15 @@
     {:else}
       <input
         type="text"
-        class="sdk-input"
+        class="input"
         bind:value={promptValue}
         placeholder={promptPlaceholder}
         onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') handlePromptSubmit() }}
       />
     {/if}
-    <div class="sdk-dialog-actions">
-      <button class="btn-secondary" onclick={handlePromptCancel}>Cancel</button>
-      <button class="btn-primary" onclick={handlePromptSubmit}>{promptOk}</button>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick={handlePromptCancel}>Cancel</button>
+      <button class="btn btn-primary" onclick={handlePromptSubmit}>{promptOk}</button>
     </div>
   </div>
 </Modal>
@@ -549,69 +549,17 @@
   .sdk-dialog {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-sm, 8px);
   }
 
   .sdk-dialog h3 {
     margin: 0;
-    font-size: 1.1rem;
+    font-size: var(--font-lg, 18px);
     font-weight: 600;
   }
 
   .sdk-dialog p {
     margin: 0;
-    color: var(--text-dim);
     line-height: 1.5;
   }
-
-  .sdk-input {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-input);
-    color: var(--text);
-    font-size: 0.9rem;
-    outline: none;
-  }
-
-  .sdk-input:focus {
-    border-color: var(--accent);
-  }
-
-  .sdk-textarea {
-    resize: vertical;
-    min-height: 80px;
-    font-family: inherit;
-  }
-
-  .sdk-dialog-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    margin-top: 4px;
-  }
-
-  .btn-primary, .btn-secondary {
-    padding: 8px 16px;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    cursor: pointer;
-    border: none;
-    font-weight: 500;
-  }
-
-  .btn-primary {
-    background: var(--accent);
-    color: var(--bg);
-  }
-
-  .btn-secondary {
-    background: var(--bg-input);
-    color: var(--text);
-    border: 1px solid var(--border);
-  }
-
-  .btn-primary:hover { opacity: 0.9; }
-  .btn-secondary:hover { background: var(--border); }
 </style>

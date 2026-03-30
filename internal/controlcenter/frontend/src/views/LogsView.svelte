@@ -215,7 +215,7 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 6px 10px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
 
@@ -255,7 +255,7 @@
     border: none;
     color: var(--text);
     outline: none;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .btn-clear {
@@ -279,7 +279,7 @@
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 2px 10px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     cursor: pointer;
   }
@@ -300,7 +300,7 @@
     border-radius: 8px;
     padding: 1rem;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     line-height: 1.5;
     max-height: 70vh;
     overflow-y: auto;

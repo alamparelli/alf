@@ -614,7 +614,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
   }
 
@@ -645,7 +645,7 @@
 
   .task-name {
     font-weight: 500;
-    font-size: 0.9rem;
+    font-size: var(--font-sm, 13px);
     word-break: break-word;
   }
 
@@ -655,7 +655,7 @@
     gap: 8px;
     flex-wrap: wrap;
     margin-top: 4px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
 
@@ -667,7 +667,7 @@
 
   .task-id {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     opacity: 0.6;
   }
@@ -717,7 +717,7 @@
 
   .cost {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.72rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
 
@@ -733,7 +733,7 @@
     background: color-mix(in srgb, var(--accent) 8%, transparent);
     border-left: 3px solid var(--accent);
     border-radius: var(--radius, 8px);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     line-height: 1.5;
     color: var(--text);
   }
@@ -743,7 +743,7 @@
     padding: 1px 8px;
     border-radius: 12px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 500;
     background: var(--bg-input);
     color: var(--text-dim);
@@ -751,7 +751,7 @@
   }
 
   .task-detail h4 {
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     margin-bottom: 6px;
   }
 
@@ -764,7 +764,7 @@
     align-items: center;
     gap: 8px;
     padding: 4px 0;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .plan-num {
@@ -778,7 +778,7 @@
   }
 
   .plan-agents {
-    font-size: 0.72rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     padding: 1px 6px;
     background: var(--bg-input);
@@ -829,7 +829,7 @@
   }
 
   .agent-task {
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     padding: 8px 12px;
     margin-bottom: 6px;
@@ -842,11 +842,11 @@
 
   .agent-name {
     font-weight: 500;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .agent-output {
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     line-height: 1.5;
     overflow-x: auto;
     word-break: break-word;
@@ -866,7 +866,7 @@
     background: none;
     color: var(--accent);
     padding: 2px 0;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
   }
 
   .btn-toggle-output:hover {
@@ -876,7 +876,7 @@
 
   .agent-error {
     color: var(--red, #c4392a);
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .task-response {
@@ -905,7 +905,7 @@
   }
 
   .task-questions p {
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     padding: 4px 0;
   }
 
@@ -939,12 +939,12 @@
     white-space: pre-wrap;
     word-break: break-word;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
   }
 
   :global(.markdown-body code) {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
   }
 
   :global(.markdown-body code:not(pre code)) {

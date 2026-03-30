@@ -503,24 +503,24 @@
 
 <style>
   .view-skills {
-    padding: 8px 0;
+    padding: var(--space-sm, 8px) 0;
     width: 100%;
   }
   .section-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
+    gap: var(--space-sm, 8px);
+    margin-bottom: var(--space-sm, 8px);
   }
   .section-header h3 {
     display: flex;
     align-items: center;
     gap: 0.4rem;
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--font-md, 15px);
   }
   .section-count {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     padding: 0.1rem 0.4rem;
     border-radius: 8px;
     background: var(--bg-input);
@@ -528,12 +528,12 @@
   }
   .section-empty {
     color: var(--text-dim);
-    font-size: 0.85rem;
-    margin: 0 0 1rem;
+    font-size: var(--font-sm, 13px);
+    margin: 0 0 var(--space-md, 16px);
   }
   .section-hint {
     color: var(--text-dim);
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     margin: -0.4rem 0 0.75rem;
   }
   .loading, .empty {
@@ -542,11 +542,11 @@
     color: var(--text-dim);
   }
   .empty p { margin: 0.5rem 0 0; }
-  .hint { font-size: 0.8rem; }
+  .hint { font-size: var(--font-sm, 13px); }
   .skill-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 1rem;
+    gap: var(--space-md, 16px);
   }
   .skill-card {
     display: flex;
@@ -556,7 +556,7 @@
   .skill-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-sm, 8px);
   }
   .badge-tier {
     background: var(--mauve);
@@ -579,10 +579,10 @@
   }
   .skill-dir {
     font-family: 'Geist Mono', monospace;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
   }
   .skill-desc {
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin: 0;
     line-height: 1.4;
@@ -593,7 +593,7 @@
     gap: 0.3rem;
   }
   .trigger-tag {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     padding: 0.1rem 0.4rem;
     border-radius: 3px;
     background: var(--bg-input);
@@ -604,7 +604,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.8rem;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
   .skill-actions {
@@ -623,7 +623,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
   }
   .form-grid input, .form-grid select, .form-grid textarea {
     padding: 0.4rem;
@@ -631,7 +631,7 @@
     border-radius: 4px;
     background: var(--bg);
     color: var(--text);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
   .full-width {
     grid-column: 1 / -1;
@@ -639,12 +639,12 @@
   .modal-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 0.5rem;
-    margin-top: 1rem;
+    gap: var(--space-sm, 8px);
+    margin-top: var(--space-md, 16px);
   }
   .code-editor {
     font-family: 'Geist Mono', monospace;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     line-height: 1.5;
     width: 100%;
     padding: 0.6rem;
@@ -656,10 +656,10 @@
   }
   .content-pre {
     font-family: 'Geist Mono', monospace;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     line-height: 1.5;
     background: var(--bg);
-    padding: 1rem;
+    padding: var(--space-md, 16px);
     border-radius: 4px;
     overflow-x: auto;
     white-space: pre-wrap;
@@ -670,9 +670,9 @@
 
   /* Import hints */
   .import-hint {
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-sm, 8px);
   }
 
   .import-hint a {
@@ -690,7 +690,7 @@
     background: color-mix(in srgb, var(--green) 6%, transparent);
     border-radius: var(--radius, 8px);
     border-left: 3px solid var(--green, #3d8b3d);
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     line-height: 1.5;
   }
@@ -705,15 +705,15 @@
   .scan-result {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-sm, 8px);
   }
   .scan-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-sm, 8px);
   }
   .scan-issues {
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--yellow);
   }
   .scan-issues ul {
@@ -721,16 +721,16 @@
     padding: 0;
   }
   .content-preview {
-    margin-top: 0.5rem;
+    margin-top: var(--space-sm, 8px);
   }
   .content-preview summary {
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
   }
   .content-preview pre {
     font-family: 'Geist Mono', monospace;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     background: var(--bg);
     padding: 0.6rem;
     border-radius: 4px;

@@ -246,7 +246,7 @@
                   {/if}
 
                   {#if isOwnApp(app)}
-                    <span class="badge" style="background:var(--accent); font-size:0.7rem">Your app</span>
+                    <span class="badge" style="background:var(--accent); font-size:var(--font-xs, 11px)">Your app</span>
                   {/if}
                 </div>
               </div>
@@ -278,7 +278,7 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.9rem;
+    font-size: var(--font-sm, 13px);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-dim);
@@ -302,7 +302,7 @@
     gap: 0.6rem;
   }
   .app-icon {
-    font-size: 1.5rem;
+    font-size: var(--font-xl, 24px);
   }
   .app-title {
     display: flex;
@@ -315,7 +315,7 @@
   .app-meta {
     display: flex;
     gap: 1rem;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
   }
   .meta-item {
@@ -324,7 +324,7 @@
     gap: 0.2rem;
   }
   .app-desc {
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin: 0;
   }
@@ -334,7 +334,7 @@
     gap: 0.3rem;
   }
   .tool-tag {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     padding: 0.1rem 0.4rem;
     border-radius: 3px;
     background: var(--bg-input);
@@ -359,10 +359,10 @@
   }
   .dev-toggle-info strong {
     display: block;
-    font-size: 0.9rem;
+    font-size: var(--font-sm, 13px);
   }
   .dev-toggle-desc {
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
   }
 </style>

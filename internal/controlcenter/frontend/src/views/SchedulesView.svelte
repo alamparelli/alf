@@ -578,14 +578,14 @@
 
   .job-description {
     width: 100%;
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     font-weight: normal;
   }
 
   .job-reason {
     width: 100%;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     font-style: italic;
     font-weight: normal;
@@ -595,7 +595,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
   .meta-item {
@@ -621,12 +621,12 @@
   .job-times {
     display: flex;
     gap: 1rem;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
   .error-text {
     color: var(--red);
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
   }
   .job-actions {
     display: flex;
@@ -641,7 +641,7 @@
     gap: 0.6rem;
   }
   .prompt-preview pre {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     background: var(--bg);
     padding: 0.4rem;
     border-radius: 4px;
@@ -655,7 +655,7 @@
     gap: 0.3rem;
   }
   .stats-line {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
   .run-list {
@@ -666,7 +666,7 @@
   .run-entry {
     display: flex;
     gap: 0.6rem;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     align-items: center;
   }
   .run-status {
@@ -678,7 +678,7 @@
   }
   .muted {
     color: var(--text-dim);
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
   }
 
   /* Modal content styles */
@@ -691,7 +691,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
   }
   .form-grid input, .form-grid select, .form-grid textarea {
     padding: 0.4rem;
@@ -699,7 +699,7 @@
     border-radius: 4px;
     background: var(--bg);
     color: var(--text);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
   .full-width {
     grid-column: 1 / -1;

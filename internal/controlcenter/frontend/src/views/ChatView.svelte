@@ -796,14 +796,14 @@
   }
 
   .chat-empty p {
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .loading-older {
     text-align: center;
     padding: 8px;
     color: var(--text-dim);
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
   }
 
   /* Typing indicator */
@@ -850,7 +850,7 @@
   }
 
   .queued-badge {
-    font-size: 0.68rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -868,7 +868,7 @@
     cursor: pointer;
     padding: 2px 6px;
     border-radius: 4px;
-    font-size: 0.68rem;
+    font-size: var(--font-xs, 11px);
     transition: opacity 0.15s, background 0.15s;
   }
 
@@ -891,7 +891,7 @@
   }
 
   .agent-modal-form label {
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
   }
 
@@ -905,7 +905,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
   }
 

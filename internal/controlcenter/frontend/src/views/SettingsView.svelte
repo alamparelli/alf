@@ -345,12 +345,12 @@
     background: color-mix(in srgb, var(--yellow) 10%, transparent);
     border: 1px solid var(--yellow, #eab308);
     border-radius: var(--radius, 8px);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text);
   }
 
   .update-current {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
 
@@ -372,16 +372,16 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .hint {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
 
   .shortcut-label {
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
   }
 
@@ -395,7 +395,7 @@
     border: 1px solid var(--border);
     border-radius: 4px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 600;
     color: var(--text);
     cursor: pointer;
@@ -425,7 +425,7 @@
     align-items: center;
     gap: 10px;
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     position: relative;
   }
 
@@ -481,7 +481,7 @@
     background: var(--bg-input);
     border-radius: var(--radius, 8px);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
   }
 
@@ -502,7 +502,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     margin-bottom: 8px;
   }
 
@@ -519,14 +519,14 @@
   }
 
   .form-hint {
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin-bottom: 12px;
   }
 
   .form-help {
     display: block;
-    font-size: 0.72rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     margin-top: 4px;
   }
@@ -546,7 +546,7 @@
     margin-top: 10px;
     padding: 8px 12px;
     border-radius: var(--radius, 8px);
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .tg-result.success {
@@ -562,13 +562,13 @@
   /* About */
   .about-version {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin-bottom: 4px;
   }
 
   .about-love {
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin-bottom: 12px;
   }
@@ -589,7 +589,7 @@
   }
 
   .about-label {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     display: block;
     margin-bottom: 4px;
@@ -605,7 +605,7 @@
   .about-links a {
     color: var(--accent);
     text-decoration: none;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
   }
 

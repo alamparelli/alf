@@ -214,7 +214,7 @@
     color: var(--text-dim);
     cursor: pointer;
     font-family: inherit;
-    font-size: 0.68rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 500;
     -webkit-tap-highlight-color: transparent;
     position: relative;
@@ -252,7 +252,7 @@
     right: calc(50% - 28px);
     background: var(--accent);
     color: var(--on-accent, #fff);
-    font-size: 0.55rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 700;
     min-width: 16px;
     height: 16px;
@@ -279,7 +279,7 @@
     border: none;
     color: var(--text);
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     outline: none;
   }
 

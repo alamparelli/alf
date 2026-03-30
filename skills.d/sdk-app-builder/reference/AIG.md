@@ -194,16 +194,19 @@ background: rgba(196, 57, 42, 0.1);
 
 ### Page padding token
 
-`--page-padding: 2.5rem` is defined in `alf-ui.css`. Use it for full-bleed app pages:
+Two tokens are defined in `alf-ui.css`:
+
+- `--page-padding: 2.5rem` — base padding for all sides
+- `--page-padding-top: calc(2.5rem + env(safe-area-inset-top))` — top padding that respects the notch/status bar
 
 ```css
-body { padding: var(--page-padding); }
-/* Or with safe area insets (games, fullscreen): */
-padding: calc(var(--page-padding) + env(safe-area-inset-top))
-         calc(var(--page-padding) + env(safe-area-inset-right))
-         calc(var(--page-padding) + env(safe-area-inset-bottom))
-         calc(var(--page-padding) + env(safe-area-inset-left));
+/* Standard app body — notch-safe top, uniform sides */
+body {
+  padding: var(--page-padding-top) var(--page-padding) var(--page-padding);
+}
 ```
+
+Apps that are mobile-responsive should always use `--page-padding-top` for the top padding to avoid content hiding behind the notch on iOS.
 
 ### Rules
 
@@ -510,7 +513,7 @@ Standard pattern for view-level controls:
 Body style:
 ```css
 body {
-  padding: var(--page-padding, 2.5rem);
+  padding: var(--page-padding-top, 2.5rem) var(--page-padding, 2.5rem) var(--page-padding, 2.5rem);
   max-width: 760px;
   margin: 0 auto;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

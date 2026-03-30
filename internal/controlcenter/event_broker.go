@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // EventType identifies what changed. Maps directly to SSE "event:" field.
@@ -85,8 +86,12 @@ func (b *EventBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+	// Connection: keep-alive is HTTP/1.1-only and forbidden in HTTP/2.
+	// Only set it when the request is HTTP/1.x to avoid ERR_HTTP2_PROTOCOL_ERROR.
+	if !r.ProtoAtLeast(2, 0) {
+		w.Header().Set("Connection", "keep-alive")
+	}
 	w.WriteHeader(http.StatusOK)
 
 	// Initial ping so client knows connection is live.
@@ -106,12 +111,19 @@ func (b *EventBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	ctx := r.Context()
+	// Periodic keepalive to prevent reverse proxies from closing idle connections.
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case msg := <-ch:
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", msg.Type, msg.Data)
+			flusher.Flush()
+		case <-ticker.C:
+			fmt.Fprintf(w, "event: ping\ndata: keepalive\n\n")
 			flusher.Flush()
 		}
 	}

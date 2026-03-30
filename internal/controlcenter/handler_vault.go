@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -441,7 +442,7 @@ func (h *VaultHandler) handleGetFile(w http.ResponseWriter, _ *http.Request, nam
 		respondJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
-	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(name))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, filepath.Base(name)))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Write(data)
 }

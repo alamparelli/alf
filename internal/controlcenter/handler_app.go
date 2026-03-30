@@ -11,6 +11,26 @@ import (
 	"strings"
 )
 
+// allowedStaticExt defines file extensions that can be served via the static
+// file handler. All other extensions are blocked to prevent leaking source
+// code, databases, configs, and other sensitive files. Edit this map to allow
+// additional file types.
+var allowedStaticExt = map[string]bool{
+	// Web
+	".html": true, ".htm": true, ".css": true, ".js": true, ".mjs": true,
+	// Images
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true,
+	".ico": true, ".webp": true, ".avif": true,
+	// Fonts
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	// Media
+	".mp3": true, ".ogg": true, ".wav": true, ".mp4": true, ".webm": true,
+	// Data (read-only, explicitly allowed)
+	".json": true, ".xml": true, ".txt": true, ".csv": true,
+	// Maps
+	".map": true,
+}
+
 // AppHandler serves files from app directories and proxies API requests
 // to REST server apps that declare a port in data/port.
 //
@@ -19,6 +39,10 @@ import (
 //	GET /apps/{name}           → serves index.html
 //	GET /apps/{name}/          → serves index.html
 //	GET /apps/{name}/file.css  → serves the file with correct MIME type
+//
+// Only files with extensions in allowedStaticExt are served.
+// Source code (.go, .py, .rs), databases (.db, .sqlite), and internal
+// files (data/port) are blocked with 404.
 //
 // API proxy (any method):
 //
@@ -76,6 +100,15 @@ func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		filePath = "index.html"
 	}
 
+	// SEC-006: Only serve files with allowed web extensions.
+	// Blocks source code (.go, .py), databases (.db, .sqlite),
+	// internal files (data/port), and anything not explicitly allowed.
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if ext == "" || !allowedStaticExt[ext] {
+		http.NotFound(w, r)
+		return
+	}
+
 	data, err := h.Store.ReadFile(appName, filePath)
 	if err != nil {
 		http.NotFound(w, r)
@@ -83,7 +116,6 @@ func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine content type from extension.
-	ext := filepath.Ext(filePath)
 	ct := mime.TypeByExtension(ext)
 	if ct == "" {
 		ct = "application/octet-stream"

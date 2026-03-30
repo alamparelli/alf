@@ -29,7 +29,6 @@ type ServiceConfig struct {
 	RestartDelay string            `json:"restart_delay"`  // e.g. "3s"
 	MaxRestarts  int               `json:"max_restarts"`   // 0 = unlimited
 	Enabled      bool              `json:"enabled"`
-	NoSandbox    bool              `json:"no_sandbox,omitempty"` // true = bypass chroot (system services only)
 }
 
 // ServiceStatus holds runtime state for a managed service.
@@ -430,19 +429,14 @@ func (s *Supervisor) buildCmd(p *managedProc) (*exec.Cmd, error) {
 	dataDir := filepath.Join(p.workDir, "data")
 	os.MkdirAll(dataDir, 0o755)
 
-	if p.config.NoSandbox {
-		// System/internal service — no sandbox, inherit daemon env.
-		cmd.Env = inheritSafeEnv()
-		cmd.Env = append(cmd.Env, "ALF_APP_DATA_DIR="+dataDir)
-	} else {
-		// App server — sandbox with chroot isolation.
-		cmd.Env = tooling.ServerSafeEnv(p.workDir)
-		tooling.SandboxServerCmd(cmd, tooling.ServerSandboxConfig{
-			AppSlug: p.appSlug,
-			AppDir:  p.workDir,
-		})
-		log.Printf("supervisor: [%s] sandbox enabled", p.appSlug)
-	}
+	// All app servers are sandboxed — no bypass allowed.
+	// Apps needing global access must use the REST proxy pattern.
+	cmd.Env = tooling.ServerSafeEnv(p.workDir)
+	tooling.SandboxServerCmd(cmd, tooling.ServerSandboxConfig{
+		AppSlug: p.appSlug,
+		AppDir:  p.workDir,
+	})
+	log.Printf("supervisor: [%s] sandbox enabled", p.appSlug)
 
 	// SEC-002: Block dangerous env overrides.
 	for k, v := range p.config.Env {

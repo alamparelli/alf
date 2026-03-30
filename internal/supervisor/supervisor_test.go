@@ -667,7 +667,7 @@ func TestBlockedEnvKeys_Completeness(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildCmd_SandboxEnvNoVaultToken(t *testing.T) {
-	// When sandbox is enabled (NoSandbox=false), VAULT_TOKEN must not leak.
+	// All servers are sandboxed — VAULT_TOKEN must not leak.
 	t.Setenv("VAULT_TOKEN", "s.super-secret")
 
 	dir := t.TempDir()
@@ -678,7 +678,7 @@ func TestBuildCmd_SandboxEnvNoVaultToken(t *testing.T) {
 
 	s := New(dir)
 	p := &managedProc{
-		config:  ServiceConfig{Command: "./run.sh", NoSandbox: false},
+		config:  ServiceConfig{Command: "./run.sh"},
 		appSlug: "app1",
 		workDir: appDir,
 	}
@@ -694,62 +694,16 @@ func TestBuildCmd_SandboxEnvNoVaultToken(t *testing.T) {
 	}
 }
 
-func TestBuildCmd_SandboxDisabled_InheritsSafeEnv(t *testing.T) {
-	// When NoSandbox=true, the server inherits the daemon's safe env (including VAULT_TOKEN).
-	t.Setenv("VAULT_TOKEN", "s.abc123")
-	t.Setenv("PATH", "/usr/bin")
-
-	dir := t.TempDir()
-	appDir := filepath.Join(dir, "app1")
-	os.MkdirAll(appDir, 0o755)
-	script := filepath.Join(appDir, "run.sh")
-	os.WriteFile(script, []byte("#!/bin/sh"), 0o755)
-
-	s := New(dir)
-	p := &managedProc{
-		config:  ServiceConfig{Command: "./run.sh", NoSandbox: true},
-		appSlug: "app1",
-		workDir: appDir,
-	}
-
-	cmd, err := s.buildCmd(p)
+func TestServiceConfig_NoSandboxFieldIgnored(t *testing.T) {
+	// Even if no_sandbox is present in JSON, it should be silently ignored
+	// (field removed from struct — no bypass allowed).
+	var cfg ServiceConfig
+	err := json.Unmarshal([]byte(`{"command":"./run","enabled":true,"no_sandbox":true}`), &cfg)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("failed to parse: %v", err)
 	}
-
-	envMap := envToMap(cmd.Env)
-	if _, ok := envMap["VAULT_TOKEN"]; !ok {
-		t.Error("non-sandboxed server should inherit VAULT_TOKEN from daemon")
-	}
-	// SysProcAttr should be nil (no sandbox applied on non-Linux) or
-	// not have namespace flags (no chroot wrapping).
-	if cmd.SysProcAttr != nil {
-		t.Error("non-sandboxed server should not have SysProcAttr set")
-	}
-}
-
-func TestServiceConfig_NoSandboxField(t *testing.T) {
-	tests := []struct {
-		name     string
-		json     string
-		expected bool
-	}{
-		{"absent defaults false", `{"command":"./run","enabled":true}`, false},
-		{"explicit true", `{"command":"./run","enabled":true,"no_sandbox":true}`, true},
-		{"explicit false", `{"command":"./run","enabled":true,"no_sandbox":false}`, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var cfg ServiceConfig
-			if err := json.Unmarshal([]byte(tt.json), &cfg); err != nil {
-				t.Fatalf("failed to parse: %v", err)
-			}
-			if cfg.NoSandbox != tt.expected {
-				t.Errorf("NoSandbox = %v, want %v", cfg.NoSandbox, tt.expected)
-			}
-		})
-	}
+	// The field doesn't exist anymore, so it's just ignored by json.Unmarshal.
+	// All servers are always sandboxed.
 }
 
 // Ensure safePrefixes list is not empty and contains expected entries.

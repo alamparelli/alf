@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeVaultUpstream simulates vault-server for proxy tests.
@@ -155,18 +156,23 @@ func TestVaultProxy_UpdateToken(t *testing.T) {
 
 func TestVaultProxy_ListenAndServe(t *testing.T) {
 	upstream, cleanup := fakeVaultUpstream(t)
-	defer cleanup()
 
 	dir, _ := os.MkdirTemp("", "vp-ln-*")
-	defer os.RemoveAll(dir)
 	sockPath := dir + "/p.sock"
 
 	proxy := NewVaultProxy(upstream, "test-token", []string{"svc"})
 	ln, err := proxy.ListenAndServe(sockPath)
 	if err != nil {
+		os.RemoveAll(dir)
+		cleanup()
 		t.Fatalf("ListenAndServe: %v", err)
 	}
-	defer ln.Close()
+	t.Cleanup(func() {
+		ln.Close()
+		time.Sleep(10 * time.Millisecond) // let serve goroutine exit
+		os.RemoveAll(dir)
+		cleanup()
+	})
 
 	// Connect via Unix socket HTTP client.
 	client := &http.Client{

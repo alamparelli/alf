@@ -219,7 +219,7 @@ func (h *VaultHandler) handleLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Manager.ClearTokens()
-	os.Unsetenv("VAULT_TOKEN")
+	// Note: VAULT_TOKEN is no longer in env (Unix socket proxy handles auth).
 	// Regenerate toolbox so LLM sees vault as "locked".
 	if h.ContextDir != "" {
 		memory.GenerateToolbox(h.ContextDir, h.DataDir)
@@ -371,7 +371,7 @@ func (h *VaultHandler) handleReset(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	os.Unsetenv("VAULT_TOKEN")
+	// Note: VAULT_TOKEN is no longer in env (Unix socket proxy handles auth).
 	// Clear persisted master password so auto-unlock doesn't use stale credentials.
 	if pwFile := h.Manager.PasswordFile(); pwFile != "" {
 		os.Remove(pwFile)

@@ -320,15 +320,15 @@ Form inputs with `name` or `data-field` attributes are collected into the `param
 
 ---
 
-## Permissions (marketplace apps)
+## Permissions
 
-Marketplace apps declare permissions in `manifest.json`:
+**All apps** (local and marketplace) must declare permissions in `manifest.json`:
 
 ```json
 { "permissions": ["storage", "bash", "clipboard"] }
 ```
 
-| Permission | What it grants | Untrusted apps |
+| Permission | What it grants | Untrusted marketplace apps |
 |---|---|---|
 | `storage` | Server-side key/value storage | Allowed |
 | `events` | Cross-app event emission | Allowed |
@@ -337,9 +337,9 @@ Marketplace apps declare permissions in `manifest.json`:
 | `upload` | File uploads | Denied |
 | `network` | Network access in sandboxed bash | Denied |
 
-- **Local/default apps** (not installed from marketplace) have all permissions.
-- **Untrusted apps** are capped to `storage`, `events`, `clipboard` regardless of what they declare.
-- **Trusted apps** (verified in registry) can use all permissions.
+- **Local apps** must declare permissions — undeclared permissions return `403`.
+- **Untrusted marketplace apps** are capped to `storage`, `events`, `clipboard` regardless of what they declare.
+- **Trusted marketplace apps** (verified in registry) can use all declared permissions.
 - APIs that require a permission return `403` with `{"error": "permission denied: <perm>"}`.
 
 ### Sandbox execution

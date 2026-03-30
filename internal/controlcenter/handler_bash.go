@@ -69,8 +69,9 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sandbox only marketplace-managed apps, not system/internal apps.
-	sandboxApp := appSlug != "" && !isSystemApp && (h.Perms == nil || h.Perms.IsTracked(appSlug))
+	// Sandbox ALL app-initiated bash except system apps.
+	// Both marketplace and local apps get full namespace isolation.
+	sandboxApp := appSlug != "" && !isSystemApp
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
@@ -86,7 +87,7 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			AppDataDir: appDataDir,
 			Network:    hasNetwork,
 		})
-		cmd.Env = tooling.SandboxSafeEnv(appDataDir)
+		cmd.Env = append(tooling.SandboxSafeEnv(appDataDir), "__SANDBOX_CMD="+req.Command)
 	} else {
 		// LLM/terminal/internal-app bash: no sandbox, just uid drop.
 		cmd.SysProcAttr = &syscall.SysProcAttr{

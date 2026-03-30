@@ -95,17 +95,23 @@ services:
     mem_limit: 2g
     cpus: "2.0"
     runtime: ${ALF_RUNTIME:-runc}
+    security_opt:
+      # AppArmor blocks mount(2) even with CAP_SYS_ADMIN — unconfined required
+      # for pivot_root sandbox. Caps are still explicitly limited below.
+      - apparmor=unconfined
     cap_drop:
       - ALL
     cap_add:
       # CHOWN/DAC_OVERRIDE/FOWNER: entrypoint (apt-get, chown, file permissions)
       # SETUID/SETGID: entrypoint + daemon (credential switching for subprocess isolation)
-      # SYS_ADMIN: daemon (namespace sandbox for marketplace app bash)
+      # SYS_ADMIN: daemon (mount namespace sandbox for app bash)
+      # SYS_CHROOT: daemon (chroot into sandbox root)
       # NET_ADMIN: nettrack-helper (conntrack events)
       - CHOWN
       - SETUID
       - SETGID
       - SYS_ADMIN
+      - SYS_CHROOT
       - DAC_OVERRIDE
       - FOWNER
       - NET_ADMIN

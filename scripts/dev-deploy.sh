@@ -198,6 +198,8 @@ services:
     mem_limit: 2g
     cpus: "2.0"
     runtime: ${ALF_RUNTIME:-runc}
+    security_opt:
+      - apparmor=unconfined
     cap_drop:
       - ALL
     cap_add:
@@ -205,6 +207,7 @@ services:
       - SETUID
       - SETGID
       - SYS_ADMIN
+      - SYS_CHROOT
       - DAC_OVERRIDE
       - FOWNER
       - NET_ADMIN

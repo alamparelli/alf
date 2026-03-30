@@ -627,9 +627,7 @@ func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 				}
 			}
 			if authenticated {
-				// No rate limit for authenticated users (games, apps make many requests).
-				next.ServeHTTP(w, r)
-				return
+				effective = rl.authLimit
 			}
 		}
 

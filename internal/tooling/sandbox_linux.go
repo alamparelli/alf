@@ -46,7 +46,7 @@ for d in bin usr lib sbin; do
   if [ -d "/$d" ]; then
     mkdir -p "$NEWROOT/$d"
     mount --rbind "/$d" "$NEWROOT/$d"
-    mount -o remount,ro,bind "$NEWROOT/$d" 2>/dev/null || true
+    mount -o remount,ro,bind "$NEWROOT/$d" || { echo "FATAL: cannot make /$d read-only"; exit 1; }
   fi
 done
 # lib64 (exists on amd64)
@@ -90,7 +90,7 @@ mount --bind "$APP_DATA" "$NEWROOT$APP_DATA"
 if [ -d /home/alf/data/tools ]; then
   mkdir -p "$NEWROOT/home/alf/data/tools"
   mount --rbind /home/alf/data/tools "$NEWROOT/home/alf/data/tools"
-  mount -o remount,ro,bind "$NEWROOT/home/alf/data/tools" 2>/dev/null || true
+  mount -o remount,ro,bind "$NEWROOT/home/alf/data/tools" || { echo "FATAL: cannot make tools read-only"; exit 1; }
 fi
 
 # HOME skeleton

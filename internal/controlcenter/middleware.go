@@ -259,8 +259,9 @@ func appIsolationMiddleware(allowedOrigin string) func(http.Handler) http.Handle
 				return
 			}
 
-			// Allow: app storage, upload, errors (handler validates app ownership)
-			if path == "/api/app-storage" || path == "/api/app-upload" || path == "/api/app-errors" {
+			// Allow: app storage, upload, errors (handler validates app ownership via Referer)
+			// Routes: /api/apps/{slug}/storage, /api/apps/{slug}/upload, /api/apps/{slug}/errors
+			if strings.HasPrefix(path, "/api/apps/"+appSlug+"/") {
 				next.ServeHTTP(w, r)
 				return
 			}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
@@ -257,6 +258,10 @@ func HandlerFactory(deps Deps) Handlers {
 			}
 			if strings.Contains(r.URL.Path, "/permissions") {
 				handleAppPermissions(w, r, permChecker)
+				return
+			}
+			if strings.Contains(r.URL.Path, "/restart") {
+				handleAppRestart(w, r)
 				return
 			}
 			(&AppListHandler{Store: deps.AppStore}).ServeHTTP(w, r)
@@ -544,4 +549,51 @@ func handleAppPermissions(w http.ResponseWriter, r *http.Request, perms marketpl
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"permissions": nil})
+}
+
+// AppRestarter can restart an app's background service.
+type AppRestarter interface {
+	RestartApp(slug string)
+}
+
+// appRestarterHolder is set after the supervisor is created.
+// Accessed from the /api/apps/{slug}/restart handler.
+var appRestarterHolder struct {
+	sync.Mutex
+	r AppRestarter
+}
+
+// SetAppRestarter registers the supervisor for app restart requests.
+func SetAppRestarter(r AppRestarter) {
+	appRestarterHolder.Lock()
+	appRestarterHolder.r = r
+	appRestarterHolder.Unlock()
+}
+
+// handleAppRestart restarts an app's background service.
+// POST /api/apps/{slug}/restart → {"ok": true}
+func handleAppRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/api/apps/")
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 1 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	slug := parts[0]
+
+	appRestarterHolder.Lock()
+	restarter := appRestarterHolder.r
+	appRestarterHolder.Unlock()
+
+	if restarter == nil {
+		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "supervisor not available"})
+		return
+	}
+
+	restarter.RestartApp(slug)
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "slug": slug})
 }

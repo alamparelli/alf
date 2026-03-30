@@ -78,6 +78,16 @@ The proxy injects authentication server-side — your app never sees API keys. O
 
 **Do not** hardcode API URLs or tokens. Do not access paths outside your app directory.
 
+### Restarting an app service
+
+To restart an app's background service (e.g. after a config change or to recover from an error):
+
+```
+POST /api/apps/{slug}/restart → {"ok": true, "slug": "{slug}"}
+```
+
+This is available from the CC frontend, ALF via bash (`curl -X POST http://localhost:8080/api/apps/my-app/restart`), and through the tools proxy socket.
+
 ## Go server template (main.go)
 
 ```go

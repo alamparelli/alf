@@ -1098,6 +1098,7 @@ func main() {
 	}
 	appsSupervisor.Start()
 	defer appsSupervisor.Stop()
+	cc.SetAppRestarter(appsSupervisor)
 
 	// Wire supervisor into marketplace and app tool so install/enable/disable/update/restart manage services.
 	if mpManager != nil {

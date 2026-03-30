@@ -16,7 +16,10 @@ import (
 	"syscall"
 	"time"
 
+	"net"
+
 	"github.com/alamparelli/alf/internal/tooling"
+	"github.com/alamparelli/alf/internal/vault"
 )
 
 // ServiceConfig is the on-disk format of service.json inside an app directory.
@@ -49,6 +52,14 @@ type Supervisor struct {
 	mu      sync.Mutex
 	procs   map[string]*managedProc
 	stop    chan struct{}
+
+	// Vault proxy support: if set, per-app proxy sockets are created for apps
+	// that declare vault services in their manifest.
+	vaultSocket   string                         // vault-server Unix socket path
+	vaultToken    string                         // current proxy token
+	servicesFn    func(string) []string          // returns declared vault services for a slug
+	vaultProxies  map[string]*vault.VaultProxy   // slug → running proxy
+	vaultListeners map[string]net.Listener       // slug → proxy socket listener
 }
 
 type managedProc struct {
@@ -70,6 +81,28 @@ func New(appsDir string) *Supervisor {
 		appsDir: appsDir,
 		procs:   make(map[string]*managedProc),
 		stop:    make(chan struct{}),
+	}
+}
+
+// SetVault configures vault proxy support. Must be called before Start().
+// servicesFn returns the declared vault services for an app slug (from manifest).
+func (s *Supervisor) SetVault(vaultSocket, proxyToken string, servicesFn func(string) []string) {
+	s.vaultSocket = vaultSocket
+	s.vaultToken = proxyToken
+	s.servicesFn = servicesFn
+	s.vaultProxies = make(map[string]*vault.VaultProxy)
+	s.vaultListeners = make(map[string]net.Listener)
+}
+
+// UpdateProxyToken updates the vault proxy token for all running per-app proxies.
+// Called after vault-server restart and re-authentication.
+func (s *Supervisor) UpdateProxyToken(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.vaultToken = token
+	for slug, proxy := range s.vaultProxies {
+		proxy.UpdateToken(token)
+		log.Printf("supervisor: [%s] vault proxy token updated", slug)
 	}
 }
 
@@ -150,6 +183,11 @@ func (s *Supervisor) StopApp(slug string) {
 		})
 	}
 	log.Printf("supervisor: [%s] stopped", slug)
+
+	// Clean up vault proxy if one was created.
+	if s.vaultProxies != nil {
+		s.stopVaultProxy(slug)
+	}
 }
 
 // RestartApp stops then starts an app service (e.g. after marketplace update).
@@ -254,6 +292,13 @@ func (s *Supervisor) scan() map[string]ServiceConfig {
 func (s *Supervisor) startService(slug string, cfg ServiceConfig) {
 	workDir := filepath.Join(s.appsDir, slug)
 
+	// Create per-app vault proxy socket if the app declares vault services.
+	if s.servicesFn != nil {
+		if svcs := s.servicesFn(slug); len(svcs) > 0 {
+			s.startVaultProxy(slug, svcs)
+		}
+	}
+
 	p := &managedProc{
 		config:  cfg,
 		appSlug: slug,
@@ -266,6 +311,40 @@ func (s *Supervisor) startService(slug string, cfg ServiceConfig) {
 	s.mu.Unlock()
 
 	go s.supervise(p)
+}
+
+// startVaultProxy creates a filtered vault proxy socket for an app.
+func (s *Supervisor) startVaultProxy(slug string, services []string) {
+	sockPath := fmt.Sprintf("/run/vault-%s.sock", slug)
+	proxy := vault.NewVaultProxy(s.vaultSocket, s.vaultToken, services)
+	ln, err := proxy.ListenAndServe(sockPath)
+	if err != nil {
+		log.Printf("supervisor: [%s] vault proxy socket failed: %v", slug, err)
+		return
+	}
+
+	s.mu.Lock()
+	s.vaultProxies[slug] = proxy
+	s.vaultListeners[slug] = ln
+	s.mu.Unlock()
+
+	log.Printf("supervisor: [%s] vault proxy on %s (services: %v)", slug, sockPath, services)
+}
+
+// stopVaultProxy stops and cleans up the vault proxy for an app.
+func (s *Supervisor) stopVaultProxy(slug string) {
+	s.mu.Lock()
+	ln := s.vaultListeners[slug]
+	delete(s.vaultProxies, slug)
+	delete(s.vaultListeners, slug)
+	s.mu.Unlock()
+
+	if ln != nil {
+		ln.Close()
+		sockPath := fmt.Sprintf("/run/vault-%s.sock", slug)
+		os.Remove(sockPath)
+		log.Printf("supervisor: [%s] vault proxy stopped", slug)
+	}
 }
 
 func (s *Supervisor) supervise(p *managedProc) {
@@ -387,7 +466,7 @@ func (s *Supervisor) supervise(p *managedProc) {
 var safePrefixes = []string{
 	"PATH=", "HOME=", "LANG=", "LC_", "TZ=", "TMPDIR=",
 	"USER=", "LOGNAME=",
-	"VAULT_TOKEN=", "VAULT_ADDR=",
+	"VAULT_PROXY_SOCK=",
 	"ANTHROPIC_",
 }
 
@@ -448,10 +527,26 @@ func (s *Supervisor) buildCmd(p *managedProc) (*exec.Cmd, error) {
 	// All app servers are sandboxed — no bypass allowed.
 	// Apps needing global access must use the REST proxy pattern.
 	cmd.Env = tooling.ServerSafeEnv(p.workDir)
-	tooling.SandboxServerCmd(cmd, tooling.ServerSandboxConfig{
+
+	sandboxCfg := tooling.ServerSandboxConfig{
 		AppSlug: p.appSlug,
 		AppDir:  p.workDir,
-	})
+	}
+
+	// If this app has a vault proxy socket, mount it into the sandbox.
+	var vaultSockPath string
+	if s.vaultProxies != nil {
+		s.mu.Lock()
+		_, hasProxy := s.vaultProxies[p.appSlug]
+		s.mu.Unlock()
+		if hasProxy {
+			vaultSockPath = fmt.Sprintf("/run/vault-%s.sock", p.appSlug)
+			sandboxCfg.VaultSocket = vaultSockPath
+			cmd.Env = append(cmd.Env, "VAULT_PROXY_SOCK="+vaultSockPath)
+		}
+	}
+
+	tooling.SandboxServerCmd(cmd, sandboxCfg)
 	log.Printf("supervisor: [%s] sandbox enabled", p.appSlug)
 
 	// SEC-002: Block dangerous env overrides.

@@ -54,9 +54,29 @@ App servers run inside a chroot jail. The server process sees:
 - `/dev/{null,zero,urandom,random}`, `/proc`, private `/tmp`
 - TLS CA certs and DNS resolution
 
-The server does NOT see other apps, vault data, secrets, or `.claude/` config. `VAULT_TOKEN` is not in the environment.
+The server does NOT see other apps, vault data, secrets, or `.claude/` config.
 
-**Do not** use `exec.Command("vault", ...)` or access paths outside your app directory. Apps needing external data should expose REST endpoints and let the frontend fetch them — the server accesses only data within its own sandbox.
+### Vault proxy (external API access)
+
+If your app needs external APIs (OpenRouter, Google, etc.), declare services in `manifest.json`:
+```json
+{ "services": ["openrouter"] }
+```
+
+The daemon creates a vault proxy socket at `VAULT_PROXY_SOCK`. Use the SDK:
+```go
+import "github.com/alamparelli/alf/pkg/appsdk"
+
+vc, err := appsdk.NewVaultClient()
+resp, err := vc.Proxy("openrouter", "POST", "/v1/chat/completions", body)
+// or
+var result MyStruct
+err = vc.ProxyJSON("openrouter", "POST", "/v1/chat/completions", reqBody, &result)
+```
+
+The proxy injects authentication server-side — your app never sees API keys. Only declared services are allowed; requests to undeclared services return 403.
+
+**Do not** hardcode API URLs or tokens. Do not access paths outside your app directory.
 
 ## Go server template (main.go)
 

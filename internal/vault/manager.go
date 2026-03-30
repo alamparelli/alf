@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,13 +17,17 @@ import (
 
 // Manager manages the vault-server subprocess and provides access to tokens.
 type Manager struct {
-	dataDir          string
-	addr             string
+	dataDir      string
+	socketPath   string // Unix socket path for vault-server
 	httpProxyURL string // optional: HTTP proxy for outbound vault-proxy requests
 	adminToken   string
 	proxyToken   string
 	mu           sync.Mutex
-	cancel           context.CancelFunc
+	cancel       context.CancelFunc
+
+	// OnTokenUpdate is called after vault restart re-authentication succeeds.
+	// Used to notify proxies (LLM + per-app) of the new proxy token.
+	OnTokenUpdate func(proxyToken string)
 
 	// Process management: cmd is only accessed via waitCh coordination.
 	// spawn() creates cmd + waitCh; watchdog owns Wait(); kill() signals + waits on waitCh.
@@ -34,10 +37,11 @@ type Manager struct {
 
 // NewManager creates a new vault manager.
 // dataDir is the path where vault.enc is stored (e.g. /opt/alf/vault-data).
+// vault-server listens on a Unix socket inside dataDir.
 func NewManager(dataDir string) *Manager {
 	return &Manager{
-		dataDir: dataDir,
-		addr:    "http://127.0.0.1:8390",
+		dataDir:    dataDir,
+		socketPath: dataDir + "/vault.sock",
 	}
 }
 
@@ -82,7 +86,7 @@ func (m *Manager) Stop() error {
 // AutoUnlock unlocks the vault with the given master password.
 // The password is NOT stored in memory — re-authentication reads from PasswordFile().
 func (m *Manager) AutoUnlock(password string) error {
-	c := vaultclient.NewWithToken(m.addr, "")
+	c := vaultclient.NewWithSocket(m.socketPath, "")
 	token, err := c.Unlock(password)
 	if err != nil {
 		return fmt.Errorf("unlock vault: %w", err)
@@ -111,7 +115,7 @@ func (m *Manager) EnsureAuth() error {
 
 // CreateProxyToken creates a proxy-scoped token for Claude subprocess usage.
 func (m *Manager) CreateProxyToken() (string, error) {
-	c := vaultclient.NewWithToken(m.addr, m.AdminToken())
+	c := vaultclient.NewWithSocket(m.socketPath, m.AdminToken())
 	token, err := c.CreateToken("proxy")
 	if err != nil {
 		return "", fmt.Errorf("create proxy token: %w", err)
@@ -145,9 +149,9 @@ func (m *Manager) ClearTokens() {
 	m.mu.Unlock()
 }
 
-// Addr returns the vault-server address.
-func (m *Manager) Addr() string {
-	return m.addr
+// SocketPath returns the vault-server Unix socket path.
+func (m *Manager) SocketPath() string {
+	return m.socketPath
 }
 
 // SetHTTPProxy configures an HTTP proxy for outbound vault-proxy requests.
@@ -203,13 +207,13 @@ func (m *Manager) Reset() error {
 
 // Health returns the vault status ("locked" or "unlocked").
 func (m *Manager) Health() (string, error) {
-	c := vaultclient.NewWithToken(m.addr, "")
+	c := vaultclient.NewWithSocket(m.socketPath, "")
 	return c.Health()
 }
 
 // Client returns a vault client using the admin token.
 func (m *Manager) Client() *vaultclient.Client {
-	return vaultclient.NewWithToken(m.addr, m.AdminToken())
+	return vaultclient.NewWithSocket(m.socketPath, m.AdminToken())
 }
 
 // GetSecret reads a secret file from the vault and returns its contents as a string.
@@ -251,9 +255,11 @@ func (m *Manager) spawn() error {
 	}
 
 	// Kill orphaned vault-server processes from previous daemon runs.
-	// Setpgid keeps vault-server alive across daemon restarts, so we must
-	// find and kill any process still holding our listen port.
 	killOrphans()
+
+	// Remove stale socket before spawning (vault-server also does this,
+	// but we clean up proactively in case a previous crash left it).
+	os.Remove(m.socketPath)
 
 	bin, err := exec.LookPath("vault-server")
 	if err != nil {
@@ -261,7 +267,7 @@ func (m *Manager) spawn() error {
 	}
 
 	args := []string{
-		"-listen", "127.0.0.1:8390",
+		"-listen", "unix:" + m.socketPath,
 		"-data-dir", m.dataDir,
 		"-token-ttl", "8760h", // 1 year - daemon manages token lifecycle
 	}
@@ -318,7 +324,7 @@ func (m *Manager) kill() error {
 
 func (m *Manager) waitHealthy(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	c := vaultclient.NewWithToken(m.addr, "")
+	c := vaultclient.NewWithSocket(m.socketPath, "")
 	for time.Now().Before(deadline) {
 		if _, err := c.Health(); err == nil {
 			return nil
@@ -360,13 +366,11 @@ func (m *Manager) watchdog(ctx context.Context) {
 		case <-time.After(backoff):
 		}
 
-		// Ensure port is released before respawning.
+		// Ensure process is dead and socket is cleaned up before respawning.
 		m.mu.Lock()
-		m.kill() // force-kill any lingering process
+		m.kill()
+		os.Remove(m.socketPath)
 		m.mu.Unlock()
-
-		// Wait for port to become available (TIME_WAIT can hold it briefly).
-		waitPortFree("127.0.0.1:8390", 5*time.Second)
 
 		m.mu.Lock()
 		err := m.spawn()
@@ -397,9 +401,10 @@ func (m *Manager) watchdog(ctx context.Context) {
 			} else if _, err := m.CreateProxyToken(); err != nil {
 				log.Printf("[vault] re-create proxy token failed: %v", err)
 			} else {
-				os.Setenv("VAULT_ADDR", m.addr)
-				os.Setenv("VAULT_TOKEN", m.ProxyToken())
 				log.Println("[vault] re-authenticated after restart, proxy token updated")
+				if m.OnTokenUpdate != nil {
+					m.OnTokenUpdate(m.ProxyToken())
+				}
 			}
 		} else if status, err := m.Health(); err == nil {
 			log.Printf("[vault] status after restart: %s", status)
@@ -433,21 +438,6 @@ func killOrphans() {
 		time.Sleep(500 * time.Millisecond)
 		_ = p.Signal(syscall.SIGKILL)
 	}
-}
-
-// waitPortFree polls until the given TCP address is not in use.
-// Returns immediately if the port is already free.
-func waitPortFree(addr string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		ln, err := net.Listen("tcp", addr)
-		if err == nil {
-			ln.Close()
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	log.Printf("[vault] warning: port %s still in use after %v", addr, timeout)
 }
 
 // logWriter routes subprocess output through Go's log package line-by-line.

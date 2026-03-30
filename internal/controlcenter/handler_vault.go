@@ -15,6 +15,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/vault"
+	vaultclient "github.com/alessandrolamparelli/vault-proxy/pkg/client"
 )
 
 // VaultHandler proxies requests to the vault-server via the Manager.
@@ -197,9 +198,8 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[vault] warning: failed to persist master password: %v", err)
 		}
 	}
-	// Propagate env vars so the LLM subprocess can use the vault CLI tool.
-	os.Setenv("VAULT_ADDR", h.Manager.Addr())
-	os.Setenv("VAULT_TOKEN", h.Manager.ProxyToken())
+	// Note: LLM subprocesses access vault via VAULT_PROXY_SOCK (set by daemon).
+	// No VAULT_ADDR/VAULT_TOKEN env vars needed.
 	// Regenerate toolbox so LLM sees vault as "ready".
 	if h.ContextDir != "" {
 		memory.GenerateToolbox(h.ContextDir, h.DataDir)
@@ -457,11 +457,10 @@ func (h *VaultHandler) handleDeleteFile(w http.ResponseWriter, _ *http.Request, 
 }
 
 func (h *VaultHandler) handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
-	// Proxy the Google OAuth2 callback to vault-server.
+	// Proxy the Google OAuth2 callback to vault-server via Unix socket.
 	// This is a browser redirect - no auth token, just query params (code, state).
-	addr := h.Manager.Addr()
-	proxyURL := addr + "/auth/oauth2/callback?" + r.URL.RawQuery
-	resp, err := http.Get(proxyURL)
+	vc := vaultclient.NewWithSocket(h.Manager.SocketPath(), "")
+	resp, err := vc.Do("GET", "/auth/oauth2/callback?"+r.URL.RawQuery, nil)
 	if err != nil {
 		http.Error(w, "vault unreachable", http.StatusBadGateway)
 		return
@@ -483,26 +482,17 @@ func (h *VaultHandler) handleOAuth2Authorize(w http.ResponseWriter, r *http.Requ
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	addr := h.Manager.Addr()
-	token := h.Manager.AdminToken()
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, addr+"/auth/oauth2/authorize", strings.NewReader(string(body)))
-	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := http.DefaultClient.Do(req)
+	vc := vaultclient.NewWithSocket(h.Manager.SocketPath(), h.Manager.AdminToken())
+	vaultResp, err := vc.Do("POST", "/auth/oauth2/authorize", strings.NewReader(string(body)))
 	if err != nil {
 		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "vault unreachable: " + err.Error()})
 		return
 	}
-	defer resp.Body.Close()
+	defer vaultResp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(vaultResp.Body)
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
+	w.WriteHeader(vaultResp.StatusCode)
 	w.Write(respBody)
 }
 

@@ -376,8 +376,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[setup] warning: failed to persist vault password: %v", err)
 			}
 		}
-		os.Setenv("VAULT_ADDR", h.Vault.Addr())
-		os.Setenv("VAULT_TOKEN", h.Vault.ProxyToken())
+		// Note: LLM subprocesses access vault via VAULT_PROXY_SOCK (set by daemon).
 		vaultUnlocked = true
 		if h.OnVaultUnlock != nil {
 			h.OnVaultUnlock()

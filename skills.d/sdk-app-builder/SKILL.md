@@ -74,7 +74,30 @@ Read the relevant reference file for templates, patterns, and API details:
 - No `unsafe-eval` frameworks (Vue, Angular, Petite Vue)
 - No external scripts/stylesheets (CSP blocks them)
 - Lucide SVG icons only — inline from lucide.dev
-- External APIs via `vault proxy <service> <method> <path>` — never hardcode keys
+- External APIs via vault proxy — never hardcode keys
+
+## Vault proxy (external API access)
+
+Apps that need external API access (OpenRouter, Google APIs, etc.) declare services in `manifest.json`:
+```json
+{
+  "services": ["openrouter", "google-api"]
+}
+```
+
+The daemon creates a per-app vault proxy socket (`VAULT_PROXY_SOCK` env var) that only allows the declared services. The proxy injects authentication server-side — apps never see API keys or vault tokens.
+
+**Go server apps** use `pkg/appsdk`:
+```go
+vc, _ := appsdk.NewVaultClient()
+resp, err := vc.Proxy("openrouter", "POST", "/v1/chat/completions", body)
+```
+
+Or via the `App` helper:
+```go
+app := appsdk.New("my-app")
+app.Vault().ProxyJSON("openrouter", "POST", "/v1/chat/completions", req, &resp)
+```
 
 ## Sandbox constraints
 
@@ -83,9 +106,10 @@ All app code (both `AlfSDK.bash()` and backend servers) runs inside a chroot jai
 - **DO** store data in the app's own `data/` directory
 - **DO** use `fetch()` to own REST proxy endpoints (`/apps/{slug}/api/...`)
 - **DO** declare permissions in `manifest.json`
-- **DO NOT** use `exec.Command("vault", ...)` in server code — VAULT_TOKEN is not in the environment
+- **DO** declare vault `services` in `manifest.json` for external API access
+- **DO** use `appsdk.NewVaultClient()` or `VAULT_PROXY_SOCK` for vault access
 - **DO NOT** access `/home/alf/data/apps/other-app/` — other apps' directories are invisible
-- **DO NOT** rely on VAULT_TOKEN or `/run/secrets/` — not available in sandbox
+- **DO NOT** hardcode API keys or rely on `VAULT_TOKEN` — use the vault proxy
 
 Apps needing data beyond their own directory should use the **REST proxy pattern**: the Go server exposes endpoints, the frontend fetches them, and the server accesses data within its sandbox only.
 
@@ -93,11 +117,11 @@ Apps needing data beyond their own directory should use the **REST proxy pattern
 
 - [ ] Source-only — no compiled binaries
 - [ ] Standalone — SQLite, no shared databases
-- [ ] `manifest.json` with slug, version, description
+- [ ] `manifest.json` with slug, version, description, permissions, services
 - [ ] `app.json` with Lucide icon (if web UI)
 - [ ] `index.html` with AlfSDK + theme CSS + explicit font-family + `alf-ui.css` classes
 - [ ] `go.mod` with all dependencies
 - [ ] CLI tool: `main.go` with appsdk + tool schema in manifest
 - [ ] REST server: `service.json` + free port + `data/port`
-- [ ] No `vault` CLI calls or VAULT_TOKEN usage in server code
+- [ ] Vault access via `appsdk.NewVaultClient()` (not direct HTTP to vault)
 - [ ] No access to other apps' directories or system paths

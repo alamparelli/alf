@@ -261,8 +261,6 @@ func main() {
 			} else if _, err := vaultMgr.CreateProxyToken(); err != nil {
 				log.Printf("warning: vault proxy token failed: %v", err)
 			} else {
-				os.Setenv("VAULT_ADDR", vaultMgr.Addr())
-				os.Setenv("VAULT_TOKEN", vaultMgr.ProxyToken())
 				log.Println("vault: unlocked, proxy token created")
 				syncVaultHostsToFirewall(vaultMgr, fwProxy)
 			}
@@ -795,6 +793,20 @@ func main() {
 			os.Setenv("ALF_TOOLS_SOCK", toolsSockPath)
 			defer func() { toolsLn.Close(); os.Remove(toolsSockPath) }()
 		}
+
+		// LLM vault proxy socket: unfiltered proxy for all LLM subprocesses
+		// (Claude CLI, Codex, vault-cli). Token injected server-side.
+		if vaultMgr != nil && vaultMgr.ProxyToken() != "" {
+			llmVaultSock := filepath.Join(contextDir, "vault-llm.sock")
+			llmProxy := vault.NewVaultProxy(vaultMgr.SocketPath(), vaultMgr.ProxyToken(), nil)
+			if llmLn, err := llmProxy.ListenAndServe(llmVaultSock); err != nil {
+				log.Printf("warning: LLM vault proxy socket failed: %v", err)
+			} else {
+				os.Setenv("VAULT_PROXY_SOCK", llmVaultSock)
+				defer func() { llmLn.Close(); os.Remove(llmVaultSock) }()
+				log.Printf("vault: LLM proxy on %s", llmVaultSock)
+			}
+		}
 	} else {
 		log.Println("CC_AUTH_TOKEN and ALLOWED_CHAT_IDS not set - Control Center disabled")
 	}
@@ -1071,6 +1083,13 @@ func main() {
 
 	// --- App Service Supervisor ---
 	appsSupervisor := supervisor.New(filepath.Join(dataDir, "apps"))
+	if vaultMgr != nil && vaultMgr.ProxyToken() != "" && mpManager != nil {
+		appsSupervisor.SetVault(vaultMgr.SocketPath(), vaultMgr.ProxyToken(), mpManager.GetServices)
+		// Notify supervisor when vault restarts and gets a new proxy token.
+		vaultMgr.OnTokenUpdate = func(token string) {
+			appsSupervisor.UpdateProxyToken(token)
+		}
+	}
 	appsSupervisor.Start()
 	defer appsSupervisor.Stop()
 

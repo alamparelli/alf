@@ -43,8 +43,9 @@ func SandboxSafeEnv(appDataDir string) []string {
 
 // ServerSandboxConfig configures isolation for a long-running app server.
 type ServerSandboxConfig struct {
-	AppSlug string
-	AppDir  string
+	AppSlug     string
+	AppDir      string
+	VaultSocket string // optional: per-app vault proxy socket path
 }
 
 // SandboxServerCmd is a no-op fallback on non-Linux systems.

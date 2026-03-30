@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/alamparelli/alf/internal/vault"
 	vaultclient "github.com/alessandrolamparelli/vault-proxy/pkg/client"
@@ -397,17 +396,16 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	}
 	mw.Close()
 
-	publishURL := h.VaultManager.Addr() + "/proxy/marketplace/api/apps/" + req.Slug + "/publish"
-	httpReq, err := http.NewRequestWithContext(r.Context(), "POST", publishURL, &buf)
+	vc := vaultclient.NewWithSocket(h.VaultManager.SocketPath(), h.VaultManager.ProxyToken())
+	publishPath := "/proxy/marketplace/api/apps/" + req.Slug + "/publish"
+	httpReq, err := http.NewRequestWithContext(r.Context(), "POST", vc.Addr+publishPath, &buf)
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "build request: " + err.Error()})
 		return
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
-	httpReq.Header.Set("Authorization", "Bearer "+h.VaultManager.ProxyToken())
 
-	httpClient := &http.Client{Timeout: 60 * time.Second}
-	resp, err := httpClient.Do(httpReq)
+	resp, err := vc.DoRequest(httpReq)
 	if err != nil {
 		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "publish failed: " + err.Error()})
 		return
@@ -461,5 +459,5 @@ func (h *DeveloperHandler) vaultClient() *vaultclient.Client {
 	if token == "" {
 		return nil
 	}
-	return vaultclient.NewWithToken(h.VaultManager.Addr(), token)
+	return vaultclient.NewWithSocket(h.VaultManager.SocketPath(), token)
 }

@@ -16,7 +16,8 @@ type Manifest struct {
 	Icon        string     `json:"icon"`
 	Tools       []ToolDecl `json:"tools"`
 	Permissions []string   `json:"permissions,omitempty"`
-	Trusted     bool       `json:"trusted,omitempty"` // only settable by marketplace registry
+	Services    []string   `json:"services,omitempty"` // vault services this app needs (e.g. ["openrouter"])
+	Trusted     bool       `json:"trusted,omitempty"`  // only settable by marketplace registry
 }
 
 // UntrustedMaxPermissions are the only permissions allowed for untrusted apps.

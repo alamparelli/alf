@@ -313,9 +313,15 @@ func (s *Supervisor) startService(slug string, cfg ServiceConfig) {
 	go s.supervise(p)
 }
 
+// vaultSockPath returns the per-app vault proxy socket path.
+// Located inside the app directory (already writable by daemon, mounted in sandbox).
+func (s *Supervisor) vaultSockPath(slug string) string {
+	return filepath.Join(s.appsDir, slug, "vault.sock")
+}
+
 // startVaultProxy creates a filtered vault proxy socket for an app.
 func (s *Supervisor) startVaultProxy(slug string, services []string) {
-	sockPath := fmt.Sprintf("/run/vault-%s.sock", slug)
+	sockPath := s.vaultSockPath(slug)
 	proxy := vault.NewVaultProxy(s.vaultSocket, s.vaultToken, services)
 	ln, err := proxy.ListenAndServe(sockPath)
 	if err != nil {
@@ -341,8 +347,7 @@ func (s *Supervisor) stopVaultProxy(slug string) {
 
 	if ln != nil {
 		ln.Close()
-		sockPath := fmt.Sprintf("/run/vault-%s.sock", slug)
-		os.Remove(sockPath)
+		os.Remove(s.vaultSockPath(slug))
 		log.Printf("supervisor: [%s] vault proxy stopped", slug)
 	}
 }
@@ -540,7 +545,7 @@ func (s *Supervisor) buildCmd(p *managedProc) (*exec.Cmd, error) {
 		_, hasProxy := s.vaultProxies[p.appSlug]
 		s.mu.Unlock()
 		if hasProxy {
-			vaultSockPath = fmt.Sprintf("/run/vault-%s.sock", p.appSlug)
+			vaultSockPath = s.vaultSockPath(p.appSlug)
 			sandboxCfg.VaultSocket = vaultSockPath
 			cmd.Env = append(cmd.Env, "VAULT_PROXY_SOCK="+vaultSockPath)
 		}

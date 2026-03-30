@@ -377,7 +377,7 @@ func HandlerFactory(deps Deps) Handlers {
 	})
 
 	// Bash command execution.
-	mux.Handle("/api/bash", &BashHandler{Perms: permChecker})
+	mux.Handle("/api/bash", &BashHandler{Perms: permChecker, DataDir: deps.DataDir})
 
 	// Restart.
 	mux.Handle("/api/restart", &RestartHandler{})

@@ -823,7 +823,7 @@
     height: 6px;
     background: var(--text-dim);
     border-radius: 50%;
-    animation: bounce 1.4s infinite ease-in-out both;
+    animation: bounce 1.4s infinite ease both;
   }
 
   .dot:nth-child(1) { animation-delay: -0.32s; }

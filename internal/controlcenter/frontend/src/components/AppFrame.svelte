@@ -93,7 +93,7 @@
     border: none !important;
     box-shadow: 0 -4px 32px rgba(0,0,0,0.3) !important;
     overflow-y: auto !important;
-    animation: alf-sheet-up 0.25s ease !important;
+    animation: alf-sheet-up 0.2s ease !important;
     z-index: 9999 !important;
     display: flex;
     flex-direction: column;

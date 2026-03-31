@@ -18,32 +18,11 @@ Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies
 
 ## How it works
 
-```
-Host machine                         Docker container
-┌──────────────┐                     ┌──────────────────────────────────┐
-│  alf CLI     │  docker compose     │  alf-daemon (PID 1, uid 1000)    │
-│              │ ──────────────────► │                                  │
-│  init/start/ │                     │  ┌──────────┐ ┌──────────────┐   │
-│  stop/upgrade│                     │  │Telegram  │ │Control Center│   │
-│              │                     │  │poller    │ │ :8080        │   │
-│              │                     │  └────┬─────┘ └──────┬───────┘   │
-│              │                     │       ▼              ▼           │
-│              │                     │  ┌──────────┐  ┌──────────┐      │
-│              │                     │  │Claude    │  │vault-srv │      │
-│              │                     │  │(uid 1001)│  │ (secrets)│      │
-│              │                     │  └──────────┘  └──────────┘      │
-└──────────────┘                     └──────────────────────────────────┘
+![ALF OS Architecture](docs/architecture.png)
 
-                                     Separate container (optional)
-                                     ┌──────────────────────────────────┐
-                                     │  whisper-service (voice)          │
-                                     │  faster-whisper + FastAPI          │
-                                     └──────────────────────────────────┘
-```
+**Host CLI** (`alf`) manages the container lifecycle from the host machine. Inside Docker, the **daemon** (uid 1000) serves the Control Center web UI, polls Telegram, and coordinates all subsystems. Claude subprocesses run as uid 1001 with restricted permissions. Sidecar containers handle voice transcription (WhisperKit) and embeddings.
 
-**Host CLI** (`alf`) manages the container lifecycle. **Daemon** runs inside Docker as uid 1000, polling Telegram for messages and serving the Control Center web UI on port 8080. Claude subprocesses run as uid 1001 with restricted permissions. Voice transcription runs in a separate `whisper-service` container.
-
-Messages flow through a **router** that classifies intent and selects a response tier. Each tier defines which Claude model to use, what tools are available, and whether write access is granted. Simple messages get instant responses from the classifier itself. Complex requests spawn a full Claude session with the appropriate capabilities.
+Messages flow through a **comm engine** → **router** → **LLM provider** pipeline. The router classifies intent and selects a response tier (model, tools, effort level). A **permission system** gates access to sandboxed apps and tools. Apps run in chroot-isolated namespaces with filesystem allowlists. Secrets are accessed exclusively through a **vault proxy** (Unix socket) — no direct access from app code.
 
 ## Quick start
 
@@ -238,6 +217,7 @@ internal/
   cli/             CLI command implementations + embedded templates + bundled skills
   controlcenter/   HTTP server, auth, config CRUD, chat API, workspace, setup wizard, docs
   conversation/    Unified conversation store (JSONL ring buffer, ContentBlocks, cross-backend)
+  marketplace/     App marketplace: install, permissions, trust model, manifest validation
   provider/        Provider/Classifier interfaces + CLI + API implementations
   router/          LLM-based message classification + tier routing
   memstore/        Semantic memory (SQLite + sqlite-vec + FTS5 + ONNX embedder)
@@ -245,9 +225,9 @@ internal/
   voice/           HTTP client for whisper-service transcription container
   scheduler/       Cron-based job scheduling with timezone support + execution logging
   supervisor/      App background service supervisor (restart policies, exponential backoff)
-  vault/           Vault-proxy subprocess management + master password persistence
+  vault/           Vault-proxy subprocess management + Unix socket proxy
   firewall/        Outbound HTTP/HTTPS traffic filtering proxy
-  tooling/         Tool registry (native + user-defined) + subprocess executor
+  tooling/         Tool registry + subprocess executor + Linux namespace sandbox
   skills/          Skill loader, trigger matching, catalog builder
   mood/            Daily mood rotation + live feedback + reaction learning
   session/         Claude session persistence (resume IDs, forced tier locking)

@@ -174,12 +174,9 @@ On first connection, the remote host key is saved automatically (TOFU — Trust 
   ```bash
   vault proxy homelab POST /ssh/exec '{"command":"hostname && uptime"}'
   ```
-  Or directly via the vault API:
+  Or directly via the vault CLI:
   ```bash
-  curl -s http://127.0.0.1:8390/ssh/homelab/exec -X POST \
-    -H "Authorization: Bearer $VAULT_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"command":"hostname"}'
+  vault proxy homelab POST /ssh/exec '{"command":"hostname"}'
   ```
 - **File transfer** — upload and download files via SFTP
 - **Command allowlist** — optionally restrict which commands can be executed per service
@@ -193,13 +190,14 @@ Vault uses scoped tokens for access control:
 - **Admin** - full access (unlock, lock, service CRUD, token management). Used by the Control Center.
 - **Proxy** - read-only, can only list services and proxy requests. This is what Alf gets.
 
-Alf's `VAULT_TOKEN` environment variable contains a proxy-scoped token, so it cannot modify services, create tokens, or lock/unlock the vault. Tokens have a 1-year TTL and are automatically re-created if vault-server restarts.
+Alf accesses the vault through a Unix socket proxy (`VAULT_PROXY_SOCK`) that injects authentication server-side. Alf never sees the actual token. The proxy only allows read-only operations (list services, proxy requests) — it cannot modify services, create tokens, or lock/unlock the vault.
 
 ## Security model
 
 - Credentials are encrypted at rest in `vault-data/vault.enc` using AES-256-GCM
 - Master password derives the encryption key via Argon2id
-- Alf subprocess only receives `VAULT_ADDR` and `VAULT_TOKEN` (proxy scope)
+- Alf subprocess connects via Unix socket proxy (`VAULT_PROXY_SOCK`) — no token in environment, auth injected server-side
+- vault-server listens only on Unix socket (not TCP) — no network-level access possible
 - `vault-data/` volume is separate from the data directory - Alf cannot access the encrypted file
 - SSRF protection: vault-server blocks requests to private/link-local IP ranges (DNS-level validation, ignores system HTTP proxy)
 - TLS skip verify: allows HTTP and private IPs only when explicitly enabled per service (still blocks link-local/metadata IPs)
@@ -245,7 +243,7 @@ The master password is the encryption key - it cannot be changed. To start fresh
 - **Container start:** vault-server starts automatically. If a master password is persisted (from a previous CC unlock or Docker secret), the vault auto-unlocks and creates proxy tokens.
 - **Crash recovery:** vault-server restarts automatically with exponential backoff (1s → 30s max). After restart, it re-unlocks and re-creates all tokens automatically - no manual intervention needed.
 - **CC unlock:** persists the master password so future restarts auto-unlock.
-- **CC lock:** revokes all tokens, clears `VAULT_TOKEN` from environment. The persisted password is kept so you can unlock again easily.
+- **CC lock:** revokes all tokens, disables the vault proxy. The persisted password is kept so you can unlock again easily.
 - **CC reset:** deletes `vault.enc`, clears persisted password, restarts vault-server fresh.
 
 ## Troubleshooting
@@ -259,8 +257,8 @@ The `vault` symlink in `tools.d/` may be missing. Check `/opt/alf/tools.d/vault`
 **"invalid token" from vault proxy:**
 Vault-server stores tokens in memory. If it restarted, all tokens were invalidated. The watchdog should re-create them automatically. Check logs for `[vault] re-authenticated after restart`. If not present, unlock the vault via CC.
 
-**"No VAULT_TOKEN found" in scheduled jobs:**
-The vault must be unlocked for Alf to use it. Check vault status in CC. If locked, unlock it - the token propagates to all future subprocess invocations immediately.
+**"vault proxy not available" in scheduled jobs:**
+The vault must be unlocked for Alf to use it. Check vault status in CC. If locked, unlock it — the proxy becomes available immediately for all subprocess invocations.
 
 **Scheduled jobs fail after container restart:**
 The master password may not be persisted. Unlock the vault once via the Control Center - the password is saved automatically for future restarts.

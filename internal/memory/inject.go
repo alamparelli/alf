@@ -446,7 +446,10 @@ func GenerateToolbox(contextDir, dataDir string) {
 	// Vault status indicator (rules are in core.md, not duplicated here).
 	if hasVault {
 		vaultStatus := "unknown"
-		if addr := os.Getenv("VAULT_ADDR"); addr != "" {
+		if os.Getenv("VAULT_PROXY_SOCK") != "" {
+			// Unix socket proxy handles auth server-side — no token needed.
+			vaultStatus = "ready"
+		} else if addr := os.Getenv("VAULT_ADDR"); addr != "" {
 			if tok := os.Getenv("VAULT_TOKEN"); tok != "" {
 				vaultStatus = "ready"
 			} else {
@@ -457,7 +460,7 @@ func GenerateToolbox(contextDir, dataDir string) {
 		}
 		sb.WriteString("## Vault (Secrets Proxy)\n\n")
 		sb.WriteString(fmt.Sprintf("Status: **%s**\n\n", vaultStatus))
-		sb.WriteString("`vault proxy <svc> <method> <path> [body]` | `vault list` | `vault health`\n\n")
+		sb.WriteString("`vault proxy <svc> <method> <path> [body]` | `vault ssh <svc> <command>` | `vault service list` | `vault health`\n\n")
 		sb.WriteString("Adding services: user configures in Control Center → Vault. Never add services via CLI.\n")
 	}
 

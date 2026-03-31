@@ -401,7 +401,21 @@ Standard pattern for view-level controls:
 </div>
 ```
 
-### Filter tabs
+### Tab bar (view navigation)
+
+Use for switching between views/pages (Dashboard, Settings, History):
+
+```html
+<div class="tab-bar">
+  <button class="tab-item active">Dashboard</button>
+  <button class="tab-item">Settings</button>
+  <button class="tab-item">History</button>
+</div>
+```
+
+### Filter tabs (in-page filtering)
+
+Use for filtering content within a single view (All, Active, Archived):
 
 ```html
 <div class="filter-tabs">
@@ -410,6 +424,51 @@ Standard pattern for view-level controls:
   <button class="tab">Category B</button>
 </div>
 ```
+
+**When to use which:**
+- **Tab bar** (underline): switching between different views/pages
+- **Filter tabs** (pill): filtering/toggling within the same view
+
+### Data table
+
+For data-heavy layouts with rows and columns:
+
+```html
+<table class="data-table">
+  <thead>
+    <tr><th>Name</th><th class="num">Amount</th><th class="num">%</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Item A</td><td class="num">1 234 €</td><td class="num positive">+5.2%</td></tr>
+    <tr><td>Item B</td><td class="num">567 €</td><td class="num negative">-2.1%</td></tr>
+    <tr><td>Item C</td><td class="num dim">0 €</td><td class="num dim">0%</td></tr>
+  </tbody>
+</table>
+```
+
+Utility classes: `.num` (right-align, tabular-nums), `.dim`, `.positive`, `.negative`.
+
+### Stat grid (KPI / metrics)
+
+For grids of small metric cards (portfolio breakdown, dashboard KPIs). Uses 1px borders between items instead of card-in-card nesting:
+
+```html
+<div class="stat-grid">
+  <div class="stat-item">
+    <div class="stat-value">15 040 €</div>
+    <div class="stat-label">Actions</div>
+    <div class="stat-sub">5.1% du total</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-value">1 480 €</div>
+    <div class="stat-label">Crypto</div>
+    <div class="stat-sub">0.5% du total</div>
+  </div>
+  <!-- more items... -->
+</div>
+```
+
+**Do NOT** nest `.card` inside `.card` for KPI grids — use `.stat-grid` instead.
 
 ### Lists
 

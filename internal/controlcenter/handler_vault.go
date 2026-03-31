@@ -574,10 +574,18 @@ func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 		Value string `json:"value"`
 	}
 	type serviceEntry struct {
-		Name          string `json:"name"`
-		BaseURL       string `json:"base_url"`
-		AuthType      string `json:"auth_type"`
-		TLSSkipVerify bool   `json:"tls_skip_verify,omitempty"`
+		Name           string   `json:"name"`
+		BaseURL        string   `json:"base_url"`
+		AuthType       string   `json:"auth_type"`
+		TLSSkipVerify  bool     `json:"tls_skip_verify,omitempty"`
+		SessionCookies bool     `json:"session_cookies,omitempty"`
+		Scopes         []string `json:"scopes,omitempty"`
+		SSHHost        string   `json:"ssh_host,omitempty"`
+		SSHPort        int      `json:"ssh_port,omitempty"`
+		SSHUser        string   `json:"ssh_user,omitempty"`
+		SSHKeyFileRef  string   `json:"ssh_key_file_ref,omitempty"`
+		HeaderName     string   `json:"header_name,omitempty"`
+		Username       string   `json:"username,omitempty"`
 	}
 
 	var secrets []secretEntry
@@ -631,26 +639,62 @@ func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 		imported++
 	}
 
-	// Import services (metadata only — credentials must be re-linked via secret picker).
-	// We create stub services with a placeholder token so vault-server accepts them.
+	// Import services — restore full metadata including SSH config.
+	// Credentials (tokens, passwords) are never exported; users re-configure them.
+	// SSH services are fully restored (host, port, user, key file ref) since the
+	// private key PEM is included in the secrets export above.
 	svcImported := 0
 	c := h.Manager.Client()
 	for _, svc := range services {
-		if svc.Name == "" || svc.BaseURL == "" {
+		if svc.Name == "" {
 			continue
 		}
 		authType := svc.AuthType
 		if authType == "" {
 			authType = "bearer"
 		}
+
+		auth := map[string]any{"type": authType}
+		switch authType {
+		case "ssh_key":
+			// SSH services: restore full connection config.
+			// Private key is in vault files (imported above via secrets).
+			auth["ssh_host"] = svc.SSHHost
+			auth["ssh_user"] = svc.SSHUser
+			if svc.SSHPort > 0 {
+				auth["ssh_port"] = svc.SSHPort
+			}
+			if svc.SSHKeyFileRef != "" {
+				auth["ssh_key_file_ref"] = svc.SSHKeyFileRef
+			}
+		case "header":
+			auth["header_name"] = svc.HeaderName
+			auth["token"] = "__imported_reconfigure_me__"
+		case "basic":
+			auth["username"] = svc.Username
+			auth["password"] = "__imported_reconfigure_me__"
+		default:
+			// bearer, oauth2_client, service_account
+			auth["token"] = "__imported_reconfigure_me__"
+		}
+
 		payload := map[string]any{
-			"name":     svc.Name,
-			"base_url": svc.BaseURL,
-			"auth":     map[string]string{"type": authType, "token": "__imported_reconfigure_me__"},
+			"name": svc.Name,
+			"auth": auth,
+		}
+		if svc.BaseURL != "" {
+			payload["base_url"] = svc.BaseURL
 		}
 		if svc.TLSSkipVerify {
 			payload["tls_skip_verify"] = true
 		}
+		if svc.SessionCookies {
+			payload["session_cookies"] = true
+		}
+		if len(svc.Scopes) > 0 {
+			payload["scopes"] = svc.Scopes
+		}
+
 		body, _ := json.Marshal(payload)
 		if err := c.AddService(strings.NewReader(string(body))); err != nil {
 			log.Printf("[vault] import service %s: %v", svc.Name, err)

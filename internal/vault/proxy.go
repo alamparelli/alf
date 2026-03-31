@@ -61,30 +61,41 @@ func (p *VaultProxy) UpdateToken(token string) {
 }
 
 func (p *VaultProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Only allow /proxy/{service}/{path...} requests.
+	// Allow /proxy/{service}/... and /ssh/{service}/... requests.
+	// /health is also allowed (no auth needed, useful for diagnostics).
 	path := r.URL.Path
-	if !strings.HasPrefix(path, "/proxy/") {
+	var service string
+	switch {
+	case strings.HasPrefix(path, "/proxy/"):
+		rest := strings.TrimPrefix(path, "/proxy/")
+		if idx := strings.IndexByte(rest, '/'); idx >= 0 {
+			service = rest[:idx]
+		} else {
+			service = rest
+		}
+	case strings.HasPrefix(path, "/ssh/"):
+		rest := strings.TrimPrefix(path, "/ssh/")
+		if idx := strings.IndexByte(rest, '/'); idx >= 0 {
+			service = rest[:idx]
+		} else {
+			service = rest
+		}
+	case path == "/health":
+		// Pass through to vault-server (no service check needed).
+	case path == "/services":
+		// Allow listing services (proxy scope).
+	default:
 		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 		return
 	}
 
-	// Extract service name from /proxy/{service}/...
-	rest := strings.TrimPrefix(path, "/proxy/")
-	idx := strings.IndexByte(rest, '/')
-	var service string
-	if idx >= 0 {
-		service = rest[:idx]
-	} else {
-		service = rest
-	}
-
-	if service == "" {
+	if service == "" && path != "/health" && path != "/services" {
 		http.Error(w, `{"error":"missing service name"}`, http.StatusBadRequest)
 		return
 	}
 
 	// Check service allowlist (nil = allow all for LLM tier).
-	if p.allowedServices != nil && !p.allowedServices[service] {
+	if service != "" && p.allowedServices != nil && !p.allowedServices[service] {
 		http.Error(w, `{"error":"service not allowed"}`, http.StatusForbidden)
 		return
 	}

@@ -30,4 +30,4 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )
 
-replace github.com/alessandrolamparelli/vault-proxy => ./third_party/vault-proxy
+replace github.com/alessandrolamparelli/vault-proxy => ./internal/controlcenter/frontend/third_party/vault-proxy

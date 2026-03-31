@@ -1,8 +1,8 @@
 ---
 name: sdk-app-builder
 description: Build standalone ALF apps — source-only (compiled at install), AlfSDK frontend, manifest, marketplace publishing
-version: "7"
-triggers: app, sdk, create app, new app, build app, make app, web app, marketplace app, publish app, standalone app, webapp, build application, create application, marketplace tool, app sdk, sdk app, new app with sdk, app with theme, interactive app
+version: "8"
+triggers: app, sdk, create app, new app, build app, make app, web app, marketplace app, publish app, standalone app, webapp, build application, create application, marketplace tool, app sdk, sdk app, new app with sdk, app with theme, interactive app, todo app, application, develop app
 ---
 
 # ALF App Builder
@@ -25,17 +25,32 @@ Before building, if the request has fewer than 2 concrete details, ask:
 
 ## Pick the right architecture
 
-| | CLI tool (appsdk) | REST server |
-|---|---|---|
-| **Best for** | Data tools the LLM calls | Rich web UIs, games, complex apps |
-| **Backend** | Go `main.go` with appsdk | Go/Python with `service.json` |
-| **Frontend** | `AlfSDK.tool()` | Direct fetch to server |
-| **LLM tool** | Always | Only if LLM needs data access |
-| **Example** | Journal, Todo, Bookmarks | 2048, Wordle, Dashboard |
+| | Frontend-only | CLI tool (appsdk) | REST server |
+|---|---|---|---|
+| **Best for** | Simple user apps | Data tools the LLM calls | Complex apps with heavy backend |
+| **Backend** | None — `AlfSDK.storage` | Go `main.go` with appsdk | Go/Python with `service.json` |
+| **Frontend** | `index.html` + vanilla JS | `AlfSDK.tool()` | Direct fetch to server |
+| **LLM tool** | No | Always | Only if LLM needs data access |
+| **Compilation** | None — works instantly | Go compile at install | Go/Python at install |
+| **Example** | Todo, Notes, Timer, Tracker | Journal, Bookmarks | 2048, Dashboard, API proxy |
 
-**CLI tool**: LLM needs CRUD operations. May have optional web UI.
-**REST server**: User-facing interactive app. No CLI tool unless LLM needs data access.
+**Decision tree — follow in order:**
+
+1. **Does the LLM need to call this app as a tool via bash?** (e.g., "add a journal entry", "search bookmarks")
+   → Yes: **CLI tool** (Go + appsdk + manifest tools)
+   → No: continue ↓
+
+2. **Does the app need server-side logic that JS can't do?** (SQLite queries, external API calls via vault, file processing, cron jobs, WebSocket server)
+   → Yes: **REST server** (Go/Python + service.json)
+   → No: continue ↓
+
+3. **Everything else → Frontend-only** (index.html + AlfSDK.storage + vanilla JS)
+   This covers: todo lists, notes, trackers, timers, calculators, games, dashboards with local data, habit trackers, budget planners, etc.
+
+**Frontend-only is the default.** No Go, no compilation, instant install. `AlfSDK.storage` provides persistent server-side key-value storage — sufficient for most apps.
+
 **Do NOT create a CLI tool** for games, calculators, visual tools.
+**Do NOT use Go** when `AlfSDK.storage` can handle the data needs.
 
 ## Reference docs (read before building)
 
@@ -52,17 +67,18 @@ Read the relevant reference file for templates, patterns, and API details:
 ## Common rules (all apps)
 
 ### Required files
-- `manifest.json` — slug, version, description, category, icon, tools (if CLI)
+- `manifest.json` — slug, version, description, category, icon, tools (if CLI), permissions
 - `app.json` — `{ "name": "...", "icon": "lucide-icon", "description": "..." }` (if web UI)
-- `go.mod` — with all dependencies declared
+- `go.mod` — with all dependencies declared **(only if Go backend)**
 
 ### Data storage
-- **SQLite only** (`modernc.org/sqlite` for Go, `sqlite3` for Python)
-- Database in `data/<slug>.db`, WAL journal mode, `SetMaxOpenConns(1)`
+- **Frontend-only apps**: use `AlfSDK.storage` (server-side key-value, persists across updates)
+- **Go apps**: SQLite only (`modernc.org/sqlite`), database in `data/<slug>.db`, WAL mode, `SetMaxOpenConns(1)`
 
 ### Frontend rules
 - **Follow AIG** — use `alf-ui.css` classes (auto-injected into iframes). See `reference/AIG.md`.
-- **Use `.btn`, `.card`, `.input`, `.form-group`** etc. — never write inline styles for standard components.
+- **`alf-ui.css` works on ALL elements** — including those created dynamically via `innerHTML`, `createElement`, or any JS rendering. It is a `<style>` tag in the iframe, not scoped. NEVER duplicate or re-implement AIG classes — just use them.
+- **Use `.btn`, `.card`, `.input`, `.form-group`** etc. — never write inline styles or custom classes for standard components.
 - Init `AlfSDK` with `onThemeChange` — see `reference/FRONTEND.md`
 - **Use SDK v2 APIs** — audio, storage, confirm/prompt, haptics, clipboard, badges, viewport, events
 - **Audio: always use `AlfSDK.audio`** — never create your own AudioContext (mobile unlock handled by SDK)
@@ -115,13 +131,53 @@ Apps needing data beyond their own directory should use the **REST proxy pattern
 
 ## Checklist
 
-- [ ] Source-only — no compiled binaries
-- [ ] Standalone — SQLite, no shared databases
-- [ ] `manifest.json` with slug, version, description, permissions, services
+**All apps:**
+- [ ] `manifest.json` with slug, version, description, permissions
 - [ ] `app.json` with Lucide icon (if web UI)
 - [ ] `index.html` with AlfSDK + theme CSS + explicit font-family + `alf-ui.css` classes
-- [ ] `go.mod` with all dependencies
-- [ ] CLI tool: `main.go` with appsdk + tool schema in manifest
-- [ ] REST server: `service.json` + free port + `data/port`
-- [ ] Vault access via `appsdk.NewVaultClient()` (not direct HTTP to vault)
 - [ ] No access to other apps' directories or system paths
+
+**Frontend-only apps (preferred for simple apps):**
+- [ ] Data stored via `AlfSDK.storage` (persistent key-value)
+- [ ] `"permissions": ["storage"]` in manifest.json
+- [ ] No `go.mod`, no `main.go` — just HTML/JS
+
+**CLI tool apps:**
+- [ ] `go.mod` with all dependencies
+- [ ] `main.go` with appsdk + tool schema in manifest
+- [ ] `"permissions": ["bash", "storage"]` in manifest.json
+
+**REST server apps:**
+- [ ] `service.json` + free port + `data/port`
+- [ ] Vault access via `appsdk.NewVaultClient()` (not direct HTTP to vault)
+
+## Validation (MANDATORY before telling the user "it's ready")
+
+After writing all files, you MUST verify the app works:
+
+1. **Check files exist:**
+   ```bash
+   ls -la ~/data/apps/<slug>/index.html ~/data/apps/<slug>/app.json ~/data/apps/<slug>/manifest.json
+   ```
+
+2. **Validate manifest.json has required permissions:**
+   ```bash
+   cat ~/data/apps/<slug>/manifest.json | grep permissions
+   ```
+   - Frontend-only with storage → must contain `"storage"`
+   - CLI tool → must contain `"bash"` and `"storage"`
+
+3. **Validate app.json format:**
+   ```bash
+   cat ~/data/apps/<slug>/app.json
+   ```
+   Must have `name`, `icon` (Lucide icon name), `description`.
+
+4. **For frontend-only apps, verify NO Go files exist:**
+   ```bash
+   ls ~/data/apps/<slug>/*.go 2>/dev/null && echo "ERROR: Go files found in frontend-only app"
+   ```
+
+5. **Open the app** — tell the user to refresh the CC page and click the app.
+
+**NEVER say "it's ready" without running these checks.** If any check fails, fix it before reporting success.

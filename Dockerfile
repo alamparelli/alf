@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy vault-proxy source (needed as Go module dependency + standalone binaries).
 WORKDIR /vault-proxy
-COPY third_party/vault-proxy/ .
+COPY internal/controlcenter/frontend/third_party/vault-proxy/ .
 
 WORKDIR /src
 COPY go.mod go.sum ./

@@ -805,6 +805,7 @@ func main() {
 				log.Printf("warning: LLM vault proxy socket failed: %v", err)
 			} else {
 				os.Setenv("VAULT_PROXY_SOCK", llmVaultSock)
+				os.Setenv("VAULT_ADDR", "unix:"+llmVaultSock)
 				defer func() { llmLn.Close(); os.Remove(llmVaultSock) }()
 				log.Printf("vault: LLM proxy on %s", llmVaultSock)
 			}
@@ -885,6 +886,22 @@ func main() {
 			tgAdapt.SetBroadcastTargets(targets)
 		}
 		commEngine.RegisterAdapter(tgAdapt)
+
+		// Register bot commands for the Telegram command menu (/ autocomplete).
+		go func() {
+			if err := tg.SetMyCommands([]tgclient.BotCommand{
+				{Command: "new", Description: "Start a new conversation"},
+				{Command: "clear", Description: "Clear and start a new session"},
+				{Command: "help", Description: "Show available commands"},
+				{Command: "skills", Description: "List active skills"},
+				{Command: "bash", Description: "Execute a bash command"},
+				{Command: "jobs", Description: "List running agent jobs"},
+				{Command: "cancel", Description: "Cancel all running jobs"},
+				{Command: "login", Description: "Get a Control Center login link"},
+			}); err != nil {
+				log.Printf("[telegram] setMyCommands: %v", err)
+			}
+		}()
 	}
 
 	// Auto-update checker (initialized here, scheduled via unified scheduler below).
@@ -1087,12 +1104,31 @@ func main() {
 	appsSupervisor := supervisor.New(filepath.Join(dataDir, "apps"))
 	if vaultMgr != nil && vaultMgr.ProxyToken() != "" && mpManager != nil {
 		appsSupervisor.SetVault(vaultMgr.SocketPath(), vaultMgr.ProxyToken(), mpManager.GetServices)
-		// Notify supervisor when vault restarts and gets a new proxy token.
+	}
+	// Always register OnTokenUpdate — vault may be unlocked after boot via CC.
+	if vaultMgr != nil {
 		vaultMgr.OnTokenUpdate = func(token string) {
-			appsSupervisor.UpdateProxyToken(token)
+			// Initialize supervisor vault on first unlock, update token on subsequent calls.
+			if appsSupervisor.HasVault() {
+				appsSupervisor.UpdateProxyToken(token)
+			} else if mpManager != nil {
+				appsSupervisor.SetVault(vaultMgr.SocketPath(), token, mpManager.GetServices)
+			}
 			if llmVaultProxy != nil {
 				llmVaultProxy.UpdateToken(token)
 				log.Println("[vault] LLM proxy token updated")
+			} else {
+				// Vault was unlocked after daemon boot — create the LLM proxy now.
+				llmVaultSock := filepath.Join(contextDir, "vault-llm.sock")
+				llmVaultProxy = vault.NewVaultProxy(vaultMgr.SocketPath(), token, nil)
+				if _, err := llmVaultProxy.ListenAndServe(llmVaultSock); err != nil {
+					log.Printf("warning: LLM vault proxy socket failed: %v", err)
+					llmVaultProxy = nil
+				} else {
+					os.Setenv("VAULT_PROXY_SOCK", llmVaultSock)
+					os.Setenv("VAULT_ADDR", "unix:"+llmVaultSock)
+					log.Printf("[vault] LLM proxy created on %s (late start)", llmVaultSock)
+				}
 			}
 		}
 	}

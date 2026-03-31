@@ -569,16 +569,16 @@
       return bash(tarCmd).then(function() {
         setStatus(statusEl, 'Publishing...', 'info');
 
-        // Send the full app bundle as a tarball + manifest (already inside the tar, but also as form field for metadata)
+        // Send the full app bundle as a tarball + manifest via vault proxy Unix socket
         var curlParts = [
           'curl -s -w "\\n%{http_code}" -X POST',
-          '-H "Authorization: Bearer $VAULT_TOKEN"',
+          '--unix-socket "$VAULT_PROXY_SOCK"',
           "-F 'manifest=<" + sp + "/manifest.json'",
           "-F 'app_bundle=@" + tarball + ";type=application/gzip'"
         ];
         if (changelog) curlParts.push("-F 'whats_new=" + changelog.replace(/'/g, "'\\''") + "'");
         if (skillPath) curlParts.push("-F 'skill=@" + sq(skillPath) + "/SKILL.md'");
-        curlParts.push("$VAULT_ADDR/proxy/marketplace/api/apps/" + sq(slug) + "/publish");
+        curlParts.push("http://localhost/proxy/marketplace/api/apps/" + sq(slug) + "/publish");
 
         return bash(curlParts.join(' '));
       }).then(function(pubRes) {

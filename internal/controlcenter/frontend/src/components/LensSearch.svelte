@@ -9,7 +9,7 @@
     File, Package, X, FolderOpen, Zap, Filter, Mail
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
-  import { spotlightSettings } from '../stores/spotlight.svelte'
+  import { lensSettings } from '../stores/lens.svelte'
 
   let open = $state(false)
   let query = $state('')
@@ -45,13 +45,13 @@
 
   function loadExcluded(): string[] {
     try {
-      const v = localStorage.getItem('spotlight:exclude')
+      const v = localStorage.getItem('lens:exclude')
       return v ? JSON.parse(v) : []
     } catch { return [] }
   }
 
   function saveExcluded(dirs: string[]) {
-    localStorage.setItem('spotlight:exclude', JSON.stringify(dirs))
+    localStorage.setItem('lens:exclude', JSON.stringify(dirs))
   }
 
   let excludedDirs = $state<string[]>(loadExcluded())
@@ -179,7 +179,7 @@
 
   function handleKeydown(e: KeyboardEvent) {
     // Global: Cmd+<key> / Ctrl+<key>
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === spotlightSettings.shortcutKey) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === lensSettings.shortcutKey) {
       e.preventDefault()
       open = !open
       if (open) {
@@ -201,7 +201,7 @@
       e.preventDefault()
       if (allResults.length > 0) {
         selectedIndex = (selectedIndex + 1) % allResults.length
-        tick().then(() => document.querySelector('.spotlight-item.selected')?.scrollIntoView({ block: 'nearest' }))
+        tick().then(() => document.querySelector('.lens-item.selected')?.scrollIntoView({ block: 'nearest' }))
       }
       return
     }
@@ -210,7 +210,7 @@
       e.preventDefault()
       if (allResults.length > 0) {
         selectedIndex = (selectedIndex - 1 + allResults.length) % allResults.length
-        tick().then(() => document.querySelector('.spotlight-item.selected')?.scrollIntoView({ block: 'nearest' }))
+        tick().then(() => document.querySelector('.lens-item.selected')?.scrollIntoView({ block: 'nearest' }))
       }
       return
     }
@@ -224,20 +224,20 @@
     }
   }
 
-  function handleOpenSpotlight() {
+  function handleOpenLens() {
     open = true
     setTimeout(() => searchInput?.focus(), 0)
   }
 
   onMount(() => {
     window.addEventListener('keydown', handleKeydown)
-    window.addEventListener('alf:open-spotlight', handleOpenSpotlight)
+    window.addEventListener('alf:open-lens', handleOpenLens)
     loadFolders()
   })
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleKeydown)
-    window.removeEventListener('alf:open-spotlight', handleOpenSpotlight)
+    window.removeEventListener('alf:open-lens', handleOpenLens)
     if (debounceTimer) clearTimeout(debounceTimer)
   })
 
@@ -256,74 +256,74 @@
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="spotlight-overlay" onclick={close}>
+  <div class="lens-overlay" onclick={close}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="spotlight-modal" onclick={(e: MouseEvent) => e.stopPropagation()}>
-      <div class="spotlight-input-row">
+    <div class="lens-modal" onclick={(e: MouseEvent) => e.stopPropagation()}>
+      <div class="lens-input-row">
         <Search size={16} />
         <input
           type="text"
           bind:this={searchInput}
           bind:value={query}
           placeholder="Search tabs, apps, files, docs..."
-          class="spotlight-input"
+          class="lens-input"
           autocomplete="off"
           spellcheck="false"
         />
-        <button class="spotlight-close" onclick={close}><X size={14} /></button>
+        <button class="lens-close" onclick={close}><X size={14} /></button>
       </div>
 
-      <div class="spotlight-results">
+      <div class="lens-results">
         {#if allResults.length === 0 && query && !loading}
-          <div class="spotlight-empty">No results found</div>
+          <div class="lens-empty">No results found</div>
         {/if}
 
         {#if loading && allResults.length === 0}
-          <div class="spotlight-empty">Searching...</div>
+          <div class="lens-empty">Searching...</div>
         {/if}
 
         <!-- System Tabs -->
         {#if systemResults.length > 0}
-          <div class="spotlight-category">System</div>
+          <div class="lens-category">System</div>
           {#each systemResults as tab, i}
             {@const globalIdx = allResults.findIndex(r => r.type === 'system' && r.data === tab)}
             <button
-              class="spotlight-item" class:selected={selectedIndex === globalIdx}
+              class="lens-item" class:selected={selectedIndex === globalIdx}
               onclick={() => selectResult({ type: 'system', data: tab })}
               onmouseenter={() => selectedIndex = globalIdx}
             >
-              <span class="spotlight-icon">
+              <span class="lens-icon">
                 {#if iconMap[tab.icon]}
                   <svelte:component this={iconMap[tab.icon]} size={16} />
                 {/if}
               </span>
-              <span class="spotlight-label">{tab.label}</span>
-              <span class="spotlight-hint">Tab</span>
+              <span class="lens-label">{tab.label}</span>
+              <span class="lens-hint">Tab</span>
             </button>
           {/each}
         {/if}
 
         <!-- Apps -->
         {#if appResults.length > 0}
-          <div class="spotlight-category">Apps</div>
+          <div class="lens-category">Apps</div>
           {#each appResults as app}
             {@const globalIdx = allResults.findIndex(r => r.type === 'app' && r.data === app)}
             <button
-              class="spotlight-item" class:selected={selectedIndex === globalIdx}
+              class="lens-item" class:selected={selectedIndex === globalIdx}
               onclick={() => selectResult({ type: 'app', data: app })}
               onmouseenter={() => selectedIndex = globalIdx}
             >
-              <span class="spotlight-icon">
+              <span class="lens-icon">
                 {#if getIcon(app.icon)}
                   <svelte:component this={getIcon(app.icon)} size={16} />
                 {:else}
                   <Package size={16} />
                 {/if}
               </span>
-              <span class="spotlight-label">{app.display_name || app.name}</span>
+              <span class="lens-label">{app.display_name || app.name}</span>
               {#if app.state}
-                <span class="spotlight-badge {stateBadgeClass(app.state)}">{app.state}</span>
+                <span class="lens-badge {stateBadgeClass(app.state)}">{app.state}</span>
               {/if}
             </button>
           {/each}
@@ -331,27 +331,27 @@
 
         <!-- Marketplace -->
         {#if marketplaceResults.length > 0}
-          <div class="spotlight-category">Marketplace</div>
+          <div class="lens-category">Marketplace</div>
           {#each marketplaceResults as app}
             {@const globalIdx = allResults.findIndex(r => r.type === 'marketplace' && r.data === app)}
             <button
-              class="spotlight-item" class:selected={selectedIndex === globalIdx}
+              class="lens-item" class:selected={selectedIndex === globalIdx}
               onclick={() => selectResult({ type: 'marketplace', data: app })}
               onmouseenter={() => selectedIndex = globalIdx}
             >
-              <span class="spotlight-icon">
+              <span class="lens-icon">
                 {#if getIcon(app.icon)}
                   <svelte:component this={getIcon(app.icon)} size={16} />
                 {:else}
                   <Store size={16} />
                 {/if}
               </span>
-              <span class="spotlight-label">{app.display_name || app.name}</span>
+              <span class="lens-label">{app.display_name || app.name}</span>
               {#if app.state}
-                <span class="spotlight-badge {stateBadgeClass(app.state)}">{app.state}</span>
+                <span class="lens-badge {stateBadgeClass(app.state)}">{app.state}</span>
               {/if}
               {#if app.category}
-                <span class="spotlight-hint">{app.category}</span>
+                <span class="lens-hint">{app.category}</span>
               {/if}
             </button>
           {/each}
@@ -359,38 +359,38 @@
 
         <!-- Files -->
         {#if fileResults.length > 0}
-          <div class="spotlight-category">Files</div>
+          <div class="lens-category">Files</div>
           {#each fileResults as file}
             {@const globalIdx = allResults.findIndex(r => r.type === 'file' && r.data === file)}
             {@const Icon = file.is_dir ? FolderOpen : fileIcon(file.extension || '')}
             <button
-              class="spotlight-item" class:selected={selectedIndex === globalIdx}
+              class="lens-item" class:selected={selectedIndex === globalIdx}
               onclick={() => selectResult({ type: 'file', data: file })}
               onmouseenter={() => selectedIndex = globalIdx}
             >
-              <span class="spotlight-icon">
+              <span class="lens-icon">
                 <svelte:component this={Icon} size={16} />
               </span>
-              <span class="spotlight-label">{file.name}</span>
-              <span class="spotlight-hint spotlight-path">{file.path.length > 40 ? '...' + file.path.slice(-37) : file.path}</span>
+              <span class="lens-label">{file.name}</span>
+              <span class="lens-hint lens-path">{file.path.length > 40 ? '...' + file.path.slice(-37) : file.path}</span>
             </button>
           {/each}
         {/if}
 
         <!-- Docs -->
         {#if docResults.length > 0}
-          <div class="spotlight-category">Docs</div>
+          <div class="lens-category">Docs</div>
           {#each docResults as doc}
             {@const globalIdx = allResults.findIndex(r => r.type === 'doc' && r.data === doc)}
             <button
-              class="spotlight-item" class:selected={selectedIndex === globalIdx}
+              class="lens-item" class:selected={selectedIndex === globalIdx}
               onclick={() => selectResult({ type: 'doc', data: doc })}
               onmouseenter={() => selectedIndex = globalIdx}
             >
-              <span class="spotlight-icon"><BookOpen size={16} /></span>
-              <span class="spotlight-label">{doc.title.length > 60 ? doc.title.slice(0, 60) + '...' : doc.title}</span>
+              <span class="lens-icon"><BookOpen size={16} /></span>
+              <span class="lens-label">{doc.title.length > 60 ? doc.title.slice(0, 60) + '...' : doc.title}</span>
               {#if doc.summary}
-                <span class="spotlight-hint">{doc.summary.length > 80 ? doc.summary.slice(0, 80) + '...' : doc.summary}</span>
+                <span class="lens-hint">{doc.summary.length > 80 ? doc.summary.slice(0, 80) + '...' : doc.summary}</span>
               {/if}
             </button>
           {/each}
@@ -398,7 +398,7 @@
       </div>
 
       {#if showFilters}
-        <div class="spotlight-filters">
+        <div class="lens-filters">
           <div class="filter-label">Folders to search</div>
           <div class="filter-grid">
             {#each availableFolders as dir}
@@ -411,7 +411,7 @@
         </div>
       {/if}
 
-      <div class="spotlight-footer">
+      <div class="lens-footer">
         <span class="kbd desktop-only">↑↓</span> <span class="desktop-only">Navigate</span>
         <span class="kbd desktop-only">↵</span> <span class="desktop-only">Open</span>
         <span class="kbd desktop-only">esc</span> <span class="desktop-only">Close</span>
@@ -428,7 +428,7 @@
 {/if}
 
 <style>
-  .spotlight-overlay {
+  .lens-overlay {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
@@ -438,7 +438,7 @@
     padding-top: 15vh;
   }
 
-  .spotlight-modal {
+  .lens-modal {
     width: 560px;
     max-width: 92vw;
     max-height: 480px;
@@ -452,7 +452,7 @@
     align-self: flex-start;
   }
 
-  .spotlight-input-row {
+  .lens-input-row {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -461,7 +461,7 @@
     color: var(--text-dim);
   }
 
-  .spotlight-input {
+  .lens-input {
     flex: 1;
     background: none;
     border: none;
@@ -471,7 +471,7 @@
     font-size: var(--font-md, 15px);
   }
 
-  .spotlight-close {
+  .lens-close {
     background: none;
     border: none;
     color: var(--text-dim);
@@ -481,13 +481,13 @@
     align-items: center;
   }
 
-  .spotlight-results {
+  .lens-results {
     flex: 1;
     overflow-y: auto;
     padding: 4px 0;
   }
 
-  .spotlight-category {
+  .lens-category {
     padding: 6px 16px 4px;
     font-size: var(--font-xs, 11px);
     font-weight: 600;
@@ -496,7 +496,7 @@
     color: var(--text-dim);
   }
 
-  .spotlight-item {
+  .lens-item {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -513,12 +513,12 @@
     overflow: hidden;
   }
 
-  .spotlight-item:hover,
-  .spotlight-item.selected {
+  .lens-item:hover,
+  .lens-item.selected {
     background: var(--bg-input);
   }
 
-  .spotlight-icon {
+  .lens-icon {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -530,14 +530,14 @@
     font-size: var(--font-md, 15px);
   }
 
-  .spotlight-label {
+  .lens-label {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .spotlight-hint {
+  .lens-hint {
     font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     white-space: nowrap;
@@ -545,13 +545,13 @@
     text-overflow: ellipsis;
   }
 
-  .spotlight-path {
+  .lens-path {
     max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .spotlight-badge {
+  .lens-badge {
     font-size: var(--font-xs, 11px);
     padding: 1px 6px;
     border-radius: 4px;
@@ -564,14 +564,14 @@
   .badge-yellow { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
   .badge-dim { background: var(--bg-input); color: var(--text-dim); }
 
-  .spotlight-empty {
+  .lens-empty {
     padding: 24px 16px;
     text-align: center;
     color: var(--text-dim);
     font-size: var(--font-sm, 13px);
   }
 
-  .spotlight-footer {
+  .lens-footer {
     padding: 8px 16px;
     border-top: 1px solid var(--border);
     font-size: var(--font-xs, 11px);
@@ -634,7 +634,7 @@
     font-weight: 600;
   }
 
-  .spotlight-filters {
+  .lens-filters {
     padding: 8px 16px;
     border-top: 1px solid var(--border);
   }

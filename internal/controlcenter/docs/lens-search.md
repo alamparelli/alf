@@ -1,17 +1,17 @@
 ---
 category: Features
-tags: search, spotlight, keyboard, shortcuts, navigation
+tags: search, lens, keyboard, shortcuts, navigation
 order: 3
 ---
 
-# Spotlight Search
+# Lens Search
 
 A quick-access search overlay for navigating tabs, apps, files, docs, and marketplace entries.
 
-## Opening Spotlight
+## Opening Lens
 
 - **Keyboard shortcut**: `Cmd+G` (Mac) / `Ctrl+G` (Windows/Linux). The default key is `G` and can be changed in Settings.
-- **FAB button**: Click the floating search button in the UI, which dispatches the `alf:open-spotlight` event.
+- **FAB button**: Click the floating search button in the UI, which dispatches the `alf:open-lens` event.
 - Press `Escape` to close.
 
 ## What it searches
@@ -34,11 +34,11 @@ System tabs are filtered locally for instant results. Apps, marketplace, files, 
 |-----|--------|
 | `Arrow Up` / `Arrow Down` | Move selection through results |
 | `Enter` | Open the selected result |
-| `Escape` | Close Spotlight |
+| `Escape` | Close Lens |
 
 ## Folder filters
 
-Click the **Filter** button in the bottom-right corner of the Spotlight footer to toggle folder visibility for file search results.
+Click the **Filter** button in the bottom-right corner of the Lens footer to toggle folder visibility for file search results.
 
 - Checkboxes let you include or exclude top-level workspace directories.
 - Internal directories (`.git`, `.claude`, `.cache`, `.local`, `node_modules`, `go-path`, `docs`) are always hidden.

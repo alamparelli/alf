@@ -866,6 +866,133 @@ a:hover { text-decoration: underline; }
   border: 0;
 }
 
+/* ── Avatar ────────────────────────────────────────────────────────────── */
+/* Circle with initials or image. Sizes: default 32px, -sm 24px, -lg 40px */
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-xs, 11px);
+  font-weight: 600;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-transform: uppercase;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-sm { width: 24px; height: 24px; font-size: 10px; }
+.avatar-lg { width: 40px; height: 40px; font-size: var(--font-sm, 13px); }
+
+/* Avatar stack — overlapping circles */
+.avatar-stack {
+  display: flex;
+}
+.avatar-stack .avatar {
+  border: 2px solid var(--bg);
+  margin-left: -8px;
+}
+.avatar-stack .avatar:first-child { margin-left: 0; }
+
+/* ── Key-value row ────────────────────────────────────────────────────── */
+/* Horizontal label: value pair. Use in detail views, settings, profiles. */
+.kv-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md, 16px);
+  padding: 8px 0;
+  font-size: var(--font-sm, 13px);
+}
+.kv-row + .kv-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+}
+.kv-label {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.kv-value {
+  text-align: right;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Line clamp (multi-line truncation) ───────────────────────────────── */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Change indicator (percentage up/down) ────────────────────────────── */
+/* Green with ▲ for positive, red with ▼ for negative.                    */
+.change-up {
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+.change-up::before { content: '▲ '; font-size: 8px; }
+.change-down {
+  color: var(--red);
+  font-variant-numeric: tabular-nums;
+}
+.change-down::before { content: '▼ '; font-size: 8px; }
+.change-flat {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Chip with remove button ──────────────────────────────────────────── */
+/* Tag-like element with an X button for removal. Use in filters, inputs. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  font-size: var(--font-xs, 11px);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text);
+}
+.chip-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 50%;
+  transition: all 0.15s;
+  padding: 0;
+}
+.chip-close:hover { background: var(--border); color: var(--text); }
+.chip-accent { background: color-mix(in srgb, var(--accent) 15%, var(--bg)); color: var(--accent); }
+.chip-danger { background: color-mix(in srgb, var(--red) 15%, var(--bg)); color: var(--red); }
+
+/* ── Sticky ───────────────────────────────────────────────────────────── */
+/* Stick element to top on scroll. Use on headers, toolbars.              */
+.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+}
+
 /* ── Mobile touch targets ──────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .btn { min-height: 44px; }

@@ -725,6 +725,101 @@ Pushes siblings apart in flex containers. Replaces `<div style="flex:1"></div>`.
 </div>
 ```
 
+### Avatar
+
+Circle with initials or image. Sizes: default 32px, `-sm` 24px, `-lg` 40px.
+
+```html
+<!-- Initials -->
+<div class="avatar">AL</div>
+<div class="avatar avatar-sm">J</div>
+<div class="avatar avatar-lg">MR</div>
+
+<!-- Image -->
+<div class="avatar"><img src="/photo.jpg" alt=""></div>
+
+<!-- Stack (overlapping) -->
+<div class="avatar-stack">
+  <div class="avatar">A</div>
+  <div class="avatar">B</div>
+  <div class="avatar">C</div>
+</div>
+```
+
+Use in: chat messages, team lists, contact cards, activity feeds.
+
+### Key-value row
+
+Horizontal label: value pair with auto-separators between rows.
+
+```html
+<div class="card">
+  <div class="kv-row">
+    <span class="kv-label">Status</span>
+    <span class="kv-value"><span class="tag tag-success">Active</span></span>
+  </div>
+  <div class="kv-row">
+    <span class="kv-label">Version</span>
+    <span class="kv-value text-mono">1.2.0</span>
+  </div>
+  <div class="kv-row">
+    <span class="kv-label">Created</span>
+    <span class="kv-value">Mar 31, 2026</span>
+  </div>
+</div>
+```
+
+Use in: detail views, profile pages, settings, info panels.
+
+### Line clamp
+
+Multi-line truncation with ellipsis. Use on descriptions, previews.
+
+```html
+<p class="line-clamp-2">Long description that may span multiple lines...</p>
+<p class="line-clamp-3">Even longer text with 3 lines max...</p>
+```
+
+### Change indicator
+
+Colored percentage change with directional arrows. Auto-inserted via CSS `::before`.
+
+```html
+<span class="change-up">+5.2%</span>
+<span class="change-down">-1.8%</span>
+<span class="change-flat">0%</span>
+```
+
+Pair with `.data-table .num` or `.stat-sub` for financial/dashboard apps.
+
+### Chip (removable tag)
+
+Tag-like element with a close button. Use for active filters, tag inputs.
+
+```html
+<div class="chip">
+  Finance
+  <button class="chip-close" onclick="removeFilter(this)">
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  </button>
+</div>
+
+<div class="chip chip-accent">Active <button class="chip-close">...</button></div>
+<div class="chip chip-danger">Error <button class="chip-close">...</button></div>
+```
+
+### Sticky header
+
+Sticks to top on scroll. Use on toolbars or section headers in long lists.
+
+```html
+<div class="toolbar sticky">
+  <h3>Results</h3>
+  <div class="spacer"></div>
+  <button class="btn btn-sm">Export</button>
+</div>
+```
+
 ---
 
 ## Layout patterns
@@ -918,6 +1013,21 @@ AlfSDK.sheet(
 
 - DO: `<div class="spacer"></div>` in flex containers
 - DON'T: `<div style="flex:1"></div>`
+
+### Key-value pairs
+
+- DO: `<div class="kv-row"><span class="kv-label">Status</span><span class="kv-value">Active</span></div>`
+- DON'T: `<div style="display:flex;justify-content:space-between"><span>Status</span><span>Active</span></div>`
+
+### Avatars
+
+- DO: `<div class="avatar">AL</div>`
+- DON'T: `<div style="width:32px;height:32px;border-radius:50%;background:green;...">AL</div>`
+
+### Percentage changes
+
+- DO: `<span class="change-up">+5.2%</span>`
+- DON'T: `<span style="color:green">▲ +5.2%</span>`
 
 ### Animations
 

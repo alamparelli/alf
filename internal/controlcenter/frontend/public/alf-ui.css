@@ -690,6 +690,41 @@
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* ── Input row (input + button side by side) ──────────────────────────── */
+.input-row {
+  display: flex;
+  gap: var(--space-sm, 8px);
+}
+.input-row .input { flex: 1; }
+
+/* ── Custom checkbox (circle) ─────────────────────────────────────────── */
+/* Use instead of native checkboxes or emoji. 20px circle, accent fill.   */
+.check {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.check:hover { border-color: var(--accent); }
+.check.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.check.checked::after {
+  content: '';
+  width: 6px;
+  height: 10px;
+  border: solid var(--on-accent);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translateY(-1px);
+}
+
 /* ── Card header row ───────────────────────────────────────────────────── */
 .card-header {
   display: flex;

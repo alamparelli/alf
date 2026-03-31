@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -293,17 +294,20 @@ type publishRequest struct {
 func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	var req publishRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[developer] publish: decode body: %v", err)
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
 	if req.Slug == "" || !validName.MatchString(req.Slug) {
+		log.Printf("[developer] publish: invalid slug %q", req.Slug)
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid slug"})
 		return
 	}
 
 	client := h.vaultClient()
 	if client == nil {
+		log.Printf("[developer] publish: vault not available (manager=%v)", h.VaultManager != nil)
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "vault not available"})
 		return
 	}
@@ -337,6 +341,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	// Write manifest.json to app dir
 	manifestJSON, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := os.WriteFile(filepath.Join(appDir, "manifest.json"), manifestJSON, 0o644); err != nil {
+		log.Printf("[developer] publish: write manifest to %s: %v", filepath.Join(appDir, "manifest.json"), err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write manifest: " + err.Error()})
 		return
 	}
@@ -349,6 +354,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 		"--exclude=./data", "--exclude=.git", "--exclude=.env*",
 		"--exclude=*.pem", "--exclude=*.key", "--no-dereference", ".")
 	if out, err := tarCmd.CombinedOutput(); err != nil {
+		log.Printf("[developer] publish: tar %s failed: %v — %s", appDir, err, string(out))
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "tar: " + string(out)})
 		return
 	}
@@ -361,6 +367,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 
 	// manifest field
 	if err := mw.WriteField("manifest", string(manifestJSON)); err != nil {
+		log.Printf("[developer] publish: multipart write manifest field: %v", err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "multipart: " + err.Error()})
 		return
 	}
@@ -368,6 +375,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	// app_bundle field (tarball)
 	tarFile, err := os.Open(tarball)
 	if err != nil {
+		log.Printf("[developer] publish: open tarball %s: %v", tarball, err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "open tarball: " + err.Error()})
 		return
 	}
@@ -375,10 +383,12 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 
 	bundlePart, err := mw.CreateFormFile("app_bundle", filepath.Base(tarball))
 	if err != nil {
+		log.Printf("[developer] publish: create form file: %v", err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "multipart: " + err.Error()})
 		return
 	}
 	if _, err := io.Copy(bundlePart, tarFile); err != nil {
+		log.Printf("[developer] publish: copy tarball to multipart: %v", err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy tarball: " + err.Error()})
 		return
 	}
@@ -400,6 +410,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	publishPath := "/proxy/marketplace/api/apps/" + req.Slug + "/publish"
 	httpReq, err := http.NewRequestWithContext(r.Context(), "POST", vc.Addr+publishPath, &buf)
 	if err != nil {
+		log.Printf("[developer] publish: build HTTP request to %s: %v", vc.Addr+publishPath, err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "build request: " + err.Error()})
 		return
 	}
@@ -407,6 +418,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 
 	resp, err := vc.DoRequest(httpReq)
 	if err != nil {
+		log.Printf("[developer] publish: DoRequest failed: %v", err)
 		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "publish failed: " + err.Error()})
 		return
 	}
@@ -416,6 +428,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		respondJSON(w, http.StatusOK, map[string]any{"success": true, "message": string(body)})
 	} else {
+		log.Printf("[developer] publish: marketplace returned HTTP %d: %s", resp.StatusCode, string(body))
 		respondJSON(w, http.StatusBadGateway, map[string]any{"error": fmt.Sprintf("HTTP %d", resp.StatusCode), "detail": string(body)})
 	}
 }

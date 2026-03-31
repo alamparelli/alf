@@ -352,7 +352,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 
 	tarCmd := exec.Command("tar", "-czf", tarball, "-C", appDir,
 		"--exclude=./data", "--exclude=.git", "--exclude=.env*",
-		"--exclude=*.pem", "--exclude=*.key", "--no-dereference", ".")
+		"--exclude=*.pem", "--exclude=*.key", ".")
 	if out, err := tarCmd.CombinedOutput(); err != nil {
 		log.Printf("[developer] publish: tar %s failed: %v — %s", appDir, err, string(out))
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "tar: " + string(out)})

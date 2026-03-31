@@ -694,11 +694,13 @@
 .input-row {
   display: flex;
   gap: var(--space-sm, 8px);
+  margin-bottom: var(--space-md, 16px);
 }
 .input-row .input { flex: 1; }
 
 /* ── Custom checkbox (circle) ─────────────────────────────────────────── */
 /* Use instead of native checkboxes or emoji. 20px circle, accent fill.   */
+/* Always has 12px right margin so text never touches the circle.          */
 .check {
   width: 20px;
   height: 20px;
@@ -710,6 +712,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-right: 12px;
 }
 .check:hover { border-color: var(--accent); }
 .check.checked {

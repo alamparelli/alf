@@ -375,7 +375,7 @@ Standard pattern for text input with an action button (e.g. add todo, send messa
 </div>
 ```
 
-`.input-row` provides `display: flex` + `gap: 8px`. The input auto-expands (`flex: 1`).
+`.input-row` provides `display: flex` + `gap: 8px` + `margin-bottom: 16px`. The input auto-expands (`flex: 1`). No need to add spacing manually.
 
 ### Custom checkbox
 
@@ -389,14 +389,18 @@ Standard pattern for text input with an action button (e.g. add todo, send messa
 <div class="check checked"></div>
 ```
 
-In list items, always wrap checkbox + text with a gap:
+`.check` has a built-in `margin-right: 12px` — text never touches the circle.
+
+In list items:
 
 ```html
-<div class="list-item-interactive" style="gap: 12px">
+<div class="list-item-interactive">
   <div class="check"></div>
   <span class="flex-1">Task text</span>
 </div>
 ```
+
+No extra gap or margin needed — `.check` handles spacing, `.list-item-interactive` provides padding (11px 14px).
 
 ### Forms
 

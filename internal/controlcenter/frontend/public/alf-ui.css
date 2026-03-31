@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    ALF UI — Shared design system for ALF apps
    Auto-injected into app iframes. Apps can override any class.
-   Version: 1.0.0
+   Version: 2.0.0
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Layout tokens ────────────────────────────────────────────────────── */
@@ -85,7 +85,7 @@
   justify-content: center;
   gap: 6px;
   padding: 8px 16px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--radius, 8px);
   background: var(--bg-input);
   color: var(--text);
@@ -94,7 +94,7 @@
   font-weight: 500;
   cursor: pointer;
   text-decoration: none;
-  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  transition: background 0.15s, opacity 0.15s;
   line-height: 1.4;
   -webkit-tap-highlight-color: transparent;
   min-height: 36px;
@@ -106,27 +106,23 @@
 .btn-primary {
   background: var(--accent);
   color: var(--on-accent);
-  border-color: var(--accent);
 }
 .btn-primary:hover { opacity: 0.9; background: var(--accent); }
 
 .btn-danger {
   background: var(--red);
   color: #fff;
-  border-color: var(--red);
 }
 .btn-danger:hover { opacity: 0.9; background: var(--red); }
 
 .btn-success {
   background: var(--green);
   color: #fff;
-  border-color: var(--green);
 }
 .btn-success:hover { opacity: 0.9; background: var(--green); }
 
 .btn-ghost {
   background: transparent;
-  border-color: transparent;
 }
 .btn-ghost:hover { background: var(--bg-input); }
 
@@ -158,13 +154,29 @@
 }
 .btn-icon:hover { color: var(--text); background: var(--bg-input); }
 
+/* Accent icon button — square, filled accent background (e.g. add button) */
+.btn-icon-accent {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: var(--radius, 8px);
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.btn-icon-accent:hover { opacity: 0.85; }
+
 .btn-block { width: 100%; }
 
 /* Active state modifier — use for toggle buttons in a group (e.g. speed selector) */
 .btn.active {
   background: var(--accent);
   color: var(--on-accent);
-  border-color: var(--accent);
 }
 
 /* Button group */
@@ -175,9 +187,9 @@
 }
 
 /* ── Cards ─────────────────────────────────────────────────────────────── */
+/* Borderless — bg-card surface stands out from bg via contrast alone.    */
 .card {
   background: var(--bg-card);
-  border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   padding: var(--space-md, 16px);
 }
@@ -186,13 +198,23 @@
 
 .card-interactive {
   background: var(--bg-card);
-  border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   padding: var(--space-md, 16px);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: background 0.15s;
 }
-.card-interactive:hover { border-color: var(--accent); }
+.card-interactive:hover { background: var(--bg-input); }
+
+/* Card group — continuous surface with light internal separators.        */
+/* Wrap list-items or custom rows. No outer border.                       */
+.card-group {
+  background: var(--bg-card);
+  border-radius: var(--radius, 8px);
+  overflow: hidden;
+}
+.card-group > *:not(:last-child) {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
 
 /* ── Form elements ─────────────────────────────────────────────────────── */
 .input, .select, .textarea {
@@ -200,20 +222,20 @@
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
-  background: var(--bg-input);
+  background: var(--bg-card);
   color: var(--text);
   font-family: inherit;
   font-size: var(--font-sm, 13px);
   line-height: 1.4;
-  transition: border-color 0.15s, outline 0.15s;
+  outline: none;
+  transition: border-color 0.15s;
 }
 .input:focus, .select:focus, .textarea:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
+  border-color: var(--accent);
 }
 .input::placeholder, .textarea::placeholder {
   color: var(--text-dim);
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
 .textarea {
@@ -278,27 +300,24 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm, 8px);
-  padding: var(--space-sm, 8px) var(--space-md, 16px);
-  border-bottom: 1px solid var(--border);
+  padding: 11px 14px;
   font-size: var(--font-sm, 13px);
   transition: background 0.12s;
 }
-.list-item:last-child { border-bottom: none; }
 
 .list-item-interactive {
   display: flex;
   align-items: center;
   gap: var(--space-sm, 8px);
-  padding: var(--space-sm, 8px) var(--space-md, 16px);
-  border-bottom: 1px solid var(--border);
+  padding: 11px 14px;
   font-size: var(--font-sm, 13px);
   cursor: pointer;
   transition: background 0.12s;
 }
-.list-item-interactive:last-child { border-bottom: none; }
 .list-item-interactive:hover { background: var(--bg-input); }
 
 /* ── Tags / badges ─────────────────────────────────────────────────────── */
+/* Translucent tinted backgrounds — text carries the color.               */
 .tag {
   display: inline-flex;
   align-items: center;
@@ -306,14 +325,15 @@
   font-size: var(--font-xs, 11px);
   border-radius: 4px;
   background: var(--bg-input);
-  border: 1px solid var(--border);
   color: var(--text-dim);
 }
 
-.tag-accent  { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-.tag-success { background: var(--green); color: #fff; border-color: var(--green); }
-.tag-danger  { background: var(--red); color: #fff; border-color: var(--red); }
-.tag-warning { background: var(--yellow); color: #fff; border-color: var(--yellow); }
+.tag-accent   { background: color-mix(in srgb, var(--accent) 15%, var(--bg)); color: var(--accent); }
+.tag-success  { background: color-mix(in srgb, var(--green) 15%, var(--bg)); color: var(--green); }
+.tag-danger   { background: color-mix(in srgb, var(--red) 15%, var(--bg)); color: var(--red); }
+.tag-warning  { background: color-mix(in srgb, var(--yellow) 15%, var(--bg)); color: var(--yellow); }
+.tag-mauve    { background: color-mix(in srgb, var(--mauve) 15%, var(--bg)); color: var(--mauve); }
+.tag-sapphire { background: color-mix(in srgb, var(--sapphire) 15%, var(--bg)); color: var(--sapphire); }
 
 .count-badge {
   display: inline-flex;
@@ -343,32 +363,29 @@
 .dot-accent  { background: var(--accent); }
 
 /* ── Alerts / status messages ──────────────────────────────────────────── */
+/* Borderless — tinted background carries the semantic color.             */
 .alert {
   padding: var(--space-sm, 8px) var(--space-md, 16px);
   border-radius: var(--radius, 8px);
   font-size: var(--font-sm, 13px);
-  border: 1px solid var(--border);
+  border: none;
   background: var(--bg-card);
 }
 .alert-success {
   background: color-mix(in srgb, var(--green) 12%, var(--bg));
   color: var(--green);
-  border-color: color-mix(in srgb, var(--green) 25%, transparent);
 }
 .alert-danger {
   background: color-mix(in srgb, var(--red) 12%, var(--bg));
   color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 25%, transparent);
 }
 .alert-warning {
   background: color-mix(in srgb, var(--yellow) 12%, var(--bg));
   color: var(--yellow);
-  border-color: color-mix(in srgb, var(--yellow) 25%, transparent);
 }
 .alert-info {
   background: color-mix(in srgb, var(--accent) 10%, var(--bg));
   color: var(--text-dim);
-  border-color: var(--border);
 }
 
 /* ── Empty state ───────────────────────────────────────────────────────── */
@@ -382,7 +399,7 @@
   text-align: center;
   gap: var(--space-sm, 8px);
 }
-.empty-state svg { opacity: 0.4; }
+.empty-state svg { opacity: 0.3; }
 .empty-state p { max-width: 280px; font-size: var(--font-sm, 13px); }
 
 /* ── Divider ───────────────────────────────────────────────────────────── */
@@ -398,14 +415,48 @@
   margin: var(--space-sm, 8px) 0;
 }
 
-/* ── Section title ─────────────────────────────────────────────────────── */
-.section-title {
+/* ── Section label ─────────────────────────────────────────────────────── */
+/* Uppercase dim label with optional count. Use to group card-groups.     */
+.section-title, .section-label {
   font-size: var(--font-xs, 11px);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-dim);
   margin-bottom: var(--space-sm, 8px);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+}
+.section-label .count {
+  font-weight: 400;
+  opacity: 0.6;
+}
+
+/* ── Progress bar ─────────────────────────────────────────────────────── */
+.progress-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+}
+.progress-track {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-input);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+.progress-label {
+  font-size: var(--font-xs, 11px);
+  color: var(--text-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Loading ───────────────────────────────────────────────────────────── */
@@ -527,29 +578,34 @@
 }
 .search-box svg { color: var(--text-dim); flex-shrink: 0; }
 
-/* ── Filter tabs ───────────────────────────────────────────────────────── */
+/* ── Filter tabs (segmented control) ──────────────────────────────────── */
+/* iOS-style segmented control. Active tab is elevated with bg-card.      */
 .filter-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  gap: 2px;
+  background: var(--bg-input);
+  border-radius: 6px;
+  padding: 2px;
+  width: fit-content;
   margin-bottom: var(--space-md, 16px);
 }
 .tab {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 8px);
-  background: none;
+  padding: 5px 14px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
   color: var(--text-dim);
   font-family: inherit;
   font-size: var(--font-xs, 11px);
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
 }
-.tab:hover { background: var(--bg-input); }
+.tab:hover { color: var(--text); }
 .tab.active {
-  background: var(--accent);
-  color: var(--on-accent);
-  border-color: var(--accent);
+  background: var(--bg-card);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
 }
 
 /* ── Tab bar (underline navigation) ──────────────────────────────────── */
@@ -592,49 +648,47 @@
   font-size: var(--font-xs, 11px);
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  padding: var(--space-xs, 6px) var(--space-sm, 10px);
-  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
 }
 .data-table td {
-  padding: var(--space-xs, 6px) var(--space-sm, 10px);
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 25%, transparent);
 }
-.data-table tr:hover td { background: var(--bg-input); }
+.data-table tr:hover td { background: color-mix(in srgb, var(--bg-input) 50%, transparent); }
 .data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .data-table .dim { color: var(--text-dim); }
 .data-table .positive { color: var(--success, #22c55e); }
 .data-table .negative { color: var(--error, #e53e3e); }
 
 /* ── Stat grid (KPI / metric cards) ──────────────────────────────────── */
-/* Use for grids of small metric/KPI items. NOT nested inside .card.     */
-/* Each .stat-item gets its own card-like appearance.                     */
+/* Fused 4-col grid with 1px borders. Each cell has a colored accent bar */
+/* at the top for category identification. NOT nested inside .card.       */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 1px;
   background: var(--border);
   border-radius: var(--radius, 8px);
   overflow: hidden;
-  border: 1px solid var(--border);
 }
 .stat-item {
   background: var(--bg-card);
-  padding: var(--space-md, 16px);
+  padding: 16px;
 }
-/* Fill empty trailing cells so the border background doesn't show through */
-.stat-grid::after {
-  content: '';
-  background: var(--bg-card);
-  /* spans remaining columns in the last row */
-  grid-column: span 99;
+.stat-bar {
+  width: 24px;
+  height: 3px;
+  border-radius: 2px;
+  margin-bottom: 8px;
 }
-.stat-item .stat-value {
-  font-size: var(--font-lg, 18px);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+.stat-value { font-size: var(--font-lg, 18px); font-weight: 700; }
+.stat-label { font-size: var(--font-xs, 11px); color: var(--text-dim); margin-top: 4px; }
+.stat-sub   { font-size: var(--font-xs, 11px); color: var(--text-dim); }
+
+@media (max-width: 600px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
-.stat-item .stat-label { color: var(--text-dim); font-size: var(--font-xs, 11px); }
-.stat-item .stat-sub { color: var(--text-dim); font-size: var(--font-xs, 11px); }
 
 /* ── Card header row ───────────────────────────────────────────────────── */
 .card-header {

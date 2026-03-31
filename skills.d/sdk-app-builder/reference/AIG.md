@@ -167,7 +167,8 @@ background: rgba(196, 57, 42, 0.1);
 - Destructive actions: `--red` (class `.btn-danger`).
 - Primary CTA: `--accent` (class `.btn-primary`).
 - Success confirmation: `--green` (class `.btn-success`).
-- Default/secondary: `--bg-input` with `--border` (class `.btn`).
+- Default/secondary: `--bg-input`, no border (class `.btn`).
+- Tags: translucent tinted backgrounds — `color-mix(in srgb, var(--color) 15%, var(--bg))` with colored text.
 - Status alerts: use `.alert-success`, `.alert-danger`, `.alert-warning`, `.alert-info`.
 - Status dots: `.dot` + `.dot-success` / `.dot-danger` / `.dot-warning`.
 - Translucent tints: `color-mix(in srgb, var(--color) 12%, var(--bg))` for backgrounds.
@@ -228,7 +229,7 @@ Apps that are mobile-responsive should always use `--page-padding-top` for the t
 | `--shadow-md` | Cards that need emphasis, floating panels |
 | `--shadow-lg` | Modals, sheets, overlays |
 
-Cards in ALF apps typically don't use shadows (border-based design). Use shadows sparingly for overlays and floating elements.
+ALF uses a **borderless** design — cards and buttons rely on background contrast, not borders. Use shadows sparingly for overlays and floating elements only.
 
 ---
 
@@ -269,8 +270,11 @@ Cards in ALF apps typically don't use shadows (border-based design). Use shadows
 ## Components
 
 All components are available via `alf-ui.css` classes. No JS required.
+**Design philosophy**: borderless surfaces. Cards, buttons, alerts, and tags rely on background contrast — not `border: 1px solid`.
 
 ### Buttons
+
+Borderless — `bg-input` background, no border. Variants use solid accent colors.
 
 ```html
 <button class="btn">Default</button>
@@ -282,9 +286,12 @@ All components are available via `alf-ui.css` classes. No JS required.
 <button class="btn btn-lg">Large</button>
 <button class="btn btn-block">Full Width</button>
 <button class="btn-icon"><!-- SVG icon --></button>
+<button class="btn-icon-accent"><!-- SVG icon --></button>
 ```
 
-Button with icon (standard pattern from CC):
+- `.btn-icon-accent` — square 40x40 accent-filled icon button (e.g. add button next to input)
+
+Button with icon:
 ```html
 <button class="btn btn-sm">
   <!-- 14px Lucide SVG --> Refresh
@@ -310,9 +317,11 @@ Toggle button group (e.g. speed selector):
   <button class="btn btn-sm" onclick="setSpeed(5)">5x</button>
 </div>
 ```
-Add/remove `.active` class via JS. The `.btn.active` style uses `--accent` background (same as `.btn-primary`).
+Add/remove `.active` class via JS. The `.btn.active` style uses `--accent` background.
 
 ### Cards
+
+Borderless — `bg-card` surface stands out from `bg` via contrast alone.
 
 ```html
 <div class="card">
@@ -329,8 +338,31 @@ Add/remove `.active` class via JS. The `.btn.active` style uses `--accent` backg
   <!-- content -->
 </div>
 
-<div class="card-interactive">Clickable card</div>
+<div class="card-interactive">Clickable card (hover → bg-input)</div>
 ```
+
+### Card group
+
+Continuous surface with light internal separators. Use to wrap lists of items.
+Separators are `border 40% opacity` — ultra-light, not full `--border`.
+
+```html
+<div class="section-label">Services <span class="count">3</span></div>
+<div class="card-group">
+  <div class="list-item-interactive">
+    <span class="dot dot-success"></span>
+    <span class="flex-1">vault-server</span>
+    <span class="tag tag-success">Running</span>
+  </div>
+  <div class="list-item-interactive">
+    <span class="dot dot-danger"></span>
+    <span class="flex-1">sandbox-worker</span>
+    <span class="tag tag-danger">Stopped</span>
+  </div>
+</div>
+```
+
+**Prefer `.card-group`** over `.card > .list` for list views — it gives a cleaner, tighter appearance.
 
 ### Forms
 
@@ -413,21 +445,21 @@ Use for switching between views/pages (Dashboard, Settings, History):
 </div>
 ```
 
-### Filter tabs (in-page filtering)
+### Filter tabs (segmented control)
 
-Use for filtering content within a single view (All, Active, Archived):
+iOS-style segmented control for in-page filtering. Active tab is elevated with `bg-card` + subtle shadow.
 
 ```html
 <div class="filter-tabs">
   <button class="tab active">All</button>
-  <button class="tab">Category A</button>
-  <button class="tab">Category B</button>
+  <button class="tab">Active</button>
+  <button class="tab">Archived</button>
 </div>
 ```
 
 **When to use which:**
 - **Tab bar** (underline): switching between different views/pages
-- **Filter tabs** (pill): filtering/toggling within the same view
+- **Filter tabs** (segmented): filtering/toggling within the same view
 
 ### Data table
 
@@ -450,42 +482,60 @@ Utility classes: `.num` (right-align, tabular-nums), `.dim`, `.positive`, `.nega
 
 ### Stat grid (KPI / metrics)
 
-For grids of small metric cards (portfolio breakdown, dashboard KPIs). Uses 1px borders between items instead of card-in-card nesting:
+Fused 4-column grid with 1px borders between items. Each cell has a colored accent bar at the top for category identification. Collapses to 2 columns on mobile (≤600px).
 
 ```html
 <div class="stat-grid">
   <div class="stat-item">
+    <div class="stat-bar" style="background:var(--sapphire)"></div>
     <div class="stat-value">15 040 €</div>
     <div class="stat-label">Actions</div>
-    <div class="stat-sub">5.1% du total</div>
+    <div class="stat-sub">5.1%</div>
   </div>
   <div class="stat-item">
+    <div class="stat-bar" style="background:var(--green)"></div>
     <div class="stat-value">1 480 €</div>
     <div class="stat-label">Crypto</div>
-    <div class="stat-sub">0.5% du total</div>
+    <div class="stat-sub">0.5%</div>
   </div>
   <!-- more items... -->
 </div>
 ```
 
-**Do NOT** nest `.card` inside `.card` for KPI grids — use `.stat-grid` instead.
+- `.stat-bar` takes its color via inline `style="background:var(--sapphire)"` — each item has its own accent color.
+- **Do NOT** nest `.card` inside `.card` for KPI grids — use `.stat-grid` instead.
+- **Do NOT** scope `.stat-value` / `.stat-label` / `.stat-sub` under `.stat-item` — they are top-level classes.
 
 ### Lists
 
+List items no longer have built-in borders — they get separators from `.card-group` parent.
+
 ```html
+<!-- Standalone list (no separators) -->
 <ul class="list">
   <li class="list-item">Static item</li>
   <li class="list-item-interactive" onclick="...">Clickable item</li>
 </ul>
+
+<!-- List inside card-group (auto-separators) -->
+<div class="card-group">
+  <div class="list-item-interactive">Item A</div>
+  <div class="list-item-interactive">Item B</div>
+</div>
 ```
 
 ### Tags
+
+Translucent tinted backgrounds — text carries the color, background is a 15% tint.
 
 ```html
 <span class="tag">Default</span>
 <span class="tag tag-accent">Active</span>
 <span class="tag tag-success">Online</span>
 <span class="tag tag-danger">Error</span>
+<span class="tag tag-warning">Pending</span>
+<span class="tag tag-mauve">Managed</span>
+<span class="tag tag-sapphire">Info</span>
 ```
 
 ### Meta items (icon + text)
@@ -530,11 +580,31 @@ For grids of small metric cards (portfolio breakdown, dashboard KPIs). Uses 1px 
 <hr class="divider-sm">
 ```
 
-### Section titles
+### Section labels
+
+Uppercase dim label with optional count. Use above `.card-group` to group items.
 
 ```html
-<h4 class="section-title">Settings</h4>
+<div class="section-label">In progress <span class="count">4</span></div>
+<div class="card-group">...</div>
 ```
+
+`.section-title` is an alias for `.section-label` (same styles).
+
+### Progress bar
+
+Thin 4px track with colored fill. Use for completion, quotas, storage.
+
+```html
+<div class="progress-bar">
+  <div class="progress-track">
+    <div class="progress-fill" style="width: 72%"></div>
+  </div>
+  <span class="progress-label">72%</span>
+</div>
+```
+
+Override fill color with inline style: `style="width:92%;background:var(--red)"` for quota warnings.
 
 ### Status dots
 
@@ -593,19 +663,18 @@ h2 { margin-bottom: var(--space-md, 16px); }
     <div class="search-box">
       <!-- Search icon --> <input type="text" placeholder="Search...">
     </div>
+    <div style="flex:1"></div>
+    <div class="filter-tabs" style="margin-bottom:0">
+      <button class="tab active">All</button>
+      <button class="tab">Active</button>
+      <button class="tab">Archived</button>
+    </div>
     <button class="btn btn-primary btn-sm"><!-- Plus icon --> Add</button>
   </div>
 
-  <div class="filter-tabs">
-    <button class="tab active">All</button>
-    <button class="tab">Active</button>
-    <button class="tab">Archived</button>
-  </div>
-
-  <div class="card">
-    <ul class="list" id="items">
-      <!-- populated by JS -->
-    </ul>
+  <div class="section-label">Active <span class="count">3</span></div>
+  <div class="card-group" id="items">
+    <!-- populated by JS with list-item-interactive -->
   </div>
 
   <div class="empty-state" id="empty" style="display:none">
@@ -717,8 +786,18 @@ AlfSDK.sheet(
 
 ### Lists
 
-- DO: `<ul class="list"><li class="list-item-interactive">Item</li></ul>`
+- DO: `<div class="card-group"><div class="list-item-interactive">Item</div></div>`
 - DON'T: `<div style="padding:8px;border-bottom:1px solid #333">Item</div>`
+
+### Cards & surfaces
+
+- DO: `<div class="card">` (borderless, bg-card background)
+- DON'T: `<div style="border:1px solid var(--border);border-radius:8px;padding:16px">`
+
+### Tags
+
+- DO: `<span class="tag tag-success">Online</span>` (translucent tint)
+- DON'T: `<span style="background:var(--green);color:#fff;padding:2px 8px">Online</span>`
 
 ---
 
@@ -730,12 +809,15 @@ AlfSDK.sheet(
 - [ ] All colors use CSS variables, zero hardcoded hex values
 - [ ] Translucent backgrounds use `color-mix()`, not `rgba()`
 - [ ] All spacing uses `--space-*` tokens or `alf-ui.css` classes
-- [ ] Buttons use `.btn` + variant classes
+- [ ] Buttons use `.btn` + variant classes, **no borders**
 - [ ] Forms use `.form-group` + `.form-label` + `.input`
-- [ ] Cards use `.card` class
+- [ ] Cards use `.card` (borderless) or `.card-group` for lists
+- [ ] Tags use `.tag` + `.tag-*` (translucent tinted, not opaque)
+- [ ] Lists use `.card-group` > `.list-item-interactive` pattern
 - [ ] Icons are inline Lucide SVGs with `currentColor`, sized 12/14/16/20px
 - [ ] Empty states use `.empty-state`
 - [ ] Loading states use `.loading-state` + `.spinner`
 - [ ] Hover transitions are `0.15s`, not arbitrary values
 - [ ] Touch targets are 44px+ on mobile
+- [ ] No `border: 1px solid` on cards, buttons, tags, or alerts
 - [ ] No inline styles for things covered by `alf-ui.css` classes

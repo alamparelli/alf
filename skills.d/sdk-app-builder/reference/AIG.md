@@ -364,6 +364,40 @@ Separators are `border 40% opacity` — ultra-light, not full `--border`.
 
 **Prefer `.card-group`** over `.card > .list` for list views — it gives a cleaner, tighter appearance.
 
+### Input row (input + button)
+
+Standard pattern for text input with an action button (e.g. add todo, send message):
+
+```html
+<div class="input-row">
+  <input class="input" type="text" placeholder="Nouvelle tâche...">
+  <button class="btn btn-primary">Ajouter</button>
+</div>
+```
+
+`.input-row` provides `display: flex` + `gap: 8px`. The input auto-expands (`flex: 1`).
+
+### Custom checkbox
+
+**NEVER use emoji checkboxes** (✅, ☑️, ⬜). Use the `.check` CSS class — a 20px circle that fills with accent color when checked.
+
+```html
+<!-- Unchecked -->
+<div class="check" onclick="this.classList.toggle('checked')"></div>
+
+<!-- Checked -->
+<div class="check checked"></div>
+```
+
+In list items, always wrap checkbox + text with a gap:
+
+```html
+<div class="list-item-interactive" style="gap: 12px">
+  <div class="check"></div>
+  <span class="flex-1">Task text</span>
+</div>
+```
+
 ### Forms
 
 ```html
@@ -764,10 +798,17 @@ AlfSDK.sheet(
 - DO: `background: color-mix(in srgb, var(--red) 12%, var(--bg))`
 - DON'T: `background: rgba(196, 57, 42, 0.1)`
 
-### Icons
+### Icons & checkboxes
 
 - DO: inline SVG with `stroke="currentColor"`, size 14px for buttons
-- DON'T: emoji icons, external icon fonts, `<img>` tags for icons
+- DO: `<div class="check"></div>` for checkboxes
+- DON'T: emoji icons (✅, ☑️, ⬜), external icon fonts, `<img>` tags for icons
+- DON'T: native `<input type="checkbox">` without `.toggle` wrapper
+
+### Input rows
+
+- DO: `<div class="input-row"><input class="input"><button class="btn btn-primary">Add</button></div>`
+- DON'T: `<input style="..."><button style="...">` without flex container or gap
 
 ### Animations
 
@@ -820,4 +861,6 @@ AlfSDK.sheet(
 - [ ] Hover transitions are `0.15s`, not arbitrary values
 - [ ] Touch targets are 44px+ on mobile
 - [ ] No `border: 1px solid` on cards, buttons, tags, or alerts
+- [ ] No emoji checkboxes — use `.check` class
+- [ ] Input + button combos use `.input-row` (flex + gap)
 - [ ] No inline styles for things covered by `alf-ui.css` classes

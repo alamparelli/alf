@@ -19,7 +19,7 @@
   import SchedulesView from './views/SchedulesView.svelte'
   import TerminalView from './views/TerminalView.svelte'
   import ChatView from './views/ChatView.svelte'
-  import SpotlightSearch from './components/SpotlightSearch.svelte'
+  import LensSearch from './components/LensSearch.svelte'
   import SetupWizard from './components/SetupWizard.svelte'
   import { X, Search } from 'lucide-svelte'
   import { nav, SYSTEM_TABS } from './stores/nav.svelte'
@@ -28,7 +28,7 @@
   import { theme } from './stores/theme.svelte'
   import { toasts } from './stores/toast.svelte'
   import { sound } from './stores/sound.svelte'
-  import { spotlightSettings } from './stores/spotlight.svelte'
+  import { lensSettings } from './stores/lens.svelte'
   import { api } from './lib/api'
 
   let showWizard = $state(false)
@@ -170,14 +170,14 @@
 {#if nav.currentView !== 'chat'}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <button class="spotlight-fab" onclick={() => window.dispatchEvent(new CustomEvent('alf:open-spotlight'))}>
+  <button class="lens-fab" onclick={() => window.dispatchEvent(new CustomEvent('alf:open-lens'))}>
     <Search size={18} />
-    <span class="fab-tooltip">Search <kbd>{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+{spotlightSettings.shortcutKey.toUpperCase()}</kbd></span>
+    <span class="fab-tooltip">Search <kbd>{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+{lensSettings.shortcutKey.toUpperCase()}</kbd></span>
   </button>
 {/if}
 
 <Toast />
-<SpotlightSearch />
+<LensSearch />
 <SetupWizard bind:open={showWizard} bind:this={wizardRef} />
 
 <style>
@@ -771,7 +771,7 @@
     }
   }
 
-  :global(.spotlight-fab) {
+  :global(.lens-fab) {
     position: fixed;
     bottom: var(--space-lg, 24px);
     right: var(--space-lg, 24px);
@@ -790,7 +790,7 @@
     transition: transform 0.15s, box-shadow 0.15s;
   }
 
-  :global(.spotlight-fab:hover) {
+  :global(.lens-fab:hover) {
     transform: scale(1.08);
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
   }
@@ -820,12 +820,12 @@
     margin-left: 4px;
   }
 
-  :global(.spotlight-fab:hover .fab-tooltip) {
+  :global(.lens-fab:hover .fab-tooltip) {
     opacity: 1;
   }
 
   @media (max-width: 768px) {
-    :global(.spotlight-fab) {
+    :global(.lens-fab) {
       bottom: 72px;
       right: 16px;
     }

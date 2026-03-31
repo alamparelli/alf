@@ -5,12 +5,12 @@
   import { theme, ALF_THEMES } from '../stores/theme.svelte'
   import { toasts } from '../stores/toast.svelte'
   import { sound } from '../stores/sound.svelte'
-  import { spotlightSettings } from '../stores/spotlight.svelte'
+  import { lensSettings } from '../stores/lens.svelte'
   import { api, esc, waitForDaemonAndReload } from '../lib/api'
 
-  // --- Spotlight shortcut ---
+  // --- Lens shortcut ---
   let shortcutCapturing = $state(false)
-  let shortcutDisplay = $derived(spotlightSettings.shortcutKey.toUpperCase())
+  let shortcutDisplay = $derived(lensSettings.shortcutKey.toUpperCase())
 
   function startCapture() {
     shortcutCapturing = true
@@ -23,7 +23,7 @@
     // Ignore modifier-only keys
     if (['Meta', 'Control', 'Alt', 'Shift', 'Tab', 'Escape'].includes(key)) return
     if (key.length === 1) {
-      spotlightSettings.setKey(key)
+      lensSettings.setKey(key)
     }
     shortcutCapturing = false
   }
@@ -210,7 +210,7 @@
       <h3>Shortcuts</h3>
     </div>
     <div class="notif-row">
-      <span class="shortcut-label">Spotlight</span>
+      <span class="shortcut-label">Lens</span>
       <span class="hint">{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+</span>
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <button

@@ -129,7 +129,20 @@ while IFS= read -r tenant; do
         done
     fi
 
-    # 3e. Ensure shared secrets are propagated
+    # 3e. Final ownership fix (after all seeds — ensures seeded files are owned correctly)
+    for subdir in data config.d skills.d cache local vault-data; do
+        if [[ -d "$tenant_dir/$subdir" ]]; then
+            chown -R "$host_uid:$host_uid" "$tenant_dir/$subdir" 2>/dev/null || true
+        fi
+    done
+    echo "  ownership re-fixed (post-seed)"
+
+    # 3g. Fix resolv.conf ownership (bind-mounted as file)
+    if [[ -f "$tenant_dir/resolv.conf" ]]; then
+        chown "$host_uid:$host_uid" "$tenant_dir/resolv.conf" 2>/dev/null || true
+    fi
+
+    # 3h. Ensure shared secrets are propagated
     for shared_secret in whisper_shared_secret embed_shared_secret; do
         if [[ -f "$SHARED_DIR/$shared_secret" ]]; then
             cp "$SHARED_DIR/$shared_secret" "$tenant_dir/secrets/$shared_secret"

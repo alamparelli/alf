@@ -1,7 +1,7 @@
-const STORAGE_KEY = 'spotlight:shortcut'
+const STORAGE_KEY = 'lens:shortcut'
 const DEFAULT_KEY = 'g'
 
-class SpotlightSettings {
+class LensSettings {
   shortcutKey = $state(DEFAULT_KEY)
 
   constructor() {
@@ -20,4 +20,4 @@ class SpotlightSettings {
   }
 }
 
-export const spotlightSettings = new SpotlightSettings()
+export const lensSettings = new LensSettings()

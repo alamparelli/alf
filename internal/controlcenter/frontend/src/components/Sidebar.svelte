@@ -1,7 +1,7 @@
 <script lang="ts">
   import { nav, SYSTEM_TABS, DEVELOPER_TAB } from '../stores/nav.svelte'
   import { apps } from '../stores/apps.svelte'
-  import { spotlightSettings } from '../stores/spotlight.svelte'
+  import { lensSettings } from '../stores/lens.svelte'
   import {
     MessageCircle, Home, Terminal, Layers, CalendarClock,
     Users, SlidersHorizontal, Shield, Lock, Store,
@@ -9,12 +9,12 @@
   } from 'lucide-svelte'
   import { getIcon } from '../lib/icons'
 
-  function openSpotlight() {
-    window.dispatchEvent(new CustomEvent('alf:open-spotlight'))
+  function openLens() {
+    window.dispatchEvent(new CustomEvent('alf:open-lens'))
   }
 
   const shortcutLabel = $derived(
-    (navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl') + '+' + spotlightSettings.shortcutKey.toUpperCase()
+    (navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl') + '+' + lensSettings.shortcutKey.toUpperCase()
   )
 
   const ICON_MAP: Record<string, any> = {
@@ -41,7 +41,7 @@
 <aside class="sidebar" class:open={nav.sidebarOpen}>
   <div class="sidebar-header">
     <h1><span>ALF</span> OS<span class="sidebar-dot"></span></h1>
-    <button class="sidebar-search" onclick={openSpotlight} title="Search ({shortcutLabel})">
+    <button class="sidebar-search" onclick={openLens} title="Search ({shortcutLabel})">
       <Search size={15} />
     </button>
   </div>

@@ -766,6 +766,106 @@ a:hover { text-decoration: underline; }
   color: var(--text-dim);
 }
 
+/* ── Page setup ───────────────────────────────────────────────────────── */
+/* Apply to <body> or a wrapper. Sets the standard ALF app layout.        */
+/* Includes notch-safe top padding, max-width, font stack, and colors.    */
+.page {
+  padding: var(--page-padding-top, 2.5rem) var(--page-padding, 2.5rem) var(--page-padding, 2.5rem);
+  max-width: 680px;
+  margin: 0 auto;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.page h2 { margin-bottom: var(--space-md, 16px); }
+
+/* ── Done / completed state ───────────────────────────────────────────── */
+/* Add to any element to show it as completed (strikethrough + dim).       */
+.done { text-decoration: line-through; color: var(--text-dim); }
+
+/* ── Footer stats ─────────────────────────────────────────────────────── */
+/* Bottom status line for counts (e.g. "2 / 5 terminées").                */
+.footer-stats {
+  margin-top: var(--space-md, 16px);
+  font-size: var(--font-xs, 11px);
+  color: var(--text-dim);
+}
+
+/* ── Danger zone ──────────────────────────────────────────────────────── */
+/* Red-tinted section for destructive actions (delete account, reset).     */
+.danger-zone {
+  background: color-mix(in srgb, var(--red) 8%, var(--bg));
+  border-radius: var(--radius, 8px);
+  padding: var(--space-md, 16px);
+}
+.danger-zone h3, .danger-zone h4 { color: var(--red); }
+
+/* ── Keyboard shortcut ────────────────────────────────────────────────── */
+.kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+  font-size: var(--font-xs, 11px);
+  background: var(--bg-input);
+  border-radius: 4px;
+  line-height: 1.6;
+}
+
+/* ── Skeleton loading ─────────────────────────────────────────────────── */
+/* Placeholder shimmer for async content. Set width/height on element.    */
+.skeleton {
+  background: var(--bg-input);
+  border-radius: var(--radius, 8px);
+  animation: alf-skeleton 1.5s ease-in-out infinite;
+}
+.skeleton-text {
+  height: 13px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  animation: alf-skeleton 1.5s ease-in-out infinite;
+}
+.skeleton-text + .skeleton-text { margin-top: 8px; }
+.skeleton-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-input);
+  animation: alf-skeleton 1.5s ease-in-out infinite;
+}
+
+@keyframes alf-skeleton {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Backdrop / overlay ───────────────────────────────────────────────── */
+/* Full-screen semi-transparent overlay for modals or panels.             */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+}
+
+/* ── Spacer ───────────────────────────────────────────────────────────── */
+/* Flex spacer — pushes siblings apart in flex containers.                */
+.spacer { flex: 1; }
+
+/* ── Screen reader only ───────────────────────────────────────────────── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Mobile touch targets ──────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .btn { min-height: 44px; }

@@ -12,7 +12,7 @@ Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies
 - **Semantic memory** - Go-native ONNX embeddings (sqlite-vec + FTS5) for real long-term recall, not just context window tricks
 - **Persistent classifier** - a long-lived Claude process handles message routing in ~0ms instead of spawning a new process per message
 - **Tier system** - configurable response tiers (model, tools, effort, read/write access) routed by an LLM classifier
-- **Defense-in-depth security** - Non-root daemon (uid 1000, zero capabilities), read-only config, restricted tool execution, not just a container boundary
+- **Defense-in-depth security** - Non-root daemon (uid 1001), LLM subprocess isolated as uid 1000 with zero capabilities, read-only config, restricted tool execution
 - **No API costs** - runs on your Claude subscription (Pro/Max/Team), not pay-per-token API calls
 - **Self-hosted** - your hardware, your data, your rules. No cloud dependency beyond your Claude account
 
@@ -20,7 +20,7 @@ Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies
 
 ![ALF OS Architecture](docs/architecture.png)
 
-**Host CLI** (`alf`) manages the container lifecycle from the host machine. Inside Docker, the **daemon** (uid 1000) serves the Control Center web UI, polls Telegram, and coordinates all subsystems. Claude subprocesses run as uid 1001 with restricted permissions. Sidecar containers handle voice transcription (WhisperKit) and embeddings.
+**Host CLI** (`alf`) manages the container lifecycle from the host machine. Inside Docker, the **daemon** runs as `alfd` (uid 1001) and serves the Control Center web UI, polls Telegram, and coordinates all subsystems. LLM subprocesses run as `alf` (uid 1000) with restricted permissions and zero capabilities. Sidecar containers handle voice transcription (WhisperKit) and embeddings.
 
 Messages flow through a **comm engine** → **router** → **LLM provider** pipeline. The router classifies intent and selects a response tier (model, tools, effort level). A **permission system** gates access to sandboxed apps and tools. Apps run in chroot-isolated namespaces with filesystem allowlists. Secrets are accessed exclusively through a **vault proxy** (Unix socket) — no direct access from app code.
 
@@ -242,9 +242,9 @@ internal/
 
 ## Security model
 
-The entrypoint runs as root for package installation and permission setup, then drops to uid 1000 (`alf`) with zero capabilities via `setpriv`. Claude subprocesses run as uid 1001 (`claude`) with further restrictions:
+The entrypoint runs as root for package installation and permission setup, then drops to `alfd` (uid 1001) via `setpriv` with minimal capabilities (setuid, setgid, sys_admin, sys_chroot, chown). LLM subprocesses run as `alf` (uid 1000) with zero capabilities and a sanitized environment:
 
-- **User separation** - daemon runs as `alf` (uid 1000), Claude runs as `claude` (uid 1001) with sanitized environment (allowlist-only)
+- **User separation** - daemon runs as `alfd` (uid 1001), LLM runs as `alf` (uid 1000) with allowlist-only environment
 - **Filesystem isolation** - `/opt/alf/config.d/` read-only, `/opt/alf/tools.d/` read+execute only, `/home/alf/data/` read+write
 - **Secrets** - Docker secrets mechanism, never in environment variables
 - **Security headers** - HSTS, X-Frame-Options DENY, CSP with SRI on CDN dependencies, X-Content-Type-Options nosniff

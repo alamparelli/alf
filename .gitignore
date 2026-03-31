@@ -35,6 +35,7 @@ user-space/
 .plans/
 
 # Local dev (docker compose build+up)
+docker-compose.yml
 dev-secrets/
 dev-data/
 dev-claude-session/

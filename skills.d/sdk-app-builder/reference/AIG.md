@@ -652,14 +652,89 @@ Override fill color with inline style: `style="width:92%;background:var(--red)"`
 <span class="dot dot-warning"></span> Pending
 ```
 
+### Footer stats
+
+Bottom status line for counts. Use below lists, progress bars, etc.
+
+```html
+<div class="footer-stats">2 / 5 terminées</div>
+```
+
+### Danger zone
+
+Red-tinted section for destructive actions. Headings auto-color red.
+
+```html
+<div class="danger-zone">
+  <h4>Supprimer le compte</h4>
+  <p class="text-sm text-dim">Cette action est irréversible.</p>
+  <button class="btn btn-danger mt-sm">Supprimer</button>
+</div>
+```
+
+### Keyboard shortcuts
+
+```html
+Press <span class="kbd">⌘K</span> to search
+```
+
+### Skeleton loading
+
+Placeholder shimmer for async content. Set dimensions on the element.
+
+```html
+<!-- Text placeholder -->
+<div class="skeleton-text" style="width: 60%"></div>
+<div class="skeleton-text" style="width: 80%"></div>
+
+<!-- Block placeholder -->
+<div class="skeleton" style="width: 100%; height: 120px"></div>
+
+<!-- Circle placeholder (avatar) -->
+<div class="skeleton-circle"></div>
+```
+
+### Backdrop
+
+Full-screen overlay for custom modals. Use `AlfSDK.sheet()` when possible — this is for cases where you need a fully custom modal.
+
+```html
+<div class="backdrop" onclick="closeModal()"></div>
+<div class="card" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:101;width:400px">
+  <!-- modal content -->
+</div>
+```
+
+### Done state
+
+Strikethrough + dim for completed items. Works on any element.
+
+```html
+<span class="done">Completed task text</span>
+```
+
+### Spacer
+
+Pushes siblings apart in flex containers. Replaces `<div style="flex:1"></div>`.
+
+```html
+<div class="toolbar">
+  <h3>Title</h3>
+  <div class="spacer"></div>
+  <button class="btn btn-sm">Action</button>
+</div>
+```
+
 ---
 
 ## Layout patterns
 
 ### Standard app page
 
+Use `.page` on `<body>` — it sets padding, max-width, font, bg, and color in one class. **No custom body CSS needed.**
+
 ```html
-<body>
+<body class="page">
   <h2>App Name</h2>
 
   <div class="card mb-md">
@@ -677,31 +752,19 @@ Override fill color with inline style: `style="width:92%;background:var(--red)"`
 </body>
 ```
 
-Body style:
-```css
-body {
-  padding: var(--page-padding-top, 2.5rem) var(--page-padding, 2.5rem) var(--page-padding, 2.5rem);
-  max-width: 760px;
-  margin: 0 auto;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
-}
-h2 { margin-bottom: var(--space-md, 16px); }
-```
+**Do NOT write body CSS manually** — `.page` handles everything. Only override `max-width` if the app needs a wider layout.
 
 ### List view with toolbar
 
 ```html
-<body>
+<body class="page">
   <h2>Items</h2>
 
   <div class="toolbar">
     <div class="search-box">
       <!-- Search icon --> <input type="text" placeholder="Search...">
     </div>
-    <div style="flex:1"></div>
+    <div class="spacer"></div>
     <div class="filter-tabs" style="margin-bottom:0">
       <button class="tab active">All</button>
       <button class="tab">Active</button>
@@ -718,6 +781,8 @@ h2 { margin-bottom: var(--space-md, 16px); }
   <div class="empty-state" id="empty" style="display:none">
     <p>No items match the current filter.</p>
   </div>
+
+  <div class="footer-stats">3 / 10 items</div>
 </body>
 ```
 
@@ -730,6 +795,31 @@ h2 { margin-bottom: var(--space-md, 16px); }
   <div class="card">Card 3</div>
   <div class="card">Card 4</div>
 </div>
+```
+
+### Settings page
+
+```html
+<body class="page">
+  <h2>Settings</h2>
+
+  <div class="card mb-md">
+    <div class="card-header">
+      <h3>Notifications</h3>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" checked>
+      <span class="toggle-track"></span>
+      Email notifications
+    </label>
+  </div>
+
+  <div class="danger-zone">
+    <h4>Delete all data</h4>
+    <p class="text-sm text-dim">This cannot be undone.</p>
+    <button class="btn btn-danger mt-sm">Delete</button>
+  </div>
+</body>
 ```
 
 ---
@@ -814,6 +904,21 @@ AlfSDK.sheet(
 - DO: `<div class="input-row"><input class="input"><button class="btn btn-primary">Add</button></div>`
 - DON'T: `<input style="..."><button style="...">` without flex container or gap
 
+### Page setup
+
+- DO: `<body class="page">` — one class, zero custom body CSS
+- DON'T: manual `body { padding: 2.5rem; max-width: 760px; margin: 0 auto; font-family: ...; background: ...; color: ...; }`
+
+### Completed / done state
+
+- DO: `<span class="done">Finished task</span>`
+- DON'T: `<span style="text-decoration:line-through;color:gray">Finished task</span>`
+
+### Spacers
+
+- DO: `<div class="spacer"></div>` in flex containers
+- DON'T: `<div style="flex:1"></div>`
+
 ### Animations
 
 - DO: `transition: background 0.15s` on hover states
@@ -850,21 +955,26 @@ AlfSDK.sheet(
 
 - [ ] Theme setup: `theme-*.css` + `theme-init.js` + `alf-app-sdk.js` in `<head>`
 - [ ] `AlfSDK.init()` with `onThemeChange` handler
-- [ ] Body has explicit `font-family`, `background: var(--bg)`, `color: var(--text)`
+- [ ] `<body class="page">` — **no manual body CSS**
 - [ ] All colors use CSS variables, zero hardcoded hex values
 - [ ] Translucent backgrounds use `color-mix()`, not `rgba()`
 - [ ] All spacing uses `--space-*` tokens or `alf-ui.css` classes
 - [ ] Buttons use `.btn` + variant classes, **no borders**
 - [ ] Forms use `.form-group` + `.form-label` + `.input`
+- [ ] Input + button combos use `.input-row` (flex + gap)
 - [ ] Cards use `.card` (borderless) or `.card-group` for lists
 - [ ] Tags use `.tag` + `.tag-*` (translucent tinted, not opaque)
 - [ ] Lists use `.card-group` > `.list-item-interactive` pattern
+- [ ] Checkboxes use `.check` / `.check.checked` — **no emoji**
+- [ ] Completed items use `.done` class
+- [ ] Flex spacers use `.spacer` — not `style="flex:1"`
 - [ ] Icons are inline Lucide SVGs with `currentColor`, sized 12/14/16/20px
 - [ ] Empty states use `.empty-state`
 - [ ] Loading states use `.loading-state` + `.spinner`
+- [ ] Async content uses `.skeleton-text` / `.skeleton` placeholders
+- [ ] Destructive sections use `.danger-zone`
+- [ ] Footer counts use `.footer-stats`
 - [ ] Hover transitions are `0.15s`, not arbitrary values
 - [ ] Touch targets are 44px+ on mobile
 - [ ] No `border: 1px solid` on cards, buttons, tags, or alerts
-- [ ] No emoji checkboxes — use `.check` class
-- [ ] Input + button combos use `.input-row` (flex + gap)
 - [ ] No inline styles for things covered by `alf-ui.css` classes

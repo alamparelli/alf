@@ -198,7 +198,6 @@
 
   let filteredApps = $derived(localApps.filter(a =>
     !foreignSlugs.includes(a) &&
-    !(marketplaceSlugs.includes(a) && !catalogApps.some((c: any) => c.slug === a)) &&
     a !== 'developer'
   ))
 

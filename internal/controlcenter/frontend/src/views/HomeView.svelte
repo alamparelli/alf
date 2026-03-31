@@ -986,7 +986,7 @@
     align-items: center;
     gap: 5px;
     padding: 5px 12px;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
     background: var(--bg-card);
     color: var(--text);
@@ -998,7 +998,7 @@
 
   .ws-btn:hover { background: var(--bg-input); }
   .ws-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .ws-btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .ws-btn.primary { background: var(--accent); color: var(--on-accent); }
   .ws-btn.primary:hover { opacity: 0.9; }
 
   /* File modal */
@@ -1043,7 +1043,7 @@
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-radius: 6px;
-    background: var(--bg-input);
+    background: var(--bg-card);
     color: var(--text);
   }
 

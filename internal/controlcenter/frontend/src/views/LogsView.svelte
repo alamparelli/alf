@@ -221,7 +221,7 @@
 
   .btn-icon {
     background: none;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
     color: var(--text-dim);
     padding: 6px;
@@ -232,7 +232,6 @@
 
   .btn-icon:hover {
     color: var(--accent);
-    border-color: var(--accent);
   }
 
   .search-row {
@@ -276,7 +275,7 @@
 
   .chip {
     background: var(--bg);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 12px;
     padding: 2px 10px;
     font-size: var(--font-xs, 11px);
@@ -285,12 +284,10 @@
   }
 
   .chip:hover, .chip.active {
-    border-color: var(--accent);
     color: var(--accent);
   }
 
   .chip-error {
-    border-color: var(--red, #e55);
     color: var(--red, #e55);
   }
 

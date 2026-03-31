@@ -761,7 +761,7 @@
     width: 28px;
     height: 28px;
     background: none;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
     color: var(--text-dim);
     cursor: pointer;
@@ -813,7 +813,7 @@
     padding: 12px 16px;
     align-self: flex-start;
     background: var(--bg-card);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 12px;
     border-bottom-left-radius: 4px;
   }

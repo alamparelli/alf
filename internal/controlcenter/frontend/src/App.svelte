@@ -300,13 +300,13 @@
     font-size: var(--font-xl, 24px);
   }
 
-  /* Common button styles */
+  /* Common button styles — borderless */
   :global(.btn) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding: 6px 14px;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--radius, 8px);
     background: var(--bg-input);
     color: var(--text);
@@ -315,7 +315,7 @@
     font-weight: 500;
     cursor: pointer;
     text-decoration: none;
-    transition: background 0.15s;
+    transition: background 0.15s, opacity 0.15s;
   }
 
   :global(.btn:hover) {
@@ -325,16 +325,15 @@
   :global(.btn-primary) {
     background: var(--accent);
     color: var(--on-accent);
-    border-color: var(--accent);
   }
 
   :global(.btn-primary:hover) {
     opacity: 0.9;
+    background: var(--accent);
   }
 
   :global(.btn-ghost) {
     background: transparent;
-    border-color: transparent;
   }
 
   :global(.btn-ghost:hover) {
@@ -385,53 +384,52 @@
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
-    background: var(--bg-input);
+    background: var(--bg-card);
     color: var(--text);
     font-family: inherit;
     font-size: var(--font-sm, 13px);
+    outline: none;
+    transition: border-color 0.15s;
   }
 
-  /* Additional button variants */
+  :global(.input:focus) {
+    border-color: var(--accent);
+  }
+
+  /* Additional button variants — borderless */
   :global(.btn-success) {
     background: var(--green);
     color: #fff;
-    border-color: var(--green);
   }
 
   :global(.btn-warning) {
     background: var(--yellow);
     color: #fff;
-    border-color: var(--yellow);
   }
 
   :global(.btn-info) {
     background: var(--sapphire);
     color: #fff;
-    border-color: var(--sapphire);
   }
 
   :global(.btn-danger) {
     background: color-mix(in srgb, var(--red) 12%, transparent);
     color: var(--red);
-    border-color: color-mix(in srgb, var(--red) 30%, transparent);
   }
 
   :global(.btn-danger:hover) {
     background: var(--red);
     color: #fff;
-    border-color: var(--red);
   }
 
   :global(.btn-secondary) {
     background: var(--bg-input);
     color: var(--text);
-    border-color: var(--border);
   }
 
   :global(.btn-secondary-sm) {
     background: var(--bg-input);
     color: var(--text);
-    border-color: var(--border);
     padding: 4px 10px;
     font-size: var(--font-xs, 11px);
   }
@@ -441,10 +439,16 @@
     padding: 6px 10px;
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
-    background: var(--bg-input);
+    background: var(--bg-card);
     color: var(--text);
     font-family: inherit;
     font-size: var(--font-sm, 13px);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  :global(select:focus) {
+    border-color: var(--accent);
   }
 
   /* Common textarea styles */
@@ -452,11 +456,17 @@
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
-    background: var(--bg-input);
+    background: var(--bg-card);
     color: var(--text);
     font-family: inherit;
     font-size: var(--font-sm, 13px);
     resize: vertical;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  :global(textarea:focus) {
+    border-color: var(--accent);
   }
 
   /* ── AIG shared components ──*/
@@ -501,8 +511,11 @@
 
   :global(.filter-tabs) {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs, 4px);
+    gap: 2px;
+    background: var(--bg-input);
+    border-radius: 6px;
+    padding: 2px;
+    width: fit-content;
     margin-bottom: var(--space-md, 16px);
   }
 
@@ -514,28 +527,47 @@
   }
 
   :global(.tab) {
-    padding: var(--space-sm, 8px) var(--space-md, 16px);
+    padding: 5px 14px;
     border: none;
-    border-bottom: 2px solid transparent;
-    background: none;
+    border-radius: 5px;
+    background: transparent;
     color: var(--text-dim);
     font-family: inherit;
-    font-size: var(--font-sm, 13px);
+    font-size: var(--font-xs, 11px);
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
-    margin-bottom: -1px;
   }
 
   :global(.tab:hover) {
     color: var(--text);
-    background: color-mix(in srgb, var(--accent) 5%, transparent);
   }
 
   :global(.tab.active) {
+    background: var(--bg-card);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  }
+
+  /* Tab used inside .tabs (underline nav) — override segmented style */
+  :global(.tabs .tab) {
+    padding: var(--space-sm, 8px) var(--space-md, 16px);
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    box-shadow: none;
+    background: none;
+  }
+
+  :global(.tabs .tab:hover) {
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+  }
+
+  :global(.tabs .tab.active) {
     color: var(--accent);
     border-bottom-color: var(--accent);
     background: none;
+    box-shadow: none;
   }
 
   :global(.badge) {
@@ -578,32 +610,28 @@
     padding: var(--space-sm, 8px) var(--space-md, 16px);
     border-radius: var(--radius, 8px);
     font-size: var(--font-sm, 13px);
-    border: 1px solid var(--border);
+    border: none;
     background: var(--bg-card);
   }
 
   :global(.alert-success) {
     background: color-mix(in srgb, var(--green) 12%, var(--bg));
     color: var(--green);
-    border-color: color-mix(in srgb, var(--green) 25%, transparent);
   }
 
   :global(.alert-danger) {
     background: color-mix(in srgb, var(--red) 12%, var(--bg));
     color: var(--red);
-    border-color: color-mix(in srgb, var(--red) 25%, transparent);
   }
 
   :global(.alert-warning) {
     background: color-mix(in srgb, var(--yellow) 12%, var(--bg));
     color: var(--yellow);
-    border-color: color-mix(in srgb, var(--yellow) 25%, transparent);
   }
 
   :global(.alert-info) {
     background: color-mix(in srgb, var(--accent) 10%, var(--bg));
     color: var(--text-dim);
-    border-color: var(--border);
   }
 
   :global(.meta) {
@@ -672,7 +700,7 @@
     gap: 6px;
     padding: 4px 10px;
     background: var(--bg-card);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
     color: var(--text-dim);
     font-family: inherit;
@@ -689,7 +717,8 @@
 
   .open-tab.active {
     color: var(--text);
-    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
     font-weight: 500;
   }
 
@@ -772,19 +801,18 @@
     white-space: nowrap;
     background: var(--bg-card, #2a2a2a);
     color: var(--text);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
     padding: 4px 10px;
     font-size: var(--font-xs, 11px);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-md);
   }
 
   :global(.fab-tooltip kbd) {
     background: var(--bg-input);
-    border: 1px solid var(--border);
     border-radius: 3px;
     padding: 0 4px;
     font-family: 'JetBrains Mono', monospace;

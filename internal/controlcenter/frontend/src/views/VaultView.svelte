@@ -1248,7 +1248,7 @@
     justify-content: space-between;
     padding: 10px 14px;
     background: var(--bg);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--radius, 8px);
     gap: 8px;
     transition: background 0.1s;
@@ -1432,7 +1432,6 @@
   .oauth-tab.active {
     color: var(--text);
     background: var(--bg-card);
-    border-color: var(--border);
     font-weight: 500;
   }
 
@@ -1524,7 +1523,7 @@
     margin: 12px 0;
     padding: 10px 12px;
     background: var(--bg-input);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--radius, 8px);
   }
 
@@ -1543,7 +1542,7 @@
     gap: 8px;
     padding: 8px 12px;
     background: var(--bg-input);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--radius, 8px);
     margin-bottom: 8px;
   }

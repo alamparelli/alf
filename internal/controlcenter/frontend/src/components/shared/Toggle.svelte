@@ -28,7 +28,7 @@
     align-items: center;
     gap: 10px;
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     position: relative;
   }
 

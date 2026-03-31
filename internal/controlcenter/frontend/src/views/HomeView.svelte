@@ -752,7 +752,7 @@
   }
 
   .ws-title {
-    font-size: 1rem;
+    font-size: var(--font-md, 15px);
     font-weight: 600;
   }
 
@@ -789,7 +789,7 @@
     align-items: center;
     gap: 6px;
     padding: 5px 12px;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
     user-select: none;
     border-radius: 0;
@@ -826,7 +826,7 @@
     align-items: center;
     gap: 4px;
     padding: 10px 16px;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -837,7 +837,7 @@
     color: var(--text);
     cursor: pointer;
     font-family: inherit;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     padding: 2px 4px;
     border-radius: 4px;
   }
@@ -851,7 +851,7 @@
     gap: 8px;
     padding: 24px;
     color: var(--text-dim);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   /* File table */
@@ -870,7 +870,7 @@
   .file-table th {
     text-align: left;
     padding: 8px 16px;
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 600;
     color: var(--text-dim);
     background: var(--bg);
@@ -890,7 +890,7 @@
 
   .file-row td {
     padding: 7px 16px;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
   }
 
@@ -910,7 +910,7 @@
   }
 
   .cell-size, .cell-date {
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
   }
 
@@ -918,7 +918,7 @@
   :global(.icon-file) { color: var(--text-dim); }
 
   .badge-protected {
-    font-size: 0.65rem;
+    font-size: var(--font-xs, 11px);
     padding: 0 5px;
     border-radius: 8px;
     background: color-mix(in srgb, var(--yellow) 12%, transparent);
@@ -954,7 +954,7 @@
     border: none;
     color: var(--text);
     font-family: inherit;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
     border-radius: 5px;
     text-align: left;
@@ -991,7 +991,7 @@
     background: var(--bg-card);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
     transition: background 0.15s;
   }
@@ -1024,7 +1024,7 @@
   .file-meta {
     display: flex;
     gap: 8px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     margin-bottom: 10px;
   }
@@ -1039,7 +1039,7 @@
     resize: vertical;
     min-height: 300px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -1051,7 +1051,7 @@
     white-space: pre-wrap;
     word-break: break-word;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     line-height: 1.5;
     padding: 8px 12px;
     background: var(--bg-input);
@@ -1062,7 +1062,7 @@
   /* JSON */
   .json-viewer {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
     line-height: 1.6;
     padding: 8px 12px;
     background: var(--bg-input);
@@ -1072,7 +1072,7 @@
   }
 
   .json-toggle { cursor: pointer; color: var(--accent); }
-  .json-type { color: var(--text-dim); font-size: 0.72rem; }
+  .json-type { color: var(--text-dim); font-size: var(--font-xs, 11px); }
   .json-key { color: var(--blue, #3b82f6); }
   .json-str { color: var(--green, #3d8b3d); }
   .json-num { color: var(--yellow, #eab308); }
@@ -1084,21 +1084,21 @@
   /* JSONL */
   .jsonl-viewer { max-height: 60vh; overflow-y: auto; }
   .jsonl-line { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
-  .jsonl-num { color: var(--text-dim); font-size: 0.72rem; width: 30px; text-align: right; flex-shrink: 0; }
-  .jsonl-content { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; white-space: pre-wrap; word-break: break-word; flex: 1; }
+  .jsonl-num { color: var(--text-dim); font-size: var(--font-xs, 11px); width: 30px; text-align: right; flex-shrink: 0; }
+  .jsonl-content { font-family: 'JetBrains Mono', monospace; font-size: var(--font-sm, 13px); white-space: pre-wrap; word-break: break-word; flex: 1; }
 
   /* CSV */
   .csv-wrap { max-height: 60vh; overflow: auto; }
-  .csv-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .csv-table { width: 100%; border-collapse: collapse; font-size: var(--font-sm, 13px); }
   .csv-table th, .csv-table td { padding: 4px 8px; border: 1px solid var(--border); text-align: left; }
   .csv-table th { background: var(--bg-input); font-weight: 500; position: sticky; top: 0; }
 
   /* Markdown */
-  :global(.markdown-body) { font-size: 0.88rem; line-height: 1.7; color: var(--text); overflow-wrap: break-word; }
+  :global(.markdown-body) { font-size: var(--font-sm, 13px); line-height: 1.7; color: var(--text); overflow-wrap: break-word; }
   :global(.markdown-body h1), :global(.markdown-body h2), :global(.markdown-body h3) { margin: 1em 0 0.5em; }
-  :global(.markdown-body h1) { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
-  :global(.markdown-body h2) { font-size: 1.2rem; }
-  :global(.markdown-body h3) { font-size: 1.05rem; }
+  :global(.markdown-body h1) { font-size: var(--font-xl, 24px); border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  :global(.markdown-body h2) { font-size: var(--font-lg, 18px); }
+  :global(.markdown-body h3) { font-size: var(--font-md, 15px); }
   :global(.markdown-body p) { margin: 0.5em 0; }
   :global(.markdown-body pre) { background: var(--bg-input); padding: 12px; border-radius: 6px; overflow-x: auto; }
   :global(.markdown-body code) { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }
@@ -1106,12 +1106,12 @@
   :global(.markdown-body ul), :global(.markdown-body ol) { padding-left: 1.5em; margin: 0.5em 0; }
   :global(.markdown-body blockquote) { border-left: 3px solid var(--border); padding-left: 1em; color: var(--text-dim); margin: 0.5em 0; }
   :global(.markdown-body table) { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
-  :global(.markdown-body th), :global(.markdown-body td) { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 0.82rem; }
+  :global(.markdown-body th), :global(.markdown-body td) { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: var(--font-sm, 13px); }
   :global(.markdown-body img) { max-width: 100%; border-radius: 6px; }
   :global(.markdown-body a) { color: var(--accent); }
 
   /* Form */
-  .dim { color: var(--text-dim); font-size: 0.85rem; }
+  .dim { color: var(--text-dim); font-size: var(--font-sm, 13px); }
   .modal-form { margin-top: 12px; }
   .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
 

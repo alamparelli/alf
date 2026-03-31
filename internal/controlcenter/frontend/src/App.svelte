@@ -433,7 +433,7 @@
     color: var(--text);
     border-color: var(--border);
     padding: 4px 10px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
   }
 
   /* Common select styles */
@@ -444,7 +444,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   /* Common textarea styles */
@@ -455,7 +455,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     resize: vertical;
   }
 
@@ -488,7 +488,7 @@
     border: none;
     background: none;
     color: var(--text);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     font-family: inherit;
     outline: none;
     min-width: 120px;
@@ -520,7 +520,7 @@
     background: none;
     color: var(--text-dim);
     font-family: inherit;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
@@ -542,7 +542,7 @@
     display: inline-flex;
     align-items: center;
     padding: 2px 8px;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 600;
     border-radius: 4px;
     text-transform: uppercase;
@@ -577,7 +577,7 @@
   :global(.alert) {
     padding: var(--space-sm, 8px) var(--space-md, 16px);
     border-radius: var(--radius, 8px);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     border: 1px solid var(--border);
     background: var(--bg-card);
   }
@@ -610,7 +610,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
 
@@ -640,7 +640,7 @@
     padding: var(--space-xl, 32px);
     gap: var(--space-sm, 8px);
     color: var(--text-dim);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   /* Common form patterns */
@@ -650,7 +650,7 @@
 
   :global(.form-group label) {
     display: block;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
     margin-bottom: 4px;
   }
@@ -676,7 +676,7 @@
     border-radius: 6px;
     color: var(--text-dim);
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.15s, color 0.15s;
@@ -775,7 +775,7 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 4px 10px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s;
@@ -788,7 +788,7 @@
     border-radius: 3px;
     padding: 0 4px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     margin-left: 4px;
   }
 

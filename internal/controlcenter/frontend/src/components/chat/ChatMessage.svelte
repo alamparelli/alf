@@ -360,7 +360,7 @@
     align-self: center;
     background: var(--bg-input);
     color: var(--text-dim);
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-style: italic;
     max-width: 90%;
     text-align: center;
@@ -368,7 +368,7 @@
 
   /* Markdown content */
   .msg-text {
-    font-size: 0.88rem;
+    font-size: var(--font-sm, 13px);
     line-height: 1.6;
   }
 
@@ -381,7 +381,7 @@
     padding: 8px 12px;
     border-radius: 6px;
     overflow-x: auto;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     margin: 8px 0;
   }
 
@@ -437,7 +437,7 @@
     border: none;
     color: inherit;
     font-family: inherit;
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
     cursor: pointer;
     text-align: left;
@@ -451,14 +451,14 @@
   .block-body {
     padding: 8px 10px;
     background: color-mix(in srgb, var(--text) 8%, transparent);
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .block-body pre {
     white-space: pre-wrap;
     word-break: break-word;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.76rem;
+    font-size: var(--font-xs, 11px);
     margin: 0;
   }
 
@@ -518,7 +518,7 @@
     padding: 4px 8px;
     background: color-mix(in srgb, var(--text) 10%, transparent);
     border-radius: 4px;
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
   }
 
   /* Footer */
@@ -531,12 +531,12 @@
   }
 
   .msg-time {
-    font-size: 0.68rem;
+    font-size: var(--font-xs, 11px);
     opacity: 0.5;
   }
 
   .msg-model, .msg-cost, .msg-duration, .msg-skills {
-    font-size: 0.65rem;
+    font-size: var(--font-xs, 11px);
     opacity: 0.5;
     font-family: 'JetBrains Mono', monospace;
   }
@@ -548,7 +548,7 @@
   }
 
   .reaction-chip {
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     padding: 1px 4px;
     border-radius: 4px;
     background: color-mix(in srgb, var(--text) 8%, transparent);
@@ -623,7 +623,7 @@
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 1.1rem;
+    font-size: var(--font-lg, 18px);
     padding: 4px;
     border-radius: 4px;
     transition: background 0.1s;

@@ -154,7 +154,7 @@
     background: none;
     border: none;
     color: var(--text-dim);
-    font-size: 1.4rem;
+    font-size: var(--font-xl, 24px);
     line-height: 1;
     cursor: pointer;
     padding: 0.25rem 0.5rem;

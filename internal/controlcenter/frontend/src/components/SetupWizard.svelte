@@ -643,7 +643,7 @@
   .wizard-logo {
     text-align: center;
     font-family: 'Sora', sans-serif;
-    font-size: 2rem;
+    font-size: var(--font-xl, 24px);
     font-weight: 700;
     letter-spacing: 0.1em;
     color: var(--accent);
@@ -651,7 +651,7 @@
   }
 
   h2 {
-    font-size: 1.1rem;
+    font-size: var(--font-lg, 18px);
     font-weight: 600;
     margin: 0 0 20px;
     text-align: center;
@@ -659,7 +659,7 @@
 
   /* Welcome modal */
   .welcome-desc {
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     text-align: center;
     margin-bottom: 20px;
@@ -676,7 +676,7 @@
     display: flex;
     gap: 12px;
     align-items: flex-start;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .welcome-step-num {
@@ -689,7 +689,7 @@
     background: var(--accent);
     color: var(--on-accent);
     font-weight: 600;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     flex-shrink: 0;
   }
 
@@ -699,7 +699,7 @@
     background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     line-height: 1.5;
     text-align: left;
@@ -715,14 +715,14 @@
 
   .welcome-quote p {
     margin: 0 0 4px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     font-style: italic;
     color: var(--text);
     line-height: 1.5;
   }
 
   .welcome-quote cite {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     font-style: normal;
   }
@@ -736,14 +736,14 @@
     flex: 1;
     justify-content: center;
     padding: 10px;
-    font-size: 0.9rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .welcome-cta {
     flex: 1;
     justify-content: center;
     padding: 10px;
-    font-size: 0.9rem;
+    font-size: var(--font-sm, 13px);
   }
 
   /* Stepper */
@@ -770,7 +770,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.72rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 600;
     color: var(--text-dim);
     background: var(--bg-card);
@@ -793,7 +793,7 @@
   .step-label {
     position: absolute;
     top: 32px;
-    font-size: 0.65rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     white-space: nowrap;
   }
@@ -804,7 +804,7 @@
   }
 
   .step-desc {
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin: 0 0 12px;
   }
@@ -826,8 +826,8 @@
 
   .backend-card:hover { border-color: var(--text-dim); }
   .backend-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); }
-  .backend-card h4 { margin: 0 0 2px; font-size: 0.85rem; }
-  .backend-card p { margin: 0; font-size: 0.72rem; color: var(--text-dim); }
+  .backend-card h4 { margin: 0 0 2px; font-size: var(--font-sm, 13px); }
+  .backend-card p { margin: 0; font-size: var(--font-xs, 11px); color: var(--text-dim); }
 
   /* Config sections (phase 2) */
   .config-section {
@@ -837,12 +837,12 @@
   }
 
   .config-section:last-child { border-bottom: none; }
-  .config-section h4 { margin: 0 0 8px; font-size: 0.85rem; }
+  .config-section h4 { margin: 0 0 8px; font-size: var(--font-sm, 13px); }
 
   .config-section .form-group { margin-bottom: 8px; }
   .config-section .form-group label {
     display: block;
-    font-size: 0.72rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     margin-bottom: 3px;
   }
@@ -855,22 +855,22 @@
     margin-top: 6px;
   }
 
-  .test-ok { font-size: 0.72rem; color: var(--accent); display: inline-flex; align-items: center; gap: 4px; }
-  .test-fail { font-size: 0.72rem; color: var(--red, #e55); display: inline-flex; align-items: center; gap: 4px; }
-  .test-loading { font-size: 0.72rem; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px; }
+  .test-ok { font-size: var(--font-xs, 11px); color: var(--accent); display: inline-flex; align-items: center; gap: 4px; }
+  .test-fail { font-size: var(--font-xs, 11px); color: var(--red, #e55); display: inline-flex; align-items: center; gap: 4px; }
+  .test-loading { font-size: var(--font-xs, 11px); color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px; }
 
   .claude-status { margin-top: 8px; }
-  .claude-status small { display: block; margin-top: 4px; font-size: 0.7rem; color: var(--text-dim); }
-  .claude-status code, code { font-size: 0.7rem; padding: 1px 4px; border-radius: 3px; background: var(--bg-input); }
+  .claude-status small { display: block; margin-top: 4px; font-size: var(--font-xs, 11px); color: var(--text-dim); }
+  .claude-status code, code { font-size: var(--font-xs, 11px); padding: 1px 4px; border-radius: 3px; background: var(--bg-input); }
 
-  .ollama-models { margin-top: 6px; font-size: 0.72rem; color: var(--text-dim); }
+  .ollama-models { margin-top: 6px; font-size: var(--font-xs, 11px); color: var(--text-dim); }
 
   /* Telegram */
   .tg-toggle {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
     margin-bottom: 12px;
   }
@@ -884,11 +884,11 @@
     margin-bottom: 12px;
   }
 
-  .form-help { font-size: 0.72rem; color: var(--text-dim); margin-top: 4px; }
+  .form-help { font-size: var(--font-xs, 11px); color: var(--text-dim); margin-top: 4px; }
   .form-help a, .link { color: var(--accent); cursor: pointer; text-decoration: none; }
   .form-help a:hover, .link:hover { text-decoration: underline; }
 
-  .tg-bot-link { margin: 8px 0; font-size: 0.85rem; }
+  .tg-bot-link { margin: 8px 0; font-size: var(--font-sm, 13px); }
   .tg-bot-link a { color: var(--accent); }
 
   .chatid-row { display: flex; gap: 8px; align-items: center; }
@@ -907,15 +907,15 @@
 
   .preset-option:hover { border-color: var(--text-dim); }
   .preset-option.selected { border-color: var(--accent); }
-  .preset-option h4 { margin: 0; font-size: 0.85rem; }
-  .preset-option p { font-size: 0.75rem; color: var(--text-dim); margin: 4px 0 0; }
+  .preset-option h4 { margin: 0; font-size: var(--font-sm, 13px); }
+  .preset-option p { font-size: var(--font-xs, 11px); color: var(--text-dim); margin: 4px 0 0; }
 
   .preset-preview { margin-top: 8px; }
-  .preset-preview table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+  .preset-preview table { width: 100%; border-collapse: collapse; font-size: var(--font-xs, 11px); }
   .preset-preview th {
     text-align: left;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     padding: 3px 8px 3px 0;
     border-bottom: 1px solid var(--border);
@@ -924,11 +924,11 @@
 
   /* Recap */
   .recap { margin: 0 0 16px; }
-  .recap dt { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-top: 8px; }
-  .recap dd { font-size: 0.85rem; margin: 2px 0 0; }
+  .recap dt { font-size: var(--font-xs, 11px); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-top: 8px; }
+  .recap dd { font-size: var(--font-sm, 13px); margin: 2px 0 0; }
 
   .apply-info {
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     padding: 8px 12px;
     border: 1px solid var(--border);
@@ -942,7 +942,7 @@
   }
 
   .apply-warning {
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     color: var(--yellow);
     padding: 8px 12px;
     border: 1px solid var(--yellow);
@@ -960,21 +960,21 @@
 
   .vault-inline label {
     display: block;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
     margin-bottom: 6px;
   }
 
   .vault-confirm { margin-top: 6px; }
 
-  .pw-mismatch { color: var(--red); font-size: 0.75rem; margin: 4px 0 0; }
+  .pw-mismatch { color: var(--red); font-size: var(--font-xs, 11px); margin: 4px 0 0; }
   .pw-warning { color: var(--red); }
 
   .apply-error {
     margin-top: 8px;
     padding: 8px 12px;
     border-radius: var(--radius, 8px);
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     background: color-mix(in srgb, var(--red) 10%, transparent);
     color: var(--red);
   }

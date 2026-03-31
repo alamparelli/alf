@@ -478,7 +478,7 @@
   }
 
   h3 {
-    font-size: 1rem;
+    font-size: var(--font-md, 15px);
     margin-bottom: 0;
   }
 
@@ -500,7 +500,7 @@
     border-radius: 6px;
     background: none;
     color: var(--text-dim);
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 600;
     cursor: pointer;
   }
@@ -531,7 +531,7 @@
     border: none;
     color: var(--text-dim);
     padding: 6px 16px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
     border-right: 1px solid var(--border);
   }
@@ -561,7 +561,7 @@
     border: none;
     border-radius: 6px;
     padding: 6px 14px;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 600;
     cursor: pointer;
   }
@@ -576,7 +576,7 @@
     border-radius: 6px;
     color: var(--text-dim);
     padding: 6px 14px;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
   }
 
@@ -586,7 +586,7 @@
     border-radius: 6px;
     color: var(--text-dim);
     padding: 4px 10px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     cursor: pointer;
   }
 
@@ -651,11 +651,11 @@
 
   .rule-pattern {
     flex: 1;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .action-badge {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 4px;
@@ -689,7 +689,7 @@
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--text-dim);
-    font-size: 0.9rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
     padding: 4px 12px 6px;
     cursor: pointer;
@@ -725,12 +725,12 @@
     border-radius: 6px;
     background: var(--bg);
     color: var(--text);
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-family: 'JetBrains Mono', monospace;
   }
 
   .filter-count {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     white-space: nowrap;
   }
@@ -751,13 +751,13 @@
   .log-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .log-table th {
     text-align: left;
     color: var(--text-dim);
-    font-size: 0.72rem;
+    font-size: var(--font-xs, 11px);
     text-transform: uppercase;
     padding: 4px 8px;
     border-bottom: 1px solid var(--border);
@@ -774,7 +774,7 @@
 
   .mono {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .path-cell {
@@ -785,13 +785,13 @@
   }
 
   .method-badge {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 600;
     color: var(--accent);
   }
 
   .status-badge {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 600;
     padding: 1px 6px;
     border-radius: 3px;
@@ -807,7 +807,7 @@
   }
 
   .source-badge {
-    font-size: 0.6rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 600;
     padding: 1px 5px;
     border-radius: 3px;
@@ -831,7 +831,7 @@
   .empty-sm {
     text-align: center;
     color: var(--text-dim);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     padding: 1rem;
   }
 
@@ -854,7 +854,7 @@
     border: 1px solid var(--border);
     color: var(--text-dim);
     padding: 2px 8px;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     cursor: pointer;
     border-radius: 4px;
   }
@@ -876,7 +876,7 @@
     border: 1px solid var(--border);
     color: var(--text-dim);
     padding: 2px 8px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     cursor: pointer;
     border-radius: 4px;
   }
@@ -892,7 +892,7 @@
   }
 
   .page-info {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
 
@@ -908,7 +908,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
   }
 
@@ -919,7 +919,7 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 8px 10px;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .modal-actions {

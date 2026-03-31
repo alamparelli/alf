@@ -468,7 +468,7 @@
     outline: none;
     color: var(--text);
     font-family: inherit;
-    font-size: 0.95rem;
+    font-size: var(--font-md, 15px);
   }
 
   .spotlight-close {
@@ -489,7 +489,7 @@
 
   .spotlight-category {
     padding: 6px 16px 4px;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -506,7 +506,7 @@
     border: none;
     color: var(--text);
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
     text-align: left;
     transition: background 0.1s;
@@ -527,7 +527,7 @@
   }
 
   .emoji-icon {
-    font-size: 1rem;
+    font-size: var(--font-md, 15px);
   }
 
   .spotlight-label {
@@ -538,7 +538,7 @@
   }
 
   .spotlight-hint {
-    font-size: 0.72rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     white-space: nowrap;
     overflow: hidden;
@@ -552,7 +552,7 @@
   }
 
   .spotlight-badge {
-    font-size: 0.65rem;
+    font-size: var(--font-xs, 11px);
     padding: 1px 6px;
     border-radius: 4px;
     font-weight: 500;
@@ -568,13 +568,13 @@
     padding: 24px 16px;
     text-align: center;
     color: var(--text-dim);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .spotlight-footer {
     padding: 8px 16px;
     border-top: 1px solid var(--border);
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     display: flex;
     gap: 12px;
@@ -588,7 +588,7 @@
     border: 1px solid var(--border);
     border-radius: 3px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
+    font-size: var(--font-xs, 11px);
     margin-right: 2px;
   }
 
@@ -606,7 +606,7 @@
     color: var(--text-dim);
     padding: 2px 6px;
     cursor: pointer;
-    font-size: 0.65rem;
+    font-size: var(--font-xs, 11px);
   }
 
   .filter-toggle:hover,
@@ -630,7 +630,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.6rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 600;
   }
 
@@ -640,7 +640,7 @@
   }
 
   .filter-label {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     margin-bottom: 6px;
     font-weight: 500;
@@ -656,7 +656,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text);
     cursor: pointer;
   }

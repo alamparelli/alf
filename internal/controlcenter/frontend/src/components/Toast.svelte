@@ -24,7 +24,7 @@
   .toast {
     padding: 10px 20px;
     border-radius: var(--radius, 8px);
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
     color: #fff;
     background: var(--accent);

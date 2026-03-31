@@ -346,7 +346,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.88rem;
+    font-size: var(--font-sm, 13px);
     resize: none;
     overflow-y: auto;
     line-height: 1.5;
@@ -424,7 +424,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     cursor: pointer;
     flex-shrink: 0;
   }
@@ -445,7 +445,7 @@
     background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: 6px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
   }
 
   .file-chip-thumb {
@@ -473,7 +473,7 @@
   }
 
   .upload-indicator {
-    font-size: 0.72rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     padding: 4px 0 0;
   }
@@ -500,7 +500,7 @@
     background: color-mix(in srgb, var(--accent) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
     border-radius: 12px;
-    font-size: 0.72rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 500;
     color: var(--accent);
   }
@@ -542,7 +542,7 @@
     border: none;
     color: var(--text);
     font-family: inherit;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
     text-align: left;
   }
@@ -555,12 +555,12 @@
   .command-name {
     font-weight: 600;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     min-width: 80px;
   }
 
   .command-desc {
     color: var(--text-dim);
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
   }
 </style>

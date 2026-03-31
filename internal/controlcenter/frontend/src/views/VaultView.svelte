@@ -856,7 +856,7 @@
               <span class="item-name mono">{'•'.repeat(8)}...{adminToken.slice(-4)}</span>
               <span class="auth-badge">admin</span>
             </div>
-            <div class="item-actions"><span class="dim" style="font-size:0.7rem">built-in</span></div>
+            <div class="item-actions"><span class="dim" style="font-size:var(--font-xs, 11px)">built-in</span></div>
           </div>
         {/if}
         {#if proxyToken}
@@ -865,7 +865,7 @@
               <span class="item-name mono">{'•'.repeat(8)}...{proxyToken.slice(-4)}</span>
               <span class="auth-badge">proxy</span>
             </div>
-            <div class="item-actions"><span class="dim" style="font-size:0.7rem">built-in</span></div>
+            <div class="item-actions"><span class="dim" style="font-size:var(--font-xs, 11px)">built-in</span></div>
           </div>
         {/if}
         {#each tokens as tok}
@@ -892,7 +892,7 @@
       <div class="section-header">
         <h3><Zap size={16} /> Mobile Access</h3>
       </div>
-      <p class="dim" style="font-size:0.8rem;margin-bottom:10px">
+      <p class="dim" style="font-size:var(--font-sm, 13px);margin-bottom:10px">
         Bearer token for the mobile app.
       </p>
       {#if mobileTokenFull}
@@ -1187,7 +1187,7 @@
     </div>
     <div class="form-group">
       <label>Value</label>
-      <textarea class="input secret-textarea" bind:value={secretValue} placeholder="Secret value or paste a private key..." rows={6} style="font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; white-space: pre;"></textarea>
+      <textarea class="input secret-textarea" bind:value={secretValue} placeholder="Secret value or paste a private key..." rows={6} style="font-family: 'JetBrains Mono', monospace; font-size: var(--font-sm, 13px); white-space: pre;"></textarea>
       <input type="file" bind:this={secretFileInput} onchange={loadSecretFile} style="display:none" />
       <button class="btn btn-sm" style="margin-top: 6px;" onclick={() => secretFileInput?.click()}>Load from file</button>
     </div>
@@ -1272,12 +1272,12 @@
 
   .item-name {
     font-weight: 500;
-    font-size: 0.85rem;
+    font-size: var(--font-sm, 13px);
     font-family: 'JetBrains Mono', monospace;
   }
 
   .item-url {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     word-break: break-all;
   }
@@ -1292,7 +1292,7 @@
     display: inline-block;
     padding: 1px 6px;
     border-radius: 10px;
-    font-size: 0.68rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 500;
     background: color-mix(in srgb, var(--sapphire) 12%, transparent);
     color: var(--blue, #3b82f6);
@@ -1315,7 +1315,7 @@
     border-bottom: 2px solid transparent;
     color: var(--text-dim);
     font-family: inherit;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
     cursor: pointer;
     transition: color 0.15s, border-color 0.15s;
@@ -1325,7 +1325,7 @@
   .storage-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
   .tab-count {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     padding: 0 5px;
     border-radius: 8px;
     background: var(--bg-input);
@@ -1338,17 +1338,17 @@
   }
 
   .secret-dots {
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     letter-spacing: 2px;
   }
 
   .mono {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
   }
 
-  .dim { color: var(--text-dim); font-size: 0.85rem; }
+  .dim { color: var(--text-dim); font-size: var(--font-sm, 13px); }
 
   .form-group {
     display: flex;
@@ -1358,19 +1358,19 @@
   }
 
   .form-group label {
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
     font-weight: 500;
   }
 
   .form-hint {
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     margin-bottom: 12px;
   }
 
   .input-sm {
     padding: 5px 8px;
-    font-size: 0.8rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .ref-toggle {
@@ -1383,7 +1383,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
   }
 
@@ -1392,7 +1392,7 @@
   }
 
   .form-hint {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
     margin: 4px 0 0;
   }
@@ -1401,7 +1401,7 @@
     background: var(--bg-input);
     padding: 1px 4px;
     border-radius: 3px;
-    font-size: 0.7rem;
+    font-size: var(--font-xs, 11px);
   }
 
   .oauth-tabs {
@@ -1419,7 +1419,7 @@
     border-radius: 6px;
     color: var(--text-dim);
     font-family: inherit;
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
     cursor: pointer;
     transition: all 0.15s;
   }
@@ -1451,7 +1451,7 @@
 
   .backup-row h4 {
     margin-bottom: 6px;
-    font-size: 0.82rem;
+    font-size: var(--font-sm, 13px);
   }
 
   .backup-form {
@@ -1489,7 +1489,7 @@
     width: auto;
     min-width: 80px;
     padding: 4px 8px;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
   }
 
   /* Token status badges */
@@ -1497,7 +1497,7 @@
     display: inline-block;
     padding: 1px 6px;
     border-radius: 10px;
-    font-size: 0.68rem;
+    font-size: var(--font-xs, 11px);
     font-weight: 500;
   }
 
@@ -1512,7 +1512,7 @@
   }
 
   .expires-date {
-    font-size: 0.68rem;
+    font-size: var(--font-xs, 11px);
     color: var(--text-dim);
   }
 
@@ -1531,7 +1531,7 @@
   .token-value {
     flex: 1;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
+    font-size: var(--font-sm, 13px);
     word-break: break-all;
     user-select: all;
   }
@@ -1551,13 +1551,13 @@
   .mobile-token-value {
     flex: 1;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     word-break: break-all;
     user-select: all;
   }
 
   .mobile-token-warning {
-    font-size: 0.75rem;
+    font-size: var(--font-xs, 11px);
     color: var(--red);
     font-weight: 500;
     margin-bottom: 8px;

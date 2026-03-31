@@ -249,7 +249,7 @@
 
   .btn-secondary {
     background: none;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
     color: var(--text-dim);
     padding: 8px 16px;
@@ -259,12 +259,11 @@
 
   .btn-secondary:hover {
     color: var(--text);
-    border-color: var(--text-dim);
   }
 
   .btn-icon {
     background: none;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
     color: var(--text-dim);
     padding: 6px;
@@ -275,7 +274,6 @@
 
   .btn-icon:hover {
     color: var(--accent);
-    border-color: var(--accent);
   }
 
   .btn-danger:hover {
@@ -323,7 +321,6 @@
     align-items: center;
     gap: 4px;
     background: var(--bg);
-    border: 1px solid var(--border);
     border-radius: 12px;
     padding: 2px 10px;
     font-size: var(--font-xs, 11px);

@@ -597,7 +597,6 @@
     padding: 0.1rem 0.4rem;
     border-radius: 3px;
     background: var(--bg-input);
-    border: 1px solid var(--border);
     color: var(--text-dim);
   }
   .skill-meta {

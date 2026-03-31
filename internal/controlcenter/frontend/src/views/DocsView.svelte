@@ -371,7 +371,6 @@
 
   .tag-btn {
     background: var(--bg-card);
-    border: 1px solid var(--border);
     border-radius: 10px;
     padding: 2px 8px;
     font-size: var(--font-xs, 11px);
@@ -380,7 +379,6 @@
   }
 
   .tag-btn:hover, .tag-btn.active {
-    border-color: var(--accent);
     color: var(--accent);
   }
 
@@ -437,7 +435,6 @@
 
   .tag-sm {
     background: var(--bg);
-    border: 1px solid var(--border);
     border-radius: 4px;
     padding: 1px 6px;
     font-size: var(--font-xs, 11px);
@@ -460,7 +457,7 @@
     align-items: center;
     gap: 4px;
     background: none;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
     color: var(--text-dim);
     padding: 6px 12px;
@@ -471,7 +468,6 @@
 
   .btn-back:hover {
     color: var(--accent);
-    border-color: var(--accent);
   }
 
   .tags {
@@ -482,7 +478,6 @@
 
   .tag {
     background: var(--bg-card);
-    border: 1px solid var(--border);
     border-radius: 10px;
     padding: 2px 8px;
     font-size: var(--font-xs, 11px);

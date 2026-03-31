@@ -343,7 +343,7 @@
     padding: 10px 16px;
     margin-bottom: 16px;
     background: color-mix(in srgb, var(--yellow) 10%, transparent);
-    border: 1px solid var(--yellow, #eab308);
+    border: none;
     border-radius: var(--radius, 8px);
     font-size: var(--font-sm, 13px);
     color: var(--text);
@@ -369,7 +369,7 @@
     padding: 4px 8px;
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
-    background: var(--bg-input);
+    background: var(--bg-card);
     color: var(--text);
     font-family: inherit;
     font-size: var(--font-sm, 13px);
@@ -392,22 +392,20 @@
     min-width: 28px;
     padding: 2px 8px;
     background: var(--bg-input);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 4px;
     font-family: 'JetBrains Mono', monospace;
     font-size: var(--font-sm, 13px);
     font-weight: 600;
     color: var(--text);
     cursor: pointer;
-    transition: border-color 0.15s;
   }
 
   .shortcut-key-btn:hover {
-    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .shortcut-key-btn.capturing {
-    border-color: var(--accent);
     color: var(--accent);
     outline: none;
   }

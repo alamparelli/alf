@@ -697,7 +697,6 @@
     margin: 16px 0 0;
     padding: 10px 14px;
     background: var(--bg-input);
-    border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
     font-size: var(--font-sm, 13px);
     color: var(--text-dim);
@@ -931,7 +930,7 @@
     font-size: var(--font-sm, 13px);
     color: var(--text-dim);
     padding: 8px 12px;
-    border: 1px solid var(--border);
+    background: var(--bg);
     border-radius: var(--radius, 8px);
     margin-bottom: 8px;
   }
@@ -952,7 +951,7 @@
   }
 
   .vault-inline {
-    border: 1px solid var(--border);
+    background: var(--bg);
     border-radius: var(--radius, 8px);
     padding: 12px;
     margin-top: 12px;

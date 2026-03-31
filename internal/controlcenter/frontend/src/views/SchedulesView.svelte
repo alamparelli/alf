@@ -697,7 +697,7 @@
     padding: 0.4rem;
     border: 1px solid var(--border);
     border-radius: 4px;
-    background: var(--bg);
+    background: var(--bg-card);
     color: var(--text);
     font-size: var(--font-sm, 13px);
   }

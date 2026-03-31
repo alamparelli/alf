@@ -391,14 +391,14 @@
 
   .tool-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .tool-chip {
-    font-size: var(--font-xs, 11px); padding: 2px 8px; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 4px; color: var(--text-dim); cursor: pointer; transition: all 0.15s;
+    font-size: var(--font-xs, 11px); padding: 2px 8px; background: var(--bg);
+    border-radius: 4px; color: var(--text-dim); cursor: pointer; transition: all 0.15s; border: none;
   }
-  .tool-chip.selected { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-  .tool-chip:hover { border-color: var(--accent); }
+  .tool-chip.selected { background: var(--accent); color: var(--on-accent); }
+  .tool-chip:hover { background: color-mix(in srgb, var(--accent) 15%, var(--bg)); }
 
   .form-actions { display: flex; gap: 8px; margin-top: 0.75rem; }
-  .btn-danger { color: var(--red); border-color: var(--red); }
+  .btn-danger { color: var(--red); }
 
   .status-box {
     margin-top: 0.6rem; padding: 0.5rem 0.65rem; border-radius: var(--radius, 8px);
@@ -406,8 +406,8 @@
     font-family: 'JetBrains Mono', monospace;
   }
   .status-box > div { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
-  .status-box.error { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 25%, transparent); }
-  .status-box.success { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 25%, transparent); }
+  .status-box.error { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
+  .status-box.success { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
 
   .catalog-list { margin-top: 8px; }
   .catalog-item {
@@ -419,7 +419,7 @@
   .catalog-item:last-child { border-bottom: none; }
   .catalog-actions { display: flex; align-items: center; gap: 8px; }
   .app-slug { font-family: 'JetBrains Mono', monospace; font-size: var(--font-xs, 11px); color: var(--text-dim); margin-left: 6px; }
-  .app-ver { font-size: var(--font-xs, 11px); color: var(--text-dim); background: var(--bg); padding: 0.1rem 0.4rem; border-radius: var(--radius, 8px); border: 1px solid var(--border); }
+  .app-ver { font-size: var(--font-xs, 11px); color: var(--text-dim); background: var(--bg); padding: 0.1rem 0.4rem; border-radius: var(--radius, 8px); }
   .empty { color: var(--text-dim); font-size: var(--font-sm, 13px); font-style: italic; padding: 0.5rem 0; }
   .link-btn { background: none; border: none; color: var(--accent); cursor: pointer; font: inherit; padding: 0; text-decoration: underline; }
 

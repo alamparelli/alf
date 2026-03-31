@@ -440,7 +440,7 @@
     align-items: center;
     gap: 5px;
     padding: 4px 10px;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--radius, 8px);
     background: var(--bg-input);
     color: var(--text);
@@ -458,7 +458,7 @@
   }
 
   .term-btn:hover { background: var(--border); }
-  .term-btn.admin-active { border-color: var(--accent); color: var(--accent); }
+  .term-btn.admin-active { color: var(--accent); }
 
   .term-container {
     flex: 1;
@@ -482,7 +482,7 @@
 
   .url-input {
     flex: 1;
-    background: var(--bg-input);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 4px 8px;
@@ -523,7 +523,7 @@
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
-    background: var(--bg-input);
+    background: var(--bg-card);
     color: var(--text);
     font-family: inherit;
     font-size: 0.85rem;
@@ -531,7 +531,7 @@
 
   .mobile-btn {
     padding: 6px 12px;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--radius, 8px);
     background: var(--bg-input);
     color: var(--text);

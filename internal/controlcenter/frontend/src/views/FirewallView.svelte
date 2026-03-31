@@ -496,9 +496,9 @@
 
   .kill-switch-btn {
     padding: 6px 14px;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
-    background: none;
+    background: var(--bg);
     color: var(--text-dim);
     font-size: var(--font-sm, 13px);
     font-weight: 600;
@@ -506,21 +506,21 @@
   }
 
   .kill-switch-btn:hover {
-    border-color: var(--red, #e55);
     color: var(--red, #e55);
+    background: color-mix(in srgb, var(--red) 8%, transparent);
   }
 
   .kill-switch-btn.active {
     background: color-mix(in srgb, var(--red) 15%, transparent);
-    border-color: var(--red, #e55);
     color: var(--red, #e55);
   }
 
   .segmented {
     display: inline-flex;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: 6px;
     overflow: hidden;
+    background: var(--bg);
   }
 
   .seg-btn {
@@ -571,8 +571,8 @@
   }
 
   .btn-secondary {
-    background: none;
-    border: 1px solid var(--border);
+    background: var(--bg);
+    border: none;
     border-radius: 6px;
     color: var(--text-dim);
     padding: 6px 14px;
@@ -581,8 +581,8 @@
   }
 
   .btn-secondary-sm {
-    background: none;
-    border: 1px solid var(--border);
+    background: var(--bg);
+    border: none;
     border-radius: 6px;
     color: var(--text-dim);
     padding: 4px 10px;
@@ -592,12 +592,11 @@
 
   .btn-secondary-sm:hover {
     color: var(--text);
-    border-color: var(--text-dim);
   }
 
   .btn-icon {
-    background: none;
-    border: 1px solid var(--border);
+    background: var(--bg);
+    border: none;
     border-radius: 6px;
     color: var(--text-dim);
     padding: 4px;
@@ -608,7 +607,6 @@
 
   .btn-icon:hover {
     color: var(--accent);
-    border-color: var(--accent);
   }
 
   .btn-icon-sm {
@@ -723,7 +721,7 @@
     padding: 5px 10px;
     border: 1px solid var(--border);
     border-radius: 6px;
-    background: var(--bg);
+    background: var(--bg-card);
     color: var(--text);
     font-size: var(--font-sm, 13px);
     font-family: 'JetBrains Mono', monospace;
@@ -851,7 +849,7 @@
 
   .page-size-btn {
     background: none;
-    border: 1px solid var(--border);
+    border: none;
     color: var(--text-dim);
     padding: 2px 8px;
     font-size: var(--font-xs, 11px);
@@ -862,7 +860,6 @@
   .page-size-btn.active {
     background: var(--accent);
     color: var(--bg);
-    border-color: var(--accent);
   }
 
   .page-nav {
@@ -873,7 +870,7 @@
 
   .page-btn {
     background: none;
-    border: 1px solid var(--border);
+    border: none;
     color: var(--text-dim);
     padding: 2px 8px;
     font-size: var(--font-xs, 11px);
@@ -887,7 +884,6 @@
   }
 
   .page-btn:not(:disabled):hover {
-    border-color: var(--accent);
     color: var(--accent);
   }
 
@@ -914,7 +910,7 @@
 
   .modal-form input,
   .modal-form select {
-    background: var(--bg);
+    background: var(--bg-card);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 6px;

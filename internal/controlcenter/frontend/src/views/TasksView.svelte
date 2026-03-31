@@ -682,7 +682,6 @@
     margin-top: 8px;
     padding: 10px 12px;
     background: color-mix(in srgb, var(--accent) 6%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-radius: var(--radius, 8px);
   }
 
@@ -747,7 +746,6 @@
     font-weight: 500;
     background: var(--bg-input);
     color: var(--text-dim);
-    border: 1px solid var(--border);
   }
 
   .task-detail h4 {
@@ -887,7 +885,6 @@
     margin-top: 12px;
     padding: 12px;
     background: color-mix(in srgb, var(--yellow) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--yellow) 20%, transparent);
     border-radius: var(--radius, 8px);
   }
 
@@ -923,7 +920,6 @@
   }
 
   .btn-danger {
-    border-color: var(--red, #c4392a);
     color: var(--red, #c4392a);
   }
 

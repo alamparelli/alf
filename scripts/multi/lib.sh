@@ -100,6 +100,14 @@ scaffold_tenant() {
         info "Generated cc_auth_token for $user"
     fi
 
+    # Place cc_auth_token in vault-data where the daemon reads it.
+    # The daemon (alfd/uid 1001) reads from /opt/alf/vault-data/.cc_auth_token.
+    local daemon_uid
+    daemon_uid=$(host_uid_for 1001)
+    cp "$dir/secrets/cc_auth_token" "$dir/vault-data/.cc_auth_token"
+    chown "$daemon_uid:$daemon_uid" "$dir/vault-data/.cc_auth_token"
+    chmod 0400 "$dir/vault-data/.cc_auth_token"
+
     # Copy shared whisper secret
     if [[ -f "$SHARED_DIR/whisper_shared_secret" ]]; then
         cp "$SHARED_DIR/whisper_shared_secret" "$dir/secrets/whisper_shared_secret"
@@ -112,10 +120,14 @@ scaffold_tenant() {
         chmod 644 "$dir/secrets/embed_shared_secret"
     fi
 
-    # Fix ownership — use remapped host UID if userns-remap is active
-    local host_uid
+    # Fix ownership — use remapped host UIDs if userns-remap is active.
+    # alf (uid 1000) = LLM subprocess, alfd (uid 1001) = daemon.
+    local host_uid host_daemon_uid
     host_uid=$(host_uid_for 1000)
-    chown -R "$host_uid:$host_uid" "$dir/data" "$dir/cache" "$dir/vault-data" "$dir/config.d" "$dir/skills.d" "$dir/local" 2>/dev/null || true
+    host_daemon_uid=$(host_uid_for 1001)
+    chown -R "$host_uid:$host_uid" "$dir/data" "$dir/cache" "$dir/local" 2>/dev/null || true
+    # Daemon-owned directories (alfd writes config, skills, vault-data)
+    chown -R "$host_daemon_uid:$host_uid" "$dir/config.d" "$dir/skills.d" "$dir/vault-data" 2>/dev/null || true
 }
 
 # ── userns-remap UID resolution ──────────────────────────────────────
@@ -189,6 +201,14 @@ preflight_fix_placeholders() {
         if [[ ! -s "${tenant_dir}secrets/embed_shared_secret" ]] && [[ -f "$SHARED_DIR/embed_shared_secret" ]]; then
             cp "$SHARED_DIR/embed_shared_secret" "${tenant_dir}secrets/embed_shared_secret"
             chmod 644 "${tenant_dir}secrets/embed_shared_secret"
+        fi
+        # Ensure cc_auth_token is in vault-data (daemon reads from there)
+        if [[ -s "${tenant_dir}secrets/cc_auth_token" ]] && [[ ! -f "${tenant_dir}vault-data/.cc_auth_token" ]]; then
+            local daemon_uid
+            daemon_uid=$(host_uid_for 1001)
+            cp "${tenant_dir}secrets/cc_auth_token" "${tenant_dir}vault-data/.cc_auth_token"
+            chown "$daemon_uid:$daemon_uid" "${tenant_dir}vault-data/.cc_auth_token" 2>/dev/null || true
+            chmod 0400 "${tenant_dir}vault-data/.cc_auth_token"
         fi
     done
 }

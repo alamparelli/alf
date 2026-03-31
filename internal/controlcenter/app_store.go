@@ -121,7 +121,7 @@ func (s *fileAppStore) List() ([]AppMeta, error) {
 }
 
 // loadDisabledApps reads .state.json and returns a set of app slugs that should
-// NOT appear in the sidebar/spotlight. An app is hidden if it has a state entry
+// NOT appear in the sidebar/lens. An app is hidden if it has a state entry
 // that is not "enabled" (i.e. "installed" or "disabled"). Apps without any state
 // entry are considered visible (non-marketplace apps).
 func loadDisabledApps(appsDir string) map[string]bool {

@@ -106,13 +106,46 @@ func TestVaultProxy_BlocksAdminEndpoints(t *testing.T) {
 
 	proxy := NewVaultProxy(upstream, "test-token", nil)
 
-	for _, path := range []string{"/health", "/tokens", "/auth/unlock", "/files", "/services", "/ssh/host/exec"} {
+	// Admin/sensitive paths must be blocked.
+	for _, path := range []string{"/tokens", "/auth/unlock", "/files", "/files/secret.json"} {
 		req := httptest.NewRequest("GET", path, nil)
 		w := httptest.NewRecorder()
 		proxy.ServeHTTP(w, req)
 		if w.Code != 403 {
 			t.Errorf("path %s: expected 403, got %d", path, w.Code)
 		}
+	}
+}
+
+func TestVaultProxy_AllowsSSHAndHealth(t *testing.T) {
+	upstream, cleanup := fakeVaultUpstream(t)
+	defer cleanup()
+
+	// Add /ssh/ and /services handlers to upstream.
+	proxy := NewVaultProxy(upstream, "test-token", nil)
+
+	for _, path := range []string{"/health", "/services", "/ssh/homelab/exec", "/proxy/openrouter/v1/models"} {
+		req := httptest.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		proxy.ServeHTTP(w, req)
+		if w.Code == 403 {
+			t.Errorf("path %s: should not be blocked, got 403", path)
+		}
+	}
+}
+
+func TestVaultProxy_AppTier_BlocksSSHForUndeclaredService(t *testing.T) {
+	upstream, cleanup := fakeVaultUpstream(t)
+	defer cleanup()
+
+	proxy := NewVaultProxy(upstream, "test-token", []string{"openrouter"})
+
+	// SSH to undeclared service should be blocked.
+	req := httptest.NewRequest("POST", "/ssh/homelab/exec", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("expected 403 for undeclared SSH service, got %d", w.Code)
 	}
 }
 

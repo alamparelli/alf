@@ -314,6 +314,19 @@ func (c *Client) postRaw(method string, payload []byte) ([]byte, error) {
 	return c.doPost(method, payload)
 }
 
+// SetMyCommands registers bot commands visible in the Telegram command menu.
+func (c *Client) SetMyCommands(commands []BotCommand) error {
+	payload, _ := json.Marshal(map[string]any{"commands": commands})
+	_, err := c.doPost("setMyCommands", payload)
+	return err
+}
+
+// BotCommand is a Telegram bot command for the command menu.
+type BotCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
 func (c *Client) doPost(method string, payload []byte) ([]byte, error) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", c.Token, method)
 	resp, err := c.HTTP.Post(url, "application/json", bytes.NewReader(payload))

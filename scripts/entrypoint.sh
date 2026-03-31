@@ -88,7 +88,16 @@ chown -R alfd:alf /opt/alf/config.d      # daemon owns config, subprocess reads 
 chmod 750 /opt/alf/config.d
 chown -R alfd:alfd /opt/alf/vault-data   # daemon-only: group alfd, LLM cannot read
 chmod 700 /opt/alf/vault-data
+# Pre-create daemon directories (daemon runs as alfd but data/ is alf-owned volume).
+for d in logs logs/events sessions config tools skills context agents agents/teams apps documents; do
+    mkdir -p "/home/alf/data/$d"
+done
+chown -R alfd:alf /home/alf/data/logs /home/alf/data/sessions /home/alf/data/config /home/alf/data/context /home/alf/data/documents
+chmod -R 750 /home/alf/data/logs /home/alf/data/sessions
+chown -R alf:alf /home/alf/data/agents /home/alf/data/apps /home/alf/data/tools /home/alf/data/skills
+chmod -R g+ws /home/alf/data/agents /home/alf/data/apps
 # tools.d/ owned by daemon: LLM gets r-x via group, no write (anti-shadow CWE-94).
+mkdir -p /home/alf/data/tools.d
 chown alfd:alf /home/alf/data/tools.d
 chmod 755 /home/alf/data/tools.d
 chown alf:alf /etc/resolv.conf 2>/dev/null || true

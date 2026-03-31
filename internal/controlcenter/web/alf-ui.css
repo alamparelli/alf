@@ -552,6 +552,90 @@
   border-color: var(--accent);
 }
 
+/* ── Tab bar (underline navigation) ──────────────────────────────────── */
+/* Use for view/page navigation (Dashboard | Settings | History).       */
+/* Use .filter-tabs + .tab for in-page filtering (All | Active).        */
+.tab-bar {
+  display: flex;
+  gap: var(--space-md, 16px);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-md, 16px);
+}
+.tab-bar .tab-item {
+  padding: var(--space-xs, 6px) var(--space-sm, 10px);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: var(--font-sm, 13px);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tab-bar .tab-item:hover { color: var(--text); }
+.tab-bar .tab-item.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Data table ──────────────────────────────────────────────────────── */
+/* Minimal table for data-heavy apps.                                    */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-sm, 13px);
+}
+.data-table th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: var(--font-xs, 11px);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: var(--space-xs, 6px) var(--space-sm, 10px);
+  border-bottom: 1px solid var(--border);
+}
+.data-table td {
+  padding: var(--space-xs, 6px) var(--space-sm, 10px);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+.data-table tr:hover td { background: var(--bg-input); }
+.data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table .dim { color: var(--text-dim); }
+.data-table .positive { color: var(--success, #22c55e); }
+.data-table .negative { color: var(--error, #e53e3e); }
+
+/* ── Stat grid (KPI / metric cards) ──────────────────────────────────── */
+/* Use for grids of small metric/KPI items. NOT nested inside .card.     */
+/* Each .stat-item gets its own card-like appearance.                     */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border-radius: var(--radius, 8px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.stat-item {
+  background: var(--bg-card);
+  padding: var(--space-md, 16px);
+}
+/* Fill empty trailing cells so the border background doesn't show through */
+.stat-grid::after {
+  content: '';
+  background: var(--bg-card);
+  /* spans remaining columns in the last row */
+  grid-column: span 99;
+}
+.stat-item .stat-value {
+  font-size: var(--font-lg, 18px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.stat-item .stat-label { color: var(--text-dim); font-size: var(--font-xs, 11px); }
+.stat-item .stat-sub { color: var(--text-dim); font-size: var(--font-xs, 11px); }
+
 /* ── Card header row ───────────────────────────────────────────────────── */
 .card-header {
   display: flex;

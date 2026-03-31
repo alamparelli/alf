@@ -23,7 +23,11 @@ cp "$MULTI_DIR"/{lib,init,provision,teardown,upgrade,list,magic-link,secret,gene
 
 # Bundled defaults (for upgrade.sh tenant seeding)
 mkdir -p "$STAGING/defaults/skills.d" "$STAGING/defaults/agents"
-cp -r "$REPO_ROOT/skills.d"/*/ "$STAGING/defaults/skills.d/" 2>/dev/null || true
+for skill in "$REPO_ROOT/skills.d"/*/; do
+    [ -d "$skill" ] || continue
+    skill_name=$(basename "$skill")
+    cp -r "$skill" "$STAGING/defaults/skills.d/$skill_name"
+done
 cp "$REPO_ROOT/internal/cli/bundled_agents"/*.json "$STAGING/defaults/agents/" 2>/dev/null || true
 
 BUNDLE=$(mktemp)

@@ -101,18 +101,18 @@ while IFS= read -r tenant; do
         echo "  secrets hardened"
     fi
 
-    # 3c. Seed bundled skills (don't overwrite existing)
+    # 3c. Seed bundled skills (always overwrite with latest bundled version)
     if [[ -d "$SKILLS_SRC" ]]; then
         mkdir -p "$tenant_dir/skills.d"
         for skill_dir in "$SKILLS_SRC"/*/; do
-            [[ ! -d "$skill_dir" ]] && continue
+            [[ -d "$skill_dir" ]] || continue
             skill_name=$(basename "$skill_dir")
-            if [[ ! -d "$tenant_dir/skills.d/$skill_name" ]]; then
-                cp -r "$skill_dir" "$tenant_dir/skills.d/$skill_name"
-                chown -R "$host_uid:$host_uid" "$tenant_dir/skills.d/$skill_name" 2>/dev/null || true
-                echo "  seeded skill: $skill_name"
-            fi
+            dest="$tenant_dir/skills.d/$skill_name"
+            mkdir -p "$dest"
+            cp -r "$skill_dir"* "$dest/" 2>/dev/null || true
+            chown -R "$host_uid:$host_uid" "$dest" 2>/dev/null || true
         done
+        echo "  skills synced"
     fi
 
     # 3d. Seed bundled agents (don't overwrite existing)

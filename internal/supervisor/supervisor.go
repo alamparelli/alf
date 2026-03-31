@@ -86,6 +86,9 @@ func New(appsDir string) *Supervisor {
 
 // SetVault configures vault proxy support. Must be called before Start().
 // servicesFn returns the declared vault services for an app slug (from manifest).
+// HasVault reports whether the supervisor has been configured with vault access.
+func (s *Supervisor) HasVault() bool { return s.vaultSocket != "" }
+
 func (s *Supervisor) SetVault(vaultSocket, proxyToken string, servicesFn func(string) []string) {
 	s.vaultSocket = vaultSocket
 	s.vaultToken = proxyToken

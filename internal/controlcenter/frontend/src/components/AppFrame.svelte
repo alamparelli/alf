@@ -468,8 +468,6 @@
     font-size: var(--font-sm, 13px);
     line-height: 1.5;
     color: var(--text);
-    background: var(--bg);
-    border-radius: var(--radius, 8px);
   }
 
   .sdk-sheet-content :global(h1),
@@ -510,6 +508,12 @@
   .sdk-sheet-content :global(button:hover) {
     border-color: var(--accent);
     background: var(--border);
+  }
+  .sdk-sheet-content :global(button.active),
+  .sdk-sheet-content :global(button[aria-pressed="true"]) {
+    background: var(--accent);
+    color: var(--on-accent);
+    border-color: var(--accent);
   }
 
   .sdk-sheet-content :global(input),

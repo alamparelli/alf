@@ -1,10 +1,12 @@
 package controlcenter
 
 import (
+	"context"
 	"crypto/subtle"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -93,7 +95,7 @@ func (h *SSHHandler) proxySSHHTTP(w http.ResponseWriter, r *http.Request, servic
 	proxyReq.Header.Set("Authorization", "Bearer "+client.Token)
 	proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 
-	resp, err := http.DefaultClient.Do(proxyReq)
+	resp, err := h.Manager.Client().DoRequest(proxyReq)
 	if err != nil {
 		log.Printf("[ssh] vault proxy error: %v", err)
 		http.Error(w, `{"error":"SSH service unavailable"}`, http.StatusBadGateway)
@@ -152,11 +154,19 @@ func (h *SSHHandler) handleSSHSession(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 
-	// Dial vault-proxy WebSocket.
+	// Dial vault-proxy WebSocket via Unix socket transport.
 	vaultHeader := http.Header{}
 	vaultHeader.Set("Authorization", "Bearer "+client.Token)
+	unixHTTPClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", h.Manager.SocketPath())
+			},
+		},
+	}
 	vaultConn, _, err := websocket.Dial(r.Context(), wsURL, &websocket.DialOptions{
 		HTTPHeader: vaultHeader,
+		HTTPClient: unixHTTPClient,
 	})
 	if err != nil {
 		browserConn.Close(websocket.StatusInternalError, "failed to connect to SSH service")

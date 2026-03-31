@@ -412,13 +412,15 @@ EOF
     cpus: "2.0"
     runtime: \${ALF_RUNTIME:-runc}
     security_opt:
-      - no-new-privileges:true
+      - apparmor=unconfined
     cap_drop:
       - ALL
     cap_add:
       - CHOWN
       - SETUID
       - SETGID
+      - SYS_ADMIN
+      - SYS_CHROOT
       - DAC_OVERRIDE
       - FOWNER
       - NET_ADMIN

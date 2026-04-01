@@ -18,6 +18,7 @@ import (
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
+	"github.com/alamparelli/alf/internal/tlsgen"
 )
 
 var tokenRegex = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
@@ -183,9 +184,23 @@ func RunInit() {
 	} else {
 		ccPort := promptPort(reader, prev.Port)
 		ccHost := promptHost(reader, prev.Host)
-		composeData = ComposeData{
-			CCPort:        ccPort,
-			CCExternalURL: fmt.Sprintf("http://%s:%s", ccHost, ccPort),
+
+		// Generate self-signed TLS cert for local HTTPS (no Traefik).
+		tlsDir := filepath.Join(dir, "config.d", "tls")
+		certPath := filepath.Join(tlsDir, "cert.pem")
+		keyPath := filepath.Join(tlsDir, "key.pem")
+		if err := tlsgen.GenerateSelfSigned(certPath, keyPath); err != nil {
+			PrintWarning(fmt.Sprintf("TLS cert generation failed: %v — falling back to HTTP", err))
+			composeData = ComposeData{
+				CCPort:        ccPort,
+				CCExternalURL: fmt.Sprintf("http://%s:%s", ccHost, ccPort),
+			}
+		} else {
+			PrintCheck("TLS certificate generated (self-signed, 10 years)")
+			composeData = ComposeData{
+				CCPort:        ccPort,
+				CCExternalURL: fmt.Sprintf("https://%s:%s", ccHost, ccPort),
+			}
 		}
 		saveSetupProfile(setupProfile{
 			Dir: dir, Port: ccPort, Host: ccHost,

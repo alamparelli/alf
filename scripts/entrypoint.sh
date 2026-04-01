@@ -81,6 +81,8 @@ fi
 
 # Phase 2.5: Fix all permissions as root (before dropping privileges).
 # alf (uid 1000) = LLM subprocess, alfd (uid 1001) = daemon.
+# Clean up stale Unix sockets from previous runs (chown on sockets fails on Docker Desktop).
+find /home/alf/data -name '*.sock' -type s -delete 2>/dev/null || true
 chown -R alf:alf /home/alf               # subprocess HOME
 chown -R alf:alf /home/alf/data          # workspace (both users via group)
 chmod -R g+ws /home/alf/data

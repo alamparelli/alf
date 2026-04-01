@@ -3,6 +3,7 @@
   import DOMPurify from 'dompurify'
   import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check, Users } from 'lucide-svelte'
   import { api } from '../../lib/api'
+  import { isStandaloneEmojiText } from '../../lib/chat'
   import { toasts } from '../../stores/toast.svelte'
   import { nav } from '../../stores/nav.svelte'
 
@@ -154,6 +155,22 @@
     return msg.text || ''
   }
 
+  function getStandaloneEmojiCandidate(): string {
+    if (msg.media && msg.media.length > 0) return ''
+
+    const blocks = msg.content_blocks
+    if (blocks && blocks.length > 0) {
+      if (blocks.some(block => block.type !== 'text')) return ''
+      return blocks.map(block => block.text || '').join('')
+    }
+
+    return msg.text || ''
+  }
+
+  function isStandaloneEmojiMessage(): boolean {
+    return isStandaloneEmojiText(getStandaloneEmojiCandidate())
+  }
+
   function handleSendToTask() {
     const text = getFullText()
     if (text.length > 10 && onSendToTask) {
@@ -201,7 +218,7 @@
   <div class="emoji-backdrop" onclick={() => showEmojiPicker = false}></div>
 {/if}
 
-<div class="chat-msg chat-msg-{msg.role}">
+<div class="chat-msg chat-msg-{msg.role}" class:standalone-emoji={isStandaloneEmojiMessage()}>
   <!-- Media attachments (user) -->
   {#if msg.media && msg.media.length > 0}
     <div class="msg-media">
@@ -272,16 +289,16 @@
         {/if}
       {:else if block.type === 'text'}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="msg-text" onclick={handleLinkClick}>{@html renderMarkdown(block.text || '')}</div>
+        <div class="msg-text" class:standalone-emoji-text={isStandaloneEmojiMessage()} onclick={handleLinkClick}>{@html renderMarkdown(block.text || '')}</div>
       {/if}
     {/each}
   {:else}
     <!-- Plain text message -->
     {#if msg.role === 'assistant' || msg.role === 'system'}
       <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-      <div class="msg-text" onclick={handleLinkClick}>{@html renderMarkdown(msg.text)}</div>
+      <div class="msg-text" class:standalone-emoji-text={isStandaloneEmojiMessage()} onclick={handleLinkClick}>{@html renderMarkdown(msg.text)}</div>
     {:else}
-      <div class="msg-text">{msg.text}</div>
+      <div class="msg-text" class:standalone-emoji-text={isStandaloneEmojiMessage()}>{msg.text}</div>
     {/if}
   {/if}
 
@@ -387,6 +404,19 @@
   .msg-text {
     font-size: var(--font-sm, 13px);
     line-height: 1.6;
+  }
+
+  .chat-msg.standalone-emoji {
+    padding: 8px 12px;
+  }
+
+  .msg-text.standalone-emoji-text {
+    font-size: clamp(2.5rem, 7vw, 4rem);
+    line-height: 1.05;
+  }
+
+  .msg-text.standalone-emoji-text :global(p) {
+    margin: 0;
   }
 
   .chat-msg-user .msg-text {
@@ -568,6 +598,10 @@
     gap: 8px;
     margin-top: 4px;
     flex-wrap: wrap;
+  }
+
+  .chat-msg.standalone-emoji .msg-footer {
+    margin-top: 6px;
   }
 
   .msg-time {

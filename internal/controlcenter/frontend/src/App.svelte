@@ -89,9 +89,9 @@
     <div class="sidebar-overlay" onclick={() => nav.sidebarOpen = false} role="presentation"></div>
   {/if}
 
-  <div class="main-content" class:main-content--app={nav.currentView.startsWith('page:')}>
+  <div class="main-content" class:main-content--app={nav.currentView.startsWith('page:')} class:main-content--chat={nav.currentView === 'chat'}>
     <div class="main-header">
-      <button class="hamburger-btn" onclick={() => nav.toggleSidebar()} aria-label="Toggle menu">
+      <button class="hamburger-btn" onclick={() => window.dispatchEvent(new CustomEvent('alf:open-menu'))} aria-label="Toggle menu">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="3" y1="6" x2="21" y2="6"></line>
           <line x1="3" y1="12" x2="21" y2="12"></line>
@@ -762,12 +762,30 @@
   @media (max-width: 768px) {
     .main-content {
       margin-left: 0;
+      padding: 0 calc(16px + env(safe-area-inset-right, 0px)) 0 calc(16px + env(safe-area-inset-left, 0px));
+    }
+    .main-header {
+      padding-top: calc(4px + env(safe-area-inset-top, 0px));
+      padding-bottom: 4px;
     }
     .hamburger-btn {
       display: block;
     }
     .sidebar-overlay {
       display: block;
+    }
+    .main-content--chat {
+      padding-bottom: 0;
+    }
+    /* App pages: show hamburger as floating overlay */
+    .main-content--app .main-header {
+      display: flex;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 10;
+      padding-top: calc(4px + env(safe-area-inset-top, 0px));
+      padding-left: calc(16px + env(safe-area-inset-left, 0px));
     }
   }
 
@@ -826,8 +844,7 @@
 
   @media (max-width: 768px) {
     :global(.lens-fab) {
-      bottom: 72px;
-      right: 16px;
+      display: none !important;
     }
   }
 </style>

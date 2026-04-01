@@ -771,7 +771,7 @@ a:hover { text-decoration: underline; }
 /* Includes notch-safe top padding, max-width, font stack, and colors.    */
 .page {
   padding: var(--page-padding-top, 2.5rem) var(--page-padding, 2.5rem) var(--page-padding, 2.5rem);
-  max-width: 680px;
+  max-width: 960px;
   margin: 0 auto;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg);
@@ -779,7 +779,17 @@ a:hover { text-decoration: underline; }
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
-.page h2 { margin-bottom: var(--space-md, 16px); }
+.page-wide {
+  padding: var(--page-padding-top, 2.5rem) var(--page-padding, 2.5rem) var(--page-padding, 2.5rem);
+  max-width: 100%;
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.page h2, .page-wide h2 { margin-bottom: var(--space-md, 16px); }
 
 /* ── Done / completed state ───────────────────────────────────────────── */
 /* Add to any element to show it as completed (strikethrough + dim).       */
@@ -993,9 +1003,17 @@ a:hover { text-decoration: underline; }
   background: var(--bg);
 }
 
-/* ── Mobile touch targets ──────────────────────────────────────────────── */
+/* ── Mobile touch targets & safe areas ────────────────────────────────── */
 @media (max-width: 768px) {
+  :root {
+    --page-padding: 1rem;
+    --page-padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+  }
   .btn { min-height: 44px; }
   .btn-sm { min-height: 36px; }
   .list-item, .list-item-interactive { min-height: 44px; }
+  body {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
 }

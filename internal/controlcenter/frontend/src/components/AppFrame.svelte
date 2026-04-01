@@ -399,6 +399,8 @@ body {
         injectUICSS(iframe)
         injectSheetCSS(iframe)
         injectSafeAreas(iframe)
+        // Reveal iframe after CSS is injected (next frame ensures paint)
+        requestAnimationFrame(() => { iframe.classList.add('ready') })
         // Send permissions to iframe after load
         fetch('/api/apps/' + slug + '/permissions')
           .then(r => r.ok ? r.json() : null)
@@ -499,6 +501,11 @@ body {
     width: 100%;
     height: 100%;
     border: none;
+    opacity: 0;
+    transition: opacity 0.1s ease;
+  }
+  .page-frame.ready {
+    opacity: 1;
   }
 
   @media (max-width: 768px) {

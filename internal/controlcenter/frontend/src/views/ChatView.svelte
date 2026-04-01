@@ -70,7 +70,7 @@
   let sending = $state(false)
   let tiers = $state<Tier[]>([])
   let messagesContainer: HTMLDivElement
-  let selectedTier = $state('')
+  let selectedTier = $state(localStorage.getItem('alf-chat-tier') || '')
   let streamingBlocks = $state<any[]>([])
   let streamingText = $state('')
   let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -703,7 +703,7 @@
   </div>
 
   <!-- Input -->
-  <ChatInput onSend={handleSend} onStop={stopCall} {sending} {tiers} {draft} onDraftChange={updateDraft} selectedModel={selectedTier} onModelChange={(m) => { selectedTier = m }} {activeSkills} onDismissSkill={dismissSkill} />
+  <ChatInput onSend={handleSend} onStop={stopCall} {sending} {tiers} {draft} onDraftChange={updateDraft} selectedModel={selectedTier} onModelChange={(m) => { selectedTier = m; localStorage.setItem('alf-chat-tier', m) }} {activeSkills} onDismissSkill={dismissSkill} />
 </div>
 
 <!-- Send to Agents Modal -->
@@ -918,7 +918,9 @@
 
   @media (max-width: 768px) {
     .chat-view {
-      height: calc(100vh - 120px);
+      height: calc(100dvh - 36px - env(safe-area-inset-top, 0px));
+      max-height: calc(100dvh - 36px - env(safe-area-inset-top, 0px));
+      margin-bottom: 0;
     }
 
     .chat-messages {

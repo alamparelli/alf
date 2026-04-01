@@ -65,6 +65,9 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 
+	// Make socket accessible to all container users so CLI tools work.
+	os.Chmod(m.socketPath, 0666)
+
 	// Watchdog: restart on crash with exponential backoff.
 	go m.watchdog(watchCtx)
 

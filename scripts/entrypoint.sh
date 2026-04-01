@@ -114,6 +114,9 @@ chmod -R g+ws /opt/alf/user-packages
 # Ensure subprocess can read its own .claude/ auth.
 chmod -R g+rX /home/alf/.claude 2>/dev/null || true
 
+# Ensure Codex CLI cache dir is owned by alf (volume mount may create as root).
+chown -R alf:alf /home/alf/.codex 2>/dev/null || true
+
 # Docker secrets: make them readable by daemon (alfd/uid 1001).
 # Docker Compose standalone mounts secrets as read-only tmpfs (chown impossible).
 # Copy to a writable location owned by alfd, then re-export *_FILE env vars.

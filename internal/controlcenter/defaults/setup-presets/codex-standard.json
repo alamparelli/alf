@@ -5,7 +5,7 @@
   "backend": "codex",
   "router_config": {
     "router_model": "gpt-5.4-mini",
-    "router_backend": "",
+    "router_backend": "codex",
     "default_fallback": "codex-fast",
     "router_distinctions": "Pick the tier that best balances capability and cost.\n\ncodex-fast: ONLY for trivial mechanical actions with no reasoning — greetings, toggling, listing, single-fact lookups. If the user asks WHY, HOW, or needs any judgment, explanation, or synthesis, do NOT use codex-fast.\n\ncodex-dev: Default for most work — questions, research, code, debugging, writing, summaries, web search, multi-step tasks.\n\ncodex-arch: Architecture, deep trade-offs, large refactors, building new modules from scratch.\n\nagent: ONLY when the user explicitly requests parallel independent workstreams. Most tasks, even complex ones, should go to a single-model tier."
   },

@@ -46,16 +46,31 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 		model = "gpt-5-codex"
 	}
 
-	// Build prompt: prepend system prompts if any.
+	// Build prompt: prepend system prompts, then conversation history.
 	fullPrompt := prompt
 	if len(params.SystemPrompts) > 0 {
-		fullPrompt = strings.Join(params.SystemPrompts, "\n\n") + "\n\n" + prompt
+		fullPrompt = strings.Join(params.SystemPrompts, "\n\n") + "\n\n" + fullPrompt
+	}
+	// Codex exec is one-shot — inject conversation history into the prompt
+	// so the model has context from previous turns.
+	if len(params.ConvMessages) > 0 {
+		var hist strings.Builder
+		hist.WriteString("<conversation_history>\n")
+		for _, m := range params.ConvMessages {
+			hist.WriteString(m.Role)
+			hist.WriteString(": ")
+			hist.WriteString(m.Content)
+			hist.WriteString("\n")
+		}
+		hist.WriteString("</conversation_history>\n\n")
+		fullPrompt = hist.String() + fullPrompt
 	}
 
 	args := []string{
 		"exec",
 		"--json",
-		"--full-auto",
+		"--dangerously-bypass-approvals-and-sandbox",
+		"-c", "shell_environment_policy.inherit=all",
 		"--model", model,
 	}
 
@@ -77,7 +92,7 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 			Credential: p.Credential,
 		}
 	}
-	cmd.Env = codexEnv(p.APIKey)
+	cmd.Env = codexEnv(p.APIKey, dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
 
 	log.Printf("codex: invoke (model=%s)", model)
@@ -235,6 +250,10 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 				errMsg = "unknown codex error"
 			}
 			log.Printf("codex: error event: %s", errMsg)
+			// Transient retry messages (e.g. "Reconnecting... 2/5") are not fatal.
+			if strings.Contains(errMsg, "Reconnecting") {
+				continue
+			}
 			cmd.Process.Kill()
 			<-stderrDone
 			cmd.Wait()
@@ -298,11 +317,14 @@ type codexEvent struct {
 
 // codexEnv builds a minimal environment for the codex subprocess.
 // If apiKey is empty, Codex falls back to ~/.codex/auth.json (ChatGPT login).
-func codexEnv(apiKey string) []string {
+func codexEnv(apiKey string, dataDir string) []string {
 	env := make([]string, 0, 8)
-	// Pass through essential variables.
-	for _, key := range []string{"PATH", "TERM", "LANG", "HOME", "TMPDIR", "TZ"} {
+	// Pass through essential variables, prepend user tools to PATH.
+	for _, key := range []string{"PATH", "TERM", "LANG", "HOME", "TMPDIR", "TZ", "VAULT_PROXY_SOCK"} {
 		if v := os.Getenv(key); v != "" {
+			if key == "PATH" && dataDir != "" {
+				v = dataDir + "/tools:" + dataDir + "/skills:" + dataDir + "/apps:" + v
+			}
 			env = append(env, key+"="+v)
 		}
 	}

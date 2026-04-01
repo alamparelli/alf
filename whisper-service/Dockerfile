@@ -15,6 +15,10 @@ COPY auth.py transcriber.py server.py ./
 
 RUN mkdir -p /models && chown whisper:whisper /models
 
+# Pre-download default model so the container works on internal-only networks.
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8', download_root='/models')" \
+    && chown -R whisper:whisper /models
+
 USER whisper
 
 EXPOSE 8000

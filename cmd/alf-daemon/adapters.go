@@ -44,6 +44,12 @@ func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params mem
 	model := params.Model
 	if forceModel != "" {
 		model = forceModel
+	} else if forceBackend != "" && forceBackend != "cli" {
+		// Backend set but no model — use router model so we don't send
+		// an incompatible fallback model (e.g. claude-haiku to codex).
+		if tc := a.tierStore.Current(); tc != nil && tc.RouterModel != "" {
+			model = tc.RouterModel
+		}
 	}
 
 	// If set to "cli" or not configured, use CLI directly (no API fallback cascade).
@@ -55,7 +61,7 @@ func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params mem
 	if a.registry != nil && a.registry.HasBackend(forceBackend) {
 		apiProv := a.registry.ForBackend(forceBackend)
 		apiModel := model
-		if !strings.Contains(apiModel, "/") {
+		if !strings.Contains(apiModel, "/") && forceBackend != "codex" {
 			apiModel = "anthropic/" + apiModel
 		}
 		result, err := apiProv.Invoke(ctx, prompt, provider.Params{

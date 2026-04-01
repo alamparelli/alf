@@ -77,11 +77,25 @@
     expandedBlocks[idx] = !expandedBlocks[idx]
   }
 
+  function fixPipeTables(text: string): string {
+    // Fix markdown tables output on a single line (common with Codex models).
+    // Detects patterns like "| H1 | H2 | |---|---| | a | b |" and adds newlines.
+    return text.replace(
+      /(\|[^|\n]+(?:\|[^|\n]+)+\|)\s*(\|[-:\s|]+\|)\s*((?:\|[^|\n]+(?:\|[^|\n]+)+\|\s*)+)/g,
+      (_, header, separator, rows) => {
+        const fixedRows = rows.trim().replace(/\|\s*\|/g, '|\n|').replace(/\|\s*$/gm, '|')
+        return `${header.trim()}\n${separator.trim()}\n${fixedRows}`
+      }
+    )
+  }
+
   function renderMarkdown(text: string): string {
     if (!text) return ''
+    // Fix single-line pipe tables before markdown parsing.
+    const withTables = fixPipeTables(text)
     // Auto-convert bare image/gif/video URLs (on their own line) to markdown images
     // so they render inline instead of as plain links.
-    const withMedia = text.replace(
+    const withMedia = withTables.replace(
       /^(https?:\/\/\S+\.(?:gif|png|jpe?g|webp|svg)(?:\?[^\s]*)?)$/gim,
       '![]($1)'
     )
@@ -248,11 +262,14 @@
           {/if}
         </div>
       {:else if block.type === 'tool_result'}
-        <div class="content-block tool-result-block">
-          <div class="block-body tool-result-body">
-            <pre>{block.content || block.text || ''}</pre>
+        {@const resultText = (block.content || block.text || '').trim()}
+        {#if resultText.length > 2}
+          <div class="content-block tool-result-block">
+            <div class="block-body tool-result-body">
+              <pre>{resultText}</pre>
+            </div>
           </div>
-        </div>
+        {/if}
       {:else if block.type === 'text'}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div class="msg-text" onclick={handleLinkClick}>{@html renderMarkdown(block.text || '')}</div>
@@ -402,6 +419,29 @@
   .msg-text :global(a) {
     color: inherit;
     text-decoration: underline;
+  }
+
+  .msg-text :global(table) {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+    font-size: var(--font-sm, 13px);
+  }
+
+  .msg-text :global(th),
+  .msg-text :global(td) {
+    border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+    padding: 6px 10px;
+    text-align: left;
+  }
+
+  .msg-text :global(th) {
+    font-weight: 600;
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+  }
+
+  .msg-text :global(tr:hover) {
+    background: color-mix(in srgb, var(--text) 5%, transparent);
   }
 
   .msg-text :global(img) {
@@ -631,5 +671,11 @@
 
   .emoji-btn:hover {
     background: var(--bg-input);
+  }
+
+  @media (max-width: 768px) {
+    .chat-msg {
+      max-width: 90%;
+    }
   }
 </style>

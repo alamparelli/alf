@@ -70,6 +70,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     iputils-ping \
     libcap2-bin \
+    bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 # Git: Debian Bookworm ships 2.39.x with CVE-2025-48384 (CISA KEV, arbitrary code exec
@@ -164,7 +165,8 @@ COPY tool-schemas/*.json /opt/alf/tools.d/
 RUN groupadd --gid 1000 alf \
     && groupadd --gid 1001 alfd \
     && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf \
-    && useradd --uid 1001 --gid alfd -G alf --shell /bin/bash --no-create-home alfd
+    && useradd --uid 1001 --gid alfd -G alf --shell /bin/bash --no-create-home alfd \
+    && printf 'export PATH="/home/alf/data/tools:/home/alf/data/skills:/home/alf/data/apps:/opt/alf/tools.d:$PATH"\nexport VAULT_PROXY_SOCK="/opt/alf/vault-data/vault.sock"\n' >> /home/alf/.profile
 
 # Directory structure for volumes.
 RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \

@@ -51,19 +51,25 @@
     )
   }
 
-  /** Inject alf-ui.css design system into iframe */
-  function injectUICSS(frame: HTMLIFrameElement) {
+  /** Inject alf-ui.css design system into iframe. Returns a promise that
+   *  resolves once the stylesheet has loaded (or immediately if already present). */
+  function injectUICSS(frame: HTMLIFrameElement): Promise<void> {
     try {
       const doc = frame.contentDocument
-      if (!doc) return
-      if (doc.getElementById('alf-ui-css')) return
-      const link = doc.createElement('link')
-      link.id = 'alf-ui-css'
-      link.rel = 'stylesheet'
-      link.href = '/static/alf-ui.css'
-      doc.head.appendChild(link)
+      if (!doc) return Promise.resolve()
+      if (doc.getElementById('alf-ui-css')) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        const link = doc.createElement('link')
+        link.id = 'alf-ui-css'
+        link.rel = 'stylesheet'
+        link.href = '/static/alf-ui.css'
+        link.onload = () => resolve()
+        link.onerror = () => resolve() // reveal even if CSS fails
+        doc.head.appendChild(link)
+      })
     } catch {
       // cross-origin — skip
+      return Promise.resolve()
     }
   }
 
@@ -396,12 +402,12 @@ body {
     window.addEventListener('message', handleMessage)
 
     if (iframe) {
-      iframe.addEventListener('load', () => {
+      iframe.addEventListener('load', async () => {
         theme.syncIframe(iframe)
-        injectUICSS(iframe)
+        await injectUICSS(iframe)
         injectSheetCSS(iframe)
         injectSafeAreas(iframe)
-        // Reveal iframe after CSS is injected (next frame ensures paint)
+        // Reveal iframe after CSS has loaded (next frame ensures paint)
         requestAnimationFrame(() => { iframeReady = true })
         // Send permissions to iframe after load
         fetch('/api/apps/' + slug + '/permissions')

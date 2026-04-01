@@ -349,6 +349,10 @@ func main() {
 	eventLog := eventlog.New(dataDir)
 	defer eventLog.Close()
 
+	// LLM transaction log — daily-rotated JSONL in logs/llm/.
+	provider.InitLLMLog(dataDir)
+	defer provider.CloseLLMLog()
+
 	// Git tracker for data directory version history.
 	var git *gittrack.Tracker
 	if cfg.GitTrack {

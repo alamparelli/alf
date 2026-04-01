@@ -129,7 +129,11 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 
 	log.Printf("provider: invoke (model=%s, resume=%q, write=%v, turns=%d, prompt=%d chars)",
 		model, params.ResumeID, params.WriteCapable, params.MaxTurns, len(prompt))
-	log.Printf("provider: in: %s", truncStderr(prompt, 500))
+	logLLM("invoke", map[string]any{
+		"provider": "cli", "model": model, "resume": params.ResumeID,
+		"write": params.WriteCapable, "turns": params.MaxTurns,
+		"prompt_len": len(prompt), "prompt": trunc(prompt, 2000),
+	})
 
 	// Preflight: verify claude binary is reachable with this env.
 	preCmd := exec.CommandContext(cmdCtx, "claude", "--version")
@@ -438,7 +442,11 @@ done:
 				usedModel = m
 				break
 			}
-			log.Printf("provider: out (session=%s, cost=$%.4f, turns=%d): %s", parsed.SessionID, parsed.TotalCostUSD, parsed.NumTurns, truncStderr(text, 500))
+			logLLM("result", map[string]any{
+				"provider": "cli", "model": usedModel, "session": parsed.SessionID,
+				"cost": parsed.TotalCostUSD, "turns": parsed.NumTurns,
+				"response_len": len(text), "response": trunc(text, 2000),
+			})
 			return &Result{
 				SessionID: parsed.SessionID,
 				Text:      text,

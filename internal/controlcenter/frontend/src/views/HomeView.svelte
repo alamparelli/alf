@@ -256,7 +256,7 @@
 
   function ctxDownload() {
     if (!ctxMenu) return
-    window.open(`/api/workspace?path=${encodeURIComponent(ctxMenu.path)}`, '_blank')
+    window.open(`/api/workspace?path=${encodeURIComponent(ctxMenu.path)}&download=1`, '_blank')
     closeContextMenu()
   }
 
@@ -612,7 +612,7 @@
       {#if viewingFile.message}
         <p class="dim">{viewingFile.message}</p>
         {#if viewingFile.message.includes('Binary')}
-          <a href={`/api/workspace?path=${encodeURIComponent(viewingPath)}`} download class="ws-btn" style="margin-top:8px">
+          <a href={`/api/workspace?path=${encodeURIComponent(viewingPath)}&download=1`} download class="ws-btn" style="margin-top:8px">
             <Download size={13} /> Download
           </a>
         {/if}

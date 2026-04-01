@@ -224,8 +224,13 @@
     }
   }
 
-  function handleOpenLens() {
+  function handleOpenLens(e: Event) {
+    const detail = (e as CustomEvent)?.detail
     open = true
+    if (detail?.query) {
+      query = detail.query
+      searchRemote(query)
+    }
     setTimeout(() => searchInput?.focus(), 0)
   }
 

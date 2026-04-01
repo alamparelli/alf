@@ -52,6 +52,10 @@ func (h *WorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		if r.URL.Query().Get("download") == "1" {
+			h.download(w, r, absPath, relPath)
+			return
+		}
 		h.get(w, absPath, relPath)
 	case http.MethodPut:
 		if h.isReadOnly(relPath) {
@@ -160,6 +164,24 @@ func (h *WorkspaceHandler) realDataDir() string {
 		return h.DataDir
 	}
 	return resolved
+}
+
+func (h *WorkspaceHandler) download(w http.ResponseWriter, r *http.Request, absPath, relPath string) {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "not found", http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	if info.IsDir() {
+		http.Error(w, "cannot download directory", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(absPath)+"\"")
+	http.ServeFile(w, r, absPath)
 }
 
 func (h *WorkspaceHandler) get(w http.ResponseWriter, absPath, relPath string) {

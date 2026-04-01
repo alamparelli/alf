@@ -322,6 +322,7 @@
   .chat-input-container {
     border-top: 1px solid var(--border);
     padding: 8px 12px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     background: var(--bg);
     transition: background 0.15s;
   }

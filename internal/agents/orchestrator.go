@@ -175,9 +175,26 @@ type ProgressFunc func(phase, detail string)
 
 // Run executes the orchestrator loop for a user message.
 func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompts []string, rc RunConfig, onProgress ProgressFunc) (string, *TaskMeta, error) {
-	teams := o.store.All()
-	if len(teams) == 0 {
+	allTeams := o.store.All()
+	if len(allTeams) == 0 {
 		return "", nil, fmt.Errorf("no agent teams configured")
+	}
+
+	// If a specific team was requested, filter to only that team.
+	// This prevents the brain from choosing a different team.
+	var teams []*TeamConfig
+	if rc.Team != "" {
+		for _, t := range allTeams {
+			if t.Name == rc.Team {
+				teams = append(teams, t)
+				break
+			}
+		}
+		if len(teams) == 0 {
+			return "", nil, fmt.Errorf("team %q not found", rc.Team)
+		}
+	} else {
+		teams = allTeams
 	}
 
 	taskID := fmt.Sprintf("%d", time.Now().UnixNano())

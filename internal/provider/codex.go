@@ -69,15 +69,24 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	args := []string{
 		"exec",
 		"--json",
-		// Use --dangerously-bypass-approvals-and-sandbox because Codex's built-in
-		// bwrap sandbox fails inside Docker ("Unexpected capabilities but not setuid").
+	}
+	if params.ReadOnly {
+		// Read-only mode: no shell tools, no file writes.
+		// Used for the orchestrator brain which must produce JSON-only output.
+		// -s read-only works inside Docker (no bwrap needed).
+		args = append(args, "-s", "read-only")
+	} else {
+		// Full access mode for sub-agents that need to execute commands.
+		// Uses --dangerously-bypass-approvals-and-sandbox because Codex's bwrap
+		// sandbox fails inside Docker ("Unexpected capabilities but not setuid").
 		// Filesystem protection is enforced by entrypoint permissions:
-		// config.d, skills.d, vault-data are owned by alfd:alf with mode 750,
-		// so alf (uid 1000) can read but not write.
-		"--dangerously-bypass-approvals-and-sandbox",
+		// config.d, skills.d, vault-data are owned by alfd:alf with mode 750.
+		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
+	}
+	args = append(args,
 		"-c", "shell_environment_policy.inherit=all",
 		"--model", model,
-	}
+	)
 
 	dataDir := params.DataDir
 	if dataDir == "" {

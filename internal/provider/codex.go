@@ -79,7 +79,12 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 		dataDir = p.DefaultDataDir
 	}
 	args = append(args, "-C", dataDir)
-	args = append(args, fullPrompt)
+
+	// Use stdin for large prompts to avoid "argument list too long" errors.
+	useStdin := len(fullPrompt) > 100000
+	if !useStdin {
+		args = append(args, fullPrompt)
+	}
 
 	timeout := p.Timeout
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -94,6 +99,10 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	}
 	cmd.Env = codexEnv(p.APIKey, dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
+
+	if useStdin {
+		cmd.Stdin = strings.NewReader(fullPrompt)
+	}
 
 	log.Printf("codex: invoke (model=%s)", model)
 

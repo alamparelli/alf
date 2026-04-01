@@ -71,7 +71,9 @@ func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params mem
 			return result.Text, nil
 		}
 		log.Printf("memstore: extraction via %s failed (%v), falling back to CLI", forceBackend, err)
-		return a.invokeCLI(ctx, prompt, model, params)
+		// Use a CLI-compatible model for fallback — the forced model may be codex-only.
+		cliModel := params.Model // original model from resolveModel()
+		return a.invokeCLI(ctx, prompt, cliModel, params)
 	}
 
 	// Auto mode: try API backends (prefer authenticated over local), fallback CLI.

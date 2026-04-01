@@ -144,6 +144,7 @@ func (h *TasksHandler) resolveAgentConfig() agents.RunConfig {
 			}
 			return agents.RunConfig{
 				Model:                model,
+				Backend:              t.Backend,
 				Effort:               t.Effort,
 				MaxTurns:             t.MaxTurns,
 				OrchestratorMaxTurns: t.OrchestratorMaxTurns,

@@ -16,14 +16,11 @@ func TestFileTierStore_LoadDefault(t *testing.T) {
 	if len(tiers.Tiers) < 4 {
 		t.Fatalf("expected at least 4 default tiers, got %d", len(tiers.Tiers))
 	}
-	if tiers.Tiers[0].Name != "haiku" {
-		t.Errorf("expected first tier 'haiku', got %q", tiers.Tiers[0].Name)
-	}
-	if tiers.Tiers[0].Effort != "low" {
-		t.Errorf("expected effort 'low', got %q", tiers.Tiers[0].Effort)
+	if tiers.Tiers[0].Name != "codex-fast" {
+		t.Errorf("expected first tier 'codex-fast', got %q", tiers.Tiers[0].Name)
 	}
 	if !tiers.Tiers[0].Routable {
-		t.Error("expected haiku tier to be routable")
+		t.Error("expected codex-fast tier to be routable")
 	}
 }
 
@@ -34,7 +31,7 @@ func TestFileTierStore_Current(t *testing.T) {
 
 	// Before any file, Current returns default.
 	cur := store.Current()
-	if len(cur.Tiers) < 4 || cur.Tiers[0].Name != "haiku" {
+	if len(cur.Tiers) < 4 || cur.Tiers[0].Name != "codex-fast" {
 		t.Error("Current() should return default tiers before any file write")
 	}
 }

@@ -57,6 +57,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Message        string `json:"message"`
+		Team           string `json:"team"`
 		NeedValidation bool   `json:"need_validation"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -90,6 +91,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 		RecallBlock:          recallBlock,
 		SkillStore:           h.SkillStore,
 		NeedValidation:       req.NeedValidation,
+		Team:                 req.Team,
 	})
 
 	// Progress callback: emit events for arbitration.

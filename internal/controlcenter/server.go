@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -35,6 +36,8 @@ type Server struct {
 	internalHandler http.Handler // handler without stripToolsSocketHeader (for Unix tools proxy)
 	addr            string
 	statusProvider  *daemonStatusProvider
+	tlsCertFile     string // if set, serve HTTPS (local self-signed)
+	tlsKeyFile      string
 }
 
 // New creates a Control Center server.
@@ -119,6 +122,19 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 	})
 
 	addr := "0.0.0.0:" + DefaultPort
+
+	// Detect self-signed TLS cert for local installs (no Traefik).
+	var tlsCert, tlsKey string
+	certPath := filepath.Join(configDir, "tls", "cert.pem")
+	keyPath := filepath.Join(configDir, "tls", "key.pem")
+	if _, err := os.Stat(certPath); err == nil {
+		if _, err := os.Stat(keyPath); err == nil {
+			tlsCert = certPath
+			tlsKey = keyPath
+			log.Printf("[CC] TLS enabled (self-signed): %s", certPath)
+		}
+	}
+
 	return &Server{
 		httpServer: &http.Server{
 			Addr:              addr,
@@ -132,6 +148,8 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		internalHandler: handlers.Internal,
 		addr:            addr,
 		statusProvider:  statusProvider,
+		tlsCertFile:     tlsCert,
+		tlsKeyFile:      tlsKey,
 	}, eventBroker, nil
 }
 
@@ -150,7 +168,12 @@ func (s *Server) InternalHandler() http.Handler {
 }
 
 // Start begins listening. Blocks until the server stops.
+// If TLS cert/key files are present (local self-signed), serves HTTPS.
 func (s *Server) Start() error {
+	if s.tlsCertFile != "" && s.tlsKeyFile != "" {
+		log.Printf("[CC] listening on %s (TLS)", s.addr)
+		return s.httpServer.ListenAndServeTLS(s.tlsCertFile, s.tlsKeyFile)
+	}
 	log.Printf("[CC] listening on %s", s.addr)
 	return s.httpServer.ListenAndServe()
 }

@@ -69,7 +69,12 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	args := []string{
 		"exec",
 		"--json",
-		"--full-auto",
+		// Use --dangerously-bypass-approvals-and-sandbox because Codex's built-in
+		// bwrap sandbox fails inside Docker ("Unexpected capabilities but not setuid").
+		// Filesystem protection is enforced by entrypoint permissions:
+		// config.d, skills.d, vault-data are owned by alfd:alf with mode 750,
+		// so alf (uid 1000) can read but not write.
+		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", "shell_environment_policy.inherit=all",
 		"--model", model,
 	}
@@ -79,13 +84,6 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 		dataDir = p.DefaultDataDir
 	}
 	args = append(args, "-C", dataDir)
-
-	// Grant write access to home directory (for .local, .npm, .cache, etc.)
-	// but NOT to config.d, skills.d, or vault-data which are daemon-owned.
-	homeDir := os.Getenv("HOME")
-	if homeDir != "" && homeDir != dataDir {
-		args = append(args, "--add-dir", homeDir)
-	}
 
 	// Use stdin for large prompts to avoid "argument list too long" errors.
 	useStdin := len(fullPrompt) > 100000

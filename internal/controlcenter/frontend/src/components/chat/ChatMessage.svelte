@@ -195,8 +195,16 @@
     return mime?.startsWith('image/')
   }
 
-  function isStandaloneText(text: string): boolean {
-    return isStandaloneEmojiMessage(text || '')
+  function isStandaloneEmojiMsg(): boolean {
+    if (msg.media && msg.media.length > 0) return false
+
+    const blocks = msg.content_blocks
+    if (blocks && blocks.length > 0) {
+      if (blocks.some(block => block.type !== 'text')) return false
+      return isStandaloneEmojiMessage(blocks.map(block => block.text || '').join(''))
+    }
+
+    return isStandaloneEmojiMessage(msg.text || '')
   }
 </script>
 
@@ -279,7 +287,7 @@
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div
           class="msg-text"
-          class:msg-text-emoji={isStandaloneText(block.text || '')}
+          class:msg-text-emoji={isStandaloneEmojiMsg()}
           onclick={handleLinkClick}
         >{@html renderMarkdown(block.text || '')}</div>
       {/if}
@@ -290,11 +298,11 @@
       <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
       <div
         class="msg-text"
-        class:msg-text-emoji={isStandaloneText(msg.text)}
+        class:msg-text-emoji={isStandaloneEmojiMsg()}
         onclick={handleLinkClick}
       >{@html renderMarkdown(msg.text)}</div>
     {:else}
-      <div class="msg-text" class:msg-text-emoji={isStandaloneText(msg.text)}>{msg.text}</div>
+      <div class="msg-text" class:msg-text-emoji={isStandaloneEmojiMsg()}>{msg.text}</div>
     {/if}
   {/if}
 

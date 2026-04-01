@@ -94,8 +94,6 @@ services:
 {{- range .Workspaces}}
       - {{.}}:/workspaces/{{base .}}
 {{- end}}
-    mem_limit: 2g
-    cpus: "2.0"
     runtime: ${ALF_RUNTIME:-runc}
     security_opt:
       # AppArmor blocks mount(2) even with CAP_SYS_ADMIN — unconfined required

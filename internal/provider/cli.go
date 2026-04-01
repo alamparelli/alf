@@ -127,8 +127,9 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	cmd.Env = safeEnv(homeDir, dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
 
-	log.Printf("provider: invoke (model=%s, resume=%q, write=%v, turns=%d)",
-		model, params.ResumeID, params.WriteCapable, params.MaxTurns)
+	log.Printf("provider: invoke (model=%s, resume=%q, write=%v, turns=%d, prompt=%d chars)",
+		model, params.ResumeID, params.WriteCapable, params.MaxTurns, len(prompt))
+	log.Printf("provider: in: %s", truncStderr(prompt, 500))
 
 	// Preflight: verify claude binary is reachable with this env.
 	preCmd := exec.CommandContext(cmdCtx, "claude", "--version")
@@ -384,7 +385,7 @@ done:
 	<-stderrDone
 	waitErr := cmd.Wait()
 	invokeDur := time.Since(invokeStart)
-	log.Printf("provider: done %dms events=%d", invokeDur.Milliseconds(), eventCount)
+	log.Printf("provider: done %dms events=%d result=%d chars", invokeDur.Milliseconds(), eventCount, resultText.Len())
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("claude timed out after %v", timeout)
 	}
@@ -437,6 +438,7 @@ done:
 				usedModel = m
 				break
 			}
+			log.Printf("provider: out (session=%s, cost=$%.4f, turns=%d): %s", parsed.SessionID, parsed.TotalCostUSD, parsed.NumTurns, truncStderr(text, 500))
 			return &Result{
 				SessionID: parsed.SessionID,
 				Text:      text,

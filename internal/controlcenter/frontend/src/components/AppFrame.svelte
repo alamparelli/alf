@@ -65,6 +65,52 @@
     }
   }
 
+  /** Inject safe area insets as CSS variables (iframes can't read env() from parent) */
+  function injectSafeAreas(frame: HTMLIFrameElement) {
+    try {
+      const doc = frame.contentDocument
+      if (!doc) return
+      if (doc.getElementById('alf-safe-areas')) return
+      // Read computed safe area values from the parent document
+      const cs = getComputedStyle(document.documentElement)
+      const top = cs.getPropertyValue('--sat').trim() || getComputedStyle(document.body).paddingTop || '0px'
+      // Use a test element to resolve env() values
+      const test = document.createElement('div')
+      test.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px);'
+      document.body.appendChild(test)
+      const computed = getComputedStyle(test)
+      const sat = computed.paddingTop
+      const sab = computed.paddingBottom
+      const sal = computed.paddingLeft
+      const sar = computed.paddingRight
+      document.body.removeChild(test)
+
+      const style = doc.createElement('style')
+      style.id = 'alf-safe-areas'
+      // Top safe area is already handled by the parent frame positioning
+      // (top: 36px + env(safe-area-inset-top)). Override --page-padding-top
+      // and --safe-area-top to 0 inside iframes to prevent double spacing.
+      // env(safe-area-inset-top) cannot be overridden, so we override the
+      // CSS variables that alf-ui.css uses instead.
+      style.textContent = `
+:root {
+  --safe-area-top: 0px;
+  --safe-area-bottom: ${sab};
+  --safe-area-left: ${sal};
+  --safe-area-right: ${sar};
+  --page-padding-top: 1rem !important;
+}
+body {
+  padding: 0 var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
+  overflow-x: hidden;
+}
+`
+      doc.head.appendChild(style)
+    } catch {
+      // cross-origin — skip
+    }
+  }
+
   /** Inject mobile-responsive sheet CSS into iframe */
   function injectSheetCSS(frame: HTMLIFrameElement) {
     try {
@@ -352,6 +398,7 @@
         theme.syncIframe(iframe)
         injectUICSS(iframe)
         injectSheetCSS(iframe)
+        injectSafeAreas(iframe)
         // Send permissions to iframe after load
         fetch('/api/apps/' + slug + '/permissions')
           .then(r => r.ok ? r.json() : null)
@@ -456,8 +503,8 @@
 
   @media (max-width: 768px) {
     .page-frame {
-      top: env(safe-area-inset-top, 0px);
-      height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+      top: calc(36px + env(safe-area-inset-top, 0px));
+      height: calc(100% - 36px - env(safe-area-inset-top, 0px));
     }
   }
 

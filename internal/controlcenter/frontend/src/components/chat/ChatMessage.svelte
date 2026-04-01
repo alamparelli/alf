@@ -94,12 +94,23 @@
     if (!text) return ''
     // Fix single-line pipe tables before markdown parsing.
     const withTables = fixPipeTables(text)
-    // Auto-convert bare image/gif/video URLs (on their own line) to markdown images
-    // so they render inline instead of as plain links.
-    const withMedia = withTables.replace(
-      /^(https?:\/\/\S+\.(?:gif|png|jpe?g|webp|svg)(?:\?[^\s]*)?)$/gim,
-      '![]($1)'
-    )
+    // Auto-convert bare image/gif URLs to markdown images so they render inline
+    // instead of as plain links. Handles two cases:
+    //   1. URL alone on its own line → replace the whole line with ![](url)
+    //   2. URL at the end of a line after other text (e.g. "🎉 https://...gif") →
+    //      keep the preceding text and append a newline + ![](url) so the image
+    //      renders below the text (required because marked needs block-level images).
+    const withMedia = withTables
+      // Case 1: URL is the only thing on the line.
+      .replace(
+        /^(https?:\/\/\S+\.(?:gif|png|jpe?g|webp|svg)(?:\?[^\s]*)?)$/gim,
+        '![]($1)'
+      )
+      // Case 2: URL appears after other content on the same line.
+      .replace(
+        /^(.+?)\s+(https?:\/\/\S+\.(?:gif|png|jpe?g|webp|svg)(?:\?[^\s]*)?)$/gim,
+        '$1\n\n![]($2)'
+      )
     const raw = marked.parse(withMedia, { async: false }) as string
     // Convert <img> with video extensions to <video> elements.
     const withVideos = raw.replace(

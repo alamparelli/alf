@@ -118,6 +118,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
+	cmd.WaitDelay = 5 * time.Second // force-close pipes after SIGKILL
 
 	// Build a safe environment for the subprocess (allowlist, not blocklist).
 	// Prevents leaking secrets (TELEGRAM_BOT_TOKEN, CC_AUTH_TOKEN, etc.)
@@ -260,20 +261,31 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 				return nil, fmt.Errorf("claude context cancelled during startup: %v", cmdCtx.Err())
 			}
 		} else {
-			line, ok := <-lineCh
-			if !ok {
-				goto done
-			}
-			if len(line) == 0 {
-				continue
-			}
-			eventCount++
-			if !firstEvent {
-				firstEvent = true
-			}
+			select {
+			case line, ok := <-lineCh:
+				if !ok {
+					goto done
+				}
+				if len(line) == 0 {
+					continue
+				}
+				eventCount++
+				if !firstEvent {
+					firstEvent = true
+				}
 
-			lastEvent = make(json.RawMessage, len(line))
-			copy(lastEvent, line)
+				lastEvent = make(json.RawMessage, len(line))
+				copy(lastEvent, line)
+			case <-cmdCtx.Done():
+				log.Printf("provider: context cancelled mid-stream, killing process group")
+				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				<-stderrDone
+				cmd.Wait()
+				if cmdCtx.Err() == context.DeadlineExceeded {
+					return nil, fmt.Errorf("claude timed out after %v", timeout)
+				}
+				return nil, fmt.Errorf("claude cancelled: %v", cmdCtx.Err())
+			}
 		}
 
 	processEvent:

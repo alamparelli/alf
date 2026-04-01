@@ -115,6 +115,7 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
+	cmd.WaitDelay = 5 * time.Second // force-close pipes after SIGKILL
 	cmd.Env = codexEnv(p.APIKey, dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
 
@@ -215,9 +216,20 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 				return nil, fmt.Errorf("codex context cancelled during startup: %v", cmdCtx.Err())
 			}
 		} else {
-			line, ok = <-lineCh
-			if !ok {
-				goto done
+			select {
+			case line, ok = <-lineCh:
+				if !ok {
+					goto done
+				}
+			case <-cmdCtx.Done():
+				log.Printf("codex: context cancelled mid-stream, killing process group")
+				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				<-stderrDone
+				cmd.Wait()
+				if cmdCtx.Err() == context.DeadlineExceeded {
+					return nil, fmt.Errorf("codex timed out after %v", timeout)
+				}
+				return nil, fmt.Errorf("codex cancelled: %v", cmdCtx.Err())
 			}
 		}
 

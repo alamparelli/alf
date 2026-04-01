@@ -274,7 +274,10 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	}
 
 	log.Printf("api[%s]: invoke (model=%s, prompt=%d chars)", p.name, model, len(prompt))
-	log.Printf("api[%s]: in: %s", p.name, truncBody([]byte(prompt)))
+	logLLM("invoke", map[string]any{
+		"provider": "api", "backend": p.name, "model": model,
+		"prompt_len": len(prompt), "prompt": trunc(prompt, 2000),
+	})
 
 	messages := p.BuildMessages(prompt, params)
 
@@ -314,7 +317,11 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		OutputTokens: resp.OutputTokens,
 	}
 
-	log.Printf("api[%s]: out (in=%d out=%d tokens): %s", p.name, resp.InputTokens, resp.OutputTokens, truncBody([]byte(text)))
+	logLLM("result", map[string]any{
+		"provider": "api", "backend": p.name, "model": model,
+		"input_tokens": resp.InputTokens, "output_tokens": resp.OutputTokens,
+		"response_len": len(text), "response": trunc(text, 2000),
+	})
 
 	// Append to legacy history (only for keyed sessions without ConvMessages).
 	if len(params.ConvMessages) == 0 && params.SessionKey != "" && p.history != nil {

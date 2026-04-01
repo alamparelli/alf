@@ -98,7 +98,7 @@
   --safe-area-bottom: ${sab};
   --safe-area-left: ${sal};
   --safe-area-right: ${sar};
-  --page-padding-top: 1rem !important;
+  --page-padding-top: 1rem;
 }
 body {
   padding: 0 var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);

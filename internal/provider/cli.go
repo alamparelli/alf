@@ -109,10 +109,14 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 
 	cmd := exec.CommandContext(cmdCtx, "claude", args...)
 	cmd.Dir = dataDir
+	spa := &syscall.SysProcAttr{Setpgid: true}
 	if p.Credential != nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: p.Credential,
-		}
+		spa.Credential = p.Credential
+	}
+	cmd.SysProcAttr = spa
+	// Kill the entire process group (claude + children) on cancel.
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 
 	// Build a safe environment for the subprocess (allowlist, not blocklist).
@@ -236,7 +240,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 				goto processEvent
 			case <-firstTimer.C:
 				// No events within timeout - kill and report stderr.
-				cmd.Process.Kill()
+				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 				<-stderrDone
 				cmd.Wait()
 				errMsg := strings.TrimSpace(stderr.String())
@@ -245,7 +249,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 				}
 				return nil, fmt.Errorf("claude startup timeout (%v): %s", firstEventTimeout, truncStderr(errMsg, 500))
 			case <-cmdCtx.Done():
-				cmd.Process.Kill()
+				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 				<-stderrDone
 				cmd.Wait()
 				return nil, fmt.Errorf("claude context cancelled during startup: %v", cmdCtx.Err())

@@ -89,11 +89,11 @@ func (c *CLIClassifier) startLocked() error {
 
 	cmd := exec.Command("claude", args...)
 	cmd.Dir = c.cfg.DataDir
+	spa := &syscall.SysProcAttr{Setpgid: true}
 	if c.cfg.Credential != nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: c.cfg.Credential,
-		}
+		spa.Credential = c.cfg.Credential
 	}
+	cmd.SysProcAttr = spa
 
 	// Build a safe environment (same allowlist as CLIProvider).
 	classifierHome := c.cfg.HomeDir
@@ -358,7 +358,8 @@ func (c *CLIClassifier) IsReady() bool {
 func (c *CLIClassifier) killLocked() {
 	if c.cmd != nil && c.cmd.Process != nil {
 		c.stdin.Close()
-		c.cmd.Process.Kill()
+		// Kill the entire process group to avoid orphan children.
+		syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 		c.cmd.Wait()
 		c.cmd = nil
 		c.ready = false

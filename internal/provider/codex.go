@@ -106,10 +106,14 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 
 	cmd := exec.CommandContext(cmdCtx, "codex", args...)
 	cmd.Dir = dataDir
+	spa := &syscall.SysProcAttr{Setpgid: true}
 	if p.Credential != nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: p.Credential,
-		}
+		spa.Credential = p.Credential
+	}
+	cmd.SysProcAttr = spa
+	// Kill the entire process group (node + rust binary + children) on cancel.
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.Env = codexEnv(p.APIKey, dataDir)
 	cmd.Env = append(cmd.Env, params.Env...)
@@ -192,7 +196,7 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 				firstTimer.Stop()
 				waitFirstEvent = false
 			case <-firstTimer.C:
-				cmd.Process.Kill()
+				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 				<-stderrDone
 				cmd.Wait()
 				errMsg := strings.TrimSpace(stderr.String())
@@ -201,7 +205,7 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 				}
 				return nil, fmt.Errorf("codex startup timeout (%v): %s", firstEventTimeout, truncStderr(errMsg, 500))
 			case <-cmdCtx.Done():
-				cmd.Process.Kill()
+				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 				<-stderrDone
 				cmd.Wait()
 				return nil, fmt.Errorf("codex context cancelled during startup: %v", cmdCtx.Err())
@@ -277,7 +281,7 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 			if strings.Contains(errMsg, "Reconnecting") {
 				continue
 			}
-			cmd.Process.Kill()
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			<-stderrDone
 			cmd.Wait()
 			return nil, fmt.Errorf("codex: %s", errMsg)

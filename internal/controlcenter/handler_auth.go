@@ -62,6 +62,10 @@ func (h *AuthHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sameSite := http.SameSiteLaxMode
+	if h.Secure {
+		sameSite = http.SameSiteNoneMode // None required for iframe fetch, but needs Secure
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "cc_session",
 		Value:    sessionID,
@@ -69,7 +73,7 @@ func (h *AuthHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   int(ttl.Seconds()),
 		HttpOnly: true,
 		Secure:   h.Secure,
-		SameSite: http.SameSiteNoneMode, // None required for iframe fetch (apps use POST from same-origin iframes)
+		SameSite: sameSite,
 	})
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)

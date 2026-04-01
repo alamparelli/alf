@@ -129,6 +129,10 @@ func autoIssueSession(w http.ResponseWriter, r *http.Request, sessions *SessionS
 		return
 	}
 	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	autoSameSite := http.SameSiteLaxMode
+	if secure {
+		autoSameSite = http.SameSiteNoneMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "cc_session",
 		Value:    sessionID,
@@ -136,7 +140,7 @@ func autoIssueSession(w http.ResponseWriter, r *http.Request, sessions *SessionS
 		MaxAge:   86400,
 		HttpOnly: true,
 		Secure:   secure,
-		SameSite: http.SameSiteNoneMode,
+		SameSite: autoSameSite,
 	})
 	log.Printf("[CC] auto-session issued for Bearer auth from %s", clientIP(r))
 }

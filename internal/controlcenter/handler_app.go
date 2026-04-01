@@ -135,6 +135,10 @@ func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"base-uri 'self'; "+
 				"frame-ancestors 'self'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+
+		// Inject alf-ui.css into <head> so the browser loads it with the
+		// page — eliminates FOUC from post-load CSS injection.
+		data = injectDesignSystemCSS(data)
 	}
 
 	w.Write(data)
@@ -181,6 +185,25 @@ func (h *AppHandler) proxyAPI(w http.ResponseWriter, r *http.Request, slug, apiP
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+// injectDesignSystemCSS inserts a <link> to alf-ui.css into the HTML <head>
+// so the browser loads it in parallel with the page, preventing FOUC.
+func injectDesignSystemCSS(html []byte) []byte {
+	const tag = `<link rel="stylesheet" href="/static/alf-ui.css">`
+	s := string(html)
+
+	// Already has it — don't double-inject.
+	if strings.Contains(s, "/static/alf-ui.css") {
+		return html
+	}
+
+	// Inject right after <head> (or <head ...>).
+	if idx := strings.Index(strings.ToLower(s), "</head>"); idx >= 0 {
+		return []byte(s[:idx] + tag + s[idx:])
+	}
+	// Fallback: prepend to the document.
+	return []byte(tag + s)
 }
 
 // AppListHandler returns JSON list of installed apps.

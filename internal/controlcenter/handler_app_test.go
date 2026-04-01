@@ -38,8 +38,12 @@ func TestAppHandler_ServesIndexHTML(t *testing.T) {
 			t.Errorf("CSP missing %q, got: %s", directive, csp)
 		}
 	}
-	if rec.Body.String() != "<html><body>Hello</body></html>" {
-		t.Errorf("unexpected body: %s", rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, "<body>Hello</body>") {
+		t.Errorf("unexpected body: %s", body)
+	}
+	if !strings.Contains(body, "alf-ui.css") {
+		t.Errorf("expected alf-ui.css injection in HTML, got: %s", body)
 	}
 }
 

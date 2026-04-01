@@ -1295,19 +1295,23 @@ func generateInitMagicLink(dir string) string {
 	// Wait for daemon health endpoint before requesting magic link.
 	// First boot can take 30-60s (embedder init, model loading).
 	PrintInfo("Waiting for daemon to be ready...")
+	baseURL := daemonCurlURL(dir)
+	curlFlags := daemonCurlFlags(dir)
 	for i := 0; i < 60; i++ {
-		health := exec.Command("docker", "exec", "alf",
-			"curl", "-sf", "http://127.0.0.1:"+cc.DefaultPort+"/health")
+		args := append([]string{"exec", "alf", "curl"}, curlFlags...)
+		args = append(args, "-sf", baseURL+"/health")
+		health := exec.Command("docker", args...)
 		if health.Run() == nil {
 			break
 		}
 		time.Sleep(2 * time.Second)
 	}
 
-	cmd := exec.Command("docker", "exec", "alf",
-		"curl", "-sf", "-X", "POST",
+	mlArgs := append([]string{"exec", "alf", "curl"}, curlFlags...)
+	mlArgs = append(mlArgs, "-sf", "-X", "POST",
 		"-H", "Authorization: Bearer "+token,
-		"http://127.0.0.1:"+cc.DefaultPort+"/api/magic-link?days=0")
+		baseURL+"/api/magic-link?days=0")
+	cmd := exec.Command("docker", mlArgs...)
 	out, err := cmd.Output()
 	if err != nil {
 		PrintWarning("Could not generate magic link - try: alf magic-link")

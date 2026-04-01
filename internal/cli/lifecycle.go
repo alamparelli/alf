@@ -8,7 +8,32 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	cc "github.com/alamparelli/alf/internal/controlcenter"
 )
+
+// daemonHasTLS checks if the install has self-signed TLS certs.
+func daemonHasTLS(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "config.d", "tls", "cert.pem"))
+	return err == nil
+}
+
+// daemonCurlURL returns the base URL for curl calls to the daemon inside the container.
+// Uses https:// with -k (insecure) when TLS is enabled, http:// otherwise.
+func daemonCurlURL(dir string) string {
+	if daemonHasTLS(dir) {
+		return "https://127.0.0.1:" + cc.DefaultPort
+	}
+	return "http://127.0.0.1:" + cc.DefaultPort
+}
+
+// daemonCurlFlags returns extra curl flags needed (e.g. -k for self-signed TLS).
+func daemonCurlFlags(dir string) []string {
+	if daemonHasTLS(dir) {
+		return []string{"-k"}
+	}
+	return nil
+}
 
 // savedInstallPath returns the path to the file that stores the install directory.
 func savedInstallPath() string {
@@ -128,10 +153,12 @@ func RunMagicLink() {
 	token := strings.TrimSpace(string(tokenBytes))
 
 	// Call the daemon's magic-link API via docker exec + curl.
-	cmd := exec.Command("docker", "exec", "alf",
-		"curl", "-sf", "-X", "POST",
+	baseURL := daemonCurlURL(dir)
+	args := append([]string{"exec", "alf", "curl"}, daemonCurlFlags(dir)...)
+	args = append(args, "-sf", "-X", "POST",
 		"-H", "Authorization: Bearer "+token,
-		"http://127.0.0.1:8080/api/magic-link")
+		baseURL+"/api/magic-link")
+	cmd := exec.Command("docker", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		Fatal("Failed to generate magic link. Is ALF running?")

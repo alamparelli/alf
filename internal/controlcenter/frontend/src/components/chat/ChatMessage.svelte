@@ -3,6 +3,7 @@
   import DOMPurify from 'dompurify'
   import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check, Users } from 'lucide-svelte'
   import { api } from '../../lib/api'
+  import { isStandaloneEmojiMessage } from '../../lib/emoji'
   import { toasts } from '../../stores/toast.svelte'
   import { nav } from '../../stores/nav.svelte'
 
@@ -193,6 +194,10 @@
   function isImageMime(mime: string): boolean {
     return mime?.startsWith('image/')
   }
+
+  function isStandaloneText(text: string): boolean {
+    return isStandaloneEmojiMessage(text || '')
+  }
 </script>
 
 {#if showEmojiPicker}
@@ -272,16 +277,24 @@
         {/if}
       {:else if block.type === 'text'}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="msg-text" onclick={handleLinkClick}>{@html renderMarkdown(block.text || '')}</div>
+        <div
+          class="msg-text"
+          class:msg-text-emoji={isStandaloneText(block.text || '')}
+          onclick={handleLinkClick}
+        >{@html renderMarkdown(block.text || '')}</div>
       {/if}
     {/each}
   {:else}
     <!-- Plain text message -->
     {#if msg.role === 'assistant' || msg.role === 'system'}
       <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-      <div class="msg-text" onclick={handleLinkClick}>{@html renderMarkdown(msg.text)}</div>
+      <div
+        class="msg-text"
+        class:msg-text-emoji={isStandaloneText(msg.text)}
+        onclick={handleLinkClick}
+      >{@html renderMarkdown(msg.text)}</div>
     {:else}
-      <div class="msg-text">{msg.text}</div>
+      <div class="msg-text" class:msg-text-emoji={isStandaloneText(msg.text)}>{msg.text}</div>
     {/if}
   {/if}
 
@@ -387,6 +400,15 @@
   .msg-text {
     font-size: var(--font-sm, 13px);
     line-height: 1.6;
+  }
+
+  .msg-text-emoji {
+    font-size: clamp(40px, 7vw, 64px);
+    line-height: 1.1;
+  }
+
+  .msg-text-emoji :global(p) {
+    margin: 0;
   }
 
   .chat-msg-user .msg-text {

@@ -120,7 +120,7 @@ func TestCodexEvent_ParseError(t *testing.T) {
 }
 
 func TestCodexEnv_ContainsAPIKey(t *testing.T) {
-	env := codexEnv("sk-test-key-123")
+	env := codexEnv("sk-test-key-123", "")
 	found := false
 	for _, e := range env {
 		if e == "CODEX_API_KEY=sk-test-key-123" {
@@ -135,7 +135,7 @@ func TestCodexEnv_ContainsAPIKey(t *testing.T) {
 
 func TestCodexEnv_ContainsPath(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
-	env := codexEnv("sk-test")
+	env := codexEnv("sk-test", "")
 	found := false
 	for _, e := range env {
 		if e == "PATH=/usr/bin" {

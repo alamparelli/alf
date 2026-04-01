@@ -79,7 +79,7 @@ func linkSystemTools(toolsDir, srcDir string) {
 // if no tiers profiles exist yet. Also migrates legacy config.d/tiers.json to the new location.
 func seedDefaultTiers(configDir string) {
 	tiersDir := filepath.Join(configDir, "tiers")
-	os.MkdirAll(tiersDir, 0o755)
+	os.MkdirAll(tiersDir, 0o750)
 
 	dest := filepath.Join(tiersDir, "claude.json")
 

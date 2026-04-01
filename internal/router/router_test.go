@@ -72,7 +72,7 @@ func TestBuildPrompt_IncludesRoutableTiers(t *testing.T) {
 	valid := validTierSet(tiers)
 	prompt := buildPrompt(ClassifyInput{Message: "hello", Tiers: tiers, DataDir: t.TempDir(), ConfigDir: t.TempDir()}, valid)
 
-	for _, name := range []string{"haiku", "sonnet", "opus"} {
+	for _, name := range []string{"codex-fast", "codex-dev", "codex-arch"} {
 		if !strings.Contains(prompt, name) {
 			t.Errorf("prompt should contain tier %q", name)
 		}
@@ -81,20 +81,16 @@ func TestBuildPrompt_IncludesRoutableTiers(t *testing.T) {
 
 func TestBuildPrompt_ExcludesDisabledTiers(t *testing.T) {
 	tiers := defaultTiers()
-	// Find and disable opus
-	for i := range tiers.Tiers {
-		if tiers.Tiers[i].Name == "opus" {
-			tiers.Tiers[i].Enabled = false
-			break
-		}
-	}
+	// Disable the last routable tier (codex-arch or opus depending on profile)
+	disabledName := tiers.Tiers[2].Name
+	tiers.Tiers[2].Enabled = false
 	valid := validTierSet(tiers)
 	prompt := buildPrompt(ClassifyInput{Message: "hello", Tiers: tiers, DataDir: t.TempDir(), ConfigDir: t.TempDir()}, valid)
 
 	lines := strings.Split(prompt, "\n")
 	for _, line := range lines {
-		if strings.HasPrefix(line, "- opus") {
-			t.Error("disabled tier 'opus' should not be listed")
+		if strings.HasPrefix(line, "- "+disabledName) {
+			t.Errorf("disabled tier %q should not be listed", disabledName)
 		}
 	}
 }
@@ -150,7 +146,7 @@ func TestValidTierSet_Default(t *testing.T) {
 	tiers := defaultTiers()
 	valid := validTierSet(tiers)
 
-	expected := []string{"haiku", "sonnet", "opus"}
+	expected := []string{"codex-fast", "codex-dev", "codex-arch"}
 	for _, name := range expected {
 		if !valid[name] {
 			t.Errorf("expected %q in valid set", name)
@@ -160,16 +156,12 @@ func TestValidTierSet_Default(t *testing.T) {
 
 func TestValidTierSet_ExcludesNonRoutable(t *testing.T) {
 	tiers := defaultTiers()
-	for i := range tiers.Tiers {
-		if tiers.Tiers[i].Name == "haiku" {
-			tiers.Tiers[i].Routable = false
-			break
-		}
-	}
+	firstName := tiers.Tiers[0].Name
+	tiers.Tiers[0].Routable = false
 	valid := validTierSet(tiers)
 
-	if valid["haiku"] {
-		t.Error("non-routable tier should not be in valid set")
+	if valid[firstName] {
+		t.Errorf("non-routable tier %q should not be in valid set", firstName)
 	}
 }
 
@@ -227,6 +219,12 @@ func TestHasWriteIntent(t *testing.T) {
 
 func TestInterpretRaw_UpgradesNonWriteTierOnWriteIntent(t *testing.T) {
 	tiers := defaultTiers()
+	// Make codex-dev write-capable so there's an upgrade target
+	for i := range tiers.Tiers {
+		if tiers.Tiers[i].Name == "codex-dev" {
+			tiers.Tiers[i].WriteCapable = true
+		}
+	}
 	// Router picks agent (non-write-capable) but message has write intent → should upgrade
 	raw := `{"tier": "agent", "reason": "follow-up"}`
 	r := InterpretRaw(raw, tiers, "you can fix all and polish")
@@ -245,21 +243,27 @@ func TestInterpretRaw_UpgradesNonWriteTierOnWriteIntent(t *testing.T) {
 
 func TestInterpretRaw_NoUpgradeForReadOnly(t *testing.T) {
 	tiers := defaultTiers()
-	// Router picks haiku for a read-only message → no upgrade
-	raw := `{"tier": "haiku", "reason": "simple question"}`
+	// Router picks codex-fast for a read-only message → no upgrade
+	raw := `{"tier": "codex-fast", "reason": "simple question"}`
 	r := InterpretRaw(raw, tiers, "what time is it")
-	if r.Tier != "haiku" {
+	if r.Tier != "codex-fast" {
 		t.Errorf("should NOT upgrade for read-only message, got %q", r.Tier)
 	}
 }
 
 func TestInterpretRaw_NoUpgradeForWriteTier(t *testing.T) {
 	tiers := defaultTiers()
+	// Make codex-dev write-capable
+	for i := range tiers.Tiers {
+		if tiers.Tiers[i].Name == "codex-dev" {
+			tiers.Tiers[i].WriteCapable = true
+		}
+	}
 	// Router already picks a write tier → no upgrade needed
-	raw := `{"tier": "sonnet", "reason": "file changes"}`
+	raw := `{"tier": "codex-dev", "reason": "file changes"}`
 	r := InterpretRaw(raw, tiers, "fix the bug")
-	if r.Tier != "sonnet" {
-		t.Errorf("should keep sonnet for write-capable tier, got %q", r.Tier)
+	if r.Tier != "codex-dev" {
+		t.Errorf("should keep codex-dev for write-capable tier, got %q", r.Tier)
 	}
 }
 
@@ -283,22 +287,24 @@ func TestStripMarkdownFences(t *testing.T) {
 
 func TestFallbackResult(t *testing.T) {
 	tiers := defaultTiers()
-	// fallbackResult picks lowest-priority enabled tier → haiku (priority 1)
+	// fallbackResult picks lowest-priority enabled tier (priority 1)
 	r := fallbackResult(tiers)
-	if r.Tier != "haiku" {
-		t.Errorf("expected fallback tier=haiku, got %q", r.Tier)
+	if r.Tier != tiers.Tiers[0].Name {
+		t.Errorf("expected fallback tier=%q, got %q", tiers.Tiers[0].Name, r.Tier)
 	}
 
-	// Disable haiku → next lowest is sonnet (priority 2)
+	// Disable first tier → next lowest is priority 2
+	first := tiers.Tiers[0].Name
+	second := tiers.Tiers[1].Name
 	for i := range tiers.Tiers {
-		if tiers.Tiers[i].Name == "haiku" {
+		if tiers.Tiers[i].Name == first {
 			tiers.Tiers[i].Enabled = false
 			break
 		}
 	}
 	r = fallbackResult(tiers)
-	if r.Tier != "sonnet" {
-		t.Errorf("expected fallback tier=sonnet, got %q", r.Tier)
+	if r.Tier != second {
+		t.Errorf("expected fallback tier=%q, got %q", second, r.Tier)
 	}
 }
 

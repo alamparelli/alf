@@ -480,7 +480,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 
 		// Save as named profile in tiers/ subdirectory.
 		tiersDir := filepath.Join(h.ConfigDir, "tiers")
-		os.MkdirAll(tiersDir, 0o755)
+		os.MkdirAll(tiersDir, 0o750)
 		profileName := preset.ID + ".json"
 		profilePath := filepath.Join(tiersDir, profileName)
 		data, _ := json.MarshalIndent(tc, "", "  ")

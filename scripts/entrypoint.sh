@@ -86,6 +86,7 @@ chown -R alf:alf /home/alf/data          # workspace (both users via group)
 chmod -R g+ws /home/alf/data
 chown -R alfd:alf /opt/alf/config.d      # daemon owns config, subprocess reads via group
 chmod 750 /opt/alf/config.d
+find /opt/alf/config.d -type d -exec chmod 750 {} +   # subdirs also 750 (no LLM write)
 chown -R alfd:alfd /opt/alf/vault-data   # daemon-only: group alfd, LLM cannot read
 chmod 700 /opt/alf/vault-data
 # Pre-create daemon directories (daemon runs as alfd but data/ is alf-owned volume).

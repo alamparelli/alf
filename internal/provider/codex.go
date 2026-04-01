@@ -69,7 +69,7 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	args := []string{
 		"exec",
 		"--json",
-		"--dangerously-bypass-approvals-and-sandbox",
+		"--full-auto",
 		"-c", "shell_environment_policy.inherit=all",
 		"--model", model,
 	}
@@ -79,6 +79,13 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 		dataDir = p.DefaultDataDir
 	}
 	args = append(args, "-C", dataDir)
+
+	// Grant write access to home directory (for .local, .npm, .cache, etc.)
+	// but NOT to config.d, skills.d, or vault-data which are daemon-owned.
+	homeDir := os.Getenv("HOME")
+	if homeDir != "" && homeDir != dataDir {
+		args = append(args, "--add-dir", homeDir)
+	}
 
 	// Use stdin for large prompts to avoid "argument list too long" errors.
 	useStdin := len(fullPrompt) > 100000

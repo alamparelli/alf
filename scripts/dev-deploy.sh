@@ -188,6 +188,8 @@ services:
       - ./config.d:/opt/alf/config.d
       - ./skills.d:/opt/alf/skills.d
       - ./cache/claude:/home/alf/.claude
+      - ./cache/codex:/home/alf/.codex
+      - ./cache/config:/home/alf/.config
       - ./cache/local:/home/alf/.local
       - ./cache/npm:/home/alf/.npm
       - ./cache/cache:/home/alf/.cache
@@ -230,8 +232,6 @@ services:
       - WHISPER_MODEL=small
     secrets:
       - whisper_shared_secret
-    volumes:
-      - ./data/models:/models
     mem_limit: 2g
     cpus: "2.0"
 

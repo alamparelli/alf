@@ -41,7 +41,7 @@ type Message struct {
 // ContentBlock stores a single content block (text, thinking, tool_use, tool_result).
 type ContentBlock struct {
 	BlockIndex int    `json:"block_index"`
-	BlockType  string `json:"block_type"`
+	BlockType  string `json:"type"`
 	Text       string `json:"text,omitempty"`
 	Name       string `json:"name,omitempty"`
 	Input      string `json:"input,omitempty"`

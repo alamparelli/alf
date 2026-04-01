@@ -12,9 +12,10 @@ import (
 
 // PromptConfig controls conditional sections in core.md.
 type PromptConfig struct {
-	Backend string // "cli" or "api" - determines tool instructions
-	Channel string // "tg" or "cc" - determines formatting rules
-	Weight  string // "light", "standard", "full" (default) - controls context density
+	Backend     string // "cli" or "api" - determines tool instructions
+	BackendName string // actual backend name (e.g. "codex") for backend-specific sections
+	Channel     string // "tg" or "cc" - determines formatting rules
+	Weight      string // "light", "standard", "full" (default) - controls context density
 }
 
 // injectedFiles are the only files injected into every conversation.
@@ -22,7 +23,8 @@ type PromptConfig struct {
 var injectedFiles = []string{"soul.md", "mood.md", "index.md", "preferences.md", "toolbox.md"}
 
 // knownTags lists the conditional section tags we support.
-var knownTags = []string{"cli", "api", "tg", "cc"}
+// Dynamic backend names (e.g. "codex") are also matched via BackendName.
+var knownTags = []string{"cli", "api", "tg", "cc", "codex"}
 
 // weightOrder defines the inclusion hierarchy for context weights.
 // "light" < "standard" < "full" — a section tagged "standard" is included
@@ -41,7 +43,7 @@ func filterSections(content string, cfg PromptConfig) string {
 	for _, tag := range knownTags {
 		beginMarker := "<!-- @begin " + tag + " -->"
 		endMarker := "<!-- @end " + tag + " -->"
-		include := (tag == cfg.Backend) || (tag == cfg.Channel)
+		include := (tag == cfg.Backend) || (tag == cfg.Channel) || (tag == cfg.BackendName)
 
 		for {
 			start := strings.Index(result, beginMarker)

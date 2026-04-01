@@ -76,16 +76,16 @@ func TestExtractReaction_EdgeCases(t *testing.T) {
 			wantText:  "",
 		},
 		{
-			name:      "multiple markers only first extracted",
+			name:      "multiple markers all stripped",
 			input:     "[[react:👍]] text [[react:🔥]] more",
 			wantEmoji: "👍",
-			wantText:  "text [[react:🔥]] more",
+			wantText:  "text  more",
 		},
 		{
-			name:      "marker in middle of text not extracted",
+			name:      "marker in middle of text stripped",
 			input:     "Hello [[react:👍]] world",
 			wantEmoji: "",
-			wantText:  "Hello [[react:👍]] world",
+			wantText:  "Hello  world",
 		},
 		{
 			name:      "text emoji without marker syntax",

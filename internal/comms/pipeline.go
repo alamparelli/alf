@@ -434,6 +434,10 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	}
 	ctxWeight := tp.EffectiveContextWeight()
 	promptCfg := memory.PromptConfig{Backend: backend, Channel: channelID.Prefix(), Weight: ctxWeight}
+	// Pass the actual backend name so conditional sections like <!-- @begin codex --> work.
+	if tp.Backend != "" {
+		promptCfg.BackendName = tp.Backend
+	}
 	sysPrompts := memory.CollectPrompts(e.ContextDir, promptCfg)
 
 	// Tier system prompt.
@@ -580,7 +584,10 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		case "tool_result":
 			e.emit(channelID, OutEvent{Type: "tool_result", Data: map[string]string{"tool_id": event.Detail, "result": event.Text}})
 		case "text_delta":
-			e.emit(channelID, OutEvent{Type: "text_delta", Data: map[string]string{"text": event.Text}})
+			text := stripReactTags(event.Text)
+			if text != "" {
+				e.emit(channelID, OutEvent{Type: "text_delta", Data: map[string]string{"text": text}})
+			}
 		}
 	}
 
@@ -662,6 +669,11 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		var blocks []conversation.ContentBlock
 		if acc != nil {
 			blocks = acc.Blocks()
+			for i := range blocks {
+				if blocks[i].Type == conversation.BlockText {
+					blocks[i].Text = stripReactTags(blocks[i].Text)
+				}
+			}
 		}
 		if len(blocks) == 0 {
 			blocks = []conversation.ContentBlock{{Type: conversation.BlockText, Text: cleanText}}
@@ -681,24 +693,106 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		})
 	}
 	// Persist to ChatDB with content blocks.
+	// Split into separate messages at text→tool boundaries so each "step"
+	// appears as its own chat bubble (text + associated tool calls).
 	if e.ChatDB != nil && msg.ConvID != "" {
-		var dbBlocks []chatdb.ContentBlock
+		var allBlocks []conversation.ContentBlock
 		if acc != nil {
-			for i, b := range acc.Blocks() {
+			allBlocks = acc.Blocks()
+		}
+
+		// Split blocks into groups: each group starts with text block(s),
+		// followed by optional tool_use/tool_result blocks.
+		// A new group begins when we see a text block after tool blocks.
+		type blockGroup struct {
+			blocks []conversation.ContentBlock
+			text   string // aggregated text for this group
+		}
+		var groups []blockGroup
+		var current blockGroup
+		lastWasTool := false
+
+		for _, b := range allBlocks {
+			isText := b.Type == conversation.BlockText
+			if isText {
+				text := stripReactTags(b.Text)
+				if text == "" {
+					continue
+				}
+				// New group if previous blocks included tools.
+				if lastWasTool && len(current.blocks) > 0 {
+					groups = append(groups, current)
+					current = blockGroup{}
+				}
+				current.blocks = append(current.blocks, conversation.ContentBlock{Type: b.Type, Text: text})
+				if current.text != "" {
+					current.text += "\n"
+				}
+				current.text += text
+				lastWasTool = false
+			} else {
+				current.blocks = append(current.blocks, b)
+				if b.Type == conversation.BlockToolUse || b.Type == conversation.BlockToolResult {
+					lastWasTool = true
+				}
+			}
+		}
+		if len(current.blocks) > 0 {
+			groups = append(groups, current)
+		}
+
+		// Persist each group as a separate assistant message.
+		if len(groups) <= 1 {
+			// Single message — use the original assistantMsgID.
+			var dbBlocks []chatdb.ContentBlock
+			for i, b := range allBlocks {
+				text := b.Text
+				if b.Type == conversation.BlockText {
+					text = stripReactTags(text)
+				}
 				dbBlocks = append(dbBlocks, chatdb.ContentBlock{
 					BlockIndex: i, BlockType: string(b.Type),
-					Text: b.Text, Name: b.Name, Input: b.Input,
+					Text: text, Name: b.Name, Input: b.Input,
 					ToolID: b.ToolID, Output: b.Output,
 				})
 			}
+			e.ChatDB.InsertMessage(chatdb.Message{
+				ID: assistantMsgID, ConvID: msg.ConvID, Role: "assistant",
+				Text: cleanText, Source: msg.Source, Model: result.Model,
+				Tier: route.Tier, CostUSD: result.CostUSD, SessionID: result.SessionID,
+				DurationMs: duration.Milliseconds(), CreatedAt: time.Now(),
+				Blocks: dbBlocks,
+			})
+		} else {
+			now := time.Now()
+			for gi, g := range groups {
+				msgID := assistantMsgID
+				if gi > 0 {
+					msgID = conversation.NewMessageID()
+				}
+				var dbBlocks []chatdb.ContentBlock
+				for i, b := range g.blocks {
+					dbBlocks = append(dbBlocks, chatdb.ContentBlock{
+						BlockIndex: i, BlockType: string(b.Type),
+						Text: b.Text, Name: b.Name, Input: b.Input,
+						ToolID: b.ToolID, Output: b.Output,
+					})
+				}
+				dbMsg := chatdb.Message{
+					ID: msgID, ConvID: msg.ConvID, Role: "assistant",
+					Text: g.text, Source: msg.Source, Model: result.Model,
+					Tier: route.Tier, SessionID: result.SessionID,
+					CreatedAt: now.Add(time.Duration(gi) * time.Millisecond),
+					Blocks: dbBlocks,
+				}
+				// Only set cost/duration on the last message.
+				if gi == len(groups)-1 {
+					dbMsg.CostUSD = result.CostUSD
+					dbMsg.DurationMs = duration.Milliseconds()
+				}
+				e.ChatDB.InsertMessage(dbMsg)
+			}
 		}
-		e.ChatDB.InsertMessage(chatdb.Message{
-			ID: assistantMsgID, ConvID: msg.ConvID, Role: "assistant",
-			Text: cleanText, Source: msg.Source, Model: result.Model,
-			Tier: route.Tier, CostUSD: result.CostUSD, SessionID: result.SessionID,
-			DurationMs: duration.Milliseconds(), CreatedAt: time.Now(),
-			Blocks: dbBlocks,
-		})
 	}
 
 	// Emit text and done events.
@@ -771,7 +865,9 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 func ExtractReaction(text string) (string, string) {
 	trimmed := strings.TrimLeft(text, " \n\r\t")
 	if !strings.HasPrefix(trimmed, "[[react:") {
-		return "", text
+		// No leading tag — still strip any mid-text tags.
+		cleaned := stripReactTags(text)
+		return "", cleaned
 	}
 	end := strings.Index(trimmed, "]]")
 	if end == -1 {
@@ -780,9 +876,24 @@ func ExtractReaction(text string) (string, string) {
 	emoji := trimmed[len("[[react:"):end]
 	rest := strings.TrimLeft(trimmed[end+2:], " \n\r\t")
 	if emoji == "none" || emoji == "" {
-		return "", rest
+		return "", stripReactTags(rest)
 	}
-	return emoji, rest
+	return emoji, stripReactTags(rest)
+}
+
+// stripReactTags removes all remaining [[react:...]] tags from text.
+func stripReactTags(text string) string {
+	for {
+		start := strings.Index(text, "[[react:")
+		if start == -1 {
+			return text
+		}
+		end := strings.Index(text[start:], "]]")
+		if end == -1 {
+			return text
+		}
+		text = text[:start] + text[start+end+2:]
+	}
 }
 
 // toolExecAdapter bridges tooling.Executor to provider.ToolExecutor.

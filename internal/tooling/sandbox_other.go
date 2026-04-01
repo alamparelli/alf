@@ -12,9 +12,10 @@ import (
 
 // SandboxConfig configures the isolation for a sandboxed bash execution.
 type SandboxConfig struct {
-	AppSlug    string
-	AppDataDir string
-	Network    bool
+	AppSlug     string
+	AppDataDir  string
+	Network     bool
+	VaultSocket string // optional: per-app vault proxy socket path
 }
 
 // SandboxedCmd is a no-op fallback on non-Linux systems.
@@ -29,7 +30,7 @@ func SandboxedCmd(cmd *exec.Cmd, originalCommand string, cfg SandboxConfig) {
 // SandboxSafeEnv returns a minimal environment for sandboxed processes.
 func SandboxSafeEnv(appDataDir string) []string {
 	return []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"PATH=/opt/alf/tools.d:/usr/local/bin:/usr/bin:/bin",
 		"HOME=/home/alf",
 		"USER=alf",
 		"LOGNAME=alf",
@@ -59,7 +60,7 @@ func SandboxServerCmd(cmd *exec.Cmd, cfg ServerSandboxConfig) {
 // ServerSafeEnv returns a minimal environment for sandboxed server processes.
 func ServerSafeEnv(appDir string) []string {
 	return []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"PATH=/opt/alf/tools.d:/usr/local/bin:/usr/bin:/bin",
 		"HOME=/home/alf",
 		"USER=alf",
 		"LOGNAME=alf",

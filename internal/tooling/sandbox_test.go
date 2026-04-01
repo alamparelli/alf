@@ -166,7 +166,7 @@ func TestSandboxSafeEnv_ContainsExpectedVars(t *testing.T) {
 	env := SandboxSafeEnv("/data/apps/myapp")
 
 	expected := map[string]string{
-		"PATH":             "/usr/local/bin:/usr/bin:/bin",
+		"PATH":             "/opt/alf/tools.d:/usr/local/bin:/usr/bin:/bin",
 		"HOME":             "/home/alf",
 		"USER":             "alf",
 		"LOGNAME":          "alf",
@@ -267,7 +267,7 @@ func TestServerSafeEnv_ContainsExpectedVars(t *testing.T) {
 	env := ServerSafeEnv("/data/apps/myapp")
 
 	expected := map[string]string{
-		"PATH":             "/usr/local/bin:/usr/bin:/bin",
+		"PATH":             "/opt/alf/tools.d:/usr/local/bin:/usr/bin:/bin",
 		"HOME":             "/home/alf",
 		"USER":             "alf",
 		"LANG":             "en_US.UTF-8",

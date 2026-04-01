@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log"
+	"net"
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/tooling"
+	"github.com/alamparelli/alf/internal/vault"
 )
 
 // systemApps are platform-level apps that bypass sandbox and permission checks.
@@ -23,7 +27,17 @@ var systemApps = map[string]bool{
 
 // BashHandler executes a bash command and returns the output.
 type BashHandler struct {
-	Perms marketplace.PermissionChecker
+	Perms   marketplace.PermissionChecker
+	DataDir string // e.g. /home/alf/data
+
+	// Vault proxy support for sandboxed apps with network permission.
+	// When set, apps with "network" permission get a per-app vault proxy socket
+	// mounted into their sandbox so they can use vault CLI without direct token access.
+	VaultManager *vault.Manager
+
+	mu             sync.Mutex
+	vaultProxies   map[string]*vault.VaultProxy // slug → proxy
+	vaultListeners map[string]net.Listener      // slug → listener
 }
 
 type bashRequest struct {
@@ -82,12 +96,28 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Marketplace app-initiated bash: full namespace sandbox.
 		appDataDir := filepath.Join("/home/alf/data/apps", appSlug, "data")
 		hasNetwork := h.Perms != nil && h.Perms.HasPermission(appSlug, "network")
-		tooling.SandboxedCmd(cmd, req.Command, tooling.SandboxConfig{
+		sandboxCfg := tooling.SandboxConfig{
 			AppSlug:    appSlug,
 			AppDataDir: appDataDir,
 			Network:    hasNetwork,
-		})
-		cmd.Env = append(tooling.SandboxSafeEnv(appDataDir), "__SANDBOX_CMD="+req.Command)
+		}
+
+		// Vault proxy: apps with network get a per-app proxy socket.
+		var vaultSockPath string
+		if hasNetwork && h.VaultManager != nil && h.VaultManager.ProxyToken() != "" {
+			vaultSockPath = h.ensureVaultProxy(appSlug)
+			if vaultSockPath != "" {
+				sandboxCfg.VaultSocket = vaultSockPath
+			}
+		}
+
+		tooling.SandboxedCmd(cmd, req.Command, sandboxCfg)
+		env := tooling.SandboxSafeEnv(appDataDir)
+		env = append(env, "__SANDBOX_CMD="+req.Command)
+		if vaultSockPath != "" {
+			env = append(env, "VAULT_PROXY_SOCK="+vaultSockPath)
+		}
+		cmd.Env = env
 	} else {
 		// LLM/terminal/internal-app bash: no sandbox, just uid drop.
 		cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -115,6 +145,45 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp.Output = output
 
 	respondJSON(w, http.StatusOK, resp)
+}
+
+// ensureVaultProxy creates or reuses a per-app vault proxy socket.
+// The socket is placed in the app's data dir so it's accessible inside the sandbox.
+// Returns the socket path, or empty string on failure.
+func (h *BashHandler) ensureVaultProxy(slug string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.vaultProxies == nil {
+		h.vaultProxies = make(map[string]*vault.VaultProxy)
+		h.vaultListeners = make(map[string]net.Listener)
+	}
+
+	currentToken := h.VaultManager.ProxyToken()
+
+	// Reuse existing proxy, refresh token if vault was restarted.
+	if proxy, ok := h.vaultProxies[slug]; ok {
+		proxy.UpdateToken(currentToken)
+		return h.vaultSockPath(slug)
+	}
+
+	// Create new proxy — allow all services (will be scoped later if needed).
+	sockPath := h.vaultSockPath(slug)
+	proxy := vault.NewVaultProxy(h.VaultManager.SocketPath(), currentToken, nil)
+	ln, err := proxy.ListenAndServe(sockPath)
+	if err != nil {
+		log.Printf("[bash] vault proxy for %s failed: %v", slug, err)
+		return ""
+	}
+
+	h.vaultProxies[slug] = proxy
+	h.vaultListeners[slug] = ln
+	log.Printf("[bash] vault proxy for %s on %s", slug, sockPath)
+	return sockPath
+}
+
+func (h *BashHandler) vaultSockPath(slug string) string {
+	return filepath.Join(h.DataDir, "apps", slug, "vault.sock")
 }
 
 // extractAppSlugFromReferer extracts the app slug from a Referer like

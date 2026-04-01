@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,7 +122,7 @@ func handleAction(tool, endpoint string, args []string) {
 		fmt.Println(result)
 
 	case "save":
-		body, _ := json.Marshal(params)
+		body, _ := json.Marshal(typedParams(params))
 		result, err := doPut(endpoint, body)
 		if err != nil {
 			fatal(err)
@@ -331,6 +332,35 @@ func doRequest(method, path string, body []byte) (string, error) {
 		}
 	}
 	return string(data), nil
+}
+
+// typedParams converts string params to their proper JSON types.
+// JSON arrays/objects are parsed as json.RawMessage, numeric strings as numbers.
+func typedParams(params map[string]string) map[string]any {
+	result := make(map[string]any, len(params))
+	for k, v := range params {
+		trimmed := strings.TrimSpace(v)
+		// Try JSON array or object.
+		if (strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) ||
+			(strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) {
+			if json.Valid([]byte(trimmed)) {
+				result[k] = json.RawMessage(trimmed)
+				continue
+			}
+		}
+		// Try integer.
+		if n, err := strconv.Atoi(trimmed); err == nil {
+			result[k] = n
+			continue
+		}
+		// Try boolean.
+		if trimmed == "true" || trimmed == "false" {
+			result[k] = trimmed == "true"
+			continue
+		}
+		result[k] = v
+	}
+	return result
 }
 
 func parseFlags(args []string) map[string]string {

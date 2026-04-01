@@ -166,7 +166,7 @@ RUN groupadd --gid 1000 alf \
     && groupadd --gid 1001 alfd \
     && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf \
     && useradd --uid 1001 --gid alfd -G alf --shell /bin/bash --no-create-home alfd \
-    && printf 'export PATH="/home/alf/data/tools:/home/alf/data/skills:/home/alf/data/apps:/opt/alf/tools.d:$PATH"\nexport VAULT_PROXY_SOCK="/opt/alf/vault-data/vault.sock"\nexport ALF_SIGNAL_SOCK="/home/alf/data/signal.sock"\n' >> /home/alf/.profile
+    && printf 'export PATH="/home/alf/data/tools:/home/alf/data/skills:/home/alf/data/apps:/opt/alf/tools.d:$PATH"\nexport VAULT_PROXY_SOCK="/opt/alf/vault-data/vault.sock"\nexport ALF_SIGNAL_SOCK="/home/alf/data/signal.sock"\nexport ALF_TOOLS_SOCK="/home/alf/data/context/tools.sock"\n' >> /home/alf/.profile
 
 # Directory structure for volumes.
 RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \

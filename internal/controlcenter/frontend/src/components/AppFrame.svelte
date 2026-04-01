@@ -9,6 +9,8 @@
   let iframe: HTMLIFrameElement
 
   // Sheet state
+  let iframeReady = $state(false)
+
   let sheetOpen = $state(false)
   let sheetHtml = $state('')
   let sheetHasActions = $state(false)
@@ -400,7 +402,7 @@ body {
         injectSheetCSS(iframe)
         injectSafeAreas(iframe)
         // Reveal iframe after CSS is injected (next frame ensures paint)
-        requestAnimationFrame(() => { iframe.classList.add('ready') })
+        requestAnimationFrame(() => { iframeReady = true })
         // Send permissions to iframe after load
         fetch('/api/apps/' + slug + '/permissions')
           .then(r => r.ok ? r.json() : null)
@@ -441,6 +443,7 @@ body {
 <iframe
   bind:this={iframe}
   class="page-frame"
+  class:ready={iframeReady}
   src={`/apps/${slug}/`}
   title={slug}
 ></iframe>

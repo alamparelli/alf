@@ -262,7 +262,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	sm := newSessionManager()
 
 	// Build orchestrator system prompt.
-	orchPrompt := BuildOrchestratorPrompt(teams, taskDir)
+	orchPrompt := BuildOrchestratorPrompt(teams, taskDir, rc.Backend)
 	allSystemPrompts := append(systemPrompts, orchPrompt)
 	maxIterations := rc.MaxIterations
 	if maxIterations <= 0 {
@@ -274,6 +274,15 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		if o.resolveModel != nil {
 			orchModel = o.resolveModel("opus")
 		}
+	}
+	// The orchestrator brain always runs on Claude CLI (not Codex) because
+	// Codex CLI cannot be restricted to JSON-only output — it always enables
+	// shell tools. When the backend is "codex", override the brain model to
+	// use Claude (sonnet for speed) while sub-agents still use the codex backend.
+	orchBackendForBrain := rc.Backend
+	if rc.Backend == "codex" {
+		orchModel = "claude-sonnet-4-6"
+		orchBackendForBrain = "" // use default CLI provider
 	}
 	orchEffort := rc.Effort
 	if orchEffort == "" {
@@ -308,9 +317,9 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		orchSessionID := sm.Get(orchestratorKey)
 
 		hasResume := orchSessionID != ""
-		log.Printf("[orchestrator] invoking model=%s backend=%s effort=%s resume=%v", orchModel, rc.Backend, orchEffort, hasResume)
+		log.Printf("[orchestrator] invoking model=%s backend=%s effort=%s resume=%v", orchModel, orchBackendForBrain, orchEffort, hasResume)
 
-		orchProvider := o.providerFor(rc.Backend, orchModel)
+		orchProvider := o.providerFor(orchBackendForBrain, orchModel)
 
 		params := provider.Params{
 			Model:         orchModel,

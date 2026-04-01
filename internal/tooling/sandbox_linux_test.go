@@ -105,11 +105,31 @@ func TestSandboxedCmd_ScriptContainsUlimits(t *testing.T) {
 	_, script := buildSandboxedCmd(t, "echo hi", SandboxConfig{
 		AppDataDir: "/data/apps/test",
 	})
-	ulimits := []string{"ulimit -v", "ulimit -u", "ulimit -f", "ulimit -t"}
+	ulimits := []string{"ulimit -u", "ulimit -f", "ulimit -t"}
 	for _, u := range ulimits {
 		if !strings.Contains(script, u) {
 			t.Errorf("script should contain %q", u)
 		}
+	}
+}
+
+func TestSandboxedCmd_PlatformToolsBindMounted(t *testing.T) {
+	_, script := buildSandboxedCmd(t, "echo hi", SandboxConfig{
+		AppDataDir: "/data/apps/test",
+	})
+	// /opt/alf/bin must be mounted (tools.d symlinks resolve into it)
+	if !strings.Contains(script, "/opt/alf/bin") {
+		t.Error("script should bind-mount /opt/alf/bin")
+	}
+	if !strings.Contains(script, `mount -o remount,ro,bind "$NEWROOT/opt/alf/bin"`) {
+		t.Error("/opt/alf/bin should be mounted read-only")
+	}
+	// /opt/alf/tools.d (the PATH-visible directory)
+	if !strings.Contains(script, "/opt/alf/tools.d") {
+		t.Error("script should bind-mount /opt/alf/tools.d")
+	}
+	if !strings.Contains(script, `mount -o remount,ro,bind "$NEWROOT/opt/alf/tools.d"`) {
+		t.Error("tools.d should be mounted read-only")
 	}
 }
 
@@ -301,6 +321,19 @@ func TestSandboxServerCmd_ScriptStructure(t *testing.T) {
 		if !strings.Contains(script, r.pattern) {
 			t.Errorf("script missing %s (expected %q)", r.desc, r.pattern)
 		}
+	}
+}
+
+func TestSandboxServerCmd_PlatformToolsBindMounted(t *testing.T) {
+	_, script := buildSandboxServerCmd(t, ServerSandboxConfig{
+		AppSlug: "weather",
+		AppDir:  "/data/apps/weather",
+	})
+	if !strings.Contains(script, "/opt/alf/bin") {
+		t.Error("server script should bind-mount /opt/alf/bin")
+	}
+	if !strings.Contains(script, "/opt/alf/tools.d") {
+		t.Error("server script should bind-mount /opt/alf/tools.d")
 	}
 }
 

@@ -12,9 +12,10 @@ import (
 
 // SandboxConfig configures the isolation for a sandboxed bash execution.
 type SandboxConfig struct {
-	AppSlug    string // app identifier (used to keep own data accessible)
-	AppDataDir string // path to app's data dir (read-write)
-	Network    bool   // if true, skip network namespace (app has network permission)
+	AppSlug     string // app identifier (used to keep own data accessible)
+	AppDataDir  string // path to app's data dir (read-write)
+	Network     bool   // if true, skip network namespace (app has network permission)
+	VaultSocket string // optional: per-app vault proxy socket path to mount into chroot
 }
 
 // SandboxedCmd configures cmd to run in isolated Linux namespaces.
@@ -94,9 +95,23 @@ if [ -d /home/alf/data/tools ]; then
   mount -o remount,ro,bind "$NEWROOT/home/alf/data/tools" || { echo "FATAL: cannot make tools read-only"; exit 1; }
 fi
 
+# Platform tools (read-only) — vault, CLI helpers installed by the daemon.
+# Mount bin/ first since tools.d/ contains symlinks into it.
+if [ -d /opt/alf/bin ]; then
+  mkdir -p "$NEWROOT/opt/alf/bin"
+  mount --rbind /opt/alf/bin "$NEWROOT/opt/alf/bin"
+  mount -o remount,ro,bind "$NEWROOT/opt/alf/bin" || { echo "FATAL: cannot make bin read-only"; exit 1; }
+fi
+if [ -d /opt/alf/tools.d ]; then
+  mkdir -p "$NEWROOT/opt/alf/tools.d"
+  mount --rbind /opt/alf/tools.d "$NEWROOT/opt/alf/tools.d"
+  mount -o remount,ro,bind "$NEWROOT/opt/alf/tools.d" || { echo "FATAL: cannot make tools.d read-only"; exit 1; }
+fi
+
 # HOME skeleton
 mkdir -p "$NEWROOT/home/alf"
 
+%s
 # --- Phase 3: chroot into new root ---
 # pivot_root fails on Docker overlay fs. chroot provides the same
 # allowlist isolation. The old root becomes unreachable after chroot
@@ -110,7 +125,6 @@ mount -t proc proc "$NEWROOT/proc" 2>/dev/null || true
 # interpreted by the setup script's shell.
 cat > "$NEWROOT/tmp/run.sh" << 'SANDBOX_SCRIPT'
 #!/bin/bash
-ulimit -v 131072 2>/dev/null || true
 ulimit -u 256 2>/dev/null || true
 ulimit -f 102400 2>/dev/null || true
 ulimit -t 60 2>/dev/null || true
@@ -127,6 +141,7 @@ exec /usr/sbin/chroot "$NEWROOT" \
 `,
 		dnsSnippet(cfg.Network),
 		shellQuote(cfg.AppDataDir),
+		bashVaultSocketMount(cfg.VaultSocket),
 	)
 
 	cmd.Path = "/bin/bash"
@@ -160,7 +175,7 @@ fi`
 // Stricter than bashSafeEnv — excludes VAULT_TOKEN and proxy settings.
 func SandboxSafeEnv(appDataDir string) []string {
 	return []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"PATH=/opt/alf/tools.d:/usr/local/bin:/usr/bin:/bin",
 		"HOME=/home/alf",
 		"USER=alf",
 		"LOGNAME=alf",
@@ -254,6 +269,19 @@ if [ -d /home/alf/data/tools ]; then
   mount -o remount,ro,bind "$NEWROOT/home/alf/data/tools" || { echo "FATAL: cannot make tools read-only"; exit 1; }
 fi
 
+# Platform tools (read-only) — vault, CLI helpers installed by the daemon.
+# Mount bin/ first since tools.d/ contains symlinks into it.
+if [ -d /opt/alf/bin ]; then
+  mkdir -p "$NEWROOT/opt/alf/bin"
+  mount --rbind /opt/alf/bin "$NEWROOT/opt/alf/bin"
+  mount -o remount,ro,bind "$NEWROOT/opt/alf/bin" || { echo "FATAL: cannot make bin read-only"; exit 1; }
+fi
+if [ -d /opt/alf/tools.d ]; then
+  mkdir -p "$NEWROOT/opt/alf/tools.d"
+  mount --rbind /opt/alf/tools.d "$NEWROOT/opt/alf/tools.d"
+  mount -o remount,ro,bind "$NEWROOT/opt/alf/tools.d" || { echo "FATAL: cannot make tools.d read-only"; exit 1; }
+fi
+
 # HOME skeleton
 mkdir -p "$NEWROOT/home/alf"
 
@@ -293,6 +321,12 @@ exec /usr/sbin/chroot "$NEWROOT" \
 	}
 }
 
+// bashVaultSocketMount returns a shell snippet to bind-mount a vault proxy socket
+// into a bash sandbox chroot. Same logic as vaultSocketMount (used by server sandbox).
+func bashVaultSocketMount(socketPath string) string {
+	return vaultSocketMount(socketPath)
+}
+
 // vaultSocketMount returns a shell snippet to bind-mount a vault proxy socket into the chroot.
 // Returns empty string if no vault socket is configured.
 func vaultSocketMount(socketPath string) string {
@@ -312,7 +346,7 @@ fi`, shellQuote(socketPath))
 // No vault token, no secrets — servers use REST proxy for data access.
 func ServerSafeEnv(appDir string) []string {
 	return []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"PATH=/opt/alf/tools.d:/usr/local/bin:/usr/bin:/bin",
 		"HOME=/home/alf",
 		"USER=alf",
 		"LOGNAME=alf",

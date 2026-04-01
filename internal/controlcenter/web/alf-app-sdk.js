@@ -158,10 +158,12 @@
       return key ? base + '?key=' + encodeURIComponent(key) : base;
     },
 
-    /** Get all keys or a single key. */
+    /** Get all keys or a single key. Returns null if key not found. */
     get: function(key) {
       return SDK.api(this._path(key)).then(function(data) {
         return key ? data.value : data;
+      }).catch(function() {
+        return key ? null : {};
       });
     },
 

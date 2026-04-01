@@ -74,6 +74,19 @@ Defines the app identity and its tool declarations. This is what the marketplace
 | `category` | No | e.g. `productivity`, `utilities`, `dev-tools` |
 | `icon` | No | [Lucide](https://lucide.dev) icon name |
 | `tools` | No | Array of tool declarations (see below) |
+| `permissions` | No | Array of permission strings (see below) |
+
+### Permissions
+
+Declared in `manifest.json` under `"permissions"`. The sandbox enforces these at runtime.
+
+| Permission | Effect |
+|------------|--------|
+| `bash` | App can execute shell commands via `/api/bash` (sandboxed) |
+| `storage` | App can use `AlfSDK.storage` for persistent key-value data |
+| `network` | Sandbox allows outbound network access (DNS, TLS certs, vault proxy socket) |
+
+Apps without `network` run in an isolated network namespace — no outbound connections. Apps with `network` get a per-app vault proxy socket (`VAULT_PROXY_SOCK`) so `vault ssh`, `vault http`, etc. work without direct token access.
 
 ### Tool declarations
 
@@ -205,8 +218,10 @@ All app code runs inside a chroot jail with an allowlist filesystem:
 
 **What apps see:**
 - System binaries (`/bin`, `/usr`, `/lib`, `/sbin`, `/lib64`) — read-only
+- Platform tools (`/opt/alf/tools.d/`) — read-only (vault, CLI helpers)
 - Minimal devices (`/dev/{null,zero,urandom,random}`), fresh `/proc`, private `/tmp`
 - TLS CA certs and DNS (servers always; bash only with `network` permission)
+- Vault proxy socket (`VAULT_PROXY_SOCK`) — apps with `network` permission get a per-app proxy socket so `vault` CLI works without direct token access
 - Own data: `/home/alf/data/apps/<slug>/data/` (bash) or full app dir (server)
 - Shared tools: `/home/alf/data/tools/` (read-only)
 
@@ -214,7 +229,7 @@ All app code runs inside a chroot jail with an allowlist filesystem:
 - Other apps' directories
 - `/opt/alf/vault-data/`, `/opt/alf/config.d/`, `/home/alf/.claude/`
 - `/home/alf/data/external/` (NFS mounts), `/run/secrets/`
-- No `VAULT_TOKEN` or secrets in environment
+- No `VAULT_TOKEN` or secrets in environment — vault access is proxied, never direct
 
 **HTTP API isolation:** Apps in iframes can only access `/apps/{own-slug}/api/*` (own REST proxy), `/api/apps/{own-slug}/*` (own storage/upload/errors), `/api/bash` (sandboxed, permission checked), and `/api/events` (read-only). All other `/api/*` endpoints return 403.
 

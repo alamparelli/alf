@@ -122,7 +122,8 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 		cmd.Stdin = strings.NewReader(fullPrompt)
 	}
 
-	log.Printf("codex: invoke (model=%s)", model)
+	log.Printf("codex: invoke (model=%s, prompt=%d chars)", model, len(fullPrompt))
+	log.Printf("codex: in: %s", truncStderr(fullPrompt, 500))
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -303,6 +304,7 @@ done:
 
 	accumulated := strings.TrimSpace(resultText.String())
 	if accumulated != "" {
+		log.Printf("codex: out (session=%s, in=%d out=%d tokens): %s", sessionID, inputTokens, outputTokens, truncStderr(accumulated, 500))
 		return &Result{
 			SessionID:    sessionID,
 			Text:         accumulated,

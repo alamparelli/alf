@@ -273,6 +273,9 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		model = "anthropic/claude-haiku-4-5"
 	}
 
+	log.Printf("api[%s]: invoke (model=%s, prompt=%d chars)", p.name, model, len(prompt))
+	log.Printf("api[%s]: in: %s", p.name, truncBody([]byte(prompt)))
+
 	messages := p.BuildMessages(prompt, params)
 
 	reqBody := apiRequest{
@@ -310,6 +313,8 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		InputTokens:  resp.InputTokens,
 		OutputTokens: resp.OutputTokens,
 	}
+
+	log.Printf("api[%s]: out (in=%d out=%d tokens): %s", p.name, resp.InputTokens, resp.OutputTokens, truncBody([]byte(text)))
 
 	// Append to legacy history (only for keyed sessions without ConvMessages).
 	if len(params.ConvMessages) == 0 && params.SessionKey != "" && p.history != nil {

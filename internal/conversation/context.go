@@ -168,6 +168,25 @@ func FlattenForOpenAI(messages []Message) []OpenAIMessage {
 	return result
 }
 
+// FlattenTextOnly converts messages to plain text OpenAI messages, stripping
+// all tool_use and tool_result blocks. Use this when switching backends to
+// avoid sending tool call messages that the new backend didn't initiate.
+func FlattenTextOnly(messages []Message) []OpenAIMessage {
+	var result []OpenAIMessage
+	for _, m := range messages {
+		text := textFromBlocks(m.Blocks)
+		if text == "" {
+			continue
+		}
+		role := m.Role
+		if role == "tool" {
+			role = "user"
+		}
+		result = append(result, OpenAIMessage{Role: role, Content: text})
+	}
+	return result
+}
+
 // textFromBlocks extracts only text content from blocks.
 func textFromBlocks(blocks []ContentBlock) string {
 	var parts []string

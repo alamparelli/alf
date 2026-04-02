@@ -546,7 +546,14 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		convMsgs := conversation.BuildContext(e.ConvStore.Recent(channel, 0), conversation.DefaultMaxMessages)
 		if isAPITier || params.ResumeID == "" {
 			if isAPITier {
-				oaiMsgs := conversation.FlattenForOpenAI(convMsgs)
+				var oaiMsgs []conversation.OpenAIMessage
+				if backendChanged {
+					// Strip tool_use/tool_result messages from history — they reference
+					// tool calls from a different backend that this one never initiated.
+					oaiMsgs = conversation.FlattenTextOnly(convMsgs)
+				} else {
+					oaiMsgs = conversation.FlattenForOpenAI(convMsgs)
+				}
 				ctxMsgs := make([]provider.ContextMessage, len(oaiMsgs))
 				for i, m := range oaiMsgs {
 					cm := provider.ContextMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}

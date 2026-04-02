@@ -55,6 +55,7 @@ func bashSafeEnv(dataDir string) []string {
 		"HOME=", "USER=", "LOGNAME=", "SHELL=",
 		"GIT_AUTHOR_", "GIT_COMMITTER_",
 		"VAULT_TOKEN=", "VAULT_ADDR=", "VAULT_PROXY_SOCK=",
+		"ALF_TOOLS_SOCK=", "ALF_SIGNAL_SOCK=",
 		"HTTP_PROXY=", "HTTPS_PROXY=", "NO_PROXY=",
 	}
 	env := make([]string, 0, 16)

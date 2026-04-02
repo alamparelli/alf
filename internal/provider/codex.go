@@ -371,7 +371,7 @@ func codexEnv(apiKey string, dataDir string) []string {
 	for _, key := range []string{"PATH", "TERM", "LANG", "HOME", "TMPDIR", "TZ", "VAULT_PROXY_SOCK", "ALF_TOOLS_SOCK", "ALF_SIGNAL_SOCK"} {
 		if v := os.Getenv(key); v != "" {
 			if key == "PATH" && dataDir != "" {
-				v = dataDir + "/tools:" + dataDir + "/skills:" + dataDir + "/apps:" + v
+				v = dataDir + "/tools.d:" + dataDir + "/tools:" + dataDir + "/skills:" + dataDir + "/apps:" + v
 			}
 			env = append(env, key+"="+v)
 		}

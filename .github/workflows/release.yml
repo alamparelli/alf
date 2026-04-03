@@ -81,7 +81,7 @@ jobs:
 
       - name: Install Syft
         if: steps.check.outputs.exists != 'true'
-        uses: anchore/sbom-action/download-syft@v0.18.1
+        uses: anchore/sbom-action/download-syft@v0.24.0
 
       - name: Sign container image
         if: steps.check.outputs.exists != 'true'
@@ -163,7 +163,7 @@ jobs:
 
       - name: Install Syft
         if: steps.check.outputs.exists != 'true'
-        uses: anchore/sbom-action/download-syft@v0.18.1
+        uses: anchore/sbom-action/download-syft@v0.24.0
 
       - name: Sign container image
         if: steps.check.outputs.exists != 'true'

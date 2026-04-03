@@ -15,6 +15,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write  # For keyless signing
+      attestations: write  # For SBOM attestations
 
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +64,7 @@ jobs:
 
       - name: Build and push
         if: steps.check.outputs.exists != 'true'
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -72,12 +75,37 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Install Cosign
+        if: steps.check.outputs.exists != 'true'
+        uses: sigstore/cosign-installer@v3.7.0
+
+      - name: Install Syft
+        if: steps.check.outputs.exists != 'true'
+        uses: anchore/sbom-action/download-syft@v0.18.1
+
+      - name: Sign container image
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+
+      - name: Generate SBOM
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          syft ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} -o spdx-json=sbom.spdx.json
+
+      - name: Attest SBOM
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          cosign attest --yes --predicate sbom.spdx.json --type spdxjson ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+
   # Build and push whisper-service Docker image
   docker-whisper:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      id-token: write  # For keyless signing
+      attestations: write  # For SBOM attestations
 
     steps:
       - uses: actions/checkout@v4
@@ -118,6 +146,7 @@ jobs:
 
       - name: Build and push whisper-service
         if: steps.check.outputs.exists != 'true'
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ./whisper-service
@@ -127,6 +156,29 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=whisper
           cache-to: type=gha,mode=max,scope=whisper
+
+      - name: Install Cosign
+        if: steps.check.outputs.exists != 'true'
+        uses: sigstore/cosign-installer@v3.7.0
+
+      - name: Install Syft
+        if: steps.check.outputs.exists != 'true'
+        uses: anchore/sbom-action/download-syft@v0.18.1
+
+      - name: Sign container image
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          cosign sign --yes ghcr.io/alamparelli/whisper-service@${{ steps.build.outputs.digest }}
+
+      - name: Generate SBOM
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          syft ghcr.io/alamparelli/whisper-service@${{ steps.build.outputs.digest }} -o spdx-json=sbom.spdx.json
+
+      - name: Attest SBOM
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          cosign attest --yes --predicate sbom.spdx.json --type spdxjson ghcr.io/alamparelli/whisper-service@${{ steps.build.outputs.digest }}
 
   # Build CLI binaries and create GitHub Release (tags only)
   cli:

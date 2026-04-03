@@ -12,6 +12,60 @@ import (
 	"time"
 )
 
+// authMethod indicates which authentication method succeeded.
+type authMethod int
+
+const (
+	authNone    authMethod = iota
+	authBearer             // primary or extra Bearer token
+	authCookie             // cc_bearer cookie
+	authSession            // cc_session cookie
+)
+
+// checkRequestAuth checks whether a request carries valid authentication via
+// Bearer token (primary or extra), cc_bearer cookie, or session cookie.
+// This is the single source of truth for request authentication, used by both
+// the middleware stack and handlers registered outside it (Terminal, SSH).
+func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, extraTokenFns []func() string) authMethod {
+	// Check Authorization header against primary token.
+	auth := r.Header.Get("Authorization")
+	if token != "" && strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(token)) == 1 {
+		return authBearer
+	}
+
+	// Check Authorization header against extra tokens (e.g. mobile API token).
+	if strings.HasPrefix(auth, "Bearer ") {
+		bearer := auth[7:]
+		for _, fn := range extraTokenFns {
+			if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(et)) == 1 {
+				return authBearer
+			}
+		}
+	}
+
+	// Check cc_bearer cookie against primary and extra tokens.
+	if cookie, err := r.Cookie("cc_bearer"); err == nil {
+		cv := cookie.Value
+		if token != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(token)) == 1 {
+			return authCookie
+		}
+		for _, fn := range extraTokenFns {
+			if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(et)) == 1 {
+				return authCookie
+			}
+		}
+	}
+
+	// Check session cookie.
+	if sessions != nil {
+		if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
+			return authSession
+		}
+	}
+
+	return authNone
+}
+
 // authMiddleware rejects requests without a valid Bearer token or session cookie.
 // Exempt paths (e.g. /health, /auth) bypass the check.
 // For unauthenticated browser requests to GET /, it returns a login page (200) instead of 401.
@@ -48,50 +102,17 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				return
 			}
 
-			// Check Authorization header against primary token.
-			auth := r.Header.Get("Authorization")
-			if token != "" && strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(token)) == 1 {
-				autoIssueSession(w, r, sessions)
+			result := checkRequestAuth(r, token, sessions, extraTokenFns)
+			if result != authNone {
+				if result == authBearer {
+					autoIssueSession(w, r, sessions)
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Check Authorization header against extra tokens (e.g. mobile API token).
-			if strings.HasPrefix(auth, "Bearer ") {
-				bearer := auth[7:]
-				for _, fn := range extraTokenFns {
-					if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(et)) == 1 {
-						autoIssueSession(w, r, sessions)
-						next.ServeHTTP(w, r)
-						return
-					}
-				}
-			}
-
-			// Check cc_bearer cookie against primary and extra tokens.
-			if cookie, err := r.Cookie("cc_bearer"); err == nil {
-				cv := cookie.Value
-				if token != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(token)) == 1 {
-					next.ServeHTTP(w, r)
-					return
-				}
-				for _, fn := range extraTokenFns {
-					if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(et)) == 1 {
-						next.ServeHTTP(w, r)
-						return
-					}
-				}
-			}
-
-			// Check session cookie.
-			if sessions != nil {
-				if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-
 			// Log after all auth methods failed.
+			auth := r.Header.Get("Authorization")
 			if strings.HasPrefix(r.URL.Path, "/api/") {
 				log.Printf("[CC] auth fail: ip=%s method=%s path=%s has_auth=%v auth_len=%d token_len=%d",
 					clientIP(r), r.Method, r.URL.Path, auth != "", len(auth), len(token))

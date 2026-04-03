@@ -131,6 +131,8 @@ if [ -d "$STAGING" ]; then
     for f in "$STAGING"/*; do
         [ -f "$f" ] || continue
         name=$(basename "$f")
+        # Skip backup/temp files — only process clean secret names (alphanumeric + underscore).
+        case "$name" in *.bak|*.old|*.tmp|*.*.*) continue ;; esac
         dest="$VAULT/.$name"
         # Always refresh from staging (source of truth is host ./secrets/).
         cp "$f" "$dest"

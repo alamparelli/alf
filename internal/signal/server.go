@@ -3,11 +3,14 @@ package signal
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"strings"
 )
+
+const maxSignalRequestSize = 16 * 1024 // 16KB max JSON request
 
 // Sender abstracts Telegram message operations for testability.
 type Sender interface {
@@ -50,8 +53,13 @@ func (s *Server) ListenUnix(sockPath string) (net.Listener, error) {
 	}
 
 	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
-	os.Chown(sockPath, -1, 1000)
-	os.Chmod(sockPath, 0660)
+	if err := os.Chown(sockPath, -1, 1000); err != nil {
+		log.Printf("signal: chown %s: %v (non-root?)", sockPath, err)
+	}
+	if err := os.Chmod(sockPath, 0660); err != nil {
+		ln.Close()
+		return nil, fmt.Errorf("chmod %s: %w", sockPath, err)
+	}
 
 	return ln, nil
 }
@@ -74,7 +82,7 @@ func (s *Server) Serve(ln net.Listener) {
 func (s *Server) handleConn(conn net.Conn) {
 	defer conn.Close()
 
-	dec := json.NewDecoder(conn)
+	dec := json.NewDecoder(io.LimitReader(conn, maxSignalRequestSize))
 	enc := json.NewEncoder(conn)
 
 	var req Request

@@ -546,25 +546,14 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		convMsgs := conversation.BuildContext(e.ConvStore.Recent(channel, 0), conversation.DefaultMaxMessages)
 		if isAPITier || params.ResumeID == "" {
 			if isAPITier {
-				var oaiMsgs []conversation.OpenAIMessage
-				if backendChanged {
-					// Strip tool_use/tool_result messages from history — they reference
-					// tool calls from a different backend that this one never initiated.
-					oaiMsgs = conversation.FlattenTextOnly(convMsgs)
-				} else {
-					oaiMsgs = conversation.FlattenForOpenAI(convMsgs)
-				}
+				// Always flatten to text-only: FlattenForOpenAI collapses multi-turn
+				// toolloops into a single assistant message with multiple tool_calls,
+				// which is semantically wrong (IDs span different model turns) and
+				// causes JSON parse errors on some providers (e.g. SiliconFlow).
+				oaiMsgs := conversation.FlattenTextOnly(convMsgs)
 				ctxMsgs := make([]provider.ContextMessage, len(oaiMsgs))
 				for i, m := range oaiMsgs {
-					cm := provider.ContextMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
-					for _, tc := range m.ToolCalls {
-						cm.ToolCalls = append(cm.ToolCalls, provider.ContextToolCall{
-							ID:        tc.ID,
-							Name:      tc.Name,
-							Arguments: tc.Arguments,
-						})
-					}
-					ctxMsgs[i] = cm
+					ctxMsgs[i] = provider.ContextMessage{Role: m.Role, Content: m.Content}
 				}
 				params.ConvMessages = ctxMsgs
 			} else {

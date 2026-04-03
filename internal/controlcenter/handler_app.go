@@ -126,7 +126,7 @@ func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if ext == ".html" || ext == ".htm" {
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline' https://unpkg.com; "+
+				"script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://unpkg.com; "+
 				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: blob: https:; "+
 				"connect-src 'self'; "+

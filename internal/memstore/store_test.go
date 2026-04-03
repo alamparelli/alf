@@ -786,6 +786,110 @@ func TestServerInvalidJSON(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Socket input validation (#14)
+// ---------------------------------------------------------------------------
+
+func TestServerStoreEmptyText(t *testing.T) {
+	_, sockPath := startTestServer(t)
+
+	resp := socketRoundTrip(t, sockPath, socketRequest{
+		Action: "store",
+		Text:   "",
+		Type:   "fact",
+	})
+	if resp.Error == "" {
+		t.Fatal("expected error for empty text")
+	}
+	if !strings.Contains(resp.Error, "text required") {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+}
+
+func TestServerStoreTextTooLarge(t *testing.T) {
+	_, sockPath := startTestServer(t)
+
+	bigText := strings.Repeat("x", 11*1024) // 11KB > 10KB limit
+	resp := socketRoundTrip(t, sockPath, socketRequest{
+		Action: "store",
+		Text:   bigText,
+		Type:   "fact",
+	})
+	if resp.Error == "" {
+		t.Fatal("expected error for oversized text")
+	}
+	if !strings.Contains(resp.Error, "too large") {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+}
+
+func TestServerStoreTextAtLimit(t *testing.T) {
+	_, sockPath := startTestServer(t)
+
+	// Exactly 10KB should be accepted.
+	text := strings.Repeat("a", 10*1024)
+	resp := socketRoundTrip(t, sockPath, socketRequest{
+		Action: "store",
+		Text:   text,
+		Type:   "fact",
+	})
+	if resp.Error != "" {
+		t.Fatalf("10KB text should be accepted, got: %s", resp.Error)
+	}
+}
+
+func TestServerStoreInvalidType(t *testing.T) {
+	_, sockPath := startTestServer(t)
+
+	resp := socketRoundTrip(t, sockPath, socketRequest{
+		Action: "store",
+		Text:   "test memory",
+		Type:   "bogus",
+	})
+	if resp.Error == "" {
+		t.Fatal("expected error for invalid type")
+	}
+	if !strings.Contains(resp.Error, "invalid type") {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+}
+
+func TestServerStoreValidTypes(t *testing.T) {
+	_, sockPath := startTestServer(t)
+
+	for _, typ := range []string{"fact", "summary", "preference", "decision"} {
+		resp := socketRoundTrip(t, sockPath, socketRequest{
+			Action: "store",
+			Text:   "valid type test " + typ,
+			Type:   typ,
+		})
+		if resp.Error != "" {
+			t.Fatalf("type %q should be accepted, got: %s", typ, resp.Error)
+		}
+	}
+}
+
+func TestServerOversizedPayload(t *testing.T) {
+	_, sockPath := startTestServer(t)
+
+	conn, err := net.DialTimeout("unix", sockPath, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	// Send 70KB payload (> 64KB limit). The JSON decoder should fail.
+	huge := `{"action":"store","text":"` + strings.Repeat("x", 70*1024) + `","type":"fact"}`
+	conn.Write([]byte(huge + "\n"))
+
+	var resp socketResponse
+	json.NewDecoder(conn).Decode(&resp)
+	if resp.Error == "" {
+		t.Fatal("expected error for oversized payload")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Mock embedder for Store tests
 // ---------------------------------------------------------------------------
 

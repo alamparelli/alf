@@ -3,11 +3,24 @@ package memstore
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"strings"
 )
+
+const (
+	maxRequestSize = 64 * 1024 // 64KB max JSON request
+	maxTextSize    = 10 * 1024 // 10KB max memory text
+)
+
+var validMemTypes = map[string]bool{
+	"fact":       true,
+	"summary":    true,
+	"preference": true,
+	"decision":   true,
+}
 
 // socketRequest is the JSON protocol for tool → daemon communication.
 type socketRequest struct {
@@ -40,8 +53,13 @@ func (s *Store) ServeUnix(sockPath string) error {
 	}
 
 	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
-	os.Chown(sockPath, -1, 1000)
-	os.Chmod(sockPath, 0660)
+	if err := os.Chown(sockPath, -1, 1000); err != nil {
+		log.Printf("memstore: chown %s: %v (non-root?)", sockPath, err)
+	}
+	if err := os.Chmod(sockPath, 0660); err != nil {
+		ln.Close()
+		return fmt.Errorf("chmod %s: %w", sockPath, err)
+	}
 
 	log.Printf("memstore: socket server listening on %s", sockPath)
 
@@ -61,7 +79,7 @@ func (s *Store) ServeUnix(sockPath string) error {
 func (s *Store) handleConn(conn net.Conn) {
 	defer conn.Close()
 
-	dec := json.NewDecoder(conn)
+	dec := json.NewDecoder(io.LimitReader(conn, maxRequestSize))
 	enc := json.NewEncoder(conn)
 
 	var req socketRequest
@@ -87,9 +105,21 @@ func (s *Store) handleConn(conn net.Conn) {
 		}
 
 	case "store":
+		if req.Text == "" {
+			resp.Error = "text required"
+			break
+		}
+		if len(req.Text) > maxTextSize {
+			resp.Error = fmt.Sprintf("text too large (%d bytes, max %d)", len(req.Text), maxTextSize)
+			break
+		}
 		memType := req.Type
 		if memType == "" {
 			memType = "fact"
+		}
+		if !validMemTypes[memType] {
+			resp.Error = fmt.Sprintf("invalid type %q (valid: fact, summary, preference, decision)", memType)
+			break
 		}
 		id, err := s.Store(req.Text, memType, "claude", nil)
 		if err != nil {

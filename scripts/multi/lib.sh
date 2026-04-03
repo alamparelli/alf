@@ -393,31 +393,13 @@ EOF
       - "traefik.http.routers.alf-${user}.middlewares=alf-${user}-rl"
     environment:
       - CC_AUTH_TOKEN_FILE=/opt/alf/vault-data/.cc_auth_token
-      - CLAUDE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth_token
       - WHISPER_URL=http://whisper:8000
-      - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
       - EMBED_URL=http://embed:8090
-      - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
       - ALF_MARKETPLACE_URL=https://marketplace.lamparelli.eu
       - CC_EXTERNAL_URL=https://${domain}
       - TZ=${timezone}
-    secrets:
-      - source: ${user}_claude_oauth_token
-        target: claude_oauth_token
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
-      - source: ${user}_whisper_shared_secret
-        target: whisper_shared_secret
-        uid: "1001"
-        gid: "1001"
-        mode: 0400
-      - source: ${user}_embed_shared_secret
-        target: embed_shared_secret
-        uid: "1001"
-        gid: "1001"
-        mode: 0400
     volumes:
+      - ./tenants/${user}/secrets:/opt/alf/secrets-staging:ro
       - ./tenants/${user}/data:/home/alf/data
       - ./tenants/${user}/config.d:/opt/alf/config.d
       - ./tenants/${user}/skills.d:/opt/alf/skills.d
@@ -468,23 +450,6 @@ networks:
         - subnet: 10.99.1.0/24
 ${tenant_net_decls}
 EOF
-
-    # Secrets section — per-tenant secrets with name mapping
-    echo "secrets:" >> "$COMPOSE_FILE"
-    while IFS= read -r tenant; do
-        [[ -z "$tenant" ]] && continue
-        local user
-        user=$(echo "$tenant" | jq -r '.user')
-
-        local secrets=(claude_oauth_token whisper_shared_secret
-                       embed_shared_secret)
-        for s in "${secrets[@]}"; do
-            cat >> "$COMPOSE_FILE" <<EOF
-  ${user}_${s}:
-    file: ./tenants/${user}/secrets/${s}
-EOF
-        done
-    done <<< "$tenants"
 
     info "Generated $COMPOSE_FILE with $(jq length "$TENANTS_FILE") tenant(s)"
 }

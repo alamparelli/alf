@@ -121,48 +121,26 @@ chmod -R g+rX /home/alf/.claude 2>/dev/null || true
 # Ensure Codex CLI cache dir is owned by alf (volume mount may create as root).
 chown -R alf:alf /home/alf/.codex 2>/dev/null || true
 
-# Docker secrets: make them readable by daemon (alfd/uid 1001).
-# Docker Compose standalone mounts secrets as read-only tmpfs (chown impossible).
-# Copy to a writable location owned by alfd, then re-export *_FILE env vars.
-if [ -d /run/secrets ]; then
-    mkdir -p /run/alf-secrets
-    cp /run/secrets/* /run/alf-secrets/ 2>/dev/null || true
-    chown -R alfd:alfd /run/alf-secrets
-    chmod 0400 /run/alf-secrets/*
-    # Re-point *_FILE env vars to the copied secrets.
-    for f in /run/alf-secrets/*; do
+# Secrets: import from staging mount to vault-data (alfd-only).
+# Host ./secrets/ is bind-mounted read-only at /opt/alf/secrets-staging/.
+# Copy to vault-data so only alfd (uid 1001) can read them at runtime.
+# The alf user (uid 1000, LLM subprocess) has no access to either location.
+STAGING="/opt/alf/secrets-staging"
+VAULT="/opt/alf/vault-data"
+if [ -d "$STAGING" ]; then
+    for f in "$STAGING"/*; do
+        [ -f "$f" ] || continue
         name=$(basename "$f")
+        dest="$VAULT/.$name"
+        # Always refresh from staging (source of truth is host ./secrets/).
+        cp "$f" "$dest"
+        chown alfd:alfd "$dest"
+        chmod 0400 "$dest"
+        # Export *_FILE env var pointing to vault-data copy.
         upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
-        export "${upper}_FILE=/run/alf-secrets/${name}"
+        export "${upper}_FILE=${dest}"
     done
-
-    # Vault master password: migrate from Docker secret to vault-data (alfd-only).
-    # This is a one-time bridge — future installs use CC setup or alf init.
-    if [ -f /run/secrets/vault_master_password ]; then
-        pw=$(cat /run/secrets/vault_master_password)
-        if [ -n "$pw" ]; then
-            pwfile="/opt/alf/vault-data/.master-password"
-            if [ ! -f "$pwfile" ]; then
-                echo "$pw" > "$pwfile"
-                chown alfd:alfd "$pwfile"
-                chmod 0400 "$pwfile"
-                echo "entrypoint: migrated vault master password to vault-data"
-            fi
-        fi
-        # Unset so daemon doesn't read from Docker secret path.
-        unset VAULT_MASTER_PASSWORD_FILE
-    fi
-
-    # CC auth token: migrate from Docker secret to vault-data (alfd-only).
-    if [ -f /run/secrets/cc_auth_token ]; then
-        tok=$(cat /run/secrets/cc_auth_token)
-        if [ -n "$tok" ]; then
-            tokfile="/opt/alf/vault-data/.cc_auth_token"
-            echo "$tok" > "$tokfile"
-            chown alfd:alfd "$tokfile"
-            chmod 0400 "$tokfile"
-        fi
-    fi
+    echo "entrypoint: secrets imported from staging to vault-data"
 fi
 
 # Phase 2.6: Seed default apps from bundled defaults (as root, before locking).

@@ -265,19 +265,16 @@ echo ""
 
 # -------------------------------------------------------
 echo "[14] Secrets isolation (subprocess cannot read daemon secrets)"
-SECRET_TEST=$(dexec_as 1000 "cat /run/secrets/telegram_bot_token 2>&1 || echo denied" 2>/dev/null)
-assert_contains "$SECRET_TEST" "denied\|Permission\|No such" "alf CANNOT read telegram_bot_token"
+# Secrets are now in vault-data (alfd:alfd 700) — alf user must not read them.
+SECRET_STAGING=$(dexec_as 1000 "ls /opt/alf/secrets-staging/ 2>&1 || echo denied" 2>/dev/null)
+assert_contains "$SECRET_STAGING" "denied\|Permission\|No such" "alf CANNOT read secrets-staging"
 
-SECRET_VAULT=$(dexec_as 1000 "cat /run/secrets/vault_master_password 2>&1 || echo denied" 2>/dev/null)
-assert_contains "$SECRET_VAULT" "denied\|Permission\|No such" "alf CANNOT read vault_master_password"
+SECRET_VAULT_DIR=$(dexec_as 1000 "cat /opt/alf/vault-data/.whisper_shared_secret 2>&1 || echo denied" 2>/dev/null)
+assert_contains "$SECRET_VAULT_DIR" "denied\|Permission\|No such" "alf CANNOT read vault-data secrets"
 
-# claude_oauth_token should be readable by subprocess (uid 1000).
-SECRET_OAUTH=$(dexec_as 1000 "cat /run/secrets/claude_oauth_token 2>/dev/null && echo ok || echo denied" 2>/dev/null)
-if echo "$SECRET_OAUTH" | grep -q "No such"; then
-  skip "claude_oauth_token secret not mounted"
-else
-  assert_not_contains "$SECRET_OAUTH" "denied\|Permission" "alf CAN read claude_oauth_token"
-fi
+# claude_oauth_token is in vault-data — only alfd reads it and passes via env.
+SECRET_OAUTH=$(dexec_as 1000 "cat /opt/alf/vault-data/.claude_oauth_token 2>&1 || echo denied" 2>/dev/null)
+assert_contains "$SECRET_OAUTH" "denied\|Permission\|No such" "alf CANNOT read claude_oauth_token from vault-data"
 echo ""
 
 # -------------------------------------------------------

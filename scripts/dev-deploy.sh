@@ -172,18 +172,12 @@ services:
     expose:
       - "8080"
     environment:
-      - CLAUDE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth_token
       - WHISPER_URL=http://whisper:8000
-      - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
       - EMBED_URL=http://embed:8090
-      - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
       - ALF_MARKETPLACE_URL=https://marketplace.lamparelli.eu
       - TZ=Europe/Rome
-    secrets:
-      - claude_oauth_token
-      - whisper_shared_secret
-      - embed_shared_secret
     volumes:
+      - ./secrets:/opt/alf/secrets-staging:ro
       - ./data:/home/alf/data
       - ./config.d:/opt/alf/config.d
       - ./skills.d:/opt/alf/skills.d
@@ -230,8 +224,8 @@ services:
     environment:
       - WHISPER_SHARED_SECRET_FILE=/run/secrets/whisper_shared_secret
       - WHISPER_MODEL=small
-    secrets:
-      - whisper_shared_secret
+    volumes:
+      - ./secrets/whisper_shared_secret:/run/secrets/whisper_shared_secret:ro
     mem_limit: 2g
     cpus: "2.0"
 
@@ -251,8 +245,8 @@ services:
       - ALL
     environment:
       - EMBED_SHARED_SECRET_FILE=/run/secrets/embed_shared_secret
-    secrets:
-      - embed_shared_secret
+    volumes:
+      - ./secrets/embed_shared_secret:/run/secrets/embed_shared_secret:ro
     mem_limit: 768m
     cpus: "1.0"
 
@@ -268,13 +262,6 @@ networks:
       config:
         - subnet: 10.99.1.0/24
 
-secrets:
-  claude_oauth_token:
-    file: ./secrets/claude_oauth_token
-  whisper_shared_secret:
-    file: ./secrets/whisper_shared_secret
-  embed_shared_secret:
-    file: ./secrets/embed_shared_secret
 COMPOSEOF
 $SCP /tmp/alf-compose-direct.yml "${REMOTE_HOST}:${REMOTE_DIR}/docker-compose.yml"
 rm -f /tmp/alf-compose-direct.yml

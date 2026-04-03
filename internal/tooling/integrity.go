@@ -1,0 +1,436 @@
+// Package tooling — Tool Integrity Guard (CWE-94 mitigation, issue #121).
+//
+// The IntegrityGuard watches the user tools/ directory for changes using
+// periodic polling. When a file is modified:
+//
+//  1. New file → hash recorded in manifest, backup created, allowed
+//  2. Known file, hash matches → no action
+//  3. Known file, hash mismatch → quarantine:
+//     a. Modified file renamed to {name}.quarantined
+//     b. Previous backup restored as the active tool
+//     c. User notified via comms engine
+//  4. File deleted → removed from manifest
+//
+// The user resolves quarantine via /tool keep or /tool revert.
+// The manifest is stored at {DataDir}/.daemon/tool-manifest.json, outside
+// the LLM-accessible tools/ directory.
+package tooling
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// ErrToolQuarantined is returned when a tool fails integrity check.
+var ErrToolQuarantined = errors.New("tool quarantined: hash mismatch detected, awaiting user approval")
+
+// ManifestEntry records the approved state of a tool.
+type ManifestEntry struct {
+	Name       string `json:"name"`
+	ExeHash    string `json:"exe_hash"`
+	SchemaHash string `json:"schema_hash,omitempty"`
+	Size       int64  `json:"size"`
+	ModTime    int64  `json:"mod_time"` // unix nano — fast-path skip
+	FirstSeen  string `json:"first_seen"`
+	LastCheck  string `json:"last_checked"`
+}
+
+// QuarantinedTool describes a tool pending user approval.
+type QuarantinedTool struct {
+	Name    string `json:"name"`
+	OldHash string `json:"old_hash"`
+	NewHash string `json:"new_hash"`
+}
+
+// IntegrityGuard watches tools/ for modifications and quarantines tampered tools.
+type IntegrityGuard struct {
+	manifestPath  string
+	backupDir     string
+	quarantineDir string // .daemon/tool-quarantine/ — inaccessible to LLM user
+	toolsDir      string
+	manifest      map[string]ManifestEntry
+	quarantined   map[string]QuarantinedTool
+	mu            sync.Mutex
+	notifyFunc    func(tool, oldHash, newHash string)
+	stopCh        chan struct{}
+}
+
+// NewIntegrityGuard creates a guard that stores manifests under {dataDir}/.daemon/.
+// The notifyFunc is called when a tool is quarantined (may be nil for testing).
+func NewIntegrityGuard(dataDir string, notify func(tool, oldHash, newHash string)) (*IntegrityGuard, error) {
+	daemonDir := filepath.Join(dataDir, ".daemon")
+	backupDir := filepath.Join(daemonDir, "tool-backups")
+	quarantineDir := filepath.Join(daemonDir, "tool-quarantine")
+	for _, d := range []string{backupDir, quarantineDir} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return nil, fmt.Errorf("integrity: create dir %s: %w", d, err)
+		}
+	}
+
+	ig := &IntegrityGuard{
+		manifestPath:  filepath.Join(daemonDir, "tool-manifest.json"),
+		backupDir:     backupDir,
+		quarantineDir: quarantineDir,
+		toolsDir:      filepath.Join(dataDir, "tools"),
+		manifest:     make(map[string]ManifestEntry),
+		quarantined:  make(map[string]QuarantinedTool),
+		notifyFunc:   notify,
+		stopCh:       make(chan struct{}),
+	}
+	if err := ig.loadManifest(); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("integrity: load manifest: %w", err)
+	}
+	return ig, nil
+}
+
+// Watch starts the polling loop. Call Stop() to terminate.
+// On first call it does an initial scan to baseline existing tools.
+func (ig *IntegrityGuard) Watch(interval time.Duration) {
+	// Initial scan — registers all existing tools without quarantine.
+	ig.scan(true)
+	go ig.pollLoop(interval)
+}
+
+// Stop terminates the polling loop.
+func (ig *IntegrityGuard) Stop() {
+	close(ig.stopCh)
+}
+
+func (ig *IntegrityGuard) pollLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ig.stopCh:
+			return
+		case <-ticker.C:
+			ig.scan(false)
+		}
+	}
+}
+
+// scan reads tools/ and checks each file against the manifest.
+// If initial=true, new files are registered silently (baseline).
+// If initial=false, hash mismatches trigger quarantine.
+func (ig *IntegrityGuard) scan(initial bool) {
+	entries, err := os.ReadDir(ig.toolsDir)
+	if err != nil {
+		return
+	}
+
+	ig.mu.Lock()
+	defer ig.mu.Unlock()
+
+	seen := make(map[string]bool)
+
+	for _, e := range entries {
+		if e.IsDir() || strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".quarantined") {
+			continue
+		}
+		name := e.Name()
+		seen[name] = true
+		toolPath := filepath.Join(ig.toolsDir, name)
+
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+
+		entry, exists := ig.manifest[name]
+
+		// Fast path: skip if size and mtime haven't changed.
+		if exists && entry.Size == info.Size() && entry.ModTime == info.ModTime().UnixNano() {
+			continue
+		}
+
+		// Compute hash.
+		exeHash, err := hashFile(toolPath)
+		if err != nil {
+			continue
+		}
+		schemaHash := ig.hashSchema(name)
+		now := time.Now().UTC().Format(time.RFC3339)
+
+		if !exists {
+			// New tool — register and backup.
+			ig.manifest[name] = ManifestEntry{
+				Name:       name,
+				ExeHash:    exeHash,
+				SchemaHash: schemaHash,
+				Size:       info.Size(),
+				ModTime:    info.ModTime().UnixNano(),
+				FirstSeen:  now,
+				LastCheck:  now,
+			}
+			ig.backup(toolPath)
+			ig.saveManifest()
+			log.Printf("[integrity] new tool registered: %s (hash=%s)", name, exeHash[:12])
+			continue
+		}
+
+		// Hash match — update cache fields.
+		if entry.ExeHash == exeHash && entry.SchemaHash == schemaHash {
+			entry.Size = info.Size()
+			entry.ModTime = info.ModTime().UnixNano()
+			entry.LastCheck = now
+			ig.manifest[name] = entry
+			continue
+		}
+
+		// Hash mismatch.
+		if initial {
+			// During baseline scan, accept the current state.
+			entry.ExeHash = exeHash
+			entry.SchemaHash = schemaHash
+			entry.Size = info.Size()
+			entry.ModTime = info.ModTime().UnixNano()
+			entry.LastCheck = now
+			ig.manifest[name] = entry
+			ig.backup(toolPath)
+			ig.saveManifest()
+			log.Printf("[integrity] baseline updated: %s (hash=%s)", name, exeHash[:12])
+			continue
+		}
+
+		// Already quarantined — re-restore backup if file content differs from backup.
+		if _, q := ig.quarantined[name]; q {
+			backupHash, _ := hashFile(filepath.Join(ig.backupDir, name+".prev"))
+			if backupHash != "" && exeHash != backupHash {
+				if err := ig.restore(name); err != nil {
+					log.Printf("[integrity] re-restore failed for quarantined %s: %v", name, err)
+				} else {
+					log.Printf("[integrity] re-restored quarantined %s (LLM re-wrote)", name)
+				}
+			}
+			continue
+		}
+
+		log.Printf("[integrity] MISMATCH on %s: expected=%s got=%s", name, entry.ExeHash[:12], exeHash[:12])
+
+		// Save modified version in daemon-owned quarantine dir (inaccessible to LLM user).
+		quarantinedPath := filepath.Join(ig.quarantineDir, name)
+		if err := copyFile(toolPath, quarantinedPath); err != nil {
+			log.Printf("[integrity] failed to save quarantined copy: %v", err)
+		}
+		os.Chmod(quarantinedPath, 0o600)
+
+		// Restore backup (the approved version).
+		if err := ig.restore(name); err != nil {
+			log.Printf("[integrity] failed to restore backup for %s: %v", name, err)
+		}
+
+		qt := QuarantinedTool{
+			Name:    name,
+			OldHash: entry.ExeHash,
+			NewHash: exeHash,
+		}
+		ig.quarantined[name] = qt
+
+		if ig.notifyFunc != nil {
+			ig.notifyFunc(name, entry.ExeHash, exeHash)
+		}
+	}
+
+	// Clean up manifest entries for deleted tools.
+	for name := range ig.manifest {
+		if !seen[name] {
+			delete(ig.manifest, name)
+			log.Printf("[integrity] tool removed: %s", name)
+		}
+	}
+}
+
+// Check returns ErrToolQuarantined if the tool is quarantined, nil otherwise.
+// Kept for executor integration — lightweight map lookup, no I/O.
+func (ig *IntegrityGuard) Check(toolPath string) error {
+	name := filepath.Base(toolPath)
+	ig.mu.Lock()
+	defer ig.mu.Unlock()
+	if _, ok := ig.quarantined[name]; ok {
+		return ErrToolQuarantined
+	}
+	return nil
+}
+
+// IsQuarantined returns true if the named tool is currently quarantined.
+func (ig *IntegrityGuard) IsQuarantined(name string) bool {
+	ig.mu.Lock()
+	defer ig.mu.Unlock()
+	_, ok := ig.quarantined[name]
+	return ok
+}
+
+// ApproveModified accepts the modified version of a quarantined tool.
+func (ig *IntegrityGuard) ApproveModified(name string) error {
+	ig.mu.Lock()
+	defer ig.mu.Unlock()
+
+	qt, ok := ig.quarantined[name]
+	if !ok {
+		return fmt.Errorf("tool %q is not quarantined", name)
+	}
+
+	toolPath := filepath.Join(ig.toolsDir, name)
+	quarantinedPath := filepath.Join(ig.quarantineDir, name)
+
+	// Move quarantined version back as the active tool and restore execute permission.
+	if err := copyFile(quarantinedPath, toolPath); err != nil {
+		return fmt.Errorf("integrity: restore quarantined: %w", err)
+	}
+	os.Chmod(toolPath, 0o755)
+	os.Remove(quarantinedPath)
+
+	// Update manifest with new hash.
+	entry := ig.manifest[name]
+	entry.ExeHash = qt.NewHash
+	entry.LastCheck = time.Now().UTC().Format(time.RFC3339)
+	entry.SchemaHash = ig.hashSchema(name)
+
+	// Update size/mtime cache from the now-active file.
+	if info, err := os.Stat(toolPath); err == nil {
+		entry.Size = info.Size()
+		entry.ModTime = info.ModTime().UnixNano()
+	}
+
+	ig.manifest[name] = entry
+	ig.backup(toolPath)
+	ig.saveManifest()
+
+	delete(ig.quarantined, name)
+	log.Printf("[integrity] approved modified tool: %s (new hash=%s)", name, qt.NewHash[:12])
+	return nil
+}
+
+// RevertTool discards the modified version, keeping the original.
+func (ig *IntegrityGuard) RevertTool(name string) error {
+	ig.mu.Lock()
+	defer ig.mu.Unlock()
+
+	if _, ok := ig.quarantined[name]; !ok {
+		return fmt.Errorf("tool %q is not quarantined", name)
+	}
+
+	quarantinedPath := filepath.Join(ig.quarantineDir, name)
+	os.Remove(quarantinedPath)
+
+	// Update mtime cache so we don't re-trigger on the restored file.
+	toolPath := filepath.Join(ig.toolsDir, name)
+	if info, err := os.Stat(toolPath); err == nil {
+		if entry, ok := ig.manifest[name]; ok {
+			entry.Size = info.Size()
+			entry.ModTime = info.ModTime().UnixNano()
+			ig.manifest[name] = entry
+		}
+	}
+
+	delete(ig.quarantined, name)
+	log.Printf("[integrity] reverted tool: %s (kept original)", name)
+	return nil
+}
+
+// Quarantined returns all tools currently awaiting user approval.
+func (ig *IntegrityGuard) Quarantined() []QuarantinedTool {
+	ig.mu.Lock()
+	defer ig.mu.Unlock()
+	result := make([]QuarantinedTool, 0, len(ig.quarantined))
+	for _, qt := range ig.quarantined {
+		result = append(result, qt)
+	}
+	return result
+}
+
+func (ig *IntegrityGuard) hashSchema(name string) string {
+	schemaPath := filepath.Join(ig.toolsDir, name+".json")
+	if _, err := os.Stat(schemaPath); err == nil {
+		h, _ := hashFile(schemaPath)
+		return h
+	}
+	return ""
+}
+
+func (ig *IntegrityGuard) loadManifest() error {
+	data, err := os.ReadFile(ig.manifestPath)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, &ig.manifest)
+}
+
+func (ig *IntegrityGuard) saveManifest() {
+	data, err := json.MarshalIndent(ig.manifest, "", "  ")
+	if err != nil {
+		log.Printf("[integrity] failed to marshal manifest: %v", err)
+		return
+	}
+	if err := os.WriteFile(ig.manifestPath, data, 0o644); err != nil {
+		log.Printf("[integrity] failed to write manifest: %v", err)
+	}
+}
+
+func (ig *IntegrityGuard) backup(toolPath string) {
+	name := filepath.Base(toolPath)
+	dst := filepath.Join(ig.backupDir, name+".prev")
+	if err := copyFile(toolPath, dst); err != nil {
+		log.Printf("[integrity] backup failed for %s: %v", name, err)
+		return
+	}
+	// Preserve execute bit in backup.
+	os.Chmod(dst, 0o755)
+}
+
+func (ig *IntegrityGuard) restore(name string) error {
+	src := filepath.Join(ig.backupDir, name+".prev")
+	dst := filepath.Join(ig.toolsDir, name)
+	// Remove target first — it may be owned by a different user (e.g. alf vs alfd).
+	os.Remove(dst)
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	// Ensure restored tools are executable and group-readable (alf group).
+	os.Chmod(dst, 0o775)
+	return nil
+}
+
+// hashFile computes the SHA-256 hex digest of a file.
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// copyFile copies src to dst, preserving permissions.
+func copyFile(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, info.Mode())
+}
+
+// IsUserTool returns true if the tool path is under the user tools/ directory
+// (not system tools.d/). Only user tools are integrity-checked.
+func IsUserTool(toolPath, dataDir string) bool {
+	userDir := filepath.Join(dataDir, "tools")
+	return strings.HasPrefix(toolPath, userDir+string(filepath.Separator))
+}

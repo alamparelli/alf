@@ -15,12 +15,13 @@ import (
 
 // Executor runs tools: native Go tools first, subprocess fallback for user tools.
 type Executor struct {
-	DataDir  string
-	HomeDir  string
-	Registry *Registry     // optional: enables JSON→CLI arg conversion for user tools
-	Env      []string      // base env vars to inject
-	Timeout  time.Duration // per-tool timeout; 0 = 30s
-	natives  map[string]NativeTool
+	DataDir   string
+	HomeDir   string
+	Registry  *Registry       // optional: enables JSON→CLI arg conversion for user tools
+	Integrity *IntegrityGuard // optional: hash-based integrity checking for user tools
+	Env       []string        // base env vars to inject
+	Timeout   time.Duration   // per-tool timeout; 0 = 30s
+	natives   map[string]NativeTool
 }
 
 // RegisterNative adds a Go-native tool. Native tools take priority over subprocess tools.
@@ -71,6 +72,17 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 			ID:      call.ID,
 			Output:  fmt.Sprintf("tool %q not found", call.Name),
 			IsError: true,
+		}
+	}
+
+	// Integrity check for user tools (not system tools.d/).
+	if e.Integrity != nil && IsUserTool(toolPath, e.DataDir) {
+		if err := e.Integrity.Check(toolPath); err != nil {
+			return CallResult{
+				ID:      call.ID,
+				Output:  fmt.Sprintf("tool %q is quarantined: %v", call.Name, err),
+				IsError: true,
+			}
 		}
 	}
 

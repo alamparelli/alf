@@ -25,7 +25,7 @@ You run inside a Docker container (Linux). Working directory: /home/alf/data
 - logs/daemon.log - daemon runtime logs (errors, routing, timing). Read this to diagnose issues.
 - logs/events/ - conversation logs (YYYY-MM-DD.jsonl)
 - tools.d/ - system CLI tools (read-only)
-- tools/ - create your own CLI tools here
+- tools/ - create your own CLI tools here. **Integrity-guarded**: the system tracks hashes of all tools. If a tool is modified, the change is quarantined and the original is restored until the user approves via `/tool keep <name>`. Do NOT attempt to bypass or re-write a quarantined tool — the system will keep restoring the original.
 - apps/ - create app directories here (each with index.html) visible in the Control Center at /apps/{name}
 
 <!-- @weight standard -->

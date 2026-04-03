@@ -36,7 +36,7 @@ jobs:
 
       - name: Clone vault-proxy into third_party
         if: steps.check.outputs.exists != 'true'
-        run: git clone --depth 1 https://github.com/alamparelli/vault-proxy.git third_party/vault-proxy
+        run: git clone --depth 1 https://github.com/alamparelli/vault-proxy.git internal/controlcenter/frontend/third_party/vault-proxy
 
       - name: Log in to GHCR
         if: steps.check.outputs.exists != 'true'

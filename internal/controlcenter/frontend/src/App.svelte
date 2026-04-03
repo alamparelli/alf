@@ -75,7 +75,7 @@
       if (e.data.action === 'ready' && e.source) {
         (e.source as Window).postMessage(
           { type: 'alf', action: 'theme', palette: theme.palette, dark: theme.isDark },
-          '*'
+          location.origin
         )
       }
     })

@@ -1,7 +1,6 @@
 package controlcenter
 
 import (
-	"crypto/subtle"
 	"log"
 	"net/http"
 	"os"
@@ -19,7 +18,8 @@ import (
 type TerminalHandler struct {
 	AuthToken     string
 	Sessions      *SessionStore
-	AllowedOrigin string // e.g. "https://cc.lamparelli.eu" - restricts WebSocket origin
+	ExtraTokenFns []func() string // additional valid tokens (e.g. mobile API token)
+	AllowedOrigin string          // e.g. "https://cc.lamparelli.eu" - restricts WebSocket origin
 }
 
 func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -173,18 +173,5 @@ func termSafeEnv(homeDir, user string) []string {
 }
 
 func (h *TerminalHandler) checkAuth(r *http.Request) bool {
-	// Bearer token.
-	if h.AuthToken != "" {
-		auth := r.Header.Get("Authorization")
-		if strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(h.AuthToken)) == 1 {
-			return true
-		}
-	}
-	// Session cookie.
-	if h.Sessions != nil {
-		if c, err := r.Cookie("cc_session"); err == nil && h.Sessions.Valid(c.Value) {
-			return true
-		}
-	}
-	return false
+	return checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns) != authNone
 }

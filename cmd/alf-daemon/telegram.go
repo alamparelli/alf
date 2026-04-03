@@ -219,6 +219,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 			"/new - Start a new conversation session\n" +
 			"/clear - Clear and start a new session\n" +
 			"/skills - List active skills (/skills clear to reset)\n" +
+			"/tool - Manage quarantined tools (keep/revert)\n" +
 			"/bash - Execute a bash command directly\n" +
 			"/jobs - List running agent jobs\n" +
 			"/cancel - Cancel all running agent jobs\n" +
@@ -226,6 +227,18 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 			"/login - Get a login link for the Control Center\n" +
 			"/start - Re-run onboarding (get to know each other)"
 		tg.SendHTML(msg.Chat.ID, help)
+		return true
+	case "/tool":
+		if !allowedChatIDs[msg.Chat.ID] {
+			return true
+		}
+		parts := strings.SplitN(msg.Text, " ", 2)
+		arg := ""
+		if len(parts) > 1 {
+			arg = strings.TrimSpace(parts[1])
+		}
+		response := cmdToolTG(engine, channelID, arg)
+		tg.SendHTML(msg.Chat.ID, response)
 		return true
 	case "/bash":
 		if !allowedChatIDs[msg.Chat.ID] {
@@ -240,6 +253,48 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 		return true
 	}
 	return false
+}
+
+// cmdToolTG handles /tool for Telegram (delegates to integrity guard).
+func cmdToolTG(engine *comms.ChatEngine, channelID comms.ChannelID, args string) string {
+	if engine.ToolExecutor == nil || engine.ToolExecutor.Integrity == nil {
+		return "Tool integrity guard is not enabled."
+	}
+	ig := engine.ToolExecutor.Integrity
+
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		quarantined := ig.Quarantined()
+		if len(quarantined) == 0 {
+			return "No quarantined tools."
+		}
+		var lines []string
+		for _, qt := range quarantined {
+			lines = append(lines, fmt.Sprintf("• <b>%s</b> (old: %s, new: %s)", qt.Name, qt.OldHash[:12], qt.NewHash[:12]))
+		}
+		return "<b>Quarantined tools:</b>\n" + strings.Join(lines, "\n") + "\n\nUse <code>/tool keep &lt;name&gt;</code> or <code>/tool revert &lt;name&gt;</code>"
+	}
+
+	if len(parts) < 2 {
+		return "Usage: <code>/tool keep &lt;name&gt;</code> | <code>/tool revert &lt;name&gt;</code>"
+	}
+
+	action, name := parts[0], parts[1]
+	switch action {
+	case "keep":
+		if err := ig.ApproveModified(name); err != nil {
+			return fmt.Sprintf("Failed: %v", err)
+		}
+		engine.ToolRegistry.Rescan()
+		return fmt.Sprintf("Tool <b>%s</b> approved. Modified version is now active.", name)
+	case "revert":
+		if err := ig.RevertTool(name); err != nil {
+			return fmt.Sprintf("Failed: %v", err)
+		}
+		return fmt.Sprintf("Tool <b>%s</b> reverted to original.", name)
+	default:
+		return "Usage: <code>/tool keep &lt;name&gt;</code> | <code>/tool revert &lt;name&gt;</code>"
+	}
 }
 
 func handleLogin(tg *tgclient.Client, msg *Message, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool) {

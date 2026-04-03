@@ -587,6 +587,27 @@ func main() {
 		Timeout:  30 * time.Second,
 		Env:      nil, // Tools use ALF_TOOLS_SOCK (from safeEnv) instead of CC_AUTH_TOKEN
 	}
+
+	// Tool integrity guard — hash-based tamper detection for user tools (issue #121).
+	var broadcastFunc func(string) // set after commEngine init
+	integrityNotify := func(tool, oldHash, newHash string) {
+		msg := fmt.Sprintf("⚠️ Tool %q was modified (hash mismatch). Quarantined.\nOld: %s\nNew: %s\nUse /tool keep %s or /tool revert %s",
+			tool, oldHash[:12], newHash[:12], tool, tool)
+		if broadcastFunc != nil {
+			broadcastFunc(msg)
+		} else {
+			log.Printf("[integrity] %s", msg)
+		}
+	}
+	integrityGuard, err := tooling.NewIntegrityGuard(dataDir, integrityNotify)
+	if err != nil {
+		log.Printf("integrity guard: %v (disabled)", err)
+	} else {
+		toolExecutor.Integrity = integrityGuard
+		toolRegistry.Integrity = integrityGuard
+		integrityGuard.Watch(500 * time.Millisecond)
+		log.Println("integrity guard: enabled for user tools (polling every 500ms)")
+	}
 	for _, t := range nativeTools {
 		toolRegistry.RegisterNative(t)
 		toolExecutor.RegisterNative(t)
@@ -639,6 +660,7 @@ func main() {
 		},
 	})
 	chatService.SetEngine(commEngine)
+	broadcastFunc = commEngine.Broadcast // wire integrity guard notifications
 	if cfg.BroadcastChannel != "" {
 		comms.BroadcastChannel = cfg.BroadcastChannel
 	}

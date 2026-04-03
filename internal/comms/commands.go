@@ -29,6 +29,7 @@ func NewCommandRegistry() *CommandRegistry {
 	r.Register(CommandDef{Name: "new", Handler: cmdNew})
 	r.Register(CommandDef{Name: "clear", Handler: cmdNew}) // alias
 	r.Register(CommandDef{Name: "skills", Handler: cmdSkills})
+	r.Register(CommandDef{Name: "tool", Handler: cmdTool})
 	return r
 }
 
@@ -87,6 +88,51 @@ func cmdSkills(e *ChatEngine, channelID ChannelID, args string) string {
 		lines = append(lines, "- "+s)
 	}
 	return fmt.Sprintf("Active skills:\n%s\n\nUse /skills clear to reset.", strings.Join(lines, "\n"))
+}
+
+// cmdTool handles /tool: manage quarantined tools.
+// /tool — list quarantined tools
+// /tool keep <name> — approve modified version
+// /tool revert <name> — revert to original
+func cmdTool(e *ChatEngine, channelID ChannelID, args string) string {
+	if e.ToolExecutor == nil || e.ToolExecutor.Integrity == nil {
+		return "Tool integrity guard is not enabled."
+	}
+	ig := e.ToolExecutor.Integrity
+
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		quarantined := ig.Quarantined()
+		if len(quarantined) == 0 {
+			return "No quarantined tools."
+		}
+		var lines []string
+		for _, qt := range quarantined {
+			lines = append(lines, fmt.Sprintf("- %s (old: %s, new: %s)", qt.Name, qt.OldHash[:12], qt.NewHash[:12]))
+		}
+		return fmt.Sprintf("Quarantined tools:\n%s\n\nUse /tool keep <name> or /tool revert <name>", strings.Join(lines, "\n"))
+	}
+
+	if len(parts) < 2 {
+		return "Usage: /tool keep <name> | /tool revert <name>"
+	}
+
+	action, name := parts[0], parts[1]
+	switch action {
+	case "keep":
+		if err := ig.ApproveModified(name); err != nil {
+			return fmt.Sprintf("Failed: %v", err)
+		}
+		e.ToolRegistry.Rescan()
+		return fmt.Sprintf("Tool %q approved. Modified version is now active.", name)
+	case "revert":
+		if err := ig.RevertTool(name); err != nil {
+			return fmt.Sprintf("Failed: %v", err)
+		}
+		return fmt.Sprintf("Tool %q reverted to original.", name)
+	default:
+		return "Usage: /tool keep <name> | /tool revert <name>"
+	}
 }
 
 // ProcessCommand checks if a message is a command and handles it.

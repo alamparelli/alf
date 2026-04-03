@@ -22,6 +22,7 @@ type Registry struct {
 	nativeNames []string
 	dataDir     string
 	secWarnings []SecurityWarning
+	Integrity   *IntegrityGuard // optional: skip quarantined tools from scan
 }
 
 // NewRegistry scans tools.d/*.json and tools/*.json under dataDir for tool manifests.
@@ -109,7 +110,7 @@ func (r *Registry) scanFiles(initial bool) {
 			continue
 		}
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".quarantined") {
 				continue
 			}
 			path := filepath.Join(dir, e.Name())
@@ -149,7 +150,11 @@ func (r *Registry) scanFiles(initial bool) {
 	userToolDir := filepath.Join(r.dataDir, "tools")
 	if entries, err := os.ReadDir(userToolDir); err == nil {
 		for _, e := range entries {
-			if e.IsDir() || strings.HasSuffix(e.Name(), ".json") {
+			if e.IsDir() || strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".quarantined") {
+				continue
+			}
+			if r.Integrity != nil && r.Integrity.IsQuarantined(e.Name()) {
+				log.Printf("tooling: skipping quarantined tool: %s", e.Name())
 				continue
 			}
 			path := filepath.Join(userToolDir, e.Name())
@@ -241,7 +246,7 @@ func (r *Registry) UserToolNames() []string {
 	}
 	var names []string
 	for _, e := range entries {
-		if !e.IsDir() && !strings.HasSuffix(e.Name(), ".json") {
+		if !e.IsDir() && !strings.HasSuffix(e.Name(), ".json") && !strings.HasSuffix(e.Name(), ".quarantined") {
 			names = append(names, e.Name())
 		}
 	}
@@ -292,7 +297,7 @@ func DiscoverToolNames(dataDir string) []string {
 			continue
 		}
 		for _, e := range entries {
-			if e.IsDir() || strings.HasSuffix(e.Name(), ".json") {
+			if e.IsDir() || strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".quarantined") {
 				continue
 			}
 			if signalTools[e.Name()] {

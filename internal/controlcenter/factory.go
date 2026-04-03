@@ -486,6 +486,9 @@ func HandlerFactory(deps Deps) Handlers {
 	}).middleware(handler) // 15/min anonymous, no limit authenticated (session, bearer, or mobile token)
 	handler = loggingMiddleware(handler)
 
+	// Shared extra token providers for handlers outside the middleware stack.
+	extraTokenFns := []func() string{func() string { return GetMobileToken(deps.VaultManager) }}
+
 	// Terminal WebSocket: registered outside the main middleware stack so the
 	// ResponseWriter keeps its http.Hijacker interface for the upgrade.
 	// Auth is checked inline. Rate limiting and logging applied separately.
@@ -493,6 +496,7 @@ func HandlerFactory(deps Deps) Handlers {
 	var termHandler http.Handler = &TerminalHandler{
 		AuthToken:     deps.AuthToken,
 		Sessions:      deps.Sessions,
+		ExtraTokenFns: extraTokenFns,
 		AllowedOrigin: deps.AllowedOrigin,
 	}
 	termHandler = termRL.middleware(termHandler)
@@ -504,6 +508,7 @@ func HandlerFactory(deps Deps) Handlers {
 		Manager:       deps.VaultManager,
 		AuthToken:     deps.AuthToken,
 		Sessions:      deps.Sessions,
+		ExtraTokenFns: extraTokenFns,
 		AllowedOrigin: deps.AllowedOrigin,
 	}
 	sshHandler = sshRL.middleware(sshHandler)

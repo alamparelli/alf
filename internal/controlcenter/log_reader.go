@@ -2,10 +2,13 @@ package controlcenter
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+const maxTailBytes = 1 << 20 // 1MB max read for tail
 
 // fileLogReader implements LogReader by reading log files from a directory.
 type fileLogReader struct {
@@ -34,7 +37,7 @@ func (r *fileLogReader) Tail(name string, n int) ([]string, error) {
 	}
 
 	path := filepath.Join(r.dir, name)
-	data, err := os.ReadFile(path)
+	data, err := readTail(path, maxTailBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []string{}, nil
@@ -73,4 +76,49 @@ func (r *fileLogReader) Available() []string {
 		}
 	}
 	return names
+}
+
+// readTail reads up to maxBytes from the end of a file.
+// For files smaller than maxBytes, reads the entire file.
+func readTail(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	size := info.Size()
+	if size <= maxBytes {
+		return io.ReadAll(f)
+	}
+
+	// Seek to (end - maxBytes) and read from there.
+	if _, err := f.Seek(size-maxBytes, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	// Drop the first partial line (we likely landed mid-line).
+	if idx := indexOf(data, '\n'); idx >= 0 {
+		data = data[idx+1:]
+	}
+	return data, nil
+}
+
+func indexOf(data []byte, b byte) int {
+	for i, v := range data {
+		if v == b {
+			return i
+		}
+	}
+	return -1
 }

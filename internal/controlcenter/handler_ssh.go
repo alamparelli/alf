@@ -2,7 +2,6 @@ package controlcenter
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"io"
 	"log"
@@ -24,6 +23,7 @@ type SSHHandler struct {
 	Manager       *vault.Manager
 	AuthToken     string
 	Sessions      *SessionStore
+	ExtraTokenFns []func() string // additional valid tokens (e.g. mobile API token)
 	AllowedOrigin string
 }
 
@@ -218,18 +218,5 @@ func (h *SSHHandler) handleSSHSession(w http.ResponseWriter, r *http.Request, se
 }
 
 func (h *SSHHandler) checkSSHAuth(r *http.Request) bool {
-	// Bearer token.
-	if h.AuthToken != "" {
-		auth := r.Header.Get("Authorization")
-		if strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(h.AuthToken)) == 1 {
-			return true
-		}
-	}
-	// Session cookie.
-	if h.Sessions != nil {
-		if c, err := r.Cookie("cc_session"); err == nil && h.Sessions.Valid(c.Value) {
-			return true
-		}
-	}
-	return false
+	return checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns) != authNone
 }

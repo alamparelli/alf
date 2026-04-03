@@ -21,6 +21,7 @@ type Registry struct {
 	natives     map[string]NativeTool
 	nativeNames []string
 	dataDir     string
+	secWarnings []SecurityWarning
 }
 
 // NewRegistry scans tools.d/*.json and tools/*.json under dataDir for tool manifests.
@@ -41,6 +42,49 @@ func (r *Registry) scan() {
 // Native Go tools are preserved - only file-based schemas are refreshed.
 func (r *Registry) Rescan() {
 	r.scanFiles(false)
+}
+
+// dangerousPatterns are substrings in tool source code that indicate shell injection risk.
+var dangerousPatterns = []struct {
+	pattern string
+	reason  string
+}{
+	{"shell=True", "Python subprocess with shell=True allows command injection (CWE-78)"},
+	{"os.system(", "os.system() passes commands through the shell (CWE-78)"},
+	{"os.popen(", "os.popen() passes commands through the shell (CWE-78)"},
+	{"eval(", "eval() executes arbitrary code (CWE-94)"},
+}
+
+// SecurityWarning records a dangerous pattern found in a user tool.
+type SecurityWarning struct {
+	Tool    string `json:"tool"`
+	Pattern string `json:"pattern"`
+	Reason  string `json:"reason"`
+}
+
+// SecurityWarnings returns warnings from the last tool scan.
+func (r *Registry) SecurityWarnings() []SecurityWarning {
+	return r.secWarnings
+}
+
+// auditToolSource scans a tool's source code for dangerous patterns.
+func auditToolSource(toolPath, toolName string) []SecurityWarning {
+	data, err := os.ReadFile(toolPath)
+	if err != nil {
+		return nil
+	}
+	src := string(data)
+	var warnings []SecurityWarning
+	for _, dp := range dangerousPatterns {
+		if strings.Contains(src, dp.pattern) {
+			warnings = append(warnings, SecurityWarning{
+				Tool:    toolName,
+				Pattern: dp.pattern,
+				Reason:  dp.reason,
+			})
+		}
+	}
+	return warnings
 }
 
 func (r *Registry) scanFiles(initial bool) {
@@ -98,6 +142,24 @@ func (r *Registry) scanFiles(initial bool) {
 			names = append(names, n)
 		}
 		log.Printf("tooling: loaded %d tool schemas: %v", len(r.schemas), names)
+	}
+
+	// Audit user tool source files for dangerous patterns (shell injection, eval, etc.).
+	r.secWarnings = nil
+	userToolDir := filepath.Join(r.dataDir, "tools")
+	if entries, err := os.ReadDir(userToolDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(userToolDir, e.Name())
+			if warnings := auditToolSource(path, e.Name()); len(warnings) > 0 {
+				for _, w := range warnings {
+					log.Printf("tooling: ⚠ SECURITY WARNING in tools/%s: %s", w.Tool, w.Reason)
+				}
+				r.secWarnings = append(r.secWarnings, warnings...)
+			}
+		}
 	}
 }
 

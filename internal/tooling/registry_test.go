@@ -124,6 +124,109 @@ func (f *fakeNativeTool) ToolName() string                                      
 func (f *fakeNativeTool) Schema() ToolSchema                                      { return ToolSchema{Name: f.name, Description: "fake"} }
 func (f *fakeNativeTool) Run(_ context.Context, _ string) (string, error)         { return "", nil }
 
+func TestAuditToolSource_DetectsDangerousPatterns(t *testing.T) {
+	dir := t.TempDir()
+
+	// Tool with shell=True
+	unsafe := filepath.Join(dir, "bad-tool")
+	os.WriteFile(unsafe, []byte("#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(cmd, shell=True)\n"), 0o755)
+
+	warnings := auditToolSource(unsafe, "bad-tool")
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d", len(warnings))
+	}
+	if warnings[0].Pattern != "shell=True" {
+		t.Errorf("expected pattern 'shell=True', got %q", warnings[0].Pattern)
+	}
+	if warnings[0].Tool != "bad-tool" {
+		t.Errorf("expected tool 'bad-tool', got %q", warnings[0].Tool)
+	}
+}
+
+func TestAuditToolSource_SafeToolNoWarnings(t *testing.T) {
+	dir := t.TempDir()
+
+	safe := filepath.Join(dir, "good-tool")
+	os.WriteFile(safe, []byte("#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(['ls', '-la'])\n"), 0o755)
+
+	warnings := auditToolSource(safe, "good-tool")
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for safe tool, got %d: %v", len(warnings), warnings)
+	}
+}
+
+func TestAuditToolSource_MultiplePatterns(t *testing.T) {
+	dir := t.TempDir()
+
+	multi := filepath.Join(dir, "multi-bad")
+	os.WriteFile(multi, []byte("#!/usr/bin/env python3\nos.system(cmd)\neval(user_input)\n"), 0o755)
+
+	warnings := auditToolSource(multi, "multi-bad")
+	if len(warnings) != 2 {
+		t.Fatalf("expected 2 warnings, got %d", len(warnings))
+	}
+	patterns := map[string]bool{}
+	for _, w := range warnings {
+		patterns[w.Pattern] = true
+	}
+	if !patterns["os.system("] || !patterns["eval("] {
+		t.Errorf("expected os.system( and eval( patterns, got %v", patterns)
+	}
+}
+
+func TestRegistry_SecurityWarnings_PopulatedOnScan(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "tools.d"), 0o755)
+	toolsDir := filepath.Join(dir, "tools")
+	os.MkdirAll(toolsDir, 0o755)
+
+	// Create an unsafe tool in user tools dir
+	os.WriteFile(filepath.Join(toolsDir, "risky"), []byte("#!/bin/bash\nos.popen(x)\n"), 0o755)
+	// Create a safe tool
+	os.WriteFile(filepath.Join(toolsDir, "safe"), []byte("#!/bin/bash\necho hello\n"), 0o755)
+
+	r := NewRegistry(dir)
+	warnings := r.SecurityWarnings()
+
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+	}
+	if warnings[0].Tool != "risky" {
+		t.Errorf("expected warning for 'risky', got %q", warnings[0].Tool)
+	}
+}
+
+func TestRegistry_SecurityWarnings_ClearedOnRescan(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "tools.d"), 0o755)
+	toolsDir := filepath.Join(dir, "tools")
+	os.MkdirAll(toolsDir, 0o755)
+
+	// Start with unsafe tool
+	unsafePath := filepath.Join(toolsDir, "fixme")
+	os.WriteFile(unsafePath, []byte("subprocess.run(cmd, shell=True)"), 0o755)
+
+	r := NewRegistry(dir)
+	if len(r.SecurityWarnings()) != 1 {
+		t.Fatalf("expected 1 warning initially, got %d", len(r.SecurityWarnings()))
+	}
+
+	// Fix the tool and rescan
+	os.WriteFile(unsafePath, []byte("subprocess.run(['cmd', 'arg'])"), 0o755)
+	r.Rescan()
+
+	if len(r.SecurityWarnings()) != 0 {
+		t.Errorf("expected 0 warnings after fix, got %d: %v", len(r.SecurityWarnings()), r.SecurityWarnings())
+	}
+}
+
+func TestAuditToolSource_NonexistentFile(t *testing.T) {
+	warnings := auditToolSource("/nonexistent/path", "ghost")
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for nonexistent file, got %d", len(warnings))
+	}
+}
+
 func TestRegistry_ForTools_MixedManifestAndFallback(t *testing.T) {
 	dir := t.TempDir()
 	toolsD := filepath.Join(dir, "tools.d")

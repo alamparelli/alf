@@ -43,8 +43,12 @@ dev-claude-session/
 # Private (not for public repo)
 .claude/
 mobile/
-scripts/dev-deploy.sh
-scripts/dev-local.sh
 technical/
 journal
 video-factory-output/
+prototypes/
+
+# Personal scripts (kept local, not tracked)
+scripts/*
+!scripts/entrypoint.sh
+!scripts/install.sh

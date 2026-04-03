@@ -3,6 +3,7 @@ package tooling
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -125,4 +126,117 @@ func TestExecutor_NonZeroExit(t *testing.T) {
 	if !result.IsError {
 		t.Error("expected error for non-zero exit")
 	}
+}
+
+// --- Security regression tests ---
+
+// TestExecutor_DropToAlfUser_Linux verifies that on Linux, user tool subprocesses
+// get SysProcAttr with uid 1000 credentials (not the daemon's uid 1001).
+// Regression test for privilege escalation: user tools must never run as daemon.
+func TestExecutor_DropToAlfUser_Linux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("credential drop only active on Linux")
+	}
+
+	cmd := exec.Command("/bin/true")
+	dropToAlfUser(cmd)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr should be set on Linux")
+	}
+	if cmd.SysProcAttr.Credential == nil {
+		t.Fatal("Credential should be set on Linux")
+	}
+	if cmd.SysProcAttr.Credential.Uid != 1000 {
+		t.Errorf("Uid = %d, want 1000", cmd.SysProcAttr.Credential.Uid)
+	}
+	if cmd.SysProcAttr.Credential.Gid != 1000 {
+		t.Errorf("Gid = %d, want 1000", cmd.SysProcAttr.Credential.Gid)
+	}
+}
+
+// TestExecutor_DropToAlfUser_Noop_NonLinux verifies that dropToAlfUser is a
+// no-op on non-Linux platforms (macOS dev/test).
+func TestExecutor_DropToAlfUser_Noop_NonLinux(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("this test checks non-Linux behavior")
+	}
+
+	cmd := exec.Command("/bin/true")
+	dropToAlfUser(cmd)
+
+	if cmd.SysProcAttr != nil {
+		t.Error("SysProcAttr should not be set on non-Linux")
+	}
+}
+
+// TestExecutor_PathTraversal_Regression verifies that tool names with path
+// traversal sequences are rejected.
+func TestExecutor_PathTraversal_Regression(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "tools.d"), 0o755)
+
+	e := &Executor{DataDir: dir, HomeDir: dir}
+
+	for _, name := range []string{"../etc/passwd", "foo/bar", "..\\windows", "tools/../secret"} {
+		result := e.Execute(context.Background(), CallRequest{
+			ID:   "trav",
+			Name: name,
+		})
+		if !result.IsError {
+			t.Errorf("expected path traversal %q to be rejected", name)
+		}
+	}
+}
+
+// TestExecutor_QuarantinedToolBlocked verifies that quarantined tools cannot be executed.
+func TestExecutor_QuarantinedToolBlocked(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	toolsDir := filepath.Join(dir, "tools")
+	os.MkdirAll(toolsDir, 0o755)
+
+	// Create a tool.
+	script := "#!/bin/sh\necho pwned\n"
+	os.WriteFile(filepath.Join(toolsDir, "evil-tool"), []byte(script), 0o755)
+
+	// Create integrity guard with tool already quarantined.
+	ig := &IntegrityGuard{
+		quarantined: map[string]QuarantinedTool{"evil-tool": {}},
+	}
+
+	e := &Executor{
+		DataDir:   dir,
+		HomeDir:   dir,
+		Integrity: ig,
+		Timeout:   5 * time.Second,
+	}
+
+	result := e.Execute(context.Background(), CallRequest{
+		ID:   "q1",
+		Name: "evil-tool",
+	})
+
+	if !result.IsError {
+		t.Error("quarantined tool should be blocked")
+	}
+	if !containsSubstring(result.Output, "quarantined") {
+		t.Errorf("error should mention quarantine, got: %s", result.Output)
+	}
+}
+
+func containsSubstring(s, sub string) bool {
+	return len(s) >= len(sub) && findSubstring(s, sub)
+}
+
+func findSubstring(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

@@ -76,11 +76,13 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 	}
 
 	// Integrity check for user tools (not system tools.d/).
+	// Uses Verify (hash at exec time) instead of Check (map lookup) to close
+	// the TOCTOU window between periodic scan and execution.
 	if e.Integrity != nil && IsUserTool(toolPath, e.DataDir) {
-		if err := e.Integrity.Check(toolPath); err != nil {
+		if err := e.Integrity.Verify(toolPath); err != nil {
 			return CallResult{
 				ID:      call.ID,
-				Output:  fmt.Sprintf("tool %q is quarantined: %v", call.Name, err),
+				Output:  fmt.Sprintf("tool %q blocked: %v", call.Name, err),
 				IsError: true,
 			}
 		}
@@ -89,6 +91,8 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 	// Convert JSON args to CLI arguments using schema conventions.
 	cliArgs := e.jsonToCLI(call.Name, call.Arguments)
 	cmd := exec.CommandContext(ctx, toolPath, cliArgs...)
+	// SEC: Drop to alf (uid 1000) for user tool execution.
+	dropToAlfUser(cmd)
 	if len(cliArgs) == 0 {
 		// No schema or conversion failed - fall back to JSON on stdin.
 		cmd.Stdin = strings.NewReader(call.Arguments)

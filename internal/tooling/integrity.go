@@ -251,7 +251,7 @@ func (ig *IntegrityGuard) scan(initial bool) {
 }
 
 // Check returns ErrToolQuarantined if the tool is quarantined, nil otherwise.
-// Kept for executor integration — lightweight map lookup, no I/O.
+// Kept for non-execution checks (status queries, UI).
 func (ig *IntegrityGuard) Check(toolPath string) error {
 	name := filepath.Base(toolPath)
 	ig.mu.Lock()
@@ -259,6 +259,41 @@ func (ig *IntegrityGuard) Check(toolPath string) error {
 	if _, ok := ig.quarantined[name]; ok {
 		return ErrToolQuarantined
 	}
+	return nil
+}
+
+// Verify performs a full integrity check suitable for use immediately before
+// execution. Unlike Check (map lookup only), Verify hashes the file on disk
+// and compares against the manifest to close the TOCTOU window between scan
+// and execution. Returns nil if the tool is safe to execute.
+func (ig *IntegrityGuard) Verify(toolPath string) error {
+	name := filepath.Base(toolPath)
+	ig.mu.Lock()
+	defer ig.mu.Unlock()
+
+	// Quarantined tools are always blocked.
+	if _, ok := ig.quarantined[name]; ok {
+		return ErrToolQuarantined
+	}
+
+	// Tool not yet in manifest (new, not scanned yet) — allow.
+	// It will be baselined on the next scan cycle.
+	entry, exists := ig.manifest[name]
+	if !exists {
+		return nil
+	}
+
+	// Hash at execution time — closes TOCTOU between periodic scan and exec.
+	hash, err := hashFile(toolPath)
+	if err != nil {
+		return fmt.Errorf("integrity: cannot read tool for verification: %w", err)
+	}
+
+	if hash != entry.ExeHash {
+		return fmt.Errorf("integrity: tool %s modified since last scan (expected %s, got %s)",
+			name, entry.ExeHash[:12], hash[:12])
+	}
+
 	return nil
 }
 

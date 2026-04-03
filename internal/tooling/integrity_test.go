@@ -389,3 +389,79 @@ func TestIntegrity_BaselineScan_AcceptsMismatch(t *testing.T) {
 		t.Fatal("initial scan should accept current state, not quarantine")
 	}
 }
+
+// --- TOCTOU regression tests (SEC-002) ---
+
+// TestVerify_BlocksModifiedBetweenScans verifies that Verify() catches a tool
+// modified after the last scan but before execution. This is the TOCTOU fix:
+// Check() would pass (map lookup says "not quarantined"), but Verify() hashes
+// the file and detects the mismatch.
+func TestVerify_BlocksModifiedBetweenScans(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "mytool", "#!/bin/sh\necho safe")
+
+	// Scan to baseline the tool.
+	ig.scan(true)
+
+	// Simulate LLM modifying the tool AFTER scan but BEFORE execution.
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/bin/sh\necho pwned"), 0o755)
+
+	// Check() would pass (not quarantined yet — next scan hasn't run).
+	if err := ig.Check(path); err != nil {
+		t.Fatalf("Check() should pass (no scan since modification): %v", err)
+	}
+
+	// Verify() must catch the modification at execution time.
+	if err := ig.Verify(path); err == nil {
+		t.Fatal("Verify() should block tool modified between scans (TOCTOU)")
+	}
+}
+
+// TestVerify_AllowsUnmodifiedTool verifies that Verify() allows a tool
+// whose hash matches the manifest.
+func TestVerify_AllowsUnmodifiedTool(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "goodtool", "#!/bin/sh\necho ok")
+
+	ig.scan(true)
+
+	if err := ig.Verify(path); err != nil {
+		t.Fatalf("Verify() should allow unmodified tool: %v", err)
+	}
+}
+
+// TestVerify_AllowsNewToolNotYetScanned verifies that Verify() allows a
+// brand new tool that hasn't been scanned yet (not in manifest).
+func TestVerify_AllowsNewToolNotYetScanned(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	ig.scan(true) // baseline with no tools
+
+	// Create tool after scan — not yet in manifest.
+	path := writeTool(t, toolsDir, "newtool", "#!/bin/sh\necho new")
+
+	if err := ig.Verify(path); err != nil {
+		t.Fatalf("Verify() should allow new tool not yet in manifest: %v", err)
+	}
+}
+
+// TestVerify_BlocksQuarantinedTool verifies that Verify() blocks quarantined
+// tools (same as Check, but Verify is now the single entry point for executor).
+func TestVerify_BlocksQuarantinedTool(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "qtool", "#!/bin/sh\necho v1")
+	ig.scan(true)
+
+	// Modify and scan to trigger quarantine.
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/bin/sh\necho v2"), 0o755)
+	ig.scan(false)
+
+	if !ig.IsQuarantined("qtool") {
+		t.Fatal("tool should be quarantined after modification + scan")
+	}
+
+	if err := ig.Verify(path); err == nil {
+		t.Fatal("Verify() should block quarantined tool")
+	}
+}

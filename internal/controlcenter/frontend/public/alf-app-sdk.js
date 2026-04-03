@@ -573,6 +573,23 @@
       });
     },
 
+    /**
+     * Call a cross-app action. The CC validates the action against
+     * the target's manifest before proxying the request.
+     * @param {string} targetSlug - Target app slug
+     * @param {string} actionName - Action declared in target's manifest
+     * @param {Object} [params] - Parameters passed as JSON body
+     * @returns {Promise<any>}
+     */
+    action: function(targetSlug, actionName, params) {
+      if (!_ensureReady('action')) return Promise.reject(new Error('SDK not initialized'));
+      return this.api('/api/app-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: targetSlug, action: actionName, params: params || {} })
+      });
+    },
+
     /** Navigate the parent CC to a view. */
     navigate: function(view) {
       if (!_ensureReady('navigate')) return;

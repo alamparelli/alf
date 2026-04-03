@@ -75,6 +75,7 @@ Defines the app identity and its tool declarations. This is what the marketplace
 | `icon` | No | [Lucide](https://lucide.dev) icon name |
 | `tools` | No | Array of tool declarations (see below) |
 | `permissions` | No | Array of permission strings (see below) |
+| `actions` | No | Map of cross-app actions (see below) |
 
 ### Permissions
 
@@ -87,6 +88,30 @@ Declared in `manifest.json` under `"permissions"`. The sandbox enforces these at
 | `network` | Sandbox allows outbound network access (DNS, TLS certs, vault proxy socket) |
 
 Apps without `network` run in an isolated network namespace — no outbound connections. Apps with `network` get a per-app vault proxy socket (`VAULT_PROXY_SOCK`) so `vault ssh`, `vault http`, etc. work without direct token access.
+
+### Cross-app actions
+
+Apps can expose actions that other apps call via `AlfSDK.action()`. Declare them in `manifest.json`:
+
+```json
+{
+  "actions": {
+    "add-item": {
+      "params": ["url", "title"],
+      "description": "Add a URL to the reading list"
+    }
+  }
+}
+```
+
+The app must handle incoming action requests at `/api/actions/<name>` in its REST server. The CC validates that the action is declared in the target's manifest before proxying. The caller is identified via the `X-Caller-App` header on the incoming request.
+
+**Consumer side** (calling app):
+
+```js
+AlfSDK.action('later', 'add-item', { url: '...', title: '...' })
+  .then(function(res) { console.log(res); });
+```
 
 ### Tool declarations
 

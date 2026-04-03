@@ -103,6 +103,7 @@ AlfSDK.init({ slug, onThemeChange,     // Init. Call once on load. REQUIRED.
 AlfSDK.tool(action, args)              // Run CLI tool. Returns Promise<string>.
 AlfSDK.api(path, opts)                 // Authenticated fetch (same-origin cookies).
 AlfSDK.bash(cmd)                       // Execute shell command via /api/bash.
+AlfSDK.action(target, action, params)  // Call cross-app action. Returns Promise<any>.
 AlfSDK.navigate(view)                  // Navigate parent SPA ('chat', 'settings', 'vault').
 AlfSDK.toast(msg, type)                // Toast in parent: 'success', 'error', 'info'.
 AlfSDK.getTheme()                      // Returns { palette, dark }.

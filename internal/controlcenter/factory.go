@@ -238,6 +238,11 @@ func HandlerFactory(deps Deps) Handlers {
 		log.Println("[security] marketplace not configured — app permission enforcement disabled")
 	}
 
+	// Cross-app actions: proxy calls between apps via declared manifest actions.
+	if deps.AppStore != nil {
+		mux.Handle("/api/app-action", &AppActionHandler{Store: deps.AppStore})
+	}
+
 	// Apps: directory-based apps with index.html + assets.
 	if deps.AppStore != nil {
 		appStorage := &AppStorageHandler{DataDir: deps.DataDir, Perms: permChecker}

@@ -86,6 +86,24 @@ AlfSDK.tool('list', { filter: 'active' }).then(function(output) {
 });
 ```
 
+### `AlfSDK.action(targetSlug, actionName, params)`
+
+Call an action declared by another app. The CC validates the action against the target's `manifest.json` before proxying the request — no direct inter-app access.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `targetSlug` | string | Target app's slug |
+| `actionName` | string | Action name (must be declared in target's manifest `actions` field) |
+| `params` | object | Parameters passed as JSON body to the target |
+
+```js
+// App "reader" calls "later" app's add-item action
+AlfSDK.action('later', 'add-item', { url: '...', title: '...' })
+  .then(function(res) { AlfSDK.toast('Added!', 'success'); });
+```
+
+The target app receives a POST at `/api/actions/add-item` with the params as JSON body and an `X-Caller-App: reader` header identifying the caller.
+
 ### `AlfSDK.navigate(view)`
 
 Navigate the Control Center to a view.

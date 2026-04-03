@@ -278,6 +278,12 @@ func appIsolationMiddleware(allowedOrigin string) func(http.Handler) http.Handle
 				return
 			}
 
+			// Allow: cross-app actions (handler validates caller and target)
+			if path == "/api/app-action" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Allow: bash endpoint (permission checked by handler)
 			if path == "/api/bash" {
 				next.ServeHTTP(w, r)

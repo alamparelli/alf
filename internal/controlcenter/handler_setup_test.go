@@ -944,3 +944,101 @@ func TestSetupApply_APIKeyEmptySkipsVault(t *testing.T) {
 		t.Error("openrouter backend not saved")
 	}
 }
+
+// --- SSRF validation tests (#95) ---
+
+func TestValidateBaseURL_AllowsPublicHTTPS(t *testing.T) {
+	if err := validateBaseURL("https://openrouter.ai/api/v1"); err != nil {
+		t.Errorf("expected public HTTPS to be allowed: %v", err)
+	}
+}
+
+func TestValidateBaseURL_AllowsDockerInternal(t *testing.T) {
+	if err := validateBaseURL("http://host.docker.internal:11434"); err != nil {
+		t.Errorf("expected host.docker.internal to be allowed: %v", err)
+	}
+}
+
+func TestValidateBaseURL_BlocksMetadata(t *testing.T) {
+	urls := []string{
+		"http://169.254.169.254/latest/meta-data/",
+		"http://metadata.google.internal/computeMetadata/v1/",
+	}
+	for _, u := range urls {
+		if err := validateBaseURL(u); err == nil {
+			t.Errorf("expected %s to be blocked", u)
+		}
+	}
+}
+
+func TestValidateBaseURL_AllowsPrivateIPs(t *testing.T) {
+	urls := []string{
+		"http://10.0.0.1:8080",
+		"http://172.16.0.1:8080",
+		"http://192.168.1.1:8080",
+	}
+	for _, u := range urls {
+		if err := validateBaseURL(u); err != nil {
+			t.Errorf("expected %s to be allowed (LAN backends): %v", u, err)
+		}
+	}
+}
+
+func TestValidateBaseURL_BlocksNonHTTP(t *testing.T) {
+	if err := validateBaseURL("ftp://evil.com/v1"); err == nil {
+		t.Error("expected ftp scheme to be blocked")
+	}
+	if err := validateBaseURL("file:///etc/passwd"); err == nil {
+		t.Error("expected file scheme to be blocked")
+	}
+}
+
+func TestValidateBaseURL_BlocksEmptyHost(t *testing.T) {
+	if err := validateBaseURL("http://"); err == nil {
+		t.Error("expected empty host to be blocked")
+	}
+}
+
+func TestSetupBackendTest_AllowsPrivateIP(t *testing.T) {
+	dir := t.TempDir()
+	h := newSetupHandler(t, nil, dir, filepath.Join(dir, "presets"))
+
+	// Private IP is allowed (LAN backends like Ollama). Connection will fail but no SSRF block.
+	body := `{"type":"custom","base_url":"http://10.0.0.1:8080/v1","api_key":"test-key"}`
+	rec := doSetupPost(t, h, "/api/setup/backend/test", body)
+
+	var resp map[string]any
+	json.NewDecoder(rec.Body).Decode(&resp)
+	errMsg, _ := resp["error"].(string)
+	if strings.Contains(errMsg, "blocked") {
+		t.Errorf("private IPs should not be blocked, got: %s", errMsg)
+	}
+}
+
+func TestSetupBackendTest_SSRF_Metadata(t *testing.T) {
+	dir := t.TempDir()
+	h := newSetupHandler(t, nil, dir, filepath.Join(dir, "presets"))
+
+	body := `{"type":"custom","base_url":"http://169.254.169.254/latest","api_key":"stolen"}`
+	rec := doSetupPost(t, h, "/api/setup/backend/test", body)
+
+	var resp map[string]any
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp["ok"] != false {
+		t.Error("expected metadata endpoint to be blocked")
+	}
+}
+
+func TestSetupOllamaModels_AllowsPrivateIP(t *testing.T) {
+	dir := t.TempDir()
+	h := newSetupHandler(t, nil, dir, filepath.Join(dir, "presets"))
+
+	rec := doSetupGet(t, h, "/api/setup/ollama/models?base_url=http://192.168.1.50:11434")
+
+	var resp map[string]any
+	json.NewDecoder(rec.Body).Decode(&resp)
+	errMsg, _ := resp["error"].(string)
+	if strings.Contains(errMsg, "blocked") {
+		t.Errorf("private IPs should not be blocked for Ollama, got: %s", errMsg)
+	}
+}

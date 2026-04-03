@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,51 @@ import (
 
 	"github.com/alamparelli/alf/internal/vault"
 )
+
+// validateBaseURL checks that a user-supplied base URL is safe to send requests to.
+// Blocks private/link-local IPs and cloud metadata endpoints to prevent SSRF.
+func validateBaseURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("scheme must be http or https")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("empty hostname")
+	}
+
+	// Block cloud metadata endpoints.
+	metadataHosts := []string{"169.254.169.254", "metadata.google.internal", "metadata.internal"}
+	for _, m := range metadataHosts {
+		if strings.EqualFold(host, m) {
+			return fmt.Errorf("blocked: cloud metadata endpoint")
+		}
+	}
+
+	// Resolve and check for private/loopback/link-local IPs.
+	// Allow "host.docker.internal" (used for Ollama).
+	if strings.EqualFold(host, "host.docker.internal") {
+		return nil
+	}
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		// DNS failure is not an SSRF — let the caller handle connection errors.
+		return nil
+	}
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("blocked: %s resolves to non-routable address %s", host, ipStr)
+		}
+	}
+	return nil
+}
 
 // SetupHandler serves the setup wizard API endpoints.
 type SetupHandler struct {
@@ -213,6 +260,10 @@ func (h *SetupHandler) handleBackendTest(w http.ResponseWriter, r *http.Request)
 		http.Error(w, jsonErr("base_url is required"), http.StatusBadRequest)
 		return
 	}
+	if err := validateBaseURL(req.BaseURL); err != nil {
+		respondJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 
 	// Test by calling /models endpoint (OpenAI-compatible).
 	modelsURL := req.BaseURL + "/models"
@@ -284,6 +335,10 @@ func (h *SetupHandler) handleOllamaModels(w http.ResponseWriter, r *http.Request
 	baseURL := strings.TrimSpace(strings.TrimSuffix(r.URL.Query().Get("base_url"), "/"))
 	if baseURL == "" {
 		baseURL = "http://host.docker.internal:11434"
+	}
+	if err := validateBaseURL(baseURL); err != nil {
+		respondJSON(w, http.StatusOK, map[string]any{"models": []string{}, "error": err.Error()})
+		return
 	}
 
 	tagsURL := baseURL + "/api/tags"

@@ -39,11 +39,22 @@ func validateBaseURL(raw string) error {
 		}
 	}
 
-	// Resolve and check for private/loopback/link-local IPs.
-	// Allow "host.docker.internal" (used for Ollama).
-	if strings.EqualFold(host, "host.docker.internal") {
-		return nil
+	// Allow known internal service hostnames used by ALF sidecars.
+	allowedInternalHosts := []string{
+		"host.docker.internal", // Ollama on host
+		"whisper",              // Whisper sidecar
+		"embed",                // Embedding sidecar
 	}
+	for _, allowed := range allowedInternalHosts {
+		if strings.EqualFold(host, allowed) {
+			return nil
+		}
+	}
+
+	// Resolve and block private/link-local IPs to prevent SSRF scanning
+	// of Docker-internal services. Loopback is allowed because inside the
+	// container it only reaches the daemon's own TCP listener (which requires
+	// auth and strips X-Tools-Socket on TCP connections).
 	ips, err := net.LookupHost(host)
 	if err != nil {
 		// DNS failure is not an SSRF — let the caller handle connection errors.
@@ -54,7 +65,7 @@ func validateBaseURL(raw string) error {
 		if ip == nil {
 			continue
 		}
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		if ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 			return fmt.Errorf("blocked: %s resolves to non-routable address %s", host, ipStr)
 		}
 	}

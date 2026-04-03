@@ -971,15 +971,29 @@ func TestValidateBaseURL_BlocksMetadata(t *testing.T) {
 	}
 }
 
-func TestValidateBaseURL_AllowsPrivateIPs(t *testing.T) {
+func TestValidateBaseURL_BlocksPrivateIPs(t *testing.T) {
 	urls := []string{
 		"http://10.0.0.1:8080",
 		"http://172.16.0.1:8080",
 		"http://192.168.1.1:8080",
 	}
 	for _, u := range urls {
+		if err := validateBaseURL(u); err == nil {
+			t.Errorf("expected %s to be blocked (SSRF prevention)", u)
+		}
+	}
+}
+
+func TestValidateBaseURL_AllowsKnownInternalHosts(t *testing.T) {
+	// These are explicitly allowlisted sidecar hostnames.
+	hosts := []string{
+		"http://host.docker.internal:11434",
+		"http://whisper:8000",
+		"http://embed:8090",
+	}
+	for _, u := range hosts {
 		if err := validateBaseURL(u); err != nil {
-			t.Errorf("expected %s to be allowed (LAN backends): %v", u, err)
+			t.Errorf("expected %s to be allowed (known sidecar): %v", u, err)
 		}
 	}
 }
@@ -999,19 +1013,19 @@ func TestValidateBaseURL_BlocksEmptyHost(t *testing.T) {
 	}
 }
 
-func TestSetupBackendTest_AllowsPrivateIP(t *testing.T) {
+func TestSetupBackendTest_BlocksPrivateIP(t *testing.T) {
 	dir := t.TempDir()
 	h := newSetupHandler(t, nil, dir, filepath.Join(dir, "presets"))
 
-	// Private IP is allowed (LAN backends like Ollama). Connection will fail but no SSRF block.
+	// Private IPs are now blocked to prevent SSRF scanning of Docker network.
 	body := `{"type":"custom","base_url":"http://10.0.0.1:8080/v1","api_key":"test-key"}`
 	rec := doSetupPost(t, h, "/api/setup/backend/test", body)
 
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
 	errMsg, _ := resp["error"].(string)
-	if strings.Contains(errMsg, "blocked") {
-		t.Errorf("private IPs should not be blocked, got: %s", errMsg)
+	if !strings.Contains(errMsg, "blocked") {
+		t.Errorf("private IPs should be blocked for SSRF prevention, got: %v", resp)
 	}
 }
 
@@ -1029,7 +1043,7 @@ func TestSetupBackendTest_SSRF_Metadata(t *testing.T) {
 	}
 }
 
-func TestSetupOllamaModels_AllowsPrivateIP(t *testing.T) {
+func TestSetupOllamaModels_BlocksPrivateIP(t *testing.T) {
 	dir := t.TempDir()
 	h := newSetupHandler(t, nil, dir, filepath.Join(dir, "presets"))
 
@@ -1038,7 +1052,7 @@ func TestSetupOllamaModels_AllowsPrivateIP(t *testing.T) {
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
 	errMsg, _ := resp["error"].(string)
-	if strings.Contains(errMsg, "blocked") {
-		t.Errorf("private IPs should not be blocked for Ollama, got: %s", errMsg)
+	if !strings.Contains(errMsg, "blocked") {
+		t.Errorf("private IPs should be blocked for SSRF prevention, got: %v", resp)
 	}
 }

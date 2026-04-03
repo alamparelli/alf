@@ -148,19 +148,38 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func termSafeEnv(homeDir, user string) []string {
 	safePrefixes := []string{
 		"PATH=", "TERM=", "LANG=", "LC_", "TZ=", "TMPDIR=",
-		"XDG_", "OMP_NUM_THREADS=", "ANTHROPIC_", "CLAUDE_",
+		"XDG_", "OMP_NUM_THREADS=",
+	}
+	// Allow specific ANTHROPIC_/CLAUDE_ vars but never tokens or keys.
+	safeExact := map[string]bool{
+		"ANTHROPIC_MODEL":  true,
+		"CLAUDE_CONFIG_DIR": true,
+		"CLAUDE_MODEL":     true,
 	}
 	localBin := homeDir + "/.local/bin"
 	env := make([]string, 0, 16)
 	for _, e := range os.Environ() {
+		// Check prefix-based allowlist.
+		allowed := false
 		for _, prefix := range safePrefixes {
 			if strings.HasPrefix(e, prefix) {
-				if strings.HasPrefix(e, "PATH=") {
-					e = "PATH=" + localBin + ":" + strings.TrimPrefix(e, "PATH=")
-				}
-				env = append(env, e)
+				allowed = true
 				break
 			}
+		}
+		// Check exact var name allowlist (for ANTHROPIC_/CLAUDE_ without leaking tokens).
+		if !allowed {
+			if eqIdx := strings.IndexByte(e, '='); eqIdx > 0 {
+				if safeExact[e[:eqIdx]] {
+					allowed = true
+				}
+			}
+		}
+		if allowed {
+			if strings.HasPrefix(e, "PATH=") {
+				e = "PATH=" + localBin + ":" + strings.TrimPrefix(e, "PATH=")
+			}
+			env = append(env, e)
 		}
 	}
 	env = append(env,

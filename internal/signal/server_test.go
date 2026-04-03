@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,5 +131,80 @@ func TestUnknownAction(t *testing.T) {
 	resp := call(sockPath, Request{Action: "bogus"})
 	if resp.OK {
 		t.Fatal("expected error for unknown action")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Input validation regression tests (#13, #14)
+// ---------------------------------------------------------------------------
+
+func TestOversizedPayload(t *testing.T) {
+	sender := &mockSender{}
+	sockPath, cleanup := setupServer(t, sender)
+	defer cleanup()
+
+	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	// Send 20KB payload (> 16KB limit). Decoder should fail.
+	huge := `{"action":"notify","text":"` + strings.Repeat("x", 20*1024) + `"}`
+	conn.Write([]byte(huge + "\n"))
+
+	var resp Response
+	json.NewDecoder(conn).Decode(&resp)
+	if resp.OK {
+		t.Fatal("expected error for oversized payload")
+	}
+	if resp.Error == "" {
+		t.Fatal("expected error message for oversized payload")
+	}
+}
+
+func TestNotifyAction(t *testing.T) {
+	var notified string
+	sender := &mockSender{}
+	sockPath := filepath.Join(t.TempDir(), "signal.sock")
+	srv := &Server{
+		TG: sender, ChatID: 123, MessageID: 456,
+		Notify: func(text string) { notified = text },
+	}
+
+	ln, err := srv.ListenUnix(sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go srv.Serve(ln)
+	defer func() { ln.Close(); os.Remove(sockPath) }()
+
+	resp := call(sockPath, Request{Action: "notify", Text: "hello"})
+	if !resp.OK {
+		t.Fatalf("expected ok, got: %s", resp.Error)
+	}
+	if notified != "hello" {
+		t.Fatalf("expected 'hello', got %q", notified)
+	}
+}
+
+func TestNotifyMissingText(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "signal.sock")
+	srv := &Server{
+		TG: &mockSender{}, ChatID: 123, MessageID: 456,
+		Notify: func(text string) {},
+	}
+
+	ln, err := srv.ListenUnix(sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go srv.Serve(ln)
+	defer func() { ln.Close(); os.Remove(sockPath) }()
+
+	resp := call(sockPath, Request{Action: "notify"})
+	if resp.OK {
+		t.Fatal("expected error for missing text")
 	}
 }

@@ -254,6 +254,30 @@ The entrypoint runs as root for package installation and permission setup, then 
 - **IP ban** - after repeated auth failures (configurable threshold and duration)
 - **SSRF protection** - vault-proxy blocks requests to private/link-local IP ranges with DNS-level validation
 - **Outbound firewall** - HTTP/HTTPS proxy with allow/deny rules per domain
+- **Container signing** - all Docker images are signed with [Cosign](https://github.com/sigstore/cosign) using keyless signing via GitHub OIDC, with SBOM attestations (SPDX-JSON)
+
+### Verify image signatures
+
+```bash
+# Install cosign
+brew install cosign
+
+# Verify alf image
+cosign verify ghcr.io/alamparelli/alf:<version> \
+  --certificate-identity-regexp="github.com/alamparelli/alf" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+# Verify whisper-service
+cosign verify ghcr.io/alamparelli/whisper-service:<version> \
+  --certificate-identity-regexp="github.com/alamparelli/alf" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+# Verify SBOM attestation
+cosign verify-attestation ghcr.io/alamparelli/alf:<version> \
+  --certificate-identity-regexp="github.com/alamparelli/alf" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  --type spdxjson
+```
 
 ## Requirements
 

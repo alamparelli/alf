@@ -311,6 +311,54 @@ func TestResolveFallbackChain_ThreeWayCycle(t *testing.T) {
 	}
 }
 
+func TestResolveTierParams_SpecificTools(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "limited", Model: "haiku", Enabled: true, Tools: []string{"bash", "grep"}},
+		},
+	}
+	tp, found := ResolveTierParams("limited", tiers, "/data", nil, nil, nil)
+	if !found {
+		t.Fatal("expected to find tier")
+	}
+	if len(tp.Tools) != 2 || tp.Tools[0] != "bash" || tp.Tools[1] != "grep" {
+		t.Errorf("expected [bash grep], got %v", tp.Tools)
+	}
+}
+
+func TestResolveTierParams_WildcardWithoutRegistry(t *testing.T) {
+	// Without a tool registry, wildcard should resolve to empty (no tools discoverable).
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "all", Model: "haiku", Enabled: true, Tools: []string{"*"}},
+		},
+	}
+	tp, found := ResolveTierParams("all", tiers, "/tmp/nonexistent", nil, nil, nil)
+	if !found {
+		t.Fatal("expected to find tier")
+	}
+	// With no registry and no tools.d/ dir, wildcard resolves to nil/empty.
+	if len(tp.Tools) != 0 {
+		t.Errorf("expected empty tools (no registry), got %v", tp.Tools)
+	}
+}
+
+func TestResolveTierParams_NativeWildcardWithoutRegistry(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "native", Model: "haiku", Enabled: true, Tools: []string{"*native"}},
+		},
+	}
+	tp, found := ResolveTierParams("native", tiers, "/data", nil, nil, nil)
+	if !found {
+		t.Fatal("expected to find tier")
+	}
+	// With nil registry, native wildcard resolves to nil.
+	if tp.Tools != nil {
+		t.Errorf("expected nil tools (no registry for native wildcard), got %v", tp.Tools)
+	}
+}
+
 func TestTierHasRead(t *testing.T) {
 	tests := []struct {
 		name string

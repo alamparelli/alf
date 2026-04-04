@@ -220,6 +220,30 @@ func (t Tier) RouterDescription() string {
 	return t.RouterLabel
 }
 
+// ProviderSchema describes a backend provider's form schema for the Add Tier UI.
+// Defined server-side as the single source of truth for provider capabilities and fields.
+type ProviderSchema struct {
+	ID            string          `json:"id"`                       // "openrouter", "ollama", "cli", etc.
+	Name          string          `json:"name"`                     // "OpenRouter"
+	Description   string          `json:"description"`              // "Multi-model gateway"
+	Type          string          `json:"type"`                     // "cli", "api", "local"
+	Configured    bool            `json:"configured"`               // has API key / is registered
+	SupportsTools bool            `json:"supports_tools"`           // provider-level tool calling support
+	Fields        []ProviderField `json:"fields"`                   // config fields for setup
+	DefaultURL    string          `json:"default_url,omitempty"`    // pre-filled base URL
+	Auth          string          `json:"auth,omitempty"`           // "bearer", "none"
+}
+
+// ProviderField describes a single configuration field for a provider.
+type ProviderField struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Placeholder string `json:"placeholder,omitempty"`
+	Type        string `json:"type,omitempty"`       // "text", "password", "url"
+	DefaultVal  string `json:"default_val,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
 // EmbeddingConfig defines the embedding service for semantic memory search.
 type EmbeddingConfig struct {
 	URL   string `json:"url,omitempty"`   // e.g. "http://embed:8090" or vault-proxy URL

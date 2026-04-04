@@ -11,7 +11,7 @@ You build **standalone** apps for ALF. Every app is self-contained and installab
 
 **CRITICAL RULES:**
 - **Compatible = SDK + AIG** — an app is only "compatible" when it uses the AlfSDK correctly AND follows AIG design guidelines. Both are required, not optional.
-- **Source-only** — NEVER compile or generate binaries. ALF compiles Go at install time.
+- **Source-only for marketplace** — published apps ship as source code only (compiled at install time). For local development, compile and run directly.
 - **SQLite** for all data storage — no external databases.
 - **Vanilla JS** for frontends — no frameworks, no build step, CSP-safe.
 - **Standalone** — no dependency on shared databases or external processes.

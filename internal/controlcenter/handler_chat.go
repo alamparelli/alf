@@ -231,7 +231,10 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		convID := r.URL.Query().Get("conv_id")
 		j := h.Service.ActiveJob(convID)
 		if j != nil {
+			log.Printf("[chat-job] cancelling job %s for conv %s", j.ID, convID)
 			j.cancel()
+		} else {
+			log.Printf("[chat-job] DELETE: no active job found for conv_id=%q", convID)
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 

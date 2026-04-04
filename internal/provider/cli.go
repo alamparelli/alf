@@ -319,6 +319,52 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		if event.Type == "stream_event" {
 			evtType = event.Event.Type
 		}
+		// Parse "assistant" messages — Claude CLI emits these with content blocks
+		// for thinking, tool_use, tool_result, and text that aren't in stream_events.
+		if event.Type == "assistant" && onProgress != nil {
+			var assistantMsg struct {
+				Message struct {
+					Content []struct {
+						Type     string          `json:"type"`
+						Text     string          `json:"text"`
+						Thinking string          `json:"thinking"`
+						Name     string          `json:"name"`
+						ID       string          `json:"id"`
+						Input    json.RawMessage `json:"input"`
+					} `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal(lastEvent, &assistantMsg) == nil {
+				for _, block := range assistantMsg.Message.Content {
+					switch block.Type {
+					case "thinking":
+						text := block.Thinking
+						if text == "" {
+							text = block.Text
+						}
+						if text != "" {
+							onProgress(StreamEvent{Type: "thinking"})
+							onProgress(StreamEvent{Type: "thinking", Text: text})
+						}
+					case "tool_use":
+						onProgress(StreamEvent{Type: "tool_use", Detail: block.Name})
+						if block.Input != nil {
+							onProgress(StreamEvent{Type: "tool_input", Detail: block.Name, Text: string(block.Input)})
+						}
+					case "tool_result":
+						resultStr := block.Text
+						if len(resultStr) > 500 {
+							resultStr = resultStr[:500] + "…"
+						}
+						onProgress(StreamEvent{Type: "tool_result", Detail: block.ID, Text: resultStr})
+					case "text":
+						if block.Text != "" {
+							onProgress(StreamEvent{Type: "text_delta", Text: block.Text})
+						}
+					}
+				}
+			}
+		}
 
 		if onProgress != nil {
 			switch {

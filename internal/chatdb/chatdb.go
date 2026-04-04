@@ -415,6 +415,22 @@ func parseTime(s string) time.Time {
 	return time.Time{}
 }
 
+// LatestConversationID returns the ID of the most recently active conversation
+// for a given source (by last message time). Returns empty string if none found.
+func (d *DB) LatestConversationID(source string) string {
+	var id string
+	err := d.db.QueryRow(
+		`SELECT c.id FROM conversations c
+		 JOIN messages m ON m.conv_id = c.id
+		 WHERE c.source = ? AND c.archived = 0
+		 ORDER BY m.created_at DESC LIMIT 1`, source,
+	).Scan(&id)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
 // UpdateConversation updates a conversation's title.
 func (d *DB) UpdateConversation(id, title string) error {
 	_, err := d.db.Exec(

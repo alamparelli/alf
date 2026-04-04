@@ -270,10 +270,14 @@ type schedulerCCNotifier struct {
 }
 
 func (n *schedulerCCNotifier) Notify(text string) {
-	n.db.EnsureConversation("_scheduler", "", "scheduler")
+	convID := n.db.LatestConversationID("cc")
+	if convID == "" {
+		convID = "_system"
+		n.db.EnsureConversation(convID, "", "cc")
+	}
 	n.db.InsertMessage(chatdb.Message{
 		ID:        cc.NewMessageID(),
-		ConvID:    "_scheduler",
+		ConvID:    convID,
 		Role:      "assistant",
 		Text:      text,
 		Source:    "scheduler",

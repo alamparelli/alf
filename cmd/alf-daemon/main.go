@@ -771,10 +771,14 @@ func main() {
 			default:
 				return
 			}
-			chatDB.EnsureConversation("_system", "", "cc")
+			convID := chatDB.LatestConversationID("cc")
+			if convID == "" {
+				convID = "_system"
+				chatDB.EnsureConversation(convID, "", "cc")
+			}
 			chatDB.InsertMessage(chatdb.Message{
 				ID:     cc.NewMessageID(),
-				ConvID: "_system",
+				ConvID: convID,
 				Role:   "system",
 				Text:   text,
 				Source: "cc",

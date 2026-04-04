@@ -168,6 +168,7 @@ func (c *commsTierStore) Snapshot() comms.TiersSnapshot {
 			SystemPrompt:         t.SystemPrompt,
 			RouterLabel:          t.RouterLabel,
 			ContextWeight:        t.EffectiveContextWeight(),
+			Fallback:             t.Fallback,
 		}
 	}
 	return snap

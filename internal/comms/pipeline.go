@@ -683,6 +683,80 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		}
 	}
 
+	// Fallback chain: on any error (except cancellation), try fallback tiers.
+	if err != nil && ctx.Err() == nil {
+		tiers := e.TierStore.Snapshot()
+		fallbackChain := ResolveFallbackChain(route.Tier, tiers)
+		for _, fbName := range fallbackChain {
+			log.Printf("[comms] tier %q failed (%v), trying fallback → %q", route.Tier, err, fbName)
+			e.emit(channelID, OutEvent{Type: "system", Data: map[string]string{
+				"text":  fmt.Sprintf("Tier %q failed, trying fallback %q…", route.Tier, fbName),
+				"level": "warn",
+			}})
+
+			fbTP, found := ResolveTierParams(fbName, tiers, e.DataDir, e.ToolRegistry, e.Registry, e.ResolveModel)
+			if !found {
+				continue
+			}
+
+			fbProv := e.Registry.ForBackend(fbTP.Backend)
+			fbIsAPI := fbTP.Backend != "" && fbTP.Backend != "cli"
+
+			// Wrap API provider with tool loop if needed.
+			if fbIsAPI && e.ToolRegistry != nil && e.ToolExecutor != nil && len(fbTP.Tools) > 0 {
+				e.ToolRegistry.Rescan()
+				if apiProv, ok := fbProv.(*provider.APIProvider); ok {
+					schemas := e.ToolRegistry.ForToolsStrict(fbTP.Tools)
+					if len(schemas) > 0 {
+						var tools []map[string]any
+						if apiProv.IsDirectOpenAI() {
+							tools = tooling.ToOpenAI(schemas)
+						} else {
+							tools = tooling.ToOpenAICompat(schemas)
+						}
+						maxT := fbTP.MaxTurns
+						if maxT <= 0 {
+							maxT = 10
+						}
+						fbProv = provider.NewToolLoop(apiProv, &toolExecAdapter{exec: e.ToolExecutor}, tools, maxT)
+					}
+				}
+			}
+
+			fbParams := provider.Params{
+				Model:         fbTP.Model,
+				Tools:         fbTP.Tools,
+				WriteCapable:  fbTP.WriteCapable,
+				Effort:        fbTP.Effort,
+				MaxTurns:      fbTP.MaxTurns,
+				SystemPrompts: params.SystemPrompts,
+				DataDir:       e.DataDir,
+				Env:           params.Env,
+				ConvMessages:  params.ConvMessages,
+			}
+
+			if acc != nil {
+				acc = conversation.NewAccumulator()
+				progressFn = acc.OnProgress(rawOnProgress)
+			}
+
+			result, err = fbProv.Invoke(ctx, prompt, fbParams, progressFn)
+			if err == nil {
+				log.Printf("[comms] fallback tier %q succeeded", fbName)
+				route.Tier = fbName
+				route.Reason += fmt.Sprintf(" [fallback: %s]", fbName)
+				tp = fbTP
+				prov = fbProv
+				isAPITier = fbIsAPI
+				e.emit(channelID, OutEvent{Type: "routed", Data: map[string]string{
+					"tier": fbName, "model": fbTP.Model,
+				}})
+				break
+			}
+			log.Printf("[comms] fallback tier %q also failed: %v", fbName, err)
+		}
+	}
+
 	if err != nil {
 		errMsg := err.Error()
 		notice := classifyProviderError(errMsg, ctx.Err())

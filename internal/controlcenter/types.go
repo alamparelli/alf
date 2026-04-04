@@ -199,6 +199,7 @@ type Tier struct {
 	Backend        string   `json:"backend,omitempty"`        // "cli" (default), or registered backend name
 	SystemPrompt   string   `json:"system_prompt,omitempty"`  // extra system prompt prepended for this tier
 	ContextWeight  string   `json:"context_weight,omitempty"` // "light", "standard", "full" (default)
+	Fallback       string   `json:"fallback,omitempty"`       // tier name to try on failure (forms a chain)
 }
 
 // EffectiveContextWeight returns the tier's context weight, defaulting to "full".

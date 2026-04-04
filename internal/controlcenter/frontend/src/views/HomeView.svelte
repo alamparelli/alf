@@ -412,7 +412,7 @@
   })
 </script>
 
-<div class="ws-root" ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="main">
+<div class="file-browser" ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="main">
   {#if dragOver}
     <div class="drag-overlay">
       <Upload size={48} />
@@ -421,9 +421,9 @@
   {/if}
 
   <!-- Header bar -->
-  <div class="ws-header">
-    <span class="ws-title">Files</span>
-    <div class="ws-toolbar">
+  <div class="file-browser-header">
+    <span class="title">Files</span>
+    <div class="toolbar">
       <button class="btn btn-sm" onclick={() => openCreateDialog('file')} title="New file"><FilePlus size={15} /></button>
       <button class="btn btn-sm" onclick={() => openCreateDialog('dir')} title="New folder"><FolderPlus size={15} /></button>
       <button class="btn btn-sm" onclick={() => { showUploadModal = true }} title="Upload"><Upload size={15} /></button>
@@ -431,12 +431,12 @@
     </div>
   </div>
 
-  <div class="ws-layout">
+  <div class="file-browser-layout">
     <!-- Left sidebar: folder tree -->
-    <div class="ws-sidebar">
+    <div class="file-browser-sidebar">
       <div class="sidebar-tree">
         <div
-          class="sidebar-item root-item"
+          class="sidebar-item root"
           class:active={currentPath === ''}
           onclick={() => navigateToDir('')}
           role="button"
@@ -484,19 +484,19 @@
     </div>
 
     <!-- Right panel: file list -->
-    <div class="ws-main">
+    <div class="file-browser-main">
       <!-- Breadcrumbs -->
       <div class="breadcrumb">
-        <button class="breadcrumb-item" onclick={() => navigateToDir('')}>data</button>
+        <button class="breadcrumb-btn" onclick={() => navigateToDir('')}>data</button>
         {#each breadcrumbs() as crumb}
           <span class="breadcrumb-sep">&rsaquo;</span>
-          <button class="breadcrumb-item" onclick={() => navigateToDir(crumb.path)}>{crumb.name}</button>
+          <button class="breadcrumb-btn" onclick={() => navigateToDir(crumb.path)}>{crumb.name}</button>
         {/each}
       </div>
 
       <!-- File table -->
       {#if loadingDir}
-        <div class="ws-loading"><Loader2 size={20} class="spin" /> Loading...</div>
+        <div class="file-browser-loading"><Loader2 size={20} class="spin" /> Loading...</div>
       {:else}
         <table class="data-table">
           <thead>
@@ -749,348 +749,3 @@
   </div>
 </Modal>
 
-<style>
-  .ws-root {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-    overflow: hidden;
-  }
-
-  /* Header */
-  .ws-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  .ws-title {
-    font-size: var(--font-md, 15px);
-    font-weight: 600;
-  }
-
-  .ws-toolbar {
-    display: flex;
-    gap: 4px;
-  }
-
-  /* Two-column layout */
-  .ws-layout {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  /* Sidebar */
-  .ws-sidebar {
-    width: 220px;
-    min-width: 180px;
-    border-right: 1px solid var(--border);
-    overflow-y: auto;
-    padding: 8px 0;
-    flex-shrink: 0;
-  }
-
-  .sidebar-tree {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .sidebar-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    font-size: var(--font-sm, 13px);
-    cursor: pointer;
-    user-select: none;
-    border-radius: 0;
-    transition: background 0.1s;
-  }
-
-  .sidebar-item:hover { background: var(--bg-input); }
-  .sidebar-item.active { background: var(--accent); color: var(--on-accent); }
-  .sidebar-item.active :global(svg) { color: var(--on-accent); }
-
-  .root-item { padding-left: 12px; font-weight: 500; }
-
-  .expand-btn {
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    color: inherit;
-    display: flex;
-    align-items: center;
-  }
-
-  /* Main panel */
-  .ws-main {
-    flex: 1;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  .breadcrumb {
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  .breadcrumb-item {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-family: inherit;
-    font-size: var(--font-sm, 13px);
-    padding: 2px 4px;
-    border-radius: 4px;
-  }
-
-  .breadcrumb-item:hover { background: var(--bg-input); color: var(--text); }
-
-  .ws-loading {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 24px;
-    color: var(--text-dim);
-    font-size: var(--font-sm, 13px);
-  }
-
-  /* File table overrides */
-  .data-table { table-layout: fixed; }
-  .data-table thead { position: sticky; top: 0; z-index: 1; }
-  .data-table th { background: var(--bg); }
-
-  .col-name { width: auto; }
-  .col-size { width: 90px; }
-  .col-date { width: 120px; }
-
-  .file-row {
-    cursor: pointer;
-    transition: background 0.1s;
-  }
-
-  .file-row:hover { background: var(--bg-input); }
-
-  .file-row td {
-    padding: 7px 16px;
-    font-size: var(--font-sm, 13px);
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
-  }
-
-  .back-row td { color: var(--accent); }
-
-  .cell-name {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-
-  .cell-name span {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .file-thumb {
-    width: 20px;
-    height: 20px;
-    object-fit: cover;
-    border-radius: 3px;
-    flex-shrink: 0;
-  }
-
-  .media-preview {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    padding: 16px;
-  }
-  .media-preview img {
-    max-width: 100%;
-    max-height: 60vh;
-    border-radius: 6px;
-  }
-  .media-preview video {
-    max-width: 100%;
-    max-height: 60vh;
-    border-radius: 6px;
-  }
-  .media-preview audio {
-    width: 100%;
-    max-width: 400px;
-  }
-
-  .cell-size, .cell-date {
-    font-size: var(--font-sm, 13px);
-    color: var(--text-dim);
-  }
-
-  :global(.icon-folder) { color: var(--accent); }
-  :global(.icon-file) { color: var(--text-dim); }
-
-  .empty-msg {
-    text-align: center;
-    color: var(--text-dim);
-    padding: 24px !important;
-  }
-
-  /* Context menu - override dropdown-menu for fixed positioning */
-  .dropdown-menu {
-    position: fixed;
-    display: block;
-    top: auto;
-    right: auto;
-    z-index: 1000;
-  }
-
-  /* Drag overlay */
-  .drag-overlay {
-    position: absolute;
-    inset: 0;
-    background: color-mix(in srgb, var(--sapphire) 10%, transparent);
-    border: 2px dashed var(--accent);
-    border-radius: var(--radius, 8px);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-    color: var(--accent);
-    gap: 8px;
-  }
-
-  /* Buttons - uses .btn/.btn-sm/.btn-primary from alf-ui.css */
-
-  /* File modal */
-  .modal-file-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-
-  .modal-file-header h3 {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0;
-  }
-
-  .modal-file-actions {
-    display: flex;
-    gap: 6px;
-  }
-
-  .file-meta {
-    display: flex;
-    gap: 8px;
-    font-size: var(--font-xs, 11px);
-    color: var(--text-dim);
-    margin-bottom: 10px;
-  }
-
-  .modal-file-body {
-    max-height: 70vh;
-    overflow-y: auto;
-  }
-
-  .file-editor {
-    width: 100%;
-    resize: vertical;
-    min-height: 300px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: var(--font-sm, 13px);
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-card);
-    color: var(--text);
-  }
-
-  .file-content {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: var(--font-sm, 13px);
-    line-height: 1.5;
-    padding: 8px 12px;
-    background: var(--bg-input);
-    border-radius: 6px;
-    overflow-x: auto;
-  }
-
-  /* JSON */
-  .json-viewer {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: var(--font-sm, 13px);
-    line-height: 1.6;
-    padding: 8px 12px;
-    background: var(--bg-input);
-    border-radius: 6px;
-    max-height: 60vh;
-    overflow-y: auto;
-  }
-
-  .json-toggle { cursor: pointer; color: var(--accent); }
-  .json-type { color: var(--text-dim); font-size: var(--font-xs, 11px); }
-  .json-key { color: var(--blue, #3b82f6); }
-  .json-str { color: var(--green, #3d8b3d); }
-  .json-num { color: var(--yellow, #eab308); }
-  .json-bool { color: var(--accent); }
-  .json-null { color: var(--text-dim); font-style: italic; }
-  .json-children { border-left: 1px solid var(--border); padding-left: 8px; }
-  .json-entry { padding: 1px 0; }
-
-  /* JSONL */
-  .jsonl-viewer { max-height: 60vh; overflow-y: auto; }
-  .jsonl-line { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
-  .jsonl-num { color: var(--text-dim); font-size: var(--font-xs, 11px); width: 30px; text-align: right; flex-shrink: 0; }
-  .jsonl-content { font-family: 'JetBrains Mono', monospace; font-size: var(--font-sm, 13px); white-space: pre-wrap; word-break: break-word; flex: 1; }
-
-  /* CSV */
-  .csv-wrap { max-height: 60vh; overflow: auto; }
-  .csv-table { width: 100%; border-collapse: collapse; font-size: var(--font-sm, 13px); }
-  .csv-table th, .csv-table td { padding: 4px 8px; border: 1px solid var(--border); text-align: left; }
-  .csv-table th { background: var(--bg-input); font-weight: 500; position: sticky; top: 0; }
-
-  /* Markdown */
-  :global(.markdown-body) { font-size: var(--font-sm, 13px); line-height: 1.7; color: var(--text); overflow-wrap: break-word; }
-  :global(.markdown-body h1), :global(.markdown-body h2), :global(.markdown-body h3) { margin: 1em 0 0.5em; }
-  :global(.markdown-body h1) { font-size: var(--font-xl, 24px); border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
-  :global(.markdown-body h2) { font-size: var(--font-lg, 18px); }
-  :global(.markdown-body h3) { font-size: var(--font-md, 15px); }
-  :global(.markdown-body p) { margin: 0.5em 0; }
-  :global(.markdown-body pre) { background: var(--bg-input); padding: 12px; border-radius: 6px; overflow-x: auto; }
-  :global(.markdown-body code) { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }
-  :global(.markdown-body :not(pre) > code) { background: var(--bg-input); padding: 2px 5px; border-radius: 3px; }
-  :global(.markdown-body ul), :global(.markdown-body ol) { padding-left: 1.5em; margin: 0.5em 0; }
-  :global(.markdown-body blockquote) { border-left: 3px solid var(--border); padding-left: 1em; color: var(--text-dim); margin: 0.5em 0; }
-  :global(.markdown-body table) { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
-  :global(.markdown-body th), :global(.markdown-body td) { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: var(--font-sm, 13px); }
-  :global(.markdown-body img) { max-width: 100%; border-radius: 6px; }
-  :global(.markdown-body a) { color: var(--accent); }
-
-  /* Form */
-  .dim { color: var(--text-dim); font-size: var(--font-sm, 13px); }
-  .modal-form { margin-top: 12px; }
-  .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
-
-  @media (max-width: 768px) {
-    .ws-sidebar { display: none; }
-    .col-date { display: none; }
-  }
-</style>

@@ -60,7 +60,7 @@ Read the relevant reference file for templates, patterns, and API details:
 | File | Read when |
 |---|---|
 | `reference/AIG.md` | **ALWAYS read first** — design rules, tokens, colors, spacing, Do/Don't |
-| `reference/AIG-COMPONENTS.md` | Need HTML markup for a specific component or layout |
+| `reference/AIG-COMPONENTS.md` | **TOC** — find the component you need, then read its file from `reference/components/<name>.md` |
 | `reference/FRONTEND.md` | Any app with a web UI (AlfSDK init, theme, CSS vars, template) |
 | `reference/CLI-TOOL.md` | Building a CLI tool app (appsdk, manifest, go source) |
 | `reference/REST-SERVER.md` | Building a REST server app (service.json, Go/Python server) |

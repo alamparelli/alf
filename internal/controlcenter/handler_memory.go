@@ -213,7 +213,6 @@ Rules: self-contained items, concise, skip trivial info.`, instruction, content)
 		Model:    "claude-haiku-4-5",
 		MaxTurns: 3,
 		Tools:    []string{""}, // no tools by default
-		Bare:     true,         // skip CLAUDE.md, hooks, plugins — pure JSON extraction
 	}
 	if tier := h.resolveTier(tierName); tier != nil {
 		if tier.Model != "" {

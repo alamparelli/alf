@@ -114,7 +114,6 @@ func (a *extractorAdapter) invokeCLI(ctx context.Context, prompt, model string, 
 		MaxTurns: params.MaxTurns,
 		DataDir:  params.DataDir,
 		Tools:    []string{""}, // explicit empty to disable all tools
-		Bare:     true,         // skip CLAUDE.md, hooks, LSP, plugins — pure JSON extraction
 	}, nil)
 	if err != nil {
 		return "", err

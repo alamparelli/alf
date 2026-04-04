@@ -47,8 +47,11 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
   // ══ REQUIRED: Theme sync — keeps app in sync with CC theme changes ══
   AlfSDK.init({
     slug: 'my-app',
-    onThemeChange: function(palette) {
+    onThemeChange: function(palette, isDark) {
+      // Option A: palette CSS files (recommended)
       document.getElementById('alf-theme').href = '/static/theme-' + palette + '.css';
+      // Option B: if using [data-theme="dark"] CSS instead of palette files
+      // document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
     }
   });
 
@@ -99,9 +102,11 @@ Every app **MUST** include these 3 elements for theme consistency:
 
 1. **`<link id="alf-theme">`** — loads the initial palette CSS (default: `theme-sage.css`)
 2. **`<script src="/static/theme-init.js">`** — reads `localStorage('alf-palette')` and swaps to the user's palette before first paint
-3. **`onThemeChange` in `AlfSDK.init()`** — fires when user switches theme in CC Settings, updates the CSS link live
+3. **`onThemeChange(palette, isDark)` in `AlfSDK.init()`** — fires when user switches theme in CC Settings. `palette` is the color palette name (e.g. 'sage', 'rose'), `isDark` is a boolean. Update the CSS link and/or `data-theme` attribute.
 
 Without `onThemeChange`, the app stays on its initial palette when the user switches themes. This is the #1 cause of apps looking "out of sync".
+
+**Common mistake**: using `onThemeChange(theme)` with 1 arg — the callback receives 2 args `(palette, isDark)`. If your app uses `[data-theme="dark"]` CSS, you MUST use `isDark` to set `data-theme`.
 
 ---
 
@@ -262,7 +267,7 @@ Layout-agnostic tokens for spacing, typography, and shadows. Use these instead o
 3. **Always include `onThemeChange`** to sync theme from parent SPA
 4. **Set `font-family` explicitly** -- `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. Google Fonts are blocked by CSP in iframes.
 5. **Load `/static/style.css`** + `/static/theme-*.css` + `/static/theme-init.js`
-6. **No external scripts/stylesheets** -- CSP blocks them. `alf-ui.css` is auto-injected.
+6. **No external scripts/stylesheets** -- CSP `style-src 'self'` blocks them. `alf-ui.css` is auto-injected. **Never use absolute URLs** (even to the CC domain like `https://cc.example.com/static/...`) — they fail in the iframe CSP. Use relative paths only: `/static/alf-ui.css`.
 7. **No `unsafe-eval`** -- no Vue, Angular, Petite Vue
 8. **Inline `<style>` only** -- no external CSS files you create. Minimize inline styles — prefer `alf-ui.css` classes.
 9. **Lucide SVG icons** -- inline SVG from lucide.dev. No icon fonts. No emoji as icons (unless user asks).
@@ -277,7 +282,7 @@ Layout-agnostic tokens for spacing, typography, and shadows. Use these instead o
 ```js
 AlfSDK.init({
   slug: 'my-app',
-  onThemeChange: function(palette) { /* theme switched */ },
+  onThemeChange: function(palette, isDark) { /* theme switched — palette='sage'|'rose'|..., isDark=bool */ },
   onVisible: function() { /* tab/app became visible — resume polling, animations */ },
   onHidden: function() { /* tab/app hidden — pause work, save state */ },
   onDestroy: function() { /* app being torn down — cleanup */ }

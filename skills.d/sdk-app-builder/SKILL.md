@@ -88,7 +88,9 @@ Read the relevant reference file for templates, patterns, and API details:
 ## Final checklist (MANDATORY — run before telling the user "it's ready")
 
 **Compatibility (SDK + AIG — both required):**
-- [ ] AlfSDK initialized with `onThemeChange` callback
+- [ ] AlfSDK initialized with `onThemeChange(palette, isDark)` callback (2 args, not 1)
+- [ ] `onThemeChange` updates both palette CSS and dark/light mode (`data-theme` or theme CSS)
+- [ ] No absolute URLs to CC domain — use `/static/...` relative paths only
 - [ ] All UI uses `alf-ui.css` classes — no custom CSS for standard components
 - [ ] CSS variables only, `--space-*` tokens, no inline style overrides
 

@@ -329,14 +329,16 @@ AlfSDK.sheet(
   '<div class="form-group">' +
     '<label class="form-label">Field</label>' +
     '<input class="input" name="field" placeholder="...">' +
-  '</div>',
-  [
-    { label: 'Cancel', callback: function() { AlfSDK.closeSheet(); } },
-    { label: 'Save', style: 'background:var(--accent);color:var(--on-accent)', callback: function(p) {
+  '</div>' +
+  '<button data-action="cancel" class="btn">Cancel</button> ' +
+  '<button data-action="save" class="btn btn-primary">Save</button>',
+  {
+    cancel: function() { AlfSDK.closeSheet(); },
+    save: function(p) {
       save(p.field);
       AlfSDK.closeSheet();
-    }}
-  ]
+    }
+  }
 );
 ```
 

@@ -79,52 +79,74 @@
 .mt-lg { margin-top: var(--space-lg, 24px); }
 
 /* ── Buttons ───────────────────────────────────────────────────────────── */
+/* v2: bordered with subtle shadow, focus ring                            */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   padding: 8px 16px;
-  border: none;
+  border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
-  background: var(--bg-input);
+  background: var(--bg-card);
   color: var(--text);
   font-family: inherit;
   font-size: var(--font-sm, 13px);
   font-weight: 500;
   cursor: pointer;
   text-decoration: none;
-  transition: background 0.15s, opacity 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
   line-height: 1.4;
   -webkit-tap-highlight-color: transparent;
   min-height: 36px;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
 }
-.btn:hover { background: var(--border); }
-.btn:active { opacity: 0.85; }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:hover { background: var(--bg-input); }
+.btn:focus-visible { outline: none; box-shadow: var(--ring, 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent)); }
+.btn:active { opacity: 0.9; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 
 .btn-primary {
   background: var(--accent);
   color: var(--on-accent);
+  border-color: var(--accent);
 }
-.btn-primary:hover { opacity: 0.9; background: var(--accent); }
+.btn-primary:hover { opacity: 0.9; }
 
 .btn-danger {
   background: var(--red);
   color: #fff;
+  border-color: var(--red);
 }
-.btn-danger:hover { opacity: 0.9; background: var(--red); }
+.btn-danger:hover { opacity: 0.9; }
 
 .btn-success {
   background: var(--green);
   color: #fff;
+  border-color: var(--green);
 }
-.btn-success:hover { opacity: 0.9; background: var(--green); }
+.btn-success:hover { opacity: 0.9; }
 
 .btn-ghost {
   background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 .btn-ghost:hover { background: var(--bg-input); }
+
+.btn-outline {
+  background: transparent;
+  box-shadow: none;
+}
+.btn-outline:hover { background: var(--bg-input); }
+
+.btn-outline-danger {
+  background: transparent;
+  border-color: var(--red);
+  color: var(--red);
+  box-shadow: none;
+}
+.btn-outline-danger:hover { background: color-mix(in srgb, var(--red) 8%, var(--bg)); }
 
 .btn-sm {
   padding: 4px 10px;
@@ -133,24 +155,26 @@
 }
 
 .btn-lg {
-  padding: 12px 24px;
+  padding: 10px 20px;
   font-size: var(--font-md, 15px);
   min-height: 44px;
 }
 
 .btn-icon {
-  padding: 6px;
-  border: none;
-  background: none;
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-dim);
   cursor: pointer;
   border-radius: var(--radius, 8px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
-  min-width: 36px;
-  transition: color 0.15s, background 0.15s;
+  transition: all 0.15s;
+  box-shadow: none;
 }
 .btn-icon:hover { color: var(--text); background: var(--bg-input); }
 
@@ -158,6 +182,7 @@
 .btn-icon-accent {
   width: 40px;
   height: 40px;
+  min-height: 40px;
   border: none;
   border-radius: var(--radius, 8px);
   background: var(--accent);
@@ -168,6 +193,7 @@
   justify-content: center;
   flex-shrink: 0;
   transition: opacity 0.15s;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
 }
 .btn-icon-accent:hover { opacity: 0.85; }
 
@@ -177,19 +203,22 @@
 .btn.active {
   background: var(--accent);
   color: var(--on-accent);
+  border-color: var(--accent);
 }
 
-/* Button group */
+/* Button group — connected buttons with shared borders */
 .btn-group {
-  display: flex;
-  gap: var(--space-sm, 8px);
-  flex-wrap: wrap;
+  display: inline-flex;
 }
+.btn-group .btn { border-radius: 0; margin-left: -1px; }
+.btn-group .btn:first-child { border-radius: var(--radius, 8px) 0 0 var(--radius, 8px); margin-left: 0; }
+.btn-group .btn:last-child { border-radius: 0 var(--radius, 8px) var(--radius, 8px) 0; }
 
 /* ── Cards ─────────────────────────────────────────────────────────────── */
-/* Borderless — bg-card surface stands out from bg via contrast alone.    */
+/* v2: bordered surfaces with subtle shadow.                              */
 .card {
   background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   padding: var(--space-md, 16px);
 }
@@ -198,22 +227,23 @@
 
 .card-interactive {
   background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   padding: var(--space-md, 16px);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.card-interactive:hover { background: var(--bg-input); }
+.card-interactive:hover { border-color: var(--text-dim); box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05)); }
 
-/* Card group — continuous surface with light internal separators.        */
-/* Wrap list-items or custom rows. No outer border.                       */
+/* Card group — bordered surface with internal separators.                */
 .card-group {
   background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   overflow: hidden;
 }
 .card-group > *:not(:last-child) {
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  border-bottom: 1px solid var(--border);
 }
 
 /* ── Form elements ─────────────────────────────────────────────────────── */
@@ -222,20 +252,21 @@
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
-  background: var(--bg-card);
+  background: transparent;
   color: var(--text);
   font-family: inherit;
   font-size: var(--font-sm, 13px);
   line-height: 1.4;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
+.input:hover, .select:hover, .textarea:hover { border-color: var(--text-dim); }
 .input:focus, .select:focus, .textarea:focus {
   border-color: var(--accent);
+  box-shadow: var(--ring, 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent));
 }
 .input::placeholder, .textarea::placeholder {
   color: var(--text-dim);
-  opacity: 0.6;
 }
 
 .textarea {
@@ -317,23 +348,27 @@
 .list-item-interactive:hover { background: var(--bg-input); }
 
 /* ── Tags / badges ─────────────────────────────────────────────────────── */
-/* Translucent tinted backgrounds — text carries the color.               */
+/* v2: pill shape with border + tinted backgrounds.                       */
 .tag {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   padding: 2px 8px;
   font-size: var(--font-xs, 11px);
-  border-radius: 4px;
-  background: var(--bg-input);
+  font-weight: 500;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
   color: var(--text-dim);
 }
 
-.tag-accent   { background: color-mix(in srgb, var(--accent) 15%, var(--bg)); color: var(--accent); }
-.tag-success  { background: color-mix(in srgb, var(--green) 15%, var(--bg)); color: var(--green); }
-.tag-danger   { background: color-mix(in srgb, var(--red) 15%, var(--bg)); color: var(--red); }
-.tag-warning  { background: color-mix(in srgb, var(--yellow) 15%, var(--bg)); color: var(--yellow); }
-.tag-mauve    { background: color-mix(in srgb, var(--mauve) 15%, var(--bg)); color: var(--mauve); }
-.tag-sapphire { background: color-mix(in srgb, var(--sapphire) 15%, var(--bg)); color: var(--sapphire); }
+.tag-accent   { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); border-color: color-mix(in srgb, var(--accent) 20%, var(--border)); color: var(--text); }
+.tag-success  { background: color-mix(in srgb, var(--green) 10%, var(--bg)); border-color: color-mix(in srgb, var(--green) 25%, var(--border)); color: var(--green); }
+.tag-danger   { background: color-mix(in srgb, var(--red) 10%, var(--bg)); border-color: color-mix(in srgb, var(--red) 25%, var(--border)); color: var(--red); }
+.tag-warning  { background: color-mix(in srgb, var(--yellow) 10%, var(--bg)); border-color: color-mix(in srgb, var(--yellow) 25%, var(--border)); color: var(--yellow); }
+.tag-mauve    { background: color-mix(in srgb, var(--mauve) 10%, var(--bg)); border-color: color-mix(in srgb, var(--mauve) 25%, var(--border)); color: var(--mauve); }
+.tag-sapphire { background: color-mix(in srgb, var(--sapphire) 10%, var(--bg)); border-color: color-mix(in srgb, var(--sapphire) 25%, var(--border)); color: var(--sapphire); }
+.tag-outline  { background: transparent; }
 
 .count-badge {
   display: inline-flex;
@@ -363,29 +398,32 @@
 .dot-accent  { background: var(--accent); }
 
 /* ── Alerts / status messages ──────────────────────────────────────────── */
-/* Borderless — tinted background carries the semantic color.             */
+/* v2: bordered with tinted backgrounds.                                  */
 .alert {
   padding: var(--space-sm, 8px) var(--space-md, 16px);
   border-radius: var(--radius, 8px);
   font-size: var(--font-sm, 13px);
-  border: none;
+  border: 1px solid var(--border);
   background: var(--bg-card);
+  display: flex;
+  gap: var(--space-sm, 8px);
+  align-items: flex-start;
 }
 .alert-success {
-  background: color-mix(in srgb, var(--green) 12%, var(--bg));
-  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 30%, var(--border));
+  background: color-mix(in srgb, var(--green) 5%, var(--bg));
 }
 .alert-danger {
-  background: color-mix(in srgb, var(--red) 12%, var(--bg));
-  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 30%, var(--border));
+  background: color-mix(in srgb, var(--red) 5%, var(--bg));
 }
 .alert-warning {
-  background: color-mix(in srgb, var(--yellow) 12%, var(--bg));
-  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 30%, var(--border));
+  background: color-mix(in srgb, var(--yellow) 5%, var(--bg));
 }
 .alert-info {
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
-  color: var(--text-dim);
+  border-color: color-mix(in srgb, var(--sapphire, var(--accent)) 30%, var(--border));
+  background: color-mix(in srgb, var(--sapphire, var(--accent)) 5%, var(--bg));
 }
 
 /* ── Empty state ───────────────────────────────────────────────────────── */
@@ -516,12 +554,13 @@
   height: 0;
 }
 .toggle-track {
-  width: 36px;
-  height: 20px;
-  background: var(--border);
-  border-radius: 10px;
+  width: 40px;
+  height: 22px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 11px;
   position: relative;
-  transition: background 0.2s;
+  transition: all 0.2s;
   flex-shrink: 0;
 }
 .toggle-track::after {
@@ -534,12 +573,15 @@
   background: var(--bg-card, #fff);
   border-radius: 50%;
   transition: transform 0.2s;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
 }
 .toggle input:checked + .toggle-track {
   background: var(--accent);
+  border-color: var(--accent);
 }
 .toggle input:checked + .toggle-track::after {
-  transform: translateX(16px);
+  transform: translateX(18px);
+  background: var(--on-accent);
 }
 .toggle.disabled {
   opacity: 0.4;
@@ -562,11 +604,11 @@
   gap: 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
-  padding: 4px 10px;
-  background: var(--bg-card);
-  transition: border-color 0.15s;
+  padding: 6px 10px;
+  background: transparent;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.search-box:focus-within { border-color: var(--accent); }
+.search-box:focus-within { border-color: var(--accent); box-shadow: var(--ring, 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent)); }
 .search-box input {
   border: none;
   background: none;
@@ -581,18 +623,18 @@
 /* ── Filter tabs (segmented control) ──────────────────────────────────── */
 /* iOS-style segmented control. Active tab is elevated with bg-card.      */
 .filter-tabs {
-  display: flex;
-  gap: 2px;
+  display: inline-flex;
+  gap: 0;
   background: var(--bg-input);
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
   padding: 2px;
-  width: fit-content;
   margin-bottom: var(--space-md, 16px);
 }
 .tab {
   padding: 5px 14px;
   border: none;
-  border-radius: 5px;
+  border-radius: calc(var(--radius, 8px) - 2px);
   background: transparent;
   color: var(--text-dim);
   font-family: inherit;
@@ -605,7 +647,7 @@
 .tab.active {
   background: var(--bg-card);
   color: var(--text);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
 }
 
 /* ── Tab bar (underline navigation) ──────────────────────────────────── */
@@ -698,21 +740,20 @@
 }
 .input-row .input { flex: 1; }
 
-/* ── Custom checkbox (circle) ─────────────────────────────────────────── */
-/* Use instead of native checkboxes or emoji. 20px circle, accent fill.   */
-/* Always has 12px right margin so text never touches the circle.          */
+/* ── Custom checkbox (square, shadcn-style) ───────────────────────────── */
 .check {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border);
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
   flex-shrink: 0;
   cursor: pointer;
   transition: all 0.15s;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 12px;
+  margin-right: 8px;
+  background: transparent;
 }
 .check:hover { border-color: var(--accent); }
 .check.checked {
@@ -721,10 +762,10 @@
 }
 .check.checked::after {
   content: '';
-  width: 6px;
-  height: 10px;
+  width: 4px;
+  height: 8px;
   border: solid var(--on-accent);
-  border-width: 0 2px 2px 0;
+  border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg) translateY(-1px);
 }
 
@@ -1475,6 +1516,39 @@ a:hover { text-decoration: underline; }
   color: var(--text-dim);
   font-size: var(--font-sm, 13px);
 }
+.page-info {
+  font-size: var(--font-xs, 11px);
+  color: var(--text-dim);
+}
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.page-size {
+  display: flex;
+  gap: 2px;
+}
+.page-size-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  padding: 2px 8px;
+  font-size: var(--font-xs, 11px);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.page-size-btn.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0 0;
+  gap: 12px;
+}
 
 /* ── Slider ───────────────────────────────────────────────────────────── */
 /* Styled range input.                                                     */
@@ -1769,6 +1843,274 @@ a:hover { text-decoration: underline; }
   display: none;
 }
 .popover:focus-within .popover-content { display: block; }
+
+/* ── View layout ──────────────────────────────────────────────────────── */
+/* Wrapper for CC views (Firewall, Schedules, etc.)                       */
+.view { padding: 8px 0; width: 100%; }
+.view h2 { margin-bottom: 16px; }
+
+/* ── Section header ──────────────────────────────────────────────────── */
+/* Flex row with title + actions, used inside cards.                      */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+.section-header h3 { font-size: var(--font-md, 15px); margin: 0; }
+
+/* ── Filter bar ──────────────────────────────────────────────────────── */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.filter-bar .input { flex: 1; }
+.filter-count {
+  font-size: var(--font-xs, 11px);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* ── Row list ────────────────────────────────────────────────────────── */
+/* Vertical list of items with consistent spacing.                        */
+.row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border-radius: var(--radius, 8px);
+}
+
+/* ── Icon buttons (tiny, inline) ─────────────────────────────────────── */
+.btn-icon-xs {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+.btn-icon-xs:hover { color: var(--text); }
+.btn-icon-xs.hover-success:hover { color: var(--green); }
+.btn-icon-xs.hover-danger:hover { color: var(--red); }
+
+/* ── Kill switch / danger toggle ─────────────────────────────────────── */
+.btn-danger-toggle {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius, 8px);
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: var(--font-sm, 13px);
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-danger-toggle:hover {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+}
+.btn-danger-toggle.active {
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+  color: var(--red);
+}
+
+/* ── Source / method / status inline badges ───────────────────────────── */
+.badge-inline {
+  font-size: var(--font-xs, 11px);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.badge-inline-accent { color: var(--accent); }
+.badge-inline-success { color: var(--green); }
+.badge-inline-danger {
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+  color: var(--red);
+}
+.badge-inline-mauve {
+  background: color-mix(in srgb, var(--mauve) 15%, transparent);
+  color: var(--mauve);
+  text-transform: uppercase;
+}
+.badge-inline-sapphire {
+  background: color-mix(in srgb, var(--sapphire) 15%, transparent);
+  color: var(--sapphire);
+  text-transform: uppercase;
+}
+.badge-inline-dim {
+  background: color-mix(in srgb, var(--text-dim) 15%, transparent);
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+/* ── Table wrapper ───────────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; }
+.data-table .sortable { cursor: pointer; user-select: none; }
+.data-table .sortable:hover { color: var(--text); }
+.data-table tr.row-danger { background: color-mix(in srgb, var(--red) 5%, transparent); }
+
+/* ── Empty / muted text ──────────────────────────────────────────────── */
+.empty-sm {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: var(--font-sm, 13px);
+  padding: 1rem;
+}
+.muted {
+  color: var(--text-dim);
+  font-size: var(--font-xs, 11px);
+}
+
+/* ── Modal form ──────────────────────────────────────────────────────── */
+.modal-form {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+/* ── Sidebar nav ─────────────────────────────────────────────────────── */
+/* Vertical navigation for sidebars (categories, TOC, settings).          */
+.sidebar-nav { width: 200px; flex-shrink: 0; }
+.sidebar-nav h4 {
+  font-size: var(--font-xs, 11px);
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.5rem;
+}
+.sidebar-nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--font-sm, 13px);
+  font-family: inherit;
+}
+.sidebar-nav-item:hover, .sidebar-nav-item.active {
+  color: var(--accent);
+  background: var(--bg-card);
+}
+
+/* ── Tag cloud ───────────────────────────────────────────────────────── */
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tag-btn {
+  background: var(--bg-card);
+  border: none;
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: var(--font-xs, 11px);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+}
+.tag-btn:hover, .tag-btn.active { color: var(--accent); }
+.tag-count { opacity: 0.5; margin-left: 2px; }
+
+/* ── TOC (table of contents) ─────────────────────────────────────────── */
+.toc {
+  width: 200px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 60px;
+  align-self: flex-start;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+.toc h4 {
+  font-size: var(--font-xs, 11px);
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.5rem;
+}
+.toc-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: var(--font-sm, 13px);
+  font-family: inherit;
+  border-left: 2px solid var(--border);
+}
+.toc-item:hover { color: var(--accent); border-left-color: var(--accent); }
+.toc-item.toc-h3 { padding-left: 20px; }
+
+/* ── Scroll to top ───────────────────────────────────────────────────── */
+.scroll-top {
+  position: fixed;
+  bottom: 100px;
+  right: 24px;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.1));
+  z-index: 10;
+}
+
+/* ── Doc card ────────────────────────────────────────────────────────── */
+.doc-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.doc-card h3 { font-size: var(--font-md, 15px); margin-bottom: 0.25rem; }
+.doc-card:hover h3 { color: var(--accent); }
+.doc-card .summary {
+  font-size: var(--font-sm, 13px);
+  color: var(--text-dim);
+  margin-bottom: 0.5rem;
+}
+
+/* ── Two-column layout (sidebar + content) ───────────────────────────── */
+.layout-sidebar {
+  display: flex;
+  gap: 1.5rem;
+}
+@media (max-width: 768px) {
+  .layout-sidebar { flex-direction: column; }
+  .layout-sidebar .sidebar-nav,
+  .layout-sidebar .toc { width: 100%; position: static; }
+}
 
 /* ── Aspect ratio ─────────────────────────────────────────────────────── */
 .aspect-square { aspect-ratio: 1; }

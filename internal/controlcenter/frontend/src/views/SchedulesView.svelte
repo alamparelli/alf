@@ -350,16 +350,16 @@
               <div class="job-title">
                 <strong>{job.name}</strong>
                 {#if job.running}
-                  <span class="badge badge-running">running</span>
+                  <span class="tag tag-success badge-running">running</span>
                 {/if}
                 {#if !job.enabled}
-                  <span class="badge badge-disabled">disabled</span>
+                  <span class="tag tag-warning">disabled</span>
                 {/if}
                 {#if job.managed}
-                  <span class="badge badge-managed">managed</span>
+                  <span class="tag tag-mauve">managed</span>
                 {/if}
                 {#if job.system}
-                  <span class="badge badge-system">system</span>
+                  <span class="tag">system</span>
                 {/if}
                 {#if job.description}
                   <span class="job-description">{job.description}</span>
@@ -371,7 +371,7 @@
               <div class="job-meta">
                 <span class="meta-item"><Clock size={12} /> {job.schedule}</span>
                 {#if job.tier}
-                  <span class="badge badge-tier">{job.tier}</span>
+                  <span class="tag tag-sapphire">{job.tier}</span>
                 {/if}
                 {#if job.output}
                   <span class="meta-item">{job.output}</span>
@@ -472,38 +472,38 @@
 <Modal open={showModal} onclose={() => showModal = false}>
   <h3>{editingJob ? 'Edit' : 'Add'} Schedule</h3>
       <div class="form-grid">
-        <label class="full-width">
+        <label class="form-group full-width">
           Name
-          <input type="text" bind:value={form.name} placeholder="e.g. daily-report" />
+          <input class="input" type="text" bind:value={form.name} placeholder="e.g. daily-report" />
         </label>
-        <label class="full-width">
+        <label class="form-group full-width">
           Description
-          <input type="text" bind:value={form.description} placeholder="Short description of what this job does" />
+          <input class="input" type="text" bind:value={form.description} placeholder="Short description of what this job does" />
         </label>
-        <label class="full-width">
+        <label class="form-group full-width">
           Schedule (cron or ISO date)
-          <input type="text" bind:value={form.schedule} placeholder="0 9 * * * or 2026-03-25T10:00:00Z" />
+          <input class="input" type="text" bind:value={form.schedule} placeholder="0 9 * * * or 2026-03-25T10:00:00Z" />
         </label>
-        <label class="full-width">
+        <label class="form-group full-width">
           Reason
-          <input type="text" bind:value={form.reason} placeholder="Why does this job exist? (context for the LLM)" />
+          <input class="input" type="text" bind:value={form.reason} placeholder="Why does this job exist? (context for the LLM)" />
         </label>
-        <label class="full-width">
+        <label class="form-group full-width">
           Prompt
-          <textarea bind:value={form.prompt} rows="4" placeholder="What should the agent do?"></textarea>
+          <textarea class="textarea" bind:value={form.prompt} rows="4" placeholder="What should the agent do?"></textarea>
         </label>
-        <label>
+        <label class="form-group">
           Tier
-          <select bind:value={form.tier}>
+          <select class="select" bind:value={form.tier}>
             <option value="">default</option>
             {#each tierNames as t}
               <option value={t}>{t}</option>
             {/each}
           </select>
         </label>
-        <label>
+        <label class="form-group">
           Output Mode
-          <select bind:value={form.output}>
+          <select class="select" bind:value={form.output}>
             <option value="chat">Chat (TG + CC)</option>
             <option value="tg">Telegram only</option>
             <option value="cc">Control Center only</option>
@@ -512,17 +512,17 @@
             <option value="silent">Silent</option>
           </select>
         </label>
-        <label>
+        <label class="form-group">
           Command (optional)
-          <input type="text" bind:value={form.command} placeholder="Shell command" />
+          <input class="input" type="text" bind:value={form.command} placeholder="Shell command" />
         </label>
-        <label>
+        <label class="form-group">
           Timeout (optional)
-          <input type="text" bind:value={form.timeout} placeholder="e.g. 5m, 1h" />
+          <input class="input" type="text" bind:value={form.timeout} placeholder="e.g. 5m, 1h" />
         </label>
-        <label class="full-width">
+        <label class="form-group full-width">
           Message (reminder mode - no prompt/tier)
-          <textarea bind:value={form.message} rows="2" placeholder="Direct notification text"></textarea>
+          <textarea class="textarea" bind:value={form.message} rows="2" placeholder="Direct notification text"></textarea>
         </label>
       </div>
   <div class="modal-actions">
@@ -603,11 +603,8 @@
     align-items: center;
     gap: 0.2rem;
   }
-  .badge-tier { background: var(--sapphire); color: #fff; }
-  .badge-running { background: var(--green); color: #fff; animation: pulse 1.5s infinite; }
-  .badge-disabled { background: var(--yellow); color: #fff; }
-  .badge-managed { background: var(--mauve); color: #fff; }
-  .badge-system { background: var(--text-dim); color: #fff; }
+  /* Tags use alf-ui .tag / .tag-success / .tag-warning / .tag-mauve / .tag-sapphire */
+  .badge-running { animation: pulse 1.5s infinite; }
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
@@ -681,25 +678,11 @@
     font-size: var(--font-xs, 11px);
   }
 
-  /* Modal content styles */
+  /* Modal form grid */
   .form-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.8rem;
-  }
-  .form-grid label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    font-size: var(--font-sm, 13px);
-  }
-  .form-grid input, .form-grid select, .form-grid textarea {
-    padding: 0.4rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg-card);
-    color: var(--text);
-    font-size: var(--font-sm, 13px);
   }
   .full-width {
     grid-column: 1 / -1;

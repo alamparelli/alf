@@ -243,24 +243,24 @@
   })
 </script>
 
-<div class="firewall-view">
+<div class="view">
   <h2>Firewall</h2>
 
   <!-- Mode toggle + Kill switch -->
   <Card>
-    <div class="mode-section">
+    <div class="flex items-center justify-between">
       <h3>Mode</h3>
-      <div class="mode-controls">
-        <div class="segmented">
+      <div class="flex items-center gap-sm">
+        <div class="filter-tabs">
           <button
-            class="seg-btn"
+            class="tab"
             class:active={config.mode === 'log-only'}
             onclick={() => setMode('log-only')}
           >
             <ShieldOff size={14} /> Log Only
           </button>
           <button
-            class="seg-btn"
+            class="tab"
             class:active={config.mode === 'enforce'}
             onclick={() => setMode('enforce')}
           >
@@ -268,7 +268,7 @@
           </button>
         </div>
         <button
-          class="kill-switch-btn"
+          class="btn-danger-toggle"
           class:active={killSwitch}
           onclick={toggleKillSwitch}
           title={killSwitch ? 'Click to resume network' : 'Block ALL outbound traffic immediately'}
@@ -281,22 +281,22 @@
 
   <!-- Rules -->
   <Card>
-    <div class="rules-header">
+    <div class="section-header">
       <h3>Rules</h3>
-      <button class="btn-primary" onclick={() => showAddRule = true}>
+      <button class="btn btn-primary btn-sm" onclick={() => showAddRule = true}>
         <Plus size={14} /> Add Rule
       </button>
     </div>
 
     {#if config.rules.length > 0}
-      <div class="rules-list">
+      <div class="row-list">
         {#each config.rules as rule, i}
-          <div class="rule-row">
-            <code class="rule-pattern">{rule.pattern}</code>
-            <span class="action-badge" class:allow={rule.action === 'allow'} class:deny={rule.action === 'deny'}>
+          <div class="row-item">
+            <code class="text-mono flex-1 text-sm">{rule.pattern}</code>
+            <span class="tag" class:tag-success={rule.action === 'allow'} class:tag-danger={rule.action === 'deny'}>
               {rule.action}
             </span>
-            <button class="btn-icon-sm" onclick={() => removeRule(i)} title="Delete rule">
+            <button class="btn-icon-xs" onclick={() => removeRule(i)} title="Delete rule">
               <Trash2 size={14} />
             </button>
           </div>
@@ -309,28 +309,28 @@
 
   <!-- Request log / Hosts -->
   <Card>
-    <div class="log-header">
-      <div class="log-tabs">
-        <button class="log-tab" class:active={activeTab === 'log'} onclick={() => activeTab = 'log'}>Request Log</button>
-        <button class="log-tab" class:active={activeTab === 'hosts'} onclick={() => activeTab = 'hosts'}>Hosts ({hosts.length})</button>
+    <div class="section-header">
+      <div class="tab-bar" style="border:none;margin:0;gap:0">
+        <button class="tab-item" class:active={activeTab === 'log'} onclick={() => activeTab = 'log'}>Request Log</button>
+        <button class="tab-item" class:active={activeTab === 'hosts'} onclick={() => activeTab = 'hosts'}>Hosts ({hosts.length})</button>
       </div>
-      <div class="log-controls">
+      <div class="flex items-center gap-sm">
         <Toggle bind:checked={autoRefresh} label="Auto-refresh" />
-        <button class="btn-icon" onclick={() => loadFirewall()} title="Refresh">
+        <button class="btn btn-ghost btn-sm" onclick={() => loadFirewall()} title="Refresh">
           <RefreshCw size={14} />
         </button>
-        <button class="btn-secondary-sm" onclick={clearLog}>Clear</button>
+        <button class="btn btn-ghost btn-sm" onclick={clearLog}>Clear</button>
       </div>
     </div>
 
     {#if activeTab === 'log'}
       <div class="filter-bar">
-        <input type="text" class="filter-input" placeholder="Filter by host, method, source..." bind:value={logFilter} />
+        <input type="text" class="input text-mono" placeholder="Filter by host, method, source..." bind:value={logFilter} />
         {#if logFilter}<span class="filter-count">{filteredLog.length} / {log.length}</span>{/if}
       </div>
       {#if filteredLog.length > 0}
-        <div class="log-table-wrap">
-          <table class="log-table">
+        <div class="table-wrap">
+          <table class="data-table">
             <thead>
               <tr>
                 <th>Time</th>
@@ -343,21 +343,21 @@
             </thead>
             <tbody>
               {#each paginatedLog as entry}
-                <tr class:blocked={entry.blocked}>
-                  <td class="mono">{formatTime(entry.time)}</td>
-                  <td><span class="method-badge">{entry.method}</span></td>
-                  <td class="mono">{entry.host}{#if entry.source} <span class="source-badge {entry.source}">{entry.source}</span>{/if}</td>
-                  <td class="mono path-cell">{entry.path}</td>
+                <tr class:row-danger={entry.blocked}>
+                  <td class="text-mono">{formatTime(entry.time)}</td>
+                  <td><span class="badge-inline badge-inline-accent">{entry.method}</span></td>
+                  <td class="text-mono">{entry.host}{#if entry.source} <span class="badge-inline badge-inline-mauve">{entry.source}</span>{/if}</td>
+                  <td class="text-mono truncate" style="max-width:200px">{entry.path}</td>
                   <td>
-                    <span class="status-badge" class:status-ok={entry.status >= 200 && entry.status < 400} class:status-blocked={entry.blocked}>
+                    <span class="badge-inline" class:badge-inline-success={entry.status >= 200 && entry.status < 400} class:badge-inline-danger={entry.blocked}>
                       {entry.blocked ? 'DENIED' : entry.status || 'OK'}
                     </span>
                   </td>
-                  <td class="action-cell">
-                    <button class="btn-icon-sm btn-allow" onclick={() => addAllowRule(entry.host)} title="Allow this host">
+                  <td class="flex gap-xs">
+                    <button class="btn-icon-xs hover-success" onclick={() => addAllowRule(entry.host)} title="Allow this host">
                       <ShieldOff size={12} />
                     </button>
-                    <button class="btn-icon-sm btn-deny" onclick={() => addDenyRule(entry.host)} title="Deny this host">
+                    <button class="btn-icon-xs hover-danger" onclick={() => addDenyRule(entry.host)} title="Deny this host">
                       <Shield size={12} />
                     </button>
                   </td>
@@ -366,7 +366,7 @@
             </tbody>
           </table>
         </div>
-        <div class="pagination">
+        <div class="pagination-bar">
           <div class="page-size">
             {#each [50, 100, 200] as size}
               <button class="page-size-btn" class:active={pageSize === size} onclick={() => setPageSize(size)}>{size}</button>
@@ -386,12 +386,12 @@
       {/if}
     {:else}
       <div class="filter-bar">
-        <input type="text" class="filter-input" placeholder="Filter by host..." bind:value={hostsFilter} />
+        <input type="text" class="input text-mono" placeholder="Filter by host..." bind:value={hostsFilter} />
         {#if hostsFilter}<span class="filter-count">{filteredHosts.length} / {hosts.length}</span>{/if}
       </div>
       {#if filteredHosts.length > 0}
-        <div class="log-table-wrap">
-          <table class="log-table">
+        <div class="table-wrap">
+          <table class="data-table">
             <thead>
               <tr>
                 <th class="sortable" onclick={() => sortHosts('host')}>Host{sortIndicator('host')}</th>
@@ -404,17 +404,17 @@
             </thead>
             <tbody>
               {#each paginatedHosts as h}
-                <tr class:blocked={h.blocked > 0 && h.allowed === 0}>
-                  <td class="mono">{h.host}{#if h.vault} <span class="source-badge">vault</span>{/if}</td>
+                <tr class:row-danger={h.blocked > 0 && h.allowed === 0}>
+                  <td class="text-mono">{h.host}{#if h.vault} <span class="badge-inline badge-inline-mauve">vault</span>{/if}</td>
                   <td>{h.count}</td>
                   <td>{h.allowed}</td>
                   <td>{h.blocked || ''}</td>
-                  <td class="mono">{formatDateTime(h.last_seen)}</td>
-                  <td class="action-cell">
-                    <button class="btn-icon-sm btn-allow" onclick={() => addAllowRule(h.host)} title="Allow this host">
+                  <td class="text-mono">{formatDateTime(h.last_seen)}</td>
+                  <td class="flex gap-xs">
+                    <button class="btn-icon-xs hover-success" onclick={() => addAllowRule(h.host)} title="Allow this host">
                       <ShieldOff size={12} />
                     </button>
-                    <button class="btn-icon-sm btn-deny" onclick={() => addDenyRule(h.host)} title="Deny this host">
+                    <button class="btn-icon-xs hover-danger" onclick={() => addDenyRule(h.host)} title="Deny this host">
                       <Shield size={12} />
                     </button>
                   </td>
@@ -423,7 +423,7 @@
             </tbody>
           </table>
         </div>
-        <div class="pagination">
+        <div class="pagination-bar">
           <div class="page-size">
             {#each [50, 100, 200] as size}
               <button class="page-size-btn" class:active={pageSize === size} onclick={() => setPageSize(size)}>{size}</button>
@@ -448,479 +448,23 @@
   <Modal open={showAddRule} onclose={() => showAddRule = false}>
     <h3>Add Rule</h3>
     <div class="modal-form">
-      <label>
+      <label class="form-group">
         Pattern
-        <input type="text" bind:value={newPattern} placeholder="*.example.com" />
+        <input class="input" type="text" bind:value={newPattern} placeholder="*.example.com" />
       </label>
-      <label>
+      <label class="form-group">
         Action
-        <select bind:value={newAction}>
+        <select class="select" bind:value={newAction}>
           <option value="allow">Allow</option>
           <option value="deny">Deny</option>
         </select>
       </label>
       <div class="modal-actions">
-        <button class="btn-primary" onclick={addRule}>Add</button>
-        <button class="btn-secondary" onclick={() => showAddRule = false}>Cancel</button>
+        <button class="btn btn-primary" onclick={addRule}>Add</button>
+        <button class="btn btn-ghost" onclick={() => showAddRule = false}>Cancel</button>
       </div>
     </div>
   </Modal>
 </div>
 
-<style>
-  .firewall-view {
-    padding: 8px 0;
-    width: 100%;
-  }
-
-  h2 {
-    margin-bottom: 16px;
-  }
-
-  h3 {
-    font-size: var(--font-md, 15px);
-    margin-bottom: 0;
-  }
-
-  .mode-section {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .mode-controls {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .kill-switch-btn {
-    padding: 6px 14px;
-    border: none;
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--text-dim);
-    font-size: var(--font-sm, 13px);
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .kill-switch-btn:hover {
-    color: var(--red, #e55);
-    background: color-mix(in srgb, var(--red) 8%, transparent);
-  }
-
-  .kill-switch-btn.active {
-    background: color-mix(in srgb, var(--red) 15%, transparent);
-    color: var(--red, #e55);
-  }
-
-  .segmented {
-    display: inline-flex;
-    border: none;
-    border-radius: 6px;
-    overflow: hidden;
-    background: var(--bg);
-  }
-
-  .seg-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    padding: 6px 16px;
-    font-size: var(--font-sm, 13px);
-    cursor: pointer;
-    border-right: 1px solid var(--border);
-  }
-
-  .seg-btn:last-child {
-    border-right: none;
-  }
-
-  .seg-btn.active {
-    background: var(--accent);
-    color: var(--bg);
-  }
-
-  .rules-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 0.75rem;
-  }
-
-  .btn-primary {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: var(--accent);
-    color: var(--bg);
-    border: none;
-    border-radius: 6px;
-    padding: 6px 14px;
-    font-size: var(--font-sm, 13px);
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .btn-primary:hover {
-    opacity: 0.9;
-  }
-
-  .btn-secondary {
-    background: var(--bg);
-    border: none;
-    border-radius: 6px;
-    color: var(--text-dim);
-    padding: 6px 14px;
-    font-size: var(--font-sm, 13px);
-    cursor: pointer;
-  }
-
-  .btn-secondary-sm {
-    background: var(--bg);
-    border: none;
-    border-radius: 6px;
-    color: var(--text-dim);
-    padding: 4px 10px;
-    font-size: var(--font-xs, 11px);
-    cursor: pointer;
-  }
-
-  .btn-secondary-sm:hover {
-    color: var(--text);
-  }
-
-  .btn-icon {
-    background: var(--bg);
-    border: none;
-    border-radius: 6px;
-    color: var(--text-dim);
-    padding: 4px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-  }
-
-  .btn-icon:hover {
-    color: var(--accent);
-  }
-
-  .btn-icon-sm {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    padding: 2px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-  }
-
-  .btn-icon-sm.btn-allow:hover {
-    color: var(--green, #6a6);
-  }
-
-  .btn-icon-sm.btn-deny:hover {
-    color: var(--red, #e55);
-  }
-
-  .action-cell {
-    display: flex;
-    gap: 2px;
-  }
-
-  .rules-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .rule-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    background: var(--bg);
-    border-radius: 6px;
-  }
-
-  .rule-pattern {
-    flex: 1;
-    font-size: var(--font-sm, 13px);
-  }
-
-  .action-badge {
-    font-size: var(--font-xs, 11px);
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 4px;
-    text-transform: uppercase;
-  }
-
-  .action-badge.allow {
-    background: color-mix(in srgb, var(--green) 15%, transparent);
-    color: var(--green, #6a6);
-  }
-
-  .action-badge.deny {
-    background: color-mix(in srgb, var(--red) 15%, transparent);
-    color: var(--red, #e55);
-  }
-
-  .log-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 0.75rem;
-  }
-
-  .log-tabs {
-    display: flex;
-    gap: 0;
-  }
-
-  .log-tab {
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--text-dim);
-    font-size: var(--font-sm, 13px);
-    font-weight: 500;
-    padding: 4px 12px 6px;
-    cursor: pointer;
-  }
-
-  .log-tab.active {
-    color: var(--text);
-    border-bottom-color: var(--accent);
-  }
-
-  .log-tab:hover:not(.active) {
-    color: var(--text);
-  }
-
-  .log-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-
-  .filter-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-
-  .filter-input {
-    flex: 1;
-    padding: 5px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-card);
-    color: var(--text);
-    font-size: var(--font-sm, 13px);
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .filter-count {
-    font-size: var(--font-xs, 11px);
-    color: var(--text-dim);
-    white-space: nowrap;
-  }
-
-  .sortable {
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .sortable:hover {
-    color: var(--text);
-  }
-
-  .log-table-wrap {
-    overflow-x: auto;
-  }
-
-  .log-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--font-sm, 13px);
-  }
-
-  .log-table th {
-    text-align: left;
-    color: var(--text-dim);
-    font-size: var(--font-xs, 11px);
-    text-transform: uppercase;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .log-table td {
-    padding: 5px 8px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .log-table tr.blocked {
-    background: color-mix(in srgb, var(--red) 5%, transparent);
-  }
-
-  .mono {
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: var(--font-sm, 13px);
-  }
-
-  .path-cell {
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .method-badge {
-    font-size: var(--font-xs, 11px);
-    font-weight: 600;
-    color: var(--accent);
-  }
-
-  .status-badge {
-    font-size: var(--font-xs, 11px);
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 3px;
-  }
-
-  .status-ok {
-    color: var(--green, #6a6);
-  }
-
-  .status-blocked {
-    background: color-mix(in srgb, var(--red) 15%, transparent);
-    color: var(--red, #e55);
-  }
-
-  .source-badge {
-    font-size: var(--font-xs, 11px);
-    font-weight: 600;
-    padding: 1px 5px;
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--mauve) 15%, transparent);
-    color: #a078dc;
-    text-transform: uppercase;
-    vertical-align: middle;
-    margin-left: 4px;
-  }
-
-  .source-badge.nettrack {
-    background: color-mix(in srgb, var(--sapphire) 15%, transparent);
-    color: #5090d0;
-  }
-
-  .source-badge.internal {
-    background: color-mix(in srgb, var(--text-dim) 15%, transparent);
-    color: #999;
-  }
-
-  .empty-sm {
-    text-align: center;
-    color: var(--text-dim);
-    font-size: var(--font-sm, 13px);
-    padding: 1rem;
-  }
-
-  /* Pagination */
-  .pagination {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 0 0;
-    gap: 12px;
-  }
-
-  .page-size {
-    display: flex;
-    gap: 2px;
-  }
-
-  .page-size-btn {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    padding: 2px 8px;
-    font-size: var(--font-xs, 11px);
-    cursor: pointer;
-    border-radius: 4px;
-  }
-
-  .page-size-btn.active {
-    background: var(--accent);
-    color: var(--bg);
-  }
-
-  .page-nav {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .page-btn {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    padding: 2px 8px;
-    font-size: var(--font-xs, 11px);
-    cursor: pointer;
-    border-radius: 4px;
-  }
-
-  .page-btn:disabled {
-    opacity: 0.3;
-    cursor: default;
-  }
-
-  .page-btn:not(:disabled):hover {
-    color: var(--accent);
-  }
-
-  .page-info {
-    font-size: var(--font-xs, 11px);
-    color: var(--text-dim);
-  }
-
-  /* Modal form */
-  .modal-form {
-    margin-top: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .modal-form label {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: var(--font-sm, 13px);
-    color: var(--text-dim);
-  }
-
-  .modal-form input,
-  .modal-form select {
-    background: var(--bg-card);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-size: var(--font-sm, 13px);
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
-  }
-</style>
+<!-- No scoped CSS — all styles from alf-ui.css -->

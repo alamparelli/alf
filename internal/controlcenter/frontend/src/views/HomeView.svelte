@@ -424,10 +424,10 @@
   <div class="ws-header">
     <span class="ws-title">Files</span>
     <div class="ws-toolbar">
-      <button class="ws-btn" onclick={() => openCreateDialog('file')} title="New file"><FilePlus size={15} /></button>
-      <button class="ws-btn" onclick={() => openCreateDialog('dir')} title="New folder"><FolderPlus size={15} /></button>
-      <button class="ws-btn" onclick={() => { showUploadModal = true }} title="Upload"><Upload size={15} /></button>
-      <button class="ws-btn" onclick={() => { loadDir(currentPath); loadSidebarRoot() }} title="Refresh"><RefreshCw size={15} /></button>
+      <button class="btn btn-sm" onclick={() => openCreateDialog('file')} title="New file"><FilePlus size={15} /></button>
+      <button class="btn btn-sm" onclick={() => openCreateDialog('dir')} title="New folder"><FolderPlus size={15} /></button>
+      <button class="btn btn-sm" onclick={() => { showUploadModal = true }} title="Upload"><Upload size={15} /></button>
+      <button class="btn btn-sm" onclick={() => { loadDir(currentPath); loadSidebarRoot() }} title="Refresh"><RefreshCw size={15} /></button>
     </div>
   </div>
 
@@ -486,11 +486,11 @@
     <!-- Right panel: file list -->
     <div class="ws-main">
       <!-- Breadcrumbs -->
-      <div class="ws-breadcrumbs">
-        <button class="crumb" onclick={() => navigateToDir('')}>data</button>
+      <div class="breadcrumb">
+        <button class="breadcrumb-item" onclick={() => navigateToDir('')}>data</button>
         {#each breadcrumbs() as crumb}
-          <span class="crumb-sep">&rsaquo;</span>
-          <button class="crumb" onclick={() => navigateToDir(crumb.path)}>{crumb.name}</button>
+          <span class="breadcrumb-sep">&rsaquo;</span>
+          <button class="breadcrumb-item" onclick={() => navigateToDir(crumb.path)}>{crumb.name}</button>
         {/each}
       </div>
 
@@ -498,7 +498,7 @@
       {#if loadingDir}
         <div class="ws-loading"><Loader2 size={20} class="spin" /> Loading...</div>
       {:else}
-        <table class="file-table">
+        <table class="data-table">
           <thead>
             <tr>
               <th class="col-name">Name</th>
@@ -535,7 +535,7 @@
                     {/if}
                     <span>{entry.name}</span>
                     {#if entry.is_dir && isProtected(entry.name)}
-                      <span class="badge-protected">protected</span>
+                      <span class="tag tag-warning">protected</span>
                     {/if}
                   </div>
                 </td>
@@ -555,21 +555,21 @@
 
 <!-- Context menu -->
 {#if ctxMenu}
-  <div class="ctx-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
-    <button class="ctx-item" onclick={ctxOpen}>
+  <div class="dropdown-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
+    <button class="dropdown-item" onclick={ctxOpen}>
       <Eye size={13} /> Open
     </button>
     {#if !ctxMenu.entry.is_dir}
-      <button class="ctx-item" onclick={ctxEdit}>
+      <button class="dropdown-item" onclick={ctxEdit}>
         <Pencil size={13} /> Edit
       </button>
-      <button class="ctx-item" onclick={ctxDownload}>
+      <button class="dropdown-item" onclick={ctxDownload}>
         <Download size={13} /> Download
       </button>
     {/if}
     {#if !(ctxMenu.entry.is_dir && isProtected(ctxMenu.entry.name))}
-      <div class="ctx-sep"></div>
-      <button class="ctx-item ctx-danger" onclick={ctxDelete}>
+      <div class="dropdown-separator"></div>
+      <button class="dropdown-item dropdown-item-danger" onclick={ctxDelete}>
         <Trash2 size={13} /> Delete
       </button>
     {/if}
@@ -584,23 +584,23 @@
       <div class="modal-file-actions">
         {#if viewingFile.editable && viewingFile.content !== undefined}
           {#if fileEditMode}
-            <button class="ws-btn primary" onclick={saveFile} disabled={savingFile}>
+            <button class="btn btn-primary btn-sm" onclick={saveFile} disabled={savingFile}>
               <Save size={13} /> {savingFile ? 'Saving...' : 'Save'}
             </button>
-            <button class="ws-btn" onclick={() => { fileEditMode = false; fileEditContent = viewingFile!.content || '' }}>Cancel</button>
+            <button class="btn btn-sm" onclick={() => { fileEditMode = false; fileEditContent = viewingFile!.content || '' }}>Cancel</button>
           {:else}
-            <button class="ws-btn" onclick={() => fileEditMode = true}>
+            <button class="btn btn-sm" onclick={() => fileEditMode = true}>
               <Pencil size={13} /> Edit
             </button>
           {/if}
         {/if}
         {#if isMarkdown(viewingFile.name) && !fileEditMode}
-          <button class="ws-btn" onclick={() => mdPreview = !mdPreview}>
+          <button class="btn btn-sm" onclick={() => mdPreview = !mdPreview}>
             {mdPreview ? 'Source' : 'Preview'}
           </button>
         {/if}
         {#if isJson(viewingFile.name) && !fileEditMode}
-          <button class="ws-btn" onclick={() => jsonTreeView = !jsonTreeView}>
+          <button class="btn btn-sm" onclick={() => jsonTreeView = !jsonTreeView}>
             {jsonTreeView ? 'Raw' : 'Tree'}
           </button>
         {/if}
@@ -623,14 +623,14 @@
           {:else if viewingFile.media === 'audio'}
             <audio controls src={viewingFile.url}></audio>
           {/if}
-          <a href={viewingFile.url} download class="ws-btn" style="margin-top:8px">
+          <a href={viewingFile.url} download class="btn btn-sm" style="margin-top:8px">
             <Download size={13} /> Download
           </a>
         </div>
       {:else if viewingFile.message}
         <p class="dim">{viewingFile.message}</p>
         {#if viewingFile.message.includes('Binary')}
-          <a href={`/api/workspace?path=${encodeURIComponent(viewingPath)}&download=1`} download class="ws-btn" style="margin-top:8px">
+          <a href={`/api/workspace?path=${encodeURIComponent(viewingPath)}&download=1`} download class="btn btn-sm" style="margin-top:8px">
             <Download size={13} /> Download
           </a>
         {/if}
@@ -723,8 +723,8 @@
       <p class="dim">In: {currentPath}/</p>
     {/if}
     <div class="modal-actions">
-      <button class="ws-btn primary" onclick={createEntry}>Create</button>
-      <button class="ws-btn" onclick={() => showCreateModal = false}>Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick={createEntry}>Create</button>
+      <button class="btn btn-sm" onclick={() => showCreateModal = false}>Cancel</button>
     </div>
   </div>
 </Modal>
@@ -741,10 +741,10 @@
       <p class="dim">To: {currentPath}/</p>
     {/if}
     <div class="modal-actions">
-      <button class="ws-btn primary" onclick={handleUpload} disabled={uploading || !uploadFiles?.length}>
+      <button class="btn btn-primary btn-sm" onclick={handleUpload} disabled={uploading || !uploadFiles?.length}>
         {uploading ? 'Uploading...' : 'Upload'}
       </button>
-      <button class="ws-btn" onclick={() => showUploadModal = false}>Cancel</button>
+      <button class="btn btn-sm" onclick={() => showUploadModal = false}>Cancel</button>
     </div>
   </div>
 </Modal>
@@ -839,20 +839,16 @@
     min-width: 0;
   }
 
-  .ws-breadcrumbs {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+  .breadcrumb {
     padding: 10px 16px;
-    font-size: var(--font-sm, 13px);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
 
-  .crumb {
+  .breadcrumb-item {
     background: none;
     border: none;
-    color: var(--text);
+    color: var(--text-dim);
     cursor: pointer;
     font-family: inherit;
     font-size: var(--font-sm, 13px);
@@ -860,8 +856,7 @@
     border-radius: 4px;
   }
 
-  .crumb:hover { background: var(--bg-input); }
-  .crumb-sep { color: var(--text-dim); }
+  .breadcrumb-item:hover { background: var(--bg-input); color: var(--text); }
 
   .ws-loading {
     display: flex;
@@ -872,28 +867,10 @@
     font-size: var(--font-sm, 13px);
   }
 
-  /* File table */
-  .file-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-  }
-
-  .file-table thead {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  .file-table th {
-    text-align: left;
-    padding: 8px 16px;
-    font-size: var(--font-sm, 13px);
-    font-weight: 600;
-    color: var(--text-dim);
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-  }
+  /* File table overrides */
+  .data-table { table-layout: fixed; }
+  .data-table thead { position: sticky; top: 0; z-index: 1; }
+  .data-table th { background: var(--bg); }
 
   .col-name { width: auto; }
   .col-size { width: 90px; }
@@ -965,52 +942,20 @@
   :global(.icon-folder) { color: var(--accent); }
   :global(.icon-file) { color: var(--text-dim); }
 
-  .badge-protected {
-    font-size: var(--font-xs, 11px);
-    padding: 0 5px;
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--yellow) 12%, transparent);
-    color: var(--yellow, #eab308);
-    flex-shrink: 0;
-  }
-
   .empty-msg {
     text-align: center;
     color: var(--text-dim);
     padding: 24px !important;
   }
 
-  /* Context menu */
-  .ctx-menu {
+  /* Context menu - override dropdown-menu for fixed positioning */
+  .dropdown-menu {
     position: fixed;
+    display: block;
+    top: auto;
+    right: auto;
     z-index: 1000;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 4px;
-    min-width: 160px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   }
-
-  .ctx-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 7px 12px;
-    background: none;
-    border: none;
-    color: var(--text);
-    font-family: inherit;
-    font-size: var(--font-sm, 13px);
-    cursor: pointer;
-    border-radius: 5px;
-    text-align: left;
-  }
-
-  .ctx-item:hover { background: var(--bg-input); }
-  .ctx-danger { color: var(--red, #c4392a); }
-  .ctx-sep { height: 1px; background: var(--border); margin: 4px 8px; }
 
   /* Drag overlay */
   .drag-overlay {
@@ -1028,26 +973,7 @@
     gap: 8px;
   }
 
-  /* Shared button */
-  .ws-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 12px;
-    border: none;
-    border-radius: 6px;
-    background: var(--bg-card);
-    color: var(--text);
-    font-family: inherit;
-    font-size: var(--font-sm, 13px);
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-
-  .ws-btn:hover { background: var(--bg-input); }
-  .ws-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .ws-btn.primary { background: var(--accent); color: var(--on-accent); }
-  .ws-btn.primary:hover { opacity: 0.9; }
+  /* Buttons - uses .btn/.btn-sm/.btn-primary from alf-ui.css */
 
   /* File modal */
   .modal-file-header {

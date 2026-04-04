@@ -125,7 +125,7 @@ AlfSDK.prompt(message, opts?)          // Input dialog → Promise<string|null>
 
 // Sheets (bottom-sheet modals rendered in parent)
 AlfSDK.sheet(html, actions?)           // Show HTML in bottom-sheet modal
-                                       //   actions: [{ label, style?, callback(params) }]
+                                       //   actions: { 'name': callback(params) }
                                        //   Buttons: add data-action="name" to elements
                                        //   Forms: inputs with name="" auto-collected as params
 AlfSDK.updateSheet(html)               // Update sheet content without closing
@@ -299,16 +299,15 @@ HTML is sanitized -- safe tags, attributes (including `style`), and `data-*` att
 // Simple informational sheet
 AlfSDK.sheet('<h3>Details</h3><p>Some content here</p>');
 
-// Sheet with action buttons
+// Sheet with action buttons (data-action + object map)
 AlfSDK.sheet(
-  '<h3>Confirm Delete</h3><p>This cannot be undone.</p>',
-  [
-    { label: 'Cancel', callback: function() { AlfSDK.closeSheet(); } },
-    { label: 'Delete', style: 'background:var(--red);color:#fff', callback: function() {
-      doDelete();
-      AlfSDK.closeSheet();
-    }}
-  ]
+  '<h3>Confirm Delete</h3><p>This cannot be undone.</p>' +
+  '<button data-action="cancel">Cancel</button>' +
+  '<button data-action="delete" style="background:var(--red);color:#fff">Delete</button>',
+  {
+    cancel: function() { AlfSDK.closeSheet(); },
+    delete: function() { doDelete(); AlfSDK.closeSheet(); }
+  }
 );
 
 // Sheet with form inputs — values auto-collected by name attribute
@@ -317,11 +316,11 @@ AlfSDK.sheet(
   '<input name="title" value="Current Title" style="width:100%;padding:8px;margin:8px 0">' +
   '<textarea name="notes" style="width:100%;padding:8px" rows="3"></textarea>' +
   '<button data-action="save" style="padding:8px 16px;background:var(--accent);color:var(--on-accent);border:none;border-radius:6px;cursor:pointer">Save</button>',
-  [{ label: 'save', callback: function(params) {
+  { save: function(params) {
     // params = { title: '...', notes: '...' }
     saveItem(params);
     AlfSDK.closeSheet();
-  }}]
+  }}
 );
 
 // Update sheet content dynamically

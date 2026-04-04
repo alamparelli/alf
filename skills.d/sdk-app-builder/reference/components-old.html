@@ -1,0 +1,2498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALF UI Components</title>
+<!-- ══ THEME SETUP — every app MUST include these 3 lines ══ -->
+<link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
+<script src="/static/theme-init.js"></script>
+<script src="/static/alf-app-sdk.js"></script>
+<!-- alf-ui.css is auto-injected by the parent frame -->
+<style>
+  /* Component gallery styles — NOT part of alf-ui */
+  .gallery-section { margin-bottom: 48px; }
+  .gallery-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--accent); margin-bottom: 16px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .gallery-row { margin-bottom: 24px; }
+  .gallery-label {
+    font-size: 11px; color: var(--text-dim); margin-bottom: 8px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .gallery-grid { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+  .gallery-spacer { height: 16px; }
+
+  /* Page layouts need visible boundaries in the gallery */
+  .layout-demo {
+    border: 1px dashed var(--border); border-radius: var(--radius);
+    overflow: hidden; height: 320px;
+  }
+
+  /* ── NEW: App-level layout components (proposed additions to alf-ui) ── */
+
+  /* App shell — full-height flex column with sticky header */
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* App header — sticky top bar with title + actions */
+  .app-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+    padding: var(--space-md, 16px) var(--page-padding, 2.5rem);
+    padding-top: calc(var(--space-md, 16px) + env(safe-area-inset-top, 0px));
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--bg);
+  }
+  .app-header-title {
+    font-size: var(--font-lg, 18px);
+    font-weight: 700;
+    margin: 0;
+  }
+  .app-header-subtitle {
+    font-size: var(--font-xs, 11px);
+    color: var(--text-dim);
+  }
+  .app-header .spacer { flex: 1; }
+  .app-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs, 4px);
+  }
+
+  /* App body — scrollable content area, centered */
+  .app-body {
+    flex: 1;
+    padding: 0 var(--page-padding, 2.5rem) var(--page-padding, 2.5rem);
+    max-width: 960px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .app-body-wide {
+    flex: 1;
+    padding: 0 var(--page-padding, 2.5rem) var(--page-padding, 2.5rem);
+    width: 100%;
+  }
+
+  /* App footer — bottom status bar */
+  .app-footer {
+    padding: var(--space-sm, 8px) var(--page-padding, 2.5rem);
+    padding-bottom: calc(var(--space-sm, 8px) + env(safe-area-inset-bottom, 0px));
+    font-size: var(--font-xs, 11px);
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+  }
+
+  /* List page pattern — search + filter + scrollable list */
+  .app-list-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+    margin-bottom: var(--space-md, 16px);
+    flex-wrap: wrap;
+  }
+  .app-list-header .search-box { flex: 1; min-width: 180px; }
+
+  /* Detail view — back + title + content sections */
+  .app-detail-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--font-sm, 13px);
+    color: var(--text-dim);
+    cursor: pointer;
+    margin-bottom: var(--space-md, 16px);
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+  }
+  .app-detail-back:hover { color: var(--text); }
+
+  /* Settings section */
+  .settings-section {
+    margin-bottom: var(--space-lg, 24px);
+  }
+  .settings-section:last-child { margin-bottom: 0; }
+  .settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md, 16px);
+    padding: 12px 0;
+  }
+  .settings-row + .settings-row {
+    border-top: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+  }
+  .settings-row-info { flex: 1; min-width: 0; }
+  .settings-row-label {
+    font-size: var(--font-sm, 13px);
+    font-weight: 500;
+  }
+  .settings-row-desc {
+    font-size: var(--font-xs, 11px);
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* Action bar — floating bottom bar for bulk actions */
+  .action-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: var(--space-sm, 8px) var(--page-padding, 2.5rem);
+    padding-bottom: calc(var(--space-sm, 8px) + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-card);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+    z-index: 30;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.08);
+  }
+
+  @media (max-width: 768px) {
+    .app-header { padding: var(--space-sm, 8px) var(--page-padding, 1rem); padding-top: calc(var(--space-sm, 8px) + env(safe-area-inset-top, 0px)); }
+    .app-body, .app-body-wide { padding: 0 var(--page-padding, 1rem) var(--page-padding, 1rem); }
+    .app-footer { padding: var(--space-sm, 8px) var(--page-padding, 1rem); }
+  }
+
+  /* ── Accordion (details/summary) ─────────────────────────────────── */
+  .accordion {
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    overflow: hidden;
+    background: var(--bg-card);
+  }
+  .accordion details {
+    border-bottom: 1px solid var(--border);
+  }
+  .accordion details:last-child { border-bottom: none; }
+  .accordion .accordion-content p { margin: 0 0 0.5rem; }
+  .accordion .accordion-content p:last-child { margin-bottom: 0; }
+  .accordion .accordion-list { padding: 0; }
+  .accordion .accordion-list-item {
+    padding: 12px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  }
+  .accordion .accordion-list-item:last-child { border-bottom: none; }
+  .accordion summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    font-size: var(--font-sm, 13px);
+    font-weight: 500;
+    cursor: pointer;
+    list-style: none;
+    transition: background 0.12s;
+    user-select: none;
+  }
+  .accordion summary::-webkit-details-marker { display: none; }
+  .accordion summary::after {
+    content: '';
+    width: 8px; height: 8px;
+    border-right: 1.5px solid var(--text-dim);
+    border-bottom: 1.5px solid var(--text-dim);
+    transform: rotate(45deg);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+  .accordion details[open] > summary::after {
+    transform: rotate(-135deg);
+  }
+  .accordion summary:hover { background: var(--bg-input); }
+  .accordion .accordion-content {
+    padding: 0 14px 14px;
+    font-size: var(--font-sm, 13px);
+    color: var(--text-dim);
+  }
+
+  /* ── Tooltip (CSS-only via data-tooltip) ────────────────────────── */
+  [data-tooltip] {
+    position: relative;
+  }
+  [data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 8px;
+    font-size: var(--font-xs, 11px);
+    background: var(--text);
+    color: var(--bg);
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 50;
+  }
+  [data-tooltip]:hover::after { opacity: 1; }
+  [data-tooltip-bottom]::after {
+    bottom: auto;
+    top: calc(100% + 6px);
+  }
+
+  /* ── Dropdown menu ──────────────────────────────────────────────── */
+  .dropdown {
+    position: relative;
+    display: inline-block;
+  }
+  .dropdown-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 180px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    padding: 4px;
+    z-index: 50;
+    box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.1));
+    display: none;
+  }
+  .dropdown:focus-within .dropdown-menu,
+  .dropdown.open .dropdown-menu { display: block; }
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: var(--font-sm, 13px);
+    border: none;
+    background: none;
+    color: var(--text);
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    border-radius: calc(var(--radius, 8px) - 2px);
+    transition: background 0.12s;
+    font-family: inherit;
+  }
+  .dropdown-item:hover { background: var(--bg-input); }
+  .dropdown-item-danger { color: var(--red); }
+  .dropdown-item-danger:hover { background: color-mix(in srgb, var(--red) 10%, var(--bg)); }
+  .dropdown-separator {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+  }
+  .dropdown-label {
+    padding: 6px 10px 4px;
+    font-size: var(--font-xs, 11px);
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  /* ── Breadcrumb ─────────────────────────────────────────────────── */
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--font-sm, 13px);
+    color: var(--text-dim);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .breadcrumb a { color: var(--text-dim); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--text); text-decoration: underline; }
+  .breadcrumb-sep { color: var(--border); }
+  .breadcrumb-current { color: var(--text); font-weight: 500; }
+
+  /* ── Pagination ─────────────────────────────────────────────────── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .page-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 32px;
+    padding: 0 8px;
+    border: none;
+    border-radius: calc(var(--radius, 8px) - 2px);
+    background: transparent;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: var(--font-sm, 13px);
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .page-btn:hover { background: var(--bg-input); color: var(--text); }
+  .page-btn.active {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .page-ellipsis {
+    padding: 0 4px;
+    color: var(--text-dim);
+    font-size: var(--font-sm, 13px);
+  }
+
+  /* ── Slider (styled range input) ────────────────────────────────── */
+  .slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--bg-input);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--accent);
+    transition: transform 0.12s;
+  }
+  .slider::-webkit-slider-thumb:hover { transform: scale(1.15); }
+  .slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  /* ── Bar chart (CSS-only) ──────────────────────────────────────── */
+  .bar-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 120px;
+    padding-top: 8px;
+  }
+  .bar-chart-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    justify-content: flex-end;
+  }
+  .bar-chart-bar {
+    width: 100%;
+    max-width: 40px;
+    border-radius: 3px 3px 0 0;
+    background: var(--accent);
+    transition: height 0.3s, opacity 0.15s;
+    min-height: 2px;
+  }
+  .bar-chart-bar:hover { opacity: 0.8; }
+  .bar-chart-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-align: center;
+  }
+  .bar-chart-value {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Horizontal bar chart */
+  .hbar-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .hbar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--font-sm, 13px);
+  }
+  .hbar-label {
+    width: 80px;
+    flex-shrink: 0;
+    text-align: right;
+    color: var(--text-dim);
+    font-size: var(--font-xs, 11px);
+  }
+  .hbar-track {
+    flex: 1;
+    height: 8px;
+    background: var(--bg-input);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .hbar-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: var(--accent);
+    transition: width 0.3s;
+  }
+  .hbar-value {
+    width: 40px;
+    font-size: var(--font-xs, 11px);
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Sparkline (CSS mini bars) */
+  .sparkline {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 24px;
+    vertical-align: middle;
+  }
+  .sparkline-bar {
+    width: 3px;
+    border-radius: 1px;
+    background: var(--accent);
+    min-height: 1px;
+  }
+
+  /* Donut / ring chart */
+  .ring-chart {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ring-chart svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+  .ring-chart circle {
+    fill: none;
+    stroke-width: 6;
+    stroke-linecap: round;
+  }
+  .ring-chart .ring-bg { stroke: var(--bg-input); }
+  .ring-chart .ring-fill { stroke: var(--accent); transition: stroke-dashoffset 0.5s; }
+  .ring-chart-value {
+    font-size: var(--font-md, 15px);
+    font-weight: 700;
+    z-index: 1;
+  }
+  .ring-chart-label {
+    font-size: var(--font-xs, 11px);
+    color: var(--text-dim);
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  /* ── Workspace layouts ────────────────────────────────────────── */
+  .workspace {
+    display: flex;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Sidebar */
+  .workspace-sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card);
+    border-right: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+    overflow-y: auto;
+  }
+  .workspace-sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+    padding: var(--space-md, 16px);
+    padding-top: calc(var(--space-md, 16px) + env(safe-area-inset-top, 0px));
+    font-weight: 600;
+    font-size: var(--font-sm, 13px);
+  }
+  .workspace-sidebar-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 var(--space-sm, 8px) var(--space-sm, 8px);
+  }
+  .workspace-sidebar-footer {
+    padding: var(--space-sm, 8px);
+    border-top: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  }
+
+  /* Sidebar nav items */
+  .sidebar-nav {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+    padding: 8px 10px;
+    font-size: var(--font-sm, 13px);
+    border-radius: calc(var(--radius, 8px) - 2px);
+    cursor: pointer;
+    color: var(--text-dim);
+    transition: all 0.12s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+  }
+  .sidebar-item:hover { background: var(--bg-input); color: var(--text); }
+  .sidebar-item.active { background: color-mix(in srgb, var(--accent) 12%, var(--bg)); color: var(--accent); }
+  .sidebar-item .count-badge { margin-left: auto; }
+
+  /* Sidebar collapsible section */
+  .sidebar-section {
+    margin-bottom: var(--space-xs, 4px);
+  }
+  .sidebar-section-title {
+    font-size: var(--font-xs, 11px);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    padding: 8px 10px 4px;
+  }
+
+  /* Main panel */
+  .workspace-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .workspace-main-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+    padding: var(--space-sm, 8px) var(--space-md, 16px);
+    padding-top: calc(var(--space-sm, 8px) + env(safe-area-inset-top, 0px));
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+    min-height: 48px;
+  }
+  .workspace-main-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-md, 16px);
+  }
+
+  /* Detail panel (right split) */
+  .workspace-detail {
+    width: 320px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+    overflow-y: auto;
+    background: var(--bg);
+  }
+  .workspace-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm, 8px) var(--space-md, 16px);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+    min-height: 48px;
+  }
+  .workspace-detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-md, 16px);
+  }
+
+  @media (max-width: 768px) {
+    .workspace-sidebar { display: none; }
+    .workspace-detail { display: none; }
+  }
+
+  /* ── Dropzone / file upload ─────────────────────────────────────── */
+  .dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm, 8px);
+    padding: var(--space-xl, 32px) var(--space-md, 16px);
+    border: 2px dashed var(--border);
+    border-radius: var(--radius, 8px);
+    background: transparent;
+    color: var(--text-dim);
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .dropzone:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+  }
+  .dropzone.dragover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+    color: var(--accent);
+  }
+  .dropzone svg { opacity: 0.4; }
+  .dropzone:hover svg { opacity: 0.6; }
+  .dropzone-text { font-size: var(--font-sm, 13px); }
+  .dropzone-hint { font-size: var(--font-xs, 11px); opacity: 0.6; }
+  .dropzone input[type="file"] { display: none; }
+
+  /* Compact dropzone (inline, smaller) */
+  .dropzone-compact {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+    padding: var(--space-sm, 8px) var(--space-md, 16px);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: var(--font-sm, 13px);
+    color: var(--text-dim);
+  }
+  .dropzone-compact:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* File item (uploaded file row) */
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+    padding: 8px 12px;
+    font-size: var(--font-sm, 13px);
+    border-radius: var(--radius, 8px);
+    background: var(--bg-card);
+    transition: background 0.12s;
+  }
+  .file-item + .file-item { margin-top: var(--space-xs, 4px); }
+  .file-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+    color: var(--accent);
+  }
+  .file-info { flex: 1; min-width: 0; }
+  .file-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-meta { font-size: var(--font-xs, 11px); color: var(--text-dim); }
+
+  /* ── Carousel (scroll-snap) ───────────────────────────────────── */
+  .carousel {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    gap: var(--space-md, 16px);
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .carousel::-webkit-scrollbar { display: none; }
+  .carousel-item {
+    scroll-snap-align: start;
+    flex-shrink: 0;
+  }
+  /* Full-width slides (1 visible) */
+  .carousel-full .carousel-item { width: 100%; }
+  /* Peek slides (show partial next) */
+  .carousel-peek .carousel-item { width: 85%; }
+  /* Card-sized slides */
+  .carousel-cards .carousel-item { width: 260px; }
+
+  .carousel-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-top: var(--space-sm, 8px);
+  }
+  .carousel-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--border);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .carousel-dot.active {
+    background: var(--accent);
+    width: 18px;
+    border-radius: 3px;
+  }
+
+  /* ── Popover (CSS popover API) ──────────────────────────────────── */
+  .popover-content {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 200px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    padding: var(--space-sm, 8px) var(--space-md, 16px);
+    box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.1));
+    z-index: 50;
+    font-size: var(--font-sm, 13px);
+    display: none;
+  }
+  .popover { position: relative; display: inline-block; }
+  .popover:focus-within .popover-content { display: block; }
+
+  /* ── Aspect ratio ───────────────────────────────────────────────── */
+  .aspect-square { aspect-ratio: 1; }
+  .aspect-video { aspect-ratio: 16/9; }
+  .aspect-4-3 { aspect-ratio: 4/3; }
+
+  @media (max-width: 768px) {
+    .app-header { padding: var(--space-sm, 8px) var(--page-padding, 1rem); padding-top: calc(var(--space-sm, 8px) + env(safe-area-inset-top, 0px)); }
+    .app-body, .app-body-wide { padding: 0 var(--page-padding, 1rem) var(--page-padding, 1rem); }
+    .app-footer { padding: var(--space-sm, 8px) var(--page-padding, 1rem); }
+  }
+</style>
+</head>
+<body style="background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.5; -webkit-font-smoothing: antialiased;">
+
+<div class="page" style="max-width: 1080px;">
+
+<h1 style="font-size: var(--font-xl); margin-bottom: 4px;">ALF UI Components</h1>
+<p class="text-dim text-sm" style="margin-bottom: 48px;">Copy-paste reference for building ALF apps. Every component below uses only <code>alf-ui.css</code> classes.</p>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE LAYOUTS                                                        -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Page Layouts</div>
+
+<div class="gallery-label">.app-shell + .app-header + .app-body — Standard app skeleton</div>
+<div class="layout-demo">
+  <div style="display:flex; flex-direction:column; height:100%;">
+    <div class="app-header" style="position:relative;">
+      <h1 class="app-header-title">My App</h1>
+      <span class="spacer"></span>
+      <div class="app-header-actions">
+        <button class="btn-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
+        <button class="btn btn-primary btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Add
+        </button>
+      </div>
+    </div>
+    <div style="flex:1; padding: 0 2.5rem 2.5rem; overflow:auto;">
+      <div class="filter-tabs">
+        <button class="tab active">All</button>
+        <button class="tab">Active</button>
+        <button class="tab">Archived</button>
+      </div>
+      <div class="card-group">
+        <div class="list-item-interactive"><span class="dot dot-success"></span><span class="flex-1">Item one</span><span class="text-dim text-xs">2m ago</span></div>
+        <div class="list-item-interactive"><span class="dot dot-warning"></span><span class="flex-1">Item two</span><span class="text-dim text-xs">1h ago</span></div>
+        <div class="list-item-interactive"><span class="dot dot-danger"></span><span class="flex-1">Item three</span><span class="text-dim text-xs">3h ago</span></div>
+      </div>
+    </div>
+    <div class="app-footer" style="position:relative;">
+      <span>3 items</span>
+      <span class="spacer"></span>
+      <span>Updated just now</span>
+    </div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.app-shell + .app-body-wide — Full-width dashboard layout</div>
+<div class="layout-demo">
+  <div style="display:flex; flex-direction:column; height:100%;">
+    <div class="app-header" style="position:relative;">
+      <h1 class="app-header-title">Dashboard</h1>
+      <span class="app-header-subtitle">Last 7 days</span>
+      <span class="spacer"></span>
+      <div class="app-header-actions">
+        <button class="btn btn-sm">Export</button>
+      </div>
+    </div>
+    <div style="flex:1; padding: 0 2.5rem 2.5rem; overflow:auto;">
+      <div class="stat-grid mb-md" style="grid-template-columns: repeat(3,1fr);">
+        <div class="stat-item"><div class="stat-bar" style="background:var(--accent)"></div><div class="stat-value">1,284</div><div class="stat-label">Total</div></div>
+        <div class="stat-item"><div class="stat-bar" style="background:var(--green)"></div><div class="stat-value">94%</div><div class="stat-label">Success</div></div>
+        <div class="stat-item"><div class="stat-bar" style="background:var(--red)"></div><div class="stat-value">12</div><div class="stat-label">Errors</div></div>
+      </div>
+      <div class="card" style="padding: 8px 0;">
+        <table class="data-table">
+          <thead><tr><th>Name</th><th>Status</th><th class="num">Count</th></tr></thead>
+          <tbody>
+            <tr><td>Pipeline A</td><td><span class="tag tag-success">OK</span></td><td class="num">843</td></tr>
+            <tr><td>Pipeline B</td><td><span class="tag tag-warning">Slow</span></td><td class="num">441</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">Settings page pattern</div>
+<div class="layout-demo">
+  <div style="display:flex; flex-direction:column; height:100%;">
+    <div class="app-header" style="position:relative;">
+      <h1 class="app-header-title">Settings</h1>
+    </div>
+    <div style="flex:1; padding: 0 2.5rem 2.5rem; overflow:auto; max-width:640px;">
+      <div class="settings-section">
+        <div class="section-label">General</div>
+        <div class="card">
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Notifications</div>
+              <div class="settings-row-desc">Receive alerts when tasks complete</div>
+            </div>
+            <label class="toggle"><input type="checkbox" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Language</div>
+              <div class="settings-row-desc">Display language for the app</div>
+            </div>
+            <select class="select" style="width:140px;"><option>English</option><option>French</option></select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Auto-save</div>
+              <div class="settings-row-desc">Save changes automatically every 30s</div>
+            </div>
+            <label class="toggle"><input type="checkbox"><span class="toggle-track"></span></label>
+          </div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="section-label">Danger zone</div>
+        <div class="danger-zone">
+          <div class="settings-row" style="border:none; padding-top:0;">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Delete all data</div>
+              <div class="settings-row-desc">This action cannot be undone</div>
+            </div>
+            <button class="btn btn-danger btn-sm">Delete</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">Detail view with back navigation</div>
+<div class="layout-demo">
+  <div style="display:flex; flex-direction:column; height:100%;">
+    <div class="app-header" style="position:relative;">
+      <button class="app-detail-back" style="margin:0;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+        Back
+      </button>
+      <span class="spacer"></span>
+      <div class="app-header-actions">
+        <button class="btn-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+        <button class="btn-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
+      </div>
+    </div>
+    <div style="flex:1; padding: 0 2.5rem 2.5rem; overflow:auto; max-width:640px;">
+      <h2 style="font-size: var(--font-lg); margin-bottom: var(--space-xs);">Project Alpha</h2>
+      <div class="flex gap-sm mb-md">
+        <span class="tag tag-accent">Active</span>
+        <span class="tag">v2.1.0</span>
+      </div>
+      <div class="card mb-md">
+        <div class="kv-row"><span class="kv-label">Created</span><span class="kv-value">Mar 15, 2026</span></div>
+        <div class="kv-row"><span class="kv-label">Owner</span><span class="kv-value">Alessandro</span></div>
+        <div class="kv-row"><span class="kv-label">Status</span><span class="kv-value"><span class="dot dot-success"></span> Running</span></div>
+      </div>
+      <div class="section-label">Activity</div>
+      <div class="card-group">
+        <div class="list-item"><span class="text-dim text-xs" style="width:60px;">10:32</span><span>Deployed to production</span></div>
+        <div class="list-item"><span class="text-dim text-xs" style="width:60px;">09:15</span><span>Tests passed</span></div>
+        <div class="list-item"><span class="text-dim text-xs" style="width:60px;">08:40</span><span>PR merged</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- BUTTONS                                                              -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Buttons</div>
+
+<div class="gallery-label">.btn variants</div>
+<div class="gallery-grid">
+  <button class="btn">Default</button>
+  <button class="btn btn-primary">Primary</button>
+  <button class="btn btn-danger">Danger</button>
+  <button class="btn btn-success">Success</button>
+  <button class="btn btn-ghost">Ghost</button>
+  <button class="btn" disabled>Disabled</button>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.btn sizes</div>
+<div class="gallery-grid items-center">
+  <button class="btn btn-sm">Small</button>
+  <button class="btn">Default</button>
+  <button class="btn btn-lg">Large</button>
+  <button class="btn btn-block">Block (full width)</button>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.btn with icon</div>
+<div class="gallery-grid items-center">
+  <button class="btn btn-primary">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+    Add item
+  </button>
+  <button class="btn">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+    Download
+  </button>
+  <button class="btn-icon">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+  </button>
+  <button class="btn-icon-accent">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.btn-group + .btn.active (toggle group)</div>
+<div class="btn-group">
+  <button class="btn btn-sm active">1x</button>
+  <button class="btn btn-sm">1.5x</button>
+  <button class="btn btn-sm">2x</button>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- CARDS                                                                -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Cards</div>
+
+<div class="gallery-label">.card — basic</div>
+<div class="card">
+  <div class="card-header">
+    <h3 style="font-size: var(--font-md); margin:0;">Card title</h3>
+    <button class="btn-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
+  </div>
+  <p class="text-sm text-dim">Card body text. Use cards for grouping related content.</p>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.card-interactive — clickable card</div>
+<div class="gallery-grid">
+  <div class="card-interactive">
+    <div class="text-bold mb-xs">Project Alpha</div>
+    <div class="text-sm text-dim">Last updated 2h ago</div>
+  </div>
+  <div class="card-interactive">
+    <div class="text-bold mb-xs">Project Beta</div>
+    <div class="text-sm text-dim">Last updated 5m ago</div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.card-group — grouped list items with separators</div>
+<div class="card-group">
+  <div class="list-item-interactive">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+    <span class="flex-1">document.pdf</span>
+    <span class="text-dim text-xs">2.4 MB</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+  </div>
+  <div class="list-item-interactive">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+    <span class="flex-1">image.png</span>
+    <span class="text-dim text-xs">890 KB</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+  </div>
+  <div class="list-item-interactive">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+    <span class="flex-1">data.json</span>
+    <span class="text-dim text-xs">124 KB</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- CONTENT CARD — title + tag + body + hook + source                    -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Content Card</div>
+
+<div class="gallery-label">.card — content card with tag, body, hook, source (e.g. feed items, post ideas, articles)</div>
+<div class="flex-col gap-sm" style="max-width:600px;">
+
+  <div class="card">
+    <div class="mb-xs">
+      <span class="text-bold text-md">Netflix just open-sourced their first AI model: VOID removes objects from video.</span>
+    </div>
+    <div class="mb-sm">
+      <span class="tag tag-accent">Thread</span>
+    </div>
+    <p class="text-sm mb-sm">Netflix vient de publier VOID sur Hugging Face, un modèle capable de supprimer des objets dans les vidéos. Leur passage à l'open-source change la donne pour les créateurs indépendants.</p>
+    <p class="text-sm text-dim mb-sm" style="font-style: italic;">Netflix publiant son premier modèle open-source est un signal fort que les géants du streaming entrent dans la course à l'IA générative vidéo.</p>
+    <div class="text-xs text-dim">Source : Netflix just dropped their first public model on Hugging Face</div>
+  </div>
+
+  <div class="card">
+    <div class="mb-xs">
+      <span class="text-bold text-md">Iran conflict just took down AWS availability zones in Bahrain &amp; Dubai. Geopolitics = cloud outages now.</span>
+    </div>
+    <div class="mb-sm">
+      <span class="tag tag-mauve">Long post</span>
+    </div>
+    <p class="text-sm mb-sm">Les frappes iraniennes ont mis hors ligne des zones AWS dans le Golfe. On construit des architectures multi-régions pour les pannes techniques, mais pas pour les guerres.</p>
+    <p class="text-sm text-dim mb-sm" style="font-style: italic;">L'intersection entre conflit armé et infrastructure cloud est un sujet rare et important pour tout professionnel de la tech.</p>
+    <div class="text-xs text-dim">Source : Iran strikes leave Amazon availability zones "hard down" in Bahrain and Dubai</div>
+  </div>
+
+</div>
+
+<div class="gallery-spacer"></div>
+<div class="gallery-label">Pattern rules — what NOT to do</div>
+<div class="alert alert-danger" style="max-width:600px;">
+  <div class="text-sm text-bold mb-xs">WRONG — common LLM mistakes</div>
+  <ul class="text-sm" style="padding-left:1.2rem; color:var(--text-dim);">
+    <li>Solid <code>background: var(--accent)</code> on tags — use <code>.tag.tag-accent</code> (translucent 15%)</li>
+    <li>Custom <code>border-left</code> on cards — cards have no borders, use <code>.card</code> as-is</li>
+    <li>Inline <code>text-transform: uppercase; font-size: 11px</code> — use <code>.text-xs.text-bold</code></li>
+    <li>Custom italic class for hook text — use <code>style="font-style:italic"</code> on <code>.text-sm.text-dim</code></li>
+    <li>Hardcoded colors like <code>#ff6b35</code> or <code>rgba(...)</code> — always use CSS variables</li>
+    <li>Custom <code>border-left: 3px solid var(--danger)</code> on cards — use <code>.alert.alert-danger</code> instead</li>
+  </ul>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- FORMS                                                                -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Forms</div>
+
+<div class="gallery-label">.form-group — label + input + hint</div>
+<div style="max-width:400px;">
+  <div class="form-group">
+    <label class="form-label">Email</label>
+    <input class="input" type="text" placeholder="you@example.com">
+    <div class="form-hint">We'll never share your email</div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Category</label>
+    <select class="select">
+      <option>Productivity</option>
+      <option>Games</option>
+      <option>Tools</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Description</label>
+    <textarea class="textarea" placeholder="Tell us more..."></textarea>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.form-row — side-by-side inputs</div>
+<div style="max-width:400px;">
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label">First name</label>
+      <input class="input" type="text" placeholder="John">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Last name</label>
+      <input class="input" type="text" placeholder="Doe">
+    </div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.input-row — input + button</div>
+<div style="max-width:400px;">
+  <div class="input-row">
+    <input class="input" type="text" placeholder="Add a new item...">
+    <button class="btn btn-primary">Add</button>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.search-box</div>
+<div style="max-width:300px;">
+  <div class="search-box">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    <input type="text" placeholder="Search...">
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.toggle — switch control</div>
+<div class="flex-col gap-sm">
+  <label class="toggle"><input type="checkbox" checked><span class="toggle-track"></span>Enabled</label>
+  <label class="toggle"><input type="checkbox"><span class="toggle-track"></span>Disabled</label>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.form-check — checkbox / radio</div>
+<div class="flex-col gap-sm">
+  <label class="form-check"><input type="checkbox" checked> Remember me</label>
+  <label class="form-check"><input type="checkbox"> Send notifications</label>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.check — custom circle checkbox</div>
+<div class="flex-col gap-sm">
+  <div class="flex items-center"><div class="check checked"></div><span class="text-sm">Completed task</span></div>
+  <div class="flex items-center"><div class="check"></div><span class="text-sm">Pending task</span></div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- NAVIGATION                                                           -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Navigation</div>
+
+<div class="gallery-label">.filter-tabs — segmented control (in-page filtering)</div>
+<div class="filter-tabs">
+  <button class="tab active">All</button>
+  <button class="tab">Active</button>
+  <button class="tab">Completed</button>
+  <button class="tab">Archived</button>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.tab-bar — underline navigation (page/view switching)</div>
+<div class="tab-bar">
+  <button class="tab-item active">Overview</button>
+  <button class="tab-item">Settings</button>
+  <button class="tab-item">History</button>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- DATA DISPLAY                                                         -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Data Display</div>
+
+<div class="gallery-label">.stat-grid — KPI / metric cards</div>
+<div class="stat-grid mb-md">
+  <div class="stat-item">
+    <div class="stat-bar" style="background: var(--accent)"></div>
+    <div class="stat-value">2,847</div>
+    <div class="stat-label">Total visits</div>
+    <div class="stat-sub"><span class="change-up">12%</span></div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-bar" style="background: var(--green)"></div>
+    <div class="stat-value">94.2%</div>
+    <div class="stat-label">Uptime</div>
+    <div class="stat-sub"><span class="change-up">0.3%</span></div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-bar" style="background: var(--yellow)"></div>
+    <div class="stat-value">1.2s</div>
+    <div class="stat-label">Avg response</div>
+    <div class="stat-sub"><span class="change-down">8%</span></div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-bar" style="background: var(--red)"></div>
+    <div class="stat-value">3</div>
+    <div class="stat-label">Errors</div>
+    <div class="stat-sub"><span class="change-flat">0%</span></div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.data-table</div>
+<div class="card" style="padding: 0;">
+  <table class="data-table">
+    <thead>
+      <tr><th>Endpoint</th><th>Method</th><th>Status</th><th class="num">Latency</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>/api/users</td><td><span class="tag tag-accent">GET</span></td><td class="positive">200</td><td class="num">45ms</td></tr>
+      <tr><td>/api/tasks</td><td><span class="tag tag-success">POST</span></td><td class="positive">201</td><td class="num">120ms</td></tr>
+      <tr><td>/api/auth</td><td><span class="tag tag-warning">POST</span></td><td class="negative">401</td><td class="num">890ms</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.kv-row — key-value pairs</div>
+<div class="card">
+  <div class="kv-row"><span class="kv-label">Version</span><span class="kv-value">2.1.0</span></div>
+  <div class="kv-row"><span class="kv-label">Author</span><span class="kv-value">Alessandro</span></div>
+  <div class="kv-row"><span class="kv-label">Last deploy</span><span class="kv-value">2 hours ago</span></div>
+  <div class="kv-row"><span class="kv-label">Status</span><span class="kv-value flex items-center gap-xs"><span class="dot dot-success"></span> Running</span></div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.progress-bar</div>
+<div style="max-width:400px;" class="flex-col gap-md">
+  <div class="progress-bar">
+    <div class="progress-track"><div class="progress-fill" style="width:72%"></div></div>
+    <span class="progress-label">72%</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-track"><div class="progress-fill" style="width:35%; background:var(--yellow)"></div></div>
+    <span class="progress-label">35%</span>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- TAGS, BADGES, STATUS                                                 -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Tags, Badges & Status</div>
+
+<div class="gallery-label">.tag variants</div>
+<div class="gallery-grid">
+  <span class="tag">Default</span>
+  <span class="tag tag-accent">Accent</span>
+  <span class="tag tag-success">Success</span>
+  <span class="tag tag-danger">Danger</span>
+  <span class="tag tag-warning">Warning</span>
+  <span class="tag tag-mauve">Mauve</span>
+  <span class="tag tag-sapphire">Sapphire</span>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.count-badge</div>
+<div class="gallery-grid items-center">
+  <span class="count-badge">3</span>
+  <span class="count-badge">12</span>
+  <span class="count-badge">99+</span>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.dot — status indicators</div>
+<div class="gallery-grid items-center">
+  <span class="flex items-center gap-xs text-sm"><span class="dot dot-success"></span> Online</span>
+  <span class="flex items-center gap-xs text-sm"><span class="dot dot-warning"></span> Degraded</span>
+  <span class="flex items-center gap-xs text-sm"><span class="dot dot-danger"></span> Down</span>
+  <span class="flex items-center gap-xs text-sm"><span class="dot dot-accent"></span> Syncing</span>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.chip — removable tag</div>
+<div class="gallery-grid">
+  <span class="chip">javascript <button class="chip-close">&times;</button></span>
+  <span class="chip chip-accent">priority <button class="chip-close">&times;</button></span>
+  <span class="chip chip-danger">urgent <button class="chip-close">&times;</button></span>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- ALERTS                                                               -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Alerts</div>
+
+<div class="flex-col gap-sm">
+  <div class="alert alert-info">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline; vertical-align:-2px; margin-right:6px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    This is an informational message.
+  </div>
+  <div class="alert alert-success">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline; vertical-align:-2px; margin-right:6px;"><path d="M20 6 9 17l-5-5"/></svg>
+    Changes saved successfully.
+  </div>
+  <div class="alert alert-warning">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline; vertical-align:-2px; margin-right:6px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/></svg>
+    Quota is at 90%. Consider upgrading.
+  </div>
+  <div class="alert alert-danger">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline; vertical-align:-2px; margin-right:6px;"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+    Connection failed. Retrying in 5s...
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- LOADING & EMPTY STATES                                               -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Loading & Empty States</div>
+
+<div class="gallery-label">.spinner sizes</div>
+<div class="gallery-grid items-center">
+  <div class="spinner spinner-sm"></div>
+  <div class="spinner"></div>
+  <div class="spinner spinner-lg"></div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.loading-state</div>
+<div class="card">
+  <div class="loading-state"><div class="spinner"></div> Loading data...</div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.skeleton — content placeholders</div>
+<div class="card">
+  <div class="flex items-center gap-sm mb-md">
+    <div class="skeleton-circle"></div>
+    <div class="flex-1">
+      <div class="skeleton-text" style="width:60%"></div>
+      <div class="skeleton-text" style="width:40%"></div>
+    </div>
+  </div>
+  <div class="skeleton" style="height:80px; width:100%;"></div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.empty-state</div>
+<div class="card">
+  <div class="empty-state">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+    <p>No documents yet. Create your first one to get started.</p>
+    <button class="btn btn-primary btn-sm">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      Create document
+    </button>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- AVATARS                                                              -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Avatars</div>
+
+<div class="gallery-label">.avatar sizes</div>
+<div class="gallery-grid items-center">
+  <div class="avatar avatar-sm">A</div>
+  <div class="avatar">AL</div>
+  <div class="avatar avatar-lg">JD</div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.avatar-stack</div>
+<div class="avatar-stack">
+  <div class="avatar">A</div>
+  <div class="avatar" style="background:var(--mauve)">B</div>
+  <div class="avatar" style="background:var(--teal)">C</div>
+  <div class="avatar" style="background:var(--peach)">+2</div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- MISC                                                                 -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Miscellaneous</div>
+
+<div class="gallery-label">.section-label with count</div>
+<div class="section-label">Recent items <span class="count">24</span></div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.divider</div>
+<hr class="divider">
+
+<div class="gallery-label">.kbd — keyboard shortcuts</div>
+<div class="gallery-grid items-center">
+  <span><kbd class="kbd">⌘</kbd> + <kbd class="kbd">K</kbd></span>
+  <span><kbd class="kbd">Esc</kbd></span>
+  <span><kbd class="kbd">⌘</kbd> + <kbd class="kbd">⇧</kbd> + <kbd class="kbd">P</kbd></span>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.meta — icon + text inline</div>
+<div class="gallery-grid">
+  <span class="meta">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    3 min ago
+  </span>
+  <span class="meta">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    Alessandro
+  </span>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.danger-zone</div>
+<div class="danger-zone">
+  <h4 style="margin: 0 0 4px;">Delete this project</h4>
+  <p class="text-sm text-dim" style="margin: 0 0 12px;">Once deleted, this cannot be recovered.</p>
+  <button class="btn btn-danger btn-sm">Delete project</button>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.change-up / .change-down / .change-flat</div>
+<div class="gallery-grid">
+  <span class="change-up">12.5%</span>
+  <span class="change-down">3.2%</span>
+  <span class="change-flat">0.0%</span>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.done — completed state</div>
+<div class="text-sm"><span class="done">Buy groceries</span></div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- COMPOSITE PATTERNS                                                   -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Composite Patterns</div>
+
+<div class="gallery-label">List with search + filters + card-group</div>
+<div class="app-list-header">
+  <div class="search-box" style="flex:1; min-width:180px;">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    <input type="text" placeholder="Search tasks...">
+  </div>
+  <div class="filter-tabs" style="margin-bottom:0;">
+    <button class="tab active">All</button>
+    <button class="tab">Todo</button>
+    <button class="tab">Done</button>
+  </div>
+</div>
+<div class="card-group">
+  <div class="list-item-interactive">
+    <div class="check"></div>
+    <div class="flex-1">
+      <div class="text-sm">Design the landing page</div>
+      <div class="meta mt-xs">
+        <span class="tag tag-accent" style="font-size:10px;">design</span>
+        <span class="text-xs text-dim">Due tomorrow</span>
+      </div>
+    </div>
+  </div>
+  <div class="list-item-interactive">
+    <div class="check checked"></div>
+    <div class="flex-1">
+      <div class="text-sm done">Set up CI pipeline</div>
+      <div class="meta mt-xs">
+        <span class="tag tag-success" style="font-size:10px;">devops</span>
+        <span class="text-xs text-dim">Completed yesterday</span>
+      </div>
+    </div>
+  </div>
+  <div class="list-item-interactive">
+    <div class="check"></div>
+    <div class="flex-1">
+      <div class="text-sm">Write API documentation</div>
+      <div class="meta mt-xs">
+        <span class="tag tag-mauve" style="font-size:10px;">docs</span>
+        <span class="text-xs text-dim">Due in 3 days</span>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="footer-stats">2 remaining &middot; 1 completed</div>
+
+<div class="gallery-spacer"></div>
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">Form inside a card (create / edit view)</div>
+<div class="card" style="max-width:480px;">
+  <div class="card-header">
+    <h3 style="font-size:var(--font-md); margin:0;">New project</h3>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Project name</label>
+    <input class="input" type="text" placeholder="my-awesome-project">
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label">Category</label>
+      <select class="select"><option>Productivity</option><option>Games</option></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Visibility</label>
+      <select class="select"><option>Private</option><option>Public</option></select>
+    </div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Description</label>
+    <textarea class="textarea" rows="3" placeholder="What does this project do?"></textarea>
+  </div>
+  <div class="flex justify-end gap-sm" style="margin-top:var(--space-md);">
+    <button class="btn">Cancel</button>
+    <button class="btn btn-primary">Create</button>
+  </div>
+</div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- WORKSPACE LAYOUTS                                                    -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Workspace Layouts</div>
+
+<div class="gallery-label">.workspace — sidebar + main (email/notes pattern)</div>
+<div class="layout-demo" style="height:360px;">
+  <div style="display:flex; height:100%; overflow:hidden;">
+    <!-- Sidebar -->
+    <div class="workspace-sidebar" style="border-right: 1px solid color-mix(in srgb, var(--border) 40%, transparent);">
+      <div class="workspace-sidebar-header">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg>
+        Workspace
+      </div>
+      <div class="workspace-sidebar-body">
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">Navigation</div>
+          <nav class="sidebar-nav">
+            <button class="sidebar-item active">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+              Dashboard
+            </button>
+            <button class="sidebar-item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+              Documents
+              <span class="count-badge" style="font-size:10px; min-width:16px; height:16px; padding:0 4px;">3</span>
+            </button>
+            <button class="sidebar-item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              Contacts
+            </button>
+          </nav>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">Projects</div>
+          <nav class="sidebar-nav">
+            <button class="sidebar-item">
+              <span class="dot dot-success"></span>
+              Alpha
+            </button>
+            <button class="sidebar-item">
+              <span class="dot dot-warning"></span>
+              Beta
+            </button>
+            <button class="sidebar-item">
+              <span class="dot dot-accent"></span>
+              Gamma
+            </button>
+          </nav>
+        </div>
+      </div>
+      <div class="workspace-sidebar-footer">
+        <button class="sidebar-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          Settings
+        </button>
+      </div>
+    </div>
+    <!-- Main -->
+    <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+      <div class="workspace-main-header">
+        <h3 style="margin:0; font-size:var(--font-sm);">Dashboard</h3>
+        <span class="spacer"></span>
+        <div class="search-box" style="min-width:0;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" placeholder="Search..." style="min-width:80px;">
+        </div>
+      </div>
+      <div class="workspace-main-body">
+        <div class="stat-grid mb-md" style="grid-template-columns: repeat(2,1fr);">
+          <div class="stat-item"><div class="stat-bar" style="background:var(--accent)"></div><div class="stat-value">128</div><div class="stat-label">Total</div></div>
+          <div class="stat-item"><div class="stat-bar" style="background:var(--green)"></div><div class="stat-value">96%</div><div class="stat-label">Success</div></div>
+        </div>
+        <div class="section-label">Recent</div>
+        <div class="card-group">
+          <div class="list-item-interactive"><span class="flex-1 text-sm">Design review</span><span class="tag tag-accent" style="font-size:10px">In progress</span></div>
+          <div class="list-item-interactive"><span class="flex-1 text-sm">API migration</span><span class="tag tag-success" style="font-size:10px">Done</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.workspace — sidebar + list + detail (3-panel)</div>
+<div class="layout-demo" style="height:360px;">
+  <div style="display:flex; height:100%; overflow:hidden;">
+    <!-- Sidebar (narrow) -->
+    <div style="width:180px; flex-shrink:0; display:flex; flex-direction:column; background:var(--bg-card); border-right:1px solid color-mix(in srgb, var(--border) 40%, transparent);">
+      <div class="workspace-sidebar-header" style="padding:12px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><path d="m22 6-10 7L2 6"/></svg>
+        Mail
+      </div>
+      <div style="flex:1; overflow-y:auto; padding:0 4px 4px;">
+        <nav class="sidebar-nav">
+          <button class="sidebar-item active" style="font-size:12px; padding:6px 8px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            Inbox <span class="count-badge" style="font-size:9px; min-width:14px; height:14px; padding:0 3px; margin-left:auto;">5</span>
+          </button>
+          <button class="sidebar-item" style="font-size:12px; padding:6px 8px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+            Sent
+          </button>
+          <button class="sidebar-item" style="font-size:12px; padding:6px 8px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+            Trash
+          </button>
+        </nav>
+      </div>
+    </div>
+    <!-- List panel -->
+    <div style="width:220px; flex-shrink:0; display:flex; flex-direction:column; border-right:1px solid color-mix(in srgb, var(--border) 40%, transparent); overflow:hidden;">
+      <div class="workspace-main-header" style="padding:8px 12px;">
+        <span class="text-sm text-bold">Inbox</span>
+        <span class="spacer"></span>
+        <span class="text-xs text-dim">5 new</span>
+      </div>
+      <div style="flex:1; overflow-y:auto;">
+        <div class="list-item-interactive" style="padding:10px 12px; background:color-mix(in srgb, var(--accent) 6%, var(--bg)); flex-direction:column; align-items:stretch; gap:2px;">
+          <div class="flex items-center gap-xs">
+            <span class="text-sm text-bold" style="flex:1;">Alice</span>
+            <span class="text-xs text-dim">2m</span>
+          </div>
+          <span class="text-xs truncate">Design review for the new landing page</span>
+        </div>
+        <div class="list-item-interactive" style="padding:10px 12px; flex-direction:column; align-items:stretch; gap:2px; border-bottom:1px solid color-mix(in srgb, var(--border) 25%, transparent);">
+          <div class="flex items-center gap-xs">
+            <span class="text-sm" style="flex:1;">Bob</span>
+            <span class="text-xs text-dim">1h</span>
+          </div>
+          <span class="text-xs text-dim truncate">Re: API endpoint changes</span>
+        </div>
+        <div class="list-item-interactive" style="padding:10px 12px; flex-direction:column; align-items:stretch; gap:2px; border-bottom:1px solid color-mix(in srgb, var(--border) 25%, transparent);">
+          <div class="flex items-center gap-xs">
+            <span class="text-sm" style="flex:1;">Carol</span>
+            <span class="text-xs text-dim">3h</span>
+          </div>
+          <span class="text-xs text-dim truncate">Meeting notes from Friday</span>
+        </div>
+      </div>
+    </div>
+    <!-- Detail panel -->
+    <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+      <div class="workspace-detail-header" style="min-height:48px; padding:8px 16px; border-bottom:1px solid color-mix(in srgb, var(--border) 40%, transparent);">
+        <span class="text-sm text-bold">Design review for the new landing page</span>
+        <button class="btn-icon" style="min-height:28px; min-width:28px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+        </button>
+      </div>
+      <div style="flex:1; overflow-y:auto; padding:16px;">
+        <div class="flex items-center gap-sm mb-md">
+          <div class="avatar avatar-sm" style="background:var(--mauve)">A</div>
+          <div>
+            <div class="text-sm text-bold">Alice</div>
+            <div class="text-xs text-dim">2 minutes ago</div>
+          </div>
+        </div>
+        <p class="text-sm" style="margin:0; line-height:1.6;">Hey, can you take a look at the new landing page design? I've updated the hero section and added the testimonials block. Let me know if the spacing looks right on mobile.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- DROPZONE / FILE UPLOAD                                               -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Dropzone / File Upload</div>
+
+<div class="gallery-label">.dropzone — large drop area</div>
+<div style="max-width:500px;">
+  <div class="dropzone">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+    <div class="dropzone-text">Drag & drop files here, or <span style="color:var(--accent); font-weight:500;">browse</span></div>
+    <div class="dropzone-hint">PNG, JPG, PDF up to 10MB</div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.dropzone.dragover — active drag state</div>
+<div style="max-width:500px;">
+  <div class="dropzone dragover">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+    <div class="dropzone-text">Drop files to upload</div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.dropzone-compact — inline drop row</div>
+<div style="max-width:400px;">
+  <div class="dropzone-compact">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+    Attach a file...
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.file-item — uploaded file rows</div>
+<div style="max-width:400px;" class="flex-col">
+  <div class="file-item">
+    <div class="file-icon">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+    </div>
+    <div class="file-info">
+      <div class="file-name">wireframes-v2.pdf</div>
+      <div class="file-meta">2.4 MB &middot; Just now</div>
+    </div>
+    <button class="btn-icon" style="min-height:28px; min-width:28px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="file-item">
+    <div class="file-icon" style="background:color-mix(in srgb, var(--green) 12%, var(--bg)); color:var(--green);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
+    </div>
+    <div class="file-info">
+      <div class="file-name">hero-screenshot.png</div>
+      <div class="file-meta">890 KB &middot; 2 min ago</div>
+    </div>
+    <button class="btn-icon" style="min-height:28px; min-width:28px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="file-item">
+    <div class="file-icon" style="background:color-mix(in srgb, var(--yellow) 12%, var(--bg)); color:var(--yellow);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M10 12l2 2 4-4"/></svg>
+    </div>
+    <div class="file-info">
+      <div class="file-name">data-export.csv</div>
+      <div class="file-meta">124 KB &middot; 5 min ago</div>
+    </div>
+    <div class="progress-bar" style="width:80px;">
+      <div class="progress-track"><div class="progress-fill" style="width:65%"></div></div>
+      <span class="progress-label">65%</span>
+    </div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">Composite — dropzone + file list</div>
+<div class="card" style="max-width:450px;">
+  <div class="card-header">
+    <h3 style="font-size:var(--font-sm); margin:0;">Attachments</h3>
+    <span class="text-xs text-dim">2 files</span>
+  </div>
+  <div class="flex-col gap-xs mb-md">
+    <div class="file-item">
+      <div class="file-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+      </div>
+      <div class="file-info">
+        <div class="file-name">report.pdf</div>
+        <div class="file-meta">1.2 MB</div>
+      </div>
+      <button class="btn-icon" style="min-height:28px; min-width:28px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="file-item">
+      <div class="file-icon" style="background:color-mix(in srgb, var(--green) 12%, var(--bg)); color:var(--green);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
+      </div>
+      <div class="file-info">
+        <div class="file-name">mockup.png</div>
+        <div class="file-meta">3.1 MB</div>
+      </div>
+      <button class="btn-icon" style="min-height:28px; min-width:28px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="dropzone-compact">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+    Add more files...
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- ACCORDION                                                            -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Accordion</div>
+
+<div class="gallery-label">.accordion — collapsible sections (uses native details/summary)</div>
+<div class="accordion" style="max-width:500px;">
+  <details>
+    <summary>What is ALF?</summary>
+    <div class="accordion-content">ALF is a personal AI assistant that runs on your own infrastructure. It manages apps, tools, and conversations.</div>
+  </details>
+  <details open>
+    <summary>How do I install apps?</summary>
+    <div class="accordion-content">
+      <p>Use the marketplace in the Control Center to browse and install apps. Apps run in sandboxed iframes with their own storage.</p>
+      <p>Each app gets its own isolated directory and key-value storage. Updates preserve your data automatically.</p>
+    </div>
+  </details>
+  <details>
+    <summary>Can I build my own apps?</summary>
+    <div class="accordion-content">Yes! Use the SDK App Builder skill. Apps are vanilla HTML/CSS/JS using the AlfSDK and alf-ui.css design system.</div>
+  </details>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.accordion with .accordion-list — multiple items inside a section (e.g. feed, articles, logs)</div>
+<div class="accordion" style="max-width:600px;">
+  <details open>
+    <summary>IA &amp; Machine Learning <span class="text-dim text-xs" style="margin-left:auto; margin-right:8px;">4</span></summary>
+    <div class="accordion-list">
+      <div class="accordion-list-item">
+        <div class="text-bold mb-xs">Anthropic buys biotech startup Coefficient Bio in $400M deal</div>
+        <div class="flex gap-xs mb-xs">
+          <span class="tag tag-accent">RSS</span>
+          <span class="tag tag-warning">To read</span>
+        </div>
+        <p class="text-sm text-dim m-0">Anthropic acquiert la startup biotech pour 400 millions de dollars, signalant une expansion vers l'IA appliquée aux sciences de la vie.</p>
+      </div>
+      <div class="accordion-list-item">
+        <div class="text-bold mb-xs">Netflix just dropped their first public model on Hugging Face: VOID</div>
+        <div class="flex gap-xs mb-xs">
+          <span class="tag tag-danger">Reddit</span>
+          <span class="tag tag-warning">To read</span>
+        </div>
+        <p class="text-sm text-dim m-0">Netflix publie son premier modèle open-source, un modèle spécialisé dans la suppression d'objets et d'interactions dans des vidéos.</p>
+      </div>
+      <div class="accordion-list-item">
+        <div class="text-bold mb-xs">Gemma 4 is fine great even for local use</div>
+        <div class="flex gap-xs mb-xs">
+          <span class="tag tag-danger">Reddit</span>
+          <span class="tag tag-warning">To read</span>
+        </div>
+        <p class="text-sm text-dim m-0">La communauté LocalLLaMA salue les performances de Gemma 4, jugé excellent pour un usage local.</p>
+      </div>
+    </div>
+  </details>
+  <details>
+    <summary>DevOps &amp; Cloud <span class="text-dim text-xs" style="margin-left:auto; margin-right:8px;">2</span></summary>
+    <div class="accordion-list">
+      <div class="accordion-list-item">
+        <div class="text-bold mb-xs">Iran conflict took down AWS availability zones in Bahrain</div>
+        <div class="flex gap-xs mb-xs">
+          <span class="tag tag-sapphire">HN</span>
+        </div>
+        <p class="text-sm text-dim m-0">Les frappes ont mis hors ligne des zones AWS dans le Golfe.</p>
+      </div>
+    </div>
+  </details>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- TOOLTIP                                                              -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Tooltip</div>
+
+<div class="gallery-label">[data-tooltip] — CSS-only hover tooltip</div>
+<div class="gallery-grid items-center">
+  <button class="btn" data-tooltip="Save your changes">Hover me</button>
+  <button class="btn-icon" data-tooltip="Settings">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+  </button>
+  <span class="tag tag-accent" data-tooltip="12 items matched">Active</span>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- DROPDOWN MENU                                                        -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Dropdown Menu</div>
+
+<div class="gallery-label">.dropdown + .dropdown-menu (focus-within triggered)</div>
+<div class="gallery-grid">
+  <div class="dropdown">
+    <button class="btn-icon" tabindex="0">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+    </button>
+    <div class="dropdown-menu" style="left:0; right:auto;">
+      <div class="dropdown-label">Actions</div>
+      <button class="dropdown-item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+        Edit
+      </button>
+      <button class="dropdown-item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+        Duplicate
+      </button>
+      <div class="dropdown-separator"></div>
+      <button class="dropdown-item dropdown-item-danger">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+        Delete
+      </button>
+    </div>
+  </div>
+
+  <div class="dropdown">
+    <button class="btn btn-sm" tabindex="0">
+      Options
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="dropdown-menu">
+      <button class="dropdown-item">Export as CSV</button>
+      <button class="dropdown-item">Export as JSON</button>
+      <div class="dropdown-separator"></div>
+      <button class="dropdown-item">Print</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- BREADCRUMB                                                           -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Breadcrumb</div>
+
+<div class="gallery-label">.breadcrumb</div>
+<nav class="breadcrumb">
+  <a href="#">Home</a>
+  <span class="breadcrumb-sep">/</span>
+  <a href="#">Projects</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Alpha</span>
+</nav>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- PAGINATION                                                           -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Pagination</div>
+
+<div class="gallery-label">.pagination</div>
+<div class="pagination">
+  <button class="page-btn" disabled>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+  </button>
+  <button class="page-btn active">1</button>
+  <button class="page-btn">2</button>
+  <button class="page-btn">3</button>
+  <span class="page-ellipsis">...</span>
+  <button class="page-btn">12</button>
+  <button class="page-btn">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+  </button>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- SLIDER                                                               -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Slider</div>
+
+<div class="gallery-label">.slider — styled range input</div>
+<div style="max-width:300px;" class="flex-col gap-md">
+  <div>
+    <div class="flex justify-between mb-xs">
+      <span class="text-sm">Volume</span>
+      <span class="text-sm text-dim">72%</span>
+    </div>
+    <input type="range" class="slider" min="0" max="100" value="72">
+  </div>
+  <div>
+    <div class="flex justify-between mb-xs">
+      <span class="text-sm">Speed</span>
+      <span class="text-sm text-dim">1.5x</span>
+    </div>
+    <input type="range" class="slider" min="0" max="100" value="50">
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- CHARTS                                                               -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Charts</div>
+
+<div class="gallery-label">.bar-chart — vertical bars</div>
+<div class="card" style="max-width:500px;">
+  <div class="card-header">
+    <h3 style="font-size:var(--font-sm); margin:0;">Weekly activity</h3>
+    <span class="text-xs text-dim">Last 7 days</span>
+  </div>
+  <div class="bar-chart" style="height:100px;">
+    <div class="bar-chart-col">
+      <span class="bar-chart-value">12</span>
+      <div class="bar-chart-bar" style="height:40%"></div>
+      <span class="bar-chart-label">Mon</span>
+    </div>
+    <div class="bar-chart-col">
+      <span class="bar-chart-value">28</span>
+      <div class="bar-chart-bar" style="height:93%"></div>
+      <span class="bar-chart-label">Tue</span>
+    </div>
+    <div class="bar-chart-col">
+      <span class="bar-chart-value">18</span>
+      <div class="bar-chart-bar" style="height:60%"></div>
+      <span class="bar-chart-label">Wed</span>
+    </div>
+    <div class="bar-chart-col">
+      <span class="bar-chart-value">24</span>
+      <div class="bar-chart-bar" style="height:80%"></div>
+      <span class="bar-chart-label">Thu</span>
+    </div>
+    <div class="bar-chart-col">
+      <span class="bar-chart-value">30</span>
+      <div class="bar-chart-bar" style="height:100%"></div>
+      <span class="bar-chart-label">Fri</span>
+    </div>
+    <div class="bar-chart-col">
+      <span class="bar-chart-value">8</span>
+      <div class="bar-chart-bar" style="height:27%; background:var(--text-dim)"></div>
+      <span class="bar-chart-label">Sat</span>
+    </div>
+    <div class="bar-chart-col">
+      <span class="bar-chart-value">5</span>
+      <div class="bar-chart-bar" style="height:17%; background:var(--text-dim)"></div>
+      <span class="bar-chart-label">Sun</span>
+    </div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.hbar-chart — horizontal bars</div>
+<div class="card" style="max-width:400px;">
+  <div class="card-header">
+    <h3 style="font-size:var(--font-sm); margin:0;">Top categories</h3>
+  </div>
+  <div class="hbar-chart">
+    <div class="hbar-row">
+      <span class="hbar-label">Design</span>
+      <div class="hbar-track"><div class="hbar-fill" style="width:85%"></div></div>
+      <span class="hbar-value">85%</span>
+    </div>
+    <div class="hbar-row">
+      <span class="hbar-label">Code</span>
+      <div class="hbar-track"><div class="hbar-fill" style="width:62%; background:var(--sapphire)"></div></div>
+      <span class="hbar-value">62%</span>
+    </div>
+    <div class="hbar-row">
+      <span class="hbar-label">Testing</span>
+      <div class="hbar-track"><div class="hbar-fill" style="width:45%; background:var(--yellow)"></div></div>
+      <span class="hbar-value">45%</span>
+    </div>
+    <div class="hbar-row">
+      <span class="hbar-label">Research</span>
+      <div class="hbar-track"><div class="hbar-fill" style="width:28%; background:var(--mauve)"></div></div>
+      <span class="hbar-value">28%</span>
+    </div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.sparkline — inline mini bars</div>
+<div class="gallery-grid items-center">
+  <span class="flex items-center gap-sm text-sm">
+    CPU
+    <span class="sparkline">
+      <span class="sparkline-bar" style="height:30%"></span>
+      <span class="sparkline-bar" style="height:50%"></span>
+      <span class="sparkline-bar" style="height:45%"></span>
+      <span class="sparkline-bar" style="height:70%"></span>
+      <span class="sparkline-bar" style="height:60%"></span>
+      <span class="sparkline-bar" style="height:80%"></span>
+      <span class="sparkline-bar" style="height:55%"></span>
+      <span class="sparkline-bar" style="height:90%"></span>
+      <span class="sparkline-bar" style="height:65%"></span>
+      <span class="sparkline-bar" style="height:40%"></span>
+    </span>
+    <span class="text-dim">42%</span>
+  </span>
+  <span class="flex items-center gap-sm text-sm">
+    Memory
+    <span class="sparkline">
+      <span class="sparkline-bar" style="height:60%; background:var(--yellow)"></span>
+      <span class="sparkline-bar" style="height:62%; background:var(--yellow)"></span>
+      <span class="sparkline-bar" style="height:58%; background:var(--yellow)"></span>
+      <span class="sparkline-bar" style="height:65%; background:var(--yellow)"></span>
+      <span class="sparkline-bar" style="height:70%; background:var(--yellow)"></span>
+      <span class="sparkline-bar" style="height:68%; background:var(--yellow)"></span>
+      <span class="sparkline-bar" style="height:72%; background:var(--yellow)"></span>
+      <span class="sparkline-bar" style="height:75%; background:var(--yellow)"></span>
+      <span class="sparkline-bar" style="height:80%; background:var(--red)"></span>
+      <span class="sparkline-bar" style="height:85%; background:var(--red)"></span>
+    </span>
+    <span class="text-dim">85%</span>
+  </span>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.ring-chart — donut / progress ring</div>
+<div class="gallery-grid items-end">
+  <div style="text-align:center;">
+    <div class="ring-chart">
+      <svg viewBox="0 0 80 80">
+        <circle class="ring-bg" cx="40" cy="40" r="34"/>
+        <circle class="ring-fill" cx="40" cy="40" r="34" stroke-dasharray="213.6" stroke-dashoffset="55.5"/>
+      </svg>
+      <span class="ring-chart-value">74%</span>
+    </div>
+    <div class="ring-chart-label">Storage</div>
+  </div>
+  <div style="text-align:center;">
+    <div class="ring-chart">
+      <svg viewBox="0 0 80 80">
+        <circle class="ring-bg" cx="40" cy="40" r="34"/>
+        <circle class="ring-fill" cx="40" cy="40" r="34" stroke-dasharray="213.6" stroke-dashoffset="149.5" style="stroke:var(--green)"/>
+      </svg>
+      <span class="ring-chart-value">30%</span>
+    </div>
+    <div class="ring-chart-label">CPU</div>
+  </div>
+  <div style="text-align:center;">
+    <div class="ring-chart">
+      <svg viewBox="0 0 80 80">
+        <circle class="ring-bg" cx="40" cy="40" r="34"/>
+        <circle class="ring-fill" cx="40" cy="40" r="34" stroke-dasharray="213.6" stroke-dashoffset="19.2" style="stroke:var(--red)"/>
+      </svg>
+      <span class="ring-chart-value">91%</span>
+    </div>
+    <div class="ring-chart-label">Memory</div>
+  </div>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">Dashboard composite — stats + chart + table</div>
+<div class="card" style="max-width:600px;">
+  <div class="card-header">
+    <h3 style="font-size:var(--font-md); margin:0;">API Metrics</h3>
+    <div class="filter-tabs" style="margin:0;">
+      <button class="tab active">24h</button>
+      <button class="tab">7d</button>
+      <button class="tab">30d</button>
+    </div>
+  </div>
+  <div class="grid-3 mb-md" style="gap:8px;">
+    <div style="text-align:center;">
+      <div class="text-lg text-bold">1.2k</div>
+      <div class="text-xs text-dim">Requests</div>
+      <div class="text-xs"><span class="change-up">8%</span></div>
+    </div>
+    <div style="text-align:center;">
+      <div class="text-lg text-bold">45ms</div>
+      <div class="text-xs text-dim">Avg latency</div>
+      <div class="text-xs"><span class="change-down">12ms</span></div>
+    </div>
+    <div style="text-align:center;">
+      <div class="text-lg text-bold">99.8%</div>
+      <div class="text-xs text-dim">Uptime</div>
+      <div class="text-xs"><span class="change-flat">0%</span></div>
+    </div>
+  </div>
+  <div class="bar-chart" style="height:60px; margin-bottom:var(--space-md);">
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:30%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:45%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:70%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:55%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:90%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:100%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:85%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:60%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:75%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:40%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:50%"></div></div>
+    <div class="bar-chart-col"><div class="bar-chart-bar" style="height:65%"></div></div>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- CAROUSEL                                                             -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Carousel</div>
+
+<div class="gallery-label">.carousel.carousel-cards — scrollable card row</div>
+<div class="carousel carousel-cards" style="max-width:600px;">
+  <div class="carousel-item">
+    <div class="card" style="height:140px; width:260px;">
+      <div class="flex items-center gap-sm mb-sm">
+        <div class="avatar avatar-sm" style="background:var(--accent)">A</div>
+        <div class="text-bold text-sm">Analytics</div>
+      </div>
+      <p class="text-xs text-dim m-0">Track usage patterns and performance metrics across your apps.</p>
+      <div class="flex justify-end mt-sm"><button class="btn btn-sm btn-primary">Open</button></div>
+    </div>
+  </div>
+  <div class="carousel-item">
+    <div class="card" style="height:140px; width:260px;">
+      <div class="flex items-center gap-sm mb-sm">
+        <div class="avatar avatar-sm" style="background:var(--mauve)">N</div>
+        <div class="text-bold text-sm">Notes</div>
+      </div>
+      <p class="text-xs text-dim m-0">Quick notes with markdown support and full-text search.</p>
+      <div class="flex justify-end mt-sm"><button class="btn btn-sm btn-primary">Open</button></div>
+    </div>
+  </div>
+  <div class="carousel-item">
+    <div class="card" style="height:140px; width:260px;">
+      <div class="flex items-center gap-sm mb-sm">
+        <div class="avatar avatar-sm" style="background:var(--teal)">T</div>
+        <div class="text-bold text-sm">Tasks</div>
+      </div>
+      <p class="text-xs text-dim m-0">Organize your work with boards, lists, and due dates.</p>
+      <div class="flex justify-end mt-sm"><button class="btn btn-sm btn-primary">Open</button></div>
+    </div>
+  </div>
+  <div class="carousel-item">
+    <div class="card" style="height:140px; width:260px;">
+      <div class="flex items-center gap-sm mb-sm">
+        <div class="avatar avatar-sm" style="background:var(--peach)">C</div>
+        <div class="text-bold text-sm">Calendar</div>
+      </div>
+      <p class="text-xs text-dim m-0">Schedule events and manage your time with smart reminders.</p>
+      <div class="flex justify-end mt-sm"><button class="btn btn-sm btn-primary">Open</button></div>
+    </div>
+  </div>
+</div>
+<div class="carousel-dots">
+  <button class="carousel-dot active"></button>
+  <button class="carousel-dot"></button>
+  <button class="carousel-dot"></button>
+  <button class="carousel-dot"></button>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.carousel.carousel-peek — full-width slides with peek</div>
+<div class="carousel carousel-peek" style="max-width:500px;">
+  <div class="carousel-item">
+    <div class="card" style="background: color-mix(in srgb, var(--accent) 12%, var(--bg));">
+      <div class="text-bold mb-xs">Welcome to ALF</div>
+      <p class="text-sm text-dim m-0">Your personal AI assistant, running on your own infrastructure.</p>
+    </div>
+  </div>
+  <div class="carousel-item">
+    <div class="card" style="background: color-mix(in srgb, var(--mauve) 12%, var(--bg));">
+      <div class="text-bold mb-xs">Install apps</div>
+      <p class="text-sm text-dim m-0">Browse the marketplace for productivity tools, games, and utilities.</p>
+    </div>
+  </div>
+  <div class="carousel-item">
+    <div class="card" style="background: color-mix(in srgb, var(--teal) 12%, var(--bg));">
+      <div class="text-bold mb-xs">Build your own</div>
+      <p class="text-sm text-dim m-0">Use AlfSDK to create custom apps with the same design system.</p>
+    </div>
+  </div>
+</div>
+<div class="carousel-dots">
+  <button class="carousel-dot active"></button>
+  <button class="carousel-dot"></button>
+  <button class="carousel-dot"></button>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.carousel.carousel-full — image/content slides</div>
+<div class="carousel carousel-full" style="max-width:400px; border-radius: var(--radius); overflow:hidden;">
+  <div class="carousel-item">
+    <div class="aspect-video" style="background: color-mix(in srgb, var(--accent) 20%, var(--bg)); display:flex; align-items:center; justify-content:center;">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
+    </div>
+  </div>
+  <div class="carousel-item">
+    <div class="aspect-video" style="background: color-mix(in srgb, var(--mauve) 20%, var(--bg)); display:flex; align-items:center; justify-content:center;">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--mauve)" stroke-width="1.5"><path d="m22 8-6 4 6 4V8ZM4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/></svg>
+    </div>
+  </div>
+  <div class="carousel-item">
+    <div class="aspect-video" style="background: color-mix(in srgb, var(--teal) 20%, var(--bg)); display:flex; align-items:center; justify-content:center;">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+    </div>
+  </div>
+</div>
+<div class="carousel-dots">
+  <button class="carousel-dot active"></button>
+  <button class="carousel-dot"></button>
+  <button class="carousel-dot"></button>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- POPOVER                                                              -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Popover</div>
+
+<div class="gallery-label">.popover — focus-within content panel</div>
+<div class="popover">
+  <button class="btn btn-sm" tabindex="0">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    More info
+  </button>
+  <div class="popover-content" style="left:0; transform:none;">
+    <div class="text-bold mb-xs">About this feature</div>
+    <p class="text-sm text-dim m-0">This popover appears on focus and can contain any content — text, forms, or actions.</p>
+    <button class="btn btn-sm btn-primary" style="margin-top:8px;">Got it</button>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- PROSE / MARKDOWN                                                      -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Prose / Markdown</div>
+
+<div class="gallery-label">.prose — rendered markdown or rich text content</div>
+<div class="prose" style="max-width:600px;">
+  <h1>Heading 1 — Page title</h1>
+  <h2>Heading 2 — Section</h2>
+  <h3>Heading 3 — Subsection</h3>
+  <h4>Heading 4 — Label</h4>
+  <p>Regular paragraph text. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Use <strong>strong</strong> for emphasis and <em>italic</em> for nuance.</p>
+  <p>Links look like <a href="#">this anchor text</a>. Inline <code>code</code> uses a subtle border.</p>
+  <ul>
+    <li>Unordered list item one</li>
+    <li>Item two with more detail</li>
+    <li>Item three</li>
+  </ul>
+  <ol>
+    <li>Ordered step one</li>
+    <li>Step two</li>
+    <li>Step three</li>
+  </ol>
+  <blockquote>Blockquote — use for callouts, notes, or citations. Gets an accent border and subtle background tint.</blockquote>
+  <pre><code>// Code block — preformatted
+const greeting = 'Hello, ALF!'
+console.log(greeting)</code></pre>
+  <hr>
+  <h2>Table example</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Default</th></tr></thead>
+    <tbody>
+      <tr><td>variant</td><td>string</td><td><code>default</code></td></tr>
+      <tr><td>size</td><td>string</td><td><code>md</code></td></tr>
+      <tr><td>disabled</td><td>boolean</td><td><code>false</code></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="gallery-label">.prose inside .accordion-content — rich content in accordion</div>
+<div class="accordion" style="max-width:500px;">
+  <details open>
+    <summary>Section with markdown content</summary>
+    <div class="accordion-content prose">
+      <h3>Installation</h3>
+      <p>Add the following to your app's <code>&lt;head&gt;</code>:</p>
+      <pre><code>&lt;link rel="stylesheet" href="/static/alf-ui.css"&gt;</code></pre>
+      <ul>
+        <li>Theme CSS is auto-injected by the parent frame</li>
+        <li>No build step required</li>
+      </ul>
+    </div>
+  </details>
+  <details>
+    <summary>Another section</summary>
+    <div class="accordion-content prose">
+      <p>Collapsed by default. Content only renders when open.</p>
+    </div>
+  </details>
+</div>
+</div>
+
+<div style="padding: 48px 0; text-align: center;">
+  <p class="text-dim text-xs">ALF UI Components &middot; Use only these classes. Do not invent custom CSS.</p>
+</div>
+
+</div>
+
+<!-- ══ THEME SYNC — every app MUST include this script ══ -->
+<script>
+AlfSDK.init({
+  slug: 'components-gallery',
+  onThemeChange: function(palette) {
+    document.getElementById('alf-theme').href = '/static/theme-' + palette + '.css';
+  }
+});
+</script>
+</body>
+</html>

@@ -71,11 +71,17 @@
     }
   }
 
-  // Collapsible blocks
+  // Collapsible blocks — auto-expand during streaming
+  const isStreaming = $derived(msg.id.startsWith('streaming-'))
   let expandedBlocks = $state<Record<number, boolean>>({})
 
   function toggleBlock(idx: number) {
     expandedBlocks[idx] = !expandedBlocks[idx]
+  }
+
+  function isExpanded(idx: number): boolean {
+    if (idx in expandedBlocks) return expandedBlocks[idx]
+    return isStreaming // auto-expand during streaming
   }
 
   function fixPipeTables(text: string): string {
@@ -117,11 +123,44 @@
       /<img\s+src="([^"]+\.(?:mp4|webm|mov)(?:\?[^"]*)?)"\s*(?:alt="([^"]*)")?\s*\/?>/gi,
       '<video src="$1" controls playsinline class="chat-video">$2</video>'
     )
-    return DOMPurify.sanitize(withVideos, {
+    const sanitized = DOMPurify.sanitize(withVideos, {
       ADD_TAGS: ['video'],
-      ADD_ATTR: ['controls', 'playsinline', 'autoplay', 'loop', 'muted'],
+      ADD_ATTR: ['controls', 'playsinline', 'autoplay', 'loop', 'muted', 'target', 'rel'],
       ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|alf):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
     })
+    // Open external links in new tab (#141)
+    const origin = window.location.origin
+    return sanitized.replace(
+      /<a\s+href="(https?:\/\/[^"]+)"/g,
+      (match, url) => url.startsWith(origin)
+        ? match
+        : `<a href="${url}" target="_blank" rel="noopener noreferrer"`
+    )
+  }
+
+  function formatToolInput(name: string, input: any): string {
+    if (!input) return ''
+    const obj = typeof input === 'string' ? (() => { try { return JSON.parse(input) } catch { return null } })() : input
+    if (!obj || typeof obj !== 'object') return typeof input === 'string' ? input : JSON.stringify(input, null, 2)
+
+    // Human-friendly display for common tools
+    switch (name?.toLowerCase()) {
+      case 'bash':
+        return obj.command || JSON.stringify(obj, null, 2)
+      case 'read':
+        return obj.file_path || JSON.stringify(obj, null, 2)
+      case 'write':
+        return `${obj.file_path || '?'}\n${obj.content || ''}`
+      case 'edit':
+        return `${obj.file_path || '?'}\n- ${(obj.old_string || '').slice(0, 100)}\n+ ${(obj.new_string || '').slice(0, 100)}`
+      case 'grep':
+      case 'search':
+        return obj.pattern || obj.query || JSON.stringify(obj, null, 2)
+      case 'glob':
+        return obj.pattern || JSON.stringify(obj, null, 2)
+      default:
+        return JSON.stringify(obj, null, 2)
+    }
   }
 
   function handleLinkClick(e: MouseEvent) {
@@ -254,7 +293,7 @@
       {#if block.type === 'thinking'}
         <div class="content-block thinking-block">
           <button class="block-header" onclick={() => toggleBlock(i)}>
-            {#if expandedBlocks[i]}
+            {#if isExpanded(i)}
               <ChevronDown size={14} />
             {:else}
               <ChevronRight size={14} />
@@ -262,16 +301,16 @@
             <Brain size={14} />
             <span>Thinking</span>
           </button>
-          {#if expandedBlocks[i]}
-            <div class="block-body thinking-body">
-              <pre>{block.thinking || block.text || ''}</pre>
+          {#if isExpanded(i)}
+            <div class="block-body thinking-body msg-text">
+              {@html renderMarkdown(block.thinking || block.text || '')}
             </div>
           {/if}
         </div>
       {:else if block.type === 'tool_use'}
         <div class="content-block tool-block">
           <button class="block-header" onclick={() => toggleBlock(i)}>
-            {#if expandedBlocks[i]}
+            {#if isExpanded(i)}
               <ChevronDown size={14} />
             {:else}
               <ChevronRight size={14} />
@@ -279,9 +318,9 @@
             <Wrench size={14} />
             <span>{block.name || 'Tool'}</span>
           </button>
-          {#if expandedBlocks[i]}
+          {#if isExpanded(i)}
             <div class="block-body tool-body">
-              <pre>{typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2)}</pre>
+              <pre>{formatToolInput(block.name, block.input)}</pre>
             </div>
           {/if}
         </div>

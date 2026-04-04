@@ -73,6 +73,7 @@
   let selectedTier = $state(localStorage.getItem('alf-chat-tier') || '')
   let streamingBlocks = $state<any[]>([])
   let streamingText = $state('')
+  let stoppedByUser = false
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let activeJobId = $state<string | null>(null)
   let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string }[]>([])
@@ -249,6 +250,7 @@
 
   async function doSend(message: string, mediaFiles: MediaFile[], model: string) {
     sending = true
+    stoppedByUser = false
     streamingBlocks = []
     streamingText = ''
 
@@ -416,7 +418,7 @@
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && finalText) {
         new Notification('ALF', { body: finalText.slice(0, 100) })
       }
-      sound.play()
+      if (finalText && !stoppedByUser) sound.play()
       if (nav.currentView !== 'chat') {
         nav.incrementBadge('chat')
       }
@@ -568,8 +570,9 @@
   // --- Stop active call ---
   async function stopCall() {
     if (!activeJobId) return
+    stoppedByUser = true
     try {
-      await api('DELETE', '/api/chat/job')
+      await api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`)
     } catch { /* ignore */ }
     // Immediately reset UI state — don't wait for stream to end
     sending = false
@@ -668,21 +671,45 @@
     {/if}
 
     {#each messages as msg (msg.id)}
-      <ChatMessageComponent {msg} {convId} onSendToTask={openAgentModal} />
+      {#if msg.role === 'assistant' && msg.content_blocks && msg.content_blocks.length > 1}
+        {#each msg.content_blocks as block, bi (bi)}
+          <ChatMessageComponent
+            msg={{
+              ...msg,
+              id: `${msg.id}-block-${bi}`,
+              text: block.type === 'text' ? (block.text || '') : '',
+              content_blocks: [block],
+              // Only show footer metadata on the last block
+              model: bi === msg.content_blocks.length - 1 ? msg.model : undefined,
+              tier: bi === msg.content_blocks.length - 1 ? msg.tier : undefined,
+              cost_usd: bi === msg.content_blocks.length - 1 ? msg.cost_usd : undefined,
+              duration_ms: bi === msg.content_blocks.length - 1 ? msg.duration_ms : undefined,
+              skills: bi === msg.content_blocks.length - 1 ? msg.skills : undefined,
+              reactions: bi === msg.content_blocks.length - 1 ? msg.reactions : undefined,
+            }}
+            {convId}
+            onSendToTask={bi === msg.content_blocks.length - 1 ? openAgentModal : undefined}
+          />
+        {/each}
+      {:else}
+        <ChatMessageComponent {msg} {convId} onSendToTask={openAgentModal} />
+      {/if}
     {/each}
 
-    <!-- Streaming response -->
+    <!-- Streaming response — each block rendered as its own bubble (#127) -->
     {#if sending && streamingBlocks.length > 0}
-      <ChatMessageComponent
-        msg={{
-          id: 'streaming',
-          role: 'assistant',
-          text: streamingText,
-          ts: new Date().toISOString(),
-          content_blocks: streamingBlocks,
-        }}
-        {convId}
-      />
+      {#each streamingBlocks as block, i (i)}
+        <ChatMessageComponent
+          msg={{
+            id: `streaming-${i}`,
+            role: 'assistant',
+            text: block.type === 'text' ? (block.text || '') : '',
+            ts: new Date().toISOString(),
+            content_blocks: [block],
+          }}
+          {convId}
+        />
+      {/each}
     {:else if sending}
       <div class="chat-msg chat-msg-assistant typing-indicator">
         <span class="dot"></span>

@@ -5,6 +5,7 @@ export interface AppInfo {
   display_name?: string
   icon?: string
   description?: string
+  source?: string
   mod_time?: string
 }
 

@@ -35,14 +35,22 @@
       const catalog = Array.isArray(catalogRes) ? catalogRes : [];
       updates = Array.isArray(updatesRes) ? updatesRes : [];
 
-      // Merge: local apps take priority, remote-only get "available" state
+      // Catalog is the source of truth: only show apps from the remote registry.
+      // Merge local state (installed/enabled/disabled) into catalog entries.
+      const localMap = new Map(local.map(a => [a.slug, a]));
       const slugMap = new Map();
-      for (const app of local) {
-        slugMap.set(app.slug, { ...app });
-      }
       for (const remote of catalog) {
-        if (!slugMap.has(remote.slug)) {
+        const installed = localMap.get(remote.slug);
+        if (installed) {
+          slugMap.set(remote.slug, { ...remote, ...installed });
+        } else {
           slugMap.set(remote.slug, { ...remote, state: 'available' });
+        }
+      }
+      // Fallback: if catalog is empty (registry down), show installed marketplace apps
+      if (catalog.length === 0) {
+        for (const app of local) {
+          slugMap.set(app.slug, { ...app });
         }
       }
 

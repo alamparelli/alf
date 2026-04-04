@@ -9,6 +9,9 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
 
 ## Full template
 
+> **IMPORTANT**: See `reference/components.html` for the visual gallery of all available components.
+> Copy HTML patterns from there — do NOT write custom CSS for things already in alf-ui.css.
+
 ```html
 <!DOCTYPE html>
 <html lang="en">
@@ -16,80 +19,89 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>My App</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <!-- ══ REQUIRED: Theme setup (3 files) ══ -->
   <link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
   <script src="/static/theme-init.js"></script>
   <script src="/static/alf-app-sdk.js"></script>
   <!-- alf-ui.css is auto-injected by the parent frame — no need to import -->
-  <style>
-    body {
-      padding: var(--space-lg, 24px);
-      max-width: 760px;
-      margin: 0 auto;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.5;
-    }
-    h2 { margin-bottom: var(--space-md, 16px); }
-  </style>
+  <!-- NO custom body CSS — use .app-shell or .page from alf-ui.css -->
 </head>
 <body>
-  <div class="flex justify-between items-center mb-md">
-    <h2 class="m-0">My App</h2>
-    <button class="btn btn-primary btn-sm" onclick="showEditor()">Add Item</button>
+<div class="app-shell">
+  <div class="app-header">
+    <h1 class="app-header-title">My App</h1>
+    <span class="spacer"></span>
+    <div class="app-header-actions">
+      <button class="btn btn-primary btn-sm" onclick="showEditor()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        Add Item
+      </button>
+    </div>
   </div>
+  <div class="app-body">
+    <div id="list"></div>
+  </div>
+</div>
 
-  <div id="list"></div>
+<script>
+  // ══ REQUIRED: Theme sync — keeps app in sync with CC theme changes ══
+  AlfSDK.init({
+    slug: 'my-app',
+    onThemeChange: function(palette) {
+      document.getElementById('alf-theme').href = '/static/theme-' + palette + '.css';
+    }
+  });
 
-  <script>
-    AlfSDK.init({
-      slug: 'my-app',
-      onThemeChange: function(palette) {
-        document.getElementById('alf-theme').href = '/static/theme-' + palette + '.css';
-      }
+  var items = [];
+
+  // CLI tool app: use AlfSDK.tool()
+  function load() {
+    AlfSDK.tool('list').then(function(out) {
+      try { items = JSON.parse(out); } catch(e) { items = []; }
+      render();
     });
+  }
 
-    var items = [];
+  // REST server app: use direct fetch
+  // function load() {
+  //   fetch('/apps/my-app/api/items').then(r => r.json()).then(function(data) {
+  //     items = data; render();
+  //   });
+  // }
 
-    // CLI tool app: use AlfSDK.tool()
-    function load() {
-      AlfSDK.tool('list').then(function(out) {
-        try { items = JSON.parse(out); } catch(e) { items = []; }
-        render();
-      });
+  function render() {
+    var el = document.getElementById('list');
+    if (!items || !items.length) {
+      el.innerHTML = '<div class="empty-state"><p>No items yet.</p></div>';
+      return;
     }
+    el.innerHTML = '<div class="card-group">' + items.map(function(item) {
+      return '<div class="list-item-interactive"><span class="flex-1">' + esc(item.name) + '</span></div>';
+    }).join('') + '</div>';
+  }
 
-    // REST server app: use direct fetch
-    // function load() {
-    //   fetch('/apps/my-app/api/items').then(r => r.json()).then(function(data) {
-    //     items = data; render();
-    //   });
-    // }
+  function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
 
-    function render() {
-      var el = document.getElementById('list');
-      if (!items || !items.length) {
-        el.innerHTML = '<div class="empty-state"><p>No items yet.</p></div>';
-        return;
-      }
-      el.innerHTML = '<div class="card"><ul class="list">' + items.map(function(item) {
-        return '<li class="list-item"><strong>' + esc(item.name) + '</strong></li>';
-      }).join('') + '</ul></div>';
-    }
-
-    function esc(s) {
-      if (!s) return '';
-      var d = document.createElement('div');
-      d.textContent = s;
-      return d.innerHTML;
-    }
-
-    load();
-  </script>
+  load();
+</script>
 </body>
 </html>
 ```
+
+### Theme requirements
+
+Every app **MUST** include these 3 elements for theme consistency:
+
+1. **`<link id="alf-theme">`** — loads the initial palette CSS (default: `theme-sage.css`)
+2. **`<script src="/static/theme-init.js">`** — reads `localStorage('alf-palette')` and swaps to the user's palette before first paint
+3. **`onThemeChange` in `AlfSDK.init()`** — fires when user switches theme in CC Settings, updates the CSS link live
+
+Without `onThemeChange`, the app stays on its initial palette when the user switches themes. This is the #1 cause of apps looking "out of sync".
 
 ---
 

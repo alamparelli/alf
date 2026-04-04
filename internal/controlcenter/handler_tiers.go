@@ -52,6 +52,7 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			AvailableBackends []string                `json:"available_backends"`
 			AvailableTools    []toolInfo              `json:"available_tools"`
 			BackendModels     map[string][]modelInfo  `json:"backend_models,omitempty"`
+			ProviderSchemas   []ProviderSchema         `json:"provider_schemas"`
 		}
 		backends := make([]string, 0, len(AllowedBackends))
 		for b := range AllowedBackends {
@@ -78,7 +79,9 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.ModelCache != nil {
 			backendModels = h.ModelCache.All()
 		}
-		respondJSON(w, http.StatusOK, tiersResponse{TiersConfig: cfg, AvailableBackends: backends, AvailableTools: tools, BackendModels: backendModels})
+		// Build provider schemas annotated with configured status.
+		providerSchemas := AnnotateConfigured(AllProviderSchemas(), backends)
+		respondJSON(w, http.StatusOK, tiersResponse{TiersConfig: cfg, AvailableBackends: backends, AvailableTools: tools, BackendModels: backendModels, ProviderSchemas: providerSchemas})
 
 	case http.MethodPut:
 		var cfg TiersConfig
@@ -108,6 +111,7 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateTiersConfig(cfg *TiersConfig) error {
+	knownProviders := KnownProviderIDs()
 	names := map[string]bool{}
 	for _, t := range cfg.Tiers {
 		if t.Name == "" {
@@ -125,7 +129,8 @@ func validateTiersConfig(cfg *TiersConfig) error {
 		if t.Effort != "" && !AllowedEfforts[t.Effort] {
 			return errVal("invalid effort for tier " + t.Name + ": " + t.Effort)
 		}
-		if !AllowedBackends[t.Backend] {
+		// Accept registered backends AND known provider schema IDs.
+		if !AllowedBackends[t.Backend] && !knownProviders[t.Backend] {
 			return errVal("invalid backend for tier " + t.Name + ": " + t.Backend)
 		}
 	}
@@ -164,7 +169,7 @@ func validateTiersConfig(cfg *TiersConfig) error {
 	if cfg.RouterModel != "" && !isAPIRouter && !AllowedModels[cfg.RouterModel] {
 		return errVal("invalid router_model: " + cfg.RouterModel)
 	}
-	if !AllowedBackends[cfg.RouterBackend] {
+	if !AllowedBackends[cfg.RouterBackend] && !knownProviders[cfg.RouterBackend] {
 		return errVal("invalid router_backend: " + cfg.RouterBackend)
 	}
 	return nil

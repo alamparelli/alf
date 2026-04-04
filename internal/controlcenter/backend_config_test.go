@@ -243,3 +243,62 @@ func TestValidateTiersConfig_FallbackNoCycle(t *testing.T) {
 		t.Errorf("expected valid diamond fallback, got: %v", err)
 	}
 }
+
+func TestValidateTiersConfig_KnownButUnconfiguredBackend(t *testing.T) {
+	// Known provider IDs should be accepted even when not in AllowedBackends.
+	SetAllowedBackends(nil) // Only "" and "cli" registered.
+	defer SetAllowedBackends(nil)
+
+	cfg := &TiersConfig{
+		Tiers: []Tier{
+			{Name: "test", Model: "gpt-4", Backend: "openrouter", Enabled: true},
+		},
+	}
+	if err := validateTiersConfig(cfg); err != nil {
+		t.Errorf("known provider 'openrouter' should be accepted even when unconfigured, got: %v", err)
+	}
+}
+
+func TestValidateTiersConfig_TrulyUnknownBackend(t *testing.T) {
+	SetAllowedBackends(nil)
+	defer SetAllowedBackends(nil)
+
+	cfg := &TiersConfig{
+		Tiers: []Tier{
+			{Name: "test", Model: "m", Backend: "totally-unknown-provider", Enabled: true},
+		},
+	}
+	if err := validateTiersConfig(cfg); err == nil {
+		t.Error("expected validation error for truly unknown backend")
+	}
+}
+
+func TestValidateTiersConfig_KnownRouterBackend(t *testing.T) {
+	SetAllowedBackends(nil)
+	defer SetAllowedBackends(nil)
+
+	cfg := &TiersConfig{
+		Tiers:         []Tier{{Name: "t", Model: "haiku", Enabled: true}},
+		RouterBackend: "ollama",
+		RouterModel:   "llama3.2",
+	}
+	if err := validateTiersConfig(cfg); err != nil {
+		t.Errorf("known provider 'ollama' should be accepted as router backend, got: %v", err)
+	}
+}
+
+func TestValidateTiersConfig_WildcardTools(t *testing.T) {
+	SetAllowedBackends([]string{"openrouter"})
+	defer SetAllowedBackends(nil)
+
+	for _, tools := range [][]string{{"*"}, {"*native"}, {"bash", "grep"}} {
+		cfg := &TiersConfig{
+			Tiers: []Tier{
+				{Name: "test", Model: "gpt-4", Backend: "openrouter", Enabled: true, Tools: tools},
+			},
+		}
+		if err := validateTiersConfig(cfg); err != nil {
+			t.Errorf("tools %v should be valid, got: %v", tools, err)
+		}
+	}
+}

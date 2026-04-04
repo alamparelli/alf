@@ -13,6 +13,7 @@
   let availableBackends = $state([]);
   let availableTools = $state([]);
   let backendModels = $state({});
+  let providerSchemas = $state([]);
   let loading = $state(true);
 
   // Config profiles
@@ -59,6 +60,29 @@
       : []
   );
 
+  // Tool mode: 'all' = ["*"], 'native' = ["*native"], 'custom' = individual selection.
+  let toolMode = $derived(
+    tierForm.tools.length === 1 && tierForm.tools[0] === '*' ? 'all'
+    : tierForm.tools.length === 1 && tierForm.tools[0] === '*native' ? 'native'
+    : 'custom'
+  );
+
+  // Selected model's info (for capability warnings).
+  let selectedModelInfo = $derived(() => {
+    const models = tierForm.backend && backendModels[tierForm.backend];
+    if (!models) return null;
+    return models.find(m => m.id === tierForm.model) || null;
+  });
+
+  // Current provider schema for selected backend.
+  let selectedProvider = $derived(
+    providerSchemas.find(p => p.id === (tierForm.backend || 'cli')) || null
+  );
+
+  // Configured vs unconfigured providers.
+  let configuredProviders = $derived(providerSchemas.filter(p => p.configured));
+  let unconfiguredProviders = $derived(providerSchemas.filter(p => !p.configured));
+
   // --- Load ---
   async function loadTiers() {
     loading = true;
@@ -68,6 +92,7 @@
       availableBackends = data.available_backends || [];
       availableTools = data.available_tools || [];
       backendModels = data.backend_models || {};
+      providerSchemas = data.provider_schemas || [];
     } catch (e) {
       toasts.error('Failed to load tiers: ' + e.message);
     } finally {
@@ -204,7 +229,24 @@
     }
   }
 
+  function setToolMode(mode) {
+    if (mode === 'all') {
+      tierForm.tools = ['*'];
+    } else if (mode === 'native') {
+      tierForm.tools = ['*native'];
+    } else {
+      // Expand wildcard to individual tool names.
+      if (tierForm.tools.length === 1 && (tierForm.tools[0] === '*' || tierForm.tools[0] === '*native')) {
+        tierForm.tools = availableTools.map(t => t.name);
+      }
+    }
+  }
+
   function toggleTool(toolName) {
+    // If in wildcard mode, expand first.
+    if (toolMode !== 'custom') {
+      tierForm.tools = availableTools.map(t => t.name);
+    }
     const idx = tierForm.tools.indexOf(toolName);
     if (idx >= 0) {
       tierForm.tools.splice(idx, 1);
@@ -313,14 +355,24 @@
         <label>
           Backend
           <select bind:value={tierForm.backend}>
-            <option value="">cli (default)</option>
-            <option value="cli">cli</option>
-            {#each availableBackends as b}
-              {#if b !== 'cli' && b !== ''}
-                <option value={b}>{b}</option>
-              {/if}
-            {/each}
+            {#if configuredProviders.length > 0}
+              <optgroup label="Configured">
+                {#each configuredProviders as p}
+                  <option value={p.id === 'cli' ? '' : p.id}>{p.name}</option>
+                {/each}
+              </optgroup>
+            {/if}
+            {#if unconfiguredProviders.length > 0}
+              <optgroup label="Available (setup required)">
+                {#each unconfiguredProviders as p}
+                  <option value={p.id}>{p.name} (setup required)</option>
+                {/each}
+              </optgroup>
+            {/if}
           </select>
+          {#if selectedProvider && !selectedProvider.configured}
+            <span class="form-warning">This backend needs API key configuration in Settings.</span>
+          {/if}
         </label>
         <label>
           Model
@@ -328,11 +380,14 @@
             <select bind:value={tierForm.model}>
               <option value="">-- select --</option>
               {#each modelsForBackend as m}
-                <option value={m.id}>{m.id}</option>
+                <option value={m.id}>{m.id}{m.tool_calls === false ? ' (no tools)' : ''}</option>
               {/each}
             </select>
           {:else}
             <input type="text" bind:value={tierForm.model} placeholder="e.g. sonnet, haiku, opus" />
+          {/if}
+          {#if selectedModelInfo()?.tool_calls === false && tierForm.tools.length > 0}
+            <span class="form-warning">This model does not support tool calling.</span>
           {/if}
         </label>
         <label>
@@ -399,14 +454,30 @@
         {#if availableTools.length > 0}
           <div class="full-width">
             <strong>Tools</strong>
-            <div class="tool-checkboxes">
-              {#each availableTools as tool}
-                <label class="checkbox tool-check" title={tool.desc}>
-                  <input type="checkbox" checked={tierForm.tools.includes(tool.name)} onchange={() => toggleTool(tool.name)} />
-                  {tool.name} <span class="tool-source">({tool.source})</span>
-                </label>
-              {/each}
+            <div class="tool-mode-row">
+              <div class="btn-group">
+                <button class="btn btn-sm" class:active={toolMode === 'all'} onclick={() => setToolMode('all')}>All Tools</button>
+                <button class="btn btn-sm" class:active={toolMode === 'native'} onclick={() => setToolMode('native')}>Native Only</button>
+                <button class="btn btn-sm" class:active={toolMode === 'custom'} onclick={() => setToolMode('custom')}>Select</button>
+              </div>
+              {#if toolMode === 'all'}
+                <span class="form-hint">All {availableTools.length} tools enabled (wildcard).</span>
+              {:else if toolMode === 'native'}
+                <span class="form-hint">Only native Go tools (bash, read, write, grep, glob).</span>
+              {:else}
+                <span class="form-hint">{tierForm.tools.length} of {availableTools.length} tools selected.</span>
+              {/if}
             </div>
+            {#if toolMode === 'custom'}
+              <div class="tool-checkboxes">
+                {#each availableTools as tool}
+                  <label class="checkbox tool-check" title={tool.desc}>
+                    <input type="checkbox" checked={tierForm.tools.includes(tool.name)} onchange={() => toggleTool(tool.name)} />
+                    {tool.name} <span class="tool-source">({tool.source})</span>
+                  </label>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
@@ -426,10 +497,9 @@
           Router Backend
           <select bind:value={routerForm.router_backend}>
             <option value="">cli (default)</option>
-            <option value="cli">cli</option>
-            {#each availableBackends as b}
-              {#if b !== 'cli' && b !== ''}
-                <option value={b}>{b}</option>
+            {#each providerSchemas as p}
+              {#if p.id !== 'cli'}
+                <option value={p.id}>{p.name}{!p.configured ? ' (setup required)' : ''}</option>
               {/if}
             {/each}
           </select>
@@ -478,11 +548,8 @@
           Backend
           <select bind:value={memoryForm.extract_backend}>
             <option value="">same as router</option>
-            <option value="cli">cli (Claude Code)</option>
-            {#each availableBackends as b}
-              {#if b !== 'cli' && b !== ''}
-                <option value={b}>{b}</option>
-              {/if}
+            {#each providerSchemas as p}
+              <option value={p.id}>{p.name}{!p.configured ? ' (setup required)' : ''}</option>
             {/each}
           </select>
         </label>
@@ -622,6 +689,21 @@
   .tool-source {
     color: var(--text-dim);
     font-size: var(--font-xs, 11px);
+  }
+  .tool-mode-row {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    margin: 0.3rem 0;
+  }
+  .form-warning {
+    font-size: var(--font-xs, 11px);
+    color: var(--yellow, #e5a50a);
+    margin-top: 2px;
+  }
+  .form-hint {
+    font-size: var(--font-xs, 11px);
+    color: var(--text-dim);
   }
   .modal-hint {
     font-size: var(--font-sm, 13px);

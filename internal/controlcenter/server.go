@@ -38,6 +38,7 @@ type Server struct {
 	statusProvider  *daemonStatusProvider
 	tlsCertFile     string // if set, serve HTTPS (local self-signed)
 	tlsKeyFile      string
+	stopWatcher     func()
 }
 
 // New creates a Control Center server.
@@ -135,7 +136,10 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		}
 	}
 
+	stopWatcher := watchAppsDir(filepath.Join(dataDir, "apps"), eventBroker, 3*time.Second)
+
 	return &Server{
+		stopWatcher: stopWatcher,
 		httpServer: &http.Server{
 			Addr:              addr,
 			Handler:           handlers.Main,
@@ -180,6 +184,9 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.stopWatcher != nil {
+		s.stopWatcher()
+	}
 	return s.httpServer.Shutdown(ctx)
 }
 

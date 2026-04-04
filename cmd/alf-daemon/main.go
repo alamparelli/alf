@@ -697,6 +697,7 @@ func main() {
 	} else {
 		go persistentSigServer.Serve(ln)
 		commEngine.SignalSockPath = persistentSigPath
+		toolExecutor.Env = append(toolExecutor.Env, "ALF_SIGNAL_SOCK="+persistentSigPath)
 		log.Printf("signal: persistent socket ready at %s", persistentSigPath)
 		defer func() { ln.Close(); os.Remove(persistentSigPath) }()
 	}

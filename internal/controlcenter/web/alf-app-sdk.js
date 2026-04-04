@@ -561,11 +561,13 @@
      */
     tool: function(action, args) {
       if (!_ensureReady('tool')) return Promise.reject(new Error('SDK not initialized'));
-      return this.api('/api/tool', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: action, args: args || {} })
-      }).then(function(res) {
+      var slug = this._slug;
+      var bin = '/home/alf/data/tools/' + slug;
+      var data = '/home/alf/data/apps/' + slug + '/data';
+      var payload = Object.assign({ action: action }, args || {});
+      var input = JSON.stringify(payload).replace(/'/g, "'\\''");
+      var cmd = "echo '" + input + "' | ALF_APP_DATA_DIR=" + data + " " + bin;
+      return this.bash(cmd).then(function(res) {
         if (res.exit_code !== 0) throw new Error(res.error || res.output || 'Command failed');
         return res.output || '';
       });

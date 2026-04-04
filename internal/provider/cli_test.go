@@ -48,6 +48,43 @@ func TestCLIProvider_InvokeCancelled(t *testing.T) {
 	}
 }
 
+// TestSafeEnv_IncludesSignalSock verifies that ALF_SIGNAL_SOCK is passed
+// through safeEnv. Regression test for #122.
+func TestSafeEnv_IncludesSignalSock(t *testing.T) {
+	t.Setenv("ALF_SIGNAL_SOCK", "/home/alf/data/signal.sock")
+
+	env := safeEnv("/home/alf", "/home/alf/data")
+
+	found := false
+	for _, e := range env {
+		if e == "ALF_SIGNAL_SOCK=/home/alf/data/signal.sock" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("ALF_SIGNAL_SOCK not found in safeEnv output; notify tool will fail (#122)")
+	}
+}
+
+// TestSafeEnv_IncludesToolsSock verifies ALF_TOOLS_SOCK is still passed.
+func TestSafeEnv_IncludesToolsSock(t *testing.T) {
+	t.Setenv("ALF_TOOLS_SOCK", "/home/alf/data/context/tools.sock")
+
+	env := safeEnv("/home/alf", "/home/alf/data")
+
+	found := false
+	for _, e := range env {
+		if e == "ALF_TOOLS_SOCK=/home/alf/data/context/tools.sock" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("ALF_TOOLS_SOCK not found in safeEnv output")
+	}
+}
+
 func TestCLIProvider_ParamsBuildsArgs(t *testing.T) {
 	// Verify that Params fields are used. We can't easily test args without
 	// actually running claude, but we can verify the provider handles empty params.

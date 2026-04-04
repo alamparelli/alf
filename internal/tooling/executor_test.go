@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -125,6 +126,81 @@ func TestExecutor_NonZeroExit(t *testing.T) {
 
 	if !result.IsError {
 		t.Error("expected error for non-zero exit")
+	}
+}
+
+// --- Environment regression tests (#122) ---
+
+// TestExecutor_EnvPropagated verifies that Env entries on the Executor are
+// passed through to tool subprocesses. Regression for #122 where
+// ALF_SIGNAL_SOCK was never reaching the notify tool.
+func TestExecutor_EnvPropagated(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	toolsD := filepath.Join(dir, "tools.d")
+	os.MkdirAll(toolsD, 0o755)
+
+	// Tool that prints ALF_SIGNAL_SOCK to stdout.
+	script := "#!/bin/sh\necho \"$ALF_SIGNAL_SOCK\"\n"
+	os.WriteFile(filepath.Join(toolsD, "env-check"), []byte(script), 0o755)
+
+	e := &Executor{
+		DataDir: dir,
+		HomeDir: dir,
+		Timeout: 5 * time.Second,
+		Env:     []string{"ALF_SIGNAL_SOCK=/tmp/test-signal.sock"},
+	}
+
+	result := e.Execute(context.Background(), CallRequest{
+		ID:        "env_1",
+		Name:      "env-check",
+		Arguments: "{}",
+	})
+
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Output)
+	}
+	want := "/tmp/test-signal.sock"
+	got := strings.TrimSpace(result.Output)
+	if got != want {
+		t.Errorf("ALF_SIGNAL_SOCK = %q, want %q", got, want)
+	}
+}
+
+// TestExecutor_EnvNil_NoSignalSock verifies that when Env is nil,
+// ALF_SIGNAL_SOCK is absent (old broken behavior).
+func TestExecutor_EnvNil_NoSignalSock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	toolsD := filepath.Join(dir, "tools.d")
+	os.MkdirAll(toolsD, 0o755)
+
+	script := "#!/bin/sh\necho \"${ALF_SIGNAL_SOCK:-UNSET}\"\n"
+	os.WriteFile(filepath.Join(toolsD, "env-check2"), []byte(script), 0o755)
+
+	e := &Executor{
+		DataDir: dir,
+		HomeDir: dir,
+		Timeout: 5 * time.Second,
+		Env:     nil, // no signal sock
+	}
+
+	result := e.Execute(context.Background(), CallRequest{
+		ID:   "env_2",
+		Name: "env-check2",
+	})
+
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Output)
+	}
+	if got := strings.TrimSpace(result.Output); got != "UNSET" {
+		t.Errorf("expected UNSET, got %q", got)
 	}
 }
 

@@ -158,7 +158,7 @@
     {:else if nav.currentView.startsWith('docs:')}
       <DocsView articleId={nav.currentView.slice(5)} />
     {:else if nav.currentView.startsWith('page:')}
-      <AppFrame slug={nav.currentView.slice(5)} />
+      <AppFrame slug={nav.currentView.slice(5)} query={nav.currentQuery} />
     {:else}
       <div class="placeholder-view"><h2>Unknown view</h2></div>
     {/if}

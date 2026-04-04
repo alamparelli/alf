@@ -33,6 +33,7 @@ export const DEVELOPER_TAB: NavItem = { view: 'developer', label: 'Developer', i
 
 class NavStore {
   currentView = $state(localStorage.getItem('alf-view') || 'chat')
+  currentQuery = $state('')
   sidebarOpen = $state(false)
   developerMode = $state(localStorage.getItem('alf-developer-mode') === 'true')
 
@@ -57,8 +58,9 @@ class NavStore {
     JSON.parse(localStorage.getItem('alf-nav-collapsed') || '{}')
   )
 
-  navigateTo(view: string) {
+  navigateTo(view: string, query: string = '') {
     this.currentView = view
+    this.currentQuery = query
     localStorage.setItem('alf-view', view)
     this.sidebarOpen = false
     // Clear badge when navigating to the view

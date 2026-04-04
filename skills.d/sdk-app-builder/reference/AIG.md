@@ -16,25 +16,22 @@ All apps share `alf-ui.css` (auto-injected into iframes) and theme CSS variables
 
 ## Theme setup
 
-Every app must load three files in `<head>` to participate in ALF's theming system:
+**CRITICAL**: Every app MUST include this exact `<head>` block and `AlfSDK.init()` to stay in sync with the CC theme. Apps that skip this will look broken when the user switches themes.
+
+### Required `<head>` (3 files)
 
 ```html
 <link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
 <script src="/static/theme-init.js"></script>
 <script src="/static/alf-app-sdk.js"></script>
+<!-- alf-ui.css is auto-injected — do NOT import it manually -->
 ```
 
 - **theme-*.css** — defines all `--bg`, `--text`, `--accent` etc. variables for that palette
-- **theme-init.js** — reads `localStorage('alf-palette')` and swaps the CSS link to the user's chosen palette before first paint
-- **alf-app-sdk.js** — listens for live theme switches from the parent SPA
+- **theme-init.js** — reads `localStorage('alf-palette')` and swaps the CSS link before first paint
+- **alf-app-sdk.js** — SDK for theme sync, storage, toasts, sheets, etc.
 
-### Available palettes (8)
-
-`sage` (default), `studio`, `catppuccin`, `dracula`, `solarized`, `tokyo-night`, `github`, `nord`
-
-Each palette defines light + dark variants via `prefers-color-scheme: dark` media query. The app doesn't need to handle dark mode — the CSS variables adapt automatically.
-
-### Theme change handler
+### Required `AlfSDK.init()` with theme handler
 
 ```js
 AlfSDK.init({
@@ -45,7 +42,31 @@ AlfSDK.init({
 });
 ```
 
-This fires when the user switches themes in Settings. Without it, the app stays on the initial palette.
+The `onThemeChange` callback fires when the user switches themes in CC Settings. **Without it, the app freezes on its initial palette** — this is the #1 cause of theme inconsistency.
+
+### Required body structure
+
+Use one of these layout classes — **never write manual body CSS**:
+
+| Layout | Class | Use for |
+|--------|-------|---------|
+| Simple page | `<body class="page">` | Basic apps, single-view |
+| App with header | `<div class="app-shell">` | Apps with sticky header + actions |
+| Sidebar + main | `<div class="workspace">` | Complex multi-panel apps |
+
+### Available palettes (8)
+
+`sage` (default), `studio`, `catppuccin`, `dracula`, `solarized`, `tokyo-night`, `github`, `nord`
+
+Each palette defines light + dark variants via `prefers-color-scheme: dark` media query. The app doesn't need to handle dark mode — the CSS variables adapt automatically.
+
+### DO NOT
+
+- Do NOT add `<link>` to alf-ui.css — it's auto-injected
+- Do NOT write `body { background: var(--bg); color: var(--text); font-family: ... }` — use `.page` or `.app-shell`
+- Do NOT add `<style>` blocks for things covered by alf-ui.css classes
+- Do NOT forget `id="alf-theme"` on the theme link — `onThemeChange` needs it
+- Do NOT use `<link id="alf-theme-link">` — the correct id is `alf-theme`
 
 ---
 

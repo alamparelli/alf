@@ -4,8 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ALF UI Components</title>
-<link rel="stylesheet" href="internal/controlcenter/frontend/public/theme-sage.css">
-<link rel="stylesheet" href="internal/controlcenter/frontend/public/alf-ui.css">
+<!-- ══ THEME SETUP — every app MUST include these 3 lines ══ -->
+<link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
+<script src="/static/theme-init.js"></script>
+<script src="/static/alf-app-sdk.js"></script>
+<!-- alf-ui.css is auto-injected by the parent frame -->
 <style>
   /* Component gallery styles — NOT part of alf-ui */
   .gallery-section { margin-bottom: 48px; }
@@ -2309,5 +2312,15 @@
 </div>
 
 </div>
+
+<!-- ══ THEME SYNC — every app MUST include this script ══ -->
+<script>
+AlfSDK.init({
+  slug: 'components-gallery',
+  onThemeChange: function(palette) {
+    document.getElementById('alf-theme').href = '/static/theme-' + palette + '.css';
+  }
+});
+</script>
 </body>
 </html>

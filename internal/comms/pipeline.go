@@ -973,17 +973,25 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	}})
 
 	// Turn limit detection: check if the result indicates a turn limit was hit.
+	turnLimitHit := false
 	if notice := detectTurnLimit(result, cleanText); notice != "" {
+		turnLimitHit = true
+		resumeHint := "Send another message or use /resume to continue."
+		fullNotice := notice + " " + resumeHint
 		e.emit(channelID, OutEvent{Type: "system", Data: map[string]string{
-			"text":  notice,
-			"level": "warning",
+			"text":       fullNotice,
+			"level":      "warning",
+			"turn_limit": "true",
+			"session_id": result.SessionID,
+			"tier":       route.Tier,
 		}})
 		if e.ChatDB != nil && msg.ConvID != "" {
 			e.ChatDB.InsertMessage(chatdb.Message{
 				ID: conversation.NewMessageID(), ConvID: msg.ConvID, Role: "system",
-				Text: notice, Source: msg.Source, CreatedAt: time.Now(),
+				Text: fullNotice, Source: msg.Source, CreatedAt: time.Now(),
 			})
 		}
+		log.Printf("[comms] turn limit hit on tier %q (session %s) — resumable", route.Tier, sessShort)
 	}
 
 	// Context size warning.
@@ -1039,6 +1047,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		Duration:       duration.Milliseconds(),
 		UserMsgID:      userMsgID,
 		AssistantMsgID: assistantMsgID,
+		TurnLimitHit:   turnLimitHit,
 	}, nil
 }
 

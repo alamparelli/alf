@@ -234,7 +234,17 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		channelID = "cc:default"
 	}
 
-	// 0. Built-in command handling via comms engine (/new, /skills, etc.).
+	// 0a. /resume: rewrite to continuation prompt and fall through to Process().
+	if newText, isResume, errMsg := cs.Engine.HandleResume(channelID, req.Message); isResume {
+		req.Message = newText
+		log.Printf("[cc] /resume → continuing session")
+	} else if errMsg != "" {
+		onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": errMsg}})
+		onEvent(ChatEvent{Type: "done", Data: ChatDoneData{}})
+		return nil
+	}
+
+	// 0b. Built-in command handling via comms engine (/new, /skills, etc.).
 	if strings.HasPrefix(req.Message, "/") {
 		if response, handled := cs.Engine.HandleCommand(channelID, req.Message); handled {
 			if response != "" {

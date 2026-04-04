@@ -325,3 +325,55 @@ func TestProcessCommand(t *testing.T) {
 		t.Error("expected /unknown to not be handled")
 	}
 }
+
+func TestHandleResume(t *testing.T) {
+	dir := t.TempDir()
+	sessions := session.New(dir, 30*time.Minute)
+
+	e := &ChatEngine{Sessions: sessions}
+
+	// /resume with no active session → error.
+	_, isResume, errMsg := e.HandleResume("cc:default", "/resume")
+	if isResume {
+		t.Error("expected isResume=false when no session")
+	}
+	if errMsg == "" {
+		t.Error("expected error message when no session")
+	}
+
+	// Set an active session.
+	sessions.Set(-1, "session-abc")
+
+	// /resume with no args → default prompt.
+	text, isResume, errMsg := e.HandleResume("cc:default", "/resume")
+	if !isResume {
+		t.Error("expected isResume=true")
+	}
+	if errMsg != "" {
+		t.Errorf("unexpected error: %s", errMsg)
+	}
+	if text != ResumePrompt {
+		t.Errorf("expected default resume prompt, got %q", text)
+	}
+
+	// /resume with custom args.
+	text, isResume, errMsg = e.HandleResume("cc:default", "/resume fix the bug")
+	if !isResume {
+		t.Error("expected isResume=true")
+	}
+	if errMsg != "" {
+		t.Errorf("unexpected error: %s", errMsg)
+	}
+	if text != "fix the bug" {
+		t.Errorf("expected 'fix the bug', got %q", text)
+	}
+
+	// Non-resume message → passthrough.
+	text, isResume, errMsg = e.HandleResume("cc:default", "hello")
+	if isResume {
+		t.Error("expected isResume=false for regular text")
+	}
+	if text != "hello" {
+		t.Errorf("expected passthrough text, got %q", text)
+	}
+}

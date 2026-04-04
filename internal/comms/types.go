@@ -109,6 +109,7 @@ type ProcessResult struct {
 	Duration       int64  // milliseconds
 	UserMsgID      string // ID of persisted user message
 	AssistantMsgID string // ID of persisted assistant message
+	TurnLimitHit   bool   // true if the provider hit its turn limit mid-run
 }
 
 // TierParams holds resolved tier configuration for Claude invocation.

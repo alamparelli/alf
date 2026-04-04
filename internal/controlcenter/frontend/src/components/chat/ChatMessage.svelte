@@ -189,7 +189,7 @@
         ), 100)
         break
       case 'apps':
-        nav.navigateTo(`page:${path}`)
+        nav.navigateTo(`page:${path}`, url.search)
         break
       case 'view':
         nav.navigateTo(path)

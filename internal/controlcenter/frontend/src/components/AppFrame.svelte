@@ -5,7 +5,7 @@
   import { toasts } from '../stores/toast.svelte'
   import Modal from './shared/Modal.svelte'
 
-  let { slug }: { slug: string } = $props()
+  let { slug, query = '' }: { slug: string; query?: string } = $props()
   let iframe: HTMLIFrameElement
 
   // Sheet state
@@ -447,7 +447,7 @@ body {
   bind:this={iframe}
   class="page-frame"
   class:ready={iframeReady}
-  src={`/apps/${slug}/`}
+  src={`/apps/${slug}/${query}`}
   title={slug}
 ></iframe>
 

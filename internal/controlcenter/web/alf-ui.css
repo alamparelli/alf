@@ -713,12 +713,16 @@ body {
 /* at the top for category identification. NOT nested inside .card.       */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 1px;
   background: var(--border);
   border-radius: var(--radius, 8px);
   overflow: hidden;
+  margin-bottom: var(--space-md, 16px);
 }
+.stat-grid-2 { grid-template-columns: repeat(2, 1fr); }
+.stat-grid-3 { grid-template-columns: repeat(3, 1fr); }
+.stat-grid-4 { grid-template-columns: repeat(4, 1fr); }
 .stat-item {
   background: var(--bg-card);
   padding: 16px;
@@ -735,6 +739,73 @@ body {
 
 @media (max-width: 600px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .stat-grid-4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Nav row (prev/next pagination with centered label) ──────────────── */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+  margin-bottom: var(--space-md, 16px);
+}
+.nav-row .nav-label {
+  flex: 1;
+  text-align: center;
+  font-size: var(--font-sm, 13px);
+  font-weight: 500;
+}
+
+/* ── Day grid (calendar cells for trackers, heatmaps) ────────────────── */
+.day-grid {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.day-grid-labels {
+  display: flex;
+  gap: 3px;
+  margin-bottom: var(--space-xs, 4px);
+}
+.day-grid-labels span {
+  width: 28px;
+  text-align: center;
+  font-size: var(--font-xs, 11px);
+  color: var(--text-dim);
+}
+.day-cell {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  transition: background 0.15s;
+  flex-shrink: 0;
+  border: none;
+  padding: 0;
+}
+.day-cell:hover { opacity: 0.8; }
+.day-cell.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.day-cell.today {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.day-cell.future {
+  opacity: 0.3;
+  cursor: default;
+}
+@media (max-width: 480px) {
+  .day-cell { width: 24px; height: 24px; font-size: 9px; }
+  .day-grid-labels span { width: 24px; font-size: 9px; }
 }
 
 /* ── Input row (input + button side by side) ──────────────────────────── */
@@ -1093,7 +1164,7 @@ a:hover { text-decoration: underline; }
 
 .app-body {
   flex: 1;
-  padding: 0 var(--page-padding, 2.5rem) var(--page-padding, 2.5rem);
+  padding: var(--space-lg, 24px) var(--page-padding, 2.5rem) var(--page-padding, 2.5rem);
   max-width: 960px;
   width: 100%;
   margin: 0 auto;

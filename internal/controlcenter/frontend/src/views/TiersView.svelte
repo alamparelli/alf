@@ -143,9 +143,29 @@
   }
 
   // --- Tier CRUD ---
+  function applyProviderHints(backendId) {
+    const schema = providerSchemas.find(p => p.id === (backendId || 'cli'));
+    if (!schema?.default_hints) return;
+    const h = schema.default_hints;
+    if (h.effort) tierForm.effort = h.effort;
+    if (h.context_weight) tierForm.context_weight = h.context_weight;
+    if (h.write_capable !== undefined && h.write_capable !== null) tierForm.write_capable = h.write_capable;
+    if (h.tools?.length) tierForm.tools = [...h.tools];
+    if (h.max_turns) tierForm.max_turns = h.max_turns;
+    if (h.timeout_min) tierForm.timeout_minutes = h.timeout_min;
+  }
+
+  function onBackendChange(newBackend) {
+    tierForm.backend = newBackend;
+    if (editingTierIndex < 0) {
+      applyProviderHints(newBackend);
+    }
+  }
+
   function openAddTier() {
     editingTierIndex = -1;
     tierForm = { name: '', backend: 'cli', model: 'sonnet', routable: true, enabled: true, router_label: '', description: '', effort: '', max_turns: 0, write_capable: false, tools: [], system_prompt: '', context_weight: 'full', priority: 0, force_command: false, max_iterations: 0, timeout_minutes: 0, orchestrator_max_turns: 0, fallback: '' };
+    applyProviderHints('cli');
     showTierModal = true;
   }
 
@@ -354,7 +374,7 @@
         </label>
         <label>
           Backend
-          <select bind:value={tierForm.backend}>
+          <select value={tierForm.backend} onchange={(e) => onBackendChange(e.target.value)}>
             {#if configuredProviders.length > 0}
               <optgroup label="Configured">
                 {#each configuredProviders as p}
@@ -390,6 +410,7 @@
             <span class="form-warning">This model does not support tool calling.</span>
           {/if}
         </label>
+        {#if selectedProvider?.supports_effort !== false}
         <label>
           Effort
           <select bind:value={tierForm.effort}>
@@ -400,6 +421,7 @@
             <option value="max">max</option>
           </select>
         </label>
+        {/if}
         <label>
           Max Turns
           <input type="number" bind:value={tierForm.max_turns} min="0" />
@@ -448,7 +470,9 @@
         <div class="checkbox-row">
           <Toggle bind:checked={tierForm.enabled} label="Enabled" />
           <Toggle bind:checked={tierForm.routable} label="Routable" />
-          <Toggle bind:checked={tierForm.write_capable} label="Write Capable" />
+          {#if selectedProvider?.supports_writing !== false}
+            <Toggle bind:checked={tierForm.write_capable} label="Write Capable" />
+          {/if}
           <Toggle bind:checked={tierForm.force_command} label="Force Command" />
         </div>
         {#if availableTools.length > 0}
@@ -457,7 +481,9 @@
             <div class="tool-mode-row">
               <div class="btn-group">
                 <button class="btn btn-sm" class:active={toolMode === 'all'} onclick={() => setToolMode('all')}>All Tools</button>
-                <button class="btn btn-sm" class:active={toolMode === 'native'} onclick={() => setToolMode('native')}>Native Only</button>
+                {#if selectedProvider?.has_native_tools}
+                  <button class="btn btn-sm" class:active={toolMode === 'native'} onclick={() => setToolMode('native')}>Native Only</button>
+                {/if}
                 <button class="btn btn-sm" class:active={toolMode === 'custom'} onclick={() => setToolMode('custom')}>Select</button>
               </div>
               {#if toolMode === 'all'}
@@ -469,12 +495,14 @@
               {/if}
             </div>
             {#if toolMode === 'custom'}
-              <div class="tool-checkboxes">
+              <div class="tool-list">
                 {#each availableTools as tool}
-                  <label class="checkbox tool-check" title={tool.desc}>
-                    <input type="checkbox" checked={tierForm.tools.includes(tool.name)} onchange={() => toggleTool(tool.name)} />
-                    {tool.name} <span class="tool-source">({tool.source})</span>
-                  </label>
+                  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                  <div class="list-item-interactive" class:selected={tierForm.tools.includes(tool.name)} onclick={() => toggleTool(tool.name)}>
+                    <input type="checkbox" checked={tierForm.tools.includes(tool.name)} onclick={(e) => e.stopPropagation()} onchange={() => toggleTool(tool.name)} />
+                    <span>{tool.name}</span>
+                    <span class="text-dim" style="margin-left:auto; font-size: var(--font-xs, 11px)">{tool.source}</span>
+                  </div>
                 {/each}
               </div>
             {/if}

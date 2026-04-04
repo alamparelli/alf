@@ -13,33 +13,17 @@
   const STEPS = ['Backend', 'Telegram', 'Tiers', 'Apply', 'Get Started']
 
   // --- Step 0: Backends ---
-  interface BackendField { key: string; label: string; placeholder: string; type?: string; defaultVal?: string }
-  interface BackendDef {
-    id: string; name: string; desc: string; fields: BackendField[]
-    defaultURL?: string; auth?: string
+  interface ProviderField {
+    key: string; label: string; placeholder?: string; type?: string; default_val?: string; required?: boolean
+  }
+  interface ProviderSchema {
+    id: string; name: string; description: string; type: string
+    configured: boolean; supports_tools: boolean; fields: ProviderField[]
+    default_url?: string; auth?: string
   }
 
-  const BACKENDS: BackendDef[] = [
-    { id: 'claude', name: 'Claude', desc: 'Anthropic via local CLI', fields: [] },
-    { id: 'codex', name: 'OpenAI Codex', desc: 'OpenAI via local CLI', fields: [
-      { key: 'api_key', label: 'API Key (optional)', placeholder: 'sk-... or leave empty for codex login', type: 'password' }
-    ] },
-    { id: 'openrouter', name: 'OpenRouter', desc: 'Multi-model gateway', fields: [
-      { key: 'api_key', label: 'API Key', placeholder: 'sk-or-...', type: 'password' }
-    ], defaultURL: 'https://openrouter.ai/api/v1' },
-    { id: 'openai', name: 'OpenAI', desc: 'GPT models', fields: [
-      { key: 'base_url', label: 'Base URL', placeholder: 'https://api.openai.com/v1', defaultVal: 'https://api.openai.com/v1' },
-      { key: 'api_key', label: 'API Key', placeholder: 'sk-...', type: 'password' }
-    ], defaultURL: 'https://api.openai.com/v1' },
-    { id: 'ollama', name: 'Ollama', desc: 'Local models', fields: [
-      { key: 'base_url', label: 'Base URL', placeholder: 'http://host.docker.internal:11434/v1', defaultVal: 'http://host.docker.internal:11434/v1' }
-    ], defaultURL: 'http://host.docker.internal:11434/v1', auth: 'none' },
-    { id: 'custom', name: 'Custom', desc: 'OpenAI-compatible endpoint', fields: [
-      { key: 'base_url', label: 'Base URL', placeholder: 'https://...' },
-      { key: 'api_key', label: 'API Key', placeholder: 'sk-...', type: 'password' },
-      { key: 'default_model', label: 'Default model', placeholder: 'model-name' }
-    ] }
-  ]
+  let providerSchemas = $state<ProviderSchema[]>([])
+  let loadingSchemas = $state(true)
 
   let selectedBackends = $state<Set<string>>(new Set())
   let backendFields = $state<Record<string, Record<string, string>>>({})
@@ -50,6 +34,25 @@
   // Two-phase backend: select first, then configure
   let backendConfigPhase = $state(false)
   let applyError = $state('')
+
+  // Load provider schemas from API
+  async function loadProviderSchemas() {
+    try {
+      const data = await api('GET', '/api/tiers')
+      providerSchemas = data.provider_schemas || []
+    } catch (e: any) {
+      toasts.error('Failed to load provider schemas: ' + e.message)
+    } finally {
+      loadingSchemas = false
+    }
+  }
+
+  // Load schemas when modal opens
+  $effect(() => {
+    if (open && loadingSchemas) {
+      loadProviderSchemas()
+    }
+  })
 
   function toggleBackend(id: string) {
     const s = new Set(selectedBackends)
@@ -75,16 +78,16 @@
     claudeChecking = false
   }
 
-  async function testBackend(def: BackendDef) {
-    const baseURL = getField(def.id, 'base_url') || def.defaultURL || ''
-    const apiKey = getField(def.id, 'api_key') || ''
-    testResults = { ...testResults, [def.id]: { ok: false, msg: '', loading: true } }
+  async function testBackend(schema: ProviderSchema) {
+    const baseURL = getField(schema.id, 'base_url') || schema.default_url || ''
+    const apiKey = getField(schema.id, 'api_key') || ''
+    testResults = { ...testResults, [schema.id]: { ok: false, msg: '', loading: true } }
     try {
-      const d = await api<any>('POST', '/api/setup/backend/test', { type: def.id, base_url: baseURL, api_key: apiKey })
-      testResults = { ...testResults, [def.id]: { ok: d.ok, msg: d.ok ? 'Connected' : (d.error || 'Failed'), loading: false } }
-      if (def.id === 'ollama' && d.ok) loadOllamaModels()
+      const d = await api<any>('POST', '/api/setup/backend/test', { type: schema.id, base_url: baseURL, api_key: apiKey })
+      testResults = { ...testResults, [schema.id]: { ok: d.ok, msg: d.ok ? 'Connected' : (d.error || 'Failed'), loading: false } }
+      if (schema.id === 'ollama' && d.ok) loadOllamaModels()
     } catch (e: any) {
-      testResults = { ...testResults, [def.id]: { ok: false, msg: e.error || 'Connection failed', loading: false } }
+      testResults = { ...testResults, [schema.id]: { ok: false, msg: e.error || 'Connection failed', loading: false } }
     }
   }
 
@@ -98,8 +101,8 @@
 
   function selectedBackendsNeedConfig(): boolean {
     return [...selectedBackends].some(id => {
-      const def = BACKENDS.find(b => b.id === id)
-      return def && def.fields.length > 0
+      const schema = providerSchemas.find(p => p.id === id)
+      return schema && schema.fields.length > 0
     })
   }
 
@@ -214,13 +217,13 @@
     const backends: Record<string, any> = {}
     for (const id of selectedBackends) {
       if (id === 'claude') continue
-      const def = BACKENDS.find(b => b.id === id)!
+      const schema = providerSchemas.find(p => p.id === id)!
       backends[id] = {
-        base_url: getField(id, 'base_url') || def.defaultURL || '',
+        base_url: getField(id, 'base_url') || schema.default_url || '',
         api_key: getField(id, 'api_key') || '',
         default_model: getField(id, 'default_model') || '',
       }
-      if (def.auth) backends[id].auth = def.auth
+      if (schema.auth) backends[id].auth = schema.auth
     }
 
     const body: any = { backends }
@@ -356,14 +359,19 @@
     {#if step === 0 && !backendConfigPhase}
       <div class="step-content">
         <p class="step-desc">Select one or more LLM backends to connect.</p>
-        <div class="backend-grid">
-          {#each BACKENDS as def}
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="backend-card" class:selected={selectedBackends.has(def.id)} onclick={() => toggleBackend(def.id)}>
-              <h4>{def.name}</h4>
-              <p>{def.desc}</p>
+        {#if loadingSchemas}
+          <div class="loading-state">
+            <Loader2 size={16} class="spin" /> Loading providers...
+          </div>
+        {:else}
+          <div class="backend-grid">
+            {#each providerSchemas as schema}
+              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+              <div class="backend-card" class:selected={selectedBackends.has(schema.id)} onclick={() => toggleBackend(schema.id)}>
+                <h4>{schema.name}</h4>
+                <p>{schema.description}</p>
 
-              {#if selectedBackends.has(def.id) && def.id === 'claude'}
+              {#if selectedBackends.has(schema.id) && schema.id === 'claude'}
                 <div class="claude-status" onclick={(e) => e.stopPropagation()}>
                   {#if claudeChecking}
                     <span class="test-loading"><Loader2 size={12} class="spin" /> Checking...</span>
@@ -376,7 +384,7 @@
                 </div>
               {/if}
 
-              {#if selectedBackends.has(def.id) && def.id === 'codex'}
+              {#if selectedBackends.has(schema.id) && schema.id === 'codex'}
                 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
                 <div class="claude-status" onclick={(e) => e.stopPropagation()}>
                   <span class="test-loading">API key <em>or</em> <code>codex login --device-auth</code> in Terminal</span>
@@ -384,7 +392,8 @@
               {/if}
             </div>
           {/each}
-        </div>
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -393,11 +402,11 @@
       <div class="step-content">
         <p class="step-desc">Configure your selected backends.</p>
         {#each [...selectedBackends] as bid}
-          {@const def = BACKENDS.find(b => b.id === bid)}
-          {#if def && def.fields.length > 0}
+          {@const schema = providerSchemas.find(p => p.id === bid)}
+          {#if schema && schema.fields.length > 0}
             <div class="config-section">
-              <h4>{def.name}</h4>
-              {#each def.fields as f}
+              <h4>{schema.name}</h4>
+              {#each schema.fields as f}
                 <div class="form-group">
                   <label for="cfg-{bid}-{f.key}">{f.label}</label>
                   <input
@@ -405,13 +414,13 @@
                     type={f.type || 'text'}
                     class="input"
                     placeholder={f.placeholder}
-                    value={getField(bid, f.key) || f.defaultVal || ''}
+                    value={getField(bid, f.key) || f.default_val || ''}
                     oninput={(e) => setField(bid, f.key, (e.target as HTMLInputElement).value)}
                   />
                 </div>
               {/each}
               <div class="test-row">
-                <button class="btn btn-sm" onclick={() => testBackend(def)} disabled={testResults[bid]?.loading}>
+                <button class="btn btn-sm" onclick={() => testBackend(schema)} disabled={testResults[bid]?.loading}>
                   {testResults[bid]?.loading ? 'Testing...' : 'Test'}
                 </button>
                 {#if testResults[bid] && !testResults[bid].loading}

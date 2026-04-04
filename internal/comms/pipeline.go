@@ -16,6 +16,7 @@ import (
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
+	"github.com/alamparelli/alf/internal/trace"
 )
 
 // Process handles an incoming message through the full pipeline.
@@ -26,11 +27,18 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	channel := channelID.ConvChannel()
 	sessionKey := channelID.SessionKey()
 
-	// 1. Persist user message to ConvStore.
+	// 0. Create request tracer.
 	userMsgID := conversation.NewMessageID()
 	var convID string
 	if e.ConvStore != nil {
 		convID = e.ConvStore.ConvID(channel)
+	}
+	tracer := trace.New(channelID.Prefix(), convID, userMsgID)
+	ctx = trace.WithContext(ctx, tracer)
+	defer tracer.Flush(e.DataDir)
+
+	// 1. Persist user message to ConvStore.
+	if e.ConvStore != nil {
 		e.ConvStore.Append(conversation.Message{
 			ID:        userMsgID,
 			ConvID:    convID,
@@ -67,6 +75,7 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	}
 
 	// 2. Check force command / session tier override.
+	routeSpan := tracer.StartSpan("route", nil)
 	forcedTier := msg.ForcedTier
 	if forcedTier == "" {
 		if ft := e.Sessions.GetForcedTier(sessionKey); ft != "" {
@@ -171,6 +180,10 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 
 	// 6. Direct response — no second LLM call needed.
 	if route.Response != "" && route.Tier == "" {
+		routeSpan.Tag("tier", "router")
+		routeSpan.Tag("reason", route.Reason)
+		routeSpan.Tag("direct", "true")
+		routeSpan.End()
 		e.Sessions.TouchContext(sessionKey, "router")
 		routerMsgID := conversation.NewMessageID()
 		// Persist to ConvStore.
@@ -225,6 +238,14 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 
 	// 8. Resolve tier params.
 	tp, _ := ResolveTierParams(route.Tier, tiers, e.DataDir, e.ToolRegistry, e.Registry, e.ResolveModel)
+
+	routeSpan.Tag("tier", route.Tier)
+	routeSpan.Tag("reason", route.Reason)
+	routeSpan.Tag("model", tp.Model)
+	if forcedTier != "" {
+		routeSpan.Tag("forced", "true")
+	}
+	routeSpan.End()
 
 	e.emit(channelID, OutEvent{Type: "routed", Data: map[string]string{"tier": route.Tier, "model": tp.Model}})
 
@@ -351,9 +372,28 @@ func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierPar
 		}
 	}
 
+	agentSpan := trace.StartSpanFromContext(ctx, "agent_run", map[string]string{
+		"model": tp.Model, "tier": "agent",
+	})
+
 	start := time.Now()
 	orchResult, orchMeta, orchErr := e.Orchestrator.Run(ctx, msg.Text, orchPrep.SystemPrompts, orchPrep.Config, onProgress)
 	duration := time.Since(start)
+
+	if agentSpan != nil {
+		agentSpan.Tag("duration_ms", fmt.Sprintf("%d", duration.Milliseconds()))
+		if orchMeta != nil {
+			agentSpan.Tag("iterations", fmt.Sprintf("%d", orchMeta.Iterations))
+			agentSpan.Tag("total_cost", fmt.Sprintf("%.4f", orchMeta.TotalCost))
+			agentSpan.Tag("agent_calls", fmt.Sprintf("%d", len(orchMeta.AgentCalls)))
+			agentSpan.Tag("task_id", orchMeta.ID)
+		}
+		if orchErr != nil {
+			agentSpan.EndWithError(orchErr)
+		} else {
+			agentSpan.End()
+		}
+	}
 
 	if orchErr != nil {
 		e.emit(channelID, OutEvent{Type: "error", Data: map[string]string{"text": orchErr.Error()}})
@@ -599,6 +639,13 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	// Build the full prompt text (use msg.Text which includes reply context from adapter).
 	prompt := msg.Text
 
+	invokeSpan := trace.StartSpanFromContext(ctx, "invoke", map[string]string{
+		"backend": tp.Backend, "model": tp.Model, "tier": route.Tier,
+	})
+	if params.ResumeID != "" && invokeSpan != nil {
+		invokeSpan.Tag("resume_id", params.ResumeID[:min(len(params.ResumeID), 8)])
+	}
+
 	start := time.Now()
 	result, err := prov.Invoke(ctx, prompt, params, progressFn)
 
@@ -620,6 +667,21 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		result, err = prov.Invoke(ctx, prompt, params, progressFn)
 	}
 	duration := time.Since(start)
+
+	if invokeSpan != nil {
+		invokeSpan.Tag("duration_ms", fmt.Sprintf("%d", duration.Milliseconds()))
+		if result != nil {
+			invokeSpan.Tag("input_tokens", fmt.Sprintf("%d", result.InputTokens))
+			invokeSpan.Tag("output_tokens", fmt.Sprintf("%d", result.OutputTokens))
+			invokeSpan.Tag("cost_usd", fmt.Sprintf("%.4f", result.CostUSD))
+			invokeSpan.Tag("model", result.Model)
+		}
+		if err != nil {
+			invokeSpan.EndWithError(err)
+		} else {
+			invokeSpan.End()
+		}
+	}
 
 	if err != nil {
 		errMsg := err.Error()

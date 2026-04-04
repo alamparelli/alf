@@ -130,7 +130,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 
 	log.Printf("provider: invoke (model=%s, resume=%q, write=%v, turns=%d, prompt=%d chars)",
 		model, params.ResumeID, params.WriteCapable, params.MaxTurns, len(prompt))
-	logLLM("invoke", map[string]any{
+	logLLMCtx(ctx, "invoke", map[string]any{
 		"provider": "cli", "model": model, "resume": params.ResumeID,
 		"write": params.WriteCapable, "turns": params.MaxTurns,
 		"prompt_len": len(prompt), "prompt": trunc(prompt, 2000),
@@ -500,7 +500,7 @@ done:
 				usedModel = m
 				break
 			}
-			logLLM("result", map[string]any{
+			logLLMCtx(ctx, "result", map[string]any{
 				"provider": "cli", "model": usedModel, "session": parsed.SessionID,
 				"cost": parsed.TotalCostUSD, "turns": parsed.NumTurns,
 				"response_len": len(text), "response": trunc(text, 2000),

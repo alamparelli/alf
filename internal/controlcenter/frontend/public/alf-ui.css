@@ -1446,6 +1446,13 @@ a:hover { text-decoration: underline; }
 }
 .dropdown:focus-within .dropdown-menu,
 .dropdown.open .dropdown-menu { display: block; }
+.dropdown-menu.dropdown-menu-fixed {
+  display: block;
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 1000;
+}
 .dropdown-item {
   display: flex;
   align-items: center;

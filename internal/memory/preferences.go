@@ -136,6 +136,7 @@ Rules:
 	result, err := prov.Invoke(ctx, prompt, provider.Params{
 		Model:    model,
 		MaxTurns: 1,
+		Bare:     true,
 	}, nil)
 	if err != nil {
 		log.Printf("[preferences] consolidation failed: %v", err)

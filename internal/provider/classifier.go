@@ -76,6 +76,7 @@ func (c *CLIClassifier) startLocked() error {
 	}
 
 	args := []string{
+		"--bare",
 		"--system-prompt", c.cfg.SystemPrompt,
 		"--model", model,
 		"--input-format", "stream-json",

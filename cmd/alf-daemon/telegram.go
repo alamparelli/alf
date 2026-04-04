@@ -142,6 +142,17 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 		}
 		tg.SendHTML(msg.Chat.ID, reply)
 		return true
+	case "/resume":
+		newText, isResume, errMsg := engine.HandleResume(channelID, msg.Text)
+		if errMsg != "" {
+			tg.SendHTML(msg.Chat.ID, errMsg)
+			return true
+		}
+		if isResume {
+			msg.Text = newText
+			return false // fall through to normal processing
+		}
+		return true
 	case "/start":
 		engine.NewSession(channelID, true)
 		// Auto-trigger onboarding conversation - fall through to normal message processing.
@@ -218,6 +229,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 			"/help - Show this message\n" +
 			"/new - Start a new conversation session\n" +
 			"/clear - Clear and start a new session\n" +
+			"/resume - Continue after a turn limit hit\n" +
 			"/skills - List active skills (/skills clear to reset)\n" +
 			"/tool - Manage quarantined tools (keep/revert)\n" +
 			"/bash - Execute a bash command directly\n" +

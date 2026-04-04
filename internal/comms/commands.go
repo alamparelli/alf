@@ -63,6 +63,31 @@ func cmdNew(e *ChatEngine, channelID ChannelID, args string) string {
 	return "New session started."
 }
 
+// ResumePrompt is the default continuation prompt sent when /resume has no args.
+const ResumePrompt = "Continue where you left off. Pick up from where you stopped."
+
+// HandleResume checks if the message is /resume and rewrites it to a continuation prompt.
+// Returns (newText, isResume). If no active session, returns an error message and isResume=false
+// so the caller can emit the error without invoking Process().
+func (e *ChatEngine) HandleResume(channelID ChannelID, text string) (newText string, isResume bool, errMsg string) {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "/resume") {
+		return text, false, ""
+	}
+	// Extract args after /resume.
+	args := strings.TrimSpace(strings.TrimPrefix(trimmed, "/resume"))
+
+	sessionKey := channelID.SessionKey()
+	if e.Sessions.Get(sessionKey) == "" {
+		return "", false, "No active session to resume. Use /new to start a new conversation."
+	}
+
+	if args != "" {
+		return args, true, ""
+	}
+	return ResumePrompt, true, ""
+}
+
 // cmdStart handles /start: onboarding variant of /new.
 func cmdStart(e *ChatEngine, channelID ChannelID, args string) string {
 	e.NewSession(channelID, true)

@@ -554,7 +554,7 @@
 
 <!-- Context menu -->
 {#if ctxMenu}
-  <div class="dropdown-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
+  <div class="dropdown-menu dropdown-menu-fixed" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
     <button class="dropdown-item" onclick={ctxOpen}>
       <Eye size={13} /> Open
     </button>

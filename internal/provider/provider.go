@@ -34,6 +34,7 @@ type Params struct {
 	MaxTurns      int
 	ResumeID      string
 	DataDir       string   // working directory for Claude subprocess
+	Bare          bool     // if true, use --bare to skip CLAUDE.md, hooks, LSP, plugins (lightweight invocations)
 	Env           []string // additional env vars for subprocess (e.g. ALF_SIGNAL_SOCK)
 	SessionKey    string            // API history key (e.g. "tg:12345"); CLI ignores this
 	ConvMessages  []ContextMessage  // conversation history from unified store; takes priority over SessionKey history

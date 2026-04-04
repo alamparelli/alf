@@ -412,7 +412,7 @@
   })
 </script>
 
-<div class="file-browser" ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="main">
+<div class="workspace workspace--embed" ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="main">
   {#if dragOver}
     <div class="drag-overlay">
       <Upload size={48} />
@@ -420,21 +420,18 @@
     </div>
   {/if}
 
-  <!-- Header bar -->
-  <div class="file-browser-header">
-    <span class="title">Files</span>
-    <div class="toolbar">
+  <!-- Left sidebar: folder tree -->
+  <div class="workspace-sidebar">
+    <div class="workspace-sidebar-header">
+      <span>Files</span>
+      <span class="spacer"></span>
       <button class="btn btn-sm" onclick={() => openCreateDialog('file')} title="New file"><FilePlus size={15} /></button>
       <button class="btn btn-sm" onclick={() => openCreateDialog('dir')} title="New folder"><FolderPlus size={15} /></button>
       <button class="btn btn-sm" onclick={() => { showUploadModal = true }} title="Upload"><Upload size={15} /></button>
       <button class="btn btn-sm" onclick={() => { loadDir(currentPath); loadSidebarRoot() }} title="Refresh"><RefreshCw size={15} /></button>
     </div>
-  </div>
-
-  <div class="file-browser-layout">
-    <!-- Left sidebar: folder tree -->
-    <div class="file-browser-sidebar">
-      <div class="sidebar-tree">
+    <div class="workspace-sidebar-body">
+      <nav class="sidebar-nav">
         <div
           class="sidebar-item root"
           class:active={currentPath === ''}
@@ -480,23 +477,25 @@
           {/each}
         {/snippet}
         {@render sidebarNode(sidebarRootEntries, '', 0)}
-      </div>
+      </nav>
     </div>
+  </div>
 
-    <!-- Right panel: file list -->
-    <div class="file-browser-main">
-      <!-- Breadcrumbs -->
-      <div class="breadcrumb">
+  <!-- Right panel: file list -->
+  <div class="workspace-main">
+    <div class="workspace-main-header">
+      <nav class="breadcrumb">
         <button class="breadcrumb-btn" onclick={() => navigateToDir('')}>data</button>
         {#each breadcrumbs() as crumb}
           <span class="breadcrumb-sep">&rsaquo;</span>
           <button class="breadcrumb-btn" onclick={() => navigateToDir(crumb.path)}>{crumb.name}</button>
         {/each}
-      </div>
+      </nav>
+    </div>
 
-      <!-- File table -->
+    <div class="workspace-main-body">
       {#if loadingDir}
-        <div class="file-browser-loading"><Loader2 size={20} class="spin" /> Loading...</div>
+        <div class="empty-sm"><Loader2 size={20} class="spin" /> Loading...</div>
       {:else}
         <table class="data-table">
           <thead>

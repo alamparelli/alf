@@ -25,8 +25,9 @@ type TierInfo struct {
 	TimeoutMin   int
 	Backend      string
 	SystemPrompt string
-	RouterLabel  string
+	RouterLabel   string
 	ContextWeight string // "light", "standard", "full"
+	Fallback      string // tier name to try on failure
 }
 
 // TiersSnapshot is a read-only snapshot of tier configuration.
@@ -191,6 +192,31 @@ func LowestMediaTier(tiers TiersSnapshot) string {
 		return tiers.Tiers[0].Name
 	}
 	return ""
+}
+
+// ResolveFallbackChain returns the ordered list of tier names to try after
+// the initial tier fails. Follows each tier's Fallback field, stopping on
+// empty fallback or cycle detection.
+func ResolveFallbackChain(startTier string, tiers TiersSnapshot) []string {
+	visited := map[string]bool{startTier: true}
+	var chain []string
+	current := startTier
+	for {
+		fb := ""
+		for _, t := range tiers.Tiers {
+			if t.Name == current {
+				fb = t.Fallback
+				break
+			}
+		}
+		if fb == "" || visited[fb] {
+			break
+		}
+		visited[fb] = true
+		chain = append(chain, fb)
+		current = fb
+	}
+	return chain
 }
 
 // IsTierValid checks if a tier is enabled and routable (or force-commandable).

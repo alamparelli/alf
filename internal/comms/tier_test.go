@@ -202,6 +202,115 @@ func TestIsTierValid(t *testing.T) {
 	}
 }
 
+func TestResolveFallbackChain_Basic(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "haiku", Enabled: true, Fallback: "sonnet"},
+			{Name: "sonnet", Enabled: true, Fallback: "opus"},
+			{Name: "opus", Enabled: true},
+		},
+	}
+
+	chain := ResolveFallbackChain("haiku", tiers)
+	if len(chain) != 2 || chain[0] != "sonnet" || chain[1] != "opus" {
+		t.Errorf("expected [sonnet opus], got %v", chain)
+	}
+}
+
+func TestResolveFallbackChain_CycleDetection(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "a", Enabled: true, Fallback: "b"},
+			{Name: "b", Enabled: true, Fallback: "a"},
+		},
+	}
+
+	chain := ResolveFallbackChain("a", tiers)
+	if len(chain) != 1 || chain[0] != "b" {
+		t.Errorf("expected [b] (cycle stopped), got %v", chain)
+	}
+}
+
+func TestResolveFallbackChain_NoFallback(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "solo", Enabled: true},
+		},
+	}
+
+	chain := ResolveFallbackChain("solo", tiers)
+	if len(chain) != 0 {
+		t.Errorf("expected empty chain, got %v", chain)
+	}
+}
+
+func TestResolveFallbackChain_MissingTarget(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "haiku", Enabled: true, Fallback: "nonexistent"},
+		},
+	}
+
+	// "nonexistent" is not in tiers, so after haiku we can't find it → chain stops
+	chain := ResolveFallbackChain("haiku", tiers)
+	// The function adds "nonexistent" to chain since it's a valid fallback name,
+	// but then can't resolve its next fallback.
+	if len(chain) != 1 || chain[0] != "nonexistent" {
+		t.Errorf("expected [nonexistent], got %v", chain)
+	}
+}
+
+func TestResolveFallbackChain_SelfReference(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "self", Enabled: true, Fallback: "self"},
+		},
+	}
+
+	chain := ResolveFallbackChain("self", tiers)
+	if len(chain) != 0 {
+		t.Errorf("expected empty chain (self-cycle), got %v", chain)
+	}
+}
+
+func TestResolveFallbackChain_LongChain(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "t1", Fallback: "t2"},
+			{Name: "t2", Fallback: "t3"},
+			{Name: "t3", Fallback: "t4"},
+			{Name: "t4", Fallback: "t5"},
+			{Name: "t5"},
+		},
+	}
+
+	chain := ResolveFallbackChain("t1", tiers)
+	expected := []string{"t2", "t3", "t4", "t5"}
+	if len(chain) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, chain)
+	}
+	for i, name := range expected {
+		if chain[i] != name {
+			t.Errorf("chain[%d] = %q, want %q", i, chain[i], name)
+		}
+	}
+}
+
+func TestResolveFallbackChain_ThreeWayCycle(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "a", Fallback: "b"},
+			{Name: "b", Fallback: "c"},
+			{Name: "c", Fallback: "a"},
+		},
+	}
+
+	chain := ResolveFallbackChain("a", tiers)
+	if len(chain) != 2 || chain[0] != "b" || chain[1] != "c" {
+		t.Errorf("expected [b c] (cycle stopped before revisiting a), got %v", chain)
+	}
+}
+
 func TestTierHasRead(t *testing.T) {
 	tests := []struct {
 		name string

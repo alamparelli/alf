@@ -178,3 +178,68 @@ func TestValidateTiersConfig_CLIModelValidation(t *testing.T) {
 		t.Errorf("expected valid CLI model, got: %v", err)
 	}
 }
+
+func TestValidateTiersConfig_FallbackValid(t *testing.T) {
+	cfg := &TiersConfig{
+		Tiers: []Tier{
+			{Name: "haiku", Model: "haiku", Enabled: true, Fallback: "sonnet"},
+			{Name: "sonnet", Model: "sonnet", Enabled: true, Fallback: "opus"},
+			{Name: "opus", Model: "opus", Enabled: true},
+		},
+	}
+	if err := validateTiersConfig(cfg); err != nil {
+		t.Errorf("expected valid fallback chain, got: %v", err)
+	}
+}
+
+func TestValidateTiersConfig_FallbackUnknownTier(t *testing.T) {
+	cfg := &TiersConfig{
+		Tiers: []Tier{
+			{Name: "haiku", Model: "haiku", Enabled: true, Fallback: "ghost"},
+		},
+	}
+	err := validateTiersConfig(cfg)
+	if err == nil {
+		t.Error("expected error for fallback referencing unknown tier")
+	}
+}
+
+func TestValidateTiersConfig_FallbackSelfReference(t *testing.T) {
+	cfg := &TiersConfig{
+		Tiers: []Tier{
+			{Name: "haiku", Model: "haiku", Enabled: true, Fallback: "haiku"},
+		},
+	}
+	err := validateTiersConfig(cfg)
+	if err == nil {
+		t.Error("expected error for self-referencing fallback")
+	}
+}
+
+func TestValidateTiersConfig_FallbackCycle(t *testing.T) {
+	cfg := &TiersConfig{
+		Tiers: []Tier{
+			{Name: "a", Model: "haiku", Enabled: true, Fallback: "b"},
+			{Name: "b", Model: "sonnet", Enabled: true, Fallback: "c"},
+			{Name: "c", Model: "opus", Enabled: true, Fallback: "a"},
+		},
+	}
+	err := validateTiersConfig(cfg)
+	if err == nil {
+		t.Error("expected error for fallback cycle")
+	}
+}
+
+func TestValidateTiersConfig_FallbackNoCycle(t *testing.T) {
+	// Diamond shape: a→c, b→c — no cycle.
+	cfg := &TiersConfig{
+		Tiers: []Tier{
+			{Name: "a", Model: "haiku", Enabled: true, Fallback: "c"},
+			{Name: "b", Model: "sonnet", Enabled: true, Fallback: "c"},
+			{Name: "c", Model: "opus", Enabled: true},
+		},
+	}
+	if err := validateTiersConfig(cfg); err != nil {
+		t.Errorf("expected valid diamond fallback, got: %v", err)
+	}
+}

@@ -31,7 +31,7 @@
     router_label: '', description: '', effort: '', max_turns: 0,
     write_capable: false, tools: [], system_prompt: '', context_weight: 'full',
     priority: 0, force_command: false, max_iterations: 0, timeout_minutes: 0,
-    orchestrator_max_turns: 0,
+    orchestrator_max_turns: 0, fallback: '',
   });
 
   // Router form
@@ -120,7 +120,7 @@
   // --- Tier CRUD ---
   function openAddTier() {
     editingTierIndex = -1;
-    tierForm = { name: '', backend: 'cli', model: 'sonnet', routable: true, enabled: true, router_label: '', description: '', effort: '', max_turns: 0, write_capable: false, tools: [], system_prompt: '', context_weight: 'full', priority: 0, force_command: false, max_iterations: 0, timeout_minutes: 0, orchestrator_max_turns: 0 };
+    tierForm = { name: '', backend: 'cli', model: 'sonnet', routable: true, enabled: true, router_label: '', description: '', effort: '', max_turns: 0, write_capable: false, tools: [], system_prompt: '', context_weight: 'full', priority: 0, force_command: false, max_iterations: 0, timeout_minutes: 0, orchestrator_max_turns: 0, fallback: '' };
     showTierModal = true;
   }
 
@@ -141,6 +141,14 @@
     }
     showTierModal = false;
     await saveAll();
+  }
+
+  function duplicateTier(idx) {
+    const src = tiersConfig.tiers[idx];
+    const copy = { ...src, tools: [...(src.tools || [])], name: src.name + '-copy' };
+    editingTierIndex = -1;
+    tierForm = copy;
+    showTierModal = true;
   }
 
   async function deleteTier(idx) {
@@ -270,12 +278,18 @@
                 <span>Max turns: {tier.max_turns}</span>
               {/if}
             </div>
+            {#if tier.fallback}
+              <span class="tier-fallback">Fallback → <strong>{tier.fallback}</strong></span>
+            {/if}
             {#if tier.description || tier.router_label}
               <p class="tier-desc">{tier.description || tier.router_label}</p>
             {/if}
             <div class="tier-actions">
               <button class="btn btn-ghost btn-sm" onclick={() => openEditTier(idx)}>
                 <Pencil size={12} /> Edit
+              </button>
+              <button class="btn btn-ghost btn-sm" onclick={() => duplicateTier(idx)}>
+                <Copy size={12} /> Duplicate
               </button>
               <button class="btn btn-ghost btn-sm btn-danger" onclick={() => deleteTier(idx)}>
                 <Trash2 size={12} /> Delete
@@ -350,6 +364,19 @@
         <label>
           Timeout (min)
           <input type="number" bind:value={tierForm.timeout_minutes} min="0" />
+        </label>
+        <label>
+          Fallback Tier
+          <select bind:value={tierForm.fallback}>
+            <option value="">none</option>
+            {#if tiersConfig}
+              {#each tiersConfig.tiers as t}
+                {#if t.name !== tierForm.name}
+                  <option value={t.name}>{t.name}</option>
+                {/if}
+              {/each}
+            {/if}
+          </select>
         </label>
         <label class="full-width">
           Router Label
@@ -519,6 +546,10 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.8rem;
+    font-size: var(--font-sm, 13px);
+    color: var(--text-dim);
+  }
+  .tier-fallback {
     font-size: var(--font-sm, 13px);
     color: var(--text-dim);
   }

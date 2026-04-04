@@ -696,6 +696,27 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 
 			fbTP, found := ResolveTierParams(fbName, tiers, e.DataDir, e.ToolRegistry, e.Registry, e.ResolveModel)
 			if !found {
+				log.Printf("[comms] fallback %q: tier not found, skipping", fbName)
+				continue
+			}
+
+			// Pre-flight: skip disabled tiers.
+			fbEnabled := false
+			for _, ti := range tiers.Tiers {
+				if ti.Name == fbName && ti.Enabled {
+					fbEnabled = true
+					break
+				}
+			}
+			if !fbEnabled {
+				log.Printf("[comms] fallback %q: tier disabled, skipping", fbName)
+				continue
+			}
+
+			// Pre-flight: skip API tiers whose backend is not registered.
+			fbIsAPIBackend := fbTP.Backend != "" && fbTP.Backend != "cli"
+			if fbIsAPIBackend && !e.Registry.HasBackend(fbTP.Backend) {
+				log.Printf("[comms] fallback %q: backend %q not registered, skipping", fbName, fbTP.Backend)
 				continue
 			}
 

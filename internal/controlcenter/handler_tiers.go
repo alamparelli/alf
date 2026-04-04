@@ -129,6 +129,37 @@ func validateTiersConfig(cfg *TiersConfig) error {
 			return errVal("invalid backend for tier " + t.Name + ": " + t.Backend)
 		}
 	}
+	// Validate fallback references and detect cycles.
+	for _, t := range cfg.Tiers {
+		if t.Fallback != "" {
+			if !names[t.Fallback] {
+				return errVal("tier " + t.Name + ": fallback references unknown tier: " + t.Fallback)
+			}
+			if t.Fallback == t.Name {
+				return errVal("tier " + t.Name + ": fallback cannot reference itself")
+			}
+		}
+	}
+	// Detect cycles in fallback chains.
+	tierMap := make(map[string]string, len(cfg.Tiers))
+	for _, t := range cfg.Tiers {
+		tierMap[t.Name] = t.Fallback
+	}
+	for _, t := range cfg.Tiers {
+		if t.Fallback == "" {
+			continue
+		}
+		visited := map[string]bool{t.Name: true}
+		cur := t.Fallback
+		for cur != "" {
+			if visited[cur] {
+				return errVal("fallback cycle detected involving tier: " + t.Name)
+			}
+			visited[cur] = true
+			cur = tierMap[cur]
+		}
+	}
+
 	isAPIRouter := cfg.RouterBackend != "" && cfg.RouterBackend != "cli"
 	if cfg.RouterModel != "" && !isAPIRouter && !AllowedModels[cfg.RouterModel] {
 		return errVal("invalid router_model: " + cfg.RouterModel)

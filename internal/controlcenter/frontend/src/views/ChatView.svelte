@@ -352,7 +352,9 @@
           }
 
           if (eventType === 'error') {
-            toasts.show(data.error || 'Stream error', 'error')
+            // Show toast for immediate feedback; the server also emits a
+            // "system" event with a classified message that persists in chat.
+            toasts.show(data.error || data.text || 'Stream error', 'error')
             continue
           }
 
@@ -551,7 +553,7 @@
       // Done event — may contain cost, model, etc.
       // No action needed; stream will end and we reload history
     } else if (type === 'error' || data.error) {
-      toasts.show(data.error || 'Stream error', 'error')
+      toasts.show(data.error || data.text || 'Stream error', 'error')
     }
 
     // Build aggregate text for simple display

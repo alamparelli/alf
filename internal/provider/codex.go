@@ -124,7 +124,7 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	}
 
 	log.Printf("codex: invoke (model=%s, prompt=%d chars)", model, len(fullPrompt))
-	logLLM("invoke", map[string]any{
+	logLLMCtx(ctx, "invoke", map[string]any{
 		"provider": "codex", "model": model,
 		"prompt_len": len(fullPrompt), "prompt": trunc(fullPrompt, 2000),
 	})
@@ -319,7 +319,7 @@ done:
 
 	accumulated := strings.TrimSpace(resultText.String())
 	if accumulated != "" {
-		logLLM("result", map[string]any{
+		logLLMCtx(ctx, "result", map[string]any{
 			"provider": "codex", "model": model, "session": sessionID,
 			"input_tokens": inputTokens, "output_tokens": outputTokens,
 			"response_len": len(accumulated), "response": trunc(accumulated, 2000),

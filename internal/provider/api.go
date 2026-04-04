@@ -274,7 +274,7 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	}
 
 	log.Printf("api[%s]: invoke (model=%s, prompt=%d chars)", p.name, model, len(prompt))
-	logLLM("invoke", map[string]any{
+	logLLMCtx(ctx, "invoke", map[string]any{
 		"provider": "api", "backend": p.name, "model": model,
 		"prompt_len": len(prompt), "prompt": trunc(prompt, 2000),
 	})
@@ -317,7 +317,7 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		OutputTokens: resp.OutputTokens,
 	}
 
-	logLLM("result", map[string]any{
+	logLLMCtx(ctx, "result", map[string]any{
 		"provider": "api", "backend": p.name, "model": model,
 		"input_tokens": resp.InputTokens, "output_tokens": resp.OutputTokens,
 		"response_len": len(text), "response": trunc(text, 2000),

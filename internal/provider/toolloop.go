@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+
+	"github.com/alamparelli/alf/internal/trace"
 )
 
 // ToolExecutor executes a tool call and returns the result.
@@ -125,16 +127,25 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 
 		// Execute each tool call sequentially.
 		for _, tc := range resp.ToolCalls {
-			if onProgress != nil {
-				// tool_use already emitted during SSE streaming; only send input here.
-				onProgress(StreamEvent{Type: "tool_input", Detail: tc.Function.Name, Text: tc.Function.Arguments})
-			}
+			// tool_use and tool_input already emitted during SSE streaming — don't re-emit.
+
+			toolSpan := trace.StartSpanFromContext(ctx, "tool_exec", map[string]string{
+				"tool": tc.Function.Name,
+			})
 
 			result := tl.executor.Execute(ctx, ToolCallRequest{
 				ID:        tc.ID,
 				Name:      tc.Function.Name,
 				Arguments: tc.Function.Arguments,
 			})
+
+			if toolSpan != nil {
+				toolSpan.Tag("output_len", fmt.Sprintf("%d", len(result.Output)))
+				if result.IsError {
+					toolSpan.Tag("is_error", "true")
+				}
+				toolSpan.End()
+			}
 
 			if onProgress != nil {
 				onProgress(StreamEvent{Type: "tool_result", Detail: tc.ID, Text: result.Output})

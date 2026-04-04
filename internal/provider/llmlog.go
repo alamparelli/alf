@@ -1,11 +1,14 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/alamparelli/alf/internal/trace"
 )
 
 // LLMLogger writes structured JSONL entries for every LLM invocation
@@ -38,6 +41,14 @@ func CloseLLMLog() {
 			llmLog.file = nil
 		}
 	}
+}
+
+// logLLMCtx logs an LLM event with trace correlation if available.
+func logLLMCtx(ctx context.Context, event string, fields map[string]any) {
+	if t := trace.FromContext(ctx); t != nil {
+		fields["trace_id"] = t.TraceID
+	}
+	logLLM(event, fields)
 }
 
 func logLLM(event string, fields map[string]any) {

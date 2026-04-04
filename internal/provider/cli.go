@@ -54,10 +54,6 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		"--verbose",
 	}
 
-	if params.Bare {
-		args = append(args, "--bare")
-	}
-
 	// Always skip permissions so resumed sessions never inherit a
 	// restrictive permission mode from a previous read-only invocation.
 	args = append(args, "--dangerously-skip-permissions")

@@ -134,7 +134,6 @@ Rules:
 		Model:    model,
 		MaxTurns: 1,
 		DataDir:  e.DataDir,
-		Bare:     true,
 	}, nil)
 	if err != nil {
 		log.Printf("[comms] reaction learning extraction failed: %v", err)

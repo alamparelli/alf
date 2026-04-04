@@ -213,7 +213,7 @@
       if (data.active && data.job_id) {
         activeJobId = data.job_id
         sending = true
-        reconnectToStream(data.job_id, data.events || 0)
+        reconnectToStream(data.job_id, 0)
       }
     } catch { /* no active job */ }
   }

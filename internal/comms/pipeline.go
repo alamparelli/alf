@@ -621,7 +621,20 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	duration := time.Since(start)
 
 	if err != nil {
-		e.emit(channelID, OutEvent{Type: "error", Data: map[string]string{"text": err.Error()}})
+		errMsg := err.Error()
+		notice := classifyProviderError(errMsg, ctx.Err())
+		e.emit(channelID, OutEvent{Type: "error", Data: map[string]string{"text": errMsg}})
+		e.emit(channelID, OutEvent{Type: "system", Data: map[string]string{
+			"text":  notice,
+			"level": "error",
+		}})
+		// Persist error notice to ChatDB so it survives page reload.
+		if e.ChatDB != nil && msg.ConvID != "" {
+			e.ChatDB.InsertMessage(chatdb.Message{
+				ID: conversation.NewMessageID(), ConvID: msg.ConvID, Role: "system",
+				Text: notice, Source: msg.Source, CreatedAt: time.Now(),
+			})
+		}
 		return nil, fmt.Errorf("provider: %w", err)
 	}
 
@@ -800,6 +813,20 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		"session_id": result.SessionID,
 		"duration":   fmt.Sprintf("%d", duration.Milliseconds()),
 	}})
+
+	// Turn limit detection: check if the result indicates a turn limit was hit.
+	if notice := detectTurnLimit(result, cleanText); notice != "" {
+		e.emit(channelID, OutEvent{Type: "system", Data: map[string]string{
+			"text":  notice,
+			"level": "warning",
+		}})
+		if e.ChatDB != nil && msg.ConvID != "" {
+			e.ChatDB.InsertMessage(chatdb.Message{
+				ID: conversation.NewMessageID(), ConvID: msg.ConvID, Role: "system",
+				Text: notice, Source: msg.Source, CreatedAt: time.Now(),
+			})
+		}
+	}
 
 	// Context size warning.
 	if _, mc := e.Sessions.Context(sessionKey); mc >= 20 {

@@ -289,7 +289,9 @@ func streamJob(w http.ResponseWriter, r *http.Request, job *chatJob, offset int)
 
 		select {
 		case <-ctx.Done():
-			log.Printf("[chat-job] client disconnected, job %s continues in background", job.ID)
+			// Client SSE stream disconnected. The job may still be running
+			// (reconnectable) or already cancelled via DELETE.
+			log.Printf("[chat-job] SSE stream closed for job %s (done=%v)", job.ID, job.isDone())
 			return
 		case <-wait:
 			// New events available.

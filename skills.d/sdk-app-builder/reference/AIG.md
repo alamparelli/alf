@@ -14,39 +14,11 @@ All apps share `alf-ui.css` (auto-injected into iframes) and theme CSS variables
 
 ---
 
-## Theme setup
+## Theme & layout
 
-**CRITICAL**: Every app MUST include this exact `<head>` block and `AlfSDK.init()` to stay in sync with the CC theme. Apps that skip this will look broken when the user switches themes.
+> **Start from `reference/SKELETON.html`** — it has the correct `<head>`, `AlfSDK.init()` with 2-arg `onThemeChange(palette, isDark)`, body structure, and all alf-ui.css patterns. Copy and adapt.
 
-### Required `<head>` (3 files)
-
-```html
-<link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
-<script src="/static/theme-init.js"></script>
-<script src="/static/alf-app-sdk.js"></script>
-<!-- alf-ui.css is auto-injected — do NOT import it manually -->
-```
-
-- **theme-*.css** — defines all `--bg`, `--text`, `--accent` etc. variables for that palette
-- **theme-init.js** — reads `localStorage('alf-palette')` and swaps the CSS link before first paint
-- **alf-app-sdk.js** — SDK for theme sync, storage, toasts, sheets, etc.
-
-### Required `AlfSDK.init()` with theme handler
-
-```js
-AlfSDK.init({
-  slug: 'my-app',
-  onThemeChange: function(palette) {
-    document.getElementById('alf-theme').href = '/static/theme-' + palette + '.css';
-  }
-});
-```
-
-The `onThemeChange` callback fires when the user switches themes in CC Settings. **Without it, the app freezes on its initial palette** — this is the #1 cause of theme inconsistency.
-
-### Required body structure
-
-Use one of these layout classes — **never write manual body CSS**:
+### Body layouts
 
 | Layout | Class | Use for |
 |--------|-------|---------|
@@ -58,15 +30,36 @@ Use one of these layout classes — **never write manual body CSS**:
 
 `sage` (default), `studio`, `catppuccin`, `dracula`, `solarized`, `tokyo-night`, `github`, `nord`
 
-Each palette defines light + dark variants via `prefers-color-scheme: dark` media query. The app doesn't need to handle dark mode — the CSS variables adapt automatically.
+Each palette defines light + dark variants via `prefers-color-scheme: dark`. The app doesn't need to handle dark mode — CSS variables adapt automatically.
 
 ### DO NOT
 
 - Do NOT add `<link>` to alf-ui.css — it's auto-injected
 - Do NOT write `body { background: var(--bg); color: var(--text); font-family: ... }` — use `.page` or `.app-shell`
-- Do NOT add `<style>` blocks for things covered by alf-ui.css classes
+- Do NOT add `<style>` blocks for things already in alf-ui.css — prefer composing existing classes
 - Do NOT forget `id="alf-theme"` on the theme link — `onThemeChange` needs it
 - Do NOT use `<link id="alf-theme-link">` — the correct id is `alf-theme`
+- Do NOT use inline `style="..."` attributes — use alf-ui.css utility classes (`spacer`, `text-dim`, `text-sm`, etc.)
+- Do NOT invent custom component classes (`.stat-box`, `.habit-row`, `.custom-card`) — find the alf-ui.css equivalent first
+
+### Zero custom CSS rule
+
+**The `<style>` block should be as small as possible** — ideally empty. Before writing any CSS class:
+1. Check `reference/AIG-COMPONENTS.md` (TOC) → read the specific component file
+2. If alf-ui.css has a class for it → use it
+3. Only write custom CSS for truly app-specific visuals (game canvases, custom charts, calendar grids) that have no alf-ui equivalent
+
+**Common mistakes** — use the alf-ui.css class instead:
+
+| Custom pattern (wrong) | alf-ui.css class (correct) |
+|---|---|
+| `.stat-box { text-align:center }` | `.stat-grid > .stat-item` + `.stat-value` + `.stat-label` |
+| `.my-list-row { display:flex; border-bottom }` | `.card-group > .list-item-interactive` |
+| `.my-actions { display:flex; gap:8px; justify-content:flex-end }` | `.modal-actions` |
+| `.my-kv { display:flex; justify-content:space-between }` | `.kv-row` + `.kv-label` + `.kv-value` |
+| `.my-tabs { display:flex; gap:4px }` | `.filter-tabs > .tab` |
+| `style="color:var(--text-dim);font-size:11px"` | `class="text-dim text-xs"` |
+| `style="display:flex;gap:8px"` | `class="flex gap-sm"` (or parent layout class) |
 
 ---
 

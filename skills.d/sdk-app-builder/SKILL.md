@@ -59,9 +59,10 @@ Read the relevant reference file for templates, patterns, and API details:
 
 | File | Read when |
 |---|---|
-| `reference/AIG.md` | **ALWAYS read first** — design rules, tokens, colors, spacing, Do/Don't |
+| `reference/SKELETON.html` | **ALWAYS copy first** — complete starting template with theme, stat-grid, card-group, filters, CRUD, sheets. Adapt to your app. |
+| `reference/AIG.md` | **ALWAYS read** — design rules, tokens, Do/Don't, zero custom CSS rule |
 | `reference/AIG-COMPONENTS.md` | **TOC** — find the component you need, then read its file from `reference/components/<name>.md` |
-| `reference/FRONTEND.md` | Any app with a web UI (AlfSDK init, theme, CSS vars, template) |
+| `reference/FRONTEND.md` | AlfSDK API details (storage, sheets, tool, confirm, haptics, events) |
 | `reference/CLI-TOOL.md` | Building a CLI tool app (appsdk, manifest, go source) |
 | `reference/REST-SERVER.md` | Building a REST server app (service.json, Go/Python server) |
 | `reference/GAMES.md` | Canvas games (resize, input, d-pad, overlay, HUD) |

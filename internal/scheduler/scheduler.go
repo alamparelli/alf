@@ -375,10 +375,10 @@ func (e *Engine) Update(id string, fields map[string]string) (*Job, error) {
 	}
 	// System jobs: schedule/command are locked, but prompt/tier/description/output can be customized.
 	if j.System {
-		systemAllowed := map[string]bool{"enabled": true, "output": true, "output_mode": true, "description": true, "reason": true, "prompt": true, "tier": true}
+		systemAllowed := map[string]bool{"enabled": true, "output": true, "output_mode": true, "description": true, "reason": true, "tier": true}
 		for k := range fields {
 			if !systemAllowed[k] {
-				return nil, fmt.Errorf("cannot modify field %q on system job %s (allowed: enabled, output, description, prompt, tier)", k, id)
+				return nil, fmt.Errorf("cannot modify field %q on system job %s (allowed: enabled, output, output_mode, description, tier)", k, id)
 			}
 		}
 	}

@@ -17,6 +17,7 @@
     is_dir: boolean
     size: number
     mod_time?: number
+    media?: string
   }
   interface WsDir {
     type: 'directory'
@@ -33,6 +34,8 @@
     editable: boolean
     content?: string
     message?: string
+    media?: string
+    url?: string
   }
 
   // --- State ---
@@ -525,6 +528,8 @@
                   <div class="cell-name">
                     {#if entry.is_dir}
                       <Folder size={15} class="icon-folder" />
+                    {:else if entry.media === 'image'}
+                      <img src={`/api/workspace?path=${encodeURIComponent(fullPath)}&download=1`} alt="" class="file-thumb" />
                     {:else}
                       <File size={15} class="icon-file" />
                     {/if}
@@ -609,7 +614,20 @@
     </div>
 
     <div class="modal-file-body">
-      {#if viewingFile.message}
+      {#if viewingFile.media && viewingFile.url}
+        <div class="media-preview">
+          {#if viewingFile.media === 'image'}
+            <img src={viewingFile.url} alt={viewingFile.name} />
+          {:else if viewingFile.media === 'video'}
+            <video controls src={viewingFile.url}></video>
+          {:else if viewingFile.media === 'audio'}
+            <audio controls src={viewingFile.url}></audio>
+          {/if}
+          <a href={viewingFile.url} download class="ws-btn" style="margin-top:8px">
+            <Download size={13} /> Download
+          </a>
+        </div>
+      {:else if viewingFile.message}
         <p class="dim">{viewingFile.message}</p>
         {#if viewingFile.message.includes('Binary')}
           <a href={`/api/workspace?path=${encodeURIComponent(viewingPath)}&download=1`} download class="ws-btn" style="margin-top:8px">
@@ -907,6 +925,36 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .file-thumb {
+    width: 20px;
+    height: 20px;
+    object-fit: cover;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .media-preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 16px;
+  }
+  .media-preview img {
+    max-width: 100%;
+    max-height: 60vh;
+    border-radius: 6px;
+  }
+  .media-preview video {
+    max-width: 100%;
+    max-height: 60vh;
+    border-radius: 6px;
+  }
+  .media-preview audio {
+    width: 100%;
+    max-width: 400px;
   }
 
   .cell-size, .cell-date {

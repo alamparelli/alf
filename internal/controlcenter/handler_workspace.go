@@ -14,6 +14,14 @@ import (
 const maxFileSize = 1 << 20  // 1 MB
 const maxUploadTotal = 10 << 20 // 10 MB total for multi-file upload
 
+// mediaTypes maps file extensions to media categories for inline preview.
+var mediaTypes = map[string]string{
+	".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image",
+	".webp": "image", ".svg": "image", ".avif": "image", ".ico": "image",
+	".mp4": "video", ".webm": "video", ".mov": "video",
+	".mp3": "audio", ".wav": "audio", ".ogg": "audio", ".m4a": "audio",
+}
+
 // editableExts is no longer used for write gating - all non-binary text files
 // under the workspace are editable. Kept only for backward compat in readFile
 // (the "editable" JSON field hint to the frontend).
@@ -39,6 +47,7 @@ type wsEntry struct {
 	IsDir   bool   `json:"is_dir"`
 	Size    int64  `json:"size"`
 	ModTime int64  `json:"mod_time"` // unix timestamp
+	Media   string `json:"media,omitempty"`
 }
 
 func (h *WorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +251,7 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 			continue
 		}
 		isDir := info.IsDir()
-		entry := wsEntry{Name: name, IsDir: isDir, Size: info.Size(), ModTime: info.ModTime().Unix()}
+		entry := wsEntry{Name: name, IsDir: isDir, Size: info.Size(), ModTime: info.ModTime().Unix(), Media: mediaTypes[strings.ToLower(filepath.Ext(name))]}
 		if isDir {
 			dirs = append(dirs, entry)
 		} else {
@@ -280,6 +289,21 @@ func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath strin
 
 func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath, relPath string, info os.FileInfo) {
 	editable := !h.isReadOnly(relPath)
+
+	// Media files: return metadata + download URL for inline preview.
+	if mt := mediaTypes[strings.ToLower(filepath.Ext(absPath))]; mt != "" {
+		data, _ := json.Marshal(map[string]any{
+			"type":     "file",
+			"name":     info.Name(),
+			"size":     info.Size(),
+			"mod_time": info.ModTime().Unix(),
+			"editable": false,
+			"media":    mt,
+			"url":      "/api/workspace?path=" + relPath + "&download=1",
+		})
+		w.Write(data)
+		return
+	}
 
 	if info.Size() > maxFileSize {
 		data, _ := json.Marshal(map[string]any{

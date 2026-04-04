@@ -438,6 +438,12 @@ func HandlerFactory(deps Deps) Handlers {
 	}
 	mux.Handle("/api/bash", bashHandler)
 
+	// Tool invocation (sandboxed, no raw shell — apps use "tool" permission).
+	mux.Handle("/api/tool", &ToolHandler{
+		Perms:   permChecker,
+		DataDir: deps.DataDir,
+	})
+
 	// Restart.
 	mux.Handle("/api/restart", &RestartHandler{})
 

@@ -232,6 +232,20 @@ type ProviderSchema struct {
 	Fields        []ProviderField `json:"fields"`                   // config fields for setup
 	DefaultURL    string          `json:"default_url,omitempty"`    // pre-filled base URL
 	Auth          string          `json:"auth,omitempty"`           // "bearer", "none"
+	DefaultHints    *TierHints      `json:"default_hints,omitempty"`    // recommended tier defaults for this provider
+	HasNativeTools  bool            `json:"has_native_tools"`           // supports *native wildcard (CLI-only)
+	SupportsEffort  bool            `json:"supports_effort"`            // effort parameter is meaningful
+	SupportsWriting bool            `json:"supports_writing"`           // write_capable is meaningful
+}
+
+// TierHints provides recommended default values when creating a new tier for a specific provider.
+type TierHints struct {
+	WriteCapable  *bool    `json:"write_capable,omitempty"`
+	Effort        string   `json:"effort,omitempty"`         // "low", "medium", "high", "max"
+	ContextWeight string   `json:"context_weight,omitempty"` // "light", "standard", "full"
+	Tools         []string `json:"tools,omitempty"`           // e.g. ["*"], ["*native"]
+	MaxTurns      int      `json:"max_turns,omitempty"`
+	TimeoutMin    int      `json:"timeout_min,omitempty"`
 }
 
 // ProviderField describes a single configuration field for a provider.

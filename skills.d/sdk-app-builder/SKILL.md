@@ -79,6 +79,7 @@ Read the relevant reference file for templates, patterns, and API details:
 - **Follow AIG** — use `alf-ui.css` classes (auto-injected into iframes). See `reference/AIG.md`.
 - **`alf-ui.css` works on ALL elements** — including those created dynamically via `innerHTML`, `createElement`, or any JS rendering. It is a `<style>` tag in the iframe, not scoped. NEVER duplicate or re-implement AIG classes — just use them.
 - **Use `.btn`, `.card`, `.input`, `.form-group`** etc. — never write inline styles or custom classes for standard components.
+- **Use `.prose`** for any markdown or rich text content (h1–h6, p, ul, ol, blockquote, code, table). Combine with `.accordion-content` when inside an accordion.
 - Init `AlfSDK` with `onThemeChange` — see `reference/FRONTEND.md`
 - **Use SDK v2 APIs** — audio, storage, confirm/prompt, haptics, clipboard, badges, viewport, events
 - **Audio: always use `AlfSDK.audio`** — never create your own AudioContext (mobile unlock handled by SDK)

@@ -175,14 +175,23 @@
 
   /* ── Accordion (details/summary) ─────────────────────────────────── */
   .accordion {
+    border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
     overflow: hidden;
     background: var(--bg-card);
   }
   .accordion details {
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+    border-bottom: 1px solid var(--border);
   }
   .accordion details:last-child { border-bottom: none; }
+  .accordion .accordion-content p { margin: 0 0 0.5rem; }
+  .accordion .accordion-content p:last-child { margin-bottom: 0; }
+  .accordion .accordion-list { padding: 0; }
+  .accordion .accordion-list-item {
+    padding: 12px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  }
+  .accordion .accordion-list-item:last-child { border-bottom: none; }
   .accordion summary {
     display: flex;
     align-items: center;
@@ -1063,6 +1072,56 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- CONTENT CARD — title + tag + body + hook + source                    -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Content Card</div>
+
+<div class="gallery-label">.card — content card with tag, body, hook, source (e.g. feed items, post ideas, articles)</div>
+<div class="flex-col gap-sm" style="max-width:600px;">
+
+  <div class="card">
+    <div class="mb-xs">
+      <span class="text-bold text-md">Netflix just open-sourced their first AI model: VOID removes objects from video.</span>
+    </div>
+    <div class="mb-sm">
+      <span class="tag tag-accent">Thread</span>
+    </div>
+    <p class="text-sm mb-sm">Netflix vient de publier VOID sur Hugging Face, un modèle capable de supprimer des objets dans les vidéos. Leur passage à l'open-source change la donne pour les créateurs indépendants.</p>
+    <p class="text-sm text-dim mb-sm" style="font-style: italic;">Netflix publiant son premier modèle open-source est un signal fort que les géants du streaming entrent dans la course à l'IA générative vidéo.</p>
+    <div class="text-xs text-dim">Source : Netflix just dropped their first public model on Hugging Face</div>
+  </div>
+
+  <div class="card">
+    <div class="mb-xs">
+      <span class="text-bold text-md">Iran conflict just took down AWS availability zones in Bahrain &amp; Dubai. Geopolitics = cloud outages now.</span>
+    </div>
+    <div class="mb-sm">
+      <span class="tag tag-mauve">Long post</span>
+    </div>
+    <p class="text-sm mb-sm">Les frappes iraniennes ont mis hors ligne des zones AWS dans le Golfe. On construit des architectures multi-régions pour les pannes techniques, mais pas pour les guerres.</p>
+    <p class="text-sm text-dim mb-sm" style="font-style: italic;">L'intersection entre conflit armé et infrastructure cloud est un sujet rare et important pour tout professionnel de la tech.</p>
+    <div class="text-xs text-dim">Source : Iran strikes leave Amazon availability zones "hard down" in Bahrain and Dubai</div>
+  </div>
+
+</div>
+
+<div class="gallery-spacer"></div>
+<div class="gallery-label">Pattern rules — what NOT to do</div>
+<div class="alert alert-danger" style="max-width:600px;">
+  <div class="text-sm text-bold mb-xs">WRONG — common LLM mistakes</div>
+  <ul class="text-sm" style="padding-left:1.2rem; color:var(--text-dim);">
+    <li>Solid <code>background: var(--accent)</code> on tags — use <code>.tag.tag-accent</code> (translucent 15%)</li>
+    <li>Custom <code>border-left</code> on cards — cards have no borders, use <code>.card</code> as-is</li>
+    <li>Inline <code>text-transform: uppercase; font-size: 11px</code> — use <code>.text-xs.text-bold</code></li>
+    <li>Custom italic class for hook text — use <code>style="font-style:italic"</code> on <code>.text-sm.text-dim</code></li>
+    <li>Hardcoded colors like <code>#ff6b35</code> or <code>rgba(...)</code> — always use CSS variables</li>
+    <li>Custom <code>border-left: 3px solid var(--danger)</code> on cards — use <code>.alert.alert-danger</code> instead</li>
+  </ul>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
 <!-- FORMS                                                                -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
 <div class="gallery-section">
@@ -1840,11 +1899,61 @@
   </details>
   <details open>
     <summary>How do I install apps?</summary>
-    <div class="accordion-content">Use the marketplace in the Control Center to browse and install apps. Apps run in sandboxed iframes with their own storage.</div>
+    <div class="accordion-content">
+      <p>Use the marketplace in the Control Center to browse and install apps. Apps run in sandboxed iframes with their own storage.</p>
+      <p>Each app gets its own isolated directory and key-value storage. Updates preserve your data automatically.</p>
+    </div>
   </details>
   <details>
     <summary>Can I build my own apps?</summary>
     <div class="accordion-content">Yes! Use the SDK App Builder skill. Apps are vanilla HTML/CSS/JS using the AlfSDK and alf-ui.css design system.</div>
+  </details>
+</div>
+
+<div class="gallery-spacer"></div>
+
+<div class="gallery-label">.accordion with .accordion-list — multiple items inside a section (e.g. feed, articles, logs)</div>
+<div class="accordion" style="max-width:600px;">
+  <details open>
+    <summary>IA &amp; Machine Learning <span class="text-dim text-xs" style="margin-left:auto; margin-right:8px;">4</span></summary>
+    <div class="accordion-list">
+      <div class="accordion-list-item">
+        <div class="text-bold mb-xs">Anthropic buys biotech startup Coefficient Bio in $400M deal</div>
+        <div class="flex gap-xs mb-xs">
+          <span class="tag tag-accent">RSS</span>
+          <span class="tag tag-warning">To read</span>
+        </div>
+        <p class="text-sm text-dim m-0">Anthropic acquiert la startup biotech pour 400 millions de dollars, signalant une expansion vers l'IA appliquée aux sciences de la vie.</p>
+      </div>
+      <div class="accordion-list-item">
+        <div class="text-bold mb-xs">Netflix just dropped their first public model on Hugging Face: VOID</div>
+        <div class="flex gap-xs mb-xs">
+          <span class="tag tag-danger">Reddit</span>
+          <span class="tag tag-warning">To read</span>
+        </div>
+        <p class="text-sm text-dim m-0">Netflix publie son premier modèle open-source, un modèle spécialisé dans la suppression d'objets et d'interactions dans des vidéos.</p>
+      </div>
+      <div class="accordion-list-item">
+        <div class="text-bold mb-xs">Gemma 4 is fine great even for local use</div>
+        <div class="flex gap-xs mb-xs">
+          <span class="tag tag-danger">Reddit</span>
+          <span class="tag tag-warning">To read</span>
+        </div>
+        <p class="text-sm text-dim m-0">La communauté LocalLLaMA salue les performances de Gemma 4, jugé excellent pour un usage local.</p>
+      </div>
+    </div>
+  </details>
+  <details>
+    <summary>DevOps &amp; Cloud <span class="text-dim text-xs" style="margin-left:auto; margin-right:8px;">2</span></summary>
+    <div class="accordion-list">
+      <div class="accordion-list-item">
+        <div class="text-bold mb-xs">Iran conflict took down AWS availability zones in Bahrain</div>
+        <div class="flex gap-xs mb-xs">
+          <span class="tag tag-sapphire">HN</span>
+        </div>
+        <p class="text-sm text-dim m-0">Les frappes ont mis hors ligne des zones AWS dans le Golfe.</p>
+      </div>
+    </div>
   </details>
 </div>
 </div>
@@ -2304,6 +2413,69 @@
     <p class="text-sm text-dim m-0">This popover appears on focus and can contain any content — text, forms, or actions.</p>
     <button class="btn btn-sm btn-primary" style="margin-top:8px;">Got it</button>
   </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- PROSE / MARKDOWN                                                      -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="gallery-section">
+<div class="gallery-title">Prose / Markdown</div>
+
+<div class="gallery-label">.prose — rendered markdown or rich text content</div>
+<div class="prose" style="max-width:600px;">
+  <h1>Heading 1 — Page title</h1>
+  <h2>Heading 2 — Section</h2>
+  <h3>Heading 3 — Subsection</h3>
+  <h4>Heading 4 — Label</h4>
+  <p>Regular paragraph text. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Use <strong>strong</strong> for emphasis and <em>italic</em> for nuance.</p>
+  <p>Links look like <a href="#">this anchor text</a>. Inline <code>code</code> uses a subtle border.</p>
+  <ul>
+    <li>Unordered list item one</li>
+    <li>Item two with more detail</li>
+    <li>Item three</li>
+  </ul>
+  <ol>
+    <li>Ordered step one</li>
+    <li>Step two</li>
+    <li>Step three</li>
+  </ol>
+  <blockquote>Blockquote — use for callouts, notes, or citations. Gets an accent border and subtle background tint.</blockquote>
+  <pre><code>// Code block — preformatted
+const greeting = 'Hello, ALF!'
+console.log(greeting)</code></pre>
+  <hr>
+  <h2>Table example</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Default</th></tr></thead>
+    <tbody>
+      <tr><td>variant</td><td>string</td><td><code>default</code></td></tr>
+      <tr><td>size</td><td>string</td><td><code>md</code></td></tr>
+      <tr><td>disabled</td><td>boolean</td><td><code>false</code></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="gallery-label">.prose inside .accordion-content — rich content in accordion</div>
+<div class="accordion" style="max-width:500px;">
+  <details open>
+    <summary>Section with markdown content</summary>
+    <div class="accordion-content prose">
+      <h3>Installation</h3>
+      <p>Add the following to your app's <code>&lt;head&gt;</code>:</p>
+      <pre><code>&lt;link rel="stylesheet" href="/static/alf-ui.css"&gt;</code></pre>
+      <ul>
+        <li>Theme CSS is auto-injected by the parent frame</li>
+        <li>No build step required</li>
+      </ul>
+    </div>
+  </details>
+  <details>
+    <summary>Another section</summary>
+    <div class="accordion-content prose">
+      <p>Collapsed by default. Content only renders when open.</p>
+    </div>
+  </details>
 </div>
 </div>
 

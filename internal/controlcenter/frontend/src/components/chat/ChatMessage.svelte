@@ -53,7 +53,17 @@
   let showEmojiPicker = $state(false)
   let copied = $state(false)
   let lightboxSrc = $state('')
+  let reactBtnEl: HTMLButtonElement | undefined = $state()
+  let pickerStyle = $state('')
   const quickEmojis = ['👍', '❤️', '😂', '🎯', '🔥', '💡', '✅', '❌', '🤔', '👀']
+
+  function toggleEmojiPicker() {
+    showEmojiPicker = !showEmojiPicker
+    if (showEmojiPicker && reactBtnEl) {
+      const rect = reactBtnEl.getBoundingClientRect()
+      pickerStyle = `position:fixed;top:${rect.top - 4}px;right:${window.innerWidth - rect.right}px;transform:translateY(-100%);`
+    }
+  }
 
   async function copyText() {
     const blocks = msg.content_blocks
@@ -391,11 +401,12 @@
         {/if}
       </button>
       <div class="react-container">
-        <button class="react-btn" onclick={() => showEmojiPicker = !showEmojiPicker}>
+        <button class="react-btn" bind:this={reactBtnEl} onclick={toggleEmojiPicker}>
           <SmilePlus size={13} />
         </button>
         {#if showEmojiPicker}
-          <div class="emoji-picker">
+          <div class="emoji-backdrop" onclick={() => showEmojiPicker = false}></div>
+          <div class="emoji-picker" style={pickerStyle}>
             {#each quickEmojis as emoji}
               <button class="emoji-btn" onclick={() => react(emoji)}>{emoji}</button>
             {/each}
@@ -723,9 +734,7 @@
   }
 
   .emoji-picker {
-    position: absolute;
-    bottom: 100%;
-    right: 0;
+    position: fixed;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -736,7 +745,6 @@
     width: 200px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
     z-index: 100;
-    margin-bottom: 4px;
   }
 
   .emoji-btn {

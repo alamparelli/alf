@@ -388,6 +388,34 @@ Separators are `border 40% opacity` — ultra-light, not full `--border`.
 
 **Prefer `.card-group`** over `.card > .list` for list views — it gives a cleaner, tighter appearance.
 
+### Content card (feed item / post idea / article)
+
+Use a plain `.card` for content items that have a title, tag, body, hook, and source. No custom borders.
+
+```html
+<div class="card">
+  <div class="mb-xs">
+    <span class="text-bold text-md">Card title here</span>
+  </div>
+  <div class="mb-sm">
+    <span class="tag tag-accent">Thread</span>
+  </div>
+  <p class="text-sm mb-sm">Body text — main content of the item.</p>
+  <p class="text-sm text-dim mb-sm" style="font-style: italic;">Hook — one-line angle or insight.</p>
+  <div class="text-xs text-dim">Source : original article title</div>
+</div>
+```
+
+**Common mistakes to avoid:**
+
+| Wrong | Correct |
+|-------|---------|
+| `background: var(--accent); color: var(--on-accent)` on tags | `.tag.tag-accent` (translucent 15%) |
+| `border-left: 3px solid var(--accent)` on every card | No border — only `.accordion details[open]` gets this |
+| Uppercase section header with inline CSS | `.text-xs.text-bold` with `letter-spacing` |
+| Custom italic class for hook | `<p class="text-sm text-dim" style="font-style:italic">` |
+| Hardcoded hex/rgba colors | Always use CSS variables |
+
 ### Input row (input + button)
 
 Standard pattern for text input with an action button (e.g. add todo, send message):
@@ -850,6 +878,8 @@ Sticks to top on scroll. Use on toolbars or section headers in long lists.
 
 Collapsible sections using native `<details>/<summary>`. No JS needed.
 
+The accordion has a full border and each open item gets an accent left border to differentiate sections visually.
+
 ```html
 <div class="accordion">
   <details>
@@ -862,6 +892,67 @@ Collapsible sections using native `<details>/<summary>`. No JS needed.
   </details>
 </div>
 ```
+
+To render **markdown / rich text** inside an accordion, combine `.accordion-content` with `.prose`:
+
+```html
+<details open>
+  <summary>With markdown content</summary>
+  <div class="accordion-content prose">
+    <h3>Title</h3>
+    <p>Paragraph with <strong>bold</strong> and <code>inline code</code>.</p>
+    <ul>
+      <li>Item one</li>
+      <li>Item two</li>
+    </ul>
+  </div>
+</details>
+```
+
+---
+
+### Prose / Markdown
+
+Use `.prose` on any container that renders markdown or rich text output. It styles all standard HTML elements with consistent typography and spacing.
+
+```html
+<div class="prose">
+  <h1>Page Title</h1>
+  <h2>Section</h2>
+  <h3>Subsection</h3>
+  <h4>Label</h4>
+  <p>Body text with <strong>bold</strong>, <em>italic</em>, and <a href="#">links</a>.</p>
+  <ul>
+    <li>List item</li>
+  </ul>
+  <ol>
+    <li>Ordered step</li>
+  </ol>
+  <blockquote>Note or callout — gets accent border and tinted background.</blockquote>
+  <pre><code>// Code block
+const x = 1</code></pre>
+  <hr>
+  <table>
+    <thead><tr><th>Name</th><th>Value</th></tr></thead>
+    <tbody><tr><td>foo</td><td>bar</td></tr></tbody>
+  </table>
+</div>
+```
+
+**Heading hierarchy in `.prose`:**
+
+| Element | Size | Style |
+|---------|------|-------|
+| `h1` | 1.75rem | Bold, large title |
+| `h2` | 1.35rem | Semi-bold + bottom border |
+| `h3` | 1.1rem | Semi-bold |
+| `h4` | 13px | Uppercase label, `text-dim` |
+| `h5`, `h6` | 13px | Dim secondary label |
+
+**Rules:**
+- Use `.prose` for any rendered markdown — app descriptions, README content, AI responses
+- `.prose` + `.accordion-content` work together — just add both classes
+- Never re-implement heading styles manually — always use `.prose`
 
 ### Tooltip
 
@@ -1393,9 +1484,11 @@ AlfSDK.sheet(
 - [ ] Forms use `.form-group` + `.form-label` + `.input`
 - [ ] Input + button combos use `.input-row` (flex + gap)
 - [ ] Cards use `.card` (borderless) or `.card-group` for lists
-- [ ] Tags use `.tag` + `.tag-*` (translucent tinted, not opaque)
+- [ ] Tags use `.tag` + `.tag-*` (translucent tinted — **never** `background: var(--accent)` solid fill)
 - [ ] Lists use `.card-group` > `.list-item-interactive` pattern
 - [ ] Collapsible sections use `.accordion` with `details/summary`
+- [ ] Markdown / rich text uses `.prose` — never re-implement heading or paragraph styles manually
+- [ ] Markdown inside accordion uses `.accordion-content.prose` (both classes together)
 - [ ] Tooltips use `data-tooltip` attribute — no custom tooltip CSS
 - [ ] Context menus use `.dropdown` + `.dropdown-menu`
 - [ ] File uploads use `.dropzone` + `.file-item`

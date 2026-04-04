@@ -16,6 +16,7 @@ type AppMeta struct {
 	Icon        string `json:"icon,omitempty"`
 	Description string `json:"description,omitempty"`
 	Category    string `json:"category,omitempty"`
+	Source      string `json:"source"`
 	ModTime     string `json:"mod_time"`
 }
 
@@ -59,8 +60,8 @@ func (s *fileAppStore) List() ([]AppMeta, error) {
 		return nil, fmt.Errorf("read apps dir: %w", err)
 	}
 
-	// Load marketplace state to filter disabled apps.
-	disabled := loadDisabledApps(s.dir)
+	// Load marketplace state to filter disabled apps and determine source.
+	disabled, marketplaceApps := loadMarketplaceState(s.dir)
 
 	var apps []AppMeta
 	for _, e := range entries {
@@ -85,8 +86,14 @@ func (s *fileAppStore) List() ([]AppMeta, error) {
 			continue
 		}
 
+		source := "local"
+		if marketplaceApps[name] {
+			source = "marketplace"
+		}
+
 		meta := AppMeta{
 			Name:    name,
+			Source:  source,
 			ModTime: info.ModTime().UTC().Format(time.RFC3339),
 		}
 
@@ -120,28 +127,29 @@ func (s *fileAppStore) List() ([]AppMeta, error) {
 	return apps, nil
 }
 
-// loadDisabledApps reads .state.json and returns a set of app slugs that should
-// NOT appear in the sidebar/lens. An app is hidden if it has a state entry
-// that is not "enabled" (i.e. "installed" or "disabled"). Apps without any state
-// entry are considered visible (non-marketplace apps).
-func loadDisabledApps(appsDir string) map[string]bool {
+// loadMarketplaceState reads .state.json and returns:
+//   - disabled: slugs that should NOT appear (state is not "enabled")
+//   - marketplace: all slugs tracked by the marketplace
+func loadMarketplaceState(appsDir string) (disabled, marketplace map[string]bool) {
 	data, err := os.ReadFile(filepath.Join(appsDir, ".state.json"))
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	var sf struct {
 		States map[string]string `json:"states"`
 	}
 	if json.Unmarshal(data, &sf) != nil {
-		return nil
+		return nil, nil
 	}
-	hidden := make(map[string]bool)
+	disabled = make(map[string]bool)
+	marketplace = make(map[string]bool)
 	for slug, state := range sf.States {
+		marketplace[slug] = true
 		if state != "enabled" {
-			hidden[slug] = true
+			disabled[slug] = true
 		}
 	}
-	return hidden
+	return disabled, marketplace
 }
 
 func (s *fileAppStore) ReadFile(app, path string) ([]byte, error) {

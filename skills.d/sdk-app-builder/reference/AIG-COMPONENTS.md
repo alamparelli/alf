@@ -50,3 +50,5 @@ This replaces v1's borderless/contrast-only approach.
 | Prose | `components/prose.md` | rendered markdown/HTML wrapper |
 | Sparkline | `components/sparkline.md` | inline mini bar chart |
 | Grid | `components/grid.md` | grid-2, grid-3 responsive layouts |
+| Nav Row | `components/nav-row.md` | prev/next navigation with centered label |
+| Day Grid | `components/day-grid.md` | calendar day cells for trackers, heatmaps |

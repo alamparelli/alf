@@ -9,6 +9,7 @@ import (
 var ValidPermissions = map[string]bool{
 	"storage":   true, // read/write per-app key/value storage
 	"bash":      true, // execute shell commands via /api/bash
+	"tool":      true, // invoke app's own CLI tool via /api/tool (no raw shell)
 	"upload":    true, // upload files via /api/apps/{slug}/upload
 	"clipboard": true, // read/write clipboard (via parent postMessage)
 	"events":    true, // emit inter-app events (via parent postMessage)

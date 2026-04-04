@@ -272,6 +272,9 @@ ALF uses a **borderless** design — cards and buttons rely on background contra
 All components are available via `alf-ui.css` classes. No JS required.
 **Design philosophy**: borderless surfaces. Cards, buttons, alerts, and tags rely on background contrast — not `border: 1px solid`.
 
+> **IMPORTANT**: See `reference/components.html` for a visual gallery of every component with copy-paste HTML.
+> When building an app, copy the exact HTML patterns from `components.html` — do NOT invent custom CSS.
+
 ### Buttons
 
 Borderless — `bg-input` background, no border. Variants use solid accent colors.
@@ -822,6 +825,211 @@ Sticks to top on scroll. Use on toolbars or section headers in long lists.
 
 ---
 
+### Accordion
+
+Collapsible sections using native `<details>/<summary>`. No JS needed.
+
+```html
+<div class="accordion">
+  <details>
+    <summary>Section title</summary>
+    <div class="accordion-content">Content here</div>
+  </details>
+  <details open>
+    <summary>Open by default</summary>
+    <div class="accordion-content">This section starts open</div>
+  </details>
+</div>
+```
+
+### Tooltip
+
+CSS-only tooltip via `data-tooltip` attribute:
+
+```html
+<button class="btn" data-tooltip="Save changes">Save</button>
+<button class="btn-icon" data-tooltip="Settings"><!-- icon --></button>
+```
+
+### Dropdown menu
+
+Focus-within triggered menu:
+
+```html
+<div class="dropdown">
+  <button class="btn-icon" tabindex="0"><!-- more icon --></button>
+  <div class="dropdown-menu">
+    <div class="dropdown-label">Actions</div>
+    <button class="dropdown-item"><!-- icon --> Edit</button>
+    <button class="dropdown-item"><!-- icon --> Duplicate</button>
+    <div class="dropdown-separator"></div>
+    <button class="dropdown-item dropdown-item-danger"><!-- icon --> Delete</button>
+  </div>
+</div>
+```
+
+### Breadcrumb
+
+```html
+<nav class="breadcrumb">
+  <a href="#">Home</a>
+  <span class="breadcrumb-sep">/</span>
+  <a href="#">Projects</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Alpha</span>
+</nav>
+```
+
+### Pagination
+
+```html
+<div class="pagination">
+  <button class="page-btn" disabled><!-- chevron-left --></button>
+  <button class="page-btn active">1</button>
+  <button class="page-btn">2</button>
+  <button class="page-btn">3</button>
+  <span class="page-ellipsis">...</span>
+  <button class="page-btn">12</button>
+  <button class="page-btn"><!-- chevron-right --></button>
+</div>
+```
+
+### Slider
+
+```html
+<input type="range" class="slider" min="0" max="100" value="72">
+```
+
+### Bar chart (vertical)
+
+```html
+<div class="bar-chart" style="height:100px">
+  <div class="bar-chart-col">
+    <span class="bar-chart-value">12</span>
+    <div class="bar-chart-bar" style="height:40%"></div>
+    <span class="bar-chart-label">Mon</span>
+  </div>
+  <!-- more columns... -->
+</div>
+```
+
+Override bar color: `style="height:60%; background:var(--green)"`.
+
+### Horizontal bar chart
+
+```html
+<div class="hbar-chart">
+  <div class="hbar-row">
+    <span class="hbar-label">Design</span>
+    <div class="hbar-track"><div class="hbar-fill" style="width:85%"></div></div>
+    <span class="hbar-value">85%</span>
+  </div>
+</div>
+```
+
+Override fill color: `style="width:62%; background:var(--sapphire)"`.
+
+### Sparkline
+
+Inline mini bars for tables/dashboard rows:
+
+```html
+<span class="sparkline">
+  <span class="sparkline-bar" style="height:30%"></span>
+  <span class="sparkline-bar" style="height:50%"></span>
+  <span class="sparkline-bar" style="height:80%"></span>
+  <!-- more bars... -->
+</span>
+```
+
+### Ring chart
+
+SVG donut/progress ring. `stroke-dasharray` = circumference (2πr), `stroke-dashoffset` = remaining.
+
+```html
+<div class="ring-chart">
+  <svg viewBox="0 0 80 80">
+    <circle class="ring-bg" cx="40" cy="40" r="34"/>
+    <circle class="ring-fill" cx="40" cy="40" r="34"
+      stroke-dasharray="213.6" stroke-dashoffset="55.5"/>
+  </svg>
+  <span class="ring-chart-value">74%</span>
+</div>
+<div class="ring-chart-label">Storage</div>
+```
+
+Formula: `stroke-dashoffset = 213.6 * (1 - percentage/100)`. Override color: `style="stroke:var(--green)"`.
+
+### Carousel
+
+Scroll-snap based, no JS for basic behavior:
+
+```html
+<!-- Card carousel -->
+<div class="carousel carousel-cards">
+  <div class="carousel-item"><div class="card">Card 1</div></div>
+  <div class="carousel-item"><div class="card">Card 2</div></div>
+</div>
+
+<!-- Peek carousel (85% width, shows next slide) -->
+<div class="carousel carousel-peek">...</div>
+
+<!-- Full-width slides -->
+<div class="carousel carousel-full">...</div>
+
+<!-- Dots indicator -->
+<div class="carousel-dots">
+  <button class="carousel-dot active"></button>
+  <button class="carousel-dot"></button>
+</div>
+```
+
+### Dropzone / file upload
+
+```html
+<!-- Large drop area -->
+<div class="dropzone">
+  <!-- 40px upload icon -->
+  <div class="dropzone-text">Drag & drop files here, or <span style="color:var(--accent)">browse</span></div>
+  <div class="dropzone-hint">PNG, JPG, PDF up to 10MB</div>
+</div>
+
+<!-- Compact inline drop row -->
+<div class="dropzone-compact">
+  <!-- 16px upload icon --> Attach a file...
+</div>
+```
+
+Add `.dragover` class via JS on `dragenter`/`dragleave` events.
+
+### File item
+
+```html
+<div class="file-item">
+  <div class="file-icon"><!-- 16px file icon --></div>
+  <div class="file-info">
+    <div class="file-name">document.pdf</div>
+    <div class="file-meta">2.4 MB · Just now</div>
+  </div>
+  <button class="btn-icon"><!-- X icon --></button>
+</div>
+```
+
+Override icon color: `style="background:color-mix(in srgb, var(--green) 12%, var(--bg)); color:var(--green)"`.
+
+### Popover
+
+```html
+<div class="popover">
+  <button class="btn btn-sm" tabindex="0">More info</button>
+  <div class="popover-content">
+    <p>Popover content here</p>
+  </div>
+</div>
+```
+
+---
+
 ## Layout patterns
 
 ### Standard app page
@@ -892,28 +1100,117 @@ Use `.page` on `<body>` — it sets padding, max-width, font, bg, and color in o
 </div>
 ```
 
+### App shell layout
+
+For apps that need a sticky header, scrollable body, and optional footer. **Use instead of `.page` when you need header actions or a footer.**
+
+```html
+<body>
+<div class="app-shell">
+  <div class="app-header">
+    <h1 class="app-header-title">My App</h1>
+    <span class="spacer"></span>
+    <div class="app-header-actions">
+      <button class="btn-icon"><!-- search icon --></button>
+      <button class="btn btn-primary btn-sm"><!-- plus icon --> Add</button>
+    </div>
+  </div>
+  <div class="app-body">
+    <!-- content here -->
+  </div>
+  <div class="app-footer">
+    <span>3 items</span>
+    <span class="spacer"></span>
+    <span>Updated just now</span>
+  </div>
+</div>
+</body>
+```
+
+Use `.app-body-wide` instead of `.app-body` for dashboards (no max-width).
+
+### Workspace layout
+
+Sidebar + main panel for complex apps (mail, notes, IDE-style):
+
+```html
+<body>
+<div class="workspace">
+  <div class="workspace-sidebar">
+    <div class="workspace-sidebar-header"><!-- logo + title --></div>
+    <div class="workspace-sidebar-body">
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Navigation</div>
+        <nav class="sidebar-nav">
+          <button class="sidebar-item active"><!-- icon --> Dashboard</button>
+          <button class="sidebar-item"><!-- icon --> Documents</button>
+        </nav>
+      </div>
+    </div>
+    <div class="workspace-sidebar-footer">
+      <button class="sidebar-item"><!-- icon --> Settings</button>
+    </div>
+  </div>
+  <div class="workspace-main">
+    <div class="workspace-main-header">
+      <h3>Dashboard</h3>
+      <span class="spacer"></span>
+      <!-- toolbar actions -->
+    </div>
+    <div class="workspace-main-body">
+      <!-- content -->
+    </div>
+  </div>
+</div>
+</body>
+```
+
+Add `.workspace-detail` as a third panel for 3-column layouts (mail reader, detail inspector).
+
+Sidebar and detail panel auto-hide on mobile (≤768px).
+
 ### Settings page
 
 ```html
-<body class="page">
-  <h2>Settings</h2>
-
-  <div class="card mb-md">
-    <div class="card-header">
-      <h3>Notifications</h3>
+<body>
+<div class="app-shell">
+  <div class="app-header">
+    <h1 class="app-header-title">Settings</h1>
+  </div>
+  <div class="app-body" style="max-width:640px">
+    <div class="settings-section">
+      <div class="section-label">General</div>
+      <div class="card">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Notifications</div>
+            <div class="settings-row-desc">Receive alerts when tasks complete</div>
+          </div>
+          <label class="toggle"><input type="checkbox" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Language</div>
+            <div class="settings-row-desc">Display language</div>
+          </div>
+          <select class="select" style="width:140px"><option>English</option></select>
+        </div>
+      </div>
     </div>
-    <label class="toggle">
-      <input type="checkbox" checked>
-      <span class="toggle-track"></span>
-      Email notifications
-    </label>
+    <div class="settings-section">
+      <div class="section-label">Danger zone</div>
+      <div class="danger-zone">
+        <div class="settings-row" style="border:none;padding-top:0">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Delete all data</div>
+            <div class="settings-row-desc">This cannot be undone</div>
+          </div>
+          <button class="btn btn-danger btn-sm">Delete</button>
+        </div>
+      </div>
+    </div>
   </div>
-
-  <div class="danger-zone">
-    <h4>Delete all data</h4>
-    <p class="text-sm text-dim">This cannot be undone.</p>
-    <button class="btn btn-danger mt-sm">Delete</button>
-  </div>
+</div>
 </body>
 ```
 
@@ -1063,9 +1360,11 @@ AlfSDK.sheet(
 
 ## Checklist for new apps
 
+- [ ] **Visual reference**: copied HTML patterns from `reference/components.html` — no invented CSS
 - [ ] Theme setup: `theme-*.css` + `theme-init.js` + `alf-app-sdk.js` in `<head>`
 - [ ] `AlfSDK.init()` with `onThemeChange` handler
-- [ ] `<body class="page">` — **no manual body CSS**
+- [ ] Layout: `.page`, `.app-shell`, or `.workspace` — **no manual body CSS**
+- [ ] Settings pages use `.settings-section` + `.settings-row` pattern
 - [ ] All colors use CSS variables, zero hardcoded hex values
 - [ ] Translucent backgrounds use `color-mix()`, not `rgba()`
 - [ ] All spacing uses `--space-*` tokens or `alf-ui.css` classes
@@ -1075,6 +1374,14 @@ AlfSDK.sheet(
 - [ ] Cards use `.card` (borderless) or `.card-group` for lists
 - [ ] Tags use `.tag` + `.tag-*` (translucent tinted, not opaque)
 - [ ] Lists use `.card-group` > `.list-item-interactive` pattern
+- [ ] Collapsible sections use `.accordion` with `details/summary`
+- [ ] Tooltips use `data-tooltip` attribute — no custom tooltip CSS
+- [ ] Context menus use `.dropdown` + `.dropdown-menu`
+- [ ] File uploads use `.dropzone` + `.file-item`
+- [ ] Charts use `.bar-chart`, `.hbar-chart`, `.ring-chart`, or `.sparkline`
+- [ ] Pagination uses `.pagination` + `.page-btn`
+- [ ] Range inputs use `.slider` class
+- [ ] Scrollable content uses `.carousel` + `.carousel-cards`/`.carousel-peek`/`.carousel-full`
 - [ ] Checkboxes use `.check` / `.check.checked` — **no emoji**
 - [ ] Completed items use `.done` class
 - [ ] Flex spacers use `.spacer` — not `style="flex:1"`

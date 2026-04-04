@@ -520,7 +520,8 @@ var safeEnvPrefixes = []string{
 	"VAULT_TOKEN=",      // Vault proxy-scoped token
 	"VAULT_ADDR=",       // Vault server address (supports unix: scheme)
 	"VAULT_PROXY_SOCK=", // Vault proxy Unix socket (token injected server-side)
-	"ALF_TOOLS_SOCK=",  // Tools proxy Unix socket (replaces CC_AUTH_TOKEN)
+	"ALF_TOOLS_SOCK=",   // Tools proxy Unix socket (replaces CC_AUTH_TOKEN)
+	"ALF_SIGNAL_SOCK=",  // Signal socket for notify tool
 }
 
 // safeEnv builds a subprocess environment with only safe variables plus HOME/ALF_DATA_DIR.

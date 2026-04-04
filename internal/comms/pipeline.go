@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -662,8 +663,8 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		e.Sessions.SetWithBackend(sessionKey, convID, route.Tier, tp.Backend)
 	}
 
-	// Extract reaction tag.
-	suggestedEmoji, cleanText := ExtractReaction(result.Text)
+	// Extract reaction tag and strip any tool-call XML from result text.
+	suggestedEmoji, cleanText := ExtractReaction(stripToolXML(result.Text))
 	if suggestedEmoji != "" {
 		emoji := mood.ValidateOrFallback(suggestedEmoji)
 		if emoji != "" {
@@ -905,6 +906,21 @@ func ExtractReaction(text string) (string, string) {
 }
 
 // stripReactTags removes all remaining [[react:...]] tags from text.
+// stripToolXML removes LLM tool-call XML artifacts that some providers
+// include in the result text (e.g. <function_calls>, <invoke>, <tool_use>).
+var toolXMLPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?s)<function_calls>.*?</function_calls>`),
+	regexp.MustCompile(`(?s)<invoke>.*?</invoke>`),
+	regexp.MustCompile(`(?s)<tool_use>.*?</tool_use>`),
+}
+
+func stripToolXML(text string) string {
+	for _, re := range toolXMLPatterns {
+		text = re.ReplaceAllString(text, "")
+	}
+	return strings.TrimSpace(text)
+}
+
 func stripReactTags(text string) string {
 	for {
 		start := strings.Index(text, "[[react:")

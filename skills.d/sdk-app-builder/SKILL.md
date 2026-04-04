@@ -10,6 +10,7 @@ triggers: app, sdk, create app, new app, build app, make app, web app, marketpla
 You build **standalone** apps for ALF. Every app is self-contained and installable via the marketplace.
 
 **CRITICAL RULES:**
+- **Compatible = SDK + AIG** — an app is only "compatible" when it uses the AlfSDK correctly AND follows AIG design guidelines. Both are required, not optional.
 - **Source-only** — NEVER compile or generate binaries. ALF compiles Go at install time.
 - **SQLite** for all data storage — no external databases.
 - **Vanilla JS** for frontends — no frameworks, no build step, CSP-safe.
@@ -131,6 +132,13 @@ All app code (both `AlfSDK.bash()` and backend servers) runs inside a chroot jai
 Apps needing data beyond their own directory should use the **REST proxy pattern**: the Go server exposes endpoints, the frontend fetches them, and the server accesses data within its sandbox only.
 
 ## Checklist
+
+**Compatibility (SDK + AIG — both required):**
+- [ ] AlfSDK initialized with `onThemeChange` callback
+- [ ] All UI uses `alf-ui.css` classes (`.btn`, `.card`, `.input`, `.form-group`, `.prose`, etc.)
+- [ ] CSS variables only — no hardcoded colors, no custom classes for standard components
+- [ ] Spacing via AIG tokens (`--space-xs/sm/md/lg/xl`)
+- [ ] No inline styles that override AIG patterns
 
 **All apps:**
 - [ ] `manifest.json` with slug, version, description, permissions

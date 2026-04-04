@@ -510,12 +510,13 @@
         setBlocks([...blocks])
       }
     } else if (type === 'text') {
-      // Final text event from comms pipeline
+      // Final text event from comms pipeline — only use it if no blocks
+      // were built during streaming (text_delta events already populated
+      // text blocks). Adding it when blocks exist would duplicate content
+      // and may expose raw tool-call XML (#124).
       const text = data.text || data.data?.text || ''
-      if (text) {
-        if (blocks.length === 0 || blocks[blocks.length - 1].type !== 'text') {
-          blocks.push({ type: 'text', text: '', thinking: '' })
-        }
+      if (text && blocks.length === 0) {
+        blocks.push({ type: 'text', text: '', thinking: '' })
         blocks[blocks.length - 1].text = text
         setBlocks([...blocks])
       }

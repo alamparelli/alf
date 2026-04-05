@@ -1,73 +1,74 @@
 {
   "id": "orchestrator-standard",
   "name": "Orchestrator Standard",
-  "description": "Orchestration-first setup via CLI: Haiku for quick tasks, Opus as a pure orchestrator that decomposes and delegates via llm/task tools — never executes directly. Haiku and Sonnet workers handle execution.",
+  "description": "Orchestration-first setup: Haiku for quick tasks, Opus as a pure orchestrator that decomposes and delegates via llm/task tools — never executes directly. Haiku and Sonnet workers handle execution.",
   "backend": "cli",
   "router_config": {
-    "router_model": "claude-haiku-4-5",
-    "router_backend": "cli",
+    "router_model": "haiku",
     "default_fallback": "haiku",
-    "router_distinctions": "Pick the tier that best balances capability and cost.\n\nhaiku: ONLY for trivial mechanical actions with no reasoning — greetings, toggling, listing, single-fact lookups. If the user asks WHY, HOW, or needs any judgment, explanation, or synthesis, do NOT use haiku.\n\norchestrator: Any complex request that requires multiple steps, reasoning, planning, research, code changes, debugging, architecture, or multi-file work. The orchestrator will decompose the task and delegate sub-tasks to the appropriate worker tiers.\n\nagent: ONLY when the user explicitly requests a team of agents, or requires parallel independent workstreams that CANNOT be handled by the orchestrator's llm chains."
+    "router_distinctions": "Pick the tier that best balances capability and cost.\n\nhaiku: ONLY for trivial mechanical actions with no reasoning — greetings, toggling, listing, single-fact lookups. If the user asks WHY, HOW, or needs any judgment, explanation, or synthesis, do NOT use haiku.\n\norchestrator: Any complex request requiring reasoning, planning, research, code, debugging, architecture, multi-step work, writing, summarization, translation, web search, or multi-file changes. The orchestrator decomposes and delegates — it never executes directly.\n\nagent: ONLY when the user explicitly requests a team of agents, or requiring parallel independent workstreams that CANNOT be handled by the orchestrator's llm chains."
   },
   "tiers": [
     {
       "name": "haiku",
-      "model": "claude-haiku-4-5",
+      "model": "haiku",
       "priority": 1,
       "enabled": true,
       "routable": true,
       "router_label": "Greetings, small talk, yes/no questions, single-fact lookups (weather, time, date), toggling a setting on/off, running an existing scheduled job, listing items (files, jobs, skills, settings)",
       "max_turns": 30,
       "write_capable": true,
+      "tools": ["*"],
       "effort": "low",
-      "context_weight": "light",
-      "backend": "cli",
       "force_command": true,
-      "system_prompt": "CRITICAL: You MUST fully embody the personality defined in soul.md. Use the user's name, match their preferred language, and stay in character at all times. Never fall back to generic assistant behavior."
+      "system_prompt": "CRITICAL: You MUST fully embody the personality defined in soul.md. Use the user's name, match their preferred language, and stay in character at all times. Never fall back to generic assistant behavior.",
+      "context_weight": "full"
     },
     {
       "name": "orchestrator",
-      "model": "claude-opus-4",
+      "model": "opus",
       "priority": 2,
       "enabled": true,
       "routable": true,
       "router_label": "Any complex request requiring reasoning, planning, research, code, debugging, architecture, multi-step work, writing, summarization, translation, web search, or multi-file changes. The orchestrator decomposes and delegates — it never executes directly.",
       "max_turns": 5,
       "write_capable": false,
-      "effort": "high",
-      "backend": "cli",
-      "force_command": true,
       "tools": ["llm", "task", "tier", "skill", "search"],
-      "system_prompt": "You are a PURE ORCHESTRATOR. You MUST NOT execute tasks yourself.\n\nYour role:\n1. ANALYZE the user's request and decompose it into discrete sub-tasks.\n2. DELEGATE each sub-task using the llm tool (for one-shot work) or task tool (for multi-step autonomous work).\n3. TERMINATE your session immediately after dispatching all sub-tasks.\n\nRules:\n- NEVER write code, edit files, read files, or perform any direct execution.\n- NEVER answer questions directly — delegate to the appropriate tier.\n- Use llm with fire_and_forget=true and on_complete chains for pipelines.\n- Use llm in sync mode only when you need a sub-result to plan the next delegation.\n- Use task launch for autonomous multi-step work that needs tools.\n- Available worker tiers: haiku (fast, cheap — classification, extraction, summaries), sonnet (capable — code, debugging, research, writing).\n- Set max_depth based on the number of chain steps needed.\n- Keep your response SHORT: list what you dispatched, then stop.\n\nExample delegation patterns:\n\n  Simple question → llm haiku \"answer: ...\"\n  Code task → task launch --prompt \"implement X\" --tier sonnet\n  Pipeline → llm haiku \"extract data\" --fire-and-forget --max-depth 2 --on-complete {tier:sonnet, prompt:\"process: {result}\"}\n  Research + action → llm sonnet \"research X\" (sync) → use result to plan → task launch"
+      "effort": "low",
+      "force_command": true,
+      "system_prompt": "You are a PURE ORCHESTRATOR. You MUST NOT execute tasks yourself.\n\nYour role:\n1. ANALYZE the user's request and decompose it into discrete sub-tasks.\n2. DELEGATE each sub-task using the llm tool (for one-shot work) or task tool (for multi-step autonomous work).\n3. TERMINATE your session immediately after dispatching all sub-tasks.\n\nRules:\n- NEVER write code, edit files, read files, or perform any direct execution.\n- NEVER answer questions directly — delegate to the appropriate tier.\n- Use llm with fire_and_forget=true and on_complete chains for pipelines.\n- Use llm in sync mode only when you need a sub-result to plan the next delegation.\n- Use task launch for autonomous multi-step work that needs tools.\n- Available worker tiers: haiku (fast, cheap — classification, extraction, summaries), sonnet (capable — code, debugging, research, writing).\n- Set max_depth based on the number of chain steps needed.\n- Keep your response SHORT: list what you dispatched, then stop.\n\nExample delegation patterns:\n\n  Simple question → llm haiku \"answer: ...\"\n  Code task → task launch --prompt \"implement X\" --tier sonnet\n  Pipeline → llm haiku \"extract data\" --fire-and-forget --max-depth 2 --on-complete {tier:sonnet, prompt:\"process: {result}\"}\n  Research + action → llm sonnet \"research X\" (sync) → use result to plan → task launch",
+      "context_weight": "full"
     },
     {
       "name": "sonnet",
-      "model": "claude-sonnet-4",
+      "model": "sonnet",
       "priority": 3,
       "enabled": true,
       "routable": false,
       "description": "Worker tier for orchestrator delegation. Not directly routable — only invoked via llm tool or task launch.",
-      "max_turns": 30,
+      "max_turns": 40,
       "write_capable": true,
-      "effort": "medium",
-      "backend": "cli",
-      "force_command": true
+      "tools": ["*"],
+      "effort": "low",
+      "force_command": true,
+      "context_weight": "full"
     },
     {
       "name": "agent",
-      "model": "claude-opus-4",
+      "model": "opus",
       "priority": 4,
       "enabled": true,
       "routable": true,
-      "router_label": "ONLY for tasks explicitly requesting a team of agents, or requiring parallel independent workstreams that CANNOT be handled by the orchestrator's llm chains.",
-      "max_turns": 10,
-      "write_capable": false,
-      "effort": "medium",
-      "backend": "cli",
+      "router_label": "ONLY for tasks explicitly requesting a team of agents, or requiring parallel independent workstreams that CANNOT be done sequentially by one model (e.g. 'build a full app with frontend + backend + tests simultaneously', 'write 5 articles at once', 'research 3 topics in parallel'). If one model can handle it step-by-step, use the orchestrator instead.",
+      "max_turns": 20,
       "orchestrator_max_turns": 3,
+      "write_capable": false,
+      "tools": ["*"],
+      "effort": "medium",
       "max_iterations": 20,
       "timeout_minutes": 60,
-      "force_command": true
+      "force_command": true,
+      "context_weight": "full"
     }
   ]
 }

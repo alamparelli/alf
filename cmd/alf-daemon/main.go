@@ -878,12 +878,64 @@ func main() {
 			marketplace: mpManager,
 			dataDir:     dataDir,
 		}},
-		tooling.LLMNativeTool{Service: &llmAdapter{
-			tierStore:        tierStore,
-			providerRegistry: registry,
-			resolveModel:     router.ResolveModel,
-			dataDir:          dataDir,
-		}},
+		tooling.LLMNativeTool{
+			Service: &llmAdapter{
+				tierStore:        tierStore,
+				providerRegistry: registry,
+				resolveModel:     router.ResolveModel,
+				dataDir:          dataDir,
+			},
+			NotifyFunc: func(chainID, status, message string) {
+				short := chainID
+				if len(short) > 8 {
+					short = short[:8]
+				}
+				var text string
+				if status == "completed" {
+					text = "Chain #" + short + " completed"
+					if message != "" {
+						preview := message
+						if len(preview) > 500 {
+							preview = preview[:500] + "..."
+						}
+						text += "\n" + preview
+					}
+				} else {
+					text = "Chain #" + short + " " + status
+					if message != "" {
+						text += ": " + message
+					}
+				}
+				convID := chatDB.LatestConversationID("cc")
+				if convID == "" {
+					convID = "_system"
+					chatDB.EnsureConversation(convID, "", "cc")
+				}
+				chatDB.InsertMessage(chatdb.Message{
+					ID:     cc.NewMessageID(),
+					ConvID: convID,
+					Role:   "system",
+					Text:   text,
+					Source: "cc",
+				})
+				log.Printf("[llm-chain] event: chain=%s status=%s", short, status)
+				if eventBroker != nil {
+					preview := text
+					if len(preview) > 200 {
+						preview = preview[:200] + "..."
+					}
+					eventBroker.EmitWithData(cc.EventNewMessage, preview)
+				}
+				if tg != nil && chatID != "" {
+					tgID, _ := strconv.ParseInt(chatID, 10, 64)
+					if tgID != 0 {
+						if err := tg.SendHTML(tgID, text); err != nil {
+							log.Printf("[llm-chain] telegram notify failed: %v", err)
+						}
+					}
+				}
+			},
+		},
 	}
 	for _, t := range systemTools {
 		toolRegistry.RegisterNative(t)

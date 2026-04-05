@@ -179,11 +179,32 @@ type LLMService interface {
 	Invoke(ctx context.Context, opts LLMInvokeOpts) (string, error)
 }
 
-// LLMInvokeOpts configures a one-shot LLM call.
+// LLMInvokeOpts configures a one-shot LLM call or a fire-and-forget chain.
 type LLMInvokeOpts struct {
-	Tier   string // tier name (dynamic, from tier config)
-	Prompt string // user prompt
-	System string // optional system prompt
+	Tier          string          // tier name (dynamic, from tier config)
+	Prompt        string          // user prompt
+	System        string          // optional system prompt
+	FireAndForget bool            // if true, run async and call OnComplete with result
+	OnComplete    *LLMOnComplete  // required when FireAndForget=true
+	MaxDepth      int             // max chain depth (set on first call, decremented)
+	ChainID       string          // UUID propagated through the chain
+}
+
+// LLMOnComplete defines the next step in a fire-and-forget chain.
+// The prompt may contain {result} which is replaced with the previous step's output
+// wrapped in <chain_result status="N">...</chain_result>.
+type LLMOnComplete struct {
+	Tier          string         `json:"tier"`
+	Prompt        string         `json:"prompt"`
+	System        string         `json:"system,omitempty"`
+	FireAndForget bool           `json:"fire_and_forget,omitempty"`
+	OnComplete    *LLMOnComplete `json:"on_complete,omitempty"`
+}
+
+// LLMChainResult is the structured result passed between chain steps.
+type LLMChainResult struct {
+	Status  int    `json:"status"`
+	Message string `json:"message"`
 }
 
 // --- Search ---

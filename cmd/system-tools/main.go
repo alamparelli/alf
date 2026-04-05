@@ -213,7 +213,7 @@ func handleSearch(args []string) {
 
 func handleLLM(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: llm <tier> <prompt> [--system <system_prompt>]")
+		fmt.Fprintln(os.Stderr, "usage: llm <tier> <prompt> [--system S] [--fire-and-forget --on-complete '<json>' --max-depth N]")
 		os.Exit(1)
 	}
 	tier := args[0]
@@ -227,18 +227,46 @@ func handleLLM(args []string) {
 	if sys, ok := params["system"]; ok {
 		body["system"] = sys
 	}
+	if _, ok := params["fire-and-forget"]; ok {
+		body["fire_and_forget"] = true
+
+		if oc, ok := params["on-complete"]; ok {
+			var onComplete json.RawMessage
+			if err := json.Unmarshal([]byte(oc), &onComplete); err != nil {
+				fmt.Fprintf(os.Stderr, "invalid --on-complete JSON: %v\n", err)
+				os.Exit(1)
+			}
+			body["on_complete"] = onComplete
+		}
+		if md, ok := params["max-depth"]; ok {
+			n, err := strconv.Atoi(md)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "invalid --max-depth: %v\n", err)
+				os.Exit(1)
+			}
+			body["max_depth"] = n
+		}
+	}
 
 	data, _ := json.Marshal(body)
 	result, err := doPost("/api/llm/invoke", data)
 	if err != nil {
 		fatal(err)
 	}
-	// Extract text from JSON response.
+	// Extract text from JSON response (sync mode) or print raw (async mode).
 	var resp struct {
-		Text string `json:"text"`
+		Text    string `json:"text"`
+		ChainID string `json:"chain_id"`
+		Status  string `json:"status"`
 	}
-	if json.Unmarshal([]byte(result), &resp) == nil && resp.Text != "" {
-		fmt.Println(resp.Text)
+	if json.Unmarshal([]byte(result), &resp) == nil {
+		if resp.ChainID != "" {
+			fmt.Printf("Chain %s %s\n", resp.ChainID, resp.Status)
+		} else if resp.Text != "" {
+			fmt.Println(resp.Text)
+		} else {
+			fmt.Println(result)
+		}
 	} else {
 		fmt.Println(result)
 	}
@@ -389,7 +417,7 @@ func printHelp(name string) {
 		"tier":   "Show tiers.\n  tier",
 		"log":    "Access logs.\n  log list\n  log tail <name> [lines]",
 		"search": "Search workspace.\n  search <query> [--types apps,files,docs]",
-		"llm":    "Invoke an LLM tier.\n  llm <tier> <prompt> [--system <system_prompt>]",
+		"llm":    "Invoke an LLM tier.\n  llm <tier> <prompt> [--system <system_prompt>]\n  llm <tier> <prompt> --fire-and-forget --max-depth N --on-complete '<json>'\n\nExamples:\n  llm haiku \"summarize this\" --system \"Be concise\"\n  llm haiku \"extract TODOs\" --fire-and-forget --max-depth 2 --on-complete '{\"tier\":\"sonnet\",\"prompt\":\"generate tests for:\\n{result}\"}'",
 	}
 	if h, ok := helps[name]; ok {
 		fmt.Println(h)

@@ -7,8 +7,9 @@ Press <span class="kbd">⌘K</span> to search
 
 **Skeleton loading:**
 ```html
-<div class="skeleton" style="width:60%;height:16px"></div>
-<div class="skeleton" style="width:100%;height:120px"></div>
+<div class="skeleton skeleton-text"></div>
+<div class="skeleton skeleton-text"></div>
+<div class="skeleton skeleton-text"></div>
 ```
 
 **Meta (icon + text):**
@@ -23,7 +24,7 @@ Press <span class="kbd">⌘K</span> to search
 
 **Spacer (flex:1 push):**
 ```html
-<div style="display:flex;align-items:center">
+<div class="flex items-center">
   <h3>Title</h3>
   <div class="spacer"></div>
   <button class="btn btn-sm">Action</button>

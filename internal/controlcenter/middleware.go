@@ -2,6 +2,7 @@ package controlcenter
 
 import (
 	"bufio"
+	"context"
 	"crypto/subtle"
 	"fmt"
 	"log"
@@ -11,6 +12,18 @@ import (
 	"sync"
 	"time"
 )
+
+// ctxKeyAppTokenSlug stores the slug extracted from a validated app Bearer token.
+// Used by handlers (e.g., BashHandler) to cross-check against Referer-derived slug.
+type ctxKeyAppTokenSlug struct{}
+
+// AppTokenSlugFromContext returns the app slug from a validated Bearer token, if any.
+func AppTokenSlugFromContext(ctx context.Context) string {
+	if s, ok := ctx.Value(ctxKeyAppTokenSlug{}).(string); ok {
+		return s
+	}
+	return ""
+}
 
 // authMethod indicates which authentication method succeeded.
 type authMethod int
@@ -97,16 +110,21 @@ func isAppSubResource(r *http.Request) bool {
 	dest := r.Header.Get("Sec-Fetch-Dest")
 	site := r.Header.Get("Sec-Fetch-Site")
 
-	// Require a Referer pointing to an /apps/ path. Browsers always send this
-	// for sub-resource loads; non-browser clients (curl) won't have it naturally.
-	// Combined with Sec-Fetch-Dest this makes spoofing require both headers.
+	// Require BOTH Sec-Fetch headers to be present (browser-set, unforgeable).
+	// curl/scripts typically don't send these — requiring both raises the bar.
+	if dest == "" || site == "" {
+		return false
+	}
+
+	// If Referer is present, it must point to an /apps/ path.
+	// Sandboxed iframes may omit Referer — that's OK when Sec-Fetch headers are valid.
 	ref := r.Header.Get("Referer")
-	if ref == "" || !strings.Contains(ref, "/apps/") {
+	if ref != "" && !strings.Contains(ref, "/apps/") {
 		return false
 	}
 
 	// Sub-resource loads: script, style, image, font, audio, video, worker, etc.
-	if dest != "" && dest != "document" && dest != "navigate" {
+	if dest != "document" && dest != "navigate" {
 		if site == "same-origin" || site == "cross-site" || site == "same-site" || site == "none" {
 			return true
 		}
@@ -181,9 +199,12 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 								return
 							}
 						}
-						// Non-scoped routes that apps need access to
+						// Non-scoped routes: propagate token slug in context
+						// so handlers can cross-check against Referer-derived slug.
 						if path == "/api/bash" || path == "/api/app-action" {
-							next.ServeHTTP(w, r)
+							tokenSlug, _ := appTokens.Validate(bearer)
+							ctx := context.WithValue(r.Context(), ctxKeyAppTokenSlug{}, tokenSlug)
+							next.ServeHTTP(w, r.WithContext(ctx))
 							return
 						}
 					}

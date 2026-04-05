@@ -82,6 +82,15 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if appSlug == "" {
 		appSlug = req.AppSlug // fallback to body for non-browser callers (no privilege gain)
 	}
+	// Cross-check: if request was authenticated via app Bearer token,
+	// the token slug must match the Referer-derived slug. Prevents an app
+	// from forging Referer to execute bash as a different app.
+	if tokenSlug := AppTokenSlugFromContext(r.Context()); tokenSlug != "" && appSlug != "" {
+		if tokenSlug != appSlug {
+			respondJSON(w, http.StatusForbidden, map[string]string{"error": "token/app slug mismatch"})
+			return
+		}
+	}
 	if appSlug != "" && !isSystemApp && h.Perms != nil && !h.Perms.HasPermission(appSlug, "bash") {
 		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash — add to manifest.json permissions"})
 		return

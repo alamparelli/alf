@@ -131,7 +131,7 @@ func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"default-src 'self'; "+
 				"script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://unpkg.com; "+
 				"style-src 'self' 'unsafe-inline'; "+
-				"img-src 'self' data: blob: https:; "+
+				"img-src 'self' data: blob:; "+
 				"connect-src 'self'; "+
 				"form-action 'self'; "+
 				"object-src 'none'; "+
@@ -205,9 +205,10 @@ func injectDesignSystemCSS(html []byte) []byte {
 	const tag = `<link rel="stylesheet" href="/static/alf-ui.css">`
 	s := string(html)
 
-	// Already has it — don't double-inject. Check for the actual <link tag,
-	// not just the URL string (which may appear inside <code> blocks).
-	if strings.Contains(s, `href="/static/alf-ui.css"`) {
+	// Already has it — don't double-inject.
+	// Check for the exact tag we inject. This avoids false positives from
+	// HTML-escaped mentions in <code> blocks (e.g., &lt;link ... alf-ui.css).
+	if strings.Contains(s, tag) {
 		return html
 	}
 

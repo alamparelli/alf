@@ -90,6 +90,7 @@ type Deps struct {
 	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
 	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
 	ModelCache       *ModelCache           // nil if model cache unavailable
+	AppTokens        *AppTokenStore           // nil if app tokens unavailable
 	Marketplace      *marketplace.Manager   // nil if marketplace unavailable
 	OnVaultUnlock    func()                // called after vault unlock (e.g. secret migration)
 	OnTaskEvent      func(taskID, status, summary string) // called when a task completes or needs attention
@@ -265,6 +266,10 @@ func HandlerFactory(deps Deps) Handlers {
 				handleAppPermissions(w, r, permChecker)
 				return
 			}
+			if strings.Contains(r.URL.Path, "/token") {
+				handleAppToken(w, r, deps.AppTokens)
+				return
+			}
 			if strings.Contains(r.URL.Path, "/restart") {
 				handleAppRestart(w, r)
 				return
@@ -272,7 +277,8 @@ func HandlerFactory(deps Deps) Handlers {
 			(&AppListHandler{Store: deps.AppStore}).ServeHTTP(w, r)
 		}))
 		mux.Handle("/apps/", &AppHandler{
-			Store: deps.AppStore,
+			Store:     deps.AppStore,
+			AppTokens: deps.AppTokens,
 		})
 	}
 
@@ -487,7 +493,7 @@ func HandlerFactory(deps Deps) Handlers {
 	handler = jsonMiddleware(handler)
 	handler = appIsolationMiddleware(deps.AllowedOrigin)(handler)
 	handler = csrfMiddleware(deps.AllowedOrigin)(handler)
-	handler = authMiddleware(deps.AuthToken, deps.Sessions, exempt, func() string {
+	handler = authMiddlewareWithAppTokens(deps.AuthToken, deps.Sessions, deps.AppTokens, exempt, func() string {
 		return GetMobileToken(deps.VaultManager)
 	})(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
@@ -570,6 +576,28 @@ func handleAppPermissions(w http.ResponseWriter, r *http.Request, perms marketpl
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"permissions": nil})
+}
+
+// handleAppToken issues a short-lived Bearer token for a sandboxed app iframe.
+// GET /api/apps/{slug}/token → {"token": "..."}
+// Called by the parent frame (authenticated via session) to get a token for the iframe.
+func handleAppToken(w http.ResponseWriter, r *http.Request, tokens *AppTokenStore) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if tokens == nil {
+		http.Error(w, `{"error":"app tokens not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/api/apps/")
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 1 || !validName.MatchString(parts[0]) {
+		http.NotFound(w, r)
+		return
+	}
+	token := tokens.Issue(parts[0])
+	respondJSON(w, http.StatusOK, map[string]any{"token": token})
 }
 
 // AppRestarter can restart an app's background service.

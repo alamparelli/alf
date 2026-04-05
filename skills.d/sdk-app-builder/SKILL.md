@@ -81,9 +81,10 @@ Read the relevant reference file for templates, patterns, and API details:
 
 ### Frontend rules
 - **Follow AIG** — use `alf-ui.css` classes (auto-injected into iframes). Read `reference/AIG.md` for rules, `reference/AIG-COMPONENTS.md` for HTML templates.
-- **Use AlfSDK v2 APIs** — audio, storage, confirm/prompt, haptics, clipboard, badges, viewport, events. See `reference/FRONTEND.md`.
+- **Use AlfSDK v4 APIs** — audio, storage, confirm/prompt, haptics, clipboard, badges, viewport, events. See `reference/FRONTEND.md`.
 - CSS variables only (no hardcoded colors), `--space-*` tokens, explicit `font-family`, Lucide SVG icons.
 - No `unsafe-eval` frameworks, no external scripts/stylesheets (CSP blocks them).
+- No `localStorage`, `document.cookie`, or `credentials: 'same-origin'` — iframes are sandboxed. Use `AlfSDK.storage` and `AlfSDK.api()`.
 - External APIs via vault proxy — see `reference/SANDBOX.md`.
 
 ## Final checklist (MANDATORY — run before telling the user "it's ready")

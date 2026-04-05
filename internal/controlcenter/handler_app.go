@@ -49,7 +49,8 @@ var allowedStaticExt = map[string]bool{
 //	/apps/{name}/api/...       → reverse proxy to localhost:{port}/api/...
 //	Port is read from apps/{name}/data/port (written by the app server at startup).
 type AppHandler struct {
-	Store AppStore
+	Store     AppStore
+	AppTokens *AppTokenStore // validates Bearer tokens from sandboxed iframes
 }
 
 func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

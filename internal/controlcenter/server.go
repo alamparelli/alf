@@ -77,6 +77,11 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 	// Schedule run log uses the same logs/scheduler directory as the scheduler engine.
 	schedRunLog := scheduler_pkg.NewRunLog(filepath.Join(dataDir, "logs", "scheduler"))
 
+	appTokens, err := NewAppTokenStore()
+	if err != nil {
+		return nil, nil, fmt.Errorf("create app token store: %w", err)
+	}
+
 	handlers := HandlerFactory(Deps{
 		ConfigStore:    configStore,
 		TierStore:      tierStore,
@@ -106,6 +111,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		ToolRegistry:     chatServiceToolRegistry(chatService),
 		ProviderRegistry: providerRegistry,
 		ModelCache:       newModelCacheIfRegistry(providerRegistry),
+		AppTokens:       appTokens,
 		Marketplace:     mp,
 		OnVaultUnlock:   onVaultUnlock,
 		OnTaskEvent:     onTaskEvent,

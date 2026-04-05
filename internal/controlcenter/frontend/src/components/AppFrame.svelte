@@ -8,6 +8,9 @@
   let { slug, query = '' }: { slug: string; query?: string } = $props()
   let iframe: HTMLIFrameElement
 
+  // MessageChannel port for dedicated communication with sandboxed iframe
+  let appPort: MessagePort | null = null
+
   // Sheet state
   let iframeReady = $state(false)
 
@@ -36,8 +39,8 @@
   // App permissions (null = all allowed, string[] = restricted)
   let appPermissions: string[] | null = $state(null)
 
-  function postToIframe(action: string) {
-    iframe?.contentWindow?.postMessage({ type: 'alf', action }, location.origin)
+  function postToIframe(action: string, data?: Record<string, any>) {
+    appPort?.postMessage({ type: 'alf', action, ...data })
   }
 
   function onVisibilityChange() {
@@ -45,134 +48,23 @@
   }
 
   function reply(replyId: number, result: any, error?: string) {
-    iframe?.contentWindow?.postMessage(
-      { type: 'alf', action: 'reply', _replyId: replyId, result, error },
-      location.origin
-    )
+    appPort?.postMessage({ type: 'alf', action: 'reply', _replyId: replyId, result, error })
   }
 
-  /** Inject alf-ui.css design system into iframe (fallback — server already
-   *  injects it into app HTML, so this is a no-op in most cases). */
-  function injectUICSS(frame: HTMLIFrameElement) {
-    try {
-      const doc = frame.contentDocument
-      if (!doc) return
-      // Skip if already present (server-injected or prior call).
-      if (doc.getElementById('alf-ui-css') ||
-          doc.querySelector('link[href*="alf-ui.css"]')) return
-      const link = doc.createElement('link')
-      link.id = 'alf-ui-css'
-      link.rel = 'stylesheet'
-      link.href = '/static/alf-ui.css'
-      doc.head.appendChild(link)
-    } catch {
-      // cross-origin — skip
+  /** Compute safe area insets from parent document */
+  function getSafeAreas() {
+    const test = document.createElement('div')
+    test.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px);'
+    document.body.appendChild(test)
+    const computed = getComputedStyle(test)
+    const areas = {
+      top: '0px', // handled by parent frame positioning
+      bottom: computed.paddingBottom,
+      left: computed.paddingLeft,
+      right: computed.paddingRight
     }
-  }
-
-  /** Inject safe area insets as CSS variables (iframes can't read env() from parent) */
-  function injectSafeAreas(frame: HTMLIFrameElement) {
-    try {
-      const doc = frame.contentDocument
-      if (!doc) return
-      if (doc.getElementById('alf-safe-areas')) return
-      // Read computed safe area values from the parent document
-      const cs = getComputedStyle(document.documentElement)
-      const top = cs.getPropertyValue('--sat').trim() || getComputedStyle(document.body).paddingTop || '0px'
-      // Use a test element to resolve env() values
-      const test = document.createElement('div')
-      test.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px);'
-      document.body.appendChild(test)
-      const computed = getComputedStyle(test)
-      const sat = computed.paddingTop
-      const sab = computed.paddingBottom
-      const sal = computed.paddingLeft
-      const sar = computed.paddingRight
-      document.body.removeChild(test)
-
-      const style = doc.createElement('style')
-      style.id = 'alf-safe-areas'
-      // Top safe area is already handled by the parent frame positioning
-      // (top: 36px + env(safe-area-inset-top)). Override --page-padding-top
-      // and --safe-area-top to 0 inside iframes to prevent double spacing.
-      // env(safe-area-inset-top) cannot be overridden, so we override the
-      // CSS variables that alf-ui.css uses instead.
-      style.textContent = `
-:root {
-  --safe-area-top: 0px;
-  --safe-area-bottom: ${sab};
-  --safe-area-left: ${sal};
-  --safe-area-right: ${sar};
-  --page-padding-top: 1rem;
-}
-body {
-  padding: 0 var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
-  overflow-x: hidden;
-}
-`
-      doc.head.appendChild(style)
-    } catch {
-      // cross-origin — skip
-    }
-  }
-
-  /** Inject mobile-responsive sheet CSS into iframe */
-  function injectSheetCSS(frame: HTMLIFrameElement) {
-    try {
-      const doc = frame.contentDocument
-      if (!doc) return
-      if (doc.getElementById('alf-sheet-css')) return
-      const style = doc.createElement('style')
-      style.id = 'alf-sheet-css'
-      style.textContent = `
-@media (max-width: 768px) {
-  dialog, dialog[open], .modal, [role="dialog"], .popup, .overlay-modal {
-    all: revert;
-    position: fixed !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    top: auto !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    max-height: 85vh !important;
-    margin: 0 !important;
-    border-radius: 16px 16px 0 0 !important;
-    padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px)) !important;
-    background: var(--bg-card, #1c1c1c) !important;
-    color: var(--text, #e0e0e0) !important;
-    border: none !important;
-    box-shadow: 0 -4px 32px rgba(0,0,0,0.3) !important;
-    overflow-y: auto !important;
-    animation: alf-sheet-up 0.2s ease !important;
-    z-index: 9999 !important;
-    display: flex;
-    flex-direction: column;
-  }
-  dialog::backdrop, .modal-backdrop, .overlay-backdrop {
-    background: rgba(0,0,0,0.5) !important;
-  }
-  dialog::before, .modal::before, [role="dialog"]::before {
-    content: '';
-    display: block;
-    width: 36px;
-    height: 5px;
-    background: currentColor;
-    opacity: 0.2;
-    border-radius: 3px;
-    margin: 10px auto 12px;
-    flex-shrink: 0;
-  }
-  @keyframes alf-sheet-up {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
-  }
-}
-`
-      doc.head.appendChild(style)
-    } catch {
-      // cross-origin — skip
-    }
+    document.body.removeChild(test)
+    return areas
   }
 
   // SEC-001 + SEC-P02: Sanitize HTML from iframe apps to prevent XSS in parent context.
@@ -245,7 +137,6 @@ body {
 
   function handleMessage(e: MessageEvent) {
     if (!e.data || e.data.type !== 'alf-app') return
-    if (e.source !== iframe?.contentWindow) return
 
     const { action, _replyId } = e.data
 
@@ -322,14 +213,9 @@ body {
         const colonIdx = rawEvent.indexOf(':')
         const eventName = colonIdx >= 0 ? rawEvent.slice(colonIdx + 1) : rawEvent
         const namespacedEvent = slug + ':' + eventName
-        // Broadcast to all other app iframes
-        document.querySelectorAll<HTMLIFrameElement>('iframe.page-frame').forEach(f => {
-          if (f !== iframe && f.contentWindow) {
-            f.contentWindow.postMessage(
-              { type: 'alf', action: 'event-relay', event: namespacedEvent, payload: e.data.payload },
-              location.origin
-            )
-          }
+        // Broadcast to all other app ports via theme registry
+        theme.broadcastToOtherApps(slug, {
+          type: 'alf', action: 'event-relay', event: namespacedEvent, payload: e.data.payload
         })
         break
       }
@@ -371,11 +257,8 @@ body {
         }
       })
     }
-    // Relay to iframe
-    iframe?.contentWindow?.postMessage(
-      { type: 'alf', action: 'sheet-action', name: actionName, params },
-      location.origin
-    )
+    // Relay to iframe via port
+    appPort?.postMessage({ type: 'alf', action: 'sheet-action', name: actionName, params })
   }
 
   function handleConfirm(result: boolean) {
@@ -393,52 +276,82 @@ body {
     if (promptReplyId) reply(promptReplyId, null)
   }
 
+  // Token refresh interval
+  let tokenRefreshTimer: ReturnType<typeof setInterval> | null = null
+
+  async function refreshToken() {
+    try {
+      const r = await fetch('/api/apps/' + slug + '/token')
+      if (!r.ok) return
+      const data = await r.json()
+      if (data.token) {
+        appPort?.postMessage({ type: 'alf', action: 'token-refresh', token: data.token })
+      }
+    } catch { /* ignore */ }
+  }
+
   onMount(() => {
     ;(window as any).navigateTo = (view: string) => nav.navigateTo(view)
 
-    window.addEventListener('message', handleMessage)
-
     if (iframe) {
-      iframe.addEventListener('load', () => {
-        theme.syncIframe(iframe)
-        injectUICSS(iframe)
-        injectSheetCSS(iframe)
-        injectSafeAreas(iframe)
-        // Reveal iframe after CSS has loaded (next frame ensures paint)
+      iframe.addEventListener('load', async () => {
+        // Fetch token and permissions in parallel
+        const [tokenRes, permRes] = await Promise.all([
+          fetch('/api/apps/' + slug + '/token').then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch('/api/apps/' + slug + '/permissions').then(r => r.ok ? r.json() : null).catch(() => null)
+        ])
+
+        if (permRes) appPermissions = permRes.permissions
+
+        // Create dedicated MessageChannel
+        const channel = new MessageChannel()
+        appPort = channel.port1
+        appPort.onmessage = handleMessage
+
+        // Register port in theme store for theme sync and event broadcast
+        theme.registerPort(slug, appPort)
+
+        // Send handshake with all initial context
+        iframe.contentWindow?.postMessage({ type: 'alf-handshake' }, '*', [channel.port2])
+
+        // Send initial context via port
+        appPort.postMessage({
+          type: 'alf',
+          action: 'init-context',
+          token: tokenRes?.token || null,
+          theme: { palette: theme.palette, dark: theme.isDark },
+          safeAreas: getSafeAreas(),
+          permissions: permRes?.permissions || null
+        })
+
+        // Reveal iframe
         requestAnimationFrame(() => { iframeReady = true })
-        // Send permissions to iframe after load
-        fetch('/api/apps/' + slug + '/permissions')
-          .then(r => r.ok ? r.json() : null)
-          .then(data => {
-            if (data) {
-              appPermissions = data.permissions
-              if (iframe?.contentWindow) {
-                iframe.contentWindow.postMessage(
-                  { type: 'alf', action: 'permissions', permissions: data.permissions },
-                  location.origin
-                )
-              }
-            }
-          })
-          .catch(() => {}) // fail silently — app gets all permissions
+
+        // Refresh token every 4 minutes
+        tokenRefreshTimer = setInterval(refreshToken, 4 * 60 * 1000)
       })
     }
 
     // Forward browser visibility changes to iframe
     document.addEventListener('visibilitychange', onVisibilityChange)
-
-    return () => window.removeEventListener('message', handleMessage)
   })
 
   onDestroy(() => {
     document.removeEventListener('visibilitychange', onVisibilityChange)
     postToIframe('hidden')
+    theme.unregisterPort(slug)
+    appPort?.close()
+    appPort = null
+    if (tokenRefreshTimer) {
+      clearInterval(tokenRefreshTimer)
+      tokenRefreshTimer = null
+    }
   })
 
   $effect(() => {
-    if (iframe) {
+    if (appPort) {
       theme.palette
-      theme.syncIframe(iframe)
+      theme.syncPort(slug)
     }
   })
 </script>
@@ -447,6 +360,7 @@ body {
   bind:this={iframe}
   class="page-frame"
   class:ready={iframeReady}
+  sandbox="allow-scripts allow-forms"
   src={`/apps/${slug}/${query}`}
   title={slug}
 ></iframe>

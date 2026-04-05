@@ -86,6 +86,10 @@ func stripToolsSocketHeader(next http.Handler) http.Handler {
 }
 
 func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool, extraTokenFns ...func() string) func(http.Handler) http.Handler {
+	return authMiddlewareWithAppTokens(token, sessions, nil, exempt, extraTokenFns...)
+}
+
+func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens *AppTokenStore, exempt map[string]bool, extraTokenFns ...func() string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Exempt paths.
@@ -109,6 +113,43 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 				}
 				next.ServeHTTP(w, r)
 				return
+			}
+
+			// App token auth: sandboxed iframes use Bearer app tokens.
+			// Tokens are slug-scoped and accepted on:
+			//   /apps/{slug}/...    — static files + API proxy
+			//   /api/apps/{slug}/...— storage, upload, errors, permissions
+			//   /api/bash           — shell commands (permission-checked by handler)
+			//   /api/app-action     — cross-app actions
+			if appTokens != nil {
+				if bearer := extractAppBearerToken(r); bearer != "" {
+					if _, ok := appTokens.Validate(bearer); ok {
+						path := r.URL.Path
+						// Slug-scoped routes: verify token slug matches
+						if strings.HasPrefix(path, "/apps/") || strings.HasPrefix(path, "/api/apps/") {
+							var prefix string
+							if strings.HasPrefix(path, "/apps/") {
+								prefix = "/apps/"
+							} else {
+								prefix = "/api/apps/"
+							}
+							reqSlug := strings.TrimPrefix(path, prefix)
+							if idx := strings.IndexByte(reqSlug, '/'); idx >= 0 {
+								reqSlug = reqSlug[:idx]
+							}
+							tokenSlug, _ := appTokens.Validate(bearer)
+							if reqSlug == tokenSlug {
+								next.ServeHTTP(w, r)
+								return
+							}
+						}
+						// Non-scoped routes that apps need access to
+						if path == "/api/bash" || path == "/api/app-action" {
+							next.ServeHTTP(w, r)
+							return
+						}
+					}
+				}
 			}
 
 			// Log after all auth methods failed.

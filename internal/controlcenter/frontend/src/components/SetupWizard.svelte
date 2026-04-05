@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import Modal from './shared/Modal.svelte'
   import { api } from '../lib/api'
   import { toasts } from '../stores/toast.svelte'
@@ -105,8 +106,14 @@
     return steps
   }
 
+  let loginResizeObserver: ResizeObserver | null = null
+
   function connectLoginTerminal() {
     if (!loginTermContainer) return
+
+    // Dispose previous instance if any
+    destroyLoginTerminal()
+
     loginTerm = new Terminal({
       cursorBlink: true, fontSize: 13,
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
@@ -115,6 +122,16 @@
     loginFitAddon = new FitAddon()
     loginTerm.loadAddon(loginFitAddon)
     loginTerm.open(loginTermContainer)
+
+    // ResizeObserver to auto-fit when modal layout settles
+    loginResizeObserver = new ResizeObserver(() => {
+      if (loginFitAddon && loginTerm) {
+        loginFitAddon.fit()
+        sendLoginResize(loginTerm.cols, loginTerm.rows)
+      }
+    })
+    loginResizeObserver.observe(loginTermContainer)
+
     loginFitAddon.fit()
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -158,6 +175,7 @@
   }
 
   function destroyLoginTerminal() {
+    if (loginResizeObserver) { loginResizeObserver.disconnect(); loginResizeObserver = null }
     if (loginWs) { loginWs.close(); loginWs = null }
     if (loginTerm) { loginTerm.dispose(); loginTerm = null }
     loginFitAddon = null
@@ -176,8 +194,11 @@
 
   // Mount/destroy terminal when loginPhase is active
   $effect(() => {
-    if (loginPhase && loginTermContainer) {
-      connectLoginTerminal()
+    if (loginPhase) {
+      // Wait for DOM to render the container element via bind:this
+      tick().then(() => {
+        if (loginTermContainer) connectLoginTerminal()
+      })
       return () => destroyLoginTerminal()
     }
   })
@@ -470,7 +491,7 @@
     </div>
 
     <!-- Step 0: Backend Selection -->
-    {#if step === 0 && !backendConfigPhase}
+    {#if step === 0 && !backendConfigPhase && !loginPhase}
       <div class="step-content">
         <p class="step-desc">Select one or more LLM backends to connect.</p>
         {#if loadingSchemas}

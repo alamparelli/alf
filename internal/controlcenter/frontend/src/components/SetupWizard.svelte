@@ -71,7 +71,7 @@
     const s = new Set(selectedBackends)
     if (s.has(id)) s.delete(id); else s.add(id)
     selectedBackends = s
-    if (id === 'claude' && s.has('claude')) checkClaude()
+    if (id === 'cli' && s.has('cli')) checkClaude()
   }
 
   function getField(backend: string, key: string): string {
@@ -92,13 +92,13 @@
   }
 
   function needsLoginPhase(): boolean {
-    return selectedBackends.has('claude') || selectedBackends.has('codex')
+    return selectedBackends.has('cli') || selectedBackends.has('codex')
   }
 
   interface LoginStep { provider: string; cmd: string; hint: string; authenticated: boolean }
   function getLoginSteps(): LoginStep[] {
     const steps: LoginStep[] = []
-    if (selectedBackends.has('claude'))
+    if (selectedBackends.has('cli'))
       steps.push({ provider: 'Claude', cmd: 'claude', hint: 'Type /login inside Claude CLI to authenticate.', authenticated: claudeAuth === true })
     if (selectedBackends.has('codex'))
       steps.push({ provider: 'Codex', cmd: 'codex login --device-auth', hint: 'Follow the device authentication flow.', authenticated: false })
@@ -106,20 +106,25 @@
   }
 
   let loginResizeObserver: ResizeObserver | null = null
-  let loginRetryTimer: ReturnType<typeof setTimeout> | null = null
+  let loginIntersectionObserver: IntersectionObserver | null = null
 
   function connectLoginTerminal() {
     if (!loginTermContainer) return
 
-    // Wait for the container to have actual dimensions (modal transition)
-    const rect = loginTermContainer.getBoundingClientRect()
-    if (rect.width === 0 || rect.height === 0) {
-      loginRetryTimer = setTimeout(() => connectLoginTerminal(), 50)
-      return
-    }
+    // Wait until the container is actually visible in the viewport
+    // (modal transition may still be in progress)
+    loginIntersectionObserver = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) {
+        loginIntersectionObserver?.disconnect()
+        loginIntersectionObserver = null
+        initLoginTerminal()
+      }
+    }, { threshold: 0.1 })
+    loginIntersectionObserver.observe(loginTermContainer)
+  }
 
-    // Dispose previous instance if any
-    destroyLoginTerminal()
+  function initLoginTerminal() {
+    if (!loginTermContainer) return
 
     loginTerm = new Terminal({
       cursorBlink: true, fontSize: 13,
@@ -129,9 +134,18 @@
     loginFitAddon = new FitAddon()
     loginTerm.loadAddon(loginFitAddon)
     loginTerm.open(loginTermContainer)
-    loginFitAddon.fit()
 
-    // ResizeObserver to auto-fit when modal layout settles
+    // Double-rAF ensures the browser has painted before fitting
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (loginFitAddon && loginTerm) {
+          loginFitAddon.fit()
+          sendLoginResize(loginTerm.cols, loginTerm.rows)
+        }
+      })
+    })
+
+    // ResizeObserver for ongoing size changes
     loginResizeObserver = new ResizeObserver(() => {
       if (loginFitAddon && loginTerm) {
         loginFitAddon.fit()
@@ -191,7 +205,7 @@
   }
 
   function destroyLoginTerminal() {
-    if (loginRetryTimer) { clearTimeout(loginRetryTimer); loginRetryTimer = null }
+    if (loginIntersectionObserver) { loginIntersectionObserver.disconnect(); loginIntersectionObserver = null }
     if (loginResizeObserver) { loginResizeObserver.disconnect(); loginResizeObserver = null }
     if (loginWs) { loginWs.close(); loginWs = null }
     if (loginTerm) { loginTerm.dispose(); loginTerm = null }
@@ -200,7 +214,7 @@
 
   async function checkLoginAuth() {
     loginAuthChecking = true
-    if (selectedBackends.has('claude')) {
+    if (selectedBackends.has('cli')) {
       try {
         const d = await api<any>('/api/setup/claude/check')
         claudeAuth = !!d.authenticated
@@ -338,7 +352,7 @@
     } catch { vaultStatus = 'locked'; vaultIsNew = true }
 
     // Check Claude auth for done step hints
-    if (selectedBackends.has('claude')) {
+    if (selectedBackends.has('cli')) {
       try {
         const r = await api<any>('/api/setup/claude/check')
         claudeAuthDone = !!r.authenticated
@@ -358,7 +372,7 @@
     applying = true
     const backends: Record<string, any> = {}
     for (const id of selectedBackends) {
-      if (id === 'claude') continue
+      if (id === 'cli') continue
       const schema = providerSchemas.find(p => p.id === id)!
       backends[id] = {
         base_url: getField(id, 'base_url') || schema.default_url || '',
@@ -523,7 +537,7 @@
                 <h4>{schema.name}</h4>
                 <p>{schema.description}</p>
 
-              {#if selectedBackends.has(schema.id) && schema.id === 'claude'}
+              {#if selectedBackends.has(schema.id) && schema.id === 'cli'}
                 <div class="claude-status" onclick={(e) => e.stopPropagation()}>
                   {#if claudeChecking}
                     <span class="test-loading"><Loader2 size={12} class="spin" /> Checking...</span>
@@ -625,7 +639,7 @@
         <div class="login-term-wrap" bind:this={loginTermContainer}></div>
 
         <div class="login-actions">
-          {#if selectedBackends.has('claude')}
+          {#if selectedBackends.has('cli')}
             <button class="btn btn-sm" onclick={() => sendLoginInput('/login\n')} title="Send /login to Claude CLI">
               Send /login
             </button>
@@ -739,7 +753,7 @@
         </dl>
 
         <!-- Claude auth hints -->
-        {#if selectedBackends.has('claude')}
+        {#if selectedBackends.has('cli')}
           {#if claudeAuthDone === true}
             <div class="apply-info">
               <strong>Claude</strong> — authenticated.

@@ -4,6 +4,9 @@
   import { toasts } from '../stores/toast.svelte'
   import { nav } from '../stores/nav.svelte'
   import { CheckCircle, Loader2, XCircle, ChevronRight, ChevronLeft, SkipForward } from 'lucide-svelte'
+  import { Terminal } from '@xterm/xterm'
+  import { FitAddon } from '@xterm/addon-fit'
+  import '@xterm/xterm/css/xterm.css'
 
   let { open = $bindable(false) }: { open?: boolean } = $props()
 
@@ -33,6 +36,15 @@
   let ollamaModels = $state<string[]>([])
   // Two-phase backend: select first, then configure
   let backendConfigPhase = $state(false)
+  // Login phase: embedded terminal for claude/codex auth
+  let loginPhase = $state(false)
+  let loginTermContainer = $state<HTMLDivElement | null>(null)
+  let loginTerm: Terminal | null = null
+  let loginFitAddon: FitAddon | null = null
+  let loginWs: WebSocket | null = null
+  let loginUrlBarVisible = $state(false)
+  let loginUrlBarValue = $state('')
+  let loginAuthChecking = $state(false)
   let applyError = $state('')
 
   // Load provider schemas from API
@@ -77,6 +89,98 @@
     } catch { claudeAuth = false }
     claudeChecking = false
   }
+
+  function needsLoginPhase(): boolean {
+    return (selectedBackends.has('claude') && claudeAuth !== true)
+      || (selectedBackends.has('codex') && !getField('codex', 'api_key'))
+  }
+
+  interface LoginStep { provider: string; cmd: string; hint: string }
+  function getLoginSteps(): LoginStep[] {
+    const steps: LoginStep[] = []
+    if (selectedBackends.has('claude') && claudeAuth !== true)
+      steps.push({ provider: 'Claude', cmd: 'claude', hint: 'The Claude CLI will start. Type /login and press Enter to begin the OAuth flow.' })
+    if (selectedBackends.has('codex') && !getField('codex', 'api_key'))
+      steps.push({ provider: 'Codex', cmd: 'codex login --device-auth', hint: 'Follow the device authentication flow shown in the terminal.' })
+    return steps
+  }
+
+  function connectLoginTerminal() {
+    if (!loginTermContainer) return
+    loginTerm = new Terminal({
+      cursorBlink: true, fontSize: 13,
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      scrollback: 2000,
+    })
+    loginFitAddon = new FitAddon()
+    loginTerm.loadAddon(loginFitAddon)
+    loginTerm.open(loginTermContainer)
+    loginFitAddon.fit()
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    loginWs = new WebSocket(`${proto}//${location.host}/api/terminal`)
+    loginWs.binaryType = 'arraybuffer'
+
+    loginWs.onopen = () => {
+      if (loginTerm && loginFitAddon) {
+        loginFitAddon.fit()
+        sendLoginResize(loginTerm.cols, loginTerm.rows)
+      }
+      const steps = getLoginSteps()
+      if (steps.length > 0) {
+        setTimeout(() => sendLoginInput(steps[0].cmd + '\n'), 300)
+      }
+    }
+
+    loginWs.onmessage = (ev) => {
+      if (!loginTerm) return
+      const data = ev.data instanceof ArrayBuffer
+        ? new TextDecoder().decode(ev.data) : ev.data
+      loginTerm.write(data)
+      const urlMatch = data.match(/(https?:\/\/[^\s\x1b]{60,})/)
+      if (urlMatch) { loginUrlBarValue = urlMatch[1]; loginUrlBarVisible = true }
+    }
+
+    loginTerm.onData((data) => sendLoginInput(data))
+  }
+
+  function sendLoginResize(cols: number, rows: number) {
+    if (!loginWs || loginWs.readyState !== WebSocket.OPEN) return
+    const buf = new Uint8Array(5)
+    buf[0] = 0x01; buf[1] = (cols >> 8) & 0xff; buf[2] = cols & 0xff
+    buf[3] = (rows >> 8) & 0xff; buf[4] = rows & 0xff
+    loginWs.send(buf.buffer)
+  }
+
+  function sendLoginInput(data: string) {
+    if (!loginWs || loginWs.readyState !== WebSocket.OPEN) return
+    loginWs.send(data)
+  }
+
+  function destroyLoginTerminal() {
+    if (loginWs) { loginWs.close(); loginWs = null }
+    if (loginTerm) { loginTerm.dispose(); loginTerm = null }
+    loginFitAddon = null
+  }
+
+  async function checkLoginAuth() {
+    loginAuthChecking = true
+    if (selectedBackends.has('claude')) {
+      try {
+        const d = await api<any>('/api/setup/claude/check')
+        claudeAuth = !!d.authenticated
+      } catch { claudeAuth = false }
+    }
+    loginAuthChecking = false
+  }
+
+  // Mount/destroy terminal when loginPhase is active
+  $effect(() => {
+    if (loginPhase && loginTermContainer) {
+      connectLoginTerminal()
+      return () => destroyLoginTerminal()
+    }
+  })
 
   async function testBackend(schema: ProviderSchema) {
     const baseURL = getField(schema.id, 'base_url') || schema.default_url || ''
@@ -253,12 +357,21 @@
 
   // Step navigation
   function nextStep() {
-    if (step === 0 && !backendConfigPhase && selectedBackendsNeedConfig()) {
+    if (step === 0 && !backendConfigPhase && !loginPhase && selectedBackendsNeedConfig()) {
       backendConfigPhase = true
       return
     }
     if (step === 0 && backendConfigPhase) {
       backendConfigPhase = false
+      if (needsLoginPhase()) { loginPhase = true; checkClaude(); return }
+      step = 1; return
+    }
+    if (step === 0 && !backendConfigPhase && !loginPhase && needsLoginPhase()) {
+      loginPhase = true; checkClaude(); return
+    }
+    if (loginPhase) {
+      loginPhase = false
+      step = 1; return
     }
     if (step === 3) { applySetup(); return }
     if (step === STEPS.length - 1) { open = false; nav.navigateTo('docs:getting-started'); return }
@@ -268,6 +381,7 @@
   }
 
   function prevStep() {
+    if (loginPhase) { loginPhase = false; return }
     if (backendConfigPhase && step === 0) {
       backendConfigPhase = false
       return
@@ -436,6 +550,54 @@
             </div>
           {/if}
         {/each}
+      </div>
+    {/if}
+
+    <!-- Login Phase: embedded terminal for claude/codex auth -->
+    {#if loginPhase}
+      {@const loginSteps = getLoginSteps()}
+      <div class="step-content">
+        <p class="step-desc">
+          {#if loginSteps.length === 1}
+            Authenticate <strong>{loginSteps[0].provider}</strong> — {loginSteps[0].hint}
+          {:else}
+            Authenticate your providers. The terminal opened with the first command. Run each one in sequence.
+          {/if}
+        </p>
+
+        {#if loginSteps.length > 1}
+          <ul class="login-steps-list">
+            {#each loginSteps as s}
+              <li><code>{s.cmd}</code> — {s.hint}</li>
+            {/each}
+          </ul>
+        {/if}
+
+        <!-- URL bar for OAuth links -->
+        {#if loginUrlBarVisible}
+          <div class="login-url-bar">
+            <input type="text" readonly value={loginUrlBarValue} class="login-url-input"
+              onclick={(e) => (e.target as HTMLInputElement).select()} />
+            <a href={loginUrlBarValue} target="_blank" rel="noopener" class="login-url-open">Open</a>
+            <button class="login-url-close" onclick={() => loginUrlBarVisible = false}>×</button>
+          </div>
+        {/if}
+
+        <div class="login-term-wrap" bind:this={loginTermContainer}></div>
+
+        <div class="login-actions">
+          {#if selectedBackends.has('claude')}
+            <button class="btn btn-sm" onclick={() => sendLoginInput('/login\n')} title="Send /login to Claude CLI">
+              Send /login
+            </button>
+          {/if}
+          <button class="btn btn-sm" onclick={checkLoginAuth} disabled={loginAuthChecking}>
+            {#if loginAuthChecking}<Loader2 size={12} class="spin" /> Checking...{:else}Check Auth{/if}
+          </button>
+          {#if claudeAuth === true && selectedBackends.has('claude')}
+            <span class="test-ok"><CheckCircle size={12} /> Claude authenticated</span>
+          {/if}
+        </div>
       </div>
     {/if}
 
@@ -615,7 +777,7 @@
 
     <!-- Navigation -->
     <div class="wizard-nav">
-      {#if step > 0 || backendConfigPhase}
+      {#if step > 0 || backendConfigPhase || loginPhase}
         <button class="btn" onclick={prevStep}>
           <ChevronLeft size={14} /> Back
         </button>
@@ -628,11 +790,18 @@
             <SkipForward size={14} /> Skip
           </button>
         {/if}
+        {#if loginPhase}
+          <button class="btn" onclick={nextStep}>
+            <SkipForward size={14} /> Skip Login
+          </button>
+        {/if}
         <button class="btn btn-primary" onclick={nextStep} disabled={!canNext || applying}>
           {#if step === 3}
             {applying ? 'Applying...' : 'Apply & Start'}
           {:else if step === STEPS.length - 1}
             Open Getting Started <ChevronRight size={14} />
+          {:else if loginPhase && claudeAuth === true}
+            Continue <ChevronRight size={14} />
           {:else}
             Next <ChevronRight size={14} />
           {/if}
@@ -1001,5 +1170,71 @@
 
   :global(.spin) { animation: spin 1s linear infinite; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* Login phase terminal */
+  .login-term-wrap {
+    height: 280px;
+    border-radius: var(--radius, 8px);
+    overflow: hidden;
+    background: #1e1e2e;
+    padding: 4px;
+    margin: 12px 0 8px;
+  }
+
+  .login-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .login-steps-list {
+    margin: 0 0 8px;
+    padding-left: 18px;
+    font-size: var(--font-sm, 13px);
+    color: var(--text-dim);
+  }
+
+  .login-steps-list li { margin-bottom: 4px; }
+
+  .login-url-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius, 8px);
+    margin-bottom: 8px;
+  }
+
+  .login-url-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    cursor: text;
+    min-width: 0;
+  }
+
+  .login-url-open {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .login-url-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 0 2px;
+    line-height: 1;
+  }
 
 </style>

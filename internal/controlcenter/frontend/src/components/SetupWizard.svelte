@@ -143,9 +143,10 @@
         loginFitAddon.fit()
         sendLoginResize(loginTerm.cols, loginTerm.rows)
       }
+      // Wait for shell prompt before sending command
       const steps = getLoginSteps()
       if (steps.length > 0) {
-        setTimeout(() => sendLoginInput(steps[0].cmd + '\n'), 300)
+        setTimeout(() => sendLoginInput(steps[0].cmd + '\n'), 500)
       }
     }
 
@@ -156,6 +157,14 @@
       loginTerm.write(data)
       const urlMatch = data.match(/(https?:\/\/[^\s\x1b]{60,})/)
       if (urlMatch) { loginUrlBarValue = urlMatch[1]; loginUrlBarVisible = true }
+    }
+
+    loginWs.onclose = () => {
+      if (loginTerm) loginTerm.write('\r\n\x1b[33m[Session ended]\x1b[0m\r\n')
+    }
+
+    loginWs.onerror = () => {
+      if (loginTerm) loginTerm.write('\r\n\x1b[31m[Connection failed]\x1b[0m\r\n')
     }
 
     loginTerm.onData((data) => sendLoginInput(data))
@@ -227,7 +236,7 @@
   function selectedBackendsNeedConfig(): boolean {
     return [...selectedBackends].some(id => {
       const schema = providerSchemas.find(p => p.id === id)
-      return schema && schema.fields.length > 0
+      return schema && schema.fields && schema.fields.length > 0
     })
   }
 
@@ -538,7 +547,7 @@
         <p class="step-desc">Configure your selected backends.</p>
         {#each [...selectedBackends] as bid}
           {@const schema = providerSchemas.find(p => p.id === bid)}
-          {#if schema && schema.fields.length > 0}
+          {#if schema && schema.fields && schema.fields.length > 0}
             <div class="config-section">
               <h4>{schema.name}</h4>
               {#each schema.fields as f}

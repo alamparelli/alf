@@ -92,24 +92,31 @@
   }
 
   function needsLoginPhase(): boolean {
-    return (selectedBackends.has('claude') && claudeAuth !== true)
-      || (selectedBackends.has('codex') && !getField('codex', 'api_key'))
+    return selectedBackends.has('claude') || selectedBackends.has('codex')
   }
 
-  interface LoginStep { provider: string; cmd: string; hint: string }
+  interface LoginStep { provider: string; cmd: string; hint: string; authenticated: boolean }
   function getLoginSteps(): LoginStep[] {
     const steps: LoginStep[] = []
-    if (selectedBackends.has('claude') && claudeAuth !== true)
-      steps.push({ provider: 'Claude', cmd: 'claude', hint: 'The Claude CLI will start. Type /login and press Enter to begin the OAuth flow.' })
-    if (selectedBackends.has('codex') && !getField('codex', 'api_key'))
-      steps.push({ provider: 'Codex', cmd: 'codex login --device-auth', hint: 'Follow the device authentication flow shown in the terminal.' })
+    if (selectedBackends.has('claude'))
+      steps.push({ provider: 'Claude', cmd: 'claude', hint: 'Type /login inside Claude CLI to authenticate.', authenticated: claudeAuth === true })
+    if (selectedBackends.has('codex'))
+      steps.push({ provider: 'Codex', cmd: 'codex login --device-auth', hint: 'Follow the device authentication flow.', authenticated: false })
     return steps
   }
 
   let loginResizeObserver: ResizeObserver | null = null
+  let loginRetryTimer: ReturnType<typeof setTimeout> | null = null
 
   function connectLoginTerminal() {
     if (!loginTermContainer) return
+
+    // Wait for the container to have actual dimensions (modal transition)
+    const rect = loginTermContainer.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) {
+      loginRetryTimer = setTimeout(() => connectLoginTerminal(), 50)
+      return
+    }
 
     // Dispose previous instance if any
     destroyLoginTerminal()
@@ -122,6 +129,7 @@
     loginFitAddon = new FitAddon()
     loginTerm.loadAddon(loginFitAddon)
     loginTerm.open(loginTermContainer)
+    loginFitAddon.fit()
 
     // ResizeObserver to auto-fit when modal layout settles
     loginResizeObserver = new ResizeObserver(() => {
@@ -132,15 +140,6 @@
     })
     loginResizeObserver.observe(loginTermContainer)
 
-    loginFitAddon.fit()
-    // Delayed re-fit: modal CSS transition may not be complete yet
-    setTimeout(() => {
-      if (loginFitAddon && loginTerm) {
-        loginFitAddon.fit()
-        sendLoginResize(loginTerm.cols, loginTerm.rows)
-      }
-    }, 150)
-
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     loginWs = new WebSocket(`${proto}//${location.host}/api/terminal`)
     loginWs.binaryType = 'arraybuffer'
@@ -150,10 +149,11 @@
         loginFitAddon.fit()
         sendLoginResize(loginTerm.cols, loginTerm.rows)
       }
-      // Wait for shell prompt before sending command
+      // Auto-run first unauthenticated provider's command
       const steps = getLoginSteps()
-      if (steps.length > 0) {
-        setTimeout(() => sendLoginInput(steps[0].cmd + '\n'), 500)
+      const first = steps.find(s => !s.authenticated)
+      if (first) {
+        setTimeout(() => sendLoginInput(first.cmd + '\n'), 500)
       }
     }
 
@@ -191,6 +191,7 @@
   }
 
   function destroyLoginTerminal() {
+    if (loginRetryTimer) { clearTimeout(loginRetryTimer); loginRetryTimer = null }
     if (loginResizeObserver) { loginResizeObserver.disconnect(); loginResizeObserver = null }
     if (loginWs) { loginWs.close(); loginWs = null }
     if (loginTerm) { loginTerm.dispose(); loginTerm = null }
@@ -593,21 +594,22 @@
     <!-- Login Phase: embedded terminal for claude/codex auth -->
     {#if loginPhase}
       {@const loginSteps = getLoginSteps()}
+      {@const allAuthenticated = loginSteps.every(s => s.authenticated)}
       <div class="step-content">
-        <p class="step-desc">
-          {#if loginSteps.length === 1}
-            Authenticate <strong>{loginSteps[0].provider}</strong> — {loginSteps[0].hint}
-          {:else}
-            Authenticate your providers. The terminal opened with the first command. Run each one in sequence.
-          {/if}
-        </p>
+        {#each loginSteps as s}
+          <div class="login-provider-row">
+            <strong>{s.provider}</strong>
+            {#if s.authenticated}
+              <span class="test-ok"><CheckCircle size={12} /> Authenticated</span>
+            {:else}
+              <span class="test-fail"><XCircle size={12} /> Not authenticated</span>
+            {/if}
+            <span class="login-hint">— {s.hint}</span>
+          </div>
+        {/each}
 
-        {#if loginSteps.length > 1}
-          <ul class="login-steps-list">
-            {#each loginSteps as s}
-              <li><code>{s.cmd}</code> — {s.hint}</li>
-            {/each}
-          </ul>
+        {#if allAuthenticated}
+          <p class="step-desc">All providers are authenticated. You can continue or use the terminal below to re-authenticate.</p>
         {/if}
 
         <!-- URL bar for OAuth links -->
@@ -631,9 +633,6 @@
           <button class="btn btn-sm" onclick={checkLoginAuth} disabled={loginAuthChecking}>
             {#if loginAuthChecking}<Loader2 size={12} class="spin" /> Checking...{:else}Check Auth{/if}
           </button>
-          {#if claudeAuth === true && selectedBackends.has('claude')}
-            <span class="test-ok"><CheckCircle size={12} /> Claude authenticated</span>
-          {/if}
         </div>
       </div>
     {/if}
@@ -853,6 +852,10 @@
   .wizard-container {
     width: 560px;
     max-width: 88vw;
+  }
+
+  .wizard-container:has(.login-term-wrap) {
+    width: 720px;
   }
 
   .wizard-logo {
@@ -1210,7 +1213,7 @@
 
   /* Login phase terminal */
   .login-term-wrap {
-    height: 280px;
+    height: min(420px, 50vh);
     border-radius: var(--radius, 8px);
     overflow: hidden;
     background: #1e1e2e;
@@ -1225,14 +1228,18 @@
     flex-wrap: wrap;
   }
 
-  .login-steps-list {
-    margin: 0 0 8px;
-    padding-left: 18px;
+  .login-provider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: var(--font-sm, 13px);
-    color: var(--text-dim);
+    margin-bottom: 6px;
+    flex-wrap: wrap;
   }
 
-  .login-steps-list li { margin-bottom: 4px; }
+  .login-hint {
+    color: var(--text-dim);
+  }
 
   .login-url-bar {
     display: flex;

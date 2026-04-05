@@ -618,7 +618,7 @@
       postToParent('toast', { msg: msg, type: type || 'success' });
     },
 
-    /** Get current theme (from parent handshake, not localStorage). */
+    /** Get current theme (from parent handshake). */
     getTheme: function() {
       return { palette: _theme.palette, dark: _theme.dark };
     },

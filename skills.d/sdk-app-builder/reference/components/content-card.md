@@ -14,10 +14,10 @@ Card with media area + body. Use for galleries, feature grids.
 </div>
 ```
 
-Tinted media area:
+Tinted media area (dynamic color — inline style acceptable here):
 ```html
 <div class="content-card">
-  <div class="content-card-media" style="background:color-mix(in srgb, var(--accent) 12%, var(--bg));">
+  <div class="content-card-media" style="background:color-mix(in srgb, var(--accent) 12%, var(--bg))">
     <!-- icon -->
   </div>
   <div class="content-card-body">

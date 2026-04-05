@@ -39,10 +39,10 @@ Scrollable content with dot indicators.
 ## Full-width carousel
 
 ```html
-<div class="carousel carousel-full" style="border-radius: var(--radius); overflow:hidden;">
+<div class="carousel carousel-full overflow-hidden">
   <div class="carousel-item">
-    <div class="aspect-video" style="background: color-mix(in srgb, var(--accent) 20%, var(--bg));">
-      <!-- slide content -->
+    <div class="aspect-video">
+      <!-- slide content (set background via JS for dynamic tints) -->
     </div>
   </div>
 </div>

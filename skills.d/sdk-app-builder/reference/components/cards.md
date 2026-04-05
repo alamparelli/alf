@@ -5,7 +5,7 @@ Bordered with `bg-card` background.
 ```html
 <div class="card">
   <h3>Title</h3>
-  <p style="color:var(--text-dim)">Description</p>
+  <p class="text-dim">Description</p>
 </div>
 
 <div class="card-interactive">Clickable card (hover darkens border)</div>

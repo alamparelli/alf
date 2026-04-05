@@ -5,7 +5,7 @@
   <button class="dropdown-item">Edit</button>
   <button class="dropdown-item">Duplicate</button>
   <div class="dropdown-separator"></div>
-  <button class="dropdown-item" style="color:var(--red)">Delete</button>
+  <button class="dropdown-item dropdown-item-danger">Delete</button>
 </div>
 ```
 

@@ -60,6 +60,10 @@ Each palette defines light + dark variants via `prefers-color-scheme: dark`. The
 | `.my-tabs { display:flex; gap:4px }` | `.filter-tabs > .tab` |
 | `style="color:var(--text-dim);font-size:11px"` | `class="text-dim text-xs"` |
 | `style="display:flex;gap:8px"` | `class="flex gap-sm"` (or parent layout class) |
+| `style="flex:1"` | `class="flex-1"` |
+| `style="display:none"` | `class="hidden"` |
+| `style="display:flex; height:100%; overflow:hidden"` | `class="workspace"` (or `.flex .h-full .overflow-hidden`) |
+| `style="flex:1; display:flex; flex-direction:column; min-width:0"` | `class="workspace-main"` (or `.flex-1 .flex-col`) |
 
 ---
 
@@ -289,7 +293,13 @@ All components below are available via `alf-ui.css` classes. No JS required.
 > **Full HTML templates**: See `reference/AIG-COMPONENTS.md` for copy-paste markup of every component.
 > **Visual gallery**: See `reference/components.html` for a rendered preview.
 
-Available components: `.btn`, `.btn-primary`, `.btn-danger`, `.btn-success`, `.btn-ghost`, `.btn-sm`, `.btn-lg`, `.btn-block`, `.btn-icon`, `.btn-icon-accent`, `.btn-group`, `.card`, `.card-header`, `.card-interactive`, `.card-group`, `.content-card`, `.input-row`, `.check`, `.form-group`, `.form-label`, `.form-hint`, `.form-row`, `.input`, `.select`, `.textarea`, `.toggle`, `.toolbar`, `.search-box`, `.tab-bar`, `.tab-item`, `.filter-tabs`, `.data-table`, `.stat-grid`, `.stat-item`, `.list`, `.list-item`, `.list-item-interactive`, `.tag`, `.tag-accent`, `.tag-success`, `.tag-danger`, `.tag-warning`, `.tag-mauve`, `.tag-sapphire`, `.meta`, `.alert`, `.alert-success`, `.alert-danger`, `.alert-warning`, `.alert-info`, `.empty-state`, `.loading-state`, `.spinner`, `.divider`, `.divider-sm`, `.section-label`, `.count`, `.progress-bar`, `.progress-track`, `.progress-fill`, `.progress-label`, `.dot`, `.dot-success`, `.dot-danger`, `.dot-warning`, `.footer-stats`, `.danger-zone`, `.kbd`, `.skeleton`, `.skeleton-text`, `.skeleton-circle`, `.backdrop`, `.done`, `.spacer`, `.avatar`, `.avatar-sm`, `.avatar-lg`, `.avatar-stack`, `.kv-row`, `.kv-label`, `.kv-value`, `.line-clamp-2`, `.line-clamp-3`, `.change-up`, `.change-down`, `.change-flat`, `.chip`, `.chip-close`, `.sticky`, `.accordion`, `.accordion-content`, `.prose`, `[data-tooltip]`, `.dropdown`, `.dropdown-menu`, `.dropdown-item`, `.breadcrumb`, `.pagination`, `.page-btn`, `.slider`, `.bar-chart`, `.hbar-chart`, `.sparkline`, `.ring-chart`, `.carousel`, `.carousel-cards`, `.carousel-peek`, `.carousel-full`, `.carousel-dots`, `.dropzone`, `.dropzone-compact`, `.file-item`, `.popover`
+Available components: `.btn`, `.btn-primary`, `.btn-danger`, `.btn-success`, `.btn-ghost`, `.btn-sm`, `.btn-lg`, `.btn-block`, `.btn-icon`, `.btn-icon-accent`, `.btn-group`, `.card`, `.card-header`, `.card-interactive`, `.card-group`, `.content-card`, `.input-row`, `.check`, `.form-group`, `.form-label`, `.form-hint`, `.form-row`, `.input`, `.select`, `.textarea`, `.toggle`, `.toolbar`, `.search-box`, `.tab-bar`, `.tab-item`, `.filter-tabs`, `.data-table`, `.stat-grid`, `.stat-item`, `.list`, `.list-item`, `.list-item-interactive`, `.tag`, `.tag-accent`, `.tag-success`, `.tag-danger`, `.tag-warning`, `.tag-mauve`, `.tag-sapphire`, `.meta`, `.alert`, `.alert-success`, `.alert-danger`, `.alert-warning`, `.alert-info`, `.empty-state`, `.loading-state`, `.spinner`, `.divider`, `.divider-sm`, `.section-label`, `.count`, `.progress-bar`, `.progress-track`, `.progress-fill`, `.progress-label`, `.dot`, `.dot-success`, `.dot-danger`, `.dot-warning`, `.footer-stats`, `.danger-zone`, `.kbd`, `.skeleton`, `.skeleton-text`, `.skeleton-circle`, `.backdrop`, `.done`, `.spacer`, `.avatar`, `.avatar-sm`, `.avatar-lg`, `.avatar-stack`, `.kv-row`, `.kv-label`, `.kv-value`, `.line-clamp-2`, `.line-clamp-3`, `.change-up`, `.change-down`, `.change-flat`, `.chip`, `.chip-close`, `.sticky`, `.accordion`, `.accordion-content`, `.prose`, `[data-tooltip]`, `.dropdown`, `.dropdown-menu`, `.dropdown-item`, `.dropdown-item-danger`, `.breadcrumb`, `.pagination`, `.page-btn`, `.slider`, `.bar-chart`, `.hbar-chart`, `.sparkline`, `.ring-chart`, `.carousel`, `.carousel-cards`, `.carousel-peek`, `.carousel-full`, `.carousel-dots`, `.dropzone`, `.dropzone-compact`, `.file-item`, `.popover`, `.workspace`, `.workspace-sidebar`, `.workspace-main`, `.workspace-detail`, `.workspace-back`, `.sidebar-item`, `.sidebar-nav`, `.count-badge`
+
+Layout utilities: `.flex`, `.flex-col`, `.flex-row`, `.flex-wrap`, `.flex-1`, `.flex-shrink-0`, `.items-center`, `.items-start`, `.items-end`, `.justify-center`, `.justify-between`, `.justify-end`, `.w-full`, `.h-full`, `.relative`, `.hidden`, `.overflow-hidden`, `.overflow-y-auto`
+
+Spacing utilities: `.gap-xs` to `.gap-xl`, `.p-xs` to `.p-xl`, `.px-sm` to `.px-lg`, `.py-sm` to `.py-lg`, `.m-0`, `.mb-xs` to `.mb-lg`, `.mt-sm` to `.mt-lg`
+
+Text utilities: `.text-xs`, `.text-sm`, `.text-md`, `.text-lg`, `.text-xl`, `.text-dim`, `.text-accent`, `.text-bold`, `.text-mono`, `.truncate`
 
 ---
 
@@ -305,7 +315,7 @@ Three layout shells — pick one per app, never write manual body CSS.
 | **List view with toolbar** | `.page` + `.toolbar` + `.card-group` + `.footer-stats` | Filterable list apps. |
 | **Grid layout** | `.grid-2`, `.grid-3` | Card grids. Collapses to 1 col under 480px. |
 | **App shell** | `.app-shell` > `.app-header` + `.app-body` + `.app-footer` | Sticky header + scrollable body + footer. Use `.app-body-wide` for dashboards. |
-| **Workspace** | `.workspace` > `.workspace-sidebar` + `.workspace-main` | Sidebar + main panel (mail, notes, IDE). Add `.workspace-detail` for 3-col. Auto-hides sidebar on mobile. |
+| **Workspace** | `.workspace` > `.workspace-sidebar` + `.workspace-main` | Sidebar + main panel (mail, notes, IDE). Add `.workspace-detail` for 3-col. Sidebar hidden on mobile; toggle via `.sidebar-open` class + `.workspace-back` button. See `components/workspace.md`. |
 | **Settings page** | `.app-shell` + `.settings-section` + `.settings-row` | Toggle/select settings with label + description. |
 
 ## Sheets (bottom-sheet modals)

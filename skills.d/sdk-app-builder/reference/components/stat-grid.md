@@ -2,6 +2,8 @@
 
 4-column fused grid with 1px gap borders. Each item has a colored accent bar.
 
+> `.stat-bar` background is set via inline style — this is the accepted pattern for per-item category colors.
+
 ```html
 <div class="stat-grid">
   <div class="stat-item">

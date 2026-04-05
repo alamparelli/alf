@@ -24,7 +24,7 @@ Use inside a `.list-item-interactive` or `.card` for per-row calendars (habit tr
 ```html
 <div class="card-group">
   <div class="list-item-interactive">
-    <span style="flex:1">Exercise</span>
+    <span class="flex-1">Exercise</span>
     <div class="day-grid">
       <button class="day-cell active">1</button>
       <button class="day-cell">2</button>

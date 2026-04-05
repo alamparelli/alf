@@ -11,12 +11,12 @@
 <div class="card-group">
   <div class="list-item-interactive">
     <span class="dot dot-success"></span>
-    <span style="flex:1">vault-server</span>
+    <span class="flex-1">vault-server</span>
     <span class="tag tag-success">Running</span>
   </div>
   <div class="list-item-interactive">
     <span class="dot dot-danger"></span>
-    <span style="flex:1">sandbox-worker</span>
+    <span class="flex-1">sandbox-worker</span>
     <span class="tag tag-danger">Stopped</span>
   </div>
 </div>

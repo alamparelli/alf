@@ -42,7 +42,7 @@ This replaces v1's borderless/contrast-only approach.
 | Settings Rows | `components/settings-rows.md` | settings-row with label + control |
 | Avatars | `components/avatars.md` | avatar circle with initials or image |
 | Loading & Utilities | `components/loading.md` | skeleton, kbd, meta, dot, spacer, divider, empty-state, danger-zone, count-badge, carousel-dots, change indicators |
-| Workspace | `components/workspace.md` | workspace-sidebar, 2-panel, 3-panel layouts |
+| Workspace | `components/workspace.md` | workspace, workspace-sidebar, workspace-main, workspace-detail, workspace-back, sidebar-item, sidebar-nav, mobile toggle |
 | Content Card | `components/content-card.md` | content-card with media + body |
 | Input Row | `components/input-row.md` | input-row (input+button), form-row (side-by-side) |
 | Carousel | `components/carousel.md` | carousel-cards, carousel-peek, carousel-full |

@@ -41,7 +41,8 @@ body {
 .flex-col   { display: flex; flex-direction: column; }
 .flex-row   { display: flex; flex-direction: row; }
 .flex-wrap  { flex-wrap: wrap; }
-.flex-1     { flex: 1; }
+.flex-1     { flex: 1; min-width: 0; }
+.flex-shrink-0 { flex-shrink: 0; }
 .items-center   { align-items: center; }
 .items-start    { align-items: flex-start; }
 .items-end      { align-items: flex-end; }
@@ -52,6 +53,8 @@ body {
 .h-full     { height: 100%; }
 .relative   { position: relative; }
 .hidden     { display: none; }
+.overflow-hidden  { overflow: hidden; }
+.overflow-y-auto  { overflow-y: auto; }
 
 /* Gap */
 .gap-xs { gap: var(--space-xs, 4px); }
@@ -1338,6 +1341,23 @@ a:hover { text-decoration: underline; }
   padding: 8px 10px 4px;
 }
 
+.workspace-back {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: calc(var(--radius, 8px) - 2px);
+  padding: 0;
+  flex-shrink: 0;
+  font-family: inherit;
+}
+.workspace-back:hover { background: var(--bg-input); color: var(--text); }
+
 .workspace-main {
   flex: 1;
   display: flex;
@@ -2376,7 +2396,18 @@ a:hover { text-decoration: underline; }
   .app-header { padding: var(--space-sm, 8px) var(--page-padding, 1rem); padding-top: calc(var(--space-sm, 8px) + env(safe-area-inset-top, 0px)); }
   .app-body, .app-body-wide { padding: 0 var(--page-padding, 1rem) var(--page-padding, 1rem); }
   .app-footer { padding: var(--space-sm, 8px) var(--page-padding, 1rem); }
+  /* Workspace: sidebar hidden by default on mobile, toggled via .sidebar-open */
   .workspace-sidebar { display: none; }
+  .workspace.sidebar-open .workspace-sidebar {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    z-index: 50;
+  }
+  .workspace.sidebar-open .workspace-main { display: none; }
   .workspace-detail { display: none; }
+  /* Back button: visible only on mobile inside workspace-main-header */
+  .workspace-back { display: flex; }
   .col-date { display: none; }
 }

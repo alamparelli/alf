@@ -14,7 +14,7 @@ Square 16px checkbox with rounded corners. Toggle `.checked` via JS.
 <!-- In a list item -->
 <div class="list-item-interactive">
   <div class="check"></div>
-  <span style="flex:1">Task text</span>
+  <span class="flex-1">Task text</span>
 </div>
 ```
 

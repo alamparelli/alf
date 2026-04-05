@@ -40,10 +40,7 @@ Sidebar + main content panels. Use for apps with navigation (mail, notes, IDE).
       </button>
       <h3 class="text-sm text-bold m-0">Dashboard</h3>
       <span class="spacer"></span>
-      <div class="search-box">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-        <input type="text" placeholder="Search...">
-      </div>
+      <alf-search-box placeholder="Search..."></alf-search-box>
     </div>
     <div class="workspace-main-body">
       <!-- main content -->
@@ -148,5 +145,5 @@ function selectView(view) {
 
 ## Utility classes used in examples
 
-All exist in `alf-ui.css` — see loading.md for full utility list:
+All exist in `alf-ui.css` — see AIG-COMPONENTS.md for full utility list:
 `.flex-1`, `.flex-col`, `.items-start`, `.items-center`, `.gap-xs`, `.gap-sm`, `.w-full`, `.m-0`, `.text-sm`, `.text-xs`, `.text-bold`, `.text-dim`, `.truncate`, `.spacer`, `.count-badge`, `.search-box`

@@ -3,7 +3,7 @@
 All apps with a web UI use **AlfSDK** for theme sync, toasts, and parent SPA communication.
 Vanilla JS only -- no frameworks, no build step, CSP-safe.
 
-> **Design system**: `alf-ui.css` is auto-injected into all app iframes. Use its classes (`.btn`, `.card`, `.input`, `.form-group`, etc.) instead of writing inline styles. See `AIG.md` for the full component reference.
+> **Design system**: `alf-ui.css` is auto-injected into all app iframes. Use its classes (`.btn`, `.card`, `.input`, `.form-group`, etc.) instead of writing inline styles. See `AIG-COMPONENTS.md` for the full component reference.
 
 ---
 
@@ -102,7 +102,7 @@ AlfSDK.i18n.languages()              // Array of preferred languages
 
 ## CSS variables (theme)
 
-Only use these -- never hardcode colors. Full reference in `AIG.md`.
+Only use these -- never hardcode colors. Full reference in `AIG-COMPONENTS.md`.
 
 | Variable | Usage |
 |---|---|
@@ -181,11 +181,11 @@ App iframes run with `sandbox="allow-scripts allow-forms allow-popups allow-popu
 
 ## Rules
 
-1. **Follow AIG** -- use `alf-ui.css` classes for buttons, cards, forms, lists. See `AIG.md`.
+1. **Follow AIG** -- use `alf-ui.css` classes for buttons, cards, forms, lists. See `AIG-COMPONENTS.md`.
 2. **Always init AlfSDK** at the top of the script block
 3. **Always include `onThemeChange`** to sync theme from parent SPA
 4. **Set `font-family` explicitly** -- `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. Google Fonts are blocked by CSP in iframes.
-5. **Load `/static/style.css`** + `/static/theme-*.css` + `/static/theme-init.js`
+5. **Load required static files**: `theme-*.css`, `theme-init.js`, `alf-app-sdk.js`, `alf-components.js`
 6. **No external scripts/stylesheets** -- CSP `style-src 'self'` blocks them. `alf-ui.css` is auto-injected. **Never use absolute URLs** (even to the CC domain like `https://cc.example.com/static/...`) — they fail in the iframe CSP. Use relative paths only: `/static/alf-ui.css`.
 7. **Lightweight eval-based frameworks OK** -- Alpine.js, Petite Vue work (`unsafe-eval` is in CSP). No build-step frameworks (React, Vue SPA, Angular).
 8. **Inline `<style>` only** -- no external CSS files you create. Minimize inline styles — prefer `alf-ui.css` classes.
@@ -253,6 +253,7 @@ AlfSDK.sheet(
 );
 
 // Sheet with form inputs — values auto-collected by name attribute
+// > **Prefer `<alf-dialog>`** for form sheets (see AIG-COMPONENTS.md). Use `AlfSDK.sheet()` only for custom non-form content.
 AlfSDK.sheet(
   '<h3>Edit Item</h3>' +
   '<div class="form-group"><label class="form-label">Title</label><input class="input" name="title" value="Current Title"></div>' +

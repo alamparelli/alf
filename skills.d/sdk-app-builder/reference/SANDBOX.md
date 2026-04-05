@@ -7,7 +7,7 @@ All app code (both `AlfSDK.bash()` and backend servers) runs inside a chroot jai
 ## Sandbox constraints
 
 - **DO** store data in the app's own `data/` directory
-- **DO** use `fetch()` to own REST proxy endpoints (`/apps/{slug}/api/...`)
+- **DO** use `AlfSDK.api()` or `AlfSDK.fetch()` to own REST proxy endpoints (`/apps/{slug}/api/...`)
 - **DO** declare permissions in `manifest.json`
 - **DO** declare vault `services` in `manifest.json` for external API access
 - **DO** use `appsdk.NewVaultClient()` or `VAULT_PROXY_SOCK` for vault access

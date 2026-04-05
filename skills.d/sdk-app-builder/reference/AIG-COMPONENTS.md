@@ -1,7 +1,7 @@
 # ALF Component Reference — v3 (Web Components)
 
 All interactive UI uses `<alf-*>` custom elements. They render as light-DOM HTML styled by `alf-ui.css`.
-Auto-loaded via `<script src="/static/alf-components.js">` (injected automatically).
+Auto-loaded via `<script src="/static/alf-components.js"></script>` (also auto-injected into app iframes).
 
 > **Rule**: Always use `<alf-*>` components. Never manually compose CSS classes for these patterns.
 > CSS utility classes (`.flex`, `.gap-sm`, `.text-dim`, `.hidden`, etc.) are still used for layout and text styling.
@@ -25,6 +25,23 @@ Auto-loaded via `<script src="/static/alf-components.js">` (injected automatical
 
 Event: `alf-tab-change` → `e.detail.value`
 
+### Tab content switching pattern
+
+```html
+<alf-tabs id="my-tabs" value="all" variant="filter">
+  <alf-tab value="all">All</alf-tab>
+  <alf-tab value="active">Active</alf-tab>
+</alf-tabs>
+<div id="panel-all">All content...</div>
+<div id="panel-active" class="hidden">Active content...</div>
+<script>
+document.getElementById('my-tabs').addEventListener('alf-tab-change', function(e) {
+  document.getElementById('panel-all').classList.toggle('hidden', e.detail.value !== 'all');
+  document.getElementById('panel-active').classList.toggle('hidden', e.detail.value !== 'active');
+});
+</script>
+```
+
 ---
 
 ## Forms
@@ -40,7 +57,7 @@ Event: `alf-tab-change` → `e.detail.value`
 
 | Element | Attrs |
 |---------|-------|
-| `<alf-input>` | `label`, `name`, `type` (text\|password\|email\|textarea), `placeholder`, `hint`, `value`, `required`, `disabled` |
+| `<alf-input>` | `label`, `name`, `type` (text\|password\|email\|number\|date\|time\|textarea), `placeholder`, `hint`, `value`, `required`, `disabled` |
 | `<alf-select>` | `label`, `name`, `placeholder`, `disabled` — contains `<option>` children |
 
 JS: `element.value` (get/set)
@@ -73,6 +90,24 @@ Methods: `.open()`, `.close()`. Events: `alf-submit` → `e.detail` (object with
 
 Uses `AlfSDK.sheet()` internally — Cancel/Save buttons are auto-generated.
 
+### Pre-filling dialog for edit
+
+```html
+<alf-dialog id="edit-dialog" label="Edit Task">
+  <alf-input label="Title" name="title" required></alf-input>
+</alf-dialog>
+<script>
+function showEdit(item) {
+  var dialog = document.getElementById('edit-dialog');
+  dialog.querySelector('alf-input[name="title"]').value = item.title;
+  dialog.open();
+}
+dialog.addEventListener('alf-submit', function(e) {
+  // e.detail = { title: '...' }
+});
+</script>
+```
+
 ---
 
 ## List
@@ -98,7 +133,9 @@ Event: `alf-check-change` → `e.detail.checked`. JS: `element.checked` (get/set
 
 ```html
 <alf-dropdown>
-  <button class="btn-icon" slot="trigger">⋯</button>
+  <button class="btn-icon" slot="trigger">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+  </button>
   <alf-menu-item value="edit">Edit</alf-menu-item>
   <alf-menu-item value="dup">Duplicate</alf-menu-item>
   <alf-menu-divider></alf-menu-divider>
@@ -458,6 +495,6 @@ These use CSS classes directly (simple enough, no JS behavior):
 | Misc text | `.meta`, `.done`, `.kbd`, `.section-label`, `.footer-stats`, `.divider` |
 | Layout | `.flex`, `.flex-col`, `.grid-2`, `.grid-3`, `.hidden`, `.spacer` |
 | Slider | `<input type="range" class="slider">` |
-| Workspace | `.workspace` > `.workspace-sidebar` + `.workspace-main` — see `components/workspace.md` |
+| Workspace | `.workspace` > `.workspace-sidebar` + `.workspace-main` |
 | Popover | `.popover` > `.popover-content` (focus-within) |
 | Prose | `.prose` wrapper for rendered markdown |

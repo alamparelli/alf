@@ -391,9 +391,9 @@ Consistent pattern across all games:
   position: absolute; inset: 0;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.62);
+  background: color-mix(in srgb, var(--text) 62%, transparent);
 }
-#overlay h2 { font-size: 1.7rem; font-weight: 700; color: #fff; margin-bottom: 0.4rem; }
+#overlay h2 { font-size: 1.7rem; font-weight: 700; color: var(--bg); margin-bottom: 0.4rem; }
 #overlay p  { color: rgba(255,255,255,0.7); font-size: 0.88rem; margin-bottom: 1.4rem; text-align: center; line-height: 1.5; }
 /* Use alf-ui.css .btn and .btn-primary classes — no need to redefine .btn here.
    Only add game-specific overrides: */
@@ -406,10 +406,10 @@ function showOverlay(title, msg, btnText) {
   document.getElementById('ov-title').textContent = title;
   document.getElementById('ov-msg').textContent   = msg;
   document.getElementById('play-btn').textContent = btnText;
-  document.getElementById('overlay').style.display = '';
+  document.getElementById('overlay').classList.remove('hidden');
 }
 function hideOverlay() {
-  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('overlay').classList.add('hidden');
 }
 ```
 

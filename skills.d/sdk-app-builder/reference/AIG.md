@@ -302,6 +302,10 @@ ALF uses a **borderless** design — cards and buttons rely on background contra
 
 > **Full reference**: See `reference/AIG-COMPONENTS.md` for every `<alf-*>` component with attributes and events.
 
+> **Note**: `alf-components.js` is a single bundled IIFE script (not ES modules). 
+> It is auto-injected into app iframes. Apps should also include it in `<head>` as 
+> `<script src="/static/alf-components.js"></script>` (no `type="module"`).
+
 ### Web components (use these)
 
 `<alf-tabs>`, `<alf-tab>`, `<alf-input>`, `<alf-select>`, `<alf-search-box>`, `<alf-dialog>`, `<alf-list>`, `<alf-list-item>`, `<alf-dropdown>`, `<alf-menu-item>`, `<alf-menu-divider>`, `<alf-tag>`, `<alf-alert>`, `<alf-toggle>`, `<alf-stat-grid>`, `<alf-stat>`, `<alf-data-table>`, `<alf-column>`, `<alf-pagination>`, `<alf-progress>`, `<alf-settings-row>`, `<alf-empty-state>`, `<alf-app-shell>`, `<alf-avatar>`, `<alf-kv-row>`, `<alf-accordion>`, `<alf-accordion-item>`, `<alf-breadcrumb>`, `<alf-crumb>`, `<alf-chip>`, `<alf-input-row>`, `<alf-bar-chart>`, `<alf-hbar>`, `<alf-sparkline>`, `<alf-ring-chart>`, `<alf-dropzone>`, `<alf-carousel>`, `<alf-danger-zone>`, `<alf-btn-group>`, `<alf-toolbar>`, `<alf-drawer>`, `<alf-loading>`, `<alf-nav-row>`
@@ -397,7 +401,7 @@ For non-form sheets (confirmation, info), use `AlfSDK.confirm()` or `AlfSDK.shee
 
 ### Input rows
 
-- DO: `<div class="input-row"><input class="input"><button class="btn btn-primary">Add</button></div>`
+- DO: `<alf-input-row placeholder="..." button="Add">`
 - DON'T: `<input style="..."><button style="...">` without flex container or gap
 
 ### Page setup
@@ -424,12 +428,12 @@ Elements that need `display:flex` when visible should have their display set via
 
 ### Key-value pairs
 
-- DO: `<div class="kv-row"><span class="kv-label">Status</span><span class="kv-value">Active</span></div>`
+- DO: `<alf-kv-row label="Status">Active</alf-kv-row>`
 - DON'T: `<div style="display:flex;justify-content:space-between"><span>Status</span><span>Active</span></div>`
 
 ### Avatars
 
-- DO: `<div class="avatar">AL</div>`
+- DO: `<alf-avatar initials="AL" color="accent">`
 - DON'T: `<div style="width:32px;height:32px;border-radius:50%;background:green;...">AL</div>`
 
 ### Percentage changes
@@ -444,17 +448,17 @@ Elements that need `display:flex` when visible should have their display set via
 
 ### Forms
 
-- DO: `<div class="form-group"><label class="form-label">Name</label><input class="input"></div>`
+- DO: `<alf-input label="Name" name="name">`
 - DON'T: `<label style="display:block;font-size:12px">Name</label><input style="width:100%;padding:8px;...">`
 
 ### Empty states
 
-- DO: `<div class="empty-state"><p>No items yet.</p><button class="btn btn-primary">Create</button></div>`
+- DO: `<alf-empty-state message="No items yet." action="Create">`
 - DON'T: `<p style="text-align:center;color:gray">Nothing here</p>`
 
 ### Lists
 
-- DO: `<div class="card-group"><div class="list-item-interactive">Item</div></div>`
+- DO: `<alf-list><alf-list-item>Item</alf-list-item></alf-list>`
 - DON'T: `<div style="padding:8px;border-bottom:1px solid #333">Item</div>`
 
 ### Cards & surfaces
@@ -471,8 +475,8 @@ Elements that need `display:flex` when visible should have their display set via
 
 ## Checklist for new apps
 
-- [ ] **Visual reference**: copied HTML patterns from `reference/components.html` — no invented CSS
-- [ ] Theme setup: `theme-*.css` + `theme-init.js` + `alf-app-sdk.js` in `<head>`
+- [ ] **Visual reference**: copied HTML patterns from `reference/AIG-COMPONENTS.md` — no invented CSS
+- [ ] Theme setup: `theme-*.css` + `theme-init.js` + `alf-app-sdk.js` + `alf-components.js` in `<head>`
 - [ ] `AlfSDK.init()` with `onThemeChange` handler
 - [ ] Layout: `.page`, `.app-shell`, or `.workspace` — **no manual body CSS**
 - [ ] Settings pages use `.settings-section` + `.settings-row` pattern
@@ -480,29 +484,29 @@ Elements that need `display:flex` when visible should have their display set via
 - [ ] Translucent backgrounds use `color-mix()`, not `rgba()`
 - [ ] All spacing uses `--space-*` tokens or `alf-ui.css` classes
 - [ ] Buttons use `.btn` + variant classes, **no borders**
-- [ ] Forms use `.form-group` + `.form-label` + `.input`
+- [ ] Forms use `<alf-input>`, `<alf-select>`
 - [ ] Input + button combos use `.input-row` (flex + gap)
 - [ ] Cards use `.card` (borderless) or `.card-group` for lists
 - [ ] Tags use `.tag` + `.tag-*` (translucent tinted — **never** `background: var(--accent)` solid fill)
-- [ ] Lists use `.card-group` > `.list-item-interactive` pattern
-- [ ] Collapsible sections use `.accordion` with `details/summary`
+- [ ] Lists use `<alf-list>` + `<alf-list-item>`
+- [ ] Collapsible sections use `<alf-accordion>` + `<alf-accordion-item>`
 - [ ] Markdown / rich text uses `.prose` — never re-implement heading or paragraph styles manually
 - [ ] Markdown inside accordion uses `.accordion-content.prose` (both classes together)
 - [ ] Tooltips use `data-tooltip` attribute — no custom tooltip CSS
-- [ ] Context menus use `.dropdown` + `.dropdown-menu`
-- [ ] File uploads use `.dropzone` + `.file-item`
-- [ ] Charts use `.bar-chart`, `.hbar-chart`, `.ring-chart`, or `.sparkline`
-- [ ] Pagination uses `.pagination` + `.page-btn`
+- [ ] Context menus use `<alf-dropdown>` + `<alf-menu-item>`
+- [ ] File uploads use `<alf-dropzone>`
+- [ ] Charts use `<alf-bar-chart>`, `<alf-hbar>`, `<alf-ring-chart>`, `<alf-sparkline>`
+- [ ] Pagination uses `<alf-pagination>`
 - [ ] Range inputs use `.slider` class
-- [ ] Scrollable content uses `.carousel` + `.carousel-cards`/`.carousel-peek`/`.carousel-full`
-- [ ] Checkboxes use `.check` / `.check.checked` — **no emoji**
+- [ ] Scrollable content uses `<alf-carousel>`
+- [ ] Checkboxes use `<alf-list-item checkbox>` or `<alf-toggle>`
 - [ ] Completed items use `.done` class
 - [ ] Flex spacers use `.spacer` — not `style="flex:1"`
 - [ ] Icons are inline Lucide SVGs with `currentColor`, sized 12/14/16/20px
-- [ ] Empty states use `.empty-state`
-- [ ] Loading states use `.loading-state` + `.spinner`
-- [ ] Async content uses `.skeleton-text` / `.skeleton` placeholders
-- [ ] Destructive sections use `.danger-zone`
+- [ ] Empty states use `<alf-empty-state>`
+- [ ] Loading states use `<alf-loading variant="spinner">`
+- [ ] Async content uses `<alf-loading variant="skeleton">` placeholders
+- [ ] Destructive sections use `<alf-danger-zone>`
 - [ ] Footer counts use `.footer-stats`
 - [ ] Hover transitions are `0.15s`, not arbitrary values
 - [ ] Touch targets are 44px+ on mobile

@@ -269,7 +269,7 @@ if __name__ == "__main__":
 The frontend fetches directly from the local server via the ALF proxy path `/apps/SLUG/api/...`:
 
 ```js
-fetch('/apps/SLUG/api/items').then(r => r.json()).then(function(data) {
+AlfSDK.api('/apps/SLUG/api/items').then(function(data) {
     items = data;
     render();
 });

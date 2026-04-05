@@ -34,43 +34,37 @@
 
   <div class="app-body">
 
-    <!-- ══ STATS: use stat-grid (not custom divs) ══ -->
-    <div class="stat-grid" id="stats">
-      <div class="stat-item">
-        <div class="stat-bar" style="background:var(--accent)"></div>
-        <div class="stat-value" id="stat-1">0</div>
-        <div class="stat-label">Total</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-bar" style="background:var(--green)"></div>
-        <div class="stat-value" id="stat-2">0</div>
-        <div class="stat-label">Active</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-bar" style="background:var(--sapphire)"></div>
-        <div class="stat-value" id="stat-3">0%</div>
-        <div class="stat-label">Rate</div>
-      </div>
-    </div>
+    <!-- ══ STATS: use alf-stat-grid web component ══ -->
+    <alf-stat-grid id="stats">
+      <alf-stat value="0" label="Total" color="accent" id="stat-1"></alf-stat>
+      <alf-stat value="0" label="Active" color="green" id="stat-2"></alf-stat>
+      <alf-stat value="0%" label="Rate" color="sapphire" id="stat-3"></alf-stat>
+    </alf-stat-grid>
 
-    <!-- ══ FILTERS: use filter-tabs (not custom buttons) ══ -->
-    <div class="filter-tabs mb-md">
-      <button class="tab active" onclick="setFilter('all',this)">All</button>
-      <button class="tab" onclick="setFilter('active',this)">Active</button>
-      <button class="tab" onclick="setFilter('done',this)">Done</button>
-    </div>
+    <!-- ══ FILTERS: use alf-tabs web component ══ -->
+    <alf-tabs id="filter-tabs" value="all" variant="filter" class="mb-md">
+      <alf-tab value="all">All</alf-tab>
+      <alf-tab value="active">Active</alf-tab>
+      <alf-tab value="done">Done</alf-tab>
+    </alf-tabs>
 
     <!-- ══ LIST: use card-group + list-item-interactive ══ -->
     <div id="list"></div>
 
-    <!-- ══ EMPTY STATE: use empty-state class ══ -->
-    <div id="empty" class="empty-state hidden">
-      <p>No items yet. Add one to get started.</p>
-      <button class="btn btn-primary btn-sm" onclick="showAdd()">Add first item</button>
-    </div>
+    <!-- ══ EMPTY STATE: use alf-empty-state web component ══ -->
+    <alf-empty-state id="empty" message="No items yet. Add one to get started." action="Add first item" class="hidden"></alf-empty-state>
 
   </div>
 </div>
+
+<!-- ══ DIALOGS: use alf-dialog web components ══ -->
+<alf-dialog id="add-dialog" label="Add Item">
+  <alf-input label="Name" name="name" placeholder="Enter name..." required></alf-input>
+</alf-dialog>
+
+<alf-dialog id="edit-dialog" label="Edit Item">
+  <alf-input label="Name" name="name" required></alf-input>
+</alf-dialog>
 
 <script>
 // ══ REQUIRED: Theme sync (2 args: palette, isDark) ══
@@ -84,6 +78,7 @@ AlfSDK.init({
 var SLUG = '<!-- APP_SLUG -->';
 var items = [];
 var filter = 'all';
+var editId = null;
 
 // ══ RENDER: compose with alf-ui.css classes, no inline styles ══
 function render() {
@@ -97,9 +92,9 @@ function render() {
   var total = items.length;
   var active = items.filter(function(i) { return !i.done; }).length;
   var rate = total ? Math.round((items.filter(function(i) { return i.done; }).length / total) * 100) : 0;
-  document.getElementById('stat-1').textContent = total;
-  document.getElementById('stat-2').textContent = active;
-  document.getElementById('stat-3').textContent = rate + '%';
+  document.getElementById('stat-1').setAttribute('value', total);
+  document.getElementById('stat-2').setAttribute('value', active);
+  document.getElementById('stat-3').setAttribute('value', rate + '%');
 
   // List
   var el = document.getElementById('list');
@@ -155,65 +150,43 @@ function remove(id) {
   });
 }
 
-// ══ ADD/EDIT: use AlfSDK.sheet() with alf-ui.css form classes ══
+// ══ ADD/EDIT: use alf-dialog web components ══
 function showAdd() {
-  AlfSDK.sheet(
-    '<h3>Add Item</h3>' +
-    '<hr class="divider">' +
-    '<div class="form-group">' +
-      '<label class="form-label">Name</label>' +
-      '<input class="input" name="name" placeholder="Enter name...">' +
-    '</div>' +
-    '<div class="modal-actions">' +
-      '<button data-action="cancel" class="btn">Cancel</button>' +
-      '<button data-action="save" class="btn btn-primary">Add</button>' +
-    '</div>',
-    {
-      cancel: function() { AlfSDK.closeSheet(); },
-      save: function(p) {
-        if (!p.name || !p.name.trim()) { AlfSDK.toast('Name is required', 'error'); return; }
-        items.push({ id: genId(), name: p.name.trim(), done: false });
-        save(); render();
-        AlfSDK.closeSheet();
-        AlfSDK.toast('Added', 'success');
-      }
-    }
-  );
+  document.getElementById('add-dialog').open();
 }
+
+document.getElementById('add-dialog').addEventListener('alf-submit', function(e) {
+  if (!e.detail.name || !e.detail.name.trim()) { AlfSDK.toast('Name is required', 'error'); return; }
+  items.push({ id: genId(), name: e.detail.name.trim(), done: false });
+  save(); render();
+  AlfSDK.toast('Added', 'success');
+});
 
 function showEdit(id) {
   var item = items.find(function(i) { return i.id === id; });
   if (!item) return;
-  AlfSDK.sheet(
-    '<h3>Edit Item</h3>' +
-    '<hr class="divider">' +
-    '<div class="form-group">' +
-      '<label class="form-label">Name</label>' +
-      '<input class="input" name="name" value="' + esc(item.name) + '">' +
-    '</div>' +
-    '<div class="modal-actions">' +
-      '<button data-action="cancel" class="btn">Cancel</button>' +
-      '<button data-action="save" class="btn btn-primary">Save</button>' +
-    '</div>',
-    {
-      cancel: function() { AlfSDK.closeSheet(); },
-      save: function(p) {
-        if (!p.name || !p.name.trim()) { AlfSDK.toast('Name is required', 'error'); return; }
-        item.name = p.name.trim();
-        save(); render();
-        AlfSDK.closeSheet();
-      }
-    }
-  );
+  editId = id;
+  var dialog = document.getElementById('edit-dialog');
+  dialog.querySelector('alf-input[name="name"]').value = item.name;
+  dialog.open();
 }
 
-// ══ FILTER ══
-function setFilter(f, btn) {
-  filter = f;
-  document.querySelectorAll('.filter-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
-  btn.classList.add('active');
+document.getElementById('edit-dialog').addEventListener('alf-submit', function(e) {
+  var item = items.find(function(i) { return i.id === editId; });
+  if (!item) return;
+  if (!e.detail.name || !e.detail.name.trim()) { AlfSDK.toast('Name is required', 'error'); return; }
+  item.name = e.detail.name.trim();
+  save(); render();
+});
+
+// ══ FILTER: alf-tabs event listener ══
+document.getElementById('filter-tabs').addEventListener('alf-tab-change', function(e) {
+  filter = e.detail.value;
   render();
-}
+});
+
+// ══ EMPTY STATE: action event listener ══
+document.getElementById('empty').addEventListener('alf-action', showAdd);
 
 // ══ UTILS ══
 function genId() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 4); }

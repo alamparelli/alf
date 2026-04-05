@@ -206,9 +206,15 @@ func injectDesignSystemCSS(html []byte) []byte {
 	s := string(html)
 
 	// Already has it — don't double-inject.
-	// Check for the exact tag we inject. This avoids false positives from
-	// HTML-escaped mentions in <code> blocks (e.g., &lt;link ... alf-ui.css).
-	if strings.Contains(s, tag) {
+	// Check for alf-components.js (covers both exact tag and manual includes).
+	if strings.Contains(s, "alf-components.js") {
+		// Still inject alf-ui.css if missing.
+		if !strings.Contains(s, "alf-ui.css") {
+			const cssTag = `<link rel="stylesheet" href="/static/alf-ui.css">`
+			if idx := strings.Index(strings.ToLower(s), "</head>"); idx >= 0 {
+				return []byte(s[:idx] + cssTag + s[idx:])
+			}
+		}
 		return html
 	}
 

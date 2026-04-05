@@ -1,5 +1,7 @@
 (function() {
 'use strict';
+if (window.__alfComponentsLoaded) return;
+window.__alfComponentsLoaded = true;
 
 // --- helpers ---
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }

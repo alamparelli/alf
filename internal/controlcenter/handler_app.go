@@ -131,8 +131,8 @@ func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"default-src 'self'; "+
 				"script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://unpkg.com; "+
 				"style-src 'self' 'unsafe-inline'; "+
-				"img-src 'self' data: blob:; "+
-				"connect-src 'self'; "+
+				"img-src 'self' data: blob: https:; "+
+				"connect-src 'self' https:; "+
 				"form-action 'self'; "+
 				"object-src 'none'; "+
 				"base-uri 'self'; "+

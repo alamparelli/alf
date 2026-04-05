@@ -363,7 +363,7 @@
   bind:this={iframe}
   class="page-frame"
   class:ready={iframeReady}
-  sandbox="allow-scripts allow-forms"
+  sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
   src={`/apps/${slug}/${query}`}
   title={slug}
 ></iframe>

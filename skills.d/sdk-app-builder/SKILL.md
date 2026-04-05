@@ -1,7 +1,7 @@
 ---
 name: sdk-app-builder
 description: Build standalone ALF apps — source-only (compiled at install), AlfSDK frontend, manifest, marketplace publishing
-version: "13"
+version: "14"
 triggers: app, sdk, create app, new app, build app, make app, web app, marketplace app, publish app, standalone app, webapp, build application, create application, marketplace tool, app sdk, sdk app, new app with sdk, app with theme, interactive app, todo app, application, develop app
 ---
 
@@ -61,7 +61,8 @@ Read the relevant reference file for templates, patterns, and API details:
 |---|---|
 | `reference/SKELETON.html` | **ALWAYS copy first** — complete starting template with theme, stat-grid, card-group, filters, CRUD, sheets. Adapt to your app. |
 | `reference/AIG.md` | **ALWAYS read** — design rules, tokens, Do/Don't, zero custom CSS rule |
-| `reference/AIG-COMPONENTS.md` | **TOC** — find the component you need, then read its file from `reference/components/<name>.md` |
+| `reference/AIG-COMPONENTS.md` | **ALWAYS read** — all `<alf-*>` web components with attrs, events, JS API |
+| `reference/UI-UX.md` | **ALWAYS read** — UI/UX design principles: hierarchy, states, feedback, navigation, color, responsive |
 | `reference/FRONTEND.md` | AlfSDK API details (storage, sheets, tool, confirm, haptics, events) |
 | `reference/CLI-TOOL.md` | Building a CLI tool app (appsdk, manifest, go source) |
 | `reference/REST-SERVER.md` | Building a REST server app (service.json, Go/Python server) |
@@ -94,8 +95,10 @@ Read the relevant reference file for templates, patterns, and API details:
 - [ ] AlfSDK initialized with `onThemeChange(palette, isDark)` callback (2 args, not 1)
 - [ ] `onThemeChange` updates both palette CSS and dark/light mode (`data-theme` or theme CSS)
 - [ ] No absolute URLs to CC domain — use `/static/...` relative paths only
-- [ ] All UI uses `alf-ui.css` classes — no custom CSS for standard components
+- [ ] All UI uses `<alf-*>` web components — no manual CSS class composition for standard patterns
 - [ ] CSS variables only, `--space-*` tokens, no inline style overrides
+- [ ] All 4 content states designed: loading, empty, populated, error (see UI-UX.md)
+- [ ] Every action has user feedback: toast, haptics, or inline indicator
 
 **All apps:**
 - [ ] `manifest.json` with slug, version, description, permissions

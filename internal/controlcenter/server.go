@@ -27,7 +27,7 @@ import (
 // DefaultPort is the Control Center HTTP listen port.
 const DefaultPort = "8080"
 
-//go:embed web/*
+//go:embed all:web
 var webFS embed.FS
 
 // Server is the Control Center HTTP server.

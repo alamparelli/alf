@@ -301,9 +301,13 @@ func corsMiddleware(allowedOrigin string, appTokens *AppTokenStore) func(http.Ha
 			if !allowed && origin == "null" {
 				p := r.URL.Path
 				isAppRoute := strings.HasPrefix(p, "/apps/") || strings.HasPrefix(p, "/api/apps/") ||
+					strings.HasPrefix(p, "/static/") ||
 					p == "/api/bash" || p == "/api/app-action"
 				if isAppRoute {
-					if r.Method == http.MethodOptions {
+					if strings.HasPrefix(p, "/static/") {
+						// Static assets are public — always allow CORS for sandboxed iframes.
+						allowed = true
+					} else if r.Method == http.MethodOptions {
 						allowed = true
 					} else if isAppSubResource(r) {
 						// Already authenticated by authMiddleware via Sec-Fetch-Dest —

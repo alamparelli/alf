@@ -442,6 +442,9 @@ func HandlerFactory(deps Deps) Handlers {
 		DataDir:      deps.DataDir,
 		VaultManager: deps.VaultManager,
 	}
+	if deps.Marketplace != nil {
+		bashHandler.ServiceGetter = deps.Marketplace.GetServices
+	}
 	mux.Handle("/api/bash", bashHandler)
 
 	// Tool invocation (sandboxed, no raw shell — apps use "tool" permission).
@@ -500,7 +503,7 @@ func HandlerFactory(deps Deps) Handlers {
 	handler = newRateLimiter(15).withAuthLimit(600, deps.Sessions).withToken(deps.AuthToken).withAppTokens(deps.AppTokens).withExtraTokens(func() string {
 		return GetMobileToken(deps.VaultManager)
 	}).middleware(handler) // 15/min anonymous, no limit authenticated (session, bearer, or mobile token)
-	handler = corsMiddleware(deps.AllowedOrigin)(handler)
+	handler = corsMiddleware(deps.AllowedOrigin, deps.AppTokens)(handler)
 	handler = loggingMiddleware(handler)
 
 	// Shared extra token providers for handlers outside the middleware stack.

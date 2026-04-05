@@ -50,7 +50,7 @@ services:
       - "traefik.http.services.alf.loadbalancer.responseforwarding.flushinterval=-1"
 {{- else}}
     ports:
-      - "0.0.0.0:{{.CCPort}}:8080"
+      - "{{if .CCBind}}{{.CCBind}}{{else}}127.0.0.1{{end}}:{{.CCPort}}:8080"
 {{- end}}
     environment:
       - WHISPER_URL=http://whisper:8000

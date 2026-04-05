@@ -96,6 +96,15 @@ func isAppSubResource(r *http.Request) bool {
 	}
 	dest := r.Header.Get("Sec-Fetch-Dest")
 	site := r.Header.Get("Sec-Fetch-Site")
+
+	// Require a Referer pointing to an /apps/ path. Browsers always send this
+	// for sub-resource loads; non-browser clients (curl) won't have it naturally.
+	// Combined with Sec-Fetch-Dest this makes spoofing require both headers.
+	ref := r.Header.Get("Referer")
+	if ref == "" || !strings.Contains(ref, "/apps/") {
+		return false
+	}
+
 	// Sub-resource loads: script, style, image, font, audio, video, worker, etc.
 	if dest != "" && dest != "document" && dest != "navigate" {
 		if site == "same-origin" || site == "cross-site" || site == "same-site" || site == "none" {
@@ -256,7 +265,7 @@ p{color:#aaa;line-height:1.6}</style></head>
 // corsMiddleware only allows CORS from the configured origin (derived from externalURL).
 // If allowedOrigin is empty, no CORS headers are set (same-origin only).
 // Sandboxed iframes (origin "null") are allowed on app routes when they carry a valid app token.
-func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
+func corsMiddleware(allowedOrigin string, appTokens *AppTokenStore) func(http.Handler) http.Handler {
 	allowedOrigin = strings.TrimRight(allowedOrigin, "/")
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -264,13 +273,23 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 
 			allowed := origin != "" && allowedOrigin != "" && origin == allowedOrigin
 
-			// Sandboxed iframes have origin "null" — allow on app routes.
-			// The auth middleware separately validates the Bearer app token.
+			// Sandboxed iframes have origin "null" — allow on app routes only.
+			// For preflight (OPTIONS) we must allow without token (browsers don't send auth on preflight).
+			// For actual requests, validate the Bearer app token to prevent abuse from non-browser callers.
 			if !allowed && origin == "null" {
 				p := r.URL.Path
-				if strings.HasPrefix(p, "/apps/") || strings.HasPrefix(p, "/api/apps/") ||
-					p == "/api/bash" || p == "/api/app-action" {
-					allowed = true
+				isAppRoute := strings.HasPrefix(p, "/apps/") || strings.HasPrefix(p, "/api/apps/") ||
+					p == "/api/bash" || p == "/api/app-action"
+				if isAppRoute {
+					if r.Method == http.MethodOptions {
+						allowed = true
+					} else if appTokens != nil {
+						if bearer := extractAppBearerToken(r); bearer != "" {
+							if _, ok := appTokens.Validate(bearer); ok {
+								allowed = true
+							}
+						}
+					}
 				}
 			}
 

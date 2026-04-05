@@ -21,21 +21,15 @@ func (h *MagicLinkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Duration: default 7 days, override with ?days=N (max 90).
-	// days=0 means no expiration (10-year session).
+	// Duration: default 7 days, override with ?days=N (1–90).
 	days := 7
 	if d := r.URL.Query().Get("days"); d != "" {
-		if n, err := strconv.Atoi(d); err == nil && n >= 0 && n <= 90 {
+		if n, err := strconv.Atoi(d); err == nil && n >= 1 && n <= 90 {
 			days = n
 		}
 	}
 
-	var sessTTL time.Duration
-	if days == 0 {
-		sessTTL = 10 * 365 * 24 * time.Hour // ~10 years
-	} else {
-		sessTTL = time.Duration(days) * 24 * time.Hour
-	}
+	sessTTL := time.Duration(days) * 24 * time.Hour
 
 	// Use chat ID 0 for CLI-generated links (not tied to a Telegram chat).
 	code, err := h.Magic.Issue(0, sessTTL)

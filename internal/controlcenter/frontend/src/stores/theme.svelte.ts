@@ -23,6 +23,9 @@ class ThemeStore {
   palette = $state(localStorage.getItem('alf-palette') || 'sage')
   isDark = $state(window.matchMedia('(prefers-color-scheme: dark)').matches)
 
+  // Port registry for MessageChannel-based theme sync with sandboxed iframes
+  private _ports = new Map<string, MessagePort>()
+
   constructor() {
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
       this.isDark = e.matches
@@ -41,24 +44,40 @@ class ThemeStore {
       link.href = base + 'theme-' + palette + '.css'
     }
 
-    this.syncAllIframes()
+    this.syncAllPorts()
   }
 
-  syncIframe(frame: HTMLIFrameElement) {
-    try {
-      frame.contentWindow?.postMessage(
-        { type: 'alf', action: 'theme', palette: this.palette, dark: this.isDark },
-        '*'
-      )
-    } catch {
-      // cross-origin or not loaded
+  /** Register an app's MessagePort for theme sync and event broadcast */
+  registerPort(slug: string, port: MessagePort) {
+    this._ports.set(slug, port)
+  }
+
+  /** Unregister an app's port on destroy */
+  unregisterPort(slug: string) {
+    this._ports.delete(slug)
+  }
+
+  /** Sync theme to a specific app's port */
+  syncPort(slug: string) {
+    const port = this._ports.get(slug)
+    port?.postMessage({ type: 'alf', action: 'theme', palette: this.palette, dark: this.isDark })
+  }
+
+  /** Sync theme to all registered app ports */
+  syncAllPorts() {
+    const msg = { type: 'alf', action: 'theme', palette: this.palette, dark: this.isDark }
+    for (const port of this._ports.values()) {
+      port.postMessage(msg)
     }
   }
 
-  syncAllIframes() {
-    document.querySelectorAll('iframe').forEach((frame) => {
-      this.syncIframe(frame as HTMLIFrameElement)
-    })
+  /** Broadcast a message to all app ports except the sender */
+  broadcastToOtherApps(senderSlug: string, msg: any) {
+    for (const [s, port] of this._ports) {
+      if (s !== senderSlug) {
+        port.postMessage(msg)
+      }
+    }
   }
 }
 

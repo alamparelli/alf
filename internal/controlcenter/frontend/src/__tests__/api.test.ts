@@ -76,18 +76,19 @@ describe('AlfSDK (public/alf-app-sdk.js)', () => {
     }
   })
 
-  it('SDK uses same-origin credentials', async () => {
+  it('SDK uses Bearer token auth', async () => {
     const { readFileSync } = await import('fs')
     const { resolve } = await import('path')
     const sdk = readFileSync(resolve(__dirname, '../../public/alf-app-sdk.js'), 'utf-8')
-    expect(sdk).toContain("'same-origin'")
+    expect(sdk).toContain("'Bearer '")
     expect(sdk).toContain("'X-Requested-With'")
   })
 
-  it('SDK validates origin in message handler', async () => {
+  it('SDK uses MessageChannel port for communication', async () => {
     const { readFileSync } = await import('fs')
     const { resolve } = await import('path')
     const sdk = readFileSync(resolve(__dirname, '../../public/alf-app-sdk.js'), 'utf-8')
-    expect(sdk).toContain('e.origin !== location.origin')
+    expect(sdk).toContain('_port.postMessage')
+    expect(sdk).toContain('alf-handshake')
   })
 })

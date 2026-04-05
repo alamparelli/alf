@@ -417,7 +417,7 @@ function hideOverlay() {
 
 ## High score persistence
 
-Use `AlfSDK.storage` (server-side, survives app updates). Fallback to `localStorage` only if needed.
+Use `AlfSDK.storage` (server-side, survives app updates). `localStorage` is not available in sandboxed iframes.
 
 ```js
 var highscore = 0;

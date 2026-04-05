@@ -15,3 +15,25 @@ describe('postMessage security (#96)', () => {
     expect(src).toContain('location.origin')
   })
 })
+
+describe('SDK v4 security', () => {
+  const sdk = readFileSync(resolve(__dirname, '../../public/alf-app-sdk.js'), 'utf-8')
+
+  it('SDK does not use parent.postMessage with wildcard', () => {
+    expect(sdk).not.toMatch(/parent\.postMessage/)
+  })
+
+  it('SDK does not access localStorage (blocked by sandbox)', () => {
+    expect(sdk).not.toContain('localStorage')
+  })
+
+  it('SDK does not use credentials: same-origin (cookies blocked by sandbox)', () => {
+    expect(sdk).not.toContain("'same-origin'")
+    expect(sdk).not.toContain('"same-origin"')
+  })
+
+  it('SDK uses Bearer token authentication', () => {
+    expect(sdk).toContain("'Bearer '")
+    expect(sdk).toContain("'Authorization'")
+  })
+})

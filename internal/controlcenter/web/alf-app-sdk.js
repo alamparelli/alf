@@ -1,6 +1,8 @@
 /**
- * ALF App SDK v3.0.0
- * Complete SDK for marketplace apps running in iframes.
+ * ALF App SDK v4.0.0
+ * SDK for marketplace apps running in sandboxed iframes.
+ * Communication via MessageChannel (no postMessage wildcard).
+ * Auth via Bearer token (no cookies — iframe is sandboxed).
  *
  * Modules:
  *   Core      — init, api, bash, tool, navigate, toast, getTheme
@@ -24,10 +26,14 @@
 
   var _msgId = 0;
   var _pendingReplies = {}; // id -> { resolve, reject }
+  var _port = null; // MessagePort from parent handshake
+  var _token = null; // Bearer token for authenticated API calls
+  var _theme = { palette: 'sage', dark: false }; // theme from parent
+  var _safeAreas = { top: '0px', bottom: '0px', left: '0px', right: '0px' };
 
   function postToParent(action, data) {
-    if (parent === window) return;
-    parent.postMessage(Object.assign({ type: 'alf-app', action: action }, data || {}), '*');
+    if (!_port) return;
+    _port.postMessage(Object.assign({ type: 'alf-app', action: action }, data || {}));
   }
 
   function requestFromParent(action, data) {
@@ -43,6 +49,106 @@
         }
       }, 30000);
     });
+  }
+
+  /** Handle messages from parent via MessagePort */
+  function _handlePortMessage(e) {
+    var msg = e.data;
+    if (!msg || msg.type !== 'alf') return;
+
+    // Initial context (sent right after handshake)
+    if (msg.action === 'init-context') {
+      if (msg.token) _token = msg.token;
+      if (msg.theme) {
+        _theme = msg.theme;
+        if (SDK._listeners.theme) SDK._listeners.theme(msg.theme.palette, msg.theme.dark);
+      }
+      if (msg.safeAreas) {
+        _safeAreas = msg.safeAreas;
+        _applySafeAreas(msg.safeAreas);
+      }
+      if (msg.permissions !== undefined) {
+        SDK._permissions = msg.permissions;
+      }
+      return;
+    }
+
+    // Token refresh
+    if (msg.action === 'token-refresh') {
+      if (msg.token) _token = msg.token;
+      return;
+    }
+
+    // Theme sync
+    if (msg.action === 'theme') {
+      _theme = { palette: msg.palette, dark: msg.dark };
+      if (SDK._listeners.theme) SDK._listeners.theme(msg.palette, msg.dark);
+      return;
+    }
+
+    // Destroy
+    if (msg.action === 'destroy' && SDK._listeners.destroy) {
+      SDK._listeners.destroy();
+      return;
+    }
+
+    // Lifecycle visibility from parent
+    if (msg.action === 'visible' && SDK._listeners.visible) {
+      SDK._listeners.visible();
+      return;
+    }
+    if (msg.action === 'hidden' && SDK._listeners.hidden) {
+      SDK._listeners.hidden();
+      return;
+    }
+
+    // Inter-app event relay
+    if (msg.action === 'event-relay') {
+      EventManager._dispatch(msg.event, msg.payload);
+      return;
+    }
+
+    // Sheet action callback relay
+    if (msg.action === 'sheet-action' && msg.name && SDK._sheetActions) {
+      var handler = SDK._sheetActions[msg.name];
+      if (handler) {
+        try { handler(msg.params || {}); } catch(err) { console.warn('[AlfSDK] sheet action error:', err); }
+      }
+      return;
+    }
+
+    // Reply to requestFromParent
+    if (msg.action === 'reply' && msg._replyId) {
+      var pending = _pendingReplies[msg._replyId];
+      if (pending) {
+        delete _pendingReplies[msg._replyId];
+        if (msg.error) pending.reject(new Error(msg.error));
+        else pending.resolve(msg.result);
+      }
+      return;
+    }
+  }
+
+  /** Apply safe area CSS variables to :root */
+  function _applySafeAreas(areas) {
+    var style = document.getElementById('alf-safe-areas');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'alf-safe-areas';
+      document.head.appendChild(style);
+    }
+    style.textContent =
+      ':root {\n' +
+      '  --safe-area-top: ' + (areas.top || '0px') + ';\n' +
+      '  --safe-area-bottom: ' + (areas.bottom || '0px') + ';\n' +
+      '  --safe-area-left: ' + (areas.left || '0px') + ';\n' +
+      '  --safe-area-right: ' + (areas.right || '0px') + ';\n' +
+      '  --page-padding-top: 1rem;\n' +
+      '}\n' +
+      'body {\n' +
+      '  padding: 0 var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);\n' +
+      '  overflow-x: hidden;\n' +
+      '}';
   }
 
   // ── Audio Manager ──────────────────────────────────────────────────
@@ -64,19 +170,16 @@
         }
         if (this._ctx.state === 'suspended') {
           this._ctx.resume();
-          // Fallback: poll state — resume() promise can hang on iOS webviews
           var check = setInterval(function() {
             if (self._ctx && self._ctx.state === 'running') {
               clearInterval(check);
               markUnlocked();
             }
           }, 50);
-          // Also keep the promise path
           this._ctx.resume().then(function() {
             clearInterval(check);
             markUnlocked();
           });
-          // Safety: stop polling after 5s to avoid leaks
           setTimeout(function() { clearInterval(check); }, 5000);
         } else {
           markUnlocked();
@@ -158,7 +261,6 @@
       return key ? base + '?key=' + encodeURIComponent(key) : base;
     },
 
-    /** Get all keys or a single key. Returns null if key not found. */
     get: function(key) {
       return SDK.api(this._path(key)).then(function(data) {
         return key ? data.value : data;
@@ -167,7 +269,6 @@
       });
     },
 
-    /** Set one or more keys (pass object). */
     set: function(keyOrObj, value) {
       var payload = {};
       if (typeof keyOrObj === 'string') {
@@ -182,12 +283,10 @@
       });
     },
 
-    /** Remove a key. */
     remove: function(key) {
       return SDK.api(this._path(key), { method: 'DELETE' });
     },
 
-    /** Clear all storage for this app. */
     clear: function() {
       return SDK.api(this._path(), {
         method: 'PUT',
@@ -196,12 +295,10 @@
       });
     },
 
-    /** List all keys. */
     keys: function() {
       return SDK.api(this._path() + '?list=keys').then(function(d) { return d.keys; });
     },
 
-    /** List all entries as [{key, value}, ...]. */
     entries: function() {
       return SDK.api(this._path() + '?list=entries').then(function(d) { return d.entries; });
     }
@@ -211,27 +308,23 @@
   var EventManager = {
     _handlers: {},
 
-    /** Resolve event name: prefix with slug unless already namespaced (contains ':'). */
     _resolveEvent: function(event) {
       if (event.indexOf(':') >= 0) return event;
       return SDK._slug ? SDK._slug + ':' + event : event;
     },
 
-    /** Subscribe to a custom event. Use 'slug:event' for cross-app, 'event' for self. */
     on: function(event, handler) {
       var resolved = this._resolveEvent(event);
       if (!this._handlers[resolved]) this._handlers[resolved] = [];
       this._handlers[resolved].push(handler);
     },
 
-    /** Unsubscribe. */
     off: function(event, handler) {
       var resolved = this._resolveEvent(event);
       if (!this._handlers[resolved]) return;
       this._handlers[resolved] = this._handlers[resolved].filter(function(h) { return h !== handler; });
     },
 
-    /** Emit an event (auto-prefixed with slug, relayed via parent to other apps). */
     emit: function(event, data) {
       var namespaced = SDK._slug ? SDK._slug + ':' + event : event;
       postToParent('event-emit', { event: namespaced, payload: data });
@@ -249,45 +342,33 @@
   var ViewportManager = {
     _changeListeners: [],
 
-    /** True if viewport width <= 768px. */
     isMobile: function() {
       return window.innerWidth <= 768;
     },
 
-    /** True if running as installed PWA (standalone). */
     isPWA: function() {
       return window.matchMedia('(display-mode: standalone)').matches ||
              window.navigator.standalone === true;
     },
 
-    /** Safe area insets (CSS env values, parsed to numbers). */
     safeArea: function() {
-      var style = getComputedStyle(document.documentElement);
-      function px(prop) {
-        var val = style.getPropertyValue('env(' + prop + ', 0px)');
-        return parseFloat(val) || 0;
-      }
-      // Alternative: read from CSS custom properties if set
       return {
-        top: px('safe-area-inset-top'),
-        bottom: px('safe-area-inset-bottom'),
-        left: px('safe-area-inset-left'),
-        right: px('safe-area-inset-right')
+        top: parseFloat(_safeAreas.top) || 0,
+        bottom: parseFloat(_safeAreas.bottom) || 0,
+        left: parseFloat(_safeAreas.left) || 0,
+        right: parseFloat(_safeAreas.right) || 0
       };
     },
 
-    /** Current orientation: 'portrait' or 'landscape'. */
     orientation: function() {
       if (screen.orientation) return screen.orientation.type.indexOf('portrait') >= 0 ? 'portrait' : 'landscape';
       return window.innerHeight > window.innerWidth ? 'portrait' : 'landscape';
     },
 
-    /** Screen dimensions. */
     size: function() {
       return { width: window.innerWidth, height: window.innerHeight };
     },
 
-    /** Register a callback for viewport changes (resize, orientation). */
     onChange: function(cb) {
       this._changeListeners.push(cb);
     },
@@ -312,32 +393,21 @@
   var HapticsManager = {
     _available: typeof navigator !== 'undefined' && 'vibrate' in navigator,
 
-    /** Light tap feedback (10ms). */
     tap: function() {
       if (this._available) navigator.vibrate(10);
     },
-
-    /** Notification feedback (double pulse). */
     notify: function() {
       if (this._available) navigator.vibrate([30, 50, 30]);
     },
-
-    /** Success feedback (rising pattern). */
     success: function() {
       if (this._available) navigator.vibrate([10, 30, 20, 30, 40]);
     },
-
-    /** Error feedback (heavy buzz). */
     error: function() {
       if (this._available) navigator.vibrate([50, 50, 100]);
     },
-
-    /** Custom vibration pattern. */
     vibrate: function(pattern) {
       if (this._available) navigator.vibrate(pattern);
     },
-
-    /** True if device supports vibration. */
     isAvailable: function() {
       return this._available;
     }
@@ -345,13 +415,10 @@
 
   // ── Clipboard ──────────────────────────────────────────────────────
   var ClipboardManager = {
-    /** Copy text to clipboard (delegates to parent for cross-frame support). */
     write: function(text) {
       if (!_hasPerm('clipboard')) return Promise.reject(new Error('Permission denied: clipboard'));
       return requestFromParent('clipboard-write', { text: text });
     },
-
-    /** Read text from clipboard (delegates to parent). */
     read: function() {
       if (!_hasPerm('clipboard')) return Promise.reject(new Error('Permission denied: clipboard'));
       return requestFromParent('clipboard-read');
@@ -360,23 +427,16 @@
 
   // ── I18n ───────────────────────────────────────────────────────────
   var I18nManager = {
-    /** Full locale string (e.g. 'en-US', 'fr-FR'). */
     locale: function() {
       return navigator.language || navigator.userLanguage || 'en';
     },
-
-    /** Language code (e.g. 'en', 'fr'). */
     lang: function() {
       return this.locale().split('-')[0];
     },
-
-    /** Text direction: 'ltr' or 'rtl'. */
     dir: function() {
       var rtlLangs = ['ar','he','fa','ur','ps','yi','sd'];
       return rtlLangs.indexOf(this.lang()) >= 0 ? 'rtl' : 'ltr';
     },
-
-    /** All preferred languages (navigator.languages). */
     languages: function() {
       return navigator.languages ? Array.from(navigator.languages) : [this.locale()];
     }
@@ -386,17 +446,12 @@
   var BadgeManager = {
     _slug: null,
 
-    /** Set badge count on the app's sidebar icon. */
     set: function(count) {
       postToParent('badge-set', { slug: this._slug, count: count });
     },
-
-    /** Increment badge by 1. */
     increment: function() {
       postToParent('badge-increment', { slug: this._slug });
     },
-
-    /** Clear the badge. */
     clear: function() {
       postToParent('badge-set', { slug: this._slug, count: 0 });
     }
@@ -404,12 +459,12 @@
 
   // ── Main SDK ───────────────────────────────────────────────────────
   var SDK = {
-    VERSION: '3.0.0',
+    VERSION: '4.0.0',
     _ready: false,
     _slug: null,
     _listeners: {},
     _authFailed: false,
-    _permissions: null, // null = all allowed, string[] = restricted set
+    _permissions: null,
 
     audio: AudioManager,
     storage: StorageManager,
@@ -426,8 +481,8 @@
      * @param {string} opts.slug - App slug
      * @param {function} [opts.onThemeChange] - Called with (palette, isDark)
      * @param {function} [opts.onDestroy] - Called when app is unloaded
-     * @param {function} [opts.onVisible] - Called when app becomes visible (tab switch or browser focus)
-     * @param {function} [opts.onHidden] - Called when app becomes hidden (tab switch or browser blur)
+     * @param {function} [opts.onVisible] - Called when app becomes visible
+     * @param {function} [opts.onHidden] - Called when app becomes hidden
      */
     init: function(opts) {
       opts = opts || {};
@@ -447,54 +502,17 @@
       if (opts.onVisible) this._listeners.visible = opts.onVisible;
       if (opts.onHidden) this._listeners.hidden = opts.onHidden;
 
-      var self = this;
+      // Wait for MessageChannel handshake from parent
       window.addEventListener('message', function(e) {
-        if (e.origin !== location.origin) return;
-        var msg = e.data;
-        if (!msg || msg.type !== 'alf') return;
-
-        // Theme sync
-        if (msg.action === 'theme' && self._listeners.theme) {
-          self._listeners.theme(msg.palette, msg.dark);
-        }
-        // Destroy
-        if (msg.action === 'destroy' && self._listeners.destroy) {
-          self._listeners.destroy();
-        }
-        // Lifecycle visibility from parent
-        if (msg.action === 'visible' && self._listeners.visible) {
-          self._listeners.visible();
-        }
-        if (msg.action === 'hidden' && self._listeners.hidden) {
-          self._listeners.hidden();
-        }
-        // Inter-app event relay
-        if (msg.action === 'event-relay') {
-          EventManager._dispatch(msg.event, msg.payload);
-        }
-        // Sheet action callback relay
-        if (msg.action === 'sheet-action' && msg.name && SDK._sheetActions) {
-          var handler = SDK._sheetActions[msg.name];
-          if (handler) {
-            try { handler(msg.params || {}); } catch(e) { console.warn('[AlfSDK] sheet action error:', e); }
-          }
-        }
-        // Permissions received from parent
-        if (msg.action === 'permissions') {
-          SDK._permissions = msg.permissions; // null = all allowed, array = restricted
-        }
-        // Reply to requestFromParent
-        if (msg.action === 'reply' && msg._replyId) {
-          var pending = _pendingReplies[msg._replyId];
-          if (pending) {
-            delete _pendingReplies[msg._replyId];
-            if (msg.error) pending.reject(new Error(msg.error));
-            else pending.resolve(msg.result);
-          }
-        }
-      });
+        if (!e.data || e.data.type !== 'alf-handshake' || !e.ports || !e.ports[0]) return;
+        _port = e.ports[0];
+        _port.onmessage = _handlePortMessage;
+        // Notify parent that app is ready
+        postToParent('ready', { slug: SDK._slug });
+      }, { once: true });
 
       // Lifecycle: Page Visibility API
+      var self = this;
       document.addEventListener('visibilitychange', function() {
         if (document.hidden) {
           if (self._listeners.hidden) self._listeners.hidden();
@@ -505,13 +523,10 @@
 
       // Auto-capture and report errors
       _setupErrorReporting();
-
-      // Notify parent that app is ready
-      postToParent('ready', { slug: this._slug });
     },
 
     /**
-     * Authenticated API call.
+     * Authenticated API call using Bearer token.
      * @param {string} path - API path
      * @param {Object} [opts] - fetch options
      * @returns {Promise<any>}
@@ -522,7 +537,9 @@
       opts = opts || {};
       opts.headers = opts.headers || {};
       opts.headers['X-Requested-With'] = 'XMLHttpRequest';
-      opts.credentials = 'same-origin';
+      if (_token) {
+        opts.headers['Authorization'] = 'Bearer ' + _token;
+      }
       return fetch(path, opts).then(function(r) {
         if (r.status === 401) {
           SDK._authFailed = true;
@@ -574,11 +591,10 @@
     },
 
     /**
-     * Call a cross-app action. The CC validates the action against
-     * the target's manifest before proxying the request.
-     * @param {string} targetSlug - Target app slug
-     * @param {string} actionName - Action declared in target's manifest
-     * @param {Object} [params] - Parameters passed as JSON body
+     * Call a cross-app action.
+     * @param {string} targetSlug
+     * @param {string} actionName
+     * @param {Object} [params]
      * @returns {Promise<any>}
      */
     action: function(targetSlug, actionName, params) {
@@ -602,58 +618,34 @@
       postToParent('toast', { msg: msg, type: type || 'success' });
     },
 
-    /** Get current theme. */
+    /** Get current theme (from parent handshake, not localStorage). */
     getTheme: function() {
-      return {
-        palette: localStorage.getItem('alf-palette') || 'sage',
-        dark: window.matchMedia('(prefers-color-scheme: dark)').matches
-      };
+      return { palette: _theme.palette, dark: _theme.dark };
     },
 
     /**
      * Show HTML in a native bottom sheet (mobile) / modal (desktop).
-     * Supports interactive callbacks via data-action attributes.
-     *
-     * @param {string} html - HTML content. Use data-action="name" on interactive elements.
-     *   Additional data-* attributes are passed as params to the callback.
-     * @param {Object} [actions] - Map of action name → callback function.
-     *   Callback receives an object with all data-* attributes from the clicked element.
-     *
-     * @example
-     *   AlfSDK.sheet(
-     *     '<h3>Book Detail</h3>' +
-     *     '<button data-action="delete" data-id="12">Delete</button>' +
-     *     '<button data-action="rate" data-id="12" data-stars="5">★★★★★</button>',
-     *     {
-     *       delete: function(p) { deleteBook(p.id); AlfSDK.closeSheet(); },
-     *       rate:   function(p) { setRating(p.id, p.stars); }
-     *     }
-     *   );
+     * @param {string} html
+     * @param {Object} [actions]
      */
     sheet: function(html, actions) {
       SDK._sheetActions = actions || {};
       postToParent('sheet', { html: html, hasActions: !!actions });
     },
 
-    /**
-     * Update the content of the currently open sheet without closing it.
-     * Preserves scroll position. Actions map from the original sheet() call is kept.
-     * @param {string} html - New HTML content
-     */
     updateSheet: function(html) {
       postToParent('update-sheet', { html: html });
     },
 
-    /** Close the current sheet. */
     closeSheet: function() {
       SDK._sheetActions = {};
       postToParent('close-sheet');
     },
 
     /**
-     * Show a confirmation dialog (CC-native bottom sheet on mobile).
+     * Show a confirmation dialog.
      * @param {string} message
-     * @param {Object} [opts] - { title: string, confirmText: string, cancelText: string }
+     * @param {Object} [opts]
      * @returns {Promise<boolean>}
      */
     confirm: function(message, opts) {
@@ -661,11 +653,10 @@
     },
 
     /**
-     * Show a prompt dialog (CC-native bottom sheet on mobile).
+     * Show a prompt dialog.
      * @param {string} message
-     * @param {Object} [opts] - { title, defaultValue, placeholder, confirmText, multiline }
-     * @param {boolean} [opts.multiline=false] - Render a textarea instead of a single-line input
-     * @returns {Promise<string|null>} - Input value, or null if cancelled
+     * @param {Object} [opts]
+     * @returns {Promise<string|null>}
      */
     prompt: function(message, opts) {
       return requestFromParent('prompt', Object.assign({ message: message }, opts || {}));
@@ -673,7 +664,7 @@
 
     /**
      * Upload a file to the app's storage.
-     * @param {File} file - File object (from input or drag-drop)
+     * @param {File} file
      * @returns {Promise<{path: string, name: string, size: number}>}
      */
     upload: function(file) {
@@ -683,7 +674,6 @@
       return SDK.api('/api/apps/' + SDK._slug + '/upload', {
         method: 'POST',
         body: formData
-        // Note: do NOT set Content-Type header — browser sets it with boundary
       });
     }
   };
@@ -698,11 +688,16 @@
           stack: String(stack || '').slice(0, 4000),
           source: source || 'unknown'
         });
-        navigator.sendBeacon(
-          '/api/apps/' + SDK._slug + '/errors',
-          new Blob([body], { type: 'application/json' })
-        );
-      } catch(e) { /* swallow — don't cause more errors */ }
+        // Use fetch with Bearer token since sendBeacon can't set headers
+        fetch('/api/apps/' + SDK._slug + '/errors', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': _token ? 'Bearer ' + _token : ''
+          },
+          body: body
+        }).catch(function() {});
+      } catch(e) { /* swallow */ }
     }
 
     window.addEventListener('error', function(e) {
@@ -733,7 +728,6 @@
   }
 
   function _hasPerm(perm) {
-    // null = no restrictions (backward compat / internal app)
     if (SDK._permissions === null || SDK._permissions === undefined) return true;
     return SDK._permissions.indexOf(perm) >= 0;
   }

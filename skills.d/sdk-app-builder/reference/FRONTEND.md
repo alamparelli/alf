@@ -17,16 +17,16 @@ Vanilla JS only -- no frameworks, no build step, CSP-safe.
 
 ```js
 // Core
-AlfSDK.VERSION                         // '3.0.0'
+AlfSDK.VERSION                         // '4.0.0'
 AlfSDK.init({ slug, onThemeChange,     // Init. Call once on load. REQUIRED.
   onVisible, onHidden, onDestroy })    //   Lifecycle callbacks (see Lifecycle section)
 AlfSDK.tool(action, args)              // Run CLI tool. Returns Promise<string>.
-AlfSDK.api(path, opts)                 // Authenticated fetch (same-origin cookies).
+AlfSDK.api(path, opts)                 // Authenticated fetch (Bearer token, automatic).
 AlfSDK.bash(cmd)                       // Execute shell command via /api/bash.
 AlfSDK.action(target, action, params)  // Call cross-app action. Returns Promise<any>.
 AlfSDK.navigate(view)                  // Navigate parent SPA ('chat', 'settings', 'vault').
 AlfSDK.toast(msg, type)                // Toast in parent: 'success', 'error', 'info'.
-AlfSDK.getTheme()                      // Returns { palette, dark }.
+AlfSDK.getTheme()                      // Returns { palette, dark } (from parent handshake).
 AlfSDK.confirm(message, opts?)         // Confirmation dialog → Promise<boolean>
 AlfSDK.prompt(message, opts?)          // Input dialog → Promise<string|null>
                                        //   opts: { title, placeholder, ok, cancel, multiline }
@@ -160,6 +160,21 @@ Layout-agnostic tokens for spacing, typography, and shadows. Use these instead o
 | `--shadow-sm` | `0 1px 2px rgba(0,0,0,0.08)` |
 | `--shadow-md` | `0 4px 12px rgba(0,0,0,0.12)` |
 | `--shadow-lg` | `0 8px 24px rgba(0,0,0,0.16)` |
+
+---
+
+## Sandbox
+
+App iframes run with `sandbox="allow-scripts allow-forms"`. This means:
+
+- **No `localStorage` or `sessionStorage`** — use `AlfSDK.storage` instead
+- **No `document.cookie`** — auth is handled automatically via Bearer token
+- **No `credentials: 'same-origin'`** — use `AlfSDK.api()` which sets the Bearer header
+- **No `parent.postMessage()`** — the SDK uses MessageChannel (automatic)
+- **No `top.location` or `parent.document`** — sandboxed, no access to parent frame
+
+**Do:** Use `AlfSDK.storage`, `AlfSDK.api()`, `AlfSDK.getTheme()`.
+**Don't:** Use `localStorage`, `fetch()` with credentials, `document.cookie`.
 
 ---
 
@@ -304,28 +319,25 @@ No `AlfSDK.bash()` needed — use direct `fetch`:
 ```js
 // The CC proxies /apps/{slug}/api/... → localhost:{port}/api/...
 // Port is read from data/port (written by the server at startup).
+// Use AlfSDK.api() for automatic Bearer auth in sandboxed iframes.
 
 // GET items
-fetch('/apps/my-app/api/items', { credentials: 'same-origin' })
-  .then(function(r) { return r.json(); })
+AlfSDK.api('/apps/my-app/api/items')
   .then(function(items) { render(items); });
 
 // POST new item
-fetch('/apps/my-app/api/items', {
+AlfSDK.api('/apps/my-app/api/items', {
   method: 'POST',
-  credentials: 'same-origin',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ title: 'New item' })
-}).then(function(r) { return r.json(); });
+}).then(function(item) { addToList(item); });
 
 // DELETE
-fetch('/apps/my-app/api/items/123', {
-  method: 'DELETE',
-  credentials: 'same-origin'
-});
+AlfSDK.api('/apps/my-app/api/items/123', { method: 'DELETE' });
 ```
 
-All HTTP methods are proxied. Auth cookies are **not** forwarded to the app server.
+All HTTP methods are proxied. Auth is handled by Bearer token (set automatically by `AlfSDK.api()`).
+**Do not use `fetch()` directly** — sandboxed iframes have no cookies, so raw fetch calls will get 401.
 If the server is not running, the proxy returns `502 Bad Gateway`.
 
 ---

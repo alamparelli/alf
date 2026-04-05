@@ -133,6 +133,13 @@
     loginResizeObserver.observe(loginTermContainer)
 
     loginFitAddon.fit()
+    // Delayed re-fit: modal CSS transition may not be complete yet
+    setTimeout(() => {
+      if (loginFitAddon && loginTerm) {
+        loginFitAddon.fit()
+        sendLoginResize(loginTerm.cols, loginTerm.rows)
+      }
+    }, 150)
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     loginWs = new WebSocket(`${proto}//${location.host}/api/terminal`)

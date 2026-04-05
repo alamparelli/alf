@@ -16,13 +16,14 @@ import (
 
 // ClassifierConfig configures the persistent CLIClassifier process.
 type ClassifierConfig struct {
-	Model        string             // e.g. "claude-haiku-4-5"
-	SystemPrompt string             // one-time system prompt (personality + tiers + rules)
-	HomeDir      string             // HOME for subprocess (where .claude/ lives); falls back to DataDir
-	DataDir      string             // working directory
-	Credential   *syscall.Credential // subprocess isolation
-	IdleTimeout  time.Duration      // restart after idle (resets conversation context)
-	MaxRetries   int                // max restart attempts before fallback
+	Model          string             // e.g. "claude-haiku-4-5"
+	SystemPrompt   string             // one-time system prompt (personality + tiers + rules)
+	HomeDir        string             // HOME for subprocess (where .claude/ lives); falls back to DataDir
+	DataDir        string             // working directory
+	Credential     *syscall.Credential // subprocess isolation
+	IdleTimeout    time.Duration      // restart after idle (resets conversation context)
+	MaxRetries     int                // max restart attempts before fallback
+	EmptyMCPConfig string             // path to empty MCP config JSON (disables MCP servers)
 }
 
 // CLIClassifier maintains a persistent Claude CLI process for fast classification.
@@ -85,6 +86,11 @@ func (c *CLIClassifier) startLocked() error {
 		"--dangerously-skip-permissions",
 		"--no-session-persistence",
 		"--verbose",
+	}
+
+	// Disable MCP servers — built-in first-party servers cause startup delays.
+	if c.cfg.EmptyMCPConfig != "" {
+		args = append(args, "--mcp-config", c.cfg.EmptyMCPConfig, "--strict-mcp-config")
 	}
 
 	cmd := exec.Command("claude", args...)

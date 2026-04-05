@@ -64,6 +64,14 @@ Each palette defines light + dark variants via `prefers-color-scheme: dark`. The
 | `style="display:none"` | `class="hidden"` |
 | `style="display:flex; height:100%; overflow:hidden"` | `class="workspace"` (or `.flex .h-full .overflow-hidden`) |
 | `style="flex:1; display:flex; flex-direction:column; min-width:0"` | `class="workspace-main"` (or `.flex-1 .flex-col`) |
+| `element.style.display = 'none'` | `element.classList.add('hidden')` |
+| `element.style.display = 'flex'` | `element.classList.remove('hidden')` (element should have flex via CSS class) |
+| `style="flex:1"` | `class="spacer"` or `class="flex-1"` |
+| `style="display:flex;flex-direction:column"` | `class="flex-col"` |
+| `style="width:100%"` | `class="w-full"` |
+| `style="color:var(--red)"` | `class="text-danger"` |
+
+> **`.hidden` uses `!important`** — it always wins over `.flex-col`, `.flex`, etc. This means you can safely combine `class="hidden flex-col flex-1"` on an element, then toggle visibility with `classList.add/remove('hidden')` without worrying about specificity.
 
 ---
 
@@ -351,8 +359,9 @@ AlfSDK.sheet(
 - Description in `<p>` with `text-dim` color.
 - Use `<hr class="divider">` to separate title from content.
 - Form inputs must have `name` attribute (auto-collected as callback params).
-- Destructive action button: `style="background:var(--red);color:#fff"`.
-- Primary action button: `style="background:var(--accent);color:var(--on-accent)"`.
+- Sheet HTML should use alf-ui.css classes (`.btn`, `.btn-primary`, `.btn-danger`, `.input`, `.form-group`) where possible.
+- Destructive action button: `class="btn btn-danger"` (not inline style).
+- Primary action button: `class="btn btn-primary"` (not inline style).
 
 ---
 
@@ -414,6 +423,13 @@ AlfSDK.sheet(
 
 - DO: `<div class="spacer"></div>` in flex containers
 - DON'T: `<div style="flex:1"></div>`
+
+### Show/hide elements
+
+- DO: `el.classList.add('hidden')` / `el.classList.remove('hidden')`
+- DON'T: `el.style.display = 'none'` / `el.style.display = ''`
+
+Elements that need `display:flex` when visible should have their display set via a CSS class (e.g. `.flex-col`). Removing `.hidden` restores the display from the CSS class.
 
 ### Key-value pairs
 

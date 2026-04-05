@@ -166,7 +166,7 @@ Layout-agnostic tokens for spacing, typography, and shadows. Use these instead o
 
 ## Sandbox
 
-App iframes run with `sandbox="allow-scripts allow-forms"`. This means:
+App iframes run with `sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"`. This means:
 
 - **No `localStorage` or `sessionStorage`** — use `AlfSDK.storage` instead
 - **No `document.cookie`** — auth is handled automatically via Bearer token
@@ -215,6 +215,23 @@ AlfSDK.init({
 
 ---
 
+## Responsive design
+
+Use `AlfSDK.viewport.onChange()` to react to viewport changes — don't just check `isMobile()` once at load time.
+
+```js
+// Adapt layout when viewport changes
+AlfSDK.viewport.onChange(function(info) {
+  if (!info.mobile && !currentId && items.length > 0) {
+    selectItem(items[0].id); // auto-select first on desktop
+  }
+});
+```
+
+Available in the callback: `info.mobile` (bool), `info.orientation` ('portrait'/'landscape'), `info.size` ({width, height}).
+
+---
+
 ## Sheets (bottom-sheet modals)
 
 Sheets render HTML in a parent-level modal (bottom-sheet on mobile, centered on desktop).
@@ -227,8 +244,8 @@ AlfSDK.sheet('<h3>Details</h3><p>Some content here</p>');
 // Sheet with action buttons (data-action + object map)
 AlfSDK.sheet(
   '<h3>Confirm Delete</h3><p>This cannot be undone.</p>' +
-  '<button data-action="cancel">Cancel</button>' +
-  '<button data-action="delete" style="background:var(--red);color:#fff">Delete</button>',
+  '<button data-action="cancel" class="btn">Cancel</button>' +
+  '<button data-action="delete" class="btn btn-danger">Delete</button>',
   {
     cancel: function() { AlfSDK.closeSheet(); },
     delete: function() { doDelete(); AlfSDK.closeSheet(); }
@@ -238,9 +255,9 @@ AlfSDK.sheet(
 // Sheet with form inputs — values auto-collected by name attribute
 AlfSDK.sheet(
   '<h3>Edit Item</h3>' +
-  '<input name="title" value="Current Title" style="width:100%;padding:8px;margin:8px 0">' +
-  '<textarea name="notes" style="width:100%;padding:8px" rows="3"></textarea>' +
-  '<button data-action="save" style="padding:8px 16px;background:var(--accent);color:var(--on-accent);border:none;border-radius:6px;cursor:pointer">Save</button>',
+  '<div class="form-group"><label class="form-label">Title</label><input class="input" name="title" value="Current Title"></div>' +
+  '<div class="form-group"><label class="form-label">Notes</label><textarea class="input" name="notes" rows="3"></textarea></div>' +
+  '<button data-action="save" class="btn btn-primary">Save</button>',
   { save: function(params) {
     // params = { title: '...', notes: '...' }
     saveItem(params);

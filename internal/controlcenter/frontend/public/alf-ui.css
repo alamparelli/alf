@@ -52,7 +52,7 @@ body {
 .w-full     { width: 100%; }
 .h-full     { height: 100%; }
 .relative   { position: relative; }
-.hidden     { display: none; }
+.hidden     { display: none !important; }
 .overflow-hidden  { overflow: hidden; }
 .overflow-y-auto  { overflow-y: auto; }
 
@@ -1280,7 +1280,7 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   background: var(--bg-card);
   border-right: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
-  overflow-y: auto;
+  overflow: hidden;
 }
 .workspace-sidebar-header {
   display: flex;

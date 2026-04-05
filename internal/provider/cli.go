@@ -25,6 +25,9 @@ type CLIProvider struct {
 	Timeout time.Duration
 	// Credential for subprocess isolation (uid/gid). Nil = inherit.
 	Credential *syscall.Credential
+	// EmptyMCPConfig is the path to a JSON file with {"mcpServers":{}} used
+	// with --strict-mcp-config to disable all MCP servers. Set by init code.
+	EmptyMCPConfig string
 }
 
 // NewCLIProvider creates a new CLIProvider.
@@ -32,11 +35,18 @@ func NewCLIProvider(homeDir, dataDir string, timeout time.Duration, cred *syscal
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
+
+	// Create an empty MCP config file so we can pass --strict-mcp-config
+	// to disable built-in first-party MCP servers that cause startup delays.
+	mcpPath := filepath.Join(homeDir, ".claude", "empty-mcp.json")
+	_ = os.WriteFile(mcpPath, []byte(`{"mcpServers":{}}`), 0644)
+
 	return &CLIProvider{
 		HomeDir:        homeDir,
 		DefaultDataDir: dataDir,
 		Timeout:        timeout,
 		Credential:     cred,
+		EmptyMCPConfig: mcpPath,
 	}
 }
 
@@ -57,6 +67,13 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	// Always skip permissions so resumed sessions never inherit a
 	// restrictive permission mode from a previous read-only invocation.
 	args = append(args, "--dangerously-skip-permissions")
+
+	// Disable MCP servers — the daemon never uses them and built-in
+	// first-party servers (Canva, Gmail, etc.) cause startup delays
+	// when they try to initialize with expired/missing auth.
+	if p.EmptyMCPConfig != "" {
+		args = append(args, "--mcp-config", p.EmptyMCPConfig, "--strict-mcp-config")
+	}
 
 	if !params.WriteCapable {
 		if len(params.Tools) > 0 {

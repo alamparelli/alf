@@ -137,6 +137,15 @@ function selectView(view) {
 | `.workspace-detail-body` | Scrollable detail content |
 | `.sidebar-open` | Modifier on `.workspace` — shows sidebar fullscreen on mobile |
 
+## Common mistakes
+
+| Wrong | Correct | Why |
+|-------|---------|-----|
+| Putting list items directly in `.workspace-sidebar` | Put them in `.workspace-sidebar-body` | Only `-body` scrolls; header/footer stay fixed |
+| Adding `overflow-y: auto` to `.workspace-sidebar` | Already on `.workspace-sidebar-body` | The sidebar itself uses `overflow: hidden` so header/footer don't scroll away |
+| Making main content not fill the panel | Use `.flex-1` on content inside `.workspace-main-body` | The body is `flex: 1` with `overflow-y: auto`, children need `flex: 1` to fill it |
+| Using `el.style.display = 'none'` to toggle panels | Use `el.classList.add('hidden')` | `.hidden` uses `!important` to safely override `.flex-col`, `.flex`, etc. |
+
 ## Utility classes used in examples
 
 All exist in `alf-ui.css` — see loading.md for full utility list:

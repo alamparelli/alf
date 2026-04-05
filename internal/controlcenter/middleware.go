@@ -297,12 +297,17 @@ func corsMiddleware(allowedOrigin string, appTokens *AppTokenStore) func(http.Ha
 			// Sandboxed iframes have origin "null" — allow on app routes only.
 			// For preflight (OPTIONS) we must allow without token (browsers don't send auth on preflight).
 			// For actual requests, validate the Bearer app token to prevent abuse from non-browser callers.
+			// Sub-resource loads (already authenticated via Sec-Fetch-Dest in authMiddleware) also get CORS.
 			if !allowed && origin == "null" {
 				p := r.URL.Path
 				isAppRoute := strings.HasPrefix(p, "/apps/") || strings.HasPrefix(p, "/api/apps/") ||
 					p == "/api/bash" || p == "/api/app-action"
 				if isAppRoute {
 					if r.Method == http.MethodOptions {
+						allowed = true
+					} else if isAppSubResource(r) {
+						// Already authenticated by authMiddleware via Sec-Fetch-Dest —
+						// grant CORS so the browser doesn't block the response.
 						allowed = true
 					} else if appTokens != nil {
 						if bearer := extractAppBearerToken(r); bearer != "" {
@@ -316,7 +321,7 @@ func corsMiddleware(allowedOrigin string, appTokens *AppTokenStore) func(http.Ha
 
 			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Requested-With")
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}

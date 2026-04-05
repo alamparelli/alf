@@ -83,9 +83,9 @@ func (c *CLIClassifier) startLocked() error {
 		"--output-format", "stream-json",
 		"--max-turns", "3",
 		"--tools", "",
+		"--verbose",
 		"--dangerously-skip-permissions",
 		"--no-session-persistence",
-		"--verbose",
 	}
 
 	// Disable MCP servers — built-in first-party servers cause startup delays.
@@ -107,17 +107,6 @@ func (c *CLIClassifier) startLocked() error {
 		classifierHome = c.cfg.DataDir
 	}
 	cmd.Env = safeEnv(classifierHome, c.cfg.DataDir)
-
-	// Log classifier environment for debugging.
-	for _, e := range cmd.Env {
-		if k, _, ok := strings.Cut(e, "="); ok {
-			v := strings.TrimPrefix(e, k+"=")
-			if len(v) > 80 {
-				v = v[:80] + "..."
-			}
-			log.Printf("classifier: env %s=%s", k, v)
-		}
-	}
 
 	// Capture stderr to log any Claude CLI errors.
 	stderrPipe, err := cmd.StderrPipe()
@@ -168,7 +157,8 @@ func (c *CLIClassifier) startLocked() error {
 	}
 
 	// Drain init event + warmup response.
-	initCtx, initCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Allow generous timeout: on low-end CPUs the CLI startup alone can take 60s+.
+	initCtx, initCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer initCancel()
 	c.ready = true // temporarily set so readResponse works
 	_, err = c.readResponse(initCtx)

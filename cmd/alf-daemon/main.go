@@ -507,6 +507,26 @@ func main() {
 		}
 	}
 
+	// Persistent CLI classifier: avoids 60s+ CLI startup per classification
+	// on low-end CPUs. Starts once, stays alive, resets after idle timeout.
+	var cliClassifier *provider.CLIClassifier
+	if !isAPIRouter {
+		cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
+			Model:          routerModel,
+			SystemPrompt:   "You are a message classifier. Respond only with the tier name and reason.",
+			HomeDir:        homeDir,
+			DataDir:        dataDir,
+			Credential:     cliProvider.Credential,
+			IdleTimeout:    60 * time.Minute,
+			EmptyMCPConfig: cliProvider.EmptyMCPConfig,
+		})
+		go func() {
+			if err := cliClassifier.Start(); err != nil {
+				log.Printf("classifier: start failed: %v (will retry on first classify)", err)
+			}
+		}()
+	}
+
 	// agentTeamsForRouter converts the agent store into router-friendly team info.
 	agentTeamsForRouter := func() []router.AgentTeamInfo {
 		teams := agentStore.All()
@@ -537,13 +557,25 @@ func main() {
 			MessageCount:  msgCount,
 			RecentContext: recentContext,
 		})
+		start := time.Now()
+
+		// Use persistent CLI classifier when available (avoids 60s+ startup per call).
+		if cliClassifier != nil {
+			cr, err := cliClassifier.Classify(context.Background(), prompt)
+			if err != nil {
+				log.Printf("router: classifier error: %v", err)
+				return router.FallbackResult(tiers)
+			}
+			log.Printf("router: classify took %dms (classifier)", time.Since(start).Milliseconds())
+			return router.InterpretRaw(cr.Response, tiers, message)
+		}
+
 		routerProv := registry.ForBackend(routerBackend)
 		params := provider.Params{
 			Model:    routerModel,
 			MaxTurns: 2,
 			DataDir:  dataDir,
 		}
-		start := time.Now()
 		result, err := routerProv.Invoke(context.Background(), prompt, params, nil)
 		if err != nil {
 			log.Printf("router: classify error: %v", err)
@@ -1273,12 +1305,36 @@ func main() {
 						newModel = "anthropic/claude-haiku-4-5"
 					}
 					routerModel = newModel
+					// Shut down CLI classifier if switching to API router.
+					if cliClassifier != nil {
+						cliClassifier.Close()
+						cliClassifier = nil
+					}
 				} else {
 					newModel := router.ResolveModel(tierStore.Current().RouterModel)
 					if newModel == "" {
 						newModel = router.ResolveModel("haiku")
 					}
 					routerModel = newModel
+					// Update or create CLI classifier.
+					if cliClassifier != nil {
+						cliClassifier.UpdateModel(newModel)
+					} else {
+						cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
+							Model:          newModel,
+							SystemPrompt:   "You are a message classifier. Respond only with the tier name and reason.",
+							HomeDir:        homeDir,
+							DataDir:        dataDir,
+							Credential:     cliProvider.Credential,
+							IdleTimeout:    60 * time.Minute,
+							EmptyMCPConfig: cliProvider.EmptyMCPConfig,
+						})
+						go func() {
+							if err := cliClassifier.Start(); err != nil {
+								log.Printf("classifier: restart failed: %v", err)
+							}
+						}()
+					}
 				}
 				if git != nil {
 					git.Commit("tiers updated via CC")
@@ -1368,12 +1424,19 @@ func main() {
 						newModel = "anthropic/claude-haiku-4-5"
 					}
 					routerModel = newModel
+					if cliClassifier != nil {
+						cliClassifier.Close()
+						cliClassifier = nil
+					}
 				} else {
 					newModel := router.ResolveModel(tierStore.Current().RouterModel)
 					if newModel == "" {
 						newModel = router.ResolveModel("haiku")
 					}
 					routerModel = newModel
+					if cliClassifier != nil {
+						cliClassifier.UpdateModel(newModel)
+					}
 				}
 				if git != nil {
 					git.Commit("tiers updated via CC")

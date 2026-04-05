@@ -57,11 +57,21 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		model = "claude-haiku-4-5"
 	}
 
+	// Use stream-json (with --verbose) only when we need streaming progress.
+	// --verbose causes Claude to scan .claude/projects/ which can take 60s+
+	// with large project data. For non-streaming calls (router, memstore),
+	// use json output to avoid this overhead.
+	outputFormat := "json"
+	if onProgress != nil {
+		outputFormat = "stream-json"
+	}
 	args := []string{
 		"-p", "-",
 		"--model", model,
-		"--output-format", "stream-json",
-		"--verbose",
+		"--output-format", outputFormat,
+	}
+	if outputFormat == "stream-json" {
+		args = append(args, "--verbose")
 	}
 
 	// Always skip permissions so resumed sessions never inherit a
@@ -201,6 +211,24 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 			stderr.WriteString(scanner.Text() + "\n")
 		}
 	}()
+
+	// Fast path for JSON output mode (no streaming). Read all stdout, parse result.
+	if outputFormat == "json" {
+		var stdout bytes.Buffer
+		scanner := bufio.NewScanner(stdoutPipe)
+		scanner.Buffer(make([]byte, 256*1024), 1024*1024)
+		for scanner.Scan() {
+			stdout.Write(scanner.Bytes())
+		}
+		<-stderrDone
+		waitErr := cmd.Wait()
+		invokeDur := time.Since(invokeStart)
+		log.Printf("provider: done %dms (json mode) result=%d chars", invokeDur.Milliseconds(), stdout.Len())
+		if cmdCtx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("claude timed out after %v", timeout)
+		}
+		return parseJSONResult(ctx, stdout.Bytes(), strings.TrimSpace(stderr.String()), waitErr)
+	}
 
 	var (
 		resultText   strings.Builder
@@ -546,6 +574,75 @@ done:
 		return nil, fmt.Errorf("claude failed: %v", waitErr)
 	}
 
+	return nil, fmt.Errorf("claude returned empty response")
+}
+
+// parseJSONResult parses the single JSON object returned by --output-format json.
+func parseJSONResult(ctx context.Context, data []byte, stderrStr string, waitErr error) (*Result, error) {
+	var parsed struct {
+		Type         string                   `json:"type"`
+		SessionID    string                   `json:"session_id"`
+		Subtype      string                   `json:"subtype"`
+		ResultText   string                   `json:"result"`
+		IsError      bool                     `json:"is_error"`
+		NumTurns     int                      `json:"num_turns"`
+		TotalCostUSD float64                  `json:"total_cost_usd"`
+		ModelUsage   map[string]jsonModelEntry `json:"modelUsage"`
+	}
+	if err := json.Unmarshal(data, &parsed); err == nil && parsed.Type == "result" {
+		text := parsed.ResultText
+		if parsed.IsError && text == "" {
+			errDetail := parsed.Subtype
+			if errDetail == "" {
+				errDetail = "unknown error"
+			}
+			log.Printf("provider: error subtype=%s stderr=%q", parsed.Subtype, truncStderr(stderrStr, 500))
+			return nil, fmt.Errorf("claude: %s", errDetail)
+		}
+		if text == "" {
+			switch parsed.Subtype {
+			case "error_max_turns":
+				text = "Turn limit reached - try breaking this into smaller steps."
+			default:
+				if parsed.IsError {
+					text = "An error occurred processing your request."
+				} else {
+					text = "Done (no text output)."
+				}
+			}
+		}
+		if parsed.IsError && strings.Contains(text, "No conversation found") {
+			return nil, fmt.Errorf("claude: %s", text)
+		}
+		usedModel := "unknown"
+		for m := range parsed.ModelUsage {
+			usedModel = m
+			break
+		}
+		logLLMCtx(ctx, "result", map[string]any{
+			"provider": "cli", "model": usedModel, "session": parsed.SessionID,
+			"cost": parsed.TotalCostUSD, "turns": parsed.NumTurns,
+			"response_len": len(text), "response": trunc(text, 2000),
+		})
+		return &Result{
+			SessionID: parsed.SessionID,
+			Text:      text,
+			Model:     usedModel,
+			CostUSD:   parsed.TotalCostUSD,
+			NumTurns:  parsed.NumTurns,
+		}, nil
+	}
+
+	if waitErr != nil {
+		if stderrStr != "" {
+			return nil, fmt.Errorf("claude: %s", stderrStr)
+		}
+		return nil, fmt.Errorf("claude failed: %v", waitErr)
+	}
+	// Fallback: return raw output as text.
+	if text := strings.TrimSpace(string(data)); text != "" {
+		return &Result{Text: text}, nil
+	}
 	return nil, fmt.Errorf("claude returned empty response")
 }
 

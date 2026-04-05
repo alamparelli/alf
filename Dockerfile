@@ -111,11 +111,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 RUN npm install -g @openai/codex \
     && codex --version
 
-# Claude Code native binary.
-# Keep ~/.local/bin/claude so Claude Code recognises the native install.
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && cp "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
-    && rm -rf /root/.local/share/claude /root/.claude \
+# Claude Code via npm (uses the Node.js already installed above).
+# The native SEA binary (claude.ai/install.sh) embeds its own Node.js runtime
+# which causes ~60s startup on low-end CPUs. npm install reuses the system Node.
+RUN npm install -g @anthropic-ai/claude-code \
     && claude --version
 
 ENV PATH="/opt/alf/tools.d:${PATH}"

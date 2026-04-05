@@ -92,8 +92,8 @@ func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool
 func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens *AppTokenStore, exempt map[string]bool, extraTokenFns ...func() string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Exempt paths.
-			if exempt[r.URL.Path] || strings.HasPrefix(r.URL.Path, "/static/") {
+			// Exempt paths and CORS preflights (OPTIONS carry no credentials).
+			if exempt[r.URL.Path] || strings.HasPrefix(r.URL.Path, "/static/") || r.Method == http.MethodOptions {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -226,15 +226,29 @@ p{color:#aaa;line-height:1.6}</style></head>
 
 // corsMiddleware only allows CORS from the configured origin (derived from externalURL).
 // If allowedOrigin is empty, no CORS headers are set (same-origin only).
+// Sandboxed iframes (origin "null") are allowed on app routes when they carry a valid app token.
 func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 	allowedOrigin = strings.TrimRight(allowedOrigin, "/")
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := strings.TrimRight(r.Header.Get("Origin"), "/")
-			if origin != "" && allowedOrigin != "" && origin == allowedOrigin {
+
+			allowed := origin != "" && allowedOrigin != "" && origin == allowedOrigin
+
+			// Sandboxed iframes have origin "null" — allow on app routes.
+			// The auth middleware separately validates the Bearer app token.
+			if !allowed && origin == "null" {
+				p := r.URL.Path
+				if strings.HasPrefix(p, "/apps/") || strings.HasPrefix(p, "/api/apps/") ||
+					p == "/api/bash" || p == "/api/app-action" {
+					allowed = true
+				}
+			}
+
+			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Requested-With")
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 
@@ -602,6 +616,7 @@ type rateLimiter struct {
 	sessions       *SessionStore    // optional — used to detect authenticated requests
 	token          string           // optional — Bearer token also gets authLimit
 	extraTokenFns  []func() string  // optional — additional valid tokens (e.g. mobile API token)
+	appTokens      *AppTokenStore   // optional — HMAC app tokens also get authLimit
 }
 
 func newRateLimiter(limit int) *rateLimiter {
@@ -639,12 +654,18 @@ func (rl *rateLimiter) withExtraTokens(fns ...func() string) *rateLimiter {
 	return rl
 }
 
+// withAppTokens allows HMAC-signed app tokens to use the authLimit.
+func (rl *rateLimiter) withAppTokens(tokens *AppTokenStore) *rateLimiter {
+	rl.appTokens = tokens
+	return rl
+}
+
 func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Never rate-limit static assets, the login page, or health checks — these
 		// must remain reachable even when a misbehaving app floods API endpoints.
 		p := r.URL.Path
-		if strings.HasPrefix(p, "/static/") || p == "/" || p == "/health" || p == "/favicon.ico" {
+		if r.Method == http.MethodOptions || strings.HasPrefix(p, "/static/") || p == "/" || p == "/health" || p == "/favicon.ico" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -678,6 +699,12 @@ func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 								authenticated = true
 								break
 							}
+						}
+					}
+					// Check HMAC app tokens (sandboxed iframe auth).
+					if !authenticated && rl.appTokens != nil {
+						if _, ok := rl.appTokens.Validate(bearer); ok {
+							authenticated = true
 						}
 					}
 				}

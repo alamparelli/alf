@@ -498,7 +498,7 @@ func HandlerFactory(deps Deps) Handlers {
 	})(handler)
 	handler = corsMiddleware(deps.AllowedOrigin)(handler)
 	handler = securityHeadersMiddleware(handler)
-	handler = newRateLimiter(15).withAuthLimit(600, deps.Sessions).withToken(deps.AuthToken).withExtraTokens(func() string {
+	handler = newRateLimiter(15).withAuthLimit(600, deps.Sessions).withToken(deps.AuthToken).withAppTokens(deps.AppTokens).withExtraTokens(func() string {
 		return GetMobileToken(deps.VaultManager)
 	}).middleware(handler) // 15/min anonymous, no limit authenticated (session, bearer, or mobile token)
 	handler = loggingMiddleware(handler)

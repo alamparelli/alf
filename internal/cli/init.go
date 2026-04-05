@@ -90,6 +90,7 @@ type setupProfile struct {
 	Workspaces         []string `json:"workspaces,omitempty"`          // host paths to mount
 	JSRuntime          string   `json:"js_runtime,omitempty"`          // "node", "deno", "bun", or ""
 	ImageTag           string   `json:"image_tag,omitempty"`           // Docker image tag override (e.g. "0.6.49")
+	Bind               string   `json:"bind,omitempty"`                // Bind address (default "127.0.0.1", "0.0.0.0" for LAN)
 }
 
 func setupProfilePath() string {

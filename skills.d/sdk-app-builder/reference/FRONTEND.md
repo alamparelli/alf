@@ -254,6 +254,21 @@ AlfSDK.updateSheet('<h3>Loading...</h3><p>Please wait</p>');
 
 **Button click handling**: Elements with `data-action="name"` trigger the matching action callback.
 Form inputs with `name` or `data-field` attributes are collected into the `params` object.
+Checkboxes collect `"true"`/`"false"`. Radio buttons collect the `value` of the checked radio in the group.
+
+**No inline JS**: `onclick`, `onchange`, and all event handler attributes are stripped by the sanitizer. Use `data-action` for buttons and native form elements (`<input type="radio">`, `<select>`, `<input type="checkbox">`) for user choices — their values are auto-collected when the action button is clicked.
+
+```js
+// Radio group — value auto-collected as params.mood
+AlfSDK.sheet(
+  '<h3>Pick Mood</h3>' +
+  '<label><input type="radio" name="mood" value="happy"> Happy</label>' +
+  '<label><input type="radio" name="mood" value="neutral" checked> Neutral</label>' +
+  '<label><input type="radio" name="mood" value="sad"> Sad</label>' +
+  '<button data-action="save">Save</button>',
+  { save: function(params) { /* params.mood = "happy"|"neutral"|"sad" */ } }
+);
+```
 
 **Sheet styling**: The sheet container has `background: var(--bg)` and inherits the theme variables. Sheet HTML gets base styles for headings, paragraphs, inputs, buttons, and labels automatically. Use `alf-ui.css` classes (`.btn`, `.input`, `.form-group`, etc.) inside sheets for consistency with the rest of the workspace.
 

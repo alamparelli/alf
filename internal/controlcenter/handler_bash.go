@@ -35,6 +35,10 @@ type BashHandler struct {
 	// mounted into their sandbox so they can use vault CLI without direct token access.
 	VaultManager *vault.Manager
 
+	// ServiceGetter returns the declared vault services for an app slug.
+	// Used to scope the vault proxy to only the services the app declared.
+	ServiceGetter func(slug string) []string
+
 	mu             sync.Mutex
 	vaultProxies   map[string]*vault.VaultProxy // slug → proxy
 	vaultListeners map[string]net.Listener      // slug → listener
@@ -167,9 +171,13 @@ func (h *BashHandler) ensureVaultProxy(slug string) string {
 		return h.vaultSockPath(slug)
 	}
 
-	// Create new proxy — allow all services (will be scoped later if needed).
+	// Create new proxy scoped to the app's declared vault services.
 	sockPath := h.vaultSockPath(slug)
-	proxy := vault.NewVaultProxy(h.VaultManager.SocketPath(), currentToken, nil)
+	var services []string
+	if h.ServiceGetter != nil {
+		services = h.ServiceGetter(slug)
+	}
+	proxy := vault.NewVaultProxy(h.VaultManager.SocketPath(), currentToken, services)
 	ln, err := proxy.ListenAndServe(sockPath)
 	if err != nil {
 		log.Printf("[bash] vault proxy for %s failed: %v", slug, err)

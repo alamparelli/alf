@@ -297,6 +297,7 @@ func regenerateCompose(dir string) {
 		}
 	}
 	data.Timezone = profile.Timezone
+	data.CCBind = profile.Bind
 	data.Workspaces = profile.Workspaces
 	if profile.ImageTag != "" && profile.ImageTag != "latest" {
 		data.Image = "ghcr.io/alamparelli/alf:" + profile.ImageTag

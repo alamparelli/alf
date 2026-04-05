@@ -205,8 +205,9 @@ func injectDesignSystemCSS(html []byte) []byte {
 	const tag = `<link rel="stylesheet" href="/static/alf-ui.css">`
 	s := string(html)
 
-	// Already has it — don't double-inject.
-	if strings.Contains(s, "/static/alf-ui.css") {
+	// Already has it — don't double-inject. Check for the actual <link tag,
+	// not just the URL string (which may appear inside <code> blocks).
+	if strings.Contains(s, `href="/static/alf-ui.css"`) {
 		return html
 	}
 

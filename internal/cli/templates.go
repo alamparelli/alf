@@ -26,6 +26,7 @@ type ComposeData struct {
 	WhisperImage  string   // Whisper image (default: ghcr.io/alamparelli/whisper-service:latest)
 	EmbedImage    string   // Embed service image (default: ghcr.io/alamparelli/embed-service:latest)
 	CCPort        string
+	CCBind        string   // Bind address (default: "127.0.0.1", set "0.0.0.0" for LAN access)
 	CCExternalURL string
 	EnableHTTPS   bool
 	Domain        string

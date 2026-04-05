@@ -250,7 +250,10 @@
       ).forEach(el => {
         const field = el.getAttribute('data-field') || el.name
         if (!field) return
-        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+        if (el instanceof HTMLInputElement && el.type === 'radio') {
+          // Only collect the checked radio in the group
+          if (el.checked) params[field] = el.value
+        } else if (el instanceof HTMLInputElement && el.type === 'checkbox') {
           params[field] = el.checked ? 'true' : 'false'
         } else {
           params[field] = el.value

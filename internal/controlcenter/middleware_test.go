@@ -208,7 +208,7 @@ func TestAuthMiddleware_LoginPage_NotForAPI(t *testing.T) {
 }
 
 func TestCORSMiddleware_AllowedOrigin(t *testing.T) {
-	handler := corsMiddleware("http://localhost:8080")(okHandler())
+	handler := corsMiddleware("http://localhost:8080", nil)(okHandler())
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	req.Header.Set("Origin", "http://localhost:8080")
 	rec := httptest.NewRecorder()
@@ -221,7 +221,7 @@ func TestCORSMiddleware_AllowedOrigin(t *testing.T) {
 }
 
 func TestCORSMiddleware_RejectsUnknownOrigin(t *testing.T) {
-	handler := corsMiddleware("http://localhost:8080")(okHandler())
+	handler := corsMiddleware("http://localhost:8080", nil)(okHandler())
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	req.Header.Set("Origin", "http://evil.com")
 	rec := httptest.NewRecorder()
@@ -234,7 +234,7 @@ func TestCORSMiddleware_RejectsUnknownOrigin(t *testing.T) {
 }
 
 func TestCORSMiddleware_EmptyAllowedOrigin(t *testing.T) {
-	handler := corsMiddleware("")(okHandler())
+	handler := corsMiddleware("", nil)(okHandler())
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	req.Header.Set("Origin", "http://192.168.1.100:9090")
 	rec := httptest.NewRecorder()
@@ -247,7 +247,7 @@ func TestCORSMiddleware_EmptyAllowedOrigin(t *testing.T) {
 }
 
 func TestCORSMiddleware_TrailingSlashNormalization(t *testing.T) {
-	handler := corsMiddleware("http://localhost:8080/")(okHandler())
+	handler := corsMiddleware("http://localhost:8080/", nil)(okHandler())
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	req.Header.Set("Origin", "http://localhost:8080")
 	rec := httptest.NewRecorder()
@@ -260,7 +260,7 @@ func TestCORSMiddleware_TrailingSlashNormalization(t *testing.T) {
 }
 
 func TestCORSMiddleware_Preflight(t *testing.T) {
-	handler := corsMiddleware("http://localhost:8080")(okHandler())
+	handler := corsMiddleware("http://localhost:8080", nil)(okHandler())
 	req := httptest.NewRequest("OPTIONS", "/api/test", nil)
 	req.Header.Set("Origin", "http://localhost:8080")
 	rec := httptest.NewRecorder()

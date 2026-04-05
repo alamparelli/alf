@@ -83,10 +83,13 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		appSlug = req.AppSlug // fallback to body for non-browser callers (no privilege gain)
 	}
 	// Cross-check: if request was authenticated via app Bearer token,
-	// the token slug must match the Referer-derived slug. Prevents an app
-	// from forging Referer to execute bash as a different app.
-	if tokenSlug := AppTokenSlugFromContext(r.Context()); tokenSlug != "" && appSlug != "" {
-		if tokenSlug != appSlug {
+	// enforce the token's slug. This prevents:
+	// 1. Forging Referer to impersonate another app (slug mismatch → 403)
+	// 2. Omitting Referer + app_slug to escape sandbox (token slug forced)
+	if tokenSlug := AppTokenSlugFromContext(r.Context()); tokenSlug != "" {
+		if appSlug == "" {
+			appSlug = tokenSlug
+		} else if tokenSlug != appSlug {
 			respondJSON(w, http.StatusForbidden, map[string]string{"error": "token/app slug mismatch"})
 			return
 		}

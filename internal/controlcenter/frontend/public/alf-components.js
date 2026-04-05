@@ -1,0 +1,37 @@
+// ALF Web Components — barrel import
+// Auto-injected into app iframes via injectDesignSystemCSS()
+import './components/alf-tabs.js';
+import './components/alf-input.js';
+import './components/alf-select.js';
+import './components/alf-search-box.js';
+import './components/alf-dialog.js';
+import './components/alf-list.js';
+import './components/alf-dropdown.js';
+import './components/alf-tag.js';
+import './components/alf-alert.js';
+import './components/alf-toggle.js';
+import './components/alf-stat-grid.js';
+import './components/alf-data-table.js';
+import './components/alf-pagination.js';
+import './components/alf-settings-row.js';
+import './components/alf-progress.js';
+import './components/alf-empty-state.js';
+import './components/alf-app-shell.js';
+import './components/alf-avatar.js';
+import './components/alf-kv-row.js';
+import './components/alf-accordion.js';
+import './components/alf-breadcrumb.js';
+import './components/alf-chip.js';
+import './components/alf-input-row.js';
+import './components/alf-danger-zone.js';
+import './components/alf-btn-group.js';
+import './components/alf-bar-chart.js';
+import './components/alf-hbar.js';
+import './components/alf-sparkline.js';
+import './components/alf-ring-chart.js';
+import './components/alf-dropzone.js';
+import './components/alf-carousel.js';
+import './components/alf-toolbar.js';
+import './components/alf-drawer.js';
+import './components/alf-loading.js';
+import './components/alf-nav-row.js';

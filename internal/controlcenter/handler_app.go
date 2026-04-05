@@ -202,7 +202,7 @@ func (h *AppHandler) proxyAPI(w http.ResponseWriter, r *http.Request, slug, apiP
 // injectDesignSystemCSS inserts a <link> to alf-ui.css into the HTML <head>
 // so the browser loads it in parallel with the page, preventing FOUC.
 func injectDesignSystemCSS(html []byte) []byte {
-	const tag = `<link rel="stylesheet" href="/static/alf-ui.css">`
+	const tag = `<link rel="stylesheet" href="/static/alf-ui.css"><script type="module" src="/static/alf-components.js"></script>`
 	s := string(html)
 
 	// Already has it — don't double-inject.

@@ -51,13 +51,16 @@ Each palette defines light + dark variants via `prefers-color-scheme: dark`. The
 
 **Common mistakes** — use the alf-ui.css class instead:
 
-| Custom pattern (wrong) | alf-ui.css class (correct) |
+| Custom pattern (wrong) | Correct |
 |---|---|
-| `.stat-box { text-align:center }` | `.stat-grid > .stat-item` + `.stat-value` + `.stat-label` |
-| `.my-list-row { display:flex; border-bottom }` | `.card-group > .list-item-interactive` |
-| `.my-actions { display:flex; gap:8px; justify-content:flex-end }` | `.modal-actions` |
-| `.my-kv { display:flex; justify-content:space-between }` | `.kv-row` + `.kv-label` + `.kv-value` |
-| `.my-tabs { display:flex; gap:4px }` | `.filter-tabs > .tab` |
+| `.stat-box { text-align:center }` | `<alf-stat-grid>` + `<alf-stat>` |
+| `.my-list-row { display:flex; border-bottom }` | `<alf-list>` + `<alf-list-item>` |
+| `.my-actions { display:flex; gap:8px; justify-content:flex-end }` | `<alf-dialog>` (auto-generates buttons) |
+| `.my-kv { display:flex; justify-content:space-between }` | `<alf-kv-row label="...">` |
+| `.my-tabs { display:flex; gap:4px }` | `<alf-tabs>` + `<alf-tab>` |
+| Manual `AlfSDK.sheet()` HTML strings | `<alf-dialog>` with `<alf-input>` children |
+| `<div class="form-group"><label class="form-label">...` | `<alf-input label="...">` |
+| `<div class="search-box"><svg ...><input>` | `<alf-search-box>` |
 | `style="color:var(--text-dim);font-size:11px"` | `class="text-dim text-xs"` |
 | `style="display:flex;gap:8px"` | `class="flex gap-sm"` (or parent layout class) |
 | `style="flex:1"` | `class="flex-1"` |
@@ -295,19 +298,22 @@ ALF uses a **borderless** design — cards and buttons rely on background contra
 
 ## Components
 
-All components below are available via `alf-ui.css` classes. No JS required.
-**Design philosophy**: borderless surfaces — background contrast, not borders.
+**Use `<alf-*>` web components for all interactive UI.** They are auto-loaded and render using `alf-ui.css` classes internally. This ensures deterministic output — no manual class composition needed.
 
-> **Full HTML templates**: See `reference/AIG-COMPONENTS.md` for copy-paste markup of every component.
-> **Visual gallery**: See `reference/components.html` for a rendered preview.
+> **Full reference**: See `reference/AIG-COMPONENTS.md` for every `<alf-*>` component with attributes and events.
 
-Available components: `.btn`, `.btn-primary`, `.btn-danger`, `.btn-success`, `.btn-ghost`, `.btn-sm`, `.btn-lg`, `.btn-block`, `.btn-icon`, `.btn-icon-accent`, `.btn-group`, `.card`, `.card-header`, `.card-interactive`, `.card-group`, `.content-card`, `.input-row`, `.check`, `.form-group`, `.form-label`, `.form-hint`, `.form-row`, `.input`, `.select`, `.textarea`, `.toggle`, `.toolbar`, `.search-box`, `.tab-bar`, `.tab-item`, `.filter-tabs`, `.data-table`, `.stat-grid`, `.stat-item`, `.list`, `.list-item`, `.list-item-interactive`, `.tag`, `.tag-accent`, `.tag-success`, `.tag-danger`, `.tag-warning`, `.tag-mauve`, `.tag-sapphire`, `.meta`, `.alert`, `.alert-success`, `.alert-danger`, `.alert-warning`, `.alert-info`, `.empty-state`, `.loading-state`, `.spinner`, `.divider`, `.divider-sm`, `.section-label`, `.count`, `.progress-bar`, `.progress-track`, `.progress-fill`, `.progress-label`, `.dot`, `.dot-success`, `.dot-danger`, `.dot-warning`, `.footer-stats`, `.danger-zone`, `.kbd`, `.skeleton`, `.skeleton-text`, `.skeleton-circle`, `.backdrop`, `.done`, `.spacer`, `.avatar`, `.avatar-sm`, `.avatar-lg`, `.avatar-stack`, `.kv-row`, `.kv-label`, `.kv-value`, `.line-clamp-2`, `.line-clamp-3`, `.change-up`, `.change-down`, `.change-flat`, `.chip`, `.chip-close`, `.sticky`, `.accordion`, `.accordion-content`, `.prose`, `[data-tooltip]`, `.dropdown`, `.dropdown-menu`, `.dropdown-item`, `.dropdown-item-danger`, `.breadcrumb`, `.pagination`, `.page-btn`, `.slider`, `.bar-chart`, `.hbar-chart`, `.sparkline`, `.ring-chart`, `.carousel`, `.carousel-cards`, `.carousel-peek`, `.carousel-full`, `.carousel-dots`, `.dropzone`, `.dropzone-compact`, `.file-item`, `.popover`, `.workspace`, `.workspace-sidebar`, `.workspace-main`, `.workspace-detail`, `.workspace-back`, `.sidebar-item`, `.sidebar-nav`, `.count-badge`
+### Web components (use these)
 
-Layout utilities: `.flex`, `.flex-col`, `.flex-row`, `.flex-wrap`, `.flex-1`, `.flex-shrink-0`, `.items-center`, `.items-start`, `.items-end`, `.justify-center`, `.justify-between`, `.justify-end`, `.w-full`, `.h-full`, `.relative`, `.hidden`, `.overflow-hidden`, `.overflow-y-auto`
+`<alf-tabs>`, `<alf-tab>`, `<alf-input>`, `<alf-select>`, `<alf-search-box>`, `<alf-dialog>`, `<alf-list>`, `<alf-list-item>`, `<alf-dropdown>`, `<alf-menu-item>`, `<alf-menu-divider>`, `<alf-tag>`, `<alf-alert>`, `<alf-toggle>`, `<alf-stat-grid>`, `<alf-stat>`, `<alf-data-table>`, `<alf-column>`, `<alf-pagination>`, `<alf-progress>`, `<alf-settings-row>`, `<alf-empty-state>`, `<alf-app-shell>`, `<alf-avatar>`, `<alf-kv-row>`, `<alf-accordion>`, `<alf-accordion-item>`, `<alf-breadcrumb>`, `<alf-crumb>`, `<alf-chip>`, `<alf-input-row>`, `<alf-bar-chart>`, `<alf-hbar>`, `<alf-sparkline>`, `<alf-ring-chart>`, `<alf-dropzone>`, `<alf-carousel>`, `<alf-danger-zone>`, `<alf-btn-group>`, `<alf-toolbar>`, `<alf-drawer>`, `<alf-loading>`, `<alf-nav-row>`
 
-Spacing utilities: `.gap-xs` to `.gap-xl`, `.p-xs` to `.p-xl`, `.px-sm` to `.px-lg`, `.py-sm` to `.py-lg`, `.m-0`, `.mb-xs` to `.mb-lg`, `.mt-sm` to `.mt-lg`
+### CSS classes (for layout, text, and simple elements only)
 
-Text utilities: `.text-xs`, `.text-sm`, `.text-md`, `.text-lg`, `.text-xl`, `.text-dim`, `.text-accent`, `.text-bold`, `.text-mono`, `.truncate`
+Buttons: `.btn`, `.btn-primary`, `.btn-danger`, `.btn-success`, `.btn-ghost`, `.btn-sm`, `.btn-lg`, `.btn-block`, `.btn-icon`
+Cards: `.card`, `.card-interactive`, `.card-group`
+Layout: `.flex`, `.flex-col`, `.flex-row`, `.flex-wrap`, `.flex-1`, `.items-center`, `.justify-between`, `.justify-end`, `.w-full`, `.h-full`, `.hidden`, `.spacer`, `.grid-2`, `.grid-3`
+Spacing: `.gap-xs` to `.gap-xl`, `.p-xs` to `.p-xl`, `.mb-xs` to `.mb-lg`, `.m-0`
+Text: `.text-xs`, `.text-sm`, `.text-dim`, `.text-bold`, `.text-mono`, `.truncate`
+Misc: `.dot`, `.dot-success`, `.dot-danger`, `.meta`, `.done`, `.kbd`, `.skeleton`, `.divider`, `.section-label`, `.footer-stats`, `[data-tooltip]`, `.slider`
 
 ---
 
@@ -328,40 +334,25 @@ Three layout shells — pick one per app, never write manual body CSS.
 
 ## Sheets (bottom-sheet modals)
 
-Sheets are rendered by the parent SPA via `AlfSDK.sheet()`. Content is sanitized HTML.
+Use `<alf-dialog>` for form sheets — it handles structure, buttons, and field collection automatically:
 
-### Structure
-
-```js
-AlfSDK.sheet(
-  '<h3>Title</h3>' +
-  '<p class="text-dim">Description of what this does.</p>' +
-  '<hr class="divider">' +
-  '<div class="form-group">' +
-    '<label class="form-label">Field</label>' +
-    '<input class="input" name="field" placeholder="...">' +
-  '</div>' +
-  '<button data-action="cancel" class="btn">Cancel</button> ' +
-  '<button data-action="save" class="btn btn-primary">Save</button>',
-  {
-    cancel: function() { AlfSDK.closeSheet(); },
-    save: function(p) {
-      save(p.field);
-      AlfSDK.closeSheet();
-    }
-  }
-);
+```html
+<alf-dialog id="my-dialog" label="Add Task">
+  <alf-input label="Title" name="title" required></alf-input>
+  <alf-select label="Priority" name="priority">
+    <option value="low">Low</option>
+    <option value="high">High</option>
+  </alf-select>
+</alf-dialog>
+<script>
+document.getElementById('my-dialog').open();
+document.getElementById('my-dialog').addEventListener('alf-submit', function(e) {
+  save(e.detail); // { title: '...', priority: 'low' }
+});
+</script>
 ```
 
-### Rules
-
-- Always start with an `<h3>` title.
-- Description in `<p>` with `text-dim` color.
-- Use `<hr class="divider">` to separate title from content.
-- Form inputs must have `name` attribute (auto-collected as callback params).
-- Sheet HTML should use alf-ui.css classes (`.btn`, `.btn-primary`, `.btn-danger`, `.input`, `.form-group`) where possible.
-- Destructive action button: `class="btn btn-danger"` (not inline style).
-- Primary action button: `class="btn btn-primary"` (not inline style).
+For non-form sheets (confirmation, info), use `AlfSDK.confirm()` or `AlfSDK.sheet()` directly.
 
 ---
 

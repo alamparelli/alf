@@ -21,7 +21,8 @@ AlfSDK.VERSION                         // '4.0.0'
 AlfSDK.init({ slug, onThemeChange,     // Init. Call once on load. REQUIRED.
   onVisible, onHidden, onDestroy })    //   Lifecycle callbacks (see Lifecycle section)
 AlfSDK.tool(action, args)              // Run CLI tool. Returns Promise<string>.
-AlfSDK.api(path, opts)                 // Authenticated fetch (Bearer token, automatic).
+AlfSDK.api(path, opts)                 // Authenticated fetch (Bearer token). Returns Promise<parsed JSON|text>. Throws on non-2xx.
+AlfSDK.fetch(path, opts)               // Raw authenticated fetch. Returns Promise<Response> (not parsed). For binary/streaming.
 AlfSDK.bash(cmd)                       // Execute shell command via /api/bash.
 AlfSDK.action(target, action, params)  // Call cross-app action. Returns Promise<any>.
 AlfSDK.navigate(view)                  // Navigate parent SPA ('chat', 'settings', 'vault').
@@ -186,12 +187,13 @@ App iframes run with `sandbox="allow-scripts allow-forms"`. This means:
 4. **Set `font-family` explicitly** -- `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. Google Fonts are blocked by CSP in iframes.
 5. **Load `/static/style.css`** + `/static/theme-*.css` + `/static/theme-init.js`
 6. **No external scripts/stylesheets** -- CSP `style-src 'self'` blocks them. `alf-ui.css` is auto-injected. **Never use absolute URLs** (even to the CC domain like `https://cc.example.com/static/...`) — they fail in the iframe CSP. Use relative paths only: `/static/alf-ui.css`.
-7. **No `unsafe-eval`** -- no Vue, Angular, Petite Vue
+7. **Lightweight eval-based frameworks OK** -- Alpine.js, Petite Vue work (`unsafe-eval` is in CSP). No build-step frameworks (React, Vue SPA, Angular).
 8. **Inline `<style>` only** -- no external CSS files you create. Minimize inline styles — prefer `alf-ui.css` classes.
 9. **Lucide SVG icons** -- inline SVG from lucide.dev. No icon fonts. No emoji as icons (unless user asks).
 10. **XSS protection** -- always escape user content with a `div.textContent` wrapper (the `esc()` helper above)
 11. **`font-family: inherit`** is NOT sufficient -- always set explicitly (see rule 4)
 12. **Use spacing tokens** -- `--space-xs` to `--space-xl` or classes `.gap-sm`, `.p-md`, `.mb-lg` etc.
+13. **Never use `fetch()` directly** -- use `AlfSDK.api()` for JSON APIs (auto-parses, throws on non-2xx) or `AlfSDK.fetch()` for binary/streaming (returns raw `Response`). Both add Bearer auth automatically.
 
 ---
 
@@ -209,7 +211,7 @@ AlfSDK.init({
 
 - `onVisible`/`onHidden` fire on Page Visibility API changes and when the parent SPA switches tabs.
 - `onDestroy` fires when the iframe is removed from the DOM.
-- The SDK blocks `tool()`, `bash()`, `storage.*` calls until `init()` completes.
+- `api()`, `fetch()`, `tool()`, `bash()`, `storage.*` calls are queued until the parent sends the init-context (Bearer token + theme) via MessageChannel. Safe to call immediately after `init()` — they wait automatically.
 
 ---
 
@@ -307,7 +309,7 @@ All other `/api/*` endpoints return 403 from app context.
 
 ### Static file allowlist
 
-Only web-safe extensions are served via `/apps/{slug}/`: `.html`, `.css`, `.js`, `.mjs`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.ico`, `.webp`, `.avif`, `.woff`, `.woff2`, `.ttf`, `.otf`, `.eot`, `.mp3`, `.ogg`, `.wav`, `.mp4`, `.webm`, `.json`, `.xml`, `.txt`, `.csv`, `.map`. Source code (`.go`, `.py`), databases (`.db`, `.sqlite`), and internal files return 404.
+Only web-safe extensions are served via `/apps/{slug}/`: `.html`, `.css`, `.js`, `.mjs`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.ico`, `.webp`, `.avif`, `.woff`, `.woff2`, `.ttf`, `.otf`, `.eot`, `.mp3`, `.ogg`, `.wav`, `.mp4`, `.webm`, `.json`, `.xml`, `.txt`, `.csv`, `.map`, `.wasm`, `.pck`. Source code (`.go`, `.py`), databases (`.db`, `.sqlite`), and internal files return 404.
 
 ---
 

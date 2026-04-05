@@ -27,6 +27,8 @@ var allowedStaticExt = map[string]bool{
 	".mp3": true, ".ogg": true, ".wav": true, ".mp4": true, ".webm": true,
 	// Data (read-only, explicitly allowed)
 	".json": true, ".xml": true, ".txt": true, ".csv": true,
+	// WebAssembly / game engines
+	".wasm": true, ".pck": true,
 	// Maps
 	".map": true,
 }
@@ -127,7 +129,7 @@ func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if ext == ".html" || ext == ".htm" {
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://unpkg.com; "+
+				"script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://unpkg.com; "+
 				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: blob: https:; "+
 				"connect-src 'self'; "+
@@ -179,6 +181,15 @@ func (h *AppHandler) proxyAPI(w http.ResponseWriter, r *http.Request, slug, apiP
 			req.Header.Del("X-Forwarded-For")
 			req.Header.Del("X-Forwarded-Proto")
 			req.Header.Del("X-Real-Ip")
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			// Strip CORS headers set by backend apps — the CC CORS middleware
+			// is authoritative. Duplicate headers cause browser rejections.
+			resp.Header.Del("Access-Control-Allow-Origin")
+			resp.Header.Del("Access-Control-Allow-Methods")
+			resp.Header.Del("Access-Control-Allow-Headers")
+			resp.Header.Del("Access-Control-Allow-Credentials")
+			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			http.Error(w, `{"error":"app server unreachable"}`, http.StatusBadGateway)

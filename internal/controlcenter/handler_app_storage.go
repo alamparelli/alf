@@ -123,11 +123,7 @@ func (h *AppStorageHandler) handleGet(w http.ResponseWriter, r *http.Request, sl
 
 	key := r.URL.Query().Get("key")
 	if key != "" {
-		val, ok := store[key]
-		if !ok {
-			respondJSON(w, http.StatusNotFound, map[string]string{"error": "key not found"})
-			return
-		}
+		val := store[key] // nil if key doesn't exist — that's fine, not an error
 		respondJSON(w, http.StatusOK, map[string]any{"key": key, "value": val})
 		return
 	}

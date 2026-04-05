@@ -85,6 +85,30 @@ func stripToolsSocketHeader(next http.Handler) http.Handler {
 	})
 }
 
+// isAppSubResource returns true if the request is a browser sub-resource load
+// (script, style, image, font, etc.) for an app static file. Sandboxed iframes
+// cannot attach Bearer tokens to these loads, so they are exempted from auth
+// and rate limiting. Security relies on Sec-Fetch-Dest (browser-set, unforgeable)
+// to distinguish sub-resource loads from direct navigation by unauthenticated users.
+func isAppSubResource(r *http.Request) bool {
+	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/apps/") || strings.Contains(r.URL.Path, "/api/") {
+		return false
+	}
+	dest := r.Header.Get("Sec-Fetch-Dest")
+	site := r.Header.Get("Sec-Fetch-Site")
+	// Sub-resource loads: script, style, image, font, audio, video, worker, etc.
+	if dest != "" && dest != "document" && dest != "navigate" {
+		if site == "same-origin" || site == "cross-site" || site == "same-site" || site == "none" {
+			return true
+		}
+	}
+	// Iframe document loads from same origin (parent loading the app).
+	if dest == "iframe" && (site == "same-origin" || site == "same-site") {
+		return true
+	}
+	return false
+}
+
 func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool, extraTokenFns ...func() string) func(http.Handler) http.Handler {
 	return authMiddlewareWithAppTokens(token, sessions, nil, exempt, extraTokenFns...)
 }
@@ -94,6 +118,11 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Exempt paths and CORS preflights (OPTIONS carry no credentials).
 			if exempt[r.URL.Path] || strings.HasPrefix(r.URL.Path, "/static/") || r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Exempt app sub-resource loads from sandboxed iframes.
+			if isAppSubResource(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -665,7 +694,8 @@ func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 		// Never rate-limit static assets, the login page, or health checks — these
 		// must remain reachable even when a misbehaving app floods API endpoints.
 		p := r.URL.Path
-		if r.Method == http.MethodOptions || strings.HasPrefix(p, "/static/") || p == "/" || p == "/health" || p == "/favicon.ico" {
+		if r.Method == http.MethodOptions || strings.HasPrefix(p, "/static/") || p == "/" || p == "/health" || p == "/favicon.ico" ||
+			isAppSubResource(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

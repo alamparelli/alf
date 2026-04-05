@@ -70,6 +70,8 @@
       if (msg.permissions !== undefined) {
         SDK._permissions = msg.permissions;
       }
+      SDK._ready = true;
+      if (SDK._readyResolve) SDK._readyResolve();
       return;
     }
 
@@ -461,6 +463,8 @@
   var SDK = {
     VERSION: '4.0.0',
     _ready: false,
+    _readyPromise: null,
+    _readyResolve: null,
     _slug: null,
     _listeners: {},
     _authFailed: false,
@@ -487,7 +491,8 @@
     init: function(opts) {
       opts = opts || {};
       this._slug = opts.slug || '';
-      this._ready = true;
+      var self2 = this;
+      this._readyPromise = new Promise(function(resolve) { self2._readyResolve = resolve; });
 
       // Bind slug to sub-managers
       StorageManager._slug = this._slug;
@@ -532,15 +537,17 @@
      * @returns {Promise<any>}
      */
     api: function(path, opts) {
-      if (!_ensureReady('api')) return Promise.reject(new Error('SDK not initialized'));
+      if (!this._readyPromise) return Promise.reject(new Error('SDK not initialized — call AlfSDK.init() first'));
       if (this._authFailed) return Promise.reject(new Error('Session expired — reload page'));
-      opts = opts || {};
-      opts.headers = opts.headers || {};
-      opts.headers['X-Requested-With'] = 'XMLHttpRequest';
-      if (_token) {
-        opts.headers['Authorization'] = 'Bearer ' + _token;
-      }
-      return fetch(path, opts).then(function(r) {
+      return this._readyPromise.then(function() {
+        opts = opts || {};
+        opts.headers = opts.headers || {};
+        opts.headers['X-Requested-With'] = 'XMLHttpRequest';
+        if (_token) {
+          opts.headers['Authorization'] = 'Bearer ' + _token;
+        }
+        return fetch(path, opts);
+      }).then(function(r) {
         if (r.status === 401) {
           SDK._authFailed = true;
           SDK.toast('Session expired — reload page to reconnect', 'error');
@@ -557,12 +564,31 @@
     },
 
     /**
+     * Raw authenticated fetch — returns the Response object (not parsed).
+     * Use for binary downloads, streaming, or when you need response headers.
+     * @param {string} path - URL path
+     * @param {Object} [opts] - fetch options
+     * @returns {Promise<Response>}
+     */
+    fetch: function(path, opts) {
+      if (!this._readyPromise) return Promise.reject(new Error('SDK not initialized — call AlfSDK.init() first'));
+      return this._readyPromise.then(function() {
+        opts = opts || {};
+        opts.headers = opts.headers || {};
+        if (_token) {
+          opts.headers['Authorization'] = 'Bearer ' + _token;
+        }
+        return fetch(path, opts);
+      });
+    },
+
+    /**
      * Execute a shell command via /api/bash.
      * @param {string} cmd
      * @returns {Promise<{output: string, exit_code: number, error: string}>}
      */
     bash: function(cmd) {
-      if (!_ensureReady('bash')) return Promise.reject(new Error('SDK not initialized'));
+      if (!this._readyPromise) return Promise.reject(new Error('SDK not initialized — call AlfSDK.init() first'));
       return this.api('/api/bash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -577,7 +603,7 @@
      * @returns {Promise<string>}
      */
     tool: function(action, args) {
-      if (!_ensureReady('tool')) return Promise.reject(new Error('SDK not initialized'));
+      if (!this._readyPromise) return Promise.reject(new Error('SDK not initialized — call AlfSDK.init() first'));
       var slug = this._slug;
       var bin = '/home/alf/data/tools/' + slug;
       var data = '/home/alf/data/apps/' + slug + '/data';
@@ -598,7 +624,7 @@
      * @returns {Promise<any>}
      */
     action: function(targetSlug, actionName, params) {
-      if (!_ensureReady('action')) return Promise.reject(new Error('SDK not initialized'));
+      if (!this._readyPromise) return Promise.reject(new Error('SDK not initialized — call AlfSDK.init() first'));
       return this.api('/api/app-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

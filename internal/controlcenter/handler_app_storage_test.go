@@ -86,14 +86,19 @@ func TestStorageGet_SingleKey(t *testing.T) {
 	}
 }
 
-func TestStorageGet_SingleKey_NotFound(t *testing.T) {
+func TestStorageGet_SingleKey_Missing(t *testing.T) {
 	h := newTestStorageHandler(t)
 	req := httptest.NewRequest("GET", "/api/apps/myapp/storage?key=missing", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for missing key, got %d", rec.Code)
+	}
+	var body map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["value"] != nil {
+		t.Errorf("expected null value for missing key, got %v", body["value"])
 	}
 }
 

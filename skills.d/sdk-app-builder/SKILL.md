@@ -83,8 +83,9 @@ Read the relevant reference file for templates, patterns, and API details:
 - **Follow AIG** — use `alf-ui.css` classes (auto-injected into iframes). Read `reference/AIG.md` for rules, `reference/AIG-COMPONENTS.md` for HTML templates.
 - **Use AlfSDK v4 APIs** — audio, storage, confirm/prompt, haptics, clipboard, badges, viewport, events. See `reference/FRONTEND.md`.
 - CSS variables only (no hardcoded colors), `--space-*` tokens, explicit `font-family`, Lucide SVG icons.
-- No `unsafe-eval` frameworks, no external scripts/stylesheets (CSP blocks them).
+- **Lightweight eval-based frameworks OK** (Alpine.js, Petite Vue) — `unsafe-eval` is in CSP. No build-step frameworks (React, Vue SPA, Angular). No external scripts/stylesheets (CSP blocks them).
 - No `localStorage`, `document.cookie`, or `credentials: 'same-origin'` — iframes are sandboxed. Use `AlfSDK.storage` and `AlfSDK.api()`.
+- **Never use `fetch()` directly** — use `AlfSDK.api()` (returns parsed JSON, throws on non-2xx) or `AlfSDK.fetch()` (returns raw Response, for binary/streaming).
 - External APIs via vault proxy — see `reference/SANDBOX.md`.
 
 ## Final checklist (MANDATORY — run before telling the user "it's ready")

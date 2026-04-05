@@ -1,7 +1,7 @@
 # ALF Component Reference — v3 (Web Components)
 
 All interactive UI uses `<alf-*>` custom elements. They render as light-DOM HTML styled by `alf-ui.css`.
-Auto-loaded via `<script type="module" src="/static/alf-components.js">` (injected automatically).
+Auto-loaded via `<script src="/static/alf-components.js">` (injected automatically).
 
 > **Rule**: Always use `<alf-*>` components. Never manually compose CSS classes for these patterns.
 > CSS utility classes (`.flex`, `.gap-sm`, `.text-dim`, `.hidden`, etc.) are still used for layout and text styling.

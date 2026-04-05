@@ -29,8 +29,8 @@ type PresetRouterConfig struct {
 	Distinctions    string `json:"router_distinctions"`
 }
 
-// loadEmbeddedPresets returns the built-in presets embedded in the binary.
-func loadEmbeddedPresets() map[string][]TierPreset {
+// LoadEmbeddedPresets returns the built-in presets embedded in the binary.
+func LoadEmbeddedPresets() map[string][]TierPreset {
 	result := make(map[string][]TierPreset)
 	entries, err := defaultPresetsFS.ReadDir("defaults/setup-presets")
 	if err != nil {
@@ -56,4 +56,17 @@ func loadEmbeddedPresets() map[string][]TierPreset {
 		result[p.Backend] = append(result[p.Backend], p)
 	}
 	return result
+}
+
+// PresetToTiersConfig converts a TierPreset into a TiersConfig suitable
+// for writing to config.d/tiers/<name>.json.
+func PresetToTiersConfig(p TierPreset) *TiersConfig {
+	tc := &TiersConfig{Tiers: p.Tiers}
+	if p.RouterConfig != nil {
+		tc.RouterModel = p.RouterConfig.RouterModel
+		tc.RouterBackend = p.RouterConfig.RouterBackend
+		tc.DefaultFallback = p.RouterConfig.DefaultFallback
+		tc.RouterDistinctions = p.RouterConfig.Distinctions
+	}
+	return tc
 }

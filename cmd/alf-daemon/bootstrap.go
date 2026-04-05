@@ -77,6 +77,7 @@ func linkSystemTools(toolsDir, srcDir string) {
 
 // seedDefaultTiers copies /opt/alf/defaults/tiers.json into config.d/tiers/claude.json
 // if no tiers profiles exist yet. Also migrates legacy config.d/tiers.json to the new location.
+// Additionally seeds all embedded setup presets as available tier profiles.
 func seedDefaultTiers(configDir string) {
 	tiersDir := filepath.Join(configDir, "tiers")
 	os.MkdirAll(tiersDir, 0o750)
@@ -94,20 +95,49 @@ func seedDefaultTiers(configDir string) {
 		}
 	}
 
-	if _, err := os.Stat(dest); err == nil {
-		return // already exists
+	// Seed default claude.json if missing.
+	if _, err := os.Stat(dest); os.IsNotExist(err) {
+		const defaultPath = "/opt/alf/defaults/tiers.json"
+		data, err := os.ReadFile(defaultPath)
+		if err != nil {
+			log.Printf("seed-tiers: no default at %s: %v", defaultPath, err)
+		} else if err := os.WriteFile(dest, data, 0o644); err != nil {
+			log.Printf("seed-tiers: failed to write %s: %v", dest, err)
+		} else {
+			log.Printf("seed-tiers: created %s from defaults", dest)
+		}
 	}
-	const defaultPath = "/opt/alf/defaults/tiers.json"
-	data, err := os.ReadFile(defaultPath)
-	if err != nil {
-		log.Printf("seed-tiers: no default at %s: %v", defaultPath, err)
-		return
+
+	// Seed embedded presets as tier profiles (skip if already exists).
+	seedPresetsAsTierProfiles(tiersDir)
+}
+
+// seedPresetsAsTierProfiles converts embedded setup presets into tier profile files
+// in config.d/tiers/. Each preset is written as <id>.json with the TiersConfig format.
+// Existing profiles are not overwritten.
+func seedPresetsAsTierProfiles(tiersDir string) {
+	for _, presets := range cc.LoadEmbeddedPresets() {
+		for _, p := range presets {
+			if p.ID == "" {
+				continue
+			}
+			dest := filepath.Join(tiersDir, p.ID+".json")
+			if _, err := os.Stat(dest); err == nil {
+				continue // already exists, don't overwrite
+			}
+			tc := cc.PresetToTiersConfig(p)
+			data, err := json.MarshalIndent(tc, "", "  ")
+			if err != nil {
+				log.Printf("seed-tiers: failed to marshal preset %s: %v", p.ID, err)
+				continue
+			}
+			if err := os.WriteFile(dest, data, 0o644); err != nil {
+				log.Printf("seed-tiers: failed to write preset %s: %v", p.ID, err)
+				continue
+			}
+			log.Printf("seed-tiers: seeded preset %s", p.ID)
+		}
 	}
-	if err := os.WriteFile(dest, data, 0o644); err != nil {
-		log.Printf("seed-tiers: failed to write %s: %v", dest, err)
-		return
-	}
-	log.Printf("seed-tiers: created %s from defaults", dest)
 }
 
 // syncClaudeJSON persists .claude.json across container rebuilds.

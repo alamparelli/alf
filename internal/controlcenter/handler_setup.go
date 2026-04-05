@@ -245,7 +245,7 @@ func (h *SetupHandler) handlePresets(w http.ResponseWriter, _ *http.Request) {
 		log.Printf("[setup] warning: failed to load presets: %v", err)
 	}
 	if len(presets) == 0 {
-		presets = loadEmbeddedPresets()
+		presets = LoadEmbeddedPresets()
 	}
 	if presets == nil {
 		presets = make(map[string][]TierPreset)
@@ -536,13 +536,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, jsonErr(err.Error()), http.StatusBadRequest)
 			return
 		}
-		tc := &TiersConfig{Tiers: preset.Tiers}
-		if preset.RouterConfig != nil {
-			tc.RouterModel = preset.RouterConfig.RouterModel
-			tc.RouterBackend = preset.RouterConfig.RouterBackend
-			tc.DefaultFallback = preset.RouterConfig.DefaultFallback
-			tc.RouterDistinctions = preset.RouterConfig.Distinctions
-		}
+		tc := PresetToTiersConfig(*preset)
 
 		// Save as named profile in tiers/ subdirectory.
 		tiersDir := filepath.Join(h.ConfigDir, "tiers")
@@ -635,7 +629,7 @@ func (h *SetupHandler) findPreset(id string) (*TierPreset, error) {
 		}
 	}
 	// Fallback to embedded presets.
-	for _, group := range loadEmbeddedPresets() {
+	for _, group := range LoadEmbeddedPresets() {
 		for i := range group {
 			if group[i].ID == id {
 				return &group[i], nil

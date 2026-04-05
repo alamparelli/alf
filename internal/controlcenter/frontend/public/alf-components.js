@@ -732,13 +732,19 @@ customElements.define('alf-stat', AlfStat);
 // --- alf-tabs ---
 var AlfTabs = class extends HTMLElement {
   static get observedAttributes() { return ['value']; }
-  connectedCallback() { this._render(); }
-  attributeChangedCallback() { this._render(); }
+  connectedCallback() {
+    // Defer render to ensure child alf-tab elements are parsed
+    var self = this;
+    requestAnimationFrame(function() { self._render(); });
+  }
+  attributeChangedCallback() { if (this._rendered) this._render(); }
   _render() {
+    this._rendered = true;
     var self = this;
     var variant = this.getAttribute('variant') || 'filter';
     var val = this.getAttribute('value') || '';
     var tabs = Array.from(this.querySelectorAll('alf-tab'));
+    if (!tabs.length) return; // children not ready yet
     var wrapClass = variant === 'underline' ? 'tab-bar tab-underline' : 'filter-tabs';
     var existing = this.querySelector('._alf-tabs-wrap');
     if (!existing) {

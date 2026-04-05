@@ -96,8 +96,9 @@ var deprecatedSkills = map[string]string{
 	"app-builder": "sdk-app-builder",
 }
 
-// SeedBundledSkills copies embedded skills into the skills.d directory.
-// Existing files are not overwritten (preserves user modifications).
+// SeedBundledSkills syncs embedded skills into the skills.d directory.
+// Files are overwritten to keep bundled skills up-to-date on upgrade.
+// Obsolete files inside bundled skill directories are removed.
 // Deprecated skills are removed first.
 func SeedBundledSkills(dir string) error {
 	skillsDir := filepath.Join(dir, "skills.d")
@@ -105,14 +106,15 @@ func SeedBundledSkills(dir string) error {
 	for old := range deprecatedSkills {
 		os.RemoveAll(filepath.Join(skillsDir, old))
 	}
-	return seedEmbedded(bundledSkillsFS, "bundled_skills", skillsDir)
+	return syncEmbedded(bundledSkillsFS, "bundled_skills", skillsDir)
 }
 
-// SeedBundledAgents copies embedded agent teams into the data/agents/teams directory.
-// Existing files are not overwritten (preserves user modifications).
+// SeedBundledAgents syncs embedded agent teams into the data/agents/teams directory.
+// Files are overwritten to keep bundled agents up-to-date on upgrade.
+// Obsolete files inside bundled agent directories are removed.
 func SeedBundledAgents(dir string) error {
 	agentsDir := filepath.Join(dir, "data", "agents", "teams")
-	return seedEmbedded(bundledAgentsFS, "bundled_agents", agentsDir)
+	return syncEmbedded(bundledAgentsFS, "bundled_agents", agentsDir)
 }
 
 // SeedTiersConfig writes the default tiers.json if it doesn't already exist.
@@ -161,11 +163,20 @@ set -e
 	return os.WriteFile(dest, []byte(content), 0o755)
 }
 
-func seedEmbedded(fsys embed.FS, root, destDir string) error {
+// syncEmbedded writes all files from the embedded FS into destDir,
+// overwriting existing files. Then it removes any files/dirs inside
+// top-level subdirectories that no longer exist in the embed.
+// Only cleans inside known subdirectories (not user-created ones).
+func syncEmbedded(fsys embed.FS, root, destDir string) error {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return err
 	}
-	return fs.WalkDir(fsys, root, func(path string, d fs.DirEntry, err error) error {
+
+	// Collect the set of all embedded relative paths.
+	embedded := make(map[string]bool)
+
+	// Phase 1: write all embedded files (overwrite existing).
+	if err := fs.WalkDir(fsys, root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -173,15 +184,11 @@ func seedEmbedded(fsys embed.FS, root, destDir string) error {
 		if rel == "." {
 			return nil
 		}
+		embedded[rel] = true
 		dest := filepath.Join(destDir, rel)
 
 		if d.IsDir() {
 			return os.MkdirAll(dest, 0o755)
-		}
-
-		// Skip if file already exists.
-		if _, err := os.Stat(dest); err == nil {
-			return nil
 		}
 
 		data, err := fsys.ReadFile(path)
@@ -189,5 +196,42 @@ func seedEmbedded(fsys embed.FS, root, destDir string) error {
 			return err
 		}
 		return os.WriteFile(dest, data, 0o644)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Phase 2: find top-level dirs that came from the embed (bundled items).
+	bundledDirs := make(map[string]bool)
+	entries, err := fs.ReadDir(fsys, root)
+	if err != nil {
+		return nil // no entries to clean
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			bundledDirs[e.Name()] = true
+		}
+	}
+
+	// Phase 3: walk each bundled dir on disk and remove files not in embed.
+	for dir := range bundledDirs {
+		diskDir := filepath.Join(destDir, dir)
+		filepath.WalkDir(diskDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil // skip inaccessible
+			}
+			rel, _ := filepath.Rel(destDir, path)
+			if rel == "." || rel == dir {
+				return nil
+			}
+			if !embedded[rel] {
+				os.RemoveAll(path)
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		})
+	}
+
+	return nil
 }

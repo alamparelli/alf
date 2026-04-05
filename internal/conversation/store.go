@@ -153,7 +153,7 @@ func (s *Store) ordered() []Message {
 }
 
 func (s *Store) appendDisk(msg Message) {
-	f, err := os.OpenFile(s.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(s.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
 		return
 	}

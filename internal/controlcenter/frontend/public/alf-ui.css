@@ -226,6 +226,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   padding: var(--space-md, 16px);
+  margin-bottom: var(--space-md, 16px);
 }
 
 .card-sm { padding: var(--space-sm, 8px) var(--space-md, 16px); }
@@ -246,6 +247,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   overflow: hidden;
+  margin-bottom: var(--space-md, 16px);
 }
 .card-group > *:not(:last-child) {
   border-bottom: 1px solid var(--border);
@@ -718,14 +720,14 @@ body {
   background: var(--border);
   border-radius: var(--radius, 8px);
   overflow: hidden;
-  margin-bottom: var(--space-md, 16px);
+  margin-bottom: var(--space-lg, 24px);
 }
 .stat-grid-2 { grid-template-columns: repeat(2, 1fr); }
 .stat-grid-3 { grid-template-columns: repeat(3, 1fr); }
 .stat-grid-4 { grid-template-columns: repeat(4, 1fr); }
 .stat-item {
   background: var(--bg-card);
-  padding: 16px;
+  padding: var(--space-lg, 24px) var(--space-md, 16px);
 }
 .stat-bar {
   width: 24px;

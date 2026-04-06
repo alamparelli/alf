@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 )
 
 // TaskNativeTool manages agent team tasks and LLM chains.
@@ -46,17 +45,9 @@ func (TaskNativeTool) Schema() ToolSchema {
 					"type":        []string{"string", "null"},
 					"description": "Task objective (required for launch).",
 				},
-				"tier": map[string]any{
-					"type":        []string{"string", "null"},
-					"description": "LLM tier for execution (optional, for launch).",
-				},
 				"team": map[string]any{
 					"type":        []string{"string", "null"},
-					"description": "Team name to run with (optional, enables multi-agent).",
-				},
-				"skills": map[string]any{
-					"type":        []string{"string", "null"},
-					"description": "Comma-separated skill names to inject (optional).",
+					"description": "Team name to run with (optional, forces a specific team).",
 				},
 				"need_validation": map[string]any{
 					"type":        []string{"boolean", "null"},
@@ -86,9 +77,7 @@ func (t TaskNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 		Action         string      `json:"action"`
 		Steps          []ChainStep `json:"steps"`
 		Prompt         string      `json:"prompt"`
-		Tier           string      `json:"tier"`
 		Team           string      `json:"team"`
-		Skills         string      `json:"skills"`
 		NeedValidation bool        `json:"need_validation"`
 		ID             string      `json:"id"`
 		Approved       *bool       `json:"approved"`
@@ -129,17 +118,9 @@ func (t TaskNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 		if args.Prompt == "" {
 			return "", fmt.Errorf("prompt is required for launch")
 		}
-		var skills []string
-		if args.Skills != "" {
-			for _, s := range strings.Split(args.Skills, ",") {
-				skills = append(skills, strings.TrimSpace(s))
-			}
-		}
 		id, err := t.Service.Launch(ctx, TaskLaunchOpts{
 			Prompt:         args.Prompt,
-			Tier:           args.Tier,
 			Team:           args.Team,
-			Skills:         skills,
 			NeedValidation: args.NeedValidation,
 		})
 		if err != nil {

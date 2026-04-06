@@ -26,17 +26,9 @@
         "type": "string",
         "description": "Task objective (required for launch)"
       },
-      "tier": {
-        "type": "string",
-        "description": "LLM tier for execution (optional)"
-      },
       "team": {
         "type": "string",
-        "description": "Team name to run with (optional, enables multi-agent)"
-      },
-      "skills": {
-        "type": "string",
-        "description": "Comma-separated skill names to inject (optional)"
+        "description": "Team name to run with (optional, forces a specific team)"
       },
       "need_validation": {
         "type": "boolean",

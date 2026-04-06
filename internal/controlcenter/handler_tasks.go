@@ -28,8 +28,8 @@ type TasksHandler struct {
 	ResolveModel func(short string) string
 
 	// OnTaskEvent is called when a task reaches a terminal or user-attention state.
-	// Arguments: taskID, status (completed/failed/awaiting_arbitration), summary.
-	OnTaskEvent func(taskID, status, summary string)
+	// Arguments: source (cc/tg), taskID, status (completed/failed/awaiting_arbitration), summary.
+	OnTaskEvent func(source, taskID, status, summary string)
 
 	EventBroker *EventBroker
 }
@@ -101,7 +101,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 			taskID = detail
 		}
 		if h.OnTaskEvent != nil && (phase == "awaiting_arbitration" || phase == "awaiting_approval") {
-			h.OnTaskEvent(taskID, phase, "")
+			h.OnTaskEvent("cc", taskID, phase, "")
 		}
 	}
 
@@ -121,7 +121,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 				summary = summary[:200] + "..."
 			}
 			if meta.Status == "completed" || meta.Status == "failed" || meta.Status == "timeout" {
-				h.OnTaskEvent(meta.ID, meta.Status, summary)
+				h.OnTaskEvent("cc", meta.ID, meta.Status, summary)
 			}
 		}
 		if h.EventBroker != nil {

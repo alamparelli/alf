@@ -368,4 +368,63 @@ func TestTaskTool_Schema(t *testing.T) {
 	if _, ok := props["action"]; !ok {
 		t.Fatal("expected 'action' property in schema")
 	}
+	// Regression: tier and skills should NOT be in schema.
+	if _, ok := props["tier"]; ok {
+		t.Fatal("tier should not be in task schema — agents have their own tiers")
+	}
+	if _, ok := props["skills"]; ok {
+		t.Fatal("skills should not be in task schema — agents have their own skills")
+	}
+	// team should still be present.
+	if _, ok := props["team"]; !ok {
+		t.Fatal("expected 'team' property in schema")
+	}
+}
+
+// Regression: launch with extra tier/skills fields should not error (ignored gracefully).
+func TestTaskTool_LaunchIgnoresExtraFields(t *testing.T) {
+	svc := &mockTaskService{launchID: "task-extra"}
+	tool := TaskNativeTool{Service: svc}
+
+	out, err := tool.Run(context.Background(), `{"action":"launch","prompt":"test","tier":"haiku","skills":"docker"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "task-extra") {
+		t.Fatalf("expected task ID in output, got: %s", out)
+	}
+}
+
+// Regression: chain with {prev} placeholder should inject result.
+func TestTaskTool_ChainWithPrevPlaceholder(t *testing.T) {
+	svc := &mockLLMService{result: "step1 output"}
+	var notified sync.WaitGroup
+	notified.Add(1)
+
+	tool := TaskNativeTool{
+		Service:    &mockTaskService{},
+		LLMService: svc,
+		NotifyFunc: func(_ ChainOrigin, _, _, _ string) { notified.Done() },
+	}
+
+	_, err := tool.Run(context.Background(), `{"action":"chain","steps":[{"tier":"haiku","prompt":"generate"},{"tier":"sonnet","prompt":"transform: {{prev}}"}]}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() { notified.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("chain did not complete in time")
+	}
+
+	calls := svc.getCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", len(calls))
+	}
+	if !strings.Contains(calls[1].Prompt, "chain_result") {
+		t.Fatalf("expected {{prev}} replaced with chain_result, got: %s", calls[1].Prompt)
+	}
 }

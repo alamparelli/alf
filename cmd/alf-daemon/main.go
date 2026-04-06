@@ -698,6 +698,27 @@ func main() {
 	}
 	log.Println("comms engine: initialized for CC channel")
 
+	// notifyChannel sends a text message to the originating channel via the comms engine.
+	// Used by chain/task notifications to route results back to CC, TG, or any future channel.
+	notifyChannel := func(source, text string) {
+		if source == "" {
+			source = "cc"
+		}
+		adapter := commEngine.Adapter(source)
+		if adapter == nil {
+			log.Printf("[notify] no adapter for channel %q, falling back to cc", source)
+			adapter = commEngine.Adapter("cc")
+		}
+		if adapter == nil {
+			log.Printf("[notify] no cc adapter available, dropping message")
+			return
+		}
+		channelID := comms.ChannelID(source + ":0")
+		if _, err := adapter.SendText(channelID, text); err != nil {
+			log.Printf("[notify] %s send failed: %v", source, err)
+		}
+	}
+
 	// Declared early so the signal server closure can reference it.
 	var eventBroker *cc.EventBroker
 
@@ -785,8 +806,8 @@ func main() {
 			// Tag vault service hosts in firewall log.
 			syncVaultHostsToFirewall(vaultMgr, fwProxy)
 		}
-		// Task event callback: notify via CC chat store (system message).
-		onTaskEvent := func(taskID, status, summary string) {
+		// Task event callback: route notification to originating channel.
+		onTaskEvent := func(source, taskID, status, summary string) {
 			var text string
 			switch status {
 			case "completed":
@@ -803,42 +824,15 @@ func main() {
 			default:
 				return
 			}
-			convID := chatDB.LatestConversationID("cc")
-			if convID == "" {
-				convID = "_system"
-				chatDB.EnsureConversation(convID, "", "cc")
-			}
-			chatDB.InsertMessage(chatdb.Message{
-				ID:     cc.NewMessageID(),
-				ConvID: convID,
-				Role:   "system",
-				Text:   text,
-				Source: "cc",
-			})
-			log.Printf("[tasks] event: task=%s status=%s", taskID[:min(8, len(taskID))], status)
-			// SSE: notify CC frontend so it plays a sound and reloads messages.
-			if eventBroker != nil {
-				preview := text
-				if len(preview) > 200 {
-					preview = preview[:200] + "..."
-				}
-				eventBroker.EmitWithData(cc.EventNewMessage, preview)
-			}
-			// Telegram: push notification for task events.
-			if tg != nil && chatID != "" {
-				tgID, _ := strconv.ParseInt(chatID, 10, 64)
-				if tgID != 0 {
-					if err := tg.SendHTML(tgID, text); err != nil {
-						log.Printf("[tasks] telegram notify failed: %v", err)
-					}
-				}
-			}
+			log.Printf("[tasks] event: task=%s status=%s origin=%s", taskID[:min(8, len(taskID))], status, source)
+			notifyChannel(source, text)
 		}
 		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
 			eventBroker = broker
+			chatService.SetEventBroker(broker)
 			go func() {
 				if err := ccServer.Start(); err != nil && err != http.ErrServerClosed {
 					log.Printf("Control Center error: %v", err)
@@ -906,47 +900,7 @@ func main() {
 			}
 		}
 		log.Printf("[chain] event: chain=%s status=%s origin=%s", short, status, origin.Source)
-
-		// Route result back to the originating channel.
-		source := origin.Source
-		if source == "" {
-			source = "cc" // default fallback
-		}
-
-		switch source {
-		case "tg":
-			if tg != nil && chatID != "" {
-				tgID, _ := strconv.ParseInt(chatID, 10, 64)
-				if tgID != 0 {
-					if err := tg.SendHTML(tgID, text); err != nil {
-						log.Printf("[chain] telegram notify failed: %v", err)
-					}
-				}
-			}
-		default: // "cc" or unknown
-			convID := origin.ConvID
-			if convID == "" {
-				convID = chatDB.LatestConversationID("cc")
-			}
-			if convID == "" {
-				convID = "_system"
-				chatDB.EnsureConversation(convID, "", "cc")
-			}
-			chatDB.InsertMessage(chatdb.Message{
-				ID:     cc.NewMessageID(),
-				ConvID: convID,
-				Role:   "assistant",
-				Text:   text,
-				Source: "cc",
-			})
-			if eventBroker != nil {
-				preview := text
-				if len(preview) > 200 {
-					preview = preview[:200] + "..."
-				}
-				eventBroker.EmitWithData(cc.EventNewMessage, preview)
-			}
-		}
+		notifyChannel(origin.Source, text)
 	}
 
 	systemTools := []tooling.NativeTool{

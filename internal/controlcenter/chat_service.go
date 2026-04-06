@@ -201,7 +201,15 @@ func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, 
 func (cs *ChatService) SetEngine(engine *comms.ChatEngine) {
 	cs.Engine = engine
 	cs.ccAdapter = newCCAdapter()
+	cs.ccAdapter.ChatDB = cs.ChatDB
 	engine.RegisterAdapter(cs.ccAdapter)
+}
+
+// SetEventBroker wires the event broker into the CC adapter for standalone notifications.
+func (cs *ChatService) SetEventBroker(broker *EventBroker) {
+	if cs.ccAdapter != nil {
+		cs.ccAdapter.EventBroker = broker
+	}
 }
 
 // RegisterUpload stores an upload entry for later reference.

@@ -226,7 +226,7 @@ func TestTasksHandler_OnTaskEventCalledOnCompletion(t *testing.T) {
 		Orchestrator: orch,
 		DataDir:      t.TempDir(),
 		ContextDir:   t.TempDir(),
-		OnTaskEvent: func(taskID, status, summary string) {
+		OnTaskEvent: func(source, taskID, status, summary string) {
 			mu.Lock()
 			events = append(events, status)
 			mu.Unlock()

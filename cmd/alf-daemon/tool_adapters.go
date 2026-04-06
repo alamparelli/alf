@@ -38,7 +38,7 @@ type taskAdapter struct {
 	tierStore    cc.TierStore
 	skillStore   skills.Store
 	resolveModel func(short string) string
-	onTaskEvent  func(taskID, status, summary string)
+	onTaskEvent  func(source, taskID, status, summary string)
 }
 
 func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (string, error) {
@@ -46,8 +46,8 @@ func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (
 		return "", errOrchestratorUnavailable
 	}
 
-	// Resolve agent tier config.
-	rc := a.resolveAgentConfig(opts.Tier)
+	// Resolve agent tier config (uses default orchestrator tier).
+	rc := a.resolveAgentConfig("")
 
 	orchPrep := agents.PrepareOrchestration(agents.OrchestrationInputs{
 		UserMessage:          opts.Prompt,
@@ -66,13 +66,11 @@ func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (
 		Team:                 opts.Team,
 	})
 
-	// Inject skill prompts if requested.
-	if len(opts.Skills) > 0 {
-		for _, name := range opts.Skills {
-			if s, ok := a.skillStore.Get(strings.TrimSpace(name)); ok {
-				orchPrep.Config.SkillPrompts = append(orchPrep.Config.SkillPrompts, s.Prompt)
-			}
-		}
+	// Resolve origin source for routing notifications.
+	origin, _ := tooling.ChainOriginFromContext(ctx)
+	source := origin.Source
+	if source == "" {
+		source = "cc"
 	}
 
 	var taskID string
@@ -81,7 +79,7 @@ func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (
 			taskID = detail
 		}
 		if a.onTaskEvent != nil && (phase == "awaiting_arbitration" || phase == "awaiting_approval") {
-			a.onTaskEvent(taskID, phase, "")
+			a.onTaskEvent(source, taskID, phase, "")
 		}
 	}
 
@@ -97,7 +95,7 @@ func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (
 				summary = summary[:200] + "..."
 			}
 			if meta.Status == "completed" || meta.Status == "failed" || meta.Status == "timeout" {
-				a.onTaskEvent(meta.ID, meta.Status, summary)
+				a.onTaskEvent(source, meta.ID, meta.Status, summary)
 			}
 		}
 	}()

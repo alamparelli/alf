@@ -21,9 +21,7 @@ type TaskService interface {
 // TaskLaunchOpts configures a new task launch.
 type TaskLaunchOpts struct {
 	Prompt         string
-	Tier           string
 	Team           string
-	Skills         []string
 	NeedValidation bool
 }
 

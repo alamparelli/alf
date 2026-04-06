@@ -200,10 +200,13 @@ func (t LLMNativeTool) notify(origin ChainOrigin, chainID string, result LLMChai
 	t.NotifyFunc(origin, chainID, status, result.Message)
 }
 
-// InjectChainResult replaces {result} in prompt with the structured chain result.
+// InjectChainResult replaces {result} (and common variants) in prompt with the structured chain result.
 func InjectChainResult(prompt string, result LLMChainResult) string {
 	replacement := fmt.Sprintf("<chain_result status=\"%d\">\n%s\n</chain_result>", result.Status, result.Message)
-	return strings.ReplaceAll(prompt, "{result}", replacement)
+	for _, ph := range []string{"{result}", "{{result}}", "{prev}", "{{prev}}"} {
+		prompt = strings.ReplaceAll(prompt, ph, replacement)
+	}
+	return prompt
 }
 
 // NewChainID generates a random 16-char hex ID for chain tracking.

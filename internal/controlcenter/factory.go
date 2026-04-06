@@ -93,7 +93,7 @@ type Deps struct {
 	AppTokens        *AppTokenStore           // nil if app tokens unavailable
 	Marketplace      *marketplace.Manager   // nil if marketplace unavailable
 	OnVaultUnlock    func()                // called after vault unlock (e.g. secret migration)
-	OnTaskEvent      func(taskID, status, summary string) // called when a task completes or needs attention
+	OnTaskEvent      func(source, taskID, status, summary string) // called when a task completes or needs attention
 	AuthToken        string
 	AllowedOrigin    string // CORS origin allowlist (from externalURL)
 	SecureCookies    bool   // true when CC is behind HTTPS

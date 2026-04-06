@@ -3,6 +3,7 @@ package controlcenter
 import (
 	"sync"
 
+	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/comms"
 )
 
@@ -12,6 +13,10 @@ import (
 type ccAdapter struct {
 	mu       sync.Mutex
 	callback func(ChatEvent)
+
+	// Optional deps for standalone message injection (notifications, chain results).
+	ChatDB      *chatdb.DB
+	EventBroker *EventBroker
 }
 
 func newCCAdapter() *ccAdapter {
@@ -20,8 +25,32 @@ func newCCAdapter() *ccAdapter {
 
 func (a *ccAdapter) Channel() string { return "cc" }
 
-func (a *ccAdapter) SendText(_ comms.ChannelID, _ string) (string, error) {
-	return "", nil // CC doesn't send text directly — uses events
+// SendText injects a standalone message into the CC chat (used for async notifications).
+func (a *ccAdapter) SendText(_ comms.ChannelID, text string) (string, error) {
+	if a.ChatDB == nil {
+		return "", nil
+	}
+	convID := a.ChatDB.LatestConversationID("cc")
+	if convID == "" {
+		convID = "_system"
+		a.ChatDB.EnsureConversation(convID, "", "cc")
+	}
+	msgID := NewMessageID()
+	a.ChatDB.InsertMessage(chatdb.Message{
+		ID:     msgID,
+		ConvID: convID,
+		Role:   "assistant",
+		Text:   text,
+		Source: "cc",
+	})
+	if a.EventBroker != nil {
+		preview := text
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		a.EventBroker.EmitWithData(EventNewMessage, preview)
+	}
+	return msgID, nil
 }
 
 func (a *ccAdapter) SendReaction(_ comms.ChannelID, _ string, _ string) error {

@@ -115,10 +115,14 @@ func handleAction(tool, endpoint string, args []string) {
 
 	case "launch":
 		if tool == "task" {
-			body, _ := json.Marshal(map[string]any{
+			payload := map[string]any{
 				"message":         params["prompt"],
 				"need_validation": params["need_validation"] == "true",
-			})
+			}
+			if t := params["team"]; t != "" {
+				payload["team"] = t
+			}
+			body, _ := json.Marshal(payload)
 			result, err := doPost(endpoint, body)
 			if err != nil {
 				fatal(err)
@@ -436,7 +440,7 @@ func parseFlags(args []string) map[string]string {
 
 func printHelp(name string) {
 	helps := map[string]string{
-		"task":   "Manage agent tasks and LLM chains.\n  task chain --steps '[{\"tier\":\"haiku\",\"prompt\":\"fact\"},{\"tier\":\"sonnet\",\"prompt\":\"tweet: {result}\"}]'\n  task launch --prompt \"objective\" [--tier T] [--team T] [--skills S]\n  task list\n  task cancel <id>\n  task delete <id>\n  task approve <id> --approved true [--feedback F]",
+		"task":   "Manage agent tasks and LLM chains.\n  task chain --steps '[{\"tier\":\"haiku\",\"prompt\":\"fact\"},{\"tier\":\"sonnet\",\"prompt\":\"tweet: {result}\"}]'\n  task launch --prompt \"objective\" [--team T]\n  task list\n  task cancel <id>\n  task delete <id>\n  task approve <id> --approved true [--feedback F]",
 		"team":   "Manage agent teams.\n  team list\n  team get <name>\n  team save --name N --agents '[{\"name\":\"a\",\"tier\":\"haiku\"}]'\n  team delete <name>",
 		"skill":  "Browse skills.\n  skill list\n  skill get <name>",
 		"app":    "Manage apps.\n  app list\n  app catalog\n  app install <slug>\n  app enable/disable/uninstall <slug>",

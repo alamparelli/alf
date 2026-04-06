@@ -371,6 +371,28 @@ func TestInjectChainResult_NoPlaceholder(t *testing.T) {
 	}
 }
 
+func TestInjectChainResult_VariantPlaceholders(t *testing.T) {
+	result := LLMChainResult{Status: 200, Message: "data"}
+	expected := "<chain_result status=\"200\">\ndata\n</chain_result>"
+
+	tests := []struct {
+		name   string
+		prompt string
+	}{
+		{"double_braces_result", "Process: {{result}}"},
+		{"single_braces_prev", "Process: {prev}"},
+		{"double_braces_prev", "Process: {{prev}}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := InjectChainResult(tt.prompt, result)
+			if !strings.Contains(got, expected) {
+				t.Fatalf("expected placeholder replaced in %q, got: %s", tt.prompt, got)
+			}
+		})
+	}
+}
+
 func TestErrorToChainResult(t *testing.T) {
 	tests := []struct {
 		err    string

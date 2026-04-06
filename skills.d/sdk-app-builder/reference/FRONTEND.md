@@ -41,6 +41,8 @@ AlfSDK.updateSheet(html)               // Update sheet content without closing
 AlfSDK.closeSheet()                    // Close current sheet
 
 // Storage (server-side, persists across updates)
+// On-disk location: data/apps/{slug}/data/storage.json (JSON key-value file)
+// The LLM can read/debug app data directly: cat ~/data/apps/{slug}/data/storage.json
 AlfSDK.storage.get(key?)               // Get value or full store
 AlfSDK.storage.set(key, value)         // Set value (or pass object for batch)
 AlfSDK.storage.remove(key)             // Delete key

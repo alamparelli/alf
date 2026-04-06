@@ -77,7 +77,7 @@ Read the relevant reference file for templates, patterns, and API details:
 - `go.mod` — with all dependencies declared **(only if Go backend)**
 
 ### Data storage
-- **Frontend-only apps**: use `AlfSDK.storage` (server-side key-value, persists across updates)
+- **Frontend-only apps**: use `AlfSDK.storage` (server-side key-value, persists across updates). On-disk: `data/apps/{slug}/data/storage.json` — readable directly via `cat`
 - **Go apps**: SQLite only (`modernc.org/sqlite`), database in `data/<slug>.db`, WAL mode, `SetMaxOpenConns(1)`
 
 ### Frontend rules

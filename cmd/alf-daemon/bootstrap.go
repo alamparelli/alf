@@ -95,7 +95,12 @@ func seedDefaultTiers(configDir string) {
 		}
 	}
 
-	// Seed default claude.json if missing.
+	// Seed embedded presets as tier profiles (skip if already exists).
+	// This runs first so the "claude" preset seeds claude.json correctly.
+	seedPresetsAsTierProfiles(tiersDir)
+
+	// Seed default claude.json from legacy defaults if still missing
+	// (only applies when no "claude" preset exists in embedded presets).
 	if _, err := os.Stat(dest); os.IsNotExist(err) {
 		const defaultPath = "/opt/alf/defaults/tiers.json"
 		data, err := os.ReadFile(defaultPath)
@@ -107,9 +112,6 @@ func seedDefaultTiers(configDir string) {
 			log.Printf("seed-tiers: created %s from defaults", dest)
 		}
 	}
-
-	// Seed embedded presets as tier profiles (skip if already exists).
-	seedPresetsAsTierProfiles(tiersDir)
 }
 
 // seedPresetsAsTierProfiles converts embedded setup presets into tier profile files

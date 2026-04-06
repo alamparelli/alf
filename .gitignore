@@ -36,9 +36,15 @@ user-space/
 
 # Local dev (docker compose build+up)
 docker-compose.yml
+dev-alf
 dev-secrets/
 dev-data/
+dev-config.d/
+dev-skills.d/
+dev-vault-data/
+dev-cache/
 dev-claude-session/
+secrets
 
 # Private (not for public repo)
 .claude/

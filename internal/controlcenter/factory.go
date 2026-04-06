@@ -397,6 +397,7 @@ func HandlerFactory(deps Deps) Handlers {
 		Vault:         deps.VaultManager,
 		PresetsDir:    filepath.Join(deps.ConfigDir, "setup-presets"),
 		Notifier:      deps.Notifier,
+		EventBroker:   deps.EventBroker,
 		ConfigDir:     deps.ConfigDir,
 		OnVaultUnlock: deps.OnVaultUnlock,
 		DataDir:       deps.DataDir,

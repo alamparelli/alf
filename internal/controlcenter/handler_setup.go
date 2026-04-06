@@ -74,14 +74,15 @@ func validateBaseURL(raw string) error {
 
 // SetupHandler serves the setup wizard API endpoints.
 type SetupHandler struct {
-	ConfigStore ConfigStore
-	TierStore   TierStore
-	Vault       *vault.Manager // nil-safe
-	PresetsDir  string         // path to config.d/setup-presets/
-	Notifier    Notifier       // nil-safe — for reload events
-	ConfigDir   string         // config.d/ path — for tiers file resolution
-	OnVaultUnlock func()       // nil-safe — called after vault unlock (secret migration)
-	DataDir     string         // data dir — for toolbox regeneration
+	ConfigStore  ConfigStore
+	TierStore    TierStore
+	Vault        *vault.Manager // nil-safe
+	PresetsDir   string         // path to config.d/setup-presets/
+	Notifier     Notifier       // nil-safe — for reload events
+	EventBroker  *EventBroker   // nil-safe — for SSE events to frontend
+	ConfigDir    string         // config.d/ path — for tiers file resolution
+	OnVaultUnlock func()        // nil-safe — called after vault unlock (secret migration)
+	DataDir      string         // data dir — for toolbox regeneration
 }
 
 func (h *SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -391,6 +392,7 @@ type setupApplyRequest struct {
 	Backends      map[string]setupBackend `json:"backends,omitempty"`
 	Telegram      *setupTelegram          `json:"telegram,omitempty"`
 	PresetID      string                  `json:"preset_id,omitempty"`
+	TierConfig    string                  `json:"tier_config,omitempty"` // existing config filename, e.g. "claude.json"
 	Timezone      string                  `json:"timezone,omitempty"`
 	VaultPassword string                  `json:"vault_password,omitempty"`
 }
@@ -528,9 +530,31 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 		configChanged = true
 	}
 
-	// Write tiers config from preset into config.d/tiers/<name>.json and switch to it.
+	// Switch to an existing tier config if specified.
 	tiersChanged := false
-	if req.PresetID != "" {
+	if req.TierConfig != "" {
+		tiersDir := filepath.Join(h.ConfigDir, "tiers")
+		profilePath := filepath.Join(tiersDir, req.TierConfig)
+		if _, err := os.Stat(profilePath); err != nil {
+			http.Error(w, jsonErr("tier config not found: "+req.TierConfig), http.StatusBadRequest)
+			return
+		}
+		if tierCfg, err := h.ConfigStore.Load(); err == nil {
+			tierCfg.TiersFile = req.TierConfig
+			if err := h.ConfigStore.Save(tierCfg); err != nil {
+				log.Printf("[setup] warning: failed to update tiers_file in config: %v", err)
+			}
+		}
+		if err := h.TierStore.SetPath(profilePath); err != nil {
+			http.Error(w, jsonErr("failed to switch tiers: "+err.Error()), http.StatusInternalServerError)
+			return
+		}
+		tiersChanged = true
+		log.Printf("[setup] switched to existing tier config %s", req.TierConfig)
+	}
+
+	// Write tiers config from preset into config.d/tiers/<name>.json and switch to it.
+	if !tiersChanged && req.PresetID != "" {
 		preset, err := h.findPreset(req.PresetID)
 		if err != nil {
 			http.Error(w, jsonErr(err.Error()), http.StatusBadRequest)
@@ -586,6 +610,15 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 		}
 		if tiersChanged {
 			h.Notifier.Notify(ReloadTiers)
+		}
+	}
+	// Emit SSE events so the frontend (chat, tiers tab) updates live.
+	if h.EventBroker != nil {
+		if configChanged {
+			h.EventBroker.Emit(EventConfig)
+		}
+		if tiersChanged {
+			h.EventBroker.Emit(EventTiers)
 		}
 	}
 

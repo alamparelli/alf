@@ -310,14 +310,26 @@
     id: string; name: string; description: string; backend: string
     tiers: { name: string; model: string; priority: number }[]
   }
+  interface TierConfig {
+    name: string; path: string; active: boolean; tiers: number
+  }
+
+  // Default preset per backend — auto-selected when user picks a backend.
+  const DEFAULT_PRESET: Record<string, string> = {
+    cli: 'claude',
+    codex: 'codex-standard',
+    openrouter: 'grok-standard',
+  }
 
   let presets = $state<Preset[]>([])
+  let existingConfigs = $state<TierConfig[]>([])
   let selectedPreset = $state('')
   let presetsLoading = $state(false)
 
   async function loadPresets() {
     presetsLoading = true
     try {
+      // Load presets for selected backends.
       const d = await api<any>('/api/setup/presets')
       const all: Preset[] = []
       for (const [backend, arr] of Object.entries(d.presets || {})) {
@@ -326,7 +338,25 @@
         }
       }
       presets = all
-      if (all.length > 0 && !selectedPreset) selectedPreset = all[0].id
+
+      // Load existing tier configs from config.d/tiers/.
+      try {
+        const configs = await api<TierConfig[]>('/api/tiers/configs')
+        existingConfigs = Array.isArray(configs) ? configs : []
+      } catch { existingConfigs = [] }
+
+      // Auto-select the default preset for the first selected backend.
+      if (!selectedPreset) {
+        for (const backend of selectedBackends) {
+          const defaultId = DEFAULT_PRESET[backend]
+          if (defaultId && all.find(p => p.id === defaultId)) {
+            selectedPreset = defaultId
+            break
+          }
+        }
+        // Fallback to first preset if no default matched.
+        if (!selectedPreset && all.length > 0) selectedPreset = all[0].id
+      }
     } catch { presets = [] }
     presetsLoading = false
   }
@@ -386,7 +416,13 @@
     if (tgEnabled && tgToken && tgChatId) {
       body.telegram = { bot_token: tgToken, chat_id: tgChatId }
     }
-    if (selectedPreset) body.preset_id = selectedPreset
+    if (selectedPreset) {
+      if (selectedPreset.startsWith('config:')) {
+        body.tier_config = selectedPreset.slice(7) + '.json'
+      } else {
+        body.preset_id = selectedPreset
+      }
+    }
     if (vaultNeedsPassword && vaultPassword) body.vault_password = vaultPassword
 
     try {
@@ -703,36 +739,54 @@
     <!-- Step 2: Tiers -->
     {#if step === 2}
       <div class="step-content">
-        <p class="step-desc">Choose a tier preset or keep your current configuration.</p>
+        <p class="step-desc">Choose a tier profile for your backend.</p>
 
         {#if presetsLoading}
-          <p class="step-desc">Loading presets...</p>
+          <p class="step-desc">Loading profiles...</p>
         {:else}
-          <div class="preset-list">
-            {#each presets as p}
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <div class="preset-option" class:selected={selectedPreset === p.id} onclick={() => selectedPreset = p.id}>
-                <h4>{p.name}</h4>
-                <p>{p.description}</p>
-                {#if p.tiers?.length}
-                  <div class="preset-preview">
-                    <table>
-                      <thead><tr><th>Tier</th><th>Model</th><th>Priority</th></tr></thead>
-                      <tbody>
-                        {#each p.tiers as t}
-                          <tr><td>{t.name}</td><td>{t.model}</td><td>{t.priority}</td></tr>
-                        {/each}
-                      </tbody>
-                    </table>
-                  </div>
-                {/if}
-              </div>
-            {/each}
+          {#if presets.length > 0}
+            <h4 class="tier-section-title">Recommended</h4>
+            <div class="preset-list">
+              {#each presets as p}
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                <div class="preset-option" class:selected={selectedPreset === p.id} onclick={() => selectedPreset = p.id}>
+                  <h4>{p.name}</h4>
+                  <p>{p.description}</p>
+                  {#if p.tiers?.length}
+                    <div class="preset-preview">
+                      <table>
+                        <thead><tr><th>Tier</th><th>Model</th><th>Priority</th></tr></thead>
+                        <tbody>
+                          {#each p.tiers as t}
+                            <tr><td>{t.name}</td><td>{t.model}</td><td>{t.priority}</td></tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
 
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          {#if existingConfigs.length > 0}
+            <h4 class="tier-section-title">Existing profiles</h4>
+            <div class="preset-list">
+              {#each existingConfigs as cfg}
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                <div class="preset-option" class:selected={selectedPreset === `config:${cfg.name}`} onclick={() => selectedPreset = `config:${cfg.name}`}>
+                  <h4>{cfg.name}{cfg.active ? ' (active)' : ''}</h4>
+                  <p>{cfg.tiers} tier{cfg.tiers !== 1 ? 's' : ''} configured</p>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div class="preset-list" style="margin-top: 8px">
             <div class="preset-option" class:selected={selectedPreset === ''} onclick={() => selectedPreset = ''}>
-              <h4>Keep current tiers</h4>
-              <p>{presets.length === 0 ? 'No presets available for your selected backends. Your current tier configuration will be preserved.' : 'Preserve your existing tier configuration.'}</p>
+              <h4>Keep current</h4>
+              <p>Preserve your existing tier configuration.</p>
             </div>
           </div>
         {/if}
@@ -749,7 +803,7 @@
           <dt>Telegram</dt>
           <dd>{tgEnabled ? 'Enabled' : 'Skipped'}</dd>
           <dt>Tiers</dt>
-          <dd>{selectedPreset ? `Preset: ${selectedPreset}` : 'Keep current'}</dd>
+          <dd>{selectedPreset ? (selectedPreset.startsWith('config:') ? `Profile: ${selectedPreset.slice(7)}` : `Preset: ${selectedPreset}`) : 'Keep current'}</dd>
         </dl>
 
         <!-- Claude auth hints -->
@@ -1126,6 +1180,8 @@
   .chatid-row input { flex: 1; }
 
   /* Presets */
+  .tier-section-title { margin: 12px 0 6px; font-size: var(--font-sm, 13px); color: var(--text-dim); font-weight: 500; }
+  .tier-section-title:first-child { margin-top: 0; }
   .preset-list { display: flex; flex-direction: column; gap: 10px; }
 
   .preset-option {

@@ -350,16 +350,16 @@ func TestTaskTool_ChainStepError(t *testing.T) {
 
 func TestTaskTool_ToolName(t *testing.T) {
 	tool := TaskNativeTool{}
-	if tool.ToolName() != "agent_task" {
-		t.Fatalf("expected 'agent_task', got %q", tool.ToolName())
+	if tool.ToolName() != "task" {
+		t.Fatalf("expected 'task', got %q", tool.ToolName())
 	}
 }
 
 func TestTaskTool_Schema(t *testing.T) {
 	tool := TaskNativeTool{}
 	s := tool.Schema()
-	if s.Name != "agent_task" {
-		t.Fatalf("expected schema name 'agent_task', got %q", s.Name)
+	if s.Name != "task" {
+		t.Fatalf("expected schema name 'task', got %q", s.Name)
 	}
 	props, ok := s.Parameters["properties"].(map[string]any)
 	if !ok {

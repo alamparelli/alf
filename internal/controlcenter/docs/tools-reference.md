@@ -127,7 +127,7 @@ llm <tier> "Summarize this document in 3 bullets: ..."
 llm <tier> "Translate to French: Hello world" --system "You are a professional translator"
 ```
 
-For async multi-step pipelines, use `agent_task chain` instead.
+For async multi-step pipelines, use `task chain` instead.
 
 | Flag | Required | Description |
 |------|----------|-------------|
@@ -135,9 +135,9 @@ For async multi-step pipelines, use `agent_task chain` instead.
 | `prompt` | Yes | The prompt to send |
 | `--system` | No | Optional system prompt for persona or constraints |
 
-> **Legacy:** `llm` also supports `--fire-and-forget` with `--on-complete` for backward compatibility, but `agent_task chain` is preferred for its simpler flat schema.
+> **Legacy:** `llm` also supports `--fire-and-forget` with `--on-complete` for backward compatibility, but `task chain` is preferred for its simpler flat schema.
 
-### agent_task
+### task
 
 Run background work: multi-agent team tasks or LLM chains.
 
@@ -175,7 +175,7 @@ Use `{result}` in a step's prompt to inject the previous step's output (wrapped 
 Launch a background team task with tool access for autonomous multi-step work.
 
 ```bash
-agent_task launch --prompt "implement feature X" --tier sonnet --team content
+task launch --prompt "implement feature X" --tier sonnet --team content
 ```
 
 | Flag | Required | Description |

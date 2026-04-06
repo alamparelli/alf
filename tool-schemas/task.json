@@ -1,13 +1,26 @@
 {
   "name": "task",
-  "description": "Launch, list, cancel, or approve autonomous agent tasks. Tasks run in the background and can use teams for multi-agent orchestration.",
+  "description": "Run background work: LLM chains or multi-agent team tasks. Use action 'chain' to run a sequence of LLM calls (e.g. generate then transform). Use action 'launch' for multi-agent team delegation. NOT for simple one-shot LLM calls — use the llm tool for that.",
   "parameters": {
     "type": "object",
     "properties": {
       "action": {
         "type": "string",
-        "enum": ["launch", "list", "cancel", "delete", "approve"],
-        "description": "Action to perform"
+        "enum": ["chain", "launch", "list", "cancel", "delete", "approve"],
+        "description": "Action to perform. Use 'chain' for sequential LLM pipeline, 'launch' for team task."
+      },
+      "steps": {
+        "type": "array",
+        "description": "Ordered list of LLM steps for chain action. Each step has tier, prompt, and optional system. Use {result} in prompt to inject previous step's output.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "tier": { "type": "string", "description": "LLM tier name to use for this step." },
+            "prompt": { "type": "string", "description": "Prompt for this step. Use {result} to reference previous step's output." },
+            "system": { "type": "string", "description": "Optional system prompt." }
+          },
+          "required": ["tier", "prompt"]
+        }
       },
       "prompt": {
         "type": "string",

@@ -15,11 +15,11 @@ type TaskNativeTool struct {
 	NotifyFunc func(origin ChainOrigin, chainID, status, message string)
 }
 
-func (TaskNativeTool) ToolName() string { return "agent_task" }
+func (TaskNativeTool) ToolName() string { return "task" }
 
 func (TaskNativeTool) Schema() ToolSchema {
 	return ToolSchema{
-		Name:        "agent_task",
+		Name:        "task",
 		Description: "Run background work: multi-agent team tasks OR LLM chains. Use action 'chain' to run a sequence of LLM calls (e.g. generate then transform). Use action 'launch' for multi-agent team delegation. NOT for simple one-shot LLM calls — use the llm tool for that.",
 		Parameters: map[string]any{
 			"type": "object",

@@ -13,6 +13,7 @@ import (
 // — only safe, read-oriented or tool-specific endpoints are permitted.
 var allowedToolsPaths = map[string]bool{
 	"/api/tasks":             true, // task list/launch/get/cancel
+	"/api/tasks/chain":       true, // task chain (fire-and-forget LLM pipeline)
 	"/api/teams":             true, // team list/get
 	"/api/skills/catalog":    true, // skill list
 	"/api/tiers":             true, // tier list (read-only)

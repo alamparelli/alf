@@ -432,6 +432,12 @@ func HandlerFactory(deps Deps) Handlers {
 			llmHandler.CurrentConvID = deps.ChatService.CurrentConvID
 		}
 		mux.Handle("/api/llm/invoke", llmHandler)
+
+		chainHandler := &ChainHandler{ToolRegistry: deps.ToolRegistry}
+		if deps.ChatService != nil {
+			chainHandler.CurrentConvID = deps.ChatService.CurrentConvID
+		}
+		mux.Handle("/api/tasks/chain", chainHandler)
 	}
 
 	// Developer tools (publish to marketplace, validate, etc.)

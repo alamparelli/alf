@@ -86,6 +86,24 @@ func handleAction(tool, endpoint string, args []string) {
 		}
 		fmt.Println(result)
 
+	case "chain":
+		if tool == "task" {
+			stepsJSON := params["steps"]
+			if stepsJSON == "" {
+				fatal(fmt.Errorf("--steps is required for chain (JSON array of {tier, prompt})"))
+			}
+			var steps []map[string]string
+			if err := json.Unmarshal([]byte(stepsJSON), &steps); err != nil {
+				fatal(fmt.Errorf("invalid --steps JSON: %w", err))
+			}
+			body, _ := json.Marshal(map[string]any{"steps": steps})
+			result, err := doPost("/api/tasks/chain", body)
+			if err != nil {
+				fatal(err)
+			}
+			fmt.Println(result)
+		}
+
 	case "launch":
 		if tool == "task" {
 			body, _ := json.Marshal(map[string]any{
@@ -409,7 +427,7 @@ func parseFlags(args []string) map[string]string {
 
 func printHelp(name string) {
 	helps := map[string]string{
-		"task":   "Manage agent tasks.\n  task launch --prompt \"objective\" [--tier T] [--team T] [--skills S]\n  task list\n  task cancel <id>\n  task delete <id>\n  task approve <id> --approved true [--feedback F]",
+		"task":   "Manage agent tasks and LLM chains.\n  task chain --steps '[{\"tier\":\"haiku\",\"prompt\":\"fact\"},{\"tier\":\"sonnet\",\"prompt\":\"tweet: {result}\"}]'\n  task launch --prompt \"objective\" [--tier T] [--team T] [--skills S]\n  task list\n  task cancel <id>\n  task delete <id>\n  task approve <id> --approved true [--feedback F]",
 		"team":   "Manage agent teams.\n  team list\n  team get <name>\n  team save --name N --agents '[{\"name\":\"a\",\"tier\":\"haiku\"}]'\n  team delete <name>",
 		"skill":  "Browse skills.\n  skill list\n  skill get <name>",
 		"app":    "Manage apps.\n  app list\n  app catalog\n  app install <slug>\n  app enable/disable/uninstall <slug>",

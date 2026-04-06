@@ -8,6 +8,11 @@
 :root {
   --page-padding: 2.5rem;
   --page-padding-top: calc(2.5rem + env(safe-area-inset-top, 0px));
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
 }
 
 /* ── Reset & Base ──────────────────────────────────────────────────────── */
@@ -1294,7 +1299,7 @@ a:hover { text-decoration: underline; }
 .workspace-sidebar-body {
   flex: 1;
   overflow-y: auto;
-  padding: 0 var(--space-sm, 8px) var(--space-sm, 8px);
+  padding: var(--space-sm, 8px);
 }
 .workspace-sidebar-footer {
   padding: var(--space-sm, 8px);

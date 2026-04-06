@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
-  import { X, MessageCircle, RotateCw, Play } from 'lucide-svelte'
+  import { X, MessageCircle, RotateCw, Play, ChevronsDownUp, ChevronsUpDown } from 'lucide-svelte'
   import ChatMessageComponent from '../components/chat/ChatMessage.svelte'
   import ChatInput from '../components/chat/ChatInput.svelte'
   import Modal from '../components/shared/Modal.svelte'
@@ -72,6 +72,7 @@
   let tiers = $state<Tier[]>([])
   let messagesContainer: HTMLDivElement
   let selectedTier = $state(localStorage.getItem('alf-chat-tier') || '')
+  let collapseBlocks = $state(localStorage.getItem('alf-chat-collapse') !== 'false')
   let streamingBlocks = $state<any[]>([])
   let streamingText = $state('')
   let stoppedByUser = false
@@ -666,6 +667,17 @@
       <RotateCw size={14} />
       <span>New</span>
     </button>
+    <button
+      class="collapse-toggle-btn"
+      onclick={() => { collapseBlocks = !collapseBlocks; localStorage.setItem('alf-chat-collapse', String(collapseBlocks)) }}
+      title={collapseBlocks ? 'Expand all blocks' : 'Collapse all blocks'}
+    >
+      {#if collapseBlocks}
+        <ChevronsUpDown size={18} />
+      {:else}
+        <ChevronsDownUp size={18} />
+      {/if}
+    </button>
   </div>
 
   <!-- Messages -->
@@ -683,7 +695,11 @@
 
     {#each messages as msg (msg.id)}
       {#if msg.role === 'assistant' && msg.content_blocks && msg.content_blocks.length > 1}
-        {@const visibleBlocks = msg.content_blocks.filter(b => b.type !== 'text' || (b.text && b.text.trim()))}
+        {@const visibleBlocks = msg.content_blocks.filter(b => {
+          if (b.type === 'text') return b.text && b.text.trim()
+          if (b.type === 'tool_result') return (b.content || b.text || '').trim()
+          return true
+        })}
         {#each visibleBlocks as block, bi (bi)}
           {@const isLast = bi === visibleBlocks.length - 1}
           <ChatMessageComponent
@@ -701,11 +717,12 @@
               reactions: isLast ? msg.reactions : undefined,
             }}
             {convId}
+            {collapseBlocks}
             onSendToTask={isLast ? openAgentModal : undefined}
           />
         {/each}
       {:else}
-        <ChatMessageComponent {msg} {convId} onSendToTask={openAgentModal} />
+        <ChatMessageComponent {msg} {convId} {collapseBlocks} onSendToTask={openAgentModal} />
       {/if}
     {/each}
 
@@ -721,6 +738,7 @@
             content_blocks: [block],
           }}
           {convId}
+          {collapseBlocks}
         />
       {/each}
     {:else if sending}
@@ -813,6 +831,26 @@
   }
 
   .new-conv-btn:hover {
+    background: var(--bg-input);
+    color: var(--text);
+  }
+
+  .collapse-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-dim);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+
+  .collapse-toggle-btn:hover {
     background: var(--bg-input);
     color: var(--text);
   }

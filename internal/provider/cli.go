@@ -231,14 +231,15 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	}
 
 	var (
-		resultText   strings.Builder
-		lastEvent    json.RawMessage
-		inThinking   bool
-		eventCount   int
-		firstEvent   bool
-		curToolName  string
-		curToolID    string
-		curToolInput strings.Builder
+		resultText      strings.Builder
+		lastEvent       json.RawMessage
+		inThinking      bool
+		hadStreamBlocks bool // true once we get content_block_start events
+		eventCount      int
+		firstEvent      bool
+		curToolName     string
+		curToolID       string
+		curToolInput    strings.Builder
 	)
 	_ = curToolID // used in progress callback
 
@@ -364,9 +365,12 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		if event.Type == "stream_event" {
 			evtType = event.Event.Type
 		}
-		// Parse "assistant" messages — Claude CLI emits these with content blocks
-		// for thinking, tool_use, tool_result, and text that aren't in stream_events.
-		if event.Type == "assistant" && onProgress != nil {
+		// Parse "assistant" summary events as fallback only when we haven't
+		// received streaming content_block events. When streaming is active,
+		// blocks arrive via content_block_start/delta/stop + tool_result in
+		// correct temporal order. The "assistant" event would duplicate them
+		// and lose tool_results.
+		if event.Type == "assistant" && onProgress != nil && !hadStreamBlocks {
 			var assistantMsg struct {
 				Message struct {
 					Content []struct {
@@ -415,12 +419,14 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 			switch {
 			// content_block_start: thinking - emit for each new thinking block
 			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "thinking":
+				hadStreamBlocks = true
 				if !inThinking {
 					onProgress(StreamEvent{Type: "thinking"})
 					inThinking = true
 				}
 			// content_block_start: tool_use
 			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "tool_use":
+				hadStreamBlocks = true
 				inThinking = false // end any open thinking block
 				curToolName = event.Event.ContentBlock.Name
 				curToolID = event.Event.ContentBlock.ID
@@ -447,6 +453,7 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 				onProgress(StreamEvent{Type: "text_delta", Text: event.Event.Delta.Text})
 			// content_block_start: text - reset thinking state
 			case evtType == "content_block_start" && event.Event.ContentBlock.Type == "text":
+				hadStreamBlocks = true
 				inThinking = false
 			// content_block_stop
 			case evtType == "content_block_stop":

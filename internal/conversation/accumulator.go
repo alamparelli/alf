@@ -51,12 +51,14 @@ func (a *Accumulator) processEvent(event provider.StreamEvent) {
 			// Thinking delta - accumulate.
 			if !a.inThinking {
 				a.flushText()
+				a.flushTool()
 				a.inThinking = true
 			}
 			a.curThinking.WriteString(event.Text)
 		} else {
 			// Thinking block start (no text).
 			a.flushText()
+			a.flushTool()
 			a.inThinking = true
 		}
 
@@ -64,15 +66,17 @@ func (a *Accumulator) processEvent(event provider.StreamEvent) {
 		if a.inThinking {
 			a.flushThinking()
 		}
+		a.flushTool()
 		if !a.inText {
 			a.inText = true
 		}
 		a.curText.WriteString(event.Text)
 
 	case "tool_use":
-		// New tool_use block starting.
+		// New tool_use block starting — flush any pending tool first.
 		a.flushThinking()
 		a.flushText()
+		a.flushTool()
 		a.curToolName = event.Detail
 		a.curToolID = ""
 		a.curToolInput.Reset()
@@ -149,17 +153,8 @@ func (a *Accumulator) flushText() {
 	a.inText = false
 }
 
-// Blocks returns the captured content blocks and flushes any pending state.
-// Call this after the provider invocation completes.
-func (a *Accumulator) Blocks() []ContentBlock {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	// Flush any remaining state.
-	a.flushThinking()
-	a.flushText()
-
-	// If there's a pending tool_use without a result, flush it.
+// flushTool finalizes any pending tool_use block.
+func (a *Accumulator) flushTool() {
 	if a.curToolName != "" {
 		a.blocks = append(a.blocks, ContentBlock{
 			Type:   BlockToolUse,
@@ -170,6 +165,17 @@ func (a *Accumulator) Blocks() []ContentBlock {
 		a.curToolName = ""
 		a.curToolInput.Reset()
 	}
+}
+
+// Blocks returns the captured content blocks and flushes any pending state.
+// Call this after the provider invocation completes.
+func (a *Accumulator) Blocks() []ContentBlock {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.flushThinking()
+	a.flushText()
+	a.flushTool()
 
 	result := make([]ContentBlock, len(a.blocks))
 	copy(result, a.blocks)

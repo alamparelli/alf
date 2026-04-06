@@ -45,10 +45,11 @@
       content_blocks?: ContentBlock[]
     }
     convId: string
+    collapseBlocks?: boolean
     onSendToTask?: (text: string) => void
   }
 
-  let { msg, convId, onSendToTask }: Props = $props()
+  let { msg, convId, collapseBlocks = true, onSendToTask }: Props = $props()
 
   let showEmojiPicker = $state(false)
   let copied = $state(false)
@@ -91,7 +92,7 @@
 
   function isExpanded(idx: number): boolean {
     if (idx in expandedBlocks) return expandedBlocks[idx]
-    return isStreaming // auto-expand during streaming
+    return !collapseBlocks
   }
 
   function fixPipeTables(text: string): string {

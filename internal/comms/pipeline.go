@@ -855,107 +855,33 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			SessionID: result.SessionID,
 		})
 	}
-	// Persist to ChatDB with content blocks.
-	// Split into separate messages at text→tool boundaries so each "step"
-	// appears as its own chat bubble (text + associated tool calls).
+	// Persist to ChatDB with all content blocks in temporal order.
+	// The frontend splits blocks into individual bubbles for display.
 	if e.ChatDB != nil && msg.ConvID != "" {
 		var allBlocks []conversation.ContentBlock
 		if acc != nil {
 			allBlocks = acc.Blocks()
 		}
 
-		// Split blocks into groups: each group starts with text block(s),
-		// followed by optional tool_use/tool_result blocks.
-		// A new group begins when we see a text block after tool blocks.
-		type blockGroup struct {
-			blocks []conversation.ContentBlock
-			text   string // aggregated text for this group
-		}
-		var groups []blockGroup
-		var current blockGroup
-		lastWasTool := false
-
-		for _, b := range allBlocks {
-			isText := b.Type == conversation.BlockText
-			if isText {
-				text := stripReactTags(b.Text)
-				if text == "" {
-					continue
-				}
-				// New group if previous blocks included tools.
-				if lastWasTool && len(current.blocks) > 0 {
-					groups = append(groups, current)
-					current = blockGroup{}
-				}
-				current.blocks = append(current.blocks, conversation.ContentBlock{Type: b.Type, Text: text})
-				if current.text != "" {
-					current.text += "\n"
-				}
-				current.text += text
-				lastWasTool = false
-			} else {
-				current.blocks = append(current.blocks, b)
-				if b.Type == conversation.BlockToolUse || b.Type == conversation.BlockToolResult {
-					lastWasTool = true
-				}
+		var dbBlocks []chatdb.ContentBlock
+		for i, b := range allBlocks {
+			text := b.Text
+			if b.Type == conversation.BlockText {
+				text = stripReactTags(text)
 			}
-		}
-		if len(current.blocks) > 0 {
-			groups = append(groups, current)
-		}
-
-		// Persist each group as a separate assistant message.
-		if len(groups) <= 1 {
-			// Single message — use the original assistantMsgID.
-			var dbBlocks []chatdb.ContentBlock
-			for i, b := range allBlocks {
-				text := b.Text
-				if b.Type == conversation.BlockText {
-					text = stripReactTags(text)
-				}
-				dbBlocks = append(dbBlocks, chatdb.ContentBlock{
-					BlockIndex: i, BlockType: string(b.Type),
-					Text: text, Name: b.Name, Input: b.Input,
-					ToolID: b.ToolID, Output: b.Output,
-				})
-			}
-			e.ChatDB.InsertMessage(chatdb.Message{
-				ID: assistantMsgID, ConvID: msg.ConvID, Role: "assistant",
-				Text: cleanText, Source: msg.Source, Model: result.Model,
-				Tier: route.Tier, CostUSD: result.CostUSD, SessionID: result.SessionID,
-				DurationMs: duration.Milliseconds(), CreatedAt: time.Now(),
-				Blocks: dbBlocks,
+			dbBlocks = append(dbBlocks, chatdb.ContentBlock{
+				BlockIndex: i, BlockType: string(b.Type),
+				Text: text, Name: b.Name, Input: b.Input,
+				ToolID: b.ToolID, Output: b.Output,
 			})
-		} else {
-			now := time.Now()
-			for gi, g := range groups {
-				msgID := assistantMsgID
-				if gi > 0 {
-					msgID = conversation.NewMessageID()
-				}
-				var dbBlocks []chatdb.ContentBlock
-				for i, b := range g.blocks {
-					dbBlocks = append(dbBlocks, chatdb.ContentBlock{
-						BlockIndex: i, BlockType: string(b.Type),
-						Text: b.Text, Name: b.Name, Input: b.Input,
-						ToolID: b.ToolID, Output: b.Output,
-					})
-				}
-				dbMsg := chatdb.Message{
-					ID: msgID, ConvID: msg.ConvID, Role: "assistant",
-					Text: g.text, Source: msg.Source, Model: result.Model,
-					Tier: route.Tier, SessionID: result.SessionID,
-					CreatedAt: now.Add(time.Duration(gi) * time.Millisecond),
-					Blocks: dbBlocks,
-				}
-				// Only set cost/duration on the last message.
-				if gi == len(groups)-1 {
-					dbMsg.CostUSD = result.CostUSD
-					dbMsg.DurationMs = duration.Milliseconds()
-				}
-				e.ChatDB.InsertMessage(dbMsg)
-			}
 		}
+		e.ChatDB.InsertMessage(chatdb.Message{
+			ID: assistantMsgID, ConvID: msg.ConvID, Role: "assistant",
+			Text: cleanText, Source: msg.Source, Model: result.Model,
+			Tier: route.Tier, CostUSD: result.CostUSD, SessionID: result.SessionID,
+			DurationMs: duration.Milliseconds(), CreatedAt: time.Now(),
+			Blocks: dbBlocks,
+		})
 	}
 
 	// Emit text and done events.

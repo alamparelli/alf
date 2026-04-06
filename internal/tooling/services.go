@@ -201,6 +201,26 @@ type LLMOnComplete struct {
 	OnComplete    *LLMOnComplete `json:"on_complete,omitempty"`
 }
 
+// ChainOrigin identifies where a fire-and-forget chain was initiated,
+// so the callback can route results back to the correct session.
+type ChainOrigin struct {
+	Source string `json:"source"` // "cc" or "tg"
+	ConvID string `json:"conv_id,omitempty"`
+}
+
+type chainOriginKey struct{}
+
+// WithChainOrigin attaches a ChainOrigin to a context.
+func WithChainOrigin(ctx context.Context, origin ChainOrigin) context.Context {
+	return context.WithValue(ctx, chainOriginKey{}, origin)
+}
+
+// ChainOriginFromContext extracts a ChainOrigin from a context, if present.
+func ChainOriginFromContext(ctx context.Context) (ChainOrigin, bool) {
+	o, ok := ctx.Value(chainOriginKey{}).(ChainOrigin)
+	return o, ok
+}
+
 // LLMChainResult is the structured result passed between chain steps.
 type LLMChainResult struct {
 	Status  int    `json:"status"`

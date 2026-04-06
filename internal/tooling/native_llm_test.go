@@ -167,7 +167,7 @@ func TestLLMTool_FireAndForget_TwoStepChain(t *testing.T) {
 
 	tool := LLMNativeTool{
 		Service: svc,
-		NotifyFunc: func(chainID, status, message string) {
+		NotifyFunc: func(_ ChainOrigin, chainID, status, message string) {
 			notifyChainID = chainID
 			notifyStatus = status
 			notifyMessage = message
@@ -226,7 +226,7 @@ func TestLLMTool_FireAndForget_ThreeStepChain(t *testing.T) {
 
 	tool := LLMNativeTool{
 		Service: svc,
-		NotifyFunc: func(_, _, _ string) {
+		NotifyFunc: func(_ ChainOrigin, _, _, _ string) {
 			notified.Done()
 		},
 	}
@@ -267,7 +267,7 @@ func TestLLMTool_FireAndForget_ErrorPropagation(t *testing.T) {
 	notified.Add(1)
 	tool := LLMNativeTool{
 		Service: svc,
-		NotifyFunc: func(_, _, _ string) {
+		NotifyFunc: func(_ ChainOrigin, _, _, _ string) {
 			notified.Done()
 		},
 	}
@@ -303,7 +303,7 @@ func TestLLMTool_FireAndForget_MaxDepthExhausted(t *testing.T) {
 
 	tool := LLMNativeTool{
 		Service: svc,
-		NotifyFunc: func(_, _, message string) {
+		NotifyFunc: func(_ ChainOrigin, _, _, message string) {
 			notifyMessage = message
 			notified.Done()
 		},

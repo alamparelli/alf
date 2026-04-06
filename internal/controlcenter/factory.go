@@ -427,7 +427,11 @@ func HandlerFactory(deps Deps) Handlers {
 
 	// LLM invocation (used by system-tools CLI).
 	if deps.ToolRegistry != nil {
-		mux.Handle("/api/llm/invoke", &LLMInvokeHandler{ToolRegistry: deps.ToolRegistry, TierStore: deps.TierStore})
+		llmHandler := &LLMInvokeHandler{ToolRegistry: deps.ToolRegistry, TierStore: deps.TierStore}
+		if deps.ChatService != nil {
+			llmHandler.CurrentConvID = deps.ChatService.CurrentConvID
+		}
+		mux.Handle("/api/llm/invoke", llmHandler)
 	}
 
 	// Developer tools (publish to marketplace, validate, etc.)

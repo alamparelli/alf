@@ -15,7 +15,7 @@ import (
 // For multi-step autonomous tasks, use the task tool instead.
 type LLMNativeTool struct {
 	Service    LLMService
-	NotifyFunc func(chainID, status, message string) // called when the last chain step completes
+	NotifyFunc func(origin ChainOrigin, chainID, status, message string) // called when the last chain step completes
 }
 
 func (LLMNativeTool) ToolName() string { return "llm" }
@@ -75,7 +75,8 @@ func (t LLMNativeTool) Run(ctx context.Context, argsJSON string) (string, error)
 		FireAndForget bool           `json:"fire_and_forget"`
 		OnComplete    *LLMOnComplete `json:"on_complete"`
 		MaxDepth      int            `json:"max_depth"`
-		ChainID       string         `json:"chain_id"` // internal, propagated between steps
+		ChainID       string         `json:"chain_id"`    // internal, propagated between steps
+		Origin        ChainOrigin    `json:"origin"`      // internal, propagated for callback routing
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -100,6 +101,14 @@ func (t LLMNativeTool) Run(ctx context.Context, argsJSON string) (string, error)
 		return result, nil
 	}
 
+	// Resolve origin: explicit args > context > zero value.
+	origin := args.Origin
+	if origin.Source == "" {
+		if ctxOrigin, ok := ChainOriginFromContext(ctx); ok {
+			origin = ctxOrigin
+		}
+	}
+
 	// Fire-and-forget validation.
 	if args.OnComplete == nil {
 		return "", fmt.Errorf("on_complete is required when fire_and_forget=true")
@@ -114,7 +123,7 @@ func (t LLMNativeTool) Run(ctx context.Context, argsJSON string) (string, error)
 	}
 
 	// Launch chain in background goroutine.
-	go t.executeChain(chainID, args.Tier, args.Prompt, args.System, args.OnComplete, args.MaxDepth)
+	go t.executeChain(origin, chainID, args.Tier, args.Prompt, args.System, args.OnComplete, args.MaxDepth)
 
 	resp, _ := json.Marshal(map[string]string{
 		"chain_id": chainID,
@@ -124,7 +133,7 @@ func (t LLMNativeTool) Run(ctx context.Context, argsJSON string) (string, error)
 }
 
 // executeChain runs the current step and chains to on_complete.
-func (t LLMNativeTool) executeChain(chainID, tier, prompt, system string, onComplete *LLMOnComplete, depth int) {
+func (t LLMNativeTool) executeChain(origin ChainOrigin, chainID, tier, prompt, system string, onComplete *LLMOnComplete, depth int) {
 	// Execute current step.
 	result, err := t.Service.Invoke(context.Background(), LLMInvokeOpts{
 		Tier:    tier,
@@ -142,14 +151,14 @@ func (t LLMNativeTool) executeChain(chainID, tier, prompt, system string, onComp
 
 	// No callback = last step → notify.
 	if onComplete == nil {
-		t.notify(chainID, chainResult)
+		t.notify(origin, chainID, chainResult)
 		return
 	}
 
 	// Depth exhausted → notify with the current result instead of continuing.
 	if depth <= 1 {
 		log.Printf("[llm-chain] chain %s reached max depth, stopping", chainID[:8])
-		t.notify(chainID, chainResult)
+		t.notify(origin, chainID, chainResult)
 		return
 	}
 
@@ -158,7 +167,7 @@ func (t LLMNativeTool) executeChain(chainID, tier, prompt, system string, onComp
 
 	// If callback is fire-and-forget, continue the chain.
 	if onComplete.FireAndForget && onComplete.OnComplete != nil {
-		t.executeChain(chainID, onComplete.Tier, callbackPrompt, onComplete.System, onComplete.OnComplete, depth-1)
+		t.executeChain(origin, chainID, onComplete.Tier, callbackPrompt, onComplete.System, onComplete.OnComplete, depth-1)
 		return
 	}
 
@@ -176,11 +185,11 @@ func (t LLMNativeTool) executeChain(chainID, tier, prompt, system string, onComp
 	} else {
 		finalChain = LLMChainResult{Status: 200, Message: finalResult}
 	}
-	t.notify(chainID, finalChain)
+	t.notify(origin, chainID, finalChain)
 }
 
 // notify calls NotifyFunc if set.
-func (t LLMNativeTool) notify(chainID string, result LLMChainResult) {
+func (t LLMNativeTool) notify(origin ChainOrigin, chainID string, result LLMChainResult) {
 	if t.NotifyFunc == nil {
 		return
 	}
@@ -188,7 +197,7 @@ func (t LLMNativeTool) notify(chainID string, result LLMChainResult) {
 	if result.Status != 200 {
 		status = "failed"
 	}
-	t.NotifyFunc(chainID, status, result.Message)
+	t.NotifyFunc(origin, chainID, status, result.Message)
 }
 
 // injectChainResult replaces {result} in prompt with the structured chain result.

@@ -544,7 +544,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 				if maxTurns <= 0 {
 					maxTurns = 10
 				}
-				prov = provider.NewToolLoop(apiProv, &toolExecAdapter{exec: e.ToolExecutor}, tools, maxTurns)
+				prov = provider.NewToolLoop(apiProv, &toolExecAdapter{exec: e.ToolExecutor, origin: tooling.ChainOrigin{Source: channelID.Prefix(), ConvID: convID}}, tools, maxTurns)
 				log.Printf("[comms] tool loop enabled: %d tools, max_turns=%d", len(schemas), maxTurns)
 				toolNames := make([]string, len(schemas))
 				for i, s := range schemas {
@@ -739,7 +739,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 						if maxT <= 0 {
 							maxT = 10
 						}
-						fbProv = provider.NewToolLoop(apiProv, &toolExecAdapter{exec: e.ToolExecutor}, tools, maxT)
+						fbProv = provider.NewToolLoop(apiProv, &toolExecAdapter{exec: e.ToolExecutor, origin: tooling.ChainOrigin{Source: channelID.Prefix(), ConvID: convID}}, tools, maxT)
 					}
 				}
 			}
@@ -1103,10 +1103,14 @@ func stripReactTags(text string) string {
 
 // toolExecAdapter bridges tooling.Executor to provider.ToolExecutor.
 type toolExecAdapter struct {
-	exec *tooling.Executor
+	exec   *tooling.Executor
+	origin tooling.ChainOrigin // injected into context for fire-and-forget routing
 }
 
 func (a *toolExecAdapter) Execute(ctx context.Context, call provider.ToolCallRequest) provider.ToolCallResult {
+	if a.origin.Source != "" {
+		ctx = tooling.WithChainOrigin(ctx, a.origin)
+	}
 	result := a.exec.Execute(ctx, tooling.CallRequest{
 		ID:        call.ID,
 		Name:      call.Name,

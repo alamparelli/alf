@@ -14,8 +14,9 @@ import (
 // its own Anthropic token — the daemon's provider registry handles auth.
 // Supports fire-and-forget mode with on_complete chain callbacks.
 type LLMInvokeHandler struct {
-	ToolRegistry *tooling.Registry
-	TierStore    TierStore
+	ToolRegistry  *tooling.Registry
+	TierStore     TierStore
+	CurrentConvID func() string // returns current CC conversation ID for chain origin
 }
 
 type llmInvokeRequest struct {
@@ -25,6 +26,7 @@ type llmInvokeRequest struct {
 	FireAndForget bool                   `json:"fire_and_forget,omitempty"`
 	OnComplete    *tooling.LLMOnComplete `json:"on_complete,omitempty"`
 	MaxDepth      int                    `json:"max_depth,omitempty"`
+	Origin        *tooling.ChainOrigin   `json:"origin,omitempty"`
 }
 
 type llmInvokeResponse struct {
@@ -69,6 +71,16 @@ func (h *LLMInvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		toolArgs["max_depth"] = req.MaxDepth
 		if req.OnComplete != nil {
 			toolArgs["on_complete"] = req.OnComplete
+		}
+		// Propagate origin for callback routing; default to CC with current conv.
+		if req.Origin != nil {
+			toolArgs["origin"] = req.Origin
+		} else {
+			origin := tooling.ChainOrigin{Source: "cc"}
+			if h.CurrentConvID != nil {
+				origin.ConvID = h.CurrentConvID()
+			}
+			toolArgs["origin"] = origin
 		}
 	}
 

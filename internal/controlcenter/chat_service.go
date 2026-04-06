@@ -1062,10 +1062,14 @@ func recallMemories(recaller MemoryRecaller, message string) string {
 
 // toolExecutorAdapter bridges tooling.Executor to provider.ToolExecutor.
 type toolExecutorAdapter struct {
-	exec *tooling.Executor
+	exec   *tooling.Executor
+	origin tooling.ChainOrigin // injected into context for fire-and-forget routing
 }
 
 func (a *toolExecutorAdapter) Execute(ctx context.Context, call provider.ToolCallRequest) provider.ToolCallResult {
+	if a.origin.Source != "" {
+		ctx = tooling.WithChainOrigin(ctx, a.origin)
+	}
 	result := a.exec.Execute(ctx, tooling.CallRequest{
 		ID:        call.ID,
 		Name:      call.Name,

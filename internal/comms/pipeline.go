@@ -568,6 +568,8 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	if e.SignalSockPath != "" {
 		log.Printf("[comms] signal sock injected: %s (env has %d vars)", e.SignalSockPath, len(params.Env))
 	}
+	// Inject chain origin so CLI subprocesses can route chain results back.
+	params.Env = append(params.Env, fmt.Sprintf("ALF_CHAIN_ORIGIN=%s:%s", channelID.Prefix(), convID))
 	if isAPITier {
 		params.ResumeID = ""
 	}

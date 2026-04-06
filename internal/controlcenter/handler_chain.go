@@ -15,7 +15,8 @@ type ChainHandler struct {
 }
 
 type chainRequest struct {
-	Steps []tooling.ChainStep `json:"steps"`
+	Steps  []tooling.ChainStep  `json:"steps"`
+	Origin *tooling.ChainOrigin `json:"origin,omitempty"`
 }
 
 func (h *ChainHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -48,11 +49,16 @@ func (h *ChainHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	argsJSON, _ := json.Marshal(toolArgs)
 
-	// Inject chain origin for routing results back to CC.
+	// Inject chain origin for routing results back to the correct channel.
 	ctx := r.Context()
-	origin := tooling.ChainOrigin{Source: "cc"}
-	if h.CurrentConvID != nil {
-		origin.ConvID = h.CurrentConvID()
+	var origin tooling.ChainOrigin
+	if req.Origin != nil {
+		origin = *req.Origin
+	} else {
+		origin = tooling.ChainOrigin{Source: "cc"}
+		if h.CurrentConvID != nil {
+			origin.ConvID = h.CurrentConvID()
+		}
 	}
 	ctx = tooling.WithChainOrigin(ctx, origin)
 

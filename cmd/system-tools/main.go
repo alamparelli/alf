@@ -96,7 +96,16 @@ func handleAction(tool, endpoint string, args []string) {
 			if err := json.Unmarshal([]byte(stepsJSON), &steps); err != nil {
 				fatal(fmt.Errorf("invalid --steps JSON: %w", err))
 			}
-			body, _ := json.Marshal(map[string]any{"steps": steps})
+			reqBody := map[string]any{"steps": steps}
+			if originEnv := os.Getenv("ALF_CHAIN_ORIGIN"); originEnv != "" {
+				parts := strings.SplitN(originEnv, ":", 2)
+				origin := map[string]string{"source": parts[0]}
+				if len(parts) > 1 {
+					origin["conv_id"] = parts[1]
+				}
+				reqBody["origin"] = origin
+			}
+			body, _ := json.Marshal(reqBody)
 			result, err := doPost("/api/tasks/chain", body)
 			if err != nil {
 				fatal(err)

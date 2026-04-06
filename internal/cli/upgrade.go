@@ -337,7 +337,12 @@ func fetchLatestTag() (string, error) {
 	return release.TagName, nil
 }
 
-const alphaBaseURL = "https://cc.lamparelli.eu/alpha"
+var alphaBaseURL = func() string {
+	if v := os.Getenv("ALF_ALPHA_URL"); v != "" {
+		return v
+	}
+	return "https://alpha.alfos.ai"
+}()
 
 // alphaUpdate checks the alpha distribution channel for a newer CLI binary.
 // It reads credentials from the ALF_TOKEN env var or the saved setup profile.

@@ -102,7 +102,7 @@ type Deps struct {
 	DataDir          string
 	ConfigDir      string
 	SkillsDir      string
-	ExternalURL    string // public URL (e.g. https://cc.lamparelli.eu)
+	ExternalURL    string // public URL (e.g. https://cc.example.com)
 	DashboardHTML  string
 	WebFS          fs.FS // embedded web assets (style.css, app.js)
 }

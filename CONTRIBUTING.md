@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Docker and Docker Compose
 - CGO enabled (required for sqlite-vec)
 
@@ -31,29 +31,24 @@ CGO_ENABLED=1 go test -tags fts5 ./...
 ### Run locally
 
 ```sh
-# Copy and fill in secrets
-mkdir -p dev-secrets
-echo "YOUR_BOT_TOKEN" > dev-secrets/telegram_bot_token
-echo "YOUR_CHAT_ID" > dev-secrets/telegram_chat_id
-openssl rand -hex 16 > dev-secrets/cc_auth_token
+# First run: creates dev-secrets/ with placeholders, builds frontend + Docker, starts stack
+./scripts/dev-local.sh
 
-# Build and start
-docker compose up --build
-```
+# Edit secrets with real values
+vim dev-secrets/telegram_bot_token  # your @BotFather token
+vim dev-secrets/telegram_chat_id    # your Telegram chat ID
 
-### Deploy to a remote host
-
-```sh
-# Requires SSH access to the target machine
-./scripts/dev-deploy.sh
-```
-
-### Local development (Docker, no remote deploy)
-
-```sh
-# Builds Docker image locally and restarts with ALF_IMAGE override
+# Restart after editing secrets
 ./scripts/dev-local.sh
 ```
+
+The script builds the Svelte frontend, builds the Docker image, and starts the stack. Control Center runs at `http://localhost:8080`.
+
+Useful flags:
+- `--no-frontend` — skip Svelte rebuild (faster iteration on Go code)
+- `--clean` — tear down existing containers first
+- `--down` — stop the stack
+
 
 ## Code conventions
 
@@ -67,24 +62,30 @@ docker compose up --build
 
 ### Architecture patterns
 
+- **Chat engine** - `internal/comms/` owns all message processing logic. Adapters (Telegram, Control Center) call `Process()` and receive events via callbacks
 - **Provider interface** - all LLM interaction goes through `provider.Provider` and `provider.Classifier` (CLI + API implementations)
 - **Unified conversation store** - `internal/conversation/` captures rich message history (text, tool_use, tool_result, thinking) in a JSONL ring buffer, shared across all backends
+- **Chat database** - `internal/chatdb/` provides SQLite-backed persistent message storage
 - **Persistent subprocesses** - long-lived processes (classifier) follow the same pattern: mutex, stdin/stdout JSON lines, auto-restart on crash, idle timeout
 - **Whisper service** - voice transcription runs in a separate Docker container (`whisper-service`), ALF communicates via HTTP client with bearer token auth
-- **Go-native inference** - ONNX embeddings run in-process via `onnxruntime_go` (no sidecar)
+- **Go-native inference** - ONNX embeddings run in-process via `onnxruntime_go`, also exposed as HTTP server (`cmd/embed-server/`)
 - **Embedded core instructions** - `internal/memory/core.md` compiled into the binary via `go:embed`, injected first in every conversation
 - **Router is pure logic** - `internal/router/` builds prompts and parses responses, never spawns processes
 - **Signal system** - `internal/signal/` provides a Unix-socket server for Claude sessions to send Telegram messages/reactions. System tools (`cmd/signal`, `cmd/schedule-tools`) use this socket
+- **System tools multi-call binary** - `cmd/system-tools/` bridges CLI tool invocations (task, team, skill, app, config, tier, log, search) to the daemon's HTTP API via symlinks
 - **App supervisor** - `internal/supervisor/` manages background services declared in `apps/*/service.json` with restart policies and exponential backoff
 - **Outbound firewall** - `internal/firewall/` proxies all HTTP/HTTPS traffic from Claude subprocesses with domain-level allow/deny rules
-- **Non-root daemon** - Daemon drops to uid 1000 (`alf`) via setpriv with zero capabilities, Claude runs as uid 1001 (`claude`) with sanitized environment, config is read-only, tools are rx-only
+- **Tracing** - `internal/trace/` logs chain and task team events for observability
+- **TLS generation** - `internal/tlsgen/` generates self-signed certificates for local HTTPS installs
+- **Non-root daemon** - Daemon drops to uid 1001 (`alfd`) via setpriv, LLM subprocesses run as uid 1000 (`alf`) with zero capabilities and sanitized environment, config is read-only, tools are rx-only
 
 ### File organization
 
-- `cmd/` - entry points only, minimal logic (includes system tools: `schedule-tools`, `signal`)
+- `cmd/` - entry points only, minimal logic (includes system tools: `schedule-tools`, `signal`, `system-tools`, `embed-server`, `nettrack-helper`)
 - `internal/` - all business logic, one package per domain
-- `scripts/` - deployment, release, and local dev automation (`dev-deploy.sh`, `dev-local.sh`, `release.sh`)
-- `internal/controlcenter/web/` - embedded web assets for Control Center (HTML, JS, CSS)
+- `scripts/` - deployment, release, and local dev automation (`dev-deploy.sh`, `dev-local.sh`, `ship.sh`)
+- `internal/controlcenter/frontend/` - Svelte 5 + Vite frontend, builds to `internal/controlcenter/web/` for `go:embed`
+- `internal/controlcenter/web/` - embedded web assets for Control Center (built output, do not edit directly)
 
 ### Testing
 
@@ -162,7 +163,43 @@ System tools are Go binaries baked into the Docker image at `/opt/alf/tools/`. U
    ```
 4. The daemon symlinks system tools into `data/tools.d/` at startup
 
-Existing system tools: `extract-video` (media processing), `memory-tools` (semantic memory), `schedule-tools` (cron jobs), `signal` (Telegram messaging from Claude sessions).
+Existing system tools: `extract-video` (media processing), `memory-tools` (semantic memory), `schedule-tools` (cron jobs), `signal` (Telegram messaging from Claude sessions), `system-tools` (multi-call binary bridging CLI to daemon API), `embed-server` (embedding HTTP server), `nettrack-helper` (conntrack event logger).
+
+## AI-assisted development
+
+ALF is built with heavy AI assistance. Here's how to work effectively with AI coding agents on this codebase.
+
+### Working with AI agents
+
+- The project follows **SOLID principles** and **factory patterns** - AI agents should maintain these
+- **TDD** - write tests first when adding new behavior
+- Keep `internal/` packages decoupled - one domain per package, interfaces at boundaries
+- System tools in `cmd/` are thin wrappers; business logic stays in `internal/`
+
+### Frontend (Svelte)
+
+The Control Center frontend lives in `internal/controlcenter/frontend/` (Svelte 5 + Vite). After changes:
+
+```sh
+cd internal/controlcenter/frontend && npm run build
+```
+
+Built output goes to `internal/controlcenter/web/` which is `go:embed`-ded into the binary. Do not edit files in `web/` directly.
+
+### Skills and apps
+
+- **Skills** are defined in `skills.d/` (bundled) or `skills/` (user). They are plain text definitions with trigger patterns
+- **Apps** use vanilla JS + AlfSDK (not frameworks) due to CSP restrictions (`unsafe-eval` blocked). See the `sdk-app-builder` skill for guidance
+- Apps run in CSP-sandboxed iframes with no direct access to secrets (vault-proxy only)
+
+### Security considerations
+
+When contributing code that touches:
+- **Subprocess execution** - always use the `alf` user (uid 1000), never root
+- **Secrets** - use `readSecret()` pattern (Docker secrets), never environment variables
+- **Network** - outbound requests from LLM subprocesses go through the firewall proxy
+- **App isolation** - apps run in chroot namespaces with filesystem allowlists
+- **Vault access** - apps access secrets via vault-proxy Unix socket, never directly
 
 ## Questions
 

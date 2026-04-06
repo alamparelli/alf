@@ -19,7 +19,7 @@ type TerminalHandler struct {
 	AuthToken     string
 	Sessions      *SessionStore
 	ExtraTokenFns []func() string // additional valid tokens (e.g. mobile API token)
-	AllowedOrigin string          // e.g. "https://cc.lamparelli.eu" - restricts WebSocket origin
+	AllowedOrigin string          // e.g. "https://cc.example.com" - restricts WebSocket origin
 }
 
 func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

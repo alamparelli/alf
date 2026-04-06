@@ -13,16 +13,17 @@ Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies
 - **Persistent classifier** - a long-lived Claude process handles message routing in ~0ms instead of spawning a new process per message
 - **Tier system** - configurable response tiers (model, tools, effort, read/write access) routed by an LLM classifier
 - **Defense-in-depth security** - Non-root daemon (uid 1001), LLM subprocess isolated as uid 1000 with zero capabilities, read-only config, restricted tool execution
+- **Multi-backend** - Claude CLI, OpenRouter, OpenAI, Ollama, or any OpenAI-compatible API. Mix backends per tier
 - **No API costs** - runs on your Claude subscription (Pro/Max/Team), not pay-per-token API calls
 - **Self-hosted** - your hardware, your data, your rules. No cloud dependency beyond your Claude account
 
 ## How it works
 
-![ALF OS Architecture](docs/architecture.png)
+![ALF OS Architecture](docs/architecture.jpeg)
 
-**Host CLI** (`alf`) manages the container lifecycle from the host machine. Inside Docker, the **daemon** runs as `alfd` (uid 1001) and serves the Control Center web UI, polls Telegram, and coordinates all subsystems. LLM subprocesses run as `alf` (uid 1000) with restricted permissions and zero capabilities. Sidecar containers handle voice transcription (WhisperKit) and embeddings.
+**Host CLI** (`alf`) manages the container lifecycle from the host machine. Inside Docker, the **daemon** runs as `alfd` (uid 1001) and serves the Control Center web UI, polls Telegram, and coordinates all subsystems. LLM subprocesses run as `alf` (uid 1000) with restricted permissions and zero capabilities. A sidecar container handles voice transcription (faster-whisper).
 
-Messages flow through a **comm engine** → **router** → **LLM provider** pipeline. The router classifies intent and selects a response tier (model, tools, effort level). A **permission system** gates access to sandboxed apps and tools. Apps run in chroot-isolated namespaces with filesystem allowlists. Secrets are accessed exclusively through a **vault proxy** (Unix socket) — no direct access from app code.
+Messages flow through a **chat engine** (`internal/comms/`) → **router** → **LLM provider** pipeline. The router classifies intent and selects a response tier (model, tools, effort level). A **permission system** gates access to sandboxed apps and tools. Apps run in chroot-isolated namespaces with filesystem allowlists. Secrets are accessed exclusively through a **vault proxy** (Unix socket) — no direct access from app code. A **tracing system** (`internal/trace/`) logs chain and task events for observability.
 
 ## Quick start
 
@@ -207,14 +208,19 @@ alf version       Print version
 cmd/
   alf/             Host CLI (init, start, stop, upgrade, login, secret, compose)
   alf-daemon/      Container daemon (Telegram bot + Control Center + Claude management)
+  embed-server/    Embedding HTTP server (ONNX inference for vector search)
   extract-video/   System tool: video frame extraction + audio transcription
   memory-tools/    System tool: recall, remember, forget (semantic memory)
+  nettrack-helper/ Privileged conntrack helper (conntrack events → Unix socket)
   schedule-tools/  System tool: create, list, delete, update scheduled jobs
   signal/          System tool: send Telegram messages and reactions from Claude sessions
+  system-tools/    Multi-call binary bridging CLI tools to daemon HTTP API
 
 internal/
   agents/          Multi-agent orchestrator, team config store, session isolation
+  chatdb/          SQLite-backed chat message database
   cli/             CLI command implementations + embedded templates + bundled skills
+  comms/           Chat engine: message processing pipeline, adapters, event dispatch
   controlcenter/   HTTP server, auth, config CRUD, chat API, workspace, setup wizard, docs
   conversation/    Unified conversation store (JSONL ring buffer, ContentBlocks, cross-backend)
   marketplace/     App marketplace: install, permissions, trust model, manifest validation
@@ -227,7 +233,9 @@ internal/
   supervisor/      App background service supervisor (restart policies, exponential backoff)
   vault/           Vault-proxy subprocess management + Unix socket proxy
   firewall/        Outbound HTTP/HTTPS traffic filtering proxy
+  tlsgen/          Self-signed TLS certificate generation for local installs
   tooling/         Tool registry + subprocess executor + Linux namespace sandbox
+  trace/           Tracing and event logging for chains and task teams
   skills/          Skill loader, trigger matching, catalog builder
   mood/            Daily mood rotation + live feedback + reaction learning
   session/         Claude session persistence (resume IDs, forced tier locking)
@@ -238,6 +246,7 @@ internal/
   eventlog/        JSONL event logging with daily rotation
   updater/         GHCR image update checker
   secrets/         Docker secrets reader
+  vulncheck/       Dependency vulnerability checking
 ```
 
 ## Security model

@@ -52,3 +52,4 @@ prototypes/
 scripts/*
 !scripts/entrypoint.sh
 !scripts/install.sh
+!scripts/dev-local.sh

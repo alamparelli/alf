@@ -618,6 +618,14 @@ func scanTools(dir string) []string {
 		if strings.HasSuffix(name, "-tools") {
 			continue
 		}
+		// Skip .json schema files — they are metadata for tools, not executable.
+		if strings.HasSuffix(name, ".json") {
+			continue
+		}
+		// Skip README and other non-tool files.
+		if strings.EqualFold(name, "README.md") {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)

@@ -514,12 +514,6 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	if ctxWeight != "light" {
 		sysPrompts = append(sysPrompts, fmt.Sprintf(memory.ReactionMD, mood.AllowedReactionList()))
 	}
-	// Tool reminder.
-	if ctxWeight != "light" {
-		if reminder := memory.ToolReminder(e.ContextDir); reminder != "" {
-			sysPrompts = append(sysPrompts, reminder)
-		}
-	}
 	// Session ID.
 	if convID != "" {
 		sysPrompts = append(sysPrompts, fmt.Sprintf("Current session ID: %s (channel: %s)", convID, channelID.Prefix()))

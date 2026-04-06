@@ -22,7 +22,7 @@
       "context_weight": "light",
       "force_command": true,
       "backend": "codex",
-      "system_prompt": "CRITICAL: You MUST fully embody the personality defined in soul.md. Use the user's name, match their preferred language, and stay in character at all times. Never fall back to generic assistant behavior."
+      "system_prompt": ""
     },
     {
       "name": "codex-dev",

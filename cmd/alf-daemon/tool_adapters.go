@@ -14,11 +14,14 @@ import (
 
 	"github.com/alamparelli/alf/internal/agents"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
+	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/supervisor"
 	"github.com/alamparelli/alf/internal/tooling"
+	"github.com/alamparelli/alf/internal/trace"
+	"strconv"
 	"time"
 )
 
@@ -39,6 +42,7 @@ type taskAdapter struct {
 	skillStore   skills.Store
 	resolveModel func(short string) string
 	onTaskEvent  func(source, taskID, status, summary string)
+	eventLog     *eventlog.Logger
 }
 
 func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (string, error) {
@@ -83,12 +87,52 @@ func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (
 		}
 	}
 
+	// Log task launch event.
+	if a.eventLog != nil {
+		a.eventLog.Log("task_launch", map[string]any{
+			"team":   opts.Team,
+			"origin": source,
+			"prompt": truncate(opts.Prompt, 200),
+		})
+	}
+
 	// Fire and forget — task is tracked by orchestrator.
 	go func() {
+		// Create a dedicated trace for this async task execution.
+		tracer := trace.New(source, origin.ConvID, "task:"+opts.Team)
+		spanHandle := tracer.StartSpan("task_team_run", map[string]string{
+			"team":   opts.Team,
+			"origin": source,
+		})
+
+		start := time.Now()
 		_, meta, err := a.orch.Run(context.Background(), opts.Prompt, orchPrep.SystemPrompts, orchPrep.Config, onProgress)
 		if err != nil {
 			log.Printf("[tasks] background task failed: %v", err)
+			spanHandle.EndWithError(err)
+		} else {
+			spanHandle.Tag("duration_ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
+			if meta != nil {
+				spanHandle.Tag("task_id", meta.ID)
+				spanHandle.Tag("status", meta.Status)
+				spanHandle.Tag("iterations", strconv.Itoa(meta.Iterations))
+			}
+			spanHandle.End()
 		}
+		tracer.Flush(a.dataDir)
+
+		// Log task completion event.
+		if a.eventLog != nil && meta != nil {
+			a.eventLog.Log("task_complete", map[string]any{
+				"task_id":    meta.ID,
+				"team":       opts.Team,
+				"status":     meta.Status,
+				"origin":     source,
+				"iterations": meta.Iterations,
+				"duration_s": int(time.Since(start).Seconds()),
+			})
+		}
+
 		if a.onTaskEvent != nil && meta != nil {
 			summary := meta.Response
 			if len(summary) > 200 {
@@ -648,6 +692,13 @@ func matchesQuery(q string, fields ...string) bool {
 		}
 	}
 	return false
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // --- LLM invoke adapter ---

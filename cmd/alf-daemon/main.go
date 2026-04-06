@@ -912,7 +912,9 @@ func main() {
 				tierStore:    tierStore,
 				skillStore:   skillStore,
 				resolveModel: router.ResolveModel,
+				eventLog:     eventLog,
 			},
+			DataDir: dataDir,
 			LLMService: &llmAdapter{
 				tierStore:        tierStore,
 				providerRegistry: registry,

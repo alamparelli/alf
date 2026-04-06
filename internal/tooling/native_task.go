@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
+	"time"
+
+	"github.com/alamparelli/alf/internal/trace"
 )
 
 // TaskNativeTool manages agent team tasks and LLM chains.
@@ -12,6 +16,7 @@ type TaskNativeTool struct {
 	Service    TaskService
 	LLMService LLMService
 	NotifyFunc func(origin ChainOrigin, chainID, status, message string)
+	DataDir    string // for trace file output (optional)
 }
 
 func (TaskNativeTool) ToolName() string { return "task" }
@@ -182,6 +187,14 @@ func (t TaskNativeTool) executeChain(origin ChainOrigin, chainID string, steps [
 		short = short[:8]
 	}
 
+	// Create a dedicated trace for this async chain execution.
+	tracer := trace.New(origin.Source, origin.ConvID, "chain:"+short)
+	defer func() {
+		if t.DataDir != "" {
+			tracer.Flush(t.DataDir)
+		}
+	}()
+
 	var lastResult LLMChainResult
 
 	for i, step := range steps {
@@ -192,6 +205,13 @@ func (t TaskNativeTool) executeChain(origin ChainOrigin, chainID string, steps [
 
 		log.Printf("[chain] %s step %d/%d tier=%s", short, i+1, len(steps), step.Tier)
 
+		spanHandle := tracer.StartSpan("chain_step", map[string]string{
+			"chain_id": short,
+			"step":     strconv.Itoa(i + 1),
+			"tier":     step.Tier,
+		})
+
+		start := time.Now()
 		result, err := t.LLMService.Invoke(context.Background(), LLMInvokeOpts{
 			Tier:    step.Tier,
 			Prompt:  prompt,
@@ -202,17 +222,27 @@ func (t TaskNativeTool) executeChain(origin ChainOrigin, chainID string, steps [
 		if err != nil {
 			lastResult = ErrorToChainResult(err)
 			log.Printf("[chain] %s step %d failed: %v", short, i+1, err)
+			spanHandle.EndWithError(err)
 			break
 		}
 		lastResult = LLMChainResult{Status: 200, Message: result}
+		spanHandle.Tag("duration_ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
+		spanHandle.End()
 	}
+
+	// Final status span.
+	finalStatus := "completed"
+	if lastResult.Status != 200 {
+		finalStatus = "failed"
+	}
+	tracer.AddSpan("chain_result", 0, map[string]string{
+		"chain_id": short,
+		"status":   finalStatus,
+		"steps":    strconv.Itoa(len(steps)),
+	}, nil)
 
 	// Notify with final result.
 	if t.NotifyFunc != nil {
-		status := "completed"
-		if lastResult.Status != 200 {
-			status = "failed"
-		}
-		t.NotifyFunc(origin, chainID, status, lastResult.Message)
+		t.NotifyFunc(origin, chainID, finalStatus, lastResult.Message)
 	}
 }

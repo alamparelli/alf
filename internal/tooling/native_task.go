@@ -12,12 +12,12 @@ type TaskNativeTool struct {
 	Service TaskService
 }
 
-func (TaskNativeTool) ToolName() string { return "task" }
+func (TaskNativeTool) ToolName() string { return "agent_task" }
 
 func (TaskNativeTool) Schema() ToolSchema {
 	return ToolSchema{
-		Name:        "task",
-		Description: "Launch, list, cancel, or approve autonomous agent tasks. Tasks run in the background and can use teams for multi-agent orchestration.",
+		Name:        "agent_task",
+		Description: "Manage multi-agent team tasks. Launches background tasks that delegate work to configured agent teams (e.g. content team with researcher + writer). Requires agent teams to be configured. NOT for simple LLM calls — use the llm tool for direct LLM invocation and chaining.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

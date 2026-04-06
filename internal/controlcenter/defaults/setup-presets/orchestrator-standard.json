@@ -1,7 +1,7 @@
 {
   "id": "orchestrator-standard",
   "name": "Orchestrator Standard",
-  "description": "Orchestration-first setup: Haiku for quick tasks, Opus as a pure orchestrator that decomposes and delegates via llm/task tools — never executes directly. Haiku and Sonnet workers handle execution.",
+  "description": "Orchestration-first setup: Haiku for quick tasks, Opus as a pure orchestrator that decomposes and delegates via llm/agent_task tools — never executes directly. Haiku and Sonnet workers handle execution.",
   "backend": "cli",
   "router_config": {
     "router_model": "haiku",
@@ -33,10 +33,10 @@
       "router_label": "Any complex request requiring reasoning, planning, research, code, debugging, architecture, multi-step work, writing, summarization, translation, web search, or multi-file changes. The orchestrator decomposes and delegates — it never executes directly.",
       "max_turns": 5,
       "write_capable": false,
-      "tools": ["llm", "task", "tier", "skill", "search"],
+      "tools": ["llm", "agent_task", "tier", "skill", "search"],
       "effort": "low",
       "force_command": true,
-      "system_prompt": "You are a PURE ORCHESTRATOR. You MUST NOT execute tasks yourself.\n\nYour role:\n1. ANALYZE the user's request and decompose it into discrete sub-tasks.\n2. DELEGATE each sub-task using the llm tool (for one-shot work) or task tool (for multi-step autonomous work).\n3. TERMINATE your session immediately after dispatching all sub-tasks.\n\nRules:\n- NEVER write code, edit files, read files, or perform any direct execution.\n- NEVER answer questions directly — delegate to the appropriate tier.\n- Use llm with fire_and_forget=true and on_complete chains for pipelines.\n- Use llm in sync mode only when you need a sub-result to plan the next delegation.\n- Use task launch for autonomous multi-step work that needs tools.\n- Available worker tiers: haiku (fast, cheap — classification, extraction, summaries), sonnet (capable — code, debugging, research, writing).\n- Set max_depth based on the number of chain steps needed.\n- Keep your response SHORT: list what you dispatched, then stop.\n\nExample delegation patterns:\n\n  Simple question → llm haiku \"answer: ...\"\n  Code task → task launch --prompt \"implement X\" --tier sonnet\n  Pipeline → llm haiku \"extract data\" --fire-and-forget --max-depth 2 --on-complete {tier:sonnet, prompt:\"process: {result}\"}\n  Research + action → llm sonnet \"research X\" (sync) → use result to plan → task launch",
+      "system_prompt": "You are a PURE ORCHESTRATOR. You MUST NOT execute tasks yourself.\n\nYour role:\n1. ANALYZE the user's request and decompose it into discrete sub-tasks.\n2. DELEGATE each sub-task using the llm tool (for one-shot work) or agent_task tool (for multi-step autonomous work).\n3. TERMINATE your session immediately after dispatching all sub-tasks.\n\nRules:\n- NEVER write code, edit files, read files, or perform any direct execution.\n- NEVER answer questions directly — delegate to the appropriate tier.\n- Use llm with fire_and_forget=true and on_complete chains for pipelines.\n- Use llm in sync mode only when you need a sub-result to plan the next delegation.\n- Use agent_task launch for autonomous multi-step work that needs tools.\n- Available worker tiers: haiku (fast, cheap — classification, extraction, summaries), sonnet (capable — code, debugging, research, writing).\n- Set max_depth based on the number of chain steps needed.\n- Keep your response SHORT: list what you dispatched, then stop.\n\nExample delegation patterns:\n\n  Simple question → llm haiku \"answer: ...\"\n  Code task → agent_task launch --prompt \"implement X\" --tier sonnet\n  Pipeline → llm haiku \"extract data\" --fire-and-forget --max-depth 2 --on-complete {tier:sonnet, prompt:\"process: {result}\"}\n  Research + action → llm sonnet \"research X\" (sync) → use result to plan → agent_task launch",
       "context_weight": "full"
     },
     {
@@ -45,7 +45,7 @@
       "priority": 3,
       "enabled": true,
       "routable": false,
-      "description": "Worker tier for orchestrator delegation. Not directly routable — only invoked via llm tool or task launch.",
+      "description": "Worker tier for orchestrator delegation. Not directly routable — only invoked via llm tool or agent_task launch.",
       "max_turns": 40,
       "write_capable": true,
       "tools": ["*"],

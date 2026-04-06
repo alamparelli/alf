@@ -12,7 +12,7 @@ import (
 // LLMNativeTool invokes a specific LLM tier with a prompt and returns the response.
 // Use this for one-shot LLM calls: text processing, classification, extraction, etc.
 // With fire_and_forget=true, runs async and chains via on_complete callbacks.
-// For multi-step autonomous tasks, use the task tool instead.
+// For multi-agent team tasks, use the agent_task tool instead.
 type LLMNativeTool struct {
 	Service    LLMService
 	NotifyFunc func(origin ChainOrigin, chainID, status, message string) // called when the last chain step completes
@@ -23,7 +23,7 @@ func (LLMNativeTool) ToolName() string { return "llm" }
 func (LLMNativeTool) Schema() ToolSchema {
 	return ToolSchema{
 		Name:        "llm",
-		Description: "Invoke a specific LLM tier with a prompt. Use for one-shot text processing: summarize, classify, extract, translate, etc. With fire_and_forget=true, runs asynchronously and chains results via on_complete callbacks. For multi-step autonomous tasks, use the task tool instead.",
+		Description: "Invoke a specific LLM tier with a prompt. The primary tool for all LLM calls: one-shot processing (summarize, classify, extract, translate) and async chains (fire_and_forget=true with on_complete callbacks). Always use this tool when you need to call an LLM tier.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

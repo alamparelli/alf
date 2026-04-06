@@ -23,6 +23,7 @@ type DB struct {
 type Message struct {
 	ID         string         `json:"id"`
 	ConvID     string         `json:"conv_id"`
+	Seq        int64          `json:"seq"`
 	Role       string         `json:"role"`
 	Text       string         `json:"text"`
 	Source     string         `json:"source"`
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS messages (
     id          TEXT PRIMARY KEY,
     conv_id     TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    seq         INTEGER NOT NULL DEFAULT 0,
     role        TEXT NOT NULL,
     text        TEXT NOT NULL DEFAULT '',
     source      TEXT NOT NULL DEFAULT 'cc',
@@ -166,6 +168,10 @@ func New(dataDir string) (*DB, error) {
 		return nil, fmt.Errorf("chatdb schema: %w", err)
 	}
 
+	// Auto-migrate: add seq column if missing (existing databases).
+	db.Exec(`ALTER TABLE messages ADD COLUMN seq INTEGER NOT NULL DEFAULT 0`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_seq ON messages(conv_id, seq)`)
+
 	return &DB{db: db}, nil
 }
 
@@ -205,10 +211,18 @@ func (d *DB) InsertMessage(msg Message) error {
 	}
 	defer tx.Rollback()
 
+	// Auto-assign next sequence number within the conversation.
+	var seq int64
+	if msg.Seq > 0 {
+		seq = msg.Seq
+	} else {
+		_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE conv_id = ?`, msg.ConvID).Scan(&seq)
+	}
+
 	_, err = tx.Exec(
-		`INSERT OR REPLACE INTO messages (id, conv_id, role, text, source, model, tier, cost_usd, duration_ms, session_id, reply_to, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.ConvID, msg.Role, msg.Text, msg.Source,
+		`INSERT OR REPLACE INTO messages (id, conv_id, seq, role, text, source, model, tier, cost_usd, duration_ms, session_id, reply_to, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.ConvID, seq, msg.Role, msg.Text, msg.Source,
 		msg.Model, msg.Tier, msg.CostUSD, msg.DurationMs,
 		msg.SessionID, msg.ReplyTo, ts,
 	)
@@ -294,25 +308,23 @@ func (d *DB) History(convID string, limit int, before time.Time) ([]Message, err
 	var rows *sql.Rows
 	var err error
 
+	const cols = `id, conv_id, seq, role, text, source, model, tier, cost_usd, duration_ms, session_id, reply_to, created_at`
+
 	if convID == "" && before.IsZero() {
 		rows, err = d.db.Query(
-			`SELECT id, conv_id, role, text, source, model, tier, cost_usd, duration_ms, session_id, reply_to, created_at
-			 FROM messages ORDER BY created_at DESC LIMIT ?`, limit,
+			`SELECT `+cols+` FROM messages ORDER BY created_at DESC, seq DESC LIMIT ?`, limit,
 		)
 	} else if convID == "" {
 		rows, err = d.db.Query(
-			`SELECT id, conv_id, role, text, source, model, tier, cost_usd, duration_ms, session_id, reply_to, created_at
-			 FROM messages WHERE created_at < ? ORDER BY created_at DESC LIMIT ?`, before, limit,
+			`SELECT `+cols+` FROM messages WHERE created_at < ? ORDER BY created_at DESC, seq DESC LIMIT ?`, before, limit,
 		)
 	} else if before.IsZero() {
 		rows, err = d.db.Query(
-			`SELECT id, conv_id, role, text, source, model, tier, cost_usd, duration_ms, session_id, reply_to, created_at
-			 FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT ?`, convID, limit,
+			`SELECT `+cols+` FROM messages WHERE conv_id = ? ORDER BY seq DESC LIMIT ?`, convID, limit,
 		)
 	} else {
 		rows, err = d.db.Query(
-			`SELECT id, conv_id, role, text, source, model, tier, cost_usd, duration_ms, session_id, reply_to, created_at
-			 FROM messages WHERE conv_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT ?`, convID, before, limit,
+			`SELECT `+cols+` FROM messages WHERE conv_id = ? AND created_at < ? ORDER BY seq DESC LIMIT ?`, convID, before, limit,
 		)
 	}
 	if err != nil {
@@ -323,7 +335,7 @@ func (d *DB) History(convID string, limit int, before time.Time) ([]Message, err
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ConvID, &m.Role, &m.Text, &m.Source,
+		if err := rows.Scan(&m.ID, &m.ConvID, &m.Seq, &m.Role, &m.Text, &m.Source,
 			&m.Model, &m.Tier, &m.CostUSD, &m.DurationMs,
 			&m.SessionID, &m.ReplyTo, &m.CreatedAt); err != nil {
 			return nil, err

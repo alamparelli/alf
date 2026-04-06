@@ -17,6 +17,7 @@
     role: string
     text: string
     ts: string
+    seq?: number
     model?: string
     tier?: string
     cost_usd?: number
@@ -134,12 +135,20 @@
     }
   }
 
+  function sortMessages(msgs: ChatMsg[]): ChatMsg[] {
+    return msgs.sort((a, b) => {
+      // Primary: seq (guaranteed unique per conv). Fallback: timestamp.
+      if (a.seq != null && b.seq != null && a.seq !== b.seq) return a.seq - b.seq
+      return a.ts.localeCompare(b.ts)
+    })
+  }
+
   function setMessages(msgs: ChatMsg[]) {
-    messages = msgs
+    messages = sortMessages(msgs)
   }
 
   function appendMessage(msg: ChatMsg) {
-    messages = [...messages, msg]
+    messages = sortMessages([...messages, msg])
   }
 
   async function scrollToBottom() {
@@ -178,7 +187,7 @@
       if (data && data.length > 0) {
         const container = messagesContainer
         const prevHeight = container?.scrollHeight || 0
-        messages = [...data, ...messages]
+        messages = sortMessages([...data, ...messages])
         await tick()
         if (container) {
           container.scrollTop = container.scrollHeight - prevHeight
@@ -258,11 +267,13 @@
 
     // Add user message optimistically
     if (message || mediaFiles.length > 0) {
+      const maxSeq = messages.reduce((max, m) => Math.max(max, m.seq ?? 0), 0)
       const userMsg: ChatMsg = {
         id: 'temp-' + Date.now(),
         role: 'user',
         text: message,
         ts: new Date().toISOString(),
+        seq: maxSeq + 1,
         conv_id: convId,
         media: mediaFiles.map(f => ({ upload_id: f.upload_id, type: f.mime_type?.startsWith('image/') ? 'photo' : 'document', file_name: f.file_name, mime_type: f.mime_type })),
       }
@@ -630,7 +641,7 @@
         // via optimistic insert (with temp- IDs that won't match server IDs).
         const newMsgs = recent.filter(m => !existingIds.has(m.id) && m.role === 'assistant')
         if (newMsgs.length > 0) {
-          messages = [...messages, ...newMsgs]
+          messages = sortMessages([...messages, ...newMsgs])
           scrollToBottom()
         }
       }).catch(() => {})
@@ -672,7 +683,9 @@
 
     {#each messages as msg (msg.id)}
       {#if msg.role === 'assistant' && msg.content_blocks && msg.content_blocks.length > 1}
-        {#each msg.content_blocks as block, bi (bi)}
+        {@const visibleBlocks = msg.content_blocks.filter(b => b.type !== 'text' || (b.text && b.text.trim()))}
+        {#each visibleBlocks as block, bi (bi)}
+          {@const isLast = bi === visibleBlocks.length - 1}
           <ChatMessageComponent
             msg={{
               ...msg,
@@ -680,15 +693,15 @@
               text: block.type === 'text' ? (block.text || '') : '',
               content_blocks: [block],
               // Only show footer metadata on the last block
-              model: bi === msg.content_blocks.length - 1 ? msg.model : undefined,
-              tier: bi === msg.content_blocks.length - 1 ? msg.tier : undefined,
-              cost_usd: bi === msg.content_blocks.length - 1 ? msg.cost_usd : undefined,
-              duration_ms: bi === msg.content_blocks.length - 1 ? msg.duration_ms : undefined,
-              skills: bi === msg.content_blocks.length - 1 ? msg.skills : undefined,
-              reactions: bi === msg.content_blocks.length - 1 ? msg.reactions : undefined,
+              model: isLast ? msg.model : undefined,
+              tier: isLast ? msg.tier : undefined,
+              cost_usd: isLast ? msg.cost_usd : undefined,
+              duration_ms: isLast ? msg.duration_ms : undefined,
+              skills: isLast ? msg.skills : undefined,
+              reactions: isLast ? msg.reactions : undefined,
             }}
             {convId}
-            onSendToTask={bi === msg.content_blocks.length - 1 ? openAgentModal : undefined}
+            onSendToTask={isLast ? openAgentModal : undefined}
           />
         {/each}
       {:else}

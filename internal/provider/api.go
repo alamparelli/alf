@@ -397,10 +397,27 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 		}
 	}
 
+	// Close the response body when context is cancelled to unblock scanner.Scan().
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			resp.Body.Close()
+		case <-done:
+		}
+	}()
+
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 256*1024)
 
 	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			resp.Body.Close()
+			return nil, ctx.Err()
+		default:
+		}
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
 			continue
@@ -485,6 +502,11 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 				}
 			}
 		}
+	}
+
+	// If context was cancelled, return immediately.
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	duration := time.Since(start)

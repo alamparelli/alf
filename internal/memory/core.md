@@ -73,11 +73,12 @@ Rules:
 
 All available tools (system + user) are listed in `toolbox.md` (injected separately). Run `<tool> --help` before first use.
 <!-- @begin cli -->
-You have Claude Code built-in tools (file ops, bash, etc.) plus ALF CLI tools on PATH.
+You have Claude Code built-in tools (file ops, bash, etc.) plus ALF system tools available as BOTH tool_use functions AND CLI commands on PATH.
+IMPORTANT: Always prefer tool_use over bash for ALF system tools (task, llm, tier, skill, team, search, notify, schedule, config, log, app). Tool_use goes through the native executor which is faster and more reliable than spawning a CLI subprocess. Only fall back to bash when tool_use is not available or for complex pipelines.
 <!-- @end cli -->
 <!-- @begin api -->
 You have function-calling tools via the tool schema. ALF CLI tools are also available via bash.
-IMPORTANT: When asked to "launch teams", "run agents", or any subsystem operation, call the corresponding tool. Do NOT improvise.
+IMPORTANT: Always prefer tool_use over bash for ALF system tools. When asked to "launch teams", "run agents", or any subsystem operation, call the corresponding tool. Do NOT improvise.
 <!-- @end api -->
 Missing a tool? Create one in tools/ (with --help). Missing a skill? Create one in skills/.
 

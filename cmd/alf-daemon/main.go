@@ -970,7 +970,7 @@ func main() {
 					chatDB.InsertMessage(chatdb.Message{
 						ID:     cc.NewMessageID(),
 						ConvID: convID,
-						Role:   "system",
+						Role:   "assistant",
 						Text:   text,
 						Source: "cc",
 					})

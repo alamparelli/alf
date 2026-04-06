@@ -346,7 +346,7 @@ func TestLLMTool_FireAndForget_MaxDepthExhausted(t *testing.T) {
 func TestInjectChainResult(t *testing.T) {
 	result := LLMChainResult{Status: 200, Message: "hello world"}
 	prompt := "Process this: {result}"
-	got := injectChainResult(prompt, result)
+	got := InjectChainResult(prompt, result)
 	expected := "Process this: <chain_result status=\"200\">\nhello world\n</chain_result>"
 	if got != expected {
 		t.Fatalf("expected:\n%s\ngot:\n%s", expected, got)
@@ -356,7 +356,7 @@ func TestInjectChainResult(t *testing.T) {
 func TestInjectChainResult_ErrorStatus(t *testing.T) {
 	result := LLMChainResult{Status: 500, Message: "internal error"}
 	prompt := "Handle: {result}"
-	got := injectChainResult(prompt, result)
+	got := InjectChainResult(prompt, result)
 	if !strings.Contains(got, `status="500"`) {
 		t.Fatalf("expected status 500, got: %s", got)
 	}
@@ -365,7 +365,7 @@ func TestInjectChainResult_ErrorStatus(t *testing.T) {
 func TestInjectChainResult_NoPlaceholder(t *testing.T) {
 	result := LLMChainResult{Status: 200, Message: "data"}
 	prompt := "No placeholder here"
-	got := injectChainResult(prompt, result)
+	got := InjectChainResult(prompt, result)
 	if got != prompt {
 		t.Fatalf("expected unchanged prompt, got: %s", got)
 	}
@@ -383,7 +383,7 @@ func TestErrorToChainResult(t *testing.T) {
 		{"something went wrong", 500},
 	}
 	for _, tt := range tests {
-		r := errorToChainResult(fmt.Errorf("%s", tt.err))
+		r := ErrorToChainResult(fmt.Errorf("%s", tt.err))
 		if r.Status != tt.status {
 			t.Errorf("error %q: expected status %d, got %d", tt.err, tt.status, r.Status)
 		}

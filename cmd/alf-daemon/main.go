@@ -882,15 +882,91 @@ func main() {
 	toolAppStore := cc.NewFileAppStore(filepath.Join(dataDir, "apps"))
 	toolLogReader := cc.LogReaderFactory(dataDir)
 	appToolAdapter := appAdapter{appStore: toolAppStore, marketplace: mpManager}
+
+	// Shared chain notification function — used by both LLMNativeTool and TaskNativeTool.
+	chainNotifyFunc := func(origin tooling.ChainOrigin, chainID, status, message string) {
+		short := chainID
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		var text string
+		if status == "completed" {
+			text = "Chain #" + short + " completed"
+			if message != "" {
+				preview := message
+				if len(preview) > 500 {
+					preview = preview[:500] + "..."
+				}
+				text += "\n" + preview
+			}
+		} else {
+			text = "Chain #" + short + " " + status
+			if message != "" {
+				text += ": " + message
+			}
+		}
+		log.Printf("[chain] event: chain=%s status=%s origin=%s", short, status, origin.Source)
+
+		// Route result back to the originating channel.
+		source := origin.Source
+		if source == "" {
+			source = "cc" // default fallback
+		}
+
+		switch source {
+		case "tg":
+			if tg != nil && chatID != "" {
+				tgID, _ := strconv.ParseInt(chatID, 10, 64)
+				if tgID != 0 {
+					if err := tg.SendHTML(tgID, text); err != nil {
+						log.Printf("[chain] telegram notify failed: %v", err)
+					}
+				}
+			}
+		default: // "cc" or unknown
+			convID := origin.ConvID
+			if convID == "" {
+				convID = chatDB.LatestConversationID("cc")
+			}
+			if convID == "" {
+				convID = "_system"
+				chatDB.EnsureConversation(convID, "", "cc")
+			}
+			chatDB.InsertMessage(chatdb.Message{
+				ID:     cc.NewMessageID(),
+				ConvID: convID,
+				Role:   "assistant",
+				Text:   text,
+				Source: "cc",
+			})
+			if eventBroker != nil {
+				preview := text
+				if len(preview) > 200 {
+					preview = preview[:200] + "..."
+				}
+				eventBroker.EmitWithData(cc.EventNewMessage, preview)
+			}
+		}
+	}
+
 	systemTools := []tooling.NativeTool{
-		tooling.TaskNativeTool{Service: &taskAdapter{
-			orch:         orch,
-			dataDir:      dataDir,
-			contextDir:   contextDir,
-			tierStore:    tierStore,
-			skillStore:   skillStore,
-			resolveModel: router.ResolveModel,
-		}},
+		tooling.TaskNativeTool{
+			Service: &taskAdapter{
+				orch:         orch,
+				dataDir:      dataDir,
+				contextDir:   contextDir,
+				tierStore:    tierStore,
+				skillStore:   skillStore,
+				resolveModel: router.ResolveModel,
+			},
+			LLMService: &llmAdapter{
+				tierStore:        tierStore,
+				providerRegistry: registry,
+				resolveModel:     router.ResolveModel,
+				dataDir:          dataDir,
+			},
+			NotifyFunc: chainNotifyFunc,
+		},
 		tooling.TeamNativeTool{Service: &teamAdapter{
 			store:   agentStore,
 			dataDir: dataDir,
@@ -917,72 +993,7 @@ func main() {
 				resolveModel:     router.ResolveModel,
 				dataDir:          dataDir,
 			},
-			NotifyFunc: func(origin tooling.ChainOrigin, chainID, status, message string) {
-				short := chainID
-				if len(short) > 8 {
-					short = short[:8]
-				}
-				var text string
-				if status == "completed" {
-					text = "Chain #" + short + " completed"
-					if message != "" {
-						preview := message
-						if len(preview) > 500 {
-							preview = preview[:500] + "..."
-						}
-						text += "\n" + preview
-					}
-				} else {
-					text = "Chain #" + short + " " + status
-					if message != "" {
-						text += ": " + message
-					}
-				}
-				log.Printf("[llm-chain] event: chain=%s status=%s origin=%s", short, status, origin.Source)
-
-				// Route result back to the originating channel.
-				source := origin.Source
-				if source == "" {
-					source = "cc" // default fallback
-				}
-
-				switch source {
-				case "tg":
-					// Telegram-originated chain → send back to TG only.
-					if tg != nil && chatID != "" {
-						tgID, _ := strconv.ParseInt(chatID, 10, 64)
-						if tgID != 0 {
-							if err := tg.SendHTML(tgID, text); err != nil {
-								log.Printf("[llm-chain] telegram notify failed: %v", err)
-							}
-						}
-					}
-				default: // "cc" or unknown
-					// CC-originated chain → inject into the originating conversation.
-					convID := origin.ConvID
-					if convID == "" {
-						convID = chatDB.LatestConversationID("cc")
-					}
-					if convID == "" {
-						convID = "_system"
-						chatDB.EnsureConversation(convID, "", "cc")
-					}
-					chatDB.InsertMessage(chatdb.Message{
-						ID:     cc.NewMessageID(),
-						ConvID: convID,
-						Role:   "assistant",
-						Text:   text,
-						Source: "cc",
-					})
-					if eventBroker != nil {
-						preview := text
-						if len(preview) > 200 {
-							preview = preview[:200] + "..."
-						}
-						eventBroker.EmitWithData(cc.EventNewMessage, preview)
-					}
-				}
-			},
+			NotifyFunc: chainNotifyFunc,
 		},
 	}
 	for _, t := range systemTools {

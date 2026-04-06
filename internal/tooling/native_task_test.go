@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type mockTaskService struct {
@@ -226,6 +228,123 @@ func TestTaskTool_InvalidJSON(t *testing.T) {
 	_, err := tool.Run(context.Background(), `{bad json}`)
 	if err == nil {
 		t.Fatal("expected JSON parse error")
+	}
+}
+
+// --- Chain action tests ---
+
+func TestTaskTool_Chain(t *testing.T) {
+	svc := &mockLLMService{result: "Bruxelles est la capitale"}
+	var notified sync.WaitGroup
+	notified.Add(1)
+
+	var gotChainID, gotStatus, gotMessage string
+	tool := TaskNativeTool{
+		Service: &mockTaskService{},
+		LLMService: svc,
+		NotifyFunc: func(_ ChainOrigin, chainID, status, message string) {
+			gotChainID = chainID
+			gotStatus = status
+			gotMessage = message
+			notified.Done()
+		},
+	}
+
+	out, err := tool.Run(context.Background(), `{"action":"chain","steps":[{"tier":"haiku","prompt":"fact about Brussels"},{"tier":"sonnet","prompt":"make tweet: {result}"}]}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "chain_id") {
+		t.Fatalf("expected chain_id in output, got: %s", out)
+	}
+
+	// Wait for async chain completion.
+	done := make(chan struct{})
+	go func() { notified.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("chain did not complete in time")
+	}
+
+	if gotStatus != "completed" {
+		t.Fatalf("expected completed, got %s", gotStatus)
+	}
+	if gotChainID == "" {
+		t.Fatal("expected non-empty chain ID")
+	}
+
+	// Verify 2 LLM calls were made.
+	calls := svc.getCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", len(calls))
+	}
+	if calls[0].Tier != "haiku" {
+		t.Fatalf("expected first call tier=haiku, got %s", calls[0].Tier)
+	}
+	if calls[1].Tier != "sonnet" {
+		t.Fatalf("expected second call tier=sonnet, got %s", calls[1].Tier)
+	}
+	// Second prompt should have {result} replaced.
+	if !strings.Contains(calls[1].Prompt, "chain_result") {
+		t.Fatalf("expected chain_result injection in second prompt, got: %s", calls[1].Prompt)
+	}
+	if gotMessage != "Bruxelles est la capitale" {
+		t.Fatalf("expected final message, got: %s", gotMessage)
+	}
+}
+
+func TestTaskTool_ChainTooFewSteps(t *testing.T) {
+	tool := TaskNativeTool{
+		Service:    &mockTaskService{},
+		LLMService: &mockLLMService{},
+	}
+
+	_, err := tool.Run(context.Background(), `{"action":"chain","steps":[{"tier":"haiku","prompt":"only one"}]}`)
+	if err == nil || !strings.Contains(err.Error(), "at least 2 steps") {
+		t.Fatalf("expected 2 steps error, got: %v", err)
+	}
+}
+
+func TestTaskTool_ChainNoLLMService(t *testing.T) {
+	tool := TaskNativeTool{Service: &mockTaskService{}}
+
+	_, err := tool.Run(context.Background(), `{"action":"chain","steps":[{"tier":"a","prompt":"x"},{"tier":"b","prompt":"y"}]}`)
+	if err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("expected not available error, got: %v", err)
+	}
+}
+
+func TestTaskTool_ChainStepError(t *testing.T) {
+	svc := &mockLLMService{err: fmt.Errorf("tier not found")}
+	var notified sync.WaitGroup
+	notified.Add(1)
+
+	var gotStatus string
+	tool := TaskNativeTool{
+		Service:    &mockTaskService{},
+		LLMService: svc,
+		NotifyFunc: func(_ ChainOrigin, _, status, _ string) {
+			gotStatus = status
+			notified.Done()
+		},
+	}
+
+	_, err := tool.Run(context.Background(), `{"action":"chain","steps":[{"tier":"bad","prompt":"x"},{"tier":"sonnet","prompt":"{result}"}]}`)
+	if err != nil {
+		t.Fatalf("chain launch should not error: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() { notified.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("chain did not complete in time")
+	}
+
+	if gotStatus != "failed" {
+		t.Fatalf("expected failed status, got %s", gotStatus)
 	}
 }
 

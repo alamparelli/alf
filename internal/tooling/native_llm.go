@@ -119,7 +119,7 @@ func (t LLMNativeTool) Run(ctx context.Context, argsJSON string) (string, error)
 
 	chainID := args.ChainID
 	if chainID == "" {
-		chainID = newChainID()
+		chainID = NewChainID()
 	}
 
 	// Launch chain in background goroutine.
@@ -144,7 +144,7 @@ func (t LLMNativeTool) executeChain(origin ChainOrigin, chainID, tier, prompt, s
 
 	var chainResult LLMChainResult
 	if err != nil {
-		chainResult = errorToChainResult(err)
+		chainResult = ErrorToChainResult(err)
 	} else {
 		chainResult = LLMChainResult{Status: 200, Message: result}
 	}
@@ -163,7 +163,7 @@ func (t LLMNativeTool) executeChain(origin ChainOrigin, chainID, tier, prompt, s
 	}
 
 	// Inject result into callback prompt.
-	callbackPrompt := injectChainResult(onComplete.Prompt, chainResult)
+	callbackPrompt := InjectChainResult(onComplete.Prompt, chainResult)
 
 	// If callback is fire-and-forget, continue the chain.
 	if onComplete.FireAndForget && onComplete.OnComplete != nil {
@@ -181,7 +181,7 @@ func (t LLMNativeTool) executeChain(origin ChainOrigin, chainID, tier, prompt, s
 
 	var finalChain LLMChainResult
 	if err != nil {
-		finalChain = errorToChainResult(err)
+		finalChain = ErrorToChainResult(err)
 	} else {
 		finalChain = LLMChainResult{Status: 200, Message: finalResult}
 	}
@@ -200,21 +200,21 @@ func (t LLMNativeTool) notify(origin ChainOrigin, chainID string, result LLMChai
 	t.NotifyFunc(origin, chainID, status, result.Message)
 }
 
-// injectChainResult replaces {result} in prompt with the structured chain result.
-func injectChainResult(prompt string, result LLMChainResult) string {
+// InjectChainResult replaces {result} in prompt with the structured chain result.
+func InjectChainResult(prompt string, result LLMChainResult) string {
 	replacement := fmt.Sprintf("<chain_result status=\"%d\">\n%s\n</chain_result>", result.Status, result.Message)
 	return strings.ReplaceAll(prompt, "{result}", replacement)
 }
 
-// newChainID generates a random 16-char hex ID for chain tracking.
-func newChainID() string {
+// NewChainID generates a random 16-char hex ID for chain tracking.
+func NewChainID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return fmt.Sprintf("%x", b)
 }
 
-// errorToChainResult converts an error to a LLMChainResult with appropriate status code.
-func errorToChainResult(err error) LLMChainResult {
+// ErrorToChainResult converts an error to a LLMChainResult with appropriate status code.
+func ErrorToChainResult(err error) LLMChainResult {
 	msg := err.Error()
 	status := 500
 	if strings.Contains(msg, "not found") {

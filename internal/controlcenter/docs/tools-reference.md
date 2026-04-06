@@ -119,9 +119,7 @@ search "oauth" --types apps,docs     # Apps and docs
 
 ### llm
 
-Invoke a specific LLM tier for one-shot text processing, or launch async chains with fire-and-forget mode.
-
-#### Sync mode (default)
+Invoke a specific LLM tier for one-shot synchronous text processing.
 
 ```bash
 llm <tier> "Classify this support ticket: ..."
@@ -129,56 +127,64 @@ llm <tier> "Summarize this document in 3 bullets: ..."
 llm <tier> "Translate to French: Hello world" --system "You are a professional translator"
 ```
 
-#### Fire-and-forget mode
-
-Runs the LLM call asynchronously and chains the result to an `on_complete` callback. Returns immediately with a chain ID. The last step in the chain notifies the user (chat message + SSE + Telegram).
-
-The `on_complete` prompt can use `{result}` which is replaced with the previous step's output wrapped in a structured block:
-
-```xml
-<chain_result status="200">
-previous step output here
-</chain_result>
-```
-
-Status codes: 200 (success), 400 (invalid), 404 (tier not found), 408 (timeout), 500 (error).
-
-```bash
-# Simple 2-step chain: extract then process
-llm haiku "extract all TODOs from this code" \
-  --fire-and-forget --max-depth 2 \
-  --on-complete '{"tier":"sonnet","prompt":"generate unit tests for these TODOs:\n{result}"}'
-
-# 3-step chain: extract → generate → summarize
-llm haiku "list public functions in main.go" \
-  --fire-and-forget --max-depth 3 \
-  --on-complete '{
-    "tier": "sonnet",
-    "prompt": "write tests for:\n{result}",
-    "fire_and_forget": true,
-    "on_complete": {
-      "tier": "haiku",
-      "prompt": "summarize what was tested:\n{result}"
-    }
-  }'
-```
-
-The callback receives status and message, so it can handle errors:
-
-```bash
-llm haiku "analyze logs for errors" \
-  --fire-and-forget --max-depth 2 \
-  --on-complete '{"tier":"sonnet","prompt":"If status=200, create a report:\n{result}\nIf status!=200, respond: analysis failed"}'
-```
+For async multi-step pipelines, use `agent_task chain` instead.
 
 | Flag | Required | Description |
 |------|----------|-------------|
 | `tier` | Yes | LLM tier name (run `tier list` to see available tiers) |
 | `prompt` | Yes | The prompt to send |
 | `--system` | No | Optional system prompt for persona or constraints |
-| `--fire-and-forget` | No | Run async, return immediately. Requires `--on-complete` |
-| `--on-complete` | fire-and-forget | JSON object defining the next LLM call. Must have `tier` and `prompt` |
-| `--max-depth` | fire-and-forget | Maximum chain depth (decremented at each step) |
+
+> **Legacy:** `llm` also supports `--fire-and-forget` with `--on-complete` for backward compatibility, but `agent_task chain` is preferred for its simpler flat schema.
+
+### agent_task
+
+Run background work: multi-agent team tasks or LLM chains.
+
+#### Chain mode
+
+Run a sequential LLM pipeline asynchronously. Returns immediately with a chain ID. The last step notifies the user (chat message + SSE + Telegram).
+
+Use `{result}` in a step's prompt to inject the previous step's output (wrapped in `<chain_result status="200">...</chain_result>`).
+
+```json
+{
+  "action": "chain",
+  "steps": [
+    {"tier": "haiku", "prompt": "Extract all TODOs from this code"},
+    {"tier": "sonnet", "prompt": "Generate unit tests for these TODOs:\n{result}"}
+  ]
+}
+```
+
+3-step example:
+
+```json
+{
+  "action": "chain",
+  "steps": [
+    {"tier": "haiku", "prompt": "List public functions in main.go"},
+    {"tier": "sonnet", "prompt": "Write tests for:\n{result}"},
+    {"tier": "haiku", "prompt": "Summarize what was tested:\n{result}"}
+  ]
+}
+```
+
+#### Launch mode
+
+Launch a background team task with tool access for autonomous multi-step work.
+
+```bash
+agent_task launch --prompt "implement feature X" --tier sonnet --team content
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `action` | Yes | `chain`, `launch`, `list`, `cancel`, `delete`, `approve` |
+| `steps` | chain | Array of `{tier, prompt, system?}` objects (min 2) |
+| `prompt` | launch | Task objective |
+| `--tier` | No | LLM tier for launch |
+| `--team` | No | Agent team name for launch |
 
 ## Memory Tools
 

@@ -227,6 +227,13 @@ type LLMChainResult struct {
 	Message string `json:"message"`
 }
 
+// ChainStep defines a single step in a flat chain array.
+type ChainStep struct {
+	Tier   string `json:"tier"`
+	Prompt string `json:"prompt"`
+	System string `json:"system,omitempty"`
+}
+
 // --- Search ---
 
 // SearchService provides cross-resource search.

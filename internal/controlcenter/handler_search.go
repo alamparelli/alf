@@ -123,7 +123,7 @@ func (h *SearchHandler) searchApps(query string) []any {
 	disabledSlugs := make(map[string]bool)
 	if h.Marketplace != nil {
 		for _, app := range h.Marketplace.List() {
-			if app.State != marketplace.StateEnabled {
+			if app.State != marketplace.StateInstalled {
 				disabledSlugs[app.Slug] = true
 			}
 		}
@@ -153,7 +153,7 @@ func (h *SearchHandler) searchApps(query string) []any {
 	// 2. Marketplace enabled apps not already in local
 	if h.Marketplace != nil {
 		for _, app := range h.Marketplace.List() {
-			if seen[app.Slug] || app.State != marketplace.StateEnabled {
+			if seen[app.Slug] || app.State != marketplace.StateInstalled {
 				continue
 			}
 			if h.marketplaceAppMatches(app, query) {
@@ -188,7 +188,7 @@ func (h *SearchHandler) searchMarketplace(query string) []any {
 	mpManaged := make(map[string]bool)
 	for _, app := range h.Marketplace.List() {
 		mpManaged[app.Slug] = true
-		if app.State == marketplace.StateEnabled {
+		if app.State == marketplace.StateInstalled {
 			activeApps[app.Slug] = true
 		}
 	}

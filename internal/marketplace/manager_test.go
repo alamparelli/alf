@@ -77,14 +77,16 @@ func TestNewManager(t *testing.T) {
 	}
 }
 
-func TestEnableDisable(t *testing.T) {
+func TestInstallActivatesApp(t *testing.T) {
 	base := setupTestEnv(t, "testapp")
 	m := NewManager(base)
 
-	// Enable
-	if err := m.Enable("testapp"); err != nil {
-		t.Fatalf("Enable: %v", err)
-	}
+	// Simulate install (sets state + activates).
+	m.mu.Lock()
+	m.states["testapp"] = StateInstalled
+	m.activate("testapp")
+	m.saveState()
+	m.mu.Unlock()
 
 	// Symlink should exist in tools/.
 	symlinkPath := filepath.Join(base, "tools", "testapp-action")
@@ -98,61 +100,40 @@ func TestEnableDisable(t *testing.T) {
 		t.Fatalf("expected schema file at %s: %v", schemaPath, err)
 	}
 
-	// Verify state is enabled.
+	// Verify state is installed.
 	apps := m.List()
 	found := false
 	for _, a := range apps {
 		if a.Slug == "testapp" {
 			found = true
-			if a.State != StateEnabled {
-				t.Fatalf("expected state %q, got %q", StateEnabled, a.State)
+			if a.State != StateInstalled {
+				t.Fatalf("expected state %q, got %q", StateInstalled, a.State)
 			}
 		}
 	}
 	if !found {
 		t.Fatal("testapp not found in List")
 	}
-
-	// Disable
-	if err := m.Disable("testapp"); err != nil {
-		t.Fatalf("Disable: %v", err)
-	}
-
-	// Symlink should be gone.
-	if _, err := os.Lstat(symlinkPath); !os.IsNotExist(err) {
-		t.Fatalf("expected symlink removed, got err: %v", err)
-	}
-
-	// Schema should be gone.
-	if _, err := os.Stat(schemaPath); !os.IsNotExist(err) {
-		t.Fatalf("expected schema removed, got err: %v", err)
-	}
-
-	// Verify state is disabled.
-	apps = m.List()
-	for _, a := range apps {
-		if a.Slug == "testapp" && a.State != StateDisabled {
-			t.Fatalf("expected state %q, got %q", StateDisabled, a.State)
-		}
-	}
 }
 
-func TestRestoreEnabled(t *testing.T) {
+func TestRestoreInstalled(t *testing.T) {
 	base := setupTestEnv(t, "testapp")
 
 	m1 := NewManager(base)
-	if err := m1.Enable("testapp"); err != nil {
-		t.Fatalf("Enable: %v", err)
-	}
+	m1.mu.Lock()
+	m1.states["testapp"] = StateInstalled
+	m1.activate("testapp")
+	m1.saveState()
+	m1.mu.Unlock()
 
 	// Remove symlinks to simulate restart.
 	os.Remove(filepath.Join(base, "tools", "testapp-action"))
 	os.Remove(filepath.Join(base, "tools", "testapp-action.json"))
 
-	// Simulate restart: create a fresh Manager and call RestoreEnabled.
+	// Simulate restart: create a fresh Manager and call RestoreInstalled.
 	m2 := NewManager(base)
-	if err := m2.RestoreEnabled(); err != nil {
-		t.Fatalf("RestoreEnabled: %v", err)
+	if err := m2.RestoreInstalled(); err != nil {
+		t.Fatalf("RestoreInstalled: %v", err)
 	}
 
 	symlinkPath := filepath.Join(base, "tools", "testapp-action")
@@ -171,32 +152,22 @@ func TestList(t *testing.T) {
 
 	m := NewManager(base)
 
-	// Simulate marketplace install for both (sets state entry).
+	// Simulate marketplace install for both.
 	m.mu.Lock()
 	m.states["alpha"] = StateInstalled
 	m.states["beta"] = StateInstalled
 	m.saveState()
 	m.mu.Unlock()
 
-	if err := m.Enable("alpha"); err != nil {
-		t.Fatalf("Enable alpha: %v", err)
-	}
-
 	apps := m.List()
 	if len(apps) != 2 {
 		t.Fatalf("expected 2 apps, got %d", len(apps))
 	}
 
-	states := make(map[string]AppState)
 	for _, a := range apps {
-		states[a.Slug] = a.State
-	}
-
-	if states["alpha"] != StateEnabled {
-		t.Errorf("alpha: expected %q, got %q", StateEnabled, states["alpha"])
-	}
-	if states["beta"] != StateInstalled {
-		t.Errorf("beta: expected %q, got %q", StateInstalled, states["beta"])
+		if a.State != StateInstalled {
+			t.Errorf("%s: expected %q, got %q", a.Slug, StateInstalled, a.State)
+		}
 	}
 
 	// Local app (no state entry) should NOT appear in List().
@@ -226,9 +197,13 @@ func TestUninstall(t *testing.T) {
 
 	m := NewManager(base)
 
-	if err := m.Enable("testapp"); err != nil {
-		t.Fatalf("Enable: %v", err)
-	}
+	// Install + activate.
+	m.mu.Lock()
+	m.states["testapp"] = StateInstalled
+	m.activate("testapp")
+	m.saveState()
+	m.mu.Unlock()
+
 	if err := m.Uninstall("testapp"); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
@@ -251,35 +226,6 @@ func TestUninstall(t *testing.T) {
 	}
 }
 
-func TestInstallDoesNotActivateToolsOrSkills(t *testing.T) {
-	base := setupTestEnv(t, "myapp")
-	m := NewManager(base)
-
-	// Simulate install by setting state to installed (like Install() does).
-	m.mu.Lock()
-	m.states["myapp"] = StateInstalled
-	m.saveState()
-	m.mu.Unlock()
-
-	// Tools should NOT exist after install-only.
-	symlinkPath := filepath.Join(base, "tools", "myapp-action")
-	if _, err := os.Lstat(symlinkPath); !os.IsNotExist(err) {
-		t.Fatalf("expected no tool symlink after install, got: %v", err)
-	}
-	schemaPath := filepath.Join(base, "tools", "myapp-action.json")
-	if _, err := os.Stat(schemaPath); !os.IsNotExist(err) {
-		t.Fatalf("expected no tool schema after install, got: %v", err)
-	}
-
-	// State should be installed, not enabled.
-	apps := m.List()
-	for _, a := range apps {
-		if a.Slug == "myapp" && a.State != StateInstalled {
-			t.Fatalf("expected state %q, got %q", StateInstalled, a.State)
-		}
-	}
-}
-
 func TestFullLifecycle(t *testing.T) {
 	base := setupTestEnv(t, "lifecycle")
 	m := NewManager(base)
@@ -287,50 +233,21 @@ func TestFullLifecycle(t *testing.T) {
 	toolSym := filepath.Join(base, "tools", "lifecycle-action")
 	toolSchema := filepath.Join(base, "tools", "lifecycle-action.json")
 
-	// 1. Install — no tools, state=installed
+	// 1. Install + activate — tools created, state=installed
 	m.mu.Lock()
 	m.states["lifecycle"] = StateInstalled
+	m.activate("lifecycle")
 	m.saveState()
 	m.mu.Unlock()
 
-	if _, err := os.Lstat(toolSym); !os.IsNotExist(err) {
-		t.Fatal("tools should not exist after install")
-	}
-
-	// 2. Enable — tools created, state=enabled
-	if err := m.Enable("lifecycle"); err != nil {
-		t.Fatalf("Enable: %v", err)
-	}
 	if _, err := os.Lstat(toolSym); err != nil {
-		t.Fatalf("tool symlink missing after enable: %v", err)
+		t.Fatalf("tool symlink missing after install: %v", err)
 	}
 	if _, err := os.Stat(toolSchema); err != nil {
-		t.Fatalf("tool schema missing after enable: %v", err)
+		t.Fatalf("tool schema missing after install: %v", err)
 	}
 
-	// 3. Disable — tools removed, state=disabled
-	if err := m.Disable("lifecycle"); err != nil {
-		t.Fatalf("Disable: %v", err)
-	}
-	if _, err := os.Lstat(toolSym); !os.IsNotExist(err) {
-		t.Fatal("tool symlink should be removed after disable")
-	}
-	if _, err := os.Stat(toolSchema); !os.IsNotExist(err) {
-		t.Fatal("tool schema should be removed after disable")
-	}
-
-	// 4. Re-enable — tools back
-	if err := m.Enable("lifecycle"); err != nil {
-		t.Fatalf("Re-enable: %v", err)
-	}
-	if _, err := os.Lstat(toolSym); err != nil {
-		t.Fatalf("tool symlink missing after re-enable: %v", err)
-	}
-
-	// 5. Disable then Uninstall — everything cleaned
-	if err := m.Disable("lifecycle"); err != nil {
-		t.Fatalf("Disable before uninstall: %v", err)
-	}
+	// 2. Uninstall — everything cleaned
 	if err := m.Uninstall("lifecycle"); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
@@ -344,31 +261,6 @@ func TestFullLifecycle(t *testing.T) {
 	}
 }
 
-func TestDisabledAppNotInRestoreEnabled(t *testing.T) {
-	base := setupTestEnv(t, "app1", "app2")
-	m := NewManager(base)
-
-	// Enable both, then disable app2.
-	m.Enable("app1")
-	m.Enable("app2")
-	m.Disable("app2")
-
-	// Remove all tool symlinks to simulate restart.
-	os.Remove(filepath.Join(base, "tools", "app1-action"))
-	os.Remove(filepath.Join(base, "tools", "app1-action.json"))
-
-	// RestoreEnabled should only restore app1, not app2.
-	m2 := NewManager(base)
-	m2.RestoreEnabled()
-
-	if _, err := os.Lstat(filepath.Join(base, "tools", "app1-action")); err != nil {
-		t.Fatal("app1 tools should be restored")
-	}
-	if _, err := os.Lstat(filepath.Join(base, "tools", "app2-action")); !os.IsNotExist(err) {
-		t.Fatal("app2 tools should NOT be restored (disabled)")
-	}
-}
-
 func TestOnChange(t *testing.T) {
 	base := setupTestEnv(t, "testapp")
 
@@ -379,17 +271,24 @@ func TestOnChange(t *testing.T) {
 		calls++
 	})
 
-	if err := m.Enable("testapp"); err != nil {
-		t.Fatalf("Enable: %v", err)
+	// Install + activate triggers onChange.
+	m.mu.Lock()
+	m.states["testapp"] = StateInstalled
+	m.activate("testapp")
+	m.saveState()
+	if m.onChange != nil {
+		m.onChange()
 	}
+	m.mu.Unlock()
+
 	if calls != 1 {
-		t.Fatalf("expected onChange called 1 time after Enable, got %d", calls)
+		t.Fatalf("expected onChange called 1 time after install, got %d", calls)
 	}
 
-	if err := m.Disable("testapp"); err != nil {
-		t.Fatalf("Disable: %v", err)
+	if err := m.Uninstall("testapp"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
 	}
 	if calls != 2 {
-		t.Fatalf("expected onChange called 2 times after Disable, got %d", calls)
+		t.Fatalf("expected onChange called 2 times after uninstall, got %d", calls)
 	}
 }

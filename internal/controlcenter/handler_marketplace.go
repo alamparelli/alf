@@ -80,10 +80,6 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = h.Manager.Install(slug)
 	case "update":
 		err = h.Manager.Update(slug)
-	case "enable":
-		err = h.Manager.Enable(slug)
-	case "disable":
-		err = h.Manager.Disable(slug)
 	case "uninstall":
 		err = h.Manager.Uninstall(slug)
 	default:
@@ -105,9 +101,9 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.EventBroker.Emit(EventApps)
 	}
 
-	// Include trust info in response for install/enable actions
+	// Include trust info in response for install actions
 	resp := map[string]any{"ok": true}
-	if action == "install" || action == "enable" {
+	if action == "install" {
 		apps := h.Manager.List()
 		for _, app := range apps {
 			if app.Slug == slug {

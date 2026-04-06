@@ -491,20 +491,6 @@ func (a *appAdapter) Update(slug string) error {
 	return a.marketplace.Update(slug)
 }
 
-func (a *appAdapter) Enable(slug string) error {
-	if a.marketplace == nil {
-		return errMarketplaceUnavailable
-	}
-	return a.marketplace.Enable(slug)
-}
-
-func (a *appAdapter) Disable(slug string) error {
-	if a.marketplace == nil {
-		return errMarketplaceUnavailable
-	}
-	return a.marketplace.Disable(slug)
-}
-
 func (a *appAdapter) Uninstall(slug string) error {
 	if a.marketplace == nil {
 		return errMarketplaceUnavailable

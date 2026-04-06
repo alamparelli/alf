@@ -19,8 +19,6 @@ type AppState string
 
 const (
 	StateInstalled AppState = "installed"
-	StateEnabled   AppState = "enabled"
-	StateDisabled  AppState = "disabled"
 )
 
 type AppInfo struct {
@@ -197,10 +195,9 @@ func (m *Manager) List() []AppInfo {
 	return apps
 }
 
-func (m *Manager) Enable(slug string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+// activate sets up tool symlinks, skills, permissions and starts the app service.
+// Must be called with m.mu held.
+func (m *Manager) activate(slug string) error {
 	manifest, err := m.loadManifest(slug)
 	if err != nil {
 		return err
@@ -253,8 +250,6 @@ func (m *Manager) Enable(slug string) error {
 		m.lockAppFiles(slug)
 	}
 
-	m.states[slug] = StateEnabled
-
 	// Cache declared permissions.
 	// SEC-002: Untrusted apps with nil permissions get safe defaults, not "all allowed".
 	isTrusted := m.trusted[slug]
@@ -280,14 +275,6 @@ func (m *Manager) Enable(slug string) error {
 		delete(m.services, slug)
 	}
 
-	if err := m.saveState(); err != nil {
-		return err
-	}
-
-	if m.onChange != nil {
-		m.onChange()
-	}
-
 	// Start the app's service if it has one.
 	if m.supervisor != nil {
 		m.supervisor.StartApp(slug)
@@ -296,23 +283,9 @@ func (m *Manager) Enable(slug string) error {
 	return nil
 }
 
-// resolveToolBinary finds the CLI tool binary for an app (bin/{slug} or bin/{arch}/{slug}).
-// Returns empty string if no CLI binary found — never falls back to "server".
-func (m *Manager) resolveToolBinary(slug string) string {
-	appDir := filepath.Join(m.dataDir, "apps", slug)
-	// Preferred: bin/{slug}
-	if fi, err := os.Stat(filepath.Join(appDir, "bin", slug)); err == nil && !fi.IsDir() {
-		return filepath.Join("bin", slug)
-	}
-	// Bundle format: bin/{arch}/{slug}
-	archBin := filepath.Join("bin", runtime.GOARCH, slug)
-	if fi, err := os.Stat(filepath.Join(appDir, archBin)); err == nil && !fi.IsDir() {
-		return archBin
-	}
-	return "" // no CLI binary available
-}
-
-func (m *Manager) Disable(slug string) error {
+// deactivate tears down tool symlinks, skills, permissions and stops the app service.
+// Caller must NOT hold m.mu (permissions cleared under separate lock for SEC-008).
+func (m *Manager) deactivate(slug string) error {
 	// SEC-008: Clear permissions first (under lock) to prevent use during teardown.
 	m.mu.Lock()
 	delete(m.perms, slug)
@@ -343,22 +316,28 @@ func (m *Manager) Disable(slug string) error {
 	// Unlink bundled skills.
 	m.unlinkAppSkills(slug)
 
-	m.states[slug] = StateDisabled
-
-	if err := m.saveState(); err != nil {
-		return err
-	}
-
-	if m.onChange != nil {
-		m.onChange()
-	}
-
 	return nil
 }
 
+// resolveToolBinary finds the CLI tool binary for an app (bin/{slug} or bin/{arch}/{slug}).
+// Returns empty string if no CLI binary found — never falls back to "server".
+func (m *Manager) resolveToolBinary(slug string) string {
+	appDir := filepath.Join(m.dataDir, "apps", slug)
+	// Preferred: bin/{slug}
+	if fi, err := os.Stat(filepath.Join(appDir, "bin", slug)); err == nil && !fi.IsDir() {
+		return filepath.Join("bin", slug)
+	}
+	// Bundle format: bin/{arch}/{slug}
+	archBin := filepath.Join("bin", runtime.GOARCH, slug)
+	if fi, err := os.Stat(filepath.Join(appDir, archBin)); err == nil && !fi.IsDir() {
+		return archBin
+	}
+	return "" // no CLI binary available
+}
+
 func (m *Manager) Uninstall(slug string) error {
-	// Disable first (removes symlinks + schemas).
-	if err := m.Disable(slug); err != nil {
+	// Deactivate first (removes symlinks, schemas, stops service).
+	if err := m.deactivate(slug); err != nil {
 		return err
 	}
 
@@ -378,10 +357,20 @@ func (m *Manager) Uninstall(slug string) error {
 
 	delete(m.states, slug)
 
-	return m.saveState()
+	if err := m.saveState(); err != nil {
+		return err
+	}
+
+	if m.onChange != nil {
+		m.onChange()
+	}
+
+	return nil
 }
 
-func (m *Manager) RestoreEnabled() error {
+// RestoreInstalled re-creates tool symlinks and permission caches on daemon startup
+// for all installed apps.
+func (m *Manager) RestoreInstalled() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -391,7 +380,7 @@ func (m *Manager) RestoreEnabled() error {
 	}
 
 	for slug, state := range m.states {
-		if state != StateEnabled {
+		if state != StateInstalled {
 			continue
 		}
 
@@ -640,15 +629,27 @@ func (m *Manager) Install(slug string) error {
 		}
 	}
 
-	// SEC-004: Lock app files immediately after download to prevent TOCTOU tampering.
-	m.lockAppFiles(slug)
-
 	m.mu.Lock()
 	m.states[slug] = StateInstalled
 	m.trusted[slug] = true // SEC-001: trust determined by install source, not manifest
-	m.saveState()
-	m.mu.Unlock()
 
+	// Activate immediately: create symlinks, permissions, start service.
+	if err := m.activate(slug); err != nil {
+		m.saveState()
+		m.mu.Unlock()
+		return err
+	}
+
+	if err := m.saveState(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+
+	if m.onChange != nil {
+		m.onChange()
+	}
+
+	m.mu.Unlock()
 	return nil
 }
 
@@ -925,8 +926,7 @@ func (m *Manager) CheckUpdates() []UpdateInfo {
 		if !ok {
 			continue
 		}
-		// Only check installed or enabled apps, skip disabled/available.
-		if state != StateInstalled && state != StateEnabled {
+		if state != StateInstalled {
 			continue
 		}
 
@@ -948,30 +948,26 @@ func (m *Manager) CheckUpdates() []UpdateInfo {
 	return updates
 }
 
-// Update re-downloads an app from the registry, preserving its data/ directory
-// and current state (enabled/installed).
+// Update re-downloads an app from the registry, preserving its data/ directory.
 func (m *Manager) Update(slug string) error {
 	if m.registryURL == "" {
 		return fmt.Errorf("no registry configured")
 	}
 
 	m.mu.Lock()
-	prevState, hasState := m.states[slug]
+	_, hasState := m.states[slug]
 	m.mu.Unlock()
 
 	if !hasState {
 		return fmt.Errorf("app %q is not installed", slug)
 	}
 
-	// Stop service before updating files.
-	if m.supervisor != nil {
-		m.supervisor.StopApp(slug)
+	// Deactivate before updating files.
+	if err := m.deactivate(slug); err != nil {
+		return err
 	}
 
 	appDir := filepath.Join(m.dataDir, "apps", slug)
-
-	// Unlock files first so they can be removed/overwritten.
-	m.unlockAppFiles(slug)
 
 	// Remove everything except data/ (preserve user data).
 	entries, err := os.ReadDir(appDir)
@@ -995,16 +991,19 @@ func (m *Manager) Update(slug string) error {
 		}
 	}
 
-	// Restore previous state.
+	// Re-activate: restore symlinks, permissions, start service.
 	m.mu.Lock()
-	m.states[slug] = prevState
-	m.saveState()
-	m.mu.Unlock()
-
-	// If the app was enabled, re-enable to refresh symlinks/schemas.
-	if prevState == StateEnabled {
-		return m.Enable(slug)
+	m.states[slug] = StateInstalled
+	if err := m.activate(slug); err != nil {
+		m.saveState()
+		m.mu.Unlock()
+		return err
 	}
+	m.saveState()
+	if m.onChange != nil {
+		m.onChange()
+	}
+	m.mu.Unlock()
 
 	return nil
 }

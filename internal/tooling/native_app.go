@@ -16,18 +16,18 @@ func (AppNativeTool) ToolName() string { return "app" }
 func (AppNativeTool) Schema() ToolSchema {
 	return ToolSchema{
 		Name:        "app",
-		Description: "Manage installed apps and marketplace: list, catalog, install, update, enable, disable, uninstall, restart services, or check service status.",
+		Description: "Manage installed apps and marketplace: list, catalog, install, update, uninstall, restart services, or check service status.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"list", "catalog", "install", "update", "enable", "disable", "uninstall", "restart", "services"},
+					"enum":        []string{"list", "catalog", "install", "update", "uninstall", "restart", "services"},
 					"description": "Action to perform. 'restart' restarts an app's background service. 'services' shows status of all running services.",
 				},
 				"slug": map[string]any{
 					"type":        []string{"string", "null"},
-					"description": "App slug (required for install/update/enable/disable/uninstall).",
+					"description": "App slug (required for install/update/uninstall).",
 				},
 			},
 			"required":             []string{"action"},
@@ -83,24 +83,6 @@ func (t AppNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
 		}
 		return fmt.Sprintf("App %q updated.", args.Slug), nil
 
-	case "enable":
-		if args.Slug == "" {
-			return "", fmt.Errorf("slug is required for enable")
-		}
-		if err := t.Service.Enable(args.Slug); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("App %q enabled.", args.Slug), nil
-
-	case "disable":
-		if args.Slug == "" {
-			return "", fmt.Errorf("slug is required for disable")
-		}
-		if err := t.Service.Disable(args.Slug); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("App %q disabled.", args.Slug), nil
-
 	case "uninstall":
 		if args.Slug == "" {
 			return "", fmt.Errorf("slug is required for uninstall")
@@ -128,6 +110,6 @@ func (t AppNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
 		return string(data), nil
 
 	default:
-		return "", fmt.Errorf("unknown action: %s (valid: list, catalog, install, update, enable, disable, uninstall, restart, services)", args.Action)
+		return "", fmt.Errorf("unknown action: %s (valid: list, catalog, install, update, uninstall, restart, services)", args.Action)
 	}
 }

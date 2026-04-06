@@ -35,7 +35,7 @@ func TestValidatePermissions_Nil(t *testing.T) {
 
 func TestManager_HasPermission_NoRestrictions(t *testing.T) {
 	m := &Manager{
-		states: map[string]AppState{"my-app": StateEnabled},
+		states: map[string]AppState{"my-app": StateInstalled},
 		perms:  make(map[string][]string),
 	}
 	// App not in perms cache = no restrictions
@@ -46,7 +46,7 @@ func TestManager_HasPermission_NoRestrictions(t *testing.T) {
 
 func TestManager_HasPermission_Granted(t *testing.T) {
 	m := &Manager{
-		states: map[string]AppState{"my-app": StateEnabled},
+		states: map[string]AppState{"my-app": StateInstalled},
 		perms:  map[string][]string{"my-app": {"storage", "bash"}},
 	}
 	if !m.HasPermission("my-app", "storage") {
@@ -59,7 +59,7 @@ func TestManager_HasPermission_Granted(t *testing.T) {
 
 func TestManager_HasPermission_Denied(t *testing.T) {
 	m := &Manager{
-		states: map[string]AppState{"my-app": StateEnabled},
+		states: map[string]AppState{"my-app": StateInstalled},
 		perms:  map[string][]string{"my-app": {"storage"}},
 	}
 	if m.HasPermission("my-app", "bash") {
@@ -72,7 +72,7 @@ func TestManager_HasPermission_Denied(t *testing.T) {
 
 func TestManager_HasPermission_EmptyPerms(t *testing.T) {
 	m := &Manager{
-		states: map[string]AppState{"my-app": StateEnabled},
+		states: map[string]AppState{"my-app": StateInstalled},
 		perms:  map[string][]string{"my-app": {}}, // explicitly empty = deny all
 	}
 	if m.HasPermission("my-app", "storage") {
@@ -149,7 +149,7 @@ func TestCapPermissionsForUntrusted(t *testing.T) {
 func TestManager_HasPermission_UntrustedCapped(t *testing.T) {
 	// Simulate an untrusted app that declared bash+storage but got capped
 	m := &Manager{
-		states:  map[string]AppState{"untrusted-app": StateEnabled},
+		states:  map[string]AppState{"untrusted-app": StateInstalled},
 		perms:   map[string][]string{"untrusted-app": CapPermissionsForUntrusted([]string{"storage", "bash"})},
 		trusted: map[string]bool{},
 	}
@@ -164,7 +164,7 @@ func TestManager_HasPermission_UntrustedCapped(t *testing.T) {
 func TestManager_HasPermission_UntrustedNilPerms(t *testing.T) {
 	// SEC-002: Untrusted app with nil permissions must get safe defaults, not all-allow
 	m := &Manager{
-		states:  map[string]AppState{"evil-app": StateEnabled},
+		states:  map[string]AppState{"evil-app": StateInstalled},
 		perms:   map[string][]string{"evil-app": {"storage", "events", "clipboard"}}, // what Enable() would set
 		trusted: map[string]bool{}, // not trusted
 	}

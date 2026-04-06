@@ -127,9 +127,8 @@ func (s *fileAppStore) List() ([]AppMeta, error) {
 	return apps, nil
 }
 
-// loadMarketplaceState reads .state.json and returns:
-//   - disabled: slugs that should NOT appear (state is not "enabled")
-//   - marketplace: all slugs tracked by the marketplace
+// loadMarketplaceState reads .state.json and returns the set of marketplace-tracked slugs.
+// All installed apps are active (no disabled state).
 func loadMarketplaceState(appsDir string) (disabled, marketplace map[string]bool) {
 	data, err := os.ReadFile(filepath.Join(appsDir, ".state.json"))
 	if err != nil {
@@ -143,11 +142,8 @@ func loadMarketplaceState(appsDir string) (disabled, marketplace map[string]bool
 	}
 	disabled = make(map[string]bool)
 	marketplace = make(map[string]bool)
-	for slug, state := range sf.States {
+	for slug := range sf.States {
 		marketplace[slug] = true
-		if state != "enabled" {
-			disabled[slug] = true
-		}
 	}
 	return disabled, marketplace
 }

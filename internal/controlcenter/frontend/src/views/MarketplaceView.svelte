@@ -6,7 +6,7 @@
   import { nav } from '../stores/nav.svelte';
   import Card from '../components/shared/Card.svelte';
   import Toggle from '../components/shared/Toggle.svelte';
-  import { Download, Power, PowerOff, Trash2, RefreshCw, Tag, User, FolderOpen, Package, Code2 } from 'lucide-svelte';
+  import { Download, Trash2, RefreshCw, Tag, User, FolderOpen, Package, Code2 } from 'lucide-svelte';
   import { getIcon } from '../lib/icons';
 
   let apps = $state([]);
@@ -16,9 +16,7 @@
   let developerSlugs = $state(new Set());
 
   const stateColors = {
-    enabled: 'var(--green)',
-    disabled: 'var(--yellow)',
-    installed: 'var(--sapphire)',
+    installed: 'var(--green)',
     available: 'var(--text-dim)',
   };
 
@@ -227,18 +225,6 @@
                     <button class="btn btn-sm btn-primary" onclick={() => doAction(app.slug, 'install')}>
                       <Download size={12} /> Install
                     </button>
-                  {:else if app.state === 'enabled' && !isOwnApp(app)}
-                    <button class="btn btn-sm btn-warning" onclick={() => doAction(app.slug, 'disable')}>
-                      <PowerOff size={12} /> Disable
-                    </button>
-                  {:else if app.state === 'disabled'}
-                    <button class="btn btn-sm btn-success" onclick={() => doAction(app.slug, 'enable')}>
-                      <Power size={12} /> Enable
-                    </button>
-                  {:else if app.state === 'installed'}
-                    <button class="btn btn-sm btn-success" onclick={() => doAction(app.slug, 'enable')}>
-                      <Power size={12} /> Enable
-                    </button>
                   {/if}
 
                   {#if app._update}
@@ -247,7 +233,7 @@
                     </button>
                   {/if}
 
-                  {#if app.state && app.state !== 'available' && !isOwnApp(app)}
+                  {#if app.state === 'installed' && !isOwnApp(app)}
                     <button class="btn btn-sm btn-danger" onclick={() => doAction(app.slug, 'uninstall', `Uninstall "${app.name}"? This will remove all app data.`)}>
                       <Trash2 size={12} /> Uninstall
                     </button>

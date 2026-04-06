@@ -100,8 +100,6 @@ type AppService interface {
 	Catalog() ([]RemoteAppInfo, error)
 	Install(slug string) error
 	Update(slug string) error
-	Enable(slug string) error
-	Disable(slug string) error
 	Uninstall(slug string) error
 	Restart(slug string) error
 	ServiceStatus() []ServiceStatusInfo

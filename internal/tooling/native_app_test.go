@@ -22,8 +22,6 @@ func (m *mockAppService) Catalog() ([]RemoteAppInfo, error) {
 
 func (m *mockAppService) Install(slug string) error       { return m.opErr }
 func (m *mockAppService) Update(slug string) error        { return m.opErr }
-func (m *mockAppService) Enable(slug string) error        { return m.opErr }
-func (m *mockAppService) Disable(slug string) error       { return m.opErr }
 func (m *mockAppService) Uninstall(slug string) error     { return m.opErr }
 func (m *mockAppService) Restart(slug string) error       { return m.opErr }
 func (m *mockAppService) ServiceStatus() []ServiceStatusInfo { return nil }
@@ -115,29 +113,7 @@ func TestAppTool_InstallError(t *testing.T) {
 	}
 }
 
-func TestAppTool_Enable(t *testing.T) {
-	tool := AppNativeTool{Service: &mockAppService{}}
 
-	out, err := tool.Run(context.Background(), `{"action":"enable","slug":"weather"}`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(out, "enabled") {
-		t.Fatalf("expected enabled message, got: %s", out)
-	}
-}
-
-func TestAppTool_Disable(t *testing.T) {
-	tool := AppNativeTool{Service: &mockAppService{}}
-
-	out, err := tool.Run(context.Background(), `{"action":"disable","slug":"weather"}`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(out, "disabled") {
-		t.Fatalf("expected disabled message, got: %s", out)
-	}
-}
 
 func TestAppTool_Uninstall(t *testing.T) {
 	tool := AppNativeTool{Service: &mockAppService{}}

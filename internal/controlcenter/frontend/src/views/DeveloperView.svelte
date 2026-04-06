@@ -44,7 +44,8 @@
     connStatus = 'pending'
     connLabel = 'Checking...'
     try {
-      const data = await api<any>('GET', '/api/developer/status')
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+      const data = await Promise.race([api<any>('GET', '/api/developer/status'), timeout]) as any
       if (data.connected) {
         connected = true
         developer = data.developer || ''
@@ -56,11 +57,11 @@
         connStatus = 'err'
         connLabel = data.error?.includes('locked') ? 'Vault is locked' :
                     data.error?.includes('not configured') ? 'No marketplace service configured' :
-                    'Connection failed'
+                    'Marketplace not reachable'
       }
     } catch {
       connStatus = 'err'
-      connLabel = 'Check failed'
+      connLabel = 'Marketplace not reachable'
     }
   }
 

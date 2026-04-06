@@ -2,574 +2,510 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Developer Tools</title>
-<link rel="stylesheet" id="alf-theme-link" href="/static/theme-sage.css">
+<link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
 <script src="/static/theme-init.js"></script>
+<script src="/static/alf-app-sdk.js"></script>
+<script src="/static/alf-components.js"></script>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
-  h1 { font-size: 1.1rem; margin-bottom: 1.5rem; color: var(--accent); }
-  h2 { font-size: 0.95rem; margin-bottom: 0.75rem; }
-  .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.25rem; }
-  label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.2rem; margin-top: 0.7rem; }
-  label:first-child { margin-top: 0; }
-  input[type="text"], select { width: 100%; padding: 0.5rem 0.65rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.85rem; font-family: inherit; }
-  select { cursor: pointer; appearance: auto; }
-  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  .mono { font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace; font-size: 0.82rem; }
-  .row { display: flex; gap: 0.75rem; }
-  .row > * { flex: 1; }
-  button { padding: 0.45rem 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); cursor: pointer; font-size: 0.82rem; margin-top: 0.7rem; }
-  button:hover { border-color: var(--accent); }
-  .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-  .btn-primary:hover { opacity: 0.9; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.75rem; margin-top: 0; }
+  body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
   .conn-status { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
   .conn-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .conn-dot.ok { background: var(--green); }
   .conn-dot.err { background: var(--red); }
   .conn-dot.pending { background: var(--yellow, orange); }
-  .hint { font-size: 0.75rem; color: var(--text-dim); margin-top: 6px; }
-  .status { margin-top: 0.6rem; padding: 0.5rem 0.65rem; border-radius: var(--radius); font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; font-family: 'JetBrains Mono', monospace; display: none; }
-  .status.error { display: block; background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 25%, transparent); }
-  .status.success { display: block; background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 25%, transparent); }
-  .status.info { display: block; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-dim); border: 1px solid var(--border); }
   .tool-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .tool-chip { font-size: 0.72rem; padding: 2px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text-dim); cursor: pointer; transition: all 0.15s; user-select: none; }
   .tool-chip.selected { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
   .tool-chip:hover { border-color: var(--accent); }
-  .catalog-list { list-style: none; }
-  .catalog-list li { padding: 0.5rem 0.5rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; border-radius: 4px; transition: background 0.15s; }
-  .catalog-list li:hover { background: var(--bg); }
-  .catalog-list li:last-child { border-bottom: none; }
+  .catalog-item { padding: 0.5rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; border-radius: 4px; cursor: pointer; transition: background 0.15s; }
+  .catalog-item:hover { background: var(--bg); }
+  .catalog-item:last-child { border-bottom: none; }
   .app-slug { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-dim); }
-  .app-ver { font-size: 0.72rem; color: var(--text-dim); background: var(--bg); padding: 0.1rem 0.4rem; border-radius: var(--radius); border: 1px solid var(--border); }
-  .empty { color: var(--text-dim); font-size: 0.82rem; font-style: italic; padding: 0.5rem 0; }
-  .section-sep { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+  .app-ver { font-size: 0.72rem; color: var(--text-dim); background: var(--bg); padding: 0.1rem 0.4rem; border-radius: var(--radius, 8px); border: 1px solid var(--border); }
+  .status { margin-top: 0.6rem; padding: 0.5rem 0.65rem; border-radius: var(--radius, 8px); font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; font-family: 'JetBrains Mono', monospace; display: none; }
+  .status.error { display: block; background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 25%, transparent); }
+  .status.success { display: block; background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 25%, transparent); }
+  .status.info { display: block; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-dim); border: 1px solid var(--border); }
+  .setup-instructions { font-size: 0.82rem; margin-top: 1rem; }
+  .setup-instructions ol { padding-left: 1.2rem; margin: 0.4rem 0 0; line-height: 1.7; }
 </style>
 </head>
-<body class="page">
-
-<h1>Developer Tools</h1>
-
-<!-- Connection -->
-<div class="card">
-  <h2>Marketplace Connection</h2>
-  <div class="conn-status">
-    <span class="conn-dot pending" id="connDot"></span>
-    <span id="connLabel">Checking...</span>
+<body>
+<div class="app-shell">
+  <div class="app-header">
+    <h1 class="app-header-title">Developer Tools</h1>
   </div>
 
-  <!-- Setup instructions, shown when not connected -->
-  <div id="vaultSetup" style="display:none; margin-top: 1rem;">
-    <p style="font-size:0.82rem; color:var(--text-dim); margin-bottom:0.75rem;">Create a <code>marketplace</code> service in your Vault to connect to the registry.</p>
-    <div style="font-size:0.82rem; line-height:1.7; margin-bottom:0.75rem;">
-      <strong>Steps:</strong>
-      <ol style="padding-left:1.2rem; margin:0.4rem 0 0;">
-        <li>Open <a href="#" id="vaultLink2" style="color:var(--accent)">Vault</a></li>
-        <li>Add a new service named <code class="mono">marketplace</code></li>
-        <li>Base URL: <code class="mono">https://marketplace.lamparelli.eu</code></li>
-        <li>Auth type: <code class="mono">bearer</code></li>
-        <li>Token: your developer API key (from the marketplace admin)</li>
-      </ol>
+  <div class="app-body">
+
+    <!-- Connection -->
+    <div class="card mb-md">
+      <h3>Marketplace Connection</h3>
+      <div class="conn-status">
+        <span class="conn-dot pending" id="connDot"></span>
+        <span id="connLabel">Checking...</span>
+      </div>
+      <div id="vaultSetup" class="setup-instructions hidden">
+        <p class="text-dim">Create a <code>marketplace</code> service in your Vault to connect to the registry.</p>
+        <ol>
+          <li>Open <a href="#" id="vaultLink" style="color:var(--accent)">Vault</a></li>
+          <li>Add a service named <code>marketplace</code></li>
+          <li>Base URL: <code id="marketplaceUrl">...</code></li>
+          <li>Auth type: <code>bearer</code></li>
+          <li>Token: your developer API key</li>
+        </ol>
+        <button class="btn btn-sm mt-sm" id="openVaultBtn">Open Vault</button>
+      </div>
+      <div id="vaultConnected" class="hidden">
+        <p class="meta mt-sm">Connected via vault service <strong>marketplace</strong>.</p>
+      </div>
     </div>
-    <button class="btn-sm" id="setupSkipBtn">Open Vault</button>
+
+    <!-- Publish -->
+    <div class="card mb-md">
+      <h3>Publish to Marketplace</h3>
+
+      <alf-select label="Source App" id="pubApp">
+        <option value="">-- Pick a local app --</option>
+      </alf-select>
+
+      <div class="flex gap-md">
+        <alf-input label="Slug" id="pubSlug" placeholder="my-app" style="flex:1"></alf-input>
+        <alf-input label="Version" id="pubVersion" placeholder="0.1.0" value="0.1.0" style="flex:1"></alf-input>
+      </div>
+      <alf-input label="Display Name" id="pubName" placeholder="My App"></alf-input>
+      <alf-input label="Description" id="pubDesc" placeholder="One-liner describing what the app does"></alf-input>
+      <div class="flex gap-md">
+        <alf-input label="Category" id="pubCategory" placeholder="utilities" style="flex:1"></alf-input>
+        <alf-input label="Icon" id="pubIcon" placeholder="box (Lucide icon name)" style="flex:1"></alf-input>
+      </div>
+      <alf-input label="What's New" id="pubChangelog" placeholder="e.g. Added dark mode, fixed export bug" hint="Changelog shown to users when they update."></alf-input>
+
+      <div class="divider"></div>
+
+      <label class="section-label">Bundled Tools</label>
+      <p class="meta mb-sm">Toggle tools to include in the app package.</p>
+      <div class="tool-chips" id="toolChips"><span class="text-dim">Loading tools...</span></div>
+
+      <alf-select label="Bundled Skill" id="pubSkill" hint="Optional skill directory (must contain SKILL.md).">
+        <option value="">None</option>
+      </alf-select>
+
+      <div class="flex gap-sm mt-md">
+        <button class="btn btn-sm" id="validateBtn">Validate</button>
+        <button class="btn btn-primary btn-sm" id="publishBtn" disabled>Publish</button>
+      </div>
+      <div id="validateResults" class="status"></div>
+      <div id="publishStatus" class="status"></div>
+    </div>
+
+    <!-- Catalog -->
+    <div class="card">
+      <div class="flex" style="justify-content:space-between;align-items:center">
+        <h3 style="margin:0">Marketplace Catalog</h3>
+        <button class="btn btn-sm" id="refreshBtn">Refresh</button>
+      </div>
+      <div id="catalogList"></div>
+      <alf-empty-state id="catalogEmpty" message="No apps in catalog." class="hidden"></alf-empty-state>
+    </div>
+
   </div>
-
-  <!-- Shown when connected -->
-  <div id="vaultConnected" style="display:none">
-    <p class="hint" style="margin-top:6px">Connected via vault service <strong>marketplace</strong>. <a href="#" id="vaultLink" style="color:var(--accent)">Manage in Vault</a></p>
-  </div>
-</div>
-
-<!-- Publish -->
-<div class="card">
-  <h2>Publish to Marketplace</h2>
-
-  <label>Source App</label>
-  <select id="pubApp" class="mono">
-    <option value="">-- Pick a local app --</option>
-  </select>
-  <p class="hint">Local app directory. Auto-fills fields from app.json and manifest.json.</p>
-
-  <div class="row">
-    <div><label>Slug</label><input type="text" id="pubSlug" class="mono" placeholder="my-app"></div>
-    <div><label>Version</label><input type="text" id="pubVersion" class="mono" placeholder="0.1.0" value="0.1.0"></div>
-  </div>
-  <label>Display Name</label><input type="text" id="pubName" placeholder="My App">
-  <label>Description</label><input type="text" id="pubDesc" placeholder="One-liner describing what the app does">
-  <div class="row">
-    <div><label>Category</label><input type="text" id="pubCategory" placeholder="utilities"></div>
-    <div><label>Icon</label><input type="text" id="pubIcon" class="mono" placeholder="box (Lucide icon name)"></div>
-  </div>
-
-  <label>What's New</label>
-  <input type="text" id="pubChangelog" placeholder="e.g. Added dark mode, fixed export bug">
-  <p class="hint">Changelog shown to users when they update.</p>
-
-  <hr class="section-sep">
-
-  <label>Bundled Tools</label>
-  <p class="hint">Toggle tools to include in the app package.</p>
-  <div class="tool-chips" id="toolChips"><span class="empty">Loading tools...</span></div>
-
-  <label>Bundled Skill</label>
-  <select id="pubSkill" class="mono">
-    <option value="">None</option>
-  </select>
-  <p class="hint">Optional skill directory (must contain SKILL.md).</p>
-
-  <button class="btn-secondary" id="validateBtn">Validate</button>
-  <button class="btn-primary" id="publishBtn" disabled>Publish</button>
-  <div id="validateResults" class="status" style="display:none"></div>
-  <div id="publishStatus" class="status"></div>
-</div>
-
-<!-- Catalog -->
-<div class="card">
-  <div style="display:flex;justify-content:space-between;align-items:center">
-    <h2 style="margin:0">Marketplace Catalog</h2>
-    <button class="btn-sm" id="refreshBtn">Refresh</button>
-  </div>
-  <ul class="catalog-list" id="catalogList"></ul>
-  <div id="catalogEmpty" class="empty" style="display:none">No apps in catalog.</div>
 </div>
 
 <script>
-(function() {
-  var connected = false;
-  var currentDeveloper = null;
-  var selectedTools = [];
-  var appsList = [];
-  var catalogSlugs = null; // null = not loaded yet, [] = loaded but empty
-  var foreignSlugs = []; // slugs owned by other developers (downloaded apps)
-  var marketplaceSlugs = []; // all slugs managed by the marketplace (installed from remote)
-  var toolsReady = null; // Promise resolved when tool chips are loaded
-
-  function bash(cmd) {
-    return fetch('/api/bash', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ command: cmd })
-    }).then(function(r) { return r.json(); });
+AlfSDK.init({
+  slug: 'developer',
+  onThemeChange: function(palette, isDark) {
+    document.getElementById('alf-theme').href = '/static/theme-' + palette + '.css';
   }
+});
 
-  function $(id) { return document.getElementById(id); }
-  function setStatus(el, msg, type) { el.textContent = msg; el.className = 'status ' + type; }
+// --- State ---
+var connected = false;
+var currentDeveloper = null;
+var selectedTools = [];
+var appsList = [];
+var catalogSlugs = null;
+var foreignSlugs = [];
+var marketplaceSlugs = [];
+var toolsReady = null;
 
-  // SEC-001: Shell-escape a path for safe interpolation into bash commands.
-  // Only allows /home/alf/data/apps/{alphanumeric-hyphen}... paths.
-  function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
-  function safePath(p) {
-    if (!/^\/home\/alf\/data\/apps\/[a-zA-Z0-9][a-zA-Z0-9_-]*/.test(p)) return null;
-    return sq(p);
-  }
+// --- Helpers ---
+function $(id) { return document.getElementById(id); }
 
-  function goVault(e) {
-    if (e) e.preventDefault();
-    if (window.parent && window.parent.navigateTo) window.parent.navigateTo('vault');
-  }
+function setStatus(el, msg, type) {
+  el.textContent = msg;
+  el.className = 'status ' + type;
+}
 
-  var vaultLink = $('vaultLink');
-  if (vaultLink) vaultLink.addEventListener('click', goVault);
+function bash(cmd) {
+  return fetch('/api/bash', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ command: cmd })
+  }).then(function(r) { return r.json(); });
+}
 
-  var vaultLink2 = $('vaultLink2');
-  if (vaultLink2) vaultLink2.addEventListener('click', goVault);
+function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
 
-  $('setupSkipBtn').addEventListener('click', function() {
-    $('vaultSetup').style.display = 'none';
-    goVault();
+function safePath(p) {
+  if (!/^\/home\/alf\/data\/apps\/[a-zA-Z0-9][a-zA-Z0-9_-]*/.test(p)) return null;
+  return sq(p);
+}
+
+function esc(s) {
+  if (!s) return '';
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function goVault(e) {
+  if (e) e.preventDefault();
+  if (window.parent && window.parent.navigateTo) window.parent.navigateTo('vault');
+}
+
+// --- Connection ---
+function checkConnection() {
+  $('connDot').className = 'conn-dot pending';
+  $('connLabel').textContent = 'Checking...';
+  $('vaultSetup').classList.add('hidden');
+  $('vaultConnected').classList.add('hidden');
+
+  var timeout = new Promise(function(_, reject) {
+    setTimeout(function() { reject(new Error('timeout')); }, 8000);
   });
 
-  // --- Connection ---
-  function checkConnection() {
-    $('connDot').className = 'conn-dot pending';
-    $('connLabel').textContent = 'Checking...';
-    $('vaultSetup').style.display = 'none';
-    $('vaultConnected').style.display = 'none';
-    bash("vault proxy marketplace GET /api/health 2>&1").then(function(res) {
-      var out = (res.output || '').trim();
-      try {
-        var data = JSON.parse(out);
-        if (data.status === 'connected') {
-          connected = true;
-          currentDeveloper = data.developer || null;
-          $('connDot').className = 'conn-dot ok';
-          $('connLabel').textContent = 'Connected as ' + (data.developer || 'developer');
-          $('vaultConnected').style.display = '';
-          $('publishBtn').disabled = false;
-          loadCatalog();
-          return;
-        }
-      } catch(e) {}
-      connected = false;
-      $('connDot').className = 'conn-dot err';
-      if (out.indexOf('not found') !== -1 || out.indexOf('unknown') !== -1) {
-        $('connLabel').textContent = 'No marketplace service configured';
-        $('vaultSetup').style.display = '';
-      } else if (out.indexOf('locked') !== -1) {
-        $('connLabel').textContent = 'Vault is locked -- unlock it in the Control Center first';
-      } else {
-        $('connLabel').textContent = 'Connection failed';
-        $('vaultSetup').style.display = '';
+  Promise.race([
+    bash("vault proxy marketplace GET /api/health 2>&1"),
+    timeout
+  ]).then(function(res) {
+    var out = (res.output || '').trim();
+    try {
+      var data = JSON.parse(out);
+      if (data.status === 'connected') {
+        connected = true;
+        currentDeveloper = data.developer || null;
+        $('connDot').className = 'conn-dot ok';
+        $('connLabel').textContent = 'Connected as ' + (data.developer || 'developer');
+        $('vaultConnected').classList.remove('hidden');
+        $('publishBtn').disabled = false;
+        loadCatalog();
+        return;
       }
-    }).catch(function() {
-      $('connDot').className = 'conn-dot err';
-      $('connLabel').textContent = 'Check failed';
-      $('vaultSetup').style.display = '';
-    });
-  }
+    } catch (e) { /* not JSON */ }
 
-  // --- Apps dropdown ---
-  function populateAppsDropdown(dirs) {
-    var sel = $('pubApp');
-    sel.innerHTML = '<option value="">-- Pick a local app --</option>';
-    appsList = dirs;
-    // Only show apps that are locally developed: not marketplace-installed, not foreign
-    var filtered = dirs.filter(function(name) {
-      if (foreignSlugs.indexOf(name) !== -1) return false;
-      if (marketplaceSlugs.indexOf(name) !== -1 && (catalogSlugs || []).indexOf(name) === -1) return false;
-      return true;
+    connected = false;
+    $('connDot').className = 'conn-dot err';
+    if (out.indexOf('not found') !== -1 || out.indexOf('unknown') !== -1) {
+      $('connLabel').textContent = 'No marketplace service configured';
+      $('vaultSetup').classList.remove('hidden');
+    } else if (out.indexOf('locked') !== -1) {
+      $('connLabel').textContent = 'Vault is locked — unlock it first';
+    } else {
+      $('connLabel').textContent = 'Marketplace not reachable';
+      $('vaultSetup').classList.remove('hidden');
+    }
+  }).catch(function() {
+    connected = false;
+    $('connDot').className = 'conn-dot err';
+    $('connLabel').textContent = 'Marketplace not reachable';
+    $('vaultSetup').classList.remove('hidden');
+  });
+}
+
+// --- Apps dropdown ---
+function populateAppsDropdown(dirs) {
+  var sel = $('pubApp');
+  sel.innerHTML = '<option value="">-- Pick a local app --</option>';
+  appsList = dirs;
+  var filtered = dirs.filter(function(name) {
+    if (foreignSlugs.indexOf(name) !== -1) return false;
+    if (marketplaceSlugs.indexOf(name) !== -1 && (catalogSlugs || []).indexOf(name) === -1) return false;
+    return true;
+  });
+  filtered.forEach(function(name) {
+    var opt = document.createElement('option');
+    opt.value = '/home/alf/data/apps/' + name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+}
+
+function loadAppsDropdown() {
+  bash("ls -1 /home/alf/data/apps/ 2>/dev/null | sort").then(function(res) {
+    var dirs = (res.output || '').trim().split('\n').filter(function(d) {
+      return d && d !== '' && d !== 'README.md' && d.indexOf('.') !== 0;
     });
-    filtered.forEach(function(name) {
+    appsList = dirs;
+    populateAppsDropdown(dirs);
+  });
+}
+
+// --- Auto-fill on app select ---
+$('pubApp').addEventListener('change', function() {
+  var path = this.value;
+  if (!path) return;
+  var slug = path.split('/').pop();
+  $('pubSlug').value = slug;
+
+  var sp = safePath(path);
+  if (!sp) return;
+
+  bash("cat " + sp + "/app.json 2>/dev/null").then(function(res) {
+    try {
+      var meta = JSON.parse(res.output || '{}');
+      if (meta.name) $('pubName').value = meta.name;
+      if (meta.description) $('pubDesc').value = meta.description;
+      if (meta.icon) $('pubIcon').value = meta.icon;
+    } catch (e) { /* no app.json */ }
+  });
+
+  Promise.all([
+    bash("cat " + sp + "/manifest.json 2>/dev/null"),
+    toolsReady || Promise.resolve()
+  ]).then(function(results) {
+    try {
+      var m = JSON.parse(results[0].output || '{}');
+      if (m.version) {
+        var parts = m.version.split('.');
+        if (parts.length === 3) parts[2] = String(parseInt(parts[2] || '0') + 1);
+        $('pubVersion').value = parts.join('.');
+      }
+      if (m.category) $('pubCategory').value = m.category;
+      if (m.icon) $('pubIcon').value = m.icon;
+      if (m.name) $('pubName').value = m.name;
+      if (m.description) $('pubDesc').value = m.description;
+      $('pubChangelog').value = '';
+
+      selectedTools = [];
+      document.querySelectorAll('.tool-chip').forEach(function(chip) {
+        chip.classList.remove('selected');
+      });
+      if (m.tools && m.tools.length) {
+        var names = m.tools.map(function(t) { return t.name; });
+        document.querySelectorAll('.tool-chip').forEach(function(chip) {
+          if (names.indexOf(chip.textContent) !== -1) {
+            chip.classList.add('selected');
+            selectedTools.push(chip.textContent);
+          }
+        });
+      }
+    } catch (e) { /* no manifest */ }
+  });
+
+  bash("ls -1d " + sp + "/skills/*/ 2>/dev/null | head -1").then(function(res) {
+    var skillDir = (res.output || '').trim();
+    if (!skillDir) { $('pubSkill').value = ''; return; }
+    var skillName = skillDir.replace(/\/$/, '').split('/').pop();
+    var sel = $('pubSkill');
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value.endsWith('/' + skillName)) {
+        sel.selectedIndex = i;
+        return;
+      }
+    }
+    sel.value = '';
+  });
+});
+
+// --- Skills dropdown ---
+function loadSkillsDropdown() {
+  var sel = $('pubSkill');
+  bash("ls -1d /home/alf/data/skills/*/ 2>/dev/null | sort -u").then(function(res) {
+    var paths = (res.output || '').trim().split('\n').filter(function(p) { return p && p !== ''; });
+    sel.innerHTML = '<option value="">None</option>';
+    paths.forEach(function(p) {
+      var name = p.replace(/\/$/, '').split('/').pop();
       var opt = document.createElement('option');
-      opt.value = '/home/alf/data/apps/' + name;
+      opt.value = p.replace(/\/$/, '');
       opt.textContent = name;
       sel.appendChild(opt);
     });
-  }
+  });
+}
 
-  function loadAppsDropdown() {
-    bash("ls -1 /home/alf/data/apps/ 2>/dev/null | sort").then(function(res) {
-      var dirs = (res.output || '').trim().split('\n').filter(function(d) {
-        return d && d !== '' && d !== 'README.md' && d.indexOf('.') !== 0;
+// --- Tools ---
+function loadTools() {
+  var container = $('toolChips');
+  toolsReady = bash("ls /home/alf/data/tools/*.json 2>/dev/null | grep -v README").then(function(res) {
+    var files = (res.output || '').trim().split('\n').filter(function(f) { return f && f !== ''; });
+    if (!files.length) { container.innerHTML = '<span class="text-dim">No user tools found.</span>'; return; }
+
+    return Promise.all(files.map(function(f) {
+      return bash("cat " + f + " 2>/dev/null").then(function(r) {
+        try { var s = JSON.parse(r.output); return s.name ? s : null; } catch (e) { return null; }
       });
-      appsList = dirs;
-      populateAppsDropdown(dirs);
-    });
-  }
-
-  // Auto-fill fields when selecting an app
-  $('pubApp').addEventListener('change', function() {
-    var path = this.value;
-    if (!path) return;
-    var slug = path.split('/').pop();
-    $('pubSlug').value = slug;
-
-    // Try to read existing app.json for metadata
-    var sp = safePath(path);
-    if (!sp) return;
-    bash("cat " + sp + "/app.json 2>/dev/null").then(function(res) {
-      try {
-        var meta = JSON.parse(res.output || '{}');
-        if (meta.name) $('pubName').value = meta.name;
-        if (meta.description) $('pubDesc').value = meta.description;
-        if (meta.icon) $('pubIcon').value = meta.icon;
-      } catch(e) {}
-    });
-
-    // Try to read existing manifest.json for version/category
-    // Wait for tool chips to be ready before selecting them
-    Promise.all([
-      bash("cat " + sp + "/manifest.json 2>/dev/null"),
-      toolsReady || Promise.resolve()
-    ]).then(function(results) {
-      var res = results[0];
-      try {
-        var m = JSON.parse(res.output || '{}');
-        if (m.version) {
-          // Bump patch
-          var parts = m.version.split('.');
-          if (parts.length === 3) parts[2] = String(parseInt(parts[2] || '0') + 1);
-          $('pubVersion').value = parts.join('.');
-        }
-        if (m.category) $('pubCategory').value = m.category;
-        if (m.icon) $('pubIcon').value = m.icon;
-        if (m.name) $('pubName').value = m.name;
-        if (m.description) $('pubDesc').value = m.description;
-        $('pubChangelog').value = '';
-
-        // Pre-select tools from existing manifest
-        selectedTools = [];
-        document.querySelectorAll('.tool-chip').forEach(function(chip) {
-          chip.classList.remove('selected');
+    })).then(function(schemas) {
+      var tools = schemas.filter(Boolean).sort(function(a, b) { return a.name.localeCompare(b.name); });
+      if (!tools.length) { container.innerHTML = '<span class="text-dim">No user tools found.</span>'; return; }
+      container.innerHTML = '';
+      tools.forEach(function(schema) {
+        var chip = document.createElement('span');
+        chip.className = 'tool-chip';
+        chip.textContent = schema.name;
+        chip.title = schema.description || '';
+        chip.addEventListener('click', function() {
+          chip.classList.toggle('selected');
+          if (chip.classList.contains('selected')) {
+            selectedTools.push(schema.name);
+          } else {
+            selectedTools = selectedTools.filter(function(t) { return t !== schema.name; });
+          }
         });
-        if (m.tools && m.tools.length) {
-          var manifestToolNames = m.tools.map(function(t) { return t.name; });
-          document.querySelectorAll('.tool-chip').forEach(function(chip) {
-            if (manifestToolNames.indexOf(chip.textContent) !== -1) {
-              chip.classList.add('selected');
-              selectedTools.push(chip.textContent);
-            }
-          });
-        }
-      } catch(e) {}
-    });
-
-    // Pre-select skill if the app has a bundled skill directory
-    bash("ls -1d " + sp + "/skills/*/ 2>/dev/null | head -1").then(function(res) {
-      var skillDir = (res.output || '').trim();
-      if (!skillDir) { $('pubSkill').value = ''; return; }
-      var skillName = skillDir.replace(/\/$/, '').split('/').pop();
-      // Match against skill dropdown options by name
-      var sel = $('pubSkill');
-      var matched = false;
-      for (var i = 0; i < sel.options.length; i++) {
-        if (sel.options[i].value.endsWith('/' + skillName)) {
-          sel.selectedIndex = i;
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) sel.value = '';
+        container.appendChild(chip);
+      });
     });
   });
+}
 
-  // --- Skills dropdown ---
-  // System skills in /opt/alf/skills.d/ are excluded — only user skills shown.
-  var SYSTEM_SKILLS_DIR = '/opt/alf/skills.d/';
-  function loadSkillsDropdown() {
-    var sel = $('pubSkill');
-    // Only scan user skill directories (not system skills)
-    bash("(ls -1d /home/alf/data/skills/*/ 2>/dev/null) | sort -u").then(function(res) {
-      var paths = (res.output || '').trim().split('\n').filter(function(p) { return p && p !== ''; });
-      sel.innerHTML = '<option value="">None</option>';
-      paths.forEach(function(p) {
-        var name = p.replace(/\/$/, '').split('/').pop();
-        var opt = document.createElement('option');
-        opt.value = p.replace(/\/$/, '');
-        opt.textContent = name;
-        sel.appendChild(opt);
-      });
-    });
+// --- Validate ---
+var validPerms = ['storage', 'bash', 'upload', 'clipboard', 'events'];
+var validCategories = ['productivity', 'dev-tools', 'games', 'media', 'utilities', 'finance', 'social', 'communication'];
+
+function validateBeforePublish() {
+  var errors = [];
+  var warnings = [];
+  var slug = $('pubSlug').value.trim();
+  var name = $('pubName').value.trim();
+  var path = $('pubApp').value;
+  var version = $('pubVersion').value.trim() || '0.1.0';
+  var desc = $('pubDesc').value.trim();
+  var category = $('pubCategory').value.trim().toLowerCase();
+
+  if (!slug) errors.push('Slug is required');
+  if (slug && !/^[a-z0-9][a-z0-9-]*$/.test(slug)) errors.push('Slug: lowercase alphanumeric + hyphens');
+  if (!name) errors.push('Name is required');
+  if (!path) errors.push('Select a source app');
+  if (!desc) warnings.push('Description is empty — recommended for marketplace listing');
+  if (!/^\d+\.\d+\.\d+$/.test(version)) errors.push('Version must be semver (e.g. 1.0.0)');
+  if (category && validCategories.indexOf(category) < 0) {
+    warnings.push('Unknown category "' + category + '". Valid: ' + validCategories.join(', '));
   }
+  if (selectedTools.length === 0) warnings.push('No tools selected — app will have no CLI backend');
 
-  // --- Tools discovery ---
-  // Load tools from their .json schemas so chip names match manifest.tools[].name exactly
-  function loadTools() {
-    var container = $('toolChips');
-    toolsReady = bash("ls /home/alf/data/tools/*.json 2>/dev/null | grep -v README").then(function(res) {
-      var files = (res.output || '').trim().split('\n').filter(function(f) { return f && f !== ''; });
-      if (!files.length) { container.innerHTML = '<span class="empty">No user tools found.</span>'; return; }
-      // Read all schema files in parallel
-      return Promise.all(files.map(function(f) {
-        return bash("cat " + f + " 2>/dev/null").then(function(r) {
-          try { var s = JSON.parse(r.output); return s.name ? s : null; } catch(e) { return null; }
-        });
-      })).then(function(schemas) {
-        var tools = schemas.filter(Boolean).sort(function(a, b) { return a.name.localeCompare(b.name); });
-        if (!tools.length) { container.innerHTML = '<span class="empty">No user tools found.</span>'; return; }
-        container.innerHTML = '';
-        tools.forEach(function(schema) {
-          var chip = document.createElement('span');
-          chip.className = 'tool-chip';
-          chip.textContent = schema.name;
-          chip.title = schema.description || '';
-          chip.addEventListener('click', function() {
-            chip.classList.toggle('selected');
-            if (chip.classList.contains('selected')) {
-              selectedTools.push(schema.name);
-            } else {
-              selectedTools = selectedTools.filter(function(t) { return t !== schema.name; });
-            }
-          });
-          container.appendChild(chip);
-        });
-      });
-    });
+  var asyncChecks = [];
+  var sp = safePath(path);
+
+  if (selectedTools.length > 0 && sp && slug) {
+    asyncChecks.push(
+      bash('test -x ' + sp + '/bin/' + sq(slug) + ' && echo ok || echo missing').then(function(res) {
+        if ((res.output || '').trim() !== 'ok') errors.push('Tool binary not found at bin/' + slug);
+      })
+    );
   }
-
-  // --- Validate ---
-  var validPerms = ['storage', 'bash', 'upload', 'clipboard', 'events'];
-  var validCategories = ['productivity', 'dev-tools', 'games', 'media', 'utilities', 'finance', 'social', 'communication'];
-
-  function validateBeforePublish() {
-    var errors = [];
-    var warnings = [];
-    var slug = $('pubSlug').value.trim();
-    var name = $('pubName').value.trim();
-    var path = $('pubApp').value;
-    var version = $('pubVersion').value.trim() || '0.1.0';
-    var desc = $('pubDesc').value.trim();
-    var category = $('pubCategory').value.trim().toLowerCase();
-
-    // Required fields
-    if (!slug) errors.push('Slug is required');
-    if (slug && !/^[a-z0-9][a-z0-9-]*$/.test(slug)) errors.push('Slug: lowercase alphanumeric + hyphens, must start with letter/digit');
-    if (!name) errors.push('Name is required');
-    if (!path) errors.push('Select a source app');
-    if (!desc) warnings.push('Description is empty — recommended for marketplace listing');
-
-    // Semver
-    if (!/^\d+\.\d+\.\d+$/.test(version)) errors.push('Version must be semver (e.g. 1.0.0)');
-
-    // Category
-    if (category && validCategories.indexOf(category) < 0) {
-      warnings.push('Unknown category "' + category + '". Valid: ' + validCategories.join(', '));
-    }
-
-    // Tools selected
-    if (selectedTools.length === 0) warnings.push('No tools selected — app will have no CLI backend');
-
-    // Async checks
-    var asyncChecks = [];
-    var sp = safePath(path);
-
-    // Binary check
-    if (selectedTools.length > 0 && sp && slug) {
-      asyncChecks.push(
-        bash('test -x ' + sp + '/bin/' + sq(slug) + ' && echo ok || echo missing').then(function(res) {
-          if ((res.output || '').trim() !== 'ok') {
-            errors.push('Tool binary not found or not executable at bin/' + slug);
+  if (sp) {
+    asyncChecks.push(
+      bash('test -f ' + sp + '/index.html && echo ok || echo missing').then(function(res) {
+        if ((res.output || '').trim() !== 'ok') warnings.push('No index.html — app will have no web UI');
+      })
+    );
+    asyncChecks.push(
+      bash('find ' + sp + ' -maxdepth 3 \\( -name ".env*" -o -name "credentials*" -o -name "*secret*" -o -name "*.pem" -o -name "*.key" \\) ! -path "*/data/*" 2>/dev/null | head -5').then(function(res) {
+        var found = (res.output || '').trim();
+        if (found) errors.push('Sensitive files found:\n' + found);
+      })
+    );
+    asyncChecks.push(
+      bash('cat ' + sp + '/manifest.json 2>/dev/null').then(function(res) {
+        try {
+          var m = JSON.parse(res.output);
+          if (m.permissions && Array.isArray(m.permissions)) {
+            m.permissions.forEach(function(p) {
+              if (validPerms.indexOf(p) < 0) errors.push('Unknown permission: ' + p);
+            });
           }
-        })
-      );
-    }
-
-    // index.html check
-    if (sp) {
-      asyncChecks.push(
-        bash('test -f ' + sp + '/index.html && echo ok || echo missing').then(function(res) {
-          if ((res.output || '').trim() !== 'ok') {
-            warnings.push('No index.html — app will have no web UI');
-          }
-        })
-      );
-    }
-
-    // Secrets scan (SEC-005: expanded patterns)
-    if (sp) {
-      asyncChecks.push(
-        bash('find ' + sp + ' -maxdepth 3 \\( -name ".env*" -o -name "credentials*" -o -name "*secret*" -o -name "*.pem" -o -name "*.key" -o -name "*.p12" -o -name "*.pfx" -o -name "id_rsa" -o -name "id_ed25519" -o -name ".npmrc" -o -name ".pypirc" -o -name ".htpasswd" \\) ! -path "*/data/*" 2>/dev/null | head -5').then(function(res) {
-          var found = (res.output || '').trim();
-          if (found) errors.push('Potentially sensitive files found (remove before publish):\n' + found);
-        })
-      );
-    }
-
-    // Permissions validation (read from existing manifest if present)
-    if (sp) {
-      asyncChecks.push(
-        bash('cat ' + sp + '/manifest.json 2>/dev/null').then(function(res) {
-          try {
-            var m = JSON.parse(res.output);
-            if (m.permissions && Array.isArray(m.permissions)) {
-              m.permissions.forEach(function(p) {
-                if (validPerms.indexOf(p) < 0) errors.push('Unknown permission: ' + p);
-              });
-            }
-          } catch(e) { /* no existing manifest — ok */ }
-        })
-      );
-    }
-
-    return Promise.all(asyncChecks).then(function() {
-      return { errors: errors, warnings: warnings };
-    });
+        } catch (e) { /* ok */ }
+      })
+    );
   }
 
-  $('validateBtn').addEventListener('click', function() {
-    var resultsEl = $('validateResults');
-    var publishBtn = $('publishBtn');
-    resultsEl.style.display = '';
-    resultsEl.className = 'status';
-    resultsEl.textContent = 'Validating...';
-    publishBtn.disabled = true;
-
-    validateBeforePublish().then(function(result) {
-      var lines = [];
-      result.errors.forEach(function(e) { lines.push('✗ ' + e); });
-      result.warnings.forEach(function(w) { lines.push('⚠ ' + w); });
-
-      if (result.errors.length === 0 && result.warnings.length === 0) {
-        lines.push('✓ All checks passed');
-      }
-
-      resultsEl.textContent = lines.join('\n');
-      resultsEl.style.whiteSpace = 'pre-wrap';
-
-      if (result.errors.length === 0) {
-        resultsEl.className = 'status ' + (result.warnings.length > 0 ? 'warning' : 'success');
-        publishBtn.disabled = !connected;
-      } else {
-        resultsEl.className = 'status error';
-        publishBtn.disabled = true;
-      }
-    });
+  return Promise.all(asyncChecks).then(function() {
+    return { errors: errors, warnings: warnings };
   });
+}
 
-  // --- Publish ---
-  $('publishBtn').addEventListener('click', function() {
-    var statusEl = $('publishStatus');
-    if (!connected) { setStatus(statusEl, 'Not connected to marketplace.', 'error'); return; }
+$('validateBtn').addEventListener('click', function() {
+  var el = $('validateResults');
+  el.className = 'status info';
+  el.textContent = 'Validating...';
+  $('publishBtn').disabled = true;
 
-    var slug = $('pubSlug').value.trim();
-    var name = $('pubName').value.trim();
-    var path = $('pubApp').value;
-    var version = $('pubVersion').value.trim() || '0.1.0';
-    var desc = $('pubDesc').value.trim();
-    var category = $('pubCategory').value.trim().toLowerCase();
-    var icon = $('pubIcon').value.trim();
-    var skillPath = $('pubSkill').value;
-    var changelog = $('pubChangelog').value.trim();
+  validateBeforePublish().then(function(result) {
+    var lines = [];
+    result.errors.forEach(function(e) { lines.push('✗ ' + e); });
+    result.warnings.forEach(function(w) { lines.push('⚠ ' + w); });
+    if (result.errors.length === 0 && result.warnings.length === 0) lines.push('✓ All checks passed');
 
-    if (!slug) { setStatus(statusEl, 'Slug is required.', 'error'); return; }
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) { setStatus(statusEl, 'Slug: lowercase alphanumeric + hyphens.', 'error'); return; }
-    if (!name) { setStatus(statusEl, 'Name is required.', 'error'); return; }
-    if (!path) { setStatus(statusEl, 'Select a source app.', 'error'); return; }
-    var sp = safePath(path);
-    if (!sp) { setStatus(statusEl, 'Invalid app path.', 'error'); return; }
+    el.textContent = lines.join('\n');
+    if (result.errors.length === 0) {
+      el.className = 'status ' + (result.warnings.length > 0 ? 'info' : 'success');
+      $('publishBtn').disabled = !connected;
+    } else {
+      el.className = 'status error';
+      $('publishBtn').disabled = true;
+    }
+  });
+});
 
-    var btn = $('publishBtn');
-    btn.disabled = true;
+// --- Publish ---
+$('publishBtn').addEventListener('click', function() {
+  var statusEl = $('publishStatus');
+  if (!connected) { setStatus(statusEl, 'Not connected to marketplace.', 'error'); return; }
 
-    // SEC-003: Re-run validation before publish
-    setStatus(statusEl, 'Validating...', 'info');
-    validateBeforePublish().then(function(result) {
-      if (result.errors.length > 0) {
-        setStatus(statusEl, 'Validation failed:\n' + result.errors.join('\n'), 'error');
-        btn.disabled = false;
-        return Promise.reject('validation failed');
-      }
-      setStatus(statusEl, 'Preparing...', 'info');
-      return Promise.resolve();
-    }).then(function() {
+  var slug = $('pubSlug').value.trim();
+  var name = $('pubName').value.trim();
+  var path = $('pubApp').value;
+  var version = $('pubVersion').value.trim() || '0.1.0';
+  var desc = $('pubDesc').value.trim();
+  var category = $('pubCategory').value.trim().toLowerCase();
+  var icon = $('pubIcon').value.trim();
+  var skillPath = $('pubSkill').value;
+  var changelog = $('pubChangelog').value.trim();
 
-    // Generate manifest
-    var manifest = {
-      name: name, slug: slug, version: version, description: desc,
-      category: category, icon: icon, tools: []
-    };
-    // changelog sent as separate whats_new form field, not in manifest
+  if (!slug || !name || !path) { setStatus(statusEl, 'Fill required fields.', 'error'); return; }
+  var sp = safePath(path);
+  if (!sp) { setStatus(statusEl, 'Invalid app path.', 'error'); return; }
 
-    // Add selected tools to manifest
-    var toolSchemaPromises = selectedTools.map(function(t) {
+  var btn = $('publishBtn');
+  btn.disabled = true;
+
+  setStatus(statusEl, 'Validating...', 'info');
+  validateBeforePublish().then(function(result) {
+    if (result.errors.length > 0) {
+      setStatus(statusEl, 'Validation failed:\n' + result.errors.join('\n'), 'error');
+      btn.disabled = false;
+      throw new Error('validation failed');
+    }
+    setStatus(statusEl, 'Preparing...', 'info');
+
+    // Build manifest
+    var manifest = { name: name, slug: slug, version: version, description: desc, category: category, icon: icon, tools: [] };
+
+    // Collect tool schemas
+    var toolPromises = selectedTools.map(function(t) {
       return bash("cat /home/alf/data/tools/" + sq(t) + ".json 2>/dev/null").then(function(res) {
-        try { return JSON.parse(res.output); } catch(e) { return null; }
+        try { return JSON.parse(res.output); } catch (e) { return null; }
       });
     });
 
-    Promise.all(toolSchemaPromises).then(function(schemas) {
+    return Promise.all(toolPromises).then(function(schemas) {
       schemas.forEach(function(s) {
         if (s) manifest.tools.push({ name: s.name, description: s.description, parameters: s.parameters });
       });
 
-      // Write manifest to source path
+      // Write manifest
       var manifestJson = JSON.stringify(manifest, null, 2);
       return bash("mkdir -p " + sp + " && cat > " + sp + "/manifest.json << 'MFEOF'\n" + manifestJson + "\nMFEOF");
     }).then(function() {
-      setStatus(statusEl, 'Bundling app directory...', 'info');
-
-      // SEC-004: Create tarball excluding data, .git, secrets, with --no-dereference
+      setStatus(statusEl, 'Bundling...', 'info');
       var tarball = '/tmp/alf-publish-' + sq(slug) + '.tar.gz';
       var tarCmd = 'tar -czf ' + tarball + ' -C ' + sp + ' --exclude=./data --exclude=.git --exclude=.env* --exclude=*.pem --exclude=*.key --no-dereference .';
       return bash(tarCmd).then(function() {
         setStatus(statusEl, 'Publishing...', 'info');
-
-        // Send the full app bundle as a tarball + manifest via vault proxy Unix socket
         var curlParts = [
           'curl -s -w "\\n%{http_code}" -X POST',
           '--unix-socket "$VAULT_PROXY_SOCK"',
@@ -579,10 +515,8 @@
         if (changelog) curlParts.push("-F 'whats_new=" + changelog.replace(/'/g, "'\\''") + "'");
         if (skillPath) curlParts.push("-F 'skill=@" + sq(skillPath) + "/SKILL.md'");
         curlParts.push("http://localhost/proxy/marketplace/api/apps/" + sq(slug) + "/publish");
-
         return bash(curlParts.join(' '));
       }).then(function(pubRes) {
-        // Cleanup tarball
         bash('rm -f ' + tarball);
         var raw = (pubRes.output || '').trim();
         var lines = raw.split('\n');
@@ -596,130 +530,126 @@
         }
         btn.disabled = false;
       });
-    }).catch(function(err) {
-      setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
-      btn.disabled = false;
     });
+  }).catch(function(err) {
+    if (err && err.message !== 'validation failed') {
+      setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
+    }
+    btn.disabled = false;
   });
+});
 
-  // --- Catalog ---
-  function loadCatalog() {
-    var list = $('catalogList');
-    var empty = $('catalogEmpty');
-    list.innerHTML = '';
-    empty.style.display = 'none';
-    bash("vault proxy marketplace GET /api/catalog 2>&1").then(function(res) {
-      var raw = (res.output || '').trim();
-      if (!raw) { empty.style.display = ''; return; }
-      var apps;
-      try { apps = JSON.parse(raw); } catch(e) { empty.style.display = ''; return; }
-      if (!apps.length) { empty.style.display = ''; return; }
-      // Compute foreign slugs (owned by other developers) to filter the app dropdown
-      if (currentDeveloper) {
-        foreignSlugs = apps.filter(function(a) {
-          return a.slug && a.developer !== currentDeveloper && a.author !== currentDeveloper;
-        }).map(function(a) { return a.slug; });
-      } else {
-        foreignSlugs = [];
-      }
-      // Refresh dropdown now that foreignSlugs is known
-      populateAppsDropdown(appsList);
+// --- Catalog ---
+function loadCatalog() {
+  var list = $('catalogList');
+  var empty = $('catalogEmpty');
+  list.innerHTML = '';
+  empty.classList.add('hidden');
 
-      // Filter catalog display to only apps published by the current developer
-      if (currentDeveloper) {
-        apps = apps.filter(function(a) { return a.developer === currentDeveloper || a.author === currentDeveloper; });
-      }
-      apps.sort(function(a, b) { return (a.name || a.slug || '').localeCompare(b.name || b.slug || ''); });
-      catalogSlugs = apps.map(function(a) { return a.slug; }).filter(Boolean);
-      if (!apps.length) { empty.style.display = ''; return; }
-      apps.forEach(function(app) {
-        var li = document.createElement('li');
-        li.style.cursor = 'pointer';
-        li.title = 'Click to fill publish form';
-        var left = document.createElement('div');
-        var nameEl = document.createElement('strong');
-        nameEl.textContent = app.name || app.slug;
-        left.appendChild(nameEl);
-        if (app.slug) {
-          var slugEl = document.createElement('span');
-          slugEl.className = 'app-slug';
-          slugEl.textContent = ' ' + app.slug;
-          left.appendChild(slugEl);
-        }
-        li.appendChild(left);
-        var right = document.createElement('div');
-        right.style.display = 'flex';
-        right.style.alignItems = 'center';
-        right.style.gap = '8px';
-        if (app.version) {
-          var ver = document.createElement('span');
-          ver.className = 'app-ver';
-          ver.textContent = 'v' + app.version;
-          right.appendChild(ver);
-        }
-        var unpubBtn = document.createElement('button');
-        unpubBtn.className = 'btn-sm';
-        unpubBtn.textContent = 'Unpublish';
-        unpubBtn.style.fontSize = '0.7rem';
-        unpubBtn.style.color = 'var(--red, #e55)';
-        unpubBtn.style.borderColor = 'var(--red, #e55)';
-        unpubBtn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          if (!confirm('Unpublish "' + (app.name || app.slug) + '" from the marketplace?')) return;
-          bash("vault proxy marketplace DELETE /api/apps/" + app.slug + " 2>&1").then(function(res) {
-            var out = (res.output || '').trim();
+  bash("vault proxy marketplace GET /api/catalog 2>&1").then(function(res) {
+    var raw = (res.output || '').trim();
+    if (!raw) { empty.classList.remove('hidden'); return; }
+    var apps;
+    try { apps = JSON.parse(raw); } catch (e) { empty.classList.remove('hidden'); return; }
+    if (!apps.length) { empty.classList.remove('hidden'); return; }
+
+    if (currentDeveloper) {
+      foreignSlugs = apps.filter(function(a) {
+        return a.slug && a.developer !== currentDeveloper && a.author !== currentDeveloper;
+      }).map(function(a) { return a.slug; });
+    }
+    populateAppsDropdown(appsList);
+
+    if (currentDeveloper) {
+      apps = apps.filter(function(a) { return a.developer === currentDeveloper || a.author === currentDeveloper; });
+    }
+    apps.sort(function(a, b) { return (a.name || a.slug || '').localeCompare(b.name || b.slug || ''); });
+    catalogSlugs = apps.map(function(a) { return a.slug; }).filter(Boolean);
+    if (!apps.length) { empty.classList.remove('hidden'); return; }
+
+    apps.forEach(function(app) {
+      var item = document.createElement('div');
+      item.className = 'catalog-item';
+      item.title = 'Click to fill publish form';
+
+      var left = document.createElement('div');
+      left.innerHTML = '<strong>' + esc(app.name || app.slug) + '</strong>' +
+        (app.slug ? ' <span class="app-slug">' + esc(app.slug) + '</span>' : '');
+      item.appendChild(left);
+
+      var right = document.createElement('div');
+      right.style.cssText = 'display:flex;align-items:center;gap:8px';
+      if (app.version) right.innerHTML += '<span class="app-ver">v' + esc(app.version) + '</span>';
+      var unpubBtn = document.createElement('button');
+      unpubBtn.className = 'btn btn-sm';
+      unpubBtn.textContent = 'Unpublish';
+      unpubBtn.style.cssText = 'font-size:0.7rem;color:var(--red);border-color:var(--red)';
+      unpubBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        AlfSDK.confirm('Unpublish "' + (app.name || app.slug) + '"?').then(function(ok) {
+          if (!ok) return;
+          bash("vault proxy marketplace DELETE /api/apps/" + app.slug + " 2>&1").then(function() {
             loadCatalog();
-          }).catch(function() { alert('Unpublish failed'); });
+          });
         });
-        right.appendChild(unpubBtn);
-        li.appendChild(right);
-        li.addEventListener('click', function() {
-          // Fill form from catalog entry
-          $('pubSlug').value = app.slug || '';
-          $('pubName').value = app.name || '';
-          $('pubDesc').value = app.description || '';
-          $('pubCategory').value = app.category || '';
-          $('pubIcon').value = app.icon || '';
-          var v = app.version || '0.1.0';
-          var parts = v.split('.');
-          if (parts.length === 3) parts[2] = String(parseInt(parts[2] || '0') + 1);
-          $('pubVersion').value = parts.join('.');
-          // Select matching app in dropdown
-          var appSel = $('pubApp');
-          for (var i = 0; i < appSel.options.length; i++) {
-            if (appSel.options[i].value.endsWith('/' + app.slug)) {
-              appSel.selectedIndex = i;
-              appSel.dispatchEvent(new Event('change'));
-              break;
-            }
-          }
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-        list.appendChild(li);
       });
-    }).catch(function() { empty.style.display = ''; });
-  }
+      right.appendChild(unpubBtn);
+      item.appendChild(right);
 
-  $('refreshBtn').addEventListener('click', function() { checkConnection(); });
-
-  // Load marketplace-managed slugs so we can exclude them from the publish dropdown.
-  function loadMarketplaceSlugs() {
-    return fetch('/api/marketplace', { credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(apps) {
-        if (Array.isArray(apps)) {
-          marketplaceSlugs = apps.map(function(a) { return a.slug; }).filter(Boolean);
+      item.addEventListener('click', function() {
+        $('pubSlug').value = app.slug || '';
+        $('pubName').value = app.name || '';
+        $('pubDesc').value = app.description || '';
+        $('pubCategory').value = app.category || '';
+        $('pubIcon').value = app.icon || '';
+        var v = app.version || '0.1.0';
+        var parts = v.split('.');
+        if (parts.length === 3) parts[2] = String(parseInt(parts[2] || '0') + 1);
+        $('pubVersion').value = parts.join('.');
+        var appSel = $('pubApp');
+        for (var i = 0; i < appSel.options.length; i++) {
+          if (appSel.options[i].value.endsWith('/' + app.slug)) {
+            appSel.selectedIndex = i;
+            appSel.dispatchEvent(new Event('change'));
+            break;
+          }
         }
-      })
-      .catch(function() { marketplaceSlugs = []; });
-  }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
 
-  // Init
-  checkConnection();
-  loadMarketplaceSlugs().then(function() { loadAppsDropdown(); });
-  loadSkillsDropdown();
-  loadTools();
-})();
+      list.appendChild(item);
+    });
+  }).catch(function() {
+    empty.classList.remove('hidden');
+  });
+}
+
+// --- Marketplace slugs ---
+function loadMarketplaceSlugs() {
+  return fetch('/api/marketplace', { credentials: 'same-origin' })
+    .then(function(r) { return r.json(); })
+    .then(function(apps) {
+      if (Array.isArray(apps)) {
+        marketplaceSlugs = apps.map(function(a) { return a.slug; }).filter(Boolean);
+      }
+    })
+    .catch(function() { marketplaceSlugs = []; });
+}
+
+// --- Events ---
+$('vaultLink').addEventListener('click', goVault);
+$('openVaultBtn').addEventListener('click', goVault);
+$('refreshBtn').addEventListener('click', function() { checkConnection(); });
+
+// --- Init ---
+bash('echo $ALF_MARKETPLACE_URL').then(function(res) {
+  var url = (res.output || '').trim();
+  if (url) $('marketplaceUrl').textContent = url;
+});
+checkConnection();
+loadMarketplaceSlugs().then(function() { loadAppsDropdown(); });
+loadSkillsDropdown();
+loadTools();
 </script>
 </body>
 </html>

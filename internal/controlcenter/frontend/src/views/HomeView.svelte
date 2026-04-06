@@ -3,7 +3,7 @@
   import {
     Folder, FolderOpen, File, FileText, FilePlus, FolderPlus,
     Trash2, Download, Upload, Save, Eye, Pencil, ChevronRight, ChevronDown,
-    X, ArrowLeft, Loader2, RefreshCw, MoreVertical
+    X, ArrowLeft, Loader2, RefreshCw, MoreVertical, Lock
   } from 'lucide-svelte'
   import Modal from '../components/shared/Modal.svelte'
   import { api } from '../lib/api'
@@ -534,7 +534,7 @@
                     {/if}
                     <span>{entry.name}</span>
                     {#if entry.is_dir && isProtected(entry.name)}
-                      <span class="tag tag-warning">protected</span>
+                      <Lock size={12} class="icon-protected" />
                     {/if}
                   </div>
                 </td>

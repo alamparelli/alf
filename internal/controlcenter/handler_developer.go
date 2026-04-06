@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/alamparelli/alf/internal/vault"
 	vaultclient "github.com/alessandrolamparelli/vault-proxy/pkg/client"
@@ -65,23 +66,34 @@ func (h *DeveloperHandler) handleStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	resp, err := client.Proxy("marketplace", "GET", "/api/health", nil)
-	if err != nil {
-		respondJSON(w, http.StatusOK, map[string]any{"connected": false, "error": err.Error()})
-		return
+	type proxyResult struct {
+		resp *http.Response
+		err  error
 	}
-	defer resp.Body.Close()
-
-	var health map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil || health["status"] != "connected" {
-		respondJSON(w, http.StatusOK, map[string]any{"connected": false, "error": "marketplace not reachable"})
-		return
+	ch := make(chan proxyResult, 1)
+	go func() {
+		resp, err := client.Proxy("marketplace", "GET", "/api/health", nil)
+		ch <- proxyResult{resp, err}
+	}()
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			respondJSON(w, http.StatusOK, map[string]any{"connected": false, "error": "marketplace not reachable"})
+			return
+		}
+		defer res.resp.Body.Close()
+		var health map[string]any
+		if err := json.NewDecoder(res.resp.Body).Decode(&health); err != nil || health["status"] != "connected" {
+			respondJSON(w, http.StatusOK, map[string]any{"connected": false, "error": "marketplace not reachable"})
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{
+			"connected": true,
+			"developer": health["developer"],
+		})
+	case <-time.After(5 * time.Second):
+		respondJSON(w, http.StatusOK, map[string]any{"connected": false, "error": "marketplace not reachable (timeout)"})
 	}
-
-	respondJSON(w, http.StatusOK, map[string]any{
-		"connected": true,
-		"developer": health["developer"],
-	})
 }
 
 // handleApps lists local app directories (filtered for development).

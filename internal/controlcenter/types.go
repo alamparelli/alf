@@ -200,6 +200,12 @@ type Tier struct {
 	SystemPrompt   string   `json:"system_prompt,omitempty"`  // extra system prompt prepended for this tier
 	ContextWeight  string   `json:"context_weight,omitempty"` // "light", "standard", "full" (default)
 	Fallback       string   `json:"fallback,omitempty"`       // tier name to try on failure (forms a chain)
+	Role           string   `json:"role,omitempty"`           // "orchestrator" for agent/team tiers
+}
+
+// IsOrchestrator returns true if this tier has the orchestrator role.
+func (t Tier) IsOrchestrator() bool {
+	return t.Role == "orchestrator"
 }
 
 // EffectiveContextWeight returns the tier's context weight, defaulting to "full".
@@ -285,6 +291,16 @@ type TiersConfig struct {
 	RouterBackend      string           `json:"router_backend,omitempty"` // "cli" (default), or registered backend name
 	Embedding          *EmbeddingConfig `json:"embedding,omitempty"`      // deprecated: use Memory.Embedding
 	Memory             *MemoryConfig    `json:"memory,omitempty"`
+}
+
+// IsOrchestratorTier returns true if the named tier has the orchestrator role.
+func (c *TiersConfig) IsOrchestratorTier(name string) bool {
+	for _, t := range c.Tiers {
+		if t.Name == name {
+			return t.IsOrchestrator()
+		}
+	}
+	return false
 }
 
 // DefaultTiersConfig returns a TiersConfig parsed from the embedded defaults/tiers.json.

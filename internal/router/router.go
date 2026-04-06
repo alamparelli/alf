@@ -440,10 +440,10 @@ func buildAgentTeamsHint(teams []AgentTeamInfo) string {
 	return b.String()
 }
 
-// hasOrchestrator returns true if an enabled+routable agent tier exists.
+// hasOrchestrator returns true if an enabled+routable orchestrator tier exists.
 func hasOrchestrator(tiers *cc.TiersConfig) bool {
 	for _, t := range tiers.Tiers {
-		if t.Name == "agent" && t.Enabled && t.Routable {
+		if t.IsOrchestrator() && t.Enabled && t.Routable {
 			return true
 		}
 	}

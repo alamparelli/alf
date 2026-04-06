@@ -118,7 +118,7 @@ func TestOnboardingTier_SkipsAgent(t *testing.T) {
 	store := &mockTierStore{snap: TiersSnapshot{
 		Tiers: []TierInfo{
 			{Name: "fast", Priority: 1, Enabled: true},
-			{Name: "agent", Priority: 2, Enabled: true},
+			{Name: "agent", Priority: 2, Enabled: true, Role: "orchestrator"},
 			{Name: "smart", Priority: 3, Enabled: true},
 		},
 	}}

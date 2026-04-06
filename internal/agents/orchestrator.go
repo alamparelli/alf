@@ -67,6 +67,11 @@ func NewOrchestrator(prov provider.Provider, store Store, dataDir string, resolv
 	}
 }
 
+// HasTeams returns true if at least one agent team is configured.
+func (o *Orchestrator) HasTeams() bool {
+	return len(o.store.All()) > 0
+}
+
 // SetResolveProvider sets the function used to resolve providers by backend name.
 func (o *Orchestrator) SetResolveProvider(fn ResolveProviderFunc) {
 	o.resolveProvider = fn

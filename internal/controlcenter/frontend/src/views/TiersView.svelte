@@ -32,7 +32,7 @@
     router_label: '', description: '', effort: '', max_turns: 0,
     write_capable: false, tools: [], system_prompt: '', context_weight: 'full',
     priority: 0, force_command: false, max_iterations: 0, timeout_minutes: 0,
-    orchestrator_max_turns: 0, fallback: '',
+    orchestrator_max_turns: 0, fallback: '', role: '',
   });
 
   // Router form
@@ -82,6 +82,10 @@
   // Configured vs unconfigured providers.
   let configuredProviders = $derived(providerSchemas.filter(p => p.configured));
   let unconfiguredProviders = $derived(providerSchemas.filter(p => !p.configured));
+
+  let hasOrchestratorTier = $derived(
+    tiersConfig?.tiers?.some(t => t.role === 'orchestrator' && t.enabled) ?? false
+  );
 
   // --- Load ---
   async function loadTiers() {
@@ -164,7 +168,7 @@
 
   function openAddTier() {
     editingTierIndex = -1;
-    tierForm = { name: '', backend: 'cli', model: 'sonnet', routable: true, enabled: true, router_label: '', description: '', effort: '', max_turns: 0, write_capable: false, tools: [], system_prompt: '', context_weight: 'full', priority: 0, force_command: false, max_iterations: 0, timeout_minutes: 0, orchestrator_max_turns: 0, fallback: '' };
+    tierForm = { name: '', backend: 'cli', model: 'sonnet', routable: true, enabled: true, router_label: '', description: '', effort: '', max_turns: 0, write_capable: false, tools: [], system_prompt: '', context_weight: 'full', priority: 0, force_command: false, max_iterations: 0, timeout_minutes: 0, orchestrator_max_turns: 0, fallback: '', role: '' };
     applyProviderHints('cli');
     showTierModal = true;
   }
@@ -314,6 +318,12 @@
     </button>
   </div>
 
+  {#if !loading && tiersConfig && !hasOrchestratorTier}
+    <div class="info-banner">
+      <strong>No orchestrator tier.</strong> Agent teams require a tier with role <em>orchestrator</em> to function. Add one or assign the role to an existing tier.
+    </div>
+  {/if}
+
   {#if loading}
     <div class="loading">Loading tiers...</div>
   {:else if !tiersConfig}
@@ -340,6 +350,9 @@
                 <span>Max turns: {tier.max_turns}</span>
               {/if}
             </div>
+            {#if tier.role === 'orchestrator'}
+              <span class="tier-fallback">Role: <strong>orchestrator</strong></span>
+            {/if}
             {#if tier.fallback}
               <span class="tier-fallback">Fallback → <strong>{tier.fallback}</strong></span>
             {/if}
@@ -441,6 +454,13 @@
         <label>
           Timeout (min)
           <input type="number" bind:value={tierForm.timeout_minutes} min="0" />
+        </label>
+        <label>
+          Role
+          <select bind:value={tierForm.role}>
+            <option value="">default</option>
+            <option value="orchestrator">orchestrator</option>
+          </select>
         </label>
         <label>
           Fallback Tier
@@ -744,5 +764,20 @@
     justify-content: flex-end;
     gap: 0.5rem;
     margin-top: 1rem;
+  }
+  .info-banner {
+    padding: 0.6rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: 6px;
+    background: rgba(var(--yellow-rgb, 250,200,50), 0.12);
+    border: 1px solid rgba(var(--yellow-rgb, 250,200,50), 0.3);
+    font-size: var(--font-sm, 13px);
+    color: var(--text);
+  }
+  .info-banner em {
+    background: var(--bg-input);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-style: normal;
   }
 </style>

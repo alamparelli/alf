@@ -53,6 +53,7 @@
       "priority": 4,
       "enabled": true,
       "routable": true,
+      "role": "orchestrator",
       "router_label": "ONLY for tasks explicitly requesting a team of agents, or requiring parallel independent workstreams that CANNOT be done sequentially by one model (e.g. 'build a full app with frontend + backend + tests simultaneously', 'write 5 articles at once', 'research 3 topics in parallel'). If one model can handle it step-by-step, use codex-dev or codex-arch instead.",
       "max_turns": 10,
       "orchestrator_max_turns": 3,

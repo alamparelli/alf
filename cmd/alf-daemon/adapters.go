@@ -169,6 +169,7 @@ func (c *commsTierStore) Snapshot() comms.TiersSnapshot {
 			RouterLabel:          t.RouterLabel,
 			ContextWeight:        t.EffectiveContextWeight(),
 			Fallback:             t.Fallback,
+			Role:                 t.Role,
 		}
 	}
 	return snap
@@ -240,6 +241,7 @@ func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
 			WriteCapable: t.WriteCapable,
 			Effort:       t.Effort,
 			MaxTurns:     t.MaxTurns,
+			Role:         t.Role,
 		}
 	}
 	return snap

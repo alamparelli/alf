@@ -194,14 +194,14 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, r
 	return tierParams{Model: "claude-haiku-4-5"}
 }
 
-// autoEnableAgentTier enables the agent tier in-memory when agent teams are configured.
+// autoEnableAgentTier enables orchestrator tiers in-memory when agent teams are configured.
 // Does NOT modify the tiers.json file - only affects the runtime state.
 func autoEnableAgentTier(tierStore cc.TierStore) {
 	tiers := tierStore.Current()
 	for i := range tiers.Tiers {
-		if tiers.Tiers[i].Name == "agent" && !tiers.Tiers[i].Enabled {
+		if tiers.Tiers[i].IsOrchestrator() && !tiers.Tiers[i].Enabled {
 			tiers.Tiers[i].Enabled = true
-			log.Printf("auto-enabled agent tier (agent teams found)")
+			log.Printf("auto-enabled orchestrator tier %q (agent teams found)", tiers.Tiers[i].Name)
 			return
 		}
 	}

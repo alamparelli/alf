@@ -115,6 +115,16 @@ type TiersSnapshot struct {
 	Tiers []TierInfo
 }
 
+// IsOrchestratorTier returns true if the named tier has the orchestrator role.
+func (s *TiersSnapshot) IsOrchestratorTier(name string) bool {
+	for _, t := range s.Tiers {
+		if t.Name == name {
+			return t.Role == "orchestrator"
+		}
+	}
+	return false
+}
+
 // TierInfo holds the fields the executor needs from a tier.
 type TierInfo struct {
 	Name         string
@@ -123,6 +133,7 @@ type TierInfo struct {
 	WriteCapable bool
 	Effort       string
 	MaxTurns     int
+	Role         string
 }
 
 // executeJob runs a scheduled job with concurrency guard.
@@ -166,7 +177,7 @@ func (e *Engine) executeJob(j *Job) {
 			log.Printf("scheduler: [%s] DEPRECATION: direct job using prompt instead of command - migrate to --command", j.ID)
 			text = j.Prompt
 		}
-	} else if j.Tier == "agent" && e.cfg.Orchestrator != nil {
+	} else if e.cfg.TierStore != nil && e.cfg.TierStore.Current().IsOrchestratorTier(j.Tier) && e.cfg.Orchestrator != nil {
 		text, execResult, err = e.invokeOrchestratorWithMeta(j)
 	} else {
 		text, execResult, err = e.invokeLLMWithMeta(j)

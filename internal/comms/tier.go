@@ -28,12 +28,23 @@ type TierInfo struct {
 	RouterLabel   string
 	ContextWeight string // "light", "standard", "full"
 	Fallback      string // tier name to try on failure
+	Role          string // "orchestrator" for agent/team tiers
 }
 
 // TiersSnapshot is a read-only snapshot of tier configuration.
 type TiersSnapshot struct {
 	Tiers           []TierInfo
 	DefaultFallback string
+}
+
+// IsOrchestratorTier returns true if the named tier has the orchestrator role.
+func (s TiersSnapshot) IsOrchestratorTier(name string) bool {
+	for _, t := range s.Tiers {
+		if t.Name == name {
+			return t.Role == "orchestrator"
+		}
+	}
+	return false
 }
 
 // TierStoreReader provides read access to tier configuration.
@@ -129,7 +140,7 @@ func OnboardingTier(tierStore TierStoreReader) string {
 	}
 	var candidates []candidate
 	for _, t := range snap.Tiers {
-		if t.Enabled && t.Name != "agent" {
+		if t.Enabled && t.Role != "orchestrator" {
 			candidates = append(candidates, candidate{t.Name, t.Priority})
 		}
 	}

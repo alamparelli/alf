@@ -258,9 +258,17 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 		})
 	}
 
-	// 9. Agent dispatch.
-	if route.Tier == "agent" && e.Orchestrator != nil {
-		return e.processAgent(ctx, msg, tp, recall, convID, userMsgID)
+	// 9. Agent dispatch — check by role, not name.
+	if tiers.IsOrchestratorTier(route.Tier) && e.Orchestrator != nil {
+		// Skip orchestrator if no teams are configured — fallback to next tier.
+		if !e.Orchestrator.HasTeams() {
+			fallback := FirstFallbackTier(e.TierStore)
+			log.Printf("[comms] → orchestrator tier %q skipped (no teams configured), falling back → %s", route.Tier, fallback)
+			route = RouteResult{Tier: fallback, Reason: fmt.Sprintf("no-teams: %s→%s", route.Tier, fallback)}
+			tp, _ = ResolveTierParams(route.Tier, tiers, e.DataDir, e.ToolRegistry, e.Registry, e.ResolveModel)
+		} else {
+			return e.processAgent(ctx, msg, tp, recall, convID, userMsgID)
+		}
 	}
 
 	// 10-13. Standard provider invocation.

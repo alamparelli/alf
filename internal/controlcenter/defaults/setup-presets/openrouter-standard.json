@@ -57,6 +57,7 @@
       "priority": 4,
       "enabled": true,
       "routable": true,
+      "role": "orchestrator",
       "router_label": "ONLY for tasks explicitly requesting a team of agents, or requiring parallel independent workstreams that CANNOT be done sequentially by one model",
       "max_turns": 10,
       "write_capable": false,

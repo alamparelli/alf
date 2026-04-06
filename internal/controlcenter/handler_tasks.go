@@ -132,14 +132,14 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// resolveAgentConfig reads the "agent" tier config to get model/effort/timeout settings.
+// resolveAgentConfig reads the orchestrator tier config to get model/effort/timeout settings.
 func (h *TasksHandler) resolveAgentConfig() agents.RunConfig {
 	if h.TierStore == nil {
 		return agents.RunConfig{}
 	}
 	tiers := h.TierStore.Current()
 	for _, t := range tiers.Tiers {
-		if t.Name == "agent" {
+		if t.IsOrchestrator() {
 			model := t.Model
 			if (t.Backend == "" || t.Backend == "cli") && h.ResolveModel != nil {
 				model = h.ResolveModel(t.Model)

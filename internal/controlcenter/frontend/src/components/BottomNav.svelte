@@ -165,7 +165,7 @@
       icon: t.icon,
       type: 'system' as const,
     }))
-    for (const app of apps.items) {
+    for (const app of apps.items.filter(a => a.name !== 'developer' || nav.developerMode)) {
       items.push({
         view: 'page:' + app.name,
         label: app.display_name || app.name,

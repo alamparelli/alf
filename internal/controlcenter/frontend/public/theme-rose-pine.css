@@ -1,0 +1,54 @@
+/* Rosé Pine palette — Warm muted Light + Dark */
+
+/* Rosé Pine Dawn (Light) */
+:root {
+  --bg: #faf4ed;
+  --bg-card: #fffaf3;
+  --bg-input: #f2e9e1;
+  --text: #575279;
+  --text-dim: #9893a5;
+  --accent: #d7827e;
+  --green: #286983;
+  --red: #b4637a;
+  --yellow: #ea9d34;
+  --border: #dfdad9;
+  --radius: 8px;
+  --on-accent: #faf4ed;
+  --danger: #b4637a;
+  --success: #286983;
+  --error: #b4637a;
+
+  --mauve: #907aa9;
+  --pink: #d7827e;
+  --teal: #286983;
+  --sapphire: #56949f;
+  --peach: #ea9d34;
+  --lavender: #c4a7e7;
+}
+
+/* Rosé Pine (Dark) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #191724;
+    --bg-card: #1f1d2e;
+    --bg-input: #26233a;
+    --text: #e0def4;
+    --text-dim: #908caa;
+    --accent: #ebbcba;
+    --green: #31748f;
+    --red: #eb6f92;
+    --yellow: #f6c177;
+    --border: #403d52;
+    --on-accent: #191724;
+    --danger: #eb6f92;
+    --success: #31748f;
+    --error: #eb6f92;
+
+    --mauve: #c4a7e7;
+    --pink: #ebbcba;
+    --teal: #31748f;
+    --sapphire: #9ccfd8;
+    --peach: #f6c177;
+    --lavender: #c4a7e7;
+  }
+}

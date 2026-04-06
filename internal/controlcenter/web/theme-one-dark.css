@@ -1,0 +1,54 @@
+/* One Dark palette — Atom-style Light + Dark */
+
+/* One Light */
+:root {
+  --bg: #fafafa;
+  --bg-card: #ffffff;
+  --bg-input: #f0f0f0;
+  --text: #383a42;
+  --text-dim: #a0a1a7;
+  --accent: #4078f2;
+  --green: #50a14f;
+  --red: #e45649;
+  --yellow: #c18401;
+  --border: #d3d3d3;
+  --radius: 8px;
+  --on-accent: #ffffff;
+  --danger: #e45649;
+  --success: #50a14f;
+  --error: #e45649;
+
+  --mauve: #a626a4;
+  --pink: #e45649;
+  --teal: #0184bc;
+  --sapphire: #4078f2;
+  --peach: #c18401;
+  --lavender: #a626a4;
+}
+
+/* One Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #282c34;
+    --bg-card: #2c313a;
+    --bg-input: #3a3f4b;
+    --text: #abb2bf;
+    --text-dim: #5c6370;
+    --accent: #61afef;
+    --green: #98c379;
+    --red: #e06c75;
+    --yellow: #e5c07b;
+    --border: #3e4451;
+    --on-accent: #282c34;
+    --danger: #e06c75;
+    --success: #98c379;
+    --error: #e06c75;
+
+    --mauve: #c678dd;
+    --pink: #e06c75;
+    --teal: #56b6c2;
+    --sapphire: #61afef;
+    --peach: #d19a66;
+    --lavender: #c678dd;
+  }
+}

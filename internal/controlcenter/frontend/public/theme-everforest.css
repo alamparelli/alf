@@ -1,0 +1,54 @@
+/* Everforest palette — Nature green Light + Dark */
+
+/* Everforest Light */
+:root {
+  --bg: #fdf6e3;
+  --bg-card: #f4f0d9;
+  --bg-input: #efebd4;
+  --text: #5c6a72;
+  --text-dim: #939f91;
+  --accent: #8da101;
+  --green: #8da101;
+  --red: #f85552;
+  --yellow: #dfa000;
+  --border: #d8d3ba;
+  --radius: 8px;
+  --on-accent: #fdf6e3;
+  --danger: #f85552;
+  --success: #8da101;
+  --error: #f85552;
+
+  --mauve: #df69ba;
+  --pink: #e67e80;
+  --teal: #35a77c;
+  --sapphire: #3a94c5;
+  --peach: #f57d26;
+  --lavender: #df69ba;
+}
+
+/* Everforest Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #2d353b;
+    --bg-card: #343f44;
+    --bg-input: #3d484d;
+    --text: #d3c6aa;
+    --text-dim: #859289;
+    --accent: #a7c080;
+    --green: #a7c080;
+    --red: #e67e80;
+    --yellow: #dbbc7f;
+    --border: #475258;
+    --on-accent: #2d353b;
+    --danger: #e67e80;
+    --success: #a7c080;
+    --error: #e67e80;
+
+    --mauve: #d699b6;
+    --pink: #e67e80;
+    --teal: #83c092;
+    --sapphire: #7fbbb3;
+    --peach: #e69875;
+    --lavender: #d699b6;
+  }
+}

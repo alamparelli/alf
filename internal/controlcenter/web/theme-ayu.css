@@ -1,0 +1,54 @@
+/* Ayu palette — Minimal Light + Dark */
+
+/* Ayu Light */
+:root {
+  --bg: #fafafa;
+  --bg-card: #ffffff;
+  --bg-input: #f0f0f0;
+  --text: #5c6166;
+  --text-dim: #8a9199;
+  --accent: #ff9940;
+  --green: #86b300;
+  --red: #f07171;
+  --yellow: #f2ae49;
+  --border: #d8d8d8;
+  --radius: 8px;
+  --on-accent: #fafafa;
+  --danger: #f07171;
+  --success: #86b300;
+  --error: #f07171;
+
+  --mauve: #a37acc;
+  --pink: #f07171;
+  --teal: #4cbf99;
+  --sapphire: #55b4d4;
+  --peach: #ff9940;
+  --lavender: #a37acc;
+}
+
+/* Ayu Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0e14;
+    --bg-card: #11141b;
+    --bg-input: #1a1e29;
+    --text: #bfbdb6;
+    --text-dim: #565b66;
+    --accent: #e6b450;
+    --green: #aad94c;
+    --red: #d95757;
+    --yellow: #e6b450;
+    --border: #1c2029;
+    --on-accent: #0b0e14;
+    --danger: #d95757;
+    --success: #aad94c;
+    --error: #d95757;
+
+    --mauve: #d2a6ff;
+    --pink: #f07178;
+    --teal: #95e6cb;
+    --sapphire: #73b8ff;
+    --peach: #ffb454;
+    --lavender: #d2a6ff;
+  }
+}

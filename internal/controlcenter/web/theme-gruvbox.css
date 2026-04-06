@@ -1,0 +1,54 @@
+/* Gruvbox palette — Retro warm Light + Dark */
+
+/* Gruvbox Light */
+:root {
+  --bg: #fbf1c7;
+  --bg-card: #f9f5d7;
+  --bg-input: #ebdbb2;
+  --text: #3c3836;
+  --text-dim: #928374;
+  --accent: #d65d0e;
+  --green: #98971a;
+  --red: #cc241d;
+  --yellow: #d79921;
+  --border: #d5c4a1;
+  --radius: 8px;
+  --on-accent: #fbf1c7;
+  --danger: #cc241d;
+  --success: #98971a;
+  --error: #cc241d;
+
+  --mauve: #b16286;
+  --pink: #d3869b;
+  --teal: #689d6a;
+  --sapphire: #458588;
+  --peach: #d65d0e;
+  --lavender: #b16286;
+}
+
+/* Gruvbox Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #282828;
+    --bg-card: #3c3836;
+    --bg-input: #504945;
+    --text: #ebdbb2;
+    --text-dim: #a89984;
+    --accent: #fe8019;
+    --green: #b8bb26;
+    --red: #fb4934;
+    --yellow: #fabd2f;
+    --border: #504945;
+    --on-accent: #282828;
+    --danger: #fb4934;
+    --success: #b8bb26;
+    --error: #fb4934;
+
+    --mauve: #d3869b;
+    --pink: #d3869b;
+    --teal: #8ec07c;
+    --sapphire: #83a598;
+    --peach: #fe8019;
+    --lavender: #d3869b;
+  }
+}

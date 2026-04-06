@@ -8,6 +8,14 @@ Auto-loaded via `<script src="/static/alf-components.js"></script>` (also auto-i
 
 ---
 
+## Spacing
+
+Block-level components (`alf-stat-grid`, `alf-search-box`, `alf-tabs`, `.card-group`) include a built-in `margin-bottom: var(--space-md, 16px)`. **Do not add extra `mb-md` classes** — spacing between stacked components is automatic.
+
+For manual spacing, use utility classes: `.mb-sm` (10px), `.mb-md` (16px), `.mb-lg` (24px).
+
+---
+
 ## Tabs
 
 ```html

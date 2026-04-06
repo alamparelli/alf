@@ -1,0 +1,54 @@
+/* shadcn/ui palette — Zinc neutral Light + Dark */
+
+/* shadcn Light */
+:root {
+  --bg: #ffffff;
+  --bg-card: #ffffff;
+  --bg-input: #f4f4f5;
+  --text: #09090b;
+  --text-dim: #71717a;
+  --accent: #18181b;
+  --green: #16a34a;
+  --red: #dc2626;
+  --yellow: #ca8a04;
+  --border: #e4e4e7;
+  --radius: 8px;
+  --on-accent: #fafafa;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --error: #dc2626;
+
+  --mauve: #8b5cf6;
+  --pink: #ec4899;
+  --teal: #14b8a6;
+  --sapphire: #0ea5e9;
+  --peach: #f97316;
+  --lavender: #a78bfa;
+}
+
+/* shadcn Dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #09090b;
+    --bg-card: #0a0a0b;
+    --bg-input: #1c1c1f;
+    --text: #fafafa;
+    --text-dim: #a1a1aa;
+    --accent: #fafafa;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --border: #27272a;
+    --on-accent: #18181b;
+    --danger: #ef4444;
+    --success: #22c55e;
+    --error: #ef4444;
+
+    --mauve: #a78bfa;
+    --pink: #f472b6;
+    --teal: #2dd4bf;
+    --sapphire: #38bdf8;
+    --peach: #fb923c;
+    --lavender: #c4b5fd;
+  }
+}

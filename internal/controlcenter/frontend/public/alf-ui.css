@@ -620,7 +620,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   padding: 6px 10px;
-  margin-bottom: var(--space-sm, 10px);
+  margin-bottom: var(--space-md, 16px);
   background: transparent;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -644,6 +644,7 @@ body {
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
+  margin-bottom: var(--space-md, 16px);
   padding: 2px;
   margin-bottom: var(--space-md, 16px);
 }
@@ -728,6 +729,7 @@ body {
   gap: 1px;
   background: var(--border);
   border-radius: var(--radius, 8px);
+  margin-bottom: var(--space-md, 16px);
   overflow: hidden;
   margin-bottom: var(--space-lg, 24px);
 }

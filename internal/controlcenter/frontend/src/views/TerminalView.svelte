@@ -368,11 +368,6 @@
   <div class="term-header">
     <span class="term-title">{sshService ? `SSH: ${sshService}` : 'Terminal'}</span>
     <div class="term-header-actions">
-      {#if !sshService}
-        <button class="term-btn" class:admin-active={adminMode} onclick={toggleAdmin} title={adminMode ? 'Switch to alf (workspace)' : 'Switch to admin (daemon)'}>
-          {adminMode ? 'admin' : 'alf'}
-        </button>
-      {/if}
       {#if sshService}
         <a class="term-btn" href="#/terminal" onclick={() => { sshService = null; newSession() }}>
           Local Terminal

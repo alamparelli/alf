@@ -13,10 +13,11 @@ import (
 
 // TaskNativeTool manages agent team tasks and LLM chains.
 type TaskNativeTool struct {
-	Service    TaskService
-	LLMService LLMService
-	NotifyFunc func(origin ChainOrigin, chainID, status, message string)
-	DataDir    string // for trace file output (optional)
+	Service     TaskService
+	TeamService TeamService
+	LLMService  LLMService
+	NotifyFunc  func(origin ChainOrigin, chainID, status, message string)
+	DataDir     string // for trace file output (optional)
 }
 
 func (TaskNativeTool) ToolName() string { return "task" }
@@ -122,6 +123,18 @@ func (t TaskNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 	case "launch":
 		if args.Prompt == "" {
 			return "", fmt.Errorf("prompt is required for launch")
+		}
+		// Early check: fail fast if no teams are configured.
+		if t.TeamService != nil {
+			teams := t.TeamService.All()
+			if len(teams) == 0 {
+				return "", fmt.Errorf("no agent teams configured — create a team first using the team tool (action: save)")
+			}
+			if args.Team != "" {
+				if _, ok := t.TeamService.Get(args.Team); !ok {
+					return "", fmt.Errorf("team %q not found — use team tool (action: list) to see available teams", args.Team)
+				}
+			}
 		}
 		id, err := t.Service.Launch(ctx, TaskLaunchOpts{
 			Prompt:         args.Prompt,

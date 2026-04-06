@@ -763,8 +763,8 @@ func main() {
 		mpManager.SetOnChange(func() {
 			toolRegistry.Rescan()
 		})
-		if err := mpManager.RestoreEnabled(); err != nil {
-			log.Printf("[marketplace] restore enabled apps: %v", err)
+		if err := mpManager.RestoreInstalled(); err != nil {
+			log.Printf("[marketplace] restore installed apps: %v", err)
 		} else {
 			toolRegistry.Rescan()
 		}
@@ -913,6 +913,10 @@ func main() {
 				skillStore:   skillStore,
 				resolveModel: router.ResolveModel,
 				eventLog:     eventLog,
+			},
+			TeamService: &teamAdapter{
+				store:   agentStore,
+				dataDir: dataDir,
 			},
 			DataDir: dataDir,
 			LLMService: &llmAdapter{

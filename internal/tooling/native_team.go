@@ -69,7 +69,7 @@ func (t TeamNativeTool) Run(_ context.Context, argsJSON string) (string, error) 
 	case "list":
 		teams := t.Service.All()
 		if len(teams) == 0 {
-			return "No teams configured.", nil
+			return "No teams configured. Create one with action 'save' providing name, description, and agents [{name, tier, description}].", nil
 		}
 		data, _ := json.MarshalIndent(teams, "", "  ")
 		return string(data), nil

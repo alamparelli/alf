@@ -29,7 +29,7 @@ type CodexProvider struct {
 // NewCodexProvider creates a new CodexProvider.
 func NewCodexProvider(dataDir string, timeout time.Duration, apiKey string, cred *syscall.Credential) *CodexProvider {
 	if timeout <= 0 {
-		timeout = 5 * time.Minute
+		timeout = 10 * time.Minute
 	}
 	return &CodexProvider{
 		DefaultDataDir: dataDir,
@@ -368,7 +368,7 @@ type codexEvent struct {
 func codexEnv(apiKey string, dataDir string) []string {
 	env := make([]string, 0, 8)
 	// Pass through essential variables, prepend user tools to PATH.
-	for _, key := range []string{"PATH", "TERM", "LANG", "HOME", "TMPDIR", "TZ", "VAULT_PROXY_SOCK", "ALF_TOOLS_SOCK", "ALF_SIGNAL_SOCK"} {
+	for _, key := range []string{"PATH", "TERM", "LANG", "HOME", "TMPDIR", "TZ", "VAULT_PROXY_SOCK", "ALF_TOOLS_SOCK", "ALF_SIGNAL_SOCK", "ALF_DATA_DIR"} {
 		if v := os.Getenv(key); v != "" {
 			if key == "PATH" && dataDir != "" {
 				v = dataDir + "/tools.d:" + dataDir + "/tools:" + dataDir + "/skills:" + dataDir + "/apps:" + v
@@ -378,6 +378,19 @@ func codexEnv(apiKey string, dataDir string) []string {
 	}
 	if apiKey != "" {
 		env = append(env, "CODEX_API_KEY="+apiKey)
+	}
+	// Ensure ALF_DATA_DIR is always set — tools like remember/recall depend on it.
+	if dataDir != "" {
+		hasDataDir := false
+		for _, e := range env {
+			if len(e) > 13 && e[:13] == "ALF_DATA_DIR=" {
+				hasDataDir = true
+				break
+			}
+		}
+		if !hasDataDir {
+			env = append(env, "ALF_DATA_DIR="+dataDir)
+		}
 	}
 	return env
 }

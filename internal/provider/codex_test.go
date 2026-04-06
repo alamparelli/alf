@@ -9,8 +9,8 @@ import (
 
 func TestNewCodexProvider_DefaultTimeout(t *testing.T) {
 	p := NewCodexProvider("/tmp", 0, "sk-test", nil)
-	if p.Timeout != 5*time.Minute {
-		t.Errorf("expected default timeout 5m, got %v", p.Timeout)
+	if p.Timeout != 10*time.Minute {
+		t.Errorf("expected default timeout 10m, got %v", p.Timeout)
 	}
 }
 

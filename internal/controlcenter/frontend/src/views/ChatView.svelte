@@ -79,6 +79,7 @@
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let activeJobId = $state<string | null>(null)
   let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string }[]>([])
+  let abortController: AbortController | null = null
   let draft = $state('')
   let activeSkills = $state<string[]>([])
 
@@ -282,6 +283,7 @@
       scrollToBottom()
     }
 
+    abortController = new AbortController()
     try {
       const body: any = { message, conv_id: convId }
       if (mediaIds.length > 0) body.media_ids = mediaIds
@@ -296,6 +298,7 @@
         },
         body: JSON.stringify(body),
         credentials: 'same-origin',
+        signal: abortController.signal,
       })
 
       if (res.status === 401) {
@@ -416,6 +419,7 @@
     } catch {
       // Stream ended or errored
     } finally {
+      abortController = null
       const finalText = streamingText
       sending = false
       activeJobId = null
@@ -435,8 +439,8 @@
         nav.incrementBadge('chat')
       }
 
-      // Process queue
-      if (messageQueue.length > 0) {
+      // Process queue (skip if user explicitly stopped)
+      if (!stoppedByUser && messageQueue.length > 0) {
         const next = messageQueue[0]
         messageQueue = messageQueue.slice(1)
         doSend(next.message, next.mediaFiles, next.model)
@@ -579,20 +583,21 @@
     setText(fullText)
   }
 
-  // --- Stop active call ---
-  async function stopCall() {
-    if (!activeJobId) return
+  // --- Stop active call (instant) ---
+  function stopCall() {
     stoppedByUser = true
-    try {
-      await api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`)
-    } catch { /* ignore */ }
-    // Immediately reset UI state — don't wait for stream to end
+    messageQueue = [] // clear pending queue
+    // Abort the active fetch stream immediately
+    abortController?.abort()
+    abortController = null
+    // Reset UI state instantly — no awaits before this
     sending = false
     activeJobId = null
     streamingBlocks = []
     streamingText = ''
-    await loadHistory()
-    scrollToBottom()
+    // Fire-and-forget: cancel backend job + reload history
+    api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`).catch(() => {})
+    loadHistory().then(() => scrollToBottom())
   }
 
   // --- New conversation ---

@@ -22,7 +22,7 @@ type Consolidator struct {
 // NewConsolidator creates a new consolidator.
 func NewConsolidator(store *Store, extractor *Extractor, prov ExtractorProvider, timeout time.Duration) *Consolidator {
 	if timeout <= 0 {
-		timeout = 5 * time.Minute
+		timeout = 10 * time.Minute
 	}
 	return &Consolidator{
 		store:     store,

@@ -8,8 +8,8 @@ import (
 
 func TestNewCLIProvider_DefaultTimeout(t *testing.T) {
 	p := NewCLIProvider("/tmp", "/tmp", 0, nil)
-	if p.Timeout != 5*time.Minute {
-		t.Errorf("expected default timeout 5m, got %v", p.Timeout)
+	if p.Timeout != 10*time.Minute {
+		t.Errorf("expected default timeout 10m, got %v", p.Timeout)
 	}
 }
 

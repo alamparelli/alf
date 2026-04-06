@@ -425,7 +425,7 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 
 	llmTimeout := j.Timeout
 	if llmTimeout <= 0 {
-		llmTimeout = 5 * time.Minute
+		llmTimeout = 10 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), llmTimeout)
 	defer cancel()

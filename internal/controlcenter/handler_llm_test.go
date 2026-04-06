@@ -104,8 +104,8 @@ func TestLLMInvokeHandler_TimeoutFallback_ZeroTimeoutMin(t *testing.T) {
 	}
 
 	remaining := time.Until(capture.deadline)
-	if remaining < 4*time.Minute+50*time.Second || remaining > 5*time.Minute+5*time.Second {
-		t.Errorf("expected deadline ~5m (fallback), got %v remaining", remaining)
+	if remaining < 9*time.Minute+50*time.Second || remaining > 10*time.Minute+5*time.Second {
+		t.Errorf("expected deadline ~10m (fallback), got %v remaining", remaining)
 	}
 }
 
@@ -127,8 +127,8 @@ func TestLLMInvokeHandler_TimeoutFallback_NilTierStore(t *testing.T) {
 	}
 
 	remaining := time.Until(capture.deadline)
-	if remaining < 4*time.Minute+50*time.Second || remaining > 5*time.Minute+5*time.Second {
-		t.Errorf("expected deadline ~5m (fallback), got %v remaining", remaining)
+	if remaining < 9*time.Minute+50*time.Second || remaining > 10*time.Minute+5*time.Second {
+		t.Errorf("expected deadline ~10m (fallback), got %v remaining", remaining)
 	}
 }
 
@@ -156,8 +156,8 @@ func TestLLMInvokeHandler_TimeoutFallback_TierNotFound(t *testing.T) {
 	}
 
 	remaining := time.Until(capture.deadline)
-	if remaining < 4*time.Minute+50*time.Second || remaining > 5*time.Minute+5*time.Second {
-		t.Errorf("expected deadline ~5m (fallback), got %v remaining", remaining)
+	if remaining < 9*time.Minute+50*time.Second || remaining > 10*time.Minute+5*time.Second {
+		t.Errorf("expected deadline ~10m (fallback), got %v remaining", remaining)
 	}
 }
 
@@ -184,10 +184,10 @@ func TestLLMInvokeHandler_TimeoutFallback_DisabledTier(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// Disabled tier should not match, so fallback to 5m.
+	// Disabled tier should not match, so fallback to 10m.
 	remaining := time.Until(capture.deadline)
-	if remaining < 4*time.Minute+50*time.Second || remaining > 5*time.Minute+5*time.Second {
-		t.Errorf("expected deadline ~5m (fallback for disabled tier), got %v remaining", remaining)
+	if remaining < 9*time.Minute+50*time.Second || remaining > 10*time.Minute+5*time.Second {
+		t.Errorf("expected deadline ~10m (fallback for disabled tier), got %v remaining", remaining)
 	}
 }
 

@@ -33,7 +33,7 @@ type CLIProvider struct {
 // NewCLIProvider creates a new CLIProvider.
 func NewCLIProvider(homeDir, dataDir string, timeout time.Duration, cred *syscall.Credential) *CLIProvider {
 	if timeout <= 0 {
-		timeout = 5 * time.Minute
+		timeout = 10 * time.Minute
 	}
 
 	// Create an empty MCP config file so we can pass --strict-mcp-config

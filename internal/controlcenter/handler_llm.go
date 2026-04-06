@@ -101,7 +101,7 @@ func (h *LLMInvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sync mode: apply tier timeout.
-	timeout := 5 * time.Minute
+	timeout := 10 * time.Minute
 	if h.TierStore != nil {
 		tiers := h.TierStore.Current()
 		for _, t := range tiers.Tiers {

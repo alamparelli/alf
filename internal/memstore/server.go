@@ -53,12 +53,12 @@ func (s *Store) ServeUnix(sockPath string) error {
 	}
 
 	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
+	// chown/chmod may fail on Docker Desktop volume mounts (VirtioFS) — non-fatal.
 	if err := os.Chown(sockPath, -1, 1000); err != nil {
 		log.Printf("memstore: chown %s: %v (non-root?)", sockPath, err)
 	}
 	if err := os.Chmod(sockPath, 0660); err != nil {
-		ln.Close()
-		return fmt.Errorf("chmod %s: %w", sockPath, err)
+		log.Printf("memstore: chmod %s: %v (continuing anyway)", sockPath, err)
 	}
 
 	log.Printf("memstore: socket server listening on %s", sockPath)

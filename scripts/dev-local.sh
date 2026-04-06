@@ -35,7 +35,7 @@ fi
 
 # Bootstrap directories.
 mkdir -p dev-secrets dev-data dev-config.d dev-skills.d dev-vault-data \
-  dev-cache/{claude,local,npm,cache}
+  dev-cache/{claude,codex,local,npm,cache}
 
 # Bootstrap dev-secrets if missing.
 if [ ! -s dev-secrets/cc_auth_token ]; then
@@ -58,7 +58,7 @@ fi
 if [ "$FRESH" = true ]; then
   echo "==> Fresh: wiping runtime data..."
   rm -rf dev-config.d dev-data dev-vault-data dev-cache
-  mkdir -p dev-config.d dev-data dev-vault-data dev-cache/{claude,local,npm,cache}
+  mkdir -p dev-config.d dev-data dev-vault-data dev-cache/{claude,codex,local,npm,cache}
 fi
 
 # Build frontend unless skipped.

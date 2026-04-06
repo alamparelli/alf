@@ -17,7 +17,7 @@
       "routable": true,
       "router_label": "Greetings, small talk, yes/no questions, single-fact lookups (weather, time, date), toggling a setting on/off, running an existing scheduled job, listing items (files, jobs, skills, settings)",
       "max_turns": 30,
-      "write_capable": false,
+      "write_capable": true,
       "context_weight": "light",
       "force_command": true,
       "system_prompt": ""
@@ -30,7 +30,7 @@
       "routable": true,
       "router_label": "Any question requiring explanation or reasoning, summarizing content, translations, web search and synthesis, code review, debugging, reading logs, editing files, implementing features, fixing bugs, writing scripts and tests, multi-file changes, creating scheduled jobs and reminders, research, multi-step sequential tasks",
       "max_turns": 30,
-      "write_capable": false,
+      "write_capable": true,
       "effort": "low",
       "force_command": true
     },
@@ -42,7 +42,7 @@
       "routable": true,
       "router_label": "Architecture design, system-level reasoning, complex trade-off analysis, large-scale refactoring, implementing complex features, redesigning system architecture, building new modules from scratch, complex multi-step tasks requiring deep thinking",
       "max_turns": 40,
-      "write_capable": false,
+      "write_capable": true,
       "effort": "low",
       "force_command": true
     },
@@ -55,7 +55,7 @@
       "role": "orchestrator",
       "router_label": "ONLY for tasks explicitly requesting a team of agents, or requiring parallel independent workstreams that CANNOT be done sequentially by one model (e.g. 'build a full app with frontend + backend + tests simultaneously', 'write 5 articles at once', 'research 3 topics in parallel'). If one model can handle it step-by-step, use sonnet or opus instead.",
       "max_turns": 10,
-      "write_capable": false,
+      "write_capable": true,
       "orchestrator_max_turns": 3,
       "max_iterations": 20,
       "effort": "medium",

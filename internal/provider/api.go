@@ -58,7 +58,7 @@ func NewAPIProviderFromConfig(cfg APIProviderConfig, history *History) *APIProvi
 		maxTokens:    maxTokens,
 		auth:         auth,
 		history:      history,
-		client:       &http.Client{Timeout: 5 * time.Minute},
+		client:       &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 

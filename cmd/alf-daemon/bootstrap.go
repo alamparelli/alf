@@ -380,7 +380,6 @@ func seedHeartbeatFile(contextDir string) {
 	}
 	os.MkdirAll(contextDir, 0o755)
 	content := `---
-tier: haiku
 ---
 
 `

@@ -213,8 +213,8 @@ func TestNewExtractor_Defaults(t *testing.T) {
 	prov := &mockProvider{}
 	e := NewExtractor(nil, "/data", "/ctx", ExtractorConfig{}, prov, nil)
 
-	if e.timeout != 5*time.Minute {
-		t.Errorf("expected 5m timeout, got %s", e.timeout)
+	if e.timeout != 10*time.Minute {
+		t.Errorf("expected 10m timeout, got %s", e.timeout)
 	}
 	if e.msgThreshold != 10 {
 		t.Errorf("expected 10 msg threshold, got %d", e.msgThreshold)

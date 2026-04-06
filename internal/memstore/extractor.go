@@ -69,7 +69,7 @@ type ExtractorConfig struct {
 // NewExtractor creates a new event-driven extractor.
 func NewExtractor(store *Store, dataDir, contextDir string, cfg ExtractorConfig, prov ExtractorProvider, tierResolver TierResolver) *Extractor {
 	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Minute
+		cfg.Timeout = 10 * time.Minute
 	}
 	if cfg.MsgThreshold <= 0 {
 		cfg.MsgThreshold = 10

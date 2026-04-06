@@ -13,7 +13,7 @@ var defaultTiersJSON []byte
 // Default values for memory configuration fallbacks.
 const (
 	DefaultMemoryExtractInterval    = 180  // minutes
-	DefaultMemoryExtractTimeout     = 300  // seconds
+	DefaultMemoryExtractTimeout     = 600  // seconds
 	DefaultMemoryExtractBootDelay   = 180  // seconds
 	DefaultMemoryExtractMinMessages = 3
 	DefaultMemoryDedupTextThreshold   = 0.7
@@ -103,7 +103,7 @@ func DefaultConfig() *Config {
 		AutoUpdateNotify:        true,
 		AuthBanThreshold:        10,
 		AuthBanDuration:         15,
-		TiersTimeout:            300,
+		TiersTimeout:            600,
 		ShowSkillFooter:         boolPtr(true),
 		TiersFile:               "tiers.json",
 		NotificationSound:       boolPtr(true),

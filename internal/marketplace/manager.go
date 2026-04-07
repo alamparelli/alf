@@ -19,7 +19,14 @@ type AppState string
 
 const (
 	StateInstalled AppState = "installed"
+	StateEnabled   AppState = "enabled"
+	StateDisabled  AppState = "disabled"
 )
+
+// isActive returns true if the app state represents a running/active app.
+func (s AppState) isActive() bool {
+	return s == StateInstalled || s == StateEnabled
+}
 
 type AppInfo struct {
 	Manifest
@@ -380,7 +387,7 @@ func (m *Manager) RestoreInstalled() error {
 	}
 
 	for slug, state := range m.states {
-		if state != StateInstalled {
+		if !state.isActive() {
 			continue
 		}
 
@@ -926,7 +933,7 @@ func (m *Manager) CheckUpdates() []UpdateInfo {
 		if !ok {
 			continue
 		}
-		if state != StateInstalled {
+		if !state.isActive() {
 			continue
 		}
 

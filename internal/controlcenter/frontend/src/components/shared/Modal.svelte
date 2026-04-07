@@ -2,9 +2,10 @@
   import { tick, onMount, onDestroy } from 'svelte'
   import type { Snippet } from 'svelte'
 
-  let { open = false, wide = false, onclose, children }: {
+  let { open = false, wide = false, persistent = false, onclose, children }: {
     open?: boolean
     wide?: boolean
+    persistent?: boolean
     onclose?: () => void
     children: Snippet
   } = $props()
@@ -16,7 +17,7 @@
   let dragging = $state(false)
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && open) {
+    if (e.key === 'Escape' && open && !persistent) {
       e.preventDefault()
       e.stopPropagation()
       handleClose()
@@ -90,7 +91,7 @@
 
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" role="presentation" onclick={handleClose}>
+  <div class="modal-backdrop" role="presentation" onclick={() => { if (!persistent) handleClose() }}>
     <!-- Desktop: centered modal -->
     <div class="modal desktop-modal" class:wide onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" bind:this={modalEl}>
       {#if onclose}

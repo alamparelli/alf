@@ -174,6 +174,12 @@ func syncClaudeJSON(homeDir string) {
 				if data, err := os.ReadFile(newest); err == nil {
 					os.WriteFile(realFile, data, 0o640)
 					log.Printf("claude-json: restored from Claude backup %s", filepath.Base(newest))
+					// Remove backup files so Claude CLI doesn't warn about them.
+					for _, e := range entries {
+						if strings.HasPrefix(e.Name(), ".claude.json.backup.") {
+							os.Remove(filepath.Join(backupDir, e.Name()))
+						}
+					}
 				}
 			}
 		}

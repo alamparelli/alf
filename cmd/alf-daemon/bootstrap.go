@@ -372,6 +372,33 @@ func writeLLMSIndex(dataDir string) {
 	log.Printf("docs: wrote llms.txt (%d docs)", len(entries))
 }
 
+// fixContextPermissions ensures all files in context/ are group-readable (0o664).
+// Claude CLI subprocesses may create or overwrite files with a restrictive umask,
+// making them unreadable by other alf-group processes.
+func fixContextPermissions(contextDir string) {
+	entries, err := os.ReadDir(contextDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		path := filepath.Join(contextDir, e.Name())
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.Mode().Perm() != 0o664 {
+			if err := os.Chmod(path, 0o664); err != nil {
+				log.Printf("fixContextPermissions: chmod %s: %v", e.Name(), err)
+			} else {
+				log.Printf("fixContextPermissions: fixed %s (%04o → 0664)", e.Name(), info.Mode().Perm())
+			}
+		}
+	}
+}
+
 // seedHeartbeatFile creates a default context/heartbeat.md if it doesn't exist.
 func seedHeartbeatFile(contextDir string) {
 	hbPath := filepath.Join(contextDir, "heartbeat.md")

@@ -331,6 +331,9 @@ func main() {
 	// Seed default heartbeat.md if missing.
 	seedHeartbeatFile(contextDir)
 
+	// Fix context file permissions (Claude CLI may create files with restrictive umask).
+	fixContextPermissions(contextDir)
+
 	// Generate toolbox.md - explicit list of all available CLI tools.
 	memory.GenerateToolbox(contextDir, dataDir)
 

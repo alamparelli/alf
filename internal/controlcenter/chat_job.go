@@ -12,11 +12,12 @@ type chatJob struct {
 	ConvID string // conversation tab this job belongs to
 	cancel context.CancelFunc
 
-	mu     sync.Mutex
-	events []ChatEvent
-	done   bool
-	err    error
-	notify chan struct{} // replaced on each push; closed to wake readers
+	mu        sync.Mutex
+	events    []ChatEvent
+	done      bool
+	cancelled bool // set immediately on cancel(); makes isDone() true before finish()
+	err       error
+	notify    chan struct{} // replaced on each push; closed to wake readers
 }
 
 func newChatJob(cancel context.CancelFunc) *chatJob {
@@ -45,10 +46,27 @@ func (j *chatJob) finish(err error) {
 	close(ch)
 }
 
+// stop cancels the job context and marks it as done immediately,
+// so status checks and reconnect logic see it as finished right away.
+func (j *chatJob) stop() {
+	j.cancel()
+	j.mu.Lock()
+	j.cancelled = true
+	// Push a cancelled event so SSE clients see it before the stream ends.
+	j.events = append(j.events, ChatEvent{
+		Type: "cancelled",
+		Data: map[string]string{"reason": "Request was cancelled"},
+	})
+	ch := j.notify
+	j.notify = make(chan struct{})
+	j.mu.Unlock()
+	close(ch) // wake any streaming readers
+}
+
 func (j *chatJob) isDone() bool {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return j.done
+	return j.done || j.cancelled
 }
 
 func (j *chatJob) eventCount() int {
@@ -65,5 +83,5 @@ func (j *chatJob) snapshot(offset int) (events []ChatEvent, isDone bool, jobErr 
 		events = make([]ChatEvent, len(j.events)-offset)
 		copy(events, j.events[offset:])
 	}
-	return events, j.done, j.err, j.notify
+	return events, j.done || j.cancelled, j.err, j.notify
 }

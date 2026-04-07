@@ -37,7 +37,7 @@ Messages flow through a **chat engine** (`internal/comms/`) → **router** → *
 ### Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/alamparelli/alf/main/scripts/install.sh | sh
+curl -fsSL install.alfos.ai | sh
 ```
 
 ### Setup

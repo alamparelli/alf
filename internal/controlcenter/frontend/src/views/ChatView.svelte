@@ -387,6 +387,16 @@
             continue
           }
 
+          if (eventType === 'cancelled') {
+            appendMessage({
+              id: 'sys-' + Date.now(),
+              role: 'system',
+              text: data.reason || 'Request was cancelled',
+              ts: new Date().toISOString(),
+            })
+            continue
+          }
+
           if (eventType === 'done') {
             // Apply metadata from done event to the last assistant message
             const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
@@ -600,9 +610,10 @@
     activeJobId = null
     streamingBlocks = []
     streamingText = ''
-    // Fire-and-forget: cancel backend job + reload history
-    api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`).catch(() => {})
-    loadHistory().then(() => scrollToBottom())
+    // Cancel backend job (persists "cancelled" system message), then reload history
+    api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`)
+      .catch(() => {})
+      .finally(() => loadHistory().then(() => scrollToBottom()))
   }
 
   // --- New conversation ---

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alamparelli/alf/internal/chatdb"
 )
 
 // ChatHandler handles POST /api/chat, GET /api/chat (history), DELETE /api/chat (new session).
@@ -232,7 +234,17 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		j := h.Service.ActiveJob(convID)
 		if j != nil {
 			log.Printf("[chat-job] cancelling job %s for conv %s", j.ID, convID)
-			j.cancel()
+			j.stop()
+			// Persist "cancelled" system message so it survives history reload.
+			if h.Service.ChatDB != nil && convID != "" {
+				h.Service.ChatDB.InsertMessage(chatdb.Message{
+					ID:     NewMessageID(),
+					ConvID: convID,
+					Role:   "system",
+					Text:   "Request was cancelled",
+					Source: "cc",
+				})
+			}
 		} else {
 			log.Printf("[chat-job] DELETE: no active job found for conv_id=%q", convID)
 		}

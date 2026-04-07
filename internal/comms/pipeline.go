@@ -112,6 +112,12 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 		route = e.ClassifyFull(routerMsg, lastTier, msgCount, recentCtx)
 	}
 
+	// Early exit if context was cancelled during routing.
+	if ctx.Err() != nil {
+		routeSpan.End()
+		return nil, ctx.Err()
+	}
+
 	// 5. Post-route adjustments.
 	// Reply reclassification: if reply + direct response → re-classify with context.
 	if msg.IsReply && forcedTier == "" && route.Response != "" && route.Tier == "" {
@@ -246,6 +252,10 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 		routeSpan.Tag("forced", "true")
 	}
 	routeSpan.End()
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 
 	e.emit(channelID, OutEvent{Type: "routed", Data: map[string]string{"tier": route.Tier, "model": tp.Model}})
 
@@ -654,7 +664,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	result, err := prov.Invoke(ctx, prompt, params, progressFn)
 
 	// Retry without resume if session failed (CLI only).
-	if err != nil && resumeID != "" && !isAPITier {
+	if err != nil && resumeID != "" && !isAPITier && ctx.Err() == nil {
 		log.Printf("[comms] session %s failed (%v), starting fresh", resumeID, err)
 		e.Sessions.Archive(sessionKey)
 		params.ResumeID = ""
@@ -784,6 +794,11 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 
 	if err != nil {
 		errMsg := err.Error()
+		// User-initiated cancellation: skip error notice — the DELETE handler
+		// persists its own "Request was cancelled" message.
+		if ctx.Err() == context.Canceled {
+			return nil, fmt.Errorf("provider: %w", err)
+		}
 		notice := classifyProviderError(errMsg, ctx.Err())
 		e.emit(channelID, OutEvent{Type: "error", Data: map[string]string{"text": errMsg}})
 		e.emit(channelID, OutEvent{Type: "system", Data: map[string]string{

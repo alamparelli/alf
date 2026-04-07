@@ -420,6 +420,11 @@
       // Stream ended or errored
     } finally {
       abortController = null
+
+      // stopCall() already cleaned up UI state — skip the rest to avoid
+      // conflicting state updates and double loadHistory() calls.
+      if (stoppedByUser) return
+
       const finalText = streamingText
       sending = false
       activeJobId = null
@@ -434,13 +439,13 @@
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && finalText) {
         new Notification('ALF', { body: finalText.slice(0, 100) })
       }
-      if (finalText && !stoppedByUser) sound.play()
+      if (finalText) sound.play()
       if (nav.currentView !== 'chat') {
         nav.incrementBadge('chat')
       }
 
-      // Process queue (skip if user explicitly stopped)
-      if (!stoppedByUser && messageQueue.length > 0) {
+      // Process queue
+      if (messageQueue.length > 0) {
         const next = messageQueue[0]
         messageQueue = messageQueue.slice(1)
         doSend(next.message, next.mediaFiles, next.model)
@@ -595,9 +600,10 @@
     activeJobId = null
     streamingBlocks = []
     streamingText = ''
-    // Fire-and-forget: cancel backend job + reload history
-    api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`).catch(() => {})
-    loadHistory().then(() => scrollToBottom())
+    // Cancel backend job (persists "cancelled" system message), then reload history
+    api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`)
+      .catch(() => {})
+      .finally(() => loadHistory().then(() => scrollToBottom()))
   }
 
   // --- New conversation ---

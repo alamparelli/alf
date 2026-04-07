@@ -43,8 +43,6 @@
   let loginTerm: Terminal | null = null
   let loginFitAddon: FitAddon | null = null
   let loginWs: WebSocket | null = null
-  let loginUrlBarVisible = $state(false)
-  let loginUrlBarValue = $state('')
   let loginAuthChecking = $state(false)
   let applyError = $state('')
 
@@ -111,16 +109,16 @@
   function connectLoginTerminal() {
     if (!loginTermContainer) return
 
-    // Wait until the container is actually visible in the viewport
-    // (modal transition may still be in progress)
-    loginIntersectionObserver = new IntersectionObserver((entries) => {
-      if (entries[0]?.isIntersecting) {
-        loginIntersectionObserver?.disconnect()
-        loginIntersectionObserver = null
+    // Modal renders children() twice (desktop + mobile sheet).
+    // bind:this may point to the hidden copy. Find the visible one.
+    setTimeout(() => {
+      const allWraps = document.querySelectorAll('.login-term-wrap') as NodeListOf<HTMLDivElement>
+      const visible = Array.from(allWraps).find(el => el.offsetWidth > 0)
+      if (visible) {
+        loginTermContainer = visible
         initLoginTerminal()
       }
-    }, { threshold: 0.1 })
-    loginIntersectionObserver.observe(loginTermContainer)
+    }, 100)
   }
 
   function initLoginTerminal() {
@@ -176,8 +174,6 @@
       const data = ev.data instanceof ArrayBuffer
         ? new TextDecoder().decode(ev.data) : ev.data
       loginTerm.write(data)
-      const urlMatch = data.match(/(https?:\/\/[^\s\x1b]{60,})/)
-      if (urlMatch) { loginUrlBarValue = urlMatch[1]; loginUrlBarVisible = true }
     }
 
     loginWs.onclose = () => {
@@ -510,7 +506,7 @@
   export function setMode(m: 'wizard' | 'welcome') { mode = m; step = 0; backendConfigPhase = false; applyError = '' }
 </script>
 
-<Modal bind:open onclose={() => open = false}>
+<Modal bind:open persistent onclose={() => open = false}>
   <div class="wizard-container">
   {#if mode === 'welcome'}
     <!-- Welcome modal (setup already complete, first visit) -->
@@ -660,16 +656,6 @@
 
         {#if allAuthenticated}
           <p class="step-desc">All providers are authenticated. You can continue or use the terminal below to re-authenticate.</p>
-        {/if}
-
-        <!-- URL bar for OAuth links -->
-        {#if loginUrlBarVisible}
-          <div class="login-url-bar">
-            <input type="text" readonly value={loginUrlBarValue} class="login-url-input"
-              onclick={(e) => (e.target as HTMLInputElement).select()} />
-            <a href={loginUrlBarValue} target="_blank" rel="noopener" class="login-url-open">Open</a>
-            <button class="login-url-close" onclick={() => loginUrlBarVisible = false}>×</button>
-          </div>
         {/if}
 
         <div class="login-term-wrap" bind:this={loginTermContainer}></div>
@@ -1309,46 +1295,6 @@
 
   .login-hint {
     color: var(--text-dim);
-  }
-
-  .login-url-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    background: var(--bg-card);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius, 8px);
-    margin-bottom: 8px;
-  }
-
-  .login-url-input {
-    flex: 1;
-    background: transparent;
-    border: none;
-    color: var(--accent);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.72rem;
-    cursor: text;
-    min-width: 0;
-  }
-
-  .login-url-open {
-    color: var(--accent);
-    text-decoration: none;
-    font-size: 0.8rem;
-    font-weight: 500;
-    white-space: nowrap;
-  }
-
-  .login-url-close {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 1.1rem;
-    padding: 0 2px;
-    line-height: 1;
   }
 
 </style>

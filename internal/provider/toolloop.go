@@ -73,6 +73,9 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 	turns := 0
 	var totalInput, totalOutput int
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("tool loop cancelled: %w", err)
+		}
 		resp, err := tl.api.DoRequest(ctx, messages, model, toolsRaw, params.Effort, onProgress)
 		if err != nil {
 			return nil, err

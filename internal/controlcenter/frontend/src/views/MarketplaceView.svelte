@@ -45,12 +45,8 @@
           slugMap.set(remote.slug, { ...remote, state: 'available' });
         }
       }
-      // Fallback: if catalog is empty (registry down), show installed marketplace apps
-      if (catalog.length === 0) {
-        for (const app of local) {
-          slugMap.set(app.slug, { ...app });
-        }
-      }
+      // No fallback: only show apps from the remote catalog.
+      // Installed apps not in the catalog are not shown in the marketplace view.
 
       // Attach update info
       const updateMap = new Map(updates.map(u => [u.slug, u]));

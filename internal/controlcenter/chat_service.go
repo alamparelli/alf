@@ -230,6 +230,9 @@ func (cs *ChatService) GetUpload(id string) *UploadEntry {
 func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	return cs.askViaEngine(ctx, req, onEvent)
 }
 

@@ -1048,8 +1048,9 @@ func main() {
 		Orchestrator: &schedulerOrchestrator{o: orch},
 		ChatLogger:   &schedulerChatLogger{db: chatDB},
 		EventLog:     eventLog,
-		CronPath:     filepath.Join(configDir, "cron.json"),
-		Location:     schedLocation,
+		CronPath:       filepath.Join(configDir, "cron.json"),
+		Location:       schedLocation,
+		SignalSockPath: persistentSigPath,
 	})
 
 	// Register system jobs (replaces individual goroutine patterns).

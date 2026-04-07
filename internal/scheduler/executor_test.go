@@ -3,6 +3,7 @@ package scheduler
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- Mock SkillStoreReader ---
@@ -246,6 +247,53 @@ func TestDispatch_SilentOutput(t *testing.T) {
 	}
 	if len(cc.notified) != 0 {
 		t.Fatal("silent output should not notify CC")
+	}
+}
+
+// --- runCommand env tests ---
+
+func TestRunCommand_SignalSockPath_PassedToSubprocess(t *testing.T) {
+	sockPath := "/tmp/test-signal.sock"
+	e := &Engine{
+		cfg: Config{
+			DataDir:        t.TempDir(),
+			SignalSockPath: sockPath,
+		},
+	}
+	j := &Job{
+		ID:      "test-env",
+		Command: "printenv ALF_SIGNAL_SOCK",
+		Timeout: 5 * time.Second,
+	}
+
+	out, err := e.runCommand(j)
+	if err != nil {
+		t.Fatalf("runCommand failed: %v", err)
+	}
+	if out != sockPath {
+		t.Fatalf("expected ALF_SIGNAL_SOCK=%q, got %q", sockPath, out)
+	}
+}
+
+func TestRunCommand_SignalSockPath_EmptyNotSet(t *testing.T) {
+	e := &Engine{
+		cfg: Config{
+			DataDir:        t.TempDir(),
+			SignalSockPath: "",
+		},
+	}
+	j := &Job{
+		ID:      "test-env-empty",
+		Command: "printenv ALF_SIGNAL_SOCK || echo NOTSET",
+		Timeout: 5 * time.Second,
+	}
+
+	out, err := e.runCommand(j)
+	if err != nil {
+		t.Fatalf("runCommand failed: %v", err)
+	}
+	if out != "NOTSET" {
+		t.Fatalf("expected ALF_SIGNAL_SOCK to be unset, got %q", out)
 	}
 }
 

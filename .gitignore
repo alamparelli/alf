@@ -2,6 +2,7 @@
 /alf
 /alf-daemon
 /memory-tools
+/schedule-tools
 /system-tools
 *.exe
 
@@ -35,6 +36,7 @@ user-space/
 .plans/
 
 # Local dev (docker compose build+up)
+dev-alf-local/
 docker-compose.yml
 dev-alf
 dev-secrets/

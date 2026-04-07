@@ -300,6 +300,10 @@ func (e *Engine) runCommand(j *Job) (string, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", j.Command)
+	cmd.Env = os.Environ()
+	if e.cfg.SignalSockPath != "" {
+		cmd.Env = append(cmd.Env, "ALF_SIGNAL_SOCK="+e.cfg.SignalSockPath)
+	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf

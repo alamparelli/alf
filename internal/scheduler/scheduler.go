@@ -24,8 +24,9 @@ type Config struct {
 	Orchestrator OrchestratorRunner // optional - multi-agent orchestration
 	ChatLogger   ChatLogger
 	EventLog     EventLogger        // optional - writes schedule_run events to daily logs
-	CronPath   string
-	Location   *time.Location
+	CronPath       string
+	Location       *time.Location
+	SignalSockPath string // passed as ALF_SIGNAL_SOCK to command subprocesses
 }
 
 // Engine is the unified scheduler that manages cron jobs + one-shots.

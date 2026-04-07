@@ -387,16 +387,6 @@
             continue
           }
 
-          if (eventType === 'cancelled') {
-            appendMessage({
-              id: 'sys-' + Date.now(),
-              role: 'system',
-              text: data.reason || 'Request was cancelled',
-              ts: new Date().toISOString(),
-            })
-            continue
-          }
-
           if (eventType === 'done') {
             // Apply metadata from done event to the last assistant message
             const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')

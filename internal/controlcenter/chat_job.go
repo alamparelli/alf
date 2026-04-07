@@ -52,11 +52,6 @@ func (j *chatJob) stop() {
 	j.cancel()
 	j.mu.Lock()
 	j.cancelled = true
-	// Push a cancelled event so SSE clients see it before the stream ends.
-	j.events = append(j.events, ChatEvent{
-		Type: "cancelled",
-		Data: map[string]string{"reason": "Request was cancelled"},
-	})
 	ch := j.notify
 	j.notify = make(chan struct{})
 	j.mu.Unlock()

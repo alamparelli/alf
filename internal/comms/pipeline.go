@@ -794,6 +794,11 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 
 	if err != nil {
 		errMsg := err.Error()
+		// User-initiated cancellation: skip error notice — the DELETE handler
+		// persists its own "Request was cancelled" message.
+		if ctx.Err() == context.Canceled {
+			return nil, fmt.Errorf("provider: %w", err)
+		}
 		notice := classifyProviderError(errMsg, ctx.Err())
 		e.emit(channelID, OutEvent{Type: "error", Data: map[string]string{"text": errMsg}})
 		e.emit(channelID, OutEvent{Type: "system", Data: map[string]string{

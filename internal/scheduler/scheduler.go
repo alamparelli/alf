@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -192,6 +193,22 @@ func (e *Engine) Start(sockPath string) error {
 		e.mu.Unlock()
 	}
 
+	// Clean up expired one-shot jobs (RFC3339 schedule whose time has passed).
+	now := time.Now()
+	var expired []string
+	for _, j := range e.store.All() {
+		if j.System {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339, j.Schedule); err == nil && !now.Before(at) {
+			expired = append(expired, j.ID)
+			log.Printf("scheduler: removing expired one-shot job %s (%s) scheduled at %s", j.ID, j.Name, j.Schedule)
+		}
+	}
+	for _, id := range expired {
+		e.store.Remove(id)
+	}
+
 	// Register all enabled persisted user jobs.
 	for _, j := range e.store.All() {
 		if j.System {
@@ -236,6 +253,28 @@ func (e *Engine) notifyChange() {
 	}
 }
 
+// warnFixedDayMonthCron returns an error if a cron expression has fixed day + fixed month
+// but wildcard year, which implies unintended yearly recurrence instead of a one-shot.
+// Expects 6-field cron: sec min hour day month dow
+func warnFixedDayMonthCron(schedule string) error {
+	fields := strings.Fields(schedule)
+	if len(fields) != 6 {
+		return nil
+	}
+	day := fields[3]  // day-of-month
+	month := fields[4] // month
+	// If both day and month are fixed (no wildcards, ranges, or steps) → likely a one-shot intent.
+	if day != "*" && month != "*" &&
+		!strings.Contains(day, "/") && !strings.Contains(day, "-") && !strings.Contains(day, ",") &&
+		!strings.Contains(month, "/") && !strings.Contains(month, "-") && !strings.Contains(month, ",") {
+		return fmt.Errorf(
+			"cron %q has fixed day=%s month=%s which creates a yearly recurrence. "+
+				"For a one-time job, use RFC3339 format (e.g. 2026-03-23T09:00:00+02:00) instead",
+			schedule, day, month)
+	}
+	return nil
+}
+
 // validOutputs defines acceptable output values.
 var validOutputs = map[string]bool{
 	"chat":   true,
@@ -267,6 +306,13 @@ func (e *Engine) Create(name, schedule, tier, prompt, command, output string, ti
 		}
 		if !found {
 			return nil, fmt.Errorf("unknown tier %q", tier)
+		}
+	}
+
+	// Reject cron expressions that look like one-shot intent (fixed day+month).
+	if _, err := time.Parse(time.RFC3339, schedule); err != nil {
+		if err := warnFixedDayMonthCron(schedule); err != nil {
+			return nil, err
 		}
 	}
 
@@ -310,6 +356,13 @@ func (e *Engine) CreateReminder(name, schedule, message, output string, timeout 
 	}
 	if !validOutputs[output] {
 		return nil, fmt.Errorf("invalid output %q (must be chat, file, both, or silent)", output)
+	}
+
+	// Reject cron expressions that look like one-shot intent (fixed day+month).
+	if _, err := time.Parse(time.RFC3339, schedule); err != nil {
+		if err := warnFixedDayMonthCron(schedule); err != nil {
+			return nil, err
+		}
 	}
 
 	j := &Job{

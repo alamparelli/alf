@@ -589,3 +589,100 @@ func TestCreateReminderWithReason(t *testing.T) {
 		t.Errorf("expected reason on reminder, got %q", j.Reason)
 	}
 }
+
+func TestWarnFixedDayMonthCron(t *testing.T) {
+	// Should reject: fixed day + fixed month = likely one-shot intent.
+	bad := []string{
+		"0 0 9 23 3 *",  // March 23 at 9am
+		"0 0 9 31 3 *",  // March 31
+		"0 2 0 3 4 *",   // April 3
+	}
+	for _, s := range bad {
+		if err := warnFixedDayMonthCron(s); err == nil {
+			t.Errorf("expected error for %q, got nil", s)
+		}
+	}
+
+	// Should allow: recurring patterns.
+	good := []string{
+		"0 0 9 * * 1-5",   // weekdays at 9am
+		"0 0 */6 * * *",   // every 6 hours
+		"0 0 9 1 * *",     // 1st of every month (wildcard month)
+		"0 0 9 * 3 *",     // every day in March (wildcard day)
+		"0 0 9 1-15 3 *",  // range day
+		"0 0 9 1,15 3 *",  // list day
+		"@every 5m",       // non-standard (not 6 fields)
+	}
+	for _, s := range good {
+		if err := warnFixedDayMonthCron(s); err != nil {
+			t.Errorf("unexpected error for %q: %v", s, err)
+		}
+	}
+}
+
+func TestCreateRejectsFixedDayMonthCron(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+	e.cron.Start()
+	defer e.cron.Stop()
+
+	// Should reject cron with fixed day+month.
+	_, err := e.Create("bad", "0 0 9 23 3 *", "direct", "", "echo hi", "silent", 0, nil, "")
+	if err == nil {
+		t.Fatal("expected error for fixed day+month cron")
+	}
+
+	// Should reject reminder too.
+	_, err = e.CreateReminder("bad reminder", "0 0 9 23 3 *", "hello", "silent", 0, "")
+	if err == nil {
+		t.Fatal("expected error for fixed day+month cron in reminder")
+	}
+
+	// RFC3339 should still work.
+	_, err = e.CreateReminder("good", "2099-03-23T09:00:00+02:00", "hello", "silent", 0, "")
+	if err != nil {
+		t.Fatalf("RFC3339 reminder should work: %v", err)
+	}
+}
+
+func TestStartCleansExpiredOneShots(t *testing.T) {
+	dir := t.TempDir()
+	cronPath := filepath.Join(dir, "cron.json")
+
+	// Seed cron.json with an expired one-shot and a valid cron job.
+	past := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
+	jobs := []map[string]any{
+		{"id": "expired1", "name": "Past Job", "schedule": past, "enabled": true, "output": "silent", "auto_delete": true},
+		{"id": "recurring1", "name": "Recurring", "schedule": "0 0 9 * * *", "enabled": true, "output": "silent"},
+	}
+	data, _ := json.Marshal(map[string]any{"jobs": jobs})
+	os.WriteFile(cronPath, data, 0o644)
+
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   cronPath,
+	})
+
+	sockDir := filepath.Join(dir, "sock")
+	os.MkdirAll(sockDir, 0o755)
+	sockPath := filepath.Join(sockDir, "test.sock")
+	if err := e.Start(sockPath); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer e.Stop()
+	defer os.RemoveAll(sockDir)
+
+	// Expired one-shot should be cleaned up.
+	if e.store.Get("expired1") != nil {
+		t.Error("expired one-shot should have been removed on startup")
+	}
+	// Recurring job should survive.
+	if e.store.Get("recurring1") == nil {
+		t.Error("recurring job should still exist")
+	}
+}

@@ -30,20 +30,14 @@ Messages flow through a **chat engine** (`internal/comms/`) → **router** → *
 ### Prerequisites
 
 - Docker and Docker Compose
-- A [Telegram bot token](https://core.telegram.org/bots#how-do-i-create-a-bot) (via @BotFather)
-- Your Telegram chat ID
-- A [Claude subscription](https://claude.ai/pricing) (Pro, Max, or Team - no API key needed)
+- 2 GB RAM minimum
+- *Optional:* a [Telegram bot token](https://core.telegram.org/bots#how-do-i-create-a-bot) (via @BotFather) + your chat ID
+- *Optional:* a Claude, Codex, or OpenAI-compatible API subscription (configured via the Setup Wizard)
 
 ### Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/alamparelli/alf/main/scripts/install.sh | sh
-```
-
-Or build from source:
-
-```sh
-go install github.com/alamparelli/alf/cmd/alf@latest
 ```
 
 ### Setup

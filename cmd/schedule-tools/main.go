@@ -501,7 +501,11 @@ Commands:
 
 Create options:
   --name <name>           Job name (required)
-  --schedule <expr>       Cron expression or RFC3339 one-shot (required)
+  --schedule <expr>       Cron expression (recurring) or RFC3339 timestamp (one-shot) (required)
+                          IMPORTANT: For one-time events (specific date without recurrence),
+                          ALWAYS use RFC3339 format (e.g. 2026-03-23T09:00:00+02:00).
+                          Never use cron with fixed day+month for one-shot jobs — it creates
+                          unintended yearly recurrence. Cron is ONLY for recurring schedules.
   --tier <tier>           LLM tier (e.g. haiku, sonnet, opus) or "direct" for bash
   --prompt <text>         Prompt for LLM tiers (required for LLM jobs)
   --command <cmd>         Bash command for direct tier (required for direct jobs)

@@ -32,7 +32,7 @@ Messages flow through a **chat engine** (`internal/comms/`) → **router** → *
 - Docker and Docker Compose
 - 2 GB RAM minimum
 - *Optional:* a [Telegram bot token](https://core.telegram.org/bots#how-do-i-create-a-bot) (via @BotFather) + your chat ID
-- *Optional:* a Claude, Codex, or OpenAI-compatible API subscription (configured via the Setup Wizard)
+- *Recommended:* a Claude, Codex, or OpenAI-compatible API subscription (configured via the Setup Wizard)
 
 ### Install
 

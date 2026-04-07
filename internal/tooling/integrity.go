@@ -90,6 +90,7 @@ func NewIntegrityGuard(dataDir string, notify func(tool, oldHash, newHash string
 	if err := ig.loadManifest(); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("integrity: load manifest: %w", err)
 	}
+	ig.restoreQuarantineState()
 	return ig, nil
 }
 
@@ -189,6 +190,14 @@ func (ig *IntegrityGuard) scan(initial bool) {
 
 		// Hash mismatch.
 		if initial {
+			// If already quarantined (restored from disk), don't re-baseline.
+			if _, q := ig.quarantined[name]; q {
+				// Re-restore the backup in case it was tampered with.
+				if err := ig.restore(name); err != nil {
+					log.Printf("[integrity] re-restore failed for quarantined %s on startup: %v", name, err)
+				}
+				continue
+			}
 			// During baseline scan, accept the current state.
 			entry.ExeHash = exeHash
 			entry.SchemaHash = schemaHash
@@ -399,6 +408,36 @@ func (ig *IntegrityGuard) loadManifest() error {
 		return err
 	}
 	return json.Unmarshal(data, &ig.manifest)
+}
+
+// restoreQuarantineState rebuilds the in-memory quarantine map from files
+// present in the quarantine directory. This survives daemon restarts.
+func (ig *IntegrityGuard) restoreQuarantineState() {
+	entries, err := os.ReadDir(ig.quarantineDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		quarantinedPath := filepath.Join(ig.quarantineDir, name)
+		newHash, err := hashFile(quarantinedPath)
+		if err != nil {
+			continue
+		}
+		oldHash := ""
+		if entry, ok := ig.manifest[name]; ok {
+			oldHash = entry.ExeHash
+		}
+		ig.quarantined[name] = QuarantinedTool{
+			Name:    name,
+			OldHash: oldHash,
+			NewHash: newHash,
+		}
+		log.Printf("[integrity] restored quarantine state for: %s", name)
+	}
 }
 
 func (ig *IntegrityGuard) saveManifest() {

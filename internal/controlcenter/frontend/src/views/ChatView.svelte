@@ -3,6 +3,7 @@
   import { X, MessageCircle, RotateCw, Play, ChevronsDownUp, ChevronsUpDown } from 'lucide-svelte'
   import ChatMessageComponent from '../components/chat/ChatMessage.svelte'
   import ChatInput from '../components/chat/ChatInput.svelte'
+  import ConversationTabs from '../components/chat/ConversationTabs.svelte'
   import Modal from '../components/shared/Modal.svelte'
   import Toggle from '../components/shared/Toggle.svelte'
   import { api } from '../lib/api'
@@ -10,6 +11,7 @@
   import { nav } from '../stores/nav.svelte'
   import { sound } from '../stores/sound.svelte'
   import { events } from '../stores/events.svelte'
+  import { convStore } from '../stores/conversations.svelte'
 
   // --- Types ---
   interface ChatMsg {
@@ -34,43 +36,9 @@
     model: string
   }
 
-  // --- Single conversation state ---
-  let convId = $state(localStorage.getItem('alf-chat-convid') || '')
-  const clientId = Math.random().toString(36).slice(2, 10)
-
-  function genId(): string {
-    return Math.random().toString(36).slice(2, 10)
-  }
-
-  function saveConvId() {
-    localStorage.setItem('alf-chat-convid', convId)
-    // Notify server so other devices/tabs sync.
-    api('/api/chat/active', {
-      method: 'PUT',
-      body: JSON.stringify({ conv_id: convId, client_id: clientId })
-    }).catch(() => {})
-  }
-
-  // Load the active conversation from server on startup.
-  async function loadActiveConversation() {
-    try {
-      const data = await api<any>('/api/chat/conversations')
-      const allConvs = data.conversations || []
-      const convs = allConvs.filter((c: any) => c.msg_count > 0)
-      // Server's active_conv_id is the source of truth.
-      const serverActive = data.active_conv_id
-      if (serverActive && allConvs.some((c: any) => c.id === serverActive)) {
-        convId = serverActive
-      } else if (convs.length > 0) {
-        convId = convs[convs.length - 1].id // most recent (ASC order)
-      } else {
-        // No conversations yet — create one.
-        convId = genId()
-        await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: convId, title: 'Chat' }) }).catch(() => {})
-      }
-      saveConvId()
-    } catch { /* server not ready yet */ }
-  }
+  // --- Conversation state (from store) ---
+  let convId = $derived(convStore.activeConvId)
+  let loadGen = $state(0) // generation counter to ignore stale loads
 
   // --- Messages ---
   let messages = $state<ChatMsg[]>([])
@@ -195,13 +163,15 @@
       setMessages([])
       return
     }
+    const gen = ++loadGen
     try {
       const data = await api<ChatMsg[]>(`/api/chat?limit=50&conv_id=${convId}`)
+      if (gen !== loadGen) return // stale response from rapid switching
       setMessages(data || [])
       hasOlderMessages = (data?.length || 0) >= 50
       scrollToBottom()
     } catch {
-      setMessages([])
+      if (gen === loadGen) setMessages([])
     }
   }
 
@@ -633,17 +603,12 @@
 
   // --- New conversation ---
   async function newConversation() {
-    try {
-      // Reset LLM session state.
-      await api<any>('/api/chat', { method: 'DELETE' })
-      // Fresh convId.
-      convId = genId()
-      await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: convId, title: 'Chat' }) }).catch(() => {})
-      saveConvId()
+    const id = await convStore.create()
+    if (id) {
       setMessages([])
       toasts.show('New conversation started', 'success')
-    } catch (e: any) {
-      toasts.show(e.error || 'Failed to start new conversation', 'error')
+    } else {
+      toasts.show('Failed to start new conversation', 'error')
     }
   }
 
@@ -651,6 +616,17 @@
   $effect(() => {
     if (nav.currentView === 'chat') {
       scrollToBottom()
+    }
+  })
+
+  // React to conversation switches
+  let prevConvId = ''
+  $effect(() => {
+    const id = convStore.activeConvId
+    if (id && id !== prevConvId && convStore.loaded) {
+      prevConvId = id
+      convStore.clearUnread(id)
+      loadHistory().then(() => scrollToBottom())
     }
   })
 
@@ -664,30 +640,39 @@
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
-    // Load the active conversation from server.
-    await loadActiveConversation()
+    // Load conversations from store (sets activeConvId).
+    await convStore.load()
     await loadTiers()
     loadActiveSkills()
     unsubTiers = events.subscribe('tiers', () => loadTiers())
     unsubActiveConv = events.subscribe('active_conv', (data) => {
       try {
         const parsed = JSON.parse(data || '{}')
-        if (parsed.client_id === clientId) return // echo suppression
-        if (parsed.conv_id && parsed.conv_id !== convId) {
-          convId = parsed.conv_id
-          localStorage.setItem('alf-chat-convid', convId)
-          loadHistory().then(() => scrollToBottom())
+        if (parsed.client_id === convStore.clientId) return // echo suppression
+        if (parsed.conv_id && parsed.conv_id !== convStore.activeConvId) {
+          convStore.switchTo(parsed.conv_id)
         }
       } catch {}
     })
-    unsubNewMsg = events.subscribe('new_message', () => {
+    unsubNewMsg = events.subscribe('new_message', (data) => {
+      // Parse JSON payload with conv_id
+      let msgConvId = convId
+      try {
+        const parsed = JSON.parse(data || '{}')
+        if (parsed.conv_id) msgConvId = parsed.conv_id
+      } catch {}
+
+      if (msgConvId !== convId) {
+        // Message for a different conversation — mark unread
+        convStore.markUnread(msgConvId)
+        return
+      }
+
       if (!convId) return
       // Fetch latest messages and append any new ones (safe during streaming).
       api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${convId}`).then(recent => {
         if (!recent?.length) return
         const existingIds = new Set(messages.map(m => m.id))
-        // Only append assistant messages — user messages are already in the UI
-        // via optimistic insert (with temp- IDs that won't match server IDs).
         const newMsgs = recent.filter(m => !existingIds.has(m.id) && m.role === 'assistant')
         if (newMsgs.length > 0) {
           messages = sortMessages([...messages, ...newMsgs])
@@ -706,11 +691,9 @@
       // 1. Sync active conversation from server.
       api<any>('/api/chat/active').then(data => {
         const serverConv = data?.active_conv_id
-        if (serverConv && serverConv !== convId) {
-          convId = serverConv
-          localStorage.setItem('alf-chat-convid', convId)
-          loadHistory().then(() => scrollToBottom())
-          return // skip message poll — loadHistory covers it
+        if (serverConv && serverConv !== convStore.activeConvId) {
+          convStore.switchTo(serverConv)
+          return
         }
       }).catch(() => {})
       // 2. Fetch latest messages and merge new ones.
@@ -763,6 +746,9 @@
       {/if}
     </button>
   </div>
+
+  <!-- Conversation Tabs -->
+  <ConversationTabs />
 
   <!-- Messages -->
   <div class="chat-messages" bind:this={messagesContainer} onscroll={onMessagesScroll}>
@@ -888,9 +874,8 @@
   .chat-view {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 48px);
-    max-height: calc(100vh - 48px);
-    margin-bottom: -24px;
+    height: 100vh;
+    max-height: 100vh;
   }
 
   /* Header */

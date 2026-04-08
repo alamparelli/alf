@@ -240,13 +240,15 @@
     min-height: 100vh;
   }
 
-  .main-content--app {
+  .main-content--app,
+  .main-content--chat {
     padding: 0;
     position: relative;
     overflow: hidden;
   }
 
-  .main-content--app .main-header {
+  .main-content--app .main-header,
+  .main-content--chat .main-header {
     display: none;
   }
 
@@ -776,6 +778,9 @@
     }
     .main-content--chat {
       padding-bottom: 0;
+    }
+    .main-content--chat .main-header {
+      display: flex;
     }
     /* App pages: show hamburger as floating overlay */
     .main-content--app .main-header {

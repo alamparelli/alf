@@ -1,6 +1,7 @@
 package controlcenter
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/alamparelli/alf/internal/chatdb"
@@ -48,7 +49,7 @@ func (a *ccAdapter) SendText(_ comms.ChannelID, text string) (string, error) {
 		if len(preview) > 200 {
 			preview = preview[:200] + "..."
 		}
-		a.EventBroker.EmitWithData(EventNewMessage, preview)
+		a.EventBroker.EmitWithData(EventNewMessage, fmt.Sprintf(`{"conv_id":%q,"preview":%q}`, convID, preview))
 	}
 	return msgID, nil
 }

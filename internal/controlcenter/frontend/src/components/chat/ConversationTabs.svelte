@@ -83,6 +83,7 @@
           {#if convStore.unreadCounts[conv.id]}
             <span class="conv-tab-badge"></span>
           {/if}
+          <span class="conv-tab-spacer"></span>
           {#if convStore.conversations.length > 1}
             <button class="conv-tab-close btn-icon" onclick={(e) => handleArchive(e, conv.id)} title="Archive">
               <X size={12} />
@@ -165,6 +166,10 @@
     outline: none;
   }
 
+  .conv-tab-spacer {
+    flex: 1;
+  }
+
   .conv-tab-badge {
     width: 6px;
     height: 6px;
@@ -182,6 +187,7 @@
     cursor: pointer;
     border-radius: 2px;
     line-height: 0;
+    flex-shrink: 0;
   }
   .conv-tab-close:hover {
     background: var(--bg-hover);

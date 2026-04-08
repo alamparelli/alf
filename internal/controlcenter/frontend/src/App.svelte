@@ -192,16 +192,25 @@
     --space-xl: 32px;
 
     /* Typography tokens */
-    --font-xs: 11px;
-    --font-sm: 13px;
-    --font-md: 15px;
-    --font-lg: 18px;
-    --font-xl: 24px;
+    --font-xs: 13px;
+    --font-sm: 15px;
+    --font-md: 17px;
+    --font-lg: 20px;
+    --font-xl: 26px;
 
     /* Shadow tokens */
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
     --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
     --shadow-lg: 0 8px 24px rgba(0,0,0,0.16);
+  }
+
+  @media (max-width: 768px) {
+    :root {
+      --font-xs: 14px;
+      --font-sm: 16px;
+      --font-md: 18px;
+      --font-lg: 20px;
+    }
   }
 
   :global(*) {

@@ -42,7 +42,17 @@
 
   // --- Messages ---
   let messages = $state<ChatMsg[]>([])
-  let sending = $state(false)
+  let sendingConvs = $state<Set<string>>(new Set())
+  let sending = $derived(sendingConvs.has(convId ?? ''))
+
+  let activeSendConvId = '' // tracks which conv the current stream belongs to
+
+  function setSending(cid: string, value: boolean) {
+    const next = new Set(sendingConvs)
+    if (value) { next.add(cid); activeSendConvId = cid } else { next.delete(cid); if (activeSendConvId === cid) activeSendConvId = '' }
+    sendingConvs = next
+  }
+  function clearSending() { if (activeSendConvId) setSending(activeSendConvId, false) }
   let tiers = $state<Tier[]>([])
   let messagesContainer: HTMLDivElement
   let selectedTier = $state(localStorage.getItem('alf-chat-tier') || '')
@@ -71,16 +81,40 @@
   let stoppedByUser = false
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let activeJobId = $state<string | null>(null)
-  let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string }[]>(loadQueue())
+  type QueueItem = { message: string; mediaFiles: MediaFile[]; model: string }
+  let allQueues = $state<Record<string, QueueItem[]>>(loadQueues())
+  let messageQueue = $derived(allQueues[convId ?? ''] || [])
   let abortController: AbortController | null = null
   let drafts = $state<Record<string, string>>({})
   let draft = $derived(drafts[convId ?? ''] ?? '')
 
-  function loadQueue(): { message: string; mediaFiles: MediaFile[]; model: string }[] {
-    try { return JSON.parse(sessionStorage.getItem('alf-chat-queue') || '[]') } catch { return [] }
+  function loadQueues(): Record<string, QueueItem[]> {
+    sessionStorage.removeItem('alf-chat-queue') // migrate old key
+    try { return JSON.parse(sessionStorage.getItem('alf-chat-queues') || '{}') } catch { return {} }
   }
   function persistQueue() {
-    sessionStorage.setItem('alf-chat-queue', JSON.stringify(messageQueue))
+    sessionStorage.setItem('alf-chat-queues', JSON.stringify(allQueues))
+  }
+  function pushToQueue(cid: string, item: QueueItem) {
+    allQueues = { ...allQueues, [cid]: [...(allQueues[cid] || []), item] }
+    persistQueue()
+  }
+  function shiftQueue(cid: string): QueueItem | undefined {
+    const q = allQueues[cid] || []
+    if (q.length === 0) return undefined
+    const [first, ...rest] = q
+    allQueues = { ...allQueues, [cid]: rest }
+    persistQueue()
+    return first
+  }
+  function clearQueue(cid: string) {
+    const { [cid]: _, ...rest } = allQueues
+    allQueues = rest
+    persistQueue()
+  }
+  function removeFromQueue(cid: string, idx: number) {
+    allQueues = { ...allQueues, [cid]: (allQueues[cid] || []).filter((_, i) => i !== idx) }
+    persistQueue()
   }
   let activeSkills = $state<string[]>([])
 
@@ -226,7 +260,7 @@
       const data = await api<any>(`/api/chat/job?conv_id=${convId}`)
       if (data.active && data.job_id) {
         activeJobId = data.job_id
-        sending = true
+        setSending(convId ?? '', true)
         reconnectToStream(data.job_id, 0)
       }
     } catch { /* no active job */ }
@@ -255,8 +289,7 @@
 
     // Queue if already sending
     if (sending) {
-      messageQueue = [...messageQueue, { message, mediaFiles, model }]
-      persistQueue()
+      pushToQueue(convId ?? '', { message, mediaFiles, model })
       return
     }
 
@@ -264,7 +297,8 @@
   }
 
   async function doSend(message: string, mediaFiles: MediaFile[], model: string) {
-    sending = true
+    const sendConvId = convId ?? ''
+    setSending(sendConvId, true)
     stoppedByUser = false
     streamingBlocks = []
     streamingText = ''
@@ -307,14 +341,14 @@
 
       if (res.status === 401) {
         toasts.show('Session expired', 'error')
-        sending = false
+        clearSending()
         return
       }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Send failed' }))
         toasts.show(err.error || 'Send failed', 'error')
-        sending = false
+        clearSending()
         return
       }
 
@@ -322,13 +356,13 @@
       await readStream(res)
     } catch (e: any) {
       toasts.show(e.message || 'Send failed', 'error')
-      sending = false
+      clearSending()
     }
   }
 
   async function readStream(res: Response) {
     const reader = res.body?.getReader()
-    if (!reader) { sending = false; return }
+    if (!reader) { clearSending(); return }
 
     const decoder = new TextDecoder()
     let buffer = ''
@@ -430,7 +464,7 @@
       if (stoppedByUser) return
 
       const finalText = streamingText
-      sending = false
+      clearSending()
       activeJobId = null
       streamingBlocks = []
       streamingText = ''
@@ -449,10 +483,8 @@
       }
 
       // Process queue
-      if (messageQueue.length > 0) {
-        const next = messageQueue[0]
-        messageQueue = messageQueue.slice(1)
-        persistQueue()
+      const next = shiftQueue(activeSendConvId || convId || '')
+      if (next) {
         doSend(next.message, next.mediaFiles, next.model)
       }
     }
@@ -468,12 +500,12 @@
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
       if (!res.ok) {
-        sending = false
+        clearSending()
         return
       }
       await readStream(res)
     } catch {
-      sending = false
+      clearSending()
     }
   }
 
@@ -596,13 +628,12 @@
   // --- Stop active call (instant) ---
   function stopCall() {
     stoppedByUser = true
-    messageQueue = [] // clear pending queue
-    persistQueue()
+    clearQueue(convId ?? '') // clear pending queue
     // Abort the active fetch stream immediately
     abortController?.abort()
     abortController = null
     // Reset UI state instantly — no awaits before this
-    sending = false
+    clearSending()
     activeJobId = null
     streamingBlocks = []
     streamingText = ''
@@ -700,19 +731,19 @@
     }
     await checkActiveJob()
 
-    // Poll every 2s: sync active conv + fetch new messages from other devices.
+    // Poll every 2s: sync active conv from other devices + fetch new messages.
     pollTimer = setInterval(() => {
       if (!convId) return
-      // 1. Sync active conversation from server.
-      api<any>('/api/chat/active').then(data => {
-        const serverConv = data?.active_conv_id
-        if (serverConv && serverConv !== convStore.activeConvId) {
-          convStore.switchTo(serverConv)
-          return
-        }
-      }).catch(() => {})
-      // 2. Fetch latest messages and merge new ones.
-      if (sending) return // don't interfere with active stream
+      // Sync active conversation from server (skip if we just switched locally).
+      if (Date.now() - convStore.lastLocalSwitch > 5000) {
+        api<any>('/api/chat/active').then(data => {
+          const serverConv = data?.active_conv_id
+          if (serverConv && serverConv !== convStore.activeConvId) {
+            convStore.switchTo(serverConv)
+          }
+        }).catch(() => {})
+      }
+      if (sending) return
       const gen = loadGen
       const fetchConvId = convId
       api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${fetchConvId}`).then(recent => {
@@ -770,6 +801,9 @@
 
   <!-- Messages -->
   <div class="chat-messages" bind:this={messagesContainer} onscroll={onMessagesScroll}>
+    {#if convId}
+      <div class="conv-debug-label">{convId}</div>
+    {/if}
     {#if loadingOlder}
       <div class="loading-older">Loading older messages...</div>
     {/if}
@@ -855,7 +889,7 @@
         <div class="msg-text">{queued.message}</div>
         <div class="queued-footer">
           <span class="queued-badge">queued #{i + 1}</span>
-          <button class="queued-cancel" onclick={() => { messageQueue = messageQueue.filter((_, idx) => idx !== i); persistQueue() }} title="Cancel queued message">
+          <button class="queued-cancel" onclick={() => removeFromQueue(convId ?? '', i)} title="Cancel queued message">
             <X size={12} /> cancel
           </button>
         </div>
@@ -897,6 +931,17 @@
 </Modal>
 
 <style>
+  .conv-debug-label {
+    position: sticky;
+    top: 0;
+    left: 0;
+    z-index: 5;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--text-muted, #888);
+    opacity: 0.6;
+  }
   .chat-view {
     display: flex;
     flex-direction: column;

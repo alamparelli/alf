@@ -26,12 +26,14 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
 	sessionKey := channelID.SessionKey()
+	// convStoreKey scopes ConvStore per tab for CC (cc:convid), per chat for TG (tg:chatid).
+	convStoreKey := string(channelID)
 
 	// 0. Create request tracer.
 	userMsgID := conversation.NewMessageID()
 	var convID string
 	if e.ConvStore != nil {
-		convID = e.ConvStore.ConvID(channel)
+		convID = e.ConvStore.ConvID(convStoreKey)
 	}
 	tracer := trace.New(channelID.Prefix(), convID, userMsgID)
 	ctx = trace.WithContext(ctx, tracer)
@@ -344,10 +346,11 @@ func (e *ChatEngine) applySkillTierOverride(route RouteResult, minTier string) R
 func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierParams, recall RecallResult, convID string, userMsgID string) (*ProcessResult, error) {
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
+	convStoreKey := string(channelID)
 
 	var convCtx string
 	if e.ConvStore != nil {
-		if msgs := e.ConvStore.Recent(channel, 0); len(msgs) > 0 {
+		if msgs := e.ConvStore.Recent(convStoreKey, 0); len(msgs) > 0 {
 			convCtx = conversation.BuildRouterContext(msgs, 5)
 		}
 	}
@@ -484,6 +487,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
 	sessionKey := channelID.SessionKey()
+	convStoreKey := string(channelID)
 
 	// Build system prompts.
 	isAPITier := tp.Backend != "" && tp.Backend != "cli"
@@ -606,7 +610,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 
 	// Inject conversation history.
 	if e.ConvStore != nil {
-		convMsgs := conversation.BuildContext(e.ConvStore.Recent(channel, 0), conversation.DefaultMaxMessages)
+		convMsgs := conversation.BuildContext(e.ConvStore.Recent(convStoreKey, 0), conversation.DefaultMaxMessages)
 		if isAPITier || params.ResumeID == "" {
 			if isAPITier {
 				// Always flatten to text-only: FlattenForOpenAI collapses multi-turn
@@ -677,7 +681,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		e.Sessions.Archive(sessionKey)
 		params.ResumeID = ""
 		if e.ConvStore != nil {
-			convMsgs := conversation.BuildContext(e.ConvStore.Recent(channel, 0), conversation.DefaultMaxMessages)
+			convMsgs := conversation.BuildContext(e.ConvStore.Recent(convStoreKey, 0), conversation.DefaultMaxMessages)
 			if histPrompt := conversation.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
 				params.SystemPrompts = append(params.SystemPrompts, histPrompt)
 			}

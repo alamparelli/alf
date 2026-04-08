@@ -19,8 +19,9 @@ func (c ChannelID) Prefix() string {
 	return s
 }
 
-// SessionKey returns a backward-compatible int64 key for session.Store.
-// TG channels parse the numeric chat ID; CC channels return -1.
+// SessionKey returns a unique int64 key for session.Store.
+// TG channels parse the numeric chat ID; CC channels hash the conv_id
+// so each conversation tab gets its own Claude CLI resume session.
 func (c ChannelID) SessionKey() int64 {
 	s := string(c)
 	i := strings.Index(s, ":")
@@ -33,6 +34,19 @@ func (c ChannelID) SessionKey() int64 {
 		if id, err := strconv.ParseInt(value, 10, 64); err == nil {
 			return id
 		}
+	}
+	// CC channels: hash the conv_id to a unique negative int64.
+	if prefix == "cc" && value != "" && value != "default" {
+		// FNV-1a hash, negated to stay in negative range (avoid TG collision).
+		var h int64 = -2166136261
+		for j := 0; j < len(value); j++ {
+			h ^= int64(value[j])
+			h *= 16777619
+		}
+		if h >= 0 {
+			h = -h - 2 // ensure negative, avoid -1 (default) and 0
+		}
+		return h
 	}
 	return -1
 }

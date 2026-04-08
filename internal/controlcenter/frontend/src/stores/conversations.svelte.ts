@@ -125,8 +125,12 @@ class ConversationStore {
     }
   }
 
+  /** Timestamp of last local conv switch — poll sync ignores server for a grace period after this. */
+  lastLocalSwitch = 0
+
   private persistConvId() {
     localStorage.setItem(LS_CONVID, this.activeConvId)
+    this.lastLocalSwitch = Date.now()
     api('/api/chat/active', {
       method: 'PUT',
       body: JSON.stringify({ conv_id: this.activeConvId, client_id: this.clientId }),

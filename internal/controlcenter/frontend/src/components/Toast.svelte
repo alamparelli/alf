@@ -14,10 +14,12 @@
   .toast-container {
     position: fixed;
     top: 16px;
-    right: 24px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 9999;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 8px;
   }
 

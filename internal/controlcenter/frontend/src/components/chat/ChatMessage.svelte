@@ -1,7 +1,7 @@
 <script lang="ts">
   import { marked } from 'marked'
   import DOMPurify from 'dompurify'
-  import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check, Users } from 'lucide-svelte'
+  import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check, Users, User } from 'lucide-svelte'
   import { api } from '../../lib/api'
   import { isStandaloneEmojiMessage } from '../../lib/emoji'
   import { toasts } from '../../stores/toast.svelte'
@@ -277,7 +277,17 @@
   <div class="emoji-backdrop" onclick={() => showEmojiPicker = false}></div>
 {/if}
 
-<div class="chat-msg chat-msg-{msg.role}">
+<div class="chat-row chat-row-{msg.role}">
+  {#if msg.role === 'assistant'}
+    <div class="chat-avatar chat-avatar-assistant">
+      <img src="/static/favicon.png" alt="ALF" class="avatar-img" />
+    </div>
+  {:else if msg.role === 'user'}
+    <div class="chat-avatar chat-avatar-user">
+      <User size={14} />
+    </div>
+  {/if}
+  <div class="chat-msg chat-msg-{msg.role}">
   <!-- Media attachments (user) -->
   {#if msg.media && msg.media.length > 0}
     <div class="msg-media">
@@ -427,6 +437,7 @@
       {/if}
     {/if}
   </div>
+  </div>
 </div>
 
 <!-- Lightbox -->
@@ -438,32 +449,81 @@
 {/if}
 
 <style>
-  .chat-msg {
+  .chat-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    margin-bottom: 8px;
     max-width: 85%;
+  }
+
+  .chat-row-user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+  }
+
+  .chat-row-assistant {
+    align-self: flex-start;
+  }
+
+  .chat-avatar {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-bottom: 2px;
+  }
+
+  .chat-avatar-assistant {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+  }
+
+  .chat-avatar-user {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+
+  .avatar-img {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .chat-msg {
+    max-width: 100%;
     padding: 10px 14px;
     border-radius: 12px;
-    margin-bottom: 8px;
     position: relative;
     word-wrap: break-word;
     overflow: visible;
+    flex: 1;
+    min-width: 0;
   }
 
   .chat-msg-user {
-    align-self: flex-end;
     background: var(--accent);
     color: var(--on-accent);
     border-bottom-right-radius: 4px;
   }
 
   .chat-msg-assistant {
-    align-self: flex-start;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-bottom-left-radius: 4px;
   }
 
-  .chat-msg-system {
+  .chat-row-system {
     align-self: center;
+    max-width: 90%;
+  }
+
+  .chat-msg-system {
     background: var(--bg-input);
     color: var(--text-dim);
     font-size: var(--font-sm, 13px);

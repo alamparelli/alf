@@ -304,9 +304,16 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 	return messages
 }
 
-// tagLastMessageCache sets cache_control on the last message in the slice.
-// This creates a 2nd cache breakpoint so conversation history is also cached.
+// tagLastMessageCache sets cache_control on the last non-system message,
+// clearing any previous non-system cache tags first (max 4 breakpoints).
 func tagLastMessageCache(messages []apiMessage) {
+	// Clear previous non-system cache tags to stay within the 4-breakpoint limit.
+	for i := range messages {
+		if messages[i].Role != "system" && messages[i].CacheControl != nil {
+			messages[i].CacheControl = nil
+		}
+	}
+	// Tag the last non-system message.
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role != "system" {
 			messages[i].CacheControl = &apiCacheControl{Type: "ephemeral"}

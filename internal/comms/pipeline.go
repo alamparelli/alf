@@ -579,7 +579,17 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	_, lastBackend, _ := e.Sessions.ContextFull(sessionKey)
 	backendChanged := lastBackend != "" && lastBackend != tp.Backend
 
-	log.Printf("[comms] cache debug: breakpoint=%d, sysPrompts=%d, model=%s, backend=%s", cacheBreakpoint, len(sysPrompts), tp.Model, tp.Backend)
+	// Debug: hash the stable prefix to verify it's identical across requests.
+	stableHash := uint32(0)
+	if cacheBreakpoint > 0 && cacheBreakpoint <= len(sysPrompts) {
+		stable := strings.Join(sysPrompts[:cacheBreakpoint], "\n\n")
+		for _, b := range []byte(stable) {
+			stableHash = stableHash*31 + uint32(b)
+		}
+		log.Printf("[comms] cache debug: breakpoint=%d, sysPrompts=%d, model=%s, stableHash=%08x, stableLen=%d", cacheBreakpoint, len(sysPrompts), tp.Model, stableHash, len(stable))
+	} else {
+		log.Printf("[comms] cache debug: breakpoint=%d, sysPrompts=%d, model=%s, backend=%s (NO SPLIT)", cacheBreakpoint, len(sysPrompts), tp.Model, tp.Backend)
+	}
 	params := provider.Params{
 		Model:           tp.Model,
 		Tools:           tp.Tools,

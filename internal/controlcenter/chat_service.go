@@ -175,6 +175,20 @@ type ReactResult struct {
 
 // reactionSystemPromptTmpl references the centralized prompt in memory/reaction.md.
 
+// ChatServiceOpts groups optional dependencies for ChatService.
+// All fields are optional and nil-safe — ChatService guards access to each.
+type ChatServiceOpts struct {
+	Registry       *provider.Registry
+	SkillStore     skills.Store
+	Orchestrator   *agents.Orchestrator
+	ConvStore      *conversation.Store
+	ToolRegistry   *tooling.Registry
+	ToolExecutor   *tooling.Executor
+	Recaller       MemoryRecaller
+	MemStore       MemoryStorer
+	BackendConfigs func() map[string]BackendConfig
+}
+
 // NewChatService creates a new ChatService.
 func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatDB *chatdb.DB, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
 	cs := &ChatService{
@@ -195,6 +209,20 @@ func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, 
 	// Start upload cleanup goroutine.
 	go cs.cleanupUploads()
 	return cs
+}
+
+// Init configures optional dependencies. Must be called before the first Ask().
+// Replaces post-construction field assignments — all deps validated in one place.
+func (cs *ChatService) Init(opts ChatServiceOpts) {
+	cs.Registry = opts.Registry
+	cs.SkillStore = opts.SkillStore
+	cs.Orchestrator = opts.Orchestrator
+	cs.ConvStore = opts.ConvStore
+	cs.ToolRegistry = opts.ToolRegistry
+	cs.ToolExecutor = opts.ToolExecutor
+	cs.Recaller = opts.Recaller
+	cs.MemStore = opts.MemStore
+	cs.BackendConfigs = opts.BackendConfigs
 }
 
 // SetEngine installs the unified comms engine and registers the CC adapter.
@@ -239,6 +267,10 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 // askViaEngine delegates message processing to the unified comms engine.
 // Engine handles persistence to ChatDB. CC-specific: SSE bridge, force commands, mood reactions.
 func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
+	if cs.Engine == nil {
+		return fmt.Errorf("chat engine not initialized — call SetEngine() before Ask()")
+	}
+
 	sessID := convSessionID(req.ConvID)
 	channelID := comms.ChannelID("cc:" + req.ConvID)
 	if req.ConvID == "" {

@@ -601,11 +601,6 @@ func main() {
 		}
 	}
 	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatDB, transcriber, classifyFn, router.ResolveModel, cliProvider)
-	chatService.Registry = registry
-	chatService.SkillStore = skillStore
-	chatService.Orchestrator = orch
-	chatService.BackendConfigs = func() map[string]cc.BackendConfig { return cfg.Backends }
-	chatService.ConvStore = convStore
 	toolRegistry := tooling.NewRegistry(dataDir)
 	nativeTools := []tooling.NativeTool{
 		tooling.BashNativeTool{DataDir: dataDir},
@@ -647,13 +642,7 @@ func main() {
 		toolRegistry.RegisterNative(t)
 		toolExecutor.RegisterNative(t)
 	}
-	chatService.ToolRegistry = toolRegistry
-	chatService.ToolExecutor = toolExecutor
 	orch.SetTooling(toolRegistry, toolExecutor)
-	if memDB != nil {
-		chatService.Recaller = &memStoreRecaller{store: memDB}
-		chatService.MemStore = memDB
-	}
 
 	// Unified comms engine: shared pipeline for CC (and later TG).
 	engineClassify := func(message, lastTier string, msgCount int, recentCtx string) comms.RouteResult {
@@ -693,6 +682,24 @@ func main() {
 			Limit:    cfg.RecallLimit,
 			Distance: cfg.RecallDistance,
 		},
+	})
+	// Initialize all optional dependencies in one place (issue #91).
+	var recaller cc.MemoryRecaller
+	var memStore cc.MemoryStorer
+	if memDB != nil {
+		recaller = &memStoreRecaller{store: memDB}
+		memStore = memDB
+	}
+	chatService.Init(cc.ChatServiceOpts{
+		Registry:       registry,
+		SkillStore:     skillStore,
+		Orchestrator:   orch,
+		ConvStore:      convStore,
+		ToolRegistry:   toolRegistry,
+		ToolExecutor:   toolExecutor,
+		Recaller:       recaller,
+		MemStore:       memStore,
+		BackendConfigs: func() map[string]cc.BackendConfig { return cfg.Backends },
 	})
 	chatService.SetEngine(commEngine)
 	broadcastFunc = commEngine.Broadcast // wire integrity guard notifications

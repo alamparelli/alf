@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -434,12 +435,10 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	// Debug: log first 500 bytes of serialized JSON to verify cache_control presence.
-	preview := string(data)
-	if len(preview) > 500 {
-		preview = preview[:500]
-	}
-	log.Printf("[api] request preview: %s", preview)
+	// Debug: dump full request JSON to file for comparison.
+	debugPath := fmt.Sprintf("/tmp/api_request_%d.json", time.Now().UnixMilli())
+	_ = os.WriteFile(debugPath, data, 0o644)
+	log.Printf("[api] request dumped to %s (%d bytes)", debugPath, len(data))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(data))
 	if err != nil {

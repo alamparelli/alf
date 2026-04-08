@@ -164,7 +164,15 @@ func (m apiMessage) MarshalJSON() ([]byte, error) {
 		}
 	case m.ToolCallID != "":
 		// Tool result: always include content + tool_call_id.
-		msg["content"] = m.Content
+		if m.CacheControl != nil && m.Content != "" {
+			msg["content"] = []map[string]any{{
+				"type":          "text",
+				"text":          m.Content,
+				"cache_control": m.CacheControl,
+			}}
+		} else {
+			msg["content"] = m.Content
+		}
 		msg["tool_call_id"] = m.ToolCallID
 	default:
 		// System/user/assistant text.
@@ -271,9 +279,33 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 		}
 	}
 
+	// Tag last conversation message for cache (2nd breakpoint).
+	// Anthropic supports up to 4 breakpoints; this caches the conversation
+	// history so subsequent turns only pay for the new user message.
+	if len(params.ConvMessages) > 0 || (params.SessionKey != "" && p.history != nil) {
+		model := params.Model
+		if model == "" {
+			model = p.defaultModel
+		}
+		if strings.HasPrefix(model, "anthropic/") {
+			tagLastMessageCache(messages)
+		}
+	}
+
 	// Current user message.
 	messages = append(messages, apiMessage{Role: "user", Content: prompt})
 	return messages
+}
+
+// tagLastMessageCache sets cache_control on the last message in the slice.
+// This creates a 2nd cache breakpoint so conversation history is also cached.
+func tagLastMessageCache(messages []apiMessage) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "system" {
+			messages[i].CacheControl = &apiCacheControl{Type: "ephemeral"}
+			return
+		}
+	}
 }
 
 // DoRequest sends a request with pre-built messages and optional tools,

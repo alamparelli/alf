@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/alamparelli/alf/internal/trace"
 )
@@ -161,6 +162,12 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 			})
 
 			log.Printf("toolloop: tool %s → %d chars (error=%v)", tc.Function.Name, len(result.Output), result.IsError)
+		}
+
+		// Tag last tool result for cache (Anthropic models) so the next
+		// DoRequest iteration gets a cache hit on system + conversation + tools.
+		if strings.HasPrefix(model, "anthropic/") {
+			tagLastMessageCache(messages)
 		}
 	}
 }

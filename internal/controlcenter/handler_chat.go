@@ -105,6 +105,42 @@ func (h *ChatConversationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// ChatActiveHandler handles GET/PUT /api/chat/active — active conversation sync.
+type ChatActiveHandler struct {
+	Service     *ChatService
+	EventBroker *EventBroker
+}
+
+func (h *ChatActiveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		respondJSON(w, http.StatusOK, map[string]any{
+			"active_conv_id": h.Service.CurrentConvID(),
+		})
+	case http.MethodPut:
+		var req struct {
+			ConvID   string `json:"conv_id"`
+			ClientID string `json:"client_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ConvID == "" {
+			respondError(w, http.StatusBadRequest, "conv_id required")
+			return
+		}
+		if len(req.ConvID) > 64 || len(req.ClientID) > 64 {
+			respondError(w, http.StatusBadRequest, "conv_id/client_id too long")
+			return
+		}
+		h.Service.SetActiveConvID(req.ConvID)
+		if h.EventBroker != nil {
+			payload, _ := json.Marshal(map[string]string{"conv_id": req.ConvID, "client_id": req.ClientID})
+			h.EventBroker.EmitWithData(EventActiveConv, string(payload))
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
 // ChatConversationHandler handles PATCH/DELETE on a single conversation.
 type ChatConversationHandler struct {
 	Service     *ChatService

@@ -36,6 +36,7 @@
 
   // --- Single conversation state ---
   let convId = $state(localStorage.getItem('alf-chat-convid') || '')
+  const clientId = Math.random().toString(36).slice(2, 10)
 
   function genId(): string {
     return Math.random().toString(36).slice(2, 10)
@@ -43,6 +44,11 @@
 
   function saveConvId() {
     localStorage.setItem('alf-chat-convid', convId)
+    // Notify server so other devices/tabs sync.
+    api('/api/chat/active', {
+      method: 'PUT',
+      body: JSON.stringify({ conv_id: convId, client_id: clientId })
+    }).catch(() => {})
   }
 
   // Load the active conversation from server on startup.
@@ -51,10 +57,10 @@
       const data = await api<any>('/api/chat/conversations')
       const allConvs = data.conversations || []
       const convs = allConvs.filter((c: any) => c.msg_count > 0)
-      // Restore saved convId if it still exists (even if empty — e.g. after /new).
-      const saved = localStorage.getItem('alf-chat-convid')
-      if (saved && allConvs.some((c: any) => c.id === saved)) {
-        convId = saved
+      // Server's active_conv_id is the source of truth.
+      const serverActive = data.active_conv_id
+      if (serverActive && allConvs.some((c: any) => c.id === serverActive)) {
+        convId = serverActive
       } else if (convs.length > 0) {
         convId = convs[convs.length - 1].id // most recent (ASC order)
       } else {
@@ -632,6 +638,7 @@
   // --- Lifecycle ---
   let unsubTiers: (() => void) | null = null
   let unsubNewMsg: (() => void) | null = null
+  let unsubActiveConv: (() => void) | null = null
 
   onMount(async () => {
     // Request notification permission
@@ -643,6 +650,17 @@
     await loadTiers()
     loadActiveSkills()
     unsubTiers = events.subscribe('tiers', () => loadTiers())
+    unsubActiveConv = events.subscribe('active_conv', (data) => {
+      try {
+        const parsed = JSON.parse(data || '{}')
+        if (parsed.client_id === clientId) return // echo suppression
+        if (parsed.conv_id && parsed.conv_id !== convId) {
+          convId = parsed.conv_id
+          localStorage.setItem('alf-chat-convid', convId)
+          loadHistory().then(() => scrollToBottom())
+        }
+      } catch {}
+    })
     unsubNewMsg = events.subscribe('new_message', () => {
       if (!convId) return
       // Fetch latest messages and append any new ones (safe during streaming).
@@ -668,6 +686,7 @@
     if (pollTimer) clearTimeout(pollTimer)
     unsubTiers?.()
     unsubNewMsg?.()
+    unsubActiveConv?.()
   })
 </script>
 

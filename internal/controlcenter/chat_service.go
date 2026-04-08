@@ -526,16 +526,28 @@ func (cs *ChatService) ClearActiveSkills() {
 }
 
 // CurrentConvID returns the active conversation ID for the CC chat.
-// Uses the last conv_id from the frontend (set by StartJob), falling back
-// to the ConvStore channel ID.
+// Priority: in-memory lastChatConv → persisted kv_meta → ConvStore fallback.
 func (cs *ChatService) CurrentConvID() string {
 	if cs.lastChatConv != "" {
 		return cs.lastChatConv
+	}
+	if cs.ChatDB != nil {
+		if v := cs.ChatDB.GetMeta("active_conv_id"); v != "" {
+			return v
+		}
 	}
 	if cs.ConvStore != nil {
 		return cs.ConvStore.ConvID(conversation.ChannelCC)
 	}
 	return ""
+}
+
+// SetActiveConvID persists the active conversation and updates in-memory state.
+func (cs *ChatService) SetActiveConvID(convID string) {
+	cs.lastChatConv = convID
+	if cs.ChatDB != nil {
+		cs.ChatDB.SetMeta("active_conv_id", convID)
+	}
 }
 
 // History returns paginated chat history, optionally filtered by conversation.
@@ -1003,7 +1015,7 @@ const recallLimit = DefaultRecallTopK
 // If a job is already running for the same conversation, returns it for reconnection.
 func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
 	convID := req.ConvID
-	cs.lastChatConv = convID // track for notify tool
+	cs.SetActiveConvID(convID) // persist + track for notify tool
 	cs.jobMu.Lock()
 	if j := cs.activeJobs[convID]; j != nil && !j.isDone() {
 		cs.jobMu.Unlock()

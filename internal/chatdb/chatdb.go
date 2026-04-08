@@ -141,6 +141,11 @@ CREATE TABLE IF NOT EXISTS media (
     url         TEXT DEFAULT '',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS kv_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
 `
 
 // New opens or creates the chat database in dataDir/logs/chat.db.
@@ -181,6 +186,21 @@ func (d *DB) Close() error {
 		return d.db.Close()
 	}
 	return nil
+}
+
+// SetMeta stores a key-value pair in the kv_meta table (upsert).
+func (d *DB) SetMeta(key, value string) error {
+	_, err := d.db.Exec(`INSERT INTO kv_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+
+// GetMeta retrieves a value from the kv_meta table. Returns "" if not found.
+func (d *DB) GetMeta(key string) string {
+	var v string
+	if err := d.db.QueryRow(`SELECT value FROM kv_meta WHERE key = ?`, key).Scan(&v); err != nil {
+		return ""
+	}
+	return v
 }
 
 // EnsureConversation creates a conversation if it doesn't exist (idempotent).

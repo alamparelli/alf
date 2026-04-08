@@ -237,9 +237,16 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 
 	// System prompts. When CacheBreakpoint > 0, split into stable (cacheable)
 	// and dynamic parts so Anthropic prompt caching can reuse the stable prefix.
+	// When bp == len (all stable, no dynamic), tag the whole block as cacheable.
+	model := params.Model
+	if model == "" {
+		model = p.defaultModel
+	}
+	isAnthropic := strings.HasPrefix(model, "anthropic/")
 	if len(params.SystemPrompts) > 0 {
 		bp := params.CacheBreakpoint
-		if bp > 0 && bp < len(params.SystemPrompts) {
+		if isAnthropic && bp > 0 && bp < len(params.SystemPrompts) {
+			// Split: stable (cacheable) + dynamic.
 			stable := strings.Join(params.SystemPrompts[:bp], "\n\n")
 			dynamic := strings.Join(params.SystemPrompts[bp:], "\n\n")
 			messages = append(messages, apiMessage{
@@ -252,7 +259,12 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 			}
 		} else {
 			combined := strings.Join(params.SystemPrompts, "\n\n")
-			messages = append(messages, apiMessage{Role: "system", Content: combined})
+			cc := (*apiCacheControl)(nil)
+			if isAnthropic && bp > 0 {
+				// All prompts are stable (bp == len) — cache the whole block.
+				cc = &apiCacheControl{Type: "ephemeral"}
+			}
+			messages = append(messages, apiMessage{Role: "system", Content: combined, CacheControl: cc})
 		}
 	}
 
@@ -282,14 +294,8 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 	// Tag last conversation message for cache (2nd breakpoint).
 	// Anthropic supports up to 4 breakpoints; this caches the conversation
 	// history so subsequent turns only pay for the new user message.
-	if len(params.ConvMessages) > 0 || (params.SessionKey != "" && p.history != nil) {
-		model := params.Model
-		if model == "" {
-			model = p.defaultModel
-		}
-		if strings.HasPrefix(model, "anthropic/") {
-			tagLastMessageCache(messages)
-		}
+	if isAnthropic && (len(params.ConvMessages) > 0 || (params.SessionKey != "" && p.history != nil)) {
+		tagLastMessageCache(messages)
 	}
 
 	// Current user message.

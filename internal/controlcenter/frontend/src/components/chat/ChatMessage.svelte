@@ -6,6 +6,7 @@
   import { isStandaloneEmojiMessage } from '../../lib/emoji'
   import { toasts } from '../../stores/toast.svelte'
   import { nav } from '../../stores/nav.svelte'
+  import { avatarUrl } from '../../stores/avatar.svelte'
 
   interface ContentBlock {
     type: string
@@ -281,7 +282,7 @@
   {#if msg.role === 'assistant'}
     <div class="chat-avatar chat-avatar-assistant">
       <img
-        src="/api/settings/avatar"
+        src={avatarUrl.current}
         alt="ALF"
         class="avatar-img"
         onerror={(e) => { e.currentTarget.src = '/static/favicon.png'; }}

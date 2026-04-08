@@ -23,7 +23,7 @@ class EventBus {
     const types = [
       'schedules', 'tasks', 'firewall', 'apps',
       'marketplace', 'vault', 'config', 'tiers',
-      'tools', 'skills', 'agents', 'new_message', 'active_conv'
+      'tools', 'skills', 'agents', 'new_message', 'active_conv', 'avatar'
     ]
     for (const type of types) {
       es.addEventListener(type, (e: MessageEvent) => this.dispatch(type, e.data))

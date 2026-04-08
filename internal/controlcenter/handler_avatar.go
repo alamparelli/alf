@@ -21,7 +21,8 @@ const (
 //	GET    /api/settings/avatar — serve sanitized PNG
 //	DELETE /api/settings/avatar — reset to default
 type AvatarHandler struct {
-	DataDir string
+	DataDir     string
+	EventBroker *EventBroker // optional: emits avatar event on changes
 }
 
 func (h *AvatarHandler) avatarPath() string {
@@ -96,12 +97,20 @@ func (h *AvatarHandler) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.emitAvatarEvent()
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *AvatarHandler) handleDelete(w http.ResponseWriter) {
 	os.Remove(h.avatarPath())
+	h.emitAvatarEvent()
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *AvatarHandler) emitAvatarEvent() {
+	if h.EventBroker != nil {
+		h.EventBroker.Emit(EventAvatar)
+	}
 }
 
 // SetFromBytes sanitizes and saves an avatar image. Used by the native tool.
@@ -115,12 +124,17 @@ func (h *AvatarHandler) SetFromBytes(imgBytes []byte) error {
 	}
 	path := h.avatarPath()
 	os.MkdirAll(filepath.Dir(path), 0o755)
-	return os.WriteFile(path, sanitized, 0o644)
+	if err := os.WriteFile(path, sanitized, 0o644); err != nil {
+		return err
+	}
+	h.emitAvatarEvent()
+	return nil
 }
 
 // Reset removes the custom avatar.
 func (h *AvatarHandler) Reset() {
 	os.Remove(h.avatarPath())
+	h.emitAvatarEvent()
 }
 
 // HasCustomAvatar returns true if a custom avatar is set.

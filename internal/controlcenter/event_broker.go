@@ -25,6 +25,7 @@ const (
 	EventAgents     EventType = "agents"
 	EventNewMessage EventType = "new_message"
 	EventActiveConv EventType = "active_conv"
+	EventAvatar     EventType = "avatar"
 )
 
 // sseEvent is an internal message carrying type + optional data payload.

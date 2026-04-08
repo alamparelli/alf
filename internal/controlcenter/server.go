@@ -86,6 +86,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 	if avatarHandler == nil {
 		avatarHandler = &AvatarHandler{DataDir: dataDir}
 	}
+	avatarHandler.EventBroker = eventBroker
 
 	handlers := HandlerFactory(Deps{
 		ConfigStore:    configStore,

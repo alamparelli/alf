@@ -87,11 +87,9 @@
             <span class="conv-tab-badge"></span>
           {/if}
           <span class="conv-tab-spacer"></span>
-          {#if convStore.conversations.length > 1}
-            <button class="conv-tab-close btn-icon" onclick={(e) => handleArchive(e, conv.id)} title="Archive">
-              <X size={12} />
-            </button>
-          {/if}
+          <button class="conv-tab-close btn-icon" onclick={(e) => handleArchive(e, conv.id)} title="Archive">
+            <X size={12} />
+          </button>
         {/if}
       </button>
     {/each}

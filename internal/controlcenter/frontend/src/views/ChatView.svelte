@@ -858,12 +858,23 @@
         {/each}
         {/if}
       {:else}
-        {@const isEmpty = msg.role === 'assistant' && !msg.text?.trim() && (!msg.content_blocks || msg.content_blocks.every(b => {
-          if (b.type === 'thinking' && hideThinking) return true
-          if ((b.type === 'tool_use' || b.type === 'tool_result') && hideTools) return true
-          if (b.type === 'text') return !b.text?.trim()
-          return false
-        }))}
+        {@const isEmpty = (() => {
+          const text = (msg.text || '').trim()
+          const blocks = msg.content_blocks || []
+          // User messages: empty if no text and no media
+          if (msg.role === 'user') return !text && (!msg.media || msg.media.length === 0)
+          // System messages: empty if no text
+          if (msg.role === 'system') return !text
+          // Assistant: empty if no visible text and all blocks are hidden/empty
+          if (!text && blocks.length === 0) return true
+          return blocks.length > 0 && blocks.every(b => {
+            if (b.type === 'thinking' && hideThinking) return true
+            if ((b.type === 'tool_use' || b.type === 'tool_result') && hideTools) return true
+            if (b.type === 'text') return !b.text?.trim()
+            if (b.type === 'tool_result') return !(b.content || b.text || '').trim()
+            return false
+          })
+        })()}
         {#if !isEmpty}
           <ChatMessageComponent {msg} {convId} {collapseBlocks} {hideThinking} {hideTools} onSendToTask={openAgentModal} />
         {/if}

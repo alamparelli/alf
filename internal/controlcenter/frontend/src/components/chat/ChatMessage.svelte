@@ -46,10 +46,12 @@
     }
     convId: string
     collapseBlocks?: boolean
+    hideThinking?: boolean
+    hideTools?: boolean
     onSendToTask?: (text: string) => void
   }
 
-  let { msg, convId, collapseBlocks = true, onSendToTask }: Props = $props()
+  let { msg, convId, collapseBlocks = true, hideThinking = false, hideTools = false, onSendToTask }: Props = $props()
 
   let showEmojiPicker = $state(false)
   let copied = $state(false)
@@ -301,7 +303,11 @@
   <!-- Content blocks (assistant streaming) -->
   {#if msg.content_blocks && msg.content_blocks.length > 0}
     {#each msg.content_blocks as block, i}
-      {#if block.type === 'thinking'}
+      {#if block.type === 'thinking' && hideThinking}
+        <!-- hidden by filter -->
+      {:else if (block.type === 'tool_use' || block.type === 'tool_result') && hideTools}
+        <!-- hidden by filter -->
+      {:else if block.type === 'thinking'}
         <div class="content-block thinking-block">
           <button class="block-header" onclick={() => toggleBlock(i)}>
             {#if isExpanded(i)}

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
-  import { X, MessageCircle, RotateCw, Play, ChevronsDownUp, ChevronsUpDown } from 'lucide-svelte'
+  import { X, MessageCircle, RotateCw, Play } from 'lucide-svelte'
   import ChatMessageComponent from '../components/chat/ChatMessage.svelte'
   import ChatInput from '../components/chat/ChatInput.svelte'
   import Modal from '../components/shared/Modal.svelte'
@@ -79,6 +79,25 @@
   let messagesContainer: HTMLDivElement
   let selectedTier = $state(localStorage.getItem('alf-chat-tier') || '')
   let collapseBlocks = $state(localStorage.getItem('alf-chat-collapse') !== 'false')
+
+  // Block visibility filter (#196)
+  type ChatFilter = 'all' | 'clean' | 'thinking' | 'tools'
+  let chatFilter = $state<ChatFilter>((localStorage.getItem('alf-chat-filter') as ChatFilter) || 'all')
+  let hideThinking = $derived(chatFilter === 'clean' || chatFilter === 'tools')
+  let hideTools = $derived(chatFilter === 'clean' || chatFilter === 'thinking')
+
+  function onFilterChange(e: Event) {
+    const detail = (e as CustomEvent).detail
+    if (detail?.value) {
+      chatFilter = detail.value as ChatFilter
+      localStorage.setItem('alf-chat-filter', chatFilter)
+    }
+  }
+
+  function bindFilterGroup(node: HTMLElement) {
+    node.addEventListener('alf-change', onFilterChange)
+    return { destroy() { node.removeEventListener('alf-change', onFilterChange) } }
+  }
   let streamingBlocks = $state<any[]>([])
   let streamingText = $state('')
   let stoppedByUser = false
@@ -719,21 +738,19 @@
 <div class="chat-view">
   <!-- Header -->
   <div class="chat-header">
-    <button class="new-conv-btn" onclick={newConversation} title="New conversation">
+    <button class="btn btn-ghost btn-sm" onclick={newConversation} title="New conversation">
       <RotateCw size={14} />
-      <span>New</span>
+      New
     </button>
-    <button
-      class="collapse-toggle-btn"
-      onclick={() => { collapseBlocks = !collapseBlocks; localStorage.setItem('alf-chat-collapse', String(collapseBlocks)) }}
-      title={collapseBlocks ? 'Expand all blocks' : 'Collapse all blocks'}
-    >
-      {#if collapseBlocks}
-        <ChevronsUpDown size={18} />
-      {:else}
-        <ChevronsDownUp size={18} />
-      {/if}
-    </button>
+    <div class="chat-header-spacer"></div>
+    <div use:bindFilterGroup>
+      <alf-btn-group value={chatFilter}>
+        <button class="btn btn-sm" data-value="all">All</button>
+        <button class="btn btn-sm" data-value="clean">Clean</button>
+        <button class="btn btn-sm" data-value="thinking">Thinking</button>
+        <button class="btn btn-sm" data-value="tools">Tools</button>
+      </alf-btn-group>
+    </div>
   </div>
 
   <!-- Messages -->
@@ -752,6 +769,8 @@
     {#each messages as msg (msg.id)}
       {#if msg.role === 'assistant' && msg.content_blocks && msg.content_blocks.length > 1}
         {@const visibleBlocks = msg.content_blocks.filter(b => {
+          if (b.type === 'thinking' && hideThinking) return false
+          if ((b.type === 'tool_use' || b.type === 'tool_result') && hideTools) return false
           if (b.type === 'text') return b.text && b.text.trim()
           if (b.type === 'tool_result') return (b.content || b.text || '').trim()
           return true
@@ -773,12 +792,12 @@
               reactions: isLast ? msg.reactions : undefined,
             }}
             {convId}
-            {collapseBlocks}
+            {collapseBlocks} {hideThinking} {hideTools}
             onSendToTask={isLast ? openAgentModal : undefined}
           />
         {/each}
       {:else}
-        <ChatMessageComponent {msg} {convId} {collapseBlocks} onSendToTask={openAgentModal} />
+        <ChatMessageComponent {msg} {convId} {collapseBlocks} {hideThinking} {hideTools} onSendToTask={openAgentModal} />
       {/if}
     {/each}
 
@@ -794,7 +813,7 @@
             content_blocks: [block],
           }}
           {convId}
-          {collapseBlocks}
+          {collapseBlocks} {hideThinking} {hideTools}
         />
       {/each}
     {:else if sending}
@@ -871,44 +890,8 @@
     flex-shrink: 0;
   }
 
-  .new-conv-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    background: none;
-    border: none;
-    border-radius: 6px;
-    color: var(--text-dim);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background 0.15s;
-  }
-
-  .new-conv-btn:hover {
-    background: var(--bg-input);
-    color: var(--text);
-  }
-
-  .collapse-toggle-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text-dim);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background 0.15s;
-  }
-
-  .collapse-toggle-btn:hover {
-    background: var(--bg-input);
-    color: var(--text);
+  .chat-header-spacer {
+    flex: 1;
   }
 
   /* Messages */

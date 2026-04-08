@@ -105,6 +105,14 @@ type apiRequest struct {
 	ParallelToolCalls  *bool             `json:"parallel_tool_calls,omitempty"`
 	Reasoning          *apiReasoning     `json:"reasoning,omitempty"`
 	StreamOptions      *apiStreamOpts    `json:"stream_options,omitempty"`
+	CacheControl       *apiCacheControl  `json:"cache_control,omitempty"`
+}
+
+// apiCacheControl configures prompt caching (OpenRouter / Anthropic).
+// Type: "ephemeral" (5-min TTL, default). Future: TTL field for 1h cache.
+type apiCacheControl struct {
+	Type string `json:"type"`           // "ephemeral"
+	TTL  string `json:"ttl,omitempty"`  // "" = 5min default, "1h" = 1 hour (Anthropic only)
 }
 
 // apiReasoning configures reasoning/thinking for OpenRouter-compatible models.
@@ -190,6 +198,7 @@ type apiStreamResult struct {
 	Model        string
 	InputTokens  int
 	OutputTokens int
+	CachedTokens int // prompt tokens served from cache (OpenRouter/Anthropic)
 }
 
 // BuildMessages constructs the messages array from a prompt and params.
@@ -258,6 +267,10 @@ func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, mode
 	if effort != "" && !p.IsOllamaCompat() {
 		reqBody.Reasoning = &apiReasoning{Effort: effort, Enabled: true}
 	}
+	// Prompt caching for Anthropic models on OpenRouter.
+	if strings.HasPrefix(model, "anthropic/") {
+		reqBody.CacheControl = &apiCacheControl{Type: "ephemeral"}
+	}
 	return p.doStreamRequest(ctx, reqBody, onProgress, 0)
 }
 
@@ -291,6 +304,10 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	// Reasoning support (OpenRouter / OpenAI-compatible).
 	if params.Effort != "" && !p.IsOllamaCompat() {
 		reqBody.Reasoning = &apiReasoning{Effort: params.Effort, Enabled: true}
+	}
+	// Prompt caching for Anthropic models on OpenRouter.
+	if strings.HasPrefix(model, "anthropic/") {
+		reqBody.CacheControl = &apiCacheControl{Type: "ephemeral"}
 	}
 
 	resp, err := p.doStreamRequest(ctx, reqBody, onProgress, 0)
@@ -382,7 +399,7 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 	var resultText strings.Builder
 	toolCalls := make(map[int]*apiToolCall) // keyed by index for incremental assembly
 	var finishReason string
-	var inputTokens, outputTokens int
+	var inputTokens, outputTokens, cachedTokens int
 
 	// Try to extract usage from response headers (OpenRouter sends these on non-streaming
 	// responses; for streaming they may appear after the body is consumed — see SSE parsing below).
@@ -447,6 +464,9 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 			Usage *struct {
 				PromptTokens     int `json:"prompt_tokens"`
 				CompletionTokens int `json:"completion_tokens"`
+				PromptTokensDetails *struct {
+					CachedTokens int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details,omitempty"`
 			} `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
@@ -460,6 +480,9 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 			}
 			if chunk.Usage.CompletionTokens > 0 {
 				outputTokens = chunk.Usage.CompletionTokens
+			}
+			if chunk.Usage.PromptTokensDetails != nil && chunk.Usage.PromptTokensDetails.CachedTokens > 0 {
+				cachedTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
 		}
 
@@ -520,8 +543,12 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 		}
 	}
 
-	log.Printf("api[%s]: response %dms %d chars %d tool_calls finish=%s model=%s",
-		p.name, duration.Milliseconds(), len(text), len(calls), finishReason, reqBody.Model)
+	cacheInfo := ""
+	if cachedTokens > 0 {
+		cacheInfo = fmt.Sprintf(" cache_hit=%d", cachedTokens)
+	}
+	log.Printf("api[%s]: response %dms %d chars %d tool_calls finish=%s model=%s%s",
+		p.name, duration.Milliseconds(), len(text), len(calls), finishReason, reqBody.Model, cacheInfo)
 
 	// For non-tool responses, empty text is an error. Retry once.
 	if text == "" && len(calls) == 0 {
@@ -539,6 +566,7 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 		Model:        reqBody.Model,
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
+		CachedTokens: cachedTokens,
 	}, nil
 }
 

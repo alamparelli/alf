@@ -282,6 +282,184 @@ func TestApiMessage_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestApiRequest_CacheControl_AnthropicModel(t *testing.T) {
+	// When model starts with "anthropic/", cache_control should be set.
+	var capturedBody json.RawMessage
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := make([]byte, 16384)
+		n, _ := r.Body.Read(body)
+		capturedBody = body[:n]
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	p := &APIProvider{
+		apiKey:    "test",
+		baseURL:   server.URL,
+		maxTokens: 4096,
+		client:    &http.Client{Timeout: 5 * time.Second},
+	}
+
+	_, err := p.Invoke(context.Background(), "test", Params{Model: "anthropic/claude-haiku-4-5"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var req struct {
+		CacheControl *apiCacheControl `json:"cache_control"`
+	}
+	if err := json.Unmarshal(capturedBody, &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if req.CacheControl == nil {
+		t.Fatal("expected cache_control to be set for anthropic/ model")
+	}
+	if req.CacheControl.Type != "ephemeral" {
+		t.Errorf("expected type 'ephemeral', got %q", req.CacheControl.Type)
+	}
+}
+
+func TestApiRequest_CacheControl_NonAnthropicModel(t *testing.T) {
+	// When model does NOT start with "anthropic/", cache_control should be omitted.
+	var capturedBody json.RawMessage
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := make([]byte, 16384)
+		n, _ := r.Body.Read(body)
+		capturedBody = body[:n]
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	p := &APIProvider{
+		apiKey:    "test",
+		baseURL:   server.URL,
+		maxTokens: 4096,
+		client:    &http.Client{Timeout: 5 * time.Second},
+	}
+
+	_, err := p.Invoke(context.Background(), "test", Params{Model: "openai/gpt-4o"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(capturedBody, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, exists := raw["cache_control"]; exists {
+		t.Error("expected cache_control to be omitted for non-anthropic model")
+	}
+}
+
+func TestApiCacheControl_JSON(t *testing.T) {
+	tests := []struct {
+		name string
+		cc   apiCacheControl
+		want string
+	}{
+		{
+			name: "ephemeral without TTL",
+			cc:   apiCacheControl{Type: "ephemeral"},
+			want: `{"type":"ephemeral"}`,
+		},
+		{
+			name: "ephemeral with TTL",
+			cc:   apiCacheControl{Type: "ephemeral", TTL: "1h"},
+			want: `{"type":"ephemeral","ttl":"1h"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.cc)
+			if err != nil {
+				t.Fatalf("marshal error: %v", err)
+			}
+			if string(data) != tt.want {
+				t.Errorf("got %s, want %s", string(data), tt.want)
+			}
+		})
+	}
+}
+
+func TestApiStreamResult_CachedTokens(t *testing.T) {
+	// Verify cached_tokens is parsed from SSE usage chunk.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"))
+		w.Write([]byte(`data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":80}}}` + "\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	p := &APIProvider{
+		apiKey:    "test",
+		baseURL:   server.URL,
+		maxTokens: 4096,
+		client:    &http.Client{Timeout: 5 * time.Second},
+	}
+
+	msgs := []apiMessage{{Role: "user", Content: "test"}}
+	result, err := p.DoRequest(context.Background(), msgs, "anthropic/claude-haiku-4-5", nil, "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.CachedTokens != 80 {
+		t.Errorf("expected CachedTokens=80, got %d", result.CachedTokens)
+	}
+	if result.InputTokens != 100 {
+		t.Errorf("expected InputTokens=100, got %d", result.InputTokens)
+	}
+}
+
+func TestAPIProvider_DoRequest_CacheControl_AnthropicModel(t *testing.T) {
+	// DoRequest should also set cache_control for anthropic/ models.
+	var capturedBody json.RawMessage
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := make([]byte, 16384)
+		n, _ := r.Body.Read(body)
+		capturedBody = body[:n]
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	p := &APIProvider{
+		apiKey:    "test",
+		baseURL:   server.URL,
+		maxTokens: 4096,
+		client:    &http.Client{Timeout: 5 * time.Second},
+	}
+
+	msgs := []apiMessage{{Role: "user", Content: "test"}}
+	_, err := p.DoRequest(context.Background(), msgs, "anthropic/claude-sonnet-4-5", nil, "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var req struct {
+		CacheControl *apiCacheControl `json:"cache_control"`
+	}
+	if err := json.Unmarshal(capturedBody, &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if req.CacheControl == nil {
+		t.Fatal("expected cache_control in DoRequest for anthropic/ model")
+	}
+	if req.CacheControl.Type != "ephemeral" {
+		t.Errorf("expected type 'ephemeral', got %q", req.CacheControl.Type)
+	}
+}
+
 func TestAPIProvider_ErrorStatus(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)

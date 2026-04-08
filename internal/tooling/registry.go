@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -279,6 +280,9 @@ func ResolveWildcard(dataDir string, reg *Registry) []string {
 			}
 		}
 	}
+	// Sort for deterministic ordering — important for prompt caching
+	// (tool definitions are part of the cached prefix).
+	sort.Strings(tools)
 	return tools
 }
 

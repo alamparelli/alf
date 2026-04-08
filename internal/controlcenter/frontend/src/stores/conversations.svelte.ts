@@ -51,8 +51,6 @@ class ConversationStore {
   async create() {
     const id = Math.random().toString(36).slice(2, 10)
     try {
-      // Reset LLM session state
-      await api<any>('/api/chat', { method: 'DELETE' })
       await api('/api/chat/conversations', {
         method: 'POST',
         body: JSON.stringify({ id, title: 'Chat' }),

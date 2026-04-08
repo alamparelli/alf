@@ -71,9 +71,17 @@
   let stoppedByUser = false
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let activeJobId = $state<string | null>(null)
-  let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string }[]>([])
+  let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string }[]>(loadQueue())
   let abortController: AbortController | null = null
-  let draft = $state('')
+  let drafts = $state<Record<string, string>>({})
+  let draft = $derived(drafts[convId ?? ''] ?? '')
+
+  function loadQueue(): { message: string; mediaFiles: MediaFile[]; model: string }[] {
+    try { return JSON.parse(sessionStorage.getItem('alf-chat-queue') || '[]') } catch { return [] }
+  }
+  function persistQueue() {
+    sessionStorage.setItem('alf-chat-queue', JSON.stringify(messageQueue))
+  }
   let activeSkills = $state<string[]>([])
 
   async function loadActiveSkills() {
@@ -91,7 +99,7 @@
   }
 
   function updateDraft(text: string) {
-    draft = text
+    drafts[convId ?? ''] = text
   }
 
   // Send to agents modal
@@ -232,7 +240,7 @@
 
   // --- Send message ---
   async function handleSend(message: string, mediaFiles: MediaFile[], model: string) {
-    draft = ''
+    drafts[convId ?? ''] = ''
 
     // Client-side command handling
     const trimmed = message.trim()
@@ -248,6 +256,7 @@
     // Queue if already sending
     if (sending) {
       messageQueue = [...messageQueue, { message, mediaFiles, model }]
+      persistQueue()
       return
     }
 
@@ -443,6 +452,7 @@
       if (messageQueue.length > 0) {
         const next = messageQueue[0]
         messageQueue = messageQueue.slice(1)
+        persistQueue()
         doSend(next.message, next.mediaFiles, next.model)
       }
     }
@@ -587,6 +597,7 @@
   function stopCall() {
     stoppedByUser = true
     messageQueue = [] // clear pending queue
+    persistQueue()
     // Abort the active fetch stream immediately
     abortController?.abort()
     abortController = null
@@ -626,6 +637,7 @@
     if (id && id !== prevConvId && convStore.loaded) {
       prevConvId = id
       convStore.clearUnread(id)
+      setMessages([]) // clear immediately to avoid stale flash
       loadHistory().then(() => scrollToBottom())
     }
   })
@@ -670,7 +682,10 @@
 
       if (!convId) return
       // Fetch latest messages and append any new ones (safe during streaming).
-      api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${convId}`).then(recent => {
+      const gen = loadGen
+      const fetchConvId = convId
+      api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${fetchConvId}`).then(recent => {
+        if (gen !== loadGen) return // stale: conversation switched
         if (!recent?.length) return
         const existingIds = new Set(messages.map(m => m.id))
         const newMsgs = recent.filter(m => !existingIds.has(m.id) && m.role === 'assistant')
@@ -698,7 +713,10 @@
       }).catch(() => {})
       // 2. Fetch latest messages and merge new ones.
       if (sending) return // don't interfere with active stream
-      api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${convId}`).then(recent => {
+      const gen = loadGen
+      const fetchConvId = convId
+      api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${fetchConvId}`).then(recent => {
+        if (gen !== loadGen) return // stale: conversation switched
         if (!recent?.length) return
         const existingIds = new Set(messages.map(m => m.id))
         const newMsgs = recent.filter(m => !existingIds.has(m.id))
@@ -837,7 +855,7 @@
         <div class="msg-text">{queued.message}</div>
         <div class="queued-footer">
           <span class="queued-badge">queued #{i + 1}</span>
-          <button class="queued-cancel" onclick={() => { messageQueue = messageQueue.filter((_, idx) => idx !== i) }} title="Cancel queued message">
+          <button class="queued-cancel" onclick={() => { messageQueue = messageQueue.filter((_, idx) => idx !== i); persistQueue() }} title="Cancel queued message">
             <X size={12} /> cancel
           </button>
         </div>

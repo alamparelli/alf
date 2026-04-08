@@ -2,6 +2,7 @@ package controlcenter
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,18 +61,20 @@ func TestChatHandler_DeleteNewSession(t *testing.T) {
 
 func TestChatHandler_DeleteFiresOnSessionEnd(t *testing.T) {
 	svc := newTestChatService(t)
-	// Set a session so there's something to archive.
-	svc.Sessions.Set(apiChatID, "test-session-xyz")
 
 	// Wire a minimal engine with OnSessionEnd hook.
-	sessions := svc.Sessions
 	var firedWith string
 	eng := &comms.ChatEngine{
-		Sessions:     sessions,
+		Sessions:     svc.Sessions,
 		ContextDir:   svc.ContextDir,
 		OnSessionEnd: func(sid string) { firedWith = sid },
 	}
 	svc.Engine = eng
+
+	// Set the session under the key the engine will actually use
+	// (ChannelID("cc:-1").SessionKey() hashes "cc:-1", not raw apiChatID).
+	chID := comms.ChannelID("cc:" + fmt.Sprint(apiChatID))
+	svc.Sessions.Set(chID.SessionKey(), "test-session-xyz")
 
 	h := &ChatHandler{Service: svc}
 	req := httptest.NewRequest("DELETE", "/api/chat", nil)

@@ -300,10 +300,7 @@ func (e *Engine) runCommand(j *Job) (string, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", j.Command)
-	cmd.Env = os.Environ()
-	if e.cfg.SignalSockPath != "" {
-		cmd.Env = append(cmd.Env, "ALF_SIGNAL_SOCK="+e.cfg.SignalSockPath)
-	}
+	cmd.Env = e.commandEnv()
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -329,6 +326,23 @@ func (e *Engine) runCommand(j *Job) (string, error) {
 	}
 
 	return strings.TrimSpace(output), nil
+}
+
+// commandEnv returns the environment for direct-tier command execution,
+// injecting tools directories into PATH and ALF_SIGNAL_SOCK.
+func (e *Engine) commandEnv() []string {
+	var env []string
+	for _, v := range os.Environ() {
+		if strings.HasPrefix(v, "PATH=") && e.cfg.DataDir != "" {
+			toolPaths := filepath.Join(e.cfg.DataDir, "tools.d") + ":" + filepath.Join(e.cfg.DataDir, "tools")
+			v = "PATH=" + toolPaths + ":" + strings.TrimPrefix(v, "PATH=")
+		}
+		env = append(env, v)
+	}
+	if e.cfg.SignalSockPath != "" {
+		env = append(env, "ALF_SIGNAL_SOCK="+e.cfg.SignalSockPath)
+	}
+	return env
 }
 
 // errorPatterns are strings that indicate a command output contains issues worth analyzing.

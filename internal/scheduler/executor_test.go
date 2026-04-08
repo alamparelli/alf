@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -272,6 +274,60 @@ func TestRunCommand_SignalSockPath_PassedToSubprocess(t *testing.T) {
 	}
 	if out != sockPath {
 		t.Fatalf("expected ALF_SIGNAL_SOCK=%q, got %q", sockPath, out)
+	}
+}
+
+func TestRunCommand_ToolsInPATH(t *testing.T) {
+	dataDir := t.TempDir()
+	e := &Engine{cfg: Config{DataDir: dataDir}}
+
+	j := &Job{
+		ID:      "test-path",
+		Command: "echo $PATH",
+		Timeout: 5 * time.Second,
+	}
+
+	out, err := e.runCommand(j)
+	if err != nil {
+		t.Fatalf("runCommand failed: %v", err)
+	}
+
+	toolsDir := filepath.Join(dataDir, "tools")
+	toolsDDir := filepath.Join(dataDir, "tools.d")
+	if !strings.Contains(out, toolsDir) {
+		t.Errorf("PATH missing %s, got: %s", toolsDir, out)
+	}
+	if !strings.Contains(out, toolsDDir) {
+		t.Errorf("PATH missing %s, got: %s", toolsDDir, out)
+	}
+	// tools.d should come before tools
+	if strings.Index(out, toolsDDir) > strings.Index(out, toolsDir) {
+		t.Errorf("tools.d should precede tools in PATH, got: %s", out)
+	}
+}
+
+func TestRunCommand_ToolsExecutable(t *testing.T) {
+	dataDir := t.TempDir()
+	toolsDir := filepath.Join(dataDir, "tools")
+	os.MkdirAll(toolsDir, 0o755)
+
+	// Create a fake tool script
+	script := filepath.Join(toolsDir, "my-tool")
+	os.WriteFile(script, []byte("#!/bin/sh\necho tool-ok"), 0o755)
+
+	e := &Engine{cfg: Config{DataDir: dataDir}}
+	j := &Job{
+		ID:      "test-tool-exec",
+		Command: "my-tool",
+		Timeout: 5 * time.Second,
+	}
+
+	out, err := e.runCommand(j)
+	if err != nil {
+		t.Fatalf("runCommand failed: %v", err)
+	}
+	if out != "tool-ok" {
+		t.Fatalf("expected 'tool-ok', got %q", out)
 	}
 }
 

@@ -44,17 +44,17 @@ func (h *LLMInvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var req llmInvokeRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyLarge)).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 	if req.Tier == "" || req.Prompt == "" {
-		http.Error(w, "tier and prompt required", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "tier and prompt required")
 		return
 	}
 
 	tool := h.ToolRegistry.GetNative("llm")
 	if tool == nil {
-		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "llm tool not registered"})
+		respondError(w, http.StatusServiceUnavailable, "llm tool not registered")
 		return
 	}
 
@@ -91,7 +91,7 @@ func (h *LLMInvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if req.FireAndForget {
 		result, err := tool.Run(r.Context(), string(argsJSON))
 		if err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -117,7 +117,7 @@ func (h *LLMInvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	result, err := tool.Run(ctx, string(argsJSON))
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

@@ -48,18 +48,18 @@ func (h *AppUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := parts[0]
 	if !validName.MatchString(slug) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid app name"})
+		respondError(w, http.StatusBadRequest, "invalid app name")
 		return
 	}
 
 	if h.Perms != nil && !h.Perms.HasPermission(slug, "upload") {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: upload"})
+		respondError(w, http.StatusForbidden, "permission denied: upload")
 		return
 	}
 
 	// Cross-app access check: app iframe may only upload to its own storage.
 	if callerSlug := extractAppSlugFromReferer(r); callerSlug != "" && callerSlug != slug {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "cross-app upload access denied"})
+		respondError(w, http.StatusForbidden, "cross-app upload access denied")
 		return
 	}
 
@@ -67,13 +67,13 @@ func (h *AppUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "file too large (max 10MB)"})
+		respondError(w, http.StatusBadRequest, "file too large (max 10MB)")
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "missing 'file' field"})
+		respondError(w, http.StatusBadRequest, "missing 'file' field")
 		return
 	}
 	defer file.Close()
@@ -88,7 +88,7 @@ func (h *AppUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	absUploads, _ := filepath.Abs(uploadsDir)
 	absDest, _ := filepath.Abs(destPath)
 	if !strings.HasPrefix(absDest, absUploads+string(filepath.Separator)) && absDest != absUploads {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		respondError(w, http.StatusBadRequest, "invalid filename")
 		return
 	}
 
@@ -101,7 +101,7 @@ func (h *AppUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	dst, err := os.Create(destPath)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "create file failed"})
+		respondError(w, http.StatusInternalServerError, "create file failed")
 		return
 	}
 	defer dst.Close()
@@ -109,7 +109,7 @@ func (h *AppUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	n, err := io.Copy(dst, file)
 	if err != nil {
 		os.Remove(destPath)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
+		respondError(w, http.StatusInternalServerError, "write failed")
 		return
 	}
 

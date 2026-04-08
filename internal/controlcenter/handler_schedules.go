@@ -14,7 +14,7 @@ type ScheduleRunHandler struct {
 
 func (h *ScheduleRunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Engine == nil {
-		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scheduler not available"})
+		respondError(w, http.StatusServiceUnavailable, "scheduler not available")
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -26,16 +26,16 @@ func (h *ScheduleRunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		respondError(w, http.StatusBadRequest, "invalid JSON: " + err.Error())
 		return
 	}
 	if req.ID == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		respondError(w, http.StatusBadRequest, "id is required")
 		return
 	}
 
 	if err := h.Engine.RunNow(req.ID); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -49,7 +49,7 @@ type SchedulesHandler struct {
 
 func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Engine == nil {
-		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scheduler not available"})
+		respondError(w, http.StatusServiceUnavailable, "scheduler not available")
 		return
 	}
 
@@ -73,25 +73,25 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			log.Printf("[schedules] POST decode error: %v", err)
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+			respondError(w, http.StatusBadRequest, "invalid JSON: " + err.Error())
 			return
 		}
 		if req.Name == "" || req.Schedule == "" {
 			log.Printf("[schedules] POST missing fields: name=%q schedule=%q", req.Name, req.Schedule)
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name and schedule are required"})
+			respondError(w, http.StatusBadRequest, "name and schedule are required")
 			return
 		}
 		// SEC-009: Enforce length limits to reduce prompt injection surface.
 		if len(req.Prompt) > 4096 {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "prompt exceeds maximum length (4096 chars)"})
+			respondError(w, http.StatusBadRequest, "prompt exceeds maximum length (4096 chars)")
 			return
 		}
 		if len(req.Reason) > 256 {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "reason exceeds maximum length (256 chars)"})
+			respondError(w, http.StatusBadRequest, "reason exceeds maximum length (256 chars)")
 			return
 		}
 		if len(req.Name) > 128 {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name exceeds maximum length (128 chars)"})
+			respondError(w, http.StatusBadRequest, "name exceeds maximum length (128 chars)")
 			return
 		}
 		var timeout time.Duration
@@ -99,19 +99,19 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var err error
 			timeout, err = time.ParseDuration(req.Timeout)
 			if err != nil {
-				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid timeout: " + err.Error()})
+				respondError(w, http.StatusBadRequest, "invalid timeout: " + err.Error())
 				return
 			}
 		}
 		// Reminder mode: message is mutually exclusive with prompt/command/tier.
 		if req.Message != "" {
 			if req.Prompt != "" || req.Command != "" || req.Tier != "" {
-				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "message is a direct push notification - cannot be combined with prompt, command, or tier"})
+				respondError(w, http.StatusBadRequest, "message is a direct push notification - cannot be combined with prompt, command, or tier")
 				return
 			}
 			job, err := h.Engine.CreateReminder(req.Name, req.Schedule, req.Message, req.Output, timeout, req.Reason)
 			if err != nil {
-				respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				respondError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 			respondJSON(w, http.StatusCreated, map[string]any{"job": job})
@@ -120,7 +120,7 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		job, err := h.Engine.Create(req.Name, req.Schedule, req.Tier, req.Prompt, req.Command, req.Output, timeout, req.Skills, req.Reason)
 		if err != nil {
 			log.Printf("[schedules] POST create error: %v (name=%q schedule=%q tier=%q)", err, req.Name, req.Schedule, req.Tier)
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		respondJSON(w, http.StatusCreated, map[string]any{"job": job})
@@ -131,16 +131,16 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Fields map[string]string `json:"fields"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+			respondError(w, http.StatusBadRequest, "invalid JSON: " + err.Error())
 			return
 		}
 		if req.ID == "" {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+			respondError(w, http.StatusBadRequest, "id is required")
 			return
 		}
 		job, err := h.Engine.Update(req.ID, req.Fields)
 		if err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"job": job})
@@ -148,11 +148,11 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		id := r.URL.Query().Get("id")
 		if id == "" {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "id query param required"})
+			respondError(w, http.StatusBadRequest, "id query param required")
 			return
 		}
 		if err := h.Engine.Delete(id); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})

@@ -29,20 +29,20 @@ type SSHHandler struct {
 
 func (h *SSHHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Manager == nil {
-		http.Error(w, `{"error":"vault not available"}`, http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "vault not available")
 		return
 	}
 
 	// Inline auth check (outside middleware stack).
 	if !h.checkSSHAuth(r) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	// Ensure vault is authenticated.
 	if err := h.Manager.EnsureAuth(); err != nil {
 		log.Printf("[ssh] vault auth failed: %v", err)
-		http.Error(w, `{"error":"vault authentication failed"}`, http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "vault authentication failed")
 		return
 	}
 
@@ -50,14 +50,14 @@ func (h *SSHHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/ssh/")
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		http.Error(w, `{"error":"expected /api/ssh/{service}/{action}"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "expected /api/ssh/{service}/{action}")
 		return
 	}
 	service, action := parts[0], parts[1]
 
 	// SEC: Reject path traversal in service name.
 	if strings.Contains(service, "..") || strings.Contains(service, "/") {
-		http.Error(w, `{"error":"invalid service name"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid service name")
 		return
 	}
 
@@ -66,7 +66,7 @@ func (h *SSHHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if action != "session" {
 		hasBearerToken := strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !hasBearerToken && r.Header.Get("X-Requested-With") == "" {
-			http.Error(w, `{"error":"missing X-Requested-With header"}`, http.StatusForbidden)
+			respondError(w, http.StatusForbidden, "missing X-Requested-With header")
 			return
 		}
 	}
@@ -77,7 +77,7 @@ func (h *SSHHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "exec", "upload", "download":
 		h.proxySSHHTTP(w, r, service, action)
 	default:
-		http.Error(w, `{"error":"unknown SSH action"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "unknown SSH action")
 	}
 }
 
@@ -89,7 +89,7 @@ func (h *SSHHandler) proxySSHHTTP(w http.ResponseWriter, r *http.Request, servic
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, vaultURL, r.Body)
 	if err != nil {
 		log.Printf("[ssh] create proxy request: %v", err)
-		http.Error(w, `{"error":"SSH service unavailable"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "SSH service unavailable")
 		return
 	}
 	proxyReq.Header.Set("Authorization", "Bearer "+client.Token)
@@ -98,7 +98,7 @@ func (h *SSHHandler) proxySSHHTTP(w http.ResponseWriter, r *http.Request, servic
 	resp, err := h.Manager.Client().DoRequest(proxyReq)
 	if err != nil {
 		log.Printf("[ssh] vault proxy error: %v", err)
-		http.Error(w, `{"error":"SSH service unavailable"}`, http.StatusBadGateway)
+		respondError(w, http.StatusBadGateway, "SSH service unavailable")
 		return
 	}
 	defer resp.Body.Close()
@@ -122,20 +122,20 @@ func (h *SSHHandler) handleSSHSession(w http.ResponseWriter, r *http.Request, se
 	wsURL := client.SSHSessionURL(service)
 	if cols := r.URL.Query().Get("cols"); cols != "" {
 		if _, err := strconv.Atoi(cols); err != nil {
-			http.Error(w, `{"error":"cols must be an integer"}`, http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "cols must be an integer")
 			return
 		}
 		wsURL += "?cols=" + cols
 		if rows := r.URL.Query().Get("rows"); rows != "" {
 			if _, err := strconv.Atoi(rows); err != nil {
-				http.Error(w, `{"error":"rows must be an integer"}`, http.StatusBadRequest)
+				respondError(w, http.StatusBadRequest, "rows must be an integer")
 				return
 			}
 			wsURL += "&rows=" + rows
 		}
 	} else if rows := r.URL.Query().Get("rows"); rows != "" {
 		if _, err := strconv.Atoi(rows); err != nil {
-			http.Error(w, `{"error":"rows must be an integer"}`, http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "rows must be an integer")
 			return
 		}
 		wsURL += "?rows=" + rows

@@ -51,7 +51,7 @@ func (h *TasksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // independent of the chat pipeline. Multiple tasks can run concurrently.
 func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 	if h.Orchestrator == nil {
-		http.Error(w, "agent not available", http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "agent not available")
 		return
 	}
 
@@ -61,11 +61,11 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 		NeedValidation bool   `json:"need_validation"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if req.Message == "" {
-		http.Error(w, "empty message", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "empty message")
 		return
 	}
 
@@ -216,11 +216,11 @@ func (h *TasksHandler) list(w http.ResponseWriter, r *http.Request) {
 func (h *TasksHandler) cancel(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		http.Error(w, "missing id", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "missing id")
 		return
 	}
 	if h.Orchestrator == nil {
-		http.Error(w, "agent not available", http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "agent not available")
 		return
 	}
 
@@ -252,7 +252,7 @@ func (h *TaskApproveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Orchestrator == nil {
-		http.Error(w, "agent not available", http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "agent not available")
 		return
 	}
 	var req struct {
@@ -261,11 +261,11 @@ func (h *TaskApproveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Feedback string `json:"feedback"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if req.ID == "" {
-		http.Error(w, "missing id", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "missing id")
 		return
 	}
 	ok := h.Orchestrator.Approve(req.ID, agents.ApprovalDecision{

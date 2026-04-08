@@ -39,13 +39,13 @@ func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case http.MethodPut:
 		if name == "" {
-			http.Error(w, `{"error":"resource name required"}`, http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "resource name required")
 			return
 		}
 		h.put(w, r, name)
 	case http.MethodDelete:
 		if name == "" {
-			http.Error(w, `{"error":"resource name required"}`, http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "resource name required")
 			return
 		}
 		h.del(w, name)
@@ -57,7 +57,7 @@ func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *ResourceHandler) list(w http.ResponseWriter) {
 	items, err := h.Store.List()
 	if err != nil {
-		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if items == nil {
@@ -71,11 +71,11 @@ func (h *ResourceHandler) get(w http.ResponseWriter, name string) {
 	content, err := h.Store.Get(name)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, jsonErr(err.Error()), http.StatusNotFound)
+			respondError(w, http.StatusNotFound, err.Error())
 		} else if strings.Contains(err.Error(), "invalid resource name") {
-			http.Error(w, jsonErr(err.Error()), http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, err.Error())
 		} else {
-			http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
@@ -86,7 +86,7 @@ func (h *ResourceHandler) get(w http.ResponseWriter, name string) {
 func (h *ResourceHandler) put(w http.ResponseWriter, r *http.Request, name string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxResourceSize+1024))
 	if err != nil {
-		http.Error(w, jsonErr("failed to read body"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "failed to read body")
 		return
 	}
 
@@ -94,17 +94,17 @@ func (h *ResourceHandler) put(w http.ResponseWriter, r *http.Request, name strin
 		Content string `json:"content"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		http.Error(w, jsonErr("invalid JSON: "+err.Error()), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 
 	if err := h.Store.Put(name, []byte(payload.Content)); err != nil {
 		if strings.Contains(err.Error(), "invalid resource name") {
-			http.Error(w, jsonErr(err.Error()), http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, err.Error())
 		} else if strings.Contains(err.Error(), "too large") {
-			http.Error(w, jsonErr(err.Error()), http.StatusRequestEntityTooLarge)
+			respondError(w, http.StatusRequestEntityTooLarge, err.Error())
 		} else {
-			http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
@@ -120,11 +120,11 @@ func (h *ResourceHandler) put(w http.ResponseWriter, r *http.Request, name strin
 func (h *ResourceHandler) del(w http.ResponseWriter, name string) {
 	if err := h.Store.Delete(name); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, jsonErr(err.Error()), http.StatusNotFound)
+			respondError(w, http.StatusNotFound, err.Error())
 		} else if strings.Contains(err.Error(), "invalid resource name") {
-			http.Error(w, jsonErr(err.Error()), http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, err.Error())
 		} else {
-			http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}

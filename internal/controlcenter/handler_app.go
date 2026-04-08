@@ -84,7 +84,7 @@ func (h *AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// (or non-app callers) may use its API proxy.
 		callerApp := extractAppSlugFromReferer(r)
 		if callerApp != "" && callerApp != appName {
-			http.Error(w, `{"error":"cross-app API access denied"}`, http.StatusForbidden)
+			respondError(w, http.StatusForbidden, "cross-app API access denied")
 			return
 		}
 		h.proxyAPI(w, r, appName, "/"+subPath)
@@ -153,13 +153,13 @@ func (h *AppHandler) proxyAPI(w http.ResponseWriter, r *http.Request, slug, apiP
 	// Read port from data/port file.
 	portData, err := h.Store.ReadFile(slug, "data/port")
 	if err != nil {
-		http.Error(w, `{"error":"app has no running server"}`, http.StatusBadGateway)
+		respondError(w, http.StatusBadGateway, "app has no running server")
 		return
 	}
 
 	port, err := strconv.Atoi(strings.TrimSpace(string(portData)))
 	if err != nil || port < 1024 || port > 65535 {
-		http.Error(w, `{"error":"invalid app port"}`, http.StatusBadGateway)
+		respondError(w, http.StatusBadGateway, "invalid app port")
 		return
 	}
 
@@ -192,7 +192,7 @@ func (h *AppHandler) proxyAPI(w http.ResponseWriter, r *http.Request, slug, apiP
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, `{"error":"app server unreachable"}`, http.StatusBadGateway)
+			respondError(w, http.StatusBadGateway, "app server unreachable")
 		},
 	}
 
@@ -240,7 +240,7 @@ func (h *AppListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	apps, err := h.Store.List()
 	if err != nil {
-		http.Error(w, `{"error":"failed to list apps"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to list apps")
 		return
 	}
 

@@ -139,7 +139,7 @@ func (h *BackendsModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	trimmed := strings.TrimPrefix(r.URL.Path, "/api/backends/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) < 2 || parts[0] == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "expected /api/backends/{name}/models"})
+		respondError(w, http.StatusBadRequest, "expected /api/backends/{name}/models")
 		return
 	}
 	name := parts[0]
@@ -159,7 +159,7 @@ func (h *BackendsModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 
 	if parts[1] != "models" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "expected /api/backends/{name}/models"})
+		respondError(w, http.StatusBadRequest, "expected /api/backends/{name}/models")
 		return
 	}
 
@@ -185,20 +185,20 @@ func (h *BackendsModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	// Cache miss: fetch on demand.
 	if h.Registry == nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "registry unavailable"})
+		respondError(w, http.StatusInternalServerError, "registry unavailable")
 		return
 	}
 
 	ap := h.Registry.GetAPIBackend(name)
 	if ap == nil {
-		respondJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("backend %q not found", name)})
+		respondError(w, http.StatusNotFound, fmt.Sprintf("backend %q not found", name))
 		return
 	}
 
 	models, err := fetchModels(ap)
 	if err != nil {
 		log.Printf("backends: failed to fetch models for %q: %v", name, err)
-		respondJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch models: %v", err)})
+		respondError(w, http.StatusBadGateway, fmt.Sprintf("failed to fetch models: %v", err))
 		return
 	}
 

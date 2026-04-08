@@ -264,12 +264,12 @@ func (h *SetupHandler) handleBackendTest(w http.ResponseWriter, r *http.Request)
 		APIKey  string `json:"api_key"`  // optional for ollama
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, jsonErr("invalid JSON"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	req.BaseURL = strings.TrimSpace(strings.TrimSuffix(req.BaseURL, "/"))
 	if req.BaseURL == "" {
-		http.Error(w, jsonErr("base_url is required"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "base_url is required")
 		return
 	}
 	if err := validateBaseURL(req.BaseURL); err != nil {
@@ -315,12 +315,12 @@ func (h *SetupHandler) handleTelegramValidate(w http.ResponseWriter, r *http.Req
 		BotToken string `json:"bot_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, jsonErr("invalid JSON"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	req.BotToken = strings.TrimSpace(req.BotToken)
 	if req.BotToken == "" {
-		http.Error(w, jsonErr("bot_token is required"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "bot_token is required")
 		return
 	}
 
@@ -413,14 +413,14 @@ type setupTelegram struct {
 func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 	var req setupApplyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, jsonErr("invalid JSON"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
 	// Validate timezone if provided.
 	if req.Timezone != "" {
 		if _, err := time.LoadLocation(req.Timezone); err != nil {
-			http.Error(w, jsonErr(fmt.Sprintf("invalid timezone %q", req.Timezone)), http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid timezone %q", req.Timezone))
 			return
 		}
 	}
@@ -431,11 +431,11 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 
 	if req.VaultPassword != "" && h.Vault != nil && h.Vault.AdminToken() == "" {
 		if err := h.Vault.AutoUnlock(req.VaultPassword); err != nil {
-			http.Error(w, jsonErr("vault unlock failed: "+err.Error()), http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "vault unlock failed: "+err.Error())
 			return
 		}
 		if _, err := h.Vault.CreateProxyToken(); err != nil {
-			http.Error(w, jsonErr("vault proxy token failed: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "vault proxy token failed: "+err.Error())
 			return
 		}
 		// Persist password for auto-unlock on restart.
@@ -453,11 +453,11 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 
 	// If secrets need storing but vault is still locked, fail early.
 	if needsVault && h.Vault != nil && h.Vault.AdminToken() == "" {
-		http.Error(w, jsonErr("vault is locked — provide vault_password to unlock"), http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "vault is locked — provide vault_password to unlock")
 		return
 	}
 	if needsVault && h.Vault == nil {
-		http.Error(w, jsonErr("vault not available — cannot store API keys"), http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "vault not available — cannot store API keys")
 		return
 	}
 
@@ -475,7 +475,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 		}
 		vaultKey := name + "_api_key"
 		if err := h.Vault.SetSecret(vaultKey, b.APIKey); err != nil {
-			http.Error(w, jsonErr(fmt.Sprintf("failed to store %s API key: %v", name, err)), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to store %s API key: %v", name, err))
 			return
 		}
 	}
@@ -484,11 +484,11 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 	restartRequired := false
 	if req.Telegram != nil && req.Telegram.BotToken != "" && req.Telegram.ChatID != "" {
 		if err := h.Vault.SetSecret(vaultKeyTGBotToken, req.Telegram.BotToken); err != nil {
-			http.Error(w, jsonErr("failed to store Telegram bot token: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to store Telegram bot token: "+err.Error())
 			return
 		}
 		if err := h.Vault.SetSecret(vaultKeyTGChatID, req.Telegram.ChatID); err != nil {
-			http.Error(w, jsonErr("failed to store Telegram chat ID: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to store Telegram chat ID: "+err.Error())
 			return
 		}
 		restartRequired = true // Telegram bot polling doesn't hot-reload
@@ -499,7 +499,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 	if len(req.Backends) > 0 || req.Timezone != "" {
 		cfg, err := h.ConfigStore.Load()
 		if err != nil {
-			http.Error(w, jsonErr("failed to load config: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to load config: "+err.Error())
 			return
 		}
 		if cfg.Backends == nil {
@@ -524,7 +524,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 			cfg.Timezone = req.Timezone
 		}
 		if err := h.ConfigStore.Save(cfg); err != nil {
-			http.Error(w, jsonErr("failed to save config: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to save config: "+err.Error())
 			return
 		}
 		configChanged = true
@@ -536,7 +536,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 		tiersDir := filepath.Join(h.ConfigDir, "tiers")
 		profilePath := filepath.Join(tiersDir, req.TierConfig)
 		if _, err := os.Stat(profilePath); err != nil {
-			http.Error(w, jsonErr("tier config not found: "+req.TierConfig), http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "tier config not found: "+req.TierConfig)
 			return
 		}
 		if tierCfg, err := h.ConfigStore.Load(); err == nil {
@@ -546,7 +546,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err := h.TierStore.SetPath(profilePath); err != nil {
-			http.Error(w, jsonErr("failed to switch tiers: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to switch tiers: "+err.Error())
 			return
 		}
 		tiersChanged = true
@@ -557,7 +557,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 	if !tiersChanged && req.PresetID != "" {
 		preset, err := h.findPreset(req.PresetID)
 		if err != nil {
-			http.Error(w, jsonErr(err.Error()), http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		tc := PresetToTiersConfig(*preset)
@@ -569,7 +569,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 		profilePath := filepath.Join(tiersDir, profileName)
 		data, _ := json.MarshalIndent(tc, "", "  ")
 		if err := os.WriteFile(profilePath, data, 0o644); err != nil {
-			http.Error(w, jsonErr("failed to save tier profile: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to save tier profile: "+err.Error())
 			return
 		}
 
@@ -583,7 +583,7 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 
 		// Switch the tier store to the new profile.
 		if err := h.TierStore.SetPath(profilePath); err != nil {
-			http.Error(w, jsonErr("failed to switch tiers: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to switch tiers: "+err.Error())
 			return
 		}
 		tiersChanged = true
@@ -680,12 +680,12 @@ func (h *SetupHandler) handleTelegramChatID(w http.ResponseWriter, r *http.Reque
 		BotToken string `json:"bot_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, jsonErr("invalid JSON"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	req.BotToken = strings.TrimSpace(req.BotToken)
 	if req.BotToken == "" {
-		http.Error(w, jsonErr("bot_token is required"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "bot_token is required")
 		return
 	}
 

@@ -35,7 +35,7 @@ func (h *VaultHandler) emitVault() {
 
 func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Manager == nil {
-		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "vault not available"})
+		respondError(w, http.StatusServiceUnavailable, "vault not available")
 		return
 	}
 
@@ -47,7 +47,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	needsAuth := path != "" && path != "status" && path != "unlock" && path != "reset" && path != "oauth2/callback"
 	if needsAuth {
 		if err := h.Manager.EnsureAuth(); err != nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "vault auth failed: " + err.Error()})
+			respondError(w, http.StatusServiceUnavailable, "vault auth failed: " + err.Error())
 			return
 		}
 	}
@@ -72,7 +72,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "secrets/") && r.Method == http.MethodDelete:
 		name := strings.TrimPrefix(path, "secrets/")
 		if !isVaultSafeName(name) {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			respondError(w, http.StatusBadRequest, "invalid name")
 			return
 		}
 		h.handleDeleteSecret(w, r, name)
@@ -84,21 +84,21 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(path, "services/")
 		name = strings.TrimSuffix(name, "/test")
 		if !isVaultSafeName(name) {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			respondError(w, http.StatusBadRequest, "invalid name")
 			return
 		}
 		h.handleTestService(w, r, name)
 	case strings.HasPrefix(path, "services/") && r.Method == http.MethodPut:
 		name := strings.TrimPrefix(path, "services/")
 		if !isVaultSafeName(name) {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			respondError(w, http.StatusBadRequest, "invalid name")
 			return
 		}
 		h.handleUpdateService(w, r, name)
 	case strings.HasPrefix(path, "services/") && r.Method == http.MethodDelete:
 		name := strings.TrimPrefix(path, "services/")
 		if !isVaultSafeName(name) {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			respondError(w, http.StatusBadRequest, "invalid name")
 			return
 		}
 		h.handleDeleteService(w, r, name)
@@ -109,7 +109,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "tokens/") && r.Method == http.MethodDelete:
 		id := strings.TrimPrefix(path, "tokens/")
 		if !isVaultSafeName(id) {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+			respondError(w, http.StatusBadRequest, "invalid id")
 			return
 		}
 		h.handleRevokeToken(w, r, id)
@@ -126,19 +126,19 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "files/") && r.Method == http.MethodGet:
 		name := strings.TrimPrefix(path, "files/")
 		if !isVaultSafeName(name) {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			respondError(w, http.StatusBadRequest, "invalid name")
 			return
 		}
 		h.handleGetFile(w, r, name)
 	case strings.HasPrefix(path, "files/") && r.Method == http.MethodDelete:
 		name := strings.TrimPrefix(path, "files/")
 		if !isVaultSafeName(name) {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			respondError(w, http.StatusBadRequest, "invalid name")
 			return
 		}
 		h.handleDeleteFile(w, r, name)
 	default:
-		respondJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		respondError(w, http.StatusNotFound, "not found")
 	}
 }
 
@@ -179,16 +179,16 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySmall)).Decode(&req); err != nil || req.Password == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "password required"})
+		respondError(w, http.StatusBadRequest, "password required")
 		return
 	}
 	if err := h.Manager.AutoUnlock(req.Password); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Create proxy token for Claude subprocess.
 	if _, err := h.Manager.CreateProxyToken(); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "proxy token: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "proxy token: " + err.Error())
 		return
 	}
 	// Persist master password so auto-unlock works after container restart.
@@ -215,7 +215,7 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 func (h *VaultHandler) handleLock(w http.ResponseWriter, r *http.Request) {
 	c := h.Manager.Client()
 	if err := c.Lock(); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.Manager.ClearTokens()
@@ -232,7 +232,7 @@ func (h *VaultHandler) handleListServices(w http.ResponseWriter, r *http.Request
 	c := h.Manager.Client()
 	services, err := c.ListServices()
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, services)
@@ -241,13 +241,13 @@ func (h *VaultHandler) handleListServices(w http.ResponseWriter, r *http.Request
 func (h *VaultHandler) handleUpdateService(w http.ResponseWriter, r *http.Request, name string) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyLarge))
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "read body: " + err.Error()})
+		respondError(w, http.StatusBadRequest, "read body: " + err.Error())
 		return
 	}
 	body = h.resolveSecretRefs(body)
 	c := h.Manager.Client()
 	if err := c.UpdateService(name, strings.NewReader(string(body))); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -256,14 +256,14 @@ func (h *VaultHandler) handleUpdateService(w http.ResponseWriter, r *http.Reques
 func (h *VaultHandler) handleAddService(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyLarge))
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "read body: " + err.Error()})
+		respondError(w, http.StatusBadRequest, "read body: " + err.Error())
 		return
 	}
 	// Resolve secret refs: if auth contains *_ref fields, look up the secret value.
 	body = h.resolveSecretRefs(body)
 	c := h.Manager.Client()
 	if err := c.AddService(strings.NewReader(string(body))); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -313,7 +313,7 @@ func (h *VaultHandler) resolveSecretRefs(body []byte) []byte {
 func (h *VaultHandler) handleDeleteService(w http.ResponseWriter, _ *http.Request, name string) {
 	c := h.Manager.Client()
 	if err := c.RemoveService(name); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -332,7 +332,7 @@ func (h *VaultHandler) handleListTokens(w http.ResponseWriter, r *http.Request) 
 	c := h.Manager.Client()
 	tokens, err := c.ListTokens()
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, tokens)
@@ -348,7 +348,7 @@ func (h *VaultHandler) handleCreateToken(w http.ResponseWriter, r *http.Request)
 	c := h.Manager.Client()
 	token, err := c.CreateToken(req.Scope)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"id": token})
@@ -357,7 +357,7 @@ func (h *VaultHandler) handleCreateToken(w http.ResponseWriter, r *http.Request)
 func (h *VaultHandler) handleRevokeToken(w http.ResponseWriter, _ *http.Request, id string) {
 	c := h.Manager.Client()
 	if err := c.RevokeToken(id); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -368,7 +368,7 @@ func (h *VaultHandler) handleReset(w http.ResponseWriter, r *http.Request) {
 	c := h.Manager.Client()
 	_ = c.Lock()
 	if err := h.Manager.Reset(); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// Note: VAULT_TOKEN is no longer in env (Unix socket proxy handles auth).
@@ -388,7 +388,7 @@ func (h *VaultHandler) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	c := h.Manager.Client()
 	files, err := c.ListFiles()
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, files)
@@ -397,17 +397,17 @@ func (h *VaultHandler) handleListFiles(w http.ResponseWriter, r *http.Request) {
 func (h *VaultHandler) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	// Parse multipart from browser, save to temp, proxy via client.
 	if err := r.ParseMultipartForm(5 << 20); err != nil { // 5MB
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart: " + err.Error()})
+		respondError(w, http.StatusBadRequest, "invalid multipart: " + err.Error())
 		return
 	}
 	name := r.FormValue("name")
 	if name == "" || !isVaultSafeName(name) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		respondError(w, http.StatusBadRequest, "name required")
 		return
 	}
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "file required"})
+		respondError(w, http.StatusBadRequest, "file required")
 		return
 	}
 	defer file.Close()
@@ -415,21 +415,21 @@ func (h *VaultHandler) handleUploadFile(w http.ResponseWriter, r *http.Request) 
 	// Write to temp file for the client.
 	tmp, err := os.CreateTemp("", "vault-upload-*")
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "temp file: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "temp file: " + err.Error())
 		return
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 	if _, err := io.Copy(tmp, file); err != nil {
 		tmp.Close()
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write temp: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "write temp: " + err.Error())
 		return
 	}
 	tmp.Close()
 
 	c := h.Manager.Client()
 	if err := c.UploadFile(name, tmpPath); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]bool{"ok": true})
@@ -439,7 +439,7 @@ func (h *VaultHandler) handleGetFile(w http.ResponseWriter, _ *http.Request, nam
 	c := h.Manager.Client()
 	data, err := c.GetFile(name)
 	if err != nil {
-		respondJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, filepath.Base(name)))
@@ -450,7 +450,7 @@ func (h *VaultHandler) handleGetFile(w http.ResponseWriter, _ *http.Request, nam
 func (h *VaultHandler) handleDeleteFile(w http.ResponseWriter, _ *http.Request, name string) {
 	c := h.Manager.Client()
 	if err := c.DeleteFile(name); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -462,7 +462,7 @@ func (h *VaultHandler) handleOAuth2Callback(w http.ResponseWriter, r *http.Reque
 	vc := vaultclient.NewWithSocket(h.Manager.SocketPath(), "")
 	resp, err := vc.Do("GET", "/auth/oauth2/callback?"+r.URL.RawQuery, nil)
 	if err != nil {
-		http.Error(w, "vault unreachable", http.StatusBadGateway)
+		respondError(w, http.StatusBadGateway, "vault unreachable")
 		return
 	}
 	defer resp.Body.Close()
@@ -479,13 +479,13 @@ func (h *VaultHandler) handleOAuth2Authorize(w http.ResponseWriter, r *http.Requ
 	// Proxy POST /auth/oauth2/authorize to vault-server.
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySmall))
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		respondError(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	vc := vaultclient.NewWithSocket(h.Manager.SocketPath(), h.Manager.AdminToken())
 	vaultResp, err := vc.Do("POST", "/auth/oauth2/authorize", strings.NewReader(string(body)))
 	if err != nil {
-		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "vault unreachable: " + err.Error()})
+		respondError(w, http.StatusBadGateway, "vault unreachable: " + err.Error())
 		return
 	}
 	defer vaultResp.Body.Close()
@@ -503,7 +503,7 @@ func (h *VaultHandler) handleExport(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySmall)).Decode(&req); err != nil || req.Password == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "password required"})
+		respondError(w, http.StatusBadRequest, "password required")
 		return
 	}
 	c := h.Manager.Client()
@@ -511,7 +511,7 @@ func (h *VaultHandler) handleExport(w http.ResponseWriter, r *http.Request) {
 	// Export secrets (files)
 	files, err := c.ListFiles()
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	type exportEntry struct {
@@ -542,12 +542,12 @@ func (h *VaultHandler) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	jsonData, err := json.Marshal(exportData)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "marshal: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "marshal: " + err.Error())
 		return
 	}
 	encrypted, err := EncryptVaultExport(jsonData, req.Password)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "encrypt: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "encrypt: " + err.Error())
 		return
 	}
 	w.Header().Set("Content-Disposition", "attachment; filename=vault-export.enc")
@@ -565,7 +565,7 @@ func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 		} `json:"secrets"` // plain JSON import (backward compat)
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyImport)).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request: " + err.Error()})
+		respondError(w, http.StatusBadRequest, "invalid request: " + err.Error())
 		return
 	}
 
@@ -595,12 +595,12 @@ func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 		// Encrypted import
 		raw, err := base64.StdEncoding.DecodeString(req.Data)
 		if err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid base64"})
+			respondError(w, http.StatusBadRequest, "invalid base64")
 			return
 		}
 		decrypted, err := DecryptVaultExport(raw, req.Password)
 		if err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "decrypt failed: " + err.Error()})
+			respondError(w, http.StatusBadRequest, "decrypt failed: " + err.Error())
 			return
 		}
 		var parsed struct {
@@ -608,7 +608,7 @@ func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 			Services []serviceEntry `json:"services"`
 		}
 		if err := json.Unmarshal(decrypted, &parsed); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid decrypted data"})
+			respondError(w, http.StatusBadRequest, "invalid decrypted data")
 			return
 		}
 		secrets = parsed.Secrets
@@ -621,7 +621,7 @@ func (h *VaultHandler) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(secrets) == 0 && len(services) == 0 {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "no secrets or services to import"})
+		respondError(w, http.StatusBadRequest, "no secrets or services to import")
 		return
 	}
 
@@ -717,7 +717,7 @@ func (h *VaultHandler) handleListSecrets(w http.ResponseWriter, r *http.Request)
 	c := h.Manager.Client()
 	files, err := c.ListFiles()
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// Return secret names (values are never exposed).
@@ -738,19 +738,19 @@ func (h *VaultHandler) handleSetSecret(w http.ResponseWriter, r *http.Request) {
 		Value string `json:"value"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyMedium)).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		respondError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 	if req.Name == "" || !isVaultSafeName(req.Name) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+		respondError(w, http.StatusBadRequest, "invalid name")
 		return
 	}
 	if req.Value == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "value required"})
+		respondError(w, http.StatusBadRequest, "value required")
 		return
 	}
 	if err := h.Manager.SetSecret(req.Name, req.Value); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	log.Printf("[vault] secret %q set via API", req.Name)
@@ -760,7 +760,7 @@ func (h *VaultHandler) handleSetSecret(w http.ResponseWriter, r *http.Request) {
 func (h *VaultHandler) handleDeleteSecret(w http.ResponseWriter, _ *http.Request, name string) {
 	c := h.Manager.Client()
 	if err := c.DeleteFile(name); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	log.Printf("[vault] secret %q deleted via API", name)
@@ -801,13 +801,13 @@ func (h *VaultHandler) handleMobileTokenCreate(w http.ResponseWriter) {
 	// Generate a cryptographically random 64-char hex token.
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
+		respondError(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
 	token := hex.EncodeToString(b)
 
 	if err := h.Manager.SetSecret(mobileTokenSecret, token); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store token: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "failed to store token: " + err.Error())
 		return
 	}
 	log.Printf("[vault] mobile API token generated")
@@ -818,7 +818,7 @@ func (h *VaultHandler) handleMobileTokenCreate(w http.ResponseWriter) {
 func (h *VaultHandler) handleMobileTokenRevoke(w http.ResponseWriter) {
 	c := h.Manager.Client()
 	if err := c.DeleteFile(mobileTokenSecret); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	log.Printf("[vault] mobile API token revoked")

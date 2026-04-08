@@ -35,19 +35,19 @@ func (h *AppStorageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := parts[0]
 	if !validName.MatchString(slug) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid app name"})
+		respondError(w, http.StatusBadRequest, "invalid app name")
 		return
 	}
 
 	if h.Perms != nil && !h.Perms.HasPermission(slug, "storage") {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: storage"})
+		respondError(w, http.StatusForbidden, "permission denied: storage")
 		return
 	}
 
 	// Cross-app access check: if request comes from an app iframe,
 	// it may only access its own storage (not another app's).
 	if callerSlug := extractAppSlugFromReferer(r); callerSlug != "" && callerSlug != slug {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "cross-app storage access denied"})
+		respondError(w, http.StatusForbidden, "cross-app storage access denied")
 		return
 	}
 
@@ -97,7 +97,7 @@ func (h *AppStorageHandler) handleGet(w http.ResponseWriter, r *http.Request, sl
 	store, err := h.load(slug)
 	h.mu.RUnlock()
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "read failed"})
+		respondError(w, http.StatusInternalServerError, "read failed")
 		return
 	}
 
@@ -134,13 +134,13 @@ func (h *AppStorageHandler) handleGet(w http.ResponseWriter, r *http.Request, sl
 func (h *AppStorageHandler) handlePut(w http.ResponseWriter, r *http.Request, slug string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "read body failed"})
+		respondError(w, http.StatusBadRequest, "read body failed")
 		return
 	}
 
 	var incoming map[string]any
 	if err := json.Unmarshal(body, &incoming); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
@@ -149,7 +149,7 @@ func (h *AppStorageHandler) handlePut(w http.ResponseWriter, r *http.Request, sl
 
 	store, err := h.load(slug)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "read failed"})
+		respondError(w, http.StatusInternalServerError, "read failed")
 		return
 	}
 
@@ -162,7 +162,7 @@ func (h *AppStorageHandler) handlePut(w http.ResponseWriter, r *http.Request, sl
 	}
 
 	if err := h.save(slug, store); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
+		respondError(w, http.StatusInternalServerError, "write failed")
 		return
 	}
 
@@ -172,7 +172,7 @@ func (h *AppStorageHandler) handlePut(w http.ResponseWriter, r *http.Request, sl
 func (h *AppStorageHandler) handleDelete(w http.ResponseWriter, r *http.Request, slug string) {
 	key := r.URL.Query().Get("key")
 	if key == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "key parameter required"})
+		respondError(w, http.StatusBadRequest, "key parameter required")
 		return
 	}
 
@@ -181,14 +181,14 @@ func (h *AppStorageHandler) handleDelete(w http.ResponseWriter, r *http.Request,
 
 	store, err := h.load(slug)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "read failed"})
+		respondError(w, http.StatusInternalServerError, "read failed")
 		return
 	}
 
 	delete(store, key)
 
 	if err := h.save(slug, store); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
+		respondError(w, http.StatusInternalServerError, "write failed")
 		return
 	}
 

@@ -43,57 +43,57 @@ func (h *AppActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySmall)
 	var req appActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
 	// Validate target slug.
 	if !validName.MatchString(req.Target) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid target app"})
+		respondError(w, http.StatusBadRequest, "invalid target app")
 		return
 	}
 
 	// SEC: Validate action name to prevent path traversal.
 	if !validName.MatchString(req.Action) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid action name"})
+		respondError(w, http.StatusBadRequest, "invalid action name")
 		return
 	}
 
 	// Identify caller from Referer (set by browser for iframe requests).
 	caller := extractAppSlugFromReferer(r)
 	if caller == "" {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "caller app not identified"})
+		respondError(w, http.StatusForbidden, "caller app not identified")
 		return
 	}
 
 	// Read and validate target manifest.
 	manifestData, err := h.Store.ReadFile(req.Target, "manifest.json")
 	if err != nil {
-		respondJSON(w, http.StatusNotFound, map[string]string{"error": "target app not found"})
+		respondError(w, http.StatusNotFound, "target app not found")
 		return
 	}
 
 	var manifest manifestWithActions
 	if err := json.Unmarshal(manifestData, &manifest); err != nil {
-		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid target manifest"})
+		respondError(w, http.StatusBadGateway, "invalid target manifest")
 		return
 	}
 
 	if _, ok := manifest.Actions[req.Action]; !ok {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "action not declared in target manifest"})
+		respondError(w, http.StatusForbidden, "action not declared in target manifest")
 		return
 	}
 
 	// Resolve target port.
 	portData, err := h.Store.ReadFile(req.Target, "data/port")
 	if err != nil {
-		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "target app has no running server"})
+		respondError(w, http.StatusBadGateway, "target app has no running server")
 		return
 	}
 
 	port, err := strconv.Atoi(strings.TrimSpace(string(portData)))
 	if err != nil || port < 1024 || port > 65535 {
-		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid target app port"})
+		respondError(w, http.StatusBadGateway, "invalid target app port")
 		return
 	}
 
@@ -133,7 +133,7 @@ func (h *AppActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			proxyReq.Header.Del("X-Real-Ip")
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			respondJSON(w, http.StatusBadGateway, map[string]string{"error": "target app server unreachable"})
+			respondError(w, http.StatusBadGateway, "target app server unreachable")
 		},
 	}
 

@@ -86,15 +86,15 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		var cfg TiersConfig
 		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+			respondError(w, http.StatusBadRequest, "invalid JSON: " + err.Error())
 			return
 		}
 		if err := validateTiersConfig(&cfg); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err := h.TierStore.Save(&cfg); err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "save failed: " + err.Error()})
+			respondError(w, http.StatusInternalServerError, "save failed: " + err.Error())
 			return
 		}
 		if h.Notifier != nil {
@@ -222,7 +222,7 @@ func (h *TierConfigsHandler) handleList(w http.ResponseWriter, _ *http.Request) 
 			respondJSON(w, http.StatusOK, []tierConfigEntry{})
 			return
 		}
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -260,37 +260,37 @@ func (h *TierConfigsHandler) handleSwitch(w http.ResponseWriter, r *http.Request
 		Name string `json:"name"` // filename, e.g. "grok.json"
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		respondError(w, http.StatusBadRequest, "name required")
 		return
 	}
 
 	// Validate: no path traversal, must be a simple filename.
 	if strings.Contains(req.Name, "/") || strings.Contains(req.Name, "..") || !strings.HasSuffix(req.Name, ".json") {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+		respondError(w, http.StatusBadRequest, "invalid name")
 		return
 	}
 
 	fullPath := filepath.Join(h.ConfigDir, "tiers", req.Name)
 	if _, err := os.Stat(fullPath); err != nil {
-		respondJSON(w, http.StatusNotFound, map[string]string{"error": "config not found"})
+		respondError(w, http.StatusNotFound, "config not found")
 		return
 	}
 
 	// Update tiers_file in config.json (just the filename, resolved via tiers/ subdir).
 	cfg, err := h.ConfigStore.Load()
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "load config: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "load config: " + err.Error())
 		return
 	}
 	cfg.TiersFile = req.Name
 	if err := h.ConfigStore.Save(cfg); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "save config: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "save config: " + err.Error())
 		return
 	}
 
 	// Switch the tier store to the new path.
 	if err := h.TierStore.SetPath(fullPath); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload tiers: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "reload tiers: " + err.Error())
 		return
 	}
 
@@ -313,12 +313,12 @@ func (h *TierConfigsHandler) handleDuplicate(w http.ResponseWriter, r *http.Requ
 		Name   string `json:"name"`   // e.g. "claude-copy.json"
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Source == "" || req.Name == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "source and name required"})
+		respondError(w, http.StatusBadRequest, "source and name required")
 		return
 	}
 	for _, n := range []string{req.Source, req.Name} {
 		if strings.Contains(n, "/") || strings.Contains(n, "..") || !strings.HasSuffix(n, ".json") {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+			respondError(w, http.StatusBadRequest, "invalid name")
 			return
 		}
 	}
@@ -328,21 +328,21 @@ func (h *TierConfigsHandler) handleDuplicate(w http.ResponseWriter, r *http.Requ
 	dstPath := filepath.Join(tiersDir, req.Name)
 
 	if _, err := os.Stat(srcPath); err != nil {
-		respondJSON(w, http.StatusNotFound, map[string]string{"error": "source not found"})
+		respondError(w, http.StatusNotFound, "source not found")
 		return
 	}
 	if _, err := os.Stat(dstPath); err == nil {
-		respondJSON(w, http.StatusConflict, map[string]string{"error": "name already exists"})
+		respondError(w, http.StatusConflict, "name already exists")
 		return
 	}
 
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "read source: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "read source: " + err.Error())
 		return
 	}
 	if err := os.WriteFile(dstPath, data, 0o644); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write copy: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "write copy: " + err.Error())
 		return
 	}
 

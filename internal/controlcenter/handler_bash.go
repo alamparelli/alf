@@ -63,11 +63,11 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var req bashRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySmall)).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 	if req.Command == "" {
-		http.Error(w, "command required", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "command required")
 		return
 	}
 
@@ -90,12 +90,12 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if appSlug == "" {
 			appSlug = tokenSlug
 		} else if tokenSlug != appSlug {
-			respondJSON(w, http.StatusForbidden, map[string]string{"error": "token/app slug mismatch"})
+			respondError(w, http.StatusForbidden, "token/app slug mismatch")
 			return
 		}
 	}
 	if appSlug != "" && !isSystemApp && h.Perms != nil && !h.Perms.HasPermission(appSlug, "bash") {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: bash — add to manifest.json permissions"})
+		respondError(w, http.StatusForbidden, "permission denied: bash — add to manifest.json permissions")
 		return
 	}
 

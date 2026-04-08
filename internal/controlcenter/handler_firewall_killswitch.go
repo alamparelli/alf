@@ -17,7 +17,7 @@ type FirewallKillSwitchHandler struct {
 
 func (h *FirewallKillSwitchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.NetTracker == nil {
-		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "nettrack not available"})
+		respondError(w, http.StatusServiceUnavailable, "nettrack not available")
 		return
 	}
 
@@ -30,7 +30,7 @@ func (h *FirewallKillSwitchHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 			Enabled bool `json:"enabled"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			respondError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		h.NetTracker.SetKillSwitch(req.Enabled)

@@ -46,7 +46,7 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && path == "catalog" {
 		remote, err := h.Manager.FetchCatalog()
 		if err != nil {
-			respondJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			respondError(w, http.StatusBadGateway, err.Error())
 			return
 		}
 		respondJSON(w, http.StatusOK, remote)
@@ -61,7 +61,7 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// POST /api/marketplace/{slug}/{action}
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "expected /api/marketplace/{slug}/{action}"})
+		respondError(w, http.StatusBadRequest, "expected /api/marketplace/{slug}/{action}")
 		return
 	}
 
@@ -70,7 +70,7 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Validate slug to prevent path traversal.
 	if !validName.MatchString(slug) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid slug"})
+		respondError(w, http.StatusBadRequest, "invalid slug")
 		return
 	}
 
@@ -83,16 +83,16 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "uninstall":
 		err = h.Manager.Uninstall(slug)
 	default:
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action: " + action})
+		respondError(w, http.StatusBadRequest, "unknown action: " + action)
 		return
 	}
 
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no such file") {
-			respondJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			respondError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

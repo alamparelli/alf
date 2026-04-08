@@ -41,7 +41,7 @@ func (b *ScheduleEventBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 

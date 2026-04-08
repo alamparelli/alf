@@ -26,10 +26,15 @@ func methodNotAllowed(w http.ResponseWriter) {
 	respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 }
 
+// respondError writes a JSON error response with the given status code.
+// This is the standard way to return errors from API handlers.
+func respondError(w http.ResponseWriter, status int, msg string) {
+	respondJSON(w, status, map[string]string{"error": msg})
+}
+
 // jsonErr returns a JSON-encoded error string for use with http.Error.
+// Deprecated: use respondError instead.
 func jsonErr(msg string) string {
-	// Use manual JSON construction to avoid silent marshal failures.
-	// The message is escaped for safe JSON embedding.
 	b, err := json.Marshal(msg)
 	if err != nil {
 		return `{"error":"internal error"}`

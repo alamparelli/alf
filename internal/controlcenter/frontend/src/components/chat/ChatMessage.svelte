@@ -284,7 +284,7 @@
     </div>
   {:else if msg.role === 'user'}
     <div class="chat-avatar chat-avatar-user">
-      <User size={14} />
+      <User size={18} />
     </div>
   {/if}
   <div class="chat-msg chat-msg-{msg.role}">
@@ -467,9 +467,9 @@
   }
 
   .chat-avatar {
-    width: 28px;
-    height: 28px;
-    min-width: 28px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -489,8 +489,8 @@
   }
 
   .avatar-img {
-    width: 20px;
-    height: 20px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     object-fit: cover;
   }

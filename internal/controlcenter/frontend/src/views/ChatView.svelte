@@ -82,7 +82,7 @@
   let streamingBlocks = $state<any[]>([])
   let streamingText = $state('')
   let stoppedByUser = false
-  let pollTimer: ReturnType<typeof setTimeout> | null = null
+  let pollTimer: ReturnType<typeof setInterval> | null = null
   let activeJobId = $state<string | null>(null)
   let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string }[]>([])
   let abortController: AbortController | null = null
@@ -680,10 +680,36 @@
       await loadHistory()
     }
     await checkActiveJob()
+
+    // Poll every 2s: sync active conv + fetch new messages from other devices.
+    pollTimer = setInterval(() => {
+      if (!convId) return
+      // 1. Sync active conversation from server.
+      api<any>('/api/chat/active').then(data => {
+        const serverConv = data?.active_conv_id
+        if (serverConv && serverConv !== convId) {
+          convId = serverConv
+          localStorage.setItem('alf-chat-convid', convId)
+          loadHistory().then(() => scrollToBottom())
+          return // skip message poll — loadHistory covers it
+        }
+      }).catch(() => {})
+      // 2. Fetch latest messages and merge new ones.
+      if (sending) return // don't interfere with active stream
+      api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${convId}`).then(recent => {
+        if (!recent?.length) return
+        const existingIds = new Set(messages.map(m => m.id))
+        const newMsgs = recent.filter(m => !existingIds.has(m.id))
+        if (newMsgs.length > 0) {
+          messages = sortMessages([...messages, ...newMsgs])
+          scrollToBottom()
+        }
+      }).catch(() => {})
+    }, 2000)
   })
 
   onDestroy(() => {
-    if (pollTimer) clearTimeout(pollTimer)
+    if (pollTimer) clearInterval(pollTimer)
     unsubTiers?.()
     unsubNewMsg?.()
     unsubActiveConv?.()

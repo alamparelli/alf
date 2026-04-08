@@ -515,6 +515,9 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	// Cache breakpoint: everything before this is stable and cacheable.
 	cacheBreakpoint := len(sysPrompts)
 
+	// Current time (dynamic — changes every minute; must be after breakpoint).
+	sysPrompts = append(sysPrompts, "Current time: "+time.Now().Format("15:04"))
+
 	// Memory recall (dynamic — changes per request).
 	if recall.Block != "" {
 		sysPrompts = append(sysPrompts, recall.Block)

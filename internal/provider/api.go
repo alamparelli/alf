@@ -438,6 +438,12 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
+	// Debug: log first 500 bytes of serialized JSON to verify cache_control presence.
+	preview := string(data)
+	if len(preview) > 500 {
+		preview = preview[:500]
+	}
+	log.Printf("[api] request preview: %s", preview)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(data))
 	if err != nil {

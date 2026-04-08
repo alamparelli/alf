@@ -330,7 +330,7 @@
   }
 
   :global(.btn:hover) {
-    background: var(--border);
+    background: color-mix(in srgb, var(--text) 12%, var(--bg-input));
   }
 
   :global(.btn-primary) {
@@ -385,8 +385,17 @@
 
   :global(.btn-group) {
     display: flex;
-    gap: var(--space-sm, 8px);
+    gap: 2px;
     flex-wrap: wrap;
+  }
+
+  :global(.btn-group .btn.active) {
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+  }
+
+  :global(.btn-group .btn:not(.active):hover) {
+    background: color-mix(in srgb, var(--text) 10%, var(--bg-input));
   }
 
   /* Common input styles */

@@ -26,20 +26,28 @@
   .toast {
     padding: 10px 20px;
     border-radius: var(--radius, 8px);
-    font-size: var(--font-sm, 13px);
+    font-size: var(--font-sm, 14px);
     font-weight: 500;
-    color: #fff;
+    color: var(--on-accent, #fff);
     background: var(--accent);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
     animation: toast-in 0.2s ease;
+  }
+
+  .toast.success {
+    background: var(--accent);
+    color: var(--on-accent, #fff);
   }
 
   .toast.error {
     background: var(--red, #e53e3e);
+    color: #fff;
   }
 
   .toast.info {
-    background: var(--text-dim);
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
   }
 
   @keyframes toast-in {

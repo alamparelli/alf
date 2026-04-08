@@ -78,6 +78,8 @@
   }
   let streamingBlocks = $state<any[]>([])
   let streamingText = $state('')
+  let streamingConvId = $state('') // which conv owns the current stream
+  let showStreaming = $derived(streamingConvId === (convId ?? ''))
   let stoppedByUser = false
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let activeJobId = $state<string | null>(null)
@@ -261,6 +263,7 @@
       if (data.active && data.job_id) {
         activeJobId = data.job_id
         setSending(convId ?? '', true)
+        streamingConvId = convId ?? ''
         reconnectToStream(data.job_id, 0)
       }
     } catch { /* no active job */ }
@@ -299,6 +302,7 @@
   async function doSend(message: string, mediaFiles: MediaFile[], model: string) {
     const sendConvId = convId ?? ''
     setSending(sendConvId, true)
+    streamingConvId = sendConvId
     stoppedByUser = false
     streamingBlocks = []
     streamingText = ''
@@ -464,10 +468,12 @@
       if (stoppedByUser) return
 
       const finalText = streamingText
+      const doneConvId = streamingConvId
       clearSending()
       activeJobId = null
       streamingBlocks = []
       streamingText = ''
+      streamingConvId = ''
       // Small delay to ensure server has committed the message before we fetch.
       await new Promise(r => setTimeout(r, 100))
       await loadHistory()
@@ -637,6 +643,7 @@
     activeJobId = null
     streamingBlocks = []
     streamingText = ''
+    streamingConvId = ''
     // Cancel backend job (persists "cancelled" system message), then reload history
     api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`)
       .catch(() => {})
@@ -669,7 +676,10 @@
       prevConvId = id
       convStore.clearUnread(id)
       setMessages([]) // clear immediately to avoid stale flash
-      loadHistory().then(() => scrollToBottom())
+      loadHistory().then(() => {
+        scrollToBottom()
+        checkActiveJob() // check if this tab has a running job
+      })
     }
   })
 
@@ -861,7 +871,7 @@
     {/each}
 
     <!-- Streaming response — each block rendered as its own bubble (#127) -->
-    {#if sending && streamingBlocks.length > 0}
+    {#if showStreaming && streamingBlocks.length > 0}
       {#each streamingBlocks as block, i (i)}
         <ChatMessageComponent
           msg={{
@@ -875,7 +885,7 @@
           {collapseBlocks} {hideThinking} {hideTools}
         />
       {/each}
-    {:else if sending}
+    {:else if showStreaming}
       <div class="chat-msg chat-msg-assistant typing-indicator">
         <span class="dot"></span>
         <span class="dot"></span>

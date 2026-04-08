@@ -6,6 +6,10 @@
   let editTitle = $state('')
   let longPressTimer: ReturnType<typeof setTimeout> | null = null
 
+  function autoFocus(node: HTMLInputElement) {
+    requestAnimationFrame(() => { node.focus(); node.select() })
+  }
+
   function handleTabClick(conv: Conversation) {
     if (editingId) return
     convStore.switchTo(conv.id)
@@ -70,13 +74,12 @@
         ontouchcancel={handleTouchEnd}
       >
         {#if editingId === conv.id}
-          <!-- svelte-ignore a11y_autofocus -->
           <input
             class="conv-tab-edit"
             bind:value={editTitle}
             onblur={commitRename}
             onkeydown={handleKeydown}
-            autofocus
+            use:autoFocus
           />
         {:else}
           <span class="conv-tab-title">{conv.title || 'Chat'}</span>

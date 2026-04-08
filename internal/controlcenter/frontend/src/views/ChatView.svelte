@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
-  import { X, MessageCircle, RotateCw, Play } from 'lucide-svelte'
+  import { X, MessageCircle, RotateCw, Play, ChevronsDownUp, ChevronsUpDown } from 'lucide-svelte'
   import ChatMessageComponent from '../components/chat/ChatMessage.svelte'
   import ChatInput from '../components/chat/ChatInput.svelte'
   import Modal from '../components/shared/Modal.svelte'
@@ -751,6 +751,17 @@
         <button class="btn btn-sm" data-value="tools">Tools</button>
       </alf-btn-group>
     </div>
+    <button
+      class="btn btn-icon btn-sm"
+      onclick={() => { collapseBlocks = !collapseBlocks; localStorage.setItem('alf-chat-collapse', String(collapseBlocks)) }}
+      title={collapseBlocks ? 'Expand all blocks' : 'Collapse all blocks'}
+    >
+      {#if collapseBlocks}
+        <ChevronsUpDown size={16} />
+      {:else}
+        <ChevronsDownUp size={16} />
+      {/if}
+    </button>
   </div>
 
   <!-- Messages -->
@@ -775,6 +786,7 @@
           if (b.type === 'tool_result') return (b.content || b.text || '').trim()
           return true
         })}
+        {#if visibleBlocks.length > 0}
         {#each visibleBlocks as block, bi (bi)}
           {@const isLast = bi === visibleBlocks.length - 1}
           <ChatMessageComponent
@@ -796,6 +808,7 @@
             onSendToTask={isLast ? openAgentModal : undefined}
           />
         {/each}
+        {/if}
       {:else}
         <ChatMessageComponent {msg} {convId} {collapseBlocks} {hideThinking} {hideTools} onSendToTask={openAgentModal} />
       {/if}

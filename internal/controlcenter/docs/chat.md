@@ -18,7 +18,7 @@ Press the **Stop** button (red square) to interrupt a response mid-stream.
 
 ## Conversations
 
-Each chat session is a conversation. Click the **New** button (top-right rotate icon) to start a fresh conversation. You can also type `/new` or `/clear` in the input bar.
+Each chat session is a conversation. Click the **New** button (top-left) to start a fresh conversation. You can also type `/new` or `/clear` in the input bar.
 
 The current conversation persists across page reloads. When you return to the Control Center, you pick up where you left off.
 
@@ -78,6 +78,19 @@ Assistant responses can contain structured content blocks:
 - **Text** -- the actual response, rendered as markdown with syntax highlighting, lists, tables, and inline media.
 
 Bare image/GIF/video URLs on their own line are auto-rendered inline. Video URLs render as playable `<video>` elements.
+
+## Block filter
+
+A button group in the chat header lets you control which content blocks are visible:
+
+| Mode | Visible blocks | Use case |
+|------|---------------|----------|
+| **All** | Text + Thinking + Tools | Full debug view -- see everything the model does |
+| **Clean** | Text only | Cleanest view -- like a normal chat, no internal details |
+| **Thinking** | Text + Thinking | Follow the model's reasoning without tool call noise |
+| **Tools** | Text + Tools | Follow the model's actions without reasoning traces |
+
+The selected filter is persisted in your browser across sessions. Each block type (thinking, tool use, tool result) is completely hidden when filtered out -- not just collapsed.
 
 ## Internal links
 

@@ -951,11 +951,10 @@ func main() {
 			dataDir:   dataDir,
 		}},
 		tooling.AppNativeTool{Service: &appToolAdapter},
-		tooling.ConfigNativeTool{Service: &configAdapter{store: configStore}},
+		tooling.ConfigNativeTool{Service: &configAdapter{store: configStore}, Avatar: avatarHandler},
 		tooling.TierNativeTool{Service: &tierAdapter{store: tierStore}},
 		tooling.LogNativeTool{Service: &logAdapter{reader: toolLogReader}},
 		tooling.FirewallNativeTool{Service: &firewallToolAdapter{proxy: fwProxy, store: fwStore}},
-		tooling.AvatarNativeTool{Service: avatarHandler},
 		tooling.SearchNativeTool{Service: &searchAdapter{
 			appStore:    toolAppStore,
 			marketplace: mpManager,

@@ -195,20 +195,6 @@ search "weather" --types apps,docs    # Apps and docs only
 
 **Type filters:** `apps`, `files`, `docs` (comma-separated, default: all)
 
-### avatar — Profile image
-
-Change the LLM's profile avatar displayed in chat messages. Images are sanitized (decode, resize to 128x128, re-encode as PNG).
-
-**Actions:** `set`, `reset`, `status`
-
-```bash
-avatar set <base64_image>    # Upload new avatar (PNG/JPEG/WebP, max 256KB)
-avatar reset                 # Remove custom avatar
-avatar status                # Check if custom avatar is set
-```
-
-See [Avatar](docs:avatar) for security details and API reference.
-
 ## Creating user tools
 
 System tools are built-in and cannot be modified. To create your own tools, place executable scripts in `~/data/tools/` and optionally add a `.json` schema file alongside.

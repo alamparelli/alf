@@ -10,41 +10,20 @@ The LLM can change its own profile avatar using the `avatar` system tool or the 
 
 ## System tool
 
-The `avatar` tool is available to all LLM tiers:
+Avatar management is part of the `config` tool (no dedicated tool — avoids schema bloat for a rarely-used action):
 
 ```bash
 # Set a new avatar (base64-encoded PNG, JPEG, or WebP)
-avatar set <base64_image_data>
+config avatar-set <base64_image_data>
 
 # Reset to default
-avatar reset
+config avatar-reset
 
 # Check current status
-avatar status
+config avatar-status
 ```
 
-### Tool schema
-
-```json
-{
-  "name": "avatar",
-  "description": "Change your profile avatar image.",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "action": {
-        "type": "string",
-        "enum": ["set", "reset", "status"]
-      },
-      "image": {
-        "type": "string",
-        "description": "Base64-encoded image data (required for set)"
-      }
-    },
-    "required": ["action"]
-  }
-}
-```
+For API tiers, use the `config` tool with `action: "avatar-set"` and `image: "<base64>"`.
 
 ## REST API
 

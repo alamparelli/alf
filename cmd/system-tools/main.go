@@ -54,7 +54,7 @@ func main() {
 	case "app":
 		handleApp(args)
 	case "config":
-		handleSimpleGet("/api/config")
+		handleConfig(args)
 	case "tier":
 		handleSimpleGet("/api/tiers")
 	case "log":
@@ -63,8 +63,6 @@ func main() {
 		handleSearch(args)
 	case "llm":
 		handleLLM(args)
-	case "avatar":
-		handleAvatar(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown tool: %s\n", name)
 		os.Exit(1)
@@ -446,12 +444,11 @@ func printHelp(name string) {
 		"team":   "Manage agent teams.\n  team list\n  team get <name>\n  team save --name N --agents '[{\"name\":\"a\",\"tier\":\"haiku\"}]'\n  team delete <name>",
 		"skill":  "Browse skills.\n  skill list\n  skill get <name>",
 		"app":    "Manage apps.\n  app list\n  app catalog\n  app install <slug>\n  app enable/disable/uninstall <slug>",
-		"config": "Show configuration.\n  config",
+		"config": "System configuration and avatar.\n  config                        Show configuration\n  config avatar-set <base64>    Upload profile avatar (PNG/JPEG/WebP, max 256KB)\n  config avatar-reset           Remove custom avatar\n  config avatar-status          Check if custom avatar is set",
 		"tier":   "Show tiers.\n  tier",
 		"log":    "Access logs.\n  log list\n  log tail <name> [lines]",
 		"search": "Search workspace.\n  search <query> [--types apps,files,docs]",
 		"llm":    "Invoke an LLM tier.\n  llm <tier> <prompt> [--system <system_prompt>]\n  llm <tier> <prompt> --fire-and-forget --max-depth N --on-complete '<json>'\n\nExamples:\n  llm haiku \"summarize this\" --system \"Be concise\"\n  llm haiku \"extract TODOs\" --fire-and-forget --max-depth 2 --on-complete '{\"tier\":\"sonnet\",\"prompt\":\"generate tests for:\\n{result}\"}'",
-		"avatar": "Manage profile avatar.\n  avatar set <base64_image>   Upload new avatar (PNG/JPEG/WebP, max 256KB)\n  avatar reset                Remove custom avatar\n  avatar status               Check if custom avatar is set",
 	}
 	if h, ok := helps[name]; ok {
 		fmt.Println(h)
@@ -460,16 +457,18 @@ func printHelp(name string) {
 	}
 }
 
-func handleAvatar(args []string) {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: avatar <set|reset|status> [image_base64]")
-		os.Exit(1)
+func handleConfig(args []string) {
+	// No args or "get" → show config.
+	if len(args) == 0 || args[0] == "get" {
+		handleSimpleGet("/api/config")
+		return
 	}
-	action := args[0]
-	switch action {
-	case "set":
+
+	// Avatar sub-commands: config avatar-set <base64>, config avatar-reset, config avatar-status.
+	switch args[0] {
+	case "avatar-set":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: avatar set <base64_image>")
+			fmt.Fprintln(os.Stderr, "usage: config avatar-set <base64_image>")
 			os.Exit(1)
 		}
 		body, _ := json.Marshal(map[string]string{"image": args[1]})
@@ -478,13 +477,13 @@ func handleAvatar(args []string) {
 			fatal(err)
 		}
 		fmt.Println(result)
-	case "reset":
+	case "avatar-reset":
 		result, err := doRequest("DELETE", "/api/settings/avatar", nil)
 		if err != nil {
 			fatal(err)
 		}
 		fmt.Println(result)
-	case "status":
+	case "avatar-status":
 		_, err := doRequest("GET", "/api/settings/avatar", nil)
 		if err != nil {
 			fmt.Println("Using default avatar.")
@@ -492,7 +491,7 @@ func handleAvatar(args []string) {
 			fmt.Println("Custom avatar is set.")
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown avatar action: %s (valid: set, reset, status)\n", action)
+		fmt.Fprintf(os.Stderr, "unknown config action: %s (valid: get, avatar-set, avatar-reset, avatar-status)\n", args[0])
 		os.Exit(1)
 	}
 }

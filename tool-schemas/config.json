@@ -1,16 +1,20 @@
 {
   "name": "config",
-  "description": "Read the current system configuration (log level, quiet hours, backends, etc.).",
+  "description": "Read system configuration or manage your profile avatar.",
   "parameters": {
     "type": "object",
     "properties": {
       "action": {
         "type": "string",
-        "enum": ["get"],
-        "description": "Action to perform"
+        "enum": ["get", "avatar-set", "avatar-reset", "avatar-status"],
+        "description": "get: read config. avatar-set: upload profile image (requires image field). avatar-reset: remove custom avatar. avatar-status: check if custom avatar is set."
+      },
+      "image": {
+        "type": "string",
+        "description": "Base64-encoded image data (PNG, JPEG, or WebP, max 256KB). Required for avatar-set."
       }
     },
     "required": ["action"],
-    "x-positional": ["action"]
+    "x-positional": ["action", "image"]
   }
 }

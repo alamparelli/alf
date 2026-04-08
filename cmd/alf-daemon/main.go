@@ -610,12 +610,15 @@ func main() {
 		tooling.WriteFileNativeTool{DataDir: dataDir},
 		tooling.RemoveNativeTool{DataDir: dataDir},
 	}
+	toolErrorJournal := tooling.NewErrorJournal(dataDir)
+
 	toolExecutor := &tooling.Executor{
-		DataDir:  dataDir,
-		HomeDir:  homeDir,
-		Registry: toolRegistry,
-		Timeout:  30 * time.Second,
-		Env:      nil, // Tools use ALF_TOOLS_SOCK (from safeEnv) instead of CC_AUTH_TOKEN
+		DataDir:      dataDir,
+		HomeDir:      homeDir,
+		Registry:     toolRegistry,
+		ErrorJournal: toolErrorJournal,
+		Timeout:      30 * time.Second,
+		Env:          nil, // Tools use ALF_TOOLS_SOCK (from safeEnv) instead of CC_AUTH_TOKEN
 	}
 
 	// Tool integrity guard — hash-based tamper detection for user tools (issue #121).
@@ -837,7 +840,7 @@ func main() {
 			log.Printf("[tasks] event: task=%s status=%s origin=%s", taskID[:min(8, len(taskID))], status, source)
 			notifyChannel(source, text)
 		}
-		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -1054,7 +1057,8 @@ func main() {
 		SkillStore:   &schedulerSkillStore{s: skillStore},
 		Orchestrator: &schedulerOrchestrator{o: orch},
 		ChatLogger:   &schedulerChatLogger{db: chatDB},
-		EventLog:     eventLog,
+		EventLog:       eventLog,
+		ToolErrors:     toolErrorJournal,
 		CronPath:       filepath.Join(configDir, "cron.json"),
 		Location:       schedLocation,
 		SignalSockPath: persistentSigPath,

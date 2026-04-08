@@ -67,6 +67,11 @@ type EventLogger interface {
 	Log(event string, fields map[string]any)
 }
 
+// ToolErrorSummarizer provides a summary of unresolved tool errors for heartbeat injection.
+type ToolErrorSummarizer interface {
+	UnresolvedSummary() string
+}
+
 // TierStoreReader reads tier configuration.
 type TierStoreReader interface {
 	Current() *TiersSnapshot

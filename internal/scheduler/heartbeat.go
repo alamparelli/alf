@@ -26,8 +26,16 @@ func (e *Engine) executeHeartbeat(j *Job) (string, *execResult, error) {
 	_, _, body := parseHeartbeatFull(string(data))
 	body = strings.TrimSpace(body)
 
-	if body == "" {
-		log.Printf("scheduler: [heartbeat] heartbeat.md body is empty, skipping")
+	// Append tool error notice if there are unresolved errors.
+	var toolErrorNotice string
+	if e.cfg.ToolErrors != nil {
+		if summary := e.cfg.ToolErrors.UnresolvedSummary(); summary != "" {
+			toolErrorNotice = summary
+		}
+	}
+
+	if body == "" && toolErrorNotice == "" {
+		log.Printf("scheduler: [heartbeat] heartbeat.md body is empty and no tool errors, skipping")
 		return "", nil, nil
 	}
 
@@ -37,8 +45,16 @@ func (e *Engine) executeHeartbeat(j *Job) (string, *execResult, error) {
 		j.Tier = tier
 	}
 
-	// Create a temporary job with the body as prompt.
+	// Create a temporary job with the body + tool error notice appended.
 	hbJob := *j
+	if toolErrorNotice != "" {
+		if body != "" {
+			body = body + "\n\n" + toolErrorNotice
+		} else {
+			body = toolErrorNotice
+		}
+		log.Printf("scheduler: [heartbeat] appending tool error notice to heartbeat prompt")
+	}
 	hbJob.Prompt = body
 	return e.invokeLLMWithMeta(&hbJob)
 }

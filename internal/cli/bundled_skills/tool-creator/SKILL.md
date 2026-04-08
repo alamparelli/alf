@@ -84,7 +84,39 @@ if [ $# -eq 0 ]; then
 fi
 ```
 
-### 5. Output conventions
+### 5. Security: NEVER use shell=True or eval
+
+Tools receive arguments as clean, separated CLI args from the ALF executor — there is no shell involved. You MUST NOT reintroduce a shell interpreter:
+
+**Forbidden patterns:**
+```python
+# Python — ALL of these are CWE-78 (command injection)
+subprocess.run(cmd, shell=True)    # shell interprets metacharacters
+os.system(cmd)                      # always uses shell
+os.popen(cmd)                       # always uses shell
+eval(user_input)                    # CWE-94 (code injection)
+exec(user_input)                    # CWE-94
+```
+
+```bash
+# Bash — avoid these with untrusted input
+eval "$var"                          # arbitrary code execution
+"$var"                               # command from variable
+```
+
+**Safe alternatives:**
+```python
+# Always use list form — no shell metacharacter interpretation
+subprocess.run(["binary", arg1, arg2], capture_output=True, text=True)
+
+# If you must parse a command string:
+import shlex
+subprocess.run(shlex.split(cmd_string), capture_output=True, text=True)
+```
+
+**Why this matters:** Tools run inside the ALF container. If a tool passes LLM-generated text to a shell, a prompt injection attack can execute arbitrary commands as the `alf` user — reading secrets, deleting data, or pivoting to other services.
+
+### 6. Output conventions
 
 - Normal output goes to stdout (so it can be piped)
 - Progress/status messages go to stderr
@@ -100,7 +132,7 @@ echo "Processing..." >&2
 cat result.json
 ```
 
-### 6. Data storage
+### 7. Data storage
 
 If the tool needs persistent data, use **SQLite** for self-contained storage:
 
@@ -125,7 +157,7 @@ mkdir -p "$DATA_DIR"
 
 Never store data in `/tmp` (lost on restart) or in the tool file itself.
 
-### 7. External APIs
+### 8. External APIs
 
 NEVER hardcode API keys or tokens. Use the vault proxy:
 
@@ -135,7 +167,7 @@ vault proxy myapi GET /endpoint
 
 If the vault isn't configured for the needed service, tell the user to add it via the Control Center vault page.
 
-### 8. Available system tools
+### 9. Available system tools
 
 These tools are already in PATH and available for your scripts to call:
 
@@ -151,13 +183,13 @@ These tools are already in PATH and available for your scripts to call:
 | `vault` | Interact with the secrets vault |
 | `extract-video` | Extract frames and transcript from video |
 
-### 9. Naming conventions
+### 10. Naming conventions
 
 - Lowercase, hyphen-separated: `disk-check`, `api-test`, `log-rotate`
 - Short, descriptive, verb-first when possible: `check-disk`, `fetch-data`, `sync-notes`
 - No generic names: avoid `run`, `do`, `helper`, `util`
 
-### 10. JSON Schema manifest (REQUIRED)
+### 11. JSON Schema manifest (REQUIRED)
 
 Every tool MUST have a companion `.json` file that describes its interface for API-based LLM tiers. Without this file, the tool is invisible to API models (only CLI tiers can use it via toolbox.md).
 
@@ -242,8 +274,35 @@ For tools without a subcommand, use `x-positional` only for value arguments:
 3. **Write** the script (bash or Python) following all standards above
 4. **Write the JSON schema** manifest with `x-positional` convention
 5. **Set permissions**: `chmod +x ~/data/tools/{name}`
-6. **Test** it: run with `--help`, then with sample args
+6. **E2E test** (MANDATORY — run on every creation AND modification):
+   a. Run `{tool} --help` → must exit 0 and print usage
+   b. Run with a **real test case** that exercises the primary flow (not just `--help`)
+   c. Verify stdout contains expected output (check exit code + output content)
+   d. If the tool fails, **fix it immediately** — do NOT deliver a broken tool
+   e. Persist the test case in the JSON schema as `x-test` (see below)
 7. **Verify** ALF discovers it: the tool appears in the next toolbox refresh (auto-detected, no restart needed)
+
+### x-test: Persisted test case (REQUIRED)
+
+Add an `x-test` field to the JSON schema so the heartbeat can re-run the test to validate repairs:
+
+```json
+{
+  "name": "my-tool",
+  "parameters": { ... },
+  "x-test": {
+    "args": {"action": "list"},
+    "expect_exit": 0,
+    "expect_output": "No items found"
+  }
+}
+```
+
+- **`args`**: JSON object matching the tool's parameters — the input for the test
+- **`expect_exit`**: Expected exit code (usually 0)
+- **`expect_output`**: Substring that must appear in stdout (use a stable fragment, not the full output)
+
+The test case should be idempotent and safe to run repeatedly. Avoid test cases that create data without cleanup.
 
 ## Quality checklist
 
@@ -255,10 +314,12 @@ Before delivering:
 - [ ] Validates required arguments
 - [ ] Errors go to stderr, output to stdout
 - [ ] No hardcoded secrets or API keys
+- [ ] No `shell=True`, `os.system()`, `eval()`, or `exec()` on untrusted input
 - [ ] Tool name follows naming conventions
 - [ ] Executable bit set (`chmod +x`)
 - [ ] JSON schema `.json` file created with `x-positional`
-- [ ] Tested with sample input
+- [ ] **E2E test passed** — ran with real args, verified output, exit code 0
+- [ ] **`x-test` field** added to JSON schema with the test case used above
 
 ## What NOT to do
 

@@ -23,7 +23,8 @@ type Config struct {
 	SkillStore   SkillStoreReader   // optional - injects skill prompts into jobs
 	Orchestrator OrchestratorRunner // optional - multi-agent orchestration
 	ChatLogger   ChatLogger
-	EventLog     EventLogger        // optional - writes schedule_run events to daily logs
+	EventLog       EventLogger        // optional - writes schedule_run events to daily logs
+	ToolErrors     ToolErrorSummarizer // optional - injects tool error summary into heartbeat
 	CronPath       string
 	Location       *time.Location
 	SignalSockPath string // passed as ALF_SIGNAL_SOCK to command subprocesses

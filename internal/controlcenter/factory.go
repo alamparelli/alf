@@ -88,6 +88,7 @@ type Deps struct {
 	EventBroker      *EventBroker           // global SSE event bus
 	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable (deprecated, use EventBroker)
 	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
+	ErrorJournal     AppErrorJournaler    // nil if error journal unavailable
 	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
 	ModelCache       *ModelCache           // nil if model cache unavailable
 	AppTokens        *AppTokenStore           // nil if app tokens unavailable
@@ -248,7 +249,7 @@ func HandlerFactory(deps Deps) Handlers {
 	if deps.AppStore != nil {
 		appStorage := &AppStorageHandler{DataDir: deps.DataDir, Perms: permChecker}
 		appUpload := &AppUploadHandler{DataDir: deps.DataDir, Perms: permChecker}
-		appErrors := &AppErrorHandler{DataDir: deps.DataDir}
+		appErrors := &AppErrorHandler{DataDir: deps.DataDir, Journal: deps.ErrorJournal}
 		mux.Handle("/api/apps/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(r.URL.Path, "/storage") {
 				appStorage.ServeHTTP(w, r)

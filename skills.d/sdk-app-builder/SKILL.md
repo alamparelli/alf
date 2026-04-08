@@ -114,4 +114,33 @@ Read the relevant reference file for templates, patterns, and API details:
 
 **REST server** — `service.json` + free port + `data/port`, vault via `appsdk.NewVaultClient()`
 
-**NEVER say "it's ready" without running these checks.** Fix any failure before reporting success.
+## E2E verification (MANDATORY — run on every creation AND modification)
+
+After the checklist above passes, run an end-to-end test to confirm the app actually works:
+
+**Frontend-only apps:**
+1. Run: `app enable <slug>` (if not already enabled)
+2. Run: `curl -s http://localhost:${CC_PORT:-9400}/apps/<slug>/` → must return 200 with HTML containing `AlfSDK`
+3. If the app uses `AlfSDK.storage`, test a write+read cycle:
+   ```bash
+   curl -s -X PUT http://localhost:${CC_PORT:-9400}/api/apps/<slug>/storage/test -d '{"value":"e2e"}' 
+   curl -s http://localhost:${CC_PORT:-9400}/api/apps/<slug>/storage/test
+   # Cleanup:
+   curl -s -X DELETE http://localhost:${CC_PORT:-9400}/api/apps/<slug>/storage/test
+   ```
+
+**CLI tool apps:**
+1. Run: `app enable <slug>` (if not already enabled)
+2. Run the tool with `--help` → must exit 0
+3. Run the tool with a **real test case** that exercises the primary action
+4. Verify exit code 0 and expected output
+5. Add `x-test` to the tool's JSON schema (same format as tool-creator)
+
+**REST server apps:**
+1. Run: `app enable <slug>` → wait 2s for server startup
+2. Run: `curl -s http://localhost:$(cat ~/data/apps/<slug>/data/port)/health` → must return 200
+3. Test one real endpoint with sample data
+
+**If any E2E step fails, fix the issue immediately.** Do NOT deliver the app until E2E passes.
+
+**NEVER say "it's ready" without running these checks AND E2E verification.** Fix any failure before reporting success.

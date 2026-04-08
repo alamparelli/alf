@@ -21,12 +21,18 @@ type AppErrorEntry struct {
 	Source    string `json:"source,omitempty"`
 }
 
+// AppErrorJournaler writes app errors to the unified error journal.
+type AppErrorJournaler interface {
+	AppendAppError(slug, message, stack string)
+}
+
 // AppErrorHandler provides per-app error logging.
 //
 //	POST /api/apps/{slug}/errors → append error to log (ring buffer, max 100)
 //	GET  /api/apps/{slug}/errors → read error log
 type AppErrorHandler struct {
 	DataDir string
+	Journal AppErrorJournaler // optional: unified error journal for heartbeat repair
 	mu      sync.Mutex
 }
 
@@ -140,6 +146,11 @@ func (h *AppErrorHandler) handlePost(w http.ResponseWriter, r *http.Request, slu
 	if err := h.save(slug, entries); err != nil {
 		respondError(w, http.StatusInternalServerError, "write failed")
 		return
+	}
+
+	// Also log to unified error journal for heartbeat repair.
+	if h.Journal != nil {
+		h.Journal.AppendAppError(slug, entry.Message, entry.Stack)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]string{"status": "logged"})

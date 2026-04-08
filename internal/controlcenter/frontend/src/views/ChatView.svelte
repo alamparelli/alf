@@ -796,7 +796,15 @@
         {/each}
         {/if}
       {:else}
-        <ChatMessageComponent {msg} {convId} {collapseBlocks} {hideThinking} {hideTools} onSendToTask={openAgentModal} />
+        {@const isEmpty = msg.role === 'assistant' && !msg.text?.trim() && (!msg.content_blocks || msg.content_blocks.every(b => {
+          if (b.type === 'thinking' && hideThinking) return true
+          if ((b.type === 'tool_use' || b.type === 'tool_result') && hideTools) return true
+          if (b.type === 'text') return !b.text?.trim()
+          return false
+        }))}
+        {#if !isEmpty}
+          <ChatMessageComponent {msg} {convId} {collapseBlocks} {hideThinking} {hideTools} onSendToTask={openAgentModal} />
+        {/if}
       {/if}
     {/each}
 

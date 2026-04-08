@@ -139,12 +139,20 @@ type apiStreamOpts struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
+// apiContentBlock is a single content block within a multi-block message.
+type apiContentBlock struct {
+	Type         string           `json:"type"`
+	Text         string           `json:"text"`
+	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
+}
+
 type apiMessage struct {
-	Role         string          `json:"-"`
-	Content      string          `json:"-"`
-	ToolCalls    []apiToolCall   `json:"-"`
-	ToolCallID   string          `json:"-"`
-	CacheControl *apiCacheControl `json:"-"` // set to emit content as block with cache_control
+	Role         string            `json:"-"`
+	Content      string            `json:"-"`
+	MultiContent []apiContentBlock `json:"-"` // multi-block content (for system messages with cache split)
+	ToolCalls    []apiToolCall     `json:"-"`
+	ToolCallID   string            `json:"-"`
+	CacheControl *apiCacheControl  `json:"-"` // set to emit content as block with cache_control
 }
 
 // MarshalJSON implements custom JSON encoding for OpenAI-compatible messages.
@@ -177,7 +185,10 @@ func (m apiMessage) MarshalJSON() ([]byte, error) {
 		msg["tool_call_id"] = m.ToolCallID
 	default:
 		// System/user/assistant text.
-		if m.CacheControl != nil && m.Content != "" {
+		if len(m.MultiContent) > 0 {
+			// Multi-block content (e.g. system message with stable + dynamic blocks).
+			msg["content"] = m.MultiContent
+		} else if m.CacheControl != nil && m.Content != "" {
 			// Emit as content block array with cache_control (Anthropic prompt caching).
 			msg["content"] = []map[string]any{{
 				"type":          "text",
@@ -246,28 +257,30 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 	isAnthropic := strings.HasPrefix(model, "anthropic/")
 	if len(params.SystemPrompts) > 0 {
 		bp := params.CacheBreakpoint
-		if isAnthropic && bp > 0 && bp < len(params.SystemPrompts) {
-			// Split: stable (cacheable) + dynamic.
-			stable := strings.Join(params.SystemPrompts[:bp], "\n\n")
-			dynamic := strings.Join(params.SystemPrompts[bp:], "\n\n")
-			messages = append(messages, apiMessage{
-				Role:    "system",
-				Content: stable,
-				CacheControl: &apiCacheControl{Type: "ephemeral"},
-			})
-			if dynamic != "" {
-				messages = append(messages, apiMessage{Role: "system", Content: dynamic})
+		if isAnthropic && bp > 0 {
+			// Single system message with multi-block content:
+			// block[0] = stable text with cache_control (cached by Anthropic)
+			// block[1] = dynamic text without cache_control (changes per request)
+			// OpenRouter merges system messages into one Anthropic system param,
+			// so using a single message with multiple blocks ensures the cache
+			// breakpoint is properly respected.
+			stable := strings.Join(params.SystemPrompts[:min(bp, len(params.SystemPrompts))], "\n\n")
+			sysMsg := apiMessage{Role: "system"}
+			sysMsg.MultiContent = []apiContentBlock{
+				{Type: "text", Text: stable, CacheControl: &apiCacheControl{Type: "ephemeral"}},
 			}
+			if bp < len(params.SystemPrompts) {
+				dynamic := strings.Join(params.SystemPrompts[bp:], "\n\n")
+				if dynamic != "" {
+					sysMsg.MultiContent = append(sysMsg.MultiContent, apiContentBlock{Type: "text", Text: dynamic})
+				}
+			}
+			messages = append(messages, sysMsg)
 		} else {
 			combined := strings.Join(params.SystemPrompts, "\n\n")
-			cc := (*apiCacheControl)(nil)
-			if isAnthropic && bp > 0 {
-				// All prompts are stable (bp == len) — cache the whole block.
-				cc = &apiCacheControl{Type: "ephemeral"}
-			}
-			messages = append(messages, apiMessage{Role: "system", Content: combined, CacheControl: cc})
+			messages = append(messages, apiMessage{Role: "system", Content: combined})
 		}
-		log.Printf("[api] BuildMessages: isAnthropic=%v, bp=%d, sysPrompts=%d, cacheSet=%v", isAnthropic, params.CacheBreakpoint, len(params.SystemPrompts), messages[0].CacheControl != nil)
+		log.Printf("[api] BuildMessages: isAnthropic=%v, bp=%d, sysPrompts=%d, multiBlock=%v", isAnthropic, bp, len(params.SystemPrompts), isAnthropic && bp > 0)
 	}
 
 	// Conversation history: prefer unified ConvMessages, fall back to per-key History.

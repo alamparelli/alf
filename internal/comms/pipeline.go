@@ -576,6 +576,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	_, lastBackend, _ := e.Sessions.ContextFull(sessionKey)
 	backendChanged := lastBackend != "" && lastBackend != tp.Backend
 
+	log.Printf("[comms] cache debug: breakpoint=%d, sysPrompts=%d, model=%s, backend=%s", cacheBreakpoint, len(sysPrompts), tp.Model, tp.Backend)
 	params := provider.Params{
 		Model:           tp.Model,
 		Tools:           tp.Tools,

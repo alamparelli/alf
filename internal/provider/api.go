@@ -266,6 +266,7 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 			}
 			messages = append(messages, apiMessage{Role: "system", Content: combined, CacheControl: cc})
 		}
+		log.Printf("[api] BuildMessages: isAnthropic=%v, bp=%d, sysPrompts=%d, cacheSet=%v", isAnthropic, params.CacheBreakpoint, len(params.SystemPrompts), messages[0].CacheControl != nil)
 	}
 
 	// Conversation history: prefer unified ConvMessages, fall back to per-key History.

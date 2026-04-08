@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -114,19 +113,6 @@ type apiRequest struct {
 type apiCacheControl struct {
 	Type string `json:"type"`           // "ephemeral"
 	TTL  string `json:"ttl,omitempty"`  // "" = 5min default, "1h" = 1 hour (Anthropic only)
-}
-
-// tagSystemPromptCache sets cache_control on the first system message in the request.
-// This causes MarshalJSON to emit content as a block array with cache_control,
-// enabling Anthropic prompt caching on OpenRouter.
-func tagSystemPromptCache(req *apiRequest) {
-	cc := &apiCacheControl{Type: "ephemeral"}
-	for i := range req.Messages {
-		if req.Messages[i].Role == "system" {
-			req.Messages[i].CacheControl = cc
-			return
-		}
-	}
 }
 
 // apiReasoning configures reasoning/thinking for OpenRouter-compatible models.
@@ -280,7 +266,6 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 			combined := strings.Join(params.SystemPrompts, "\n\n")
 			messages = append(messages, apiMessage{Role: "system", Content: combined})
 		}
-		log.Printf("[api] BuildMessages: isAnthropic=%v, bp=%d, sysPrompts=%d, multiBlock=%v", isAnthropic, bp, len(params.SystemPrompts), isAnthropic && bp > 0)
 	}
 
 	// Conversation history: prefer unified ConvMessages, fall back to per-key History.
@@ -457,10 +442,6 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	// Debug: dump full request JSON to file for comparison.
-	debugPath := fmt.Sprintf("/tmp/api_request_%d.json", time.Now().UnixMilli())
-	_ = os.WriteFile(debugPath, data, 0o644)
-	log.Printf("[api] request dumped to %s (%d bytes)", debugPath, len(data))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(data))
 	if err != nil {

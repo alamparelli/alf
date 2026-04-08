@@ -579,16 +579,6 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	_, lastBackend, _ := e.Sessions.ContextFull(sessionKey)
 	backendChanged := lastBackend != "" && lastBackend != tp.Backend
 
-	// Debug: hash each stable prompt individually to find which one changes.
-	if cacheBreakpoint > 0 && cacheBreakpoint <= len(sysPrompts) {
-		for i := 0; i < cacheBreakpoint && i < len(sysPrompts); i++ {
-			h := uint32(0)
-			for _, b := range []byte(sysPrompts[i]) {
-				h = h*31 + uint32(b)
-			}
-			log.Printf("[comms] cache debug: prompt[%d] hash=%08x len=%d first60=%q", i, h, len(sysPrompts[i]), sysPrompts[i][:min(60, len(sysPrompts[i]))])
-		}
-	}
 	params := provider.Params{
 		Model:           tp.Model,
 		Tools:           tp.Tools,

@@ -77,6 +77,12 @@
     return { destroy() { node.removeEventListener('alf-change', onFilterChange) } }
   }
   let streamingBlocks = $state<any[]>([])
+  let visibleStreamingBlocks = $derived(streamingBlocks.filter(b => {
+    if (b.type === 'thinking' && hideThinking) return false
+    if ((b.type === 'tool_use' || b.type === 'tool_result') && hideTools) return false
+    if (b.type === 'text') return !!(b.text && b.text.trim())
+    return true
+  }))
   let streamingText = $state('')
   let streamingConvId = $state('') // which conv owns the current stream
   let showStreaming = $derived(streamingConvId === (convId ?? ''))
@@ -882,8 +888,8 @@
     {/each}
 
     <!-- Streaming response — each block rendered as its own bubble (#127) -->
-    {#if showStreaming && streamingBlocks.length > 0}
-      {#each streamingBlocks as block, i (i)}
+    {#if showStreaming && visibleStreamingBlocks.length > 0}
+      {#each visibleStreamingBlocks as block, i (i)}
         <ChatMessageComponent
           msg={{
             id: `streaming-${i}`,

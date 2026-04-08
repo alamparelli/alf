@@ -222,12 +222,16 @@ func ToolReminder(contextDir string) string {
 // ToolInstruction returns the API-tier tool instruction prepended to system prompts.
 // Only relevant for API tiers where tools are declared via JSON schema.
 func ToolInstruction(toolNames []string) string {
+	// Sort for deterministic output — important for prompt caching.
+	sorted := make([]string, len(toolNames))
+	copy(sorted, toolNames)
+	sort.Strings(sorted)
 	return fmt.Sprintf(
 		"You have access to the following tools: %s.\n"+
 			"IMPORTANT: You MUST call the appropriate tool for every action. "+
 			"Never simulate, assume, or hallucinate the result of a tool call. "+
 			"Always invoke the tool and wait for the actual result before responding.",
-		strings.Join(toolNames, ", "),
+		strings.Join(sorted, ", "),
 	)
 }
 

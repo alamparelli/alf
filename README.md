@@ -69,9 +69,9 @@ Send a message to your bot on Telegram. That's it.
 
 ### Semantic memory
 
-ALF remembers things across conversations. The memory system uses sqlite-vec for vector similarity search and FTS5 for keyword matching, with Go-native ONNX Runtime inference (all-MiniLM-L6-v2) - no Python dependency for embeddings.
+Alf remembers things across conversations. The memory system uses sqlite-vec for vector similarity search and FTS5 for keyword matching, with Go-native ONNX Runtime inference (all-MiniLM-L6-v2) - no Python dependency for embeddings.
 
-Claude has three memory tools:
+Alf has three memory tools:
 - **recall** - hybrid semantic + keyword search over past memories
 - **remember** - store facts, preferences, decisions, summaries
 - **forget** - remove memories by ID

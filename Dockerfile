@@ -152,6 +152,7 @@ RUN mkdir -p /opt/alf/tools.d \
     && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/log \
     && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/search \
     && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/llm \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/avatar \
     && ln -s /opt/alf/bin/vault-cli /opt/alf/tools.d/vault \
     && ln -s /opt/alf/bin/vault-server /usr/local/bin/vault-server
 

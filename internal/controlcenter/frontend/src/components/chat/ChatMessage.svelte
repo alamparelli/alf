@@ -280,7 +280,12 @@
 <div class="chat-row chat-row-{msg.role}">
   {#if msg.role === 'assistant'}
     <div class="chat-avatar chat-avatar-assistant">
-      <img src="/static/favicon.png" alt="ALF" class="avatar-img" />
+      <img
+        src="/api/settings/avatar"
+        alt="ALF"
+        class="avatar-img"
+        onerror={(e) => { e.currentTarget.src = '/static/favicon.png'; }}
+      />
     </div>
   {:else if msg.role === 'user'}
     <div class="chat-avatar chat-avatar-user">

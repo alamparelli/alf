@@ -89,6 +89,7 @@ type Deps struct {
 	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable (deprecated, use EventBroker)
 	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
 	ErrorJournal     AppErrorJournaler    // nil if error journal unavailable
+	Avatar           *AvatarHandler       // shared with native tool for LLM avatar changes
 	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
 	ModelCache       *ModelCache           // nil if model cache unavailable
 	AppTokens        *AppTokenStore           // nil if app tokens unavailable
@@ -161,6 +162,11 @@ func HandlerFactory(deps Deps) Handlers {
 		SkillsDir: deps.SkillsDir,
 		Notifier:  deps.Notifier,
 	})
+	if deps.Avatar == nil {
+		deps.Avatar = &AvatarHandler{DataDir: deps.DataDir}
+	}
+	mux.Handle("/api/settings/avatar", deps.Avatar)
+
 	mux.Handle("/api/status", &StatusHandler{
 		Provider: deps.StatusProvider,
 	})

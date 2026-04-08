@@ -611,6 +611,7 @@ func main() {
 		tooling.RemoveNativeTool{DataDir: dataDir},
 	}
 	toolErrorJournal := tooling.NewErrorJournal(dataDir)
+	avatarHandler := &cc.AvatarHandler{DataDir: dataDir}
 
 	toolExecutor := &tooling.Executor{
 		DataDir:      dataDir,
@@ -840,7 +841,7 @@ func main() {
 			log.Printf("[tasks] event: task=%s status=%s origin=%s", taskID[:min(8, len(taskID))], status, source)
 			notifyChannel(source, text)
 		}
-		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -954,6 +955,7 @@ func main() {
 		tooling.TierNativeTool{Service: &tierAdapter{store: tierStore}},
 		tooling.LogNativeTool{Service: &logAdapter{reader: toolLogReader}},
 		tooling.FirewallNativeTool{Service: &firewallToolAdapter{proxy: fwProxy, store: fwStore}},
+		tooling.AvatarNativeTool{Service: avatarHandler},
 		tooling.SearchNativeTool{Service: &searchAdapter{
 			appStore:    toolAppStore,
 			marketplace: mpManager,

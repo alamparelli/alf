@@ -63,6 +63,8 @@ func main() {
 		handleSearch(args)
 	case "llm":
 		handleLLM(args)
+	case "avatar":
+		handleAvatar(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown tool: %s\n", name)
 		os.Exit(1)
@@ -449,11 +451,49 @@ func printHelp(name string) {
 		"log":    "Access logs.\n  log list\n  log tail <name> [lines]",
 		"search": "Search workspace.\n  search <query> [--types apps,files,docs]",
 		"llm":    "Invoke an LLM tier.\n  llm <tier> <prompt> [--system <system_prompt>]\n  llm <tier> <prompt> --fire-and-forget --max-depth N --on-complete '<json>'\n\nExamples:\n  llm haiku \"summarize this\" --system \"Be concise\"\n  llm haiku \"extract TODOs\" --fire-and-forget --max-depth 2 --on-complete '{\"tier\":\"sonnet\",\"prompt\":\"generate tests for:\\n{result}\"}'",
+		"avatar": "Manage profile avatar.\n  avatar set <base64_image>   Upload new avatar (PNG/JPEG/WebP, max 256KB)\n  avatar reset                Remove custom avatar\n  avatar status               Check if custom avatar is set",
 	}
 	if h, ok := helps[name]; ok {
 		fmt.Println(h)
 	} else {
 		fmt.Printf("Usage: %s <action> [options]\n", name)
+	}
+}
+
+func handleAvatar(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: avatar <set|reset|status> [image_base64]")
+		os.Exit(1)
+	}
+	action := args[0]
+	switch action {
+	case "set":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: avatar set <base64_image>")
+			os.Exit(1)
+		}
+		body, _ := json.Marshal(map[string]string{"image": args[1]})
+		result, err := doRequest("PUT", "/api/settings/avatar", body)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(result)
+	case "reset":
+		result, err := doRequest("DELETE", "/api/settings/avatar", nil)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(result)
+	case "status":
+		_, err := doRequest("GET", "/api/settings/avatar", nil)
+		if err != nil {
+			fmt.Println("Using default avatar.")
+		} else {
+			fmt.Println("Custom avatar is set.")
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "unknown avatar action: %s (valid: set, reset, status)\n", action)
+		os.Exit(1)
 	}
 }
 

@@ -349,10 +349,8 @@ func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, mode
 	if effort != "" && !p.IsOllamaCompat() {
 		reqBody.Reasoning = &apiReasoning{Effort: effort, Enabled: true}
 	}
-	// Top-level prompt caching hint for Anthropic models on OpenRouter.
-	if strings.HasPrefix(model, "anthropic/") {
-		reqBody.CacheControl = &apiCacheControl{Type: "ephemeral"}
-	}
+	// Per-message cache_control (set by BuildMessages) handles caching;
+	// top-level cache_control removed to avoid conflicts.
 	return p.doStreamRequest(ctx, reqBody, onProgress, 0)
 }
 
@@ -387,10 +385,8 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	if params.Effort != "" && !p.IsOllamaCompat() {
 		reqBody.Reasoning = &apiReasoning{Effort: params.Effort, Enabled: true}
 	}
-	// Top-level prompt caching hint for Anthropic models on OpenRouter.
-	if strings.HasPrefix(model, "anthropic/") {
-		reqBody.CacheControl = &apiCacheControl{Type: "ephemeral"}
-	}
+	// Per-message cache_control (set by BuildMessages) handles caching;
+	// top-level cache_control removed to avoid conflicts.
 
 	resp, err := p.doStreamRequest(ctx, reqBody, onProgress, 0)
 	if err != nil {

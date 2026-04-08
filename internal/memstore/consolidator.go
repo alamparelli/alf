@@ -103,11 +103,12 @@ func (c *Consolidator) consolidate() error {
 			if action.NewType != "" {
 				memType = action.NewType
 			}
-			_, err := c.store.Store(action.MergedText, memType, "consolidator", nil)
+			newID, err := c.store.Store(action.MergedText, memType, "consolidator", nil)
 			if err != nil {
 				log.Printf("memstore/consolidator: merge store failed: %v", err)
 				continue
 			}
+			log.Printf("memstore/consolidator: merged %v → id=%d", action.IDs, newID)
 			for _, id := range action.IDs {
 				c.store.Delete(id)
 			}

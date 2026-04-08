@@ -49,6 +49,7 @@
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(j =>
+        j.id.toLowerCase().includes(q) ||
         j.name.toLowerCase().includes(q) ||
         (j.prompt || '').toLowerCase().includes(q) ||
         (j.schedule || '').toLowerCase().includes(q)
@@ -349,6 +350,7 @@
               </span>
               <div class="job-title">
                 <strong>{job.name}</strong>
+                <span class="job-id">{job.id}</span>
                 {#if job.running}
                   <span class="tag tag-success badge-running">running</span>
                 {/if}
@@ -574,6 +576,14 @@
     flex: 1;
     min-width: 0;
     flex-wrap: wrap;
+  }
+
+  .job-id {
+    font-size: var(--font-xs, 11px);
+    color: var(--text-dim);
+    font-weight: normal;
+    font-family: var(--font-mono, monospace);
+    opacity: 0.6;
   }
 
   .job-description {

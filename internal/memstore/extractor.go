@@ -280,7 +280,7 @@ func (e *Extractor) Extract() error {
 			truncText = truncText[:100] + "..."
 		}
 		log.Printf("memstore: fact[%d/%d] type=%s text=%q", i+1, len(facts), memType, truncText)
-		_, err := e.store.Store(fact.Text, memType, "extractor", nil)
+		id, err := e.store.Store(fact.Text, memType, "extractor", nil)
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate") {
 				log.Printf("memstore: fact[%d] → duplicate, skipped", i+1)
@@ -289,7 +289,7 @@ func (e *Extractor) Extract() error {
 			log.Printf("memstore: fact[%d] → store failed: %v", i+1, err)
 			continue
 		}
-		log.Printf("memstore: fact[%d] → stored OK", i+1)
+		log.Printf("memstore: fact[%d] → stored OK (id=%d)", i+1, id)
 		stored++
 	}
 

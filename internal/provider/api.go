@@ -300,8 +300,17 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 		tagLastMessageCache(messages)
 	}
 
-	// Current user message.
-	messages = append(messages, apiMessage{Role: "user", Content: prompt})
+	// Current user message — skip if already present as last ConvMessage.
+	alreadyPresent := false
+	if len(messages) > 0 {
+		last := messages[len(messages)-1]
+		if last.Role == "user" && last.Content == prompt {
+			alreadyPresent = true
+		}
+	}
+	if !alreadyPresent {
+		messages = append(messages, apiMessage{Role: "user", Content: prompt})
+	}
 	return messages
 }
 

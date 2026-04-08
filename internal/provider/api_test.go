@@ -283,7 +283,8 @@ func TestApiMessage_RoundTrip(t *testing.T) {
 }
 
 func TestApiRequest_CacheControl_AnthropicModel(t *testing.T) {
-	// When model starts with "anthropic/", cache_control should be set.
+	// When model starts with "anthropic/" and CacheBreakpoint > 0,
+	// the system message content should include cache_control in blocks.
 	var capturedBody json.RawMessage
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := make([]byte, 16384)
@@ -303,22 +304,28 @@ func TestApiRequest_CacheControl_AnthropicModel(t *testing.T) {
 		client:    &http.Client{Timeout: 5 * time.Second},
 	}
 
-	_, err := p.Invoke(context.Background(), "test", Params{Model: "anthropic/claude-haiku-4-5"}, nil)
+	_, err := p.Invoke(context.Background(), "test", Params{
+		Model:           "anthropic/claude-haiku-4-5",
+		SystemPrompts:   []string{"system prompt"},
+		CacheBreakpoint: 1,
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// Verify per-message cache_control on system message content block.
 	var req struct {
-		CacheControl *apiCacheControl `json:"cache_control"`
+		Messages []json.RawMessage `json:"messages"`
 	}
 	if err := json.Unmarshal(capturedBody, &req); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if req.CacheControl == nil {
-		t.Fatal("expected cache_control to be set for anthropic/ model")
+	if len(req.Messages) == 0 {
+		t.Fatal("no messages in request")
 	}
-	if req.CacheControl.Type != "ephemeral" {
-		t.Errorf("expected type 'ephemeral', got %q", req.CacheControl.Type)
+	sysMsg := string(req.Messages[0])
+	if !strings.Contains(sysMsg, `"cache_control"`) {
+		t.Errorf("expected cache_control in system message content block, got: %s", sysMsg[:min(200, len(sysMsg))])
 	}
 }
 
@@ -419,8 +426,8 @@ func TestApiStreamResult_CachedTokens(t *testing.T) {
 	}
 }
 
-func TestAPIProvider_DoRequest_CacheControl_AnthropicModel(t *testing.T) {
-	// DoRequest should also set cache_control for anthropic/ models.
+func TestAPIProvider_DoRequest_NoCacheControl_TopLevel(t *testing.T) {
+	// DoRequest should NOT set top-level cache_control (per-message only).
 	var capturedBody json.RawMessage
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := make([]byte, 16384)
@@ -446,17 +453,12 @@ func TestAPIProvider_DoRequest_CacheControl_AnthropicModel(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var req struct {
-		CacheControl *apiCacheControl `json:"cache_control"`
-	}
-	if err := json.Unmarshal(capturedBody, &req); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(capturedBody, &raw); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if req.CacheControl == nil {
-		t.Fatal("expected cache_control in DoRequest for anthropic/ model")
-	}
-	if req.CacheControl.Type != "ephemeral" {
-		t.Errorf("expected type 'ephemeral', got %q", req.CacheControl.Type)
+	if _, exists := raw["cache_control"]; exists {
+		t.Error("expected no top-level cache_control (per-message only)")
 	}
 }
 

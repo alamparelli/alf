@@ -105,6 +105,7 @@ RUN if [ "${TARGETARCH}" = "arm64" ]; then FFARCH="arm64"; else FFARCH="amd64"; 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
+    && npm install -g npm@11 \
     && node --version && npm --version
 
 # OpenAI Codex CLI.

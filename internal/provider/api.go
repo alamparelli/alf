@@ -115,6 +115,19 @@ type apiCacheControl struct {
 	TTL  string `json:"ttl,omitempty"`  // "" = 5min default, "1h" = 1 hour (Anthropic only)
 }
 
+// tagSystemPromptCache sets cache_control on the first system message in the request.
+// This causes MarshalJSON to emit content as a block array with cache_control,
+// enabling Anthropic prompt caching on OpenRouter.
+func tagSystemPromptCache(req *apiRequest) {
+	cc := &apiCacheControl{Type: "ephemeral"}
+	for i := range req.Messages {
+		if req.Messages[i].Role == "system" {
+			req.Messages[i].CacheControl = cc
+			return
+		}
+	}
+}
+
 // apiReasoning configures reasoning/thinking for OpenRouter-compatible models.
 type apiReasoning struct {
 	Effort string `json:"effort,omitempty"`    // "low", "medium", "high"
@@ -126,10 +139,11 @@ type apiStreamOpts struct {
 }
 
 type apiMessage struct {
-	Role       string        `json:"-"`
-	Content    string        `json:"-"`
-	ToolCalls  []apiToolCall `json:"-"`
-	ToolCallID string        `json:"-"`
+	Role         string          `json:"-"`
+	Content      string          `json:"-"`
+	ToolCalls    []apiToolCall   `json:"-"`
+	ToolCallID   string          `json:"-"`
+	CacheControl *apiCacheControl `json:"-"` // set to emit content as block with cache_control
 }
 
 // MarshalJSON implements custom JSON encoding for OpenAI-compatible messages.
@@ -153,8 +167,15 @@ func (m apiMessage) MarshalJSON() ([]byte, error) {
 		msg["content"] = m.Content
 		msg["tool_call_id"] = m.ToolCallID
 	default:
-		// System/user/assistant text: omit content only if empty.
-		if m.Content != "" {
+		// System/user/assistant text.
+		if m.CacheControl != nil && m.Content != "" {
+			// Emit as content block array with cache_control (Anthropic prompt caching).
+			msg["content"] = []map[string]any{{
+				"type":          "text",
+				"text":          m.Content,
+				"cache_control": m.CacheControl,
+			}}
+		} else if m.Content != "" {
 			msg["content"] = m.Content
 		}
 	}
@@ -206,10 +227,25 @@ type apiStreamResult struct {
 func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 	var messages []apiMessage
 
-	// System prompts.
+	// System prompts. When CacheBreakpoint > 0, split into stable (cacheable)
+	// and dynamic parts so Anthropic prompt caching can reuse the stable prefix.
 	if len(params.SystemPrompts) > 0 {
-		combined := strings.Join(params.SystemPrompts, "\n\n")
-		messages = append(messages, apiMessage{Role: "system", Content: combined})
+		bp := params.CacheBreakpoint
+		if bp > 0 && bp < len(params.SystemPrompts) {
+			stable := strings.Join(params.SystemPrompts[:bp], "\n\n")
+			dynamic := strings.Join(params.SystemPrompts[bp:], "\n\n")
+			messages = append(messages, apiMessage{
+				Role:    "system",
+				Content: stable,
+				CacheControl: &apiCacheControl{Type: "ephemeral"},
+			})
+			if dynamic != "" {
+				messages = append(messages, apiMessage{Role: "system", Content: dynamic})
+			}
+		} else {
+			combined := strings.Join(params.SystemPrompts, "\n\n")
+			messages = append(messages, apiMessage{Role: "system", Content: combined})
+		}
 	}
 
 	// Conversation history: prefer unified ConvMessages, fall back to per-key History.
@@ -267,7 +303,7 @@ func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, mode
 	if effort != "" && !p.IsOllamaCompat() {
 		reqBody.Reasoning = &apiReasoning{Effort: effort, Enabled: true}
 	}
-	// Prompt caching for Anthropic models on OpenRouter.
+	// Top-level prompt caching hint for Anthropic models on OpenRouter.
 	if strings.HasPrefix(model, "anthropic/") {
 		reqBody.CacheControl = &apiCacheControl{Type: "ephemeral"}
 	}
@@ -305,7 +341,7 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	if params.Effort != "" && !p.IsOllamaCompat() {
 		reqBody.Reasoning = &apiReasoning{Effort: params.Effort, Enabled: true}
 	}
-	// Prompt caching for Anthropic models on OpenRouter.
+	// Top-level prompt caching hint for Anthropic models on OpenRouter.
 	if strings.HasPrefix(model, "anthropic/") {
 		reqBody.CacheControl = &apiCacheControl{Type: "ephemeral"}
 	}

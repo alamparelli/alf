@@ -512,7 +512,10 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	if onboarding := memory.OnboardingPrompt(e.ContextDir); onboarding != "" {
 		sysPrompts = append(sysPrompts, onboarding)
 	}
-	// Memory recall.
+	// Cache breakpoint: everything before this is stable and cacheable.
+	cacheBreakpoint := len(sysPrompts)
+
+	// Memory recall (dynamic — changes per request).
 	if recall.Block != "" {
 		sysPrompts = append(sysPrompts, recall.Block)
 	}
@@ -563,6 +566,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 					toolNames[i] = s.Name
 				}
 				sysPrompts = append([]string{memory.ToolInstruction(toolNames)}, sysPrompts...)
+				cacheBreakpoint++ // tool instruction was prepended; shift breakpoint to keep stable/dynamic split correct
 			}
 		}
 	}
@@ -573,12 +577,13 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	backendChanged := lastBackend != "" && lastBackend != tp.Backend
 
 	params := provider.Params{
-		Model:         tp.Model,
-		Tools:         tp.Tools,
-		WriteCapable:  tp.WriteCapable,
-		Effort:        tp.Effort,
-		MaxTurns:      tp.MaxTurns,
-		SystemPrompts: sysPrompts,
+		Model:           tp.Model,
+		Tools:           tp.Tools,
+		WriteCapable:    tp.WriteCapable,
+		Effort:          tp.Effort,
+		MaxTurns:        tp.MaxTurns,
+		SystemPrompts:   sysPrompts,
+		CacheBreakpoint: cacheBreakpoint,
 		ResumeID:      resumeID,
 		DataDir:       e.DataDir,
 		Env:           e.signalEnv(msg.Env),

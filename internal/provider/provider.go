@@ -30,7 +30,8 @@ type Params struct {
 	WriteCapable  bool     // if true, use --dangerously-skip-permissions; if false, restrict to Tools whitelist
 	ReadOnly      bool     // if true, use read-only sandbox (Codex: -s read-only, no shell tools)
 	Effort        string
-	SystemPrompts []string // appended system prompts (context files, reactions)
+	SystemPrompts      []string // appended system prompts (context files, reactions)
+	CacheBreakpoint    int      // index in SystemPrompts: prompts before this are cacheable, at/after are dynamic
 	MaxTurns      int
 	ResumeID      string
 	DataDir       string   // working directory for Claude subprocess

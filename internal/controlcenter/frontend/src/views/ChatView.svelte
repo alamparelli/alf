@@ -684,6 +684,7 @@
       prevConvId = id
       convStore.clearUnread(id)
       setMessages([]) // clear immediately to avoid stale flash
+      loadActiveSkills() // reload per-conversation skills
       loadHistory().then(() => {
         scrollToBottom()
         checkActiveJob() // check if this tab has a running job

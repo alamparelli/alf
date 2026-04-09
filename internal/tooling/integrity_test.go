@@ -490,17 +490,43 @@ func TestVerify_AllowsUnmodifiedTool(t *testing.T) {
 	}
 }
 
-// TestVerify_AllowsNewToolNotYetScanned verifies that Verify() allows a
-// brand new tool that hasn't been scanned yet (not in manifest).
-func TestVerify_AllowsNewToolNotYetScanned(t *testing.T) {
+// TestVerify_AllowsNewSafeTool verifies that Verify() allows a new safe tool
+// not yet in manifest, and baselines it inline.
+func TestVerify_AllowsNewSafeTool(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	ig.scan(true) // baseline with no tools
 
-	// Create tool after scan — not yet in manifest.
+	// Create safe tool after scan — not yet in manifest.
 	path := writeTool(t, toolsDir, "newtool", "#!/bin/sh\necho new")
 
 	if err := ig.Verify(path); err != nil {
-		t.Fatalf("Verify() should allow new tool not yet in manifest: %v", err)
+		t.Fatalf("Verify() should allow safe new tool: %v", err)
+	}
+
+	// Tool should now be baselined in manifest.
+	ig.mu.Lock()
+	_, exists := ig.manifest["newtool"]
+	ig.mu.Unlock()
+	if !exists {
+		t.Fatal("expected new tool to be baselined in manifest after Verify()")
+	}
+}
+
+// TestVerify_BlocksNewDangerousTool verifies that Verify() blocks a new tool
+// with dangerous patterns even before the first scan cycle.
+func TestVerify_BlocksNewDangerousTool(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	ig.scan(true) // baseline with no tools
+
+	// Create dangerous tool after scan — not yet in manifest.
+	path := writeTool(t, toolsDir, "evil", "#!/usr/bin/env python3\neval(input())")
+
+	err := ig.Verify(path)
+	if err == nil {
+		t.Fatal("Verify() should block new tool with dangerous patterns")
+	}
+	if !strings.Contains(err.Error(), "dangerous patterns") {
+		t.Fatalf("expected 'dangerous patterns' error, got: %v", err)
 	}
 }
 

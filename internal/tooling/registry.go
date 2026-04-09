@@ -100,10 +100,10 @@ func auditToolSource(toolPath, toolName string) []SecurityWarning {
 	if err != nil {
 		return nil
 	}
-	src := string(data)
+	src := strings.ToLower(string(data))
 	var warnings []SecurityWarning
 	for _, rule := range securityRuleset.Rules {
-		if strings.Contains(src, rule.Pattern) {
+		if strings.Contains(src, strings.ToLower(rule.Pattern)) {
 			warnings = append(warnings, SecurityWarning{
 				Tool:     toolName,
 				RuleID:   rule.ID,

@@ -326,10 +326,27 @@ func (ig *IntegrityGuard) Verify(toolPath string) error {
 		return ErrToolQuarantined
 	}
 
-	// Tool not yet in manifest (new, not scanned yet) — allow.
-	// It will be baselined on the next scan cycle.
+	// Tool not yet in manifest (new, not scanned yet) — audit inline
+	// before allowing execution. This closes the window between file
+	// creation and the next scan cycle.
 	entry, exists := ig.manifest[name]
 	if !exists {
+		if warnings := auditToolSource(toolPath, name); len(warnings) > 0 {
+			return fmt.Errorf("integrity: new tool %s contains dangerous patterns, blocked pending scan", name)
+		}
+		// Baseline it now so subsequent calls skip the inline audit.
+		hash, err := hashFile(toolPath)
+		if err != nil {
+			return fmt.Errorf("integrity: cannot hash new tool: %w", err)
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		ig.manifest[name] = ManifestEntry{
+			Name:      name,
+			ExeHash:   hash,
+			FirstSeen: now,
+			LastCheck: now,
+		}
+		ig.saveManifest()
 		return nil
 	}
 
@@ -512,7 +529,7 @@ func (ig *IntegrityGuard) saveQuarantine() {
 		log.Printf("[integrity] failed to marshal quarantine state: %v", err)
 		return
 	}
-	if err := os.WriteFile(ig.quarantinePath, data, 0o644); err != nil {
+	if err := os.WriteFile(ig.quarantinePath, data, 0o600); err != nil {
 		log.Printf("[integrity] failed to write quarantine state: %v", err)
 	}
 }
@@ -522,7 +539,7 @@ func (ig *IntegrityGuard) logChange(name, oldHash, newHash string) {
 	logPath := filepath.Join(filepath.Dir(ig.manifestPath), "tool-changes.log")
 	entry := fmt.Sprintf("%s\t%s\told=%s\tnew=%s\n",
 		time.Now().UTC().Format(time.RFC3339), name, oldHash[:12], newHash[:12])
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
@@ -536,7 +553,7 @@ func (ig *IntegrityGuard) saveManifest() {
 		log.Printf("[integrity] failed to marshal manifest: %v", err)
 		return
 	}
-	if err := os.WriteFile(ig.manifestPath, data, 0o644); err != nil {
+	if err := os.WriteFile(ig.manifestPath, data, 0o600); err != nil {
 		log.Printf("[integrity] failed to write manifest: %v", err)
 	}
 }

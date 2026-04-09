@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 
 	"github.com/alamparelli/alf/internal/trace"
@@ -43,6 +44,12 @@ func NewToolLoop(api *APIProvider, executor ToolExecutor, tools []map[string]any
 	if maxTurns <= 0 {
 		maxTurns = 10
 	}
+	// Sort tools by name for deterministic ordering (improves prompt cache hits).
+	slices.SortFunc(tools, func(a, b map[string]any) int {
+		nameA, _ := nestedString(a, "function", "name")
+		nameB, _ := nestedString(b, "function", "name")
+		return strings.Compare(nameA, nameB)
+	})
 	return &ToolLoop{
 		api:      api,
 		executor: executor,
@@ -170,4 +177,18 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 			tagLastMessageCache(messages)
 		}
 	}
+}
+
+// nestedString extracts a string from nested maps: m[keys[0]][keys[1]]...
+func nestedString(m map[string]any, keys ...string) (string, bool) {
+	cur := any(m)
+	for _, k := range keys {
+		mm, ok := cur.(map[string]any)
+		if !ok {
+			return "", false
+		}
+		cur = mm[k]
+	}
+	s, ok := cur.(string)
+	return s, ok
 }

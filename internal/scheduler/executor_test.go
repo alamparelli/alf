@@ -353,6 +353,103 @@ func TestRunCommand_SignalSockPath_EmptyNotSet(t *testing.T) {
 	}
 }
 
+func TestCommandEnv_ExcludesSecrets(t *testing.T) {
+	// Set secrets matching various suffix/prefix patterns.
+	t.Setenv("TELEGRAM_BOT_TOKEN", "secret-token")
+	t.Setenv("CC_AUTH_TOKEN", "secret-auth")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("VAULT_MASTER_PASSWORD", "vault-pw")
+	t.Setenv("EMBED_SHARED_SECRET", "embed-sec")
+	t.Setenv("CLAUDE_CODE_CONFIG", "claude-cfg")
+	// Non-secret vars should pass through.
+	t.Setenv("HOME", "/home/alf")
+	t.Setenv("LANG", "en_US.UTF-8")
+	t.Setenv("REDDIT_CLIENT_ID", "reddit-id") // no secret suffix
+
+	e := &Engine{cfg: Config{DataDir: t.TempDir(), SignalSockPath: "/tmp/sig.sock"}}
+	env := e.commandEnv()
+
+	envMap := make(map[string]string)
+	for _, v := range env {
+		parts := strings.SplitN(v, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	// Safe vars should be present.
+	if envMap["HOME"] != "/home/alf" {
+		t.Errorf("expected HOME=/home/alf, got %q", envMap["HOME"])
+	}
+	if envMap["LANG"] != "en_US.UTF-8" {
+		t.Errorf("expected LANG=en_US.UTF-8, got %q", envMap["LANG"])
+	}
+	if envMap["ALF_SIGNAL_SOCK"] != "/tmp/sig.sock" {
+		t.Errorf("expected ALF_SIGNAL_SOCK=/tmp/sig.sock, got %q", envMap["ALF_SIGNAL_SOCK"])
+	}
+	if envMap["REDDIT_CLIENT_ID"] != "reddit-id" {
+		t.Errorf("expected REDDIT_CLIENT_ID to pass through, got %q", envMap["REDDIT_CLIENT_ID"])
+	}
+
+	// Secrets must NOT be present.
+	for _, forbidden := range []string{
+		"TELEGRAM_BOT_TOKEN", "CC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
+		"VAULT_MASTER_PASSWORD", "EMBED_SHARED_SECRET", "CLAUDE_CODE_CONFIG",
+	} {
+		if _, ok := envMap[forbidden]; ok {
+			t.Errorf("secret %s leaked into commandEnv", forbidden)
+		}
+	}
+}
+
+func TestIsSecretEnv(t *testing.T) {
+	cases := []struct {
+		kv     string
+		secret bool
+	}{
+		{"TELEGRAM_BOT_TOKEN=abc", true},
+		{"CC_AUTH_TOKEN=xyz", true},
+		{"ANTHROPIC_API_KEY=sk-123", true},
+		{"VAULT_MASTER_PASSWORD=pw", true},
+		{"WHISPER_SHARED_SECRET=sec", true},
+		{"CLAUDE_CODE_CONFIG=/path", true},
+		{"CLAUDE_OAUTH=tok", true},
+		{"HOME=/home/alf", false},
+		{"PATH=/usr/bin", false},
+		{"REDDIT_CLIENT_ID=abc", false},
+		{"LANG=en_US.UTF-8", false},
+		{"MY_CUSTOM_VAR=hello", false},
+	}
+	for _, tc := range cases {
+		if got := isSecretEnv(tc.kv); got != tc.secret {
+			t.Errorf("isSecretEnv(%q) = %v, want %v", tc.kv, got, tc.secret)
+		}
+	}
+}
+
+func TestCommandEnv_PATHIncludesToolDirs(t *testing.T) {
+	dataDir := t.TempDir()
+	e := &Engine{cfg: Config{DataDir: dataDir}}
+	env := e.commandEnv()
+
+	var pathVal string
+	for _, v := range env {
+		if strings.HasPrefix(v, "PATH=") {
+			pathVal = strings.TrimPrefix(v, "PATH=")
+			break
+		}
+	}
+
+	toolsD := filepath.Join(dataDir, "tools.d")
+	tools := filepath.Join(dataDir, "tools")
+	if !strings.Contains(pathVal, toolsD) {
+		t.Errorf("PATH missing tools.d dir, got: %s", pathVal)
+	}
+	if !strings.Contains(pathVal, tools) {
+		t.Errorf("PATH missing tools dir, got: %s", pathVal)
+	}
+}
+
 func TestDispatch_NoChannelsConfigured(t *testing.T) {
 	e := &Engine{cfg: Config{DataDir: t.TempDir()}}
 	// Should not panic when TG and CC are nil.

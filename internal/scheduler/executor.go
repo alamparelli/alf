@@ -333,14 +333,45 @@ func (e *Engine) runCommand(j *Job) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
+// secretEnvSuffixes are environment variable name suffixes that indicate
+// daemon credentials. Any var whose name (before '=') ends with one of
+// these is excluded from direct-tier job subprocesses.
+var secretEnvSuffixes = []string{"_TOKEN", "_SECRET", "_KEY", "_PASSWORD"}
+
+// secretEnvPrefixes are environment variable prefixes that are always
+// excluded from direct-tier jobs regardless of suffix.
+var secretEnvPrefixes = []string{"CLAUDE_"}
+
+// isSecretEnv returns true if the env var (in KEY=VALUE form) looks like
+// a daemon secret based on its name suffix or prefix.
+func isSecretEnv(kv string) bool {
+	name, _, _ := strings.Cut(kv, "=")
+	upper := strings.ToUpper(name)
+	for _, suffix := range secretEnvSuffixes {
+		if strings.HasSuffix(upper, suffix) {
+			return true
+		}
+	}
+	for _, prefix := range secretEnvPrefixes {
+		if strings.HasPrefix(upper, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // commandEnv returns the environment for direct-tier command execution,
-// injecting tools directories into PATH and ALF_SIGNAL_SOCK.
+// injecting tools directories into PATH and ALF_SIGNAL_SOCK. Daemon
+// secrets are excluded to prevent exfiltration by job commands.
 func (e *Engine) commandEnv() []string {
 	var env []string
 	for _, v := range os.Environ() {
+		if isSecretEnv(v) {
+			continue
+		}
 		if strings.HasPrefix(v, "PATH=") && e.cfg.DataDir != "" {
 			toolPaths := filepath.Join(e.cfg.DataDir, "tools.d") + ":" + filepath.Join(e.cfg.DataDir, "tools")
-			v = "PATH=" + toolPaths + ":" + strings.TrimPrefix(v, "PATH=")
+			v = "PATH=" + strings.TrimPrefix(v, "PATH=") + ":" + toolPaths
 		}
 		env = append(env, v)
 	}

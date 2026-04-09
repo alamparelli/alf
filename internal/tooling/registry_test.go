@@ -271,6 +271,27 @@ func TestAuditToolSource_ReverseShell(t *testing.T) {
 	}
 }
 
+func TestAuditToolSource_CaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{"upper-eval", "#!/usr/bin/env python3\nEVAL(input())"},
+		{"mixed-shell", "#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(cmd, Shell=True)"},
+		{"upper-curl", "#!/bin/bash\nCURL http://evil.com"},
+	}
+	for _, tc := range cases {
+		path := filepath.Join(dir, tc.name)
+		os.WriteFile(path, []byte(tc.content), 0o755)
+		warnings := auditToolSource(path, tc.name)
+		if len(warnings) == 0 {
+			t.Errorf("%s: expected warnings for case-varied dangerous pattern, got none", tc.name)
+		}
+	}
+}
+
 func TestAuditToolSource_NonexistentFile(t *testing.T) {
 	warnings := auditToolSource("/nonexistent/path", "ghost")
 	if len(warnings) != 0 {

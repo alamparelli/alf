@@ -565,14 +565,29 @@ func (cs *ChatService) ActiveSkills() []string {
 	return cs.Sessions.GetSkills(apiChatID)
 }
 
+// ActiveSkillsForConv returns active skills for a specific conversation.
+func (cs *ChatService) ActiveSkillsForConv(convID string) []string {
+	return cs.Sessions.GetSkills(convSessionID(convID))
+}
+
 // RemoveActiveSkill removes a single skill from the CC session.
 func (cs *ChatService) RemoveActiveSkill(name string) {
 	cs.Sessions.RemoveSkill(apiChatID, name)
 }
 
+// RemoveActiveSkillForConv removes a single skill for a specific conversation.
+func (cs *ChatService) RemoveActiveSkillForConv(convID, name string) {
+	cs.Sessions.RemoveSkill(convSessionID(convID), name)
+}
+
 // ClearActiveSkills removes all active skills from the CC session.
 func (cs *ChatService) ClearActiveSkills() {
 	cs.Sessions.ClearSkills(apiChatID)
+}
+
+// ClearActiveSkillsForConv clears all active skills for a specific conversation.
+func (cs *ChatService) ClearActiveSkillsForConv(convID string) {
+	cs.Sessions.ClearSkills(convSessionID(convID))
 }
 
 // CurrentConvID returns the active conversation ID for the CC chat.

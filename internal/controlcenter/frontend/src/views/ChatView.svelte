@@ -128,14 +128,16 @@
 
   async function loadActiveSkills() {
     try {
-      const data = await api<{ skills: string[] }>('/api/chat/skills')
+      const cid = convId ?? ''
+      const data = await api<{ skills: string[] }>(`/api/chat/skills?conv_id=${encodeURIComponent(cid)}`)
       activeSkills = data.skills || []
     } catch { /* silent */ }
   }
 
   async function dismissSkill(name: string) {
     try {
-      await api(`/api/chat/skills?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+      const cid = convId ?? ''
+      await api(`/api/chat/skills?conv_id=${encodeURIComponent(cid)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
       activeSkills = activeSkills.filter(s => s !== name)
     } catch { /* silent */ }
   }

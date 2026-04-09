@@ -211,15 +211,16 @@ type ChatSkillsHandler struct {
 }
 
 func (h *ChatSkillsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	convID := r.URL.Query().Get("conv_id")
 	switch r.Method {
 	case http.MethodGet:
-		skills := h.Service.ActiveSkills()
+		skills := h.Service.ActiveSkillsForConv(convID)
 		respondJSON(w, http.StatusOK, map[string]any{"skills": skills})
 	case http.MethodDelete:
 		if name := r.URL.Query().Get("name"); name != "" {
-			h.Service.RemoveActiveSkill(name)
+			h.Service.RemoveActiveSkillForConv(convID, name)
 		} else {
-			h.Service.ClearActiveSkills()
+			h.Service.ClearActiveSkillsForConv(convID)
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:

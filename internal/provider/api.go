@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -126,10 +128,19 @@ type apiStreamOpts struct {
 }
 
 // apiContentBlock is a single content block within a multi-block message.
+// Supports text, image, and document types with optional source (for vision).
 type apiContentBlock struct {
-	Type         string           `json:"type"`
-	Text         string           `json:"text"`
-	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
+	Type         string            `json:"type"`
+	Text         string            `json:"text,omitempty"`
+	Source       *apiVisionSource  `json:"source,omitempty"`
+	CacheControl *apiCacheControl  `json:"cache_control,omitempty"`
+}
+
+// apiVisionSource represents base64-encoded media for vision APIs (image/document).
+type apiVisionSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 type apiMessage struct {
@@ -307,7 +318,36 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 		}
 	}
 	if !alreadyPresent {
-		messages = append(messages, apiMessage{Role: "user", Content: prompt})
+		userMsg := apiMessage{Role: "user"}
+
+		// If there's media, build multi-block content with vision blocks + text prompt.
+		if len(params.Media) > 0 {
+			var blocks []apiContentBlock
+
+			// Add vision blocks for images and documents.
+			for _, m := range params.Media {
+				block := p.buildVisionBlock(m)
+				if block != nil {
+					blocks = append(blocks, *block)
+				}
+			}
+
+			// Add text prompt as final block.
+			if prompt != "" {
+				blocks = append(blocks, apiContentBlock{Type: "text", Text: prompt})
+			}
+
+			if len(blocks) > 0 {
+				userMsg.MultiContent = blocks
+			} else {
+				// Fallback: no vision blocks built, use text content.
+				userMsg.Content = prompt
+			}
+		} else {
+			userMsg.Content = prompt
+		}
+
+		messages = append(messages, userMsg)
 	}
 	return messages
 }
@@ -327,6 +367,45 @@ func tagLastMessageCache(messages []apiMessage) {
 			messages[i].CacheControl = &apiCacheControl{Type: "ephemeral"}
 			return
 		}
+	}
+}
+
+// buildVisionBlock reads a media file and builds an apiContentBlock with vision data.
+// Returns nil if the media type is not supported or the file cannot be read.
+func (p *APIProvider) buildVisionBlock(m MediaEntry) *apiContentBlock {
+	// Read media file from disk.
+	data, err := os.ReadFile(m.TempPath)
+	if err != nil {
+		log.Printf("api: failed to read media file %s: %v", m.TempPath, err)
+		return nil
+	}
+
+	if len(data) == 0 {
+		return nil
+	}
+
+	// Encode to base64.
+	b64 := base64.StdEncoding.EncodeToString(data)
+
+	// Map media type to vision block type.
+	blockType := "image"
+	switch m.Type {
+	case "photo":
+		blockType = "image"
+	case "document", "video":
+		blockType = "document"
+	default:
+		// Unsupported media type, skip.
+		return nil
+	}
+
+	return &apiContentBlock{
+		Type: blockType,
+		Source: &apiVisionSource{
+			Type:      "base64",
+			MediaType: m.MimeType,
+			Data:      b64,
+		},
 	}
 }
 

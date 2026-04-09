@@ -665,6 +665,22 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	// Build the full prompt text (use msg.Text which includes reply context from adapter).
 	prompt := msg.Text
 
+	// For API providers, populate Media field from InMessage media entries.
+	if isAPITier && len(msg.Media) > 0 {
+		for _, m := range msg.Media {
+			params.Media = append(params.Media, provider.MediaEntry{
+				Type:        m.Type,
+				FileName:    m.FileName,
+				MimeType:    m.MimeType,
+				TempPath:    m.TempPath,
+				FramePaths:  m.FramePaths,
+				Transcript:  m.Transcript,
+				TextContent: m.TextContent,
+			})
+		}
+		log.Printf("[comms] media: populated %d entries for API provider", len(msg.Media))
+	}
+
 	invokeSpan := trace.StartSpanFromContext(ctx, "invoke", map[string]string{
 		"backend": tp.Backend, "model": tp.Model, "tier": route.Tier,
 	})

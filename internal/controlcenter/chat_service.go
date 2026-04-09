@@ -420,6 +420,23 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		}
 	}
 
+	// Populate Media field for API providers (vision support).
+	for _, mid := range req.MediaIDs {
+		entry := cs.GetUpload(mid)
+		if entry == nil {
+			continue
+		}
+		msg.Media = append(msg.Media, comms.MediaEntry{
+			Type:        entry.MediaType,
+			FileName:    entry.FileName,
+			MimeType:    entry.MimeType,
+			TempPath:    entry.TempPath,
+			FramePaths:  entry.FramePaths,
+			Transcript:  entry.Transcript,
+			TextContent: entry.TextContent,
+		})
+	}
+
 	// 4. Set up event bridge (suppress engine's "done", we emit our own).
 	cs.ccAdapter.setCallback(onEvent)
 	defer cs.ccAdapter.setCallback(nil)

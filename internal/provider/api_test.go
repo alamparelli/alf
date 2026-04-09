@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -482,5 +483,175 @@ func TestAPIProvider_ErrorStatus(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "500") {
 		t.Errorf("expected error to mention status code, got: %v", err)
+	}
+}
+
+func TestBuildVisionBlock_Image(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test-image-*.png")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Write minimal PNG data
+	pngData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	tmpFile.Write(pngData)
+	tmpFile.Close()
+
+	p := &APIProvider{}
+	m := MediaEntry{
+		Type:     "photo",
+		FileName: "test.png",
+		MimeType: "image/png",
+		TempPath: tmpFile.Name(),
+	}
+
+	block := p.buildVisionBlock(m)
+	if block == nil {
+		t.Fatalf("expected vision block, got nil")
+	}
+
+	if block.Type != "image" {
+		t.Errorf("expected type 'image', got %q", block.Type)
+	}
+
+	if block.Source == nil {
+		t.Fatalf("expected source, got nil")
+	}
+
+	if block.Source.Type != "base64" {
+		t.Errorf("expected source type 'base64', got %q", block.Source.Type)
+	}
+
+	if block.Source.MediaType != "image/png" {
+		t.Errorf("expected media type 'image/png', got %q", block.Source.MediaType)
+	}
+
+	if block.Source.Data == "" {
+		t.Errorf("expected base64 data, got empty string")
+	}
+}
+
+func TestBuildVisionBlock_Document(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test-doc-*.pdf")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	tmpFile.Write([]byte("test pdf content"))
+	tmpFile.Close()
+
+	p := &APIProvider{}
+	m := MediaEntry{
+		Type:     "document",
+		FileName: "test.pdf",
+		MimeType: "application/pdf",
+		TempPath: tmpFile.Name(),
+	}
+
+	block := p.buildVisionBlock(m)
+	if block == nil {
+		t.Fatalf("expected vision block, got nil")
+	}
+
+	if block.Type != "document" {
+		t.Errorf("expected type 'document', got %q", block.Type)
+	}
+}
+
+func TestBuildVisionBlock_FileNotFound(t *testing.T) {
+	p := &APIProvider{}
+	m := MediaEntry{
+		Type:     "photo",
+		FileName: "nonexistent.png",
+		MimeType: "image/png",
+		TempPath: "/nonexistent/path/image.png",
+	}
+
+	block := p.buildVisionBlock(m)
+	if block != nil {
+		t.Errorf("expected nil for nonexistent file, got %v", block)
+	}
+}
+
+func TestBuildVisionBlock_EmptyFile(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test-empty-*.png")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	p := &APIProvider{}
+	m := MediaEntry{
+		Type:     "photo",
+		FileName: "empty.png",
+		MimeType: "image/png",
+		TempPath: tmpFile.Name(),
+	}
+
+	block := p.buildVisionBlock(m)
+	if block != nil {
+		t.Errorf("expected nil for empty file, got %v", block)
+	}
+}
+
+func TestBuildMessages_WithMedia(t *testing.T) {
+	// Create a temporary test image
+	tmpFile, err := os.CreateTemp("", "test-*.png")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	tmpFile.Write([]byte("fake png content"))
+	tmpFile.Close()
+
+	tmpDir := t.TempDir()
+	p := NewAPIProvider("test-key", NewHistory(tmpDir, 100, 3600))
+	params := Params{
+		Model:         "test-model",
+		SystemPrompts: []string{"You are helpful."},
+		Media: []MediaEntry{
+			{
+				Type:     "photo",
+				FileName: "test.png",
+				MimeType: "image/png",
+				TempPath: tmpFile.Name(),
+			},
+		},
+	}
+
+	prompt := "What's in this image?"
+	messages := p.BuildMessages(prompt, params)
+
+	if len(messages) == 0 {
+		t.Fatalf("expected messages, got empty slice")
+	}
+
+	// Last message should be user message with multi-content
+	userMsg := messages[len(messages)-1]
+	if userMsg.Role != "user" {
+		t.Errorf("expected user role, got %q", userMsg.Role)
+	}
+
+	if len(userMsg.MultiContent) < 2 {
+		t.Errorf("expected multi-content with at least 2 blocks, got %d", len(userMsg.MultiContent))
+	}
+
+	// First block should be image (vision block)
+	if userMsg.MultiContent[0].Type != "image" {
+		t.Errorf("expected first block type 'image', got %q", userMsg.MultiContent[0].Type)
+	}
+
+	// Last block should be text prompt
+	lastBlock := userMsg.MultiContent[len(userMsg.MultiContent)-1]
+	if lastBlock.Type != "text" {
+		t.Errorf("expected last block type 'text', got %q", lastBlock.Type)
+	}
+
+	if lastBlock.Text != prompt {
+		t.Errorf("expected last block text %q, got %q", prompt, lastBlock.Text)
 	}
 }

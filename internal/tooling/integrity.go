@@ -72,10 +72,13 @@ func NewIntegrityGuard(dataDir string, notify func(tool, oldHash, newHash string
 	daemonDir := filepath.Join(dataDir, ".daemon")
 	backupDir := filepath.Join(daemonDir, "tool-backups")
 	quarantineDir := filepath.Join(daemonDir, "tool-quarantine")
-	for _, d := range []string{backupDir, quarantineDir} {
+	for _, d := range []string{daemonDir, backupDir, quarantineDir} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, fmt.Errorf("integrity: create dir %s: %w", d, err)
 		}
+		// Ensure .daemon tree is only writable by daemon (alfd, uid 1001).
+		// This prevents the LLM (alf, uid 1000) from tampering via bash.
+		os.Chmod(d, 0o700)
 	}
 
 	ig := &IntegrityGuard{

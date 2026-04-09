@@ -48,5 +48,14 @@ func CheckBoundary(dataDir, path string) (string, error) {
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("path escapes workspace boundary: %s", path)
 	}
+
+	// Deny writes to internal daemon directories — LLM must not tamper with
+	// integrity state, quarantine files, or daemon internals.
+	for _, deny := range []string{".daemon", "logs/tool-changes.log"} {
+		if strings.HasPrefix(rel, deny) {
+			return "", fmt.Errorf("path is protected (internal system directory): %s", path)
+		}
+	}
+
 	return realPath, nil
 }

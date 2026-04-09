@@ -1601,6 +1601,7 @@ func main() {
 
 			// Handle media messages: download and save for Claude to read.
 			var mediaCleanup func()
+			var mediaEntries []comms.MediaEntry
 			if hasMedia && !hasVoice {
 				// Collect all files to download (supports albums via mergeMediaGroups).
 				type fileRef struct {
@@ -1747,9 +1748,16 @@ func main() {
 								label = fmt.Sprintf("PHOTO %d/%d", fi+1, len(files))
 							}
 							allParts = append(allParts, fmt.Sprintf("[%s from Telegram chat - use Read tool to view: %s]", label, tmpPath))
+							mediaEntries = append(mediaEntries, comms.MediaEntry{
+								Type: "photo", FileName: f.FileName, MimeType: mimeType, TempPath: tmpPath,
+							})
 						} else if media.IsTextContent(mimeType) || mimeType == "application/pdf" {
 							textContent := media.ExtractTextFromDocument(data, mimeType)
 							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s", f.FileName, textContent))
+							mediaEntries = append(mediaEntries, comms.MediaEntry{
+								Type: "document", FileName: f.FileName, MimeType: mimeType,
+								TempPath: tmpPath, TextContent: textContent,
+							})
 						} else {
 							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s - use Read tool to view: %s]", f.FileName, tmpPath))
 						}
@@ -1873,6 +1881,7 @@ func main() {
 				ForcedTier: forcedTierName,
 				ConvID:     fmt.Sprintf("tg-%d", tgChatID),
 				Source:     "telegram",
+				Media:      mediaEntries,
 			}
 			if isReply {
 				msg.ReplyTo = extractReplyContext(u.Message)

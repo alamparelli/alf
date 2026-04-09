@@ -76,8 +76,9 @@ func NewIntegrityGuard(dataDir string, notify func(tool, oldHash, newHash string
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, fmt.Errorf("integrity: create dir %s: %w", d, err)
 		}
-		// Ensure .daemon tree is only writable by daemon (alfd, uid 1001).
+		// Ensure .daemon tree is owned by daemon (alfd, uid 1001) and mode 700.
 		// This prevents the LLM (alf, uid 1000) from tampering via bash.
+		os.Chown(d, 1001, 1001)
 		os.Chmod(d, 0o700)
 	}
 

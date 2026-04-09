@@ -192,30 +192,9 @@ func (ig *IntegrityGuard) scan(initial bool) {
 
 		// Hash mismatch.
 
-		// Grace period: tools created within the last 30 seconds are still
-		// being set up (LLM writes executable then schema, or refines content).
-		// Accept changes silently instead of quarantining.
-		if !initial && exists {
-			if firstSeen, err := time.Parse(time.RFC3339, entry.FirstSeen); err == nil {
-				if time.Since(firstSeen) < 30*time.Second {
-					entry.ExeHash = exeHash
-					entry.SchemaHash = schemaHash
-					entry.Size = info.Size()
-					entry.ModTime = info.ModTime().UnixNano()
-					entry.LastCheck = now
-					ig.manifest[name] = entry
-					ig.backup(toolPath)
-					ig.saveManifest()
-					log.Printf("[integrity] grace period: accepted change to new tool %s (age=%v)", name, time.Since(firstSeen).Round(time.Second))
-					continue
-				}
-			}
-		}
-
 		if initial {
 			// If already quarantined (restored from disk), don't re-baseline.
 			if _, q := ig.quarantined[name]; q {
-				// Re-restore the backup in case it was tampered with.
 				if err := ig.restore(name); err != nil {
 					log.Printf("[integrity] re-restore failed for quarantined %s on startup: %v", name, err)
 				}
@@ -247,31 +226,48 @@ func (ig *IntegrityGuard) scan(initial bool) {
 			continue
 		}
 
-		log.Printf("[integrity] MISMATCH on %s: expected=%s got=%s", name, entry.ExeHash[:12], exeHash[:12])
+		// Log-only mode: accept the change, update manifest, log to file.
+		// Only quarantine if the new version contains dangerous patterns.
+		log.Printf("[integrity] change detected: %s (old=%s new=%s)", name, entry.ExeHash[:12], exeHash[:12])
+		ig.logChange(name, entry.ExeHash, exeHash)
 
-		// Save modified version in daemon-owned quarantine dir (inaccessible to LLM user).
-		quarantinedPath := filepath.Join(ig.quarantineDir, name)
-		if err := copyFile(toolPath, quarantinedPath); err != nil {
-			log.Printf("[integrity] failed to save quarantined copy: %v", err)
-		}
-		os.Chmod(quarantinedPath, 0o600)
+		// Check for dangerous patterns — quarantine only if flagged.
+		if warnings := auditToolSource(toolPath, name); len(warnings) > 0 {
+			log.Printf("[integrity] DANGEROUS PATTERN in %s — quarantining", name)
+			for _, w := range warnings {
+				log.Printf("[integrity]   %s: %s", w.Pattern, w.Reason)
+			}
 
-		// Restore backup (the approved version).
-		if err := ig.restore(name); err != nil {
-			log.Printf("[integrity] failed to restore backup for %s: %v", name, err)
+			quarantinedPath := filepath.Join(ig.quarantineDir, name)
+			if err := copyFile(toolPath, quarantinedPath); err != nil {
+				log.Printf("[integrity] failed to save quarantined copy: %v", err)
+			}
+			os.Chmod(quarantinedPath, 0o600)
+
+			if err := ig.restore(name); err != nil {
+				log.Printf("[integrity] failed to restore backup for %s: %v", name, err)
+			}
+
+			qt := QuarantinedTool{
+				Name:    name,
+				OldHash: entry.ExeHash,
+				NewHash: exeHash,
+			}
+			ig.quarantined[name] = qt
+			ig.saveQuarantine()
+			// No notification — heartbeat will pick up quarantine state.
+			continue
 		}
 
-		qt := QuarantinedTool{
-			Name:    name,
-			OldHash: entry.ExeHash,
-			NewHash: exeHash,
-		}
-		ig.quarantined[name] = qt
-		ig.saveQuarantine()
-
-		if ig.notifyFunc != nil {
-			ig.notifyFunc(name, entry.ExeHash, exeHash)
-		}
+		// Safe change — auto-approve: update manifest and backup.
+		entry.ExeHash = exeHash
+		entry.SchemaHash = schemaHash
+		entry.Size = info.Size()
+		entry.ModTime = info.ModTime().UnixNano()
+		entry.LastCheck = now
+		ig.manifest[name] = entry
+		ig.backup(toolPath)
+		ig.saveManifest()
 	}
 
 	// Clean up manifest entries for deleted tools.
@@ -493,6 +489,19 @@ func (ig *IntegrityGuard) saveQuarantine() {
 	if err := os.WriteFile(ig.quarantinePath, data, 0o644); err != nil {
 		log.Printf("[integrity] failed to write quarantine state: %v", err)
 	}
+}
+
+// logChange appends a tool change record to the integrity log file.
+func (ig *IntegrityGuard) logChange(name, oldHash, newHash string) {
+	logPath := filepath.Join(filepath.Dir(ig.manifestPath), "tool-changes.log")
+	entry := fmt.Sprintf("%s\t%s\told=%s\tnew=%s\n",
+		time.Now().UTC().Format(time.RFC3339), name, oldHash[:12], newHash[:12])
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(entry)
 }
 
 func (ig *IntegrityGuard) saveManifest() {

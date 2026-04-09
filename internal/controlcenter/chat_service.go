@@ -300,6 +300,12 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 			}
 			if response != "" {
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": response}})
+				if cs.ChatDB != nil && req.ConvID != "" {
+					cs.ChatDB.InsertMessage(chatdb.Message{
+						ID: NewMessageID(), ConvID: req.ConvID, Role: "system",
+						Text: response, Source: "cc",
+					})
+				}
 			}
 			onEvent(ChatEvent{Type: "done", Data: ChatDoneData{}})
 			return nil
@@ -347,9 +353,14 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 				if desc != "" {
 					desc = " — " + desc
 				}
-				onEvent(ChatEvent{Type: "system", Data: map[string]string{
-					"text": fmt.Sprintf("Skill **%s** activated%s", sk.Name, desc),
-				}})
+				skillText := fmt.Sprintf("Skill **%s** activated%s", sk.Name, desc)
+				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": skillText}})
+				if cs.ChatDB != nil && req.ConvID != "" {
+					cs.ChatDB.InsertMessage(chatdb.Message{
+						ID: NewMessageID(), ConvID: req.ConvID, Role: "system",
+						Text: skillText, Source: "cc",
+					})
+				}
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
 					// Persist the skill command as a user message.
 					if cs.ChatDB != nil && req.ConvID != "" {

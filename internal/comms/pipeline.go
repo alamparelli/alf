@@ -933,7 +933,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	turnLimitHit := false
 	if notice := detectTurnLimit(result, cleanText); notice != "" {
 		turnLimitHit = true
-		resumeHint := "Send another message or use /resume to continue."
+		resumeHint := "Turn limit reached. Send another message to continue, increase the timeout, or raise the turn limit."
 		fullNotice := notice + " " + resumeHint
 		e.emit(channelID, OutEvent{Type: "system", Data: map[string]string{
 			"text":       fullNotice,

@@ -1,6 +1,7 @@
 package tooling
 
 import (
+	_ "embed"
 	"encoding/json"
 	"log"
 	"os"
@@ -8,6 +9,9 @@ import (
 	"sort"
 	"strings"
 )
+
+//go:embed ruleset.json
+var rulesetJSON []byte
 
 // ToolSchema describes a tool's interface for OpenAI function calling.
 type ToolSchema struct {
@@ -46,22 +50,43 @@ func (r *Registry) Rescan() {
 	r.scanFiles(false)
 }
 
-// dangerousPatterns are substrings in tool source code that indicate shell injection risk.
-var dangerousPatterns = []struct {
-	pattern string
-	reason  string
-}{
-	{"shell=True", "Python subprocess with shell=True allows command injection (CWE-78)"},
-	{"os.system(", "os.system() passes commands through the shell (CWE-78)"},
-	{"os.popen(", "os.popen() passes commands through the shell (CWE-78)"},
-	{"eval(", "eval() executes arbitrary code (CWE-94)"},
+// SecurityRule is a single pattern rule loaded from ruleset.json.
+type SecurityRule struct {
+	ID       string   `json:"id"`
+	Category string   `json:"category"`
+	Pattern  string   `json:"pattern"`
+	Type     string   `json:"type"` // "substring" (default) or "regex" (future)
+	Severity string   `json:"severity"`
+	CWE      string   `json:"cwe"`
+	Reason   string   `json:"reason"`
+	Languages []string `json:"languages"`
+}
+
+// SecurityRuleset is the top-level structure of ruleset.json.
+type SecurityRuleset struct {
+	Version     string         `json:"version"`
+	Description string         `json:"description"`
+	Rules       []SecurityRule `json:"rules"`
+}
+
+// securityRuleset is the parsed ruleset, loaded once at init.
+var securityRuleset SecurityRuleset
+
+func init() {
+	if err := json.Unmarshal(rulesetJSON, &securityRuleset); err != nil {
+		log.Fatalf("tooling: failed to parse embedded ruleset.json: %v", err)
+	}
 }
 
 // SecurityWarning records a dangerous pattern found in a user tool.
 type SecurityWarning struct {
-	Tool    string `json:"tool"`
-	Pattern string `json:"pattern"`
-	Reason  string `json:"reason"`
+	Tool     string `json:"tool"`
+	RuleID   string `json:"rule_id"`
+	Pattern  string `json:"pattern"`
+	Category string `json:"category"`
+	Severity string `json:"severity"`
+	CWE      string `json:"cwe"`
+	Reason   string `json:"reason"`
 }
 
 // SecurityWarnings returns warnings from the last tool scan.
@@ -69,7 +94,7 @@ func (r *Registry) SecurityWarnings() []SecurityWarning {
 	return r.secWarnings
 }
 
-// auditToolSource scans a tool's source code for dangerous patterns.
+// auditToolSource scans a tool's source code for dangerous patterns from ruleset.json.
 func auditToolSource(toolPath, toolName string) []SecurityWarning {
 	data, err := os.ReadFile(toolPath)
 	if err != nil {
@@ -77,12 +102,16 @@ func auditToolSource(toolPath, toolName string) []SecurityWarning {
 	}
 	src := string(data)
 	var warnings []SecurityWarning
-	for _, dp := range dangerousPatterns {
-		if strings.Contains(src, dp.pattern) {
+	for _, rule := range securityRuleset.Rules {
+		if strings.Contains(src, rule.Pattern) {
 			warnings = append(warnings, SecurityWarning{
-				Tool:    toolName,
-				Pattern: dp.pattern,
-				Reason:  dp.reason,
+				Tool:     toolName,
+				RuleID:   rule.ID,
+				Pattern:  rule.Pattern,
+				Category: rule.Category,
+				Severity: rule.Severity,
+				CWE:      rule.CWE,
+				Reason:   rule.Reason,
 			})
 		}
 	}

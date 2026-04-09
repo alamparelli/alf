@@ -1,0 +1,396 @@
+{
+  "version": "1.0.0",
+  "description": "Dangerous pattern ruleset for tool integrity guard. Patterns are matched against tool source code to detect supply-chain / tool-poisoning attacks.",
+  "rules": [
+    {
+      "id": "EXEC-001",
+      "category": "code_execution",
+      "pattern": "eval(",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-94",
+      "reason": "eval() executes arbitrary code",
+      "languages": ["python", "javascript", "shell"]
+    },
+    {
+      "id": "EXEC-002",
+      "category": "code_execution",
+      "pattern": "exec(",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-94",
+      "reason": "exec() executes arbitrary code",
+      "languages": ["python", "ruby"]
+    },
+    {
+      "id": "EXEC-003",
+      "category": "code_execution",
+      "pattern": "compile(",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-94",
+      "reason": "compile() can build code for later execution",
+      "languages": ["python"]
+    },
+    {
+      "id": "SHELL-001",
+      "category": "shell_injection",
+      "pattern": "os.system(",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "os.system() passes commands through the shell",
+      "languages": ["python"]
+    },
+    {
+      "id": "SHELL-002",
+      "category": "shell_injection",
+      "pattern": "os.popen(",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "os.popen() passes commands through the shell",
+      "languages": ["python"]
+    },
+    {
+      "id": "SHELL-003",
+      "category": "shell_injection",
+      "pattern": "shell=True",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "subprocess with shell=True allows command injection",
+      "languages": ["python"]
+    },
+    {
+      "id": "SHELL-004",
+      "category": "shell_injection",
+      "pattern": "child_process",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "Node.js child_process spawns shell commands",
+      "languages": ["javascript"]
+    },
+    {
+      "id": "SHELL-005",
+      "category": "shell_injection",
+      "pattern": "subprocess.call(",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-78",
+      "reason": "subprocess.call() can execute shell commands",
+      "languages": ["python"]
+    },
+    {
+      "id": "SHELL-006",
+      "category": "shell_injection",
+      "pattern": "subprocess.Popen(",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-78",
+      "reason": "subprocess.Popen() can execute shell commands",
+      "languages": ["python"]
+    },
+    {
+      "id": "EXFIL-001",
+      "category": "network_exfiltration",
+      "pattern": "curl ",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-200",
+      "reason": "curl can exfiltrate data to external servers",
+      "languages": ["shell"]
+    },
+    {
+      "id": "EXFIL-002",
+      "category": "network_exfiltration",
+      "pattern": "wget ",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-200",
+      "reason": "wget can exfiltrate data or download malicious payloads",
+      "languages": ["shell"]
+    },
+    {
+      "id": "EXFIL-003",
+      "category": "network_exfiltration",
+      "pattern": "nc ",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-200",
+      "reason": "netcat can open network connections for exfiltration or reverse shells",
+      "languages": ["shell"]
+    },
+    {
+      "id": "EXFIL-004",
+      "category": "network_exfiltration",
+      "pattern": "ncat ",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-200",
+      "reason": "ncat can open network connections for exfiltration or reverse shells",
+      "languages": ["shell"]
+    },
+    {
+      "id": "EXFIL-005",
+      "category": "network_exfiltration",
+      "pattern": "requests.post(",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "reason": "HTTP POST can exfiltrate data to external servers",
+      "languages": ["python"]
+    },
+    {
+      "id": "EXFIL-006",
+      "category": "network_exfiltration",
+      "pattern": "requests.get(",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "reason": "HTTP GET can exfiltrate data via query parameters",
+      "languages": ["python"]
+    },
+    {
+      "id": "EXFIL-007",
+      "category": "network_exfiltration",
+      "pattern": "urllib.request",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "reason": "urllib can send data to external servers",
+      "languages": ["python"]
+    },
+    {
+      "id": "EXFIL-008",
+      "category": "network_exfiltration",
+      "pattern": "http.client",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "reason": "http.client can send data to external servers",
+      "languages": ["python"]
+    },
+    {
+      "id": "EXFIL-009",
+      "category": "network_exfiltration",
+      "pattern": "fetch(",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "reason": "fetch() can send data to external servers",
+      "languages": ["javascript"]
+    },
+    {
+      "id": "EXFIL-010",
+      "category": "network_exfiltration",
+      "pattern": "XMLHttpRequest",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "reason": "XMLHttpRequest can send data to external servers",
+      "languages": ["javascript"]
+    },
+    {
+      "id": "REVSHELL-001",
+      "category": "reverse_shell",
+      "pattern": "/dev/tcp/",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "Bash /dev/tcp used for reverse shells",
+      "languages": ["shell"]
+    },
+    {
+      "id": "REVSHELL-002",
+      "category": "reverse_shell",
+      "pattern": "bash -i",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "Interactive bash commonly used in reverse shell payloads",
+      "languages": ["shell"]
+    },
+    {
+      "id": "REVSHELL-003",
+      "category": "reverse_shell",
+      "pattern": "nc -e",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "netcat -e executes a program on connection (reverse shell)",
+      "languages": ["shell"]
+    },
+    {
+      "id": "REVSHELL-004",
+      "category": "reverse_shell",
+      "pattern": "socket.socket(",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-78",
+      "reason": "Raw socket creation — common in Python reverse shells",
+      "languages": ["python"]
+    },
+    {
+      "id": "ENCODE-001",
+      "category": "encoded_payload",
+      "pattern": "base64 -d",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-116",
+      "reason": "Base64 decoding often used to hide malicious payloads",
+      "languages": ["shell"]
+    },
+    {
+      "id": "ENCODE-002",
+      "category": "encoded_payload",
+      "pattern": "| bash",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "Piping content into bash executes arbitrary commands",
+      "languages": ["shell"]
+    },
+    {
+      "id": "ENCODE-003",
+      "category": "encoded_payload",
+      "pattern": "| sh",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "Piping content into sh executes arbitrary commands",
+      "languages": ["shell"]
+    },
+    {
+      "id": "ENCODE-004",
+      "category": "encoded_payload",
+      "pattern": "| zsh",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "reason": "Piping content into zsh executes arbitrary commands",
+      "languages": ["shell"]
+    },
+    {
+      "id": "SENSITIVE-001",
+      "category": "sensitive_file_access",
+      "pattern": "/etc/passwd",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "reason": "Reading /etc/passwd exposes system user information",
+      "languages": ["shell", "python"]
+    },
+    {
+      "id": "SENSITIVE-002",
+      "category": "sensitive_file_access",
+      "pattern": "/etc/shadow",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-200",
+      "reason": "Reading /etc/shadow exposes password hashes",
+      "languages": ["shell", "python"]
+    },
+    {
+      "id": "SENSITIVE-003",
+      "category": "sensitive_file_access",
+      "pattern": ".ssh/",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-200",
+      "reason": "Accessing SSH keys enables lateral movement",
+      "languages": ["shell", "python"]
+    },
+    {
+      "id": "SENSITIVE-004",
+      "category": "sensitive_file_access",
+      "pattern": ".env",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "reason": "Reading .env files exposes secrets and API keys",
+      "languages": ["shell", "python", "javascript"]
+    },
+    {
+      "id": "SENSITIVE-005",
+      "category": "sensitive_file_access",
+      "pattern": "AWS_SECRET",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-200",
+      "reason": "Referencing AWS secrets indicates credential theft",
+      "languages": ["shell", "python", "javascript"]
+    },
+    {
+      "id": "SENSITIVE-006",
+      "category": "sensitive_file_access",
+      "pattern": "OPENAI_API_KEY",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "reason": "Referencing API keys indicates credential theft",
+      "languages": ["shell", "python", "javascript"]
+    },
+    {
+      "id": "PRIV-001",
+      "category": "privilege_escalation",
+      "pattern": "chmod 777",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-732",
+      "reason": "World-writable permissions enable privilege escalation",
+      "languages": ["shell"]
+    },
+    {
+      "id": "PRIV-002",
+      "category": "privilege_escalation",
+      "pattern": "chmod u+s",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-732",
+      "reason": "SUID bit enables privilege escalation",
+      "languages": ["shell"]
+    },
+    {
+      "id": "PRIV-003",
+      "category": "privilege_escalation",
+      "pattern": "sudo ",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-250",
+      "reason": "sudo elevates privileges — unexpected in tool context",
+      "languages": ["shell"]
+    },
+    {
+      "id": "DESTRUCT-001",
+      "category": "destructive",
+      "pattern": "rm -rf /",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-400",
+      "reason": "Recursive deletion of root filesystem",
+      "languages": ["shell"]
+    },
+    {
+      "id": "DESTRUCT-002",
+      "category": "destructive",
+      "pattern": "mkfs.",
+      "type": "substring",
+      "severity": "critical",
+      "cwe": "CWE-400",
+      "reason": "Formatting filesystem destroys all data",
+      "languages": ["shell"]
+    },
+    {
+      "id": "DESTRUCT-003",
+      "category": "destructive",
+      "pattern": "dd if=",
+      "type": "substring",
+      "severity": "high",
+      "cwe": "CWE-400",
+      "reason": "dd can overwrite disks or exfiltrate raw data",
+      "languages": ["shell"]
+    }
+  ]
+}

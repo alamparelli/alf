@@ -1683,7 +1683,9 @@ func main() {
 
 						mimeType := media.DetectMimeType(data, f.FileName)
 						ext := extFromMime(mimeType, f.FileName)
-						tmpFile, err := os.CreateTemp("", "alf-media-*"+ext)
+						mediaDir := filepath.Join(dataDir, "media")
+						os.MkdirAll(mediaDir, 0o755)
+						tmpFile, err := os.CreateTemp(mediaDir, "alf-media-*"+ext)
 						if err != nil {
 							log.Printf("media temp file failed: %v", err)
 							continue

@@ -72,3 +72,25 @@ func TestVersionInjection_DevLocal(t *testing.T) {
 		t.Error("dev-local.sh missing BUILD_VERSION")
 	}
 }
+
+// TestRegression_DevDeploy_TeamsNoDelete ensures dev-deploy.sh does NOT use
+// --delete when rsyncing agent teams, which would wipe user-created teams.
+func TestRegression_DevDeploy_TeamsNoDelete(t *testing.T) {
+	content := readRepoFile(t, "scripts/dev-deploy.sh")
+
+	// Find the teams rsync block and check it doesn't use --delete.
+	// The pattern is: "Syncing bundled agent teams" followed by rsync command.
+	idx := strings.Index(content, "agent teams")
+	if idx == -1 {
+		t.Fatal("dev-deploy.sh missing agent teams sync section")
+	}
+	// Check the next ~200 chars after the marker for --delete.
+	end := idx + 200
+	if end > len(content) {
+		end = len(content)
+	}
+	block := content[idx:end]
+	if strings.Contains(block, "--delete") {
+		t.Error("dev-deploy.sh uses --delete for teams rsync — this wipes user-created teams on deploy")
+	}
+}

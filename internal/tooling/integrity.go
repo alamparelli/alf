@@ -54,15 +54,16 @@ type QuarantinedTool struct {
 
 // IntegrityGuard watches tools/ for modifications and quarantines tampered tools.
 type IntegrityGuard struct {
-	manifestPath  string
-	backupDir     string
-	quarantineDir string // .daemon/tool-quarantine/ — inaccessible to LLM user
-	toolsDir      string
-	manifest      map[string]ManifestEntry
-	quarantined   map[string]QuarantinedTool
-	mu            sync.Mutex
-	notifyFunc    func(tool, oldHash, newHash string)
-	stopCh        chan struct{}
+	manifestPath    string
+	quarantinePath  string // .daemon/tool-quarantine.json — persisted state
+	backupDir       string
+	quarantineDir   string // .daemon/tool-quarantine/ — inaccessible to LLM user
+	toolsDir        string
+	manifest        map[string]ManifestEntry
+	quarantined     map[string]QuarantinedTool
+	mu              sync.Mutex
+	notifyFunc      func(tool, oldHash, newHash string)
+	stopCh          chan struct{}
 }
 
 // NewIntegrityGuard creates a guard that stores manifests under {dataDir}/.daemon/.
@@ -78,14 +79,15 @@ func NewIntegrityGuard(dataDir string, notify func(tool, oldHash, newHash string
 	}
 
 	ig := &IntegrityGuard{
-		manifestPath:  filepath.Join(daemonDir, "tool-manifest.json"),
-		backupDir:     backupDir,
-		quarantineDir: quarantineDir,
-		toolsDir:      filepath.Join(dataDir, "tools"),
-		manifest:     make(map[string]ManifestEntry),
-		quarantined:  make(map[string]QuarantinedTool),
-		notifyFunc:   notify,
-		stopCh:       make(chan struct{}),
+		manifestPath:   filepath.Join(daemonDir, "tool-manifest.json"),
+		quarantinePath: filepath.Join(daemonDir, "tool-quarantine.json"),
+		backupDir:      backupDir,
+		quarantineDir:  quarantineDir,
+		toolsDir:       filepath.Join(dataDir, "tools"),
+		manifest:       make(map[string]ManifestEntry),
+		quarantined:    make(map[string]QuarantinedTool),
+		notifyFunc:     notify,
+		stopCh:         make(chan struct{}),
 	}
 	if err := ig.loadManifest(); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("integrity: load manifest: %w", err)
@@ -189,6 +191,27 @@ func (ig *IntegrityGuard) scan(initial bool) {
 		}
 
 		// Hash mismatch.
+
+		// Grace period: tools created within the last 30 seconds are still
+		// being set up (LLM writes executable then schema, or refines content).
+		// Accept changes silently instead of quarantining.
+		if !initial && exists {
+			if firstSeen, err := time.Parse(time.RFC3339, entry.FirstSeen); err == nil {
+				if time.Since(firstSeen) < 30*time.Second {
+					entry.ExeHash = exeHash
+					entry.SchemaHash = schemaHash
+					entry.Size = info.Size()
+					entry.ModTime = info.ModTime().UnixNano()
+					entry.LastCheck = now
+					ig.manifest[name] = entry
+					ig.backup(toolPath)
+					ig.saveManifest()
+					log.Printf("[integrity] grace period: accepted change to new tool %s (age=%v)", name, time.Since(firstSeen).Round(time.Second))
+					continue
+				}
+			}
+		}
+
 		if initial {
 			// If already quarantined (restored from disk), don't re-baseline.
 			if _, q := ig.quarantined[name]; q {
@@ -244,6 +267,7 @@ func (ig *IntegrityGuard) scan(initial bool) {
 			NewHash: exeHash,
 		}
 		ig.quarantined[name] = qt
+		ig.saveQuarantine()
 
 		if ig.notifyFunc != nil {
 			ig.notifyFunc(name, entry.ExeHash, exeHash)
@@ -351,6 +375,7 @@ func (ig *IntegrityGuard) ApproveModified(name string) error {
 	ig.saveManifest()
 
 	delete(ig.quarantined, name)
+	ig.saveQuarantine()
 	log.Printf("[integrity] approved modified tool: %s (new hash=%s)", name, qt.NewHash[:12])
 	return nil
 }
@@ -378,6 +403,7 @@ func (ig *IntegrityGuard) RevertTool(name string) error {
 	}
 
 	delete(ig.quarantined, name)
+	ig.saveQuarantine()
 	log.Printf("[integrity] reverted tool: %s (kept original)", name)
 	return nil
 }
@@ -410,9 +436,23 @@ func (ig *IntegrityGuard) loadManifest() error {
 	return json.Unmarshal(data, &ig.manifest)
 }
 
-// restoreQuarantineState rebuilds the in-memory quarantine map from files
-// present in the quarantine directory. This survives daemon restarts.
+// restoreQuarantineState rebuilds the in-memory quarantine map.
+// Primary source: tool-quarantine.json (authoritative).
+// Fallback: scan quarantine directory files (backwards compat).
 func (ig *IntegrityGuard) restoreQuarantineState() {
+	// Try JSON state file first.
+	if data, err := os.ReadFile(ig.quarantinePath); err == nil {
+		var state map[string]QuarantinedTool
+		if json.Unmarshal(data, &state) == nil && len(state) > 0 {
+			for name, qt := range state {
+				ig.quarantined[name] = qt
+				log.Printf("[integrity] restored quarantine state for: %s", name)
+			}
+			return
+		}
+	}
+
+	// Fallback: rebuild from quarantine directory files.
 	entries, err := os.ReadDir(ig.quarantineDir)
 	if err != nil {
 		return
@@ -436,7 +476,22 @@ func (ig *IntegrityGuard) restoreQuarantineState() {
 			OldHash: oldHash,
 			NewHash: newHash,
 		}
-		log.Printf("[integrity] restored quarantine state for: %s", name)
+		log.Printf("[integrity] restored quarantine state for: %s (from dir)", name)
+	}
+	if len(ig.quarantined) > 0 {
+		ig.saveQuarantine()
+	}
+}
+
+// saveQuarantine persists the quarantine map to disk.
+func (ig *IntegrityGuard) saveQuarantine() {
+	data, err := json.MarshalIndent(ig.quarantined, "", "  ")
+	if err != nil {
+		log.Printf("[integrity] failed to marshal quarantine state: %v", err)
+		return
+	}
+	if err := os.WriteFile(ig.quarantinePath, data, 0o644); err != nil {
+		log.Printf("[integrity] failed to write quarantine state: %v", err)
 	}
 }
 

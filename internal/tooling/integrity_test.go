@@ -3,6 +3,7 @@ package tooling
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,18 @@ func writeTool(t *testing.T, toolsDir, name, content string) string {
 // scanOnce triggers a non-initial scan (simulates a poll tick).
 func scanOnce(ig *IntegrityGuard) {
 	ig.scan(false)
+}
+
+// ageManifest backdates all manifest entries past the grace period so that
+// modifications trigger quarantine in tests (which run in <1s).
+func ageManifest(ig *IntegrityGuard) {
+	ig.mu.Lock()
+	defer ig.mu.Unlock()
+	old := time.Now().Add(-60 * time.Second).UTC().Format(time.RFC3339)
+	for name, entry := range ig.manifest {
+		entry.FirstSeen = old
+		ig.manifest[name] = entry
+	}
 }
 
 func TestIntegrity_NewTool_Registered(t *testing.T) {
@@ -70,6 +83,7 @@ func TestIntegrity_ModifiedTool_Quarantined(t *testing.T) {
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
 
 	ig.scan(true) // baseline
+	ageManifest(ig)
 
 	// Modify the tool (with different mtime to bypass fast path).
 	time.Sleep(10 * time.Millisecond)
@@ -98,6 +112,7 @@ func TestIntegrity_Check_ReturnsQuarantined(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
 	os.WriteFile(path, []byte("#!/bin/sh\necho HACKED"), 0o755)
@@ -112,6 +127,7 @@ func TestIntegrity_ApproveModified(t *testing.T) {
 	dir, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
 	os.WriteFile(path, []byte("#!/bin/sh\necho v2"), 0o755)
@@ -148,6 +164,7 @@ func TestIntegrity_RevertTool(t *testing.T) {
 	dir, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
 	os.WriteFile(path, []byte("#!/bin/sh\necho HACKED"), 0o755)
@@ -185,6 +202,7 @@ func TestIntegrity_SchemaChange_Quarantined(t *testing.T) {
 	os.WriteFile(schemaPath, []byte(`{"name":"mytool"}`), 0o644)
 
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
 	os.WriteFile(schemaPath, []byte(`{"name":"mytool","description":"hacked"}`), 0o644)
@@ -233,6 +251,7 @@ func TestIntegrity_NotifyFunc_Called(t *testing.T) {
 
 	path := writeTool(t, toolsDir, "test", "original")
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
 	os.WriteFile(path, []byte("modified"), 0o755)
@@ -316,6 +335,7 @@ func TestIntegrity_Quarantined_List(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "a", "original")
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
 	os.WriteFile(path, []byte("modified"), 0o755)
@@ -346,6 +366,7 @@ func TestIntegrity_RewriteWhileQuarantined_ReRestored(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho original")
 	ig.scan(true)
+	ageManifest(ig)
 
 	// First modification → quarantine.
 	time.Sleep(10 * time.Millisecond)
@@ -402,6 +423,7 @@ func TestVerify_BlocksModifiedBetweenScans(t *testing.T) {
 
 	// Scan to baseline the tool.
 	ig.scan(true)
+	ageManifest(ig)
 
 	// Simulate LLM modifying the tool AFTER scan but BEFORE execution.
 	time.Sleep(10 * time.Millisecond)
@@ -451,6 +473,7 @@ func TestVerify_BlocksQuarantinedTool(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "qtool", "#!/bin/sh\necho v1")
 	ig.scan(true)
+	ageManifest(ig)
 
 	// Modify and scan to trigger quarantine.
 	time.Sleep(10 * time.Millisecond)
@@ -463,5 +486,111 @@ func TestVerify_BlocksQuarantinedTool(t *testing.T) {
 
 	if err := ig.Verify(path); err == nil {
 		t.Fatal("Verify() should block quarantined tool")
+	}
+}
+
+// --- Regression tests for #221 ---
+
+// TestRegression221_NewToolGracePeriod verifies that a newly created tool
+// modified within 30s is NOT quarantined (LLM creation pattern: write then refine).
+func TestRegression221_NewToolGracePeriod(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+
+	// Simulate LLM creating a tool (no initial baseline — tool didn't exist).
+	path := writeTool(t, toolsDir, "newtool", "#!/bin/sh\necho v1")
+	scanOnce(ig) // registers as new tool
+
+	ig.mu.Lock()
+	_, exists := ig.manifest["newtool"]
+	ig.mu.Unlock()
+	if !exists {
+		t.Fatal("tool should be registered after first scan")
+	}
+
+	// LLM modifies it immediately (within grace period).
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/bin/sh\necho v2"), 0o755)
+	scanOnce(ig)
+
+	if ig.IsQuarantined("newtool") {
+		t.Fatal("newly created tool modified within grace period should NOT be quarantined (#221)")
+	}
+
+	// Manifest should have the updated hash.
+	ig.mu.Lock()
+	entry := ig.manifest["newtool"]
+	ig.mu.Unlock()
+	hash, _ := hashFile(path)
+	if entry.ExeHash != hash {
+		t.Fatal("manifest should reflect the latest version during grace period")
+	}
+}
+
+// TestRegression221_QuarantinePersistsReboot verifies that quarantine state
+// survives daemon restart (new IntegrityGuard instance reads persisted state).
+func TestRegression221_QuarantinePersistsReboot(t *testing.T) {
+	dir, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho original")
+	ig.scan(true)
+	ageManifest(ig)
+
+	// Modify and quarantine.
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/bin/sh\necho hacked"), 0o755)
+	scanOnce(ig)
+
+	if !ig.IsQuarantined("hello") {
+		t.Fatal("tool should be quarantined")
+	}
+
+	// Simulate daemon restart — create new guard.
+	ig2, err := NewIntegrityGuard(dir, nil)
+	if err != nil {
+		t.Fatalf("new guard: %v", err)
+	}
+
+	// Quarantine state should be restored from JSON file.
+	if !ig2.IsQuarantined("hello") {
+		t.Fatal("quarantine state should persist across daemon restart (#221)")
+	}
+
+	// /tool keep should work on the restarted guard.
+	if err := ig2.ApproveModified("hello"); err != nil {
+		t.Fatalf("/tool keep failed after restart: %v (#221)", err)
+	}
+
+	if ig2.IsQuarantined("hello") {
+		t.Fatal("tool should not be quarantined after approval")
+	}
+}
+
+// TestRegression221_QuarantineJSONPersistence verifies the JSON state file
+// is written and cleaned up correctly.
+func TestRegression221_QuarantineJSONPersistence(t *testing.T) {
+	dir, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "tool1", "#!/bin/sh\necho v1")
+	ig.scan(true)
+	ageManifest(ig)
+
+	// Quarantine.
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/bin/sh\necho v2"), 0o755)
+	scanOnce(ig)
+
+	// JSON file should exist.
+	jsonPath := filepath.Join(dir, ".daemon", "tool-quarantine.json")
+	if _, err := os.Stat(jsonPath); os.IsNotExist(err) {
+		t.Fatal("tool-quarantine.json should exist after quarantine")
+	}
+
+	// Approve — JSON should be updated (empty map).
+	ig.ApproveModified("tool1")
+
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal("should be able to read quarantine JSON after approve")
+	}
+	if strings.Contains(string(data), "tool1") {
+		t.Fatal("tool1 should be removed from quarantine JSON after approve")
 	}
 }

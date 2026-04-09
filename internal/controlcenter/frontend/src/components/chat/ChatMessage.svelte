@@ -835,8 +835,14 @@
   }
 
   @media (max-width: 768px) {
+    .chat-avatar {
+      display: none;
+    }
+    .chat-row {
+      max-width: 92%;
+    }
     .chat-msg {
-      max-width: 90%;
+      max-width: 100%;
     }
   }
 </style>

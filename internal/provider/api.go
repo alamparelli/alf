@@ -636,7 +636,6 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 			} `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			log.Printf("api[%s]: SSE parse error: %v | payload: %.200s", p.name, err, payload)
 			continue
 		}
 

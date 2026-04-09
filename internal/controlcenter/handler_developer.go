@@ -168,7 +168,7 @@ func (h *DeveloperHandler) handleSkills(w http.ResponseWriter, r *http.Request) 
 func (h *DeveloperHandler) handleAppMeta(w http.ResponseWriter, r *http.Request) {
 	slug := r.URL.Query().Get("slug")
 	if slug == "" || !validName.MatchString(slug) {
-		http.Error(w, "invalid slug", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid slug")
 		return
 	}
 
@@ -246,7 +246,7 @@ var validCategories = map[string]bool{
 func (h *DeveloperHandler) handleValidate(w http.ResponseWriter, r *http.Request) {
 	var req validateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 
@@ -307,20 +307,20 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	var req publishRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("[developer] publish: decode body: %v", err)
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 
 	if req.Slug == "" || !validName.MatchString(req.Slug) {
 		log.Printf("[developer] publish: invalid slug %q", req.Slug)
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid slug"})
+		respondError(w, http.StatusBadRequest, "invalid slug")
 		return
 	}
 
 	client := h.vaultClient()
 	if client == nil {
 		log.Printf("[developer] publish: vault not available (manager=%v)", h.VaultManager != nil)
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "vault not available"})
+		respondError(w, http.StatusBadRequest, "vault not available")
 		return
 	}
 
@@ -354,7 +354,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	manifestJSON, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := os.WriteFile(filepath.Join(appDir, "manifest.json"), manifestJSON, 0o644); err != nil {
 		log.Printf("[developer] publish: write manifest to %s: %v", filepath.Join(appDir, "manifest.json"), err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write manifest: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "write manifest: " + err.Error())
 		return
 	}
 
@@ -367,7 +367,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 		"--exclude=*.pem", "--exclude=*.key", ".")
 	if out, err := tarCmd.CombinedOutput(); err != nil {
 		log.Printf("[developer] publish: tar %s failed: %v — %s", appDir, err, string(out))
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "tar: " + string(out)})
+		respondError(w, http.StatusInternalServerError, "tar: " + string(out))
 		return
 	}
 
@@ -380,7 +380,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	// manifest field
 	if err := mw.WriteField("manifest", string(manifestJSON)); err != nil {
 		log.Printf("[developer] publish: multipart write manifest field: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "multipart: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "multipart: " + err.Error())
 		return
 	}
 
@@ -388,7 +388,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	tarFile, err := os.Open(tarball)
 	if err != nil {
 		log.Printf("[developer] publish: open tarball %s: %v", tarball, err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "open tarball: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "open tarball: " + err.Error())
 		return
 	}
 	defer tarFile.Close()
@@ -396,12 +396,12 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	bundlePart, err := mw.CreateFormFile("app_bundle", filepath.Base(tarball))
 	if err != nil {
 		log.Printf("[developer] publish: create form file: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "multipart: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "multipart: " + err.Error())
 		return
 	}
 	if _, err := io.Copy(bundlePart, tarFile); err != nil {
 		log.Printf("[developer] publish: copy tarball to multipart: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy tarball: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "copy tarball: " + err.Error())
 		return
 	}
 
@@ -423,7 +423,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	httpReq, err := http.NewRequestWithContext(r.Context(), "POST", vc.Addr+publishPath, &buf)
 	if err != nil {
 		log.Printf("[developer] publish: build HTTP request to %s: %v", vc.Addr+publishPath, err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "build request: " + err.Error()})
+		respondError(w, http.StatusInternalServerError, "build request: " + err.Error())
 		return
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
@@ -431,7 +431,7 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 	resp, err := vc.DoRequest(httpReq)
 	if err != nil {
 		log.Printf("[developer] publish: DoRequest failed: %v", err)
-		respondJSON(w, http.StatusBadGateway, map[string]string{"error": "publish failed: " + err.Error()})
+		respondError(w, http.StatusBadGateway, "publish failed: " + err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -451,19 +451,19 @@ func (h *DeveloperHandler) handleUnpublish(w http.ResponseWriter, r *http.Reques
 		Slug string `json:"slug"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Slug == "" || !validName.MatchString(req.Slug) {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 
 	client := h.vaultClient()
 	if client == nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "vault not available"})
+		respondError(w, http.StatusBadRequest, "vault not available")
 		return
 	}
 
 	resp, err := client.Proxy("marketplace", "DELETE", "/api/apps/"+req.Slug, nil)
 	if err != nil {
-		respondJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	defer resp.Body.Close()

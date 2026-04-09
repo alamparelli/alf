@@ -34,6 +34,16 @@ import (
 // ErrToolQuarantined is returned when a tool fails integrity check.
 var ErrToolQuarantined = errors.New("tool quarantined: hash mismatch detected, awaiting user approval")
 
+// UID/GID constants for file ownership.
+// alf (uid 1000): LLM user — runs bash, creates tools.
+// alfd (uid 1001): daemon — owns .daemon/, quarantine state, integrity data.
+const (
+	uidAlf  = 1000
+	gidAlf  = 1000
+	uidAlfd = 1001
+	gidAlfd = 1001
+)
+
 // ManifestEntry records the approved state of a tool.
 type ManifestEntry struct {
 	Name       string `json:"name"`
@@ -54,15 +64,16 @@ type QuarantinedTool struct {
 
 // IntegrityGuard watches tools/ for modifications and quarantines tampered tools.
 type IntegrityGuard struct {
-	manifestPath  string
-	backupDir     string
-	quarantineDir string // .daemon/tool-quarantine/ — inaccessible to LLM user
-	toolsDir      string
-	manifest      map[string]ManifestEntry
-	quarantined   map[string]QuarantinedTool
-	mu            sync.Mutex
-	notifyFunc    func(tool, oldHash, newHash string)
-	stopCh        chan struct{}
+	manifestPath    string
+	quarantinePath  string // .daemon/tool-quarantine.json — persisted state
+	backupDir       string
+	quarantineDir   string // .daemon/tool-quarantine/ — inaccessible to LLM user
+	toolsDir        string
+	manifest        map[string]ManifestEntry
+	quarantined     map[string]QuarantinedTool
+	mu              sync.Mutex
+	notifyFunc      func(tool, oldHash, newHash string)
+	stopCh          chan struct{}
 }
 
 // NewIntegrityGuard creates a guard that stores manifests under {dataDir}/.daemon/.
@@ -71,21 +82,26 @@ func NewIntegrityGuard(dataDir string, notify func(tool, oldHash, newHash string
 	daemonDir := filepath.Join(dataDir, ".daemon")
 	backupDir := filepath.Join(daemonDir, "tool-backups")
 	quarantineDir := filepath.Join(daemonDir, "tool-quarantine")
-	for _, d := range []string{backupDir, quarantineDir} {
+	for _, d := range []string{daemonDir, backupDir, quarantineDir} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, fmt.Errorf("integrity: create dir %s: %w", d, err)
 		}
+		// Ensure .daemon tree is owned by daemon (alfd, uid 1001) and mode 700.
+		// This prevents the LLM (alf, uid 1000) from tampering via bash.
+		os.Chown(d, uidAlfd, gidAlfd)
+		os.Chmod(d, 0o700)
 	}
 
 	ig := &IntegrityGuard{
-		manifestPath:  filepath.Join(daemonDir, "tool-manifest.json"),
-		backupDir:     backupDir,
-		quarantineDir: quarantineDir,
-		toolsDir:      filepath.Join(dataDir, "tools"),
-		manifest:     make(map[string]ManifestEntry),
-		quarantined:  make(map[string]QuarantinedTool),
-		notifyFunc:   notify,
-		stopCh:       make(chan struct{}),
+		manifestPath:   filepath.Join(daemonDir, "tool-manifest.json"),
+		quarantinePath: filepath.Join(daemonDir, "tool-quarantine.json"),
+		backupDir:      backupDir,
+		quarantineDir:  quarantineDir,
+		toolsDir:       filepath.Join(dataDir, "tools"),
+		manifest:       make(map[string]ManifestEntry),
+		quarantined:    make(map[string]QuarantinedTool),
+		notifyFunc:     notify,
+		stopCh:         make(chan struct{}),
 	}
 	if err := ig.loadManifest(); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("integrity: load manifest: %w", err)
@@ -189,10 +205,10 @@ func (ig *IntegrityGuard) scan(initial bool) {
 		}
 
 		// Hash mismatch.
+
 		if initial {
 			// If already quarantined (restored from disk), don't re-baseline.
 			if _, q := ig.quarantined[name]; q {
-				// Re-restore the backup in case it was tampered with.
 				if err := ig.restore(name); err != nil {
 					log.Printf("[integrity] re-restore failed for quarantined %s on startup: %v", name, err)
 				}
@@ -221,33 +237,58 @@ func (ig *IntegrityGuard) scan(initial bool) {
 					log.Printf("[integrity] re-restored quarantined %s (LLM re-wrote)", name)
 				}
 			}
+			lockdownTool(toolPath)
 			continue
 		}
 
-		log.Printf("[integrity] MISMATCH on %s: expected=%s got=%s", name, entry.ExeHash[:12], exeHash[:12])
+		// Log-only mode: accept the change, update manifest, log to file.
+		// Only quarantine if the new version contains dangerous patterns.
+		log.Printf("[integrity] change detected: %s (old=%s new=%s)", name, entry.ExeHash[:12], exeHash[:12])
+		ig.logChange(name, entry.ExeHash, exeHash)
 
-		// Save modified version in daemon-owned quarantine dir (inaccessible to LLM user).
-		quarantinedPath := filepath.Join(ig.quarantineDir, name)
-		if err := copyFile(toolPath, quarantinedPath); err != nil {
-			log.Printf("[integrity] failed to save quarantined copy: %v", err)
-		}
-		os.Chmod(quarantinedPath, 0o600)
+		// Check for dangerous patterns — quarantine only if flagged.
+		if warnings := auditToolSource(toolPath, name); len(warnings) > 0 {
+			log.Printf("[integrity] DANGEROUS PATTERN in %s — quarantining", name)
+			for _, w := range warnings {
+				log.Printf("[integrity]   %s: %s", w.Pattern, w.Reason)
+			}
 
-		// Restore backup (the approved version).
-		if err := ig.restore(name); err != nil {
-			log.Printf("[integrity] failed to restore backup for %s: %v", name, err)
+			quarantinedPath := filepath.Join(ig.quarantineDir, name)
+			if err := copyFile(toolPath, quarantinedPath); err != nil {
+				log.Printf("[integrity] failed to save quarantined copy: %v", err)
+			}
+			os.Chmod(quarantinedPath, 0o600)
+			os.Chown(quarantinedPath, uidAlfd, gidAlfd)
+
+			if err := ig.restore(name); err != nil {
+				log.Printf("[integrity] failed to restore backup for %s: %v", name, err)
+			}
+			lockdownTool(toolPath)
+
+			qt := QuarantinedTool{
+				Name:    name,
+				OldHash: entry.ExeHash,
+				NewHash: exeHash,
+			}
+			ig.quarantined[name] = qt
+			ig.saveQuarantine()
+
+			// Notify user — dangerous quarantine requires human attention.
+			if ig.notifyFunc != nil {
+				ig.notifyFunc(name, entry.ExeHash, exeHash)
+			}
+			continue
 		}
 
-		qt := QuarantinedTool{
-			Name:    name,
-			OldHash: entry.ExeHash,
-			NewHash: exeHash,
-		}
-		ig.quarantined[name] = qt
-
-		if ig.notifyFunc != nil {
-			ig.notifyFunc(name, entry.ExeHash, exeHash)
-		}
+		// Safe change — auto-approve: update manifest and backup.
+		entry.ExeHash = exeHash
+		entry.SchemaHash = schemaHash
+		entry.Size = info.Size()
+		entry.ModTime = info.ModTime().UnixNano()
+		entry.LastCheck = now
+		ig.manifest[name] = entry
+		ig.backup(toolPath)
+		ig.saveManifest()
 	}
 
 	// Clean up manifest entries for deleted tools.
@@ -285,10 +326,27 @@ func (ig *IntegrityGuard) Verify(toolPath string) error {
 		return ErrToolQuarantined
 	}
 
-	// Tool not yet in manifest (new, not scanned yet) — allow.
-	// It will be baselined on the next scan cycle.
+	// Tool not yet in manifest (new, not scanned yet) — audit inline
+	// before allowing execution. This closes the window between file
+	// creation and the next scan cycle.
 	entry, exists := ig.manifest[name]
 	if !exists {
+		if warnings := auditToolSource(toolPath, name); len(warnings) > 0 {
+			return fmt.Errorf("integrity: new tool %s contains dangerous patterns, blocked pending scan", name)
+		}
+		// Baseline it now so subsequent calls skip the inline audit.
+		hash, err := hashFile(toolPath)
+		if err != nil {
+			return fmt.Errorf("integrity: cannot hash new tool: %w", err)
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		ig.manifest[name] = ManifestEntry{
+			Name:      name,
+			ExeHash:   hash,
+			FirstSeen: now,
+			LastCheck: now,
+		}
+		ig.saveManifest()
 		return nil
 	}
 
@@ -327,11 +385,11 @@ func (ig *IntegrityGuard) ApproveModified(name string) error {
 	toolPath := filepath.Join(ig.toolsDir, name)
 	quarantinedPath := filepath.Join(ig.quarantineDir, name)
 
-	// Move quarantined version back as the active tool and restore execute permission.
+	// Move quarantined version back as the active tool and restore permissions.
 	if err := copyFile(quarantinedPath, toolPath); err != nil {
 		return fmt.Errorf("integrity: restore quarantined: %w", err)
 	}
-	os.Chmod(toolPath, 0o755)
+	unlockTool(toolPath)
 	os.Remove(quarantinedPath)
 
 	// Update manifest with new hash.
@@ -351,6 +409,7 @@ func (ig *IntegrityGuard) ApproveModified(name string) error {
 	ig.saveManifest()
 
 	delete(ig.quarantined, name)
+	ig.saveQuarantine()
 	log.Printf("[integrity] approved modified tool: %s (new hash=%s)", name, qt.NewHash[:12])
 	return nil
 }
@@ -377,7 +436,11 @@ func (ig *IntegrityGuard) RevertTool(name string) error {
 		}
 	}
 
+	// Restore execute permission and alf ownership now that quarantine is cleared.
+	unlockTool(toolPath)
+
 	delete(ig.quarantined, name)
+	ig.saveQuarantine()
 	log.Printf("[integrity] reverted tool: %s (kept original)", name)
 	return nil
 }
@@ -410,9 +473,25 @@ func (ig *IntegrityGuard) loadManifest() error {
 	return json.Unmarshal(data, &ig.manifest)
 }
 
-// restoreQuarantineState rebuilds the in-memory quarantine map from files
-// present in the quarantine directory. This survives daemon restarts.
+// restoreQuarantineState rebuilds the in-memory quarantine map.
+// Primary source: tool-quarantine.json (authoritative).
+// Fallback: scan quarantine directory files (backwards compat).
 func (ig *IntegrityGuard) restoreQuarantineState() {
+	// Try JSON state file first.
+	if data, err := os.ReadFile(ig.quarantinePath); err == nil {
+		var state map[string]QuarantinedTool
+		if json.Unmarshal(data, &state) == nil && len(state) > 0 {
+			for name, qt := range state {
+				ig.quarantined[name] = qt
+				// Re-enforce lockdown on startup (perms may have been tampered with).
+				lockdownTool(filepath.Join(ig.toolsDir, name))
+				log.Printf("[integrity] restored quarantine state for: %s", name)
+			}
+			return
+		}
+	}
+
+	// Fallback: rebuild from quarantine directory files.
 	entries, err := os.ReadDir(ig.quarantineDir)
 	if err != nil {
 		return
@@ -436,8 +515,36 @@ func (ig *IntegrityGuard) restoreQuarantineState() {
 			OldHash: oldHash,
 			NewHash: newHash,
 		}
-		log.Printf("[integrity] restored quarantine state for: %s", name)
+		log.Printf("[integrity] restored quarantine state for: %s (from dir)", name)
 	}
+	if len(ig.quarantined) > 0 {
+		ig.saveQuarantine()
+	}
+}
+
+// saveQuarantine persists the quarantine map to disk.
+func (ig *IntegrityGuard) saveQuarantine() {
+	data, err := json.MarshalIndent(ig.quarantined, "", "  ")
+	if err != nil {
+		log.Printf("[integrity] failed to marshal quarantine state: %v", err)
+		return
+	}
+	if err := os.WriteFile(ig.quarantinePath, data, 0o600); err != nil {
+		log.Printf("[integrity] failed to write quarantine state: %v", err)
+	}
+}
+
+// logChange appends a tool change record to the integrity log file.
+func (ig *IntegrityGuard) logChange(name, oldHash, newHash string) {
+	logPath := filepath.Join(filepath.Dir(ig.manifestPath), "tool-changes.log")
+	entry := fmt.Sprintf("%s\t%s\told=%s\tnew=%s\n",
+		time.Now().UTC().Format(time.RFC3339), name, oldHash[:12], newHash[:12])
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(entry)
 }
 
 func (ig *IntegrityGuard) saveManifest() {
@@ -446,7 +553,7 @@ func (ig *IntegrityGuard) saveManifest() {
 		log.Printf("[integrity] failed to marshal manifest: %v", err)
 		return
 	}
-	if err := os.WriteFile(ig.manifestPath, data, 0o644); err != nil {
+	if err := os.WriteFile(ig.manifestPath, data, 0o600); err != nil {
 		log.Printf("[integrity] failed to write manifest: %v", err)
 	}
 }
@@ -473,6 +580,21 @@ func (ig *IntegrityGuard) restore(name string) error {
 	// Ensure restored tools are executable and group-readable (alf group).
 	os.Chmod(dst, 0o775)
 	return nil
+}
+
+// lockdownTool strips execute permission and changes group to alfd (gid 1001)
+// so the LLM user (alf, uid 1000) cannot chmod +x or execute it via bash.
+// Only the daemon (alfd) can restore it via ApproveModified.
+func lockdownTool(path string) {
+	os.Chmod(path, 0o640)           // rw-r----- (no execute)
+	os.Chown(path, -1, gidAlfd)
+	log.Printf("[integrity] locked down %s (mode=640, group=alfd)", filepath.Base(path))
+}
+
+// unlockTool restores normal execute permission and alf group ownership.
+func unlockTool(path string) {
+	os.Chmod(path, 0o755)
+	os.Chown(path, uidAlf, gidAlf)
 }
 
 // hashFile computes the SHA-256 hex digest of a file.

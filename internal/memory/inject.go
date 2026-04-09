@@ -116,12 +116,12 @@ func CollectPrompts(contextDir string, cfg PromptConfig) []string {
 	filtered := filterSections(strings.TrimSpace(coreMD), cfg)
 	prompts = append(prompts, filtered)
 
-	// Inject current date/time so the model always knows "now".
+	// Date is stable (same all day); injected here so it falls in the cacheable prefix.
+	// Time is dynamic and must be injected AFTER the cache breakpoint by the caller.
 	now := time.Now()
-	clock := fmt.Sprintf("Current date: %s %d %s %d\nTime: %s",
-		now.Format("Monday"), now.Day(), now.Format("January"), now.Year(),
-		now.Format("15:04"))
-	prompts = append(prompts, clock)
+	date := fmt.Sprintf("Current date: %s %d %s %d",
+		now.Format("Monday"), now.Day(), now.Format("January"), now.Year())
+	prompts = append(prompts, date)
 
 	// Determine which files to inject based on weight.
 	// Light tiers skip toolbox.md (tools are in the system prompt or not needed).
@@ -222,12 +222,16 @@ func ToolReminder(contextDir string) string {
 // ToolInstruction returns the API-tier tool instruction prepended to system prompts.
 // Only relevant for API tiers where tools are declared via JSON schema.
 func ToolInstruction(toolNames []string) string {
+	// Sort for deterministic output — important for prompt caching.
+	sorted := make([]string, len(toolNames))
+	copy(sorted, toolNames)
+	sort.Strings(sorted)
 	return fmt.Sprintf(
 		"You have access to the following tools: %s.\n"+
 			"IMPORTANT: You MUST call the appropriate tool for every action. "+
 			"Never simulate, assume, or hallucinate the result of a tool call. "+
 			"Always invoke the tool and wait for the actual result before responding.",
-		strings.Join(toolNames, ", "),
+		strings.Join(sorted, ", "),
 	)
 }
 

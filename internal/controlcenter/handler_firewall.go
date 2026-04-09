@@ -18,7 +18,7 @@ type FirewallHandler struct {
 
 func (h *FirewallHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Proxy == nil {
-		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "firewall not available"})
+		respondError(w, http.StatusServiceUnavailable, "firewall not available")
 		return
 	}
 
@@ -26,7 +26,7 @@ func (h *FirewallHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		cfg, err := h.Store.Load()
 		if err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			respondError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		resp := map[string]any{
@@ -44,15 +44,15 @@ func (h *FirewallHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		var cfg firewall.Config
 		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+			respondError(w, http.StatusBadRequest, "invalid JSON: " + err.Error())
 			return
 		}
 		if cfg.Mode != firewall.ModeLogOnly && cfg.Mode != firewall.ModeEnforce {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be 'log-only' or 'enforce'"})
+			respondError(w, http.StatusBadRequest, "mode must be 'log-only' or 'enforce'")
 			return
 		}
 		if err := h.Store.Save(&cfg); err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "save failed: " + err.Error()})
+			respondError(w, http.StatusInternalServerError, "save failed: " + err.Error())
 			return
 		}
 		if h.Notifier != nil {

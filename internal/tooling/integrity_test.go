@@ -3,6 +3,7 @@ package tooling
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -35,6 +36,18 @@ func scanOnce(ig *IntegrityGuard) {
 	ig.scan(false)
 }
 
+// ageManifest backdates all manifest entries past the grace period so that
+// modifications trigger quarantine in tests (which run in <1s).
+func ageManifest(ig *IntegrityGuard) {
+	ig.mu.Lock()
+	defer ig.mu.Unlock()
+	old := time.Now().Add(-60 * time.Second).UTC().Format(time.RFC3339)
+	for name, entry := range ig.manifest {
+		entry.FirstSeen = old
+		ig.manifest[name] = entry
+	}
+}
+
 func TestIntegrity_NewTool_Registered(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
@@ -65,20 +78,48 @@ func TestIntegrity_UnchangedTool_NotQuarantined(t *testing.T) {
 	}
 }
 
-func TestIntegrity_ModifiedTool_Quarantined(t *testing.T) {
+func TestIntegrity_ModifiedTool_SafeChange_AutoApproved(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
+
+	ig.scan(true) // baseline
+	ageManifest(ig)
+
+	// Safe modification — should be auto-approved, not quarantined.
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/bin/sh\necho updated"), 0o755)
+
+	scanOnce(ig)
+
+	if ig.IsQuarantined("hello") {
+		t.Fatal("safe modification should be auto-approved, not quarantined")
+	}
+
+	// Manifest should have new hash.
+	ig.mu.Lock()
+	entry := ig.manifest["hello"]
+	ig.mu.Unlock()
+	hash, _ := hashFile(path)
+	if entry.ExeHash != hash {
+		t.Fatal("manifest should reflect auto-approved change")
+	}
+}
+
+func TestIntegrity_DangerousModification_Quarantined(t *testing.T) {
 	dir, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
 
 	ig.scan(true) // baseline
+	ageManifest(ig)
 
-	// Modify the tool (with different mtime to bypass fast path).
+	// Dangerous modification — contains eval().
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("#!/bin/sh\necho HACKED"), 0o755)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
 
 	scanOnce(ig)
 
 	if !ig.IsQuarantined("hello") {
-		t.Fatal("modified tool should be quarantined")
+		t.Fatal("dangerous modification should be quarantined")
 	}
 
 	// Verify quarantined copy exists in daemon dir.
@@ -98,9 +139,10 @@ func TestIntegrity_Check_ReturnsQuarantined(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("#!/bin/sh\necho HACKED"), 0o755)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
 	scanOnce(ig)
 
 	if err := ig.Check(path); err != ErrToolQuarantined {
@@ -112,10 +154,16 @@ func TestIntegrity_ApproveModified(t *testing.T) {
 	dir, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
 	ig.scan(true)
+	ageManifest(ig)
 
+	// Use dangerous content to trigger quarantine.
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("#!/bin/sh\necho v2"), 0o755)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
 	scanOnce(ig)
+
+	if !ig.IsQuarantined("hello") {
+		t.Fatal("dangerous tool should be quarantined before approve")
+	}
 
 	if err := ig.ApproveModified("hello"); err != nil {
 		t.Fatalf("approve failed: %v", err)
@@ -127,7 +175,7 @@ func TestIntegrity_ApproveModified(t *testing.T) {
 
 	// Active tool should be the modified version.
 	data, _ := os.ReadFile(path)
-	if string(data) != "#!/bin/sh\necho v2" {
+	if string(data) != "#!/usr/bin/env python3\neval(input())" {
 		t.Fatalf("approved version not active, got: %s", string(data))
 	}
 
@@ -137,7 +185,7 @@ func TestIntegrity_ApproveModified(t *testing.T) {
 		t.Fatal("quarantined file should be removed after approval")
 	}
 
-	// Next scan should not re-quarantine.
+	// Next scan should not re-quarantine (content unchanged).
 	scanOnce(ig)
 	if ig.IsQuarantined("hello") {
 		t.Fatal("approved tool re-quarantined on next scan")
@@ -148,9 +196,10 @@ func TestIntegrity_RevertTool(t *testing.T) {
 	dir, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("#!/bin/sh\necho HACKED"), 0o755)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
 	scanOnce(ig)
 
 	if err := ig.RevertTool("hello"); err != nil {
@@ -178,16 +227,17 @@ func TestIntegrity_RevertTool(t *testing.T) {
 	}
 }
 
-func TestIntegrity_SchemaChange_Quarantined(t *testing.T) {
+func TestIntegrity_SchemaChange_AutoApproved(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	writeTool(t, toolsDir, "mytool", "#!/bin/sh\necho ok")
 	schemaPath := filepath.Join(toolsDir, "mytool.json")
 	os.WriteFile(schemaPath, []byte(`{"name":"mytool"}`), 0o644)
 
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(schemaPath, []byte(`{"name":"mytool","description":"hacked"}`), 0o644)
+	os.WriteFile(schemaPath, []byte(`{"name":"mytool","description":"updated"}`), 0o644)
 	// Touch the exe so mtime changes and scan rechecks.
 	exe := filepath.Join(toolsDir, "mytool")
 	data, _ := os.ReadFile(exe)
@@ -195,8 +245,9 @@ func TestIntegrity_SchemaChange_Quarantined(t *testing.T) {
 
 	scanOnce(ig)
 
-	if !ig.IsQuarantined("mytool") {
-		t.Fatal("schema change should trigger quarantine")
+	// Schema-only change with safe content → auto-approved, not quarantined.
+	if ig.IsQuarantined("mytool") {
+		t.Fatal("safe schema change should be auto-approved, not quarantined")
 	}
 }
 
@@ -219,7 +270,7 @@ func TestIntegrity_ManifestPersistence(t *testing.T) {
 	}
 }
 
-func TestIntegrity_NotifyFunc_Called(t *testing.T) {
+func TestIntegrity_DangerousChange_NotifiesUser(t *testing.T) {
 	dir := t.TempDir()
 	toolsDir := filepath.Join(dir, "tools")
 	os.MkdirAll(toolsDir, 0o755)
@@ -233,16 +284,21 @@ func TestIntegrity_NotifyFunc_Called(t *testing.T) {
 
 	path := writeTool(t, toolsDir, "test", "original")
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("modified"), 0o755)
+	os.WriteFile(path, []byte("import os\nos.system('rm -rf /')"), 0o755)
 	scanOnce(ig)
 
+	// Dangerous quarantine should notify the user.
 	if !notified {
-		t.Fatal("notify func was not called")
+		t.Fatal("notify func should be called for dangerous quarantine")
 	}
 	if notifiedTool != "test" {
-		t.Fatalf("expected tool name 'test', got %q", notifiedTool)
+		t.Fatalf("expected tool 'test', got %q", notifiedTool)
+	}
+	if _, q := ig.quarantined["test"]; !q {
+		t.Fatal("dangerous tool should still be quarantined")
 	}
 }
 
@@ -316,9 +372,10 @@ func TestIntegrity_Quarantined_List(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "a", "original")
 	ig.scan(true)
+	ageManifest(ig)
 
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("modified"), 0o755)
+	os.WriteFile(path, []byte("import os\nos.system('whoami')"), 0o755)
 	scanOnce(ig)
 
 	list := ig.Quarantined()
@@ -346,10 +403,11 @@ func TestIntegrity_RewriteWhileQuarantined_ReRestored(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho original")
 	ig.scan(true)
+	ageManifest(ig)
 
-	// First modification → quarantine.
+	// First modification with dangerous pattern → quarantine.
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("#!/bin/sh\necho hacked"), 0o755)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
 	scanOnce(ig)
 
 	if !ig.IsQuarantined("hello") {
@@ -358,7 +416,7 @@ func TestIntegrity_RewriteWhileQuarantined_ReRestored(t *testing.T) {
 
 	// LLM writes again while quarantined.
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("#!/bin/sh\necho hacked-v2"), 0o755)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval('more')"), 0o755)
 	scanOnce(ig)
 
 	// Should still be quarantined and backup re-restored.
@@ -402,6 +460,7 @@ func TestVerify_BlocksModifiedBetweenScans(t *testing.T) {
 
 	// Scan to baseline the tool.
 	ig.scan(true)
+	ageManifest(ig)
 
 	// Simulate LLM modifying the tool AFTER scan but BEFORE execution.
 	time.Sleep(10 * time.Millisecond)
@@ -431,17 +490,43 @@ func TestVerify_AllowsUnmodifiedTool(t *testing.T) {
 	}
 }
 
-// TestVerify_AllowsNewToolNotYetScanned verifies that Verify() allows a
-// brand new tool that hasn't been scanned yet (not in manifest).
-func TestVerify_AllowsNewToolNotYetScanned(t *testing.T) {
+// TestVerify_AllowsNewSafeTool verifies that Verify() allows a new safe tool
+// not yet in manifest, and baselines it inline.
+func TestVerify_AllowsNewSafeTool(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	ig.scan(true) // baseline with no tools
 
-	// Create tool after scan — not yet in manifest.
+	// Create safe tool after scan — not yet in manifest.
 	path := writeTool(t, toolsDir, "newtool", "#!/bin/sh\necho new")
 
 	if err := ig.Verify(path); err != nil {
-		t.Fatalf("Verify() should allow new tool not yet in manifest: %v", err)
+		t.Fatalf("Verify() should allow safe new tool: %v", err)
+	}
+
+	// Tool should now be baselined in manifest.
+	ig.mu.Lock()
+	_, exists := ig.manifest["newtool"]
+	ig.mu.Unlock()
+	if !exists {
+		t.Fatal("expected new tool to be baselined in manifest after Verify()")
+	}
+}
+
+// TestVerify_BlocksNewDangerousTool verifies that Verify() blocks a new tool
+// with dangerous patterns even before the first scan cycle.
+func TestVerify_BlocksNewDangerousTool(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	ig.scan(true) // baseline with no tools
+
+	// Create dangerous tool after scan — not yet in manifest.
+	path := writeTool(t, toolsDir, "evil", "#!/usr/bin/env python3\neval(input())")
+
+	err := ig.Verify(path)
+	if err == nil {
+		t.Fatal("Verify() should block new tool with dangerous patterns")
+	}
+	if !strings.Contains(err.Error(), "dangerous patterns") {
+		t.Fatalf("expected 'dangerous patterns' error, got: %v", err)
 	}
 }
 
@@ -451,10 +536,11 @@ func TestVerify_BlocksQuarantinedTool(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	path := writeTool(t, toolsDir, "qtool", "#!/bin/sh\necho v1")
 	ig.scan(true)
+	ageManifest(ig)
 
-	// Modify and scan to trigger quarantine.
+	// Modify with dangerous content to trigger quarantine.
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("#!/bin/sh\necho v2"), 0o755)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
 	ig.scan(false)
 
 	if !ig.IsQuarantined("qtool") {
@@ -463,5 +549,168 @@ func TestVerify_BlocksQuarantinedTool(t *testing.T) {
 
 	if err := ig.Verify(path); err == nil {
 		t.Fatal("Verify() should block quarantined tool")
+	}
+}
+
+// --- Regression tests for #221 ---
+
+// TestRegression221_NewToolGracePeriod verifies that a newly created tool
+// modified within 30s is NOT quarantined (LLM creation pattern: write then refine).
+func TestRegression221_NewToolGracePeriod(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+
+	// Simulate LLM creating a tool (no initial baseline — tool didn't exist).
+	path := writeTool(t, toolsDir, "newtool", "#!/bin/sh\necho v1")
+	scanOnce(ig) // registers as new tool
+
+	ig.mu.Lock()
+	_, exists := ig.manifest["newtool"]
+	ig.mu.Unlock()
+	if !exists {
+		t.Fatal("tool should be registered after first scan")
+	}
+
+	// LLM modifies it immediately (within grace period).
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/bin/sh\necho v2"), 0o755)
+	scanOnce(ig)
+
+	if ig.IsQuarantined("newtool") {
+		t.Fatal("newly created tool modified within grace period should NOT be quarantined (#221)")
+	}
+
+	// Manifest should have the updated hash.
+	ig.mu.Lock()
+	entry := ig.manifest["newtool"]
+	ig.mu.Unlock()
+	hash, _ := hashFile(path)
+	if entry.ExeHash != hash {
+		t.Fatal("manifest should reflect the latest version during grace period")
+	}
+}
+
+// TestRegression221_QuarantinePersistsReboot verifies that quarantine state
+// survives daemon restart (new IntegrityGuard instance reads persisted state).
+func TestRegression221_QuarantinePersistsReboot(t *testing.T) {
+	dir, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho original")
+	ig.scan(true)
+	ageManifest(ig)
+
+	// Modify with dangerous content to trigger quarantine.
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
+	scanOnce(ig)
+
+	if !ig.IsQuarantined("hello") {
+		t.Fatal("tool should be quarantined")
+	}
+
+	// Simulate daemon restart — create new guard.
+	ig2, err := NewIntegrityGuard(dir, nil)
+	if err != nil {
+		t.Fatalf("new guard: %v", err)
+	}
+
+	// Quarantine state should be restored from JSON file.
+	if !ig2.IsQuarantined("hello") {
+		t.Fatal("quarantine state should persist across daemon restart (#221)")
+	}
+
+	// /tool keep should work on the restarted guard.
+	if err := ig2.ApproveModified("hello"); err != nil {
+		t.Fatalf("/tool keep failed after restart: %v (#221)", err)
+	}
+
+	if ig2.IsQuarantined("hello") {
+		t.Fatal("tool should not be quarantined after approval")
+	}
+}
+
+// TestRegression221_QuarantineJSONPersistence verifies the JSON state file
+// is written and cleaned up correctly.
+func TestRegression221_QuarantineJSONPersistence(t *testing.T) {
+	dir, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "tool1", "#!/bin/sh\necho v1")
+	ig.scan(true)
+	ageManifest(ig)
+
+	// Quarantine with dangerous content.
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
+	scanOnce(ig)
+
+	// JSON file should exist.
+	jsonPath := filepath.Join(dir, ".daemon", "tool-quarantine.json")
+	if _, err := os.Stat(jsonPath); os.IsNotExist(err) {
+		t.Fatal("tool-quarantine.json should exist after quarantine")
+	}
+
+	// Approve — JSON should be updated (empty map).
+	ig.ApproveModified("tool1")
+
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal("should be able to read quarantine JSON after approve")
+	}
+	if strings.Contains(string(data), "tool1") {
+		t.Fatal("tool1 should be removed from quarantine JSON after approve")
+	}
+}
+
+// TestQuarantine_LockdownPerms verifies that quarantined tools have execute
+// stripped and are restored on approve/revert.
+func TestQuarantine_LockdownPerms(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho safe")
+	ig.scan(true)
+	ageManifest(ig)
+
+	// Trigger quarantine with dangerous content.
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
+	scanOnce(ig)
+
+	// After quarantine, tool should NOT be executable.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal("tool file should exist after quarantine (restored backup)")
+	}
+	mode := info.Mode().Perm()
+	if mode&0o111 != 0 {
+		t.Errorf("quarantined tool should have no execute bits, got %o", mode)
+	}
+
+	// Approve — should restore execute permission.
+	ig.ApproveModified("hello")
+	info, _ = os.Stat(path)
+	mode = info.Mode().Perm()
+	if mode&0o111 == 0 {
+		t.Errorf("approved tool should be executable, got %o", mode)
+	}
+}
+
+// TestQuarantine_RevertRestoresPerms verifies revert also unlocks the tool.
+func TestQuarantine_RevertRestoresPerms(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho safe")
+	ig.scan(true)
+	ageManifest(ig)
+
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\nos.system('rm -rf /')"), 0o755)
+	scanOnce(ig)
+
+	// Locked down.
+	info, _ := os.Stat(path)
+	if info.Mode().Perm()&0o111 != 0 {
+		t.Error("quarantined tool should not be executable")
+	}
+
+	// Revert — should restore perms.
+	ig.RevertTool("hello")
+	info, _ = os.Stat(path)
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Error("reverted tool should be executable")
 	}
 }

@@ -47,7 +47,7 @@ func (h *FirewallLookupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	host := r.URL.Query().Get("host")
 	if host == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "host parameter required"})
+		respondError(w, http.StatusBadRequest, "host parameter required")
 		return
 	}
 

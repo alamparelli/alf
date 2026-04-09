@@ -15,13 +15,14 @@ import (
 
 // Executor runs tools: native Go tools first, subprocess fallback for user tools.
 type Executor struct {
-	DataDir   string
-	HomeDir   string
-	Registry  *Registry       // optional: enables JSON→CLI arg conversion for user tools
-	Integrity *IntegrityGuard // optional: hash-based integrity checking for user tools
-	Env       []string        // base env vars to inject
-	Timeout   time.Duration   // per-tool timeout; 0 = 30s
-	natives   map[string]NativeTool
+	DataDir      string
+	HomeDir      string
+	Registry     *Registry       // optional: enables JSON→CLI arg conversion for user tools
+	Integrity    *IntegrityGuard // optional: hash-based integrity checking for user tools
+	ErrorJournal *ErrorJournal   // optional: logs user tool errors for heartbeat repair
+	Env          []string        // base env vars to inject
+	Timeout      time.Duration   // per-tool timeout; 0 = 30s
+	natives      map[string]NativeTool
 }
 
 // RegisterNative adds a Go-native tool. Native tools take priority over subprocess tools.
@@ -109,9 +110,13 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 	if err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if ctx.Err() == context.DeadlineExceeded {
+			msg := fmt.Sprintf("tool %q timed out after %s", call.Name, timeout)
+			if e.ErrorJournal != nil {
+				e.ErrorJournal.Append(call.Name, call.Arguments, msg)
+			}
 			return CallResult{
 				ID:      call.ID,
-				Output:  fmt.Sprintf("tool %q timed out after %s", call.Name, timeout),
+				Output:  msg,
 				IsError: true,
 			}
 		}
@@ -125,11 +130,19 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 		if output == "" {
 			output = fmt.Sprintf("tool %q failed: %v", call.Name, err)
 		}
+		if e.ErrorJournal != nil {
+			e.ErrorJournal.Append(call.Name, call.Arguments, output)
+		}
 		return CallResult{
 			ID:      call.ID,
 			Output:  output,
 			IsError: true,
 		}
+	}
+
+	// Success: auto-resolve any previous errors for this tool.
+	if e.ErrorJournal != nil {
+		e.ErrorJournal.ResolveByName(call.Name)
 	}
 
 	if output == "" {

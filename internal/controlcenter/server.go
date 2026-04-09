@@ -39,13 +39,14 @@ type Server struct {
 	tlsCertFile     string // if set, serve HTTPS (local self-signed)
 	tlsKeyFile      string
 	stopWatcher     func()
+	Avatar          *AvatarHandler // exposed for native tool access
 }
 
 // New creates a Control Center server.
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, netTracker *firewall.NetTracker, vaultMgr *vault.Manager, providerRegistry *provider.Registry, onVaultUnlock func(), onTaskEvent func(source, taskID, status, summary string), mp *marketplace.Manager) (*Server, *EventBroker, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, netTracker *firewall.NetTracker, vaultMgr *vault.Manager, providerRegistry *provider.Registry, onVaultUnlock func(), onTaskEvent func(source, taskID, status, summary string), mp *marketplace.Manager, errorJournal AppErrorJournaler, avatarHandler *AvatarHandler) (*Server, *EventBroker, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore, appStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
 	var chatDB *chatdb.DB
@@ -82,6 +83,11 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		return nil, nil, fmt.Errorf("create app token store: %w", err)
 	}
 
+	if avatarHandler == nil {
+		avatarHandler = &AvatarHandler{DataDir: dataDir}
+	}
+	avatarHandler.EventBroker = eventBroker
+
 	handlers := HandlerFactory(Deps{
 		ConfigStore:    configStore,
 		TierStore:      tierStore,
@@ -109,6 +115,8 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		EventBroker:     eventBroker,
 		ScheduleEvents:  schedEventBroker,
 		ToolRegistry:     chatServiceToolRegistry(chatService),
+		ErrorJournal:     errorJournal,
+		Avatar:           avatarHandler,
 		ProviderRegistry: providerRegistry,
 		ModelCache:       newModelCacheIfRegistry(providerRegistry),
 		AppTokens:       appTokens,
@@ -145,6 +153,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 	stopWatcher := watchAppsDir(filepath.Join(dataDir, "apps"), eventBroker, 3*time.Second)
 
 	return &Server{
+		Avatar:      avatarHandler,
 		stopWatcher: stopWatcher,
 		httpServer: &http.Server{
 			Addr:              addr,

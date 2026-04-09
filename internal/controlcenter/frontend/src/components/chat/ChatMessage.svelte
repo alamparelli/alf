@@ -1,11 +1,12 @@
 <script lang="ts">
   import { marked } from 'marked'
   import DOMPurify from 'dompurify'
-  import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check, Users } from 'lucide-svelte'
+  import { ChevronDown, ChevronRight, Wrench, Brain, SmilePlus, Image, Clipboard, Check, Users, User } from 'lucide-svelte'
   import { api } from '../../lib/api'
   import { isStandaloneEmojiMessage } from '../../lib/emoji'
   import { toasts } from '../../stores/toast.svelte'
   import { nav } from '../../stores/nav.svelte'
+  import { avatarUrl } from '../../stores/avatar.svelte'
 
   interface ContentBlock {
     type: string
@@ -46,10 +47,12 @@
     }
     convId: string
     collapseBlocks?: boolean
+    hideThinking?: boolean
+    hideTools?: boolean
     onSendToTask?: (text: string) => void
   }
 
-  let { msg, convId, collapseBlocks = true, onSendToTask }: Props = $props()
+  let { msg, convId, collapseBlocks = true, hideThinking = false, hideTools = false, onSendToTask }: Props = $props()
 
   let showEmojiPicker = $state(false)
   let copied = $state(false)
@@ -275,7 +278,22 @@
   <div class="emoji-backdrop" onclick={() => showEmojiPicker = false}></div>
 {/if}
 
-<div class="chat-msg chat-msg-{msg.role}">
+<div class="chat-row chat-row-{msg.role}">
+  {#if msg.role === 'assistant'}
+    <div class="chat-avatar chat-avatar-assistant">
+      <img
+        src={avatarUrl.current}
+        alt="ALF"
+        class="avatar-img"
+        onerror={(e) => { e.currentTarget.src = '/static/favicon.png'; }}
+      />
+    </div>
+  {:else if msg.role === 'user'}
+    <div class="chat-avatar chat-avatar-user">
+      <User size={18} />
+    </div>
+  {/if}
+  <div class="chat-msg chat-msg-{msg.role}">
   <!-- Media attachments (user) -->
   {#if msg.media && msg.media.length > 0}
     <div class="msg-media">
@@ -301,7 +319,11 @@
   <!-- Content blocks (assistant streaming) -->
   {#if msg.content_blocks && msg.content_blocks.length > 0}
     {#each msg.content_blocks as block, i}
-      {#if block.type === 'thinking'}
+      {#if block.type === 'thinking' && hideThinking}
+        <!-- hidden by filter -->
+      {:else if (block.type === 'tool_use' || block.type === 'tool_result') && hideTools}
+        <!-- hidden by filter -->
+      {:else if block.type === 'thinking'}
         <div class="content-block thinking-block">
           <button class="block-header" onclick={() => toggleBlock(i)}>
             {#if isExpanded(i)}
@@ -421,6 +443,7 @@
       {/if}
     {/if}
   </div>
+  </div>
 </div>
 
 <!-- Lightbox -->
@@ -432,32 +455,81 @@
 {/if}
 
 <style>
-  .chat-msg {
+  .chat-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    margin-bottom: 8px;
     max-width: 85%;
+  }
+
+  .chat-row-user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+  }
+
+  .chat-row-assistant {
+    align-self: flex-start;
+  }
+
+  .chat-avatar {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-bottom: 2px;
+  }
+
+  .chat-avatar-assistant {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+  }
+
+  .chat-avatar-user {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+
+  .avatar-img {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .chat-msg {
+    max-width: 100%;
     padding: 10px 14px;
     border-radius: 12px;
-    margin-bottom: 8px;
     position: relative;
     word-wrap: break-word;
     overflow: visible;
+    flex: 1;
+    min-width: 0;
   }
 
   .chat-msg-user {
-    align-self: flex-end;
     background: var(--accent);
     color: var(--on-accent);
     border-bottom-right-radius: 4px;
   }
 
   .chat-msg-assistant {
-    align-self: flex-start;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-bottom-left-radius: 4px;
   }
 
-  .chat-msg-system {
+  .chat-row-system {
     align-self: center;
+    max-width: 90%;
+  }
+
+  .chat-msg-system {
     background: var(--bg-input);
     color: var(--text-dim);
     font-size: var(--font-sm, 13px);
@@ -763,8 +835,14 @@
   }
 
   @media (max-width: 768px) {
+    .chat-avatar {
+      display: none;
+    }
+    .chat-row {
+      max-width: 92%;
+    }
     .chat-msg {
-      max-width: 90%;
+      max-width: 100%;
     }
   }
 </style>

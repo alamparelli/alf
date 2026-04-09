@@ -34,7 +34,7 @@ func (h *MagicLinkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Use chat ID 0 for CLI-generated links (not tied to a Telegram chat).
 	code, err := h.Magic.Issue(0, sessTTL)
 	if err != nil {
-		http.Error(w, `{"error":"failed to generate link"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to generate link")
 		return
 	}
 

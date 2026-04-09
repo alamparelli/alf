@@ -103,8 +103,10 @@ func TestCommand_SkillsClear(t *testing.T) {
 func TestNewSession_FiresOnSessionEnd(t *testing.T) {
 	dir := t.TempDir()
 	sessions := session.New(dir, 30*time.Minute)
-	sessions.Set(-1, "session-abc")
-	sessions.AddSkills(-1, []string{"test-skill"})
+	chID := ChannelID("cc:test-conv")
+	key := chID.SessionKey()
+	sessions.Set(key, "session-abc")
+	sessions.AddSkills(key, []string{"test-skill"})
 
 	var firedWith string
 	e := &ChatEngine{
@@ -113,7 +115,7 @@ func TestNewSession_FiresOnSessionEnd(t *testing.T) {
 		OnSessionEnd: func(sid string) { firedWith = sid },
 	}
 
-	old := e.NewSession("cc:-1", false)
+	old := e.NewSession(chID, false)
 
 	if old != "session-abc" {
 		t.Errorf("expected old session 'session-abc', got %q", old)
@@ -122,7 +124,7 @@ func TestNewSession_FiresOnSessionEnd(t *testing.T) {
 		t.Errorf("expected OnSessionEnd fired with 'session-abc', got %q", firedWith)
 	}
 	// Skills should be cleared.
-	if sk := sessions.GetSkills(-1); len(sk) > 0 {
+	if sk := sessions.GetSkills(key); len(sk) > 0 {
 		t.Errorf("expected skills cleared, got %v", sk)
 	}
 }
@@ -151,7 +153,9 @@ func TestNewSession_NoFireWhenNoOldSession(t *testing.T) {
 func TestNewSession_CmdNewDelegatesToEngine(t *testing.T) {
 	dir := t.TempDir()
 	sessions := session.New(dir, 30*time.Minute)
-	sessions.Set(-1, "old-sess")
+	chID := ChannelID("cc:test-conv2")
+	key := chID.SessionKey()
+	sessions.Set(key, "old-sess")
 
 	var firedWith string
 	e := &ChatEngine{
@@ -160,7 +164,7 @@ func TestNewSession_CmdNewDelegatesToEngine(t *testing.T) {
 		OnSessionEnd: func(sid string) { firedWith = sid },
 	}
 
-	result := cmdNew(e, "cc:-1", "")
+	result := cmdNew(e, chID, "")
 
 	if result != "Previous session archived. New session started." {
 		t.Errorf("unexpected result: %q", result)
@@ -173,7 +177,9 @@ func TestNewSession_CmdNewDelegatesToEngine(t *testing.T) {
 func TestNewSession_EventLog(t *testing.T) {
 	dir := t.TempDir()
 	sessions := session.New(dir, 30*time.Minute)
-	sessions.Set(-1, "session-log-test")
+	chID := ChannelID("cc:test-conv3")
+	key := chID.SessionKey()
+	sessions.Set(key, "session-log-test")
 
 	dataDir := t.TempDir()
 	el := eventlog.New(dataDir)
@@ -185,7 +191,7 @@ func TestNewSession_EventLog(t *testing.T) {
 		EventLog:   el,
 	}
 
-	old := e.NewSession("cc:-1", false)
+	old := e.NewSession(chID, false)
 	if old != "session-log-test" {
 		t.Fatalf("expected old session 'session-log-test', got %q", old)
 	}

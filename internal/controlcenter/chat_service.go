@@ -175,6 +175,20 @@ type ReactResult struct {
 
 // reactionSystemPromptTmpl references the centralized prompt in memory/reaction.md.
 
+// ChatServiceOpts groups optional dependencies for ChatService.
+// All fields are optional and nil-safe — ChatService guards access to each.
+type ChatServiceOpts struct {
+	Registry       *provider.Registry
+	SkillStore     skills.Store
+	Orchestrator   *agents.Orchestrator
+	ConvStore      *conversation.Store
+	ToolRegistry   *tooling.Registry
+	ToolExecutor   *tooling.Executor
+	Recaller       MemoryRecaller
+	MemStore       MemoryStorer
+	BackendConfigs func() map[string]BackendConfig
+}
+
 // NewChatService creates a new ChatService.
 func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatDB *chatdb.DB, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
 	cs := &ChatService{
@@ -195,6 +209,20 @@ func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, 
 	// Start upload cleanup goroutine.
 	go cs.cleanupUploads()
 	return cs
+}
+
+// Init configures optional dependencies. Must be called before the first Ask().
+// Replaces post-construction field assignments — all deps validated in one place.
+func (cs *ChatService) Init(opts ChatServiceOpts) {
+	cs.Registry = opts.Registry
+	cs.SkillStore = opts.SkillStore
+	cs.Orchestrator = opts.Orchestrator
+	cs.ConvStore = opts.ConvStore
+	cs.ToolRegistry = opts.ToolRegistry
+	cs.ToolExecutor = opts.ToolExecutor
+	cs.Recaller = opts.Recaller
+	cs.MemStore = opts.MemStore
+	cs.BackendConfigs = opts.BackendConfigs
 }
 
 // SetEngine installs the unified comms engine and registers the CC adapter.
@@ -239,6 +267,10 @@ func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(Ch
 // askViaEngine delegates message processing to the unified comms engine.
 // Engine handles persistence to ChatDB. CC-specific: SSE bridge, force commands, mood reactions.
 func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
+	if cs.Engine == nil {
+		return fmt.Errorf("chat engine not initialized — call SetEngine() before Ask()")
+	}
+
 	sessID := convSessionID(req.ConvID)
 	channelID := comms.ChannelID("cc:" + req.ConvID)
 	if req.ConvID == "" {
@@ -258,8 +290,22 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 	// 0b. Built-in command handling via comms engine (/new, /skills, etc.).
 	if strings.HasPrefix(req.Message, "/") {
 		if response, handled := cs.Engine.HandleCommand(channelID, req.Message); handled {
+			// Persist the slash command as a user message so it stays visible in chat.
+			if cs.ChatDB != nil && req.ConvID != "" {
+				cs.ChatDB.EnsureConversation(req.ConvID, "", "cc")
+				cs.ChatDB.InsertMessage(chatdb.Message{
+					ID: NewMessageID(), ConvID: req.ConvID, Role: "user",
+					Text: req.Message, Source: "cc",
+				})
+			}
 			if response != "" {
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": response}})
+				if cs.ChatDB != nil && req.ConvID != "" {
+					cs.ChatDB.InsertMessage(chatdb.Message{
+						ID: NewMessageID(), ConvID: req.ConvID, Role: "system",
+						Text: response, Source: "cc",
+					})
+				}
 			}
 			onEvent(ChatEvent{Type: "done", Data: ChatDoneData{}})
 			return nil
@@ -283,6 +329,13 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 					})
 				}
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+					// Persist the force command as a user message.
+					if cs.ChatDB != nil && req.ConvID != "" {
+						cs.ChatDB.InsertMessage(chatdb.Message{
+							ID: NewMessageID(), ConvID: req.ConvID, Role: "user",
+							Text: req.Message, Source: "cc",
+						})
+					}
 					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{Model: t.Name, Tier: t.Name}})
 					return nil
 				}
@@ -300,10 +353,22 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 				if desc != "" {
 					desc = " — " + desc
 				}
-				onEvent(ChatEvent{Type: "system", Data: map[string]string{
-					"text": fmt.Sprintf("Skill **%s** activated%s", sk.Name, desc),
-				}})
+				skillText := fmt.Sprintf("Skill **%s** activated%s", sk.Name, desc)
+				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": skillText}})
+				if cs.ChatDB != nil && req.ConvID != "" {
+					cs.ChatDB.InsertMessage(chatdb.Message{
+						ID: NewMessageID(), ConvID: req.ConvID, Role: "system",
+						Text: skillText, Source: "cc",
+					})
+				}
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+					// Persist the skill command as a user message.
+					if cs.ChatDB != nil && req.ConvID != "" {
+						cs.ChatDB.InsertMessage(chatdb.Message{
+							ID: NewMessageID(), ConvID: req.ConvID, Role: "user",
+							Text: req.Message, Source: "cc",
+						})
+					}
 					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{}})
 					return nil
 				}
@@ -353,6 +418,23 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		if orig, _ := cs.ChatDB.Get(req.ReplyTo); orig != nil {
 			msg.ReplyTo = orig.Text
 		}
+	}
+
+	// Populate Media field for API providers (vision support).
+	for _, mid := range req.MediaIDs {
+		entry := cs.GetUpload(mid)
+		if entry == nil {
+			continue
+		}
+		msg.Media = append(msg.Media, comms.MediaEntry{
+			Type:        entry.MediaType,
+			FileName:    entry.FileName,
+			MimeType:    entry.MimeType,
+			TempPath:    entry.TempPath,
+			FramePaths:  entry.FramePaths,
+			Transcript:  entry.Transcript,
+			TextContent: entry.TextContent,
+		})
 	}
 
 	// 4. Set up event bridge (suppress engine's "done", we emit our own).
@@ -483,9 +565,19 @@ func (cs *ChatService) ActiveSkills() []string {
 	return cs.Sessions.GetSkills(apiChatID)
 }
 
+// ActiveSkillsForConv returns active skills for a specific conversation.
+func (cs *ChatService) ActiveSkillsForConv(convID string) []string {
+	return cs.Sessions.GetSkills(convSessionID(convID))
+}
+
 // RemoveActiveSkill removes a single skill from the CC session.
 func (cs *ChatService) RemoveActiveSkill(name string) {
 	cs.Sessions.RemoveSkill(apiChatID, name)
+}
+
+// RemoveActiveSkillForConv removes a single skill for a specific conversation.
+func (cs *ChatService) RemoveActiveSkillForConv(convID, name string) {
+	cs.Sessions.RemoveSkill(convSessionID(convID), name)
 }
 
 // ClearActiveSkills removes all active skills from the CC session.
@@ -493,17 +585,34 @@ func (cs *ChatService) ClearActiveSkills() {
 	cs.Sessions.ClearSkills(apiChatID)
 }
 
+// ClearActiveSkillsForConv clears all active skills for a specific conversation.
+func (cs *ChatService) ClearActiveSkillsForConv(convID string) {
+	cs.Sessions.ClearSkills(convSessionID(convID))
+}
+
 // CurrentConvID returns the active conversation ID for the CC chat.
-// Uses the last conv_id from the frontend (set by StartJob), falling back
-// to the ConvStore channel ID.
+// Priority: in-memory lastChatConv → persisted kv_meta → ConvStore fallback.
 func (cs *ChatService) CurrentConvID() string {
 	if cs.lastChatConv != "" {
 		return cs.lastChatConv
+	}
+	if cs.ChatDB != nil {
+		if v := cs.ChatDB.GetMeta("active_conv_id"); v != "" {
+			return v
+		}
 	}
 	if cs.ConvStore != nil {
 		return cs.ConvStore.ConvID(conversation.ChannelCC)
 	}
 	return ""
+}
+
+// SetActiveConvID persists the active conversation and updates in-memory state.
+func (cs *ChatService) SetActiveConvID(convID string) {
+	cs.lastChatConv = convID
+	if cs.ChatDB != nil {
+		cs.ChatDB.SetMeta("active_conv_id", convID)
+	}
 }
 
 // History returns paginated chat history, optionally filtered by conversation.
@@ -971,7 +1080,7 @@ const recallLimit = DefaultRecallTopK
 // If a job is already running for the same conversation, returns it for reconnection.
 func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
 	convID := req.ConvID
-	cs.lastChatConv = convID // track for notify tool
+	cs.SetActiveConvID(convID) // persist + track for notify tool
 	cs.jobMu.Lock()
 	if j := cs.activeJobs[convID]; j != nil && !j.isDone() {
 		cs.jobMu.Unlock()

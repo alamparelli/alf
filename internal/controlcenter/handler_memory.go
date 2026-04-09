@@ -77,13 +77,13 @@ func (h *MemoryIngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 	var req ingestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "request too large or invalid JSON"})
+		respondError(w, http.StatusBadRequest, "request too large or invalid JSON")
 		return
 	}
 
 	req.Content = strings.TrimSpace(req.Content)
 	if req.Content == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "content is required"})
+		respondError(w, http.StatusBadRequest, "content is required")
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *MemoryIngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	resp, err := h.extractAndStore(req.Content, req.Instruction, req.Tier)
 	if err != nil {
 		log.Printf("[CC] memory ingest error: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "extraction failed - check server logs"})
+		respondError(w, http.StatusInternalServerError, "extraction failed - check server logs")
 		return
 	}
 
@@ -278,17 +278,17 @@ Rules: self-contained items, concise, skip trivial info.`, instruction, content)
 
 func (h *MemoryIngestHandler) handleContextDestination(w http.ResponseWriter, req ingestRequest) {
 	if h.ContextStore == nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "context store not available"})
+		respondError(w, http.StatusBadRequest, "context store not available")
 		return
 	}
 
 	name := strings.TrimSpace(req.FileName)
 	if name == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "file_name is required for context destination"})
+		respondError(w, http.StatusBadRequest, "file_name is required for context destination")
 		return
 	}
 	if !validFileName.MatchString(name) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "file_name must contain only letters, numbers, dashes, and underscores"})
+		respondError(w, http.StatusBadRequest, "file_name must contain only letters, numbers, dashes, and underscores")
 		return
 	}
 	if protectedContextFiles[strings.ToLower(name)] {
@@ -301,7 +301,7 @@ func (h *MemoryIngestHandler) handleContextDestination(w http.ResponseWriter, re
 	resp, err := h.saveToContext(req.Content, req.Instruction, name, req.Tier)
 	if err != nil {
 		log.Printf("[CC] context save error: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "save failed - check server logs"})
+		respondError(w, http.StatusInternalServerError, "save failed - check server logs")
 		return
 	}
 	respondJSON(w, http.StatusOK, resp)

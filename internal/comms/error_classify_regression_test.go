@@ -2,6 +2,7 @@ package comms
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -128,6 +129,19 @@ func TestRegression_ToolLoop_TurnLimit(t *testing.T) {
 	// But if somehow it arrives as an error:
 	notice := classifyProviderError("Tool calling turn limit reached", nil)
 	assertContains(t, notice, "Turn limit", "toolloop turn limit as error")
+}
+
+func TestRegression_TurnLimitHint_NoResume(t *testing.T) {
+	// #235: The turn limit hint must NOT reference /resume (it doesn't exist).
+	// The hint is a hardcoded string in pipeline.go — grep for it here to catch regressions.
+	data, err := os.ReadFile("pipeline.go")
+	if err != nil {
+		t.Fatal("cannot read pipeline.go:", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "/resume") {
+		t.Error("pipeline.go still references /resume — this command does not exist (see #235)")
+	}
 }
 
 func assertContains(t *testing.T, s, substr, context string) {

@@ -3,6 +3,7 @@
   import { X, MessageCircle, RotateCw, Play, ChevronsDownUp, ChevronsUpDown } from 'lucide-svelte'
   import ChatMessageComponent from '../components/chat/ChatMessage.svelte'
   import ChatInput from '../components/chat/ChatInput.svelte'
+  import ConversationTabs from '../components/chat/ConversationTabs.svelte'
   import Modal from '../components/shared/Modal.svelte'
   import Toggle from '../components/shared/Toggle.svelte'
   import { api } from '../lib/api'
@@ -10,6 +11,7 @@
   import { nav } from '../stores/nav.svelte'
   import { sound } from '../stores/sound.svelte'
   import { events } from '../stores/events.svelte'
+  import { convStore } from '../stores/conversations.svelte'
 
   // --- Types ---
   interface ChatMsg {
@@ -34,71 +36,114 @@
     model: string
   }
 
-  // --- Single conversation state ---
-  let convId = $state(localStorage.getItem('alf-chat-convid') || '')
-
-  function genId(): string {
-    return Math.random().toString(36).slice(2, 10)
-  }
-
-  function saveConvId() {
-    localStorage.setItem('alf-chat-convid', convId)
-  }
-
-  // Load the active conversation from server on startup.
-  async function loadActiveConversation() {
-    try {
-      const data = await api<any>('/api/chat/conversations')
-      const allConvs = data.conversations || []
-      const convs = allConvs.filter((c: any) => c.msg_count > 0)
-      // Restore saved convId if it still exists (even if empty — e.g. after /new).
-      const saved = localStorage.getItem('alf-chat-convid')
-      if (saved && allConvs.some((c: any) => c.id === saved)) {
-        convId = saved
-      } else if (convs.length > 0) {
-        convId = convs[convs.length - 1].id // most recent (ASC order)
-      } else {
-        // No conversations yet — create one.
-        convId = genId()
-        await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: convId, title: 'Chat' }) }).catch(() => {})
-      }
-      saveConvId()
-    } catch { /* server not ready yet */ }
-  }
+  // --- Conversation state (from store) ---
+  let convId = $derived(convStore.activeConvId)
+  let loadGen = $state(0) // generation counter to ignore stale loads
 
   // --- Messages ---
   let messages = $state<ChatMsg[]>([])
-  let sending = $state(false)
+  let sendingConvs = $state<Set<string>>(new Set())
+  let sending = $derived(sendingConvs.has(convId ?? ''))
+
+  let activeSendConvId = '' // tracks which conv the current stream belongs to
+
+  function setSending(cid: string, value: boolean) {
+    const next = new Set(sendingConvs)
+    if (value) { next.add(cid); activeSendConvId = cid } else { next.delete(cid); if (activeSendConvId === cid) activeSendConvId = '' }
+    sendingConvs = next
+  }
+  function clearSending() { if (activeSendConvId) setSending(activeSendConvId, false) }
   let tiers = $state<Tier[]>([])
   let messagesContainer: HTMLDivElement
   let selectedTier = $state(localStorage.getItem('alf-chat-tier') || '')
   let collapseBlocks = $state(localStorage.getItem('alf-chat-collapse') !== 'false')
+
+  // Block visibility filter (#196)
+  type ChatFilter = 'all' | 'clean' | 'thinking' | 'tools'
+  let chatFilter = $state<ChatFilter>((localStorage.getItem('alf-chat-filter') as ChatFilter) || 'all')
+  let hideThinking = $derived(chatFilter === 'clean' || chatFilter === 'tools')
+  let hideTools = $derived(chatFilter === 'clean' || chatFilter === 'thinking')
+
+  function onFilterChange(e: Event) {
+    const detail = (e as CustomEvent).detail
+    if (detail?.value) {
+      chatFilter = detail.value as ChatFilter
+      localStorage.setItem('alf-chat-filter', chatFilter)
+    }
+  }
+
+  function bindFilterGroup(node: HTMLElement) {
+    node.addEventListener('alf-change', onFilterChange)
+    return { destroy() { node.removeEventListener('alf-change', onFilterChange) } }
+  }
   let streamingBlocks = $state<any[]>([])
+  let visibleStreamingBlocks = $derived(streamingBlocks.filter(b => {
+    if (b.type === 'thinking' && hideThinking) return false
+    if ((b.type === 'tool_use' || b.type === 'tool_result') && hideTools) return false
+    if (b.type === 'text') return !!(b.text && b.text.trim())
+    return true
+  }))
   let streamingText = $state('')
+  let streamingConvId = $state('') // which conv owns the current stream
+  let showStreaming = $derived(streamingConvId === (convId ?? ''))
   let stoppedByUser = false
-  let pollTimer: ReturnType<typeof setTimeout> | null = null
+  let pollTimer: ReturnType<typeof setInterval> | null = null
   let activeJobId = $state<string | null>(null)
-  let messageQueue = $state<{ message: string; mediaFiles: MediaFile[]; model: string }[]>([])
+  type QueueItem = { message: string; mediaFiles: MediaFile[]; model: string }
+  let allQueues = $state<Record<string, QueueItem[]>>(loadQueues())
+  let messageQueue = $derived(allQueues[convId ?? ''] || [])
   let abortController: AbortController | null = null
-  let draft = $state('')
+  let drafts = $state<Record<string, string>>({})
+  let draft = $derived(drafts[convId ?? ''] ?? '')
+
+  function loadQueues(): Record<string, QueueItem[]> {
+    sessionStorage.removeItem('alf-chat-queue') // migrate old key
+    try { return JSON.parse(sessionStorage.getItem('alf-chat-queues') || '{}') } catch { return {} }
+  }
+  function persistQueue() {
+    sessionStorage.setItem('alf-chat-queues', JSON.stringify(allQueues))
+  }
+  function pushToQueue(cid: string, item: QueueItem) {
+    allQueues = { ...allQueues, [cid]: [...(allQueues[cid] || []), item] }
+    persistQueue()
+  }
+  function shiftQueue(cid: string): QueueItem | undefined {
+    const q = allQueues[cid] || []
+    if (q.length === 0) return undefined
+    const [first, ...rest] = q
+    allQueues = { ...allQueues, [cid]: rest }
+    persistQueue()
+    return first
+  }
+  function clearQueue(cid: string) {
+    const { [cid]: _, ...rest } = allQueues
+    allQueues = rest
+    persistQueue()
+  }
+  function removeFromQueue(cid: string, idx: number) {
+    allQueues = { ...allQueues, [cid]: (allQueues[cid] || []).filter((_, i) => i !== idx) }
+    persistQueue()
+  }
   let activeSkills = $state<string[]>([])
 
   async function loadActiveSkills() {
     try {
-      const data = await api<{ skills: string[] }>('/api/chat/skills')
+      const cid = convId ?? ''
+      const data = await api<{ skills: string[] }>(`/api/chat/skills?conv_id=${encodeURIComponent(cid)}`)
       activeSkills = data.skills || []
     } catch { /* silent */ }
   }
 
   async function dismissSkill(name: string) {
     try {
-      await api(`/api/chat/skills?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+      const cid = convId ?? ''
+      await api(`/api/chat/skills?conv_id=${encodeURIComponent(cid)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
       activeSkills = activeSkills.filter(s => s !== name)
     } catch { /* silent */ }
   }
 
   function updateDraft(text: string) {
-    draft = text
+    drafts[convId ?? ''] = text
   }
 
   // Send to agents modal
@@ -170,13 +215,15 @@
       setMessages([])
       return
     }
+    const gen = ++loadGen
     try {
       const data = await api<ChatMsg[]>(`/api/chat?limit=50&conv_id=${convId}`)
+      if (gen !== loadGen) return // stale response from rapid switching
       setMessages(data || [])
       hasOlderMessages = (data?.length || 0) >= 50
       scrollToBottom()
     } catch {
-      setMessages([])
+      if (gen === loadGen) setMessages([])
     }
   }
 
@@ -223,7 +270,8 @@
       const data = await api<any>(`/api/chat/job?conv_id=${convId}`)
       if (data.active && data.job_id) {
         activeJobId = data.job_id
-        sending = true
+        setSending(convId ?? '', true)
+        streamingConvId = convId ?? ''
         reconnectToStream(data.job_id, 0)
       }
     } catch { /* no active job */ }
@@ -237,7 +285,7 @@
 
   // --- Send message ---
   async function handleSend(message: string, mediaFiles: MediaFile[], model: string) {
-    draft = ''
+    drafts[convId ?? ''] = ''
 
     // Client-side command handling
     const trimmed = message.trim()
@@ -252,7 +300,7 @@
 
     // Queue if already sending
     if (sending) {
-      messageQueue = [...messageQueue, { message, mediaFiles, model }]
+      pushToQueue(convId ?? '', { message, mediaFiles, model })
       return
     }
 
@@ -260,7 +308,9 @@
   }
 
   async function doSend(message: string, mediaFiles: MediaFile[], model: string) {
-    sending = true
+    const sendConvId = convId ?? ''
+    setSending(sendConvId, true)
+    streamingConvId = sendConvId
     stoppedByUser = false
     streamingBlocks = []
     streamingText = ''
@@ -303,14 +353,14 @@
 
       if (res.status === 401) {
         toasts.show('Session expired', 'error')
-        sending = false
+        clearSending()
         return
       }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Send failed' }))
         toasts.show(err.error || 'Send failed', 'error')
-        sending = false
+        clearSending()
         return
       }
 
@@ -318,13 +368,13 @@
       await readStream(res)
     } catch (e: any) {
       toasts.show(e.message || 'Send failed', 'error')
-      sending = false
+      clearSending()
     }
   }
 
   async function readStream(res: Response) {
     const reader = res.body?.getReader()
-    if (!reader) { sending = false; return }
+    if (!reader) { clearSending(); return }
 
     const decoder = new TextDecoder()
     let buffer = ''
@@ -426,10 +476,12 @@
       if (stoppedByUser) return
 
       const finalText = streamingText
-      sending = false
+      const doneConvId = streamingConvId
+      clearSending()
       activeJobId = null
       streamingBlocks = []
       streamingText = ''
+      streamingConvId = ''
       // Small delay to ensure server has committed the message before we fetch.
       await new Promise(r => setTimeout(r, 100))
       await loadHistory()
@@ -445,9 +497,8 @@
       }
 
       // Process queue
-      if (messageQueue.length > 0) {
-        const next = messageQueue[0]
-        messageQueue = messageQueue.slice(1)
+      const next = shiftQueue(activeSendConvId || convId || '')
+      if (next) {
         doSend(next.message, next.mediaFiles, next.model)
       }
     }
@@ -463,12 +514,12 @@
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
       if (!res.ok) {
-        sending = false
+        clearSending()
         return
       }
       await readStream(res)
     } catch {
-      sending = false
+      clearSending()
     }
   }
 
@@ -591,15 +642,16 @@
   // --- Stop active call (instant) ---
   function stopCall() {
     stoppedByUser = true
-    messageQueue = [] // clear pending queue
+    clearQueue(convId ?? '') // clear pending queue
     // Abort the active fetch stream immediately
     abortController?.abort()
     abortController = null
     // Reset UI state instantly — no awaits before this
-    sending = false
+    clearSending()
     activeJobId = null
     streamingBlocks = []
     streamingText = ''
+    streamingConvId = ''
     // Cancel backend job (persists "cancelled" system message), then reload history
     api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`)
       .catch(() => {})
@@ -608,17 +660,12 @@
 
   // --- New conversation ---
   async function newConversation() {
-    try {
-      // Reset LLM session state.
-      await api<any>('/api/chat', { method: 'DELETE' })
-      // Fresh convId.
-      convId = genId()
-      await api('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ id: convId, title: 'Chat' }) }).catch(() => {})
-      saveConvId()
+    const id = await convStore.create()
+    if (id) {
       setMessages([])
       toasts.show('New conversation started', 'success')
-    } catch (e: any) {
-      toasts.show(e.error || 'Failed to start new conversation', 'error')
+    } else {
+      toasts.show('Failed to start new conversation', 'error')
     }
   }
 
@@ -629,28 +676,68 @@
     }
   })
 
+  // React to conversation switches
+  let prevConvId = ''
+  $effect(() => {
+    const id = convStore.activeConvId
+    if (id && id !== prevConvId && convStore.loaded) {
+      prevConvId = id
+      convStore.clearUnread(id)
+      setMessages([]) // clear immediately to avoid stale flash
+      loadActiveSkills() // reload per-conversation skills
+      loadHistory().then(() => {
+        scrollToBottom()
+        checkActiveJob() // check if this tab has a running job
+      })
+    }
+  })
+
   // --- Lifecycle ---
   let unsubTiers: (() => void) | null = null
   let unsubNewMsg: (() => void) | null = null
+  let unsubActiveConv: (() => void) | null = null
 
   onMount(async () => {
     // Request notification permission
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
-    // Load the active conversation from server.
-    await loadActiveConversation()
+    // Load conversations from store (sets activeConvId).
+    await convStore.load()
     await loadTiers()
     loadActiveSkills()
     unsubTiers = events.subscribe('tiers', () => loadTiers())
-    unsubNewMsg = events.subscribe('new_message', () => {
+    unsubActiveConv = events.subscribe('active_conv', (data) => {
+      try {
+        const parsed = JSON.parse(data || '{}')
+        if (parsed.client_id === convStore.clientId) return // echo suppression
+        if (parsed.conv_id && parsed.conv_id !== convStore.activeConvId) {
+          convStore.switchTo(parsed.conv_id)
+        }
+      } catch {}
+    })
+    unsubNewMsg = events.subscribe('new_message', (data) => {
+      // Parse JSON payload with conv_id
+      let msgConvId = convId
+      try {
+        const parsed = JSON.parse(data || '{}')
+        if (parsed.conv_id) msgConvId = parsed.conv_id
+      } catch {}
+
+      if (msgConvId !== convId) {
+        // Message for a different conversation — mark unread
+        convStore.markUnread(msgConvId)
+        return
+      }
+
       if (!convId) return
       // Fetch latest messages and append any new ones (safe during streaming).
-      api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${convId}`).then(recent => {
+      const gen = loadGen
+      const fetchConvId = convId
+      api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${fetchConvId}`).then(recent => {
+        if (gen !== loadGen) return // stale: conversation switched
         if (!recent?.length) return
         const existingIds = new Set(messages.map(m => m.id))
-        // Only append assistant messages — user messages are already in the UI
-        // via optimistic insert (with temp- IDs that won't match server IDs).
         const newMsgs = recent.filter(m => !existingIds.has(m.id) && m.role === 'assistant')
         if (newMsgs.length > 0) {
           messages = sortMessages([...messages, ...newMsgs])
@@ -662,37 +749,80 @@
       await loadHistory()
     }
     await checkActiveJob()
+
+    // Poll every 2s: sync active conv from other devices + fetch new messages.
+    pollTimer = setInterval(() => {
+      if (!convId) return
+      // Sync active conversation from server (skip if we just switched locally).
+      if (Date.now() - convStore.lastLocalSwitch > 5000) {
+        api<any>('/api/chat/active').then(data => {
+          const serverConv = data?.active_conv_id
+          if (serverConv && serverConv !== convStore.activeConvId) {
+            convStore.switchTo(serverConv)
+          }
+        }).catch(() => {})
+      }
+      if (sending) return
+      const gen = loadGen
+      const fetchConvId = convId
+      api<ChatMsg[]>(`/api/chat?limit=5&conv_id=${fetchConvId}`).then(recent => {
+        if (gen !== loadGen) return // stale: conversation switched
+        if (!recent?.length) return
+        const existingIds = new Set(messages.map(m => m.id))
+        const newMsgs = recent.filter(m => !existingIds.has(m.id))
+        if (newMsgs.length > 0) {
+          messages = sortMessages([...messages, ...newMsgs])
+          scrollToBottom()
+        }
+      }).catch(() => {})
+    }, 2000)
   })
 
   onDestroy(() => {
-    if (pollTimer) clearTimeout(pollTimer)
+    if (pollTimer) clearInterval(pollTimer)
     unsubTiers?.()
     unsubNewMsg?.()
+    unsubActiveConv?.()
   })
 </script>
 
 <div class="chat-view">
   <!-- Header -->
   <div class="chat-header">
-    <button class="new-conv-btn" onclick={newConversation} title="New conversation">
+    <button class="btn btn-ghost btn-sm" onclick={newConversation} title="New conversation">
       <RotateCw size={14} />
-      <span>New</span>
+      New
     </button>
+    <div class="chat-header-spacer"></div>
+    <div use:bindFilterGroup>
+      <alf-btn-group value={chatFilter}>
+        <button class="btn btn-sm" data-value="all">All</button>
+        <button class="btn btn-sm" data-value="clean">Clean</button>
+        <button class="btn btn-sm" data-value="thinking">Thinking</button>
+        <button class="btn btn-sm" data-value="tools">Tools</button>
+      </alf-btn-group>
+    </div>
     <button
-      class="collapse-toggle-btn"
+      class="btn btn-icon btn-sm"
       onclick={() => { collapseBlocks = !collapseBlocks; localStorage.setItem('alf-chat-collapse', String(collapseBlocks)) }}
       title={collapseBlocks ? 'Expand all blocks' : 'Collapse all blocks'}
     >
       {#if collapseBlocks}
-        <ChevronsUpDown size={18} />
+        <ChevronsUpDown size={16} />
       {:else}
-        <ChevronsDownUp size={18} />
+        <ChevronsDownUp size={16} />
       {/if}
     </button>
   </div>
 
+  <!-- Conversation Tabs -->
+  <ConversationTabs />
+
   <!-- Messages -->
   <div class="chat-messages" bind:this={messagesContainer} onscroll={onMessagesScroll}>
+    {#if convId}
+      <div class="conv-debug-label">{convId}</div>
+    {/if}
     {#if loadingOlder}
       <div class="loading-older">Loading older messages...</div>
     {/if}
@@ -707,10 +837,13 @@
     {#each messages as msg (msg.id)}
       {#if msg.role === 'assistant' && msg.content_blocks && msg.content_blocks.length > 1}
         {@const visibleBlocks = msg.content_blocks.filter(b => {
+          if (b.type === 'thinking' && hideThinking) return false
+          if ((b.type === 'tool_use' || b.type === 'tool_result') && hideTools) return false
           if (b.type === 'text') return b.text && b.text.trim()
           if (b.type === 'tool_result') return (b.content || b.text || '').trim()
           return true
         })}
+        {#if visibleBlocks.length > 0}
         {#each visibleBlocks as block, bi (bi)}
           {@const isLast = bi === visibleBlocks.length - 1}
           <ChatMessageComponent
@@ -728,18 +861,38 @@
               reactions: isLast ? msg.reactions : undefined,
             }}
             {convId}
-            {collapseBlocks}
+            {collapseBlocks} {hideThinking} {hideTools}
             onSendToTask={isLast ? openAgentModal : undefined}
           />
         {/each}
+        {/if}
       {:else}
-        <ChatMessageComponent {msg} {convId} {collapseBlocks} onSendToTask={openAgentModal} />
+        {@const isEmpty = (() => {
+          const text = (msg.text || '').trim()
+          const blocks = msg.content_blocks || []
+          // User messages: empty if no text and no media
+          if (msg.role === 'user') return !text && (!msg.media || msg.media.length === 0)
+          // System messages: empty if no text
+          if (msg.role === 'system') return !text
+          // Assistant: empty if no visible text and all blocks are hidden/empty
+          if (!text && blocks.length === 0) return true
+          return blocks.length > 0 && blocks.every(b => {
+            if (b.type === 'thinking' && hideThinking) return true
+            if ((b.type === 'tool_use' || b.type === 'tool_result') && hideTools) return true
+            if (b.type === 'text') return !b.text?.trim()
+            if (b.type === 'tool_result') return !(b.content || b.text || '').trim()
+            return false
+          })
+        })()}
+        {#if !isEmpty}
+          <ChatMessageComponent {msg} {convId} {collapseBlocks} {hideThinking} {hideTools} onSendToTask={openAgentModal} />
+        {/if}
       {/if}
     {/each}
 
     <!-- Streaming response — each block rendered as its own bubble (#127) -->
-    {#if sending && streamingBlocks.length > 0}
-      {#each streamingBlocks as block, i (i)}
+    {#if showStreaming && visibleStreamingBlocks.length > 0}
+      {#each visibleStreamingBlocks as block, i (i)}
         <ChatMessageComponent
           msg={{
             id: `streaming-${i}`,
@@ -749,10 +902,10 @@
             content_blocks: [block],
           }}
           {convId}
-          {collapseBlocks}
+          {collapseBlocks} {hideThinking} {hideTools}
         />
       {/each}
-    {:else if sending}
+    {:else if showStreaming}
       <div class="chat-msg chat-msg-assistant typing-indicator">
         <span class="dot"></span>
         <span class="dot"></span>
@@ -766,7 +919,7 @@
         <div class="msg-text">{queued.message}</div>
         <div class="queued-footer">
           <span class="queued-badge">queued #{i + 1}</span>
-          <button class="queued-cancel" onclick={() => { messageQueue = messageQueue.filter((_, idx) => idx !== i) }} title="Cancel queued message">
+          <button class="queued-cancel" onclick={() => removeFromQueue(convId ?? '', i)} title="Cancel queued message">
             <X size={12} /> cancel
           </button>
         </div>
@@ -808,12 +961,22 @@
 </Modal>
 
 <style>
+  .conv-debug-label {
+    position: sticky;
+    top: 0;
+    left: 0;
+    z-index: 5;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--text-muted, #888);
+    opacity: 0.6;
+  }
   .chat-view {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 48px);
-    max-height: calc(100vh - 48px);
-    margin-bottom: -24px;
+    height: 100vh;
+    max-height: 100vh;
   }
 
   /* Header */
@@ -826,44 +989,8 @@
     flex-shrink: 0;
   }
 
-  .new-conv-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    background: none;
-    border: none;
-    border-radius: 6px;
-    color: var(--text-dim);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background 0.15s;
-  }
-
-  .new-conv-btn:hover {
-    background: var(--bg-input);
-    color: var(--text);
-  }
-
-  .collapse-toggle-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text-dim);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background 0.15s;
-  }
-
-  .collapse-toggle-btn:hover {
-    background: var(--bg-input);
-    color: var(--text);
+  .chat-header-spacer {
+    flex: 1;
   }
 
   /* Messages */

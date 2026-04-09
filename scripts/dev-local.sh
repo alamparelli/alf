@@ -69,7 +69,10 @@ name: alf-dev
 
 services:
   alf:
-    build: ..
+    build:
+      context: ..
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-dev-local}
     container_name: alf
     hostname: workspace
     restart: unless-stopped
@@ -177,8 +180,11 @@ fi
 # Set timezone from host if not already set.
 export TZ="${TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||' || echo UTC)}"
 
-echo "==> Building ALF CLI..."
-go build -ldflags "-s -w -X main.version=dev-local" -o "$LOCAL_DIR/alf" ./cmd/alf/
+BUILD_VERSION=$(git describe --tags --always 2>/dev/null || echo "dev-local")
+export BUILD_VERSION
+
+echo "==> Building ALF CLI (${BUILD_VERSION})..."
+go build -ldflags "-s -w -X main.version=${BUILD_VERSION}" -o "$LOCAL_DIR/alf" ./cmd/alf/
 
 # Symlink so the CLI finds secrets at the expected path.
 ln -sf "$LOCAL_DIR/secrets" "$LOCAL_DIR/secrets-link" 2>/dev/null || true

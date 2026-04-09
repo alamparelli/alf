@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -105,6 +108,14 @@ type apiRequest struct {
 	ParallelToolCalls  *bool             `json:"parallel_tool_calls,omitempty"`
 	Reasoning          *apiReasoning     `json:"reasoning,omitempty"`
 	StreamOptions      *apiStreamOpts    `json:"stream_options,omitempty"`
+	CacheControl       *apiCacheControl  `json:"cache_control,omitempty"`
+}
+
+// apiCacheControl configures prompt caching (OpenRouter / Anthropic).
+// Type: "ephemeral" (5-min TTL, default). Future: TTL field for 1h cache.
+type apiCacheControl struct {
+	Type string `json:"type"`           // "ephemeral"
+	TTL  string `json:"ttl,omitempty"`  // "" = 5min default, "1h" = 1 hour (Anthropic only)
 }
 
 // apiReasoning configures reasoning/thinking for OpenRouter-compatible models.
@@ -117,11 +128,28 @@ type apiStreamOpts struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
+// apiContentBlock is a single content block within a multi-block message.
+// Supports text and image_url types (OpenAI-compatible vision format).
+type apiContentBlock struct {
+	Type         string            `json:"type"`
+	Text         string            `json:"text,omitempty"`
+	ImageURL     *apiImageURL      `json:"image_url,omitempty"`
+	CacheControl *apiCacheControl  `json:"cache_control,omitempty"`
+}
+
+// apiImageURL represents an image for OpenAI-compatible vision APIs.
+// URL can be a data URI (data:image/jpeg;base64,...) or an HTTP URL.
+type apiImageURL struct {
+	URL string `json:"url"`
+}
+
 type apiMessage struct {
-	Role       string        `json:"-"`
-	Content    string        `json:"-"`
-	ToolCalls  []apiToolCall `json:"-"`
-	ToolCallID string        `json:"-"`
+	Role         string            `json:"-"`
+	Content      string            `json:"-"`
+	MultiContent []apiContentBlock `json:"-"` // multi-block content (for system messages with cache split)
+	ToolCalls    []apiToolCall     `json:"-"`
+	ToolCallID   string            `json:"-"`
+	CacheControl *apiCacheControl  `json:"-"` // set to emit content as block with cache_control
 }
 
 // MarshalJSON implements custom JSON encoding for OpenAI-compatible messages.
@@ -142,11 +170,29 @@ func (m apiMessage) MarshalJSON() ([]byte, error) {
 		}
 	case m.ToolCallID != "":
 		// Tool result: always include content + tool_call_id.
-		msg["content"] = m.Content
+		if m.CacheControl != nil && m.Content != "" {
+			msg["content"] = []map[string]any{{
+				"type":          "text",
+				"text":          m.Content,
+				"cache_control": m.CacheControl,
+			}}
+		} else {
+			msg["content"] = m.Content
+		}
 		msg["tool_call_id"] = m.ToolCallID
 	default:
-		// System/user/assistant text: omit content only if empty.
-		if m.Content != "" {
+		// System/user/assistant text.
+		if len(m.MultiContent) > 0 {
+			// Multi-block content (e.g. system message with stable + dynamic blocks).
+			msg["content"] = m.MultiContent
+		} else if m.CacheControl != nil && m.Content != "" {
+			// Emit as content block array with cache_control (Anthropic prompt caching).
+			msg["content"] = []map[string]any{{
+				"type":          "text",
+				"text":          m.Content,
+				"cache_control": m.CacheControl,
+			}}
+		} else if m.Content != "" {
 			msg["content"] = m.Content
 		}
 	}
@@ -190,6 +236,7 @@ type apiStreamResult struct {
 	Model        string
 	InputTokens  int
 	OutputTokens int
+	CachedTokens int // prompt tokens served from cache (OpenRouter/Anthropic)
 }
 
 // BuildMessages constructs the messages array from a prompt and params.
@@ -197,10 +244,39 @@ type apiStreamResult struct {
 func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 	var messages []apiMessage
 
-	// System prompts.
+	// System prompts. When CacheBreakpoint > 0, split into stable (cacheable)
+	// and dynamic parts so Anthropic prompt caching can reuse the stable prefix.
+	// When bp == len (all stable, no dynamic), tag the whole block as cacheable.
+	model := params.Model
+	if model == "" {
+		model = p.defaultModel
+	}
+	isAnthropic := strings.HasPrefix(model, "anthropic/")
 	if len(params.SystemPrompts) > 0 {
-		combined := strings.Join(params.SystemPrompts, "\n\n")
-		messages = append(messages, apiMessage{Role: "system", Content: combined})
+		bp := params.CacheBreakpoint
+		if isAnthropic && bp > 0 {
+			// Single system message with multi-block content:
+			// block[0] = stable text with cache_control (cached by Anthropic)
+			// block[1] = dynamic text without cache_control (changes per request)
+			// OpenRouter merges system messages into one Anthropic system param,
+			// so using a single message with multiple blocks ensures the cache
+			// breakpoint is properly respected.
+			stable := strings.Join(params.SystemPrompts[:min(bp, len(params.SystemPrompts))], "\n\n")
+			sysMsg := apiMessage{Role: "system"}
+			sysMsg.MultiContent = []apiContentBlock{
+				{Type: "text", Text: stable, CacheControl: &apiCacheControl{Type: "ephemeral"}},
+			}
+			if bp < len(params.SystemPrompts) {
+				dynamic := strings.Join(params.SystemPrompts[bp:], "\n\n")
+				if dynamic != "" {
+					sysMsg.MultiContent = append(sysMsg.MultiContent, apiContentBlock{Type: "text", Text: dynamic})
+				}
+			}
+			messages = append(messages, sysMsg)
+		} else {
+			combined := strings.Join(params.SystemPrompts, "\n\n")
+			messages = append(messages, apiMessage{Role: "system", Content: combined})
+		}
 	}
 
 	// Conversation history: prefer unified ConvMessages, fall back to per-key History.
@@ -226,9 +302,129 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 		}
 	}
 
-	// Current user message.
-	messages = append(messages, apiMessage{Role: "user", Content: prompt})
+	// Tag last conversation message for cache (2nd breakpoint).
+	// Anthropic supports up to 4 breakpoints; this caches the conversation
+	// history so subsequent turns only pay for the new user message.
+	if isAnthropic && (len(params.ConvMessages) > 0 || (params.SessionKey != "" && p.history != nil)) {
+		tagLastMessageCache(messages)
+	}
+
+	// Current user message — skip if already present as last ConvMessage.
+	alreadyPresent := false
+	if len(messages) > 0 {
+		last := messages[len(messages)-1]
+		if last.Role == "user" && last.Content == prompt {
+			alreadyPresent = true
+		}
+	}
+	if !alreadyPresent {
+		userMsg := apiMessage{Role: "user"}
+
+		// If there's media, build multi-block content with vision blocks + text prompt.
+		if len(params.Media) > 0 {
+			var blocks []apiContentBlock
+
+			// Add vision blocks for images and documents.
+			for _, m := range params.Media {
+				block := p.buildVisionBlock(m)
+				if block != nil {
+					blocks = append(blocks, *block)
+				}
+			}
+
+			// Add text prompt as final block, stripping CLI-style media
+			// instructions since the image is already inline as a vision block.
+			cleanPrompt := stripMediaInstructions(prompt)
+			if cleanPrompt != "" {
+				blocks = append(blocks, apiContentBlock{Type: "text", Text: cleanPrompt})
+			}
+
+			if len(blocks) > 0 {
+				userMsg.MultiContent = blocks
+			} else {
+				// Fallback: no vision blocks built, use text content.
+				userMsg.Content = prompt
+			}
+		} else {
+			userMsg.Content = prompt
+		}
+
+		messages = append(messages, userMsg)
+	}
 	return messages
+}
+
+// tagLastMessageCache sets cache_control on the last non-system message,
+// clearing any previous non-system cache tags first (max 4 breakpoints).
+func tagLastMessageCache(messages []apiMessage) {
+	// Clear previous non-system cache tags to stay within the 4-breakpoint limit.
+	for i := range messages {
+		if messages[i].Role != "system" && messages[i].CacheControl != nil {
+			messages[i].CacheControl = nil
+		}
+	}
+	// Tag the last non-system message.
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "system" {
+			messages[i].CacheControl = &apiCacheControl{Type: "ephemeral"}
+			return
+		}
+	}
+}
+
+// buildVisionBlock reads a media file and builds an apiContentBlock with vision data.
+// Uses OpenAI-compatible format: type "image_url" with data URI.
+// Returns nil if the media type is not supported or the file cannot be read.
+func (p *APIProvider) buildVisionBlock(m MediaEntry) *apiContentBlock {
+	switch m.Type {
+	case "photo":
+		// Read and encode as base64 data URI for vision.
+	case "document":
+		// Documents with extracted text: return as text block instead.
+		if m.TextContent != "" {
+			return &apiContentBlock{
+				Type: "text",
+				Text: fmt.Sprintf("[Document: %s]\n%s", m.FileName, m.TextContent),
+			}
+		}
+		// Binary documents without text extraction: skip (can't vision PDFs on most models).
+		return nil
+	default:
+		return nil
+	}
+
+	// Read media file from disk.
+	data, err := os.ReadFile(m.TempPath)
+	if err != nil {
+		log.Printf("api: failed to read media file %s: %v", m.TempPath, err)
+		return nil
+	}
+	if len(data) == 0 {
+		return nil
+	}
+
+	// Build data URI: data:<mime>;base64,<data>
+	b64 := base64.StdEncoding.EncodeToString(data)
+	dataURI := fmt.Sprintf("data:%s;base64,%s", m.MimeType, b64)
+
+	return &apiContentBlock{
+		Type:     "image_url",
+		ImageURL: &apiImageURL{URL: dataURI},
+	}
+}
+
+// mediaInstructionRe matches CLI-style media instructions like:
+// [PHOTO - use Read tool to view: /path/to/file.jpg]
+// [VIDEO "name" - use Read tool to view: /path]
+// [VIDEO "name" - contact sheet with key frames. Use Read tool to view: /path]
+var mediaInstructionRe = regexp.MustCompile(`(?m)\[(?:PHOTO|VIDEO)[^\]]*(?:use Read tool to view|contact sheet)[^\]]*\]\n?`)
+
+// stripMediaInstructions removes CLI-style [PHOTO/VIDEO - use Read tool...] lines
+// from the prompt. When vision blocks are sent inline, these instructions are
+// redundant and confuse models into using read_file instead of the vision data.
+func stripMediaInstructions(prompt string) string {
+	cleaned := mediaInstructionRe.ReplaceAllString(prompt, "")
+	return strings.TrimSpace(cleaned)
 }
 
 // DoRequest sends a request with pre-built messages and optional tools,
@@ -258,6 +454,8 @@ func (p *APIProvider) DoRequest(ctx context.Context, messages []apiMessage, mode
 	if effort != "" && !p.IsOllamaCompat() {
 		reqBody.Reasoning = &apiReasoning{Effort: effort, Enabled: true}
 	}
+	// Per-message cache_control (set by BuildMessages) handles caching;
+	// top-level cache_control removed to avoid conflicts.
 	return p.doStreamRequest(ctx, reqBody, onProgress, 0)
 }
 
@@ -292,6 +490,8 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	if params.Effort != "" && !p.IsOllamaCompat() {
 		reqBody.Reasoning = &apiReasoning{Effort: params.Effort, Enabled: true}
 	}
+	// Per-message cache_control (set by BuildMessages) handles caching;
+	// top-level cache_control removed to avoid conflicts.
 
 	resp, err := p.doStreamRequest(ctx, reqBody, onProgress, 0)
 	if err != nil {
@@ -382,7 +582,7 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 	var resultText strings.Builder
 	toolCalls := make(map[int]*apiToolCall) // keyed by index for incremental assembly
 	var finishReason string
-	var inputTokens, outputTokens int
+	var inputTokens, outputTokens, cachedTokens int
 
 	// Try to extract usage from response headers (OpenRouter sends these on non-streaming
 	// responses; for streaming they may appear after the body is consumed — see SSE parsing below).
@@ -447,6 +647,9 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 			Usage *struct {
 				PromptTokens     int `json:"prompt_tokens"`
 				CompletionTokens int `json:"completion_tokens"`
+				PromptTokensDetails *struct {
+					CachedTokens int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details,omitempty"`
 			} `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
@@ -460,6 +663,9 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 			}
 			if chunk.Usage.CompletionTokens > 0 {
 				outputTokens = chunk.Usage.CompletionTokens
+			}
+			if chunk.Usage.PromptTokensDetails != nil && chunk.Usage.PromptTokensDetails.CachedTokens > 0 {
+				cachedTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
 		}
 
@@ -520,8 +726,12 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 		}
 	}
 
-	log.Printf("api[%s]: response %dms %d chars %d tool_calls finish=%s model=%s",
-		p.name, duration.Milliseconds(), len(text), len(calls), finishReason, reqBody.Model)
+	cacheInfo := ""
+	if cachedTokens > 0 {
+		cacheInfo = fmt.Sprintf(" cache_hit=%d", cachedTokens)
+	}
+	log.Printf("api[%s]: response %dms %d chars %d tool_calls finish=%s model=%s%s",
+		p.name, duration.Milliseconds(), len(text), len(calls), finishReason, reqBody.Model, cacheInfo)
 
 	// For non-tool responses, empty text is an error. Retry once.
 	if text == "" && len(calls) == 0 {
@@ -539,6 +749,7 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 		Model:        reqBody.Model,
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
+		CachedTokens: cachedTokens,
 	}, nil
 }
 

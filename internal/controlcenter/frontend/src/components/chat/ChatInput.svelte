@@ -32,6 +32,8 @@
   let textarea: HTMLTextAreaElement
   let fileInput: HTMLInputElement
   let dragOver = $state(false)
+  let tierDropdownOpen = $state(false)
+  let tierBtnEl: HTMLButtonElement
 
   // Sync text and model when props change (tab switch)
   $effect(() => {
@@ -40,6 +42,18 @@
   $effect(() => {
     selectedModel = selectedModelProp
   })
+
+  function selectTier(name: string) {
+    selectedModel = name
+    onModelChange?.(name)
+    tierDropdownOpen = false
+  }
+
+  function handleTierClickOutside(e: MouseEvent) {
+    if (tierBtnEl && !tierBtnEl.contains(e.target as Node)) {
+      tierDropdownOpen = false
+    }
+  }
 
   // Notify parent of text changes
   function onInput() {
@@ -291,14 +305,29 @@
       onpaste={handlePaste}
     ></textarea>
 
-    <!-- Tier selector -->
+    <!-- Tier selector (custom upward dropdown) -->
     {#if tiers.length > 0}
-      <select class="tier-select" bind:value={selectedModel} onchange={() => onModelChange?.(selectedModel)}>
-        <option value="">Auto</option>
-        {#each tiers as tier}
-          <option value={tier.name}>{tier.name}</option>
-        {/each}
-      </select>
+      <div class="tier-dropdown-wrapper">
+        <button
+          class="tier-select"
+          bind:this={tierBtnEl}
+          onclick={() => tierDropdownOpen = !tierDropdownOpen}
+          type="button"
+        >
+          {selectedModel || 'Auto'} <span class="tier-caret">&#9650;</span>
+        </button>
+        {#if tierDropdownOpen}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="tier-dropdown">
+            <button class="tier-option" class:active={!selectedModel} onclick={() => selectTier('')}>Auto</button>
+            {#each tiers as tier}
+              <button class="tier-option" class:active={selectedModel === tier.name} onclick={() => selectTier(tier.name)}>{tier.name}</button>
+            {/each}
+          </div>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="tier-backdrop" onclick={() => tierDropdownOpen = false}></div>
+        {/if}
+      </div>
     {/if}
 
     <!-- Send / Stop button -->
@@ -418,6 +447,11 @@
     cursor: not-allowed;
   }
 
+  .tier-dropdown-wrapper {
+    position: relative;
+    flex-shrink: 0;
+  }
+
   .tier-select {
     padding: 6px 8px;
     border: 1px solid var(--border);
@@ -427,7 +461,60 @@
     font-family: inherit;
     font-size: var(--font-xs, 11px);
     cursor: pointer;
-    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .tier-caret {
+    font-size: 8px;
+    opacity: 0.5;
+  }
+
+  .tier-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+  }
+
+  .tier-dropdown {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    margin-bottom: 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.15);
+    z-index: 100;
+    min-width: 120px;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 4px;
+  }
+
+  .tier-option {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: var(--font-xs, 11px);
+    text-align: left;
+    cursor: pointer;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  .tier-option:hover {
+    background: var(--bg-input);
+  }
+
+  .tier-option.active {
+    color: var(--accent);
+    font-weight: 600;
   }
 
   /* File chips */

@@ -34,13 +34,13 @@ func (h *ChatMediaHandler) upload(w http.ResponseWriter, r *http.Request) {
 	// 50MB max.
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyUpload)
 	if err := r.ParseMultipartForm(50 * 1024 * 1024); err != nil {
-		http.Error(w, `{"error":"file too large or invalid multipart"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "file too large or invalid multipart")
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, `{"error":"missing file field"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "missing file field")
 		return
 	}
 	defer file.Close()
@@ -54,7 +54,7 @@ func (h *ChatMediaHandler) upload(w http.ResponseWriter, r *http.Request) {
 	result, err := h.Service.Upload(file, fileName, mediaType)
 	if err != nil {
 		log.Printf("[chat-api] upload error: %v", err)
-		http.Error(w, `{"error":"upload failed"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "upload failed")
 		return
 	}
 
@@ -64,7 +64,7 @@ func (h *ChatMediaHandler) upload(w http.ResponseWriter, r *http.Request) {
 func (h *ChatMediaHandler) serveMedia(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/chat/media/")
 	if id == "" {
-		http.Error(w, `{"error":"missing media id"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "missing media id")
 		return
 	}
 
@@ -84,13 +84,13 @@ func (h *ChatMediaHandler) serveMedia(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+	respondError(w, http.StatusNotFound, "not found")
 }
 
 func serveLocalFile(w http.ResponseWriter, r *http.Request, path, mimeType, fileName string, modTime time.Time) {
 	f, err := os.Open(path)
 	if err != nil {
-		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
+		respondError(w, http.StatusNotFound, "file not found")
 		return
 	}
 	defer f.Close()

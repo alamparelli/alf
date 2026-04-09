@@ -25,7 +25,7 @@ type TerminalHandler struct {
 func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Inline auth check (middleware can't wrap this handler).
 	if !h.checkAuth(r) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 

@@ -27,17 +27,17 @@ func (h *ChainHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var req chainRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyLarge)).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 	if len(req.Steps) < 2 {
-		http.Error(w, "at least 2 steps required", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "at least 2 steps required")
 		return
 	}
 
 	tool := h.ToolRegistry.GetNative("task")
 	if tool == nil {
-		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "task tool not registered"})
+		respondError(w, http.StatusServiceUnavailable, "task tool not registered")
 		return
 	}
 
@@ -64,7 +64,7 @@ func (h *ChainHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	result, err := tool.Run(ctx, string(argsJSON))
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

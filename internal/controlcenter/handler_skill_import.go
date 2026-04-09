@@ -106,7 +106,7 @@ func (h *SkillImportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var req skillImportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON or request too large"})
+		respondError(w, http.StatusBadRequest, "invalid JSON or request too large")
 		return
 	}
 
@@ -118,14 +118,14 @@ func (h *SkillImportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "install":
 		h.handleInstall(w, req)
 	default:
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be 'scan', 'correct', or 'install'"})
+		respondError(w, http.StatusBadRequest, "action must be 'scan', 'correct', or 'install'")
 	}
 }
 
 func (h *SkillImportHandler) handleScan(w http.ResponseWriter, req skillImportRequest) {
 	owner, repo, skillName, err := parseCommand(req.Command)
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -146,7 +146,7 @@ func (h *SkillImportHandler) handleScan(w http.ResponseWriter, req skillImportRe
 				return
 			}
 		}
-		respondJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch skill: %v", err)})
+		respondError(w, http.StatusBadGateway, fmt.Sprintf("failed to fetch skill: %v", err))
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *SkillImportHandler) handleScan(w http.ResponseWriter, req skillImportRe
 	scanResult, err := h.runSecurityScan(content, req.Backend, req.Model)
 	if err != nil {
 		log.Printf("[CC] skill import scan error: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("security scan failed: %v", err)})
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("security scan failed: %v", err))
 		return
 	}
 
@@ -208,7 +208,7 @@ Return ONLY the corrected SKILL.md content. No explanations, no code fences, no 
 func (h *SkillImportHandler) handleCorrect(w http.ResponseWriter, req skillImportRequest) {
 	content := strings.TrimSpace(req.Content)
 	if content == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "content is required"})
+		respondError(w, http.StatusBadRequest, "content is required")
 		return
 	}
 
@@ -218,13 +218,13 @@ func (h *SkillImportHandler) handleCorrect(w http.ResponseWriter, req skillImpor
 	}
 
 	if h.ProviderRegistry == nil {
-		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no provider registry available"})
+		respondError(w, http.StatusServiceUnavailable, "no provider registry available")
 		return
 	}
 
 	prov := h.ProviderRegistry.ForBackend(req.Backend)
 	if prov == nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "backend not available"})
+		respondError(w, http.StatusBadRequest, "backend not available")
 		return
 	}
 
@@ -246,7 +246,7 @@ func (h *SkillImportHandler) handleCorrect(w http.ResponseWriter, req skillImpor
 	}, nil)
 	if err != nil {
 		log.Printf("[CC] skill import correct error: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("correction failed: %v", err)})
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("correction failed: %v", err))
 		return
 	}
 
@@ -259,17 +259,17 @@ func (h *SkillImportHandler) handleCorrect(w http.ResponseWriter, req skillImpor
 func (h *SkillImportHandler) handleInstall(w http.ResponseWriter, req skillImportRequest) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		respondError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if !isSafeName(name) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid skill name: must be alphanumeric with dashes/underscores"})
+		respondError(w, http.StatusBadRequest, "invalid skill name: must be alphanumeric with dashes/underscores")
 		return
 	}
 
 	content := strings.TrimSpace(req.Content)
 	if content == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "content is required"})
+		respondError(w, http.StatusBadRequest, "content is required")
 		return
 	}
 
@@ -297,7 +297,7 @@ func (h *SkillImportHandler) handleInstall(w http.ResponseWriter, req skillImpor
 
 	// Create directory.
 	if err := os.MkdirAll(skillDir, 0o775); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create skill directory"})
+		respondError(w, http.StatusInternalServerError, "failed to create skill directory")
 		return
 	}
 
@@ -305,12 +305,12 @@ func (h *SkillImportHandler) handleInstall(w http.ResponseWriter, req skillImpor
 	tmpPath := skillPath + ".tmp"
 	if err := os.WriteFile(tmpPath, []byte(enriched), 0o664); err != nil {
 		os.Remove(tmpPath)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to write skill file"})
+		respondError(w, http.StatusInternalServerError, "failed to write skill file")
 		return
 	}
 	if err := os.Rename(tmpPath, skillPath); err != nil {
 		os.Remove(tmpPath)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save skill file"})
+		respondError(w, http.StatusInternalServerError, "failed to save skill file")
 		return
 	}
 

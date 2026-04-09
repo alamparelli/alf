@@ -2,6 +2,7 @@ package controlcenter
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,18 +61,20 @@ func TestChatHandler_DeleteNewSession(t *testing.T) {
 
 func TestChatHandler_DeleteFiresOnSessionEnd(t *testing.T) {
 	svc := newTestChatService(t)
-	// Set a session so there's something to archive.
-	svc.Sessions.Set(apiChatID, "test-session-xyz")
 
 	// Wire a minimal engine with OnSessionEnd hook.
-	sessions := svc.Sessions
 	var firedWith string
 	eng := &comms.ChatEngine{
-		Sessions:     sessions,
+		Sessions:     svc.Sessions,
 		ContextDir:   svc.ContextDir,
 		OnSessionEnd: func(sid string) { firedWith = sid },
 	}
 	svc.Engine = eng
+
+	// Set the session under the key the engine will actually use
+	// (ChannelID("cc:-1").SessionKey() hashes "cc:-1", not raw apiChatID).
+	chID := comms.ChannelID("cc:" + fmt.Sprint(apiChatID))
+	svc.Sessions.Set(chID.SessionKey(), "test-session-xyz")
 
 	h := &ChatHandler{Service: svc}
 	req := httptest.NewRequest("DELETE", "/api/chat", nil)
@@ -200,5 +203,130 @@ func TestChatHandler_HistoryPagination(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &msgs)
 	if len(msgs) != 3 {
 		t.Errorf("expected 3, got %d", len(msgs))
+	}
+}
+
+func TestChatActiveHandler_GetReturnsActiveConvID(t *testing.T) {
+	svc := newTestChatService(t)
+	svc.SetActiveConvID("conv-abc")
+
+	h := &ChatActiveHandler{Service: svc, EventBroker: NewEventBroker()}
+	req := httptest.NewRequest("GET", "/api/chat/active", nil)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var result map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("JSON decode: %v", err)
+	}
+	if result["active_conv_id"] != "conv-abc" {
+		t.Errorf("expected conv-abc, got %q", result["active_conv_id"])
+	}
+}
+
+func TestChatActiveHandler_GetEmpty(t *testing.T) {
+	svc := newTestChatService(t)
+
+	h := &ChatActiveHandler{Service: svc, EventBroker: NewEventBroker()}
+	req := httptest.NewRequest("GET", "/api/chat/active", nil)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var result map[string]string
+	json.Unmarshal(rec.Body.Bytes(), &result)
+	if result["active_conv_id"] != "" {
+		t.Errorf("expected empty active_conv_id, got %q", result["active_conv_id"])
+	}
+}
+
+func TestChatActiveHandler_PutSetsActive(t *testing.T) {
+	svc := newTestChatService(t)
+	broker := NewEventBroker()
+
+	h := &ChatActiveHandler{Service: svc, EventBroker: broker}
+	body := `{"conv_id":"conv-xyz","client_id":"browser-1"}`
+	req := httptest.NewRequest("PUT", "/api/chat/active", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Verify it was persisted.
+	if got := svc.CurrentConvID(); got != "conv-xyz" {
+		t.Errorf("expected conv-xyz, got %q", got)
+	}
+
+	// Verify DB persistence survives clearing in-memory state.
+	svc.lastChatConv = ""
+	if got := svc.CurrentConvID(); got != "conv-xyz" {
+		t.Errorf("expected conv-xyz from DB fallback, got %q", got)
+	}
+}
+
+func TestChatActiveHandler_PutEmptyConvID(t *testing.T) {
+	h := &ChatActiveHandler{Service: newTestChatService(t), EventBroker: NewEventBroker()}
+	body := `{"conv_id":"","client_id":"browser-1"}`
+	req := httptest.NewRequest("PUT", "/api/chat/active", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty conv_id, got %d", rec.Code)
+	}
+}
+
+func TestChatActiveHandler_PutConvIDTooLong(t *testing.T) {
+	h := &ChatActiveHandler{Service: newTestChatService(t), EventBroker: NewEventBroker()}
+	longID := strings.Repeat("x", 65)
+	body := `{"conv_id":"` + longID + `","client_id":"ok"}`
+	req := httptest.NewRequest("PUT", "/api/chat/active", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for conv_id > 64, got %d", rec.Code)
+	}
+}
+
+func TestChatActiveHandler_PutClientIDTooLong(t *testing.T) {
+	h := &ChatActiveHandler{Service: newTestChatService(t), EventBroker: NewEventBroker()}
+	longClient := strings.Repeat("c", 65)
+	body := `{"conv_id":"ok","client_id":"` + longClient + `"}`
+	req := httptest.NewRequest("PUT", "/api/chat/active", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for client_id > 64, got %d", rec.Code)
+	}
+}
+
+func TestChatActiveHandler_MethodNotAllowed(t *testing.T) {
+	h := &ChatActiveHandler{Service: newTestChatService(t), EventBroker: NewEventBroker()}
+	req := httptest.NewRequest("DELETE", "/api/chat/active", nil)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", rec.Code)
 	}
 }

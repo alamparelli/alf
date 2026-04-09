@@ -67,6 +67,11 @@ type EventLogger interface {
 	Log(event string, fields map[string]any)
 }
 
+// ToolErrorSummarizer provides a summary of unresolved tool errors for heartbeat injection.
+type ToolErrorSummarizer interface {
+	UnresolvedSummary() string
+}
+
 // TierStoreReader reads tier configuration.
 type TierStoreReader interface {
 	Current() *TiersSnapshot
@@ -300,10 +305,7 @@ func (e *Engine) runCommand(j *Job) (string, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", j.Command)
-	cmd.Env = os.Environ()
-	if e.cfg.SignalSockPath != "" {
-		cmd.Env = append(cmd.Env, "ALF_SIGNAL_SOCK="+e.cfg.SignalSockPath)
-	}
+	cmd.Env = e.commandEnv()
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -329,6 +331,54 @@ func (e *Engine) runCommand(j *Job) (string, error) {
 	}
 
 	return strings.TrimSpace(output), nil
+}
+
+// secretEnvSuffixes are environment variable name suffixes that indicate
+// daemon credentials. Any var whose name (before '=') ends with one of
+// these is excluded from direct-tier job subprocesses.
+var secretEnvSuffixes = []string{"_TOKEN", "_SECRET", "_KEY", "_PASSWORD"}
+
+// secretEnvPrefixes are environment variable prefixes that are always
+// excluded from direct-tier jobs regardless of suffix.
+var secretEnvPrefixes = []string{"CLAUDE_"}
+
+// isSecretEnv returns true if the env var (in KEY=VALUE form) looks like
+// a daemon secret based on its name suffix or prefix.
+func isSecretEnv(kv string) bool {
+	name, _, _ := strings.Cut(kv, "=")
+	upper := strings.ToUpper(name)
+	for _, suffix := range secretEnvSuffixes {
+		if strings.HasSuffix(upper, suffix) {
+			return true
+		}
+	}
+	for _, prefix := range secretEnvPrefixes {
+		if strings.HasPrefix(upper, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// commandEnv returns the environment for direct-tier command execution,
+// injecting tools directories into PATH and ALF_SIGNAL_SOCK. Daemon
+// secrets are excluded to prevent exfiltration by job commands.
+func (e *Engine) commandEnv() []string {
+	var env []string
+	for _, v := range os.Environ() {
+		if isSecretEnv(v) {
+			continue
+		}
+		if strings.HasPrefix(v, "PATH=") && e.cfg.DataDir != "" {
+			toolPaths := filepath.Join(e.cfg.DataDir, "tools.d") + ":" + filepath.Join(e.cfg.DataDir, "tools")
+			v = "PATH=" + strings.TrimPrefix(v, "PATH=") + ":" + toolPaths
+		}
+		env = append(env, v)
+	}
+	if e.cfg.SignalSockPath != "" {
+		env = append(env, "ALF_SIGNAL_SOCK="+e.cfg.SignalSockPath)
+	}
+	return env
 }
 
 // errorPatterns are strings that indicate a command output contains issues worth analyzing.

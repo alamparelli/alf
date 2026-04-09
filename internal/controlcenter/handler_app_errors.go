@@ -21,12 +21,18 @@ type AppErrorEntry struct {
 	Source    string `json:"source,omitempty"`
 }
 
+// AppErrorJournaler writes app errors to the unified error journal.
+type AppErrorJournaler interface {
+	AppendAppError(slug, message, stack string)
+}
+
 // AppErrorHandler provides per-app error logging.
 //
 //	POST /api/apps/{slug}/errors → append error to log (ring buffer, max 100)
 //	GET  /api/apps/{slug}/errors → read error log
 type AppErrorHandler struct {
 	DataDir string
+	Journal AppErrorJournaler // optional: unified error journal for heartbeat repair
 	mu      sync.Mutex
 }
 
@@ -40,13 +46,13 @@ func (h *AppErrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := parts[0]
 	if !validName.MatchString(slug) {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid app name"})
+		respondError(w, http.StatusBadRequest, "invalid app name")
 		return
 	}
 
 	// Cross-app access check: app iframe may only write to its own error log.
 	if callerSlug := extractAppSlugFromReferer(r); callerSlug != "" && callerSlug != slug {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "cross-app error access denied"})
+		respondError(w, http.StatusForbidden, "cross-app error access denied")
 		return
 	}
 
@@ -96,7 +102,7 @@ func (h *AppErrorHandler) handleGet(w http.ResponseWriter, slug string) {
 	entries, err := h.load(slug)
 	h.mu.Unlock()
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "read failed"})
+		respondError(w, http.StatusInternalServerError, "read failed")
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"errors": entries, "count": len(entries)})
@@ -105,18 +111,18 @@ func (h *AppErrorHandler) handleGet(w http.ResponseWriter, slug string) {
 func (h *AppErrorHandler) handlePost(w http.ResponseWriter, r *http.Request, slug string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16)) // 64KB max per error
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "read body failed"})
+		respondError(w, http.StatusBadRequest, "read body failed")
 		return
 	}
 
 	var entry AppErrorEntry
 	if err := json.Unmarshal(body, &entry); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
 	if entry.Message == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "message required"})
+		respondError(w, http.StatusBadRequest, "message required")
 		return
 	}
 
@@ -127,7 +133,7 @@ func (h *AppErrorHandler) handlePost(w http.ResponseWriter, r *http.Request, slu
 
 	entries, err := h.load(slug)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "read failed"})
+		respondError(w, http.StatusInternalServerError, "read failed")
 		return
 	}
 
@@ -138,8 +144,13 @@ func (h *AppErrorHandler) handlePost(w http.ResponseWriter, r *http.Request, slu
 	}
 
 	if err := h.save(slug, entries); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
+		respondError(w, http.StatusInternalServerError, "write failed")
 		return
+	}
+
+	// Also log to unified error journal for heartbeat repair.
+	if h.Journal != nil {
+		h.Journal.AppendAppError(slug, entry.Message, entry.Stack)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]string{"status": "logged"})

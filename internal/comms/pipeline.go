@@ -26,12 +26,14 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
 	sessionKey := channelID.SessionKey()
+	// convStoreKey scopes ConvStore per tab for CC (cc:convid), per chat for TG (tg:chatid).
+	convStoreKey := string(channelID)
 
 	// 0. Create request tracer.
 	userMsgID := conversation.NewMessageID()
 	var convID string
 	if e.ConvStore != nil {
-		convID = e.ConvStore.ConvID(channel)
+		convID = e.ConvStore.ConvID(convStoreKey)
 	}
 	tracer := trace.New(channelID.Prefix(), convID, userMsgID)
 	ctx = trace.WithContext(ctx, tracer)
@@ -344,10 +346,11 @@ func (e *ChatEngine) applySkillTierOverride(route RouteResult, minTier string) R
 func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierParams, recall RecallResult, convID string, userMsgID string) (*ProcessResult, error) {
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
+	convStoreKey := string(channelID)
 
 	var convCtx string
 	if e.ConvStore != nil {
-		if msgs := e.ConvStore.Recent(channel, 0); len(msgs) > 0 {
+		if msgs := e.ConvStore.Recent(convStoreKey, 0); len(msgs) > 0 {
 			convCtx = conversation.BuildRouterContext(msgs, 5)
 		}
 	}
@@ -484,6 +487,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
 	sessionKey := channelID.SessionKey()
+	convStoreKey := string(channelID)
 
 	// Build system prompts.
 	isAPITier := tp.Backend != "" && tp.Backend != "cli"
@@ -512,7 +516,13 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	if onboarding := memory.OnboardingPrompt(e.ContextDir); onboarding != "" {
 		sysPrompts = append(sysPrompts, onboarding)
 	}
-	// Memory recall.
+	// Cache breakpoint: everything before this is stable and cacheable.
+	cacheBreakpoint := len(sysPrompts)
+
+	// Current time (dynamic — changes every minute; must be after breakpoint).
+	sysPrompts = append(sysPrompts, "Current time: "+time.Now().Format("15:04"))
+
+	// Memory recall (dynamic — changes per request).
 	if recall.Block != "" {
 		sysPrompts = append(sysPrompts, recall.Block)
 	}
@@ -563,6 +573,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 					toolNames[i] = s.Name
 				}
 				sysPrompts = append([]string{memory.ToolInstruction(toolNames)}, sysPrompts...)
+				cacheBreakpoint++ // tool instruction was prepended; shift breakpoint to keep stable/dynamic split correct
 			}
 		}
 	}
@@ -573,12 +584,13 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	backendChanged := lastBackend != "" && lastBackend != tp.Backend
 
 	params := provider.Params{
-		Model:         tp.Model,
-		Tools:         tp.Tools,
-		WriteCapable:  tp.WriteCapable,
-		Effort:        tp.Effort,
-		MaxTurns:      tp.MaxTurns,
-		SystemPrompts: sysPrompts,
+		Model:           tp.Model,
+		Tools:           tp.Tools,
+		WriteCapable:    tp.WriteCapable,
+		Effort:          tp.Effort,
+		MaxTurns:        tp.MaxTurns,
+		SystemPrompts:   sysPrompts,
+		CacheBreakpoint: cacheBreakpoint,
 		ResumeID:      resumeID,
 		DataDir:       e.DataDir,
 		Env:           e.signalEnv(msg.Env),
@@ -598,7 +610,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 
 	// Inject conversation history.
 	if e.ConvStore != nil {
-		convMsgs := conversation.BuildContext(e.ConvStore.Recent(channel, 0), conversation.DefaultMaxMessages)
+		convMsgs := conversation.BuildContext(e.ConvStore.Recent(convStoreKey, 0), conversation.DefaultMaxMessages)
 		if isAPITier || params.ResumeID == "" {
 			if isAPITier {
 				// Always flatten to text-only: FlattenForOpenAI collapses multi-turn
@@ -653,6 +665,22 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	// Build the full prompt text (use msg.Text which includes reply context from adapter).
 	prompt := msg.Text
 
+	// For API providers, populate Media field from InMessage media entries.
+	if isAPITier && len(msg.Media) > 0 {
+		for _, m := range msg.Media {
+			params.Media = append(params.Media, provider.MediaEntry{
+				Type:        m.Type,
+				FileName:    m.FileName,
+				MimeType:    m.MimeType,
+				TempPath:    m.TempPath,
+				FramePaths:  m.FramePaths,
+				Transcript:  m.Transcript,
+				TextContent: m.TextContent,
+			})
+		}
+		log.Printf("[comms] media: populated %d entries for API provider", len(msg.Media))
+	}
+
 	invokeSpan := trace.StartSpanFromContext(ctx, "invoke", map[string]string{
 		"backend": tp.Backend, "model": tp.Model, "tier": route.Tier,
 	})
@@ -669,7 +697,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		e.Sessions.Archive(sessionKey)
 		params.ResumeID = ""
 		if e.ConvStore != nil {
-			convMsgs := conversation.BuildContext(e.ConvStore.Recent(channel, 0), conversation.DefaultMaxMessages)
+			convMsgs := conversation.BuildContext(e.ConvStore.Recent(convStoreKey, 0), conversation.DefaultMaxMessages)
 			if histPrompt := conversation.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
 				params.SystemPrompts = append(params.SystemPrompts, histPrompt)
 			}
@@ -921,7 +949,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	turnLimitHit := false
 	if notice := detectTurnLimit(result, cleanText); notice != "" {
 		turnLimitHit = true
-		resumeHint := "Send another message or use /resume to continue."
+		resumeHint := "Turn limit reached. Send another message to continue, increase the timeout, or raise the turn limit."
 		fullNotice := notice + " " + resumeHint
 		e.emit(channelID, OutEvent{Type: "system", Data: map[string]string{
 			"text":       fullNotice,

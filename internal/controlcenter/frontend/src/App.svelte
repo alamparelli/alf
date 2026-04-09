@@ -204,6 +204,15 @@
     --shadow-lg: 0 8px 24px rgba(0,0,0,0.16);
   }
 
+  @media (max-width: 768px) {
+    :root {
+      --font-xs: 13px;
+      --font-sm: 15px;
+      --font-md: 17px;
+      --font-lg: 20px;
+    }
+  }
+
   :global(*) {
     box-sizing: border-box;
     margin: 0;
@@ -240,13 +249,15 @@
     min-height: 100vh;
   }
 
-  .main-content--app {
+  .main-content--app,
+  .main-content--chat {
     padding: 0;
     position: relative;
     overflow: hidden;
   }
 
-  .main-content--app .main-header {
+  .main-content--app .main-header,
+  .main-content--chat .main-header {
     display: none;
   }
 
@@ -319,7 +330,7 @@
   }
 
   :global(.btn:hover) {
-    background: var(--border);
+    background: color-mix(in srgb, var(--text) 12%, var(--bg-input));
   }
 
   :global(.btn-primary) {
@@ -374,8 +385,17 @@
 
   :global(.btn-group) {
     display: flex;
-    gap: var(--space-sm, 8px);
+    gap: 2px;
     flex-wrap: wrap;
+  }
+
+  :global(.btn-group .btn.active) {
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+  }
+
+  :global(.btn-group .btn:not(.active):hover) {
+    background: color-mix(in srgb, var(--text) 10%, var(--bg-input));
   }
 
   /* Common input styles */
@@ -516,6 +536,8 @@
     border-radius: 6px;
     padding: 2px;
     width: fit-content;
+    max-width: 100%;
+    overflow-x: auto;
     margin-bottom: var(--space-md, 16px);
   }
 
@@ -776,6 +798,9 @@
     }
     .main-content--chat {
       padding-bottom: 0;
+    }
+    .main-content--chat .main-header {
+      display: flex;
     }
     /* App pages: show hamburger as floating overlay */
     .main-content--app .main-header {

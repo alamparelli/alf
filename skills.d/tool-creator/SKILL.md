@@ -274,8 +274,35 @@ For tools without a subcommand, use `x-positional` only for value arguments:
 3. **Write** the script (bash or Python) following all standards above
 4. **Write the JSON schema** manifest with `x-positional` convention
 5. **Set permissions**: `chmod +x ~/data/tools/{name}`
-6. **Test** it: run with `--help`, then with sample args
+6. **E2E test** (MANDATORY — run on every creation AND modification):
+   a. Run `{tool} --help` → must exit 0 and print usage
+   b. Run with a **real test case** that exercises the primary flow (not just `--help`)
+   c. Verify stdout contains expected output (check exit code + output content)
+   d. If the tool fails, **fix it immediately** — do NOT deliver a broken tool
+   e. Persist the test case in the JSON schema as `x-test` (see below)
 7. **Verify** ALF discovers it: the tool appears in the next toolbox refresh (auto-detected, no restart needed)
+
+### x-test: Persisted test case (REQUIRED)
+
+Add an `x-test` field to the JSON schema so the heartbeat can re-run the test to validate repairs:
+
+```json
+{
+  "name": "my-tool",
+  "parameters": { ... },
+  "x-test": {
+    "args": {"action": "list"},
+    "expect_exit": 0,
+    "expect_output": "No items found"
+  }
+}
+```
+
+- **`args`**: JSON object matching the tool's parameters — the input for the test
+- **`expect_exit`**: Expected exit code (usually 0)
+- **`expect_output`**: Substring that must appear in stdout (use a stable fragment, not the full output)
+
+The test case should be idempotent and safe to run repeatedly. Avoid test cases that create data without cleanup.
 
 ## Quality checklist
 
@@ -291,7 +318,8 @@ Before delivering:
 - [ ] Tool name follows naming conventions
 - [ ] Executable bit set (`chmod +x`)
 - [ ] JSON schema `.json` file created with `x-positional`
-- [ ] Tested with sample input
+- [ ] **E2E test passed** — ran with real args, verified output, exit code 0
+- [ ] **`x-test` field** added to JSON schema with the test case used above
 
 ## What NOT to do
 

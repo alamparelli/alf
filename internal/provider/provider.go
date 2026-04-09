@@ -24,19 +24,32 @@ type Result struct {
 }
 
 // Params configures a Claude invocation.
+// MediaEntry represents a media file for vision APIs.
+type MediaEntry struct {
+	Type        string   // "photo", "document", "video", "voice"
+	FileName    string
+	MimeType    string
+	TempPath    string   // local filesystem path to media file
+	FramePaths  []string // for video: contact sheet frame paths
+	Transcript  string   // for voice/video: transcript
+	TextContent string   // for documents: extracted text
+}
+
 type Params struct {
 	Model         string
 	Tools         []string
 	WriteCapable  bool     // if true, use --dangerously-skip-permissions; if false, restrict to Tools whitelist
 	ReadOnly      bool     // if true, use read-only sandbox (Codex: -s read-only, no shell tools)
 	Effort        string
-	SystemPrompts []string // appended system prompts (context files, reactions)
+	SystemPrompts      []string // appended system prompts (context files, reactions)
+	CacheBreakpoint    int      // index in SystemPrompts: prompts before this are cacheable, at/after are dynamic
 	MaxTurns      int
 	ResumeID      string
 	DataDir       string   // working directory for Claude subprocess
 	Env           []string // additional env vars for subprocess (e.g. ALF_SIGNAL_SOCK)
 	SessionKey    string            // API history key (e.g. "tg:12345"); CLI ignores this
 	ConvMessages  []ContextMessage  // conversation history from unified store; takes priority over SessionKey history
+	Media         []MediaEntry      // media files for vision APIs (API providers only)
 }
 
 // ContextToolCall represents a tool invocation within a ContextMessage.

@@ -95,7 +95,7 @@ func (h *TelegramHandler) put(w http.ResponseWriter, r *http.Request) {
 		ChatID   string `json:"chat_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, jsonErr("invalid JSON"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
@@ -103,29 +103,29 @@ func (h *TelegramHandler) put(w http.ResponseWriter, r *http.Request) {
 	req.ChatID = strings.TrimSpace(req.ChatID)
 
 	if req.BotToken == "" || req.ChatID == "" {
-		http.Error(w, jsonErr("bot_token and chat_id are required"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "bot_token and chat_id are required")
 		return
 	}
 
 	// Validate bot token against Telegram API.
 	botName := validateBotTokenHTTP(req.BotToken)
 	if botName == "" {
-		http.Error(w, jsonErr("invalid bot token - could not verify with Telegram API"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid bot token - could not verify with Telegram API")
 		return
 	}
 
 	if h.Vault == nil {
-		http.Error(w, jsonErr("vault not available"), http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "vault not available")
 		return
 	}
 
 	// Store in vault.
 	if err := h.Vault.SetSecret(vaultKeyTGBotToken, req.BotToken); err != nil {
-		http.Error(w, jsonErr(fmt.Sprintf("failed to save bot token: %v", err)), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to save bot token: %v", err))
 		return
 	}
 	if err := h.Vault.SetSecret(vaultKeyTGChatID, req.ChatID); err != nil {
-		http.Error(w, jsonErr(fmt.Sprintf("failed to save chat ID: %v", err)), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to save chat ID: %v", err))
 		return
 	}
 

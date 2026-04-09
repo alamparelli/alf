@@ -72,11 +72,19 @@ func registerBackends(registry *provider.Registry, cfg *cc.Config, apiHistory *p
 		if auth == "" {
 			auth = "bearer"
 		}
+		// Default OpenRouter app identification headers.
+		headers := bcfg.Headers
+		if len(headers) == 0 && strings.Contains(bcfg.BaseURL, "openrouter.ai") {
+			headers = map[string]string{
+				"HTTP-Referer": "https://alfos.ai",
+				"X-Title":      "Alf",
+			}
+		}
 		prov := provider.NewAPIProviderFromConfig(provider.APIProviderConfig{
 			Name:         name,
 			BaseURL:      bcfg.BaseURL,
 			APIKey:       apiKey,
-			Headers:      bcfg.Headers,
+			Headers:      headers,
 			DefaultModel: bcfg.DefaultModel,
 			MaxTokens:    bcfg.MaxTokens,
 			Auth:         auth,

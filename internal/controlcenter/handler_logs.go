@@ -39,7 +39,7 @@ func (h *LogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	lines, err := h.Reader.Tail(name, n)
 	if err != nil {
-		http.Error(w, jsonErr(err.Error()), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

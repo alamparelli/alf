@@ -53,18 +53,18 @@ func (h *TeamsHandler) list(w http.ResponseWriter) {
 func (h *TeamsHandler) save(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		http.Error(w, jsonErr("failed to read body"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "failed to read body")
 		return
 	}
 
 	// Validate JSON structure.
 	var tc agents.TeamConfig
 	if err := json.Unmarshal(body, &tc); err != nil {
-		http.Error(w, jsonErr("invalid JSON: "+err.Error()), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 	if tc.Name == "" {
-		http.Error(w, jsonErr("team name is required"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "team name is required")
 		return
 	}
 
@@ -117,7 +117,7 @@ func (h *TeamsHandler) save(w http.ResponseWriter, r *http.Request) {
 
 	dest := filepath.Join(dir, filename)
 	if err := os.WriteFile(dest, pretty, 0o644); err != nil {
-		http.Error(w, jsonErr("write failed: "+err.Error()), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "write failed: "+err.Error())
 		return
 	}
 
@@ -139,7 +139,7 @@ func (h *TeamsHandler) del(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	id := r.URL.Query().Get("id")
 	if name == "" && id == "" {
-		http.Error(w, jsonErr("missing name or id parameter"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "missing name or id parameter")
 		return
 	}
 
@@ -158,7 +158,7 @@ func (h *TeamsHandler) del(w http.ResponseWriter, r *http.Request) {
 	if !removed && name != "" {
 		safeName := sanitizeTeamName(name)
 		if safeName == "" {
-			http.Error(w, jsonErr("invalid team name"), http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "invalid team name")
 			return
 		}
 		dest := filepath.Join(dir, safeName+".json")
@@ -188,7 +188,7 @@ func (h *TeamsHandler) del(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !removed {
-		http.Error(w, jsonErr("team not found"), http.StatusNotFound)
+		respondError(w, http.StatusNotFound, "team not found")
 		return
 	}
 

@@ -34,11 +34,11 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *ChatHandler) sendMessage(w http.ResponseWriter, r *http.Request) {
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if req.Message == "" && len(req.MediaIDs) == 0 {
-		http.Error(w, `{"error":"message or media_ids required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "message or media_ids required")
 		return
 	}
 
@@ -93,13 +93,49 @@ func (h *ChatConversationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			Title string `json:"title"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
-			http.Error(w, `{"error":"id required"}`, http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "id required")
 			return
 		}
 		if h.Service.ChatDB != nil {
 			h.Service.ChatDB.EnsureConversation(req.ID, req.Title, "cc")
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true, "id": req.ID})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+// ChatActiveHandler handles GET/PUT /api/chat/active — active conversation sync.
+type ChatActiveHandler struct {
+	Service     *ChatService
+	EventBroker *EventBroker
+}
+
+func (h *ChatActiveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		respondJSON(w, http.StatusOK, map[string]any{
+			"active_conv_id": h.Service.CurrentConvID(),
+		})
+	case http.MethodPut:
+		var req struct {
+			ConvID   string `json:"conv_id"`
+			ClientID string `json:"client_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ConvID == "" {
+			respondError(w, http.StatusBadRequest, "conv_id required")
+			return
+		}
+		if len(req.ConvID) > 64 || len(req.ClientID) > 64 {
+			respondError(w, http.StatusBadRequest, "conv_id/client_id too long")
+			return
+		}
+		h.Service.SetActiveConvID(req.ConvID)
+		if h.EventBroker != nil {
+			payload, _ := json.Marshal(map[string]string{"conv_id": req.ConvID, "client_id": req.ClientID})
+			h.EventBroker.EmitWithData(EventActiveConv, string(payload))
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
 		methodNotAllowed(w)
 	}
@@ -115,7 +151,7 @@ func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	// Extract conversation ID from path: /api/chat/conversations/<id>
 	parts := splitPath(r.URL.Path)
 	if len(parts) < 4 {
-		http.Error(w, `{"error":"conversation id required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "conversation id required")
 		return
 	}
 	convID := parts[len(parts)-1]
@@ -126,7 +162,7 @@ func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			Title string `json:"title"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		if h.Service.ChatDB != nil {
@@ -175,15 +211,16 @@ type ChatSkillsHandler struct {
 }
 
 func (h *ChatSkillsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	convID := r.URL.Query().Get("conv_id")
 	switch r.Method {
 	case http.MethodGet:
-		skills := h.Service.ActiveSkills()
+		skills := h.Service.ActiveSkillsForConv(convID)
 		respondJSON(w, http.StatusOK, map[string]any{"skills": skills})
 	case http.MethodDelete:
 		if name := r.URL.Query().Get("name"); name != "" {
-			h.Service.RemoveActiveSkill(name)
+			h.Service.RemoveActiveSkillForConv(convID, name)
 		} else {
-			h.Service.ClearActiveSkills()
+			h.Service.ClearActiveSkillsForConv(convID)
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
@@ -203,7 +240,7 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if jobID := r.URL.Query().Get("stream"); jobID != "" {
 			job := h.Service.GetJob(jobID)
 			if job == nil {
-				http.Error(w, `{"error":"job not found"}`, http.StatusNotFound)
+				respondError(w, http.StatusNotFound, "job not found")
 				return
 			}
 			offset := 0
@@ -260,7 +297,7 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func streamJob(w http.ResponseWriter, r *http.Request, job *chatJob, offset int) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 

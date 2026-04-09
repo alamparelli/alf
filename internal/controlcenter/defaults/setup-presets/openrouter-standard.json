@@ -27,7 +27,7 @@
     },
     {
       "name": "sonnet",
-      "model": "anthropic/claude-sonnet-4",
+      "model": "anthropic/claude-sonnet-4.6",
       "priority": 2,
       "enabled": true,
       "routable": true,
@@ -40,7 +40,7 @@
     },
     {
       "name": "opus",
-      "model": "anthropic/claude-opus-4",
+      "model": "anthropic/claude-opus-4.6",
       "priority": 3,
       "enabled": true,
       "routable": true,
@@ -53,7 +53,7 @@
     },
     {
       "name": "agent",
-      "model": "anthropic/claude-opus-4",
+      "model": "anthropic/claude-opus-4.6",
       "priority": 4,
       "enabled": true,
       "routable": true,

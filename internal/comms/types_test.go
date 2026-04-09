@@ -30,7 +30,6 @@ func TestChannelID_SessionKey(t *testing.T) {
 		{"tg:12345", 12345},
 		{"tg:999999999", 999999999},
 		{"cc:default", -1},
-		{"cc:conv_abc", -1},
 		{"tg:notanumber", -1},
 		{"unknown", -1},
 	}
@@ -38,6 +37,19 @@ func TestChannelID_SessionKey(t *testing.T) {
 		if got := tt.id.SessionKey(); got != tt.want {
 			t.Errorf("ChannelID(%q).SessionKey() = %d, want %d", tt.id, got, tt.want)
 		}
+	}
+
+	// CC conv_ids must produce unique, negative session keys.
+	keyA := ChannelID("cc:conv_abc").SessionKey()
+	keyB := ChannelID("cc:conv_xyz").SessionKey()
+	if keyA == keyB {
+		t.Errorf("different cc conv_ids must produce different session keys, both got %d", keyA)
+	}
+	if keyA >= 0 || keyB >= 0 {
+		t.Errorf("cc session keys must be negative, got %d and %d", keyA, keyB)
+	}
+	if keyA == -1 || keyB == -1 {
+		t.Errorf("cc session keys must not be -1 (default), got %d and %d", keyA, keyB)
 	}
 }
 

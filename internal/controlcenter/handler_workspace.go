@@ -55,7 +55,7 @@ func (h *WorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	absPath, err := h.resolve(relPath)
 	if err != nil {
-		http.Error(w, jsonErr("invalid path"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid path")
 		return
 	}
 
@@ -68,14 +68,14 @@ func (h *WorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.get(w, absPath, relPath)
 	case http.MethodPut:
 		if h.isReadOnly(relPath) {
-			http.Error(w, jsonErr("read-only directory"), http.StatusForbidden)
+			respondError(w, http.StatusForbidden, "read-only directory")
 			return
 		}
 		writePath := h.resolveWrite(relPath, absPath)
 		h.put(w, r, writePath, relPath)
 	case http.MethodDelete:
 		if h.isReadOnly(relPath) {
-			http.Error(w, jsonErr("read-only directory"), http.StatusForbidden)
+			respondError(w, http.StatusForbidden, "read-only directory")
 			return
 		}
 		writePath := h.resolveWrite(relPath, absPath)
@@ -179,14 +179,14 @@ func (h *WorkspaceHandler) download(w http.ResponseWriter, r *http.Request, absP
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			http.Error(w, "not found", http.StatusNotFound)
+			respondError(w, http.StatusNotFound, "not found")
 		} else {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
 	if info.IsDir() {
-		http.Error(w, "cannot download directory", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "cannot download directory")
 		return
 	}
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(absPath)+"\"")
@@ -197,9 +197,9 @@ func (h *WorkspaceHandler) get(w http.ResponseWriter, absPath, relPath string) {
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			http.Error(w, jsonErr("not found"), http.StatusNotFound)
+			respondError(w, http.StatusNotFound, "not found")
 		} else {
-			http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
@@ -214,7 +214,7 @@ func (h *WorkspaceHandler) get(w http.ResponseWriter, absPath, relPath string) {
 func (h *WorkspaceHandler) listDir(w http.ResponseWriter, absPath, relPath string) {
 	entries, err := os.ReadDir(absPath)
 	if err != nil {
-		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -319,7 +319,7 @@ func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath, relPath stri
 
 	content, err := os.ReadFile(absPath)
 	if err != nil {
-		http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -348,13 +348,13 @@ func (h *WorkspaceHandler) readFile(w http.ResponseWriter, absPath, relPath stri
 
 func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, relPath string) {
 	if relPath == "" {
-		http.Error(w, jsonErr("cannot write to root directory"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "cannot write to root directory")
 		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxFileSize+1024))
 	if err != nil {
-		http.Error(w, jsonErr("failed to read body"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "failed to read body")
 		return
 	}
 
@@ -362,12 +362,12 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 		Content string `json:"content"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		http.Error(w, jsonErr("invalid JSON: "+err.Error()), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 
 	if len(payload.Content) > maxFileSize {
-		http.Error(w, jsonErr("content too large (max 1 MB)"), http.StatusRequestEntityTooLarge)
+		respondError(w, http.StatusRequestEntityTooLarge, "content too large (max 1 MB)")
 		return
 	}
 
@@ -375,7 +375,7 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 	dir := filepath.Dir(absPath)
 	tmp, err := os.CreateTemp(dir, ".ws-*.tmp")
 	if err != nil {
-		http.Error(w, jsonErr("write failed: "+err.Error()), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "write failed: "+err.Error())
 		return
 	}
 	tmpName := tmp.Name()
@@ -383,14 +383,14 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 	if _, err := tmp.WriteString(payload.Content); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
-		http.Error(w, jsonErr("write failed"), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "write failed")
 		return
 	}
 	tmp.Close()
 
 	if err := os.Rename(tmpName, absPath); err != nil {
 		os.Remove(tmpName)
-		http.Error(w, jsonErr("write failed: "+err.Error()), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "write failed: "+err.Error())
 		return
 	}
 
@@ -416,16 +416,16 @@ var protectedDirs = map[string]bool{
 
 func (h *WorkspaceHandler) del(w http.ResponseWriter, absPath, relPath string) {
 	if relPath == "" {
-		http.Error(w, jsonErr("cannot delete root"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "cannot delete root")
 		return
 	}
 
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			http.Error(w, jsonErr("not found"), http.StatusNotFound)
+			respondError(w, http.StatusNotFound, "not found")
 		} else {
-			http.Error(w, jsonErr(err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
@@ -433,16 +433,16 @@ func (h *WorkspaceHandler) del(w http.ResponseWriter, absPath, relPath string) {
 	if info.IsDir() {
 		// Protect system directories.
 		if protectedDirs[relPath] {
-			http.Error(w, jsonErr("cannot delete system directory"), http.StatusForbidden)
+			respondError(w, http.StatusForbidden, "cannot delete system directory")
 			return
 		}
 		if err := os.RemoveAll(absPath); err != nil {
-			http.Error(w, jsonErr("delete failed: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
 			return
 		}
 	} else {
 		if err := os.Remove(absPath); err != nil {
-			http.Error(w, jsonErr("delete failed: "+err.Error()), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "delete failed: "+err.Error())
 			return
 		}
 	}
@@ -489,7 +489,7 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseMultipartForm(maxUploadTotal); err != nil {
-		http.Error(w, jsonErr("request too large or invalid multipart"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "request too large or invalid multipart")
 		return
 	}
 
@@ -499,18 +499,18 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	wsH := &WorkspaceHandler{DataDir: h.DataDir, ConfigDir: h.ConfigDir, SkillsDir: h.SkillsDir}
 	targetAbs, err := wsH.resolve(target)
 	if err != nil {
-		http.Error(w, jsonErr("invalid target path"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid target path")
 		return
 	}
 
 	// Ensure target exists and is a directory.
 	info, err := os.Stat(targetAbs)
 	if err != nil && !os.IsNotExist(err) {
-		http.Error(w, jsonErr("target error"), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "target error")
 		return
 	}
 	if err == nil && !info.IsDir() {
-		http.Error(w, jsonErr("target is not a directory"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "target is not a directory")
 		return
 	}
 
@@ -519,13 +519,13 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Create target directory if it doesn't exist.
 	if err := os.MkdirAll(writeTarget, 0755); err != nil {
-		http.Error(w, jsonErr("failed to create target directory"), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to create target directory")
 		return
 	}
 
 	files := r.MultipartForm.File["files"]
 	if len(files) == 0 {
-		http.Error(w, jsonErr("no files provided"), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "no files provided")
 		return
 	}
 
@@ -535,7 +535,7 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var saved []string
 	for i, fh := range files {
 		if fh.Size > maxFileSize {
-			http.Error(w, jsonErr("file too large: "+fh.Filename), http.StatusRequestEntityTooLarge)
+			respondError(w, http.StatusRequestEntityTooLarge, "file too large: "+fh.Filename)
 			return
 		}
 
@@ -553,33 +553,33 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Security: ensure we don't escape the target directory.
 		if !pathWithinDir(filepath.Clean(destPath), filepath.Clean(writeTarget)) {
-			http.Error(w, jsonErr("invalid file path: "+fh.Filename), http.StatusBadRequest)
+			respondError(w, http.StatusBadRequest, "invalid file path: "+fh.Filename)
 			return
 		}
 
 		// Ensure parent directories exist for nested paths.
 		if dir := filepath.Dir(destPath); dir != writeTarget {
 			if err := os.MkdirAll(dir, 0755); err != nil {
-				http.Error(w, jsonErr("failed to create directory"), http.StatusInternalServerError)
+				respondError(w, http.StatusInternalServerError, "failed to create directory")
 				return
 			}
 		}
 
 		src, err := fh.Open()
 		if err != nil {
-			http.Error(w, jsonErr("failed to read file: "+fh.Filename), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to read file: "+fh.Filename)
 			return
 		}
 
 		content, err := io.ReadAll(io.LimitReader(src, maxFileSize+1))
 		src.Close()
 		if err != nil {
-			http.Error(w, jsonErr("failed to read file: "+fh.Filename), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to read file: "+fh.Filename)
 			return
 		}
 
 		if err := os.WriteFile(destPath, content, 0644); err != nil {
-			http.Error(w, jsonErr("failed to write file: "+fh.Filename), http.StatusInternalServerError)
+			respondError(w, http.StatusInternalServerError, "failed to write file: "+fh.Filename)
 			return
 		}
 

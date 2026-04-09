@@ -601,11 +601,6 @@ func main() {
 		}
 	}
 	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatDB, transcriber, classifyFn, router.ResolveModel, cliProvider)
-	chatService.Registry = registry
-	chatService.SkillStore = skillStore
-	chatService.Orchestrator = orch
-	chatService.BackendConfigs = func() map[string]cc.BackendConfig { return cfg.Backends }
-	chatService.ConvStore = convStore
 	toolRegistry := tooling.NewRegistry(dataDir)
 	nativeTools := []tooling.NativeTool{
 		tooling.BashNativeTool{DataDir: dataDir},
@@ -615,12 +610,16 @@ func main() {
 		tooling.WriteFileNativeTool{DataDir: dataDir},
 		tooling.RemoveNativeTool{DataDir: dataDir},
 	}
+	toolErrorJournal := tooling.NewErrorJournal(dataDir)
+	avatarHandler := &cc.AvatarHandler{DataDir: dataDir}
+
 	toolExecutor := &tooling.Executor{
-		DataDir:  dataDir,
-		HomeDir:  homeDir,
-		Registry: toolRegistry,
-		Timeout:  30 * time.Second,
-		Env:      nil, // Tools use ALF_TOOLS_SOCK (from safeEnv) instead of CC_AUTH_TOKEN
+		DataDir:      dataDir,
+		HomeDir:      homeDir,
+		Registry:     toolRegistry,
+		ErrorJournal: toolErrorJournal,
+		Timeout:      30 * time.Second,
+		Env:          nil, // Tools use ALF_TOOLS_SOCK (from safeEnv) instead of CC_AUTH_TOKEN
 	}
 
 	// Tool integrity guard — hash-based tamper detection for user tools (issue #121).
@@ -647,13 +646,7 @@ func main() {
 		toolRegistry.RegisterNative(t)
 		toolExecutor.RegisterNative(t)
 	}
-	chatService.ToolRegistry = toolRegistry
-	chatService.ToolExecutor = toolExecutor
 	orch.SetTooling(toolRegistry, toolExecutor)
-	if memDB != nil {
-		chatService.Recaller = &memStoreRecaller{store: memDB}
-		chatService.MemStore = memDB
-	}
 
 	// Unified comms engine: shared pipeline for CC (and later TG).
 	engineClassify := func(message, lastTier string, msgCount int, recentCtx string) comms.RouteResult {
@@ -693,6 +686,24 @@ func main() {
 			Limit:    cfg.RecallLimit,
 			Distance: cfg.RecallDistance,
 		},
+	})
+	// Initialize all optional dependencies in one place (issue #91).
+	var recaller cc.MemoryRecaller
+	var memStore cc.MemoryStorer
+	if memDB != nil {
+		recaller = &memStoreRecaller{store: memDB}
+		memStore = memDB
+	}
+	chatService.Init(cc.ChatServiceOpts{
+		Registry:       registry,
+		SkillStore:     skillStore,
+		Orchestrator:   orch,
+		ConvStore:      convStore,
+		ToolRegistry:   toolRegistry,
+		ToolExecutor:   toolExecutor,
+		Recaller:       recaller,
+		MemStore:       memStore,
+		BackendConfigs: func() map[string]cc.BackendConfig { return cfg.Backends },
 	})
 	chatService.SetEngine(commEngine)
 	broadcastFunc = commEngine.Broadcast // wire integrity guard notifications
@@ -830,7 +841,7 @@ func main() {
 			log.Printf("[tasks] event: task=%s status=%s origin=%s", taskID[:min(8, len(taskID))], status, source)
 			notifyChannel(source, text)
 		}
-		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -940,7 +951,7 @@ func main() {
 			dataDir:   dataDir,
 		}},
 		tooling.AppNativeTool{Service: &appToolAdapter},
-		tooling.ConfigNativeTool{Service: &configAdapter{store: configStore}},
+		tooling.ConfigNativeTool{Service: &configAdapter{store: configStore}, Avatar: avatarHandler},
 		tooling.TierNativeTool{Service: &tierAdapter{store: tierStore}},
 		tooling.LogNativeTool{Service: &logAdapter{reader: toolLogReader}},
 		tooling.FirewallNativeTool{Service: &firewallToolAdapter{proxy: fwProxy, store: fwStore}},
@@ -1047,7 +1058,8 @@ func main() {
 		SkillStore:   &schedulerSkillStore{s: skillStore},
 		Orchestrator: &schedulerOrchestrator{o: orch},
 		ChatLogger:   &schedulerChatLogger{db: chatDB},
-		EventLog:     eventLog,
+		EventLog:       eventLog,
+		ToolErrors:     toolErrorJournal,
 		CronPath:       filepath.Join(configDir, "cron.json"),
 		Location:       schedLocation,
 		SignalSockPath: persistentSigPath,
@@ -1589,6 +1601,7 @@ func main() {
 
 			// Handle media messages: download and save for Claude to read.
 			var mediaCleanup func()
+			var mediaEntries []comms.MediaEntry
 			if hasMedia && !hasVoice {
 				// Collect all files to download (supports albums via mergeMediaGroups).
 				type fileRef struct {
@@ -1671,7 +1684,9 @@ func main() {
 
 						mimeType := media.DetectMimeType(data, f.FileName)
 						ext := extFromMime(mimeType, f.FileName)
-						tmpFile, err := os.CreateTemp("", "alf-media-*"+ext)
+						mediaDir := filepath.Join(dataDir, "media")
+						os.MkdirAll(mediaDir, 0o755)
+						tmpFile, err := os.CreateTemp(mediaDir, "alf-media-*"+ext)
 						if err != nil {
 							log.Printf("media temp file failed: %v", err)
 							continue
@@ -1733,9 +1748,16 @@ func main() {
 								label = fmt.Sprintf("PHOTO %d/%d", fi+1, len(files))
 							}
 							allParts = append(allParts, fmt.Sprintf("[%s from Telegram chat - use Read tool to view: %s]", label, tmpPath))
+							mediaEntries = append(mediaEntries, comms.MediaEntry{
+								Type: "photo", FileName: f.FileName, MimeType: mimeType, TempPath: tmpPath,
+							})
 						} else if media.IsTextContent(mimeType) || mimeType == "application/pdf" {
 							textContent := media.ExtractTextFromDocument(data, mimeType)
 							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s", f.FileName, textContent))
+							mediaEntries = append(mediaEntries, comms.MediaEntry{
+								Type: "document", FileName: f.FileName, MimeType: mimeType,
+								TempPath: tmpPath, TextContent: textContent,
+							})
 						} else {
 							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s - use Read tool to view: %s]", f.FileName, tmpPath))
 						}
@@ -1859,6 +1881,7 @@ func main() {
 				ForcedTier: forcedTierName,
 				ConvID:     fmt.Sprintf("tg-%d", tgChatID),
 				Source:     "telegram",
+				Media:      mediaEntries,
 			}
 			if isReply {
 				msg.ReplyTo = extractReplyContext(u.Message)

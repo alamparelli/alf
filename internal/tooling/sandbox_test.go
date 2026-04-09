@@ -74,6 +74,36 @@ func TestCheckBoundary_DotDotTraversal(t *testing.T) {
 	}
 }
 
+func TestCheckBoundary_DaemonDirProtected(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".daemon"), 0o700)
+
+	// Direct write to .daemon/ should be blocked.
+	_, err := CheckBoundary(dir, filepath.Join(dir, ".daemon", "tool-quarantine.json"))
+	if err == nil {
+		t.Error("expected error: .daemon/ should be protected from LLM writes")
+	}
+	if !strings.Contains(err.Error(), "protected") {
+		t.Errorf("expected 'protected' in error, got: %v", err)
+	}
+
+	// Subdirectory within .daemon should also be blocked.
+	_, err = CheckBoundary(dir, filepath.Join(dir, ".daemon", "tool-quarantine", "evil"))
+	if err == nil {
+		t.Error("expected error: .daemon subdirs should be protected")
+	}
+}
+
+func TestCheckBoundary_ToolChangesLogProtected(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "logs"), 0o755)
+
+	_, err := CheckBoundary(dir, filepath.Join(dir, "logs", "tool-changes.log"))
+	if err == nil {
+		t.Error("expected error: tool-changes.log should be protected from LLM writes")
+	}
+}
+
 func TestCheckBoundary_NewFileInsideBoundary(t *testing.T) {
 	dir := t.TempDir()
 	newFile := filepath.Join(dir, "new.txt")

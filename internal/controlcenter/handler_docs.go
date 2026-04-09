@@ -53,7 +53,7 @@ func (h *DocsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *DocsHandler) serveList(w http.ResponseWriter, query string) {
 	entries, err := docsFS.ReadDir("docs")
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 

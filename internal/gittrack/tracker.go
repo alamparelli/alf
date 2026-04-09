@@ -171,6 +171,9 @@ models/
 sessions/
 logs/daemon.log
 
+# Quarantined tools (transient, pending user approval).
+.daemon/tool-quarantine/
+
 # Transient database files and sockets.
 *.db-shm
 *.db-wal

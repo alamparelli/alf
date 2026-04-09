@@ -66,8 +66,7 @@ func (e *ChatEngine) ExtractReactionLearning(emoji string, channelID ChannelID) 
 		return
 	}
 
-	channel := channelID.ConvChannel()
-	recent := e.ConvStore.Recent(channel, 12)
+	recent := e.ConvStore.Recent(string(channelID), 12)
 	if len(recent) < 2 {
 		return
 	}

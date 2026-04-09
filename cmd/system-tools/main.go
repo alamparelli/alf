@@ -54,7 +54,7 @@ func main() {
 	case "app":
 		handleApp(args)
 	case "config":
-		handleSimpleGet("/api/config")
+		handleConfig(args)
 	case "tier":
 		handleSimpleGet("/api/tiers")
 	case "log":
@@ -444,7 +444,7 @@ func printHelp(name string) {
 		"team":   "Manage agent teams.\n  team list\n  team get <name>\n  team save --name N --agents '[{\"name\":\"a\",\"tier\":\"haiku\"}]'\n  team delete <name>",
 		"skill":  "Browse skills.\n  skill list\n  skill get <name>",
 		"app":    "Manage apps.\n  app list\n  app catalog\n  app install <slug>\n  app enable/disable/uninstall <slug>",
-		"config": "Show configuration.\n  config",
+		"config": "System configuration and avatar.\n  config                        Show configuration\n  config avatar-set <base64>    Upload profile avatar (PNG/JPEG/WebP, max 256KB)\n  config avatar-reset           Remove custom avatar\n  config avatar-status          Check if custom avatar is set",
 		"tier":   "Show tiers.\n  tier",
 		"log":    "Access logs.\n  log list\n  log tail <name> [lines]",
 		"search": "Search workspace.\n  search <query> [--types apps,files,docs]",
@@ -454,6 +454,45 @@ func printHelp(name string) {
 		fmt.Println(h)
 	} else {
 		fmt.Printf("Usage: %s <action> [options]\n", name)
+	}
+}
+
+func handleConfig(args []string) {
+	// No args or "get" → show config.
+	if len(args) == 0 || args[0] == "get" {
+		handleSimpleGet("/api/config")
+		return
+	}
+
+	// Avatar sub-commands: config avatar-set <base64>, config avatar-reset, config avatar-status.
+	switch args[0] {
+	case "avatar-set":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: config avatar-set <base64_image>")
+			os.Exit(1)
+		}
+		body, _ := json.Marshal(map[string]string{"image": args[1]})
+		result, err := doRequest("PUT", "/api/settings/avatar", body)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(result)
+	case "avatar-reset":
+		result, err := doRequest("DELETE", "/api/settings/avatar", nil)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(result)
+	case "avatar-status":
+		_, err := doRequest("GET", "/api/settings/avatar", nil)
+		if err != nil {
+			fmt.Println("Using default avatar.")
+		} else {
+			fmt.Println("Custom avatar is set.")
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "unknown config action: %s (valid: get, avatar-set, avatar-reset, avatar-status)\n", args[0])
+		os.Exit(1)
 	}
 }
 

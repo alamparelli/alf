@@ -22,7 +22,7 @@ type DebugToolsPageHandler struct{}
 func (h *DebugToolsPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	data, err := debugToolsHTML.ReadFile("web/debug-tools.html")
 	if err != nil {
-		http.Error(w, "page not found", http.StatusNotFound)
+		respondError(w, http.StatusNotFound, "page not found")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

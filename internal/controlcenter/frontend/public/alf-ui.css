@@ -24,11 +24,11 @@ body {
 }
 
 /* ── Typography ────────────────────────────────────────────────────────── */
-.text-xs   { font-size: var(--font-xs, 11px); }
-.text-sm   { font-size: var(--font-sm, 13px); }
-.text-md   { font-size: var(--font-md, 15px); }
-.text-lg   { font-size: var(--font-lg, 18px); }
-.text-xl   { font-size: var(--font-xl, 24px); }
+.text-xs   { font-size: var(--font-xs, 13px); }
+.text-sm   { font-size: var(--font-sm, 15px); }
+.text-md   { font-size: var(--font-md, 17px); }
+.text-lg   { font-size: var(--font-lg, 20px); }
+.text-xl   { font-size: var(--font-xl, 26px); }
 
 .text-dim     { color: var(--text-dim); }
 .text-accent  { color: var(--accent); }
@@ -114,7 +114,7 @@ body {
   min-height: 36px;
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
 }
-.btn:hover { background: var(--bg-input); }
+.btn:hover { background: color-mix(in srgb, var(--text) 8%, var(--bg-card)); }
 .btn:focus-visible { outline: none; box-shadow: var(--ring, 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent)); }
 .btn:active { opacity: 0.9; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
@@ -145,13 +145,13 @@ body {
   border-color: transparent;
   box-shadow: none;
 }
-.btn-ghost:hover { background: var(--bg-input); }
+.btn-ghost:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
 
 .btn-outline {
   background: transparent;
   box-shadow: none;
 }
-.btn-outline:hover { background: var(--bg-input); }
+.btn-outline:hover { background: color-mix(in srgb, var(--text) 6%, var(--bg-card)); }
 
 .btn-outline-danger {
   background: transparent;
@@ -189,7 +189,7 @@ body {
   transition: all 0.15s;
   box-shadow: none;
 }
-.btn-icon:hover { color: var(--text); background: var(--bg-input); }
+.btn-icon:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
 
 /* Accent icon button — square, filled accent background (e.g. add button) */
 .btn-icon-accent {

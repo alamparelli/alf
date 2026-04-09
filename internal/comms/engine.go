@@ -173,7 +173,7 @@ func (e *ChatEngine) NewSession(channelID ChannelID, onboard bool) (oldSessionID
 	e.Sessions.ClearSkills(key)
 
 	if e.ConvStore != nil {
-		e.ConvStore.NewConversation(channelID.ConvChannel())
+		e.ConvStore.NewConversation(string(channelID))
 	}
 
 	if onboard {

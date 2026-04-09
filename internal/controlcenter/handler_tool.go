@@ -41,37 +41,37 @@ func (h *ToolHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var req toolRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySmall)).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 	if req.Action == "" {
-		http.Error(w, "action required", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "action required")
 		return
 	}
 
 	// Identify calling app from Referer (same as bash handler).
 	appSlug := extractAppSlugFromReferer(r)
 	if appSlug == "" {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "tool endpoint is app-only"})
+		respondError(w, http.StatusForbidden, "tool endpoint is app-only")
 		return
 	}
 
 	// System apps don't need this endpoint — they have bash.
 	if systemApps[appSlug] {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "system apps should use /api/bash"})
+		respondError(w, http.StatusForbidden, "system apps should use /api/bash")
 		return
 	}
 
 	// Check "tool" permission.
 	if h.Perms != nil && !h.Perms.HasPermission(appSlug, "tool") {
-		respondJSON(w, http.StatusForbidden, map[string]string{"error": "permission denied: tool — add to manifest.json permissions"})
+		respondError(w, http.StatusForbidden, "permission denied: tool — add to manifest.json permissions")
 		return
 	}
 
 	// Verify the tool binary exists.
 	binPath := filepath.Join(h.DataDir, "tools", appSlug)
 	if info, err := os.Stat(binPath); err != nil || info.IsDir() {
-		respondJSON(w, http.StatusNotFound, map[string]string{"error": "no tool binary for " + appSlug})
+		respondError(w, http.StatusNotFound, "no tool binary for " + appSlug)
 		return
 	}
 

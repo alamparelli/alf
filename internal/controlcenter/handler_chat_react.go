@@ -18,17 +18,17 @@ func (h *ChatReactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var req ReactRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if req.MsgID == "" || req.Emoji == "" {
-		http.Error(w, `{"error":"msg_id and emoji required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "msg_id and emoji required")
 		return
 	}
 
 	result, err := h.Service.React(req)
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

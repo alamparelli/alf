@@ -81,6 +81,40 @@ func TestInsertMessage_SeqPerConversation(t *testing.T) {
 	}
 }
 
+func TestSetGetMeta(t *testing.T) {
+	db := newTestDB(t)
+
+	// Get missing key returns empty string.
+	if v := db.GetMeta("nonexistent"); v != "" {
+		t.Errorf("expected empty for missing key, got %q", v)
+	}
+
+	// Set and get.
+	if err := db.SetMeta("active_conv_id", "conv-123"); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if v := db.GetMeta("active_conv_id"); v != "conv-123" {
+		t.Errorf("expected conv-123, got %q", v)
+	}
+
+	// Overwrite existing key.
+	if err := db.SetMeta("active_conv_id", "conv-456"); err != nil {
+		t.Fatalf("SetMeta overwrite: %v", err)
+	}
+	if v := db.GetMeta("active_conv_id"); v != "conv-456" {
+		t.Errorf("expected conv-456 after overwrite, got %q", v)
+	}
+
+	// Multiple keys don't interfere.
+	db.SetMeta("other_key", "other_value")
+	if v := db.GetMeta("active_conv_id"); v != "conv-456" {
+		t.Errorf("expected conv-456, got %q", v)
+	}
+	if v := db.GetMeta("other_key"); v != "other_value" {
+		t.Errorf("expected other_value, got %q", v)
+	}
+}
+
 func TestHistory_OrderBySeq_SameTimestamp(t *testing.T) {
 	db := newTestDB(t)
 	convID := "conv-order"

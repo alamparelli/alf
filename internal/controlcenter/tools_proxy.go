@@ -21,6 +21,7 @@ var allowedToolsPaths = map[string]bool{
 	"/api/logs":              true, // log list/tail
 	"/api/search":            true, // search
 	"/api/llm/invoke":        true, // LLM invocation (used by system-tools)
+	"/api/settings/avatar":   true, // avatar management
 	"/health":                true, // health check
 }
 

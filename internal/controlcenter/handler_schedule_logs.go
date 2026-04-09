@@ -14,7 +14,7 @@ type ScheduleLogsHandler struct {
 
 func (h *ScheduleLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.RunLog == nil {
-		respondJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "run logs not available"})
+		respondError(w, http.StatusServiceUnavailable, "run logs not available")
 		return
 	}
 

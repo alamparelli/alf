@@ -73,7 +73,7 @@ services:
       - ./cache/cache:/home/alf/.cache
       - ./local:/opt/alf/user-packages
       - ./vault-data:/opt/alf/vault-data
-      - ./resolv.conf:/etc/resolv.conf
+      - ./resolv.conf:/etc/resolv.conf:ro
 {{- range .Workspaces}}
       - {{.}}:/workspaces/{{base .}}
 {{- end}}

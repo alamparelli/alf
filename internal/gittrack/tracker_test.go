@@ -173,6 +173,7 @@ func TestGitignore_Content(t *testing.T) {
 		"*.db-shm",
 		"*.db-wal",
 		"*.sock",
+		".daemon/tool-quarantine/",
 	} {
 		if !strings.Contains(content, expected) {
 			t.Errorf(".gitignore should contain %q", expected)

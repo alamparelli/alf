@@ -128,19 +128,18 @@ type apiStreamOpts struct {
 }
 
 // apiContentBlock is a single content block within a multi-block message.
-// Supports text, image, and document types with optional source (for vision).
+// Supports text and image_url types (OpenAI-compatible vision format).
 type apiContentBlock struct {
 	Type         string            `json:"type"`
 	Text         string            `json:"text,omitempty"`
-	Source       *apiVisionSource  `json:"source,omitempty"`
+	ImageURL     *apiImageURL      `json:"image_url,omitempty"`
 	CacheControl *apiCacheControl  `json:"cache_control,omitempty"`
 }
 
-// apiVisionSource represents base64-encoded media for vision APIs (image/document).
-type apiVisionSource struct {
-	Type      string `json:"type"`
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
+// apiImageURL represents an image for OpenAI-compatible vision APIs.
+// URL can be a data URI (data:image/jpeg;base64,...) or an HTTP URL.
+type apiImageURL struct {
+	URL string `json:"url"`
 }
 
 type apiMessage struct {
@@ -371,41 +370,43 @@ func tagLastMessageCache(messages []apiMessage) {
 }
 
 // buildVisionBlock reads a media file and builds an apiContentBlock with vision data.
+// Uses OpenAI-compatible format: type "image_url" with data URI.
 // Returns nil if the media type is not supported or the file cannot be read.
 func (p *APIProvider) buildVisionBlock(m MediaEntry) *apiContentBlock {
+	switch m.Type {
+	case "photo":
+		// Read and encode as base64 data URI for vision.
+	case "document":
+		// Documents with extracted text: return as text block instead.
+		if m.TextContent != "" {
+			return &apiContentBlock{
+				Type: "text",
+				Text: fmt.Sprintf("[Document: %s]\n%s", m.FileName, m.TextContent),
+			}
+		}
+		// Binary documents without text extraction: skip (can't vision PDFs on most models).
+		return nil
+	default:
+		return nil
+	}
+
 	// Read media file from disk.
 	data, err := os.ReadFile(m.TempPath)
 	if err != nil {
 		log.Printf("api: failed to read media file %s: %v", m.TempPath, err)
 		return nil
 	}
-
 	if len(data) == 0 {
 		return nil
 	}
 
-	// Encode to base64.
+	// Build data URI: data:<mime>;base64,<data>
 	b64 := base64.StdEncoding.EncodeToString(data)
-
-	// Map media type to vision block type.
-	blockType := "image"
-	switch m.Type {
-	case "photo":
-		blockType = "image"
-	case "document", "video":
-		blockType = "document"
-	default:
-		// Unsupported media type, skip.
-		return nil
-	}
+	dataURI := fmt.Sprintf("data:%s;base64,%s", m.MimeType, b64)
 
 	return &apiContentBlock{
-		Type: blockType,
-		Source: &apiVisionSource{
-			Type:      "base64",
-			MediaType: m.MimeType,
-			Data:      b64,
-		},
+		Type:     "image_url",
+		ImageURL: &apiImageURL{URL: dataURI},
 	}
 }
 

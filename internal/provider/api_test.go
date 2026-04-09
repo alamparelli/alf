@@ -493,7 +493,6 @@ func TestBuildVisionBlock_Image(t *testing.T) {
 	}
 	defer os.Remove(tmpFile.Name())
 
-	// Write minimal PNG data
 	pngData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
 	tmpFile.Write(pngData)
 	tmpFile.Close()
@@ -511,52 +510,53 @@ func TestBuildVisionBlock_Image(t *testing.T) {
 		t.Fatalf("expected vision block, got nil")
 	}
 
-	if block.Type != "image" {
-		t.Errorf("expected type 'image', got %q", block.Type)
+	if block.Type != "image_url" {
+		t.Errorf("expected type 'image_url', got %q", block.Type)
 	}
 
-	if block.Source == nil {
-		t.Fatalf("expected source, got nil")
+	if block.ImageURL == nil {
+		t.Fatalf("expected image_url, got nil")
 	}
 
-	if block.Source.Type != "base64" {
-		t.Errorf("expected source type 'base64', got %q", block.Source.Type)
-	}
-
-	if block.Source.MediaType != "image/png" {
-		t.Errorf("expected media type 'image/png', got %q", block.Source.MediaType)
-	}
-
-	if block.Source.Data == "" {
-		t.Errorf("expected base64 data, got empty string")
+	if !strings.HasPrefix(block.ImageURL.URL, "data:image/png;base64,") {
+		t.Errorf("expected data URI with image/png, got %q", block.ImageURL.URL[:40])
 	}
 }
 
-func TestBuildVisionBlock_Document(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "test-doc-*.pdf")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
+func TestBuildVisionBlock_DocumentWithText(t *testing.T) {
+	p := &APIProvider{}
+	m := MediaEntry{
+		Type:        "document",
+		FileName:    "test.pdf",
+		MimeType:    "application/pdf",
+		TextContent: "extracted text from PDF",
 	}
-	defer os.Remove(tmpFile.Name())
 
-	tmpFile.Write([]byte("test pdf content"))
-	tmpFile.Close()
+	block := p.buildVisionBlock(m)
+	if block == nil {
+		t.Fatalf("expected text block for document with text, got nil")
+	}
 
+	if block.Type != "text" {
+		t.Errorf("expected type 'text', got %q", block.Type)
+	}
+
+	if !strings.Contains(block.Text, "extracted text from PDF") {
+		t.Errorf("expected extracted text in block, got %q", block.Text)
+	}
+}
+
+func TestBuildVisionBlock_DocumentWithoutText(t *testing.T) {
 	p := &APIProvider{}
 	m := MediaEntry{
 		Type:     "document",
 		FileName: "test.pdf",
 		MimeType: "application/pdf",
-		TempPath: tmpFile.Name(),
 	}
 
 	block := p.buildVisionBlock(m)
-	if block == nil {
-		t.Fatalf("expected vision block, got nil")
-	}
-
-	if block.Type != "document" {
-		t.Errorf("expected type 'document', got %q", block.Type)
+	if block != nil {
+		t.Errorf("expected nil for document without text extraction, got %v", block)
 	}
 }
 
@@ -640,9 +640,9 @@ func TestBuildMessages_WithMedia(t *testing.T) {
 		t.Errorf("expected multi-content with at least 2 blocks, got %d", len(userMsg.MultiContent))
 	}
 
-	// First block should be image (vision block)
-	if userMsg.MultiContent[0].Type != "image" {
-		t.Errorf("expected first block type 'image', got %q", userMsg.MultiContent[0].Type)
+	// First block should be image_url (OpenAI-compatible vision block)
+	if userMsg.MultiContent[0].Type != "image_url" {
+		t.Errorf("expected first block type 'image_url', got %q", userMsg.MultiContent[0].Type)
 	}
 
 	// Last block should be text prompt

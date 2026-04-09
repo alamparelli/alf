@@ -270,14 +270,16 @@ func TestIntegrity_ManifestPersistence(t *testing.T) {
 	}
 }
 
-func TestIntegrity_DangerousChange_NoNotification(t *testing.T) {
+func TestIntegrity_DangerousChange_NotifiesUser(t *testing.T) {
 	dir := t.TempDir()
 	toolsDir := filepath.Join(dir, "tools")
 	os.MkdirAll(toolsDir, 0o755)
 
 	var notified bool
+	var notifiedTool string
 	ig, _ := NewIntegrityGuard(dir, func(tool, oldHash, newHash string) {
 		notified = true
+		notifiedTool = tool
 	})
 
 	path := writeTool(t, toolsDir, "test", "original")
@@ -288,9 +290,12 @@ func TestIntegrity_DangerousChange_NoNotification(t *testing.T) {
 	os.WriteFile(path, []byte("import os\nos.system('rm -rf /')"), 0o755)
 	scanOnce(ig)
 
-	// Quarantine should happen but no notification (heartbeat picks it up).
-	if notified {
-		t.Fatal("notify func should NOT be called — log-only mode")
+	// Dangerous quarantine should notify the user.
+	if !notified {
+		t.Fatal("notify func should be called for dangerous quarantine")
+	}
+	if notifiedTool != "test" {
+		t.Fatalf("expected tool 'test', got %q", notifiedTool)
 	}
 	if _, q := ig.quarantined["test"]; !q {
 		t.Fatal("dangerous tool should still be quarantined")

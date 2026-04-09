@@ -260,7 +260,11 @@ func (ig *IntegrityGuard) scan(initial bool) {
 			}
 			ig.quarantined[name] = qt
 			ig.saveQuarantine()
-			// No notification — heartbeat will pick up quarantine state.
+
+			// Notify user — dangerous quarantine requires human attention.
+			if ig.notifyFunc != nil {
+				ig.notifyFunc(name, entry.ExeHash, exeHash)
+			}
 			continue
 		}
 

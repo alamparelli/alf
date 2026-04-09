@@ -290,6 +290,14 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 	// 0b. Built-in command handling via comms engine (/new, /skills, etc.).
 	if strings.HasPrefix(req.Message, "/") {
 		if response, handled := cs.Engine.HandleCommand(channelID, req.Message); handled {
+			// Persist the slash command as a user message so it stays visible in chat.
+			if cs.ChatDB != nil && req.ConvID != "" {
+				cs.ChatDB.EnsureConversation(req.ConvID, "", "cc")
+				cs.ChatDB.InsertMessage(chatdb.Message{
+					ID: NewMessageID(), ConvID: req.ConvID, Role: "user",
+					Text: req.Message, Source: "cc",
+				})
+			}
 			if response != "" {
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": response}})
 			}
@@ -315,6 +323,13 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 					})
 				}
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+					// Persist the force command as a user message.
+					if cs.ChatDB != nil && req.ConvID != "" {
+						cs.ChatDB.InsertMessage(chatdb.Message{
+							ID: NewMessageID(), ConvID: req.ConvID, Role: "user",
+							Text: req.Message, Source: "cc",
+						})
+					}
 					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{Model: t.Name, Tier: t.Name}})
 					return nil
 				}
@@ -336,6 +351,13 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 					"text": fmt.Sprintf("Skill **%s** activated%s", sk.Name, desc),
 				}})
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+					// Persist the skill command as a user message.
+					if cs.ChatDB != nil && req.ConvID != "" {
+						cs.ChatDB.InsertMessage(chatdb.Message{
+							ID: NewMessageID(), ConvID: req.ConvID, Role: "user",
+							Text: req.Message, Source: "cc",
+						})
+					}
 					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{}})
 					return nil
 				}

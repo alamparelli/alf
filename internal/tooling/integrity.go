@@ -34,6 +34,16 @@ import (
 // ErrToolQuarantined is returned when a tool fails integrity check.
 var ErrToolQuarantined = errors.New("tool quarantined: hash mismatch detected, awaiting user approval")
 
+// UID/GID constants for file ownership.
+// alf (uid 1000): LLM user — runs bash, creates tools.
+// alfd (uid 1001): daemon — owns .daemon/, quarantine state, integrity data.
+const (
+	uidAlf  = 1000
+	gidAlf  = 1000
+	uidAlfd = 1001
+	gidAlfd = 1001
+)
+
 // ManifestEntry records the approved state of a tool.
 type ManifestEntry struct {
 	Name       string `json:"name"`
@@ -78,7 +88,7 @@ func NewIntegrityGuard(dataDir string, notify func(tool, oldHash, newHash string
 		}
 		// Ensure .daemon tree is owned by daemon (alfd, uid 1001) and mode 700.
 		// This prevents the LLM (alf, uid 1000) from tampering via bash.
-		os.Chown(d, 1001, 1001)
+		os.Chown(d, uidAlfd, gidAlfd)
 		os.Chmod(d, 0o700)
 	}
 
@@ -248,6 +258,7 @@ func (ig *IntegrityGuard) scan(initial bool) {
 				log.Printf("[integrity] failed to save quarantined copy: %v", err)
 			}
 			os.Chmod(quarantinedPath, 0o600)
+			os.Chown(quarantinedPath, uidAlfd, gidAlfd)
 
 			if err := ig.restore(name); err != nil {
 				log.Printf("[integrity] failed to restore backup for %s: %v", name, err)
@@ -559,14 +570,14 @@ func (ig *IntegrityGuard) restore(name string) error {
 // Only the daemon (alfd) can restore it via ApproveModified.
 func lockdownTool(path string) {
 	os.Chmod(path, 0o640)           // rw-r----- (no execute)
-	os.Chown(path, -1, 1001)        // group=alfd; -1 keeps uid unchanged
+	os.Chown(path, -1, gidAlfd)
 	log.Printf("[integrity] locked down %s (mode=640, group=alfd)", filepath.Base(path))
 }
 
 // unlockTool restores normal execute permission and alf group ownership.
 func unlockTool(path string) {
 	os.Chmod(path, 0o755)
-	os.Chown(path, 1000, 1000) // alf:alf
+	os.Chown(path, uidAlf, gidAlf)
 }
 
 // hashFile computes the SHA-256 hex digest of a file.

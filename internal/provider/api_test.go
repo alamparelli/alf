@@ -655,3 +655,40 @@ func TestBuildMessages_WithMedia(t *testing.T) {
 		t.Errorf("expected last block text %q, got %q", prompt, lastBlock.Text)
 	}
 }
+
+func TestStripMediaInstructions(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			"photo instruction",
+			"[PHOTO - use Read tool to view: /home/alf/data/media/img.jpg]\nWhat is this?",
+			"What is this?",
+		},
+		{
+			"video instruction",
+			`[VIDEO "clip.mp4" - contact sheet with key frames. Use Read tool to view: /path/frames.jpg]` + "\nDescribe this video",
+			"Describe this video",
+		},
+		{
+			"no instruction",
+			"Hello, how are you?",
+			"Hello, how are you?",
+		},
+		{
+			"mixed content",
+			"[PHOTO - use Read tool to view: /path/a.jpg]\n[PHOTO - use Read tool to view: /path/b.jpg]\nCompare these two images",
+			"Compare these two images",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripMediaInstructions(tt.input)
+			if got != tt.want {
+				t.Errorf("stripMediaInstructions(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

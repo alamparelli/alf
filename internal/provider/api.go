@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -331,9 +332,11 @@ func (p *APIProvider) BuildMessages(prompt string, params Params) []apiMessage {
 				}
 			}
 
-			// Add text prompt as final block.
-			if prompt != "" {
-				blocks = append(blocks, apiContentBlock{Type: "text", Text: prompt})
+			// Add text prompt as final block, stripping CLI-style media
+			// instructions since the image is already inline as a vision block.
+			cleanPrompt := stripMediaInstructions(prompt)
+			if cleanPrompt != "" {
+				blocks = append(blocks, apiContentBlock{Type: "text", Text: cleanPrompt})
 			}
 
 			if len(blocks) > 0 {
@@ -408,6 +411,20 @@ func (p *APIProvider) buildVisionBlock(m MediaEntry) *apiContentBlock {
 		Type:     "image_url",
 		ImageURL: &apiImageURL{URL: dataURI},
 	}
+}
+
+// mediaInstructionRe matches CLI-style media instructions like:
+// [PHOTO - use Read tool to view: /path/to/file.jpg]
+// [VIDEO "name" - use Read tool to view: /path]
+// [VIDEO "name" - contact sheet with key frames. Use Read tool to view: /path]
+var mediaInstructionRe = regexp.MustCompile(`(?m)\[(?:PHOTO|VIDEO)[^\]]*(?:use Read tool to view|contact sheet)[^\]]*\]\n?`)
+
+// stripMediaInstructions removes CLI-style [PHOTO/VIDEO - use Read tool...] lines
+// from the prompt. When vision blocks are sent inline, these instructions are
+// redundant and confuse models into using read_file instead of the vision data.
+func stripMediaInstructions(prompt string) string {
+	cleaned := mediaInstructionRe.ReplaceAllString(prompt, "")
+	return strings.TrimSpace(cleaned)
 }
 
 // DoRequest sends a request with pre-built messages and optional tools,

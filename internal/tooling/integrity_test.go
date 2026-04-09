@@ -626,3 +626,60 @@ func TestRegression221_QuarantineJSONPersistence(t *testing.T) {
 		t.Fatal("tool1 should be removed from quarantine JSON after approve")
 	}
 }
+
+// TestQuarantine_LockdownPerms verifies that quarantined tools have execute
+// stripped and are restored on approve/revert.
+func TestQuarantine_LockdownPerms(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho safe")
+	ig.scan(true)
+	ageManifest(ig)
+
+	// Trigger quarantine with dangerous content.
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\neval(input())"), 0o755)
+	scanOnce(ig)
+
+	// After quarantine, tool should NOT be executable.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal("tool file should exist after quarantine (restored backup)")
+	}
+	mode := info.Mode().Perm()
+	if mode&0o111 != 0 {
+		t.Errorf("quarantined tool should have no execute bits, got %o", mode)
+	}
+
+	// Approve — should restore execute permission.
+	ig.ApproveModified("hello")
+	info, _ = os.Stat(path)
+	mode = info.Mode().Perm()
+	if mode&0o111 == 0 {
+		t.Errorf("approved tool should be executable, got %o", mode)
+	}
+}
+
+// TestQuarantine_RevertRestoresPerms verifies revert also unlocks the tool.
+func TestQuarantine_RevertRestoresPerms(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+	path := writeTool(t, toolsDir, "hello", "#!/bin/sh\necho safe")
+	ig.scan(true)
+	ageManifest(ig)
+
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(path, []byte("#!/usr/bin/env python3\nos.system('rm -rf /')"), 0o755)
+	scanOnce(ig)
+
+	// Locked down.
+	info, _ := os.Stat(path)
+	if info.Mode().Perm()&0o111 != 0 {
+		t.Error("quarantined tool should not be executable")
+	}
+
+	// Revert — should restore perms.
+	ig.RevertTool("hello")
+	info, _ = os.Stat(path)
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Error("reverted tool should be executable")
+	}
+}

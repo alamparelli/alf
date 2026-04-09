@@ -226,6 +226,7 @@ func (ig *IntegrityGuard) scan(initial bool) {
 					log.Printf("[integrity] re-restored quarantined %s (LLM re-wrote)", name)
 				}
 			}
+			lockdownTool(toolPath)
 			continue
 		}
 
@@ -250,6 +251,7 @@ func (ig *IntegrityGuard) scan(initial bool) {
 			if err := ig.restore(name); err != nil {
 				log.Printf("[integrity] failed to restore backup for %s: %v", name, err)
 			}
+			lockdownTool(toolPath)
 
 			qt := QuarantinedTool{
 				Name:    name,
@@ -350,11 +352,11 @@ func (ig *IntegrityGuard) ApproveModified(name string) error {
 	toolPath := filepath.Join(ig.toolsDir, name)
 	quarantinedPath := filepath.Join(ig.quarantineDir, name)
 
-	// Move quarantined version back as the active tool and restore execute permission.
+	// Move quarantined version back as the active tool and restore permissions.
 	if err := copyFile(quarantinedPath, toolPath); err != nil {
 		return fmt.Errorf("integrity: restore quarantined: %w", err)
 	}
-	os.Chmod(toolPath, 0o755)
+	unlockTool(toolPath)
 	os.Remove(quarantinedPath)
 
 	// Update manifest with new hash.
@@ -401,6 +403,9 @@ func (ig *IntegrityGuard) RevertTool(name string) error {
 		}
 	}
 
+	// Restore execute permission and alf ownership now that quarantine is cleared.
+	unlockTool(toolPath)
+
 	delete(ig.quarantined, name)
 	ig.saveQuarantine()
 	log.Printf("[integrity] reverted tool: %s (kept original)", name)
@@ -445,6 +450,8 @@ func (ig *IntegrityGuard) restoreQuarantineState() {
 		if json.Unmarshal(data, &state) == nil && len(state) > 0 {
 			for name, qt := range state {
 				ig.quarantined[name] = qt
+				// Re-enforce lockdown on startup (perms may have been tampered with).
+				lockdownTool(filepath.Join(ig.toolsDir, name))
 				log.Printf("[integrity] restored quarantine state for: %s", name)
 			}
 			return
@@ -540,6 +547,21 @@ func (ig *IntegrityGuard) restore(name string) error {
 	// Ensure restored tools are executable and group-readable (alf group).
 	os.Chmod(dst, 0o775)
 	return nil
+}
+
+// lockdownTool strips execute permission and changes group to alfd (gid 1001)
+// so the LLM user (alf, uid 1000) cannot chmod +x or execute it via bash.
+// Only the daemon (alfd) can restore it via ApproveModified.
+func lockdownTool(path string) {
+	os.Chmod(path, 0o640)           // rw-r----- (no execute)
+	os.Chown(path, -1, 1001)        // group=alfd; -1 keeps uid unchanged
+	log.Printf("[integrity] locked down %s (mode=640, group=alfd)", filepath.Base(path))
+}
+
+// unlockTool restores normal execute permission and alf group ownership.
+func unlockTool(path string) {
+	os.Chmod(path, 0o755)
+	os.Chown(path, 1000, 1000) // alf:alf
 }
 
 // hashFile computes the SHA-256 hex digest of a file.

@@ -147,10 +147,10 @@ func TestCheckAndRecord(t *testing.T) {
 		t.Errorf("Check(blocked.com) = rule=%q action=%q blocked=%v, want blocked", rule, action, blocked)
 	}
 
-	// Check unknown host (no matching rule).
-	_, action, blocked = p.Check("unknown.com")
-	if blocked {
-		t.Error("Check(unknown.com) should not block when no rule matches")
+	// Check unknown host (no matching rule) — default-deny in enforce mode.
+	_, _, blocked = p.Check("unknown.com")
+	if !blocked {
+		t.Error("Check(unknown.com) should default-deny in enforce mode when no rule matches")
 	}
 
 	// Record external entry and verify it appears in log.
@@ -181,6 +181,79 @@ func TestCheckLogOnly(t *testing.T) {
 	_, _, blocked := p.Check("evil.com")
 	if blocked {
 		t.Error("Check in log-only mode should not block")
+	}
+}
+
+func TestEnforceDefaultDeny(t *testing.T) {
+	cfg := &Config{Mode: ModeEnforce, Rules: []Rule{}}
+	p := NewProxy(cfg)
+	p.SetVaultHosts([]string{"openrouter.ai", "api.telegram.org"})
+
+	cases := []struct {
+		host        string
+		wantBlocked bool
+		wantRule    string
+	}{
+		// Empty rules, enforce mode → default-deny for public hosts.
+		{"example.com", true, "default-deny"},
+		{"google.com", true, "default-deny"},
+		// Vault-registered hosts → implicit allow.
+		{"openrouter.ai", false, "vault-implicit-allow"},
+		{"api.telegram.org", false, "vault-implicit-allow"},
+		// Internal networking: loopback, private, localhost, link-local.
+		{"127.0.0.1", false, "internal-implicit-allow"},
+		{"localhost", false, "internal-implicit-allow"},
+		{"10.0.0.5", false, "internal-implicit-allow"},
+		{"172.17.0.2", false, "internal-implicit-allow"},
+		{"192.168.1.10", false, "internal-implicit-allow"},
+		{"169.254.1.1", false, "internal-implicit-allow"},
+	}
+	for _, tc := range cases {
+		rule, blocked := p.decide(tc.host)
+		if blocked != tc.wantBlocked {
+			t.Errorf("decide(%q) blocked=%v, want %v (rule=%q)", tc.host, blocked, tc.wantBlocked, rule)
+		}
+		if rule != tc.wantRule {
+			t.Errorf("decide(%q) rule=%q, want %q", tc.host, rule, tc.wantRule)
+		}
+	}
+}
+
+func TestEnforceExplicitAllowOverridesDefaultDeny(t *testing.T) {
+	cfg := &Config{
+		Mode: ModeEnforce,
+		Rules: []Rule{
+			{Pattern: "marketplace.alfos.ai", Action: "allow"},
+			{Pattern: "*.anthropic.com", Action: "allow"},
+		},
+	}
+	p := NewProxy(cfg)
+
+	if _, blocked := p.decide("marketplace.alfos.ai"); blocked {
+		t.Error("explicit allow should not be blocked")
+	}
+	if _, blocked := p.decide("api.anthropic.com"); blocked {
+		t.Error("wildcard allow should not be blocked")
+	}
+	if rule, blocked := p.decide("evil.com"); !blocked || rule != "default-deny" {
+		t.Errorf("unmatched host: got rule=%q blocked=%v, want default-deny", rule, blocked)
+	}
+}
+
+func TestLogOnlyNeverBlocks(t *testing.T) {
+	cfg := &Config{
+		Mode: ModeLogOnly,
+		Rules: []Rule{
+			{Pattern: "evil.com", Action: "deny"},
+			{Pattern: "*", Action: "deny"},
+		},
+	}
+	p := NewProxy(cfg)
+
+	for _, host := range []string{"evil.com", "anything.com", "google.com"} {
+		if _, blocked := p.decide(host); blocked {
+			t.Errorf("decide(%q) blocked in log-only mode, should never block", host)
+		}
 	}
 }
 

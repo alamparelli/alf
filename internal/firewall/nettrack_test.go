@@ -108,13 +108,14 @@ func TestNetTrackerFirewallRules(t *testing.T) {
 	p := NewProxy(cfg)
 	tracker := NewNetTracker(p, "/nonexistent.sock")
 
-	// evil.com won't match by IP (reverse DNS returns IP), so let's test
-	// that the Check() integration works by using the raw IP.
+	// Raw public IP with no matching rule — default-deny in enforce mode.
 	tracker.processEvent(connEvent{Proto: 6, DstIP: "93.184.216.34", DPort: 443, TS: time.Now().Unix()})
 	entries := p.Log.Entries()
-	// The IP won't match "evil.com" pattern, so it should not be blocked.
-	if entries[0].Blocked {
-		t.Error("raw IP should not match domain pattern")
+	if !entries[0].Blocked {
+		t.Error("unmatched public IP should be blocked under default-deny")
+	}
+	if entries[0].Rule != "default-deny" {
+		t.Errorf("expected rule=default-deny, got %q", entries[0].Rule)
 	}
 }
 

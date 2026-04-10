@@ -326,12 +326,20 @@ func (h *DeveloperHandler) handlePublish(w http.ResponseWriter, r *http.Request)
 
 	appDir := filepath.Join(h.DataDir, "apps", req.Slug)
 
-	// Build manifest
-	manifest := map[string]any{
-		"name": req.Name, "slug": req.Slug, "version": req.Version,
-		"description": req.Desc, "category": req.Category, "icon": req.Icon,
-		"tools": []any{},
+	// Load existing manifest (if any) to preserve non-UI fields like `permissions`
+	manifest := map[string]any{}
+	if data, err := os.ReadFile(filepath.Join(appDir, "manifest.json")); err == nil {
+		_ = json.Unmarshal(data, &manifest)
 	}
+
+	// Overlay UI-managed fields onto existing manifest
+	manifest["name"] = req.Name
+	manifest["slug"] = req.Slug
+	manifest["version"] = req.Version
+	manifest["description"] = req.Desc
+	manifest["category"] = req.Category
+	manifest["icon"] = req.Icon
+	manifest["tools"] = []any{}
 
 	// Load tool schemas
 	for _, toolName := range req.Tools {

@@ -8,10 +8,26 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"time"
 )
+
+// subResourceExts is the set of file extensions that a sandboxed null-origin
+// iframe legitimately fetches as sub-resources (script, style, image, font,
+// media). HTML/JSON documents are excluded on purpose: those must go through
+// normal cookie auth via the iframe's document load (which is same-origin
+// from the parent and carries cookies).
+var subResourceExts = map[string]bool{
+	".js": true, ".mjs": true, ".map": true,
+	".css":  true,
+	".png":  true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".svg": true, ".ico": true, ".avif": true,
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	".mp3":  true, ".mp4": true, ".webm": true, ".ogg": true, ".wav": true,
+	".wasm": true,
+}
 
 // ctxKeyAppTokenSlug stores the slug extracted from a validated app Bearer token.
 // Used by handlers (e.g., BashHandler) to cross-check against Referer-derived slug.
@@ -99,41 +115,73 @@ func stripToolsSocketHeader(next http.Handler) http.Handler {
 }
 
 // isAppSubResource returns true if the request is a browser sub-resource load
-// (script, style, image, font, etc.) for an app static file. Sandboxed iframes
-// cannot attach Bearer tokens to these loads, so they are exempted from auth
-// and rate limiting. Security relies on Sec-Fetch-Dest (browser-set, unforgeable)
-// to distinguish sub-resource loads from direct navigation by unauthenticated users.
+// (script, style, image, font, etc.) from a sandboxed app iframe. Sandboxed
+// iframes at /apps/{slug}/ are loaded with sandbox="allow-scripts ..." (no
+// allow-same-origin), giving them an opaque "null" origin. Sub-resource fetches
+// from that context cannot attach cookies OR Bearer tokens, so the auth
+// middleware exempts them based on request shape.
+//
+// SECURITY: Sec-Fetch-* headers are NOT a trust signal on their own — any HTTP
+// client can set them arbitrarily. The bypass is gated by multiple conditions
+// that are hard to satisfy *together* outside a real sandboxed iframe:
+//
+//  1. Origin: null  — sandboxed iframes without allow-same-origin have opaque
+//     origin. Non-browser clients can forge it, but it's the canonical marker
+//     and aligns with corsMiddleware which already special-cases "null".
+//  2. File extension must be a real sub-resource type (script, style, image,
+//     font, media, wasm). HTML/JSON are excluded: document loads of the iframe
+//     itself are fetched same-origin by the parent window and MUST carry
+//     cookies (normal auth path). This closes the enumeration vector where an
+//     attacker could hit /apps/{slug}/ or /apps/{slug}/manifest.json with
+//     forged Sec-Fetch headers to list installed apps.
+//  3. Sec-Fetch-Dest must match a sub-resource type (not document/iframe).
+//  4. Sec-Fetch-Site must be present.
+//
+// NOTE: The rate limiter still exempts sub-resources (apps may legitimately
+// load many assets per page load). DoS via fully-forged conditions is a
+// residual risk but significantly reduced — the auth bypass (enumeration,
+// file dumps) is closed, and real sandboxed iframes are the only "honest"
+// users of this path.
 func isAppSubResource(r *http.Request) bool {
 	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/apps/") || strings.Contains(r.URL.Path, "/api/") {
 		return false
 	}
+
+	// 1. Extension must be a real sub-resource type — never HTML/JSON/etc.
+	ext := strings.ToLower(path.Ext(r.URL.Path))
+	if !subResourceExts[ext] {
+		return false
+	}
+
+	// 2. Sandboxed iframes without allow-same-origin always have opaque Origin.
+	if r.Header.Get("Origin") != "null" {
+		return false
+	}
+
+	// 3. Sec-Fetch headers must be present.
 	dest := r.Header.Get("Sec-Fetch-Dest")
 	site := r.Header.Get("Sec-Fetch-Site")
-
-	// Require BOTH Sec-Fetch headers to be present (browser-set, unforgeable).
-	// curl/scripts typically don't send these — requiring both raises the bar.
 	if dest == "" || site == "" {
 		return false
 	}
 
-	// If Referer is present, it must point to an /apps/ path.
-	// Sandboxed iframes may omit Referer — that's OK when Sec-Fetch headers are valid.
+	// 4. Reject document/iframe/navigate — those are not sub-resources and must
+	// go through normal cookie auth via the parent window's same-origin fetch.
+	if dest == "document" || dest == "iframe" || dest == "navigate" {
+		return false
+	}
+
+	// 5. If Referer is present, it must point to an /apps/ path.
 	ref := r.Header.Get("Referer")
 	if ref != "" && !strings.Contains(ref, "/apps/") {
 		return false
 	}
 
-	// Sub-resource loads: script, style, image, font, audio, video, worker, etc.
-	if dest != "document" && dest != "navigate" {
-		if site == "same-origin" || site == "cross-site" || site == "same-site" || site == "none" {
-			return true
-		}
-	}
-	// Iframe document loads from same origin (parent loading the app).
-	if dest == "iframe" && (site == "same-origin" || site == "same-site") {
-		return true
-	}
-	return false
+	// Any remaining sub-resource dest (script, style, image, font, audio,
+	// video, worker, track, embed, object, etc.) with any Sec-Fetch-Site is
+	// accepted — the null-origin + extension + dest combination is what
+	// distinguishes a real sandboxed sub-resource from a crafted request.
+	return true
 }
 
 func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool, extraTokenFns ...func() string) func(http.Handler) http.Handler {

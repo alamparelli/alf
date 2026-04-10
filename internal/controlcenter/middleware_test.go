@@ -686,3 +686,179 @@ func TestIsTrustedProxy_PublicIPs(t *testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Regression tests for PENTEST-0.7.8 HIGH-1:
+// Sec-Fetch-Dest/Site header forgery bypassed auth + rate limit on /apps/*.
+//
+// Attack (confirmed against cc.lamparelli.eu on 2026-04-10): a non-browser
+// client sending forged `Sec-Fetch-Dest: script|iframe` + `Sec-Fetch-Site:
+// same-origin` on /apps/{slug}/... bypassed authMiddleware, reaching
+// AppHandler unauthenticated. This allowed:
+//   - enumeration of installed apps (via /apps/{slug}/)
+//   - unauthenticated dump of manifest.json, app.json, index.html of any app
+//   - unlimited requests (no rate limit applied to the bypass path)
+//
+// Fix: isAppSubResource now also requires Origin: null, a sub-resource file
+// extension (not .html/.json), and blocks dest=document|iframe|navigate.
+// -----------------------------------------------------------------------------
+
+// helperSubResReq builds a request that would have triggered the old bypass.
+func helperSubResReq(method, urlPath string) *http.Request {
+	req := httptest.NewRequest(method, urlPath, nil)
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	return req
+}
+
+func TestIsAppSubResource_Regression_NoOriginNull(t *testing.T) {
+	// Forged Sec-Fetch headers but no Origin: null → must NOT be treated as
+	// sub-resource (the pentest used this exact shape to bypass auth).
+	req := helperSubResReq("GET", "/apps/later/index.js")
+	if isAppSubResource(req) {
+		t.Fatal("forged Sec-Fetch without Origin: null MUST be rejected")
+	}
+}
+
+func TestIsAppSubResource_Regression_HTMLRejected(t *testing.T) {
+	// HTML document loads must go through normal cookie auth. An attacker
+	// could previously enumerate apps via /apps/{slug}/ (→ index.html).
+	req := helperSubResReq("GET", "/apps/later/")
+	req.Header.Set("Origin", "null")
+	if isAppSubResource(req) {
+		t.Fatal("HTML document load (no extension) must not be a sub-resource")
+	}
+
+	req = helperSubResReq("GET", "/apps/later/index.html")
+	req.Header.Set("Origin", "null")
+	req.Header.Set("Sec-Fetch-Dest", "iframe")
+	if isAppSubResource(req) {
+		t.Fatal("index.html with dest=iframe must not be a sub-resource")
+	}
+}
+
+func TestIsAppSubResource_Regression_JSONRejected(t *testing.T) {
+	// manifest.json / app.json dumps were confirmed exploitable in the
+	// pentest. These must NOT be served via the sub-resource bypass.
+	for _, file := range []string{"manifest.json", "app.json", "config.json"} {
+		req := helperSubResReq("GET", "/apps/later/"+file)
+		req.Header.Set("Origin", "null")
+		if isAppSubResource(req) {
+			t.Errorf("%s must not be a sub-resource (leaks app metadata)", file)
+		}
+	}
+}
+
+func TestIsAppSubResource_Regression_DocumentDestRejected(t *testing.T) {
+	// dest=document|iframe|navigate must never bypass auth.
+	for _, dest := range []string{"document", "iframe", "navigate"} {
+		req := helperSubResReq("GET", "/apps/later/foo.js")
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", dest)
+		if isAppSubResource(req) {
+			t.Errorf("dest=%s must not bypass auth", dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_LegitimateSandboxedFetch(t *testing.T) {
+	// A genuine sandboxed iframe sub-resource load — the design case the
+	// bypass exists for — must still be recognised.
+	cases := []struct {
+		ext  string
+		dest string
+	}{
+		{".js", "script"},
+		{".mjs", "script"},
+		{".css", "style"},
+		{".png", "image"},
+		{".svg", "image"},
+		{".woff2", "font"},
+		{".wasm", "script"},
+		{".mp4", "video"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("GET", "/apps/later/asset"+tc.ext, nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if !isAppSubResource(req) {
+			t.Errorf("legit sub-resource %s (dest=%s) must be allowed", tc.ext, tc.dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_RefererOutsideApps(t *testing.T) {
+	// Referer from a non-/apps/ page must be rejected (defense-in-depth).
+	req := httptest.NewRequest("GET", "/apps/later/app.js", nil)
+	req.Header.Set("Origin", "null")
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	req.Header.Set("Referer", "https://evil.example/page")
+	if isAppSubResource(req) {
+		t.Fatal("external Referer must not be treated as app iframe context")
+	}
+}
+
+func TestIsAppSubResource_NonGETRejected(t *testing.T) {
+	for _, m := range []string{"POST", "PUT", "DELETE", "PATCH"} {
+		req := httptest.NewRequest(m, "/apps/later/foo.js", nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", "script")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if isAppSubResource(req) {
+			t.Errorf("method %s must not be a sub-resource", m)
+		}
+	}
+}
+
+func TestIsAppSubResource_APIPath(t *testing.T) {
+	// /apps/{slug}/api/... is the app's REST proxy — never a sub-resource.
+	req := httptest.NewRequest("GET", "/apps/later/api/items.js", nil)
+	req.Header.Set("Origin", "null")
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	if isAppSubResource(req) {
+		t.Fatal("/apps/{slug}/api/ must never bypass auth")
+	}
+}
+
+// Full auth-middleware integration test reproducing the pentest PoC.
+// This is the canonical regression: before the fix, this request got
+// next.ServeHTTP (bypass). After the fix, it must get 401.
+func TestAuthMiddleware_Regression_PentestSecFetchBypass(t *testing.T) {
+	handler := authMiddleware("secret-token", nil, nil)(okHandler())
+
+	// Exact PoC used against cc.lamparelli.eu:
+	//   curl -H "Sec-Fetch-Dest: script" -H "Sec-Fetch-Site: same-origin" \
+	//        https://cc.lamparelli.eu/apps/later/
+	req := httptest.NewRequest("GET", "/apps/later/", nil)
+	req.Header.Set("Sec-Fetch-Dest", "iframe")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("PENTEST-0.7.8 HIGH-1 regression: /apps/later/ bypassed auth")
+	}
+
+	// Same PoC targeting manifest.json (unauth dump was confirmed).
+	req = httptest.NewRequest("GET", "/apps/later/manifest.json", nil)
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Origin", "null")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("PENTEST-0.7.8 HIGH-1 regression: manifest.json bypassed auth")
+	}
+
+	// Script sub-resource WITHOUT Origin: null (pentest shape) must 401.
+	req = httptest.NewRequest("GET", "/apps/later/app.js", nil)
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("PENTEST-0.7.8 HIGH-1 regression: /apps/*/*.js without Origin: null bypassed auth")
+	}
+}

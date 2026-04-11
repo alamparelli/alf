@@ -566,6 +566,21 @@
     /**
      * Raw authenticated fetch — returns the Response object (not parsed).
      * Use for binary downloads, streaming, or when you need response headers.
+     *
+     * NOTE: For <img>, <audio>, <video>, and @font-face, you do NOT need
+     * AlfSDK.fetch(). If your app backend serves the asset under /api/ with
+     * a media/font file extension, you can use the URL directly:
+     *
+     *   <img src="/apps/SLUG/api/covers/42.jpg">
+     *
+     * Allowed bare-URL extensions under /api/:
+     *   .png .jpg .jpeg .gif .webp .svg .ico .avif
+     *   .woff .woff2 .ttf .otf .eot
+     *   .mp3 .mp4 .webm .ogg .wav
+     *
+     * Anything else under /api/ (.json, .js, .css, .wasm, .html, ...) still
+     * requires AlfSDK.api() / AlfSDK.fetch() so the Bearer token is attached.
+     *
      * @param {string} path - URL path
      * @param {Object} [opts] - fetch options
      * @returns {Promise<Response>}

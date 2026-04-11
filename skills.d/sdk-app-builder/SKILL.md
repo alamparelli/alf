@@ -17,6 +17,43 @@ You build **standalone** apps for ALF. Every app is self-contained and installab
 - **Standalone** — no dependency on shared databases or external processes.
 - **Sandboxed** — all code runs in a chroot jail. No access to vault, secrets, or other apps' data.
 
+## Architecture mental model (read first)
+
+Your app runs in **two different execution contexts**. Get this wrong and you'll chase phantom bugs for hours.
+
+```
+┌────────────────────────────── PARENT FRAME (Control Center) ──────────────────────────────┐
+│  Full auth (session cookie). Can reach any CC URL directly.                                │
+│  Sheets you open with AlfSDK.sheet(html, actions) RENDER HERE — HTML runs in parent scope. │
+│                                                                                             │
+│  ┌─────────────────────── IFRAME (your app) ────────────────────────┐                      │
+│  │  sandbox="allow-scripts allow-forms allow-popups ..." (no allow-same-origin)              │
+│  │  → Origin: null (opaque). No cookies, no top.*, no parent.document.                       │
+│  │  AlfSDK obtains a short-lived Bearer token via MessageChannel on init.                    │
+│  │                                                                                            │
+│  │  AlfSDK.api(path)    → fetch(path, {Authorization: Bearer ...})  ← token attached         │
+│  │  AlfSDK.fetch(path)  → same, raw Response (for blobs/streams)                              │
+│  │  AlfSDK.sheet(html)  → postMessage to parent, parent renders the HTML                      │
+│  │                                                                                            │
+│  │  <img src="/apps/SLUG/foo.png">        ✅ static file in your app dir (auth bypass        │
+│  │                                           via sandbox sub-resource gate)                    │
+│  │  <img src="/apps/SLUG/api/42.jpg">     ✅ proxied to your backend (asset ext bypass)       │
+│  │  <img src="/apps/SLUG/api/data.json">  ❌ data endpoint → 401. Use AlfSDK.api() instead.   │
+│  │  fetch('/api/vault/...') without SDK    ❌ no Bearer → 401                                  │
+│  └──────────────────────────────────────────────────────────────────┘                      │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Consequences:**
+
+1. **Two HTTP worlds** — the iframe needs `AlfSDK.api()`/`AlfSDK.fetch()` for every authenticated call because the browser can't attach the Bearer token on its own. Raw `fetch()` in an iframe → 401.
+2. **One exception**: browser tag loads (`<img>`, `<audio>`, `<video>`, `@font-face`) can use direct URLs if the path ends with a media/font extension — the CC recognizes sandboxed sub-resources via `Sec-Fetch-*` + `Origin: null` and waives auth. **Only** for `.png .jpg .jpeg .gif .webp .svg .ico .avif .woff .woff2 .ttf .otf .eot .mp3 .mp4 .webm .ogg .wav` under `/apps/{slug}/` OR `/apps/{slug}/api/...`. Everything else (including `.json`, `.js`, `.css`, `.wasm`) requires the SDK.
+3. **Sheets render in the parent frame** — `AlfSDK.sheet(html)` sends HTML to the Control Center for rendering. The HTML runs *outside* your iframe with full CC origin, so direct `<img src="/apps/SLUG/api/42.jpg">` works there even without the sub-resource bypass. Don't mix the two contexts up: code in `AlfSDK.sheet()` is NOT in your iframe.
+4. **REST server apps**: your backend listens on `127.0.0.1:{port}` (port written to `data/port`) and the CC reverse-proxies `/apps/{slug}/api/*` → `localhost:{port}/api/*`. Strip `Cookie`, `Authorization`, and forwarded headers — app servers are untrusted and the CC removes them before forwarding.
+5. **Cross-app calls** go through `AlfSDK.action(targetSlug, action, params)` — declared in the target's `manifest.json`. Never call another app's `/apps/{other}/api/*` directly; it's blocked by referer check (SEC-005).
+
+If a hypothesis about routing or auth doesn't match one of these 5 points, the hypothesis is wrong — re-check the context (iframe vs parent) before digging.
+
 ## Scope check
 
 Before building, if the request has fewer than 2 concrete details, ask:
@@ -75,6 +112,14 @@ Read the relevant reference file for templates, patterns, and API details:
 - `manifest.json` — slug, version, description, category, icon, tools (if CLI), permissions
 - `app.json` — `{ "name": "...", "icon": "lucide-icon", "description": "..." }` (if web UI)
 - `go.mod` — with all dependencies declared **(only if Go backend)**
+- `README.md` — **mandatory for every app**. 10–30 lines, human-readable. Must include:
+  1. **Architecture** in one sentence (frontend-only / CLI tool / REST server + storage choice).
+  2. **Data layout** — what's in `data/` (files, DB name, directories).
+  3. **API routes** — list every `/api/...` route the backend exposes (if any), with method + purpose.
+  4. **Permissions** — what the app needs (`storage`, `bash`, `network`, etc.) and why.
+  5. **Quirks** — anything non-obvious the next developer (or LLM) should know before touching the code.
+
+  The README is the first thing another LLM reads when asked to fix a bug — without it, they'll rebuild the mental model by grepping the code, wasting tokens and making wrong guesses.
 
 ### Data storage
 - **Frontend-only apps**: use `AlfSDK.storage` (server-side key-value, persists across updates). On-disk: `data/apps/{slug}/data/storage.json` — readable directly via `cat`
@@ -86,7 +131,8 @@ Read the relevant reference file for templates, patterns, and API details:
 - CSS variables only (no hardcoded colors), `--space-*` tokens, explicit `font-family`, Lucide SVG icons.
 - **Lightweight eval-based frameworks OK** (Alpine.js, Petite Vue) — `unsafe-eval` is in CSP. No build-step frameworks (React, Vue SPA, Angular). No external scripts/stylesheets (CSP blocks them).
 - No `localStorage`, `document.cookie`, or `credentials: 'same-origin'` — iframes are sandboxed. Use `AlfSDK.storage` and `AlfSDK.api()`.
-- **Never use `fetch()` directly** — use `AlfSDK.api()` (returns parsed JSON, throws on non-2xx) or `AlfSDK.fetch()` (returns raw Response, for binary/streaming).
+- **Never use `fetch()` directly for data** — use `AlfSDK.api()` (parsed JSON, throws on non-2xx) or `AlfSDK.fetch()` (raw Response, for blobs/streaming). Both attach the Bearer token automatically.
+- **`<img>`, `<audio>`, `<video>`, `@font-face` CAN use direct URLs** — if the asset is served under `/apps/{slug}/` or `/apps/{slug}/api/...` with a media/font extension (`.png .jpg .webp .svg .woff2 .mp4 ...`). See the "Architecture mental model" section. Data endpoints still require `AlfSDK.api()`.
 - External APIs via vault proxy — see `reference/SANDBOX.md`.
 
 ## Final checklist (MANDATORY — run before telling the user "it's ready")

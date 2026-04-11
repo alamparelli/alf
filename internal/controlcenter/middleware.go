@@ -29,6 +29,25 @@ var subResourceExts = map[string]bool{
 	".wasm": true,
 }
 
+// assetExts is the narrower subset of subResourceExts allowed to bypass auth
+// when the path contains /api/ (i.e. proxied to the app's backend server).
+// Restricted to image/audio/video/font so that a sandboxed iframe can load
+// <img>, <audio>, <video>, <link> font, <picture>, etc. with direct URLs.
+//
+// Excluded on purpose vs. subResourceExts: .js, .mjs, .css, .wasm, .map.
+// Scripts and styles served dynamically by app backends must still go through
+// authenticated AlfSDK.fetch() — letting them bypass auth here would open
+// unauth code execution and source-map leaks on user-generated content.
+var assetExts = map[string]bool{
+	// Images
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".svg": true, ".ico": true, ".avif": true,
+	// Fonts
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	// Audio / video
+	".mp3": true, ".mp4": true, ".webm": true, ".ogg": true, ".wav": true,
+}
+
 // ctxKeyAppTokenSlug stores the slug extracted from a validated app Bearer token.
 // Used by handlers (e.g., BashHandler) to cross-check against Referer-derived slug.
 type ctxKeyAppTokenSlug struct{}
@@ -143,7 +162,7 @@ func stripToolsSocketHeader(next http.Handler) http.Handler {
 // file dumps) is closed, and real sandboxed iframes are the only "honest"
 // users of this path.
 func isAppSubResource(r *http.Request) bool {
-	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/apps/") || strings.Contains(r.URL.Path, "/api/") {
+	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/apps/") {
 		return false
 	}
 
@@ -153,8 +172,13 @@ func isAppSubResource(r *http.Request) bool {
 		return false
 	}
 
-	// 2. Sandboxed iframes without allow-same-origin always have opaque Origin.
-	if r.Header.Get("Origin") != "null" {
+	// 1b. For API-proxied paths (/apps/{slug}/api/...), narrow the allowed
+	// extensions to image/audio/video/font only. This lets <img>, <audio>,
+	// <video>, and @font-face load assets that an app backend serves
+	// dynamically (e.g. user-uploaded covers, transcoded media) while still
+	// blocking unauth access to .js/.css/.wasm/.map — those must go through
+	// the authenticated Bearer path via AlfSDK.fetch().
+	if strings.Contains(r.URL.Path, "/api/") && !assetExts[ext] {
 		return false
 	}
 
@@ -162,6 +186,31 @@ func isAppSubResource(r *http.Request) bool {
 	dest := r.Header.Get("Sec-Fetch-Dest")
 	site := r.Header.Get("Sec-Fetch-Site")
 	if dest == "" || site == "" {
+		return false
+	}
+
+	// 2. Origin gate. Two valid cases:
+	//   (a) Origin: null  — fetch()/XHR from a sandboxed null-origin iframe
+	//       (AlfSDK.api / AlfSDK.fetch always take this path).
+	//   (b) Empty Origin + tag-load dest (image/audio/video/font/track)
+	//       — browsers NEVER send an Origin header for plain <img>, <audio>,
+	//         <video>, <link rel=preload as=font>, or <track> sub-resources,
+	//         even from a sandboxed null-origin iframe. Without this carve-
+	//         out, <img src="/apps/X/api/cover.jpg"> from an app iframe gets
+	//         401, breaking dynamic asset loading entirely.
+	//
+	// The carve-out is restricted to tag-load dests so the original pentest
+	// pattern (forged Sec-Fetch-Dest=script + empty Origin) stays rejected:
+	// script/style/wasm/etc. would expose source code unauthenticated, while
+	// image/audio/video/font expose at most opaque media content the browser
+	// can't read pixel/sample data from cross-origin. The residual risk is
+	// that a third-party site can hot-link an app's media if it knows the
+	// exact slug + path — equivalent to default web behavior for any public
+	// image URL, and bounded to media that can't leak data via the browser.
+	origin := r.Header.Get("Origin")
+	isTagLoad := dest == "image" || dest == "audio" || dest == "video" ||
+		dest == "font" || dest == "track"
+	if origin != "null" && !(origin == "" && isTagLoad) {
 		return false
 	}
 

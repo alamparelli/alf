@@ -275,4 +275,31 @@ AlfSDK.api('/apps/SLUG/api/items').then(function(data) {
 });
 ```
 
+### Serving binary assets (images, audio, video, fonts)
+
+Your REST server can serve **binary asset files** (user-uploaded covers, generated thumbnails, transcoded media, etc.) directly under `/api/...` with an asset file extension. The sandboxed iframe can then load them with a plain `<img src>`, `<audio>`, `<video>`, or `@font-face` — no `AlfSDK.fetch()` + blob URL dance needed.
+
+```go
+// Go chi example
+r.Get("/api/covers/{id}.jpg", func(w http.ResponseWriter, r *http.Request) {
+    id := chi.URLParam(r, "id")
+    http.ServeFile(w, r, filepath.Join(dataDir, "covers", id+".jpg"))
+})
+```
+
+```html
+<!-- in index.html, direct <img src> works from the iframe -->
+<img src="/apps/SLUG/api/covers/42.jpg" alt="">
+```
+
+**Allowed extensions under `/api/` without auth header** (media + fonts only):
+`.png .jpg .jpeg .gif .webp .svg .ico .avif` · `.woff .woff2 .ttf .otf .eot` · `.mp3 .mp4 .webm .ogg .wav`
+
+**Not allowed as unauth sub-resources** (must use `AlfSDK.api()` / `AlfSDK.fetch()`):
+`.json .xml .csv .txt .html` (data endpoints) · `.js .mjs .css .wasm .map` (scripts/styles — blocked to prevent unauth code exec on dynamic endpoints).
+
+**Why the split**: the CC's sandboxed-iframe auth bypass is extension-gated. Data responses (`.json`, `.html`) always require the Bearer token via `AlfSDK.api()`. Scripts/styles served dynamically from an app backend would be an unauth code-exec vector, so they're also blocked under `/api/` even though they work from the static app directory.
+
+**URL must include the extension.** `/api/cover/42` returning `image/jpeg` does *not* bypass auth — the path has no `.jpg` suffix, so the iframe sees a 302 redirect. Always include the extension in the route (`/api/covers/{id}.jpg`).
+
 Read `FRONTEND.md` for the full frontend template and AlfSDK reference.

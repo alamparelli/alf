@@ -812,14 +812,140 @@ func TestIsAppSubResource_NonGETRejected(t *testing.T) {
 	}
 }
 
-func TestIsAppSubResource_APIPath(t *testing.T) {
-	// /apps/{slug}/api/... is the app's REST proxy — never a sub-resource.
-	req := httptest.NewRequest("GET", "/apps/later/api/items.js", nil)
-	req.Header.Set("Origin", "null")
-	req.Header.Set("Sec-Fetch-Dest", "script")
+func TestIsAppSubResource_APIPath_ScriptRejected(t *testing.T) {
+	// /apps/{slug}/api/*.js must never bypass auth — app backends serving
+	// dynamic JS would be unauth code-exec vector.
+	for _, p := range []string{
+		"/apps/later/api/items.js",
+		"/apps/later/api/bundle.mjs",
+		"/apps/later/api/style.css",
+		"/apps/later/api/mod.wasm",
+		"/apps/later/api/bundle.map",
+	} {
+		req := httptest.NewRequest("GET", p, nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", "script")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if isAppSubResource(req) {
+			t.Errorf("%s under /api/ must never bypass auth", p)
+		}
+	}
+}
+
+func TestIsAppSubResource_APIPath_AssetsAllowed(t *testing.T) {
+	// /apps/{slug}/api/*.{jpg,png,woff2,mp4,...} IS allowed to bypass auth
+	// so that <img>, <audio>, <video>, @font-face can load assets served
+	// dynamically by the app's backend (e.g. bookshelf cover thumbnails).
+	cases := []struct {
+		path string
+		dest string
+	}{
+		{"/apps/bookshelf/api/covers/1.jpg", "image"},
+		{"/apps/bookshelf/api/covers/2.png", "image"},
+		{"/apps/bookshelf/api/art/avatar.webp", "image"},
+		{"/apps/bookshelf/api/icons/logo.svg", "image"},
+		{"/apps/bookshelf/api/fonts/Inter.woff2", "font"},
+		{"/apps/bookshelf/api/media/clip.mp4", "video"},
+		{"/apps/bookshelf/api/media/ping.mp3", "audio"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		req.Header.Set("Referer", "https://cc.example/apps/bookshelf/")
+		if !isAppSubResource(req) {
+			t.Errorf("%s (dest=%s) must be accepted as an asset sub-resource", tc.path, tc.dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_TagLoad_EmptyOriginAccepted(t *testing.T) {
+	// Browsers do NOT send an Origin header for plain <img>, <audio>, <video>,
+	// <link> font, or <track> sub-resources — even from a sandboxed null-
+	// origin iframe. The bypass MUST accept these requests, otherwise dynamic
+	// asset URLs (e.g. <img src="/apps/bookshelf/api/covers/42.jpg">) all
+	// 401-out from app iframes. This is the bookshelf regression case.
+	cases := []struct {
+		path string
+		dest string
+	}{
+		// Static files in app dir
+		{"/apps/bookshelf/icon.png", "image"},
+		{"/apps/bookshelf/cover.webp", "image"},
+		{"/apps/bookshelf/font.woff2", "font"},
+		{"/apps/bookshelf/audio.mp3", "audio"},
+		{"/apps/bookshelf/clip.mp4", "video"},
+		// Dynamic assets via API proxy
+		{"/apps/bookshelf/api/covers/1.jpg", "image"},
+		{"/apps/bookshelf/api/avatars/u42.png", "image"},
+		{"/apps/bookshelf/api/media/song.mp3", "audio"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		// NOTE: deliberately no Origin header — that's the whole point.
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		req.Header.Set("Sec-Fetch-Mode", "no-cors")
+		if !isAppSubResource(req) {
+			t.Errorf("%s (dest=%s, no Origin) must be accepted as a tag-load sub-resource", tc.path, tc.dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_TagLoad_NonAssetDestStillRejected(t *testing.T) {
+	// The empty-Origin carve-out is restricted to image/audio/video/font/track.
+	// Non-tag-load dest types (script, style, embed, object, ...) MUST still
+	// require Origin: null — otherwise the original pentest pattern (forged
+	// Sec-Fetch-Dest=script, no real Origin) would re-open unauth source-code
+	// dumps from app directories.
+	cases := []struct {
+		path string
+		dest string
+	}{
+		{"/apps/later/index.js", "script"},
+		{"/apps/later/style.css", "style"},
+		{"/apps/later/mod.wasm", "script"},
+		{"/apps/later/widget.css", "style"},
+		{"/apps/later/sw.js", "worker"},
+		{"/apps/later/icon.svg", "embed"},
+		{"/apps/later/icon.svg", "object"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		// No Origin header — same as a forged sub-resource attack
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if isAppSubResource(req) {
+			t.Errorf("%s (dest=%s, no Origin) must be rejected — non-tag-load dests require Origin: null", tc.path, tc.dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_TagLoad_ThirdPartyOriginRejected(t *testing.T) {
+	// A real third-party site loading a CC asset would either send a real
+	// Origin (CORS request) or no Origin (regular <img>). The CORS case must
+	// still be rejected — only "null" or absent are valid.
+	req := httptest.NewRequest("GET", "/apps/bookshelf/api/covers/1.jpg", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Sec-Fetch-Dest", "image")
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
 	if isAppSubResource(req) {
-		t.Fatal("/apps/{slug}/api/ must never bypass auth")
+		t.Fatal("third-party Origin must never be treated as a sandboxed sub-resource")
+	}
+}
+
+func TestIsAppSubResource_APIPath_JSONStillRejected(t *testing.T) {
+	// Data endpoints (.json, .xml, .csv, .txt) must stay auth-required even
+	// under /api/, regardless of forged sub-resource headers.
+	for _, ext := range []string{".json", ".xml", ".csv", ".txt", ".html"} {
+		req := httptest.NewRequest("GET", "/apps/later/api/data"+ext, nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", "empty")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if isAppSubResource(req) {
+			t.Errorf("%s under /api/ must not bypass auth", ext)
+		}
 	}
 }
 

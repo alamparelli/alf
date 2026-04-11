@@ -97,6 +97,9 @@ func (h *DeveloperHandler) handleStatus(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleApps lists local app directories (filtered for development).
+// Only directories containing at least one recognizable app marker file are
+// returned — this excludes orphaned/empty leftover dirs from incomplete
+// uninstalls, which would otherwise pollute the Source App dropdown (#277).
 func (h *DeveloperHandler) handleApps(w http.ResponseWriter, r *http.Request) {
 	appsDir := filepath.Join(h.DataDir, "apps")
 	entries, err := os.ReadDir(appsDir)
@@ -105,9 +108,22 @@ func (h *DeveloperHandler) handleApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	markers := []string{"app.json", "manifest.json", "index.html"}
+
 	var apps []string
 	for _, e := range entries {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		appPath := filepath.Join(appsDir, e.Name())
+		hasMarker := false
+		for _, marker := range markers {
+			if _, err := os.Stat(filepath.Join(appPath, marker)); err == nil {
+				hasMarker = true
+				break
+			}
+		}
+		if !hasMarker {
 			continue
 		}
 		apps = append(apps, e.Name())

@@ -133,6 +133,47 @@ This means users don't lose context when the router switches tiers mid-conversat
 - Cost tracking isn't available for API models (always shows $0.00)
 - When setting up tools for an API tier, only compatible tools are shown in the list
 
+## Connecting Ollama on macOS
+
+Ollama runs on the Mac host, ALF runs inside a Docker container — so ALF has to reach *out* of the container to the host. Two things to know:
+
+### 1. Use `host.docker.internal`, not your LAN IP
+
+The Ollama preset uses `http://host.docker.internal:11434/v1` for a reason. ALF's setup wizard runs an SSRF check on any base URL you enter and **rejects private/LAN IPs** (`192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`) to prevent scanning of the Docker-internal network. `host.docker.internal` is explicitly allowlisted.
+
+If you typed your Mac's LAN IP and got `blocked: <host> resolves to non-routable address`, that's why — switch to `host.docker.internal` and it will work.
+
+### 2. `host.docker.internal` resolution
+
+Since ALF 0.7.8, the generated `docker-compose.yml` pins `host.docker.internal` to the host gateway via:
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
+This works on Docker Desktop (Mac/Windows) *and* native Docker on Linux. If you were on an older ALF install and hit resolution failures, regenerate the compose file with `alf compose` or re-run `alf init`.
+
+### 3. Make sure Ollama accepts container traffic
+
+By default Ollama only binds to `127.0.0.1` on the host, which the container cannot reach. Bind it to all interfaces:
+
+```bash
+# macOS — launchctl
+launchctl setenv OLLAMA_HOST 0.0.0.0:11434
+# then restart Ollama.app
+```
+
+Or run Ollama from the terminal: `OLLAMA_HOST=0.0.0.0:11434 ollama serve`.
+
+Verify from inside the ALF container:
+
+```bash
+docker exec alf curl -s http://host.docker.internal:11434/api/tags
+```
+
+You should see your installed models. If the request hangs or returns connection refused, Ollama isn't listening on the gateway interface.
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -143,3 +184,6 @@ This means users don't lose context when the router switches tiers mid-conversat
 | API error 400: context too long | ALF auto-truncates history and retries once |
 | Tier falls back to CLI | Backend not configured or API key missing |
 | Backend not in dropdown | Add it to `config.json` backends and restart |
+| `blocked: ... resolves to non-routable address` | You entered a private/LAN IP — use `host.docker.internal` instead (see "Connecting Ollama on macOS" above) |
+| Ollama: connection refused from container | `OLLAMA_HOST=0.0.0.0:11434` on the host, then restart Ollama |
+| Ollama: `host.docker.internal` doesn't resolve | Regenerate compose with `alf compose` (adds `host-gateway` entry) |

@@ -133,6 +133,18 @@ func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error, desc
 	job.cronID = int(entryID)
 	e.entries[id] = entryID
 
+	// Hydrate LastRun/LastError from the runlog so restarts don't wipe display
+	// state for long-interval system jobs (e.g. @every 360m). Without this,
+	// mem-consolidate appears idle in the UI between boot and its next tick.
+	// NextRun is populated later in Start() once cron has computed schedules.
+	if rec := e.runLog.LastRunFor(id); rec != nil {
+		t := rec.StartedAt
+		job.LastRun = &t
+		if rec.Status == "error" || rec.Status == "timeout" {
+			job.LastError = rec.Error
+		}
+	}
+
 	// Add to store (in-memory only, system jobs are registered at startup).
 	e.store.mu.Lock()
 	e.store.jobs = append(e.store.jobs, job)
@@ -225,6 +237,23 @@ func (e *Engine) Start(sockPath string) error {
 	}
 
 	e.cron.Start()
+
+	// Refresh NextRun for every registered job now that cron has computed
+	// its entry schedules. RegisterSystem and scheduleJob (for user jobs)
+	// both run before cron.Start(), so their entry.Next was zero at the time.
+	e.mu.Lock()
+	for id, entryID := range e.entries {
+		entry := e.cron.Entry(entryID)
+		if entry.Next.IsZero() {
+			continue
+		}
+		if j := e.store.Get(id); j != nil {
+			next := entry.Next
+			j.NextRun = &next
+		}
+	}
+	e.mu.Unlock()
+
 	log.Printf("scheduler: started with %d entries", len(e.cron.Entries()))
 
 	// Start socket server.

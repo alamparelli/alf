@@ -190,6 +190,41 @@ func TestRunLogCleanupCallsPurge(t *testing.T) {
 	}
 }
 
+func TestRunLogLastRunFor(t *testing.T) {
+	dir := t.TempDir()
+	rl := NewRunLog(dir)
+
+	// Nothing yet.
+	if rec := rl.LastRunFor("missing"); rec != nil {
+		t.Errorf("expected nil for unknown job, got %+v", rec)
+	}
+
+	// Write records across two days for the same job; newest should win.
+	yesterday := time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour).Add(10 * time.Hour)
+	today := time.Now().Truncate(24 * time.Hour).Add(10 * time.Hour)
+
+	rl.Append(RunRecord{JobID: "mem-consolidate", StartedAt: yesterday, Status: "ok"})
+	rl.Append(RunRecord{JobID: "other", StartedAt: today.Add(time.Minute), Status: "ok"})
+	rl.Append(RunRecord{JobID: "mem-consolidate", StartedAt: today, Status: "error", Error: "boom"})
+
+	rec := rl.LastRunFor("mem-consolidate")
+	if rec == nil {
+		t.Fatal("expected a record, got nil")
+	}
+	if !rec.StartedAt.Equal(today) {
+		t.Errorf("expected newest record (today), got %v", rec.StartedAt)
+	}
+	if rec.Status != "error" || rec.Error != "boom" {
+		t.Errorf("expected error status with boom, got %q/%q", rec.Status, rec.Error)
+	}
+
+	// Different job falls through to its own most recent record.
+	rec = rl.LastRunFor("other")
+	if rec == nil || rec.JobID != "other" {
+		t.Fatalf("expected 'other' record, got %+v", rec)
+	}
+}
+
 func TestRunLogSince(t *testing.T) {
 	dir := t.TempDir()
 	rl := NewRunLog(dir)

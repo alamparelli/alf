@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -67,6 +68,52 @@ func (rl *RunLog) Append(rec RunRecord) {
 	}
 	f.Write(data)
 	f.WriteString("\n")
+}
+
+// LastRunFor returns the most recent record for a job by scanning daily files
+// from newest to oldest and stopping at the first match. Returns nil if no
+// record is found. Used to hydrate system job state across daemon restarts.
+func (rl *RunLog) LastRunFor(jobID string) *RunRecord {
+	entries, err := os.ReadDir(rl.dir)
+	if err != nil {
+		return nil
+	}
+
+	// Collect daily file stems (YYYY-MM-DD), sorted desc.
+	stems := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		stem := strings.TrimSuffix(e.Name(), ".jsonl")
+		if _, err := time.Parse("2006-01-02", stem); err != nil {
+			continue
+		}
+		stems = append(stems, stem)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(stems)))
+
+	for _, stem := range stems {
+		data, err := os.ReadFile(filepath.Join(rl.dir, stem+".jsonl"))
+		if err != nil {
+			continue
+		}
+		lines := splitLines(data)
+		// Scan this day's lines back-to-front (newest last in file).
+		for i := len(lines) - 1; i >= 0; i-- {
+			if len(lines[i]) == 0 {
+				continue
+			}
+			var rec RunRecord
+			if err := json.Unmarshal(lines[i], &rec); err != nil {
+				continue
+			}
+			if rec.JobID == jobID {
+				return &rec
+			}
+		}
+	}
+	return nil
 }
 
 // Recent returns the last N records for a job, newest first.

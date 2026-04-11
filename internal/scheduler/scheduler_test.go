@@ -217,6 +217,69 @@ func TestEngineUpdate(t *testing.T) {
 	}
 }
 
+func TestEngineRegisterSystemHydratesFromRunLog(t *testing.T) {
+	// Regression for #257: long-interval system jobs (@every 360m) appeared
+	// idle in the UI after each daemon restart because LastRun/NextRun were
+	// not restored from the runlog. RegisterSystem must hydrate them so the
+	// display reflects the actual execution history.
+	dir := t.TempDir()
+
+	// Pre-populate the runlog as if the job had run yesterday under a
+	// previous daemon process.
+	logDir := filepath.Join(dir, "logs", "scheduler")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rl := NewRunLog(logDir)
+	pastRun := time.Now().Add(-2 * time.Hour)
+	rl.Append(RunRecord{
+		JobID:     "mem-consolidate",
+		JobName:   "Memory Consolidation",
+		Tier:      "system",
+		StartedAt: pastRun,
+		Status:    "ok",
+	})
+
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+
+	e.RegisterSystem("mem-consolidate", "Memory Consolidation", "@every 360m", func() error { return nil })
+
+	// LastRun should already be hydrated from the runlog after RegisterSystem,
+	// without needing Start() to run.
+	jobs := e.List(false)
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	job := jobs[0]
+	if job.LastRun == nil {
+		t.Fatal("expected LastRun to be hydrated from runlog, got nil")
+	}
+	if !job.LastRun.Equal(pastRun) {
+		t.Errorf("expected LastRun=%v, got %v", pastRun, *job.LastRun)
+	}
+
+	// After Start, NextRun should be populated from the cron entry.
+	sockPath := filepath.Join(dir, "scheduler.sock")
+	if err := e.Start(sockPath); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer e.Stop()
+
+	jobs = e.List(false)
+	job = jobs[0]
+	if job.NextRun == nil {
+		t.Error("expected NextRun to be populated after Start, got nil")
+	}
+	// LastRun must survive Start (which reloads the store).
+	if job.LastRun == nil || !job.LastRun.Equal(pastRun) {
+		t.Errorf("LastRun lost after Start: got %v", job.LastRun)
+	}
+}
+
 func TestEngineSystemJobCannotBeDeleted(t *testing.T) {
 	dir := t.TempDir()
 	e := New(Config{

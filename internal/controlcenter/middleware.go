@@ -327,22 +327,80 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 	}
 }
 
-// autoIssueSession creates a session cookie when a Bearer-authenticated browser request
-// arrives without an existing session. This bridges Bearer auth (mobile app) to cookie auth
-// (WebView JS), so subsequent fetch() calls work automatically.
+// autoIssueSessionTTL is the lifetime of a cookie session auto-derived from a
+// Bearer-authenticated page navigation. Kept short (1h) because the cookie is a
+// bridge to the real Bearer token, not a primary credential — if the Bearer is
+// rotated, stale auto-sessions survive at most this long. See #271.
+const autoIssueSessionTTL = time.Hour
+
+// bearerDerivedChatID maps a Bearer token to a stable negative chatID so
+// auto-issued cookie sessions are isolated per Bearer:
+//   - Rotating a Bearer starts a fresh eviction pool (the old pool ages out
+//     with the cookies tied to it).
+//   - SessionStore.RevokeChat(x) on one Bearer cannot sweep another Bearer's
+//     auto-sessions.
+//
+// The return value is always <= -3, staying clear of the reserved ids
+// 0 (Telegram "unknown"), -1 (apiChatID for API chat clients), and -2 (kept
+// free for future sentinels). The hash is FNV-1a 64-bit, same family as
+// convSessionID in chat_service.go.
+func bearerDerivedChatID(bearer string) int64 {
+	const (
+		fnvOffset64 uint64 = 14695981039346656037
+		fnvPrime64  uint64 = 1099511628211
+	)
+	h := fnvOffset64
+	for i := 0; i < len(bearer); i++ {
+		h ^= uint64(bearer[i])
+		h *= fnvPrime64
+	}
+	// Drop the sign bit, then shift into the safe range (<= -3).
+	v := int64(h >> 1)
+	return -v - 3
+}
+
+// autoIssueSession creates a session cookie when a Bearer-authenticated browser
+// top-level navigation arrives without an existing session. This bridges Bearer
+// auth (mobile app) to cookie auth (WebView JS), so subsequent fetch() calls
+// authenticate via the cookie automatically.
+//
+// Security notes (#271):
+//   - The trigger is Sec-Fetch-Dest: document, not just Accept: text/html.
+//     Real browsers send this on top-level navigations; API clients don't, so
+//     random API calls no longer get an unsolicited cookie.
+//   - The session is bound to a per-Bearer hashed chatID (see
+//     bearerDerivedChatID) so two mobile clients with different Bearers
+//     cannot evict each other via SessionStore.evictOldestLocked, and
+//     RevokeChat cannot sweep unrelated sessions.
+//   - TTL is 1h (not 24h) — the cookie is a bridge, not a primary session.
 func autoIssueSession(w http.ResponseWriter, r *http.Request, sessions *SessionStore) {
 	if sessions == nil {
 		return
 	}
-	// Only issue on browser page navigations, not API calls.
-	if !strings.Contains(r.Header.Get("Accept"), "text/html") {
+	// Only issue on real browser top-level navigations. Sec-Fetch-Dest is sent
+	// by every modern Chromium/WebKit WebView and is absent on API clients —
+	// a much tighter signal than matching Accept: text/html.
+	if r.Header.Get("Sec-Fetch-Dest") != "document" {
 		return
 	}
 	// Skip if already has a valid session.
 	if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
 		return
 	}
-	sessionID, err := sessions.Issue(0, 24*time.Hour)
+	// Extract the Bearer we just validated. Cookie-based Bearer (cc_bearer)
+	// is unusual for page navigations; fall back to a generic sentinel rather
+	// than sharing a pool across clients.
+	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if bearer == "" {
+		if c, err := r.Cookie("cc_bearer"); err == nil {
+			bearer = c.Value
+		}
+	}
+	chatID := int64(-3) // safe sentinel for unknown-Bearer path
+	if bearer != "" {
+		chatID = bearerDerivedChatID(bearer)
+	}
+	sessionID, err := sessions.Issue(chatID, autoIssueSessionTTL)
 	if err != nil {
 		log.Printf("[CC] auto-session issue failed: %v", err)
 		return
@@ -356,7 +414,7 @@ func autoIssueSession(w http.ResponseWriter, r *http.Request, sessions *SessionS
 		Name:     "cc_session",
 		Value:    sessionID,
 		Path:     "/",
-		MaxAge:   86400,
+		MaxAge:   int(autoIssueSessionTTL / time.Second),
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: autoSameSite,

@@ -516,10 +516,12 @@ func TestAuthMiddleware_BearerAutoSession(t *testing.T) {
 		return mobileToken
 	})(okHandler())
 
-	// Browser page navigation with mobile Bearer token → should set cc_session cookie.
+	// Browser top-level navigation (Sec-Fetch-Dest: document) with mobile
+	// Bearer token → should set cc_session cookie.
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer "+mobileToken)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("Sec-Fetch-Dest", "document")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -537,6 +539,10 @@ func TestAuthMiddleware_BearerAutoSession(t *testing.T) {
 	}
 	if sessionCookie == nil {
 		t.Fatal("expected cc_session cookie to be set on Bearer page navigation")
+	}
+	// #271: TTL must be 1h (3600s), not the old 24h.
+	if sessionCookie.MaxAge != int(autoIssueSessionTTL/time.Second) {
+		t.Errorf("cc_session MaxAge: expected %d (1h), got %d", int(autoIssueSessionTTL/time.Second), sessionCookie.MaxAge)
 	}
 
 	// Subsequent request with just the session cookie (no Bearer) should work.
@@ -568,6 +574,84 @@ func TestAuthMiddleware_BearerNoAutoSessionForAPI(t *testing.T) {
 		if c.Name == "cc_session" {
 			t.Error("should not set session cookie on API call")
 		}
+	}
+}
+
+// #271: Accept: text/html alone is no longer enough to trigger an
+// auto-session. Only a real top-level navigation (Sec-Fetch-Dest: document)
+// should derive a cookie from a Bearer.
+func TestAuthMiddleware_BearerNoAutoSessionWithoutSecFetchDest(t *testing.T) {
+	ss := NewSessionStore(nil)
+	handler := authMiddleware("test-token", ss, nil)(okHandler())
+
+	// GET /foo with Accept: text/html but NO Sec-Fetch-Dest header —
+	// previously triggered auto-session; must now be ignored.
+	req := httptest.NewRequest("GET", "/foo", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "cc_session" {
+			t.Error("#271 regression: Accept: text/html alone should not auto-issue a session cookie")
+		}
+	}
+}
+
+// #271: Different Bearer tokens must produce different chatIDs so
+// SessionStore.evictOldestLocked cannot evict cross-user. A collision between
+// two distinct bearers would reopen the DoS-between-mobile-clients path.
+func TestAuthMiddleware_BearerAutoSession_PerBearerIsolation(t *testing.T) {
+	ss := NewSessionStore(nil)
+	ss.SetMaxSessions(2)
+	const tokenA = "bearer-aaaaaaaaaaaaaaaaaaaaaaaa"
+	const tokenB = "bearer-bbbbbbbbbbbbbbbbbbbbbbbb"
+
+	// Sanity: distinct bearers must hash to distinct chatIDs, none equal to
+	// reserved sentinels (0, -1, -2).
+	aID := bearerDerivedChatID(tokenA)
+	bID := bearerDerivedChatID(tokenB)
+	if aID == bID {
+		t.Fatalf("bearerDerivedChatID collision: %d == %d", aID, bID)
+	}
+	for _, reserved := range []int64{0, -1, -2} {
+		if aID == reserved || bID == reserved {
+			t.Fatalf("bearerDerivedChatID produced reserved value %d (a=%d b=%d)", reserved, aID, bID)
+		}
+	}
+
+	handler := authMiddleware(tokenA, ss, nil, func() string { return tokenB })(okHandler())
+
+	issue := func(token string) string {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Sec-Fetch-Dest", "document")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == "cc_session" {
+				return c.Value
+			}
+		}
+		t.Fatalf("no cc_session cookie issued for token %q", token)
+		return ""
+	}
+
+	// Issue maxSessions cookies for bearer A, then two for bearer B.
+	a1 := issue(tokenA)
+	a2 := issue(tokenA)
+	_ = issue(tokenB)
+	_ = issue(tokenB)
+
+	// With pre-fix chatID=0 sharing, bearer B's two issues would have evicted
+	// a1 and a2 (oldest in the chatID=0 pool). With per-bearer isolation,
+	// bearer A's sessions must survive.
+	if !ss.Valid(a1) || !ss.Valid(a2) {
+		t.Error("#271 regression: bearer B issuance evicted bearer A's auto-sessions (cross-user eviction)")
 	}
 }
 

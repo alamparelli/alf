@@ -1925,7 +1925,20 @@ func main() {
 					}
 				}()
 
-				result, err := commEngine.Process(context.Background(), msg)
+				// Per-message budget: cap the handler at 2× the provider timeout so
+				// that retry + one fallback cannot extend indefinitely. Without a
+				// deadline, a mid-stream provider kill leaves the pipeline running
+				// retry/fallback on context.Background() (both gated on ctx.Err()==nil),
+				// which holds the global tgChatSem and makes the bot appear frozen
+				// to the next Telegram message until restart (issue #253).
+				msgBudget := 2 * tiersTimeout
+				if msgBudget <= 0 {
+					msgBudget = 20 * time.Minute
+				}
+				msgCtx, msgCancel := context.WithTimeout(context.Background(), msgBudget)
+				defer msgCancel()
+
+				result, err := commEngine.Process(msgCtx, msg)
 
 				if err != nil {
 					log.Printf("engine error: %v", err)

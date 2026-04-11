@@ -1004,20 +1004,7 @@ func main() {
 		commEngine.RegisterAdapter(tgAdapt)
 
 		// Register bot commands for the Telegram command menu (/ autocomplete).
-		go func() {
-			if err := tg.SetMyCommands([]tgclient.BotCommand{
-				{Command: "new", Description: "Start a new conversation"},
-				{Command: "clear", Description: "Clear and start a new session"},
-				{Command: "help", Description: "Show available commands"},
-				{Command: "skills", Description: "List active skills"},
-				{Command: "bash", Description: "Execute a bash command"},
-				{Command: "jobs", Description: "List running agent jobs"},
-				{Command: "cancel", Description: "Cancel all running jobs"},
-				{Command: "login", Description: "Get a Control Center login link"},
-			}); err != nil {
-				log.Printf("[telegram] setMyCommands: %v", err)
-			}
-		}()
+		go refreshTelegramCommands(tg, tierStore)
 	}
 
 	// Auto-update checker (initialized here, scheduled via unified scheduler below).
@@ -1339,6 +1326,11 @@ func main() {
 						}()
 					}
 				}
+				// Re-publish Telegram bot command menu so newly-enabled or
+				// renamed force-command tiers appear in `/` autocomplete.
+				if telegramEnabled {
+					go refreshTelegramCommands(tg, tierStore)
+				}
 				if git != nil {
 					git.Commit("tiers updated via CC")
 				}
@@ -1440,6 +1432,11 @@ func main() {
 					if cliClassifier != nil {
 						cliClassifier.UpdateModel(newModel)
 					}
+				}
+				// Re-publish Telegram bot command menu so newly-enabled or
+				// renamed force-command tiers appear in `/` autocomplete.
+				if telegramEnabled {
+					go refreshTelegramCommands(tg, tierStore)
 				}
 				if git != nil {
 					git.Commit("tiers updated via CC")
@@ -1982,6 +1979,48 @@ func main() {
 				}
 			}()
 		}
+	}
+}
+
+// refreshTelegramCommands registers the Telegram bot command menu used for the
+// `/` autocomplete popup. It combines the fixed built-in commands with one
+// entry per enabled force-command tier (e.g. `/sonnet`, `/haiku`) so users can
+// discover and invoke tier overrides directly from Telegram.
+//
+// Safe to call from any goroutine; intended to be invoked at daemon startup
+// and again on every ReloadTiers event so the menu stays in sync with the
+// currently-loaded tier configuration.
+func refreshTelegramCommands(tg *tgclient.Client, tierStore cc.TierStore) {
+	if tg == nil {
+		return
+	}
+	cmds := []tgclient.BotCommand{
+		{Command: "new", Description: "Start a new conversation"},
+		{Command: "clear", Description: "Clear and start a new session"},
+		{Command: "help", Description: "Show available commands"},
+		{Command: "skills", Description: "List active skills"},
+		{Command: "bash", Description: "Execute a bash command"},
+		{Command: "jobs", Description: "List running agent jobs"},
+		{Command: "cancel", Description: "Cancel all running jobs"},
+		{Command: "login", Description: "Get a Control Center login link"},
+	}
+	if tc := tierStore.Current(); tc != nil {
+		for _, t := range tc.Tiers {
+			if !t.Enabled || !t.ForceCommand {
+				continue
+			}
+			desc := fmt.Sprintf("Force reply from %s tier", t.Name)
+			if t.Model != "" {
+				desc = fmt.Sprintf("Force reply from %s (%s)", t.Name, t.Model)
+			}
+			cmds = append(cmds, tgclient.BotCommand{
+				Command:     t.Name,
+				Description: desc,
+			})
+		}
+	}
+	if err := tg.SetMyCommands(cmds); err != nil {
+		log.Printf("[telegram] setMyCommands: %v", err)
 	}
 }
 

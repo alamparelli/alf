@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -540,11 +541,17 @@ func appIsolationMiddleware(allowedOrigin string) func(http.Handler) http.Handle
 	}
 }
 
-// securityHeadersMiddleware sets security headers on every response.
+// securityHeadersMiddleware sets security headers on every response and is
+// the authoritative place where untrusted forwarded headers are stripped.
+//
+// This middleware MUST run OUTSIDE rateLimiter and authMiddleware so that any
+// call to clientIP() below this layer observes the stripped request — otherwise
+// a client from a trusted proxy CIDR could spoof X-Forwarded-For (see #272).
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// SEC-007: Strip incoming forwarded headers to prevent host injection.
-		// These may be set by external reverse proxies or spoofed by clients.
+		// SEC-007 / #272: Strip incoming forwarded headers to prevent host
+		// injection AND IP spoofing from LAN attackers. clientIP() will then
+		// fall back to RemoteAddr for any middleware/handler that runs below.
 		r.Header.Del("X-Forwarded-Host")
 		r.Header.Del("X-Forwarded-For")
 		r.Header.Del("X-Forwarded-Proto")
@@ -592,26 +599,44 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// trustedProxyCIDRs are networks whose X-Forwarded-For/X-Real-IP headers we trust.
-// Only connections from these addresses may override the client IP.
-// Includes Docker default bridge, common overlay networks, and loopback.
-var trustedProxyCIDRs = func() []*net.IPNet {
+// trustedProxyCIDRs are networks whose X-Forwarded-For/X-Real-IP headers we
+// trust. Only connections from these addresses may override the client IP.
+//
+// Default is loopback-only (127.0.0.0/8, ::1/128). Earlier releases trusted
+// all RFC1918 ranges, which let any LAN-local client forge X-Forwarded-For
+// and bypass anonymous rate limits (issue #272). Operators running a reverse
+// proxy outside the loopback must opt in explicitly via the environment
+// variable ALF_TRUSTED_PROXY_CIDRS (comma-separated CIDRs, e.g.
+// "10.0.0.0/8,::1/128"). Tests may overwrite this variable directly via
+// computeTrustedProxyCIDRs.
+var trustedProxyCIDRs = computeTrustedProxyCIDRs()
+
+// computeTrustedProxyCIDRs builds the trusted proxy CIDR list from the hard
+// defaults plus any entries in ALF_TRUSTED_PROXY_CIDRS.
+func computeTrustedProxyCIDRs() []*net.IPNet {
 	cidrs := []string{
-		"127.0.0.0/8",   // loopback
-		"10.0.0.0/8",    // Docker / private class A
-		"172.16.0.0/12", // Docker default bridge range
-		"192.168.0.0/16", // private class C
-		"::1/128",       // IPv6 loopback
+		"127.0.0.0/8", // loopback
+		"::1/128",     // IPv6 loopback
+	}
+	if extra := os.Getenv("ALF_TRUSTED_PROXY_CIDRS"); extra != "" {
+		for _, c := range strings.Split(extra, ",") {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				cidrs = append(cidrs, c)
+			}
+		}
 	}
 	var nets []*net.IPNet
 	for _, cidr := range cidrs {
 		_, n, err := net.ParseCIDR(cidr)
-		if err == nil {
-			nets = append(nets, n)
+		if err != nil {
+			log.Printf("[CC] invalid trusted proxy CIDR %q: %v", cidr, err)
+			continue
 		}
+		nets = append(nets, n)
 	}
 	return nets
-}()
+}
 
 func isTrustedProxy(remoteIP string) bool {
 	ip := net.ParseIP(remoteIP)

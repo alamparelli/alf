@@ -518,10 +518,14 @@ func HandlerFactory(deps Deps) Handlers {
 	handler = authMiddlewareWithAppTokens(deps.AuthToken, deps.Sessions, deps.AppTokens, exempt, func() string {
 		return GetMobileToken(deps.VaultManager)
 	})(handler)
-	handler = securityHeadersMiddleware(handler)
 	handler = newRateLimiter(15).withAuthLimit(600, deps.Sessions).withToken(deps.AuthToken).withAppTokens(deps.AppTokens).withExtraTokens(func() string {
 		return GetMobileToken(deps.VaultManager)
 	}).middleware(handler) // 15/min anonymous, no limit authenticated (session, bearer, or mobile token)
+	// securityHeadersMiddleware MUST wrap rateLimiter so that untrusted
+	// X-Forwarded-For / X-Real-IP are stripped before clientIP() is read
+	// by the rate limiter. See #272 — LAN clients in a trusted proxy CIDR
+	// could otherwise rotate XFF to bypass the 15/min anonymous limit.
+	handler = securityHeadersMiddleware(handler)
 	handler = corsMiddleware(deps.AllowedOrigin, deps.AppTokens)(handler)
 	handler = loggingMiddleware(handler)
 

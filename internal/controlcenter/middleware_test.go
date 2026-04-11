@@ -2,6 +2,7 @@ package controlcenter
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -595,8 +596,19 @@ var _ http.Flusher = (*statusWriter)(nil)
 // SEC-004: clientIP must not trust X-Forwarded-For from untrusted origins
 // ---------------------------------------------------------------------------
 
+// withTrustedProxyCIDRs overrides the package-level trustedProxyCIDRs for the
+// duration of a test. computeTrustedProxyCIDRs() re-reads the env var, so the
+// helper can simulate the operator-configured opt-in for private ranges.
+func withTrustedProxyCIDRs(t *testing.T, env string) {
+	t.Helper()
+	saved := trustedProxyCIDRs
+	t.Setenv("ALF_TRUSTED_PROXY_CIDRS", env)
+	trustedProxyCIDRs = computeTrustedProxyCIDRs()
+	t.Cleanup(func() { trustedProxyCIDRs = saved })
+}
+
 func TestClientIP_TrustedProxy_HonorsXFF(t *testing.T) {
-	// Requests from loopback/private network may carry XFF (reverse proxy scenario).
+	// Loopback is trusted by default — a reverse proxy on 127.0.0.1 can set XFF.
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "127.0.0.1:12345" // loopback = trusted proxy
 	req.Header.Set("X-Forwarded-For", "203.0.113.5")
@@ -607,14 +619,34 @@ func TestClientIP_TrustedProxy_HonorsXFF(t *testing.T) {
 	}
 }
 
-func TestClientIP_TrustedProxy_DockerBridge(t *testing.T) {
+func TestClientIP_TrustedProxy_DockerBridge_OptIn(t *testing.T) {
+	// #272: private ranges are NOT trusted by default anymore. Operators must
+	// opt in via ALF_TRUSTED_PROXY_CIDRS. Once opted in, XFF is honored.
+	withTrustedProxyCIDRs(t, "172.16.0.0/12")
+
 	req := httptest.NewRequest("GET", "/", nil)
-	req.RemoteAddr = "172.20.0.1:5000" // Docker bridge = trusted
+	req.RemoteAddr = "172.20.0.1:5000"
 	req.Header.Set("X-Forwarded-For", "203.0.113.99")
 
 	ip := clientIP(req)
 	if ip != "203.0.113.99" {
-		t.Errorf("docker bridge remote: expected XFF value, got %q", ip)
+		t.Errorf("docker bridge remote (opted in): expected XFF value, got %q", ip)
+	}
+}
+
+func TestClientIP_PrivateRange_NotTrustedByDefault(t *testing.T) {
+	// #272: without explicit opt-in, 10/8 172.16/12 192.168/16 must be treated
+	// as untrusted so XFF spoofing from a LAN attacker is ignored.
+	for _, remote := range []string{"10.0.0.5:1", "172.20.0.1:1", "192.168.1.10:1"} {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = remote
+		req.Header.Set("X-Forwarded-For", "203.0.113.99")
+
+		ip := clientIP(req)
+		if ip == "203.0.113.99" {
+			host, _, _ := net.SplitHostPort(remote)
+			t.Errorf("%s: XFF spoofing accepted by default — should fall back to RemoteAddr %s", remote, host)
+		}
 	}
 }
 
@@ -669,12 +701,30 @@ func TestClientIP_MultiValueXFF_TakesFirst(t *testing.T) {
 	}
 }
 
-func TestIsTrustedProxy_PrivateRanges(t *testing.T) {
-	trusted := []string{"127.0.0.1", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.100"}
-	for _, ip := range trusted {
+func TestIsTrustedProxy_LoopbackOnlyByDefault(t *testing.T) {
+	// Default policy (#272): only loopback is trusted.
+	for _, ip := range []string{"127.0.0.1", "127.1.2.3", "::1"} {
 		if !isTrustedProxy(ip) {
-			t.Errorf("expected %s to be a trusted proxy IP", ip)
+			t.Errorf("expected %s to be trusted (loopback default)", ip)
 		}
+	}
+	for _, ip := range []string{"10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.100"} {
+		if isTrustedProxy(ip) {
+			t.Errorf("expected %s NOT trusted by default — opt-in required", ip)
+		}
+	}
+}
+
+func TestIsTrustedProxy_EnvOptIn(t *testing.T) {
+	withTrustedProxyCIDRs(t, "10.0.0.0/8, 192.168.0.0/16")
+	for _, ip := range []string{"10.0.0.1", "10.255.255.255", "192.168.1.100"} {
+		if !isTrustedProxy(ip) {
+			t.Errorf("expected %s to be trusted after opt-in", ip)
+		}
+	}
+	// 172.16/12 was NOT added to the opt-in list → still untrusted.
+	if isTrustedProxy("172.16.0.1") {
+		t.Error("172.16.0.1 should not be trusted (not in opt-in list)")
 	}
 }
 
@@ -685,6 +735,50 @@ func TestIsTrustedProxy_PublicIPs(t *testing.T) {
 			t.Errorf("expected %s to NOT be a trusted proxy IP", ip)
 		}
 	}
+}
+
+// TestRateLimiter_XFFSpoofRegression is a regression test for #272.
+//
+// The outer middleware chain in factory.go wraps rateLimiter with
+// securityHeadersMiddleware so that X-Forwarded-For / X-Real-IP are stripped
+// before the rate limiter reads clientIP(). This test pins that ordering: if
+// a future refactor inverts the wrapping, a LAN client in a trusted CIDR
+// could once again rotate XFF to escape the anonymous 15/min limit.
+func TestRateLimiter_XFFSpoofRegression(t *testing.T) {
+	withTrustedProxyCIDRs(t, "10.0.0.0/8") // simulate operator-configured trust
+
+	rl := newRateLimiter(3)
+	// Production order: securityHeaders is OUTSIDE rateLimiter.
+	chain := securityHeadersMiddleware(rl.middleware(okHandler()))
+
+	// 6 requests from the same LAN IP, each with a different spoofed XFF.
+	// With the strip running first, all 6 count against 10.0.0.5 and the
+	// 4th+ must be rate limited.
+	var okCount, limited int
+	for i := 0; i < 6; i++ {
+		req := httptest.NewRequest("GET", "/api/ping", nil)
+		req.RemoteAddr = "10.0.0.5:12345"
+		req.Header.Set("X-Forwarded-For", httpFakeClient(i))
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, req)
+		switch rec.Code {
+		case http.StatusOK:
+			okCount++
+		case http.StatusTooManyRequests:
+			limited++
+		}
+	}
+	if okCount != 3 {
+		t.Errorf("expected 3 OK responses (limit=3), got %d", okCount)
+	}
+	if limited != 3 {
+		t.Errorf("expected 3 rate-limited responses, got %d — XFF spoofing bypassed the limiter", limited)
+	}
+}
+
+// httpFakeClient returns a deterministic dummy public IP for spoofing tests.
+func httpFakeClient(i int) string {
+	return fmt.Sprintf("203.0.113.%d", i%250+1)
 }
 
 // -----------------------------------------------------------------------------

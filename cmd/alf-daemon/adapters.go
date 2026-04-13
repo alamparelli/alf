@@ -237,10 +237,14 @@ func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
 		Tiers: make([]scheduler.TierInfo, len(tc.Tiers)),
 	}
 	for i, t := range tc.Tiers {
+		model := router.ResolveModel(t.Model)
+		if model == "" {
+			model = t.Model // preserve non-Claude models (e.g. gpt-5.4)
+		}
 		snap.Tiers[i] = scheduler.TierInfo{
 			Name:         t.Name,
 			Backend:      t.Backend,
-			Model:        router.ResolveModel(t.Model),
+			Model:        model,
 			Tools:        t.Tools,
 			WriteCapable: t.WriteCapable,
 			Effort:       t.Effort,

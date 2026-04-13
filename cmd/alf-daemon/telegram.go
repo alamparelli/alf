@@ -549,6 +549,8 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 		if t.Name == fallback {
 			if m := router.ResolveModel(t.Model); m != "" {
 				model = m
+			} else if t.Model != "" {
+				model = t.Model // preserve non-Claude models (e.g. gpt-5.4)
 			}
 			break
 		}

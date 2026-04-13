@@ -1040,7 +1040,7 @@ func main() {
 		ChatID:       parsedChatID,
 		TG:           tg,
 		CC:           &schedulerCCNotifier{db: chatDB, broker: eventBroker},
-		Provider:     &schedulerProvider{p: cliProvider},
+		Provider:     &schedulerProvider{r: registry},
 		TierStore:    &schedulerTierStore{ts: tierStore},
 		SkillStore:   &schedulerSkillStore{s: skillStore},
 		Orchestrator: &schedulerOrchestrator{o: orch},

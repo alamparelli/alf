@@ -39,6 +39,7 @@ type ProviderInvoker interface {
 
 // ProviderParams mirrors provider.Params to avoid circular imports.
 type ProviderParams struct {
+	Backend       string
 	Model         string
 	Tools         []string
 	WriteCapable  bool
@@ -133,6 +134,7 @@ func (s *TiersSnapshot) IsOrchestratorTier(name string) bool {
 // TierInfo holds the fields the executor needs from a tier.
 type TierInfo struct {
 	Name         string
+	Backend      string
 	Model        string
 	Tools        []string
 	WriteCapable bool
@@ -440,6 +442,7 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		if snap != nil {
 			for _, t := range snap.Tiers {
 				if t.Name == j.Tier {
+					params.Backend = t.Backend
 					if t.Model != "" {
 						params.Model = t.Model
 					}

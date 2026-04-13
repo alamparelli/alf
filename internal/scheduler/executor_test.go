@@ -564,6 +564,33 @@ func TestInvokeLLMWithMeta_RoutesToCorrectBackend(t *testing.T) {
 	}
 }
 
+func TestInvokeLLMWithMeta_NonClaudeModelPassedThrough(t *testing.T) {
+	// Regression test: when a tier specifies a non-Claude model (e.g. gpt-5.4),
+	// invokeLLMWithMeta must NOT fall back to the hardcoded default "claude-haiku-4-5".
+	codexProvider := &mockProvider{backend: "codex"}
+	router := &mockBackendRouter{
+		fallback:  &mockProvider{backend: "cli"},
+		providers: map[string]*mockProvider{"codex": codexProvider},
+	}
+	tiers := []TierInfo{
+		{Name: "codex-dev", Backend: "codex", Model: "gpt-5.4"},
+	}
+	e := newTestEngineWithProvider(router, tiers)
+
+	j := &Job{ID: "j-gpt", Name: "test", Tier: "codex-dev", Prompt: "hello", Timeout: 5 * time.Second}
+	_, _, err := e.invokeLLMWithMeta(j)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(codexProvider.calls) != 1 {
+		t.Fatalf("expected codex provider to be called once, got %d", len(codexProvider.calls))
+	}
+	got := codexProvider.calls[0].Model
+	if got != "gpt-5.4" {
+		t.Errorf("model in params: got %q, want %q (default claude-haiku-4-5 must not leak)", got, "gpt-5.4")
+	}
+}
+
 func TestInvokeLLMWithMeta_UnknownBackendFallsToCLI(t *testing.T) {
 	cliProvider := &mockProvider{backend: "cli"}
 	router := &mockBackendRouter{

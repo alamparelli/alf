@@ -891,10 +891,11 @@ func helperSubResReq(method, urlPath string) *http.Request {
 
 func TestIsAppSubResource_Regression_NoOriginNull(t *testing.T) {
 	// Forged Sec-Fetch headers but no Origin: null → must NOT be treated as
-	// sub-resource (the pentest used this exact shape to bypass auth).
-	req := helperSubResReq("GET", "/apps/later/index.js")
+	// sub-resource for non-script/style dests or API paths.
+	// Note: script/style on static paths are now allowed (see isStaticAssetLoad).
+	req := helperSubResReq("GET", "/apps/later/api/index.js")
 	if isAppSubResource(req) {
-		t.Fatal("forged Sec-Fetch without Origin: null MUST be rejected")
+		t.Fatal("forged Sec-Fetch without Origin: null on API path MUST be rejected")
 	}
 }
 
@@ -1072,12 +1073,31 @@ func TestIsAppSubResource_TagLoad_EmptyOriginAccepted(t *testing.T) {
 }
 
 func TestIsAppSubResource_TagLoad_NonAssetDestStillRejected(t *testing.T) {
-	// The empty-Origin carve-out is restricted to image/audio/video/font/track.
-	// Non-tag-load dest types (script, style, embed, object, ...) MUST still
-	// require Origin: null — otherwise the original pentest pattern (forged
-	// Sec-Fetch-Dest=script, no real Origin) would re-open unauth source-code
-	// dumps from app directories.
-	cases := []struct {
+	// Worker, embed, object dests with empty Origin must still be rejected.
+	// Script/style on API paths must also be rejected (step 1b blocks .js/.css).
+	rejected := []struct {
+		path string
+		dest string
+	}{
+		{"/apps/later/sw.js", "worker"},
+		{"/apps/later/icon.svg", "embed"},
+		{"/apps/later/icon.svg", "object"},
+		// Script/style on API paths: still blocked
+		{"/apps/later/api/index.js", "script"},
+		{"/apps/later/api/style.css", "style"},
+	}
+	for _, tc := range rejected {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if isAppSubResource(req) {
+			t.Errorf("%s (dest=%s, no Origin) must be rejected", tc.path, tc.dest)
+		}
+	}
+
+	// Script/style on static (non-API) paths with empty Origin are now
+	// accepted — these are <script>/<link> tag loads from sandboxed iframes.
+	accepted := []struct {
 		path string
 		dest string
 	}{
@@ -1085,17 +1105,13 @@ func TestIsAppSubResource_TagLoad_NonAssetDestStillRejected(t *testing.T) {
 		{"/apps/later/style.css", "style"},
 		{"/apps/later/mod.wasm", "script"},
 		{"/apps/later/widget.css", "style"},
-		{"/apps/later/sw.js", "worker"},
-		{"/apps/later/icon.svg", "embed"},
-		{"/apps/later/icon.svg", "object"},
 	}
-	for _, tc := range cases {
+	for _, tc := range accepted {
 		req := httptest.NewRequest("GET", tc.path, nil)
-		// No Origin header — same as a forged sub-resource attack
 		req.Header.Set("Sec-Fetch-Dest", tc.dest)
 		req.Header.Set("Sec-Fetch-Site", "cross-site")
-		if isAppSubResource(req) {
-			t.Errorf("%s (dest=%s, no Origin) must be rejected — non-tag-load dests require Origin: null", tc.path, tc.dest)
+		if !isAppSubResource(req) {
+			t.Errorf("%s (dest=%s, no Origin) must be accepted as static asset tag-load", tc.path, tc.dest)
 		}
 	}
 }
@@ -1156,13 +1172,14 @@ func TestAuthMiddleware_Regression_PentestSecFetchBypass(t *testing.T) {
 		t.Fatal("PENTEST-0.7.8 HIGH-1 regression: manifest.json bypassed auth")
 	}
 
-	// Script sub-resource WITHOUT Origin: null (pentest shape) must 401.
-	req = httptest.NewRequest("GET", "/apps/later/app.js", nil)
+	// Script sub-resource on API path WITHOUT Origin: null (pentest shape) must 401.
+	// Note: static paths now allow script/style with empty Origin (sandboxed iframe tag loads).
+	req = httptest.NewRequest("GET", "/apps/later/api/app.js", nil)
 	req.Header.Set("Sec-Fetch-Dest", "script")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code == http.StatusOK {
-		t.Fatal("PENTEST-0.7.8 HIGH-1 regression: /apps/*/*.js without Origin: null bypassed auth")
+		t.Fatal("PENTEST-0.7.8 HIGH-1 regression: /apps/*/api/*.js without Origin: null bypassed auth")
 	}
 }

@@ -190,7 +190,7 @@ func isAppSubResource(r *http.Request) bool {
 		return false
 	}
 
-	// 2. Origin gate. Two valid cases:
+	// 2. Origin gate. Three valid cases:
 	//   (a) Origin: null  — fetch()/XHR from a sandboxed null-origin iframe
 	//       (AlfSDK.api / AlfSDK.fetch always take this path).
 	//   (b) Empty Origin + tag-load dest (image/audio/video/font/track)
@@ -199,19 +199,24 @@ func isAppSubResource(r *http.Request) bool {
 	//         even from a sandboxed null-origin iframe. Without this carve-
 	//         out, <img src="/apps/X/api/cover.jpg"> from an app iframe gets
 	//         401, breaking dynamic asset loading entirely.
+	//   (c) Empty Origin + script/style dest on static (non-API) paths
+	//       — <script src="app.js"> and <link href="style.css"> tags from a
+	//         sandboxed iframe also omit Origin. These are safe for static
+	//         paths: the files are the app's own distributed assets, not
+	//         secrets. API paths are already blocked for .js/.css at step 1b.
 	//
-	// The carve-out is restricted to tag-load dests so the original pentest
-	// pattern (forged Sec-Fetch-Dest=script + empty Origin) stays rejected:
-	// script/style/wasm/etc. would expose source code unauthenticated, while
-	// image/audio/video/font expose at most opaque media content the browser
-	// can't read pixel/sample data from cross-origin. The residual risk is
-	// that a third-party site can hot-link an app's media if it knows the
-	// exact slug + path — equivalent to default web behavior for any public
-	// image URL, and bounded to media that can't leak data via the browser.
+	// Case (b) is restricted to tag-load dests for /api/ paths: the original
+	// pentest pattern (forged Sec-Fetch-Dest=script + empty Origin on /api/)
+	// stays rejected by step 1b. Case (c) is safe because static app files
+	// under /apps/{slug}/ are public within the app's context. The residual
+	// risk is that a third-party site can hot-link an app's static assets if
+	// it knows the exact slug + path — equivalent to default CDN behavior.
 	origin := r.Header.Get("Origin")
 	isTagLoad := dest == "image" || dest == "audio" || dest == "video" ||
 		dest == "font" || dest == "track"
-	if origin != "null" && !(origin == "" && isTagLoad) {
+	isStaticAssetLoad := (dest == "script" || dest == "style") &&
+		!strings.Contains(r.URL.Path, "/api/")
+	if origin != "null" && !(origin == "" && (isTagLoad || isStaticAssetLoad)) {
 		return false
 	}
 

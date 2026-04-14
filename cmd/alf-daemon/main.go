@@ -1143,8 +1143,18 @@ func main() {
 		sched.OnChange = func() { eventBroker.Emit(cc.EventSchedules) }
 	}
 
-	if err := sched.Start(filepath.Join(contextDir, "scheduler.sock")); err != nil {
-		log.Printf("warning: scheduler start failed: %v", err)
+	// Ensure contextDir exists before the scheduler binds its socket there.
+	// Bootstrap already creates it, but this is cheap insurance against a
+	// future refactor that removes or reorders the bootstrap call.
+	if err := os.MkdirAll(contextDir, 0o755); err != nil {
+		log.Printf("ERROR: cannot create context dir %s: %v", contextDir, err)
+	}
+	schedSockPath := filepath.Join(contextDir, "scheduler.sock")
+	if err := sched.Start(schedSockPath); err != nil {
+		// Do not silently degrade: without the socket, schedule-tools, digests,
+		// memory consolidation and health checks all stop working. Log loudly
+		// so operators notice in daemon.log.
+		log.Printf("ERROR: scheduler failed to start on %s: %v — schedule tools will be unavailable", schedSockPath, err)
 	}
 	defer sched.Stop()
 

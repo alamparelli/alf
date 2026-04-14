@@ -2,11 +2,25 @@ package scheduler
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// testSockPath returns a short unix-socket path safe on macOS (SUN_PATH ~104).
+// t.TempDir() nests under /var/folders/... which routinely exceeds the limit.
+var testSockSeq uint64
+
+func testSockPath(t *testing.T) string {
+	t.Helper()
+	n := atomic.AddUint64(&testSockSeq, 1)
+	p := filepath.Join(os.TempDir(), fmt.Sprintf("alf-sched-%d-%d.sock", os.Getpid(), n))
+	t.Cleanup(func() { os.Remove(p) })
+	return p
+}
 
 func TestStoreLoadSave(t *testing.T) {
 	dir := t.TempDir()
@@ -263,7 +277,7 @@ func TestEngineRegisterSystemHydratesFromRunLog(t *testing.T) {
 	}
 
 	// After Start, NextRun should be populated from the cron entry.
-	sockPath := filepath.Join(dir, "scheduler.sock")
+	sockPath := testSockPath(t)
 	if err := e.Start(sockPath); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -473,7 +487,7 @@ func TestManagedJobVisibleInList(t *testing.T) {
 
 func TestSystemJobsSurviveStart(t *testing.T) {
 	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "test.sock")
+	sockPath := testSockPath(t)
 
 	e := New(Config{
 		DataDir:    dir,
@@ -731,14 +745,11 @@ func TestStartCleansExpiredOneShots(t *testing.T) {
 		CronPath:   cronPath,
 	})
 
-	sockDir := filepath.Join(dir, "sock")
-	os.MkdirAll(sockDir, 0o755)
-	sockPath := filepath.Join(sockDir, "test.sock")
+	sockPath := testSockPath(t)
 	if err := e.Start(sockPath); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	defer e.Stop()
-	defer os.RemoveAll(sockDir)
 
 	// Expired one-shot should be cleaned up.
 	if e.store.Get("expired1") != nil {
@@ -747,5 +758,30 @@ func TestStartCleansExpiredOneShots(t *testing.T) {
 	// Recurring job should survive.
 	if e.store.Get("recurring1") == nil {
 		t.Error("recurring job should still exist")
+	}
+}
+
+// Regression for #284: a failed socket bind (e.g. parent dir unwritable inside
+// a container) must surface from Start() so operators see the failure at boot
+// instead of discovering it later when schedule-tools gets "no such file".
+func TestStartSurfacesSocketBindError(t *testing.T) {
+	dir := t.TempDir()
+	e := New(Config{
+		DataDir:    dir,
+		ContextDir: dir,
+		CronPath:   filepath.Join(dir, "cron.json"),
+	})
+
+	// Socket path under a file (not a directory) → bind must fail.
+	blocker := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	bad := filepath.Join(blocker, "scheduler.sock")
+
+	err := e.Start(bad)
+	if err == nil {
+		e.Stop()
+		t.Fatal("expected Start to return an error when the socket path is unbindable")
 	}
 }

@@ -256,11 +256,15 @@ func (e *Engine) Start(sockPath string) error {
 
 	log.Printf("scheduler: started with %d entries", len(e.cron.Entries()))
 
-	// Start socket server.
+	// Start socket server. Listen synchronously so a bind failure surfaces to
+	// the daemon boot code instead of silently dying inside a goroutine.
 	e.server = NewServer(e, sockPath)
+	if err := e.server.Listen(); err != nil {
+		return fmt.Errorf("scheduler: bind socket: %w", err)
+	}
 	go func() {
-		if err := e.server.Serve(); err != nil {
-			log.Printf("scheduler: socket server error: %v", err)
+		if err := e.server.Accept(); err != nil {
+			log.Printf("scheduler: socket accept loop exited: %v", err)
 		}
 	}()
 

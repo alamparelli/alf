@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -50,8 +51,13 @@ func NewServer(engine *Engine, sockPath string) *Server {
 	}
 }
 
-// Serve starts listening. Blocks until closed.
-func (s *Server) Serve() error {
+// Listen binds the unix socket synchronously. Must be called before Accept.
+// Returns the bind error so callers can surface a misconfigured socket path
+// instead of silently failing inside a background goroutine.
+func (s *Server) Listen() error {
+	if err := os.MkdirAll(filepath.Dir(s.sockPath), 0o755); err != nil {
+		return fmt.Errorf("mkdir socket dir %s: %w", filepath.Dir(s.sockPath), err)
+	}
 	os.Remove(s.sockPath)
 
 	ln, err := net.Listen("unix", s.sockPath)
@@ -65,9 +71,17 @@ func (s *Server) Serve() error {
 	os.Chmod(s.sockPath, 0660)
 
 	log.Printf("scheduler: socket server listening on %s", s.sockPath)
+	return nil
+}
 
+// Accept runs the accept loop. Blocks until the listener is closed.
+// Listen must have been called successfully first.
+func (s *Server) Accept() error {
+	if s.listener == nil {
+		return fmt.Errorf("scheduler server: Accept called before Listen")
+	}
 	for {
-		conn, err := ln.Accept()
+		conn, err := s.listener.Accept()
 		if err != nil {
 			if strings.Contains(err.Error(), "use of closed") {
 				return nil
@@ -77,6 +91,16 @@ func (s *Server) Serve() error {
 		}
 		go s.handleConn(conn)
 	}
+}
+
+// Serve binds and runs the accept loop. Kept for callers that want the legacy
+// blocking signature; new code should call Listen + Accept separately so bind
+// errors surface synchronously.
+func (s *Server) Serve() error {
+	if err := s.Listen(); err != nil {
+		return err
+	}
+	return s.Accept()
 }
 
 // Close stops the listener.

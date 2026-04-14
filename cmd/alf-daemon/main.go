@@ -1286,6 +1286,13 @@ func main() {
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
 					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
+					if memDB != nil {
+						applied := memDB.SetDedupConfig(memstore.DedupConfig{
+							TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
+							CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
+						})
+						log.Printf("memstore: dedup thresholds reloaded (text=%.2f cosine=%.2f)", applied.TextThreshold, applied.CosineThreshold)
+					}
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {
@@ -1410,6 +1417,13 @@ func main() {
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
 					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
+					if memDB != nil {
+						applied := memDB.SetDedupConfig(memstore.DedupConfig{
+							TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
+							CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
+						})
+						log.Printf("memstore: dedup thresholds reloaded (text=%.2f cosine=%.2f)", applied.TextThreshold, applied.CosineThreshold)
+					}
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {

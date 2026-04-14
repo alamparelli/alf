@@ -206,8 +206,15 @@ func handleLog(args []string) {
 	if args[0] == "tail" && len(args) > 1 {
 		name := args[1]
 		lines := "100"
-		if len(args) > 2 {
-			lines = args[2]
+		// Accept either positional number (e.g. `log tail daemon 200`) or --lines/-n flag.
+		rest := args[2:]
+		flags := parseFlags(rest)
+		if v, ok := flags["lines"]; ok {
+			lines = v
+		} else if v, ok := flags["n"]; ok {
+			lines = v
+		} else if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+			lines = rest[0]
 		}
 		result, err := doGet(fmt.Sprintf("/api/logs?name=%s&n=%s", name, lines))
 		if err != nil {

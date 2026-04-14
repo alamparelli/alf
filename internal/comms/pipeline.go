@@ -272,6 +272,13 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 
 	// 9. Agent dispatch — check by role, not name.
 	if tiers.IsOrchestratorTier(route.Tier) && e.Orchestrator != nil {
+		// Require a model to be explicitly set on the orchestrator tier.
+		if tp.Model == "" {
+			log.Printf("[comms] → orchestrator tier %q has no model configured — aborting", route.Tier)
+			e.emit(channelID, OutEvent{Type: "text", Data: map[string]string{"text": "⚠️ Orchestrator tier has no model configured. Please set a model (e.g. \"sonnet\") in your orchestrator tier config."}})
+			e.emit(channelID, OutEvent{Type: "done", Data: map[string]string{"tier": route.Tier, "model": ""}})
+			return nil, nil
+		}
 		// Skip orchestrator if no teams are configured — fallback to next tier.
 		if !e.Orchestrator.HasTeams() {
 			fallback := FirstFallbackTier(e.TierStore)

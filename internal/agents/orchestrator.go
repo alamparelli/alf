@@ -292,10 +292,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	}
 	orchModel := rc.Model
 	if orchModel == "" {
-		orchModel = "claude-opus-4-6"
-		if o.resolveModel != nil {
-			orchModel = o.resolveModel("opus")
-		}
+		return "", nil, fmt.Errorf("orchestrator tier has no model configured — set a model in the orchestrator tier config")
 	}
 	orchEffort := rc.Effort
 	if orchEffort == "" {

@@ -43,6 +43,28 @@ func (p *slowProvider) Invoke(ctx context.Context, _ string, _ provider.Params, 
 
 func (p *slowProvider) release() { close(p.gate) }
 
+// staticTierStore is a minimal TierStore that returns a fixed config.
+type staticTierStore struct{ cfg *TiersConfig }
+
+func (s *staticTierStore) Load() (*TiersConfig, error)   { return s.cfg, nil }
+func (s *staticTierStore) Save(*TiersConfig) error        { return nil }
+func (s *staticTierStore) Current() *TiersConfig          { return s.cfg }
+func (s *staticTierStore) Reload() error                  { return nil }
+func (s *staticTierStore) SetPath(string) error           { return nil }
+func (s *staticTierStore) Path() string                   { return "" }
+
+// newTestTierStore returns a TierStore with a single orchestrator tier.
+func newTestTierStore() TierStore {
+	return &staticTierStore{cfg: &TiersConfig{
+		Tiers: []Tier{{
+			Name:    "agent",
+			Model:   "claude-sonnet-4-6",
+			Enabled: true,
+			Role:    "orchestrator",
+		}},
+	}}
+}
+
 // newTestOrchestrator creates an orchestrator backed by the given provider.
 func newTestOrchestrator(t *testing.T, prov provider.Provider) *agents.Orchestrator {
 	t.Helper()
@@ -64,7 +86,7 @@ func newTestOrchestrator(t *testing.T, prov provider.Provider) *agents.Orchestra
 func TestTasksHandler_LaunchReturnsOK(t *testing.T) {
 	orch := newTestOrchestrator(t, &mockProvider{})
 
-	h := &TasksHandler{Orchestrator: orch, DataDir: t.TempDir(), ContextDir: t.TempDir()}
+	h := &TasksHandler{Orchestrator: orch, DataDir: t.TempDir(), ContextDir: t.TempDir(), TierStore: newTestTierStore()}
 	req := httptest.NewRequest("POST", "/api/tasks", strings.NewReader(`{"message":"build something"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -114,7 +136,7 @@ func TestTasksHandler_LaunchNoOrchestrator(t *testing.T) {
 func TestTasksHandler_LaunchIsNonBlocking(t *testing.T) {
 	sp := newSlowProvider()
 	orch := newTestOrchestrator(t, sp)
-	h := &TasksHandler{Orchestrator: orch, DataDir: t.TempDir(), ContextDir: t.TempDir()}
+	h := &TasksHandler{Orchestrator: orch, DataDir: t.TempDir(), ContextDir: t.TempDir(), TierStore: newTestTierStore()}
 
 	// Launch should return immediately even though the provider blocks.
 	done := make(chan struct{})
@@ -142,7 +164,7 @@ func TestTasksHandler_ConcurrentTasksRun(t *testing.T) {
 	sp := newSlowProvider()
 	defer sp.release()
 	orch := newTestOrchestrator(t, sp)
-	h := &TasksHandler{Orchestrator: orch, DataDir: t.TempDir(), ContextDir: t.TempDir()}
+	h := &TasksHandler{Orchestrator: orch, DataDir: t.TempDir(), ContextDir: t.TempDir(), TierStore: newTestTierStore()}
 
 	// Launch 3 tasks concurrently.
 	var wg sync.WaitGroup
@@ -226,6 +248,7 @@ func TestTasksHandler_OnTaskEventCalledOnCompletion(t *testing.T) {
 		Orchestrator: orch,
 		DataDir:      t.TempDir(),
 		ContextDir:   t.TempDir(),
+		TierStore:    newTestTierStore(),
 		OnTaskEvent: func(source, taskID, status, summary string) {
 			mu.Lock()
 			events = append(events, status)

@@ -71,6 +71,10 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve agent tier params and build orchestration inputs.
 	agentRC := h.resolveAgentConfig()
+	if agentRC.Model == "" {
+		respondError(w, http.StatusUnprocessableEntity, "orchestrator tier has no model configured — set a model in the orchestrator tier config")
+		return
+	}
 	var recallBlock string
 	if h.Recaller != nil {
 		recallBlock = recallMemories(h.Recaller, req.Message)

@@ -82,12 +82,15 @@
   const SAFE_ATTRS = new Set([
     'class','id','style','href','src','alt','title','width','height','colspan','rowspan',
     'type','name','value','placeholder','checked','disabled','readonly','rows','cols',
+    'required','selected','multiple','min','max','step','pattern','autocomplete',
+    'label','hint','variant','color','size','active','message','total','page-size','current',
     'target','rel','role','aria-label','aria-hidden','aria-expanded','for',
     'data-action','data-id','data-value','data-field','data-type',
     'viewBox','d','fill','stroke','stroke-width','cx','cy','r','x','y','x1','y1','x2','y2',
     'points','transform','xmlns','stroke-linecap','stroke-linejoin'
   ])
   const DATA_ATTR_PREFIX = 'data-'
+  const ALF_TAG_PREFIX = 'alf-'
 
   function sanitizeHtml(html: string): string {
     // First pass: parse and strip
@@ -102,7 +105,7 @@
         const el = node as Element
         const tag = el.tagName.toLowerCase()
 
-        if (!SAFE_TAGS.has(tag)) {
+        if (!SAFE_TAGS.has(tag) && !tag.startsWith(ALF_TAG_PREFIX)) {
           el.remove()
           continue
         }

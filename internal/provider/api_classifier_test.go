@@ -19,9 +19,10 @@ func TestAPIClassifier_Classify(t *testing.T) {
 
 	history := NewHistory(t.TempDir(), 100, time.Hour)
 	api := NewAPIProviderFromConfig(APIProviderConfig{
-		Name:    "test",
-		BaseURL: server.URL,
-		Auth:    "none",
+		Name:         "test",
+		BaseURL:      server.URL,
+		Auth:         "none",
+		DefaultModel: "test-model",
 	}, history)
 
 	c := NewAPIClassifier(api, history, "You are a router.")

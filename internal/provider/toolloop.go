@@ -68,7 +68,10 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 		model = tl.api.defaultModel
 	}
 	if model == "" {
-		model = "anthropic/claude-haiku-4-5"
+		// No hardcoded model fallback: fail fast rather than silently
+		// switching backends. Caller must provide a model via params or
+		// the API backend's configured default.
+		return nil, fmt.Errorf("toolloop: no model configured (pass Params.Model or configure the backend default)")
 	}
 
 	// Marshal tools to JSON for the request.

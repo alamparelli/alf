@@ -153,6 +153,14 @@ func (h *MemoryIngestHandler) storeAsIs(content string) *ingestResponse {
 	return resp
 }
 
+// currentTiers returns the live tier config or nil if no store is attached.
+func (h *MemoryIngestHandler) currentTiers() *TiersConfig {
+	if h.TierStore == nil {
+		return nil
+	}
+	return h.TierStore.Current()
+}
+
 // resolveTier finds the requested tier, or defaults to the first enabled tier with tools.
 func (h *MemoryIngestHandler) resolveTier(name string) *Tier {
 	if h.TierStore == nil {
@@ -208,9 +216,10 @@ Rules: self-contained items, concise, skip trivial info.`, instruction, content)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// Build params from tier config.
+	// Build params from tier config. Default model comes from the user's
+	// configured fallback — never hardcode a provider-specific value.
 	params := provider.Params{
-		Model:    "claude-haiku-4-5",
+		Model:    DefaultFallbackModel(h.currentTiers()),
 		MaxTurns: 3,
 		Tools:    []string{""}, // no tools by default
 	}
@@ -326,7 +335,7 @@ Content:
 		defer cancel()
 
 		params := provider.Params{
-			Model:    "claude-haiku-4-5",
+			Model:    DefaultFallbackModel(h.currentTiers()),
 			MaxTurns: 1,
 			Tools:    []string{""},
 		}

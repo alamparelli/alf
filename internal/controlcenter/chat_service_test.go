@@ -258,13 +258,17 @@ func TestChatService_ResolveTierParams(t *testing.T) {
 		t.Error("expected non-empty model for haiku tier")
 	}
 
-	// Unknown tier should fallback.
+	// Unknown tier should fallback to the user's configured default
+	// (via DefaultFallbackModel), not a hardcoded Claude model.
 	tp = svc.resolveTierParams("nonexistent")
 	if tp.Model == "" {
-		t.Error("expected fallback model")
+		t.Error("expected fallback model resolved from user config")
 	}
-	if tp.Model != "claude-haiku-4-5" {
-		t.Errorf("expected fallback model claude-haiku-4-5, got %q", tp.Model)
+	// Verify the fallback actually matches a configured tier (no baked value).
+	tiers := svc.TierStore.Current()
+	want := DefaultFallbackModel(tiers)
+	if tp.Model != want {
+		t.Errorf("fallback mismatch: got %q, want %q (from DefaultFallbackModel)", tp.Model, want)
 	}
 }
 

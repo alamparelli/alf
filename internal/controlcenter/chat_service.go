@@ -816,11 +816,9 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 			}
 		}
 	}
-	fallback := "claude-haiku-4-5"
-	if cs.ResolveModel != nil {
-		fallback = cs.ResolveModel("haiku")
-	}
-	return tierParams{Model: fallback}
+	// Tier not found — resolve from the user's configured fallback rather
+	// than hardcoding a Claude model (users may run any backend).
+	return tierParams{Model: DefaultFallbackModel(cs.TierStore.Current())}
 }
 
 // tierParams holds per-tier Claude CLI arguments.
@@ -882,9 +880,16 @@ func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 	}
 
 	resumeID := cs.Sessions.Get(apiChatID)
-	tp := tierParams{Model: "claude-haiku-4-5"}
+	var tp tierParams
 	if fallback := cs.firstFallbackTier(); fallback != "" {
 		tp = cs.resolveTierParams(fallback)
+	}
+	if tp.Model == "" {
+		tp.Model = DefaultFallbackModel(cs.TierStore.Current())
+	}
+	if tp.Model == "" {
+		log.Printf("[chat-api] no fallback model configured, skipping negative follow-up")
+		return
 	}
 
 	params := provider.Params{

@@ -61,3 +61,4 @@ scripts/*
 !scripts/entrypoint.sh
 !scripts/install.sh
 !scripts/dev-local.sh
+!scripts/check-hardcoded-models.sh

@@ -47,8 +47,10 @@ func TestResolveTierParams_Unknown(t *testing.T) {
 	if found {
 		t.Error("expected found=false for unknown tier")
 	}
-	if tp.Model != "claude-haiku-4-5" {
-		t.Errorf("expected fallback model, got %q", tp.Model)
+	// Fallback now comes from the configured tier set (no hardcoded Claude
+	// model). With no resolveModel callback, the raw alias is returned.
+	if tp.Model != "haiku" {
+		t.Errorf("expected fallback model 'haiku' (from user tier), got %q", tp.Model)
 	}
 }
 

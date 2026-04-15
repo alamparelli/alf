@@ -63,9 +63,12 @@ func NewCLIProvider(homeDir, dataDir string, timeout time.Duration, cred *syscal
 
 // Invoke spawns a claude -p subprocess, parses stream-json, and returns the result.
 func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, onProgress OnProgress) (*Result, error) {
+	// CLIProvider spawns the Anthropic `claude` CLI. If the caller forgot
+	// to set a model, fail fast so the user isn't billed on a default they
+	// didn't pick — resolution belongs in the caller (tier config).
 	model := params.Model
 	if model == "" {
-		model = "claude-haiku-4-5"
+		return nil, fmt.Errorf("CLIProvider: Params.Model is empty (resolve from tier before invoking)")
 	}
 
 	// Use stream-json (with --verbose) only when we need streaming progress.

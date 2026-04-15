@@ -500,13 +500,18 @@ func main() {
 				routerModel = ap.Name() // will get default from provider
 			}
 			if routerModel == "" {
-				routerModel = "anthropic/claude-haiku-4-5"
+				if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
+					if !strings.Contains(fb, "/") {
+						fb = "anthropic/" + fb
+					}
+					routerModel = fb
+				}
 			}
 		}
 	} else {
 		routerModel = router.ResolveModel(routerModel)
 		if routerModel == "" {
-			routerModel = router.ResolveModel("haiku")
+			routerModel = cc.DefaultFallbackModel(tierStore.Current())
 		}
 	}
 
@@ -1077,60 +1082,9 @@ func main() {
 	var memExtractor *memstore.Extractor
 	if memDB != nil {
 		extractorTierResolver := func() string {
-			// Resolve a model from the current tier config. The extractAdapter
-			// routes to the correct backend (CLI/codex/API) based on tier
-			// metadata, so non-CLI tiers are safe here.
-			// Order: default_fallback → lowest-priority enabled routable tier
-			// → any enabled tier. Never return a hardcoded model name (#291).
-			tiers := tierStore.Current()
-			if tiers == nil {
-				return ""
-			}
-			pick := func(name string) string {
-				for _, t := range tiers.Tiers {
-					if t.Name != name || !t.Enabled {
-						continue
-					}
-					if m := router.ResolveModel(t.Model); m != "" {
-						return m
-					}
-					return t.Model
-				}
-				return ""
-			}
-			if m := pick(tiers.DefaultFallback); m != "" {
-				return m
-			}
-			// Lowest-priority enabled routable tier.
-			best := ""
-			bestPriority := int(^uint(0) >> 1)
-			for _, t := range tiers.Tiers {
-				if !t.Enabled || !t.Routable {
-					continue
-				}
-				if t.Priority < bestPriority {
-					bestPriority = t.Priority
-					if m := router.ResolveModel(t.Model); m != "" {
-						best = m
-					} else {
-						best = t.Model
-					}
-				}
-			}
-			if best != "" {
-				return best
-			}
-			// Last resort: any enabled tier.
-			for _, t := range tiers.Tiers {
-				if !t.Enabled {
-					continue
-				}
-				if m := router.ResolveModel(t.Model); m != "" {
-					return m
-				}
-				return t.Model
-			}
-			return ""
+			// Delegates to the single source of truth. Never returns a
+			// hardcoded model — users can run any backend (see #291).
+			return cc.DefaultFallbackModel(tierStore.Current())
 		}
 		extractTimeout := time.Duration(cfg.EffectiveMemoryExtractTimeout()) * time.Second
 		extractAdapter := &extractorAdapter{prov: cliProvider, registry: registry, tierStore: tierStore}
@@ -1347,7 +1301,12 @@ func main() {
 				if isAPIR {
 					newModel := tierStore.Current().RouterModel
 					if newModel == "" {
-						newModel = "anthropic/claude-haiku-4-5"
+						if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
+							if !strings.Contains(fb, "/") {
+								fb = "anthropic/" + fb
+							}
+							newModel = fb
+						}
 					}
 					routerModel = newModel
 					// Shut down CLI classifier if switching to API router.
@@ -1478,7 +1437,12 @@ func main() {
 				if isAPIR {
 					newModel := tierStore.Current().RouterModel
 					if newModel == "" {
-						newModel = "anthropic/claude-haiku-4-5"
+						if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
+							if !strings.Contains(fb, "/") {
+								fb = "anthropic/" + fb
+							}
+							newModel = fb
+						}
 					}
 					routerModel = newModel
 					if cliClassifier != nil {

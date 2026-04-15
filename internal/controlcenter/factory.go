@@ -226,6 +226,7 @@ func HandlerFactory(deps Deps) Handlers {
 		ProviderRegistry: deps.ProviderRegistry,
 		ModelCache:       deps.ModelCache,
 		Notifier:         deps.Notifier,
+		TierStore:        deps.TierStore,
 	})
 	mux.Handle("/api/skills/", &ResourceHandler{
 		Store:       deps.SkillStore,

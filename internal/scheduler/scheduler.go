@@ -28,6 +28,11 @@ type Config struct {
 	CronPath       string
 	Location       *time.Location
 	SignalSockPath string // passed as ALF_SIGNAL_SOCK to command subprocesses
+
+	// CatchupRecurringMinInterval: recurring cron jobs with a tick interval
+	// >= this value are caught up once after downtime. Zero disables it.
+	// One-shot (RFC3339) jobs are always caught up regardless of this setting.
+	CatchupRecurringMinInterval time.Duration
 }
 
 // Engine is the unified scheduler that manages cron jobs + one-shots.
@@ -45,6 +50,9 @@ type Engine struct {
 	systemFuncs map[string]func()
 
 	server *Server
+
+	// stopCh signals auxiliary goroutines (last_seen writer) to exit.
+	stopCh chan struct{}
 
 	// OnChange is called after any mutation (create/update/delete).
 	// Set by the daemon to push real-time updates to the CC.
@@ -65,6 +73,7 @@ func New(cfg Config) *Engine {
 		runLog:      NewRunLog(logDir),
 		entries:     make(map[string]cron.EntryID),
 		systemFuncs: make(map[string]func()),
+		stopCh:      make(chan struct{}),
 	}
 }
 
@@ -155,6 +164,10 @@ func (e *Engine) RegisterSystem(id, name, schedule string, fn func() error, desc
 
 // Start loads persisted jobs, registers them with cron, and starts the socket server.
 func (e *Engine) Start(sockPath string) error {
+	// Capture liveness timestamp BEFORE the writer refreshes it, so catchup
+	// can compute the actual downtime window.
+	lastSeen := readLastSeen(e.cfg.DataDir)
+
 	// Snapshot system jobs registered before Start (RegisterSystem adds them in-memory).
 	e.store.mu.RLock()
 	systemJobs := make([]*Job, 0)
@@ -208,16 +221,23 @@ func (e *Engine) Start(sockPath string) error {
 	}
 
 	// Clean up expired one-shot jobs (RFC3339 schedule whose time has passed).
+	// Preserve jobs that fired during downtime so runCatchup can replay them.
 	now := time.Now()
+	catchupWindow := !lastSeen.IsZero() && now.Sub(lastSeen) <= catchupMaxDowntime
 	var expired []string
 	for _, j := range e.store.All() {
 		if j.System {
 			continue
 		}
-		if at, err := time.Parse(time.RFC3339, j.Schedule); err == nil && !now.Before(at) {
-			expired = append(expired, j.ID)
-			log.Printf("scheduler: removing expired one-shot job %s (%s) scheduled at %s", j.ID, j.Name, j.Schedule)
+		at, err := time.Parse(time.RFC3339, j.Schedule)
+		if err != nil || now.Before(at) {
+			continue
 		}
+		if catchupWindow && j.Enabled && at.After(lastSeen) {
+			continue // will be caught up after cron.Start()
+		}
+		expired = append(expired, j.ID)
+		log.Printf("scheduler: removing expired one-shot job %s (%s) scheduled at %s", j.ID, j.Name, j.Schedule)
 	}
 	for _, id := range expired {
 		e.store.Remove(id)
@@ -256,6 +276,10 @@ func (e *Engine) Start(sockPath string) error {
 
 	log.Printf("scheduler: started with %d entries", len(e.cron.Entries()))
 
+	// Catch up jobs missed during downtime, then keep the liveness file fresh.
+	e.runCatchup(lastSeen)
+	startLastSeenWriter(e.cfg.DataDir, e.stopCh)
+
 	// Start socket server. Listen synchronously so a bind failure surfaces to
 	// the daemon boot code instead of silently dying inside a goroutine.
 	e.server = NewServer(e, sockPath)
@@ -273,6 +297,11 @@ func (e *Engine) Start(sockPath string) error {
 
 // Stop halts the cron engine and socket server.
 func (e *Engine) Stop() {
+	select {
+	case <-e.stopCh:
+	default:
+		close(e.stopCh)
+	}
 	ctx := e.cron.Stop()
 	<-ctx.Done()
 	if e.server != nil {

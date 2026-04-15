@@ -80,6 +80,10 @@ type Config struct {
 	RecallDistance float64 `json:"recall_distance,omitempty"`
 	// MediaRetentionDays is how many days media files are kept after a conversation is deleted, 0 = default (7).
 	MediaRetentionDays int `json:"media_retention_days,omitempty"`
+	// CatchupRecurringMinInterval enables catch-up for recurring cron jobs whose
+	// tick interval is >= this value. Go duration string (e.g. "6h"). Empty or "0"
+	// disables recurring catch-up. One-shot (RFC3339) jobs are always caught up.
+	CatchupRecurringMinInterval string `json:"catchup_recurring_min_interval,omitempty"`
 }
 
 // QuietHours defines a time window where the bot won't respond.

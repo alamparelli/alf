@@ -1039,6 +1039,15 @@ func main() {
 	parsedChatID, _ := strconv.ParseInt(chatID, 10, 64)
 	schedLocation := resolveTimezone(cfg.Timezone)
 
+	var catchupMinInterval time.Duration
+	if s := cfg.CatchupRecurringMinInterval; s != "" {
+		if d, err := time.ParseDuration(s); err != nil {
+			log.Printf("scheduler: invalid catchup_recurring_min_interval %q: %v — disabled", s, err)
+		} else {
+			catchupMinInterval = d
+		}
+	}
+
 	sched := scheduler.New(scheduler.Config{
 		DataDir:      dataDir,
 		ContextDir:   contextDir,
@@ -1055,6 +1064,7 @@ func main() {
 		CronPath:       filepath.Join(configDir, "cron.json"),
 		Location:       schedLocation,
 		SignalSockPath: persistentSigPath,
+		CatchupRecurringMinInterval: catchupMinInterval,
 	})
 
 	// Register system jobs (replaces individual goroutine patterns).

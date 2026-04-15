@@ -526,6 +526,7 @@
 
   .chat-row-system {
     align-self: center;
+    width: fit-content;
     max-width: 90%;
   }
 
@@ -534,8 +535,9 @@
     color: var(--text-dim);
     font-size: var(--font-sm, 13px);
     font-style: italic;
-    max-width: 90%;
+    max-width: 100%;
     text-align: center;
+    white-space: nowrap;
   }
 
   /* Markdown content */

@@ -20,6 +20,8 @@ const (
 	DefaultMemoryDedupCosineThreshold = 0.15
 	DefaultRecallTopK    = 3
 	DefaultRecallMinDist = 1.2
+	DefaultSummarizationThreshold = 20
+	DefaultSummarizationKeepLast  = 10
 )
 
 // BackendConfig defines an OpenAI-compatible LLM API endpoint.
@@ -84,6 +86,15 @@ type Config struct {
 	// tick interval is >= this value. Go duration string (e.g. "6h"). Empty or "0"
 	// disables recurring catch-up. One-shot (RFC3339) jobs are always caught up.
 	CatchupRecurringMinInterval string `json:"catchup_recurring_min_interval,omitempty"`
+	// SummarizationEnabled toggles progressive conversation summarization.
+	// nil = true (default on).
+	SummarizationEnabled *bool `json:"summarization_enabled,omitempty"`
+	// SummarizationThreshold is the number of uncovered messages beyond which
+	// older messages are compressed into a summary. 0 = default (20).
+	SummarizationThreshold int `json:"summarization_threshold,omitempty"`
+	// SummarizationKeepLast is the number of recent messages kept in full
+	// detail (not summarized). Must be < threshold. 0 = default (10).
+	SummarizationKeepLast int `json:"summarization_keep_last,omitempty"`
 }
 
 // QuietHours defines a time window where the bot won't respond.
@@ -170,6 +181,30 @@ func (c *Config) EffectiveMemoryDedupCosineThreshold() float64 {
 		return c.MemoryDedupCosineThreshold
 	}
 	return DefaultMemoryDedupCosineThreshold
+}
+
+// EffectiveSummarizationEnabled reports whether progressive summarization is on.
+func (c *Config) EffectiveSummarizationEnabled() bool {
+	if c.SummarizationEnabled != nil {
+		return *c.SummarizationEnabled
+	}
+	return true
+}
+
+// EffectiveSummarizationThreshold returns the message-count threshold.
+func (c *Config) EffectiveSummarizationThreshold() int {
+	if c.SummarizationThreshold > 0 {
+		return c.SummarizationThreshold
+	}
+	return DefaultSummarizationThreshold
+}
+
+// EffectiveSummarizationKeepLast returns the recent-message retention count.
+func (c *Config) EffectiveSummarizationKeepLast() int {
+	if c.SummarizationKeepLast > 0 {
+		return c.SummarizationKeepLast
+	}
+	return DefaultSummarizationKeepLast
 }
 
 // DefaultDNSServers are used when Config.DNSServers is empty.

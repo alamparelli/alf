@@ -912,6 +912,9 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			CostUSD:   result.CostUSD,
 			SessionID: result.SessionID,
 		})
+		// Trigger progressive summarization if the conversation has grown.
+		// Runs in a background goroutine; does not block the current turn.
+		e.maybeSummarizeAsync(channel, convID)
 	}
 	// Persist to ChatDB with all content blocks in temporal order.
 	// The frontend splits blocks into individual bubbles for display.

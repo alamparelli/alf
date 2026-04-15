@@ -196,53 +196,6 @@ alf uninstall     Remove ALF and its data
 alf version       Print version
 ```
 
-## Project structure
-
-```
-cmd/
-  alf/             Host CLI (init, start, stop, upgrade, login, secret, compose)
-  alf-daemon/      Container daemon (Telegram bot + Control Center + Claude management)
-  embed-server/    Embedding HTTP server (ONNX inference for vector search)
-  extract-video/   System tool: video frame extraction + audio transcription
-  memory-tools/    System tool: recall, remember, forget (semantic memory)
-  nettrack-helper/ Privileged conntrack helper (conntrack events → Unix socket)
-  schedule-tools/  System tool: create, list, delete, update scheduled jobs
-  signal/          System tool: send Telegram messages and reactions from Claude sessions
-  system-tools/    Multi-call binary bridging CLI tools to daemon HTTP API
-
-internal/
-  agents/          Multi-agent orchestrator, team config store, session isolation
-  chatdb/          SQLite-backed chat message database
-  cli/             CLI command implementations + embedded templates + bundled skills
-  comms/           Chat engine: message processing pipeline, adapters, event dispatch
-  controlcenter/   HTTP server, auth, config CRUD, chat API, workspace, setup wizard, docs
-  conversation/    Unified conversation store (JSONL ring buffer, ContentBlocks, cross-backend)
-  marketplace/     App marketplace: install, permissions, trust model, manifest validation
-  provider/        Provider/Classifier interfaces + CLI + API implementations
-  router/          LLM-based message classification + tier routing
-  memstore/        Semantic memory (SQLite + sqlite-vec + FTS5 + ONNX embedder)
-  media/           Download, MIME detection, frame extraction, contact sheets, PDF parsing
-  voice/           HTTP client for whisper-service transcription container
-  scheduler/       Cron-based job scheduling with timezone support + execution logging
-  supervisor/      App background service supervisor (restart policies, exponential backoff)
-  vault/           Vault-proxy subprocess management + Unix socket proxy
-  firewall/        Outbound HTTP/HTTPS traffic filtering proxy
-  tlsgen/          Self-signed TLS certificate generation for local installs
-  tooling/         Tool registry + subprocess executor + Linux namespace sandbox
-  trace/           Tracing and event logging for chains and task teams
-  skills/          Skill loader, trigger matching, catalog builder
-  mood/            Daily mood rotation + live feedback + reaction learning
-  session/         Claude session persistence (resume IDs, forced tier locking)
-  telegram/        Telegram Bot API client + Markdown→HTML
-  memory/          System prompt assembly (embedded core + soul, mood, context, onboarding)
-  signal/          Unix-socket server for Claude→Telegram message delivery
-  gittrack/        Git versioning for data directory
-  eventlog/        JSONL event logging with daily rotation
-  updater/         GHCR image update checker
-  secrets/         Docker secrets reader
-  vulncheck/       Dependency vulnerability checking
-```
-
 ## Security model
 
 The entrypoint runs as root for package installation and permission setup, then drops to `alfd` (uid 1001) via `setpriv` with minimal capabilities (setuid, setgid, sys_admin, sys_chroot, chown). LLM subprocesses run as `alf` (uid 1000) with zero capabilities and a sanitized environment:
@@ -251,7 +204,7 @@ The entrypoint runs as root for package installation and permission setup, then 
 - **Filesystem isolation** - `/opt/alf/config.d/` read-only, `/opt/alf/tools.d/` read+execute only, `/home/alf/data/` read+write
 - **Secrets** - Docker secrets mechanism, never in environment variables
 - **Security headers** - HSTS, X-Frame-Options DENY, CSP with SRI on CDN dependencies, X-Content-Type-Options nosniff
-- **Rate limiting** - 60 req/min global (120 for authenticated users), 5 req/min on auth, CORS on the Control Center API
+- **Rate limiting** - 15 req/min global for anonymous requests (600 for authenticated users), 5 req/min on auth endpoints, 30 req/min on terminal/SSH endpoints, CORS on the Control Center API
 - **Authentication** - magic link (time-limited, rotating) or bearer token with session cookies
 - **Session revocation** - new magic link invalidates all previous sessions
 - **IP ban** - after repeated auth failures (configurable threshold and duration)

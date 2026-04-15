@@ -15,7 +15,13 @@ const (
 	BlockToolUse    BlockType = "tool_use"
 	BlockToolResult BlockType = "tool_result"
 	BlockThinking   BlockType = "thinking"
+	BlockSummary    BlockType = "summary"
 )
+
+// RoleSummary marks a Message as a condensed summary of earlier messages.
+// Its Blocks contain a single BlockSummary block; CoveredIDs lists which
+// message IDs this summary replaces in the context window.
+const RoleSummary = "summary"
 
 // ContentBlock represents a single piece of content within a message.
 // Modeled after Claude's streaming content blocks.
@@ -65,6 +71,11 @@ type Message struct {
 	ReplyTo   string         `json:"reply_to,omitempty"`
 	Media     []MediaRef     `json:"media,omitempty"`
 	Reactions []Reaction     `json:"reactions,omitempty"`
+
+	// CoveredIDs lists the message IDs that this message replaces in the
+	// context window. Only set for Role == RoleSummary. Readers filter out
+	// any message whose ID appears here.
+	CoveredIDs []string `json:"covered_ids,omitempty"`
 }
 
 // NewConvID generates a new conversation ID.

@@ -692,6 +692,9 @@ func main() {
 			Limit:    cfg.RecallLimit,
 			Distance: cfg.RecallDistance,
 		},
+		SummarizationEnabled:   cfg.EffectiveSummarizationEnabled(),
+		SummarizationThreshold: cfg.EffectiveSummarizationThreshold(),
+		SummarizationKeepLast:  cfg.EffectiveSummarizationKeepLast(),
 	})
 	// Initialize all optional dependencies in one place (issue #91).
 	var recaller cc.MemoryRecaller

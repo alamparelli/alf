@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // Store persists rich conversation messages as JSONL and keeps a ring buffer in memory.
@@ -90,6 +91,11 @@ func (s *Store) Get(id string) *Message {
 
 // Recent returns the last n messages from the given channel's active conversation.
 // Pass n=0 for all messages in the current conversation.
+//
+// Summary records (Role == RoleSummary) are applied: the latest summary
+// replaces the messages whose IDs appear in its CoveredIDs. The returned
+// slice contains the summary (if any) followed by the non-covered messages
+// in chronological order.
 func (s *Store) Recent(channel string, n int) []Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -98,16 +104,116 @@ func (s *Store) Recent(channel string, n int) []Message {
 		return nil
 	}
 	all := s.ordered()
-	var msgs []Message
+	var raw []Message
 	for _, m := range all {
 		if m.ConvID == convID {
-			msgs = append(msgs, m)
+			raw = append(raw, m)
 		}
 	}
+	msgs := applySummary(raw)
 	if n > 0 && n < len(msgs) {
 		msgs = msgs[len(msgs)-n:]
 	}
 	return msgs
+}
+
+// applySummary collapses raw conversation messages by applying the latest
+// summary record: messages covered by the summary are removed, and the
+// summary is prepended. Older summaries are dropped.
+func applySummary(msgs []Message) []Message {
+	var latest *Message
+	for i := range msgs {
+		if msgs[i].Role == RoleSummary {
+			latest = &msgs[i]
+		}
+	}
+	if latest == nil {
+		return msgs
+	}
+	covered := make(map[string]struct{}, len(latest.CoveredIDs))
+	for _, id := range latest.CoveredIDs {
+		covered[id] = struct{}{}
+	}
+	result := make([]Message, 0, len(msgs))
+	result = append(result, *latest)
+	for i := range msgs {
+		m := msgs[i]
+		if m.Role == RoleSummary {
+			continue
+		}
+		if _, skip := covered[m.ID]; skip {
+			continue
+		}
+		result = append(result, m)
+	}
+	return result
+}
+
+// RecentRaw returns all messages for the channel's active conversation
+// without applying summary collapsing. Used by the summarizer to see the
+// full uncondensed history it needs to summarize.
+func (s *Store) RecentRaw(channel string) []Message {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	convID := s.convIDs[channel]
+	if convID == "" {
+		return nil
+	}
+	var msgs []Message
+	for _, m := range s.ordered() {
+		if m.ConvID == convID {
+			msgs = append(msgs, m)
+		}
+	}
+	return msgs
+}
+
+// LastSummaryCovered returns the set of message IDs covered by the most
+// recent summary for the channel's active conversation. Returns nil if no
+// summary exists. The summarizer uses this to avoid re-summarizing the
+// same messages twice.
+func (s *Store) LastSummaryCovered(channel string) map[string]struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	convID := s.convIDs[channel]
+	if convID == "" {
+		return nil
+	}
+	var latest *Message
+	for _, m := range s.ordered() {
+		if m.ConvID == convID && m.Role == RoleSummary {
+			cp := m
+			latest = &cp
+		}
+	}
+	if latest == nil {
+		return nil
+	}
+	covered := make(map[string]struct{}, len(latest.CoveredIDs))
+	for _, id := range latest.CoveredIDs {
+		covered[id] = struct{}{}
+	}
+	return covered
+}
+
+// AppendSummary appends a summary record to the store. The summary replaces
+// coveredIDs in the readable conversation: Recent() will return the summary
+// in place of those messages. This is append-only — the original messages
+// remain on disk, just hidden from the rendered context.
+func (s *Store) AppendSummary(channel, convID, text string, coveredIDs []string) {
+	if convID == "" || text == "" || len(coveredIDs) == 0 {
+		return
+	}
+	msg := Message{
+		ID:        NewMessageID(),
+		ConvID:    convID,
+		Channel:   channel,
+		Role:      RoleSummary,
+		Blocks:    []ContentBlock{{Type: BlockSummary, Text: text}},
+		Timestamp: time.Now(),
+		CoveredIDs: coveredIDs,
+	}
+	s.Append(msg)
 }
 
 // RecentAll returns the last n messages regardless of channel or conversation.

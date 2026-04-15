@@ -25,9 +25,11 @@ type ToolCallRequest struct {
 
 // ToolCallResult is the output of a tool execution.
 type ToolCallResult struct {
-	ID      string
-	Output  string
-	IsError bool
+	ID           string
+	Output       string
+	IsError      bool
+	ExitCode     int    // 0 success, non-zero failure, -1 timeout / launch error
+	ErrorMessage string // short error description (stderr/timeout), empty on success
 }
 
 // ToolLoop wraps an APIProvider with an agentic tool-calling loop.
@@ -145,6 +147,7 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 
 			toolSpan := trace.StartSpanFromContext(ctx, "tool_exec", map[string]string{
 				"tool": tc.Function.Name,
+				"args": sanitizeToolArgs(tc.Function.Arguments),
 			})
 
 			result := tl.executor.Execute(ctx, ToolCallRequest{
@@ -155,8 +158,12 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 
 			if toolSpan != nil {
 				toolSpan.Tag("output_len", fmt.Sprintf("%d", len(result.Output)))
+				toolSpan.Tag("exit_code", fmt.Sprintf("%d", result.ExitCode))
 				if result.IsError {
 					toolSpan.Tag("is_error", "true")
+					if msg := sanitizeToolError(result.ErrorMessage); msg != "" {
+						toolSpan.Tag("error", msg)
+					}
 				}
 				toolSpan.End()
 			}

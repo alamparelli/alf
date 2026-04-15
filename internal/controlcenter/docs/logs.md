@@ -64,6 +64,52 @@ ALF logs everything about its operation:
 | `timeout` | Timeout events |
 | `orchestrator` or `agent` | Agent task coordination |
 
+## Tool execution traces
+
+Every LLM tool call is logged to `logs/traces/YYYY-MM-DD.jsonl` as a structured
+span (`tool_exec`) with:
+
+| Tag | Description |
+|-----|-------------|
+| `tool` | Tool name (e.g. `bash`, `read_file`, `write_file`) |
+| `args` | JSON arguments, truncated to 500 chars. Sensitive keys (`token`, `key`, `secret`, `password`, `credential`, `auth`) are replaced with `[REDACTED]` |
+| `exit_code` | Process exit code (0 = success, non-zero = failure, -1 = timeout or launch error) |
+| `is_error` | `"true"` when the call failed |
+| `error` | Short error description (stderr or timeout message), truncated to 500 chars |
+| `output_len` | Response length in bytes |
+| `duration_ms` | Execution time |
+
+### Daily stats report
+
+Once per day at 00:05 local time, the `tool-stats` system job aggregates the
+last 7 days of traces into `logs/traces/stats-YYYY-MM-DD.json`:
+
+```json
+{
+  "generated_at": "2026-04-16T00:05:00Z",
+  "window_days": 7,
+  "total_runs": 1459,
+  "total_errors": 42,
+  "tools": [
+    {
+      "tool": "bash",
+      "runs": 412,
+      "errors": 38,
+      "err_rate": 0.092,
+      "avg_ms": 280.4,
+      "p95_ms": 1200,
+      "max_ms": 4800,
+      "last_error": "permission denied"
+    },
+    ...
+  ]
+}
+```
+
+Tools are sorted by error count (desc), then by run count (desc) — so the
+noisiest/most-failing tools are at the top. Use this to spot flaky user tools
+or slow native tools at a glance.
+
 ## Common questions
 
 **Where are log files stored?**

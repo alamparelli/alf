@@ -25,8 +25,10 @@ func (a *ToolingExecutorAdapter) Execute(ctx context.Context, call ToolCallReque
 		Arguments: call.Arguments,
 	})
 	return ToolCallResult{
-		ID:      r.ID,
-		Output:  r.Output,
-		IsError: r.IsError,
+		ID:           r.ID,
+		Output:       r.Output,
+		IsError:      r.IsError,
+		ExitCode:     r.ExitCode,
+		ErrorMessage: r.ErrorMessage,
 	}
 }

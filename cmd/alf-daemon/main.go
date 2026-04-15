@@ -38,6 +38,7 @@ import (
 	"github.com/alamparelli/alf/internal/supervisor"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
+	"github.com/alamparelli/alf/internal/trace"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/updater"
 	"github.com/alamparelli/alf/internal/voice"
@@ -1132,6 +1133,16 @@ func main() {
 	// Daily schedule digest - runs at 08:00 local time.
 	sched.RegisterSystem("sched-digest", "Schedule Digest", "0 0 8 * * *", sched.SendDailyDigest,
 		"Sends a daily summary of scheduled jobs at 8am: upcoming runs, recent failures, and job stats.")
+
+	// Daily tool stats — aggregates last 7 days of tool_exec spans into
+	// logs/traces/stats-YYYY-MM-DD.json. Runs at 00:05 local time.
+	sched.RegisterSystem("tool-stats", "Tool Execution Stats", "0 5 0 * * *", func() error {
+		report, err := trace.AggregateToolStats(dataDir, 7)
+		if err != nil {
+			return err
+		}
+		return trace.WriteToolStatsReport(dataDir, report)
+	}, "Aggregates the last 7 days of tool execution traces (logs/traces/*.jsonl) into a daily stats report at logs/traces/stats-YYYY-MM-DD.json: runs, errors, error rate, avg/p95 duration per tool.")
 
 	// Vault token health check — every hour, alerts on expired/expiring tokens.
 	if vaultMgr != nil {

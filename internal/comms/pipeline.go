@@ -1097,8 +1097,10 @@ func (a *toolExecAdapter) Execute(ctx context.Context, call provider.ToolCallReq
 		Arguments: call.Arguments,
 	})
 	return provider.ToolCallResult{
-		ID:      result.ID,
-		Output:  result.Output,
-		IsError: result.IsError,
+		ID:           result.ID,
+		Output:       result.Output,
+		IsError:      result.IsError,
+		ExitCode:     result.ExitCode,
+		ErrorMessage: result.ErrorMessage,
 	}
 }

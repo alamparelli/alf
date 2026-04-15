@@ -17,6 +17,7 @@
   let sheetOpen = $state(false)
   let sheetHtml = $state('')
   let sheetHasActions = $state(false)
+  let sheetContentEl: HTMLElement | undefined = $state()
 
   // Confirm dialog state
   let confirmOpen = $state(false)
@@ -158,6 +159,38 @@
         sheetHtml = ''
         sheetHasActions = false
         break
+      case 'query-sheet': {
+        if (!sheetOpen || !sheetContentEl) { reply(_replyId, { exists: false }); break }
+        const sel = String(e.data.selector || '')
+        let el: Element | null = null
+        try { el = sel ? sheetContentEl.querySelector(sel) : null } catch { /* bad selector */ }
+        if (!el) { reply(_replyId, { exists: false }); break }
+        const out: Record<string, any> = {
+          exists: true,
+          text: (el as HTMLElement).textContent || '',
+          html: el.innerHTML
+        }
+        if (el instanceof HTMLInputElement) {
+          out.value = el.value
+          out.checked = el.checked
+        } else if (el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) {
+          out.value = el.value
+        }
+        reply(_replyId, out)
+        break
+      }
+      case 'patch-sheet': {
+        if (!sheetOpen || !sheetContentEl) { reply(_replyId, false); break }
+        const sel = String(e.data.selector || '')
+        let el: Element | null = null
+        try { el = sel ? sheetContentEl.querySelector(sel) : null } catch { /* bad selector */ }
+        if (!el) { reply(_replyId, false); break }
+        const wrap = document.createElement('div')
+        wrap.innerHTML = sanitizeHtml(String(e.data.html || ''))
+        el.innerHTML = wrap.innerHTML
+        reply(_replyId, true)
+        break
+      }
 
       // ── Navigate ──
       case 'navigate':
@@ -374,7 +407,7 @@
 <!-- Sheet modal -->
 <Modal open={sheetOpen} onclose={() => { sheetOpen = false; sheetHtml = ''; sheetHasActions = false }}>
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="sdk-sheet-content" onclick={handleSheetClick}>
+  <div class="sdk-sheet-content" bind:this={sheetContentEl} onclick={handleSheetClick}>
     {@html sheetHtml}
   </div>
 </Modal>

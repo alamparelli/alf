@@ -202,7 +202,12 @@ func InterpretRaw(raw string, tiers *cc.TiersConfig, message string) Result {
 	if result.Response != "" {
 		log.Printf("router: (%d chars) → direct response ignored, falling back to %s", len(message), fb.Tier)
 	} else {
-		log.Printf("router: parse failed (%d chars), falling back to %s", len(raw), fb.Tier)
+		// Log a truncated raw sample so parse failures are diagnosable (#194).
+		preview := raw
+		if len(preview) > 200 {
+			preview = preview[:200] + "…"
+		}
+		log.Printf("router: parse failed (%d chars), falling back to %s. raw=%q", len(raw), fb.Tier, preview)
 	}
 	return fb
 }

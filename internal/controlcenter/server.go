@@ -136,7 +136,14 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		WebFS:          webSub,
 	})
 
-	addr := "0.0.0.0:" + DefaultPort
+	// Bind host defaults to loopback for safety (bare-metal/systemd installs).
+	// Docker Compose sets ALF_CC_BIND=0.0.0.0 in the container so the host-side
+	// port mapping (127.0.0.1:PORT:8080) can reach the container from the host.
+	bindHost := os.Getenv("ALF_CC_BIND")
+	if bindHost == "" {
+		bindHost = "127.0.0.1"
+	}
+	addr := bindHost + ":" + DefaultPort
 
 	// Detect self-signed TLS cert for local installs (no Traefik).
 	var tlsCert, tlsKey string

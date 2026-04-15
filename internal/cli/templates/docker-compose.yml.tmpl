@@ -58,6 +58,7 @@ services:
       - "{{if .CCBind}}{{.CCBind}}{{else}}127.0.0.1{{end}}:{{.CCPort}}:8080"
 {{- end}}
     environment:
+      - ALF_CC_BIND=0.0.0.0
       - WHISPER_URL=http://whisper:8000
       - EMBED_URL=http://embed:8090
       - ALF_MARKETPLACE_URL=https://marketplace.alfos.ai

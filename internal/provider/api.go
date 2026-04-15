@@ -66,15 +66,15 @@ func NewAPIProviderFromConfig(cfg APIProviderConfig, history *History) *APIProvi
 }
 
 // NewAPIProvider creates an APIProvider for OpenRouter (backward compat).
-// Deprecated: use NewAPIProviderFromConfig.
+// Deprecated: use NewAPIProviderFromConfig. No DefaultModel is baked in —
+// callers must pass Params.Model (typically resolved from tier config).
 func NewAPIProvider(apiKey string, history *History) *APIProvider {
 	return NewAPIProviderFromConfig(APIProviderConfig{
-		Name:         "openrouter",
-		BaseURL:      "https://openrouter.ai/api/v1",
-		APIKey:       apiKey,
-		Headers:      map[string]string{"HTTP-Referer": "https://github.com/alamparelli/alf", "X-Title": "ALF"},
-		DefaultModel: "anthropic/claude-haiku-4-5",
-		Auth:         "bearer",
+		Name:    "openrouter",
+		BaseURL: "https://openrouter.ai/api/v1",
+		APIKey:  apiKey,
+		Headers: map[string]string{"HTTP-Referer": "https://github.com/alamparelli/alf", "X-Title": "ALF"},
+		Auth:    "bearer",
 	}, history)
 }
 
@@ -468,7 +468,7 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		model = p.defaultModel
 	}
 	if model == "" {
-		model = "anthropic/claude-haiku-4-5"
+		return nil, fmt.Errorf("api[%s]: no model configured (pass Params.Model or set APIProviderConfig.DefaultModel)", p.name)
 	}
 
 	log.Printf("api[%s]: invoke (model=%s, prompt=%d chars)", p.name, model, len(prompt))

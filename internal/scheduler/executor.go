@@ -431,8 +431,11 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		return "", nil, fmt.Errorf("no provider configured")
 	}
 
+	// Model is resolved from the tier config below. We do not hardcode a
+	// provider-specific default: if the tier lookup fails, the provider
+	// call errors with a clear message instead of silently running on
+	// Anthropic when the user may have configured a different backend.
 	params := ProviderParams{
-		Model:   "claude-haiku-4-5", // default
 		DataDir: e.cfg.DataDir,
 	}
 
@@ -484,6 +487,10 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 	if llmTimeout <= 0 {
 		llmTimeout = 10 * time.Minute
 	}
+	if params.Model == "" {
+		return "", nil, fmt.Errorf("scheduler: no model configured for tier %q (job %s)", j.Tier, j.ID)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), llmTimeout)
 	defer cancel()
 

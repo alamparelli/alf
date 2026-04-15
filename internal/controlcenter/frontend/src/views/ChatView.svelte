@@ -34,6 +34,8 @@
   interface Tier {
     name: string
     model: string
+    enabled?: boolean
+    force_command?: boolean
   }
 
   // --- Conversation state (from store) ---
@@ -257,7 +259,12 @@
   async function loadTiers() {
     try {
       const data = await api<any>('/api/tiers')
-      tiers = (data.tiers || []).map((t: any) => ({ name: t.name, model: t.model }))
+      tiers = (data.tiers || []).map((t: any) => ({
+        name: t.name,
+        model: t.model,
+        enabled: t.enabled !== false,
+        force_command: !!t.force_command,
+      }))
     } catch {
       tiers = []
     }

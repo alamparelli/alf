@@ -14,7 +14,7 @@
     onSend: (message: string, mediaFiles: UploadedFile[], model: string) => void
     onStop?: () => void
     sending: boolean
-    tiers?: { name: string; model: string }[]
+    tiers?: { name: string; model: string; enabled?: boolean; force_command?: boolean }[]
     draft?: string
     onDraftChange?: (text: string) => void
     selectedModel?: string
@@ -70,10 +70,14 @@
     { name: 'skills', desc: 'List available skills' },
   ]
 
-  // Add tier force commands
+  // Only tiers that are enabled AND marked force_command in the profile are
+  // exposed as /<tier> autocompletions — mirrors the backend's matching rule
+  // in chat_service.go and the Telegram bot menu in refreshTelegramCommands.
   let allCommands = $derived.by(() => {
     const cmds = [...builtinCommands]
     for (const t of tiers) {
+      if (t.enabled === false) continue
+      if (!t.force_command) continue
       cmds.push({ name: t.name, desc: `Force tier: ${t.model}` })
     }
     return cmds

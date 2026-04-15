@@ -313,12 +313,18 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 	}
 
 	// 1. Force command detection: /<tier> or /<skill> (CC-specific UI feedback).
-	if strings.HasPrefix(req.Message, "/") && req.Model == "" {
+	// Runs even when req.Model is already set (e.g. the CC tier selector
+	// pre-fills it) — an explicit /tier prefix is a stronger user intent
+	// than the dropdown and must win. When a force command matches, req.Model
+	// is rewritten below to the forced tier.
+	if strings.HasPrefix(req.Message, "/") {
 		parts := strings.SplitN(req.Message, " ", 2)
 		cmdName := strings.TrimPrefix(parts[0], "/")
+		tierMatched := false
 
 		for _, t := range cs.TierStore.Current().Tiers {
 			if t.Enabled && t.ForceCommand && t.Name == cmdName {
+				tierMatched = true
 				cs.Sessions.SetForcedTier(sessID, t.Name)
 				sysText := fmt.Sprintf("Session locked to **%s**. Use /new to reset.", t.Name)
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": sysText}})
@@ -345,7 +351,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 			}
 		}
 
-		if cs.Engine.SkillStore != nil && req.Model == "" {
+		if cs.Engine.SkillStore != nil && !tierMatched {
 			if sk, ok := cs.Engine.SkillStore.Get(cmdName); ok {
 				sessionKey := channelID.SessionKey()
 				cs.Engine.Sessions.AddSkills(sessionKey, []string{sk.Name})

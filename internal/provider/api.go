@@ -575,6 +575,9 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
+		if msg := translateAPIError(resp.StatusCode, body); msg != "" {
+			return nil, fmt.Errorf("%s", msg)
+		}
 		return nil, fmt.Errorf("api[%s] error %d: %s", p.name, resp.StatusCode, truncBody(body))
 	}
 
@@ -751,6 +754,20 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 		OutputTokens: outputTokens,
 		CachedTokens: cachedTokens,
 	}, nil
+}
+
+// translateAPIError returns a user-friendly message for known provider
+// errors (e.g. OpenRouter image-capability 404s). Empty string means the
+// caller should fall back to the raw error format.
+func translateAPIError(status int, body []byte) string {
+	s := string(body)
+	switch {
+	case status == 404 && strings.Contains(s, "No endpoints found that support image input"):
+		return "The active model does not support image input. Switch to an image-capable model (e.g. gpt-4o, claude-sonnet) or remove the attachment."
+	case status == 404 && strings.Contains(s, "No endpoints found"):
+		return "No provider endpoint matches this request for the selected model. The model may be unavailable or incompatible with the requested feature."
+	}
+	return ""
 }
 
 func truncBody(body []byte) string {

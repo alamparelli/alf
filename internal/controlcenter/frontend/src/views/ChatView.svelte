@@ -209,6 +209,16 @@
     }
   }
 
+  // Tracks whether the user is pinned near the bottom of the thread.
+  // Streaming chunks only auto-scroll when true, so scrolling up to read
+  // earlier messages during a long response is not interrupted.
+  let userAtBottom = $state(true)
+  const bottomStickThreshold = 80 // px
+
+  async function scrollToBottomIfFollowing() {
+    if (userAtBottom) await scrollToBottom()
+  }
+
   let loadingOlder = $state(false)
   let hasOlderMessages = $state(false)
 
@@ -251,6 +261,8 @@
 
   function onMessagesScroll(e: Event) {
     const el = e.target as HTMLDivElement
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    userAtBottom = distanceFromBottom <= bottomStickThreshold
     if (el.scrollTop < 100 && hasOlderMessages) {
       loadOlderMessages()
     }
@@ -471,7 +483,7 @@
         // Update streaming display
         streamingBlocks = [...currentBlocks]
         streamingText = currentText
-        scrollToBottom()
+        scrollToBottomIfFollowing()
       }
     } catch {
       // Stream ended or errored

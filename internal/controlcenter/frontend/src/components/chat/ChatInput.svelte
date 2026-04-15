@@ -64,6 +64,26 @@
   let showCommands = $state(false)
   let commandFilter = $state('')
   let selectedCommandIdx = $state(0)
+  // Set when a command is picked so the autoResize re-check can't bounce
+  // showCommands back to true before the user edits the text again.
+  let commandJustPicked = false
+
+  function selectCommand(name: string) {
+    const next = '/' + name + ' '
+    text = next
+    showCommands = false
+    selectedCommandIdx = 0
+    commandFilter = ''
+    commandJustPicked = true
+    // Restore focus + place caret at the end on the next tick so the
+    // programmatic value update has landed in the DOM.
+    setTimeout(() => {
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(next.length, next.length)
+      autoResize()
+    }, 0)
+  }
 
   const builtinCommands = [
     { name: 'new', desc: 'Start a new conversation' },
@@ -96,6 +116,13 @@
 
     // Detect slash command input
     const val = textarea.value
+    if (commandJustPicked) {
+      // A selection just populated the textarea programmatically; ignore
+      // this pass so the dropdown stays closed until the user types again.
+      commandJustPicked = false
+      showCommands = false
+      return
+    }
     if (val.startsWith('/') && !val.includes(' ')) {
       commandFilter = val.slice(1)
       showCommands = true
@@ -119,10 +146,7 @@
       }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
         e.preventDefault()
-        const cmd = filteredCommands[selectedCommandIdx]
-        text = '/' + cmd.name + ' '
-        showCommands = false
-        autoResize()
+        selectCommand(filteredCommands[selectedCommandIdx].name)
         return
       }
       if (e.key === 'Escape') {
@@ -273,8 +297,9 @@
       {#each filteredCommands as cmd, i}
         <button
           class="command-item"
+          type="button"
           class:selected={i === selectedCommandIdx}
-          onclick={() => { text = '/' + cmd.name + ' '; showCommands = false; textarea?.focus() }}
+          onmousedown={(e) => { e.preventDefault(); selectCommand(cmd.name) }}
           onmouseenter={() => selectedCommandIdx = i}
         >
           <span class="command-name">/{cmd.name}</span>

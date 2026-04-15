@@ -3,6 +3,7 @@ package scheduler
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,6 +22,46 @@ func TestLastSeenRoundtrip(t *testing.T) {
 	}
 	if time.Since(got) > time.Second {
 		t.Fatalf("timestamp too old: %v", got)
+	}
+}
+
+func TestLastSeen_CapsAtMaxLines(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < lastSeenMaxLines+5; i++ {
+		if err := writeLastSeen(dir); err != nil {
+			t.Fatalf("write #%d: %v", i, err)
+		}
+	}
+	data, err := os.ReadFile(lastSeenPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nonEmpty int
+	for _, l := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty != lastSeenMaxLines {
+		t.Fatalf("expected %d lines, got %d", lastSeenMaxLines, nonEmpty)
+	}
+	if readLastSeen(dir).IsZero() {
+		t.Fatal("expected readable timestamp after rotation")
+	}
+}
+
+func TestReadLastSeen_IgnoresMalformedTrailingLines(t *testing.T) {
+	dir := t.TempDir()
+	path := lastSeenPath(dir)
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	good := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	content := good + "\nnot-a-time\n\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := readLastSeen(dir)
+	if got.IsZero() {
+		t.Fatal("expected fallback to last valid line")
 	}
 }
 

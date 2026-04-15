@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -17,32 +18,60 @@ const catchupMaxDowntime = 24 * time.Hour
 // lastSeenInterval is how often the liveness timestamp is refreshed.
 const lastSeenInterval = 60 * time.Second
 
+// lastSeenMaxLines caps the ring buffer. The file keeps a short history
+// (for debugging / manual inspection) but is rotated on every write so it
+// never grows unbounded.
+const lastSeenMaxLines = 10
+
 // lastSeenPath returns the path of the liveness timestamp file.
 func lastSeenPath(dataDir string) string {
 	return filepath.Join(dataDir, "scheduler", "last_seen")
 }
 
-// readLastSeen returns the last persisted liveness timestamp. Zero time if
-// the file is missing or unreadable.
+// readLastSeen returns the most recent persisted liveness timestamp. Zero
+// time if the file is missing, empty, or unreadable. The file is a small
+// rolling buffer of timestamps (one per line, oldest first); we parse the
+// last non-empty line.
 func readLastSeen(dataDir string) time.Time {
 	data, err := os.ReadFile(lastSeenPath(dataDir))
 	if err != nil {
 		return time.Time{}
 	}
-	t, err := time.Parse(time.RFC3339Nano, string(data))
-	if err != nil {
-		return time.Time{}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339Nano, line); err == nil {
+			return t
+		}
 	}
-	return t
+	return time.Time{}
 }
 
-// writeLastSeen persists the current time to the liveness file.
+// writeLastSeen appends the current time to the liveness file and keeps at
+// most lastSeenMaxLines entries (oldest pruned). The rotation happens on
+// every call so the file never exceeds the cap.
 func writeLastSeen(dataDir string) error {
 	path := lastSeenPath(dataDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o644)
+
+	var lines []string
+	if data, err := os.ReadFile(path); err == nil {
+		for _, l := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+			if strings.TrimSpace(l) != "" {
+				lines = append(lines, l)
+			}
+		}
+	}
+	lines = append(lines, time.Now().UTC().Format(time.RFC3339Nano))
+	if len(lines) > lastSeenMaxLines {
+		lines = lines[len(lines)-lastSeenMaxLines:]
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 }
 
 // startLastSeenWriter starts a goroutine that refreshes the liveness file

@@ -335,8 +335,12 @@ func (e *Extractor) selectFiles(diffStat string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
+	model := e.resolveModel()
+	if model == "" {
+		return nil, fmt.Errorf("no tier available for file selection (tierResolver returned empty)")
+	}
 	raw, err := e.provider.Invoke(ctx, prompt, ExtractorParams{
-		Model:    e.resolveModel(),
+		Model:    model,
 		MaxTurns: 1,
 		DataDir:  e.dataDir,
 	})
@@ -373,13 +377,17 @@ func (e *Extractor) extractFacts(diffContent string) ([]extractedFact, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
+	model := e.resolveModel()
+	if model == "" {
+		return nil, fmt.Errorf("no tier available for fact extraction (tierResolver returned empty)")
+	}
 	raw, err := e.provider.Invoke(ctx, prompt, ExtractorParams{
-		Model:    e.resolveModel(),
+		Model:    model,
 		MaxTurns: 1,
 		DataDir:  e.dataDir,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("claude extraction: %w", err)
+		return nil, fmt.Errorf("extraction: %w", err)
 	}
 
 	return parseJSONFactArray(raw)
@@ -478,13 +486,15 @@ func (e *Extractor) saveState(hash string) {
 	os.WriteFile(e.statePath, data, 0o644)
 }
 
+// resolveModel returns the model from the configured tier resolver.
+// Returns "" if no tier is available — callers MUST handle this (#291).
+// No hardcoded model fallback: users may run any backend (codex, ollama,
+// anthropic, …) and a hardcoded Claude model would bypass their config.
 func (e *Extractor) resolveModel() string {
 	if e.tierResolver != nil {
-		if m := e.tierResolver(); m != "" {
-			return m
-		}
+		return e.tierResolver()
 	}
-	return "claude-haiku-4-5"
+	return ""
 }
 
 // --- JSON parsing helpers ---

@@ -1077,14 +1077,52 @@ func main() {
 	var memExtractor *memstore.Extractor
 	if memDB != nil {
 		extractorTierResolver := func() string {
-			// Find the first enabled tier with a CLI-compatible backend.
-			// Tiers with non-CLI backends (e.g. "codex") use models that
-			// the Claude CLI cannot invoke (e.g. gpt-5.4-mini).
-			for _, t := range tierStore.Current().Tiers {
-				if !t.Enabled {
+			// Resolve a model from the current tier config. The extractAdapter
+			// routes to the correct backend (CLI/codex/API) based on tier
+			// metadata, so non-CLI tiers are safe here.
+			// Order: default_fallback → lowest-priority enabled routable tier
+			// → any enabled tier. Never return a hardcoded model name (#291).
+			tiers := tierStore.Current()
+			if tiers == nil {
+				return ""
+			}
+			pick := func(name string) string {
+				for _, t := range tiers.Tiers {
+					if t.Name != name || !t.Enabled {
+						continue
+					}
+					if m := router.ResolveModel(t.Model); m != "" {
+						return m
+					}
+					return t.Model
+				}
+				return ""
+			}
+			if m := pick(tiers.DefaultFallback); m != "" {
+				return m
+			}
+			// Lowest-priority enabled routable tier.
+			best := ""
+			bestPriority := int(^uint(0) >> 1)
+			for _, t := range tiers.Tiers {
+				if !t.Enabled || !t.Routable {
 					continue
 				}
-				if t.Backend != "" && t.Backend != "cli" {
+				if t.Priority < bestPriority {
+					bestPriority = t.Priority
+					if m := router.ResolveModel(t.Model); m != "" {
+						best = m
+					} else {
+						best = t.Model
+					}
+				}
+			}
+			if best != "" {
+				return best
+			}
+			// Last resort: any enabled tier.
+			for _, t := range tiers.Tiers {
+				if !t.Enabled {
 					continue
 				}
 				if m := router.ResolveModel(t.Model); m != "" {

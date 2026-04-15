@@ -1,11 +1,57 @@
 package router
 
 import (
+	"bytes"
+	"log"
 	"strings"
 	"testing"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 )
+
+// TestInterpretRaw_LogsRawOnParseFailure verifies that when the classifier
+// returns unparseable output, the raw content is logged (truncated) so
+// parse failures can be diagnosed. See #194.
+func TestInterpretRaw_LogsRawOnParseFailure(t *testing.T) {
+	var buf bytes.Buffer
+	origOut := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(origOut)
+
+	tiers := defaultTiers()
+	// Garbage that neither parses as JSON nor contains a tier name.
+	raw := "zzzz garbage output that should not match any tier zzzz"
+	_ = InterpretRaw(raw, tiers, "hello")
+
+	logged := buf.String()
+	if !strings.Contains(logged, "parse failed") {
+		t.Errorf("expected 'parse failed' in log, got: %s", logged)
+	}
+	if !strings.Contains(logged, "raw=") {
+		t.Errorf("expected raw= in log, got: %s", logged)
+	}
+	if !strings.Contains(logged, "zzzz garbage") {
+		t.Errorf("expected raw sample in log, got: %s", logged)
+	}
+}
+
+// TestInterpretRaw_TruncatesLongRaw verifies the raw log preview is
+// truncated to ~200 chars to avoid flooding the log.
+func TestInterpretRaw_TruncatesLongRaw(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(log.Writer())
+
+	tiers := defaultTiers()
+	raw := strings.Repeat("x", 500)
+	_ = InterpretRaw(raw, tiers, "hello")
+
+	logged := buf.String()
+	// Ensure we don't dump all 500 chars.
+	if strings.Count(logged, "x") >= 500 {
+		t.Errorf("raw preview not truncated: logged %d chars", strings.Count(logged, "x"))
+	}
+}
 
 func defaultTiers() *cc.TiersConfig {
 	return cc.DefaultTiersConfig()

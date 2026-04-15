@@ -170,12 +170,16 @@ func (c *Consolidator) identifyActions(memoryList string) ([]consolidationAction
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
-	model := "claude-haiku-4-5"
+	// Resolve model from the configured tier — never hardcode (#291).
+	// Users may run any backend; a baked-in Claude model would bypass config.
+	var model string
 	if c.extractor.tierResolver != nil {
-		if m := c.extractor.tierResolver(); m != "" {
-			model = m
-		}
+		model = c.extractor.tierResolver()
 	}
+	if model == "" {
+		return nil, fmt.Errorf("no tier available for memory consolidation (tierResolver returned empty)")
+	}
+	log.Printf("memstore/consolidator: invoking with model=%s", model)
 
 	raw, err := c.provider.Invoke(ctx, prompt, ExtractorParams{
 		Model:    model,

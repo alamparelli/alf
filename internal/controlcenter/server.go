@@ -136,12 +136,18 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		WebFS:          webSub,
 	})
 
-	// Bind host defaults to loopback for safety (bare-metal/systemd installs).
-	// Docker Compose sets ALF_CC_BIND=0.0.0.0 in the container so the host-side
-	// port mapping (127.0.0.1:PORT:8080) can reach the container from the host.
+	// Bind host defaults to loopback for safety on bare-metal/systemd installs.
+	// Inside Docker (/.dockerenv present), default to 0.0.0.0 so reverse proxies
+	// on the container network (Traefik, nginx) can reach CC. Host-side exposure
+	// is controlled by the compose `ports:` directive, not the bind address.
+	// Explicit ALF_CC_BIND always wins.
 	bindHost := os.Getenv("ALF_CC_BIND")
 	if bindHost == "" {
-		bindHost = "127.0.0.1"
+		if _, err := os.Stat("/.dockerenv"); err == nil {
+			bindHost = "0.0.0.0"
+		} else {
+			bindHost = "127.0.0.1"
+		}
 	}
 	addr := bindHost + ":" + DefaultPort
 

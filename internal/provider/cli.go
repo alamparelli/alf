@@ -38,15 +38,26 @@ func NewCLIProvider(homeDir, dataDir string, timeout time.Duration, cred *syscal
 
 	// Create an empty MCP config file so we can pass --strict-mcp-config
 	// to disable built-in first-party MCP servers that cause startup delays.
-	mcpPath := filepath.Join(homeDir, ".claude", "empty-mcp.json")
-	_ = os.WriteFile(mcpPath, []byte(`{"mcpServers":{}}`), 0644)
+	// On fresh install, ~/.claude/ may not exist yet — create it first, and
+	// only set EmptyMCPConfig if the write succeeds (otherwise --mcp-config
+	// would point at a missing file and break the CLI, see #212).
+	mcpDir := filepath.Join(homeDir, ".claude")
+	mcpPath := filepath.Join(mcpDir, "empty-mcp.json")
+	var emptyMCP string
+	if err := os.MkdirAll(mcpDir, 0o755); err != nil {
+		log.Printf("cli-provider: mkdir %s failed: %v", mcpDir, err)
+	} else if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{}}`), 0644); err != nil {
+		log.Printf("cli-provider: write empty-mcp.json failed: %v", err)
+	} else {
+		emptyMCP = mcpPath
+	}
 
 	return &CLIProvider{
 		HomeDir:        homeDir,
 		DefaultDataDir: dataDir,
 		Timeout:        timeout,
 		Credential:     cred,
-		EmptyMCPConfig: mcpPath,
+		EmptyMCPConfig: emptyMCP,
 	}
 }
 

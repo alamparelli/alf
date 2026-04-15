@@ -54,7 +54,11 @@ func (b *EventBroker) Emit(event EventType) {
 }
 
 // EmitWithData sends a typed event with a custom data payload.
+// Safe to call on a nil broker (no-op).
 func (b *EventBroker) EmitWithData(event EventType, data string) {
+	if b == nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	msg := sseEvent{Type: event, Data: data}

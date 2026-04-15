@@ -327,9 +327,7 @@ func (h *SkillImportHandler) handleInstall(w http.ResponseWriter, req skillImpor
 	}
 
 	// Notify daemon to reload skills.
-	if h.Notifier != nil {
-		h.Notifier.Notify(ReloadSkills)
-	}
+	notifyReload(h.Notifier, ReloadSkills)
 
 	respondJSON(w, http.StatusOK, skillInstallResponse{
 		Installed: true,

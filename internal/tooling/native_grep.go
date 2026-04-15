@@ -2,7 +2,6 @@ package tooling
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -64,8 +63,8 @@ func (t GrepNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 		ContextLines    int    `json:"context_lines"`
 		FilesOnly       bool   `json:"files_only"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 	if args.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")

@@ -125,12 +125,8 @@ func (h *TeamsHandler) save(w http.ResponseWriter, r *http.Request) {
 	if h.AgentStore != nil {
 		h.AgentStore.Reload()
 	}
-	if h.Notifier != nil {
-		h.Notifier.Notify(ReloadAgents)
-	}
-	if h.EventBroker != nil {
-		h.EventBroker.Emit(EventAgents)
-	}
+	notifyReload(h.Notifier, ReloadAgents)
+	h.EventBroker.Emit(EventAgents)
 
 	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "id": tc.ID, "file": filename})
 }
@@ -195,14 +191,10 @@ func (h *TeamsHandler) del(w http.ResponseWriter, r *http.Request) {
 	if h.AgentStore != nil {
 		h.AgentStore.Reload()
 	}
-	if h.Notifier != nil {
-		h.Notifier.Notify(ReloadAgents)
-	}
-	if h.EventBroker != nil {
-		h.EventBroker.Emit(EventAgents)
-	}
+	notifyReload(h.Notifier, ReloadAgents)
+	h.EventBroker.Emit(EventAgents)
 
-	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+	respondOK(w)
 }
 
 // sanitizeTeamName returns a safe filename component from a team name.

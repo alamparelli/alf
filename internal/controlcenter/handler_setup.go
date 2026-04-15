@@ -306,7 +306,7 @@ func (h *SetupHandler) handleBackendTest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+	respondOK(w)
 }
 
 // handleTelegramValidate validates a bot token via the Telegram API.
@@ -603,23 +603,14 @@ func (h *SetupHandler) handleApply(w http.ResponseWriter, r *http.Request) {
 		ensureClaudeOnboarding()
 	}
 
-	// Notify daemon for hot-reload.
-	if h.Notifier != nil {
-		if configChanged {
-			h.Notifier.Notify(ReloadConfig)
-		}
-		if tiersChanged {
-			h.Notifier.Notify(ReloadTiers)
-		}
+	// Notify daemon for hot-reload and emit SSE events for live frontend updates.
+	if configChanged {
+		notifyReload(h.Notifier, ReloadConfig)
+		h.EventBroker.Emit(EventConfig)
 	}
-	// Emit SSE events so the frontend (chat, tiers tab) updates live.
-	if h.EventBroker != nil {
-		if configChanged {
-			h.EventBroker.Emit(EventConfig)
-		}
-		if tiersChanged {
-			h.EventBroker.Emit(EventTiers)
-		}
+	if tiersChanged {
+		notifyReload(h.Notifier, ReloadTiers)
+		h.EventBroker.Emit(EventTiers)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{

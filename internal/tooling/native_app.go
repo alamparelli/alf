@@ -41,8 +41,8 @@ func (t AppNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
 		Action string `json:"action"`
 		Slug   string `json:"slug"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 
 	switch args.Action {

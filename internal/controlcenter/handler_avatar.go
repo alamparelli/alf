@@ -108,9 +108,7 @@ func (h *AvatarHandler) handleDelete(w http.ResponseWriter) {
 }
 
 func (h *AvatarHandler) emitAvatarEvent() {
-	if h.EventBroker != nil {
-		h.EventBroker.Emit(EventAvatar)
-	}
+	h.EventBroker.Emit(EventAvatar)
 }
 
 // SetFromBytes sanitizes and saves an avatar image. Used by the native tool.

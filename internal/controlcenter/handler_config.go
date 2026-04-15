@@ -108,13 +108,9 @@ func (h *ConfigHandler) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.Notifier != nil {
-		h.Notifier.Notify(h.Event)
-	}
-	if h.EventBroker != nil {
-		h.EventBroker.Emit(EventConfig)
-	}
+	notifyReload(h.Notifier, h.Event)
+	h.EventBroker.Emit(EventConfig)
 
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 

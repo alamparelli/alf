@@ -36,8 +36,8 @@ func (t TierNativeTool) Run(_ context.Context, argsJSON string) (string, error) 
 	var args struct {
 		Action string `json:"action"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 
 	switch args.Action {

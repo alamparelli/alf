@@ -26,6 +26,11 @@ func methodNotAllowed(w http.ResponseWriter) {
 	respondJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 }
 
+// respondOK writes the standard {"ok": true} 200 JSON response.
+func respondOK(w http.ResponseWriter) {
+	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // respondError writes a JSON error response with the given status code.
 // This is the standard way to return errors from API handlers.
 func respondError(w http.ResponseWriter, status int, msg string) {

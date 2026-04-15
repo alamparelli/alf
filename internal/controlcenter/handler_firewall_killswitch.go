@@ -34,9 +34,7 @@ func (h *FirewallKillSwitchHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 			return
 		}
 		h.NetTracker.SetKillSwitch(req.Enabled)
-		if h.EventBroker != nil {
-			h.EventBroker.Emit(EventFirewall)
-		}
+		h.EventBroker.Emit(EventFirewall)
 		respondJSON(w, http.StatusOK, map[string]bool{"enabled": req.Enabled})
 
 	default:

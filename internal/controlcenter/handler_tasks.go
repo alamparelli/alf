@@ -111,9 +111,7 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 
 	// Fire and forget - task is tracked by orchestrator.running map.
 	go func() {
-		if h.EventBroker != nil {
-			h.EventBroker.Emit(EventTasks)
-		}
+		h.EventBroker.Emit(EventTasks)
 		_, meta, err := h.Orchestrator.Run(context.Background(), req.Message, orchPrep.SystemPrompts, orchPrep.Config, onProgress)
 		if err != nil {
 			log.Printf("[tasks] background task failed: %v", err)
@@ -128,12 +126,10 @@ func (h *TasksHandler) launch(w http.ResponseWriter, r *http.Request) {
 				h.OnTaskEvent("cc", meta.ID, meta.Status, summary)
 			}
 		}
-		if h.EventBroker != nil {
-			h.EventBroker.Emit(EventTasks)
-		}
+		h.EventBroker.Emit(EventTasks)
 	}()
 
-	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+	respondOK(w)
 }
 
 // resolveAgentConfig reads the orchestrator tier config to get model/effort/timeout settings.
@@ -231,7 +227,7 @@ func (h *TasksHandler) cancel(w http.ResponseWriter, r *http.Request) {
 	// action=delete removes the task from disk (completed only).
 	if r.URL.Query().Get("action") == "delete" {
 		ok := h.Orchestrator.DeleteTask(id)
-		if ok && h.EventBroker != nil {
+		if ok {
 			h.EventBroker.Emit(EventTasks)
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"deleted": ok})
@@ -239,7 +235,7 @@ func (h *TasksHandler) cancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ok := h.Orchestrator.Cancel(id)
-	if ok && h.EventBroker != nil {
+	if ok {
 		h.EventBroker.Emit(EventTasks)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"cancelled": ok})

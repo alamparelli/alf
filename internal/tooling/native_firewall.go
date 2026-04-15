@@ -2,7 +2,6 @@ package tooling
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -75,8 +74,8 @@ func (t FirewallNativeTool) Run(_ context.Context, argsJSON string) (string, err
 		Limit  int    `json:"limit"`
 		Query  string `json:"query"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 
 	switch args.Action {

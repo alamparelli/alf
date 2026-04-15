@@ -97,13 +97,9 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusInternalServerError, "save failed: " + err.Error())
 			return
 		}
-		if h.Notifier != nil {
-			h.Notifier.Notify(ReloadTiers)
-		}
-		if h.EventBroker != nil {
-			h.EventBroker.Emit(EventTiers)
-		}
-		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		notifyReload(h.Notifier, ReloadTiers)
+		h.EventBroker.Emit(EventTiers)
+		respondOK(w)
 
 	default:
 		methodNotAllowed(w)
@@ -294,17 +290,12 @@ func (h *TierConfigsHandler) handleSwitch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if h.Notifier != nil {
-		h.Notifier.Notify(ReloadTiers)
-		h.Notifier.Notify(ReloadConfig)
-	}
-	if h.EventBroker != nil {
-		h.EventBroker.Emit(EventTiers)
-		h.EventBroker.Emit(EventConfig)
-	}
+	notifyReload(h.Notifier, ReloadTiers, ReloadConfig)
+	h.EventBroker.Emit(EventTiers)
+	h.EventBroker.Emit(EventConfig)
 
 	log.Printf("[tiers] switched to %s", req.Name)
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 func (h *TierConfigsHandler) handleDuplicate(w http.ResponseWriter, r *http.Request) {
@@ -347,5 +338,5 @@ func (h *TierConfigsHandler) handleDuplicate(w http.ResponseWriter, r *http.Requ
 	}
 
 	log.Printf("[tiers] duplicated %s → %s", req.Source, req.Name)
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }

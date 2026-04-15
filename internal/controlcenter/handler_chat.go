@@ -131,11 +131,9 @@ func (h *ChatActiveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.Service.SetActiveConvID(req.ConvID)
-		if h.EventBroker != nil {
-			payload, _ := json.Marshal(map[string]string{"conv_id": req.ConvID, "client_id": req.ClientID})
-			h.EventBroker.EmitWithData(EventActiveConv, string(payload))
-		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		payload, _ := json.Marshal(map[string]string{"conv_id": req.ConvID, "client_id": req.ClientID})
+		h.EventBroker.EmitWithData(EventActiveConv, string(payload))
+		respondOK(w)
 	default:
 		methodNotAllowed(w)
 	}
@@ -168,7 +166,7 @@ func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		if h.Service.ChatDB != nil {
 			h.Service.ChatDB.UpdateConversation(convID, req.Title)
 		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		respondOK(w)
 	case http.MethodDelete:
 		if h.Service.ChatDB != nil {
 			// Clean up expired media files before archiving.
@@ -188,7 +186,7 @@ func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			}
 			h.Service.ChatDB.ArchiveConversation(convID)
 		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		respondOK(w)
 	default:
 		methodNotAllowed(w)
 	}
@@ -222,7 +220,7 @@ func (h *ChatSkillsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.Service.ClearActiveSkillsForConv(convID)
 		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		respondOK(w)
 	default:
 		methodNotAllowed(w)
 	}
@@ -285,7 +283,7 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Printf("[chat-job] DELETE: no active job found for conv_id=%q", convID)
 		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		respondOK(w)
 
 	default:
 		methodNotAllowed(w)

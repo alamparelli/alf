@@ -109,12 +109,10 @@ func (h *ResourceHandler) put(w http.ResponseWriter, r *http.Request, name strin
 		return
 	}
 
-	if h.Notifier != nil {
-		h.Notifier.Notify(h.Event)
-	}
+	notifyReload(h.Notifier, h.Event)
 	h.emitEvent()
 
-	w.Write([]byte(`{"ok":true}`))
+	respondOK(w)
 }
 
 func (h *ResourceHandler) del(w http.ResponseWriter, name string) {
@@ -129,12 +127,10 @@ func (h *ResourceHandler) del(w http.ResponseWriter, name string) {
 		return
 	}
 
-	if h.Notifier != nil {
-		h.Notifier.Notify(h.Event)
-	}
+	notifyReload(h.Notifier, h.Event)
 	h.emitEvent()
 
-	w.Write([]byte(`{"ok":true}`))
+	respondOK(w)
 }
 
 // emitEvent maps the ReloadEvent to the corresponding EventType for SSE.

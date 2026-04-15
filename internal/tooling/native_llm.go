@@ -78,8 +78,8 @@ func (t LLMNativeTool) Run(ctx context.Context, argsJSON string) (string, error)
 		ChainID       string         `json:"chain_id"`    // internal, propagated between steps
 		Origin        ChainOrigin    `json:"origin"`      // internal, propagated for callback routing
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 	if args.Tier == "" {
 		return "", fmt.Errorf("tier is required")

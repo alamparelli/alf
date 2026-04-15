@@ -257,32 +257,30 @@ func HandlerFactory(deps Deps) Handlers {
 		appStorage := &AppStorageHandler{DataDir: deps.DataDir, Perms: permChecker}
 		appUpload := &AppUploadHandler{DataDir: deps.DataDir, Perms: permChecker}
 		appErrors := &AppErrorHandler{DataDir: deps.DataDir, Journal: deps.ErrorJournal}
+		// Sub-route dispatch: /api/apps/{slug}/{action}. Matches on the
+		// trailing action segment so slugs that happen to contain an action
+		// keyword (e.g. "storage-helper") don't get misrouted.
 		mux.Handle("/api/apps/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.Contains(r.URL.Path, "/storage") {
+			action := ""
+			if i := strings.LastIndex(r.URL.Path, "/"); i >= 0 {
+				action = r.URL.Path[i+1:]
+			}
+			switch action {
+			case "storage":
 				appStorage.ServeHTTP(w, r)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/upload") {
+			case "upload":
 				appUpload.ServeHTTP(w, r)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/errors") {
+			case "errors":
 				appErrors.ServeHTTP(w, r)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/permissions") {
+			case "permissions":
 				handleAppPermissions(w, r, permChecker)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/token") {
+			case "token":
 				handleAppToken(w, r, deps.AppTokens)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/restart") {
+			case "restart":
 				handleAppRestart(w, r)
-				return
+			default:
+				(&AppListHandler{Store: deps.AppStore}).ServeHTTP(w, r)
 			}
-			(&AppListHandler{Store: deps.AppStore}).ServeHTTP(w, r)
 		}))
 		mux.Handle("/apps/", &AppHandler{
 			Store:     deps.AppStore,

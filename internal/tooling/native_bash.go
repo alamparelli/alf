@@ -3,7 +3,6 @@ package tooling
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -87,8 +86,8 @@ func (t BashNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 		Command string `json:"command"`
 		Timeout int    `json:"timeout"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 	if args.Command == "" {
 		return "", fmt.Errorf("command is required")

@@ -249,6 +249,43 @@ func TestWorkspace_NormalFileEditable(t *testing.T) {
 	}
 }
 
+func TestWorkspace_PUT_PreservesFileMode(t *testing.T) {
+	h, dataDir, _, _ := newTestWorkspaceHandler(t)
+	path := filepath.Join(dataDir, "notes.md")
+	os.WriteFile(path, []byte("old"), 0o664)
+	os.Chmod(path, 0o664) // bypass umask
+
+	rec := wsPut(h, "notes.md", "new content")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o664 {
+		t.Errorf("file mode = %o, want 0664", got)
+	}
+}
+
+func TestWorkspace_PUT_NewFileDefaultsTo0664(t *testing.T) {
+	h, dataDir, _, _ := newTestWorkspaceHandler(t)
+
+	rec := wsPut(h, "fresh.md", "hi")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	info, err := os.Stat(filepath.Join(dataDir, "fresh.md"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o664 {
+		t.Errorf("new file mode = %o, want 0664", got)
+	}
+}
+
 // --- PUT saves content correctly ---
 
 func TestWorkspace_PUT_SavesJSONContent(t *testing.T) {

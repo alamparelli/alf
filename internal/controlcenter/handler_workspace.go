@@ -371,6 +371,14 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 		return
 	}
 
+	// Preserve existing file mode across the atomic replace. CreateTemp
+	// produces 0600 files; without this, rename would drop the original
+	// file's permissions (e.g. 0664) and break group-write access.
+	mode := os.FileMode(0o664)
+	if info, err := os.Stat(absPath); err == nil {
+		mode = info.Mode().Perm()
+	}
+
 	// Atomic write: tmp file + rename.
 	dir := filepath.Dir(absPath)
 	tmp, err := os.CreateTemp(dir, ".ws-*.tmp")
@@ -387,6 +395,12 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 		return
 	}
 	tmp.Close()
+
+	if err := os.Chmod(tmpName, mode); err != nil {
+		os.Remove(tmpName)
+		respondError(w, http.StatusInternalServerError, "write failed: "+err.Error())
+		return
+	}
 
 	if err := os.Rename(tmpName, absPath); err != nil {
 		os.Remove(tmpName)

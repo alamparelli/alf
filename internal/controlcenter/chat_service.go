@@ -323,7 +323,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		tierMatched := false
 
 		for _, t := range cs.TierStore.Current().Tiers {
-			if t.Enabled && t.ForceCommand && t.Name == cmdName {
+			if t.Enabled && t.ForceCommand && (t.Name == cmdName || SanitizeTierCommand(t.Name) == cmdName) {
 				tierMatched = true
 				cs.Sessions.SetForcedTier(sessID, t.Name)
 				sysText := fmt.Sprintf("Session locked to **%s**. Use /new to reset.", t.Name)

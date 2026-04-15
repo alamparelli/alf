@@ -2,9 +2,68 @@ package provider
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+// TestNewCLIProvider_CreatesEmptyMCPConfig verifies empty-mcp.json is
+// created and EmptyMCPConfig is set so --strict-mcp-config works. See #212.
+func TestNewCLIProvider_CreatesEmptyMCPConfig(t *testing.T) {
+	home := t.TempDir()
+	p := NewCLIProvider(home, home, 0, nil)
+
+	expected := filepath.Join(home, ".claude", "empty-mcp.json")
+	if p.EmptyMCPConfig != expected {
+		t.Fatalf("EmptyMCPConfig=%q, want %q", p.EmptyMCPConfig, expected)
+	}
+	data, err := os.ReadFile(expected)
+	if err != nil {
+		t.Fatalf("empty-mcp.json not created: %v", err)
+	}
+	if string(data) != `{"mcpServers":{}}` {
+		t.Errorf("empty-mcp.json contents unexpected: %s", data)
+	}
+}
+
+// TestNewCLIProvider_FreshInstallCreatesClaudeDir verifies that on a
+// fresh install where ~/.claude/ does not yet exist, NewCLIProvider
+// creates the directory rather than failing silently. See #212.
+func TestNewCLIProvider_FreshInstallCreatesClaudeDir(t *testing.T) {
+	home := t.TempDir()
+	// Do NOT pre-create ~/.claude/ — simulate fresh install.
+
+	p := NewCLIProvider(home, home, 0, nil)
+
+	claudeDir := filepath.Join(home, ".claude")
+	if fi, err := os.Stat(claudeDir); err != nil || !fi.IsDir() {
+		t.Fatalf(".claude dir not created on fresh install: %v", err)
+	}
+	if p.EmptyMCPConfig == "" {
+		t.Error("EmptyMCPConfig is empty — --strict-mcp-config would break")
+	}
+	if _, err := os.Stat(p.EmptyMCPConfig); err != nil {
+		t.Errorf("empty-mcp.json missing at %q: %v", p.EmptyMCPConfig, err)
+	}
+}
+
+// TestNewCLIProvider_UnwritableHomeFallsBack verifies that when the home
+// directory cannot be written, EmptyMCPConfig is left empty so the CLI
+// invocation does not pass --mcp-config with a broken path.
+func TestNewCLIProvider_UnwritableHomeFallsBack(t *testing.T) {
+	// Point at a path that cannot exist as a directory (parent is a file).
+	parent := t.TempDir()
+	blocker := filepath.Join(parent, "blocker")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	home := filepath.Join(blocker, "home") // cannot mkdir under a regular file
+
+	p := NewCLIProvider(home, home, 0, nil)
+
+	if p.EmptyMCPConfig != "" {
+		t.Errorf("expected EmptyMCPConfig to be empty on mkdir failure, got %q", p.EmptyMCPConfig)
+	}
+}
 
 func TestNewCLIProvider_DefaultTimeout(t *testing.T) {
 	p := NewCLIProvider("/tmp", "/tmp", 0, nil)

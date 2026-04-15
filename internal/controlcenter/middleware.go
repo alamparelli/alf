@@ -130,6 +130,7 @@ func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, ext
 func stripToolsSocketHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del("X-Tools-Socket")
+		r.Header.Del("X-Tools-Socket-App")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -261,6 +262,14 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 			// Only trusted on Unix socket connections — the TCP server strips this
 			// header via stripToolsSocketHeader() to prevent external forgery.
 			if r.Header.Get("X-Tools-Socket") == "1" {
+				// Per-app variant: if the socket belongs to a specific app
+				// (AppToolsProxy), propagate the slug into context so handlers
+				// like /api/bash can enforce app-scoped permissions.
+				if appSlug := r.Header.Get("X-Tools-Socket-App"); appSlug != "" {
+					ctx := context.WithValue(r.Context(), ctxKeyAppTokenSlug{}, appSlug)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
 				next.ServeHTTP(w, r)
 				return
 			}

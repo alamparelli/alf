@@ -60,7 +60,17 @@ type Supervisor struct {
 	servicesFn    func(string) []string          // returns declared vault services for a slug
 	vaultProxies  map[string]*vault.VaultProxy   // slug → running proxy
 	vaultListeners map[string]net.Listener       // slug → proxy socket listener
+
+	// App tools proxy: per-app socket that exposes a slug-scoped subset of the
+	// CC HTTP API (includes /api/bash with permission check). Set via
+	// SetAppTools. See controlcenter.AppToolsProxy.
+	appToolsFactory   AppToolsListener            // opens per-app listener
+	appToolsListeners map[string]net.Listener     // slug → listener
 }
+
+// AppToolsListener is the factory injected by the daemon to start a per-app
+// tools socket. Kept as a function to avoid importing controlcenter here.
+type AppToolsListener func(sockPath, slug string) (net.Listener, error)
 
 type managedProc struct {
 	config   ServiceConfig
@@ -95,6 +105,47 @@ func (s *Supervisor) SetVault(vaultSocket, proxyToken string, servicesFn func(st
 	s.servicesFn = servicesFn
 	s.vaultProxies = make(map[string]*vault.VaultProxy)
 	s.vaultListeners = make(map[string]net.Listener)
+}
+
+// SetAppTools configures the per-app tools socket factory. When set, every
+// supervised app gets a <workDir>/tools.sock whose path is exported as
+// ALF_TOOLS_SOCK inside the sandbox. Must be called before Start().
+func (s *Supervisor) SetAppTools(factory AppToolsListener) {
+	s.appToolsFactory = factory
+	s.appToolsListeners = make(map[string]net.Listener)
+}
+
+// appToolsSockPath returns the per-app tools socket path. Lives inside the
+// app workdir so it is bind-mounted RW into the sandbox automatically.
+func (s *Supervisor) appToolsSockPath(slug string) string {
+	return filepath.Join(s.appsDir, slug, "tools.sock")
+}
+
+func (s *Supervisor) startAppTools(slug string) {
+	if s.appToolsFactory == nil {
+		return
+	}
+	sockPath := s.appToolsSockPath(slug)
+	ln, err := s.appToolsFactory(sockPath, slug)
+	if err != nil {
+		log.Printf("supervisor: [%s] app tools socket failed: %v", slug, err)
+		return
+	}
+	s.mu.Lock()
+	s.appToolsListeners[slug] = ln
+	s.mu.Unlock()
+}
+
+func (s *Supervisor) stopAppTools(slug string) {
+	s.mu.Lock()
+	ln := s.appToolsListeners[slug]
+	delete(s.appToolsListeners, slug)
+	s.mu.Unlock()
+	if ln != nil {
+		ln.Close()
+		os.Remove(s.appToolsSockPath(slug))
+		log.Printf("supervisor: [%s] app tools socket stopped", slug)
+	}
 }
 
 // UpdateProxyToken updates the vault proxy token for all running per-app proxies.
@@ -191,6 +242,8 @@ func (s *Supervisor) StopApp(slug string) {
 	if s.vaultProxies != nil {
 		s.stopVaultProxy(slug)
 	}
+	// Clean up per-app tools socket.
+	s.stopAppTools(slug)
 }
 
 // RestartApp stops then starts an app service (e.g. after marketplace update).
@@ -223,6 +276,17 @@ func (s *Supervisor) Stop() {
 		if p.cmd != nil && p.cmd.Process != nil {
 			p.cmd.Process.Kill()
 		}
+	}
+
+	// Close per-app tools sockets.
+	s.mu.Lock()
+	slugs := make([]string, 0, len(s.appToolsListeners))
+	for slug := range s.appToolsListeners {
+		slugs = append(slugs, slug)
+	}
+	s.mu.Unlock()
+	for _, slug := range slugs {
+		s.stopAppTools(slug)
 	}
 }
 
@@ -301,6 +365,9 @@ func (s *Supervisor) startService(slug string, cfg ServiceConfig) {
 			s.startVaultProxy(slug, svcs)
 		}
 	}
+
+	// Create per-app tools socket (exposes slug-scoped CC HTTP subset).
+	s.startAppTools(slug)
 
 	p := &managedProc{
 		config:  cfg,
@@ -552,6 +619,16 @@ func (s *Supervisor) buildCmd(p *managedProc) (*exec.Cmd, error) {
 			sandboxCfg.VaultSocket = vaultSockPath
 			cmd.Env = append(cmd.Env, "VAULT_PROXY_SOCK="+vaultSockPath)
 		}
+	}
+
+	// If this app has a tools socket, expose it as ALF_TOOLS_SOCK. The socket
+	// lives inside p.workDir and is bind-mounted RW into the sandbox via AppDir,
+	// so no extra mount is needed.
+	s.mu.Lock()
+	_, hasAppTools := s.appToolsListeners[p.appSlug]
+	s.mu.Unlock()
+	if hasAppTools {
+		cmd.Env = append(cmd.Env, "ALF_TOOLS_SOCK="+s.appToolsSockPath(p.appSlug))
 	}
 
 	tooling.SandboxServerCmd(cmd, sandboxCfg)

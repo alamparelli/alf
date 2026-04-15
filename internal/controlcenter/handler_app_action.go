@@ -125,6 +125,7 @@ func (h *AppActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			proxyReq.Header.Del("Cookie")
 			proxyReq.Header.Del("Authorization")
 			proxyReq.Header.Del("X-Tools-Socket")
+			proxyReq.Header.Del("X-Tools-Socket-App")
 			proxyReq.Header.Del("X-Requested-With")
 			// SEC-007: Strip forwarded headers.
 			proxyReq.Header.Del("X-Forwarded-Host")

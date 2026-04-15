@@ -1233,6 +1233,13 @@ func main() {
 	if vaultMgr != nil && vaultMgr.ProxyToken() != "" && mpManager != nil {
 		appsSupervisor.SetVault(vaultMgr.SocketPath(), vaultMgr.ProxyToken(), mpManager.GetServices)
 	}
+	// Per-app tools sockets: each supervised app gets <workDir>/tools.sock
+	// serving a slug-scoped CC subset (reads + /api/bash with permission check).
+	if ccServerRef != nil {
+		appsSupervisor.SetAppTools(func(sockPath, slug string) (net.Listener, error) {
+			return cc.ListenAndServeAppTools(sockPath, slug, ccServerRef.InternalHandler())
+		})
+	}
 	// Always register OnTokenUpdate — vault may be unlocked after boot via CC.
 	if vaultMgr != nil {
 		vaultMgr.OnTokenUpdate = func(token string) {

@@ -1472,6 +1472,41 @@ a:hover { text-decoration: underline; }
   border-bottom: none;
 }
 
+/* ── <alf-accordion-item> web-component pattern ─────────────────────── */
+/* Coexists with the <details>/<summary> rules above. Used when authors  */
+/* compose via <alf-accordion><alf-accordion-item label="...">.          */
+.accordion-item { display: block; }
+.accordion-item + .accordion-item { border-top: 1px solid var(--border); }
+.accordion-item .accordion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: var(--spacing-md, 12px);
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+.accordion-item .accordion-header:hover { color: var(--accent); }
+.accordion-item .accordion-chevron { transition: transform 0.2s; }
+.accordion-item.open .accordion-chevron { transform: rotate(180deg); }
+.accordion-item .accordion-body {
+  display: none;
+  padding: var(--spacing-md, 12px);
+  border-top: 1px solid var(--border);
+}
+.accordion-item.open .accordion-body { display: block; }
+
+/* ── <alf-select> option leak guard ─────────────────────────────────── */
+/* Hide raw <option> children when alf-select hasn't rendered its own    */
+/* <select> yet (e.g. inside alf-dialog, or during re-render).           */
+alf-select > option { display: none; }
+
 /* ── Prose / Markdown ─────────────────────────────────────────────────── */
 /* Apply .prose to any container that renders markdown or rich text.       */
 .prose { line-height: 1.7; color: var(--text); }

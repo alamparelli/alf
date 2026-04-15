@@ -3,7 +3,7 @@ class AlfToggle extends HTMLElement {
   connectedCallback() {
     const checked = this.hasAttribute('checked');
     const name = this.getAttribute('name') || '';
-    this.innerHTML = `<label class="toggle"><input type="checkbox" ${checked ? 'checked' : ''} name="${name}"><span class="toggle-slider"></span></label>`;
+    this.innerHTML = `<label class="toggle"><input type="checkbox" ${checked ? 'checked' : ''} name="${name}"><span class="toggle-track"></span></label>`;
     this.querySelector('input').addEventListener('change', (e) => {
       this.toggleAttribute('checked', e.target.checked);
       fire(this, 'alf-change', { checked: e.target.checked, name });

@@ -38,8 +38,15 @@ export async function api<T = any>(pathOrMethod: string, optsOrPath?: RequestIni
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }))
-    throw body
+    const payload = await res.json().catch(() => null)
+    const msg =
+      (payload && (payload.error || payload.message)) ||
+      res.statusText ||
+      `HTTP ${res.status}`
+    const err = new Error(msg) as Error & Record<string, any>
+    if (payload && typeof payload === 'object') Object.assign(err, payload)
+    err.status = res.status
+    throw err
   }
 
   return res.json()

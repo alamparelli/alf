@@ -2048,6 +2048,15 @@ func refreshTelegramCommands(tg *tgclient.Client, tierStore cc.TierStore) {
 			if !t.Enabled || !t.ForceCommand {
 				continue
 			}
+			// Telegram rejects the whole batch with BOT_COMMAND_INVALID if any
+			// command name doesn't match ^[a-z0-9_]{1,32}$ — hyphens (common
+			// in tier names like "codex-fast") are not allowed. Skip invalid
+			// names so the menu still publishes; the command itself still
+			// works when typed literally in chat.
+			if !isValidTelegramCommand(t.Name) {
+				log.Printf("[telegram] skipping tier %q from bot menu (invalid command name, must match ^[a-z0-9_]{1,32}$)", t.Name)
+				continue
+			}
 			desc := fmt.Sprintf("Force reply from %s tier", t.Name)
 			if t.Model != "" {
 				desc = fmt.Sprintf("Force reply from %s (%s)", t.Name, t.Model)
@@ -2061,6 +2070,22 @@ func refreshTelegramCommands(tg *tgclient.Client, tierStore cc.TierStore) {
 	if err := tg.SetMyCommands(cmds); err != nil {
 		log.Printf("[telegram] setMyCommands: %v", err)
 	}
+}
+
+// isValidTelegramCommand reports whether name satisfies Telegram's bot
+// command naming rule: 1–32 chars, lowercase ASCII letters / digits /
+// underscores only. Names failing this rule cause the API to reject the
+// entire setMyCommands call with BOT_COMMAND_INVALID.
+func isValidTelegramCommand(name string) bool {
+	if len(name) < 1 || len(name) > 32 {
+		return false
+	}
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveEmbedder picks the best available embedder implementation.

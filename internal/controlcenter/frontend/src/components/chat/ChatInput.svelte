@@ -376,7 +376,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     resize: none;
     overflow-y: auto;
     line-height: 1.5;

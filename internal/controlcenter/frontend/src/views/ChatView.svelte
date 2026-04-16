@@ -10,6 +10,7 @@
   import { toasts } from '../stores/toast.svelte'
   import { nav } from '../stores/nav.svelte'
   import { sound } from '../stores/sound.svelte'
+  import { chatUI } from '../stores/chat-ui.svelte'
   import { events } from '../stores/events.svelte'
   import { convStore } from '../stores/conversations.svelte'
 
@@ -698,6 +699,7 @@
   let unsubActiveConv: (() => void) | null = null
 
   onMount(async () => {
+    chatUI.setFontSize(chatUI.fontSize)
     // Request notification permission
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()

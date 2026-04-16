@@ -56,6 +56,7 @@
 
   let showEmojiPicker = $state(false)
   let copied = $state(false)
+  let localReactions = $state<Reaction[]>(msg.reactions || [])
   let lightboxSrc = $state('')
   let reactBtnEl: HTMLButtonElement | undefined = $state()
   let pickerStyle = $state('')
@@ -230,16 +231,9 @@
     showEmojiPicker = false
     try {
       const result = await api('POST', '/api/chat/react', { msg_id: msg.id, emoji })
-      // Optimistically add user reaction locally
-      const newReaction: Reaction = { emoji, from: 'user' }
-      if (msg.reactions) {
-        msg.reactions = [...msg.reactions, newReaction]
-      } else {
-        msg.reactions = [newReaction]
-      }
-      // Add ALF's mirror reaction if returned
+      localReactions = [...localReactions, { emoji, from: 'user' }]
       if (result.mirror) {
-        msg.reactions = [...msg.reactions, { emoji: result.mirror, from: 'alf' }]
+        localReactions = [...localReactions, { emoji: result.mirror, from: 'alf' }]
       }
     } catch (e: any) {
       toasts.show(e.error || 'Failed to react', 'error')
@@ -406,9 +400,9 @@
     {/if}
 
     <!-- Reactions -->
-    {#if msg.reactions && msg.reactions.length > 0}
+    {#if localReactions.length > 0}
       <div class="msg-reactions">
-        {#each msg.reactions as r}
+        {#each localReactions as r}
           <span class="reaction-chip" class:reaction-alf={r.from === 'alf'}>{r.emoji}</span>
         {/each}
       </div>

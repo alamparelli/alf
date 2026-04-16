@@ -66,6 +66,26 @@ func TestIntegrity_NewTool_Registered(t *testing.T) {
 	}
 }
 
+func TestIntegrity_NonExecutable_NotRegistered(t *testing.T) {
+	_, ig, toolsDir := setupIntegrityTest(t)
+
+	// Write a non-executable file (e.g. README.md, mode 0644).
+	readmePath := filepath.Join(toolsDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# Tools\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	ig.scan(true)
+
+	ig.mu.Lock()
+	_, ok := ig.manifest["README.md"]
+	ig.mu.Unlock()
+
+	if ok {
+		t.Fatal("README.md should not be registered as a tool (not executable)")
+	}
+}
+
 func TestIntegrity_UnchangedTool_NotQuarantined(t *testing.T) {
 	_, ig, toolsDir := setupIntegrityTest(t)
 	writeTool(t, toolsDir, "hello", "#!/bin/sh\necho hello")

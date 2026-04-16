@@ -163,6 +163,11 @@ func (ig *IntegrityGuard) scan(initial bool) {
 			continue
 		}
 
+		// Skip non-executable files (e.g. README.md, docs) — only binaries/scripts are tools.
+		if info.Mode()&0111 == 0 {
+			continue
+		}
+
 		entry, exists := ig.manifest[name]
 
 		// Fast path: skip if size and mtime haven't changed.

@@ -308,6 +308,7 @@ func TestRecent(t *testing.T) {
 
 func TestRecentLimit(t *testing.T) {
 	s := newTestStore(t)
+	s.SetDedupConfig(DedupConfig{TextThreshold: 1.1}) // disable dedup — test targets limit, not dedup
 
 	for i := 0; i < 5; i++ {
 		s.Store("unique bulk fact number "+string(rune('A'+i))+" about testing", "fact", "test", nil)
@@ -520,6 +521,7 @@ func TestTruncate(t *testing.T) {
 
 func TestConcurrentStoreAndSearch(t *testing.T) {
 	s := newTestStore(t)
+	s.SetDedupConfig(DedupConfig{TextThreshold: 1.1}) // disable dedup — test targets concurrency, not dedup
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 20)

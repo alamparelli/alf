@@ -830,11 +830,6 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	}
 	PrintCheck("tiers.json")
 
-	if err := SeedBootstrapScript(dir); err != nil {
-		Fatal(fmt.Sprintf("Failed to write bootstrap.sh: %v", err))
-	}
-	PrintCheck("bootstrap.sh")
-
 	// Write runtime.txt with JS runtime choice (if selected).
 	writeRuntimeTxt(dir, compose.JSRuntime)
 

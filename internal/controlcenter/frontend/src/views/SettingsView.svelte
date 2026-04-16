@@ -6,6 +6,7 @@
   import { toasts } from '../stores/toast.svelte'
   import { sound } from '../stores/sound.svelte'
   import { lensSettings } from '../stores/lens.svelte'
+  import { chatUI, CHAT_FONT_PRESETS, type ChatFontSize } from '../stores/chat-ui.svelte'
   import { api, esc, waitForDaemonAndReload } from '../lib/api'
 
   // --- Lens shortcut ---
@@ -32,6 +33,11 @@
   function onThemeChange(e: Event) {
     const select = e.target as HTMLSelectElement
     theme.apply(select.value)
+  }
+
+  function onChatFontSizeChange(e: Event) {
+    const select = e.target as HTMLSelectElement
+    chatUI.setFontSize(select.value as ChatFontSize)
   }
 
   // --- Restart ---
@@ -169,6 +175,18 @@
         {/each}
       </select>
       <span class="hint">Light/dark follows your system.</span>
+    </div>
+  </Card>
+
+  <Card>
+    <div class="row">
+      <h3>Chat</h3>
+      <select class="settings-select" value={chatUI.fontSize} onchange={onChatFontSizeChange}>
+        {#each Object.entries(CHAT_FONT_PRESETS) as [key, preset]}
+          <option value={key}>{preset.label}</option>
+        {/each}
+      </select>
+      <span class="hint">Applies to chat messages and the composer.</span>
     </div>
   </Card>
 

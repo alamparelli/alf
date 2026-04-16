@@ -36,6 +36,10 @@ class ConversationStore {
       }
       this.persistConvId()
       this.loaded = true
+      // Fresh install: no conversations yet — create the first one automatically.
+      if (all.length === 0) {
+        await this.create()
+      }
     } catch { /* server not ready */ }
   }
 

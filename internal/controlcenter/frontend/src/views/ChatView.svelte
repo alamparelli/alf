@@ -62,7 +62,11 @@
 
   // Block visibility filter (#196)
   type ChatFilter = 'all' | 'clean' | 'thinking' | 'tools'
-  let chatFilter = $state<ChatFilter>((localStorage.getItem('alf-chat-filter') as ChatFilter) || 'all')
+  const savedChatFilter = localStorage.getItem('alf-chat-filter') as ChatFilter | null
+  const isValidChatFilter = (value: string | null): value is ChatFilter => (
+    value === 'all' || value === 'clean' || value === 'thinking' || value === 'tools'
+  )
+  let chatFilter = $state<ChatFilter>(isValidChatFilter(savedChatFilter) ? savedChatFilter : 'clean')
   let hideThinking = $derived(chatFilter === 'clean' || chatFilter === 'tools')
   let hideTools = $derived(chatFilter === 'clean' || chatFilter === 'thinking')
 

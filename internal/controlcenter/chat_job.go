@@ -64,6 +64,12 @@ func (j *chatJob) isDone() bool {
 	return j.done || j.cancelled
 }
 
+func (j *chatJob) wasCancelled() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.cancelled
+}
+
 func (j *chatJob) eventCount() int {
 	j.mu.Lock()
 	defer j.mu.Unlock()

@@ -527,7 +527,7 @@
   .chat-msg-system {
     background: var(--bg-input);
     color: var(--text-dim);
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     font-style: italic;
     max-width: 100%;
     text-align: center;
@@ -536,7 +536,7 @@
 
   /* Markdown content */
   .msg-text {
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     line-height: 1.6;
   }
 
@@ -558,7 +558,7 @@
     padding: 8px 12px;
     border-radius: 6px;
     overflow-x: auto;
-    font-size: var(--font-sm, 13px);
+    font-size: calc(var(--alf-chat-font-size, var(--font-sm, 13px)) * var(--alf-chat-mono-scale, 0.82));
     margin: 8px 0;
   }
 
@@ -585,7 +585,7 @@
     border-collapse: collapse;
     width: 100%;
     margin: 8px 0;
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
   }
 
   .msg-text :global(th),
@@ -637,7 +637,7 @@
     border: none;
     color: inherit;
     font-family: inherit;
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     font-weight: 500;
     cursor: pointer;
     text-align: left;
@@ -651,14 +651,14 @@
   .block-body {
     padding: 8px 10px;
     background: color-mix(in srgb, var(--text) 8%, transparent);
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
   }
 
   .block-body pre {
     white-space: pre-wrap;
     word-break: break-word;
     font-family: 'JetBrains Mono', monospace;
-    font-size: var(--font-xs, 11px);
+    font-size: calc(var(--alf-chat-font-size, var(--font-sm, 13px)) * var(--alf-chat-mono-scale, 0.82));
     margin: 0;
   }
 
@@ -718,7 +718,7 @@
     padding: 4px 8px;
     background: color-mix(in srgb, var(--text) 10%, transparent);
     border-radius: 4px;
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
   }
 
   /* Footer */
@@ -731,12 +731,12 @@
   }
 
   .msg-time {
-    font-size: var(--font-xs, 11px);
+    font-size: var(--alf-chat-meta-font-size, var(--font-xs, 11px));
     opacity: 0.5;
   }
 
   .msg-model, .msg-cost, .msg-duration, .msg-skills {
-    font-size: var(--font-xs, 11px);
+    font-size: var(--alf-chat-meta-font-size, var(--font-xs, 11px));
     opacity: 0.5;
     font-family: 'JetBrains Mono', monospace;
   }
@@ -748,7 +748,7 @@
   }
 
   .reaction-chip {
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     padding: 1px 4px;
     border-radius: 4px;
     background: color-mix(in srgb, var(--text) 8%, transparent);

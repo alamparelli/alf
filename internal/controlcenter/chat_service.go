@@ -106,6 +106,10 @@ type ChatService struct {
 	jobMu        sync.Mutex
 	lastChatConv string // last conv_id used by the CC chat frontend
 
+	// askOverride, if non-nil, replaces askViaEngine. Test-only seam for
+	// exercising StartJob concurrency without standing up a full ChatEngine.
+	askOverride func(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error
+
 	// Upload registry: upload_id → UploadEntry
 	uploads   map[string]*UploadEntry
 	uploadsMu sync.Mutex
@@ -259,6 +263,9 @@ func (cs *ChatService) GetUpload(id string) *UploadEntry {
 func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if cs.askOverride != nil {
+		return cs.askOverride(ctx, req, onEvent)
 	}
 	return cs.askViaEngine(ctx, req, onEvent)
 }

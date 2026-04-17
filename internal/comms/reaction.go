@@ -227,5 +227,6 @@ func (e *ChatEngine) resolveFallbackModel() string {
 			return t.Model
 		}
 	}
-	return "claude-haiku-4-5"
+	// No matching tier — resolve from the configured fallback, never hardcode.
+	return DefaultFallbackModel(e.TierStore.Snapshot(), e.ResolveModel)
 }

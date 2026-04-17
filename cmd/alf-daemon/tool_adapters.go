@@ -52,6 +52,9 @@ func (a *taskAdapter) Launch(ctx context.Context, opts tooling.TaskLaunchOpts) (
 
 	// Resolve agent tier config (uses default orchestrator tier).
 	rc := a.resolveAgentConfig("")
+	if rc.Model == "" {
+		return "", fmt.Errorf("orchestrator tier has no model configured — set a model in the orchestrator tier config")
+	}
 
 	orchPrep := agents.PrepareOrchestration(agents.OrchestrationInputs{
 		UserMessage:          opts.Prompt,

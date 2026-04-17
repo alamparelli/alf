@@ -10,5 +10,5 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }

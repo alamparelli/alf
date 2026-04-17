@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -38,8 +39,30 @@ type DedupConfig struct {
 type Store struct {
 	db       *sql.DB
 	embedder EmbedderI
-	dedup    DedupConfig
+	dedup    atomic.Value // DedupConfig, swappable at runtime (hot reload)
 	mu       sync.RWMutex
+}
+
+// dedupCfg returns the current dedup config (lock-free read).
+func (s *Store) dedupCfg() DedupConfig {
+	if v := s.dedup.Load(); v != nil {
+		return v.(DedupConfig)
+	}
+	return DedupConfig{TextThreshold: 0.7, CosineThreshold: 0.15}
+}
+
+// SetDedupConfig atomically updates dedup thresholds. Values <= 0 keep existing.
+// Returns the effective config after merge.
+func (s *Store) SetDedupConfig(cfg DedupConfig) DedupConfig {
+	cur := s.dedupCfg()
+	if cfg.TextThreshold > 0 {
+		cur.TextThreshold = cfg.TextThreshold
+	}
+	if cfg.CosineThreshold > 0 {
+		cur.CosineThreshold = cfg.CosineThreshold
+	}
+	s.dedup.Store(cur)
+	return cur
 }
 
 // New opens (or creates) the memory database and initialises the schema.
@@ -66,7 +89,8 @@ func New(dbPath string, embedder EmbedderI, dedupCfg ...DedupConfig) (*Store, er
 		}
 	}
 
-	s := &Store{db: db, embedder: embedder, dedup: dedup}
+	s := &Store{db: db, embedder: embedder}
+	s.dedup.Store(dedup)
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -310,6 +334,7 @@ func (s *Store) Close() error {
 // 1. FTS5 keyword search + Jaccard similarity (catches lexical near-matches)
 // 2. Cosine similarity on embeddings (catches semantic reformulations)
 func (s *Store) hasDuplicate(text string) bool {
+	dedup := s.dedupCfg()
 	// Strategy 1: FTS5 + Jaccard for lexical near-matches.
 	words := strings.Fields(text)
 	if len(words) > 8 {
@@ -333,7 +358,7 @@ func (s *Store) hasDuplicate(text string) bool {
 			var existing string
 			rows.Scan(&existing)
 			sim := textSimilarity(text, existing)
-			if sim >= s.dedup.TextThreshold {
+			if sim >= dedup.TextThreshold {
 				truncNew := text
 				if len(truncNew) > 80 {
 					truncNew = truncNew[:80] + "..."
@@ -342,7 +367,7 @@ func (s *Store) hasDuplicate(text string) bool {
 				if len(truncOld) > 80 {
 					truncOld = truncOld[:80] + "..."
 				}
-				log.Printf("memstore: dedup-text rejected (sim=%.2f >= %.2f): %q ~ %q", sim, s.dedup.TextThreshold, truncNew, truncOld)
+				log.Printf("memstore: dedup-text rejected (sim=%.2f >= %.2f): %q ~ %q", sim, dedup.TextThreshold, truncNew, truncOld)
 				return true
 			}
 		}
@@ -378,7 +403,7 @@ func (s *Store) hasDuplicate(text string) bool {
 					}{d, t})
 				}
 
-				if len(closest) > 0 && closest[0].dist < s.dedup.CosineThreshold {
+				if len(closest) > 0 && closest[0].dist < dedup.CosineThreshold {
 					// Entity check: if the new fact and closest match share
 					// fewer than half their proper nouns, it's a false positive.
 					newEntities := extractEntities(text)
@@ -393,7 +418,7 @@ func (s *Store) hasDuplicate(text string) bool {
 					// Top-K consensus: if only 1 of 3 is below threshold, weaker signal.
 					belowCount := 0
 					for _, c := range closest {
-						if c.dist < s.dedup.CosineThreshold {
+						if c.dist < dedup.CosineThreshold {
 							belowCount++
 						}
 					}
@@ -406,7 +431,7 @@ func (s *Store) hasDuplicate(text string) bool {
 
 					truncNew := truncate(text, 80)
 					truncOld := truncate(closest[0].text, 80)
-					log.Printf("memstore: dedup-cosine rejected (dist=%.4f < %.2f, %d/3 below): %q vs %q", closest[0].dist, s.dedup.CosineThreshold, belowCount, truncNew, truncOld)
+					log.Printf("memstore: dedup-cosine rejected (dist=%.4f < %.2f, %d/3 below): %q vs %q", closest[0].dist, dedup.CosineThreshold, belowCount, truncNew, truncOld)
 					return true
 				}
 			}

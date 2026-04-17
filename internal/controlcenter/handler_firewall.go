@@ -55,17 +55,13 @@ func (h *FirewallHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusInternalServerError, "save failed: " + err.Error())
 			return
 		}
-		if h.Notifier != nil {
-			h.Notifier.Notify(ReloadFirewall)
-		}
-		if h.EventBroker != nil {
-			h.EventBroker.Emit(EventFirewall)
-		}
-		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		notifyReload(h.Notifier, ReloadFirewall)
+		h.EventBroker.Emit(EventFirewall)
+		respondOK(w)
 
 	case http.MethodDelete:
 		h.Proxy.Log.Clear()
-		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		respondOK(w)
 
 	default:
 		methodNotAllowed(w)

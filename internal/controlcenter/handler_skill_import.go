@@ -64,6 +64,7 @@ type SkillImportHandler struct {
 	ProviderRegistry *provider.Registry
 	ModelCache       *ModelCache
 	Notifier         Notifier
+	TierStore        TierStore
 }
 
 type skillImportRequest struct {
@@ -94,6 +95,13 @@ type skillInstallResponse struct {
 	Installed bool   `json:"installed"`
 	Path      string `json:"path"`
 	Name      string `json:"name"`
+}
+
+func (h *SkillImportHandler) tiersCurrent() *TiersConfig {
+	if h.TierStore == nil {
+		return nil
+	}
+	return h.TierStore.Current()
 }
 
 func (h *SkillImportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -230,7 +238,11 @@ func (h *SkillImportHandler) handleCorrect(w http.ResponseWriter, req skillImpor
 
 	model := req.Model
 	if model == "" {
-		model = "claude-haiku-4-5"
+		model = DefaultFallbackModel(h.tiersCurrent())
+	}
+	if model == "" {
+		respondError(w, http.StatusFailedDependency, "no model configured for skill scan")
+		return
 	}
 
 	prompt := fmt.Sprintf("Security issues found:\n%s\n\nOriginal SKILL.md:\n```\n%s\n```\n\nReturn the corrected SKILL.md:", issues, content)
@@ -315,9 +327,7 @@ func (h *SkillImportHandler) handleInstall(w http.ResponseWriter, req skillImpor
 	}
 
 	// Notify daemon to reload skills.
-	if h.Notifier != nil {
-		h.Notifier.Notify(ReloadSkills)
-	}
+	notifyReload(h.Notifier, ReloadSkills)
 
 	respondJSON(w, http.StatusOK, skillInstallResponse{
 		Installed: true,
@@ -460,7 +470,10 @@ func (h *SkillImportHandler) runSecurityScan(content, backend, model string) (*s
 	}
 
 	if model == "" {
-		model = "claude-haiku-4-5"
+		model = DefaultFallbackModel(h.tiersCurrent())
+	}
+	if model == "" {
+		return nil, fmt.Errorf("no model configured for skill scan")
 	}
 
 	prompt := "Analyze this SKILL.md for security issues:\n\n```\n" + content + "\n```"

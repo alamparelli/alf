@@ -168,16 +168,41 @@ Layout-agnostic tokens for spacing, typography, and shadows. Use these instead o
 
 ## Sandbox
 
-App iframes run with `sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"`. This means:
+App iframes run with `sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"` — **no `allow-same-origin`**. This gives the iframe an opaque `null` origin. Consequences:
 
 - **No `localStorage` or `sessionStorage`** — use `AlfSDK.storage` instead
 - **No `document.cookie`** — auth is handled automatically via Bearer token
 - **No `credentials: 'same-origin'`** — use `AlfSDK.api()` which sets the Bearer header
-- **No `parent.postMessage()`** — the SDK uses MessageChannel (automatic)
+- **No `parent.postMessage()`** directly — the SDK uses MessageChannel (automatic)
 - **No `top.location` or `parent.document`** — sandboxed, no access to parent frame
+- **Raw `fetch('/...')` returns 401** — the browser can't attach the Bearer token for you. Use `AlfSDK.api()` or `AlfSDK.fetch()`.
 
-**Do:** Use `AlfSDK.storage`, `AlfSDK.api()`, `AlfSDK.getTheme()`.
-**Don't:** Use `localStorage`, `fetch()` with credentials, `document.cookie`.
+### The `<img>` / `<audio>` / `<video>` / `@font-face` exception
+
+Browser tag loads are the one case where direct URLs work from the iframe. The CC recognizes a sandboxed sub-resource via `Origin: null` + `Sec-Fetch-Dest: image|audio|video|font` + extension check, and waives the Bearer requirement. The rule:
+
+- **URL must be under `/apps/{slug}/...`** (your own app, static file) OR `/apps/{slug}/api/...` (proxied to your backend).
+- **Path must end with an asset extension**: `.png .jpg .jpeg .gif .webp .svg .ico .avif` (images) · `.woff .woff2 .ttf .otf .eot` (fonts) · `.mp3 .mp4 .webm .ogg .wav` (media).
+- Data extensions (`.json .xml .csv .txt .html`) and code extensions (`.js .mjs .css .wasm .map`) under `/api/` still require the SDK — this is deliberate, to prevent unauth code exec or data leak via forged sub-resource requests.
+
+```html
+<!-- ✅ Works: static file in your app dir -->
+<img src="/apps/bookshelf/logo.png">
+
+<!-- ✅ Works: dynamic asset served by your REST backend -->
+<img src="/apps/bookshelf/api/covers/42.jpg">
+
+<!-- ❌ 401: data endpoint, not an asset — use AlfSDK.api() -->
+<img src="/apps/bookshelf/api/books">
+
+<!-- ❌ 401: path has no asset extension, even if the response is JPEG -->
+<img src="/apps/bookshelf/api/cover?id=42">
+```
+
+**The extension has to be in the path, not the Content-Type.** A backend that responds with `image/jpeg` on a path without `.jpg` will NOT bypass auth — the gate inspects the URL suffix. Design your routes as `/api/covers/{id}.jpg`, not `/api/cover?id=42`.
+
+**Do:** `AlfSDK.storage`, `AlfSDK.api()` for data, direct URLs with asset extensions for `<img>`/`<audio>`/`<video>`/fonts.
+**Don't:** `localStorage`, `fetch()` for data, `document.cookie`, direct URLs for JSON/JS/CSS.
 
 ---
 
@@ -195,7 +220,7 @@ App iframes run with `sandbox="allow-scripts allow-forms allow-popups allow-popu
 10. **XSS protection** -- always escape user content with a `div.textContent` wrapper (the `esc()` helper above)
 11. **`font-family: inherit`** is NOT sufficient -- always set explicitly (see rule 4)
 12. **Use spacing tokens** -- `--space-xs` to `--space-xl` or classes `.gap-sm`, `.p-md`, `.mb-lg` etc.
-13. **Never use `fetch()` directly** -- use `AlfSDK.api()` for JSON APIs (auto-parses, throws on non-2xx) or `AlfSDK.fetch()` for binary/streaming (returns raw `Response`). Both add Bearer auth automatically.
+13. **Never use `fetch()` directly for data** -- use `AlfSDK.api()` for JSON APIs (auto-parses, throws on non-2xx) or `AlfSDK.fetch()` for binary/streaming (returns raw `Response`). Both add Bearer auth automatically. The **one exception** is `<img>`/`<audio>`/`<video>`/`@font-face`: those can use direct URLs under `/apps/{slug}/...` or `/apps/{slug}/api/...` when the path ends with an asset extension — see the "Sandbox" section above.
 
 ---
 

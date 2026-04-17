@@ -343,26 +343,47 @@ func (m *Manager) resolveToolBinary(slug string) string {
 }
 
 func (m *Manager) Uninstall(slug string) error {
-	// Deactivate first (removes symlinks, schemas, stops service).
+	// Best-effort graceful deactivation: uses the manifest to unlink tools/skills
+	// and stops the service. If the manifest is missing or corrupt we must not
+	// abort here — the forceCleanupAppFiles fallback below still handles cleanup
+	// using filesystem truth (see issues #250, #277).
 	if err := m.deactivate(slug); err != nil {
-		return err
+		log.Printf("marketplace: deactivate %s during uninstall: %v (continuing with fallback cleanup)", slug, err)
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Safety net: scrub any residual tool symlinks, tool schemas, or skill
+	// symlinks that still point at this app. Catches the case where deactivate
+	// couldn't enumerate them (missing manifest) or where an earlier install
+	// crashed partway through.
+	m.forceCleanupAppFiles(slug)
+
 	appDir := filepath.Join(m.dataDir, "apps", slug)
 
 	// Remove everything except data/ (user data never deleted).
 	entries, _ := os.ReadDir(appDir)
+	hasData := false
 	for _, e := range entries {
 		if e.Name() == "data" {
+			hasData = true
 			continue
 		}
 		os.RemoveAll(filepath.Join(appDir, e.Name()))
 	}
 
+	// If no user data was preserved, remove the now-empty app directory itself.
+	// Without this, leftover empty dirs pollute the Developer Source App dropdown
+	// and the marketplace List (issue #277).
+	if !hasData {
+		os.Remove(appDir)
+	}
+
 	delete(m.states, slug)
+	delete(m.perms, slug)
+	delete(m.services, slug)
+	delete(m.trusted, slug)
 
 	if err := m.saveState(); err != nil {
 		return err
@@ -373,6 +394,48 @@ func (m *Manager) Uninstall(slug string) error {
 	}
 
 	return nil
+}
+
+// forceCleanupAppFiles scrubs residual symlinks and schemas that belong to slug
+// using filesystem truth rather than the manifest. Used as a safety net during
+// Uninstall so a broken/missing manifest cannot leave orphan files behind
+// (issue #250). Must be called with m.mu held.
+func (m *Manager) forceCleanupAppFiles(slug string) {
+	appFragment := filepath.Join("apps", slug) // "apps/<slug>"
+
+	// Tools: walk data/tools/ and drop anything whose symlink target points
+	// into this app directory. Also drop the matching <name>.json schema.
+	toolsDir := filepath.Join(m.dataDir, "tools")
+	if entries, err := os.ReadDir(toolsDir); err == nil {
+		for _, e := range entries {
+			full := filepath.Join(toolsDir, e.Name())
+			target, lerr := os.Readlink(full)
+			if lerr != nil {
+				continue // not a symlink — leave it alone
+			}
+			if !strings.Contains(target, appFragment) {
+				continue
+			}
+			os.Remove(full)
+			// Matching schema lives next to the binary symlink.
+			os.Remove(full + ".json")
+		}
+	}
+
+	// Skills: same treatment for data/skills/ entries.
+	skillsDir := filepath.Join(m.dataDir, "skills")
+	if entries, err := os.ReadDir(skillsDir); err == nil {
+		for _, e := range entries {
+			full := filepath.Join(skillsDir, e.Name())
+			target, lerr := os.Readlink(full)
+			if lerr != nil {
+				continue
+			}
+			if strings.Contains(target, appFragment) {
+				os.Remove(full)
+			}
+		}
+	}
 }
 
 // RestoreInstalled re-creates tool symlinks and permission caches on daemon startup

@@ -192,9 +192,11 @@ func (r *commsRecaller) Search(query string, limit int) ([]comms.MemoryResult, e
 	return out, nil
 }
 
-// schedulerProvider adapts provider.CLIProvider to the scheduler.ProviderInvoker interface.
+// schedulerProvider adapts provider.Registry to the scheduler.ProviderInvoker interface.
+// It routes each job invocation to the correct backend (CLI, API, Codex, …) based on
+// the Backend field resolved from the tier config.
 type schedulerProvider struct {
-	p *provider.CLIProvider
+	r *provider.Registry
 }
 
 func (s *schedulerProvider) Invoke(ctx context.Context, prompt string, params scheduler.ProviderParams, onProgress interface{}) (*scheduler.ProviderResult, error) {
@@ -207,7 +209,8 @@ func (s *schedulerProvider) Invoke(ctx context.Context, prompt string, params sc
 		MaxTurns:      params.MaxTurns,
 		DataDir:       params.DataDir,
 	}
-	result, err := s.p.Invoke(ctx, prompt, pp, nil)
+	p := s.r.ForBackend(params.Backend)
+	result, err := p.Invoke(ctx, prompt, pp, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -234,9 +237,14 @@ func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
 		Tiers: make([]scheduler.TierInfo, len(tc.Tiers)),
 	}
 	for i, t := range tc.Tiers {
+		model := router.ResolveModel(t.Model)
+		if model == "" {
+			model = t.Model // preserve non-Claude models (e.g. gpt-5.4)
+		}
 		snap.Tiers[i] = scheduler.TierInfo{
 			Name:         t.Name,
-			Model:        router.ResolveModel(t.Model),
+			Backend:      t.Backend,
+			Model:        model,
 			Tools:        t.Tools,
 			WriteCapable: t.WriteCapable,
 			Effort:       t.Effort,

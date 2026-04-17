@@ -47,8 +47,10 @@ func TestResolveTierParams_Unknown(t *testing.T) {
 	if found {
 		t.Error("expected found=false for unknown tier")
 	}
-	if tp.Model != "claude-haiku-4-5" {
-		t.Errorf("expected fallback model, got %q", tp.Model)
+	// Fallback now comes from the configured tier set (no hardcoded Claude
+	// model). With no resolveModel callback, the raw alias is returned.
+	if tp.Model != "haiku" {
+		t.Errorf("expected fallback model 'haiku' (from user tier), got %q", tp.Model)
 	}
 }
 
@@ -176,6 +178,29 @@ func TestLowestMediaTier_NoReadTier(t *testing.T) {
 
 	if got := LowestMediaTier(tiers); got != "fast" {
 		t.Errorf("LowestMediaTier() = %q, want %q", got, "fast")
+	}
+}
+
+// "*" in a tier's Tools list must be treated as "all tools allowed",
+// which includes Read. Regression guard for the case where codex-fast
+// was excluded from summarization because the literal "Read" check
+// missed the wildcard.
+func TestTierHasRead_WildcardTools(t *testing.T) {
+	tier := TierInfo{Name: "codex-fast", Tools: []string{"*"}}
+	if !TierHasRead(tier) {
+		t.Error("TierHasRead should be true when Tools contains \"*\"")
+	}
+}
+
+func TestLowestMediaTier_WildcardPicksCheaper(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "codex-fast", Priority: 1, Enabled: true, Tools: []string{"*"}},
+			{Name: "grok-fast", Priority: 10, Enabled: true, WriteCapable: true},
+		},
+	}
+	if got := LowestMediaTier(tiers); got != "codex-fast" {
+		t.Errorf("LowestMediaTier() = %q, want codex-fast (wildcard Read beats prio-10 write)", got)
 	}
 }
 

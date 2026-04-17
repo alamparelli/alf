@@ -38,6 +38,11 @@ services:
       whisper-internal:
       embed-internal:
     extra_hosts:
+      # host.docker.internal → host gateway. Required on Linux (not provided by
+      # default) and forces a stable /etc/hosts entry on Docker Desktop Mac/Win
+      # where native resolution is occasionally flaky. Lets Ollama on the host
+      # be reached at http://host.docker.internal:11434 cross-platform.
+      - "host.docker.internal:host-gateway"
       - "whisper:10.99.0.10"
       - "embed:10.99.1.10"
 {{- if .EnableHTTPS}}
@@ -53,6 +58,7 @@ services:
       - "{{if .CCBind}}{{.CCBind}}{{else}}127.0.0.1{{end}}:{{.CCPort}}:8080"
 {{- end}}
     environment:
+      - ALF_CC_BIND=0.0.0.0
       - WHISPER_URL=http://whisper:8000
       - EMBED_URL=http://embed:8090
       - ALF_MARKETPLACE_URL=https://marketplace.alfos.ai

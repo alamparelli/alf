@@ -7,7 +7,7 @@
  * Modules:
  *   Core      — init, api, bash, tool, navigate, toast, getTheme
  *   Audio     — AlfSDK.audio.load/play/playUrl (mobile autoplay unlock)
- *   Sheet     — AlfSDK.sheet/closeSheet (native CC bottom-sheet modals)
+ *   Sheet     — AlfSDK.sheet/updateSheet/closeSheet/querySheet/patchSheet (native CC bottom-sheet modals)
  *   Storage   — AlfSDK.storage.get/set/remove/clear (per-app key/value)
  *   Dialog    — AlfSDK.confirm/prompt (native CC dialog, bottom-sheet on mobile)
  *   Events    — AlfSDK.events.on/off/emit (inter-app pub/sub via parent)
@@ -566,6 +566,21 @@
     /**
      * Raw authenticated fetch — returns the Response object (not parsed).
      * Use for binary downloads, streaming, or when you need response headers.
+     *
+     * NOTE: For <img>, <audio>, <video>, and @font-face, you do NOT need
+     * AlfSDK.fetch(). If your app backend serves the asset under /api/ with
+     * a media/font file extension, you can use the URL directly:
+     *
+     *   <img src="/apps/SLUG/api/covers/42.jpg">
+     *
+     * Allowed bare-URL extensions under /api/:
+     *   .png .jpg .jpeg .gif .webp .svg .ico .avif
+     *   .woff .woff2 .ttf .otf .eot
+     *   .mp3 .mp4 .webm .ogg .wav
+     *
+     * Anything else under /api/ (.json, .js, .css, .wasm, .html, ...) still
+     * requires AlfSDK.api() / AlfSDK.fetch() so the Bearer token is attached.
+     *
      * @param {string} path - URL path
      * @param {Object} [opts] - fetch options
      * @returns {Promise<Response>}
@@ -666,6 +681,29 @@
     closeSheet: function() {
       SDK._sheetActions = {};
       postToParent('close-sheet');
+    },
+
+    /**
+     * Read an element inside the currently open sheet.
+     * Needed because the sheet DOM lives in the parent frame and is not
+     * reachable via document.querySelector from app handlers.
+     * @param {string} selector
+     * @returns {Promise<{exists: boolean, text?: string, html?: string, value?: string, checked?: boolean}>}
+     */
+    querySheet: function(selector) {
+      return requestFromParent('query-sheet', { selector: selector });
+    },
+
+    /**
+     * Replace innerHTML of a sub-tree inside the currently open sheet.
+     * Lets apps show loading states or partial results without re-rendering
+     * the entire sheet. HTML is sanitized parent-side.
+     * @param {string} selector
+     * @param {string} html
+     * @returns {Promise<boolean>} false if sheet is closed or selector didn't match
+     */
+    patchSheet: function(selector, html) {
+      return requestFromParent('patch-sheet', { selector: selector, html: html });
     },
 
     /**

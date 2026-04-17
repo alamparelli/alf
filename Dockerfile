@@ -107,17 +107,29 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && rm -rf /var/lib/apt/lists/* \
     && node --version && npm --version
 
+# Install bundled global npm packages into /opt/alf/bundled-packages (image-only).
+# /opt/alf/user-packages is reserved for runtime updates installed by the `alf`
+# user via a volume mount in compose (see entrypoint Phase 1c). Putting the
+# bundled installs under a distinct, non-mounted prefix ensures the image-baked
+# copy survives the volume mount while still letting the runtime user override
+# any bundled binary with a fresh `npm install -g <pkg>` (closes #288).
+#
+# PATH ordering: user-packages first (volume, user updates take precedence),
+# then bundled-packages (image fallback), then the tool shims.
+ENV NPM_CONFIG_PREFIX=/opt/alf/user-packages
+ENV PATH="/opt/alf/user-packages/bin:/opt/alf/bundled-packages/bin:/opt/alf/tools.d:${PATH}"
+RUN mkdir -p /opt/alf/bundled-packages/bin /opt/alf/bundled-packages/lib \
+    && mkdir -p /opt/alf/user-packages/bin /opt/alf/user-packages/lib
+
 # OpenAI Codex CLI.
-RUN npm install -g @openai/codex \
+RUN npm install -g --prefix /opt/alf/bundled-packages @openai/codex \
     && codex --version
 
 # Claude Code via npm (uses the Node.js already installed above).
 # The native SEA binary (claude.ai/install.sh) embeds its own Node.js runtime
 # which causes ~60s startup on low-end CPUs. npm install reuses the system Node.
-RUN npm install -g @anthropic-ai/claude-code \
+RUN npm install -g --prefix /opt/alf/bundled-packages @anthropic-ai/claude-code \
     && claude --version
-
-ENV PATH="/opt/alf/tools.d:${PATH}"
 
 COPY internal/controlcenter/defaults/tiers.json /opt/alf/defaults/tiers.json
 COPY internal/controlcenter/defaults/apps/developer/ /opt/alf/defaults/apps/developer/
@@ -165,7 +177,9 @@ RUN groupadd --gid 1000 alf \
     && groupadd --gid 1001 alfd \
     && useradd --uid 1000 --gid alf --shell /bin/bash --create-home alf \
     && useradd --uid 1001 --gid alfd -G alf --shell /bin/bash --no-create-home alfd \
-    && printf 'export PATH="/home/alf/data/tools:/home/alf/data/skills:/home/alf/data/apps:/opt/alf/tools.d:$PATH"\nexport ALF_SIGNAL_SOCK="/home/alf/data/signal.sock"\nexport ALF_TOOLS_SOCK="/home/alf/data/context/tools.sock"\n' >> /home/alf/.profile
+    && printf 'export PATH="/home/alf/data/tools:/home/alf/data/skills:/home/alf/data/apps:/opt/alf/user-packages/bin:/opt/alf/bundled-packages/bin:/opt/alf/tools.d:$PATH"\nexport ALF_SIGNAL_SOCK="/home/alf/data/signal.sock"\nexport ALF_TOOLS_SOCK="/home/alf/data/context/tools.sock"\n' >> /home/alf/.profile \
+    && printf 'prefix=/opt/alf/user-packages\n' > /home/alf/.npmrc \
+    && chown alf:alf /home/alf/.npmrc
 
 # Directory structure for volumes.
 RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
@@ -174,7 +188,6 @@ RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
     && mkdir -p /home/alf/data/config.d /home/alf/data/skills.d \
     && mkdir -p /opt/alf/config.d \
     && mkdir -p /opt/alf/vault-data \
-    && mkdir -p /opt/alf/user-packages/bin /opt/alf/user-packages/lib \
     && chown -R root:alf /home/alf/data \
     && chmod -R g+ws /home/alf/data \
     && chown -R alfd:alf /opt/alf/config.d \
@@ -182,7 +195,9 @@ RUN mkdir -p /home/alf/data/logs /home/alf/data/sessions \
     && chown alfd:alfd /opt/alf/vault-data \
     && chmod 700 /opt/alf/vault-data \
     && chmod -R 755 /opt/alf/tools.d \
-    && chmod -R 755 /opt/alf/bin
+    && chmod -R 755 /opt/alf/bin \
+    && chown -R alf:alf /opt/alf/user-packages /opt/alf/bundled-packages \
+    && chmod -R 755 /opt/alf/user-packages /opt/alf/bundled-packages
 
 # Git safe directory (data dir is a volume mount, may have different ownership).
 RUN git config --system --add safe.directory /home/alf/data

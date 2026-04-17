@@ -185,6 +185,15 @@ func syncClaudeJSON(homeDir string) {
 		}
 	}
 
+	// Fresh install: no volume copy, no backups. Create a minimal stub so
+	// Claude CLI subprocesses (classifier, provider) don't warn on every call.
+	if _, err := os.Stat(realFile); os.IsNotExist(err) {
+		stub := []byte(`{"hasCompletedOnboarding":true,"numStartups":1}`)
+		if err := os.WriteFile(realFile, stub, 0o640); err == nil {
+			log.Printf("claude-json: created default stub (fresh install)")
+		}
+	}
+
 	// Ensure hasCompletedOnboarding is set. Users who authenticate via
 	// "claude login" get a valid OAuth token but skip the interactive
 	// onboarding that sets this flag. Without it, "claude -p" invocations fail.

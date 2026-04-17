@@ -100,12 +100,15 @@ type ChatService struct {
 	BackendConfigs  func() map[string]BackendConfig // may be nil - backend pricing lookup
 	Engine          *comms.ChatEngine              // may be nil - unified engine (Step 5+)
 	ccAdapter       *ccAdapter                     // bridges engine events to per-call callbacks
-	mu              sync.Mutex                  // serialize Claude calls (single user v1)
 
 	// Background job tracking - one active job per conversation.
 	activeJobs   map[string]*chatJob // conv_id → job
 	jobMu        sync.Mutex
 	lastChatConv string // last conv_id used by the CC chat frontend
+
+	// askOverride, if non-nil, replaces askViaEngine. Test-only seam for
+	// exercising StartJob concurrency without standing up a full ChatEngine.
+	askOverride func(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error
 
 	// Upload registry: upload_id → UploadEntry
 	uploads   map[string]*UploadEntry
@@ -125,6 +128,11 @@ type ChatRequest struct {
 	MediaIDs []string `json:"media_ids,omitempty"`
 	Model    string   `json:"model,omitempty"` // force specific tier/model
 	ConvID   string   `json:"conv_id,omitempty"` // conversation tab ID (empty = default)
+
+	// preInsertedUserMsgID is set by StartJob after persisting the user
+	// message synchronously (#310). Flows to engine.InMessage so the
+	// pipeline skips re-insertion. Not JSON-serialized.
+	preInsertedUserMsgID string
 }
 
 // ChatDoneData is sent with the "done" event.
@@ -255,11 +263,14 @@ func (cs *ChatService) GetUpload(id string) *UploadEntry {
 }
 
 // Ask processes a chat message, invokes Claude, and streams events via onEvent.
+// No global mutex: concurrency is bounded per-conversation by StartJob's
+// activeJobs check. A hang in one conv must not stall other convs (issue #312).
 func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if cs.askOverride != nil {
+		return cs.askOverride(ctx, req, onEvent)
 	}
 	return cs.askViaEngine(ctx, req, onEvent)
 }
@@ -313,12 +324,18 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 	}
 
 	// 1. Force command detection: /<tier> or /<skill> (CC-specific UI feedback).
-	if strings.HasPrefix(req.Message, "/") && req.Model == "" {
+	// Runs even when req.Model is already set (e.g. the CC tier selector
+	// pre-fills it) — an explicit /tier prefix is a stronger user intent
+	// than the dropdown and must win. When a force command matches, req.Model
+	// is rewritten below to the forced tier.
+	if strings.HasPrefix(req.Message, "/") {
 		parts := strings.SplitN(req.Message, " ", 2)
 		cmdName := strings.TrimPrefix(parts[0], "/")
+		tierMatched := false
 
 		for _, t := range cs.TierStore.Current().Tiers {
-			if t.Enabled && t.ForceCommand && t.Name == cmdName {
+			if t.Enabled && t.ForceCommand && (t.Name == cmdName || SanitizeTierCommand(t.Name) == cmdName) {
+				tierMatched = true
 				cs.Sessions.SetForcedTier(sessID, t.Name)
 				sysText := fmt.Sprintf("Session locked to **%s**. Use /new to reset.", t.Name)
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": sysText}})
@@ -345,7 +362,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 			}
 		}
 
-		if cs.Engine.SkillStore != nil && req.Model == "" {
+		if cs.Engine.SkillStore != nil && !tierMatched {
 			if sk, ok := cs.Engine.SkillStore.Get(cmdName); ok {
 				sessionKey := channelID.SessionKey()
 				cs.Engine.Sessions.AddSkills(sessionKey, []string{sk.Name})
@@ -402,17 +419,19 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		}
 	}
 
-	// 3. Build InMessage for engine (engine handles persistence to ChatDB).
+	// 3. Build InMessage for engine. If StartJob pre-persisted the user
+	// message, pass the ID so the engine skips re-insertion (#310).
 	msg := comms.InMessage{
-		ChannelID:    channelID,
-		Text:         prompt,
-		RawText:      req.Message,
-		RouterText:   routerMsg,
-		IsReply:      req.ReplyTo != "",
-		ForcedTier:   req.Model,
-		ConvID:       req.ConvID,
-		Source:       "cc",
-		ReplyToMsgID: req.ReplyTo,
+		ChannelID:            channelID,
+		Text:                 prompt,
+		RawText:              req.Message,
+		RouterText:           routerMsg,
+		IsReply:              req.ReplyTo != "",
+		ForcedTier:           req.Model,
+		ConvID:               req.ConvID,
+		Source:               "cc",
+		ReplyToMsgID:         req.ReplyTo,
+		PreInsertedUserMsgID: req.preInsertedUserMsgID,
 	}
 	if req.ReplyTo != "" {
 		if orig, _ := cs.ChatDB.Get(req.ReplyTo); orig != nil {
@@ -591,26 +610,50 @@ func (cs *ChatService) ClearActiveSkillsForConv(convID string) {
 }
 
 // CurrentConvID returns the active conversation ID for the CC chat.
-// Priority: in-memory lastChatConv → persisted kv_meta → ConvStore fallback.
+//
+// Priority:
+//  1. in-memory lastChatConv (within this daemon run)
+//  2. persisted kv_meta.active_conv_id — validated against the non-archived
+//     CC conversations list so a stale pointer (e.g. user archived the conv)
+//     doesn't leak through
+//  3. most recent non-archived CC conversation from ChatDB
+//  4. "" — frontend will create a fresh conv
+//
+// This no longer falls back to ConvStore.ConvID. ConvStore IDs are an
+// internal tracking namespace unrelated to the UI's tab IDs, and returning
+// one caused #318 — after a restart with no kv_meta, the server returned
+// a freshly-minted "conv-%x" that the UI couldn't match against its
+// conversation list, rotating the user to a brand-new tab.
 func (cs *ChatService) CurrentConvID() string {
 	if cs.lastChatConv != "" {
 		return cs.lastChatConv
 	}
-	if cs.ChatDB != nil {
-		if v := cs.ChatDB.GetMeta("active_conv_id"); v != "" {
-			return v
+	if cs.ChatDB == nil {
+		return ""
+	}
+	convs, _ := cs.ChatDB.Conversations("cc", false)
+	if v := cs.ChatDB.GetMeta("active_conv_id"); v != "" {
+		for _, c := range convs {
+			if c.ID == v {
+				return v
+			}
 		}
 	}
-	if cs.ConvStore != nil {
-		return cs.ConvStore.ConvID(conversation.ChannelCC)
+	if len(convs) > 0 {
+		return convs[len(convs)-1].ID
 	}
 	return ""
 }
 
 // SetActiveConvID persists the active conversation and updates in-memory state.
+// Also ensures the conv row exists in ChatDB so CurrentConvID's validation
+// (introduced for #318) can resolve it on the next call.
 func (cs *ChatService) SetActiveConvID(convID string) {
 	cs.lastChatConv = convID
 	if cs.ChatDB != nil {
+		if convID != "" {
+			cs.ChatDB.EnsureConversation(convID, "", "cc")
+		}
 		cs.ChatDB.SetMeta("active_conv_id", convID)
 	}
 }
@@ -816,11 +859,9 @@ func (cs *ChatService) resolveTierParams(tierName string) tierParams {
 			}
 		}
 	}
-	fallback := "claude-haiku-4-5"
-	if cs.ResolveModel != nil {
-		fallback = cs.ResolveModel("haiku")
-	}
-	return tierParams{Model: fallback}
+	// Tier not found — resolve from the user's configured fallback rather
+	// than hardcoding a Claude model (users may run any backend).
+	return tierParams{Model: DefaultFallbackModel(cs.TierStore.Current())}
 }
 
 // tierParams holds per-tier Claude CLI arguments.
@@ -870,9 +911,6 @@ func extractReactionTag(text string) (string, string) {
 func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 	time.Sleep(2 * time.Second)
 
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	langNote := "IMPORTANT: Reply in the same language the user has been using in this conversation."
 	var prompt string
 	if mood.IsStrongNegative(emoji) {
@@ -882,9 +920,16 @@ func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 	}
 
 	resumeID := cs.Sessions.Get(apiChatID)
-	tp := tierParams{Model: "claude-haiku-4-5"}
+	var tp tierParams
 	if fallback := cs.firstFallbackTier(); fallback != "" {
 		tp = cs.resolveTierParams(fallback)
+	}
+	if tp.Model == "" {
+		tp.Model = DefaultFallbackModel(cs.TierStore.Current())
+	}
+	if tp.Model == "" {
+		log.Printf("[chat-api] no fallback model configured, skipping negative follow-up")
+		return
 	}
 
 	params := provider.Params{
@@ -1076,6 +1121,40 @@ func extFromMimeMap(mimeType, fileName string) string {
 const recallDistanceThreshold = DefaultRecallMinDist
 const recallLimit = DefaultRecallTopK
 
+// jobMaxDuration caps any single chat job. A wedged provider must not tie up
+// the conversation slot (and thus the user's tab) indefinitely — this is the
+// safety net against issue #312-style hangs where manual restart was needed.
+const jobMaxDuration = 20 * time.Minute
+
+// persistUserMessage inserts the user message into ChatDB synchronously so
+// it survives refresh even if the provider call never completes (#310).
+// Returns the message ID, or "" for slash commands (which the engine
+// handles and persists itself via HandleCommand).
+func (cs *ChatService) persistUserMessage(req ChatRequest) string {
+	if cs.ChatDB == nil || req.ConvID == "" {
+		return ""
+	}
+	// Slash commands persist on their own path (system + user together).
+	if strings.HasPrefix(req.Message, "/") {
+		return ""
+	}
+	if req.Message == "" && len(req.MediaIDs) == 0 {
+		return ""
+	}
+	id := NewMessageID()
+	cs.ChatDB.EnsureConversation(req.ConvID, "", "cc")
+	cs.ChatDB.InsertMessage(chatdb.Message{
+		ID:        id,
+		ConvID:    req.ConvID,
+		Role:      "user",
+		Text:      req.Message,
+		Source:    "cc",
+		ReplyTo:   req.ReplyTo,
+		CreatedAt: time.Now(),
+	})
+	return id
+}
+
 // StartJob launches Ask in a background goroutine and returns the job for streaming.
 // If a job is already running for the same conversation, returns it for reconnection.
 func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
@@ -1087,7 +1166,14 @@ func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
 		return j
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Persist the user message synchronously before launching the async
+	// provider call (#310). Previously this happened inside engine.Process,
+	// so a refresh between POST and the first provider token could lose
+	// the message. Slash commands are a special case: engine.HandleCommand
+	// persists them itself with system response, so skip here.
+	req.preInsertedUserMsgID = cs.persistUserMessage(req)
+
+	ctx, cancel := context.WithTimeout(context.Background(), jobMaxDuration)
 	job := newChatJob(cancel)
 	job.ConvID = convID
 	cs.activeJobs[convID] = job
@@ -1099,11 +1185,26 @@ func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
 	}
 	cs.jobMu.Unlock()
 
+	log.Printf("[chat-job] start job=%s conv=%q model=%q", job.ID, convID, req.Model)
+
 	go func() {
+		start := time.Now()
 		err := cs.Ask(ctx, req, func(evt ChatEvent) {
 			job.push(evt)
 		})
+		outcome := "completed"
+		switch {
+		case job.wasCancelled():
+			outcome = "cancelled"
+		case ctx.Err() == context.DeadlineExceeded:
+			outcome = "timeout"
+		case err != nil:
+			outcome = "error"
+		}
+		log.Printf("[chat-job] done  job=%s conv=%q duration=%s outcome=%s err=%v",
+			job.ID, convID, time.Since(start).Round(time.Millisecond), outcome, err)
 		job.finish(err)
+		cancel() // release timer
 	}()
 
 	return job
@@ -1196,8 +1297,10 @@ func (a *toolExecutorAdapter) Execute(ctx context.Context, call provider.ToolCal
 		Arguments: call.Arguments,
 	})
 	return provider.ToolCallResult{
-		ID:      result.ID,
-		Output:  result.Output,
-		IsError: result.IsError,
+		ID:           result.ID,
+		Output:       result.Output,
+		IsError:      result.IsError,
+		ExitCode:     result.ExitCode,
+		ErrorMessage: result.ErrorMessage,
 	}
 }

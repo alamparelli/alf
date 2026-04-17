@@ -66,15 +66,15 @@ func NewAPIProviderFromConfig(cfg APIProviderConfig, history *History) *APIProvi
 }
 
 // NewAPIProvider creates an APIProvider for OpenRouter (backward compat).
-// Deprecated: use NewAPIProviderFromConfig.
+// Deprecated: use NewAPIProviderFromConfig. No DefaultModel is baked in —
+// callers must pass Params.Model (typically resolved from tier config).
 func NewAPIProvider(apiKey string, history *History) *APIProvider {
 	return NewAPIProviderFromConfig(APIProviderConfig{
-		Name:         "openrouter",
-		BaseURL:      "https://openrouter.ai/api/v1",
-		APIKey:       apiKey,
-		Headers:      map[string]string{"HTTP-Referer": "https://github.com/alamparelli/alf", "X-Title": "ALF"},
-		DefaultModel: "anthropic/claude-haiku-4-5",
-		Auth:         "bearer",
+		Name:    "openrouter",
+		BaseURL: "https://openrouter.ai/api/v1",
+		APIKey:  apiKey,
+		Headers: map[string]string{"HTTP-Referer": "https://github.com/alamparelli/alf", "X-Title": "ALF"},
+		Auth:    "bearer",
 	}, history)
 }
 
@@ -468,7 +468,7 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 		model = p.defaultModel
 	}
 	if model == "" {
-		model = "anthropic/claude-haiku-4-5"
+		return nil, fmt.Errorf("api[%s]: no model configured (pass Params.Model or set APIProviderConfig.DefaultModel)", p.name)
 	}
 
 	log.Printf("api[%s]: invoke (model=%s, prompt=%d chars)", p.name, model, len(prompt))
@@ -575,6 +575,9 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
+		if msg := translateAPIError(resp.StatusCode, body); msg != "" {
+			return nil, fmt.Errorf("%s", msg)
+		}
 		return nil, fmt.Errorf("api[%s] error %d: %s", p.name, resp.StatusCode, truncBody(body))
 	}
 
@@ -751,6 +754,20 @@ func (p *APIProvider) doStreamRequest(ctx context.Context, reqBody apiRequest, o
 		OutputTokens: outputTokens,
 		CachedTokens: cachedTokens,
 	}, nil
+}
+
+// translateAPIError returns a user-friendly message for known provider
+// errors (e.g. OpenRouter image-capability 404s). Empty string means the
+// caller should fall back to the raw error format.
+func translateAPIError(status int, body []byte) string {
+	s := string(body)
+	switch {
+	case status == 404 && strings.Contains(s, "No endpoints found that support image input"):
+		return "The active model does not support image input. Switch to an image-capable model (e.g. gpt-4o, claude-sonnet) or remove the attachment."
+	case status == 404 && strings.Contains(s, "No endpoints found"):
+		return "No provider endpoint matches this request for the selected model. The model may be unavailable or incompatible with the requested feature."
+	}
+	return ""
 }
 
 func truncBody(body []byte) string {

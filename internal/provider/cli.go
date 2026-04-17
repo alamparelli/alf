@@ -38,23 +38,37 @@ func NewCLIProvider(homeDir, dataDir string, timeout time.Duration, cred *syscal
 
 	// Create an empty MCP config file so we can pass --strict-mcp-config
 	// to disable built-in first-party MCP servers that cause startup delays.
-	mcpPath := filepath.Join(homeDir, ".claude", "empty-mcp.json")
-	_ = os.WriteFile(mcpPath, []byte(`{"mcpServers":{}}`), 0644)
+	// On fresh install, ~/.claude/ may not exist yet — create it first, and
+	// only set EmptyMCPConfig if the write succeeds (otherwise --mcp-config
+	// would point at a missing file and break the CLI, see #212).
+	mcpDir := filepath.Join(homeDir, ".claude")
+	mcpPath := filepath.Join(mcpDir, "empty-mcp.json")
+	var emptyMCP string
+	if err := os.MkdirAll(mcpDir, 0o755); err != nil {
+		log.Printf("cli-provider: mkdir %s failed: %v", mcpDir, err)
+	} else if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{}}`), 0644); err != nil {
+		log.Printf("cli-provider: write empty-mcp.json failed: %v", err)
+	} else {
+		emptyMCP = mcpPath
+	}
 
 	return &CLIProvider{
 		HomeDir:        homeDir,
 		DefaultDataDir: dataDir,
 		Timeout:        timeout,
 		Credential:     cred,
-		EmptyMCPConfig: mcpPath,
+		EmptyMCPConfig: emptyMCP,
 	}
 }
 
 // Invoke spawns a claude -p subprocess, parses stream-json, and returns the result.
 func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, onProgress OnProgress) (*Result, error) {
+	// CLIProvider spawns the Anthropic `claude` CLI. If the caller forgot
+	// to set a model, fail fast so the user isn't billed on a default they
+	// didn't pick — resolution belongs in the caller (tier config).
 	model := params.Model
 	if model == "" {
-		model = "claude-haiku-4-5"
+		return nil, fmt.Errorf("CLIProvider: Params.Model is empty (resolve from tier before invoking)")
 	}
 
 	// Use stream-json (with --verbose) only when we need streaming progress.

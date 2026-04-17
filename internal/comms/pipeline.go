@@ -30,7 +30,12 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	convStoreKey := string(channelID)
 
 	// 0. Create request tracer.
-	userMsgID := conversation.NewMessageID()
+	// If the adapter pre-inserted the user message, reuse its ID so tracer,
+	// ConvStore and ChatDB remain consistent (#310).
+	userMsgID := msg.PreInsertedUserMsgID
+	if userMsgID == "" {
+		userMsgID = conversation.NewMessageID()
+	}
 	var convID string
 	if e.ConvStore != nil {
 		convID = e.ConvStore.ConvID(convStoreKey)
@@ -39,8 +44,8 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	ctx = trace.WithContext(ctx, tracer)
 	defer tracer.Flush(e.DataDir)
 
-	// 1. Persist user message to ConvStore.
-	if e.ConvStore != nil {
+	// 1. Persist user message to ConvStore (skip if adapter did it).
+	if e.ConvStore != nil && msg.PreInsertedUserMsgID == "" {
 		e.ConvStore.Append(conversation.Message{
 			ID:        userMsgID,
 			ConvID:    convID,
@@ -51,8 +56,8 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 		})
 	}
 
-	// 1a. Persist user message to ChatDB (UI persistence).
-	if e.ChatDB != nil && msg.ConvID != "" {
+	// 1a. Persist user message to ChatDB (skip if adapter did it).
+	if e.ChatDB != nil && msg.ConvID != "" && msg.PreInsertedUserMsgID == "" {
 		e.ChatDB.EnsureConversation(msg.ConvID, "", msg.Source)
 		e.ChatDB.InsertMessage(chatdb.Message{
 			ID:      userMsgID,
@@ -272,6 +277,13 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 
 	// 9. Agent dispatch — check by role, not name.
 	if tiers.IsOrchestratorTier(route.Tier) && e.Orchestrator != nil {
+		// Require a model to be explicitly set on the orchestrator tier.
+		if tp.Model == "" {
+			log.Printf("[comms] → orchestrator tier %q has no model configured — aborting", route.Tier)
+			e.emit(channelID, OutEvent{Type: "text", Data: map[string]string{"text": "⚠️ Orchestrator tier has no model configured. Please set a model (e.g. \"sonnet\") in your orchestrator tier config."}})
+			e.emit(channelID, OutEvent{Type: "done", Data: map[string]string{"tier": route.Tier, "model": ""}})
+			return nil, nil
+		}
 		// Skip orchestrator if no teams are configured — fallback to next tier.
 		if !e.Orchestrator.HasTeams() {
 			fallback := FirstFallbackTier(e.TierStore)
@@ -435,6 +447,8 @@ func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierPar
 			Tier:      "agent",
 			CostUSD:   orchMeta.TotalCost,
 		})
+		// Trigger progressive summarization on the agent path too (mirrors processStandard).
+		e.maybeSummarizeAsync(channel, convID)
 	}
 	if e.ChatDB != nil && msg.ConvID != "" {
 		e.ChatDB.InsertMessage(chatdb.Message{
@@ -905,6 +919,9 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			CostUSD:   result.CostUSD,
 			SessionID: result.SessionID,
 		})
+		// Trigger progressive summarization if the conversation has grown.
+		// Runs in a background goroutine; does not block the current turn.
+		e.maybeSummarizeAsync(channel, convID)
 	}
 	// Persist to ChatDB with all content blocks in temporal order.
 	// The frontend splits blocks into individual bubbles for display.
@@ -1090,8 +1107,10 @@ func (a *toolExecAdapter) Execute(ctx context.Context, call provider.ToolCallReq
 		Arguments: call.Arguments,
 	})
 	return provider.ToolCallResult{
-		ID:      result.ID,
-		Output:  result.Output,
-		IsError: result.IsError,
+		ID:           result.ID,
+		Output:       result.Output,
+		IsError:      result.IsError,
+		ExitCode:     result.ExitCode,
+		ErrorMessage: result.ErrorMessage,
 	}
 }

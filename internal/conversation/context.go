@@ -37,6 +37,9 @@ func BuildContext(messages []Message, maxMessages int) []Message {
 			case BlockThinking:
 				// Drop thinking blocks entirely - they're internal.
 				continue
+			case BlockSummary:
+				// Keep summary as-is; it's a condensed stand-in for older messages.
+				result[i].Blocks = append(result[i].Blocks, b)
 			case BlockToolResult:
 				// Truncate old tool results.
 				output := b.Output
@@ -61,6 +64,17 @@ func BuildContext(messages []Message, maxMessages int) []Message {
 func FlattenForAPI(messages []Message) []APIMessage {
 	var result []APIMessage
 	for _, m := range messages {
+		if m.Role == RoleSummary {
+			text := summaryText(m.Blocks)
+			if text == "" {
+				continue
+			}
+			result = append(result, APIMessage{
+				Role:    "system",
+				Content: "Summary of earlier conversation:\n" + text,
+			})
+			continue
+		}
 		text := flattenBlocks(m.Blocks)
 		if text == "" {
 			continue
@@ -71,6 +85,16 @@ func FlattenForAPI(messages []Message) []APIMessage {
 		})
 	}
 	return result
+}
+
+func summaryText(blocks []ContentBlock) string {
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == BlockSummary && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // APIMessage is a simple role+content pair for API providers.
@@ -103,6 +127,16 @@ type OpenAIMessage struct {
 func FlattenForOpenAI(messages []Message) []OpenAIMessage {
 	var result []OpenAIMessage
 	for _, m := range messages {
+		if m.Role == RoleSummary {
+			text := summaryText(m.Blocks)
+			if text != "" {
+				result = append(result, OpenAIMessage{
+					Role:    "system",
+					Content: "Summary of earlier conversation:\n" + text,
+				})
+			}
+			continue
+		}
 		if m.Role == "user" {
 			text := textFromBlocks(m.Blocks)
 			if text != "" {
@@ -174,6 +208,16 @@ func FlattenForOpenAI(messages []Message) []OpenAIMessage {
 func FlattenTextOnly(messages []Message) []OpenAIMessage {
 	var result []OpenAIMessage
 	for _, m := range messages {
+		if m.Role == RoleSummary {
+			text := summaryText(m.Blocks)
+			if text != "" {
+				result = append(result, OpenAIMessage{
+					Role:    "system",
+					Content: "Summary of earlier conversation:\n" + text,
+				})
+			}
+			continue
+		}
 		text := textFromBlocks(m.Blocks)
 		if text == "" {
 			continue
@@ -219,6 +263,17 @@ func FormatAsSystemPrompt(messages []Message, contextWeight ...string) string {
 		role := m.Role
 		if m.Tier != "" {
 			role = fmt.Sprintf("%s [%s]", m.Role, m.Tier)
+		}
+		if m.Role == RoleSummary {
+			sb.WriteString("--- summary of earlier conversation ---\n")
+			for _, b := range m.Blocks {
+				if b.Type == BlockSummary {
+					sb.WriteString(b.Text)
+					sb.WriteString("\n")
+				}
+			}
+			sb.WriteString("\n")
+			continue
 		}
 		sb.WriteString(fmt.Sprintf("--- %s ---\n", role))
 

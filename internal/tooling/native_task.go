@@ -89,8 +89,8 @@ func (t TaskNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 		Approved       *bool       `json:"approved"`
 		Feedback       string      `json:"feedback"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 
 	switch args.Action {

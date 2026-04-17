@@ -308,6 +308,7 @@ func TestRecent(t *testing.T) {
 
 func TestRecentLimit(t *testing.T) {
 	s := newTestStore(t)
+	s.SetDedupConfig(DedupConfig{TextThreshold: 1.1}) // disable dedup — test targets limit, not dedup
 
 	for i := 0; i < 5; i++ {
 		s.Store("unique bulk fact number "+string(rune('A'+i))+" about testing", "fact", "test", nil)
@@ -520,6 +521,7 @@ func TestTruncate(t *testing.T) {
 
 func TestConcurrentStoreAndSearch(t *testing.T) {
 	s := newTestStore(t)
+	s.SetDedupConfig(DedupConfig{TextThreshold: 1.1}) // disable dedup — test targets concurrency, not dedup
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 20)
@@ -994,3 +996,33 @@ func TestSetEmbedder(t *testing.T) {
 }
 
 // Extractor tests are in extractor_test.go
+
+// Regression for #193: dedup thresholds must be updatable at runtime
+// (no daemon restart) so config hot-reload can propagate new values.
+func TestSetDedupConfig_HotReload(t *testing.T) {
+	s := newTestStore(t)
+
+	initial := s.dedupCfg()
+	if initial.TextThreshold != 0.7 || initial.CosineThreshold != 0.15 {
+		t.Fatalf("unexpected defaults: %+v", initial)
+	}
+
+	applied := s.SetDedupConfig(DedupConfig{TextThreshold: 0.9, CosineThreshold: 0.08})
+	if applied.TextThreshold != 0.9 || applied.CosineThreshold != 0.08 {
+		t.Fatalf("applied config wrong: %+v", applied)
+	}
+
+	got := s.dedupCfg()
+	if got.TextThreshold != 0.9 || got.CosineThreshold != 0.08 {
+		t.Fatalf("dedup not swapped: %+v", got)
+	}
+
+	// Zero values must keep the existing threshold (partial update).
+	applied = s.SetDedupConfig(DedupConfig{TextThreshold: 0.0, CosineThreshold: 0.05})
+	if applied.TextThreshold != 0.9 {
+		t.Fatalf("text threshold should be preserved on zero update, got %.2f", applied.TextThreshold)
+	}
+	if applied.CosineThreshold != 0.05 {
+		t.Fatalf("cosine threshold should update to 0.05, got %.2f", applied.CosineThreshold)
+	}
+}

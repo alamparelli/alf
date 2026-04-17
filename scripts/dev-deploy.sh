@@ -98,6 +98,7 @@ services:
       - "traefik.docker.network=proxy"
     environment:
       - CC_EXTERNAL_URL=https://cc.lamparelli.eu
+      - ALF_CC_BIND=0.0.0.0
 
 networks:
   proxy:

@@ -426,7 +426,7 @@
       if (d.ok) {
         localStorage.setItem('alf-welcomed', '1')
         toasts.show('Setup complete', 'success')
-        if (d.restart_required) toasts.show('Restart required for Telegram', 'error')
+        if (d.restart_required) toasts.show('Restart required to apply changes', 'info')
         step = 4 // advance to Get Started page
       }
     } catch (e: any) {

@@ -1,10 +1,96 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestSyncClaudeJSON_FreshInstall verifies that a fresh install (no volume
+// copy, no backups) produces a valid .claude.json stub so Claude CLI
+// subprocesses (classifier, provider) don't warn on every call. See #229.
+func TestSyncClaudeJSON_FreshInstall(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	syncClaudeJSON(home)
+
+	data, err := os.ReadFile(filepath.Join(home, ".claude.json"))
+	if err != nil {
+		t.Fatalf(".claude.json not created on fresh install: %v", err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("stub is not valid JSON: %v", err)
+	}
+	if cfg["hasCompletedOnboarding"] != true {
+		t.Errorf("hasCompletedOnboarding=%v, want true", cfg["hasCompletedOnboarding"])
+	}
+}
+
+func TestSyncClaudeJSON_RestoresFromVolume(t *testing.T) {
+	home := t.TempDir()
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(claudeDir, "claude.json"),
+		[]byte(`{"token":"from-volume","hasCompletedOnboarding":true}`), 0o640)
+
+	syncClaudeJSON(home)
+
+	data, err := os.ReadFile(filepath.Join(home, ".claude.json"))
+	if err != nil {
+		t.Fatalf("read restored file: %v", err)
+	}
+	if !strings.Contains(string(data), "from-volume") {
+		t.Errorf("expected restore from volume, got: %s", data)
+	}
+}
+
+func TestSyncClaudeJSON_RestoresFromBackup(t *testing.T) {
+	home := t.TempDir()
+	backupDir := filepath.Join(home, ".claude", "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backup := filepath.Join(backupDir, ".claude.json.backup.1234567890")
+	os.WriteFile(backup, []byte(`{"token":"from-backup"}`), 0o640)
+
+	syncClaudeJSON(home)
+
+	data, err := os.ReadFile(filepath.Join(home, ".claude.json"))
+	if err != nil {
+		t.Fatalf("read restored file: %v", err)
+	}
+	if !strings.Contains(string(data), "from-backup") {
+		t.Errorf("expected restore from backup, got: %s", data)
+	}
+	if _, err := os.Stat(backup); !os.IsNotExist(err) {
+		t.Errorf("expected backup file to be removed after restore")
+	}
+}
+
+func TestSyncClaudeJSON_PreservesExisting(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realFile := filepath.Join(home, ".claude.json")
+	os.WriteFile(realFile,
+		[]byte(`{"token":"keep-me","hasCompletedOnboarding":true,"numStartups":5}`), 0o640)
+
+	syncClaudeJSON(home)
+
+	data, _ := os.ReadFile(realFile)
+	if !strings.Contains(string(data), "keep-me") {
+		t.Errorf("existing token lost: %s", data)
+	}
+}
 
 func TestReadSkillVersion_Valid(t *testing.T) {
 	dir := t.TempDir()

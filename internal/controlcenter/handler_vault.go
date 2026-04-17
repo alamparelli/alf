@@ -28,9 +28,7 @@ type VaultHandler struct {
 }
 
 func (h *VaultHandler) emitVault() {
-	if h.EventBroker != nil {
-		h.EventBroker.Emit(EventVault)
-	}
+	h.EventBroker.Emit(EventVault)
 }
 
 func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -71,8 +69,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleSetSecret(w, r)
 	case strings.HasPrefix(path, "secrets/") && r.Method == http.MethodDelete:
 		name := strings.TrimPrefix(path, "secrets/")
-		if !isVaultSafeName(name) {
-			respondError(w, http.StatusBadRequest, "invalid name")
+		if rejectUnsafeName(w, name, "name") {
 			return
 		}
 		h.handleDeleteSecret(w, r, name)
@@ -83,22 +80,19 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "services/") && strings.HasSuffix(path, "/test") && r.Method == http.MethodPost:
 		name := strings.TrimPrefix(path, "services/")
 		name = strings.TrimSuffix(name, "/test")
-		if !isVaultSafeName(name) {
-			respondError(w, http.StatusBadRequest, "invalid name")
+		if rejectUnsafeName(w, name, "name") {
 			return
 		}
 		h.handleTestService(w, r, name)
 	case strings.HasPrefix(path, "services/") && r.Method == http.MethodPut:
 		name := strings.TrimPrefix(path, "services/")
-		if !isVaultSafeName(name) {
-			respondError(w, http.StatusBadRequest, "invalid name")
+		if rejectUnsafeName(w, name, "name") {
 			return
 		}
 		h.handleUpdateService(w, r, name)
 	case strings.HasPrefix(path, "services/") && r.Method == http.MethodDelete:
 		name := strings.TrimPrefix(path, "services/")
-		if !isVaultSafeName(name) {
-			respondError(w, http.StatusBadRequest, "invalid name")
+		if rejectUnsafeName(w, name, "name") {
 			return
 		}
 		h.handleDeleteService(w, r, name)
@@ -108,8 +102,7 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleCreateToken(w, r)
 	case strings.HasPrefix(path, "tokens/") && r.Method == http.MethodDelete:
 		id := strings.TrimPrefix(path, "tokens/")
-		if !isVaultSafeName(id) {
-			respondError(w, http.StatusBadRequest, "invalid id")
+		if rejectUnsafeName(w, id, "id") {
 			return
 		}
 		h.handleRevokeToken(w, r, id)
@@ -125,15 +118,13 @@ func (h *VaultHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleUploadFile(w, r)
 	case strings.HasPrefix(path, "files/") && r.Method == http.MethodGet:
 		name := strings.TrimPrefix(path, "files/")
-		if !isVaultSafeName(name) {
-			respondError(w, http.StatusBadRequest, "invalid name")
+		if rejectUnsafeName(w, name, "name") {
 			return
 		}
 		h.handleGetFile(w, r, name)
 	case strings.HasPrefix(path, "files/") && r.Method == http.MethodDelete:
 		name := strings.TrimPrefix(path, "files/")
-		if !isVaultSafeName(name) {
-			respondError(w, http.StatusBadRequest, "invalid name")
+		if rejectUnsafeName(w, name, "name") {
 			return
 		}
 		h.handleDeleteFile(w, r, name)
@@ -209,7 +200,7 @@ func (h *VaultHandler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		h.OnUnlock()
 	}
 	h.emitVault()
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 func (h *VaultHandler) handleLock(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +216,7 @@ func (h *VaultHandler) handleLock(w http.ResponseWriter, r *http.Request) {
 		memory.GenerateToolbox(h.ContextDir, h.DataDir)
 	}
 	h.emitVault()
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 func (h *VaultHandler) handleListServices(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +241,7 @@ func (h *VaultHandler) handleUpdateService(w http.ResponseWriter, r *http.Reques
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 func (h *VaultHandler) handleAddService(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +257,7 @@ func (h *VaultHandler) handleAddService(w http.ResponseWriter, r *http.Request) 
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 // resolveSecretRefs replaces *_ref fields in service auth with actual secret values.
@@ -316,7 +307,7 @@ func (h *VaultHandler) handleDeleteService(w http.ResponseWriter, _ *http.Reques
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 func (h *VaultHandler) handleTestService(w http.ResponseWriter, _ *http.Request, name string) {
@@ -325,7 +316,7 @@ func (h *VaultHandler) handleTestService(w http.ResponseWriter, _ *http.Request,
 		respondJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 func (h *VaultHandler) handleListTokens(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +351,7 @@ func (h *VaultHandler) handleRevokeToken(w http.ResponseWriter, _ *http.Request,
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 func (h *VaultHandler) handleReset(w http.ResponseWriter, r *http.Request) {
@@ -379,7 +370,7 @@ func (h *VaultHandler) handleReset(w http.ResponseWriter, r *http.Request) {
 	if h.ContextDir != "" {
 		memory.GenerateToolbox(h.ContextDir, h.DataDir)
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 // --- File management ---
@@ -453,7 +444,7 @@ func (h *VaultHandler) handleDeleteFile(w http.ResponseWriter, _ *http.Request, 
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 func (h *VaultHandler) handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
@@ -754,7 +745,7 @@ func (h *VaultHandler) handleSetSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("[vault] secret %q set via API", req.Name)
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 func (h *VaultHandler) handleDeleteSecret(w http.ResponseWriter, _ *http.Request, name string) {
@@ -764,7 +755,7 @@ func (h *VaultHandler) handleDeleteSecret(w http.ResponseWriter, _ *http.Request
 		return
 	}
 	log.Printf("[vault] secret %q deleted via API", name)
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 // --- Mobile API Token ---
@@ -822,7 +813,7 @@ func (h *VaultHandler) handleMobileTokenRevoke(w http.ResponseWriter) {
 		return
 	}
 	log.Printf("[vault] mobile API token revoked")
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 // GetMobileToken returns the current mobile token from vault, or empty string.
@@ -839,6 +830,16 @@ func GetMobileToken(vm *vault.Manager) string {
 
 // isVaultSafeName validates that a name/id has no path traversal characters.
 var isVaultSafeName = isSafeName
+
+// rejectUnsafeName writes a 400 and returns true if name fails the vault-safe
+// check. Callers should early-return on true.
+func rejectUnsafeName(w http.ResponseWriter, name, label string) bool {
+	if !isVaultSafeName(name) {
+		respondError(w, http.StatusBadRequest, "invalid "+label)
+		return true
+	}
+	return false
+}
 
 // obfuscateToken shows the first 8 and last 4 chars of a token, masking the rest.
 // Returns "***" for tokens too short to obfuscate safely.

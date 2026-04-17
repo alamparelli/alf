@@ -84,6 +84,93 @@ func (tp *ToolsProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tp.Handler.ServeHTTP(w, r)
 }
 
+// AppToolsProxy is a per-app variant of ToolsProxy served over a socket mounted
+// into one specific app's sandbox. Requests are tagged with the app's slug so
+// downstream handlers can enforce per-app permissions (bash, network, etc.).
+//
+// Allowlist is a superset of ToolsProxy: apps get the same read/tool endpoints
+// PLUS /api/bash (permission-gated) and their own /api/apps/{slug}/... scope.
+// Install/marketplace endpoints are blocked — apps must not install other apps.
+type AppToolsProxy struct {
+	Slug    string
+	Handler http.Handler // the main CC mux
+}
+
+// appAllowedPaths = allowedToolsPaths minus nothing, plus /api/bash.
+var appAllowedPaths = func() map[string]bool {
+	m := make(map[string]bool, len(allowedToolsPaths)+1)
+	for k, v := range allowedToolsPaths {
+		m[k] = v
+	}
+	m["/api/bash"] = true
+	return m
+}()
+
+// appAllowedPrefixes = allowedToolsPrefixes minus marketplace/developer.
+// Apps can reach /api/apps/ (scoped to their own slug by downstream handlers).
+var appAllowedPrefixes = []string{
+	"/api/apps/",
+}
+
+func (ap *AppToolsProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimRight(r.URL.Path, "/")
+	if path == "" {
+		path = "/"
+	}
+
+	allowed := appAllowedPaths[path]
+	if !allowed {
+		for _, prefix := range appAllowedPrefixes {
+			if strings.HasPrefix(path+"/", prefix) {
+				allowed = true
+				break
+			}
+		}
+	}
+	if !allowed {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	if methods, ok := blockedToolsMethods[path]; ok {
+		for _, m := range methods {
+			if r.Method == m {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+	}
+
+	// Socket presence is authentication; the slug is bound to the socket path.
+	r.Header.Set("X-Tools-Socket", "1")
+	r.Header.Set("X-Tools-Socket-App", ap.Slug)
+
+	ap.Handler.ServeHTTP(w, r)
+}
+
+// ListenAndServeAppTools starts a per-app tools proxy on a Unix socket.
+// The socket is chmod 0660 and owned by group alf so the app's uid 1000 can reach it.
+func ListenAndServeAppTools(sockPath, slug string, handler http.Handler) (net.Listener, error) {
+	os.Remove(sockPath)
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		return nil, err
+	}
+	os.Chown(sockPath, -1, 1000)
+	os.Chmod(sockPath, 0660)
+
+	proxy := &AppToolsProxy{Slug: slug, Handler: handler}
+	go func() {
+		srv := &http.Server{Handler: proxy}
+		if err := srv.Serve(ln); err != nil && !strings.Contains(err.Error(), "use of closed") {
+			log.Printf("[app-tools-proxy:%s] serve error: %v", slug, err)
+		}
+	}()
+	log.Printf("[app-tools-proxy:%s] listening on %s", slug, sockPath)
+	return ln, nil
+}
+
 // ListenAndServeTools starts the tools proxy on a Unix socket.
 // The caller should defer closing the listener and removing the socket file.
 func ListenAndServeTools(sockPath string, handler http.Handler) (net.Listener, error) {

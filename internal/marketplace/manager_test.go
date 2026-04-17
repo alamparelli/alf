@@ -292,3 +292,115 @@ func TestOnChange(t *testing.T) {
 		t.Fatalf("expected onChange called 2 times after uninstall, got %d", calls)
 	}
 }
+
+// TestUninstallRemovesAppDir verifies that Uninstall removes the app directory
+// entirely when there is no data/ subdirectory to preserve. Regression for
+// issue #277: leftover empty dirs showed up in the Developer Source App list.
+func TestUninstallRemovesAppDir(t *testing.T) {
+	base := setupTestEnv(t, "ghostapp")
+	m := NewManager(base)
+
+	m.mu.Lock()
+	m.states["ghostapp"] = StateInstalled
+	m.activate("ghostapp")
+	m.saveState()
+	m.mu.Unlock()
+
+	if err := m.Uninstall("ghostapp"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+
+	// App directory should be gone entirely (no data/ to preserve).
+	appDir := filepath.Join(base, "apps", "ghostapp")
+	if _, err := os.Stat(appDir); !os.IsNotExist(err) {
+		t.Fatalf("expected app dir removed, got err: %v", err)
+	}
+}
+
+// TestUninstallPreservesDataDir verifies that Uninstall keeps the app dir and
+// data/ contents intact when the user has data in apps/<slug>/data/.
+func TestUninstallPreservesDataDir(t *testing.T) {
+	base := setupTestEnv(t, "dataapp")
+
+	dataDir := filepath.Join(base, "apps", "dataapp", "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(dataDir, "keep.txt")
+	if err := os.WriteFile(sentinel, []byte("precious"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(base)
+	m.mu.Lock()
+	m.states["dataapp"] = StateInstalled
+	m.activate("dataapp")
+	m.saveState()
+	m.mu.Unlock()
+
+	if err := m.Uninstall("dataapp"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("expected data/ preserved: %v", err)
+	}
+}
+
+// TestUninstallWithBrokenManifest verifies that Uninstall cleans up residual
+// tool symlinks, schemas and app-dir contents even when the manifest has been
+// deleted or corrupted. Regression for issues #250 and #277: a missing
+// manifest caused deactivate() to error out and Uninstall to abort, leaving
+// orphaned files behind.
+func TestUninstallWithBrokenManifest(t *testing.T) {
+	base := setupTestEnv(t, "brokenapp")
+	m := NewManager(base)
+
+	// Install + activate normally so tool symlinks/schemas get created.
+	m.mu.Lock()
+	m.states["brokenapp"] = StateInstalled
+	m.activate("brokenapp")
+	m.saveState()
+	m.mu.Unlock()
+
+	toolSym := filepath.Join(base, "tools", "brokenapp-action")
+	toolSchema := filepath.Join(base, "tools", "brokenapp-action.json")
+	if _, err := os.Lstat(toolSym); err != nil {
+		t.Fatalf("tool symlink should exist after activate: %v", err)
+	}
+
+	// Corrupt the manifest so deactivate() cannot enumerate tools.
+	if err := os.WriteFile(
+		filepath.Join(base, "apps", "brokenapp", "manifest.json"),
+		[]byte("not json"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Uninstall must succeed and still scrub the orphan tool files.
+	if err := m.Uninstall("brokenapp"); err != nil {
+		t.Fatalf("Uninstall with broken manifest must not error: %v", err)
+	}
+
+	if _, err := os.Lstat(toolSym); !os.IsNotExist(err) {
+		t.Fatalf("tool symlink should be cleaned up even with broken manifest, got err: %v", err)
+	}
+	if _, err := os.Stat(toolSchema); !os.IsNotExist(err) {
+		t.Fatalf("tool schema should be cleaned up even with broken manifest, got err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "apps", "brokenapp")); !os.IsNotExist(err) {
+		t.Fatalf("app dir should be removed even with broken manifest, got err: %v", err)
+	}
+
+	// Manager state entries must all be cleared.
+	m.mu.Lock()
+	_, hasState := m.states["brokenapp"]
+	_, hasPerms := m.perms["brokenapp"]
+	_, hasTrusted := m.trusted["brokenapp"]
+	m.mu.Unlock()
+	if hasState || hasPerms || hasTrusted {
+		t.Fatalf("expected all manager state cleared, got state=%v perms=%v trusted=%v",
+			hasState, hasPerms, hasTrusted)
+	}
+}

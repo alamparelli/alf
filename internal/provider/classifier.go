@@ -16,7 +16,7 @@ import (
 
 // ClassifierConfig configures the persistent CLIClassifier process.
 type ClassifierConfig struct {
-	Model          string             // e.g. "claude-haiku-4-5"
+	Model          string             // full model ID; resolved from tier config by caller
 	SystemPrompt   string             // one-time system prompt (personality + tiers + rules)
 	HomeDir        string             // HOME for subprocess (where .claude/ lives); falls back to DataDir
 	DataDir        string             // working directory
@@ -71,9 +71,13 @@ func (c *CLIClassifier) startLocked() error {
 		return nil
 	}
 
+	// CLIClassifier is Anthropic-specific by construction: it spawns the
+	// `claude` CLI as a persistent subprocess. If no model is provided by
+	// the caller, fail fast rather than silently picking a model the user
+	// may not expect — the daemon should always configure this from tiers.
 	model := c.cfg.Model
 	if model == "" {
-		model = "claude-haiku-4-5"
+		return fmt.Errorf("CLIClassifier: cfg.Model is empty (configure from tier)")
 	}
 
 	args := []string{

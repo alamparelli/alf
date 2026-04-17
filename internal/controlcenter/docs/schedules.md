@@ -238,6 +238,68 @@ ALF can send a daily summary of all scheduled job executions. This is a system j
 
 The digest is sent to Telegram automatically.
 
+## Catch-up after downtime
+
+If the server is offline when a job should fire, ALF can replay missed jobs on
+startup.
+
+**How it works**
+
+- The scheduler writes a liveness timestamp (`data/scheduler/last_seen`) every
+  60 seconds while running.
+- On boot, it compares `last_seen` to the current time. The gap is the
+  "downtime window".
+- Any missed jobs inside that window are executed once, in the background,
+  after the scheduler finishes startup.
+
+**What gets caught up**
+
+| Job type | Caught up? |
+|----------|-----------|
+| One-shot (RFC3339 date, e.g. "run on 2026-05-01T09:00:00") | Always, if it fired during downtime |
+| Recurring cron (e.g. `@every 10m`, `0 */6 * * *`) | Opt-in via config (see below) |
+| System jobs (heartbeat, digest, memory consolidation, ...) | Never — they resume on their own cadence |
+
+**Opting in for recurring jobs**
+
+Add to `config.json`:
+
+```json
+{
+  "catchup_recurring_min_interval": "6h"
+}
+```
+
+Only recurring jobs whose tick interval is **at least** this value are caught
+up. Accepted format: Go duration string (`"30m"`, `"6h"`, `"24h"`).
+
+This filter exists because replaying every missed tick of a fast-interval job
+(`@every 1m` over 2h of downtime = 120 runs) is almost never what you want.
+Keep the threshold high enough that only "meaningful" jobs are replayed.
+
+Each missed recurring job runs **once**, not once per missed tick.
+
+**Safety caps**
+
+- If `last_seen` is missing (first boot, or the file was deleted), catch-up is
+  skipped entirely.
+- If the downtime exceeds **24 hours**, catch-up is skipped — it assumes the
+  outage was long enough that replaying is no longer meaningful.
+- Catch-up runs in background goroutines after `cron.Start()`; it never blocks
+  boot.
+
+**Logs**
+
+Each catch-up is logged:
+
+```
+scheduler: catchup: running <job-id> (<name>) — one-shot missed at 2026-04-15T08:00:00Z
+scheduler: catchup: running <job-id> (<name>) — recurring missed (interval=6h, downtime=7h12m)
+```
+
+The execution itself produces a normal `RunRecord` (`ok` / `error`) in the run
+log, so catch-up runs show up just like any other run in the UI.
+
 ## Common questions
 
 **Can I schedule from Telegram?**

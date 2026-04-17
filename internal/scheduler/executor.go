@@ -39,6 +39,7 @@ type ProviderInvoker interface {
 
 // ProviderParams mirrors provider.Params to avoid circular imports.
 type ProviderParams struct {
+	Backend       string
 	Model         string
 	Tools         []string
 	WriteCapable  bool
@@ -133,6 +134,7 @@ func (s *TiersSnapshot) IsOrchestratorTier(name string) bool {
 // TierInfo holds the fields the executor needs from a tier.
 type TierInfo struct {
 	Name         string
+	Backend      string
 	Model        string
 	Tools        []string
 	WriteCapable bool
@@ -429,8 +431,11 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		return "", nil, fmt.Errorf("no provider configured")
 	}
 
+	// Model is resolved from the tier config below. We do not hardcode a
+	// provider-specific default: if the tier lookup fails, the provider
+	// call errors with a clear message instead of silently running on
+	// Anthropic when the user may have configured a different backend.
 	params := ProviderParams{
-		Model:   "claude-haiku-4-5", // default
 		DataDir: e.cfg.DataDir,
 	}
 
@@ -440,6 +445,7 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		if snap != nil {
 			for _, t := range snap.Tiers {
 				if t.Name == j.Tier {
+					params.Backend = t.Backend
 					if t.Model != "" {
 						params.Model = t.Model
 					}
@@ -481,6 +487,10 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 	if llmTimeout <= 0 {
 		llmTimeout = 10 * time.Minute
 	}
+	if params.Model == "" {
+		return "", nil, fmt.Errorf("scheduler: no model configured for tier %q (job %s)", j.Tier, j.ID)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), llmTimeout)
 	defer cancel()
 

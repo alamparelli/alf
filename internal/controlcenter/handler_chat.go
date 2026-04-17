@@ -41,6 +41,13 @@ func (h *ChatHandler) sendMessage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "message or media_ids required")
 		return
 	}
+	// conv_id is required so the message can be persisted immediately
+	// (issue #310): silently dropping for empty conv_id loses the message
+	// on refresh before engine.Process runs.
+	if req.ConvID == "" {
+		respondError(w, http.StatusBadRequest, "conv_id required")
+		return
+	}
 
 	job := h.Service.StartJob(req)
 	streamJob(w, r, job, 0)
@@ -131,11 +138,9 @@ func (h *ChatActiveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.Service.SetActiveConvID(req.ConvID)
-		if h.EventBroker != nil {
-			payload, _ := json.Marshal(map[string]string{"conv_id": req.ConvID, "client_id": req.ClientID})
-			h.EventBroker.EmitWithData(EventActiveConv, string(payload))
-		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		payload, _ := json.Marshal(map[string]string{"conv_id": req.ConvID, "client_id": req.ClientID})
+		h.EventBroker.EmitWithData(EventActiveConv, string(payload))
+		respondOK(w)
 	default:
 		methodNotAllowed(w)
 	}
@@ -168,7 +173,7 @@ func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		if h.Service.ChatDB != nil {
 			h.Service.ChatDB.UpdateConversation(convID, req.Title)
 		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		respondOK(w)
 	case http.MethodDelete:
 		if h.Service.ChatDB != nil {
 			// Clean up expired media files before archiving.
@@ -188,7 +193,7 @@ func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			}
 			h.Service.ChatDB.ArchiveConversation(convID)
 		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		respondOK(w)
 	default:
 		methodNotAllowed(w)
 	}
@@ -222,10 +227,34 @@ func (h *ChatSkillsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.Service.ClearActiveSkillsForConv(convID)
 		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		respondOK(w)
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+// ChatJobsHandler handles GET /api/chat/jobs — list all active jobs across
+// conversations. Used by the frontend on page load to rebind streaming state
+// per conv (issue #310). Response: {"jobs": [{"conv_id","job_id","events"}]}
+type ChatJobsHandler struct {
+	Service *ChatService
+}
+
+func (h *ChatJobsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	jobs := h.Service.ActiveJobs()
+	out := make([]map[string]any, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, map[string]any{
+			"conv_id": j.ConvID,
+			"job_id":  j.ID,
+			"events":  j.eventCount(),
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"jobs": out})
 }
 
 // ChatJobHandler handles GET /api/chat/job (status + reconnect) and DELETE (cancel).
@@ -285,7 +314,7 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Printf("[chat-job] DELETE: no active job found for conv_id=%q", convID)
 		}
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+		respondOK(w)
 
 	default:
 		methodNotAllowed(w)

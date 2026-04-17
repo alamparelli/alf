@@ -56,6 +56,7 @@
 
   let showEmojiPicker = $state(false)
   let copied = $state(false)
+  let localReactions = $state<Reaction[]>(msg.reactions || [])
   let lightboxSrc = $state('')
   let reactBtnEl: HTMLButtonElement | undefined = $state()
   let pickerStyle = $state('')
@@ -230,16 +231,9 @@
     showEmojiPicker = false
     try {
       const result = await api('POST', '/api/chat/react', { msg_id: msg.id, emoji })
-      // Optimistically add user reaction locally
-      const newReaction: Reaction = { emoji, from: 'user' }
-      if (msg.reactions) {
-        msg.reactions = [...msg.reactions, newReaction]
-      } else {
-        msg.reactions = [newReaction]
-      }
-      // Add ALF's mirror reaction if returned
+      localReactions = [...localReactions, { emoji, from: 'user' }]
       if (result.mirror) {
-        msg.reactions = [...msg.reactions, { emoji: result.mirror, from: 'alf' }]
+        localReactions = [...localReactions, { emoji: result.mirror, from: 'alf' }]
       }
     } catch (e: any) {
       toasts.show(e.error || 'Failed to react', 'error')
@@ -391,7 +385,9 @@
 
   <!-- Footer: time, model, reactions -->
   <div class="msg-footer">
-    <span class="msg-time">{formatTime(msg.ts)}</span>
+    {#if msg.ts}
+      <span class="msg-time">{formatTime(msg.ts)}</span>
+    {/if}
     {#if msg.model}
       <span class="msg-model">{msg.tier || msg.model}</span>
     {/if}
@@ -406,9 +402,9 @@
     {/if}
 
     <!-- Reactions -->
-    {#if msg.reactions && msg.reactions.length > 0}
+    {#if localReactions.length > 0}
       <div class="msg-reactions">
-        {#each msg.reactions as r}
+        {#each localReactions as r}
           <span class="reaction-chip" class:reaction-alf={r.from === 'alf'}>{r.emoji}</span>
         {/each}
       </div>
@@ -526,21 +522,23 @@
 
   .chat-row-system {
     align-self: center;
+    width: fit-content;
     max-width: 90%;
   }
 
   .chat-msg-system {
     background: var(--bg-input);
     color: var(--text-dim);
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     font-style: italic;
-    max-width: 90%;
+    max-width: 100%;
     text-align: center;
+    white-space: nowrap;
   }
 
   /* Markdown content */
   .msg-text {
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     line-height: 1.6;
   }
 
@@ -562,7 +560,7 @@
     padding: 8px 12px;
     border-radius: 6px;
     overflow-x: auto;
-    font-size: var(--font-sm, 13px);
+    font-size: calc(var(--alf-chat-font-size, var(--font-sm, 13px)) * var(--alf-chat-mono-scale, 0.82));
     margin: 8px 0;
   }
 
@@ -589,7 +587,7 @@
     border-collapse: collapse;
     width: 100%;
     margin: 8px 0;
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
   }
 
   .msg-text :global(th),
@@ -641,7 +639,7 @@
     border: none;
     color: inherit;
     font-family: inherit;
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     font-weight: 500;
     cursor: pointer;
     text-align: left;
@@ -655,14 +653,14 @@
   .block-body {
     padding: 8px 10px;
     background: color-mix(in srgb, var(--text) 8%, transparent);
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
   }
 
   .block-body pre {
     white-space: pre-wrap;
     word-break: break-word;
     font-family: 'JetBrains Mono', monospace;
-    font-size: var(--font-xs, 11px);
+    font-size: calc(var(--alf-chat-font-size, var(--font-sm, 13px)) * var(--alf-chat-mono-scale, 0.82));
     margin: 0;
   }
 
@@ -722,7 +720,7 @@
     padding: 4px 8px;
     background: color-mix(in srgb, var(--text) 10%, transparent);
     border-radius: 4px;
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
   }
 
   /* Footer */
@@ -735,12 +733,12 @@
   }
 
   .msg-time {
-    font-size: var(--font-xs, 11px);
+    font-size: var(--alf-chat-meta-font-size, var(--font-xs, 11px));
     opacity: 0.5;
   }
 
   .msg-model, .msg-cost, .msg-duration, .msg-skills {
-    font-size: var(--font-xs, 11px);
+    font-size: var(--alf-chat-meta-font-size, var(--font-xs, 11px));
     opacity: 0.5;
     font-family: 'JetBrains Mono', monospace;
   }
@@ -752,7 +750,7 @@
   }
 
   .reaction-chip {
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     padding: 1px 4px;
     border-radius: 4px;
     background: color-mix(in srgb, var(--text) 8%, transparent);

@@ -482,20 +482,33 @@ $('publishBtn').addEventListener('click', function() {
     }
     setStatus(statusEl, 'Preparing...', 'info');
 
-    // Build manifest
-    var manifest = { name: name, slug: slug, version: version, description: desc, category: category, icon: icon, tools: [] };
+    // Load existing manifest (if any) to preserve non-UI fields like `permissions`
+    return bash("cat " + sp + "/manifest.json 2>/dev/null").then(function(res) {
+      var existing = {};
+      try { existing = JSON.parse(res.output) || {}; } catch (e) { existing = {}; }
 
-    // Collect tool schemas
-    var toolPromises = selectedTools.map(function(t) {
-      return bash("cat /home/alf/data/tools/" + sq(t) + ".json 2>/dev/null").then(function(res) {
-        try { return JSON.parse(res.output); } catch (e) { return null; }
+      // Overlay UI-managed fields onto existing manifest
+      var manifest = Object.assign({}, existing, {
+        name: name,
+        slug: slug,
+        version: version,
+        description: desc,
+        category: category,
+        icon: icon,
+        tools: []
       });
-    });
 
-    return Promise.all(toolPromises).then(function(schemas) {
-      schemas.forEach(function(s) {
-        if (s) manifest.tools.push({ name: s.name, description: s.description, parameters: s.parameters });
+      // Collect tool schemas
+      var toolPromises = selectedTools.map(function(t) {
+        return bash("cat /home/alf/data/tools/" + sq(t) + ".json 2>/dev/null").then(function(res) {
+          try { return JSON.parse(res.output); } catch (e) { return null; }
+        });
       });
+
+      return Promise.all(toolPromises).then(function(schemas) {
+        schemas.forEach(function(s) {
+          if (s) manifest.tools.push({ name: s.name, description: s.description, parameters: s.parameters });
+        });
 
       // Write manifest
       var manifestJson = JSON.stringify(manifest, null, 2);
@@ -530,6 +543,7 @@ $('publishBtn').addEventListener('click', function() {
         }
         btn.disabled = false;
       });
+    });
     });
   }).catch(function(err) {
     if (err && err.message !== 'validation failed') {

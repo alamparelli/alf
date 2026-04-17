@@ -1,6 +1,8 @@
 package controlcenter
 
 import (
+	"bytes"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -8,7 +10,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+//go:embed web/favicon.png
+var defaultAvatarPNG []byte
 
 const (
 	avatarMaxInputBytes = 256 << 10 // 256KB raw input limit
@@ -43,15 +49,18 @@ func (h *AvatarHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AvatarHandler) handleGet(w http.ResponseWriter, r *http.Request) {
-	path := h.avatarPath()
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		http.NotFound(w, r)
-		return
-	}
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'")
 	w.Header().Set("Cache-Control", "no-cache")
+
+	path := h.avatarPath()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// No custom avatar uploaded yet — serve the embedded default so
+		// pages that display the avatar don't spam 404s in the network tab.
+		http.ServeContent(w, r, "avatar.png", time.Time{}, bytes.NewReader(defaultAvatarPNG))
+		return
+	}
 	http.ServeFile(w, r, path)
 }
 
@@ -108,9 +117,7 @@ func (h *AvatarHandler) handleDelete(w http.ResponseWriter) {
 }
 
 func (h *AvatarHandler) emitAvatarEvent() {
-	if h.EventBroker != nil {
-		h.EventBroker.Emit(EventAvatar)
-	}
+	h.EventBroker.Emit(EventAvatar)
 }
 
 // SetFromBytes sanitizes and saves an avatar image. Used by the native tool.

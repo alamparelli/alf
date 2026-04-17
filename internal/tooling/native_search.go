@@ -41,8 +41,8 @@ func (t SearchNativeTool) Run(_ context.Context, argsJSON string) (string, error
 		Query string `json:"query"`
 		Types string `json:"types"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 	if args.Query == "" {
 		return "", fmt.Errorf("query is required")

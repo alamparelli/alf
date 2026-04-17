@@ -148,6 +148,23 @@ When you send a message, ALF automatically searches long-term memory for relevan
 
 ---
 
+## Progressive summarization
+
+Long conversations are compressed on the fly: once the uncovered message count crosses a threshold, older messages are folded into a single short summary (cheap tier, async) and the summary is injected as a `system` message (API) or `--- summary of earlier conversation ---` block (CLI) on the next turn. Keeps context small without losing history.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `summarization_enabled` | bool | `true` | Toggle the feature. Set to `false` to disable (useful for debugging or if you pay per-token aggressively and prefer hard truncation). |
+| `summarization_threshold` | int | `20` | Number of uncovered messages beyond which older ones get summarized. |
+| `summarization_keep_last` | int | `10` | Number of recent messages kept in full detail (not summarized). Must be strictly less than `summarization_threshold` — otherwise the feature silently no-ops. |
+
+Notes:
+- Summarization is fire-and-forget: the current turn never waits for it. The summary becomes visible on the **next** turn.
+- Only one summarization runs per `(channel, conversation)` at a time; concurrent triggers are skipped.
+- Disable via `{"summarization_enabled": false}` if you see unexpected LLM cost on the cheapest tier or want to debug with full raw history.
+
+---
+
 ## DNS
 
 | Field | Type | Default | Description |
@@ -176,7 +193,7 @@ See [Creating Skills](docs:creating-skills) for skill setup.
     "openrouter": {
       "base_url": "https://openrouter.ai/api/v1",
       "vault_service": "openrouter",
-      "default_model": "anthropic/claude-haiku-4-5"
+      "default_model": "anthropic/test-haiku-4-5"
     },
     "ollama": {
       "base_url": "http://host.docker.internal:11434/v1",

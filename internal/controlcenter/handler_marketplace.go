@@ -96,10 +96,8 @@ func (h *MarketplaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.EventBroker != nil {
-		h.EventBroker.Emit(EventMarketplace)
-		h.EventBroker.Emit(EventApps)
-	}
+	h.EventBroker.Emit(EventMarketplace)
+	h.EventBroker.Emit(EventApps)
 
 	// Include trust info in response for install actions
 	resp := map[string]any{"ok": true}

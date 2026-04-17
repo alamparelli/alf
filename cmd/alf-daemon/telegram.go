@@ -542,16 +542,26 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 	}
 
 	resumeID := chatSessions.Get(chatID)
-	// Use the cheapest tier for fast follow-up.
-	model := "claude-haiku-4-5"
+	// Use the cheapest tier for fast follow-up. Resolve from user config
+	// via firstFallbackTier → DefaultFallbackModel; never hardcode a model.
+	model := ""
 	fallback := firstFallbackTier(tierStore)
 	for _, t := range tierStore.Current().Tiers {
 		if t.Name == fallback {
 			if m := router.ResolveModel(t.Model); m != "" {
 				model = m
+			} else if t.Model != "" {
+				model = t.Model // preserve non-Claude models (e.g. gpt-5.4)
 			}
 			break
 		}
+	}
+	if model == "" {
+		model = cc.DefaultFallbackModel(tierStore.Current())
+	}
+	if model == "" {
+		log.Printf("telegram: no fallback model configured, skipping negative-reaction follow-up")
+		return
 	}
 
 	result, err := prov.Invoke(context.Background(), prompt, provider.Params{

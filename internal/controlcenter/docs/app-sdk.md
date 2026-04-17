@@ -66,6 +66,24 @@ AlfSDK.api('/api/bash', {
 });
 ```
 
+### Binary assets via direct URL (no SDK call)
+
+For `<img>`, `<audio>`, `<video>`, and `@font-face`, you don't need `AlfSDK.api()` or `AlfSDK.fetch()`. If your REST server app serves the asset under `/api/` with a media/font file extension, the URL works directly from the sandboxed iframe:
+
+```html
+<img src="/apps/my-app/api/covers/42.jpg" alt="">
+<audio src="/apps/my-app/api/sounds/ping.mp3"></audio>
+<video src="/apps/my-app/api/clips/demo.mp4"></video>
+```
+
+**Extensions allowed under `/api/` without auth headers** (images, audio, video, fonts):
+`.png .jpg .jpeg .gif .webp .svg .ico .avif` · `.woff .woff2 .ttf .otf .eot` · `.mp3 .mp4 .webm .ogg .wav`
+
+**Still require `AlfSDK.api()` / `AlfSDK.fetch()`** (data + scripts, blocked to prevent unauth exec/leak on dynamic endpoints):
+`.json .xml .csv .txt .html` · `.js .mjs .css .wasm .map`
+
+**The extension must be in the URL path.** `/api/covers/42` that returns `image/jpeg` does *not* work as a direct `<img src>` — the path has no `.jpg` suffix, so the browser cannot identify it as a sub-resource and the request fails auth. Always include the extension in your route (`/api/covers/{id}.jpg`).
+
 ### `AlfSDK.bash(cmd)`
 
 Execute a shell command in a sandboxed chroot. The sandbox exposes only the app's `data/` directory (read-write) and system binaries (read-only). Network access requires the `network` permission. Returns `{ output, exit_code, error }`.

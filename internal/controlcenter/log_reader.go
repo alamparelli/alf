@@ -38,6 +38,13 @@ func (r *fileLogReader) Tail(name string, n int) ([]string, error) {
 
 	path := filepath.Join(r.dir, name)
 	data, err := readTail(path, maxTailBytes)
+	if err != nil && os.IsNotExist(err) && !strings.Contains(name, ".") {
+		// Convenience: `log tail daemon` should find `daemon.log`.
+		altPath := filepath.Join(r.dir, name+".log")
+		if altData, altErr := readTail(altPath, maxTailBytes); altErr == nil {
+			data, err = altData, nil
+		}
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []string{}, nil

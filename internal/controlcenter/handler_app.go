@@ -175,6 +175,7 @@ func (h *AppHandler) proxyAPI(w http.ResponseWriter, r *http.Request, slug, apiP
 			req.Header.Del("Cookie")
 			req.Header.Del("Authorization")
 			req.Header.Del("X-Tools-Socket")
+			req.Header.Del("X-Tools-Socket-App")
 			req.Header.Del("X-Requested-With")
 			// SEC-007: Strip forwarded headers to prevent host header injection.
 			req.Header.Del("X-Forwarded-Host")

@@ -2,7 +2,6 @@ package tooling
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -46,8 +45,8 @@ func (t GlobNativeTool) Run(_ context.Context, argsJSON string) (string, error) 
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 	if args.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")

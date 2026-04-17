@@ -198,8 +198,8 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, r
 			}
 		}
 	}
-	// Tier not found - use defaults.
-	return tierParams{Model: "claude-haiku-4-5"}
+	// Tier not found — resolve from user config instead of hardcoding a model.
+	return tierParams{Model: cc.DefaultFallbackModel(tiers)}
 }
 
 // autoEnableAgentTier enables orchestrator tiers in-memory when agent teams are configured.

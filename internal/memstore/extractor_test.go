@@ -38,7 +38,7 @@ func TestExtractFacts_CleanJSON(t *testing.T) {
 	prov := &mockProvider{
 		response: `[{"text":"user prefers Go","type":"preference"},{"text":"project uses Docker","type":"fact"}]`,
 	}
-	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov}
+	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov, tierResolver: func() string { return "test-model" }}
 
 	facts, err := e.extractFacts("some diff text")
 	if err != nil {
@@ -57,8 +57,42 @@ func TestExtractFacts_CleanJSON(t *testing.T) {
 	if len(prov.calls) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(prov.calls))
 	}
-	if prov.calls[0].Params.Model != "claude-haiku-4-5" {
-		t.Errorf("expected haiku model, got %s", prov.calls[0].Params.Model)
+	if prov.calls[0].Params.Model != "test-model" {
+		t.Errorf("expected tier-resolved model, got %s", prov.calls[0].Params.Model)
+	}
+}
+
+// TestResolveModel_NoResolver verifies that an extractor without a
+// tierResolver returns empty string (no hardcoded Claude fallback). See #291.
+func TestResolveModel_NoResolver(t *testing.T) {
+	e := &Extractor{}
+	if m := e.resolveModel(); m != "" {
+		t.Errorf("expected empty model with nil resolver, got %q", m)
+	}
+}
+
+// TestResolveModel_ResolverReturnsEmpty verifies that when the resolver
+// returns empty, resolveModel propagates empty (no hardcoded fallback).
+func TestResolveModel_ResolverReturnsEmpty(t *testing.T) {
+	e := &Extractor{tierResolver: func() string { return "" }}
+	if m := e.resolveModel(); m != "" {
+		t.Errorf("expected empty model when resolver returns empty, got %q", m)
+	}
+}
+
+// TestExtractFacts_NoTierAvailable verifies that extractFacts returns a
+// clear error instead of invoking with a hardcoded Claude model when no
+// tier is resolvable (#291).
+func TestExtractFacts_NoTierAvailable(t *testing.T) {
+	prov := &mockProvider{response: `[]`}
+	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov, tierResolver: func() string { return "" }}
+
+	_, err := e.extractFacts("diff")
+	if err == nil {
+		t.Fatal("expected error when no tier available, got nil")
+	}
+	if len(prov.calls) != 0 {
+		t.Errorf("provider should not be invoked when no tier available, got %d calls", len(prov.calls))
 	}
 }
 
@@ -66,7 +100,7 @@ func TestExtractFacts_MarkdownWrapped(t *testing.T) {
 	prov := &mockProvider{
 		response: "```json\n[{\"text\":\"wrapped fact\",\"type\":\"fact\"}]\n```",
 	}
-	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov}
+	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov, tierResolver: func() string { return "test-model" }}
 
 	facts, err := e.extractFacts("diff content")
 	if err != nil {
@@ -79,20 +113,20 @@ func TestExtractFacts_MarkdownWrapped(t *testing.T) {
 
 func TestExtractFacts_ProviderError(t *testing.T) {
 	prov := &mockProvider{err: fmt.Errorf("connection refused")}
-	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov}
+	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov, tierResolver: func() string { return "test-model" }}
 
 	_, err := e.extractFacts("diff content")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if got := err.Error(); got != "claude extraction: connection refused" {
+	if got := err.Error(); got != "extraction: connection refused" {
 		t.Errorf("unexpected error: %s", got)
 	}
 }
 
 func TestExtractFacts_InvalidJSON(t *testing.T) {
 	prov := &mockProvider{response: "I couldn't extract any facts from this."}
-	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov}
+	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov, tierResolver: func() string { return "test-model" }}
 
 	_, err := e.extractFacts("diff content")
 	if err == nil {
@@ -105,7 +139,7 @@ func TestExtractFacts_InvalidJSON(t *testing.T) {
 
 func TestExtractFacts_EmptyArray(t *testing.T) {
 	prov := &mockProvider{response: "[]"}
-	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov}
+	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov, tierResolver: func() string { return "test-model" }}
 
 	facts, err := e.extractFacts("diff content")
 	if err != nil {
@@ -120,7 +154,7 @@ func TestExtractFacts_ContactType(t *testing.T) {
 	prov := &mockProvider{
 		response: `[{"text":"Miguel Rebelo (hello@mirebelo.com) — author of Zapier roundup","type":"contact"}]`,
 	}
-	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov}
+	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov, tierResolver: func() string { return "test-model" }}
 
 	facts, err := e.extractFacts("diff with contact info")
 	if err != nil {
@@ -138,7 +172,7 @@ func TestSelectFiles_ParsesResponse(t *testing.T) {
 	prov := &mockProvider{
 		response: `["logs/events/2026-03-17.jsonl", "context/plan.md"]`,
 	}
-	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov}
+	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov, tierResolver: func() string { return "test-model" }}
 
 	files, err := e.selectFiles("some stat output")
 	if err != nil {
@@ -154,7 +188,7 @@ func TestSelectFiles_ParsesResponse(t *testing.T) {
 
 func TestSelectFiles_EmptyArray(t *testing.T) {
 	prov := &mockProvider{response: "[]"}
-	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov}
+	e := &Extractor{dataDir: "/tmp", stateDir: t.TempDir(), timeout: time.Minute, provider: prov, tierResolver: func() string { return "test-model" }}
 
 	files, err := e.selectFiles("empty stat")
 	if err != nil {

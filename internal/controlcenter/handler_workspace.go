@@ -371,6 +371,14 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 		return
 	}
 
+	// Preserve existing file mode across the atomic replace. CreateTemp
+	// produces 0600 files; without this, rename would drop the original
+	// file's permissions (e.g. 0664) and break group-write access.
+	mode := os.FileMode(0o664)
+	if info, err := os.Stat(absPath); err == nil {
+		mode = info.Mode().Perm()
+	}
+
 	// Atomic write: tmp file + rename.
 	dir := filepath.Dir(absPath)
 	tmp, err := os.CreateTemp(dir, ".ws-*.tmp")
@@ -388,6 +396,12 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 	}
 	tmp.Close()
 
+	if err := os.Chmod(tmpName, mode); err != nil {
+		os.Remove(tmpName)
+		respondError(w, http.StatusInternalServerError, "write failed: "+err.Error())
+		return
+	}
+
 	if err := os.Rename(tmpName, absPath); err != nil {
 		os.Remove(tmpName)
 		respondError(w, http.StatusInternalServerError, "write failed: "+err.Error())
@@ -395,7 +409,7 @@ func (h *WorkspaceHandler) put(w http.ResponseWriter, r *http.Request, absPath, 
 	}
 
 	h.notifyChange(relPath)
-	w.Write([]byte(`{"ok":true}`))
+	respondOK(w)
 }
 
 // protectedDirs are directories that cannot be deleted (top-level and nested).
@@ -448,25 +462,32 @@ func (h *WorkspaceHandler) del(w http.ResponseWriter, absPath, relPath string) {
 	}
 
 	h.notifyChange(relPath)
-	w.Write([]byte(`{"ok":true}`))
+	respondOK(w)
+}
+
+// reloadEventForPath maps a workspace-relative path to the reload event it
+// should trigger. Returns (0, false) if the path is not reload-relevant.
+// Shared by WorkspaceHandler.notifyChange and UploadHandler.
+func reloadEventForPath(relPath string) (ReloadEvent, bool) {
+	switch {
+	case relPath == "config.d/config.json":
+		return ReloadConfig, true
+	case relPath == "config.d/tiers.json":
+		return ReloadTiers, true
+	case strings.HasPrefix(relPath, "tools"):
+		return ReloadTools, true
+	case strings.HasPrefix(relPath, "skills") || strings.HasPrefix(relPath, "skills.d"):
+		return ReloadSkills, true
+	case strings.HasPrefix(relPath, "agents/teams"):
+		return ReloadAgents, true
+	}
+	return 0, false
 }
 
 // notifyChange sends reload events based on which file was modified.
 func (h *WorkspaceHandler) notifyChange(relPath string) {
-	if h.Notifier == nil {
-		return
-	}
-	switch {
-	case relPath == "config.d/config.json":
-		h.Notifier.Notify(ReloadConfig)
-	case relPath == "config.d/tiers.json":
-		h.Notifier.Notify(ReloadTiers)
-	case strings.HasPrefix(relPath, "tools"):
-		h.Notifier.Notify(ReloadTools)
-	case strings.HasPrefix(relPath, "skills") || strings.HasPrefix(relPath, "skills.d"):
-		h.Notifier.Notify(ReloadSkills)
-	case strings.HasPrefix(relPath, "agents/teams"):
-		h.Notifier.Notify(ReloadAgents)
+	if ev, ok := reloadEventForPath(relPath); ok {
+		notifyReload(h.Notifier, ev)
 	}
 }
 
@@ -592,18 +613,9 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Notify about changes.
-	if h.Notifier != nil {
-		for _, s := range saved {
-			switch {
-			case strings.HasPrefix(s, "tools"):
-				h.Notifier.Notify(ReloadTools)
-			case strings.HasPrefix(s, "skills") || strings.HasPrefix(s, "skills.d"):
-				h.Notifier.Notify(ReloadSkills)
-			case s == "config.d/config.json":
-				h.Notifier.Notify(ReloadConfig)
-			case s == "config.d/tiers.json":
-				h.Notifier.Notify(ReloadTiers)
-			}
+	for _, s := range saved {
+		if ev, ok := reloadEventForPath(s); ok {
+			notifyReload(h.Notifier, ev)
 		}
 	}
 

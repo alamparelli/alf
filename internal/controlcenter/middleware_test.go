@@ -2,6 +2,7 @@ package controlcenter
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -515,10 +516,12 @@ func TestAuthMiddleware_BearerAutoSession(t *testing.T) {
 		return mobileToken
 	})(okHandler())
 
-	// Browser page navigation with mobile Bearer token → should set cc_session cookie.
+	// Browser top-level navigation (Sec-Fetch-Dest: document) with mobile
+	// Bearer token → should set cc_session cookie.
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer "+mobileToken)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("Sec-Fetch-Dest", "document")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -536,6 +539,10 @@ func TestAuthMiddleware_BearerAutoSession(t *testing.T) {
 	}
 	if sessionCookie == nil {
 		t.Fatal("expected cc_session cookie to be set on Bearer page navigation")
+	}
+	// #271: TTL must be 1h (3600s), not the old 24h.
+	if sessionCookie.MaxAge != int(autoIssueSessionTTL/time.Second) {
+		t.Errorf("cc_session MaxAge: expected %d (1h), got %d", int(autoIssueSessionTTL/time.Second), sessionCookie.MaxAge)
 	}
 
 	// Subsequent request with just the session cookie (no Bearer) should work.
@@ -570,6 +577,84 @@ func TestAuthMiddleware_BearerNoAutoSessionForAPI(t *testing.T) {
 	}
 }
 
+// #271: Accept: text/html alone is no longer enough to trigger an
+// auto-session. Only a real top-level navigation (Sec-Fetch-Dest: document)
+// should derive a cookie from a Bearer.
+func TestAuthMiddleware_BearerNoAutoSessionWithoutSecFetchDest(t *testing.T) {
+	ss := NewSessionStore(nil)
+	handler := authMiddleware("test-token", ss, nil)(okHandler())
+
+	// GET /foo with Accept: text/html but NO Sec-Fetch-Dest header —
+	// previously triggered auto-session; must now be ignored.
+	req := httptest.NewRequest("GET", "/foo", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "cc_session" {
+			t.Error("#271 regression: Accept: text/html alone should not auto-issue a session cookie")
+		}
+	}
+}
+
+// #271: Different Bearer tokens must produce different chatIDs so
+// SessionStore.evictOldestLocked cannot evict cross-user. A collision between
+// two distinct bearers would reopen the DoS-between-mobile-clients path.
+func TestAuthMiddleware_BearerAutoSession_PerBearerIsolation(t *testing.T) {
+	ss := NewSessionStore(nil)
+	ss.SetMaxSessions(2)
+	const tokenA = "bearer-aaaaaaaaaaaaaaaaaaaaaaaa"
+	const tokenB = "bearer-bbbbbbbbbbbbbbbbbbbbbbbb"
+
+	// Sanity: distinct bearers must hash to distinct chatIDs, none equal to
+	// reserved sentinels (0, -1, -2).
+	aID := bearerDerivedChatID(tokenA)
+	bID := bearerDerivedChatID(tokenB)
+	if aID == bID {
+		t.Fatalf("bearerDerivedChatID collision: %d == %d", aID, bID)
+	}
+	for _, reserved := range []int64{0, -1, -2} {
+		if aID == reserved || bID == reserved {
+			t.Fatalf("bearerDerivedChatID produced reserved value %d (a=%d b=%d)", reserved, aID, bID)
+		}
+	}
+
+	handler := authMiddleware(tokenA, ss, nil, func() string { return tokenB })(okHandler())
+
+	issue := func(token string) string {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Sec-Fetch-Dest", "document")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == "cc_session" {
+				return c.Value
+			}
+		}
+		t.Fatalf("no cc_session cookie issued for token %q", token)
+		return ""
+	}
+
+	// Issue maxSessions cookies for bearer A, then two for bearer B.
+	a1 := issue(tokenA)
+	a2 := issue(tokenA)
+	_ = issue(tokenB)
+	_ = issue(tokenB)
+
+	// With pre-fix chatID=0 sharing, bearer B's two issues would have evicted
+	// a1 and a2 (oldest in the chatID=0 pool). With per-bearer isolation,
+	// bearer A's sessions must survive.
+	if !ss.Valid(a1) || !ss.Valid(a2) {
+		t.Error("#271 regression: bearer B issuance evicted bearer A's auto-sessions (cross-user eviction)")
+	}
+}
+
 func TestAuthMiddleware_CcBearerCookieExtraToken(t *testing.T) {
 	mobileToken := "mobile-token-xyz"
 	handler := authMiddleware("primary-token", nil, nil, func() string {
@@ -595,8 +680,19 @@ var _ http.Flusher = (*statusWriter)(nil)
 // SEC-004: clientIP must not trust X-Forwarded-For from untrusted origins
 // ---------------------------------------------------------------------------
 
+// withTrustedProxyCIDRs overrides the package-level trustedProxyCIDRs for the
+// duration of a test. computeTrustedProxyCIDRs() re-reads the env var, so the
+// helper can simulate the operator-configured opt-in for private ranges.
+func withTrustedProxyCIDRs(t *testing.T, env string) {
+	t.Helper()
+	saved := trustedProxyCIDRs
+	t.Setenv("ALF_TRUSTED_PROXY_CIDRS", env)
+	trustedProxyCIDRs = computeTrustedProxyCIDRs()
+	t.Cleanup(func() { trustedProxyCIDRs = saved })
+}
+
 func TestClientIP_TrustedProxy_HonorsXFF(t *testing.T) {
-	// Requests from loopback/private network may carry XFF (reverse proxy scenario).
+	// Loopback is trusted by default — a reverse proxy on 127.0.0.1 can set XFF.
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "127.0.0.1:12345" // loopback = trusted proxy
 	req.Header.Set("X-Forwarded-For", "203.0.113.5")
@@ -607,14 +703,34 @@ func TestClientIP_TrustedProxy_HonorsXFF(t *testing.T) {
 	}
 }
 
-func TestClientIP_TrustedProxy_DockerBridge(t *testing.T) {
+func TestClientIP_TrustedProxy_DockerBridge_OptIn(t *testing.T) {
+	// #272: private ranges are NOT trusted by default anymore. Operators must
+	// opt in via ALF_TRUSTED_PROXY_CIDRS. Once opted in, XFF is honored.
+	withTrustedProxyCIDRs(t, "172.16.0.0/12")
+
 	req := httptest.NewRequest("GET", "/", nil)
-	req.RemoteAddr = "172.20.0.1:5000" // Docker bridge = trusted
+	req.RemoteAddr = "172.20.0.1:5000"
 	req.Header.Set("X-Forwarded-For", "203.0.113.99")
 
 	ip := clientIP(req)
 	if ip != "203.0.113.99" {
-		t.Errorf("docker bridge remote: expected XFF value, got %q", ip)
+		t.Errorf("docker bridge remote (opted in): expected XFF value, got %q", ip)
+	}
+}
+
+func TestClientIP_PrivateRange_NotTrustedByDefault(t *testing.T) {
+	// #272: without explicit opt-in, 10/8 172.16/12 192.168/16 must be treated
+	// as untrusted so XFF spoofing from a LAN attacker is ignored.
+	for _, remote := range []string{"10.0.0.5:1", "172.20.0.1:1", "192.168.1.10:1"} {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = remote
+		req.Header.Set("X-Forwarded-For", "203.0.113.99")
+
+		ip := clientIP(req)
+		if ip == "203.0.113.99" {
+			host, _, _ := net.SplitHostPort(remote)
+			t.Errorf("%s: XFF spoofing accepted by default — should fall back to RemoteAddr %s", remote, host)
+		}
 	}
 }
 
@@ -669,12 +785,30 @@ func TestClientIP_MultiValueXFF_TakesFirst(t *testing.T) {
 	}
 }
 
-func TestIsTrustedProxy_PrivateRanges(t *testing.T) {
-	trusted := []string{"127.0.0.1", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.100"}
-	for _, ip := range trusted {
+func TestIsTrustedProxy_LoopbackOnlyByDefault(t *testing.T) {
+	// Default policy (#272): only loopback is trusted.
+	for _, ip := range []string{"127.0.0.1", "127.1.2.3", "::1"} {
 		if !isTrustedProxy(ip) {
-			t.Errorf("expected %s to be a trusted proxy IP", ip)
+			t.Errorf("expected %s to be trusted (loopback default)", ip)
 		}
+	}
+	for _, ip := range []string{"10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.100"} {
+		if isTrustedProxy(ip) {
+			t.Errorf("expected %s NOT trusted by default — opt-in required", ip)
+		}
+	}
+}
+
+func TestIsTrustedProxy_EnvOptIn(t *testing.T) {
+	withTrustedProxyCIDRs(t, "10.0.0.0/8, 192.168.0.0/16")
+	for _, ip := range []string{"10.0.0.1", "10.255.255.255", "192.168.1.100"} {
+		if !isTrustedProxy(ip) {
+			t.Errorf("expected %s to be trusted after opt-in", ip)
+		}
+	}
+	// 172.16/12 was NOT added to the opt-in list → still untrusted.
+	if isTrustedProxy("172.16.0.1") {
+		t.Error("172.16.0.1 should not be trusted (not in opt-in list)")
 	}
 }
 
@@ -684,5 +818,368 @@ func TestIsTrustedProxy_PublicIPs(t *testing.T) {
 		if isTrustedProxy(ip) {
 			t.Errorf("expected %s to NOT be a trusted proxy IP", ip)
 		}
+	}
+}
+
+// TestRateLimiter_XFFSpoofRegression is a regression test for #272.
+//
+// The outer middleware chain in factory.go wraps rateLimiter with
+// securityHeadersMiddleware so that X-Forwarded-For / X-Real-IP are stripped
+// before the rate limiter reads clientIP(). This test pins that ordering: if
+// a future refactor inverts the wrapping, a LAN client in a trusted CIDR
+// could once again rotate XFF to escape the anonymous 15/min limit.
+func TestRateLimiter_XFFSpoofRegression(t *testing.T) {
+	withTrustedProxyCIDRs(t, "10.0.0.0/8") // simulate operator-configured trust
+
+	rl := newRateLimiter(3)
+	// Production order: securityHeaders is OUTSIDE rateLimiter.
+	chain := securityHeadersMiddleware(rl.middleware(okHandler()))
+
+	// 6 requests from the same LAN IP, each with a different spoofed XFF.
+	// With the strip running first, all 6 count against 10.0.0.5 and the
+	// 4th+ must be rate limited.
+	var okCount, limited int
+	for i := 0; i < 6; i++ {
+		req := httptest.NewRequest("GET", "/api/ping", nil)
+		req.RemoteAddr = "10.0.0.5:12345"
+		req.Header.Set("X-Forwarded-For", httpFakeClient(i))
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, req)
+		switch rec.Code {
+		case http.StatusOK:
+			okCount++
+		case http.StatusTooManyRequests:
+			limited++
+		}
+	}
+	if okCount != 3 {
+		t.Errorf("expected 3 OK responses (limit=3), got %d", okCount)
+	}
+	if limited != 3 {
+		t.Errorf("expected 3 rate-limited responses, got %d — XFF spoofing bypassed the limiter", limited)
+	}
+}
+
+// httpFakeClient returns a deterministic dummy public IP for spoofing tests.
+func httpFakeClient(i int) string {
+	return fmt.Sprintf("203.0.113.%d", i%250+1)
+}
+
+// -----------------------------------------------------------------------------
+// Regression tests for PENTEST-0.7.8 HIGH-1:
+// Sec-Fetch-Dest/Site header forgery bypassed auth + rate limit on /apps/*.
+//
+// Attack (confirmed against cc.lamparelli.eu on 2026-04-10): a non-browser
+// client sending forged `Sec-Fetch-Dest: script|iframe` + `Sec-Fetch-Site:
+// same-origin` on /apps/{slug}/... bypassed authMiddleware, reaching
+// AppHandler unauthenticated. This allowed:
+//   - enumeration of installed apps (via /apps/{slug}/)
+//   - unauthenticated dump of manifest.json, app.json, index.html of any app
+//   - unlimited requests (no rate limit applied to the bypass path)
+//
+// Fix: isAppSubResource now also requires Origin: null, a sub-resource file
+// extension (not .html/.json), and blocks dest=document|iframe|navigate.
+// -----------------------------------------------------------------------------
+
+// helperSubResReq builds a request that would have triggered the old bypass.
+func helperSubResReq(method, urlPath string) *http.Request {
+	req := httptest.NewRequest(method, urlPath, nil)
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	return req
+}
+
+func TestIsAppSubResource_Regression_NoOriginNull(t *testing.T) {
+	// Forged Sec-Fetch headers but no Origin: null → must NOT be treated as
+	// sub-resource for non-script/style dests or API paths.
+	// Note: script/style on static paths are now allowed (see isStaticAssetLoad).
+	req := helperSubResReq("GET", "/apps/later/api/index.js")
+	if isAppSubResource(req) {
+		t.Fatal("forged Sec-Fetch without Origin: null on API path MUST be rejected")
+	}
+}
+
+func TestIsAppSubResource_Regression_HTMLRejected(t *testing.T) {
+	// HTML document loads must go through normal cookie auth. An attacker
+	// could previously enumerate apps via /apps/{slug}/ (→ index.html).
+	req := helperSubResReq("GET", "/apps/later/")
+	req.Header.Set("Origin", "null")
+	if isAppSubResource(req) {
+		t.Fatal("HTML document load (no extension) must not be a sub-resource")
+	}
+
+	req = helperSubResReq("GET", "/apps/later/index.html")
+	req.Header.Set("Origin", "null")
+	req.Header.Set("Sec-Fetch-Dest", "iframe")
+	if isAppSubResource(req) {
+		t.Fatal("index.html with dest=iframe must not be a sub-resource")
+	}
+}
+
+func TestIsAppSubResource_Regression_JSONRejected(t *testing.T) {
+	// manifest.json / app.json dumps were confirmed exploitable in the
+	// pentest. These must NOT be served via the sub-resource bypass.
+	for _, file := range []string{"manifest.json", "app.json", "config.json"} {
+		req := helperSubResReq("GET", "/apps/later/"+file)
+		req.Header.Set("Origin", "null")
+		if isAppSubResource(req) {
+			t.Errorf("%s must not be a sub-resource (leaks app metadata)", file)
+		}
+	}
+}
+
+func TestIsAppSubResource_Regression_DocumentDestRejected(t *testing.T) {
+	// dest=document|iframe|navigate must never bypass auth.
+	for _, dest := range []string{"document", "iframe", "navigate"} {
+		req := helperSubResReq("GET", "/apps/later/foo.js")
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", dest)
+		if isAppSubResource(req) {
+			t.Errorf("dest=%s must not bypass auth", dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_LegitimateSandboxedFetch(t *testing.T) {
+	// A genuine sandboxed iframe sub-resource load — the design case the
+	// bypass exists for — must still be recognised.
+	cases := []struct {
+		ext  string
+		dest string
+	}{
+		{".js", "script"},
+		{".mjs", "script"},
+		{".css", "style"},
+		{".png", "image"},
+		{".svg", "image"},
+		{".woff2", "font"},
+		{".wasm", "script"},
+		{".mp4", "video"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("GET", "/apps/later/asset"+tc.ext, nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if !isAppSubResource(req) {
+			t.Errorf("legit sub-resource %s (dest=%s) must be allowed", tc.ext, tc.dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_RefererOutsideApps(t *testing.T) {
+	// Referer from a non-/apps/ page must be rejected (defense-in-depth).
+	req := httptest.NewRequest("GET", "/apps/later/app.js", nil)
+	req.Header.Set("Origin", "null")
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	req.Header.Set("Referer", "https://evil.example/page")
+	if isAppSubResource(req) {
+		t.Fatal("external Referer must not be treated as app iframe context")
+	}
+}
+
+func TestIsAppSubResource_NonGETRejected(t *testing.T) {
+	for _, m := range []string{"POST", "PUT", "DELETE", "PATCH"} {
+		req := httptest.NewRequest(m, "/apps/later/foo.js", nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", "script")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if isAppSubResource(req) {
+			t.Errorf("method %s must not be a sub-resource", m)
+		}
+	}
+}
+
+func TestIsAppSubResource_APIPath_ScriptRejected(t *testing.T) {
+	// /apps/{slug}/api/*.js must never bypass auth — app backends serving
+	// dynamic JS would be unauth code-exec vector.
+	for _, p := range []string{
+		"/apps/later/api/items.js",
+		"/apps/later/api/bundle.mjs",
+		"/apps/later/api/style.css",
+		"/apps/later/api/mod.wasm",
+		"/apps/later/api/bundle.map",
+	} {
+		req := httptest.NewRequest("GET", p, nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", "script")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if isAppSubResource(req) {
+			t.Errorf("%s under /api/ must never bypass auth", p)
+		}
+	}
+}
+
+func TestIsAppSubResource_APIPath_AssetsAllowed(t *testing.T) {
+	// /apps/{slug}/api/*.{jpg,png,woff2,mp4,...} IS allowed to bypass auth
+	// so that <img>, <audio>, <video>, @font-face can load assets served
+	// dynamically by the app's backend (e.g. bookshelf cover thumbnails).
+	cases := []struct {
+		path string
+		dest string
+	}{
+		{"/apps/bookshelf/api/covers/1.jpg", "image"},
+		{"/apps/bookshelf/api/covers/2.png", "image"},
+		{"/apps/bookshelf/api/art/avatar.webp", "image"},
+		{"/apps/bookshelf/api/icons/logo.svg", "image"},
+		{"/apps/bookshelf/api/fonts/Inter.woff2", "font"},
+		{"/apps/bookshelf/api/media/clip.mp4", "video"},
+		{"/apps/bookshelf/api/media/ping.mp3", "audio"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		req.Header.Set("Referer", "https://cc.example/apps/bookshelf/")
+		if !isAppSubResource(req) {
+			t.Errorf("%s (dest=%s) must be accepted as an asset sub-resource", tc.path, tc.dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_TagLoad_EmptyOriginAccepted(t *testing.T) {
+	// Browsers do NOT send an Origin header for plain <img>, <audio>, <video>,
+	// <link> font, or <track> sub-resources — even from a sandboxed null-
+	// origin iframe. The bypass MUST accept these requests, otherwise dynamic
+	// asset URLs (e.g. <img src="/apps/bookshelf/api/covers/42.jpg">) all
+	// 401-out from app iframes. This is the bookshelf regression case.
+	cases := []struct {
+		path string
+		dest string
+	}{
+		// Static files in app dir
+		{"/apps/bookshelf/icon.png", "image"},
+		{"/apps/bookshelf/cover.webp", "image"},
+		{"/apps/bookshelf/font.woff2", "font"},
+		{"/apps/bookshelf/audio.mp3", "audio"},
+		{"/apps/bookshelf/clip.mp4", "video"},
+		// Dynamic assets via API proxy
+		{"/apps/bookshelf/api/covers/1.jpg", "image"},
+		{"/apps/bookshelf/api/avatars/u42.png", "image"},
+		{"/apps/bookshelf/api/media/song.mp3", "audio"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		// NOTE: deliberately no Origin header — that's the whole point.
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		req.Header.Set("Sec-Fetch-Mode", "no-cors")
+		if !isAppSubResource(req) {
+			t.Errorf("%s (dest=%s, no Origin) must be accepted as a tag-load sub-resource", tc.path, tc.dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_TagLoad_NonAssetDestStillRejected(t *testing.T) {
+	// Worker, embed, object dests with empty Origin must still be rejected.
+	// Script/style on API paths must also be rejected (step 1b blocks .js/.css).
+	rejected := []struct {
+		path string
+		dest string
+	}{
+		{"/apps/later/sw.js", "worker"},
+		{"/apps/later/icon.svg", "embed"},
+		{"/apps/later/icon.svg", "object"},
+		// Script/style on API paths: still blocked
+		{"/apps/later/api/index.js", "script"},
+		{"/apps/later/api/style.css", "style"},
+	}
+	for _, tc := range rejected {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if isAppSubResource(req) {
+			t.Errorf("%s (dest=%s, no Origin) must be rejected", tc.path, tc.dest)
+		}
+	}
+
+	// Script/style on static (non-API) paths with empty Origin are now
+	// accepted — these are <script>/<link> tag loads from sandboxed iframes.
+	accepted := []struct {
+		path string
+		dest string
+	}{
+		{"/apps/later/index.js", "script"},
+		{"/apps/later/style.css", "style"},
+		{"/apps/later/mod.wasm", "script"},
+		{"/apps/later/widget.css", "style"},
+	}
+	for _, tc := range accepted {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if !isAppSubResource(req) {
+			t.Errorf("%s (dest=%s, no Origin) must be accepted as static asset tag-load", tc.path, tc.dest)
+		}
+	}
+}
+
+func TestIsAppSubResource_TagLoad_ThirdPartyOriginRejected(t *testing.T) {
+	// A real third-party site loading a CC asset would either send a real
+	// Origin (CORS request) or no Origin (regular <img>). The CORS case must
+	// still be rejected — only "null" or absent are valid.
+	req := httptest.NewRequest("GET", "/apps/bookshelf/api/covers/1.jpg", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Sec-Fetch-Dest", "image")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	if isAppSubResource(req) {
+		t.Fatal("third-party Origin must never be treated as a sandboxed sub-resource")
+	}
+}
+
+func TestIsAppSubResource_APIPath_JSONStillRejected(t *testing.T) {
+	// Data endpoints (.json, .xml, .csv, .txt) must stay auth-required even
+	// under /api/, regardless of forged sub-resource headers.
+	for _, ext := range []string{".json", ".xml", ".csv", ".txt", ".html"} {
+		req := httptest.NewRequest("GET", "/apps/later/api/data"+ext, nil)
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Dest", "empty")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if isAppSubResource(req) {
+			t.Errorf("%s under /api/ must not bypass auth", ext)
+		}
+	}
+}
+
+// Full auth-middleware integration test reproducing the pentest PoC.
+// This is the canonical regression: before the fix, this request got
+// next.ServeHTTP (bypass). After the fix, it must get 401.
+func TestAuthMiddleware_Regression_PentestSecFetchBypass(t *testing.T) {
+	handler := authMiddleware("secret-token", nil, nil)(okHandler())
+
+	// Exact PoC used against cc.lamparelli.eu:
+	//   curl -H "Sec-Fetch-Dest: script" -H "Sec-Fetch-Site: same-origin" \
+	//        https://cc.lamparelli.eu/apps/later/
+	req := httptest.NewRequest("GET", "/apps/later/", nil)
+	req.Header.Set("Sec-Fetch-Dest", "iframe")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("PENTEST-0.7.8 HIGH-1 regression: /apps/later/ bypassed auth")
+	}
+
+	// Same PoC targeting manifest.json (unauth dump was confirmed).
+	req = httptest.NewRequest("GET", "/apps/later/manifest.json", nil)
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Origin", "null")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("PENTEST-0.7.8 HIGH-1 regression: manifest.json bypassed auth")
+	}
+
+	// Script sub-resource on API path WITHOUT Origin: null (pentest shape) must 401.
+	// Note: static paths now allow script/style with empty Origin (sandboxed iframe tag loads).
+	req = httptest.NewRequest("GET", "/apps/later/api/app.js", nil)
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("PENTEST-0.7.8 HIGH-1 regression: /apps/*/api/*.js without Origin: null bypassed auth")
 	}
 }

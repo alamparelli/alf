@@ -2,7 +2,6 @@ package tooling
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,8 +54,8 @@ func (t RemoveNativeTool) Run(_ context.Context, argsJSON string) (string, error
 		Path      string `json:"path"`
 		Recursive bool   `json:"recursive"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 	if args.Path == "" {
 		return "", fmt.Errorf("path is required")

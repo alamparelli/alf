@@ -37,6 +37,53 @@ type TiersSnapshot struct {
 	DefaultFallback string
 }
 
+// DefaultFallbackModel resolves a fallback model from the snapshot without
+// hardcoding any provider-specific value. Mirrors
+// controlcenter.DefaultFallbackModel (kept local to avoid an import cycle:
+// controlcenter → comms). Keep the two implementations in sync.
+// Order: default_fallback tier → lowest-priority enabled routable →
+// any enabled → "". resolveModel may be nil (no alias expansion).
+func DefaultFallbackModel(snap TiersSnapshot, resolveModel func(string) string) string {
+	resolve := func(raw string) string {
+		if resolveModel != nil {
+			if m := resolveModel(raw); m != "" {
+				return m
+			}
+		}
+		return raw
+	}
+	// 1. Named default_fallback.
+	if name := snap.DefaultFallback; name != "" {
+		for _, t := range snap.Tiers {
+			if t.Name == name && t.Enabled {
+				return resolve(t.Model)
+			}
+		}
+	}
+	// 2. Lowest-priority enabled+routable tier.
+	bestIdx := -1
+	bestPriority := int(^uint(0) >> 1)
+	for i, t := range snap.Tiers {
+		if !t.Enabled || !t.Routable {
+			continue
+		}
+		if t.Priority < bestPriority {
+			bestPriority = t.Priority
+			bestIdx = i
+		}
+	}
+	if bestIdx >= 0 {
+		return resolve(snap.Tiers[bestIdx].Model)
+	}
+	// 3. Any enabled tier.
+	for _, t := range snap.Tiers {
+		if t.Enabled {
+			return resolve(t.Model)
+		}
+	}
+	return ""
+}
+
 // IsOrchestratorTier returns true if the named tier has the orchestrator role.
 func (s TiersSnapshot) IsOrchestratorTier(name string) bool {
 	for _, t := range s.Tiers {
@@ -110,7 +157,8 @@ func ResolveTierParams(tierName string, tiers TiersSnapshot, dataDir string, too
 			}, true
 		}
 	}
-	return TierParams{Model: "claude-haiku-4-5"}, false
+	// Tier not found — resolve from the configured fallback, never hardcode.
+	return TierParams{Model: DefaultFallbackModel(tiers, resolveModel)}, false
 }
 
 // FirstFallbackTier returns the default fallback from config, or the first
@@ -164,12 +212,13 @@ func OnboardingTier(tierStore TierStoreReader) string {
 }
 
 // TierHasRead returns true if the tier has Read tool access.
+// "*" in Tools grants all tools including Read.
 func TierHasRead(t TierInfo) bool {
 	if t.WriteCapable {
 		return true
 	}
 	for _, tool := range t.Tools {
-		if tool == "Read" {
+		if tool == "*" || tool == "Read" {
 			return true
 		}
 	}

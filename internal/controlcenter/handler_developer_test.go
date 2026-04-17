@@ -12,8 +12,16 @@ import (
 func TestDeveloper_Apps(t *testing.T) {
 	dir := t.TempDir()
 	appsDir := filepath.Join(dir, "apps")
+
+	// Real app dirs carry at least one marker file.
 	os.MkdirAll(filepath.Join(appsDir, "my-app"), 0o755)
+	os.WriteFile(filepath.Join(appsDir, "my-app", "app.json"), []byte(`{}`), 0o644)
 	os.MkdirAll(filepath.Join(appsDir, "other-app"), 0o755)
+	os.WriteFile(filepath.Join(appsDir, "other-app", "manifest.json"), []byte(`{}`), 0o644)
+
+	// Orphan/leftover empty dir (e.g. from a broken uninstall) must be excluded.
+	os.MkdirAll(filepath.Join(appsDir, "orphan"), 0o755)
+
 	os.WriteFile(filepath.Join(appsDir, "not-a-dir.txt"), []byte("x"), 0o644)
 	// Hidden dirs should be excluded
 	os.MkdirAll(filepath.Join(appsDir, ".hidden"), 0o755)
@@ -37,6 +45,9 @@ func TestDeveloper_Apps(t *testing.T) {
 	for _, name := range resp.Apps {
 		if strings.HasPrefix(name, ".") {
 			t.Errorf("hidden dir should be excluded: %s", name)
+		}
+		if name == "orphan" {
+			t.Errorf("orphan empty dir should be excluded")
 		}
 	}
 }

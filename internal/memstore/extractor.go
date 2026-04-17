@@ -13,6 +13,22 @@ import (
 	"time"
 )
 
+// diffExcludes are git pathspec exclusions applied to Pass 1 stat and worktree
+// checks. Binary/generated files are skipped, plus self-referential LLM/scheduler
+// logs to prevent the memory extractor from feeding on its own output (observed
+// to cause 18× prompt growth over 2 days on 2026-04-14/15).
+var diffExcludes = []string{
+	":!*.png", ":!*.jpg", ":!*.wav", ":!*.mp3", ":!*.bin",
+	":!*.db", ":!*.db-shm", ":!*.db-wal",
+	":!*.zip", ":!*.tar.gz",
+	":!tools/go-path/", ":!tools/go/",
+	":!logs/llm/", ":!logs/scheduler/",
+}
+
+// maxPass2DiffBytes caps the Pass 2 diff size fed to the LLM. Files selected
+// by Pass 1 may still be large; truncate to keep a single extraction bounded.
+const maxPass2DiffBytes = 200_000
+
 // ExtractorProvider invokes Claude and returns text output.
 type ExtractorProvider interface {
 	Invoke(ctx context.Context, prompt string, params ExtractorParams) (string, error)
@@ -153,10 +169,8 @@ func (e *Extractor) Extract() error {
 	// Check for uncommitted working tree changes (staged + unstaged).
 	worktreeMode := false
 	if currentHash == lastHash {
-		wtStat, _ := e.gitCommand("diff", "--stat", "--no-color", "HEAD",
-			"--", ":!*.png", ":!*.jpg", ":!*.wav", ":!*.mp3", ":!*.bin",
-			":!*.db", ":!*.db-shm", ":!*.db-wal",
-			":!tools/go-path/", ":!tools/go/", ":!*.zip", ":!*.tar.gz")
+		wtArgs := append([]string{"diff", "--stat", "--no-color", "HEAD", "--"}, diffExcludes...)
+		wtStat, _ := e.gitCommand(wtArgs...)
 		if strings.TrimSpace(wtStat) == "" {
 			log.Printf("memstore: no new commits or working tree changes since last extraction")
 			return nil
@@ -166,9 +180,7 @@ func (e *Extractor) Extract() error {
 	}
 
 	// Pass 1: get diff stat.
-	binaryExcludes := []string{":!*.png", ":!*.jpg", ":!*.wav", ":!*.mp3", ":!*.bin",
-		":!*.db", ":!*.db-shm", ":!*.db-wal",
-		":!tools/go-path/", ":!tools/go/", ":!*.zip", ":!*.tar.gz"}
+	binaryExcludes := diffExcludes
 	var statArgs []string
 	if worktreeMode {
 		// Diff working tree against HEAD.
@@ -259,6 +271,11 @@ func (e *Extractor) Extract() error {
 		return nil
 	}
 
+	if len(diffContent) > maxPass2DiffBytes {
+		log.Printf("memstore: pass 2 diff too large (%d bytes), truncating to %d", len(diffContent), maxPass2DiffBytes)
+		diffContent = diffContent[:maxPass2DiffBytes] + "\n... (truncated)"
+	}
+
 	// Pass 2: extract facts from the diff.
 	log.Printf("memstore: pass 2 — extracting from %d bytes of diff", len(diffContent))
 	facts, err := e.extractFacts(diffContent)
@@ -335,8 +352,12 @@ func (e *Extractor) selectFiles(diffStat string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
+	model := e.resolveModel()
+	if model == "" {
+		return nil, fmt.Errorf("no tier available for file selection (tierResolver returned empty)")
+	}
 	raw, err := e.provider.Invoke(ctx, prompt, ExtractorParams{
-		Model:    e.resolveModel(),
+		Model:    model,
 		MaxTurns: 1,
 		DataDir:  e.dataDir,
 	})
@@ -373,13 +394,17 @@ func (e *Extractor) extractFacts(diffContent string) ([]extractedFact, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
+	model := e.resolveModel()
+	if model == "" {
+		return nil, fmt.Errorf("no tier available for fact extraction (tierResolver returned empty)")
+	}
 	raw, err := e.provider.Invoke(ctx, prompt, ExtractorParams{
-		Model:    e.resolveModel(),
+		Model:    model,
 		MaxTurns: 1,
 		DataDir:  e.dataDir,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("claude extraction: %w", err)
+		return nil, fmt.Errorf("extraction: %w", err)
 	}
 
 	return parseJSONFactArray(raw)
@@ -478,13 +503,15 @@ func (e *Extractor) saveState(hash string) {
 	os.WriteFile(e.statePath, data, 0o644)
 }
 
+// resolveModel returns the model from the configured tier resolver.
+// Returns "" if no tier is available — callers MUST handle this (#291).
+// No hardcoded model fallback: users may run any backend (codex, ollama,
+// anthropic, …) and a hardcoded Claude model would bypass their config.
 func (e *Extractor) resolveModel() string {
 	if e.tierResolver != nil {
-		if m := e.tierResolver(); m != "" {
-			return m
-		}
+		return e.tierResolver()
 	}
-	return "claude-haiku-4-5"
+	return ""
 }
 
 // --- JSON parsing helpers ---

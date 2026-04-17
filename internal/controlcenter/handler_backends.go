@@ -149,7 +149,7 @@ func (h *BackendsModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		if h.Cache != nil {
 			go h.Cache.RefreshBackend(name)
 		}
-		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		respondOK(w)
 		return
 	}
 

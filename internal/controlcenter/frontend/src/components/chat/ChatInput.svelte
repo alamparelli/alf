@@ -14,16 +14,17 @@
     onSend: (message: string, mediaFiles: UploadedFile[], model: string) => void
     onStop?: () => void
     sending: boolean
-    tiers?: { name: string; model: string }[]
+    tiers?: { name: string; model: string; enabled?: boolean; force_command?: boolean }[]
     draft?: string
     onDraftChange?: (text: string) => void
     selectedModel?: string
     onModelChange?: (model: string) => void
     activeSkills?: string[]
     onDismissSkill?: (name: string) => void
+    convId?: string
   }
 
-  let { onSend, onStop, sending, tiers = [], draft = '', onDraftChange, selectedModel: selectedModelProp = '', onModelChange, activeSkills = [], onDismissSkill }: Props = $props()
+  let { onSend, onStop, sending, tiers = [], draft = '', onDraftChange, selectedModel: selectedModelProp = '', onModelChange, activeSkills = [], onDismissSkill, convId }: Props = $props()
 
   let text = $state(draft)
   let files = $state<UploadedFile[]>([])
@@ -41,6 +42,13 @@
   })
   $effect(() => {
     selectedModel = selectedModelProp
+  })
+
+  // Auto-focus composer when opening/switching a chat so the user can type immediately.
+  $effect(() => {
+    void convId
+    if (!textarea) return
+    requestAnimationFrame(() => textarea?.focus())
   })
 
   function selectTier(name: string) {
@@ -64,16 +72,40 @@
   let showCommands = $state(false)
   let commandFilter = $state('')
   let selectedCommandIdx = $state(0)
+  // Set when a command is picked so the autoResize re-check can't bounce
+  // showCommands back to true before the user edits the text again.
+  let commandJustPicked = false
+
+  function selectCommand(name: string) {
+    const next = '/' + name + ' '
+    text = next
+    showCommands = false
+    selectedCommandIdx = 0
+    commandFilter = ''
+    commandJustPicked = true
+    // Restore focus + place caret at the end on the next tick so the
+    // programmatic value update has landed in the DOM.
+    setTimeout(() => {
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(next.length, next.length)
+      autoResize()
+    }, 0)
+  }
 
   const builtinCommands = [
     { name: 'new', desc: 'Start a new conversation' },
     { name: 'skills', desc: 'List available skills' },
   ]
 
-  // Add tier force commands
+  // Only tiers that are enabled AND marked force_command in the profile are
+  // exposed as /<tier> autocompletions — mirrors the backend's matching rule
+  // in chat_service.go and the Telegram bot menu in refreshTelegramCommands.
   let allCommands = $derived.by(() => {
     const cmds = [...builtinCommands]
     for (const t of tiers) {
+      if (t.enabled === false) continue
+      if (!t.force_command) continue
       cmds.push({ name: t.name, desc: `Force tier: ${t.model}` })
     }
     return cmds
@@ -92,6 +124,13 @@
 
     // Detect slash command input
     const val = textarea.value
+    if (commandJustPicked) {
+      // A selection just populated the textarea programmatically; ignore
+      // this pass so the dropdown stays closed until the user types again.
+      commandJustPicked = false
+      showCommands = false
+      return
+    }
     if (val.startsWith('/') && !val.includes(' ')) {
       commandFilter = val.slice(1)
       showCommands = true
@@ -115,10 +154,7 @@
       }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
         e.preventDefault()
-        const cmd = filteredCommands[selectedCommandIdx]
-        text = '/' + cmd.name + ' '
-        showCommands = false
-        autoResize()
+        selectCommand(filteredCommands[selectedCommandIdx].name)
         return
       }
       if (e.key === 'Escape') {
@@ -269,8 +305,9 @@
       {#each filteredCommands as cmd, i}
         <button
           class="command-item"
+          type="button"
           class:selected={i === selectedCommandIdx}
-          onclick={() => { text = '/' + cmd.name + ' '; showCommands = false; textarea?.focus() }}
+          onmousedown={(e) => { e.preventDefault(); selectCommand(cmd.name) }}
           onmouseenter={() => selectedCommandIdx = i}
         >
           <span class="command-name">/{cmd.name}</span>
@@ -376,7 +413,7 @@
     background: var(--bg-input);
     color: var(--text);
     font-family: inherit;
-    font-size: var(--font-sm, 13px);
+    font-size: var(--alf-chat-font-size, var(--font-sm, 13px));
     resize: none;
     overflow-y: auto;
     line-height: 1.5;

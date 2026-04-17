@@ -39,7 +39,7 @@ func (h *ScheduleRunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 // SchedulesHandler serves GET/POST/PUT/DELETE for scheduled jobs.
@@ -155,7 +155,7 @@ func (h *SchedulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		respondOK(w)
 
 	default:
 		methodNotAllowed(w)

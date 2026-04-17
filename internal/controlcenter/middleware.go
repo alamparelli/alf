@@ -8,10 +8,46 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
 )
+
+// subResourceExts is the set of file extensions that a sandboxed null-origin
+// iframe legitimately fetches as sub-resources (script, style, image, font,
+// media). HTML/JSON documents are excluded on purpose: those must go through
+// normal cookie auth via the iframe's document load (which is same-origin
+// from the parent and carries cookies).
+var subResourceExts = map[string]bool{
+	".js": true, ".mjs": true, ".map": true,
+	".css":  true,
+	".png":  true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".svg": true, ".ico": true, ".avif": true,
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	".mp3":  true, ".mp4": true, ".webm": true, ".ogg": true, ".wav": true,
+	".wasm": true,
+}
+
+// assetExts is the narrower subset of subResourceExts allowed to bypass auth
+// when the path contains /api/ (i.e. proxied to the app's backend server).
+// Restricted to image/audio/video/font so that a sandboxed iframe can load
+// <img>, <audio>, <video>, <link> font, <picture>, etc. with direct URLs.
+//
+// Excluded on purpose vs. subResourceExts: .js, .mjs, .css, .wasm, .map.
+// Scripts and styles served dynamically by app backends must still go through
+// authenticated AlfSDK.fetch() — letting them bypass auth here would open
+// unauth code execution and source-map leaks on user-generated content.
+var assetExts = map[string]bool{
+	// Images
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".svg": true, ".ico": true, ".avif": true,
+	// Fonts
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	// Audio / video
+	".mp3": true, ".mp4": true, ".webm": true, ".ogg": true, ".wav": true,
+}
 
 // ctxKeyAppTokenSlug stores the slug extracted from a validated app Bearer token.
 // Used by handlers (e.g., BashHandler) to cross-check against Referer-derived slug.
@@ -94,46 +130,114 @@ func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, ext
 func stripToolsSocketHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del("X-Tools-Socket")
+		r.Header.Del("X-Tools-Socket-App")
 		next.ServeHTTP(w, r)
 	})
 }
 
 // isAppSubResource returns true if the request is a browser sub-resource load
-// (script, style, image, font, etc.) for an app static file. Sandboxed iframes
-// cannot attach Bearer tokens to these loads, so they are exempted from auth
-// and rate limiting. Security relies on Sec-Fetch-Dest (browser-set, unforgeable)
-// to distinguish sub-resource loads from direct navigation by unauthenticated users.
+// (script, style, image, font, etc.) from a sandboxed app iframe. Sandboxed
+// iframes at /apps/{slug}/ are loaded with sandbox="allow-scripts ..." (no
+// allow-same-origin), giving them an opaque "null" origin. Sub-resource fetches
+// from that context cannot attach cookies OR Bearer tokens, so the auth
+// middleware exempts them based on request shape.
+//
+// SECURITY: Sec-Fetch-* headers are NOT a trust signal on their own — any HTTP
+// client can set them arbitrarily. The bypass is gated by multiple conditions
+// that are hard to satisfy *together* outside a real sandboxed iframe:
+//
+//  1. Origin: null  — sandboxed iframes without allow-same-origin have opaque
+//     origin. Non-browser clients can forge it, but it's the canonical marker
+//     and aligns with corsMiddleware which already special-cases "null".
+//  2. File extension must be a real sub-resource type (script, style, image,
+//     font, media, wasm). HTML/JSON are excluded: document loads of the iframe
+//     itself are fetched same-origin by the parent window and MUST carry
+//     cookies (normal auth path). This closes the enumeration vector where an
+//     attacker could hit /apps/{slug}/ or /apps/{slug}/manifest.json with
+//     forged Sec-Fetch headers to list installed apps.
+//  3. Sec-Fetch-Dest must match a sub-resource type (not document/iframe).
+//  4. Sec-Fetch-Site must be present.
+//
+// NOTE: The rate limiter still exempts sub-resources (apps may legitimately
+// load many assets per page load). DoS via fully-forged conditions is a
+// residual risk but significantly reduced — the auth bypass (enumeration,
+// file dumps) is closed, and real sandboxed iframes are the only "honest"
+// users of this path.
 func isAppSubResource(r *http.Request) bool {
-	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/apps/") || strings.Contains(r.URL.Path, "/api/") {
+	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/apps/") {
 		return false
 	}
+
+	// 1. Extension must be a real sub-resource type — never HTML/JSON/etc.
+	ext := strings.ToLower(path.Ext(r.URL.Path))
+	if !subResourceExts[ext] {
+		return false
+	}
+
+	// 1b. For API-proxied paths (/apps/{slug}/api/...), narrow the allowed
+	// extensions to image/audio/video/font only. This lets <img>, <audio>,
+	// <video>, and @font-face load assets that an app backend serves
+	// dynamically (e.g. user-uploaded covers, transcoded media) while still
+	// blocking unauth access to .js/.css/.wasm/.map — those must go through
+	// the authenticated Bearer path via AlfSDK.fetch().
+	if strings.Contains(r.URL.Path, "/api/") && !assetExts[ext] {
+		return false
+	}
+
+	// 3. Sec-Fetch headers must be present.
 	dest := r.Header.Get("Sec-Fetch-Dest")
 	site := r.Header.Get("Sec-Fetch-Site")
-
-	// Require BOTH Sec-Fetch headers to be present (browser-set, unforgeable).
-	// curl/scripts typically don't send these — requiring both raises the bar.
 	if dest == "" || site == "" {
 		return false
 	}
 
-	// If Referer is present, it must point to an /apps/ path.
-	// Sandboxed iframes may omit Referer — that's OK when Sec-Fetch headers are valid.
+	// 2. Origin gate. Three valid cases:
+	//   (a) Origin: null  — fetch()/XHR from a sandboxed null-origin iframe
+	//       (AlfSDK.api / AlfSDK.fetch always take this path).
+	//   (b) Empty Origin + tag-load dest (image/audio/video/font/track)
+	//       — browsers NEVER send an Origin header for plain <img>, <audio>,
+	//         <video>, <link rel=preload as=font>, or <track> sub-resources,
+	//         even from a sandboxed null-origin iframe. Without this carve-
+	//         out, <img src="/apps/X/api/cover.jpg"> from an app iframe gets
+	//         401, breaking dynamic asset loading entirely.
+	//   (c) Empty Origin + script/style dest on static (non-API) paths
+	//       — <script src="app.js"> and <link href="style.css"> tags from a
+	//         sandboxed iframe also omit Origin. These are safe for static
+	//         paths: the files are the app's own distributed assets, not
+	//         secrets. API paths are already blocked for .js/.css at step 1b.
+	//
+	// Case (b) is restricted to tag-load dests for /api/ paths: the original
+	// pentest pattern (forged Sec-Fetch-Dest=script + empty Origin on /api/)
+	// stays rejected by step 1b. Case (c) is safe because static app files
+	// under /apps/{slug}/ are public within the app's context. The residual
+	// risk is that a third-party site can hot-link an app's static assets if
+	// it knows the exact slug + path — equivalent to default CDN behavior.
+	origin := r.Header.Get("Origin")
+	isTagLoad := dest == "image" || dest == "audio" || dest == "video" ||
+		dest == "font" || dest == "track"
+	isStaticAssetLoad := (dest == "script" || dest == "style") &&
+		!strings.Contains(r.URL.Path, "/api/")
+	if origin != "null" && !(origin == "" && (isTagLoad || isStaticAssetLoad)) {
+		return false
+	}
+
+	// 4. Reject document/iframe/navigate — those are not sub-resources and must
+	// go through normal cookie auth via the parent window's same-origin fetch.
+	if dest == "document" || dest == "iframe" || dest == "navigate" {
+		return false
+	}
+
+	// 5. If Referer is present, it must point to an /apps/ path.
 	ref := r.Header.Get("Referer")
 	if ref != "" && !strings.Contains(ref, "/apps/") {
 		return false
 	}
 
-	// Sub-resource loads: script, style, image, font, audio, video, worker, etc.
-	if dest != "document" && dest != "navigate" {
-		if site == "same-origin" || site == "cross-site" || site == "same-site" || site == "none" {
-			return true
-		}
-	}
-	// Iframe document loads from same origin (parent loading the app).
-	if dest == "iframe" && (site == "same-origin" || site == "same-site") {
-		return true
-	}
-	return false
+	// Any remaining sub-resource dest (script, style, image, font, audio,
+	// video, worker, track, embed, object, etc.) with any Sec-Fetch-Site is
+	// accepted — the null-origin + extension + dest combination is what
+	// distinguishes a real sandboxed sub-resource from a crafted request.
+	return true
 }
 
 func authMiddleware(token string, sessions *SessionStore, exempt map[string]bool, extraTokenFns ...func() string) func(http.Handler) http.Handler {
@@ -158,6 +262,14 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 			// Only trusted on Unix socket connections — the TCP server strips this
 			// header via stripToolsSocketHeader() to prevent external forgery.
 			if r.Header.Get("X-Tools-Socket") == "1" {
+				// Per-app variant: if the socket belongs to a specific app
+				// (AppToolsProxy), propagate the slug into context so handlers
+				// like /api/bash can enforce app-scoped permissions.
+				if appSlug := r.Header.Get("X-Tools-Socket-App"); appSlug != "" {
+					ctx := context.WithValue(r.Context(), ctxKeyAppTokenSlug{}, appSlug)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -229,22 +341,80 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 	}
 }
 
-// autoIssueSession creates a session cookie when a Bearer-authenticated browser request
-// arrives without an existing session. This bridges Bearer auth (mobile app) to cookie auth
-// (WebView JS), so subsequent fetch() calls work automatically.
+// autoIssueSessionTTL is the lifetime of a cookie session auto-derived from a
+// Bearer-authenticated page navigation. Kept short (1h) because the cookie is a
+// bridge to the real Bearer token, not a primary credential — if the Bearer is
+// rotated, stale auto-sessions survive at most this long. See #271.
+const autoIssueSessionTTL = time.Hour
+
+// bearerDerivedChatID maps a Bearer token to a stable negative chatID so
+// auto-issued cookie sessions are isolated per Bearer:
+//   - Rotating a Bearer starts a fresh eviction pool (the old pool ages out
+//     with the cookies tied to it).
+//   - SessionStore.RevokeChat(x) on one Bearer cannot sweep another Bearer's
+//     auto-sessions.
+//
+// The return value is always <= -3, staying clear of the reserved ids
+// 0 (Telegram "unknown"), -1 (apiChatID for API chat clients), and -2 (kept
+// free for future sentinels). The hash is FNV-1a 64-bit, same family as
+// convSessionID in chat_service.go.
+func bearerDerivedChatID(bearer string) int64 {
+	const (
+		fnvOffset64 uint64 = 14695981039346656037
+		fnvPrime64  uint64 = 1099511628211
+	)
+	h := fnvOffset64
+	for i := 0; i < len(bearer); i++ {
+		h ^= uint64(bearer[i])
+		h *= fnvPrime64
+	}
+	// Drop the sign bit, then shift into the safe range (<= -3).
+	v := int64(h >> 1)
+	return -v - 3
+}
+
+// autoIssueSession creates a session cookie when a Bearer-authenticated browser
+// top-level navigation arrives without an existing session. This bridges Bearer
+// auth (mobile app) to cookie auth (WebView JS), so subsequent fetch() calls
+// authenticate via the cookie automatically.
+//
+// Security notes (#271):
+//   - The trigger is Sec-Fetch-Dest: document, not just Accept: text/html.
+//     Real browsers send this on top-level navigations; API clients don't, so
+//     random API calls no longer get an unsolicited cookie.
+//   - The session is bound to a per-Bearer hashed chatID (see
+//     bearerDerivedChatID) so two mobile clients with different Bearers
+//     cannot evict each other via SessionStore.evictOldestLocked, and
+//     RevokeChat cannot sweep unrelated sessions.
+//   - TTL is 1h (not 24h) — the cookie is a bridge, not a primary session.
 func autoIssueSession(w http.ResponseWriter, r *http.Request, sessions *SessionStore) {
 	if sessions == nil {
 		return
 	}
-	// Only issue on browser page navigations, not API calls.
-	if !strings.Contains(r.Header.Get("Accept"), "text/html") {
+	// Only issue on real browser top-level navigations. Sec-Fetch-Dest is sent
+	// by every modern Chromium/WebKit WebView and is absent on API clients —
+	// a much tighter signal than matching Accept: text/html.
+	if r.Header.Get("Sec-Fetch-Dest") != "document" {
 		return
 	}
 	// Skip if already has a valid session.
 	if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
 		return
 	}
-	sessionID, err := sessions.Issue(0, 24*time.Hour)
+	// Extract the Bearer we just validated. Cookie-based Bearer (cc_bearer)
+	// is unusual for page navigations; fall back to a generic sentinel rather
+	// than sharing a pool across clients.
+	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if bearer == "" {
+		if c, err := r.Cookie("cc_bearer"); err == nil {
+			bearer = c.Value
+		}
+	}
+	chatID := int64(-3) // safe sentinel for unknown-Bearer path
+	if bearer != "" {
+		chatID = bearerDerivedChatID(bearer)
+	}
+	sessionID, err := sessions.Issue(chatID, autoIssueSessionTTL)
 	if err != nil {
 		log.Printf("[CC] auto-session issue failed: %v", err)
 		return
@@ -258,7 +428,7 @@ func autoIssueSession(w http.ResponseWriter, r *http.Request, sessions *SessionS
 		Name:     "cc_session",
 		Value:    sessionID,
 		Path:     "/",
-		MaxAge:   86400,
+		MaxAge:   int(autoIssueSessionTTL / time.Second),
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: autoSameSite,
@@ -443,11 +613,17 @@ func appIsolationMiddleware(allowedOrigin string) func(http.Handler) http.Handle
 	}
 }
 
-// securityHeadersMiddleware sets security headers on every response.
+// securityHeadersMiddleware sets security headers on every response and is
+// the authoritative place where untrusted forwarded headers are stripped.
+//
+// This middleware MUST run OUTSIDE rateLimiter and authMiddleware so that any
+// call to clientIP() below this layer observes the stripped request — otherwise
+// a client from a trusted proxy CIDR could spoof X-Forwarded-For (see #272).
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// SEC-007: Strip incoming forwarded headers to prevent host injection.
-		// These may be set by external reverse proxies or spoofed by clients.
+		// SEC-007 / #272: Strip incoming forwarded headers to prevent host
+		// injection AND IP spoofing from LAN attackers. clientIP() will then
+		// fall back to RemoteAddr for any middleware/handler that runs below.
 		r.Header.Del("X-Forwarded-Host")
 		r.Header.Del("X-Forwarded-For")
 		r.Header.Del("X-Forwarded-Proto")
@@ -495,26 +671,44 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// trustedProxyCIDRs are networks whose X-Forwarded-For/X-Real-IP headers we trust.
-// Only connections from these addresses may override the client IP.
-// Includes Docker default bridge, common overlay networks, and loopback.
-var trustedProxyCIDRs = func() []*net.IPNet {
+// trustedProxyCIDRs are networks whose X-Forwarded-For/X-Real-IP headers we
+// trust. Only connections from these addresses may override the client IP.
+//
+// Default is loopback-only (127.0.0.0/8, ::1/128). Earlier releases trusted
+// all RFC1918 ranges, which let any LAN-local client forge X-Forwarded-For
+// and bypass anonymous rate limits (issue #272). Operators running a reverse
+// proxy outside the loopback must opt in explicitly via the environment
+// variable ALF_TRUSTED_PROXY_CIDRS (comma-separated CIDRs, e.g.
+// "10.0.0.0/8,::1/128"). Tests may overwrite this variable directly via
+// computeTrustedProxyCIDRs.
+var trustedProxyCIDRs = computeTrustedProxyCIDRs()
+
+// computeTrustedProxyCIDRs builds the trusted proxy CIDR list from the hard
+// defaults plus any entries in ALF_TRUSTED_PROXY_CIDRS.
+func computeTrustedProxyCIDRs() []*net.IPNet {
 	cidrs := []string{
-		"127.0.0.0/8",   // loopback
-		"10.0.0.0/8",    // Docker / private class A
-		"172.16.0.0/12", // Docker default bridge range
-		"192.168.0.0/16", // private class C
-		"::1/128",       // IPv6 loopback
+		"127.0.0.0/8", // loopback
+		"::1/128",     // IPv6 loopback
+	}
+	if extra := os.Getenv("ALF_TRUSTED_PROXY_CIDRS"); extra != "" {
+		for _, c := range strings.Split(extra, ",") {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				cidrs = append(cidrs, c)
+			}
+		}
 	}
 	var nets []*net.IPNet
 	for _, cidr := range cidrs {
 		_, n, err := net.ParseCIDR(cidr)
-		if err == nil {
-			nets = append(nets, n)
+		if err != nil {
+			log.Printf("[CC] invalid trusted proxy CIDR %q: %v", cidr, err)
+			continue
 		}
+		nets = append(nets, n)
 	}
 	return nets
-}()
+}
 
 func isTrustedProxy(remoteIP string) bool {
 	ip := net.ParseIP(remoteIP)

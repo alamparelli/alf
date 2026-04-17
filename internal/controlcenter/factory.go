@@ -226,6 +226,7 @@ func HandlerFactory(deps Deps) Handlers {
 		ProviderRegistry: deps.ProviderRegistry,
 		ModelCache:       deps.ModelCache,
 		Notifier:         deps.Notifier,
+		TierStore:        deps.TierStore,
 	})
 	mux.Handle("/api/skills/", &ResourceHandler{
 		Store:       deps.SkillStore,
@@ -256,32 +257,30 @@ func HandlerFactory(deps Deps) Handlers {
 		appStorage := &AppStorageHandler{DataDir: deps.DataDir, Perms: permChecker}
 		appUpload := &AppUploadHandler{DataDir: deps.DataDir, Perms: permChecker}
 		appErrors := &AppErrorHandler{DataDir: deps.DataDir, Journal: deps.ErrorJournal}
+		// Sub-route dispatch: /api/apps/{slug}/{action}. Matches on the
+		// trailing action segment so slugs that happen to contain an action
+		// keyword (e.g. "storage-helper") don't get misrouted.
 		mux.Handle("/api/apps/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.Contains(r.URL.Path, "/storage") {
+			action := ""
+			if i := strings.LastIndex(r.URL.Path, "/"); i >= 0 {
+				action = r.URL.Path[i+1:]
+			}
+			switch action {
+			case "storage":
 				appStorage.ServeHTTP(w, r)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/upload") {
+			case "upload":
 				appUpload.ServeHTTP(w, r)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/errors") {
+			case "errors":
 				appErrors.ServeHTTP(w, r)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/permissions") {
+			case "permissions":
 				handleAppPermissions(w, r, permChecker)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/token") {
+			case "token":
 				handleAppToken(w, r, deps.AppTokens)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/restart") {
+			case "restart":
 				handleAppRestart(w, r)
-				return
+			default:
+				(&AppListHandler{Store: deps.AppStore}).ServeHTTP(w, r)
 			}
-			(&AppListHandler{Store: deps.AppStore}).ServeHTTP(w, r)
 		}))
 		mux.Handle("/apps/", &AppHandler{
 			Store:     deps.AppStore,
@@ -302,6 +301,7 @@ func HandlerFactory(deps Deps) Handlers {
 		mux.Handle("/api/chat/conversations", &ChatConversationsHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/conversations/", &ChatConversationHandler{Service: deps.ChatService, ConfigStore: deps.ConfigStore})
 		mux.Handle("/api/chat/job", &ChatJobHandler{Service: deps.ChatService})
+		mux.Handle("/api/chat/jobs", &ChatJobsHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/upload", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/media/", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/react", &ChatReactHandler{Service: deps.ChatService})
@@ -518,10 +518,14 @@ func HandlerFactory(deps Deps) Handlers {
 	handler = authMiddlewareWithAppTokens(deps.AuthToken, deps.Sessions, deps.AppTokens, exempt, func() string {
 		return GetMobileToken(deps.VaultManager)
 	})(handler)
-	handler = securityHeadersMiddleware(handler)
 	handler = newRateLimiter(15).withAuthLimit(600, deps.Sessions).withToken(deps.AuthToken).withAppTokens(deps.AppTokens).withExtraTokens(func() string {
 		return GetMobileToken(deps.VaultManager)
 	}).middleware(handler) // 15/min anonymous, no limit authenticated (session, bearer, or mobile token)
+	// securityHeadersMiddleware MUST wrap rateLimiter so that untrusted
+	// X-Forwarded-For / X-Real-IP are stripped before clientIP() is read
+	// by the rate limiter. See #272 — LAN clients in a trusted proxy CIDR
+	// could otherwise rotate XFF to bypass the 15/min anonymous limit.
+	handler = securityHeadersMiddleware(handler)
 	handler = corsMiddleware(deps.AllowedOrigin, deps.AppTokens)(handler)
 	handler = loggingMiddleware(handler)
 

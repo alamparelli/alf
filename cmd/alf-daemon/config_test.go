@@ -5,7 +5,59 @@ import (
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/provider"
+	"github.com/alamparelli/alf/internal/scheduler"
 )
+
+// staticTierStore is a minimal cc.TierStore backed by a fixed TiersConfig.
+type staticTierStore struct{ cfg *cc.TiersConfig }
+
+func (s *staticTierStore) Load() (*cc.TiersConfig, error)  { return s.cfg, nil }
+func (s *staticTierStore) Save(_ *cc.TiersConfig) error    { return nil }
+func (s *staticTierStore) Current() *cc.TiersConfig        { return s.cfg }
+func (s *staticTierStore) Reload() error                   { return nil }
+func (s *staticTierStore) SetPath(_ string) error          { return nil }
+func (s *staticTierStore) Path() string                    { return "" }
+
+func TestSchedulerTierStore_PreservesNonClaudeModel(t *testing.T) {
+	ts := &schedulerTierStore{
+		ts: &staticTierStore{cfg: &cc.TiersConfig{
+			Tiers: []cc.Tier{
+				{Name: "codex-dev", Backend: "codex", Model: "gpt-5.4"},
+				{Name: "haiku", Backend: "", Model: "haiku"},
+			},
+		}},
+	}
+
+	snap := ts.Current()
+	if snap == nil {
+		t.Fatal("expected non-nil snapshot")
+	}
+
+	cases := []struct {
+		name      string
+		wantModel string
+	}{
+		// gpt-5.4 is not a Claude alias — must pass through unchanged.
+		{"codex-dev", "gpt-5.4"},
+		// "haiku" is a Claude alias — must be expanded.
+		{"haiku", "claude-haiku-4-5"},
+	}
+
+	byName := make(map[string]scheduler.TierInfo)
+	for _, t := range snap.Tiers {
+		byName[t.Name] = t
+	}
+
+	for _, tc := range cases {
+		ti, ok := byName[tc.name]
+		if !ok {
+			t.Fatalf("tier %q not found in snapshot", tc.name)
+		}
+		if ti.Model != tc.wantModel {
+			t.Errorf("tier %q: got model %q, want %q", tc.name, ti.Model, tc.wantModel)
+		}
+	}
+}
 
 func TestResolveBackendAPIKey_AuthNone(t *testing.T) {
 	bcfg := cc.BackendConfig{Auth: "none"}

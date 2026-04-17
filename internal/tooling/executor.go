@@ -42,9 +42,11 @@ type CallRequest struct {
 
 // CallResult is the output of a tool execution.
 type CallResult struct {
-	ID      string
-	Output  string
-	IsError bool
+	ID           string
+	Output       string
+	IsError      bool
+	ExitCode     int    // 0 on success, non-zero for failures. -1 for timeout or launch errors.
+	ErrorMessage string // short error description (stderr/timeout/launch error), empty on success
 }
 
 // Execute runs a tool. Native Go tools are tried first, then subprocess binaries.
@@ -53,7 +55,7 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 	if n, ok := e.natives[call.Name]; ok {
 		out, err := n.Run(ctx, call.Arguments)
 		if err != nil {
-			return CallResult{ID: call.ID, Output: err.Error(), IsError: true}
+			return CallResult{ID: call.ID, Output: err.Error(), IsError: true, ExitCode: -1, ErrorMessage: err.Error()}
 		}
 		if out == "" {
 			out = "(no output)"
@@ -69,11 +71,8 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 
 	toolPath := e.resolveTool(call.Name)
 	if toolPath == "" {
-		return CallResult{
-			ID:      call.ID,
-			Output:  fmt.Sprintf("tool %q not found", call.Name),
-			IsError: true,
-		}
+		msg := fmt.Sprintf("tool %q not found", call.Name)
+		return CallResult{ID: call.ID, Output: msg, IsError: true, ExitCode: -1, ErrorMessage: msg}
 	}
 
 	// Integrity check for user tools (not system tools.d/).
@@ -81,11 +80,8 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 	// the TOCTOU window between periodic scan and execution.
 	if e.Integrity != nil && IsUserTool(toolPath, e.DataDir) {
 		if err := e.Integrity.Verify(toolPath); err != nil {
-			return CallResult{
-				ID:      call.ID,
-				Output:  fmt.Sprintf("tool %q blocked: %v", call.Name, err),
-				IsError: true,
-			}
+			msg := fmt.Sprintf("tool %q blocked: %v", call.Name, err)
+			return CallResult{ID: call.ID, Output: msg, IsError: true, ExitCode: -1, ErrorMessage: msg}
 		}
 	}
 
@@ -114,11 +110,11 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 			if e.ErrorJournal != nil {
 				e.ErrorJournal.Append(call.Name, call.Arguments, msg)
 			}
-			return CallResult{
-				ID:      call.ID,
-				Output:  msg,
-				IsError: true,
-			}
+			return CallResult{ID: call.ID, Output: msg, IsError: true, ExitCode: -1, ErrorMessage: msg}
+		}
+		exitCode := -1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
 		}
 		if errMsg != "" {
 			if output != "" {
@@ -133,11 +129,11 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 		if e.ErrorJournal != nil {
 			e.ErrorJournal.Append(call.Name, call.Arguments, output)
 		}
-		return CallResult{
-			ID:      call.ID,
-			Output:  output,
-			IsError: true,
+		reportedErr := errMsg
+		if reportedErr == "" {
+			reportedErr = err.Error()
 		}
+		return CallResult{ID: call.ID, Output: output, IsError: true, ExitCode: exitCode, ErrorMessage: reportedErr}
 	}
 
 	// Success: auto-resolve any previous errors for this tool.

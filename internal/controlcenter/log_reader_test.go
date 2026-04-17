@@ -63,6 +63,22 @@ func TestTailMissingFile(t *testing.T) {
 	}
 }
 
+func TestTailAutoAppendsLogSuffix(t *testing.T) {
+	dir := writeTempLog(t, "daemon.log", "a\nb\nc\n")
+	r := NewFileLogReader(dir, nil)
+
+	lines, err := r.Tail("daemon", 10)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines via auto-suffix, got %d: %v", len(lines), lines)
+	}
+	if lines[0] != "a" || lines[2] != "c" {
+		t.Fatalf("unexpected lines: %v", lines)
+	}
+}
+
 func TestTailPathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	r := NewFileLogReader(dir, nil)

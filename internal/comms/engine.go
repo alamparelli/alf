@@ -50,6 +50,12 @@ type ChatEngine struct {
 	// Recall configuration (from config.d).
 	RecallCfg RecallConfig
 
+	// Summarization configuration (from config.d). Zero values fall back to
+	// package defaults via the effective* methods at call sites.
+	SummarizationEnabled   bool
+	SummarizationThreshold int
+	SummarizationKeepLast  int
+
 	// Signal socket path (persistent, set by daemon after StartSignal).
 	SignalSockPath string
 
@@ -79,6 +85,9 @@ func NewEngine(cfg EngineConfig) *ChatEngine {
 		ResolveModel:   cfg.ResolveModel,
 		BackendConfigs: cfg.BackendConfigs,
 		RecallCfg:      cfg.RecallCfg,
+		SummarizationEnabled:   cfg.SummarizationEnabled,
+		SummarizationThreshold: cfg.SummarizationThreshold,
+		SummarizationKeepLast:  cfg.SummarizationKeepLast,
 		adapters:       make(map[string]ChannelAdapter),
 	}
 }
@@ -106,6 +115,10 @@ type EngineConfig struct {
 	ResolveModel   func(short string) string
 	BackendConfigs func() map[string]BackendConfig
 	RecallCfg      RecallConfig
+
+	SummarizationEnabled   bool
+	SummarizationThreshold int
+	SummarizationKeepLast  int
 }
 
 // RegisterAdapter adds a channel adapter to the engine.

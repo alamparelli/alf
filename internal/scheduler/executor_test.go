@@ -1,11 +1,14 @@
 package scheduler
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 // --- Mock SkillStoreReader ---
@@ -454,4 +457,157 @@ func TestDispatch_NoChannelsConfigured(t *testing.T) {
 	e := &Engine{cfg: Config{DataDir: t.TempDir()}}
 	// Should not panic when TG and CC are nil.
 	e.dispatch(&Job{Output: "chat", ID: "j1"}, "no channels")
+}
+
+// --- Backend routing tests ---
+
+// mockProvider records which backend was selected and what params were passed.
+type mockProvider struct {
+	backend string
+	calls   []ProviderParams
+	result  *ProviderResult
+}
+
+func (m *mockProvider) Invoke(_ context.Context, _ string, params ProviderParams, _ interface{}) (*ProviderResult, error) {
+	m.calls = append(m.calls, params)
+	if m.result != nil {
+		return m.result, nil
+	}
+	return &ProviderResult{Text: "ok from " + m.backend}, nil
+}
+
+// mockBackendRouter dispatches Invoke to a provider chosen by Backend field,
+// simulating the registry.ForBackend behaviour used by schedulerProvider.
+type mockBackendRouter struct {
+	providers map[string]*mockProvider
+	fallback  *mockProvider
+}
+
+func (r *mockBackendRouter) Invoke(ctx context.Context, prompt string, params ProviderParams, onProgress interface{}) (*ProviderResult, error) {
+	backend := params.Backend
+	if backend == "" || backend == "cli" {
+		return r.fallback.Invoke(ctx, prompt, params, onProgress)
+	}
+	if p, ok := r.providers[backend]; ok {
+		return p.Invoke(ctx, prompt, params, onProgress)
+	}
+	// Unknown backend → fallback (mirrors registry behaviour).
+	return r.fallback.Invoke(ctx, prompt, params, onProgress)
+}
+
+func newTestEngineWithProvider(provider ProviderInvoker, tiers []TierInfo) *Engine {
+	snap := &TiersSnapshot{Tiers: tiers}
+	return &Engine{
+		cfg: Config{
+			Provider:  provider,
+			TierStore: &staticTierStore{snap: snap},
+			DataDir:   os.TempDir(),
+		},
+		store:   &Store{},
+		runLog:  NewRunLog(os.TempDir()),
+		entries: make(map[string]cron.EntryID),
+	}
+}
+
+type staticTierStore struct{ snap *TiersSnapshot }
+
+func (s *staticTierStore) Current() *TiersSnapshot { return s.snap }
+
+func TestInvokeLLMWithMeta_RoutesToCorrectBackend(t *testing.T) {
+	cliProvider := &mockProvider{backend: "cli"}
+	codexProvider := &mockProvider{backend: "codex"}
+	apiProvider := &mockProvider{backend: "openrouter"}
+
+	router := &mockBackendRouter{
+		fallback: cliProvider,
+		providers: map[string]*mockProvider{
+			"codex":      codexProvider,
+			"openrouter": apiProvider,
+		},
+	}
+
+	tiers := []TierInfo{
+		{Name: "fast", Backend: "", Model: "claude-haiku-4-5"},
+		{Name: "codex-dev", Backend: "codex", Model: "gpt-5-codex"},
+		{Name: "openrouter-tier", Backend: "openrouter", Model: "anthropic/claude-opus-4-5"},
+	}
+
+	e := newTestEngineWithProvider(router, tiers)
+
+	cases := []struct {
+		tier     string
+		wantProv *mockProvider
+		wantBack string
+	}{
+		{"fast", cliProvider, ""},
+		{"codex-dev", codexProvider, "codex"},
+		{"openrouter-tier", apiProvider, "openrouter"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tier, func(t *testing.T) {
+			before := len(tc.wantProv.calls)
+			j := &Job{ID: "j1", Name: "test", Tier: tc.tier, Prompt: "do something", Timeout: 5 * time.Second}
+			_, _, err := e.invokeLLMWithMeta(j)
+			if err != nil {
+				t.Fatalf("invokeLLMWithMeta returned error: %v", err)
+			}
+			if len(tc.wantProv.calls) != before+1 {
+				t.Fatalf("expected %s provider to be called once, call count before=%d after=%d",
+					tc.tier, before, len(tc.wantProv.calls))
+			}
+			got := tc.wantProv.calls[len(tc.wantProv.calls)-1].Backend
+			if got != tc.wantBack {
+				t.Errorf("Backend in params: got %q, want %q", got, tc.wantBack)
+			}
+		})
+	}
+}
+
+func TestInvokeLLMWithMeta_NonClaudeModelPassedThrough(t *testing.T) {
+	// Regression test: when a tier specifies a non-Claude model (e.g. gpt-5.4),
+	// invokeLLMWithMeta must NOT fall back to the hardcoded default "claude-haiku-4-5".
+	codexProvider := &mockProvider{backend: "codex"}
+	router := &mockBackendRouter{
+		fallback:  &mockProvider{backend: "cli"},
+		providers: map[string]*mockProvider{"codex": codexProvider},
+	}
+	tiers := []TierInfo{
+		{Name: "codex-dev", Backend: "codex", Model: "gpt-5.4"},
+	}
+	e := newTestEngineWithProvider(router, tiers)
+
+	j := &Job{ID: "j-gpt", Name: "test", Tier: "codex-dev", Prompt: "hello", Timeout: 5 * time.Second}
+	_, _, err := e.invokeLLMWithMeta(j)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(codexProvider.calls) != 1 {
+		t.Fatalf("expected codex provider to be called once, got %d", len(codexProvider.calls))
+	}
+	got := codexProvider.calls[0].Model
+	if got != "gpt-5.4" {
+		t.Errorf("model in params: got %q, want %q (default claude-haiku-4-5 must not leak)", got, "gpt-5.4")
+	}
+}
+
+func TestInvokeLLMWithMeta_UnknownBackendFallsToCLI(t *testing.T) {
+	cliProvider := &mockProvider{backend: "cli"}
+	router := &mockBackendRouter{
+		fallback:  cliProvider,
+		providers: map[string]*mockProvider{},
+	}
+	tiers := []TierInfo{
+		{Name: "ghost-tier", Backend: "ghost", Model: "some-model"},
+	}
+	e := newTestEngineWithProvider(router, tiers)
+
+	j := &Job{ID: "j2", Name: "test", Tier: "ghost-tier", Prompt: "hello", Timeout: 5 * time.Second}
+	_, _, err := e.invokeLLMWithMeta(j)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cliProvider.calls) != 1 {
+		t.Fatalf("expected CLI fallback to be called once, got %d", len(cliProvider.calls))
+	}
 }

@@ -38,6 +38,7 @@ import (
 	"github.com/alamparelli/alf/internal/supervisor"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
+	"github.com/alamparelli/alf/internal/trace"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/updater"
 	"github.com/alamparelli/alf/internal/voice"
@@ -500,13 +501,18 @@ func main() {
 				routerModel = ap.Name() // will get default from provider
 			}
 			if routerModel == "" {
-				routerModel = "anthropic/claude-haiku-4-5"
+				if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
+					if !strings.Contains(fb, "/") {
+						fb = "anthropic/" + fb
+					}
+					routerModel = fb
+				}
 			}
 		}
 	} else {
 		routerModel = router.ResolveModel(routerModel)
 		if routerModel == "" {
-			routerModel = router.ResolveModel("haiku")
+			routerModel = cc.DefaultFallbackModel(tierStore.Current())
 		}
 	}
 
@@ -686,6 +692,9 @@ func main() {
 			Limit:    cfg.RecallLimit,
 			Distance: cfg.RecallDistance,
 		},
+		SummarizationEnabled:   cfg.EffectiveSummarizationEnabled(),
+		SummarizationThreshold: cfg.EffectiveSummarizationThreshold(),
+		SummarizationKeepLast:  cfg.EffectiveSummarizationKeepLast(),
 	})
 	// Initialize all optional dependencies in one place (issue #91).
 	var recaller cc.MemoryRecaller
@@ -1004,20 +1013,7 @@ func main() {
 		commEngine.RegisterAdapter(tgAdapt)
 
 		// Register bot commands for the Telegram command menu (/ autocomplete).
-		go func() {
-			if err := tg.SetMyCommands([]tgclient.BotCommand{
-				{Command: "new", Description: "Start a new conversation"},
-				{Command: "clear", Description: "Clear and start a new session"},
-				{Command: "help", Description: "Show available commands"},
-				{Command: "skills", Description: "List active skills"},
-				{Command: "bash", Description: "Execute a bash command"},
-				{Command: "jobs", Description: "List running agent jobs"},
-				{Command: "cancel", Description: "Cancel all running jobs"},
-				{Command: "login", Description: "Get a Control Center login link"},
-			}); err != nil {
-				log.Printf("[telegram] setMyCommands: %v", err)
-			}
-		}()
+		go refreshTelegramCommands(tg, tierStore)
 	}
 
 	// Auto-update checker (initialized here, scheduled via unified scheduler below).
@@ -1047,13 +1043,22 @@ func main() {
 	parsedChatID, _ := strconv.ParseInt(chatID, 10, 64)
 	schedLocation := resolveTimezone(cfg.Timezone)
 
+	var catchupMinInterval time.Duration
+	if s := cfg.CatchupRecurringMinInterval; s != "" {
+		if d, err := time.ParseDuration(s); err != nil {
+			log.Printf("scheduler: invalid catchup_recurring_min_interval %q: %v — disabled", s, err)
+		} else {
+			catchupMinInterval = d
+		}
+	}
+
 	sched := scheduler.New(scheduler.Config{
 		DataDir:      dataDir,
 		ContextDir:   contextDir,
 		ChatID:       parsedChatID,
 		TG:           tg,
 		CC:           &schedulerCCNotifier{db: chatDB, broker: eventBroker},
-		Provider:     &schedulerProvider{p: cliProvider},
+		Provider:     &schedulerProvider{r: registry},
 		TierStore:    &schedulerTierStore{ts: tierStore},
 		SkillStore:   &schedulerSkillStore{s: skillStore},
 		Orchestrator: &schedulerOrchestrator{o: orch},
@@ -1063,6 +1068,7 @@ func main() {
 		CronPath:       filepath.Join(configDir, "cron.json"),
 		Location:       schedLocation,
 		SignalSockPath: persistentSigPath,
+		CatchupRecurringMinInterval: catchupMinInterval,
 	})
 
 	// Register system jobs (replaces individual goroutine patterns).
@@ -1090,22 +1096,9 @@ func main() {
 	var memExtractor *memstore.Extractor
 	if memDB != nil {
 		extractorTierResolver := func() string {
-			// Find the first enabled tier with a CLI-compatible backend.
-			// Tiers with non-CLI backends (e.g. "codex") use models that
-			// the Claude CLI cannot invoke (e.g. gpt-5.4-mini).
-			for _, t := range tierStore.Current().Tiers {
-				if !t.Enabled {
-					continue
-				}
-				if t.Backend != "" && t.Backend != "cli" {
-					continue
-				}
-				if m := router.ResolveModel(t.Model); m != "" {
-					return m
-				}
-				return t.Model
-			}
-			return ""
+			// Delegates to the single source of truth. Never returns a
+			// hardcoded model — users can run any backend (see #291).
+			return cc.DefaultFallbackModel(tierStore.Current())
 		}
 		extractTimeout := time.Duration(cfg.EffectiveMemoryExtractTimeout()) * time.Second
 		extractAdapter := &extractorAdapter{prov: cliProvider, registry: registry, tierStore: tierStore}
@@ -1144,6 +1137,16 @@ func main() {
 	sched.RegisterSystem("sched-digest", "Schedule Digest", "0 0 8 * * *", sched.SendDailyDigest,
 		"Sends a daily summary of scheduled jobs at 8am: upcoming runs, recent failures, and job stats.")
 
+	// Daily tool stats — aggregates last 7 days of tool_exec spans into
+	// logs/traces/stats-YYYY-MM-DD.json. Runs at 00:05 local time.
+	sched.RegisterSystem("tool-stats", "Tool Execution Stats", "0 5 0 * * *", func() error {
+		report, err := trace.AggregateToolStats(dataDir, 7)
+		if err != nil {
+			return err
+		}
+		return trace.WriteToolStatsReport(dataDir, report)
+	}, "Aggregates the last 7 days of tool execution traces (logs/traces/*.jsonl) into a daily stats report at logs/traces/stats-YYYY-MM-DD.json: runs, errors, error rate, avg/p95 duration per tool.")
+
 	// Vault token health check — every hour, alerts on expired/expiring tokens.
 	if vaultMgr != nil {
 		checker := newVaultTokenChecker(vaultMgr)
@@ -1156,8 +1159,18 @@ func main() {
 		sched.OnChange = func() { eventBroker.Emit(cc.EventSchedules) }
 	}
 
-	if err := sched.Start(filepath.Join(contextDir, "scheduler.sock")); err != nil {
-		log.Printf("warning: scheduler start failed: %v", err)
+	// Ensure contextDir exists before the scheduler binds its socket there.
+	// Bootstrap already creates it, but this is cheap insurance against a
+	// future refactor that removes or reorders the bootstrap call.
+	if err := os.MkdirAll(contextDir, 0o755); err != nil {
+		log.Printf("ERROR: cannot create context dir %s: %v", contextDir, err)
+	}
+	schedSockPath := filepath.Join(contextDir, "scheduler.sock")
+	if err := sched.Start(schedSockPath); err != nil {
+		// Do not silently degrade: without the socket, schedule-tools, digests,
+		// memory consolidation and health checks all stop working. Log loudly
+		// so operators notice in daemon.log.
+		log.Printf("ERROR: scheduler failed to start on %s: %v — schedule tools will be unavailable", schedSockPath, err)
 	}
 	defer sched.Stop()
 
@@ -1222,6 +1235,13 @@ func main() {
 	appsSupervisor := supervisor.New(filepath.Join(dataDir, "apps"))
 	if vaultMgr != nil && vaultMgr.ProxyToken() != "" && mpManager != nil {
 		appsSupervisor.SetVault(vaultMgr.SocketPath(), vaultMgr.ProxyToken(), mpManager.GetServices)
+	}
+	// Per-app tools sockets: each supervised app gets <workDir>/tools.sock
+	// serving a slug-scoped CC subset (reads + /api/bash with permission check).
+	if ccServerRef != nil {
+		appsSupervisor.SetAppTools(func(sockPath, slug string) (net.Listener, error) {
+			return cc.ListenAndServeAppTools(sockPath, slug, ccServerRef.InternalHandler())
+		})
 	}
 	// Always register OnTokenUpdate — vault may be unlocked after boot via CC.
 	if vaultMgr != nil {
@@ -1289,6 +1309,13 @@ func main() {
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
 					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
+					if memDB != nil {
+						applied := memDB.SetDedupConfig(memstore.DedupConfig{
+							TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
+							CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
+						})
+						log.Printf("memstore: dedup thresholds reloaded (text=%.2f cosine=%.2f)", applied.TextThreshold, applied.CosineThreshold)
+					}
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {
@@ -1305,7 +1332,12 @@ func main() {
 				if isAPIR {
 					newModel := tierStore.Current().RouterModel
 					if newModel == "" {
-						newModel = "anthropic/claude-haiku-4-5"
+						if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
+							if !strings.Contains(fb, "/") {
+								fb = "anthropic/" + fb
+							}
+							newModel = fb
+						}
 					}
 					routerModel = newModel
 					// Shut down CLI classifier if switching to API router.
@@ -1338,6 +1370,11 @@ func main() {
 							}
 						}()
 					}
+				}
+				// Re-publish Telegram bot command menu so newly-enabled or
+				// renamed force-command tiers appear in `/` autocomplete.
+				if telegramEnabled {
+					go refreshTelegramCommands(tg, tierStore)
 				}
 				if git != nil {
 					git.Commit("tiers updated via CC")
@@ -1408,6 +1445,13 @@ func main() {
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
 					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
+					if memDB != nil {
+						applied := memDB.SetDedupConfig(memstore.DedupConfig{
+							TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
+							CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
+						})
+						log.Printf("memstore: dedup thresholds reloaded (text=%.2f cosine=%.2f)", applied.TextThreshold, applied.CosineThreshold)
+					}
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {
@@ -1424,7 +1468,12 @@ func main() {
 				if isAPIR {
 					newModel := tierStore.Current().RouterModel
 					if newModel == "" {
-						newModel = "anthropic/claude-haiku-4-5"
+						if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
+							if !strings.Contains(fb, "/") {
+								fb = "anthropic/" + fb
+							}
+							newModel = fb
+						}
 					}
 					routerModel = newModel
 					if cliClassifier != nil {
@@ -1440,6 +1489,11 @@ func main() {
 					if cliClassifier != nil {
 						cliClassifier.UpdateModel(newModel)
 					}
+				}
+				// Re-publish Telegram bot command menu so newly-enabled or
+				// renamed force-command tiers appear in `/` autocomplete.
+				if telegramEnabled {
+					go refreshTelegramCommands(tg, tierStore)
 				}
 				if git != nil {
 					git.Commit("tiers updated via CC")
@@ -1832,7 +1886,7 @@ func main() {
 				parts := strings.SplitN(cmdSource, " ", 2)
 				cmdName := strings.TrimPrefix(parts[0], "/")
 				for _, t := range tierStore.Current().Tiers {
-					if t.ForceCommand && t.Name == cmdName {
+					if t.ForceCommand && (t.Name == cmdName || cc.SanitizeTierCommand(t.Name) == cmdName) {
 						// Persist tier override for the session.
 						chatSessions.SetForcedTier(u.Message.Chat.ID, t.Name)
 						if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
@@ -1928,7 +1982,20 @@ func main() {
 					}
 				}()
 
-				result, err := commEngine.Process(context.Background(), msg)
+				// Per-message budget: cap the handler at 2× the provider timeout so
+				// that retry + one fallback cannot extend indefinitely. Without a
+				// deadline, a mid-stream provider kill leaves the pipeline running
+				// retry/fallback on context.Background() (both gated on ctx.Err()==nil),
+				// which holds the global tgChatSem and makes the bot appear frozen
+				// to the next Telegram message until restart (issue #253).
+				msgBudget := 2 * tiersTimeout
+				if msgBudget <= 0 {
+					msgBudget = 20 * time.Minute
+				}
+				msgCtx, msgCancel := context.WithTimeout(context.Background(), msgBudget)
+				defer msgCancel()
+
+				result, err := commEngine.Process(msgCtx, msg)
 
 				if err != nil {
 					log.Printf("engine error: %v", err)
@@ -1982,6 +2049,58 @@ func main() {
 				}
 			}()
 		}
+	}
+}
+
+// refreshTelegramCommands registers the Telegram bot command menu used for the
+// `/` autocomplete popup. It combines the fixed built-in commands with one
+// entry per enabled force-command tier (e.g. `/sonnet`, `/haiku`) so users can
+// discover and invoke tier overrides directly from Telegram.
+//
+// Safe to call from any goroutine; intended to be invoked at daemon startup
+// and again on every ReloadTiers event so the menu stays in sync with the
+// currently-loaded tier configuration.
+func refreshTelegramCommands(tg *tgclient.Client, tierStore cc.TierStore) {
+	if tg == nil {
+		return
+	}
+	cmds := []tgclient.BotCommand{
+		{Command: "new", Description: "Start a new conversation"},
+		{Command: "clear", Description: "Clear and start a new session"},
+		{Command: "help", Description: "Show available commands"},
+		{Command: "skills", Description: "List active skills"},
+		{Command: "bash", Description: "Execute a bash command"},
+		{Command: "jobs", Description: "List running agent jobs"},
+		{Command: "cancel", Description: "Cancel all running jobs"},
+		{Command: "login", Description: "Get a Control Center login link"},
+	}
+	if tc := tierStore.Current(); tc != nil {
+		for _, t := range tc.Tiers {
+			if !t.Enabled || !t.ForceCommand {
+				continue
+			}
+			// Telegram rejects the whole batch with BOT_COMMAND_INVALID if any
+			// command name doesn't match ^[a-z0-9_]{1,32}$ — hyphens (common
+			// in tier names like "codex-fast") are not allowed. Sanitize the
+			// name for the menu; the backend matchers accept both the raw
+			// tier name and its sanitized alias.
+			cmdName := cc.SanitizeTierCommand(t.Name)
+			if cmdName == "" {
+				log.Printf("[telegram] skipping tier %q from bot menu (no valid command chars)", t.Name)
+				continue
+			}
+			desc := fmt.Sprintf("Force reply from %s tier", t.Name)
+			if t.Model != "" {
+				desc = fmt.Sprintf("Force reply from %s (%s)", t.Name, t.Model)
+			}
+			cmds = append(cmds, tgclient.BotCommand{
+				Command:     cmdName,
+				Description: desc,
+			})
+		}
+	}
+	if err := tg.SetMyCommands(cmds); err != nil {
+		log.Printf("[telegram] setMyCommands: %v", err)
 	}
 }
 

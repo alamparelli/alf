@@ -1,5 +1,8 @@
 import { fire, esc } from './_helpers.js';
 class AlfDialog extends HTMLElement {
+  connectedCallback() {
+    this.style.display = 'none';
+  }
   open() {
     const label = this.getAttribute('label') || 'Dialog';
     const fields = Array.from(this.querySelectorAll('alf-input, alf-select'));

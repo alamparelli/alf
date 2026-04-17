@@ -52,7 +52,11 @@ type socketResponse struct {
 }
 
 func main() {
-	dataDir := os.Getenv("HOME")
+	// Default dataDir mirrors the daemon's default (/home/alf/data in container,
+	// $HOME/data otherwise). Using $HOME alone was wrong and produced
+	// /home/alf/context/scheduler.sock while the daemon binds at
+	// /home/alf/data/context/scheduler.sock (see #284).
+	dataDir := filepath.Join(os.Getenv("HOME"), "data")
 	if d := os.Getenv("ALF_DATA_DIR"); d != "" {
 		dataDir = d
 	}

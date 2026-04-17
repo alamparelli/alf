@@ -131,8 +131,7 @@ func NewProxy(cfg *Config) *Proxy {
 	// HTTP request handler.
 	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		host := stripPort(req.Host)
-		rule, action := p.match(host)
-		blocked := action == "deny" && p.currentConfig().Mode == ModeEnforce
+		rule, blocked := p.decide(host)
 
 		entry := RequestEntry{
 			Time:    time.Now(),
@@ -157,8 +156,7 @@ func NewProxy(cfg *Config) *Proxy {
 	// HTTPS CONNECT handler (domain-level only, no MITM).
 	proxy.OnRequest().HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 		hostname := stripPort(host)
-		rule, action := p.match(hostname)
-		blocked := action == "deny" && p.currentConfig().Mode == ModeEnforce
+		rule, blocked := p.decide(hostname)
 
 		entry := RequestEntry{
 			Time:    time.Now(),
@@ -196,10 +194,8 @@ func NewProxy(cfg *Config) *Proxy {
 
 // record logs an entry and updates persistent host stats.
 func (p *Proxy) record(entry RequestEntry) {
-	if entry.Source == "" {
-		if hosts := p.vaultHosts.Load(); hosts != nil && (*hosts)[entry.Host] {
-			entry.Source = "vault"
-		}
+	if entry.Source == "" && p.isVaultHost(entry.Host) {
+		entry.Source = "vault"
 	}
 	p.Log.Add(entry)
 	if p.Store != nil {
@@ -222,12 +218,75 @@ func (p *Proxy) Record(entry RequestEntry) {
 	p.record(entry)
 }
 
-// Check evaluates a host against firewall rules and returns the matching rule
-// pattern, action, and whether the request would be blocked.
-func (p *Proxy) Check(host string) (pattern, action string, blocked bool) {
-	pattern, action = p.match(host)
-	blocked = action == "deny" && p.currentConfig().Mode == ModeEnforce
-	return
+// Check evaluates a host against firewall rules and returns the effective
+// rule label, action, and whether the request would be blocked. The rule
+// label is either an explicit pattern or an implicit policy marker like
+// "default-deny" or "internal-implicit-allow".
+func (p *Proxy) Check(host string) (rule, action string, blocked bool) {
+	_, explicitAction := p.match(host)
+	ruleLabel, b := p.decide(host)
+	action = explicitAction
+	if action == "" {
+		action = ruleLabel
+	}
+	return ruleLabel, action, b
+}
+
+// decide applies firewall policy for a host and returns the effective rule
+// label and whether the request is blocked. In enforce mode the policy is
+// fail-closed: unmatched hosts are blocked unless they belong to a configured
+// vault service or resolve to a private/loopback IP (implicit allow). In
+// log-only mode nothing is ever blocked.
+func (p *Proxy) decide(host string) (rule string, blocked bool) {
+	pattern, action := p.match(host)
+	mode := p.currentConfig().Mode
+
+	if mode != ModeEnforce {
+		// log-only: record the match (if any) but never block.
+		return pattern, false
+	}
+
+	switch action {
+	case "allow":
+		return pattern, false
+	case "deny":
+		return pattern, true
+	}
+
+	// No explicit rule matched — apply default-deny, with exemptions for:
+	// - vault-registered hosts (user-configured services)
+	// - private/loopback IPs (Docker internal networking, localhost)
+	// - "localhost" hostname
+	if p.isVaultHost(host) {
+		return "vault-implicit-allow", false
+	}
+	if isInternalHost(host) {
+		return "internal-implicit-allow", false
+	}
+	return "default-deny", true
+}
+
+// isInternalHost reports whether host is a loopback, private, or link-local
+// address (or the literal "localhost"). These are implicitly allowed in
+// enforce mode to avoid breaking Docker/LAN traffic.
+func isInternalHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+// isVaultHost reports whether the host is registered as a vault service target.
+func (p *Proxy) isVaultHost(host string) bool {
+	hosts := p.vaultHosts.Load()
+	if hosts == nil {
+		return false
+	}
+	return (*hosts)[host]
 }
 
 // Reload atomically swaps the config.

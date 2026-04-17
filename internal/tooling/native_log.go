@@ -2,7 +2,6 @@ package tooling
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -47,8 +46,8 @@ func (t LogNativeTool) Run(_ context.Context, argsJSON string) (string, error) {
 		Name   string `json:"name"`
 		Lines  int    `json:"lines"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	if err := parseArgs(argsJSON, &args); err != nil {
+		return "", err
 	}
 
 	switch args.Action {

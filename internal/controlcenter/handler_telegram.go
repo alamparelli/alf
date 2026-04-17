@@ -141,7 +141,7 @@ func (h *TelegramHandler) del(w http.ResponseWriter, _ *http.Request) {
 		h.Vault.Client().DeleteFile(vaultKeyTGBotToken)
 		h.Vault.Client().DeleteFile(vaultKeyTGChatID)
 	}
-	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	respondOK(w)
 }
 
 // validateBotTokenHTTP validates a bot token via the Telegram API. Returns bot username or "".

@@ -154,11 +154,12 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	}()
 
 	var (
-		resultText   strings.Builder
-		sessionID    string
-		inputTokens  int
-		outputTokens int
-		eventCount   int
+		resultText      strings.Builder
+		sessionID       string
+		inputTokens     int
+		outputTokens    int
+		eventCount      int
+		pendingAgentMsg string // last agent_message, flushed as text_delta on turn.completed; earlier ones emitted as thinking
 	)
 
 	lineCh := make(chan []byte, 64)
@@ -259,15 +260,21 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 			switch evt.Item.Type {
 			case "agent_message":
 				if evt.Item.Text != "" {
-					log.Printf("codex: agent_message text (%d chars): %s", len(evt.Item.Text), truncStderr(evt.Item.Text, 200))
-					resultText.WriteString(evt.Item.Text)
-					if onProgress != nil {
-						onProgress(StreamEvent{Type: "text_delta", Text: evt.Item.Text})
+					log.Printf("codex: agent_message buffered (%d chars): %s", len(evt.Item.Text), truncStderr(evt.Item.Text, 200))
+					// Previous buffered message is now known to be intermediate — emit as thinking.
+					if pendingAgentMsg != "" && onProgress != nil {
+						onProgress(StreamEvent{Type: "thinking", Text: pendingAgentMsg})
 					}
+					pendingAgentMsg = evt.Item.Text
 				} else {
 					log.Printf("codex: agent_message with EMPTY text (raw: %s)", truncStderr(string(line), 500))
 				}
 			case "command_execution":
+				// A tool call after a pending agent_message confirms that message was narration — emit as thinking.
+				if pendingAgentMsg != "" && onProgress != nil {
+					onProgress(StreamEvent{Type: "thinking", Text: pendingAgentMsg})
+					pendingAgentMsg = ""
+				}
 				if onProgress != nil {
 					output := evt.Item.Output
 					if len(output) > 500 {
@@ -280,6 +287,14 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 			}
 
 		case "turn.completed":
+			// Flush the last buffered agent_message as the actual final answer.
+			if pendingAgentMsg != "" {
+				resultText.WriteString(pendingAgentMsg)
+				if onProgress != nil {
+					onProgress(StreamEvent{Type: "text_delta", Text: pendingAgentMsg})
+				}
+				pendingAgentMsg = ""
+			}
 			if evt.Usage.InputTokens > 0 {
 				inputTokens += evt.Usage.InputTokens
 			}
@@ -305,6 +320,14 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	}
 
 done:
+	// Edge case: stream closed before turn.completed — treat last buffered message as final.
+	if pendingAgentMsg != "" {
+		resultText.WriteString(pendingAgentMsg)
+		if onProgress != nil {
+			onProgress(StreamEvent{Type: "text_delta", Text: pendingAgentMsg})
+		}
+		pendingAgentMsg = ""
+	}
 	<-scanDone
 	<-stderrDone
 	waitErr := cmd.Wait()

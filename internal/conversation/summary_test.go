@@ -253,3 +253,65 @@ func TestSummary_PersistsAcrossReload(t *testing.T) {
 		t.Errorf("want m2 as tail, got %s", got[1].ID)
 	}
 }
+
+// RecentRawByConv and LastSummaryCoveredByConv must be scoped by the
+// passed convID, not by the channel's active conversation. Regression
+// guard for the CC multi-tab summarizer bug where messages from conv A
+// were returned while the summarizer targeted conv B, causing covered
+// IDs to reset on every run.
+func TestSummary_ByConv_IgnoresChannelActiveConv(t *testing.T) {
+	s := NewStore(t.TempDir())
+	ch := "cc"
+
+	// Two concurrent convs on the same channel (multi-tab CC chat).
+	convA := "conv-aaaa"
+	convB := "conv-bbbb"
+
+	s.Append(makeMsg("a1", ch, convA, "user", "hi A"))
+	s.Append(makeMsg("a2", ch, convA, "assistant", "hello A"))
+	s.AppendSummary(ch, convA, "sumA", []string{"a1", "a2"})
+
+	s.Append(makeMsg("b1", ch, convB, "user", "hi B"))
+	s.Append(makeMsg("b2", ch, convB, "assistant", "hello B"))
+
+	// RecentRawByConv(convA) must only return convA messages (incl. summary),
+	// independent of whichever convID got written last on the channel.
+	rawA := s.RecentRawByConv(convA)
+	if len(rawA) != 3 {
+		t.Fatalf("convA raw: want 3 (a1,a2,summary), got %d", len(rawA))
+	}
+	for _, m := range rawA {
+		if m.ConvID != convA {
+			t.Errorf("convA raw leaked msg from %s", m.ConvID)
+		}
+	}
+
+	rawB := s.RecentRawByConv(convB)
+	if len(rawB) != 2 {
+		t.Fatalf("convB raw: want 2 (b1,b2), got %d", len(rawB))
+	}
+
+	// LastSummaryCoveredByConv(convA) → 2 covered IDs.
+	covA := s.LastSummaryCoveredByConv(convA)
+	if len(covA) != 2 {
+		t.Fatalf("convA covered: want 2, got %d", len(covA))
+	}
+
+	// LastSummaryCoveredByConv(convB) → nil (no summary in convB).
+	if got := s.LastSummaryCoveredByConv(convB); got != nil {
+		t.Fatalf("convB covered: want nil (no summary), got %v", got)
+	}
+}
+
+// RecentRaw (channel variant) should still work and follow the channel's
+// active conv. Sanity check so the refactor didn't regress the old API.
+func TestSummary_RecentRaw_StillFollowsChannelActive(t *testing.T) {
+	s := NewStore(t.TempDir())
+	ch := "cc"
+	conv := s.ConvID(ch)
+	s.Append(makeMsg("x1", ch, conv, "user", "x"))
+	raw := s.RecentRaw(ch)
+	if len(raw) != 1 || raw[0].ID != "x1" {
+		t.Fatalf("channel-scoped RecentRaw broken: %+v", raw)
+	}
+}

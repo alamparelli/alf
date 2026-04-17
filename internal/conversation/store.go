@@ -154,8 +154,22 @@ func applySummary(msgs []Message) []Message {
 // full uncondensed history it needs to summarize.
 func (s *Store) RecentRaw(channel string) []Message {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	convID := s.convIDs[channel]
+	s.mu.RUnlock()
+	if convID == "" {
+		return nil
+	}
+	return s.RecentRawByConv(convID)
+}
+
+// RecentRawByConv returns all messages for the given conversation ID
+// without applying summary collapsing. Unlike RecentRaw, this does not
+// depend on the channel's "active" conv — essential for multi-tab chats
+// where the summarizer targets a specific conv that may not be the most
+// recent on its channel.
+func (s *Store) RecentRawByConv(convID string) []Message {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if convID == "" {
 		return nil
 	}
@@ -174,8 +188,20 @@ func (s *Store) RecentRaw(channel string) []Message {
 // same messages twice.
 func (s *Store) LastSummaryCovered(channel string) map[string]struct{} {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	convID := s.convIDs[channel]
+	s.mu.RUnlock()
+	if convID == "" {
+		return nil
+	}
+	return s.LastSummaryCoveredByConv(convID)
+}
+
+// LastSummaryCoveredByConv returns the covered-IDs set for the latest
+// summary in the given conv. Conv-scoped variant of LastSummaryCovered,
+// required by the summarizer in multi-tab chat scenarios.
+func (s *Store) LastSummaryCoveredByConv(convID string) map[string]struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if convID == "" {
 		return nil
 	}

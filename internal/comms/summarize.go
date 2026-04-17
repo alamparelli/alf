@@ -51,30 +51,34 @@ func (e *ChatEngine) maybeSummarizeAsync(channel, convID string) {
 		return // nonsensical config — refuse to summarize
 	}
 
-	// Snapshot messages under the store's lock via Recent (which already
-	// applies any existing summary). If the visible count is below
-	// threshold, nothing to do.
-	visible := e.ConvStore.Recent(channel, 0)
-	if len(visible) < threshold {
-		return
-	}
-
-	// Look at the raw log to know which real messages we still need to
-	// summarize (exclude those already covered by a prior summary).
-	raw := e.ConvStore.RecentRaw(channel)
-	alreadyCovered := e.ConvStore.LastSummaryCovered(channel)
+	// Scope reads to the target convID (not the channel's active conv) —
+	// CC multi-tab chat rotates active convID, so channel-scoped reads
+	// would mix messages across tabs and reset covered_ids every run.
+	raw := e.ConvStore.RecentRawByConv(convID)
+	alreadyCovered := e.ConvStore.LastSummaryCoveredByConv(convID)
 
 	var toSummarize []conversation.Message
 	var toSummarizeIDs []string
 	var uncovered []conversation.Message
+	hasSummary := false
 	for _, m := range raw {
 		if m.Role == conversation.RoleSummary {
+			hasSummary = true
 			continue
 		}
 		if _, skip := alreadyCovered[m.ID]; skip {
 			continue
 		}
 		uncovered = append(uncovered, m)
+	}
+	// Visible count = prior summary (1 if any) + uncovered tail. Below
+	// threshold means nothing worth compacting yet.
+	visible := len(uncovered)
+	if hasSummary {
+		visible++
+	}
+	if visible < threshold {
+		return
 	}
 	if len(uncovered) <= keepLast {
 		return

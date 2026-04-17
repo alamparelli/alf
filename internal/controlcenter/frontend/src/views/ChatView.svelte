@@ -671,8 +671,10 @@
 
   // --- Stop active call (instant) ---
   // Only affects the conv currently viewed — other convs keep streaming.
-  // The pending queue is preserved so the user's prepared follow-ups aren't
-  // silently lost when they cancel a single response (#310 UX).
+  // On stop, the most recent queued message (if any) is restored to the
+  // input draft so the user can edit or resend it; older queued items are
+  // dropped. This matches the mental model of "stop and reconsider what
+  // I was about to send next" (#310 follow-up).
   function stopCall() {
     const cid = convId ?? ''
     if (!cid) return
@@ -687,6 +689,17 @@
       text: '',
       jobId: null,
     })
+
+    // Restore the most recent queued message into the draft, drop the rest.
+    const queued = allQueues[cid] || []
+    if (queued.length > 0) {
+      const last = queued[queued.length - 1]
+      if (last?.message) {
+        drafts = { ...drafts, [cid]: last.message }
+      }
+      clearQueue(cid)
+    }
+
     api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(cid)}`)
       .catch(() => {})
       .finally(() => {

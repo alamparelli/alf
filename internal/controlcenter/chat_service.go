@@ -610,26 +610,50 @@ func (cs *ChatService) ClearActiveSkillsForConv(convID string) {
 }
 
 // CurrentConvID returns the active conversation ID for the CC chat.
-// Priority: in-memory lastChatConv → persisted kv_meta → ConvStore fallback.
+//
+// Priority:
+//  1. in-memory lastChatConv (within this daemon run)
+//  2. persisted kv_meta.active_conv_id — validated against the non-archived
+//     CC conversations list so a stale pointer (e.g. user archived the conv)
+//     doesn't leak through
+//  3. most recent non-archived CC conversation from ChatDB
+//  4. "" — frontend will create a fresh conv
+//
+// This no longer falls back to ConvStore.ConvID. ConvStore IDs are an
+// internal tracking namespace unrelated to the UI's tab IDs, and returning
+// one caused #318 — after a restart with no kv_meta, the server returned
+// a freshly-minted "conv-%x" that the UI couldn't match against its
+// conversation list, rotating the user to a brand-new tab.
 func (cs *ChatService) CurrentConvID() string {
 	if cs.lastChatConv != "" {
 		return cs.lastChatConv
 	}
-	if cs.ChatDB != nil {
-		if v := cs.ChatDB.GetMeta("active_conv_id"); v != "" {
-			return v
+	if cs.ChatDB == nil {
+		return ""
+	}
+	convs, _ := cs.ChatDB.Conversations("cc", false)
+	if v := cs.ChatDB.GetMeta("active_conv_id"); v != "" {
+		for _, c := range convs {
+			if c.ID == v {
+				return v
+			}
 		}
 	}
-	if cs.ConvStore != nil {
-		return cs.ConvStore.ConvID(conversation.ChannelCC)
+	if len(convs) > 0 {
+		return convs[len(convs)-1].ID
 	}
 	return ""
 }
 
 // SetActiveConvID persists the active conversation and updates in-memory state.
+// Also ensures the conv row exists in ChatDB so CurrentConvID's validation
+// (introduced for #318) can resolve it on the next call.
 func (cs *ChatService) SetActiveConvID(convID string) {
 	cs.lastChatConv = convID
 	if cs.ChatDB != nil {
+		if convID != "" {
+			cs.ChatDB.EnsureConversation(convID, "", "cc")
+		}
 		cs.ChatDB.SetMeta("active_conv_id", convID)
 	}
 }

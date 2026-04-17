@@ -442,6 +442,8 @@ func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierPar
 			Tier:      "agent",
 			CostUSD:   orchMeta.TotalCost,
 		})
+		// Trigger progressive summarization on the agent path too (mirrors processStandard).
+		e.maybeSummarizeAsync(channel, convID)
 	}
 	if e.ChatDB != nil && msg.ConvID != "" {
 		e.ChatDB.InsertMessage(chatdb.Message{

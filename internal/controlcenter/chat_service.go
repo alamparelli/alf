@@ -100,12 +100,15 @@ type ChatService struct {
 	BackendConfigs  func() map[string]BackendConfig // may be nil - backend pricing lookup
 	Engine          *comms.ChatEngine              // may be nil - unified engine (Step 5+)
 	ccAdapter       *ccAdapter                     // bridges engine events to per-call callbacks
-	mu              sync.Mutex                  // serialize Claude calls (single user v1)
 
 	// Background job tracking - one active job per conversation.
 	activeJobs   map[string]*chatJob // conv_id → job
 	jobMu        sync.Mutex
 	lastChatConv string // last conv_id used by the CC chat frontend
+
+	// askOverride, if non-nil, replaces askViaEngine. Test-only seam for
+	// exercising StartJob concurrency without standing up a full ChatEngine.
+	askOverride func(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error
 
 	// Upload registry: upload_id → UploadEntry
 	uploads   map[string]*UploadEntry
@@ -255,11 +258,14 @@ func (cs *ChatService) GetUpload(id string) *UploadEntry {
 }
 
 // Ask processes a chat message, invokes Claude, and streams events via onEvent.
+// No global mutex: concurrency is bounded per-conversation by StartJob's
+// activeJobs check. A hang in one conv must not stall other convs (issue #312).
 func (cs *ChatService) Ask(ctx context.Context, req ChatRequest, onEvent func(ChatEvent)) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if cs.askOverride != nil {
+		return cs.askOverride(ctx, req, onEvent)
 	}
 	return cs.askViaEngine(ctx, req, onEvent)
 }
@@ -874,9 +880,6 @@ func extractReactionTag(text string) (string, string) {
 func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 	time.Sleep(2 * time.Second)
 
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	langNote := "IMPORTANT: Reply in the same language the user has been using in this conversation."
 	var prompt string
 	if mood.IsStrongNegative(emoji) {
@@ -1087,6 +1090,11 @@ func extFromMimeMap(mimeType, fileName string) string {
 const recallDistanceThreshold = DefaultRecallMinDist
 const recallLimit = DefaultRecallTopK
 
+// jobMaxDuration caps any single chat job. A wedged provider must not tie up
+// the conversation slot (and thus the user's tab) indefinitely — this is the
+// safety net against issue #312-style hangs where manual restart was needed.
+const jobMaxDuration = 20 * time.Minute
+
 // StartJob launches Ask in a background goroutine and returns the job for streaming.
 // If a job is already running for the same conversation, returns it for reconnection.
 func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
@@ -1098,7 +1106,7 @@ func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
 		return j
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), jobMaxDuration)
 	job := newChatJob(cancel)
 	job.ConvID = convID
 	cs.activeJobs[convID] = job
@@ -1110,11 +1118,26 @@ func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
 	}
 	cs.jobMu.Unlock()
 
+	log.Printf("[chat-job] start job=%s conv=%q model=%q", job.ID, convID, req.Model)
+
 	go func() {
+		start := time.Now()
 		err := cs.Ask(ctx, req, func(evt ChatEvent) {
 			job.push(evt)
 		})
+		outcome := "completed"
+		switch {
+		case job.wasCancelled():
+			outcome = "cancelled"
+		case ctx.Err() == context.DeadlineExceeded:
+			outcome = "timeout"
+		case err != nil:
+			outcome = "error"
+		}
+		log.Printf("[chat-job] done  job=%s conv=%q duration=%s outcome=%s err=%v",
+			job.ID, convID, time.Since(start).Round(time.Millisecond), outcome, err)
 		job.finish(err)
+		cancel() // release timer
 	}()
 
 	return job

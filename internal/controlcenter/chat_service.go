@@ -128,6 +128,11 @@ type ChatRequest struct {
 	MediaIDs []string `json:"media_ids,omitempty"`
 	Model    string   `json:"model,omitempty"` // force specific tier/model
 	ConvID   string   `json:"conv_id,omitempty"` // conversation tab ID (empty = default)
+
+	// preInsertedUserMsgID is set by StartJob after persisting the user
+	// message synchronously (#310). Flows to engine.InMessage so the
+	// pipeline skips re-insertion. Not JSON-serialized.
+	preInsertedUserMsgID string
 }
 
 // ChatDoneData is sent with the "done" event.
@@ -414,17 +419,19 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		}
 	}
 
-	// 3. Build InMessage for engine (engine handles persistence to ChatDB).
+	// 3. Build InMessage for engine. If StartJob pre-persisted the user
+	// message, pass the ID so the engine skips re-insertion (#310).
 	msg := comms.InMessage{
-		ChannelID:    channelID,
-		Text:         prompt,
-		RawText:      req.Message,
-		RouterText:   routerMsg,
-		IsReply:      req.ReplyTo != "",
-		ForcedTier:   req.Model,
-		ConvID:       req.ConvID,
-		Source:       "cc",
-		ReplyToMsgID: req.ReplyTo,
+		ChannelID:            channelID,
+		Text:                 prompt,
+		RawText:              req.Message,
+		RouterText:           routerMsg,
+		IsReply:              req.ReplyTo != "",
+		ForcedTier:           req.Model,
+		ConvID:               req.ConvID,
+		Source:               "cc",
+		ReplyToMsgID:         req.ReplyTo,
+		PreInsertedUserMsgID: req.preInsertedUserMsgID,
 	}
 	if req.ReplyTo != "" {
 		if orig, _ := cs.ChatDB.Get(req.ReplyTo); orig != nil {
@@ -1095,6 +1102,35 @@ const recallLimit = DefaultRecallTopK
 // safety net against issue #312-style hangs where manual restart was needed.
 const jobMaxDuration = 20 * time.Minute
 
+// persistUserMessage inserts the user message into ChatDB synchronously so
+// it survives refresh even if the provider call never completes (#310).
+// Returns the message ID, or "" for slash commands (which the engine
+// handles and persists itself via HandleCommand).
+func (cs *ChatService) persistUserMessage(req ChatRequest) string {
+	if cs.ChatDB == nil || req.ConvID == "" {
+		return ""
+	}
+	// Slash commands persist on their own path (system + user together).
+	if strings.HasPrefix(req.Message, "/") {
+		return ""
+	}
+	if req.Message == "" && len(req.MediaIDs) == 0 {
+		return ""
+	}
+	id := NewMessageID()
+	cs.ChatDB.EnsureConversation(req.ConvID, "", "cc")
+	cs.ChatDB.InsertMessage(chatdb.Message{
+		ID:        id,
+		ConvID:    req.ConvID,
+		Role:      "user",
+		Text:      req.Message,
+		Source:    "cc",
+		ReplyTo:   req.ReplyTo,
+		CreatedAt: time.Now(),
+	})
+	return id
+}
+
 // StartJob launches Ask in a background goroutine and returns the job for streaming.
 // If a job is already running for the same conversation, returns it for reconnection.
 func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
@@ -1105,6 +1141,13 @@ func (cs *ChatService) StartJob(req ChatRequest) *chatJob {
 		cs.jobMu.Unlock()
 		return j
 	}
+
+	// Persist the user message synchronously before launching the async
+	// provider call (#310). Previously this happened inside engine.Process,
+	// so a refresh between POST and the first provider token could lose
+	// the message. Slash commands are a special case: engine.HandleCommand
+	// persists them itself with system response, so skip here.
+	req.preInsertedUserMsgID = cs.persistUserMessage(req)
 
 	ctx, cancel := context.WithTimeout(context.Background(), jobMaxDuration)
 	job := newChatJob(cancel)

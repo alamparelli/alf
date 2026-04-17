@@ -385,7 +385,9 @@
 
   <!-- Footer: time, model, reactions -->
   <div class="msg-footer">
-    <span class="msg-time">{formatTime(msg.ts)}</span>
+    {#if msg.ts}
+      <span class="msg-time">{formatTime(msg.ts)}</span>
+    {/if}
     {#if msg.model}
       <span class="msg-model">{msg.tier || msg.model}</span>
     {/if}

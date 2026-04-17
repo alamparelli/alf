@@ -1,6 +1,7 @@
 <script lang="ts">
   import { X } from 'lucide-svelte'
   import { convStore, type Conversation } from '../../stores/conversations.svelte'
+  import { chatRuntimes } from '../../stores/chat-runtimes.svelte'
 
   let editingId = $state<string | null>(null)
   let editTitle = $state('')
@@ -83,7 +84,9 @@
           />
         {:else}
           <span class="conv-tab-title">{conv.title || 'Chat'}</span>
-          {#if convStore.unreadCounts[conv.id]}
+          {#if chatRuntimes.isSending(conv.id)}
+            <span class="conv-tab-spinner" title="Response in progress"></span>
+          {:else if convStore.unreadCounts[conv.id]}
             <span class="conv-tab-badge"></span>
           {/if}
           <span class="conv-tab-spacer"></span>
@@ -177,6 +180,19 @@
     border-radius: 50%;
     background: var(--accent);
     flex-shrink: 0;
+  }
+
+  .conv-tab-spinner {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent);
+    border-top-color: transparent;
+    flex-shrink: 0;
+    animation: conv-tab-spin 0.8s linear infinite;
+  }
+  @keyframes conv-tab-spin {
+    to { transform: rotate(360deg); }
   }
 
   .conv-tab-close {

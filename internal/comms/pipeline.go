@@ -30,7 +30,12 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	convStoreKey := string(channelID)
 
 	// 0. Create request tracer.
-	userMsgID := conversation.NewMessageID()
+	// If the adapter pre-inserted the user message, reuse its ID so tracer,
+	// ConvStore and ChatDB remain consistent (#310).
+	userMsgID := msg.PreInsertedUserMsgID
+	if userMsgID == "" {
+		userMsgID = conversation.NewMessageID()
+	}
 	var convID string
 	if e.ConvStore != nil {
 		convID = e.ConvStore.ConvID(convStoreKey)
@@ -39,8 +44,8 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	ctx = trace.WithContext(ctx, tracer)
 	defer tracer.Flush(e.DataDir)
 
-	// 1. Persist user message to ConvStore.
-	if e.ConvStore != nil {
+	// 1. Persist user message to ConvStore (skip if adapter did it).
+	if e.ConvStore != nil && msg.PreInsertedUserMsgID == "" {
 		e.ConvStore.Append(conversation.Message{
 			ID:        userMsgID,
 			ConvID:    convID,
@@ -51,8 +56,8 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 		})
 	}
 
-	// 1a. Persist user message to ChatDB (UI persistence).
-	if e.ChatDB != nil && msg.ConvID != "" {
+	// 1a. Persist user message to ChatDB (skip if adapter did it).
+	if e.ChatDB != nil && msg.ConvID != "" && msg.PreInsertedUserMsgID == "" {
 		e.ChatDB.EnsureConversation(msg.ConvID, "", msg.Source)
 		e.ChatDB.InsertMessage(chatdb.Message{
 			ID:      userMsgID,

@@ -263,6 +263,20 @@
       case 'badge-increment':
         nav.incrementBadge('page:' + slug)
         break
+
+      // ── Token refresh on-demand (iframe detected 401) ──
+      // The iframe cannot hit /api/apps/{slug}/token directly (its sandboxed
+      // null-origin carries no cookies). We hold the parent session cookie, so
+      // we mint a new slug-scoped HMAC token and hand it back via the port.
+      case 'request-token': {
+        const rid = _replyId || 0
+        if (!rid) break
+        fetch('/api/apps/' + slug + '/token')
+          .then(r => r.ok ? r.json() : null)
+          .then(data => reply(rid, data?.token || null))
+          .catch(() => reply(rid, null))
+        break
+      }
     }
   }
 

@@ -51,6 +51,25 @@
     });
   }
 
+  // Coalesce concurrent 401 retries: if many API calls hit 401 at once, all
+  // share one token-refresh round-trip instead of hammering the parent.
+  var _tokenRefreshInflight = null;
+  function _refreshTokenFromParent() {
+    if (!_port) return Promise.resolve(false);
+    if (_tokenRefreshInflight) return _tokenRefreshInflight;
+    _tokenRefreshInflight = requestFromParent('request-token').then(function(newToken) {
+      if (newToken) { _token = newToken; return true; }
+      return false;
+    }).catch(function() {
+      return false;
+    });
+    // Clear the cache shortly so a later 401 can trigger a fresh attempt.
+    _tokenRefreshInflight.finally(function() {
+      setTimeout(function() { _tokenRefreshInflight = null; }, 1000);
+    });
+    return _tokenRefreshInflight;
+  }
+
   /** Handle messages from parent via MessagePort */
   function _handlePortMessage(e) {
     var msg = e.data;
@@ -532,6 +551,9 @@
 
     /**
      * Authenticated API call using Bearer token.
+     * On 401, asks the parent for a fresh token once and retries. This covers
+     * tokens expiring between the 4-minute refresh ticks (suspended tab,
+     * throttled timer, race with init) without forcing a page reload.
      * @param {string} path - API path
      * @param {Object} [opts] - fetch options
      * @returns {Promise<any>}
@@ -539,14 +561,20 @@
     api: function(path, opts) {
       if (!this._readyPromise) return Promise.reject(new Error('SDK not initialized — call AlfSDK.init() first'));
       if (this._authFailed) return Promise.reject(new Error('Session expired — reload page'));
-      return this._readyPromise.then(function() {
-        opts = opts || {};
-        opts.headers = opts.headers || {};
-        opts.headers['X-Requested-With'] = 'XMLHttpRequest';
-        if (_token) {
-          opts.headers['Authorization'] = 'Bearer ' + _token;
-        }
-        return fetch(path, opts);
+
+      function doFetch() {
+        var o = Object.assign({}, opts || {});
+        o.headers = Object.assign({}, (opts && opts.headers) || {});
+        o.headers['X-Requested-With'] = 'XMLHttpRequest';
+        if (_token) o.headers['Authorization'] = 'Bearer ' + _token;
+        return fetch(path, o);
+      }
+
+      return this._readyPromise.then(doFetch).then(function(r) {
+        if (r.status !== 401) return r;
+        return _refreshTokenFromParent().then(function(ok) {
+          return ok ? doFetch() : r;
+        });
       }).then(function(r) {
         if (r.status === 401) {
           SDK._authFailed = true;
@@ -587,13 +615,19 @@
      */
     fetch: function(path, opts) {
       if (!this._readyPromise) return Promise.reject(new Error('SDK not initialized — call AlfSDK.init() first'));
-      return this._readyPromise.then(function() {
-        opts = opts || {};
-        opts.headers = opts.headers || {};
-        if (_token) {
-          opts.headers['Authorization'] = 'Bearer ' + _token;
-        }
-        return fetch(path, opts);
+
+      function doFetch() {
+        var o = Object.assign({}, opts || {});
+        o.headers = Object.assign({}, (opts && opts.headers) || {});
+        if (_token) o.headers['Authorization'] = 'Bearer ' + _token;
+        return fetch(path, o);
+      }
+
+      return this._readyPromise.then(doFetch).then(function(r) {
+        if (r.status !== 401) return r;
+        return _refreshTokenFromParent().then(function(ok) {
+          return ok ? doFetch() : r;
+        });
       });
     },
 

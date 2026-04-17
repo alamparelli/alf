@@ -61,6 +61,34 @@ func AppTokenSlugFromContext(ctx context.Context) string {
 	return ""
 }
 
+// classifyAuthFail returns a short reason code describing why authentication
+// failed. Used by authMiddleware's final log line so operators can distinguish
+// "no credential supplied" (first-paint, cookieless client) from "credential
+// supplied but rejected" (expired token, wrong slug) without re-deriving the
+// signal from upstream traces. Never includes token values.
+func classifyAuthFail(r *http.Request, appTokenReason string) string {
+	if appTokenReason != "" {
+		return appTokenReason
+	}
+	hasBearer := strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ")
+	_, bearerCookieErr := r.Cookie("cc_bearer")
+	_, sessionCookieErr := r.Cookie("cc_session")
+	hasBearerCookie := bearerCookieErr == nil
+	hasSessionCookie := sessionCookieErr == nil
+	switch {
+	case hasBearer:
+		return "bearer_header_rejected"
+	case hasBearerCookie && hasSessionCookie:
+		return "cookies_rejected"
+	case hasSessionCookie:
+		return "session_cookie_rejected"
+	case hasBearerCookie:
+		return "bearer_cookie_rejected"
+	default:
+		return "no_credential"
+	}
+}
+
 // authMethod indicates which authentication method succeeded.
 type authMethod int
 
@@ -289,9 +317,14 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 			//   /api/apps/{slug}/...— storage, upload, errors, permissions
 			//   /api/bash           — shell commands (permission-checked by handler)
 			//   /api/app-action     — cross-app actions
+			//
+			// appTokenFailReason is non-empty when a Bearer was supplied but
+			// the app-token path rejected it — lets the final log explain why.
+			appTokenFailReason := ""
 			if appTokens != nil {
 				if bearer := extractAppBearerToken(r); bearer != "" {
-					if _, ok := appTokens.Validate(bearer); ok {
+					tokenSlug, valid := appTokens.Validate(bearer)
+					if valid {
 						path := r.URL.Path
 						// Slug-scoped routes: verify token slug matches
 						if strings.HasPrefix(path, "/apps/") || strings.HasPrefix(path, "/api/apps/") {
@@ -305,29 +338,34 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 							if idx := strings.IndexByte(reqSlug, '/'); idx >= 0 {
 								reqSlug = reqSlug[:idx]
 							}
-							tokenSlug, _ := appTokens.Validate(bearer)
 							if reqSlug == tokenSlug {
 								next.ServeHTTP(w, r)
 								return
 							}
+							appTokenFailReason = "app_token_slug_mismatch"
 						}
 						// Non-scoped routes: propagate token slug in context
 						// so handlers can cross-check against Referer-derived slug.
 						if path == "/api/bash" || path == "/api/app-action" {
-							tokenSlug, _ := appTokens.Validate(bearer)
 							ctx := context.WithValue(r.Context(), ctxKeyAppTokenSlug{}, tokenSlug)
 							next.ServeHTTP(w, r.WithContext(ctx))
 							return
 						}
+						if appTokenFailReason == "" {
+							appTokenFailReason = "app_token_route_not_allowed"
+						}
+					} else {
+						appTokenFailReason = "app_token_invalid_or_expired"
 					}
 				}
 			}
 
 			// Log after all auth methods failed.
-			auth := r.Header.Get("Authorization")
-			if strings.HasPrefix(r.URL.Path, "/api/") {
-				log.Printf("[CC] auth fail: ip=%s method=%s path=%s has_auth=%v auth_len=%d token_len=%d",
-					clientIP(r), r.Method, r.URL.Path, auth != "", len(auth), len(token))
+			// Distinguishes "no credential at all" from "credential present but
+			// rejected" so app-iframe 401 loops are diagnosable from logs alone.
+			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/apps/") {
+				log.Printf("[CC] auth fail: ip=%s method=%s path=%s reason=%s",
+					clientIP(r), r.Method, r.URL.Path, classifyAuthFail(r, appTokenFailReason))
 			}
 
 			// Show login page only for root path - all other unauthenticated paths get 401.

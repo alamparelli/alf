@@ -111,25 +111,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check if image already exists
+      # Content-addressed check: the whisper-service has its own lifecycle
+      # and rarely changes between alf releases. Tagging the built image with
+      # a hash of the source directory lets us skip the 10-minute rebuild
+      # when nothing under whisper-service/ has changed, and re-alias the
+      # existing image under the new alf version tag instead.
+      - name: Compute whisper source hash
+        id: hash
+        run: |
+          HASH=$(find whisper-service -type f -not -path '*/\.*' | sort | xargs sha256sum | sha256sum | cut -c1-12)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+
+      - name: Check if image for this source hash already exists
         id: check
         run: |
           VERSION=${GITHUB_REF_NAME#v}
+          HASH="${{ steps.hash.outputs.hash }}"
           TOKEN=$(curl -s "https://ghcr.io/token?service=ghcr.io&scope=repository:alamparelli/whisper-service:pull" | jq -r .token)
-          STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/alamparelli/whisper-service/manifests/${VERSION}")
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/alamparelli/whisper-service/manifests/sha-${HASH}")
           if [ "$STATUS" = "200" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image for source hash sha-${HASH} already exists — will re-tag instead of rebuild"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Log in to GHCR
-        if: steps.check.outputs.exists != 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Cheap path: image already built for this source hash; just alias the
+      # existing manifest under the new :<version> and :latest tags. Takes
+      # a few seconds vs ~10 minutes for a fresh multi-arch build.
+      - name: Re-tag existing image (no rebuild)
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          SRC="ghcr.io/alamparelli/whisper-service:sha-${{ steps.hash.outputs.hash }}"
+          docker buildx imagetools create \
+            --tag ghcr.io/alamparelli/whisper-service:${VERSION} \
+            --tag ghcr.io/alamparelli/whisper-service:latest \
+            "$SRC"
 
       - name: Set up Docker Buildx
         if: steps.check.outputs.exists != 'true'
@@ -144,6 +169,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
+            type=raw,value=sha-${{ steps.hash.outputs.hash }}
 
       - name: Build and push whisper-service
         if: steps.check.outputs.exists != 'true'

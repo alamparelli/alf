@@ -953,7 +953,7 @@
   </div>
 
   <!-- Input -->
-  <ChatInput onSend={handleSend} onStop={stopCall} {sending} {tiers} {draft} onDraftChange={updateDraft} selectedModel={selectedTier} onModelChange={(m) => { selectedTier = m; localStorage.setItem('alf-chat-tier', m) }} {activeSkills} onDismissSkill={dismissSkill} />
+  <ChatInput onSend={handleSend} onStop={stopCall} {sending} {tiers} {draft} onDraftChange={updateDraft} selectedModel={selectedTier} onModelChange={(m) => { selectedTier = m; localStorage.setItem('alf-chat-tier', m) }} {activeSkills} onDismissSkill={dismissSkill} {convId} />
 </div>
 
 <!-- Send to Agents Modal -->

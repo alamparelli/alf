@@ -21,9 +21,10 @@
     onModelChange?: (model: string) => void
     activeSkills?: string[]
     onDismissSkill?: (name: string) => void
+    convId?: string
   }
 
-  let { onSend, onStop, sending, tiers = [], draft = '', onDraftChange, selectedModel: selectedModelProp = '', onModelChange, activeSkills = [], onDismissSkill }: Props = $props()
+  let { onSend, onStop, sending, tiers = [], draft = '', onDraftChange, selectedModel: selectedModelProp = '', onModelChange, activeSkills = [], onDismissSkill, convId }: Props = $props()
 
   let text = $state(draft)
   let files = $state<UploadedFile[]>([])
@@ -41,6 +42,13 @@
   })
   $effect(() => {
     selectedModel = selectedModelProp
+  })
+
+  // Auto-focus composer when opening/switching a chat so the user can type immediately.
+  $effect(() => {
+    void convId
+    if (!textarea) return
+    requestAnimationFrame(() => textarea?.focus())
   })
 
   function selectTier(name: string) {

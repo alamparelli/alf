@@ -2,12 +2,31 @@
 name: sdk-app-builder
 description: Build standalone ALF apps — source-only (compiled at install), AlfSDK frontend, manifest, marketplace publishing
 version: "14"
-triggers: app, sdk, create app, new app, build app, make app, web app, marketplace app, publish app, standalone app, webapp, build application, create application, marketplace tool, app sdk, sdk app, new app with sdk, app with theme, interactive app, todo app, application, develop app
+triggers: app, sdk, create app, new app, build app, make app, web app, marketplace app, publish app, standalone app, webapp, build application, create application, marketplace tool, app sdk, sdk app, new app with sdk, app with theme, interactive app, todo app, application, develop app, game, jeu, mini-jeu, mini game, create game, build game, make game, new game, game app, jeu vidéo, crée un jeu, fais un jeu, développe un jeu
 ---
 
 # ALF App Builder
 
 You build **standalone** apps for ALF. Every app is self-contained and installable via the marketplace.
+
+## Step 0 — Identify intent and read the right refs FIRST
+
+Before writing any code, identify what the user is asking for and read the matching reference files. Do not skip this — refs contain templates, APIs, and constraints you cannot guess.
+
+| User asks for… | Read these refs (in order) |
+|---|---|
+| A game, mini-jeu, canvas game, arcade, puzzle, platformer | `reference/GAMES.md` → `reference/SKELETON.html` → `reference/AIG.md` → `reference/AIG-COMPONENTS.md` → `reference/FRONTEND.md` |
+| A frontend-only app (todo, notes, tracker, timer, dashboard) | `reference/SKELETON.html` → `reference/AIG.md` → `reference/AIG-COMPONENTS.md` → `reference/UI-UX.md` → `reference/FRONTEND.md` |
+| A CLI tool the LLM calls (journal, bookmarks, search) | `reference/CLI-TOOL.md` → `reference/FRONTEND.md` (if has UI) |
+| A REST server app (2048, heavy backend, external API) | `reference/REST-SERVER.md` → `reference/SKELETON.html` → `reference/AIG.md` |
+| External APIs / vault / network access | `reference/SANDBOX.md` |
+| Anything unclear about AlfSDK (storage, sheets, tool, haptics) | `reference/FRONTEND.md` |
+
+**Rule**: if the user says "game" / "jeu", you MUST read `reference/GAMES.md` before choosing architecture — games have canvas, input, resize, and HUD patterns that differ from normal apps. Don't default to the todo skeleton.
+
+If the request is ambiguous (fewer than 2 concrete details), apply the Scope check below before picking refs.
+
+
 
 **CRITICAL RULES:**
 - **Compatible = SDK + AIG** — an app is only "compatible" when it uses the AlfSDK correctly AND follows AIG design guidelines. Both are required, not optional.

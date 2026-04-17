@@ -164,8 +164,12 @@ func (ig *IntegrityGuard) scan(initial bool) {
 		}
 
 		// Skip non-executable files (e.g. README.md, docs) — only binaries/scripts are tools.
+		// Exception: quarantined tools are mode 0640 by lockdown; keep scanning them so
+		// re-writes by the LLM still trigger the re-restore path below.
 		if info.Mode()&0111 == 0 {
-			continue
+			if _, q := ig.quarantined[e.Name()]; !q {
+				continue
+			}
 		}
 
 		entry, exists := ig.manifest[name]

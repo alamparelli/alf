@@ -89,6 +89,12 @@ type InMessage struct {
 	ConvID       string // conversation ID for ChatDB persistence (CC tab ID, TG "tg-{chatID}")
 	Source       string // "cc", "telegram", "mobile", "scheduler"
 	ReplyToMsgID string // message ID for ChatDB reply tracking
+
+	// PreInsertedUserMsgID, when non-empty, signals that the adapter has
+	// already persisted the user message to ConvStore/ChatDB with this ID.
+	// The engine will reuse it and skip re-insertion. Used by CC StartJob
+	// to guarantee persistence before the async provider call (#310).
+	PreInsertedUserMsgID string
 }
 
 // DisplayText returns RawText if set, otherwise Text.

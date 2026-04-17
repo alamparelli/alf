@@ -13,6 +13,7 @@
   import { chatUI } from '../stores/chat-ui.svelte'
   import { events } from '../stores/events.svelte'
   import { convStore } from '../stores/conversations.svelte'
+  import { chatRuntimes, type ContentBlock } from '../stores/chat-runtimes.svelte'
 
   // --- Types ---
   interface ChatMsg {
@@ -45,17 +46,20 @@
 
   // --- Messages ---
   let messages = $state<ChatMsg[]>([])
-  let sendingConvs = $state<Set<string>>(new Set())
-  let sending = $derived(sendingConvs.has(convId ?? ''))
 
-  let activeSendConvId = '' // tracks which conv the current stream belongs to
+  // Per-conv streaming state (#310). sending, streaming blocks, abort, etc.
+  // all live in chatRuntimes so a stream on conv A can't bleed into conv B.
+  let sending = $derived(chatRuntimes.isSending(convId ?? ''))
 
   function setSending(cid: string, value: boolean) {
-    const next = new Set(sendingConvs)
-    if (value) { next.add(cid); activeSendConvId = cid } else { next.delete(cid); if (activeSendConvId === cid) activeSendConvId = '' }
-    sendingConvs = next
+    if (!cid) return
+    chatRuntimes.update(cid, { sending: value })
   }
-  function clearSending() { if (activeSendConvId) setSending(activeSendConvId, false) }
+  function clearSending(cid?: string) {
+    const target = cid ?? convId ?? ''
+    if (!target) return
+    chatRuntimes.update(target, { sending: false })
+  }
   let tiers = $state<Tier[]>([])
   let messagesContainer: HTMLDivElement
   let selectedTier = $state(localStorage.getItem('alf-chat-tier') || '')
@@ -83,23 +87,22 @@
     node.addEventListener('alf-change', onFilterChange)
     return { destroy() { node.removeEventListener('alf-change', onFilterChange) } }
   }
-  let streamingBlocks = $state<any[]>([])
+  // Streaming blocks come from the per-conv runtime. Rendering always picks
+  // the runtime of the currently-viewed conv, so tab switches never mutate
+  // another conv's in-flight stream (#310).
+  let streamingBlocks = $derived<ContentBlock[]>(chatRuntimes.get(convId ?? '').blocks)
   let visibleStreamingBlocks = $derived(streamingBlocks.filter(b => {
     if (b.type === 'thinking' && hideThinking) return false
     if ((b.type === 'tool_use' || b.type === 'tool_result') && hideTools) return false
     if (b.type === 'text') return !!(b.text && b.text.trim())
     return true
   }))
-  let streamingText = $state('')
-  let streamingConvId = $state('') // which conv owns the current stream
-  let showStreaming = $derived(streamingConvId === (convId ?? ''))
-  let stoppedByUser = false
+  let streamingText = $derived(chatRuntimes.get(convId ?? '').text)
+  let showStreaming = $derived(sending && chatRuntimes.get(convId ?? '').jobId !== null)
   let pollTimer: ReturnType<typeof setInterval> | null = null
-  let activeJobId = $state<string | null>(null)
   type QueueItem = { message: string; mediaFiles: MediaFile[]; model: string }
   let allQueues = $state<Record<string, QueueItem[]>>(loadQueues())
   let messageQueue = $derived(allQueues[convId ?? ''] || [])
-  let abortController: AbortController | null = null
   let drafts = $state<Record<string, string>>({})
   let draft = $derived(drafts[convId ?? ''] ?? '')
 
@@ -287,16 +290,17 @@
     }
   }
 
-  // Check for active job on load (reconnect to stream)
-  async function checkActiveJob() {
-    if (sending || !convId) return
+  // Check for active job on load (reconnect to stream). Dedupes against the
+  // per-conv reader so a tab switch doesn't open a duplicate SSE (#310).
+  async function checkActiveJob(targetConvId?: string) {
+    const cid = targetConvId ?? convId ?? ''
+    if (!cid) return
+    if (chatRuntimes.hasActiveReader(cid)) return // already streaming
     try {
-      const data = await api<any>(`/api/chat/job?conv_id=${convId}`)
+      const data = await api<any>(`/api/chat/job?conv_id=${cid}`)
       if (data.active && data.job_id) {
-        activeJobId = data.job_id
-        setSending(convId ?? '', true)
-        streamingConvId = convId ?? ''
-        reconnectToStream(data.job_id, 0)
+        chatRuntimes.update(cid, { jobId: data.job_id, sending: true })
+        reconnectToStream(cid, data.job_id, 0)
       }
     } catch { /* no active job */ }
   }
@@ -333,15 +337,21 @@
 
   async function doSend(message: string, mediaFiles: MediaFile[], model: string) {
     const sendConvId = convId ?? ''
-    setSending(sendConvId, true)
-    streamingConvId = sendConvId
-    stoppedByUser = false
-    streamingBlocks = []
-    streamingText = ''
+    if (!sendConvId) return
+    const ac = new AbortController()
+    chatRuntimes.update(sendConvId, {
+      sending: true,
+      stoppedByUser: false,
+      blocks: [],
+      text: '',
+      abortController: ac,
+    })
 
     const mediaIds = mediaFiles.map(f => f.upload_id)
 
-    // Add user message optimistically
+    // Add user message optimistically. The backend now persists the user
+    // msg synchronously on POST, so refresh before the first token still
+    // shows it from history (#310).
     if (message || mediaFiles.length > 0) {
       const maxSeq = messages.reduce((max, m) => Math.max(max, m.seq ?? 0), 0)
       const userMsg: ChatMsg = {
@@ -350,16 +360,15 @@
         text: message,
         ts: new Date().toISOString(),
         seq: maxSeq + 1,
-        conv_id: convId,
+        conv_id: sendConvId,
         media: mediaFiles.map(f => ({ upload_id: f.upload_id, type: f.mime_type?.startsWith('image/') ? 'photo' : 'document', file_name: f.file_name, mime_type: f.mime_type })),
       }
       appendMessage(userMsg)
       scrollToBottom()
     }
 
-    abortController = new AbortController()
     try {
-      const body: any = { message, conv_id: convId }
+      const body: any = { message, conv_id: sendConvId }
       if (mediaIds.length > 0) body.media_ids = mediaIds
       if (model) body.model = model
 
@@ -372,41 +381,44 @@
         },
         body: JSON.stringify(body),
         credentials: 'same-origin',
-        signal: abortController.signal,
+        signal: ac.signal,
       })
 
       if (res.status === 401) {
         toasts.show('Session expired', 'error')
-        clearSending()
+        clearSending(sendConvId)
         return
       }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Send failed' }))
         toasts.show(err.error || 'Send failed', 'error')
-        clearSending()
+        clearSending(sendConvId)
         return
       }
 
-      // Read SSE stream
-      await readStream(res)
+      await readStream(sendConvId, res)
     } catch (e: any) {
       toasts.show(e.message || 'Send failed', 'error')
-      clearSending()
+      clearSending(sendConvId)
     }
   }
 
-  async function readStream(res: Response) {
+  // readStream is scoped to a specific conv so events from a stream started
+  // in tab A always write into chatRuntimes[A], even while the user views B.
+  async function readStream(cid: string, res: Response) {
     const reader = res.body?.getReader()
-    if (!reader) { clearSending(); return }
+    if (!reader) { clearSending(cid); return }
+
+    chatRuntimes.update(cid, { readerActive: true })
 
     const decoder = new TextDecoder()
     let buffer = ''
 
-    // Track content blocks as they stream
-    let currentBlocks: any[] = []
-    let currentText = ''
-    let pendingEvent = '' // SSE event type from "event:" line
+    // Seed from existing runtime state so a reconnect doesn't drop prior blocks.
+    let currentBlocks: any[] = [...chatRuntimes.get(cid).blocks]
+    let currentText = chatRuntimes.get(cid).text
+    let pendingEvent = ''
 
     try {
       while (true) {
@@ -418,39 +430,27 @@
         buffer = lines.pop() || ''
 
         for (const line of lines) {
-          if (line === '') {
-            // Empty line = end of SSE message, reset pending event
-            pendingEvent = ''
-            continue
-          }
-
-          if (line.startsWith('event: ')) {
-            pendingEvent = line.slice(7).trim()
-            continue
-          }
-
+          if (line === '') { pendingEvent = ''; continue }
+          if (line.startsWith('event: ')) { pendingEvent = line.slice(7).trim(); continue }
           if (!line.startsWith('data: ')) continue
           const dataStr = line.slice(6)
           let data: any
           try { data = JSON.parse(dataStr) } catch { continue }
 
-          // Use the paired event type, or fall back to data.type
           const eventType = pendingEvent || data.type || ''
 
           if (eventType === 'job') {
-            activeJobId = data.job_id
+            chatRuntimes.update(cid, { jobId: data.job_id })
             continue
           }
 
           if (eventType === 'error') {
-            // Show toast for immediate feedback; the server also emits a
-            // "system" event with a classified message that persists in chat.
             toasts.show(data.error || data.text || 'Stream error', 'error')
             continue
           }
 
           if (eventType === 'system') {
-            if (data.text) {
+            if (data.text && cid === (convId ?? '')) {
               appendMessage({
                 id: 'sys-' + Date.now(),
                 role: 'system',
@@ -462,21 +462,22 @@
           }
 
           if (eventType === 'done') {
-            // Apply metadata from done event to the last assistant message
-            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
-            if (lastAssistant && data) {
-              if (data.model) lastAssistant.model = data.model
-              if (data.tier) lastAssistant.tier = data.tier
-              if (data.cost_usd) lastAssistant.cost_usd = data.cost_usd
-              if (data.duration_ms) lastAssistant.duration_ms = data.duration_ms
-              if (data.skills) lastAssistant.skills = data.skills
-              messages = [...messages]
+            // Apply metadata only if the user is currently viewing this conv.
+            if (cid === (convId ?? '')) {
+              const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
+              if (lastAssistant && data) {
+                if (data.model) lastAssistant.model = data.model
+                if (data.tier) lastAssistant.tier = data.tier
+                if (data.cost_usd) lastAssistant.cost_usd = data.cost_usd
+                if (data.duration_ms) lastAssistant.duration_ms = data.duration_ms
+                if (data.skills) lastAssistant.skills = data.skills
+                messages = [...messages]
+              }
+              loadActiveSkills()
             }
-            loadActiveSkills()
             continue
           }
 
-          // Inject the event type into data for the handler
           data.type = data.type || eventType
           handleStreamEvent(data, currentBlocks, (updated) => {
             currentBlocks = updated
@@ -485,65 +486,70 @@
           })
         }
 
-        // Update streaming display
-        streamingBlocks = [...currentBlocks]
-        streamingText = currentText
-        scrollToBottomIfFollowing()
+        chatRuntimes.update(cid, {
+          blocks: [...currentBlocks],
+          text: currentText,
+        })
+        if (cid === (convId ?? '')) scrollToBottomIfFollowing()
       }
     } catch {
       // Stream ended or errored
     } finally {
-      abortController = null
+      const runtime = chatRuntimes.get(cid)
+      const finalText = runtime.text
+      const wasStopped = runtime.stoppedByUser
 
-      // stopCall() already cleaned up UI state — skip the rest to avoid
-      // conflicting state updates and double loadHistory() calls.
-      if (stoppedByUser) return
+      chatRuntimes.update(cid, { readerActive: false, abortController: null })
 
-      const finalText = streamingText
-      const doneConvId = streamingConvId
-      clearSending()
-      activeJobId = null
-      streamingBlocks = []
-      streamingText = ''
-      streamingConvId = ''
-      // Small delay to ensure server has committed the message before we fetch.
+      // If stopCall cleaned up already, don't double-work.
+      if (wasStopped) {
+        chatRuntimes.resetStream(cid)
+        return
+      }
+
+      chatRuntimes.resetStream(cid)
+      // Small delay so the server has committed the assistant msg.
       await new Promise(r => setTimeout(r, 100))
-      await loadHistory()
-      scrollToBottom()
+      // Only reload the visible conv's history; other convs will refresh
+      // when the user switches to them.
+      if (cid === (convId ?? '')) {
+        await loadHistory()
+        scrollToBottom()
+      }
 
-      // Notifications
+      // Notifications: only chime for the foreground conv; background
+      // convs just bump the tab spinner + unread badge via other events.
+      const isForeground = cid === (convId ?? '') && !document.hidden
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && finalText) {
         new Notification('ALF', { body: finalText.slice(0, 100) })
       }
-      if (finalText) sound.play()
+      if (finalText && isForeground) sound.play()
       if (nav.currentView !== 'chat') {
         nav.incrementBadge('chat')
       }
 
-      // Process queue
-      const next = shiftQueue(activeSendConvId || convId || '')
+      // Process queue for this conv only.
+      const next = shiftQueue(cid)
       if (next) {
         doSend(next.message, next.mediaFiles, next.model)
       }
     }
   }
 
-  // SSE event parsing — the server uses paired event:/data: lines
-  // We need to handle a stateful parse
-
-  async function reconnectToStream(jobId: string, offset: number) {
+  async function reconnectToStream(cid: string, jobId: string, offset: number) {
+    if (chatRuntimes.hasActiveReader(cid)) return // dedupe
     try {
       const res = await fetch(`/api/chat/job?stream=${jobId}&offset=${offset}`, {
         credentials: 'same-origin',
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
       if (!res.ok) {
-        clearSending()
+        clearSending(cid)
         return
       }
-      await readStream(res)
+      await readStream(cid, res)
     } catch {
-      clearSending()
+      clearSending(cid)
     }
   }
 
@@ -664,22 +670,41 @@
   }
 
   // --- Stop active call (instant) ---
+  // Only affects the conv currently viewed — other convs keep streaming.
+  // On stop, the most recent queued message (if any) is restored to the
+  // input draft so the user can edit or resend it; older queued items are
+  // dropped. This matches the mental model of "stop and reconsider what
+  // I was about to send next" (#310 follow-up).
   function stopCall() {
-    stoppedByUser = true
-    clearQueue(convId ?? '') // clear pending queue
-    // Abort the active fetch stream immediately
-    abortController?.abort()
-    abortController = null
-    // Reset UI state instantly — no awaits before this
-    clearSending()
-    activeJobId = null
-    streamingBlocks = []
-    streamingText = ''
-    streamingConvId = ''
-    // Cancel backend job (persists "cancelled" system message), then reload history
-    api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(convId)}`)
+    const cid = convId ?? ''
+    if (!cid) return
+    const runtime = chatRuntimes.get(cid)
+    runtime.abortController?.abort()
+    chatRuntimes.update(cid, {
+      stoppedByUser: true,
+      sending: false,
+      abortController: null,
+      readerActive: false,
+      blocks: [],
+      text: '',
+      jobId: null,
+    })
+
+    // Restore the most recent queued message into the draft, drop the rest.
+    const queued = allQueues[cid] || []
+    if (queued.length > 0) {
+      const last = queued[queued.length - 1]
+      if (last?.message) {
+        drafts = { ...drafts, [cid]: last.message }
+      }
+      clearQueue(cid)
+    }
+
+    api('DELETE', `/api/chat/job?conv_id=${encodeURIComponent(cid)}`)
       .catch(() => {})
-      .finally(() => loadHistory().then(() => scrollToBottom()))
+      .finally(() => {
+        if ((convId ?? '') === cid) loadHistory().then(() => scrollToBottom())
+      })
   }
 
   // --- New conversation ---
@@ -700,7 +725,9 @@
     }
   })
 
-  // React to conversation switches
+  // React to conversation switches.
+  // In-flight streams on other convs keep running inside chatRuntimes — this
+  // effect only rebinds the currently-viewed conv's display (#310).
   let prevConvId = ''
   $effect(() => {
     const id = convStore.activeConvId
@@ -708,10 +735,10 @@
       prevConvId = id
       convStore.clearUnread(id)
       setMessages([]) // clear immediately to avoid stale flash
-      loadActiveSkills() // reload per-conversation skills
+      loadActiveSkills()
       loadHistory().then(() => {
         scrollToBottom()
-        checkActiveJob() // check if this tab has a running job
+        checkActiveJob(id) // reconnect this conv's reader if none is active
       })
     }
   })
@@ -773,7 +800,18 @@
     if (convId) {
       await loadHistory()
     }
-    await checkActiveJob()
+    // Rebind every active job across all convs so the tab spinners light up
+    // immediately after refresh and streams resume without opening dupes (#310).
+    try {
+      const data = await api<{ jobs: { conv_id: string; job_id: string; events: number }[] }>('/api/chat/jobs')
+      for (const j of data.jobs || []) {
+        if (!j.conv_id || !j.job_id) continue
+        chatRuntimes.update(j.conv_id, { jobId: j.job_id, sending: true })
+        reconnectToStream(j.conv_id, j.job_id, 0)
+      }
+    } catch { /* fall back to single-conv check */
+      await checkActiveJob()
+    }
 
     // Poll every 2s: sync active conv from other devices + fetch new messages.
     pollTimer = setInterval(() => {
@@ -877,7 +915,10 @@
               id: `${msg.id}-block-${bi}`,
               text: block.type === 'text' ? (block.text || '') : '',
               content_blocks: [block],
-              // Only show footer metadata on the last block
+              // Only show footer metadata + timestamp on the last block.
+              // Non-last blocks share the parent msg.ts — displaying it on
+              // every bubble made them all look identical (#310).
+              ts: isLast ? msg.ts : '',
               model: isLast ? msg.model : undefined,
               tier: isLast ? msg.tier : undefined,
               cost_usd: isLast ? msg.cost_usd : undefined,

@@ -1,6 +1,7 @@
 package controlcenter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,6 +25,64 @@ func TestChatHandler_PostEmpty(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+// Regression guard for #310: POST without conv_id must be rejected so the
+// message is never silently dropped from persistence.
+func TestChatHandler_PostRequiresConvID(t *testing.T) {
+	h := &ChatHandler{Service: newTestChatService(t)}
+	body := `{"message":"hi"}`
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing conv_id, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "conv_id") {
+		t.Errorf("expected error to mention conv_id, got %q", rec.Body.String())
+	}
+}
+
+// Regression guard for #310: StartJob persists the user message
+// synchronously so it survives a refresh even if the provider call is
+// cancelled or slow. Before the fix, persistence happened inside
+// engine.Process (async) and a quick refresh could lose the message.
+func TestChatService_StartJobPersistsUserMsgBeforeProvider(t *testing.T) {
+	svc := newTestChatService(t)
+	svc.ChatDB.EnsureConversation("conv-310", "", "cc")
+
+	// Block Ask so the async provider never completes in this test.
+	release := make(chan struct{})
+	defer close(release)
+	svc.askOverride = func(ctx context.Context, _ ChatRequest, _ func(ChatEvent)) error {
+		<-release
+		return nil
+	}
+
+	svc.StartJob(ChatRequest{ConvID: "conv-310", Message: "save me"})
+
+	// Give the synchronous insert a moment; StartJob returns after it has
+	// already persisted, so history must contain the message immediately.
+	msgs, err := svc.ChatDB.History("conv-310", 10, time.Time{})
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	var found bool
+	for _, m := range msgs {
+		if m.Role == "user" && m.Text == "save me" {
+			found = true
+			if m.CreatedAt.IsZero() {
+				t.Error("user message CreatedAt should not be zero")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("user message not persisted synchronously; got %d messages", len(msgs))
 	}
 }
 

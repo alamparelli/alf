@@ -301,6 +301,7 @@ func HandlerFactory(deps Deps) Handlers {
 		mux.Handle("/api/chat/conversations", &ChatConversationsHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/conversations/", &ChatConversationHandler{Service: deps.ChatService, ConfigStore: deps.ConfigStore})
 		mux.Handle("/api/chat/job", &ChatJobHandler{Service: deps.ChatService})
+		mux.Handle("/api/chat/jobs", &ChatJobsHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/upload", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/media/", &ChatMediaHandler{Service: deps.ChatService})
 		mux.Handle("/api/chat/react", &ChatReactHandler{Service: deps.ChatService})

@@ -89,7 +89,7 @@
     <div class="sidebar-overlay" onclick={() => nav.sidebarOpen = false} role="presentation"></div>
   {/if}
 
-  <div class="main-content" class:main-content--app={nav.currentView.startsWith('page:')} class:main-content--chat={nav.currentView === 'chat'}>
+  <div class="main-content" class:main-content--app={nav.currentView.startsWith('page:')} class:main-content--chat={nav.currentView === 'chat' || nav.currentView === 'terminal'}>
     <div class="main-header">
       <button class="hamburger-btn" onclick={() => window.dispatchEvent(new CustomEvent('alf:open-menu'))} aria-label="Toggle menu">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

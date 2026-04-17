@@ -2,7 +2,6 @@
   import { onMount, onDestroy } from 'svelte'
   import { Terminal } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
-  import { WebLinksAddon } from '@xterm/addon-web-links'
   import { RotateCw } from 'lucide-svelte'
   import { toasts } from '../stores/toast.svelte'
   import { theme } from '../stores/theme.svelte'
@@ -145,6 +144,8 @@
   let fitAddon: FitAddon | null = null
   let ws: WebSocket | null = null
   let resizeObserver: ResizeObserver | null = null
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined
+  let pendingFitFrame: number | null = null
 
   // SSH mode: parsed from URL hash ?ssh=service-name
   let sshService = $state<string | null>(null)
@@ -161,10 +162,6 @@
 
   // Admin mode: runs terminal as alfd (uid 1001) with daemon-level access
   let adminMode = $state(false)
-
-  // URL bar overlay state
-  let urlBarVisible = $state(false)
-  let urlBarValue = $state('')
 
   // Mobile input bar
   let isMobile = $state(false)
@@ -185,10 +182,8 @@
 
     ws.onopen = () => {
       // Send initial resize
-      if (term && fitAddon) {
-        fitAddon.fit()
-        sendResize(term.cols, term.rows)
-      }
+      scheduleFit(0)
+      scheduleFit(120)
       // Default to data directory (local terminal only)
       if (!sshService) {
         setTimeout(() => sendInput('cd /home/alf/data && clear\n'), 100)
@@ -201,7 +196,6 @@
           ? new TextDecoder().decode(ev.data)
           : ev.data
         term.write(data)
-        checkForUrl(data)
       }
     }
 
@@ -231,6 +225,25 @@
   function sendInput(data: string) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(data)
+  }
+
+  function fitTerminal() {
+    if (!fitAddon || !term || !termContainer || !termContainer.isConnected) return
+    fitAddon.fit()
+    if (term.cols > 0 && term.rows > 0) {
+      sendResize(term.cols, term.rows)
+    }
+  }
+
+  function scheduleFit(delay = 0) {
+    clearTimeout(resizeTimer)
+    resizeTimer = setTimeout(() => {
+      if (pendingFitFrame !== null) cancelAnimationFrame(pendingFitFrame)
+      pendingFitFrame = requestAnimationFrame(() => {
+        pendingFitFrame = null
+        fitTerminal()
+      })
+    }, delay)
   }
 
   function handleMobileSend() {
@@ -276,15 +289,6 @@
     }
   }
 
-  // URL bar: detect long URLs in terminal output for OAuth flows
-  function checkForUrl(data: string) {
-    const urlMatch = data.match(/(https?:\/\/[^\s\x1b]{80,})/)
-    if (urlMatch) {
-      urlBarValue = urlMatch[1]
-      urlBarVisible = true
-    }
-  }
-
   onMount(() => {
     detectMobile()
     window.addEventListener('resize', detectMobile)
@@ -307,33 +311,32 @@
     fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
 
-    const webLinksAddon = new WebLinksAddon((_, uri) => {
-      window.open(uri, '_blank')
-    })
-    term.loadAddon(webLinksAddon)
-
     term.open(termContainer)
-    fitAddon.fit()
+    scheduleFit(0)
+    scheduleFit(120)
 
     term.onData((data) => {
       sendInput(data)
     })
 
     // ResizeObserver for auto-fit (debounced to avoid rapid-fire during drag resize)
-    let resizeTimer: ReturnType<typeof setTimeout> | undefined
     resizeObserver = new ResizeObserver(() => {
-      clearTimeout(resizeTimer)
-      resizeTimer = setTimeout(() => {
-        if (fitAddon && term) {
-          fitAddon.fit()
-          sendResize(term.cols, term.rows)
-        }
-      }, 50)
+      scheduleFit(50)
     })
     resizeObserver.observe(termContainer)
+    if (termContainer.parentElement) {
+      resizeObserver.observe(termContainer.parentElement)
+    }
+    window.addEventListener('orientationchange', handleViewportResize)
+    window.visualViewport?.addEventListener('resize', handleViewportResize)
 
     connect()
   })
+
+  function handleViewportResize() {
+    detectMobile()
+    scheduleFit(50)
+  }
 
   // Reactively sync terminal theme when CC palette or dark mode changes.
   $effect(() => {
@@ -348,6 +351,13 @@
   onDestroy(() => {
     window.removeEventListener('hashchange', parseSSHFromHash)
     window.removeEventListener('resize', detectMobile)
+    window.removeEventListener('orientationchange', handleViewportResize)
+    window.visualViewport?.removeEventListener('resize', handleViewportResize)
+    clearTimeout(resizeTimer)
+    if (pendingFitFrame !== null) {
+      cancelAnimationFrame(pendingFitFrame)
+      pendingFitFrame = null
+    }
     if (ws) {
       ws.close()
       ws = null
@@ -379,16 +389,6 @@
     </div>
   </div>
 
-  <!-- URL Bar overlay -->
-  {#if urlBarVisible}
-    <div class="url-bar">
-      <input type="text" readonly value={urlBarValue} class="url-input"
-        onclick={(e) => (e.target as HTMLInputElement).select()} />
-      <a href={urlBarValue} target="_blank" rel="noopener" class="url-open">Open</a>
-      <button class="url-close" onclick={() => urlBarVisible = false}>×</button>
-    </div>
-  {/if}
-
   <div id="terminalContainer" class="term-container" bind:this={termContainer}></div>
 
   <!-- Mobile input bar -->
@@ -412,8 +412,12 @@
   .terminal-view {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 60px);
+    width: 100%;
+    height: 100vh;
+    max-height: 100vh;
+    min-height: 0;
     position: relative;
+    overflow: hidden;
   }
 
   .term-header {
@@ -461,47 +465,7 @@
     overflow: hidden;
     border-radius: var(--radius, 8px);
     padding: 4px;
-  }
-
-  /* URL Bar */
-  .url-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    margin-bottom: 4px;
-  }
-
-  .url-input {
-    flex: 1;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 4px 8px;
-    color: var(--text);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
-    cursor: text;
-  }
-
-  .url-open {
-    color: var(--accent);
-    text-decoration: none;
-    font-size: 0.8rem;
-    font-weight: 500;
-    white-space: nowrap;
-  }
-
-  .url-close {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 1.1rem;
-    padding: 0 4px;
+    width: 100%;
   }
 
   /* Mobile input */
@@ -538,5 +502,13 @@
 
   .mobile-btn:active {
     background: var(--border);
+  }
+
+  @media (max-width: 768px) {
+    .terminal-view {
+      height: calc(100dvh - 36px - env(safe-area-inset-top, 0px));
+      max-height: calc(100dvh - 36px - env(safe-area-inset-top, 0px));
+      margin-bottom: 0;
+    }
   }
 </style>

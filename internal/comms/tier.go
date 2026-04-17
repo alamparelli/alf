@@ -212,12 +212,13 @@ func OnboardingTier(tierStore TierStoreReader) string {
 }
 
 // TierHasRead returns true if the tier has Read tool access.
+// "*" in Tools grants all tools including Read.
 func TierHasRead(t TierInfo) bool {
 	if t.WriteCapable {
 		return true
 	}
 	for _, tool := range t.Tools {
-		if tool == "Read" {
+		if tool == "*" || tool == "Read" {
 			return true
 		}
 	}

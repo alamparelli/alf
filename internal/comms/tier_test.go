@@ -181,6 +181,29 @@ func TestLowestMediaTier_NoReadTier(t *testing.T) {
 	}
 }
 
+// "*" in a tier's Tools list must be treated as "all tools allowed",
+// which includes Read. Regression guard for the case where codex-fast
+// was excluded from summarization because the literal "Read" check
+// missed the wildcard.
+func TestTierHasRead_WildcardTools(t *testing.T) {
+	tier := TierInfo{Name: "codex-fast", Tools: []string{"*"}}
+	if !TierHasRead(tier) {
+		t.Error("TierHasRead should be true when Tools contains \"*\"")
+	}
+}
+
+func TestLowestMediaTier_WildcardPicksCheaper(t *testing.T) {
+	tiers := TiersSnapshot{
+		Tiers: []TierInfo{
+			{Name: "codex-fast", Priority: 1, Enabled: true, Tools: []string{"*"}},
+			{Name: "grok-fast", Priority: 10, Enabled: true, WriteCapable: true},
+		},
+	}
+	if got := LowestMediaTier(tiers); got != "codex-fast" {
+		t.Errorf("LowestMediaTier() = %q, want codex-fast (wildcard Read beats prio-10 write)", got)
+	}
+}
+
 func TestIsTierValid(t *testing.T) {
 	tiers := TiersSnapshot{
 		Tiers: []TierInfo{

@@ -472,6 +472,7 @@ func corsMiddleware(allowedOrigin string, appTokens *AppTokenStore) func(http.Ha
 				p := r.URL.Path
 				isAppRoute := strings.HasPrefix(p, "/apps/") || strings.HasPrefix(p, "/api/apps/") ||
 					strings.HasPrefix(p, "/static/") ||
+					strings.HasPrefix(p, "/wasm-app/") ||
 					p == "/api/bash" || p == "/api/app-action"
 				if isAppRoute {
 					if strings.HasPrefix(p, "/static/") {

@@ -65,6 +65,7 @@ cat > /tmp/${SLUG}-index.html <<'HTMLEOF'
   <meta charset="utf-8">
   <title>WASM Playground</title>
   <link rel="stylesheet" id="alf-theme" href="/static/theme-sage.css">
+  <script src="/static/alf-app-sdk.js"></script>
   <style>
     body { font-family: system-ui; max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.5; }
     h1 { font-size: 1.4rem; }
@@ -97,13 +98,9 @@ cat > /tmp/${SLUG}-index.html <<'HTMLEOF'
   <pre id="out">response will appear here…</pre>
 
   <div class="note">
-    <b>Note — backend path</b>: this demo calls the WASM backend at
-    <code>http://127.0.0.1:8788/wasm-app/wasm-playground/*</code>, which
-    is reachable only from inside the homelab container. To test buttons
-    from your laptop, open an SSH tunnel:
-    <pre>ssh -L 8788:127.0.0.1:8788 alessandro@192.168.129.101</pre>
-    Then keep this iframe open. A follow-up change mounts the WASM router
-    inside the CC mux so no tunnel is needed.
+    The WASM backend is mounted inside the CC mux at
+    <code>/wasm-app/wasm-playground/*</code>. Fetches from this iframe
+    are same-origin and authenticated by your CC session cookie.
   </div>
 
   <h2>How it works</h2>
@@ -122,20 +119,24 @@ cat > /tmp/${SLUG}-index.html <<'HTMLEOF'
                                          (manifest-gated)</pre>
 
   <script>
+    // AlfSDK.init performs the MessageChannel handshake with the CC parent
+    // to receive a Bearer app token. After that, AlfSDK.fetch attaches the
+    // token automatically — required because the iframe is sandboxed
+    // (Origin: null, no cookies).
+    AlfSDK.init({ slug: 'wasm-playground' });
+
     async function call(path) {
       const out = document.getElementById('out');
       out.textContent = 'loading…';
       out.className = '';
       try {
-        const url = 'http://127.0.0.1:8788/wasm-app/wasm-playground' + path;
-        const r = await fetch(url);
+        const r = await AlfSDK.fetch('/wasm-app/wasm-playground' + path);
         const t = await r.text();
         out.className = r.ok ? 'ok' : 'err';
         out.textContent = 'HTTP ' + r.status + ' ' + r.statusText + '\n\n' + t;
       } catch (e) {
         out.className = 'err';
-        out.textContent = 'error: ' + e.message +
-          '\n\nLikely the :8788 tunnel is not set up. See the note above.';
+        out.textContent = 'error: ' + (e.message || String(e));
       }
     }
   </script>
@@ -172,6 +173,6 @@ ssh "$REMOTE" "docker logs --tail=40 alf 2>&1 | grep -iE '(wasm|discovery|playgr
 
 echo ""
 echo "==> Done."
-echo "   Open the CC sidebar → you should see 'WASM Playground' under 'developer'."
-echo "   To test backend buttons, tunnel :8788 :"
-echo "     ssh -L 8788:127.0.0.1:8788 ${REMOTE}"
+echo "   Open the CC sidebar → 'WASM Playground' under 'developer'."
+echo "   Clicking the buttons hits the WASM backend via /wasm-app/${SLUG}/api/*"
+echo "   — same-origin, no tunnel needed."

@@ -677,6 +677,10 @@ func main() {
 	// /home/alf/data/tools/<name>/ or /home/alf/data/apps/<name>/. No
 	// rebuild required; daemon restart reloads them.
 	wasmCtx := context.Background()
+	// extraCCHandlers is passed to cc.New so the WASM app router is mounted
+	// inside the CC mux (same-origin, auth middleware applies). Populated
+	// only if the WASM runtime starts cleanly.
+	extraCCHandlers := map[string]http.Handler{}
 	wasmRuntime, err := wasm.New(wasmCtx, wasm.Options{
 		DataRoot: filepath.Join(dataDir, "wasm-data"),
 		Notifier: daemonWASMNotifier{},
@@ -712,18 +716,11 @@ func main() {
 		}
 		log.Printf("[wasm] discovery: %d tool(s), %d app(s) registered", wasmToolCount, wasmAppCount)
 
-		// Dedicated listener for WASM apps. Separate from CC so the
-		// integration has zero blast radius on existing app handlers.
-		// User reaches it as http://<host>:8788/wasm-app/<name>/.
-		go func() {
-			addr := "127.0.0.1:8788"
-			mux := http.NewServeMux()
-			mux.Handle("/wasm-app/", wasmAppRouter)
-			log.Printf("[wasm] app router listening on http://%s/wasm-app/", addr)
-			if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
-				log.Printf("[wasm] app router error: %v", err)
-			}
-		}()
+		// Mount the WASM app router inside the CC mux (same-origin for
+		// iframe fetches, full CC middleware stack applies: auth, CSRF,
+		// rate limit, CORS, security headers). Replaces the spike's
+		// dedicated :8788 listener — no tunnel needed from the user.
+		extraCCHandlers["/wasm-app/"] = wasmAppRouter
 	}
 	// --- /WASM ------------------------------------------------------------
 
@@ -925,7 +922,7 @@ func main() {
 			log.Printf("[tasks] event: task=%s status=%s origin=%s", taskID[:min(8, len(taskID))], status, source)
 			notifyChannel(source, text)
 		}
-		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler, extraCCHandlers)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {

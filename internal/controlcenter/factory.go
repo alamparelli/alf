@@ -107,6 +107,13 @@ type Deps struct {
 	ExternalURL    string // public URL (e.g. https://cc.example.com)
 	DashboardHTML  string
 	WebFS          fs.FS // embedded web assets (style.css, app.js)
+
+	// ExtraHandlers registers additional mux routes inside the standard
+	// middleware stack (auth, rate limit, CORS, security headers all apply).
+	// Used by the daemon to attach the WASM app router at /wasm-app/*
+	// without introducing a second HTTP listener. Keys are http.ServeMux
+	// patterns (typically with a trailing slash for subtree match).
+	ExtraHandlers map[string]http.Handler
 }
 
 // StoreFactory creates concrete store implementations from data and config directories.
@@ -502,6 +509,12 @@ func HandlerFactory(deps Deps) Handlers {
 	// Static assets (CSS, JS) - served from embedded web/ directory.
 	if deps.WebFS != nil {
 		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(deps.WebFS))))
+	}
+
+	// Extra routes attached by the caller (currently: WASM app router).
+	// Registered BEFORE the dashboard "/" catch-all so longer patterns win.
+	for pattern, h := range deps.ExtraHandlers {
+		mux.Handle(pattern, h)
 	}
 
 	// Dashboard.

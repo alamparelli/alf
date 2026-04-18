@@ -1,11 +1,37 @@
 # ALF WASM spike
 
-A **self-contained** experiment validating a WASM-based capability runtime as
-the replacement for ALF's current custom sandboxing stack (chroot via bash,
-`CAP_SYS_ADMIN` daemon, integrity guard, 3 parallel permission systems).
+A WASM-based capability runtime replacing ALF's custom sandboxing stack
+(chroot via bash, `CAP_SYS_ADMIN` daemon, integrity guard, 3 parallel
+permission systems).
 
-Nothing outside `experimental/wasm/` is modified. This is a **pattern proof**,
-not an integration.
+## Status — end of 2026-04-19
+
+**Branch `spike/wasm` (HEAD `866df52`) live on homelab.** Verified end-to-end:
+
+| Path | Status |
+|---|---|
+| Standalone POC (this directory) — initial pattern proof | ✅ |
+| Runtime ported into main module (`internal/runtime/wasm/`) | ✅ |
+| Daemon integration — bundled tool + user-placed discovery | ✅ |
+| Tool invocable by real LLM via OpenRouter | ✅ (`wasm-demo` called by Gemma) |
+| App in CC sidebar, same-origin iframe fetches | ✅ (`wasm-playground`) |
+| Zero regression on 26 legacy tools + ~30 marketplace apps | ✅ |
+
+### Read next
+
+- **[INTEGRATION.md](INTEGRATION.md)** — full architecture as built, deployment workflow, adding new capabilities, known limitations
+- **[HOMELAB.md](HOMELAB.md)** — deploy & test on homelab
+- **[DELETIONS.md](DELETIONS.md)** — migration roadmap with LoC counts
+- **[SPIKE.md](SPIKE.md)** — original goals, kill criteria, timebox
+- **[RESULTS.md](RESULTS.md)** — initial measurements (pre-compile-cache)
+
+## What the files in *this* directory still are
+
+The original standalone POC (predates the main-module integration). Kept as:
+
+- A **reference** showing the minimal viable pattern (isolated Go module, no daemon coupling)
+- A **demo** you can run locally with `make demo-tool` / `make demo-app` — no homelab needed
+- **Build artefact source** for the examples placed on the container by `scripts/deploy-wasm-playground.sh`
 
 ## What it demonstrates
 

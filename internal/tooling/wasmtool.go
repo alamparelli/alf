@@ -64,11 +64,22 @@ func NewWASMTool(rt *wasmrt.Runtime, discovered wasmrt.DiscoveredCapability, sch
 	return t
 }
 
-// ToolName implements NativeTool.
-func (t *WASMTool) ToolName() string { return t.manifest.Name }
+// ToolName implements NativeTool. Hyphens in the manifest name are
+// normalized to underscores so the tool is addressable by the forms
+// providers actually emit (OpenAI-style function calling converts
+// hyphens in schema names, so "wasm-demo" arrives as "wasm_demo" in
+// tool_call messages). The manifest can keep human-readable hyphens.
+func (t *WASMTool) ToolName() string {
+	return strings.ReplaceAll(t.manifest.Name, "-", "_")
+}
 
-// Schema implements NativeTool.
-func (t *WASMTool) Schema() ToolSchema { return t.schema }
+// Schema implements NativeTool. Schema.Name is force-aligned to
+// ToolName so the LLM-emitted tool_call name resolves in the registry.
+func (t *WASMTool) Schema() ToolSchema {
+	s := t.schema
+	s.Name = t.ToolName()
+	return s
+}
 
 // Run implements NativeTool. It forwards the caller's JSON args on stdin,
 // invokes the WASM guest, and returns stdout. Non-zero exit surfaces as an

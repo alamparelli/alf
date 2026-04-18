@@ -1,0 +1,17 @@
+# A reference "migrated native" tool, bundled into the ALF binary via
+# go:embed. Demonstrates the WASM tool path without requiring any file
+# placement on the deployed instance.
+#
+# The runtime discovers this manifest from the embedded FS at daemon
+# startup and registers it in the tool registry alongside Go-native tools.
+
+name = "wasm-demo"
+version = "0.1.0"
+kind = "tool"
+runtime = "go-wasip1"
+entry = "tool-demo.wasm"
+description = "Reference WASM tool bundled with ALF. Echoes the input and records a run counter."
+
+[permissions]
+log     = true
+storage = true

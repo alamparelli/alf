@@ -41,6 +41,9 @@ docker images "${IMAGE_NAME}" --format '{{.ID}} {{.Tag}}' | grep -v latest | awk
 echo "==> Building frontend (Svelte)..."
 (cd internal/controlcenter/frontend && npm install --silent && npm run build)
 
+echo "==> Building WASM guests (bundled via go:embed)..."
+bash wasm-guests/build.sh
+
 echo "==> Building CLI (linux/amd64)..."
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
   -ldflags "-s -w -X main.version=${BUILD_VERSION}" \

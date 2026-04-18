@@ -21,6 +21,7 @@ import (
 	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/marketplace"
+	"github.com/alamparelli/alf/internal/runtime/wasm"
 	"github.com/alamparelli/alf/internal/secrets"
 	"github.com/alamparelli/alf/internal/vault"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
@@ -42,6 +43,7 @@ import (
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 	"github.com/alamparelli/alf/internal/updater"
 	"github.com/alamparelli/alf/internal/voice"
+	wasmguests "github.com/alamparelli/alf/wasm-guests"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -652,6 +654,72 @@ func main() {
 		toolRegistry.RegisterNative(t)
 		toolExecutor.RegisterNative(t)
 	}
+
+	// --- WASM capability runtime (spike/wasm) -----------------------------
+	// Wazero-backed runtime for WASM tools/apps. Runs ALONGSIDE the legacy
+	// subprocess sandbox — nothing in internal/tooling/sandbox*.go or
+	// integrity.go is removed yet. See experimental/wasm/DELETIONS.md for
+	// the migration roadmap.
+	//
+	// Discovery order (later overrides earlier by capability name):
+	//   1. Bundled (go:embed) — extracted to dataDir/wasm-bundled/
+	//   2. User-placed tools  — dataDir/wasm-tools/<name>/
+	//   3. User-placed apps   — dataDir/wasm-apps/<name>/
+	//
+	// User-placed capabilities are created by SSH'ing into the container
+	// and dropping a manifest.toml + .wasm under /home/alf/data/wasm-tools/
+	// or /home/alf/data/wasm-apps/; no rebuild required.
+	wasmCtx := context.Background()
+	wasmRuntime, err := wasm.New(wasmCtx, wasm.Options{
+		DataRoot: filepath.Join(dataDir, "wasm-data"),
+		Notifier: daemonWASMNotifier{},
+	})
+	if err != nil {
+		log.Printf("warning: wasm runtime init failed: %v (wasm tools/apps disabled)", err)
+	} else {
+		defer wasmRuntime.Close(wasmCtx)
+
+		bundledRoot := filepath.Join(dataDir, "wasm-bundled")
+		if _, err := wasmguests.ExtractTo(bundledRoot); err != nil {
+			log.Printf("warning: wasm bundled extract: %v", err)
+		}
+		userToolsDir := filepath.Join(dataDir, "wasm-tools")
+		userAppsDir := filepath.Join(dataDir, "wasm-apps")
+
+		caps := wasm.ScanDirs(bundledRoot, userToolsDir, userAppsDir)
+		wasmAppRouter := wasm.NewAppRouter(wasmRuntime)
+		wasmToolCount := 0
+		wasmAppCount := 0
+		for _, c := range caps {
+			switch c.Manifest.Kind {
+			case wasm.KindTool:
+				t := tooling.NewWASMTool(wasmRuntime, c, nil)
+				toolRegistry.RegisterNative(t)
+				toolExecutor.RegisterNative(t)
+				log.Printf("[wasm] registered tool %q (from %s)", c.Manifest.Name, c.ManifestPath)
+				wasmToolCount++
+			case wasm.KindApp:
+				wasmAppRouter.Register(c)
+				wasmAppCount++
+			}
+		}
+		log.Printf("[wasm] discovery: %d tool(s), %d app(s) registered", wasmToolCount, wasmAppCount)
+
+		// Dedicated listener for WASM apps. Separate from CC so the
+		// integration has zero blast radius on existing app handlers.
+		// User reaches it as http://<host>:8788/wasm-app/<name>/.
+		go func() {
+			addr := "127.0.0.1:8788"
+			mux := http.NewServeMux()
+			mux.Handle("/wasm-app/", wasmAppRouter)
+			log.Printf("[wasm] app router listening on http://%s/wasm-app/", addr)
+			if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
+				log.Printf("[wasm] app router error: %v", err)
+			}
+		}()
+	}
+	// --- /WASM ------------------------------------------------------------
+
 	orch.SetTooling(toolRegistry, toolExecutor)
 
 	// Unified comms engine: shared pipeline for CC (and later TG).

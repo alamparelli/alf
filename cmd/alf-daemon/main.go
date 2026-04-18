@@ -662,13 +662,20 @@ func main() {
 	// the migration roadmap.
 	//
 	// Discovery order (later overrides earlier by capability name):
-	//   1. Bundled (go:embed) — extracted to dataDir/wasm-bundled/
-	//   2. User-placed tools  — dataDir/wasm-tools/<name>/
-	//   3. User-placed apps   — dataDir/wasm-apps/<name>/
+	//   1. Bundled (go:embed)       — extracted to dataDir/wasm-bundled/
+	//   2. Tools dir (cohost legacy) — dataDir/tools/<name>/manifest.toml
+	//   3. Apps dir  (cohost legacy) — dataDir/apps/<name>/manifest.toml
 	//
-	// User-placed capabilities are created by SSH'ing into the container
-	// and dropping a manifest.toml + .wasm under /home/alf/data/wasm-tools/
-	// or /home/alf/data/wasm-apps/; no rebuild required.
+	// WASM capabilities live alongside legacy shell tools and marketplace
+	// apps in the same directories. Discovery is disambiguated by filename:
+	// WASM capabilities have manifest.toml; legacy tools are *.json at the
+	// top level (scanned directly by registry.go) and marketplace apps have
+	// manifest.json. No collision.
+	//
+	// User-placed WASM capabilities are created by SSH'ing into the
+	// container and dropping a manifest.toml + .wasm under
+	// /home/alf/data/tools/<name>/ or /home/alf/data/apps/<name>/. No
+	// rebuild required; daemon restart reloads them.
 	wasmCtx := context.Background()
 	wasmRuntime, err := wasm.New(wasmCtx, wasm.Options{
 		DataRoot: filepath.Join(dataDir, "wasm-data"),
@@ -683,8 +690,8 @@ func main() {
 		if _, err := wasmguests.ExtractTo(bundledRoot); err != nil {
 			log.Printf("warning: wasm bundled extract: %v", err)
 		}
-		userToolsDir := filepath.Join(dataDir, "wasm-tools")
-		userAppsDir := filepath.Join(dataDir, "wasm-apps")
+		userToolsDir := filepath.Join(dataDir, "tools")
+		userAppsDir := filepath.Join(dataDir, "apps")
 
 		caps := wasm.ScanDirs(bundledRoot, userToolsDir, userAppsDir)
 		wasmAppRouter := wasm.NewAppRouter(wasmRuntime)

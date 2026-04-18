@@ -12,8 +12,8 @@ After `scripts/dev-deploy.sh` ships a fresh image, the daemon has:
 - `internal/runtime/wasm` — wazero-backed runtime with compile cache
 - 1 **bundled tool** (`wasm-demo`) embedded via `go:embed` — proves the
   pattern works with zero container-side setup
-- Dynamic **discovery** on startup: scans `/home/alf/data/wasm-tools/*`
-  and `/home/alf/data/wasm-apps/*` for user-placed manifests
+- Dynamic **discovery** on startup: scans `/home/alf/data/tools/*`
+  and `/home/alf/data/apps/*` for user-placed manifests
 - A dedicated HTTP listener on **127.0.0.1:8788** serving
   `/wasm-app/<name>/` for WASM apps
 
@@ -76,11 +76,11 @@ scp experimental/wasm/examples/tool-hello/manifest.toml $docker_host:/tmp/
 
 # 2. copy into the container (docker cp or volume mount, depending on setup)
 ssh $docker_host <<'EOF'
-  docker exec alf mkdir -p /home/alf/data/wasm-tools/hello
-  docker cp /tmp/tool-hello.wasm  alf:/home/alf/data/wasm-tools/hello/hello.wasm
-  docker cp /tmp/manifest.toml    alf:/home/alf/data/wasm-tools/hello/manifest.toml
+  docker exec alf mkdir -p /home/alf/data/tools/hello
+  docker cp /tmp/tool-hello.wasm  alf:/home/alf/data/tools/hello/hello.wasm
+  docker cp /tmp/manifest.toml    alf:/home/alf/data/tools/hello/manifest.toml
   # Fix ownership inside the container so alfd can read it:
-  docker exec alf chown -R alf:alf /home/alf/data/wasm-tools/hello
+  docker exec alf chown -R alf:alf /home/alf/data/tools/hello
 EOF
 ```
 
@@ -88,9 +88,9 @@ Adjust `manifest.toml` inside the container so `entry` matches:
 
 ```bash
 docker exec alf sed -i 's/^entry = ".*"/entry = "hello.wasm"/' \
-  /home/alf/data/wasm-tools/hello/manifest.toml
+  /home/alf/data/tools/hello/manifest.toml
 docker exec alf sed -i 's/^name = ".*"/name = "hello"/' \
-  /home/alf/data/wasm-tools/hello/manifest.toml
+  /home/alf/data/tools/hello/manifest.toml
 ```
 
 Restart the daemon so discovery picks it up (hot reload is Phase-4
@@ -105,7 +105,7 @@ docker logs --tail=20 alf 2>&1 | grep wasm
 Expected new line:
 
 ```
-[wasm] registered tool "hello" (from /home/alf/data/wasm-tools/hello/manifest.toml)
+[wasm] registered tool "hello" (from /home/alf/data/tools/hello/manifest.toml)
 [wasm] discovery: 2 tool(s), 0 app(s) registered
 ```
 
@@ -125,19 +125,19 @@ scp experimental/wasm/examples/app-hello/manifest.toml $docker_host:/tmp/
 scp -r experimental/wasm/examples/app-hello/frontend $docker_host:/tmp/frontend-playground
 
 ssh $docker_host <<'EOF'
-  docker exec alf mkdir -p /home/alf/data/wasm-apps/playground
-  docker cp /tmp/app-hello.wasm        alf:/home/alf/data/wasm-apps/playground/playground.wasm
-  docker cp /tmp/manifest.toml         alf:/home/alf/data/wasm-apps/playground/manifest.toml
-  docker cp /tmp/frontend-playground/. alf:/home/alf/data/wasm-apps/playground/frontend/
-  docker exec alf chown -R alf:alf /home/alf/data/wasm-apps/playground
+  docker exec alf mkdir -p /home/alf/data/apps/playground
+  docker cp /tmp/app-hello.wasm        alf:/home/alf/data/apps/playground/playground.wasm
+  docker cp /tmp/manifest.toml         alf:/home/alf/data/apps/playground/manifest.toml
+  docker cp /tmp/frontend-playground/. alf:/home/alf/data/apps/playground/frontend/
+  docker exec alf chown -R alf:alf /home/alf/data/apps/playground
 EOF
 
 # Fix name + entry inside the container
 docker exec alf sh -c '
   sed -i "s/^entry = \".*\"/entry = \"playground.wasm\"/" \
-         /home/alf/data/wasm-apps/playground/manifest.toml
+         /home/alf/data/apps/playground/manifest.toml
   sed -i "s/^name = \".*\"/name = \"playground\"/" \
-         /home/alf/data/wasm-apps/playground/manifest.toml
+         /home/alf/data/apps/playground/manifest.toml
 '
 
 docker restart alf
@@ -171,10 +171,10 @@ policy is enforced.
 docker exec alf ls /home/alf/data/wasm-bundled/tool-demo/
 
 # 2. User-placed tool
-docker exec alf ls /home/alf/data/wasm-tools/
+docker exec alf ls /home/alf/data/tools/
 
 # 3. User-placed app
-docker exec alf ls /home/alf/data/wasm-apps/
+docker exec alf ls /home/alf/data/apps/
 
 # 4. Discovery log
 docker logs alf 2>&1 | grep "\[wasm\]" | tail -10

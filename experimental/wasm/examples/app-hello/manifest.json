@@ -1,0 +1,9 @@
+{
+  "name": "WASM Playground",
+  "slug": "wasm-playground",
+  "version": "0.1.0",
+  "description": "Demo app served by the ALF wazero runtime (spike).",
+  "category": "developer",
+  "icon": "code",
+  "permissions": ["storage"]
+}

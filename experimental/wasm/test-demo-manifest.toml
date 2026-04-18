@@ -1,9 +1,0 @@
-name = "wasm-demo"
-version = "0.1.0"
-kind = "tool"
-runtime = "go-wasip1"
-entry = "test-demo.wasm"
-description = "test"
-[permissions]
-log = true
-storage = true

@@ -287,6 +287,7 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 			// Tokens are slug-scoped and accepted on:
 			//   /apps/{slug}/...    — static files + API proxy
 			//   /api/apps/{slug}/...— storage, upload, errors, permissions
+			//   /wasm-app/{slug}/...— WASM app backend (wazero router)
 			//   /api/bash           — shell commands (permission-checked by handler)
 			//   /api/app-action     — cross-app actions
 			if appTokens != nil {
@@ -294,12 +295,15 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 					if _, ok := appTokens.Validate(bearer); ok {
 						path := r.URL.Path
 						// Slug-scoped routes: verify token slug matches
-						if strings.HasPrefix(path, "/apps/") || strings.HasPrefix(path, "/api/apps/") {
+						if strings.HasPrefix(path, "/apps/") || strings.HasPrefix(path, "/api/apps/") || strings.HasPrefix(path, "/wasm-app/") {
 							var prefix string
-							if strings.HasPrefix(path, "/apps/") {
+							switch {
+							case strings.HasPrefix(path, "/apps/"):
 								prefix = "/apps/"
-							} else {
+							case strings.HasPrefix(path, "/api/apps/"):
 								prefix = "/api/apps/"
+							default:
+								prefix = "/wasm-app/"
 							}
 							reqSlug := strings.TrimPrefix(path, prefix)
 							if idx := strings.IndexByte(reqSlug, '/'); idx >= 0 {

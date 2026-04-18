@@ -1,0 +1,21 @@
+# App manifest — declares which host capabilities this app may call.
+# The app can reach exactly these and no others, by construction of the
+# host-imports link step.
+
+name = "app-hello"
+version = "0.1.0"
+kind = "app"
+runtime = "go-wasip1"
+entry = "app-hello.wasm"
+description = "A minimal ALF app: HTTP handler backed by storage + vault."
+
+[permissions]
+log     = true
+storage = true
+# Allow exactly these vault services. Anything else returns rc=-2 (denied).
+vault   = ["coingecko", "httpbin"]
+
+# Denied:
+# http   = []        # no raw HTTP — use vault or fail
+# memory = false
+# events = false

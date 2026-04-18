@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ALF WASM — hello app</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+           max-width: 720px; margin: 40px auto; padding: 0 20px;
+           line-height: 1.5; color: #222; }
+    h1 { font-size: 1.4rem; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 8px;
+          overflow-x: auto; font-size: 13px; }
+    button { background: #2563eb; color: white; border: 0; padding: 8px 14px;
+             border-radius: 6px; cursor: pointer; margin: 4px 4px 4px 0; }
+    button:hover { background: #1d4ed8; }
+    .row { margin: 16px 0; }
+    .note { font-size: 13px; color: #666; margin-top: 32px; }
+  </style>
+</head>
+<body>
+  <h1>ALF WASM spike — hello app</h1>
+  <p>
+    This page is a static frontend. The buttons below call the
+    <code>/api/*</code> endpoints, which are served by a Go program
+    compiled to WebAssembly and executed inside the host runtime's
+    <code>wazero</code> sandbox. Each call is a fresh instance.
+  </p>
+
+  <div class="row">
+    <button onclick="call('/api/hello')">/api/hello</button>
+    <button onclick="call('/api/counter')">/api/counter</button>
+    <button onclick="call('/api/btc')">/api/btc (vault→coingecko)</button>
+    <button onclick="call('/api/denied-demo')">/api/denied-demo (expect rc=-2)</button>
+  </div>
+
+  <pre id="out">response will appear here…</pre>
+
+  <p class="note">
+    The app's manifest declares <code>storage = true</code> and
+    <code>vault = ["coingecko", "httpbin"]</code>. Calling
+    <code>vault.request("openai", …)</code> — as
+    <code>/api/denied-demo</code> does — returns host return code
+    <code>-2</code> (permission denied). The guest cannot read files,
+    open sockets, or exec subprocesses — the corresponding host
+    imports simply don't exist in its linked module.
+  </p>
+
+  <script>
+    async function call(path) {
+      const out = document.getElementById('out');
+      out.textContent = 'loading…';
+      try {
+        const r = await fetch(path);
+        const t = await r.text();
+        out.textContent = `HTTP ${r.status} ${r.statusText}\n\n${t}`;
+      } catch (e) {
+        out.textContent = 'error: ' + e.message;
+      }
+    }
+  </script>
+</body>
+</html>

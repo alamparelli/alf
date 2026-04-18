@@ -1,0 +1,20 @@
+# Tool manifest — declares everything this capability needs from the host.
+# Anything NOT declared is absent from the guest's linkable imports, so it
+# cannot be called — period. This is the structural invariant of the sandbox.
+
+name = "tool-hello"
+version = "0.1.0"
+kind = "tool"
+runtime = "go-wasip1"
+entry = "tool-hello.wasm"
+description = "A trivial tool: log something, do a storage round-trip."
+
+[permissions]
+log     = true          # allows alf.LogInfo / alf.LogError
+storage = true          # allows alf.StoragePut / alf.StorageGet
+
+# Not granted — the corresponding host imports WILL NOT link into the guest.
+# vault   = []
+# http    = []
+# memory  = false
+# events  = false

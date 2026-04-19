@@ -51,7 +51,8 @@ secrets
 # Private (not for public repo)
 .claude/
 mobile/
-technical/
+technical/*
+!technical/TEST-BASELINE.md
 journal
 video-factory-output/
 prototypes/

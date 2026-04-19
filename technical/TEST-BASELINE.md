@@ -55,7 +55,7 @@ on "no user-facing change".
 | `internal/skills` | 75.7 % | capability | skill dispatch through full pipeline |
 | `internal/marketplace` | 48.6 % | capability | app REST backend round-trip |
 | `internal/firewall` | 59.3 % | sandbox | blocked net → fail; allowed → succeed |
-| `internal/vault` | **25.1 %** 🔴 | sandbox | tier-gated access, proxy auth |
+| `internal/vault` | 48.8 % | sandbox | subprocess lifecycle (E2E-only) |
 | `internal/provider` | 46.4 % | ai | model routing, summarize pipeline |
 | `internal/router` | 62.5 % | ai | `ResolveModel` baseline |
 | `internal/agents` | 73.9 % | ai | agent loop, tool invocation |
@@ -112,7 +112,7 @@ Gaps identified in the audit:
 | 5 | One skill through full pipeline | partial | `internal/skills` + `internal/controlcenter` |
 | 6 | Marketplace app with REST backend responds | gap | `internal/marketplace` + `pkg/appsdk` |
 | 7 | Firewall blocked net fails, allowed succeeds | to verify | `internal/firewall` |
-| 8 | Vault tier-gated access | gap | `internal/vault` |
+| 8 | Vault tier-gated access | covered | `internal/vault` (manager api + proxy) |
 | 9 | Integrity guard quarantines tampered tool | to verify | `internal/tooling` (`integrity_test.go`) |
 | 10 | `ResolveModel` baseline behaviour | to verify | `internal/router` |
 | 11 | Scheduler job fires → invokes capability | gap | `internal/scheduler` + `internal/tooling` |
@@ -141,8 +141,8 @@ audit surfaced a pre-existing race in
 field that `Orchestrator.Run` writes from another goroutine without
 synchronisation. The production build does not run with `-race`
 either, so the race has not shipped a user-visible regression, but
-it must be fixed in a dedicated ticket before the ai rework starts
-(step 4). Until then, `regression-race` is the tech-debt tracker.
+it must be fixed before the ai rework starts (step 4). Tracked in
+#345. Until then, `regression-race` is the tech-debt tracker.
 
 ## Entry / exit contract for follow-up tickets
 

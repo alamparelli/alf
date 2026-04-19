@@ -230,3 +230,39 @@ func TestAPIProvider_DoRequest_ToolCallsParsing(t *testing.T) {
 		t.Errorf("expected arguments '{\"query\":\"test\"}', got %q", tc.Function.Arguments)
 	}
 }
+
+func TestNestedString_Found(t *testing.T) {
+	m := map[string]any{
+		"outer": map[string]any{
+			"inner": map[string]any{"name": "bob"},
+		},
+	}
+	got, ok := nestedString(m, "outer", "inner", "name")
+	if !ok || got != "bob" {
+		t.Errorf("expected (bob, true), got (%q, %v)", got, ok)
+	}
+}
+
+func TestNestedString_MissingKey(t *testing.T) {
+	m := map[string]any{"a": map[string]any{"b": "c"}}
+	_, ok := nestedString(m, "a", "x")
+	if ok {
+		t.Error("expected ok=false when leaf key is missing")
+	}
+}
+
+func TestNestedString_NotAString(t *testing.T) {
+	m := map[string]any{"a": map[string]any{"b": 42}}
+	_, ok := nestedString(m, "a", "b")
+	if ok {
+		t.Error("expected ok=false when value is not a string")
+	}
+}
+
+func TestNestedString_NonMapInPath(t *testing.T) {
+	m := map[string]any{"a": "scalar"}
+	_, ok := nestedString(m, "a", "b")
+	if ok {
+		t.Error("expected ok=false when traversing through a scalar")
+	}
+}

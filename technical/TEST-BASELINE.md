@@ -49,7 +49,7 @@ on "no user-facing change".
 |---|---:|---|---|
 | `internal/conversation` | 88.4 % | memory | multi-conv isolation, convID scoping |
 | `internal/memstore` | 55.8 % | memory | dedup + FTS fallback under load |
-| `internal/memory` | 41.9 % | memory | preferences dispatch, recall-tools |
+| `internal/memory` | 84.8 % | memory | scanApps/GenerateToolbox (E2E-only) |
 | `internal/chatdb` | 56.8 % | memory | concurrency (see #346) |
 | `internal/tooling` | 59.5 % | capability | e2e per native tool (~20) + integrity guard |
 | `internal/skills` | 75.7 % | capability | skill dispatch through full pipeline |

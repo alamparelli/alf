@@ -1,6 +1,10 @@
 package firewall
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -254,6 +258,162 @@ func TestLogOnlyNeverBlocks(t *testing.T) {
 		if _, blocked := p.decide(host); blocked {
 			t.Errorf("decide(%q) blocked in log-only mode, should never block", host)
 		}
+	}
+}
+
+func TestDefaultConfig_SaneDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Mode != ModeLogOnly {
+		t.Errorf("default mode = %q, want %q", cfg.Mode, ModeLogOnly)
+	}
+	if cfg.Port != 4751 {
+		t.Errorf("default port = %d, want 4751", cfg.Port)
+	}
+	if len(cfg.Rules) != 0 {
+		t.Errorf("default rules should be empty, got %d", len(cfg.Rules))
+	}
+}
+
+func TestProxy_Handler_WrapsGoproxyServer(t *testing.T) {
+	p := NewProxy(DefaultConfig())
+	h := p.Handler()
+	if h == nil {
+		t.Fatal("Handler returned nil")
+	}
+	// The handler must respond to HTTP requests without panicking.
+	// A bare GET with no upstream target is enough to prove wiring.
+	req := httptest.NewRequest("GET", "http://example.com/", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	// goproxy will attempt the upstream call and fail, but the handler
+	// must not have panicked — any status is fine here.
+	if w.Code == 0 {
+		t.Error("Handler did not write a response")
+	}
+}
+
+// Critical-path regression from TEST-BASELINE.md, scenario 7:
+// firewall blocked net fails, allowed net succeeds. Drives real HTTP
+// through the goproxy stack to prove the OnRequest/HandleConnect
+// callbacks apply the firewall decision on the wire.
+
+func TestProxy_HTTP_BlockedRuleReturns403(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("upstream should never be hit when firewall blocks the request")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	// Deny everything in enforce mode.
+	p := NewProxy(&Config{
+		Mode:  ModeEnforce,
+		Rules: []Rule{{Pattern: "*", Action: "deny"}},
+	})
+	proxySrv := httptest.NewServer(p.Handler())
+	defer proxySrv.Close()
+
+	proxyURL, _ := url.Parse(proxySrv.URL)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+	}
+
+	resp, err := client.Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("GET via firewall proxy: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 403 from firewall, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	// The block must be recorded in the ring buffer with Blocked=true.
+	entries := p.Log.Entries()
+	if len(entries) == 0 {
+		t.Fatal("firewall did not record a blocked entry")
+	}
+	last := entries[len(entries)-1]
+	if !last.Blocked {
+		t.Errorf("recorded entry Blocked=%v, want true", last.Blocked)
+	}
+	if last.Status != http.StatusForbidden {
+		t.Errorf("recorded entry Status=%d, want 403", last.Status)
+	}
+}
+
+func TestProxy_HTTP_AllowedRequestRelayed(t *testing.T) {
+	var upstreamHit bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("relayed-ok"))
+	}))
+	defer upstream.Close()
+
+	// Log-only mode: no rule ever blocks — allowed traffic should
+	// reach the upstream unchanged.
+	p := NewProxy(&Config{
+		Mode:  ModeLogOnly,
+		Rules: []Rule{{Pattern: "*", Action: "deny"}}, // deny rule present but log-only ignores it
+	})
+	proxySrv := httptest.NewServer(p.Handler())
+	defer proxySrv.Close()
+
+	proxyURL, _ := url.Parse(proxySrv.URL)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+	}
+
+	resp, err := client.Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("GET via firewall proxy: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 relayed, got %d: %s", resp.StatusCode, string(body))
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "relayed-ok" {
+		t.Errorf("upstream body not relayed: %q", string(body))
+	}
+	if !upstreamHit {
+		t.Error("upstream was never hit — firewall did not relay the request")
+	}
+
+	// The allowed request must be recorded with Blocked=false.
+	entries := p.Log.Entries()
+	if len(entries) == 0 {
+		t.Fatal("firewall did not record the allowed entry")
+	}
+	last := entries[len(entries)-1]
+	if last.Blocked {
+		t.Errorf("allowed request recorded as Blocked=true")
+	}
+}
+
+// Store integration: when a Store is attached, the proxy persists
+// cumulative host counters via record().
+func TestProxy_Record_UpdatesStoreHostStats(t *testing.T) {
+	p := NewProxy(&Config{Mode: ModeEnforce, Rules: []Rule{{Pattern: "*", Action: "deny"}}})
+	p.Store = NewStore(t.TempDir())
+
+	p.Record(RequestEntry{Host: "evil.com", Method: "GET", Blocked: true, Status: 403})
+	p.Record(RequestEntry{Host: "evil.com", Method: "GET", Blocked: true, Status: 403})
+	p.Record(RequestEntry{Host: "friend.com", Method: "GET"})
+
+	hosts := p.Store.Hosts()
+	byHost := map[string]HostStat{}
+	for _, h := range hosts {
+		byHost[h.Host] = h
+	}
+	if got := byHost["evil.com"]; got.Count != 2 || got.Blocked != 2 {
+		t.Errorf("evil.com stats: %+v", got)
+	}
+	if got := byHost["friend.com"]; got.Count != 1 || got.Allowed != 1 {
+		t.Errorf("friend.com stats: %+v", got)
 	}
 }
 

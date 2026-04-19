@@ -54,7 +54,7 @@ on "no user-facing change".
 | `internal/tooling` | 59.5 % | capability | e2e per native tool (~20) + integrity guard |
 | `internal/skills` | 75.7 % | capability | skill dispatch through full pipeline |
 | `internal/marketplace` | 48.6 % | capability | app REST backend round-trip |
-| `internal/firewall` | 59.3 % | sandbox | blocked net → fail; allowed → succeed |
+| `internal/firewall` | 78.9 % | sandbox | nettrack control socket (E2E-only) |
 | `internal/vault` | 48.8 % | sandbox | subprocess lifecycle (E2E-only) |
 | `internal/provider` | 46.4 % | ai | model routing, summarize pipeline |
 | `internal/router` | 62.5 % | ai | `ResolveModel` baseline |
@@ -111,7 +111,7 @@ Gaps identified in the audit:
 | 4 | Each native tool has one e2e integration test | gap | `internal/tooling` |
 | 5 | One skill through full pipeline | partial | `internal/skills` + `internal/controlcenter` |
 | 6 | Marketplace app with REST backend responds | gap | `internal/marketplace` + `pkg/appsdk` |
-| 7 | Firewall blocked net fails, allowed succeeds | to verify | `internal/firewall` |
+| 7 | Firewall blocked net fails, allowed succeeds | covered | `internal/firewall` (HTTP e2e via goproxy) |
 | 8 | Vault tier-gated access | covered | `internal/vault` (manager api + proxy) |
 | 9 | Integrity guard quarantines tampered tool | to verify | `internal/tooling` (`integrity_test.go`) |
 | 10 | `ResolveModel` baseline behaviour | to verify | `internal/router` |

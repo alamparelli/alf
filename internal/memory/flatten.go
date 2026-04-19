@@ -1,47 +1,80 @@
-package conversation
+package memory
 
 import (
 	"fmt"
 	"strings"
 )
 
+// Truncation limits shared by BuildContext and the flatteners. Originated in
+// internal/conversation; kept here so consumers don't have to reach across
+// packages to know why a tool_result got truncated.
+const (
+	MaxToolResultBytes = 2048
+	MaxThinkingBytes   = 1024
+	DefaultMaxMessages = 50
+)
+
+// APIMessage is a simple role+content pair for provider APIs that don't
+// support structured content blocks.
+type APIMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// OpenAIToolCall represents a tool invocation in OpenAI message format.
+type OpenAIToolCall struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+// OpenAIMessage is a structured message for OpenAI-compatible APIs. Unlike
+// APIMessage it preserves tool_calls and tool results as structured data so
+// models don't learn to simulate tool calls from text patterns.
+type OpenAIMessage struct {
+	Role       string           // "user", "assistant", "tool"
+	Content    string           // text content
+	ToolCalls  []OpenAIToolCall // assistant messages: tool invocations
+	ToolCallID string           // tool messages: links result to its call
+}
+
 // BuildContext returns up to maxMessages recent messages, with truncation
 // applied to reduce token cost. Drops thinking blocks first, then truncates
-// tool_result output from oldest messages.
+// tool_result output from oldest messages. The input slice is not mutated.
 func BuildContext(messages []Message, maxMessages int) []Message {
 	if maxMessages <= 0 {
 		maxMessages = DefaultMaxMessages
 	}
-
-	// Take last N messages.
 	if len(messages) > maxMessages {
 		messages = messages[len(messages)-maxMessages:]
 	}
-
-	// Copy to avoid mutating the originals.
 	result := make([]Message, len(messages))
 	for i, m := range messages {
 		result[i] = Message{
-			ID:        m.ID,
-			Role:      m.Role,
-			Timestamp: m.Timestamp,
-			Model:     m.Model,
-			Tier:      m.Tier,
-			Backend:   m.Backend,
-			CostUSD:   m.CostUSD,
-			SessionID: m.SessionID,
-			ReplyTo:   m.ReplyTo,
+			ID:         m.ID,
+			Seq:        m.Seq,
+			Role:       m.Role,
+			Channel:    m.Channel,
+			Content:    m.Content,
+			Model:      m.Model,
+			Tier:       m.Tier,
+			Backend:    m.Backend,
+			CostUSD:    m.CostUSD,
+			DurationMs: m.DurationMs,
+			SessionID:  m.SessionID,
+			ReplyTo:    m.ReplyTo,
+			CoveredIDs: m.CoveredIDs,
+			CreatedAt:  m.CreatedAt,
 		}
 		for _, b := range m.Blocks {
 			switch b.Type {
 			case BlockThinking:
-				// Drop thinking blocks entirely - they're internal.
+				// Thinking blocks are internal — drop.
 				continue
 			case BlockSummary:
-				// Keep summary as-is; it's a condensed stand-in for older messages.
+				// Summary stays as-is; it's a condensed stand-in for older messages.
 				result[i].Blocks = append(result[i].Blocks, b)
 			case BlockToolResult:
-				// Truncate old tool results.
 				output := b.Output
 				if len(output) > MaxToolResultBytes {
 					output = output[:MaxToolResultBytes] + "..."
@@ -60,7 +93,9 @@ func BuildContext(messages []Message, maxMessages int) []Message {
 }
 
 // FlattenForAPI converts rich messages into simple role+content pairs
-// suitable for OpenAI-compatible API calls.
+// suitable for OpenAI-compatible API calls that don't preserve tool
+// structures. Summary messages become a "system" role prefixed with a
+// marker so the model recognises condensed history.
 func FlattenForAPI(messages []Message) []APIMessage {
 	var result []APIMessage
 	for _, m := range messages {
@@ -79,51 +114,15 @@ func FlattenForAPI(messages []Message) []APIMessage {
 		if text == "" {
 			continue
 		}
-		result = append(result, APIMessage{
-			Role:    m.Role,
-			Content: text,
-		})
+		result = append(result, APIMessage{Role: m.Role, Content: text})
 	}
 	return result
 }
 
-func summaryText(blocks []ContentBlock) string {
-	var parts []string
-	for _, b := range blocks {
-		if b.Type == BlockSummary && b.Text != "" {
-			parts = append(parts, b.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-// APIMessage is a simple role+content pair for API providers.
-type APIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// OpenAIToolCall represents a tool invocation in OpenAI message format.
-type OpenAIToolCall struct {
-	ID        string
-	Name      string
-	Arguments string
-}
-
-// OpenAIMessage is a structured message for OpenAI-compatible APIs.
-// Unlike APIMessage, it preserves tool_calls and tool results as structured
-// data so models don't learn to simulate tool calls from text patterns.
-type OpenAIMessage struct {
-	Role       string           // "user", "assistant", "tool"
-	Content    string           // text content
-	ToolCalls  []OpenAIToolCall // assistant messages: tool invocations
-	ToolCallID string           // tool messages: links result to its call
-}
-
 // FlattenForOpenAI converts rich messages into structured OpenAI-format
 // messages that preserve tool calls and results as proper API structures.
-// This prevents weaker models from learning to hallucinate tool calls
-// by mimicking text patterns like "[Used tool: X]" in conversation history.
+// Prevents weaker models from learning to hallucinate tool calls by mimicking
+// "[Used tool: X]" text patterns.
 func FlattenForOpenAI(messages []Message) []OpenAIMessage {
 	var result []OpenAIMessage
 	for _, m := range messages {
@@ -176,14 +175,11 @@ func FlattenForOpenAI(messages []Message) []OpenAIMessage {
 		}
 
 		if len(toolCalls) > 0 {
-			// Assistant message with tool calls.
 			msg := OpenAIMessage{Role: "assistant", ToolCalls: toolCalls}
 			if len(textParts) > 0 {
 				msg.Content = strings.Join(textParts, "\n")
 			}
 			result = append(result, msg)
-
-			// Each tool result becomes a separate "tool" message.
 			for _, tr := range toolResults {
 				result = append(result, OpenAIMessage{
 					Role:       "tool",
@@ -192,7 +188,6 @@ func FlattenForOpenAI(messages []Message) []OpenAIMessage {
 				})
 			}
 		} else if len(textParts) > 0 {
-			// Pure text assistant message.
 			result = append(result, OpenAIMessage{
 				Role:    "assistant",
 				Content: strings.Join(textParts, "\n"),
@@ -203,8 +198,8 @@ func FlattenForOpenAI(messages []Message) []OpenAIMessage {
 }
 
 // FlattenTextOnly converts messages to plain text OpenAI messages, stripping
-// all tool_use and tool_result blocks. Use this when switching backends to
-// avoid sending tool call messages that the new backend didn't initiate.
+// tool_use and tool_result blocks. Use when switching backends to avoid
+// sending tool call messages that the new backend didn't initiate.
 func FlattenTextOnly(messages []Message) []OpenAIMessage {
 	var result []OpenAIMessage
 	for _, m := range messages {
@@ -231,25 +226,14 @@ func FlattenTextOnly(messages []Message) []OpenAIMessage {
 	return result
 }
 
-// textFromBlocks extracts only text content from blocks.
-func textFromBlocks(blocks []ContentBlock) string {
-	var parts []string
-	for _, b := range blocks {
-		if b.Type == BlockText && b.Text != "" {
-			parts = append(parts, b.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-// FormatAsSystemPrompt renders conversation history as a system prompt
-// injection for CLI providers that don't support message arrays.
-// contextWeight controls verbosity: "light" strips tool blocks, "standard"/"full" include them.
+// FormatAsSystemPrompt renders conversation history as a system-prompt
+// injection for CLI-only providers that don't support message arrays.
+// contextWeight controls verbosity: "light" strips tool blocks,
+// "standard"/"full" include them.
 func FormatAsSystemPrompt(messages []Message, contextWeight ...string) string {
 	if len(messages) == 0 {
 		return ""
 	}
-
 	weight := "full"
 	if len(contextWeight) > 0 && contextWeight[0] != "" {
 		weight = contextWeight[0]
@@ -276,14 +260,12 @@ func FormatAsSystemPrompt(messages []Message, contextWeight ...string) string {
 			continue
 		}
 		sb.WriteString(fmt.Sprintf("--- %s ---\n", role))
-
 		for _, b := range m.Blocks {
 			switch b.Type {
 			case BlockText:
 				sb.WriteString(b.Text)
 				sb.WriteString("\n")
 			case BlockToolUse:
-				// Light tiers: skip tool noise to maximize conversation signal.
 				if weight != "light" {
 					sb.WriteString(fmt.Sprintf("[Used tool: %s]\n", b.Name))
 				}
@@ -299,12 +281,58 @@ func FormatAsSystemPrompt(messages []Message, contextWeight ...string) string {
 		}
 		sb.WriteString("\n")
 	}
-
 	sb.WriteString("=== [end conversation history] ===")
 	return sb.String()
 }
 
-// flattenBlocks combines all blocks into a single text representation.
+// BuildRouterContext creates a compact conversation summary for the router
+// classifier. Returns the last maxTurns*2 messages truncated so the classify
+// prompt stays small. Returns "" if no relevant messages.
+func BuildRouterContext(msgs []Message, maxTurns int) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+	start := 0
+	if len(msgs) > maxTurns*2 {
+		start = len(msgs) - maxTurns*2
+	}
+	var b strings.Builder
+	for _, m := range msgs[start:] {
+		text := TextContent(m)
+		if text == "" {
+			continue
+		}
+		if len(text) > 150 {
+			text = text[:150] + "..."
+		}
+		role := "user"
+		if m.Role == "assistant" {
+			role = "assistant"
+			if m.Tier != "" {
+				role = m.Tier
+			}
+		}
+		b.WriteString(fmt.Sprintf("[%s]: %s\n", role, text))
+	}
+	return b.String()
+}
+
+// TextContent returns the concatenated text from all BlockText blocks in m.
+// Falls back to m.Content when Blocks is empty — keeps callers that use
+// AppendMessage with a plain Content string working.
+func TextContent(m Message) string {
+	if len(m.Blocks) == 0 {
+		return m.Content
+	}
+	var parts []string
+	for _, b := range m.Blocks {
+		if b.Type == BlockText && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "")
+}
+
 func flattenBlocks(blocks []ContentBlock) string {
 	var parts []string
 	for _, b := range blocks {
@@ -323,6 +351,26 @@ func flattenBlocks(blocks []ContentBlock) string {
 			if output != "" {
 				parts = append(parts, fmt.Sprintf("[Tool result: %s]", output))
 			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func textFromBlocks(blocks []ContentBlock) string {
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == BlockText && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func summaryText(blocks []ContentBlock) string {
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == BlockSummary && b.Text != "" {
+			parts = append(parts, b.Text)
 		}
 	}
 	return strings.Join(parts, "\n")

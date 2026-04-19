@@ -1,12 +1,13 @@
-package conversation
+package comms
 
 import (
 	"testing"
 
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/provider"
 )
 
-func TestAccumulatorTextOnly(t *testing.T) {
+func TestAccumulator_TextOnly(t *testing.T) {
 	acc := NewAccumulator()
 	cb := acc.OnProgress(nil)
 
@@ -17,7 +18,7 @@ func TestAccumulatorTextOnly(t *testing.T) {
 	if len(blocks) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(blocks))
 	}
-	if blocks[0].Type != BlockText {
+	if blocks[0].Type != memory.BlockText {
 		t.Errorf("expected text block, got %s", blocks[0].Type)
 	}
 	if blocks[0].Text != "Hello world" {
@@ -25,7 +26,7 @@ func TestAccumulatorTextOnly(t *testing.T) {
 	}
 }
 
-func TestAccumulatorThinkingThenText(t *testing.T) {
+func TestAccumulator_ThinkingThenText(t *testing.T) {
 	acc := NewAccumulator()
 	cb := acc.OnProgress(nil)
 
@@ -37,15 +38,15 @@ func TestAccumulatorThinkingThenText(t *testing.T) {
 	if len(blocks) != 2 {
 		t.Fatalf("expected 2 blocks, got %d", len(blocks))
 	}
-	if blocks[0].Type != BlockThinking {
+	if blocks[0].Type != memory.BlockThinking {
 		t.Errorf("expected thinking block, got %s", blocks[0].Type)
 	}
-	if blocks[1].Type != BlockText {
+	if blocks[1].Type != memory.BlockText {
 		t.Errorf("expected text block, got %s", blocks[1].Type)
 	}
 }
 
-func TestAccumulatorToolUseAndResult(t *testing.T) {
+func TestAccumulator_ToolUseAndResult(t *testing.T) {
 	acc := NewAccumulator()
 	cb := acc.OnProgress(nil)
 
@@ -60,36 +61,24 @@ func TestAccumulatorToolUseAndResult(t *testing.T) {
 	if len(blocks) != 4 {
 		t.Fatalf("expected 4 blocks (thinking, tool_use, tool_result, text), got %d", len(blocks))
 	}
-
-	if blocks[0].Type != BlockThinking {
+	if blocks[0].Type != memory.BlockThinking {
 		t.Errorf("block 0: expected thinking, got %s", blocks[0].Type)
 	}
-	if blocks[1].Type != BlockToolUse {
-		t.Errorf("block 1: expected tool_use, got %s", blocks[1].Type)
+	if blocks[1].Type != memory.BlockToolUse || blocks[1].Name != "Read" || blocks[1].Input != `{"path":"/foo"}` {
+		t.Errorf("block 1 malformed: %+v", blocks[1])
 	}
-	if blocks[1].Name != "Read" {
-		t.Errorf("block 1: expected tool name 'Read', got %q", blocks[1].Name)
+	if blocks[2].Type != memory.BlockToolResult || blocks[2].Output != "file contents here" {
+		t.Errorf("block 2 malformed: %+v", blocks[2])
 	}
-	if blocks[1].Input != `{"path":"/foo"}` {
-		t.Errorf("block 1: unexpected input %q", blocks[1].Input)
-	}
-	if blocks[2].Type != BlockToolResult {
-		t.Errorf("block 2: expected tool_result, got %s", blocks[2].Type)
-	}
-	if blocks[2].Output != "file contents here" {
-		t.Errorf("block 2: unexpected output %q", blocks[2].Output)
-	}
-	if blocks[3].Type != BlockText {
+	if blocks[3].Type != memory.BlockText {
 		t.Errorf("block 3: expected text, got %s", blocks[3].Type)
 	}
 }
 
-func TestAccumulatorDelegatesToInner(t *testing.T) {
+func TestAccumulator_DelegatesToInner(t *testing.T) {
 	acc := NewAccumulator()
 	var called int
-	inner := func(event provider.StreamEvent) {
-		called++
-	}
+	inner := func(event provider.StreamEvent) { called++ }
 	cb := acc.OnProgress(inner)
 
 	cb(provider.StreamEvent{Type: "text_delta", Text: "hi"})
@@ -100,31 +89,29 @@ func TestAccumulatorDelegatesToInner(t *testing.T) {
 	}
 }
 
-func TestAccumulatorToolResultTruncation(t *testing.T) {
+func TestAccumulator_ToolResultTruncation(t *testing.T) {
 	acc := NewAccumulator()
 	cb := acc.OnProgress(nil)
 
-	// Generate a large tool result.
-	bigOutput := make([]byte, MaxToolResultBytes+500)
+	bigOutput := make([]byte, memory.MaxToolResultBytes+500)
 	for i := range bigOutput {
 		bigOutput[i] = 'x'
 	}
-
 	cb(provider.StreamEvent{Type: "tool_use", Detail: "Bash"})
 	cb(provider.StreamEvent{Type: "tool_result", Detail: "t1", Text: string(bigOutput)})
 
 	blocks := acc.Blocks()
-	var resultBlock *ContentBlock
-	for _, b := range blocks {
-		if b.Type == BlockToolResult {
-			resultBlock = &b
+	var result *memory.ContentBlock
+	for i := range blocks {
+		if blocks[i].Type == memory.BlockToolResult {
+			result = &blocks[i]
 			break
 		}
 	}
-	if resultBlock == nil {
+	if result == nil {
 		t.Fatal("expected a tool_result block")
 	}
-	if len(resultBlock.Output) > MaxToolResultBytes+10 {
-		t.Errorf("tool result should be truncated, got %d bytes", len(resultBlock.Output))
+	if len(result.Output) > memory.MaxToolResultBytes+10 {
+		t.Errorf("tool result should be truncated, got %d bytes", len(result.Output))
 	}
 }

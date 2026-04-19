@@ -1,11 +1,12 @@
 package comms
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
 
-	"github.com/alamparelli/alf/internal/conversation"
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 // CommandHandler processes a slash command. Returns a text response.
@@ -208,11 +209,14 @@ func CheckForceCommand(text string, tiers []TierInfo) (tierName, remaining strin
 	return "", ""
 }
 
-// newConversation helper rotates conversation ID on the store.
-func newConversation(store *conversation.Store, channel string) string {
+// newConversation helper rotates the active-conv pref for a channel on the
+// memory store and returns the new conv ID.
+func newConversation(store memory.Store, channel string) string {
 	if store == nil {
 		return ""
 	}
-	store.NewConversation(channel)
-	return store.ConvID(channel)
+	ctx := context.Background()
+	newID := memory.NewConvID()
+	_ = store.SetPref(ctx, "active_conv:"+channel, string(newID))
+	return string(newID)
 }

@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alamparelli/alf/internal/conversation"
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 // ChannelID identifies a conversation channel. Format: "tg:12345", "cc:default".
@@ -51,13 +51,13 @@ func (c ChannelID) SessionKey() int64 {
 	return -1
 }
 
-// ConvChannel returns the conversation.Channel constant for this channel ID.
+// ConvChannel returns the memory.Channel constant for this channel ID.
 func (c ChannelID) ConvChannel() string {
 	switch c.Prefix() {
 	case "tg":
-		return conversation.ChannelTelegram
+		return memory.ChannelTelegram
 	case "cc":
-		return conversation.ChannelCC
+		return memory.ChannelCC
 	default:
 		return c.Prefix()
 	}
@@ -125,7 +125,7 @@ type ProcessResult struct {
 	Skills         []string
 	Reaction       string // suggested emoji (extracted from [[react:EMOJI]])
 	IsAgent        bool
-	Blocks         []conversation.ContentBlock
+	Blocks         []memory.ContentBlock
 	Duration       int64  // milliseconds
 	UserMsgID      string // ID of persisted user message
 	AssistantMsgID string // ID of persisted assistant message

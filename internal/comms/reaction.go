@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
@@ -62,11 +61,18 @@ func (e *ChatEngine) React(input ReactInput) (*ReactResult, error) {
 
 // ExtractReactionLearning extracts a behavioral learning from a reaction using conversation context.
 func (e *ChatEngine) ExtractReactionLearning(emoji string, channelID ChannelID) {
-	if e.ConvStore == nil {
+	if e.Memory == nil {
 		return
 	}
 
-	recent := e.ConvStore.Recent(string(channelID), 12)
+	ctxBg := context.Background()
+	// Resolve the active conv for this channel.
+	v, _ := e.Memory.GetPref(ctxBg, "active_conv:"+string(channelID))
+	convID, _ := v.(string)
+	if convID == "" {
+		return
+	}
+	recent, _ := e.Memory.ListMessages(ctxBg, memory.ConvID(convID), memory.ListOpts{Limit: 12, ApplySummary: true})
 	if len(recent) < 2 {
 		return
 	}
@@ -77,7 +83,7 @@ func (e *ChatEngine) ExtractReactionLearning(emoji string, channelID ChannelID) 
 	for _, msg := range recent {
 		var text string
 		for _, b := range msg.Blocks {
-			if b.Type == conversation.BlockText {
+			if b.Type == memory.BlockText {
 				text = b.Text
 				break
 			}

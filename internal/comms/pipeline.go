@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
-	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
@@ -26,48 +24,47 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
 	sessionKey := channelID.SessionKey()
-	// convStoreKey scopes ConvStore per tab for CC (cc:convid), per chat for TG (tg:chatid).
-	convStoreKey := string(channelID)
 
 	// 0. Create request tracer.
 	// If the adapter pre-inserted the user message, reuse its ID so tracer,
-	// ConvStore and ChatDB remain consistent (#310).
+	// and the Memory store remain consistent (#310).
 	userMsgID := msg.PreInsertedUserMsgID
 	if userMsgID == "" {
-		userMsgID = conversation.NewMessageID()
+		userMsgID = string(memory.NewMessageID())
 	}
-	var convID string
-	if e.ConvStore != nil {
-		convID = e.ConvStore.ConvID(convStoreKey)
+	// convID is the unified conversation ID used by the memory store. For CC
+	// callers it is msg.ConvID (tab-scoped). For TG callers it defaults to
+	// the channel-scoped active conv pref.
+	convID := msg.ConvID
+	if convID == "" && e.Memory != nil {
+		v, _ := e.Memory.GetPref(ctx, "active_conv:"+string(channelID))
+		if s, ok := v.(string); ok && s != "" {
+			convID = s
+		} else {
+			newID := memory.NewConvID()
+			_ = e.Memory.SetPref(ctx, "active_conv:"+string(channelID), string(newID))
+			convID = string(newID)
+		}
 	}
 	tracer := trace.New(channelID.Prefix(), convID, userMsgID)
 	ctx = trace.WithContext(ctx, tracer)
 	defer tracer.Flush(e.DataDir)
 
-	// 1. Persist user message to ConvStore (skip if adapter did it).
-	if e.ConvStore != nil && msg.PreInsertedUserMsgID == "" {
-		e.ConvStore.Append(conversation.Message{
-			ID:        userMsgID,
-			ConvID:    convID,
-			Channel:   channel,
-			Role:      "user",
-			Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: msg.DisplayText()}},
-			Timestamp: time.Now(),
-		})
-	}
-
-	// 1a. Persist user message to ChatDB (skip if adapter did it).
-	if e.ChatDB != nil && msg.ConvID != "" && msg.PreInsertedUserMsgID == "" {
-		e.ChatDB.EnsureConversation(msg.ConvID, "", msg.Source)
-		e.ChatDB.InsertMessage(chatdb.Message{
-			ID:      userMsgID,
-			ConvID:  msg.ConvID,
+	// 1. Persist user message to Memory (skip if adapter did it).
+	// Phase-1 parallel write (ChatDB + ConvStore) collapsed into a single
+	// Memory.AppendMessage call — single schema, one write.
+	if e.Memory != nil && msg.PreInsertedUserMsgID == "" && convID != "" {
+		_ = e.Memory.EnsureConv(ctx, memory.ConvID(convID), "", msg.Source)
+		userMem := memory.Message{
 			Role:    "user",
-			Text:    msg.DisplayText(),
-			Source:  msg.Source,
-			ReplyTo: msg.ReplyToMsgID,
-			CreatedAt: time.Now(),
-		})
+			Channel: channel,
+			Content: msg.DisplayText(),
+			Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: msg.DisplayText()}},
+			ReplyTo: memory.MsgID(msg.ReplyToMsgID),
+		}
+		if stored, err := e.Memory.AppendMessage(ctx, memory.ConvID(convID), userMem); err == nil && stored.ID != "" {
+			userMsgID = string(stored.ID)
+		}
 	}
 
 	// 1b. Log incoming message to EventLog for mem-extract.
@@ -97,8 +94,8 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 	lastTier, msgCount := e.Sessions.Context(sessionKey)
 
 	var recentCtx string
-	if e.ConvStore != nil {
-		recentCtx = conversation.BuildRouterContext(e.ConvStore.RecentAll(6), 3)
+	if e.Memory != nil {
+		recentCtx = memory.BuildRouterContext(collectRecentAll(ctx, e.Memory, 6), 3)
 	}
 
 	var route RouteResult
@@ -198,27 +195,20 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 		routeSpan.Tag("direct", "true")
 		routeSpan.End()
 		e.Sessions.TouchContext(sessionKey, "router")
-		routerMsgID := conversation.NewMessageID()
-		// Persist to ConvStore.
-		if e.ConvStore != nil {
-			e.ConvStore.Append(conversation.Message{
-				ID:        routerMsgID,
-				ConvID:    convID,
-				Channel:   channel,
-				Role:      "assistant",
-				Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: route.Response}},
-				Timestamp: time.Now(),
-				Model:     "router",
-				Tier:      "router",
-			})
-		}
-		// Persist to ChatDB.
-		if e.ChatDB != nil && msg.ConvID != "" {
-			e.ChatDB.InsertMessage(chatdb.Message{
-				ID: routerMsgID, ConvID: msg.ConvID, Role: "assistant",
-				Text: route.Response, Source: msg.Source, Model: "router",
-				Tier: "router", CreatedAt: time.Now(),
-			})
+		routerMsgID := string(memory.NewMessageID())
+		// Persist to Memory (unified store replaces parallel ChatDB+ConvStore writes).
+		if e.Memory != nil && convID != "" {
+			asst := memory.Message{
+				Role:    "assistant",
+				Channel: channel,
+				Content: route.Response,
+				Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: route.Response}},
+				Model:   "router",
+				Tier:    "router",
+			}
+			if stored, err := e.Memory.AppendMessage(ctx, memory.ConvID(convID), asst); err == nil && stored.ID != "" {
+				routerMsgID = string(stored.ID)
+			}
 		}
 		e.emit(channelID, OutEvent{Type: "text", Data: map[string]string{"text": route.Response}})
 		if route.React != "" {
@@ -358,12 +348,11 @@ func (e *ChatEngine) applySkillTierOverride(route RouteResult, minTier string) R
 func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierParams, recall RecallResult, convID string, userMsgID string) (*ProcessResult, error) {
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
-	convStoreKey := string(channelID)
 
 	var convCtx string
-	if e.ConvStore != nil {
-		if msgs := e.ConvStore.Recent(convStoreKey, 0); len(msgs) > 0 {
-			convCtx = conversation.BuildRouterContext(msgs, 5)
+	if e.Memory != nil && convID != "" {
+		if msgs, _ := e.Memory.ListMessages(ctx, memory.ConvID(convID), memory.ListOpts{ApplySummary: true}); len(msgs) > 0 {
+			convCtx = memory.BuildRouterContext(msgs, 5)
 		}
 	}
 
@@ -433,30 +422,25 @@ func (e *ChatEngine) processAgent(ctx context.Context, msg InMessage, tp TierPar
 		return nil, fmt.Errorf("agent: %w", orchErr)
 	}
 
-	// Persist agent response.
-	agentMsgID := conversation.NewMessageID()
-	if e.ConvStore != nil {
-		e.ConvStore.Append(conversation.Message{
-			ID:        agentMsgID,
-			ConvID:    convID,
-			Channel:   channel,
-			Role:      "assistant",
-			Blocks:    []conversation.ContentBlock{{Type: conversation.BlockText, Text: orchResult}},
-			Timestamp: time.Now(),
-			Model:     "agent",
-			Tier:      "agent",
-			CostUSD:   orchMeta.TotalCost,
-		})
+	// Persist agent response (collapsed parallel write into Memory.AppendMessage).
+	agentMsgID := string(memory.NewMessageID())
+	if e.Memory != nil && convID != "" {
+		asst := memory.Message{
+			Role:       "assistant",
+			Channel:    channel,
+			Content:    orchResult,
+			Blocks:     []memory.ContentBlock{{Type: memory.BlockText, Text: orchResult}},
+			Model:      "agent",
+			Tier:       "agent",
+			Backend:    tp.Backend,
+			CostUSD:    orchMeta.TotalCost,
+			DurationMs: duration.Milliseconds(),
+		}
+		if stored, err := e.Memory.AppendMessage(ctx, memory.ConvID(convID), asst); err == nil && stored.ID != "" {
+			agentMsgID = string(stored.ID)
+		}
 		// Trigger progressive summarization on the agent path too (mirrors processStandard).
-		e.maybeSummarizeAsync(channel, convID)
-	}
-	if e.ChatDB != nil && msg.ConvID != "" {
-		e.ChatDB.InsertMessage(chatdb.Message{
-			ID: agentMsgID, ConvID: msg.ConvID, Role: "assistant",
-			Text: orchResult, Source: msg.Source, Model: "agent",
-			Tier: "agent", CostUSD: orchMeta.TotalCost,
-			DurationMs: duration.Milliseconds(), CreatedAt: time.Now(),
-		})
+		e.maybeSummarizeAsync(ctx, channel, convID)
 	}
 
 	e.emit(channelID, OutEvent{Type: "text", Data: map[string]string{"text": orchResult}})
@@ -501,7 +485,6 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	channelID := msg.ChannelID
 	channel := channelID.ConvChannel()
 	sessionKey := channelID.SessionKey()
-	convStoreKey := string(channelID)
 
 	// Build system prompts.
 	isAPITier := tp.Backend != "" && tp.Backend != "cli"
@@ -623,22 +606,23 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	}
 
 	// Inject conversation history.
-	if e.ConvStore != nil {
-		convMsgs := conversation.BuildContext(e.ConvStore.Recent(convStoreKey, 0), conversation.DefaultMaxMessages)
+	if e.Memory != nil && convID != "" {
+		recent, _ := e.Memory.ListMessages(ctx, memory.ConvID(convID), memory.ListOpts{ApplySummary: true})
+		convMsgs := memory.BuildContext(recent, memory.DefaultMaxMessages)
 		if isAPITier || params.ResumeID == "" {
 			if isAPITier {
 				// Always flatten to text-only: FlattenForOpenAI collapses multi-turn
 				// toolloops into a single assistant message with multiple tool_calls,
 				// which is semantically wrong (IDs span different model turns) and
 				// causes JSON parse errors on some providers (e.g. SiliconFlow).
-				oaiMsgs := conversation.FlattenTextOnly(convMsgs)
+				oaiMsgs := memory.FlattenTextOnly(convMsgs)
 				ctxMsgs := make([]provider.ContextMessage, len(oaiMsgs))
 				for i, m := range oaiMsgs {
 					ctxMsgs[i] = provider.ContextMessage{Role: m.Role, Content: m.Content}
 				}
 				params.ConvMessages = ctxMsgs
 			} else {
-				if histPrompt := conversation.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
+				if histPrompt := memory.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
 					params.SystemPrompts = append(params.SystemPrompts, histPrompt)
 				}
 			}
@@ -668,10 +652,10 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		}
 	}
 
-	var acc *conversation.Accumulator
+	var acc *Accumulator
 	progressFn := rawOnProgress
-	if e.ConvStore != nil {
-		acc = conversation.NewAccumulator()
+	if e.Memory != nil {
+		acc = NewAccumulator()
 		progressFn = acc.OnProgress(rawOnProgress)
 	}
 
@@ -710,14 +694,15 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		log.Printf("[comms] session %s failed (%v), starting fresh", resumeID, err)
 		e.Sessions.Archive(sessionKey)
 		params.ResumeID = ""
-		if e.ConvStore != nil {
-			convMsgs := conversation.BuildContext(e.ConvStore.Recent(convStoreKey, 0), conversation.DefaultMaxMessages)
-			if histPrompt := conversation.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
+		if e.Memory != nil && convID != "" {
+			recent, _ := e.Memory.ListMessages(ctx, memory.ConvID(convID), memory.ListOpts{ApplySummary: true})
+			convMsgs := memory.BuildContext(recent, memory.DefaultMaxMessages)
+			if histPrompt := memory.FormatAsSystemPrompt(convMsgs, ctxWeight); histPrompt != "" {
 				params.SystemPrompts = append(params.SystemPrompts, histPrompt)
 			}
 		}
 		if acc != nil {
-			acc = conversation.NewAccumulator()
+			acc = NewAccumulator()
 			progressFn = acc.OnProgress(rawOnProgress)
 		}
 		result, err = prov.Invoke(ctx, prompt, params, progressFn)
@@ -813,7 +798,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			}
 
 			if acc != nil {
-				acc = conversation.NewAccumulator()
+				acc = NewAccumulator()
 				progressFn = acc.OnProgress(rawOnProgress)
 			}
 
@@ -847,12 +832,15 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			"text":  notice,
 			"level": "error",
 		}})
-		// Persist error notice to ChatDB so it survives page reload.
-		if e.ChatDB != nil && msg.ConvID != "" {
-			e.ChatDB.InsertMessage(chatdb.Message{
-				ID: conversation.NewMessageID(), ConvID: msg.ConvID, Role: "system",
-				Text: notice, Source: msg.Source, CreatedAt: time.Now(),
-			})
+		// Persist error notice to Memory so it survives page reload.
+		if e.Memory != nil && convID != "" {
+			sysMsg := memory.Message{
+				Role:    "system",
+				Channel: channel,
+				Content: notice,
+				Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: notice}},
+			}
+			_, _ = e.Memory.AppendMessage(ctx, memory.ConvID(convID), sysMsg)
 		}
 		return nil, fmt.Errorf("provider: %w", err)
 	}
@@ -891,65 +879,41 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		}
 	}
 
-	// Persist assistant message.
-	assistantMsgID := conversation.NewMessageID()
-	if e.ConvStore != nil {
-		var blocks []conversation.ContentBlock
+	// Persist assistant message (collapsed parallel write into Memory.AppendMessage).
+	// Blocks preserve temporal order so the frontend can split them into
+	// individual bubbles for display.
+	assistantMsgID := string(memory.NewMessageID())
+	if e.Memory != nil && convID != "" {
+		var blocks []memory.ContentBlock
 		if acc != nil {
 			blocks = acc.Blocks()
 			for i := range blocks {
-				if blocks[i].Type == conversation.BlockText {
+				if blocks[i].Type == memory.BlockText {
 					blocks[i].Text = stripReactTags(blocks[i].Text)
 				}
 			}
 		}
 		if len(blocks) == 0 {
-			blocks = []conversation.ContentBlock{{Type: conversation.BlockText, Text: cleanText}}
+			blocks = []memory.ContentBlock{{Type: memory.BlockText, Text: cleanText}}
 		}
-		e.ConvStore.Append(conversation.Message{
-			ID:        assistantMsgID,
-			ConvID:    convID,
-			Channel:   channel,
-			Role:      "assistant",
-			Blocks:    blocks,
-			Timestamp: time.Now(),
-			Model:     result.Model,
-			Tier:      route.Tier,
-			Backend:   tp.Backend,
-			CostUSD:   result.CostUSD,
-			SessionID: result.SessionID,
-		})
+		asst := memory.Message{
+			Role:       "assistant",
+			Channel:    channel,
+			Content:    cleanText,
+			Blocks:     blocks,
+			Model:      result.Model,
+			Tier:       route.Tier,
+			Backend:    tp.Backend,
+			CostUSD:    result.CostUSD,
+			SessionID:  result.SessionID,
+			DurationMs: duration.Milliseconds(),
+		}
+		if stored, err := e.Memory.AppendMessage(ctx, memory.ConvID(convID), asst); err == nil && stored.ID != "" {
+			assistantMsgID = string(stored.ID)
+		}
 		// Trigger progressive summarization if the conversation has grown.
 		// Runs in a background goroutine; does not block the current turn.
-		e.maybeSummarizeAsync(channel, convID)
-	}
-	// Persist to ChatDB with all content blocks in temporal order.
-	// The frontend splits blocks into individual bubbles for display.
-	if e.ChatDB != nil && msg.ConvID != "" {
-		var allBlocks []conversation.ContentBlock
-		if acc != nil {
-			allBlocks = acc.Blocks()
-		}
-
-		var dbBlocks []chatdb.ContentBlock
-		for i, b := range allBlocks {
-			text := b.Text
-			if b.Type == conversation.BlockText {
-				text = stripReactTags(text)
-			}
-			dbBlocks = append(dbBlocks, chatdb.ContentBlock{
-				BlockIndex: i, BlockType: string(b.Type),
-				Text: text, Name: b.Name, Input: b.Input,
-				ToolID: b.ToolID, Output: b.Output,
-			})
-		}
-		e.ChatDB.InsertMessage(chatdb.Message{
-			ID: assistantMsgID, ConvID: msg.ConvID, Role: "assistant",
-			Text: cleanText, Source: msg.Source, Model: result.Model,
-			Tier: route.Tier, CostUSD: result.CostUSD, SessionID: result.SessionID,
-			DurationMs: duration.Milliseconds(), CreatedAt: time.Now(),
-			Blocks: dbBlocks,
-		})
+		e.maybeSummarizeAsync(ctx, channel, convID)
 	}
 
 	// Emit text and done events.
@@ -975,11 +939,14 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			"session_id": result.SessionID,
 			"tier":       route.Tier,
 		}})
-		if e.ChatDB != nil && msg.ConvID != "" {
-			e.ChatDB.InsertMessage(chatdb.Message{
-				ID: conversation.NewMessageID(), ConvID: msg.ConvID, Role: "system",
-				Text: fullNotice, Source: msg.Source, CreatedAt: time.Now(),
-			})
+		if e.Memory != nil && convID != "" {
+			sysMsg := memory.Message{
+				Role:    "system",
+				Channel: channel,
+				Content: fullNotice,
+				Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: fullNotice}},
+			}
+			_, _ = e.Memory.AppendMessage(ctx, memory.ConvID(convID), sysMsg)
 		}
 		log.Printf("[comms] turn limit hit on tier %q (session %s) — resumable", route.Tier, sessShort)
 	}
@@ -1019,9 +986,18 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		e.OnMessage(result.SessionID)
 	}
 
-	var resultBlocks []conversation.ContentBlock
+	var resultBlocks []memory.ContentBlock
 	if acc != nil {
-		resultBlocks = acc.Blocks()
+		for _, b := range acc.Blocks() {
+			resultBlocks = append(resultBlocks, memory.ContentBlock{
+				Type:   memory.BlockType(string(b.Type)),
+				Text:   b.Text,
+				Name:   b.Name,
+				Input:  b.Input,
+				ToolID: b.ToolID,
+				Output: b.Output,
+			})
+		}
 	}
 
 	return &ProcessResult{
@@ -1089,6 +1065,37 @@ func stripReactTags(text string) string {
 		}
 		text = text[:start] + text[start+end+2:]
 	}
+}
+
+// collectRecentAll merges the last n messages across every conversation in
+// the store, sorted chronologically. Replaces conversation.Store.RecentAll.
+// Used by the router to give the classifier a shared cross-conv context.
+func collectRecentAll(ctx context.Context, s memory.Store, n int) []memory.Message {
+	if s == nil || n <= 0 {
+		return nil
+	}
+	convs, err := s.ListConvs(ctx, memory.ConvFilter{})
+	if err != nil || len(convs) == 0 {
+		return nil
+	}
+	var all []memory.Message
+	for _, c := range convs {
+		msgs, err := s.ListMessages(ctx, c.ID, memory.ListOpts{ApplySummary: true})
+		if err != nil {
+			continue
+		}
+		all = append(all, msgs...)
+	}
+	// Sort by CreatedAt ascending; stable for equal timestamps.
+	for i := 1; i < len(all); i++ {
+		for j := i; j > 0 && all[j-1].CreatedAt > all[j].CreatedAt; j-- {
+			all[j-1], all[j] = all[j], all[j-1]
+		}
+	}
+	if n > 0 && len(all) > n {
+		all = all[len(all)-n:]
+	}
+	return all
 }
 
 // toolExecAdapter bridges tooling.Executor to provider.ToolExecutor.

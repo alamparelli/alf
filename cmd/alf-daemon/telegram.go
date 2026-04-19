@@ -17,9 +17,9 @@ import (
 
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/comms"
-	"github.com/alamparelli/alf/internal/conversation"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
@@ -484,7 +484,7 @@ func extractReaction(text string) (string, string) {
 }
 
 // handleReaction processes an emoji reaction on an Alf message.
-func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, contextDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider, memDB *memstore.Store, convStore *conversation.Store, engine *comms.ChatEngine) {
+func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, contextDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider, memDB *memstore.Store, memStore memory.Store, engine *comms.ChatEngine) {
 	// Log the reaction and update live feedback.
 	mood.LogReaction(dataDir, emoji, messageID)
 	mood.UpdateLiveFeedback(contextDir, dataDir)

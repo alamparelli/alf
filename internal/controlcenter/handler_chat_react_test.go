@@ -1,26 +1,25 @@
 package controlcenter
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/alamparelli/alf/internal/chatdb"
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 func TestChatReactHandler_ValidReaction(t *testing.T) {
 	svc := newTestChatService(t)
 
-	// Add a message to react to.
-	svc.ChatDB.EnsureConversation("test", "", "cc")
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "msg-1", ConvID: "test", Role: "assistant", Text: "hello",
-	})
+	// Add a message to react to and capture the store-assigned ID.
+	msgID := appendTestMessage(t, svc, "test", "assistant", "hello")
 
 	h := &ChatReactHandler{Service: svc}
-	body := `{"msg_id":"msg-1","emoji":"👍"}`
+	body := fmt.Sprintf(`{"msg_id":%q,"emoji":"👍"}`, msgID)
 	req := httptest.NewRequest("POST", "/api/chat/react", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -94,20 +93,18 @@ func TestChatReactHandler_MethodNotAllowed(t *testing.T) {
 
 func TestChatReactHandler_ReactionStored(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatDB.EnsureConversation("test", "", "cc")
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "msg-react", ConvID: "test", Role: "assistant", Text: "test",
-	})
+	msgID := appendTestMessage(t, svc, "test", "assistant", "test")
 
 	h := &ChatReactHandler{Service: svc}
-	body := `{"msg_id":"msg-react","emoji":"🔥"}`
+	body := fmt.Sprintf(`{"msg_id":%q,"emoji":"🔥"}`, msgID)
 	req := httptest.NewRequest("POST", "/api/chat/react", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	// Verify reaction was stored in chat DB.
-	msg, _ := svc.ChatDB.Get("msg-react")
+	// Verify reaction was stored in the memory store.
+	ctx := context.Background()
+	msg, _ := svc.Memory.GetMessage(ctx, memory.ConvID("test"), memory.MsgID(msgID))
 	if msg == nil {
 		t.Fatal("message not found")
 	}

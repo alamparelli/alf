@@ -7,16 +7,16 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/comms"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/firewall"
-	"github.com/alamparelli/alf/internal/tooling"
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
 // extractorAdapter bridges provider.CLIProvider to memstore.ExtractorProvider,
@@ -255,19 +255,22 @@ func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
 	return snap
 }
 
-// schedulerChatLogger adapts chatdb.DB to the scheduler.ChatLogger interface.
+// schedulerChatLogger adapts memory.Store to the scheduler.ChatLogger interface.
 type schedulerChatLogger struct {
-	db *chatdb.DB
+	mem memory.Store
 }
 
 func (l *schedulerChatLogger) LogScheduledMessage(text, tier, jobName string) {
-	l.db.EnsureConversation("_scheduler", "", "scheduler")
-	l.db.InsertMessage(chatdb.Message{
-		ID:        cc.NewMessageID(),
-		ConvID:    "_scheduler",
+	if l.mem == nil {
+		return
+	}
+	ctx := context.Background()
+	_ = l.mem.EnsureConv(ctx, "_scheduler", "", "scheduler")
+	_, _ = l.mem.AppendMessage(ctx, "_scheduler", memory.Message{
 		Role:      "assistant",
-		Text:      text,
-		Source:    "scheduler",
+		Channel:   "scheduler",
+		Content:   text,
+		Blocks:    []memory.ContentBlock{{Type: memory.BlockText, Text: text}},
 		Tier:      tier,
 		SessionID: "scheduled:" + jobName,
 	})
@@ -276,22 +279,25 @@ func (l *schedulerChatLogger) LogScheduledMessage(text, tier, jobName string) {
 // schedulerCCNotifier pushes schedule notifications to the Control Center chat
 // and emits an SSE event so the frontend can show a toast/sound.
 type schedulerCCNotifier struct {
-	db     *chatdb.DB
+	mem    memory.Store
 	broker *cc.EventBroker
 }
 
 func (n *schedulerCCNotifier) Notify(text string) {
-	convID := n.db.LatestConversationID("cc")
+	if n.mem == nil {
+		return
+	}
+	ctx := context.Background()
+	convID, _ := n.mem.LatestConvID(ctx, "cc")
 	if convID == "" {
 		convID = "_system"
-		n.db.EnsureConversation(convID, "", "cc")
+		_ = n.mem.EnsureConv(ctx, convID, "", "cc")
 	}
-	n.db.InsertMessage(chatdb.Message{
-		ID:        cc.NewMessageID(),
-		ConvID:    convID,
+	_, _ = n.mem.AppendMessage(ctx, convID, memory.Message{
 		Role:      "assistant",
-		Text:      text,
-		Source:    "scheduler",
+		Channel:   "scheduler",
+		Content:   text,
+		Blocks:    []memory.ContentBlock{{Type: memory.BlockText, Text: text}},
 		Tier:      "scheduler",
 		SessionID: "scheduler:notification",
 	})

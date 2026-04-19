@@ -16,9 +16,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/comms"
-	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/secrets"
@@ -46,6 +44,37 @@ import (
 )
 
 var version = "dev"
+
+// collectRecentAllMem merges the last n messages across every conversation
+// in the memory store, sorted chronologically. Replacement for the previous
+// conversation.Store.RecentAll in the daemon's classifier wiring (#336).
+func collectRecentAllMem(s memory.Store, n int) []memory.Message {
+	if s == nil || n <= 0 {
+		return nil
+	}
+	ctx := context.Background()
+	convs, err := s.ListConvs(ctx, memory.ConvFilter{})
+	if err != nil || len(convs) == 0 {
+		return nil
+	}
+	var all []memory.Message
+	for _, c := range convs {
+		msgs, err := s.ListMessages(ctx, c.ID, memory.ListOpts{ApplySummary: true})
+		if err != nil {
+			continue
+		}
+		all = append(all, msgs...)
+	}
+	for i := 1; i < len(all); i++ {
+		for j := i; j > 0 && all[j-1].CreatedAt > all[j].CreatedAt; j-- {
+			all[j-1], all[j] = all[j], all[j-1]
+		}
+	}
+	if n > 0 && len(all) > n {
+		all = all[len(all)-n:]
+	}
+	return all
+}
 
 func main() {
 	// Ensure daemon-created files are group-writable (umask 002 = rwxrwxr-x).
@@ -433,16 +462,20 @@ func main() {
 	alfMsgIDs := newRingBuffer(200)
 	chatHistory := newChatHistoryBuffer(10) // last 10 exchanges per chat
 
-	// Chat message store (SQLite — replaces JSONL ring buffer).
-	chatDB, err := chatdb.New(dataDir)
-	if err != nil {
-		log.Fatalf("chatdb: %v", err)
+	// Unified memory store: replaces chatdb + conversation (see #336).
+	// One-shot import of any legacy dataDir/logs/chat.db happens BEFORE we
+	// open memory.db — migrateChatDBToMemoryDB refuses to run if memory.db
+	// already has messages, so pre-existing state is always safe.
+	// DEPRECATED: migration call planned for removal in v0.7.14
+	// (see cmd/alf-daemon/memorymigrate.go::migrationTargetRemovalVersion).
+	if err := migrateChatDBToMemoryDB(dataDir); err != nil {
+		log.Fatalf("memory migration: %v", err)
 	}
-	defer chatDB.Close()
-	// One-time migration from legacy JSONL format.
-	chatDB.MigrateFromJSONL(filepath.Join(dataDir, "logs", "chat_messages.jsonl"))
-	// Unified conversation store (rich messages with content blocks).
-	convStore := conversation.NewStore(dataDir)
+	memStore, err := memory.NewSQLiteStore(dataDir)
+	if err != nil {
+		log.Fatalf("memory: %v", err)
+	}
+	defer memStore.Close()
 
 	// Provider: spawn-per-call Claude CLI for responses.
 	// Process isolation: daemon runs as alfd (uid 1001), subprocess runs as alf (uid 1000).
@@ -597,7 +630,7 @@ func main() {
 	// Chat service for mobile app API (shares Claude invocation with Telegram bot).
 	classifyFn := func(message, lastTier string, msgCount int) cc.RouteResult {
 		// Build recent context from conversation history (cross-session for continuity).
-		recentCtx := conversation.BuildRouterContext(convStore.RecentAll(6), 3)
+		recentCtx := memory.BuildRouterContext(collectRecentAllMem(memStore, 6), 3)
 		rr := classifyMessageFull(message, tierStore.Current(), lastTier, msgCount, recentCtx)
 		return cc.RouteResult{
 			Tier:     rr.Tier,
@@ -606,7 +639,7 @@ func main() {
 			React:    rr.React,
 		}
 	}
-	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatDB, transcriber, classifyFn, router.ResolveModel, cliProvider)
+	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, memStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
 	toolRegistry := tooling.NewRegistry(dataDir)
 	nativeTools := []tooling.NativeTool{
 		tooling.BashNativeTool{DataDir: dataDir},
@@ -675,8 +708,7 @@ func main() {
 		ConfigDir:      configDir,
 		ContextDir:     contextDir,
 		Sessions:       chatSessions,
-		ConvStore:      convStore,
-		ChatDB:         chatDB,
+		Memory:         memStore,
 		EventLog:       eventLog,
 		TierStore:      &commsTierStore{ts: tierStore},
 		SkillStore:     skillStore,
@@ -698,20 +730,19 @@ func main() {
 	})
 	// Initialize all optional dependencies in one place (issue #91).
 	var recaller cc.MemoryRecaller
-	var memStore cc.MemoryStorer
+	var memRecallStore cc.MemoryStorer
 	if memDB != nil {
 		recaller = &memStoreRecaller{store: memDB}
-		memStore = memDB
+		memRecallStore = memDB
 	}
 	chatService.Init(cc.ChatServiceOpts{
 		Registry:       registry,
 		SkillStore:     skillStore,
 		Orchestrator:   orch,
-		ConvStore:      convStore,
 		ToolRegistry:   toolRegistry,
 		ToolExecutor:   toolExecutor,
 		Recaller:       recaller,
-		MemStore:       memStore,
+		MemStore:       memRecallStore,
 		BackendConfigs: func() map[string]cc.BackendConfig { return cfg.Backends },
 	})
 	chatService.SetEngine(commEngine)
@@ -753,13 +784,13 @@ func main() {
 		if convID == "" {
 			convID = "_system"
 		}
-		chatDB.EnsureConversation(convID, "", "cc")
-		chatDB.InsertMessage(chatdb.Message{
-			ID:        cc.NewMessageID(),
-			ConvID:    convID,
+		ctx := context.Background()
+		_ = memStore.EnsureConv(ctx, memory.ConvID(convID), "", "cc")
+		_, _ = memStore.AppendMessage(ctx, memory.ConvID(convID), memory.Message{
 			Role:      "assistant",
-			Text:      text,
-			Source:    "cc",
+			Channel:   "cc",
+			Content:   text,
+			Blocks:    []memory.ContentBlock{{Type: memory.BlockText, Text: text}},
 			Tier:      "notify",
 			SessionID: "signal:notify",
 		})
@@ -1057,12 +1088,12 @@ func main() {
 		ContextDir:   contextDir,
 		ChatID:       parsedChatID,
 		TG:           tg,
-		CC:           &schedulerCCNotifier{db: chatDB, broker: eventBroker},
+		CC:           &schedulerCCNotifier{mem: memStore, broker: eventBroker},
 		Provider:     &schedulerProvider{r: registry},
 		TierStore:    &schedulerTierStore{ts: tierStore},
 		SkillStore:   &schedulerSkillStore{s: skillStore},
 		Orchestrator: &schedulerOrchestrator{o: orch},
-		ChatLogger:   &schedulerChatLogger{db: chatDB},
+		ChatLogger:   &schedulerChatLogger{mem: memStore},
 		EventLog:       eventLog,
 		ToolErrors:     toolErrorJournal,
 		CronPath:       filepath.Join(configDir, "cron.json"),
@@ -1563,7 +1594,7 @@ func main() {
 				}
 				emoji := mr.NewReaction[0].Emoji
 				log.Printf("← reaction %s on msg %d", emoji, mr.MessageID)
-				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, contextDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider, memDB, convStore, commEngine)
+				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, contextDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider, memDB, memStore, commEngine)
 				continue
 			}
 

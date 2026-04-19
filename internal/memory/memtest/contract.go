@@ -75,7 +75,7 @@ func testAppendListOrder(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
 	for _, role := range []string{"user", "assistant", "user"} {
-		if err := s.AppendMessage(ctx, "c1", memory.Message{Role: role, Content: role}); err != nil {
+		if _, err := s.AppendMessage(ctx, "c1", memory.Message{Role: role, Content: role}); err != nil {
 			t.Fatalf("AppendMessage: %v", err)
 		}
 	}
@@ -106,8 +106,8 @@ func testAppendListOrder(t *testing.T, factory Factory) {
 func testConvIsolation(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
-	_ = s.AppendMessage(ctx, "convA", memory.Message{Role: "user", Content: "A"})
-	_ = s.AppendMessage(ctx, "convB", memory.Message{Role: "user", Content: "B"})
+	_, _ = s.AppendMessage(ctx,"convA", memory.Message{Role: "user", Content: "A"})
+	_, _ = s.AppendMessage(ctx,"convB", memory.Message{Role: "user", Content: "B"})
 	a, _ := s.ListMessages(ctx, "convA", memory.ListOpts{})
 	b, _ := s.ListMessages(ctx, "convB", memory.ListOpts{})
 	if len(a) != 1 || a[0].Content != "A" {
@@ -133,7 +133,7 @@ func testListLimit(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
-		_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "m"})
+		_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user", Content: "m"})
 	}
 	msgs, err := s.ListMessages(ctx, "c", memory.ListOpts{Limit: 2})
 	if err != nil {
@@ -148,7 +148,7 @@ func testListAfter(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
 	for i := 0; i < 4; i++ {
-		_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "m"})
+		_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user", Content: "m"})
 	}
 	all, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
 	mid := all[1].ID
@@ -170,7 +170,7 @@ func testListBefore(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
 	for i := 0; i < 4; i++ {
-		_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "m"})
+		_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user", Content: "m"})
 	}
 	all, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
 	mid := all[2].ID
@@ -192,7 +192,7 @@ func testListAfterBefore(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
-		_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "m"})
+		_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user", Content: "m"})
 	}
 	all, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
 	msgs, err := s.ListMessages(ctx, "c", memory.ListOpts{After: all[0].ID, Before: all[4].ID})
@@ -218,8 +218,8 @@ func testSummarizeEmpty(t *testing.T, factory Factory) {
 func testSummarizeNonEmpty(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
-	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "hi"})
-	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "assistant", Content: "hello"})
+	_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user", Content: "hi"})
+	_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "assistant", Content: "hello"})
 	sum, err := s.Summarize(ctx, "c")
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
@@ -237,7 +237,7 @@ func testSummarizeNonEmpty(t *testing.T, factory Factory) {
 
 func testAppendEmptyConv(t *testing.T, factory Factory) {
 	s := factory()
-	err := s.AppendMessage(context.Background(), "", memory.Message{Role: "user", Content: "x"})
+	_, err := s.AppendMessage(context.Background(), "", memory.Message{Role: "user", Content: "x"})
 	if err == nil {
 		t.Errorf("want error on empty convID, got nil")
 	}
@@ -400,7 +400,7 @@ func testAppendAssignsSeq(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "m"})
+		_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user", Content: "m"})
 	}
 	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
 	if len(msgs) != 3 {
@@ -438,7 +438,7 @@ func testAppendRichMessage(t *testing.T, factory Factory) {
 		SessionID:  "sess-1",
 		ReplyTo:    memory.MsgID("prev-id"),
 	}
-	if err := s.AppendMessage(ctx, "c", in); err != nil {
+	if _, err := s.AppendMessage(ctx, "c", in); err != nil {
 		t.Fatalf("AppendMessage: %v", err)
 	}
 	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
@@ -468,8 +468,8 @@ func testAppendRichMessage(t *testing.T, factory Factory) {
 func testGetMessageScoped(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
-	_ = s.AppendMessage(ctx, "a", memory.Message{Role: "user", Content: "from-a"})
-	_ = s.AppendMessage(ctx, "b", memory.Message{Role: "user", Content: "from-b"})
+	_, _ = s.AppendMessage(ctx,"a", memory.Message{Role: "user", Content: "from-a"})
+	_, _ = s.AppendMessage(ctx,"b", memory.Message{Role: "user", Content: "from-b"})
 
 	aMsgs, _ := s.ListMessages(ctx, "a", memory.ListOpts{})
 	got, err := s.GetMessage(ctx, "a", aMsgs[0].ID)
@@ -500,7 +500,7 @@ func testGetMessageUnknown(t *testing.T, factory Factory) {
 func testAddReactionIdempotent(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
-	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user"})
 	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
 	id := msgs[0].ID
 
@@ -539,7 +539,7 @@ func testAppendSummaryApplies(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "old"})
+		_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user", Content: "old"})
 	}
 	all, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
 	var covered []memory.MsgID
@@ -569,7 +569,7 @@ func testAppendSummaryApplies(t *testing.T, factory Factory) {
 func testAppendSummaryEmpty(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
-	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user"})
 	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
 	before := len(msgs)
 	// Empty text → no-op.
@@ -585,8 +585,8 @@ func testAppendSummaryEmpty(t *testing.T, factory Factory) {
 func testLatestSummaryCovered(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
-	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
-	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user"})
+	_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user"})
 	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
 	firstTwo := []memory.MsgID{msgs[0].ID, msgs[1].ID}
 
@@ -608,8 +608,8 @@ func testLatestSummaryCovered(t *testing.T, factory Factory) {
 func testListApplyFalse(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
-	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
-	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user"})
+	_, _ = s.AppendMessage(ctx,"c", memory.Message{Role: "user"})
 	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
 	_ = s.AppendSummary(ctx, "c", "sum", []memory.MsgID{msgs[0].ID})
 
@@ -687,8 +687,8 @@ func testConvListExcludesArchived(t *testing.T, factory Factory) {
 func testConvDeleteCascades(t *testing.T, factory Factory) {
 	s := factory()
 	ctx := context.Background()
-	_ = s.AppendMessage(ctx, "a", memory.Message{Role: "user", Content: "kept-or-gone"})
-	_ = s.AppendMessage(ctx, "b", memory.Message{Role: "user", Content: "kept"})
+	_, _ = s.AppendMessage(ctx,"a", memory.Message{Role: "user", Content: "kept-or-gone"})
+	_, _ = s.AppendMessage(ctx,"b", memory.Message{Role: "user", Content: "kept"})
 	if err := s.DeleteConv(ctx, "a"); err != nil {
 		t.Fatalf("DeleteConv: %v", err)
 	}
@@ -709,9 +709,9 @@ func testLatestConvID(t *testing.T, factory Factory) {
 	_ = s.EnsureConv(ctx, "cc-new", "", memory.ChannelCC)
 	_ = s.EnsureConv(ctx, "tg-1", "", memory.ChannelTelegram)
 	// cc-old gets a message, then cc-new, then tg-1.
-	_ = s.AppendMessage(ctx, "cc-old", memory.Message{Role: "user"})
-	_ = s.AppendMessage(ctx, "tg-1", memory.Message{Role: "user"})
-	_ = s.AppendMessage(ctx, "cc-new", memory.Message{Role: "user"})
+	_, _ = s.AppendMessage(ctx,"cc-old", memory.Message{Role: "user"})
+	_, _ = s.AppendMessage(ctx,"tg-1", memory.Message{Role: "user"})
+	_, _ = s.AppendMessage(ctx,"cc-new", memory.Message{Role: "user"})
 
 	ccLatest, _ := s.LatestConvID(ctx, memory.ChannelCC)
 	if ccLatest != "cc-new" {
@@ -737,7 +737,7 @@ func testCtxCancel(t *testing.T, factory Factory) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "x"}); err == nil {
+	if _, err := s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "x"}); err == nil {
 		t.Errorf("AppendMessage with canceled ctx should return ctx.Err()")
 	}
 	if _, err := s.ListMessages(ctx, "c", memory.ListOpts{}); err == nil {

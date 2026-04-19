@@ -1,11 +1,12 @@
 package comms
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/alamparelli/alf/internal/conversation"
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/session"
 )
 
@@ -169,18 +170,22 @@ func TestNewConversation_NilStore(t *testing.T) {
 }
 
 func TestNewConversation_RotatesAndReturnsID(t *testing.T) {
-	store := conversation.NewStore(t.TempDir())
-	_ = store.NewConversation("tg") // seed with initial id
-	first := store.ConvID("tg")
+	store := memory.NewInMem()
+	ctx := context.Background()
+	// Seed an initial active-conv pref so rotation has an "old" value.
+	_ = store.SetPref(ctx, "active_conv:tg", "conv-seed")
+	first, _ := store.GetPref(ctx, "active_conv:tg")
+	firstStr, _ := first.(string)
 
 	got := newConversation(store, "tg")
 	if got == "" {
 		t.Fatal("expected non-empty conv id")
 	}
-	if got == first {
+	if got == firstStr {
 		t.Errorf("expected rotated id, got same as before: %q", got)
 	}
-	if store.ConvID("tg") != got {
-		t.Errorf("store's ConvID should match the returned value")
+	cur, _ := store.GetPref(ctx, "active_conv:tg")
+	if s, _ := cur.(string); s != got {
+		t.Errorf("active_conv pref should match the returned value; got %v want %q", s, got)
 	}
 }

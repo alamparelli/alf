@@ -209,12 +209,12 @@ func (s *InMem) LatestConvID(ctx context.Context, channel Channel) (ConvID, erro
 	return bestID, nil
 }
 
-func (s *InMem) AppendMessage(ctx context.Context, convID ConvID, msg Message) error {
+func (s *InMem) AppendMessage(ctx context.Context, convID ConvID, msg Message) (Message, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return Message{}, err
 	}
 	if convID == "" {
-		return errors.New("memory: AppendMessage: empty convID")
+		return Message{}, errors.New("memory: AppendMessage: empty convID")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -236,7 +236,7 @@ func (s *InMem) AppendMessage(ctx context.Context, convID ConvID, msg Message) e
 	c.lastWriteOrder = n
 
 	s.messages[convID] = append(s.messages[convID], msg)
-	return nil
+	return msg, nil
 }
 
 func (s *InMem) GetMessage(ctx context.Context, convID ConvID, msgID MsgID) (*Message, error) {
@@ -387,12 +387,13 @@ func (s *InMem) AppendSummary(ctx context.Context, convID ConvID, text string, c
 	}
 	copied := make([]MsgID, len(coveredIDs))
 	copy(copied, coveredIDs)
-	return s.AppendMessage(ctx, convID, Message{
+	_, err := s.AppendMessage(ctx, convID, Message{
 		Role:       RoleSummary,
 		Content:    text,
 		Blocks:     []ContentBlock{{Type: BlockSummary, Text: text}},
 		CoveredIDs: copied,
 	})
+	return err
 }
 
 func (s *InMem) LatestSummaryCovered(ctx context.Context, convID ConvID) ([]MsgID, error) {

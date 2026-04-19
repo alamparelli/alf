@@ -1,6 +1,7 @@
 package controlcenter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alamparelli/alf/internal/chatdb"
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 // ChatHandler handles POST /api/chat, GET /api/chat (history), DELETE /api/chat (new session).
@@ -103,8 +104,8 @@ func (h *ChatConversationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			respondError(w, http.StatusBadRequest, "id required")
 			return
 		}
-		if h.Service.ChatDB != nil {
-			h.Service.ChatDB.EnsureConversation(req.ID, req.Title, "cc")
+		if h.Service.Memory != nil {
+			_ = h.Service.Memory.EnsureConv(context.Background(), memory.ConvID(req.ID), req.Title, "cc")
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true, "id": req.ID})
 	default:
@@ -170,12 +171,13 @@ func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			respondError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		if h.Service.ChatDB != nil {
-			h.Service.ChatDB.UpdateConversation(convID, req.Title)
+		if h.Service.Memory != nil {
+			_ = h.Service.Memory.UpdateConvTitle(context.Background(), memory.ConvID(convID), req.Title)
 		}
 		respondOK(w)
 	case http.MethodDelete:
-		if h.Service.ChatDB != nil {
+		if h.Service.Memory != nil {
+			ctx := context.Background()
 			// Clean up expired media files before archiving.
 			retentionDays := 7
 			if h.ConfigStore != nil {
@@ -183,15 +185,24 @@ func (h *ChatConversationHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 					retentionDays = cfg.MediaRetentionDays
 				}
 			}
-			cutoff := time.Now().AddDate(0, 0, -retentionDays)
-			expired := h.Service.ChatDB.ExpiredMediaForConversation(convID, cutoff)
-			for _, ref := range expired {
-				if ref.FilePath != "" {
-					os.Remove(ref.FilePath)
+			cutoff := time.Now().AddDate(0, 0, -retentionDays).UnixMilli()
+			// Walk messages to find expired media (memory.Store does not
+			// expose a dedicated media-cleanup query; list and filter in code).
+			msgs, _ := h.Service.Memory.ListMessages(ctx, memory.ConvID(convID), memory.ListOpts{})
+			for _, m := range msgs {
+				if m.CreatedAt >= cutoff {
+					continue
 				}
-				h.Service.ChatDB.DeleteMedia(ref.UploadID)
+				for _, ref := range m.Media {
+					if ref.FilePath != "" {
+						os.Remove(ref.FilePath)
+					}
+					// TODO(#336): memory.Store has no DeleteMedia;
+					// orphaned media rows stay on disk but are no longer
+					// referenced by a live message. Pending #336 retention.
+				}
 			}
-			h.Service.ChatDB.ArchiveConversation(convID)
+			_ = h.Service.Memory.ArchiveConv(ctx, memory.ConvID(convID))
 		}
 		respondOK(w)
 	default:
@@ -302,13 +313,12 @@ func (h *ChatJobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[chat-job] cancelling job %s for conv %s", j.ID, convID)
 			j.stop()
 			// Persist "cancelled" system message so it survives history reload.
-			if h.Service.ChatDB != nil && convID != "" {
-				h.Service.ChatDB.InsertMessage(chatdb.Message{
-					ID:     NewMessageID(),
-					ConvID: convID,
-					Role:   "system",
-					Text:   "Request was cancelled",
-					Source: "cc",
+			if h.Service.Memory != nil && convID != "" {
+				_, _ = h.Service.Memory.AppendMessage(context.Background(), memory.ConvID(convID), memory.Message{
+					Role:    "system",
+					Channel: "cc",
+					Content: "Request was cancelled",
+					Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: "Request was cancelled"}},
 				})
 			}
 		} else {

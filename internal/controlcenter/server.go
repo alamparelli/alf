@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 
 	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/firewall"
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/provider"
 	scheduler_pkg "github.com/alamparelli/alf/internal/scheduler"
@@ -49,11 +49,11 @@ type Server struct {
 func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, netTracker *firewall.NetTracker, vaultMgr *vault.Manager, providerRegistry *provider.Registry, onVaultUnlock func(), onTaskEvent func(source, taskID, status, summary string), mp *marketplace.Manager, errorJournal AppErrorJournaler, avatarHandler *AvatarHandler) (*Server, *EventBroker, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore, appStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
-	var chatDB *chatdb.DB
+	var memoryStore memory.Store
 	if chatService != nil {
-		chatDB = chatService.ChatDB
+		memoryStore = chatService.Memory
 	}
-	statusProvider := NewStatusProvider(stats, version, chatDB)
+	statusProvider := NewStatusProvider(stats, version, memoryStore)
 	notifier := NewChannelNotifier(reloadCh)
 
 	// Load initial tiers into memory.

@@ -1,11 +1,12 @@
 package controlcenter
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
-	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/comms"
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 // ccAdapter bridges the comms.ChannelAdapter interface to ChatService's
@@ -16,7 +17,7 @@ type ccAdapter struct {
 	callback func(ChatEvent)
 
 	// Optional deps for standalone message injection (notifications, chain results).
-	ChatDB      *chatdb.DB
+	Memory      memory.Store
 	EventBroker *EventBroker
 }
 
@@ -28,26 +29,29 @@ func (a *ccAdapter) Channel() string { return "cc" }
 
 // SendText injects a standalone message into the CC chat (used for async notifications).
 func (a *ccAdapter) SendText(_ comms.ChannelID, text string) (string, error) {
-	if a.ChatDB == nil {
+	if a.Memory == nil {
 		return "", nil
 	}
-	convID := a.ChatDB.LatestConversationID("cc")
+	ctx := context.Background()
+	convID, _ := a.Memory.LatestConvID(ctx, "cc")
 	if convID == "" {
 		convID = "_system"
-		a.ChatDB.EnsureConversation(convID, "", "cc")
+		_ = a.Memory.EnsureConv(ctx, convID, "", "cc")
 	}
-	msgID := NewMessageID()
-	a.ChatDB.InsertMessage(chatdb.Message{
-		ID:     msgID,
-		ConvID: convID,
-		Role:   "assistant",
-		Text:   text,
-		Source: "cc",
-	})
+	msg := memory.Message{
+		Role:    "assistant",
+		Channel: "cc",
+		Content: text,
+		Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: text}},
+	}
+	stored, err := a.Memory.AppendMessage(ctx, convID, msg)
+	if err != nil {
+		return "", err
+	}
 	if a.EventBroker != nil {
-		a.EventBroker.EmitWithData(EventNewMessage, fmt.Sprintf(`{"conv_id":%q}`, convID))
+		a.EventBroker.EmitWithData(EventNewMessage, fmt.Sprintf(`{"conv_id":%q}`, string(convID)))
 	}
-	return msgID, nil
+	return string(stored.ID), nil
 }
 
 func (a *ccAdapter) SendReaction(_ comms.ChannelID, _ string, _ string) error {

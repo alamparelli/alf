@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alamparelli/alf/internal/conversation"
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 func TestStripToolXML_RemovesFunctionCalls(t *testing.T) {
@@ -40,9 +40,9 @@ func TestStripToolXML_NoMatch(t *testing.T) {
 }
 
 func TestBuildSummarizationPrompt_IncludesMessages(t *testing.T) {
-	msgs := []conversation.Message{
-		{Role: "user", Blocks: []conversation.ContentBlock{{Type: conversation.BlockText, Text: "hello bot"}}},
-		{Role: "assistant", Blocks: []conversation.ContentBlock{{Type: conversation.BlockText, Text: "hi human"}}},
+	msgs := []memory.Message{
+		{Role: "user", Blocks: []memory.ContentBlock{{Type: memory.BlockText, Text: "hello bot"}}},
+		{Role: "assistant", Blocks: []memory.ContentBlock{{Type: memory.BlockText, Text: "hi human"}}},
 	}
 	prompt := buildSummarizationPrompt(msgs)
 
@@ -54,9 +54,9 @@ func TestBuildSummarizationPrompt_IncludesMessages(t *testing.T) {
 }
 
 func TestBuildSummarizationPrompt_SkipsEmptyText(t *testing.T) {
-	msgs := []conversation.Message{
+	msgs := []memory.Message{
 		{Role: "user", Blocks: nil},
-		{Role: "assistant", Blocks: []conversation.ContentBlock{{Type: conversation.BlockText, Text: "only me"}}},
+		{Role: "assistant", Blocks: []memory.ContentBlock{{Type: memory.BlockText, Text: "only me"}}},
 	}
 	prompt := buildSummarizationPrompt(msgs)
 	if strings.Count(prompt, "[user]:") != 0 {
@@ -68,8 +68,8 @@ func TestBuildSummarizationPrompt_SkipsEmptyText(t *testing.T) {
 }
 
 func TestBuildSummarizationPrompt_DefaultRole(t *testing.T) {
-	msgs := []conversation.Message{
-		{Role: "", Blocks: []conversation.ContentBlock{{Type: conversation.BlockText, Text: "unknown role"}}},
+	msgs := []memory.Message{
+		{Role: "", Blocks: []memory.ContentBlock{{Type: memory.BlockText, Text: "unknown role"}}},
 	}
 	prompt := buildSummarizationPrompt(msgs)
 	if !strings.Contains(prompt, "[user]: unknown role") {

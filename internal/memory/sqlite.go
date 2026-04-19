@@ -350,17 +350,17 @@ func (s *SQLiteStore) LatestConvID(ctx context.Context, channel Channel) (ConvID
 
 // Messages --------------------------------------------------------------------
 
-func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Message) error {
+func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Message) (Message, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return Message{}, err
 	}
 	if convID == "" {
-		return errors.New("memory: AppendMessage: empty convID")
+		return Message{}, errors.New("memory: AppendMessage: empty convID")
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return Message{}, err
 	}
 	defer tx.Rollback()
 
@@ -373,7 +373,7 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Mess
 		`INSERT OR IGNORE INTO conversations (id, title, channel, created_at, updated_at)
 		 VALUES (?, '', '', ?, ?)`,
 		string(convID), now, now); err != nil {
-		return fmt.Errorf("memory: AppendMessage: ensure conv: %w", err)
+		return Message{}, fmt.Errorf("memory: AppendMessage: ensure conv: %w", err)
 	}
 
 	// Next per-conv seq.
@@ -381,7 +381,7 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Mess
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE conv_id = ?`,
 		string(convID)).Scan(&seq); err != nil {
-		return fmt.Errorf("memory: AppendMessage: next seq: %w", err)
+		return Message{}, fmt.Errorf("memory: AppendMessage: next seq: %w", err)
 	}
 
 	msg.ID = s.newMsgID()
@@ -392,7 +392,7 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Mess
 	if msg.ToolCall != nil {
 		b, err := json.Marshal(msg.ToolCall)
 		if err != nil {
-			return fmt.Errorf("memory: AppendMessage: marshal tool_call: %w", err)
+			return Message{}, fmt.Errorf("memory: AppendMessage: marshal tool_call: %w", err)
 		}
 		toolCallJSON = string(b)
 	}
@@ -407,7 +407,7 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Mess
 		msg.Model, msg.Tier, msg.Backend, msg.CostUSD, msg.DurationMs, msg.SessionID, string(msg.ReplyTo),
 		toolCallJSON, msg.CreatedAt,
 	); err != nil {
-		return fmt.Errorf("memory: AppendMessage: insert message: %w", err)
+		return Message{}, fmt.Errorf("memory: AppendMessage: insert message: %w", err)
 	}
 
 	for i, b := range msg.Blocks {
@@ -416,7 +416,7 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Mess
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			string(msg.ID), i, string(b.Type), b.Text, b.Name, b.Input, b.ToolID, b.Output,
 		); err != nil {
-			return fmt.Errorf("memory: AppendMessage: insert block %d: %w", i, err)
+			return Message{}, fmt.Errorf("memory: AppendMessage: insert block %d: %w", i, err)
 		}
 	}
 
@@ -426,7 +426,7 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Mess
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			m.UploadID, string(msg.ID), string(convID), m.FileName, m.MimeType, m.MediaType, m.FilePath, m.URL,
 		); err != nil {
-			return fmt.Errorf("memory: AppendMessage: insert media %s: %w", m.UploadID, err)
+			return Message{}, fmt.Errorf("memory: AppendMessage: insert media %s: %w", m.UploadID, err)
 		}
 	}
 
@@ -435,7 +435,7 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Mess
 			`INSERT OR IGNORE INTO reactions (message_id, emoji, source) VALUES (?, ?, ?)`,
 			string(msg.ID), r.Emoji, r.Source,
 		); err != nil {
-			return fmt.Errorf("memory: AppendMessage: insert reaction: %w", err)
+			return Message{}, fmt.Errorf("memory: AppendMessage: insert reaction: %w", err)
 		}
 	}
 
@@ -444,7 +444,7 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Mess
 			`INSERT OR IGNORE INTO summary_covered (summary_msg_id, covered_msg_id) VALUES (?, ?)`,
 			string(msg.ID), string(cid),
 		); err != nil {
-			return fmt.Errorf("memory: AppendMessage: insert summary_covered: %w", err)
+			return Message{}, fmt.Errorf("memory: AppendMessage: insert summary_covered: %w", err)
 		}
 	}
 
@@ -452,10 +452,13 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, convID ConvID, msg Mess
 		`UPDATE conversations SET updated_at = ? WHERE id = ?`,
 		now, string(convID),
 	); err != nil {
-		return fmt.Errorf("memory: AppendMessage: bump updated_at: %w", err)
+		return Message{}, fmt.Errorf("memory: AppendMessage: bump updated_at: %w", err)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return Message{}, err
+	}
+	return msg, nil
 }
 
 func (s *SQLiteStore) GetMessage(ctx context.Context, convID ConvID, msgID MsgID) (*Message, error) {
@@ -773,12 +776,13 @@ func (s *SQLiteStore) AppendSummary(ctx context.Context, convID ConvID, text str
 	if text == "" || len(coveredIDs) == 0 {
 		return nil
 	}
-	return s.AppendMessage(ctx, convID, Message{
+	_, err := s.AppendMessage(ctx, convID, Message{
 		Role:       RoleSummary,
 		Content:    text,
 		Blocks:     []ContentBlock{{Type: BlockSummary, Text: text}},
 		CoveredIDs: coveredIDs,
 	})
+	return err
 }
 
 func (s *SQLiteStore) LatestSummaryCovered(ctx context.Context, convID ConvID) ([]MsgID, error) {

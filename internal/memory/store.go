@@ -263,11 +263,16 @@ type Store interface {
 	// given channel, by last-message timestamp. Empty string if none.
 	LatestConvID(ctx context.Context, channel Channel) (ConvID, error)
 
-	// AppendMessage persists msg under convID. The implementation assigns
-	// msg.ID, msg.Seq, and msg.CreatedAt; caller-supplied values in those
-	// fields are ignored. If the conv does not yet exist the Store creates
-	// it (with empty title/channel) — mirrors the chatdb behaviour.
-	AppendMessage(ctx context.Context, convID ConvID, msg Message) error
+	// AppendMessage persists msg under convID and returns the stored value
+	// with Store-assigned ID, Seq, and CreatedAt populated. Caller-supplied
+	// values in those fields on input are ignored. If the conv does not yet
+	// exist the Store creates it (with empty title/channel) — mirrors the
+	// chatdb behaviour.
+	//
+	// Returning the populated Message (rather than just acknowledging the
+	// write) lets callers chain downstream work — echoing the ID to SSE,
+	// attaching media refs, logging — without a racy read-back query.
+	AppendMessage(ctx context.Context, convID ConvID, msg Message) (Message, error)
 
 	// GetMessage returns a single message by ID within convID, including its
 	// blocks, media, and reactions. Unknown message returns (nil, nil).

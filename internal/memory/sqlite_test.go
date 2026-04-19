@@ -46,7 +46,7 @@ func TestSQLite_ReopenPreservesState(t *testing.T) {
 	if err := s1.EnsureConv(ctx, "c", "hello", memory.ChannelCC); err != nil {
 		t.Fatalf("EnsureConv: %v", err)
 	}
-	if err := s1.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "persisted"}); err != nil {
+	if _, err := s1.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "persisted"}); err != nil {
 		t.Fatalf("AppendMessage: %v", err)
 	}
 	if err := s1.SetPref(ctx, "theme", "dark"); err != nil {
@@ -70,7 +70,7 @@ func TestSQLite_ReopenPreservesState(t *testing.T) {
 		t.Errorf("reopen lost messages: %+v", msgs)
 	}
 	// New append must not collide with the persisted msg ID.
-	if err := s2.AppendMessage(ctx, "c", memory.Message{Role: "assistant", Content: "after-reopen"}); err != nil {
+	if _, err := s2.AppendMessage(ctx, "c", memory.Message{Role: "assistant", Content: "after-reopen"}); err != nil {
 		t.Fatalf("AppendMessage after reopen: %v", err)
 	}
 	msgs, _ = s2.ListMessages(ctx, "c", memory.ListOpts{})
@@ -119,7 +119,7 @@ func TestSQLite_ConcurrentAppend_NoLockedErrors(t *testing.T) {
 			defer wg.Done()
 			convID := memory.ConvID(fmt.Sprintf("c%d", c))
 			for i := 0; i < nMsgs; i++ {
-				if err := s.AppendMessage(ctx, convID, memory.Message{
+				if _, err := s.AppendMessage(ctx, convID, memory.Message{
 					Role:    "user",
 					Content: fmt.Sprintf("payload-%d-%d", c, i),
 				}); err != nil {

@@ -4,9 +4,9 @@ import (
 	"log"
 	"sync"
 
+	"context"
+
 	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
-	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/provider"
@@ -24,11 +24,10 @@ type ChatEngine struct {
 	ContextDir string
 
 	// Stores
-	Sessions  *session.Store
-	ConvStore *conversation.Store
-	ChatDB    *chatdb.DB // may be nil — UI chat persistence (SQLite)
-	EventLog  *eventlog.Logger
-	TierStore TierStoreReader
+	Sessions   *session.Store
+	Memory     memory.Store // unified store (replaces ChatDB + ConvStore)
+	EventLog   *eventlog.Logger
+	TierStore  TierStoreReader
 	SkillStore skills.Store
 
 	// Providers
@@ -71,8 +70,7 @@ func NewEngine(cfg EngineConfig) *ChatEngine {
 		ConfigDir:      cfg.ConfigDir,
 		ContextDir:     cfg.ContextDir,
 		Sessions:       cfg.Sessions,
-		ConvStore:      cfg.ConvStore,
-		ChatDB:         cfg.ChatDB,
+		Memory:         cfg.Memory,
 		EventLog:       cfg.EventLog,
 		TierStore:      cfg.TierStore,
 		SkillStore:     cfg.SkillStore,
@@ -98,10 +96,9 @@ type EngineConfig struct {
 	ConfigDir  string
 	ContextDir string
 
-	Sessions   *session.Store
-	ConvStore  *conversation.Store
-	ChatDB     *chatdb.DB
-	EventLog   *eventlog.Logger
+	Sessions *session.Store
+	Memory   memory.Store
+	EventLog *eventlog.Logger
 	TierStore  TierStoreReader
 	SkillStore skills.Store
 
@@ -185,8 +182,13 @@ func (e *ChatEngine) NewSession(channelID ChannelID, onboard bool) (oldSessionID
 	old := e.Sessions.Archive(key)
 	e.Sessions.ClearSkills(key)
 
-	if e.ConvStore != nil {
-		e.ConvStore.NewConversation(string(channelID))
+	if e.Memory != nil {
+		// Rotate the active conv pref for this channelID: generate a fresh
+		// conv and record it. The old pref value is discarded — callers that
+		// still need the old conv reference kept it in the adapter.
+		ctx := context.Background()
+		newID := memory.NewConvID()
+		_ = e.Memory.SetPref(ctx, "active_conv:"+string(channelID), string(newID))
 	}
 
 	if onboard {

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alamparelli/alf/internal/chatdb"
 	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/provider"
 	chatsession "github.com/alamparelli/alf/internal/session"
 )
@@ -37,15 +37,11 @@ func newTestChatService(t *testing.T) *ChatService {
 	eventLog := eventlog.New(dataDir)
 	t.Cleanup(func() { eventLog.Close() })
 
-	chatDB, err := chatdb.New(dataDir)
-	if err != nil {
-		t.Fatalf("chatdb: %v", err)
-	}
-	t.Cleanup(func() { chatDB.Close() })
+	mem := memory.NewInMem()
 
 	return NewChatService(
 		dataDir, configDir, contextDir,
-		tierStore, sessions, eventLog, chatDB,
+		tierStore, sessions, eventLog, mem,
 		nil, // no transcriber
 		func(msg, lastTier string, msgCount int) RouteResult {
 			// Default test router: always route to "test_tier".
@@ -153,33 +149,42 @@ func TestChatService_UploadInvalidMediaType(t *testing.T) {
 	os.Remove(entry.TempPath)
 }
 
+// appendTestMessage is a small helper that appends a message to the memory
+// store and returns the store-assigned ID. Used by tests that need to
+// reference specific messages by ID (reactions, replies, etc.).
+func appendTestMessage(t *testing.T, svc *ChatService, convID, role, text string) string {
+	t.Helper()
+	ctx := context.Background()
+	_ = svc.Memory.EnsureConv(ctx, memory.ConvID(convID), "", "cc")
+	stored, err := svc.Memory.AppendMessage(ctx, memory.ConvID(convID), memory.Message{
+		Role: role, Channel: "cc", Content: text,
+		Blocks: []memory.ContentBlock{{Type: memory.BlockText, Text: text}},
+	})
+	if err != nil {
+		t.Fatalf("append test message: %v", err)
+	}
+	return string(stored.ID)
+}
+
 func TestChatService_History(t *testing.T) {
 	svc := newTestChatService(t)
 
-	now := time.Now()
-	svc.ChatDB.EnsureConversation("test", "", "cc")
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "h1", ConvID: "test", Role: "user", Text: "first",
-		CreatedAt: now.Add(-2 * time.Minute),
-	})
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "h2", ConvID: "test", Role: "assistant", Text: "second",
-		CreatedAt: now.Add(-time.Minute),
-	})
+	_ = appendTestMessage(t, svc, "test", "user", "first")
+	_ = appendTestMessage(t, svc, "test", "assistant", "second")
 
-	msgs := svc.History(50, time.Time{}, "")
+	msgs := svc.History(50, time.Time{}, "test")
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2, got %d", len(msgs))
 	}
-	if msgs[0].ID != "h1" {
-		t.Errorf("expected first message h1, got %q", msgs[0].ID)
+	if msgs[0].Text != "first" {
+		t.Errorf("expected first message text 'first', got %q", msgs[0].Text)
 	}
 }
 
 func TestChatService_HistoryLimitCap(t *testing.T) {
 	svc := newTestChatService(t)
 
-	// Requesting limit > 200 should be capped and return empty slice.
+	// Requesting limit > 200 with empty convID should be capped and return empty slice.
 	msgs := svc.History(999, time.Time{}, "")
 	if len(msgs) != 0 {
 		t.Errorf("expected empty history, got %d", len(msgs))
@@ -188,12 +193,9 @@ func TestChatService_HistoryLimitCap(t *testing.T) {
 
 func TestChatService_ReactValid(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatDB.EnsureConversation("test", "", "cc")
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "react-msg", ConvID: "test", Role: "assistant", Text: "test",
-	})
+	id := appendTestMessage(t, svc, "test", "assistant", "test")
 
-	result, err := svc.React(ReactRequest{MsgID: "react-msg", Emoji: "👍"})
+	result, err := svc.React(ReactRequest{MsgID: id, Emoji: "👍"})
 	if err != nil {
 		t.Fatalf("React error: %v", err)
 	}
@@ -212,11 +214,8 @@ func TestChatService_BuildPrompt(t *testing.T) {
 	}
 
 	// Message with reply context.
-	svc.ChatDB.EnsureConversation("test", "", "cc")
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "orig", ConvID: "test", Role: "assistant", Text: "original message",
-	})
-	prompt = svc.buildPrompt(ChatRequest{Message: "my reply", ReplyTo: "orig"})
+	origID := appendTestMessage(t, svc, "test", "assistant", "original message")
+	prompt = svc.buildPrompt(ChatRequest{Message: "my reply", ReplyTo: origID, ConvID: "test"})
 	if !strings.Contains(prompt, "original message") {
 		t.Error("expected reply context in prompt")
 	}
@@ -309,15 +308,12 @@ func TestApiChatID_NegativeConstant(t *testing.T) {
 
 func TestBuildPrompt_ReplyExistingMessage(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatDB.EnsureConversation("c1", "", "cc")
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "quoted-msg", ConvID: "c1", Role: "assistant",
-		Text: "This is the original message.",
-	})
+	id := appendTestMessage(t, svc, "c1", "assistant", "This is the original message.")
 
 	prompt := svc.buildPrompt(ChatRequest{
 		Message: "what did you mean?",
-		ReplyTo: "quoted-msg",
+		ReplyTo: id,
+		ConvID:  "c1",
 	})
 
 	if !strings.Contains(prompt, "This is the original message.") {
@@ -336,14 +332,11 @@ func TestBuildPrompt_ReplyLongMessageNotTruncated(t *testing.T) {
 	// This test documents that behavior — if truncation is added later,
 	// update this test accordingly.
 	svc := newTestChatService(t)
-	svc.ChatDB.EnsureConversation("c1", "", "cc")
 
 	longText := strings.Repeat("x", 2000)
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "long-msg", ConvID: "c1", Role: "assistant", Text: longText,
-	})
+	id := appendTestMessage(t, svc, "c1", "assistant", longText)
 
-	prompt := svc.buildPrompt(ChatRequest{Message: "reply", ReplyTo: "long-msg"})
+	prompt := svc.buildPrompt(ChatRequest{Message: "reply", ReplyTo: id, ConvID: "c1"})
 	if !strings.Contains(prompt, longText) {
 		t.Error("expected full (untruncated) original text in reply context")
 	}
@@ -363,14 +356,11 @@ func TestBuildPrompt_ReplyNonExistentMessage(t *testing.T) {
 	}
 }
 
-func TestBuildPrompt_ReplyWithNilChatDB(t *testing.T) {
+func TestBuildPrompt_ReplyWithNilMemory(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatDB = nil
+	svc.Memory = nil
 
-	// buildPrompt calls cs.ChatDB.Get — with nil ChatDB it should not panic.
-	// The current code will panic if ChatDB is nil and ReplyTo is set.
-	// This is a known edge: CC always has a ChatDB, so it's acceptable.
-	// If we want to guard, this test should be updated.
+	// buildPrompt guards against nil Memory — no panic when ReplyTo is unset.
 	prompt := svc.buildPrompt(ChatRequest{Message: "hello", ReplyTo: ""})
 	if prompt != "hello" {
 		t.Errorf("expected %q, got %q", "hello", prompt)
@@ -381,10 +371,7 @@ func TestBuildPrompt_ReplyWithNilChatDB(t *testing.T) {
 
 func TestBuildPrompt_ReplyWithMedia(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatDB.EnsureConversation("c1", "", "cc")
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "orig-2", ConvID: "c1", Role: "assistant", Text: "look at this",
-	})
+	id := appendTestMessage(t, svc, "c1", "assistant", "look at this")
 
 	svc.RegisterUpload(&UploadEntry{
 		ID:        "img-1",
@@ -396,7 +383,8 @@ func TestBuildPrompt_ReplyWithMedia(t *testing.T) {
 
 	prompt := svc.buildPrompt(ChatRequest{
 		Message:  "here is my screenshot",
-		ReplyTo:  "orig-2",
+		ReplyTo:  id,
+		ConvID:   "c1",
 		MediaIDs: []string{"img-1"},
 	})
 

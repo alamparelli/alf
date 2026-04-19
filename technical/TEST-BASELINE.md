@@ -53,7 +53,7 @@ on "no user-facing change".
 | `internal/chatdb` | 56.8 % | memory | concurrency (see #346) |
 | `internal/tooling` | 59.5 % | capability | e2e per native tool (~20) + integrity guard |
 | `internal/skills` | 75.7 % | capability | skill dispatch through full pipeline |
-| `internal/marketplace` | 48.6 % | capability | app REST backend round-trip |
+| `internal/marketplace` | 70.5 % | capability | legacy install path (SEC-001 covers bundle) |
 | `internal/firewall` | 78.9 % | sandbox | nettrack control socket (E2E-only) |
 | `internal/vault` | 48.8 % | sandbox | subprocess lifecycle (E2E-only) |
 | `internal/provider` | 46.4 % | ai | model routing, summarize pipeline |

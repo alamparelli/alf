@@ -50,7 +50,7 @@ on "no user-facing change".
 | `internal/conversation` | 88.4 % | memory | multi-conv isolation, convID scoping |
 | `internal/memstore` | 55.8 % | memory | dedup + FTS fallback under load |
 | `internal/memory` | 41.9 % | memory | preferences dispatch, recall-tools |
-| `internal/chatdb` | 31.1 % | memory | convID scoping on every write/read |
+| `internal/chatdb` | 56.8 % | memory | concurrency (see #346) |
 | `internal/tooling` | 59.5 % | capability | e2e per native tool (~20) + integrity guard |
 | `internal/skills` | 75.7 % | capability | skill dispatch through full pipeline |
 | `internal/marketplace` | 48.6 % | capability | app REST backend round-trip |
@@ -105,20 +105,19 @@ Gaps identified in the audit:
 
 | # | Scenario | Status | Host package |
 |---|---|---|---|
-| 1 | Multi-conv isolation (concurrent convs, no state bleed) | partial | `internal/controlcenter` + `internal/conversation` |
-| 2 | ConvID scoping on every write/read | gap | `internal/chatdb` |
-| 3 | Summarize pipeline (long conv → stored + retrievable) | to verify | `internal/provider` + `internal/memory` |
-| 4 | Each native tool has one e2e integration test | gap | `internal/tooling` |
-| 5 | One skill through full pipeline | partial | `internal/skills` + `internal/controlcenter` |
-| 6 | Marketplace app with REST backend responds | gap | `internal/marketplace` + `pkg/appsdk` |
+| 1 | Multi-conv isolation (concurrent convs, no state bleed) | covered | `internal/chatdb` (isolation_test) |
+| 2 | ConvID scoping on every write/read | covered | `internal/chatdb` (isolation_test) |
+| 3 | Summarize pipeline (long conv → stored + retrievable) | covered | `internal/conversation` (`summary_test.go`) |
+| 4 | Each native tool has one e2e integration test | covered | `internal/tooling` (`native_*_test.go`) |
+| 5 | One skill through full pipeline | covered | `internal/skills` (catalog/store/inject tests) |
+| 6 | Marketplace app with REST backend responds | covered | `internal/controlcenter` (`handler_app_proxy_test.go`) |
 | 7 | Firewall blocked net fails, allowed succeeds | covered | `internal/firewall` (HTTP e2e via goproxy) |
 | 8 | Vault tier-gated access | covered | `internal/vault` (manager api + proxy) |
-| 9 | Integrity guard quarantines tampered tool | to verify | `internal/tooling` (`integrity_test.go`) |
-| 10 | `ResolveModel` baseline behaviour | to verify | `internal/router` |
-| 11 | Scheduler job fires → invokes capability | gap | `internal/scheduler` + `internal/tooling` |
+| 9 | Integrity guard quarantines tampered tool | covered | `internal/tooling` (`integrity_test.go`) |
+| 10 | `ResolveModel` baseline behaviour | covered | `internal/router` (`TestResolveModel`) |
+| 11 | Scheduler job fires → invokes capability | covered | `internal/scheduler` (executor + engine tests) |
 
-Gap-filling plan is deliverable 3 — tracked in a follow-up inside
-this ticket.
+All critical-path scenarios pinned. Deliverable 3 complete.
 
 ## Regression command
 

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
@@ -653,10 +652,10 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		}
 	}
 
-	var acc *conversation.Accumulator
+	var acc *Accumulator
 	progressFn := rawOnProgress
 	if e.Memory != nil {
-		acc = conversation.NewAccumulator()
+		acc = NewAccumulator()
 		progressFn = acc.OnProgress(rawOnProgress)
 	}
 
@@ -703,7 +702,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			}
 		}
 		if acc != nil {
-			acc = conversation.NewAccumulator()
+			acc = NewAccumulator()
 			progressFn = acc.OnProgress(rawOnProgress)
 		}
 		result, err = prov.Invoke(ctx, prompt, params, progressFn)
@@ -799,7 +798,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			}
 
 			if acc != nil {
-				acc = conversation.NewAccumulator()
+				acc = NewAccumulator()
 				progressFn = acc.OnProgress(rawOnProgress)
 			}
 
@@ -887,19 +886,11 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	if e.Memory != nil && convID != "" {
 		var blocks []memory.ContentBlock
 		if acc != nil {
-			for _, b := range acc.Blocks() {
-				text := b.Text
-				if b.Type == conversation.BlockText {
-					text = stripReactTags(text)
+			blocks = acc.Blocks()
+			for i := range blocks {
+				if blocks[i].Type == memory.BlockText {
+					blocks[i].Text = stripReactTags(blocks[i].Text)
 				}
-				blocks = append(blocks, memory.ContentBlock{
-					Type:   memory.BlockType(string(b.Type)),
-					Text:   text,
-					Name:   b.Name,
-					Input:  b.Input,
-					ToolID: b.ToolID,
-					Output: b.Output,
-				})
 			}
 		}
 		if len(blocks) == 0 {

@@ -47,10 +47,8 @@ on "no user-facing change".
 
 | Package | Coverage | Rework target | Critical gap to watch |
 |---|---:|---|---|
-| `internal/conversation` | 88.4 % | memory | multi-conv isolation, convID scoping |
-| `internal/memstore` | 55.8 % | memory | dedup + FTS fallback under load |
-| `internal/memory` | 84.8 % | memory | scanApps/GenerateToolbox (E2E-only) |
-| `internal/chatdb` | 56.8 % | memory | concurrency (see #346) |
+| `internal/memstore` | 55.8 % | memory | dedup + FTS fallback under load (Step 1.3 target) |
+| `internal/memory` | 82.8 % | memory | SQLite backend error paths — Step 1.2 (#336) grew this package ~3× (chatdb+conversation absorption). Floor dropped 84.8 → 82.8 because ~600 new lines of SQL error handling land uncovered; happy paths are exercised by the 37-sub-test memtest contract (runs against both InMem and SQLiteStore). |
 | `internal/tooling` | 59.5 % | capability | e2e per native tool (~20) + integrity guard |
 | `internal/skills` | 75.7 % | capability | skill dispatch through full pipeline |
 | `internal/marketplace` | 70.5 % | capability | legacy install path (SEC-001 covers bundle) |
@@ -105,9 +103,9 @@ Gaps identified in the audit:
 
 | # | Scenario | Status | Host package |
 |---|---|---|---|
-| 1 | Multi-conv isolation (concurrent convs, no state bleed) | covered | `internal/chatdb` (isolation_test) |
-| 2 | ConvID scoping on every write/read | covered | `internal/chatdb` (isolation_test) |
-| 3 | Summarize pipeline (long conv → stored + retrievable) | covered | `internal/conversation` (`summary_test.go`) |
+| 1 | Multi-conv isolation (concurrent convs, no state bleed) | covered | `internal/memory` (`memtest` contract `ConvIsolation` + `SQLite_ConcurrentAppend_NoLockedErrors`) |
+| 2 | ConvID scoping on every write/read | covered at signature level | every `memory.Store` method takes `convID` as an explicit parameter (#336 rule) |
+| 3 | Summarize pipeline (long conv → stored + retrievable) | covered | `internal/memory` (`memtest` contract `AppendSummary_ReplacesCoveredOnApply` + `LatestSummaryCovered`) + `internal/comms/summarize.go` |
 | 4 | Each native tool has one e2e integration test | covered | `internal/tooling` (`native_*_test.go`) |
 | 5 | One skill through full pipeline | covered | `internal/skills` (catalog/store/inject tests) |
 | 6 | Marketplace app with REST backend responds | covered | `internal/controlcenter` (`handler_app_proxy_test.go`) |

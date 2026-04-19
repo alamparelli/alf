@@ -463,6 +463,14 @@ func main() {
 	chatHistory := newChatHistoryBuffer(10) // last 10 exchanges per chat
 
 	// Unified memory store: replaces chatdb + conversation (see #336).
+	// One-shot import of any legacy dataDir/logs/chat.db happens BEFORE we
+	// open memory.db — migrateChatDBToMemoryDB refuses to run if memory.db
+	// already has messages, so pre-existing state is always safe.
+	// DEPRECATED: migration call planned for removal in v0.7.14
+	// (see cmd/alf-daemon/memorymigrate.go::migrationTargetRemovalVersion).
+	if err := migrateChatDBToMemoryDB(dataDir); err != nil {
+		log.Fatalf("memory migration: %v", err)
+	}
 	memStore, err := memory.NewSQLiteStore(dataDir)
 	if err != nil {
 		log.Fatalf("memory: %v", err)

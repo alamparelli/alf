@@ -31,6 +31,7 @@ func RunStoreContract(t *testing.T, factory Factory) {
 	t.Helper()
 
 	t.Run("AppendList_OrderAndIDs", func(t *testing.T) { testAppendListOrder(t, factory) })
+	t.Run("AppendList_AssignsSeq", func(t *testing.T) { testAppendAssignsSeq(t, factory) })
 	t.Run("ConvIsolation", func(t *testing.T) { testConvIsolation(t, factory) })
 	t.Run("UnknownConvReturnsEmpty", func(t *testing.T) { testUnknownConv(t, factory) })
 	t.Run("ListOpts_Limit", func(t *testing.T) { testListLimit(t, factory) })
@@ -40,6 +41,20 @@ func RunStoreContract(t *testing.T, factory Factory) {
 	t.Run("Summarize_EmptyIsZero", func(t *testing.T) { testSummarizeEmpty(t, factory) })
 	t.Run("Summarize_NonEmpty", func(t *testing.T) { testSummarizeNonEmpty(t, factory) })
 	t.Run("AppendMessage_RejectsEmptyConvID", func(t *testing.T) { testAppendEmptyConv(t, factory) })
+	t.Run("AppendMessage_PreservesBlocksMediaReactionsBookkeeping", func(t *testing.T) { testAppendRichMessage(t, factory) })
+	t.Run("GetMessage_ScopedToConv", func(t *testing.T) { testGetMessageScoped(t, factory) })
+	t.Run("GetMessage_UnknownReturnsNil", func(t *testing.T) { testGetMessageUnknown(t, factory) })
+	t.Run("AddReaction_Idempotent", func(t *testing.T) { testAddReactionIdempotent(t, factory) })
+	t.Run("AddReaction_UnknownMessage", func(t *testing.T) { testAddReactionUnknownMsg(t, factory) })
+	t.Run("AppendSummary_ReplacesCoveredOnApply", func(t *testing.T) { testAppendSummaryApplies(t, factory) })
+	t.Run("AppendSummary_EmptyIsNoop", func(t *testing.T) { testAppendSummaryEmpty(t, factory) })
+	t.Run("LatestSummaryCovered", func(t *testing.T) { testLatestSummaryCovered(t, factory) })
+	t.Run("ListMessages_ApplySummaryFalseShowsRaw", func(t *testing.T) { testListApplyFalse(t, factory) })
+	t.Run("Convs_EnsureGetUpdate", func(t *testing.T) { testConvEnsureGetUpdate(t, factory) })
+	t.Run("Convs_ListFilterByChannel", func(t *testing.T) { testConvListFilterChannel(t, factory) })
+	t.Run("Convs_ListExcludesArchivedByDefault", func(t *testing.T) { testConvListExcludesArchived(t, factory) })
+	t.Run("Convs_DeleteCascadesMessages", func(t *testing.T) { testConvDeleteCascades(t, factory) })
+	t.Run("Convs_LatestByChannel", func(t *testing.T) { testLatestConvID(t, factory) })
 	t.Run("IndexSearch_Roundtrip", func(t *testing.T) { testIndexSearch(t, factory) })
 	t.Run("Search_ScopeIsolation", func(t *testing.T) { testSearchScopeIsolation(t, factory) })
 	t.Run("Search_Reindex_Replaces", func(t *testing.T) { testReindexReplaces(t, factory) })
@@ -376,6 +391,342 @@ func testPrefsEmptyKey(t *testing.T, factory Factory) {
 	}
 	if _, err := s.GetPref(context.Background(), ""); err == nil {
 		t.Errorf("GetPref(\"\") should error")
+	}
+}
+
+// --- widened conv/message surface ------------------------------------------
+
+func testAppendAssignsSeq(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "m"})
+	}
+	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(msgs))
+	}
+	for i, m := range msgs {
+		want := int64(i + 1)
+		if m.Seq != want {
+			t.Errorf("msg[%d].Seq = %d, want %d", i, m.Seq, want)
+		}
+	}
+}
+
+func testAppendRichMessage(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	in := memory.Message{
+		Role:    "assistant",
+		Channel: memory.ChannelCC,
+		Content: "hello",
+		Blocks: []memory.ContentBlock{
+			{Type: memory.BlockText, Text: "hello"},
+			{Type: memory.BlockToolUse, Name: "read_file", Input: `{"path":"x"}`, ToolID: "t1"},
+			{Type: memory.BlockToolResult, ToolID: "t1", Output: "file contents"},
+		},
+		Media: []memory.Media{
+			{UploadID: "up1", FileName: "cat.png", MimeType: "image/png", MediaType: "photo"},
+		},
+		Reactions:  []memory.Reaction{{Emoji: "👍", Source: "user"}},
+		Model:      "claude-opus-4-7",
+		Tier:       "hero",
+		Backend:    "anthropic",
+		CostUSD:    0.42,
+		DurationMs: 1500,
+		SessionID:  "sess-1",
+		ReplyTo:    memory.MsgID("prev-id"),
+	}
+	if err := s.AppendMessage(ctx, "c", in); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 msg, got %d", len(msgs))
+	}
+	got := msgs[0]
+	if got.Role != "assistant" || got.Channel != memory.ChannelCC {
+		t.Errorf("role/channel not preserved: %+v", got)
+	}
+	if len(got.Blocks) != 3 || got.Blocks[1].Name != "read_file" || got.Blocks[2].Output != "file contents" {
+		t.Errorf("blocks not preserved: %+v", got.Blocks)
+	}
+	if len(got.Media) != 1 || got.Media[0].UploadID != "up1" {
+		t.Errorf("media not preserved: %+v", got.Media)
+	}
+	if len(got.Reactions) != 1 || got.Reactions[0].Emoji != "👍" {
+		t.Errorf("reactions not preserved: %+v", got.Reactions)
+	}
+	if got.Model != "claude-opus-4-7" || got.Tier != "hero" || got.Backend != "anthropic" ||
+		got.CostUSD != 0.42 || got.DurationMs != 1500 || got.SessionID != "sess-1" ||
+		got.ReplyTo != memory.MsgID("prev-id") {
+		t.Errorf("bookkeeping fields not preserved: %+v", got)
+	}
+}
+
+func testGetMessageScoped(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.AppendMessage(ctx, "a", memory.Message{Role: "user", Content: "from-a"})
+	_ = s.AppendMessage(ctx, "b", memory.Message{Role: "user", Content: "from-b"})
+
+	aMsgs, _ := s.ListMessages(ctx, "a", memory.ListOpts{})
+	got, err := s.GetMessage(ctx, "a", aMsgs[0].ID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if got == nil || got.Content != "from-a" {
+		t.Errorf("GetMessage returned wrong content: %+v", got)
+	}
+	// GetMessage with wrong convID must not cross-leak.
+	leak, _ := s.GetMessage(ctx, "b", aMsgs[0].ID)
+	if leak != nil {
+		t.Errorf("GetMessage leaked across convs: %+v", leak)
+	}
+}
+
+func testGetMessageUnknown(t *testing.T, factory Factory) {
+	s := factory()
+	got, err := s.GetMessage(context.Background(), "c", "nope")
+	if err != nil {
+		t.Fatalf("GetMessage unknown: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil, got %+v", got)
+	}
+}
+
+func testAddReactionIdempotent(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
+	id := msgs[0].ID
+
+	ok, err := s.AddReaction(ctx, "c", id, memory.Reaction{Emoji: "👍", Source: "user"})
+	if err != nil || !ok {
+		t.Fatalf("AddReaction: ok=%v err=%v", ok, err)
+	}
+	// Same emoji+source is a no-op.
+	_, _ = s.AddReaction(ctx, "c", id, memory.Reaction{Emoji: "👍", Source: "user"})
+	// Same emoji, different source is a distinct reaction.
+	_, _ = s.AddReaction(ctx, "c", id, memory.Reaction{Emoji: "👍", Source: "alf"})
+
+	got, _ := s.GetMessage(ctx, "c", id)
+	if got == nil {
+		t.Fatal("message disappeared")
+	}
+	if len(got.Reactions) != 2 {
+		t.Errorf("want 2 distinct reactions, got %d: %+v", len(got.Reactions), got.Reactions)
+	}
+}
+
+func testAddReactionUnknownMsg(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.EnsureConv(ctx, "c", "", memory.ChannelCC)
+	ok, err := s.AddReaction(ctx, "c", "nope", memory.Reaction{Emoji: "👍", Source: "user"})
+	if err != nil {
+		t.Fatalf("AddReaction unknown: %v", err)
+	}
+	if ok {
+		t.Errorf("AddReaction on unknown msg should return false, got true")
+	}
+}
+
+func testAppendSummaryApplies(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user", Content: "old"})
+	}
+	all, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
+	var covered []memory.MsgID
+	for _, m := range all[:2] {
+		covered = append(covered, m.ID)
+	}
+	if err := s.AppendSummary(ctx, "c", "the first two", covered); err != nil {
+		t.Fatalf("AppendSummary: %v", err)
+	}
+
+	applied, err := s.ListMessages(ctx, "c", memory.ListOpts{ApplySummary: true})
+	if err != nil {
+		t.Fatalf("ListMessages applied: %v", err)
+	}
+	// Expect: [summary, 3rd original msg].
+	if len(applied) != 2 {
+		t.Fatalf("expected 2 visible msgs, got %d", len(applied))
+	}
+	if applied[0].Role != memory.RoleSummary {
+		t.Errorf("first visible msg should be summary, got %q", applied[0].Role)
+	}
+	if applied[1].ID != all[2].ID {
+		t.Errorf("second visible msg should be the uncovered original, got %+v", applied[1])
+	}
+}
+
+func testAppendSummaryEmpty(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
+	before := len(msgs)
+	// Empty text → no-op.
+	_ = s.AppendSummary(ctx, "c", "", []memory.MsgID{msgs[0].ID})
+	// Empty coveredIDs → no-op.
+	_ = s.AppendSummary(ctx, "c", "would-summarize", nil)
+	after, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
+	if len(after) != before {
+		t.Errorf("AppendSummary empty should be no-op, msgs went %d → %d", before, len(after))
+	}
+}
+
+func testLatestSummaryCovered(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
+	firstTwo := []memory.MsgID{msgs[0].ID, msgs[1].ID}
+
+	covered, _ := s.LatestSummaryCovered(ctx, "c")
+	if len(covered) != 0 {
+		t.Errorf("no summary yet, want empty; got %v", covered)
+	}
+
+	_ = s.AppendSummary(ctx, "c", "sum", firstTwo)
+	covered, err := s.LatestSummaryCovered(ctx, "c")
+	if err != nil {
+		t.Fatalf("LatestSummaryCovered: %v", err)
+	}
+	if len(covered) != 2 {
+		t.Errorf("want 2 covered, got %d", len(covered))
+	}
+}
+
+func testListApplyFalse(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	_ = s.AppendMessage(ctx, "c", memory.Message{Role: "user"})
+	msgs, _ := s.ListMessages(ctx, "c", memory.ListOpts{})
+	_ = s.AppendSummary(ctx, "c", "sum", []memory.MsgID{msgs[0].ID})
+
+	raw, _ := s.ListMessages(ctx, "c", memory.ListOpts{ApplySummary: false})
+	// Raw timeline: 2 originals + summary = 3 entries.
+	if len(raw) != 3 {
+		t.Errorf("ApplySummary=false should return raw timeline of 3, got %d", len(raw))
+	}
+}
+
+func testConvEnsureGetUpdate(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	if err := s.EnsureConv(ctx, "c", "hello", memory.ChannelCC); err != nil {
+		t.Fatalf("EnsureConv: %v", err)
+	}
+	// Idempotent.
+	if err := s.EnsureConv(ctx, "c", "different-title", memory.ChannelCC); err != nil {
+		t.Fatalf("EnsureConv second: %v", err)
+	}
+	info, err := s.GetConv(ctx, "c")
+	if err != nil {
+		t.Fatalf("GetConv: %v", err)
+	}
+	if info.ID != "c" || info.Title != "hello" {
+		t.Errorf("EnsureConv should not overwrite title on second call, got %+v", info)
+	}
+	if err := s.UpdateConvTitle(ctx, "c", "renamed"); err != nil {
+		t.Fatalf("UpdateConvTitle: %v", err)
+	}
+	info, _ = s.GetConv(ctx, "c")
+	if info.Title != "renamed" {
+		t.Errorf("UpdateConvTitle did not persist, got %+v", info)
+	}
+}
+
+func testConvListFilterChannel(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.EnsureConv(ctx, "cc-1", "", memory.ChannelCC)
+	_ = s.EnsureConv(ctx, "cc-2", "", memory.ChannelCC)
+	_ = s.EnsureConv(ctx, "tg-1", "", memory.ChannelTelegram)
+
+	cc, _ := s.ListConvs(ctx, memory.ConvFilter{Channel: memory.ChannelCC})
+	if len(cc) != 2 {
+		t.Errorf("cc channel: want 2, got %d", len(cc))
+	}
+	tg, _ := s.ListConvs(ctx, memory.ConvFilter{Channel: memory.ChannelTelegram})
+	if len(tg) != 1 {
+		t.Errorf("tg channel: want 1, got %d", len(tg))
+	}
+	all, _ := s.ListConvs(ctx, memory.ConvFilter{})
+	if len(all) != 3 {
+		t.Errorf("no filter: want 3, got %d", len(all))
+	}
+}
+
+func testConvListExcludesArchived(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.EnsureConv(ctx, "live", "", memory.ChannelCC)
+	_ = s.EnsureConv(ctx, "old", "", memory.ChannelCC)
+	_ = s.ArchiveConv(ctx, "old")
+
+	live, _ := s.ListConvs(ctx, memory.ConvFilter{Channel: memory.ChannelCC})
+	if len(live) != 1 || live[0].ID != "live" {
+		t.Errorf("default should hide archived, got %+v", live)
+	}
+	all, _ := s.ListConvs(ctx, memory.ConvFilter{Channel: memory.ChannelCC, IncludeArchived: true})
+	if len(all) != 2 {
+		t.Errorf("IncludeArchived=true should return 2, got %d", len(all))
+	}
+}
+
+func testConvDeleteCascades(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.AppendMessage(ctx, "a", memory.Message{Role: "user", Content: "kept-or-gone"})
+	_ = s.AppendMessage(ctx, "b", memory.Message{Role: "user", Content: "kept"})
+	if err := s.DeleteConv(ctx, "a"); err != nil {
+		t.Fatalf("DeleteConv: %v", err)
+	}
+	aMsgs, _ := s.ListMessages(ctx, "a", memory.ListOpts{})
+	if len(aMsgs) != 0 {
+		t.Errorf("DeleteConv should cascade messages, got %d", len(aMsgs))
+	}
+	bMsgs, _ := s.ListMessages(ctx, "b", memory.ListOpts{})
+	if len(bMsgs) != 1 {
+		t.Errorf("unrelated conv b was affected: %d msgs", len(bMsgs))
+	}
+}
+
+func testLatestConvID(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.EnsureConv(ctx, "cc-old", "", memory.ChannelCC)
+	_ = s.EnsureConv(ctx, "cc-new", "", memory.ChannelCC)
+	_ = s.EnsureConv(ctx, "tg-1", "", memory.ChannelTelegram)
+	// cc-old gets a message, then cc-new, then tg-1.
+	_ = s.AppendMessage(ctx, "cc-old", memory.Message{Role: "user"})
+	_ = s.AppendMessage(ctx, "tg-1", memory.Message{Role: "user"})
+	_ = s.AppendMessage(ctx, "cc-new", memory.Message{Role: "user"})
+
+	ccLatest, _ := s.LatestConvID(ctx, memory.ChannelCC)
+	if ccLatest != "cc-new" {
+		t.Errorf("cc latest: got %q, want cc-new", ccLatest)
+	}
+	tgLatest, _ := s.LatestConvID(ctx, memory.ChannelTelegram)
+	if tgLatest != "tg-1" {
+		t.Errorf("tg latest: got %q, want tg-1", tgLatest)
+	}
+
+	// Archived convs are skipped.
+	_ = s.ArchiveConv(ctx, "cc-new")
+	ccLatest, _ = s.LatestConvID(ctx, memory.ChannelCC)
+	if ccLatest != "cc-old" {
+		t.Errorf("after archiving cc-new, cc latest should be cc-old, got %q", ccLatest)
 	}
 }
 

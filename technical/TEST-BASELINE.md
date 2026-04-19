@@ -56,7 +56,7 @@ on "no user-facing change".
 | `internal/marketplace` | 70.5 % | capability | legacy install path (SEC-001 covers bundle) |
 | `internal/firewall` | 78.9 % | sandbox | nettrack control socket (E2E-only) |
 | `internal/vault` | 48.8 % | sandbox | subprocess lifecycle (E2E-only) |
-| `internal/provider` | 46.4 % | ai | model routing, summarize pipeline |
+| `internal/provider` | 52.1 % | ai | CLI/Codex Invoke subprocess (E2E-only) |
 | `internal/router` | 62.5 % | ai | `ResolveModel` baseline |
 | `internal/agents` | 73.9 % | ai | agent loop, tool invocation |
 | `internal/controlcenter` | 47.6 % | runtime consumer | `chat_service` concurrency, session scoping |

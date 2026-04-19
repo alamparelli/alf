@@ -133,22 +133,21 @@ milestone 0.7.9 that cannot both enter and exit on a green
 `make regression` is rejected.
 
 A `make regression-race` target runs the same suite under the race
-detector. It is **not** part of the baseline contract because the
-audit surfaced a pre-existing race in
-`internal/agents/orchestrator.go:432` — tests
-`TestRun_PlanWithValidation_*` and `TestRun_Arbitration*` read a
-field that `Orchestrator.Run` writes from another goroutine without
-synchronisation. The production build does not run with `-race`
-either, so the race has not shipped a user-visible regression, but
-it must be fixed before the ai rework starts (step 4). Tracked in
-#345. Until then, `regression-race` is the tech-debt tracker.
+detector and is now **part of the baseline contract** alongside
+`make regression`. #345 fixed the pre-existing race on `TaskMeta`
+(Orchestrator.Run writes vs. Running()/Approve reads) by guarding
+every meta mutation with `o.mu` and returning deep copies from
+Running(). From this point on, any ticket whose diff introduces a
+new data race must either resolve it before merging or file a
+tracking issue and leave the race unfixed only with explicit
+milestone-owner approval.
 
 ## Entry / exit contract for follow-up tickets
 
 Every ticket in milestone 0.7.9 (#344+) links to this file and
 states, in its acceptance section:
 
-> Entry: `make regression` green on HEAD.
-> Exit: `make regression` green on HEAD of the ticket branch, with
-> coverage for the moved packages not below the baseline in the
-> table above.
+> Entry: `make regression` AND `make regression-race` green on HEAD.
+> Exit: `make regression` AND `make regression-race` green on HEAD
+> of the ticket branch, with coverage for the moved packages not
+> below the baseline in the table above.

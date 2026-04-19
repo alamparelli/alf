@@ -47,9 +47,9 @@ func needsSecret(path string) bool {
 	return info.Size() == 0
 }
 
-// SetSecret writes a secret file with mode 644 so containers running as
-// non-root (e.g. whisper uid 1000) can read bind-mounted secrets.
-// The secrets directory itself stays 700 (owner-only traversal on the host).
+// SetSecret writes a secret file with mode 0600 in a 0700 directory.
+// Sidecars (whisper/embed) run as uid 1000; secret files must be owned
+// by a uid the sidecar can read (host uid 1000, or explicit chown).
 func SetSecret(baseDir, name, value string) error {
 	dir := secretsDir(baseDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -70,16 +70,14 @@ func SetSecret(baseDir, name, value string) error {
 // Call during upgrade to fix installs that used 0o644.
 func HardenSecrets(baseDir string) {
 	dir := secretsDir(baseDir)
-	os.Chmod(dir, 0o755)
+	os.Chmod(dir, 0o700)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	// Secrets must be 0644 so containers running as non-root (uid 1000)
-	// can read bind-mounted files even when the host runs as root.
 	for _, e := range entries {
 		if !e.IsDir() {
-			os.Chmod(filepath.Join(dir, e.Name()), 0o644)
+			os.Chmod(filepath.Join(dir, e.Name()), 0o600)
 		}
 	}
 }

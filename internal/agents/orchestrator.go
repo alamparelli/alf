@@ -84,6 +84,9 @@ func (o *Orchestrator) SetTooling(registry *tooling.Registry, executor *tooling.
 }
 
 // Running returns a snapshot of all currently running tasks.
+//
+// The returned RunningTask.Meta is a deep copy — callers may read it freely
+// without synchronising with Run(). See #345.
 func (o *Orchestrator) Running() []RunningTask {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -92,10 +95,57 @@ func (o *Orchestrator) Running() []RunningTask {
 		tasks = append(tasks, RunningTask{
 			ID:        rt.ID,
 			StartedAt: rt.StartedAt,
-			Meta:      rt.Meta,
+			Meta:      cloneMetaLocked(rt.Meta),
 		})
 	}
 	return tasks
+}
+
+// cloneMetaLocked returns a deep copy of meta. Caller MUST hold o.mu.
+func cloneMetaLocked(meta *TaskMeta) *TaskMeta {
+	if meta == nil {
+		return nil
+	}
+	cp := *meta
+	if meta.Plan != nil {
+		cp.Plan = append([]PlanStep(nil), meta.Plan...)
+	}
+	if meta.Questions != nil {
+		cp.Questions = append([]string(nil), meta.Questions...)
+	}
+	if meta.AgentCalls != nil {
+		cp.AgentCalls = append([]AgentResult(nil), meta.AgentCalls...)
+	}
+	if meta.CompletedAt != nil {
+		t := *meta.CompletedAt
+		cp.CompletedAt = &t
+	}
+	return &cp
+}
+
+// updateMeta mutates meta under o.mu and persists a JSON snapshot atomically.
+// Any TaskMeta change that could be observed via Running() MUST go through
+// updateMeta or setMeta. See #345.
+func (o *Orchestrator) updateMeta(taskDir string, meta *TaskMeta, fn func(*TaskMeta)) {
+	o.mu.Lock()
+	fn(meta)
+	data, err := json.MarshalIndent(meta, "", "  ")
+	o.mu.Unlock()
+	if err != nil {
+		log.Printf("[orchestrator] failed to marshal task meta: %v", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "task.json"), data, 0o644); err != nil {
+		log.Printf("[orchestrator] failed to write task meta: %v", err)
+	}
+}
+
+// setMeta mutates meta under o.mu without persisting. Use for bookkeeping that
+// doesn't need an immediate disk flush (e.g. iteration counter).
+func (o *Orchestrator) setMeta(meta *TaskMeta, fn func(*TaskMeta)) {
+	o.mu.Lock()
+	fn(meta)
+	o.mu.Unlock()
 }
 
 // Cancel stops a running task by ID. Returns true if the task was found and cancelled.
@@ -149,8 +199,12 @@ func (o *Orchestrator) DeleteTask(taskID string) bool {
 func (o *Orchestrator) Approve(taskID string, decision ApprovalDecision) bool {
 	o.mu.Lock()
 	rt, ok := o.running[taskID]
+	var status string
+	if ok {
+		status = rt.Meta.Status
+	}
 	o.mu.Unlock()
-	if !ok || (rt.Meta.Status != "awaiting_approval" && rt.Meta.Status != "awaiting_arbitration") {
+	if !ok || (status != "awaiting_approval" && status != "awaiting_arbitration") {
 		return false
 	}
 	select {
@@ -270,15 +324,30 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		// If status is still "running", "awaiting_approval", or "awaiting_arbitration"
 		// when we exit (e.g. context cancelled, panic recovery), update disk so the
 		// task isn't orphaned as invisible.
+		o.mu.Lock()
+		shouldPersist := false
 		if meta.Status == "running" || meta.Status == "awaiting_approval" || meta.Status == "awaiting_arbitration" {
 			meta.Status = "interrupted"
 			now := time.Now()
 			meta.CompletedAt = &now
-			o.saveMeta(taskDir, meta)
+			shouldPersist = true
 		}
-		o.mu.Lock()
 		delete(o.running, taskID)
+		var data []byte
+		if shouldPersist {
+			var err error
+			data, err = json.MarshalIndent(meta, "", "  ")
+			if err != nil {
+				log.Printf("[orchestrator] failed to marshal task meta: %v", err)
+				shouldPersist = false
+			}
+		}
 		o.mu.Unlock()
+		if shouldPersist {
+			if err := os.WriteFile(filepath.Join(taskDir, "task.json"), data, 0o644); err != nil {
+				log.Printf("[orchestrator] failed to write task meta: %v", err)
+			}
+		}
 	}()
 
 	sm := newSessionManager()
@@ -313,7 +382,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	lastRawOutput := ""
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
-		meta.Iterations = iteration + 1
+		o.setMeta(meta, func(m *TaskMeta) { m.Iterations = iteration + 1 })
 		iterStart := time.Now()
 
 		log.Printf("[orchestrator] ── iteration %d/%d ──", iteration+1, maxIterations)
@@ -353,15 +422,16 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 
 		if err != nil {
 			log.Printf("[orchestrator] FAILED iteration %d: %v", iteration+1, err)
-			meta.Status = "failed"
-			now := time.Now()
-			meta.CompletedAt = &now
-			o.saveMeta(taskDir, meta)
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				m.Status = "failed"
+				now := time.Now()
+				m.CompletedAt = &now
+			})
 			return "", meta, fmt.Errorf("orchestrator invoke: %w", err)
 		}
 
 		iterDur := time.Since(iterStart)
-		meta.TotalCost += result.CostUSD
+		o.setMeta(meta, func(m *TaskMeta) { m.TotalCost += result.CostUSD })
 		if result.SessionID != "" {
 			sm.Set(orchestratorKey, result.SessionID)
 		}
@@ -375,10 +445,11 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			turnLimitRetries++
 			if turnLimitRetries > maxTurnLimitRetries {
 				log.Printf("[orchestrator] ✗ orchestrator hit turn limit %d times - aborting", turnLimitRetries)
-				meta.Status = "failed"
-				now := time.Now()
-				meta.CompletedAt = &now
-				o.saveMeta(taskDir, meta)
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+					m.Status = "failed"
+					now := time.Now()
+					m.CompletedAt = &now
+				})
 				return "", meta, fmt.Errorf("orchestrator repeatedly hit turn limit (%d retries) - try increasing max_turns in the orchestrator tier config", maxTurnLimitRetries)
 			}
 			log.Printf("[orchestrator] ⚠ orchestrator hit turn limit (%d/%d retries) - clearing session", turnLimitRetries, maxTurnLimitRetries)
@@ -422,15 +493,13 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 
 		// Plan output - display and optionally block for approval.
 		if len(output.Plan) > 0 {
-			meta.Plan = output.Plan
-			o.saveMeta(taskDir, meta)
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) { m.Plan = output.Plan })
 			if onProgress != nil {
 				onProgress("plan_ready", "")
 			}
 
 			if rc.NeedValidation {
-				meta.Status = "awaiting_approval"
-				o.saveMeta(taskDir, meta)
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) { m.Status = "awaiting_approval" })
 				if onProgress != nil {
 					onProgress("awaiting_approval", "")
 				}
@@ -440,15 +509,15 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 					return "", meta, ctx.Err()
 				case decision := <-rt.ApprovalCh:
 					if !decision.Approved {
-						meta.Status = "running"
-						meta.ValidationFeedback = decision.Feedback
-						meta.Plan = nil
-						o.saveMeta(taskDir, meta)
+						o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+							m.Status = "running"
+							m.ValidationFeedback = decision.Feedback
+							m.Plan = nil
+						})
 						prompt = `{"plan_rejected":true,"feedback":"` + escapeJSON(decision.Feedback) + `","instruction":"revise your plan based on the feedback and output a new plan"}`
 						continue
 					}
-					meta.Status = "running"
-					o.saveMeta(taskDir, meta)
+					o.updateMeta(taskDir, meta, func(m *TaskMeta) { m.Status = "running" })
 				}
 			}
 			// Tell orchestrator to execute the plan.
@@ -459,9 +528,10 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		// Questions from orchestrator — enter arbitration mode.
 		if len(output.Questions) > 0 {
 			log.Printf("[orchestrator] orchestrator has %d question(s) for the user", len(output.Questions))
-			meta.Questions = output.Questions
-			meta.Status = "awaiting_arbitration"
-			o.saveMeta(taskDir, meta)
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				m.Questions = output.Questions
+				m.Status = "awaiting_arbitration"
+			})
 			if onProgress != nil {
 				onProgress("awaiting_arbitration", taskID)
 			}
@@ -470,9 +540,10 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			case <-ctx.Done():
 				return "", meta, ctx.Err()
 			case decision := <-rt.ApprovalCh:
-				meta.Status = "running"
-				meta.Questions = nil
-				o.saveMeta(taskDir, meta)
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+					m.Status = "running"
+					m.Questions = nil
+				})
 				prompt = `{"arbitration_response":"` + escapeJSON(decision.Feedback) + `","instruction":"the user has answered your questions, continue with the task"}`
 				continue
 			}
@@ -481,11 +552,12 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		// Final response - done.
 		if output.Response != "" {
 			log.Printf("[orchestrator] ✓ final response received (%d chars)", len(output.Response))
-			meta.Status = "completed"
-			meta.Response = output.Response
-			now := time.Now()
-			meta.CompletedAt = &now
-			o.saveMeta(taskDir, meta)
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				m.Status = "completed"
+				m.Response = output.Response
+				now := time.Now()
+				m.CompletedAt = &now
+			})
 			totalDur := time.Since(meta.StartedAt)
 			log.Printf("[orchestrator] task %s completed: %d iterations %dms $%.4f",
 				taskID, meta.Iterations, totalDur.Milliseconds(), meta.TotalCost)
@@ -504,10 +576,11 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			if consecutiveNonJSON >= maxConsecutiveNonJSON {
 				log.Printf("[orchestrator] ✗ brain returned same non-JSON output %d times - aborting: %s",
 					consecutiveNonJSON, truncate(result.Text, 200))
-				meta.Status = "failed"
-				now := time.Now()
-				meta.CompletedAt = &now
-				o.saveMeta(taskDir, meta)
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+					m.Status = "failed"
+					now := time.Now()
+					m.CompletedAt = &now
+				})
 				return "", meta, fmt.Errorf("orchestrator brain error (repeated %d times): %s",
 					consecutiveNonJSON, truncate(result.Text, 200))
 			}
@@ -561,9 +634,10 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		}
 		if len(agentQuestions) > 0 {
 			log.Printf("[orchestrator] agents raised %d question(s) for the user", len(agentQuestions))
-			meta.Questions = agentQuestions
-			meta.Status = "awaiting_arbitration"
-			o.saveMeta(taskDir, meta)
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				m.Questions = agentQuestions
+				m.Status = "awaiting_arbitration"
+			})
 			if onProgress != nil {
 				onProgress("awaiting_arbitration", taskID)
 			}
@@ -571,9 +645,10 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 			case <-ctx.Done():
 				return "", meta, ctx.Err()
 			case decision := <-rt.ApprovalCh:
-				meta.Status = "running"
-				meta.Questions = nil
-				o.saveMeta(taskDir, meta)
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+					m.Status = "running"
+					m.Questions = nil
+				})
 				// Inject user answers into the next resume prompt alongside agent results.
 				prompt = `{"arbitration_response":"` + escapeJSON(decision.Feedback) + `","instruction":"the user answered the agents' questions, incorporate their answers and continue"}`
 				continue
@@ -617,10 +692,11 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 
 	// Max iterations exceeded.
 	log.Printf("[orchestrator] ✗ task %s hit max iterations (%d)", taskID, maxIterations)
-	meta.Status = "timeout"
-	now := time.Now()
-	meta.CompletedAt = &now
-	o.saveMeta(taskDir, meta)
+	o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+		m.Status = "timeout"
+		now := time.Now()
+		m.CompletedAt = &now
+	})
 	return "", meta, fmt.Errorf("max iterations (%d) exceeded", maxIterations)
 }
 
@@ -675,22 +751,21 @@ func (o *Orchestrator) executeDelegates(
 	}
 
 	// Pre-register all agents as "working" in meta so the Tasks UI shows them immediately.
-	mu.Lock()
 	workingIndices := make(map[string]int, len(indexed)) // agent key → index in AgentCalls
-	for _, id := range indexed {
-		key := id.Agent
-		if agentCount[id.Agent] > 1 {
-			key = fmt.Sprintf("%s#%d", id.Agent, id.index)
+	o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+		for _, id := range indexed {
+			key := id.Agent
+			if agentCount[id.Agent] > 1 {
+				key = fmt.Sprintf("%s#%d", id.Agent, id.index)
+			}
+			workingIndices[key] = len(m.AgentCalls)
+			m.AgentCalls = append(m.AgentCalls, AgentResult{
+				Agent:  id.Agent,
+				Task:   id.DelegateRequest.Task,
+				Status: "working",
+			})
 		}
-		workingIndices[key] = len(meta.AgentCalls)
-		meta.AgentCalls = append(meta.AgentCalls, AgentResult{
-			Agent:  id.Agent,
-			Task:   id.DelegateRequest.Task,
-			Status: "working",
-		})
-	}
-	o.saveMeta(taskDir, meta)
-	mu.Unlock()
+	})
 
 	for _, id := range indexed {
 		wg.Add(1)
@@ -716,13 +791,13 @@ func (o *Orchestrator) executeDelegates(
 
 			mu.Lock()
 			results = append(results, ar)
-			// Update the pre-registered "working" entry with final result.
-			if i, ok := workingIndices[sessionKey]; ok && i < len(meta.AgentCalls) {
-				meta.AgentCalls[i] = ar
-			}
-			meta.TotalCost += ar.CostUSD
-			o.saveMeta(taskDir, meta)
 			mu.Unlock()
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				if i, ok := workingIndices[sessionKey]; ok && i < len(m.AgentCalls) {
+					m.AgentCalls[i] = ar
+				}
+				m.TotalCost += ar.CostUSD
+			})
 		}(id.DelegateRequest, id.index)
 	}
 

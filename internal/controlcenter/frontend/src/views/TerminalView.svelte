@@ -180,13 +180,9 @@
       // Send initial resize
       scheduleFit(0)
       scheduleFit(120)
-      // Local terminal: attach to persistent tmux session "web" (survives page refresh).
-      // -A = attach if exists, create otherwise. -D = detach any prior client to avoid ghost mirroring.
+      // Default to data directory (local terminal only)
       if (!sshService) {
-        setTimeout(
-          () => sendInput('cd /home/alf/data 2>/dev/null; tmux new-session -A -D -s web\n'),
-          100
-        )
+        setTimeout(() => sendInput('cd /home/alf/data && clear\n'), 100)
       }
     }
 
@@ -413,8 +409,6 @@
     min-height: 0;
     position: relative;
     overflow: hidden;
-    padding: 12px 16px 16px;
-    box-sizing: border-box;
   }
 
   .term-header {
@@ -460,9 +454,8 @@
     min-height: 0;
     overflow: hidden;
     border-radius: var(--radius, 8px);
-    padding: 10px 12px;
+    padding: 4px;
     width: 100%;
-    background: var(--bg-card);
   }
 
   /* Mobile input */
@@ -506,10 +499,6 @@
       height: calc(100dvh - 36px - env(safe-area-inset-top, 0px));
       max-height: calc(100dvh - 36px - env(safe-area-inset-top, 0px));
       margin-bottom: 0;
-      padding: 8px 10px 10px;
-    }
-    .term-container {
-      padding: 8px;
     }
   }
 </style>

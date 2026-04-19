@@ -159,6 +159,14 @@ func New(dataDir string) (*DB, error) {
 		return nil, fmt.Errorf("chatdb open: %w", err)
 	}
 
+	// SQLite permits one writer at a time. The DSN busy_timeout is a
+	// per-connection pragma and Go's sql pool does not re-apply it on
+	// pool-borrowed connections, so concurrent writers race and fail
+	// with "database is locked" (see #346). Pin the pool to a single
+	// connection — reads are cheap, chatdb is small, and the memory
+	// rework in 0.7.9 moves this behind a single ConvStore anyway.
+	db.SetMaxOpenConns(1)
+
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("chatdb WAL: %w", err)
@@ -216,6 +224,9 @@ func (d *DB) EnsureConversation(id, title, source string) error {
 }
 
 // InsertMessage inserts a message along with its content blocks and media in a single transaction.
+// Safe for concurrent use: the pool is pinned to one connection (see New), so
+// concurrent writers are serialised at the sql layer and will not see
+// "database is locked". Callers may assume at-most-one writer at a time.
 func (d *DB) InsertMessage(msg Message) error {
 	if msg.Source == "" {
 		msg.Source = "cc"

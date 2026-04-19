@@ -2,7 +2,6 @@ package chatdb
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -289,13 +288,11 @@ func TestDeleteConversation_CascadesMessages(t *testing.T) {
 
 // ----- Concurrent multi-conv writes -----------------------------------
 
-// Concurrent writers across distinct conversations. Today chatdb
-// returns "database is locked" under real concurrency (tracked in
-// #346) because the Go sql pool does not re-apply the busy_timeout
-// pragma to pool-borrowed connections. Callers must retry. This
-// test pins the isolation property — not the concurrency limit.
-// Once #346 lands, the retry loop becomes a no-op; the test still
-// passes, so we do not need to edit it.
+// Concurrent writers across distinct conversations. Pins two
+// properties at once (#346): (1) concurrent InsertMessage returns
+// zero errors — no retry loop — because chatdb now serialises the
+// pool to a single connection; (2) isolation still holds, no
+// cross-conv bleed and seq numbers stay 1..N per conv.
 func TestConcurrentInserts_NoCrossConvBleed(t *testing.T) {
 	db := newTestDB(t)
 	const nConvs = 4
@@ -303,20 +300,6 @@ func TestConcurrentInserts_NoCrossConvBleed(t *testing.T) {
 
 	for i := 0; i < nConvs; i++ {
 		db.EnsureConversation(fmt.Sprintf("c%d", i), "", "cc")
-	}
-
-	insertWithRetry := func(msg Message) error {
-		for attempt := 0; attempt < 50; attempt++ {
-			err := db.InsertMessage(msg)
-			if err == nil {
-				return nil
-			}
-			if !strings.Contains(err.Error(), "locked") {
-				return err
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-		return fmt.Errorf("still locked after retries")
 	}
 
 	var wg sync.WaitGroup
@@ -327,7 +310,7 @@ func TestConcurrentInserts_NoCrossConvBleed(t *testing.T) {
 			defer wg.Done()
 			convID := fmt.Sprintf("c%d", c)
 			for i := 0; i < nMsgs; i++ {
-				if err := insertWithRetry(Message{
+				if err := db.InsertMessage(Message{
 					ID:     fmt.Sprintf("%s-%d", convID, i),
 					ConvID: convID,
 					Role:   "user",

@@ -59,7 +59,7 @@ on "no user-facing change".
 | `internal/provider` | 52.1 % | ai | CLI/Codex Invoke subprocess (E2E-only) |
 | `internal/router` | 62.5 % | ai | `ResolveModel` baseline |
 | `internal/agents` | 73.9 % | ai | agent loop, tool invocation |
-| `internal/controlcenter` | 47.6 % | runtime consumer | `chat_service` concurrency, session scoping |
+| `internal/controlcenter` | 49.0 % | runtime consumer | handler_avatar covered; chat handlers + avatar/backends still partial |
 | `pkg/appsdk` | 26.4 % | guest SDK | app-side contract stays stable |
 
 ### Outside the move path (reference green)

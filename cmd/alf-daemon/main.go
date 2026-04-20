@@ -479,12 +479,17 @@ func main() {
 	// One-shot backfill of pre-#337 memstore data into memory.Store so the
 	// recallers (#337c2, now reading from memory.Store) see the existing
 	// fact corpus. Sentinel-gated so it runs exactly once per install.
-	// Non-fatal — a failed migration logs and continues; memstore still
-	// serves the old data through the dual-write shim + next extractor run.
+	// Runs asynchronously — on a corpus of thousands of rows the
+	// embedder round-trips serialise to ~1s/row, which would block the
+	// HTTP server from opening for many minutes otherwise. Search+recall
+	// degrade gracefully until the backfill lands (missing rows just
+	// don't show up in vec hits yet).
 	if cfg.EffectiveMemoryEnabled() {
-		if err := migrateMemstoreToMemory(context.Background(), contextDir, memStore); err != nil {
-			log.Printf("[memstore-migrate] failed: %v", err)
-		}
+		go func() {
+			if err := migrateMemstoreToMemory(context.Background(), contextDir, memStore); err != nil {
+				log.Printf("[memstore-migrate] failed: %v", err)
+			}
+		}()
 
 		// memstore.sock protocol now served by socketsrv on top of
 		// memory.Store (#337c4b3). The path is unchanged so memory-tools

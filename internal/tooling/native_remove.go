@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	sbexec "github.com/alamparelli/alf/internal/sandbox/exec"
 )
 
 // RemoveNativeTool deletes files or directories with post-deletion verification.
@@ -62,7 +64,7 @@ func (t RemoveNativeTool) Run(_ context.Context, argsJSON string) (string, error
 	}
 
 	// Resolve relative paths against DataDir.
-	args.Path = ResolvePath(t.DataDir, args.Path)
+	args.Path = sbexec.ResolvePath(t.DataDir, args.Path)
 
 	// Block protected paths.
 	if protectedPaths[args.Path] {
@@ -73,7 +75,7 @@ func (t RemoveNativeTool) Run(_ context.Context, argsJSON string) (string, error
 		return "", fmt.Errorf("refusing to delete data root: %s", args.Path)
 	}
 	// Block paths outside DataDir (resolves symlinks to prevent escape).
-	if _, err := CheckBoundary(t.DataDir, args.Path); err != nil {
+	if _, err := sbexec.CheckBoundary(t.DataDir, args.Path); err != nil {
 		return "", err
 	}
 

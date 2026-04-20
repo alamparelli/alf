@@ -68,6 +68,25 @@ func (r *Registry) Get(id ID) (Capability, bool) {
 	return c, ok
 }
 
+// Resolve is the Runtime-facing accessor: it satisfies the lookup half of
+// runtime.CapabilityRegistry (defined in internal/runtime). Behaviour is
+// identical to Get — Resolve exists to let *Registry match the Runtime
+// interface without an adapter type.
+func (r *Registry) Resolve(id ID) (Capability, bool) {
+	return r.Get(id)
+}
+
+// List returns every registered Manifest, sorted by ID for determinism.
+// It satisfies the enumeration half of runtime.CapabilityRegistry.
+func (r *Registry) List() []Manifest {
+	caps := r.All()
+	out := make([]Manifest, 0, len(caps))
+	for _, c := range caps {
+		out = append(out, c.Manifest())
+	}
+	return out
+}
+
 // Len returns the number of registered capabilities.
 func (r *Registry) Len() int {
 	r.mu.RLock()

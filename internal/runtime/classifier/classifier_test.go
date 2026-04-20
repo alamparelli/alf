@@ -1,4 +1,4 @@
-package router
+package classifier
 
 import (
 	"bytes"
@@ -208,29 +208,6 @@ func TestValidTierSet_ExcludesNonRoutable(t *testing.T) {
 
 	if valid[firstName] {
 		t.Errorf("non-routable tier %q should not be in valid set", firstName)
-	}
-}
-
-func TestResolveModel(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"haiku", "claude-haiku-4-5"},
-		{"sonnet", "claude-sonnet-4-6"},
-		{"opus", "claude-opus-4-6"},
-		{"sonnet-max", "claude-sonnet-4-6-max"},
-		{"opus-max", "claude-opus-4-6-max"},
-		{"Haiku", "claude-haiku-4-5"},
-		{"claude-sonnet-4-6", "claude-sonnet-4-6"},
-		{"unknown", ""},
-	}
-
-	for _, tt := range tests {
-		got := ResolveModel(tt.input)
-		if got != tt.want {
-			t.Errorf("ResolveModel(%q) = %q, want %q", tt.input, got, tt.want)
-		}
 	}
 }
 

@@ -1,4 +1,9 @@
-package router
+// Package classifier routes a user message to a tier and, when the router
+// decides to answer directly, produces a ready-made response. It lives
+// inside internal/runtime/ because it imports memory + controlcenter —
+// imports that would violate §4 if placed under internal/ai/. Moved here
+// from internal/router/ in #340 R2a.
+package classifier
 
 import (
 	"encoding/json"
@@ -8,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alamparelli/alf/internal/ai"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/memory"
 )
@@ -38,14 +42,6 @@ type ClassifyInput struct {
 	MessageCount  int             // from session store
 	AgentTeams    []AgentTeamInfo // available agent teams for routing hints
 	RecentContext string          // compact summary of recent conversation turns
-}
-
-// ResolveModel is a thin re-export of ai.ResolveModel — the single
-// authoritative model resolver. Kept here for backward compatibility with
-// consumers that import internal/router; will be removed when those callers
-// migrate to ai.ResolveModel directly (#340 A5).
-func ResolveModel(short string) string {
-	return string(ai.ResolveModel(short))
 }
 
 // BuildSystemPrompt constructs the one-time system prompt for the persistent

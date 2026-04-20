@@ -42,6 +42,24 @@ func (r *Registry) Register(c Capability) error {
 	return nil
 }
 
+// Replace upserts a Capability: if an entry with the same ID exists it is
+// overwritten, otherwise the Capability is added. Use this when mirroring
+// a mutable external source (e.g. skills reloaded from disk) where calling
+// Register on every refresh would fail on duplicates.
+func (r *Registry) Replace(c Capability) error {
+	if c == nil {
+		return fmt.Errorf("capability: cannot replace with nil")
+	}
+	m := c.Manifest()
+	if m.ID == "" {
+		return fmt.Errorf("capability: manifest ID is empty")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.caps[m.ID] = c
+	return nil
+}
+
 // Get returns the Capability registered under id, or (nil, false) if absent.
 func (r *Registry) Get(id ID) (Capability, bool) {
 	r.mu.RLock()

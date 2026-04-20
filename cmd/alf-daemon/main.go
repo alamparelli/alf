@@ -677,6 +677,11 @@ func main() {
 	// tooling.Registry until Runtime arrives in Step 4.
 	capRegistry := capability.NewRegistry()
 	toolRegistry.SetCapabilityRegistry(capRegistry)
+	// #338 C3: mirror every loaded Skill into capRegistry as KindSkill.
+	// Re-run after each Reload below so the unified registry stays in sync.
+	if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
+		log.Printf("skills: capability mirror (initial): %v", err)
+	}
 	nativeTools := []tooling.NativeTool{
 		tooling.BashNativeTool{DataDir: dataDir},
 		tooling.GrepNativeTool{DataDir: dataDir},
@@ -1466,6 +1471,9 @@ func main() {
 					log.Printf("skills reload error: %v", err)
 				} else {
 					injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
+					if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
+						log.Printf("skills: capability mirror (reload): %v", err)
+					}
 					log.Println("skills reloaded")
 				}
 				if git != nil {
@@ -1588,6 +1596,9 @@ func main() {
 					log.Printf("skills reload error: %v", err)
 				} else {
 					injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
+					if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
+						log.Printf("skills: capability mirror (reload): %v", err)
+					}
 					log.Println("skills reloaded")
 				}
 				if git != nil {

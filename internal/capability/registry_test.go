@@ -67,6 +67,43 @@ func TestRegistry_RegisterDuplicateRejected(t *testing.T) {
 	}
 }
 
+func TestRegistry_ReplaceUpserts(t *testing.T) {
+	r := NewRegistry()
+	first := newStub("x", KindTool)
+	if err := r.Replace(first); err != nil {
+		t.Fatalf("Replace (add): %v", err)
+	}
+	if r.Len() != 1 {
+		t.Fatalf("Len after insert: want 1, got %d", r.Len())
+	}
+	second := stubCap{manifest: Manifest{ID: "x", Kind: KindSkill, Name: "renamed"}}
+	if err := r.Replace(second); err != nil {
+		t.Fatalf("Replace (overwrite): %v", err)
+	}
+	if r.Len() != 1 {
+		t.Fatalf("Len after overwrite: want 1, got %d", r.Len())
+	}
+	got, _ := r.Get("x")
+	if got.Manifest().Kind != KindSkill {
+		t.Fatalf("Replace did not overwrite: kind=%v", got.Manifest().Kind)
+	}
+}
+
+func TestRegistry_ReplaceNilRejected(t *testing.T) {
+	r := NewRegistry()
+	if err := r.Replace(nil); err == nil {
+		t.Fatal("Replace(nil): expected error")
+	}
+}
+
+func TestRegistry_ReplaceEmptyIDRejected(t *testing.T) {
+	r := NewRegistry()
+	c := stubCap{manifest: Manifest{ID: ""}}
+	if err := r.Replace(c); err == nil {
+		t.Fatal("Replace(empty ID): expected error")
+	}
+}
+
 func TestRegistry_GetMissing(t *testing.T) {
 	r := NewRegistry()
 	if _, ok := r.Get("missing"); ok {

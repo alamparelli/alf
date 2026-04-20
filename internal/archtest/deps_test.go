@@ -59,42 +59,62 @@ type pkgInfo struct {
 	Imports    []string
 }
 
-// TestDependencyRules verifies the v0.7.10 dependency rules.
+// TestFoundationDependencyRules enforces that the five foundation packages
+// (capability, memory, ai, sandbox, runtime) do not cross-import each other
+// beyond what ARCHITECTURE-v0.7.10 §4 allows (runtime may import the four
+// leaves; no leaf may import another leaf or runtime).
 //
-// INFORMATIONAL: violations are reported via t.Log. The test never fails.
-// Flip to t.Errorf once the migration baseline is clean (end of Step 4 / start
-// of Step 5).
-func TestDependencyRules(t *testing.T) {
+// This test is ENFORCING — violations fail the build. The rule hardens the
+// contract at the heart of the v0.7.10 rework: accidental coupling inside
+// the five-block foundation is a regression.
+func TestFoundationDependencyRules(t *testing.T) {
 	pkgs, err := listPackages(t)
 	if err != nil {
 		t.Skipf("archtest skipped: go list failed: %v", err)
 		return
 	}
 
-	foundationViolations := 0
-	consumerViolations := 0
-
 	for _, p := range pkgs {
 		rel := strings.TrimPrefix(p.ImportPath, modulePrefix)
-
-		// Rule A: foundation packages must not import forbidden peers.
-		if forbidden, ok := forbiddenImports[rel]; ok {
-			for _, imp := range p.Imports {
-				impRel := strings.TrimPrefix(imp, modulePrefix)
-				if _, bad := forbidden[impRel]; bad {
-					t.Logf("VIOLATION (foundation cross-import): %s imports %s", rel, impRel)
-					foundationViolations++
-				}
-			}
+		forbidden, ok := forbiddenImports[rel]
+		if !ok {
 			continue
 		}
+		for _, imp := range p.Imports {
+			impRel := strings.TrimPrefix(imp, modulePrefix)
+			if _, bad := forbidden[impRel]; bad {
+				t.Errorf("foundation cross-import: %s imports %s (see technical/ARCHITECTURE-v0.7.10.md §4)", rel, impRel)
+			}
+		}
+	}
+}
 
-		// Rule B: consumers (everything else under internal/, excluding runtime)
-		// must not directly import any leaf foundation package.
+// TestConsumerDependencyRules reports cases where a consumer (any internal/
+// package outside the five foundation blocks) imports a leaf foundation
+// package directly. Target state: consumers go through internal/runtime.
+//
+// INFORMATIONAL during milestone 0.7.9: violations are reported via t.Log.
+// Flip to t.Errorf at the end of Step 4 (#340) once Runtime is written and
+// consumers have been migrated.
+func TestConsumerDependencyRules(t *testing.T) {
+	pkgs, err := listPackages(t)
+	if err != nil {
+		t.Skipf("archtest skipped: go list failed: %v", err)
+		return
+	}
+
+	consumerViolations := 0
+	for _, p := range pkgs {
+		rel := strings.TrimPrefix(p.ImportPath, modulePrefix)
 		if !strings.HasPrefix(rel, "internal/") {
 			continue
 		}
 		if _, isFoundation := foundation[rel]; isFoundation {
+			continue
+		}
+		// Skip foundation-package-scoped children (e.g. internal/memory/dedup)
+		// — they are part of the memory block, not independent consumers.
+		if isFoundationChild(rel) {
 			continue
 		}
 		for _, imp := range p.Imports {
@@ -106,9 +126,20 @@ func TestDependencyRules(t *testing.T) {
 		}
 	}
 
-	t.Logf("archtest summary: foundationViolations=%d consumerViolations=%d pkgsScanned=%d",
-		foundationViolations, consumerViolations, len(pkgs))
-	t.Log("archtest is INFORMATIONAL at Step 0 — these violations are expected during migration")
+	t.Logf("archtest summary: consumerViolations=%d pkgsScanned=%d", consumerViolations, len(pkgs))
+	t.Log("consumer rule is INFORMATIONAL until Step 4 (#340) lands runtime")
+}
+
+// isFoundationChild returns true for packages nested inside a foundation
+// block (e.g. internal/memory/dedup, internal/memory/socketsrv). Those are
+// part of the block itself and may import their parent freely.
+func isFoundationChild(rel string) bool {
+	for f := range foundation {
+		if strings.HasPrefix(rel, f+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // listPackages runs `go list -json ./...` and decodes the stream.

@@ -443,23 +443,8 @@ func main() {
 		}
 	}
 
-	var memDB *memstore.Store
 	if !cfg.EffectiveMemoryEnabled() {
 		log.Println("memstore: disabled by config (memory_enabled=false)")
-	} else {
-		dedupCfg := memstore.DedupConfig{
-			TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
-			CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
-		}
-		var err error
-		memDB, err = memstore.New(filepath.Join(contextDir, "memory.db"), embedder, dedupCfg)
-		if err != nil {
-			log.Printf("warning: memory store init failed: %v", err)
-		} else {
-			defer memDB.Close()
-			memDB.CheckDims()
-			log.Printf("memstore: ready (db=%s)", filepath.Join(contextDir, "memory.db"))
-		}
 	}
 
 	// Ring buffer tracking Alf's sent message IDs for reaction matching.
@@ -485,11 +470,11 @@ func main() {
 	}
 	defer memStore.Close()
 
-	// (#337c4d3) The C1 dual-write shim is gone: every production writer
-	// — Extractor, Consolidator, ingest adapter, socket server — now
-	// targets memory.Store directly. memstore.Store lingers only for
-	// its DedupConfig hot-reload hooks below; a future cleanup will
-	// retire those and delete the memstore package.
+	// memstore.Store retired in #337 close-out: every writer targets
+	// memory.Store directly (Extractor via dedup.IndexWithDedup,
+	// Consolidator same, ingest adapter, socket server via socketsrv).
+	// The legacy package now holds only the ONNX Embedder + Tokenizer
+	// that the embed-server binary consumes.
 
 	// One-shot backfill of pre-#337 memstore data into memory.Store so the
 	// recallers (#337c2, now reading from memory.Store) see the existing
@@ -929,7 +914,7 @@ func main() {
 			log.Printf("[tasks] event: task=%s status=%s origin=%s", taskID[:min(8, len(taskID))], status, source)
 			notifyChannel(source, text)
 		}
-		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memRecallStore, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -1173,7 +1158,7 @@ func main() {
 		}
 	}
 	var memExtractor *memstore.Extractor
-	if memDB != nil {
+	if cfg.EffectiveMemoryEnabled() {
 		extractorTierResolver := func() string {
 			// Delegates to the single source of truth. Never returns a
 			// hardcoded model — users can run any backend (see #291).
@@ -1182,24 +1167,21 @@ func main() {
 		extractTimeout := time.Duration(cfg.EffectiveMemoryExtractTimeout()) * time.Second
 		extractAdapter := &extractorAdapter{prov: cliProvider, registry: registry, tierStore: tierStore}
 
-		memExtractor = memstore.NewExtractor(memDB, dataDir, contextDir, memstore.ExtractorConfig{
+		memExtractor = memstore.NewExtractor(dataDir, contextDir, memstore.ExtractorConfig{
 			Timeout:      extractTimeout,
 			MsgThreshold: cfg.EffectiveMemoryExtractMinMessages(),
 		}, extractAdapter, extractorTierResolver)
 
-		// #337c4c: route extractor writes through memory.Store via the
-		// dedup helper. Skips the memstore.Store.Store path (and its
-		// FTS5 fuzzy dedup) in favour of hash-exact + optional vec
-		// near-dup. Threshold 0.85 matches memstore's prior CosineThreshold
-		// at the high end — conservative so we don't over-deduplicate
-		// while the embedder warms up.
+		// Extractor writes through memory.Store via dedup. Threshold
+		// 0.85 matches memstore's prior CosineThreshold at the high end
+		// — conservative so we don't over-deduplicate while the embedder
+		// warms up.
 		memExtractor.SetMemoryBackend(memStore, 0.85)
 
-		// Consolidator: dedup + fallback extraction every 6h.
-		consolidator := memstore.NewConsolidator(memDB, memExtractor, extractAdapter, extractTimeout)
-		// #337c4d2: consolidator walks memory.Store via ListDocuments
-		// across the same known scopes the socket server and recallers
-		// use. Same threshold as the extractor for symmetry.
+		// Consolidator walks memory.Store via ListDocuments across the
+		// same scopes the socket server and recallers use. Same
+		// threshold as the extractor for symmetry.
+		consolidator := memstore.NewConsolidator(memExtractor, extractAdapter, extractTimeout)
 		consolidator.SetMemoryBackend(memStore, socketsrv.KnownScopes, 0.85)
 		sched.RegisterSystem("mem-consolidate", "Memory Consolidation", "@every 360m", func() error {
 			return consolidator.RunOnce()
@@ -1400,13 +1382,11 @@ func main() {
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
 					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
-					if memDB != nil {
-						applied := memDB.SetDedupConfig(memstore.DedupConfig{
-							TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
-							CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
-						})
-						log.Printf("memstore: dedup thresholds reloaded (text=%.2f cosine=%.2f)", applied.TextThreshold, applied.CosineThreshold)
-					}
+					// Dedup thresholds are no longer tunable at runtime — the
+					// legacy memstore.Store.SetDedupConfig path is gone (#337
+					// close-out). dedup.Options.NearDupThreshold is set at
+					// Extractor/Consolidator wire time; a restart is required
+					// to change it.
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {
@@ -1536,13 +1516,11 @@ func main() {
 					applyDNS(cfg)
 					registerBackends(registry, cfg, apiHistory, vaultMgr)
 					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
-					if memDB != nil {
-						applied := memDB.SetDedupConfig(memstore.DedupConfig{
-							TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
-							CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
-						})
-						log.Printf("memstore: dedup thresholds reloaded (text=%.2f cosine=%.2f)", applied.TextThreshold, applied.CosineThreshold)
-					}
+					// Dedup thresholds are no longer tunable at runtime — the
+					// legacy memstore.Store.SetDedupConfig path is gone (#337
+					// close-out). dedup.Options.NearDupThreshold is set at
+					// Extractor/Consolidator wire time; a restart is required
+					// to change it.
 					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
 				}
 				if git != nil {
@@ -1654,7 +1632,7 @@ func main() {
 				}
 				emoji := mr.NewReaction[0].Emoji
 				log.Printf("← reaction %s on msg %d", emoji, mr.MessageID)
-				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, contextDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider, memDB, memStore, commEngine)
+				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, contextDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider, memStore, commEngine)
 				continue
 			}
 

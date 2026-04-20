@@ -2,24 +2,41 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/memstore"
 )
 
-// seedMemstore opens a memstore in contextDir and writes a handful of
-// typed memories. Returns the directory so the caller can point the
-// migration at it.
+// seedMemstore fabricates a legacy memstore.db with the old `memories`
+// schema. The real memstore.Store has been retired (#337 close-out) so
+// the test speaks directly to SQLite to build the file the migrator
+// expects on disk.
 func seedMemstore(t *testing.T, contextDir string) {
 	t.Helper()
-	store, err := memstore.New(filepath.Join(contextDir, "memory.db"), nil)
+	dbPath := filepath.Join(contextDir, "memory.db")
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
-		t.Fatalf("memstore.New: %v", err)
+		t.Fatalf("open legacy memstore: %v", err)
 	}
-	defer store.Close()
+	defer db.Close()
+
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS memories (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			text TEXT NOT NULL,
+			type TEXT NOT NULL,
+			source TEXT NOT NULL DEFAULT 'extractor',
+			metadata TEXT NOT NULL DEFAULT '{}',
+			created_at TEXT NOT NULL
+		)`); err != nil {
+		t.Fatalf("create memories table: %v", err)
+	}
 
 	seeds := []struct{ text, typ, source string }{
 		{"the deployment uses docker compose on homelab", "fact", "extractor"},
@@ -27,8 +44,12 @@ func seedMemstore(t *testing.T, contextDir string) {
 		{"decided to use sqlite-vec for vector storage", "decision", "extractor"},
 		{"contact John Doe +1-555-0100", "contact", "extractor"},
 	}
+	now := time.Now().Format(time.RFC3339)
 	for _, s := range seeds {
-		if _, err := store.Store(s.text, s.typ, s.source, nil); err != nil {
+		if _, err := db.Exec(
+			`INSERT INTO memories (text, type, source, metadata, created_at) VALUES (?, ?, ?, '{}', ?)`,
+			s.text, s.typ, s.source, now,
+		); err != nil {
 			t.Fatalf("seed %q: %v", s.text, err)
 		}
 	}

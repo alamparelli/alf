@@ -51,7 +51,6 @@ type TierResolver func() string
 // It is triggered event-driven (session end, message threshold) and
 // also runs as a fallback via the consolidator cron.
 type Extractor struct {
-	store        *Store
 	dataDir      string        // root data dir (git repo)
 	stateDir     string        // where to store state file (context dir)
 	timeout      time.Duration // timeout for Claude extraction call
@@ -64,19 +63,19 @@ type Extractor struct {
 	msgCounts map[string]int
 	mu        sync.Mutex
 
-	// memStore, if non-nil, replaces the memstore.Store.Store write path
-	// with dedup.IndexWithDedup (#337c4c). When set, the extractor
-	// writes facts directly into memory.Store under scope=memType and
-	// no longer touches the memstore memories table. Leave nil to keep
-	// the legacy path alive during transitional deployments.
+	// Memory backend — the sole write path after #337. Nil is legal
+	// (Extract() runs the LLM + parses but stores nothing) and lets
+	// unit tests exercise the diff / Pass-1 / Pass-2 plumbing without
+	// a real store.
 	memStore         memory.Store
 	nearDupThreshold float32 // passed through to dedup.Options
 }
 
-// SetMemoryBackend rewires the extractor's write path onto memory.Store
+// SetMemoryBackend wires the extractor's write path onto memory.Store
 // via the dedup helper. threshold controls near-dup skipping (see
 // dedup.Options.NearDupThreshold); pass 0 to rely on exact-dup only.
-// Calling with a nil store restores the legacy memstore path.
+// Calling with a nil store disables writes entirely — Extract still
+// runs end-to-end but drops its output on the floor.
 func (e *Extractor) SetMemoryBackend(store memory.Store, threshold float32) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -104,8 +103,9 @@ type ExtractorConfig struct {
 	MsgThreshold int           // messages before mid-session extraction (0 = 10)
 }
 
-// NewExtractor creates a new event-driven extractor.
-func NewExtractor(store *Store, dataDir, contextDir string, cfg ExtractorConfig, prov ExtractorProvider, tierResolver TierResolver) *Extractor {
+// NewExtractor creates a new event-driven extractor. Call
+// SetMemoryBackend before the first Extract() run to enable writes.
+func NewExtractor(dataDir, contextDir string, cfg ExtractorConfig, prov ExtractorProvider, tierResolver TierResolver) *Extractor {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 10 * time.Minute
 	}
@@ -119,7 +119,6 @@ func NewExtractor(store *Store, dataDir, contextDir string, cfg ExtractorConfig,
 	}
 
 	return &Extractor{
-		store:        store,
 		dataDir:      dataDir,
 		stateDir:     contextDir,
 		timeout:      cfg.Timeout,
@@ -328,40 +327,28 @@ func (e *Extractor) Extract() error {
 		}
 		log.Printf("memstore: fact[%d/%d] type=%s text=%q", i+1, len(facts), memType, truncText)
 
-		if memStore != nil {
-			// #337c4c path: write directly into memory.Store via dedup.
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			res, err := dedup.IndexWithDedup(ctx, memStore, memory.Scope(memType), memory.Document{Text: fact.Text}, dedup.Options{
-				Source:           "extractor",
-				NearDupThreshold: nearDupThreshold,
-				Now:              func() string { return time.Now().Format(time.RFC3339) },
-			})
-			cancel()
-			if err != nil {
-				log.Printf("memstore: fact[%d] → memory Index failed: %v", i+1, err)
-				continue
-			}
-			if !res.Stored {
-				log.Printf("memstore: fact[%d] → %s-dup, skipped (id=%s)", i+1, res.Reason, res.DocID)
-				continue
-			}
-			log.Printf("memstore: fact[%d] → stored OK (id=%s via memory.Store)", i+1, res.DocID)
-			stored++
+		if memStore == nil {
+			// No backend wired — the extractor is running in a test or
+			// misconfigured daemon. Log and move on rather than panic.
+			log.Printf("memstore: fact[%d] → no memory backend wired, skipped", i+1)
 			continue
 		}
-
-		// Legacy path: memstore.Store.Store with FTS5 dedup. Kept for
-		// deployments that haven't wired SetMemoryBackend yet.
-		id, err := e.store.Store(fact.Text, memType, "extractor", nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		res, err := dedup.IndexWithDedup(ctx, memStore, memory.Scope(memType), memory.Document{Text: fact.Text}, dedup.Options{
+			Source:           "extractor",
+			NearDupThreshold: nearDupThreshold,
+			Now:              func() string { return time.Now().Format(time.RFC3339) },
+		})
+		cancel()
 		if err != nil {
-			if strings.Contains(err.Error(), "duplicate") {
-				log.Printf("memstore: fact[%d] → duplicate, skipped", i+1)
-				continue
-			}
-			log.Printf("memstore: fact[%d] → store failed: %v", i+1, err)
+			log.Printf("memstore: fact[%d] → memory Index failed: %v", i+1, err)
 			continue
 		}
-		log.Printf("memstore: fact[%d] → stored OK (id=%d)", i+1, id)
+		if !res.Stored {
+			log.Printf("memstore: fact[%d] → %s-dup, skipped (id=%s)", i+1, res.Reason, res.DocID)
+			continue
+		}
+		log.Printf("memstore: fact[%d] → stored OK (id=%s)", i+1, res.DocID)
 		stored++
 	}
 

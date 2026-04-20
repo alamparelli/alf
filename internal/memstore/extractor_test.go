@@ -245,7 +245,7 @@ func TestStatePersistence_CorruptFile(t *testing.T) {
 
 func TestNewExtractor_Defaults(t *testing.T) {
 	prov := &mockProvider{}
-	e := NewExtractor(nil, "/data", "/ctx", ExtractorConfig{}, prov, nil)
+	e := NewExtractor("/data", "/ctx", ExtractorConfig{}, prov, nil)
 
 	if e.timeout != 10*time.Minute {
 		t.Errorf("expected 10m timeout, got %s", e.timeout)
@@ -260,7 +260,7 @@ func TestNewExtractor_Defaults(t *testing.T) {
 
 func TestNewExtractor_CustomValues(t *testing.T) {
 	prov := &mockProvider{}
-	e := NewExtractor(nil, "/data", "/ctx", ExtractorConfig{
+	e := NewExtractor("/data", "/ctx", ExtractorConfig{
 		Timeout:      2 * time.Minute,
 		MsgThreshold: 5,
 	}, prov, nil)
@@ -274,7 +274,7 @@ func TestNewExtractor_CustomValues(t *testing.T) {
 }
 
 func TestOnMessage_Threshold(t *testing.T) {
-	e := NewExtractor(nil, "/tmp", t.TempDir(), ExtractorConfig{
+	e := NewExtractor("/tmp", t.TempDir(), ExtractorConfig{
 		MsgThreshold: 3,
 	}, &mockProvider{}, nil)
 
@@ -297,7 +297,7 @@ func TestOnMessage_Threshold(t *testing.T) {
 }
 
 func TestOnSessionEnd_ClearsCounter(t *testing.T) {
-	e := NewExtractor(nil, "/tmp", t.TempDir(), ExtractorConfig{
+	e := NewExtractor("/tmp", t.TempDir(), ExtractorConfig{
 		MsgThreshold: 100, // high threshold to avoid triggering extract
 	}, &mockProvider{}, nil)
 

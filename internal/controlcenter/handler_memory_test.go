@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alamparelli/alf/internal/ai"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/runtime"
 )
 
 // mockMemStore implements MemoryStorer for testing.
@@ -385,3 +387,61 @@ func TestIngest_Context_NoContextStore(t *testing.T) {
 		t.Errorf("expected 400, got %d", rec.Code)
 	}
 }
+
+// TestRunLLM_PrefersRuntimeOverProvider pins the #340 R4g migration: when the
+// handler has a Runtime wired, runLLM dispatches through Runtime.Converse
+// forwarding the tier-resolved params (Model, Effort, MaxTurns, Tools) and
+// returns the aggregated text; the Provider.Invoke path is skipped.
+func TestRunLLM_PrefersRuntimeOverProvider(t *testing.T) {
+	fr := &fakeRuntime{result: runtime.ConverseResult{Text: "runtime text"}}
+	h := &MemoryIngestHandler{
+		Store:    &mockMemStore{},
+		Provider: &mockIngestProvider{response: "PROVIDER SHOULD NOT BE CALLED"},
+		Runtime:  fr,
+	}
+
+	text, err := h.runLLM(context.Background(), "extract", ingestLLMParams{
+		Model:    "opus",
+		Effort:   "high",
+		MaxTurns: 3,
+		Tools:    []string{"bash", ""},
+	})
+	if err != nil {
+		t.Fatalf("runLLM: %v", err)
+	}
+	if text != "runtime text" {
+		t.Fatalf("text: got %q want %q", text, "runtime text")
+	}
+	if fr.calls != 1 {
+		t.Fatalf("Runtime.Converse calls: got %d want 1", fr.calls)
+	}
+	got := fr.lastReq
+	if got.Model != ai.ModelID("opus") || got.Effort != "high" || got.MaxTurns != 3 {
+		t.Errorf("params: %+v", got)
+	}
+	if len(got.Tools) != 1 || got.Tools[0].Name != "bash" {
+		t.Errorf("Tools: got %+v want [bash]", got.Tools)
+	}
+}
+
+// TestRunLLM_FallsBackToProviderWhenRuntimeNil pins the legacy path used by
+// existing test rigs and older daemon orderings where the Runtime isn't wired.
+func TestRunLLM_FallsBackToProviderWhenRuntimeNil(t *testing.T) {
+	mp := &mockIngestProvider{response: "provider text"}
+	h := &MemoryIngestHandler{Store: &mockMemStore{}, Provider: mp}
+
+	text, err := h.runLLM(context.Background(), "extract", ingestLLMParams{
+		Model:    "haiku",
+		MaxTurns: 1,
+	})
+	if err != nil {
+		t.Fatalf("runLLM: %v", err)
+	}
+	if text != "provider text" {
+		t.Fatalf("text: got %q want %q", text, "provider text")
+	}
+}
+
+// Compile-time check so the suite fails if fakeRuntime drifts from the
+// Runtime contract.
+var _ runtime.Runtime = (*fakeRuntime)(nil)

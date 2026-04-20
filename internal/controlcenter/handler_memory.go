@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alamparelli/alf/internal/ai"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/runtime"
 )
 
 // validFileName uses the shared safeName pattern from validation.go.
@@ -43,6 +45,7 @@ type MemoryStorer interface {
 type MemoryIngestHandler struct {
 	Store        MemoryStorer
 	Provider     provider.Provider
+	Runtime      runtime.Runtime // may be nil - prefers Runtime.Converse when set (#340 R4g)
 	TierStore    TierStore
 	ContextStore ResourceStore // for destination=context
 }
@@ -216,35 +219,15 @@ Rules: self-contained items, concise, skip trivial info.`, instruction, content)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// Build params from tier config. Default model comes from the user's
-	// configured fallback — never hardcode a provider-specific value.
-	params := provider.Params{
-		Model:    DefaultFallbackModel(h.currentTiers()),
-		MaxTurns: 3,
-		Tools:    []string{""}, // no tools by default
-	}
-	if tier := h.resolveTier(tierName); tier != nil {
-		if tier.Model != "" {
-			params.Model = tier.Model
-		}
-		if tier.MaxTurns > 0 {
-			params.MaxTurns = tier.MaxTurns
-		}
-		if len(tier.Tools) > 0 {
-			params.Tools = tier.Tools
-		}
-		if tier.Effort != "" {
-			params.Effort = tier.Effort
-		}
-	}
+	params := h.tierParams(tierName, 3)
 
-	result, err := h.Provider.Invoke(ctx, prompt, params, nil)
+	text, err := h.runLLM(ctx, prompt, params)
 	if err != nil {
 		return nil, fmt.Errorf("claude extraction failed: %w", err)
 	}
 
 	// Parse JSON array from response - Claude may wrap it in prose or code blocks.
-	raw := stripCodeBlock(result.Text)
+	raw := stripCodeBlock(text)
 
 	// Extract JSON array even if surrounded by prose text.
 	if start := strings.Index(raw, "["); start >= 0 {
@@ -255,7 +238,7 @@ Rules: self-contained items, concise, skip trivial info.`, instruction, content)
 
 	var facts []ingestMemory
 	if err := json.Unmarshal([]byte(raw), &facts); err != nil {
-		return nil, fmt.Errorf("failed to parse extraction result: %w (raw: %.200s)", err, result.Text)
+		return nil, fmt.Errorf("failed to parse extraction result: %w (raw: %.200s)", err, text)
 	}
 
 	resp := &ingestResponse{}
@@ -334,26 +317,14 @@ Content:
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 
-		params := provider.Params{
-			Model:    DefaultFallbackModel(h.currentTiers()),
-			MaxTurns: 1,
-			Tools:    []string{""},
-		}
-		if tier := h.resolveTier(tierName); tier != nil {
-			if tier.Model != "" {
-				params.Model = tier.Model
-			}
-			if tier.Effort != "" {
-				params.Effort = tier.Effort
-			}
-		}
+		params := h.tierParams(tierName, 1)
 
-		result, err := h.Provider.Invoke(ctx, prompt, params, nil)
+		text, err := h.runLLM(ctx, prompt, params)
 		if err != nil {
 			return nil, fmt.Errorf("summarization failed: %w", err)
 		}
 
-		body = strings.TrimSpace(result.Text) + "\n"
+		body = strings.TrimSpace(text) + "\n"
 	}
 
 	if err := h.ContextStore.Put(fileName, []byte(body)); err != nil {
@@ -364,6 +335,86 @@ Content:
 		"file_name": fileName + ".md",
 		"imported":  1,
 	}, nil
+}
+
+// ingestLLMParams holds the resolved per-call LLM parameters used by both
+// runLLM branches (Runtime.Converse and legacy Provider.Invoke). Introduced
+// by #340 R4g so tier lookup lives in one place while the two dispatch
+// branches read a single struct.
+type ingestLLMParams struct {
+	Model    string
+	Tools    []string // nil => no tools
+	MaxTurns int
+	Effort   string
+}
+
+// tierParams resolves the LLM parameters for a named tier, falling back to
+// the user-configured default model. maxTurns is the baseline used when the
+// tier config does not override it.
+func (h *MemoryIngestHandler) tierParams(tierName string, maxTurns int) ingestLLMParams {
+	p := ingestLLMParams{
+		Model:    DefaultFallbackModel(h.currentTiers()),
+		MaxTurns: maxTurns,
+	}
+	if tier := h.resolveTier(tierName); tier != nil {
+		if tier.Model != "" {
+			p.Model = tier.Model
+		}
+		if tier.MaxTurns > 0 {
+			p.MaxTurns = tier.MaxTurns
+		}
+		if len(tier.Tools) > 0 {
+			p.Tools = tier.Tools
+		}
+		if tier.Effort != "" {
+			p.Effort = tier.Effort
+		}
+	}
+	return p
+}
+
+// runLLM dispatches the one-shot ingest call. Prefers Runtime.Converse when
+// the handler has a Runtime wired (#340 R4g); falls back to the legacy
+// Provider.Invoke path otherwise so test rigs and daemons without a Runtime
+// keep working unchanged.
+func (h *MemoryIngestHandler) runLLM(ctx context.Context, prompt string, p ingestLLMParams) (string, error) {
+	if h.Runtime != nil {
+		req := runtime.ConverseRequest{
+			Model:    ai.ModelID(p.Model),
+			Prompt:   prompt,
+			Effort:   p.Effort,
+			MaxTurns: p.MaxTurns,
+		}
+		if len(p.Tools) > 0 {
+			req.Tools = make([]ai.ToolSpec, 0, len(p.Tools))
+			for _, name := range p.Tools {
+				if name == "" {
+					continue
+				}
+				req.Tools = append(req.Tools, ai.ToolSpec{Name: name})
+			}
+		}
+		res, err := h.Runtime.Converse(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return res.Text, nil
+	}
+
+	params := provider.Params{
+		Model:    p.Model,
+		MaxTurns: p.MaxTurns,
+		Effort:   p.Effort,
+		Tools:    p.Tools,
+	}
+	if params.Tools == nil {
+		params.Tools = []string{""}
+	}
+	result, err := h.Provider.Invoke(ctx, prompt, params, nil)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
 }
 
 // MemoryTiersHandler returns the list of enabled tiers for the Teach UI dropdown.

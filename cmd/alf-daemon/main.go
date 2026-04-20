@@ -896,6 +896,24 @@ func main() {
 	var ccServerRef *cc.Server
 	var llmVaultProxy *vault.VaultProxy
 
+	// #340 R4g: build the shared Runtime once, before CC + scheduler wire up.
+	// Both consumers reuse the same instance — Options.Tier is ignored by
+	// Converse/Chat/Invoke, so a single Runtime is correct. capRegistry is a
+	// pointer, so later registrations (scheduler.CommandCapability) stay
+	// visible to the Runtime's List()/Resolve() lookups.
+	sharedRuntime, rtErr := runtime.New(runtime.Deps{
+		Registry: capRegistry,
+		Memory:   memStore,
+		AI:       provider.NewRegistryEngine(registry),
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Tier: sandbox.Tier("direct")})
+	if rtErr != nil {
+		log.Printf("runtime: init failed: %v (CC + scheduler will fall back to legacy paths)", rtErr)
+	}
+	if sharedRuntime != nil && chatService != nil {
+		chatService.SetRuntime(sharedRuntime)
+	}
+
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
 		// On vault unlock, re-register backends and load Telegram credentials.
@@ -945,7 +963,7 @@ func main() {
 			log.Printf("[tasks] event: task=%s status=%s origin=%s", taskID[:min(8, len(taskID))], status, source)
 			notifyChannel(source, text)
 		}
-		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memRecallStore, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memRecallStore, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler, sharedRuntime)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -1160,22 +1178,8 @@ func main() {
 	// scheduler still flattens skills into SystemPrompts the legacy way.
 	schedOrchStrategy := agents.NewStrategy(orch, agents.StrategyOptions{Source: "schedule"})
 
-	schedRuntime, err := runtime.New(runtime.Deps{
-		Registry: capRegistry,
-		Memory:   memStore,
-		AI:       provider.NewRegistryEngine(registry),
-		Sandbox:  sandbox.New(),
-	}, runtime.Options{Tier: sandbox.Tier("direct")})
-	if err != nil {
-		log.Printf("scheduler: runtime init failed: %v (falling back to inline direct-tier path)", err)
-	}
-	// #340 R4f: wire the same Runtime into the CC chat service so stateless
-	// follow-up flows (negativeFollowUp) go through Converse instead of
-	// Provider.Invoke directly. Options.Tier is ignored by Converse — a single
-	// shared Runtime serves both scheduler and CC stateless calls.
-	if schedRuntime != nil && chatService != nil {
-		chatService.SetRuntime(schedRuntime)
-	}
+	// #340 R4g: scheduler reuses the shared Runtime built earlier.
+	schedRuntime := sharedRuntime
 
 	sched := scheduler.New(scheduler.Config{
 		DataDir:      dataDir,

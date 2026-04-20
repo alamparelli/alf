@@ -11,14 +11,15 @@ import (
 	"sync"
 	"time"
 
+	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/marketplace"
+	"github.com/alamparelli/alf/internal/runtime"
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	firewall "github.com/alamparelli/alf/internal/sandbox/network"
-	"github.com/alamparelli/alf/internal/marketplace"
-	provider "github.com/alamparelli/alf/internal/ai/provider"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
-	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // unifiedPermChecker wraps the marketplace PermissionChecker with a fallback
@@ -79,6 +80,7 @@ type Deps struct {
 	Orchestrator   *agents.Orchestrator // nil if orchestrator not available
 	MemStore       MemoryStorer       // nil if memory unavailable
 	MemProvider    provider.Provider  // nil if memory unavailable
+	Runtime        runtime.Runtime    // nil if runtime unavailable (#340 R4g)
 	Scheduler      ScheduleEngine     // nil if scheduler unavailable
 	ScheduleRunLog *scheduler.RunLog  // nil if scheduler unavailable
 	FirewallStore  *firewall.Store      // nil if firewall unavailable
@@ -314,6 +316,7 @@ func HandlerFactory(deps Deps) Handlers {
 		mux.Handle("/api/memory/ingest", &MemoryIngestHandler{
 			Store:        deps.MemStore,
 			Provider:     deps.MemProvider,
+			Runtime:      deps.Runtime,
 			TierStore:    deps.TierStore,
 			ContextStore: deps.ContextStore,
 		})

@@ -14,7 +14,7 @@ import (
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/marketplace"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"

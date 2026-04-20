@@ -17,7 +17,7 @@ import (
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/marketplace"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	scheduler_pkg "github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"

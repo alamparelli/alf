@@ -17,7 +17,6 @@ import (
 
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/ai"
-	aiprovider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/capability"
 	runtimeagents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/runtime/classifier"
@@ -34,7 +33,7 @@ import (
 	"github.com/alamparelli/alf/internal/memory/socketsrv"
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/mood"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/alamparelli/alf/internal/sandbox"
 	"github.com/alamparelli/alf/internal/scheduler"
@@ -1164,7 +1163,7 @@ func main() {
 	schedRuntime, err := runtime.New(runtime.Deps{
 		Registry: capRegistry,
 		Memory:   memStore,
-		AI:       aiprovider.NewRegistryEngine(registry),
+		AI:       provider.NewRegistryEngine(registry),
 		Sandbox:  sandbox.New(),
 	}, runtime.Options{Tier: sandbox.Tier("direct")})
 	if err != nil {

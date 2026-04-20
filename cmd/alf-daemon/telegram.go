@@ -21,7 +21,7 @@ import (
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 )

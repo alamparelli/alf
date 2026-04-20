@@ -6,7 +6,7 @@ package agents
 
 import (
 	rtagents "github.com/alamparelli/alf/internal/runtime/agents"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 // --- Types ---------------------------------------------------------------

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 // slowProvider blocks until released, simulating a long-running agent call.

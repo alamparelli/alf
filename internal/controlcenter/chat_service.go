@@ -17,7 +17,7 @@ import (
 	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	chatsession "github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"

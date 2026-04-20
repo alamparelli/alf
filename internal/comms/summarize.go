@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 // Summarization defaults. The threshold is the number of uncovered messages

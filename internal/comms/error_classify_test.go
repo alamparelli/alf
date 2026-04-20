@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 func TestClassifyProviderError_TurnLimit(t *testing.T) {

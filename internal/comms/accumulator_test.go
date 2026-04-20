@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 func TestAccumulator_TextOnly(t *testing.T) {

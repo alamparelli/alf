@@ -16,7 +16,7 @@ import (
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/marketplace"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/supervisor"
 	"github.com/alamparelli/alf/internal/tooling"

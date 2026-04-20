@@ -15,7 +15,7 @@ import (
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memstore"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"

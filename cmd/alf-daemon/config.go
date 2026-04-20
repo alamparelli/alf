@@ -13,7 +13,7 @@ import (
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/firewall"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/secrets"
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"

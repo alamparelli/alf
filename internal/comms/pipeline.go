@@ -11,7 +11,7 @@ import (
 	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/trace"

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 // mockProvider returns pre-defined responses in sequence.

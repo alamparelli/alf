@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/tooling"
 )
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 // mockMemStore implements MemoryStorer for testing.

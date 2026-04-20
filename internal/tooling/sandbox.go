@@ -1,61 +1,48 @@
 package tooling
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+	goexec "os/exec"
+
+	sbexec "github.com/alamparelli/alf/internal/sandbox/exec"
 )
 
-// ResolvePath resolves a path relative to dataDir (if relative) and cleans it.
+// This file is a thin re-export shim. The Exec facet of Sandbox now lives at
+// internal/sandbox/exec (moved during #339 Step 3). Tooling's native_*.go,
+// executor, and registry keep using these aliases until Runtime (#340)
+// rewires consumers.
+
+// SandboxConfig is an alias for exec.SandboxConfig.
+type SandboxConfig = sbexec.SandboxConfig
+
+// ServerSandboxConfig is an alias for exec.ServerSandboxConfig.
+type ServerSandboxConfig = sbexec.ServerSandboxConfig
+
+// ResolvePath re-exports exec.ResolvePath.
 func ResolvePath(dataDir, path string) string {
-	if dataDir != "" && !filepath.IsAbs(path) {
-		path = filepath.Join(dataDir, path)
-	}
-	return filepath.Clean(path)
+	return sbexec.ResolvePath(dataDir, path)
 }
 
-// CheckBoundary verifies that path stays within dataDir after resolving symlinks.
-// Returns the resolved real path or an error if it escapes the workspace.
+// CheckBoundary re-exports exec.CheckBoundary.
 func CheckBoundary(dataDir, path string) (string, error) {
-	if dataDir == "" {
-		return path, nil
-	}
+	return sbexec.CheckBoundary(dataDir, path)
+}
 
-	// Resolve the real dataDir (it may itself be behind symlinks/mounts).
-	realDataDir, err := filepath.EvalSymlinks(dataDir)
-	if err != nil {
-		realDataDir = filepath.Clean(dataDir)
-	}
+// SandboxedCmd re-exports exec.SandboxedCmd.
+func SandboxedCmd(cmd *goexec.Cmd, originalCommand string, cfg SandboxConfig) {
+	sbexec.SandboxedCmd(cmd, originalCommand, cfg)
+}
 
-	// Resolve the target path. For new files that don't exist yet,
-	// resolve the parent directory instead.
-	realPath, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return "", fmt.Errorf("cannot resolve path: %w", err)
-		}
-		// File doesn't exist yet - resolve parent dir + keep the filename.
-		parentReal, err2 := filepath.EvalSymlinks(filepath.Dir(path))
-		if err2 != nil {
-			// Parent also doesn't exist, fall back to lexical check.
-			parentReal = filepath.Clean(filepath.Dir(path))
-		}
-		realPath = filepath.Join(parentReal, filepath.Base(path))
-	}
+// SandboxSafeEnv re-exports exec.SandboxSafeEnv.
+func SandboxSafeEnv(appDataDir string) []string {
+	return sbexec.SandboxSafeEnv(appDataDir)
+}
 
-	rel, err := filepath.Rel(realDataDir, realPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("path escapes workspace boundary: %s", path)
-	}
+// SandboxServerCmd re-exports exec.SandboxServerCmd.
+func SandboxServerCmd(cmd *goexec.Cmd, cfg ServerSandboxConfig) {
+	sbexec.SandboxServerCmd(cmd, cfg)
+}
 
-	// Deny writes to internal daemon directories — LLM must not tamper with
-	// integrity state, quarantine files, or daemon internals.
-	for _, deny := range []string{".daemon", "logs/tool-changes.log"} {
-		if strings.HasPrefix(rel, deny) {
-			return "", fmt.Errorf("path is protected (internal system directory): %s", path)
-		}
-	}
-
-	return realPath, nil
+// ServerSafeEnv re-exports exec.ServerSafeEnv.
+func ServerSafeEnv(appDir string) []string {
+	return sbexec.ServerSafeEnv(appDir)
 }

@@ -1,6 +1,6 @@
 //go:build linux
 
-package tooling
+package exec
 
 import (
 	"fmt"

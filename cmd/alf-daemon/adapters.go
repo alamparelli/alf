@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -234,6 +237,50 @@ func (c *commsTierStore) Snapshot() comms.TiersSnapshot {
 		}
 	}
 	return snap
+}
+
+// memoryIngestAdapter implements cc.MemoryStorer on top of memory.Store so
+// the /api/memory/ingest writer path can land on the unified store
+// (#337c4a). Preserves the legacy Store() signature so handler_memory.go
+// and its tests need no change.
+//
+// Doc ID strategy: derive from a SHA-256 prefix of the text so repeated
+// ingests of identical content upsert-refresh a single row rather than
+// accumulate copies. This is coarser than memstore's FTS5 fuzzy dedup —
+// it only catches byte-identical duplicates — but it keeps the natural
+// "idempotent re-ingest" behaviour that users rely on.
+type memoryIngestAdapter struct {
+	store memory.Store
+}
+
+func (a *memoryIngestAdapter) Store(text, memType, source string, meta map[string]any) (int64, error) {
+	if a.store == nil {
+		return 0, fmt.Errorf("memory: ingest adapter has no backing store")
+	}
+	h := sha256.Sum256([]byte(text))
+	docID := fmt.Sprintf("ingest-%x", h[:12])
+	mm := map[string]string{
+		"source":     source,
+		"created_at": time.Now().Format(time.RFC3339),
+	}
+	for k, v := range meta {
+		switch vv := v.(type) {
+		case string:
+			mm[k] = vv
+		default:
+			if b, err := json.Marshal(v); err == nil {
+				mm[k] = string(b)
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := a.store.Index(ctx, memory.Scope(memType), memory.Document{
+		ID: docID, Text: text, Metadata: mm,
+	}); err != nil {
+		return 0, err
+	}
+	return 0, nil
 }
 
 // memoryCommsRecaller adapts memory.Store to the comms.MemoryRecaller

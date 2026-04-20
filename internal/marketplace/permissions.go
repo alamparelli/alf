@@ -4,11 +4,6 @@ import (
 	"github.com/alamparelli/alf/internal/sandbox"
 )
 
-// ValidPermissions re-exports the Sandbox-owned vocabulary of permission
-// names. Kept here as a variable alias so existing marketplace callers keep
-// working until Runtime (#340) rewires them through the runtime package.
-var ValidPermissions = sandbox.ValidPermissions
-
 // PermissionChecker determines whether an app has a given permission.
 // Handlers use this interface to avoid importing the full marketplace package.
 type PermissionChecker interface {
@@ -17,16 +12,6 @@ type PermissionChecker interface {
 	// (installed from registry or explicitly enabled). Internal/default apps
 	// are NOT tracked and should bypass sandboxing.
 	IsTracked(slug string) bool
-}
-
-// ValidatePermissions re-exports sandbox.ValidatePermissions.
-func ValidatePermissions(perms []string) error {
-	return sandbox.ValidatePermissions(perms)
-}
-
-// ValidateServices re-exports sandbox.ValidateServices.
-func ValidateServices(services []string) error {
-	return sandbox.ValidateServices(services)
 }
 
 // ValidateManifest checks a manifest for common issues before publishing or enabling.
@@ -57,10 +42,10 @@ func ValidateManifest(m *Manifest) (errors []string, warnings []string) {
 	if m.Description == "" {
 		warnings = append(warnings, "description is empty")
 	}
-	if err := ValidatePermissions(m.Permissions); err != nil {
+	if err := sandbox.ValidatePermissions(m.Permissions); err != nil {
 		errors = append(errors, err.Error())
 	}
-	if err := ValidateServices(m.Services); err != nil {
+	if err := sandbox.ValidateServices(m.Services); err != nil {
 		errors = append(errors, err.Error())
 	}
 	return

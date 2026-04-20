@@ -238,7 +238,19 @@ func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (Con
 		Stream:        true,
 	}
 
-	stream, err := r.deps.AI.Run(ctx, aiReq)
+	// When the caller provided a Strategy, hand it the Engine and let it
+	// drive the turn — could be a single Run, a retry loop, a multi-agent
+	// orchestrator, anything. Otherwise fall through to the default
+	// single-shot path. See #340 R5e.
+	var (
+		stream <-chan ai.Event
+		err    error
+	)
+	if req.Strategy != nil {
+		stream, err = req.Strategy.Run(ctx, r.deps.AI, aiReq)
+	} else {
+		stream, err = r.deps.AI.Run(ctx, aiReq)
+	}
 	if err != nil {
 		return ConverseResult{}, fmt.Errorf("runtime.Converse: ai.Run: %w", err)
 	}

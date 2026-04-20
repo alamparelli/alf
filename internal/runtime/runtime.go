@@ -90,6 +90,17 @@ type ConverseRequest struct {
 	Effort        string
 	WriteCapable  bool
 	DataDir       string
+
+	// Strategy, when non-nil, is the driver of the Engine for this call.
+	// It lets callers plug a multi-turn orchestrator (multi-agent, retry-
+	// with-reflection, chain-of-thought) into the same Runtime surface that
+	// normally does a single Engine.Run. A nil Strategy means "one Run, one
+	// result" — the pre-R5e behaviour.
+	//
+	// Strategy belongs to the per-call request rather than Runtime.Options
+	// because different scheduled jobs (or different chat turns, later) may
+	// need different orchestration shapes on the same underlying Engine.
+	Strategy ai.Strategy
 }
 
 // ConverseResult carries the aggregated response plus whatever usage data the

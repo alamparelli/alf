@@ -871,6 +871,107 @@ func TestConverse_DoesNotPersistMemory(t *testing.T) {
 	}
 }
 
+// TestConverse_StrategyDrivesEngine proves the #340 R5e hook: when a
+// Strategy is attached, Converse drives through it rather than calling
+// engine.Run directly. The Strategy gets the same (engine, request) tuple
+// the Runtime would have passed to Run — so wrapping orchestrators can be
+// added later without touching Runtime.
+func TestConverse_StrategyDrivesEngine(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{
+		{
+			{Kind: ai.EventToken, Token: "from "},
+			{Kind: ai.EventToken, Token: "strategy"},
+			{Kind: ai.EventDone, Usage: &ai.Usage{CostUSD: 0.01, NumTurns: 2}},
+		},
+	}}
+	// The strategy records that it was called and then delegates to the
+	// Engine it was given — exactly the contract.
+	var strategyCalled bool
+	strat := aiStrategyFunc(func(ctx context.Context, engine ai.Engine, req ai.Request) (<-chan ai.Event, error) {
+		strategyCalled = true
+		return engine.Run(ctx, req)
+	})
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	res, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Prompt:   "hi",
+		Strategy: strat,
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if !strategyCalled {
+		t.Fatal("Strategy.Run was not invoked")
+	}
+	if res.Text != "from strategy" {
+		t.Fatalf("Text: got %q", res.Text)
+	}
+	if res.Usage == nil || res.Usage.NumTurns != 2 {
+		t.Fatalf("Usage: got %+v", res.Usage)
+	}
+}
+
+// TestConverse_StrategyBypassesEngineRun guards against a refactor that
+// would accidentally call engine.Run on top of the Strategy — that would
+// cause double execution. We install an engine that fails on any direct
+// Run call; the Strategy returns a handcrafted stream. If Converse passes,
+// the dispatch is clean.
+func TestConverse_StrategyBypassesEngineRun(t *testing.T) {
+	failEng := &errEngine{err: errors.New("engine.Run should not be called directly")}
+	strat := aiStrategyFunc(func(ctx context.Context, _ ai.Engine, _ ai.Request) (<-chan ai.Event, error) {
+		ch := make(chan ai.Event, 2)
+		ch <- ai.Event{Kind: ai.EventToken, Token: "x"}
+		ch <- ai.Event{Kind: ai.EventDone}
+		close(ch)
+		return ch, nil
+	})
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       failEng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	res, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Prompt:   "hi",
+		Strategy: strat,
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if res.Text != "x" {
+		t.Fatalf("Text: got %q", res.Text)
+	}
+}
+
+// TestConverse_StrategyErrorSurfaces: a Strategy that returns a non-nil
+// error on Run must propagate verbatim — Runtime does not retry or wrap
+// into success.
+func TestConverse_StrategyErrorSurfaces(t *testing.T) {
+	strat := aiStrategyFunc(func(_ context.Context, _ ai.Engine, _ ai.Request) (<-chan ai.Event, error) {
+		return nil, errors.New("strategy exploded")
+	})
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       &fakeEngine{},
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Prompt:   "hi",
+		Strategy: strat,
+	})
+	if err == nil {
+		t.Fatal("expected error from Strategy")
+	}
+}
+
 // TestConverse_StreamClosedWithoutDoneErrors defends against a malformed
 // Engine implementation that closes the channel before EventDone — the
 // Runtime must not return a fake-successful empty result.
@@ -886,6 +987,14 @@ func TestConverse_StreamClosedWithoutDoneErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when stream closes without EventDone")
 	}
+}
+
+// aiStrategyFunc is a func-adapter so tests don't need a standalone type per
+// strategy. Satisfies ai.Strategy.
+type aiStrategyFunc func(ctx context.Context, engine ai.Engine, req ai.Request) (<-chan ai.Event, error)
+
+func (f aiStrategyFunc) Run(ctx context.Context, engine ai.Engine, req ai.Request) (<-chan ai.Event, error) {
+	return f(ctx, engine, req)
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

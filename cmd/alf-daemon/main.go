@@ -485,13 +485,11 @@ func main() {
 	}
 	defer memStore.Close()
 
-	// Dual-write shim for #337c1: every memstore.Store write also lands in
-	// memory.Store as an Index(scope=type, id=fmt.Sprint(memID)). Lets the
-	// unified store fill up as the extractor runs, without moving any
-	// reader off memstore yet.
-	if memDB != nil {
-		memDB.SetMirror(memStore)
-	}
+	// (#337c4d3) The C1 dual-write shim is gone: every production writer
+	// — Extractor, Consolidator, ingest adapter, socket server — now
+	// targets memory.Store directly. memstore.Store lingers only for
+	// its DedupConfig hot-reload hooks below; a future cleanup will
+	// retire those and delete the memstore package.
 
 	// One-shot backfill of pre-#337 memstore data into memory.Store so the
 	// recallers (#337c2, now reading from memory.Store) see the existing

@@ -15,10 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
 	"github.com/alamparelli/alf/internal/ai"
 	"github.com/alamparelli/alf/internal/capability"
-	runtimeagents "github.com/alamparelli/alf/internal/runtime/agents"
+	"github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/runtime/classifier"
 	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/firewall"
@@ -1158,7 +1157,7 @@ func main() {
 	// like the direct-LLM path. StrategyOptions.Source is the tag that
 	// surfaces in TaskMeta; SkillLookup / MemoryContext stay nil — the
 	// scheduler still flattens skills into SystemPrompts the legacy way.
-	schedOrchStrategy := runtimeagents.NewStrategy(orch, runtimeagents.StrategyOptions{Source: "schedule"})
+	schedOrchStrategy := agents.NewStrategy(orch, agents.StrategyOptions{Source: "schedule"})
 
 	schedRuntime, err := runtime.New(runtime.Deps{
 		Registry: capRegistry,

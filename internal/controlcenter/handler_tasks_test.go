@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 

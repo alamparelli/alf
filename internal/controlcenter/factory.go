@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/marketplace"
 	provider "github.com/alamparelli/alf/internal/ai/provider"

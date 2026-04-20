@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 )
 
 func TestActivityHandler_Empty(t *testing.T) {

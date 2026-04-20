@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
 	provider "github.com/alamparelli/alf/internal/ai/provider"

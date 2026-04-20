@@ -13,7 +13,7 @@ import (
 
 	"path/filepath"
 
-	"github.com/alamparelli/alf/internal/agents"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/marketplace"

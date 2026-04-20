@@ -6,7 +6,7 @@ import (
 
 	"context"
 
-	"github.com/alamparelli/alf/internal/agents"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
 	provider "github.com/alamparelli/alf/internal/ai/provider"

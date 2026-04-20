@@ -329,6 +329,17 @@ type Store interface {
 	// Used by the /forget capability once the socket server retires (#337).
 	DeleteDocument(ctx context.Context, scope Scope, docID string) (bool, error)
 
+	// ListDocuments returns up to `limit` documents in scope, ordered
+	// by insertion time ascending (oldest first). Unknown scope returns
+	// (nil, nil). Empty scope is a contract violation and MUST return
+	// an error. limit <= 0 is an error; to page through a large corpus
+	// callers should issue multiple calls with bounded limits.
+	//
+	// Used by the Consolidator (#337c4d) to walk the full corpus for
+	// LLM-driven merge/retype/delete decisions. Not a Search — this
+	// method returns insertion-ordered rows with no relevance scoring.
+	ListDocuments(ctx context.Context, scope Scope, limit int) ([]Document, error)
+
 	// Preferences — replaces memory/preferences.
 
 	// GetPref returns the value for key or (nil, nil) if unset.

@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alamparelli/alf/internal/ai"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
-	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/runtime"
 	chatsession "github.com/alamparelli/alf/internal/session"
 )
 
@@ -529,5 +532,95 @@ func TestForceCommand_TierLookupPattern(t *testing.T) {
 				t.Errorf("msg: got %q, want %q", gotMsg, tc.wantMsg)
 			}
 		})
+	}
+}
+
+// fakeRuntime records Converse calls and returns a canned ConverseResult.
+// Chat and Invoke are unused here — #340 R4f only wires Converse.
+type fakeRuntime struct {
+	lastReq runtime.ConverseRequest
+	calls   int
+	result  runtime.ConverseResult
+	err     error
+}
+
+func (f *fakeRuntime) Chat(ctx context.Context, convID memory.ConvID, userInput string) (<-chan runtime.Event, error) {
+	return nil, nil
+}
+
+func (f *fakeRuntime) Invoke(ctx context.Context, capID capability.ID, args runtime.Args) (runtime.Output, error) {
+	return runtime.Output{}, nil
+}
+
+func (f *fakeRuntime) Converse(ctx context.Context, req runtime.ConverseRequest) (runtime.ConverseResult, error) {
+	f.calls++
+	f.lastReq = req
+	if f.err != nil {
+		return runtime.ConverseResult{}, f.err
+	}
+	return f.result, nil
+}
+
+// TestInvokeFollowUp_PrefersRuntimeOverProvider locks the #340 R4f migration:
+// when SetRuntime has been called, invokeFollowUp routes through
+// Runtime.Converse (forwarding tier params + ResumeID) instead of calling
+// Provider.Invoke directly.
+func TestInvokeFollowUp_PrefersRuntimeOverProvider(t *testing.T) {
+	svc := newTestChatService(t)
+	fr := &fakeRuntime{
+		result: runtime.ConverseResult{
+			Text:  "runtime response",
+			Usage: &ai.Usage{Model: "resolved-model", SessionID: "sess-42"},
+		},
+	}
+	svc.SetRuntime(fr)
+
+	tp := tierParams{
+		Model:        "opus",
+		Backend:      "openrouter",
+		Effort:       "high",
+		WriteCapable: true,
+		MaxTurns:     5,
+	}
+	text, model, sessionID, err := svc.invokeFollowUp(context.Background(), "follow-up prompt", tp, "sess-prev")
+	if err != nil {
+		t.Fatalf("invokeFollowUp: %v", err)
+	}
+
+	if fr.calls != 1 {
+		t.Fatalf("Runtime.Converse calls: got %d want 1", fr.calls)
+	}
+	if text != "runtime response" || model != "resolved-model" || sessionID != "sess-42" {
+		t.Fatalf("return values: text=%q model=%q session=%q", text, model, sessionID)
+	}
+
+	got := fr.lastReq
+	if got.Model != "opus" || got.Backend != "openrouter" {
+		t.Errorf("tier passthrough: model=%q backend=%q", got.Model, got.Backend)
+	}
+	if got.Prompt != "follow-up prompt" || got.ResumeID != "sess-prev" {
+		t.Errorf("prompt/resume: prompt=%q resume=%q", got.Prompt, got.ResumeID)
+	}
+	if got.Effort != "high" || !got.WriteCapable || got.MaxTurns != 5 {
+		t.Errorf("effort/write/maxturns: %+v", got)
+	}
+}
+
+// TestInvokeFollowUp_FallsBackToProviderWhenRuntimeNil pins the legacy path:
+// with no Runtime wired (older startup orderings, test rigs) invokeFollowUp
+// uses Provider.Invoke so the feature keeps working while the R4 migration
+// rolls out.
+func TestInvokeFollowUp_FallsBackToProviderWhenRuntimeNil(t *testing.T) {
+	svc := newTestChatService(t)
+	// Runtime intentionally not set.
+
+	tp := tierParams{Model: "haiku"}
+	text, model, _, err := svc.invokeFollowUp(context.Background(), "hi", tp, "")
+	if err != nil {
+		t.Fatalf("invokeFollowUp: %v", err)
+	}
+	// mockProvider returns "mock response" / model "mock".
+	if text != "mock response" || model != "mock" {
+		t.Fatalf("provider fallback: text=%q model=%q", text, model)
 	}
 }

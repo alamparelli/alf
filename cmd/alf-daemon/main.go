@@ -1169,6 +1169,13 @@ func main() {
 	if err != nil {
 		log.Printf("scheduler: runtime init failed: %v (falling back to inline direct-tier path)", err)
 	}
+	// #340 R4f: wire the same Runtime into the CC chat service so stateless
+	// follow-up flows (negativeFollowUp) go through Converse instead of
+	// Provider.Invoke directly. Options.Tier is ignored by Converse — a single
+	// shared Runtime serves both scheduler and CC stateless calls.
+	if schedRuntime != nil && chatService != nil {
+		chatService.SetRuntime(schedRuntime)
+	}
 
 	sched := scheduler.New(scheduler.Config{
 		DataDir:      dataDir,

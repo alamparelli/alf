@@ -11,13 +11,15 @@ import (
 	"sync"
 	"time"
 
-	agents "github.com/alamparelli/alf/internal/runtime/agents"
+	"github.com/alamparelli/alf/internal/ai"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
-	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/runtime"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	chatsession "github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
@@ -96,6 +98,7 @@ type ChatService struct {
 	ToolExecutor    *tooling.Executor              // may be nil - tool subprocess runner
 	BackendConfigs  func() map[string]BackendConfig // may be nil - backend pricing lookup
 	Engine          *comms.ChatEngine              // may be nil - unified engine (Step 5+)
+	Runtime         runtime.Runtime                // may be nil - #340 R4f, drives stateless LLM flows via Converse
 	ccAdapter       *ccAdapter                     // bridges engine events to per-call callbacks
 
 	// Background job tracking - one active job per conversation.
@@ -226,6 +229,14 @@ func (cs *ChatService) Init(opts ChatServiceOpts) {
 	cs.Recaller = opts.Recaller
 	cs.MemStore = opts.MemStore
 	cs.BackendConfigs = opts.BackendConfigs
+}
+
+// SetRuntime installs the runtime.Runtime used for stateless LLM flows
+// (currently: negativeFollowUp). When nil the service falls back to the
+// legacy Provider.Invoke path. Added in #340 R4f as the first CC migration
+// onto Runtime; later chunks will extend this to the main chat path.
+func (cs *ChatService) SetRuntime(rt runtime.Runtime) {
+	cs.Runtime = rt
 }
 
 // SetEngine installs the unified comms engine and registers the CC adapter.
@@ -976,23 +987,17 @@ func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 		return
 	}
 
-	params := provider.Params{
-		Model:    tp.Model,
-		ResumeID: resumeID,
-		DataDir:  cs.DataDir,
-	}
-
-	result, err := cs.Provider.Invoke(context.Background(), prompt, params, nil)
+	text, model, sessionID, err := cs.invokeFollowUp(context.Background(), prompt, tp, resumeID)
 	if err != nil {
 		log.Printf("[chat-api] negative follow-up error: %v", err)
 		return
 	}
 
-	if result.SessionID != "" {
-		cs.Sessions.SetWithContext(apiChatID, result.SessionID, "follow-up")
+	if sessionID != "" {
+		cs.Sessions.SetWithContext(apiChatID, sessionID, "follow-up")
 	}
 
-	_, cleanText := extractReactionTag(result.Text)
+	_, cleanText := extractReactionTag(text)
 	if cs.Memory != nil {
 		ctx := context.Background()
 		_ = cs.Memory.EnsureConv(ctx, "_followup", "", "cc")
@@ -1001,16 +1006,59 @@ func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 			Channel: "cc",
 			Content: cleanText,
 			Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: cleanText}},
-			Model:   result.Model,
+			Model:   model,
 			Tier:    "follow-up",
 		})
 	}
 
 	cs.EventLog.Log("negative_followup", map[string]any{
 		"emoji":  emoji,
-		"model":  result.Model,
+		"model":  model,
 		"source": "api",
 	})
+}
+
+// invokeFollowUp runs the negative-follow-up LLM call. Prefers Runtime.Converse
+// when wired (#340 R4f) so the turn flows through the single-orchestrator
+// contract; falls back to the legacy Provider.Invoke path when Runtime is nil
+// (older test rigs, daemon startup orderings where Runtime isn't set yet).
+// Returns the assistant text, resolved model, and provider session id.
+func (cs *ChatService) invokeFollowUp(ctx context.Context, prompt string, tp tierParams, resumeID string) (text, model, sessionID string, err error) {
+	if cs.Runtime != nil {
+		res, cerr := cs.Runtime.Converse(ctx, runtime.ConverseRequest{
+			Model:        ai.ModelID(tp.Model),
+			Backend:      tp.Backend,
+			Prompt:       prompt,
+			DataDir:      cs.DataDir,
+			ResumeID:     resumeID,
+			Effort:       tp.Effort,
+			WriteCapable: tp.WriteCapable,
+			MaxTurns:     tp.MaxTurns,
+		})
+		if cerr != nil {
+			return "", "", "", cerr
+		}
+		text = res.Text
+		if res.Usage != nil {
+			model = res.Usage.Model
+			sessionID = res.Usage.SessionID
+		}
+		if model == "" {
+			model = tp.Model
+		}
+		return text, model, sessionID, nil
+	}
+
+	params := provider.Params{
+		Model:    tp.Model,
+		ResumeID: resumeID,
+		DataDir:  cs.DataDir,
+	}
+	result, ierr := cs.Provider.Invoke(ctx, prompt, params, nil)
+	if ierr != nil {
+		return "", "", "", ierr
+	}
+	return result.Text, result.Model, result.SessionID, nil
 }
 
 // cleanupUploads periodically removes expired upload entries from the registry.

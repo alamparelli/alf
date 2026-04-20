@@ -16,16 +16,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func init() {
-	// Register the sqlite-vec extension on every sqlite3 connection opened
-	// after this point. Safe to call from multiple packages — it's
-	// idempotent in sqlite_vec/cgo.
-	sqlite_vec.Auto()
-}
+// sqlite-vec registration moved to sqlite_vec_register.go (gated by
+// //go:build cgo). Without that build constraint the CGO-free tool
+// binaries (cmd/memory-tools, cmd/system-tools, …) can't compile this
+// package because the sqlite-vec/cgo module has no non-cgo fallback.
+// WithEmbedder will return an error at runtime for a no-cgo build that
+// somehow does reach vec territory — it won't, because no-cgo callers
+// never wire an embedder.
 
 // SQLiteStore is the production Store backend for Step 1.2 (#336). It
 // absorbs the old chatdb + conversation packages under one SQLite database
@@ -61,20 +61,50 @@ type SQLiteStore struct {
 // features (e.g. vector search) that depend on extra tables.
 type StoreOption func(*SQLiteStore)
 
-// WithEmbedder enables semantic Index/Search backed by sqlite-vec. The
-// embedder's Dims() must be non-zero; passing an embedder with Dims() == 0
-// is treated as "no embedder" and the store falls back to the LIKE path.
+// defaultEmbedderDim is the schema dimension used when WithEmbedder is
+// called against an embedder that has not yet finished startup (typical:
+// HTTPEmbedder registering with the embed-server takes a few seconds,
+// during which Dims() returns 0). 384 matches the E5-small model we
+// ship with embed-service. A caller using a different model must pair
+// WithEmbedder with WithEmbedderDim to override this.
+const defaultEmbedderDim = 384
+
+// WithEmbedder enables semantic Index/Search backed by sqlite-vec.
+//
+// Late-ready embedders: the embedder ref is stored even when Dims() == 0
+// at option-apply time. The schema dimension is resolved in this order:
+// (1) Dims() if already > 0, (2) any prior WithEmbedderDim call, (3) the
+// package default (384). Index/Search at runtime defer to the embedder's
+// current state via IsReady().
+//
+// Passing a nil embedder is a no-op.
 //
 // Swapping embedder implementations between runs is allowed as long as
 // Dims() stays the same — the vec0 virtual table is created with a fixed
 // dimension and SQLite does not let you alter that in place.
 func WithEmbedder(e Embedder) StoreOption {
 	return func(s *SQLiteStore) {
-		if e == nil || e.Dims() <= 0 {
+		if e == nil {
 			return
 		}
 		s.embedder = e
-		s.embedDim = e.Dims()
+		if d := e.Dims(); d > 0 {
+			s.embedDim = d
+		} else if s.embedDim == 0 {
+			s.embedDim = defaultEmbedderDim
+		}
+	}
+}
+
+// WithEmbedderDim pre-declares the embedding dimension for callers that
+// wire a late-ready embedder (Dims() == 0 at boot) backed by a non-E5
+// model. Must be passed BEFORE WithEmbedder so the dim is seen while
+// the embedder ref is set.
+func WithEmbedderDim(dim int) StoreOption {
+	return func(s *SQLiteStore) {
+		if dim > 0 {
+			s.embedDim = dim
+		}
 	}
 }
 

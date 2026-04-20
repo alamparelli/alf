@@ -68,7 +68,7 @@ func TestIntegration_SingleTurnChat(t *testing.T) {
 	rt, store := newRealStack(t, prov, runtime.Options{Model: "test-model", Tier: "pro"})
 
 	ctx := context.Background()
-	ch, err := rt.Chat(ctx, memory.ConvID("conv-integ"), "hi")
+	ch, err := rt.Chat(ctx, runtime.ChatRequest{ConvID: memory.ConvID("conv-integ"), UserInput: "hi"})
 	if err != nil {
 		t.Fatalf("Chat: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestIntegration_SecondTurnSeesPriorHistory(t *testing.T) {
 		}
 	}
 
-	ch1, err := rt.Chat(ctx, "c-2", "one")
+	ch1, err := rt.Chat(ctx, runtime.ChatRequest{ConvID: "c-2", UserInput: "one"})
 	if err != nil {
 		t.Fatalf("Chat #1: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestIntegration_SecondTurnSeesPriorHistory(t *testing.T) {
 	// Swap provider script for the second turn.
 	prov.result = &provider.Result{Text: "second"}
 
-	ch2, err := rt.Chat(ctx, "c-2", "two")
+	ch2, err := rt.Chat(ctx, runtime.ChatRequest{ConvID: "c-2", UserInput: "two"})
 	if err != nil {
 		t.Fatalf("Chat #2: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestIntegration_ProviderErrorDoesNotPersistAssistant(t *testing.T) {
 	rt, store := newRealStack(t, prov, runtime.Options{Model: "m", Tier: "pro"})
 
 	ctx := context.Background()
-	ch, err := rt.Chat(ctx, "c-err", "please fail")
+	ch, err := rt.Chat(ctx, runtime.ChatRequest{ConvID: "c-err", UserInput: "please fail"})
 	if err != nil {
 		t.Fatalf("Chat: %v", err)
 	}

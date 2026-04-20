@@ -20,11 +20,11 @@ type stubRuntime struct {
 	invokeCalled bool
 }
 
-func (s *stubRuntime) Chat(ctx context.Context, convID memory.ConvID, userInput string) (<-chan runtime.Event, error) {
-	if convID == "" {
+func (s *stubRuntime) Chat(ctx context.Context, req runtime.ChatRequest) (<-chan runtime.Event, error) {
+	if req.ConvID == "" {
 		return nil, errors.New("convID required")
 	}
-	if userInput == "" {
+	if req.UserInput == "" {
 		return nil, errors.New("userInput required")
 	}
 	out := make(chan runtime.Event, len(s.chatScript))
@@ -65,7 +65,7 @@ func TestRuntime_ChatStreamsScriptedEvents(t *testing.T) {
 		{Kind: runtime.EventDone},
 	}}
 
-	ch, err := rt.Chat(context.Background(), memory.ConvID("conv-1"), "hi")
+	ch, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: memory.ConvID("conv-1"), UserInput: "hi"})
 	if err != nil {
 		t.Fatalf("Chat returned error: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRuntime_ChatEmitsToolResult(t *testing.T) {
 		{Kind: runtime.EventDone},
 	}}
 
-	ch, err := rt.Chat(context.Background(), memory.ConvID("conv-1"), "run ls")
+	ch, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: memory.ConvID("conv-1"), UserInput: "run ls"})
 	if err != nil {
 		t.Fatalf("Chat returned error: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestRuntime_ChatContextCancelStopsStream(t *testing.T) {
 	}}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := rt.Chat(ctx, memory.ConvID("conv-1"), "hi")
+	ch, err := rt.Chat(ctx, runtime.ChatRequest{ConvID: memory.ConvID("conv-1"), UserInput: "hi"})
 	if err != nil {
 		t.Fatalf("Chat returned error: %v", err)
 	}
@@ -142,10 +142,10 @@ func TestRuntime_ChatContextCancelStopsStream(t *testing.T) {
 
 func TestRuntime_ChatRejectsMissingInputs(t *testing.T) {
 	rt := &stubRuntime{}
-	if _, err := rt.Chat(context.Background(), memory.ConvID(""), "hi"); err == nil {
+	if _, err := rt.Chat(context.Background(), runtime.ChatRequest{UserInput: "hi"}); err == nil {
 		t.Fatal("expected error when convID empty")
 	}
-	if _, err := rt.Chat(context.Background(), memory.ConvID("c"), ""); err == nil {
+	if _, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: memory.ConvID("c")}); err == nil {
 		t.Fatal("expected error when userInput empty")
 	}
 }

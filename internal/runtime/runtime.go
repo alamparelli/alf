@@ -58,7 +58,9 @@ type Output = capability.Output
 // Runtime is the single orchestration surface exposed to all consumers.
 type Runtime interface {
 	// Chat processes one user turn inside a conversation. Streams events.
-	Chat(ctx context.Context, convID memory.ConvID, userInput string) (<-chan Event, error)
+	// Request fields mirror ConverseRequest where both surfaces overlap so
+	// consumers can reuse per-tier resolution logic across Chat + Converse.
+	Chat(ctx context.Context, req ChatRequest) (<-chan Event, error)
 
 	// Invoke runs a single Capability (scheduler, UI button, cron).
 	Invoke(ctx context.Context, capID capability.ID, args Args) (Output, error)
@@ -69,6 +71,32 @@ type Runtime interface {
 	// needs "just run the model with this context" without touching a
 	// conversation. See #340 R5c.
 	Converse(ctx context.Context, req ConverseRequest) (ConverseResult, error)
+}
+
+// ChatRequest is the per-turn input to Runtime.Chat. It carries everything a
+// consumer needs to route a user message through the AI + tool loop without
+// reaching into the Provider layer directly.
+//
+// ConvID + UserInput are required. Model falls back to Options.Model when
+// empty. Tools, when nil, default to the capability Registry projection;
+// pass a non-nil (possibly empty) slice to pin a specific tool set.
+//
+// Backend/Effort/WriteCapable/MaxTurns/DataDir/SystemPrompts/ResumeID mirror
+// the ConverseRequest fields so consumers can reuse the same tier-resolution
+// logic across Chat + Converse. Added in #340 R4h so chat_service /
+// comms.ChatEngine can migrate off Provider.Invoke directly.
+type ChatRequest struct {
+	ConvID        memory.ConvID
+	UserInput     string
+	Model         ai.ModelID
+	Backend       string
+	SystemPrompts []string
+	Tools         []ai.ToolSpec // nil ⇒ use Registry.List(); non-nil overrides
+	MaxTurns      int
+	Effort        string
+	WriteCapable  bool
+	DataDir       string
+	ResumeID      string
 }
 
 // ConverseRequest is the stateless LLM surface: system prompts + prompt +

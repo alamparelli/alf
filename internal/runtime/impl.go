@@ -57,35 +57,42 @@ type defaultRuntime struct {
 // Tools, and drives the AI + tool loop until the engine completes the turn
 // without further ToolCalls. All streamed events are surfaced to the caller
 // over the returned channel; the channel is closed when the turn terminates.
-func (r *defaultRuntime) Chat(ctx context.Context, convID memory.ConvID, userInput string) (<-chan Event, error) {
-	if convID == "" {
-		return nil, fmt.Errorf("runtime.Chat: convID required")
+func (r *defaultRuntime) Chat(ctx context.Context, req ChatRequest) (<-chan Event, error) {
+	if req.ConvID == "" {
+		return nil, fmt.Errorf("runtime.Chat: ConvID required")
 	}
-	if userInput == "" {
-		return nil, fmt.Errorf("runtime.Chat: userInput required")
+	if req.UserInput == "" {
+		return nil, fmt.Errorf("runtime.Chat: UserInput required")
 	}
-	if r.opts.Model == "" {
-		return nil, fmt.Errorf("runtime.Chat: Options.Model required")
+	model := req.Model
+	if model == "" {
+		model = r.opts.Model
+	}
+	if model == "" {
+		return nil, fmt.Errorf("runtime.Chat: Model required (none in Request, none in Options)")
 	}
 
 	userMsg := memory.Message{
 		Role:   "user",
-		Blocks: []memory.ContentBlock{{Type: memory.BlockText, Text: userInput}},
+		Blocks: []memory.ContentBlock{{Type: memory.BlockText, Text: req.UserInput}},
 	}
-	if _, err := r.deps.Memory.AppendMessage(ctx, convID, userMsg); err != nil {
+	if _, err := r.deps.Memory.AppendMessage(ctx, req.ConvID, userMsg); err != nil {
 		return nil, fmt.Errorf("runtime.Chat: persist user message: %w", err)
 	}
 
-	history, err := r.deps.Memory.ListMessages(ctx, convID, memory.ListOpts{ApplySummary: true})
+	history, err := r.deps.Memory.ListMessages(ctx, req.ConvID, memory.ListOpts{ApplySummary: true})
 	if err != nil {
 		return nil, fmt.Errorf("runtime.Chat: load history: %w", err)
 	}
 
 	messages := toAIMessages(history)
-	tools := buildToolSpecs(r.deps.Registry.List())
+	tools := req.Tools
+	if tools == nil {
+		tools = buildToolSpecs(r.deps.Registry.List())
+	}
 
 	out := make(chan Event, 16)
-	go r.runChatLoop(ctx, convID, messages, tools, out)
+	go r.runChatLoop(ctx, req, model, messages, tools, out)
 	return out, nil
 }
 
@@ -95,7 +102,8 @@ func (r *defaultRuntime) Chat(ctx context.Context, convID memory.ConvID, userInp
 // EventDone / EventError.
 func (r *defaultRuntime) runChatLoop(
 	ctx context.Context,
-	convID memory.ConvID,
+	chatReq ChatRequest,
+	model ai.ModelID,
 	messages []ai.Message,
 	tools []ai.ToolSpec,
 	out chan<- Event,
@@ -109,10 +117,17 @@ func (r *defaultRuntime) runChatLoop(
 
 	for iter := 0; iter < r.opts.MaxIterations; iter++ {
 		req := ai.Request{
-			Model:    r.opts.Model,
-			Messages: messages,
-			Tools:    tools,
-			Stream:   true,
+			Model:         model,
+			Backend:       chatReq.Backend,
+			SystemPrompts: chatReq.SystemPrompts,
+			Messages:      messages,
+			Tools:         tools,
+			MaxTurns:      chatReq.MaxTurns,
+			Effort:        chatReq.Effort,
+			WriteCapable:  chatReq.WriteCapable,
+			DataDir:       chatReq.DataDir,
+			ResumeID:      chatReq.ResumeID,
+			Stream:        true,
 		}
 
 		stream, err := r.deps.AI.Run(ctx, req)
@@ -163,7 +178,7 @@ func (r *defaultRuntime) runChatLoop(
 		if len(pendingCalls) == 0 {
 			// Turn complete — persist the consolidated assistant message.
 			if len(assistantBlocks) > 0 {
-				if _, err := r.deps.Memory.AppendMessage(ctx, convID, memory.Message{
+				if _, err := r.deps.Memory.AppendMessage(ctx, chatReq.ConvID, memory.Message{
 					Role:   "assistant",
 					Blocks: assistantBlocks,
 				}); err != nil {

@@ -544,7 +544,7 @@ type fakeRuntime struct {
 	err     error
 }
 
-func (f *fakeRuntime) Chat(ctx context.Context, convID memory.ConvID, userInput string) (<-chan runtime.Event, error) {
+func (f *fakeRuntime) Chat(ctx context.Context, req runtime.ChatRequest) (<-chan runtime.Event, error) {
 	return nil, nil
 }
 

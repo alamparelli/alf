@@ -282,7 +282,7 @@ func TestChat_ErrorsIfModelMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := rt.Chat(context.Background(), "c", "hi"); err == nil {
+	if _, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "c", UserInput: "hi"}); err == nil {
 		t.Fatal("Chat without Model should error")
 	}
 }
@@ -308,7 +308,7 @@ func TestChat_PersistsUserAndAssistantAndStreamsTokens(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	ch, err := rt.Chat(context.Background(), "conv-1", "hi")
+	ch, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "conv-1", UserInput: "hi"})
 	if err != nil {
 		t.Fatalf("Chat: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestChat_ExecutesToolCallAndReinjectsResult(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	ch, err := rt.Chat(context.Background(), "conv-1", "please echo")
+	ch, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "conv-1", UserInput: "please echo"})
 	if err != nil {
 		t.Fatalf("Chat: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestChat_ToolCapabilityNotFound_FoldsErrorIntoResult(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	ch, _ := rt.Chat(context.Background(), "c", "x")
+	ch, _ := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "c", UserInput: "x"})
 	got := drain(ch)
 	if got.doneErr != nil {
 		t.Fatalf("unexpected error: %v", got.doneErr)
@@ -506,7 +506,7 @@ func TestChat_AIEngineRunError_IsSurfaced(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	ch, err := rt.Chat(context.Background(), "c", "x")
+	ch, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "c", UserInput: "x"})
 	if err != nil {
 		t.Fatalf("Chat returned setup error: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestChat_StreamErrorEvent_IsSurfaced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	ch, _ := rt.Chat(context.Background(), "c", "x")
+	ch, _ := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "c", UserInput: "x"})
 	got := drain(ch)
 	if got.doneErr == nil || got.doneErr.Error() != "midstream" {
 		t.Fatalf("expected midstream error, got %v", got.doneErr)
@@ -565,7 +565,7 @@ func TestChat_MaxIterations_Trips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	ch, _ := rt.Chat(context.Background(), "c", "x")
+	ch, _ := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "c", UserInput: "x"})
 	got := drain(ch)
 	if got.doneErr == nil {
 		t.Fatal("expected max-iterations error")
@@ -582,11 +582,106 @@ func TestChat_RejectsMissingInputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := rt.Chat(context.Background(), "", "x"); err == nil {
+	if _, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "", UserInput: "x"}); err == nil {
 		t.Fatal("expected error for empty convID")
 	}
-	if _, err := rt.Chat(context.Background(), "c", ""); err == nil {
+	if _, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "c", UserInput: ""}); err == nil {
 		t.Fatal("expected error for empty userInput")
+	}
+}
+
+// TestChat_ForwardsRequestPassthroughs pins the #340 R4h contract: every
+// per-call field on ChatRequest flows into the ai.Request the engine sees on
+// the first Run of the turn — so chat_service + comms.ChatEngine can control
+// Model/Tier params per message without mutating Runtime.Options.
+func TestChat_ForwardsRequestPassthroughs(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, err := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "options-fallback"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	explicitTools := []ai.ToolSpec{{Name: "picked"}}
+	ch, err := rt.Chat(context.Background(), runtime.ChatRequest{
+		ConvID:        "conv-pass",
+		UserInput:     "hello",
+		Model:         "request-model",
+		Backend:       "openrouter",
+		SystemPrompts: []string{"identity", "tier-prompt"},
+		Tools:         explicitTools,
+		MaxTurns:      9,
+		Effort:        "high",
+		WriteCapable:  true,
+		DataDir:       "/data/req",
+		ResumeID:      "sess-chat",
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	for range ch {
+	}
+
+	if len(eng.requests) != 1 {
+		t.Fatalf("engine runs: got %d want 1", len(eng.requests))
+	}
+	r := eng.requests[0]
+	if r.Model != "request-model" {
+		t.Errorf("Model: got %q want request-model (options fallback must not win)", r.Model)
+	}
+	if r.Backend != "openrouter" || r.Effort != "high" || !r.WriteCapable || r.MaxTurns != 9 || r.DataDir != "/data/req" || r.ResumeID != "sess-chat" {
+		t.Errorf("passthroughs drifted: %+v", r)
+	}
+	if len(r.SystemPrompts) != 2 || r.SystemPrompts[0] != "identity" || r.SystemPrompts[1] != "tier-prompt" {
+		t.Errorf("SystemPrompts: %+v", r.SystemPrompts)
+	}
+	if len(r.Tools) != 1 || r.Tools[0].Name != "picked" {
+		t.Errorf("Tools override not honoured: %+v (want [picked])", r.Tools)
+	}
+}
+
+// TestChat_ModelFallsBackToOptions pins the "Options.Model is the fallback"
+// half of the Converse/Chat symmetry: leaving ChatRequest.Model empty must
+// pick up the Runtime-level default so existing single-tier setups still
+// work without threading a Model on every call.
+func TestChat_ModelFallsBackToOptions(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "options-default"})
+
+	ch, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "c", UserInput: "hi"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	for range ch {
+	}
+	if eng.requests[0].Model != "options-default" {
+		t.Fatalf("Model fallback: got %q want options-default", eng.requests[0].Model)
+	}
+}
+
+// TestChat_ErrorsWhenNoModelAnywhere pins the safety net: an empty
+// ChatRequest.Model paired with an empty Options.Model is a config bug, not
+// a silent run on some hidden default.
+func TestChat_ErrorsWhenNoModelAnywhere(t *testing.T) {
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}},
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{})
+
+	_, err := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "c", UserInput: "hi"})
+	if err == nil {
+		t.Fatal("expected error when neither Request.Model nor Options.Model is set")
 	}
 }
 

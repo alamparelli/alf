@@ -62,6 +62,14 @@ func RunStoreContract(t *testing.T, factory Factory) {
 	t.Run("Search_KZeroReturnsEmpty", func(t *testing.T) { testSearchKZero(t, factory) })
 	t.Run("Search_KNegativeErrors", func(t *testing.T) { testSearchKNegative(t, factory) })
 	t.Run("Index_RejectsEmptyID", func(t *testing.T) { testIndexEmptyID(t, factory) })
+	t.Run("GetDocument_Roundtrip", func(t *testing.T) { testGetDocumentRoundtrip(t, factory) })
+	t.Run("GetDocument_UnknownReturnsNil", func(t *testing.T) { testGetDocumentUnknown(t, factory) })
+	t.Run("GetDocument_ScopeIsolation", func(t *testing.T) { testGetDocumentScopeIsolation(t, factory) })
+	t.Run("GetDocument_RejectsEmpty", func(t *testing.T) { testGetDocumentRejectsEmpty(t, factory) })
+	t.Run("DeleteDocument_RemovesAndSearchExcludes", func(t *testing.T) { testDeleteDocumentRemoves(t, factory) })
+	t.Run("DeleteDocument_UnknownReturnsFalse", func(t *testing.T) { testDeleteDocumentUnknown(t, factory) })
+	t.Run("DeleteDocument_ScopeIsolation", func(t *testing.T) { testDeleteDocumentScopeIsolation(t, factory) })
+	t.Run("DeleteDocument_RejectsEmpty", func(t *testing.T) { testDeleteDocumentRejectsEmpty(t, factory) })
 	t.Run("Prefs_Roundtrip", func(t *testing.T) { testPrefsRoundtrip(t, factory) })
 	t.Run("Prefs_UnsetReturnsNil", func(t *testing.T) { testPrefsUnset(t, factory) })
 	t.Run("Prefs_NilValueClears", func(t *testing.T) { testPrefsNilClears(t, factory) })
@@ -340,6 +348,135 @@ func testIndexEmptyID(t *testing.T, factory Factory) {
 	err := s.Index(context.Background(), "s", memory.Document{ID: "", Text: "x"})
 	if err == nil {
 		t.Errorf("Index with empty doc.ID should error")
+	}
+}
+
+func testGetDocumentRoundtrip(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.Index(ctx, "s", memory.Document{
+		ID:       "doc-1",
+		Text:     "hello world",
+		Metadata: map[string]string{"k": "v"},
+	})
+	got, err := s.GetDocument(ctx, "s", "doc-1")
+	if err != nil {
+		t.Fatalf("GetDocument: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetDocument returned nil on existing doc")
+	}
+	if got.ID != "doc-1" || got.Text != "hello world" {
+		t.Errorf("document mismatch: %+v", got)
+	}
+	if got.Metadata["k"] != "v" {
+		t.Errorf("metadata lost on roundtrip: %+v", got.Metadata)
+	}
+}
+
+func testGetDocumentUnknown(t *testing.T, factory Factory) {
+	s := factory()
+	got, err := s.GetDocument(context.Background(), "s", "does-not-exist")
+	if err != nil {
+		t.Fatalf("GetDocument unknown: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for unknown doc, got %+v", got)
+	}
+}
+
+func testGetDocumentScopeIsolation(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.Index(ctx, "A", memory.Document{ID: "shared", Text: "in A"})
+
+	// Same docID under a different scope must be a miss, not a leak.
+	got, err := s.GetDocument(ctx, "B", "shared")
+	if err != nil {
+		t.Fatalf("GetDocument: %v", err)
+	}
+	if got != nil {
+		t.Errorf("scope B saw doc from scope A: %+v", got)
+	}
+}
+
+func testGetDocumentRejectsEmpty(t *testing.T, factory Factory) {
+	s := factory()
+	if _, err := s.GetDocument(context.Background(), "", "id"); err == nil {
+		t.Errorf("GetDocument with empty scope should error")
+	}
+	if _, err := s.GetDocument(context.Background(), "s", ""); err == nil {
+		t.Errorf("GetDocument with empty docID should error")
+	}
+}
+
+func testDeleteDocumentRemoves(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.Index(ctx, "s", memory.Document{ID: "gone", Text: "ephemeral fact"})
+	_ = s.Index(ctx, "s", memory.Document{ID: "stay", Text: "persistent fact"})
+
+	ok, err := s.DeleteDocument(ctx, "s", "gone")
+	if err != nil {
+		t.Fatalf("DeleteDocument: %v", err)
+	}
+	if !ok {
+		t.Errorf("DeleteDocument returned false on existing doc")
+	}
+
+	// GetDocument must now miss.
+	got, _ := s.GetDocument(ctx, "s", "gone")
+	if got != nil {
+		t.Errorf("GetDocument after delete returned %+v", got)
+	}
+	// Search must not surface the deleted doc — the FTS/vec triggers must
+	// have cleaned up too, not just the base row.
+	hits, _ := s.Search(ctx, "s", "ephemeral", 10)
+	for _, h := range hits {
+		if h.Document.ID == "gone" {
+			t.Errorf("Search still returns deleted doc: %+v", h)
+		}
+	}
+	// And the sibling doc must survive.
+	if g, _ := s.GetDocument(ctx, "s", "stay"); g == nil {
+		t.Errorf("Delete wiped an unrelated doc")
+	}
+}
+
+func testDeleteDocumentUnknown(t *testing.T, factory Factory) {
+	s := factory()
+	ok, err := s.DeleteDocument(context.Background(), "s", "never-existed")
+	if err != nil {
+		t.Fatalf("DeleteDocument unknown: %v", err)
+	}
+	if ok {
+		t.Errorf("DeleteDocument returned true on missing doc")
+	}
+}
+
+func testDeleteDocumentScopeIsolation(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.Index(ctx, "A", memory.Document{ID: "shared", Text: "in A"})
+	_ = s.Index(ctx, "B", memory.Document{ID: "shared", Text: "in B"})
+
+	ok, err := s.DeleteDocument(ctx, "A", "shared")
+	if err != nil || !ok {
+		t.Fatalf("Delete(A/shared) ok=%v err=%v", ok, err)
+	}
+	// The B-scoped doc with the same docID must survive.
+	if g, _ := s.GetDocument(ctx, "B", "shared"); g == nil {
+		t.Errorf("DeleteDocument leaked across scopes: B/shared is gone")
+	}
+}
+
+func testDeleteDocumentRejectsEmpty(t *testing.T, factory Factory) {
+	s := factory()
+	if _, err := s.DeleteDocument(context.Background(), "", "id"); err == nil {
+		t.Errorf("DeleteDocument with empty scope should error")
+	}
+	if _, err := s.DeleteDocument(context.Background(), "s", ""); err == nil {
+		t.Errorf("DeleteDocument with empty docID should error")
 	}
 }
 

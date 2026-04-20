@@ -1235,6 +1235,80 @@ func (s *SQLiteStore) searchVec(ctx context.Context, scope Scope, query string, 
 	return out, nil
 }
 
+func (s *SQLiteStore) GetDocument(ctx context.Context, scope Scope, docID string) (*Document, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if scope == "" {
+		return nil, errors.New("memory: GetDocument: empty scope")
+	}
+	if docID == "" {
+		return nil, errors.New("memory: GetDocument: empty docID")
+	}
+	var d Document
+	var meta string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT doc_id, text, metadata FROM documents WHERE scope = ? AND doc_id = ?`,
+		string(scope), docID).Scan(&d.ID, &d.Text, &meta)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if meta != "" && meta != "{}" {
+		_ = json.Unmarshal([]byte(meta), &d.Metadata)
+	}
+	return &d, nil
+}
+
+func (s *SQLiteStore) DeleteDocument(ctx context.Context, scope Scope, docID string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if scope == "" {
+		return false, errors.New("memory: DeleteDocument: empty scope")
+	}
+	if docID == "" {
+		return false, errors.New("memory: DeleteDocument: empty docID")
+	}
+
+	// Look up the rowid first — needed to clean the vec table because vec0
+	// is a virtual table that doesn't participate in regular FK cascades.
+	// documents_fts is handled by the AFTER DELETE trigger (see
+	// migrateVecSchema).
+	var rowID int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT rowid FROM documents WHERE scope = ? AND doc_id = ?`,
+		string(scope), docID).Scan(&rowID)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	// Drop the vec row before deleting from documents — if the delete
+	// trigger on documents fires while the vec row is still present and
+	// the process crashes between the two DELETEs, reopening the DB would
+	// leave an orphan vec embedding. Ordering the vec DELETE first means
+	// the worst case is a document with no embedding (benign — Search
+	// just won't rank it).
+	if s.embedDim > 0 {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM documents_vec WHERE rowid = ?`, rowID); err != nil {
+			return false, fmt.Errorf("memory: DeleteDocument: vec cleanup: %w", err)
+		}
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM documents WHERE scope = ? AND doc_id = ?`,
+		string(scope), docID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // Preferences ---------------------------------------------------------------
 
 func (s *SQLiteStore) GetPref(ctx context.Context, key string) (Value, error) {

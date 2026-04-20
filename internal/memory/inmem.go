@@ -536,6 +536,60 @@ func (s *InMem) Search(ctx context.Context, scope Scope, query string, k int) ([
 	return out, nil
 }
 
+func (s *InMem) GetDocument(ctx context.Context, scope Scope, docID string) (*Document, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if scope == "" {
+		return nil, errors.New("memory: GetDocument: empty scope")
+	}
+	if docID == "" {
+		return nil, errors.New("memory: GetDocument: empty docID")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	docs, ok := s.documents[scope]
+	if !ok {
+		return nil, nil
+	}
+	d, ok := docs[docID]
+	if !ok {
+		return nil, nil
+	}
+	return &d, nil
+}
+
+func (s *InMem) DeleteDocument(ctx context.Context, scope Scope, docID string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if scope == "" {
+		return false, errors.New("memory: DeleteDocument: empty scope")
+	}
+	if docID == "" {
+		return false, errors.New("memory: DeleteDocument: empty docID")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	docs, ok := s.documents[scope]
+	if !ok {
+		return false, nil
+	}
+	if _, ok := docs[docID]; !ok {
+		return false, nil
+	}
+	delete(docs, docID)
+	// Preserve docOrder invariant: strip docID from the ordered slice.
+	order := s.docOrder[scope]
+	for i, id := range order {
+		if id == docID {
+			s.docOrder[scope] = append(order[:i], order[i+1:]...)
+			break
+		}
+	}
+	return true, nil
+}
+
 // Preferences ---------------------------------------------------------------
 
 func (s *InMem) GetPref(ctx context.Context, key string) (Value, error) {

@@ -1262,6 +1262,45 @@ func (s *SQLiteStore) GetDocument(ctx context.Context, scope Scope, docID string
 	return &d, nil
 }
 
+func (s *SQLiteStore) ListDocuments(ctx context.Context, scope Scope, limit int) ([]Document, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if scope == "" {
+		return nil, errors.New("memory: ListDocuments: empty scope")
+	}
+	if limit <= 0 {
+		return nil, errors.New("memory: ListDocuments: limit must be > 0")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT doc_id, text, metadata FROM documents
+		 WHERE scope = ?
+		 ORDER BY inserted_at ASC, rowid ASC
+		 LIMIT ?`,
+		string(scope), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Document
+	for rows.Next() {
+		var d Document
+		var meta string
+		if err := rows.Scan(&d.ID, &d.Text, &meta); err != nil {
+			return nil, err
+		}
+		if meta != "" && meta != "{}" {
+			_ = json.Unmarshal([]byte(meta), &d.Metadata)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *SQLiteStore) DeleteDocument(ctx context.Context, scope Scope, docID string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err

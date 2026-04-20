@@ -559,6 +559,35 @@ func (s *InMem) GetDocument(ctx context.Context, scope Scope, docID string) (*Do
 	return &d, nil
 }
 
+func (s *InMem) ListDocuments(ctx context.Context, scope Scope, limit int) ([]Document, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if scope == "" {
+		return nil, errors.New("memory: ListDocuments: empty scope")
+	}
+	if limit <= 0 {
+		return nil, errors.New("memory: ListDocuments: limit must be > 0")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	docs, ok := s.documents[scope]
+	if !ok {
+		return nil, nil
+	}
+	order := s.docOrder[scope]
+	var out []Document
+	for _, id := range order {
+		if d, ok := docs[id]; ok {
+			out = append(out, d)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func (s *InMem) DeleteDocument(ctx context.Context, scope Scope, docID string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err

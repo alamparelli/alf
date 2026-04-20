@@ -70,6 +70,11 @@ func RunStoreContract(t *testing.T, factory Factory) {
 	t.Run("DeleteDocument_UnknownReturnsFalse", func(t *testing.T) { testDeleteDocumentUnknown(t, factory) })
 	t.Run("DeleteDocument_ScopeIsolation", func(t *testing.T) { testDeleteDocumentScopeIsolation(t, factory) })
 	t.Run("DeleteDocument_RejectsEmpty", func(t *testing.T) { testDeleteDocumentRejectsEmpty(t, factory) })
+	t.Run("ListDocuments_InsertionOrder", func(t *testing.T) { testListDocumentsInsertionOrder(t, factory) })
+	t.Run("ListDocuments_RespectsLimit", func(t *testing.T) { testListDocumentsLimit(t, factory) })
+	t.Run("ListDocuments_ScopeIsolation", func(t *testing.T) { testListDocumentsScopeIsolation(t, factory) })
+	t.Run("ListDocuments_UnknownScopeIsEmpty", func(t *testing.T) { testListDocumentsUnknownScope(t, factory) })
+	t.Run("ListDocuments_RejectsInvalid", func(t *testing.T) { testListDocumentsRejectsInvalid(t, factory) })
 	t.Run("Prefs_Roundtrip", func(t *testing.T) { testPrefsRoundtrip(t, factory) })
 	t.Run("Prefs_UnsetReturnsNil", func(t *testing.T) { testPrefsUnset(t, factory) })
 	t.Run("Prefs_NilValueClears", func(t *testing.T) { testPrefsNilClears(t, factory) })
@@ -477,6 +482,84 @@ func testDeleteDocumentRejectsEmpty(t *testing.T, factory Factory) {
 	}
 	if _, err := s.DeleteDocument(context.Background(), "s", ""); err == nil {
 		t.Errorf("DeleteDocument with empty docID should error")
+	}
+}
+
+func testListDocumentsInsertionOrder(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	// Index in deliberate order — List must preserve it.
+	_ = s.Index(ctx, "s", memory.Document{ID: "a", Text: "first"})
+	_ = s.Index(ctx, "s", memory.Document{ID: "b", Text: "second"})
+	_ = s.Index(ctx, "s", memory.Document{ID: "c", Text: "third"})
+
+	docs, err := s.ListDocuments(ctx, "s", 10)
+	if err != nil {
+		t.Fatalf("ListDocuments: %v", err)
+	}
+	if len(docs) != 3 {
+		t.Fatalf("want 3 docs, got %d", len(docs))
+	}
+	wantOrder := []string{"a", "b", "c"}
+	for i, want := range wantOrder {
+		if docs[i].ID != want {
+			t.Errorf("docs[%d].ID = %q, want %q", i, docs[i].ID, want)
+		}
+	}
+}
+
+func testListDocumentsLimit(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		_ = s.Index(ctx, "s", memory.Document{ID: string(rune('a' + i)), Text: "x"})
+	}
+	docs, err := s.ListDocuments(ctx, "s", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 2 {
+		t.Errorf("limit=2 returned %d docs", len(docs))
+	}
+}
+
+func testListDocumentsScopeIsolation(t *testing.T, factory Factory) {
+	s := factory()
+	ctx := context.Background()
+	_ = s.Index(ctx, "A", memory.Document{ID: "1", Text: "a-stuff"})
+	_ = s.Index(ctx, "B", memory.Document{ID: "2", Text: "b-stuff"})
+
+	docsA, _ := s.ListDocuments(ctx, "A", 10)
+	if len(docsA) != 1 || docsA[0].ID != "1" {
+		t.Errorf("scope A leaked: got %+v", docsA)
+	}
+	docsB, _ := s.ListDocuments(ctx, "B", 10)
+	if len(docsB) != 1 || docsB[0].ID != "2" {
+		t.Errorf("scope B leaked: got %+v", docsB)
+	}
+}
+
+func testListDocumentsUnknownScope(t *testing.T, factory Factory) {
+	s := factory()
+	docs, err := s.ListDocuments(context.Background(), "never-written", 10)
+	if err != nil {
+		t.Fatalf("unknown scope ListDocuments: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Errorf("expected empty result for unknown scope, got %d docs", len(docs))
+	}
+}
+
+func testListDocumentsRejectsInvalid(t *testing.T, factory Factory) {
+	s := factory()
+	if _, err := s.ListDocuments(context.Background(), "", 10); err == nil {
+		t.Errorf("ListDocuments with empty scope should error")
+	}
+	if _, err := s.ListDocuments(context.Background(), "s", 0); err == nil {
+		t.Errorf("ListDocuments with limit=0 should error")
+	}
+	if _, err := s.ListDocuments(context.Background(), "s", -1); err == nil {
+		t.Errorf("ListDocuments with negative limit should error")
 	}
 }
 

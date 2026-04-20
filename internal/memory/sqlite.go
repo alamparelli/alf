@@ -3,9 +3,12 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,8 +16,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
 )
+
+func init() {
+	// Register the sqlite-vec extension on every sqlite3 connection opened
+	// after this point. Safe to call from multiple packages — it's
+	// idempotent in sqlite_vec/cgo.
+	sqlite_vec.Auto()
+}
 
 // SQLiteStore is the production Store backend for Step 1.2 (#336). It
 // absorbs the old chatdb + conversation packages under one SQLite database
@@ -30,11 +41,41 @@ type SQLiteStore struct {
 	db     *sql.DB
 	msgSeq atomic.Uint64
 
+	// Optional embedding pipeline. When nil, Index/Search use the legacy
+	// LIKE substring path; when set, Index also stores a float[dim] vector
+	// in the documents_vec virtual table and Search uses cosine similarity.
+	embedder Embedder
+	embedDim int // cached Dims() at open time; 0 means vec disabled
+
 	// nowFn is the injectable clock. Defaults to time.Now().UnixMilli.
 	// Exposed only for tests in the same package.
 	nowFn func() int64
 
 	closeOnce sync.Once
+}
+
+// StoreOption configures a SQLiteStore at construction time.
+//
+// Options are applied in order and MUST only touch fields of the store —
+// the schema is materialised after options run so an option may opt into
+// features (e.g. vector search) that depend on extra tables.
+type StoreOption func(*SQLiteStore)
+
+// WithEmbedder enables semantic Index/Search backed by sqlite-vec. The
+// embedder's Dims() must be non-zero; passing an embedder with Dims() == 0
+// is treated as "no embedder" and the store falls back to the LIKE path.
+//
+// Swapping embedder implementations between runs is allowed as long as
+// Dims() stays the same — the vec0 virtual table is created with a fixed
+// dimension and SQLite does not let you alter that in place.
+func WithEmbedder(e Embedder) StoreOption {
+	return func(s *SQLiteStore) {
+		if e == nil || e.Dims() <= 0 {
+			return
+		}
+		s.embedder = e
+		s.embedDim = e.Dims()
+	}
 }
 
 const sqliteSchema = `
@@ -126,7 +167,12 @@ CREATE TABLE IF NOT EXISTS prefs (
 //
 // Pass an empty dataDir to use an in-memory SQLite DB (":memory:") — intended
 // for tests only. Production callers always pass a real directory.
-func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
+//
+// Options configure optional subsystems. WithEmbedder enables semantic
+// search — the vec0 / FTS5 tables are materialised only when an embedder
+// is present so the default-path schema stays CGO-vec-free for callers
+// that don't need it.
+func NewSQLiteStore(dataDir string, opts ...StoreOption) (*SQLiteStore, error) {
 	var dbPath string
 	if dataDir == "" {
 		dbPath = ":memory:"
@@ -159,6 +205,15 @@ func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
 		db:    db,
 		nowFn: func() int64 { return time.Now().UnixMilli() },
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	if s.embedDim > 0 {
+		if err := s.migrateVecSchema(); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("memory: vec schema: %w", err)
+		}
+	}
 
 	// Seed the in-process sequence from the highest existing message ID so
 	// reopening a DB does not collide with old IDs.
@@ -171,6 +226,80 @@ func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
 	}
 
 	return s, nil
+}
+
+// migrateVecSchema adds the vec0 + FTS5 tables used for semantic Search.
+// Called only when an embedder is configured; the default schema stays
+// vec-free so callers that don't need semantic search pay no CGO-vec cost
+// at open time.
+//
+// The documents table owns an INTEGER rowid (implicit in SQLite); we use
+// that rowid as the join key for both virtual tables. The vec dimension is
+// baked into the DDL — swapping embedders with a different dim requires
+// dropping and rebuilding the index (handled in a later sub-ticket).
+func (s *SQLiteStore) migrateVecSchema() error {
+	// Idempotency: record the dim the index was created with and refuse to
+	// reopen with a different one. Matches the memstore invariant — vec0
+	// cannot change its declared dimension in place.
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS doc_vec_meta (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("doc_vec_meta: %w", err)
+	}
+	var existingDim string
+	_ = s.db.QueryRow(`SELECT value FROM doc_vec_meta WHERE key = 'dim'`).Scan(&existingDim)
+	if existingDim != "" && existingDim != fmt.Sprintf("%d", s.embedDim) {
+		return fmt.Errorf("memory: vec dim mismatch: db was built with %s, embedder reports %d", existingDim, s.embedDim)
+	}
+	if existingDim == "" {
+		if _, err := s.db.Exec(`INSERT INTO doc_vec_meta (key, value) VALUES ('dim', ?)`, fmt.Sprintf("%d", s.embedDim)); err != nil {
+			return fmt.Errorf("doc_vec_meta insert: %w", err)
+		}
+	}
+
+	stmts := []string{
+		fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS documents_vec USING vec0(
+			rowid INTEGER PRIMARY KEY,
+			embedding float[%d] distance_metric=cosine
+		)`, s.embedDim),
+		`CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+			text, scope UNINDEXED, content=documents, content_rowid=rowid
+		)`,
+		// Keep FTS5 mirror in sync with documents. vec0 is written
+		// explicitly by Index() — we don't trigger it from SQL because the
+		// embedding must be computed in Go.
+		`CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+			INSERT INTO documents_fts(rowid, text, scope) VALUES (new.rowid, new.text, new.scope);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+			INSERT INTO documents_fts(documents_fts, rowid, text, scope) VALUES('delete', old.rowid, old.text, old.scope);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+			INSERT INTO documents_fts(documents_fts, rowid, text, scope) VALUES('delete', old.rowid, old.text, old.scope);
+			INSERT INTO documents_fts(rowid, text, scope) VALUES (new.rowid, new.text, new.scope);
+		END`,
+	}
+	for _, stmt := range stmts {
+		if _, err := s.db.Exec(stmt); err != nil {
+			head := stmt
+			if len(head) > 80 {
+				head = head[:80]
+			}
+			return fmt.Errorf("exec %q: %w", head, err)
+		}
+	}
+	return nil
+}
+
+// serializeVec converts a float32 vector into the little-endian byte blob
+// that sqlite-vec expects for a vec0 column.
+func serializeVec(v []float32) []byte {
+	buf := make([]byte, 4*len(v))
+	for i, f := range v {
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(f))
+	}
+	return buf
 }
 
 // Close releases the database handle. Safe to call multiple times.
@@ -894,7 +1023,7 @@ func (s *SQLiteStore) Index(ctx context.Context, scope Scope, doc Document) erro
 		}
 		meta = string(b)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO documents (scope, doc_id, text, metadata, inserted_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(scope, doc_id) DO UPDATE SET
@@ -902,7 +1031,48 @@ func (s *SQLiteStore) Index(ctx context.Context, scope Scope, doc Document) erro
 		    metadata = excluded.metadata,
 		    inserted_at = excluded.inserted_at`,
 		string(scope), doc.ID, doc.Text, meta, s.nowFn())
-	return err
+	if err != nil {
+		return err
+	}
+
+	if s.embedder == nil || !s.embedder.IsReady() {
+		return nil
+	}
+
+	// Resolve the document's rowid — the INSERT…ON CONFLICT path returns
+	// LastInsertId only on the insert branch, so for upserts we re-query.
+	rowID, lidErr := res.LastInsertId()
+	if lidErr != nil || rowID == 0 {
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT rowid FROM documents WHERE scope = ? AND doc_id = ?`,
+			string(scope), doc.ID).Scan(&rowID); err != nil {
+			return fmt.Errorf("memory: Index: rowid lookup: %w", err)
+		}
+	}
+
+	vec, embErr := s.embedder.Embed(doc.Text)
+	if embErr != nil {
+		// Embedding failure is non-fatal — the row is still in documents
+		// and FTS5; only the vec path is degraded. Callers see reduced
+		// semantic quality rather than a hard error. Logged for ops.
+		log.Printf("[memory] Index: embed failed (scope=%q id=%q): %v — vec skipped", scope, doc.ID, embErr)
+		return nil
+	}
+	if len(vec) != s.embedDim {
+		return fmt.Errorf("memory: Index: embedder returned %d dims, expected %d", len(vec), s.embedDim)
+	}
+
+	// UPSERT into vec0: delete old row (if any) then insert. vec0 does not
+	// support ON CONFLICT.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM documents_vec WHERE rowid = ?`, rowID); err != nil {
+		return fmt.Errorf("memory: Index: vec delete: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO documents_vec (rowid, embedding) VALUES (?, ?)`,
+		rowID, serializeVec(vec)); err != nil {
+		return fmt.Errorf("memory: Index: vec insert: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLiteStore) Search(ctx context.Context, scope Scope, query string, k int) ([]Hit, error) {
@@ -916,8 +1086,19 @@ func (s *SQLiteStore) Search(ctx context.Context, scope Scope, query string, k i
 		return nil, nil
 	}
 
-	// LIKE-based substring match — same pragma as InMem. The Step 1.3 work
-	// replaces this with the FTS5 path inherited from memstore.
+	// Vector path: embed the query, ask sqlite-vec for nearest neighbours
+	// scoped to the requested Scope, then map back to Documents.
+	if s.embedder != nil && s.embedder.IsReady() && strings.TrimSpace(query) != "" {
+		if hits, err := s.searchVec(ctx, scope, query, k); err != nil {
+			log.Printf("[memory] Search: vec path failed, falling back to LIKE: %v", err)
+		} else {
+			return hits, nil
+		}
+	}
+
+	// LIKE substring fallback — used when no embedder is configured, the
+	// embedder is not ready, or the query is empty. Kept so tests and
+	// bootstrap runs without a model continue to work.
 	q := query
 	lower := strings.ToLower(q)
 
@@ -985,6 +1166,73 @@ func scoredLess(a, b struct {
 		return a.hit.Score > b.hit.Score
 	}
 	return a.idx < b.idx
+}
+
+// searchVec runs a cosine-distance nearest-neighbour lookup over documents_vec
+// and returns the matching Documents. Restricted to the requested scope — we
+// over-fetch (k * 4, capped) from vec0 and filter post-hoc because sqlite-vec
+// does not expose a SQL WHERE clause on the index itself.
+func (s *SQLiteStore) searchVec(ctx context.Context, scope Scope, query string, k int) ([]Hit, error) {
+	qv, err := s.embedder.EmbedQuery(query)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+	if len(qv) != s.embedDim {
+		return nil, fmt.Errorf("embedder returned %d dims, expected %d", len(qv), s.embedDim)
+	}
+
+	// Over-fetch to absorb the per-scope filter. 4x is a heuristic — same
+	// ballpark as memstore. Capped so we don't pull the whole index if a
+	// caller asks for k=10000.
+	fetch := k * 4
+	if fetch < 32 {
+		fetch = 32
+	}
+	if fetch > 1024 {
+		fetch = 1024
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT d.doc_id, d.text, d.metadata, v.distance
+		FROM documents_vec v
+		JOIN documents d ON d.rowid = v.rowid
+		WHERE v.embedding MATCH ? AND d.scope = ? AND k = ?
+		ORDER BY v.distance ASC`,
+		serializeVec(qv), string(scope), fetch)
+	if err != nil {
+		return nil, fmt.Errorf("vec query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Hit
+	for rows.Next() {
+		var d Document
+		var meta string
+		var dist float64
+		if err := rows.Scan(&d.ID, &d.Text, &meta, &dist); err != nil {
+			return nil, err
+		}
+		if meta != "" && meta != "{}" {
+			_ = json.Unmarshal([]byte(meta), &d.Metadata)
+		}
+		// Cosine distance → similarity score in [0, 1] (higher == more
+		// relevant), matching the contract on Hit.Score.
+		score := float32(1.0 - dist)
+		if score < 0 {
+			score = 0
+		}
+		out = append(out, Hit{Document: d, Score: score})
+		if len(out) >= k {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 // Preferences ---------------------------------------------------------------

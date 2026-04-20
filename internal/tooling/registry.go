@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/alamparelli/alf/internal/capability"
 )
 
 //go:embed ruleset.json
@@ -28,6 +30,11 @@ type Registry struct {
 	dataDir     string
 	secWarnings []SecurityWarning
 	Integrity   *IntegrityGuard // optional: skip quarantined tools from scan
+
+	// capReg is the unified capability registry. When non-nil, every
+	// RegisterNative call also registers the tool as a KindTool Capability.
+	// Introduced by #338 C1 (dual-registration). Consumers migrate in C2.
+	capReg *capability.Registry
 }
 
 // NewRegistry scans tools.d/*.json and tools/*.json under dataDir for tool manifests.
@@ -238,6 +245,9 @@ func (r *Registry) Get(name string) (ToolSchema, bool) {
 }
 
 // RegisterNative adds a native Go tool's schema and instance to the registry.
+// If a capability.Registry has been attached via SetCapabilityRegistry, the
+// tool is also mirrored there as a KindTool Capability (dual-registration
+// during #338 C1).
 func (r *Registry) RegisterNative(t NativeTool) {
 	r.schemas[t.ToolName()] = t.Schema()
 	if r.natives == nil {
@@ -245,6 +255,40 @@ func (r *Registry) RegisterNative(t NativeTool) {
 	}
 	r.natives[t.ToolName()] = t
 	r.nativeNames = append(r.nativeNames, t.ToolName())
+
+	if r.capReg != nil {
+		if err := r.capReg.Register(asCapability(t)); err != nil {
+			log.Printf("tooling: capability dual-register %q: %v", t.ToolName(), err)
+		}
+	}
+}
+
+// SetCapabilityRegistry attaches a unified capability.Registry. Future
+// RegisterNative calls will mirror the tool into it, and every previously
+// registered native tool is back-filled immediately so the two registries
+// stay in sync regardless of call order.
+func (r *Registry) SetCapabilityRegistry(cr *capability.Registry) {
+	r.capReg = cr
+	if cr == nil {
+		return
+	}
+	for _, name := range r.nativeNames {
+		t, ok := r.natives[name]
+		if !ok {
+			continue
+		}
+		if _, exists := cr.Get(capability.ID(name)); exists {
+			continue
+		}
+		if err := cr.Register(asCapability(t)); err != nil {
+			log.Printf("tooling: capability back-fill %q: %v", name, err)
+		}
+	}
+}
+
+// CapabilityRegistry returns the attached unified registry, or nil.
+func (r *Registry) CapabilityRegistry() *capability.Registry {
+	return r.capReg
 }
 
 // GetNative returns a native tool by name, or nil if not found.

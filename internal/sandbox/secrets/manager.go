@@ -1,5 +1,7 @@
-// Package vault manages the vault-server subprocess lifecycle.
-package vault
+// Package secrets is the Secrets facet of Sandbox: it manages the
+// vault-server subprocess lifecycle and exposes per-capability vault access
+// via a scoped HTTP proxy. Moved from internal/vault during #339 (Step 3).
+package secrets
 
 import (
 	"context"

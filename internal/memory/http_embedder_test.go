@@ -1,4 +1,4 @@
-package memstore
+package memory
 
 import (
 	"encoding/json"
@@ -304,8 +304,8 @@ func TestHTTPEmbedderStop(t *testing.T) {
 }
 
 func TestHTTPEmbedderInterfaceCompliance(t *testing.T) {
-	// Compile-time check that HTTPEmbedder satisfies EmbedderI.
-	var _ EmbedderI = (*HTTPEmbedder)(nil)
+	// Compile-time check that HTTPEmbedder satisfies the Embedder contract.
+	var _ Embedder = (*HTTPEmbedder)(nil)
 }
 
 func TestHTTPEmbedderIdempotentStart(t *testing.T) {

@@ -429,18 +429,23 @@ func main() {
 		log.Println("voice transcription disabled (WHISPER_URL or WHISPER_SHARED_SECRET not set)")
 	}
 
-	// Embedding engine: resolve from tier config or EMBED_URL env (sidecar container).
-	var memDB *memstore.Store
-	if !cfg.EffectiveMemoryEnabled() {
-		log.Println("memstore: disabled by config (memory_enabled=false)")
-	} else {
-		embedder := resolveEmbedder(tierStore)
+	// Embedding engine: resolve once and share between the legacy memstore
+	// (cmd/alf-daemon-side semantic memory) and the unified memory.Store
+	// (opened below). Both paths consult the same HTTP embed-server.
+	var embedder memory.Embedder
+	if cfg.EffectiveMemoryEnabled() {
+		embedder = resolveEmbedder(tierStore)
 		if embedder != nil {
 			if stopper, ok := embedder.(interface{ Stop() }); ok {
 				defer stopper.Stop()
 			}
 		}
+	}
 
+	var memDB *memstore.Store
+	if !cfg.EffectiveMemoryEnabled() {
+		log.Println("memstore: disabled by config (memory_enabled=false)")
+	} else {
 		dedupCfg := memstore.DedupConfig{
 			TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
 			CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
@@ -471,7 +476,11 @@ func main() {
 	if err := migrateChatDBToMemoryDB(dataDir); err != nil {
 		log.Fatalf("memory migration: %v", err)
 	}
-	memStore, err := memory.NewSQLiteStore(dataDir)
+	var memOpts []memory.StoreOption
+	if embedder != nil {
+		memOpts = append(memOpts, memory.WithEmbedder(embedder))
+	}
+	memStore, err := memory.NewSQLiteStore(dataDir, memOpts...)
 	if err != nil {
 		log.Fatalf("memory: %v", err)
 	}
@@ -2137,7 +2146,7 @@ func refreshTelegramCommands(tg *tgclient.Client, tierStore cc.TierStore) {
 
 // resolveEmbedder picks the best available embedder implementation.
 // Priority: 1) tier profile memory.embedding, 2) legacy tier embedding, 3) EMBED_URL env, 4) nil (FTS5-only).
-func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
+func resolveEmbedder(tierStore cc.TierStore) memory.Embedder {
 	// Use a stable instance ID so re-registrations reuse the same slot in the
 	// embed-server token map. Docker hostnames change on every container restart,
 	// which would leak slots and eventually hit the 50-instance cap.
@@ -2147,14 +2156,14 @@ func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
 	if tc := tierStore.Current(); tc != nil {
 		// 1. New: memory.embedding config.
 		if tc.Memory != nil && tc.Memory.Embedding != nil && tc.Memory.Embedding.URL != "" {
-			emb := memstore.NewHTTPEmbedder(tc.Memory.Embedding.URL, embedInstanceID, secret, 30*time.Second)
+			emb := memory.NewHTTPEmbedder(tc.Memory.Embedding.URL, embedInstanceID, secret, 30*time.Second)
 			go startHTTPEmbedder(emb)
 			log.Printf("memstore: using HTTP embedder from memory config (url=%s)", tc.Memory.Embedding.URL)
 			return emb
 		}
 		// 2. Legacy: embedding config at tier root (backward compat).
 		if tc.Embedding != nil && tc.Embedding.URL != "" {
-			emb := memstore.NewHTTPEmbedder(tc.Embedding.URL, embedInstanceID, secret, 30*time.Second)
+			emb := memory.NewHTTPEmbedder(tc.Embedding.URL, embedInstanceID, secret, 30*time.Second)
 			go startHTTPEmbedder(emb)
 			log.Printf("memstore: using HTTP embedder from tier config (url=%s)", tc.Embedding.URL)
 			return emb
@@ -2163,7 +2172,7 @@ func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
 
 	// 2. From env var (embed sidecar container, same pattern as whisper).
 	if url := os.Getenv("EMBED_URL"); url != "" {
-		emb := memstore.NewHTTPEmbedder(url, embedInstanceID, secret, 30*time.Second)
+		emb := memory.NewHTTPEmbedder(url, embedInstanceID, secret, 30*time.Second)
 		go startHTTPEmbedder(emb)
 		log.Printf("memstore: using HTTP embedder (url=%s)", url)
 		return emb
@@ -2177,7 +2186,7 @@ func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
 // startHTTPEmbedder registers with the embed service, retrying up to 30 times.
 // Falls back to FTS5-only search if embed service is unavailable.
 // Gives up early on "no route to host" / "connection refused" (service not deployed).
-func startHTTPEmbedder(emb *memstore.HTTPEmbedder) {
+func startHTTPEmbedder(emb *memory.HTTPEmbedder) {
 	for attempt := 1; attempt <= 30; attempt++ {
 		err := emb.Start()
 		if err == nil {

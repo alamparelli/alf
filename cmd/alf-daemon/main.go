@@ -716,9 +716,13 @@ func main() {
 		}
 		return result
 	}
+	// Recaller reads from the unified memory.Store (#337c2). The dual-write
+	// shim (C1) keeps documents in sync with memstore, so this path now
+	// covers both freshly-extracted facts and the existing memstore corpus
+	// (via the planned one-shot migration in C3).
 	var engineRecaller comms.MemoryRecaller
-	if memDB != nil {
-		engineRecaller = &commsRecaller{store: memDB}
+	if cfg.EffectiveMemoryEnabled() {
+		engineRecaller = &memoryCommsRecaller{store: memStore}
 	}
 	commEngine := comms.NewEngine(comms.EngineConfig{
 		DataDir:        dataDir,
@@ -746,10 +750,16 @@ func main() {
 		SummarizationKeepLast:  cfg.EffectiveSummarizationKeepLast(),
 	})
 	// Initialize all optional dependencies in one place (issue #91).
+	// Reader path: memory.Store.Search (via fan-out across scopes).
+	// Writer path for /api/memory/ingest: still on *memstore.Store so the
+	// dual-write shim (C1) mirrors UI-ingested facts into documents too.
+	// Writer migration to memory.Store.Index is sub-ticket C4.
 	var recaller cc.MemoryRecaller
 	var memRecallStore cc.MemoryStorer
+	if cfg.EffectiveMemoryEnabled() {
+		recaller = &memoryCCRecaller{store: memStore}
+	}
 	if memDB != nil {
-		recaller = &memStoreRecaller{store: memDB}
 		memRecallStore = memDB
 	}
 	chatService.Init(cc.ChatServiceOpts{

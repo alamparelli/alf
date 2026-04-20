@@ -314,6 +314,21 @@ type Store interface {
 	// k == 0 returns (nil, nil).
 	Search(ctx context.Context, scope Scope, query string, k int) ([]Hit, error)
 
+	// GetDocument returns the document at (scope, docID). Unknown (scope,
+	// docID) returns (nil, nil) — matches the not-found convention for
+	// GetMessage / GetConv. Empty scope or docID are contract violations
+	// and MUST return an error.
+	GetDocument(ctx context.Context, scope Scope, docID string) (*Document, error)
+
+	// DeleteDocument removes (scope, docID) from the index. Also drops any
+	// embedded vector and FTS row the implementation keeps in lockstep
+	// with the documents table. Unknown (scope, docID) is a no-op — returns
+	// (false, nil). Empty scope or docID are contract violations and MUST
+	// return an error.
+	//
+	// Used by the /forget capability once the socket server retires (#337).
+	DeleteDocument(ctx context.Context, scope Scope, docID string) (bool, error)
+
 	// Preferences — replaces memory/preferences.
 
 	// GetPref returns the value for key or (nil, nil) if unset.

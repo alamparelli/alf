@@ -123,6 +123,53 @@ func TestSQLiteStore_NoEmbedder_FallsBackToLike(t *testing.T) {
 	}
 }
 
+// TestSQLiteStore_DeleteDocument_RemovesVecRow catches the failure mode
+// where DeleteDocument cleans the base row and FTS trigger fires, but
+// documents_vec keeps an orphan embedding that still matches in Search.
+// Exercises the vec path specifically — the generic contract test only
+// hits the LIKE fallback because it runs without an embedder.
+func TestSQLiteStore_DeleteDocument_RemovesVecRow(t *testing.T) {
+	emb := memtest.NewStubEmbedder(32)
+	s, err := memory.NewSQLiteStore(t.TempDir(), memory.WithEmbedder(emb))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.Index(ctx, "s", memory.Document{ID: "v1", Text: "apple orange banana"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Index(ctx, "s", memory.Document{ID: "v2", Text: "apple mango kiwi"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Precondition: vec search returns both.
+	pre, _ := s.Search(ctx, "s", "apple", 5)
+	if len(pre) != 2 {
+		t.Fatalf("precondition: expected 2 hits, got %d", len(pre))
+	}
+
+	ok, err := s.DeleteDocument(ctx, "s", "v1")
+	if err != nil || !ok {
+		t.Fatalf("DeleteDocument: ok=%v err=%v", ok, err)
+	}
+
+	// Search must now only surface v2 — no orphan vec hit for v1.
+	hits, err := s.Search(ctx, "s", "apple", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range hits {
+		if h.Document.ID == "v1" {
+			t.Errorf("vec search returned deleted doc v1: score=%f", h.Score)
+		}
+	}
+	if len(hits) == 0 {
+		t.Error("expected v2 to remain, got 0 hits")
+	}
+}
+
 // TestSQLiteStore_VecDim_PersistsAcrossOpens catches the schema-drift
 // failure mode where a store is re-opened with an embedder of a different
 // dimension. The second open must fail fast rather than silently corrupting

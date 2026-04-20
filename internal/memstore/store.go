@@ -1,7 +1,6 @@
 package memstore
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -13,8 +12,6 @@ import (
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
-
-	"github.com/alamparelli/alf/internal/memory"
 )
 
 func init() {
@@ -39,28 +36,19 @@ type DedupConfig struct {
 }
 
 // Store manages the semantic memory database with sqlite-vec + FTS5.
+//
+// #337 note: nothing in production calls Store.Store / Store.Search /
+// Store.Delete anymore — Extractor, Consolidator, ingest adapter, and
+// the socket server all target memory.Store directly. The type survives
+// only because NewExtractor / NewConsolidator still take a *Store arg
+// (legacy signatures) and the daemon still wires the dedup-config
+// hot-reload hooks through it. Full deletion is scoped for a follow-up
+// cleanup once those entry points are updated.
 type Store struct {
 	db       *sql.DB
 	embedder EmbedderI
 	dedup    atomic.Value // DedupConfig, swappable at runtime (hot reload)
 	mu       sync.RWMutex
-
-	// mirror is an optional memory.Store that receives an Index(scope=type,
-	// doc_id=fmt.Sprint(id)) call for every successful Store() during the
-	// #337 transition. Lets the unified memory.db fill up as the extractor
-	// runs without moving writers off memstore yet. Read under mu.
-	mirror memory.Store
-}
-
-// SetMirror wires a memory.Store as a dual-write target. After SetMirror,
-// every successful Store() also issues memory.Store.Index using the memory
-// type as Scope and the freshly-assigned id as Document.ID. Mirror errors
-// are logged and swallowed — a mirror failure MUST NOT fail the primary
-// write (the whole point is a non-intrusive shadow during #337).
-func (s *Store) SetMirror(m memory.Store) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.mirror = m
 }
 
 // dedupCfg returns the current dedup config (lock-free read).
@@ -185,12 +173,18 @@ func (s *Store) migrate() error {
 
 // Store inserts a new memory. Returns the memory ID.
 // Deduplicates by checking FTS5 for near-exact matches first.
+//
+// #337 note: this method is no longer called from production — both
+// the Extractor (via dedup.IndexWithDedup) and the Consolidator target
+// memory.Store directly. Kept here until NewExtractor / NewConsolidator
+// signatures can drop the *Store arg. Still covered by the legacy
+// memstore tests for regression insurance during that cleanup.
 func (s *Store) Store(text, memType, source string, meta map[string]any) (int64, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Dedup: check for near-exact match via FTS5.
 	if s.hasDuplicate(text) {
-		s.mu.Unlock()
 		return 0, fmt.Errorf("duplicate memory detected")
 	}
 
@@ -205,7 +199,6 @@ func (s *Store) Store(text, memType, source string, meta map[string]any) (int64,
 		text, memType, source, string(metaJSON), now,
 	)
 	if err != nil {
-		s.mu.Unlock()
 		return 0, fmt.Errorf("insert memory: %w", err)
 	}
 
@@ -224,29 +217,6 @@ func (s *Store) Store(text, memType, source string, meta map[string]any) (int64,
 			); err != nil {
 				log.Printf("memstore: vec insert failed for memory #%d: %v", id, err)
 			}
-		}
-	}
-
-	mirror := s.mirror
-	s.mu.Unlock()
-
-	// Dual-write into memory.Store (#337 transition). Runs outside s.mu so a
-	// slow embed call on the shared embedder cannot stall memstore writers.
-	// Failures are best-effort — the primary memstore write has already
-	// succeeded.
-	if mirror != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		indexErr := mirror.Index(ctx, memory.Scope(memType), memory.Document{
-			ID:   fmt.Sprintf("%d", id),
-			Text: text,
-			Metadata: map[string]string{
-				"source":     source,
-				"created_at": now,
-			},
-		})
-		cancel()
-		if indexErr != nil {
-			log.Printf("memstore: mirror Index failed for memory #%d: %v", id, indexErr)
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/alamparelli/alf/internal/ai"
 	"github.com/alamparelli/alf/internal/capability"
@@ -201,6 +202,65 @@ func (r *defaultRuntime) runChatLoop(
 	}
 
 	emit(ctx, out, Event{Kind: EventError, Err: fmt.Errorf("runtime.Chat: max iterations (%d) exceeded", r.opts.MaxIterations)})
+}
+
+// Converse runs a stateless, one-shot LLM call. No Memory access, no
+// Capability registry lookup, no Sandbox — the Provider is the sole
+// executor. Caller supplies a model (Options.Model is the fallback),
+// system prompts, the current prompt, and any conversational history.
+// See #340 R5c.
+func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (ConverseResult, error) {
+	if req.Prompt == "" {
+		return ConverseResult{}, fmt.Errorf("runtime.Converse: Prompt required")
+	}
+	model := req.Model
+	if model == "" {
+		model = r.opts.Model
+	}
+	if model == "" {
+		return ConverseResult{}, fmt.Errorf("runtime.Converse: Model required (none in Request, none in Options)")
+	}
+
+	messages := make([]ai.Message, 0, len(req.History)+1)
+	messages = append(messages, req.History...)
+	messages = append(messages, ai.Message{Role: ai.RoleUser, Content: req.Prompt})
+
+	aiReq := ai.Request{
+		Model:         model,
+		SystemPrompts: req.SystemPrompts,
+		Messages:      messages,
+		Tools:         req.Tools,
+		Stream:        true,
+	}
+
+	stream, err := r.deps.AI.Run(ctx, aiReq)
+	if err != nil {
+		return ConverseResult{}, fmt.Errorf("runtime.Converse: ai.Run: %w", err)
+	}
+
+	var (
+		text    strings.Builder
+		usage   *ai.Usage
+		sawDone bool
+	)
+	for ev := range stream {
+		switch ev.Kind {
+		case ai.EventToken:
+			text.WriteString(ev.Token)
+		case ai.EventError:
+			return ConverseResult{}, fmt.Errorf("runtime.Converse: %w", ev.Err)
+		case ai.EventDone:
+			sawDone = true
+			usage = ev.Usage
+		}
+	}
+	if !sawDone {
+		if ctx.Err() != nil {
+			return ConverseResult{}, ctx.Err()
+		}
+		return ConverseResult{}, fmt.Errorf("runtime.Converse: engine closed stream without EventDone")
+	}
+	return ConverseResult{Text: text.String(), Usage: usage}, nil
 }
 
 // Invoke resolves a Capability, derives its Policy under the Runtime tier,

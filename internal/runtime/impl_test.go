@@ -661,6 +661,200 @@ func TestInvoke_RejectsEmptyCapID(t *testing.T) {
 	}
 }
 
+// ── #340 R5c Converse ───────────────────────────────────────────────────────
+
+// TestConverse_AggregatesTextAndPropagatesUsage pins the one-shot surface:
+// tokens concatenate into Text, Usage on EventDone flows through.
+func TestConverse_AggregatesTextAndPropagatesUsage(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{
+		{
+			{Kind: ai.EventToken, Token: "hel"},
+			{Kind: ai.EventToken, Token: "lo"},
+			{Kind: ai.EventDone, Usage: &ai.Usage{CostUSD: 0.001, Model: "test-model", NumTurns: 1}},
+		},
+	}}
+	rt, err := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "fallback-model"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Prompt: "hi",
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if res.Text != "hello" {
+		t.Fatalf("Text: got %q want hello", res.Text)
+	}
+	if res.Usage == nil || res.Usage.CostUSD != 0.001 || res.Usage.NumTurns != 1 {
+		t.Fatalf("Usage: got %+v", res.Usage)
+	}
+}
+
+// TestConverse_ForwardsSystemPromptsAndHistory shows Request.SystemPrompts +
+// History land on the ai.Request the engine receives, and the Prompt is
+// appended as the final user message.
+func TestConverse_ForwardsSystemPromptsAndHistory(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Model:         "override-model",
+		SystemPrompts: []string{"identity", "job-context"},
+		Prompt:        "user turn",
+		History: []ai.Message{
+			{Role: ai.RoleUser, Content: "earlier q"},
+			{Role: ai.RoleAssistant, Content: "earlier a"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if len(eng.requests) != 1 {
+		t.Fatalf("Run calls: got %d want 1", len(eng.requests))
+	}
+	req := eng.requests[0]
+	if req.Model != "override-model" {
+		t.Fatalf("Model: got %q want override-model", req.Model)
+	}
+	if len(req.SystemPrompts) != 2 || req.SystemPrompts[0] != "identity" {
+		t.Fatalf("SystemPrompts: got %v", req.SystemPrompts)
+	}
+	if len(req.Messages) != 3 {
+		t.Fatalf("Messages len: got %d want 3", len(req.Messages))
+	}
+	if req.Messages[2].Role != ai.RoleUser || req.Messages[2].Content != "user turn" {
+		t.Fatalf("final message: got %+v", req.Messages[2])
+	}
+}
+
+// TestConverse_FallsBackToOptionsModel ensures the Options.Model seeded at
+// New-time is used when Request.Model is empty — symmetric with Chat.
+func TestConverse_FallsBackToOptionsModel(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "fallback"})
+
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if eng.requests[0].Model != "fallback" {
+		t.Fatalf("Model: got %q want fallback", eng.requests[0].Model)
+	}
+}
+
+// TestConverse_ErrorsWithoutModel guards against silently running on a
+// hardcoded default: no Model in Request AND no Options.Model ⇒ error.
+func TestConverse_ErrorsWithoutModel(t *testing.T) {
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       &fakeEngine{},
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{}) // no Model
+	if _, err := rt.Converse(context.Background(), runtime.ConverseRequest{Prompt: "hi"}); err == nil {
+		t.Fatal("expected error when neither Request nor Options carry Model")
+	}
+}
+
+// TestConverse_ErrorsOnEmptyPrompt enforces the non-negotiable input.
+func TestConverse_ErrorsOnEmptyPrompt(t *testing.T) {
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       &fakeEngine{},
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+	if _, err := rt.Converse(context.Background(), runtime.ConverseRequest{}); err == nil {
+		t.Fatal("expected error on empty Prompt")
+	}
+}
+
+// TestConverse_EngineErrorSurfaces propagates ai.Engine.Run errors without
+// wrapping them into a ConverseResult.
+func TestConverse_EngineErrorSurfaces(t *testing.T) {
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       &errEngine{err: errors.New("upstream")},
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{Prompt: "hi"})
+	if err == nil {
+		t.Fatal("expected error from engine")
+	}
+}
+
+// TestConverse_EventErrorSurfaces covers the mid-stream error case: the
+// engine ran fine but emitted EventError before EventDone.
+func TestConverse_EventErrorSurfaces(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventError, Err: errors.New("mid-stream")}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{Prompt: "hi"})
+	if err == nil {
+		t.Fatal("expected mid-stream error to surface")
+	}
+}
+
+// TestConverse_DoesNotPersistMemory pins the #340 R5c invariant: a Converse
+// call MUST NOT touch Memory. The fake store would fail Append when it sees
+// a write; absence of writes proves statelessness.
+func TestConverse_DoesNotPersistMemory(t *testing.T) {
+	store := newFakeStore()
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventToken, Token: "x"}, {Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   store,
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	if _, err := rt.Converse(context.Background(), runtime.ConverseRequest{Prompt: "hi"}); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if len(store.All("any")) != 0 {
+		t.Fatalf("expected 0 messages written; got %d", len(store.All("any")))
+	}
+}
+
+// TestConverse_StreamClosedWithoutDoneErrors defends against a malformed
+// Engine implementation that closes the channel before EventDone — the
+// Runtime must not return a fake-successful empty result.
+func TestConverse_StreamClosedWithoutDoneErrors(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventToken, Token: "x"}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{Prompt: "hi"})
+	if err == nil {
+		t.Fatal("expected error when stream closes without EventDone")
+	}
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 // errEngine always fails on Run.

@@ -49,6 +49,12 @@ func (s *stubRuntime) Invoke(ctx context.Context, capID capability.ID, args runt
 	return s.invokeOut, s.invokeErr
 }
 
+func (s *stubRuntime) Converse(ctx context.Context, req runtime.ConverseRequest) (runtime.ConverseResult, error) {
+	// Stub: tests don't exercise Converse via this double. The concrete
+	// Runtime has its own Converse coverage in impl_test.go / integration_test.go.
+	return runtime.ConverseResult{}, errors.New("stubRuntime: Converse not implemented")
+}
+
 // Compile-time check: stubRuntime satisfies runtime.Runtime.
 var _ runtime.Runtime = (*stubRuntime)(nil)
 

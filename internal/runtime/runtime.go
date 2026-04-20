@@ -62,6 +62,32 @@ type Runtime interface {
 
 	// Invoke runs a single Capability (scheduler, UI button, cron).
 	Invoke(ctx context.Context, capID capability.ID, args Args) (Output, error)
+
+	// Converse is a stateless one-shot LLM call — no Memory persistence, no
+	// tool loop. The Provider adapter forwards tools CLI-native if any are
+	// listed. Intended for scheduler jobs, CLI commands, and anything that
+	// needs "just run the model with this context" without touching a
+	// conversation. See #340 R5c.
+	Converse(ctx context.Context, req ConverseRequest) (ConverseResult, error)
+}
+
+// ConverseRequest is the stateless LLM surface: system prompts + prompt +
+// optional history + optional tool list + model override. The Runtime never
+// reads or writes Memory — History is the caller's responsibility.
+type ConverseRequest struct {
+	Model         ai.ModelID
+	SystemPrompts []string
+	Prompt        string
+	History       []ai.Message
+	Tools         []ai.ToolSpec
+}
+
+// ConverseResult carries the aggregated response plus whatever usage data the
+// Provider surfaced (cost, turn count, session id). Usage is nil when the
+// Provider did not report it.
+type ConverseResult struct {
+	Text  string
+	Usage *ai.Usage
 }
 
 // Deps groups the collaborators. The concrete Runtime (next milestones) wires

@@ -210,6 +210,49 @@ func TestIntegration_ProviderErrorDoesNotPersistAssistant(t *testing.T) {
 	}
 }
 
+// TestIntegration_ConverseThroughProviderStack validates #340 R5c on the real
+// adapter: Runtime.Converse → provider.NewEngine → scriptedProvider. No
+// Memory write, Usage populated from Result, text aggregated from Invoke.
+func TestIntegration_ConverseThroughProviderStack(t *testing.T) {
+	prov := &scriptedProvider{result: &provider.Result{
+		Text:      "response text",
+		Model:     "actual-model",
+		CostUSD:   0.002,
+		NumTurns:  2,
+		SessionID: "sess-abc",
+	}}
+	rt, store := newRealStack(t, prov, runtime.Options{Model: "opts-model", Tier: "pro"})
+
+	res, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		SystemPrompts: []string{"you are a scheduled job"},
+		Prompt:        "do the thing",
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if res.Text != "response text" {
+		t.Fatalf("Text: got %q want %q", res.Text, "response text")
+	}
+	if res.Usage == nil || res.Usage.CostUSD != 0.002 || res.Usage.SessionID != "sess-abc" {
+		t.Fatalf("Usage: got %+v", res.Usage)
+	}
+
+	// Statelessness: the in-memory store must have zero conversations.
+	convs, _ := store.ListConvs(context.Background(), memory.ConvFilter{})
+	if len(convs) != 0 {
+		t.Fatalf("Converse must not persist; got %d conversations", len(convs))
+	}
+
+	// Provider translation: SystemPrompts flowed through, prompt is the
+	// final user message.
+	if prov.lastPrompt != "do the thing" {
+		t.Fatalf("prompt: got %q", prov.lastPrompt)
+	}
+	if len(prov.lastParams.SystemPrompts) != 1 || prov.lastParams.SystemPrompts[0] != "you are a scheduled job" {
+		t.Fatalf("SystemPrompts: got %v", prov.lastParams.SystemPrompts)
+	}
+}
+
 // firstTextBlock returns the first BlockText Text in the message, or "".
 // Mirrors the way the chat UI reconstructs text for display — useful sanity
 // check that Runtime's block packing composes with the Store's round-trip.

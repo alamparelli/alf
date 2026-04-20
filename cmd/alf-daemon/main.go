@@ -1189,6 +1189,14 @@ func main() {
 			MsgThreshold: cfg.EffectiveMemoryExtractMinMessages(),
 		}, extractAdapter, extractorTierResolver)
 
+		// #337c4c: route extractor writes through memory.Store via the
+		// dedup helper. Skips the memstore.Store.Store path (and its
+		// FTS5 fuzzy dedup) in favour of hash-exact + optional vec
+		// near-dup. Threshold 0.85 matches memstore's prior CosineThreshold
+		// at the high end — conservative so we don't over-deduplicate
+		// while the embedder warms up.
+		memExtractor.SetMemoryBackend(memStore, 0.85)
+
 		// Consolidator: dedup + fallback extraction every 6h.
 		consolidator := memstore.NewConsolidator(memDB, memExtractor, extractAdapter, extractTimeout)
 		sched.RegisterSystem("mem-consolidate", "Memory Consolidation", "@every 360m", func() error {

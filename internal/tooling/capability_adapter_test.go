@@ -136,6 +136,56 @@ func TestRegistry_DualRegisterOnAttachBefore(t *testing.T) {
 	}
 }
 
+// TestRegistry_DualRegister_RealNatives wires the real first-batch NativeTool
+// types the daemon registers at boot (the DataDir-only ones) and checks every
+// one is mirrored into capability.Registry with a correct KindTool Manifest.
+// Integration smoke for #338 C2 daemon wiring.
+func TestRegistry_DualRegister_RealNatives(t *testing.T) {
+	tmp := t.TempDir()
+	reg := NewRegistry(tmp)
+	cr := capability.NewRegistry()
+	reg.SetCapabilityRegistry(cr)
+
+	natives := []NativeTool{
+		BashNativeTool{DataDir: tmp},
+		GrepNativeTool{DataDir: tmp},
+		GlobNativeTool{DataDir: tmp},
+		ReadFileNativeTool{DataDir: tmp},
+		WriteFileNativeTool{DataDir: tmp},
+		RemoveNativeTool{DataDir: tmp},
+	}
+	for _, nt := range natives {
+		reg.RegisterNative(nt)
+	}
+
+	if cr.Len() != len(natives) {
+		t.Fatalf("capability.Registry Len: want %d, got %d", len(natives), cr.Len())
+	}
+	for _, nt := range natives {
+		id := capability.ID(nt.ToolName())
+		c, ok := cr.Get(id)
+		if !ok {
+			t.Errorf("native %q not mirrored into capability.Registry", id)
+			continue
+		}
+		m := c.Manifest()
+		if m.ID != id {
+			t.Errorf("%s: Manifest.ID = %q, want %q", id, m.ID, id)
+		}
+		if m.Kind != capability.KindTool {
+			t.Errorf("%s: Manifest.Kind = %v, want KindTool", id, m.Kind)
+		}
+		if m.Name == "" {
+			t.Errorf("%s: Manifest.Name empty", id)
+		}
+	}
+
+	tools := cr.ByKind(capability.KindTool)
+	if len(tools) != len(natives) {
+		t.Fatalf("ByKind(Tool): want %d, got %d", len(natives), len(tools))
+	}
+}
+
 func TestRegistry_CapabilityRegistryAccessor(t *testing.T) {
 	reg := NewRegistry(t.TempDir())
 	if reg.CapabilityRegistry() != nil {

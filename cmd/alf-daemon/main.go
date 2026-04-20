@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/marketplace"
@@ -671,6 +672,11 @@ func main() {
 	}
 	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, memStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
 	toolRegistry := tooling.NewRegistry(dataDir)
+	// Unified capability registry (#338 C2): every NativeTool registered on
+	// toolRegistry is mirrored as a KindTool Capability. Consumers keep using
+	// tooling.Registry until Runtime arrives in Step 4.
+	capRegistry := capability.NewRegistry()
+	toolRegistry.SetCapabilityRegistry(capRegistry)
 	nativeTools := []tooling.NativeTool{
 		tooling.BashNativeTool{DataDir: dataDir},
 		tooling.GrepNativeTool{DataDir: dataDir},

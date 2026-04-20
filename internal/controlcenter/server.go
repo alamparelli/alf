@@ -14,14 +14,14 @@ import (
 	"path/filepath"
 
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
-	"github.com/alamparelli/alf/internal/firewall"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/marketplace"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	scheduler_pkg "github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // DefaultPort is the Control Center HTTP listen port.

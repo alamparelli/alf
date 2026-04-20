@@ -20,10 +20,10 @@ import (
 	"github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/runtime/classifier"
 	"github.com/alamparelli/alf/internal/comms"
-	"github.com/alamparelli/alf/internal/firewall"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/secrets"
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/gittrack"
@@ -35,6 +35,7 @@ import (
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/alamparelli/alf/internal/sandbox"
+	"github.com/alamparelli/alf/internal/sandbox/integrity"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/signal"
@@ -719,7 +720,7 @@ func main() {
 			log.Printf("[integrity] %s", msg)
 		}
 	}
-	integrityGuard, err := tooling.NewIntegrityGuard(dataDir, integrityNotify)
+	integrityGuard, err := integrity.NewIntegrityGuard(dataDir, integrityNotify)
 	if err != nil {
 		log.Printf("integrity guard: %v (disabled)", err)
 	} else {

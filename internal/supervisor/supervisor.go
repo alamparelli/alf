@@ -18,8 +18,8 @@ import (
 
 	"net"
 
-	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/vault"
+	sbexec "github.com/alamparelli/alf/internal/sandbox/exec"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // ServiceConfig is the on-disk format of service.json inside an app directory.
@@ -601,9 +601,9 @@ func (s *Supervisor) buildCmd(p *managedProc) (*exec.Cmd, error) {
 
 	// All app servers are sandboxed — no bypass allowed.
 	// Apps needing global access must use the REST proxy pattern.
-	cmd.Env = tooling.ServerSafeEnv(p.workDir)
+	cmd.Env = sbexec.ServerSafeEnv(p.workDir)
 
-	sandboxCfg := tooling.ServerSandboxConfig{
+	sandboxCfg := sbexec.ServerSandboxConfig{
 		AppSlug: p.appSlug,
 		AppDir:  p.workDir,
 	}
@@ -631,7 +631,7 @@ func (s *Supervisor) buildCmd(p *managedProc) (*exec.Cmd, error) {
 		cmd.Env = append(cmd.Env, "ALF_TOOLS_SOCK="+s.appToolsSockPath(p.appSlug))
 	}
 
-	tooling.SandboxServerCmd(cmd, sandboxCfg)
+	sbexec.SandboxServerCmd(cmd, sandboxCfg)
 	log.Printf("supervisor: [%s] sandbox enabled", p.appSlug)
 
 	// SEC-002: Block dangerous env overrides.

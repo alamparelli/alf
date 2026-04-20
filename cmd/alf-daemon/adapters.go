@@ -12,7 +12,7 @@ import (
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/comms"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/firewall"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memstore"
 	provider "github.com/alamparelli/alf/internal/ai/provider"

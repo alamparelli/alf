@@ -12,13 +12,13 @@ import (
 	"time"
 
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
-	"github.com/alamparelli/alf/internal/firewall"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/marketplace"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // unifiedPermChecker wraps the marketplace PermissionChecker with a fallback

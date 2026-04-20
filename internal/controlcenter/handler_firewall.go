@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/alamparelli/alf/internal/firewall"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 )
 
 // FirewallHandler serves GET/PUT for firewall config and request log.

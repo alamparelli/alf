@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/marketplace"
-	"github.com/alamparelli/alf/internal/tooling"
+	sbexec "github.com/alamparelli/alf/internal/sandbox/exec"
 )
 
 // ToolHandler executes an app's own CLI tool binary without granting raw shell access.
@@ -93,13 +93,13 @@ func (h *ToolHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.CommandContext(ctx, binPath)
 	cmd.Stdin = bytes.NewReader(stdinBytes)
 
-	sandboxCfg := tooling.SandboxConfig{
+	sandboxCfg := sbexec.SandboxConfig{
 		AppSlug:    appSlug,
 		AppDataDir: appDataDir,
 		Network:    false, // tool invocations don't need network
 	}
-	tooling.SandboxedCmd(cmd, binPath, sandboxCfg)
-	env := tooling.SandboxSafeEnv(appDataDir)
+	sbexec.SandboxedCmd(cmd, binPath, sandboxCfg)
+	env := sbexec.SandboxSafeEnv(appDataDir)
 	env = append(env, "__SANDBOX_CMD="+binPath)
 	cmd.Env = env
 

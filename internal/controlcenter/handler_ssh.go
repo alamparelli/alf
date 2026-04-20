@@ -13,7 +13,7 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // SSHHandler proxies SSH requests from the UI/API to vault-proxy.

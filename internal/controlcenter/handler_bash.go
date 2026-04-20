@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/marketplace"
-	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/vault"
+	sbexec "github.com/alamparelli/alf/internal/sandbox/exec"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // systemApps are platform-level apps that bypass sandbox and permission checks.
@@ -112,7 +112,7 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Marketplace app-initiated bash: full namespace sandbox.
 		appDataDir := filepath.Join("/home/alf/data/apps", appSlug, "data")
 		hasNetwork := h.Perms != nil && h.Perms.HasPermission(appSlug, "network")
-		sandboxCfg := tooling.SandboxConfig{
+		sandboxCfg := sbexec.SandboxConfig{
 			AppSlug:    appSlug,
 			AppDataDir: appDataDir,
 			Network:    hasNetwork,
@@ -127,8 +127,8 @@ func (h *BashHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		tooling.SandboxedCmd(cmd, req.Command, sandboxCfg)
-		env := tooling.SandboxSafeEnv(appDataDir)
+		sbexec.SandboxedCmd(cmd, req.Command, sandboxCfg)
+		env := sbexec.SandboxSafeEnv(appDataDir)
 		env = append(env, "__SANDBOX_CMD="+req.Command)
 		if vaultSockPath != "" {
 			env = append(env, "VAULT_PROXY_SOCK="+vaultSockPath)

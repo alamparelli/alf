@@ -12,11 +12,11 @@ import (
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/firewall"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/secrets"
 	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // readAuthToken reads CC_AUTH_TOKEN from vault-data (daemon-only, mode 700)

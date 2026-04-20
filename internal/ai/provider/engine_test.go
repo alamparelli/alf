@@ -1,0 +1,307 @@
+package provider_test
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/alamparelli/alf/internal/ai"
+	"github.com/alamparelli/alf/internal/ai/provider"
+)
+
+// stubProvider is a test double that records Invoke calls and can emit
+// stream events before returning a configured Result/error.
+type stubProvider struct {
+	mu            sync.Mutex
+	streamEvents  []provider.StreamEvent
+	result        *provider.Result
+	err           error
+	lastPrompt    string
+	lastParams    provider.Params
+	calls         int
+	invokeCh      chan struct{} // closed once Invoke has been called
+}
+
+func (s *stubProvider) Invoke(ctx context.Context, prompt string, params provider.Params, onProgress provider.OnProgress) (*provider.Result, error) {
+	s.mu.Lock()
+	s.calls++
+	s.lastPrompt = prompt
+	s.lastParams = params
+	if s.invokeCh != nil {
+		close(s.invokeCh)
+		s.invokeCh = nil
+	}
+	events := append([]provider.StreamEvent(nil), s.streamEvents...)
+	s.mu.Unlock()
+
+	if onProgress != nil {
+		for _, ev := range events {
+			onProgress(ev)
+		}
+	}
+	return s.result, s.err
+}
+
+// drainEvents collects every ai.Event from ch into slices keyed by Kind.
+type drained struct {
+	tokens  []string
+	sawDone bool
+	err     error
+}
+
+func drainEvents(t *testing.T, ch <-chan ai.Event) drained {
+	t.Helper()
+	var d drained
+	for ev := range ch {
+		switch ev.Kind {
+		case ai.EventToken:
+			d.tokens = append(d.tokens, ev.Token)
+		case ai.EventDone:
+			d.sawDone = true
+		case ai.EventError:
+			d.err = ev.Err
+		}
+	}
+	return d
+}
+
+func joinTokens(parts []string) string {
+	out := ""
+	for _, p := range parts {
+		out += p
+	}
+	return out
+}
+
+// ── validation ──────────────────────────────────────────────────────────────
+
+func TestNewEngine_NilProviderErrors(t *testing.T) {
+	eng := provider.NewEngine(nil)
+	_, err := eng.Run(context.Background(), ai.Request{Model: "m", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}}})
+	if err == nil {
+		t.Fatal("expected error when provider is nil")
+	}
+}
+
+func TestRun_RejectsMissingModel(t *testing.T) {
+	eng := provider.NewEngine(&stubProvider{})
+	_, err := eng.Run(context.Background(), ai.Request{Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}}})
+	if err == nil {
+		t.Fatal("expected error when Request.Model empty")
+	}
+}
+
+func TestRun_RejectsEmptyMessages(t *testing.T) {
+	eng := provider.NewEngine(&stubProvider{})
+	if _, err := eng.Run(context.Background(), ai.Request{Model: "m"}); err == nil {
+		t.Fatal("expected error when Messages is empty")
+	}
+}
+
+func TestRun_RejectsNoUserMessage(t *testing.T) {
+	eng := provider.NewEngine(&stubProvider{})
+	_, err := eng.Run(context.Background(), ai.Request{
+		Model:    "m",
+		Messages: []ai.Message{{Role: ai.RoleSystem, Content: "sys"}},
+	})
+	if err == nil {
+		t.Fatal("expected error when no user message present")
+	}
+}
+
+// ── happy path ──────────────────────────────────────────────────────────────
+
+func TestRun_StreamsTextDeltasThenDone(t *testing.T) {
+	stub := &stubProvider{
+		streamEvents: []provider.StreamEvent{
+			{Type: "thinking", Text: "ignored"},
+			{Type: "text_delta", Text: "hel"},
+			{Type: "tool_use", Detail: "ignored"},
+			{Type: "text_delta", Text: "lo"},
+		},
+		result: &provider.Result{Text: "hello"},
+	}
+	eng := provider.NewEngine(stub)
+
+	ch, err := eng.Run(context.Background(), ai.Request{
+		Model: "test-model",
+		Messages: []ai.Message{
+			{Role: ai.RoleSystem, Content: "sys"},
+			{Role: ai.RoleUser, Content: "say hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	d := drainEvents(t, ch)
+
+	if d.err != nil {
+		t.Fatalf("unexpected error event: %v", d.err)
+	}
+	if !d.sawDone {
+		t.Fatal("missing EventDone")
+	}
+	if joinTokens(d.tokens) != "hello" {
+		t.Fatalf("tokens: got %q, want %q", joinTokens(d.tokens), "hello")
+	}
+	if len(d.tokens) != 2 {
+		t.Fatalf("token count: got %d want 2 (no trailing duplicate)", len(d.tokens))
+	}
+}
+
+// If no OnProgress deltas arrive, the adapter must emit Result.Text as a
+// single trailing token so consumers always see the full response.
+func TestRun_EmitsFullResultWhenNoDeltas(t *testing.T) {
+	stub := &stubProvider{
+		result: &provider.Result{Text: "full response"},
+	}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model:    "m",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	d := drainEvents(t, ch)
+
+	if d.err != nil {
+		t.Fatalf("unexpected error: %v", d.err)
+	}
+	if !d.sawDone {
+		t.Fatal("missing EventDone")
+	}
+	if len(d.tokens) != 1 || d.tokens[0] != "full response" {
+		t.Fatalf("tokens: got %+v", d.tokens)
+	}
+}
+
+// When deltas stream a prefix and Result.Text extends beyond it, only the
+// suffix should be emitted at the end — no double-send.
+func TestRun_EmitsOnlyMissingSuffix(t *testing.T) {
+	stub := &stubProvider{
+		streamEvents: []provider.StreamEvent{
+			{Type: "text_delta", Text: "partial "},
+		},
+		result: &provider.Result{Text: "partial then full"},
+	}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model:    "m",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	d := drainEvents(t, ch)
+
+	if d.err != nil {
+		t.Fatalf("unexpected error: %v", d.err)
+	}
+	if joinTokens(d.tokens) != "partial then full" {
+		t.Fatalf("concat tokens: got %q", joinTokens(d.tokens))
+	}
+}
+
+// ── request translation ─────────────────────────────────────────────────────
+
+func TestRun_PromptIsLastUserMessage(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok"}}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model: "m",
+		Messages: []ai.Message{
+			{Role: ai.RoleUser, Content: "first"},
+			{Role: ai.RoleAssistant, Content: "ack"},
+			{Role: ai.RoleUser, Content: "latest"},
+		},
+	})
+	drainEvents(t, ch)
+
+	if stub.lastPrompt != "latest" {
+		t.Fatalf("lastPrompt: got %q want %q", stub.lastPrompt, "latest")
+	}
+	if len(stub.lastParams.ConvMessages) != 2 {
+		t.Fatalf("ConvMessages len: got %d want 2", len(stub.lastParams.ConvMessages))
+	}
+	if stub.lastParams.ConvMessages[0].Role != "user" || stub.lastParams.ConvMessages[0].Content != "first" {
+		t.Fatalf("history[0] wrong: %+v", stub.lastParams.ConvMessages[0])
+	}
+	if stub.lastParams.ConvMessages[1].Role != "assistant" || stub.lastParams.ConvMessages[1].Content != "ack" {
+		t.Fatalf("history[1] wrong: %+v", stub.lastParams.ConvMessages[1])
+	}
+}
+
+func TestRun_ModelAndToolsPropagate(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok"}}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model: "opus-42",
+		Tools: []ai.ToolSpec{
+			{Name: "bash"},
+			{Name: "read_file"},
+			{Name: ""}, // dropped
+		},
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	drainEvents(t, ch)
+
+	if stub.lastParams.Model != "opus-42" {
+		t.Fatalf("model: got %q want %q", stub.lastParams.Model, "opus-42")
+	}
+	if got := stub.lastParams.Tools; len(got) != 2 || got[0] != "bash" || got[1] != "read_file" {
+		t.Fatalf("Tools: got %+v", got)
+	}
+}
+
+// ── errors ──────────────────────────────────────────────────────────────────
+
+func TestRun_ProviderError_SurfacesEventError(t *testing.T) {
+	boom := errors.New("provider failure")
+	stub := &stubProvider{err: boom}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model:    "m",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	d := drainEvents(t, ch)
+
+	if d.sawDone {
+		t.Fatal("should not emit EventDone when Invoke errors")
+	}
+	if d.err == nil || !errors.Is(d.err, boom) {
+		t.Fatalf("error event: got %v want wrap of %v", d.err, boom)
+	}
+}
+
+// ── cancellation ────────────────────────────────────────────────────────────
+
+func TestRun_ContextCancelPropagatesAsError(t *testing.T) {
+	stub := &stubProvider{
+		err: context.Canceled,
+	}
+	eng := provider.NewEngine(stub)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ch, _ := eng.Run(ctx, ai.Request{
+		Model:    "m",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+
+	// Drain with a safety timeout so a bugged adapter doesn't hang CI.
+	timeout := time.After(500 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		for range ch {
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-timeout:
+		t.Fatal("adapter did not close channel after ctx cancel")
+	}
+}

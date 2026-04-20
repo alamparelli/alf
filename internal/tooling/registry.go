@@ -26,7 +26,7 @@ type Registry struct {
 	nativeNames []string
 	dataDir     string
 	secWarnings []SecurityWarning
-	Integrity   *IntegrityGuard // optional: skip quarantined tools from scan
+	Integrity   *integrity.IntegrityGuard // optional: skip quarantined tools from scan
 
 	// capReg is the unified capability registry. When non-nil, every
 	// RegisterNative call also registers the tool as a KindTool Capability.

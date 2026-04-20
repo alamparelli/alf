@@ -3,15 +3,17 @@ package tooling
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/alamparelli/alf/internal/sandbox/integrity"
 )
 
 // The full integrity Guard behaviour is tested in internal/sandbox/integrity.
-// These tests only cover the thin re-export shim kept here so that
-// cmd/alf-daemon and tooling/{registry,executor} keep compiling unchanged.
+// These tests cover the tooling-side integration: Executor/Registry consume
+// integrity.IntegrityGuard directly after the shim was removed in #340 R5l.
 
-func TestShim_NewIntegrityGuard_CreatesGuard(t *testing.T) {
+func TestIntegrityGuardConstructs(t *testing.T) {
 	dir := t.TempDir()
-	ig, err := NewIntegrityGuard(dir, nil)
+	ig, err := integrity.NewIntegrityGuard(dir, nil)
 	if err != nil {
 		t.Fatalf("NewIntegrityGuard: %v", err)
 	}
@@ -20,7 +22,7 @@ func TestShim_NewIntegrityGuard_CreatesGuard(t *testing.T) {
 	}
 }
 
-func TestShim_IsUserTool(t *testing.T) {
+func TestIsUserTool(t *testing.T) {
 	dataDir := "/tmp/alf-test"
 	tests := []struct {
 		path string
@@ -31,7 +33,7 @@ func TestShim_IsUserTool(t *testing.T) {
 		{"/unrelated/tools/foo", false},
 	}
 	for _, tc := range tests {
-		if got := IsUserTool(tc.path, dataDir); got != tc.want {
+		if got := integrity.IsUserTool(tc.path, dataDir); got != tc.want {
 			t.Errorf("IsUserTool(%q) = %v, want %v", tc.path, got, tc.want)
 		}
 	}

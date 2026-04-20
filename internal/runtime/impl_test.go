@@ -269,6 +269,24 @@ func TestNew_ValidatesDeps(t *testing.T) {
 	}
 }
 
+// TestChat_ErrorsIfModelMissing pins the Model-required contract at Chat
+// call time (relocated from runtime.New in #340 R5b so Invoke-only consumers
+// can construct a Runtime without a model).
+func TestChat_ErrorsIfModelMissing(t *testing.T) {
+	rt, err := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       &fakeEngine{},
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{}) // no Model
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := rt.Chat(context.Background(), "c", "hi"); err == nil {
+		t.Fatal("Chat without Model should error")
+	}
+}
+
 // ── Chat pipeline ───────────────────────────────────────────────────────────
 
 func TestChat_PersistsUserAndAssistantAndStreamsTokens(t *testing.T) {

@@ -50,10 +50,17 @@ func (e *engineAdapter) Run(ctx context.Context, req ai.Request) (<-chan ai.Even
 		return nil, errors.New("provider.Engine: Request.Model required")
 	}
 
-	prompt, history, systemPrompts, err := splitPrompt(req.Messages)
+	prompt, history, systemFromMessages, err := splitPrompt(req.Messages)
 	if err != nil {
 		return nil, err
 	}
+
+	// Per-call Request.SystemPrompts come first, then any RoleSystem messages
+	// (which the Runtime may still inject via Messages during history replay).
+	// Order matters: identity/job-context lives in Request.SystemPrompts,
+	// conversational system turns come after — this mirrors how
+	// Provider.Params stacks them. See #340 R5b.
+	systemPrompts := mergeSystemPrompts(req.SystemPrompts, systemFromMessages)
 
 	params := Params{
 		Model:         string(req.Model),
@@ -124,11 +131,47 @@ func (e *engineAdapter) runInvoke(ctx context.Context, prompt string, params Par
 		}
 	}
 
+	// #340 R5b: surface usage (cost / model / turns / session) to consumers.
+	// A nil Usage is valid when the Provider returned no Result (rare
+	// success path); EventDone still fires so Runtime can finalise the turn.
+	var usage *ai.Usage
+	if result != nil {
+		usage = &ai.Usage{
+			CostUSD:   result.CostUSD,
+			Model:     result.Model,
+			NumTurns:  result.NumTurns,
+			SessionID: result.SessionID,
+		}
+	}
 	select {
 	case <-ctx.Done():
 		return
-	case out <- ai.Event{Kind: ai.EventDone}:
+	case out <- ai.Event{Kind: ai.EventDone, Usage: usage}:
 	}
+}
+
+// mergeSystemPrompts concatenates two slices, dropping empty entries. Keeping
+// this in one place gives us a single allocation on the hot path and a single
+// test target. The result may be nil when both inputs are empty.
+func mergeSystemPrompts(a, b []string) []string {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	for _, s := range b {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // splitPrompt isolates the last RoleUser message (used as the Invoke prompt),

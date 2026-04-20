@@ -43,12 +43,29 @@ type ToolSpec struct {
 }
 
 // Request is the single shape handed to Engine.Run.
+//
+// SystemPrompts carries per-call system instructions (identity, job context,
+// skill prompts). They are concatenated with any RoleSystem entries in
+// Messages by the Provider adapter; keeping them separate lets callers build
+// a Request without fabricating synthetic messages. See #340 R5b.
 type Request struct {
-	Model     ModelID
-	Messages  []Message
-	Tools     []ToolSpec
-	MaxTokens int
-	Stream    bool
+	Model         ModelID
+	SystemPrompts []string
+	Messages      []Message
+	Tools         []ToolSpec
+	MaxTokens     int
+	Stream        bool
+}
+
+// Usage summarises what an Engine.Run actually cost. Populated by the Provider
+// adapter and attached to the terminal EventDone so consumers (scheduler,
+// chat_service, …) can record cost/model/turn metrics without reaching into
+// the provider layer. Fields that a given provider does not supply stay zero.
+type Usage struct {
+	CostUSD   float64
+	Model     string
+	NumTurns  int
+	SessionID string
 }
 
 // EventKind distinguishes streaming event payloads.
@@ -74,6 +91,7 @@ type Event struct {
 	Token    string    // set when Kind == EventToken
 	ToolCall *ToolCall // set when Kind == EventToolCall
 	Err      error     // set when Kind == EventError
+	Usage    *Usage    // set when Kind == EventDone (may be nil if provider didn't surface usage)
 }
 
 // Engine runs an AI Request and returns a streamed channel of Events.

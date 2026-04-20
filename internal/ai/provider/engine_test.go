@@ -364,3 +364,133 @@ func TestRun_ContextCancelPropagatesAsError(t *testing.T) {
 		t.Fatal("adapter did not close channel after ctx cancel")
 	}
 }
+
+// ── #340 R5b: SystemPrompts per-call + Usage on EventDone ───────────────────
+
+// TestRun_RequestSystemPromptsForwarded pins that ai.Request.SystemPrompts
+// lands in Params.SystemPrompts before any RoleSystem message from Messages.
+func TestRun_RequestSystemPromptsForwarded(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok"}}
+	eng := provider.NewEngine(stub)
+
+	ch, err := eng.Run(context.Background(), ai.Request{
+		Model:         "m",
+		SystemPrompts: []string{"identity", "job-context"},
+		Messages: []ai.Message{
+			{Role: ai.RoleSystem, Content: "from-history"},
+			{Role: ai.RoleUser, Content: "hi"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	drainEvents(t, ch)
+
+	got := stub.lastParams.SystemPrompts
+	want := []string{"identity", "job-context", "from-history"}
+	if len(got) != len(want) {
+		t.Fatalf("SystemPrompts len: got %d want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("SystemPrompts[%d]: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestRun_RequestSystemPromptsDropsEmpty verifies the merge helper silently
+// discards empty strings from either source rather than propagating them to
+// the Provider (empty system prompts upset some backends and waste tokens).
+func TestRun_RequestSystemPromptsDropsEmpty(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok"}}
+	eng := provider.NewEngine(stub)
+
+	ch, err := eng.Run(context.Background(), ai.Request{
+		Model:         "m",
+		SystemPrompts: []string{"", "keep"},
+		Messages: []ai.Message{
+			{Role: ai.RoleSystem, Content: ""},
+			{Role: ai.RoleUser, Content: "hi"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	drainEvents(t, ch)
+
+	got := stub.lastParams.SystemPrompts
+	if len(got) != 1 || got[0] != "keep" {
+		t.Fatalf("SystemPrompts after drop: got %v want [keep]", got)
+	}
+}
+
+// TestRun_EventDoneCarriesUsage proves the Provider.Result metadata (cost,
+// model, turns, session) is surfaced as ai.Usage on the terminal EventDone.
+func TestRun_EventDoneCarriesUsage(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{
+		Text:      "hello",
+		Model:     "actual-model",
+		CostUSD:   0.0123,
+		NumTurns:  4,
+		SessionID: "sess-42",
+	}}
+	eng := provider.NewEngine(stub)
+
+	ch, err := eng.Run(context.Background(), ai.Request{
+		Model:    "m",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var done ai.Event
+	for ev := range ch {
+		if ev.Kind == ai.EventDone {
+			done = ev
+		}
+	}
+	if done.Usage == nil {
+		t.Fatal("EventDone.Usage is nil — provider Result was non-nil")
+	}
+	if done.Usage.Model != "actual-model" {
+		t.Fatalf("Usage.Model: got %q want %q", done.Usage.Model, "actual-model")
+	}
+	if done.Usage.CostUSD != 0.0123 {
+		t.Fatalf("Usage.CostUSD: got %v want 0.0123", done.Usage.CostUSD)
+	}
+	if done.Usage.NumTurns != 4 {
+		t.Fatalf("Usage.NumTurns: got %d want 4", done.Usage.NumTurns)
+	}
+	if done.Usage.SessionID != "sess-42" {
+		t.Fatalf("Usage.SessionID: got %q want %q", done.Usage.SessionID, "sess-42")
+	}
+}
+
+// TestRun_EventDoneUsageNilWhenNoResult covers the edge case: Provider
+// returned (nil, nil). EventDone still fires so the Runtime can finalise,
+// but Usage is absent.
+func TestRun_EventDoneUsageNilWhenNoResult(t *testing.T) {
+	stub := &stubProvider{result: nil}
+	eng := provider.NewEngine(stub)
+
+	ch, err := eng.Run(context.Background(), ai.Request{
+		Model:    "m",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var done ai.Event
+	for ev := range ch {
+		if ev.Kind == ai.EventDone {
+			done = ev
+		}
+	}
+	if done.Kind != ai.EventDone {
+		t.Fatal("missing EventDone")
+	}
+	if done.Usage != nil {
+		t.Fatalf("Usage should be nil when result is nil, got %+v", done.Usage)
+	}
+}

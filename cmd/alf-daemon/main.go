@@ -486,6 +486,14 @@ func main() {
 	}
 	defer memStore.Close()
 
+	// Dual-write shim for #337c1: every memstore.Store write also lands in
+	// memory.Store as an Index(scope=type, id=fmt.Sprint(memID)). Lets the
+	// unified store fill up as the extractor runs, without moving any
+	// reader off memstore yet. The reader migration is sub-ticket C2.
+	if memDB != nil {
+		memDB.SetMirror(memStore)
+	}
+
 	// Provider: spawn-per-call Claude CLI for responses.
 	// Process isolation: daemon runs as alfd (uid 1001), subprocess runs as alf (uid 1000).
 	alfCred := &syscall.Credential{Uid: 1000, Gid: 1000}

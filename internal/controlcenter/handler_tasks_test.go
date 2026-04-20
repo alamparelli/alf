@@ -43,6 +43,22 @@ func (p *slowProvider) Invoke(ctx context.Context, _ string, _ provider.Params, 
 
 func (p *slowProvider) release() { close(p.gate) }
 
+// waitForRunning blocks until the orchestrator reports at least n running
+// tasks, or the timeout elapses. The handler's fire-and-forget goroutine may
+// not have registered with the orchestrator yet when the HTTP response
+// returns, so callers that need to drain must synchronise on this first.
+func waitForRunning(t *testing.T, orch *agents.Orchestrator, n int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if len(orch.Running()) >= n {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d running tasks (got %d)", n, len(orch.Running()))
+}
+
 // staticTierStore is a minimal TierStore that returns a fixed config.
 type staticTierStore struct{ cfg *TiersConfig }
 
@@ -155,14 +171,19 @@ func TestTasksHandler_LaunchIsNonBlocking(t *testing.T) {
 		t.Fatal("launch blocked waiting for orchestrator to complete")
 	}
 
-	// Release the provider so the background goroutine can finish cleanly.
+	// Release the provider and drain the orchestrator so TempDir cleanup
+	// doesn't race with background file writes. See #347.
+	waitForRunning(t, orch, 1, 2*time.Second)
 	sp.release()
-	time.Sleep(50 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := orch.WaitIdle(ctx); err != nil {
+		t.Fatalf("orchestrator did not drain: %v", err)
+	}
 }
 
 func TestTasksHandler_ConcurrentTasksRun(t *testing.T) {
 	sp := newSlowProvider()
-	defer sp.release()
 	orch := newTestOrchestrator(t, sp)
 	h := &TasksHandler{Orchestrator: orch, DataDir: t.TempDir(), ContextDir: t.TempDir(), TierStore: newTestTierStore()}
 
@@ -183,12 +204,20 @@ func TestTasksHandler_ConcurrentTasksRun(t *testing.T) {
 	}
 	wg.Wait()
 
-	// All 3 should be tracked as running.
-	// Wait briefly for goroutines to register with orchestrator.
-	time.Sleep(100 * time.Millisecond)
+	// Wait for all 3 goroutines to register with the orchestrator, then assert.
+	waitForRunning(t, orch, 3, 2*time.Second)
 	running := orch.Running()
 	if len(running) < 2 {
 		t.Errorf("expected at least 2 concurrent running tasks, got %d", len(running))
+	}
+
+	// Drain orchestrator goroutines before t.Cleanup removes TempDir, otherwise
+	// post-run meta/log writes race with RemoveAll. See #347.
+	sp.release()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := orch.WaitIdle(ctx); err != nil {
+		t.Fatalf("orchestrator did not drain: %v", err)
 	}
 }
 

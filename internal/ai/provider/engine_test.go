@@ -149,6 +149,14 @@ func TestRun_StreamsTextDeltasThenDone(t *testing.T) {
 	if len(d.tokens) != 2 {
 		t.Fatalf("token count: got %d want 2 (no trailing duplicate)", len(d.tokens))
 	}
+
+	// The system message must land in SystemPrompts, not ConvMessages.
+	if got := stub.lastParams.SystemPrompts; len(got) != 1 || got[0] != "sys" {
+		t.Fatalf("SystemPrompts: got %+v, want [sys]", got)
+	}
+	if len(stub.lastParams.ConvMessages) != 0 {
+		t.Fatalf("ConvMessages should be empty when only a system + user msg: got %+v", stub.lastParams.ConvMessages)
+	}
 }
 
 // If no OnProgress deltas arrive, the adapter must emit Result.Text as a
@@ -228,6 +236,57 @@ func TestRun_PromptIsLastUserMessage(t *testing.T) {
 	}
 	if stub.lastParams.ConvMessages[1].Role != "assistant" || stub.lastParams.ConvMessages[1].Content != "ack" {
 		t.Fatalf("history[1] wrong: %+v", stub.lastParams.ConvMessages[1])
+	}
+}
+
+// Multiple system messages must land in SystemPrompts, in order, and must
+// NOT leak into ConvMessages.
+func TestRun_SystemMessagesRouteToSystemPrompts(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok"}}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model: "m",
+		Messages: []ai.Message{
+			{Role: ai.RoleSystem, Content: "persona"},
+			{Role: ai.RoleUser, Content: "first"},
+			{Role: ai.RoleAssistant, Content: "ack"},
+			{Role: ai.RoleSystem, Content: "reminder"},
+			{Role: ai.RoleUser, Content: "latest"},
+		},
+	})
+	drainEvents(t, ch)
+
+	if got := stub.lastParams.SystemPrompts; len(got) != 2 || got[0] != "persona" || got[1] != "reminder" {
+		t.Fatalf("SystemPrompts: got %+v, want [persona reminder]", got)
+	}
+	for _, cm := range stub.lastParams.ConvMessages {
+		if cm.Role == "system" {
+			t.Fatalf("system role leaked into ConvMessages: %+v", cm)
+		}
+	}
+	if len(stub.lastParams.ConvMessages) != 2 {
+		t.Fatalf("ConvMessages len: got %d want 2 (first user + assistant ack)", len(stub.lastParams.ConvMessages))
+	}
+}
+
+// Empty system message content must be skipped — no blank entries in SystemPrompts.
+func TestRun_EmptySystemMessageIsSkipped(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok"}}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model: "m",
+		Messages: []ai.Message{
+			{Role: ai.RoleSystem, Content: ""},
+			{Role: ai.RoleSystem, Content: "non-empty"},
+			{Role: ai.RoleUser, Content: "hi"},
+		},
+	})
+	drainEvents(t, ch)
+
+	if got := stub.lastParams.SystemPrompts; len(got) != 1 || got[0] != "non-empty" {
+		t.Fatalf("SystemPrompts: got %+v, want [non-empty]", got)
 	}
 }
 

@@ -50,15 +50,16 @@ func (e *engineAdapter) Run(ctx context.Context, req ai.Request) (<-chan ai.Even
 		return nil, errors.New("provider.Engine: Request.Model required")
 	}
 
-	prompt, history, err := splitPrompt(req.Messages)
+	prompt, history, systemPrompts, err := splitPrompt(req.Messages)
 	if err != nil {
 		return nil, err
 	}
 
 	params := Params{
-		Model:        string(req.Model),
-		Tools:        toolNames(req.Tools),
-		ConvMessages: history,
+		Model:         string(req.Model),
+		Tools:         toolNames(req.Tools),
+		ConvMessages:  history,
+		SystemPrompts: systemPrompts,
 	}
 
 	out := make(chan ai.Event, 16)
@@ -130,15 +131,23 @@ func (e *engineAdapter) runInvoke(ctx context.Context, prompt string, params Par
 	}
 }
 
-// splitPrompt isolates the last RoleUser message (used as the Invoke prompt)
-// and returns the rest as ContextMessages in their original order.
+// splitPrompt isolates the last RoleUser message (used as the Invoke prompt),
+// groups RoleSystem messages into SystemPrompts (order-preserving), and
+// returns the non-system remainder as ContextMessages.
+//
+// Provider.Params draws a sharp line between SystemPrompts and ConvMessages
+// — dropping every non-user turn into ConvMessages (as the first cut of the
+// adapter did) confuses downstream providers that cache or weight system
+// prompts separately. Every ai.RoleSystem message is routed through
+// Params.SystemPrompts; every other non-last-user message stays in
+// ConvMessages with its original Role.
 //
 // An empty history is valid (some callers issue fresh conversations). An
 // absence of any user message is an error — the Provider.Invoke contract
 // requires a prompt.
-func splitPrompt(msgs []ai.Message) (string, []ContextMessage, error) {
+func splitPrompt(msgs []ai.Message) (prompt string, history []ContextMessage, systemPrompts []string, err error) {
 	if len(msgs) == 0 {
-		return "", nil, errors.New("provider.Engine: Request.Messages is empty")
+		return "", nil, nil, errors.New("provider.Engine: Request.Messages is empty")
 	}
 	lastUser := -1
 	for i := len(msgs) - 1; i >= 0; i-- {
@@ -148,17 +157,23 @@ func splitPrompt(msgs []ai.Message) (string, []ContextMessage, error) {
 		}
 	}
 	if lastUser < 0 {
-		return "", nil, errors.New("provider.Engine: Request.Messages has no user message")
+		return "", nil, nil, errors.New("provider.Engine: Request.Messages has no user message")
 	}
 
-	history := make([]ContextMessage, 0, len(msgs)-1)
+	history = make([]ContextMessage, 0, len(msgs)-1)
 	for i, m := range msgs {
 		if i == lastUser {
 			continue
 		}
+		if m.Role == ai.RoleSystem {
+			if m.Content != "" {
+				systemPrompts = append(systemPrompts, m.Content)
+			}
+			continue
+		}
 		history = append(history, ContextMessage{Role: string(m.Role), Content: m.Content})
 	}
-	return msgs[lastUser].Content, history, nil
+	return msgs[lastUser].Content, history, systemPrompts, nil
 }
 
 func toolNames(specs []ai.ToolSpec) []string {

@@ -865,11 +865,19 @@ func main() {
 		mpManager = marketplace.NewManager(dataDir)
 		mpManager.SetOnChange(func() {
 			toolRegistry.Rescan()
+			// #338 C4: re-mirror apps into the unified registry on every
+			// install / uninstall / update.
+			if err := marketplace.MirrorInto(mpManager, capRegistry); err != nil {
+				log.Printf("marketplace: capability mirror (change): %v", err)
+			}
 		})
 		if err := mpManager.RestoreInstalled(); err != nil {
 			log.Printf("[marketplace] restore installed apps: %v", err)
 		} else {
 			toolRegistry.Rescan()
+			if err := marketplace.MirrorInto(mpManager, capRegistry); err != nil {
+				log.Printf("marketplace: capability mirror (initial): %v", err)
+			}
 		}
 		log.Printf("[marketplace] enabled (registry=%s)", os.Getenv("ALF_MARKETPLACE_URL"))
 	} else {

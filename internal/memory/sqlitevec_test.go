@@ -123,6 +123,66 @@ func TestSQLiteStore_NoEmbedder_FallsBackToLike(t *testing.T) {
 	}
 }
 
+// TestSQLiteStore_WithEmbedder_LateReadyStillBuildsVecSchema catches the
+// production regression where WithEmbedder silently no-op'd because the
+// HTTPEmbedder hadn't registered with embed-server yet (Dims() == 0 at
+// Store open time, became 384 a few seconds later). The store must
+// provision documents_vec at open and let the embedder catch up.
+func TestSQLiteStore_WithEmbedder_LateReadyStillBuildsVecSchema(t *testing.T) {
+	emb := memtest.NewStubEmbedder(32)
+	emb.Ready = false // simulate HTTPEmbedder pre-registration state
+
+	s, err := memory.NewSQLiteStore(t.TempDir(), memory.WithEmbedder(emb))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	// Flip the embedder to ready — mirrors the real-world sequence.
+	emb.Ready = true
+
+	ctx := context.Background()
+	if err := s.Index(ctx, "fact", memory.Document{ID: "1", Text: "docker compose on homelab"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+	hits, err := s.Search(ctx, "fact", "docker", 5)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatalf("late-ready embedder: no hits — vec schema was not provisioned")
+	}
+	// Score shape check: vec cosine yields score in [0, 1]; LIKE fallback
+	// is bounded by len(query)/len(text) which is small for this query.
+	// A score > 0.5 is a strong signal the vec path ran.
+	if hits[0].Score < 0.5 {
+		t.Errorf("expected vec-path score >= 0.5, got %f (likely stuck on LIKE fallback)", hits[0].Score)
+	}
+}
+
+// TestSQLiteStore_WithEmbedderDim_OverridesDefault covers the
+// multi-option path: WithEmbedderDim sets the schema dim before
+// WithEmbedder stores the late-ready embedder ref.
+func TestSQLiteStore_WithEmbedderDim_OverridesDefault(t *testing.T) {
+	emb := memtest.NewStubEmbedder(64)
+	emb.Ready = false
+
+	s, err := memory.NewSQLiteStore(t.TempDir(),
+		memory.WithEmbedderDim(64),
+		memory.WithEmbedder(emb),
+	)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	emb.Ready = true
+	ctx := context.Background()
+	if err := s.Index(ctx, "fact", memory.Document{ID: "a", Text: "hello"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+}
+
 // TestSQLiteStore_DeleteDocument_RemovesVecRow catches the failure mode
 // where DeleteDocument cleans the base row and FTS trigger fires, but
 // documents_vec keeps an orphan embedding that still matches in Search.

@@ -51,8 +51,9 @@ type Orchestrator struct {
 	toolRegistry    *tooling.Registry   // optional: tool schemas for API agentic loop
 	toolExecutor    *tooling.Executor   // optional: tool subprocess runner
 
-	mu       sync.Mutex
-	running  map[string]*RunningTask
+	mu        sync.Mutex
+	running   map[string]*RunningTask
+	idCounter uint64 // monotonically-increasing suffix for taskID, guarded by mu
 }
 
 // NewOrchestrator creates a new orchestrator.
@@ -81,6 +82,27 @@ func (o *Orchestrator) SetResolveProvider(fn ResolveProviderFunc) {
 func (o *Orchestrator) SetTooling(registry *tooling.Registry, executor *tooling.Executor) {
 	o.toolRegistry = registry
 	o.toolExecutor = executor
+}
+
+// WaitIdle blocks until there are no running tasks, or ctx is cancelled.
+// Used by tests and for clean shutdown to drain in-flight orchestrator
+// goroutines before tearing down their data directory.
+func (o *Orchestrator) WaitIdle(ctx context.Context) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		o.mu.Lock()
+		n := len(o.running)
+		o.mu.Unlock()
+		if n == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // Running returns a snapshot of all currently running tasks.
@@ -256,7 +278,13 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 		teams = allTeams
 	}
 
-	taskID := fmt.Sprintf("%d", time.Now().UnixNano())
+	// Unique taskID: nanosecond timestamp + monotonic counter. UnixNano alone
+	// can collide between concurrent Run() calls scheduled in the same
+	// nanosecond, which would clobber the running map entry. See #347.
+	o.mu.Lock()
+	o.idCounter++
+	taskID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), o.idCounter)
+	o.mu.Unlock()
 	agentsParent := filepath.Join(o.dataDir, "agents")
 	taskDir := filepath.Join(agentsParent, taskID)
 	os.MkdirAll(taskDir, 0o775)

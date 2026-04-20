@@ -17,7 +17,6 @@ type Secret struct {
 // SecretRegistry lists all secrets ALF knows about.
 // Add new entries here as ALF grows - `alf secret list` picks them up automatically.
 var SecretRegistry = []Secret{
-	{Name: "claude_oauth_token", Description: "Claude Code OAuth token (via alf login)", Required: false},
 	{Name: "whisper_shared_secret", Description: "Whisper service shared secret (auto-generated)", Required: false},
 	{Name: "embed_shared_secret", Description: "Embed service shared secret (auto-generated)", Required: false},
 }

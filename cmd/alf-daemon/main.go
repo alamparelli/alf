@@ -88,11 +88,8 @@ func main() {
 
 	// CC_AUTH_TOKEN no longer passed to subprocess env — system-tools use ALF_TOOLS_SOCK instead.
 
-	// Set Claude OAuth token as env var if available (picked up by safeEnv for subprocesses).
-	if oauthToken := secrets.ReadSecret("CLAUDE_OAUTH_TOKEN"); oauthToken != "" {
-		os.Setenv("CLAUDE_CODE_OAUTH_TOKEN", oauthToken)
-		log.Println("Claude OAuth token loaded from secret")
-	}
+	// Claude OAuth: source of truth is ~/.claude/.credentials.json (written by `claude login`).
+	// The claude CLI subprocess reads it directly via HOME, and refreshes the token automatically.
 
 	// Verify claude CLI is available.
 	if _, err := exec.LookPath("claude"); err != nil {

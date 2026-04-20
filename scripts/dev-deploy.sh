@@ -128,7 +128,7 @@ for s in whisper_shared_secret embed_shared_secret; do
   fi
 done
 # Ensure required secret files exist (Docker Compose requires them even if empty).
-for s in claude_oauth_token whisper_shared_secret embed_shared_secret; do
+for s in whisper_shared_secret embed_shared_secret; do
   touch ${REMOTE_DIR}/secrets/\$s
   chmod 600 ${REMOTE_DIR}/secrets/\$s
 done"

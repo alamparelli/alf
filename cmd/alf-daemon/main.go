@@ -489,9 +489,20 @@ func main() {
 	// Dual-write shim for #337c1: every memstore.Store write also lands in
 	// memory.Store as an Index(scope=type, id=fmt.Sprint(memID)). Lets the
 	// unified store fill up as the extractor runs, without moving any
-	// reader off memstore yet. The reader migration is sub-ticket C2.
+	// reader off memstore yet.
 	if memDB != nil {
 		memDB.SetMirror(memStore)
+	}
+
+	// One-shot backfill of pre-#337 memstore data into memory.Store so the
+	// recallers (#337c2, now reading from memory.Store) see the existing
+	// fact corpus. Sentinel-gated so it runs exactly once per install.
+	// Non-fatal — a failed migration logs and continues; memstore still
+	// serves the old data through the dual-write shim + next extractor run.
+	if cfg.EffectiveMemoryEnabled() {
+		if err := migrateMemstoreToMemory(context.Background(), contextDir, memStore); err != nil {
+			log.Printf("[memstore-migrate] failed: %v", err)
+		}
 	}
 
 	// Provider: spawn-per-call Claude CLI for responses.

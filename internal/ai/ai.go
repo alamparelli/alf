@@ -67,6 +67,13 @@ type Request struct {
 	WriteCapable  bool
 	DataDir       string
 	Stream        bool
+
+	// ResumeID lets a caller continue a provider-side session (e.g. Claude CLI
+	// resume, OpenRouter thread). Empty means start fresh. Providers that do
+	// not support session resumption ignore it. Added in #340 R4e so chat
+	// follow-ups (chat_service.negativeFollowUp) can reach the provider via
+	// Runtime.Converse without losing context from the previous turn.
+	ResumeID string
 }
 
 // Usage summarises what an Engine.Run actually cost. Populated by the Provider

@@ -71,6 +71,7 @@ func (e *engineAdapter) Run(ctx context.Context, req ai.Request) (<-chan ai.Even
 		Effort:        req.Effort,
 		WriteCapable:  req.WriteCapable,
 		DataDir:       req.DataDir,
+		ResumeID:      req.ResumeID,
 	}
 
 	out := make(chan ai.Event, 16)

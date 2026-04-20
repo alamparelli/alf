@@ -101,6 +101,13 @@ type ConverseRequest struct {
 	// because different scheduled jobs (or different chat turns, later) may
 	// need different orchestration shapes on the same underlying Engine.
 	Strategy ai.Strategy
+
+	// ResumeID continues a provider-side session (Claude CLI resume, etc.)
+	// without replaying History. Empty means start fresh. Providers that do
+	// not support session resumption ignore it. Added in #340 R4e so
+	// chat_service.negativeFollowUp can reach the provider via Converse
+	// while preserving the session the previous turn opened.
+	ResumeID string
 }
 
 // ConverseResult carries the aggregated response plus whatever usage data the

@@ -313,6 +313,24 @@ func TestRun_ModelAndToolsPropagate(t *testing.T) {
 	}
 }
 
+// TestRun_ResumeIDPropagates locks the #340 R4e passthrough so a caller using
+// Runtime.Converse can continue a provider-side session (Claude CLI resume).
+func TestRun_ResumeIDPropagates(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok"}}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model:    "m",
+		ResumeID: "sess-abc",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "continue"}},
+	})
+	drainEvents(t, ch)
+
+	if stub.lastParams.ResumeID != "sess-abc" {
+		t.Fatalf("ResumeID: got %q want %q", stub.lastParams.ResumeID, "sess-abc")
+	}
+}
+
 // ── errors ──────────────────────────────────────────────────────────────────
 
 func TestRun_ProviderError_SurfacesEventError(t *testing.T) {

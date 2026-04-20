@@ -730,6 +730,30 @@ func TestConverse_ForwardsProviderPassthroughs(t *testing.T) {
 	}
 }
 
+// TestConverse_ForwardsResumeID pins the #340 R4e passthrough: ResumeID flows
+// from ConverseRequest → ai.Request so chat follow-ups can continue a
+// provider-side session through Runtime.
+func TestConverse_ForwardsResumeID(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Prompt:   "continue",
+		ResumeID: "sess-xyz",
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if got := eng.requests[0].ResumeID; got != "sess-xyz" {
+		t.Fatalf("ResumeID: got %q want sess-xyz", got)
+	}
+}
+
 // TestConverse_ForwardsSystemPromptsAndHistory shows Request.SystemPrompts +
 // History land on the ai.Request the engine receives, and the Prompt is
 // appended as the final user message.

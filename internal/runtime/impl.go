@@ -241,6 +241,7 @@ func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (Con
 		WriteCapable:  req.WriteCapable,
 		DataDir:       req.DataDir,
 		Stream:        true,
+		ResumeID:      req.ResumeID,
 	}
 
 	// When the caller provided a Strategy, hand it the Engine and let it

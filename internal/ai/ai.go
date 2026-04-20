@@ -14,7 +14,7 @@ package ai
 
 import "context"
 
-// ModelID is the canonical identifier resolved by ResolveModel.
+// ModelID is the canonical identifier returned by ResolveModel.
 type ModelID string
 
 // Role enumerates message authorship as seen by the model.
@@ -79,10 +79,4 @@ type Event struct {
 // Engine runs an AI Request and returns a streamed channel of Events.
 type Engine interface {
 	Run(ctx context.Context, req Request) (<-chan Event, error)
-}
-
-// ResolveModel is the single authoritative model resolver.
-// Any hardcoded fallback elsewhere is a violation enforced by CI.
-func ResolveModel(_ context.Context, _ string) (ModelID, error) {
-	panic("not implemented")
 }

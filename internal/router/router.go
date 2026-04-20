@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alamparelli/alf/internal/ai"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/memory"
 )
@@ -39,25 +40,12 @@ type ClassifyInput struct {
 	RecentContext string          // compact summary of recent conversation turns
 }
 
-// ResolveModel maps short model names to full Claude model identifiers.
+// ResolveModel is a thin re-export of ai.ResolveModel — the single
+// authoritative model resolver. Kept here for backward compatibility with
+// consumers that import internal/router; will be removed when those callers
+// migrate to ai.ResolveModel directly (#340 A5).
 func ResolveModel(short string) string {
-	switch strings.ToLower(short) {
-	case "haiku":
-		return "claude-haiku-4-5"
-	case "sonnet":
-		return "claude-sonnet-4-6"
-	case "opus":
-		return "claude-opus-4-6"
-	case "sonnet-max":
-		return "claude-sonnet-4-6-max"
-	case "opus-max":
-		return "claude-opus-4-6-max"
-	default:
-		if strings.HasPrefix(short, "claude-") {
-			return short
-		}
-		return ""
-	}
+	return string(ai.ResolveModel(short))
 }
 
 // BuildSystemPrompt constructs the one-time system prompt for the persistent

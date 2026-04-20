@@ -95,20 +95,6 @@ func TestDefaultFallbackTier_ReturnsBackend(t *testing.T) {
 	}
 }
 
-func TestResolveModelAlias_Aliases(t *testing.T) {
-	cases := map[string]string{
-		"haiku":      "claude-haiku-4-5",
-		"sonnet":     "claude-sonnet-4-6",
-		"opus":       "claude-opus-4-6",
-		"sonnet-max": "claude-sonnet-4-6-max",
-		"opus-max":   "claude-opus-4-6-max",
-		"HAIKU":      "claude-haiku-4-5",
-		"claude-custom-model": "claude-custom-model",
-		"gpt-5":      "",
-	}
-	for in, want := range cases {
-		if got := resolveModelAlias(in); got != want {
-			t.Errorf("resolveModelAlias(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
+// The resolveModelAlias test moved to internal/ai: the mapping is now the
+// single authoritative ai.ResolveModel, exercised by ai.TestResolveModel_*.
+// #340 R5f deletes controlcenter's duplicate implementation.

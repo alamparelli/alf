@@ -18,8 +18,9 @@ var hardcodedModelPattern = regexp.MustCompile(`"claude-(haiku|sonnet|opus)-[0-9
 // that embed a hardcoded claude model identifier string. The single source of
 // truth is ai.ResolveModel (see technical/ARCHITECTURE-v0.7.10.md §2.3 rule 1).
 //
-// INFORMATIONAL during milestone 0.7.9: violations logged via t.Logf, not
-// t.Errorf. Flip to enforcing in #340 A5 once consumer fallbacks are purged.
+// ENFORCING as of #340 R5f: the last production violation (five hardcoded
+// model aliases in internal/controlcenter/fallback.go) was purged by routing
+// controlcenter's DefaultFallbackTier through ai.ResolveModel.
 //
 // Exclusions:
 //   - *_test.go files (fixtures frequently embed real model IDs).
@@ -81,10 +82,9 @@ func TestHardcodedModelFallback(t *testing.T) {
 	}
 
 	for _, v := range violations {
-		t.Logf("HARDCODED MODEL: %s", v)
+		t.Errorf("HARDCODED MODEL: %s", v)
 	}
 	t.Logf("archtest summary: hardcodedViolations=%d filesScanned=%d", len(violations), scanned)
-	t.Log("hardcoded-model rule is INFORMATIONAL until #340 A5 lands consumer migration")
 }
 
 // stripLineComment returns line with anything starting at an unquoted "//"

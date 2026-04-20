@@ -14,7 +14,6 @@ import (
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/secrets"
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/vault"
@@ -163,7 +162,7 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, r
 			// For CLI backend, resolve short names to full model IDs.
 			// For API backends, use the model string as-is.
 			if backend == "" || backend == "cli" {
-				model = router.ResolveModel(t.Model)
+				model = resolveModel(t.Model)
 			}
 			// Resolve tool wildcards into concrete tool names.
 			tools := t.Tools

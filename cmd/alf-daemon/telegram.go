@@ -22,7 +22,6 @@ import (
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 )
@@ -547,7 +546,7 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 	fallback := firstFallbackTier(tierStore)
 	for _, t := range tierStore.Current().Tiers {
 		if t.Name == fallback {
-			if m := router.ResolveModel(t.Model); m != "" {
+			if m := resolveModel(t.Model); m != "" {
 				model = m
 			} else if t.Model != "" {
 				model = t.Model // preserve non-Claude models (e.g. gpt-5.4)

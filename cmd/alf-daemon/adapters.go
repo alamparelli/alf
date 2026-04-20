@@ -16,7 +16,6 @@ import (
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
@@ -350,7 +349,7 @@ func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
 		Tiers: make([]scheduler.TierInfo, len(tc.Tiers)),
 	}
 	for i, t := range tc.Tiers {
-		model := router.ResolveModel(t.Model)
+		model := resolveModel(t.Model)
 		if model == "" {
 			model = t.Model // preserve non-Claude models (e.g. gpt-5.4)
 		}

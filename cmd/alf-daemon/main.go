@@ -16,9 +16,11 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	"github.com/alamparelli/alf/internal/ai"
 	aiprovider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/capability"
 	runtimeagents "github.com/alamparelli/alf/internal/runtime/agents"
+	"github.com/alamparelli/alf/internal/runtime/classifier"
 	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/marketplace"
@@ -33,7 +35,6 @@ import (
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/router"
 	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/alamparelli/alf/internal/sandbox"
 	"github.com/alamparelli/alf/internal/scheduler"
@@ -50,6 +51,12 @@ import (
 )
 
 var version = "dev"
+
+// resolveModel is the daemon's local adapter around ai.ResolveModel so call
+// sites keep the `func(string) string` shape that several downstream APIs
+// (agents.NewOrchestrator, cc.NewChatService, ...) still require. Introduced
+// by #340 R5g as part of removing the router shim from the daemon's imports.
+var resolveModel = func(s string) string { return string(ai.ResolveModel(s)) }
 
 // collectRecentAllMem merges the last n messages across every conversation
 // in the memory store, sorted chronologically. Replacement for the previous
@@ -535,7 +542,7 @@ func main() {
 					}
 				}
 				if backend == "" || backend == "cli" {
-					model = router.ResolveModel(t.Model)
+					model = resolveModel(t.Model)
 				}
 				return agents.TierParams{
 					Model:        model,
@@ -550,7 +557,7 @@ func main() {
 		}
 		return agents.TierParams{}, false
 	}
-	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel, resolveTier)
+	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, resolveModel, resolveTier)
 	orch.SetResolveProvider(func(backend string) provider.Provider {
 		return registry.ForBackend(backend)
 	})
@@ -575,7 +582,7 @@ func main() {
 			}
 		}
 	} else {
-		routerModel = router.ResolveModel(routerModel)
+		routerModel = resolveModel(routerModel)
 		if routerModel == "" {
 			routerModel = cc.DefaultFallbackModel(tierStore.Current())
 		}
@@ -602,15 +609,15 @@ func main() {
 	}
 
 	// agentTeamsForRouter converts the agent store into router-friendly team info.
-	agentTeamsForRouter := func() []router.AgentTeamInfo {
+	agentTeamsForRouter := func() []classifier.AgentTeamInfo {
 		teams := agentStore.All()
-		infos := make([]router.AgentTeamInfo, 0, len(teams))
+		infos := make([]classifier.AgentTeamInfo, 0, len(teams))
 		for _, t := range teams {
 			names := make([]string, len(t.Agents))
 			for i, a := range t.Agents {
 				names[i] = a.Name
 			}
-			infos = append(infos, router.AgentTeamInfo{
+			infos = append(infos, classifier.AgentTeamInfo{
 				Name:        t.Name,
 				Description: t.Description,
 				Agents:      names,
@@ -620,8 +627,8 @@ func main() {
 	}
 
 	// classifyMessageFull includes session context for continuity routing.
-	classifyMessageFull := func(message string, tiers *cc.TiersConfig, lastTier string, msgCount int, recentContext string) router.Result {
-		prompt := router.BuildClassifyPrompt(router.ClassifyInput{
+	classifyMessageFull := func(message string, tiers *cc.TiersConfig, lastTier string, msgCount int, recentContext string) classifier.Result {
+		prompt := classifier.BuildClassifyPrompt(classifier.ClassifyInput{
 			Message:       message,
 			Tiers:         tiers,
 			DataDir:       dataDir,
@@ -638,10 +645,10 @@ func main() {
 			cr, err := cliClassifier.Classify(context.Background(), prompt)
 			if err != nil {
 				log.Printf("router: classifier error: %v", err)
-				return router.FallbackResult(tiers)
+				return classifier.FallbackResult(tiers)
 			}
 			log.Printf("router: classify took %dms (classifier)", time.Since(start).Milliseconds())
-			return router.InterpretRaw(cr.Response, tiers, message)
+			return classifier.InterpretRaw(cr.Response, tiers, message)
 		}
 
 		routerProv := registry.ForBackend(routerBackend)
@@ -653,10 +660,10 @@ func main() {
 		result, err := routerProv.Invoke(context.Background(), prompt, params, nil)
 		if err != nil {
 			log.Printf("router: classify error: %v", err)
-			return router.FallbackResult(tiers)
+			return classifier.FallbackResult(tiers)
 		}
 		log.Printf("router: classify took %dms (backend=%s)", time.Since(start).Milliseconds(), routerBackend)
-		return router.InterpretRaw(result.Text, tiers, message)
+		return classifier.InterpretRaw(result.Text, tiers, message)
 	}
 
 	// Chat service for mobile app API (shares Claude invocation with Telegram bot).
@@ -671,7 +678,7 @@ func main() {
 			React:    rr.React,
 		}
 	}
-	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, memStore, transcriber, classifyFn, router.ResolveModel, cliProvider)
+	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, memStore, transcriber, classifyFn, resolveModel, cliProvider)
 	toolRegistry := tooling.NewRegistry(dataDir)
 	// Unified capability registry (#338 C2): every NativeTool registered on
 	// toolRegistry is mirrored as a KindTool Capability. Consumers keep using
@@ -764,7 +771,7 @@ func main() {
 		ToolRegistry:   toolRegistry,
 		ToolExecutor:   toolExecutor,
 		ClassifyFull:   engineClassify,
-		ResolveModel:   router.ResolveModel,
+		ResolveModel:   resolveModel,
 		BackendConfigs: engineBackendConfigs,
 		RecallCfg: comms.RecallConfig{
 			Limit:    cfg.RecallLimit,
@@ -1023,7 +1030,7 @@ func main() {
 				contextDir:   contextDir,
 				tierStore:    tierStore,
 				skillStore:   skillStore,
-				resolveModel: router.ResolveModel,
+				resolveModel: resolveModel,
 				eventLog:     eventLog,
 			},
 			TeamService: &teamAdapter{
@@ -1034,7 +1041,7 @@ func main() {
 			LLMService: &llmAdapter{
 				tierStore:        tierStore,
 				providerRegistry: registry,
-				resolveModel:     router.ResolveModel,
+				resolveModel:     resolveModel,
 				dataDir:          dataDir,
 			},
 			NotifyFunc: chainNotifyFunc,
@@ -1062,7 +1069,7 @@ func main() {
 			Service: &llmAdapter{
 				tierStore:        tierStore,
 				providerRegistry: registry,
-				resolveModel:     router.ResolveModel,
+				resolveModel:     resolveModel,
 				dataDir:          dataDir,
 			},
 			NotifyFunc: chainNotifyFunc,
@@ -1467,9 +1474,9 @@ func main() {
 						cliClassifier = nil
 					}
 				} else {
-					newModel := router.ResolveModel(tierStore.Current().RouterModel)
+					newModel := resolveModel(tierStore.Current().RouterModel)
 					if newModel == "" {
-						newModel = router.ResolveModel("haiku")
+						newModel = resolveModel("haiku")
 					}
 					routerModel = newModel
 					// Update or create CLI classifier.
@@ -1603,9 +1610,9 @@ func main() {
 						cliClassifier = nil
 					}
 				} else {
-					newModel := router.ResolveModel(tierStore.Current().RouterModel)
+					newModel := resolveModel(tierStore.Current().RouterModel)
 					if newModel == "" {
-						newModel = router.ResolveModel("haiku")
+						newModel = resolveModel("haiku")
 					}
 					routerModel = newModel
 					if cliClassifier != nil {

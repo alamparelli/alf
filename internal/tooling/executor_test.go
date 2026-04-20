@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alamparelli/alf/internal/sandbox/integrity"
 )
 
 func TestExecutor_ToolNotFound(t *testing.T) {
@@ -280,9 +282,7 @@ func TestExecutor_QuarantinedToolBlocked(t *testing.T) {
 	os.WriteFile(filepath.Join(toolsDir, "evil-tool"), []byte(script), 0o755)
 
 	// Create integrity guard with tool already quarantined.
-	ig := &IntegrityGuard{
-		quarantined: map[string]QuarantinedTool{"evil-tool": {}},
-	}
+	ig := integrity.NewTestGuardWithQuarantine(map[string]QuarantinedTool{"evil-tool": {}})
 
 	e := &Executor{
 		DataDir:   dir,

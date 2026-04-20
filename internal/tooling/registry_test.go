@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/alamparelli/alf/internal/sandbox/integrity"
 )
 
 func TestNewRegistry_LoadsManifests(t *testing.T) {
@@ -221,10 +223,11 @@ func TestRegistry_SecurityWarnings_ClearedOnRescan(t *testing.T) {
 }
 
 func TestRuleset_LoadedAndNonEmpty(t *testing.T) {
-	if len(securityRuleset.Rules) == 0 {
+	rs := integrity.Ruleset()
+	if len(rs.Rules) == 0 {
 		t.Fatal("embedded ruleset has no rules")
 	}
-	for _, r := range securityRuleset.Rules {
+	for _, r := range rs.Rules {
 		if r.ID == "" || r.Pattern == "" || r.Reason == "" {
 			t.Errorf("rule missing required fields: %+v", r)
 		}

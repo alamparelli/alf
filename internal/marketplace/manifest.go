@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/alamparelli/alf/internal/sandbox"
 )
 
 type Manifest struct {
@@ -20,26 +22,12 @@ type Manifest struct {
 	Trusted     bool       `json:"trusted,omitempty"`  // only settable by marketplace registry
 }
 
-// UntrustedMaxPermissions are the only permissions allowed for untrusted apps.
-var UntrustedMaxPermissions = map[string]bool{
-	"storage":   true,
-	"events":    true,
-	"clipboard": true,
-}
+// UntrustedMaxPermissions re-exports the sandbox-owned allow-list.
+var UntrustedMaxPermissions = sandbox.UntrustedMaxPermissions
 
-// CapPermissionsForUntrusted restricts permissions to the safe set.
-// Returns the filtered list. If perms is nil (legacy/no field), returns nil unchanged.
+// CapPermissionsForUntrusted re-exports sandbox.CapPermissionsForUntrusted.
 func CapPermissionsForUntrusted(perms []string) []string {
-	if perms == nil {
-		return nil
-	}
-	capped := make([]string, 0, len(perms))
-	for _, p := range perms {
-		if UntrustedMaxPermissions[p] {
-			capped = append(capped, p)
-		}
-	}
-	return capped
+	return sandbox.CapPermissionsForUntrusted(perms)
 }
 
 type ToolDecl struct {
@@ -67,11 +55,3 @@ func LoadManifest(path string) (*Manifest, error) {
 	return &m, nil
 }
 
-func init() {
-	// SEC-006: Compile-time check that UntrustedMaxPermissions is a subset of ValidPermissions.
-	for p := range UntrustedMaxPermissions {
-		if !ValidPermissions[p] {
-			panic("UntrustedMaxPermissions contains unknown permission: " + p)
-		}
-	}
-}

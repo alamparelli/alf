@@ -1199,6 +1199,10 @@ func main() {
 
 		// Consolidator: dedup + fallback extraction every 6h.
 		consolidator := memstore.NewConsolidator(memDB, memExtractor, extractAdapter, extractTimeout)
+		// #337c4d2: consolidator walks memory.Store via ListDocuments
+		// across the same known scopes the socket server and recallers
+		// use. Same threshold as the extractor for symmetry.
+		consolidator.SetMemoryBackend(memStore, socketsrv.KnownScopes, 0.85)
 		sched.RegisterSystem("mem-consolidate", "Memory Consolidation", "@every 360m", func() error {
 			return consolidator.RunOnce()
 		}, "Review the long-term memory store for redundancy and quality. Use recall to sample memories across all types (fact, decision, preference, contact). For each group of similar or overlapping memories: keep the most accurate and complete version, delete duplicates with forget, and if needed consolidate into a single updated memory with remember. Do not remove unique information. Focus on reducing noise without data loss.")

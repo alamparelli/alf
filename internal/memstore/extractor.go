@@ -11,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/memory/dedup"
 )
 
 // diffExcludes are git pathspec exclusions applied to Pass 1 stat and worktree
@@ -60,6 +63,25 @@ type Extractor struct {
 	// Per-session message counters for mid-session extraction.
 	msgCounts map[string]int
 	mu        sync.Mutex
+
+	// memStore, if non-nil, replaces the memstore.Store.Store write path
+	// with dedup.IndexWithDedup (#337c4c). When set, the extractor
+	// writes facts directly into memory.Store under scope=memType and
+	// no longer touches the memstore memories table. Leave nil to keep
+	// the legacy path alive during transitional deployments.
+	memStore         memory.Store
+	nearDupThreshold float32 // passed through to dedup.Options
+}
+
+// SetMemoryBackend rewires the extractor's write path onto memory.Store
+// via the dedup helper. threshold controls near-dup skipping (see
+// dedup.Options.NearDupThreshold); pass 0 to rely on exact-dup only.
+// Calling with a nil store restores the legacy memstore path.
+func (e *Extractor) SetMemoryBackend(store memory.Store, threshold float32) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.memStore = store
+	e.nearDupThreshold = threshold
 }
 
 // ExtractorState holds the persisted state of the extractor.
@@ -283,6 +305,14 @@ func (e *Extractor) Extract() error {
 		return fmt.Errorf("extract facts: %w", err)
 	}
 
+	// Snapshot the memory-backend config under the lock so a concurrent
+	// SetMemoryBackend call doesn't flip mid-loop. Reading once here is
+	// enough — the backend either is or isn't in place for this run.
+	e.mu.Lock()
+	memStore := e.memStore
+	nearDupThreshold := e.nearDupThreshold
+	e.mu.Unlock()
+
 	stored := 0
 	for i, fact := range facts {
 		if fact.Text == "" {
@@ -297,6 +327,31 @@ func (e *Extractor) Extract() error {
 			truncText = truncText[:100] + "..."
 		}
 		log.Printf("memstore: fact[%d/%d] type=%s text=%q", i+1, len(facts), memType, truncText)
+
+		if memStore != nil {
+			// #337c4c path: write directly into memory.Store via dedup.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			res, err := dedup.IndexWithDedup(ctx, memStore, memory.Scope(memType), memory.Document{Text: fact.Text}, dedup.Options{
+				Source:           "extractor",
+				NearDupThreshold: nearDupThreshold,
+				Now:              func() string { return time.Now().Format(time.RFC3339) },
+			})
+			cancel()
+			if err != nil {
+				log.Printf("memstore: fact[%d] → memory Index failed: %v", i+1, err)
+				continue
+			}
+			if !res.Stored {
+				log.Printf("memstore: fact[%d] → %s-dup, skipped (id=%s)", i+1, res.Reason, res.DocID)
+				continue
+			}
+			log.Printf("memstore: fact[%d] → stored OK (id=%s via memory.Store)", i+1, res.DocID)
+			stored++
+			continue
+		}
+
+		// Legacy path: memstore.Store.Store with FTS5 dedup. Kept for
+		// deployments that haven't wired SetMemoryBackend yet.
 		id, err := e.store.Store(fact.Text, memType, "extractor", nil)
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate") {

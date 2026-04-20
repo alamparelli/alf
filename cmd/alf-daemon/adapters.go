@@ -121,19 +121,80 @@ func (a *extractorAdapter) invokeCLI(ctx context.Context, prompt, model string, 
 	return result.Text, nil
 }
 
-// memStoreRecaller adapts memstore.Store to the cc.MemoryRecaller interface.
-type memStoreRecaller struct {
-	store *memstore.Store
+// memoryScopes lists the known memory types produced by the extractor and
+// consolidator. Recallers fan out a Search across each because the
+// memory.Store contract searches one Scope at a time — the old memstore
+// model put every memory in a single table so a one-shot search sufficed.
+// When a new memType is introduced (e.g. in extractor.go's type whitelist),
+// add it here too.
+var memoryScopes = []memory.Scope{"fact", "preference", "decision", "contact", "summary"}
+
+// searchMemoryAcrossScopes fans out a Search across every known memory
+// scope and returns the top `limit` hits merged by descending score.
+// Shared by the cc and comms recaller adapters below.
+func searchMemoryAcrossScopes(store memory.Store, query string, limit int) ([]memory.Hit, error) {
+	if store == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var all []memory.Hit
+	for _, scope := range memoryScopes {
+		hits, err := store.Search(ctx, scope, query, limit)
+		if err != nil {
+			// One bad scope must not black-hole the recall — log and keep
+			// going with the others. Recall is best-effort.
+			log.Printf("memory: recall scope=%q failed: %v", scope, err)
+			continue
+		}
+		// Tag each hit with its scope so the adapter can return the Type
+		// field MemoryResult consumers expect.
+		for _, h := range hits {
+			if h.Document.Metadata == nil {
+				h.Document.Metadata = map[string]string{}
+			}
+			h.Document.Metadata["scope"] = string(scope)
+			all = append(all, h)
+		}
+	}
+	// Merge-sort by score descending (insertion sort — N stays small).
+	for i := 1; i < len(all); i++ {
+		for j := i; j > 0 && all[j].Score > all[j-1].Score; j-- {
+			all[j], all[j-1] = all[j-1], all[j]
+		}
+	}
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
 }
 
-func (r *memStoreRecaller) Search(query string, limit int) ([]cc.MemoryResult, error) {
-	results, err := r.store.Search(query, limit)
+// memoryCCRecaller adapts memory.Store to the cc.MemoryRecaller interface.
+// Replaces the pre-#337 *memstore.Store adapter once the documents table
+// is fed by the dual-write shim (sub-ticket C1).
+type memoryCCRecaller struct {
+	store memory.Store
+}
+
+func (r *memoryCCRecaller) Search(query string, limit int) ([]cc.MemoryResult, error) {
+	hits, err := searchMemoryAcrossScopes(r.store, query, limit)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]cc.MemoryResult, len(results))
-	for i, m := range results {
-		out[i] = cc.MemoryResult{Text: m.Text, Type: m.Type, Distance: m.Distance}
+	out := make([]cc.MemoryResult, len(hits))
+	for i, h := range hits {
+		// memory.Hit.Score is similarity (higher == more relevant);
+		// MemoryResult.Distance is cosine distance (lower == more relevant).
+		// Invert so downstream ranking code keeps working.
+		out[i] = cc.MemoryResult{
+			Text:     h.Document.Text,
+			Type:     h.Document.Metadata["scope"],
+			Distance: float64(1 - h.Score),
+		}
 	}
 	return out, nil
 }
@@ -175,19 +236,24 @@ func (c *commsTierStore) Snapshot() comms.TiersSnapshot {
 	return snap
 }
 
-// commsRecaller adapts memstore.Store to the comms.MemoryRecaller interface.
-type commsRecaller struct {
-	store *memstore.Store
+// memoryCommsRecaller adapts memory.Store to the comms.MemoryRecaller
+// interface. Symmetric to memoryCCRecaller but returns comms.MemoryResult.
+type memoryCommsRecaller struct {
+	store memory.Store
 }
 
-func (r *commsRecaller) Search(query string, limit int) ([]comms.MemoryResult, error) {
-	results, err := r.store.Search(query, limit)
+func (r *memoryCommsRecaller) Search(query string, limit int) ([]comms.MemoryResult, error) {
+	hits, err := searchMemoryAcrossScopes(r.store, query, limit)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]comms.MemoryResult, len(results))
-	for i, m := range results {
-		out[i] = comms.MemoryResult{Text: m.Text, Type: m.Type, Distance: m.Distance}
+	out := make([]comms.MemoryResult, len(hits))
+	for i, h := range hits {
+		out[i] = comms.MemoryResult{
+			Text:     h.Document.Text,
+			Type:     h.Document.Metadata["scope"],
+			Distance: float64(1 - h.Score),
+		}
 	}
 	return out, nil
 }

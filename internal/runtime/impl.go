@@ -217,7 +217,12 @@ func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (Con
 	if model == "" {
 		model = r.opts.Model
 	}
-	if model == "" {
+	// Model is required unless a Strategy is handling the turn — a wrapping
+	// Strategy (e.g. multi-agent orchestrator) may resolve models internally
+	// via its own tier lookup. The single-ResolveModel rule still holds in
+	// that case: the Strategy owns the resolution inside its scope.
+	// See #340 R5e3.
+	if model == "" && req.Strategy == nil {
 		return ConverseResult{}, fmt.Errorf("runtime.Converse: Model required (none in Request, none in Options)")
 	}
 

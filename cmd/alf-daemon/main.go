@@ -18,6 +18,7 @@ import (
 	"github.com/alamparelli/alf/internal/agents"
 	aiprovider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/capability"
+	runtimeagents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/firewall"
 	"github.com/alamparelli/alf/internal/marketplace"
@@ -1146,6 +1147,13 @@ func main() {
 	if err := capRegistry.Register(scheduler.NewCommandCapability(dataDir, persistentSigPath)); err != nil {
 		log.Printf("scheduler: register CommandCapability: %v (direct-tier jobs will use legacy path)", err)
 	}
+	// #340 R5e3: wrap the multi-agent orchestrator as an ai.Strategy so
+	// orchestrator-tier scheduler jobs dispatch through Runtime.Converse
+	// like the direct-LLM path. StrategyOptions.Source is the tag that
+	// surfaces in TaskMeta; SkillLookup / MemoryContext stay nil — the
+	// scheduler still flattens skills into SystemPrompts the legacy way.
+	schedOrchStrategy := runtimeagents.NewStrategy(orch, runtimeagents.StrategyOptions{Source: "schedule"})
+
 	schedRuntime, err := runtime.New(runtime.Deps{
 		Registry: capRegistry,
 		Memory:   memStore,
@@ -1172,7 +1180,8 @@ func main() {
 		CronPath:       filepath.Join(configDir, "cron.json"),
 		Location:       schedLocation,
 		SignalSockPath: persistentSigPath,
-		Runtime:        schedRuntime,
+		Runtime:              schedRuntime,
+		OrchestratorStrategy: schedOrchStrategy,
 		CatchupRecurringMinInterval: catchupMinInterval,
 	})
 

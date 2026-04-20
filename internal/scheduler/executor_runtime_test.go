@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alamparelli/alf/internal/ai"
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/runtime"
 )
@@ -206,6 +207,74 @@ func TestInvokeLLMWithMeta_RoutesViaRuntime(t *testing.T) {
 	if len(rt.converseCalls) != 1 {
 		t.Fatalf("Converse calls: got %d want 1", len(rt.converseCalls))
 	}
+}
+
+// TestInvokeOrchestratorWithMeta_RoutesViaRuntimeWhenStrategySet proves
+// the #340 R5e3 dispatch: Runtime + OrchestratorStrategy present ⇒
+// orchestrator jobs go through Runtime.Converse (Strategy attached),
+// bypassing the legacy Orchestrator interface.
+func TestInvokeOrchestratorWithMeta_RoutesViaRuntimeWhenStrategySet(t *testing.T) {
+	rt := &fakeRuntimeInvoker{
+		converseOut: runtime.ConverseResult{
+			Text:  "orchestrator output",
+			Usage: &ai.Usage{CostUSD: 0.03, NumTurns: 4, Model: "internal-model"},
+		},
+	}
+	strat := aiStrategyFunc(func(_ context.Context, _ ai.Engine, _ ai.Request) (<-chan ai.Event, error) {
+		ch := make(chan ai.Event, 1)
+		close(ch)
+		return ch, nil
+	})
+	e := &Engine{cfg: Config{
+		Runtime:              rt,
+		OrchestratorStrategy: strat,
+		ContextDir:           "",
+	}}
+	j := &Job{ID: "orch-j", Tier: "orch-tier", Prompt: "plan the sprint"}
+
+	text, meta, err := e.invokeOrchestratorWithMeta(j)
+	if err != nil {
+		t.Fatalf("invokeOrchestratorWithMeta: %v", err)
+	}
+	if text != "orchestrator output" {
+		t.Fatalf("text: got %q", text)
+	}
+	if meta == nil || meta.Iterations != 4 || meta.CostUSD != 0.03 {
+		t.Fatalf("meta: got %+v", meta)
+	}
+	if len(rt.converseCalls) != 1 {
+		t.Fatalf("Converse calls: got %d want 1", len(rt.converseCalls))
+	}
+	req := rt.converseCalls[0]
+	if req.Prompt != "plan the sprint" {
+		t.Fatalf("Prompt: got %q", req.Prompt)
+	}
+	if req.Strategy == nil {
+		t.Fatal("Converse Request must carry the Strategy")
+	}
+}
+
+// TestInvokeOrchestratorWithMeta_FallsBackWithoutStrategy: when
+// OrchestratorStrategy is not set, the scheduler uses the legacy
+// Orchestrator path — proves the migration stays opt-in per-chunk.
+func TestInvokeOrchestratorWithMeta_FallsBackWithoutStrategy(t *testing.T) {
+	rt := &fakeRuntimeInvoker{} // Runtime set but no Strategy
+	e := &Engine{cfg: Config{Runtime: rt}}
+	j := &Job{ID: "j", Prompt: "x"}
+	_, _, err := e.invokeOrchestratorWithMeta(j)
+	if err == nil {
+		t.Fatal("expected legacy path to error with 'orchestrator not configured'")
+	}
+	if len(rt.converseCalls) != 0 {
+		t.Fatalf("Converse must not be called when Strategy is nil; got %d", len(rt.converseCalls))
+	}
+}
+
+// Need aiStrategyFunc in this package for the test above. Inline it.
+type aiStrategyFunc func(ctx context.Context, engine ai.Engine, req ai.Request) (<-chan ai.Event, error)
+
+func (f aiStrategyFunc) Run(ctx context.Context, engine ai.Engine, req ai.Request) (<-chan ai.Event, error) {
+	return f(ctx, engine, req)
 }
 
 // TestInvokeLLMWithMeta_FallsBackToLegacyWithoutRuntime: no Runtime ⇒ the

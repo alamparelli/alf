@@ -731,8 +731,21 @@ func (e *Engine) invokeOrchestrator(j *Job) (string, error) {
 	return text, err
 }
 
-// invokeOrchestratorWithMeta delegates to the orchestrator and returns execution metadata.
+// invokeOrchestratorWithMeta routes an orchestrator-tier job. When Runtime
+// and OrchestratorStrategy are both configured, the job goes through
+// Runtime.Converse with the Strategy attached — same path the LLM flow
+// uses, which means orchestrator and direct-LLM jobs share the single
+// orchestration surface. Otherwise the legacy cfg.Orchestrator.Run path
+// runs, preserving pre-R5e3 behaviour. See #340 R5e3.
 func (e *Engine) invokeOrchestratorWithMeta(j *Job) (string, *execResult, error) {
+	if e.cfg.Runtime != nil && e.cfg.OrchestratorStrategy != nil {
+		return e.invokeOrchestratorViaRuntime(j)
+	}
+	return e.invokeOrchestratorLegacy(j)
+}
+
+// invokeOrchestratorLegacy is the pre-R5e3 path kept for back-compat.
+func (e *Engine) invokeOrchestratorLegacy(j *Job) (string, *execResult, error) {
 	if e.cfg.Orchestrator == nil {
 		return "", nil, fmt.Errorf("orchestrator not configured")
 	}
@@ -766,6 +779,46 @@ func (e *Engine) invokeOrchestratorWithMeta(j *Job) (string, *execResult, error)
 	}
 	log.Printf("scheduler: [%s] orchestrator done: %d iterations, $%.4f", j.ID, meta.Iterations, meta.TotalCost)
 	return text, result, nil
+}
+
+// invokeOrchestratorViaRuntime mirrors invokeOrchestratorLegacy's input
+// assembly but dispatches through Runtime.Converse with the pre-wired
+// orchestrator Strategy. Task lifecycle stays inside the Strategy; the
+// scheduler only sees final text + Usage coming back.
+func (e *Engine) invokeOrchestratorViaRuntime(j *Job) (string, *execResult, error) {
+	var sysPrompts []string
+	if e.cfg.ContextDir != "" {
+		sysPrompts = append(sysPrompts, memory.CollectSchedulerPrompts(e.cfg.ContextDir)...)
+	}
+	if len(j.Skills) > 0 && e.cfg.SkillStore != nil {
+		if block := buildSkillBlock(e.cfg.SkillStore, j.Skills); block != "" {
+			sysPrompts = append(sysPrompts, block)
+		}
+	}
+
+	orchTimeout := j.Timeout
+	if orchTimeout <= 0 {
+		orchTimeout = 30 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), orchTimeout)
+	defer cancel()
+
+	res, err := e.cfg.Runtime.Converse(ctx, runtime.ConverseRequest{
+		Prompt:        j.Prompt,
+		SystemPrompts: sysPrompts,
+		Strategy:      e.cfg.OrchestratorStrategy,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	meta := &execResult{}
+	if res.Usage != nil {
+		meta.CostUSD = res.Usage.CostUSD
+		meta.Model = res.Usage.Model
+		meta.Iterations = res.Usage.NumTurns
+	}
+	log.Printf("scheduler: [%s] orchestrator done (runtime path): %d iterations, $%.4f", j.ID, meta.Iterations, meta.CostUSD)
+	return res.Text, meta, nil
 }
 
 // logScheduleRun writes a schedule_run event to the daily event log.

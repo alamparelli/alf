@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alamparelli/alf/internal/ai"
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/robfig/cron/v3"
@@ -42,9 +43,14 @@ type Config struct {
 	SignalSockPath string // passed as ALF_SIGNAL_SOCK to command subprocesses
 
 	// Runtime, when set, routes direct-tier bash commands through
-	// Runtime.Invoke("scheduler.command", ...). When nil, the legacy inline
-	// runCommand path is used (back-compat during the #340 migration).
+	// Runtime.Invoke("scheduler.command", ...) and LLM jobs through
+	// Runtime.Converse. Legacy Provider path is the fallback (#340).
 	Runtime RuntimeInvoker
+
+	// OrchestratorStrategy, when set alongside Runtime, drives orchestrator-
+	// tier jobs through Runtime.Converse with this Strategy attached. Legacy
+	// cfg.Orchestrator.Run path stays as fallback. See #340 R5e3.
+	OrchestratorStrategy ai.Strategy
 
 	// CatchupRecurringMinInterval: recurring cron jobs with a tick interval
 	// >= this value are caught up once after downtime. Zero disables it.

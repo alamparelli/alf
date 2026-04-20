@@ -949,6 +949,38 @@ func TestConverse_StrategyBypassesEngineRun(t *testing.T) {
 	}
 }
 
+// TestConverse_StrategySkipsModelCheck relaxes the single-ResolveModel
+// check when a Strategy is attached — the Strategy may resolve models
+// internally (e.g. multi-agent orchestrator's own tier lookup). Introduced
+// in #340 R5e3.
+func TestConverse_StrategySkipsModelCheck(t *testing.T) {
+	called := false
+	strat := aiStrategyFunc(func(_ context.Context, _ ai.Engine, _ ai.Request) (<-chan ai.Event, error) {
+		called = true
+		ch := make(chan ai.Event, 1)
+		ch <- ai.Event{Kind: ai.EventDone}
+		close(ch)
+		return ch, nil
+	})
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       &fakeEngine{},
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{}) // no Options.Model
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Prompt:   "hi",
+		Strategy: strat,
+		// No Request.Model either — but Strategy is set, so Converse allows it.
+	})
+	if err != nil {
+		t.Fatalf("Converse with Strategy should not require Model: %v", err)
+	}
+	if !called {
+		t.Fatal("Strategy was not invoked")
+	}
+}
+
 // TestConverse_StrategyErrorSurfaces: a Strategy that returns a non-nil
 // error on Run must propagate verbatim — Runtime does not retry or wrap
 // into success.

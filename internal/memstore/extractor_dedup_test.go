@@ -105,14 +105,8 @@ func newExtractorWithMemory(t *testing.T, p memstore.ExtractorProvider) (*memsto
 	}
 	t.Cleanup(func() { _ = memStore.Close() })
 
-	ms, err := memstore.New(filepath.Join(t.TempDir(), "ms.db"), nil)
-	if err != nil {
-		t.Fatalf("memstore.New: %v", err)
-	}
-	t.Cleanup(func() { _ = ms.Close() })
-
 	ctxDir := t.TempDir()
-	ex := memstore.NewExtractor(ms, dataDir, ctxDir, memstore.ExtractorConfig{}, p, func() string { return "test-model" })
+	ex := memstore.NewExtractor(dataDir, ctxDir, memstore.ExtractorConfig{}, p, func() string { return "test-model" })
 	ex.SetMemoryBackend(memStore, 0)
 	return ex, memStore, dataDir
 }

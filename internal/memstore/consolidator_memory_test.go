@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"testing"
 
 	"github.com/alamparelli/alf/internal/memory"
@@ -56,21 +55,15 @@ func newConsolidatorWithMemory(t *testing.T, prov memstore.ExtractorProvider) (*
 	dataDir := t.TempDir()
 	initGitRepo(t, dataDir)
 
-	ms, err := memstore.New(filepath.Join(t.TempDir(), "ms.db"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ms.Close() })
-
 	memStore, err := memory.NewSQLiteStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = memStore.Close() })
 
-	ex := memstore.NewExtractor(ms, dataDir, t.TempDir(), memstore.ExtractorConfig{}, prov, func() string { return "test-model" })
+	ex := memstore.NewExtractor(dataDir, t.TempDir(), memstore.ExtractorConfig{}, prov, func() string { return "test-model" })
 	ex.SetMemoryBackend(memStore, 0)
-	c := memstore.NewConsolidator(ms, ex, prov, 0)
+	c := memstore.NewConsolidator(ex, prov, 0)
 	c.SetMemoryBackend(memStore, []memory.Scope{"fact", "preference", "decision", "contact"}, 0)
 	return c, memStore
 }

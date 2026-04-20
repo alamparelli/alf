@@ -256,7 +256,6 @@ func TestNew_ValidatesDeps(t *testing.T) {
 		{"missing Memory", func(d *runtime.Deps, _ *runtime.Options) { d.Memory = nil }},
 		{"missing AI", func(d *runtime.Deps, _ *runtime.Options) { d.AI = nil }},
 		{"missing Sandbox", func(d *runtime.Deps, _ *runtime.Options) { d.Sandbox = nil }},
-		{"missing Model", func(_ *runtime.Deps, o *runtime.Options) { o.Model = "" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

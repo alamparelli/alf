@@ -39,9 +39,8 @@ func New(deps Deps, opts Options) (Runtime, error) {
 	if deps.Sandbox == nil {
 		return nil, fmt.Errorf("runtime: Deps.Sandbox required")
 	}
-	if opts.Model == "" {
-		return nil, fmt.Errorf("runtime: Options.Model required")
-	}
+	// Options.Model is checked at Chat call time, not here: Invoke-only
+	// consumers (e.g. #340 R5a scheduler direct-tier) don't need a model.
 	if opts.MaxIterations <= 0 {
 		opts.MaxIterations = defaultMaxIterations
 	}
@@ -63,6 +62,9 @@ func (r *defaultRuntime) Chat(ctx context.Context, convID memory.ConvID, userInp
 	}
 	if userInput == "" {
 		return nil, fmt.Errorf("runtime.Chat: userInput required")
+	}
+	if r.opts.Model == "" {
+		return nil, fmt.Errorf("runtime.Chat: Options.Model required")
 	}
 
 	userMsg := memory.Message{

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/runtime"
 )
 
 // execResult captures metadata from LLM/orchestrator invocations.
@@ -179,7 +180,7 @@ func (e *Engine) executeJob(j *Job) {
 		text, execResult, err = e.runTwoPhase(j)
 	} else if j.Tier == "direct" {
 		if j.Command != "" {
-			text, err = e.runCommand(j)
+			text, err = e.invokeDirectCommand(j)
 		} else {
 			log.Printf("scheduler: [%s] DEPRECATION: direct job using prompt instead of command - migrate to --command", j.ID)
 			text = j.Prompt
@@ -295,6 +296,32 @@ func (e *Engine) executeJob(j *Job) {
 	if !j.System {
 		e.store.Save()
 	}
+}
+
+// invokeDirectCommand runs a direct-tier bash job. If Runtime is configured
+// (#340 R5a migration), it goes through Runtime.Invoke(CommandCapabilityID, …).
+// Otherwise the legacy inline runCommand path is used so existing deployments
+// keep working while Capability registration is still opt-in.
+func (e *Engine) invokeDirectCommand(j *Job) (string, error) {
+	if e.cfg.Runtime == nil {
+		return e.runCommand(j)
+	}
+	args := runtime.Args{"command": j.Command}
+	if j.Timeout > 0 {
+		args["timeout"] = j.Timeout
+	}
+	ctx := context.Background()
+	out, err := e.cfg.Runtime.Invoke(ctx, CommandCapabilityID, args)
+	if err != nil {
+		return "", err
+	}
+	if out.Error != "" {
+		return "", fmt.Errorf("%s", out.Error)
+	}
+	if s, ok := out.Data.(string); ok {
+		return s, nil
+	}
+	return "", nil
 }
 
 // runCommand executes a bash command for direct-tier jobs.

@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -8,8 +9,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alamparelli/alf/internal/capability"
+	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/robfig/cron/v3"
 )
+
+// RuntimeInvoker is the narrow surface of runtime.Runtime the scheduler consumes.
+// Kept as a local interface so scheduler tests can fake it without building a
+// full Runtime. Any runtime.Runtime satisfies it. See #340 R5a.
+type RuntimeInvoker interface {
+	Invoke(ctx context.Context, capID capability.ID, args runtime.Args) (capability.Output, error)
+}
 
 // Config holds dependencies for the scheduler engine.
 type Config struct {
@@ -28,6 +38,11 @@ type Config struct {
 	CronPath       string
 	Location       *time.Location
 	SignalSockPath string // passed as ALF_SIGNAL_SOCK to command subprocesses
+
+	// Runtime, when set, routes direct-tier bash commands through
+	// Runtime.Invoke("scheduler.command", ...). When nil, the legacy inline
+	// runCommand path is used (back-compat during the #340 migration).
+	Runtime RuntimeInvoker
 
 	// CatchupRecurringMinInterval: recurring cron jobs with a tick interval
 	// >= this value are caught up once after downtime. Zero disables it.

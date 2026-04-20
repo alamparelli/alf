@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/agents"
+	aiprovider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/comms"
 	"github.com/alamparelli/alf/internal/firewall"
@@ -32,6 +33,8 @@ import (
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
 	"github.com/alamparelli/alf/internal/router"
+	"github.com/alamparelli/alf/internal/runtime"
+	"github.com/alamparelli/alf/internal/sandbox"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/signal"
@@ -1137,6 +1140,22 @@ func main() {
 		}
 	}
 
+	// #340 R5a: register scheduler.command Capability so direct-tier bash
+	// jobs can execute through Runtime.Invoke. Constructed before Runtime
+	// so runtime.New sees it in the registry listing.
+	if err := capRegistry.Register(scheduler.NewCommandCapability(dataDir, persistentSigPath)); err != nil {
+		log.Printf("scheduler: register CommandCapability: %v (direct-tier jobs will use legacy path)", err)
+	}
+	schedRuntime, err := runtime.New(runtime.Deps{
+		Registry: capRegistry,
+		Memory:   memStore,
+		AI:       aiprovider.NewEngine(cliProvider),
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Tier: sandbox.Tier("direct")})
+	if err != nil {
+		log.Printf("scheduler: runtime init failed: %v (falling back to inline direct-tier path)", err)
+	}
+
 	sched := scheduler.New(scheduler.Config{
 		DataDir:      dataDir,
 		ContextDir:   contextDir,
@@ -1153,6 +1172,7 @@ func main() {
 		CronPath:       filepath.Join(configDir, "cron.json"),
 		Location:       schedLocation,
 		SignalSockPath: persistentSigPath,
+		Runtime:        schedRuntime,
 		CatchupRecurringMinInterval: catchupMinInterval,
 	})
 

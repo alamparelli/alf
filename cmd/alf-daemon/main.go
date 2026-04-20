@@ -26,6 +26,7 @@ import (
 	"github.com/alamparelli/alf/internal/gittrack"
 	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/memory/socketsrv"
 	"github.com/alamparelli/alf/internal/memstore"
 	"github.com/alamparelli/alf/internal/mood"
 	"github.com/alamparelli/alf/internal/provider"
@@ -457,9 +458,7 @@ func main() {
 		} else {
 			defer memDB.Close()
 			memDB.CheckDims()
-			sockPath := filepath.Join(contextDir, "memstore.sock")
-			go memDB.ServeUnix(sockPath)
-			log.Printf("memstore: ready (db=%s, socket=%s)", filepath.Join(contextDir, "memory.db"), sockPath)
+			log.Printf("memstore: ready (db=%s)", filepath.Join(contextDir, "memory.db"))
 		}
 	}
 
@@ -503,6 +502,21 @@ func main() {
 		if err := migrateMemstoreToMemory(context.Background(), contextDir, memStore); err != nil {
 			log.Printf("[memstore-migrate] failed: %v", err)
 		}
+
+		// memstore.sock protocol now served by socketsrv on top of
+		// memory.Store (#337c4b3). The path is unchanged so memory-tools
+		// connects transparently; the old memDB.ServeUnix is gone, which
+		// means /remember calls from LLMs now land in memory.db directly
+		// (no longer through the C1 dual-write shim, which only covers
+		// the extractor/consolidator write paths).
+		sockPath := filepath.Join(contextDir, "memstore.sock")
+		memSocketSrv := socketsrv.New(memStore)
+		go func() {
+			if err := memSocketSrv.ServeUnix(sockPath); err != nil {
+				log.Printf("[memory-socket] serve %s: %v", sockPath, err)
+			}
+		}()
+		log.Printf("[memory-socket] ready (socket=%s)", sockPath)
 	}
 
 	// Provider: spawn-per-call Claude CLI for responses.

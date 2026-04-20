@@ -1,4 +1,4 @@
-package firewall
+package network
 
 import (
 	"context"

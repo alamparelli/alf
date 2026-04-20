@@ -1,4 +1,7 @@
-package firewall
+// Package network is the Network facet of Sandbox: it runs an outbound HTTP
+// proxy with per-capability allow/deny rules and tracks connections via a
+// nettrack socket. Moved from internal/firewall during #339 (Step 3).
+package network
 
 import (
 	"log"

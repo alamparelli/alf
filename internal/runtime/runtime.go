@@ -74,12 +74,22 @@ type Runtime interface {
 // ConverseRequest is the stateless LLM surface: system prompts + prompt +
 // optional history + optional tool list + model override. The Runtime never
 // reads or writes Memory — History is the caller's responsibility.
+//
+// Backend/Effort/WriteCapable/MaxTurns/DataDir are provider-shaped passthroughs
+// (#340 R5d) that let consumers which previously built provider.Params
+// directly (scheduler) reach the provider layer via Runtime.Converse without
+// losing tier configuration.
 type ConverseRequest struct {
 	Model         ai.ModelID
+	Backend       string
 	SystemPrompts []string
 	Prompt        string
 	History       []ai.Message
 	Tools         []ai.ToolSpec
+	MaxTurns      int
+	Effort        string
+	WriteCapable  bool
+	DataDir       string
 }
 
 // ConverseResult carries the aggregated response plus whatever usage data the

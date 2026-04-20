@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alamparelli/alf/internal/ai"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/runtime"
 )
@@ -453,7 +454,20 @@ func (e *Engine) invokeLLM(j *Job) (string, error) {
 }
 
 // invokeLLMWithMeta calls the Claude provider and returns execution metadata.
+// When Config.Runtime is set, the call is routed through Runtime.Converse so
+// the scheduler shares a single orchestration surface with chat_service
+// (#340 R5d). Legacy inline path stays as a fallback while deployments roll
+// out the Runtime wiring.
 func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
+	if e.cfg.Runtime != nil {
+		return e.invokeLLMViaRuntime(j)
+	}
+	return e.invokeLLMLegacy(j)
+}
+
+// invokeLLMLegacy is the pre-R5d path kept for back-compat when no Runtime
+// is configured.
+func (e *Engine) invokeLLMLegacy(j *Job) (string, *execResult, error) {
 	if e.cfg.Provider == nil {
 		return "", nil, fmt.Errorf("no provider configured")
 	}
@@ -532,6 +546,106 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		NumTurns: result.NumTurns,
 	}
 	return result.Text, meta, nil
+}
+
+// invokeLLMViaRuntime mirrors invokeLLMLegacy's tier resolution but hands the
+// call to Runtime.Converse. It was introduced in #340 R5d alongside the
+// ConverseRequest passthroughs (Backend / Effort / WriteCapable / MaxTurns /
+// DataDir) so the new surface preserves legacy behaviour one-for-one —
+// including the job-context system prompt + L1/L2/L3 + skill block injection.
+func (e *Engine) invokeLLMViaRuntime(j *Job) (string, *execResult, error) {
+	req := runtime.ConverseRequest{
+		Prompt:  j.Prompt,
+		DataDir: e.cfg.DataDir,
+	}
+
+	// Resolve tier params from tier store.
+	if e.cfg.TierStore != nil {
+		if snap := e.cfg.TierStore.Current(); snap != nil {
+			for _, t := range snap.Tiers {
+				if t.Name != j.Tier {
+					continue
+				}
+				req.Backend = t.Backend
+				if t.Model != "" {
+					req.Model = toAIModelID(t.Model)
+				}
+				if len(t.Tools) > 0 {
+					req.Tools = toolSpecs(t.Tools)
+				}
+				req.WriteCapable = t.WriteCapable
+				req.Effort = t.Effort
+				if t.MaxTurns > 0 {
+					req.MaxTurns = t.MaxTurns
+				}
+				break
+			}
+		}
+	}
+
+	// Job context — mirrors legacy ordering so prompt caching stays stable.
+	jobContext := fmt.Sprintf("You are executing scheduled job %q (ID: %s, schedule: %s).", j.Name, j.ID, j.Schedule)
+	if j.Reason != "" {
+		jobContext += fmt.Sprintf(" Reason this job was created: %s", j.Reason)
+	}
+	if j.Message != "" {
+		jobContext += fmt.Sprintf(" The scheduled message is: %s", j.Message)
+	}
+	req.SystemPrompts = append(req.SystemPrompts, jobContext)
+
+	if e.cfg.ContextDir != "" {
+		req.SystemPrompts = append(req.SystemPrompts, memory.CollectSchedulerPrompts(e.cfg.ContextDir)...)
+	}
+	if len(j.Skills) > 0 && e.cfg.SkillStore != nil {
+		if block := buildSkillBlock(e.cfg.SkillStore, j.Skills); block != "" {
+			req.SystemPrompts = append(req.SystemPrompts, block)
+		}
+	}
+
+	if req.Model == "" {
+		return "", nil, fmt.Errorf("scheduler: no model configured for tier %q (job %s)", j.Tier, j.ID)
+	}
+
+	llmTimeout := j.Timeout
+	if llmTimeout <= 0 {
+		llmTimeout = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), llmTimeout)
+	defer cancel()
+
+	res, err := e.cfg.Runtime.Converse(ctx, req)
+	if err != nil {
+		return "", nil, err
+	}
+
+	meta := &execResult{}
+	if res.Usage != nil {
+		meta.CostUSD = res.Usage.CostUSD
+		meta.Model = res.Usage.Model
+		meta.NumTurns = res.Usage.NumTurns
+	}
+	return res.Text, meta, nil
+}
+
+// toAIModelID is a local adapter that keeps scheduler's imports shallow:
+// the daemon / tier store speaks strings, ai speaks ai.ModelID.
+func toAIModelID(s string) ai.ModelID { return ai.ModelID(s) }
+
+// toolSpecs wraps tier tool names in ai.ToolSpec so Runtime.Converse can
+// forward them through ai.Request.Tools without the scheduler building the
+// whole ToolSpec (description/schema come from the registry later).
+func toolSpecs(names []string) []ai.ToolSpec {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]ai.ToolSpec, 0, len(names))
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		out = append(out, ai.ToolSpec{Name: n})
+	}
+	return out
 }
 
 // SendDailyDigest generates and sends a schedule execution report for the last 24h.

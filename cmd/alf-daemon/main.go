@@ -1149,7 +1149,7 @@ func main() {
 	schedRuntime, err := runtime.New(runtime.Deps{
 		Registry: capRegistry,
 		Memory:   memStore,
-		AI:       aiprovider.NewEngine(cliProvider),
+		AI:       aiprovider.NewRegistryEngine(registry),
 		Sandbox:  sandbox.New(),
 	}, runtime.Options{Tier: sandbox.Tier("direct")})
 	if err != nil {

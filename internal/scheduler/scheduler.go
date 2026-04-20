@@ -16,9 +16,11 @@ import (
 
 // RuntimeInvoker is the narrow surface of runtime.Runtime the scheduler consumes.
 // Kept as a local interface so scheduler tests can fake it without building a
-// full Runtime. Any runtime.Runtime satisfies it. See #340 R5a.
+// full Runtime. Any runtime.Runtime satisfies it. Invoke is the direct-tier
+// bash path (#340 R5a); Converse is the LLM one-shot path (#340 R5d).
 type RuntimeInvoker interface {
 	Invoke(ctx context.Context, capID capability.ID, args runtime.Args) (capability.Output, error)
+	Converse(ctx context.Context, req runtime.ConverseRequest) (runtime.ConverseResult, error)
 }
 
 // Config holds dependencies for the scheduler engine.

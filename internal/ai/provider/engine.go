@@ -67,6 +67,10 @@ func (e *engineAdapter) Run(ctx context.Context, req ai.Request) (<-chan ai.Even
 		Tools:         toolNames(req.Tools),
 		ConvMessages:  history,
 		SystemPrompts: systemPrompts,
+		MaxTurns:      req.MaxTurns,
+		Effort:        req.Effort,
+		WriteCapable:  req.WriteCapable,
+		DataDir:       req.DataDir,
 	}
 
 	out := make(chan ai.Event, 16)

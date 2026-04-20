@@ -697,6 +697,39 @@ func TestConverse_AggregatesTextAndPropagatesUsage(t *testing.T) {
 	}
 }
 
+// TestConverse_ForwardsProviderPassthroughs proves #340 R5d: Backend /
+// Effort / WriteCapable / MaxTurns / DataDir flow from ConverseRequest to
+// ai.Request verbatim. The Runtime does not interpret them; it just passes
+// them to the Engine.
+func TestConverse_ForwardsProviderPassthroughs(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Prompt:       "hi",
+		Backend:      "openrouter",
+		Effort:       "high",
+		WriteCapable: true,
+		MaxTurns:     7,
+		DataDir:      "/data",
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	req := eng.requests[0]
+	if req.Backend != "openrouter" {
+		t.Fatalf("Backend: got %q want openrouter", req.Backend)
+	}
+	if req.Effort != "high" || !req.WriteCapable || req.MaxTurns != 7 || req.DataDir != "/data" {
+		t.Fatalf("passthroughs not forwarded: %+v", req)
+	}
+}
+
 // TestConverse_ForwardsSystemPromptsAndHistory shows Request.SystemPrompts +
 // History land on the ai.Request the engine receives, and the Prompt is
 // appended as the final user message.

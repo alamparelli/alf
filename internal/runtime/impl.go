@@ -227,9 +227,14 @@ func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (Con
 
 	aiReq := ai.Request{
 		Model:         model,
+		Backend:       req.Backend,
 		SystemPrompts: req.SystemPrompts,
 		Messages:      messages,
 		Tools:         req.Tools,
+		MaxTurns:      req.MaxTurns,
+		Effort:        req.Effort,
+		WriteCapable:  req.WriteCapable,
+		DataDir:       req.DataDir,
 		Stream:        true,
 	}
 

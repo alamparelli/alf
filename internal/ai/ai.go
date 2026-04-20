@@ -48,12 +48,24 @@ type ToolSpec struct {
 // skill prompts). They are concatenated with any RoleSystem entries in
 // Messages by the Provider adapter; keeping them separate lets callers build
 // a Request without fabricating synthetic messages. See #340 R5b.
+//
+// Backend/Effort/WriteCapable/MaxTurns/DataDir are provider-shaped passthroughs
+// added in #340 R5d so consumers that previously built provider.Params
+// directly (scheduler) can reach the provider layer via the ai contract
+// without losing tier-level configuration. An Engine implementation that does
+// not care about these fields simply ignores them; the provider adapter
+// maps them into Params.
 type Request struct {
 	Model         ModelID
+	Backend       string
 	SystemPrompts []string
 	Messages      []Message
 	Tools         []ToolSpec
 	MaxTokens     int
+	MaxTurns      int
+	Effort        string
+	WriteCapable  bool
+	DataDir       string
 	Stream        bool
 }
 

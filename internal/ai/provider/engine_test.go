@@ -467,6 +467,42 @@ func TestRun_EventDoneCarriesUsage(t *testing.T) {
 	}
 }
 
+// TestRun_RequestPassesProviderFields pins the #340 R5d passthrough: tier-
+// level Effort / WriteCapable / MaxTurns / DataDir flow from ai.Request to
+// Params without adapter-side filtering. Previously (pre-R5d) these were
+// silently dropped; the scheduler migration relies on them reaching the
+// provider intact.
+func TestRun_RequestPassesProviderFields(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok"}}
+	eng := provider.NewEngine(stub)
+
+	ch, err := eng.Run(context.Background(), ai.Request{
+		Model:        "m",
+		Effort:       "high",
+		WriteCapable: true,
+		MaxTurns:     12,
+		DataDir:      "/var/alf",
+		Messages:     []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	drainEvents(t, ch)
+
+	if got := stub.lastParams.Effort; got != "high" {
+		t.Fatalf("Params.Effort: got %q want high", got)
+	}
+	if !stub.lastParams.WriteCapable {
+		t.Fatal("Params.WriteCapable: got false want true")
+	}
+	if got := stub.lastParams.MaxTurns; got != 12 {
+		t.Fatalf("Params.MaxTurns: got %d want 12", got)
+	}
+	if got := stub.lastParams.DataDir; got != "/var/alf" {
+		t.Fatalf("Params.DataDir: got %q want /var/alf", got)
+	}
+}
+
 // TestRun_EventDoneUsageNilWhenNoResult covers the edge case: Provider
 // returned (nil, nil). EventDone still fires so the Runtime can finalise,
 // but Usage is absent.

@@ -50,6 +50,7 @@ type Event struct {
 	ToolResult *capability.Output // set when Kind == EventToolResult
 	ToolName   string             // set when Kind == EventToolResult
 	Err        error              // set when Kind == EventError
+	Usage      *ai.Usage          // set on EventDone when the engine surfaces usage (#340 R4i)
 }
 
 // Output is the result of a one-shot Invoke (scheduler, button, ...).
@@ -71,6 +72,14 @@ type Runtime interface {
 	// needs "just run the model with this context" without touching a
 	// conversation. See #340 R5c.
 	Converse(ctx context.Context, req ConverseRequest) (ConverseResult, error)
+
+	// ConverseStream mirrors Converse but returns the event stream instead
+	// of aggregating, so consumers that need to surface tokens as they
+	// arrive (CC SSE, Telegram typing indicators, comms.ChatEngine) can
+	// reach the model through Runtime without falling back to
+	// provider.Invoke directly. Semantics match Converse: stateless, no
+	// Memory access, no Capability execution. Added in #340 R4i.
+	ConverseStream(ctx context.Context, req ConverseRequest) (<-chan Event, error)
 }
 
 // ChatRequest is the per-turn input to Runtime.Chat. It carries everything a

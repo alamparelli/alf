@@ -55,6 +55,11 @@ func (s *stubRuntime) Converse(ctx context.Context, req runtime.ConverseRequest)
 	return runtime.ConverseResult{}, errors.New("stubRuntime: Converse not implemented")
 }
 
+func (s *stubRuntime) ConverseStream(ctx context.Context, req runtime.ConverseRequest) (<-chan runtime.Event, error) {
+	// Same rationale as Converse — contract pin only.
+	return nil, errors.New("stubRuntime: ConverseStream not implemented")
+}
+
 // Compile-time check: stubRuntime satisfies runtime.Runtime.
 var _ runtime.Runtime = (*stubRuntime)(nil)
 

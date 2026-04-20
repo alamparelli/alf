@@ -561,6 +561,13 @@ func (f *fakeRuntime) Converse(ctx context.Context, req runtime.ConverseRequest)
 	return f.result, nil
 }
 
+func (f *fakeRuntime) ConverseStream(ctx context.Context, req runtime.ConverseRequest) (<-chan runtime.Event, error) {
+	// Not exercised by R4f/R4g tests — the CC flows migrated so far only
+	// use Converse. The method exists to satisfy the interface; adding
+	// behaviour here is the job of the first test that needs it.
+	return nil, nil
+}
+
 // TestInvokeFollowUp_PrefersRuntimeOverProvider locks the #340 R4f migration:
 // when SetRuntime has been called, invokeFollowUp routes through
 // Runtime.Converse (forwarding tier params + ResumeID) instead of calling

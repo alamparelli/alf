@@ -1148,6 +1148,190 @@ func (f aiStrategyFunc) Run(ctx context.Context, engine ai.Engine, req ai.Reques
 	return f(ctx, engine, req)
 }
 
+// ── ConverseStream (#340 R4i) ───────────────────────────────────────────────
+
+// TestConverseStream_ForwardsTokensAndUsage pins the happy path: every
+// ai.EventToken arrives as a runtime.EventToken, the terminal EventDone
+// carries Usage through, and the channel closes cleanly.
+func TestConverseStream_ForwardsTokensAndUsage(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{
+		{Kind: ai.EventToken, Token: "hel"},
+		{Kind: ai.EventToken, Token: "lo"},
+		{Kind: ai.EventDone, Usage: &ai.Usage{CostUSD: 0.02, Model: "m", NumTurns: 1, SessionID: "s-9"}},
+	}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	ch, err := rt.ConverseStream(context.Background(), runtime.ConverseRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("ConverseStream: %v", err)
+	}
+	var tokens []string
+	var done runtime.Event
+	var sawDone bool
+	for ev := range ch {
+		switch ev.Kind {
+		case runtime.EventToken:
+			tokens = append(tokens, ev.Token)
+		case runtime.EventDone:
+			done = ev
+			sawDone = true
+		case runtime.EventError:
+			t.Fatalf("unexpected EventError: %v", ev.Err)
+		}
+	}
+	if join(tokens) != "hello" {
+		t.Fatalf("tokens: got %q want hello", join(tokens))
+	}
+	if !sawDone {
+		t.Fatal("missing EventDone")
+	}
+	if done.Usage == nil || done.Usage.SessionID != "s-9" || done.Usage.CostUSD != 0.02 {
+		t.Fatalf("Usage not surfaced on EventDone: %+v", done.Usage)
+	}
+}
+
+// TestConverseStream_ForwardsPassthroughs checks the shared builder is
+// wired: Backend / Effort / MaxTurns / ResumeID / SystemPrompts / Tools
+// all land on the ai.Request the engine receives — same contract as
+// Converse, proved independently so future drift is caught.
+func TestConverseStream_ForwardsPassthroughs(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "fallback"})
+
+	ch, err := rt.ConverseStream(context.Background(), runtime.ConverseRequest{
+		Prompt:        "hello",
+		Model:         "override",
+		Backend:       "openrouter",
+		SystemPrompts: []string{"tier-prompt"},
+		Tools:         []ai.ToolSpec{{Name: "bash"}},
+		MaxTurns:      7,
+		Effort:        "high",
+		WriteCapable:  true,
+		DataDir:       "/data",
+		ResumeID:      "sess-stream",
+	})
+	if err != nil {
+		t.Fatalf("ConverseStream: %v", err)
+	}
+	for range ch {
+	}
+	if len(eng.requests) != 1 {
+		t.Fatalf("engine runs: got %d want 1", len(eng.requests))
+	}
+	r := eng.requests[0]
+	if r.Model != "override" || r.Backend != "openrouter" || r.Effort != "high" || r.MaxTurns != 7 || !r.WriteCapable || r.DataDir != "/data" || r.ResumeID != "sess-stream" {
+		t.Errorf("passthroughs drifted: %+v", r)
+	}
+	if len(r.SystemPrompts) != 1 || r.SystemPrompts[0] != "tier-prompt" {
+		t.Errorf("SystemPrompts: %+v", r.SystemPrompts)
+	}
+	if len(r.Tools) != 1 || r.Tools[0].Name != "bash" {
+		t.Errorf("Tools: %+v", r.Tools)
+	}
+}
+
+// TestConverseStream_EventErrorSurfaces proves a mid-stream ai.EventError
+// is forwarded as a terminal runtime.EventError (not swallowed, not
+// followed by a phantom EventDone).
+func TestConverseStream_EventErrorSurfaces(t *testing.T) {
+	boom := errors.New("mid-stream")
+	eng := &fakeEngine{scripts: [][]ai.Event{{
+		{Kind: ai.EventToken, Token: "partial"},
+		{Kind: ai.EventError, Err: boom},
+	}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	ch, err := rt.ConverseStream(context.Background(), runtime.ConverseRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("ConverseStream: %v", err)
+	}
+	var gotErr error
+	var sawDone bool
+	for ev := range ch {
+		if ev.Kind == runtime.EventError {
+			gotErr = ev.Err
+		}
+		if ev.Kind == runtime.EventDone {
+			sawDone = true
+		}
+	}
+	if gotErr == nil || !errors.Is(gotErr, boom) {
+		t.Fatalf("expected wrapped mid-stream error, got: %v", gotErr)
+	}
+	if sawDone {
+		t.Fatal("EventDone must not fire after EventError")
+	}
+}
+
+// TestConverseStream_DropsToolCalls pins the documented translation: the
+// Provider stack owns the tool loop (ToolLoop wrapper), so surfacing
+// ai.EventToolCall at the ConverseStream boundary would encourage double
+// execution. Tool calls must not reach the consumer here.
+func TestConverseStream_DropsToolCalls(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{
+		{Kind: ai.EventToken, Token: "before"},
+		{Kind: ai.EventToolCall, ToolCall: &ai.ToolCall{ID: "x", Name: "bash"}},
+		{Kind: ai.EventToken, Token: "after"},
+		{Kind: ai.EventDone},
+	}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	ch, _ := rt.ConverseStream(context.Background(), runtime.ConverseRequest{Prompt: "hi"})
+	var kinds []runtime.EventKind
+	var tokens []string
+	for ev := range ch {
+		kinds = append(kinds, ev.Kind)
+		if ev.Kind == runtime.EventToken {
+			tokens = append(tokens, ev.Token)
+		}
+	}
+	for _, k := range kinds {
+		if k != runtime.EventToken && k != runtime.EventDone {
+			t.Fatalf("unexpected event kind in stream: %v (kinds=%v)", k, kinds)
+		}
+	}
+	if join(tokens) != "beforeafter" {
+		t.Fatalf("tokens: got %q want beforeafter", join(tokens))
+	}
+}
+
+// TestConverseStream_ValidationErrorsReturnSync proves the constructor-style
+// path: invalid requests return synchronously from ConverseStream (no
+// channel allocated) so callers get a plain error instead of having to
+// drain a goroutine just to learn the Prompt was empty.
+func TestConverseStream_ValidationErrorsReturnSync(t *testing.T) {
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       &fakeEngine{},
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	if ch, err := rt.ConverseStream(context.Background(), runtime.ConverseRequest{}); err == nil || ch != nil {
+		t.Fatal("expected (nil, error) for empty Prompt")
+	}
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 // errEngine always fails on Run.

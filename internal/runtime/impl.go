@@ -219,14 +219,15 @@ func (r *defaultRuntime) runChatLoop(
 	emit(ctx, out, Event{Kind: EventError, Err: fmt.Errorf("runtime.Chat: max iterations (%d) exceeded", r.opts.MaxIterations)})
 }
 
-// Converse runs a stateless, one-shot LLM call. No Memory access, no
-// Capability registry lookup, no Sandbox — the Provider is the sole
-// executor. Caller supplies a model (Options.Model is the fallback),
-// system prompts, the current prompt, and any conversational history.
-// See #340 R5c.
-func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (ConverseResult, error) {
+// prepareConverseStream validates the ConverseRequest, builds the
+// ai.Request, and opens the underlying ai.Event stream (either via a
+// caller-supplied Strategy or the default single-Run path). Shared by
+// Converse (aggregates to a single result) and ConverseStream (forwards
+// events translated into runtime.Event). Error prefixes use the caller's
+// name so surface errors remain unambiguous.
+func (r *defaultRuntime) prepareConverseStream(ctx context.Context, req ConverseRequest, caller string) (<-chan ai.Event, error) {
 	if req.Prompt == "" {
-		return ConverseResult{}, fmt.Errorf("runtime.Converse: Prompt required")
+		return nil, fmt.Errorf("%s: Prompt required", caller)
 	}
 	model := req.Model
 	if model == "" {
@@ -238,7 +239,7 @@ func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (Con
 	// that case: the Strategy owns the resolution inside its scope.
 	// See #340 R5e3.
 	if model == "" && req.Strategy == nil {
-		return ConverseResult{}, fmt.Errorf("runtime.Converse: Model required (none in Request, none in Options)")
+		return nil, fmt.Errorf("%s: Model required (none in Request, none in Options)", caller)
 	}
 
 	messages := make([]ai.Message, 0, len(req.History)+1)
@@ -259,10 +260,6 @@ func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (Con
 		ResumeID:      req.ResumeID,
 	}
 
-	// When the caller provided a Strategy, hand it the Engine and let it
-	// drive the turn — could be a single Run, a retry loop, a multi-agent
-	// orchestrator, anything. Otherwise fall through to the default
-	// single-shot path. See #340 R5e.
 	var (
 		stream <-chan ai.Event
 		err    error
@@ -273,7 +270,20 @@ func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (Con
 		stream, err = r.deps.AI.Run(ctx, aiReq)
 	}
 	if err != nil {
-		return ConverseResult{}, fmt.Errorf("runtime.Converse: ai.Run: %w", err)
+		return nil, fmt.Errorf("%s: ai.Run: %w", caller, err)
+	}
+	return stream, nil
+}
+
+// Converse runs a stateless, one-shot LLM call. No Memory access, no
+// Capability registry lookup, no Sandbox — the Provider is the sole
+// executor. Caller supplies a model (Options.Model is the fallback),
+// system prompts, the current prompt, and any conversational history.
+// See #340 R5c.
+func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (ConverseResult, error) {
+	stream, err := r.prepareConverseStream(ctx, req, "runtime.Converse")
+	if err != nil {
+		return ConverseResult{}, err
 	}
 
 	var (
@@ -299,6 +309,54 @@ func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (Con
 		return ConverseResult{}, fmt.Errorf("runtime.Converse: engine closed stream without EventDone")
 	}
 	return ConverseResult{Text: text.String(), Usage: usage}, nil
+}
+
+// ConverseStream mirrors Converse but forwards the ai.Event stream as
+// runtime.Event to the caller instead of aggregating. Consumers that need
+// to react to tokens as they arrive (SSE bridge, Telegram typing) reach
+// the Provider via this surface; semantics otherwise match Converse —
+// stateless, no Memory access, no Capability execution. See #340 R4i.
+//
+// Translation:
+//   - ai.EventToken → runtime.EventToken (Token forwarded).
+//   - ai.EventDone  → runtime.EventDone  (Usage attached when surfaced).
+//   - ai.EventError → runtime.EventError (Err forwarded).
+//   - ai.EventToolCall is ignored: the Provider stack handles tools via
+//     its internal ToolLoop. Surfacing them here would encourage
+//     consumers to double-execute.
+//
+// The returned channel is closed when the engine stream closes or ctx is
+// cancelled. A stream that closes without an ai.EventDone under a
+// non-cancelled ctx surfaces as an EventError.
+func (r *defaultRuntime) ConverseStream(ctx context.Context, req ConverseRequest) (<-chan Event, error) {
+	stream, err := r.prepareConverseStream(ctx, req, "runtime.ConverseStream")
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(chan Event, 16)
+	go func() {
+		defer close(out)
+		var sawDone bool
+		for ev := range stream {
+			switch ev.Kind {
+			case ai.EventToken:
+				if !emit(ctx, out, Event{Kind: EventToken, Token: ev.Token}) {
+					return
+				}
+			case ai.EventError:
+				emit(ctx, out, Event{Kind: EventError, Err: ev.Err})
+				return
+			case ai.EventDone:
+				sawDone = true
+				emit(ctx, out, Event{Kind: EventDone, Usage: ev.Usage})
+			}
+		}
+		if !sawDone && ctx.Err() == nil {
+			emit(ctx, out, Event{Kind: EventError, Err: fmt.Errorf("runtime.ConverseStream: engine closed stream without EventDone")})
+		}
+	}()
+	return out, nil
 }
 
 // Invoke resolves a Capability, derives its Policy under the Runtime tier,

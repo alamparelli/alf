@@ -761,17 +761,15 @@ func main() {
 		SummarizationKeepLast:  cfg.EffectiveSummarizationKeepLast(),
 	})
 	// Initialize all optional dependencies in one place (issue #91).
-	// Reader path: memory.Store.Search (via fan-out across scopes).
-	// Writer path for /api/memory/ingest: still on *memstore.Store so the
-	// dual-write shim (C1) mirrors UI-ingested facts into documents too.
-	// Writer migration to memory.Store.Index is sub-ticket C4.
+	// Reader path: memory.Store.Search via fan-out across scopes (#337c2).
+	// Writer path for /api/memory/ingest: memory.Store.Index via the ingest
+	// adapter (#337c4a). memstore's dual-write shim still fires for legacy
+	// write paths (extractor/consolidator/socket-server) until they retire.
 	var recaller cc.MemoryRecaller
 	var memRecallStore cc.MemoryStorer
 	if cfg.EffectiveMemoryEnabled() {
 		recaller = &memoryCCRecaller{store: memStore}
-	}
-	if memDB != nil {
-		memRecallStore = memDB
+		memRecallStore = &memoryIngestAdapter{store: memStore}
 	}
 	chatService.Init(cc.ChatServiceOpts{
 		Registry:       registry,

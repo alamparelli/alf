@@ -218,7 +218,7 @@ EOF
 chmod +x /path/to/alf/data/tools/my-tool
 ```
 
-User tools are auto-discovered at boot and listed in Claude's toolbox. Claude runs them via the Bash tool.
+User tools are auto-discovered at boot and exposed to whichever backend (CLI / Codex / API / Ollama) is serving the current tier. The model invokes them through the standard tool-call protocol of its backend.
 
 ### System tools (image rebuild)
 
@@ -235,7 +235,7 @@ System tools are Go binaries baked into the Docker image at `/opt/alf/tools/`. U
    ```
 4. The daemon symlinks system tools into `data/tools.d/` at startup
 
-Existing system tools: `extract-video` (media processing), `memory-tools` (semantic memory), `schedule-tools` (cron jobs), `signal` (Telegram messaging from Claude sessions), `system-tools` (multi-call binary bridging CLI to daemon API), `embed-server` (embedding HTTP server), `nettrack-helper` (conntrack event logger).
+Existing system tools: `extract-video` (media processing), `memory-tools` (semantic memory), `schedule-tools` (cron jobs), `signal` (Telegram messaging from in-sandbox LLM sessions), `system-tools` (multi-call binary bridging CLI to daemon API), `embed-server` (embedding HTTP server), `nettrack-helper` (conntrack event logger).
 
 ## AI-assisted development
 

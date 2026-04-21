@@ -2,20 +2,23 @@
 
 A personal AI assistant that lives in your Telegram chats. Built in Go. Runs on your hardware.
 
-ALF connects Claude to your messaging, wraps it with semantic long-term memory, configurable response tiers, voice transcription, and a web dashboard - all in a single Docker container you control.
+ALF connects an LLM of your choice to your messaging, wraps it with semantic long-term memory, configurable response tiers, voice transcription, and a web dashboard — all in a single Docker container you control.
 
 ## Why ALF
 
 Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies. ALF is different:
 
-- **Go binary, zero JS runtime** - single static binary, minimal attack surface, no `node_modules` supply chain
-- **Semantic memory** - Go-native ONNX embeddings (sqlite-vec + FTS5) for real long-term recall, not just context window tricks
-- **Persistent classifier** - a long-lived Claude process handles message routing in ~0ms instead of spawning a new process per message
-- **Tier system** - configurable response tiers (model, tools, effort, read/write access) routed by an LLM classifier
-- **Defense-in-depth security** - Non-root daemon (uid 1001), LLM subprocess isolated as uid 1000 with zero capabilities, read-only config, restricted tool execution
-- **Multi-backend** - Claude CLI, OpenRouter, OpenAI, Ollama, or any OpenAI-compatible API. Mix backends per tier
-- **No API costs** - runs on your Claude subscription (Pro/Max/Team), not pay-per-token API calls
-- **Self-hosted** - your hardware, your data, your rules. No cloud dependency beyond your Claude account
+- **Go binary, zero JS runtime** — single static binary, minimal attack surface, no `node_modules` supply chain
+- **Semantic memory** — Go-native ONNX embeddings (sqlite-vec + FTS5) for real long-term recall, not just context window tricks
+- **Persistent classifier** — a long-lived classifier process handles message routing in ~0ms instead of spawning a new one per message
+- **Tier system** — configurable response tiers (model, tools, effort, read/write access) routed by an LLM classifier
+- **Defense-in-depth security** — non-root daemon (uid 1001), LLM subprocess isolated as uid 1000 with zero capabilities, read-only config, restricted tool execution
+- **Backend-agnostic** — three backend families, mixable per tier:
+  - **CLI**: Claude Code (Claude Pro/Max subscription) or OpenAI Codex (ChatGPT Plus + GPT-5-codex)
+  - **API**: any OpenAI-compatible HTTP API (OpenRouter for 200+ models, OpenAI, Groq, Anthropic API, …)
+  - **Local**: Ollama (any local model, no API key)
+- **Subscription-friendly** — run on a flat-rate subscription (Claude Pro/Max, ChatGPT Plus) instead of pay-per-token, or go fully local with Ollama
+- **Self-hosted** — your hardware, your data, your rules. No cloud dependency beyond whichever backend you configure
 
 ## How it works
 
@@ -49,7 +52,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the contributor-facing re
 - Docker and Docker Compose
 - 2 GB RAM minimum
 - *Optional:* a [Telegram bot token](https://core.telegram.org/bots#how-do-i-create-a-bot) (via @BotFather) + your chat ID
-- *Recommended:* a Claude, Codex, or OpenAI-compatible API subscription (configured via the Setup Wizard)
+- *One* of the supported backends: a Claude Pro/Max subscription (for the Claude Code CLI backend), a ChatGPT Plus subscription (for the Codex CLI backend), any OpenAI-compatible API key (OpenRouter, OpenAI, Groq, …), or a local Ollama install
 
 ### Install
 
@@ -68,14 +71,16 @@ The interactive wizard walks you through:
 2. Configuring Telegram credentials
 3. Setting up dashboard access (HTTP or HTTPS with Let's Encrypt)
 4. Starting the container
-6. Authenticating Claude
+5. Authenticating your chosen backend (Claude CLI, Codex CLI, or API key)
 
-After the container is running, the Control Center **Setup Wizard** guides you through backend selection (Claude CLI, OpenRouter, OpenAI, Ollama), tier presets, and optional Telegram configuration - all from the browser.
+After the container is running, the Control Center **Setup Wizard** guides you through backend selection (CLI, Codex, API / OpenRouter / OpenAI / Ollama / …), tier presets, and optional Telegram configuration — all from the browser.
 
 ### After setup
 
 ```sh
-alf login     # Authenticate Claude inside the container
+alf login     # Authenticate the Claude CLI backend inside the container
+              # (only needed if you picked the "cli" backend — API / Codex / Ollama
+              #  backends authenticate via keys stored in the vault)
 alf status    # Check container health
 alf logs      # Tail container logs
 ```
@@ -105,18 +110,25 @@ Define response tiers with different capabilities:
 
 | Property | What it controls |
 |----------|-----------------|
-| `model` | Claude model (haiku, sonnet, opus) |
-| `effort` | Thinking effort (low, medium, high) |
+| `backend` | Which backend serves this tier (`cli`, `codex`, or a configured API backend) |
+| `model` | Model ID for the chosen backend (e.g. `sonnet`, `gpt-4o`, `llama3`) |
+| `effort` | Thinking / reasoning effort (`low`, `medium`, `high`) |
 | `tools` | Available tools for the session |
-| `write_capable` | Whether Claude can modify files |
+| `write_capable` | Whether the model is allowed to modify files |
 | `max_turns` | Agentic loop depth |
 | `instant` | Router responds directly (no second LLM call) |
 
-The LLM classifier reads your message and picks the right tier. Greetings get instant haiku responses. Complex tasks get multi-turn opus sessions with full tool access.
+The LLM classifier reads your message and picks the right tier. Greetings get instant cheap-model responses. Complex tasks get multi-turn deep-model sessions with full tool access.
 
 ### Multi-backend support
 
-ALF isn't limited to Claude. Connect OpenRouter (200+ models), OpenAI (GPT-4), Ollama (local models), or any OpenAI-compatible API. Mix backends in the same tier configuration - route simple messages to a free model and complex tasks to Claude. Conversation context flows seamlessly across backend switches.
+ALF ships with three backend families and you can mix them per tier:
+
+- **CLI backend** — routes through a locally-installed CLI. Two providers supported: **Claude Code** (uses your Claude Pro / Max / Team subscription, flat rate) and **OpenAI Codex** (uses your ChatGPT Plus subscription with `codex exec` for GPT-5-codex).
+- **API backend** — any OpenAI-compatible HTTP endpoint. Pre-configured presets for **OpenRouter** (200+ models via a single key), **OpenAI** (GPT-4o / o1 / o3 / …), **Anthropic API** (direct Claude API), and you can register any custom `base_url`.
+- **Local backend** — **Ollama**. Any locally-hosted model, zero API key, zero cost.
+
+Conversation context flows seamlessly across backend switches — a tier running on Ollama and another running on Claude CLI can share the same conversation history. See [backends documentation](internal/controlcenter/docs/backends.md) for the full configuration reference.
 
 ### Voice transcription
 
@@ -124,10 +136,10 @@ Send a voice message on Telegram. ALF transcribes it via the whisper-service con
 
 ### Media processing
 
-- **Images** - forwarded to Claude's vision capabilities
-- **Videos/GIFs** - frame extraction into contact sheets + audio transcription
-- **PDFs** - text extraction via pdftotext
-- **Documents** - passed through to Claude with appropriate context
+- **Images** — forwarded to the model's vision capabilities (when the backend supports it)
+- **Videos/GIFs** — frame extraction into contact sheets + audio transcription
+- **PDFs** — text extraction via pdftotext
+- **Documents** — passed through to the model with appropriate context
 
 ### Skills & tools
 
@@ -201,7 +213,7 @@ alf start         Start the container
 alf stop          Stop the container
 alf restart       Restart the container
 alf upgrade       Pull latest image and restart (update alias works too)
-alf login         Authenticate Claude inside the container
+alf login         Authenticate the Claude CLI backend inside the container (only for "cli" backend; API/Codex/Ollama authenticate via the vault)
 alf status        Show container status and versions
 alf logs          Tail container logs
 alf secret        Manage secrets (list, set, remove)
@@ -257,7 +269,7 @@ cosign verify-attestation ghcr.io/alamparelli/alf:<version> \
 - **OS**: Linux or macOS (Docker required)
 - **RAM**: 512 MB minimum (2 GB recommended for voice transcription)
 - **Disk**: ~800 MB for the Docker image + ~600 MB on first voice message (Whisper model)
-- **Network**: outbound HTTPS to Telegram API and Claude API
+- **Network**: outbound HTTPS to Telegram + the API endpoint(s) of the backend(s) you've configured (Anthropic, OpenAI, OpenRouter, Ollama host, …)
 
 ## Contributing
 

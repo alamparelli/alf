@@ -37,19 +37,18 @@ func CheckBoundary(dataDir, path string) (string, error) {
 	}
 
 	// Resolve the target path. For new files that don't exist yet,
-	// resolve the parent directory instead.
+	// walk ancestors until we find one that does exist and
+	// EvalSymlinks *that* — otherwise a symlink sitting on the
+	// existing prefix (e.g. /workspace/link -> /etc) is never resolved
+	// and a write through a deep non-existent tail escapes the
+	// workspace (see #385-7).
 	realPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return "", fmt.Errorf("cannot resolve path: %w", err)
 		}
-		// File doesn't exist yet - resolve parent dir + keep the filename.
-		parentReal, err2 := filepath.EvalSymlinks(filepath.Dir(path))
-		if err2 != nil {
-			// Parent also doesn't exist, fall back to lexical check.
-			parentReal = filepath.Clean(filepath.Dir(path))
-		}
-		realPath = filepath.Join(parentReal, filepath.Base(path))
+		existingReal, tail := resolveExistingAncestor(path)
+		realPath = filepath.Join(append([]string{existingReal}, tail...)...)
 	}
 
 	rel, err := filepath.Rel(realDataDir, realPath)
@@ -66,4 +65,38 @@ func CheckBoundary(dataDir, path string) (string, error) {
 	}
 
 	return realPath, nil
+}
+
+// resolveExistingAncestor walks path's ancestors until one exists,
+// EvalSymlinks that (so any symlink on the existing prefix is
+// resolved), and returns (realExistingPath, tailSegments) where
+// tailSegments is the non-existent suffix in original order.
+//
+// Centralising this lets CheckBoundary treat "path doesn't exist yet"
+// safely: a symlink further up the chain can no longer smuggle the
+// target outside the boundary (#385-7).
+func resolveExistingAncestor(path string) (string, []string) {
+	cursor := filepath.Clean(path)
+	var tail []string
+	for {
+		if _, err := os.Lstat(cursor); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			// Permission denied or similar — fall back to lexical.
+			return filepath.Clean(path), nil
+		}
+		parent := filepath.Dir(cursor)
+		if parent == cursor {
+			// Reached filesystem root with nothing existing — fall back
+			// to lexical resolution of the full path.
+			return filepath.Clean(path), nil
+		}
+		tail = append([]string{filepath.Base(cursor)}, tail...)
+		cursor = parent
+	}
+	real, err := filepath.EvalSymlinks(cursor)
+	if err != nil {
+		real = filepath.Clean(cursor)
+	}
+	return real, tail
 }

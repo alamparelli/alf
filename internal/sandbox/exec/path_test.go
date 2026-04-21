@@ -148,6 +148,56 @@ func TestCheckBoundary_SymlinkEscape(t *testing.T) {
 	}
 }
 
+// Regression guard for #385-7: a symlink sitting on the existing
+// prefix of a deep non-existent path must NOT be bypassed by the
+// "parent doesn't exist either, fall back to lexical" branch. Before
+// the fix CheckBoundary would accept the path even though a future
+// write lands outside the workspace.
+func TestCheckBoundary_SymlinkEscape_DeepNonExistent(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+
+	// /workspace/link -> /outside (existing directory).
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deep non-existent path *through* the symlink: neither
+	// "deep/new/file.txt" nor "deep/new" exist. Lstat on each ancestor
+	// fails until we hit /workspace/link itself, which exists and is a
+	// symlink out of the workspace. resolveExistingAncestor must
+	// collapse that symlink before the boundary check.
+	probe := filepath.Join(dir, "link", "deep", "new", "file.txt")
+
+	_, err := CheckBoundary(dir, probe)
+	if err == nil {
+		t.Fatal("expected error: symlink on existing prefix escapes boundary even though tail is non-existent")
+	}
+}
+
+// A benign deep non-existent path inside the workspace (no symlinks)
+// must still be accepted — the fix should not break legitimate
+// "create a new file three directories deep" calls.
+func TestCheckBoundary_DeepNonExistent_Inside(t *testing.T) {
+	dir := t.TempDir()
+	probe := filepath.Join(dir, "new-subdir", "deeper", "file.txt")
+
+	path, err := CheckBoundary(dir, probe)
+	if err != nil {
+		t.Fatalf("expected success for deep new path inside workspace, got %v", err)
+	}
+	if !strings.HasPrefix(path, dir) {
+		// EvalSymlinks on macOS may canonicalize /var/folders/...  to
+		// /private/var/folders/..., so compare to the resolved dataDir
+		// root instead.
+		realDir, _ := filepath.EvalSymlinks(dir)
+		if !strings.HasPrefix(path, realDir) {
+			t.Errorf("resolved path %q does not sit under %q", path, realDir)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // shellQuote tests
 // ---------------------------------------------------------------------------

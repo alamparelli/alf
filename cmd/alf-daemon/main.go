@@ -913,6 +913,9 @@ func main() {
 	if sharedRuntime != nil && chatService != nil {
 		chatService.SetRuntime(sharedRuntime)
 	}
+	if sharedRuntime != nil && commEngine != nil {
+		commEngine.SetRuntime(sharedRuntime)
+	}
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {

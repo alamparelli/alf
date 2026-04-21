@@ -6,10 +6,11 @@ import (
 
 	"context"
 
-	agents "github.com/alamparelli/alf/internal/runtime/agents"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
-	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/runtime"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/session"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
@@ -36,6 +37,12 @@ type ChatEngine struct {
 	Recaller     MemoryRecaller
 	ToolRegistry *tooling.Registry
 	ToolExecutor *tooling.Executor
+
+	// Runtime is the unified orchestrator surface (#340 R4j0). May be nil
+	// during early daemon boot or in tests; call sites must fall back to
+	// the legacy provider path when nil. Populated by SetRuntime once
+	// cmd/alf-daemon constructs the shared Runtime.
+	Runtime runtime.Runtime
 
 	// Injected functions
 	ClassifyFull   ClassifyFullFunc
@@ -79,6 +86,7 @@ func NewEngine(cfg EngineConfig) *ChatEngine {
 		Recaller:       cfg.Recaller,
 		ToolRegistry:   cfg.ToolRegistry,
 		ToolExecutor:   cfg.ToolExecutor,
+		Runtime:        cfg.Runtime,
 		ClassifyFull:   cfg.ClassifyFull,
 		ResolveModel:   cfg.ResolveModel,
 		BackendConfigs: cfg.BackendConfigs,
@@ -108,6 +116,11 @@ type EngineConfig struct {
 	ToolRegistry *tooling.Registry
 	ToolExecutor *tooling.Executor
 
+	// Runtime is optional at config time; the daemon wires it post-hoc via
+	// ChatEngine.SetRuntime once the shared Runtime is built. Included here
+	// so test rigs can inject a fake directly via NewEngine.
+	Runtime runtime.Runtime
+
 	ClassifyFull   ClassifyFullFunc
 	ResolveModel   func(short string) string
 	BackendConfigs func() map[string]BackendConfig
@@ -116,6 +129,15 @@ type EngineConfig struct {
 	SummarizationEnabled   bool
 	SummarizationThreshold int
 	SummarizationKeepLast  int
+}
+
+// SetRuntime installs the unified runtime.Runtime after construction.
+// Called by cmd/alf-daemon once the shared Runtime is built (it depends on
+// the capability registry which is populated after NewEngine). #340 R4j0.
+func (e *ChatEngine) SetRuntime(rt runtime.Runtime) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Runtime = rt
 }
 
 // RegisterAdapter adds a channel adapter to the engine.

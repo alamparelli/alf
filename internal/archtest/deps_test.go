@@ -54,6 +54,51 @@ var leafFoundation = map[string]struct{}{
 	"internal/sandbox":    {},
 }
 
+// consumerLeafExceptions whitelists legitimate direct leaf imports with a
+// one-line justification. The rule "consumers import runtime, not leaves"
+// is architecturally sound for *orchestration*, but the leaves also expose
+// contract types (ai.ModelID, capability.Manifest, sandbox.PermissionSet,
+// memory.Document) that consumers legitimately need to:
+//
+//   - Build runtime requests (scheduler → ai.ModelID for ConverseRequest)
+//   - Implement foundation interfaces (scheduler.CommandCapability →
+//     capability.Capability)
+//   - Validate inputs against the foundation schema (marketplace →
+//     sandbox.ValidatePermissions)
+//   - Consume pure helpers (controlcenter → ai.ResolveModel)
+//
+// Every entry needs a short reason; adding a new one is a deliberate
+// architectural decision and should be reviewed like any other PR change.
+// See #340 R6.
+var consumerLeafExceptions = map[string]map[string]string{
+	"internal/scheduler": {
+		"internal/ai":         "ai.ModelID/Strategy/ToolSpec to build runtime.ConverseRequest",
+		"internal/capability": "scheduler.CommandCapability implements capability.Capability",
+		"internal/memory":     "memory.CollectSchedulerPrompts — disk-read utility, not orchestration",
+	},
+	"internal/marketplace": {
+		"internal/capability": "marketplace.appCapability adapter implements capability.Capability",
+		"internal/sandbox":    "sandbox.ValidatePermissions / UntrustedMaxPermissions — schema validation",
+	},
+	"internal/tooling": {
+		"internal/capability": "tooling.nativeCapability adapter implements capability.Capability",
+	},
+	"internal/skills": {
+		"internal/capability": "skills.skillCapability adapter implements capability.Capability",
+	},
+	"internal/comms": {
+		"internal/ai":     "ai.ModelID/Message/ToolSpec/MediaEntry to build runtime.ConverseRequest in runtime_invoke.go (#340 R4j3)",
+		"internal/memory": "conversation history + pref store — state layer below Runtime orchestration",
+	},
+	"internal/controlcenter": {
+		"internal/ai":     "ai.ModelID / ai.ResolveModel / ai.ToolSpec — contract types + pure helper",
+		"internal/memory": "conversation + doc reads for UI rendering (handler_chat*, handler_memory*)",
+	},
+	"internal/memstore": {
+		"internal/memory": "memstore extends the memory block (extractor / consolidator / embedder)",
+	},
+}
+
 type pkgInfo struct {
 	ImportPath string
 	Imports    []string
@@ -89,13 +134,17 @@ func TestFoundationDependencyRules(t *testing.T) {
 	}
 }
 
-// TestConsumerDependencyRules reports cases where a consumer (any internal/
-// package outside the five foundation blocks) imports a leaf foundation
-// package directly. Target state: consumers go through internal/runtime.
+// TestConsumerDependencyRules enforces that consumers (any internal/
+// package outside the five foundation blocks) reach foundation *behaviour*
+// through internal/runtime, not through direct leaf imports.
 //
-// INFORMATIONAL during milestone 0.7.9: violations are reported via t.Log.
-// Flip to t.Errorf at the end of Step 4 (#340) once Runtime is written and
-// consumers have been migrated.
+// Direct leaf imports are allowed ONLY when listed in consumerLeafExceptions
+// with a justification (contract types, interface implementation, pure
+// helpers). Any unjustified direct leaf import fails the test.
+//
+// This test was INFORMATIONAL during milestone 0.7.9 (#334) while Steps 1–4
+// migrated consumers onto Runtime. It flips to enforcing in #340 R6 after
+// R4j landed and the remaining leaf imports were audited and classified.
 func TestConsumerDependencyRules(t *testing.T) {
 	pkgs, err := listPackages(t)
 	if err != nil {
@@ -103,7 +152,17 @@ func TestConsumerDependencyRules(t *testing.T) {
 		return
 	}
 
-	consumerViolations := 0
+	// Track which exceptions are actually exercised. A stale exception
+	// (consumer no longer imports a leaf) is a yellow flag — remove it so
+	// the allowlist reflects reality.
+	used := make(map[string]map[string]bool, len(consumerLeafExceptions))
+	for consumer, exc := range consumerLeafExceptions {
+		used[consumer] = make(map[string]bool, len(exc))
+		for leaf := range exc {
+			used[consumer][leaf] = false
+		}
+	}
+
 	for _, p := range pkgs {
 		rel := strings.TrimPrefix(p.ImportPath, modulePrefix)
 		if !strings.HasPrefix(rel, "internal/") {
@@ -119,15 +178,44 @@ func TestConsumerDependencyRules(t *testing.T) {
 		}
 		for _, imp := range p.Imports {
 			impRel := strings.TrimPrefix(imp, modulePrefix)
-			if _, leaf := leafFoundation[impRel]; leaf {
-				t.Logf("VIOLATION (consumer direct leaf import): %s imports %s (should import internal/runtime)", rel, impRel)
-				consumerViolations++
+			if _, leaf := leafFoundation[impRel]; !leaf {
+				continue
 			}
+			// An exception on a consumer covers every sub-package: if
+			// internal/comms is allowed to import internal/memory, then
+			// internal/comms/sub is implicitly covered too (it would not
+			// be called a separate consumer by the intent of the rule).
+			consumerRoot := topLevelConsumer(rel)
+			if justification, ok := consumerLeafExceptions[consumerRoot][impRel]; ok {
+				used[consumerRoot][impRel] = true
+				t.Logf("ALLOWED (justified): %s imports %s — %s", rel, impRel, justification)
+				continue
+			}
+			t.Errorf("VIOLATION: %s imports %s — consumers must import internal/runtime instead. If this import is a legitimate contract/type/helper, add an entry to consumerLeafExceptions with justification.", rel, impRel)
 		}
 	}
 
-	t.Logf("archtest summary: consumerViolations=%d pkgsScanned=%d", consumerViolations, len(pkgs))
-	t.Log("consumer rule is INFORMATIONAL until Step 4 (#340) lands runtime")
+	// Report unused exceptions. Not a hard failure (a package may be
+	// temporarily deleted), but visible so reviewers can prune.
+	for consumer, seen := range used {
+		for leaf, wasSeen := range seen {
+			if !wasSeen {
+				t.Logf("STALE EXCEPTION (not exercised): %s → %s — consider removing from consumerLeafExceptions", consumer, leaf)
+			}
+		}
+	}
+}
+
+// topLevelConsumer maps a nested consumer path to its top-level package. For
+// example "internal/comms/sub" → "internal/comms". Exceptions are keyed on
+// top-level consumers so internal re-structuring does not silently void an
+// exception.
+func topLevelConsumer(rel string) string {
+	rest := strings.TrimPrefix(rel, "internal/")
+	if i := strings.Index(rest, "/"); i >= 0 {
+		return "internal/" + rest[:i]
+	}
+	return rel
 }
 
 // isFoundationChild returns true for packages nested inside a foundation

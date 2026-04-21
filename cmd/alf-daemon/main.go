@@ -22,7 +22,7 @@ import (
 	"github.com/alamparelli/alf/internal/comms"
 	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/marketplace"
-	"github.com/alamparelli/alf/internal/secrets"
+	"github.com/alamparelli/alf/internal/envsecrets"
 	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/eventlog"
@@ -410,7 +410,7 @@ func main() {
 
 	// Voice transcriber (HTTP client to whisper-service container).
 	whisperURL := os.Getenv("WHISPER_URL")
-	whisperSecret := secrets.ReadSecret("WHISPER_SHARED_SECRET")
+	whisperSecret := envsecrets.ReadSecret("WHISPER_SHARED_SECRET")
 	var transcriber *voice.Transcriber
 	if whisperURL != "" && whisperSecret != "" {
 		instanceID, _ := os.Hostname()
@@ -2256,7 +2256,7 @@ func resolveEmbedder(tierStore cc.TierStore) memory.Embedder {
 	// embed-server token map. Docker hostnames change on every container restart,
 	// which would leak slots and eventually hit the 50-instance cap.
 	const embedInstanceID = "alf-daemon"
-	secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
+	secret := envsecrets.ReadSecret("EMBED_SHARED_SECRET")
 
 	if tc := tierStore.Current(); tc != nil {
 		// 1. New: memory.embedding config.

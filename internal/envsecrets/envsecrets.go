@@ -1,4 +1,7 @@
-package secrets
+// Package envsecrets reads sensitive configuration from environment variables,
+// with optional _FILE indirection for Docker / Kubernetes secret mounts.
+// Not to be confused with internal/sandbox/secrets (the per-app vault).
+package envsecrets
 
 import (
 	"os"

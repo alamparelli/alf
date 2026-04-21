@@ -14,7 +14,7 @@ import (
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
-	"github.com/alamparelli/alf/internal/secrets"
+	"github.com/alamparelli/alf/internal/envsecrets"
 	"github.com/alamparelli/alf/internal/tooling"
 	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
@@ -31,7 +31,7 @@ func readAuthToken() string {
 		}
 	}
 	// Fallback: Docker secret (for backwards compatibility / migration).
-	return secrets.ReadSecret("CC_AUTH_TOKEN")
+	return envsecrets.ReadSecret("CC_AUTH_TOKEN")
 }
 
 // vaultPassword reads the master password from the persisted password file

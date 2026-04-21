@@ -176,6 +176,8 @@ func HandlerFactory(deps Deps) Handlers {
 		Reader: deps.LogReader,
 	})
 
+	mux.Handle("/api/models/claude", &ClaudeModelsHandler{})
+
 	mux.Handle("/api/tiers", &TiersHandler{
 		TierStore:    deps.TierStore,
 		Notifier:     deps.Notifier,

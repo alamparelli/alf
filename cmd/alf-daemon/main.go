@@ -337,6 +337,14 @@ func main() {
 		log.Printf("ERROR: failed to load tiers: %v - using defaults (your tiers.json edits are IGNORED)", err)
 	}
 
+	// Load Claude models allowlist (user-editable, feeds tier-form dropdown
+	// and validator). Falls back to embedded default when file absent/empty.
+	claudeModelsStore := cc.NewFileClaudeModelsStore(cc.ClaudeModelsPath(configDir))
+	if err := claudeModelsStore.Reload(); err != nil {
+		log.Printf("WARN: failed to load claude_models.txt: %v — using embedded default", err)
+	}
+	cc.SetClaudeModelsStore(claudeModelsStore)
+
 	// Load skill catalog: system → bundled copy → user (later overrides earlier).
 	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills.d"), filepath.Join(dataDir, "skills"))
 
@@ -1556,6 +1564,18 @@ func main() {
 				if git != nil {
 					git.Commit("tools updated via CC")
 				}
+			case cc.ReloadClaudeModels:
+				if err := claudeModelsStore.Reload(); err != nil {
+					log.Printf("ERROR: claude_models reload failed: %v", err)
+				} else {
+					log.Printf("claude_models reloaded (%d entries)", len(claudeModelsStore.Current()))
+				}
+				if eventBroker != nil {
+					eventBroker.Emit(cc.EventClaudeModels)
+				}
+				if git != nil {
+					git.Commit("claude_models updated via CC")
+				}
 			}
 		}
 	}
@@ -1675,6 +1695,15 @@ func main() {
 					fwProxy.Reload(newFWCfg)
 				} else {
 					log.Printf("firewall reload error: %v", err)
+				}
+			case cc.ReloadClaudeModels:
+				if err := claudeModelsStore.Reload(); err != nil {
+					log.Printf("ERROR: claude_models reload failed: %v", err)
+				} else {
+					log.Printf("claude_models reloaded (%d entries)", len(claudeModelsStore.Current()))
+				}
+				if eventBroker != nil {
+					eventBroker.Emit(cc.EventClaudeModels)
 				}
 			}
 		default:

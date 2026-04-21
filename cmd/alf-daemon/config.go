@@ -245,6 +245,7 @@ func watchConfigFiles(configDir string, dataDir string, tiersPathFn func() strin
 		{filepath.Join(configDir, "config.json"), cc.ReloadConfig, false},
 		{filepath.Join(configDir, "firewall.json"), cc.ReloadFirewall, false},
 		{filepath.Join(dataDir, "agents", "teams"), cc.ReloadAgents, true},
+		{cc.ClaudeModelsPath(configDir), cc.ReloadClaudeModels, false},
 	}
 
 	modTimes := make(map[string]time.Time)

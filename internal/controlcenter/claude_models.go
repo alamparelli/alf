@@ -106,6 +106,11 @@ func SetClaudeModelsStore(s *ClaudeModelsStore) {
 	globalClaudeModelsStore.Store(s)
 }
 
+// GetClaudeModelsStore returns the process-wide store, or nil if unset.
+func GetClaudeModelsStore() *ClaudeModelsStore {
+	return globalClaudeModelsStore.Load()
+}
+
 // IsValidClaudeModel reports whether model is a recognised Claude model
 // identifier for cli-backend tier configuration. It accepts:
 //   - short aliases that resolve via internal/ai.ResolveModel (haiku,

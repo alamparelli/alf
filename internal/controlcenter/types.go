@@ -392,6 +392,7 @@ const (
 	ReloadSkills
 	ReloadAgents
 	ReloadFirewall
+	ReloadClaudeModels
 )
 
 // Stats tracks daemon runtime metrics. Safe for concurrent use.

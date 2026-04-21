@@ -2286,7 +2286,6 @@ func refreshTelegramCommands(tg *tgclient.Client, tierStore cc.TierStore) {
 		{Command: "clear", Description: "Clear and start a new session"},
 		{Command: "help", Description: "Show available commands"},
 		{Command: "skills", Description: "List active skills"},
-		{Command: "bash", Description: "Execute a bash command"},
 		{Command: "jobs", Description: "List running agent jobs"},
 		{Command: "cancel", Description: "Cancel all running jobs"},
 		{Command: "login", Description: "Get a Control Center login link"},

@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -230,7 +229,6 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 			"/resume - Continue after a turn limit hit\n" +
 			"/skills - List active skills (/skills clear to reset)\n" +
 			"/tool - Manage quarantined tools (keep/revert)\n" +
-			"/bash - Execute a bash command directly\n" +
 			"/jobs - List running agent jobs\n" +
 			"/cancel - Cancel all running agent jobs\n" +
 			"/restart - Restart the ALF daemon\n" +
@@ -249,17 +247,6 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 		}
 		response := cmdToolTG(engine, channelID, arg)
 		tg.SendHTML(msg.Chat.ID, response)
-		return true
-	case "/bash":
-		if !allowedChatIDs[msg.Chat.ID] {
-			return true
-		}
-		parts := strings.SplitN(msg.Text, " ", 2)
-		if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
-			tg.SendHTML(msg.Chat.ID, "Usage: <code>/bash &lt;command&gt;</code>")
-			return true
-		}
-		go execBashCommand(tg, msg.Chat.ID, strings.TrimSpace(parts[1]))
 		return true
 	}
 	return false
@@ -590,36 +577,3 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 	}
 }
 
-// execBashCommand runs a bash command and sends the output via Telegram.
-func execBashCommand(tg *tgclient.Client, chatID int64, command string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	tg.SendChatAction(chatID, "typing")
-
-	err := cmd.Run()
-	result := out.String()
-	if len(result) > 4000 {
-		result = result[:4000] + "\n... (truncated)"
-	}
-
-	var msg string
-	if err != nil {
-		if result != "" {
-			msg = fmt.Sprintf("<pre>%s</pre>\n\nExit: %v", tgclient.EscapeHTML(result), err)
-		} else {
-			msg = fmt.Sprintf("Error: %v", err)
-		}
-	} else if result == "" {
-		msg = "<i>Command completed (no output)</i>"
-	} else {
-		msg = fmt.Sprintf("<pre>%s</pre>", tgclient.EscapeHTML(result))
-	}
-
-	tg.SendHTML(chatID, msg)
-}

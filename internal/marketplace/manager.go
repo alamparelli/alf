@@ -3,10 +3,12 @@ package marketplace
 import (
 	"archive/zip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +16,44 @@ import (
 	"sync"
 	"time"
 )
+
+// errInsecureRegistry is returned by validateRegistryURL when the URL uses
+// a non-https scheme without the ALF_MARKETPLACE_INSECURE=1 dev override.
+var errInsecureRegistry = errors.New("insecure registry URL (http://) requires ALF_MARKETPLACE_INSECURE=1")
+
+// validateRegistryURL enforces HTTPS on the marketplace registry URL.
+//
+//   - raw == "":       returns "" (marketplace disabled, not an error).
+//   - https://…:       accepted.
+//   - http://… + insecure=="1": accepted, caller should warn.
+//   - http://… no override:     rejected (errInsecureRegistry).
+//   - unparseable/other scheme: rejected.
+//
+// Returning the cleaned URL lets callers normalise trailing slashes in future.
+func validateRegistryURL(raw, insecure string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse registry URL: %w", err)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("registry URL missing host: %q", raw)
+	}
+	switch u.Scheme {
+	case "https":
+		return raw, nil
+	case "http":
+		if insecure != "1" {
+			return "", errInsecureRegistry
+		}
+		return raw, nil
+	default:
+		return "", fmt.Errorf("registry URL has unsupported scheme %q (want https)", u.Scheme)
+	}
+}
 
 type AppState string
 
@@ -70,9 +110,18 @@ type stateFile struct {
 }
 
 func NewManager(dataDir string) *Manager {
+	rawURL := os.Getenv("ALF_MARKETPLACE_URL")
+	insecure := os.Getenv("ALF_MARKETPLACE_INSECURE")
+	registryURL, err := validateRegistryURL(rawURL, insecure)
+	if err != nil {
+		log.Printf("[marketplace] rejecting ALF_MARKETPLACE_URL=%q: %v — marketplace disabled. Set ALF_MARKETPLACE_INSECURE=1 to allow plain http:// (dev only).", rawURL, err)
+	} else if registryURL != "" && insecure == "1" {
+		log.Printf("[marketplace] WARNING: registry URL %q is plain http:// (ALF_MARKETPLACE_INSECURE=1). Do not use this configuration in production.", registryURL)
+	}
+
 	m := &Manager{
 		dataDir:     dataDir,
-		registryURL: os.Getenv("ALF_MARKETPLACE_URL"),
+		registryURL: registryURL,
 		states:      make(map[string]AppState),
 		perms:       make(map[string][]string),
 		services:    make(map[string][]string),

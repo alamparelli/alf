@@ -114,7 +114,7 @@ func validateTiersConfig(cfg *TiersConfig) error {
 		names[t.Name] = true
 		// Skip model validation for API backends (any model ID is valid).
 		isAPIBackend := t.Backend != "" && t.Backend != "cli"
-		if !isAPIBackend && !AllowedModels[t.Model] {
+		if !isAPIBackend && !IsValidClaudeModel(t.Model) {
 			return errVal("invalid model for tier " + t.Name + ": " + t.Model)
 		}
 		if t.Effort != "" && !AllowedEfforts[t.Effort] {
@@ -157,7 +157,7 @@ func validateTiersConfig(cfg *TiersConfig) error {
 	}
 
 	isAPIRouter := cfg.RouterBackend != "" && cfg.RouterBackend != "cli"
-	if cfg.RouterModel != "" && !isAPIRouter && !AllowedModels[cfg.RouterModel] {
+	if cfg.RouterModel != "" && !isAPIRouter && !IsValidClaudeModel(cfg.RouterModel) {
 		return errVal("invalid router_model: " + cfg.RouterModel)
 	}
 	if !AllowedBackends[cfg.RouterBackend] && !knownProviders[cfg.RouterBackend] {

@@ -1,0 +1,40 @@
+# Claude models supported by Claude Code CLI.
+#
+# One model name per line. Lines starting with # are comments.
+# Edit this file to add new models without waiting for a daemon update.
+#
+# The daemon also accepts any model ID starting with "claude-" as a
+# safety-net fallback, so you can use a newly released model before
+# editing this list — but adding it here makes it visible in the UI
+# dropdown and documents which models your team considers supported.
+#
+# Reference: https://code.claude.com/docs/en/model-config
+# Models overview: https://platform.claude.com/docs/en/about-claude/models/overview
+
+# Short aliases (haiku, sonnet, opus, sonnet-max, opus-max) are handled
+# separately by the daemon's model resolver and always accepted — they
+# are intentionally not listed here to keep the dropdown focused on
+# versioned model IDs.
+
+# === Current models (April 2026) ===
+# Opus 4.7 — most capable (requires Claude Code v2.1.111+)
+claude-opus-4-7
+claude-opus-4-7[1m]
+
+# Sonnet 4.6 — balanced speed/intelligence
+claude-sonnet-4-6
+claude-sonnet-4-6[1m]
+
+# Haiku 4.5 — fastest
+claude-haiku-4-5
+claude-haiku-4-5-20251001
+
+# === Legacy models (still available) ===
+claude-opus-4-6
+claude-opus-4-6[1m]
+claude-sonnet-4-5
+claude-sonnet-4-5-20250929
+claude-opus-4-5
+claude-opus-4-5-20251101
+claude-opus-4-1
+claude-opus-4-1-20250805

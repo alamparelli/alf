@@ -114,6 +114,26 @@ func seedDefaultTiers(configDir string) {
 	}
 }
 
+// seedDefaultClaudeModels writes the embedded claude_models.txt into
+// configDir on first run, giving users a pre-populated file they can edit
+// to add new Claude models without waiting for a daemon update.
+// Existing files are left untouched.
+func seedDefaultClaudeModels(configDir string) {
+	dest := cc.ClaudeModelsPath(configDir)
+	if _, err := os.Stat(dest); err == nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		log.Printf("seed-claude-models: create dir: %v", err)
+		return
+	}
+	if err := os.WriteFile(dest, cc.DefaultClaudeModelsTxt(), 0o644); err != nil {
+		log.Printf("seed-claude-models: write %s: %v", dest, err)
+		return
+	}
+	log.Printf("seed-claude-models: created %s", dest)
+}
+
 // seedPresetsAsTierProfiles converts embedded setup presets into tier profile files
 // in config.d/tiers/. Each preset is written as <id>.json with the TiersConfig format.
 // Existing profiles are not overwritten.

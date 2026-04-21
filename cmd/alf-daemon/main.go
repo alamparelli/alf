@@ -255,6 +255,8 @@ func main() {
 	}
 	// Seed default tiers.json if not present (from image-embedded copy).
 	seedDefaultTiers(configDir)
+	// Seed default claude_models.txt (user-editable Claude model allowlist).
+	seedDefaultClaudeModels(configDir)
 	// Remove stale Claude settings that may restrict tool permissions.
 	cleanClaudeSettings(homeDir)
 

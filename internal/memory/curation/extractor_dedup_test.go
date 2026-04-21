@@ -1,4 +1,4 @@
-package memstore_test
+package curation_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memory/dedup"
-	"github.com/alamparelli/alf/internal/memstore"
+	curation "github.com/alamparelli/alf/internal/memory/curation"
 )
 
 // prov is a tiny ExtractorProvider that returns the same canned JSON
@@ -20,7 +20,7 @@ import (
 // without spawning a real model.
 type prov struct{ resp string }
 
-func (p *prov) Invoke(_ context.Context, _ string, _ memstore.ExtractorParams) (string, error) {
+func (p *prov) Invoke(_ context.Context, _ string, _ curation.ExtractorParams) (string, error) {
 	return p.resp, nil
 }
 
@@ -81,7 +81,7 @@ type twoPassProv struct {
 	calls        int
 }
 
-func (p *twoPassProv) Invoke(_ context.Context, _ string, _ memstore.ExtractorParams) (string, error) {
+func (p *twoPassProv) Invoke(_ context.Context, _ string, _ curation.ExtractorParams) (string, error) {
 	p.calls++
 	if p.calls == 1 {
 		return p.pass1, nil
@@ -93,7 +93,7 @@ func (p *twoPassProv) Invoke(_ context.Context, _ string, _ memstore.ExtractorPa
 // unified memory.Store (via dedup). Returns the extractor, the memstore
 // (kept as the first positional argument for NewExtractor), and the
 // memory.Store so the test can assert on what landed.
-func newExtractorWithMemory(t *testing.T, p memstore.ExtractorProvider) (*memstore.Extractor, memory.Store, string) {
+func newExtractorWithMemory(t *testing.T, p curation.ExtractorProvider) (*curation.Extractor, memory.Store, string) {
 	t.Helper()
 	// dataDir must be a git repo for Extract() to work.
 	dataDir := t.TempDir()
@@ -106,7 +106,7 @@ func newExtractorWithMemory(t *testing.T, p memstore.ExtractorProvider) (*memsto
 	t.Cleanup(func() { _ = memStore.Close() })
 
 	ctxDir := t.TempDir()
-	ex := memstore.NewExtractor(dataDir, ctxDir, memstore.ExtractorConfig{}, p, func() string { return "test-model" })
+	ex := curation.NewExtractor(dataDir, ctxDir, curation.ExtractorConfig{}, p, func() string { return "test-model" })
 	ex.SetMemoryBackend(memStore, 0)
 	return ex, memStore, dataDir
 }

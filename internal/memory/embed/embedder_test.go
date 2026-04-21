@@ -1,4 +1,4 @@
-package memstore
+package embed
 
 import (
 	"math"

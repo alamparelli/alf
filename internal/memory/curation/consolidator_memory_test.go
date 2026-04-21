@@ -1,4 +1,4 @@
-package memstore_test
+package curation_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memory/dedup"
-	"github.com/alamparelli/alf/internal/memstore"
+	curation "github.com/alamparelli/alf/internal/memory/curation"
 )
 
 // seedMemory writes n documents into memStore under scope, returning
@@ -40,7 +40,7 @@ type consolidatorProvider struct {
 	err  error
 }
 
-func (p *consolidatorProvider) Invoke(_ context.Context, _ string, _ memstore.ExtractorParams) (string, error) {
+func (p *consolidatorProvider) Invoke(_ context.Context, _ string, _ curation.ExtractorParams) (string, error) {
 	if p.err != nil {
 		return "", p.err
 	}
@@ -50,7 +50,7 @@ func (p *consolidatorProvider) Invoke(_ context.Context, _ string, _ memstore.Ex
 // newConsolidatorWithMemory builds a Consolidator + Extractor pair
 // wired to a memory.Store. Mirrors the production bootstrap just
 // enough to drive RunOnce() end-to-end.
-func newConsolidatorWithMemory(t *testing.T, prov memstore.ExtractorProvider) (*memstore.Consolidator, memory.Store) {
+func newConsolidatorWithMemory(t *testing.T, prov curation.ExtractorProvider) (*curation.Consolidator, memory.Store) {
 	t.Helper()
 	dataDir := t.TempDir()
 	initGitRepo(t, dataDir)
@@ -61,9 +61,9 @@ func newConsolidatorWithMemory(t *testing.T, prov memstore.ExtractorProvider) (*
 	}
 	t.Cleanup(func() { _ = memStore.Close() })
 
-	ex := memstore.NewExtractor(dataDir, t.TempDir(), memstore.ExtractorConfig{}, prov, func() string { return "test-model" })
+	ex := curation.NewExtractor(dataDir, t.TempDir(), curation.ExtractorConfig{}, prov, func() string { return "test-model" })
 	ex.SetMemoryBackend(memStore, 0)
-	c := memstore.NewConsolidator(ex, prov, 0)
+	c := curation.NewConsolidator(ex, prov, 0)
 	c.SetMemoryBackend(memStore, []memory.Scope{"fact", "preference", "decision", "contact"}, 0)
 	return c, memStore
 }

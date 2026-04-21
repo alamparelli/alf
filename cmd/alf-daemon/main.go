@@ -30,7 +30,7 @@ import (
 	"github.com/alamparelli/alf/internal/media"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memory/socketsrv"
-	"github.com/alamparelli/alf/internal/memstore"
+	"github.com/alamparelli/alf/internal/memory/curation"
 	"github.com/alamparelli/alf/internal/mood"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/runtime"
@@ -1227,7 +1227,7 @@ func main() {
 			ccServerRef.SetUpdater(uc)
 		}
 	}
-	var memExtractor *memstore.Extractor
+	var memExtractor *curation.Extractor
 	if cfg.EffectiveMemoryEnabled() {
 		extractorTierResolver := func() string {
 			// Delegates to the single source of truth. Never returns a
@@ -1237,7 +1237,7 @@ func main() {
 		extractTimeout := time.Duration(cfg.EffectiveMemoryExtractTimeout()) * time.Second
 		extractAdapter := &extractorAdapter{prov: cliProvider, registry: registry, tierStore: tierStore}
 
-		memExtractor = memstore.NewExtractor(dataDir, contextDir, memstore.ExtractorConfig{
+		memExtractor = curation.NewExtractor(dataDir, contextDir, curation.ExtractorConfig{
 			Timeout:      extractTimeout,
 			MsgThreshold: cfg.EffectiveMemoryExtractMinMessages(),
 		}, extractAdapter, extractorTierResolver)
@@ -1251,7 +1251,7 @@ func main() {
 		// Consolidator walks memory.Store via ListDocuments across the
 		// same scopes the socket server and recallers use. Same
 		// threshold as the extractor for symmetry.
-		consolidator := memstore.NewConsolidator(memExtractor, extractAdapter, extractTimeout)
+		consolidator := curation.NewConsolidator(memExtractor, extractAdapter, extractTimeout)
 		consolidator.SetMemoryBackend(memStore, socketsrv.KnownScopes, 0.85)
 		sched.RegisterSystem("mem-consolidate", "Memory Consolidation", "@every 360m", func() error {
 			return consolidator.RunOnce()

@@ -59,7 +59,8 @@ utilities.
 | `internal/memory` | 82.5 % | memory | SQLite backend + InMem implementations; memtest contract runs against both |
 | `internal/memory/dedup` | 90.9 % | memory | near-dup blocking + threshold logic |
 | `internal/memory/socketsrv` | 64.0 % | memory | IPC for memory-tools binary |
-| `internal/memstore` | 67.9 % | memory | legacy extractor/consolidator; Step 1.3 residue tracked in #369 |
+| `internal/memory/embed` | 59.2 % | memory | ONNX embedder impl of memory.Embedder (was internal/memstore, #369) |
+| `internal/memory/curation` | 75.6 % | memory | fact extraction + consolidation services consuming memory.Store (was internal/memstore, #369) |
 | `internal/ai` | **100.0 %** | ai | Contract types + ResolveModel (pure helpers); archtest forbids hardcoded model fallbacks outside this package |
 | `internal/ai/provider` | 55.7 % | ai | APIProvider / CLIProvider / CodexProvider / ToolLoop (CLI subprocesses are E2E-only) |
 | `internal/sandbox` | 97.0 % | sandbox | Sandbox interface + Policy derivation |

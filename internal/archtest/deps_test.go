@@ -94,9 +94,6 @@ var consumerLeafExceptions = map[string]map[string]string{
 		"internal/ai":     "ai.ModelID / ai.ResolveModel / ai.ToolSpec — contract types + pure helper",
 		"internal/memory": "conversation + doc reads for UI rendering (handler_chat*, handler_memory*)",
 	},
-	"internal/memstore": {
-		"internal/memory": "memstore extends the memory block (extractor / consolidator / embedder)",
-	},
 }
 
 type pkgInfo struct {

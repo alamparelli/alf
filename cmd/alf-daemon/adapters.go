@@ -14,14 +14,14 @@ import (
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/memstore"
+	"github.com/alamparelli/alf/internal/memory/curation"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
 )
 
-// extractorAdapter bridges provider.CLIProvider to memstore.ExtractorProvider,
+// extractorAdapter bridges provider.CLIProvider to curation.ExtractorProvider,
 // with optional fallback to an API backend when CLI is unavailable.
 type extractorAdapter struct {
 	prov      *provider.CLIProvider
@@ -29,7 +29,7 @@ type extractorAdapter struct {
 	tierStore cc.TierStore       // read memory.extract_backend preference
 }
 
-func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params memstore.ExtractorParams) (string, error) {
+func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params curation.ExtractorParams) (string, error) {
 	// Check tier profile for explicit extract_backend preference.
 	// Default: use the router backend/model (cheap, fast, already configured).
 	var forceBackend, forceModel string
@@ -110,7 +110,7 @@ func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params mem
 	return a.invokeCLI(ctx, prompt, model, params)
 }
 
-func (a *extractorAdapter) invokeCLI(ctx context.Context, prompt, model string, params memstore.ExtractorParams) (string, error) {
+func (a *extractorAdapter) invokeCLI(ctx context.Context, prompt, model string, params curation.ExtractorParams) (string, error) {
 	result, err := a.prov.Invoke(ctx, prompt, provider.Params{
 		Model:    model,
 		MaxTurns: params.MaxTurns,

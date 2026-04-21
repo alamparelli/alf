@@ -1,4 +1,4 @@
-package memstore
+package embed
 
 import (
 	"encoding/json"

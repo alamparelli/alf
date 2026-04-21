@@ -17,6 +17,12 @@ import (
 	vaultclient "github.com/alessandrolamparelli/vault-proxy/pkg/client"
 )
 
+// vaultSocketMode restricts the daemon vault socket to the alfd group.
+// The daemon runs as alfd; the socket is created inside vault-data
+// (0700 alfd:alfd), which already gates access — this is defense in depth.
+// Per-app proxy sockets (see proxy.go) expose scoped access to alf (uid 1000).
+const vaultSocketMode os.FileMode = 0660
+
 // Manager manages the vault-server subprocess and provides access to tokens.
 type Manager struct {
 	dataDir      string
@@ -67,8 +73,9 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Make socket accessible to all container users so CLI tools work.
-	os.Chmod(m.socketPath, 0666)
+	if err := os.Chmod(m.socketPath, vaultSocketMode); err != nil {
+		log.Printf("[vault] chmod socket %s: %v", m.socketPath, err)
+	}
 
 	// Watchdog: restart on crash with exponential backoff.
 	go m.watchdog(watchCtx)

@@ -3,9 +3,47 @@ package secrets
 import (
 	"bytes"
 	"log"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// Regression guard for #385-1: the daemon vault socket must be 0660
+// (group-rw for alfd, world-no-access). Ticket #385 flagged the prior
+// 0666 as an attack-surface smell even though vault-data/ (0700) already
+// gates the path — if a future change ever moves the socket, the mode
+// must not silently widen to world-rw.
+func TestVaultSocketMode_Is0660(t *testing.T) {
+	if got := vaultSocketMode & os.ModePerm; got != 0660 {
+		t.Fatalf("vaultSocketMode = %o, want 0660", got)
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX perm bits not meaningful on Windows")
+	}
+
+	// End-to-end sanity: chmod a real file and read back the mode.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault.sock")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	f.Close()
+
+	if err := os.Chmod(path, vaultSocketMode); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0660 {
+		t.Fatalf("on-disk mode = %o, want 0660", got)
+	}
+}
 
 func captureLog(fn func()) string {
 	var buf bytes.Buffer

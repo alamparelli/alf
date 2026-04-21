@@ -1,36 +1,18 @@
 package memory
 
 import (
-	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 // Regression lock for step 1 (memory consolidation) of milestone
 // 0.7.9. Tests the public entry points: prompt collection variants,
-// onboarding flag lifecycle, preferences consolidation, workspace
-// summary, tool reminder. See TEST-BASELINE.md.
-
-// ----- Stub provider ---------------------------------------------------
-
-type stubProvider struct {
-	reply string
-	err   error
-	seen  string
-}
-
-func (s *stubProvider) Invoke(_ context.Context, prompt string, _ provider.Params, _ provider.OnProgress) (*provider.Result, error) {
-	s.seen = prompt
-	if s.err != nil {
-		return nil, s.err
-	}
-	return &provider.Result{Text: s.reply}, nil
-}
+// onboarding flag lifecycle, workspace summary, tool reminder.
+// See TEST-BASELINE.md. Preference-consolidation tests moved to
+// internal/memory/curation/preferences_test.go when the LLM-driven
+// consolidator left the memory package (0.7.9 cleanup).
 
 // ----- CollectPrompts --------------------------------------------------
 
@@ -297,102 +279,3 @@ func TestWorkspaceSummary_UnreadableDirDegrades(t *testing.T) {
 	}
 }
 
-// ----- ConsolidatePreferences ------------------------------------------
-
-func TestConsolidatePreferences_BelowThresholdNoOp(t *testing.T) {
-	dir := t.TempDir()
-
-	// 3 entries < consolidateThreshold (20).
-	for i := 0; i < 3; i++ {
-		AppendPreference(dir, "p", "positive", "👍")
-	}
-
-	original, _ := os.ReadFile(filepath.Join(dir, preferencesFile))
-	stub := &stubProvider{reply: "should-never-run"}
-
-	ConsolidatePreferences(dir, stub, "test-model")
-
-	if stub.seen != "" {
-		t.Error("provider invoked despite being below threshold")
-	}
-
-	after, _ := os.ReadFile(filepath.Join(dir, preferencesFile))
-	if string(after) != string(original) {
-		t.Errorf("file mutated despite no-op:\nbefore=%q\nafter=%q", string(original), string(after))
-	}
-}
-
-func TestConsolidatePreferences_AboveThresholdReplacesFile(t *testing.T) {
-	dir := t.TempDir()
-
-	// Push above threshold.
-	for i := 0; i < consolidateThreshold+1; i++ {
-		AppendPreference(dir, "pref", "positive", "👍")
-	}
-
-	consolidated := "# User Preferences\n\n## Communication\n- [+] concise answers\n"
-	stub := &stubProvider{reply: consolidated}
-
-	ConsolidatePreferences(dir, stub, "test-model")
-
-	if stub.seen == "" {
-		t.Fatal("provider was not invoked despite being above threshold")
-	}
-
-	got, _ := os.ReadFile(filepath.Join(dir, preferencesFile))
-	if !strings.Contains(string(got), "## Communication") {
-		t.Errorf("file not replaced with consolidated content:\n%s", string(got))
-	}
-}
-
-func TestConsolidatePreferences_StripsMarkdownFences(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < consolidateThreshold+1; i++ {
-		AppendPreference(dir, "pref", "positive", "👍")
-	}
-
-	fenced := "```markdown\n# User Preferences\n\n## Tone\n- [+] direct\n```"
-	stub := &stubProvider{reply: fenced}
-
-	ConsolidatePreferences(dir, stub, "test-model")
-
-	got, _ := os.ReadFile(filepath.Join(dir, preferencesFile))
-	if strings.Contains(string(got), "```") {
-		t.Errorf("markdown fences leaked into file:\n%s", string(got))
-	}
-	if !strings.Contains(string(got), "## Tone") {
-		t.Errorf("content dropped:\n%s", string(got))
-	}
-}
-
-func TestConsolidatePreferences_RejectsUnexpectedFormat(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < consolidateThreshold+1; i++ {
-		AppendPreference(dir, "pref", "positive", "👍")
-	}
-	original, _ := os.ReadFile(filepath.Join(dir, preferencesFile))
-
-	stub := &stubProvider{reply: "lorem ipsum without the expected header"}
-	ConsolidatePreferences(dir, stub, "test-model")
-
-	after, _ := os.ReadFile(filepath.Join(dir, preferencesFile))
-	if string(after) != string(original) {
-		t.Errorf("file replaced with invalid format:\n%s", string(after))
-	}
-}
-
-func TestConsolidatePreferences_ProviderErrorLeavesFileUnchanged(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < consolidateThreshold+1; i++ {
-		AppendPreference(dir, "pref", "positive", "👍")
-	}
-	original, _ := os.ReadFile(filepath.Join(dir, preferencesFile))
-
-	stub := &stubProvider{err: errors.New("llm unreachable")}
-	ConsolidatePreferences(dir, stub, "test-model")
-
-	after, _ := os.ReadFile(filepath.Join(dir, preferencesFile))
-	if string(after) != string(original) {
-		t.Errorf("provider error should preserve file, got:\n%s", string(after))
-	}
-}

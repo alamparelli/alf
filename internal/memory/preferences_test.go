@@ -13,7 +13,7 @@ func TestAppendPreference(t *testing.T) {
 	AppendPreference(dir, "User likes bullet lists", "positive", "👍")
 	AppendPreference(dir, "User dislikes verbose explanations", "negative", "👎")
 
-	data, err := os.ReadFile(filepath.Join(dir, preferencesFile))
+	data, err := os.ReadFile(filepath.Join(dir, PreferencesFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestCountEntries(t *testing.T) {
 
 func TestAppendPreference_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, preferencesFile)
+	path := filepath.Join(dir, PreferencesFile)
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("file should not exist yet")

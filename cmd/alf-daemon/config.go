@@ -355,16 +355,25 @@ func syncVaultHostsToFirewall(mgr *vault.Manager, fw *firewall.Proxy) {
 	}
 }
 
+// parseAllowedChatIDs parses a comma-separated list of Telegram chat IDs
+// into a lookup set. Malformed entries are logged and skipped — callers
+// MUST treat an empty result as "Telegram must not start" (see #385-3).
 func parseAllowedChatIDs(s string) map[int64]bool {
 	result := make(map[int64]bool)
 	if s == "" {
 		return result
 	}
 	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
-			result[id] = true
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
 		}
+		id, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			log.Printf("[telegram] ignoring invalid chat ID %q in TELEGRAM_CHAT_ID: %v", trimmed, err)
+			continue
+		}
+		result[id] = true
 	}
 	return result
 }

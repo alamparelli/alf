@@ -323,11 +323,20 @@ func main() {
 		}
 	}
 
-	telegramEnabled = token != "" && chatID != ""
-	if telegramEnabled {
-		allowedChatIDs = parseAllowedChatIDs(chatID)
-	} else {
+	// Parse chat allowlist first: an empty allowlist MUST disable Telegram.
+	// Running the listener with no allowlist lets any stranger who knows the
+	// bot handle interact with it (#385-3).
+	allowedChatIDs = parseAllowedChatIDs(chatID)
+	telegramEnabled = token != "" && len(allowedChatIDs) > 0
+	switch {
+	case telegramEnabled:
+		// ok
+	case token == "":
 		log.Println("Telegram not configured - running in Control Center-only mode")
+	case chatID == "":
+		log.Println("Telegram token set but TELEGRAM_CHAT_ID is empty - running in Control Center-only mode")
+	default:
+		log.Printf("ERROR: Telegram disabled - TELEGRAM_CHAT_ID=%q yielded no valid chat IDs. Expected comma-separated int64. Running in Control Center-only mode.", chatID)
 	}
 
 	// Load initial tiers config. Honour optional tiers_file override in config.
@@ -951,8 +960,16 @@ func main() {
 				}
 			}
 			if token != "" && chatID != "" && !telegramEnabled {
-				telegramEnabled = true
-				log.Println("Telegram config loaded from vault (post-unlock)")
+				// Re-parse allowlist: post-unlock chatID may be different from
+				// the pre-unlock value. Empty/invalid allowlist keeps Telegram
+				// disabled, same invariant as startup (#385-3).
+				allowedChatIDs = parseAllowedChatIDs(chatID)
+				if len(allowedChatIDs) > 0 {
+					telegramEnabled = true
+					log.Println("Telegram config loaded from vault (post-unlock)")
+				} else {
+					log.Printf("ERROR: Telegram stays disabled - vault TELEGRAM_CHAT_ID=%q yielded no valid chat IDs.", chatID)
+				}
 			}
 			// Tag vault service hosts in firewall log.
 			syncVaultHostsToFirewall(vaultMgr, fwProxy)
@@ -1752,7 +1769,9 @@ func main() {
 			// Handle emoji reactions.
 			if u.MessageReaction != nil {
 				mr := u.MessageReaction
-				if len(allowedChatIDs) > 0 && !allowedChatIDs[mr.Chat.ID] {
+				// Listener only starts with a non-empty allowlist (#385-3),
+				// so the check is a plain lookup — no "empty == allow-all" fallback.
+				if !allowedChatIDs[mr.Chat.ID] {
 					continue
 				}
 				if len(mr.NewReaction) == 0 {
@@ -1770,7 +1789,8 @@ func main() {
 			}
 
 			// Authorize sender - reject anyone not in allowedChatIDs.
-			if len(allowedChatIDs) > 0 && !allowedChatIDs[u.Message.Chat.ID] {
+			// Listener only starts with a non-empty allowlist (#385-3).
+			if !allowedChatIDs[u.Message.Chat.ID] {
 				log.Printf("unauthorized message from chat_id=%d user=%s - dropped", u.Message.Chat.ID, u.Message.From.Username)
 				continue
 			}

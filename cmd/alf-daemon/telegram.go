@@ -18,11 +18,11 @@ import (
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/comms"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/mood"
+	"github.com/alamparelli/alf/internal/platform/mood"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
-	"github.com/alamparelli/alf/internal/session"
+	"github.com/alamparelli/alf/internal/platform/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 )
 

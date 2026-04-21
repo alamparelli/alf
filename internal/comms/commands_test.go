@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alamparelli/alf/internal/eventlog"
-	"github.com/alamparelli/alf/internal/session"
+	"github.com/alamparelli/alf/internal/platform/eventlog"
+	"github.com/alamparelli/alf/internal/platform/session"
 )
 
 func TestCommandRegistry_Register(t *testing.T) {

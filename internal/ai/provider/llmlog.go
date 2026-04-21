@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alamparelli/alf/internal/trace"
+	"github.com/alamparelli/alf/internal/platform/trace"
 )
 
 // LLMLogger writes structured JSONL entries for every LLM invocation

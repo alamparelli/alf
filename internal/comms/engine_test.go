@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/session"
+	"github.com/alamparelli/alf/internal/platform/session"
 )
 
 // stubAdapter records events and calls for engine-level tests.

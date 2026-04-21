@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
-	chatsession "github.com/alamparelli/alf/internal/session"
+	chatsession "github.com/alamparelli/alf/internal/platform/session"
 )
 
 // TestCurrentConvID_ResumesAfterRestart is the regression guard for #318:

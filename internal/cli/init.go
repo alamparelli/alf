@@ -18,7 +18,7 @@ import (
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/tlsgen"
+	"github.com/alamparelli/alf/internal/platform/tlsgen"
 )
 
 var tokenRegex = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)

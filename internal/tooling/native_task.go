@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/alamparelli/alf/internal/trace"
+	"github.com/alamparelli/alf/internal/platform/trace"
 )
 
 // TaskNativeTool manages agent team tasks and LLM chains.

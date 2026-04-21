@@ -10,7 +10,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memory/curation"
-	"github.com/alamparelli/alf/internal/mood"
+	"github.com/alamparelli/alf/internal/platform/mood"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alamparelli/alf/internal/session"
+	"github.com/alamparelli/alf/internal/platform/session"
 )
 
 func TestHandleCommand_DelegatesToDefaultRegistry(t *testing.T) {

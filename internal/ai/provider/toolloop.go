@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/alamparelli/alf/internal/trace"
+	"github.com/alamparelli/alf/internal/platform/trace"
 )
 
 // ToolExecutor executes a tool call and returns the result.

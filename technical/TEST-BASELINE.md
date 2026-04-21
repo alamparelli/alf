@@ -93,23 +93,23 @@ utilities.
 
 | Package | Coverage |
 |---|---:|
-| `internal/session` | 97.0 % |
-| `internal/mood` | 89.5 % |
-| `internal/trace` | 88.3 % |
-| `internal/eventlog` | 85.7 % |
-| `internal/signal` | 83.7 % |
-| `internal/updater` | 75.7 % |
-| `internal/tlsgen` | 72.1 % |
+| `internal/platform/session` | 97.0 % |
+| `internal/platform/mood` | 89.5 % |
+| `internal/platform/trace` | 88.3 % |
+| `internal/platform/eventlog` | 85.7 % |
+| `internal/platform/signal` | 83.7 % |
+| `internal/platform/updater` | 75.7 % |
+| `internal/platform/tlsgen` | 72.1 % |
 | `internal/telegram` | 71.9 % |
-| `internal/media` | 62.2 % |
-| `internal/gittrack` | 60.9 % |
+| `internal/platform/media` | 62.2 % |
+| `internal/platform/gittrack` | 60.9 % |
 | `internal/voice` | 58.8 % |
 | `cmd/embed-server` | 46.0 % |
-| `internal/supervisor` | 28.6 % |
+| `internal/platform/supervisor` | 28.6 % |
 | `cmd/alf-daemon` | 13.2 % |
 | `internal/cli` | 2.9 % |
 | `internal/archtest` | no statements (architectural tests) |
-| `internal/vulncheck` | no statements |
+| `internal/platform/vulncheck` | no statements |
 
 ### No tests at all
 
@@ -121,7 +121,7 @@ utilities.
 | `cmd/schedule-tools` | command wrapper | deferred |
 | `cmd/signal` | command wrapper | deferred |
 | `cmd/system-tools` | command wrapper | deferred |
-| `internal/mood` | domain | to assess in gap pass |
+| `internal/platform/mood` | domain | to assess in gap pass |
 | `internal/secrets` | **security-sensitive** | 🔴 must cover in gap pass |
 
 ## Critical-path scenarios (deliverable 2)

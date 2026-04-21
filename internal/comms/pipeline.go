@@ -10,11 +10,11 @@ import (
 
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/mood"
+	"github.com/alamparelli/alf/internal/platform/mood"
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/trace"
+	"github.com/alamparelli/alf/internal/platform/trace"
 )
 
 // Process handles an incoming message through the full pipeline.

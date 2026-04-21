@@ -14,13 +14,13 @@ import (
 
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/marketplace"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/skills"
-	"github.com/alamparelli/alf/internal/supervisor"
+	"github.com/alamparelli/alf/internal/platform/supervisor"
 	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/trace"
+	"github.com/alamparelli/alf/internal/platform/trace"
 	"strconv"
 	"time"
 )

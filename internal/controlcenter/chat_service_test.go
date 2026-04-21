@@ -11,10 +11,10 @@ import (
 	"github.com/alamparelli/alf/internal/ai"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/capability"
-	"github.com/alamparelli/alf/internal/eventlog"
+	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/runtime"
-	chatsession "github.com/alamparelli/alf/internal/session"
+	chatsession "github.com/alamparelli/alf/internal/platform/session"
 )
 
 // mockProvider is a no-op provider for tests that don't invoke Claude.

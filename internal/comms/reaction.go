@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/memory/curation"
 	"github.com/alamparelli/alf/internal/mood"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
@@ -162,10 +163,20 @@ Rules:
 
 	memory.AppendPreference(e.ContextDir, learning.Learning, sentiment, emoji)
 
-	// Consolidate if threshold exceeded.
-	if memory.CountEntries(e.ContextDir) >= 20 {
+	// Consolidate if threshold exceeded. memory/ no longer imports ai/provider;
+	// we wrap the provider call in a closure so curation stays provider-agnostic.
+	if memory.CountEntries(e.ContextDir) >= memory.PreferencesThreshold {
 		model := e.resolveFallbackModel()
-		go memory.ConsolidatePreferences(e.ContextDir, prov, model)
+		go curation.ConsolidatePreferences(e.ContextDir, func(ctx context.Context, prompt string) (string, error) {
+			result, err := prov.Invoke(ctx, prompt, provider.Params{
+				Model:    model,
+				MaxTurns: 1,
+			}, nil)
+			if err != nil {
+				return "", err
+			}
+			return result.Text, nil
+		})
 	}
 }
 

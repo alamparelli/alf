@@ -15,9 +15,8 @@ import (
 type TiersHandler struct {
 	TierStore    TierStore
 	Notifier     Notifier
-	DataDir      string             // for tool discovery
-	ToolRegistry *tooling.Registry  // may be nil
-	ModelCache   *ModelCache        // may be nil - pre-fetched models per backend
+	ToolRegistry *tooling.Registry // may be nil — when nil the "available_tools" list falls back to cliTools only
+	ModelCache   *ModelCache       // may be nil - pre-fetched models per backend
 	EventBroker  *EventBroker
 }
 
@@ -60,17 +59,13 @@ func (h *TiersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				backends = append(backends, b)
 			}
 		}
-		// Build tool list: CLI tools + ALF tools.
+		// Build tool list: CLI tools + ALF tools. ToolRegistry is wired by the
+		// daemon bootstrap (cmd/alf-daemon/main.go) through factory.go; when it
+		// is unexpectedly nil the tab shows only the CLI subset rather than
+		// triggering a fresh disk scan on every request.
 		tools := append([]toolInfo{}, cliTools...)
 		if h.ToolRegistry != nil {
-			// Native Go tools + user tools with JSON schemas - curated list only.
-			// Only tools with a JSON schema - LLMs need a definition to invoke them.
 			for _, schema := range h.ToolRegistry.AllSchemas() {
-				tools = append(tools, toolInfo{Name: schema.Name, Desc: schema.Description, Source: "alf"})
-			}
-		} else if h.DataDir != "" {
-			// Fallback when no registry: only show tools with a JSON schema.
-			for _, schema := range tooling.NewRegistry(h.DataDir).AllSchemas() {
 				tools = append(tools, toolInfo{Name: schema.Name, Desc: schema.Description, Source: "alf"})
 			}
 		}

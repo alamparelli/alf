@@ -179,7 +179,6 @@ func HandlerFactory(deps Deps) Handlers {
 	mux.Handle("/api/tiers", &TiersHandler{
 		TierStore:    deps.TierStore,
 		Notifier:     deps.Notifier,
-		DataDir:      deps.DataDir,
 		ToolRegistry: deps.ToolRegistry,
 		ModelCache:   deps.ModelCache,
 		EventBroker:  deps.EventBroker,

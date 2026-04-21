@@ -881,6 +881,39 @@ func TestConverse_ForwardsUsageTokens(t *testing.T) {
 	}
 }
 
+// TestConverse_PerCallEngineOverride pins the #340 R4j3 hook: a non-nil
+// ConverseRequest.Engine bypasses Deps.AI for this call only, so consumers
+// can inject a locally-assembled Engine (e.g. a tool-loop-wrapped provider)
+// without mutating Runtime Deps.
+func TestConverse_PerCallEngineOverride(t *testing.T) {
+	depsEng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventToken, Token: "from-deps"}, {Kind: ai.EventDone}}}}
+	perCallEng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventToken, Token: "from-override"}, {Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       depsEng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	res, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Prompt: "hi",
+		Engine: perCallEng,
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if res.Text != "from-override" {
+		t.Fatalf("Engine override not honoured: got %q", res.Text)
+	}
+	// Deps.AI must not have been called.
+	if len(depsEng.requests) != 0 {
+		t.Fatalf("Deps.AI should not have been invoked: got %d requests", len(depsEng.requests))
+	}
+	if len(perCallEng.requests) != 1 {
+		t.Fatalf("override engine should have been invoked once: got %d", len(perCallEng.requests))
+	}
+}
+
 // TestConverse_ForwardsResumeID pins the #340 R4e passthrough: ResumeID flows
 // from ConverseRequest → ai.Request so chat follow-ups can continue a
 // provider-side session through Runtime.

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	agents "github.com/alamparelli/alf/internal/runtime/agents"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/mood"
-	provider "github.com/alamparelli/alf/internal/ai/provider"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/trace"
@@ -687,7 +687,23 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	}
 
 	start := time.Now()
-	result, err := prov.Invoke(ctx, prompt, params, progressFn)
+	// #340 R4j3: when a Runtime is installed, the happy-path invocation
+	// goes through Runtime.ConverseStream. The Provider (possibly wrapped
+	// with a ToolLoop) is passed as a per-call Engine override so the
+	// wrapping stays in effect. If the Runtime is nil (early-boot, tests
+	// without a wired Runtime) we keep the legacy prov.Invoke call. The
+	// retry + fallback paths below are intentionally still on the legacy
+	// surface — they migrate in R4j4.
+	var (
+		result *provider.Result
+		err    error
+	)
+	if e.Runtime != nil {
+		convReq := buildConverseRequest(prompt, prov, params)
+		result, err = e.invokeViaRuntime(ctx, convReq, progressFn)
+	} else {
+		result, err = prov.Invoke(ctx, prompt, params, progressFn)
+	}
 
 	// Retry without resume if session failed (CLI only).
 	if err != nil && resumeID != "" && !isAPITier && ctx.Err() == nil {

@@ -263,14 +263,23 @@ func (r *defaultRuntime) prepareConverseStream(ctx context.Context, req Converse
 		ResumeID:        req.ResumeID,
 	}
 
+	// Per-call Engine override lets consumers that assemble a specialised
+	// ai.Engine (e.g. comms.ChatEngine wrapping an API provider with a
+	// tool loop) run under the full Runtime surface without needing to
+	// bypass it. The Strategy hook still composes on top.  #340 R4j3.
+	engine := r.deps.AI
+	if req.Engine != nil {
+		engine = req.Engine
+	}
+
 	var (
 		stream <-chan ai.Event
 		err    error
 	)
 	if req.Strategy != nil {
-		stream, err = req.Strategy.Run(ctx, r.deps.AI, aiReq)
+		stream, err = req.Strategy.Run(ctx, engine, aiReq)
 	} else {
-		stream, err = r.deps.AI.Run(ctx, aiReq)
+		stream, err = engine.Run(ctx, aiReq)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: ai.Run: %w", caller, err)

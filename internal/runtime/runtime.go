@@ -175,6 +175,16 @@ type ConverseRequest struct {
 	// need different orchestration shapes on the same underlying Engine.
 	Strategy ai.Strategy
 
+	// Engine, when non-nil, overrides the Runtime's default ai.Engine for
+	// this call only. Use cases:
+	//   - comms.ChatEngine wraps an API provider with a tool loop
+	//     (provider.NewToolLoop) before exposing it as an ai.Engine; the
+	//     Runtime's registry engine cannot see that wrapping.
+	//   - Tests injecting a deterministic Engine without mutating Deps.
+	// The Strategy hook still composes: if both are set, Strategy drives
+	// the per-turn loop on top of req.Engine. Added in #340 R4j3.
+	Engine ai.Engine
+
 	// ResumeID continues a provider-side session (Claude CLI resume, etc.)
 	// without replaying History. Empty means start fresh. Providers that do
 	// not support session resumption ignore it. Added in #340 R4e so

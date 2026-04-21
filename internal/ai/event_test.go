@@ -41,6 +41,30 @@ func TestEvent_KindPayloadShape(t *testing.T) {
 			wantOK:  func(e ai.Event) bool { return e.Token == "" && e.ToolCall == nil && e.Err == nil },
 			wantMsg: "EventDone must carry no payload",
 		},
+		{
+			name:    "EventThinking carries Text",
+			event:   ai.Event{Kind: ai.EventThinking, Text: "reasoning..."},
+			wantOK:  func(e ai.Event) bool { return e.Text != "" && e.Token == "" && e.ToolCall == nil && e.Err == nil },
+			wantMsg: "EventThinking must have Text set and only Text",
+		},
+		{
+			name:    "EventToolUse carries ToolName only",
+			event:   ai.Event{Kind: ai.EventToolUse, ToolName: "grep"},
+			wantOK:  func(e ai.Event) bool { return e.ToolName != "" && e.Text == "" && e.ToolID == "" && e.Token == "" },
+			wantMsg: "EventToolUse must have ToolName set, Text/ToolID/Token empty",
+		},
+		{
+			name:    "EventToolInput carries ToolName + Text",
+			event:   ai.Event{Kind: ai.EventToolInput, ToolName: "grep", Text: `{"pattern":"`},
+			wantOK:  func(e ai.Event) bool { return e.ToolName != "" && e.Text != "" && e.ToolID == "" },
+			wantMsg: "EventToolInput must have ToolName+Text set, ToolID empty",
+		},
+		{
+			name:    "EventToolOutput carries ToolID + Text",
+			event:   ai.Event{Kind: ai.EventToolOutput, ToolID: "call_abc", Text: "match 1\n"},
+			wantOK:  func(e ai.Event) bool { return e.ToolID != "" && e.Text != "" && e.ToolName == "" },
+			wantMsg: "EventToolOutput must have ToolID+Text set, ToolName empty",
+		},
 	}
 
 	for _, tc := range tests {
@@ -56,12 +80,16 @@ func TestEvent_KindPayloadShape(t *testing.T) {
 // untyped iota constants — downstream code switches on these values.
 func TestEventKind_DistinctValues(t *testing.T) {
 	kinds := map[ai.EventKind]string{
-		ai.EventToken:    "EventToken",
-		ai.EventToolCall: "EventToolCall",
-		ai.EventDone:     "EventDone",
-		ai.EventError:    "EventError",
+		ai.EventToken:       "EventToken",
+		ai.EventToolCall:    "EventToolCall",
+		ai.EventDone:        "EventDone",
+		ai.EventError:       "EventError",
+		ai.EventThinking:    "EventThinking",
+		ai.EventToolUse:     "EventToolUse",
+		ai.EventToolInput:   "EventToolInput",
+		ai.EventToolOutput:  "EventToolOutput",
 	}
-	if len(kinds) != 4 {
+	if len(kinds) != 8 {
 		t.Fatalf("EventKind set collapsed: %d distinct values", len(kinds))
 	}
 }

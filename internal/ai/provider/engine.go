@@ -27,9 +27,16 @@ import (
 //     role names.
 //   - req.Tools.Name values are copied into params.Tools so the Provider can
 //     filter or whitelist capabilities internally.
-//   - OnProgress "text_delta" events are forwarded as ai.EventToken. Other
-//     StreamEvent types (thinking, tool_use, tool_input, tool_result,
-//     block_stop) are dropped — they are not part of the ai.Engine contract.
+//   - OnProgress "text_delta" events are forwarded as ai.EventToken and
+//     contribute to the final-text-delta reconciliation below.
+//   - OnProgress "thinking" / "tool_use" / "tool_input" / "tool_result"
+//     events are forwarded as ai.EventThinking / EventToolUse /
+//     EventToolInput / EventToolOutput respectively (#340 R4j1). These
+//     are observability events, not dispatch: consumers that don't handle
+//     them drop them via the default switch, consumers that do (CC UI,
+//     Telegram typing indicators) can render progress without reaching
+//     into the provider layer.
+//   - "block_stop" is still dropped — it carries no useful payload.
 //   - If the Provider returns text not already streamed via OnProgress, the
 //     full Result.Text is emitted as a single trailing ai.EventToken so
 //     consumers always see the complete response.
@@ -86,16 +93,31 @@ func (e *engineAdapter) runInvoke(ctx context.Context, prompt string, params Par
 	// OnProgress so we can emit only the delta at the end (avoiding a
 	// double-emission of any already-streamed prefix).
 	var streamed strings.Builder
-	onProgress := func(ev StreamEvent) {
-		if ev.Type != "text_delta" || ev.Text == "" {
-			return
-		}
-		streamed.WriteString(ev.Text)
-		// Non-blocking-ish send: if ctx is done, drop.
+	forward := func(e ai.Event) {
 		select {
 		case <-ctx.Done():
 			return
-		case out <- ai.Event{Kind: ai.EventToken, Token: ev.Text}:
+		case out <- e:
+		}
+	}
+	onProgress := func(ev StreamEvent) {
+		switch ev.Type {
+		case "text_delta":
+			if ev.Text == "" {
+				return
+			}
+			streamed.WriteString(ev.Text)
+			forward(ai.Event{Kind: ai.EventToken, Token: ev.Text})
+		case "thinking":
+			// ev.Text may be empty (block_start signal with no body yet) — we
+			// still forward so consumers can render an activity indicator.
+			forward(ai.Event{Kind: ai.EventThinking, Text: ev.Text})
+		case "tool_use":
+			forward(ai.Event{Kind: ai.EventToolUse, ToolName: ev.Detail})
+		case "tool_input":
+			forward(ai.Event{Kind: ai.EventToolInput, ToolName: ev.Detail, Text: ev.Text})
+		case "tool_result":
+			forward(ai.Event{Kind: ai.EventToolOutput, ToolID: ev.Detail, Text: ev.Text})
 		}
 	}
 

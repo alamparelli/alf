@@ -1315,6 +1315,59 @@ func TestConverseStream_DropsToolCalls(t *testing.T) {
 	}
 }
 
+// TestConverseStream_ForwardsSubEvents (#340 R4j1) pins that observability
+// sub-events surfaced by the Provider stack — thinking / tool_use /
+// tool_input / tool_output — reach the consumer verbatim, translated to the
+// runtime.Event kinds. This is what the pipeline needs to render progress
+// without reaching into the Provider layer.
+func TestConverseStream_ForwardsSubEvents(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{
+		{Kind: ai.EventThinking, Text: "pondering"},
+		{Kind: ai.EventToolUse, ToolName: "grep"},
+		{Kind: ai.EventToolInput, ToolName: "grep", Text: `{"p":"x"}`},
+		{Kind: ai.EventToolOutput, ToolID: "call_1", Text: "match\n"},
+		{Kind: ai.EventToken, Token: "final"},
+		{Kind: ai.EventDone},
+	}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	ch, err := rt.ConverseStream(context.Background(), runtime.ConverseRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("ConverseStream: %v", err)
+	}
+	var got []runtime.Event
+	for ev := range ch {
+		got = append(got, ev)
+	}
+	// Expect: Thinking, ToolUse, ToolInput, ToolOutput, Token, Done (6 events).
+	if len(got) != 6 {
+		t.Fatalf("event count: got %d want 6 (%+v)", len(got), got)
+	}
+	if got[0].Kind != runtime.EventThinking || got[0].Text != "pondering" {
+		t.Fatalf("thinking: %+v", got[0])
+	}
+	if got[1].Kind != runtime.EventToolUse || got[1].ToolName != "grep" {
+		t.Fatalf("tool_use: %+v", got[1])
+	}
+	if got[2].Kind != runtime.EventToolInput || got[2].ToolName != "grep" || got[2].Text != `{"p":"x"}` {
+		t.Fatalf("tool_input: %+v", got[2])
+	}
+	if got[3].Kind != runtime.EventToolOutput || got[3].ToolID != "call_1" || got[3].Text != "match\n" {
+		t.Fatalf("tool_output: %+v", got[3])
+	}
+	if got[4].Kind != runtime.EventToken || got[4].Token != "final" {
+		t.Fatalf("token: %+v", got[4])
+	}
+	if got[5].Kind != runtime.EventDone {
+		t.Fatalf("done: %+v", got[5])
+	}
+}
+
 // TestConverseStream_ValidationErrorsReturnSync proves the constructor-style
 // path: invalid requests return synchronously from ConverseStream (no
 // channel allocated) so callers get a plain error instead of having to

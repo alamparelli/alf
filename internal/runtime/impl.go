@@ -318,9 +318,13 @@ func (r *defaultRuntime) Converse(ctx context.Context, req ConverseRequest) (Con
 // stateless, no Memory access, no Capability execution. See #340 R4i.
 //
 // Translation:
-//   - ai.EventToken → runtime.EventToken (Token forwarded).
-//   - ai.EventDone  → runtime.EventDone  (Usage attached when surfaced).
-//   - ai.EventError → runtime.EventError (Err forwarded).
+//   - ai.EventToken        → runtime.EventToken        (Token forwarded).
+//   - ai.EventDone         → runtime.EventDone         (Usage attached when surfaced).
+//   - ai.EventError        → runtime.EventError        (Err forwarded).
+//   - ai.EventThinking     → runtime.EventThinking     (Text forwarded).  #340 R4j1
+//   - ai.EventToolUse      → runtime.EventToolUse      (ToolName).
+//   - ai.EventToolInput    → runtime.EventToolInput    (ToolName, Text).
+//   - ai.EventToolOutput   → runtime.EventToolOutput   (ToolID, Text).
 //   - ai.EventToolCall is ignored: the Provider stack handles tools via
 //     its internal ToolLoop. Surfacing them here would encourage
 //     consumers to double-execute.
@@ -342,6 +346,22 @@ func (r *defaultRuntime) ConverseStream(ctx context.Context, req ConverseRequest
 			switch ev.Kind {
 			case ai.EventToken:
 				if !emit(ctx, out, Event{Kind: EventToken, Token: ev.Token}) {
+					return
+				}
+			case ai.EventThinking:
+				if !emit(ctx, out, Event{Kind: EventThinking, Text: ev.Text}) {
+					return
+				}
+			case ai.EventToolUse:
+				if !emit(ctx, out, Event{Kind: EventToolUse, ToolName: ev.ToolName}) {
+					return
+				}
+			case ai.EventToolInput:
+				if !emit(ctx, out, Event{Kind: EventToolInput, ToolName: ev.ToolName, Text: ev.Text}) {
+					return
+				}
+			case ai.EventToolOutput:
+				if !emit(ctx, out, Event{Kind: EventToolOutput, ToolID: ev.ToolID, Text: ev.Text}) {
 					return
 				}
 			case ai.EventError:

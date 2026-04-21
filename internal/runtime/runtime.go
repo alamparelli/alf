@@ -36,21 +36,47 @@ type EventKind int
 
 const (
 	EventToken      EventKind = iota // streamed assistant token
-	EventToolResult                  // a Capability finished executing
+	EventToolResult                  // a Capability finished executing (full Output)
 	EventDone                        // terminal
 	EventError                       // terminal error
+
+	// Observability sub-events forwarded verbatim from the Provider stack
+	// (#340 R4j1). Unlike EventToolResult (which fires on Capability
+	// execution inside Runtime.Chat), these describe what the model is
+	// doing while the turn is still in flight and carry no dispatch
+	// responsibility — consumers render them for UX only.
+	EventThinking   // model reasoning text
+	EventToolUse    // tool invocation announcement (name)
+	EventToolInput  // streaming tool input chunks
+	EventToolOutput // streaming tool output chunks
 )
 
 // Event is the unified stream item returned to UI / scheduler / telegram.
 // It merges AI token events with Capability execution results, hiding the
 // internal loop.
+//
+// Field matrix by Kind:
+//   EventToken       → Token
+//   EventToolResult  → ToolResult, ToolName (Capability output)
+//   EventDone        → Usage
+//   EventError       → Err
+//   EventThinking    → Text
+//   EventToolUse     → ToolName
+//   EventToolInput   → ToolName, Text
+//   EventToolOutput  → ToolID,  Text
 type Event struct {
 	Kind       EventKind
 	Token      string             // set when Kind == EventToken
 	ToolResult *capability.Output // set when Kind == EventToolResult
-	ToolName   string             // set when Kind == EventToolResult
+	ToolName   string             // set when Kind == EventToolResult, EventToolUse, EventToolInput
 	Err        error              // set when Kind == EventError
 	Usage      *ai.Usage          // set on EventDone when the engine surfaces usage (#340 R4i)
+
+	// Observability payload fields populated for EventThinking /
+	// EventToolUse / EventToolInput / EventToolOutput (#340 R4j1). Unused
+	// for the original four kinds and zero by default.
+	Text   string // EventThinking, EventToolInput (chunk), EventToolOutput (chunk)
+	ToolID string // EventToolOutput
 }
 
 // Output is the result of a one-shot Invoke (scheduler, button, ...).

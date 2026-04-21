@@ -91,10 +91,22 @@ type Usage struct {
 type EventKind int
 
 const (
-	EventToken    EventKind = iota // an incremental token or chunk
-	EventToolCall                  // the model requested a tool invocation
+	EventToken    EventKind = iota // an incremental token or chunk (assistant text)
+	EventToolCall                  // the model requested a tool invocation (dispatch)
 	EventDone                      // terminal event for this request
 	EventError                     // terminal error event
+
+	// Observability sub-events surfaced by the Provider stack (#340 R4j1).
+	// These are informational — they do NOT drive Runtime tool dispatch
+	// (that remains EventToolCall) and they do NOT contribute to the
+	// assistant text accumulation (that remains EventToken). Consumers
+	// that want to render progress (spinners, tool chips, reasoning
+	// traces) can switch on them; consumers that don't care drop them
+	// silently via their default switch behaviour.
+	EventThinking    // model reasoning text (chain-of-thought stream)
+	EventToolUse     // tool invocation announcement (name only)
+	EventToolInput   // streaming tool input chunks (partial JSON args)
+	EventToolOutput  // streaming tool result chunks (partial output text)
 )
 
 // ToolCall is emitted when the model wants a Capability executed.
@@ -105,12 +117,29 @@ type ToolCall struct {
 }
 
 // Event is one unit of the streaming output.
+//
+// Field matrix by Kind:
+//   EventToken       → Token
+//   EventToolCall    → ToolCall
+//   EventError       → Err
+//   EventDone        → Usage (may be nil)
+//   EventThinking    → Text
+//   EventToolUse     → ToolName
+//   EventToolInput   → ToolName, Text
+//   EventToolOutput  → ToolID,  Text
 type Event struct {
 	Kind     EventKind
 	Token    string    // set when Kind == EventToken
 	ToolCall *ToolCall // set when Kind == EventToolCall
 	Err      error     // set when Kind == EventError
 	Usage    *Usage    // set when Kind == EventDone (may be nil if provider didn't surface usage)
+
+	// Observability fields populated for EventThinking / EventToolUse /
+	// EventToolInput / EventToolOutput (#340 R4j1). Unused for the
+	// original four kinds and zero by default.
+	Text     string // EventThinking (full or delta), EventToolInput (chunk), EventToolOutput (chunk)
+	ToolName string // EventToolUse, EventToolInput
+	ToolID   string // EventToolOutput
 }
 
 // Engine runs an AI Request and returns a streamed channel of Events.

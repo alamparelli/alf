@@ -46,9 +46,13 @@ func (s *stubProvider) Invoke(ctx context.Context, prompt string, params provide
 
 // drainEvents collects every ai.Event from ch into slices keyed by Kind.
 type drained struct {
-	tokens  []string
-	sawDone bool
-	err     error
+	tokens    []string
+	thinking  []string
+	toolUses  []string       // tool names
+	toolInput []ai.Event     // preserves ToolName+Text pair
+	toolOut   []ai.Event     // preserves ToolID+Text pair
+	sawDone   bool
+	err       error
 }
 
 func drainEvents(t *testing.T, ch <-chan ai.Event) drained {
@@ -58,6 +62,14 @@ func drainEvents(t *testing.T, ch <-chan ai.Event) drained {
 		switch ev.Kind {
 		case ai.EventToken:
 			d.tokens = append(d.tokens, ev.Token)
+		case ai.EventThinking:
+			d.thinking = append(d.thinking, ev.Text)
+		case ai.EventToolUse:
+			d.toolUses = append(d.toolUses, ev.ToolName)
+		case ai.EventToolInput:
+			d.toolInput = append(d.toolInput, ev)
+		case ai.EventToolOutput:
+			d.toolOut = append(d.toolOut, ev)
 		case ai.EventDone:
 			d.sawDone = true
 		case ai.EventError:
@@ -116,9 +128,9 @@ func TestRun_RejectsNoUserMessage(t *testing.T) {
 func TestRun_StreamsTextDeltasThenDone(t *testing.T) {
 	stub := &stubProvider{
 		streamEvents: []provider.StreamEvent{
-			{Type: "thinking", Text: "ignored"},
+			{Type: "thinking", Text: "reasoning"},
 			{Type: "text_delta", Text: "hel"},
-			{Type: "tool_use", Detail: "ignored"},
+			{Type: "tool_use", Detail: "grep"},
 			{Type: "text_delta", Text: "lo"},
 		},
 		result: &provider.Result{Text: "hello"},
@@ -156,6 +168,52 @@ func TestRun_StreamsTextDeltasThenDone(t *testing.T) {
 	}
 	if len(stub.lastParams.ConvMessages) != 0 {
 		t.Fatalf("ConvMessages should be empty when only a system + user msg: got %+v", stub.lastParams.ConvMessages)
+	}
+}
+
+// #340 R4j1: non-text_delta StreamEvents (thinking / tool_use / tool_input /
+// tool_result) are forwarded to consumers as observability ai.Events so the
+// pipeline can render progress without reaching into the Provider layer.
+func TestRun_ForwardsProviderSubEvents(t *testing.T) {
+	stub := &stubProvider{
+		streamEvents: []provider.StreamEvent{
+			{Type: "thinking", Text: "pondering"},
+			{Type: "tool_use", Detail: "grep"},
+			{Type: "tool_input", Detail: "grep", Text: `{"pattern":`},
+			{Type: "tool_result", Detail: "call_abc", Text: "match\n"},
+			{Type: "block_stop"}, // still dropped
+			{Type: "text_delta", Text: "done"},
+		},
+		result: &provider.Result{Text: "done"},
+	}
+	eng := provider.NewEngine(stub)
+
+	ch, err := eng.Run(context.Background(), ai.Request{
+		Model:    "m",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	d := drainEvents(t, ch)
+
+	if d.err != nil {
+		t.Fatalf("unexpected error: %v", d.err)
+	}
+	if len(d.thinking) != 1 || d.thinking[0] != "pondering" {
+		t.Fatalf("thinking: got %+v, want [pondering]", d.thinking)
+	}
+	if len(d.toolUses) != 1 || d.toolUses[0] != "grep" {
+		t.Fatalf("toolUses: got %+v, want [grep]", d.toolUses)
+	}
+	if len(d.toolInput) != 1 || d.toolInput[0].ToolName != "grep" || d.toolInput[0].Text != `{"pattern":` {
+		t.Fatalf("toolInput: got %+v", d.toolInput)
+	}
+	if len(d.toolOut) != 1 || d.toolOut[0].ToolID != "call_abc" || d.toolOut[0].Text != "match\n" {
+		t.Fatalf("toolOut: got %+v", d.toolOut)
+	}
+	if !d.sawDone {
+		t.Fatal("missing EventDone")
 	}
 }
 

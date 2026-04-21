@@ -23,7 +23,24 @@ Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies
 
 **Host CLI** (`alf`) manages the container lifecycle from the host machine. Inside Docker, the **daemon** runs as `alfd` (uid 1001) and serves the Control Center web UI, polls Telegram, and coordinates all subsystems. LLM subprocesses run as `alf` (uid 1000) with restricted permissions and zero capabilities. A sidecar container handles voice transcription (faster-whisper).
 
-Messages flow through a **chat engine** (`internal/comms/`) → **router** → **LLM provider** pipeline. The router classifies intent and selects a response tier (model, tools, effort level). A **permission system** gates access to sandboxed apps and tools. Apps run in chroot-isolated namespaces with filesystem allowlists. Secrets are accessed exclusively through a **vault proxy** (Unix socket) — no direct access from app code. A **tracing system** (`internal/trace/`) logs chain and task events for observability.
+### Internal architecture — 5 blocks
+
+ALF's internal code is organised around five first-class concerns:
+
+```
+internal/
+├── capability/   ← what ALF can execute       (tools + skills + apps)
+├── memory/       ← what ALF knows / remembers (conv + embeddings + preferences)
+├── ai/           ← the brain that decides     (provider + strategy + ResolveModel)
+├── sandbox/      ← the guards that enforce    (firewall + vault + filesystem + integrity)
+└── runtime/      ← the conductor              (orchestrates the four)
+```
+
+A **Capability** (tool / skill / app) is executed by the **AI**, with graded access to **Memory**, inside a **Sandbox** that enforces a Policy. The **Runtime** orchestrates the four. Everything else is periphery (user-facing consumers under `cli/ controlcenter/ telegram/ voice/ scheduler/`, ops plumbing under `internal/platform/`).
+
+Dependency rules are enforced by CI (`internal/archtest/`): only `runtime/` may import the four inner blocks; consumers depend on `runtime/` alone.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the contributor-facing reference and the "where do I put this?" decision tree.
 
 ## Quick start
 

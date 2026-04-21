@@ -597,26 +597,6 @@ func main() {
 		}
 	}
 
-	// Persistent CLI classifier: avoids 60s+ CLI startup per classification
-	// on low-end CPUs. Starts once, stays alive, resets after idle timeout.
-	var cliClassifier *provider.CLIClassifier
-	if !isAPIRouter {
-		cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
-			Model:          routerModel,
-			SystemPrompt:   "You are a message classifier. Respond only with the tier name and reason.",
-			HomeDir:        homeDir,
-			DataDir:        dataDir,
-			Credential:     cliProvider.Credential,
-			IdleTimeout:    60 * time.Minute,
-			EmptyMCPConfig: cliProvider.EmptyMCPConfig,
-		})
-		go func() {
-			if err := cliClassifier.Start(); err != nil {
-				log.Printf("classifier: start failed: %v (will retry on first classify)", err)
-			}
-		}()
-	}
-
 	// agentTeamsForRouter converts the agent store into router-friendly team info.
 	agentTeamsForRouter := func() []classifier.AgentTeamInfo {
 		teams := agentStore.All()
@@ -633,6 +613,28 @@ func main() {
 			})
 		}
 		return infos
+	}
+
+	// Persistent CLI classifier: avoids 60s+ CLI startup per classification
+	// on low-end CPUs. Starts once, stays alive, resets after idle timeout.
+	// The system prompt is built from the live tier catalog so the subprocess
+	// has authoritative tier state in context from the first message (#332).
+	var cliClassifier *provider.CLIClassifier
+	if !isAPIRouter {
+		cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
+			Model:          routerModel,
+			SystemPrompt:   classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter()),
+			HomeDir:        homeDir,
+			DataDir:        dataDir,
+			Credential:     cliProvider.Credential,
+			IdleTimeout:    60 * time.Minute,
+			EmptyMCPConfig: cliProvider.EmptyMCPConfig,
+		})
+		go func() {
+			if err := cliClassifier.Start(); err != nil {
+				log.Printf("classifier: start failed: %v (will retry on first classify)", err)
+			}
+		}()
 	}
 
 	// classifyMessageFull includes session context for continuity routing.
@@ -1502,13 +1504,23 @@ func main() {
 						newModel = resolveModel("haiku")
 					}
 					routerModel = newModel
-					// Update or create CLI classifier.
+					// Rebuild the classifier system prompt from the fresh tier
+					// catalog. Without this, the persistent subprocess keeps
+					// stale tier state in its conversation history and the
+					// router ignores renames/additions until the next idle
+					// restart (#332).
+					newSysPrompt := classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter())
 					if cliClassifier != nil {
-						cliClassifier.UpdateModel(newModel)
+						if err := cliClassifier.UpdateSystemPrompt(newSysPrompt); err != nil {
+							log.Printf("classifier: UpdateSystemPrompt failed: %v", err)
+						}
+						if err := cliClassifier.UpdateModel(newModel); err != nil {
+							log.Printf("classifier: UpdateModel failed: %v", err)
+						}
 					} else {
 						cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
 							Model:          newModel,
-							SystemPrompt:   "You are a message classifier. Respond only with the tier name and reason.",
+							SystemPrompt:   newSysPrompt,
 							HomeDir:        homeDir,
 							DataDir:        dataDir,
 							Credential:     cliProvider.Credential,
@@ -1651,7 +1663,16 @@ func main() {
 					}
 					routerModel = newModel
 					if cliClassifier != nil {
-						cliClassifier.UpdateModel(newModel)
+						// Rebuild the classifier system prompt so the
+						// persistent subprocess sees the fresh tier catalog
+						// (#332).
+						newSysPrompt := classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter())
+						if err := cliClassifier.UpdateSystemPrompt(newSysPrompt); err != nil {
+							log.Printf("classifier: UpdateSystemPrompt failed: %v", err)
+						}
+						if err := cliClassifier.UpdateModel(newModel); err != nil {
+							log.Printf("classifier: UpdateModel failed: %v", err)
+						}
 					}
 				}
 				// Re-publish Telegram bot command menu so newly-enabled or

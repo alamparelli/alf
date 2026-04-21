@@ -171,6 +171,58 @@ func TestRun_StreamsTextDeltasThenDone(t *testing.T) {
 	}
 }
 
+// #340 R4j2: ai.Request passthroughs (CacheBreakpoint / Media / Env) reach
+// provider.Params untouched so comms.ChatEngine's prompt-caching boundary,
+// multimodal attachments, and subprocess env survive the Runtime hop.
+func TestRun_ForwardsR4j2Passthroughs(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok"}}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model:           "m",
+		Messages:        []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+		CacheBreakpoint: 5,
+		Media:           []ai.MediaEntry{{Type: "photo", FileName: "a.png", MimeType: "image/png"}},
+		Env:             []string{"ALF_SIGNAL_SOCK=/tmp/s"},
+	})
+	drainEvents(t, ch)
+
+	if stub.lastParams.CacheBreakpoint != 5 {
+		t.Fatalf("CacheBreakpoint: got %d want 5", stub.lastParams.CacheBreakpoint)
+	}
+	if len(stub.lastParams.Media) != 1 || stub.lastParams.Media[0].FileName != "a.png" {
+		t.Fatalf("Media: got %+v", stub.lastParams.Media)
+	}
+	if len(stub.lastParams.Env) != 1 || stub.lastParams.Env[0] != "ALF_SIGNAL_SOCK=/tmp/s" {
+		t.Fatalf("Env: got %+v", stub.lastParams.Env)
+	}
+}
+
+// #340 R4j2: provider.Result.InputTokens/OutputTokens reach the terminal
+// EventDone's Usage so downstream consumers can account for token spend
+// without reaching into the provider layer directly.
+func TestRun_ForwardsUsageTokens(t *testing.T) {
+	stub := &stubProvider{result: &provider.Result{Text: "ok", InputTokens: 77, OutputTokens: 33, CostUSD: 0.01, Model: "m"}}
+	eng := provider.NewEngine(stub)
+
+	ch, _ := eng.Run(context.Background(), ai.Request{
+		Model:    "m",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	var usage *ai.Usage
+	for ev := range ch {
+		if ev.Kind == ai.EventDone {
+			usage = ev.Usage
+		}
+	}
+	if usage == nil {
+		t.Fatal("no EventDone Usage surfaced")
+	}
+	if usage.InputTokens != 77 || usage.OutputTokens != 33 {
+		t.Fatalf("tokens: got in=%d out=%d want 77/33", usage.InputTokens, usage.OutputTokens)
+	}
+}
+
 // #340 R4j1: non-text_delta StreamEvents (thinking / tool_use / tool_input /
 // tool_result) are forwarded to consumers as observability ai.Events so the
 // pipeline can render progress without reaching into the Provider layer.

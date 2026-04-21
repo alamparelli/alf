@@ -825,6 +825,62 @@ func TestConverse_ForwardsProviderPassthroughs(t *testing.T) {
 	}
 }
 
+// TestConverse_ForwardsR4j2Passthroughs pins the #340 R4j2 additions:
+// CacheBreakpoint / Media / Env reach the ai.Request untouched so the
+// provider adapter can map them onto Params for comms.ChatEngine's migration.
+func TestConverse_ForwardsR4j2Passthroughs(t *testing.T) {
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	media := []ai.MediaEntry{{Type: "photo", FileName: "a.png", MimeType: "image/png", TempPath: "/tmp/a"}}
+	_, err := rt.Converse(context.Background(), runtime.ConverseRequest{
+		Prompt:          "look at this",
+		CacheBreakpoint: 3,
+		Media:           media,
+		Env:             []string{"ALF_SIGNAL_SOCK=/tmp/s", "ALF_CHAIN_ORIGIN=cc:abc"},
+	})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	req := eng.requests[0]
+	if req.CacheBreakpoint != 3 {
+		t.Fatalf("CacheBreakpoint: got %d want 3", req.CacheBreakpoint)
+	}
+	if len(req.Media) != 1 || req.Media[0].FileName != "a.png" {
+		t.Fatalf("Media: got %+v", req.Media)
+	}
+	if len(req.Env) != 2 || req.Env[0] != "ALF_SIGNAL_SOCK=/tmp/s" {
+		t.Fatalf("Env: got %+v", req.Env)
+	}
+}
+
+// TestConverse_ForwardsUsageTokens pins the #340 R4j2 addition: InputTokens
+// and OutputTokens surface on ai.Usage (and therefore on ConverseResult)
+// so CC can account for API token spend via Runtime.
+func TestConverse_ForwardsUsageTokens(t *testing.T) {
+	usage := &ai.Usage{InputTokens: 120, OutputTokens: 45, CostUSD: 0.01, Model: "m"}
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone, Usage: usage}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	res, err := rt.Converse(context.Background(), runtime.ConverseRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if res.Usage == nil || res.Usage.InputTokens != 120 || res.Usage.OutputTokens != 45 {
+		t.Fatalf("Usage tokens not forwarded: %+v", res.Usage)
+	}
+}
+
 // TestConverse_ForwardsResumeID pins the #340 R4e passthrough: ResumeID flows
 // from ConverseRequest → ai.Request so chat follow-ups can continue a
 // provider-side session through Runtime.

@@ -154,6 +154,16 @@ type ConverseRequest struct {
 	WriteCapable  bool
 	DataDir       string
 
+	// CacheBreakpoint / Media / Env are provider-shaped passthroughs added
+	// in #340 R4j2 so comms.ChatEngine can reach the provider layer via
+	// Runtime.ConverseStream without losing prompt caching (static/dynamic
+	// system prompt boundary), multimodal attachments, or subprocess env
+	// (ALF_SIGNAL_SOCK, ALF_CHAIN_ORIGIN). Engines that do not care about
+	// these fields ignore them.
+	CacheBreakpoint int
+	Media           []ai.MediaEntry
+	Env             []string
+
 	// Strategy, when non-nil, is the driver of the Engine for this call.
 	// It lets callers plug a multi-turn orchestrator (multi-agent, retry-
 	// with-reflection, chain-of-thought) into the same Runtime surface that

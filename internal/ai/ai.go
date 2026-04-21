@@ -42,6 +42,21 @@ type ToolSpec struct {
 	Schema      map[string]any // JSON schema for arguments
 }
 
+// MediaEntry is the provider-agnostic shape for an attached file (image,
+// document, video, voice note) handed to a multimodal request. The Provider
+// adapter maps it onto the underlying provider.MediaEntry; callers do not
+// need to import the provider package. Added in #340 R4j2 so the pipeline
+// can pass media through Runtime.ConverseStream.
+type MediaEntry struct {
+	Type        string   // "photo", "document", "video", "voice"
+	FileName    string
+	MimeType    string
+	TempPath    string   // local filesystem path to media file
+	FramePaths  []string // video: contact sheet frame paths
+	Transcript  string   // voice/video: transcript
+	TextContent string   // documents: extracted text
+}
+
 // Request is the single shape handed to Engine.Run.
 //
 // SystemPrompts carries per-call system instructions (identity, job context,
@@ -55,6 +70,10 @@ type ToolSpec struct {
 // without losing tier-level configuration. An Engine implementation that does
 // not care about these fields simply ignores them; the provider adapter
 // maps them into Params.
+//
+// CacheBreakpoint/Media/Env were added in #340 R4j2 to bring the remaining
+// provider.Params fields consumed by comms/pipeline.go onto the ai contract,
+// so Runtime.ConverseStream can replace direct provider.Invoke calls.
 type Request struct {
 	Model         ModelID
 	Backend       string
@@ -67,6 +86,21 @@ type Request struct {
 	WriteCapable  bool
 	DataDir       string
 	Stream        bool
+
+	// CacheBreakpoint is an index into SystemPrompts. Entries before the
+	// index are stable (cacheable across turns); entries at or after are
+	// dynamic (per-request). Providers that support prompt caching use
+	// this to split the static/dynamic boundary — ignored otherwise.
+	CacheBreakpoint int
+
+	// Media carries multimodal attachments. Only API providers consume it;
+	// CLI providers ignore.
+	Media []MediaEntry
+
+	// Env is an optional list of "KEY=VALUE" entries appended to the
+	// subprocess environment for CLI providers (e.g. ALF_SIGNAL_SOCK,
+	// ALF_CHAIN_ORIGIN). Ignored by API providers.
+	Env []string
 
 	// ResumeID lets a caller continue a provider-side session (e.g. Claude CLI
 	// resume, OpenRouter thread). Empty means start fresh. Providers that do
@@ -85,6 +119,14 @@ type Usage struct {
 	Model     string
 	NumTurns  int
 	SessionID string
+
+	// InputTokens/OutputTokens are the raw token counts reported by the
+	// Provider (API backends populate both; some CLI backends leave them
+	// zero). Added in #340 R4j2 so comms.ChatEngine can surface the same
+	// metrics it gets from provider.Result today without reaching past
+	// Runtime into the provider layer.
+	InputTokens  int
+	OutputTokens int
 }
 
 // EventKind distinguishes streaming event payloads.

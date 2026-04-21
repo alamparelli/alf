@@ -247,17 +247,20 @@ func (r *defaultRuntime) prepareConverseStream(ctx context.Context, req Converse
 	messages = append(messages, ai.Message{Role: ai.RoleUser, Content: req.Prompt})
 
 	aiReq := ai.Request{
-		Model:         model,
-		Backend:       req.Backend,
-		SystemPrompts: req.SystemPrompts,
-		Messages:      messages,
-		Tools:         req.Tools,
-		MaxTurns:      req.MaxTurns,
-		Effort:        req.Effort,
-		WriteCapable:  req.WriteCapable,
-		DataDir:       req.DataDir,
-		Stream:        true,
-		ResumeID:      req.ResumeID,
+		Model:           model,
+		Backend:         req.Backend,
+		SystemPrompts:   req.SystemPrompts,
+		Messages:        messages,
+		Tools:           req.Tools,
+		MaxTurns:        req.MaxTurns,
+		Effort:          req.Effort,
+		WriteCapable:    req.WriteCapable,
+		DataDir:         req.DataDir,
+		Stream:          true,
+		CacheBreakpoint: req.CacheBreakpoint,
+		Media:           req.Media,
+		Env:             req.Env,
+		ResumeID:        req.ResumeID,
 	}
 
 	var (

@@ -70,15 +70,18 @@ func (e *engineAdapter) Run(ctx context.Context, req ai.Request) (<-chan ai.Even
 	systemPrompts := mergeSystemPrompts(req.SystemPrompts, systemFromMessages)
 
 	params := Params{
-		Model:         string(req.Model),
-		Tools:         toolNames(req.Tools),
-		ConvMessages:  history,
-		SystemPrompts: systemPrompts,
-		MaxTurns:      req.MaxTurns,
-		Effort:        req.Effort,
-		WriteCapable:  req.WriteCapable,
-		DataDir:       req.DataDir,
-		ResumeID:      req.ResumeID,
+		Model:           string(req.Model),
+		Tools:           toolNames(req.Tools),
+		ConvMessages:    history,
+		SystemPrompts:   systemPrompts,
+		CacheBreakpoint: req.CacheBreakpoint,
+		MaxTurns:        req.MaxTurns,
+		Effort:          req.Effort,
+		WriteCapable:    req.WriteCapable,
+		DataDir:         req.DataDir,
+		Env:             append([]string(nil), req.Env...),
+		Media:           toProviderMedia(req.Media),
+		ResumeID:        req.ResumeID,
 	}
 
 	out := make(chan ai.Event, 16)
@@ -164,10 +167,12 @@ func (e *engineAdapter) runInvoke(ctx context.Context, prompt string, params Par
 	var usage *ai.Usage
 	if result != nil {
 		usage = &ai.Usage{
-			CostUSD:   result.CostUSD,
-			Model:     result.Model,
-			NumTurns:  result.NumTurns,
-			SessionID: result.SessionID,
+			CostUSD:      result.CostUSD,
+			Model:        result.Model,
+			NumTurns:     result.NumTurns,
+			SessionID:    result.SessionID,
+			InputTokens:  result.InputTokens,  // #340 R4j2
+			OutputTokens: result.OutputTokens, // #340 R4j2
 		}
 	}
 	select {
@@ -244,6 +249,29 @@ func splitPrompt(msgs []ai.Message) (prompt string, history []ContextMessage, sy
 		history = append(history, ContextMessage{Role: string(m.Role), Content: m.Content})
 	}
 	return msgs[lastUser].Content, history, systemPrompts, nil
+}
+
+// toProviderMedia maps ai.MediaEntry → provider.MediaEntry so the ai
+// package does not import provider. Returns nil when the input is empty
+// to keep an empty media list from perturbing providers that branch on
+// len(params.Media). Added in #340 R4j2.
+func toProviderMedia(entries []ai.MediaEntry) []MediaEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]MediaEntry, len(entries))
+	for i, e := range entries {
+		out[i] = MediaEntry{
+			Type:        e.Type,
+			FileName:    e.FileName,
+			MimeType:    e.MimeType,
+			TempPath:    e.TempPath,
+			FramePaths:  append([]string(nil), e.FramePaths...),
+			Transcript:  e.Transcript,
+			TextContent: e.TextContent,
+		}
+	}
+	return out
 }
 
 func toolNames(specs []ai.ToolSpec) []string {

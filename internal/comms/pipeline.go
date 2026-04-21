@@ -687,23 +687,14 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	}
 
 	start := time.Now()
-	// #340 R4j3: when a Runtime is installed, the happy-path invocation
-	// goes through Runtime.ConverseStream. The Provider (possibly wrapped
-	// with a ToolLoop) is passed as a per-call Engine override so the
-	// wrapping stays in effect. If the Runtime is nil (early-boot, tests
-	// without a wired Runtime) we keep the legacy prov.Invoke call. The
-	// retry + fallback paths below are intentionally still on the legacy
-	// surface — they migrate in R4j4.
-	var (
-		result *provider.Result
-		err    error
-	)
-	if e.Runtime != nil {
-		convReq := buildConverseRequest(prompt, prov, params)
-		result, err = e.invokeViaRuntime(ctx, convReq, progressFn)
-	} else {
-		result, err = prov.Invoke(ctx, prompt, params, progressFn)
-	}
+	// #340 R4j4: every provider invocation in processStandard now goes
+	// through Runtime.ConverseStream via invokeViaRuntime. The happy
+	// path, the session-retry path (CLI-only), and the fallback chain
+	// below all use the same helper so there is a single point of
+	// instrumentation and no divergence between surfaces. The Provider
+	// (possibly wrapped with a ToolLoop) is threaded through as an
+	// Engine override so the wrapping stays in effect.
+	result, err := e.invokeViaRuntime(ctx, buildConverseRequest(prompt, prov, params), progressFn)
 
 	// Retry without resume if session failed (CLI only).
 	if err != nil && resumeID != "" && !isAPITier && ctx.Err() == nil {
@@ -721,7 +712,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			acc = NewAccumulator()
 			progressFn = acc.OnProgress(rawOnProgress)
 		}
-		result, err = prov.Invoke(ctx, prompt, params, progressFn)
+		result, err = e.invokeViaRuntime(ctx, buildConverseRequest(prompt, prov, params), progressFn)
 	}
 	duration := time.Since(start)
 
@@ -818,13 +809,14 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 				progressFn = acc.OnProgress(rawOnProgress)
 			}
 
-			result, err = fbProv.Invoke(ctx, prompt, fbParams, progressFn)
+			// #340 R4j4: fallback also threads through Runtime so instrumentation
+			// and tool-loop semantics stay uniform with the primary path.
+			result, err = e.invokeViaRuntime(ctx, buildConverseRequest(prompt, fbProv, fbParams), progressFn)
 			if err == nil {
 				log.Printf("[comms] fallback tier %q succeeded", fbName)
 				route.Tier = fbName
 				route.Reason += fmt.Sprintf(" [fallback: %s]", fbName)
 				tp = fbTP
-				prov = fbProv
 				isAPITier = fbIsAPI
 				e.emit(channelID, OutEvent{Type: "routed", Data: map[string]string{
 					"tier": fbName, "model": fbTP.Model,

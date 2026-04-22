@@ -1679,17 +1679,35 @@ func main() {
 						newModel = resolveModel("haiku")
 					}
 					routerModel = newModel
+					newSysPrompt := classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter())
 					if cliClassifier != nil {
 						// Rebuild the classifier system prompt so the
 						// persistent subprocess sees the fresh tier catalog
 						// (#332).
-						newSysPrompt := classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter())
 						if err := cliClassifier.UpdateSystemPrompt(newSysPrompt); err != nil {
 							log.Printf("classifier: UpdateSystemPrompt failed: %v", err)
 						}
 						if err := cliClassifier.UpdateModel(newModel); err != nil {
 							log.Printf("classifier: UpdateModel failed: %v", err)
 						}
+					} else {
+						// API→CLI router switch: previous profile used an API
+						// router so cliClassifier was shut down. Start a fresh
+						// one so classification resumes on the CLI path.
+						cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
+							Model:          newModel,
+							SystemPrompt:   newSysPrompt,
+							HomeDir:        homeDir,
+							DataDir:        dataDir,
+							Credential:     cliProvider.Credential,
+							IdleTimeout:    60 * time.Minute,
+							EmptyMCPConfig: cliProvider.EmptyMCPConfig,
+						})
+						go func() {
+							if err := cliClassifier.Start(); err != nil {
+								log.Printf("classifier: restart failed: %v", err)
+							}
+						}()
 					}
 				}
 				// Re-publish Telegram bot command menu so newly-enabled or

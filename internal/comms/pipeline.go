@@ -86,6 +86,17 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 			forcedTier = ft
 		}
 	}
+	// Validate the forced tier against the current tier catalog — a profile
+	// switch may have removed or disabled the tier that the session was
+	// locked to. In that case, clear the session override and fall through
+	// to normal classification.
+	if forcedTier != "" {
+		if !IsTierValid(forcedTier, e.TierStore.Snapshot()) {
+			log.Printf("[comms] forced tier %q no longer valid, clearing session override", forcedTier)
+			e.Sessions.SetForcedTier(sessionKey, "")
+			forcedTier = ""
+		}
+	}
 
 	// 3. Pre-route memory recall.
 	recall := RecallWithConfig(e.Recaller, msg.Text, e.RecallCfg)

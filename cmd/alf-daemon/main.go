@@ -1452,319 +1452,186 @@ func main() {
 	}
 	appToolAdapter.supervisor = appsSupervisor
 
-	// When Telegram is not configured, run a CC-only event loop.
-	if !telegramEnabled {
-		log.Println("Running in Control Center-only mode (no Telegram polling)")
-		for event := range reloadCh {
-			switch event {
-			case cc.ReloadConfig:
-				if newCfg, err := configStore.Load(); err == nil {
-					oldTZ := cfg.Timezone
-					oldTiersFile := cfg.TiersFile
-					cfg = newCfg
-					chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
-					if cfg.MaxSessions > 0 {
-						sessions.SetMaxSessions(cfg.MaxSessions)
-					}
-					if cfg.Timezone != oldTZ {
-						time.Local = resolveTimezone(cfg.Timezone)
-					}
-					// Switch tiers file if tiers_file changed.
-					if cfg.TiersFile != oldTiersFile {
-						newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
-						if err := tierStore.SetPath(newTiersPath); err != nil {
-							log.Printf("ERROR: tiers reload from new path %q failed: %v - keeping previous tiers", newTiersPath, err)
-						} else {
-							log.Printf("config: tiers_file changed to %q", newTiersPath)
-						}
-					}
-					applyDNS(cfg)
-					registerBackends(registry, cfg, apiHistory, vaultMgr)
-					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
-					// Dedup thresholds are no longer tunable at runtime — the
-					// legacy memstore.Store.SetDedupConfig path is gone (#337
-					// close-out). dedup.Options.NearDupThreshold is set at
-					// Extractor/Consolidator wire time; a restart is required
-					// to change it.
-					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
+	// Reload event dispatcher, shared by both the CC-only and Telegram-enabled
+	// modes. Previously each mode inlined its own switch over reloadCh: the
+	// Telegram branch polled reloadCh with a non-blocking select and then made
+	// a long-poll HTTP call to getUpdates (20-30s), which dropped reload
+	// events on the floor and caused the router to classify messages against
+	// a stale tier catalog after /api/tiers/configs/switch. Running the
+	// dispatcher in its own goroutine (below) decouples reload handling from
+	// both the HTTP server and the Telegram poller.
+	//
+	// TODO: protect shared state (routerModel, routerBackend, cliClassifier,
+	// cfg) with a mutex — reads happen from HTTP/TG goroutines.
+	handleReload := func(event cc.ReloadEvent) {
+		switch event {
+		case cc.ReloadConfig:
+			if newCfg, err := configStore.Load(); err == nil {
+				oldTZ := cfg.Timezone
+				oldTiersFile := cfg.TiersFile
+				cfg = newCfg
+				chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
+				if cfg.MaxSessions > 0 {
+					sessions.SetMaxSessions(cfg.MaxSessions)
 				}
-				if git != nil {
-					git.Commit("config updated via CC")
+				if cfg.Timezone != oldTZ {
+					time.Local = resolveTimezone(cfg.Timezone)
 				}
-			case cc.ReloadTiers:
-				if err := tierStore.Reload(); err != nil {
-					log.Printf("ERROR: tiers reload failed: %v", err)
-				} else {
-					log.Println("tiers reloaded")
-				}
-				routerBackend = tierStore.Current().RouterBackend
-				isAPIR := routerBackend != "" && routerBackend != "cli"
-				if isAPIR {
-					newModel := tierStore.Current().RouterModel
-					if newModel == "" {
-						if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
-							if !strings.Contains(fb, "/") {
-								fb = "anthropic/" + fb
-							}
-							newModel = fb
-						}
-					}
-					routerModel = newModel
-					// Shut down CLI classifier if switching to API router.
-					if cliClassifier != nil {
-						cliClassifier.Close()
-						cliClassifier = nil
-					}
-				} else {
-					newModel := resolveModel(tierStore.Current().RouterModel)
-					if newModel == "" {
-						newModel = resolveModel("haiku")
-					}
-					routerModel = newModel
-					// Rebuild the classifier system prompt from the fresh tier
-					// catalog. Without this, the persistent subprocess keeps
-					// stale tier state in its conversation history and the
-					// router ignores renames/additions until the next idle
-					// restart (#332).
-					newSysPrompt := classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter())
-					if cliClassifier != nil {
-						if err := cliClassifier.UpdateSystemPrompt(newSysPrompt); err != nil {
-							log.Printf("classifier: UpdateSystemPrompt failed: %v", err)
-						}
-						if err := cliClassifier.UpdateModel(newModel); err != nil {
-							log.Printf("classifier: UpdateModel failed: %v", err)
-						}
+				// Switch tiers file if tiers_file changed.
+				if cfg.TiersFile != oldTiersFile {
+					newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
+					if err := tierStore.SetPath(newTiersPath); err != nil {
+						log.Printf("ERROR: tiers reload from new path %q failed: %v - keeping previous tiers", newTiersPath, err)
 					} else {
-						cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
-							Model:          newModel,
-							SystemPrompt:   newSysPrompt,
-							HomeDir:        homeDir,
-							DataDir:        dataDir,
-							Credential:     cliProvider.Credential,
-							IdleTimeout:    60 * time.Minute,
-							EmptyMCPConfig: cliProvider.EmptyMCPConfig,
-						})
-						go func() {
-							if err := cliClassifier.Start(); err != nil {
-								log.Printf("classifier: restart failed: %v", err)
-							}
-						}()
+						log.Printf("config: tiers_file changed to %q", newTiersPath)
 					}
 				}
-				// Re-publish Telegram bot command menu so newly-enabled or
-				// renamed force-command tiers appear in `/` autocomplete.
-				if telegramEnabled {
-					go refreshTelegramCommands(tg, tierStore)
-				}
-				if git != nil {
-					git.Commit("tiers updated via CC")
-				}
-			case cc.ReloadSkills:
-				if err := skillStore.Reload(); err != nil {
-					log.Printf("skills reload error: %v", err)
-				} else {
-					injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
-					if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
-						log.Printf("skills: capability mirror (reload): %v", err)
+				applyDNS(cfg)
+				registerBackends(registry, cfg, apiHistory, vaultMgr)
+				registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
+				// Dedup thresholds are no longer tunable at runtime — the
+				// legacy memstore.Store.SetDedupConfig path is gone (#337
+				// close-out). dedup.Options.NearDupThreshold is set at
+				// Extractor/Consolidator wire time; a restart is required
+				// to change it.
+				log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
+			}
+			if git != nil {
+				git.Commit("config updated via CC")
+			}
+		case cc.ReloadTiers:
+			if err := tierStore.Reload(); err != nil {
+				log.Printf("ERROR: tiers reload failed: %v", err)
+			} else {
+				log.Println("tiers reloaded")
+			}
+			routerBackend = tierStore.Current().RouterBackend
+			isAPIR := routerBackend != "" && routerBackend != "cli"
+			if isAPIR {
+				newModel := tierStore.Current().RouterModel
+				if newModel == "" {
+					if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
+						if !strings.Contains(fb, "/") {
+							fb = "anthropic/" + fb
+						}
+						newModel = fb
 					}
-					log.Println("skills reloaded")
 				}
-				if git != nil {
-					git.Commit("skills updated via CC")
+				routerModel = newModel
+				// Shut down CLI classifier if switching to API router.
+				if cliClassifier != nil {
+					cliClassifier.Close()
+					cliClassifier = nil
 				}
-			case cc.ReloadAgents:
-				if err := agentStore.Reload(); err != nil {
-					log.Printf("agents reload error: %v", err)
-				} else {
-					teams := agentStore.All()
-					log.Printf("agents reloaded (%d teams)", len(teams))
-					if len(teams) > 0 {
-						autoEnableAgentTier(tierStore)
+			} else {
+				newModel := resolveModel(tierStore.Current().RouterModel)
+				if newModel == "" {
+					newModel = resolveModel("haiku")
+				}
+				routerModel = newModel
+				// Rebuild the classifier system prompt from the fresh tier
+				// catalog. Without this, the persistent subprocess keeps
+				// stale tier state in its conversation history and the
+				// router ignores renames/additions until the next idle
+				// restart (#332).
+				newSysPrompt := classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter())
+				if cliClassifier != nil {
+					if err := cliClassifier.UpdateSystemPrompt(newSysPrompt); err != nil {
+						log.Printf("classifier: UpdateSystemPrompt failed: %v", err)
 					}
-				}
-			case cc.ReloadFirewall:
-				if newFWCfg, err := fwStore.Load(); err == nil {
-					fwProxy.Reload(newFWCfg)
+					if err := cliClassifier.UpdateModel(newModel); err != nil {
+						log.Printf("classifier: UpdateModel failed: %v", err)
+					}
 				} else {
-					log.Printf("firewall reload error: %v", err)
+					cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
+						Model:          newModel,
+						SystemPrompt:   newSysPrompt,
+						HomeDir:        homeDir,
+						DataDir:        dataDir,
+						Credential:     cliProvider.Credential,
+						IdleTimeout:    60 * time.Minute,
+						EmptyMCPConfig: cliProvider.EmptyMCPConfig,
+					})
+					go func() {
+						if err := cliClassifier.Start(); err != nil {
+							log.Printf("classifier: restart failed: %v", err)
+						}
+					}()
 				}
-			case cc.ReloadTools:
-				log.Println("tools reloaded")
-				if git != nil {
-					git.Commit("tools updated via CC")
+			}
+			// Re-publish Telegram bot command menu so newly-enabled or
+			// renamed force-command tiers appear in `/` autocomplete.
+			if telegramEnabled {
+				go refreshTelegramCommands(tg, tierStore)
+			}
+			if git != nil {
+				git.Commit("tiers updated via CC")
+			}
+		case cc.ReloadSkills:
+			if err := skillStore.Reload(); err != nil {
+				log.Printf("skills reload error: %v", err)
+			} else {
+				injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
+				if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
+					log.Printf("skills: capability mirror (reload): %v", err)
 				}
-			case cc.ReloadClaudeModels:
-				if err := claudeModelsStore.Reload(); err != nil {
-					log.Printf("ERROR: claude_models reload failed: %v", err)
-				} else {
-					log.Printf("claude_models reloaded (%d entries)", len(claudeModelsStore.Current()))
+				log.Println("skills reloaded")
+			}
+			if git != nil {
+				git.Commit("skills updated via CC")
+			}
+		case cc.ReloadAgents:
+			if err := agentStore.Reload(); err != nil {
+				log.Printf("agents reload error: %v", err)
+			} else {
+				teams := agentStore.All()
+				log.Printf("agents reloaded (%d teams)", len(teams))
+				if len(teams) > 0 {
+					autoEnableAgentTier(tierStore)
 				}
-				if eventBroker != nil {
-					eventBroker.Emit(cc.EventClaudeModels)
-				}
-				if git != nil {
-					git.Commit("claude_models updated via CC")
-				}
+			}
+		case cc.ReloadFirewall:
+			if newFWCfg, err := fwStore.Load(); err == nil {
+				fwProxy.Reload(newFWCfg)
+			} else {
+				log.Printf("firewall reload error: %v", err)
+			}
+		case cc.ReloadTools:
+			log.Println("tools reloaded")
+			if git != nil {
+				git.Commit("tools updated via CC")
+			}
+		case cc.ReloadClaudeModels:
+			if err := claudeModelsStore.Reload(); err != nil {
+				log.Printf("ERROR: claude_models reload failed: %v", err)
+			} else {
+				log.Printf("claude_models reloaded (%d entries)", len(claudeModelsStore.Current()))
+			}
+			if eventBroker != nil {
+				eventBroker.Emit(cc.EventClaudeModels)
+			}
+			if git != nil {
+				git.Commit("claude_models updated via CC")
 			}
 		}
 	}
 
-	for {
-		// Check for reload events (non-blocking).
-		select {
-		case event := <-reloadCh:
-			switch event {
-			case cc.ReloadConfig:
-				if newCfg, err := configStore.Load(); err == nil {
-					oldTZ := cfg.Timezone
-					oldTiersFile := cfg.TiersFile
-					cfg = newCfg
-					chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
-					if cfg.MaxSessions > 0 {
-						sessions.SetMaxSessions(cfg.MaxSessions)
-					}
-					if cfg.Timezone != oldTZ {
-						time.Local = resolveTimezone(cfg.Timezone)
-						log.Printf("config: timezone changed to %q (logs updated, scheduler needs restart)", cfg.Timezone)
-					}
-					// Switch tiers file if tiers_file changed.
-					if cfg.TiersFile != oldTiersFile {
-						newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
-						if err := tierStore.SetPath(newTiersPath); err != nil {
-							log.Printf("ERROR: tiers reload from new path %q failed: %v - keeping previous tiers", newTiersPath, err)
-						} else {
-							log.Printf("config: tiers_file changed to %q", newTiersPath)
-						}
-					}
-					// Re-register backends if config changed.
-					applyDNS(cfg)
-					registerBackends(registry, cfg, apiHistory, vaultMgr)
-					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
-					// Dedup thresholds are no longer tunable at runtime — the
-					// legacy memstore.Store.SetDedupConfig path is gone (#337
-					// close-out). dedup.Options.NearDupThreshold is set at
-					// Extractor/Consolidator wire time; a restart is required
-					// to change it.
-					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
-				}
-				if git != nil {
-					git.Commit("config updated via CC")
-				}
-			case cc.ReloadTiers:
-				if err := tierStore.Reload(); err != nil {
-					log.Printf("ERROR: tiers reload failed: %v - keeping previous config", err)
-				} else {
-					log.Println("tiers reloaded")
-				}
-				routerBackend = tierStore.Current().RouterBackend
-				isAPIR := routerBackend != "" && routerBackend != "cli"
-				if isAPIR {
-					newModel := tierStore.Current().RouterModel
-					if newModel == "" {
-						if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
-							if !strings.Contains(fb, "/") {
-								fb = "anthropic/" + fb
-							}
-							newModel = fb
-						}
-					}
-					routerModel = newModel
-					if cliClassifier != nil {
-						cliClassifier.Close()
-						cliClassifier = nil
-					}
-				} else {
-					newModel := resolveModel(tierStore.Current().RouterModel)
-					if newModel == "" {
-						newModel = resolveModel("haiku")
-					}
-					routerModel = newModel
-					newSysPrompt := classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter())
-					if cliClassifier != nil {
-						// Rebuild the classifier system prompt so the
-						// persistent subprocess sees the fresh tier catalog
-						// (#332).
-						if err := cliClassifier.UpdateSystemPrompt(newSysPrompt); err != nil {
-							log.Printf("classifier: UpdateSystemPrompt failed: %v", err)
-						}
-						if err := cliClassifier.UpdateModel(newModel); err != nil {
-							log.Printf("classifier: UpdateModel failed: %v", err)
-						}
-					} else {
-						// API→CLI router switch: previous profile used an API
-						// router so cliClassifier was shut down. Start a fresh
-						// one so classification resumes on the CLI path.
-						cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
-							Model:          newModel,
-							SystemPrompt:   newSysPrompt,
-							HomeDir:        homeDir,
-							DataDir:        dataDir,
-							Credential:     cliProvider.Credential,
-							IdleTimeout:    60 * time.Minute,
-							EmptyMCPConfig: cliProvider.EmptyMCPConfig,
-						})
-						go func() {
-							if err := cliClassifier.Start(); err != nil {
-								log.Printf("classifier: restart failed: %v", err)
-							}
-						}()
-					}
-				}
-				// Re-publish Telegram bot command menu so newly-enabled or
-				// renamed force-command tiers appear in `/` autocomplete.
-				if telegramEnabled {
-					go refreshTelegramCommands(tg, tierStore)
-				}
-				if git != nil {
-					git.Commit("tiers updated via CC")
-				}
-			case cc.ReloadTools:
-				log.Println("tools reloaded")
-				if git != nil {
-					git.Commit("tools updated via CC")
-				}
-			case cc.ReloadSkills:
-				if err := skillStore.Reload(); err != nil {
-					log.Printf("skills reload error: %v", err)
-				} else {
-					injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
-					if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
-						log.Printf("skills: capability mirror (reload): %v", err)
-					}
-					log.Println("skills reloaded")
-				}
-				if git != nil {
-					git.Commit("skills updated via CC")
-				}
-			case cc.ReloadAgents:
-				if err := agentStore.Reload(); err != nil {
-					log.Printf("agents reload error: %v", err)
-				} else {
-					teams := agentStore.All()
-					log.Printf("agents reloaded (%d teams)", len(teams))
-					if len(teams) > 0 {
-						autoEnableAgentTier(tierStore)
-					}
-				}
-			case cc.ReloadFirewall:
-				if newFWCfg, err := fwStore.Load(); err == nil {
-					fwProxy.Reload(newFWCfg)
-				} else {
-					log.Printf("firewall reload error: %v", err)
-				}
-			case cc.ReloadClaudeModels:
-				if err := claudeModelsStore.Reload(); err != nil {
-					log.Printf("ERROR: claude_models reload failed: %v", err)
-				} else {
-					log.Printf("claude_models reloaded (%d entries)", len(claudeModelsStore.Current()))
-				}
-				if eventBroker != nil {
-					eventBroker.Emit(cc.EventClaudeModels)
-				}
-			}
-		default:
+	// Dedicated reload goroutine so reload events are never starved by the
+	// Telegram long-poll or any other foreground loop.
+	go func() {
+		for event := range reloadCh {
+			handleReload(event)
 		}
+	}()
 
+	// When Telegram is not configured, the HTTP server and the reload
+	// goroutine already own the process; block forever to keep main alive.
+	if !telegramEnabled {
+		log.Println("Running in Control Center-only mode (no Telegram polling)")
+		select {}
+	}
+
+	for {
 		updates, err := getUpdates(client, token, offset)
 		if err != nil {
 			log.Printf("getUpdates error: %v", err)

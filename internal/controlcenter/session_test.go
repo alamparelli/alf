@@ -371,6 +371,52 @@ func TestSlidingExpiry_PersistsTTL(t *testing.T) {
 	}
 }
 
+func TestCheck_SignalsRenewalPastHalfway(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	ss := NewSessionStore(func() time.Time { return now })
+
+	ttl := 10 * time.Hour
+	id, _ := ss.Issue(100, ttl)
+
+	// Before halfway: Check reports valid, not renewed.
+	now = now.Add(3 * time.Hour)
+	ss.nowFn = func() time.Time { return now }
+
+	valid, renewed, gotTTL := ss.Check(id)
+	if !valid || renewed {
+		t.Errorf("before halfway: expected valid=true renewed=false, got valid=%v renewed=%v", valid, renewed)
+	}
+	if gotTTL != 0 {
+		t.Errorf("before halfway: expected ttl=0, got %v", gotTTL)
+	}
+
+	// Past halfway: Check reports valid AND renewed, returns TTL.
+	now = now.Add(3 * time.Hour) // total 6h, past 5h halfway
+	ss.nowFn = func() time.Time { return now }
+
+	valid, renewed, gotTTL = ss.Check(id)
+	if !valid || !renewed {
+		t.Errorf("past halfway: expected valid=true renewed=true, got valid=%v renewed=%v", valid, renewed)
+	}
+	if gotTTL != ttl {
+		t.Errorf("past halfway: expected ttl=%v, got %v", ttl, gotTTL)
+	}
+
+	// Immediately after renewal, next Check should NOT re-signal renewal.
+	valid, renewed, _ = ss.Check(id)
+	if !valid || renewed {
+		t.Errorf("after renewal: expected valid=true renewed=false, got valid=%v renewed=%v", valid, renewed)
+	}
+}
+
+func TestCheck_InvalidSession(t *testing.T) {
+	ss := NewSessionStore(nil)
+	valid, renewed, ttl := ss.Check("nonexistent")
+	if valid || renewed || ttl != 0 {
+		t.Errorf("unknown id: expected (false,false,0), got (%v,%v,%v)", valid, renewed, ttl)
+	}
+}
+
 func TestSlidingExpiry_LegacySessionNoTTL(t *testing.T) {
 	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	ss := NewSessionStore(func() time.Time { return now })

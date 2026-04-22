@@ -218,5 +218,6 @@ func (h *SSHHandler) handleSSHSession(w http.ResponseWriter, r *http.Request, se
 }
 
 func (h *SSHHandler) checkSSHAuth(r *http.Request) bool {
-	return checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns) != authNone
+	method, _ := checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns)
+	return method != authNone
 }

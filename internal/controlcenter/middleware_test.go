@@ -144,6 +144,59 @@ func TestAuthMiddleware_ValidCookie(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_CookieRefreshedOnRenewal(t *testing.T) {
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := t0
+	ss := NewSessionStore(func() time.Time { return now })
+
+	ttl := 10 * time.Hour
+	id, _ := ss.Issue(100, ttl)
+
+	handler := authMiddleware("test-token", ss, nil)(okHandler())
+
+	// Before halfway: no renewal, no Set-Cookie on response.
+	now = t0.Add(3 * time.Hour)
+	req1 := httptest.NewRequest("GET", "/api/status", nil)
+	req1.AddCookie(&http.Cookie{Name: "cc_session", Value: id})
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("before halfway: expected 200, got %d", rec1.Code)
+	}
+	if got := rec1.Result().Cookies(); len(got) != 0 {
+		t.Errorf("before halfway: expected no Set-Cookie, got %d cookies", len(got))
+	}
+
+	// Past halfway: sliding expiry kicks in, response should Set-Cookie.
+	now = t0.Add(6 * time.Hour)
+	req2 := httptest.NewRequest("GET", "/api/status", nil)
+	req2.AddCookie(&http.Cookie{Name: "cc_session", Value: id})
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("past halfway: expected 200, got %d", rec2.Code)
+	}
+	var refreshed *http.Cookie
+	for _, c := range rec2.Result().Cookies() {
+		if c.Name == "cc_session" {
+			refreshed = c
+			break
+		}
+	}
+	if refreshed == nil {
+		t.Fatal("past halfway: expected cc_session Set-Cookie on renewal")
+	}
+	if refreshed.Value != id {
+		t.Errorf("refreshed cookie value: expected %q, got %q", id, refreshed.Value)
+	}
+	if refreshed.MaxAge != int(ttl/time.Second) {
+		t.Errorf("refreshed MaxAge: expected %d, got %d", int(ttl/time.Second), refreshed.MaxAge)
+	}
+	if !refreshed.HttpOnly {
+		t.Error("refreshed cookie should be HttpOnly")
+	}
+}
+
 func TestAuthMiddleware_InvalidCookie(t *testing.T) {
 	ss := NewSessionStore(nil)
 	handler := authMiddleware("test-token", ss, nil)(okHandler())

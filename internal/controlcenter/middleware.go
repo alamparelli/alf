@@ -99,15 +99,28 @@ const (
 	authSession            // cc_session cookie
 )
 
+// sessionRenewal carries the info needed to refresh the cc_session cookie on
+// the response when sliding expiry extended a session on the server side.
+// Only populated when checkRequestAuth returns authSession AND the session was
+// just renewed.
+type sessionRenewal struct {
+	id  string
+	ttl time.Duration
+}
+
 // checkRequestAuth checks whether a request carries valid authentication via
 // Bearer token (primary or extra), cc_bearer cookie, or session cookie.
 // This is the single source of truth for request authentication, used by both
 // the middleware stack and handlers registered outside it (Terminal, SSH).
-func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, extraTokenFns []func() string) authMethod {
+//
+// When the session cookie path succeeds and sliding expiry just extended the
+// session server-side, the returned renew value is non-nil so the caller can
+// re-emit the cookie with a fresh MaxAge.
+func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, extraTokenFns []func() string) (authMethod, *sessionRenewal) {
 	// Check Authorization header against primary token.
 	auth := r.Header.Get("Authorization")
 	if token != "" && strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(token)) == 1 {
-		return authBearer
+		return authBearer, nil
 	}
 
 	// Check Authorization header against extra tokens (e.g. mobile API token).
@@ -115,7 +128,7 @@ func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, ext
 		bearer := auth[7:]
 		for _, fn := range extraTokenFns {
 			if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(et)) == 1 {
-				return authBearer
+				return authBearer, nil
 			}
 		}
 	}
@@ -124,23 +137,51 @@ func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, ext
 	if cookie, err := r.Cookie("cc_bearer"); err == nil {
 		cv := cookie.Value
 		if token != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(token)) == 1 {
-			return authCookie
+			return authCookie, nil
 		}
 		for _, fn := range extraTokenFns {
 			if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(et)) == 1 {
-				return authCookie
+				return authCookie, nil
 			}
 		}
 	}
 
 	// Check session cookie.
 	if sessions != nil {
-		if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
-			return authSession
+		if cookie, err := r.Cookie("cc_session"); err == nil {
+			valid, renewed, ttl := sessions.Check(cookie.Value)
+			if valid {
+				if renewed {
+					return authSession, &sessionRenewal{id: cookie.Value, ttl: ttl}
+				}
+				return authSession, nil
+			}
 		}
 	}
 
-	return authNone
+	return authNone, nil
+}
+
+// refreshSessionCookie re-emits cc_session with a fresh MaxAge so the browser's
+// cookie lifetime tracks server-side sliding expiry. Attribute choices match
+// autoIssueSession: Secure is inferred from TLS / X-Forwarded-Proto; SameSite
+// is None when Secure (required for iframe fetch), Lax otherwise.
+func refreshSessionCookie(w http.ResponseWriter, r *http.Request, id string, ttl time.Duration) {
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	sameSite := http.SameSiteLaxMode
+	if secure {
+		sameSite = http.SameSiteNoneMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "cc_session",
+		Value:    id,
+		Path:     "/",
+		MaxAge:   int(ttl / time.Second),
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
+	})
+	log.Printf("[CC] session cookie refreshed (sliding expiry, ttl=%s) from %s", ttl, clientIP(r))
 }
 
 // authMiddleware rejects requests without a valid Bearer token or session cookie.
@@ -302,10 +343,12 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 				return
 			}
 
-			result := checkRequestAuth(r, token, sessions, extraTokenFns)
+			result, renewal := checkRequestAuth(r, token, sessions, extraTokenFns)
 			if result != authNone {
 				if result == authBearer {
 					autoIssueSession(w, r, sessions)
+				} else if renewal != nil {
+					refreshSessionCookie(w, r, renewal.id, renewal.ttl)
 				}
 				next.ServeHTTP(w, r)
 				return

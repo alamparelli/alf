@@ -169,5 +169,6 @@ func termSafeEnv(homeDir, user string) []string {
 }
 
 func (h *TerminalHandler) checkAuth(r *http.Request) bool {
-	return checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns) != authNone
+	method, _ := checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns)
+	return method != authNone
 }

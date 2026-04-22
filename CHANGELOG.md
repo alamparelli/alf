@@ -10,7 +10,7 @@ see the Git history and GitHub releases for pre-0.7.9 changes.
 
 ---
 
-## [0.7.9] — Foundation rework
+## [0.7.9] — 2026-04-22 — Foundation rework
 
 **Zero new user-facing feature. Clean base. Five unified blocks. WASM-ready.**
 

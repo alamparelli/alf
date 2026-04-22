@@ -77,6 +77,97 @@ to land instead of twelve.
   agents, supervisor→platform/, trace→platform/, signal→platform/,
   tlsgen→platform/) fixed.
 
+### Added
+
+- **User-editable Claude models allowlist** ([#370](https://github.com/alamparelli/alf/issues/370)) —
+  `claude_models.txt` is seeded into `configDir` on first run and hot-reloadable.
+  Users can add upcoming model IDs without waiting for an ALF release; the
+  validator now accepts any string matching the relaxed model-name pattern.
+- **`GET /api/models/claude`** — returns the live allowlist as
+  `{"models": [...]}` so the Control Center can populate model pickers.
+  Edits to `claude_models.txt` fire the `claude_models` SSE event so
+  connected clients refresh their dropdowns without a page reload.
+- **Model dropdown in tier + router forms** — Control Center fetches
+  `/api/models/claude` on mount and renders a `<select>` (visually
+  consistent with the rest of the form). The list hot-reloads via SSE.
+- User guide for `claude_models.txt` added at
+  `internal/controlcenter/docs/claude-models.md`; `tier-setup.md` updated
+  with a cross-reference.
+
+### Fixed
+
+- **Classifier stale tier catalog** ([#332](https://github.com/alamparelli/alf/issues/332)) —
+  the persistent Claude CLI classifier was started with a generic system
+  prompt; tier context lived only in the per-call user prompt. Stale tier
+  lists from earlier turns could influence routing after a rename, disable,
+  or add. Fix: `BuildSystemPrompt` is now used at startup and
+  `UpdateSystemPrompt` is called on every `ReloadTiers`; errors from both
+  methods are surfaced instead of swallowed.
+- **Daemon reload starved by Telegram long-poll** — reload events sat in
+  the channel unprocessed during a 20–30 s `getUpdates` call, so the first
+  classification after a profile switch used the stale catalog. Reload
+  handling moved to a dedicated goroutine shared by both CC-only and
+  Telegram-enabled modes (−133 net lines in `main.go`).
+- **Hot-reload router + active sessions on profile switch** — two bugs
+  broke the reload path: (1) on API→CLI router transition, a nil
+  `cliClassifier` caused the reload branch to silently no-op; (2)
+  sessions persisting `ForcedTier` were not validated against the new
+  profile's `TierStore.Snapshot()`, forwarding a dangling tier name.
+  Both are now corrected.
+- **cc_session cookie not refreshed under sliding expiry** —
+  `SessionStore.Valid()` extended `expiresAt` server-side past the
+  halfway point, but the cookie's `MaxAge` was fixed at login and never
+  re-emitted, so browsers dropped the cookie at its original deadline
+  and forced a magic-link regen even for active users. `Check()` now
+  surfaces the renewal event and `authMiddleware` re-`SetCookie`s
+  `cc_session` with a fresh MaxAge on each renewal. `Valid()` is
+  read-only (no sliding side-effect) so the rate-limiter's validity
+  probe no longer consumes the renewal before the auth path can act
+  on it. Verified end-to-end on homelab: authenticated request past
+  halfway → `Set-Cookie` header present, `expires_at` bumped by full
+  TTL, log line `[CC] session cookie refreshed (sliding expiry, ttl=…)`.
+
+### Security
+
+Fixes for [#385](https://github.com/alamparelli/alf/issues/385) — seven
+items landed in this release cycle; two remain for 0.8.0 (bundle signing
+and the marketplace audit trail):
+
+- **Vault socket perms tightened** — `vault.sock` chmod changed from
+  `0666` to `0660`; `chmod` errors are now logged instead of silently
+  discarded.
+- **Marketplace registry must use HTTPS** — `NewManager` rejects plain
+  `http://` URLs (marketplace disabled, daemon stays alive). Override with
+  `ALF_MARKETPLACE_INSECURE=1` emits a loud warning and is accepted; all
+  other schemes are rejected.
+- **Telegram listener fails closed on empty allowlist** — malformed or
+  empty `TELEGRAM_CHAT_ID` values now prevent the bot from starting. An
+  empty allowlist previously degraded to "allow any chat ID"; the fix makes
+  opt-in explicit with an error log distinguishing the three misconfiguration
+  modes.
+- **Telegram `/bash` command removed** — the command was gated only on the
+  chat-ID allowlist. A leaked bot token plus a known chat ID was sufficient
+  for remote shell access. Users needing remote shell should use SSH.
+  A regression test (`TestTelegramBashCommandStaysRemoved`) guards against
+  re-introduction.
+- **Skill entry names validated in `linkAppSkills`** — bundled skill
+  directory names are now restricted to `[a-zA-Z0-9_-]+`; entries not
+  matching are skipped and logged. `unlinkAppSkills` applies the same filter
+  to avoid removing unrelated paths. Naming rules documented in
+  `creating-skills.md`.
+- **Symlink escape via non-existent path tails blocked** —
+  `CheckBoundary`'s "file doesn't exist yet" branch previously used
+  `filepath.Clean(Dir(path))` — a lexical operation that never resolves
+  symlinks. An app-planted symlink pointing outside the workspace combined
+  with a deep non-existent tail could pass the check while the kernel write
+  landed outside. `resolveExistingAncestor` now walks up until `Lstat`
+  succeeds, calls `EvalSymlinks` on that prefix, and rejoins the
+  non-existent tail.
+
+### Dependencies
+
+- Vite bumped to 8.0.9; DOMPurify bumped to 3.4.1.
+
 ### Known gaps — tracked for 0.8.0
 
 - [#377](https://github.com/alamparelli/alf/issues/377) — absorb

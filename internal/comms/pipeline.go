@@ -87,12 +87,20 @@ func (e *ChatEngine) Process(ctx context.Context, msg InMessage) (*ProcessResult
 		}
 	}
 	// Validate the forced tier against the current tier catalog — a profile
-	// switch may have removed or disabled the tier that the session was
-	// locked to. In that case, clear the session override and fall through
-	// to normal classification.
+	// switch may have removed the tier the session was locked to. Force-command
+	// tiers bypass the enabled check (that's their purpose), so only clear the
+	// override when the tier is completely absent from the catalog.
 	if forcedTier != "" {
-		if !IsTierValid(forcedTier, e.TierStore.Snapshot()) {
-			log.Printf("[comms] forced tier %q no longer valid, clearing session override", forcedTier)
+		snap := e.TierStore.Snapshot()
+		found := false
+		for _, t := range snap.Tiers {
+			if t.Name == forcedTier && (t.Enabled || t.ForceCommand) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			log.Printf("[comms] forced tier %q no longer in catalog, clearing session override", forcedTier)
 			e.Sessions.SetForcedTier(sessionKey, "")
 			forcedTier = ""
 		}

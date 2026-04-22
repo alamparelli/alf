@@ -98,13 +98,11 @@
     { name: 'skills', desc: 'List available skills' },
   ]
 
-  // Only tiers that are enabled AND marked force_command in the profile are
-  // exposed as /<tier> autocompletions — mirrors the backend's matching rule
-  // in chat_service.go and the Telegram bot menu in refreshTelegramCommands.
+  // Tiers marked force_command are exposed as /<tier> autocompletions regardless
+  // of their enabled state — force_command bypasses enabled (same rule as backend).
   let allCommands = $derived.by(() => {
     const cmds = [...builtinCommands]
     for (const t of tiers) {
-      if (t.enabled === false) continue
       if (!t.force_command) continue
       cmds.push({ name: t.name, desc: `Force tier: ${t.model}` })
     }

@@ -263,16 +263,25 @@ func (ss *SessionStore) RevokeChat(chatID int64) {
 }
 
 // Valid returns true if the session ID exists and has not expired.
-// Implements sliding expiry: when a session is past the halfway point of its TTL,
-// its expiration is extended by the original TTL from now.
+// Read-only: does NOT trigger sliding expiry. Use Check when you also need to
+// renew the cookie on the response.
 func (ss *SessionStore) Valid(id string) bool {
-	v, _, _ := ss.Check(id)
-	return v
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	s, ok := ss.sessions[id]
+	if !ok {
+		return false
+	}
+	return !ss.nowFn().After(s.expiresAt)
 }
 
-// Check validates the session and reports whether sliding expiry just renewed it.
-// When renewed is true, the caller should re-emit the session cookie with a fresh
-// MaxAge of ttl seconds so the browser's cookie lifetime tracks the server's.
+// Check validates the session and applies sliding expiry: when past the halfway
+// point of its TTL, expiresAt is extended by the original TTL from now and
+// renewed is reported so the caller can re-emit the session cookie with a fresh
+// MaxAge. Only the auth path (authMiddleware) should call Check — other
+// call-sites that merely need validity (rate-limiter bypass, dedup) should use
+// Valid so they don't consume the renewal event.
 func (ss *SessionStore) Check(id string) (valid bool, renewed bool, ttl time.Duration) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()

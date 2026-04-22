@@ -429,12 +429,12 @@
               {/each}
             </select>
           {:else}
-            <input type="text" list="claude-models-list" bind:value={tierForm.model} placeholder="e.g. sonnet, claude-opus-4-7 — type or pick" />
-            <datalist id="claude-models-list">
+            <select bind:value={tierForm.model}>
+              <option value="">-- select --</option>
               {#each availableClaudeModels as m}
-                <option value={m}></option>
+                <option value={m}>{m}</option>
               {/each}
-            </datalist>
+            </select>
           {/if}
           {#if selectedModelInfo()?.tool_calls === false && tierForm.tools.length > 0}
             <span class="form-warning">This model does not support tool calling.</span>
@@ -579,12 +579,12 @@
               {/each}
             </select>
           {:else}
-            <input type="text" list="claude-models-list-router" bind:value={routerForm.router_model} placeholder="e.g. haiku, claude-haiku-4-5 — type or pick" />
-            <datalist id="claude-models-list-router">
+            <select bind:value={routerForm.router_model}>
+              <option value="">-- select --</option>
               {#each availableClaudeModels as m}
-                <option value={m}></option>
+                <option value={m}>{m}</option>
               {/each}
-            </datalist>
+            </select>
           {/if}
         </label>
         <label class="full-width">

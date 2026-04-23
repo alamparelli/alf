@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/mood"
+	"github.com/alamparelli/alf/internal/platform/mood"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
 )

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 const (

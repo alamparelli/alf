@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	sbexec "github.com/alamparelli/alf/internal/sandbox/exec"
 )
 
 const globMaxResults = 500
@@ -60,8 +62,8 @@ func (t GlobNativeTool) Run(_ context.Context, argsJSON string) (string, error) 
 			base = "."
 		}
 	} else {
-		base = ResolvePath(t.DataDir, base)
-		if _, err := CheckBoundary(t.DataDir, base); err != nil {
+		base = sbexec.ResolvePath(t.DataDir, base)
+		if _, err := sbexec.CheckBoundary(t.DataDir, base); err != nil {
 			return "", err
 		}
 	}

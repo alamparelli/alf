@@ -160,9 +160,6 @@
     }
   }
 
-  // Admin mode: runs terminal as alfd (uid 1001) with daemon-level access
-  let adminMode = $state(false)
-
   // Mobile input bar
   let isMobile = $state(false)
   let mobileInput = $state('')
@@ -173,10 +170,9 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const base = sshService
+    const url = sshService
       ? `${proto}//${location.host}/api/ssh/${encodeURIComponent(sshService)}/session`
       : `${proto}//${location.host}/api/terminal`
-    const url = adminMode && !sshService ? base + '?mode=admin' : base
     ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
 
@@ -272,11 +268,6 @@
       term.reset()
     }
     connect()
-  }
-
-  function toggleAdmin() {
-    adminMode = !adminMode
-    newSession()
   }
 
   function handleMobileCopy() {
@@ -457,7 +448,6 @@
   }
 
   .term-btn:hover { background: var(--border); }
-  .term-btn.admin-active { color: var(--accent); }
 
   .term-container {
     flex: 1;

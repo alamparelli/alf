@@ -14,6 +14,7 @@
   let availableTools = $state([]);
   let backendModels = $state({});
   let providerSchemas = $state([]);
+  let availableClaudeModels = $state([]); // user-editable list from /api/models/claude
   let loading = $state(true);
 
   // Config profiles
@@ -101,6 +102,15 @@
       toasts.error('Failed to load tiers: ' + e.message);
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadClaudeModels() {
+    try {
+      const data = await api('GET', '/api/models/claude');
+      availableClaudeModels = Array.isArray(data?.models) ? data.models : [];
+    } catch {
+      availableClaudeModels = [];
     }
   }
 
@@ -289,8 +299,10 @@
   onMount(() => {
     loadTiers();
     loadConfigs();
-    const unsub = events.subscribe('tiers', () => { loadTiers(); loadConfigs(); });
-    return () => unsub();
+    loadClaudeModels();
+    const unsubTiers = events.subscribe('tiers', () => { loadTiers(); loadConfigs(); });
+    const unsubModels = events.subscribe('claude_models', () => { loadClaudeModels(); });
+    return () => { unsubTiers(); unsubModels(); };
   });
 </script>
 
@@ -417,7 +429,12 @@
               {/each}
             </select>
           {:else}
-            <input type="text" bind:value={tierForm.model} placeholder="e.g. sonnet, haiku, opus" />
+            <select bind:value={tierForm.model}>
+              <option value="">-- select --</option>
+              {#each availableClaudeModels as m}
+                <option value={m}>{m}</option>
+              {/each}
+            </select>
           {/if}
           {#if selectedModelInfo()?.tool_calls === false && tierForm.tools.length > 0}
             <span class="form-warning">This model does not support tool calling.</span>
@@ -562,7 +579,12 @@
               {/each}
             </select>
           {:else}
-            <input type="text" bind:value={routerForm.router_model} placeholder="e.g. haiku" />
+            <select bind:value={routerForm.router_model}>
+              <option value="">-- select --</option>
+              {#each availableClaudeModels as m}
+                <option value={m}>{m}</option>
+              {/each}
+            </select>
           {/if}
         </label>
         <label class="full-width">

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 // classifyProviderError returns a user-friendly notice for provider errors.

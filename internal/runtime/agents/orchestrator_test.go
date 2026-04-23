@@ -1,0 +1,1515 @@
+package agents
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	provider "github.com/alamparelli/alf/internal/ai/provider"
+)
+
+// mockProvider returns pre-defined responses in sequence.
+type mockProvider struct {
+	responses []*provider.Result
+	errors    []error
+	idx       atomic.Int32
+	calls     []mockCall
+	mu        chan struct{} // mutex via buffered chan
+}
+
+type mockCall struct {
+	Prompt string
+	Params provider.Params
+}
+
+func newMockProvider(responses []*provider.Result, errors []error) *mockProvider {
+	if errors == nil {
+		errors = make([]error, len(responses))
+	}
+	return &mockProvider{
+		responses: responses,
+		errors:    errors,
+		mu:        make(chan struct{}, 1),
+	}
+}
+
+func (m *mockProvider) Invoke(_ context.Context, prompt string, params provider.Params, _ provider.OnProgress) (*provider.Result, error) {
+	i := int(m.idx.Add(1) - 1)
+
+	m.mu <- struct{}{}
+	m.calls = append(m.calls, mockCall{Prompt: prompt, Params: params})
+	<-m.mu
+
+	if i >= len(m.responses) {
+		return &provider.Result{Text: `{"response": "fallback"}`}, nil
+	}
+	return m.responses[i], m.errors[i]
+}
+
+func (m *mockProvider) callCount() int {
+	return int(m.idx.Load())
+}
+
+// testStore creates a Store with the given teams.
+func testStore(teams ...*TeamConfig) Store {
+	dir, _ := os.MkdirTemp("", "agents-test-*")
+	for _, tc := range teams {
+		data, _ := json.Marshal(tc)
+		os.WriteFile(filepath.Join(dir, tc.Name+".json"), data, 0o644)
+	}
+	return NewFileAgentStore(dir)
+}
+
+// testTierResolver maps tier names to test params for orchestrator tests.
+var testTierResolver = func(tierName string) (TierParams, bool) {
+	switch tierName {
+	case "sonnet":
+		return TierParams{Model: "claude-sonnet-4-6", Effort: "high", WriteCapable: true}, true
+	case "haiku":
+		return TierParams{Model: "claude-haiku-4-5", Effort: "low"}, true
+	case "default":
+		return TierParams{Model: "claude-haiku-4-5"}, true
+	default:
+		return TierParams{}, false
+	}
+}
+
+var testTeam = &TeamConfig{
+	Name:             "content",
+	Description:      "Content team",
+	MaxAgentsPerReq:  3,
+	GlobalTimeoutMin: 1,
+	Agents: []AgentConfig{
+		{Name: "researcher", Description: "Researches", Tier: "sonnet", SystemPrompt: "Research."},
+		{Name: "writer", Description: "Writes", Tier: "sonnet", SystemPrompt: "Write."},
+		{Name: "reviewer", Description: "Reviews", Tier: "haiku", SystemPrompt: "Review."},
+	},
+}
+
+func TestDirectResponse(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"response": "Here is your answer."}`, SessionID: "s1", CostUSD: 0.01},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "hello", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "Here is your answer." {
+		t.Errorf("unexpected: %s", text)
+	}
+	if meta.Status != "completed" {
+		t.Errorf("unexpected status: %s", meta.Status)
+	}
+	if mp.callCount() != 1 {
+		t.Errorf("expected 1 call, got %d", mp.callCount())
+	}
+}
+
+func TestSingleDelegation(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator: delegate
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find info"}]}`, SessionID: "s1", CostUSD: 0.01},
+		// Agent: researcher
+		{Text: "Research results here", SessionID: "a1", CostUSD: 0.005},
+		// Orchestrator: final response
+		{Text: `{"response": "Based on research: answer"}`, SessionID: "s1", CostUSD: 0.01},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "research this", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "Based on research") {
+		t.Errorf("unexpected: %s", text)
+	}
+	if meta.Iterations != 2 {
+		t.Errorf("expected 2 iterations, got %d", meta.Iterations)
+	}
+	if len(meta.AgentCalls) != 1 {
+		t.Errorf("expected 1 agent call, got %d", len(meta.AgentCalls))
+	}
+}
+
+func TestParallelDelegation(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator: delegate to 3
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "t1"}, {"agent": "content/writer", "task": "t2"}, {"agent": "content/reviewer", "task": "t3"}]}`, SessionID: "s1"},
+		// 3 agents
+		{Text: "r1", SessionID: "a1"},
+		{Text: "r2", SessionID: "a2"},
+		{Text: "r3", SessionID: "a3"},
+		// Orchestrator: done
+		{Text: `{"response": "combined"}`, SessionID: "s1"},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "do everything", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "combined" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if len(meta.AgentCalls) != 3 {
+		t.Errorf("expected 3 agent calls, got %d", len(meta.AgentCalls))
+	}
+}
+
+func TestMultiIteration(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Iter 1: delegate research
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "research"}]}`},
+		{Text: "research data"},
+		// Iter 2: delegate writer with research
+		{Text: `{"delegates": [{"agent": "content/writer", "task": "write based on research"}]}`},
+		{Text: "draft article"},
+		// Iter 3: final
+		{Text: `{"response": "polished article"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "write article", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "polished article" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if meta.Iterations != 3 {
+		t.Errorf("expected 3 iterations, got %d", meta.Iterations)
+	}
+}
+
+func TestAgentSessionResume(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Iter 1: delegate researcher
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "t1"}]}`},
+		{Text: "partial", SessionID: "agent-sess-1"},
+		// Iter 2: re-delegate same agent
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "more detail"}]}`},
+		{Text: "complete", SessionID: "agent-sess-2"},
+		// Done
+		{Text: `{"response": "final"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that second agent call used resume ID.
+	mp.mu <- struct{}{}
+	defer func() { <-mp.mu }()
+
+	// calls[1] = first agent call (no resume), calls[3] = second agent call (should have resume)
+	if len(mp.calls) < 4 {
+		t.Fatalf("expected at least 4 calls, got %d", len(mp.calls))
+	}
+	if mp.calls[1].Params.ResumeID != "" {
+		t.Error("first agent call should not have resume ID")
+	}
+	if mp.calls[3].Params.ResumeID != "agent-sess-1" {
+		t.Errorf("second agent call should resume session, got %q", mp.calls[3].Params.ResumeID)
+	}
+}
+
+func TestPlainTextTriggersNudge(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// First: plain text (invalid) - should trigger nudge
+		{Text: "Just a plain answer without JSON"},
+		// After nudge: proper delegation
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find info"}]}`},
+		{Text: "agent result"},
+		{Text: `{"response": "done"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, _, err := orch.Run(context.Background(), "hi", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "done" {
+		t.Errorf("unexpected: %s", text)
+	}
+	// Should have been nudged: 1 (plain text) + 1 (delegate) + 1 (agent) + 1 (response) = 4 calls
+	if mp.callCount() != 4 {
+		t.Errorf("expected 4 calls (nudge + delegation), got %d", mp.callCount())
+	}
+}
+
+func TestReDelegateOnBadResult(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find X"}]}`},
+		{Text: "garbage data"},
+		// Orchestrator re-delegates
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find X with more specificity"}]}`},
+		{Text: "proper result"},
+		{Text: `{"response": "answer from proper result"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "answer from proper result" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if len(meta.AgentCalls) != 2 {
+		t.Errorf("expected 2 agent calls, got %d", len(meta.AgentCalls))
+	}
+}
+
+func TestSwitchAgentOnFailure(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find"}]}`},
+		// researcher fails
+		nil,
+		// Orchestrator switches to writer
+		{Text: `{"delegates": [{"agent": "content/writer", "task": "write instead"}]}`},
+		{Text: "written content"},
+		{Text: `{"response": "done"}`},
+	}, []error{nil, fmt.Errorf("agent failed"), nil, nil, nil})
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "done" {
+		t.Errorf("unexpected: %s", text)
+	}
+	// First call had error, second succeeded
+	if len(meta.AgentCalls) != 2 {
+		t.Errorf("expected 2 agent calls, got %d", len(meta.AgentCalls))
+	}
+	if meta.AgentCalls[0].Error == "" {
+		t.Error("first agent call should have error")
+	}
+}
+
+func TestPartialSuccess(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Delegate to 2 agents
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "t1"}, {"agent": "content/writer", "task": "t2"}]}`},
+		{Text: "good result"},           // researcher succeeds
+		nil,                             // writer fails
+		// Orchestrator re-delegates writer only
+		{Text: `{"delegates": [{"agent": "content/writer", "task": "retry writing"}]}`},
+		{Text: "now it works"},
+		{Text: `{"response": "combined"}`},
+	}, []error{nil, nil, fmt.Errorf("writer crashed"), nil, nil, nil})
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 3 agent calls: researcher ok, writer fail, writer retry ok
+	if len(meta.AgentCalls) != 3 {
+		t.Errorf("expected 3 agent calls, got %d", len(meta.AgentCalls))
+	}
+}
+
+func TestAgentErrorPassthrough(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find"}]}`},
+		nil, // agent fails
+		{Text: `{"response": "handled the error"}`},
+	}, []error{nil, fmt.Errorf("provider error"), nil})
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "handled the error" {
+		t.Errorf("unexpected: %s", text)
+	}
+}
+
+func TestMaxIterationsExceeded(t *testing.T) {
+	// Create a provider that always delegates (never returns final response).
+	responses := make([]*provider.Result, 60)
+	for i := range responses {
+		if i%2 == 0 {
+			responses[i] = &provider.Result{Text: `{"delegates": [{"agent": "content/researcher", "task": "more"}]}`}
+		} else {
+			responses[i] = &provider.Result{Text: "result"}
+		}
+	}
+	mp := newMockProvider(responses, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	_, meta, err := orch.Run(context.Background(), "infinite", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err == nil {
+		t.Fatal("expected error for max iterations")
+	}
+	if !strings.Contains(err.Error(), "max iterations") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if meta.Status != "timeout" {
+		t.Errorf("expected timeout status, got %s", meta.Status)
+	}
+}
+
+func TestGlobalTimeout(t *testing.T) {
+	// Use a pre-cancelled context.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "slow"}]}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	_, _, err := orch.Run(ctx, "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err == nil {
+		// The orchestrator call itself may succeed on cancelled context
+		// depending on provider behavior. That's acceptable.
+		return
+	}
+}
+
+func TestMaxAgentsPerRequest(t *testing.T) {
+	team := &TeamConfig{
+		Name:            "small",
+		Description:     "Small team",
+		MaxAgentsPerReq: 2,
+		Agents: []AgentConfig{
+			{Name: "a", Tier: "haiku", SystemPrompt: "a"},
+			{Name: "b", Tier: "haiku", SystemPrompt: "b"},
+			{Name: "c", Tier: "haiku", SystemPrompt: "c"},
+		},
+	}
+	mp := newMockProvider([]*provider.Result{
+		// Request 3 agents but limit is 2
+		{Text: `{"delegates": [{"agent": "small/a", "task": "t1"}, {"agent": "small/b", "task": "t2"}, {"agent": "small/c", "task": "t3"}]}`},
+		{Text: "r1"}, {Text: "r2"}, // only 2 will run
+		{Text: `{"response": "done"}`},
+	}, nil)
+	store := testStore(team)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(meta.AgentCalls) != 2 {
+		t.Errorf("expected 2 agent calls (truncated from 3), got %d", len(meta.AgentCalls))
+	}
+}
+
+func TestInvalidAgentName(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/nonexistent", "task": "t1"}]}`},
+		{Text: `{"response": "handled"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "handled" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if len(meta.AgentCalls) != 1 {
+		t.Fatalf("expected 1 agent call, got %d", len(meta.AgentCalls))
+	}
+	if meta.AgentCalls[0].Error == "" {
+		t.Error("expected error for invalid agent")
+	}
+}
+
+func TestInvalidTeamName(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "faketeam/agent", "task": "t1"}]}`},
+		{Text: `{"response": "handled"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "handled" {
+		t.Errorf("unexpected: %s", text)
+	}
+}
+
+func TestEmptyDelegates(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": []}`},
+		{Text: `{"response": "ok"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "ok" {
+		t.Errorf("unexpected: %s", text)
+	}
+}
+
+func TestNoTeamsConfigured(t *testing.T) {
+	mp := newMockProvider(nil, nil)
+	dir := t.TempDir()
+	store := NewFileAgentStore(dir)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "no agent teams") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMalformedJSONTriggersNudge(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Malformed JSON - triggers nudge
+		{Text: `not json at all`},
+		// After nudge: proper response
+		{Text: `{"response": "ok after nudge"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "ok after nudge" {
+		t.Errorf("expected nudged response, got: %s", text)
+	}
+	if mp.callCount() != 2 {
+		t.Errorf("expected 2 calls (nudge + proper), got %d", mp.callCount())
+	}
+}
+
+func TestSessionExpired(t *testing.T) {
+	callIdx := atomic.Int32{}
+	mp := &mockProvider{
+		responses: []*provider.Result{
+			{Text: `{"response": "ok"}`, SessionID: "s1"},
+		},
+		errors: []error{nil},
+		mu:     make(chan struct{}, 1),
+	}
+	// Override with custom behavior: first call fails with session error.
+	origInvoke := mp
+	customProv := &sessionExpiredProvider{
+		inner:   origInvoke,
+		callIdx: &callIdx,
+	}
+
+	store := testStore(testTeam)
+	orch := NewOrchestrator(customProv, store, t.TempDir(), nil, testTierResolver)
+	text, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "ok" {
+		t.Errorf("unexpected: %s", text)
+	}
+}
+
+type sessionExpiredProvider struct {
+	inner   *mockProvider
+	callIdx *atomic.Int32
+}
+
+func (p *sessionExpiredProvider) Invoke(ctx context.Context, prompt string, params provider.Params, onProgress provider.OnProgress) (*provider.Result, error) {
+	idx := p.callIdx.Add(1)
+	if idx == 1 && params.ResumeID != "" {
+		return nil, fmt.Errorf("No conversation found with id fake-session")
+	}
+	return p.inner.Invoke(ctx, prompt, params, onProgress)
+}
+
+func TestTaskMetaTracking(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find"}]}`, CostUSD: 0.01},
+		{Text: "found it", CostUSD: 0.005},
+		{Text: `{"response": "done"}`, CostUSD: 0.01},
+	}, nil)
+	store := testStore(testTeam)
+	dataDir := t.TempDir()
+	orch := NewOrchestrator(mp, store, dataDir, nil, testTierResolver)
+
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check task.json was written.
+	taskDir := filepath.Join(dataDir, "agents", meta.ID)
+	data, err := os.ReadFile(filepath.Join(taskDir, "task.json"))
+	if err != nil {
+		t.Fatalf("task.json not found: %v", err)
+	}
+
+	var saved TaskMeta
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatalf("invalid task.json: %v", err)
+	}
+	if saved.Status != "completed" {
+		t.Errorf("expected completed, got %s", saved.Status)
+	}
+	if saved.Iterations != 2 {
+		t.Errorf("expected 2 iterations, got %d", saved.Iterations)
+	}
+}
+
+func TestWorkingDirCreated(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find"}]}`},
+		{Text: "result"},
+		{Text: `{"response": "done"}`},
+	}, nil)
+	store := testStore(testTeam)
+	dataDir := t.TempDir()
+	orch := NewOrchestrator(mp, store, dataDir, nil, testTierResolver)
+
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskDir := filepath.Join(dataDir, "agents", meta.ID)
+	// Check task dir exists (orchestrator and read-only agents share it).
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Error("task dir not created")
+	}
+	// Check task.json was written.
+	if _, err := os.Stat(filepath.Join(taskDir, "task.json")); err != nil {
+		t.Error("task.json not written")
+	}
+}
+
+func TestTimeoutDuringAgent(t *testing.T) {
+	// Provider that blocks on agent call.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "slow"}]}`},
+	}, nil)
+	// Override second call to block.
+	blockProv := &blockingProvider{inner: mp}
+
+	store := testStore(testTeam)
+	orch := NewOrchestrator(blockProv, store, t.TempDir(), nil, testTierResolver)
+
+	_, _, err := orch.Run(ctx, "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	// Should error due to timeout.
+	if err == nil {
+		// If it somehow completes, that's also acceptable if the context was checked.
+		return
+	}
+}
+
+type blockingProvider struct {
+	inner *mockProvider
+	count atomic.Int32
+}
+
+func (p *blockingProvider) Invoke(ctx context.Context, prompt string, params provider.Params, onProgress provider.OnProgress) (*provider.Result, error) {
+	n := p.count.Add(1)
+	if n > 1 {
+		// Block until context cancelled.
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return p.inner.Invoke(ctx, prompt, params, onProgress)
+}
+
+// --- RunConfig tests ---
+
+func TestRunConfigOrchestratorMaxTurnsPassedToBrain(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"response": "done"}`, CostUSD: 0.01},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6", OrchestratorMaxTurns: 5}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The orchestrator brain call should have MaxTurns=5.
+	if len(mp.calls) == 0 {
+		t.Fatal("no calls recorded")
+	}
+	if mp.calls[0].Params.MaxTurns != 5 {
+		t.Errorf("expected MaxTurns=5 for brain, got %d", mp.calls[0].Params.MaxTurns)
+	}
+}
+
+func TestRunConfigMaxTurnsDefault(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"response": "done"}`, CostUSD: 0.01},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Default orchestrator turns = defaultOrchestratorTurns (3).
+	if mp.calls[0].Params.MaxTurns != 3 {
+		t.Errorf("expected default orchestrator MaxTurns=3, got %d", mp.calls[0].Params.MaxTurns)
+	}
+}
+
+func TestRunConfigModelAndEffort(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"response": "done"}`, CostUSD: 0.01},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{
+		Model:  "claude-sonnet-4-6",
+		Effort: "low",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if mp.calls[0].Params.Model != "claude-sonnet-4-6" {
+		t.Errorf("expected model claude-sonnet-4-6, got %s", mp.calls[0].Params.Model)
+	}
+	if mp.calls[0].Params.Effort != "low" {
+		t.Errorf("expected effort low, got %s", mp.calls[0].Params.Effort)
+	}
+}
+
+func TestRunConfigMaxIterations(t *testing.T) {
+	// Provider always delegates, never returns a response - should stop at MaxIterations.
+	mp := newMockProvider(nil, nil) // falls through to fallback
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	// Override fallback to always delegate.
+	delegateProvider := &alwaysDelegateProvider{}
+	orch.provider = delegateProvider
+
+	_, meta, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6", MaxIterations: 2}, nil)
+	if err == nil {
+		t.Fatal("expected max iterations error")
+	}
+	if !strings.Contains(err.Error(), "max iterations (2) exceeded") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if meta.Iterations != 2 {
+		t.Errorf("expected 2 iterations, got %d", meta.Iterations)
+	}
+}
+
+// alwaysDelegateProvider returns delegate JSON for orchestrator calls and results for agent calls.
+type alwaysDelegateProvider struct {
+	count atomic.Int32
+}
+
+func (p *alwaysDelegateProvider) Invoke(_ context.Context, _ string, params provider.Params, _ provider.OnProgress) (*provider.Result, error) {
+	n := int(p.count.Add(1))
+	// Odd calls = orchestrator brain, Even calls = agent.
+	if n%2 == 1 {
+		return &provider.Result{Text: `{"delegates": [{"agent": "content/researcher", "task": "do it"}]}`}, nil
+	}
+	return &provider.Result{Text: "agent result"}, nil
+}
+
+func TestRunNonBlocking(t *testing.T) {
+	// Verify the orchestrator can run concurrently (not blocking the caller).
+	slowProvider := &slowMockProvider{
+		delay: 50 * time.Millisecond,
+		result: &provider.Result{
+			Text:    `{"response": "done"}`,
+			CostUSD: 0.01,
+		},
+	}
+	store := testStore(testTeam)
+	orch := NewOrchestrator(slowProvider, store, t.TempDir(), nil, testTierResolver)
+
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+		close(done)
+	}()
+
+	// The goroutine should not block - we should be able to do other work.
+	select {
+	case <-done:
+		// Completed - good.
+	case <-time.After(5 * time.Second):
+		t.Fatal("orchestrator Run blocked for too long")
+	}
+}
+
+type slowMockProvider struct {
+	delay  time.Duration
+	result *provider.Result
+}
+
+func (p *slowMockProvider) Invoke(_ context.Context, _ string, _ provider.Params, _ provider.OnProgress) (*provider.Result, error) {
+	time.Sleep(p.delay)
+	return p.result, nil
+}
+
+func TestRunningTracksTask(t *testing.T) {
+	// Provider that blocks until cancelled.
+	blocker := make(chan struct{})
+	bp := &channelProvider{ch: blocker}
+	store := testStore(testTeam)
+	orch := NewOrchestrator(bp, store, t.TempDir(), nil, testTierResolver)
+
+	// No running tasks initially.
+	if len(orch.Running()) != 0 {
+		t.Fatal("expected no running tasks")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		orch.Run(ctx, "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+		close(done)
+	}()
+
+	// Wait for the task to register.
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(orch.Running()) > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("task never appeared in Running()")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	running := orch.Running()
+	if len(running) != 1 {
+		t.Fatalf("expected 1 running task, got %d", len(running))
+	}
+	if running[0].ID == "" {
+		t.Error("running task has empty ID")
+	}
+
+	// Cancel and verify cleanup.
+	cancel()
+	<-done
+
+	if len(orch.Running()) != 0 {
+		t.Error("task still in Running() after completion")
+	}
+}
+
+func TestCancelStopsTask(t *testing.T) {
+	blocker := make(chan struct{})
+	bp := &channelProvider{ch: blocker}
+	store := testStore(testTeam)
+	orch := NewOrchestrator(bp, store, t.TempDir(), nil, testTierResolver)
+
+	done := make(chan struct{})
+	go func() {
+		orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+		close(done)
+	}()
+
+	// Wait for task to register.
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(orch.Running()) > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("task never appeared")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Cancel via the orchestrator API.
+	running := orch.Running()
+	ok := orch.Cancel(running[0].ID)
+	if !ok {
+		t.Fatal("Cancel returned false")
+	}
+
+	select {
+	case <-done:
+		// Good - task stopped.
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't stop after Cancel")
+	}
+}
+
+func TestCancelAllStopsTasks(t *testing.T) {
+	blocker := make(chan struct{})
+	bp := &channelProvider{ch: blocker}
+	store := testStore(testTeam)
+	orch := NewOrchestrator(bp, store, t.TempDir(), nil, testTierResolver)
+
+	// Start two tasks.
+	done1 := make(chan struct{})
+	done2 := make(chan struct{})
+	go func() { orch.Run(context.Background(), "test1", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil); close(done1) }()
+	go func() { orch.Run(context.Background(), "test2", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil); close(done2) }()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(orch.Running()) >= 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected 2 running tasks, got %d", len(orch.Running()))
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	n := orch.CancelAll()
+	if n != 2 {
+		t.Errorf("expected CancelAll to return 2, got %d", n)
+	}
+
+	select {
+	case <-done1:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task 1 didn't stop")
+	}
+	select {
+	case <-done2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task 2 didn't stop")
+	}
+}
+
+// channelProvider blocks on Invoke until the channel is closed or context is cancelled.
+type channelProvider struct {
+	ch chan struct{}
+}
+
+func (p *channelProvider) Invoke(ctx context.Context, _ string, _ provider.Params, _ provider.OnProgress) (*provider.Result, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-p.ch:
+		return &provider.Result{Text: `{"response": "done"}`}, nil
+	}
+}
+
+func TestProgressCallbacks(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator: delegate
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+		// Agent: result
+		{Text: "found it", CostUSD: 0.005},
+		// Orchestrator: final
+		{Text: `{"response": "here you go"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	var phases []string
+	progress := func(phase, detail string) {
+		phases = append(phases, phase)
+	}
+
+	_, _, err := orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, progress)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have: thinking, planning, agent, agent_done, synthesizing, thinking
+	expected := map[string]bool{
+		"thinking":     false,
+		"planning":     false,
+		"agent":        false,
+		"agent_done":   false,
+		"synthesizing": false,
+	}
+	for _, p := range phases {
+		expected[p] = true
+	}
+	for phase, seen := range expected {
+		if !seen {
+			t.Errorf("missing progress phase: %s (got phases: %v)", phase, phases)
+		}
+	}
+}
+
+func TestRun_PlanOutput(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// First call: plan
+		{Text: `{"plan": [{"step": 1, "description": "research", "agents": ["content/researcher"]}, {"step": 2, "description": "write", "agents": ["content/writer"]}]}`},
+		// After plan_approved: delegate
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find info"}]}`},
+		// Agent result
+		{Text: "research results"},
+		// Final response
+		{Text: `{"response": "done with plan"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "plan test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "done with plan" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if len(meta.Plan) != 2 {
+		t.Errorf("expected 2 plan steps, got %d", len(meta.Plan))
+	}
+	if meta.Plan[0].Description != "research" {
+		t.Errorf("unexpected plan step: %s", meta.Plan[0].Description)
+	}
+}
+
+func TestRun_PlanWithValidation_Approved(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Plan
+		{Text: `{"plan": [{"step": 1, "description": "do stuff"}]}`},
+		// After approval: delegate
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+		{Text: "result"},
+		{Text: `{"response": "completed"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	var phases []string
+	progress := func(phase, _ string) { phases = append(phases, phase) }
+
+	done := make(chan struct{})
+	var text string
+	var meta *TaskMeta
+	var runErr error
+	go func() {
+		text, meta, runErr = orch.Run(context.Background(), "validate test", nil, RunConfig{Model: "claude-sonnet-4-6", NeedValidation: true}, progress)
+		close(done)
+	}()
+
+	// Wait for awaiting_approval status.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_approval" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Approve the plan.
+	running := orch.Running()
+	ok := orch.Approve(running[0].ID, ApprovalDecision{Approved: true})
+	if !ok {
+		t.Fatal("Approve returned false")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete after approval")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if text != "completed" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if meta.Status != "completed" {
+		t.Errorf("expected completed, got %s", meta.Status)
+	}
+
+	// Check phases include awaiting_approval.
+	hasAwaiting := false
+	for _, p := range phases {
+		if p == "awaiting_approval" {
+			hasAwaiting = true
+		}
+	}
+	if !hasAwaiting {
+		t.Errorf("expected awaiting_approval phase, got: %v", phases)
+	}
+}
+
+func TestRun_PlanWithValidation_Rejected(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// First plan
+		{Text: `{"plan": [{"step": 1, "description": "bad plan"}]}`},
+		// After rejection: revised plan
+		{Text: `{"plan": [{"step": 1, "description": "better plan"}]}`},
+		// After auto-approved: delegate
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+		{Text: "result"},
+		{Text: `{"response": "done"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	done := make(chan struct{})
+	var meta *TaskMeta
+	var runErr error
+	go func() {
+		_, meta, runErr = orch.Run(context.Background(), "reject test", nil, RunConfig{Model: "claude-sonnet-4-6", NeedValidation: true}, nil)
+		close(done)
+	}()
+
+	// Wait for awaiting_approval.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_approval" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Reject with feedback.
+	running := orch.Running()
+	ok := orch.Approve(running[0].ID, ApprovalDecision{Approved: false, Feedback: "add more detail"})
+	if !ok {
+		t.Fatal("Approve returned false")
+	}
+
+	// After rejection, the second plan won't need validation (NeedValidation only blocks once,
+	// but our code re-enters the plan block with NeedValidation still true).
+	// Wait for the second awaiting_approval.
+	deadline = time.After(2 * time.Second)
+	for {
+		running = orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_approval" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached second awaiting_approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Approve the second plan.
+	ok = orch.Approve(running[0].ID, ApprovalDecision{Approved: true})
+	if !ok {
+		t.Fatal("second Approve returned false")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if meta.ValidationFeedback != "add more detail" {
+		t.Errorf("expected feedback, got %q", meta.ValidationFeedback)
+	}
+}
+
+func TestRun_PlanWithValidation_ContextCancelled(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"plan": [{"step": 1, "description": "plan"}]}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var meta *TaskMeta
+	go func() {
+		_, meta, _ = orch.Run(ctx, "cancel test", nil, RunConfig{Model: "claude-sonnet-4-6", NeedValidation: true}, nil)
+		close(done)
+	}()
+
+	// Wait for awaiting_approval.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_approval" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Cancel context instead of approving.
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't exit after cancel")
+	}
+
+	if meta.Status != "interrupted" {
+		t.Errorf("expected interrupted, got %s", meta.Status)
+	}
+}
+
+func TestApprove_NotAwaitingApproval(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	// Start a task that's running (not awaiting approval).
+	blocker := make(chan struct{})
+	blockProv := &channelProvider{ch: blocker}
+	orch.provider = blockProv
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		orch.Run(ctx, "test", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+		close(done)
+	}()
+
+	// Wait for running.
+	deadline := time.After(2 * time.Second)
+	for {
+		if len(orch.Running()) > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("task never started")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	running := orch.Running()
+	ok := orch.Approve(running[0].ID, ApprovalDecision{Approved: true})
+	if ok {
+		t.Error("Approve should return false for non-awaiting task")
+	}
+
+	cancel()
+	<-done
+}
+
+func TestApprove_UnknownTaskID(t *testing.T) {
+	store := testStore(testTeam)
+	orch := NewOrchestrator(nil, store, t.TempDir(), nil, testTierResolver)
+	ok := orch.Approve("nonexistent", ApprovalDecision{Approved: true})
+	if ok {
+		t.Error("Approve should return false for unknown task")
+	}
+}
+
+func TestRun_NoPlan_BackwardsCompatible(t *testing.T) {
+	// Model goes straight to delegates (no plan) - existing behavior.
+	mp := newMockProvider([]*provider.Result{
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find"}]}`},
+		{Text: "result"},
+		{Text: `{"response": "done"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	text, meta, err := orch.Run(context.Background(), "no plan", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "done" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if len(meta.Plan) != 0 {
+		t.Errorf("expected no plan, got %d steps", len(meta.Plan))
+	}
+}
+
+// --- extractQuestions tests ---
+
+func TestExtractQuestions(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want []string
+	}{
+		{"single", "Before [[QUESTION: What color?]] after", []string{"What color?"}},
+		{"multiple", "[[QUESTION: A?]] and [[QUESTION: B?]]", []string{"A?", "B?"}},
+		{"none", "No questions here", nil},
+		{"empty marker", "[[QUESTION: ]]", nil},
+		{"with brackets", "[[QUESTION: Pick A or B?]]", []string{"Pick A or B?"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractQuestions(tt.text)
+			if len(got) != len(tt.want) {
+				t.Fatalf("extractQuestions(%q) = %v, want %v", tt.text, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("question[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestParseOrchestratorOutput_WithQuestions(t *testing.T) {
+	text := `{"questions": ["What format?", "Include examples?"]}`
+	out := parseOrchestratorOutput(text)
+	if len(out.Questions) != 2 {
+		t.Fatalf("expected 2 questions, got %d", len(out.Questions))
+	}
+	if out.Questions[0] != "What format?" {
+		t.Errorf("question[0] = %q", out.Questions[0])
+	}
+}
+
+func TestRun_ArbitrationFromOrchestrator(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator outputs questions.
+		{Text: `{"questions": ["Pick A or B?"]}`},
+		// After user answers: final response.
+		{Text: `{"response": "done with A"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	var phases []string
+	progress := func(phase, _ string) { phases = append(phases, phase) }
+
+	done := make(chan struct{})
+	var text string
+	var meta *TaskMeta
+	var runErr error
+	go func() {
+		text, meta, runErr = orch.Run(context.Background(), "choose", nil, RunConfig{Model: "claude-sonnet-4-6"}, progress)
+		close(done)
+	}()
+
+	// Wait for awaiting_arbitration.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_arbitration" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_arbitration")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Verify questions are stored.
+	running := orch.Running()
+	if len(running[0].Meta.Questions) != 1 {
+		t.Fatalf("expected 1 question, got %d", len(running[0].Meta.Questions))
+	}
+
+	// Send answer.
+	ok := orch.Approve(running[0].ID, ApprovalDecision{Approved: true, Feedback: "A"})
+	if !ok {
+		t.Fatal("Approve returned false")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete after arbitration response")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if text != "done with A" {
+		t.Errorf("unexpected: %s", text)
+	}
+	if meta.Status != "completed" {
+		t.Errorf("expected completed, got %s", meta.Status)
+	}
+
+	// Verify awaiting_arbitration phase was emitted.
+	hasArbitration := false
+	for _, p := range phases {
+		if p == "awaiting_arbitration" {
+			hasArbitration = true
+		}
+	}
+	if !hasArbitration {
+		t.Errorf("expected awaiting_arbitration phase, got: %v", phases)
+	}
+}
+
+func TestRun_ArbitrationFromAgentMarkers(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator: delegate.
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "find"}]}`},
+		// Agent returns result with QUESTION marker.
+		{Text: "Found data. [[QUESTION: Should I include charts?]]"},
+		// After user answers: orchestrator gets results and responds.
+		{Text: `{"response": "done with charts"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	done := make(chan struct{})
+	var text string
+	var runErr error
+	go func() {
+		text, _, runErr = orch.Run(context.Background(), "analyze", nil, RunConfig{Model: "claude-sonnet-4-6"}, nil)
+		close(done)
+	}()
+
+	// Wait for awaiting_arbitration.
+	deadline := time.After(2 * time.Second)
+	for {
+		running := orch.Running()
+		if len(running) > 0 && running[0].Meta.Status == "awaiting_arbitration" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("never reached awaiting_arbitration")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Answer.
+	running := orch.Running()
+	orch.Approve(running[0].ID, ApprovalDecision{Approved: true, Feedback: "Yes, include charts"})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if text != "done with charts" {
+		t.Errorf("unexpected: %s", text)
+	}
+}
+
+func TestRun_ArbitrationThenApproval(t *testing.T) {
+	mp := newMockProvider([]*provider.Result{
+		// Orchestrator asks questions first.
+		{Text: `{"questions": ["Which approach?"]}`},
+		// After user answers: plan.
+		{Text: `{"plan": [{"step": 1, "description": "do stuff"}]}`},
+		// After approval: delegate.
+		{Text: `{"delegates": [{"agent": "content/researcher", "task": "go"}]}`},
+		{Text: "result"},
+		{Text: `{"response": "completed"}`},
+	}, nil)
+	store := testStore(testTeam)
+	orch := NewOrchestrator(mp, store, t.TempDir(), nil, testTierResolver)
+
+	done := make(chan struct{})
+	var text string
+	var runErr error
+	go func() {
+		text, _, runErr = orch.Run(context.Background(), "test", nil, RunConfig{Model: "claude-sonnet-4-6", NeedValidation: true}, nil)
+		close(done)
+	}()
+
+	// Wait for arbitration.
+	waitForStatus := func(status string) {
+		deadline := time.After(2 * time.Second)
+		for {
+			running := orch.Running()
+			if len(running) > 0 && running[0].Meta.Status == status {
+				return
+			}
+			select {
+			case <-deadline:
+				t.Fatalf("never reached %s", status)
+			default:
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+	}
+
+	waitForStatus("awaiting_arbitration")
+	running := orch.Running()
+	orch.Approve(running[0].ID, ApprovalDecision{Approved: true, Feedback: "approach A"})
+
+	waitForStatus("awaiting_approval")
+	running = orch.Running()
+	orch.Approve(running[0].ID, ApprovalDecision{Approved: true})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task didn't complete")
+	}
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if text != "completed" {
+		t.Errorf("unexpected: %s", text)
+	}
+}

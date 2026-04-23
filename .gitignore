@@ -47,11 +47,16 @@ dev-vault-data/
 dev-cache/
 dev-claude-session/
 secrets
+!internal/sandbox/secrets/
+!internal/sandbox/secrets/**
+!internal/secrets/
+!internal/secrets/**
 
 # Private (not for public repo)
 .claude/
 mobile/
-technical/
+technical/*
+!technical/TEST-BASELINE.md
 journal
 video-factory-output/
 prototypes/

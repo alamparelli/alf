@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // TelegramHandler handles GET, PUT, DELETE /api/telegram for configuring Telegram integration.

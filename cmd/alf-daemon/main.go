@@ -15,37 +15,78 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
+	"github.com/alamparelli/alf/internal/ai"
+	"github.com/alamparelli/alf/internal/capability"
+	"github.com/alamparelli/alf/internal/runtime/agents"
+	"github.com/alamparelli/alf/internal/runtime/classifier"
 	"github.com/alamparelli/alf/internal/comms"
-	"github.com/alamparelli/alf/internal/conversation"
-	"github.com/alamparelli/alf/internal/firewall"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/marketplace"
-	"github.com/alamparelli/alf/internal/secrets"
-	"github.com/alamparelli/alf/internal/vault"
+	"github.com/alamparelli/alf/internal/envsecrets"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/eventlog"
-	"github.com/alamparelli/alf/internal/gittrack"
-	"github.com/alamparelli/alf/internal/media"
+	"github.com/alamparelli/alf/internal/platform/eventlog"
+	"github.com/alamparelli/alf/internal/platform/gittrack"
+	"github.com/alamparelli/alf/internal/platform/media"
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/memstore"
-	"github.com/alamparelli/alf/internal/mood"
-	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/router"
+	"github.com/alamparelli/alf/internal/memory/socketsrv"
+	"github.com/alamparelli/alf/internal/memory/curation"
+	"github.com/alamparelli/alf/internal/platform/mood"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/runtime"
+	"github.com/alamparelli/alf/internal/sandbox"
+	"github.com/alamparelli/alf/internal/sandbox/integrity"
 	"github.com/alamparelli/alf/internal/scheduler"
-	"github.com/alamparelli/alf/internal/session"
-	"github.com/alamparelli/alf/internal/signal"
-	"github.com/alamparelli/alf/internal/supervisor"
+	"github.com/alamparelli/alf/internal/platform/session"
+	"github.com/alamparelli/alf/internal/platform/signal"
+	"github.com/alamparelli/alf/internal/platform/supervisor"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/trace"
+	"github.com/alamparelli/alf/internal/platform/trace"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
-	"github.com/alamparelli/alf/internal/updater"
+	"github.com/alamparelli/alf/internal/platform/updater"
 	"github.com/alamparelli/alf/internal/voice"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var version = "dev"
+
+// resolveModel is the daemon's local adapter around ai.ResolveModel so call
+// sites keep the `func(string) string` shape that several downstream APIs
+// (agents.NewOrchestrator, cc.NewChatService, ...) still require. Introduced
+// by #340 R5g as part of removing the router shim from the daemon's imports.
+var resolveModel = func(s string) string { return string(ai.ResolveModel(s)) }
+
+// collectRecentAllMem merges the last n messages across every conversation
+// in the memory store, sorted chronologically. Replacement for the previous
+// conversation.Store.RecentAll in the daemon's classifier wiring (#336).
+func collectRecentAllMem(s memory.Store, n int) []memory.Message {
+	if s == nil || n <= 0 {
+		return nil
+	}
+	ctx := context.Background()
+	convs, err := s.ListConvs(ctx, memory.ConvFilter{})
+	if err != nil || len(convs) == 0 {
+		return nil
+	}
+	var all []memory.Message
+	for _, c := range convs {
+		msgs, err := s.ListMessages(ctx, c.ID, memory.ListOpts{ApplySummary: true})
+		if err != nil {
+			continue
+		}
+		all = append(all, msgs...)
+	}
+	for i := 1; i < len(all); i++ {
+		for j := i; j > 0 && all[j-1].CreatedAt > all[j].CreatedAt; j-- {
+			all[j-1], all[j] = all[j], all[j-1]
+		}
+	}
+	if n > 0 && len(all) > n {
+		all = all[len(all)-n:]
+	}
+	return all
+}
 
 func main() {
 	// Ensure daemon-created files are group-writable (umask 002 = rwxrwxr-x).
@@ -57,11 +98,8 @@ func main() {
 
 	// CC_AUTH_TOKEN no longer passed to subprocess env — system-tools use ALF_TOOLS_SOCK instead.
 
-	// Set Claude OAuth token as env var if available (picked up by safeEnv for subprocesses).
-	if oauthToken := secrets.ReadSecret("CLAUDE_OAUTH_TOKEN"); oauthToken != "" {
-		os.Setenv("CLAUDE_CODE_OAUTH_TOKEN", oauthToken)
-		log.Println("Claude OAuth token loaded from secret")
-	}
+	// Claude OAuth: source of truth is ~/.claude/.credentials.json (written by `claude login`).
+	// The claude CLI subprocess reads it directly via HOME, and refreshes the token automatically.
 
 	// Verify claude CLI is available.
 	if _, err := exec.LookPath("claude"); err != nil {
@@ -217,6 +255,8 @@ func main() {
 	}
 	// Seed default tiers.json if not present (from image-embedded copy).
 	seedDefaultTiers(configDir)
+	// Seed default claude_models.txt (user-editable Claude model allowlist).
+	seedDefaultClaudeModels(configDir)
 	// Remove stale Claude settings that may restrict tool permissions.
 	cleanClaudeSettings(homeDir)
 
@@ -283,11 +323,20 @@ func main() {
 		}
 	}
 
-	telegramEnabled = token != "" && chatID != ""
-	if telegramEnabled {
-		allowedChatIDs = parseAllowedChatIDs(chatID)
-	} else {
+	// Parse chat allowlist first: an empty allowlist MUST disable Telegram.
+	// Running the listener with no allowlist lets any stranger who knows the
+	// bot handle interact with it (#385-3).
+	allowedChatIDs = parseAllowedChatIDs(chatID)
+	telegramEnabled = token != "" && len(allowedChatIDs) > 0
+	switch {
+	case telegramEnabled:
+		// ok
+	case token == "":
 		log.Println("Telegram not configured - running in Control Center-only mode")
+	case chatID == "":
+		log.Println("Telegram token set but TELEGRAM_CHAT_ID is empty - running in Control Center-only mode")
+	default:
+		log.Printf("ERROR: Telegram disabled - TELEGRAM_CHAT_ID=%q yielded no valid chat IDs. Expected comma-separated int64. Running in Control Center-only mode.", chatID)
 	}
 
 	// Load initial tiers config. Honour optional tiers_file override in config.
@@ -296,6 +345,14 @@ func main() {
 	if err := tierStore.Reload(); err != nil {
 		log.Printf("ERROR: failed to load tiers: %v - using defaults (your tiers.json edits are IGNORED)", err)
 	}
+
+	// Load Claude models allowlist (user-editable, feeds tier-form dropdown
+	// and validator). Falls back to embedded default when file absent/empty.
+	claudeModelsStore := cc.NewFileClaudeModelsStore(cc.ClaudeModelsPath(configDir))
+	if err := claudeModelsStore.Reload(); err != nil {
+		log.Printf("WARN: failed to load claude_models.txt: %v — using embedded default", err)
+	}
+	cc.SetClaudeModelsStore(claudeModelsStore)
 
 	// Load skill catalog: system → bundled copy → user (later overrides earlier).
 	skillStore := skills.NewFileSkillStore(skillsDir, filepath.Join(dataDir, "skills.d"), filepath.Join(dataDir, "skills"))
@@ -372,7 +429,7 @@ func main() {
 
 	// Voice transcriber (HTTP client to whisper-service container).
 	whisperURL := os.Getenv("WHISPER_URL")
-	whisperSecret := secrets.ReadSecret("WHISPER_SHARED_SECRET")
+	whisperSecret := envsecrets.ReadSecret("WHISPER_SHARED_SECRET")
 	var transcriber *voice.Transcriber
 	if whisperURL != "" && whisperSecret != "" {
 		instanceID, _ := os.Hostname()
@@ -400,49 +457,82 @@ func main() {
 		log.Println("voice transcription disabled (WHISPER_URL or WHISPER_SHARED_SECRET not set)")
 	}
 
-	// Embedding engine: resolve from tier config or EMBED_URL env (sidecar container).
-	var memDB *memstore.Store
-	if !cfg.EffectiveMemoryEnabled() {
-		log.Println("memstore: disabled by config (memory_enabled=false)")
-	} else {
-		embedder := resolveEmbedder(tierStore)
+	// Embedding engine: resolve once and share between the legacy memstore
+	// (cmd/alf-daemon-side semantic memory) and the unified memory.Store
+	// (opened below). Both paths consult the same HTTP embed-server.
+	var embedder memory.Embedder
+	if cfg.EffectiveMemoryEnabled() {
+		embedder = resolveEmbedder(tierStore)
 		if embedder != nil {
 			if stopper, ok := embedder.(interface{ Stop() }); ok {
 				defer stopper.Stop()
 			}
 		}
+	}
 
-		dedupCfg := memstore.DedupConfig{
-			TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
-			CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
-		}
-		var err error
-		memDB, err = memstore.New(filepath.Join(contextDir, "memory.db"), embedder, dedupCfg)
-		if err != nil {
-			log.Printf("warning: memory store init failed: %v", err)
-		} else {
-			defer memDB.Close()
-			memDB.CheckDims()
-			sockPath := filepath.Join(contextDir, "memstore.sock")
-			go memDB.ServeUnix(sockPath)
-			log.Printf("memstore: ready (db=%s, socket=%s)", filepath.Join(contextDir, "memory.db"), sockPath)
-		}
+	if !cfg.EffectiveMemoryEnabled() {
+		log.Println("memstore: disabled by config (memory_enabled=false)")
 	}
 
 	// Ring buffer tracking Alf's sent message IDs for reaction matching.
 	alfMsgIDs := newRingBuffer(200)
 	chatHistory := newChatHistoryBuffer(10) // last 10 exchanges per chat
 
-	// Chat message store (SQLite — replaces JSONL ring buffer).
-	chatDB, err := chatdb.New(dataDir)
-	if err != nil {
-		log.Fatalf("chatdb: %v", err)
+	// Unified memory store: replaces chatdb + conversation (see #336).
+	// One-shot import of any legacy dataDir/logs/chat.db happens BEFORE we
+	// open memory.db — migrateChatDBToMemoryDB refuses to run if memory.db
+	// already has messages, so pre-existing state is always safe.
+	// DEPRECATED: migration call planned for removal in v0.7.14
+	// (see cmd/alf-daemon/memorymigrate.go::migrationTargetRemovalVersion).
+	if err := migrateChatDBToMemoryDB(dataDir); err != nil {
+		log.Fatalf("memory migration: %v", err)
 	}
-	defer chatDB.Close()
-	// One-time migration from legacy JSONL format.
-	chatDB.MigrateFromJSONL(filepath.Join(dataDir, "logs", "chat_messages.jsonl"))
-	// Unified conversation store (rich messages with content blocks).
-	convStore := conversation.NewStore(dataDir)
+	var memOpts []memory.StoreOption
+	if embedder != nil {
+		memOpts = append(memOpts, memory.WithEmbedder(embedder))
+	}
+	memStore, err := memory.NewSQLiteStore(dataDir, memOpts...)
+	if err != nil {
+		log.Fatalf("memory: %v", err)
+	}
+	defer memStore.Close()
+
+	// memstore.Store retired in #337 close-out: every writer targets
+	// memory.Store directly (Extractor via dedup.IndexWithDedup,
+	// Consolidator same, ingest adapter, socket server via socketsrv).
+	// The legacy package now holds only the ONNX Embedder + Tokenizer
+	// that the embed-server binary consumes.
+
+	// One-shot backfill of pre-#337 memstore data into memory.Store so the
+	// recallers (#337c2, now reading from memory.Store) see the existing
+	// fact corpus. Sentinel-gated so it runs exactly once per install.
+	// Runs asynchronously — on a corpus of thousands of rows the
+	// embedder round-trips serialise to ~1s/row, which would block the
+	// HTTP server from opening for many minutes otherwise. Search+recall
+	// degrade gracefully until the backfill lands (missing rows just
+	// don't show up in vec hits yet).
+	if cfg.EffectiveMemoryEnabled() {
+		go func() {
+			if err := migrateMemstoreToMemory(context.Background(), contextDir, memStore); err != nil {
+				log.Printf("[memstore-migrate] failed: %v", err)
+			}
+		}()
+
+		// memstore.sock protocol now served by socketsrv on top of
+		// memory.Store (#337c4b3). The path is unchanged so memory-tools
+		// connects transparently; the old memDB.ServeUnix is gone, which
+		// means /remember calls from LLMs now land in memory.db directly
+		// (no longer through the C1 dual-write shim, which only covers
+		// the extractor/consolidator write paths).
+		sockPath := filepath.Join(contextDir, "memstore.sock")
+		memSocketSrv := socketsrv.New(memStore)
+		go func() {
+			if err := memSocketSrv.ServeUnix(sockPath); err != nil {
+				log.Printf("[memory-socket] serve %s: %v", sockPath, err)
+			}
+		}()
+		log.Printf("[memory-socket] ready (socket=%s)", sockPath)
+	}
 
 	// Provider: spawn-per-call Claude CLI for responses.
 	// Process isolation: daemon runs as alfd (uid 1001), subprocess runs as alf (uid 1000).
@@ -470,7 +560,7 @@ func main() {
 					}
 				}
 				if backend == "" || backend == "cli" {
-					model = router.ResolveModel(t.Model)
+					model = resolveModel(t.Model)
 				}
 				return agents.TierParams{
 					Model:        model,
@@ -485,7 +575,7 @@ func main() {
 		}
 		return agents.TierParams{}, false
 	}
-	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, router.ResolveModel, resolveTier)
+	orch := agents.NewOrchestrator(cliProvider, agentStore, dataDir, resolveModel, resolveTier)
 	orch.SetResolveProvider(func(backend string) provider.Provider {
 		return registry.ForBackend(backend)
 	})
@@ -510,19 +600,39 @@ func main() {
 			}
 		}
 	} else {
-		routerModel = router.ResolveModel(routerModel)
+		routerModel = resolveModel(routerModel)
 		if routerModel == "" {
 			routerModel = cc.DefaultFallbackModel(tierStore.Current())
 		}
 	}
 
+	// agentTeamsForRouter converts the agent store into router-friendly team info.
+	agentTeamsForRouter := func() []classifier.AgentTeamInfo {
+		teams := agentStore.All()
+		infos := make([]classifier.AgentTeamInfo, 0, len(teams))
+		for _, t := range teams {
+			names := make([]string, len(t.Agents))
+			for i, a := range t.Agents {
+				names[i] = a.Name
+			}
+			infos = append(infos, classifier.AgentTeamInfo{
+				Name:        t.Name,
+				Description: t.Description,
+				Agents:      names,
+			})
+		}
+		return infos
+	}
+
 	// Persistent CLI classifier: avoids 60s+ CLI startup per classification
 	// on low-end CPUs. Starts once, stays alive, resets after idle timeout.
+	// The system prompt is built from the live tier catalog so the subprocess
+	// has authoritative tier state in context from the first message (#332).
 	var cliClassifier *provider.CLIClassifier
 	if !isAPIRouter {
 		cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
 			Model:          routerModel,
-			SystemPrompt:   "You are a message classifier. Respond only with the tier name and reason.",
+			SystemPrompt:   classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter()),
 			HomeDir:        homeDir,
 			DataDir:        dataDir,
 			Credential:     cliProvider.Credential,
@@ -536,27 +646,9 @@ func main() {
 		}()
 	}
 
-	// agentTeamsForRouter converts the agent store into router-friendly team info.
-	agentTeamsForRouter := func() []router.AgentTeamInfo {
-		teams := agentStore.All()
-		infos := make([]router.AgentTeamInfo, 0, len(teams))
-		for _, t := range teams {
-			names := make([]string, len(t.Agents))
-			for i, a := range t.Agents {
-				names[i] = a.Name
-			}
-			infos = append(infos, router.AgentTeamInfo{
-				Name:        t.Name,
-				Description: t.Description,
-				Agents:      names,
-			})
-		}
-		return infos
-	}
-
 	// classifyMessageFull includes session context for continuity routing.
-	classifyMessageFull := func(message string, tiers *cc.TiersConfig, lastTier string, msgCount int, recentContext string) router.Result {
-		prompt := router.BuildClassifyPrompt(router.ClassifyInput{
+	classifyMessageFull := func(message string, tiers *cc.TiersConfig, lastTier string, msgCount int, recentContext string) classifier.Result {
+		prompt := classifier.BuildClassifyPrompt(classifier.ClassifyInput{
 			Message:       message,
 			Tiers:         tiers,
 			DataDir:       dataDir,
@@ -573,10 +665,10 @@ func main() {
 			cr, err := cliClassifier.Classify(context.Background(), prompt)
 			if err != nil {
 				log.Printf("router: classifier error: %v", err)
-				return router.FallbackResult(tiers)
+				return classifier.FallbackResult(tiers)
 			}
 			log.Printf("router: classify took %dms (classifier)", time.Since(start).Milliseconds())
-			return router.InterpretRaw(cr.Response, tiers, message)
+			return classifier.InterpretRaw(cr.Response, tiers, message)
 		}
 
 		routerProv := registry.ForBackend(routerBackend)
@@ -588,16 +680,16 @@ func main() {
 		result, err := routerProv.Invoke(context.Background(), prompt, params, nil)
 		if err != nil {
 			log.Printf("router: classify error: %v", err)
-			return router.FallbackResult(tiers)
+			return classifier.FallbackResult(tiers)
 		}
 		log.Printf("router: classify took %dms (backend=%s)", time.Since(start).Milliseconds(), routerBackend)
-		return router.InterpretRaw(result.Text, tiers, message)
+		return classifier.InterpretRaw(result.Text, tiers, message)
 	}
 
 	// Chat service for mobile app API (shares Claude invocation with Telegram bot).
 	classifyFn := func(message, lastTier string, msgCount int) cc.RouteResult {
 		// Build recent context from conversation history (cross-session for continuity).
-		recentCtx := conversation.BuildRouterContext(convStore.RecentAll(6), 3)
+		recentCtx := memory.BuildRouterContext(collectRecentAllMem(memStore, 6), 3)
 		rr := classifyMessageFull(message, tierStore.Current(), lastTier, msgCount, recentCtx)
 		return cc.RouteResult{
 			Tier:     rr.Tier,
@@ -606,8 +698,18 @@ func main() {
 			React:    rr.React,
 		}
 	}
-	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, chatDB, transcriber, classifyFn, router.ResolveModel, cliProvider)
+	chatService := cc.NewChatService(dataDir, configDir, contextDir, tierStore, chatSessions, eventLog, memStore, transcriber, classifyFn, resolveModel, cliProvider)
 	toolRegistry := tooling.NewRegistry(dataDir)
+	// Unified capability registry (#338 C2): every NativeTool registered on
+	// toolRegistry is mirrored as a KindTool Capability. Consumers keep using
+	// tooling.Registry until Runtime arrives in Step 4.
+	capRegistry := capability.NewRegistry()
+	toolRegistry.SetCapabilityRegistry(capRegistry)
+	// #338 C3: mirror every loaded Skill into capRegistry as KindSkill.
+	// Re-run after each Reload below so the unified registry stays in sync.
+	if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
+		log.Printf("skills: capability mirror (initial): %v", err)
+	}
 	nativeTools := []tooling.NativeTool{
 		tooling.BashNativeTool{DataDir: dataDir},
 		tooling.GrepNativeTool{DataDir: dataDir},
@@ -639,7 +741,7 @@ func main() {
 			log.Printf("[integrity] %s", msg)
 		}
 	}
-	integrityGuard, err := tooling.NewIntegrityGuard(dataDir, integrityNotify)
+	integrityGuard, err := integrity.NewIntegrityGuard(dataDir, integrityNotify)
 	if err != nil {
 		log.Printf("integrity guard: %v (disabled)", err)
 	} else {
@@ -666,17 +768,20 @@ func main() {
 		}
 		return result
 	}
+	// Recaller reads from the unified memory.Store (#337c2). The dual-write
+	// shim (C1) keeps documents in sync with memstore, so this path now
+	// covers both freshly-extracted facts and the existing memstore corpus
+	// (via the planned one-shot migration in C3).
 	var engineRecaller comms.MemoryRecaller
-	if memDB != nil {
-		engineRecaller = &commsRecaller{store: memDB}
+	if cfg.EffectiveMemoryEnabled() {
+		engineRecaller = &memoryCommsRecaller{store: memStore}
 	}
 	commEngine := comms.NewEngine(comms.EngineConfig{
 		DataDir:        dataDir,
 		ConfigDir:      configDir,
 		ContextDir:     contextDir,
 		Sessions:       chatSessions,
-		ConvStore:      convStore,
-		ChatDB:         chatDB,
+		Memory:         memStore,
 		EventLog:       eventLog,
 		TierStore:      &commsTierStore{ts: tierStore},
 		SkillStore:     skillStore,
@@ -686,7 +791,7 @@ func main() {
 		ToolRegistry:   toolRegistry,
 		ToolExecutor:   toolExecutor,
 		ClassifyFull:   engineClassify,
-		ResolveModel:   router.ResolveModel,
+		ResolveModel:   resolveModel,
 		BackendConfigs: engineBackendConfigs,
 		RecallCfg: comms.RecallConfig{
 			Limit:    cfg.RecallLimit,
@@ -697,21 +802,24 @@ func main() {
 		SummarizationKeepLast:  cfg.EffectiveSummarizationKeepLast(),
 	})
 	// Initialize all optional dependencies in one place (issue #91).
+	// Reader path: memory.Store.Search via fan-out across scopes (#337c2).
+	// Writer path for /api/memory/ingest: memory.Store.Index via the ingest
+	// adapter (#337c4a). memstore's dual-write shim still fires for legacy
+	// write paths (extractor/consolidator/socket-server) until they retire.
 	var recaller cc.MemoryRecaller
-	var memStore cc.MemoryStorer
-	if memDB != nil {
-		recaller = &memStoreRecaller{store: memDB}
-		memStore = memDB
+	var memRecallStore cc.MemoryStorer
+	if cfg.EffectiveMemoryEnabled() {
+		recaller = &memoryCCRecaller{store: memStore}
+		memRecallStore = &memoryIngestAdapter{store: memStore}
 	}
 	chatService.Init(cc.ChatServiceOpts{
 		Registry:       registry,
 		SkillStore:     skillStore,
 		Orchestrator:   orch,
-		ConvStore:      convStore,
 		ToolRegistry:   toolRegistry,
 		ToolExecutor:   toolExecutor,
 		Recaller:       recaller,
-		MemStore:       memStore,
+		MemStore:       memRecallStore,
 		BackendConfigs: func() map[string]cc.BackendConfig { return cfg.Backends },
 	})
 	chatService.SetEngine(commEngine)
@@ -753,13 +861,13 @@ func main() {
 		if convID == "" {
 			convID = "_system"
 		}
-		chatDB.EnsureConversation(convID, "", "cc")
-		chatDB.InsertMessage(chatdb.Message{
-			ID:        cc.NewMessageID(),
-			ConvID:    convID,
+		ctx := context.Background()
+		_ = memStore.EnsureConv(ctx, memory.ConvID(convID), "", "cc")
+		_, _ = memStore.AppendMessage(ctx, memory.ConvID(convID), memory.Message{
 			Role:      "assistant",
-			Text:      text,
-			Source:    "cc",
+			Channel:   "cc",
+			Content:   text,
+			Blocks:    []memory.ContentBlock{{Type: memory.BlockText, Text: text}},
 			Tier:      "notify",
 			SessionID: "signal:notify",
 		})
@@ -785,11 +893,19 @@ func main() {
 		mpManager = marketplace.NewManager(dataDir)
 		mpManager.SetOnChange(func() {
 			toolRegistry.Rescan()
+			// #338 C4: re-mirror apps into the unified registry on every
+			// install / uninstall / update.
+			if err := marketplace.MirrorInto(mpManager, capRegistry); err != nil {
+				log.Printf("marketplace: capability mirror (change): %v", err)
+			}
 		})
 		if err := mpManager.RestoreInstalled(); err != nil {
 			log.Printf("[marketplace] restore installed apps: %v", err)
 		} else {
 			toolRegistry.Rescan()
+			if err := marketplace.MirrorInto(mpManager, capRegistry); err != nil {
+				log.Printf("marketplace: capability mirror (initial): %v", err)
+			}
 		}
 		log.Printf("[marketplace] enabled (registry=%s)", os.Getenv("ALF_MARKETPLACE_URL"))
 	} else {
@@ -800,6 +916,27 @@ func main() {
 	schedAdapter := &ccScheduleAdapter{}
 	var ccServerRef *cc.Server
 	var llmVaultProxy *vault.VaultProxy
+
+	// #340 R4g: build the shared Runtime once, before CC + scheduler wire up.
+	// Both consumers reuse the same instance — Options.Tier is ignored by
+	// Converse/Chat/Invoke, so a single Runtime is correct. capRegistry is a
+	// pointer, so later registrations (scheduler.CommandCapability) stay
+	// visible to the Runtime's List()/Resolve() lookups.
+	sharedRuntime, rtErr := runtime.New(runtime.Deps{
+		Registry: capRegistry,
+		Memory:   memStore,
+		AI:       provider.NewRegistryEngine(registry),
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Tier: sandbox.Tier("direct")})
+	if rtErr != nil {
+		log.Printf("runtime: init failed: %v (CC + scheduler will fall back to legacy paths)", rtErr)
+	}
+	if sharedRuntime != nil && chatService != nil {
+		chatService.SetRuntime(sharedRuntime)
+	}
+	if sharedRuntime != nil && commEngine != nil {
+		commEngine.SetRuntime(sharedRuntime)
+	}
 
 	// Start Control Center HTTP server.
 	if authToken != "" || len(allowedChatIDs) > 0 {
@@ -823,8 +960,16 @@ func main() {
 				}
 			}
 			if token != "" && chatID != "" && !telegramEnabled {
-				telegramEnabled = true
-				log.Println("Telegram config loaded from vault (post-unlock)")
+				// Re-parse allowlist: post-unlock chatID may be different from
+				// the pre-unlock value. Empty/invalid allowlist keeps Telegram
+				// disabled, same invariant as startup (#385-3).
+				allowedChatIDs = parseAllowedChatIDs(chatID)
+				if len(allowedChatIDs) > 0 {
+					telegramEnabled = true
+					log.Println("Telegram config loaded from vault (post-unlock)")
+				} else {
+					log.Printf("ERROR: Telegram stays disabled - vault TELEGRAM_CHAT_ID=%q yielded no valid chat IDs.", chatID)
+				}
 			}
 			// Tag vault service hosts in firewall log.
 			syncVaultHostsToFirewall(vaultMgr, fwProxy)
@@ -850,7 +995,7 @@ func main() {
 			log.Printf("[tasks] event: task=%s status=%s origin=%s", taskID[:min(8, len(taskID))], status, source)
 			notifyChannel(source, text)
 		}
-		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memDB, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler)
+		ccServer, broker, err := cc.New(dataDir, configDir, skillsDir, stats, version, authToken, ccExternalURL, cfg, reloadCh, magic, sessions, chatService, memRecallStore, cliProvider, orch, agentStore, schedAdapter, fwStore, fwProxy, netTracker, vaultMgr, registry, onVaultUnlock, onTaskEvent, mpManager, toolErrorJournal, avatarHandler, sharedRuntime)
 		if err != nil {
 			log.Printf("warning: failed to start Control Center: %v", err)
 		} else {
@@ -934,7 +1079,7 @@ func main() {
 				contextDir:   contextDir,
 				tierStore:    tierStore,
 				skillStore:   skillStore,
-				resolveModel: router.ResolveModel,
+				resolveModel: resolveModel,
 				eventLog:     eventLog,
 			},
 			TeamService: &teamAdapter{
@@ -945,7 +1090,7 @@ func main() {
 			LLMService: &llmAdapter{
 				tierStore:        tierStore,
 				providerRegistry: registry,
-				resolveModel:     router.ResolveModel,
+				resolveModel:     resolveModel,
 				dataDir:          dataDir,
 			},
 			NotifyFunc: chainNotifyFunc,
@@ -973,7 +1118,7 @@ func main() {
 			Service: &llmAdapter{
 				tierStore:        tierStore,
 				providerRegistry: registry,
-				resolveModel:     router.ResolveModel,
+				resolveModel:     resolveModel,
 				dataDir:          dataDir,
 			},
 			NotifyFunc: chainNotifyFunc,
@@ -1052,22 +1197,40 @@ func main() {
 		}
 	}
 
+	// #340 R5a: register scheduler.command Capability so direct-tier bash
+	// jobs can execute through Runtime.Invoke. Constructed before Runtime
+	// so runtime.New sees it in the registry listing.
+	if err := capRegistry.Register(scheduler.NewCommandCapability(dataDir, persistentSigPath)); err != nil {
+		log.Printf("scheduler: register CommandCapability: %v (direct-tier jobs will use legacy path)", err)
+	}
+	// #340 R5e3: wrap the multi-agent orchestrator as an ai.Strategy so
+	// orchestrator-tier scheduler jobs dispatch through Runtime.Converse
+	// like the direct-LLM path. StrategyOptions.Source is the tag that
+	// surfaces in TaskMeta; SkillLookup / MemoryContext stay nil — the
+	// scheduler still flattens skills into SystemPrompts the legacy way.
+	schedOrchStrategy := agents.NewStrategy(orch, agents.StrategyOptions{Source: "schedule"})
+
+	// #340 R4g: scheduler reuses the shared Runtime built earlier.
+	schedRuntime := sharedRuntime
+
 	sched := scheduler.New(scheduler.Config{
 		DataDir:      dataDir,
 		ContextDir:   contextDir,
 		ChatID:       parsedChatID,
 		TG:           tg,
-		CC:           &schedulerCCNotifier{db: chatDB, broker: eventBroker},
+		CC:           &schedulerCCNotifier{mem: memStore, broker: eventBroker},
 		Provider:     &schedulerProvider{r: registry},
 		TierStore:    &schedulerTierStore{ts: tierStore},
 		SkillStore:   &schedulerSkillStore{s: skillStore},
 		Orchestrator: &schedulerOrchestrator{o: orch},
-		ChatLogger:   &schedulerChatLogger{db: chatDB},
+		ChatLogger:   &schedulerChatLogger{mem: memStore},
 		EventLog:       eventLog,
 		ToolErrors:     toolErrorJournal,
 		CronPath:       filepath.Join(configDir, "cron.json"),
 		Location:       schedLocation,
 		SignalSockPath: persistentSigPath,
+		Runtime:              schedRuntime,
+		OrchestratorStrategy: schedOrchStrategy,
 		CatchupRecurringMinInterval: catchupMinInterval,
 	})
 
@@ -1093,8 +1256,8 @@ func main() {
 			ccServerRef.SetUpdater(uc)
 		}
 	}
-	var memExtractor *memstore.Extractor
-	if memDB != nil {
+	var memExtractor *curation.Extractor
+	if cfg.EffectiveMemoryEnabled() {
 		extractorTierResolver := func() string {
 			// Delegates to the single source of truth. Never returns a
 			// hardcoded model — users can run any backend (see #291).
@@ -1103,13 +1266,22 @@ func main() {
 		extractTimeout := time.Duration(cfg.EffectiveMemoryExtractTimeout()) * time.Second
 		extractAdapter := &extractorAdapter{prov: cliProvider, registry: registry, tierStore: tierStore}
 
-		memExtractor = memstore.NewExtractor(memDB, dataDir, contextDir, memstore.ExtractorConfig{
+		memExtractor = curation.NewExtractor(dataDir, contextDir, curation.ExtractorConfig{
 			Timeout:      extractTimeout,
 			MsgThreshold: cfg.EffectiveMemoryExtractMinMessages(),
 		}, extractAdapter, extractorTierResolver)
 
-		// Consolidator: dedup + fallback extraction every 6h.
-		consolidator := memstore.NewConsolidator(memDB, memExtractor, extractAdapter, extractTimeout)
+		// Extractor writes through memory.Store via dedup. Threshold
+		// 0.85 matches memstore's prior CosineThreshold at the high end
+		// — conservative so we don't over-deduplicate while the embedder
+		// warms up.
+		memExtractor.SetMemoryBackend(memStore, 0.85)
+
+		// Consolidator walks memory.Store via ListDocuments across the
+		// same scopes the socket server and recallers use. Same
+		// threshold as the extractor for symmetry.
+		consolidator := curation.NewConsolidator(memExtractor, extractAdapter, extractTimeout)
+		consolidator.SetMemoryBackend(memStore, socketsrv.KnownScopes, 0.85)
 		sched.RegisterSystem("mem-consolidate", "Memory Consolidation", "@every 360m", func() error {
 			return consolidator.RunOnce()
 		}, "Review the long-term memory store for redundancy and quality. Use recall to sample memories across all types (fact, decision, preference, contact). For each group of similar or overlapping memories: keep the most accurate and complete version, delete duplicates with forget, and if needed consolidate into a single updated memory with remember. Do not remove unique information. Focus on reducing noise without data loss.")
@@ -1280,259 +1452,186 @@ func main() {
 	}
 	appToolAdapter.supervisor = appsSupervisor
 
-	// When Telegram is not configured, run a CC-only event loop.
-	if !telegramEnabled {
-		log.Println("Running in Control Center-only mode (no Telegram polling)")
-		for event := range reloadCh {
-			switch event {
-			case cc.ReloadConfig:
-				if newCfg, err := configStore.Load(); err == nil {
-					oldTZ := cfg.Timezone
-					oldTiersFile := cfg.TiersFile
-					cfg = newCfg
-					chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
-					if cfg.MaxSessions > 0 {
-						sessions.SetMaxSessions(cfg.MaxSessions)
-					}
-					if cfg.Timezone != oldTZ {
-						time.Local = resolveTimezone(cfg.Timezone)
-					}
-					// Switch tiers file if tiers_file changed.
-					if cfg.TiersFile != oldTiersFile {
-						newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
-						if err := tierStore.SetPath(newTiersPath); err != nil {
-							log.Printf("ERROR: tiers reload from new path %q failed: %v - keeping previous tiers", newTiersPath, err)
-						} else {
-							log.Printf("config: tiers_file changed to %q", newTiersPath)
-						}
-					}
-					applyDNS(cfg)
-					registerBackends(registry, cfg, apiHistory, vaultMgr)
-					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
-					if memDB != nil {
-						applied := memDB.SetDedupConfig(memstore.DedupConfig{
-							TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
-							CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
-						})
-						log.Printf("memstore: dedup thresholds reloaded (text=%.2f cosine=%.2f)", applied.TextThreshold, applied.CosineThreshold)
-					}
-					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
+	// Reload event dispatcher, shared by both the CC-only and Telegram-enabled
+	// modes. Previously each mode inlined its own switch over reloadCh: the
+	// Telegram branch polled reloadCh with a non-blocking select and then made
+	// a long-poll HTTP call to getUpdates (20-30s), which dropped reload
+	// events on the floor and caused the router to classify messages against
+	// a stale tier catalog after /api/tiers/configs/switch. Running the
+	// dispatcher in its own goroutine (below) decouples reload handling from
+	// both the HTTP server and the Telegram poller.
+	//
+	// TODO: protect shared state (routerModel, routerBackend, cliClassifier,
+	// cfg) with a mutex — reads happen from HTTP/TG goroutines.
+	handleReload := func(event cc.ReloadEvent) {
+		switch event {
+		case cc.ReloadConfig:
+			if newCfg, err := configStore.Load(); err == nil {
+				oldTZ := cfg.Timezone
+				oldTiersFile := cfg.TiersFile
+				cfg = newCfg
+				chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
+				if cfg.MaxSessions > 0 {
+					sessions.SetMaxSessions(cfg.MaxSessions)
 				}
-				if git != nil {
-					git.Commit("config updated via CC")
+				if cfg.Timezone != oldTZ {
+					time.Local = resolveTimezone(cfg.Timezone)
 				}
-			case cc.ReloadTiers:
-				if err := tierStore.Reload(); err != nil {
-					log.Printf("ERROR: tiers reload failed: %v", err)
-				} else {
-					log.Println("tiers reloaded")
-				}
-				routerBackend = tierStore.Current().RouterBackend
-				isAPIR := routerBackend != "" && routerBackend != "cli"
-				if isAPIR {
-					newModel := tierStore.Current().RouterModel
-					if newModel == "" {
-						if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
-							if !strings.Contains(fb, "/") {
-								fb = "anthropic/" + fb
-							}
-							newModel = fb
-						}
-					}
-					routerModel = newModel
-					// Shut down CLI classifier if switching to API router.
-					if cliClassifier != nil {
-						cliClassifier.Close()
-						cliClassifier = nil
-					}
-				} else {
-					newModel := router.ResolveModel(tierStore.Current().RouterModel)
-					if newModel == "" {
-						newModel = router.ResolveModel("haiku")
-					}
-					routerModel = newModel
-					// Update or create CLI classifier.
-					if cliClassifier != nil {
-						cliClassifier.UpdateModel(newModel)
+				// Switch tiers file if tiers_file changed.
+				if cfg.TiersFile != oldTiersFile {
+					newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
+					if err := tierStore.SetPath(newTiersPath); err != nil {
+						log.Printf("ERROR: tiers reload from new path %q failed: %v - keeping previous tiers", newTiersPath, err)
 					} else {
-						cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
-							Model:          newModel,
-							SystemPrompt:   "You are a message classifier. Respond only with the tier name and reason.",
-							HomeDir:        homeDir,
-							DataDir:        dataDir,
-							Credential:     cliProvider.Credential,
-							IdleTimeout:    60 * time.Minute,
-							EmptyMCPConfig: cliProvider.EmptyMCPConfig,
-						})
-						go func() {
-							if err := cliClassifier.Start(); err != nil {
-								log.Printf("classifier: restart failed: %v", err)
-							}
-						}()
+						log.Printf("config: tiers_file changed to %q", newTiersPath)
 					}
 				}
-				// Re-publish Telegram bot command menu so newly-enabled or
-				// renamed force-command tiers appear in `/` autocomplete.
-				if telegramEnabled {
-					go refreshTelegramCommands(tg, tierStore)
-				}
-				if git != nil {
-					git.Commit("tiers updated via CC")
-				}
-			case cc.ReloadSkills:
-				if err := skillStore.Reload(); err != nil {
-					log.Printf("skills reload error: %v", err)
-				} else {
-					injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
-					log.Println("skills reloaded")
-				}
-				if git != nil {
-					git.Commit("skills updated via CC")
-				}
-			case cc.ReloadAgents:
-				if err := agentStore.Reload(); err != nil {
-					log.Printf("agents reload error: %v", err)
-				} else {
-					teams := agentStore.All()
-					log.Printf("agents reloaded (%d teams)", len(teams))
-					if len(teams) > 0 {
-						autoEnableAgentTier(tierStore)
+				applyDNS(cfg)
+				registerBackends(registry, cfg, apiHistory, vaultMgr)
+				registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
+				// Dedup thresholds are no longer tunable at runtime — the
+				// legacy memstore.Store.SetDedupConfig path is gone (#337
+				// close-out). dedup.Options.NearDupThreshold is set at
+				// Extractor/Consolidator wire time; a restart is required
+				// to change it.
+				log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
+			}
+			if git != nil {
+				git.Commit("config updated via CC")
+			}
+		case cc.ReloadTiers:
+			if err := tierStore.Reload(); err != nil {
+				log.Printf("ERROR: tiers reload failed: %v", err)
+			} else {
+				log.Println("tiers reloaded")
+			}
+			routerBackend = tierStore.Current().RouterBackend
+			isAPIR := routerBackend != "" && routerBackend != "cli"
+			if isAPIR {
+				newModel := tierStore.Current().RouterModel
+				if newModel == "" {
+					if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
+						if !strings.Contains(fb, "/") {
+							fb = "anthropic/" + fb
+						}
+						newModel = fb
 					}
 				}
-			case cc.ReloadFirewall:
-				if newFWCfg, err := fwStore.Load(); err == nil {
-					fwProxy.Reload(newFWCfg)
+				routerModel = newModel
+				// Shut down CLI classifier if switching to API router.
+				if cliClassifier != nil {
+					cliClassifier.Close()
+					cliClassifier = nil
+				}
+			} else {
+				newModel := resolveModel(tierStore.Current().RouterModel)
+				if newModel == "" {
+					newModel = resolveModel("haiku")
+				}
+				routerModel = newModel
+				// Rebuild the classifier system prompt from the fresh tier
+				// catalog. Without this, the persistent subprocess keeps
+				// stale tier state in its conversation history and the
+				// router ignores renames/additions until the next idle
+				// restart (#332).
+				newSysPrompt := classifier.BuildSystemPrompt(tierStore.Current(), dataDir, configDir, agentTeamsForRouter())
+				if cliClassifier != nil {
+					if err := cliClassifier.UpdateSystemPrompt(newSysPrompt); err != nil {
+						log.Printf("classifier: UpdateSystemPrompt failed: %v", err)
+					}
+					if err := cliClassifier.UpdateModel(newModel); err != nil {
+						log.Printf("classifier: UpdateModel failed: %v", err)
+					}
 				} else {
-					log.Printf("firewall reload error: %v", err)
+					cliClassifier = provider.NewCLIClassifier(provider.ClassifierConfig{
+						Model:          newModel,
+						SystemPrompt:   newSysPrompt,
+						HomeDir:        homeDir,
+						DataDir:        dataDir,
+						Credential:     cliProvider.Credential,
+						IdleTimeout:    60 * time.Minute,
+						EmptyMCPConfig: cliProvider.EmptyMCPConfig,
+					})
+					go func() {
+						if err := cliClassifier.Start(); err != nil {
+							log.Printf("classifier: restart failed: %v", err)
+						}
+					}()
 				}
-			case cc.ReloadTools:
-				log.Println("tools reloaded")
-				if git != nil {
-					git.Commit("tools updated via CC")
+			}
+			// Re-publish Telegram bot command menu so newly-enabled or
+			// renamed force-command tiers appear in `/` autocomplete.
+			if telegramEnabled {
+				go refreshTelegramCommands(tg, tierStore)
+			}
+			if git != nil {
+				git.Commit("tiers updated via CC")
+			}
+		case cc.ReloadSkills:
+			if err := skillStore.Reload(); err != nil {
+				log.Printf("skills reload error: %v", err)
+			} else {
+				injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
+				if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
+					log.Printf("skills: capability mirror (reload): %v", err)
 				}
+				log.Println("skills reloaded")
+			}
+			if git != nil {
+				git.Commit("skills updated via CC")
+			}
+		case cc.ReloadAgents:
+			if err := agentStore.Reload(); err != nil {
+				log.Printf("agents reload error: %v", err)
+			} else {
+				teams := agentStore.All()
+				log.Printf("agents reloaded (%d teams)", len(teams))
+				if len(teams) > 0 {
+					autoEnableAgentTier(tierStore)
+				}
+			}
+		case cc.ReloadFirewall:
+			if newFWCfg, err := fwStore.Load(); err == nil {
+				fwProxy.Reload(newFWCfg)
+			} else {
+				log.Printf("firewall reload error: %v", err)
+			}
+		case cc.ReloadTools:
+			log.Println("tools reloaded")
+			if git != nil {
+				git.Commit("tools updated via CC")
+			}
+		case cc.ReloadClaudeModels:
+			if err := claudeModelsStore.Reload(); err != nil {
+				log.Printf("ERROR: claude_models reload failed: %v", err)
+			} else {
+				log.Printf("claude_models reloaded (%d entries)", len(claudeModelsStore.Current()))
+			}
+			if eventBroker != nil {
+				eventBroker.Emit(cc.EventClaudeModels)
+			}
+			if git != nil {
+				git.Commit("claude_models updated via CC")
 			}
 		}
 	}
 
-	for {
-		// Check for reload events (non-blocking).
-		select {
-		case event := <-reloadCh:
-			switch event {
-			case cc.ReloadConfig:
-				if newCfg, err := configStore.Load(); err == nil {
-					oldTZ := cfg.Timezone
-					oldTiersFile := cfg.TiersFile
-					cfg = newCfg
-					chatSessions.SetTimeout(time.Duration(cfg.SessionTimeout) * time.Minute)
-					if cfg.MaxSessions > 0 {
-						sessions.SetMaxSessions(cfg.MaxSessions)
-					}
-					if cfg.Timezone != oldTZ {
-						time.Local = resolveTimezone(cfg.Timezone)
-						log.Printf("config: timezone changed to %q (logs updated, scheduler needs restart)", cfg.Timezone)
-					}
-					// Switch tiers file if tiers_file changed.
-					if cfg.TiersFile != oldTiersFile {
-						newTiersPath := cc.TiersPathFromConfig(configDir, cfg)
-						if err := tierStore.SetPath(newTiersPath); err != nil {
-							log.Printf("ERROR: tiers reload from new path %q failed: %v - keeping previous tiers", newTiersPath, err)
-						} else {
-							log.Printf("config: tiers_file changed to %q", newTiersPath)
-						}
-					}
-					// Re-register backends if config changed.
-					applyDNS(cfg)
-					registerBackends(registry, cfg, apiHistory, vaultMgr)
-					registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
-					if memDB != nil {
-						applied := memDB.SetDedupConfig(memstore.DedupConfig{
-							TextThreshold:   cfg.EffectiveMemoryDedupTextThreshold(),
-							CosineThreshold: cfg.EffectiveMemoryDedupCosineThreshold(),
-						})
-						log.Printf("memstore: dedup thresholds reloaded (text=%.2f cosine=%.2f)", applied.TextThreshold, applied.CosineThreshold)
-					}
-					log.Printf("config reloaded: log_level=%s session_timeout=%dm timezone=%s backends=%d", cfg.LogLevel, cfg.SessionTimeout, cfg.Timezone, len(cfg.Backends))
-				}
-				if git != nil {
-					git.Commit("config updated via CC")
-				}
-			case cc.ReloadTiers:
-				if err := tierStore.Reload(); err != nil {
-					log.Printf("ERROR: tiers reload failed: %v - keeping previous config", err)
-				} else {
-					log.Println("tiers reloaded")
-				}
-				routerBackend = tierStore.Current().RouterBackend
-				isAPIR := routerBackend != "" && routerBackend != "cli"
-				if isAPIR {
-					newModel := tierStore.Current().RouterModel
-					if newModel == "" {
-						if fb := cc.DefaultFallbackModel(tierStore.Current()); fb != "" {
-							if !strings.Contains(fb, "/") {
-								fb = "anthropic/" + fb
-							}
-							newModel = fb
-						}
-					}
-					routerModel = newModel
-					if cliClassifier != nil {
-						cliClassifier.Close()
-						cliClassifier = nil
-					}
-				} else {
-					newModel := router.ResolveModel(tierStore.Current().RouterModel)
-					if newModel == "" {
-						newModel = router.ResolveModel("haiku")
-					}
-					routerModel = newModel
-					if cliClassifier != nil {
-						cliClassifier.UpdateModel(newModel)
-					}
-				}
-				// Re-publish Telegram bot command menu so newly-enabled or
-				// renamed force-command tiers appear in `/` autocomplete.
-				if telegramEnabled {
-					go refreshTelegramCommands(tg, tierStore)
-				}
-				if git != nil {
-					git.Commit("tiers updated via CC")
-				}
-			case cc.ReloadTools:
-				log.Println("tools reloaded")
-				if git != nil {
-					git.Commit("tools updated via CC")
-				}
-			case cc.ReloadSkills:
-				if err := skillStore.Reload(); err != nil {
-					log.Printf("skills reload error: %v", err)
-				} else {
-					injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
-					log.Println("skills reloaded")
-				}
-				if git != nil {
-					git.Commit("skills updated via CC")
-				}
-			case cc.ReloadAgents:
-				if err := agentStore.Reload(); err != nil {
-					log.Printf("agents reload error: %v", err)
-				} else {
-					teams := agentStore.All()
-					log.Printf("agents reloaded (%d teams)", len(teams))
-					if len(teams) > 0 {
-						autoEnableAgentTier(tierStore)
-					}
-				}
-			case cc.ReloadFirewall:
-				if newFWCfg, err := fwStore.Load(); err == nil {
-					fwProxy.Reload(newFWCfg)
-				} else {
-					log.Printf("firewall reload error: %v", err)
-				}
-			}
-		default:
+	// Dedicated reload goroutine so reload events are never starved by the
+	// Telegram long-poll or any other foreground loop.
+	go func() {
+		for event := range reloadCh {
+			handleReload(event)
 		}
+	}()
 
+	// When Telegram is not configured, the HTTP server and the reload
+	// goroutine already own the process; block forever to keep main alive.
+	if !telegramEnabled {
+		log.Println("Running in Control Center-only mode (no Telegram polling)")
+		select {}
+	}
+
+	for {
 		updates, err := getUpdates(client, token, offset)
 		if err != nil {
 			log.Printf("getUpdates error: %v", err)
@@ -1555,7 +1654,9 @@ func main() {
 			// Handle emoji reactions.
 			if u.MessageReaction != nil {
 				mr := u.MessageReaction
-				if len(allowedChatIDs) > 0 && !allowedChatIDs[mr.Chat.ID] {
+				// Listener only starts with a non-empty allowlist (#385-3),
+				// so the check is a plain lookup — no "empty == allow-all" fallback.
+				if !allowedChatIDs[mr.Chat.ID] {
 					continue
 				}
 				if len(mr.NewReaction) == 0 {
@@ -1563,7 +1664,7 @@ func main() {
 				}
 				emoji := mr.NewReaction[0].Emoji
 				log.Printf("← reaction %s on msg %d", emoji, mr.MessageID)
-				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, contextDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider, memDB, convStore, commEngine)
+				go handleReaction(tg, mr.Chat.ID, mr.MessageID, emoji, contextDir, dataDir, chatSessions, tierStore, alfMsgIDs, eventLog, cliProvider, memStore, commEngine)
 				continue
 			}
 
@@ -1573,7 +1674,8 @@ func main() {
 			}
 
 			// Authorize sender - reject anyone not in allowedChatIDs.
-			if len(allowedChatIDs) > 0 && !allowedChatIDs[u.Message.Chat.ID] {
+			// Listener only starts with a non-empty allowlist (#385-3).
+			if !allowedChatIDs[u.Message.Chat.ID] {
 				log.Printf("unauthorized message from chat_id=%d user=%s - dropped", u.Message.Chat.ID, u.Message.From.Username)
 				continue
 			}
@@ -2069,7 +2171,6 @@ func refreshTelegramCommands(tg *tgclient.Client, tierStore cc.TierStore) {
 		{Command: "clear", Description: "Clear and start a new session"},
 		{Command: "help", Description: "Show available commands"},
 		{Command: "skills", Description: "List active skills"},
-		{Command: "bash", Description: "Execute a bash command"},
 		{Command: "jobs", Description: "List running agent jobs"},
 		{Command: "cancel", Description: "Cancel all running jobs"},
 		{Command: "login", Description: "Get a Control Center login link"},
@@ -2106,24 +2207,24 @@ func refreshTelegramCommands(tg *tgclient.Client, tierStore cc.TierStore) {
 
 // resolveEmbedder picks the best available embedder implementation.
 // Priority: 1) tier profile memory.embedding, 2) legacy tier embedding, 3) EMBED_URL env, 4) nil (FTS5-only).
-func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
+func resolveEmbedder(tierStore cc.TierStore) memory.Embedder {
 	// Use a stable instance ID so re-registrations reuse the same slot in the
 	// embed-server token map. Docker hostnames change on every container restart,
 	// which would leak slots and eventually hit the 50-instance cap.
 	const embedInstanceID = "alf-daemon"
-	secret := secrets.ReadSecret("EMBED_SHARED_SECRET")
+	secret := envsecrets.ReadSecret("EMBED_SHARED_SECRET")
 
 	if tc := tierStore.Current(); tc != nil {
 		// 1. New: memory.embedding config.
 		if tc.Memory != nil && tc.Memory.Embedding != nil && tc.Memory.Embedding.URL != "" {
-			emb := memstore.NewHTTPEmbedder(tc.Memory.Embedding.URL, embedInstanceID, secret, 30*time.Second)
+			emb := memory.NewHTTPEmbedder(tc.Memory.Embedding.URL, embedInstanceID, secret, 30*time.Second)
 			go startHTTPEmbedder(emb)
 			log.Printf("memstore: using HTTP embedder from memory config (url=%s)", tc.Memory.Embedding.URL)
 			return emb
 		}
 		// 2. Legacy: embedding config at tier root (backward compat).
 		if tc.Embedding != nil && tc.Embedding.URL != "" {
-			emb := memstore.NewHTTPEmbedder(tc.Embedding.URL, embedInstanceID, secret, 30*time.Second)
+			emb := memory.NewHTTPEmbedder(tc.Embedding.URL, embedInstanceID, secret, 30*time.Second)
 			go startHTTPEmbedder(emb)
 			log.Printf("memstore: using HTTP embedder from tier config (url=%s)", tc.Embedding.URL)
 			return emb
@@ -2132,7 +2233,7 @@ func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
 
 	// 2. From env var (embed sidecar container, same pattern as whisper).
 	if url := os.Getenv("EMBED_URL"); url != "" {
-		emb := memstore.NewHTTPEmbedder(url, embedInstanceID, secret, 30*time.Second)
+		emb := memory.NewHTTPEmbedder(url, embedInstanceID, secret, 30*time.Second)
 		go startHTTPEmbedder(emb)
 		log.Printf("memstore: using HTTP embedder (url=%s)", url)
 		return emb
@@ -2146,7 +2247,7 @@ func resolveEmbedder(tierStore cc.TierStore) memstore.EmbedderI {
 // startHTTPEmbedder registers with the embed service, retrying up to 30 times.
 // Falls back to FTS5-only search if embed service is unavailable.
 // Gives up early on "no route to host" / "connection refused" (service not deployed).
-func startHTTPEmbedder(emb *memstore.HTTPEmbedder) {
+func startHTTPEmbedder(emb *memory.HTTPEmbedder) {
 	for attempt := 1; attempt <= 30; attempt++ {
 		err := emb.Start()
 		if err == nil {

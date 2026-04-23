@@ -13,15 +13,16 @@ import (
 
 	"path/filepath"
 
-	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
-	"github.com/alamparelli/alf/internal/firewall"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/marketplace"
-	"github.com/alamparelli/alf/internal/provider"
+	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/runtime"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 	scheduler_pkg "github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/vault"
 )
 
 // DefaultPort is the Control Center HTTP listen port.
@@ -46,14 +47,14 @@ type Server struct {
 // dataDir is the path to data directory, configDir is the RW config path.
 // stats, version, authToken, and reloadCh are provided by the daemon.
 // magic and sessions enable magic link authentication (may be nil to disable).
-func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, netTracker *firewall.NetTracker, vaultMgr *vault.Manager, providerRegistry *provider.Registry, onVaultUnlock func(), onTaskEvent func(source, taskID, status, summary string), mp *marketplace.Manager, errorJournal AppErrorJournaler, avatarHandler *AvatarHandler) (*Server, *EventBroker, error) {
+func New(dataDir, configDir, skillsDir string, stats *Stats, version string, authToken string, externalURL string, cfg *Config, reloadCh chan ReloadEvent, magic *MagicStore, sessions *SessionStore, chatService *ChatService, memStore MemoryStorer, memProvider provider.Provider, orchestrator *agents.Orchestrator, agentStore agents.Store, scheduler ScheduleEngine, fwStore *firewall.Store, fwProxy *firewall.Proxy, netTracker *firewall.NetTracker, vaultMgr *vault.Manager, providerRegistry *provider.Registry, onVaultUnlock func(), onTaskEvent func(source, taskID, status, summary string), mp *marketplace.Manager, errorJournal AppErrorJournaler, avatarHandler *AvatarHandler, rt runtime.Runtime) (*Server, *EventBroker, error) {
 	configStore, tierStore, contextStore, toolStore, skillStore, appStore := StoreFactory(dataDir, configDir)
 	logReader := LogReaderFactory(dataDir)
-	var chatDB *chatdb.DB
+	var memoryStore memory.Store
 	if chatService != nil {
-		chatDB = chatService.ChatDB
+		memoryStore = chatService.Memory
 	}
-	statusProvider := NewStatusProvider(stats, version, chatDB)
+	statusProvider := NewStatusProvider(stats, version, memoryStore)
 	notifier := NewChannelNotifier(reloadCh)
 
 	// Load initial tiers into memory.
@@ -104,6 +105,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		ChatService:    chatService,
 		MemStore:       memStore,
 		MemProvider:    memProvider,
+		Runtime:        rt,
 		AgentStore:     agentStore,
 		Orchestrator:   orchestrator,
 		Scheduler:      scheduler,

@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alamparelli/alf/internal/ai"
 	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/runtime"
 )
 
 // execResult captures metadata from LLM/orchestrator invocations.
@@ -179,7 +181,7 @@ func (e *Engine) executeJob(j *Job) {
 		text, execResult, err = e.runTwoPhase(j)
 	} else if j.Tier == "direct" {
 		if j.Command != "" {
-			text, err = e.runCommand(j)
+			text, err = e.invokeDirectCommand(j)
 		} else {
 			log.Printf("scheduler: [%s] DEPRECATION: direct job using prompt instead of command - migrate to --command", j.ID)
 			text = j.Prompt
@@ -295,6 +297,32 @@ func (e *Engine) executeJob(j *Job) {
 	if !j.System {
 		e.store.Save()
 	}
+}
+
+// invokeDirectCommand runs a direct-tier bash job. If Runtime is configured
+// (#340 R5a migration), it goes through Runtime.Invoke(CommandCapabilityID, …).
+// Otherwise the legacy inline runCommand path is used so existing deployments
+// keep working while Capability registration is still opt-in.
+func (e *Engine) invokeDirectCommand(j *Job) (string, error) {
+	if e.cfg.Runtime == nil {
+		return e.runCommand(j)
+	}
+	args := runtime.Args{"command": j.Command}
+	if j.Timeout > 0 {
+		args["timeout"] = j.Timeout
+	}
+	ctx := context.Background()
+	out, err := e.cfg.Runtime.Invoke(ctx, CommandCapabilityID, args)
+	if err != nil {
+		return "", err
+	}
+	if out.Error != "" {
+		return "", fmt.Errorf("%s", out.Error)
+	}
+	if s, ok := out.Data.(string); ok {
+		return s, nil
+	}
+	return "", nil
 }
 
 // runCommand executes a bash command for direct-tier jobs.
@@ -426,7 +454,20 @@ func (e *Engine) invokeLLM(j *Job) (string, error) {
 }
 
 // invokeLLMWithMeta calls the Claude provider and returns execution metadata.
+// When Config.Runtime is set, the call is routed through Runtime.Converse so
+// the scheduler shares a single orchestration surface with chat_service
+// (#340 R5d). Legacy inline path stays as a fallback while deployments roll
+// out the Runtime wiring.
 func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
+	if e.cfg.Runtime != nil {
+		return e.invokeLLMViaRuntime(j)
+	}
+	return e.invokeLLMLegacy(j)
+}
+
+// invokeLLMLegacy is the pre-R5d path kept for back-compat when no Runtime
+// is configured.
+func (e *Engine) invokeLLMLegacy(j *Job) (string, *execResult, error) {
 	if e.cfg.Provider == nil {
 		return "", nil, fmt.Errorf("no provider configured")
 	}
@@ -505,6 +546,106 @@ func (e *Engine) invokeLLMWithMeta(j *Job) (string, *execResult, error) {
 		NumTurns: result.NumTurns,
 	}
 	return result.Text, meta, nil
+}
+
+// invokeLLMViaRuntime mirrors invokeLLMLegacy's tier resolution but hands the
+// call to Runtime.Converse. It was introduced in #340 R5d alongside the
+// ConverseRequest passthroughs (Backend / Effort / WriteCapable / MaxTurns /
+// DataDir) so the new surface preserves legacy behaviour one-for-one —
+// including the job-context system prompt + L1/L2/L3 + skill block injection.
+func (e *Engine) invokeLLMViaRuntime(j *Job) (string, *execResult, error) {
+	req := runtime.ConverseRequest{
+		Prompt:  j.Prompt,
+		DataDir: e.cfg.DataDir,
+	}
+
+	// Resolve tier params from tier store.
+	if e.cfg.TierStore != nil {
+		if snap := e.cfg.TierStore.Current(); snap != nil {
+			for _, t := range snap.Tiers {
+				if t.Name != j.Tier {
+					continue
+				}
+				req.Backend = t.Backend
+				if t.Model != "" {
+					req.Model = toAIModelID(t.Model)
+				}
+				if len(t.Tools) > 0 {
+					req.Tools = toolSpecs(t.Tools)
+				}
+				req.WriteCapable = t.WriteCapable
+				req.Effort = t.Effort
+				if t.MaxTurns > 0 {
+					req.MaxTurns = t.MaxTurns
+				}
+				break
+			}
+		}
+	}
+
+	// Job context — mirrors legacy ordering so prompt caching stays stable.
+	jobContext := fmt.Sprintf("You are executing scheduled job %q (ID: %s, schedule: %s).", j.Name, j.ID, j.Schedule)
+	if j.Reason != "" {
+		jobContext += fmt.Sprintf(" Reason this job was created: %s", j.Reason)
+	}
+	if j.Message != "" {
+		jobContext += fmt.Sprintf(" The scheduled message is: %s", j.Message)
+	}
+	req.SystemPrompts = append(req.SystemPrompts, jobContext)
+
+	if e.cfg.ContextDir != "" {
+		req.SystemPrompts = append(req.SystemPrompts, memory.CollectSchedulerPrompts(e.cfg.ContextDir)...)
+	}
+	if len(j.Skills) > 0 && e.cfg.SkillStore != nil {
+		if block := buildSkillBlock(e.cfg.SkillStore, j.Skills); block != "" {
+			req.SystemPrompts = append(req.SystemPrompts, block)
+		}
+	}
+
+	if req.Model == "" {
+		return "", nil, fmt.Errorf("scheduler: no model configured for tier %q (job %s)", j.Tier, j.ID)
+	}
+
+	llmTimeout := j.Timeout
+	if llmTimeout <= 0 {
+		llmTimeout = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), llmTimeout)
+	defer cancel()
+
+	res, err := e.cfg.Runtime.Converse(ctx, req)
+	if err != nil {
+		return "", nil, err
+	}
+
+	meta := &execResult{}
+	if res.Usage != nil {
+		meta.CostUSD = res.Usage.CostUSD
+		meta.Model = res.Usage.Model
+		meta.NumTurns = res.Usage.NumTurns
+	}
+	return res.Text, meta, nil
+}
+
+// toAIModelID is a local adapter that keeps scheduler's imports shallow:
+// the daemon / tier store speaks strings, ai speaks ai.ModelID.
+func toAIModelID(s string) ai.ModelID { return ai.ModelID(s) }
+
+// toolSpecs wraps tier tool names in ai.ToolSpec so Runtime.Converse can
+// forward them through ai.Request.Tools without the scheduler building the
+// whole ToolSpec (description/schema come from the registry later).
+func toolSpecs(names []string) []ai.ToolSpec {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]ai.ToolSpec, 0, len(names))
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		out = append(out, ai.ToolSpec{Name: n})
+	}
+	return out
 }
 
 // SendDailyDigest generates and sends a schedule execution report for the last 24h.
@@ -590,8 +731,21 @@ func (e *Engine) invokeOrchestrator(j *Job) (string, error) {
 	return text, err
 }
 
-// invokeOrchestratorWithMeta delegates to the orchestrator and returns execution metadata.
+// invokeOrchestratorWithMeta routes an orchestrator-tier job. When Runtime
+// and OrchestratorStrategy are both configured, the job goes through
+// Runtime.Converse with the Strategy attached — same path the LLM flow
+// uses, which means orchestrator and direct-LLM jobs share the single
+// orchestration surface. Otherwise the legacy cfg.Orchestrator.Run path
+// runs, preserving pre-R5e3 behaviour. See #340 R5e3.
 func (e *Engine) invokeOrchestratorWithMeta(j *Job) (string, *execResult, error) {
+	if e.cfg.Runtime != nil && e.cfg.OrchestratorStrategy != nil {
+		return e.invokeOrchestratorViaRuntime(j)
+	}
+	return e.invokeOrchestratorLegacy(j)
+}
+
+// invokeOrchestratorLegacy is the pre-R5e3 path kept for back-compat.
+func (e *Engine) invokeOrchestratorLegacy(j *Job) (string, *execResult, error) {
 	if e.cfg.Orchestrator == nil {
 		return "", nil, fmt.Errorf("orchestrator not configured")
 	}
@@ -625,6 +779,46 @@ func (e *Engine) invokeOrchestratorWithMeta(j *Job) (string, *execResult, error)
 	}
 	log.Printf("scheduler: [%s] orchestrator done: %d iterations, $%.4f", j.ID, meta.Iterations, meta.TotalCost)
 	return text, result, nil
+}
+
+// invokeOrchestratorViaRuntime mirrors invokeOrchestratorLegacy's input
+// assembly but dispatches through Runtime.Converse with the pre-wired
+// orchestrator Strategy. Task lifecycle stays inside the Strategy; the
+// scheduler only sees final text + Usage coming back.
+func (e *Engine) invokeOrchestratorViaRuntime(j *Job) (string, *execResult, error) {
+	var sysPrompts []string
+	if e.cfg.ContextDir != "" {
+		sysPrompts = append(sysPrompts, memory.CollectSchedulerPrompts(e.cfg.ContextDir)...)
+	}
+	if len(j.Skills) > 0 && e.cfg.SkillStore != nil {
+		if block := buildSkillBlock(e.cfg.SkillStore, j.Skills); block != "" {
+			sysPrompts = append(sysPrompts, block)
+		}
+	}
+
+	orchTimeout := j.Timeout
+	if orchTimeout <= 0 {
+		orchTimeout = 30 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), orchTimeout)
+	defer cancel()
+
+	res, err := e.cfg.Runtime.Converse(ctx, runtime.ConverseRequest{
+		Prompt:        j.Prompt,
+		SystemPrompts: sysPrompts,
+		Strategy:      e.cfg.OrchestratorStrategy,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	meta := &execResult{}
+	if res.Usage != nil {
+		meta.CostUSD = res.Usage.CostUSD
+		meta.Model = res.Usage.Model
+		meta.Iterations = res.Usage.NumTurns
+	}
+	log.Printf("scheduler: [%s] orchestrator done (runtime path): %d iterations, $%.4f", j.ID, meta.Iterations, meta.CostUSD)
+	return res.Text, meta, nil
 }
 
 // logScheduleRun writes a schedule_run event to the daily event log.

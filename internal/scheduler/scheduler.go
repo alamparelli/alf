@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -8,8 +9,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alamparelli/alf/internal/ai"
+	"github.com/alamparelli/alf/internal/capability"
+	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/robfig/cron/v3"
 )
+
+// RuntimeInvoker is the narrow surface of runtime.Runtime the scheduler consumes.
+// Kept as a local interface so scheduler tests can fake it without building a
+// full Runtime. Any runtime.Runtime satisfies it. Invoke is the direct-tier
+// bash path (#340 R5a); Converse is the LLM one-shot path (#340 R5d).
+type RuntimeInvoker interface {
+	Invoke(ctx context.Context, capID capability.ID, args runtime.Args) (capability.Output, error)
+	Converse(ctx context.Context, req runtime.ConverseRequest) (runtime.ConverseResult, error)
+}
 
 // Config holds dependencies for the scheduler engine.
 type Config struct {
@@ -28,6 +41,16 @@ type Config struct {
 	CronPath       string
 	Location       *time.Location
 	SignalSockPath string // passed as ALF_SIGNAL_SOCK to command subprocesses
+
+	// Runtime, when set, routes direct-tier bash commands through
+	// Runtime.Invoke("scheduler.command", ...) and LLM jobs through
+	// Runtime.Converse. Legacy Provider path is the fallback (#340).
+	Runtime RuntimeInvoker
+
+	// OrchestratorStrategy, when set alongside Runtime, drives orchestrator-
+	// tier jobs through Runtime.Converse with this Strategy attached. Legacy
+	// cfg.Orchestrator.Run path stays as fallback. See #340 R5e3.
+	OrchestratorStrategy ai.Strategy
 
 	// CatchupRecurringMinInterval: recurring cron jobs with a tick interval
 	// >= this value are caught up once after downtime. Zero disables it.

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
 )
 

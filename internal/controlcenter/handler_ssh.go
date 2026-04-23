@@ -13,7 +13,7 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // SSHHandler proxies SSH requests from the UI/API to vault-proxy.
@@ -218,5 +218,6 @@ func (h *SSHHandler) handleSSHSession(w http.ResponseWriter, r *http.Request, se
 }
 
 func (h *SSHHandler) checkSSHAuth(r *http.Request) bool {
-	return checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns) != authNone
+	method, _ := checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns)
+	return method != authNone
 }

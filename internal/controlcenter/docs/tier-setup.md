@@ -89,7 +89,7 @@ Here's what a `tiers.json` file looks like:
 | Setting | What it does | Example |
 |---------|-------------|---------|
 | `name` | Unique name. Shows up in logs and status messages. | `"sonnet"` |
-| `model` | Which Claude model to use: `haiku`, `sonnet`, or `opus`. | `"sonnet"` |
+| `model` | Which Claude model to use. Short alias (`haiku`, `sonnet`, `opus`) or a full ID like `claude-opus-4-7`. See [Managing Claude Models](docs:claude-models) to add new models without a daemon update. | `"sonnet"` |
 | `priority` | Ranking order (1 = first choice, 2 = second, etc.). When ALF can't decide, it picks the lowest number. | `3` |
 | `enabled` | Set to `false` to turn off a tier completely. | `true` |
 | `routable` | Set to `false` to hide from the router (manual-only). | `true` |

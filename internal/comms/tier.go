@@ -4,7 +4,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/alamparelli/alf/internal/provider"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/tooling"
 )
 

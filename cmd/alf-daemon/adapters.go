@@ -2,24 +2,26 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/comms"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/firewall"
-	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/memstore"
-	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/router"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
+	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/memory/curation"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
-// extractorAdapter bridges provider.CLIProvider to memstore.ExtractorProvider,
+// extractorAdapter bridges provider.CLIProvider to curation.ExtractorProvider,
 // with optional fallback to an API backend when CLI is unavailable.
 type extractorAdapter struct {
 	prov      *provider.CLIProvider
@@ -27,7 +29,7 @@ type extractorAdapter struct {
 	tierStore cc.TierStore       // read memory.extract_backend preference
 }
 
-func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params memstore.ExtractorParams) (string, error) {
+func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params curation.ExtractorParams) (string, error) {
 	// Check tier profile for explicit extract_backend preference.
 	// Default: use the router backend/model (cheap, fast, already configured).
 	var forceBackend, forceModel string
@@ -108,7 +110,7 @@ func (a *extractorAdapter) Invoke(ctx context.Context, prompt string, params mem
 	return a.invokeCLI(ctx, prompt, model, params)
 }
 
-func (a *extractorAdapter) invokeCLI(ctx context.Context, prompt, model string, params memstore.ExtractorParams) (string, error) {
+func (a *extractorAdapter) invokeCLI(ctx context.Context, prompt, model string, params curation.ExtractorParams) (string, error) {
 	result, err := a.prov.Invoke(ctx, prompt, provider.Params{
 		Model:    model,
 		MaxTurns: params.MaxTurns,
@@ -121,19 +123,80 @@ func (a *extractorAdapter) invokeCLI(ctx context.Context, prompt, model string, 
 	return result.Text, nil
 }
 
-// memStoreRecaller adapts memstore.Store to the cc.MemoryRecaller interface.
-type memStoreRecaller struct {
-	store *memstore.Store
+// memoryScopes lists the known memory types produced by the extractor and
+// consolidator. Recallers fan out a Search across each because the
+// memory.Store contract searches one Scope at a time — the old memstore
+// model put every memory in a single table so a one-shot search sufficed.
+// When a new memType is introduced (e.g. in extractor.go's type whitelist),
+// add it here too.
+var memoryScopes = []memory.Scope{"fact", "preference", "decision", "contact", "summary"}
+
+// searchMemoryAcrossScopes fans out a Search across every known memory
+// scope and returns the top `limit` hits merged by descending score.
+// Shared by the cc and comms recaller adapters below.
+func searchMemoryAcrossScopes(store memory.Store, query string, limit int) ([]memory.Hit, error) {
+	if store == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var all []memory.Hit
+	for _, scope := range memoryScopes {
+		hits, err := store.Search(ctx, scope, query, limit)
+		if err != nil {
+			// One bad scope must not black-hole the recall — log and keep
+			// going with the others. Recall is best-effort.
+			log.Printf("memory: recall scope=%q failed: %v", scope, err)
+			continue
+		}
+		// Tag each hit with its scope so the adapter can return the Type
+		// field MemoryResult consumers expect.
+		for _, h := range hits {
+			if h.Document.Metadata == nil {
+				h.Document.Metadata = map[string]string{}
+			}
+			h.Document.Metadata["scope"] = string(scope)
+			all = append(all, h)
+		}
+	}
+	// Merge-sort by score descending (insertion sort — N stays small).
+	for i := 1; i < len(all); i++ {
+		for j := i; j > 0 && all[j].Score > all[j-1].Score; j-- {
+			all[j], all[j-1] = all[j-1], all[j]
+		}
+	}
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
 }
 
-func (r *memStoreRecaller) Search(query string, limit int) ([]cc.MemoryResult, error) {
-	results, err := r.store.Search(query, limit)
+// memoryCCRecaller adapts memory.Store to the cc.MemoryRecaller interface.
+// Replaces the pre-#337 *memstore.Store adapter once the documents table
+// is fed by the dual-write shim (sub-ticket C1).
+type memoryCCRecaller struct {
+	store memory.Store
+}
+
+func (r *memoryCCRecaller) Search(query string, limit int) ([]cc.MemoryResult, error) {
+	hits, err := searchMemoryAcrossScopes(r.store, query, limit)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]cc.MemoryResult, len(results))
-	for i, m := range results {
-		out[i] = cc.MemoryResult{Text: m.Text, Type: m.Type, Distance: m.Distance}
+	out := make([]cc.MemoryResult, len(hits))
+	for i, h := range hits {
+		// memory.Hit.Score is similarity (higher == more relevant);
+		// MemoryResult.Distance is cosine distance (lower == more relevant).
+		// Invert so downstream ranking code keeps working.
+		out[i] = cc.MemoryResult{
+			Text:     h.Document.Text,
+			Type:     h.Document.Metadata["scope"],
+			Distance: float64(1 - h.Score),
+		}
 	}
 	return out, nil
 }
@@ -175,19 +238,68 @@ func (c *commsTierStore) Snapshot() comms.TiersSnapshot {
 	return snap
 }
 
-// commsRecaller adapts memstore.Store to the comms.MemoryRecaller interface.
-type commsRecaller struct {
-	store *memstore.Store
+// memoryIngestAdapter implements cc.MemoryStorer on top of memory.Store so
+// the /api/memory/ingest writer path can land on the unified store
+// (#337c4a). Preserves the legacy Store() signature so handler_memory.go
+// and its tests need no change.
+//
+// Doc ID strategy: derive from a SHA-256 prefix of the text so repeated
+// ingests of identical content upsert-refresh a single row rather than
+// accumulate copies. This is coarser than memstore's FTS5 fuzzy dedup —
+// it only catches byte-identical duplicates — but it keeps the natural
+// "idempotent re-ingest" behaviour that users rely on.
+type memoryIngestAdapter struct {
+	store memory.Store
 }
 
-func (r *commsRecaller) Search(query string, limit int) ([]comms.MemoryResult, error) {
-	results, err := r.store.Search(query, limit)
+func (a *memoryIngestAdapter) Store(text, memType, source string, meta map[string]any) (int64, error) {
+	if a.store == nil {
+		return 0, fmt.Errorf("memory: ingest adapter has no backing store")
+	}
+	h := sha256.Sum256([]byte(text))
+	docID := fmt.Sprintf("ingest-%x", h[:12])
+	mm := map[string]string{
+		"source":     source,
+		"created_at": time.Now().Format(time.RFC3339),
+	}
+	for k, v := range meta {
+		switch vv := v.(type) {
+		case string:
+			mm[k] = vv
+		default:
+			if b, err := json.Marshal(v); err == nil {
+				mm[k] = string(b)
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := a.store.Index(ctx, memory.Scope(memType), memory.Document{
+		ID: docID, Text: text, Metadata: mm,
+	}); err != nil {
+		return 0, err
+	}
+	return 0, nil
+}
+
+// memoryCommsRecaller adapts memory.Store to the comms.MemoryRecaller
+// interface. Symmetric to memoryCCRecaller but returns comms.MemoryResult.
+type memoryCommsRecaller struct {
+	store memory.Store
+}
+
+func (r *memoryCommsRecaller) Search(query string, limit int) ([]comms.MemoryResult, error) {
+	hits, err := searchMemoryAcrossScopes(r.store, query, limit)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]comms.MemoryResult, len(results))
-	for i, m := range results {
-		out[i] = comms.MemoryResult{Text: m.Text, Type: m.Type, Distance: m.Distance}
+	out := make([]comms.MemoryResult, len(hits))
+	for i, h := range hits {
+		out[i] = comms.MemoryResult{
+			Text:     h.Document.Text,
+			Type:     h.Document.Metadata["scope"],
+			Distance: float64(1 - h.Score),
+		}
 	}
 	return out, nil
 }
@@ -237,7 +349,7 @@ func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
 		Tiers: make([]scheduler.TierInfo, len(tc.Tiers)),
 	}
 	for i, t := range tc.Tiers {
-		model := router.ResolveModel(t.Model)
+		model := resolveModel(t.Model)
 		if model == "" {
 			model = t.Model // preserve non-Claude models (e.g. gpt-5.4)
 		}
@@ -255,19 +367,22 @@ func (s *schedulerTierStore) Current() *scheduler.TiersSnapshot {
 	return snap
 }
 
-// schedulerChatLogger adapts chatdb.DB to the scheduler.ChatLogger interface.
+// schedulerChatLogger adapts memory.Store to the scheduler.ChatLogger interface.
 type schedulerChatLogger struct {
-	db *chatdb.DB
+	mem memory.Store
 }
 
 func (l *schedulerChatLogger) LogScheduledMessage(text, tier, jobName string) {
-	l.db.EnsureConversation("_scheduler", "", "scheduler")
-	l.db.InsertMessage(chatdb.Message{
-		ID:        cc.NewMessageID(),
-		ConvID:    "_scheduler",
+	if l.mem == nil {
+		return
+	}
+	ctx := context.Background()
+	_ = l.mem.EnsureConv(ctx, "_scheduler", "", "scheduler")
+	_, _ = l.mem.AppendMessage(ctx, "_scheduler", memory.Message{
 		Role:      "assistant",
-		Text:      text,
-		Source:    "scheduler",
+		Channel:   "scheduler",
+		Content:   text,
+		Blocks:    []memory.ContentBlock{{Type: memory.BlockText, Text: text}},
 		Tier:      tier,
 		SessionID: "scheduled:" + jobName,
 	})
@@ -276,22 +391,25 @@ func (l *schedulerChatLogger) LogScheduledMessage(text, tier, jobName string) {
 // schedulerCCNotifier pushes schedule notifications to the Control Center chat
 // and emits an SSE event so the frontend can show a toast/sound.
 type schedulerCCNotifier struct {
-	db     *chatdb.DB
+	mem    memory.Store
 	broker *cc.EventBroker
 }
 
 func (n *schedulerCCNotifier) Notify(text string) {
-	convID := n.db.LatestConversationID("cc")
+	if n.mem == nil {
+		return
+	}
+	ctx := context.Background()
+	convID, _ := n.mem.LatestConvID(ctx, "cc")
 	if convID == "" {
 		convID = "_system"
-		n.db.EnsureConversation(convID, "", "cc")
+		_ = n.mem.EnsureConv(ctx, convID, "", "cc")
 	}
-	n.db.InsertMessage(chatdb.Message{
-		ID:        cc.NewMessageID(),
-		ConvID:    convID,
+	_, _ = n.mem.AppendMessage(ctx, convID, memory.Message{
 		Role:      "assistant",
-		Text:      text,
-		Source:    "scheduler",
+		Channel:   "scheduler",
+		Content:   text,
+		Blocks:    []memory.ContentBlock{{Type: memory.BlockText, Text: text}},
 		Tier:      "scheduler",
 		SessionID: "scheduler:notification",
 	})

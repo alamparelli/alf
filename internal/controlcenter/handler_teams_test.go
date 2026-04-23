@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alamparelli/alf/internal/agents"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 )
 
 func newTestTeamsHandler(t *testing.T) (*TeamsHandler, string) {

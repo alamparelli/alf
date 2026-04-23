@@ -61,6 +61,34 @@ func AppTokenSlugFromContext(ctx context.Context) string {
 	return ""
 }
 
+// classifyAuthFail returns a short reason code describing why authentication
+// failed. Used by authMiddleware's final log line so operators can distinguish
+// "no credential supplied" (first-paint, cookieless client) from "credential
+// supplied but rejected" (expired token, wrong slug) without re-deriving the
+// signal from upstream traces. Never includes token values.
+func classifyAuthFail(r *http.Request, appTokenReason string) string {
+	if appTokenReason != "" {
+		return appTokenReason
+	}
+	hasBearer := strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ")
+	_, bearerCookieErr := r.Cookie("cc_bearer")
+	_, sessionCookieErr := r.Cookie("cc_session")
+	hasBearerCookie := bearerCookieErr == nil
+	hasSessionCookie := sessionCookieErr == nil
+	switch {
+	case hasBearer:
+		return "bearer_header_rejected"
+	case hasBearerCookie && hasSessionCookie:
+		return "cookies_rejected"
+	case hasSessionCookie:
+		return "session_cookie_rejected"
+	case hasBearerCookie:
+		return "bearer_cookie_rejected"
+	default:
+		return "no_credential"
+	}
+}
+
 // authMethod indicates which authentication method succeeded.
 type authMethod int
 
@@ -71,15 +99,28 @@ const (
 	authSession            // cc_session cookie
 )
 
+// sessionRenewal carries the info needed to refresh the cc_session cookie on
+// the response when sliding expiry extended a session on the server side.
+// Only populated when checkRequestAuth returns authSession AND the session was
+// just renewed.
+type sessionRenewal struct {
+	id  string
+	ttl time.Duration
+}
+
 // checkRequestAuth checks whether a request carries valid authentication via
 // Bearer token (primary or extra), cc_bearer cookie, or session cookie.
 // This is the single source of truth for request authentication, used by both
 // the middleware stack and handlers registered outside it (Terminal, SSH).
-func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, extraTokenFns []func() string) authMethod {
+//
+// When the session cookie path succeeds and sliding expiry just extended the
+// session server-side, the returned renew value is non-nil so the caller can
+// re-emit the cookie with a fresh MaxAge.
+func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, extraTokenFns []func() string) (authMethod, *sessionRenewal) {
 	// Check Authorization header against primary token.
 	auth := r.Header.Get("Authorization")
 	if token != "" && strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(token)) == 1 {
-		return authBearer
+		return authBearer, nil
 	}
 
 	// Check Authorization header against extra tokens (e.g. mobile API token).
@@ -87,7 +128,7 @@ func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, ext
 		bearer := auth[7:]
 		for _, fn := range extraTokenFns {
 			if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(et)) == 1 {
-				return authBearer
+				return authBearer, nil
 			}
 		}
 	}
@@ -96,23 +137,51 @@ func checkRequestAuth(r *http.Request, token string, sessions *SessionStore, ext
 	if cookie, err := r.Cookie("cc_bearer"); err == nil {
 		cv := cookie.Value
 		if token != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(token)) == 1 {
-			return authCookie
+			return authCookie, nil
 		}
 		for _, fn := range extraTokenFns {
 			if et := fn(); et != "" && subtle.ConstantTimeCompare([]byte(cv), []byte(et)) == 1 {
-				return authCookie
+				return authCookie, nil
 			}
 		}
 	}
 
 	// Check session cookie.
 	if sessions != nil {
-		if cookie, err := r.Cookie("cc_session"); err == nil && sessions.Valid(cookie.Value) {
-			return authSession
+		if cookie, err := r.Cookie("cc_session"); err == nil {
+			valid, renewed, ttl := sessions.Check(cookie.Value)
+			if valid {
+				if renewed {
+					return authSession, &sessionRenewal{id: cookie.Value, ttl: ttl}
+				}
+				return authSession, nil
+			}
 		}
 	}
 
-	return authNone
+	return authNone, nil
+}
+
+// refreshSessionCookie re-emits cc_session with a fresh MaxAge so the browser's
+// cookie lifetime tracks server-side sliding expiry. Attribute choices match
+// autoIssueSession: Secure is inferred from TLS / X-Forwarded-Proto; SameSite
+// is None when Secure (required for iframe fetch), Lax otherwise.
+func refreshSessionCookie(w http.ResponseWriter, r *http.Request, id string, ttl time.Duration) {
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	sameSite := http.SameSiteLaxMode
+	if secure {
+		sameSite = http.SameSiteNoneMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "cc_session",
+		Value:    id,
+		Path:     "/",
+		MaxAge:   int(ttl / time.Second),
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
+	})
+	log.Printf("[CC] session cookie refreshed (sliding expiry, ttl=%s) from %s", ttl, clientIP(r))
 }
 
 // authMiddleware rejects requests without a valid Bearer token or session cookie.
@@ -274,10 +343,12 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 				return
 			}
 
-			result := checkRequestAuth(r, token, sessions, extraTokenFns)
+			result, renewal := checkRequestAuth(r, token, sessions, extraTokenFns)
 			if result != authNone {
 				if result == authBearer {
 					autoIssueSession(w, r, sessions)
+				} else if renewal != nil {
+					refreshSessionCookie(w, r, renewal.id, renewal.ttl)
 				}
 				next.ServeHTTP(w, r)
 				return
@@ -289,9 +360,14 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 			//   /api/apps/{slug}/...— storage, upload, errors, permissions
 			//   /api/bash           — shell commands (permission-checked by handler)
 			//   /api/app-action     — cross-app actions
+			//
+			// appTokenFailReason is non-empty when a Bearer was supplied but
+			// the app-token path rejected it — lets the final log explain why.
+			appTokenFailReason := ""
 			if appTokens != nil {
 				if bearer := extractAppBearerToken(r); bearer != "" {
-					if _, ok := appTokens.Validate(bearer); ok {
+					tokenSlug, valid := appTokens.Validate(bearer)
+					if valid {
 						path := r.URL.Path
 						// Slug-scoped routes: verify token slug matches
 						if strings.HasPrefix(path, "/apps/") || strings.HasPrefix(path, "/api/apps/") {
@@ -305,29 +381,34 @@ func authMiddlewareWithAppTokens(token string, sessions *SessionStore, appTokens
 							if idx := strings.IndexByte(reqSlug, '/'); idx >= 0 {
 								reqSlug = reqSlug[:idx]
 							}
-							tokenSlug, _ := appTokens.Validate(bearer)
 							if reqSlug == tokenSlug {
 								next.ServeHTTP(w, r)
 								return
 							}
+							appTokenFailReason = "app_token_slug_mismatch"
 						}
 						// Non-scoped routes: propagate token slug in context
 						// so handlers can cross-check against Referer-derived slug.
 						if path == "/api/bash" || path == "/api/app-action" {
-							tokenSlug, _ := appTokens.Validate(bearer)
 							ctx := context.WithValue(r.Context(), ctxKeyAppTokenSlug{}, tokenSlug)
 							next.ServeHTTP(w, r.WithContext(ctx))
 							return
 						}
+						if appTokenFailReason == "" {
+							appTokenFailReason = "app_token_route_not_allowed"
+						}
+					} else {
+						appTokenFailReason = "app_token_invalid_or_expired"
 					}
 				}
 			}
 
 			// Log after all auth methods failed.
-			auth := r.Header.Get("Authorization")
-			if strings.HasPrefix(r.URL.Path, "/api/") {
-				log.Printf("[CC] auth fail: ip=%s method=%s path=%s has_auth=%v auth_len=%d token_len=%d",
-					clientIP(r), r.Method, r.URL.Path, auth != "", len(auth), len(token))
+			// Distinguishes "no credential at all" from "credential present but
+			// rejected" so app-iframe 401 loops are diagnosable from logs alone.
+			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/apps/") {
+				log.Printf("[CC] auth fail: ip=%s method=%s path=%s reason=%s",
+					clientIP(r), r.Method, r.URL.Path, classifyAuthFail(r, appTokenFailReason))
 			}
 
 			// Show login page only for root path - all other unauthenticated paths get 401.

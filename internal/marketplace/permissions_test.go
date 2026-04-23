@@ -3,31 +3,33 @@ package marketplace
 import (
 	"os"
 	"testing"
+
+	"github.com/alamparelli/alf/internal/sandbox"
 )
 
 func TestValidatePermissions_Valid(t *testing.T) {
-	err := ValidatePermissions([]string{"storage", "bash", "upload", "clipboard", "events"})
+	err := sandbox.ValidatePermissions([]string{"storage", "bash", "upload", "clipboard", "events"})
 	if err != nil {
 		t.Errorf("expected nil error for valid perms, got: %v", err)
 	}
 }
 
 func TestValidatePermissions_Empty(t *testing.T) {
-	err := ValidatePermissions([]string{})
+	err := sandbox.ValidatePermissions([]string{})
 	if err != nil {
 		t.Errorf("expected nil error for empty perms, got: %v", err)
 	}
 }
 
 func TestValidatePermissions_Invalid(t *testing.T) {
-	err := ValidatePermissions([]string{"storage", "hack-the-planet"})
+	err := sandbox.ValidatePermissions([]string{"storage", "hack-the-planet"})
 	if err == nil {
 		t.Error("expected error for unknown permission")
 	}
 }
 
 func TestValidatePermissions_Nil(t *testing.T) {
-	err := ValidatePermissions(nil)
+	err := sandbox.ValidatePermissions(nil)
 	if err != nil {
 		t.Errorf("expected nil error for nil perms, got: %v", err)
 	}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 	vaultclient "github.com/alessandrolamparelli/vault-proxy/pkg/client"
 )
 

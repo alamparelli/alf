@@ -8,11 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/alamparelli/alf/internal/chatdb"
 
 	"github.com/alamparelli/alf/internal/comms"
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 func TestChatHandler_PostEmpty(t *testing.T) {
@@ -53,7 +51,8 @@ func TestChatHandler_PostRequiresConvID(t *testing.T) {
 // engine.Process (async) and a quick refresh could lose the message.
 func TestChatService_StartJobPersistsUserMsgBeforeProvider(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatDB.EnsureConversation("conv-310", "", "cc")
+	ctx := context.Background()
+	_ = svc.Memory.EnsureConv(ctx, "conv-310", "", "cc")
 
 	// Block Ask so the async provider never completes in this test.
 	release := make(chan struct{})
@@ -65,17 +64,17 @@ func TestChatService_StartJobPersistsUserMsgBeforeProvider(t *testing.T) {
 
 	svc.StartJob(ChatRequest{ConvID: "conv-310", Message: "save me"})
 
-	// Give the synchronous insert a moment; StartJob returns after it has
-	// already persisted, so history must contain the message immediately.
-	msgs, err := svc.ChatDB.History("conv-310", 10, time.Time{})
+	// StartJob returns after the synchronous insert, so history must contain
+	// the message immediately.
+	msgs, err := svc.Memory.ListMessages(ctx, "conv-310", memory.ListOpts{})
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}
 	var found bool
 	for _, m := range msgs {
-		if m.Role == "user" && m.Text == "save me" {
+		if m.Role == "user" && m.Content == "save me" {
 			found = true
-			if m.CreatedAt.IsZero() {
+			if m.CreatedAt == 0 {
 				t.Error("user message CreatedAt should not be zero")
 			}
 			break
@@ -208,18 +207,11 @@ func TestChatHandler_HistoryEmpty(t *testing.T) {
 
 func TestChatHandler_HistoryWithMessages(t *testing.T) {
 	svc := newTestChatService(t)
-	svc.ChatDB.EnsureConversation("test", "", "cc")
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "msg-1", ConvID: "test", Role: "user", Text: "hello",
-		CreatedAt: time.Now().Add(-time.Minute),
-	})
-	svc.ChatDB.InsertMessage(chatdb.Message{
-		ID: "msg-2", ConvID: "test", Role: "assistant", Text: "hi",
-		CreatedAt: time.Now(),
-	})
+	_ = appendTestMessage(t, svc, "test", "user", "hello")
+	_ = appendTestMessage(t, svc, "test", "assistant", "hi")
 
 	h := &ChatHandler{Service: svc}
-	req := httptest.NewRequest("GET", "/api/chat?limit=50", nil)
+	req := httptest.NewRequest("GET", "/api/chat?limit=50&conv_id=test", nil)
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -239,26 +231,19 @@ func TestChatHandler_HistoryWithMessages(t *testing.T) {
 
 func TestChatHandler_HistoryPagination(t *testing.T) {
 	svc := newTestChatService(t)
-	now := time.Now()
-	svc.ChatDB.EnsureConversation("test", "", "cc")
 	for i := 0; i < 10; i++ {
-		svc.ChatDB.InsertMessage(chatdb.Message{
-			ID:        NewMessageID(),
-			ConvID:    "test",
-			Role:      "user",
-			Text:      "msg",
-			CreatedAt: now.Add(time.Duration(i) * time.Minute),
-		})
+		_ = appendTestMessage(t, svc, "test", "user", "msg")
 	}
 
+	// TODO(#336): before-timestamp pagination dropped in memory migration
+	// (see chat_service.History). This test now verifies limit only.
 	h := &ChatHandler{Service: svc}
-	before := now.Add(5 * time.Minute).Format(time.RFC3339)
-	req := httptest.NewRequest("GET", "/api/chat?limit=3&before="+before, nil)
+	req := httptest.NewRequest("GET", "/api/chat?limit=3&conv_id=test", nil)
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
 
-	var msgs []ChatMessage
+	var msgs []HistoryMessage
 	json.Unmarshal(rec.Body.Bytes(), &msgs)
 	if len(msgs) != 3 {
 		t.Errorf("expected 3, got %d", len(msgs))

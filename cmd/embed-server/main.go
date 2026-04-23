@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alamparelli/alf/internal/memstore"
+	"github.com/alamparelli/alf/internal/memory/embed"
 )
 
 const (
@@ -23,7 +23,7 @@ const (
 )
 
 type server struct {
-	embedder *memstore.Embedder
+	embedder *embed.Embedder
 	secret   string
 	tokens   sync.Map // instance_id → token
 	dims     int
@@ -39,7 +39,7 @@ func main() {
 		log.Fatal("EMBED_SHARED_SECRET or EMBED_SHARED_SECRET_FILE is required")
 	}
 
-	embedder, err := memstore.NewEmbedder(*modelDir)
+	embedder, err := embed.NewEmbedder(*modelDir)
 	if err != nil {
 		log.Fatalf("embedder init: %v", err)
 	}

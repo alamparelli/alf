@@ -1,0 +1,1188 @@
+package agents
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/alamparelli/alf/internal/memory"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/tooling"
+)
+
+const (
+	defaultMaxIterations     = 20
+	defaultOrchestratorTurns = 3 // low: orchestrator should output JSON quickly, not do deep tool work
+	defaultGlobalTimeout     = 60 * time.Minute
+	orchestratorKey          = "agent"
+)
+
+// ResolveModelFunc maps short model names to full CLI model names.
+type ResolveModelFunc func(short string) string
+
+// Orchestrator coordinates sub-agents via a resume loop.
+// RunningTask tracks a live orchestrator task for cancellation.
+type RunningTask struct {
+	ID         string
+	StartedAt  time.Time
+	Cancel     context.CancelFunc
+	Meta       *TaskMeta
+	ApprovalCh chan ApprovalDecision
+}
+
+// ResolveProviderFunc maps a backend name to a provider.
+// Empty string or "cli" should return the default CLI provider.
+type ResolveProviderFunc func(backend string) provider.Provider
+
+type Orchestrator struct {
+	provider        provider.Provider
+	store           Store
+	dataDir         string
+	resolveModel    ResolveModelFunc
+	resolveTier     ResolveTierFunc
+	resolveProvider ResolveProviderFunc // optional: resolve provider by backend name
+	toolRegistry    *tooling.Registry   // optional: tool schemas for API agentic loop
+	toolExecutor    *tooling.Executor   // optional: tool subprocess runner
+
+	mu        sync.Mutex
+	running   map[string]*RunningTask
+	idCounter uint64 // monotonically-increasing suffix for taskID, guarded by mu
+}
+
+// NewOrchestrator creates a new orchestrator.
+func NewOrchestrator(prov provider.Provider, store Store, dataDir string, resolveModel ResolveModelFunc, resolveTier ResolveTierFunc) *Orchestrator {
+	return &Orchestrator{
+		provider:     prov,
+		store:        store,
+		dataDir:      dataDir,
+		resolveModel: resolveModel,
+		resolveTier:  resolveTier,
+		running:      make(map[string]*RunningTask),
+	}
+}
+
+// HasTeams returns true if at least one agent team is configured.
+func (o *Orchestrator) HasTeams() bool {
+	return len(o.store.All()) > 0
+}
+
+// SetResolveProvider sets the function used to resolve providers by backend name.
+func (o *Orchestrator) SetResolveProvider(fn ResolveProviderFunc) {
+	o.resolveProvider = fn
+}
+
+// SetTooling configures the tool registry and executor for API-tier agentic tool loops.
+func (o *Orchestrator) SetTooling(registry *tooling.Registry, executor *tooling.Executor) {
+	o.toolRegistry = registry
+	o.toolExecutor = executor
+}
+
+// WaitIdle blocks until there are no running tasks, or ctx is cancelled.
+// Used by tests and for clean shutdown to drain in-flight orchestrator
+// goroutines before tearing down their data directory.
+func (o *Orchestrator) WaitIdle(ctx context.Context) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		o.mu.Lock()
+		n := len(o.running)
+		o.mu.Unlock()
+		if n == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// Running returns a snapshot of all currently running tasks.
+//
+// The returned RunningTask.Meta is a deep copy — callers may read it freely
+// without synchronising with Run(). See #345.
+func (o *Orchestrator) Running() []RunningTask {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	tasks := make([]RunningTask, 0, len(o.running))
+	for _, rt := range o.running {
+		tasks = append(tasks, RunningTask{
+			ID:        rt.ID,
+			StartedAt: rt.StartedAt,
+			Meta:      cloneMetaLocked(rt.Meta),
+		})
+	}
+	return tasks
+}
+
+// cloneMetaLocked returns a deep copy of meta. Caller MUST hold o.mu.
+func cloneMetaLocked(meta *TaskMeta) *TaskMeta {
+	if meta == nil {
+		return nil
+	}
+	cp := *meta
+	if meta.Plan != nil {
+		cp.Plan = append([]PlanStep(nil), meta.Plan...)
+	}
+	if meta.Questions != nil {
+		cp.Questions = append([]string(nil), meta.Questions...)
+	}
+	if meta.AgentCalls != nil {
+		cp.AgentCalls = append([]AgentResult(nil), meta.AgentCalls...)
+	}
+	if meta.CompletedAt != nil {
+		t := *meta.CompletedAt
+		cp.CompletedAt = &t
+	}
+	return &cp
+}
+
+// updateMeta mutates meta under o.mu and persists a JSON snapshot atomically.
+// Any TaskMeta change that could be observed via Running() MUST go through
+// updateMeta or setMeta. See #345.
+func (o *Orchestrator) updateMeta(taskDir string, meta *TaskMeta, fn func(*TaskMeta)) {
+	o.mu.Lock()
+	fn(meta)
+	data, err := json.MarshalIndent(meta, "", "  ")
+	o.mu.Unlock()
+	if err != nil {
+		log.Printf("[orchestrator] failed to marshal task meta: %v", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "task.json"), data, 0o644); err != nil {
+		log.Printf("[orchestrator] failed to write task meta: %v", err)
+	}
+}
+
+// setMeta mutates meta under o.mu without persisting. Use for bookkeeping that
+// doesn't need an immediate disk flush (e.g. iteration counter).
+func (o *Orchestrator) setMeta(meta *TaskMeta, fn func(*TaskMeta)) {
+	o.mu.Lock()
+	fn(meta)
+	o.mu.Unlock()
+}
+
+// Cancel stops a running task by ID. Returns true if the task was found and cancelled.
+func (o *Orchestrator) Cancel(taskID string) bool {
+	o.mu.Lock()
+	rt, ok := o.running[taskID]
+	o.mu.Unlock()
+	if !ok {
+		return false
+	}
+	log.Printf("[orchestrator] cancelling task %s", taskID)
+	rt.Cancel()
+	return true
+}
+
+// CancelAll stops all running tasks.
+func (o *Orchestrator) CancelAll() int {
+	o.mu.Lock()
+	tasks := make([]*RunningTask, 0, len(o.running))
+	for _, rt := range o.running {
+		tasks = append(tasks, rt)
+	}
+	o.mu.Unlock()
+	for _, rt := range tasks {
+		log.Printf("[orchestrator] cancelling task %s", rt.ID)
+		rt.Cancel()
+	}
+	return len(tasks)
+}
+
+// DeleteTask removes a completed task's directory from disk.
+// Returns true if the task was found and deleted. Cannot delete running tasks.
+func (o *Orchestrator) DeleteTask(taskID string) bool {
+	o.mu.Lock()
+	_, running := o.running[taskID]
+	o.mu.Unlock()
+	if running {
+		return false
+	}
+	taskDir := filepath.Join(o.dataDir, "agents", taskID)
+	if _, err := os.Stat(taskDir); os.IsNotExist(err) {
+		return false
+	}
+	os.RemoveAll(taskDir)
+	log.Printf("[orchestrator] deleted task %s", taskID)
+	return true
+}
+
+// Approve sends an approval decision to a task awaiting validation.
+// Returns true if the decision was delivered.
+func (o *Orchestrator) Approve(taskID string, decision ApprovalDecision) bool {
+	o.mu.Lock()
+	rt, ok := o.running[taskID]
+	var status string
+	if ok {
+		status = rt.Meta.Status
+	}
+	o.mu.Unlock()
+	if !ok || (status != "awaiting_approval" && status != "awaiting_arbitration") {
+		return false
+	}
+	select {
+	case rt.ApprovalCh <- decision:
+		return true
+	default:
+		return false
+	}
+}
+
+// providerFor returns the provider for the given backend, falling back to the default.
+// If backend is empty but model contains "/" (e.g. "x-ai/grok-4"), it's an API model
+// and we auto-detect the backend via resolveProvider.
+func (o *Orchestrator) providerFor(backend, model string) provider.Provider {
+	if backend == "" && strings.Contains(model, "/") {
+		backend = "openrouter" // convention: slash in model name = API model
+		log.Printf("[orchestrator] auto-detected backend=%s for model=%s", backend, model)
+	}
+	if o.resolveProvider != nil && backend != "" && backend != "cli" {
+		return o.resolveProvider(backend)
+	}
+	return o.provider
+}
+
+// ProgressFunc reports status during orchestration.
+type ProgressFunc func(phase, detail string)
+
+// Run executes the orchestrator loop for a user message.
+func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompts []string, rc RunConfig, onProgress ProgressFunc) (string, *TaskMeta, error) {
+	allTeams := o.store.All()
+	if len(allTeams) == 0 {
+		return "", nil, fmt.Errorf("no agent teams configured")
+	}
+
+	// If a specific team was requested, filter to only that team.
+	// This prevents the brain from choosing a different team.
+	var teams []*TeamConfig
+	if rc.Team != "" {
+		for _, t := range allTeams {
+			if t.Name == rc.Team {
+				teams = append(teams, t)
+				break
+			}
+		}
+		if len(teams) == 0 {
+			return "", nil, fmt.Errorf("team %q not found", rc.Team)
+		}
+	} else {
+		teams = allTeams
+	}
+
+	// Unique taskID: nanosecond timestamp + monotonic counter. UnixNano alone
+	// can collide between concurrent Run() calls scheduled in the same
+	// nanosecond, which would clobber the running map entry. See #347.
+	o.mu.Lock()
+	o.idCounter++
+	taskID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), o.idCounter)
+	o.mu.Unlock()
+	agentsParent := filepath.Join(o.dataDir, "agents")
+	taskDir := filepath.Join(agentsParent, taskID)
+	os.MkdirAll(taskDir, 0o775)
+	// Ensure the agents/ parent and task dir are owned by alf (subprocess uid 1000)
+	// so the LLM process can write files inside.
+	os.Chmod(agentsParent, 0o775)
+	if err := os.Chown(agentsParent, 1000, 1000); err != nil {
+		log.Printf("[orchestrator] chown agents dir: %v", err)
+	}
+	os.Chmod(taskDir, 0o775)
+	if err := os.Chown(taskDir, 1000, 1000); err != nil {
+		log.Printf("[orchestrator] chown task dir: %v", err)
+	}
+
+	log.Printf("[orchestrator] task %s started | teams=%d | message_len=%d", taskID, len(teams), len(userMessage))
+
+	meta := &TaskMeta{
+		ID:        taskID,
+		StartedAt: time.Now(),
+		Status:    "running",
+		Prompt:    userMessage,
+		Source:    rc.Source,
+		Team:      rc.Team,
+	}
+
+	// Persist team config and initial task state immediately.
+	o.saveTeams(taskDir, teams)
+	o.saveMeta(taskDir, meta)
+
+	// Notify caller of the task ID so it can be referenced.
+	if onProgress != nil {
+		onProgress("task_started", taskID)
+	}
+
+	// Determine global timeout from max team timeout.
+	globalTimeout := defaultGlobalTimeout
+	for _, tc := range teams {
+		if tc.GlobalTimeoutMin > 0 {
+			d := time.Duration(tc.GlobalTimeoutMin) * time.Minute
+			if d > globalTimeout {
+				globalTimeout = d
+			}
+		}
+	}
+	// Tier-level timeout overrides team-level timeout if set.
+	if rc.TimeoutMin > 0 {
+		globalTimeout = time.Duration(rc.TimeoutMin) * time.Minute
+	}
+	log.Printf("[orchestrator] global timeout=%s | task_dir=%s", globalTimeout, taskDir)
+	ctx, cancel := context.WithTimeout(ctx, globalTimeout)
+	defer cancel()
+
+	// Register for cancellation tracking.
+	o.mu.Lock()
+	o.running[taskID] = &RunningTask{
+		ID:         taskID,
+		StartedAt:  meta.StartedAt,
+		Cancel:     cancel,
+		Meta:       meta,
+		ApprovalCh: make(chan ApprovalDecision, 1),
+	}
+	rt := o.running[taskID]
+	o.mu.Unlock()
+	defer func() {
+		// If status is still "running", "awaiting_approval", or "awaiting_arbitration"
+		// when we exit (e.g. context cancelled, panic recovery), update disk so the
+		// task isn't orphaned as invisible.
+		o.mu.Lock()
+		shouldPersist := false
+		if meta.Status == "running" || meta.Status == "awaiting_approval" || meta.Status == "awaiting_arbitration" {
+			meta.Status = "interrupted"
+			now := time.Now()
+			meta.CompletedAt = &now
+			shouldPersist = true
+		}
+		delete(o.running, taskID)
+		var data []byte
+		if shouldPersist {
+			var err error
+			data, err = json.MarshalIndent(meta, "", "  ")
+			if err != nil {
+				log.Printf("[orchestrator] failed to marshal task meta: %v", err)
+				shouldPersist = false
+			}
+		}
+		o.mu.Unlock()
+		if shouldPersist {
+			if err := os.WriteFile(filepath.Join(taskDir, "task.json"), data, 0o644); err != nil {
+				log.Printf("[orchestrator] failed to write task meta: %v", err)
+			}
+		}
+	}()
+
+	sm := newSessionManager()
+
+	// Build orchestrator system prompt.
+	orchPrompt := BuildOrchestratorPrompt(teams, taskDir, rc.Backend)
+	allSystemPrompts := append(systemPrompts, orchPrompt)
+	maxIterations := rc.MaxIterations
+	if maxIterations <= 0 {
+		maxIterations = defaultMaxIterations
+	}
+	orchModel := rc.Model
+	if orchModel == "" {
+		return "", nil, fmt.Errorf("orchestrator tier has no model configured — set a model in the orchestrator tier config")
+	}
+	orchEffort := rc.Effort
+	if orchEffort == "" {
+		orchEffort = "high"
+	}
+	orchMaxTurns := rc.OrchestratorMaxTurns
+	if orchMaxTurns <= 0 {
+		orchMaxTurns = defaultOrchestratorTurns
+	}
+	log.Printf("[orchestrator] system prompts: %d total (%d user + orchestrator prompt) | max_iterations=%d model=%s effort=%s max_turns=%d", len(allSystemPrompts), len(systemPrompts), maxIterations, orchModel, orchEffort, orchMaxTurns)
+
+	// First call: send user message.
+	prompt := userMessage
+	turnLimitRetries := 0
+	const maxTurnLimitRetries = 2
+	consecutiveNonJSON := 0
+	const maxConsecutiveNonJSON = 2
+	lastRawOutput := ""
+
+	for iteration := 0; iteration < maxIterations; iteration++ {
+		o.setMeta(meta, func(m *TaskMeta) { m.Iterations = iteration + 1 })
+		iterStart := time.Now()
+
+		log.Printf("[orchestrator] ── iteration %d/%d ──", iteration+1, maxIterations)
+		log.Printf("[orchestrator] prompt to orchestrator: %d chars", len(prompt))
+
+		if onProgress != nil {
+			onProgress("thinking", fmt.Sprintf("iteration %d", iteration+1))
+		}
+
+		// Invoke orchestrator (read-only, uses taskDir as cwd).
+		orchSessionID := sm.Get(orchestratorKey)
+
+		hasResume := orchSessionID != ""
+		log.Printf("[orchestrator] invoking model=%s backend=%s effort=%s resume=%v", orchModel, rc.Backend, orchEffort, hasResume)
+
+		orchProvider := o.providerFor(rc.Backend, orchModel)
+
+		params := provider.Params{
+			Model:         orchModel,
+			SystemPrompts: allSystemPrompts,
+			ResumeID:      orchSessionID,
+			DataDir:       taskDir,
+			Effort:        orchEffort,
+			MaxTurns:      orchMaxTurns,
+			ReadOnly:      true, // Brain must produce JSON-only output, no tool use.
+		}
+
+		result, err := orchProvider.Invoke(ctx, prompt, params, nil)
+
+		// Retry without resume if session expired.
+		if err != nil && orchSessionID != "" && strings.Contains(err.Error(), "No conversation found") {
+			log.Printf("[orchestrator] session expired, retrying without resume")
+			sm.Clear(orchestratorKey)
+			params.ResumeID = ""
+			result, err = orchProvider.Invoke(ctx, prompt, params, nil)
+		}
+
+		if err != nil {
+			log.Printf("[orchestrator] FAILED iteration %d: %v", iteration+1, err)
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				m.Status = "failed"
+				now := time.Now()
+				m.CompletedAt = &now
+			})
+			return "", meta, fmt.Errorf("orchestrator invoke: %w", err)
+		}
+
+		iterDur := time.Since(iterStart)
+		o.setMeta(meta, func(m *TaskMeta) { m.TotalCost += result.CostUSD })
+		if result.SessionID != "" {
+			sm.Set(orchestratorKey, result.SessionID)
+		}
+
+		log.Printf("[orchestrator] response received: %dms $%.4f %d chars session=%s",
+			iterDur.Milliseconds(), result.CostUSD, len(result.Text), truncate(result.SessionID, 12))
+		log.Printf("[orchestrator] raw output: %d chars", len(result.Text))
+
+		// Detect orchestrator turn limit - retry a limited number of times.
+		if strings.Contains(result.Text, "Turn limit reached") {
+			turnLimitRetries++
+			if turnLimitRetries > maxTurnLimitRetries {
+				log.Printf("[orchestrator] ✗ orchestrator hit turn limit %d times - aborting", turnLimitRetries)
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+					m.Status = "failed"
+					now := time.Now()
+					m.CompletedAt = &now
+				})
+				return "", meta, fmt.Errorf("orchestrator repeatedly hit turn limit (%d retries) - try increasing max_turns in the orchestrator tier config", maxTurnLimitRetries)
+			}
+			log.Printf("[orchestrator] ⚠ orchestrator hit turn limit (%d/%d retries) - clearing session", turnLimitRetries, maxTurnLimitRetries)
+			sm.Clear(orchestratorKey)
+			prompt = userMessage
+			continue
+		}
+
+		// Parse orchestrator output.
+		output := parseOrchestratorOutput(result.Text)
+
+		// Gather output - read files and return content to orchestrator.
+		if len(output.Gather) > 0 {
+			log.Printf("[orchestrator] gathering %d file(s) for context", len(output.Gather))
+			var gatherResult strings.Builder
+			gatherResult.WriteString(`{"gathered_files":{`)
+			first := true
+			for _, path := range output.Gather {
+				// Sanitize: only allow paths under data dir.
+				fullPath := filepath.Join(o.dataDir, path)
+				data, err := os.ReadFile(fullPath)
+				content := ""
+				if err != nil {
+					content = "(file not found: " + path + ")"
+				} else {
+					content = string(data)
+					if len(content) > 10000 {
+						content = content[:10000] + "\n... (truncated)"
+					}
+				}
+				if !first {
+					gatherResult.WriteString(",")
+				}
+				first = false
+				gatherResult.WriteString(`"` + escapeJSON(path) + `":"` + escapeJSON(content) + `"`)
+			}
+			gatherResult.WriteString(`},"instruction":"now analyze this context and output a plan (Option A)"}`)
+			prompt = gatherResult.String()
+			continue
+		}
+
+		// Plan output - display and optionally block for approval.
+		if len(output.Plan) > 0 {
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) { m.Plan = output.Plan })
+			if onProgress != nil {
+				onProgress("plan_ready", "")
+			}
+
+			if rc.NeedValidation {
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) { m.Status = "awaiting_approval" })
+				if onProgress != nil {
+					onProgress("awaiting_approval", "")
+				}
+				// Block until user approves or context cancels.
+				select {
+				case <-ctx.Done():
+					return "", meta, ctx.Err()
+				case decision := <-rt.ApprovalCh:
+					if !decision.Approved {
+						o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+							m.Status = "running"
+							m.ValidationFeedback = decision.Feedback
+							m.Plan = nil
+						})
+						prompt = `{"plan_rejected":true,"feedback":"` + escapeJSON(decision.Feedback) + `","instruction":"revise your plan based on the feedback and output a new plan"}`
+						continue
+					}
+					o.updateMeta(taskDir, meta, func(m *TaskMeta) { m.Status = "running" })
+				}
+			}
+			// Tell orchestrator to execute the plan.
+			prompt = `{"plan_approved":true,"instruction":"execute the plan now by delegating to agents"}`
+			continue
+		}
+
+		// Questions from orchestrator — enter arbitration mode.
+		if len(output.Questions) > 0 {
+			log.Printf("[orchestrator] orchestrator has %d question(s) for the user", len(output.Questions))
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				m.Questions = output.Questions
+				m.Status = "awaiting_arbitration"
+			})
+			if onProgress != nil {
+				onProgress("awaiting_arbitration", taskID)
+			}
+			// Block until user responds or context cancels.
+			select {
+			case <-ctx.Done():
+				return "", meta, ctx.Err()
+			case decision := <-rt.ApprovalCh:
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+					m.Status = "running"
+					m.Questions = nil
+				})
+				prompt = `{"arbitration_response":"` + escapeJSON(decision.Feedback) + `","instruction":"the user has answered your questions, continue with the task"}`
+				continue
+			}
+		}
+
+		// Final response - done.
+		if output.Response != "" {
+			log.Printf("[orchestrator] ✓ final response received (%d chars)", len(output.Response))
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				m.Status = "completed"
+				m.Response = output.Response
+				now := time.Now()
+				m.CompletedAt = &now
+			})
+			totalDur := time.Since(meta.StartedAt)
+			log.Printf("[orchestrator] task %s completed: %d iterations %dms $%.4f",
+				taskID, meta.Iterations, totalDur.Milliseconds(), meta.TotalCost)
+			return output.Response, meta, nil
+		}
+
+		// No delegates and no response - treat as empty iteration.
+		if len(output.Delegates) == 0 {
+			// Detect repeated identical non-JSON output (e.g. model error loops).
+			if result.Text == lastRawOutput {
+				consecutiveNonJSON++
+			} else {
+				consecutiveNonJSON = 1
+				lastRawOutput = result.Text
+			}
+			if consecutiveNonJSON >= maxConsecutiveNonJSON {
+				log.Printf("[orchestrator] ✗ brain returned same non-JSON output %d times - aborting: %s",
+					consecutiveNonJSON, truncate(result.Text, 200))
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+					m.Status = "failed"
+					now := time.Now()
+					m.CompletedAt = &now
+				})
+				return "", meta, fmt.Errorf("orchestrator brain error (repeated %d times): %s",
+					consecutiveNonJSON, truncate(result.Text, 200))
+			}
+			log.Printf("[orchestrator] ⚠ no delegates and no response - nudging")
+			prompt = `{"agent_results": [], "note": "No delegates provided. Either delegate to agents or provide a final response."}`
+			continue
+		}
+
+		// Log delegate plan.
+		agentNames := make([]string, len(output.Delegates))
+		for i, d := range output.Delegates {
+			_, name := splitTeamAgent(d.Agent)
+			agentNames[i] = name
+			log.Printf("[orchestrator]   [%d] agent=%s task=%s", i+1, d.Agent, truncate(d.Task, 100))
+		}
+		log.Printf("[orchestrator] delegating to %d agent(s): %s", len(output.Delegates), strings.Join(agentNames, ", "))
+
+		if onProgress != nil {
+			onProgress("planning", fmt.Sprintf("Dispatching %d agents: %s", len(output.Delegates), strings.Join(agentNames, ", ")))
+		}
+
+		// Execute delegates.
+		agentResults := o.executeDelegates(ctx, output.Delegates, teams, sm, taskDir, meta, rc, onProgress)
+
+		// Log results summary.
+		log.Printf("[orchestrator] delegates completed:")
+		for _, ar := range agentResults {
+			if ar.Error != "" {
+				log.Printf("[orchestrator]   ✗ %s: error=%s (%dms)", ar.Agent, truncate(ar.Error, 100), ar.Duration.Milliseconds())
+			} else {
+				log.Printf("[orchestrator]   ✓ %s: %d chars $%.4f (%dms)", ar.Agent, len(ar.Text), ar.CostUSD, ar.Duration.Milliseconds())
+			}
+		}
+
+		// Build results JSON for resume.
+		var resultsJSON []agentResultJSON
+		for _, ar := range agentResults {
+			resultsJSON = append(resultsJSON, agentResultJSON{
+				Agent:      ar.Agent,
+				Result:     ar.Text,
+				Error:      ar.Error,
+				CostUSD:    ar.CostUSD,
+				DurationMs: ar.Duration.Milliseconds(),
+			})
+		}
+
+		// Extract [[QUESTION: ...]] markers from agent results.
+		var agentQuestions []string
+		for _, ar := range agentResults {
+			agentQuestions = append(agentQuestions, extractQuestions(ar.Text)...)
+		}
+		if len(agentQuestions) > 0 {
+			log.Printf("[orchestrator] agents raised %d question(s) for the user", len(agentQuestions))
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				m.Questions = agentQuestions
+				m.Status = "awaiting_arbitration"
+			})
+			if onProgress != nil {
+				onProgress("awaiting_arbitration", taskID)
+			}
+			select {
+			case <-ctx.Done():
+				return "", meta, ctx.Err()
+			case decision := <-rt.ApprovalCh:
+				o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+					m.Status = "running"
+					m.Questions = nil
+				})
+				// Inject user answers into the next resume prompt alongside agent results.
+				prompt = `{"arbitration_response":"` + escapeJSON(decision.Feedback) + `","instruction":"the user answered the agents' questions, incorporate their answers and continue"}`
+				continue
+			}
+		}
+
+		// Check if any agents failed.
+		hasErrors := false
+		for _, ar := range agentResults {
+			if ar.Error != "" {
+				hasErrors = true
+				break
+			}
+		}
+
+		reviewInstruction := "Review the agent results. If all results are satisfactory, produce your final response. If any result is incomplete, incorrect, or needs improvement, delegate again with corrective instructions."
+		if hasErrors {
+			reviewInstruction = "Some agents failed. Review the errors, decide if you need to retry with different instructions or if you can produce a final response with the successful results."
+		}
+
+		resumeData := struct {
+			AgentResults []agentResultJSON `json:"agent_results"`
+			Iteration    int               `json:"iteration"`
+			TotalCostUSD float64           `json:"total_cost_usd"`
+			Review       string            `json:"review_instruction"`
+		}{
+			AgentResults: resultsJSON,
+			Iteration:    iteration + 2,
+			TotalCostUSD: meta.TotalCost,
+			Review:       reviewInstruction,
+		}
+
+		data, _ := json.Marshal(resumeData)
+		prompt = string(data)
+		log.Printf("[orchestrator] resume payload: %d bytes, running cost=$%.4f", len(data), meta.TotalCost)
+
+		if onProgress != nil {
+			onProgress("synthesizing", "")
+		}
+	}
+
+	// Max iterations exceeded.
+	log.Printf("[orchestrator] ✗ task %s hit max iterations (%d)", taskID, maxIterations)
+	o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+		m.Status = "timeout"
+		now := time.Now()
+		m.CompletedAt = &now
+	})
+	return "", meta, fmt.Errorf("max iterations (%d) exceeded", maxIterations)
+}
+
+// executeDelegates runs sub-agents concurrently and collects results.
+func (o *Orchestrator) executeDelegates(
+	ctx context.Context,
+	delegates []DelegateRequest,
+	teams []*TeamConfig,
+	sm *SessionManager,
+	taskDir string,
+	meta *TaskMeta,
+	rc RunConfig,
+	onProgress ProgressFunc,
+) []AgentResult {
+	// Find max concurrent limit from the relevant teams.
+	maxConcurrent := 0
+	for _, d := range delegates {
+		teamName, _ := splitTeamAgent(d.Agent)
+		for _, tc := range teams {
+			if tc.Name == teamName && tc.MaxAgentsPerReq > maxConcurrent {
+				maxConcurrent = tc.MaxAgentsPerReq
+			}
+		}
+	}
+	if maxConcurrent <= 0 {
+		maxConcurrent = 3
+	}
+
+	// Truncate delegates if exceeding limit.
+	if len(delegates) > maxConcurrent {
+		log.Printf("[orchestrator] truncating %d delegates to %d (team limit)", len(delegates), maxConcurrent)
+		delegates = delegates[:maxConcurrent]
+	}
+
+	var (
+		mu      sync.Mutex
+		results []AgentResult
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, maxConcurrent)
+	)
+
+	// Track how many times each agent appears to create unique session keys.
+	agentCount := make(map[string]int, len(delegates))
+	type indexedDelegate struct {
+		DelegateRequest
+		index int
+	}
+	indexed := make([]indexedDelegate, len(delegates))
+	for i, d := range delegates {
+		agentCount[d.Agent]++
+		indexed[i] = indexedDelegate{d, agentCount[d.Agent]}
+	}
+
+	// Pre-register all agents as "working" in meta so the Tasks UI shows them immediately.
+	workingIndices := make(map[string]int, len(indexed)) // agent key → index in AgentCalls
+	o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+		for _, id := range indexed {
+			key := id.Agent
+			if agentCount[id.Agent] > 1 {
+				key = fmt.Sprintf("%s#%d", id.Agent, id.index)
+			}
+			workingIndices[key] = len(m.AgentCalls)
+			m.AgentCalls = append(m.AgentCalls, AgentResult{
+				Agent:  id.Agent,
+				Task:   id.DelegateRequest.Task,
+				Status: "working",
+			})
+		}
+	})
+
+	for _, id := range indexed {
+		wg.Add(1)
+		go func(d DelegateRequest, idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			// Use unique session key when same agent is delegated multiple times.
+			sessionKey := d.Agent
+			if agentCount[d.Agent] > 1 {
+				sessionKey = fmt.Sprintf("%s#%d", d.Agent, idx)
+			}
+			ar := o.invokeAgentWithKey(ctx, d, sessionKey, sm, taskDir, rc, onProgress)
+
+			// Set final status.
+			if ar.Error != "" {
+				ar.Status = "failed"
+			} else {
+				ar.Status = "completed"
+			}
+			ar.Task = d.Task
+
+			mu.Lock()
+			results = append(results, ar)
+			mu.Unlock()
+			o.updateMeta(taskDir, meta, func(m *TaskMeta) {
+				if i, ok := workingIndices[sessionKey]; ok && i < len(m.AgentCalls) {
+					m.AgentCalls[i] = ar
+				}
+				m.TotalCost += ar.CostUSD
+			})
+		}(id.DelegateRequest, id.index)
+	}
+
+	wg.Wait()
+	return results
+}
+
+// invokeAgentWithKey calls a single sub-agent using the given session key.
+func (o *Orchestrator) invokeAgentWithKey(
+	ctx context.Context,
+	d DelegateRequest,
+	sessionKey string,
+	sm *SessionManager,
+	taskDir string,
+	rc RunConfig,
+	onProgress ProgressFunc,
+) AgentResult {
+	start := time.Now()
+	teamName, agentName := splitTeamAgent(d.Agent)
+
+	_, ac, ok := o.store.GetAgent(d.Agent)
+	if !ok {
+		log.Printf("[orchestrator] agent %q not found in store", d.Agent)
+		return AgentResult{
+			Agent:    d.Agent,
+			Error:    fmt.Sprintf("agent %q not found", d.Agent),
+			Duration: time.Since(start),
+		}
+	}
+
+	// Resolve tier to get execution parameters.
+	var tp TierParams
+	if o.resolveTier != nil && ac.Tier != "" {
+		var found bool
+		tp, found = o.resolveTier(ac.Tier)
+		if !found {
+			log.Printf("[orchestrator] tier %q not found for agent %s/%s", ac.Tier, teamName, agentName)
+			return AgentResult{
+				Agent:    d.Agent,
+				Error:    fmt.Sprintf("tier %q not found", ac.Tier),
+				Duration: time.Since(start),
+			}
+		}
+	} else {
+		log.Printf("[orchestrator] agent %s/%s has no tier configured", teamName, agentName)
+		return AgentResult{
+			Agent:    d.Agent,
+			Error:    fmt.Sprintf("agent %q has no tier configured", d.Agent),
+			Duration: time.Since(start),
+		}
+	}
+
+	if onProgress != nil {
+		onProgress("agent", fmt.Sprintf("%s/%s", teamName, agentName))
+	}
+
+	// Every agent gets its own working directory under the task folder.
+	agentDir := filepath.Join(taskDir, fmt.Sprintf("%s-%s", teamName, agentName))
+	if sessionKey != d.Agent {
+		agentDir = filepath.Join(taskDir, fmt.Sprintf("%s-%s-%s", teamName, agentName, sessionKey[strings.LastIndex(sessionKey, "#")+1:]))
+	}
+	os.MkdirAll(agentDir, 0o775)
+	os.Chmod(agentDir, 0o775)
+	if err := os.Chown(agentDir, 1000, 1000); err != nil {
+		log.Printf("[orchestrator] chown agent dir %s: %v", agentDir, err)
+	}
+
+	model := tp.Model
+
+	sessionID := sm.Get(sessionKey)
+	hasResume := sessionID != ""
+	log.Printf("[orchestrator] → agent %s/%s: tier=%s model=%s backend=%s effort=%s write=%v max_turns=%d resume=%v",
+		teamName, agentName, ac.Tier, model, tp.Backend, tp.Effort, tp.WriteCapable, tp.MaxTurns, hasResume)
+	log.Printf("[orchestrator]   task: %d chars", len(d.Task))
+
+	// Build system prompts: tier prompt + agent's own prompt + workspace + context + memory + skills.
+	sysPrompts := make([]string, 0, 5+len(rc.MemoryContext)+len(rc.SkillPrompts))
+	if tp.SystemPrompt != "" {
+		sysPrompts = append(sysPrompts, tp.SystemPrompt)
+	}
+	if ac.SystemPrompt != "" {
+		sysPrompts = append(sysPrompts, ac.SystemPrompt)
+	}
+
+	// Workspace directory enforcement: tell agent exactly where to write.
+	sysPrompts = append(sysPrompts, fmt.Sprintf(
+		"## Your Workspace\nYour working directory is: %s\n"+
+			"ALL files you create MUST be written inside this directory using RELATIVE paths (e.g. ./output.md).\n"+
+			"Do NOT write files anywhere else — not in /home/alf/data/, not in the root, not in any other agent's directory.\n"+
+			"Exception: if your task explicitly instructs you to write to /home/alf/data/apps/<app-name>/, follow that instruction.",
+		agentDir))
+
+	// Original user request: agents get the raw message as fallback context.
+	if rc.OriginalRequest != "" {
+		sysPrompts = append(sysPrompts, "=== [Original User Request] ===\n"+rc.OriginalRequest)
+	}
+
+	// Conversation context: recent exchanges so agents understand the broader discussion.
+	if rc.ConversationContext != "" {
+		sysPrompts = append(sysPrompts, "=== [Recent Conversation] ===\n"+rc.ConversationContext)
+	}
+
+	sysPrompts = append(sysPrompts, rc.MemoryContext...)
+
+	// Skill injection: per-agent skills override global matched skills.
+	var agentSkillPrompts []string
+	if len(ac.Skills) > 0 && rc.SkillLookup != nil {
+		// Agent has explicit skills — resolve by name.
+		for _, name := range ac.Skills {
+			if prompt, ok := rc.SkillLookup.Get(name); ok && prompt != "" {
+				agentSkillPrompts = append(agentSkillPrompts, prompt)
+			} else {
+				log.Printf("[orchestrator]   skill %q not found for agent %s/%s", name, teamName, agentName)
+			}
+		}
+	} else {
+		// No per-agent skills — use globally matched skills.
+		agentSkillPrompts = rc.SkillPrompts
+	}
+	sysPrompts = append(sysPrompts, agentSkillPrompts...)
+	if len(rc.MemoryContext) > 0 || len(agentSkillPrompts) > 0 {
+		log.Printf("[orchestrator]   injecting %d memory + %d skill prompt(s) into agent %s/%s", len(rc.MemoryContext), len(agentSkillPrompts), teamName, agentName)
+	}
+
+	params := provider.Params{
+		Model:         model,
+		Tools:         tp.Tools,
+		WriteCapable:  tp.WriteCapable,
+		Effort:        tp.Effort,
+		MaxTurns:      tp.MaxTurns,
+		SystemPrompts: sysPrompts,
+		ResumeID:      sessionID,
+		DataDir:       agentDir,
+	}
+
+	// Forward agent streaming events to progress callback.
+	var agentProgress provider.OnProgress
+	if onProgress != nil {
+		agentProgress = func(event provider.StreamEvent) {
+			switch event.Type {
+			case "thinking":
+				if event.Text == "" {
+					onProgress("agent_thinking", agentName)
+				}
+			case "tool_use":
+				onProgress("agent_tool", agentName+":"+event.Detail)
+			}
+		}
+	}
+
+	agentProv := o.providerFor(tp.Backend, model)
+
+	// Wrap API provider with agentic tool loop when tier has tools.
+	if o.toolRegistry != nil && o.toolExecutor != nil && len(tp.Tools) > 0 {
+		if apiProv, ok := agentProv.(*provider.APIProvider); ok {
+			o.toolRegistry.Rescan()
+			// Expand tool wildcards into concrete tool names.
+			resolvedTools := tp.Tools
+			if len(resolvedTools) == 1 && resolvedTools[0] == "*" {
+				resolvedTools = tooling.ResolveWildcard(o.dataDir, o.toolRegistry)
+				log.Printf("[orchestrator]   wildcard resolved to %d tools for %s/%s", len(resolvedTools), teamName, agentName)
+			} else if len(resolvedTools) == 1 && resolvedTools[0] == "*native" {
+				resolvedTools = o.toolRegistry.NativeToolNames()
+				log.Printf("[orchestrator]   native wildcard resolved to %d tools for %s/%s", len(resolvedTools), teamName, agentName)
+			}
+			schemas := o.toolRegistry.ForToolsStrict(resolvedTools)
+			if len(schemas) > 0 {
+				var tools []map[string]any
+				if apiProv.IsDirectOpenAI() {
+					tools = tooling.ToOpenAI(schemas)
+				} else {
+					tools = tooling.ToOpenAICompat(schemas)
+				}
+				maxTurns := tp.MaxTurns
+				if maxTurns <= 0 {
+					maxTurns = 10
+				}
+				agentProv = provider.NewToolLoop(apiProv, &orchestratorToolAdapter{exec: o.toolExecutor}, tools, maxTurns)
+				toolNames := make([]string, len(schemas))
+				for i, s := range schemas {
+					toolNames[i] = s.Name
+				}
+				params.SystemPrompts = append([]string{memory.ToolInstruction(toolNames)}, params.SystemPrompts...)
+				log.Printf("[orchestrator]   tool loop enabled for %s/%s: %d tools, max_turns=%d", teamName, agentName, len(schemas), maxTurns)
+			}
+		}
+	}
+
+	result, err := agentProv.Invoke(ctx, d.Task, params, agentProgress)
+
+	// Retry without resume if session expired.
+	if err != nil && sessionID != "" && strings.Contains(err.Error(), "No conversation found") {
+		log.Printf("[orchestrator]   agent %s/%s session expired, retrying", teamName, agentName)
+		sm.Clear(sessionKey)
+		params.ResumeID = ""
+		result, err = agentProv.Invoke(ctx, d.Task, params, agentProgress)
+	}
+
+	dur := time.Since(start)
+	if err != nil {
+		log.Printf("[orchestrator] ✗ agent %s/%s failed after %dms: %v", teamName, agentName, dur.Milliseconds(), err)
+		if onProgress != nil {
+			onProgress("agent_done", fmt.Sprintf("%s ✗ (%ds)", agentName, int(dur.Seconds())))
+		}
+		return AgentResult{
+			Agent:    d.Agent,
+			Model:    model,
+			Error:    err.Error(),
+			Duration: dur,
+		}
+	}
+
+	if result.SessionID != "" {
+		sm.Set(sessionKey, result.SessionID)
+	}
+
+	log.Printf("[orchestrator] ← agent %s/%s: %dms $%.4f %d chars session=%s",
+		teamName, agentName, dur.Milliseconds(), result.CostUSD, len(result.Text), truncate(result.SessionID, 12))
+
+	// Detect turn limit as a sub-agent failure.
+	if strings.Contains(result.Text, "Turn limit reached") {
+		log.Printf("[orchestrator] ✗ agent %s/%s hit turn limit", teamName, agentName)
+		if onProgress != nil {
+			onProgress("agent_done", fmt.Sprintf("%s ✗ turn limit (%ds)", agentName, int(dur.Seconds())))
+		}
+		return AgentResult{
+			Agent:    d.Agent,
+			Model:    model,
+			Text:     result.Text,
+			Error:    "turn limit reached",
+			CostUSD:  result.CostUSD,
+			Duration: dur,
+		}
+	}
+
+	if onProgress != nil {
+		onProgress("agent_done", fmt.Sprintf("%s ✓ (%ds, $%.4f)", agentName, int(dur.Seconds()), result.CostUSD))
+	}
+
+	return AgentResult{
+		Agent:    d.Agent,
+		Model:    model,
+		Text:     result.Text,
+		CostUSD:  result.CostUSD,
+		Duration: dur,
+	}
+}
+
+// parseOrchestratorOutput parses the orchestrator's JSON output.
+// Falls back to treating the entire text as a plain text response.
+func parseOrchestratorOutput(text string) OrchestratorOutput {
+	text = strings.TrimSpace(text)
+
+	// Try to find JSON in the text (may be wrapped in markdown code blocks).
+	jsonStr := text
+	if idx := strings.Index(text, "{"); idx >= 0 {
+		// Find the matching closing brace.
+		depth := 0
+		for i := idx; i < len(text); i++ {
+			switch text[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					jsonStr = text[idx : i+1]
+					goto parse
+				}
+			}
+		}
+	}
+
+parse:
+	var out OrchestratorOutput
+	if err := json.Unmarshal([]byte(jsonStr), &out); err != nil {
+		// Not valid JSON - do NOT treat as response; force re-delegation.
+		log.Printf("[orchestrator] ⚠ output is not valid JSON, will nudge for proper delegation")
+		return OrchestratorOutput{} // empty = triggers nudge loop
+	}
+
+	return out
+}
+
+// escapeJSON escapes a string for safe embedding in a JSON string literal.
+func escapeJSON(s string) string {
+	b, _ := json.Marshal(s)
+	// Strip surrounding quotes.
+	if len(b) >= 2 {
+		return string(b[1 : len(b)-1])
+	}
+	return s
+}
+
+// truncate shortens a string to maxLen, appending "…" if truncated.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "…"
+}
+
+// saveTeams writes teams.json to the task directory with the agent config snapshot.
+func (o *Orchestrator) saveTeams(taskDir string, teams []*TeamConfig) {
+	data, err := json.MarshalIndent(teams, "", "  ")
+	if err != nil {
+		log.Printf("[orchestrator] failed to marshal teams: %v", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "teams.json"), data, 0o644); err != nil {
+		log.Printf("[orchestrator] failed to write teams.json: %v", err)
+	}
+}
+
+// orchestratorToolAdapter bridges tooling.Executor to provider.ToolExecutor.
+type orchestratorToolAdapter struct {
+	exec *tooling.Executor
+}
+
+func (a *orchestratorToolAdapter) Execute(ctx context.Context, call provider.ToolCallRequest) provider.ToolCallResult {
+	result := a.exec.Execute(ctx, tooling.CallRequest{
+		ID:        call.ID,
+		Name:      call.Name,
+		Arguments: call.Arguments,
+	})
+	return provider.ToolCallResult{
+		ID:           result.ID,
+		Output:       result.Output,
+		IsError:      result.IsError,
+		ExitCode:     result.ExitCode,
+		ErrorMessage: result.ErrorMessage,
+	}
+}
+
+// questionRegex matches [[QUESTION: ...]] markers in agent output text.
+var questionRegex = regexp.MustCompile(`\[\[QUESTION:\s*(.*?)\]\]`)
+
+// extractQuestions parses [[QUESTION: ...]] markers from text.
+func extractQuestions(text string) []string {
+	matches := questionRegex.FindAllStringSubmatch(text, -1)
+	var questions []string
+	for _, m := range matches {
+		q := strings.TrimSpace(m[1])
+		if q != "" {
+			questions = append(questions, q)
+		}
+	}
+	return questions
+}
+
+// saveMeta writes task.json to the task directory.
+func (o *Orchestrator) saveMeta(taskDir string, meta *TaskMeta) {
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		log.Printf("[orchestrator] failed to marshal task meta: %v", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "task.json"), data, 0o644); err != nil {
+		log.Printf("[orchestrator] failed to write task meta: %v", err)
+	}
+}

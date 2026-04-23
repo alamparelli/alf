@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alamparelli/alf/internal/conversation"
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/mood"
-	"github.com/alamparelli/alf/internal/provider"
+	"github.com/alamparelli/alf/internal/memory/curation"
+	"github.com/alamparelli/alf/internal/platform/mood"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 // ReactInput is the input for reaction processing.
@@ -62,11 +62,18 @@ func (e *ChatEngine) React(input ReactInput) (*ReactResult, error) {
 
 // ExtractReactionLearning extracts a behavioral learning from a reaction using conversation context.
 func (e *ChatEngine) ExtractReactionLearning(emoji string, channelID ChannelID) {
-	if e.ConvStore == nil {
+	if e.Memory == nil {
 		return
 	}
 
-	recent := e.ConvStore.Recent(string(channelID), 12)
+	ctxBg := context.Background()
+	// Resolve the active conv for this channel.
+	v, _ := e.Memory.GetPref(ctxBg, "active_conv:"+string(channelID))
+	convID, _ := v.(string)
+	if convID == "" {
+		return
+	}
+	recent, _ := e.Memory.ListMessages(ctxBg, memory.ConvID(convID), memory.ListOpts{Limit: 12, ApplySummary: true})
 	if len(recent) < 2 {
 		return
 	}
@@ -77,7 +84,7 @@ func (e *ChatEngine) ExtractReactionLearning(emoji string, channelID ChannelID) 
 	for _, msg := range recent {
 		var text string
 		for _, b := range msg.Blocks {
-			if b.Type == conversation.BlockText {
+			if b.Type == memory.BlockText {
 				text = b.Text
 				break
 			}
@@ -156,10 +163,20 @@ Rules:
 
 	memory.AppendPreference(e.ContextDir, learning.Learning, sentiment, emoji)
 
-	// Consolidate if threshold exceeded.
-	if memory.CountEntries(e.ContextDir) >= 20 {
+	// Consolidate if threshold exceeded. memory/ no longer imports ai/provider;
+	// we wrap the provider call in a closure so curation stays provider-agnostic.
+	if memory.CountEntries(e.ContextDir) >= memory.PreferencesThreshold {
 		model := e.resolveFallbackModel()
-		go memory.ConsolidatePreferences(e.ContextDir, prov, model)
+		go curation.ConsolidatePreferences(e.ContextDir, func(ctx context.Context, prompt string) (string, error) {
+			result, err := prov.Invoke(ctx, prompt, provider.Params{
+				Model:    model,
+				MaxTurns: 1,
+			}, nil)
+			if err != nil {
+				return "", err
+			}
+			return result.Text, nil
+		})
 	}
 }
 

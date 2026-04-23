@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 )
 
 // ActivityItem represents a single active operation in the system.

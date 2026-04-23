@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	sbexec "github.com/alamparelli/alf/internal/sandbox/exec"
 )
 
 const grepMaxOutput = 10_000
@@ -72,8 +74,8 @@ func (t GrepNativeTool) Run(ctx context.Context, argsJSON string) (string, error
 	if args.Path == "" && t.DataDir != "" {
 		args.Path = t.DataDir
 	} else if args.Path != "" {
-		args.Path = ResolvePath(t.DataDir, args.Path)
-		if _, err := CheckBoundary(t.DataDir, args.Path); err != nil {
+		args.Path = sbexec.ResolvePath(t.DataDir, args.Path)
+		if _, err := sbexec.CheckBoundary(t.DataDir, args.Path); err != nil {
 			return "", err
 		}
 	}

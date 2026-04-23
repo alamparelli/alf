@@ -210,7 +210,6 @@ These work in both Telegram and CC Chat:
 | Command | What it does |
 |---------|-------------|
 | `/help` | Show all available commands |
-| `/bash <command>` | Execute a bash command directly (authorized users only) |
 | `/jobs` | List running agent jobs |
 | `/cancel` | Cancel all running agent jobs |
 | `/restart` | Restart the ALF daemon |

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alamparelli/alf/internal/memory"
 )
 
 // ChatMediaHandler handles POST /api/chat/upload and GET /api/chat/media/:id.
@@ -75,12 +77,24 @@ func (h *ChatMediaHandler) serveMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fallback: persisted media ref in database.
-	if h.Service.ChatDB != nil {
-		ref, err := h.Service.ChatDB.GetMediaByUploadID(id)
-		if err == nil && ref != nil && ref.FilePath != "" {
-			serveLocalFile(w, r, ref.FilePath, ref.MimeType, ref.FileName, time.Time{})
-			return
+	// Fallback: persisted media ref in memory store. We don't keep an
+	// upload-id index, so walk known convs and match.
+	// TODO(#336): memory.Store has no direct upload-id lookup; this linear
+	// scan is the migration shim. Most callers find the entry in the
+	// in-memory upload registry above, so this path is rarely taken.
+	if h.Service.Memory != nil {
+		ctx := r.Context()
+		convs, _ := h.Service.Memory.ListConvs(ctx, memory.ConvFilter{IncludeArchived: true})
+		for _, c := range convs {
+			msgs, _ := h.Service.Memory.ListMessages(ctx, c.ID, memory.ListOpts{})
+			for _, m := range msgs {
+				for _, md := range m.Media {
+					if md.UploadID == id && md.FilePath != "" {
+						serveLocalFile(w, r, md.FilePath, md.MimeType, md.FileName, time.Time{})
+						return
+					}
+				}
+			}
 		}
 	}
 

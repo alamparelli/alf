@@ -20,6 +20,7 @@ const (
 	EventVault      EventType = "vault"
 	EventConfig     EventType = "config"
 	EventTiers      EventType = "tiers"
+	EventClaudeModels EventType = "claude_models"
 	EventTools      EventType = "tools"
 	EventSkills     EventType = "skills"
 	EventAgents     EventType = "agents"

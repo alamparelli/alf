@@ -357,15 +357,6 @@ func DefaultTiersJSON() []byte {
 	return defaultTiersJSON
 }
 
-// AllowedModels defines valid model names for tier validation.
-var AllowedModels = map[string]bool{
-	"haiku":      true,
-	"sonnet":     true,
-	"opus":       true,
-	"sonnet-max": true,
-	"opus-max":   true,
-}
-
 // AllowedBackends is populated at runtime from registered backends.
 // "" and "cli" are always valid; additional backends come from config.
 var AllowedBackends = map[string]bool{
@@ -401,6 +392,7 @@ const (
 	ReloadSkills
 	ReloadAgents
 	ReloadFirewall
+	ReloadClaudeModels
 )
 
 // Stats tracks daemon runtime metrics. Safe for concurrent use.

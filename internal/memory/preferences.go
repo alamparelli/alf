@@ -2,32 +2,33 @@ package memory
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
-
-	"github.com/alamparelli/alf/internal/provider"
 )
 
-const (
-	preferencesFile       = "preferences.md"
-	consolidateThreshold  = 20 // consolidate after this many entries
-)
+// PreferencesFile is the on-disk file name, relative to the context directory,
+// where user preference entries are appended.
+const PreferencesFile = "preferences.md"
+
+// PreferencesThreshold is the entry count above which curation.ConsolidatePreferences
+// replaces the append-only list with a structured LLM summary.
+const PreferencesThreshold = 20
 
 var preferencesMu sync.Mutex
 
 // AppendPreference adds a learning to the preferences file.
-// If the file exceeds the threshold, it triggers consolidation.
+// If the file exceeds the threshold, callers should schedule consolidation via
+// curation.ConsolidatePreferences (memory keeps the data plane, curation
+// owns the LLM-driven reorganisation).
 func AppendPreference(contextDir string, learning, sentiment, emoji string) {
 	preferencesMu.Lock()
 	defer preferencesMu.Unlock()
 
-	path := filepath.Join(contextDir, preferencesFile)
+	path := filepath.Join(contextDir, PreferencesFile)
 
 	// Create file with header if it doesn't exist.
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -54,7 +55,7 @@ func AppendPreference(contextDir string, learning, sentiment, emoji string) {
 
 // CountEntries returns the number of bullet entries in the preferences file.
 func CountEntries(contextDir string) int {
-	path := filepath.Join(contextDir, preferencesFile)
+	path := filepath.Join(contextDir, PreferencesFile)
 	f, err := os.Open(path)
 	if err != nil {
 		return 0
@@ -71,92 +72,8 @@ func CountEntries(contextDir string) int {
 	return count
 }
 
-// ConsolidatePreferences uses an LLM to summarize preferences when they exceed the threshold.
-// It replaces the file with a structured summary.
-func ConsolidatePreferences(contextDir string, prov provider.Provider, model string) {
-	preferencesMu.Lock()
-	defer preferencesMu.Unlock()
-
-	path := filepath.Join(contextDir, preferencesFile)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	content := string(data)
-
-	// Count entries.
-	lines := strings.Split(content, "\n")
-	count := 0
-	for _, l := range lines {
-		if strings.HasPrefix(strings.TrimSpace(l), "- [") {
-			count++
-		}
-	}
-	if count < consolidateThreshold {
-		return
-	}
-
-	log.Printf("[preferences] consolidating %d entries", count)
-
-	prompt := fmt.Sprintf(`Consolidate these user preference entries into a structured summary. Group by category (Communication, Format, Tone, Topics, Dislikes). Merge duplicates, keep specific details, remove redundancy.
-
-Current entries:
-%s
-
-Output format (markdown):
-# User Preferences
-
-Learned from reactions and feedback.
-
-## Communication
-- ...
-
-## Format
-- ...
-
-## Tone
-- ...
-
-## Topics
-- ...
-
-## Dislikes
-- ...
-
-Rules:
-- Keep only categories that have entries
-- Each bullet should be a clear, actionable preference
-- Preserve the [+] or [-] prefix to indicate positive/negative
-- If two entries contradict, keep the most recent (last in list)
-- Output ONLY the markdown, nothing else`, content)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	result, err := prov.Invoke(ctx, prompt, provider.Params{
-		Model:    model,
-		MaxTurns: 1,
-	}, nil)
-	if err != nil {
-		log.Printf("[preferences] consolidation failed: %v", err)
-		return
-	}
-
-	summary := strings.TrimSpace(result.Text)
-	summary = strings.TrimPrefix(summary, "```markdown")
-	summary = strings.TrimPrefix(summary, "```")
-	summary = strings.TrimSuffix(summary, "```")
-	summary = strings.TrimSpace(summary)
-
-	if !strings.Contains(summary, "# User Preferences") {
-		log.Printf("[preferences] consolidation returned unexpected format, skipping")
-		return
-	}
-
-	if err := os.WriteFile(path, []byte(summary+"\n"), 0o644); err != nil {
-		log.Printf("[preferences] failed to write consolidated file: %v", err)
-		return
-	}
-
-	log.Printf("[preferences] consolidated %d entries into structured summary", count)
-}
+// LockPreferences / UnlockPreferences expose the file-level mutex to callers
+// (curation.ConsolidatePreferences) that must serialise rewrites against
+// concurrent AppendPreference calls.
+func LockPreferences()   { preferencesMu.Lock() }
+func UnlockPreferences() { preferencesMu.Unlock() }

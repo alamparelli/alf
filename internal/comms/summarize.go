@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alamparelli/alf/internal/conversation"
-	"github.com/alamparelli/alf/internal/provider"
+	"github.com/alamparelli/alf/internal/memory"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 )
 
 // Summarization defaults. The threshold is the number of uncovered messages
@@ -32,8 +32,8 @@ var summarizationInFlight sync.Map // key: "channel|convID" -> struct{}
 // The goroutine is fire-and-forget: the current turn does not wait. The
 // summary becomes visible on the next turn. Only one summarization runs per
 // (channel, convID) at a time; concurrent triggers are skipped.
-func (e *ChatEngine) maybeSummarizeAsync(channel, convID string) {
-	if e.ConvStore == nil || e.Registry == nil || e.TierStore == nil {
+func (e *ChatEngine) maybeSummarizeAsync(ctx context.Context, channel, convID string) {
+	if e.Memory == nil || e.Registry == nil || e.TierStore == nil {
 		return
 	}
 	if !e.SummarizationEnabled {
@@ -54,15 +54,19 @@ func (e *ChatEngine) maybeSummarizeAsync(channel, convID string) {
 	// Scope reads to the target convID (not the channel's active conv) —
 	// CC multi-tab chat rotates active convID, so channel-scoped reads
 	// would mix messages across tabs and reset covered_ids every run.
-	raw := e.ConvStore.RecentRawByConv(convID)
-	alreadyCovered := e.ConvStore.LastSummaryCoveredByConv(convID)
+	raw, _ := e.Memory.ListMessages(ctx, memory.ConvID(convID), memory.ListOpts{ApplySummary: false})
+	coveredIDs, _ := e.Memory.LatestSummaryCovered(ctx, memory.ConvID(convID))
+	alreadyCovered := make(map[memory.MsgID]struct{}, len(coveredIDs))
+	for _, id := range coveredIDs {
+		alreadyCovered[id] = struct{}{}
+	}
 
-	var toSummarize []conversation.Message
-	var toSummarizeIDs []string
-	var uncovered []conversation.Message
+	var toSummarize []memory.Message
+	var toSummarizeIDs []memory.MsgID
+	var uncovered []memory.Message
 	hasSummary := false
 	for _, m := range raw {
-		if m.Role == conversation.RoleSummary {
+		if m.Role == memory.RoleSummary {
 			hasSummary = true
 			continue
 		}
@@ -91,7 +95,7 @@ func (e *ChatEngine) maybeSummarizeAsync(channel, convID string) {
 
 	// Build the list of covered IDs we'll record in the summary:
 	// prior summary's covered IDs ∪ IDs we're about to summarize.
-	covered := make([]string, 0, len(alreadyCovered)+len(toSummarizeIDs))
+	covered := make([]memory.MsgID, 0, len(alreadyCovered)+len(toSummarizeIDs))
 	for id := range alreadyCovered {
 		covered = append(covered, id)
 	}
@@ -113,7 +117,7 @@ func (e *ChatEngine) maybeSummarizeAsync(channel, convID string) {
 
 // runSummarization selects the cheapest tier, calls the provider with a
 // summarization prompt, and appends a summary record on success.
-func (e *ChatEngine) runSummarization(channel, convID string, msgs []conversation.Message, covered []string) error {
+func (e *ChatEngine) runSummarization(channel, convID string, msgs []memory.Message, covered []memory.MsgID) error {
 	if len(msgs) == 0 {
 		return nil
 	}
@@ -152,7 +156,8 @@ func (e *ChatEngine) runSummarization(channel, convID string, msgs []conversatio
 	if text == "" {
 		return fmt.Errorf("empty summary text")
 	}
-	e.ConvStore.AppendSummary(channel, convID, text, covered)
+	ctx2 := context.Background()
+	_ = e.Memory.AppendSummary(ctx2, memory.ConvID(convID), text, covered)
 	log.Printf("[summarize] %s: compressed %d messages into %d-char summary (tier=%s, cost=%.4f)",
 		channel, len(msgs), len(text), tierName, result.CostUSD)
 	return nil
@@ -160,7 +165,7 @@ func (e *ChatEngine) runSummarization(channel, convID string, msgs []conversatio
 
 // buildSummarizationPrompt renders the messages to summarize as a single
 // prompt asking for a condensed, fact-preserving summary.
-func buildSummarizationPrompt(msgs []conversation.Message) string {
+func buildSummarizationPrompt(msgs []memory.Message) string {
 	var sb strings.Builder
 	sb.WriteString("You are a conversation summarizer. Produce a concise summary ")
 	sb.WriteString("of the exchange below that preserves key facts, user intent, ")
@@ -168,7 +173,7 @@ func buildSummarizationPrompt(msgs []conversation.Message) string {
 	sb.WriteString("commentary; output only the summary paragraph.\n\n")
 	sb.WriteString("=== conversation ===\n")
 	for _, m := range msgs {
-		text := m.TextContent()
+		text := memory.TextContent(m)
 		if text == "" {
 			continue
 		}

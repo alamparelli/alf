@@ -9,22 +9,19 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/comms"
-	"github.com/alamparelli/alf/internal/conversation"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/eventlog"
-	"github.com/alamparelli/alf/internal/memstore"
-	"github.com/alamparelli/alf/internal/mood"
-	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/router"
-	"github.com/alamparelli/alf/internal/session"
+	"github.com/alamparelli/alf/internal/platform/eventlog"
+	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/platform/mood"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/platform/session"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 )
 
@@ -232,7 +229,6 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 			"/resume - Continue after a turn limit hit\n" +
 			"/skills - List active skills (/skills clear to reset)\n" +
 			"/tool - Manage quarantined tools (keep/revert)\n" +
-			"/bash - Execute a bash command directly\n" +
 			"/jobs - List running agent jobs\n" +
 			"/cancel - Cancel all running agent jobs\n" +
 			"/restart - Restart the ALF daemon\n" +
@@ -251,17 +247,6 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 		}
 		response := cmdToolTG(engine, channelID, arg)
 		tg.SendHTML(msg.Chat.ID, response)
-		return true
-	case "/bash":
-		if !allowedChatIDs[msg.Chat.ID] {
-			return true
-		}
-		parts := strings.SplitN(msg.Text, " ", 2)
-		if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
-			tg.SendHTML(msg.Chat.ID, "Usage: <code>/bash &lt;command&gt;</code>")
-			return true
-		}
-		go execBashCommand(tg, msg.Chat.ID, strings.TrimSpace(parts[1]))
 		return true
 	}
 	return false
@@ -484,7 +469,7 @@ func extractReaction(text string) (string, string) {
 }
 
 // handleReaction processes an emoji reaction on an Alf message.
-func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, contextDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider, memDB *memstore.Store, convStore *conversation.Store, engine *comms.ChatEngine) {
+func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, contextDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider, memStore memory.Store, engine *comms.ChatEngine) {
 	// Log the reaction and update live feedback.
 	mood.LogReaction(dataDir, emoji, messageID)
 	mood.UpdateLiveFeedback(contextDir, dataDir)
@@ -548,7 +533,7 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 	fallback := firstFallbackTier(tierStore)
 	for _, t := range tierStore.Current().Tiers {
 		if t.Name == fallback {
-			if m := router.ResolveModel(t.Model); m != "" {
+			if m := resolveModel(t.Model); m != "" {
 				model = m
 			} else if t.Model != "" {
 				model = t.Model // preserve non-Claude models (e.g. gpt-5.4)
@@ -592,36 +577,3 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 	}
 }
 
-// execBashCommand runs a bash command and sends the output via Telegram.
-func execBashCommand(tg *tgclient.Client, chatID int64, command string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	tg.SendChatAction(chatID, "typing")
-
-	err := cmd.Run()
-	result := out.String()
-	if len(result) > 4000 {
-		result = result[:4000] + "\n... (truncated)"
-	}
-
-	var msg string
-	if err != nil {
-		if result != "" {
-			msg = fmt.Sprintf("<pre>%s</pre>\n\nExit: %v", tgclient.EscapeHTML(result), err)
-		} else {
-			msg = fmt.Sprintf("Error: %v", err)
-		}
-	} else if result == "" {
-		msg = "<i>Command completed (no output)</i>"
-	} else {
-		msg = fmt.Sprintf("<pre>%s</pre>", tgclient.EscapeHTML(result))
-	}
-
-	tg.SendHTML(chatID, msg)
-}

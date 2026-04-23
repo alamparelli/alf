@@ -1,6 +1,6 @@
 package controlcenter
 
-import "strings"
+import "github.com/alamparelli/alf/internal/ai"
 
 // DefaultFallbackModel resolves the user's configured fallback model without
 // hardcoding any provider-specific value. Resolution order:
@@ -23,8 +23,8 @@ func DefaultFallbackTier(tiers *TiersConfig) (model, backend string, ok bool) {
 		return "", "", false
 	}
 	resolve := func(raw string) string {
-		if m := resolveModelAlias(raw); m != "" {
-			return m
+		if m := ai.ResolveModel(raw); m != "" {
+			return string(m)
 		}
 		return raw
 	}
@@ -61,26 +61,3 @@ func DefaultFallbackTier(tiers *TiersConfig) (model, backend string, ok bool) {
 	return "", "", false
 }
 
-// resolveModelAlias maps short aliases ("haiku", "sonnet", …) to full
-// Anthropic model IDs. Kept here (rather than importing router) to avoid
-// an import cycle: controlcenter is lower in the dep graph than router.
-// The mapping must stay in sync with router.ResolveModel.
-func resolveModelAlias(short string) string {
-	switch strings.ToLower(strings.TrimSpace(short)) {
-	case "haiku":
-		return "claude-haiku-4-5"
-	case "sonnet":
-		return "claude-sonnet-4-6"
-	case "opus":
-		return "claude-opus-4-6"
-	case "sonnet-max":
-		return "claude-sonnet-4-6-max"
-	case "opus-max":
-		return "claude-opus-4-6-max"
-	default:
-		if strings.HasPrefix(short, "claude-") {
-			return short
-		}
-		return ""
-	}
-}

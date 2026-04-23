@@ -11,14 +11,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/firewall"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/marketplace"
-	"github.com/alamparelli/alf/internal/provider"
+	"github.com/alamparelli/alf/internal/runtime"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/vault"
 )
 
 // unifiedPermChecker wraps the marketplace PermissionChecker with a fallback
@@ -79,6 +80,7 @@ type Deps struct {
 	Orchestrator   *agents.Orchestrator // nil if orchestrator not available
 	MemStore       MemoryStorer       // nil if memory unavailable
 	MemProvider    provider.Provider  // nil if memory unavailable
+	Runtime        runtime.Runtime    // nil if runtime unavailable (#340 R4g)
 	Scheduler      ScheduleEngine     // nil if scheduler unavailable
 	ScheduleRunLog *scheduler.RunLog  // nil if scheduler unavailable
 	FirewallStore  *firewall.Store      // nil if firewall unavailable
@@ -174,10 +176,11 @@ func HandlerFactory(deps Deps) Handlers {
 		Reader: deps.LogReader,
 	})
 
+	mux.Handle("/api/models/claude", &ClaudeModelsHandler{})
+
 	mux.Handle("/api/tiers", &TiersHandler{
 		TierStore:    deps.TierStore,
 		Notifier:     deps.Notifier,
-		DataDir:      deps.DataDir,
 		ToolRegistry: deps.ToolRegistry,
 		ModelCache:   deps.ModelCache,
 		EventBroker:  deps.EventBroker,
@@ -314,6 +317,7 @@ func HandlerFactory(deps Deps) Handlers {
 		mux.Handle("/api/memory/ingest", &MemoryIngestHandler{
 			Store:        deps.MemStore,
 			Provider:     deps.MemProvider,
+			Runtime:      deps.Runtime,
 			TierStore:    deps.TierStore,
 			ContextStore: deps.ContextStore,
 		})

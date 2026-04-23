@@ -276,11 +276,15 @@ func TestSlidingExpiry_RenewsAfterHalfway(t *testing.T) {
 	now = now.Add(6 * time.Hour)
 	ss.nowFn = func() time.Time { return now }
 
-	if !ss.Valid(id) {
+	valid, renewed, _ := ss.Check(id)
+	if !valid {
 		t.Fatal("session should still be valid at 6h")
 	}
+	if !renewed {
+		t.Error("Check should report renewed=true past halfway")
+	}
 
-	// After Valid(), expiresAt should be extended to now + ttl = 6h + 10h = 16:00.
+	// After Check(), expiresAt should be extended to now + ttl = 6h + 10h = 16:00.
 	ss.mu.Lock()
 	s := ss.sessions[id]
 	newExpiry := s.expiresAt
@@ -290,6 +294,20 @@ func TestSlidingExpiry_RenewsAfterHalfway(t *testing.T) {
 	if !newExpiry.Equal(expectedExpiry) {
 		t.Errorf("expected expiresAt to be renewed to %v, got %v (original was %v)",
 			expectedExpiry, newExpiry, originalExpiry)
+	}
+
+	// Valid() must NOT trigger sliding expiry — sanity check the read-only contract.
+	now = now.Add(6 * time.Hour) // 12h, again past halfway of the renewed window
+	ss.nowFn = func() time.Time { return now }
+	expiryBefore := expectedExpiry
+	if !ss.Valid(id) {
+		t.Fatal("session should be valid after second advance")
+	}
+	ss.mu.Lock()
+	expiryAfterValid := ss.sessions[id].expiresAt
+	ss.mu.Unlock()
+	if !expiryAfterValid.Equal(expiryBefore) {
+		t.Errorf("Valid() must be read-only; expected expiresAt %v, got %v", expiryBefore, expiryAfterValid)
 	}
 }
 
@@ -306,8 +324,12 @@ func TestSlidingExpiry_NoRenewBeforeHalfway(t *testing.T) {
 	now = now.Add(3 * time.Hour)
 	ss.nowFn = func() time.Time { return now }
 
-	if !ss.Valid(id) {
+	valid, renewed, _ := ss.Check(id)
+	if !valid {
 		t.Fatal("session should be valid at 3h")
+	}
+	if renewed {
+		t.Error("Check must not report renewed before halfway")
 	}
 
 	// expiresAt should be unchanged.
@@ -351,12 +373,16 @@ func TestSlidingExpiry_PersistsTTL(t *testing.T) {
 	// Simulate restart: load from same file.
 	ss2 := NewFileSessionStore(path, func() time.Time { return now })
 
-	// Advance past halfway (6h) and call Valid — TTL must have survived persistence.
+	// Advance past halfway (6h) and call Check — TTL must have survived persistence.
 	now = now.Add(6 * time.Hour)
 	ss2.nowFn = func() time.Time { return now }
 
-	if !ss2.Valid(id) {
+	valid, renewed, _ := ss2.Check(id)
+	if !valid {
 		t.Fatal("session should be valid after reload at 6h")
+	}
+	if !renewed {
+		t.Error("Check should report renewed=true after TTL-aware reload")
 	}
 
 	// Verify sliding expiry kicked in (proves TTL survived).
@@ -368,6 +394,52 @@ func TestSlidingExpiry_PersistsTTL(t *testing.T) {
 	expectedExpiry := now.Add(ttl)
 	if !newExpiry.Equal(expectedExpiry) {
 		t.Errorf("expected expiresAt renewed to %v after reload, got %v (TTL not persisted?)", expectedExpiry, newExpiry)
+	}
+}
+
+func TestCheck_SignalsRenewalPastHalfway(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	ss := NewSessionStore(func() time.Time { return now })
+
+	ttl := 10 * time.Hour
+	id, _ := ss.Issue(100, ttl)
+
+	// Before halfway: Check reports valid, not renewed.
+	now = now.Add(3 * time.Hour)
+	ss.nowFn = func() time.Time { return now }
+
+	valid, renewed, gotTTL := ss.Check(id)
+	if !valid || renewed {
+		t.Errorf("before halfway: expected valid=true renewed=false, got valid=%v renewed=%v", valid, renewed)
+	}
+	if gotTTL != 0 {
+		t.Errorf("before halfway: expected ttl=0, got %v", gotTTL)
+	}
+
+	// Past halfway: Check reports valid AND renewed, returns TTL.
+	now = now.Add(3 * time.Hour) // total 6h, past 5h halfway
+	ss.nowFn = func() time.Time { return now }
+
+	valid, renewed, gotTTL = ss.Check(id)
+	if !valid || !renewed {
+		t.Errorf("past halfway: expected valid=true renewed=true, got valid=%v renewed=%v", valid, renewed)
+	}
+	if gotTTL != ttl {
+		t.Errorf("past halfway: expected ttl=%v, got %v", ttl, gotTTL)
+	}
+
+	// Immediately after renewal, next Check should NOT re-signal renewal.
+	valid, renewed, _ = ss.Check(id)
+	if !valid || renewed {
+		t.Errorf("after renewal: expected valid=true renewed=false, got valid=%v renewed=%v", valid, renewed)
+	}
+}
+
+func TestCheck_InvalidSession(t *testing.T) {
+	ss := NewSessionStore(nil)
+	valid, renewed, ttl := ss.Check("nonexistent")
+	if valid || renewed || ttl != 0 {
+		t.Errorf("unknown id: expected (false,false,0), got (%v,%v,%v)", valid, renewed, ttl)
 	}
 }
 
@@ -388,8 +460,12 @@ func TestSlidingExpiry_LegacySessionNoTTL(t *testing.T) {
 	now = now.Add(13 * time.Hour)
 	ss.nowFn = func() time.Time { return now }
 
-	if !ss.Valid("legacy-id") {
+	valid, renewed, _ := ss.Check("legacy-id")
+	if !valid {
 		t.Fatal("legacy session should still be valid at 13h")
+	}
+	if renewed {
+		t.Error("legacy session (ttl=0) must not report renewed")
 	}
 
 	// Verify expiresAt was NOT extended (ttl=0 skips sliding logic).

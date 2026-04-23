@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	sbexec "github.com/alamparelli/alf/internal/sandbox/exec"
 )
 
 // WriteFileNativeTool writes content to a file, creating parent directories as needed.
@@ -47,8 +49,8 @@ func (t WriteFileNativeTool) Run(_ context.Context, argsJSON string) (string, er
 	if args.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	args.Path = ResolvePath(t.DataDir, args.Path)
-	if _, err := CheckBoundary(t.DataDir, args.Path); err != nil {
+	args.Path = sbexec.ResolvePath(t.DataDir, args.Path)
+	if _, err := sbexec.CheckBoundary(t.DataDir, args.Path); err != nil {
 		return "", err
 	}
 

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // fakeVaultServer simulates the vault-server file API endpoints used by the

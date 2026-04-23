@@ -51,40 +51,17 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if shell == "" {
 		shell = "/bin/bash"
 	}
-	// Terminal user: default alf (uid 1000, workspace), admin mode = alfd (uid 1001, daemon).
-	isAdmin := r.URL.Query().Get("mode") == "admin"
+	// Terminal runs as alf (uid 1000) — same permissions as the LLM subprocess.
 	cmd := exec.CommandContext(ctx, shell, "--login")
-	if isAdmin {
-		// Admin terminal: runs as daemon user (alfd/uid 1001).
-		// Has access to vault-data, config, and daemon internals.
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{Uid: 1001, Gid: 1001, Groups: []uint32{1001, 1000}},
-		}
-	} else {
-		// Standard terminal: runs as alf (uid 1000).
-		// Same permissions as the LLM subprocess.
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
-		}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
 	}
 	homeDir := "/home/alf"
 	if d := os.Getenv("ALF_HOME_DIR"); d != "" {
 		homeDir = d
 	}
-	if isAdmin {
-		cmd.Dir = "/opt/alf"
-	} else {
-		cmd.Dir = homeDir
-	}
-	// Build a safe environment - exclude daemon secrets (OAuth tokens, API keys, etc.).
-	user := "alf"
-	envHome := homeDir
-	if isAdmin {
-		user = "alfd"
-		envHome = "/opt/alf"
-	}
-	env := termSafeEnv(envHome, user)
-	cmd.Env = env
+	cmd.Dir = homeDir
+	cmd.Env = termSafeEnv(homeDir, "alf")
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -192,5 +169,6 @@ func termSafeEnv(homeDir, user string) []string {
 }
 
 func (h *TerminalHandler) checkAuth(r *http.Request) bool {
-	return checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns) != authNone
+	method, _ := checkRequestAuth(r, h.AuthToken, h.Sessions, h.ExtraTokenFns)
+	return method != authNone
 }

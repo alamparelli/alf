@@ -14,18 +14,22 @@
 # All binaries
 go build ./...
 
-# With FTS5 support (required for memstore)
+# With FTS5 support (required for memory embeddings + sqlite-vec)
 CGO_ENABLED=1 go build -tags fts5 ./...
 ```
 
 ### Test
 
 ```sh
-# All tests (except memstore)
+# All tests (except memory sub-packages using FTS5)
 go test ./...
 
-# Including memstore (requires CGO + FTS5)
+# Full regression (CGO + FTS5 required for memory/, sandbox/*, archtest)
 CGO_ENABLED=1 go test -tags fts5 ./...
+
+# Or via make:
+make regression         # same as above, with coverage report
+make regression-quick   # no coverage, faster
 ```
 
 ### Run locally
@@ -60,32 +64,100 @@ Useful flags:
 - Factory pattern for complex object creation (`internal/controlcenter/factory.go`)
 - Error messages are lowercase, no punctuation
 
-### Architecture patterns
+### Architecture — 5 blocks
 
-- **Chat engine** - `internal/comms/` owns all message processing logic. Adapters (Telegram, Control Center) call `Process()` and receive events via callbacks
-- **Provider interface** - all LLM interaction goes through `provider.Provider` and `provider.Classifier` (CLI + API implementations)
-- **Unified conversation store** - `internal/conversation/` captures rich message history (text, tool_use, tool_result, thinking) in a JSONL ring buffer, shared across all backends
-- **Chat database** - `internal/chatdb/` provides SQLite-backed persistent message storage
-- **Persistent subprocesses** - long-lived processes (classifier) follow the same pattern: mutex, stdin/stdout JSON lines, auto-restart on crash, idle timeout
-- **Whisper service** - voice transcription runs in a separate Docker container (`whisper-service`), ALF communicates via HTTP client with bearer token auth
-- **Go-native inference** - ONNX embeddings run in-process via `onnxruntime_go`, also exposed as HTTP server (`cmd/embed-server/`)
-- **Embedded core instructions** - `internal/memory/core.md` compiled into the binary via `go:embed`, injected first in every conversation
-- **Router is pure logic** - `internal/router/` builds prompts and parses responses, never spawns processes
-- **Signal system** - `internal/signal/` provides a Unix-socket server for Claude sessions to send Telegram messages/reactions. System tools (`cmd/signal`, `cmd/schedule-tools`) use this socket
-- **System tools multi-call binary** - `cmd/system-tools/` bridges CLI tool invocations (task, team, skill, app, config, tier, log, search) to the daemon's HTTP API via symlinks
-- **App supervisor** - `internal/supervisor/` manages background services declared in `apps/*/service.json` with restart policies and exponential backoff
-- **Outbound firewall** - `internal/firewall/` proxies all HTTP/HTTPS traffic from Claude subprocesses with domain-level allow/deny rules
-- **Tracing** - `internal/trace/` logs chain and task team events for observability
-- **TLS generation** - `internal/tlsgen/` generates self-signed certificates for local HTTPS installs
-- **Non-root daemon** - Daemon drops to uid 1001 (`alfd`) via setpriv, LLM subprocesses run as uid 1000 (`alf`) with zero capabilities and sanitized environment, config is read-only, tools are rx-only
+ALF's code is organised around five first-class concerns, enforced by CI:
+
+```
+internal/
+├── capability/   ← what ALF can execute       (tools + skills + apps)
+├── memory/       ← what ALF knows / remembers (conv + embeddings + preferences)
+├── ai/           ← the brain that decides     (provider + strategy + ResolveModel)
+├── sandbox/      ← the guards that enforce    (firewall + vault + filesystem + integrity)
+└── runtime/      ← the conductor              (orchestrates the four)
+```
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full reference, sub-package layout, and contract interfaces. What follows is the contributor-facing summary.
+
+#### Where does my new file belong?
+
+Use this decision tree when adding a new file or package:
+
+1. **Is it executable by the AI (a tool, skill, or app)?**
+   → `internal/capability/` contract + register through the adapter in `tooling/`, `skills/`, or `marketplace/`.
+
+2. **Does it persist or recall data (conversations, embeddings, preferences, facts)?**
+   → `internal/memory/` (or a sub-package: `memory/embed/`, `memory/curation/`, `memory/dedup/`, …).
+
+3. **Does it turn an intent into tokens (provider driver, strategy, model resolution)?**
+   → `internal/ai/` (contract) or `internal/ai/provider/` (concrete driver).
+
+4. **Does it enforce a policy (file access, network, secrets, integrity)?**
+   → `internal/sandbox/` (or a facet sub-package: `sandbox/exec/`, `sandbox/network/`, `sandbox/secrets/`, `sandbox/integrity/`).
+
+5. **Does it orchestrate the four (pipelines, agents, classifier)?**
+   → `internal/runtime/` (or `runtime/agents/` for multi-agent, `runtime/classifier/` for tier selection).
+
+6. **Is it a user-facing surface (CLI, web UI, Telegram, voice, scheduler)?**
+   → root-level consumer package: `cli/`, `controlcenter/`, `telegram/`, `voice/`, `scheduler/`.
+
+7. **Is it ops plumbing (cron, tracing, supervision, updater, cert gen, event log, …)?**
+   → `internal/platform/<name>/`.
+
+8. **None of the above?** → 🚨 **Red flag.** Open a discussion issue before you code. If a new concept doesn't fit any of the five blocks nor the periphery, either the concept is ill-framed or the architecture needs an explicit amendment — both deserve a conversation first.
+
+#### Dependency rules (enforced by CI)
+
+```
+consumers (controlcenter, telegram, scheduler, cli, ...)
+    │
+    ▼
+  runtime
+    │
+    ├──► capability
+    ├──► memory
+    ├──► ai
+    └──► sandbox
+```
+
+Forbidden imports:
+
+- `capability` **must not** import `memory`, `ai`, `sandbox`, `runtime`.
+- `memory` **must not** import `capability`, `ai`, `sandbox`, `runtime`.
+- `ai` **must not** import `capability`, `memory`, `sandbox`, `runtime`.
+- `sandbox` **must not** import `capability`, `memory`, `ai`, `runtime`.
+- **Only `runtime` may import the four blocks together.**
+- No consumer imports an inner block directly — everything goes through `runtime`.
+
+Enforcement lives in `internal/archtest/deps_test.go` (`TestFoundationDependencyRules`, `TestConsumerDependencyRules`). Both run in enforcing mode — a violation fails CI. A third test (`TestHardcodedModelFallback`) ensures `ai.ResolveModel` stays the single source of truth for model selection.
+
+Justified cross-block imports (e.g. `marketplace` → `capability` for adapter types) are listed as exceptions in the archtest and must be documented when added.
+
+#### Patterns worth knowing
+
+- **Capability adapters.** `tooling/`, `skills/`, and `marketplace/` each keep a `capability_adapter.go` that wraps their native objects (NativeTool / Skill / App) as `capability.Capability`. They register into `capability.Registry` via dual-registration. Runtime resolves Capabilities through the unified registry.
+- **Memory contract tests.** Any new `memory.Store` implementation must pass `internal/memory/memtest/` — the contract test battery guarantees scoping + idempotency invariants.
+- **Provider interface.** All LLM interaction goes through `ai.Engine` + `ai.Strategy`. Provider drivers implement `ai.Engine` inside `ai/provider/`. The runtime picks the Strategy.
+- **ONNX embeddings.** `memory/embed/` wraps `onnxruntime_go` in-process. `cmd/embed-server/` exposes the same embedder over HTTP for cases where CGO is unavailable.
+- **`go:embed` core prompts.** Operational prompts (`core.md`, `onboarding.md`, …) live in `internal/memory/` and are compiled into the binary via `go:embed` in `memory/prompts.go`.
+- **Persistent subprocesses.** Long-lived processes (classifier) share a pattern: mutex, stdin/stdout JSON lines, auto-restart on crash, idle timeout.
+- **Whisper sidecar.** Voice transcription runs in a separate Docker container (`whisper-service`); ALF talks to it over HTTP with bearer-token auth.
+- **Signal socket.** `internal/platform/signal/` is a Unix-socket server that lets in-sandbox Capabilities send Telegram messages / reactions. `cmd/signal` and `cmd/schedule-tools` are the clients.
+- **System-tools multi-call binary.** `cmd/system-tools/` bridges CLI subcommands (task, team, skill, app, config, tier, log, search) to the daemon's HTTP API via symlinks.
+- **App supervisor.** `internal/platform/supervisor/` manages background services declared in `apps/*/service.json` with restart policies + exponential backoff.
+- **Outbound firewall.** `internal/sandbox/network/` proxies all HTTP/HTTPS traffic from LLM subprocesses with domain-level allow/deny rules.
+- **Tracing.** `internal/platform/trace/` logs chain and task-team events for observability.
+- **Non-root daemon.** Daemon drops to uid 1001 (`alfd`) via `setpriv`; LLM subprocesses run as uid 1000 (`alf`) with zero capabilities and sanitised environment. Config is read-only, tools are rx-only.
 
 ### File organization
 
-- `cmd/` - entry points only, minimal logic (includes system tools: `schedule-tools`, `signal`, `system-tools`, `embed-server`, `nettrack-helper`)
-- `internal/` - all business logic, one package per domain
+- `cmd/` - entry points only, minimal logic (includes system tools: `schedule-tools`, `signal`, `system-tools`, `embed-server`, `nettrack-helper`, `extract-video`, `memory-tools`)
+- `internal/` - all business logic, organised into the 5 blocks + periphery (see decision tree above)
 - `scripts/` - deployment, release, and local dev automation (`dev-deploy.sh`, `dev-local.sh`, `ship.sh`)
 - `internal/controlcenter/frontend/` - Svelte 5 + Vite frontend, builds to `internal/controlcenter/web/` for `go:embed`
 - `internal/controlcenter/web/` - embedded web assets for Control Center (built output, do not edit directly)
+- `docs/` - user- and contributor-facing documentation (including `ARCHITECTURE.md`)
+- `technical/` - implementation notes, test baselines, archived specs
 
 ### Testing
 
@@ -124,10 +196,10 @@ Keep the subject line under 72 characters. Add a body if the "why" isn't obvious
 
 ALF currently supports Telegram. To add a new platform:
 
-1. Create `internal/<platform>/` with send/receive logic
-2. Add polling or webhook handler in `cmd/alf-daemon/main.go`
-3. Wire messages through the existing router - the classification and tier system is platform-agnostic
-4. Add platform-specific formatting in the new package (the router returns plain text)
+1. Create `internal/<platform>/` with send/receive logic (same level as `telegram/`, `voice/`).
+2. Add polling or webhook handler in `cmd/alf-daemon/main.go`.
+3. Consume `runtime.Runtime.Chat(ctx, convID, input)` — the classification and tier system is platform-agnostic and lives inside Runtime. Consumers do not call `ai/` / `memory/` / `capability/` directly.
+4. Add platform-specific formatting in the new package (Runtime returns plain text + structured events).
 
 ## Adding a new tool
 
@@ -146,7 +218,7 @@ EOF
 chmod +x /path/to/alf/data/tools/my-tool
 ```
 
-User tools are auto-discovered at boot and listed in Claude's toolbox. Claude runs them via the Bash tool.
+User tools are auto-discovered at boot and exposed to whichever backend (CLI / Codex / API / Ollama) is serving the current tier. The model invokes them through the standard tool-call protocol of its backend.
 
 ### System tools (image rebuild)
 
@@ -163,7 +235,7 @@ System tools are Go binaries baked into the Docker image at `/opt/alf/tools/`. U
    ```
 4. The daemon symlinks system tools into `data/tools.d/` at startup
 
-Existing system tools: `extract-video` (media processing), `memory-tools` (semantic memory), `schedule-tools` (cron jobs), `signal` (Telegram messaging from Claude sessions), `system-tools` (multi-call binary bridging CLI to daemon API), `embed-server` (embedding HTTP server), `nettrack-helper` (conntrack event logger).
+Existing system tools: `extract-video` (media processing), `memory-tools` (semantic memory), `schedule-tools` (cron jobs), `signal` (Telegram messaging from in-sandbox LLM sessions), `system-tools` (multi-call binary bridging CLI to daemon API), `embed-server` (embedding HTTP server), `nettrack-helper` (conntrack event logger).
 
 ## AI-assisted development
 
@@ -171,10 +243,11 @@ ALF is built with heavy AI assistance. Here's how to work effectively with AI co
 
 ### Working with AI agents
 
-- The project follows **SOLID principles** and **factory patterns** - AI agents should maintain these
-- **TDD** - write tests first when adding new behavior
-- Keep `internal/` packages decoupled - one domain per package, interfaces at boundaries
-- System tools in `cmd/` are thin wrappers; business logic stays in `internal/`
+- Point the agent at [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first — the 5-block model + decision tree is what keeps generated code in the right place.
+- The project follows **SOLID principles** and **factory patterns** — AI agents should maintain these.
+- **TDD** — write tests first when adding new behaviour.
+- Keep `internal/` packages decoupled — enforce the block boundaries from `internal/archtest/` in every PR.
+- System tools in `cmd/` are thin wrappers; business logic stays in `internal/`.
 
 ### Frontend (Svelte)
 

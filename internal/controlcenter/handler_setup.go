@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // validateBaseURL checks that a user-supplied base URL is safe to send requests to.

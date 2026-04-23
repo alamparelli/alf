@@ -4,13 +4,14 @@ import (
 	"log"
 	"sync"
 
-	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
-	"github.com/alamparelli/alf/internal/conversation"
-	"github.com/alamparelli/alf/internal/eventlog"
+	"context"
+
+	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/session"
+	"github.com/alamparelli/alf/internal/runtime"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
+	"github.com/alamparelli/alf/internal/platform/session"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
 )
@@ -24,11 +25,10 @@ type ChatEngine struct {
 	ContextDir string
 
 	// Stores
-	Sessions  *session.Store
-	ConvStore *conversation.Store
-	ChatDB    *chatdb.DB // may be nil — UI chat persistence (SQLite)
-	EventLog  *eventlog.Logger
-	TierStore TierStoreReader
+	Sessions   *session.Store
+	Memory     memory.Store // unified store (replaces ChatDB + ConvStore)
+	EventLog   *eventlog.Logger
+	TierStore  TierStoreReader
 	SkillStore skills.Store
 
 	// Providers
@@ -37,6 +37,12 @@ type ChatEngine struct {
 	Recaller     MemoryRecaller
 	ToolRegistry *tooling.Registry
 	ToolExecutor *tooling.Executor
+
+	// Runtime is the unified orchestrator surface (#340 R4j0). May be nil
+	// during early daemon boot or in tests; call sites must fall back to
+	// the legacy provider path when nil. Populated by SetRuntime once
+	// cmd/alf-daemon constructs the shared Runtime.
+	Runtime runtime.Runtime
 
 	// Injected functions
 	ClassifyFull   ClassifyFullFunc
@@ -71,8 +77,7 @@ func NewEngine(cfg EngineConfig) *ChatEngine {
 		ConfigDir:      cfg.ConfigDir,
 		ContextDir:     cfg.ContextDir,
 		Sessions:       cfg.Sessions,
-		ConvStore:      cfg.ConvStore,
-		ChatDB:         cfg.ChatDB,
+		Memory:         cfg.Memory,
 		EventLog:       cfg.EventLog,
 		TierStore:      cfg.TierStore,
 		SkillStore:     cfg.SkillStore,
@@ -81,6 +86,7 @@ func NewEngine(cfg EngineConfig) *ChatEngine {
 		Recaller:       cfg.Recaller,
 		ToolRegistry:   cfg.ToolRegistry,
 		ToolExecutor:   cfg.ToolExecutor,
+		Runtime:        cfg.Runtime,
 		ClassifyFull:   cfg.ClassifyFull,
 		ResolveModel:   cfg.ResolveModel,
 		BackendConfigs: cfg.BackendConfigs,
@@ -98,10 +104,9 @@ type EngineConfig struct {
 	ConfigDir  string
 	ContextDir string
 
-	Sessions   *session.Store
-	ConvStore  *conversation.Store
-	ChatDB     *chatdb.DB
-	EventLog   *eventlog.Logger
+	Sessions *session.Store
+	Memory   memory.Store
+	EventLog *eventlog.Logger
 	TierStore  TierStoreReader
 	SkillStore skills.Store
 
@@ -111,6 +116,11 @@ type EngineConfig struct {
 	ToolRegistry *tooling.Registry
 	ToolExecutor *tooling.Executor
 
+	// Runtime is optional at config time; the daemon wires it post-hoc via
+	// ChatEngine.SetRuntime once the shared Runtime is built. Included here
+	// so test rigs can inject a fake directly via NewEngine.
+	Runtime runtime.Runtime
+
 	ClassifyFull   ClassifyFullFunc
 	ResolveModel   func(short string) string
 	BackendConfigs func() map[string]BackendConfig
@@ -119,6 +129,15 @@ type EngineConfig struct {
 	SummarizationEnabled   bool
 	SummarizationThreshold int
 	SummarizationKeepLast  int
+}
+
+// SetRuntime installs the unified runtime.Runtime after construction.
+// Called by cmd/alf-daemon once the shared Runtime is built (it depends on
+// the capability registry which is populated after NewEngine). #340 R4j0.
+func (e *ChatEngine) SetRuntime(rt runtime.Runtime) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Runtime = rt
 }
 
 // RegisterAdapter adds a channel adapter to the engine.
@@ -185,8 +204,13 @@ func (e *ChatEngine) NewSession(channelID ChannelID, onboard bool) (oldSessionID
 	old := e.Sessions.Archive(key)
 	e.Sessions.ClearSkills(key)
 
-	if e.ConvStore != nil {
-		e.ConvStore.NewConversation(string(channelID))
+	if e.Memory != nil {
+		// Rotate the active conv pref for this channelID: generate a fresh
+		// conv and record it. The old pref value is discarded — callers that
+		// still need the old conv reference kept it in the adapter.
+		ctx := context.Background()
+		newID := memory.NewConvID()
+		_ = e.Memory.SetPref(ctx, "active_conv:"+string(channelID), string(newID))
 	}
 
 	if onboard {

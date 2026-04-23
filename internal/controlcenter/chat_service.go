@@ -11,16 +11,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alamparelli/alf/internal/agents"
-	"github.com/alamparelli/alf/internal/chatdb"
+	"github.com/alamparelli/alf/internal/ai"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/comms"
-	"github.com/alamparelli/alf/internal/conversation"
-	"github.com/alamparelli/alf/internal/eventlog"
-	"github.com/alamparelli/alf/internal/media"
+	"github.com/alamparelli/alf/internal/platform/eventlog"
+	"github.com/alamparelli/alf/internal/platform/media"
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/mood"
-	"github.com/alamparelli/alf/internal/provider"
-	chatsession "github.com/alamparelli/alf/internal/session"
+	"github.com/alamparelli/alf/internal/platform/mood"
+	"github.com/alamparelli/alf/internal/runtime"
+	agents "github.com/alamparelli/alf/internal/runtime/agents"
+	chatsession "github.com/alamparelli/alf/internal/platform/session"
 	"github.com/alamparelli/alf/internal/skills"
 	"github.com/alamparelli/alf/internal/tooling"
 	"github.com/alamparelli/alf/internal/voice"
@@ -84,21 +84,21 @@ type ChatService struct {
 	TierStore    TierStore
 	Sessions     *chatsession.Store
 	EventLog     *eventlog.Logger
-	ChatDB       *chatdb.DB
-	Transcriber  *voice.Transcriber   // may be nil
-	Classify     ClassifyFunc         // injected router
-	ResolveModel ResolveModelFunc     // injected model resolver
-	Provider     provider.Provider    // injected Claude provider (default)
-	Registry     *provider.Registry   // may be nil - multi-backend dispatch
-	Recaller     MemoryRecaller       // may be nil - auto-injects relevant memories
-	MemStore     MemoryStorer         // may be nil - stores reaction-based learnings
-	SkillStore   skills.Store         // may be nil - injects skill catalog into system prompts
-	Orchestrator  *agents.Orchestrator        // may be nil - multi-agent orchestrator
-	ConvStore     *conversation.Store         // may be nil - unified conversation store (Phase 1: parallel write)
-	ToolRegistry  *tooling.Registry           // may be nil - tool schemas for API agentic loop
-	ToolExecutor    *tooling.Executor           // may be nil - tool subprocess runner
+	Memory       memory.Store           // unified store (replaces ChatDB + ConvStore)
+	Transcriber  *voice.Transcriber     // may be nil
+	Classify     ClassifyFunc           // injected router
+	ResolveModel ResolveModelFunc       // injected model resolver
+	Provider     provider.Provider      // injected Claude provider (default)
+	Registry     *provider.Registry     // may be nil - multi-backend dispatch
+	Recaller     MemoryRecaller         // may be nil - auto-injects relevant memories
+	MemStore     MemoryStorer           // may be nil - stores reaction-based learnings
+	SkillStore   skills.Store           // may be nil - injects skill catalog into system prompts
+	Orchestrator  *agents.Orchestrator             // may be nil - multi-agent orchestrator
+	ToolRegistry  *tooling.Registry                // may be nil - tool schemas for API agentic loop
+	ToolExecutor    *tooling.Executor              // may be nil - tool subprocess runner
 	BackendConfigs  func() map[string]BackendConfig // may be nil - backend pricing lookup
 	Engine          *comms.ChatEngine              // may be nil - unified engine (Step 5+)
+	Runtime         runtime.Runtime                // may be nil - #340 R4f, drives stateless LLM flows via Converse
 	ccAdapter       *ccAdapter                     // bridges engine events to per-call callbacks
 
 	// Background job tracking - one active job per conversation.
@@ -189,7 +189,6 @@ type ChatServiceOpts struct {
 	Registry       *provider.Registry
 	SkillStore     skills.Store
 	Orchestrator   *agents.Orchestrator
-	ConvStore      *conversation.Store
 	ToolRegistry   *tooling.Registry
 	ToolExecutor   *tooling.Executor
 	Recaller       MemoryRecaller
@@ -198,15 +197,15 @@ type ChatServiceOpts struct {
 }
 
 // NewChatService creates a new ChatService.
-func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, chatDB *chatdb.DB, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
+func NewChatService(dataDir, configDir, contextDir string, tierStore TierStore, sessions *chatsession.Store, eventLog *eventlog.Logger, mem memory.Store, transcriber *voice.Transcriber, classify ClassifyFunc, resolveModel ResolveModelFunc, prov provider.Provider) *ChatService {
 	cs := &ChatService{
 		DataDir:      dataDir,
 		ConfigDir:    configDir,
-		ContextDir:  contextDir,
+		ContextDir:   contextDir,
 		TierStore:    tierStore,
 		Sessions:     sessions,
 		EventLog:     eventLog,
-		ChatDB:       chatDB,
+		Memory:       mem,
 		Transcriber:  transcriber,
 		Classify:     classify,
 		ResolveModel: resolveModel,
@@ -225,7 +224,6 @@ func (cs *ChatService) Init(opts ChatServiceOpts) {
 	cs.Registry = opts.Registry
 	cs.SkillStore = opts.SkillStore
 	cs.Orchestrator = opts.Orchestrator
-	cs.ConvStore = opts.ConvStore
 	cs.ToolRegistry = opts.ToolRegistry
 	cs.ToolExecutor = opts.ToolExecutor
 	cs.Recaller = opts.Recaller
@@ -233,11 +231,19 @@ func (cs *ChatService) Init(opts ChatServiceOpts) {
 	cs.BackendConfigs = opts.BackendConfigs
 }
 
+// SetRuntime installs the runtime.Runtime used for stateless LLM flows
+// (currently: negativeFollowUp). When nil the service falls back to the
+// legacy Provider.Invoke path. Added in #340 R4f as the first CC migration
+// onto Runtime; later chunks will extend this to the main chat path.
+func (cs *ChatService) SetRuntime(rt runtime.Runtime) {
+	cs.Runtime = rt
+}
+
 // SetEngine installs the unified comms engine and registers the CC adapter.
 func (cs *ChatService) SetEngine(engine *comms.ChatEngine) {
 	cs.Engine = engine
 	cs.ccAdapter = newCCAdapter()
-	cs.ccAdapter.ChatDB = cs.ChatDB
+	cs.ccAdapter.Memory = cs.Memory
 	engine.RegisterAdapter(cs.ccAdapter)
 }
 
@@ -302,19 +308,21 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 	if strings.HasPrefix(req.Message, "/") {
 		if response, handled := cs.Engine.HandleCommand(channelID, req.Message); handled {
 			// Persist the slash command as a user message so it stays visible in chat.
-			if cs.ChatDB != nil && req.ConvID != "" {
-				cs.ChatDB.EnsureConversation(req.ConvID, "", "cc")
-				cs.ChatDB.InsertMessage(chatdb.Message{
-					ID: NewMessageID(), ConvID: req.ConvID, Role: "user",
-					Text: req.Message, Source: "cc",
+			if cs.Memory != nil && req.ConvID != "" {
+				_ = cs.Memory.EnsureConv(ctx, memory.ConvID(req.ConvID), "", "cc")
+				_, _ = cs.Memory.AppendMessage(ctx, memory.ConvID(req.ConvID), memory.Message{
+					Role: "user", Channel: "cc",
+					Content: req.Message,
+					Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: req.Message}},
 				})
 			}
 			if response != "" {
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": response}})
-				if cs.ChatDB != nil && req.ConvID != "" {
-					cs.ChatDB.InsertMessage(chatdb.Message{
-						ID: NewMessageID(), ConvID: req.ConvID, Role: "system",
-						Text: response, Source: "cc",
+				if cs.Memory != nil && req.ConvID != "" {
+					_, _ = cs.Memory.AppendMessage(ctx, memory.ConvID(req.ConvID), memory.Message{
+						Role: "system", Channel: "cc",
+						Content: response,
+						Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: response}},
 					})
 				}
 			}
@@ -334,23 +342,25 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		tierMatched := false
 
 		for _, t := range cs.TierStore.Current().Tiers {
-			if t.Enabled && t.ForceCommand && (t.Name == cmdName || SanitizeTierCommand(t.Name) == cmdName) {
+			if t.ForceCommand && (t.Name == cmdName || SanitizeTierCommand(t.Name) == cmdName) {
 				tierMatched = true
 				cs.Sessions.SetForcedTier(sessID, t.Name)
 				sysText := fmt.Sprintf("Session locked to **%s**. Use /new to reset.", t.Name)
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": sysText}})
-				if cs.ChatDB != nil && req.ConvID != "" {
-					cs.ChatDB.InsertMessage(chatdb.Message{
-						ID: NewMessageID(), ConvID: req.ConvID, Role: "system",
-						Text: sysText, Source: "cc",
+				if cs.Memory != nil && req.ConvID != "" {
+					_, _ = cs.Memory.AppendMessage(ctx, memory.ConvID(req.ConvID), memory.Message{
+						Role: "system", Channel: "cc",
+						Content: sysText,
+						Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: sysText}},
 					})
 				}
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
 					// Persist the force command as a user message.
-					if cs.ChatDB != nil && req.ConvID != "" {
-						cs.ChatDB.InsertMessage(chatdb.Message{
-							ID: NewMessageID(), ConvID: req.ConvID, Role: "user",
-							Text: req.Message, Source: "cc",
+					if cs.Memory != nil && req.ConvID != "" {
+						_, _ = cs.Memory.AppendMessage(ctx, memory.ConvID(req.ConvID), memory.Message{
+							Role: "user", Channel: "cc",
+							Content: req.Message,
+							Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: req.Message}},
 						})
 					}
 					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{Model: t.Name, Tier: t.Name}})
@@ -372,18 +382,20 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 				}
 				skillText := fmt.Sprintf("Skill **%s** activated%s", sk.Name, desc)
 				onEvent(ChatEvent{Type: "system", Data: map[string]string{"text": skillText}})
-				if cs.ChatDB != nil && req.ConvID != "" {
-					cs.ChatDB.InsertMessage(chatdb.Message{
-						ID: NewMessageID(), ConvID: req.ConvID, Role: "system",
-						Text: skillText, Source: "cc",
+				if cs.Memory != nil && req.ConvID != "" {
+					_, _ = cs.Memory.AppendMessage(ctx, memory.ConvID(req.ConvID), memory.Message{
+						Role: "system", Channel: "cc",
+						Content: skillText,
+						Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: skillText}},
 					})
 				}
 				if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
 					// Persist the skill command as a user message.
-					if cs.ChatDB != nil && req.ConvID != "" {
-						cs.ChatDB.InsertMessage(chatdb.Message{
-							ID: NewMessageID(), ConvID: req.ConvID, Role: "user",
-							Text: req.Message, Source: "cc",
+					if cs.Memory != nil && req.ConvID != "" {
+						_, _ = cs.Memory.AppendMessage(ctx, memory.ConvID(req.ConvID), memory.Message{
+							Role: "user", Channel: "cc",
+							Content: req.Message,
+							Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: req.Message}},
 						})
 					}
 					onEvent(ChatEvent{Type: "done", Data: ChatDoneData{}})
@@ -409,9 +421,9 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 
 	// Build router text with reply context hint.
 	routerMsg := req.Message
-	if req.ReplyTo != "" {
-		if orig, _ := cs.ChatDB.Get(req.ReplyTo); orig != nil {
-			quoted := orig.Text
+	if req.ReplyTo != "" && cs.Memory != nil && req.ConvID != "" {
+		if orig, _ := cs.Memory.GetMessage(ctx, memory.ConvID(req.ConvID), memory.MsgID(req.ReplyTo)); orig != nil {
+			quoted := orig.Content
 			if len(quoted) > 100 {
 				quoted = quoted[:100] + "..."
 			}
@@ -433,9 +445,9 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		ReplyToMsgID:         req.ReplyTo,
 		PreInsertedUserMsgID: req.preInsertedUserMsgID,
 	}
-	if req.ReplyTo != "" {
-		if orig, _ := cs.ChatDB.Get(req.ReplyTo); orig != nil {
-			msg.ReplyTo = orig.Text
+	if req.ReplyTo != "" && cs.Memory != nil && req.ConvID != "" {
+		if orig, _ := cs.Memory.GetMessage(ctx, memory.ConvID(req.ConvID), memory.MsgID(req.ReplyTo)); orig != nil {
+			msg.ReplyTo = orig.Content
 		}
 	}
 
@@ -470,21 +482,12 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 	}
 
 	// 5b. Persist media refs for the user message.
-	if cs.ChatDB != nil && len(req.MediaIDs) > 0 {
-		for _, mid := range req.MediaIDs {
-			entry := cs.GetUpload(mid)
-			if entry == nil {
-				continue
-			}
-			cs.ChatDB.InsertMediaRef(chatdb.MediaRef{
-				UploadID:  entry.ID,
-				FileName:  entry.FileName,
-				MimeType:  entry.MimeType,
-				MediaType: entry.MediaType,
-				FilePath:  entry.TempPath,
-			}, result.UserMsgID, req.ConvID)
-		}
-	}
+	// TODO(#336): memory.Store does not expose a post-hoc media-attach API —
+	// media is attached at AppendMessage time. Folding it into the user
+	// message requires threading req.MediaIDs through persistUserMessage +
+	// InMessage.Media; handled at those call sites. The loop below is now
+	// a no-op kept for the issue trail.
+	_ = result
 
 	// 6. Spontaneous mood reaction (CC-specific).
 	state := mood.GetCurrentState(cs.ContextDir)
@@ -523,7 +526,12 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 	mood.LogReaction(cs.DataDir, emoji, 0)
 	mood.UpdateLiveFeedback(cs.ContextDir, cs.DataDir)
 
-	cs.ChatDB.AddReaction(req.MsgID, emoji, "user")
+	// Resolve the owning convID and record the reaction in the memory store.
+	ctx := context.Background()
+	convID := cs.findConvForMsg(ctx, req.MsgID)
+	if cs.Memory != nil && convID != "" {
+		_, _ = cs.Memory.AddReaction(ctx, memory.ConvID(convID), memory.MsgID(req.MsgID), memory.Reaction{Emoji: emoji, Source: "user"})
+	}
 
 	result := &ReactResult{OK: true}
 
@@ -532,7 +540,9 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 		mirror := mood.ChooseMirror(emoji, state)
 		if mirror != "" {
 			result.Mirror = mirror
-			cs.ChatDB.AddReaction(req.MsgID, mirror, "alf")
+			if cs.Memory != nil && convID != "" {
+				_, _ = cs.Memory.AddReaction(ctx, memory.ConvID(convID), memory.MsgID(req.MsgID), memory.Reaction{Emoji: mirror, Source: "alf"})
+			}
 		}
 	}
 
@@ -560,8 +570,10 @@ func (cs *ChatService) NewSession(onboard bool) (string, string) {
 	} else {
 		// Legacy fallback when engine is not wired.
 		old = cs.Sessions.Archive(apiChatID)
-		if cs.ConvStore != nil {
-			cs.ConvStore.NewConversation(conversation.ChannelCC)
+		if cs.Memory != nil {
+			ctx := context.Background()
+			newID := memory.NewConvID()
+			_ = cs.Memory.SetPref(ctx, "active_conv:"+memory.ChannelCC, string(newID))
 		}
 		if onboard {
 			memory.SetOnboarding(cs.ContextDir)
@@ -570,11 +582,15 @@ func (cs *ChatService) NewSession(onboard bool) (string, string) {
 		}
 	}
 	var newConvID string
-	if cs.ConvStore != nil {
-		newConvID = cs.ConvStore.ConvID(conversation.ChannelCC)
+	if cs.Memory != nil {
+		ctx := context.Background()
+		v, _ := cs.Memory.GetPref(ctx, "active_conv:"+memory.ChannelCC)
+		if s, ok := v.(string); ok {
+			newConvID = s
+		}
 	}
 	if newConvID == "" {
-		newConvID = NewMessageID()
+		newConvID = string(memory.NewConvID())
 	}
 	return old, newConvID
 }
@@ -628,60 +644,99 @@ func (cs *ChatService) CurrentConvID() string {
 	if cs.lastChatConv != "" {
 		return cs.lastChatConv
 	}
-	if cs.ChatDB == nil {
+	if cs.Memory == nil {
 		return ""
 	}
-	convs, _ := cs.ChatDB.Conversations("cc", false)
-	if v := cs.ChatDB.GetMeta("active_conv_id"); v != "" {
-		for _, c := range convs {
-			if c.ID == v {
-				return v
+	ctx := context.Background()
+	convs, _ := cs.Memory.ListConvs(ctx, memory.ConvFilter{Channel: "cc"})
+	if v, _ := cs.Memory.GetPref(ctx, "active_conv_id"); v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			for _, c := range convs {
+				if string(c.ID) == s {
+					return s
+				}
 			}
 		}
 	}
 	if len(convs) > 0 {
-		return convs[len(convs)-1].ID
+		return string(convs[len(convs)-1].ID)
 	}
 	return ""
 }
 
 // SetActiveConvID persists the active conversation and updates in-memory state.
-// Also ensures the conv row exists in ChatDB so CurrentConvID's validation
+// Also ensures the conv row exists in Memory so CurrentConvID's validation
 // (introduced for #318) can resolve it on the next call.
 func (cs *ChatService) SetActiveConvID(convID string) {
 	cs.lastChatConv = convID
-	if cs.ChatDB != nil {
+	if cs.Memory != nil {
+		ctx := context.Background()
 		if convID != "" {
-			cs.ChatDB.EnsureConversation(convID, "", "cc")
+			_ = cs.Memory.EnsureConv(ctx, memory.ConvID(convID), "", "cc")
 		}
-		cs.ChatDB.SetMeta("active_conv_id", convID)
+		_ = cs.Memory.SetPref(ctx, "active_conv_id", convID)
 	}
 }
 
 // History returns paginated chat history, optionally filtered by conversation.
-func (cs *ChatService) History(limit int, before time.Time, convID string) []chatdb.Message {
+//
+// The HTTP JSON shape must stay stable: the memory store uses int64 unix
+// millis for CreatedAt while the historical wire contract exposed time.Time
+// under the "ts" key. historyMessage is the JSON boundary type that pins
+// that shape.
+func (cs *ChatService) History(limit int, before time.Time, convID string) []HistoryMessage {
 	if limit <= 0 {
 		limit = 50
 	}
 	if limit > 200 {
 		limit = 200
 	}
-	msgs, err := cs.ChatDB.History(convID, limit, before)
+	if cs.Memory == nil || convID == "" {
+		return []HistoryMessage{}
+	}
+	ctx := context.Background()
+	// TODO(#336): before-timestamp pagination dropped in memory migration;
+	// use cursor-based Before MsgID instead. Most callers pass zero Time.
+	if !before.IsZero() {
+		log.Printf("[chat-service] history: 'before' timestamp pagination not supported in memory store; returning latest")
+	}
+	msgs, err := cs.Memory.ListMessages(ctx, memory.ConvID(convID), memory.ListOpts{Limit: limit, ApplySummary: false})
 	if err != nil {
 		log.Printf("[chat-service] history error: %v", err)
-		return []chatdb.Message{}
+		return []HistoryMessage{}
 	}
-	return msgs
+	out := make([]HistoryMessage, len(msgs))
+	for i, m := range msgs {
+		out[i] = memoryMessageToHistory(m, convID)
+	}
+	return out
 }
 
 // Conversations returns all known conversation summaries.
-func (cs *ChatService) Conversations() []chatdb.ConversationInfo {
-	convs, err := cs.ChatDB.Conversations("", false)
+func (cs *ChatService) Conversations() []ConversationHistory {
+	if cs.Memory == nil {
+		return []ConversationHistory{}
+	}
+	ctx := context.Background()
+	convs, err := cs.Memory.ListConvs(ctx, memory.ConvFilter{})
 	if err != nil {
 		log.Printf("[chat-service] conversations error: %v", err)
-		return []chatdb.ConversationInfo{}
+		return []ConversationHistory{}
 	}
-	return convs
+	out := make([]ConversationHistory, len(convs))
+	for i, c := range convs {
+		out[i] = ConversationHistory{
+			ID:          string(c.ID),
+			Title:       c.Title,
+			Source:      c.Channel,
+			CreatedAt:   time.UnixMilli(c.CreatedAt),
+			UpdatedAt:   time.UnixMilli(c.UpdatedAt),
+			LastMessage: time.UnixMilli(c.LastMessage),
+			Archived:    c.Archived,
+			MsgCount:    c.MsgCount,
+		}
+	}
+	return out
 }
 
 // buildPrompt constructs the full prompt from a ChatRequest.
@@ -689,9 +744,9 @@ func (cs *ChatService) buildPrompt(req ChatRequest) string {
 	var parts []string
 
 	// Reply context.
-	if req.ReplyTo != "" {
-		if orig, _ := cs.ChatDB.Get(req.ReplyTo); orig != nil {
-			parts = append(parts, fmt.Sprintf("[The user is replying to this previous message:\n---\n%s\n---\n]", orig.Text))
+	if req.ReplyTo != "" && cs.Memory != nil && req.ConvID != "" {
+		if orig, _ := cs.Memory.GetMessage(context.Background(), memory.ConvID(req.ConvID), memory.MsgID(req.ReplyTo)); orig != nil {
+			parts = append(parts, fmt.Sprintf("[The user is replying to this previous message:\n---\n%s\n---\n]", orig.Content))
 		}
 	}
 
@@ -932,41 +987,78 @@ func (cs *ChatService) negativeFollowUp(emoji, msgID string) {
 		return
 	}
 
-	params := provider.Params{
-		Model:    tp.Model,
-		ResumeID: resumeID,
-		DataDir:  cs.DataDir,
-	}
-
-	result, err := cs.Provider.Invoke(context.Background(), prompt, params, nil)
+	text, model, sessionID, err := cs.invokeFollowUp(context.Background(), prompt, tp, resumeID)
 	if err != nil {
 		log.Printf("[chat-api] negative follow-up error: %v", err)
 		return
 	}
 
-	if result.SessionID != "" {
-		cs.Sessions.SetWithContext(apiChatID, result.SessionID, "follow-up")
+	if sessionID != "" {
+		cs.Sessions.SetWithContext(apiChatID, sessionID, "follow-up")
 	}
 
-	_, cleanText := extractReactionTag(result.Text)
-	if cs.ChatDB != nil {
-		cs.ChatDB.EnsureConversation("_followup", "", "cc")
-		cs.ChatDB.InsertMessage(chatdb.Message{
-			ID:     NewMessageID(),
-			ConvID: "_followup",
-			Role:   "assistant",
-			Text:   cleanText,
-			Source: "cc",
-			Model:  result.Model,
-			Tier:   "follow-up",
+	_, cleanText := extractReactionTag(text)
+	if cs.Memory != nil {
+		ctx := context.Background()
+		_ = cs.Memory.EnsureConv(ctx, "_followup", "", "cc")
+		_, _ = cs.Memory.AppendMessage(ctx, "_followup", memory.Message{
+			Role:    "assistant",
+			Channel: "cc",
+			Content: cleanText,
+			Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: cleanText}},
+			Model:   model,
+			Tier:    "follow-up",
 		})
 	}
 
 	cs.EventLog.Log("negative_followup", map[string]any{
 		"emoji":  emoji,
-		"model":  result.Model,
+		"model":  model,
 		"source": "api",
 	})
+}
+
+// invokeFollowUp runs the negative-follow-up LLM call. Prefers Runtime.Converse
+// when wired (#340 R4f) so the turn flows through the single-orchestrator
+// contract; falls back to the legacy Provider.Invoke path when Runtime is nil
+// (older test rigs, daemon startup orderings where Runtime isn't set yet).
+// Returns the assistant text, resolved model, and provider session id.
+func (cs *ChatService) invokeFollowUp(ctx context.Context, prompt string, tp tierParams, resumeID string) (text, model, sessionID string, err error) {
+	if cs.Runtime != nil {
+		res, cerr := cs.Runtime.Converse(ctx, runtime.ConverseRequest{
+			Model:        ai.ModelID(tp.Model),
+			Backend:      tp.Backend,
+			Prompt:       prompt,
+			DataDir:      cs.DataDir,
+			ResumeID:     resumeID,
+			Effort:       tp.Effort,
+			WriteCapable: tp.WriteCapable,
+			MaxTurns:     tp.MaxTurns,
+		})
+		if cerr != nil {
+			return "", "", "", cerr
+		}
+		text = res.Text
+		if res.Usage != nil {
+			model = res.Usage.Model
+			sessionID = res.Usage.SessionID
+		}
+		if model == "" {
+			model = tp.Model
+		}
+		return text, model, sessionID, nil
+	}
+
+	params := provider.Params{
+		Model:    tp.Model,
+		ResumeID: resumeID,
+		DataDir:  cs.DataDir,
+	}
+	result, ierr := cs.Provider.Invoke(ctx, prompt, params, nil)
+	if ierr != nil {
+		return "", "", "", ierr
+	}
+	return result.Text, result.Model, result.SessionID, nil
 }
 
 // cleanupUploads periodically removes expired upload entries from the registry.
@@ -1126,12 +1218,12 @@ const recallLimit = DefaultRecallTopK
 // safety net against issue #312-style hangs where manual restart was needed.
 const jobMaxDuration = 20 * time.Minute
 
-// persistUserMessage inserts the user message into ChatDB synchronously so
-// it survives refresh even if the provider call never completes (#310).
-// Returns the message ID, or "" for slash commands (which the engine
-// handles and persists itself via HandleCommand).
+// persistUserMessage inserts the user message into the memory store
+// synchronously so it survives refresh even if the provider call never
+// completes (#310). Returns the message ID, or "" for slash commands
+// (which the engine handles and persists itself via HandleCommand).
 func (cs *ChatService) persistUserMessage(req ChatRequest) string {
-	if cs.ChatDB == nil || req.ConvID == "" {
+	if cs.Memory == nil || req.ConvID == "" {
 		return ""
 	}
 	// Slash commands persist on their own path (system + user together).
@@ -1141,18 +1233,36 @@ func (cs *ChatService) persistUserMessage(req ChatRequest) string {
 	if req.Message == "" && len(req.MediaIDs) == 0 {
 		return ""
 	}
-	id := NewMessageID()
-	cs.ChatDB.EnsureConversation(req.ConvID, "", "cc")
-	cs.ChatDB.InsertMessage(chatdb.Message{
-		ID:        id,
-		ConvID:    req.ConvID,
-		Role:      "user",
-		Text:      req.Message,
-		Source:    "cc",
-		ReplyTo:   req.ReplyTo,
-		CreatedAt: time.Now(),
-	})
-	return id
+	ctx := context.Background()
+	_ = cs.Memory.EnsureConv(ctx, memory.ConvID(req.ConvID), "", "cc")
+	var mediaEntries []memory.Media
+	for _, mid := range req.MediaIDs {
+		entry := cs.GetUpload(mid)
+		if entry == nil {
+			continue
+		}
+		mediaEntries = append(mediaEntries, memory.Media{
+			UploadID:  entry.ID,
+			FileName:  entry.FileName,
+			MimeType:  entry.MimeType,
+			MediaType: entry.MediaType,
+			FilePath:  entry.TempPath,
+		})
+	}
+	userMsg := memory.Message{
+		Role:    "user",
+		Channel: "cc",
+		Content: req.Message,
+		Blocks:  []memory.ContentBlock{{Type: memory.BlockText, Text: req.Message}},
+		ReplyTo: memory.MsgID(req.ReplyTo),
+		Media:   mediaEntries,
+	}
+	stored, err := cs.Memory.AppendMessage(ctx, memory.ConvID(req.ConvID), userMsg)
+	if err != nil {
+		log.Printf("[chat-service] persist user message: %v", err)
+		return ""
+	}
+	return string(stored.ID)
 }
 
 // StartJob launches Ask in a background goroutine and returns the job for streaming.
@@ -1279,6 +1389,30 @@ func recallMemories(recaller MemoryRecaller, message string) string {
 	}
 	log.Printf("[chat-api] recall: injected %d memories for %q", len(relevant), q)
 	return sb.String()
+}
+
+// findConvForMsg walks known convs to find which one owns msgID. Used by
+// React() after the migration because memory.Store addresses messages by
+// (convID, msgID) — callers no longer have a flat id → message index like
+// chatdb.Get provided. Most reaction flows happen shortly after send, so
+// we prefer the active conv first; callers still carrying a convID should
+// pass it directly to skip the scan.
+func (cs *ChatService) findConvForMsg(ctx context.Context, msgID string) string {
+	if cs.Memory == nil || msgID == "" {
+		return ""
+	}
+	if cs.lastChatConv != "" {
+		if m, _ := cs.Memory.GetMessage(ctx, memory.ConvID(cs.lastChatConv), memory.MsgID(msgID)); m != nil {
+			return cs.lastChatConv
+		}
+	}
+	convs, _ := cs.Memory.ListConvs(ctx, memory.ConvFilter{IncludeArchived: true})
+	for _, c := range convs {
+		if m, _ := cs.Memory.GetMessage(ctx, c.ID, memory.MsgID(msgID)); m != nil {
+			return string(c.ID)
+		}
+	}
+	return ""
 }
 
 // toolExecutorAdapter bridges tooling.Executor to provider.ToolExecutor.

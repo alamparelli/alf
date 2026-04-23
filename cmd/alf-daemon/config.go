@@ -12,12 +12,11 @@ import (
 	"time"
 
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	"github.com/alamparelli/alf/internal/firewall"
-	"github.com/alamparelli/alf/internal/provider"
-	"github.com/alamparelli/alf/internal/router"
-	"github.com/alamparelli/alf/internal/secrets"
+	firewall "github.com/alamparelli/alf/internal/sandbox/network"
+	provider "github.com/alamparelli/alf/internal/ai/provider"
+	"github.com/alamparelli/alf/internal/envsecrets"
 	"github.com/alamparelli/alf/internal/tooling"
-	"github.com/alamparelli/alf/internal/vault"
+	vault "github.com/alamparelli/alf/internal/sandbox/secrets"
 )
 
 // readAuthToken reads CC_AUTH_TOKEN from vault-data (daemon-only, mode 700)
@@ -32,7 +31,7 @@ func readAuthToken() string {
 		}
 	}
 	// Fallback: Docker secret (for backwards compatibility / migration).
-	return secrets.ReadSecret("CC_AUTH_TOKEN")
+	return envsecrets.ReadSecret("CC_AUTH_TOKEN")
 }
 
 // vaultPassword reads the master password from the persisted password file
@@ -163,7 +162,7 @@ func resolveTierParams(tierName string, tiers *cc.TiersConfig, dataDir string, r
 			// For CLI backend, resolve short names to full model IDs.
 			// For API backends, use the model string as-is.
 			if backend == "" || backend == "cli" {
-				model = router.ResolveModel(t.Model)
+				model = resolveModel(t.Model)
 			}
 			// Resolve tool wildcards into concrete tool names.
 			tools := t.Tools
@@ -246,6 +245,7 @@ func watchConfigFiles(configDir string, dataDir string, tiersPathFn func() strin
 		{filepath.Join(configDir, "config.json"), cc.ReloadConfig, false},
 		{filepath.Join(configDir, "firewall.json"), cc.ReloadFirewall, false},
 		{filepath.Join(dataDir, "agents", "teams"), cc.ReloadAgents, true},
+		{cc.ClaudeModelsPath(configDir), cc.ReloadClaudeModels, false},
 	}
 
 	modTimes := make(map[string]time.Time)
@@ -355,16 +355,25 @@ func syncVaultHostsToFirewall(mgr *vault.Manager, fw *firewall.Proxy) {
 	}
 }
 
+// parseAllowedChatIDs parses a comma-separated list of Telegram chat IDs
+// into a lookup set. Malformed entries are logged and skipped — callers
+// MUST treat an empty result as "Telegram must not start" (see #385-3).
 func parseAllowedChatIDs(s string) map[int64]bool {
 	result := make(map[int64]bool)
 	if s == "" {
 		return result
 	}
 	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
-			result[id] = true
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
 		}
+		id, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			log.Printf("[telegram] ignoring invalid chat ID %q in TELEGRAM_CHAT_ID: %v", trimmed, err)
+			continue
+		}
+		result[id] = true
 	}
 	return result
 }

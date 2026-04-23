@@ -56,6 +56,21 @@ skills/
 - Any `.md` file in the same folder (except `SKILL.md`) is treated as reference material and appended to the prompt.
 - Non-`.md` files (scripts, data) are ignored by the loader but ALF can still read them during a conversation.
 
+### Naming rules
+
+Skill folder names (and the `name` frontmatter field) must match `[a-zA-Z0-9_-]+` — letters, digits, hyphens, and underscores.
+
+Accepted: `my-skill`, `Code_Review`, `x-manager`, `v2`.
+
+Rejected (silently skipped at load time with a log warning):
+- `My Skill` — spaces not allowed.
+- `code.review` — dots not allowed.
+- `.hidden` — leading dot not allowed.
+- `🔥fire`, `accenté` — non-ASCII not allowed.
+- `foo$(bar)` — shell metacharacters not allowed.
+
+This applies equally to standalone user skills and to skills bundled inside marketplace apps (`apps/<slug>/skills/`).
+
 ## The SKILL.md format
 
 Every `SKILL.md` starts with a **frontmatter** block (metadata between `---` lines), followed by the **body** (instructions).

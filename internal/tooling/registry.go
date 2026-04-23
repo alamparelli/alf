@@ -1,17 +1,16 @@
 package tooling
 
 import (
-	_ "embed"
 	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-)
 
-//go:embed ruleset.json
-var rulesetJSON []byte
+	"github.com/alamparelli/alf/internal/capability"
+	"github.com/alamparelli/alf/internal/sandbox/integrity"
+)
 
 // ToolSchema describes a tool's interface for OpenAI function calling.
 type ToolSchema struct {
@@ -27,7 +26,12 @@ type Registry struct {
 	nativeNames []string
 	dataDir     string
 	secWarnings []SecurityWarning
-	Integrity   *IntegrityGuard // optional: skip quarantined tools from scan
+	Integrity   *integrity.IntegrityGuard // optional: skip quarantined tools from scan
+
+	// capReg is the unified capability registry. When non-nil, every
+	// RegisterNative call also registers the tool as a KindTool Capability.
+	// Introduced by #338 C1 (dual-registration). Consumers migrate in C2.
+	capReg *capability.Registry
 }
 
 // NewRegistry scans tools.d/*.json and tools/*.json under dataDir for tool manifests.
@@ -50,72 +54,24 @@ func (r *Registry) Rescan() {
 	r.scanFiles(false)
 }
 
-// SecurityRule is a single pattern rule loaded from ruleset.json.
-type SecurityRule struct {
-	ID       string   `json:"id"`
-	Category string   `json:"category"`
-	Pattern  string   `json:"pattern"`
-	Type     string   `json:"type"` // "substring" (default) or "regex" (future)
-	Severity string   `json:"severity"`
-	CWE      string   `json:"cwe"`
-	Reason   string   `json:"reason"`
-	Languages []string `json:"languages"`
-}
+// SecurityRule is an alias for integrity.SecurityRule.
+type SecurityRule = integrity.SecurityRule
 
-// SecurityRuleset is the top-level structure of ruleset.json.
-type SecurityRuleset struct {
-	Version     string         `json:"version"`
-	Description string         `json:"description"`
-	Rules       []SecurityRule `json:"rules"`
-}
+// SecurityRuleset is an alias for integrity.SecurityRuleset.
+type SecurityRuleset = integrity.SecurityRuleset
 
-// securityRuleset is the parsed ruleset, loaded once at init.
-var securityRuleset SecurityRuleset
-
-func init() {
-	if err := json.Unmarshal(rulesetJSON, &securityRuleset); err != nil {
-		log.Fatalf("tooling: failed to parse embedded ruleset.json: %v", err)
-	}
-}
-
-// SecurityWarning records a dangerous pattern found in a user tool.
-type SecurityWarning struct {
-	Tool     string `json:"tool"`
-	RuleID   string `json:"rule_id"`
-	Pattern  string `json:"pattern"`
-	Category string `json:"category"`
-	Severity string `json:"severity"`
-	CWE      string `json:"cwe"`
-	Reason   string `json:"reason"`
-}
+// SecurityWarning is an alias for integrity.SecurityWarning.
+type SecurityWarning = integrity.SecurityWarning
 
 // SecurityWarnings returns warnings from the last tool scan.
 func (r *Registry) SecurityWarnings() []SecurityWarning {
 	return r.secWarnings
 }
 
-// auditToolSource scans a tool's source code for dangerous patterns from ruleset.json.
+// auditToolSource is a thin wrapper for integrity.AuditToolSource kept for
+// the internal scan path. It will disappear once the scan path moves.
 func auditToolSource(toolPath, toolName string) []SecurityWarning {
-	data, err := os.ReadFile(toolPath)
-	if err != nil {
-		return nil
-	}
-	src := strings.ToLower(string(data))
-	var warnings []SecurityWarning
-	for _, rule := range securityRuleset.Rules {
-		if strings.Contains(src, strings.ToLower(rule.Pattern)) {
-			warnings = append(warnings, SecurityWarning{
-				Tool:     toolName,
-				RuleID:   rule.ID,
-				Pattern:  rule.Pattern,
-				Category: rule.Category,
-				Severity: rule.Severity,
-				CWE:      rule.CWE,
-				Reason:   rule.Reason,
-			})
-		}
-	}
-	return warnings
+	return integrity.AuditToolSource(toolPath, toolName)
 }
 
 func (r *Registry) scanFiles(initial bool) {
@@ -238,6 +194,9 @@ func (r *Registry) Get(name string) (ToolSchema, bool) {
 }
 
 // RegisterNative adds a native Go tool's schema and instance to the registry.
+// If a capability.Registry has been attached via SetCapabilityRegistry, the
+// tool is also mirrored there as a KindTool Capability (dual-registration
+// during #338 C1).
 func (r *Registry) RegisterNative(t NativeTool) {
 	r.schemas[t.ToolName()] = t.Schema()
 	if r.natives == nil {
@@ -245,6 +204,40 @@ func (r *Registry) RegisterNative(t NativeTool) {
 	}
 	r.natives[t.ToolName()] = t
 	r.nativeNames = append(r.nativeNames, t.ToolName())
+
+	if r.capReg != nil {
+		if err := r.capReg.Register(asCapability(t)); err != nil {
+			log.Printf("tooling: capability dual-register %q: %v", t.ToolName(), err)
+		}
+	}
+}
+
+// SetCapabilityRegistry attaches a unified capability.Registry. Future
+// RegisterNative calls will mirror the tool into it, and every previously
+// registered native tool is back-filled immediately so the two registries
+// stay in sync regardless of call order.
+func (r *Registry) SetCapabilityRegistry(cr *capability.Registry) {
+	r.capReg = cr
+	if cr == nil {
+		return
+	}
+	for _, name := range r.nativeNames {
+		t, ok := r.natives[name]
+		if !ok {
+			continue
+		}
+		if _, exists := cr.Get(capability.ID(name)); exists {
+			continue
+		}
+		if err := cr.Register(asCapability(t)); err != nil {
+			log.Printf("tooling: capability back-fill %q: %v", name, err)
+		}
+	}
+}
+
+// CapabilityRegistry returns the attached unified registry, or nil.
+func (r *Registry) CapabilityRegistry() *capability.Registry {
+	return r.capReg
 }
 
 // GetNative returns a native tool by name, or nil if not found.

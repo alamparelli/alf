@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alamparelli/alf/internal/sandbox/integrity"
 )
 
 // Executor runs tools: native Go tools first, subprocess fallback for user tools.
@@ -18,7 +20,7 @@ type Executor struct {
 	DataDir      string
 	HomeDir      string
 	Registry     *Registry       // optional: enables JSON→CLI arg conversion for user tools
-	Integrity    *IntegrityGuard // optional: hash-based integrity checking for user tools
+	Integrity    *integrity.IntegrityGuard // optional: hash-based integrity checking for user tools
 	ErrorJournal *ErrorJournal   // optional: logs user tool errors for heartbeat repair
 	Env          []string        // base env vars to inject
 	Timeout      time.Duration   // per-tool timeout; 0 = 30s
@@ -78,7 +80,7 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 	// Integrity check for user tools (not system tools.d/).
 	// Uses Verify (hash at exec time) instead of Check (map lookup) to close
 	// the TOCTOU window between periodic scan and execution.
-	if e.Integrity != nil && IsUserTool(toolPath, e.DataDir) {
+	if e.Integrity != nil && integrity.IsUserTool(toolPath, e.DataDir) {
 		if err := e.Integrity.Verify(toolPath); err != nil {
 			msg := fmt.Sprintf("tool %q blocked: %v", call.Name, err)
 			return CallResult{ID: call.ID, Output: msg, IsError: true, ExitCode: -1, ErrorMessage: msg}

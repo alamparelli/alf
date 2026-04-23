@@ -3,17 +3,66 @@ package marketplace
 import (
 	"archive/zip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
+
+// validSkillName restricts bundled skill directory names to the same
+// shape as the resource-store validName regex ([a-zA-Z0-9_-]+). The
+// outer bundle extraction rejects path-traversal prefixes, but the
+// directory name itself is exposed to the LLM and the UI — weird
+// unicode, spaces or shell metacharacters have no business there.
+// Kept local to avoid an import cycle on controlcenter (#385-6).
+var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// errInsecureRegistry is returned by validateRegistryURL when the URL uses
+// a non-https scheme without the ALF_MARKETPLACE_INSECURE=1 dev override.
+var errInsecureRegistry = errors.New("insecure registry URL (http://) requires ALF_MARKETPLACE_INSECURE=1")
+
+// validateRegistryURL enforces HTTPS on the marketplace registry URL.
+//
+//   - raw == "":       returns "" (marketplace disabled, not an error).
+//   - https://…:       accepted.
+//   - http://… + insecure=="1": accepted, caller should warn.
+//   - http://… no override:     rejected (errInsecureRegistry).
+//   - unparseable/other scheme: rejected.
+//
+// Returning the cleaned URL lets callers normalise trailing slashes in future.
+func validateRegistryURL(raw, insecure string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse registry URL: %w", err)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("registry URL missing host: %q", raw)
+	}
+	switch u.Scheme {
+	case "https":
+		return raw, nil
+	case "http":
+		if insecure != "1" {
+			return "", errInsecureRegistry
+		}
+		return raw, nil
+	default:
+		return "", fmt.Errorf("registry URL has unsupported scheme %q (want https)", u.Scheme)
+	}
+}
 
 type AppState string
 
@@ -70,9 +119,18 @@ type stateFile struct {
 }
 
 func NewManager(dataDir string) *Manager {
+	rawURL := os.Getenv("ALF_MARKETPLACE_URL")
+	insecure := os.Getenv("ALF_MARKETPLACE_INSECURE")
+	registryURL, err := validateRegistryURL(rawURL, insecure)
+	if err != nil {
+		log.Printf("[marketplace] rejecting ALF_MARKETPLACE_URL=%q: %v — marketplace disabled. Set ALF_MARKETPLACE_INSECURE=1 to allow plain http:// (dev only).", rawURL, err)
+	} else if registryURL != "" && insecure == "1" {
+		log.Printf("[marketplace] WARNING: registry URL %q is plain http:// (ALF_MARKETPLACE_INSECURE=1). Do not use this configuration in production.", registryURL)
+	}
+
 	m := &Manager{
 		dataDir:     dataDir,
-		registryURL: os.Getenv("ALF_MARKETPLACE_URL"),
+		registryURL: registryURL,
 		states:      make(map[string]AppState),
 		perms:       make(map[string][]string),
 		services:    make(map[string][]string),
@@ -497,6 +555,10 @@ func (m *Manager) RestoreInstalled() error {
 }
 
 // linkAppSkills symlinks skill directories from apps/<slug>/skills/ into data/skills/.
+// Skill directory names must match validSkillName — any other shape is
+// skipped with a log. Extraction already blocks traversal, but a filesystem
+// post-extraction or a non-regex-safe unicode name still has to be gated
+// because the name is later exposed to the LLM and UI.
 func (m *Manager) linkAppSkills(slug string) {
 	skillsSrc := filepath.Join(m.dataDir, "apps", slug, "skills")
 	entries, err := os.ReadDir(skillsSrc)
@@ -509,14 +571,22 @@ func (m *Manager) linkAppSkills(slug string) {
 		if !e.IsDir() {
 			continue
 		}
-		link := filepath.Join(skillsDst, e.Name())
-		target := filepath.Join("..", "apps", slug, "skills", e.Name())
+		name := e.Name()
+		if !validSkillName.MatchString(name) {
+			log.Printf("[marketplace] app %q: skipping skill %q (invalid name, expected [a-zA-Z0-9_-]+)", slug, name)
+			continue
+		}
+		link := filepath.Join(skillsDst, name)
+		target := filepath.Join("..", "apps", slug, "skills", name)
 		os.Remove(link) // remove stale
 		os.Symlink(target, link)
 	}
 }
 
 // unlinkAppSkills removes skill symlinks that point to this app.
+// Only names matching validSkillName are considered — an invalid name
+// was never symlinked by linkAppSkills, so we must not touch whatever
+// file may happen to sit at that path.
 func (m *Manager) unlinkAppSkills(slug string) {
 	skillsSrc := filepath.Join(m.dataDir, "apps", slug, "skills")
 	entries, err := os.ReadDir(skillsSrc)
@@ -528,7 +598,11 @@ func (m *Manager) unlinkAppSkills(slug string) {
 		if !e.IsDir() {
 			continue
 		}
-		os.Remove(filepath.Join(skillsDst, e.Name()))
+		name := e.Name()
+		if !validSkillName.MatchString(name) {
+			continue
+		}
+		os.Remove(filepath.Join(skillsDst, name))
 	}
 }
 

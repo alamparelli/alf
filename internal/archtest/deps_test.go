@@ -86,10 +86,6 @@ var consumerLeafExceptions = map[string]map[string]string{
 	"internal/skills": {
 		"internal/capability": "skills.skillCapability adapter implements capability.Capability",
 	},
-	"internal/comms": {
-		"internal/ai":     "ai.ModelID/Message/ToolSpec/MediaEntry to build runtime.ConverseRequest in runtime_invoke.go (#340 R4j3)",
-		"internal/memory": "conversation history + pref store — state layer below Runtime orchestration",
-	},
 	"internal/controlcenter": {
 		"internal/ai":     "ai.ModelID / ai.ResolveModel / ai.ToolSpec — contract types + pure helper",
 		"internal/memory": "conversation + doc reads for UI rendering (handler_chat*, handler_memory*)",
@@ -179,9 +175,10 @@ func TestConsumerDependencyRules(t *testing.T) {
 				continue
 			}
 			// An exception on a consumer covers every sub-package: if
-			// internal/comms is allowed to import internal/memory, then
-			// internal/comms/sub is implicitly covered too (it would not
-			// be called a separate consumer by the intent of the rule).
+			// internal/marketplace is allowed to import internal/capability,
+			// then internal/marketplace/sub is implicitly covered too (it
+			// would not be called a separate consumer by the intent of the
+			// rule).
 			consumerRoot := topLevelConsumer(rel)
 			if justification, ok := consumerLeafExceptions[consumerRoot][impRel]; ok {
 				used[consumerRoot][impRel] = true
@@ -204,9 +201,9 @@ func TestConsumerDependencyRules(t *testing.T) {
 }
 
 // topLevelConsumer maps a nested consumer path to its top-level package. For
-// example "internal/comms/sub" → "internal/comms". Exceptions are keyed on
-// top-level consumers so internal re-structuring does not silently void an
-// exception.
+// example "internal/marketplace/sub" → "internal/marketplace". Exceptions are
+// keyed on top-level consumers so internal re-structuring does not silently
+// void an exception.
 func topLevelConsumer(rel string) string {
 	rest := strings.TrimPrefix(rel, "internal/")
 	if i := strings.Index(rest, "/"); i >= 0 {

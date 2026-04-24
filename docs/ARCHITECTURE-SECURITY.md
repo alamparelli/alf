@@ -810,7 +810,7 @@ Use this when adding code that touches the security boundary:
 | `#377` comms absorption into runtime | seam | prepares `#383` |
 | `#382` sandbox facet wire-in (`PolicyFrom(ctx)`) | seam | identity/audit ctx (NOT authority-carrying) |
 | `#387` WASM trust model spec | L2 | design of signatures + trust store + bootstrap |
-| `#388` runtime signature verification | L2 | implements the spec at load time |
+| `#388` runtime signature verification | L2 | **Implemented** on `release/0.8.0` across 6 commits (`818cc3f` → `39ba698`): `internal/capability/envelope/` carries the full §7.10 pipeline — `Canonicalize` (TOML → JCS JSON), `Validate` (schema + deferred-block rejection per MANIFEST-SCHEMA §3.4), Ed25519-ph + BLAKE2b-512 primitives (ported from the #387 POC), `TrustStore` (in-memory + dir-backed), and `Verify` as the single pipeline entry point. `runtime.Instantiator.InstantiateVerified` is the one runtime consumer, gated by archtest `TestOneVerifyCallSite`. 58 envelope tests + 5 verified-instantiate tests. Deferred to follow-ups: startup discovery + WARN logging (with #386 boot wiring), full §7.10.3 envelope-record JSON (stop-gap: bundle hash in trusted comment), build-time signing path (#386 + handoff), CRL (#396). |
 | `#397` canonicalization + signature envelope spec | L2 | pin format, parser, algo to close SAML/JWT-class gaps |
 | `#391` ocap foundation — forge + Tier 3.1 handles | L3.1 | **Implemented** on `release/0.8.0` across 8 commits (`ba1c2a1` → `ed4778f`): `internal/capability/handle/` carries all five Tier 3.1 types (FS, HTTP, Exec, Secrets, Tool) with uniform scope / revocation / non-serializable / lifecycle semantics; `handle.RuntimeToken` + `ForgeInstance` realise the §4.3 three-lock forge gate; `runtime.Instantiator` is the first consumer with `trust.Verify` stubbed (nopVerifier) pending #388; archtest `TestMintRuntimeTokenIsRuntimeOnly` + `TestNoPluginStdlibImport` + TCB hygiene live. 71 tests. See comment trail on #391. Migration of existing capabilities deferred to #398/#399/#400. |
 | `#392` capability providers (user-extensible registry) | L3.1 | signed providers export new handle kinds |
@@ -848,7 +848,7 @@ Phase 1 — foundation
   #383 bypass elim    (blocked on #391 — post-ocap)
 
 Phase 2 — parallel tracks (unblocked by prototype validation)
-  Track A  #387 trust spec ✅ ── #397 canonicalization spec ✅ (impl pending) ── #388 runtime verify
+  Track A  #387 trust spec ✅ ── #397 canonicalization spec ✅ ── #388 runtime verify ✅ done (6 commits)
   Track B  #391 OCAP FORGE (Tier 3.1)          ✅ done (8 commits, stubbed trust.Verify)
   Track C  #386 WASM wiring                    — integrate prototype into daemon boot
   Track D  #384 marketplace bundle signing     — no longer gated on spike outcome
@@ -889,7 +889,7 @@ Final gate — tag 0.8.0
 | `#383` | `tooling.Executor` package-private; archtest forbids non-runtime import; broken `sandbox/exec/linux.go` removed |
 | `#387` | trust spec merged; trust chain documented; CLI commands spec'd |
 | `#397` | one canonical form; one pinned parser; algo ID in envelope; scheme-substitution test rejected |
-| `#388` | single `trust.Verify` call site (archtest); unsigned/untrusted rejected; TOCTOU test (verify-then-modify-on-disk → reject); prototype's stubbed Verify replaced |
+| `#388` | **Shipped** on `release/0.8.0`. Single call site enforced (archtest `TestOneVerifyCallSite`); unsigned/untrusted rejected (`ErrSigFileMalformed` / `ErrSignerNotTrusted`); TOCTOU-safe — VerifyInput is in-memory bytes, no disk re-reads between verify and use; prototype's stubbed Verify replaced by `envelope.Verify` behind `runtime.Instantiator.InstantiateVerified`. Follow-up polish: §7.10.3 envelope-record JSON (stop-gap: bundle hash in trusted comment). |
 | `#391` | **Shipped.** Archtest green (`TestMintRuntimeTokenIsRuntimeOnly`, `TestNoPluginStdlibImport`, TCB hygiene); `Instance.Close` cancels in-flight in <100ms (per-handle revocation tests); `forgeGrants` produces nil handles for non-declared resources (unit-verified). AST-level "no ambient stores in capability pkgs" detector deferred to #398. |
 | `#386` (integration) | `hello-read` + `notes` loaded at daemon boot from `skills.d/wasm/`; LLM tool-loop sees them; `wasm_build_tool` registered as native tool; `make test-wasm-prototype` stays green |
 | `#398` | handles non-serializable; WASM import cross-check catches lying manifest; no unsafe in capability pkgs |

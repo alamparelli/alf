@@ -1,4 +1,4 @@
-package comms
+package runtime
 
 import (
 	"context"
@@ -7,11 +7,10 @@ import (
 
 	"github.com/alamparelli/alf/internal/ai"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
-	"github.com/alamparelli/alf/internal/runtime"
 )
 
 // buildConverseRequest translates the pipeline's legacy provider.Params +
-// prompt into a runtime.ConverseRequest with an Engine override that carries
+// prompt into a ConverseRequest with an Engine override that carries
 // any locally-applied wrapping (e.g. provider.NewToolLoop around an
 // APIProvider). Added in #340 R4j3 so processStandard's happy path can
 // reach the provider stack through Runtime.ConverseStream without reshaping
@@ -21,7 +20,7 @@ import (
 // the same variable that would otherwise be passed to `prov.Invoke`. Passing
 // prov through provider.NewEngine lets tool-loop-wrapped providers keep
 // their wrapper active on the Runtime path.
-func buildConverseRequest(prompt string, prov provider.Provider, params provider.Params) runtime.ConverseRequest {
+func buildConverseRequest(prompt string, prov provider.Provider, params provider.Params) ConverseRequest {
 	history := make([]ai.Message, 0, len(params.ConvMessages))
 	for _, m := range params.ConvMessages {
 		history = append(history, ai.Message{
@@ -57,7 +56,7 @@ func buildConverseRequest(prompt string, prov provider.Provider, params provider
 		}
 	}
 
-	return runtime.ConverseRequest{
+	return ConverseRequest{
 		Model:           ai.ModelID(params.Model),
 		Backend:         "", // carried via the Engine override instead.
 		SystemPrompts:   append([]string(nil), params.SystemPrompts...),
@@ -76,7 +75,7 @@ func buildConverseRequest(prompt string, prov provider.Provider, params provider
 	}
 }
 
-// invokeViaRuntime drives one provider turn through runtime.ConverseStream
+// invokeViaRuntime drives one provider turn through ConverseStream
 // and materialises a *provider.Result-compatible struct so the rest of
 // processStandard can stay on the legacy Result shape. Stream events are
 // translated back into provider.StreamEvent so the same progress callback
@@ -88,7 +87,7 @@ func buildConverseRequest(prompt string, prov provider.Provider, params provider
 // check keeps working. Added in #340 R4j3.
 func (e *ChatEngine) invokeViaRuntime(
 	ctx context.Context,
-	req runtime.ConverseRequest,
+	req ConverseRequest,
 	progressFn provider.OnProgress,
 ) (*provider.Result, error) {
 	if e.Runtime == nil {
@@ -107,30 +106,30 @@ func (e *ChatEngine) invokeViaRuntime(
 	)
 	for ev := range stream {
 		switch ev.Kind {
-		case runtime.EventToken:
+		case EventToken:
 			text.WriteString(ev.Token)
 			if progressFn != nil {
 				progressFn(provider.StreamEvent{Type: "text_delta", Text: ev.Token})
 			}
-		case runtime.EventThinking:
+		case EventThinking:
 			if progressFn != nil {
 				progressFn(provider.StreamEvent{Type: "thinking", Text: ev.Text})
 			}
-		case runtime.EventToolUse:
+		case EventToolUse:
 			if progressFn != nil {
 				progressFn(provider.StreamEvent{Type: "tool_use", Detail: ev.ToolName})
 			}
-		case runtime.EventToolInput:
+		case EventToolInput:
 			if progressFn != nil {
 				progressFn(provider.StreamEvent{Type: "tool_input", Detail: ev.ToolName, Text: ev.Text})
 			}
-		case runtime.EventToolOutput:
+		case EventToolOutput:
 			if progressFn != nil {
 				progressFn(provider.StreamEvent{Type: "tool_result", Detail: ev.ToolID, Text: ev.Text})
 			}
-		case runtime.EventError:
+		case EventError:
 			streamErr = ev.Err
-		case runtime.EventDone:
+		case EventDone:
 			usage = ev.Usage
 		}
 	}

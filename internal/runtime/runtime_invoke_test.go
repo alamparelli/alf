@@ -1,4 +1,4 @@
-package comms
+package runtime
 
 import (
 	"context"
@@ -8,24 +8,23 @@ import (
 	"github.com/alamparelli/alf/internal/ai"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/capability"
-	"github.com/alamparelli/alf/internal/runtime"
 )
 
 // fakeRuntime scripts a single ConverseStream call so invokeViaRuntime can be
 // exercised in isolation. Only ConverseStream is exercised; the other Runtime
 // methods panic if called (fail-fast on surface misuse).
 type fakeRuntime struct {
-	events []runtime.Event
+	events []Event
 	err    error
-	gotReq runtime.ConverseRequest
+	gotReq ConverseRequest
 }
 
-func (f *fakeRuntime) ConverseStream(_ context.Context, req runtime.ConverseRequest) (<-chan runtime.Event, error) {
+func (f *fakeRuntime) ConverseStream(_ context.Context, req ConverseRequest) (<-chan Event, error) {
 	f.gotReq = req
 	if f.err != nil {
 		return nil, f.err
 	}
-	ch := make(chan runtime.Event, len(f.events))
+	ch := make(chan Event, len(f.events))
 	for _, ev := range f.events {
 		ch <- ev
 	}
@@ -33,38 +32,38 @@ func (f *fakeRuntime) ConverseStream(_ context.Context, req runtime.ConverseRequ
 	return ch, nil
 }
 
-func (f *fakeRuntime) Chat(context.Context, runtime.ChatRequest) (<-chan runtime.Event, error) {
+func (f *fakeRuntime) Chat(context.Context, ChatRequest) (<-chan Event, error) {
 	panic("Chat not expected")
 }
 
-func (f *fakeRuntime) Invoke(context.Context, capability.ID, runtime.Args) (runtime.Output, error) {
+func (f *fakeRuntime) Invoke(context.Context, capability.ID, Args) (Output, error) {
 	panic("Invoke not expected")
 }
 
-func (f *fakeRuntime) Converse(context.Context, runtime.ConverseRequest) (runtime.ConverseResult, error) {
+func (f *fakeRuntime) Converse(context.Context, ConverseRequest) (ConverseResult, error) {
 	panic("Converse not expected")
 }
 
 // TestInvokeViaRuntime_TranslatesEventsToStreamEvents (#340 R4j3) pins the
-// parity contract: each runtime.Event variant round-trips through the
+// parity contract: each Event variant round-trips through the
 // progress callback as the matching provider.StreamEvent. This is the
 // invariant that keeps the Accumulator + OutEvent emissions byte-identical
 // to the legacy prov.Invoke path.
 func TestInvokeViaRuntime_TranslatesEventsToStreamEvents(t *testing.T) {
-	rt := &fakeRuntime{events: []runtime.Event{
-		{Kind: runtime.EventThinking, Text: "pondering"},
-		{Kind: runtime.EventToolUse, ToolName: "grep"},
-		{Kind: runtime.EventToolInput, ToolName: "grep", Text: `{"p":"x"}`},
-		{Kind: runtime.EventToolOutput, ToolID: "call_1", Text: "match\n"},
-		{Kind: runtime.EventToken, Token: "done"},
-		{Kind: runtime.EventDone, Usage: &ai.Usage{InputTokens: 12, OutputTokens: 5, CostUSD: 0.001, Model: "m", NumTurns: 2, SessionID: "sid-42"}},
+	rt := &fakeRuntime{events: []Event{
+		{Kind: EventThinking, Text: "pondering"},
+		{Kind: EventToolUse, ToolName: "grep"},
+		{Kind: EventToolInput, ToolName: "grep", Text: `{"p":"x"}`},
+		{Kind: EventToolOutput, ToolID: "call_1", Text: "match\n"},
+		{Kind: EventToken, Token: "done"},
+		{Kind: EventDone, Usage: &ai.Usage{InputTokens: 12, OutputTokens: 5, CostUSD: 0.001, Model: "m", NumTurns: 2, SessionID: "sid-42"}},
 	}}
 	e := &ChatEngine{Runtime: rt}
 
 	var captured []provider.StreamEvent
 	progressFn := func(ev provider.StreamEvent) { captured = append(captured, ev) }
 
-	result, err := e.invokeViaRuntime(context.Background(), runtime.ConverseRequest{Prompt: "hi"}, progressFn)
+	result, err := e.invokeViaRuntime(context.Background(), ConverseRequest{Prompt: "hi"}, progressFn)
 	if err != nil {
 		t.Fatalf("invokeViaRuntime: %v", err)
 	}
@@ -94,18 +93,18 @@ func TestInvokeViaRuntime_TranslatesEventsToStreamEvents(t *testing.T) {
 }
 
 // TestInvokeViaRuntime_SurfacesStreamError pins the error contract: a
-// mid-stream runtime.EventError is returned verbatim to the caller so
+// mid-stream EventError is returned verbatim to the caller so
 // processStandard's retry + fallback path can react as if prov.Invoke had
 // failed.
 func TestInvokeViaRuntime_SurfacesStreamError(t *testing.T) {
 	boom := errors.New("provider blew up")
-	rt := &fakeRuntime{events: []runtime.Event{
-		{Kind: runtime.EventToken, Token: "partial"},
-		{Kind: runtime.EventError, Err: boom},
+	rt := &fakeRuntime{events: []Event{
+		{Kind: EventToken, Token: "partial"},
+		{Kind: EventError, Err: boom},
 	}}
 	e := &ChatEngine{Runtime: rt}
 
-	_, err := e.invokeViaRuntime(context.Background(), runtime.ConverseRequest{Prompt: "hi"}, nil)
+	_, err := e.invokeViaRuntime(context.Background(), ConverseRequest{Prompt: "hi"}, nil)
 	if !errors.Is(err, boom) {
 		t.Fatalf("error: got %v want wrapping %v", err, boom)
 	}
@@ -116,7 +115,7 @@ func TestInvokeViaRuntime_SurfacesStreamError(t *testing.T) {
 // message rather than NPE.
 func TestInvokeViaRuntime_NilRuntimeErrors(t *testing.T) {
 	e := &ChatEngine{}
-	_, err := e.invokeViaRuntime(context.Background(), runtime.ConverseRequest{Prompt: "hi"}, nil)
+	_, err := e.invokeViaRuntime(context.Background(), ConverseRequest{Prompt: "hi"}, nil)
 	if err == nil {
 		t.Fatal("expected error when Runtime is nil")
 	}

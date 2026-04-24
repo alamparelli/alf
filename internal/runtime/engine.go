@@ -1,4 +1,4 @@
-package comms
+package runtime
 
 import (
 	"log"
@@ -9,7 +9,6 @@ import (
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
-	"github.com/alamparelli/alf/internal/runtime"
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/platform/session"
 	"github.com/alamparelli/alf/internal/skills"
@@ -42,7 +41,7 @@ type ChatEngine struct {
 	// during early daemon boot or in tests; call sites must fall back to
 	// the legacy provider path when nil. Populated by SetRuntime once
 	// cmd/alf-daemon constructs the shared Runtime.
-	Runtime runtime.Runtime
+	Runtime Runtime
 
 	// Injected functions
 	ClassifyFull   ClassifyFullFunc
@@ -119,7 +118,7 @@ type EngineConfig struct {
 	// Runtime is optional at config time; the daemon wires it post-hoc via
 	// ChatEngine.SetRuntime once the shared Runtime is built. Included here
 	// so test rigs can inject a fake directly via NewEngine.
-	Runtime runtime.Runtime
+	Runtime Runtime
 
 	ClassifyFull   ClassifyFullFunc
 	ResolveModel   func(short string) string
@@ -131,10 +130,10 @@ type EngineConfig struct {
 	SummarizationKeepLast  int
 }
 
-// SetRuntime installs the unified runtime.Runtime after construction.
+// SetRuntime installs the unified Runtime after construction.
 // Called by cmd/alf-daemon once the shared Runtime is built (it depends on
 // the capability registry which is populated after NewEngine). #340 R4j0.
-func (e *ChatEngine) SetRuntime(rt runtime.Runtime) {
+func (e *ChatEngine) SetRuntime(rt Runtime) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.Runtime = rt

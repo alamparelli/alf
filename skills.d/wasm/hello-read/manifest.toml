@@ -1,0 +1,9 @@
+alf_envelope_version = 1
+id      = "hello-read"
+kind    = "wasm-tool"
+version = "0.1.0"
+name    = "Hello Read"
+description = "Reference 0.8.0 WASM tool. Reads a file from the hello-read bundle's data directory and returns the content."
+
+[[fs.reads]]
+path = "data/"

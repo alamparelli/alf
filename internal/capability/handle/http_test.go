@@ -97,7 +97,7 @@ func TestHTTPHandle_DoInScope(t *testing.T) {
 
 	u := mustParse(t, srv.URL)
 	h := NewHTTPHandle("cap", HTTPScope{Hosts: []string{u.Hostname()}}, srv.Client())
-	inst := NewInstance(context.Background(), "cap", nil, h, nil)
+	inst := NewInstance(context.Background(), "cap", Grants{HTTP: h})
 	defer inst.Close()
 
 	req, _ := http.NewRequest("GET", srv.URL, nil)
@@ -115,7 +115,7 @@ func TestHTTPHandle_DoInScope(t *testing.T) {
 
 func TestHTTPHandle_OutOfScope(t *testing.T) {
 	h := NewHTTPHandle("cap", HTTPScope{Hosts: []string{"allowed.example.com"}}, nil)
-	inst := NewInstance(context.Background(), "cap", nil, h, nil)
+	inst := NewInstance(context.Background(), "cap", Grants{HTTP: h})
 	defer inst.Close()
 
 	req, _ := http.NewRequest("GET", "https://denied.example.com/x", nil)
@@ -130,7 +130,7 @@ func TestHTTPHandle_MethodOutOfScope(t *testing.T) {
 		Hosts:   []string{"api.example.com"},
 		Methods: []string{"GET"},
 	}, nil)
-	inst := NewInstance(context.Background(), "cap", nil, h, nil)
+	inst := NewInstance(context.Background(), "cap", Grants{HTTP: h})
 	defer inst.Close()
 
 	req, _ := http.NewRequest("POST", "https://api.example.com/x", strings.NewReader(""))
@@ -148,7 +148,7 @@ func TestHTTPHandle_Revocation(t *testing.T) {
 
 	u := mustParse(t, srv.URL)
 	h := NewHTTPHandle("cap", HTTPScope{Hosts: []string{u.Hostname()}}, srv.Client())
-	inst := NewInstance(context.Background(), "cap", nil, h, nil)
+	inst := NewInstance(context.Background(), "cap", Grants{HTTP: h})
 
 	start := time.Now()
 	inst.Close()
@@ -174,7 +174,7 @@ func TestHTTPHandle_LifecycleCancelsInFlight(t *testing.T) {
 
 	u := mustParse(t, srv.URL)
 	h := NewHTTPHandle("cap", HTTPScope{Hosts: []string{u.Hostname()}}, srv.Client())
-	inst := NewInstance(context.Background(), "cap", nil, h, nil)
+	inst := NewInstance(context.Background(), "cap", Grants{HTTP: h})
 
 	var doErr atomic.Value
 	done := make(chan struct{})

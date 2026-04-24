@@ -67,7 +67,7 @@ func TestExecScope_PathTraversalBlocked(t *testing.T) {
 func TestExecHandle_RunAllowed(t *testing.T) {
 	echo := execBin(t, "echo")
 	h := NewExecHandle("cap", ExecScope{Binaries: []string{echo}})
-	inst := NewInstance(context.Background(), "cap", nil, nil, h)
+	inst := NewInstance(context.Background(), "cap", Grants{Exec: h})
 	defer inst.Close()
 
 	res, err := inst.Exec.Run(context.Background(), echo, []string{"hello"}, nil)
@@ -84,7 +84,7 @@ func TestExecHandle_RunAllowed(t *testing.T) {
 
 func TestExecHandle_RunOutOfScope(t *testing.T) {
 	h := NewExecHandle("cap", ExecScope{Binaries: []string{"/bin/echo"}})
-	inst := NewInstance(context.Background(), "cap", nil, nil, h)
+	inst := NewInstance(context.Background(), "cap", Grants{Exec: h})
 	defer inst.Close()
 
 	_, err := inst.Exec.Run(context.Background(), "/bin/ls", nil, nil)
@@ -95,7 +95,7 @@ func TestExecHandle_RunOutOfScope(t *testing.T) {
 
 func TestExecHandle_RunRelativePathDenied(t *testing.T) {
 	h := NewExecHandle("cap", ExecScope{Binaries: []string{"/bin/echo"}})
-	inst := NewInstance(context.Background(), "cap", nil, nil, h)
+	inst := NewInstance(context.Background(), "cap", Grants{Exec: h})
 	defer inst.Close()
 
 	_, err := inst.Exec.Run(context.Background(), "echo", nil, nil)
@@ -108,7 +108,7 @@ func TestExecHandle_NonZeroExitReported(t *testing.T) {
 	// /usr/bin/false exits 1 on POSIX.
 	f := execBin(t, "false")
 	h := NewExecHandle("cap", ExecScope{Binaries: []string{f}})
-	inst := NewInstance(context.Background(), "cap", nil, nil, h)
+	inst := NewInstance(context.Background(), "cap", Grants{Exec: h})
 	defer inst.Close()
 
 	res, err := inst.Exec.Run(context.Background(), f, nil, nil)
@@ -123,7 +123,7 @@ func TestExecHandle_NonZeroExitReported(t *testing.T) {
 func TestExecHandle_Revocation(t *testing.T) {
 	echo := execBin(t, "echo")
 	h := NewExecHandle("cap", ExecScope{Binaries: []string{echo}})
-	inst := NewInstance(context.Background(), "cap", nil, nil, h)
+	inst := NewInstance(context.Background(), "cap", Grants{Exec: h})
 
 	start := time.Now()
 	inst.Close()
@@ -140,7 +140,7 @@ func TestExecHandle_Revocation(t *testing.T) {
 func TestExecHandle_LifecycleCancelsInFlight(t *testing.T) {
 	sleep := execBin(t, "sleep")
 	h := NewExecHandle("cap", ExecScope{Binaries: []string{sleep}})
-	inst := NewInstance(context.Background(), "cap", nil, nil, h)
+	inst := NewInstance(context.Background(), "cap", Grants{Exec: h})
 
 	var runErr atomic.Value
 	done := make(chan struct{})
@@ -181,7 +181,7 @@ func TestExecHandle_StdinPassthrough(t *testing.T) {
 	// /bin/cat mirrors stdin to stdout — use it to verify stdin passes.
 	cat := execBin(t, "cat")
 	h := NewExecHandle("cap", ExecScope{Binaries: []string{cat}})
-	inst := NewInstance(context.Background(), "cap", nil, nil, h)
+	inst := NewInstance(context.Background(), "cap", Grants{Exec: h})
 	defer inst.Close()
 
 	res, err := inst.Exec.Run(context.Background(), cat, nil, []byte("piped-input"))

@@ -13,6 +13,18 @@ import (
 	"github.com/alamparelli/alf/internal/capability"
 )
 
+// Grants is the set of handles Runtime.Instantiate forged from a verified
+// manifest. A nil field means the manifest did not declare that resource —
+// the capability literally has no way to reach it. This struct mirrors the
+// §3.1 per-resource handle table and grows as new Tier 3.1 handle types
+// are added; existing call sites are insulated from new slots.
+type Grants struct {
+	FS      *FSHandle
+	HTTP    *HTTPHandle
+	Exec    *ExecHandle
+	Secrets *SecretsHandle
+}
+
 // Instance aggregates every handle a capability received. A nil field means
 // the manifest did not declare that resource and the capability has no way
 // to reach it.
@@ -21,33 +33,38 @@ type Instance struct {
 	FS           *FSHandle
 	HTTP         *HTTPHandle
 	Exec         *ExecHandle
+	Secrets      *SecretsHandle
 	lifecycleCtx context.Context
 	cancel       context.CancelFunc
 	closeOnce    sync.Once
 }
 
-// NewInstance creates an Instance parented by ctx. Handles passed in are
+// NewInstance creates an Instance parented by ctx. Handles in g are
 // re-parented to the Instance lifecycle so Close() cancels every in-flight
-// operation across all handles. A nil slot means the manifest did not
-// declare that resource.
-func NewInstance(ctx context.Context, owner capability.ID, fs *FSHandle, httpH *HTTPHandle, execH *ExecHandle) *Instance {
+// operation across all handles. A nil Grants field means the manifest did
+// not declare that resource.
+func NewInstance(ctx context.Context, owner capability.ID, g Grants) *Instance {
 	lc, cancel := context.WithCancel(ctx)
 	inst := &Instance{
 		Owner:        owner,
 		lifecycleCtx: lc,
 		cancel:       cancel,
 	}
-	if fs != nil {
-		fs.lifecycleCtx = lc
-		inst.FS = fs
+	if g.FS != nil {
+		g.FS.lifecycleCtx = lc
+		inst.FS = g.FS
 	}
-	if httpH != nil {
-		httpH.attachLifecycle(lc)
-		inst.HTTP = httpH
+	if g.HTTP != nil {
+		g.HTTP.attachLifecycle(lc)
+		inst.HTTP = g.HTTP
 	}
-	if execH != nil {
-		execH.attachLifecycle(lc)
-		inst.Exec = execH
+	if g.Exec != nil {
+		g.Exec.attachLifecycle(lc)
+		inst.Exec = g.Exec
+	}
+	if g.Secrets != nil {
+		g.Secrets.attachLifecycle(lc)
+		inst.Secrets = g.Secrets
 	}
 	return inst
 }
@@ -70,6 +87,9 @@ func (i *Instance) Close() {
 		}
 		if i.Exec != nil {
 			i.Exec.revoked.Store(true)
+		}
+		if i.Secrets != nil {
+			i.Secrets.revoked.Store(true)
 		}
 	})
 }

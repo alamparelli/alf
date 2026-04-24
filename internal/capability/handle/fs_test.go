@@ -18,8 +18,9 @@ func TestFSHandle_ReadInScope(t *testing.T) {
 	if err := os.WriteFile(target, []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	inst := NewInstance(context.Background(), capability.ID("cap"),
-		NewFSHandle("cap", dir, FSScope{Reads: []string{"hello.txt"}}), nil, nil)
+	inst := NewInstance(context.Background(), capability.ID("cap"), Grants{
+		FS: NewFSHandle("cap", dir, FSScope{Reads: []string{"hello.txt"}}),
+	})
 	defer inst.Close()
 
 	data, err := inst.FS.Read(context.Background(), target)
@@ -38,8 +39,9 @@ func TestFSHandle_OutOfScope(t *testing.T) {
 	_ = os.WriteFile(allowed, []byte("a"), 0o644)
 	_ = os.WriteFile(other, []byte("b"), 0o644)
 
-	inst := NewInstance(context.Background(), "cap",
-		NewFSHandle("cap", dir, FSScope{Reads: []string{"allowed.txt"}}), nil, nil)
+	inst := NewInstance(context.Background(), "cap", Grants{
+		FS: NewFSHandle("cap", dir, FSScope{Reads: []string{"allowed.txt"}}),
+	})
 	defer inst.Close()
 
 	if _, err := inst.FS.Read(context.Background(), other); !errors.Is(err, ErrOutOfScope) {
@@ -50,8 +52,9 @@ func TestFSHandle_OutOfScope(t *testing.T) {
 func TestFSHandle_WriteInScope(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "out.txt")
-	inst := NewInstance(context.Background(), "cap",
-		NewFSHandle("cap", dir, FSScope{Writes: []string{"out.txt"}}), nil, nil)
+	inst := NewInstance(context.Background(), "cap", Grants{
+		FS: NewFSHandle("cap", dir, FSScope{Writes: []string{"out.txt"}}),
+	})
 	defer inst.Close()
 
 	if err := inst.FS.Write(context.Background(), target, []byte("x")); err != nil {
@@ -67,8 +70,9 @@ func TestFSHandle_Revocation(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "x.txt")
 	_ = os.WriteFile(target, []byte("y"), 0o644)
-	inst := NewInstance(context.Background(), "cap",
-		NewFSHandle("cap", dir, FSScope{Reads: []string{"x.txt"}}), nil, nil)
+	inst := NewInstance(context.Background(), "cap", Grants{
+		FS: NewFSHandle("cap", dir, FSScope{Reads: []string{"x.txt"}}),
+	})
 
 	start := time.Now()
 	inst.Close()
@@ -94,8 +98,9 @@ func TestFSHandle_DirectoryScope(t *testing.T) {
 	f1 := filepath.Join(sub, "a.txt")
 	_ = os.WriteFile(f1, []byte("1"), 0o644)
 
-	inst := NewInstance(context.Background(), "cap",
-		NewFSHandle("cap", dir, FSScope{Reads: []string{"data/"}}), nil, nil)
+	inst := NewInstance(context.Background(), "cap", Grants{
+		FS: NewFSHandle("cap", dir, FSScope{Reads: []string{"data/"}}),
+	})
 	defer inst.Close()
 
 	if _, err := inst.FS.Read(context.Background(), f1); err != nil {

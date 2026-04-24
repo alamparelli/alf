@@ -823,7 +823,7 @@ Use this when adding code that touches the security boundary:
 | `#398` handle hygiene invariants | L3.1 impl | non-serializable, WASM import cross-check, no-unsafe archtest |
 | `#401` research spike: lightweight IFC | future (0.9.0+) | evaluate Flume-style labeling for memory+events |
 | `#86` AppArmor + seccomp + CAP_SYS_ADMIN | L1 outer | kernel ring |
-| `#386` WASM runtime integration | L1 inner + L3.1 | wazero as wall; host imports = Tier 3.1 handles. **Spike validated** on branch `release-prototype/080` — now integration work, not discovery. See `docs/WASM.md`. |
+| `#386` WASM runtime integration | L1 inner + L3.1 | wazero as wall; host imports = Tier 3.1 handles. **Shipped** on `release/0.8.0` across 12 commits: `internal/runtime/wasm/` carries the full stack — wazero `Engine` pinned at v1.11.0, `CheckImports` (handle hygiene #3), `host_fs` ABI (alf_fs_read/write, packed i64, `api.Memory.Read/Write` only), `Runtime.Instantiate` pipeline (envelope.Verify → forge → compile → cross-check → host link → `_initialize`), `Adapter` behind `capability.Capability`, in-daemon Go→WASM builder, `wasm_build_tool` native, `Loader` auto-signing unsigned bundles with daemon key (§7.3 Tier 2). `skills.d/wasm/hello-read/` reference tool with E2E round-trip through the full stack. 3 archtests pinning wazero-import scope + `host_fs` memory-access rules. 65 tests in `internal/runtime/wasm/` + 7 E2E. Follow-up: wire `Loader.LoadDir` into `cmd/alf-daemon/main.go` under `ALF_EXPERIMENTAL=1` boot gate. |
 | `#404` 0.8.0 preparation meta-ticket | meta | sequencing (ship 0.7.9 first), demolition inventory, safety rules during dev window |
 | `#406` 0.8.0-demo: raze legacy sandbox layer | meta | pre-ocap demolition — `ALF_EXPERIMENTAL=1` boot gate + `X-ALF-Experimental` header; razed `sandbox/exec/linux.go` (chroot+setpriv+bwrap) and `tooling/native_firewall.go` (global firewall LLM view); narrowed `PolicyFrom(ctx)` → `IdentityFrom(ctx)` (authority no longer propagates via ctx). Scouted ambient-injection inventory = empty after #377. |
 | `#407` POSIX file-permission audit | L1 outer | deferred follow-up from #406; chmod/umask/socket-perm categorisation, sibling to #86 |
@@ -850,7 +850,7 @@ Phase 1 — foundation
 Phase 2 — parallel tracks (unblocked by prototype validation)
   Track A  #387 trust spec ✅ ── #397 canonicalization spec ✅ ── #388 runtime verify ✅ done (6 commits)
   Track B  #391 OCAP FORGE (Tier 3.1)          ✅ done (8 commits, stubbed trust.Verify)
-  Track C  #386 WASM wiring                    — integrate prototype into daemon boot
+  Track C  #386 WASM wiring                    ✅ done (12 commits — clean rebuild on release/0.8.0)
   Track D  #384 marketplace bundle signing     — no longer gated on spike outcome
 
 Phase 3 — Layer 3 completion (depends on Phase 2)
@@ -891,7 +891,7 @@ Final gate — tag 0.8.0
 | `#397` | one canonical form; one pinned parser; algo ID in envelope; scheme-substitution test rejected |
 | `#388` | **Shipped** on `release/0.8.0`. Single call site enforced (archtest `TestOneVerifyCallSite`); unsigned/untrusted rejected (`ErrSigFileMalformed` / `ErrSignerNotTrusted`); TOCTOU-safe — VerifyInput is in-memory bytes, no disk re-reads between verify and use; prototype's stubbed Verify replaced by `envelope.Verify` behind `runtime.Instantiator.InstantiateVerified`. Follow-up polish: §7.10.3 envelope-record JSON (stop-gap: bundle hash in trusted comment). |
 | `#391` | **Shipped.** Archtest green (`TestMintRuntimeTokenIsRuntimeOnly`, `TestNoPluginStdlibImport`, TCB hygiene); `Instance.Close` cancels in-flight in <100ms (per-handle revocation tests); `forgeGrants` produces nil handles for non-declared resources (unit-verified). AST-level "no ambient stores in capability pkgs" detector deferred to #398. |
-| `#386` (integration) | `hello-read` + `notes` loaded at daemon boot from `skills.d/wasm/`; LLM tool-loop sees them; `wasm_build_tool` registered as native tool; `make test-wasm-prototype` stays green |
+| `#386` (integration) | **Shipped.** `internal/runtime/wasm/Runtime.Instantiate` threads envelope.Verify → forge → compile → CheckImports → BuildHostModule → `_initialize` reactor (single archtest-enforced call site for each invariant). `skills.d/wasm/hello-read/` is a real reactor-mode guest round-tripped through the full stack in E2E. Loader auto-signs LLM-authored bundles with the §7.3 Tier 2 daemon key. `wasm_build_tool` is the native authoring path (no external build.sh). 3 archtests: wazero confined to `internal/runtime/wasm`, `host_fs.go` uses only `api.Memory.Read/Write`, no unsafe/linkname in the host subtree. **Pending follow-up**: wire `Loader.LoadDir` into `cmd/alf-daemon/main.go` under `ALF_EXPERIMENTAL=1`. |
 | `#398` | handles non-serializable; WASM import cross-check catches lying manifest; no unsafe in capability pkgs |
 | `#384` | unsigned bundle refused; MitM HTTP rejected; same verify path as #388 (no marketplace-special code) |
 | `#389` | unsigned skills refused; tools outside `declares` invisible to LLM tool-loop |

@@ -161,13 +161,15 @@ For the prototype, buffers are never freed — guests are short-lived enough tha
 All WASM capability builds happen inside ALF via the native tool `wasm_build_tool` (`internal/tooling/native_wasm_build.go`). This is the only supported path per `ARCHITECTURE-SECURITY.md` §4.1. There is no `build.sh` external to the daemon.
 
 Flow:
-1. LLM (or CLI) calls `wasm_build_tool` with `{id, kind, manifest_toml, sources}`
-2. Tool materializes sources in a tempdir, runs the Go toolchain with the env from §4.1
-3. Tool cross-checks the produced `.wasm` against the manifest (§7.1)
-4. Tool installs the bundle under `<DataDir>/skills.d/wasm/<id>/`
-5. Tool returns a JSON status report
+1. LLM (or CLI) calls `wasm_build_tool` with `{manifest_toml, sources}`. The manifest is authoritative — `id` and `kind` are read from it, not taken as independent inputs.
+2. Tool runs `envelope.Validate` on `manifest_toml` — rejects deferred blocks (http/exec/secrets/events/tools/memory) per MANIFEST-SCHEMA §3.4 and enforces required fields. Kind must be `wasm-tool` or `wasm-app`.
+3. Tool runs `internal/runtime/wasm/builder.Build` — materialises sources in an isolated tempdir, runs the Go toolchain with the env from §4.1, returns the `.wasm` bytes. Tempdir removed on every return path. Context cancellation kills the subprocess.
+4. Tool installs `manifest.toml` + `<id>.wasm` under `<DataDir>/skills.d/wasm/<id>/` (0o600 files, 0o700 dir). The bundle ships **unsigned** at this layer.
+5. Tool returns a JSON status report: `{id, kind, bundle_dir, wasm_sha256, wasm_bytes, unsigned: true, signing_note}`.
 
-Signing (by the local daemon key for LLM-built; by the user-endorsed key for widening) is deferred to #387 / #388.
+**Import cross-check** is NOT run at build time. Running it here would require `internal/tooling` to import `internal/runtime/wasm`, which forms a cycle (`runtime` imports `tooling`). The invariant lives at instantiate time — the same `CheckImports` that gates `Runtime.Instantiate` (§7.1 step 3). The single-source-of-truth architecture holds: the loader is the one authoritative line of defence, and a build-time pre-flight would be developer convenience, not a security boundary.
+
+**Signing** happens at boot-time discovery (§7.1-bis): the `Loader.LoadDir` sees an unsigned bundle, signs the canonicalised manifest + bundle hash with the §7.3 Tier 2 daemon key, persists `manifest.sig` alongside the bundle, and proceeds to the normal signed-load path. Subsequent boots reuse the persisted signature. Third-party bundles (marketplace, step 12 / #384) ship pre-signed and bypass auto-signing.
 
 ---
 
@@ -230,33 +232,60 @@ The prototype uses a **minimal hand-written TOML parser** in `internal/runtime/w
 ### 7.1 Instantiate flow
 
 ```go
-func (r *Runtime) Instantiate(ctx, bundle) (*Module, error) {
-    // 1. Layer 2 — trust verification (stubbed in prototype, #388 fills in)
-    if err := r.trust.Verify(bundle.Signed); err != nil { return nil, err }
+// internal/runtime/wasm/instantiate.go — the single production
+// load path from on-disk bytes to a running guest.
+func (r *Runtime) Instantiate(ctx, in envelope.VerifyInput, wasmBytes, baseDir) (*Module, error) {
+    // 1. envelope.Verify via runtime.Instantiator.InstantiateVerified:
+    //    signature + trust store + schema + canonicalisation + bundle
+    //    hash cross-check. Produces *VerifiedInstantiation (Instance +
+    //    typed Manifest).
+    vi, err := r.inst.InstantiateVerified(ctx, in, baseDir)
+    if err != nil { return nil, err }
 
-    // 2. Handle hygiene invariant #3 — WASM imports ⊆ manifest declarations
-    if err := crossCheckImports(ctx, r.engine, bundle.WasmBytes, bundle.Manifest); err != nil {
-        return nil, err
+    // 2. Engine.Compile — wazero parses the guest bytes.
+    cm, err := r.engine.Compile(ctx, wasmBytes)
+    if err != nil { vi.Instance.Close(); return nil, err }
+
+    // 3. Handle hygiene invariant #3 — CheckImports enforces that
+    //    guest imports ⊆ manifest declarations.
+    if err := CheckImports(cm, vi.Manifest); err != nil {
+        _ = cm.Close(ctx); vi.Instance.Close(); return nil, err
     }
 
-    // 3. Tier 3.1 — forge handles from manifest declarations only
-    var fs *handle.FSHandle
-    if len(bundle.Manifest.FSReads) > 0 || len(bundle.Manifest.FSWrites) > 0 {
-        fs = handle.NewFSHandle(..., bundle.BaseDir, ...)
-    }
-    inst := handle.NewInstance(ctx, bundle.Manifest.ID, fs)
+    // 4. Link host functions — only those backed by a live handle.
+    //    BuildHostModule exports alf_fs_read iff scope.Reads non-empty,
+    //    alf_fs_write iff scope.Writes non-empty.
+    hostMod, err := BuildHostModule(ctx, r.engine.Runtime(), vi.Instance.FS)
+    if err != nil { ... cleanup ... return nil, err }
 
-    // 4. Link host functions — only those backed by a live handle
-    hostMod, _ := buildHostModule(ctx, r, inst)
+    // 5. Instantiate guest (reactor mode — _initialize, not _start).
+    modCfg := wazero.NewModuleConfig().
+        WithName(string(vi.Manifest.ID)).
+        WithStartFunctions("_initialize")
+    guest, err := r.engine.Runtime().InstantiateModule(ctx, cm, modCfg)
+    if err != nil { ... cleanup ... return nil, err }
 
-    // 5. Instantiate guest (reactor mode — _initialize, not _start)
-    guest, _ := r.engine.InstantiateModule(ctx, compiledModule, modCfg)
-
-    return &Module{Manifest, Instance: inst, guest, hostMod, wasiMod}, nil
+    return &Module{Instance: vi.Instance, Manifest: vi.Manifest, Guest: guest, ...}, nil
 }
 ```
 
-The cross-check (step 2) prevents a manifest from lying: if the `.wasm` imports `alf_fs_write` but the manifest declares only `fs.reads`, instantiate fails before any guest code runs.
+- **The cross-check (step 3) prevents a manifest from lying**: if the `.wasm` imports `alf_fs_write` but the manifest declares only `fs.reads`, instantiate fails before any guest code runs (`ErrLyingManifest`).
+- **envelope.Verify is the SOLE call site of the trust pipeline** — archtest `TestOneVerifyCallSite` enforces that `runtime.Instantiator.InstantiateVerified` is the one consumer. Every load path converges here.
+- **The Runtime manages WASI**: `wasi_snapshot_preview1.Instantiate` is called once per `wasm.Runtime` at `NewRuntime`. Guests can freely link WASI imports; no host-FS pre-opens are configured, so WASI cannot reach the host filesystem ambiently.
+
+### 7.1-bis Boot-time loader
+
+`internal/runtime/wasm/loader.go` walks `<DataDir>/skills.d/wasm/<id>/` and registers each bundle it can verify:
+
+```
+<root>/<id>/manifest.toml   (required)
+<root>/<id>/<id>.wasm       (required)
+<root>/<id>/manifest.sig    (optional — auto-signed if absent)
+```
+
+Auto-sign path: LLM-authored bundles from `wasm_build_tool` (§4.5) ship unsigned. The loader signs with the §7.3 Tier 2 daemon key on first discovery, persists the signature, and reuses it on subsequent boots. Marketplace bundles (#384) ship pre-signed and bypass auto-signing.
+
+Error aggregation: a per-bundle failure is logged and returned in the `errs` slice but never aborts the scan — one bad bundle cannot block others. Successful loads are registered in `capability.Registry` via `wasm.Adapter` so the LLM tool-loop sees WASM capabilities alongside native Go capabilities with no shim.
 
 ### 7.2 Invocation
 
@@ -313,9 +342,26 @@ The old `Instance` is orphaned; callers holding it see `ErrRevoked` on next call
 
 ## 9. Timeline & validation gates
 
-### 9.1 Prototype validated
+### 9.1 Prototype validated + production rebuild
 
-Branch `release-prototype/080` proves the architectural spine: forge, handles, cross-check, host ABI, revocation, in-daemon build, E2E tool + app. 15 tests green (`make test-wasm-prototype`). See comment on #386 for the detailed report.
+Branch `release-prototype/080` proved the architectural spine: forge, handles, cross-check, host ABI, revocation, in-daemon build, E2E tool + app (15 tests).
+
+The production implementation on `release/0.8.0` is a clean rebuild — no direct copy of the prototype — that composes the pieces shipped in #388 (envelope verify) and #391 (ocap forge). It ships as 12 atomic commits under #386:
+
+1. `InstantiateVerified` returns `VerifiedInstantiation` (handle.Instance + envelope.Manifest)
+2. wazero v1.11.0 + `wasm.Engine` skeleton
+3. `CheckImports` (handle hygiene invariant #3)
+4. `host_fs` ABI (`alf_fs_read/write`, packed i64, `api.Memory.Read/Write` only)
+5. `Runtime.Instantiate` pipeline
+6. `wasm.Adapter` (behind `capability.Capability`)
+7. `runtime/wasm/builder.Build` (Go→WASM via toolchain)
+8. `wasm_build_tool` native tool
+9. boot-time `Loader` + daemon-key auto-sign
+10. `skills.d/wasm/hello-read/` reference tool + E2E round-trip
+11. 3 archtests pinning wazero-import scope + host_fs memory rules
+12. docs refresh (this commit)
+
+**Test inventory**: 65 tests in `internal/runtime/wasm/` + 7 E2E + 3 archtests.
 
 ### 9.2 Phases
 
@@ -358,13 +404,14 @@ Branch `release-prototype/080` proves the architectural spine: forge, handles, c
 
 ## 10. Document lifecycle
 
-This doc is a snapshot of the prototype state on `release-prototype/080`. It will drift as 0.8.0 tickets land. Mandatory refresh points:
+This doc is a snapshot of the implementation state on `release/0.8.0`. It will drift as the remaining 0.8.0 tickets land. Mandatory refresh points:
 
-- **After #388 lands** — remove "stubbed `trust.Verify`" language from §7.1; document the real verify envelope.
-- **After #391 lands** — reconcile handle type list (add `http.Handle`, `exec.Handle`, `secrets.Handle` when their tier ships; for 0.8.0 only `fs` is in scope).
-- **After #398 lands** — update §3.4 safety matrix with the final archtest ruleset.
-- **After #386 wiring lands** — update §4.5 with the real boot-time loader path and the registered-native-tool surface; replace "future work: add `alf_free`" if apps grew that need it.
-- **At v0.8.0 tag** — §9 rewritten from roadmap to "what actually shipped"; §8 ("what's not included") moves items realized into the rest of the doc, keeps only what's truly deferred to 0.9.0+.
+- **After #388 lands** ✅ — stubbed `trust.Verify` language removed; §7.1 documents the real envelope pipeline.
+- **After #391 lands** ✅ — handle type list reconciled; for 0.8.0 only `fs` is in scope (other handles shipped at the API level but the WASM host ABI wires only `fs` for now).
+- **After #398 lands** — update §3.4 safety matrix with the final archtest ruleset (step 11 of #386 already pins the `host_fs.go` memory-access rules; #398 extends to the full capability-package set).
+- **After #386 wiring lands** ✅ — §4.5 rewritten against the real `wasm_build_tool` + loader flow; §7.1 carries the real `Runtime.Instantiate` pipeline.
+- **After daemon boot wiring lands** (follow-up to this #386) — §7.1-bis needs the exact `ALF_EXPERIMENTAL=1` gate name and the boot-log format.
+- **At v0.8.0 tag** — §9 rewritten from roadmap to "what actually shipped"; §8 ("what's not included") moves items realised into the rest of the doc, keeps only what's truly deferred to 0.9.0+.
 
 Doc owner for these refreshes: the person closing the corresponding ticket. If you close one of the above without refreshing this doc, you're shipping a lie to future contributors.
 

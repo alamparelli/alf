@@ -55,16 +55,17 @@ func MintRuntimeToken() RuntimeToken {
 // ocap model. Callers must present the RuntimeToken minted at daemon init.
 // Any other caller receives ErrInvalidRuntimeToken and no handle.
 //
-// NewInstance remains exported for the moment to keep the existing prototype
-// wiring compilable; it will be demoted to unexported once Runtime.Instantiate
-// consumes the forge (later step of #391). Until then, the forge sits
-// alongside as the preferred path for new Runtime integration.
-func ForgeInstance(tok RuntimeToken, ctx context.Context, owner capability.ID, fs *FSHandle) (*Instance, error) {
+// Handles passed through (fs, httpH) may be nil — a nil slot means the
+// manifest did not declare that resource. NewInstance remains exported
+// for the moment to keep the existing prototype wiring compilable; it
+// will be demoted to unexported once Runtime.Instantiate consumes the
+// forge (later step of #391).
+func ForgeInstance(tok RuntimeToken, ctx context.Context, owner capability.ID, fs *FSHandle, httpH *HTTPHandle) (*Instance, error) {
 	if !mintedOK.Load() {
 		return nil, ErrInvalidRuntimeToken
 	}
 	if subtle.ConstantTimeCompare(tok.key[:], mintedToken.key[:]) != 1 {
 		return nil, ErrInvalidRuntimeToken
 	}
-	return NewInstance(ctx, owner, fs), nil
+	return NewInstance(ctx, owner, fs, httpH), nil
 }

@@ -19,6 +19,7 @@ import (
 type Instance struct {
 	Owner        capability.ID
 	FS           *FSHandle
+	HTTP         *HTTPHandle
 	lifecycleCtx context.Context
 	cancel       context.CancelFunc
 	closeOnce    sync.Once
@@ -27,7 +28,7 @@ type Instance struct {
 // NewInstance creates an Instance parented by ctx. Handles passed in are
 // re-parented to the Instance lifecycle so Close() cancels every in-flight
 // operation across all handles.
-func NewInstance(ctx context.Context, owner capability.ID, fs *FSHandle) *Instance {
+func NewInstance(ctx context.Context, owner capability.ID, fs *FSHandle, httpH *HTTPHandle) *Instance {
 	lc, cancel := context.WithCancel(ctx)
 	inst := &Instance{
 		Owner:        owner,
@@ -37,6 +38,10 @@ func NewInstance(ctx context.Context, owner capability.ID, fs *FSHandle) *Instan
 	if fs != nil {
 		fs.lifecycleCtx = lc
 		inst.FS = fs
+	}
+	if httpH != nil {
+		httpH.attachLifecycle(lc)
+		inst.HTTP = httpH
 	}
 	return inst
 }
@@ -53,6 +58,9 @@ func (i *Instance) Close() {
 		i.cancel()
 		if i.FS != nil {
 			i.FS.revoked.Store(true)
+		}
+		if i.HTTP != nil {
+			i.HTTP.revoked.Store(true)
 		}
 	})
 }

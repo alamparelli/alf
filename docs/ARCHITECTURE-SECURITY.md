@@ -478,6 +478,8 @@ Use this when adding code that touches the security boundary:
 | `#86` AppArmor + seccomp + CAP_SYS_ADMIN | L1 outer | kernel ring |
 | `#386` WASM runtime integration | L1 inner + L3.1 | wazero as wall; host imports = Tier 3.1 handles. **Spike validated** on branch `release-prototype/080` — now integration work, not discovery. See `docs/WASM.md`. |
 | `#404` 0.8.0 preparation meta-ticket | meta | sequencing (ship 0.7.9 first), demolition inventory, safety rules during dev window |
+| `#406` 0.8.0-demo: raze legacy sandbox layer | meta | pre-ocap demolition — `ALF_EXPERIMENTAL=1` boot gate + `X-ALF-Experimental` header; razed `sandbox/exec/linux.go` (chroot+setpriv+bwrap) and `tooling/native_firewall.go` (global firewall LLM view); narrowed `PolicyFrom(ctx)` → `IdentityFrom(ctx)` (authority no longer propagates via ctx). Scouted ambient-injection inventory = empty after #377. |
+| `#407` POSIX file-permission audit | L1 outer | deferred follow-up from #406; chmod/umask/socket-perm categorisation, sibling to #86 |
 
 Old tickets superseded and closed:
 - `#390` (events topic allowlist + memory per-capability scoping) → split into Events private-by-default + Memory agent-mediated
@@ -489,12 +491,14 @@ The DAG below reflects the post-prototype reality. Before `release-prototype/080
 
 ```
 Phase 0 — prerequisite (see #404)
-  ship 0.7.9 ── freeze release/0.7.9 ── #385 merged
+  ship 0.7.9 ── freeze release/0.7.9 ── #385 merged              ✅ done
+  (0.7.10 stabilisation shipped alongside)
 
-Phase 1 — foundation (sequential)
-  #377 comms → runtime ─┐
-                        ├── #383 bypass elim + raze sandbox/exec/linux.go
-  #382 facet wire-in ───┘
+Phase 1 — foundation
+  #377 comms → runtime                                          ✅ done
+  #406 raze legacy sandbox + narrow ctx authority + gate        ✅ done
+  #382 facet wire-in  (blocked on #391 — post-ocap)
+  #383 bypass elim    (blocked on #391 — post-ocap)
 
 Phase 2 — parallel tracks (unblocked by prototype validation)
   Track A  #387 trust spec ── #388 runtime verify ── #397 canonicalization

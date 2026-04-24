@@ -4,6 +4,8 @@ A personal AI assistant that lives in your Telegram chats. Built in Go. Runs on 
 
 ALF connects an LLM of your choice to your messaging, wraps it with semantic long-term memory, configurable response tiers, voice transcription, and a web dashboard — all in a single Docker container you control.
 
+> **Note — 0.8.0 development window.** The `release/0.8.0` branch is mid-migration toward the object-capability model described in [`docs/ARCHITECTURE-SECURITY.md`](docs/ARCHITECTURE-SECURITY.md) §3.1. The legacy process sandbox (chroot+setpriv+bwrap on Linux) has been **razed** (ticket [#406](https://github.com/alamparelli/alf/issues/406)); the ocap forge that replaces it lands in [#391](https://github.com/alamparelli/alf/issues/391) and [#386](https://github.com/alamparelli/alf/issues/386). Daemon builds from this branch **refuse to start** without `ALF_EXPERIMENTAL=1` set, log a multi-line banner at boot, and tag every Control Center response with `X-ALF-Experimental: no-isolation`. Do not run development-branch builds on shared or production hosts. Stable releases continue to track the tags in `release/0.7.x`.
+
 ## Why ALF
 
 Most AI assistant frameworks are Node.js monoliths with hundreds of dependencies. ALF is different:

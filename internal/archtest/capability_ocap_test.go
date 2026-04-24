@@ -145,6 +145,73 @@ func TestHandlePackageNoUnsafeOrLinkname(t *testing.T) {
 	}
 }
 
+// TestOneVerifyCallSite — #388 deliverable 2. The envelope.Verify
+// function is the single load-time signature-check entry point. Every
+// load path (startup discovery, marketplace install, alf install,
+// skill load, provider load) must converge here; no "internal use
+// only" bypass, no branch that skips verification.
+//
+// The regex hunts for top-level pipeline call syntax across the whole
+// codebase. Allowed callers:
+//   - internal/capability/envelope/ — own implementation + tests
+//   - internal/runtime/instantiator_verified.go — the ONE runtime
+//     consumer (and its _test.go sibling)
+//
+// A second runtime caller would be a bypass: two consumers means two
+// opportunities for one to forget a step of the pipeline. Archtest
+// catches that before it merges.
+func TestOneVerifyCallSite(t *testing.T) {
+	root := repoRoot()
+	// Match calls to envelope's top-level pipeline entry — NOT
+	// VerifySignature or VerifyGlobalComment, which are lower-level
+	// primitives the pipeline uses internally.
+	pattern := regexp.MustCompile(`\benvelope\.Verify\s*\(`)
+
+	var violations []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if skipOcapDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		// Envelope package's own code + tests.
+		if strings.HasPrefix(rel, filepath.Join("internal", "capability", "envelope")) {
+			return nil
+		}
+		// The single runtime consumer + its test.
+		if rel == filepath.Join("internal", "runtime", "instantiator_verified.go") ||
+			rel == filepath.Join("internal", "runtime", "instantiator_verified_test.go") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if pattern.Match(b) {
+			violations = append(violations, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+
+	for _, v := range violations {
+		t.Errorf("envelope.Verify called outside the sanctioned call sites: %s — see #388 deliverable 2. Every load path must converge on Instantiator.InstantiateVerified.", v)
+	}
+}
+
 // TestHandleTypesRejectJSONMarshal exercises §4.2 invariant 1 (handles
 // are non-serializable) at the behaviour level. Every exported handle
 // type's MarshalJSON must return a non-nil error — encoding/json will

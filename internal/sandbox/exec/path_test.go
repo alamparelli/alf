@@ -330,13 +330,7 @@ func TestSandboxSafeEnv_AppDataDirPropagated(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDnsSnippet_NetworkTrue(t *testing.T) {
-	got := dnsSnippet(true)
-	if !strings.Contains(got, "resolv.conf") {
-		t.Errorf("network=true should copy resolv.conf, got: %s", got)
-	}
-	if strings.HasPrefix(got, "#") {
-		t.Errorf("network=true should not be a comment, got: %s", got)
-	}
+	t.Skip("0.8.0-demo: dnsSnippet razed in #406 alongside the bwrap script; re-assess under #391 if Tier 3.1 http.Handle needs DNS configuration")
 }
 
 // ---------------------------------------------------------------------------
@@ -419,11 +413,5 @@ func TestServerSafeEnv_AppDataDirCombinesWithData(t *testing.T) {
 }
 
 func TestDnsSnippet_NetworkFalse(t *testing.T) {
-	got := dnsSnippet(false)
-	if strings.Contains(got, "resolv.conf") {
-		t.Errorf("network=false should not reference resolv.conf, got: %s", got)
-	}
-	if !strings.HasPrefix(got, "#") {
-		t.Errorf("network=false should be a comment, got: %s", got)
-	}
+	t.Skip("0.8.0-demo: dnsSnippet razed in #406 alongside the bwrap script; re-assess under #391 if Tier 3.1 http.Handle needs DNS configuration")
 }

@@ -23,6 +23,7 @@ type Grants struct {
 	HTTP    *HTTPHandle
 	Exec    *ExecHandle
 	Secrets *SecretsHandle
+	Tool    *ToolHandle
 }
 
 // Instance aggregates every handle a capability received. A nil field means
@@ -34,6 +35,7 @@ type Instance struct {
 	HTTP         *HTTPHandle
 	Exec         *ExecHandle
 	Secrets      *SecretsHandle
+	Tool         *ToolHandle
 	lifecycleCtx context.Context
 	cancel       context.CancelFunc
 	closeOnce    sync.Once
@@ -66,6 +68,10 @@ func NewInstance(ctx context.Context, owner capability.ID, g Grants) *Instance {
 		g.Secrets.attachLifecycle(lc)
 		inst.Secrets = g.Secrets
 	}
+	if g.Tool != nil {
+		g.Tool.attachLifecycle(lc)
+		inst.Tool = g.Tool
+	}
 	return inst
 }
 
@@ -90,6 +96,9 @@ func (i *Instance) Close() {
 		}
 		if i.Secrets != nil {
 			i.Secrets.revoked.Store(true)
+		}
+		if i.Tool != nil {
+			i.Tool.revoked.Store(true)
 		}
 	})
 }

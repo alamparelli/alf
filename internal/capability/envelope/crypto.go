@@ -97,14 +97,17 @@ func Sign(priv PrivateKey, data []byte) ([]byte, error) {
 	return out, nil
 }
 
-// Verify decodes sig as a minisign signature blob, checks that its
-// key ID matches pub, that the algorithm is the supported prehashed
-// variant, and that the Ed25519 signature validates against
+// VerifySignature decodes sig as a minisign signature blob, checks
+// that its key ID matches pub, that the algorithm is the supported
+// prehashed variant, and that the Ed25519 signature validates against
 // BLAKE2b-512(data).
 //
 // Errors returned are drawn from the typed set below so callers can
 // map to the §7.10.7 test vector outcomes via errors.Is.
-func Verify(pub PublicKey, data, sig []byte) error {
+//
+// The high-level pipeline entry point is envelope.Verify (verify.go);
+// this function is the raw cryptographic primitive it delegates to.
+func VerifySignature(pub PublicKey, data, sig []byte) error {
 	if len(pub.Key) != ed25519.PublicKeySize {
 		return fmt.Errorf("envelope: public key wrong size: got %d, want %d", len(pub.Key), ed25519.PublicKeySize)
 	}

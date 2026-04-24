@@ -71,7 +71,7 @@ func TestSignVerify_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Verify(pub, data, sig); err != nil {
+	if err := VerifySignature(pub, data, sig); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }
@@ -80,7 +80,7 @@ func TestVerify_TamperedPayloadRejected(t *testing.T) {
 	pub, priv := mustGenKey(t)
 	data := []byte("original")
 	sig, _ := Sign(priv, data)
-	if err := Verify(pub, []byte("tampered"), sig); !errors.Is(err, ErrSignatureInvalid) {
+	if err := VerifySignature(pub, []byte("tampered"), sig); !errors.Is(err, ErrSignatureInvalid) {
 		t.Fatalf("want ErrSignatureInvalid, got %v", err)
 	}
 }
@@ -90,14 +90,14 @@ func TestVerify_WrongKeyRejected(t *testing.T) {
 	otherPub, _ := mustGenKey(t)
 	data := []byte("x")
 	sig, _ := Sign(priv, data)
-	if err := Verify(otherPub, data, sig); !errors.Is(err, ErrKeyIDMismatch) {
+	if err := VerifySignature(otherPub, data, sig); !errors.Is(err, ErrKeyIDMismatch) {
 		t.Fatalf("want ErrKeyIDMismatch, got %v", err)
 	}
 }
 
 func TestVerify_MalformedSigRejected(t *testing.T) {
 	pub, _ := mustGenKey(t)
-	if err := Verify(pub, []byte("x"), []byte("too-short")); !errors.Is(err, ErrSignatureMalformed) {
+	if err := VerifySignature(pub, []byte("x"), []byte("too-short")); !errors.Is(err, ErrSignatureMalformed) {
 		t.Fatalf("want ErrSignatureMalformed, got %v", err)
 	}
 }
@@ -113,7 +113,7 @@ func TestVerify_AlgorithmSubstitutionRejected(t *testing.T) {
 	// Overwrite algo to something unsupported.
 	sig[0] = 'R'
 	sig[1] = 'S'
-	if err := Verify(pub, data, sig); !errors.Is(err, ErrAlgorithmUnsupported) {
+	if err := VerifySignature(pub, data, sig); !errors.Is(err, ErrAlgorithmUnsupported) {
 		t.Fatalf("want ErrAlgorithmUnsupported, got %v", err)
 	}
 }
@@ -184,7 +184,7 @@ func TestEncodeAndParseSignatureFile(t *testing.T) {
 	}
 
 	// Main sig still validates.
-	if err := Verify(pub, data, parsedSig); err != nil {
+	if err := VerifySignature(pub, data, parsedSig); err != nil {
 		t.Errorf("Verify main sig: %v", err)
 	}
 	// Global sig validates the trusted comment.

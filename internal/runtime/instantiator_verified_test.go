@@ -76,17 +76,44 @@ func TestInstantiateVerified_HappyPath(t *testing.T) {
 	inst := NewInstantiator()
 
 	in, _ := signBundle(t, verifiedManifest, []byte("wasm-bytes"))
-	h, err := inst.InstantiateVerified(context.Background(), in, "/tmp/verified-cap")
+	vi, err := inst.InstantiateVerified(context.Background(), in, "/tmp/verified-cap")
 	if err != nil {
 		t.Fatalf("InstantiateVerified: %v", err)
 	}
-	defer h.Close()
+	defer vi.Instance.Close()
 
-	if h.Owner != "verified-cap" {
-		t.Errorf("Owner=%q, want verified-cap", h.Owner)
+	if vi.Instance.Owner != "verified-cap" {
+		t.Errorf("Owner=%q, want verified-cap", vi.Instance.Owner)
 	}
-	if h.FS == nil {
+	if vi.Instance.FS == nil {
 		t.Error("FS handle nil despite declared fs.reads")
+	}
+	if vi.Manifest == nil {
+		t.Fatal("Manifest nil on success")
+	}
+	if vi.Manifest.ID != "verified-cap" {
+		t.Errorf("Manifest.ID=%q, want verified-cap", vi.Manifest.ID)
+	}
+	if vi.Manifest.Kind != envelope.KindWASMTool {
+		t.Errorf("Manifest.Kind=%q, want wasm-tool", vi.Manifest.Kind)
+	}
+	if len(vi.Manifest.FS.Reads) != 1 || vi.Manifest.FS.Reads[0].Path != "data/" {
+		t.Errorf("Manifest.FS.Reads=%v, want [{data/}]", vi.Manifest.FS.Reads)
+	}
+}
+
+func TestInstantiateVerified_TamperedBundleRejected(t *testing.T) {
+	handle.ResetMintForTesting()
+	inst := NewInstantiator()
+
+	// Sign with the real bundle bytes, then swap to different bytes
+	// post-signing. The hash in the trusted comment will mismatch.
+	in, _ := signBundle(t, verifiedManifest, []byte("wasm-bytes"))
+	in.Bundle = []byte("tampered-wasm-bytes")
+
+	_, err := inst.InstantiateVerified(context.Background(), in, "/tmp/x")
+	if !errors.Is(err, envelope.ErrBundleHashMismatch) {
+		t.Fatalf("want ErrBundleHashMismatch, got %v", err)
 	}
 }
 
@@ -149,13 +176,13 @@ func TestInstantiateVerified_EmitsHandleRevocable(t *testing.T) {
 	inst := NewInstantiator()
 
 	in, _ := signBundle(t, verifiedManifest, nil)
-	h, err := inst.InstantiateVerified(context.Background(), in, "/tmp/x")
+	vi, err := inst.InstantiateVerified(context.Background(), in, "/tmp/x")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	h.Close()
-	if _, err := h.FS.Read(context.Background(), "data/foo"); !errors.Is(err, handle.ErrRevoked) {
+	vi.Instance.Close()
+	if _, err := vi.Instance.FS.Read(context.Background(), "data/foo"); !errors.Is(err, handle.ErrRevoked) {
 		t.Errorf("FS.Read after Close: want ErrRevoked, got %v", err)
 	}
 }

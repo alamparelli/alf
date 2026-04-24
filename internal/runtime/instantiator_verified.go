@@ -8,6 +8,24 @@ import (
 	"github.com/alamparelli/alf/internal/capability/handle"
 )
 
+// VerifiedInstantiation is the success payload of InstantiateVerified.
+// It carries the forged handle Instance plus the typed envelope
+// Manifest that produced it. Downstream loaders (WASM engine, skill
+// registrar, marketplace installer) read declared scope, kind, and
+// version from Manifest without re-parsing the TOML — envelope.Verify
+// has already validated and canonicalised those bytes once, and that
+// single pass is the source of truth per §7.10.
+//
+// The bundle bytes themselves stay with the caller: they passed them
+// in via VerifyInput.Bundle and the same slice was hashed against the
+// trusted comment's bundle_sha256. Re-reading from disk between verify
+// and use would break TOCTOU safety; handing the bytes back here would
+// just waste memory.
+type VerifiedInstantiation struct {
+	Instance *handle.Instance
+	Manifest *envelope.Manifest
+}
+
 // InstantiateVerified is the production load path: it takes raw in-memory
 // bytes (§7.10 TOCTOU-safe — no disk re-reads between verify and use),
 // calls envelope.Verify under the runtime token, and forges the handle
@@ -23,7 +41,7 @@ import (
 // scope paths are resolved against it so manifests can use relative
 // paths. If the bundle is embedded (go:embed), pass an empty string and
 // the forge produces nil FSHandles (read-only contexts).
-func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.VerifyInput, baseDir string) (*handle.Instance, error) {
+func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.VerifyInput, baseDir string) (*VerifiedInstantiation, error) {
 	vm, err := envelope.Verify(in)
 	if err != nil {
 		return nil, err
@@ -47,7 +65,14 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 		BaseDir:  baseDir,
 	}
 	grants := i.forgeGrants(signed)
-	return handle.ForgeInstance(i.token, ctx, capManifest.ID, grants)
+	inst, err := handle.ForgeInstance(i.token, ctx, capManifest.ID, grants)
+	if err != nil {
+		return nil, err
+	}
+	return &VerifiedInstantiation{
+		Instance: inst,
+		Manifest: vm.Manifest,
+	}, nil
 }
 
 // mapEnvelopeKind bridges the envelope.Manifest kind enum (string-typed

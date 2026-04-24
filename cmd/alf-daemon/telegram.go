@@ -15,7 +15,7 @@ import (
 	"time"
 
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
-	"github.com/alamparelli/alf/internal/comms"
+	"github.com/alamparelli/alf/internal/runtime/comms"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/memory"

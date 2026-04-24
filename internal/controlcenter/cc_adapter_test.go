@@ -3,7 +3,7 @@ package controlcenter
 import (
 	"testing"
 
-	"github.com/alamparelli/alf/internal/comms"
+	"github.com/alamparelli/alf/internal/runtime/comms"
 )
 
 func TestCCAdapter_Channel(t *testing.T) {

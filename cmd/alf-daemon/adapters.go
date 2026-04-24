@@ -10,7 +10,7 @@ import (
 	"time"
 
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
-	"github.com/alamparelli/alf/internal/comms"
+	"github.com/alamparelli/alf/internal/runtime/comms"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/memory"

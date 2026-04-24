@@ -13,7 +13,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/ai"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
-	"github.com/alamparelli/alf/internal/comms"
+	"github.com/alamparelli/alf/internal/runtime/comms"
 	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/platform/media"
 	"github.com/alamparelli/alf/internal/memory"

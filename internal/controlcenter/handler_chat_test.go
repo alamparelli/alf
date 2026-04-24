@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alamparelli/alf/internal/comms"
+	"github.com/alamparelli/alf/internal/runtime/comms"
 	"github.com/alamparelli/alf/internal/memory"
 )
 

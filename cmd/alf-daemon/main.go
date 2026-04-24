@@ -19,7 +19,7 @@ import (
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/runtime/classifier"
-	"github.com/alamparelli/alf/internal/comms"
+	"github.com/alamparelli/alf/internal/runtime/comms"
 	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/envsecrets"

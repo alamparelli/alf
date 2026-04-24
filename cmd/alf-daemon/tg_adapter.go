@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alamparelli/alf/internal/comms"
+	"github.com/alamparelli/alf/internal/runtime/comms"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 )
 

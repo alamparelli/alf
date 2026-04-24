@@ -60,12 +60,12 @@ func MintRuntimeToken() RuntimeToken {
 // for the moment to keep the existing prototype wiring compilable; it
 // will be demoted to unexported once Runtime.Instantiate consumes the
 // forge (later step of #391).
-func ForgeInstance(tok RuntimeToken, ctx context.Context, owner capability.ID, fs *FSHandle, httpH *HTTPHandle) (*Instance, error) {
+func ForgeInstance(tok RuntimeToken, ctx context.Context, owner capability.ID, fs *FSHandle, httpH *HTTPHandle, execH *ExecHandle) (*Instance, error) {
 	if !mintedOK.Load() {
 		return nil, ErrInvalidRuntimeToken
 	}
 	if subtle.ConstantTimeCompare(tok.key[:], mintedToken.key[:]) != 1 {
 		return nil, ErrInvalidRuntimeToken
 	}
-	return NewInstance(ctx, owner, fs, httpH), nil
+	return NewInstance(ctx, owner, fs, httpH, execH), nil
 }

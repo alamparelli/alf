@@ -20,6 +20,7 @@ type Instance struct {
 	Owner        capability.ID
 	FS           *FSHandle
 	HTTP         *HTTPHandle
+	Exec         *ExecHandle
 	lifecycleCtx context.Context
 	cancel       context.CancelFunc
 	closeOnce    sync.Once
@@ -27,8 +28,9 @@ type Instance struct {
 
 // NewInstance creates an Instance parented by ctx. Handles passed in are
 // re-parented to the Instance lifecycle so Close() cancels every in-flight
-// operation across all handles.
-func NewInstance(ctx context.Context, owner capability.ID, fs *FSHandle, httpH *HTTPHandle) *Instance {
+// operation across all handles. A nil slot means the manifest did not
+// declare that resource.
+func NewInstance(ctx context.Context, owner capability.ID, fs *FSHandle, httpH *HTTPHandle, execH *ExecHandle) *Instance {
 	lc, cancel := context.WithCancel(ctx)
 	inst := &Instance{
 		Owner:        owner,
@@ -42,6 +44,10 @@ func NewInstance(ctx context.Context, owner capability.ID, fs *FSHandle, httpH *
 	if httpH != nil {
 		httpH.attachLifecycle(lc)
 		inst.HTTP = httpH
+	}
+	if execH != nil {
+		execH.attachLifecycle(lc)
+		inst.Exec = execH
 	}
 	return inst
 }
@@ -61,6 +67,9 @@ func (i *Instance) Close() {
 		}
 		if i.HTTP != nil {
 			i.HTTP.revoked.Store(true)
+		}
+		if i.Exec != nil {
+			i.Exec.revoked.Store(true)
 		}
 	})
 }

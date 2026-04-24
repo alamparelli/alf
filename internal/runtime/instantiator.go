@@ -1,0 +1,153 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+
+	"github.com/alamparelli/alf/internal/capability"
+	"github.com/alamparelli/alf/internal/capability/handle"
+)
+
+// SignedManifest is the input to Instantiator.Instantiate. Today it wraps
+// capability.Manifest only; the Signature / canonical envelope fields
+// spec'd in #397 slot in here once the parser lands. Keeping the type
+// now means call sites don't churn later.
+type SignedManifest struct {
+	Manifest capability.Manifest
+
+	// BaseDir is the on-disk directory the capability was loaded from.
+	// FSHandle scope paths are resolved against this root so manifests
+	// can use relative paths. Empty when not applicable (e.g., native
+	// Go-kind tools that have no bundle dir).
+	BaseDir string
+}
+
+// TrustVerifier checks that a SignedManifest's signature matches the
+// trust store. The real implementation lands in #388; for now a no-op
+// verifier ships so Instantiator can be exercised end-to-end without
+// blocking on the trust chain.
+type TrustVerifier interface {
+	Verify(signed SignedManifest) error
+}
+
+// nopVerifier accepts every manifest. Wire point for the real verifier
+// (#388); production Instantiator will replace this with a TrustStore-
+// backed implementation once the trust spec is impl'd.
+type nopVerifier struct{}
+
+func (nopVerifier) Verify(_ SignedManifest) error { return nil }
+
+// ErrManifestID is returned by Instantiate when the manifest has an
+// empty ID — a forge result without an owner identity cannot be scoped
+// to anything and is treated as a programming error.
+var ErrManifestID = errors.New("runtime: SignedManifest has empty Manifest.ID")
+
+// Instantiator is the sole forge of capability.handle.Instance under
+// the Tier 3.1 ocap model (ARCHITECTURE-SECURITY.md §3.1, §4.3). It
+// holds the process-wide RuntimeToken minted once at construction and
+// is the only code path that reaches handle.ForgeInstance.
+//
+// The existing Runtime (Chat / Invoke / Converse) is untouched —
+// Instantiator coexists with it during the migration window. Once
+// capabilities start receiving Instance values (deferred to
+// #398/#399/#400), the orchestrator methods will call Instantiate
+// before dispatch instead of resolving via the Registry directly.
+type Instantiator struct {
+	token    handle.RuntimeToken
+	verifier TrustVerifier
+}
+
+// InstantiatorOption configures an Instantiator at construction. Keeps
+// NewInstantiator a one-argument-style call while leaving room for
+// DI of the verifier, a custom secrets reader, etc.
+type InstantiatorOption func(*Instantiator)
+
+// WithTrustVerifier substitutes the default no-op verifier. Used in
+// tests and by the production daemon once #388 lands.
+func WithTrustVerifier(v TrustVerifier) InstantiatorOption {
+	return func(i *Instantiator) { i.verifier = v }
+}
+
+// NewInstantiator constructs the singleton forge for a daemon process.
+// Calls handle.MintRuntimeToken exactly once; a second call panics
+// (§4.3 one-shot invariant). Tests construct many Instantiators and
+// must call handle.ResetMintForTesting between cases.
+func NewInstantiator(opts ...InstantiatorOption) *Instantiator {
+	inst := &Instantiator{
+		token:    handle.MintRuntimeToken(),
+		verifier: nopVerifier{},
+	}
+	for _, o := range opts {
+		o(inst)
+	}
+	return inst
+}
+
+// Instantiate verifies the signed manifest, forges the handle set it
+// requests, and returns an *handle.Instance whose fields carry only
+// the authority the manifest declared. Every other slot is nil — the
+// capability literally has no way to reach what it did not request.
+//
+// ctx is the parent context for the instance's lifecycle: when it (or
+// the returned Instance.Close) cancels, every handle revokes
+// structurally, aborting in-flight ops through context.AfterFunc.
+func (i *Instantiator) Instantiate(ctx context.Context, signed SignedManifest) (*handle.Instance, error) {
+	if signed.Manifest.ID == "" {
+		return nil, ErrManifestID
+	}
+	if err := i.verifier.Verify(signed); err != nil {
+		return nil, err
+	}
+	grants := i.forgeGrants(signed)
+	return handle.ForgeInstance(i.token, ctx, signed.Manifest.ID, grants)
+}
+
+// forgeGrants derives the handle set from the verified manifest. The
+// mapping here reflects today's capability.Manifest schema (FilePaths /
+// Networks / Secrets); it grows when #397 canonicalises the envelope
+// and adds Exec + Tool declarations. Unset permission fields mean the
+// corresponding handle is nil — the capability cannot reach that
+// resource.
+//
+// Scope semantics compiled here are authoritative for the lifetime of
+// the Instance. The manifest is verified BEFORE this runs, so the
+// fields we read are trusted input.
+func (i *Instantiator) forgeGrants(signed SignedManifest) handle.Grants {
+	m := signed.Manifest
+	g := handle.Grants{}
+
+	// FilePaths: today's schema does not distinguish read vs write —
+	// treat every entry as read-capable. Write mapping arrives with
+	// the #397 envelope (entries will carry a Mode field).
+	if len(m.Permissions.FilePaths) > 0 {
+		g.FS = handle.NewFSHandle(m.ID, signed.BaseDir, handle.FSScope{
+			Reads: m.Permissions.FilePaths,
+		})
+	}
+
+	// Networks: treated as hostname patterns. Exact match or wildcard
+	// subdomain pattern ("*.example.com"). CIDR parsing defer until
+	// #397 specifies the format.
+	if len(m.Permissions.Networks) > 0 {
+		g.HTTP = handle.NewHTTPHandle(m.ID, handle.HTTPScope{
+			Hosts: m.Permissions.Networks,
+		}, nil)
+	}
+
+	// Secrets: key-pattern allowlist. Reader is nil at this step —
+	// wiring to sandbox/secrets.Manager happens when Manager exposes
+	// a narrow per-capability ReaderFor(id) helper. Until then, a
+	// SecretsHandle with a nil reader returns ErrSecretNotFound on
+	// every lookup (defensive default, never succeeds silently).
+	if len(m.Permissions.Secrets) > 0 {
+		g.Secrets = handle.NewSecretsHandle(m.ID, handle.SecretsScope{
+			Names: m.Permissions.Secrets,
+		}, nil)
+	}
+
+	// Exec + Tool: no fields in today's Manifest. Both stay nil — a
+	// capability loaded now has no spawn or inter-cap invocation
+	// surface through its handle until the schema grows.
+
+	return g
+}

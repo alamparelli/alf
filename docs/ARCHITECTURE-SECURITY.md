@@ -576,9 +576,149 @@ Cascade fires via `#396`: every capability signed by A's local-daemon key refuse
 - **Marketplace key changed between releases:** the new daemon binary embeds the new pubkey; on boot, if the marketplace fingerprint in the trust store differs from the embedded one, the daemon does not silently swap. It adds the new key alongside, keeps the old under `source=embedded-at-boot` with the old `added_at`, and logs that both are present. Operator decision to remove the old one is an `alf trust remove` + ratification.
 - **NTP drift at first boot:** the clock-sanity check (§7.7) treats >1 year-before-build-time as refuse-to-boot; NTP can bring the clock forward but a skew of this magnitude outside lab environments is vanishingly rare. The daemon logs the skew direction and the build time for diagnostics.
 
----
+### 7.10 Envelope format & canonicalization
+
+This section is the written spec delivered under `#397`. Schema of the authored `manifest.toml` lives in its own document — [`docs/MANIFEST-SCHEMA.md`](MANIFEST-SCHEMA.md). This section pins how that authored file becomes the deterministic bytes covered by a signature.
+
+#### 7.10.1 Why canonicalization
+
+Two authors writing the same logical manifest in TOML will produce different byte representations (whitespace, key order, comment presence, trailing commas). A signature computed over raw bytes rejects semantically-identical manifests and is vulnerable to the **parser divergence** class of attacks that claimed SAML, JWT, and PKCS#7 as real CVEs: verifier parses one way, consumer parses another, semantically-different data gets through.
+
+The fix is well-known: **normalize to a single canonical byte form before signing**. Signer and verifier both run the canonicalizer; both see the same bytes; both agree on what was signed.
+
+#### 7.10.2 Pipeline
+
+```
+manifest.toml bytes
+       │
+       ▼
+parse with pelletier/go-toml/v2 (pinned version)
+       │
+       ▼
+Go struct tree (typed)
+       │
+       ▼
+validate against MANIFEST-SCHEMA (required fields, kind-specific rules,
+                                  no unknown fields, no deferred blocks)
+       │
+       ▼
+project to canonical JSON tree
+  - alphabetical key order at every level
+  - explicit null for absent optional fields (no implicit omission)
+  - arrays of tables → JSON arrays of objects
+  - TOML date/time → RFC 3339 strings ("YYYY-MM-DDTHH:MM:SSZ")
+  - TOML local date / local time → "YYYY-MM-DD" / "HH:MM:SS" strings
+  - TOML mixed-type arrays → REJECTED (validation step)
+       │
+       ▼
+serialize via RFC 8785 JSON Canonicalization Scheme (JCS)
+  - UTF-8, no BOM
+  - no insignificant whitespace
+  - numbers in shortest-round-trip form
+  - Unicode NFC normalized strings
+       │
+       ▼
+canonical bytes — the signature's signed data
+```
+
+Both the signer (`alf sign`) and the verifier (`internal/capability/envelope/` per `#388`) run this exact pipeline. Divergence is impossible by construction: the code path is shared.
+
+#### 7.10.3 Envelope structure
+
+The detached signature file `manifest.sig` is a minisign-compatible envelope (see §7.1) whose **payload** is an `alf-envelope` record. The record is itself canonicalized via the same pipeline before signing:
+
+```
+alf-envelope record (canonical JSON before signing):
+{
+  "alf_envelope_version": 1,
+  "algorithm": "ed25519-ph-blake2b512",
+  "bundle_hash": "sha256:e3b0c442...",
+  "manifest_canonical_hash": "sha256:a665a459...",
+  "signed_at": "2026-05-01T12:00:00Z",
+  "signer_key_fingerprint": "71778D2757253228"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `alf_envelope_version` | Bound to the envelope schema version. Daemon rejects unknown versions. |
+| `algorithm` | Pinned identifier; verifier dispatches on this value, never on a default. |
+| `bundle_hash` | SHA-256 of the bundle's primary artefact (`.wasm` for `wasm-tool` / `wasm-app`, `bundle.zip` for `marketplace-app`). Separates bundle-integrity from manifest-correctness. |
+| `manifest_canonical_hash` | SHA-256 of the canonical bytes produced by §7.10.2 applied to the authored `manifest.toml`. Stored as a hash, not the full canonical bytes, because the verifier re-computes the canonical form and compares hashes rather than transporting the entire manifest inside the envelope. |
+| `signed_at` | RFC 3339 UTC timestamp. Required for CRL `not_valid_after` revocation (§7.7). |
+| `signer_key_fingerprint` | Uppercase hex of the signing key's 8-byte minisign key ID. Verifier does the trust-store lookup on this field before cryptographic verification. |
+
+The envelope record is canonicalized (same pipeline) and signed with Ed25519 (pre-hashed via BLAKE2b-512, minisign "ED" format per §7.1). The resulting `.sig` file is minisign-compatible — `minisign -V` can verify it as the interop escape-hatch.
+
+#### 7.10.4 Algorithm pinning
+
+Only one algorithm is recognised in `alf_envelope_version = 1`:
+
+```
+algorithm = "ed25519-ph-blake2b512"
+```
+
+The verifier reads `envelope.algorithm` **before** deciding how to verify — no defaulting, no negotiation, no `alg: none`. An envelope claiming an unsupported algorithm is rejected at step 4 of the §7.4 state diagram.
+
+**Scheme-substitution test:** an envelope that claims `algorithm = "rsa-sha256"` but whose signature is produced with an Ed25519 key is rejected because the verifier dispatches to the RSA verification code, which refuses to parse the Ed25519 signature as RSA. Covered by the reference implementation's test vectors.
+
+**Algorithm migration:** adding a post-quantum or secondary scheme is a coordinated bump of `alf_envelope_version` + a new `algorithm` enum value. Old envelopes keep working while the new codepath is gated on the new version — no silent upgrade, no opportunistic downgrade.
+
+#### 7.10.5 Property guarantees
+
+The reference implementation (`internal/capability/envelope/`, landing under `#397` — implementation follow-up) is tested against these invariants:
+
+- **Idempotency.** `canonicalize(canonicalize(manifest)) == canonicalize(manifest)`. A manifest that is already canonical is a fixed point of the pipeline.
+- **Format-insensitive equivalence.** Two `manifest.toml` files with the same logical content but different whitespace / key order / comment presence produce byte-identical canonical output. Property-tested with `testing/quick`.
+- **Rejection on unknown.** A manifest with any unrecognised top-level key or sub-table is rejected at validation step 3 of the §7.10.2 pipeline. No field is silently discarded.
+- **Rejection on deferred.** A 0.8.0 manifest containing `[[http.scopes]]`, `[[exec.commands]]`, `[[secrets.scopes]]`, `[[events.*]]`, `[[tools.declares]]`, or `[memory]` is rejected. Each has a dedicated error message pointing at the ticket (`#389` / `#399` / `#400` / successor) that will land the block.
+
+#### 7.10.6 Parser pinning (archtest rule)
+
+The verify path must parse TOML with exactly one parser. The rule is archtest-enforced:
+
+```
+Forbidden imports from internal/capability/envelope/ and any package it calls:
+  github.com/BurntSushi/toml          (alternative TOML parser)
+  gopkg.in/yaml.v3                    (any YAML parser)
+  encoding/xml                        (XML parser — not in scope, guard against
+                                       future author of a manifest.xml path)
+
+Allowed:
+  github.com/pelletier/go-toml/v2     (the pinned parser)
+  encoding/json                       (for canonical JSON serialization)
+```
+
+`go.mod` pins `pelletier/go-toml/v2` at an exact version; upgrades are deliberate and reviewed (CVE tracking via the parser's GitHub security advisories).
+
+#### 7.10.7 Test vectors (delivered with reference implementation)
+
+The reference implementation ships with golden test vectors covering every branch of the verify flow (§7.4). Each vector is a triple of `(manifest.toml, envelope.json, expected_result)`:
+
+| Scenario | Expected result |
+|---|---|
+| Well-formed 0.8.0 manifest, valid signature | verified |
+| Same manifest with reshuffled keys | verified (canonical form identical) |
+| Same manifest with extra whitespace / comments | verified |
+| Unsigned (no envelope) | rejected — `errUnsigned` |
+| Wrong signature key ID for the claimed fingerprint | rejected — `errSignerMismatch` |
+| Tampered `manifest.toml` bytes | rejected — `errCanonicalMismatch` |
+| Tampered `.wasm` bytes | rejected — `errBundleHashMismatch` |
+| `alf_envelope_version = 0` (too old) | rejected — `errEnvelopeVersionUnsupported` |
+| `alf_envelope_version = 99` (too new) | rejected — `errEnvelopeVersionUnsupported` |
+| `algorithm = "rsa-sha256"` (scheme substitution) | rejected — `errAlgorithmUnsupported` |
+| `algorithm = "ed25519-ph-blake2b512"` but signature is actually RSA | rejected — `errSignatureInvalid` |
+| Key in trust store but revoked by CRL, `signed_at` before `not_valid_after` | verified |
+| Key in trust store but revoked by CRL, `signed_at` after `not_valid_after` | rejected — `errKeyRevokedAtTime` |
+| Key not in trust store | rejected — `errSignerNotTrusted` |
+| Manifest declares `[[http.scopes]]` in a 0.8.0 envelope | rejected — `errBlockDeferred` |
+| Manifest has `author` top-level field | rejected — `errUnknownField` |
+
+Vectors live under `internal/capability/envelope/testdata/` alongside the reference implementation.
 
 ---
+
+
 
 ## 8. Revocation
 
@@ -708,7 +848,7 @@ Phase 1 — foundation
   #383 bypass elim    (blocked on #391 — post-ocap)
 
 Phase 2 — parallel tracks (unblocked by prototype validation)
-  Track A  #387 trust spec ✅ done ── #388 runtime verify ── #397 canonicalization
+  Track A  #387 trust spec ✅ ── #397 canonicalization spec ✅ (impl pending) ── #388 runtime verify
   Track B  #391 OCAP FORGE (Tier 3.1)          — starts with trust.Verify stub
   Track C  #386 WASM wiring                    — integrate prototype into daemon boot
   Track D  #384 marketplace bundle signing     — no longer gated on spike outcome

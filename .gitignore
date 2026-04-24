@@ -57,6 +57,8 @@ secrets
 mobile/
 technical/*
 !technical/TEST-BASELINE.md
+!technical/poc/
+!technical/poc/**
 journal
 video-factory-output/
 prototypes/

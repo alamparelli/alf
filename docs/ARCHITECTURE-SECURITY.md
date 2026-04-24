@@ -75,33 +75,16 @@ Once wazero hosts third-party WASM inside the daemon process, **Layer 1 is not a
 
 **Protects against:** loading a tampered binary, impersonation of a legitimate publisher, "sideload = unsigned" escape hatches, silent permission widening between versions, algorithm/downgrade attacks on signatures.
 
-**Mechanism:**
-- Every loadable artifact (WASM bundle, skill bundle, marketplace app, provider) carries a **detached signature** binding a canonical representation of the manifest + binary together.
-- alf maintains a **local trust store**; the marketplace key is one entry among others.
-- Verification is **mandatory and at load time** (`#388`). No dev-mode bypass.
+**Mechanism (summary — full spec in §7):**
+- Every loadable artifact carries a **detached Ed25519 signature** over a canonical envelope (`#397`) binding manifest + binary together.
+- alf maintains a **local trust store** (§7.2); the marketplace key is one entry among others.
+- Verification is **mandatory and at load time** (`#388`). No dev-mode bypass, no unsigned execution.
 - Self-signed builds use the same verification code path as marketplace-signed ones.
 - Permission widening invalidates the signature by construction — re-signing is a deliberate act, and widening beyond the local daemon key's ceiling requires the user-endorsed key.
 
-**Trust chain (full, end-to-end):**
+**Trust is rooted in the daemon binary, not in any runtime server.** TOFU happens once, at install time (verifying the Docker image digest / brew formula / release signature). After that, every loaded artifact must chain back to a key in the trust store. Full bootstrap and key tiers in §7.3.
 
-```
-alf release signing key
-  → signs alf daemon Docker image / binary
-  → the signed binary embeds the alf-marketplace public key
-  → marketplace publishes bundles signed with that key
-  → user's trust store inherits the marketplace key from the binary
-  → OR: user generates local key via alf keygen → adds to trust store
-  → OR: user runs alf trust add <third-party-key>
-
-At runtime:
-  verify(bundle.sig, trust_store) → yes/no → never loads unless yes
-```
-
-**Not "no TOFU":** there is TOFU on the daemon binary itself (user must verify the image they install — Docker Hub digest, brew formula checksum, GitHub release signature). Inside the running daemon, there is no TOFU.
-
-**Canonicalization (`#397`):** the signature covers a canonical, version-tagged, algorithm-pinned envelope — not raw TOML bytes. Parser leniency gaps (SAML/JWT/PKCS#7 class bugs) are closed by specifying exactly one canonical form and a pinned reference parser.
-
-**What Layer 2 does NOT protect against:** a correctly-signed capability doing legitimate-looking things with authority it was granted. Identity says *who*, not *what they're allowed to do*.
+**What Layer 2 does NOT protect against:** a correctly-signed capability doing legitimate-looking things with authority it was granted. Identity says *who*, not *what they're allowed to do*. That is Layer 3 (§2.3 + §3).
 
 ### 2.3 Layer 3 — Authority
 
@@ -349,27 +332,251 @@ Exceeding the ceiling requires the **user-endorsed key** (stored in vault user-s
 
 ---
 
-## 7. Vault partitioning
+## 7. Trust & vault
 
-The vault (`internal/sandbox/secrets/`) was designed for capability-accessed secrets. Under the admin boundary, it gains a **user-scope partition**:
+This section is the written spec delivered under `#387`. It is the single reference for how alf knows whom to trust, where trust material lives, and how an operator moves it across machines. Implementation tickets: `#388` (verify), `#395` (admin CLI + vault partitioning), `#396` (revocation), `#397` (envelope canonicalization).
 
-### 7.1 Capability-scope (existing)
+### 7.1 Cryptographic scheme
 
-- Each capability has its own namespace reached via a per-capability proxy socket
-- Contents: API keys, tokens the capability uses
-- Access: via `secrets.Handle` forged at instantiation
-- Scope baked into the handle; capability cannot enumerate others' scopes
+- **Primitive:** Ed25519, from the Go standard library's `crypto/ed25519`. Zero-dependency, constant-time, widely audited.
+- **Payload handling:** pre-hashed. The payload (WASM bundle or bundle-manifest pair) is hashed with BLAKE2b-512 before the Ed25519 signature is computed. Verification streams the hash without buffering the payload, so multi-MB bundles verify in `O(sig_size)` regardless of size.
+- **Envelope format:** minisign 0.9+ compatible (algorithm `ED`, pre-hashed Ed25519 over BLAKE2b-512). Chosen so an operator with the stock `minisign` CLI — packaged by Homebrew, apt, and most distros — can verify an alf-signed bundle without alf tooling on the path. Interop proven by the POC under [`technical/poc/trust-minisign-compat/`](../technical/poc/trust-minisign-compat/).
+- **Algorithm pinning:** every signed envelope carries an explicit `envelope_version` + `algorithm` field. Verification dispatches on the declared algorithm; there is no silent default, no algorithm negotiation, no `algorithm: none`. Format details in `#397`.
+- **Algorithm migration:** adding a post-quantum or secondary scheme is a coordinated bump of `envelope_version`. Old versions are retired on a schedule, not by opportunistic downgrade.
 
-### 7.2 User-scope (new)
+### 7.2 Trust store
 
-- Single namespace, accessible only via **admin CLI commands** (`alf sign`, `alf keygen`, `alf trust add`)
-- Contents: user's signing key, trust store edits, ratification tokens
-- Access: no `secrets.Handle` can ever be forged for user-scope — archtest-enforced
-- Unlocked by passphrase at the moment of admin command execution; re-locked immediately after
+**Location:** `~/.config/alf/trust-store.toml` on the daemon's host filesystem (inside the container for Docker installs, mounted through from a user-owned volume). Platform-specific backends — macOS Keychain, Linux Secret Service — are evaluated as opt-in alternatives for 0.9.0, out of 0.8.0 scope (post-audit finding H7).
 
-**The LLM has no path to user-scope.** It cannot forge a handle (archtest blocks), it cannot call the admin CLI (admin boundary), it cannot see the contents. Ever.
+**Format:** TOML, one `[[keys]]` entry per trusted public key:
 
-Details: `#395` section on vault partitioning.
+```toml
+envelope_version = 1
+
+[[keys]]
+fingerprint = "71778D2757253228"
+pubkey      = "RWRxd40nVyUyKBAE2ZFfM3UJpnWEsNhUPwf5KRkpffwACBOXmXC4QU41"
+algorithm   = "ed25519-ph-blake2b512"
+label       = "alf-marketplace"
+source      = "embedded-at-boot"    # see §7.4 for valid sources
+added_at    = "2026-04-24T14:30:00Z"
+```
+
+- `fingerprint` — uppercase hex of the 8-byte minisign key ID (the primary key for lookup + revocation).
+- `pubkey` — base64 of the minisign pubkey blob (`algorithm || key_id || ed25519_public`, 42 bytes).
+- `algorithm` — pinned identifier for the signature scheme this key produces.
+- `label` — human-readable name surfaced in CLI output.
+- `source` ∈ `{embedded-at-boot, auto-generated, user-endorsed, trust-add, trust-migrate}` — audit trail for how the key entered the store.
+- `added_at` — RFC3339 timestamp.
+
+**File integrity checks at boot:**
+
+1. Path must be a regular file (not a symlink) — opened with `O_NOFOLLOW` semantics.
+2. Owned by the daemon's user.
+3. Mode is exactly `0600` (no group/other bits). Violations abort daemon boot with an explicit error; boot does not "repair" permissions because the wrong mode suggests tampering.
+4. `envelope_version` must match or precede the daemon's supported version. A future version aborts boot; a past version attempts in-place upgrade and re-writes with `0600`.
+
+**Access control:**
+
+- **Read-only** from the Runtime's verify path and the boot-time loader.
+- **Mutations** only via admin CLI commands (§7.6), which route through the admin boundary (§6).
+- No capability — WASM-kind or Go-kind — can ever obtain a handle that lets it write here. Archtest (`#398`) forbids `internal/runtime`, `internal/tooling`, `internal/skills`, `internal/marketplace` from importing any write path on the file.
+
+**Operator guidance:** do not sync the trust store across devices via Syncthing / iCloud / Dropbox. The file is deliberately machine-local; migration goes through the explicit export/import flow in §7.8.
+
+### 7.3 Trust chain — four-tier bootstrap
+
+Trust in alf is rooted in the daemon binary the operator installed, not in any server alf talks to at runtime. A freshly installed daemon has exactly one trusted key (tier 1); higher tiers are provisioned explicitly.
+
+#### Tier 1 — Release-signed daemon binary (root)
+
+- The alf daemon binary / Docker image is signed by the alf release key. Release publishing is in scope of the project's CI/CD, out of scope for this spec.
+- The alf-marketplace public key is **embedded** in the binary (as a compile-time constant, not a network fetch).
+- The operator's root of trust is their decision to trust the binary they installed — Docker Hub image digest, Homebrew formula checksum, GitHub release signature. That trust decision cannot be made by the daemon itself; it is a TOFU moment at install time.
+- At first boot, the embedded marketplace pubkey is copied into `trust-store.toml` with `source = "embedded-at-boot"` if it is not already present. The operation is idempotent — the fingerprint is the primary key, so re-running the boot loader does not duplicate entries.
+
+#### Tier 2 — Local daemon key (auto-generated at first boot)
+
+- If `vault user-scope` contains no `local-daemon` key at first boot, the daemon generates a fresh Ed25519 keypair using `crypto/ed25519`.
+- **Private key:** written to vault user-scope (§7.5), encrypted with the user's vault passphrase.
+- **Public key:** added to `trust-store.toml` with `label = "local-daemon"` and `source = "auto-generated"`.
+- **Purpose:** the local daemon uses this key to sign LLM-built WASM capabilities for which the user did not explicitly ratify a wider permission envelope.
+- **Ceiling — enforced at sign time, not just at load time:** a bundle signed by this key may declare only `memory: agent-mediated`, `events: own-topics`, `http: none`, `exec: none`, `secrets: none`, `fs: own-dir`. The signer rejects widening requests with a message pointing the user at `alf keygen` (tier 3). Loading a tier-2-signed bundle that declares anything beyond the ceiling fails verification — the ceiling is re-checked at load time, not only at sign time (`#388`).
+
+#### Tier 3 — User-endorsed key (`alf keygen`)
+
+- Lazy-created. The first time the user runs `alf keygen` (or the first widening-ratification flow that requires a tier-3 key) the daemon generates a second Ed25519 keypair and stores the private key in vault user-scope under a distinct identifier.
+- **Private key:** passphrase-unlocked at the moment of each admin command that needs it, re-locked immediately after. The key is never resident in daemon memory between admin invocations.
+- **Public key:** added to the trust store with `label = "user-endorsed"` and `source = "user-endorsed"`.
+- **Ceiling:** none. A tier-3 signature is an explicit act by the user — the UX makes this unambiguous by requiring the passphrase and by listing the permissions in the sign confirmation prompt.
+
+#### Tier 4 — Third-party publisher keys (`alf trust add`)
+
+- Operator explicitly adds a publisher's public key by fingerprint, URL, or pasted blob.
+- Each `alf trust add` invocation is itself subject to the admin-boundary ratification flow (`#395`), so the action is visible in the ratification history.
+- Adding a key is **not** equivalent to approving every bundle that key will ever sign — each install of a bundle signed by a trusted third-party key still goes through per-install ratification. `alf trust add` lets the install flow succeed without prompting for the key; it does not auto-approve capability scope.
+
+### 7.4 Install / load flow — state diagram
+
+Every arrow terminates in `LOAD` only if all checks pass. Every early exit fails closed.
+
+```
+  bundle arrives
+      │
+      ▼
+  parse envelope ── version unknown ──► REJECT
+      │
+      ▼
+  check algorithm ── not in pinned set ──► REJECT
+      │
+      ▼
+  lookup signer fingerprint in trust-store.toml
+      │
+      ├── not found ──► prompt: alf trust add <fp>
+      │                          (admin-boundary gate)
+      │
+      ├── revoked in CRL + signed_at > not_valid_after ──► REJECT
+      │
+      ▼
+  verify signature via pinned algorithm
+      │
+      ├── invalid ──► REJECT
+      │
+      ▼
+  canonicalize manifest; compare to envelope.manifest_canonical (#397)
+      │
+      ├── mismatch ──► REJECT
+      │
+      ▼
+  validate manifest against schema
+      │
+      ├── unknown fields / rule violations ──► REJECT
+      │
+      ▼
+  if signer is the local-daemon key (tier 2):
+    check declared permissions ≤ tier-2 ceiling
+      │
+      ├── widening requested ──► REJECT
+      │                          (message: run `alf keygen` to self-endorse)
+      ▼
+  forge Instance via Runtime.Instantiate (#391)
+      │
+      ├── WASM imports ≠ manifest declarations ──► REJECT (#398)
+      │
+      ▼
+  LOAD
+```
+
+### 7.5 Vault partitioning
+
+The vault (`internal/sandbox/secrets/`) already existed for capability-accessed secrets. Under the admin boundary, it gains a **user-scope partition**. Partitioning is the structural mechanism that keeps the LLM's reach away from signing keys.
+
+#### 7.5.1 Capability-scope (existing)
+
+- Each capability has its own namespace reached via a per-capability proxy socket.
+- Contents: API keys, tokens the capability uses.
+- Access: via `secrets.Handle` forged at instantiation.
+- Scope baked into the handle; capability cannot enumerate others' scopes.
+
+#### 7.5.2 User-scope (new)
+
+- Single namespace, accessible only via **admin CLI commands** (§7.6).
+- Contents: `local-daemon` private key, `user-endorsed` private key, ratification tokens, trust-store edit journals.
+- Access: **no `secrets.Handle` can ever be forged for user-scope** — archtest-enforced on the forge (`#391` + `#398`).
+- Unlocked by passphrase at the moment of admin command execution; re-locked immediately after.
+
+**The LLM has no path to user-scope.** It cannot forge a handle (archtest blocks the forge), it cannot call the admin CLI (admin boundary), it cannot see the contents. Ever.
+
+### 7.6 Admin CLI surface
+
+Semantics are listed here; implementation lives in `#395`. Every command requires admin-boundary ratification where noted.
+
+| Command | Purpose | Admin-boundary |
+|---|---|---|
+| `alf keygen` | Create the user-endorsed key (tier 3). Prompts for passphrase. | Yes |
+| `alf trust list` | List trust-store entries (fingerprint, label, source, added_at). | No |
+| `alf trust add <pubkey-or-url>` | Add a third-party key (tier 4). | Yes |
+| `alf trust remove <fingerprint>` | Remove a key. Triggers cascade `#396`. | Yes |
+| `alf trust revoke <fingerprint> [--reason ...]` | Revoke with reason code. Writes CRL entry. | Yes |
+| `alf sign <bundle> [--key user-endorsed]` | Sign a bundle with a private key from vault user-scope. Default signer is the local-daemon key (ceiling-enforced); `--key user-endorsed` widens. | Yes |
+| `alf install <bundle>` | Install a bundle. Runs the §7.4 flow; unknown signer prompts `alf trust add`. | Yes (for the install itself) |
+| `alf pending` | List pending ratifications from the admin-boundary queue. | No |
+| `alf migrate export <file>` | One-shot export of trust store + vault user-scope (§7.8). | Yes |
+| `alf migrate import <file>` | One-shot import, prompts for the source vault passphrase. | Yes |
+| `alf trust export <file>` | Trust-store-only export (pubkeys + metadata). | No |
+| `alf trust import <file>` | Trust-store-only import. | Yes (per-key) |
+
+### 7.7 Revocation
+
+Summary of invariants; full spec in `#396`.
+
+- **Close semantics:** `Instance.Close()` cancels `lifecycleCtx`, which propagates to every handle's in-flight operation. No "drain and exit" — operations return `ErrRevoked` or context cancellation immediately.
+- **Cascade:** revoking a provider closes its dependents atomically. Applications see `dependency-revoked` on next load.
+- **Key-based revocation:** revoking a fingerprint invalidates every bundle it signed, past and future. Enforcement is at the §7.4 state diagram's trust-store lookup.
+- **Timestamp binding:** every envelope includes a `signed_at` timestamp. CRLs carry `not_valid_after`; bundles signed after that time are rejected even if the key is still in the trust store.
+- **CRL distribution:** signed by the alf release key, distributed out-of-band (see `#396`). Cached locally with a 30-day offline grace.
+- **Clock sanity:** at boot, compare system clock to the binary's build time. If system clock is more than 1 year earlier than build time, refuse to boot (a wildly past clock is more likely compromise than NTP drift). If more than 6 hours after `time.Now()` measured by monotonic source, log a warning but continue.
+
+### 7.8 Multi-instance migration
+
+Goal: an operator moving alf from machine A to machine B keeps working. UX target: a single export command on A, a single import command on B.
+
+Three classes of trust material, handled separately at the primitive level but bundled together by `alf migrate`:
+
+| Material | Portable? | Why |
+|---|---|---|
+| Trust store (pubkeys + labels + fingerprints) | **Yes** | Operator curates it; the same set of publishers they trust on A is the set they trust on B. |
+| User-endorsed private key (tier 3) | **Yes** | Operator-owned; travels with the vault backup so the same identity can sign on B. |
+| Local-daemon private key (tier 2) | **No** | Per-machine by design. Capabilities signed with A's local-daemon key remain runnable on B (its pubkey is imported into B's trust store), but B generates its own local-daemon key to sign future LLM-built capabilities. |
+
+**Happy-path migration:**
+
+```sh
+# On machine A
+alf migrate export ~/alf-backup.alfmigrate
+  → produces a single file containing:
+      - trust-store.toml snapshot (all pubkeys)
+      - vault user-scope archive (encrypted with a passphrase chosen by the operator at export time)
+
+# On machine B — fresh install
+alf-daemon    # first boot: generates B's local-daemon key, embeds marketplace key
+alf migrate import ~/alf-backup.alfmigrate
+  → prompts for the export passphrase
+  → restores vault user-scope (user-endorsed key)
+  → merges trust store (A's local-daemon pubkey + all tier-4 pubkeys)
+```
+
+**Post-migration trust store on B:**
+
+```
+[local-daemon(B)]   generated on B's first boot   source=auto-generated
+[local-daemon(A)]   imported from A's backup      source=trust-migrate
+[alf-marketplace]   embedded at boot              source=embedded-at-boot
+[user-endorsed]     imported from A's backup      source=trust-migrate
+[third-party-*]     imported from A's backup      source=trust-migrate
+```
+
+**If machine A is compromised or lost:**
+
+```sh
+# On machine B
+alf trust revoke <fingerprint-local-daemon-A> --reason "machine compromised"
+```
+
+Cascade fires via `#396`: every capability signed by A's local-daemon key refuses to load or runs to termination via `Instance.Close()`. The user-endorsed key is unaffected — it was passphrase-encrypted in the vault backup, so a compromised A cannot have leaked the private material.
+
+**Power-user primitives** remain available: `alf trust export/import` for pubkeys only, `alf vault backup/restore` for vault only. `alf migrate` is a convenience wrapper composing the two with a single passphrase prompt.
+
+### 7.9 Edge cases
+
+- **First boot with empty trust store:** auto-generate local-daemon key + embed marketplace key; boot succeeds with `source=auto-generated` + `source=embedded-at-boot` entries. If either fails (filesystem error, random source unavailable), boot refuses and surfaces the error — an empty trust store post-boot is never acceptable.
+- **Daemon boots with `envelope_version` higher than supported:** refuse to boot with `alf-daemon too old for this trust store (store v2, daemon supports ≤ v1) — upgrade alf`. Migration forward is a daemon decision; migration backward is not supported.
+- **Daemon boots with `envelope_version` lower than current:** in-place upgrade (add new fields with safe defaults, bump version), re-write with `0600`, log the upgrade to the daemon's startup log.
+- **Unknown fields inside the same `envelope_version`:** warn but accept. Forward compatibility for minor additions.
+- **Marketplace key changed between releases:** the new daemon binary embeds the new pubkey; on boot, if the marketplace fingerprint in the trust store differs from the embedded one, the daemon does not silently swap. It adds the new key alongside, keeps the old under `source=embedded-at-boot` with the old `added_at`, and logs that both are present. Operator decision to remove the old one is an `alf trust remove` + ratification.
+- **NTP drift at first boot:** the clock-sanity check (§7.7) treats >1 year-before-build-time as refuse-to-boot; NTP can bring the clock forward but a skew of this magnitude outside lab environments is vanishingly rare. The daemon logs the skew direction and the build time for diagnostics.
+
+---
 
 ---
 
@@ -501,7 +708,7 @@ Phase 1 — foundation
   #383 bypass elim    (blocked on #391 — post-ocap)
 
 Phase 2 — parallel tracks (unblocked by prototype validation)
-  Track A  #387 trust spec ── #388 runtime verify ── #397 canonicalization
+  Track A  #387 trust spec ✅ done ── #388 runtime verify ── #397 canonicalization
   Track B  #391 OCAP FORGE (Tier 3.1)          — starts with trust.Verify stub
   Track C  #386 WASM wiring                    — integrate prototype into daemon boot
   Track D  #384 marketplace bundle signing     — no longer gated on spike outcome

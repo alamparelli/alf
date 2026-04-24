@@ -1,0 +1,6 @@
+trust-poc
+trust-minisign-compat
+alf-poc.pub
+alf-poc.sec.raw
+testdata/sample.bin
+testdata/sample.bin.minisig

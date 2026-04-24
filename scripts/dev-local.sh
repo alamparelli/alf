@@ -9,6 +9,16 @@ set -euo pipefail
 #   --fresh         Wipe runtime data (config, data, cache) for a fresh install
 #   --no-frontend   Skip Svelte frontend rebuild
 #   --down          Stop the stack and exit
+#
+# 0.8.0 dev-window notice
+# -----------------------
+# Builds from release/0.8.0 have the legacy sandbox razed (ticket #406).
+# The daemon refuses to start without ALF_EXPERIMENTAL=1, which this
+# script sets automatically in the generated docker-compose.yml. The
+# daemon will log a multi-line NO ISOLATION banner at boot and tag every
+# Control Center response with `X-ALF-Experimental: no-isolation`.
+# Do not use this script to deploy on shared or production hosts —
+# stable releases track tags in release/0.7.x.
 
 CLEAN=false
 FRESH=false
@@ -90,6 +100,11 @@ services:
       - EMBED_URL=http://embed:8090
       - ALF_MARKETPLACE_URL=https://marketplace.alfos.ai
       - TZ=${TZ:-UTC}
+      # 0.8.0 dev-window gate: the daemon refuses to start without this
+      # after ticket #406 razed the legacy sandbox. Removed once
+      # ALF_OCAP_STRICT=1 replaces it post-#391 + #386. Do not deploy this
+      # build on shared or production hosts — see docs/ARCHITECTURE-SECURITY.md §12.
+      - ALF_EXPERIMENTAL=1
     volumes:
       - ./secrets:/opt/alf/secrets-staging:ro
       - ./data:/home/alf/data

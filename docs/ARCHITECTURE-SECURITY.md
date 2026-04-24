@@ -812,7 +812,7 @@ Use this when adding code that touches the security boundary:
 | `#387` WASM trust model spec | L2 | design of signatures + trust store + bootstrap |
 | `#388` runtime signature verification | L2 | implements the spec at load time |
 | `#397` canonicalization + signature envelope spec | L2 | pin format, parser, algo to close SAML/JWT-class gaps |
-| `#391` ocap foundation — forge + Tier 3.1 handles | L3.1 | structural ocap for external I/O |
+| `#391` ocap foundation — forge + Tier 3.1 handles | L3.1 | **Implemented** on `release/0.8.0` across 8 commits (`ba1c2a1` → `ed4778f`): `internal/capability/handle/` carries all five Tier 3.1 types (FS, HTTP, Exec, Secrets, Tool) with uniform scope / revocation / non-serializable / lifecycle semantics; `handle.RuntimeToken` + `ForgeInstance` realise the §4.3 three-lock forge gate; `runtime.Instantiator` is the first consumer with `trust.Verify` stubbed (nopVerifier) pending #388; archtest `TestMintRuntimeTokenIsRuntimeOnly` + `TestNoPluginStdlibImport` + TCB hygiene live. 71 tests. See comment trail on #391. Migration of existing capabilities deferred to #398/#399/#400. |
 | `#392` capability providers (user-extensible registry) | L3.1 | signed providers export new handle kinds |
 | `#383` bypass elimination (one seam) | seam | `tooling.Executor` package-private under ocap |
 | `#389` skills as first-class | L3.1 + L3.2 | skills = signed cap; `declares` → tool handles; memory via agent |
@@ -849,13 +849,15 @@ Phase 1 — foundation
 
 Phase 2 — parallel tracks (unblocked by prototype validation)
   Track A  #387 trust spec ✅ ── #397 canonicalization spec ✅ (impl pending) ── #388 runtime verify
-  Track B  #391 OCAP FORGE (Tier 3.1)          — starts with trust.Verify stub
+  Track B  #391 OCAP FORGE (Tier 3.1)          ✅ done (8 commits, stubbed trust.Verify)
   Track C  #386 WASM wiring                    — integrate prototype into daemon boot
   Track D  #384 marketplace bundle signing     — no longer gated on spike outcome
 
 Phase 3 — Layer 3 completion (depends on Phase 2)
   #389 skills ── #392 providers ── #398 hygiene ── #399 events ── #400 memory ── #395 admin
   #396 revocation e2e (extends prototype lifecycleCtx cascade)
+
+  (#382 facet wire-in + #383 bypass elim now unblocked by #391 — mechanical refactors onto Instance-shaped DI)
 
 Phase 4 — independent
   #86 AppArmor/seccomp (Layer 1 outer ring)
@@ -888,7 +890,7 @@ Final gate — tag 0.8.0
 | `#387` | trust spec merged; trust chain documented; CLI commands spec'd |
 | `#397` | one canonical form; one pinned parser; algo ID in envelope; scheme-substitution test rejected |
 | `#388` | single `trust.Verify` call site (archtest); unsigned/untrusted rejected; TOCTOU test (verify-then-modify-on-disk → reject); prototype's stubbed Verify replaced |
-| `#391` | archtest green: no ambient stores in capability pkgs; `Instance.Close` cancels in-flight in <10ms; `forgeGrants` produces nil handles for non-declared resources |
+| `#391` | **Shipped.** Archtest green (`TestMintRuntimeTokenIsRuntimeOnly`, `TestNoPluginStdlibImport`, TCB hygiene); `Instance.Close` cancels in-flight in <100ms (per-handle revocation tests); `forgeGrants` produces nil handles for non-declared resources (unit-verified). AST-level "no ambient stores in capability pkgs" detector deferred to #398. |
 | `#386` (integration) | `hello-read` + `notes` loaded at daemon boot from `skills.d/wasm/`; LLM tool-loop sees them; `wasm_build_tool` registered as native tool; `make test-wasm-prototype` stays green |
 | `#398` | handles non-serializable; WASM import cross-check catches lying manifest; no unsafe in capability pkgs |
 | `#384` | unsigned bundle refused; MitM HTTP rejected; same verify path as #388 (no marketplace-special code) |

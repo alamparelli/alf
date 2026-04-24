@@ -19,7 +19,8 @@ func TestNativeToolMetadata(t *testing.T) {
 		{"app", AppNativeTool{}},
 		{"bash", BashNativeTool{}},
 		{"config", ConfigNativeTool{}},
-		{"firewall", FirewallNativeTool{}},
+		// firewall tool razed in #406 — global view across capabilities
+		// was incompatible with Tier 3.1 per-handle scope.
 		{"glob", GlobNativeTool{}},
 		{"grep", GrepNativeTool{}},
 		{"llm", LLMNativeTool{}},

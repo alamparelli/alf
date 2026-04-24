@@ -12,13 +12,11 @@ import (
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/runtime"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
-	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/memory"
 	"github.com/alamparelli/alf/internal/memory/curation"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/scheduler"
 	"github.com/alamparelli/alf/internal/skills"
-	"github.com/alamparelli/alf/internal/tooling"
 )
 
 // extractorAdapter bridges provider.CLIProvider to curation.ExtractorProvider,
@@ -554,52 +552,5 @@ func schedulerJobToCC(j *scheduler.Job) cc.ScheduleJob {
 	sj.LastError = j.LastError
 	sj.Running = j.IsRunning()
 	return sj
-}
-
-// firewallToolAdapter adapts firewall.Proxy to tooling.FirewallService.
-type firewallToolAdapter struct {
-	proxy *firewall.Proxy
-	store *firewall.Store
-}
-
-func (a *firewallToolAdapter) RecentEntries(limit int) []tooling.FirewallEntry {
-	if a.proxy == nil {
-		return nil
-	}
-	raw := a.proxy.Log.Entries()
-	// Return the last N entries.
-	if len(raw) > limit {
-		raw = raw[len(raw)-limit:]
-	}
-	out := make([]tooling.FirewallEntry, len(raw))
-	for i, e := range raw {
-		out[i] = tooling.FirewallEntry{
-			Time:    e.Time,
-			Method:  e.Method,
-			Host:    e.Host,
-			Path:    e.Path,
-			Blocked: e.Blocked,
-			Source:  e.Source,
-		}
-	}
-	return out
-}
-
-func (a *firewallToolAdapter) Hosts() []tooling.FirewallHostStat {
-	if a.store == nil {
-		return nil
-	}
-	raw := a.store.Hosts()
-	out := make([]tooling.FirewallHostStat, len(raw))
-	for i, h := range raw {
-		out[i] = tooling.FirewallHostStat{
-			Host:    h.Host,
-			Count:   h.Count,
-			Allowed: h.Allowed,
-			Blocked: h.Blocked,
-			Vault:   h.Vault,
-		}
-	}
-	return out
 }
 

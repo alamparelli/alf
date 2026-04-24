@@ -1117,7 +1117,10 @@ func main() {
 		tooling.ConfigNativeTool{Service: &configAdapter{store: configStore}, Avatar: avatarHandler},
 		tooling.TierNativeTool{Service: &tierAdapter{store: tierStore}},
 		tooling.LogNativeTool{Service: &logAdapter{reader: toolLogReader}},
-		tooling.FirewallNativeTool{Service: &firewallToolAdapter{proxy: fwProxy, store: fwStore}},
+		// FirewallNativeTool razed in #406 — gave the LLM a global view of
+		// firewall activity across all capabilities, incompatible with the
+		// Tier 3.1 per-handle network scope. A per-handle introspection
+		// surface, if useful, is designed under #391.
 		tooling.SearchNativeTool{Service: &searchAdapter{
 			appStore:    toolAppStore,
 			marketplace: mpManager,

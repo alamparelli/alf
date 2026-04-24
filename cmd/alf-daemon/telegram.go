@@ -15,7 +15,7 @@ import (
 	"time"
 
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
-	"github.com/alamparelli/alf/internal/runtime/comms"
+	"github.com/alamparelli/alf/internal/runtime"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/memory"
@@ -124,9 +124,9 @@ func hasMedia(msg *Message) bool {
 }
 
 // handleCommand processes known /commands. Returns true if handled.
-func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, orch *agents.Orchestrator) bool {
+func handleCommand(tg *tgclient.Client, msg *Message, engine *runtime.ChatEngine, magic *cc.MagicStore, ccExternalURL string, allowedChatIDs map[int64]bool, orch *agents.Orchestrator) bool {
 	cmd := strings.SplitN(msg.Text, " ", 2)[0]
-	channelID := comms.ChannelID(fmt.Sprintf("tg:%d", msg.Chat.ID))
+	channelID := runtime.ChannelID(fmt.Sprintf("tg:%d", msg.Chat.ID))
 	switch cmd {
 	case "/login":
 		handleLogin(tg, msg, magic, ccExternalURL, allowedChatIDs)
@@ -253,7 +253,7 @@ func handleCommand(tg *tgclient.Client, msg *Message, engine *comms.ChatEngine, 
 }
 
 // cmdToolTG handles /tool for Telegram (delegates to integrity guard).
-func cmdToolTG(engine *comms.ChatEngine, channelID comms.ChannelID, args string) string {
+func cmdToolTG(engine *runtime.ChatEngine, channelID runtime.ChannelID, args string) string {
 	if engine.ToolExecutor == nil || engine.ToolExecutor.Integrity == nil {
 		return "Tool integrity guard is not enabled."
 	}
@@ -469,7 +469,7 @@ func extractReaction(text string) (string, string) {
 }
 
 // handleReaction processes an emoji reaction on an Alf message.
-func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, contextDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider, memStore memory.Store, engine *comms.ChatEngine) {
+func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, contextDir, dataDir string, chatSessions *session.Store, tierStore cc.TierStore, alfMsgIDs *ringBuffer, eventLog *eventlog.Logger, prov *provider.CLIProvider, memStore memory.Store, engine *runtime.ChatEngine) {
 	// Log the reaction and update live feedback.
 	mood.LogReaction(dataDir, emoji, messageID)
 	mood.UpdateLiveFeedback(contextDir, dataDir)
@@ -498,7 +498,7 @@ func handleReaction(tg *tgclient.Client, chatID, messageID int64, emoji, context
 
 	// Extract preference learning via comms engine.
 	if engine != nil {
-		go engine.ExtractReactionLearning(emoji, comms.ChannelID("tg:"+fmt.Sprint(chatID)))
+		go engine.ExtractReactionLearning(emoji, runtime.ChannelID("tg:"+fmt.Sprint(chatID)))
 	}
 
 	// Negative reaction follow-up: ask what went wrong.

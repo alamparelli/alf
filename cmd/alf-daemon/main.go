@@ -19,7 +19,6 @@ import (
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/runtime/classifier"
-	"github.com/alamparelli/alf/internal/runtime/comms"
 	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/envsecrets"
@@ -757,14 +756,14 @@ func main() {
 	orch.SetTooling(toolRegistry, toolExecutor)
 
 	// Unified comms engine: shared pipeline for CC (and later TG).
-	engineClassify := func(message, lastTier string, msgCount int, recentCtx string) comms.RouteResult {
+	engineClassify := func(message, lastTier string, msgCount int, recentCtx string) runtime.RouteResult {
 		rr := classifyMessageFull(message, tierStore.Current(), lastTier, msgCount, recentCtx)
-		return comms.RouteResult{Tier: rr.Tier, Response: rr.Response, Reason: rr.Reason, React: rr.React}
+		return runtime.RouteResult{Tier: rr.Tier, Response: rr.Response, Reason: rr.Reason, React: rr.React}
 	}
-	engineBackendConfigs := func() map[string]comms.BackendConfig {
-		result := make(map[string]comms.BackendConfig, len(cfg.Backends))
+	engineBackendConfigs := func() map[string]runtime.BackendConfig {
+		result := make(map[string]runtime.BackendConfig, len(cfg.Backends))
 		for name, bc := range cfg.Backends {
-			result[name] = comms.BackendConfig{InputPrice: bc.InputPrice, OutputPrice: bc.OutputPrice}
+			result[name] = runtime.BackendConfig{InputPrice: bc.InputPrice, OutputPrice: bc.OutputPrice}
 		}
 		return result
 	}
@@ -772,11 +771,11 @@ func main() {
 	// shim (C1) keeps documents in sync with memstore, so this path now
 	// covers both freshly-extracted facts and the existing memstore corpus
 	// (via the planned one-shot migration in C3).
-	var engineRecaller comms.MemoryRecaller
+	var engineRecaller runtime.MemoryRecaller
 	if cfg.EffectiveMemoryEnabled() {
 		engineRecaller = &memoryCommsRecaller{store: memStore}
 	}
-	commEngine := comms.NewEngine(comms.EngineConfig{
+	commEngine := runtime.NewEngine(runtime.EngineConfig{
 		DataDir:        dataDir,
 		ConfigDir:      configDir,
 		ContextDir:     contextDir,
@@ -793,7 +792,7 @@ func main() {
 		ClassifyFull:   engineClassify,
 		ResolveModel:   resolveModel,
 		BackendConfigs: engineBackendConfigs,
-		RecallCfg: comms.RecallConfig{
+		RecallCfg: runtime.RecallConfig{
 			Limit:    cfg.RecallLimit,
 			Distance: cfg.RecallDistance,
 		},
@@ -825,7 +824,7 @@ func main() {
 	chatService.SetEngine(commEngine)
 	broadcastFunc = commEngine.Broadcast // wire integrity guard notifications
 	if cfg.BroadcastChannel != "" {
-		comms.BroadcastChannel = cfg.BroadcastChannel
+		runtime.BroadcastChannel = cfg.BroadcastChannel
 	}
 	log.Println("comms engine: initialized for CC channel")
 
@@ -844,7 +843,7 @@ func main() {
 			log.Printf("[notify] no cc adapter available, dropping message")
 			return
 		}
-		channelID := comms.ChannelID(source + ":0")
+		channelID := runtime.ChannelID(source + ":0")
 		if _, err := adapter.SendText(channelID, text); err != nil {
 			log.Printf("[notify] %s send failed: %v", source, err)
 		}
@@ -1705,7 +1704,7 @@ func main() {
 			// Extract reply context if this is a quoted reply.
 			isReply := u.Message.ReplyToMessage != nil
 
-			// message_in is now logged centrally by comms.Process()
+			// message_in is now logged centrally by runtime.Process()
 
 			// Handle voice messages: transcribe and treat as text.
 			if hasVoice && transcriber != nil && !transcriber.IsReady() {
@@ -1757,7 +1756,7 @@ func main() {
 
 			// Handle media messages: download and save for Claude to read.
 			var mediaCleanup func()
-			var mediaEntries []comms.MediaEntry
+			var mediaEntries []runtime.MediaEntry
 			if hasMedia && !hasVoice {
 				// Collect all files to download (supports albums via mergeMediaGroups).
 				type fileRef struct {
@@ -1904,13 +1903,13 @@ func main() {
 								label = fmt.Sprintf("PHOTO %d/%d", fi+1, len(files))
 							}
 							allParts = append(allParts, fmt.Sprintf("[%s from Telegram chat - use Read tool to view: %s]", label, tmpPath))
-							mediaEntries = append(mediaEntries, comms.MediaEntry{
+							mediaEntries = append(mediaEntries, runtime.MediaEntry{
 								Type: "photo", FileName: f.FileName, MimeType: mimeType, TempPath: tmpPath,
 							})
 						} else if media.IsTextContent(mimeType) || mimeType == "application/pdf" {
 							textContent := media.ExtractTextFromDocument(data, mimeType)
 							allParts = append(allParts, fmt.Sprintf("[FILE from Telegram chat: %s]\nContent:\n%s", f.FileName, textContent))
-							mediaEntries = append(mediaEntries, comms.MediaEntry{
+							mediaEntries = append(mediaEntries, runtime.MediaEntry{
 								Type: "document", FileName: f.FileName, MimeType: mimeType,
 								TempPath: tmpPath, TextContent: textContent,
 							})
@@ -2023,12 +2022,12 @@ func main() {
 
 			// --- Unified engine processing ---
 			tgChatID := u.Message.Chat.ID
-			tgChannelID := comms.ChannelID(fmt.Sprintf("tg:%d", tgChatID))
+			tgChannelID := runtime.ChannelID(fmt.Sprintf("tg:%d", tgChatID))
 
 			msgWithReplyContext := buildMessageContent(u.Message)
 			routerMsg := buildRouterMessage(u.Message)
 
-			msg := comms.InMessage{
+			msg := runtime.InMessage{
 				ChannelID:  tgChannelID,
 				Text:       msgWithReplyContext,
 				RawText:    userText,

@@ -13,7 +13,6 @@ import (
 
 	"github.com/alamparelli/alf/internal/ai"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
-	"github.com/alamparelli/alf/internal/runtime/comms"
 	"github.com/alamparelli/alf/internal/platform/eventlog"
 	"github.com/alamparelli/alf/internal/platform/media"
 	"github.com/alamparelli/alf/internal/memory"
@@ -97,7 +96,7 @@ type ChatService struct {
 	ToolRegistry  *tooling.Registry                // may be nil - tool schemas for API agentic loop
 	ToolExecutor    *tooling.Executor              // may be nil - tool subprocess runner
 	BackendConfigs  func() map[string]BackendConfig // may be nil - backend pricing lookup
-	Engine          *comms.ChatEngine              // may be nil - unified engine (Step 5+)
+	Engine          *runtime.ChatEngine              // may be nil - unified engine (Step 5+)
 	Runtime         runtime.Runtime                // may be nil - #340 R4f, drives stateless LLM flows via Converse
 	ccAdapter       *ccAdapter                     // bridges engine events to per-call callbacks
 
@@ -240,7 +239,7 @@ func (cs *ChatService) SetRuntime(rt runtime.Runtime) {
 }
 
 // SetEngine installs the unified comms engine and registers the CC adapter.
-func (cs *ChatService) SetEngine(engine *comms.ChatEngine) {
+func (cs *ChatService) SetEngine(engine *runtime.ChatEngine) {
 	cs.Engine = engine
 	cs.ccAdapter = newCCAdapter()
 	cs.ccAdapter.Memory = cs.Memory
@@ -289,7 +288,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 	}
 
 	sessID := convSessionID(req.ConvID)
-	channelID := comms.ChannelID("cc:" + req.ConvID)
+	channelID := runtime.ChannelID("cc:" + req.ConvID)
 	if req.ConvID == "" {
 		channelID = "cc:default"
 	}
@@ -433,7 +432,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 
 	// 3. Build InMessage for engine. If StartJob pre-persisted the user
 	// message, pass the ID so the engine skips re-insertion (#310).
-	msg := comms.InMessage{
+	msg := runtime.InMessage{
 		ChannelID:            channelID,
 		Text:                 prompt,
 		RawText:              req.Message,
@@ -457,7 +456,7 @@ func (cs *ChatService) askViaEngine(ctx context.Context, req ChatRequest, onEven
 		if entry == nil {
 			continue
 		}
-		msg.Media = append(msg.Media, comms.MediaEntry{
+		msg.Media = append(msg.Media, runtime.MediaEntry{
 			Type:        entry.MediaType,
 			FileName:    entry.FileName,
 			MimeType:    entry.MimeType,
@@ -548,7 +547,7 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 
 	// Extract preference learning via comms engine.
 	if cs.Engine != nil {
-		go cs.Engine.ExtractReactionLearning(emoji, comms.ChannelID("cc:0"))
+		go cs.Engine.ExtractReactionLearning(emoji, runtime.ChannelID("cc:0"))
 	}
 
 	// Async negative follow-up.
@@ -566,7 +565,7 @@ func (cs *ChatService) React(req ReactRequest) (*ReactResult, error) {
 func (cs *ChatService) NewSession(onboard bool) (string, string) {
 	var old string
 	if cs.Engine != nil {
-		old = cs.Engine.NewSession(comms.ChannelID("cc:"+fmt.Sprint(apiChatID)), onboard)
+		old = cs.Engine.NewSession(runtime.ChannelID("cc:"+fmt.Sprint(apiChatID)), onboard)
 	} else {
 		// Legacy fallback when engine is not wired.
 		old = cs.Sessions.Archive(apiChatID)

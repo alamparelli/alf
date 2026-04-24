@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alamparelli/alf/internal/runtime/comms"
+	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/alamparelli/alf/internal/memory"
 )
 
@@ -122,7 +122,7 @@ func TestChatHandler_DeleteFiresOnSessionEnd(t *testing.T) {
 
 	// Wire a minimal engine with OnSessionEnd hook.
 	var firedWith string
-	eng := &comms.ChatEngine{
+	eng := &runtime.ChatEngine{
 		Sessions:     svc.Sessions,
 		ContextDir:   svc.ContextDir,
 		OnSessionEnd: func(sid string) { firedWith = sid },
@@ -131,7 +131,7 @@ func TestChatHandler_DeleteFiresOnSessionEnd(t *testing.T) {
 
 	// Set the session under the key the engine will actually use
 	// (ChannelID("cc:-1").SessionKey() hashes "cc:-1", not raw apiChatID).
-	chID := comms.ChannelID("cc:" + fmt.Sprint(apiChatID))
+	chID := runtime.ChannelID("cc:" + fmt.Sprint(apiChatID))
 	svc.Sessions.Set(chID.SessionKey(), "test-session-xyz")
 
 	h := &ChatHandler{Service: svc}
@@ -152,7 +152,7 @@ func TestChatHandler_DeleteNoFireWhenNoSession(t *testing.T) {
 	svc := newTestChatService(t)
 
 	fired := false
-	eng := &comms.ChatEngine{
+	eng := &runtime.ChatEngine{
 		Sessions:     svc.Sessions,
 		ContextDir:   svc.ContextDir,
 		OnSessionEnd: func(sid string) { fired = true },

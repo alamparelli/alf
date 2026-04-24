@@ -3,7 +3,7 @@ package controlcenter
 import (
 	"testing"
 
-	"github.com/alamparelli/alf/internal/runtime/comms"
+	"github.com/alamparelli/alf/internal/runtime"
 )
 
 func TestCCAdapter_Channel(t *testing.T) {
@@ -20,11 +20,11 @@ func TestCCAdapter_OnEvent_ForwardsToCallback(t *testing.T) {
 		received = append(received, evt)
 	})
 
-	a.OnEvent("cc:default", comms.OutEvent{
+	a.OnEvent("cc:default", runtime.OutEvent{
 		Type: "thinking",
 		Data: map[string]string{"text": "hmm"},
 	})
-	a.OnEvent("cc:default", comms.OutEvent{
+	a.OnEvent("cc:default", runtime.OutEvent{
 		Type: "text_delta",
 		Data: map[string]string{"text": "hello"},
 	})
@@ -47,11 +47,11 @@ func TestCCAdapter_OnEvent_SuppressesDone(t *testing.T) {
 		received = append(received, evt)
 	})
 
-	a.OnEvent("cc:default", comms.OutEvent{
+	a.OnEvent("cc:default", runtime.OutEvent{
 		Type: "text",
 		Data: map[string]string{"text": "hello"},
 	})
-	a.OnEvent("cc:default", comms.OutEvent{
+	a.OnEvent("cc:default", runtime.OutEvent{
 		Type: "done",
 		Data: map[string]string{"model": "test"},
 	})
@@ -67,7 +67,7 @@ func TestCCAdapter_OnEvent_SuppressesDone(t *testing.T) {
 func TestCCAdapter_OnEvent_NilCallback(t *testing.T) {
 	a := newCCAdapter()
 	// Should not panic with nil callback.
-	a.OnEvent("cc:default", comms.OutEvent{
+	a.OnEvent("cc:default", runtime.OutEvent{
 		Type: "text",
 		Data: map[string]string{"text": "hello"},
 	})
@@ -81,14 +81,14 @@ func TestCCAdapter_SetCallback_Clears(t *testing.T) {
 	})
 	a.setCallback(nil)
 
-	a.OnEvent("cc:default", comms.OutEvent{Type: "text", Data: map[string]string{}})
+	a.OnEvent("cc:default", runtime.OutEvent{Type: "text", Data: map[string]string{}})
 	if called {
 		t.Error("expected callback to not be called after clearing")
 	}
 }
 
 func TestOutEventToChatEvent(t *testing.T) {
-	event := comms.OutEvent{
+	event := runtime.OutEvent{
 		Type: "routed",
 		Data: map[string]string{"tier": "fast", "model": "haiku"},
 	}

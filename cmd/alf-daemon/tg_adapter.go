@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alamparelli/alf/internal/runtime/comms"
+	"github.com/alamparelli/alf/internal/runtime"
 	tgclient "github.com/alamparelli/alf/internal/telegram"
 )
 
@@ -58,19 +58,19 @@ func sendTGNotify(tg *tgclient.Client, chatID int64, text string) error {
 	return tg.SendMessage(chatID, text)
 }
 
-// tgAdapter bridges comms.ChannelAdapter to Telegram-specific I/O.
+// tgAdapter bridges runtime.ChannelAdapter to Telegram-specific I/O.
 // Manages per-channel typing indicators during engine.Process() calls.
 type tgAdapter struct {
 	tg               *tgclient.Client
 	mu               sync.Mutex
-	indicators       map[comms.ChannelID]*typingIndicator
+	indicators       map[runtime.ChannelID]*typingIndicator
 	broadcastTargets []int64 // chat IDs to send broadcasts to (from allowedChatIDs)
 }
 
 func newTGAdapter(tg *tgclient.Client) *tgAdapter {
 	return &tgAdapter{
 		tg:         tg,
-		indicators: make(map[comms.ChannelID]*typingIndicator),
+		indicators: make(map[runtime.ChannelID]*typingIndicator),
 	}
 }
 
@@ -81,7 +81,7 @@ func (a *tgAdapter) SetBroadcastTargets(ids []int64) {
 
 func (a *tgAdapter) Channel() string { return "tg" }
 
-func (a *tgAdapter) SendText(channelID comms.ChannelID, text string) (string, error) {
+func (a *tgAdapter) SendText(channelID runtime.ChannelID, text string) (string, error) {
 	chatID := channelID.SessionKey()
 	if chatID <= 0 {
 		// Invalid channel ID — broadcast to all configured targets.
@@ -96,13 +96,13 @@ func (a *tgAdapter) SendText(channelID comms.ChannelID, text string) (string, er
 	return "", err
 }
 
-func (a *tgAdapter) SendReaction(channelID comms.ChannelID, msgID string, emoji string) error {
+func (a *tgAdapter) SendReaction(channelID runtime.ChannelID, msgID string, emoji string) error {
 	return nil // reactions handled explicitly in the TG loop
 }
 
 // OnEvent updates typing indicators based on engine streaming events.
 // The "done" event is suppressed — the TG loop handles completion explicitly.
-func (a *tgAdapter) OnEvent(channelID comms.ChannelID, event comms.OutEvent) {
+func (a *tgAdapter) OnEvent(channelID runtime.ChannelID, event runtime.OutEvent) {
 	a.mu.Lock()
 	ind := a.indicators[channelID]
 	a.mu.Unlock()
@@ -131,14 +131,14 @@ func (a *tgAdapter) OnEvent(channelID comms.ChannelID, event comms.OutEvent) {
 }
 
 // SetIndicator registers a typing indicator for a channel.
-func (a *tgAdapter) SetIndicator(channelID comms.ChannelID, ind *typingIndicator) {
+func (a *tgAdapter) SetIndicator(channelID runtime.ChannelID, ind *typingIndicator) {
 	a.mu.Lock()
 	a.indicators[channelID] = ind
 	a.mu.Unlock()
 }
 
 // ClearIndicator removes the typing indicator for a channel.
-func (a *tgAdapter) ClearIndicator(channelID comms.ChannelID) {
+func (a *tgAdapter) ClearIndicator(channelID runtime.ChannelID) {
 	a.mu.Lock()
 	delete(a.indicators, channelID)
 	a.mu.Unlock()

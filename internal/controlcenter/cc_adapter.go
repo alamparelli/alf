@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/alamparelli/alf/internal/runtime/comms"
+	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/alamparelli/alf/internal/memory"
 )
 
-// ccAdapter bridges the comms.ChannelAdapter interface to ChatService's
+// ccAdapter bridges the runtime.ChannelAdapter interface to ChatService's
 // per-call onEvent callbacks. Since ChatService serializes calls via mu,
 // only one callback is active at a time.
 type ccAdapter struct {
@@ -28,7 +28,7 @@ func newCCAdapter() *ccAdapter {
 func (a *ccAdapter) Channel() string { return "cc" }
 
 // SendText injects a standalone message into the CC chat (used for async notifications).
-func (a *ccAdapter) SendText(_ comms.ChannelID, text string) (string, error) {
+func (a *ccAdapter) SendText(_ runtime.ChannelID, text string) (string, error) {
 	if a.Memory == nil {
 		return "", nil
 	}
@@ -54,13 +54,13 @@ func (a *ccAdapter) SendText(_ comms.ChannelID, text string) (string, error) {
 	return string(stored.ID), nil
 }
 
-func (a *ccAdapter) SendReaction(_ comms.ChannelID, _ string, _ string) error {
+func (a *ccAdapter) SendReaction(_ runtime.ChannelID, _ string, _ string) error {
 	return nil // CC reactions are sent via events
 }
 
-// OnEvent converts comms.OutEvent to ChatEvent and forwards to the active callback.
+// OnEvent converts runtime.OutEvent to ChatEvent and forwards to the active callback.
 // The "done" event is suppressed — the CC wrapper emits its own richer ChatDoneData.
-func (a *ccAdapter) OnEvent(_ comms.ChannelID, event comms.OutEvent) {
+func (a *ccAdapter) OnEvent(_ runtime.ChannelID, event runtime.OutEvent) {
 	a.mu.Lock()
 	cb := a.callback
 	a.mu.Unlock()
@@ -82,8 +82,8 @@ func (a *ccAdapter) setCallback(cb func(ChatEvent)) {
 	a.mu.Unlock()
 }
 
-// outEventToChatEvent converts a comms.OutEvent to a CC ChatEvent.
-func outEventToChatEvent(event comms.OutEvent) ChatEvent {
+// outEventToChatEvent converts a runtime.OutEvent to a CC ChatEvent.
+func outEventToChatEvent(event runtime.OutEvent) ChatEvent {
 	return ChatEvent{
 		Type: event.Type,
 		Data: event.Data,

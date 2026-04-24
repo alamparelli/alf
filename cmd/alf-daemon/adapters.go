@@ -10,7 +10,7 @@ import (
 	"time"
 
 	agents "github.com/alamparelli/alf/internal/runtime/agents"
-	"github.com/alamparelli/alf/internal/runtime/comms"
+	"github.com/alamparelli/alf/internal/runtime"
 	cc "github.com/alamparelli/alf/internal/controlcenter"
 	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/memory"
@@ -201,19 +201,19 @@ func (r *memoryCCRecaller) Search(query string, limit int) ([]cc.MemoryResult, e
 	return out, nil
 }
 
-// commsTierStore adapts cc.TierStore to the comms.TierStoreReader interface.
+// commsTierStore adapts cc.TierStore to the runtime.TierStoreReader interface.
 type commsTierStore struct {
 	ts cc.TierStore
 }
 
-func (c *commsTierStore) Snapshot() comms.TiersSnapshot {
+func (c *commsTierStore) Snapshot() runtime.TiersSnapshot {
 	cur := c.ts.Current()
-	snap := comms.TiersSnapshot{
+	snap := runtime.TiersSnapshot{
 		DefaultFallback: cur.DefaultFallback,
-		Tiers:           make([]comms.TierInfo, len(cur.Tiers)),
+		Tiers:           make([]runtime.TierInfo, len(cur.Tiers)),
 	}
 	for i, t := range cur.Tiers {
-		snap.Tiers[i] = comms.TierInfo{
+		snap.Tiers[i] = runtime.TierInfo{
 			Name:                 t.Name,
 			Model:                t.Model,
 			Priority:             t.Priority,
@@ -282,20 +282,20 @@ func (a *memoryIngestAdapter) Store(text, memType, source string, meta map[strin
 	return 0, nil
 }
 
-// memoryCommsRecaller adapts memory.Store to the comms.MemoryRecaller
-// interface. Symmetric to memoryCCRecaller but returns comms.MemoryResult.
+// memoryCommsRecaller adapts memory.Store to the runtime.MemoryRecaller
+// interface. Symmetric to memoryCCRecaller but returns runtime.MemoryResult.
 type memoryCommsRecaller struct {
 	store memory.Store
 }
 
-func (r *memoryCommsRecaller) Search(query string, limit int) ([]comms.MemoryResult, error) {
+func (r *memoryCommsRecaller) Search(query string, limit int) ([]runtime.MemoryResult, error) {
 	hits, err := searchMemoryAcrossScopes(r.store, query, limit)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]comms.MemoryResult, len(hits))
+	out := make([]runtime.MemoryResult, len(hits))
 	for i, h := range hits {
-		out[i] = comms.MemoryResult{
+		out[i] = runtime.MemoryResult{
 			Text:     h.Document.Text,
 			Type:     h.Document.Metadata["scope"],
 			Distance: float64(1 - h.Score),

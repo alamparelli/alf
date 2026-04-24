@@ -428,13 +428,15 @@
                 <option value={m.id}>{m.id}{m.tool_calls === false ? ' (no tools)' : ''}</option>
               {/each}
             </select>
-          {:else}
+          {:else if !tierForm.backend || tierForm.backend === 'cli'}
             <select bind:value={tierForm.model}>
               <option value="">-- select --</option>
               {#each availableClaudeModels as m}
                 <option value={m}>{m}</option>
               {/each}
             </select>
+          {:else}
+            <input type="text" bind:value={tierForm.model} placeholder="model name (e.g. gpt-5-codex, llama3.1)" />
           {/if}
           {#if selectedModelInfo()?.tool_calls === false && tierForm.tools.length > 0}
             <span class="form-warning">This model does not support tool calling.</span>
@@ -578,13 +580,15 @@
                 <option value={m.id}>{m.id}</option>
               {/each}
             </select>
-          {:else}
+          {:else if !routerForm.router_backend || routerForm.router_backend === 'cli'}
             <select bind:value={routerForm.router_model}>
               <option value="">-- select --</option>
               {#each availableClaudeModels as m}
                 <option value={m}>{m}</option>
               {/each}
             </select>
+          {:else}
+            <input type="text" bind:value={routerForm.router_model} placeholder="model name (e.g. gpt-5-codex, llama3.1)" />
           {/if}
         </label>
         <label class="full-width">

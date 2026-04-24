@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"fmt"
 	"testing"
+	"time"
 
 	"github.com/alamparelli/alf/internal/capability/envelope"
 	"github.com/alamparelli/alf/internal/capability/handle"
@@ -34,7 +34,10 @@ func signBundle(t *testing.T, manifestTOML string, bundle []byte) (envelope.Veri
 		t.Fatal(err)
 	}
 
-	comment := "test bundle"
+	tc := envelope.TrustedComment{
+		BundleID: "test-bundle",
+		SignedAt: time.Date(2026, 4, 24, 15, 30, 0, 0, time.UTC),
+	}
 	if bundle != nil {
 		h := sha256.Sum256(bundle)
 		const hex = "0123456789abcdef"
@@ -43,9 +46,9 @@ func signBundle(t *testing.T, manifestTOML string, bundle []byte) (envelope.Veri
 			hx[i*2] = hex[b>>4]
 			hx[i*2+1] = hex[b&0x0f]
 		}
-		comment = fmt.Sprintf("test bundle bundle_sha256=%s", string(hx))
+		tc.BundleHash = string(hx)
 	}
-	sigFile, err := envelope.EncodeSignatureFile(priv, sig, comment)
+	sigFile, err := envelope.EncodeSignatureFile(priv, sig, envelope.BuildTrustedComment(tc))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // VerifyInput carries every byte sequence the verify pipeline consumes.
@@ -46,6 +47,13 @@ type VerifiedManifest struct {
 	CanonicalBytes []byte
 	SignerID       KeyID
 	TrustedComment string
+
+	// SignedAt is the RFC 3339 timestamp the signer embedded in the
+	// trusted comment (tamper-protected by the minisign global
+	// signature). Required — a signature without signed_at cannot
+	// support CRL time-bound revocation (§7.7), so the verify pipeline
+	// rejects it with ErrTrustedCommentMalformed.
+	SignedAt time.Time
 }
 
 // Verify is the single load-time entry point for #388 (the archtest
@@ -112,15 +120,21 @@ func Verify(in VerifyInput) (*VerifiedManifest, error) {
 		return nil, fmt.Errorf("envelope: trusted comment integrity: %w", err)
 	}
 
-	// 7. Bundle hash cross-check.
+	// 7. Parse the structured trusted comment — required fields only
+	// (signed_at). BundleHash is cross-checked against the actual
+	// bundle bytes when provided.
+	tc, err := ParseTrustedComment(trustedComment)
+	if err != nil {
+		return nil, err
+	}
+
 	if in.Bundle != nil {
-		expected, ok := extractBundleHash(trustedComment)
-		if !ok {
+		if tc.BundleHash == "" {
 			return nil, fmt.Errorf("%w: trusted comment lacks bundle_sha256= field", ErrBundleHashMissing)
 		}
 		actual := sha256hex(in.Bundle)
-		if expected != actual {
-			return nil, fmt.Errorf("%w: expected=%s actual=%s", ErrBundleHashMismatch, expected, actual)
+		if tc.BundleHash != actual {
+			return nil, fmt.Errorf("%w: expected=%s actual=%s", ErrBundleHashMismatch, tc.BundleHash, actual)
 		}
 	}
 
@@ -129,6 +143,7 @@ func Verify(in VerifyInput) (*VerifiedManifest, error) {
 		CanonicalBytes: canonical,
 		SignerID:       pub.ID,
 		TrustedComment: trustedComment,
+		SignedAt:       tc.SignedAt,
 	}, nil
 }
 
@@ -151,36 +166,6 @@ func sha256hex(data []byte) string {
 	return string(out)
 }
 
-// extractBundleHash pulls the "bundle_sha256=<hex>" field out of the
-// trusted comment. The comment is a space-separated keyword=value
-// list; any whitespace around the field is tolerated. Returns false
-// if the field is absent.
-//
-// Format example:
-//
-//	"bundle hello-read@0.1.0 bundle_sha256=e3b0c442... signed_at=2026-04-24"
-//
-// This is the stop-gap carrier for the bundle-hash property until
-// full §7.10.3 envelope records land. Signers emit this format; the
-// verifier reads it here; tests exercise both sides.
-func extractBundleHash(comment string) (string, bool) {
-	const prefix = "bundle_sha256="
-	// Walk fields space-separated.
-	i := 0
-	for i < len(comment) {
-		// Skip leading whitespace.
-		for i < len(comment) && (comment[i] == ' ' || comment[i] == '\t') {
-			i++
-		}
-		// Read a token until whitespace.
-		start := i
-		for i < len(comment) && comment[i] != ' ' && comment[i] != '\t' {
-			i++
-		}
-		token := comment[start:i]
-		if len(token) > len(prefix) && token[:len(prefix)] == prefix {
-			return token[len(prefix):], true
-		}
-	}
-	return "", false
-}
+// (extractBundleHash removed — its responsibility moved into the
+// typed ParseTrustedComment in comment.go. That parser also extracts
+// signed_at, which was the missing field on the road to #396 CRL.)

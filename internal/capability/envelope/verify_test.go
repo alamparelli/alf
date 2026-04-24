@@ -2,15 +2,15 @@ package envelope
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // signValidBundle generates a signer, signs the canonical manifest,
-// embeds the bundle_sha256 in the trusted comment, and returns all the
-// pieces a Verify call needs. Used as a setup helper by the verify
-// tests — keeps each test focused on the property under check.
+// embeds bundle_sha256 + signed_at in the trusted comment (via the
+// typed TrustedComment helper so tests exercise the production format),
+// and returns all the pieces a Verify call needs.
 func signValidBundle(t *testing.T, manifest string, bundle []byte) (VerifyInput, *MemoryTrustStore, PublicKey, PrivateKey) {
 	t.Helper()
 
@@ -27,11 +27,14 @@ func signValidBundle(t *testing.T, manifest string, bundle []byte) (VerifyInput,
 		t.Fatalf("Sign setup: %v", err)
 	}
 
-	comment := "bundle hello-read@0.1.0"
-	if bundle != nil {
-		comment = fmt.Sprintf("%s bundle_sha256=%s", comment, sha256hex(bundle))
+	tc := TrustedComment{
+		BundleID: "hello-read@0.1.0",
+		SignedAt: time.Date(2026, 4, 24, 15, 30, 0, 0, time.UTC),
 	}
-	sigFile, err := EncodeSignatureFile(priv, sig, comment)
+	if bundle != nil {
+		tc.BundleHash = sha256hex(bundle)
+	}
+	sigFile, err := EncodeSignatureFile(priv, sig, BuildTrustedComment(tc))
 	if err != nil {
 		t.Fatalf("EncodeSignatureFile setup: %v", err)
 	}
@@ -115,14 +118,19 @@ func TestVerify_TamperedManifestRejected(t *testing.T) {
 
 func TestVerify_BundleHashMissingRejected(t *testing.T) {
 	// Sign with a comment that DOESN'T embed bundle_sha256=... then try
-	// to Verify with a non-nil Bundle.
+	// to Verify with a non-nil Bundle. signed_at is still required —
+	// ParseTrustedComment enforces it independently.
 	pub, priv := mustGenKey(t)
 	store := NewMemoryTrustStore()
 	store.Add(pub)
 
 	canonical, _ := Canonicalize([]byte(validManifest()))
 	sig, _ := Sign(priv, canonical)
-	sigFile, _ := EncodeSignatureFile(priv, sig, "bundle with no hash field")
+	tc := TrustedComment{
+		BundleID: "no-bundle-hash",
+		SignedAt: time.Date(2026, 4, 24, 15, 30, 0, 0, time.UTC),
+	}
+	sigFile, _ := EncodeSignatureFile(priv, sig, BuildTrustedComment(tc))
 
 	in := VerifyInput{
 		ManifestTOML: []byte(validManifest()),
@@ -180,34 +188,5 @@ func TestVerify_ReturnsSignerIDForAudit(t *testing.T) {
 	}
 }
 
-func TestExtractBundleHash(t *testing.T) {
-	cases := map[string]struct {
-		comment string
-		want    string
-		ok      bool
-	}{
-		"at end":                 {"bundle x bundle_sha256=abc123", "abc123", true},
-		"at start":               {"bundle_sha256=abc123 other field", "abc123", true},
-		"in middle":              {"first bundle_sha256=abc123 last", "abc123", true},
-		"absent":                 {"bundle x other y", "", false},
-		"prefix-only":            {"bundle_sha256=", "", true},
-		"empty":                  {"", "", false},
-		"similar-field-rejected": {"other_bundle_sha256=abc other", "", false},
-	}
-	for name, tc := range cases {
-		got, ok := extractBundleHash(tc.comment)
-		// Edge case: "prefix-only" gives "" as value — len(token)=len(prefix)
-		// so our >len(prefix) guard rejects it. Document that the extractor
-		// requires a non-empty hash; the Verify pipeline would fail on
-		// an empty hash anyway via ErrBundleHashMismatch.
-		if name == "prefix-only" {
-			if ok {
-				t.Errorf("%s: empty-value should be treated as no field (got ok=%v val=%q)", name, ok, got)
-			}
-			continue
-		}
-		if ok != tc.ok || got != tc.want {
-			t.Errorf("%s: got (%q, %v), want (%q, %v)", name, got, ok, tc.want, tc.ok)
-		}
-	}
-}
+// (TestExtractBundleHash removed — functionality replaced by the typed
+// TrustedComment parser; see comment_test.go for coverage.)

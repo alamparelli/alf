@@ -65,7 +65,9 @@ func TestDerive_DefensiveCopy(t *testing.T) {
 	}
 }
 
-func TestApply_InstallsPolicyOnCtx(t *testing.T) {
+func TestApply_InstallsIdentityOnCtx(t *testing.T) {
+	// Post-#406 section 4: ctx carries Identity (CapID + Tier), not Policy.
+	// Authority lives in handles forged at Runtime.Instantiate (#391).
 	sb := New()
 	ctx := context.Background()
 	policy := Policy{Tier: "pro"}
@@ -75,37 +77,40 @@ func TestApply_InstallsPolicyOnCtx(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	got, ok := PolicyFrom(sbxCtx)
+	got, ok := IdentityFrom(sbxCtx)
 	if !ok {
-		t.Fatal("PolicyFrom: no policy on sandboxed ctx")
+		t.Fatal("IdentityFrom: no identity on sandboxed ctx")
+	}
+	if got.CapID != "x" {
+		t.Errorf("CapID = %q, want x", got.CapID)
 	}
 	if got.Tier != "pro" {
 		t.Errorf("Tier = %q, want pro", got.Tier)
 	}
 
-	if _, ok := PolicyFrom(ctx); ok {
-		t.Error("PolicyFrom: unsandboxed ctx should not return a policy")
+	if _, ok := IdentityFrom(ctx); ok {
+		t.Error("IdentityFrom: unsandboxed ctx should not return an identity")
 	}
 }
 
 func TestApply_NoAccumulation(t *testing.T) {
-	// ARCHITECTURE-v0.7.10.md §2.4 hard rule: one Policy per Capability.
-	// Re-applying overwrites; it must NEVER merge or list.
+	// ARCHITECTURE-v0.7.10.md §2.4 hard rule, re-cast in Identity terms:
+	// one Identity per ctx. Re-applying overwrites; it must NEVER merge.
 	sb := New()
 	ctx := context.Background()
 
 	ctx1, _ := sb.Apply(ctx, ManifestView{ID: "cap1"}, Policy{Tier: "free"})
 	ctx2, _ := sb.Apply(ctx1, ManifestView{ID: "cap2"}, Policy{Tier: "pro"})
 
-	got, _ := PolicyFrom(ctx2)
-	if got.Tier != "pro" {
-		t.Errorf("second Apply did not replace: Tier = %q, want pro", got.Tier)
+	got, _ := IdentityFrom(ctx2)
+	if got.CapID != "cap2" || got.Tier != "pro" {
+		t.Errorf("second Apply did not replace: got %+v, want cap2/pro", got)
 	}
 
-	// First ctx must still carry the first policy — Apply is pure w.r.t. its
-	// input ctx; the "no accumulation" rule is enforced by using a single key.
-	got1, _ := PolicyFrom(ctx1)
-	if got1.Tier != "free" {
-		t.Errorf("first ctx leaked: Tier = %q, want free", got1.Tier)
+	// First ctx must still carry the first identity — Apply is pure w.r.t.
+	// its input ctx; "no accumulation" is enforced by using a single key.
+	got1, _ := IdentityFrom(ctx1)
+	if got1.CapID != "cap1" || got1.Tier != "free" {
+		t.Errorf("first ctx leaked: got %+v, want cap1/free", got1)
 	}
 }

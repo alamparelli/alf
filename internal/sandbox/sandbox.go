@@ -38,12 +38,35 @@ type SecretRules struct {
 	KeyPatterns []string
 }
 
-// Policy is the effective, derived set of rules applied to one Capability.
+// Policy is the effective, derived set of rules for one Capability.
+//
+// Policy is a *derivation output* — what Sandbox.Derive produces from a
+// manifest + tier. Under the ocap model (docs/ARCHITECTURE-SECURITY.md §3.1),
+// Policy is consumed by Runtime.Instantiate at forge time to bake scope into
+// capability handles. It is NOT propagated via ctx — see Identity below and
+// the commentary on Sandbox.Apply. A Policy value that escapes its
+// forge-time role should be treated as dead data.
 type Policy struct {
 	FileAccess FileRules
 	Network    NetworkRules
 	Secrets    SecretRules
 	Tier       Tier
+}
+
+// Identity carries per-call identity + audit metadata on the sandboxed ctx.
+// It contains NO authority surface — no allow/deny fields, no permissions,
+// no policy. Authority, under ocap (§3.1), lives in the handles a capability
+// holds, forged by Runtime.Instantiate from the verified manifest. Anything
+// on ctx can be manipulated by code that holds the ctx; ctx is the wrong
+// home for authority.
+//
+// Narrowed from the pre-0.8.0 Policy-on-ctx surface in #406 section 4.
+type Identity struct {
+	// CapID mirrors ManifestView.ID — the caller capability for this call.
+	CapID string
+	// Tier is the aggregated user envelope; surfaced for audit logs and
+	// downstream telemetry, never as a policy gate.
+	Tier Tier
 }
 
 // ManifestView is the minimal shape Sandbox needs to derive a Policy.

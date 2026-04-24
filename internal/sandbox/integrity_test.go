@@ -24,8 +24,8 @@ func TestApply_NoChecker_IsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply without checker: %v", err)
 	}
-	if _, ok := PolicyFrom(ctx); !ok {
-		t.Error("Policy missing on sandboxed ctx")
+	if _, ok := IdentityFrom(ctx); !ok {
+		t.Error("Identity missing on sandboxed ctx")
 	}
 }
 
@@ -43,12 +43,12 @@ func TestApply_Checker_Pass(t *testing.T) {
 	if c.gotID != "xpost" {
 		t.Errorf("Verify got capID %q, want xpost", c.gotID)
 	}
-	if _, ok := PolicyFrom(ctx); !ok {
-		t.Error("Policy not installed after successful Verify")
+	if _, ok := IdentityFrom(ctx); !ok {
+		t.Error("Identity not installed after successful Verify")
 	}
 }
 
-func TestApply_Checker_Fail_AbortsBeforePolicyInstall(t *testing.T) {
+func TestApply_Checker_Fail_AbortsBeforeIdentityInstall(t *testing.T) {
 	boom := errors.New("quarantined")
 	c := &fakeChecker{err: boom}
 	sb := New(WithIntegrity(c))

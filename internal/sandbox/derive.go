@@ -5,11 +5,14 @@ import (
 	"fmt"
 )
 
-// policyCtxKey is a typed, unexported key for the single Policy installed on a
-// ctx by Apply. A second Apply on the same ctx REPLACES the Policy; it never
-// accumulates. This implements ARCHITECTURE-v0.7.10.md §2.4 hard rule:
-// "one Policy applies to one Capability — no implicit accumulation".
-type policyCtxKey struct{}
+// identityCtxKey is a typed, unexported key for the single Identity stashed
+// on a ctx by Apply. A second Apply on the same ctx REPLACES the Identity;
+// it never accumulates — the one-Identity-per-ctx invariant mirrors the
+// one-Policy-per-Capability rule from ARCHITECTURE-v0.7.10.md §2.4.
+//
+// Narrowed from the pre-0.8.0 policyCtxKey in #406 section 4: authority no
+// longer rides on ctx (see Identity docstring in sandbox.go).
+type identityCtxKey struct{}
 
 // IntegrityChecker is the plug-point that lets Apply reject Capabilities
 // whose backing binary / bundle has been tampered with. The sandbox root
@@ -78,31 +81,34 @@ func (defaultSandbox) Derive(m ManifestView, tier Tier) (Policy, error) {
 	}, nil
 }
 
-// Apply installs policy on ctx so that the Capability identified by m runs
-// under the enforced boundaries. The returned ctx MUST be the one passed to
+// Apply verifies the capability's integrity and tags ctx with an Identity
+// for audit/telemetry. The returned ctx MUST be the one passed to
 // Capability.Execute; any other ctx is unsandboxed.
 //
 // Order of operations:
 //  1. Integrity check (if wired via WithIntegrity). A failing check aborts
-//     the call; the Policy is never installed.
-//  2. Policy install on ctx.
+//     the call; Identity is never installed.
+//  2. Identity stash on ctx (CapID + Tier).
 //
-// The network / secrets / exec facets are consulted at enforcement time by
-// code that reads the Policy via PolicyFrom. Wiring those facets into Apply
-// itself is Runtime's (#340) job.
+// policy is accepted for signature stability — it remains the derivation
+// output that Runtime.Instantiate (#391) consumes to forge capability
+// handles with baked-in scope. Its authority-bearing fields (FileAccess,
+// Network, Secrets) are NOT propagated via ctx. If a future facet needs to
+// consult policy at enforcement time, it receives policy as an explicit
+// parameter or a forged handle — never by reading ctx.
 func (s defaultSandbox) Apply(ctx context.Context, m ManifestView, policy Policy) (context.Context, error) {
 	if s.checker != nil {
 		if err := s.checker.Verify(m.ID); err != nil {
 			return nil, fmt.Errorf("sandbox: integrity check failed for %q: %w", m.ID, err)
 		}
 	}
-	return context.WithValue(ctx, policyCtxKey{}, policy), nil
+	return context.WithValue(ctx, identityCtxKey{}, Identity{CapID: m.ID, Tier: policy.Tier}), nil
 }
 
-// PolicyFrom returns the Policy installed on ctx by Apply, or (zero, false)
-// if the ctx is not sandboxed. Facet enforcers (C3+) call this to read the
-// active Policy at enforcement time.
-func PolicyFrom(ctx context.Context) (Policy, bool) {
-	p, ok := ctx.Value(policyCtxKey{}).(Policy)
-	return p, ok
+// IdentityFrom returns the Identity stashed on ctx by Apply, or
+// (zero, false) if ctx is not sandboxed. Safe to call anywhere — reading
+// Identity cannot grant access, only log who is acting.
+func IdentityFrom(ctx context.Context) (Identity, bool) {
+	id, ok := ctx.Value(identityCtxKey{}).(Identity)
+	return id, ok
 }

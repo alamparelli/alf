@@ -357,9 +357,9 @@ func TestChat_ExecutesToolCallAndReinjectsResult(t *testing.T) {
 			Description: "repeat input",
 		},
 		execFn: func(ctx context.Context, in capability.Input) (capability.Output, error) {
-			// Sandbox.Apply should have installed a Policy on ctx.
-			if _, ok := sandbox.PolicyFrom(ctx); !ok {
-				return capability.Output{Error: "no policy"}, nil
+			// Sandbox.Apply should have tagged ctx with Identity.
+			if _, ok := sandbox.IdentityFrom(ctx); !ok {
+				return capability.Output{Error: "no identity"}, nil
 			}
 			return capability.Output{Data: "echoed:" + toStr(in["msg"])}, nil
 		},
@@ -688,7 +688,13 @@ func TestChat_ErrorsWhenNoModelAnywhere(t *testing.T) {
 // ── Invoke pipeline ─────────────────────────────────────────────────────────
 
 func TestInvoke_ResolvesDerivesAppliesAndExecutes(t *testing.T) {
-	// Capability asserts Sandbox.Apply installed a Policy on ctx.
+	// Capability asserts Sandbox.Apply tagged ctx with the expected Identity.
+	//
+	// Post-#406 section 4: Policy is NO LONGER propagated via ctx. The
+	// derivation-from-manifest check (that FileAccess.ReadPaths mirrors
+	// PermissionSet.FilePaths) lives in sandbox/derive_test.go, where it
+	// belongs — it was redundant here and represented the pre-ocap authority
+	// leak where a capability could read its own scope from ctx.
 	cap := &fakeCapability{
 		manifest: capability.Manifest{
 			ID:   "native.ping",
@@ -699,12 +705,15 @@ func TestInvoke_ResolvesDerivesAppliesAndExecutes(t *testing.T) {
 			},
 		},
 		execFn: func(ctx context.Context, in capability.Input) (capability.Output, error) {
-			p, ok := sandbox.PolicyFrom(ctx)
+			id, ok := sandbox.IdentityFrom(ctx)
 			if !ok {
-				return capability.Output{}, errors.New("runtime did not install policy")
+				return capability.Output{}, errors.New("runtime did not install identity")
 			}
-			if len(p.FileAccess.ReadPaths) != 1 || p.FileAccess.ReadPaths[0] != "/tmp/*" {
-				return capability.Output{}, errors.New("policy not derived from manifest permissions")
+			if id.CapID != "native.ping" {
+				return capability.Output{}, errors.New("identity.CapID mismatch: got " + id.CapID)
+			}
+			if id.Tier != "pro" {
+				return capability.Output{}, errors.New("identity.Tier mismatch: got " + string(id.Tier))
 			}
 			return capability.Output{Data: in["echo"]}, nil
 		},

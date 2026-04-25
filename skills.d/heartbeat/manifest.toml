@@ -1,0 +1,9 @@
+alf_envelope_version = 1
+id          = "heartbeat"
+kind        = "skill"
+version     = "1"
+name        = "Heartbeat"
+description = "Periodic heartbeat that executes user-defined instructions from context/heartbeat.md"
+
+[[tools.declares]]
+id = "notify"

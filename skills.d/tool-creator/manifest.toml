@@ -1,0 +1,12 @@
+alf_envelope_version = 1
+id          = "tool-creator"
+kind        = "skill"
+version     = "2"
+name        = "Tool Creator"
+description = "Creates well-structured CLI tools (bash/python scripts) in ~/data/tools/ with --help, error handling, and proper conventions"
+
+[[tools.declares]]
+id = "skill"
+
+[[tools.declares]]
+id = "recall"

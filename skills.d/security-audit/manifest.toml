@@ -1,0 +1,12 @@
+alf_envelope_version = 1
+id          = "security-audit"
+kind        = "skill"
+version     = "2"
+name        = "Security Audit"
+description = "Security expert that audits user-created skills and tools for injection, data exfiltration, and privilege escalation risks"
+
+[[tools.declares]]
+id = "recall"
+
+[[tools.declares]]
+id = "remember"

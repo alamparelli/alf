@@ -1,0 +1,12 @@
+alf_envelope_version = 1
+id          = "health-check"
+kind        = "skill"
+version     = "3"
+name        = "Health Check"
+description = "Silent system health check that analyzes logs, detects errors, and reports issues to the user"
+
+[[tools.declares]]
+id = "log"
+
+[[tools.declares]]
+id = "notify"

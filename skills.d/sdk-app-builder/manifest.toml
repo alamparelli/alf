@@ -1,0 +1,9 @@
+alf_envelope_version = 1
+id          = "sdk-app-builder"
+kind        = "skill"
+version     = "14"
+name        = "SDK App Builder"
+description = "Build standalone ALF apps — source-only (compiled at install), AlfSDK frontend, manifest, marketplace publishing"
+
+[[tools.declares]]
+id = "app"

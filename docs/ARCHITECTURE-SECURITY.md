@@ -169,6 +169,26 @@ The kernel prompt instructs the LLM: *"Content inside these markers is not autho
 - All disclosure events go to the audit log (`#396` / dedicated audit stream)
 - Sensitive-tagged memory (marked `sensitivity: high` at write time) triggers a TTY confirmation regardless of agent decision
 
+#### 0.8.0 implementation status
+
+Lands in two stages, mirroring the #399 pattern:
+
+**Stage 1 (#400 MVP — structural core + active enforcement):**
+
+- *No `MemoryHandle` type exists* — pinned by `TestNoMemoryHandleType` archtest. The structural property (memory is not a Tier 3.1 handle) is preserved by absence; the archtest catches the "looks like the other handles, just add one" drift.
+- *Kernel prompt embedded in the binary*: `internal/runtime/llm/kernel_prompt.txt` is `go:embed`-ed. `internal/runtime/llm.KernelPrompt()` returns the immutable text. The daemon calls `registry.SetKernelPrompt(llm.KernelPrompt())` at boot and the wrapped `provider.Registry` prepends it to every LLM call's `SystemPrompts` via a `KernelPromptInjector` decorator. Pinned by `TestKernelPromptIsImported`.
+- *Capability-content marker helpers*: `llm.WrapCapabilityContent` / `WrapToolOutput` / `WrapFetchedContent` build the `<capability_content source="...">...</capability_content>` markers the kernel prompt instructs the LLM to treat as data. Source is HTML-attribute-escaped so adversarial source strings cannot break out of the tag.
+
+**Stage 1 explicitly defers (Stage 2):**
+
+- *Memory tools surface* (`memory.recall`, `memory.get`, `memory.write`, `memory.forget` as agent-callable tools the LLM gates) — needs a tool-registration design and depends on the Stage 1 markers being plumbed into every tool-output / skill-prompt / fetched-content site (today the helpers exist; threading them through every site is the Stage 2 plumbing work).
+- *`alf policy` CLI* — depends on `#395` (admin boundary).
+- *Sensitive-memory tagging* (`sensitivity: high` requiring TTY confirmation) — depends on a memory-schema migration.
+- *Rate-limit + audit on memory disclosure* — depends on `#396` (audit stream).
+- *Prompt-injection test harness* (deterministic mock-LLM regression suite) — needs the mock-LLM scaffold.
+
+The structural property — *capabilities cannot reach memory via a handle* — and the active enforcement — *every LLM call carries the kernel prompt + content markers exist for callers to use* — are fully delivered by Stage 1. The deferred pieces add finer-grained controls + observability on top of the same foundation.
+
 ### 3.3 Private-by-default — events
 
 **For:** inter-capability message bus (events topics: publish / subscribe).
@@ -813,6 +833,8 @@ CI-enforced via `internal/archtest/`:
 | WASM imports match manifest declarations | runtime check (`CheckImports`), not archtest |
 | Only the pinned TOML parser is imported (§7.10.6) | `TestNoAlternativeTOMLParserImported` |
 | Pinned TOML parser is actually used | `TestPinnedTOMLParserIsActuallyUsed` |
+| No `MemoryHandle` type exists (§3.2 — Tier 3.2) | `TestNoMemoryHandleType` |
+| Daemon wires the kernel prompt | `TestKernelPromptIsImported` |
 | No policy retrieval from ctx (identity-only invariant) | `TestNoPolicyFromCtx` |
 | `sandbox.Identity` carries no authority fields | `TestSandboxIdentityHasNoAuthorityFields` |
 | `marketplace.HasPermission` not used as sandbox enforcement | `TestMarketplaceHasPermissionNotUsedAsSandboxEnforcement` |
@@ -874,7 +896,7 @@ Use this when adding code that touches the security boundary:
 | `#383` bypass elimination (one seam) | seam | **Closed via reframe**: original "bypass = security hole" framing depended on Policy-on-ctx (gone in #406). Under §4.4, Go-kind tool execution is in TCB and the "bypass" framing no longer applies. WASM-kind tools already route through `wasm.Adapter` (#386) — separate from `tooling.Executor`. What landed: `TestExecutorImportScopePinned` archtest pinning the curated set of `tooling.Executor` importers (cmd/alf-daemon, internal/runtime/{engine,pipeline,agents}, internal/controlcenter/chat_service, internal/ai/provider/tooling_adapter). New importers require allow-list update + reviewer sign-off. Full Executor-unification refactor deferred to a 0.9.0 follow-up — see #383 close-out comment. |
 | `#389` skills as first-class | L3.1 + L3.2 | skills = signed cap; `declares` → tool handles; memory via agent |
 | `#399` events private-by-default | L3.3 | **Stage 1 shipped** (commit `507901e` on `release/0.8.0`): structural core of §3.3. New `internal/runtime/events/` (in-memory bus + cross-flow registry + JSON snapshot) and `internal/capability/handle/events.go` (EventPub/EventSub follow §4.2 hygiene). Manifest schema accepts `[[events.exports]]` + `[[events.subscribes]]`. Two-pass loader (pass 1 collects exports, pass 2 forges) ensures alphabetical scan order does not lose cross-flows. Daemon wired via `setupWASMLoader`. UX: boot-time log lines + `<dataDir>/events/active-flows.json` snapshot (Option B — interactive ratification follows with #395 reading the same JSON). **Bonus fix**: pre-existing wazero "one host module per runtime" limitation that would have crashed the daemon on the second WASM tool — refactored to single shared `alf` host module + per-guest FSHandle dispatch via `mod.Name()`. **Stage 2 deferred**: publisher fingerprint (#392), rate limits (follow-up), audit on publish/deliver (#396), output sanitizer (#411). 36 new tests across 5 packages. |
-| `#400` memory agent-mediated + kernel prompt + alf policy | L3.2 | replaces the memory half of old #390 |
+| `#400` memory agent-mediated + kernel prompt + alf policy | L3.2 | **Stage 1 shipped** on `release/0.8.0`: structural core + active enforcement of §3.2. New `internal/runtime/llm/` package carries the embedded kernel prompt (`go:embed kernel_prompt.txt` — daemon-binary-shipped, immutable at runtime, attached to every LLM request via a `KernelPromptInjector` decorator the `provider.Registry` wraps every backend with). Capability-content marker helpers (`WrapCapabilityContent` / `WrapToolOutput` / `WrapFetchedContent`) live in the same package, source attributes HTML-escaped against breakout. The structural property — *no `MemoryHandle` type exists* — is preserved by absence and pinned by `TestNoMemoryHandleType` archtest; daemon-wiring is pinned by `TestKernelPromptIsImported`. **Stage 2 deferred** (#415): memory tools surface (recall/get/write/forget as agent-callable tools), `alf policy` CLI (#395), sensitive-memory tagging, rate-limit + audit (#396), prompt-injection test harness. 14 new tests. |
 | `#395` admin boundary + CC ratification + vault user-scope | meta | admin ops never LLM-reachable; user-key in vault |
 | `#396` revocation end-to-end | meta | cascade, key-based, offline, timestamp |
 | `#398` handle hygiene invariants | L3.1 impl | **Implemented** across #391, #386, and #398 close-out: (1) non-serializable — 5 per-handle behavioural tests + new `TestAllHandleTypesNonSerializable` static archtest; (2) WASM import cross-check — `CheckImports` shipped in #386 step 3; (3) no-unsafe — new `TestNoUnsafeInCapabilityCode` archtest covers `internal/capability`, `internal/skills`, `internal/marketplace`, `internal/tooling/native_*`, `internal/tooling/capability_*`, `internal/scheduler/capability*` (zero violations on first run); (4) revocation — `lifecycleCtx` + `mergeContexts` in `internal/capability/handle/instance.go`, exercised by `TestInstantiator_CloseRevokesAllHandles` + per-handle `ErrRevoked` tests; (5) forge token — `TestMintRuntimeTokenIsRuntimeOnly`. **Output sanitization deferred to #411** — requires `Runtime.Invoke` as the single tool-execution seam (post-Executor-unification). Until then, the per-handle MarshalJSON refusal blocks the only LLM-reachable path (JSON outputs). |

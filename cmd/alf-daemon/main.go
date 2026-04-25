@@ -19,6 +19,7 @@ import (
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/runtime/classifier"
+	"github.com/alamparelli/alf/internal/runtime/llm"
 	firewall "github.com/alamparelli/alf/internal/sandbox/network"
 	"github.com/alamparelli/alf/internal/marketplace"
 	"github.com/alamparelli/alf/internal/envsecrets"
@@ -554,6 +555,14 @@ func main() {
 	registry := provider.NewRegistry(cliProvider)
 	registerBackends(registry, cfg, apiHistory, vaultMgr)
 	registerCodex(registry, dataDir, tiersTimeout, vaultMgr, alfCred)
+
+	// #400 Stage 1: install the daemon-shipped kernel prompt so every
+	// LLM call gets the §3.2 agent-mediation rules (memory policy +
+	// capability-content non-authority + admin-boundary refusals)
+	// prepended to its SystemPrompts. Wrapping is transparent to all
+	// callers of registry.ForBackend.
+	registry.SetKernelPrompt(llm.KernelPrompt())
+	log.Println("kernel prompt: §3.2 agent-mediation rules attached to every LLM request")
 
 	// Multi-agent coordinator.
 	resolveTier := func(tierName string) (agents.TierParams, bool) {

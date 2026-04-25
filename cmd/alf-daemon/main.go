@@ -719,6 +719,17 @@ func main() {
 	if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
 		log.Printf("skills: capability mirror (initial): %v", err)
 	}
+
+	// #386 step 12 follow-up: WASM bundle loader. Scans <skillsDir>/wasm/,
+	// runs verify+forge+instantiate per bundle, registers each adapter into
+	// capRegistry. Per-bundle errors are logged and skipped; init failures
+	// downgrade to a warning so the daemon stays usable for non-WASM flows.
+	wasmRt, err := setupWASMLoader(context.Background(), dataDir, skillsDir, capRegistry, log.Printf)
+	if err != nil {
+		log.Printf("wasm-loader: init failed (WASM bundles will not load): %v", err)
+	} else {
+		defer func() { _ = wasmRt.Close(context.Background()) }()
+	}
 	nativeTools := []tooling.NativeTool{
 		tooling.BashNativeTool{DataDir: dataDir},
 		tooling.GrepNativeTool{DataDir: dataDir},

@@ -25,6 +25,7 @@ type Manifest struct {
 
 	FS     FSBlock
 	Events EventsBlock
+	Tools  ToolsBlock
 }
 
 // ManifestKind enumerates the capability kinds recognised by the 0.8.0
@@ -80,6 +81,22 @@ type EventSubscription struct {
 	Topic string
 }
 
+// ToolsBlock captures [[tools.declares]] per ARCHITECTURE-SECURITY §3.1
+// + #389. Each declaration names another capability ID this capability
+// is authorised to invoke. The forge materialises a single ToolHandle
+// scoped to the listed IDs; tools not in declares are invisible to the
+// LLM tool surface (not blocked, absent — see #389 acceptance criteria).
+type ToolsBlock struct {
+	Declares []ToolDeclaration
+}
+
+// ToolDeclaration is one entry in [[tools.declares]]. ID matches the
+// idPattern regex (lowercase, digits, hyphens) — same shape as a
+// capability id elsewhere in the schema.
+type ToolDeclaration struct {
+	ID string
+}
+
 // tomlManifest is the raw TOML-decoded shape. Field tags drive the
 // pelletier/go-toml/v2 unmarshal. Separate from Manifest so we can
 // detect unknown fields by unmarshalling into a strict struct then
@@ -94,13 +111,13 @@ type tomlManifest struct {
 
 	FS     tomlFSBlock     `toml:"fs"`
 	Events tomlEventsBlock `toml:"events"`
+	Tools  tomlToolsBlock  `toml:"tools"`
 
 	// Deferred blocks — presence is a validation error. We decode them
 	// to detect presence only; contents are ignored.
 	HTTP    *map[string]any `toml:"http"`
 	Exec    *map[string]any `toml:"exec"`
 	Secrets *map[string]any `toml:"secrets"`
-	Tools   *map[string]any `toml:"tools"`
 	Memory  *map[string]any `toml:"memory"`
 }
 
@@ -125,4 +142,12 @@ type tomlEventExport struct {
 type tomlEventSubscription struct {
 	From  string `toml:"from"`
 	Topic string `toml:"topic"`
+}
+
+type tomlToolsBlock struct {
+	Declares []tomlToolDeclaration `toml:"declares"`
+}
+
+type tomlToolDeclaration struct {
+	ID string `toml:"id"`
 }

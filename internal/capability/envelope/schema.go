@@ -35,6 +35,9 @@ var (
 	ErrEventTopicMalformed        = errors.New("envelope: events topic must match ^[a-z0-9][a-z0-9._-]*$")
 	ErrEventSubscribeFromEmpty    = errors.New("envelope: events.subscribes.from is empty")
 	ErrEventSubscribeFromMalformed = errors.New("envelope: events.subscribes.from must match ^[a-z0-9][a-z0-9-]*$")
+	ErrToolDeclareIDEmpty          = errors.New("envelope: tools.declares.id is empty")
+	ErrToolDeclareIDMalformed      = errors.New("envelope: tools.declares.id must match ^[a-z0-9][a-z0-9-]*$")
+	ErrToolDeclareDuplicate        = errors.New("envelope: tools.declares contains duplicate id")
 )
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -116,9 +119,6 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 	if t.Secrets != nil {
 		return nil, fmt.Errorf("%w: secrets (lands in 0.9.0+ alongside secrets.Handle)", ErrBlockDeferred)
 	}
-	if t.Tools != nil {
-		return nil, fmt.Errorf("%w: tools (lands under #389)", ErrBlockDeferred)
-	}
 	if t.Memory != nil {
 		return nil, fmt.Errorf("%w: memory (lands under #400)", ErrBlockDeferred)
 	}
@@ -164,6 +164,12 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		return nil, err
 	}
 
+	// tools block (#389).
+	tools, err := validateToolsBlock(t.Tools)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Manifest{
 		EnvelopeVersion: *t.AlfEnvelopeVersion,
 		ID:              t.ID,
@@ -173,6 +179,7 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		Description:     t.Description,
 		FS:              fs,
 		Events:          events,
+		Tools:           tools,
 	}, nil
 }
 
@@ -222,6 +229,33 @@ func validateEventsBlock(raw tomlEventsBlock) (EventsBlock, error) {
 		subs = append(subs, EventSubscription{From: s.From, Topic: s.Topic})
 	}
 	return EventsBlock{Exports: exports, Subscribes: subs}, nil
+}
+
+// validateToolsBlock walks tools.declares and rejects malformed entries.
+// Per ARCHITECTURE-SECURITY §3.1 + #389, each declared id is the
+// capability ID of another tool the holder is authorised to invoke.
+// Exact match only — wildcards are intentionally not supported so the
+// install-time UI can surface every coupling and revocation can cascade.
+func validateToolsBlock(raw tomlToolsBlock) (ToolsBlock, error) {
+	if len(raw.Declares) == 0 {
+		return ToolsBlock{}, nil
+	}
+	out := make([]ToolDeclaration, 0, len(raw.Declares))
+	seen := make(map[string]struct{}, len(raw.Declares))
+	for i, d := range raw.Declares {
+		if d.ID == "" {
+			return ToolsBlock{}, fmt.Errorf("%w: tools.declares[%d]", ErrToolDeclareIDEmpty, i)
+		}
+		if !idPattern.MatchString(d.ID) {
+			return ToolsBlock{}, fmt.Errorf("%w: tools.declares[%d].id=%q", ErrToolDeclareIDMalformed, i, d.ID)
+		}
+		if _, dup := seen[d.ID]; dup {
+			return ToolsBlock{}, fmt.Errorf("%w: tools.declares[%d].id=%q", ErrToolDeclareDuplicate, i, d.ID)
+		}
+		seen[d.ID] = struct{}{}
+		out = append(out, ToolDeclaration{ID: d.ID})
+	}
+	return ToolsBlock{Declares: out}, nil
 }
 
 func validateFSPaths(raw []tomlFSPath, block string) ([]FSPath, error) {

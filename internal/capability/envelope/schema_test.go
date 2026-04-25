@@ -143,11 +143,12 @@ path = "data/"
 func TestValidate_DeferredBlocksRejected(t *testing.T) {
 	// `events` no longer deferred — landed under #399. See
 	// TestValidate_EventsBlock_* for the events-block coverage.
+	// `tools` no longer deferred — landed under #389. See
+	// TestValidate_ToolsBlock_* for the tools-block coverage.
 	cases := map[string]string{
 		"http":    "[[http.scopes]]\nhost = \"x.com\"\n",
 		"exec":    "[[exec.commands]]\npath = \"/bin/x\"\n",
 		"secrets": "[[secrets.scopes]]\nname = \"x\"\n",
-		"tools":   "[[tools.declares]]\nid = \"x\"\n",
 		"memory":  "[memory]\nscope = \"x\"\n",
 	}
 	for blk, snippet := range cases {
@@ -217,6 +218,76 @@ func TestValidate_AllKinds(t *testing.T) {
 		if m.Kind != kindConst {
 			t.Errorf("kind=%s: Manifest.Kind=%q", kindStr, m.Kind)
 		}
+	}
+}
+
+func TestValidate_ToolsBlock_HappyPath(t *testing.T) {
+	input := validManifest() + `
+[[tools.declares]]
+id = "read-file"
+
+[[tools.declares]]
+id = "bash"
+`
+	m, err := Validate([]byte(input))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if len(m.Tools.Declares) != 2 {
+		t.Fatalf("Tools.Declares=%d, want 2", len(m.Tools.Declares))
+	}
+	if m.Tools.Declares[0].ID != "read-file" || m.Tools.Declares[1].ID != "bash" {
+		t.Errorf("declares=%v, want [read-file, bash]", m.Tools.Declares)
+	}
+}
+
+func TestValidate_ToolsBlock_NoBlockAllowed(t *testing.T) {
+	// Skill / tool with no [[tools.declares]] is valid — the forge
+	// produces a nil ToolHandle, the cap cannot invoke any other.
+	m, err := Validate([]byte(validManifest()))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if len(m.Tools.Declares) != 0 {
+		t.Errorf("Tools.Declares should be empty, got %v", m.Tools.Declares)
+	}
+}
+
+func TestValidate_ToolsBlock_EmptyIDRejected(t *testing.T) {
+	input := validManifest() + `
+[[tools.declares]]
+id = ""
+`
+	_, err := Validate([]byte(input))
+	if !errors.Is(err, ErrToolDeclareIDEmpty) {
+		t.Fatalf("want ErrToolDeclareIDEmpty, got %v", err)
+	}
+}
+
+func TestValidate_ToolsBlock_MalformedIDRejected(t *testing.T) {
+	for _, bad := range []string{"UPPER", "with_underscore", "-leading-dash", "with.dot"} {
+		input := validManifest() + `
+[[tools.declares]]
+id = "` + bad + `"
+`
+		_, err := Validate([]byte(input))
+		if !errors.Is(err, ErrToolDeclareIDMalformed) {
+			t.Errorf("id=%q: want ErrToolDeclareIDMalformed, got %v", bad, err)
+		}
+	}
+}
+
+func TestValidate_ToolsBlock_DuplicateIDRejected(t *testing.T) {
+	input := validManifest() + `
+[[tools.declares]]
+id = "bash"
+
+[[tools.declares]]
+id = "bash"
+`
+	_, err := Validate([]byte(input))
+	if !errors.Is(err, ErrToolDeclareDuplicate) {
+		t.Fatalf("want ErrToolDeclareDuplicate, got %v", err)
 	}
 }
 

@@ -98,6 +98,19 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 		}
 	}
 
+	// Tools block forging (#389). Same shape as the events branch:
+	// only runs when an invoker is wired so the legacy Instantiate
+	// path and tests that don't exercise the tool surface stay
+	// untouched. Manifests that declare zero tools yield a nil
+	// ToolHandle — the cap has no inter-capability invocation surface.
+	if i.invoker != nil && len(vm.Manifest.Tools.Declares) > 0 {
+		allowed := make([]capability.ID, 0, len(vm.Manifest.Tools.Declares))
+		for _, d := range vm.Manifest.Tools.Declares {
+			allowed = append(allowed, capability.ID(d.ID))
+		}
+		grants.Tool = handle.NewToolHandle(capManifest.ID, handle.ToolScope{Allowed: allowed}, i.invoker)
+	}
+
 	inst, err := handle.ForgeInstance(i.token, ctx, capManifest.ID, grants)
 	if err != nil {
 		return nil, err

@@ -64,6 +64,14 @@ type Instantiator struct {
 	bus       handle.EventPublisher
 	subscribe handle.EventSubscriber
 	crossFlow CrossFlowQuerier
+
+	// invoker is the optional inter-capability invoker (#389). When
+	// non-nil, InstantiateVerified forges a ToolHandle scoped to the
+	// manifest's [[tools.declares]] entries. When nil (tests + legacy
+	// callers), Tool handles stay nil and capabilities cannot reach
+	// other capabilities even if their manifest declared the link —
+	// matching the §3.1 invariant "no invoker, no authority".
+	invoker handle.ToolInvoker
 }
 
 // CrossFlowQuerier is the narrow read-side of internal/runtime/events
@@ -101,6 +109,16 @@ func WithEventsBus(pub handle.EventPublisher, sub handle.EventSubscriber) Instan
 // handle forging; without it InstantiateVerified skips event handles.
 func WithCrossFlowRegistry(r CrossFlowQuerier) InstantiatorOption {
 	return func(i *Instantiator) { i.crossFlow = r }
+}
+
+// WithToolInvoker wires the inter-capability invoker that ToolHandle
+// dispatches through (#389). Production daemons plug in a registry-
+// backed invoker so a skill's declared tool calls reach the right
+// capability; tests pass a stub that records invocations. When this
+// option is omitted, [[tools.declares]] entries in a manifest are
+// validated but no Tool handle is forged.
+func WithToolInvoker(inv handle.ToolInvoker) InstantiatorOption {
+	return func(i *Instantiator) { i.invoker = inv }
 }
 
 // NewInstantiator constructs the singleton forge for a daemon process.
@@ -180,9 +198,11 @@ func (i *Instantiator) forgeGrants(signed SignedManifest) handle.Grants {
 		}, nil)
 	}
 
-	// Exec + Tool: no fields in today's Manifest. Both stay nil — a
-	// capability loaded now has no spawn or inter-cap invocation
-	// surface through its handle until the schema grows.
+	// Exec: no field on today's legacy Manifest — stays nil.
+	// Tool: forged in InstantiateVerified from envelope.Manifest.Tools
+	// when an invoker is wired, mirroring how event handles are forged.
+	// Going through the legacy SignedManifest path always yields a nil
+	// Tool handle.
 
 	return g
 }

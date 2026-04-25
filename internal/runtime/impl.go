@@ -471,6 +471,44 @@ func buildToolSpecs(manifests []capability.Manifest) []ai.ToolSpec {
 	return specs
 }
 
+// BuildScopedToolSpecs is the #389 Tier 3.1 tool-surface filter: it
+// projects the registry's manifests into ToolSpec form, then keeps
+// only the entries whose ID matches an allowlist. A nil or empty
+// allowed slice means "no tools" — the LLM sees an empty tool menu,
+// matching the §3.1 promise that capabilities cannot reach what their
+// manifest did not declare.
+//
+// "Not blocked, absent" — the §3.1 acceptance criterion is structural,
+// not a runtime check. Tools outside the allowlist do not appear in
+// the spec returned to the provider, so the LLM never learns they
+// exist for this turn.
+//
+// Production wire-in arrives when the orchestrator + Runtime.Invoke
+// expose an explicit "active skill" boundary; until then, this helper
+// covers the structural contract the forge depends on (Étape 2's
+// ToolHandle scope mirrors what this function produces — same
+// allowlist, same shape).
+func BuildScopedToolSpecs(manifests []capability.Manifest, allowed []capability.ID) []ai.ToolSpec {
+	if len(manifests) == 0 || len(allowed) == 0 {
+		return nil
+	}
+	allowedSet := make(map[capability.ID]struct{}, len(allowed))
+	for _, id := range allowed {
+		allowedSet[id] = struct{}{}
+	}
+	specs := make([]ai.ToolSpec, 0, len(allowed))
+	for _, m := range manifests {
+		if _, ok := allowedSet[m.ID]; !ok {
+			continue
+		}
+		specs = append(specs, ai.ToolSpec{
+			Name:        string(m.ID),
+			Description: m.Description,
+		})
+	}
+	return specs
+}
+
 // toAIMessages flattens the persisted history into the provider-facing
 // {Role, Content} shape the ai.Engine consumes. Tool-use/tool-result
 // structure is preserved by FlattenForAPI only as plain text; richer

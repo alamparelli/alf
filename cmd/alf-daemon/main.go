@@ -739,6 +739,25 @@ func main() {
 	} else {
 		defer func() { _ = wasmRt.Close(context.Background()) }()
 	}
+
+	// #389 step 8: verified-skill loader. Walks the same directories
+	// the legacy skillStore scans, prepares each signed bundle, and
+	// forges a handle.Instance per verified skill. Reuses the shared
+	// Instantiator + daemon key from wasmRt (§4.3 one-shot mint).
+	// Skills without a manifest.toml stay on the legacy MirrorInto
+	// path during the transition; both paths coexist until every
+	// shipped + user skill has migrated.
+	skillDirs := []string{skillsDir, filepath.Join(dataDir, "skills.d"), filepath.Join(dataDir, "skills")}
+	var skillsRt *skillsRuntime
+	if wasmRt != nil {
+		skillsRt, err = setupSkillsLoader(context.Background(), skillDirs, wasmRt, log.Printf)
+		if err != nil {
+			log.Printf("skills-loader: init failed (verified-skill forge will not run): %v", err)
+		} else {
+			defer skillsRt.Close()
+		}
+	}
+	_ = skillsRt
 	nativeTools := []tooling.NativeTool{
 		tooling.BashNativeTool{DataDir: dataDir},
 		tooling.GrepNativeTool{DataDir: dataDir},
@@ -1606,6 +1625,17 @@ func main() {
 				injectAppTriggers(skillStore, filepath.Join(dataDir, "apps"))
 				if err := skills.MirrorInto(skillStore, capRegistry); err != nil {
 					log.Printf("skills: capability mirror (reload): %v", err)
+				}
+				// #389 step 8: re-run the verified-skill forge so manifest.toml
+				// edits take effect immediately. Old Instances are revoked
+				// before the new batch goes live.
+				if skillsRt != nil && wasmRt != nil {
+					next, err := setupSkillsLoader(context.Background(), skillDirs, wasmRt, log.Printf)
+					if err != nil {
+						log.Printf("skills-loader (reload): %v", err)
+					} else {
+						skillsRt.Replace(next.verified)
+					}
 				}
 				log.Println("skills reloaded")
 			}

@@ -26,6 +26,15 @@ type wasmRuntime struct {
 	loader    *wasm.Loader
 	bus       *events.Bus
 	crossFlow *events.MemoryRegistry
+
+	// Inst is the shared Instantiator. A single RuntimeToken is minted
+	// per process (§4.3 invariant), so any other loader that needs to
+	// forge handles (skill loader, future provider loader) must reuse
+	// this one. DaemonPriv + TrustStore are exposed for the same reason
+	// — every kind shares the §7.3 Tier 2 daemon key.
+	Inst       *runtime.Instantiator
+	DaemonPriv envelope.PrivateKey
+	TrustStore *envelope.MemoryTrustStore
 }
 
 // Close tears down the wazero runtime. Safe on nil receiver so main()
@@ -97,5 +106,13 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 		logf("[wasm-loader] error: %v", e)
 	}
 
-	return &wasmRuntime{rt: rt, loader: loader, bus: bus, crossFlow: crossFlow}, nil
+	return &wasmRuntime{
+		rt:         rt,
+		loader:     loader,
+		bus:        bus,
+		crossFlow:  crossFlow,
+		Inst:       inst,
+		DaemonPriv: priv,
+		TrustStore: store,
+	}, nil
 }

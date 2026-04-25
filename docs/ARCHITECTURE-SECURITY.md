@@ -205,6 +205,30 @@ The user sees the coupling and consents (or not). Each cross-flow is a named edg
 
 **What this closes:** the simple exfiltration path where cap-A (http) passively picks up cap-B's (memory-reader) events. Without a declared flow from B to A, they cannot communicate, regardless of topic name collision.
 
+#### 0.8.0 implementation status
+
+The §3.3 model lands in two stages:
+
+**Stage 1 (0.8.0 #399 MVP — structural core):**
+
+- New package `internal/runtime/events/` holds the in-memory bus (`busImpl`).
+- New handle types `EventPub` / `EventSub` in `internal/capability/handle/` follow §4.2 hygiene (non-serializable, `lifecycleCtx`-bound revocation).
+- Manifest schema accepts `[[events.exports]]` (`topic`) and `[[events.subscribes]]` (`from`, `topic`); the post-#388 `envelope.Verify` pipeline already signs both sides.
+- `wasm.Loader.LoadDir` does **two passes**: pass 1 reads + validates every manifest, then builds a publisher-topic registry from `events.exports`; pass 2 forges `EventSub` handles only when the cited publisher is installed AND its signed manifest declares the matching export. Two-pass is necessary so a subscriber loaded before its publisher in alphabetical order still gets its handle.
+- **Boot-time observability** (UX placeholder per hard rule #5 "surfaced at install"): every forged cross-flow logs `[events] cross-flow established: <sub> ← <pub>:"<topic>"` at boot, and a `<dataDir>/events/active-flows.json` snapshot is written after each load. The JSON file is the data path that #395 (CC ratification page) will consume to render an interactive review surface; the log line is what is visible today.
+
+**Stage 1 explicitly defers:**
+
+- *Interactive ratification UI* — needs the CC ratification page (#395). The JSON snapshot is the data shape that page will read.
+- *Publisher fingerprint scoping* (`from = "alf-marketplace:cap-B"` vs bare `from = "cap-B"`) — needs #392 capability providers + the namespacing layer it introduces.
+- *Per-topic rate limits* — follow-up; the bus design accepts quota injection without core rewrite.
+- *Audit log entries on publish/deliver* — needs #396 audit stream.
+- *Output sanitizer rejection of leaked event handles* — needs the `Runtime.Invoke` single seam (#411).
+
+The structural property — *no cross-flow exists without two signed declarations* — is fully enforced by Stage 1. The deferred pieces add anti-spoofing / anti-flood / observability layers on top of the same structural foundation.
+
+**Stage 2 (0.9.0+):** the deferred pieces above land as their dependencies clear.
+
 ---
 
 ## 4. Implementation constraints

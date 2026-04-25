@@ -767,7 +767,7 @@ Revocation must work end-to-end, online and offline, across cascades. Details in
 5. **Layer 3 Tier 3.3 (events private-by-default):** no default cross-capability bus. Every cross-flow is two declarations, signed, surfaced at install.
 6. **Go-kind is maintainer-only.** Third-party = WASM-kind obligatory.
 7. **One forge.** `Instance` constructed only via `Runtime.Instantiate` with its runtime-token.
-8. **One seam.** Every Capability execution goes through `Runtime.Invoke` (`#383`).
+8. **One seam — aspirational for non-WASM.** Every WASM-kind Capability execution goes through `wasm.Adapter` (#386); Go-kind tool execution today flows through a curated set of wiring layers (`TestExecutorImportScopePinned`) rather than a single seam. The single-seam refactor for Go-kind is deferred — see #383 close-out + §4.4. Under §4.1 (Go-kind = TCB), this is acceptable.
 9. **Admin boundary hard.** `alf trust add / install / sign / provider install` never reachable from any handle or tool. TTY-only or CC-via-session-cookie.
 10. **No parallel auth system.** A new feature that wants to gate something builds a handle type for it (Tier 3.1), asks the LLM gatekeeper (Tier 3.2), or declares a cross-flow (Tier 3.3). It does not add a middleware predicate.
 
@@ -777,7 +777,7 @@ CI-enforced via `internal/archtest/`:
 |---|---|
 | No `*memory.storeImpl` outside `memory/` | `TestMemoryImplPrivate` |
 | No `*events.busImpl` outside `events/` | `TestEventsBusImplPrivate` |
-| No `tooling.Executor` import outside `runtime/` | `TestExecutorImplPrivate` |
+| `tooling.Executor` importers pinned to a curated allow-list | `TestExecutorImportScopePinned` |
 | No capability package takes `*Store` / `*Bus` / `*Registry` | `TestCapabilityPkgNoAmbientAuth` |
 | `Instance` forge requires `runtimeToken` | `TestForgeRequiresRuntimeToken` |
 | `trust.Verify` called before `forgeGrants` (single call site) | `TestOneVerifyCallSite` |
@@ -843,7 +843,7 @@ Use this when adding code that touches the security boundary:
 | `#397` canonicalization + signature envelope spec | L2 | pin format, parser, algo to close SAML/JWT-class gaps |
 | `#391` ocap foundation — forge + Tier 3.1 handles | L3.1 | **Implemented** on `release/0.8.0` across 8 commits (`ba1c2a1` → `ed4778f`): `internal/capability/handle/` carries all five Tier 3.1 types (FS, HTTP, Exec, Secrets, Tool) with uniform scope / revocation / non-serializable / lifecycle semantics; `handle.RuntimeToken` + `ForgeInstance` realise the §4.3 three-lock forge gate; `runtime.Instantiator` is the first consumer with `trust.Verify` stubbed (nopVerifier) pending #388; archtest `TestMintRuntimeTokenIsRuntimeOnly` + `TestNoPluginStdlibImport` + TCB hygiene live. 71 tests. See comment trail on #391. Migration of existing capabilities deferred to #398/#399/#400. |
 | `#392` capability providers (user-extensible registry) | L3.1 | signed providers export new handle kinds |
-| `#383` bypass elimination (one seam) | seam | `tooling.Executor` package-private under ocap |
+| `#383` bypass elimination (one seam) | seam | **Closed via reframe**: original "bypass = security hole" framing depended on Policy-on-ctx (gone in #406). Under §4.4, Go-kind tool execution is in TCB and the "bypass" framing no longer applies. WASM-kind tools already route through `wasm.Adapter` (#386) — separate from `tooling.Executor`. What landed: `TestExecutorImportScopePinned` archtest pinning the curated set of `tooling.Executor` importers (cmd/alf-daemon, internal/runtime/{engine,pipeline,agents}, internal/controlcenter/chat_service, internal/ai/provider/tooling_adapter). New importers require allow-list update + reviewer sign-off. Full Executor-unification refactor deferred to a 0.9.0 follow-up — see #383 close-out comment. |
 | `#389` skills as first-class | L3.1 + L3.2 | skills = signed cap; `declares` → tool handles; memory via agent |
 | `#399` events private-by-default | L3.3 | replaces the events half of old #390 |
 | `#400` memory agent-mediated + kernel prompt + alf policy | L3.2 | replaces the memory half of old #390 |

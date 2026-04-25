@@ -235,10 +235,11 @@ func TestHandleTypesRejectJSONMarshal(t *testing.T) {
 }
 
 // skipOcapDir mirrors the existing archtest walker: skip ignorable
-// directories we never want to scan (vendor deps, build output, VCS).
+// directories we never want to scan (vendor deps, build output, VCS,
+// agent worktrees that mirror the repo under .claude/).
 func skipOcapDir(name string) bool {
 	switch name {
-	case "node_modules", "vendor", ".git", "dist", "build":
+	case "node_modules", "vendor", ".git", ".claude", "dist", "build":
 		return true
 	}
 	return false

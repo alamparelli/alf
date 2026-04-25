@@ -26,8 +26,8 @@ type Module struct {
 	Manifest *envelope.Manifest
 	Guest    api.Module
 
-	compiled wazero.CompiledModule
-	host     api.Module
+	compiled       wazero.CompiledModule
+	hostUnregister func() // unregisters this guest's FSHandle from the runtime's host registry
 }
 
 // Close tears down the module: first cancels the handle.Instance
@@ -55,8 +55,8 @@ func (m *Module) Close(ctx context.Context) error {
 	if m.Guest != nil {
 		set(m.Guest.Close(ctx))
 	}
-	if m.host != nil {
-		set(m.host.Close(ctx))
+	if m.hostUnregister != nil {
+		m.hostUnregister()
 	}
 	if m.compiled != nil {
 		set(m.compiled.Close(ctx))
@@ -69,20 +69,23 @@ func (m *Module) Close(ctx context.Context) error {
 // produce live guest modules.
 //
 // One Runtime per daemon process. It owns the WASI import
-// registration and the wasm.Engine lifecycle. NewRuntime must be
+// registration, the shared "alf" host module, the per-guest FS
+// handle registry, and the wasm.Engine lifecycle. NewRuntime must be
 // called after the Instantiator has been constructed (the runtime
 // token is minted there).
 type Runtime struct {
-	engine *Engine
-	inst   *runtime.Instantiator
+	engine  *Engine
+	inst    *runtime.Instantiator
+	hostMod api.Module       // the singleton "alf" host module
+	hostReg *hostFSRegistry  // per-guest FSHandle dispatch table
 }
 
 // NewRuntime constructs the daemon-wide WASM runtime. It takes over
 // the provided ctx for the wazero runtime's lifetime (cancelling the
 // ctx cascades to every guest instance via WithCloseOnContextDone).
-// WASI preview 1 is registered once at construction; subsequent
-// Instantiate calls can link wasi_snapshot_preview1 imports into
-// any guest.
+// WASI preview 1 is registered once at construction; the shared "alf"
+// host module is registered next so subsequent Instantiate calls only
+// need to register the per-guest FSHandle in the dispatch table.
 func NewRuntime(ctx context.Context, inst *runtime.Instantiator) (*Runtime, error) {
 	if inst == nil {
 		return nil, fmt.Errorf("wasm: NewRuntime requires a non-nil Instantiator")
@@ -92,7 +95,13 @@ func NewRuntime(ctx context.Context, inst *runtime.Instantiator) (*Runtime, erro
 		_ = e.Close(ctx)
 		return nil, fmt.Errorf("wasm: register WASI preview 1: %w", err)
 	}
-	return &Runtime{engine: e, inst: inst}, nil
+	reg := newHostFSRegistry()
+	hostMod, err := BuildHostModule(ctx, e.Runtime(), reg)
+	if err != nil {
+		_ = e.Close(ctx)
+		return nil, fmt.Errorf("wasm: register host module: %w", err)
+	}
+	return &Runtime{engine: e, inst: inst, hostMod: hostMod, hostReg: reg}, nil
 }
 
 // Close tears down the WASM runtime. All live modules are closed
@@ -162,35 +171,34 @@ func (r *Runtime) Instantiate(ctx context.Context, in envelope.VerifyInput, wasm
 		return nil, err
 	}
 
-	// 4. Host module. Exports are already scope-gated.
-	hostMod, err := BuildHostModule(ctx, r.engine.Runtime(), vi.Instance.FS)
-	if err != nil {
-		cleanupCM()
-		cleanupInst()
-		return nil, fmt.Errorf("wasm: host module: %w", err)
-	}
-	cleanupHost := func() { _ = hostMod.Close(ctx) }
+	// 4. Register this guest's FSHandle in the runtime's per-guest
+	// dispatch table. The shared "alf" host module (registered at
+	// NewRuntime) routes alf_fs_* calls to this handle by reading
+	// the calling guest's wazero module name.
+	guestName := string(vi.Manifest.ID)
+	r.hostReg.Register(guestName, vi.Instance.FS)
+	cleanupHostReg := func() { r.hostReg.Unregister(guestName) }
 
 	// 5. Instantiate guest in reactor mode. WithStartFunctions
 	// replaces the default "_start" with "_initialize" — if the
 	// module has _initialize, wazero calls it and returns; otherwise
 	// it's silently skipped (wazero v1.11 config.go).
 	modCfg := wazero.NewModuleConfig().
-		WithName(string(vi.Manifest.ID)).
+		WithName(guestName).
 		WithStartFunctions("_initialize")
 	guest, err := r.engine.Runtime().InstantiateModule(ctx, cm, modCfg)
 	if err != nil {
-		cleanupHost()
+		cleanupHostReg()
 		cleanupCM()
 		cleanupInst()
 		return nil, fmt.Errorf("wasm: instantiate guest: %w", err)
 	}
 
 	return &Module{
-		Instance: vi.Instance,
-		Manifest: vi.Manifest,
-		Guest:    guest,
-		compiled: cm,
-		host:     hostMod,
+		Instance:       vi.Instance,
+		Manifest:       vi.Manifest,
+		Guest:          guest,
+		compiled:       cm,
+		hostUnregister: cleanupHostReg,
 	}, nil
 }

@@ -19,11 +19,13 @@ import (
 // §3.1 per-resource handle table and grows as new Tier 3.1 handle types
 // are added; existing call sites are insulated from new slots.
 type Grants struct {
-	FS      *FSHandle
-	HTTP    *HTTPHandle
-	Exec    *ExecHandle
-	Secrets *SecretsHandle
-	Tool    *ToolHandle
+	FS        *FSHandle
+	HTTP      *HTTPHandle
+	Exec      *ExecHandle
+	Secrets   *SecretsHandle
+	Tool      *ToolHandle
+	EventPub  *EventPub   // one publisher handle covers all exported topics
+	EventSubs []*EventSub // one handle per (from, topic) cross-flow
 }
 
 // Instance aggregates every handle a capability received. A nil field means
@@ -36,6 +38,8 @@ type Instance struct {
 	Exec         *ExecHandle
 	Secrets      *SecretsHandle
 	Tool         *ToolHandle
+	EventPub     *EventPub
+	EventSubs    []*EventSub
 	lifecycleCtx context.Context
 	cancel       context.CancelFunc
 	closeOnce    sync.Once
@@ -72,6 +76,17 @@ func NewInstance(ctx context.Context, owner capability.ID, g Grants) *Instance {
 		g.Tool.attachLifecycle(lc)
 		inst.Tool = g.Tool
 	}
+	if g.EventPub != nil {
+		g.EventPub.attachLifecycle(lc)
+		inst.EventPub = g.EventPub
+	}
+	for _, sub := range g.EventSubs {
+		if sub == nil {
+			continue
+		}
+		sub.attachLifecycle(lc)
+		inst.EventSubs = append(inst.EventSubs, sub)
+	}
 	return inst
 }
 
@@ -99,6 +114,12 @@ func (i *Instance) Close() {
 		}
 		if i.Tool != nil {
 			i.Tool.revoked.Store(true)
+		}
+		if i.EventPub != nil {
+			i.EventPub.revoked.Store(true)
+		}
+		for _, sub := range i.EventSubs {
+			sub.revoke()
 		}
 	})
 }

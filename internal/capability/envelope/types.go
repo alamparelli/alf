@@ -23,7 +23,8 @@ type Manifest struct {
 	Name            string
 	Description     string
 
-	FS FSBlock
+	FS     FSBlock
+	Events EventsBlock
 }
 
 // ManifestKind enumerates the capability kinds recognised by the 0.8.0
@@ -53,6 +54,32 @@ type FSPath struct {
 	Path string
 }
 
+// EventsBlock captures the [[events.exports]] / [[events.subscribes]]
+// arrays per §3.3 of ARCHITECTURE-SECURITY.md. Empty slices mean "no
+// publish/subscribe authority" — the cap gets no event handle in
+// Grants.
+type EventsBlock struct {
+	Exports    []EventExport
+	Subscribes []EventSubscription
+}
+
+// EventExport declares one topic this capability is authorised to
+// publish on. Other capabilities may subscribe by referencing this
+// (publisher-id, topic) pair in their own events.subscribes.
+type EventExport struct {
+	Topic string
+}
+
+// EventSubscription declares one cross-flow this capability requests:
+// receive events from publisher From on topic Topic. The Runtime forge
+// only materialises an EventSub handle when the named publisher is
+// installed AND its signed manifest declares the topic in its
+// events.exports.
+type EventSubscription struct {
+	From  string
+	Topic string
+}
+
 // tomlManifest is the raw TOML-decoded shape. Field tags drive the
 // pelletier/go-toml/v2 unmarshal. Separate from Manifest so we can
 // detect unknown fields by unmarshalling into a strict struct then
@@ -65,16 +92,16 @@ type tomlManifest struct {
 	Name               string  `toml:"name"`
 	Description        string  `toml:"description"`
 
-	FS tomlFSBlock `toml:"fs"`
+	FS     tomlFSBlock     `toml:"fs"`
+	Events tomlEventsBlock `toml:"events"`
 
 	// Deferred blocks — presence is a validation error. We decode them
 	// to detect presence only; contents are ignored.
-	HTTP     *map[string]any `toml:"http"`
-	Exec     *map[string]any `toml:"exec"`
-	Secrets  *map[string]any `toml:"secrets"`
-	Events   *map[string]any `toml:"events"`
-	Tools    *map[string]any `toml:"tools"`
-	Memory   *map[string]any `toml:"memory"`
+	HTTP    *map[string]any `toml:"http"`
+	Exec    *map[string]any `toml:"exec"`
+	Secrets *map[string]any `toml:"secrets"`
+	Tools   *map[string]any `toml:"tools"`
+	Memory  *map[string]any `toml:"memory"`
 }
 
 type tomlFSBlock struct {
@@ -84,4 +111,18 @@ type tomlFSBlock struct {
 
 type tomlFSPath struct {
 	Path string `toml:"path"`
+}
+
+type tomlEventsBlock struct {
+	Exports    []tomlEventExport       `toml:"exports"`
+	Subscribes []tomlEventSubscription `toml:"subscribes"`
+}
+
+type tomlEventExport struct {
+	Topic string `toml:"topic"`
+}
+
+type tomlEventSubscription struct {
+	From  string `toml:"from"`
+	Topic string `toml:"topic"`
 }

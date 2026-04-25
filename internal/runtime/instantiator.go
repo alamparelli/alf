@@ -55,6 +55,23 @@ var ErrManifestID = errors.New("runtime: SignedManifest has empty Manifest.ID")
 type Instantiator struct {
 	token    handle.RuntimeToken
 	verifier TrustVerifier
+
+	// Bus and CrossFlow are the optional events wiring (#399). When
+	// both are non-nil, InstantiateVerified forges EventPub/EventSub
+	// handles per the manifest's events block + cross-flow registry.
+	// When either is nil (default for tests + legacy callers), no
+	// events handles are forged.
+	bus       handle.EventPublisher
+	subscribe handle.EventSubscriber
+	crossFlow CrossFlowQuerier
+}
+
+// CrossFlowQuerier is the narrow read-side of internal/runtime/events
+// CrossFlowRegistry that the Instantiator needs at forge time. Pulling
+// the type out as an interface keeps runtime → events a one-way
+// dependency (the forge never reaches into the bus impl).
+type CrossFlowQuerier interface {
+	HasExport(publisher capability.ID, topic string) bool
 }
 
 // InstantiatorOption configures an Instantiator at construction. Keeps
@@ -66,6 +83,24 @@ type InstantiatorOption func(*Instantiator)
 // tests and by the production daemon once #388 lands.
 func WithTrustVerifier(v TrustVerifier) InstantiatorOption {
 	return func(i *Instantiator) { i.verifier = v }
+}
+
+// WithEventsBus wires the cross-capability event bus (#399). Both pub
+// and sub interfaces typically come from the same *events.Bus instance;
+// they are split here so a future bus split (separate publisher / queue
+// router) can be wired without changing the Instantiator API.
+func WithEventsBus(pub handle.EventPublisher, sub handle.EventSubscriber) InstantiatorOption {
+	return func(i *Instantiator) {
+		i.bus = pub
+		i.subscribe = sub
+	}
+}
+
+// WithCrossFlowRegistry wires the publisher-topic registry the loader
+// populates in pass 1. Required (alongside WithEventsBus) for events
+// handle forging; without it InstantiateVerified skips event handles.
+func WithCrossFlowRegistry(r CrossFlowQuerier) InstantiatorOption {
+	return func(i *Instantiator) { i.crossFlow = r }
 }
 
 // NewInstantiator constructs the singleton forge for a daemon process.

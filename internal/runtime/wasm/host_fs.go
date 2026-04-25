@@ -28,44 +28,69 @@ func packResult(err, outLen uint32) uint64 {
 	return (uint64(err) << 32) | uint64(outLen)
 }
 
-// BuildHostModule compiles the "alf" host module for a single guest
-// instance. The FS handle is captured in closure — each guest gets
-// its own host module bound to its own forged handle. Functions are
-// exported CONDITIONALLY on scope: a guest whose manifest declared no
-// fs.reads receives a module without alf_fs_read, and wazero will
-// refuse to instantiate a guest that imports a function the host
-// module does not export. This is the "§3.5 only linked if authorised"
-// belt in WASM.md; CheckImports is the braces (step 3).
+// BuildHostModule registers the shared "alf" host module on rt. Because
+// wazero rejects duplicate module names, this MUST be called exactly
+// once per runtime — the daemon does so at NewRuntime time, after which
+// every guest instantiated on the same runtime imports from the same
+// shared module. Per-guest authority is routed via reg.Lookup(mod.Name()):
+// each host function reads the calling guest's wazero module name and
+// fetches its FSHandle from the registry the loader populated at forge.
 //
-// Returns the instantiated host module and any error from wazero.
-// The module's lifetime is tied to the runtime; it is closed implicitly
-// when the runtime closes, so callers do not need to track it
-// separately from the guest module it serves.
+// Always-export model: alf_fs_read and alf_fs_write are unconditionally
+// exported. The structural gate against ambient access is `CheckImports`
+// (run before InstantiateModule), which fails the guest if it imports a
+// function its manifest did not declare. The previous "conditional
+// export" pattern was belt-and-braces; CheckImports remains the braces.
 //
-// If fs is nil (manifest declared no fs at all), the host module is
-// empty — no alf_fs_* functions. A guest that imports them will fail
-// to instantiate, which is the desired structural outcome.
-func BuildHostModule(ctx context.Context, rt wazero.Runtime, fs *handle.FSHandle) (api.Module, error) {
+// Returns the instantiated host module — the runtime owns its lifetime
+// (closed when the engine closes).
+func BuildHostModule(ctx context.Context, rt wazero.Runtime, reg *hostFSRegistry) (api.Module, error) {
+	if reg == nil {
+		return nil, fmt.Errorf("wasm: BuildHostModule requires a host registry")
+	}
 	b := rt.NewHostModuleBuilder(hostModuleALF)
-
-	if fs != nil && len(fs.Scope().Reads) > 0 {
-		b.NewFunctionBuilder().
-			WithFunc(makeFSRead(fs)).
-			WithParameterNames("path_ptr", "path_len", "out_ptr", "out_max").
-			Export(fnAlfFSRead)
-	}
-	if fs != nil && len(fs.Scope().Writes) > 0 {
-		b.NewFunctionBuilder().
-			WithFunc(makeFSWrite(fs)).
-			WithParameterNames("path_ptr", "path_len", "data_ptr", "data_len").
-			Export(fnAlfFSWrite)
-	}
+	b.NewFunctionBuilder().
+		WithFunc(makeFSReadDispatch(reg)).
+		WithParameterNames("path_ptr", "path_len", "out_ptr", "out_max").
+		Export(fnAlfFSRead)
+	b.NewFunctionBuilder().
+		WithFunc(makeFSWriteDispatch(reg)).
+		WithParameterNames("path_ptr", "path_len", "data_ptr", "data_len").
+		Export(fnAlfFSWrite)
 
 	mod, err := b.Instantiate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("wasm: build host module: %w", err)
 	}
 	return mod, nil
+}
+
+// makeFSReadDispatch returns the alf_fs_read implementation. It looks
+// up the calling guest's FSHandle via mod.Name() — if no handle is
+// registered (guest instantiated outside the forge path, or registered
+// with empty scope), the call returns errIO. Same memory-only access
+// pattern as the original makeFSRead — archtest TestWASMHostFSUsesMemoryReadWriteOnly
+// continues to enforce it.
+func makeFSReadDispatch(reg *hostFSRegistry) func(context.Context, api.Module, uint32, uint32, uint32, uint32) uint64 {
+	return func(ctx context.Context, mod api.Module, pathPtr, pathLen, outPtr, outMax uint32) uint64 {
+		fs := reg.Lookup(mod.Name())
+		if fs == nil {
+			return packResult(errIO, 0)
+		}
+		return makeFSRead(fs)(ctx, mod, pathPtr, pathLen, outPtr, outMax)
+	}
+}
+
+// makeFSWriteDispatch is the alf_fs_write counterpart. Returns uint32
+// (err_code only) per WASM.md §3.2.
+func makeFSWriteDispatch(reg *hostFSRegistry) func(context.Context, api.Module, uint32, uint32, uint32, uint32) uint32 {
+	return func(ctx context.Context, mod api.Module, pathPtr, pathLen, dataPtr, dataLen uint32) uint32 {
+		fs := reg.Lookup(mod.Name())
+		if fs == nil {
+			return errIO
+		}
+		return makeFSWrite(fs)(ctx, mod, pathPtr, pathLen, dataPtr, dataLen)
+	}
 }
 
 // makeFSRead closes over the per-instance FSHandle and returns the

@@ -141,11 +141,12 @@ path = "data/"
 }
 
 func TestValidate_DeferredBlocksRejected(t *testing.T) {
+	// `events` no longer deferred — landed under #399. See
+	// TestValidate_EventsBlock_* for the events-block coverage.
 	cases := map[string]string{
 		"http":    "[[http.scopes]]\nhost = \"x.com\"\n",
 		"exec":    "[[exec.commands]]\npath = \"/bin/x\"\n",
 		"secrets": "[[secrets.scopes]]\nname = \"x\"\n",
-		"events":  "[[events.exports]]\ntopic = \"x\"\n",
 		"tools":   "[[tools.declares]]\nid = \"x\"\n",
 		"memory":  "[memory]\nscope = \"x\"\n",
 	}

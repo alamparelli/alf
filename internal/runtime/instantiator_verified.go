@@ -65,6 +65,39 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 		BaseDir:  baseDir,
 	}
 	grants := i.forgeGrants(signed)
+
+	// Events block forging (#399). Only runs when bus + cross-flow
+	// registry are wired; tests and legacy paths skip this entirely.
+	// EventPub is forged unconditionally for any capability that
+	// declared events.exports — the topics are baked into the handle's
+	// scope so a publish on an undeclared topic returns ErrTopicNotExported.
+	// EventSub is forged only when the cross-flow registry confirms
+	// the cited publisher is installed AND exports the topic.
+	if i.bus != nil && i.subscribe != nil && i.crossFlow != nil {
+		if len(vm.Manifest.Events.Exports) > 0 {
+			topics := make([]string, 0, len(vm.Manifest.Events.Exports))
+			for _, e := range vm.Manifest.Events.Exports {
+				topics = append(topics, e.Topic)
+			}
+			grants.EventPub = handle.NewEventPub(capManifest.ID, topics, i.bus)
+		}
+		for _, s := range vm.Manifest.Events.Subscribes {
+			fromID := capability.ID(s.From)
+			if !i.crossFlow.HasExport(fromID, s.Topic) {
+				// §3.3 private-by-default: no handle, no method, no leak.
+				// The loader logs this as an unresolved cross-flow.
+				continue
+			}
+			q, cleanup, err := i.subscribe.Subscribe(capManifest.ID, fromID, s.Topic)
+			if err != nil {
+				continue
+			}
+			grants.EventSubs = append(grants.EventSubs, handle.NewEventSub(
+				capManifest.ID, fromID, s.Topic, q, cleanup,
+			))
+		}
+	}
+
 	inst, err := handle.ForgeInstance(i.token, ctx, capManifest.ID, grants)
 	if err != nil {
 		return nil, err

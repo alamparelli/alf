@@ -31,9 +31,19 @@ var (
 	ErrFSPathEmpty                = errors.New("envelope: fs path is empty")
 	ErrFSPathAbsolute             = errors.New("envelope: fs path must be relative to bundle root")
 	ErrFSPathTraversal            = errors.New("envelope: fs path contains '..' segment")
+	ErrEventTopicEmpty            = errors.New("envelope: events topic is empty")
+	ErrEventTopicMalformed        = errors.New("envelope: events topic must match ^[a-z0-9][a-z0-9._-]*$")
+	ErrEventSubscribeFromEmpty    = errors.New("envelope: events.subscribes.from is empty")
+	ErrEventSubscribeFromMalformed = errors.New("envelope: events.subscribes.from must match ^[a-z0-9][a-z0-9-]*$")
 )
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// topicPattern allows lowercase, digits, dot/underscore/hyphen — matches
+// common topic-name conventions (e.g. "chat.log", "email.new", "task_done").
+// Wildcards / glob patterns are intentionally NOT permitted in 0.8.0
+// per the §3.3 promise of explicit cross-flows.
+var topicPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 // knownKinds is the enum of accepted manifest.kind values (MANIFEST-SCHEMA §3.3).
 var knownKinds = map[string]ManifestKind{
@@ -106,9 +116,6 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 	if t.Secrets != nil {
 		return nil, fmt.Errorf("%w: secrets (lands in 0.9.0+ alongside secrets.Handle)", ErrBlockDeferred)
 	}
-	if t.Events != nil {
-		return nil, fmt.Errorf("%w: events (lands under #399)", ErrBlockDeferred)
-	}
 	if t.Tools != nil {
 		return nil, fmt.Errorf("%w: tools (lands under #389)", ErrBlockDeferred)
 	}
@@ -151,6 +158,12 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		return nil, err
 	}
 
+	// events block (#399).
+	events, err := validateEventsBlock(t.Events)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Manifest{
 		EnvelopeVersion: *t.AlfEnvelopeVersion,
 		ID:              t.ID,
@@ -159,6 +172,7 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		Name:            t.Name,
 		Description:     t.Description,
 		FS:              fs,
+		Events:          events,
 	}, nil
 }
 
@@ -172,6 +186,42 @@ func validateFSBlock(raw tomlFSBlock) (FSBlock, error) {
 		return FSBlock{}, err
 	}
 	return FSBlock{Reads: reads, Writes: writes}, nil
+}
+
+// validateEventsBlock walks events.exports + events.subscribes and
+// rejects malformed entries. Per §3.3, both sides of a cross-flow are
+// declarative and must reference well-formed identifiers; the runtime
+// loader's two-pass cross-flow resolver enforces that the named
+// publisher exists, so this validation is purely format-level.
+func validateEventsBlock(raw tomlEventsBlock) (EventsBlock, error) {
+	exports := make([]EventExport, 0, len(raw.Exports))
+	for i, e := range raw.Exports {
+		if e.Topic == "" {
+			return EventsBlock{}, fmt.Errorf("%w: events.exports[%d]", ErrEventTopicEmpty, i)
+		}
+		if !topicPattern.MatchString(e.Topic) {
+			return EventsBlock{}, fmt.Errorf("%w: events.exports[%d].topic=%q", ErrEventTopicMalformed, i, e.Topic)
+		}
+		exports = append(exports, EventExport{Topic: e.Topic})
+	}
+
+	subs := make([]EventSubscription, 0, len(raw.Subscribes))
+	for i, s := range raw.Subscribes {
+		if s.From == "" {
+			return EventsBlock{}, fmt.Errorf("%w: events.subscribes[%d]", ErrEventSubscribeFromEmpty, i)
+		}
+		if !idPattern.MatchString(s.From) {
+			return EventsBlock{}, fmt.Errorf("%w: events.subscribes[%d].from=%q", ErrEventSubscribeFromMalformed, i, s.From)
+		}
+		if s.Topic == "" {
+			return EventsBlock{}, fmt.Errorf("%w: events.subscribes[%d]", ErrEventTopicEmpty, i)
+		}
+		if !topicPattern.MatchString(s.Topic) {
+			return EventsBlock{}, fmt.Errorf("%w: events.subscribes[%d].topic=%q", ErrEventTopicMalformed, i, s.Topic)
+		}
+		subs = append(subs, EventSubscription{From: s.From, Topic: s.Topic})
+	}
+	return EventsBlock{Exports: exports, Subscribes: subs}, nil
 }
 
 func validateFSPaths(raw []tomlFSPath, block string) ([]FSPath, error) {

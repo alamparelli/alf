@@ -59,20 +59,18 @@ func TestClassifyFSError(t *testing.T) {
 // "only linked if authorised" invariant: a handle with reads but no
 // writes produces an alf host module with alf_fs_read exported and
 // alf_fs_write absent.
-func TestBuildHostModule_ReadOnlyScopeExportsOnlyRead(t *testing.T) {
+// TestBuildHostModule_AlwaysExportsBothFunctions: under the shared
+// host-module model (one "alf" per runtime, per-guest dispatch via
+// mod.Name()), exports are unconditional. The structural gate against
+// undeclared imports is CheckImports — see TestCheckImports_* — which
+// runs before InstantiateModule and rejects guests whose import list
+// is not a subset of their manifest's declared scope.
+func TestBuildHostModule_AlwaysExportsBothFunctions(t *testing.T) {
 	e := NewEngine(context.Background())
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
-	baseDir := t.TempDir()
-	fs := handle.NewFSHandle(capability.ID("test"), baseDir, handle.FSScope{
-		Reads: []string{"data/"},
-	})
-	// Re-parent lifecycleCtx by wrapping in an Instance — NewFSHandle
-	// alone leaves lifecycleCtx nil; the forge does the attachment.
-	inst := handle.NewInstance(context.Background(), capability.ID("test"), handle.Grants{FS: fs})
-	t.Cleanup(inst.Close)
-
-	mod, err := BuildHostModule(context.Background(), e.Runtime(), inst.FS)
+	reg := newHostFSRegistry()
+	mod, err := BuildHostModule(context.Background(), e.Runtime(), reg)
 	if err != nil {
 		t.Fatalf("BuildHostModule: %v", err)
 	}
@@ -80,100 +78,46 @@ func TestBuildHostModule_ReadOnlyScopeExportsOnlyRead(t *testing.T) {
 
 	defs := mod.ExportedFunctionDefinitions()
 	if _, ok := defs[fnAlfFSRead]; !ok {
-		t.Errorf("%s not exported despite declared reads", fnAlfFSRead)
-	}
-	if _, ok := defs[fnAlfFSWrite]; ok {
-		t.Errorf("%s exported despite no declared writes", fnAlfFSWrite)
-	}
-}
-
-func TestBuildHostModule_WriteOnlyScopeExportsOnlyWrite(t *testing.T) {
-	e := NewEngine(context.Background())
-	t.Cleanup(func() { _ = e.Close(context.Background()) })
-
-	baseDir := t.TempDir()
-	fs := handle.NewFSHandle(capability.ID("test"), baseDir, handle.FSScope{
-		Writes: []string{"out/"},
-	})
-	inst := handle.NewInstance(context.Background(), capability.ID("test"), handle.Grants{FS: fs})
-	t.Cleanup(inst.Close)
-
-	mod, err := BuildHostModule(context.Background(), e.Runtime(), inst.FS)
-	if err != nil {
-		t.Fatalf("BuildHostModule: %v", err)
-	}
-	t.Cleanup(func() { _ = mod.Close(context.Background()) })
-
-	defs := mod.ExportedFunctionDefinitions()
-	if _, ok := defs[fnAlfFSRead]; ok {
-		t.Errorf("%s exported despite no declared reads", fnAlfFSRead)
+		t.Errorf("%s not exported", fnAlfFSRead)
 	}
 	if _, ok := defs[fnAlfFSWrite]; !ok {
-		t.Errorf("%s not exported despite declared writes", fnAlfFSWrite)
+		t.Errorf("%s not exported", fnAlfFSWrite)
+	}
+	if got := len(defs); got != 2 {
+		t.Errorf("want 2 exports, got %d: %v", got, keys(defs))
 	}
 }
 
-func TestBuildHostModule_BothExported(t *testing.T) {
+// TestBuildHostModule_NilRegistryRejected covers the guard: callers
+// must always provide the per-runtime hostFSRegistry. Passing nil
+// would mean every guest's alf_fs_* call has nowhere to look up its
+// FSHandle — a footgun.
+func TestBuildHostModule_NilRegistryRejected(t *testing.T) {
 	e := NewEngine(context.Background())
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
-	baseDir := t.TempDir()
-	fs := handle.NewFSHandle(capability.ID("test"), baseDir, handle.FSScope{
-		Reads:  []string{"data/"},
-		Writes: []string{"out/"},
-	})
-	inst := handle.NewInstance(context.Background(), capability.ID("test"), handle.Grants{FS: fs})
-	t.Cleanup(inst.Close)
-
-	mod, err := BuildHostModule(context.Background(), e.Runtime(), inst.FS)
-	if err != nil {
-		t.Fatalf("BuildHostModule: %v", err)
-	}
-	t.Cleanup(func() { _ = mod.Close(context.Background()) })
-
-	defs := mod.ExportedFunctionDefinitions()
-	if len(defs) != 2 {
-		t.Errorf("want 2 exports, got %d: %v", len(defs), keys(defs))
+	if _, err := BuildHostModule(context.Background(), e.Runtime(), nil); err == nil {
+		t.Fatal("nil registry must be rejected")
 	}
 }
 
-func TestBuildHostModule_NilFSProducesEmptyModule(t *testing.T) {
-	e := NewEngine(context.Background())
-	t.Cleanup(func() { _ = e.Close(context.Background()) })
-
-	mod, err := BuildHostModule(context.Background(), e.Runtime(), nil)
-	if err != nil {
-		t.Fatalf("BuildHostModule: %v", err)
-	}
-	t.Cleanup(func() { _ = mod.Close(context.Background()) })
-
-	if got := len(mod.ExportedFunctionDefinitions()); got != 0 {
-		t.Errorf("want 0 exports, got %d", got)
-	}
-}
-
-// TestBuildHostModule_SameRuntimeTwiceFails ensures we can't accidentally
-// register two "alf" host modules on the same runtime — wazero rejects
-// duplicate module names, which is the correct behaviour for our
-// one-guest-one-host-module model.
+// TestBuildHostModule_SameRuntimeTwiceFails: wazero rejects duplicate
+// module names. NewRuntime registers the host module exactly once at
+// construction; this test ensures the underlying mechanism would still
+// catch a second registration if a future change accidentally re-called
+// BuildHostModule on the same runtime.
 func TestBuildHostModule_SameRuntimeTwiceFails(t *testing.T) {
 	e := NewEngine(context.Background())
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
-	baseDir := t.TempDir()
-	fs := handle.NewFSHandle(capability.ID("test"), baseDir, handle.FSScope{
-		Reads: []string{"data/"},
-	})
-	inst := handle.NewInstance(context.Background(), capability.ID("test"), handle.Grants{FS: fs})
-	t.Cleanup(inst.Close)
-
-	mod1, err := BuildHostModule(context.Background(), e.Runtime(), inst.FS)
+	reg := newHostFSRegistry()
+	mod1, err := BuildHostModule(context.Background(), e.Runtime(), reg)
 	if err != nil {
 		t.Fatalf("first BuildHostModule: %v", err)
 	}
 	t.Cleanup(func() { _ = mod1.Close(context.Background()) })
 
-	_, err = BuildHostModule(context.Background(), e.Runtime(), inst.FS)
+	_, err = BuildHostModule(context.Background(), e.Runtime(), reg)
 	if err == nil {
 		t.Fatal("second BuildHostModule on same runtime: want error, got nil")
 	}

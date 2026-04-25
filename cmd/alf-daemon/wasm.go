@@ -7,6 +7,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/capability/envelope"
 	"github.com/alamparelli/alf/internal/runtime"
+	"github.com/alamparelli/alf/internal/runtime/events"
 	"github.com/alamparelli/alf/internal/runtime/wasm"
 )
 
@@ -17,10 +18,14 @@ import (
 const wasmLoaderRoot = "wasm"
 
 // wasmRuntime bundles the daemon-owned WASM lifecycle so main() has a
-// single object to defer-close on shutdown.
+// single object to defer-close on shutdown. The bus + cross-flow
+// registry are kept on the struct so future hot-reload paths (#395
+// follow-up) can reuse them across LoadDir invocations.
 type wasmRuntime struct {
-	rt     *wasm.Runtime
-	loader *wasm.Loader
+	rt        *wasm.Runtime
+	loader    *wasm.Loader
+	bus       *events.Bus
+	crossFlow *events.MemoryRegistry
 }
 
 // Close tears down the wazero runtime. Safe on nil receiver so main()
@@ -58,18 +63,31 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 	store := envelope.NewMemoryTrustStore()
 	store.Add(pub)
 
-	inst := runtime.NewInstantiator()
+	// Events plumbing (#399): the bus is the in-memory router, the
+	// cross-flow registry is populated by the loader's pass 1 from
+	// every manifest's events.exports. Both wired into the Instantiator
+	// so InstantiateVerified forges EventPub/EventSub handles when a
+	// manifest declares events blocks.
+	bus := events.New()
+	crossFlow := events.NewMemoryRegistry()
+
+	inst := runtime.NewInstantiator(
+		runtime.WithEventsBus(bus, bus),
+		runtime.WithCrossFlowRegistry(crossFlow),
+	)
 	rt, err := wasm.NewRuntime(ctx, inst)
 	if err != nil {
 		return nil, fmt.Errorf("wasm-loader: new runtime: %w", err)
 	}
 
 	loader := &wasm.Loader{
-		Runtime:    rt,
-		Registry:   registry,
-		DaemonPriv: priv,
-		TrustStore: store,
-		Logger:     logf,
+		Runtime:     rt,
+		Registry:    registry,
+		DaemonPriv:  priv,
+		TrustStore:  store,
+		Logger:      logf,
+		CrossFlow:   crossFlow,
+		SnapshotDir: dataDir,
 	}
 
 	root := filepath.Join(skillsDir, wasmLoaderRoot)
@@ -79,5 +97,5 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 		logf("[wasm-loader] error: %v", e)
 	}
 
-	return &wasmRuntime{rt: rt, loader: loader}, nil
+	return &wasmRuntime{rt: rt, loader: loader, bus: bus, crossFlow: crossFlow}, nil
 }

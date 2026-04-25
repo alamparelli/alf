@@ -86,6 +86,9 @@ var consumerLeafExceptions = map[string]map[string]string{
 	"internal/skills": {
 		"internal/capability": "skills.skillCapability adapter implements capability.Capability",
 	},
+	"internal/admin": {
+		"internal/capability": "admin/pending.Item carries the originating capability.ID for audit",
+	},
 	"internal/controlcenter": {
 		"internal/ai":     "ai.ModelID / ai.ResolveModel / ai.ToolSpec — contract types + pure helper",
 		"internal/memory": "conversation + doc reads for UI rendering (handler_chat*, handler_memory*)",

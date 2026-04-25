@@ -129,6 +129,32 @@ Path semantics:
 - No `..` segments allowed — rejected at parse time.
 - No symlinks allowed to escape the scope — enforced at open time by `internal/sandbox/exec/path.go`'s `CheckBoundary`.
 
+#### tools — declared inter-capability invocation (#389)
+
+```toml
+[[tools.declares]]
+id = "notify"
+
+[[tools.declares]]
+id = "log"
+```
+
+Each entry names another capability's `id` that this capability is
+authorised to invoke through its forged `handle.ToolHandle`. Exact match
+only — no wildcards, no globs. Listing every dependency by name is the
+explicit-coupling rule the install-time UI relies on (and §3.1's "tools
+outside `declares` are absent from the LLM tool surface" promise depends
+on the same allowlist).
+
+`id` rules:
+
+- Matches `^[a-z0-9][a-z0-9-]*$` — same shape as a top-level
+  `manifest.id`, since each entry references another capability.
+- Duplicate ids in a single block are a parse error.
+- An empty `[[tools.declares]]` array is valid and equivalent to
+  omitting `[tools]` entirely — the forge produces a nil `ToolHandle`
+  and the capability has no inter-capability invocation surface.
+
 #### Deferred blocks — parse error in 0.8.0
 
 ```toml
@@ -139,9 +165,6 @@ Path semantics:
 [[http.scopes]]      # Tier 3.1 http.Handle,        deferred to 0.9.0+
 [[exec.commands]]    # Tier 3.1 exec.Handle,        deferred to 0.9.0+
 [[secrets.scopes]]   # Tier 3.1 secrets.Handle,     deferred to 0.9.0+
-[[events.exports]]   # private-by-default events,   deferred to #399
-[[events.subscribes]] # private-by-default events,  deferred to #399
-[[tools.declares]]   # skills declare their tools,  deferred to #389
 [memory]             # agent-mediated memory,       deferred to #400
 ```
 
@@ -213,7 +236,7 @@ Kind-specific rules:
 
 ### 4.3 `skill`
 
-Prompt-level capability with no executable code. Declares the tools it orchestrates (deferred to `#389`).
+Prompt-level capability whose body is a `SKILL.md` co-located with the manifest. Declares the tools the skill is authorised to invoke (#389 Stage 1 shipped).
 
 ```toml
 alf_envelope_version = 1
@@ -223,11 +246,36 @@ kind        = "skill"
 version     = "1.2.0"
 name        = "Commit and push"
 description = "Stages, commits with a generated message, pushes."
+
+[[tools.declares]]
+id = "bash"
+```
+
+Bundle layout:
+
+```
+commit-push/
+├── manifest.toml         # signed envelope (this file)
+├── manifest.sig          # detached signature; daemon-signed at first boot if absent
+└── SKILL.md              # prompt body (the bundle hashed into the trusted comment)
 ```
 
 Kind-specific rules:
 
-- No permission blocks are meaningful until `[[tools.declares]]` lands in `#389` — skills that need tools inherit them from the caller until then.
+- `SKILL.md` IS the bundle. The signature pipeline hashes its bytes into
+  the trusted comment per §7.10; tampering after signing is rejected at load.
+- Discovery metadata — `triggers`, `tier` — stays in `SKILL.md` YAML
+  frontmatter on purpose. Those fields drive *when* a skill surfaces,
+  not *what* it can do, and they live outside the security envelope by
+  design. Editing `SKILL.md` (frontmatter or body) invalidates the
+  signature; on a daemon-key bundle the next boot re-signs.
+- `[[tools.declares]]` is the cap surface. The forge mints a single
+  `ToolHandle` scoped to the listed ids; tools not in the block are
+  absent from the LLM tool menu (Stage 2 wires the filter through the
+  orchestrator).
+- No `[memory]` block. Memory is Tier 3.2 (agent-mediated, #400) — no
+  structural handle even when a skill needs it; the skill calls
+  agent-callable memory tools the LLM gates with the kernel prompt.
 
 ### 4.4 `provider`
 

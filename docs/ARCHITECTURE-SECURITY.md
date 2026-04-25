@@ -778,14 +778,15 @@ CI-enforced via `internal/archtest/`:
 | No `*memory.storeImpl` outside `memory/` | `TestMemoryImplPrivate` |
 | No `*events.busImpl` outside `events/` | `TestEventsBusImplPrivate` |
 | `tooling.Executor` importers pinned to a curated allow-list | `TestExecutorImportScopePinned` |
-| No capability package takes `*Store` / `*Bus` / `*Registry` | `TestCapabilityPkgNoAmbientAuth` |
-| `Instance` forge requires `runtimeToken` | `TestForgeRequiresRuntimeToken` |
+| No capability package takes `*Store` / `*Bus` / `*Registry` | not yet enforced — tracked by #392 |
+| Mint of `RuntimeToken` is runtime-only | `TestMintRuntimeTokenIsRuntimeOnly` |
 | `trust.Verify` called before `forgeGrants` (single call site) | `TestOneVerifyCallSite` |
-| No `unsafe` / `reflect` / `go:linkname` in capability packages | `TestNoUnsafeInCapabilities` |
-| No `plugin` stdlib import anywhere | `TestNoDynamicGoPlugins` |
-| No capability holds `http.Handle` scoped to CC origin | `TestNoCapHTTPToCC` |
-| Handle types forbid encoding/Marshal | `TestHandleNonSerializable` |
-| WASM imports match manifest declarations | runtime check, not archtest |
+| No `unsafe` / `reflect` / `linkname` / `plugin` in capability code | `TestNoUnsafeInCapabilityCode` |
+| No `plugin` stdlib import anywhere | `TestNoPluginStdlibImport` |
+| No capability holds `http.Handle` scoped to CC origin | not yet enforced — tracked by #395 |
+| Every exported `*Handle` type declares `MarshalJSON` | `TestAllHandleTypesNonSerializable` |
+| `internal/capability/handle/` itself has no unsafe/linkname | `TestHandlePackageNoUnsafeOrLinkname` |
+| WASM imports match manifest declarations | runtime check (`CheckImports`), not archtest |
 | No policy retrieval from ctx (identity-only invariant) | `TestNoPolicyFromCtx` |
 | `sandbox.Identity` carries no authority fields | `TestSandboxIdentityHasNoAuthorityFields` |
 | `marketplace.HasPermission` not used as sandbox enforcement | `TestMarketplaceHasPermissionNotUsedAsSandboxEnforcement` |
@@ -849,7 +850,7 @@ Use this when adding code that touches the security boundary:
 | `#400` memory agent-mediated + kernel prompt + alf policy | L3.2 | replaces the memory half of old #390 |
 | `#395` admin boundary + CC ratification + vault user-scope | meta | admin ops never LLM-reachable; user-key in vault |
 | `#396` revocation end-to-end | meta | cascade, key-based, offline, timestamp |
-| `#398` handle hygiene invariants | L3.1 impl | non-serializable, WASM import cross-check, no-unsafe archtest |
+| `#398` handle hygiene invariants | L3.1 impl | **Implemented** across #391, #386, and #398 close-out: (1) non-serializable — 5 per-handle behavioural tests + new `TestAllHandleTypesNonSerializable` static archtest; (2) WASM import cross-check — `CheckImports` shipped in #386 step 3; (3) no-unsafe — new `TestNoUnsafeInCapabilityCode` archtest covers `internal/capability`, `internal/skills`, `internal/marketplace`, `internal/tooling/native_*`, `internal/tooling/capability_*`, `internal/scheduler/capability*` (zero violations on first run); (4) revocation — `lifecycleCtx` + `mergeContexts` in `internal/capability/handle/instance.go`, exercised by `TestInstantiator_CloseRevokesAllHandles` + per-handle `ErrRevoked` tests; (5) forge token — `TestMintRuntimeTokenIsRuntimeOnly`. **Output sanitization deferred to #411** — requires `Runtime.Invoke` as the single tool-execution seam (post-Executor-unification). Until then, the per-handle MarshalJSON refusal blocks the only LLM-reachable path (JSON outputs). |
 | `#401` research spike: lightweight IFC | future (0.9.0+) | evaluate Flume-style labeling for memory+events |
 | `#86` AppArmor + seccomp + CAP_SYS_ADMIN | L1 outer | kernel ring |
 | `#386` WASM runtime integration | L1 inner + L3.1 | wazero as wall; host imports = Tier 3.1 handles. **Shipped** on `release/0.8.0` across 12 commits: `internal/runtime/wasm/` carries the full stack — wazero `Engine` pinned at v1.11.0, `CheckImports` (handle hygiene #3), `host_fs` ABI (alf_fs_read/write, packed i64, `api.Memory.Read/Write` only), `Runtime.Instantiate` pipeline (envelope.Verify → forge → compile → cross-check → host link → `_initialize`), `Adapter` behind `capability.Capability`, in-daemon Go→WASM builder, `wasm_build_tool` native, `Loader` auto-signing unsigned bundles with daemon key (§7.3 Tier 2). `skills.d/wasm/hello-read/` reference tool with E2E round-trip through the full stack. 3 archtests pinning wazero-import scope + `host_fs` memory-access rules. 65 tests in `internal/runtime/wasm/` + 7 E2E. Follow-up: wire `Loader.LoadDir` into `cmd/alf-daemon/main.go` under `ALF_EXPERIMENTAL=1` boot gate. |

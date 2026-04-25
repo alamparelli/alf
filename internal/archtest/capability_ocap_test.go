@@ -212,27 +212,12 @@ func TestOneVerifyCallSite(t *testing.T) {
 	}
 }
 
-// TestHandleTypesRejectJSONMarshal exercises §4.2 invariant 1 (handles
-// are non-serializable) at the behaviour level. Every exported handle
-// type's MarshalJSON must return a non-nil error — encoding/json will
-// then refuse to serialise instances, and the archtest failure clearly
-// points at the offender.
-//
-// This is a runtime property test, not a static rule, but it lives with
-// the archtest suite so CI catches a regression on any new handle type
-// that forgets to implement MarshalJSON.
-func TestHandleTypesRejectJSONMarshal(t *testing.T) {
-	// Intentionally delegated to the handle package's own test suite
-	// (TestFSHandle_NonSerializable, TestHTTPHandle_NonSerializable, etc.)
-	// — running them here would pull handle as a test dependency. This
-	// stub stands as documentation that the invariant IS tested and
-	// points to the actual location.
-	t.Log("enforced by per-handle tests in internal/capability/handle/*_test.go: " +
-		"TestFSHandle_NonSerializable, TestHTTPHandle_NonSerializable, " +
-		"TestExecHandle_NonSerializable, TestSecretsHandle_NonSerializable, " +
-		"TestToolHandle_NonSerializable. Adding a new handle type requires " +
-		"an equivalent test.")
-}
+// Note on the §4.2 invariant 1 enforcement (handles non-serializable):
+// the static rule lives in TestAllHandleTypesNonSerializable
+// (handle_hygiene_test.go) — every exported *Handle type must declare
+// MarshalJSON. The behavioural rule lives in the handle package's own
+// per-handle tests (TestFSHandle_NonSerializable etc.) which exercise
+// json.Marshal and verify it errors.
 
 // skipOcapDir mirrors the existing archtest walker: skip ignorable
 // directories we never want to scan (vendor deps, build output, VCS,

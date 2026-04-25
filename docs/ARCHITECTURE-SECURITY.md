@@ -257,6 +257,32 @@ Combined: the concrete is unreachable, the constructor requires a runtime-only t
 
 Details: `#391`.
 
+### 4.4 Sandbox facets: enforcement asymmetry under ocap
+
+The sandbox subtree (`internal/sandbox/network/`, `internal/sandbox/secrets/`) runs as **shared daemon-scope infrastructure**, not as per-capability gates. Concretely:
+
+- The outbound HTTP proxy (`network/proxy.go`) applies a single global rule set; it does not check "which capability initiated this request".
+- The vault manager (`secrets/manager.go`) hands out an admin token + a single proxy token at process scope.
+
+This is **acceptable by construction** under §4.1's Go-kind / WASM-kind asymmetry:
+
+| Capability kind | Authority enforcement | Rationale |
+|---|---|---|
+| **WASM-kind** | Per-capability, structural — host imports (`alf_fs_*`, `alf_http_*`) dispatch on the handle's baked scope (#386 §7.1) | Third-party / LLM-authored — must be confined |
+| **Go-kind** | Process-scope sandbox infrastructure + signature + code review | alf-maintainer only, in TCB by §4.1 |
+
+What `Sandbox.Apply` does for both kinds: stash an `Identity{CapID, Tier}` on ctx for audit / correlation. **It does not stash policy.** Authority lives in handles for WASM, in TCB discipline for Go-kind. Re-introducing `PolicyFrom(ctx)` is forbidden by archtest `TestNoPolicyFromCtx`.
+
+**Concrete invariants (CI-enforced):**
+
+1. `sandbox.Identity` carries no allow/deny / scope / permission fields — `TestSandboxIdentityHasNoAuthorityFields`.
+2. No code reads policy from ctx — `TestNoPolicyFromCtx`.
+3. `marketplace.HasPermission` is not consulted as enforcement inside `internal/sandbox/`, `internal/capability/`, or `internal/runtime/` — `TestMarketplaceHasPermissionNotUsedAsSandboxEnforcement`. (HTTP authorisation in `internal/controlcenter/handler_*.go` is a separate concern: it gates which `appSlug` can hit which endpoint, not what an in-process call may do.)
+
+**Future work** — turning the network proxy and vault manager into per-capability gates for non-WASM tools is **explicitly deferred** beyond 0.8.0 (tracked in a follow-up ticket). Migrating non-WASM tools to WASM-kind would obviate the need entirely; that is the preferred direction.
+
+Details: `#382` (closed with this reframe), follow-up ticket for per-capability proxy work.
+
 ---
 
 ## 5. Composition attacks — acknowledged limitation
@@ -760,6 +786,9 @@ CI-enforced via `internal/archtest/`:
 | No capability holds `http.Handle` scoped to CC origin | `TestNoCapHTTPToCC` |
 | Handle types forbid encoding/Marshal | `TestHandleNonSerializable` |
 | WASM imports match manifest declarations | runtime check, not archtest |
+| No policy retrieval from ctx (identity-only invariant) | `TestNoPolicyFromCtx` |
+| `sandbox.Identity` carries no authority fields | `TestSandboxIdentityHasNoAuthorityFields` |
+| `marketplace.HasPermission` not used as sandbox enforcement | `TestMarketplaceHasPermissionNotUsedAsSandboxEnforcement` |
 
 ---
 
@@ -808,7 +837,7 @@ Use this when adding code that touches the security boundary:
 | `#385` security quick-wins (now in 0.7.9 milestone) | mixed | audit-driven hardening, pre-requisite ship before 0.8.0 starts |
 | `#384` marketplace bundle signing + TLS-pinned registry | L2 (post-#386) | distribution-side signing — deferred until WASM spike validates direction |
 | `#377` comms absorption into runtime | seam | prepares `#383` |
-| `#382` sandbox facet wire-in (`PolicyFrom(ctx)`) | seam | identity/audit ctx (NOT authority-carrying) |
+| `#382` sandbox facet wire-in (`PolicyFrom(ctx)`) | seam | **Closed via reframe**: identity-only ctx invariant achieved by #406 (no `PolicyFrom`) + #391 (handles carry authority) + #386 (WASM host imports dispatch on handle scope). 3 archtests pin the invariants (`TestNoPolicyFromCtx`, `TestSandboxIdentityHasNoAuthorityFields`, `TestMarketplaceHasPermissionNotUsedAsSandboxEnforcement`). Per-capability isolation for non-WASM Go-kind tools (network proxy, vault per-socket scope) deferred to a post-0.8.0 follow-up — Go-kind is alf-maintainer-only by §4.1, so process-scope infrastructure is acceptable; migration to WASM-kind is the preferred long-term path. See §4.4. |
 | `#387` WASM trust model spec | L2 | design of signatures + trust store + bootstrap |
 | `#388` runtime signature verification | L2 | **Implemented** on `release/0.8.0` across 6 commits (`818cc3f` → `39ba698`): `internal/capability/envelope/` carries the full §7.10 pipeline — `Canonicalize` (TOML → JCS JSON), `Validate` (schema + deferred-block rejection per MANIFEST-SCHEMA §3.4), Ed25519-ph + BLAKE2b-512 primitives (ported from the #387 POC), `TrustStore` (in-memory + dir-backed), and `Verify` as the single pipeline entry point. `runtime.Instantiator.InstantiateVerified` is the one runtime consumer, gated by archtest `TestOneVerifyCallSite`. 58 envelope tests + 5 verified-instantiate tests. Deferred to follow-ups: startup discovery + WARN logging (with #386 boot wiring), full §7.10.3 envelope-record JSON (stop-gap: bundle hash in trusted comment), build-time signing path (#386 + handoff), CRL (#396). |
 | `#397` canonicalization + signature envelope spec | L2 | pin format, parser, algo to close SAML/JWT-class gaps |

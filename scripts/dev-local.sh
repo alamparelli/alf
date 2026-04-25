@@ -2,13 +2,14 @@
 set -euo pipefail
 
 # Local development script: build and run ALF in Docker on this machine.
-# Usage: ./scripts/dev-local.sh [--clean] [--fresh] [--no-frontend] [--down]
+# Usage: ./scripts/dev-local.sh [--clean] [--fresh] [--no-frontend] [--down] [--stop]
 #
 # Flags:
 #   --clean         Tear down everything first (volumes preserved)
 #   --fresh         Wipe runtime data (config, data, cache) for a fresh install
 #   --no-frontend   Skip Svelte frontend rebuild
-#   --down          Stop the stack and exit
+#   --down          Stop and remove the stack, then exit
+#   --stop          Stop containers without removing them, then exit
 #
 # 0.8.0 dev-window notice
 # -----------------------
@@ -24,6 +25,7 @@ CLEAN=false
 FRESH=false
 NO_FRONTEND=false
 DOWN=false
+STOP=false
 
 for arg in "$@"; do
   case "$arg" in
@@ -31,6 +33,7 @@ for arg in "$@"; do
     --fresh)       FRESH=true; CLEAN=true ;;
     --no-frontend) NO_FRONTEND=true ;;
     --down)        DOWN=true ;;
+    --stop)        STOP=true ;;
     *) echo "Unknown flag: $arg"; exit 1 ;;
   esac
 done
@@ -43,6 +46,12 @@ cd "$REPO_ROOT"
 if [ "$DOWN" = true ]; then
   echo "==> Stopping ALF..."
   docker compose -f "$LOCAL_DIR/docker-compose.yml" down
+  exit 0
+fi
+
+if [ "$STOP" = true ]; then
+  echo "==> Stopping ALF containers (preserving them)..."
+  docker compose -f "$LOCAL_DIR/docker-compose.yml" stop
   exit 0
 fi
 

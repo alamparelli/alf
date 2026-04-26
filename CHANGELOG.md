@@ -82,6 +82,67 @@ the milestone ticket map.
     Deferred to Stage 2: signed CRL distribution, offline N-day
     fail-safe, clock-skew detection, `alf trust revoke` CLI
     (depends on #395 Stage 2 admin boundary).
+- **#396 Stage 2 — CRL distribution + offline cache + clock-sanity
+  (deliverables 5, 6, 7)**. Four commits close out the §7.7 + §8
+  revocation pipeline end-to-end; D2 (provider cascade) + D8
+  (`alf trust revoke` CLI) remain deferred to their respective
+  blocking tickets (#392 / #395 Stage 2).
+  - **Deliverable 5 (CRL primitive)** — new `internal/capability/envelope/crl.go`.
+    `CRL` + `CRLEntry` types, embedded-signature wire format
+    (`{"crl": {...}, "signature": "<base64>"}` — no sidecar). The
+    signature covers `CanonicalCRLBytes(payload)` — same JCS rules
+    as `Canonicalize` (alphabetical keys, NFC strings, RFC3339 UTC,
+    no whitespace). `ParseSignedCRL` re-canonicalizes the parsed
+    payload server-side before verifying so signer + verifier
+    agree on byte layout without sidecar gymnastics, avoiding the
+    parser-divergence attack class (§7.10.1).
+    `MemoryTrustStore` gained a second revocation map (`crlRevokedAt`)
+    so operator-set `Revoke()` and CRL-set `ApplyCRL()` are
+    independent channels. `RevokedAfter` returns the strictest
+    (earliest) of the two — neither can soften the other. `Add()`
+    clears operator-set only (CRL is upstream-authoritative);
+    `Remove()` clears both. Re-applying a CRL replaces (not
+    merges) the previous CRL state. `KeyID` gained `MarshalJSON` /
+    `UnmarshalJSON` (16-char uppercase hex) + `ParseKeyIDHex`
+    helper. 15 tests.
+  - **Deliverable 6 (offline cache + 30-day fail-safe)** — new
+    `internal/capability/crl/` package layered above `envelope/`.
+    `Source` interface with `HTTPSource` impl (4 MiB body cap +
+    distinct `ErrSourceUnavailable` / `ErrSourceMalformed`
+    sentinels), `Cache` interface with `FileCache` impl (atomic
+    `crl.json` + `crl.meta.json` writes under `<dataDir>/crl/`,
+    payload-size mismatch detection), and the `Refresher`
+    orchestrator. Per-Tick algorithm: fetch from Source on
+    success → save cache + apply; on Source unavailable → load
+    cache → apply if valid; on Source malformed → reject (active
+    mis-serve does NOT trigger cache fallback); compute
+    `age = now - lastFetched` and log `[crl] OFFLINE FAIL-SAFE`
+    when `age >= GracePeriod` (default `30 * 24h` per §7.7).
+    Never aborts. `Run()` drives Tick on `Interval` (default 6h).
+    13 tests.
+  - **Deliverable 7 (clock-sanity)** — new
+    `internal/capability/envelope/clocksanity.go`. `CheckBootClock`
+    refuses if `now` is more than 1y before `BuildTime`
+    (`ErrClockTooEarly`); one-sided — wildly future clocks accept,
+    only the past is policed. `WallClockSkew` + `MonitorClockSkew`
+    sample wall vs monotonic delta and warn at >6h drift.
+    `SkewFromDeltas` exposes the pure math for tests (Go can't
+    synthesize a `time.Time` with mismatched wall/monotonic).
+    `BuildTime` is link-time-injected via
+    `-ldflags="-X .../envelope.buildTime=2026-04-26T12:00:00Z"`;
+    dev builds without ldflags degrade to no-op. 11 tests.
+  - **Daemon wiring** — `cmd/alf-daemon/crl.go` (`setupCRL`)
+    + `internal/capability/envelope/release_key.go` (`go:embed`
+    wrapper around `release_pubkey.minisign`) + `cmd/alf-release-keygen/`
+    (one-shot keygen tool). Boot path: `CheckBootClock` →
+    `MonitorClockSkew` goroutine → if release pubkey embedded AND
+    `ALF_CRL_URL` set, start `Refresher.Run()` against
+    `wasmRt.TrustStore`. Degrades gracefully when either is
+    absent (operator-set `Revoke` still works); only clock-sanity
+    refusal escalates to `log.Fatal`.
+  - **Stage 2 deferred**: D2 (provider cascade — depends on #392),
+    D8 (`alf trust revoke` CLI — depends on #395 Stage 2 admin
+    boundary).
 - `TestThreeTierAlignment_E2E` (8 subtests) — a single integration
   test that loads two co-resident signed manifests through one
   `Instantiator` (events bus + cross-flow registry wired the way the

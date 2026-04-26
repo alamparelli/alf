@@ -1,5 +1,5 @@
 # Stage 1: Build Go binaries with CGO (sqlite-vec).
-FROM golang:1.25-bookworm AS builder
+FROM golang:1.26.2-bookworm AS builder
 
 ARG TARGETARCH
 ARG BUILD_VERSION=dev

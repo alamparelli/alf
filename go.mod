@@ -2,6 +2,8 @@ module github.com/alamparelli/alf
 
 go 1.25.8
 
+toolchain go1.26.2
+
 require github.com/alessandrolamparelli/vault-proxy v0.2.0
 
 require (

@@ -17,6 +17,31 @@ but no v0.8.0 tag has been cut. See
 [`docs/ARCHITECTURE-SECURITY.md`](docs/ARCHITECTURE-SECURITY.md) §12 for
 the milestone ticket map.
 
+### Security
+
+- **SEC-003 — events bus publish/cleanup race**. `Bus.Publish`
+  snapshotted the route slice under `RLock`, released, then sent on
+  the queue without coordination with `Subscribe`'s cleanup func —
+  which acquired `Lock`, removed the route, and `close(q)`. A
+  publisher that snapshotted before cleanup ran and sent after it
+  closed the channel triggered `panic: send on closed channel`,
+  killing the daemon process. Reachable from any LLM-driven
+  publish/revoke loop. Fix: hold `RLock` across the fan-out so
+  cleanup is strictly serialised after every in-flight Publish;
+  sends are non-blocking (`select+default`) so the lock is held
+  for ~µs even with thousands of subscribers. Pinned by
+  `TestBus_PublishCleanupRace` (32 subscribers churning, 4
+  publishers; panics within 100ms without the fix).
+- **CVE patch — toolchain bumped to `go1.26.2`** (was `go1.26.1`
+  via Dockerfile `golang:1.25`). `govulncheck` flagged 4 stdlib
+  CVEs reaching production code: `GO-2026-4947` /
+  `GO-2026-4946` (x509 chain-build / policy-validation DoS),
+  `GO-2026-4870` (TLS 1.3 KeyUpdate DoS), `GO-2026-4866`
+  (excludedSubtrees case-sensitivity auth bypass). All fixed in
+  `1.26.2`. `go.mod` carries a `toolchain go1.26.2` directive;
+  Dockerfile pinned to `golang:1.26.2-bookworm`. Post-bump
+  `govulncheck`: zero vulnerabilities reaching code.
+
 ### Fixed
 
 - **3-tier alignment audit (D1)** — `[[fs.writes]]` declarations in a

@@ -430,7 +430,11 @@ func TestChat_ExecutesToolCallAndReinjectsResult(t *testing.T) {
 		t.Fatal("second request has no messages")
 	}
 	tail := second[len(second)-1]
-	if tail.Role != ai.RoleTool || tail.Content != "echoed:hi" {
+	// §3.2 marker discipline: tool-result content delivered to the LLM
+	// is wrapped in <tool_output source="..."> so the kernel prompt can
+	// flag it as non-authoritative (audit D6). The raw text "echoed:hi"
+	// remains in the memory store assertions further down.
+	if tail.Role != ai.RoleTool || tail.Content != `<tool_output source="native.echo">echoed:hi</tool_output>` {
 		t.Fatalf("second request tail msg wrong: %+v", tail)
 	}
 
@@ -458,6 +462,75 @@ func TestChat_ExecutesToolCallAndReinjectsResult(t *testing.T) {
 	if !sawText || !sawUse || !sawResult {
 		t.Fatalf("assistant blocks incomplete: text=%v use=%v result=%v blocks=%+v",
 			sawText, sawUse, sawResult, asst.Blocks)
+	}
+}
+
+// TestChat_ToolResultMarkerDiscipline pins the audit D6 fix: tool
+// results delivered to the LLM are wrapped in <tool_output source="...">
+// markers (§3.2), but the memory store keeps the raw, unwrapped text so
+// recall-time consumers don't surface marker tags.
+//
+// The wrap site is internal/runtime/impl.go's append to messages; the
+// memory append happens just before with the unwrapped resultText. Any
+// future change that wraps in formatToolResult instead would pollute
+// memory and this test would catch it.
+func TestChat_ToolResultMarkerDiscipline(t *testing.T) {
+	cap := &fakeCapability{
+		manifest: capability.Manifest{
+			ID: "native.tool", Kind: capability.KindTool, Name: "tool",
+		},
+		execFn: func(_ context.Context, _ capability.Input) (capability.Output, error) {
+			return capability.Output{Data: "RAW_RESULT"}, nil
+		},
+	}
+	eng := &fakeEngine{scripts: [][]ai.Event{
+		{
+			{Kind: ai.EventToolCall, ToolCall: &ai.ToolCall{ID: "tc1", Name: "native.tool"}},
+			{Kind: ai.EventDone},
+		},
+		{
+			{Kind: ai.EventToken, Token: "ok"},
+			{Kind: ai.EventDone},
+		},
+	}}
+	store := newFakeStore()
+	rt, err := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(cap),
+		Memory:   store,
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ch, _ := rt.Chat(context.Background(), runtime.ChatRequest{ConvID: "c", UserInput: "go"})
+	drain(ch)
+
+	// LLM-bound message (second request tail) must be wrapped.
+	tail := eng.requests[1].Messages[len(eng.requests[1].Messages)-1]
+	wantLLM := `<tool_output source="native.tool">RAW_RESULT</tool_output>`
+	if tail.Role != ai.RoleTool || tail.Content != wantLLM {
+		t.Errorf("LLM-bound msg: got %q, want %q", tail.Content, wantLLM)
+	}
+
+	// Memory store must hold the raw, unwrapped result.
+	msgs := store.All("c")
+	if len(msgs) < 2 {
+		t.Fatalf("expected ≥2 persisted messages, got %d", len(msgs))
+	}
+	asst := msgs[1]
+	var sawRaw bool
+	for _, b := range asst.Blocks {
+		if b.Type == memory.BlockToolResult {
+			if b.Output != "RAW_RESULT" {
+				t.Errorf("memory tool-result.Output: got %q, want raw RAW_RESULT (no marker tags)", b.Output)
+			}
+			sawRaw = true
+		}
+	}
+	if !sawRaw {
+		t.Error("no BlockToolResult persisted")
 	}
 }
 

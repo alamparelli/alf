@@ -266,3 +266,25 @@ func TestNestedString_NonMapInPath(t *testing.T) {
 		t.Error("expected ok=false when traversing through a scalar")
 	}
 }
+
+// TestWrapToolOutputForLLM_PinsMarkerShape pins the audit D6 fix:
+// tool results sent to the API tool loop are wrapped in
+// <tool_output source="..."> matching the kernel prompt's marker
+// expectations from internal/runtime/llm.kernel_prompt.txt §3.2.
+//
+// Inlined here because internal/ai/provider cannot import
+// internal/runtime/llm (foundation cross-import). If the kernel
+// prompt's tag string ever changes, this test + the helper must be
+// updated alongside internal/runtime/llm.TagToolOutput.
+func TestWrapToolOutputForLLM_PinsMarkerShape(t *testing.T) {
+	if got, want := wrapToolOutputForLLM("native.echo", "hi"), `<tool_output source="native.echo">hi</tool_output>`; got != want {
+		t.Errorf("with source: got %q, want %q", got, want)
+	}
+	if got, want := wrapToolOutputForLLM("", "hi"), `<tool_output>hi</tool_output>`; got != want {
+		t.Errorf("empty source: got %q, want %q", got, want)
+	}
+	// Adversarial source string must not break out of the attribute.
+	if got := wrapToolOutputForLLM(`evil"><script>`, "x"); got != `<tool_output source="evil&quot;&gt;&lt;script&gt;">x</tool_output>` {
+		t.Errorf("attribute escape failed: %q", got)
+	}
+}

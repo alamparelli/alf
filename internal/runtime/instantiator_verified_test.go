@@ -132,6 +132,55 @@ func TestInstantiateVerified_UntrustedSignerRejected(t *testing.T) {
 	}
 }
 
+// TestInstantiateVerified_FSWritesRouted pins the audit D1 fix:
+// [[fs.writes]] declarations in the envelope manifest reach the forged
+// FSHandle's write scope. Prior to the fix, permissionsFromEnvelope
+// silently dropped writes because the legacy capability.PermissionSet
+// has no read/write distinction; envelope-loaded caps that declared
+// fs.writes saw every Write() return ErrOutOfScope.
+func TestInstantiateVerified_FSWritesRouted(t *testing.T) {
+	handle.ResetMintForTesting()
+	inst := NewInstantiator()
+
+	const manifest = `alf_envelope_version = 1
+id      = "writer-cap"
+kind    = "wasm-tool"
+version = "0.1.0"
+name    = "Writer"
+
+[[fs.reads]]
+path = "in/"
+
+[[fs.writes]]
+path = "out/"
+`
+	in, _ := signBundle(t, manifest, []byte("wasm-bytes"))
+	baseDir := t.TempDir()
+	vi, err := inst.InstantiateVerified(context.Background(), in, baseDir)
+	if err != nil {
+		t.Fatalf("InstantiateVerified: %v", err)
+	}
+	defer vi.Instance.Close()
+
+	if vi.Instance.FS == nil {
+		t.Fatal("FS handle nil despite declared fs.reads + fs.writes")
+	}
+
+	scope := vi.Instance.FS.Scope()
+	if len(scope.Writes) != 1 {
+		t.Fatalf("scope.Writes=%v, want 1 path", scope.Writes)
+	}
+
+	// Functional check: a Write() under the declared path succeeds.
+	if err := vi.Instance.FS.Write(context.Background(), "out/note.txt", []byte("hi")); err != nil {
+		t.Errorf("Write to declared path failed: %v", err)
+	}
+	// And a Write() outside scope still fails.
+	if err := vi.Instance.FS.Write(context.Background(), "elsewhere/x", []byte("hi")); !errors.Is(err, handle.ErrOutOfScope) {
+		t.Errorf("Write outside scope: got %v, want ErrOutOfScope", err)
+	}
+}
+
 func TestInstantiateVerified_TamperedManifestRejected(t *testing.T) {
 	handle.ResetMintForTesting()
 	inst := NewInstantiator()

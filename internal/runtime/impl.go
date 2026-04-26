@@ -9,6 +9,7 @@ import (
 	"github.com/alamparelli/alf/internal/ai"
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/runtime/llm"
 	"github.com/alamparelli/alf/internal/sandbox"
 )
 
@@ -212,7 +213,10 @@ func (r *defaultRuntime) runChatLoop(
 				Output: resultText,
 				ToolID: tc.ID,
 			})
-			messages = append(messages, ai.Message{Role: ai.RoleTool, Content: resultText})
+			// Wrap only at the LLM-bound message — kernel prompt §3.2
+			// instructs the agent to treat <tool_output> as data. Memory
+			// stores raw resultText so recalls don't carry marker tags.
+			messages = append(messages, ai.Message{Role: ai.RoleTool, Content: llm.WrapToolOutput(tc.Name, resultText)})
 		}
 	}
 

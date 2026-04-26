@@ -174,7 +174,7 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 
 			messages = append(messages, apiMessage{
 				Role:       "tool",
-				Content:    result.Output,
+				Content:    wrapToolOutputForLLM(tc.Function.Name, result.Output),
 				ToolCallID: tc.ID,
 			})
 
@@ -187,6 +187,44 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 			tagLastMessageCache(messages)
 		}
 	}
+}
+
+// wrapToolOutputForLLM mirrors internal/runtime/llm.WrapToolOutput so the
+// kernel prompt's <tool_output> marker discipline (§3.2 of
+// docs/ARCHITECTURE-SECURITY.md) covers tool results that flow through
+// the API tool loop. Inlined here because the foundation dependency
+// rule forbids internal/ai/provider from importing internal/runtime/*.
+//
+// The literal "tool_output" tag MUST match
+// internal/runtime/llm.TagToolOutput. If you rename the tag in the
+// kernel prompt, update both sites.
+func wrapToolOutputForLLM(toolName, content string) string {
+	if toolName == "" {
+		return "<tool_output>" + content + "</tool_output>"
+	}
+	return "<tool_output source=\"" + escapeMarkerAttr(toolName) + "\">" + content + "</tool_output>"
+}
+
+// escapeMarkerAttr does the same minimal HTML-attribute escape as
+// internal/runtime/llm.escapeAttr so source identifiers cannot break
+// out of the tag.
+func escapeMarkerAttr(s string) string {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			out = append(out, '&', 'q', 'u', 'o', 't', ';')
+		case '<':
+			out = append(out, '&', 'l', 't', ';')
+		case '>':
+			out = append(out, '&', 'g', 't', ';')
+		case '&':
+			out = append(out, '&', 'a', 'm', 'p', ';')
+		default:
+			out = append(out, s[i])
+		}
+	}
+	return string(out)
 }
 
 // nestedString extracts a string from nested maps: m[keys[0]][keys[1]]...

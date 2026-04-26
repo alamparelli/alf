@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/alamparelli/alf/internal/memory"
+	"github.com/alamparelli/alf/internal/runtime/llm"
 	"github.com/alamparelli/alf/internal/skills"
 )
 
@@ -65,7 +66,10 @@ func PrepareOrchestration(in OrchestrationInputs) OrchestrationResult {
 			for i, sk := range matched {
 				names[i] = sk.Name
 				if sk.Prompt != "" {
-					skillInjections = append(skillInjections, sk.Prompt)
+					// Wrap with §3.2 capability_content marker so the kernel
+					// prompt can flag injected skill bodies as non-authoritative
+					// (audit D6).
+					skillInjections = append(skillInjections, llm.WrapCapabilityContent("skill:"+sk.Name, sk.Prompt))
 				}
 			}
 			log.Printf("[orchestration] matched skills %v (%d prompts)", names, len(skillInjections))

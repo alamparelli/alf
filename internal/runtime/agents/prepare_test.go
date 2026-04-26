@@ -3,6 +3,8 @@ package agents
 import (
 	"strings"
 	"testing"
+
+	"github.com/alamparelli/alf/internal/skills"
 )
 
 func TestPrepareOrchestration_MinimalInputs(t *testing.T) {
@@ -154,5 +156,65 @@ func TestPrepareOrchestration_PromptOrdering(t *testing.T) {
 	}
 	if !strings.Contains(res.SystemPrompts[2], "Recent conversation") {
 		t.Errorf("third prompt should be conversation, got %q", res.SystemPrompts[2])
+	}
+}
+
+// stubSkillStore is a minimal Store impl for the wrap-pinning test below.
+type stubSkillStore struct{ skills []*skills.Skill }
+
+func (s *stubSkillStore) All() []*skills.Skill                      { return s.skills }
+func (s *stubSkillStore) Get(name string) (*skills.Skill, bool) {
+	for _, sk := range s.skills {
+		if sk.Name == name {
+			return sk, true
+		}
+	}
+	return nil, false
+}
+func (s *stubSkillStore) Reload() error                                          { return nil }
+func (s *stubSkillStore) AddDynamicTriggers(_ string, _ []string)                {}
+
+// TestPrepareOrchestration_SkillBodyWrappedWithMarker pins the audit
+// D6 fix: when MatchTriggers picks up a skill from the user message,
+// its prompt body is wrapped in <capability_content source="skill:NAME">
+// so the kernel prompt's §3.2 marker rule treats injected skill text
+// as non-authoritative.
+func TestPrepareOrchestration_SkillBodyWrappedWithMarker(t *testing.T) {
+	store := &stubSkillStore{skills: []*skills.Skill{
+		{
+			Name:     "weather",
+			Triggers: []string{"weather"},
+			Prompt:   "RAW_SKILL_BODY",
+		},
+	}}
+
+	res := PrepareOrchestration(OrchestrationInputs{
+		UserMessage: "what's the weather?",
+		SkillStore:  store,
+	})
+
+	want := `<capability_content source="skill:weather">RAW_SKILL_BODY</capability_content>`
+	if len(res.Config.SkillPrompts) != 1 {
+		t.Fatalf("Config.SkillPrompts len=%d, want 1; got %v", len(res.Config.SkillPrompts), res.Config.SkillPrompts)
+	}
+	if res.Config.SkillPrompts[0] != want {
+		t.Errorf("Config.SkillPrompts[0]:\n got: %q\nwant: %q", res.Config.SkillPrompts[0], want)
+	}
+	// Negative: the raw, unwrapped form must NOT appear in SkillPrompts —
+	// that would mean the wrap was bypassed somewhere.
+	if res.Config.SkillPrompts[0] == "RAW_SKILL_BODY" {
+		t.Error("Config.SkillPrompts[0] is unwrapped — §3.2 marker bypassed")
+	}
+	// SkillLookup must continue to return the RAW prompt (used by the
+	// per-agent injection path, which has its own wrap site if needed).
+	// This pins that the wrap happens only at the global SkillPrompts
+	// build site, not at SkillLookup.Get.
+	if res.Config.SkillLookup != nil {
+		got, ok := res.Config.SkillLookup.Get("weather")
+		if !ok {
+			t.Error("SkillLookup.Get(weather) returned ok=false")
+		} else if got != "RAW_SKILL_BODY" {
+			t.Errorf("SkillLookup.Get returned wrapped text — should be raw: %q", got)
+		}
 	}
 }

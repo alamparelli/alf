@@ -66,6 +66,18 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 	}
 	grants := i.forgeGrants(signed)
 
+	// FS handle forging from the typed envelope: forgeGrants produced a
+	// reads-only FSHandle via the legacy PermissionSet shim (which has
+	// no read/write distinction). Override here so [[fs.writes]] paths
+	// reach the handle's write scope. Audit doc D1 — see
+	// technical/AUDIT-3-TIERS-2026-04-26.md.
+	if len(vm.Manifest.FS.Reads) > 0 || len(vm.Manifest.FS.Writes) > 0 {
+		grants.FS = handle.NewFSHandle(capManifest.ID, baseDir, handle.FSScope{
+			Reads:  envFSPaths(vm.Manifest.FS.Reads),
+			Writes: envFSPaths(vm.Manifest.FS.Writes),
+		})
+	}
+
 	// Events block forging (#399). Only runs when bus + cross-flow
 	// registry are wired; tests and legacy paths skip this entirely.
 	// EventPub is forged unconditionally for any capability that
@@ -140,18 +152,27 @@ func mapEnvelopeKind(k envelope.ManifestKind) capability.Kind {
 }
 
 // permissionsFromEnvelope builds the legacy capability.PermissionSet
-// from the envelope.Manifest's typed blocks. For 0.8.0 only fs is
-// wired; other blocks (http/exec/secrets) are parse-time errors in
-// the schema, so they're always empty here. The stopgap keeps
-// forgeGrants unchanged — the FilePaths field feeds FSHandle scope.
-func permissionsFromEnvelope(m *envelope.Manifest) capability.PermissionSet {
-	out := capability.PermissionSet{}
-	for _, p := range m.FS.Reads {
-		out.FilePaths = append(out.FilePaths, p.Path)
+// from the envelope.Manifest's typed blocks. The FS branch is empty
+// here — FS handle forging happens in InstantiateVerified using the
+// typed envelope directly (see audit D1 fix), because the legacy
+// PermissionSet has no read/write distinction. Other blocks
+// (http/exec/secrets) are parse-time errors in the schema today, so
+// they're always empty.
+func permissionsFromEnvelope(_ *envelope.Manifest) capability.PermissionSet {
+	return capability.PermissionSet{}
+}
+
+// envFSPaths flattens an envelope.FSPath slice to plain strings. Used
+// by InstantiateVerified to feed handle.FSScope without going through
+// the legacy PermissionSet shim.
+func envFSPaths(in []envelope.FSPath) []string {
+	if len(in) == 0 {
+		return nil
 	}
-	// Writes deliberately ignored at the legacy layer — read/write
-	// distinction arrives with the schema migration. FSHandle scope
-	// already supports both; this shim just routes reads for now.
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		out = append(out, p.Path)
+	}
 	return out
 }
 

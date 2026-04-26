@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/capability/handle"
@@ -72,6 +73,15 @@ type Instantiator struct {
 	// other capabilities even if their manifest declared the link —
 	// matching the §3.1 invariant "no invoker, no authority".
 	invoker handle.ToolInvoker
+
+	// Live registry — populated by InstantiateVerified after every
+	// successful forge. RevokeByKey walks this list to close every
+	// Instance signed by a given key. Entries self-prune via a
+	// watcher goroutine when the Instance's lifecycle ctx cancels.
+	// See revocation.go for the wiring; #396 deliverable 3.
+	liveMu           sync.Mutex
+	live             []liveEntry
+	revocationLogger func(format string, args ...any)
 }
 
 // CrossFlowQuerier is the narrow read-side of internal/runtime/events

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"time"
 
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/capability/envelope"
@@ -24,6 +25,19 @@ import (
 type VerifiedInstantiation struct {
 	Instance *handle.Instance
 	Manifest *envelope.Manifest
+
+	// SignerID is the trust-store key fingerprint that signed the
+	// envelope. Surfaced so callers (loaders, audit log, future
+	// status surfaces) can correlate an Instance back to the key
+	// that made it trusted. RevokeByKey on the Instantiator keys
+	// off this same value (#396 deliverable 3).
+	SignerID envelope.KeyID
+
+	// SignedAt is the RFC 3339 timestamp the signer embedded in the
+	// trusted comment. Used by the trust-store not-valid-after
+	// enforcement (#396 commit 3) to reject bundles signed after a
+	// post-compromise revocation timestamp.
+	SignedAt time.Time
 }
 
 // InstantiateVerified is the production load path: it takes raw in-memory
@@ -127,9 +141,19 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 	if err != nil {
 		return nil, err
 	}
+
+	// Track in the live registry so RevokeByKey can find this Instance
+	// later (#396 deliverable 3). The watcher goroutine inside
+	// trackLive prunes the entry when Close() fires the lifecycle ctx,
+	// regardless of whether Close came from the user, RevokeByKey, or
+	// the eventual provider cascade (#392 follow-up).
+	i.trackLive(inst, vm.SignerID, vm.SignedAt)
+
 	return &VerifiedInstantiation{
 		Instance: inst,
 		Manifest: vm.Manifest,
+		SignerID: vm.SignerID,
+		SignedAt: vm.SignedAt,
 	}, nil
 }
 

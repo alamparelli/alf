@@ -740,6 +740,19 @@ func main() {
 		defer func() { _ = wasmRt.Close(context.Background()) }()
 	}
 
+	// #396 Stage 2: clock-sanity boot check + CRL refresher + skew
+	// monitor. Refuses to boot if system clock is wildly past
+	// (§7.7); applies signed CRLs from ALF_CRL_URL to wasm trust
+	// store on a 6h cycle with 30-day offline fail-safe. Degrades
+	// gracefully when no release pubkey is embedded (dev build).
+	if wasmRt != nil {
+		crlRt, err := setupCRL(context.Background(), dataDir, wasmRt.TrustStore, log.Printf)
+		if err != nil {
+			log.Fatalf("crl: %v", err) // refused boot: clock sanity
+		}
+		defer crlRt.Close()
+	}
+
 	// #389 step 8: verified-skill loader. Walks the same directories
 	// the legacy skillStore scans, prepares each signed bundle, and
 	// forges a handle.Instance per verified skill. Reuses the shared

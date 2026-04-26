@@ -63,18 +63,29 @@ var ErrSignerKeyRevoked = errors.New("envelope: signer key revoked at or before 
 // MemoryTrustStore is a trivial in-memory store. Used by tests and by
 // the daemon when bootstrapping with a single embedded key (tier 1,
 // the release-signed daemon binary per §7.3).
+//
+// Two separate revocation maps:
+//   - revokedAt: operator-set via Revoke() (admin CLI / #395 path)
+//   - crlRevokedAt: set by ApplyCRL() from a signed alf release CRL
+//
+// RevokedAfter returns the strictest (earliest) of the two — neither
+// channel can soften the other. Add() clears operator-set only; the
+// CRL is upstream-authoritative and can't be silenced by re-trusting
+// locally. Remove() clears both (the key itself is gone).
 type MemoryTrustStore struct {
-	mu        sync.RWMutex
-	keys      map[KeyID]PublicKey
-	revokedAt map[KeyID]time.Time
+	mu           sync.RWMutex
+	keys         map[KeyID]PublicKey
+	revokedAt    map[KeyID]time.Time
+	crlRevokedAt map[KeyID]time.Time
 }
 
 // NewMemoryTrustStore constructs an empty in-memory store. Keys are
 // added via Add(). Concurrency-safe.
 func NewMemoryTrustStore() *MemoryTrustStore {
 	return &MemoryTrustStore{
-		keys:      make(map[KeyID]PublicKey),
-		revokedAt: make(map[KeyID]time.Time),
+		keys:         make(map[KeyID]PublicKey),
+		revokedAt:    make(map[KeyID]time.Time),
+		crlRevokedAt: make(map[KeyID]time.Time),
 	}
 }
 
@@ -102,6 +113,7 @@ func (m *MemoryTrustStore) Remove(id KeyID) {
 	defer m.mu.Unlock()
 	delete(m.keys, id)
 	delete(m.revokedAt, id)
+	delete(m.crlRevokedAt, id)
 }
 
 // Revoke records a not-valid-after timestamp for id. Bundles signed
@@ -123,12 +135,50 @@ func (m *MemoryTrustStore) Revoke(id KeyID, notValidAfter time.Time) {
 	m.revokedAt[id] = notValidAfter
 }
 
-// RevokedAfter implements Revoker.
+// RevokedAfter implements Revoker. Returns the strictest (earliest)
+// of operator-set and CRL-set timestamps. Either channel alone is
+// authoritative; neither can soften the other.
 func (m *MemoryTrustStore) RevokedAfter(id KeyID) (time.Time, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	t, ok := m.revokedAt[id]
-	return t, ok
+	op, opOK := m.revokedAt[id]
+	crl, crlOK := m.crlRevokedAt[id]
+	switch {
+	case opOK && crlOK:
+		if op.Before(crl) {
+			return op, true
+		}
+		return crl, true
+	case opOK:
+		return op, true
+	case crlOK:
+		return crl, true
+	}
+	return time.Time{}, false
+}
+
+// ApplyCRL installs the entries of a verified CRL into the store.
+// Replaces (does not merge) the previous CRL state — re-applying the
+// same CRL is idempotent; applying a newer CRL with fewer entries
+// drops the missing keys' CRL-set timestamps (operator-set Revoke()
+// timestamps are unaffected).
+//
+// Entries naming a KeyID NOT in the store are accepted anyway: the
+// trust store may grow (Add) after a CRL was applied, and we want
+// the CRL to take effect immediately rather than after a re-fetch.
+// The dual map keeps these CRL-only entries separate from the keys
+// the operator has explicitly trusted.
+func (m *MemoryTrustStore) ApplyCRL(c *CRL) {
+	if c == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	fresh := make(map[KeyID]time.Time, len(c.Entries))
+	for _, e := range c.Entries {
+		fresh[e.KeyID] = e.NotValidAfter
+	}
+	m.crlRevokedAt = fresh
 }
 
 // Lookup implements TrustStore.

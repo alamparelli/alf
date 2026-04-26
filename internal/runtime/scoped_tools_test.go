@@ -42,13 +42,27 @@ func TestBuildScopedToolSpecs_TwoAllowedReturnsBoth(t *testing.T) {
 	}
 }
 
-func TestBuildScopedToolSpecs_NilAllowedYieldsEmpty(t *testing.T) {
+// TestBuildScopedToolSpecs_NilAllowedYieldsAll pins the SEC-005
+// legacy-compatibility semantic: a nil allowlist means "no boundary
+// configured for this turn — surface every registered manifest".
+// This is the path for callers that have not yet wired an active-skill
+// boundary (most Chat callers as of v0.8.0-beta). The orchestrator
+// post-#389 Stage 2 will pass a non-nil allowlist, which narrows the
+// surface to the active skill's [[tools.declares]].
+//
+// Distinct from the empty-slice case: nil = "no boundary",
+// []capability.ID{} = "explicit empty boundary, surface zero tools".
+func TestBuildScopedToolSpecs_NilAllowedYieldsAll(t *testing.T) {
 	specs := BuildScopedToolSpecs(fixtureManifests(), nil)
-	if specs != nil {
-		t.Errorf("nil allowed: want nil specs, got %v", specs)
+	if len(specs) != 3 {
+		t.Fatalf("nil allowed: want 3 specs (all manifests), got %d: %v", len(specs), specs)
 	}
 }
 
+// TestBuildScopedToolSpecs_EmptyAllowedYieldsEmpty pins that an
+// explicit empty allowlist (non-nil, length zero) surfaces zero
+// tools — distinct from nil. This is the "active skill declared no
+// tools" path.
 func TestBuildScopedToolSpecs_EmptyAllowedYieldsEmpty(t *testing.T) {
 	specs := BuildScopedToolSpecs(fixtureManifests(), []capability.ID{})
 	if specs != nil {

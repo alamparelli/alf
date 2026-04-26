@@ -132,6 +132,16 @@ type ChatRequest struct {
 	WriteCapable  bool
 	DataDir       string
 	ResumeID      string
+
+	// ActiveSkills, when non-nil, narrows the LLM-visible tool surface
+	// to the subset of registered capabilities whose ID matches one of
+	// these entries. Drives the §3.1 "tools outside the allowlist are
+	// absent, not blocked" promise (SEC-005). Used only when Tools is
+	// nil — explicit Tools always wins. The orchestrator (post-#389
+	// Stage 2) populates this from the active skill's
+	// [[tools.declares]]; legacy callers leave it nil and get the
+	// legacy unfiltered surface.
+	ActiveSkills []capability.ID
 }
 
 // ConverseRequest is the stateless LLM surface: system prompts + prompt +

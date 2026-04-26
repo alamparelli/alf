@@ -758,6 +758,76 @@ func TestChat_ErrorsWhenNoModelAnywhere(t *testing.T) {
 	}
 }
 
+// TestChat_ActiveSkillsNarrowsToolSurface pins SEC-005: when
+// ChatRequest.ActiveSkills is non-nil, the LLM-facing tool list must
+// be filtered to that allowlist via BuildScopedToolSpecs. Without
+// this wiring the §3.1 "tools outside the allowlist are absent, not
+// blocked" promise was unreachable from production.
+func TestChat_ActiveSkillsNarrowsToolSurface(t *testing.T) {
+	read := &fakeCapability{manifest: capability.Manifest{ID: "read-file", Description: "Read a file"}}
+	bash := &fakeCapability{manifest: capability.Manifest{ID: "bash", Description: "Run a bash command"}}
+	write := &fakeCapability{manifest: capability.Manifest{ID: "write-file", Description: "Write a file"}}
+
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(read, bash, write),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	ch, err := rt.Chat(context.Background(), runtime.ChatRequest{
+		ConvID:       "c",
+		UserInput:    "hi",
+		ActiveSkills: []capability.ID{"bash"}, // narrow surface
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	for range ch {
+	}
+
+	r := eng.requests[0]
+	if len(r.Tools) != 1 || r.Tools[0].Name != "bash" {
+		t.Errorf("tool surface not narrowed by ActiveSkills: got %+v, want only [bash]", r.Tools)
+	}
+}
+
+// TestChat_NilActiveSkillsKeepsLegacySurface pins the
+// backward-compat half of SEC-005: a nil ActiveSkills slice keeps
+// the legacy "all registered manifests" surface so existing callers
+// (controlcenter, scheduler) that have not yet wired an active-skill
+// boundary continue to work. The orchestrator wiring (post-#389
+// Stage 2) will populate ActiveSkills explicitly.
+func TestChat_NilActiveSkillsKeepsLegacySurface(t *testing.T) {
+	read := &fakeCapability{manifest: capability.Manifest{ID: "read-file", Description: "Read a file"}}
+	bash := &fakeCapability{manifest: capability.Manifest{ID: "bash", Description: "Run a bash command"}}
+
+	eng := &fakeEngine{scripts: [][]ai.Event{{{Kind: ai.EventDone}}}}
+	rt, _ := runtime.New(runtime.Deps{
+		Registry: newFakeRegistry(read, bash),
+		Memory:   newFakeStore(),
+		AI:       eng,
+		Sandbox:  sandbox.New(),
+	}, runtime.Options{Model: "m"})
+
+	ch, err := rt.Chat(context.Background(), runtime.ChatRequest{
+		ConvID:    "c",
+		UserInput: "hi",
+		// ActiveSkills nil ⇒ legacy unfiltered surface
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	for range ch {
+	}
+
+	r := eng.requests[0]
+	if len(r.Tools) != 2 {
+		t.Errorf("nil ActiveSkills should keep all 2 tools, got %+v", r.Tools)
+	}
+}
+
 // ── Invoke pipeline ─────────────────────────────────────────────────────────
 
 func TestInvoke_ResolvesDerivesAppliesAndExecutes(t *testing.T) {

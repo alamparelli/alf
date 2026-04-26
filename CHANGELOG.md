@@ -19,6 +19,24 @@ the milestone ticket map.
 
 ### Security
 
+- **SEC-005 — wire BuildScopedToolSpecs into the Chat tool surface**.
+  The §3.1 active-skill tool-surface filter was implemented but never
+  wired into production: the legacy `buildToolSpecs` helper (no
+  allowlist) was the only producer, so every chat turn exposed every
+  installed capability to the LLM regardless of which skill was
+  active. Fix: `runtime.Chat` now routes through
+  `BuildScopedToolSpecs`, gated by a new
+  `ChatRequest.ActiveSkills []capability.ID` field. The legacy
+  unfiltered helper was deleted; `BuildScopedToolSpecs` gained
+  nil-allowlist semantics (= legacy "all manifests" surface) so
+  callers without an active-skill boundary still work pending #389
+  Stage 2 orchestrator wiring. Two new archtests:
+  `TestNoLegacyBuildToolSpecsHelper` (the deleted symbol cannot
+  re-appear in production code) and
+  `TestBuildScopedToolSpecsIsWiredInChat` (the wire-in cannot be
+  silently reverted to inline projection). Two new behavioural
+  tests: `TestChat_ActiveSkillsNarrowsToolSurface` and
+  `TestChat_NilActiveSkillsKeepsLegacySurface`.
 - **SEC-001 — CRL anti-replay (monotonic IssuedAt high-water)**.
   Every signed CRL applied by the refresher updates an in-memory
   high-water mark — the IssuedAt of the most recently applied CRL.

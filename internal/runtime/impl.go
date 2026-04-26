@@ -89,7 +89,12 @@ func (r *defaultRuntime) Chat(ctx context.Context, req ChatRequest) (<-chan Even
 	messages := toAIMessages(history)
 	tools := req.Tools
 	if tools == nil {
-		tools = buildToolSpecs(r.deps.Registry.List())
+		// SEC-005: route through BuildScopedToolSpecs so the §3.1
+		// active-skill boundary has a single producer to plug into.
+		// req.ActiveSkills == nil ⇒ legacy "all tools" surface (the
+		// orchestrator wiring lands with #389 Stage 2). Non-nil
+		// allowlist already narrows the surface today.
+		tools = BuildScopedToolSpecs(r.deps.Registry.List(), req.ActiveSkills)
 	}
 
 	out := make(chan Event, 16)
@@ -458,42 +463,41 @@ func manifestView(m capability.Manifest) sandbox.ManifestView {
 	}
 }
 
-// buildToolSpecs projects the registry's manifests into the provider-facing
-// ToolSpec slice. An empty registry yields a nil slice — valid for turns
-// that should not exercise any Capability.
-func buildToolSpecs(manifests []capability.Manifest) []ai.ToolSpec {
+// BuildScopedToolSpecs is the #389 Tier 3.1 tool-surface producer.
+// It projects the registry's manifests into ToolSpec form, optionally
+// filtered to an allowlist of capability IDs.
+//
+// Allowed-slice semantics:
+//   - nil          → all manifests projected (legacy behaviour for
+//                    callers that have not yet wired an active-skill
+//                    boundary). Logged-but-not-enforced — see #389
+//                    Stage 2 for the per-turn narrowing.
+//   - non-nil, len=0 → empty tool surface (LLM sees no tools).
+//   - non-nil, len>0 → only manifests whose ID is in the allowlist
+//                    appear in the spec; the rest are absent, not
+//                    blocked, matching the §3.1 promise that the LLM
+//                    never learns of capabilities outside the active
+//                    skill's [[tools.declares]].
+//
+// SEC-005: this is the SOLE production producer of LLM-facing tool
+// specs in the runtime. The legacy unfiltered helper was deleted —
+// callers that need the unfiltered set pass nil. An archtest pins
+// the single-producer invariant.
+func BuildScopedToolSpecs(manifests []capability.Manifest, allowed []capability.ID) []ai.ToolSpec {
 	if len(manifests) == 0 {
 		return nil
 	}
-	specs := make([]ai.ToolSpec, 0, len(manifests))
-	for _, m := range manifests {
-		specs = append(specs, ai.ToolSpec{
-			Name:        string(m.ID),
-			Description: m.Description,
-		})
+	if allowed == nil {
+		specs := make([]ai.ToolSpec, 0, len(manifests))
+		for _, m := range manifests {
+			specs = append(specs, ai.ToolSpec{
+				Name:        string(m.ID),
+				Description: m.Description,
+			})
+		}
+		return specs
 	}
-	return specs
-}
-
-// BuildScopedToolSpecs is the #389 Tier 3.1 tool-surface filter: it
-// projects the registry's manifests into ToolSpec form, then keeps
-// only the entries whose ID matches an allowlist. A nil or empty
-// allowed slice means "no tools" — the LLM sees an empty tool menu,
-// matching the §3.1 promise that capabilities cannot reach what their
-// manifest did not declare.
-//
-// "Not blocked, absent" — the §3.1 acceptance criterion is structural,
-// not a runtime check. Tools outside the allowlist do not appear in
-// the spec returned to the provider, so the LLM never learns they
-// exist for this turn.
-//
-// Production wire-in arrives when the orchestrator + Runtime.Invoke
-// expose an explicit "active skill" boundary; until then, this helper
-// covers the structural contract the forge depends on (Étape 2's
-// ToolHandle scope mirrors what this function produces — same
-// allowlist, same shape).
-func BuildScopedToolSpecs(manifests []capability.Manifest, allowed []capability.ID) []ai.ToolSpec {
-	if len(manifests) == 0 || len(allowed) == 0 {
+	if len(allowed) == 0 {
 		return nil
 	}
 	allowedSet := make(map[capability.ID]struct{}, len(allowed))

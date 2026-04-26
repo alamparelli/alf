@@ -8,7 +8,12 @@
 // substitute it without re-building the daemon binary.
 package llm
 
-import _ "embed"
+import (
+	"crypto/rand"
+	_ "embed"
+	"encoding/hex"
+	"strings"
+)
 
 //go:embed kernel_prompt.txt
 var kernelPrompt string
@@ -18,8 +23,56 @@ var kernelPrompt string
 // treated as a programming error by the prepender — daemons must not
 // run with an empty kernel prompt because the agent-mediation guarantee
 // of §3.2 collapses without it.
+//
+// The returned string carries {NONCE} placeholders inside the marker
+// definitions. The KernelPromptInjector at provider-Invoke time
+// generates a fresh per-turn nonce and substitutes it across the
+// kernel prompt, every other system prompt, the user prompt, and
+// every conversation message. Without this binding, a tool that emits
+// the literal closing tag bytes can break out of the marker and
+// inject pseudo-system instructions — see SEC-002.
 func KernelPrompt() string {
 	return kernelPrompt
+}
+
+// NoncePlaceholder is the literal token inside the kernel prompt and
+// every wrap-site output. The KernelPromptInjector replaces every
+// occurrence of this string with a freshly-generated random nonce on
+// every Invoke. Exported so providers below the injector layer
+// (e.g. ToolLoop, which wraps tool outputs during multi-turn loops
+// after the injector has already run) can perform the same
+// substitution against the per-Invoke nonce.
+const NoncePlaceholder = "{NONCE}"
+
+// NewNonce returns a fresh 16-hex-char (8 random bytes) nonce. Used
+// by the KernelPromptInjector at the start of every Invoke. Unguessable
+// — crypto/rand backs it. A WASM tool composing its output cannot
+// predict this value because it does not run inside the daemon's
+// PRNG.
+func NewNonce() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failure is catastrophic; fall back to a constant
+		// rather than crash, so the daemon does not lose its LLM
+		// pipeline. The constant still rotates between deployments
+		// (different binary builds) — but a well-funded attacker
+		// who reaches this branch already has bigger problems.
+		return "0000000000000000"
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// SubstituteNonce replaces every NoncePlaceholder occurrence in s
+// with the given nonce. Used by the injector to materialise the
+// kernel prompt + wrapped content for a specific turn, and by
+// downstream providers that wrap tool outputs after the injector has
+// run (so they need to substitute the same nonce in their own
+// loop-local wraps).
+func SubstituteNonce(s, nonce string) string {
+	if !strings.Contains(s, NoncePlaceholder) {
+		return s
+	}
+	return strings.ReplaceAll(s, NoncePlaceholder, nonce)
 }
 
 // Marker tag names used to wrap capability-provided content before it
@@ -30,6 +83,11 @@ func KernelPrompt() string {
 // output formatters, fetcher integrations) reference the same strings —
 // a typo in a wrapper site would silently break the kernel prompt's
 // match expectations.
+//
+// The runtime tag emitted by the wrap functions is the constant name
+// suffixed with "_{NONCE}". The bare constants below are kept for
+// backward-compat introspection (tests that probe the structural
+// shape) and for archtests that pin the names.
 const (
 	TagCapabilityContent = "capability_content"
 	TagToolOutput        = "tool_output"
@@ -40,28 +98,37 @@ const (
 // marker, attributing the source for audit. Use for skill prompts,
 // agent instructions, or any other text that originated from a
 // capability and is being injected into the LLM context.
+//
+// The returned string carries the {NONCE} placeholder; the injector
+// substitutes it with a per-turn random nonce so a malicious source
+// cannot break out of the marker by emitting the closing tag bytes
+// (SEC-002).
 func WrapCapabilityContent(source, content string) string {
 	return wrapWithSource(TagCapabilityContent, source, content)
 }
 
 // WrapToolOutput wraps the result of a tool invocation. Use at the
 // site where tool outputs are appended to the LLM message history.
+// {NONCE} placeholder semantics — see WrapCapabilityContent.
 func WrapToolOutput(toolName, content string) string {
 	return wrapWithSource(TagToolOutput, toolName, content)
 }
 
 // WrapFetchedContent wraps content fetched from an external resource
 // (web page, API response). Use at the site where fetched bytes
-// become part of the LLM context.
+// become part of the LLM context. {NONCE} placeholder semantics —
+// see WrapCapabilityContent.
 func WrapFetchedContent(url, content string) string {
 	return wrapWithSource(TagFetchedContent, url, content)
 }
 
 func wrapWithSource(tag, source, content string) string {
+	openTag := "<" + tag + "_" + NoncePlaceholder
+	closeTag := "</" + tag + "_" + NoncePlaceholder + ">"
 	if source == "" {
-		return "<" + tag + ">" + content + "</" + tag + ">"
+		return openTag + ">" + content + closeTag
 	}
-	return "<" + tag + ` source="` + escapeAttr(source) + `">` + content + "</" + tag + ">"
+	return openTag + ` source="` + escapeAttr(source) + `">` + content + closeTag
 }
 
 // escapeAttr does a minimal HTML-attribute escape for source strings

@@ -174,7 +174,7 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 
 			messages = append(messages, apiMessage{
 				Role:       "tool",
-				Content:    wrapToolOutputForLLM(tc.Function.Name, result.Output),
+				Content:    wrapToolOutputForLLM(ctx, tc.Function.Name, result.Output),
 				ToolCallID: tc.ID,
 			})
 
@@ -190,19 +190,33 @@ func (tl *ToolLoop) Invoke(ctx context.Context, prompt string, params Params, on
 }
 
 // wrapToolOutputForLLM mirrors internal/runtime/llm.WrapToolOutput so the
-// kernel prompt's <tool_output> marker discipline (§3.2 of
+// kernel prompt's marker discipline (§3.2 of
 // docs/ARCHITECTURE-SECURITY.md) covers tool results that flow through
 // the API tool loop. Inlined here because the foundation dependency
 // rule forbids internal/ai/provider from importing internal/runtime/*.
 //
 // The literal "tool_output" tag MUST match
-// internal/runtime/llm.TagToolOutput. If you rename the tag in the
-// kernel prompt, update both sites.
-func wrapToolOutputForLLM(toolName, content string) string {
-	if toolName == "" {
-		return "<tool_output>" + content + "</tool_output>"
+// internal/runtime/llm.TagToolOutput, and the {NONCE} placeholder
+// suffix MUST match internal/runtime/llm.NoncePlaceholder. If either
+// changes, update both sites.
+//
+// ctx carries the per-Invoke marker nonce (installed by
+// KernelPromptInjector). When present, this function emits a fully
+// substituted marker; absent ctx-nonce (test paths bypassing the
+// injector) keeps the {NONCE} literal so callers can inspect the
+// shape — the kernel prompt then carries the same literal placeholder
+// and the LLM still sees a consistent boundary, just not random.
+func wrapToolOutputForLLM(ctx context.Context, toolName, content string) string {
+	nonce := markerNonceFromCtx(ctx)
+	if nonce == "" {
+		nonce = noncePlaceholder
 	}
-	return "<tool_output source=\"" + escapeMarkerAttr(toolName) + "\">" + content + "</tool_output>"
+	openTag := "<tool_output_" + nonce
+	closeTag := "</tool_output_" + nonce + ">"
+	if toolName == "" {
+		return openTag + ">" + content + closeTag
+	}
+	return openTag + " source=\"" + escapeMarkerAttr(toolName) + "\">" + content + closeTag
 }
 
 // escapeMarkerAttr does the same minimal HTML-attribute escape as

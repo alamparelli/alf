@@ -19,6 +19,37 @@ the milestone ticket map.
 
 ### Security
 
+- **SEC-002 — marker breakout via per-turn nonce framing**. The
+  `<tool_output>` / `<capability_content>` / `<fetched_content>`
+  markers that the §3.2 kernel prompt anchors on were structurally
+  trivial: a tool that emitted the literal closing-tag bytes inside
+  its own content broke out of the wrapper, forging a pseudo-system
+  segment the kernel prompt's "NOT authoritative" rule no longer
+  covered. Reachable from any LLM-controlled tool that can return
+  attacker-chosen bytes (every WASM tool today). Fix: every wrap
+  function now emits `<tag_{NONCE}>...</tag_{NONCE}>` with a
+  literal `{NONCE}` placeholder; the `KernelPromptInjector` at
+  every `Invoke` generates a fresh 16-hex random nonce
+  (`crypto/rand`-backed), substitutes it across the kernel prompt
+  + every caller `SystemPrompts` entry + the user prompt + every
+  `ConvMessage.Content`, then propagates the nonce through
+  `context.Context` so `ToolLoop`'s loop-local wraps for tool
+  outputs in subsequent iterations get the same materialised
+  nonce. A capability cannot guess the per-Invoke value, so
+  closing-tag bytes inside its content stay literal data — the
+  real closing tag carries the nonce. New primitives:
+  `llm.NoncePlaceholder`, `llm.NewNonce`, `llm.SubstituteNonce`
+  (with private mirrors `noncePlaceholder`, `newMarkerNonce`,
+  `substituteMarkerNonce` in `internal/ai/provider` because the
+  foundation rule forbids the cross-import). Tests:
+  `TestKernelPromptInjector_SubstitutesNonceAcrossInputs`,
+  `TestKernelPromptInjector_NoncesDifferAcrossInvokes` (50
+  consecutive Invokes, no duplicate nonce),
+  `TestKernelPromptInjector_NoncePropagatedViaContext`,
+  `TestNewNonce_ProducesRandomDistinctValues` (1000 draws),
+  `TestSubstituteNonce_ReplacesPlaceholderEverywhere`,
+  `TestWrapToolOutput_BreakoutAttempt_IsContained` (hostile
+  closing-tag bytes inside content stay contained).
 - **SEC-005 — wire BuildScopedToolSpecs into the Chat tool surface**.
   The §3.1 active-skill tool-surface filter was implemented but never
   wired into production: the legacy `buildToolSpecs` helper (no

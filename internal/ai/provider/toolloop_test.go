@@ -267,24 +267,37 @@ func TestNestedString_NonMapInPath(t *testing.T) {
 	}
 }
 
-// TestWrapToolOutputForLLM_PinsMarkerShape pins the audit D6 fix:
-// tool results sent to the API tool loop are wrapped in
-// <tool_output source="..."> matching the kernel prompt's marker
-// expectations from internal/runtime/llm.kernel_prompt.txt §3.2.
+// TestWrapToolOutputForLLM_PinsMarkerShape pins the audit D6 fix +
+// SEC-002 nonce binding: tool results sent to the API tool loop are
+// wrapped in <tool_output_NONCE source="..."> matching the kernel
+// prompt's per-Invoke marker expectations from
+// internal/runtime/llm.kernel_prompt.txt §3.2.
 //
 // Inlined here because internal/ai/provider cannot import
 // internal/runtime/llm (foundation cross-import). If the kernel
-// prompt's tag string ever changes, this test + the helper must be
-// updated alongside internal/runtime/llm.TagToolOutput.
+// prompt's tag string or nonce placeholder ever changes, this test
+// + the helper must be updated alongside the llm package.
+//
+// Without a nonce in ctx (test path bypassing KernelPromptInjector),
+// the {NONCE} placeholder remains literal. With a nonce in ctx, the
+// substitution happens at wrap time so the loop iteration's tool
+// output already carries the per-Invoke nonce.
 func TestWrapToolOutputForLLM_PinsMarkerShape(t *testing.T) {
-	if got, want := wrapToolOutputForLLM("native.echo", "hi"), `<tool_output source="native.echo">hi</tool_output>`; got != want {
+	ctx := context.Background()
+	if got, want := wrapToolOutputForLLM(ctx, "native.echo", "hi"), `<tool_output_{NONCE} source="native.echo">hi</tool_output_{NONCE}>`; got != want {
 		t.Errorf("with source: got %q, want %q", got, want)
 	}
-	if got, want := wrapToolOutputForLLM("", "hi"), `<tool_output>hi</tool_output>`; got != want {
+	if got, want := wrapToolOutputForLLM(ctx, "", "hi"), `<tool_output_{NONCE}>hi</tool_output_{NONCE}>`; got != want {
 		t.Errorf("empty source: got %q, want %q", got, want)
 	}
 	// Adversarial source string must not break out of the attribute.
-	if got := wrapToolOutputForLLM(`evil"><script>`, "x"); got != `<tool_output source="evil&quot;&gt;&lt;script&gt;">x</tool_output>` {
+	if got := wrapToolOutputForLLM(ctx, `evil"><script>`, "x"); got != `<tool_output_{NONCE} source="evil&quot;&gt;&lt;script&gt;">x</tool_output_{NONCE}>` {
 		t.Errorf("attribute escape failed: %q", got)
+	}
+	// With a ctx-installed nonce, the substitution materialises in
+	// the same call.
+	withNonce := withMarkerNonce(ctx, "abcdef0123456789")
+	if got, want := wrapToolOutputForLLM(withNonce, "calc", "42"), `<tool_output_abcdef0123456789 source="calc">42</tool_output_abcdef0123456789>`; got != want {
+		t.Errorf("ctx nonce: got %q, want %q", got, want)
 	}
 }

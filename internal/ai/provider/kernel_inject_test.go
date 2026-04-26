@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -90,6 +91,123 @@ func TestRegistry_ForBackend_WrapsWhenKernelPromptSet(t *testing.T) {
 	if len(stub.gotParams.SystemPrompts) != 2 || stub.gotParams.SystemPrompts[0] != "KERNEL" {
 		t.Errorf("wrapper did not prepend kernel prompt; got %v", stub.gotParams.SystemPrompts)
 	}
+}
+
+// TestKernelPromptInjector_SubstitutesNonceAcrossInputs pins SEC-002:
+// the per-Invoke nonce must be substituted in the kernel prompt, in
+// every caller-supplied system prompt, in the user prompt, and in
+// every ConvMessage Content. After Invoke, no {NONCE} placeholder
+// may remain in any of those strings.
+func TestKernelPromptInjector_SubstitutesNonceAcrossInputs(t *testing.T) {
+	stub := &stubProvider{}
+	wrapped := NewKernelPromptInjector(stub,
+		`KERNEL: <tool_output_{NONCE}> markers</tool_output_{NONCE}>`)
+
+	params := Params{
+		SystemPrompts: []string{
+			`<capability_content_{NONCE} source="skill:foo">body</capability_content_{NONCE}>`,
+			"plain prompt with no nonce",
+		},
+		ConvMessages: []ContextMessage{
+			{Role: "tool", Content: `<tool_output_{NONCE}>previous-iter</tool_output_{NONCE}>`},
+		},
+	}
+	prompt := `user said: <fetched_content_{NONCE}>page</fetched_content_{NONCE}>`
+
+	if _, err := wrapped.Invoke(context.Background(), prompt, params, nil); err != nil {
+		t.Fatal(err)
+	}
+	for i, sp := range stub.gotParams.SystemPrompts {
+		if strings.Contains(sp, noncePlaceholder) {
+			t.Errorf("SystemPrompts[%d] still carries {NONCE}: %q", i, sp)
+		}
+	}
+	for i, m := range stub.gotParams.ConvMessages {
+		if strings.Contains(m.Content, noncePlaceholder) {
+			t.Errorf("ConvMessages[%d].Content still carries {NONCE}: %q", i, m.Content)
+		}
+	}
+	// Kernel prompt is at index 0 of SystemPrompts after injection.
+	kp := stub.gotParams.SystemPrompts[0]
+	if !strings.Contains(kp, "KERNEL: <tool_output_") {
+		t.Errorf("kernel prompt nonce substitution missing: %q", kp)
+	}
+	// First caller prompt also substituted — same nonce as kernel.
+	cp1 := stub.gotParams.SystemPrompts[1]
+	if !strings.Contains(cp1, "<capability_content_") {
+		t.Errorf("caller prompt 1 nonce substitution missing: %q", cp1)
+	}
+	// Extract nonce from kernel and confirm caller prompt + ConvMessage
+	// share the same nonce — binding is the whole point.
+	idx := strings.Index(kp, "<tool_output_")
+	if idx < 0 {
+		t.Fatalf("kernel prompt malformed: %q", kp)
+	}
+	end := strings.Index(kp[idx:], ">")
+	kernelNonce := kp[idx+len("<tool_output_") : idx+end]
+	if !strings.Contains(cp1, kernelNonce) {
+		t.Errorf("caller prompt missing kernel nonce %q: %q", kernelNonce, cp1)
+	}
+	convContent := stub.gotParams.ConvMessages[0].Content
+	if !strings.Contains(convContent, kernelNonce) {
+		t.Errorf("ConvMessage missing kernel nonce %q: %q", kernelNonce, convContent)
+	}
+}
+
+// TestKernelPromptInjector_NoncesDifferAcrossInvokes pins that
+// successive Invokes get distinct nonces. Without this, an attacker
+// who learns one Invoke's nonce could craft closing-tag bytes for a
+// future tool output. crypto/rand backs newMarkerNonce.
+func TestKernelPromptInjector_NoncesDifferAcrossInvokes(t *testing.T) {
+	stub := &stubProvider{}
+	wrapped := NewKernelPromptInjector(stub, `K_{NONCE}`)
+
+	seen := make(map[string]struct{}, 50)
+	for i := 0; i < 50; i++ {
+		if _, err := wrapped.Invoke(context.Background(), "p", Params{}, nil); err != nil {
+			t.Fatal(err)
+		}
+		kp := stub.gotParams.SystemPrompts[0]
+		// kernel prompt looks like "K_<nonce>"
+		if !strings.HasPrefix(kp, "K_") {
+			t.Fatalf("unexpected kernel prompt shape: %q", kp)
+		}
+		nonce := strings.TrimPrefix(kp, "K_")
+		if len(nonce) != 16 {
+			t.Fatalf("nonce wrong length: %q", nonce)
+		}
+		if _, dup := seen[nonce]; dup {
+			t.Fatalf("duplicate nonce across Invokes: %q", nonce)
+		}
+		seen[nonce] = struct{}{}
+	}
+}
+
+// TestKernelPromptInjector_NoncePropagatedViaContext pins that
+// downstream providers (ToolLoop) can read the per-Invoke nonce from
+// ctx so loop-local wraps materialise with the same nonce.
+func TestKernelPromptInjector_NoncePropagatedViaContext(t *testing.T) {
+	var seenNonce string
+	capturer := stubProviderFn(func(ctx context.Context, _ string, _ Params, _ OnProgress) (*Result, error) {
+		seenNonce = markerNonceFromCtx(ctx)
+		return &Result{}, nil
+	})
+	wrapped := NewKernelPromptInjector(capturer, "K")
+
+	if _, err := wrapped.Invoke(context.Background(), "p", Params{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(seenNonce) != 16 {
+		t.Errorf("expected 16-hex nonce in ctx, got %q", seenNonce)
+	}
+}
+
+// stubProviderFn is a Provider whose Invoke runs an arbitrary fn —
+// used to capture the per-Invoke ctx state.
+type stubProviderFn func(ctx context.Context, prompt string, params Params, onProgress OnProgress) (*Result, error)
+
+func (f stubProviderFn) Invoke(ctx context.Context, prompt string, params Params, onProgress OnProgress) (*Result, error) {
+	return f(ctx, prompt, params, onProgress)
 }
 
 func TestRegistry_ForBackend_NoWrapWhenKernelPromptUnset(t *testing.T) {

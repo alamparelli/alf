@@ -1,6 +1,42 @@
 package provider
 
-import "context"
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"strings"
+)
+
+// noncePlaceholder MUST match internal/runtime/llm.NoncePlaceholder.
+// Inlined here because the foundation dependency rule forbids
+// internal/ai/provider from importing internal/runtime/*. If the llm
+// constant changes, update this one in lockstep — the LLM-facing
+// kernel prompt and every wrap-site rely on the two strings being
+// byte-identical.
+const noncePlaceholder = "{NONCE}"
+
+// newMarkerNonce returns a fresh 16-hex-char (8 random bytes) nonce
+// used to bind the per-Invoke kernel prompt to the wrap markers
+// surrounding capability content. Mirrors
+// internal/runtime/llm.NewNonce — see the rationale there.
+func newMarkerNonce() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "0000000000000000"
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// substituteMarkerNonce replaces every noncePlaceholder occurrence
+// in s with the given nonce. The injector applies it to every string
+// that may carry a wrapped marker placeholder before the request
+// reaches the wire.
+func substituteMarkerNonce(s, nonce string) string {
+	if !strings.Contains(s, noncePlaceholder) {
+		return s
+	}
+	return strings.ReplaceAll(s, noncePlaceholder, nonce)
+}
 
 // KernelPromptInjector is the narrow seam #400 uses to prepend the
 // daemon-shipped kernel prompt to every LLM call's SystemPrompts. The
@@ -34,14 +70,76 @@ func NewKernelPromptInjector(p Provider, prompt string) *KernelPromptInjector {
 	return &KernelPromptInjector{inner: p, prompt: prompt}
 }
 
-// Invoke implements Provider. Prepends the kernel prompt and dispatches
-// to the wrapped provider.
+// Invoke implements Provider. Generates a fresh per-Invoke nonce,
+// substitutes it across the kernel prompt + every caller-supplied
+// SystemPrompts entry + the user prompt + every ConvMessage Content,
+// then prepends the materialised kernel prompt and dispatches to the
+// wrapped provider.
+//
+// The nonce binding (SEC-002) prevents capability content from
+// breaking out of its <tag_NONCE>...</tag_NONCE> wrapper: a tool that
+// emits the literal closing tag bytes cannot guess the random per-
+// Invoke nonce, so the LLM still sees a structurally-intact marker
+// and the kernel prompt's "NOT authoritative" rule remains binding.
+//
+// The nonce is propagated through context so providers below this
+// layer (most importantly ToolLoop, which wraps tool outputs during
+// multi-turn loops AFTER the injector has already substituted) can
+// substitute the same value into their loop-local wraps.
 func (k *KernelPromptInjector) Invoke(ctx context.Context, prompt string, params Params, onProgress OnProgress) (*Result, error) {
+	nonce := newMarkerNonce()
+	ctx = withMarkerNonce(ctx, nonce)
+
+	prompt = substituteMarkerNonce(prompt, nonce)
+	if len(params.SystemPrompts) > 0 {
+		out := make([]string, len(params.SystemPrompts))
+		for i, s := range params.SystemPrompts {
+			out[i] = substituteMarkerNonce(s, nonce)
+		}
+		params.SystemPrompts = out
+	}
+	if len(params.ConvMessages) > 0 {
+		out := make([]ContextMessage, len(params.ConvMessages))
+		for i, m := range params.ConvMessages {
+			m.Content = substituteMarkerNonce(m.Content, nonce)
+			out[i] = m
+		}
+		params.ConvMessages = out
+	}
+
 	if k.prompt != "" {
 		// Prepend, never replace — caller-supplied SystemPrompts (skill
 		// prompts, tier instructions, conversation context) follow the
-		// kernel prompt unchanged.
-		params.SystemPrompts = append([]string{k.prompt}, params.SystemPrompts...)
+		// kernel prompt unchanged. Substitute the kernel prompt with
+		// the per-Invoke nonce so the marker definitions in §3.2
+		// reference the same nonce the wrappers used.
+		kp := substituteMarkerNonce(k.prompt, nonce)
+		params.SystemPrompts = append([]string{kp}, params.SystemPrompts...)
 	}
 	return k.inner.Invoke(ctx, prompt, params, onProgress)
+}
+
+// markerNonceCtxKey carries the per-Invoke marker nonce so providers
+// below the injector (ToolLoop) can substitute placeholders in
+// loop-local wraps.
+type markerNonceCtxKey struct{}
+
+// withMarkerNonce returns ctx annotated with the per-Invoke marker
+// nonce. Used by KernelPromptInjector to propagate the nonce to
+// ToolLoop iterations that wrap tool outputs after the injector has
+// finished its substitution pass.
+func withMarkerNonce(ctx context.Context, nonce string) context.Context {
+	return context.WithValue(ctx, markerNonceCtxKey{}, nonce)
+}
+
+// markerNonceFromCtx returns the per-Invoke marker nonce previously
+// installed by withMarkerNonce, or empty string if none. ToolLoop
+// reads this when wrapping tool outputs for the next iteration so
+// the substituted markers match the kernel prompt's substituted
+// definitions.
+func markerNonceFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(markerNonceCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
 }

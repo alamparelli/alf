@@ -434,7 +434,11 @@ func TestChat_ExecutesToolCallAndReinjectsResult(t *testing.T) {
 	// is wrapped in <tool_output source="..."> so the kernel prompt can
 	// flag it as non-authoritative (audit D6). The raw text "echoed:hi"
 	// remains in the memory store assertions further down.
-	if tail.Role != ai.RoleTool || tail.Content != `<tool_output source="native.echo">echoed:hi</tool_output>` {
+	// SEC-002: wrapper emits {NONCE} placeholder; the substitution to
+	// a real per-Invoke nonce happens in the provider layer
+	// (KernelPromptInjector.Invoke). At the message-build site checked
+	// here, the placeholder is still literal.
+	if tail.Role != ai.RoleTool || tail.Content != `<tool_output_{NONCE} source="native.echo">echoed:hi</tool_output_{NONCE}>` {
 		t.Fatalf("second request tail msg wrong: %+v", tail)
 	}
 
@@ -508,8 +512,10 @@ func TestChat_ToolResultMarkerDiscipline(t *testing.T) {
 	drain(ch)
 
 	// LLM-bound message (second request tail) must be wrapped.
+	// SEC-002: the wrap site emits the {NONCE} placeholder; injector
+	// substitutes downstream. Pre-injector inspection sees the literal.
 	tail := eng.requests[1].Messages[len(eng.requests[1].Messages)-1]
-	wantLLM := `<tool_output source="native.tool">RAW_RESULT</tool_output>`
+	wantLLM := `<tool_output_{NONCE} source="native.tool">RAW_RESULT</tool_output_{NONCE}>`
 	if tail.Role != ai.RoleTool || tail.Content != wantLLM {
 		t.Errorf("LLM-bound msg: got %q, want %q", tail.Content, wantLLM)
 	}

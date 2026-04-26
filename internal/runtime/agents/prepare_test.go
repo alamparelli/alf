@@ -193,7 +193,11 @@ func TestPrepareOrchestration_SkillBodyWrappedWithMarker(t *testing.T) {
 		SkillStore:  store,
 	})
 
-	want := `<capability_content source="skill:weather">RAW_SKILL_BODY</capability_content>`
+	// SEC-002: wrap markers carry a {NONCE} placeholder that the
+	// KernelPromptInjector substitutes per-Invoke. PrepareOrchestration
+	// runs ahead of the LLM call, so the placeholder is still literal
+	// here — the substitution happens later in the provider layer.
+	want := `<capability_content_{NONCE} source="skill:weather">RAW_SKILL_BODY</capability_content_{NONCE}>`
 	if len(res.Config.SkillPrompts) != 1 {
 		t.Fatalf("Config.SkillPrompts len=%d, want 1; got %v", len(res.Config.SkillPrompts), res.Config.SkillPrompts)
 	}

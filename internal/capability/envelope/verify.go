@@ -128,6 +128,23 @@ func Verify(in VerifyInput) (*VerifiedManifest, error) {
 		return nil, err
 	}
 
+	// 8. Time-bound revocation check (#396 deliverable 4). If the
+	// trust store implements Revoker AND has recorded a not-valid-
+	// after timestamp for this signer, reject every bundle whose
+	// signed-at is at or beyond that timestamp. This catches
+	// retroactive compromise: the key is still in the store but
+	// any bundle signed after the compromise window cannot be
+	// trusted. Strict-before semantics — equality at the boundary
+	// rejects.
+	if r, ok := in.TrustStore.(Revoker); ok {
+		if revokedAt, hasRev := r.RevokedAfter(pub.ID); hasRev {
+			if !tc.SignedAt.Before(revokedAt) {
+				return nil, fmt.Errorf("%w: signer=%s revoked-at=%s signed-at=%s",
+					ErrSignerKeyRevoked, pub.ID.Hex(), revokedAt.Format(time.RFC3339), tc.SignedAt.Format(time.RFC3339))
+			}
+		}
+	}
+
 	if in.Bundle != nil {
 		if tc.BundleHash == "" {
 			return nil, fmt.Errorf("%w: trusted comment lacks bundle_sha256= field", ErrBundleHashMissing)

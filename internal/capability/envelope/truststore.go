@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // TrustStore maps a KeyID to the public key authorised to verify
@@ -34,35 +35,100 @@ type TrustStore interface {
 // operators can surface the correct remediation.
 var ErrTrustStoreCorrupt = errors.New("truststore: pubkey file unreadable")
 
+// Revoker is the optional interface a TrustStore implements to
+// support time-bound key revocation per #396 deliverable 4. The
+// envelope.Verify pipeline does a runtime type assertion on this
+// interface; a TrustStore that does not satisfy it simply has no
+// revocation surface (every verified bundle passes the time check).
+//
+// Semantics: RevokedAfter(id) returns the timestamp T such that any
+// bundle with SignedAt >= T must be rejected, even if the key id is
+// still in the store. T-zero / ok=false means "no revocation
+// recorded" — the caller treats every signed-at as valid.
+//
+// The check is "signed-at strictly before T accepts" — equality
+// rejects. This matches the operator mental model "key compromised
+// at T; nothing signed at or after T is trustworthy".
+type Revoker interface {
+	RevokedAfter(id KeyID) (time.Time, bool)
+}
+
+// ErrSignerKeyRevoked is returned by Verify when the signer's key
+// has a recorded not-valid-after timestamp and the bundle's signed-at
+// is at or beyond it. Distinct from ErrSignerNotTrusted because the
+// key IS in the store — operators may want different remediation
+// flows ("compromised — replace bundle" vs "untrusted — install key").
+var ErrSignerKeyRevoked = errors.New("envelope: signer key revoked at or before signed-at")
+
 // MemoryTrustStore is a trivial in-memory store. Used by tests and by
 // the daemon when bootstrapping with a single embedded key (tier 1,
 // the release-signed daemon binary per §7.3).
 type MemoryTrustStore struct {
-	mu   sync.RWMutex
-	keys map[KeyID]PublicKey
+	mu        sync.RWMutex
+	keys      map[KeyID]PublicKey
+	revokedAt map[KeyID]time.Time
 }
 
 // NewMemoryTrustStore constructs an empty in-memory store. Keys are
 // added via Add(). Concurrency-safe.
 func NewMemoryTrustStore() *MemoryTrustStore {
-	return &MemoryTrustStore{keys: make(map[KeyID]PublicKey)}
+	return &MemoryTrustStore{
+		keys:      make(map[KeyID]PublicKey),
+		revokedAt: make(map[KeyID]time.Time),
+	}
 }
 
 // Add registers a PublicKey. Overwrites any previous entry for the
 // same ID — caller decides when that's legitimate (e.g., key rotation)
 // and when it's an attempted replacement. The admin CLI (#395) gates
 // this operation behind TTY/CC-session confirmation.
+//
+// Add CLEARS any previous revocation timestamp for the same KeyID. A
+// fresh Add() = "operator decided this key is valid again from now"
+// (e.g., a forensic re-trust after compromise was contained). The
+// CLI must surface this in the confirmation prompt.
 func (m *MemoryTrustStore) Add(pub PublicKey) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.keys[pub.ID] = pub
+	delete(m.revokedAt, pub.ID)
 }
 
-// Remove drops the entry for id. No-op if absent.
+// Remove drops the entry for id. No-op if absent. Also clears any
+// stored revocation timestamp — Removed keys cannot be queried, so
+// the timestamp would dangle.
 func (m *MemoryTrustStore) Remove(id KeyID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.keys, id)
+	delete(m.revokedAt, id)
+}
+
+// Revoke records a not-valid-after timestamp for id. Bundles signed
+// at or after the timestamp will be rejected by envelope.Verify even
+// if the key is still in the store. Calling Revoke a second time
+// overwrites the previous timestamp — operators can shift the
+// boundary (e.g. "compromise actually started earlier than I thought").
+//
+// Revoking an unknown key is a no-op (avoids the half-state where
+// a revocation outlives the key it referred to). The Instantiator-
+// side RevokeByKey (commit 2) is the natural pairing: the typical
+// admin flow is "store.Revoke(fp, now); inst.RevokeByKey(fp)".
+func (m *MemoryTrustStore) Revoke(id KeyID, notValidAfter time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.keys[id]; !ok {
+		return
+	}
+	m.revokedAt[id] = notValidAfter
+}
+
+// RevokedAfter implements Revoker.
+func (m *MemoryTrustStore) RevokedAfter(id KeyID) (time.Time, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	t, ok := m.revokedAt[id]
+	return t, ok
 }
 
 // Lookup implements TrustStore.

@@ -819,8 +819,8 @@ CI-enforced via `internal/archtest/`:
 
 | Rule | Test |
 |---|---|
-| No `*memory.storeImpl` outside `memory/` | `TestMemoryImplPrivate` |
-| No `*events.busImpl` outside `events/` | `TestEventsBusImplPrivate` |
+| No `*memory.storeImpl` outside `memory/` | not yet enforced — tracked by #392 (audit D3, 2026-04-26) |
+| No `*events.busImpl` outside `events/` | not yet enforced — tracked by #392 (audit D14, 2026-04-26) |
 | `tooling.Executor` importers pinned to a curated allow-list | `TestExecutorImportScopePinned` |
 | No capability package takes `*Store` / `*Bus` / `*Registry` | not yet enforced — tracked by #392 |
 | Mint of `RuntimeToken` is runtime-only | `TestMintRuntimeTokenIsRuntimeOnly` |

@@ -58,7 +58,9 @@ P2 = behaviour visible in spec but not yet end-to-end through production code pa
 
 **D2 — P3 — `internal/runtime/instantiator.go` legacy `Instantiate` defaults to `nopVerifier{}` (`instantiator.go:36`).** Production daemons use `InstantiateVerified` and the archtest enforces single Verify call site, so this is unused in production but still callable from tests + legacy code. Not a security drift today, but the asymmetric "two forge entry points, one verifying, one not" surface should be removed once the migration window closes (§12 calls out the legacy path as transitional). Track or remove with #389 Stage 2.
 
-**D3 — P3 — §9 archtest table claims tests that don't exist.** `docs/ARCHITECTURE-SECURITY.md:822-823` lists `TestMemoryImplPrivate` (no `*memory.storeImpl` outside `memory/`) and `TestEventsBusImplPrivate` (no `*events.busImpl` outside `events/`) as enforcing rules. Neither test exists in `internal/archtest/`. `events.New()` returns `*Bus` (exported); any package can construct one. Today's only consumers (`cmd/alf-daemon/wasm.go`, `internal/runtime/wasm/loader.go`, the test files) are correct by code review, but no archtest pins that. Either the spec table needs the same "tracked by #392" annotation it already uses for one row, or the tests need to land. Cheapest fix is the doc annotation.
+**D3 — P3 — §9 archtest table claims tests that don't exist.** **ANNOTATED 2026-04-26.** §9 table now reads "not yet enforced — tracked by #392 (audit D3)" for the two phantom rows, mirroring the pattern already used for the broader `*Store` / `*Bus` / `*Registry` rule. The static archtests themselves land with #392 (capability providers).
+
+  Original finding (kept for history): `docs/ARCHITECTURE-SECURITY.md:822-823` lists `TestMemoryImplPrivate` (no `*memory.storeImpl` outside `memory/`) and `TestEventsBusImplPrivate` (no `*events.busImpl` outside `events/`) as enforcing rules. Neither test exists in `internal/archtest/`. `events.New()` returns `*Bus` (exported); any package can construct one. Today's only consumers (`cmd/alf-daemon/wasm.go`, `internal/runtime/wasm/loader.go`, the test files) are correct by code review, but no archtest pins that. Either the spec table needs the same "tracked by #392" annotation it already uses for one row, or the tests need to land. Cheapest fix is the doc annotation.
 
 **D4 — P3 — ToolHandle / `WithToolInvoker` not wired into the production daemon.** `instantiator.go:74` has the optional `invoker` field; `instantiator_verified.go:106` forges `ToolHandle` only when an invoker is wired. `cmd/alf-daemon/main.go` does not call `runtime.WithToolInvoker(...)`. `[[tools.declares]]` in shipped skill manifests is parsed and validated by `TestShippedSkillManifestsValidate` (`skills_forge_test.go:36`), but no `ToolHandle` is forged at boot — the LLM still reaches skill tools through the legacy `MirrorInto + skillCapability` path. This matches the explicitly deferred §12 row #389 Stage 2 (orchestrator-level "active-skill" boundary), but worth surfacing because today's behaviour is "tool surface narrowing is declared but not enforced".
 
@@ -144,7 +146,9 @@ The structural property — *no `MemoryHandle` type exists* — is enforced stat
 
 **D13 — P3 — No audit on publish/deliver.** Deferred to #396.
 
-**D14 — P3 — No archtest forbidding `*events.Bus` parameters in capability code.** §9 table line 823 mentions `TestEventsBusImplPrivate` but no such test exists (see D3). Today `events.Bus` is exported; capability packages could grab one through `events.New()`. Discipline only; no CI gate. Document or add the test.
+**D14 — P3 — No archtest forbidding `*events.Bus` parameters in capability code.** **ANNOTATED 2026-04-26.** Same close-out shape as D3 — §9 table now points to #392 instead of claiming a phantom test.
+
+  Original finding (kept for history): §9 table line 823 mentions `TestEventsBusImplPrivate` but no such test exists (see D3). Today `events.Bus` is exported; capability packages could grab one through `events.New()`. Discipline only; no CI gate. Document or add the test.
 
 ### Verdict 3.3
 
@@ -186,7 +190,7 @@ Listed by priority, not bundled into a plan — each is a discrete decision poin
 |---|---|---|---|
 | D1 | `[[fs.writes]]` silently dropped | **DONE 2026-04-26**: forge `FSHandle` directly from envelope `FS.Reads`+`FS.Writes` in `InstantiateVerified`. | resolved |
 | D6 | Marker helpers unused at every call site | **DONE 2026-04-26**: wrapped at 3 production sites (`impl.go`, `toolloop.go`, `prepare.go`). | resolved |
-| D3, D14 | §9 table claims non-existent archtests | Either land the tests or annotate the table. 30 min for annotation, half-day for tests. | small |
+| D3, D14 | §9 table claims non-existent archtests | **DONE 2026-04-26**: annotated as deferred to #392 (mirrors the pattern already used for the broader `*Store`/`*Bus`/`*Registry` rule). Static archtests land with #392. | resolved |
 | D10 | No interactive ratification surface | Spec already defers to #395 Stage 2 — confirm the JSON shape suffices for that page; no work today. | 0 |
 | D2, D4 | Two forge entry points + ToolHandle not wired | Roll into #389 Stage 2 close-out. | (already scoped) |
 | #396 | Revocation end-to-end | Only open v0.8.0-beta gate. | (already scoped) |

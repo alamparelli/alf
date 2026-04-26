@@ -10,6 +10,62 @@ see the Git history and GitHub releases for pre-0.7.9 changes.
 
 ---
 
+## [Unreleased] — 0.8.0 development
+
+In-progress work on `release/0.8.0`. Items here have landed on the branch
+but no v0.8.0 tag has been cut. See
+[`docs/ARCHITECTURE-SECURITY.md`](docs/ARCHITECTURE-SECURITY.md) §12 for
+the milestone ticket map.
+
+### Fixed
+
+- **3-tier alignment audit (D1)** — `[[fs.writes]]` declarations in a
+  signed envelope manifest were silently dropped at the forge layer:
+  the legacy `permissionsFromEnvelope` shim routed only `[[fs.reads]]`
+  into `PermissionSet.FilePaths`, so any tool declaring writes loaded
+  fine but every `alf_fs_write` returned `ErrOutOfScope`.
+  `Instantiator.InstantiateVerified` now forges `FSHandle` directly
+  from the typed `envelope.Manifest.FS` with both `Reads` and `Writes`
+  populated. Pinned by `TestInstantiateVerified_FSWritesRouted`.
+- **3-tier alignment audit (D6)** — `<tool_output>` /
+  `<capability_content>` markers from the §3.2 kernel prompt had no
+  syntactic anchor in production: the wrap helpers in
+  `internal/runtime/llm` existed but were not called outside their
+  own tests. Plumbed at the three production sites that feed text
+  into the LLM context: tool result in `internal/runtime/impl.go`
+  (legacy chat loop), tool result in `internal/ai/provider/toolloop.go`
+  (API tool loop, inlined to avoid foundation cross-import), and
+  matched-skill body injection in `internal/runtime/agents/prepare.go`.
+  Memory store keeps the unwrapped text so recall is not polluted by
+  marker tags. Pinned by `TestChat_ToolResultMarkerDiscipline`,
+  `TestWrapToolOutputForLLM_PinsMarkerShape`, and
+  `TestPrepareOrchestration_SkillBodyWrappedWithMarker`.
+
+### Added
+
+- `TestThreeTierAlignment_E2E` (8 subtests) — a single integration
+  test that loads two co-resident signed manifests through one
+  `Instantiator` (events bus + cross-flow registry wired the way the
+  daemon wires them) and exercises the cross-tier behaviour the
+  per-package tests can't cover alone: §3.1 FS scope isolation
+  across caps, §3.3 declared cross-flow delivery + scope rejection +
+  orphan-subscriber denial, §3.2 absence of memory handle.
+- `technical/AUDIT-3-TIERS-2026-04-26.md` — alignment audit between
+  the implementation on `release/0.8.0` and
+  `docs/ARCHITECTURE-SECURITY.md` §3. Catalogues 14 drifts (P1–P3),
+  cites file:line evidence, and tracks resolution status.
+
+### Documentation
+
+- `docs/ARCHITECTURE-SECURITY.md` §9 hard-rules table — phantom
+  archtest entries (`TestMemoryImplPrivate`,
+  `TestEventsBusImplPrivate`) annotated as deferred per audit findings
+  D3 + D14, mirroring the existing "tracked by #392" pattern. The
+  rules themselves remain in force as code-review discipline; the
+  static archtests land alongside #392 (capability providers).
+
+---
+
 ## [0.7.9] — 2026-04-22 — Foundation rework
 
 **Zero new user-facing feature. Clean base. Five unified blocks. WASM-ready.**

@@ -19,9 +19,18 @@ type Cache interface {
 	// Refresher can log and proceed (treats corrupt = absent).
 	Load() (raw []byte, lastFetched time.Time, ok bool, err error)
 
-	// Save replaces the cache with raw + fetchedAt. Atomic from the
-	// reader's POV — partial writes never observed.
-	Save(raw []byte, fetchedAt time.Time) error
+	// Save replaces the cache with raw + fetchedAt + issuedAt. Atomic
+	// from the reader's POV — partial writes never observed. issuedAt
+	// is the IssuedAt of the CRL contained in raw; persisted so the
+	// anti-replay high-water mark survives a daemon restart (SEC-001).
+	Save(raw []byte, fetchedAt time.Time, issuedAt time.Time) error
+
+	// LoadIssuedAt returns the IssuedAt of the most recent
+	// successfully-applied CRL. Drives SEC-001 anti-replay: every
+	// fetched/cached CRL must have IssuedAt strictly greater than
+	// this high-water mark or it is rejected as a replay. Returns
+	// zero time + nil on first boot (no prior apply).
+	LoadIssuedAt() (time.Time, error)
 }
 
 // ErrCacheCorrupt signals that the cache file exists but its
@@ -46,8 +55,9 @@ const (
 )
 
 type cacheMeta struct {
-	LastFetched time.Time `json:"last_fetched"`
-	PayloadSize int       `json:"payload_size"`
+	LastFetched     time.Time `json:"last_fetched"`
+	PayloadSize     int       `json:"payload_size"`
+	LastCRLIssuedAt time.Time `json:"last_crl_issued_at,omitempty"`
 }
 
 // Load implements Cache. Returns (nil, zero, false, nil) on absent
@@ -92,7 +102,7 @@ func (f *FileCache) Load() ([]byte, time.Time, bool, error) {
 // Save implements Cache. Writes both files atomically via
 // rename-from-tmp so a crash mid-write leaves the previous cache
 // intact (or no cache at all on first boot).
-func (f *FileCache) Save(raw []byte, fetchedAt time.Time) error {
+func (f *FileCache) Save(raw []byte, fetchedAt time.Time, issuedAt time.Time) error {
 	if f.Dir == "" {
 		return fmt.Errorf("crl: cache Dir not set")
 	}
@@ -101,8 +111,9 @@ func (f *FileCache) Save(raw []byte, fetchedAt time.Time) error {
 	}
 
 	meta := cacheMeta{
-		LastFetched: fetchedAt.UTC(),
-		PayloadSize: len(raw),
+		LastFetched:     fetchedAt.UTC(),
+		PayloadSize:     len(raw),
+		LastCRLIssuedAt: issuedAt.UTC(),
 	}
 	metaBytes, err := json.Marshal(meta)
 	if err != nil {
@@ -116,6 +127,30 @@ func (f *FileCache) Save(raw []byte, fetchedAt time.Time) error {
 		return err
 	}
 	return nil
+}
+
+// LoadIssuedAt implements Cache. Reads only the meta file; returns
+// (zero, nil) when meta is absent or empty so the Refresher treats
+// "first boot" as "no high-water set, accept anything". Corruption
+// returns a typed error — the Refresher logs and proceeds without
+// a high-water (which means the next fetch effectively re-baselines).
+func (f *FileCache) LoadIssuedAt() (time.Time, error) {
+	if f.Dir == "" {
+		return time.Time{}, fmt.Errorf("crl: cache Dir not set")
+	}
+	metaPath := filepath.Join(f.Dir, cacheMetaName)
+	metaRaw, err := os.ReadFile(metaPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("%w: read meta: %w", ErrCacheCorrupt, err)
+	}
+	var meta cacheMeta
+	if err := json.Unmarshal(metaRaw, &meta); err != nil {
+		return time.Time{}, fmt.Errorf("%w: parse meta: %w", ErrCacheCorrupt, err)
+	}
+	return meta.LastCRLIssuedAt.UTC(), nil
 }
 
 // writeAtomic writes data to path via a tmp file in the same

@@ -19,6 +19,25 @@ the milestone ticket map.
 
 ### Security
 
+- **SEC-001 — CRL anti-replay (monotonic IssuedAt high-water)**.
+  Every signed CRL applied by the refresher updates an in-memory
+  high-water mark — the IssuedAt of the most recently applied CRL.
+  The mark is persisted in the cache meta (`crl.meta.json`'s new
+  `last_crl_issued_at` field) and re-loaded on the first Tick after
+  every daemon boot. CRLs whose `IssuedAt` is strictly older than
+  the high-water are rejected as `ErrCRLReplay` on **both** the
+  source path (MitM / compromised CDN replays an older valid CRL
+  to roll back a revocation) and the cache path (attacker writes
+  an older signed CRL into `<dataDir>/crl/crl.json` while leaving
+  meta untouched). Equal `IssuedAt` is treated as idempotent
+  (legitimate boot-from-cache scenario re-applies the same CRL).
+  `Cache.Save` signature gained an `issuedAt time.Time` parameter;
+  new `Cache.LoadIssuedAt()` method exposes the persisted
+  high-water for cross-restart enforcement. Pinned by 4 new tests:
+  `TestRefresher_SourceReplayRejected`,
+  `TestRefresher_HighWaterPersistsAcrossRestart`,
+  `TestRefresher_CacheReplayRejected`,
+  `TestRefresher_EqualIssuedAtIdempotent`.
 - **SEC-003 — events bus publish/cleanup race**. `Bus.Publish`
   snapshotted the route slice under `RLock`, released, then sent on
   the queue without coordination with `Subscribe`'s cleanup func —

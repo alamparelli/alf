@@ -51,6 +51,13 @@ type TickResult struct {
 	AppliedAt time.Time
 }
 
+// ErrCRLReplay signals SEC-001: a fetched or cached CRL has IssuedAt
+// at-or-before the high-water mark of the most recently applied CRL.
+// Active downgrade attack — treat like ErrSourceMalformed (do NOT
+// fall back to the cache; the cache value, if older, is also rejected
+// once the in-memory high-water is loaded).
+var ErrCRLReplay = errors.New("crl: replay rejected — IssuedAt not strictly newer than last applied")
+
 // Refresher pulls signed CRLs from Source, caches them, and applies
 // them to Store. Failure modes:
 //   - Source unavailable + Cache present → apply cache, log warning.
@@ -59,20 +66,31 @@ type TickResult struct {
 //     boot offline is recoverable on next Tick).
 //   - Source malformed (sig invalid, bad JSON) → reject; do NOT fall
 //     back to the cache (active-mis-serve is stronger than absence).
+//   - Source/Cache CRL with IssuedAt <= high-water → reject as
+//     replay (SEC-001). High-water survives daemon restarts via
+//     Cache.LoadIssuedAt.
 //
 // Concurrency: Tick is goroutine-safe via mu. Run starts a single
 // goroutine that calls Tick every Interval until ctx is done.
 type Refresher struct {
-	Source       Source
-	Cache        Cache
-	ReleasePub   envelope.PublicKey
-	Store        Applier
-	Interval     time.Duration
-	GracePeriod  time.Duration
-	Now          func() time.Time
-	Logf         func(string, ...any)
+	Source      Source
+	Cache       Cache
+	ReleasePub  envelope.PublicKey
+	Store       Applier
+	Interval    time.Duration
+	GracePeriod time.Duration
+	Now         func() time.Time
+	Logf        func(string, ...any)
 
 	mu sync.Mutex
+
+	// lastIssuedAt is the SEC-001 anti-replay high-water mark — the
+	// IssuedAt of the most recently applied CRL across the lifetime
+	// of this Refresher. Loaded from Cache on first Tick so a
+	// daemon restart cannot accept replays. Updated on every
+	// successful apply (source or cache).
+	lastIssuedAt    time.Time
+	highWaterLoaded bool
 }
 
 // Tick executes one refresh cycle. Returns the TickResult on success
@@ -87,6 +105,21 @@ func (r *Refresher) Tick(ctx context.Context) (TickResult, error) {
 	now := r.now()
 	logf := r.logger()
 
+	// First Tick: load the SEC-001 anti-replay high-water from cache
+	// meta so a daemon restart cannot accept replays of an older CRL
+	// than the one applied before the restart. A meta read failure is
+	// non-fatal (re-baselines on next successful apply) but logged.
+	if !r.highWaterLoaded {
+		if r.Cache != nil {
+			if hw, err := r.Cache.LoadIssuedAt(); err != nil {
+				logf("[crl] high-water load failed (non-fatal): %v", err)
+			} else if !hw.IsZero() {
+				r.lastIssuedAt = hw.UTC()
+			}
+		}
+		r.highWaterLoaded = true
+	}
+
 	// Try the live source first.
 	raw, srcErr := r.fetchFromSource(ctx)
 	if srcErr == nil {
@@ -96,14 +129,27 @@ func (r *Refresher) Tick(ctx context.Context) (TickResult, error) {
 			logf("[crl] source returned malformed CRL: %v", parseErr)
 			return TickResult{}, fmt.Errorf("%w: %w", ErrSourceMalformed, parseErr)
 		}
+		// SEC-001 anti-replay: reject CRLs whose IssuedAt is strictly
+		// older than the high-water. Equal IssuedAt is treated as
+		// idempotent (re-applying the same logical CRL produces the
+		// same trust state — no harm). The attack we block is an
+		// attacker (MitM or compromised CDN) replaying an older
+		// signed CRL to roll back a revocation.
+		if !r.lastIssuedAt.IsZero() && crl.IssuedAt.Before(r.lastIssuedAt) {
+			logf("[crl] source CRL rejected as replay: issued_at=%s < high-water=%s",
+				crl.IssuedAt.Format(time.RFC3339), r.lastIssuedAt.Format(time.RFC3339))
+			return TickResult{}, fmt.Errorf("%w: source IssuedAt=%s, high-water=%s",
+				ErrCRLReplay, crl.IssuedAt.Format(time.RFC3339), r.lastIssuedAt.Format(time.RFC3339))
+		}
 		// Persist before applying so a crash post-apply doesn't lose
 		// the bytes we just trusted.
 		if r.Cache != nil {
-			if err := r.Cache.Save(raw, now); err != nil {
+			if err := r.Cache.Save(raw, now, crl.IssuedAt); err != nil {
 				logf("[crl] cache save failed (non-fatal): %v", err)
 			}
 		}
 		r.Store.ApplyCRL(crl)
+		r.lastIssuedAt = crl.IssuedAt.UTC()
 		logf("[crl] refreshed from source: %d entries, issued_at=%s", len(crl.Entries), crl.IssuedAt.Format(time.RFC3339))
 		return TickResult{
 			FromSource:  true,
@@ -145,6 +191,18 @@ func (r *Refresher) Tick(ctx context.Context) (TickResult, error) {
 		return TickResult{}, fmt.Errorf("%w: cache verify: %w", ErrSourceUnavailable, parseErr)
 	}
 
+	// SEC-001 anti-replay also applies to the cache path: an
+	// attacker who plants an older but signature-valid CRL into the
+	// cache dir (assuming OS-level write to <dataDir>/crl/) must not
+	// silently downgrade the in-memory trust state. Equal IssuedAt
+	// is idempotent (this is the legitimate boot-from-cache case).
+	if !r.lastIssuedAt.IsZero() && crl.IssuedAt.Before(r.lastIssuedAt) {
+		logf("[crl] cached CRL rejected as replay: issued_at=%s < high-water=%s",
+			crl.IssuedAt.Format(time.RFC3339), r.lastIssuedAt.Format(time.RFC3339))
+		return TickResult{}, fmt.Errorf("%w: cache IssuedAt=%s, high-water=%s",
+			ErrCRLReplay, crl.IssuedAt.Format(time.RFC3339), r.lastIssuedAt.Format(time.RFC3339))
+	}
+
 	stale := false
 	grace := r.gracePeriod()
 	age := now.Sub(lastFetched)
@@ -158,6 +216,7 @@ func (r *Refresher) Tick(ctx context.Context) (TickResult, error) {
 	}
 
 	r.Store.ApplyCRL(crl)
+	r.lastIssuedAt = crl.IssuedAt.UTC()
 	return TickResult{
 		FromSource:  false,
 		CacheStale:  stale,

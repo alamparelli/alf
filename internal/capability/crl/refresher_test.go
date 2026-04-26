@@ -137,7 +137,7 @@ func TestRefresher_FetchFailFallsBackToCache(t *testing.T) {
 
 	cacheDir := t.TempDir()
 	cache := &FileCache{Dir: cacheDir}
-	if err := cache.Save(raw, cacheTime); err != nil {
+	if err := cache.Save(raw, cacheTime, cacheTime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -181,7 +181,7 @@ func TestRefresher_StaleButNotExpired(t *testing.T) {
 	pub, raw := signedCRL(t, cacheTime, nil)
 
 	cache := &FileCache{Dir: t.TempDir()}
-	if err := cache.Save(raw, cacheTime); err != nil {
+	if err := cache.Save(raw, cacheTime, cacheTime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -212,7 +212,7 @@ func TestRefresher_ExpiredStillOperates(t *testing.T) {
 	})
 
 	cache := &FileCache{Dir: t.TempDir()}
-	if err := cache.Save(raw, cacheTime); err != nil {
+	if err := cache.Save(raw, cacheTime, cacheTime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -273,7 +273,7 @@ func TestRefresher_MalformedSourceDoesNotFallback(t *testing.T) {
 	})
 
 	cache := &FileCache{Dir: t.TempDir()}
-	if err := cache.Save(validRaw, cacheTime); err != nil {
+	if err := cache.Save(validRaw, cacheTime, cacheTime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -309,7 +309,7 @@ func TestFileCache_RoundTrip(t *testing.T) {
 	want := []byte(`{"crl":{},"signature":"AAAA"}`)
 	wantT := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
 
-	if err := c.Save(want, wantT); err != nil {
+	if err := c.Save(want, wantT, wantT); err != nil {
 		t.Fatal(err)
 	}
 	got, gotT, ok, err := c.Load()
@@ -362,7 +362,7 @@ func TestFileCache_PayloadMissingMetaIsCorrupt(t *testing.T) {
 func TestFileCache_PayloadSizeMismatchIsCorrupt(t *testing.T) {
 	dir := t.TempDir()
 	c := &FileCache{Dir: dir}
-	if err := c.Save([]byte("hello world"), time.Now()); err != nil {
+	if err := c.Save([]byte("hello world"), time.Now(), time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	// Truncate the payload after Save.
@@ -429,4 +429,250 @@ func mustKeyID(t *testing.T, hex string) envelope.KeyID {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// signedCRLWithKey signs a CRL with a caller-supplied keypair so a
+// single test can produce multiple legitimately-signed CRLs from the
+// same release key — required for replay scenarios.
+func signedCRLWithKey(t *testing.T, priv envelope.PrivateKey, issuedAt time.Time, entries []envelope.CRLEntry) []byte {
+	t.Helper()
+	c := envelope.CRL{
+		Version:    envelope.CRLEnvelopeVersion,
+		IssuedAt:   issuedAt,
+		NextUpdate: issuedAt.Add(30 * 24 * time.Hour),
+		Entries:    entries,
+	}
+	raw, err := envelope.EncodeSignedCRL(c, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// TestRefresher_SourceReplayRejected pins SEC-001 on the source path:
+// once a CRL with IssuedAt=T2 has been applied, an older but
+// validly-signed CRL with IssuedAt=T1<T2 served by the source must be
+// rejected as ErrCRLReplay. The store stays at T2's revocation set.
+func TestRefresher_SourceReplayRejected(t *testing.T) {
+	pub, priv, err := envelope.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1 := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+
+	keyOld := mustKeyID(t, "0000000000000001")
+	keyNew := mustKeyID(t, "0000000000000002")
+
+	rawT1 := signedCRLWithKey(t, priv, t1, []envelope.CRLEntry{
+		{KeyID: keyOld, NotValidAfter: t1},
+	})
+	rawT2 := signedCRLWithKey(t, priv, t2, []envelope.CRLEntry{
+		{KeyID: keyOld, NotValidAfter: t1},
+		{KeyID: keyNew, NotValidAfter: t2}, // newer CRL adds keyNew
+	})
+
+	store := envelope.NewMemoryTrustStore()
+	cache := &FileCache{Dir: t.TempDir()}
+	src := &mockSource{response: rawT2}
+	logger := &captureLogger{}
+	r := &Refresher{
+		Source:     src,
+		Cache:      cache,
+		ReleasePub: pub,
+		Store:      store,
+		Now:        func() time.Time { return t2.Add(time.Hour) },
+		Logf:       logger.Logf,
+	}
+
+	// First Tick applies T2.
+	if _, err := r.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if _, ok := store.RevokedAfter(keyNew); !ok {
+		t.Fatal("T2 not applied")
+	}
+
+	// Source now serves T1 (the replay). Same release key, valid sig.
+	src.mu.Lock()
+	src.response = rawT1
+	src.mu.Unlock()
+
+	_, err = r.Tick(context.Background())
+	if !errors.Is(err, ErrCRLReplay) {
+		t.Fatalf("got %v, want ErrCRLReplay", err)
+	}
+	if !logger.contains("rejected as replay") {
+		t.Error("expected replay-rejected log line")
+	}
+	// Store must still carry the T2 revocation set — replay did NOT
+	// roll back to T1.
+	if _, ok := store.RevokedAfter(keyNew); !ok {
+		t.Error("replay must not have rolled back T2's revocation of keyNew")
+	}
+}
+
+// TestRefresher_HighWaterPersistsAcrossRestart pins that the SEC-001
+// guarantee survives a daemon restart: a fresh Refresher reading the
+// same on-disk cache picks up the high-water from cache meta and
+// rejects an older CRL served by the source.
+func TestRefresher_HighWaterPersistsAcrossRestart(t *testing.T) {
+	pub, priv, err := envelope.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1 := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	now := t2.Add(time.Hour)
+
+	keyOld := mustKeyID(t, "0000000000000001")
+	rawT1 := signedCRLWithKey(t, priv, t1, []envelope.CRLEntry{{KeyID: keyOld, NotValidAfter: t1}})
+	rawT2 := signedCRLWithKey(t, priv, t2, []envelope.CRLEntry{{KeyID: keyOld, NotValidAfter: t2}})
+
+	cacheDir := t.TempDir()
+	cache := &FileCache{Dir: cacheDir}
+
+	// Run 1 — apply T2 via source. Cache + high-water persisted.
+	{
+		r := &Refresher{
+			Source:     &mockSource{response: rawT2},
+			Cache:      cache,
+			ReleasePub: pub,
+			Store:      envelope.NewMemoryTrustStore(),
+			Now:        func() time.Time { return now },
+		}
+		if _, err := r.Tick(context.Background()); err != nil {
+			t.Fatalf("seed tick: %v", err)
+		}
+	}
+
+	// Run 2 — fresh Refresher (simulating daemon restart). Source now
+	// serves T1 (the replay). High-water should be loaded from cache
+	// meta on first Tick and reject the source.
+	{
+		store := envelope.NewMemoryTrustStore()
+		r := &Refresher{
+			Source:     &mockSource{response: rawT1},
+			Cache:      &FileCache{Dir: cacheDir}, // fresh handle, same disk
+			ReleasePub: pub,
+			Store:      store,
+			Now:        func() time.Time { return now.Add(time.Hour) },
+		}
+		_, err := r.Tick(context.Background())
+		if !errors.Is(err, ErrCRLReplay) {
+			t.Fatalf("got %v, want ErrCRLReplay across restart", err)
+		}
+	}
+}
+
+// TestRefresher_CacheReplayRejected pins SEC-001 on the cache path:
+// if an attacker plants an older signed CRL into the on-disk cache
+// dir AND the source is unavailable, the Refresher must reject the
+// older cached CRL as a replay rather than silently downgrading.
+func TestRefresher_CacheReplayRejected(t *testing.T) {
+	pub, priv, err := envelope.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1 := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	now := t2.Add(time.Hour)
+
+	keyOld := mustKeyID(t, "0000000000000001")
+	rawT1 := signedCRLWithKey(t, priv, t1, []envelope.CRLEntry{{KeyID: keyOld, NotValidAfter: t1}})
+	rawT2 := signedCRLWithKey(t, priv, t2, []envelope.CRLEntry{{KeyID: keyOld, NotValidAfter: t2}})
+
+	cacheDir := t.TempDir()
+	cache := &FileCache{Dir: cacheDir}
+
+	// Seed: apply T2 from source so high-water = T2 in cache meta.
+	{
+		r := &Refresher{
+			Source:     &mockSource{response: rawT2},
+			Cache:      cache,
+			ReleasePub: pub,
+			Store:      envelope.NewMemoryTrustStore(),
+			Now:        func() time.Time { return now },
+		}
+		if _, err := r.Tick(context.Background()); err != nil {
+			t.Fatalf("seed tick: %v", err)
+		}
+	}
+
+	// Attacker tampers cache: writes T1 payload but keeps the meta
+	// file unchanged so the high-water stays at T2. Real attackers
+	// would need OS-level write to the cache dir — this is the threat
+	// model for SEC-001 cache replay.
+	attackerCache := &FileCache{Dir: cacheDir}
+	if err := writeAtomic(filepath.Join(cacheDir, cachePayloadName), rawT1, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Source unavailable so the refresher falls back to cache.
+	logger := &captureLogger{}
+	r := &Refresher{
+		Source:     &mockSource{err: ErrSourceUnavailable},
+		Cache:      attackerCache,
+		ReleasePub: pub,
+		Store:      envelope.NewMemoryTrustStore(),
+		Now:        func() time.Time { return now.Add(time.Hour) },
+		Logf:       logger.Logf,
+	}
+	_, err = r.Tick(context.Background())
+	if !errors.Is(err, ErrCRLReplay) {
+		t.Fatalf("got %v, want ErrCRLReplay on cache tamper", err)
+	}
+	if !logger.contains("cached CRL rejected as replay") {
+		t.Error("expected cache-replay log line")
+	}
+}
+
+// TestRefresher_EqualIssuedAtIdempotent pins that re-applying the
+// same CRL (same IssuedAt) is a no-op — not a replay error. This is
+// the legitimate boot-from-cache scenario where the daemon restarts,
+// loads the high-water from cache meta, and re-applies the same CRL
+// the cache holds.
+func TestRefresher_EqualIssuedAtIdempotent(t *testing.T) {
+	pub, priv, err := envelope.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	now := t1.Add(time.Hour)
+
+	keyOld := mustKeyID(t, "0000000000000001")
+	rawT1 := signedCRLWithKey(t, priv, t1, []envelope.CRLEntry{{KeyID: keyOld, NotValidAfter: t1}})
+
+	cacheDir := t.TempDir()
+	cache := &FileCache{Dir: cacheDir}
+
+	// Seed cache via Source.
+	{
+		r := &Refresher{
+			Source:     &mockSource{response: rawT1},
+			Cache:      cache,
+			ReleasePub: pub,
+			Store:      envelope.NewMemoryTrustStore(),
+			Now:        func() time.Time { return now },
+		}
+		if _, err := r.Tick(context.Background()); err != nil {
+			t.Fatalf("seed tick: %v", err)
+		}
+	}
+
+	// Restart: source unavailable, cache holds T1, high-water in meta
+	// is also T1. Re-applying T1 must NOT be a replay error.
+	store := envelope.NewMemoryTrustStore()
+	r := &Refresher{
+		Source:     &mockSource{err: ErrSourceUnavailable},
+		Cache:      &FileCache{Dir: cacheDir},
+		ReleasePub: pub,
+		Store:      store,
+		Now:        func() time.Time { return now.Add(time.Hour) },
+	}
+	if _, err := r.Tick(context.Background()); err != nil {
+		t.Fatalf("idempotent re-apply rejected as %v", err)
+	}
+	if _, ok := store.RevokedAfter(keyOld); !ok {
+		t.Error("idempotent re-apply did not populate store")
+	}
 }

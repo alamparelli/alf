@@ -274,6 +274,39 @@ When contributing code that touches:
 - **App isolation** - apps run in chroot namespaces with filesystem allowlists
 - **Vault access** - apps access secrets via vault-proxy Unix socket, never directly
 
+### CRL signing (maintainer flow)
+
+The §8 revocation pipeline distributes a signed CRL out-of-band. The
+public verification key is embedded in the daemon binary via
+`go:embed`; the corresponding private key signs CRLs and never ships
+in any binary.
+
+For homelab development (signing test CRLs, exercising
+`internal/capability/crl/`), generate a release keypair once:
+
+```bash
+go run ./cmd/alf-release-keygen
+# pubkey  → internal/capability/envelope/release_pubkey.minisign  (commit to git)
+# privkey → dev-secrets/release-key.priv                          (gitignored)
+```
+
+The keygen tool refuses to overwrite non-empty files unless `-force`
+is set. After running it, rebuilding `alf-daemon` embeds the new
+pubkey at compile time. Setting `ALF_CRL_URL` to a host serving a
+signed CRL JSON activates the refresher (see
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md#revocation-396-stage-2)).
+
+In production, the privkey lives on a hardened signing host (HSM or
+air-gapped machine), never in `dev-secrets/`. The `dev-secrets/` path
+is the homelab-dev convention only — must be replaced before any
+v1.0 release-signing flow.
+
+To sign a CRL with the homelab privkey, see the test in
+[`internal/capability/envelope/crl_test.go`](internal/capability/envelope/crl_test.go)
+(`TestCRL_RoundTrip` exercises `EncodeSignedCRL`); a CLI wrapper
+will land alongside #395 Stage 2 (`alf trust revoke` admin
+command — D8 of #396).
+
 ## Questions
 
 Open an issue on GitHub.

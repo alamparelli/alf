@@ -580,12 +580,12 @@ Semantics are listed here; implementation lives in `#395`. Every command require
 
 Summary of invariants; full spec in `#396`.
 
-- **Close semantics:** `Instance.Close()` cancels `lifecycleCtx`, which propagates to every handle's in-flight operation. No "drain and exit" — operations return `ErrRevoked` or context cancellation immediately.
-- **Cascade:** revoking a provider closes its dependents atomically. Applications see `dependency-revoked` on next load.
-- **Key-based revocation:** revoking a fingerprint invalidates every bundle it signed, past and future. Enforcement is at the §7.4 state diagram's trust-store lookup.
-- **Timestamp binding:** every envelope includes a `signed_at` timestamp. CRLs carry `not_valid_after`; bundles signed after that time are rejected even if the key is still in the trust store.
-- **CRL distribution:** signed by the alf release key, distributed out-of-band (see `#396`). Cached locally with a 30-day offline grace.
-- **Clock sanity:** at boot, compare system clock to the binary's build time. If system clock is more than 1 year earlier than build time, refuse to boot (a wildly past clock is more likely compromise than NTP drift). If more than 6 hours after `time.Now()` measured by monotonic source, log a warning but continue.
+- **Close semantics:** `Instance.Close()` cancels `lifecycleCtx`, which propagates to every handle's in-flight operation. No "drain and exit" — operations return `ErrRevoked` or context cancellation immediately. Implemented in [`internal/capability/handle/instance.go`](../internal/capability/handle/instance.go); timing pinned by `TestCloseTiming_*` (≤200ms unwind).
+- **Cascade:** revoking a provider closes its dependents atomically. Applications see `dependency-revoked` on next load. Provider cascade (§8 D2) deferred — depends on `#392`.
+- **Key-based revocation:** revoking a fingerprint invalidates every bundle it signed, past and future. Enforcement is at the §7.4 state diagram's trust-store lookup. `Instantiator.RevokeByKey(KeyID)` in [`internal/runtime/revocation.go`](../internal/runtime/revocation.go) closes every live `Instance` for the fingerprint via the self-pruning live registry.
+- **Timestamp binding:** every envelope includes a `signed_at` timestamp. CRLs carry `not_valid_after`; bundles signed after that time are rejected even if the key is still in the trust store. Strict-before semantics (boundary equality rejects). Implemented in [`envelope.Verify`](../internal/capability/envelope/verify.go); operator-set timestamps via `MemoryTrustStore.Revoke()`, CRL-set via `MemoryTrustStore.ApplyCRL()` — independent maps; strictest wins.
+- **CRL distribution:** signed by the alf release key, distributed out-of-band (see `#396`). Cached locally with a 30-day offline grace. Implementation in [`internal/capability/crl/`](../internal/capability/crl/) (refresher + cache + source) plus [`internal/capability/envelope/crl.go`](../internal/capability/envelope/crl.go) (wire format + parse/verify). Wire format is a single JSON document `{"crl": {...}, "signature": "<base64>"}` — no sidecar. Daemon wiring in [`cmd/alf-daemon/crl.go`](../cmd/alf-daemon/crl.go); operator config via `ALF_CRL_URL` (see [docs/CONFIGURATION.md](CONFIGURATION.md#revocation-396-stage-2)). Active mis-serve (sig invalid) does NOT trigger cache fallback — distinct from "source unavailable" which does.
+- **Clock sanity:** at boot, compare system clock to the binary's build time. If system clock is more than 1 year earlier than build time, refuse to boot (a wildly past clock is more likely compromise than NTP drift). If more than 6 hours after `time.Now()` measured by monotonic source, log a warning but continue. Implementation in [`internal/capability/envelope/clocksanity.go`](../internal/capability/envelope/clocksanity.go) (`CheckBootClock` + `MonitorClockSkew`). `buildTime` ldflags-injected at release; dev builds without injection degrade to no-op.
 
 ### 7.8 Multi-instance migration
 
@@ -792,13 +792,15 @@ Vectors live under `internal/capability/envelope/testdata/` alongside the refere
 
 ## 8. Revocation
 
-Revocation must work end-to-end, online and offline, across cascades. Details in `#396`; summary of invariants:
+Revocation must work end-to-end, online and offline, across cascades. Details in `#396`; cross-references to the implementation in §7.7 above; summary of invariants:
 
-- **Close semantics:** `Instance.Close()` cancels `lifecycleCtx`, which propagates to every handle's in-flight operation. No "drain and exit" — operations return `ErrRevoked` or context cancellation immediately.
-- **Cascade:** if a provider is revoked, all children depending on it are `Close()`-d atomically. Applications see a `dependency-revoked` error on next load.
-- **Key-based revocation:** revoking a publisher key in the trust store invalidates every bundle it signed, past and future. A local CRL (signed by the alf release key) distributed out-of-band handles post-compromise revocations.
-- **Timestamp binding:** every bundle includes a signing timestamp inside the signed envelope. Post-compromise CRLs carry `not-valid-after-time`; bundles signed after that time are rejected even if the key is still in the trust store.
-- **Offline behavior:** daemon caches the last-known-good CRL. After N days offline, warns the user but continues operating (fail-safe).
+- **Close semantics:** `Instance.Close()` cancels `lifecycleCtx`, which propagates to every handle's in-flight operation. No "drain and exit" — operations return `ErrRevoked` or context cancellation immediately. ([`internal/capability/handle/`](../internal/capability/handle/))
+- **Cascade:** if a provider is revoked, all children depending on it are `Close()`-d atomically. Applications see a `dependency-revoked` error on next load. (Deferred — `#396` D2, `#392`-bound.)
+- **Key-based revocation:** revoking a publisher key in the trust store invalidates every bundle it signed, past and future. A local CRL (signed by the alf release key) distributed out-of-band handles post-compromise revocations. ([`internal/capability/envelope/truststore.go`](../internal/capability/envelope/truststore.go), [`internal/runtime/revocation.go`](../internal/runtime/revocation.go))
+- **Timestamp binding:** every bundle includes a signing timestamp inside the signed envelope. Post-compromise CRLs carry `not-valid-after-time`; bundles signed after that time are rejected even if the key is still in the trust store. ([`internal/capability/envelope/crl.go`](../internal/capability/envelope/crl.go), [`internal/capability/envelope/verify.go`](../internal/capability/envelope/verify.go))
+- **Offline behavior:** daemon caches the last-known-good CRL. After N days offline, warns the user but continues operating (fail-safe). N defaults to 30 days; configurable via `crl.Refresher.GracePeriod`. ([`internal/capability/crl/`](../internal/capability/crl/) — `Refresher` + `FileCache` + `HTTPSource`)
+
+Operator-facing knobs: `ALF_CRL_URL` activates upstream distribution (see [`docs/CONFIGURATION.md`](CONFIGURATION.md#revocation-396-stage-2)). Without it, the trust store still supports operator-set `Revoke()` (manual channel) — the §7.7 timestamp check fires regardless of how the not-valid-after stamp was recorded. The `alf trust revoke` admin CLI (D8) lands alongside `#395` Stage 2.
 
 ---
 

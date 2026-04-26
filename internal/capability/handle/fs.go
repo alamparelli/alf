@@ -3,10 +3,12 @@ package handle
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/alamparelli/alf/internal/capability"
 )
@@ -85,6 +87,14 @@ func (h *FSHandle) resolvePath(p string) string {
 var (
 	ErrRevoked    = errors.New("handle: revoked")
 	ErrOutOfScope = errors.New("handle: path out of scope")
+
+	// ErrSymlinkRefused signals SEC-006: the resolved path is a
+	// symbolic link or contains one as the final component. FSHandle
+	// refuses to follow symlinks out of an abundance of caution —
+	// a co-tenant or operator who placed a symlink inside the
+	// capability's scope could otherwise leak data outside it
+	// (or, on writes, clobber arbitrary files).
+	ErrSymlinkRefused = errors.New("handle: symlink in path refused")
 )
 
 // MarshalJSON always fails; handles are not serializable by construction.
@@ -92,7 +102,10 @@ func (h *FSHandle) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("handle: FSHandle is not serializable")
 }
 
-// Read returns file contents if path is in the read scope.
+// Read returns file contents if path is in the read scope. SEC-006:
+// the file is opened with O_NOFOLLOW so a symlink installed in scope
+// cannot redirect the read to a path outside scope. ELOOP / "too
+// many levels of symbolic links" surfaces as ErrSymlinkRefused.
 func (h *FSHandle) Read(ctx context.Context, path string) ([]byte, error) {
 	if err := h.preflight(ctx); err != nil {
 		return nil, err
@@ -106,7 +119,7 @@ func (h *FSHandle) Read(ctx context.Context, path string) ([]byte, error) {
 	var data []byte
 	var err error
 	go func() {
-		data, err = os.ReadFile(abs)
+		data, err = readFileNoFollow(abs)
 		close(done)
 	}()
 	select {
@@ -119,7 +132,11 @@ func (h *FSHandle) Read(ctx context.Context, path string) ([]byte, error) {
 	}
 }
 
-// Write stores data at path if path is in the write scope.
+// Write stores data at path if path is in the write scope. SEC-006:
+// the file is opened with O_NOFOLLOW + mode 0o600 so (a) a symlink
+// installed in scope cannot redirect the write outside scope and
+// (b) the resulting file is not world-readable in shared-volume
+// container deployments.
 func (h *FSHandle) Write(ctx context.Context, path string, data []byte) error {
 	if err := h.preflight(ctx); err != nil {
 		return err
@@ -134,7 +151,7 @@ func (h *FSHandle) Write(ctx context.Context, path string, data []byte) error {
 	done := make(chan struct{})
 	var err error
 	go func() {
-		err = os.WriteFile(abs, data, 0o644)
+		err = writeFileNoFollow(abs, data, 0o600)
 		close(done)
 	}()
 	select {
@@ -145,6 +162,66 @@ func (h *FSHandle) Write(ctx context.Context, path string, data []byte) error {
 	case <-h.lifecycleCtx.Done():
 		return ErrRevoked
 	}
+}
+
+// readFileNoFollow mirrors os.ReadFile but opens with O_NOFOLLOW so
+// the final path component being a symlink fails with ELOOP rather
+// than transparently redirecting the read to the symlink target.
+// Translates ELOOP to ErrSymlinkRefused so callers can distinguish
+// from generic I/O errors. Lstat is also checked because some
+// platforms surface symlink-traversal differently (Linux: ELOOP at
+// open; macOS: behaves consistently with O_NOFOLLOW).
+func readFileNoFollow(abs string) ([]byte, error) {
+	// Pre-check: refuse if the leaf is a symlink. Defends against
+	// platforms where O_NOFOLLOW semantics drift, and surfaces a
+	// clear error to the caller.
+	if info, err := os.Lstat(abs); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil, ErrSymlinkRefused
+	}
+	f, err := os.OpenFile(abs, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		if isSymlinkErr(err) {
+			return nil, ErrSymlinkRefused
+		}
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
+
+// writeFileNoFollow mirrors os.WriteFile but uses O_NOFOLLOW so the
+// final path component cannot be a symlink to an arbitrary location.
+// File mode is enforced to mode (caller passes 0o600).
+func writeFileNoFollow(abs string, data []byte, mode os.FileMode) error {
+	if info, err := os.Lstat(abs); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return ErrSymlinkRefused
+	}
+	f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, mode)
+	if err != nil {
+		if isSymlinkErr(err) {
+			return ErrSymlinkRefused
+		}
+		return err
+	}
+	if _, werr := f.Write(data); werr != nil {
+		_ = f.Close()
+		return werr
+	}
+	return f.Close()
+}
+
+// isSymlinkErr returns true when err indicates the OS refused an
+// open due to a symlink in the path (with O_NOFOLLOW). Linux raises
+// syscall.ELOOP; macOS / BSD use the same constant. Wrapped errors
+// from os.OpenFile carry the underlying syscall.Errno.
+func isSymlinkErr(err error) bool {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		if errno, ok := pathErr.Err.(syscall.Errno); ok && errno == syscall.ELOOP {
+			return true
+		}
+	}
+	return false
 }
 
 // Scope returns the effective scope. Used by the WASM host-function layer

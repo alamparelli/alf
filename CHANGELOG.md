@@ -19,6 +19,23 @@ the milestone ticket map.
 
 ### Security
 
+- **SEC-006 — FSHandle symlink TOCTOU + mode tightening**.
+  `FSHandle.Read` / `Write` used `os.ReadFile` / `WriteFile` which
+  silently follow symlinks. A symlink installed inside the
+  capability's scope (by a co-tenant cap, the operator, or via an
+  earlier in-scope write) could redirect reads to leak files outside
+  scope, or redirect writes to clobber arbitrary paths. Mode `0o644`
+  on writes also left files world-readable inside shared-volume
+  container deployments. Fix: open with `O_NOFOLLOW` plus an `Lstat`
+  pre-check (defends against platform-specific O_NOFOLLOW drift) so
+  a symlink at the leaf surfaces as new `ErrSymlinkRefused` rather
+  than transparently dereferencing. Write mode tightened to `0o600`
+  (owner read/write only). New `readFileNoFollow`,
+  `writeFileNoFollow`, `isSymlinkErr` helpers in `handle/fs.go`.
+  3 new tests: `TestFSHandle_RefusesSymlinkRead` (in-scope symlink
+  to outside target → bytes do NOT leak),
+  `TestFSHandle_RefusesSymlinkWrite` (symlink to outside file → file
+  NOT clobbered), `TestFSHandle_WriteUses0o600`.
 - **SEC-007 — HTTPS-only CRL URL (boot-time validation)**.
   `ALF_CRL_URL` accepted plaintext HTTP for any host. Combined with
   SEC-001 replay this widened the rollback surface — a net-position

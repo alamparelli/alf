@@ -73,10 +73,15 @@ func (b *Bus) Publish(from capability.ID, topic string, payload []byte, ts time.
 	if topic == "" {
 		return fmt.Errorf("events: empty topic")
 	}
+	// Hold RLock across the fan-out so cleanup() — which closes the
+	// queue under Lock — cannot interleave with a send. Sends are
+	// non-blocking (select+default), so RLock is held for at most a
+	// few µs even with thousands of subscribers. Without this, a
+	// publisher snapshotting the slice and sending after cleanup ran
+	// hits a closed channel and panics (SEC-003).
 	b.mu.RLock()
-	subs := append([]*subscription(nil), b.routes[routeKey{publisher: from, topic: topic}]...)
-	b.mu.RUnlock()
-
+	defer b.mu.RUnlock()
+	subs := b.routes[routeKey{publisher: from, topic: topic}]
 	if len(subs) == 0 {
 		// No subscriber routed for this (from, topic). Per §3.3
 		// "private-by-default", this is the normal case for a

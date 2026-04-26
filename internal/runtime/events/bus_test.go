@@ -2,6 +2,7 @@ package events
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -138,4 +139,67 @@ func TestBus_RevocationClosesQueue(t *testing.T) {
 	if ev, ok := <-q; ok {
 		t.Errorf("queue should be closed after cleanup, got %+v", ev)
 	}
+}
+
+// TestBus_PublishCleanupRace pins SEC-003: a publisher snapshotting
+// the route slice could send on a queue that cleanup had just closed,
+// triggering "send on closed channel" panic and crashing the daemon.
+// The fix holds the bus RLock across fan-out so cleanup (which acquires
+// the write Lock) is strictly serialised after any in-flight Publish.
+//
+// This test must be run under -race to maximise scheduling pressure.
+// Without the fix, it panics within milliseconds on every modern CPU.
+func TestBus_PublishCleanupRace(t *testing.T) {
+	const (
+		subs       = 32
+		duration   = 200 * time.Millisecond
+		publishers = 4
+	)
+	b := New()
+
+	// Spawn N subscribers. Each one repeatedly cleans up + re-subscribes
+	// to keep the route table churning while publishers fire.
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for i := 0; i < subs; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_, cleanup, err := b.Subscribe("cap-b", "cap-a", "chat.log")
+				if err != nil {
+					t.Errorf("subscribe: %v", err)
+					return
+				}
+				cleanup()
+			}
+		}()
+	}
+
+	// Publishers fire as fast as they can. If the race is reachable,
+	// one of them panics on a closed channel send.
+	for i := 0; i < publishers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_ = b.Publish("cap-a", "chat.log", []byte("ping"), time.Now())
+			}
+		}()
+	}
+
+	time.Sleep(duration)
+	close(stop)
+	wg.Wait()
 }

@@ -168,7 +168,20 @@ func NewDaemonAutoSigner(priv envelope.PrivateKey, now func() time.Time) AutoSig
 	return &daemonAutoSigner{priv: priv, now: now}
 }
 
+// Sign auto-signs the canonicalised manifest with the daemon key.
+//
+// SEC-004: refuses to sign manifests that exceed the §7.3 Tier-2
+// ceiling (cross-flow event subscriptions, etc.). The operator
+// must re-sign with the user-endorsed key (Tier 3) via `alf keygen`
+// + `alf sign --key user-endorsed` to widen authority.
 func (s *daemonAutoSigner) Sign(manifestBytes, bundleBytes []byte) ([]byte, error) {
+	manifest, err := envelope.Validate(manifestBytes)
+	if err != nil {
+		return nil, fmt.Errorf("validate: %w", err)
+	}
+	if err := envelope.EnforceTier2Ceiling(manifest); err != nil {
+		return nil, err
+	}
 	canonical, err := envelope.Canonicalize(manifestBytes)
 	if err != nil {
 		return nil, fmt.Errorf("canonicalize: %w", err)

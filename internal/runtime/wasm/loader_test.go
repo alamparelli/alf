@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -130,6 +131,52 @@ func TestLoader_LoadDir_AutoSignsAndRegistersUnsignedBundle(t *testing.T) {
 	sigPath := filepath.Join(bundleDir, "manifest.sig")
 	if _, err := os.Stat(sigPath); err != nil {
 		t.Errorf("manifest.sig missing after auto-sign: %v", err)
+	}
+}
+
+// TestLoader_AutoSign_RefusesCrossFlowSubscription pins SEC-004:
+// the auto-signer must reject manifests that exceed the §7.3 Tier-2
+// ceiling. A manifest declaring [[events.subscribes]] is requesting
+// cross-cap authority — the local daemon key cannot pre-approve it,
+// so auto-sign returns ErrCeilingExceeded and the bundle is NOT
+// loaded. The operator's recourse is `alf sign --key user-endorsed`.
+func TestLoader_AutoSign_RefusesCrossFlowSubscription(t *testing.T) {
+	rt, priv, store, reg := newTestLoaderRuntime(t)
+	root := t.TempDir()
+	const subManifest = `alf_envelope_version = 1
+id      = "ceiling-test"
+kind    = "wasm-tool"
+version = "0.1.0"
+name    = "Ceiling Test"
+
+[[events.subscribes]]
+from  = "some-publisher"
+topic = "evt"
+`
+	writeBundle(t, root, "ceiling-test", subManifest, minimalWasmBytes())
+
+	l := &Loader{
+		Runtime:    rt,
+		Registry:   reg,
+		DaemonPriv: priv,
+		TrustStore: store,
+		Now:        fixedNow,
+	}
+	loaded, errs := l.LoadDir(context.Background(), root)
+	if len(loaded) != 0 {
+		t.Errorf("ceiling-violating bundle loaded: %v", loaded)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("want 1 error, got %d: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Error(), "Tier-2 ceiling") {
+		t.Errorf("error should mention Tier-2 ceiling: %v", errs[0])
+	}
+	// manifest.sig must NOT have been written — the auto-signer
+	// refused before reaching the persist step.
+	sigPath := filepath.Join(root, "ceiling-test", "manifest.sig")
+	if _, err := os.Stat(sigPath); err == nil {
+		t.Error("manifest.sig was written despite ceiling violation")
 	}
 }
 

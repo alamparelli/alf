@@ -19,6 +19,33 @@ the milestone ticket map.
 
 ### Security
 
+- **SEC-004 — auto-sign §7.3 Tier-2 ceiling enforcement**.
+  Both auto-signers (`wasm.Loader.autoSign` for WASM bundles and
+  `skills.daemonAutoSigner.Sign` for skill bundles) signed any
+  schema-valid manifest the local daemon key could produce a
+  signature for. This silently widened the daemon key's authority
+  beyond the §7.3 Tier-2 ceiling: an LLM-built or sideloaded bundle
+  declaring `[[events.subscribes]]` against another cap would be
+  auto-signed and cross-flow-forged at next boot, with no operator
+  intervention. The user-endorsed key (Tier 3) is the only level
+  authorised to widen authority across capability boundaries. Fix:
+  new `envelope.EnforceTier2Ceiling(*Manifest) error` returning
+  `ErrCeilingExceeded` when a manifest declares cross-flow event
+  subscriptions (the only widening surface today; future widening
+  blocks slot into the same function). Both auto-signers call
+  `Validate` then `EnforceTier2Ceiling` before signing — refusing
+  early so `manifest.sig` is never persisted for a ceiling-violating
+  bundle. Operator recourse is `alf keygen` + `alf sign --key
+  user-endorsed`, then re-load. 7 new tests:
+  `TestEnforceTier2Ceiling_*` (6 cases pinning bare/own-dir-fs/own-
+  topic-export/cross-flow-rejected/tools-declares-accepted/nil-
+  rejected) and integration test
+  `TestLoader_AutoSign_RefusesCrossFlowSubscription` (subscriber
+  bundle blocked, `manifest.sig` not written, error mentions
+  Tier-2 ceiling). Pre-existing cross-flow loader tests migrated
+  to a `preSignSubscriberBundle` helper that mints a manual
+  signature with the trust-store key — simulating the
+  user-endorsed flow these tests pre-date.
 - **SEC-006 — FSHandle symlink TOCTOU + mode tightening**.
   `FSHandle.Read` / `Write` used `os.ReadFile` / `WriteFile` which
   silently follow symlinks. A symlink installed inside the

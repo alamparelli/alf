@@ -2,6 +2,8 @@ package wasm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +18,38 @@ import (
 	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/alamparelli/alf/internal/runtime/events"
 )
+
+// preSignSubscriberBundle pre-signs a subscriber manifest at
+// <root>/<id>/manifest.sig so the loader skips the Tier-2 auto-sign
+// path. SEC-004 makes the auto-signer refuse cross-flow
+// subscriptions; in production, such bundles must be signed with a
+// user-endorsed key. These tests simulate that with a manual
+// pre-sign using the same trust-store key.
+func preSignSubscriberBundle(t *testing.T, root, id, manifest string, wasm []byte, priv envelope.PrivateKey, now time.Time) {
+	t.Helper()
+	dir := filepath.Join(root, id)
+	canonical, err := envelope.Canonicalize([]byte(manifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := envelope.Sign(priv, canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(wasm)
+	tc := envelope.TrustedComment{
+		BundleID:   "manual-signed-" + hex.EncodeToString(hash[:4]),
+		BundleHash: hex.EncodeToString(hash[:]),
+		SignedAt:   now.UTC(),
+	}
+	sigFile, err := envelope.EncodeSignatureFile(priv, sig, envelope.BuildTrustedComment(tc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.sig"), sigFile, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // newTestLoaderRuntimeWithEvents builds a fresh Instantiator wired
 // with an events.Bus + events.MemoryRegistry, returning everything
@@ -78,6 +112,10 @@ func TestLoader_CrossFlowForged(t *testing.T) {
 
 	writeBundle(t, root, "pub-cap", publisherManifest, minimalWasmBytes())
 	writeBundle(t, root, "sub-cap", subscriberManifest, minimalWasmBytes())
+	// SEC-004: cross-flow subscribers exceed the Tier-2 ceiling, so the
+	// auto-signer refuses them. Pre-sign with the same trust-store key
+	// to simulate the user-endorsed flow this test pre-dates.
+	preSignSubscriberBundle(t, root, "sub-cap", subscriberManifest, minimalWasmBytes(), priv, fixedLoaderNow())
 
 	logs := newLogCapture()
 	l := &Loader{
@@ -131,6 +169,9 @@ func TestLoader_SubscriberWithoutPublisherSkipped(t *testing.T) {
 	rt, _, registry, priv, store, reg := newTestLoaderRuntimeWithEvents(t)
 	root := t.TempDir()
 	writeBundle(t, root, "sub-cap", subscriberManifest, minimalWasmBytes())
+	// SEC-004: pre-sign because the subscriber's [[events.subscribes]]
+	// exceeds the Tier-2 auto-sign ceiling.
+	preSignSubscriberBundle(t, root, "sub-cap", subscriberManifest, minimalWasmBytes(), priv, fixedLoaderNow())
 
 	logs := newLogCapture()
 	l := &Loader{
@@ -174,6 +215,8 @@ func TestLoader_TwoPassResolvesRegardlessOfOrder(t *testing.T) {
 	// would be silently lost.
 	writeBundle(t, root, "sub-cap", subscriberManifest, minimalWasmBytes())
 	writeBundle(t, root, "pub-cap", publisherManifest, minimalWasmBytes())
+	// SEC-004: pre-sign cross-flow subscriber.
+	preSignSubscriberBundle(t, root, "sub-cap", subscriberManifest, minimalWasmBytes(), priv, fixedLoaderNow())
 
 	logs := newLogCapture()
 	l := &Loader{

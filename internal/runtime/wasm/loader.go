@@ -261,7 +261,20 @@ func (l *Loader) instantiateBundle(ctx context.Context, pre preLoadedBundle) (st
 // embeds the bundle SHA-256 in the trusted comment, mirroring the
 // stop-gap format shipped in #388 (`commit 34010c6`). The signed_at
 // timestamp comes from the injected clock so tests are deterministic.
+//
+// SEC-004: refuses to sign manifests that exceed the §7.3 Tier-2
+// ceiling. The local daemon key cannot pre-approve cross-flow
+// subscriptions or future widening blocks — the operator must
+// re-sign with the user-endorsed key (Tier 3) via `alf keygen`
+// + `alf sign --key user-endorsed`.
 func (l *Loader) autoSign(manifestBytes, wasmBytes []byte) ([]byte, error) {
+	manifest, err := envelope.Validate(manifestBytes)
+	if err != nil {
+		return nil, fmt.Errorf("validate: %w", err)
+	}
+	if err := envelope.EnforceTier2Ceiling(manifest); err != nil {
+		return nil, err
+	}
 	canonical, err := envelope.Canonicalize(manifestBytes)
 	if err != nil {
 		return nil, fmt.Errorf("canonicalize: %w", err)

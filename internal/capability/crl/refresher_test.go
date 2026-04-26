@@ -422,6 +422,77 @@ func TestHTTPSource_BodyCapEnforced(t *testing.T) {
 	}
 }
 
+// TestValidateCRLURL_AllowsHTTPS pins SEC-007: a public HTTPS URL
+// is the production path and must always pass.
+func TestValidateCRLURL_AllowsHTTPS(t *testing.T) {
+	if err := ValidateCRLURL("https://crl.alf.org/v1.json"); err != nil {
+		t.Errorf("HTTPS rejected: %v", err)
+	}
+}
+
+// TestValidateCRLURL_RejectsPlaintextPublicHost pins SEC-007: a
+// non-loopback HTTP URL must be refused — it would let any
+// net-position attacker swap CRL bytes (combined with SEC-001
+// replay this widens rollback risk).
+func TestValidateCRLURL_RejectsPlaintextPublicHost(t *testing.T) {
+	cases := []string{
+		"http://crl.alf.org/v1.json",
+		"http://example.com/crl",
+		"http://10.0.0.1/crl", // RFC1918 still public-routable from the threat model POV
+	}
+	for _, u := range cases {
+		err := ValidateCRLURL(u)
+		if !errors.Is(err, ErrInsecureURL) {
+			t.Errorf("%s: got %v, want ErrInsecureURL", u, err)
+		}
+	}
+}
+
+// TestValidateCRLURL_AllowsLoopbackHTTP pins the test/dev
+// exemption: HTTP is OK for loopback addresses. httptest harnesses
+// bind to 127.0.0.1 and rely on this exemption.
+func TestValidateCRLURL_AllowsLoopbackHTTP(t *testing.T) {
+	cases := []string{
+		"http://127.0.0.1:8080/crl",
+		"http://[::1]:8080/crl",
+		"http://localhost:8080/crl",
+	}
+	for _, u := range cases {
+		if err := ValidateCRLURL(u); err != nil {
+			t.Errorf("%s: loopback HTTP rejected: %v", u, err)
+		}
+	}
+}
+
+// TestValidateCRLURL_RejectsUnknownScheme pins that schemes other
+// than http/https (file, ftp, javascript, gopher, ...) are refused.
+func TestValidateCRLURL_RejectsUnknownScheme(t *testing.T) {
+	cases := []string{
+		"file:///etc/passwd",
+		"ftp://crl.alf.org/v1.json",
+		"javascript:alert(1)",
+		"gopher://crl.alf.org/",
+	}
+	for _, u := range cases {
+		err := ValidateCRLURL(u)
+		if !errors.Is(err, ErrInsecureURL) {
+			t.Errorf("%s: got %v, want ErrInsecureURL", u, err)
+		}
+	}
+}
+
+// TestHTTPSource_RejectsPlaintextPublicURL pins that the runtime
+// fetch path enforces the same scheme rule — a misconfigured
+// HTTPSource that bypassed the daemon-boot ValidateCRLURL still
+// refuses to fetch.
+func TestHTTPSource_RejectsPlaintextPublicURL(t *testing.T) {
+	src := &HTTPSource{URL: "http://crl.example.com/v1.json"}
+	_, err := src.Fetch(context.Background())
+	if !errors.Is(err, ErrInsecureURL) {
+		t.Errorf("got %v, want ErrInsecureURL", err)
+	}
+}
+
 func mustKeyID(t *testing.T, hex string) envelope.KeyID {
 	t.Helper()
 	id, err := envelope.ParseKeyIDHex(hex)

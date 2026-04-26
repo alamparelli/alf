@@ -85,6 +85,13 @@ func setupCRL(ctx context.Context, dataDir string, store *envelope.MemoryTrustSt
 		logf("[crl] ALF_CRL_URL not set — CRL distribution disabled (release-key fingerprint=%s)", pub.ID.Hex())
 		return sys, nil
 	}
+	// SEC-007: enforce HTTPS at boot rather than letting the first
+	// Tick surface the misconfiguration. A plaintext URL on a public
+	// host is a deployment bug — refuse to start so the operator
+	// notices immediately.
+	if err := crl.ValidateCRLURL(url); err != nil {
+		return sys, fmt.Errorf("crl: ALF_CRL_URL refused: %w", err)
+	}
 
 	cacheDir := filepath.Join(dataDir, "crl")
 	cache := &crl.FileCache{Dir: cacheDir}

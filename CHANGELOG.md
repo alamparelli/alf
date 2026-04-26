@@ -19,6 +19,22 @@ the milestone ticket map.
 
 ### Security
 
+- **SEC-007 — HTTPS-only CRL URL (boot-time validation)**.
+  `ALF_CRL_URL` accepted plaintext HTTP for any host. Combined with
+  SEC-001 replay this widened the rollback surface — a net-position
+  attacker could swap CRL bytes without touching TLS. Fix: new
+  `crl.ValidateCRLURL` enforces `scheme = https` for non-loopback
+  hosts; `127.0.0.0/8` / `::1` / `localhost` over HTTP stay allowed
+  for local-dev and httptest harnesses. `HTTPSource.Fetch`
+  re-enforces at call time so a programmatic misuse cannot bypass
+  the daemon-boot check; `cmd/alf-daemon/setupCRL` fails fast on
+  misconfigured `ALF_CRL_URL` rather than waiting for the first
+  Tick. New `ErrInsecureURL` sentinel. 5 new tests:
+  `TestValidateCRLURL_AllowsHTTPS`,
+  `TestValidateCRLURL_RejectsPlaintextPublicHost`,
+  `TestValidateCRLURL_AllowsLoopbackHTTP`,
+  `TestValidateCRLURL_RejectsUnknownScheme` (file/ftp/javascript/
+  gopher all refused), `TestHTTPSource_RejectsPlaintextPublicURL`.
 - **SEC-002 — marker breakout via per-turn nonce framing**. The
   `<tool_output>` / `<capability_content>` / `<fetched_content>`
   markers that the §3.2 kernel prompt anchors on were structurally

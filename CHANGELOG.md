@@ -43,6 +43,45 @@ the milestone ticket map.
 
 ### Added
 
+- **#396 Stage 1 — revocation end-to-end (deliverables 1, 3, 4)**.
+  Three commits land the load-bearing core of the §8 revocation
+  story; CRL distribution + offline behaviour stay deferred to
+  Stage 2.
+  - **Deliverable 1 (timing acceptance)** — `Instance.Close()` was
+    already wired through `lifecycleCtx` + `context.AfterFunc` in
+    #391, but no test pinned the §8 timing budget. New
+    `TestCloseTiming_*` (4 cases) prove HTTP / Exec / Tool in-flight
+    ops unwind within 200ms after `Close`, and that 50 concurrent
+    `Close()` calls don't deadlock — pre-condition for the
+    `RevokeByKey` path that closes N Instances in parallel.
+  - **Deliverable 3 (key-based revocation)** —
+    `Instantiator.RevokeByKey(KeyID)` closes every live Instance
+    forged from a bundle signed by the given fingerprint. The
+    Instantiator now keeps a self-pruning live registry indexed
+    by signer key; entries drop via a watcher goroutine when
+    Close fires, regardless of whether Close came from the user,
+    a RevokeByKey, or a future provider cascade. Audit log line
+    per closed Instance via the configurable `WithRevocationLogger`
+    option. `VerifiedInstantiation` now exposes `SignerID` +
+    `SignedAt` so loaders can correlate without re-parsing the
+    envelope. 6 tests including in-flight cancellation under
+    budget and concurrent Close + RevokeByKey safety.
+  - **Deliverable 4 (not-valid-after enforcement)** — new
+    `envelope.Revoker` interface; `MemoryTrustStore.Revoke(KeyID,
+    time.Time)` records a not-valid-after stamp;
+    `envelope.Verify` rejects bundles whose `signed-at` is at or
+    beyond it (strict-before semantics — boundary equality
+    rejects). New `ErrSignerKeyRevoked` is distinct from
+    `ErrSignerNotTrusted` so operators see the correct
+    remediation. `Add()` clears any prior revocation (re-trust
+    flow); `Remove()` clears alongside the key. 10 tests cover
+    happy path, boundary, repeated revoke, re-trust, unknown
+    key no-op, non-Revoker store fallback.
+  - **Operator flow now functional**: `store.Revoke(fp, now)`
+    blocks future loads; `inst.RevokeByKey(fp)` closes live ones.
+    Deferred to Stage 2: signed CRL distribution, offline N-day
+    fail-safe, clock-skew detection, `alf trust revoke` CLI
+    (depends on #395 Stage 2 admin boundary).
 - `TestThreeTierAlignment_E2E` (8 subtests) — a single integration
   test that loads two co-resident signed manifests through one
   `Instantiator` (events bus + cross-flow registry wired the way the

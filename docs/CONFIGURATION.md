@@ -41,6 +41,26 @@ README for the happy-path setup.
 | `ALF_MARKETPLACE_URL` | placeholder | Marketplace HTTPS endpoint |
 | `ALF_MARKETPLACE_INSECURE` | unset | Skips TLS verification (homelab only) |
 
+## Trust store (#395 Stage 2 chunk 1)
+
+The daemon's WASM trust store lives at `<dataDir>/trust/` — one
+minisign `.pub` file per operator-trusted signing key, plus an
+optional `.revoked` sidecar per key holding an RFC3339 not-valid-
+after timestamp. Format details and rationale in
+[§7.2](ARCHITECTURE-SECURITY.md#72-trust-store).
+
+| Path | Owner | Purpose |
+|---|---|---|
+| `<dataDir>/trust/<keyid>.pub` | operator (via `alf trust add`) | minisign-format public key, mode 0o644 |
+| `<dataDir>/trust/<keyid>.revoked` | operator (via `alf trust revoke`) | RFC3339Nano timestamp; `envelope.Verify` rejects bundles whose `signed-at >= timestamp` |
+| `<dataDir>/keys/daemon.json` | daemon (auto-bootstrap) | local daemon keypair (Tier 2). Auto-trusted at boot, **not** listed under `<dataDir>/trust/` and not surfaced by `alf trust list`. |
+
+The `alf trust` CLI mutates this directory directly without daemon
+roundtrip — TTY-only, non-TTY stdin refused. Changes take effect on
+the next `alf restart` (hot-reload via SIGHUP is a planned follow-up).
+Full command surface and §6 admin-boundary rules in
+[§7.6](ARCHITECTURE-SECURITY.md#76-admin-cli-surface).
+
 ## Revocation (#396 Stage 2)
 
 | Variable | Default | Purpose |

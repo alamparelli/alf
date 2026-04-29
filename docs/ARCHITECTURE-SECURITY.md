@@ -416,7 +416,20 @@ This section is the written spec delivered under `#387`. It is the single refere
 
 ### 7.2 Trust store
 
-**Location:** `~/.config/alf/trust-store.toml` on the daemon's host filesystem (inside the container for Docker installs, mounted through from a user-owned volume). Platform-specific backends — macOS Keychain, Linux Secret Service — are evaluated as opt-in alternatives for 0.9.0, out of 0.8.0 scope (post-audit finding H7).
+> **Implementation status (0.8.0).** The store is a *directory* of
+> minisign-format files at `<dataDir>/trust/`, not a single TOML
+> file. Operators add a key by dropping a `<keyid>.pub` file (via
+> `alf trust add`); revocation is a sibling `<keyid>.revoked`
+> sidecar containing an RFC3339 timestamp. The TOML-with-metadata
+> format described below is the spec target — when the schema bump
+> lands (post-0.8.0) it carries `label`, `source`, `added_at`
+> alongside the pubkey. Today the per-file layout is intentional:
+> stock `minisign` can read each `.pub` directly, and atomic single-
+> file mutations sidestep the lock-vs-rewrite problem a single TOML
+> file would have. See `internal/capability/envelope/truststore.go`
+> (`DirTrustStore`).
+
+**Location:** `<dataDir>/trust/` on the daemon's host filesystem (inside the container for Docker installs, mounted through from a user-owned volume). Platform-specific backends — macOS Keychain, Linux Secret Service — are evaluated as opt-in alternatives for 0.9.0, out of 0.8.0 scope (post-audit finding H7).
 
 **Format:** TOML, one `[[keys]]` entry per trusted public key:
 
@@ -559,22 +572,27 @@ The vault (`internal/sandbox/secrets/`) already existed for capability-accessed 
 
 ### 7.6 Admin CLI surface
 
-Semantics are listed here; implementation lives in `#395`. Every command requires admin-boundary ratification where noted.
+Semantics are listed here; implementation lives in `#395`. Every command requires admin-boundary ratification where noted. The Status column tracks 0.8.0 ship state — `shipped` commands are usable today; `deferred` commands have a target `#395` chunk noted.
 
-| Command | Purpose | Admin-boundary |
-|---|---|---|
-| `alf keygen` | Create the user-endorsed key (tier 3). Prompts for passphrase. | Yes |
-| `alf trust list` | List trust-store entries (fingerprint, label, source, added_at). | No |
-| `alf trust add <pubkey-or-url>` | Add a third-party key (tier 4). | Yes |
-| `alf trust remove <fingerprint>` | Remove a key. Triggers cascade `#396`. | Yes |
-| `alf trust revoke <fingerprint> [--reason ...]` | Revoke with reason code. Writes CRL entry. | Yes |
-| `alf sign <bundle> [--key user-endorsed]` | Sign a bundle with a private key from vault user-scope. Default signer is the local-daemon key (ceiling-enforced); `--key user-endorsed` widens. | Yes |
-| `alf install <bundle>` | Install a bundle. Runs the §7.4 flow; unknown signer prompts `alf trust add`. | Yes (for the install itself) |
-| `alf pending` | List pending ratifications from the admin-boundary queue. | No |
-| `alf migrate export <file>` | One-shot export of trust store + vault user-scope (§7.8). | Yes |
-| `alf migrate import <file>` | One-shot import, prompts for the source vault passphrase. | Yes |
-| `alf trust export <file>` | Trust-store-only export (pubkeys + metadata). | No |
-| `alf trust import <file>` | Trust-store-only import. | Yes (per-key) |
+| Command | Purpose | Admin-boundary | Status |
+|---|---|---|---|
+| `alf trust list` | List trust-store entries (fingerprint, status, comment). | No | shipped (Stage 2 chunk 1) |
+| `alf trust add <pub-file> [--comment ...]` | Add a third-party key (tier 4). Prompts for explicit `yes` on the TTY. | Yes (TTY confirm) | shipped (Stage 2 chunk 1) |
+| `alf trust remove <fingerprint>` | Remove a key. Will trigger cascade `#396` D8 once daemon hot-reload lands. | Yes (TTY confirm) | shipped (Stage 2 chunk 1) |
+| `alf trust revoke <fingerprint> [--at <RFC3339>]` | Pin a not-valid-after timestamp. `Verify` rejects bundles signed at-or-after. | Yes (TTY confirm) | shipped (Stage 2 chunk 1) |
+| `alf keygen` | Create the user-endorsed key (tier 3). Prompts for passphrase. | Yes | deferred (Stage 2 chunk 2) |
+| `alf sign <bundle> [--key user-endorsed]` | Sign a bundle with a private key from vault user-scope. Default signer is the local-daemon key (ceiling-enforced); `--key user-endorsed` widens. | Yes | deferred (Stage 2 chunk 2) |
+| `alf pending` | List pending ratifications from the admin-boundary queue. | No | deferred (Stage 2 chunk 3) |
+| `alf ratify <id>` / `--deny <id>` | Approve or deny a pending item from the queue. | Yes | deferred (Stage 2 chunk 3) |
+| `alf install <bundle>` | Install a bundle. Runs the §7.4 flow; unknown signer prompts `alf trust add`. | Yes (for the install itself) | deferred (Stage 2 chunk 3) |
+| `alf migrate export <file>` | One-shot export of trust store + vault user-scope (§7.8). | Yes | deferred (post-0.8.0) |
+| `alf migrate import <file>` | One-shot import, prompts for the source vault passphrase. | Yes | deferred (post-0.8.0) |
+| `alf trust export <file>` | Trust-store-only export (pubkeys + metadata). | No | deferred (post-0.8.0) |
+| `alf trust import <file>` | Trust-store-only import. | Yes (per-key) | deferred (post-0.8.0) |
+
+**TTY confirm** is the §6 enforcement for trust-mutating ops shipped in chunk 1: each command refuses on non-TTY stdin (typed `ErrNonInteractive`) and prompts for an explicit `yes` before any disk write. Non-TTY input is the canonical prompt-injection signature this boundary blocks.
+
+**Effect timing.** Chunk 1 commands mutate `<dataDir>/trust/` directly and take effect on the next `alf restart`. SIGHUP-driven hot-reload is wired-in-spirit (`DirTrustStore.Load` is reload-safe — fresh map built then atomically swapped under the mutex) but not yet bound to a signal handler; that is a follow-up.
 
 ### 7.7 Revocation
 

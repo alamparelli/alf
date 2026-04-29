@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestMemoryTrustStore_AddLookupRemove(t *testing.T) {
@@ -165,4 +166,164 @@ func writePubFile(t *testing.T, dir, filename string, pub PublicKey, comment str
 	if err := os.WriteFile(filepath.Join(dir, filename), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestDirTrustStore_PersistRoundTrip(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "trust") // dir does not exist yet
+	s := NewDirTrustStore(dir)
+	pub, _ := mustGenKey(t)
+
+	if err := s.Persist(pub, "alf operator key"); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+	if _, ok, _ := s.Lookup(pub.ID); !ok {
+		t.Error("in-memory entry missing after Persist")
+	}
+	// File present at the deterministic name.
+	want := filepath.Join(dir, pub.ID.Hex()+".pub")
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("on-disk file missing: %v", err)
+	}
+
+	// A fresh store loads the same key.
+	s2 := NewDirTrustStore(dir)
+	if err := s2.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok, _ := s2.Lookup(pub.ID); !ok {
+		t.Error("reload-after-Persist did not see the key")
+	}
+}
+
+func TestDirTrustStore_PersistOverwriteIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	s := NewDirTrustStore(dir)
+	pub, _ := mustGenKey(t)
+
+	if err := s.Persist(pub, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	// Re-persist with a different comment must succeed and not leave
+	// stale tmp files behind.
+	if err := s.Persist(pub, "v2"); err != nil {
+		t.Fatalf("re-Persist: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".tmp" || hasSubstr(e.Name(), ".tmp-") {
+			t.Errorf("stale tmp file leftover: %s", e.Name())
+		}
+	}
+	if len(entries) != 1 {
+		t.Errorf("expected 1 file after overwrite, got %d", len(entries))
+	}
+}
+
+func TestDirTrustStore_PersistRemoveIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	s := NewDirTrustStore(dir)
+	pub, _ := mustGenKey(t)
+
+	if err := s.Persist(pub, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PersistRemove(pub.ID); err != nil {
+		t.Fatalf("PersistRemove: %v", err)
+	}
+	if _, ok, _ := s.Lookup(pub.ID); ok {
+		t.Error("in-memory entry survived PersistRemove")
+	}
+	if _, err := os.Stat(filepath.Join(dir, pub.ID.Hex()+".pub")); !os.IsNotExist(err) {
+		t.Errorf("file should be gone, got err=%v", err)
+	}
+	// Second call is a no-op.
+	if err := s.PersistRemove(pub.ID); err != nil {
+		t.Errorf("second PersistRemove should be no-op, got %v", err)
+	}
+}
+
+func TestDirTrustStore_PersistRevokeRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := NewDirTrustStore(dir)
+	pub, _ := mustGenKey(t)
+	if err := s.Persist(pub, "k"); err != nil {
+		t.Fatal(err)
+	}
+
+	when := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	if err := s.PersistRevoke(pub.ID, when); err != nil {
+		t.Fatalf("PersistRevoke: %v", err)
+	}
+	gotT, ok := s.RevokedAfter(pub.ID)
+	if !ok || !gotT.Equal(when) {
+		t.Errorf("RevokedAfter=%v ok=%v, want %v ok=true", gotT, ok, when)
+	}
+
+	// Reload picks up the revocation from disk.
+	s2 := NewDirTrustStore(dir)
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	gotT, ok = s2.RevokedAfter(pub.ID)
+	if !ok || !gotT.Equal(when) {
+		t.Errorf("after reload: RevokedAfter=%v ok=%v, want %v ok=true", gotT, ok, when)
+	}
+}
+
+func TestDirTrustStore_PersistRevokeRejectsUnknownKey(t *testing.T) {
+	s := NewDirTrustStore(t.TempDir())
+	var id KeyID
+	id[0] = 0xab
+	err := s.PersistRevoke(id, time.Now())
+	if !errors.Is(err, ErrKeyNotInStore) {
+		t.Errorf("want ErrKeyNotInStore, got %v", err)
+	}
+}
+
+func TestDirTrustStore_PersistClearsStaleRevoked(t *testing.T) {
+	dir := t.TempDir()
+	s := NewDirTrustStore(dir)
+	pub, _ := mustGenKey(t)
+	if err := s.Persist(pub, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PersistRevoke(pub.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// Re-Persist should clear the operator-set revocation (matches Add).
+	if err := s.Persist(pub, "v2-fresh-trust"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.RevokedAfter(pub.ID); ok {
+		t.Error("re-Persist should have cleared the operator-set revoked entry")
+	}
+	if _, err := os.Stat(filepath.Join(dir, pub.ID.Hex()+".revoked")); !os.IsNotExist(err) {
+		t.Errorf(".revoked sidecar should be gone, got %v", err)
+	}
+}
+
+func TestDirTrustStore_LoadRejectsMalformedRevoked(t *testing.T) {
+	dir := t.TempDir()
+	pub, _ := mustGenKey(t)
+	writePubFile(t, dir, pub.ID.Hex()+".pub", pub, "k")
+	if err := os.WriteFile(filepath.Join(dir, pub.ID.Hex()+".revoked"), []byte("not-a-timestamp"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := NewDirTrustStore(dir)
+	if err := s.Load(); !errors.Is(err, ErrTrustStoreCorrupt) {
+		t.Errorf("want ErrTrustStoreCorrupt on malformed .revoked, got %v", err)
+	}
+}
+
+func hasSubstr(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

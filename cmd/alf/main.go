@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/alamparelli/alf/cmd/alf/admin"
 	"github.com/alamparelli/alf/internal/cli"
 )
 
@@ -60,6 +62,8 @@ func main() {
 		cli.RunMagicLink()
 	case "compose":
 		cli.RunCompose()
+	case "trust":
+		runTrust(os.Args[2:])
 	case "uninstall":
 		cli.RunUninstall()
 	case "version":
@@ -72,6 +76,36 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+}
+
+// runTrust resolves the production TrustEnv (real os.Std*, real
+// terminal check, real time.Now, real install layout) and dispatches
+// to admin.Trust. Errors exit non-zero so shell pipelines (`alf
+// trust list && ...`) can chain reliably.
+func runTrust(args []string) {
+	env := admin.TrustEnv{
+		TrustDir:   admin.DefaultTrustDir(),
+		Stdin:      os.Stdin,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+		IsTerminal: stdinIsTerminal,
+		Now:        time.Now,
+	}
+	if err := admin.Trust(env, args); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+// stdinIsTerminal reports whether os.Stdin is a TTY. The check is a
+// fstat on fd 0; we avoid pulling in golang.org/x/term for the one
+// call. Used to gate the mutating trust subcommands per #395 §6.
+func stdinIsTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
 func printUsage() {
@@ -89,6 +123,7 @@ func printUsage() {
 	fmt.Println("  login     Authenticate Claude inside the container")
 	fmt.Println("  magic-link  Generate a Control Center login link")
 	fmt.Println("  secret    Manage secrets (list/set/remove)")
+	fmt.Println("  trust     Manage trusted signing keys (list/add/remove/revoke)")
 	fmt.Println("  uninstall Remove ALF completely")
 	fmt.Println("  version   Print CLI version")
 }

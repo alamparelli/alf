@@ -48,6 +48,12 @@ func SaveInstallDir(dir string) {
 	os.WriteFile(p, []byte(dir+"\n"), 0o644)
 }
 
+// AlfDir returns the install directory (the one containing
+// docker-compose.yml). Exported so external CLI packages — notably
+// cmd/alf/admin/ for #395 — can resolve the install layout without
+// duplicating the env-var + saved-path lookup logic.
+func AlfDir() string { return alfDir() }
+
 func alfDir() string {
 	// 0. Explicit override (dev-local workflow).
 	if dir := os.Getenv("ALF_DIR"); dir != "" {

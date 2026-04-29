@@ -45,7 +45,7 @@ func (c *crlSubsystem) Close() {
 //
 // All other failures (source down, cache corrupt, etc.) are
 // recovered by the Refresher per §7.7 fail-safe.
-func setupCRL(ctx context.Context, dataDir string, store *envelope.MemoryTrustStore, logf func(string, ...any)) (*crlSubsystem, error) {
+func setupCRL(ctx context.Context, dataDir string, store *envelope.DirTrustStore, logf func(string, ...any)) (*crlSubsystem, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}

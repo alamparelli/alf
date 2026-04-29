@@ -32,9 +32,15 @@ type wasmRuntime struct {
 	// forge handles (skill loader, future provider loader) must reuse
 	// this one. DaemonPriv + TrustStore are exposed for the same reason
 	// — every kind shares the §7.3 Tier 2 daemon key.
+	//
+	// TrustStore is a DirTrustStore so operator-managed keys persist
+	// across restarts under <dataDir>/trust/. The CLI side mutates the
+	// directory directly via DirTrustStore.Persist / PersistRemove /
+	// PersistRevoke; the running daemon picks up changes on the next
+	// SIGHUP-driven Load() (#395 Stage 2 follow-up) or on restart.
 	Inst       *runtime.Instantiator
 	DaemonPriv envelope.PrivateKey
-	TrustStore *envelope.MemoryTrustStore
+	TrustStore *envelope.DirTrustStore
 }
 
 // Close tears down the wazero runtime. Safe on nil receiver so main()
@@ -69,8 +75,19 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 		return nil, fmt.Errorf("wasm-loader: daemon key: %w", err)
 	}
 
-	store := envelope.NewMemoryTrustStore()
+	// Trust store is dir-backed under <dataDir>/trust/ so admin CLI
+	// mutations (alf trust add/remove/revoke) survive restarts. The
+	// daemon key itself is NOT persisted here — it lives in keys/
+	// alongside its private half (auto-bootstrap, never operator-
+	// editable). On boot we Add() it to the in-memory side so the
+	// verify path admits daemon-signed bundles without writing a
+	// corresponding .pub file an operator might think is theirs.
+	store := envelope.NewDirTrustStore(filepath.Join(dataDir, "trust"))
+	if err := store.Load(); err != nil {
+		return nil, fmt.Errorf("wasm-loader: trust store load: %w", err)
+	}
 	store.Add(pub)
+	logf("[wasm-loader] trust store: dir=%s operator-keys=%d", store.Dir(), len(store.Keys())-1)
 
 	// Events plumbing (#399): the bus is the in-memory router, the
 	// cross-flow registry is populated by the loader's pass 1 from

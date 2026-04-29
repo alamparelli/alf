@@ -224,11 +224,29 @@ func NewDirTrustStore(dir string) *DirTrustStore {
 	}
 }
 
-// Load reads every .pub file under the store's directory and populates
-// the in-memory cache. A missing directory is treated as "no trusted
-// keys" (empty store); this is the correct posture for first boot.
-// A directory that exists but is unreadable, or a .pub file that fails
-// to parse, is a hard error.
+// Dir returns the on-disk directory backing this store. Exposed so
+// admin CLI code can stat or display the path it just mutated; the
+// hot-path verify code never needs it.
+func (d *DirTrustStore) Dir() string { return d.dir }
+
+// pubFileName / revokedFileName render the deterministic on-disk
+// names for a KeyID. Persist writes to these names; PersistRemove and
+// PersistRevoke target the same names so admin operations don't have
+// to scan content to find the right file.
+func pubFileName(id KeyID) string     { return id.Hex() + ".pub" }
+func revokedFileName(id KeyID) string { return id.Hex() + ".revoked" }
+
+// Load reads every .pub and .revoked file under the store's directory
+// and populates the in-memory cache. A missing directory is treated
+// as "no trusted keys" (empty store); this is the correct posture for
+// first boot. A directory that exists but is unreadable, or a file
+// that fails to parse, is a hard error.
+//
+// Operator-set revocation timestamps survive across reloads because
+// .revoked files persist them. CRL-set timestamps live only in memory
+// and are repopulated by ApplyCRL on the next refresher tick — by
+// design (the CRL channel is upstream-authoritative, not operator-
+// editable on disk).
 func (d *DirTrustStore) Load() error {
 	entries, err := os.ReadDir(d.dir)
 	if err != nil {
@@ -241,28 +259,193 @@ func (d *DirTrustStore) Load() error {
 	// Build a fresh map then swap it in, so a failed reload doesn't
 	// leave the store half-populated.
 	fresh := make(map[KeyID]PublicKey)
+	freshRevoked := make(map[KeyID]time.Time)
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pub") {
+		if e.IsDir() {
 			continue
 		}
 		path := filepath.Join(d.dir, e.Name())
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("%w: %s: %w", ErrTrustStoreCorrupt, path, err)
+		switch {
+		case strings.HasSuffix(e.Name(), ".pub"):
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("%w: %s: %w", ErrTrustStoreCorrupt, path, err)
+			}
+			pub, err := ParsePublicKeyFile(raw)
+			if err != nil {
+				return fmt.Errorf("%w: %s: %w", ErrTrustStoreCorrupt, path, err)
+			}
+			if existing, collision := fresh[pub.ID]; collision {
+				return fmt.Errorf("%w: key ID %s appears twice (existing pubkey size=%d, new %s)",
+					ErrTrustStoreCorrupt, pub.ID.Hex(), len(existing.Key), path)
+			}
+			fresh[pub.ID] = pub
+		case strings.HasSuffix(e.Name(), ".revoked"):
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("%w: %s: %w", ErrTrustStoreCorrupt, path, err)
+			}
+			id, t, err := parseRevokedFile(e.Name(), raw)
+			if err != nil {
+				return fmt.Errorf("%w: %s: %w", ErrTrustStoreCorrupt, path, err)
+			}
+			freshRevoked[id] = t
+		default:
+			// Other files are ignored (notes, README, etc.).
 		}
-		pub, err := ParsePublicKeyFile(raw)
-		if err != nil {
-			return fmt.Errorf("%w: %s: %w", ErrTrustStoreCorrupt, path, err)
-		}
-		if existing, collision := fresh[pub.ID]; collision {
-			return fmt.Errorf("%w: key ID %s appears twice (existing pubkey size=%d, new %s)",
-				ErrTrustStoreCorrupt, pub.ID.Hex(), len(existing.Key), path)
-		}
-		fresh[pub.ID] = pub
 	}
 
 	d.mu.Lock()
 	d.keys = fresh
+	// Operator-set revocations come from disk; CRL-set entries are
+	// kept untouched (they are repopulated by the upstream Refresher).
+	d.revokedAt = freshRevoked
 	d.mu.Unlock()
 	return nil
+}
+
+// Persist writes pub to <dir>/<keyid>.pub and adds it to the in-memory
+// cache. Atomic via tmp+rename — a concurrent Load() (or a daemon
+// SIGHUP mid-write) never observes a half-written file. The operator-
+// set revocation timestamp for this id is cleared on disk and in
+// memory: a fresh Persist means "operator decided the key is valid
+// again from now" (matches MemoryTrustStore.Add semantics).
+//
+// File mode 0o644: pubkeys are public material. Directory created
+// 0o755 if missing.
+func (d *DirTrustStore) Persist(pub PublicKey, comment string) error {
+	if err := os.MkdirAll(d.dir, 0o755); err != nil {
+		return fmt.Errorf("truststore: mkdir %s: %w", d.dir, err)
+	}
+	raw, err := EncodePublicKeyFile(pub, comment)
+	if err != nil {
+		return fmt.Errorf("truststore: encode pubkey: %w", err)
+	}
+	target := filepath.Join(d.dir, pubFileName(pub.ID))
+	if err := atomicWrite(target, raw, 0o644); err != nil {
+		return fmt.Errorf("truststore: persist %s: %w", target, err)
+	}
+	// Mirror Add() semantics on the disk: clear the .revoked sidecar.
+	revoked := filepath.Join(d.dir, revokedFileName(pub.ID))
+	if err := os.Remove(revoked); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("truststore: clear stale revoked %s: %w", revoked, err)
+	}
+	d.MemoryTrustStore.Add(pub)
+	return nil
+}
+
+// PersistRemove deletes <keyid>.pub and any companion <keyid>.revoked
+// from the store directory and clears the in-memory entry. The
+// operation is idempotent — a missing .pub file returns nil (the
+// post-condition "key absent from store" already holds).
+func (d *DirTrustStore) PersistRemove(id KeyID) error {
+	pub := filepath.Join(d.dir, pubFileName(id))
+	revoked := filepath.Join(d.dir, revokedFileName(id))
+	if err := os.Remove(pub); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("truststore: remove %s: %w", pub, err)
+	}
+	if err := os.Remove(revoked); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("truststore: remove %s: %w", revoked, err)
+	}
+	d.MemoryTrustStore.Remove(id)
+	return nil
+}
+
+// PersistRevoke writes <keyid>.revoked with the RFC3339Nano timestamp
+// and records it in-memory. The pubkey file remains in place: Revoke
+// pins a not-valid-after boundary, it does not delete the key.
+//
+// Revoking a key not present in the store is a no-op (matches
+// MemoryTrustStore.Revoke semantics) — operators get a typed error so
+// the CLI can surface a clear "no such key" rather than silently
+// writing a dangling .revoked sidecar.
+func (d *DirTrustStore) PersistRevoke(id KeyID, notValidAfter time.Time) error {
+	if _, ok, _ := d.Lookup(id); !ok {
+		return fmt.Errorf("%w: %s", ErrKeyNotInStore, id.Hex())
+	}
+	if err := os.MkdirAll(d.dir, 0o755); err != nil {
+		return fmt.Errorf("truststore: mkdir %s: %w", d.dir, err)
+	}
+	target := filepath.Join(d.dir, revokedFileName(id))
+	body := []byte(notValidAfter.UTC().Format(time.RFC3339Nano) + "\n")
+	if err := atomicWrite(target, body, 0o644); err != nil {
+		return fmt.Errorf("truststore: persist %s: %w", target, err)
+	}
+	d.MemoryTrustStore.Revoke(id, notValidAfter)
+	return nil
+}
+
+// ErrKeyNotInStore distinguishes "operator named a key the store
+// doesn't have" from generic I/O errors. The admin CLI maps it to a
+// non-zero exit with an explicit "no such key" message.
+var ErrKeyNotInStore = errors.New("truststore: key not in store")
+
+// atomicWrite writes data to a sibling temp file then renames over
+// target. The rename is atomic on POSIX filesystems; a concurrent
+// reader sees either the old content or the new, never a partial.
+// On error, the temp file is best-effort cleaned up.
+func atomicWrite(target string, data []byte, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(target), filepath.Base(target)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
+}
+
+// parseRevokedFile decodes a <keyid>.revoked file. The KeyID is taken
+// from the filename (16 hex chars before .revoked) so the file format
+// itself is just a single RFC3339Nano timestamp line — no embedded ID
+// to disagree with the filename.
+func parseRevokedFile(name string, raw []byte) (KeyID, time.Time, error) {
+	stem := strings.TrimSuffix(name, ".revoked")
+	if len(stem) != 16 {
+		return KeyID{}, time.Time{}, fmt.Errorf("filename %q: stem length %d, want 16 hex chars", name, len(stem))
+	}
+	var id KeyID
+	for i := 0; i < 8; i++ {
+		hi, ok1 := unhex(stem[i*2])
+		lo, ok2 := unhex(stem[i*2+1])
+		if !ok1 || !ok2 {
+			return KeyID{}, time.Time{}, fmt.Errorf("filename %q: not hex at byte %d", name, i)
+		}
+		id[i] = hi<<4 | lo
+	}
+	t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(raw)))
+	if err != nil {
+		return KeyID{}, time.Time{}, fmt.Errorf("body: %w", err)
+	}
+	return id, t, nil
+}
+
+// unhex maps an ASCII hex digit (upper or lower) to its 4-bit value.
+func unhex(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	}
+	return 0, false
 }

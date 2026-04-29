@@ -17,6 +17,54 @@ but no v0.8.0 tag has been cut. See
 [`docs/ARCHITECTURE-SECURITY.md`](docs/ARCHITECTURE-SECURITY.md) §12 for
 the milestone ticket map.
 
+### Added
+
+- **#395 Stage 2 chunk 1 — operator-managed trust store + `alf trust`
+  CLI**. The daemon's WASM trust store is now `*envelope.DirTrustStore`
+  bound to `<dataDir>/trust/` instead of an in-memory store seeded only
+  with the auto-bootstrapped daemon key. Operators add, remove, and
+  revoke third-party signing keys without daemon roundtrip via four new
+  TTY-only subcommands of `alf`:
+  - `alf trust list` — prints fingerprint + status (`trusted` /
+    `revoked@<RFC3339>`) + untrusted-comment for every key under
+    `<dataDir>/trust/`. The daemon-bootstrapped key lives in
+    `<dataDir>/keys/daemon.json` (auto-trusted at boot) and is
+    intentionally not surfaced — operators are not meant to manage it.
+  - `alf trust add <pub-file> [--comment "..."]` — parses a minisign
+    `.pub` file, prompts for explicit "yes" on the TTY, then atomically
+    persists `<keyid>.pub` (tmp + rename, mode 0o644). Re-Adding an
+    existing fingerprint clears any prior `.revoked` sidecar (matches
+    `MemoryTrustStore.Add` semantics).
+  - `alf trust remove <fingerprint>` — deletes `<keyid>.pub` and any
+    companion `<keyid>.revoked`. Idempotent on disk; rejects unknown
+    fingerprints loudly so a typo doesn't silently no-op.
+  - `alf trust revoke <fingerprint> [--at <RFC3339>]` — writes
+    `<keyid>.revoked` with an RFC3339 timestamp; the pubkey file stays
+    in place. Default `--at` is now (operator's TTY clock); `--at`
+    overrides for "compromise actually started earlier than this
+    command" cases. `envelope.Verify` rejects bundles whose
+    `signed-at >= revoked-at` via the existing `Revoker` interface.
+  All mutating commands refuse on non-TTY stdin (`ErrNonInteractive`)
+  — non-TTY input is the canonical prompt-injection signature this
+  boundary exists to block. Changes take effect on the next `alf
+  restart` (SIGHUP-driven hot-reload deferred to a follow-up). New
+  package `cmd/alf/admin/` is pinned by two archtests:
+  `TestAdminCLIPackageBoundary` (no consumer outside `cmd/alf/*` may
+  import it) and `TestAdminCLIDoesNotImportRuntime` (admin CLI must
+  not pull in `internal/runtime`, `internal/tooling`,
+  `internal/capability/handle`). New persistence API on the envelope
+  side: `DirTrustStore.Persist(pub, comment)`,
+  `DirTrustStore.PersistRemove(id)`,
+  `DirTrustStore.PersistRevoke(id, t)`, plus a `.revoked` sidecar
+  loader so operator-set timestamps survive restarts (CRL-set
+  timestamps remain memory-only by design — the upstream `Refresher`
+  repopulates them on the next tick). New `envelope.ErrKeyNotInStore`
+  sentinel. 8 new admin-CLI tests, 7 new envelope tests, 2 new
+  archtests. **Stage 2 chunks 2–4 still pending**: `alf keygen` +
+  `alf sign` (user-endorsed key + passphrase), `alf pending` +
+  `alf ratify` (persistent ratification queue + CC trust domain),
+  vault user-scope + `SecretValue` redaction.
+
 ### Security
 
 - **SEC-004 — auto-sign §7.3 Tier-2 ceiling enforcement**.

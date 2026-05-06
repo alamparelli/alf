@@ -19,6 +19,44 @@ the milestone ticket map.
 
 ### Added
 
+- **#389 Stage 2 — active-skill boundary narrows LLM tool surface**.
+  Stage 1 shipped the structural core (schema, forge, loader). Stage 2
+  wires the orchestrator path so the §3.1 promise actually holds at
+  the LLM tool spec layer: a manifest-shipped skill's
+  `[[tools.declares]]` block now bounds what the model sees per
+  turn. New `skills.NarrowToolsByDeclares(lookup, activeSkills,
+  tierTools)` returns the intersection of "tier-allowed" and "any
+  active skill's declares" preserving tier order; YAML-only active
+  skills (no manifest yet) return nil from the lookup → tier
+  passthrough (transition compromise). New helper
+  `skills.DeclaresFromVerified` flattens a `*VerifiedSkill`'s
+  manifest into a `[]string` for daemon wiring. `pipeline.ChatEngine`
+  gains `SkillDeclaresLookup` field + `SetSkillDeclaresLookup`
+  setter (same wire-after-construction pattern as `SetRuntime` —
+  `skillsRuntime` is built late). `processStandard` hoists
+  `activeSkills` out of the prompt-injection branch and applies the
+  narrow before the API tool loop is wrapped AND before
+  `provider.Params.Tools` is populated; same narrow on the fallback
+  path. Soak diagnostics: a `[comms] active-skill boundary narrowed
+  tools X → Y` log line surfaces every actual narrow.
+  `cmd/alf-daemon/skillsRuntime.DeclaresLookup(name)` walks
+  `s.verified` linearly (the list is small — 5 shipped + a handful
+  of operator skills); `Replace`'s slice swap is reflected
+  immediately by future calls — no cache to invalidate. Boot wires
+  `commEngine.SetSkillDeclaresLookup(skillsRt.DeclaresLookup)` right
+  after `SetEngine`. 17 new tests across two packages: 12 in
+  `internal/skills/narrow_test.go` covering the load-bearing
+  intersection-narrowing invariant + 9 edge cases (nil lookup, empty
+  active skills, empty tier tools, tier order preservation, union
+  across multiple skills, YAML-only mix passthrough, declares
+  outside tier ignored — declares cannot extend the tier ceiling,
+  zero overlap → empty, mixed YAML + manifest skills); 5 in
+  `cmd/alf-daemon/skills_loader_test.go` covering nil receiver,
+  empty verified, hit-by-name, malformed-entry skipping,
+  verified-slice mutation visibility. **Still deferred**: legacy
+  `MirrorInto + skillCapability` deletion (independent demolition
+  PR once every shipped + user skill ships a manifest.toml).
+
 - **#395 Stage 2 chunk 3 — `alf pending` + `alf ratify` + persistent
   `pending.DirStore`**. Stage 1 shipped an in-memory `pending.Store`
   contract; the production daemon and CLI now have an on-disk

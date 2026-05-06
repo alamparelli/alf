@@ -61,6 +61,27 @@ the next `alf restart` (hot-reload via SIGHUP is a planned follow-up).
 Full command surface and §6 admin-boundary rules in
 [§7.6](ARCHITECTURE-SECURITY.md#76-admin-cli-surface).
 
+## User-endorsed key (#395 Stage 2 chunk 2)
+
+The §7.3 Tier-3 user-endorsed signing key is persisted at
+`<dataDir>/keys/user-endorsed.json` (mode 0o600, parent 0o700) and
+encrypted at rest with ChaCha20-Poly1305 under a 32-byte
+argon2id-derived key (t=3, m=64MiB, p=4). Format details in
+[§7.3](ARCHITECTURE-SECURITY.md#tier-3---user-endorsed-key-alf-keygen)
+and [`internal/admin/userkey/userkey.go`](../internal/admin/userkey/userkey.go).
+
+| Path | Owner | Purpose |
+|---|---|---|
+| `<dataDir>/keys/user-endorsed.json` | operator (via `alf keygen`) | passphrase-encrypted Ed25519 keypair (Tier 3). Decrypted only inside `userkey.Store.Sign` / `WithPrivateKey` callbacks; zeroed on return. |
+| `<dataDir>/keys/daemon.json` | daemon (auto-bootstrap) | local daemon keypair (Tier 2). Listed here for layout completeness; not part of chunk 2. |
+
+The `alf keygen` and `alf sign` commands mutate this file (and
+bundle directories) directly — TTY-only, non-TTY stdin refused.
+Lost passphrase = re-keygen with `--force`; bundles signed by the
+old key will fail verification afterwards. Distribute the public
+half across machines via `alf keygen --export-pub <path>` followed
+by `alf trust add <path>` on each peer.
+
 ## Revocation (#396 Stage 2)
 
 | Variable | Default | Purpose |

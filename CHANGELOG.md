@@ -19,6 +19,66 @@ the milestone ticket map.
 
 ### Added
 
+- **#395 Stage 2 chunk 2 — `alf keygen` + `alf sign` (Tier-3
+  user-endorsed signing)**. Tier-2 daemon key auto-signs only what
+  the §7.3 ceiling allows (no cross-flow events; SEC-004 enforces
+  this). Anything that widens authority beyond that ceiling now has
+  a TTY-only CLI path: the operator mints a user-endorsed key with
+  `alf keygen`, then signs the bundle with `alf sign`. New package
+  `internal/admin/userkey/` persists the key under
+  `<dataDir>/keys/user-endorsed.json` (mode 0o600, parent 0o700,
+  atomic tmp+rename) encrypted with ChaCha20-Poly1305 under a
+  32-byte argon2id-derived key (t=3, m=64MiB, p=4); salt + nonce
+  are 32 / 12 random bytes per seal. AEAD AAD binds schema version,
+  KDF id, KeyID and the public key — any field swap between records
+  surfaces as `ErrPassphrase`, indistinguishable from a typo from an
+  offline attacker's perspective.
+  - `alf keygen [--export-pub <path>] [--comment "..."] [--force]`
+    — refuses non-TTY stdin, prompts twice for a passphrase
+    (≥12 bytes), persists the encrypted record, prints fingerprint +
+    storage path. Re-running without `--force` on an existing record
+    fails loudly; `--force` requires explicit "yes" confirm and warns
+    that bundles signed with the old key will fail verification.
+    `--export-pub` writes a minisign-format `.pub` for distribution
+    via `alf trust add` on other machines.
+  - `alf sign <bundle-dir> [--bundle <path>] [--at <RFC3339>]`
+    — refuses non-TTY stdin, reads `manifest.toml`, validates the
+    schema (NO Tier-2 ceiling check — Tier 3 IS the path that may
+    widen authority beyond the daemon key's ceiling), canonicalises,
+    prompts for the passphrase, signs, writes `manifest.sig`
+    atomically. Bundle-artefact detection follows manifest.kind:
+    `wasm-tool`/`wasm-app` → single `*.wasm` in the bundle dir;
+    `marketplace-app` → `bundle.zip`; `skill`/`provider` → no
+    artefact (BundleHash empty in trusted comment, accepted by
+    `envelope.Verify`). `--bundle` overrides detection;
+    `--at <RFC3339>` overrides signed-at.
+  Wiring: new `cmd/alf/admin/env.go` carries a shared `Env` (the
+  legacy `TrustEnv` is now a type alias). `cmd/alf/main.go` adds a
+  single `runAdmin(handler, args)` factory that builds the
+  production env once (real `os.Std*`, `golang.org/x/term`-backed
+  terminal check + no-echo passphrase reader, real `time.Now`,
+  install-layout-resolved paths) and dispatches across `trust`,
+  `keygen`, `sign`. New dependency `golang.org/x/term` v0.42.0 (the
+  canonical no-echo passphrase primitive). New userkey API
+  `WithPrivateKey(pass, fn)` zeroes the plaintext private key on
+  return; the CLI uses it for the raw Ed25519 global-comment sig
+  that minisign expects (BLAKE2b-prehashed `Sign` is the wrong
+  primitive there). Archtest fix in `topLevelConsumer`: was silently
+  remapping `cmd/alf/admin` → `internal/cmd` and missing the
+  allowlist; now strips `internal/`, `cmd/`, or `pkg/` correctly.
+  11 new tests in `cmd/alf/admin/keysign_test.go` (round-trip with
+  and without WASM artefact, non-TTY refusal, no-key path,
+  passphrase mismatch, short passphrase, ambiguous-bundle, missing
+  manifest, force-overwrite, export-pub) + 1 new userkey API method.
+  Round-trip verification uses `envelope.ParseSignatureFile` +
+  `Canonicalize` + `VerifySignature` + `VerifyGlobalComment` directly
+  — same primitives `envelope.Verify` chains internally; the
+  high-level call site stays reserved for runtime per #388
+  deliverable 2 (`TestOneVerifyCallSite`). **Stage 2 chunks 3–4
+  still pending**: persistent `pending.Queue` + `alf pending` +
+  `alf ratify` + CC `/admin/ratify/*` route in a separate trust
+  domain; vault user-scope partition + `SecretValue` redaction.
+
 - **#395 Stage 2 chunk 1 — operator-managed trust store + `alf trust`
   CLI**. The daemon's WASM trust store is now `*envelope.DirTrustStore`
   bound to `<dataDir>/trust/` instead of an in-memory store seeded only

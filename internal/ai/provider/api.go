@@ -472,10 +472,10 @@ func (p *APIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	}
 
 	log.Printf("api[%s]: invoke (model=%s, prompt=%d chars)", p.name, model, len(prompt))
-	logLLMCtx(ctx, "invoke", map[string]any{
+	logLLMCtx(ctx, "invoke", mergeFields(map[string]any{
 		"provider": "api", "backend": p.name, "model": model,
 		"prompt_len": len(prompt), "prompt": trunc(prompt, 2000),
-	})
+	}, summarizeSystemPrompts(params.SystemPrompts)))
 
 	messages := p.BuildMessages(prompt, params)
 

@@ -97,7 +97,10 @@ func (c *CLIClassifier) startLocked() error {
 		args = append(args, "--mcp-config", c.cfg.EmptyMCPConfig, "--strict-mcp-config")
 	}
 
-	cmd := exec.Command("claude", args...)
+	// 0.8.0-beta soak fix — symmetric with cli.go: setpriv-wrap to
+	// drop ambient/inheritable caps. See caps_linux.go.
+	wrapName, wrapArgs := capDropWrap("claude", args)
+	cmd := exec.Command(wrapName, wrapArgs...)
 	cmd.Dir = c.cfg.DataDir
 	spa := &syscall.SysProcAttr{Setpgid: true}
 	if c.cfg.Credential != nil {

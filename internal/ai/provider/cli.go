@@ -148,7 +148,13 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "claude", args...)
+	// 0.8.0-beta soak fix — wrap the spawn with setpriv to drop
+	// ambient + inheritable caps at exec time. See caps_linux.go
+	// for the rationale (Go stdlib's AmbientCaps doesn't support a
+	// pure clear-without-raise, so we use the runtime tool). On
+	// macOS dev hosts capDropWrap is a no-op so tests still compile.
+	wrapName, wrapArgs := capDropWrap("claude", args)
+	cmd := exec.CommandContext(cmdCtx, wrapName, wrapArgs...)
 	cmd.Dir = dataDir
 	spa := &syscall.SysProcAttr{Setpgid: true}
 	if p.Credential != nil {
@@ -171,14 +177,15 @@ func (p *CLIProvider) Invoke(ctx context.Context, prompt string, params Params, 
 
 	log.Printf("provider: invoke (model=%s, resume=%q, write=%v, turns=%d, prompt=%d chars)",
 		model, params.ResumeID, params.WriteCapable, params.MaxTurns, len(prompt))
-	logLLMCtx(ctx, "invoke", map[string]any{
+	logLLMCtx(ctx, "invoke", mergeFields(map[string]any{
 		"provider": "cli", "model": model, "resume": params.ResumeID,
 		"write": params.WriteCapable, "turns": params.MaxTurns,
 		"prompt_len": len(prompt), "prompt": trunc(prompt, 2000),
-	})
+	}, summarizeSystemPrompts(params.SystemPrompts)))
 
 	// Preflight: verify claude binary is reachable with this env.
-	preCmd := exec.CommandContext(cmdCtx, "claude", "--version")
+	preName, preArgs := capDropWrap("claude", []string{"--version"})
+	preCmd := exec.CommandContext(cmdCtx, preName, preArgs...)
 	preCmd.Dir = dataDir
 	preCmd.Env = cmd.Env
 	if p.Credential != nil {

@@ -2,9 +2,12 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,4 +98,50 @@ func trunc(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// kernelMarker is a stable substring of the §3.2 kernel prompt
+// (internal/runtime/llm/kernel_prompt.txt). Used by summarizeSystemPrompts
+// to flag whether the kernel was prepended for a given Invoke.
+const kernelMarker = "ALF KERNEL INSTRUCTIONS"
+
+// summarizeSystemPrompts returns a privacy-respecting audit summary of
+// params.SystemPrompts for the LLM log. Plaintext system prompts can
+// carry skill bodies, tier instructions, and conversation context — we
+// log shape + identity (count, total length, kernel-present flag, sha256
+// prefix) without dumping the bytes themselves.
+//
+// The kernel_present flag is the soak-window audit signal: every chat
+// invocation must show kernel_present=true; absence is a regression of
+// the §3.2 wiring (see TestKernelPromptIsImported and the §12 gate).
+//
+// nonce_substituted reports whether any literal "{NONCE}" placeholder
+// remains in the joined system prompts — should always be false when
+// KernelPromptInjector is wrapping the registry. Presence indicates a
+// dispatch path that bypassed the injector (regression of the SEC-002
+// per-turn nonce wiring).
+func summarizeSystemPrompts(prompts []string) map[string]any {
+	count := len(prompts)
+	if count == 0 {
+		return map[string]any{"system_count": 0, "system_total_len": 0, "system_kernel_present": false, "system_nonce_unsubstituted": false}
+	}
+	joined := strings.Join(prompts, "\n\n")
+	sum := sha256.Sum256([]byte(joined))
+	return map[string]any{
+		"system_count":               count,
+		"system_total_len":           len(joined),
+		"system_kernel_present":      strings.Contains(joined, kernelMarker),
+		"system_nonce_unsubstituted": strings.Contains(joined, "{NONCE}"),
+		"system_sha256":              hex.EncodeToString(sum[:])[:16],
+	}
+}
+
+// mergeFields copies extra into base, overwriting on key collision.
+// Used to fold summarizeSystemPrompts output into an invoke log entry
+// without inflating call sites with verbose map literal joins.
+func mergeFields(base, extra map[string]any) map[string]any {
+	for k, v := range extra {
+		base[k] = v
+	}
+	return base
 }

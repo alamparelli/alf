@@ -104,7 +104,10 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "codex", args...)
+	// 0.8.0-beta soak fix — symmetric with cli.go: wrap with setpriv
+	// to drop ambient/inheritable caps at exec time. See caps_linux.go.
+	wrapName, wrapArgs := capDropWrap("codex", args)
+	cmd := exec.CommandContext(cmdCtx, wrapName, wrapArgs...)
 	cmd.Dir = dataDir
 	spa := &syscall.SysProcAttr{Setpgid: true}
 	if p.Credential != nil {
@@ -124,10 +127,10 @@ func (p *CodexProvider) Invoke(ctx context.Context, prompt string, params Params
 	}
 
 	log.Printf("codex: invoke (model=%s, prompt=%d chars)", model, len(fullPrompt))
-	logLLMCtx(ctx, "invoke", map[string]any{
+	logLLMCtx(ctx, "invoke", mergeFields(map[string]any{
 		"provider": "codex", "model": model,
 		"prompt_len": len(fullPrompt), "prompt": trunc(fullPrompt, 2000),
-	})
+	}, summarizeSystemPrompts(params.SystemPrompts)))
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

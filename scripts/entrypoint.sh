@@ -87,6 +87,28 @@ find /opt/alf/vault-data -name '*.sock' -type s -delete 2>/dev/null || true
 chown -R alf:alf /home/alf               # subprocess HOME
 chown -R alf:alf /home/alf/data          # workspace (both users via group)
 chmod -R g+ws /home/alf/data
+# Daemon-private signing material (#395 §7.3): the broad g+ws above
+# flips daemon.json to mode 0620, which wasm-loader's enforcePerms
+# correctly rejects (group-write on a Tier-2 signing key is a §7.3
+# trust violation). Tighten <dataDir>/keys/ back to owner-only AFTER
+# the recursive g+ws so the LLM subprocess (alf, gid alf) cannot
+# read or write the daemon's auto-bootstrap key. Keeps user-endorsed
+# keys (Tier 3, written by alf admin keygen) on the same posture.
+if [ -d /home/alf/data/keys ]; then
+    chown -R alfd:alfd /home/alf/data/keys
+    chmod 700 /home/alf/data/keys
+    find /home/alf/data/keys -type f -exec chmod 600 {} +
+fi
+# Same for the admin pending queue (#395 chunk 3 DirStore). Items
+# carry the LLM's ratification request payload; daemon-only by §6
+# admin boundary. Subprocess (alf, gid alf) must not be able to
+# enumerate or read these.
+if [ -d /home/alf/data/admin ]; then
+    chown -R alfd:alfd /home/alf/data/admin
+    chmod 700 /home/alf/data/admin
+    find /home/alf/data/admin -type d -exec chmod 700 {} +
+    find /home/alf/data/admin -type f -exec chmod 600 {} +
+fi
 chown -R alfd:alf /opt/alf/config.d      # daemon owns config, subprocess reads via group
 chmod 750 /opt/alf/config.d
 find /opt/alf/config.d -type d -exec chmod 750 {} +   # subdirs also 750 (no LLM write)
@@ -197,8 +219,22 @@ fi
 # Keep CAP_SETUID+CAP_SETGID so the daemon can spawn subprocesses as alf (uid 1000).
 # --init-groups loads supplementary groups from /etc/group (alfd is also in group alf).
 # GOMEMLIMIT caps Go heap and makes GC aggressive near the limit.
+#
+# 0.8.0-beta soak finding: dropped CAP_SYS_ADMIN, CAP_SYS_CHROOT, CAP_CHOWN
+# from the ambient/inheritable sets. These were required by the legacy
+# sandbox (chroot + setpriv + bwrap; see internal/sandbox/exec/exec.go
+# pre-#406) to set up per-tool jails. After #406 razed that layer
+# (chroot escape risk, CAP_SYS_ADMIN escalation, apparmor=unconfined),
+# nothing in the 0.8.0 daemon path uses these caps. Carrying them in
+# the ambient set turned them into a vestigial DAC-bypass surface for
+# the LLM subprocess (setfsuid via CAP_SETUID was already a concern;
+# CAP_SYS_ADMIN added more on Linux). Keeping CAP_SETUID + CAP_SETGID
+# only — the daemon still needs them to spawn the LLM subprocess as
+# user alf. A follow-up post-beta will drop those too via per-spawn
+# ambient-caps clearing in cli.go / codex.go (defence in depth so the
+# LLM subprocess itself runs with zero caps).
 export GOMEMLIMIT=512MiB
 exec setpriv --reuid=1001 --regid=1001 --init-groups \
-    --inh-caps=-all,+setuid,+setgid,+sys_admin,+sys_chroot,+chown \
-    --ambient-caps=+setuid,+setgid,+sys_admin,+sys_chroot,+chown \
+    --inh-caps=-all,+setuid,+setgid \
+    --ambient-caps=+setuid,+setgid \
     /opt/alf/alf-daemon "$@"

@@ -19,6 +19,39 @@ the milestone ticket map.
 
 ### Added
 
+- **3-layer sandbox E2E harness — beta soak gates for #399 + #400**.
+  New `internal/runtime/sandbox_3layer_test.go` carries three
+  integration tests run via `go test -run TestSandbox_`. Each one
+  is the "the layered sandbox holds" claim executed against the
+  production forge / injector path — not a unit test of one
+  helper. Gates the `release/0.8.0` beta soak; a regression in any
+  of the wiring touched by #391 / #399 / #400 / #386 / #389 surfaces
+  here.
+  - `TestSandbox_L33_EventCrossFlow_PrivateByDefault` — 4-cap
+    integration through `Instantiator` + `events.Bus` + cross-flow
+    registry. Cap-A exports `chat.log`; cap-B subscribes (gets
+    EventSub); cap-C declared nothing (no EventSubs); cap-D
+    subscribes to an unexported topic (forge skips silently).
+    Round-trip publish: cap-B receives, `bus.SubscriberCount`
+    confirms cap-B is the sole receiver. Pins the §3.3 acceptance
+    criterion lifted verbatim from the #399 issue body.
+  - `TestSandbox_L33_BusRefusesUndeclaredSubscriber` — second-line
+    invariant at the bus layer (defence in depth behind the
+    forge): a Subscribe on a (publisher, topic) the publisher
+    never exported gets no events when the publisher publishes on
+    a different topic.
+  - `TestSandbox_L32_KernelPromptHolds_AgainstFetchedContent` —
+    drives `WrapFetchedContent` with hostile content (literal
+    `</fetched_content>` bytes attempting marker breakout) through
+    `KernelPromptInjector` → `capturingProvider`. Asserts kernel
+    prompt at position 0, opening + closing tag both nonce-bound
+    (SEC-002), attacker's bare close bytes appear INSIDE the
+    marker as content, kernel prompt mentions each marker tag
+    name so the agent has an explicit rule to demote inner
+    contents. Pins the #400 acceptance criterion's structural
+    premise; the LLM-behavioural side ("model actually refuses")
+    is a soak-window observability item rather than a unit gate.
+
 - **#389 Stage 2 — active-skill boundary narrows LLM tool surface**.
   Stage 1 shipped the structural core (schema, forge, loader). Stage 2
   wires the orchestrator path so the §3.1 promise actually holds at

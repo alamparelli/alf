@@ -5,6 +5,8 @@ import (
 	"os"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/alamparelli/alf/cmd/alf/admin"
 	"github.com/alamparelli/alf/internal/cli"
 )
@@ -63,7 +65,11 @@ func main() {
 	case "compose":
 		cli.RunCompose()
 	case "trust":
-		runTrust(os.Args[2:])
+		runAdmin(admin.Trust, os.Args[2:])
+	case "keygen":
+		runAdmin(admin.Keygen, os.Args[2:])
+	case "sign":
+		runAdmin(admin.Sign, os.Args[2:])
 	case "uninstall":
 		cli.RunUninstall()
 	case "version":
@@ -78,34 +84,49 @@ func main() {
 	}
 }
 
-// runTrust resolves the production TrustEnv (real os.Std*, real
-// terminal check, real time.Now, real install layout) and dispatches
-// to admin.Trust. Errors exit non-zero so shell pipelines (`alf
-// trust list && ...`) can chain reliably.
-func runTrust(args []string) {
-	env := admin.TrustEnv{
-		TrustDir:   admin.DefaultTrustDir(),
-		Stdin:      os.Stdin,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
-		IsTerminal: stdinIsTerminal,
-		Now:        time.Now,
+// runAdmin resolves the production admin.Env (real os.Std*, real
+// terminal check, real time.Now, real install layout, x/term-backed
+// passphrase reader) and dispatches to handler. Errors exit non-zero
+// so shell pipelines (`alf trust list && ...`) chain reliably.
+//
+// Single env constructor for trust + keygen + sign + (later) pending
+// + ratify keeps the production wiring in one place. A new admin
+// handler only needs a one-line case in main.
+func runAdmin(handler func(admin.Env, []string) error, args []string) {
+	env := admin.Env{
+		TrustDir:     admin.DefaultTrustDir(),
+		UserKeyPath:  admin.DefaultUserKeyPath(),
+		Stdin:        os.Stdin,
+		Stdout:       os.Stdout,
+		Stderr:       os.Stderr,
+		IsTerminal:   stdinIsTerminal,
+		Now:          time.Now,
+		ReadPassword: readPasswordFromTTY,
 	}
-	if err := admin.Trust(env, args); err != nil {
+	if err := handler(env, args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-// stdinIsTerminal reports whether os.Stdin is a TTY. The check is a
-// fstat on fd 0; we avoid pulling in golang.org/x/term for the one
-// call. Used to gate the mutating trust subcommands per #395 §6.
+// stdinIsTerminal reports whether os.Stdin is a TTY. Used to gate
+// the mutating admin subcommands per #395 §6.
 func stdinIsTerminal() bool {
-	fi, err := os.Stdin.Stat()
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// readPasswordFromTTY prints prompt to stdout and reads a passphrase
+// from stdin without echo. Falls back to an explicit error if stdin
+// is not a real terminal — admin.Env.IsTerminal already gates the
+// command before we get here, so this is defence in depth.
+func readPasswordFromTTY(prompt string) ([]byte, error) {
+	fmt.Fprint(os.Stdout, prompt)
+	pw, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stdout) // newline after silent read
 	if err != nil {
-		return false
+		return nil, err
 	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+	return pw, nil
 }
 
 func printUsage() {
@@ -124,6 +145,8 @@ func printUsage() {
 	fmt.Println("  magic-link  Generate a Control Center login link")
 	fmt.Println("  secret    Manage secrets (list/set/remove)")
 	fmt.Println("  trust     Manage trusted signing keys (list/add/remove/revoke)")
+	fmt.Println("  keygen    Mint the user-endorsed signing key (passphrase-protected)")
+	fmt.Println("  sign      Sign a bundle with the user-endorsed key")
 	fmt.Println("  uninstall Remove ALF completely")
 	fmt.Println("  version   Print CLI version")
 }

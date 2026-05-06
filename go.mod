@@ -19,6 +19,7 @@ require (
 	github.com/yalue/onnxruntime_go v1.26.0
 	golang.org/x/crypto v0.49.0
 	golang.org/x/image v0.38.0
+	golang.org/x/term v0.42.0
 	golang.org/x/text v0.35.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	nhooyr.io/websocket v1.8.17
@@ -32,7 +33,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
 )
 
 replace github.com/alessandrolamparelli/vault-proxy => ./internal/controlcenter/frontend/third_party/vault-proxy

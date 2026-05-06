@@ -232,36 +232,77 @@ func (s *Store) LoadPublic() (envelope.PublicKey, error) {
 }
 
 // Sign decrypts the private key with passphrase, signs canonical via
-// envelope.Sign, and returns the 74-byte minisign signature blob plus
-// the signer's KeyID. The plaintext private key lives only on this
-// stack frame and is zeroed in defer before the function returns.
+// envelope.Sign (BLAKE2b-512 pre-hash + Ed25519), and returns the
+// 74-byte minisign signature blob plus the signer's KeyID. The
+// plaintext private key lives only on the stack frame opened by
+// WithPrivateKey and is zeroed before this function returns.
 //
 // A wrong passphrase, a corrupted file with the AEAD tag mismatch,
 // or a tampered AAD field all surface as ErrPassphrase — by design,
 // to avoid revealing whether the operator typed wrong or whether
 // the file was modified. Surface-level corruption (bad base64,
 // truncated record) returns ErrCorrupt before any KDF work.
+//
+// For callers that need lower-level access to the Ed25519 primitive
+// (e.g. minisign-format global-comment signature, which is raw
+// Ed25519 over rawSig||trustedComment without the pre-hash), use
+// WithPrivateKey directly — it hands a typed PrivateKey to a
+// callback and zeroes the bytes regardless of outcome.
 func (s *Store) Sign(passphrase []byte, canonical []byte) ([]byte, envelope.KeyID, error) {
-	rec, err := readRecord(s.Path)
+	var (
+		out   []byte
+		keyID envelope.KeyID
+	)
+	err := s.WithPrivateKey(passphrase, func(priv envelope.PrivateKey) error {
+		sig, err := envelope.Sign(priv, canonical)
+		if err != nil {
+			return fmt.Errorf("userkey: sign: %w", err)
+		}
+		out = sig
+		keyID = priv.ID
+		return nil
+	})
 	if err != nil {
 		return nil, envelope.KeyID{}, err
 	}
+	return out, keyID, nil
+}
 
+// WithPrivateKey decrypts the stored key, hands it to fn, and zeroes
+// the plaintext bytes immediately after fn returns regardless of
+// outcome. Used by callers that need lower-level access to the
+// Ed25519 primitive than Sign (e.g. minisign-format global-comment
+// signatures that are raw Ed25519 without a BLAKE2b pre-hash, or
+// future signature schemes added to the envelope package).
+//
+// Contract: fn must NOT keep references to priv.Key beyond its call
+// frame. The slice is zeroed before WithPrivateKey returns. Storing
+// the slice elsewhere creates a dangling reference whose contents
+// flip from valid key material to zeroes between callbacks.
+//
+// Errors from readRecord / decode / AEAD-open are propagated; an
+// fn-returned error is wrapped only if non-nil so the caller can
+// errors.Is-check it.
+func (s *Store) WithPrivateKey(passphrase []byte, fn func(priv envelope.PrivateKey) error) error {
+	rec, err := readRecord(s.Path)
+	if err != nil {
+		return err
+	}
 	pub, keyID, err := decodeIdentity(rec)
 	if err != nil {
-		return nil, envelope.KeyID{}, err
+		return err
 	}
 	salt, err := base64.StdEncoding.DecodeString(rec.SaltB64)
 	if err != nil || len(salt) != saltLen {
-		return nil, envelope.KeyID{}, fmt.Errorf("%w: salt", ErrCorrupt)
+		return fmt.Errorf("%w: salt", ErrCorrupt)
 	}
 	nonce, err := base64.StdEncoding.DecodeString(rec.NonceB64)
 	if err != nil || len(nonce) != chacha20poly1305.NonceSize {
-		return nil, envelope.KeyID{}, fmt.Errorf("%w: nonce", ErrCorrupt)
+		return fmt.Errorf("%w: nonce", ErrCorrupt)
 	}
 	ciphertext, err := base64.StdEncoding.DecodeString(rec.CiphertextB64)
 	if err != nil {
-		return nil, envelope.KeyID{}, fmt.Errorf("%w: ciphertext", ErrCorrupt)
+		return fmt.Errorf("%w: ciphertext", ErrCorrupt)
 	}
 
 	derivedKey := argon2.IDKey(passphrase, salt, rec.KDFTime, rec.KDFMemory, rec.KDFParallelism, derivedKeyLen)
@@ -269,24 +310,20 @@ func (s *Store) Sign(passphrase []byte, canonical []byte) ([]byte, envelope.KeyI
 
 	aead, err := chacha20poly1305.New(derivedKey)
 	if err != nil {
-		return nil, envelope.KeyID{}, fmt.Errorf("userkey: aead init: %w", err)
+		return fmt.Errorf("userkey: aead init: %w", err)
 	}
 	aad := buildAAD(rec.Version, kdfArgon2idID, keyID, pub.Key)
 	plaintext, err := aead.Open(nil, nonce, ciphertext, aad)
 	if err != nil {
-		return nil, envelope.KeyID{}, ErrPassphrase
+		return ErrPassphrase
 	}
 	defer zero(plaintext)
 	if len(plaintext) != ed25519.PrivateKeySize {
-		return nil, envelope.KeyID{}, fmt.Errorf("%w: priv key length %d", ErrCorrupt, len(plaintext))
+		return fmt.Errorf("%w: priv key length %d", ErrCorrupt, len(plaintext))
 	}
 
 	priv := envelope.PrivateKey{ID: keyID, Key: ed25519.PrivateKey(plaintext)}
-	sig, err := envelope.Sign(priv, canonical)
-	if err != nil {
-		return nil, envelope.KeyID{}, fmt.Errorf("userkey: sign: %w", err)
-	}
-	return sig, keyID, nil
+	return fn(priv)
 }
 
 // Remove deletes the on-disk record. Used by `alf keygen --force`

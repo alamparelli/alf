@@ -11,38 +11,16 @@ import (
 	"time"
 
 	"github.com/alamparelli/alf/internal/capability/envelope"
-	"github.com/alamparelli/alf/internal/cli"
 )
 
-// TrustEnv holds the dependencies a trust subcommand needs. Tests
-// substitute every field; production wiring resolves them from the
-// CLI binary (Stdin/Stdout/Stderr from os, Now from time.Now,
-// IsTerminal from a unix isatty check, TrustDir from the install
-// layout). Keeping the struct narrow lets the tests run end-to-end
-// without ever touching real os.Std*.
-type TrustEnv struct {
-	TrustDir string
-
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-
-	// IsTerminal returns true when Stdin is a TTY. The mutating
-	// commands (add/remove/revoke) refuse with a typed error when it
-	// returns false — a non-TTY input is the prompt-injection
-	// signature this boundary exists to block. List does not call it.
-	IsTerminal func() bool
-
-	// Now is injected so tests can pin "default revoke timestamp" to a
-	// known instant. Production wires it to time.Now.
-	Now func() time.Time
-}
-
-// ErrNonInteractive is returned by mutating subcommands when stdin
-// is not a TTY. The CLI dispatcher exits non-zero with a message
-// pointing the operator at the only sanctioned override: rerun the
-// command from a real terminal.
-var ErrNonInteractive = errors.New("alf trust: refusing to run without a TTY")
+// ErrNonInteractive is returned by mutating admin subcommands when
+// stdin is not a TTY. The CLI dispatcher exits non-zero with a
+// message pointing the operator at the only sanctioned override:
+// rerun the command from a real terminal.
+//
+// Used by trust add/remove/revoke, keygen, and sign. List is the
+// only read-only command and does not call it.
+var ErrNonInteractive = errors.New("alf admin: refusing to run without a TTY")
 
 // Trust dispatches `alf trust <sub> ...` to the matching handler. A
 // missing or unknown subcommand prints usage and returns a non-nil
@@ -373,9 +351,3 @@ func extractUntrustedComment(raw []byte) string {
 	return ""
 }
 
-// DefaultTrustDir resolves the on-disk trust directory from the alf
-// install layout: <install>/data/trust/. Cmd/alf/main calls this to
-// build the production TrustEnv; tests pass a tmpdir directly.
-func DefaultTrustDir() string {
-	return filepath.Join(cli.AlfDir(), "data", "trust")
-}

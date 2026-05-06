@@ -22,7 +22,7 @@ import (
 // internal/admin/* . Adding to this list is a deliberate architectural
 // decision and should be reviewed like any other PR change.
 var allowedAdminConsumers = map[string]string{
-	"cmd/alf":           "alf trust / pending / ratify CLI commands run TTY-direct",
+	"cmd/alf":           "alf trust / keygen / sign / pending / ratify CLI commands run TTY-direct",
 	"cmd/alf-daemon":    "daemon-side append: Runtime enqueues a pending item when a cap reaches a ratification-required point",
 	"internal/cli":      "shared CLI helpers used by cmd/alf admin commands",
 	"internal/admin":    "package-internal cross-references between admin sub-packages",

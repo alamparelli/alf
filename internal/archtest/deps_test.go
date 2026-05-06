@@ -204,13 +204,17 @@ func TestConsumerDependencyRules(t *testing.T) {
 }
 
 // topLevelConsumer maps a nested consumer path to its top-level package. For
-// example "internal/marketplace/sub" → "internal/marketplace". Exceptions are
-// keyed on top-level consumers so internal re-structuring does not silently
-// void an exception.
+// example "internal/marketplace/sub" → "internal/marketplace" and
+// "cmd/alf/admin" → "cmd/alf". Exceptions are keyed on top-level consumers so
+// internal re-structuring does not silently void an exception.
 func topLevelConsumer(rel string) string {
-	rest := strings.TrimPrefix(rel, "internal/")
-	if i := strings.Index(rest, "/"); i >= 0 {
-		return "internal/" + rest[:i]
+	for _, prefix := range []string{"internal/", "cmd/", "pkg/"} {
+		if rest, ok := strings.CutPrefix(rel, prefix); ok {
+			if i := strings.Index(rest, "/"); i >= 0 {
+				return prefix + rest[:i]
+			}
+			return rel
+		}
 	}
 	return rel
 }

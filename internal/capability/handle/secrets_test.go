@@ -80,8 +80,8 @@ func TestSecretsHandle_GetInScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if val != "ghp_xxx" {
-		t.Errorf("got %q, want ghp_xxx", val)
+	if got := val.Reveal(); got != "ghp_xxx" {
+		t.Errorf("got %q, want ghp_xxx", got)
 	}
 }
 
@@ -107,11 +107,11 @@ func TestSecretsHandle_WildcardMatch(t *testing.T) {
 	inst := NewInstance(context.Background(), "cap", Grants{Secrets: h})
 	defer inst.Close()
 
-	if v, err := inst.Secrets.Get(context.Background(), "github_token"); err != nil || v != "ghp_xxx" {
-		t.Errorf("github_token: v=%q err=%v", v, err)
+	if v, err := inst.Secrets.Get(context.Background(), "github_token"); err != nil || v.Reveal() != "ghp_xxx" {
+		t.Errorf("github_token: v=%q err=%v", v.Reveal(), err)
 	}
-	if v, err := inst.Secrets.Get(context.Background(), "github_user"); err != nil || v != "alice" {
-		t.Errorf("github_user: v=%q err=%v", v, err)
+	if v, err := inst.Secrets.Get(context.Background(), "github_user"); err != nil || v.Reveal() != "alice" {
+		t.Errorf("github_user: v=%q err=%v", v.Reveal(), err)
 	}
 	if _, err := inst.Secrets.Get(context.Background(), "gitlab_token"); !errors.Is(err, ErrOutOfScope) {
 		t.Errorf("gitlab_token: want ErrOutOfScope, got %v", err)

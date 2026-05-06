@@ -72,32 +72,39 @@ func NewSecretsHandle(owner capability.ID, scope SecretsScope, reader SecretsRea
 // call; the underlying reader is not itself context-aware in today's
 // implementation, so a hung vault would block here. Future: surface ctx
 // into the reader interface.
-func (h *SecretsHandle) Get(ctx context.Context, name string) (string, error) {
+//
+// The returned SecretValue redacts on String / GoString / MarshalJSON /
+// MarshalBinary / MarshalText so an accidental %v / json.Marshal /
+// log line cannot surface the plaintext (#395 Stage 2 chunk 4). Use
+// SecretValue.ConsumeInto(w) for the trusted path (HTTP header
+// injection, HMAC seed) or SecretValue.Reveal() when grep-auditable
+// exposure is acceptable.
+func (h *SecretsHandle) Get(ctx context.Context, name string) (SecretValue, error) {
 	if h.revoked.Load() {
-		return "", ErrRevoked
+		return SecretValue{}, ErrRevoked
 	}
 	if !h.scope.Allows(name) {
-		return "", ErrOutOfScope
+		return SecretValue{}, ErrOutOfScope
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return SecretValue{}, err
 	}
 	if h.lifecycleCtx != nil {
 		if err := h.lifecycleCtx.Err(); err != nil {
-			return "", ErrRevoked
+			return SecretValue{}, ErrRevoked
 		}
 	}
 	if h.reader == nil {
-		return "", ErrSecretNotFound
+		return SecretValue{}, ErrSecretNotFound
 	}
 	val, err := h.reader.GetSecret(name)
 	if err != nil {
-		return "", err
+		return SecretValue{}, err
 	}
 	if val == "" {
-		return "", ErrSecretNotFound
+		return SecretValue{}, ErrSecretNotFound
 	}
-	return val, nil
+	return NewSecretValueFromString(val), nil
 }
 
 // Owner returns the capability ID this handle was forged for.

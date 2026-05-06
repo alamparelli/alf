@@ -19,6 +19,60 @@ the milestone ticket map.
 
 ### Added
 
+- **#395 Stage 2 chunk 4 — `SecretValue` redaction + vault
+  user-scope partition**. Closes the secrets-flow isolation gap
+  per ticket §3: even within capability-scope, secret values must
+  not leak into LLM context via the *composition* surface (a benign
+  `%v`, `json.Marshal` in a log line, memory-recall snapshot
+  persisting the plaintext). `SecretsHandle.Get(ctx, name)` now
+  returns a `handle.SecretValue` instead of a raw string. The
+  type:
+  - **Redacts via every standard formatter.** `String()` /
+    `GoString()` return `<redacted>` (covers `fmt.Sprintf %v / %s /
+    %q / %#v / %+v` — every formatter that routes through
+    `Stringer`/`GoStringer`). `MarshalJSON` returns `"<redacted>"`.
+    `MarshalText` returns `<redacted>`. `MarshalBinary` returns
+    `ErrSecretValueNotMarshalable` so gob / msgpack / any binary
+    serialiser fails LOUDLY rather than silently emitting bytes.
+  - **Provides two trusted-caller paths.** `Reveal() string` is
+    audit-greppable — every call site is meant to be visible to a
+    security review. `ConsumeInto(io.Writer)` writes the plaintext
+    and zeroes the internal buffer in place; subsequent calls are
+    no-ops returning `(0, nil)`. Use for HTTP header injection,
+    HMAC seeds, anywhere the secret's lifetime can be bounded to a
+    single write.
+  - **Holds bytes, not a string.** Internal buffer is `[]byte` so
+    `ConsumeInto` can scrub in place; strings are immutable in Go
+    and cannot be zeroed without an extra copy.
+  - Constructors: `NewSecretValue(b []byte)` borrows the caller's
+    buffer (so a vault reader scrub-on-error also clears the
+    SecretValue); `NewSecretValueFromString(s)` copies, allocates
+    a fresh slice.
+  Vault user-scope partition: structurally in place via
+  `internal/admin/userkey/` (already pinned by
+  `TestAdminPackageBoundary` to admin-only consumers).
+  `internal/sandbox/secrets/Manager` does not expose paths under
+  `<dataDir>/keys/` or `<dataDir>/admin/`, so no `secrets.Handle`
+  constructor can ever target user-scope material — the structural
+  partition the chunk-4 spec asked for is already enforced.
+  14 new tests in `internal/capability/handle/secret_value_test.go`:
+  StringRedacts, GoStringRedacts (`%#v` is the most common debug
+  leak surface), QuoteVerbAlsoRedacts (`%q` falls back to Stringer
+  for non-string types), MarshalJSONRedacts (decoded through
+  `json.Unmarshal` to verify semantic value, not the byte form),
+  StructMarshalingRedacts (the common case: SecretValue field in
+  a tool-output struct), MarshalBinaryRefuses, MarshalTextRedacts,
+  RevealReturnsPlaintext, RevealOnZeroValue,
+  ConsumeIntoWritesAndScrubs, ConsumeIntoNilReceiverNoOp,
+  ConsumeIntoTwiceIsIdempotent, FmtPrintEverywhereStaysRedacted
+  (sweep across every fmt verb), NewSecretValueBorrowsBuffer (the
+  vault scrub-on-error contract), NewSecretValueFromStringCopies.
+  **Stage 2 complete.** Reflection-based `Runtime.Invoke` output
+  sanitizer (chunk 4 ticket §3 third bullet) deferred to `#411`
+  — same dependency as `#398`'s output-sanitization piece;
+  redaction at the type level is the load-bearing piece, the
+  sanitizer is defence in depth.
+
 - **3-layer sandbox E2E harness — beta soak gates for #399 + #400**.
   New `internal/runtime/sandbox_3layer_test.go` carries three
   integration tests run via `go test -run TestSandbox_`. Each one

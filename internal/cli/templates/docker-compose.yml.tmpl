@@ -74,6 +74,22 @@ services:
     volumes:
       - ./secrets:/opt/alf/secrets-staging:ro
       - ./data:/home/alf/data
+      # Daemon-private signing material (#395 §7.3 Tier 2 daemon
+      # auto-bootstrap key + Tier 3 user-endorsed via `alf keygen`)
+      # and the admin pending queue (chunk 3 DirStore). NAMED VOLUMES
+      # on purpose: bind-mounts on Docker Desktop (macOS, Windows
+      # WSL2) traverse a fakeowner FUSE/9p layer that ignores inode
+      # uid/gid, letting the LLM subprocess (uid 1000) read alfd-owned
+      # 0o600 files. Named volumes stay inside the Linux VM with real
+      # ext4 DAC, so `cat /home/alf/data/keys/daemon.json` from the
+      # LLM subprocess returns EACCES on every host (Linux native,
+      # Docker Desktop macOS, Windows WSL2).
+      #
+      # Operators back up via `docker run --rm -v alf-go_alf-keys:/k
+      # alpine tar czf - -C /k . > keys-backup.tar.gz` (replace volume
+      # name with the project-prefixed actual name from `docker volume ls`).
+      - alf-keys:/home/alf/data/keys
+      - alf-admin:/home/alf/data/admin
       - ./config.d:/opt/alf/config.d
       - ./skills.d:/opt/alf/skills.d
       - ./cache/claude:/home/alf/.claude
@@ -83,7 +99,13 @@ services:
       - ./cache/npm:/home/alf/.npm
       - ./cache/cache:/home/alf/.cache
       - ./local:/opt/alf/user-packages
-      - ./vault-data:/opt/alf/vault-data
+      # Vault store + sidecar shared secrets (CC bearer, whisper,
+      # embed, telegram). All daemon-private. Named volume — same
+      # fakeowner reasoning. The vault.sock chmod-on-socket also works
+      # inside ext4 (fails on Docker Desktop bind-mount with "invalid
+      # argument" — the operator-visible boot warning post-fix won't
+      # appear because the path is in a real Linux FS).
+      - alf-vault:/opt/alf/vault-data
       - ./resolv.conf:/etc/resolv.conf:ro
 {{- range .Workspaces}}
       - {{.}}:/workspaces/{{base .}}
@@ -159,4 +181,15 @@ networks:
     ipam:
       config:
         - subnet: 10.99.1.0/24
+
+volumes:
+  # Named volumes for daemon-private storage. Stay inside the Docker
+  # VM (Linux ext4) so DAC enforces alfd:alfd 0o600 properly even on
+  # Docker Desktop hosts (macOS, Windows). The LLM subprocess running
+  # as uid 1000 cannot read these files; the fakeowner bypass that
+  # plagues bind-mounted host paths is bypassed by named volumes.
+  # See docs/ARCHITECTURE-SECURITY.md §7.3 + the vendored README.
+  alf-keys:
+  alf-vault:
+  alf-admin:
 

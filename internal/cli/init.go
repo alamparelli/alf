@@ -778,22 +778,23 @@ func generateFiles(dir, botToken, chatID string, compose ComposeData) {
 	// Telegram tokens are no longer stored as Docker secrets — configured via CC setup wizard.
 
 	// Generate Control Center auth token.
-	// Stored in vault-data (daemon-only, mode 700) so the LLM subprocess cannot read it.
-	// Also written to secrets/ for Docker Compose mount (entrypoint migrates to vault-data).
+	// Written to <install>/secrets/cc_auth_token on the host. The
+	// docker-compose template bind-mounts ./secrets:/opt/alf/secrets-staging
+	// (read-only); the entrypoint copies the staged token into vault-data
+	// at boot. vault-data itself is a NAMED VOLUME (alf-vault) so the
+	// LLM subprocess uid 1000 cannot read the runtime copy via
+	// Docker Desktop's bind-mount fakeowner FUSE — DAC enforces
+	// alfd:alfd 0o600 inside the Linux VM. No host-side write to
+	// vault-data is needed (would land in a path that's no longer
+	// mounted into the container, dead bytes).
 	ccToken, err := generateAuthToken()
 	if err != nil {
 		Fatal(fmt.Sprintf("Failed to generate auth token: %v", err))
 	}
-	vaultDataDir := filepath.Join(dir, "vault-data")
-	os.MkdirAll(vaultDataDir, 0o700)
-	if err := os.WriteFile(filepath.Join(vaultDataDir, ".cc_auth_token"), []byte(ccToken+"\n"), 0o600); err != nil {
-		Fatal(fmt.Sprintf("Failed to write auth token to vault-data: %v", err))
-	}
-	// Also write to secrets/ for backwards compat with Docker Compose mount.
 	if err := SetSecret(dir, "cc_auth_token", ccToken); err != nil {
 		Fatal(fmt.Sprintf("Failed to write secret: %v", err))
 	}
-	PrintCheck("vault-data/.cc_auth_token")
+	PrintCheck("secrets/cc_auth_token (entrypoint migrates to vault-data named volume on boot)")
 
 	// Auto-generate whisper shared secret if missing or empty.
 	// Auto-generate shared secrets for sidecar services.

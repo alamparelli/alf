@@ -56,7 +56,7 @@ if [ "$STOP" = true ]; then
 fi
 
 # All runtime data lives in dev-alf-local/ to keep the repo clean.
-mkdir -p "$LOCAL_DIR"/{secrets,data,config.d,skills.d,vault-data,cache/{claude,codex,local,npm,cache}}
+mkdir -p "$LOCAL_DIR"/{secrets,data,config.d,skills.d,cache/{claude,codex,local,npm,cache}}
 
 # Bootstrap secrets if missing.
 if [ ! -s "$LOCAL_DIR/secrets/cc_auth_token" ]; then
@@ -78,8 +78,14 @@ fi
 
 if [ "$FRESH" = true ]; then
   echo "==> Fresh: wiping runtime data..."
-  rm -rf "$LOCAL_DIR"/{config.d,data,vault-data,cache}
-  mkdir -p "$LOCAL_DIR"/{config.d,data,vault-data,cache/{claude,codex,local,npm,cache}}
+  # Bind-mounted dirs on host
+  rm -rf "$LOCAL_DIR"/{config.d,data,cache}
+  mkdir -p "$LOCAL_DIR"/{config.d,data,cache/{claude,codex,local,npm,cache}}
+  # Named volumes for daemon-private storage (keys, vault, admin queue):
+  # remove via docker so the fresh boot regenerates daemon key + bootstraps
+  # vault from secrets-staging. Volumes are project-prefixed (alf-dev_*)
+  # by docker compose; remove succeeds quietly on absent volumes.
+  docker volume rm alf-dev_alf-keys alf-dev_alf-vault alf-dev_alf-admin 2>/dev/null || true
 fi
 
 # Generate docker-compose.yml in LOCAL_DIR with relative paths.
@@ -117,6 +123,21 @@ services:
     volumes:
       - ./secrets:/opt/alf/secrets-staging:ro
       - ./data:/home/alf/data
+      # Daemon-private signing material (#395 §7.3 Tier 2 daemon key
+      # auto-bootstrapped on first boot + Tier 3 user-endorsed key
+      # written by `alf keygen`). NAMED VOLUME on purpose: bind-mounts
+      # on Docker Desktop / macOS traverse a fakeowner FUSE layer that
+      # ignores inode uid/gid, letting the LLM subprocess (uid 1000)
+      # read alfd-owned 0o600 files. Named volumes stay inside the
+      # Linux VM with real ext4 DAC, so 'cat /home/alf/data/keys/daemon.json'
+      # from the LLM subprocess returns EACCES like it does on Linux native.
+      # Operators can still inspect/back up via `docker run --rm
+      # -v alf-keys:/k alpine tar czf - -C /k . > keys-backup.tar.gz`.
+      - alf-keys:/home/alf/data/keys
+      # Admin pending queue (#395 chunk 3) — DirStore items carry the
+      # Item.Payload as JSON. Side-channel about what the LLM has been
+      # asked to ratify; not LLM-readable. Same fakeowner reasoning.
+      - alf-admin:/home/alf/data/admin
       - ./config.d:/opt/alf/config.d
       - ./skills.d:/opt/alf/skills.d
       - ./cache/claude:/home/alf/.claude
@@ -124,7 +145,11 @@ services:
       - ./cache/local:/home/alf/.local
       - ./cache/npm:/home/alf/.npm
       - ./cache/cache:/home/alf/.cache
-      - ./vault-data:/opt/alf/vault-data
+      # Vault store + bearer tokens + sidecar shared secrets (CC auth,
+      # whisper, embed, telegram). All daemon-private. Named volume —
+      # same fakeowner reasoning. The vault.sock chmod-on-socket also
+      # works inside a Linux ext4 FS (fails on Docker Desktop bind).
+      - alf-vault:/opt/alf/vault-data
     mem_limit: 2g
     cpus: "2.0"
     security_opt:
@@ -191,6 +216,15 @@ networks:
     ipam:
       config:
         - subnet: 10.99.1.0/24
+
+volumes:
+  # Named volumes for daemon-private storage. Stay inside the Docker
+  # VM (Linux ext4) so DAC enforces alfd:alfd 0o600 properly even on
+  # Docker Desktop hosts. See docs/ARCHITECTURE-SECURITY.md §7.3 for
+  # the trust-surface boundary these volumes implement.
+  alf-keys:
+  alf-vault:
+  alf-admin:
 COMPOSE
 
 # Build frontend unless skipped.

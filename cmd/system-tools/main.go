@@ -63,6 +63,8 @@ func main() {
 		handleSearch(args)
 	case "llm":
 		handleLLM(args)
+	case "wasm_build_tool":
+		handleWASMBuildTool(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown tool: %s\n", name)
 		os.Exit(1)
@@ -318,6 +320,102 @@ func handleSimpleGet(endpoint string) {
 	fmt.Println(result)
 }
 
+// handleWASMBuildTool dispatches to the daemon's POST /api/wasm/build
+// endpoint, which calls WASMBuildNativeTool internally.
+//
+// Two input modes for LLM ergonomics — both produce the same
+// {manifest_toml, sources} body:
+//
+//   - stdin JSON: `cat args.json | wasm_build_tool` — the LLM writes
+//     the JSON itself. Required body shape: {"manifest_toml": "...",
+//     "sources": {"path/to/file": "content"}}.
+//   - bundle dir: `wasm_build_tool --bundle-dir <path>` — reads
+//     <path>/manifest.toml and every .go file under <path> (recursive)
+//     into the sources map. The LLM authors files via write_file, then
+//     calls this with the directory.
+//
+// Either mode forwards the assembled JSON body to the daemon.
+func handleWASMBuildTool(args []string) {
+	params := parseFlags(args)
+	bundleDir := params["bundle-dir"]
+	if bundleDir == "" {
+		// stdin mode: read the full JSON body as-is.
+		body, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fatal(fmt.Errorf("wasm_build_tool: read stdin: %w", err))
+		}
+		if len(strings.TrimSpace(string(body))) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: wasm_build_tool --bundle-dir <path>")
+			fmt.Fprintln(os.Stderr, "   or: cat body.json | wasm_build_tool")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "Body shape: {\"manifest_toml\": \"...\", \"sources\": {\"path\": \"content\"}}")
+			os.Exit(1)
+		}
+		result, err := doPost("/api/wasm/build", body)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(result)
+		return
+	}
+
+	// bundle-dir mode: assemble the body from disk.
+	manifestPath := filepath.Join(bundleDir, "manifest.toml")
+	manifestBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		fatal(fmt.Errorf("wasm_build_tool: read %s: %w", manifestPath, err))
+	}
+	sources := map[string]string{}
+	walkErr := filepath.Walk(bundleDir, func(path string, info os.FileInfo, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		// Only collect Go source + go.mod / go.sum. Skip the manifest
+		// (carried as manifest_toml) and built artefacts (.wasm,
+		// .sig). This matches what builder.Build expects.
+		base := filepath.Base(path)
+		ext := filepath.Ext(base)
+		if base == "manifest.toml" || ext == ".wasm" || ext == ".sig" {
+			return nil
+		}
+		if ext != ".go" && base != "go.mod" && base != "go.sum" {
+			return nil
+		}
+		rel, err := filepath.Rel(bundleDir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		sources[rel] = string(data)
+		return nil
+	})
+	if walkErr != nil {
+		fatal(fmt.Errorf("wasm_build_tool: collect sources: %w", walkErr))
+	}
+	if len(sources) == 0 {
+		fatal(fmt.Errorf("wasm_build_tool: no Go sources found under %s", bundleDir))
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"manifest_toml": string(manifestBytes),
+		"sources":       sources,
+	})
+	if err != nil {
+		fatal(err)
+	}
+	result, err := doPost("/api/wasm/build", body)
+	if err != nil {
+		fatal(err)
+	}
+	fmt.Println(result)
+}
+
 // --- HTTP helpers ---
 
 // httpClient returns an HTTP client that connects via Unix socket (ALF_TOOLS_SOCK)
@@ -456,6 +554,7 @@ func printHelp(name string) {
 		"log":    "Access logs.\n  log list\n  log tail <name> [lines]",
 		"search": "Search workspace.\n  search <query> [--types apps,files,docs]",
 		"llm":    "Invoke an LLM tier.\n  llm <tier> <prompt> [--system <system_prompt>]\n  llm <tier> <prompt> --fire-and-forget --max-depth N --on-complete '<json>'\n\nExamples:\n  llm haiku \"summarize this\" --system \"Be concise\"\n  llm haiku \"extract TODOs\" --fire-and-forget --max-depth 2 --on-complete '{\"tier\":\"sonnet\",\"prompt\":\"generate tests for:\\n{result}\"}'",
+		"wasm_build_tool": "Compile a Go source tree into a WASM capability bundle and install it under skills.d/wasm/<id>/.\n\n  wasm_build_tool --bundle-dir <path>     # reads manifest.toml + every .go|go.mod|go.sum under <path>\n  cat body.json | wasm_build_tool          # body: {\"manifest_toml\": \"...\", \"sources\": {\"path\": \"content\"}}\n\nThe daemon validates the manifest (envelope schema, kind=wasm-tool|wasm-app),\ncompiles via runtime/wasm/builder, installs the bundle unsigned. The next daemon\nrestart auto-signs with the §7.3 Tier-2 daemon key (subject to the SEC-004 ceiling)\nand registers the adapter.",
 	}
 	if h, ok := helps[name]; ok {
 		fmt.Println(h)

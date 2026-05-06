@@ -1,0 +1,23 @@
+{
+  "name": "wasm_build_tool",
+  "description": "Compile a Go source tree into a WASM capability bundle and install it under skills.d/wasm/<id>/. The manifest_toml must be a valid 0.8.0 envelope manifest (see docs/MANIFEST-SCHEMA.md). The sources map keys are relative paths inside the module root (e.g., go.mod, main.go). The bundle is installed unsigned; the daemon auto-signs at next boot discovery.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "manifest_toml": {
+        "type": "string",
+        "description": "Raw TOML text of the envelope manifest (alf_envelope_version=1, kind=wasm-tool|wasm-app, id, version, name, description, optional [[fs.reads]] / [[fs.writes]] scopes). See docs/MANIFEST-SCHEMA.md §3."
+      },
+      "sources": {
+        "type": "object",
+        "description": "File map keyed by relative path inside the Go module root. Must include go.mod and at least one .go file. Larger trees with subpkg/ are supported via paths like 'subpkg/foo.go'.",
+        "additionalProperties": {
+          "type": "string"
+        }
+      }
+    },
+    "required": ["manifest_toml", "sources"],
+    "additionalProperties": false,
+    "x-stdin-json": true
+  }
+}

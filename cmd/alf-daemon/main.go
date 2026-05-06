@@ -778,6 +778,18 @@ func main() {
 		tooling.ReadFileNativeTool{DataDir: dataDir},
 		tooling.WriteFileNativeTool{DataDir: dataDir},
 		tooling.RemoveNativeTool{DataDir: dataDir},
+		// #386 step 8 — LLM-authored WASM capability path. Given a
+		// {manifest_toml, sources} pair, the daemon validates against
+		// the envelope schema, compiles via runtime/wasm/builder, and
+		// installs an unsigned bundle under <dataDir>/skills.d/wasm/<id>/.
+		// The next daemon boot picks the bundle up via setupWASMLoader,
+		// auto-signs with the §7.3 Tier-2 daemon key (subject to the
+		// SEC-004 ceiling), forges the handles, and registers the
+		// adapter. Until this wire-in landed during 0.8.0-beta soak the
+		// tool was implemented but not reachable from chat — operators
+		// had to hand-author bundles in skills.d/wasm/<id>/ to exercise
+		// the WASM path.
+		tooling.WASMBuildNativeTool{DataDir: dataDir},
 	}
 	toolErrorJournal := tooling.NewErrorJournal(dataDir)
 	avatarHandler := &cc.AvatarHandler{DataDir: dataDir}

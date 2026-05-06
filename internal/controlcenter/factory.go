@@ -238,6 +238,14 @@ func HandlerFactory(deps Deps) Handlers {
 		EventBroker: deps.EventBroker,
 	})
 
+	// #386 step 8 follow-up — POST /api/wasm/build is the cli/codex
+	// parallel of the WASMBuildNativeTool. The native tool is reachable
+	// in api-mode chat via Executor; CLI-mode subprocesses reach it
+	// through this endpoint via the system-tools wasm_build_tool
+	// dispatcher (proxied over /home/alf/data/context/tools.sock).
+	// Body: JSON {manifest_toml, sources}. See handler_wasm_build.go.
+	mux.Handle("/api/wasm/build", &WASMBuildHandler{DataDir: deps.DataDir})
+
 	// Permission checker: wraps marketplace manager with local manifest fallback.
 	// Marketplace-tracked apps use the permission system; local apps check manifest.json.
 	var permChecker marketplace.PermissionChecker

@@ -107,6 +107,22 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && rm -rf /var/lib/apt/lists/* \
     && node --version && npm --version
 
+# Go toolchain (#386 step 8). The wasm_build_tool / WASMBuildNativeTool path
+# compiles LLM-authored Go sources into WASM bundles by shelling out to
+# `go build -buildmode=c-shared GOOS=wasip1 GOARCH=wasm` (see
+# internal/runtime/wasm/builder/builder.go). Without `go` on PATH the
+# in-daemon authoring path returns ErrNoGoToolchain — operators have to
+# pre-build bundles outside the container, defeating the LLM-authoring
+# UX of 0.8.0. Pin to the same toolchain the builder stage uses so
+# `runtime` and `cgo` stay aligned.
+ARG GO_VERSION=1.26.2
+RUN GO_ARCH=$([ "${TARGETARCH}" = "arm64" ] && echo "arm64" || echo "amd64") \
+    && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" \
+       | tar xz -C /usr/local \
+    && ln -s /usr/local/go/bin/go /usr/local/bin/go \
+    && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt \
+    && go version
+
 # Install bundled global npm packages into /opt/alf/bundled-packages (image-only).
 # /opt/alf/user-packages is reserved for runtime updates installed by the `alf`
 # user via a volume mount in compose (see entrypoint Phase 1c). Putting the
@@ -164,6 +180,7 @@ RUN mkdir -p /opt/alf/tools.d \
     && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/log \
     && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/search \
     && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/llm \
+    && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/wasm_build_tool \
     && ln -s /opt/alf/bin/vault-cli /opt/alf/tools.d/vault \
     && ln -s /opt/alf/bin/vault-server /usr/local/bin/vault-server
 

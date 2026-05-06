@@ -125,6 +125,11 @@ func Keygen(env Env, args []string) error {
 // written atomically; an existing manifest.sig is replaced (re-signing
 // is the supported workflow).
 func Sign(env Env, args []string) error {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			return printSignUsage(env.Stdout)
+		}
+	}
 	if len(args) < 1 {
 		return fmt.Errorf("sign: missing bundle-dir argument")
 	}
@@ -149,8 +154,6 @@ func Sign(env Env, args []string) error {
 			}
 			signedAt = t
 			i++
-		case "-h", "--help":
-			return printSignUsage(env.Stdout)
 		default:
 			return fmt.Errorf("sign: unknown argument %q", args[i])
 		}

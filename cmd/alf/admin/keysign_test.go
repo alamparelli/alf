@@ -267,6 +267,28 @@ func TestSign_RefusesNonTTY(t *testing.T) {
 	}
 }
 
+// TestSign_HelpBypassesTTYAndArgs pins that `alf sign --help` and
+// `alf sign -h` print usage and exit 0 even when stdin is not a TTY
+// and no bundle-dir is supplied. Detected during 0.8.0-beta soak:
+// the previous implementation consumed `--help` as the bundleDir
+// argument and then refused on the TTY gate, so operators on a CI /
+// pipe-fed shell could not discover the per-command flags.
+func TestSign_HelpBypassesTTYAndArgs(t *testing.T) {
+	for _, flag := range []string{"--help", "-h"} {
+		flag := flag
+		t.Run(flag, func(t *testing.T) {
+			env, stdout, _ := newAdminTestEnv(t, "")
+			env.IsTerminal = func() bool { return false }
+			if err := Sign(*env.Env, []string{flag}); err != nil {
+				t.Fatalf("Sign %s: got %v, want nil", flag, err)
+			}
+			if !strings.Contains(stdout.String(), "Usage: alf sign") {
+				t.Errorf("Sign %s: stdout missing usage banner, got: %q", flag, stdout.String())
+			}
+		})
+	}
+}
+
 func TestSign_NoKey(t *testing.T) {
 	env, _, _ := newAdminTestEnv(t, "")
 	bundleDir := makeMinimalSkillBundle(t)

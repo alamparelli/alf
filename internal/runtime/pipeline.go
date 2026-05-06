@@ -532,6 +532,12 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	if onboarding := memory.OnboardingPrompt(e.ContextDir); onboarding != "" {
 		sysPrompts = append(sysPrompts, onboarding)
 	}
+	// Active skills for this session — used both for prompt injection
+	// (below) and for the §3.1 active-skill boundary narrowing (#389
+	// Stage 2, further down). Fetched once so the two paths see the
+	// same view.
+	activeSkills := e.Sessions.GetSkills(sessionKey)
+
 	// Cache breakpoint: everything before this is stable and cacheable.
 	cacheBreakpoint := len(sysPrompts)
 
@@ -547,7 +553,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 		if catalog := skills.BuildCatalog(e.SkillStore); catalog != "" {
 			sysPrompts = append(sysPrompts, catalog)
 		}
-		if activeSkills := e.Sessions.GetSkills(sessionKey); len(activeSkills) > 0 {
+		if len(activeSkills) > 0 {
 			log.Printf("[comms] skills: injecting session skills %v", activeSkills)
 			if block := skills.BuildInjectionByName(e.SkillStore, activeSkills); block != "" {
 				sysPrompts = append(sysPrompts, block)
@@ -566,11 +572,25 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	// Select provider.
 	prov := e.Registry.ForBackend(tp.Backend)
 
+	// #389 Stage 2: §3.1 active-skill boundary. When a manifest-shipped
+	// active skill carries a [[tools.declares]] block, narrow the
+	// tier's tool surface to the intersection of "tier-allowed" and
+	// "any active skill declares" before sending to the API provider.
+	// YAML-only active skills (no manifest yet) leave tp.Tools
+	// unchanged — the transition compromise documented in
+	// skills.NarrowToolsByDeclares. Without this step, a skill like
+	// `declares: [web.fetch]` would still see the LLM offered every
+	// tier-configured tool, breaking the §3.1 promise.
+	scopedTools := skills.NarrowToolsByDeclares(e.SkillDeclaresLookup, activeSkills, tp.Tools)
+	if len(scopedTools) != len(tp.Tools) && e.SkillDeclaresLookup != nil {
+		log.Printf("[comms] active-skill boundary narrowed tools %v → %v (active=%v)", tp.Tools, scopedTools, activeSkills)
+	}
+
 	// Wrap API provider with agentic tool loop.
-	if isAPITier && e.ToolRegistry != nil && e.ToolExecutor != nil && len(tp.Tools) > 0 {
+	if isAPITier && e.ToolRegistry != nil && e.ToolExecutor != nil && len(scopedTools) > 0 {
 		e.ToolRegistry.Rescan()
 		if apiProv, ok := prov.(*provider.APIProvider); ok {
-			schemas := e.ToolRegistry.ForToolsStrict(tp.Tools)
+			schemas := e.ToolRegistry.ForToolsStrict(scopedTools)
 			if len(schemas) > 0 {
 				var tools []map[string]any
 				if apiProv.IsDirectOpenAI() {
@@ -601,7 +621,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 
 	params := provider.Params{
 		Model:           tp.Model,
-		Tools:           tp.Tools,
+		Tools:           scopedTools, // #389 Stage 2: tp.Tools narrowed by active-skill declares
 		WriteCapable:    tp.WriteCapable,
 		Effort:          tp.Effort,
 		MaxTurns:        tp.MaxTurns,
@@ -790,11 +810,14 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			fbProv := e.Registry.ForBackend(fbTP.Backend)
 			fbIsAPI := fbTP.Backend != "" && fbTP.Backend != "cli"
 
+			// #389 Stage 2: same active-skill narrow as the primary tier.
+			fbScopedTools := skills.NarrowToolsByDeclares(e.SkillDeclaresLookup, activeSkills, fbTP.Tools)
+
 			// Wrap API provider with tool loop if needed.
-			if fbIsAPI && e.ToolRegistry != nil && e.ToolExecutor != nil && len(fbTP.Tools) > 0 {
+			if fbIsAPI && e.ToolRegistry != nil && e.ToolExecutor != nil && len(fbScopedTools) > 0 {
 				e.ToolRegistry.Rescan()
 				if apiProv, ok := fbProv.(*provider.APIProvider); ok {
-					schemas := e.ToolRegistry.ForToolsStrict(fbTP.Tools)
+					schemas := e.ToolRegistry.ForToolsStrict(fbScopedTools)
 					if len(schemas) > 0 {
 						var tools []map[string]any
 						if apiProv.IsDirectOpenAI() {
@@ -813,7 +836,7 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 
 			fbParams := provider.Params{
 				Model:         fbTP.Model,
-				Tools:         fbTP.Tools,
+				Tools:         fbScopedTools,
 				WriteCapable:  fbTP.WriteCapable,
 				Effort:        fbTP.Effort,
 				MaxTurns:      fbTP.MaxTurns,

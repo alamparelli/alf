@@ -64,6 +64,18 @@ type ChatEngine struct {
 	// Signal socket path (persistent, set by daemon after StartSignal).
 	SignalSockPath string
 
+	// SkillDeclaresLookup, when non-nil, returns the [[tools.declares]]
+	// id list for a manifest-shipped skill name. The pipeline calls it
+	// with each entry in Sessions.GetSkills(...) and narrows tp.Tools
+	// to the intersection of "tier-allowed" and "any active skill's
+	// declares" (#389 Stage 2 — §3.1 active-skill boundary).
+	//
+	// Nil during early boot or in test rigs that don't wire skill
+	// loading; calls fall back to the legacy unfiltered tier surface.
+	// Wired post-construction by cmd/alf-daemon to skillsRuntime
+	// (which holds the loaded VerifiedSkills with their manifests).
+	SkillDeclaresLookup func(skillName string) []string
+
 	// Adapters
 	adapters map[string]ChannelAdapter
 	mu       sync.RWMutex
@@ -137,6 +149,16 @@ func (e *ChatEngine) SetRuntime(rt Runtime) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.Runtime = rt
+}
+
+// SetSkillDeclaresLookup installs the active-skill boundary producer
+// post-construction (#389 Stage 2). Same wiring shape as SetRuntime —
+// the lookup depends on skillsRuntime which is built after the engine.
+// Pass nil to disable narrowing (legacy unfiltered surface).
+func (e *ChatEngine) SetSkillDeclaresLookup(lookup func(skillName string) []string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.SkillDeclaresLookup = lookup
 }
 
 // RegisterAdapter adds a channel adapter to the engine.

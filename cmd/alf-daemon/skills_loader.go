@@ -45,6 +45,34 @@ func (s *skillsRuntime) Replace(next []*skills.VerifiedSkill) {
 	s.verified = next
 }
 
+// DeclaresLookup matches the §3.1 active-skill boundary contract
+// (#389 Stage 2). Returns the [[tools.declares]] id list for a
+// skill identified by its SKILL.md / manifest name, or nil if no
+// loaded skill matches the name (e.g. a YAML-only legacy skill, or
+// a typo in the session's active-skills set).
+//
+// The lookup walks s.verified linearly. The list is small (5 shipped
+// + a handful of operator skills); a map index would not pay back
+// the bookkeeping cost for the load + Replace paths.
+//
+// Safe on nil receiver — returns nil. Used by ChatEngine via
+// SetSkillDeclaresLookup; the engine treats nil result as "no
+// declares from this skill" (legacy-permissive semantics).
+func (s *skillsRuntime) DeclaresLookup(name string) []string {
+	if s == nil {
+		return nil
+	}
+	for _, vs := range s.verified {
+		if vs == nil || vs.Skill == nil {
+			continue
+		}
+		if vs.Skill.Name == name {
+			return skills.DeclaresFromVerified(vs)
+		}
+	}
+	return nil
+}
+
 // setupSkillsLoader walks every directory in skillDirs, prepares each
 // signed bundle (manifest.toml + SKILL.md + optional manifest.sig),
 // drives it through the shared Instantiator, and returns the list of

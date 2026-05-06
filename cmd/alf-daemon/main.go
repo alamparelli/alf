@@ -888,6 +888,15 @@ func main() {
 	if cfg.BroadcastChannel != "" {
 		runtime.BroadcastChannel = cfg.BroadcastChannel
 	}
+	// #389 Stage 2: wire the §3.1 active-skill boundary. The lookup
+	// returns the manifest's [[tools.declares]] for any active skill
+	// that ships a manifest.toml; the pipeline narrows tp.Tools to
+	// the intersection per turn. Skills loaded via the legacy YAML
+	// path (no manifest yet) return nil → tier surface unchanged.
+	if skillsRt != nil {
+		commEngine.SetSkillDeclaresLookup(skillsRt.DeclaresLookup)
+		log.Println("comms engine: §3.1 active-skill boundary wired (skill manifests narrow LLM tool surface)")
+	}
 	log.Println("comms engine: initialized for CC channel")
 
 	// notifyChannel sends a text message to the originating channel via the comms engine.

@@ -19,6 +19,42 @@ the milestone ticket map.
 
 ### Added
 
+- **#395 Stage 2 chunk 3 — `alf pending` + `alf ratify` + persistent
+  `pending.DirStore`**. Stage 1 shipped an in-memory `pending.Store`
+  contract; the production daemon and CLI now have an on-disk
+  implementation that survives `alf restart`. New `*DirStore` at
+  `<dataDir>/admin/pending/<id>.json` (mode 0o600, parent 0o700) —
+  one file per `Item`, atomic tmp+rename per `Append`, unlink per
+  `Approve`/`Deny`. ID allocation: scanned at construction time;
+  next id = max existing + 1 (zero-padded decimal so lex-sort matches
+  numeric). Refuses construction if `<dir>` has 0o077 perms set.
+  Operator-facing CLI:
+  - `alf pending [list]` — read-only enumeration, no TTY required.
+    Five-column table (ID / KIND / AGE / FROM / PAYLOAD), oldest-
+    first. Empty queue prints a friendly message and the queue dir.
+  - `alf ratify <id> [--deny]` — approve (default) or deny a single
+    item. Refuses non-TTY stdin. Shows the item's kind / from /
+    created-at / full payload before prompting `Type 'yes' to
+    approve|deny:`. Argument-order independent. Approving prints
+    a note that queue removal does NOT itself execute the requested
+    operation — the consumer that `Append`'d the item is responsible
+    for the actual effect.
+  Wiring: `cmd/alf/admin/Env` gains `PendingDir` + `DefaultPendingDir()`;
+  `runAdmin` dispatches the two new commands. No daemon-side
+  wiring yet — there is no consumer that `Append`'s items at boot;
+  the Runtime → Append plumbing lands when an LLM-built widening
+  capability reaches that point. New helpers in `pending`:
+  `NewDirStore(dir, now)`, `DirStore.Dir()`, `DefaultDir(dataDir)`.
+  10 new DirStore tests + 15 new CLI tests = 25 across two packages,
+  including persistence-across-restart, path-traversal payload
+  rejection (`../../etc/passwd` cannot escape `<dir>`), 50-way
+  concurrency, full item-details rendered before the confirm prompt.
+  **CC `/admin/ratify/*` route deferred** — needs a separate browser-
+  session trust domain in the CC HTTP surface + Svelte UI; tracked
+  as a chunk-3.5 / CC follow-up. The CLI surface is sufficient for
+  the beta soak. **Stage 2 chunk 4 still pending**: vault user-scope
+  partition + `SecretValue` redaction.
+
 - **#395 Stage 2 chunk 2 — `alf keygen` + `alf sign` (Tier-3
   user-endorsed signing)**. Tier-2 daemon key auto-signs only what
   the §7.3 ceiling allows (no cross-flow events; SEC-004 enforces

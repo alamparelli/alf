@@ -82,6 +82,29 @@ old key will fail verification afterwards. Distribute the public
 half across machines via `alf keygen --export-pub <path>` followed
 by `alf trust add <path>` on each peer.
 
+## Ratification queue (#395 Stage 2 chunk 3)
+
+The admin-side ratification queue lives at
+`<dataDir>/admin/pending/` — one JSON file per pending item (mode
+0o600, parent 0o700). Format details in
+[§7.6](ARCHITECTURE-SECURITY.md#76-admin-cli-surface) and
+[`internal/admin/pending/dir.go`](../internal/admin/pending/dir.go).
+
+| Path | Owner | Purpose |
+|---|---|---|
+| `<dataDir>/admin/pending/<id>.json` | daemon (via the `pending.Store.Append` path; CLI removes via `Approve`/`Deny`) | one ratification item — `Kind` enum (`trust.add`, `bundle.install`, `permission.widen`), narrow string-keyed payload, originating capability id |
+
+The `alf pending` command is read-only and does not require a TTY.
+`alf ratify <id> [--deny]` is mutating: refuses non-TTY stdin,
+shows the full item details before the confirm prompt, removes the
+item on approval. Removal from the queue does **not** itself
+execute the requested operation — the consumer that `Append`'d the
+item (Runtime's widening path, not yet wired) is responsible for
+the side effect. The CLI only flips the gate.
+
+CC `/admin/ratify/*` route is deferred (chunk 3.5 / CC follow-up).
+For the 0.8.0-beta soak, the TTY-only CLI is the supported surface.
+
 ## Revocation (#396 Stage 2)
 
 | Variable | Default | Purpose |

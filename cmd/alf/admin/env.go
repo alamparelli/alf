@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/alamparelli/alf/internal/admin/pending"
 	"github.com/alamparelli/alf/internal/admin/userkey"
 	"github.com/alamparelli/alf/internal/cli"
 )
@@ -27,6 +28,10 @@ type Env struct {
 	// UserKeyPath is the absolute path to the §7.3 Tier-3
 	// user-endorsed key record (see internal/admin/userkey).
 	UserKeyPath string
+
+	// PendingDir is <dataDir>/admin/pending/ — the ratification queue
+	// directory the alf pending / alf ratify commands read and mutate.
+	PendingDir string
 
 	// I/O handles. Tests substitute these with bytes.Buffer-backed
 	// readers/writers so subcommands run end-to-end without touching
@@ -71,4 +76,10 @@ func DefaultTrustDir() string {
 // Sibling to the daemon-bootstrapped key under <install>/data/keys/.
 func DefaultUserKeyPath() string {
 	return userkey.DefaultPath(filepath.Join(cli.AlfDir(), "data"))
+}
+
+// DefaultPendingDir resolves the path to the ratification queue from
+// the alf install layout: <install>/data/admin/pending/.
+func DefaultPendingDir() string {
+	return pending.DefaultDir(filepath.Join(cli.AlfDir(), "data"))
 }

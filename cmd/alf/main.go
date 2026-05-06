@@ -70,6 +70,10 @@ func main() {
 		runAdmin(admin.Keygen, os.Args[2:])
 	case "sign":
 		runAdmin(admin.Sign, os.Args[2:])
+	case "pending":
+		runAdmin(admin.Pending, os.Args[2:])
+	case "ratify":
+		runAdmin(admin.Ratify, os.Args[2:])
 	case "uninstall":
 		cli.RunUninstall()
 	case "version":
@@ -96,6 +100,7 @@ func runAdmin(handler func(admin.Env, []string) error, args []string) {
 	env := admin.Env{
 		TrustDir:     admin.DefaultTrustDir(),
 		UserKeyPath:  admin.DefaultUserKeyPath(),
+		PendingDir:   admin.DefaultPendingDir(),
 		Stdin:        os.Stdin,
 		Stdout:       os.Stdout,
 		Stderr:       os.Stderr,
@@ -147,6 +152,8 @@ func printUsage() {
 	fmt.Println("  trust     Manage trusted signing keys (list/add/remove/revoke)")
 	fmt.Println("  keygen    Mint the user-endorsed signing key (passphrase-protected)")
 	fmt.Println("  sign      Sign a bundle with the user-endorsed key")
+	fmt.Println("  pending   List items awaiting ratification")
+	fmt.Println("  ratify    Approve or deny a pending item")
 	fmt.Println("  uninstall Remove ALF completely")
 	fmt.Println("  version   Print CLI version")
 }

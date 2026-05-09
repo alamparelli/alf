@@ -155,11 +155,23 @@ func TestHandlePackageNoUnsafeOrLinkname(t *testing.T) {
 // codebase. Allowed callers:
 //   - internal/capability/envelope/ — own implementation + tests
 //   - internal/runtime/instantiator_verified.go — the ONE runtime
-//     consumer (and its _test.go sibling)
+//     consumer for capabilities that go through the ocap forge
+//     (and its _test.go sibling)
+//   - internal/marketplace/bundle.go — the legacy marketplace-app
+//     install path (#384). marketplace-app is deprecated (see
+//     MANIFEST-SCHEMA §4.6) and runs a binary daemon, not the
+//     wazero forge — InstantiateVerified would forge a handle
+//     Instance the marketplace doesn't need. This caller still
+//     hits the SAME envelope.Verify pipeline so the security
+//     property is preserved. Listed explicitly so a future move
+//     to wasm-app routing through Instantiator is a deliberate
+//     archtest update, not silent drift.
 //
 // A second runtime caller would be a bypass: two consumers means two
 // opportunities for one to forget a step of the pipeline. Archtest
-// catches that before it merges.
+// catches that before it merges. The marketplace exception above is
+// in the spirit of the rule (full pipeline, not a primitive), not
+// against it.
 func TestOneVerifyCallSite(t *testing.T) {
 	root := repoRoot()
 	// Match calls to envelope's top-level pipeline entry — NOT
@@ -192,6 +204,12 @@ func TestOneVerifyCallSite(t *testing.T) {
 		// The single runtime consumer + its test.
 		if rel == filepath.Join("internal", "runtime", "instantiator_verified.go") ||
 			rel == filepath.Join("internal", "runtime", "instantiator_verified_test.go") {
+			return nil
+		}
+		// The legacy marketplace install path (#384) — see TestOneVerifyCallSite
+		// docstring above for the justification.
+		if rel == filepath.Join("internal", "marketplace", "bundle.go") ||
+			rel == filepath.Join("internal", "marketplace", "bundle_verify_test.go") {
 			return nil
 		}
 		b, err := os.ReadFile(path)

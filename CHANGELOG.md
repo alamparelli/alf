@@ -19,6 +19,134 @@ the milestone ticket map.
 
 ### Added
 
+- **#402 — Update permission-widening goes through ratification**.
+  `Manager.Update` now diffs the new manifest's declared
+  permissions against the previous install's set and refuses any
+  widening that has not been explicitly approved by an operator
+  via the admin pending queue (#395 Stage 2). Closes the v0.7.9
+  audit finding "manifest update silently widens perms".
+
+  **Why this matters.** Pre-#402 `Update` replaced
+  `m.perms[slug]` with whatever the new manifest declared.
+  Scenario: install-time perms = `["storage"]` (user-approved);
+  update-time perms = `["storage", "bash", "network"]` — no
+  prompt, no log, the LLM-built capability surface widens
+  silently the next time the supervisor restarts the app. Under
+  the v0.8.0 trust model (signed manifests + admin boundary)
+  this is a privilege-escalation path that has to be closed
+  before tag-time.
+
+  **Order of operations** in the new `Update`:
+  1. Download + verify the bundle (envelope.Verify, #384).
+  2. Read the NEW `manifest.json` from the in-memory ZIP via
+     `readManifestJSONFromZip` — bounded by
+     `MaxBundleManifestJSONSize = 16 KiB`.
+  3. Read the OLD `manifest.json` off disk (still present —
+     deactivate hasn't fired yet).
+  4. `diffPermissions(prev, next)` returns the sorted list of
+     perms in next but absent from prev. Set-semantics —
+     duplicates collapse, ordering is irrelevant.
+  5. If widening:
+     - `permRatifier` wired → enqueue a `KindPermissionWiden`
+       item, return `ErrPermissionWideningPending` with the
+       queue ID embedded in the message.
+     - `permRatifier` nil → return
+       `ErrPermissionWideningRefused`. No fallback to silent
+       widening.
+     In both cases, NO on-disk state changes; the running app
+     keeps its old version.
+  6. If narrowing or unchanged: deactivate, wipe, extract,
+     re-activate (legacy flow).
+
+  **`internal/marketplace/permdiff.go`.** New file carrying:
+  - `PermissionRatifier` callback type — the daemon's seam to
+    the admin pending queue. Returns the assigned queue ID and
+    any enqueue error.
+  - `ErrPermissionWideningPending` (widening + ratifier wired,
+    queued for approval).
+  - `ErrPermissionWideningRefused` (widening + no ratifier —
+    "refusing to silently widen").
+  - `diffPermissions(prev, next) []string` — set-difference
+    over string slices, alphabetically sorted, never-nil.
+  - `Manager.SetPermissionRatifier(fn)` setter for the daemon
+    to wire the queue.
+
+  **`internal/marketplace/bundle.go`.** Extended with
+  `readManifestJSONFromZip` (mirrors `readManifestFromZip` but
+  for the legacy JSON view) + `ErrBundleManifestJSONMissing`
+  for the typed-error path. The TOML envelope (manifest.toml)
+  is the trust gate; manifest.json is the runtime metadata
+  source the activate path consumes — until #414 retires that
+  legacy step.
+
+  **`internal/marketplace/manager.go` refactor.** Split the
+  monolithic `downloadAndExtractBundle` into:
+  - `downloadAndVerifyBundle(slug) ([]byte, error)` — fetch
+    bundle.zip + bundle.sig, verify, return bundle bytes.
+  - `extractVerifiedBundle(slug, appDir, bytes) error` — write
+    to disk; caller has already verified.
+  - `downloadAndExtractBundle` is now a convenience wrapper
+    Install consumes. Update uses the split helpers so it can
+    interpose the permission-widening gate between verify and
+    extract.
+
+  **Daemon wiring.** `cmd/alf-daemon/main.go` constructs a
+  `pending.NewDirStore(<dataDir>/admin/pending/, time.Now)` at
+  marketplace init time and wires a closure into
+  `mpManager.SetPermissionRatifier`. The closure calls
+  `pendingStore.Append(ctx, pending.Item{Kind:
+  KindPermissionWiden, Payload: { slug, old_perms, new_perms,
+  added_perms }})` and returns the assigned queue ID. When
+  `pending.NewDirStore` itself fails (perms / disk full),
+  `SetPermissionRatifier` is NOT called — Update widenings
+  then refuse outright per the design.
+
+  **Operator UX.** A widening Update surfaces with:
+  ```
+  marketplace: update permissions widened — operator ratification
+  required: queue id=000000000042 app="myapp" added=[bash network]
+  — run `alf ratify 000000000042` to approve
+  ```
+  After `alf ratify`, the operator re-runs `alf install myapp`
+  (or `Update` once an automated retry path is wired) to
+  proceed.
+
+  **Acceptance covered.**
+  - ✅ Update path diffs old vs new permissions BEFORE
+    committing (`TestUpdate_WideningWithRatifierEnqueues`
+    asserts m.perms[slug] is unchanged AND on-disk
+    manifest.json is unchanged after a refused-pending
+    Update).
+  - ✅ Widening requires explicit user approval through the
+    admin boundary (#395) — not the LLM. The `permRatifier`
+    callback is the only path; there is no LLM-reachable bypass.
+  - ✅ Narrowing is allowed silently
+    (`TestUpdate_NarrowingProceedsSilently` verifies the
+    ratifier is NOT called when next ⊆ prev).
+  - ✅ Refused-pending Update does not reach m.perms[slug]
+    (asserted in the integration test).
+
+  **Archtest exception (`TestOneVerifyCallSite`).**
+  `internal/marketplace/bundle.go` is now an explicitly-listed
+  caller of `envelope.Verify`. Marketplace-app is deprecated
+  (see MANIFEST-SCHEMA §4.6) and runs a binary daemon, not the
+  wazero forge — `InstantiateVerified` would mint a handle
+  Instance the marketplace doesn't need. The caller still
+  hits the same `envelope.Verify` pipeline (full, not a
+  lower-level primitive), so the security property is
+  preserved. Listed explicitly so a future move to `wasm-app`
+  routing through Instantiator is a deliberate archtest update,
+  not silent drift.
+
+  **Tests.** 8 new permdiff tests in `permdiff_test.go`
+  (empty/nil edges / narrowing-silent / widening-surfaces-added /
+  order-insensitive / duplicates-collapse / empty-prev-any-next /
+  err-sentinels-distinct), 4 new Update integration tests in
+  `update_widen_test.go` (narrowing-proceeds /
+  widening-with-ratifier-enqueues / widening-without-ratifier-
+  refused / ratifier-enqueue-error-propagates). 12 new tests
+  total. Race detector clean.
+
 - **#384 — marketplace bundle signing (Layer 2 distribution)**.
   Closes the 0.7.9 critical "marketplace integrity" finding by
   routing every marketplace install through the same

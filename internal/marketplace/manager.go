@@ -123,6 +123,13 @@ type Manager struct {
 	// refuse to run if this is nil — there is no fallback to the
 	// pre-#384 unsigned-bundle path.
 	trustStore envelope.TrustStore
+
+	// permRatifier is the #402 callback wired by the daemon to the
+	// admin pending queue. Update consults this when an app's new
+	// manifest declares broader permissions than the cached state;
+	// when nil, widenings are refused outright (no fallback to the
+	// pre-#402 silent-widen path).
+	permRatifier PermissionRatifier
 }
 
 type stateFile struct {
@@ -222,6 +229,20 @@ func (m *Manager) SetTrustStore(s envelope.TrustStore) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.trustStore = s
+}
+
+// SetPermissionRatifier wires the #402 callback the manager
+// invokes when an Update would widen an app's declared permissions.
+// The callback hands the diff to the admin pending queue — see
+// PermissionRatifier docs for the payload shape.
+//
+// Daemon boot calls this AFTER constructing the pending DirStore;
+// when nil, Update refuses any widening with
+// ErrPermissionWideningRefused (no fallback to silent widening).
+func (m *Manager) SetPermissionRatifier(fn PermissionRatifier) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.permRatifier = fn
 }
 
 // GetServices returns the declared vault services for an app.
@@ -836,20 +857,19 @@ func (m *Manager) Install(slug string) error {
 // larger is refused before the download completes.
 const MaxBundleSize int64 = 200 << 20
 
-// downloadAndExtractBundle downloads a signed ZIP bundle from the
-// registry, verifies its envelope against the trust store, then
-// extracts. The verify step happens BEFORE any file is written to
-// disk — a tampered or unsigned bundle never touches the apps dir.
+// downloadAndVerifyBundle fetches bundle.zip + bundle.sig from the
+// registry and verifies the envelope BEFORE returning anything.
+// The caller decides whether to extract — Install does so directly,
+// Update first runs the #402 permission diff against the verified
+// bundle's manifest.json.
 //
 // Wire-level contract (#384):
 //
-//   GET <registryURL>/api/apps/<slug>/bundle?arch=<arch>   → bundle.zip
+//   GET <registryURL>/api/apps/<slug>/bundle?arch=<arch>     → bundle.zip
 //   GET <registryURL>/api/apps/<slug>/bundle.sig?arch=<arch> → bundle.sig
 //
 // Both responses are required. A 404 on bundle.sig surfaces as
-// ErrBundleSignatureMissing so the operator sees "registry has not
-// yet been upgraded for v0.8.0 signed bundles" rather than a
-// confusing transport error.
+// ErrBundleSignatureMissing.
 //
 // Failure modes the caller can branch on:
 //   - errors.Is(err, ErrBundleSignatureMissing): server upgrade pending.
@@ -857,28 +877,30 @@ const MaxBundleSize int64 = 200 << 20
 //   - errors.Is(err, ErrBundleManifestNotMarketplace): wrong kind.
 //   - errors.Is(err, ErrBundleManifestMissing): legacy unsigned bundle.
 //   - any other err: transport / canonicalisation / signature math.
-func (m *Manager) downloadAndExtractBundle(slug, appDir string) error {
+func (m *Manager) downloadAndVerifyBundle(slug string) ([]byte, error) {
 	if m.trustStore == nil {
-		return fmt.Errorf("marketplace: trust store not wired — daemon boot must call SetTrustStore before Install")
+		return nil, fmt.Errorf("marketplace: trust store not wired — daemon boot must call SetTrustStore before Install")
 	}
-
 	bundleBytes, err := m.fetchBundleArtefact(slug, "bundle", MaxBundleSize, false)
 	if err != nil {
-		return fmt.Errorf("download bundle: %w", err)
+		return nil, fmt.Errorf("download bundle: %w", err)
 	}
 	sigBytes, err := m.fetchBundleArtefact(slug, "bundle.sig", MaxBundleSignatureSize, true)
 	if err != nil {
-		return err // already typed as ErrBundleSignatureMissing on 404
+		return nil, err // already typed as ErrBundleSignatureMissing on 404
 	}
-
 	if _, err := verifyBundle(bundleBytes, sigBytes, m.trustStore); err != nil {
-		return fmt.Errorf("verify bundle: %w", err)
+		return nil, fmt.Errorf("verify bundle: %w", err)
 	}
+	return bundleBytes, nil
+}
 
-	// Verify passed — now extract from the in-memory bytes via
-	// *bytes.Reader (implements io.ReaderAt + size). No disk
-	// round-trip; the bundle bytes already live in RAM since we
-	// needed them for the verify hash check.
+// extractVerifiedBundle writes the verified bundle bytes into
+// appDir using the ZIP path-traversal-safe extractor. Caller is
+// responsible for having run downloadAndVerifyBundle first — this
+// function does NOT re-verify. Splitting the two lets Update slot
+// the #402 permission-widening check between verify and extract.
+func (m *Manager) extractVerifiedBundle(slug, appDir string, bundleBytes []byte) error {
 	if err := extractBundle(bytes.NewReader(bundleBytes), int64(len(bundleBytes)), appDir); err != nil {
 		return err
 	}
@@ -886,6 +908,18 @@ func (m *Manager) downloadAndExtractBundle(slug, appDir string) error {
 		log.Printf("marketplace: chmod service binary for %s: %v", slug, err)
 	}
 	return nil
+}
+
+// downloadAndExtractBundle is the convenience wrapper Install
+// consumes: download + verify + extract in one call. Update uses
+// the split helpers so it can interpose the permission-widening
+// gate between verify and extract.
+func (m *Manager) downloadAndExtractBundle(slug, appDir string) error {
+	bundleBytes, err := m.downloadAndVerifyBundle(slug)
+	if err != nil {
+		return err
+	}
+	return m.extractVerifiedBundle(slug, appDir, bundleBytes)
 }
 
 // fetchBundleArtefact issues a GET against the registry and returns
@@ -1064,7 +1098,33 @@ func (m *Manager) CheckUpdates() []UpdateInfo {
 	return updates
 }
 
-// Update re-downloads an app from the registry, preserving its data/ directory.
+// Update re-downloads an app from the registry, verifying the
+// signed bundle and gating any permission widening through the
+// admin pending queue (#402). Preserves the data/ directory across
+// the update.
+//
+// Order of operations:
+//  1. Download + verify the new bundle (envelope.Verify).
+//  2. Read the new manifest.json from the in-memory ZIP.
+//  3. Read the OLD manifest.json off disk (still present — wipe
+//     hasn't fired yet).
+//  4. Diff RAW perms (manifest-declared, not post-cap).
+//  5. If new ⊃ old (widening):
+//       a. permRatifier wired → enqueue PermissionWiden item;
+//          return ErrPermissionWideningPending with queue ID.
+//       b. permRatifier nil → return ErrPermissionWideningRefused.
+//     In both cases, NO on-disk state changes; the running app
+//     keeps its old version.
+//  6. If new ⊆ old (narrow / equal): deactivate, wipe, extract,
+//     re-activate.
+//
+// Acceptance covered (#402):
+//   - Update path diffs old vs. new permissions BEFORE committing.
+//   - Widening requires explicit operator approval via the admin
+//     boundary (#395 pending queue).
+//   - Narrowing is silent.
+//   - Refused widening does NOT reach m.perms[slug] (the deactivate
+//     path never runs).
 func (m *Manager) Update(slug string) error {
 	if m.registryURL == "" {
 		return fmt.Errorf("no registry configured")
@@ -1078,6 +1138,47 @@ func (m *Manager) Update(slug string) error {
 		return fmt.Errorf("app %q is not installed", slug)
 	}
 
+	// Step 1: download + verify. Refuses unsigned / untrusted /
+	// tampered bundles before any on-disk mutation.
+	bundleBytes, err := m.downloadAndVerifyBundle(slug)
+	if err != nil {
+		return err
+	}
+
+	// Step 2: extract NEW manifest.json from the verified bundle.
+	newManifest, err := readManifestJSONFromZip(bundleBytes)
+	if err != nil {
+		return fmt.Errorf("update: read new manifest.json: %w", err)
+	}
+
+	// Step 3: load OLD manifest.json from disk. The previous install's
+	// file is still in place at this point — deactivate hasn't run.
+	oldManifest, err := m.loadManifest(slug)
+	if err != nil {
+		return fmt.Errorf("update: read old manifest: %w", err)
+	}
+
+	// Step 4: diff RAW (manifest-declared) permissions. This sees
+	// pre-cap data — the diff against post-cap state would mask
+	// widenings that happen to fall under the safe-default ceiling.
+	added := diffPermissions(oldManifest.Permissions, newManifest.Permissions)
+	if len(added) > 0 {
+		// Step 5: widening detected — gate.
+		m.mu.Lock()
+		ratifier := m.permRatifier
+		m.mu.Unlock()
+		if ratifier == nil {
+			return fmt.Errorf("%w: app %q wants %v", ErrPermissionWideningRefused, slug, added)
+		}
+		queueID, qerr := ratifier(slug, oldManifest.Permissions, newManifest.Permissions, added)
+		if qerr != nil {
+			return fmt.Errorf("update: enqueue permission widening: %w", qerr)
+		}
+		return fmt.Errorf("%w: queue id=%s app=%q added=%v — run `alf ratify %s` to approve",
+			ErrPermissionWideningPending, queueID, slug, added, queueID)
+	}
+
+	// Step 6: no widening — proceed with the legacy update flow.
 	// Deactivate before updating files.
 	if err := m.deactivate(slug); err != nil {
 		return err
@@ -1097,10 +1198,10 @@ func (m *Manager) Update(slug string) error {
 		os.RemoveAll(filepath.Join(appDir, e.Name()))
 	}
 
-	// Re-download from registry: signed-bundle path only (#384).
 	os.MkdirAll(appDir, 0o755)
 
-	if err := m.downloadAndExtractBundle(slug, appDir); err != nil {
+	// Already verified above; just write the bundle to disk.
+	if err := m.extractVerifiedBundle(slug, appDir, bundleBytes); err != nil {
 		return err
 	}
 

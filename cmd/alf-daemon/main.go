@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alamparelli/alf/internal/admin/pending"
 	"github.com/alamparelli/alf/internal/ai"
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/capability/envelope"
@@ -1001,6 +1002,29 @@ func main() {
 			} else {
 				log.Printf("[marketplace] no marketplace pubkey embedded — installs require operator-imported third-party keys (alf trust add)")
 			}
+		}
+		// #402: wire the permission-widening ratifier. Update calls
+		// this when a new manifest declares broader permissions than
+		// the cached install state; widenings enqueue a
+		// KindPermissionWiden item and refuse the update until an
+		// operator runs `alf ratify <id>`. When wiring fails (e.g.
+		// pending dir cannot be created), Update degrades to refusing
+		// every widening — never silently widening.
+		if pendingStore, err := pending.NewDirStore(pending.DefaultDir(dataDir), time.Now); err == nil {
+			mpManager.SetPermissionRatifier(func(slug string, oldP, newP, added []string) (string, error) {
+				return pendingStore.Append(context.Background(), pending.Item{
+					Kind: pending.KindPermissionWiden,
+					Payload: map[string]string{
+						"slug":        slug,
+						"old_perms":   strings.Join(oldP, ","),
+						"new_perms":   strings.Join(newP, ","),
+						"added_perms": strings.Join(added, ","),
+					},
+				})
+			})
+			log.Printf("[marketplace] permission-widening ratifier wired: queue=%s", pendingStore.Dir())
+		} else {
+			log.Printf("[marketplace] pending DirStore init failed (%v) — Update widenings will be refused outright", err)
 		}
 		mpManager.SetOnChange(func() {
 			toolRegistry.Rescan()

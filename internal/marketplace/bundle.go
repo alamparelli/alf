@@ -3,6 +3,7 @@ package marketplace
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -41,6 +42,68 @@ const MaxBundleManifestSize = 64 << 10
 // signature is on the order of 200 bytes; 4 KiB tolerates trusted
 // comment growth without giving an attacker a memory bomb.
 const MaxBundleSignatureSize = 4 << 10
+
+// MaxBundleManifestJSONSize bounds the in-memory read of
+// manifest.json — the legacy view the activate path consumes for
+// app metadata (permissions, services, tools). Smaller than the
+// envelope ceiling on the assumption that a real-world manifest
+// fits comfortably in 16 KiB; this is a memory-bomb defence, not a
+// design constraint.
+const MaxBundleManifestJSONSize = 16 << 10
+
+// readManifestJSONFromZip extracts the legacy `manifest.json` from
+// the in-memory bundle ZIP, parses it into a Manifest, and returns
+// the result. Used by #402 to diff a bundle's declared permissions
+// against the cached post-install state BEFORE the update touches
+// the on-disk app dir.
+//
+// Failure modes mapped to typed errors:
+//   - manifest.json absent: ErrBundleManifestJSONMissing
+//   - exceeds size cap:    wrapped fmt error
+//   - JSON parse error:    wrapped fmt error
+//
+// Bundles that pre-date the v0.8.0 envelope migration may carry
+// only manifest.json (no manifest.toml); those fail at verifyBundle
+// long before this helper runs. By the time #402's diff path
+// invokes this, the envelope check has already passed.
+func readManifestJSONFromZip(zipBytes []byte) (*Manifest, error) {
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: zip reader: %w", err)
+	}
+	for _, zf := range zr.File {
+		if zf.Name != "manifest.json" {
+			continue
+		}
+		if zf.UncompressedSize64 > MaxBundleManifestJSONSize {
+			return nil, fmt.Errorf("marketplace: manifest.json exceeds %d-byte ceiling: got %d", MaxBundleManifestJSONSize, zf.UncompressedSize64)
+		}
+		rc, err := zf.Open()
+		if err != nil {
+			return nil, fmt.Errorf("marketplace: open manifest.json: %w", err)
+		}
+		defer rc.Close()
+		raw, err := io.ReadAll(io.LimitReader(rc, MaxBundleManifestJSONSize))
+		if err != nil {
+			return nil, fmt.Errorf("marketplace: read manifest.json: %w", err)
+		}
+		var m Manifest
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, fmt.Errorf("marketplace: parse manifest.json: %w", err)
+		}
+		// SEC-001: never trust the bundle-declared trust flag.
+		m.Trusted = false
+		return &m, nil
+	}
+	return nil, ErrBundleManifestJSONMissing
+}
+
+// ErrBundleManifestJSONMissing signals that the verified bundle has
+// no `manifest.json` at its root. The activate path consumes this
+// file for permissions/services/tools metadata; without it the app
+// cannot be installed even if the envelope (manifest.toml) is
+// well-formed and signed.
+var ErrBundleManifestJSONMissing = errors.New("marketplace: bundle has no manifest.json at root")
 
 // readManifestFromZip extracts `manifest.toml` from inside the
 // bundle ZIP without writing anything to disk. The returned bytes

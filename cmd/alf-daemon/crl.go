@@ -30,6 +30,12 @@ func (c *crlSubsystem) Close() {
 // check at boot, CRL refresher applying signed CRLs to the WASM
 // trust store, wall-clock skew monitor in background.
 //
+// onApply is fired by the Refresher AFTER each successful
+// ApplyCRL on the trust store (both source and cache paths). The
+// daemon points it at the revocation cascader so newly-revoked
+// keys close their live Instances without waiting for SIGHUP.
+// May be nil (CRL still applies, just no live cascade).
+//
 // Degrades gracefully:
 //
 //   - No release pubkey embedded (dev build / fresh checkout)
@@ -45,7 +51,7 @@ func (c *crlSubsystem) Close() {
 //
 // All other failures (source down, cache corrupt, etc.) are
 // recovered by the Refresher per §7.7 fail-safe.
-func setupCRL(ctx context.Context, dataDir string, store *envelope.DirTrustStore, logf func(string, ...any)) (*crlSubsystem, error) {
+func setupCRL(ctx context.Context, dataDir string, store *envelope.DirTrustStore, onApply func(), logf func(string, ...any)) (*crlSubsystem, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -106,6 +112,7 @@ func setupCRL(ctx context.Context, dataDir string, store *envelope.DirTrustStore
 		GracePeriod: crl.DefaultGracePeriod,
 		Now:         time.Now,
 		Logf:        logf,
+		OnApply:     onApply,
 	}
 
 	go refresher.Run(subCtx)

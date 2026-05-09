@@ -318,6 +318,105 @@ func TestApplyCRL_StrictestWins(t *testing.T) {
 	}
 }
 
+// TestAllRevoked_MergesBothChannels pins that AllRevoked returns
+// every revoked key from both the operator-set and CRL-set channels,
+// and that overlapping entries surface the strictest (earliest)
+// timestamp. The cascade engine (#396 D2) consumes this snapshot to
+// detect newly-revoked keys across reloads.
+func TestAllRevoked_MergesBothChannels(t *testing.T) {
+	pubA, _, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubB, _, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubC, _, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewMemoryTrustStore()
+	store.Add(pubA)
+	store.Add(pubB)
+	store.Add(pubC)
+
+	// A: operator-only revoke.
+	tA := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	store.Revoke(pubA.ID, tA)
+
+	// B: CRL-only revoke.
+	tB := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	store.ApplyCRL(&CRL{
+		Version:  CRLEnvelopeVersion,
+		IssuedAt: time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC),
+		Entries:  []CRLEntry{{KeyID: pubB.ID, NotValidAfter: tB}},
+	})
+
+	// C: both channels — operator stricter.
+	cOp := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	cCRL := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	store.Revoke(pubC.ID, cOp)
+	// Re-apply CRL with both B and C entries — ApplyCRL replaces, not merges.
+	store.ApplyCRL(&CRL{
+		Version:  CRLEnvelopeVersion,
+		IssuedAt: time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC),
+		Entries: []CRLEntry{
+			{KeyID: pubB.ID, NotValidAfter: tB},
+			{KeyID: pubC.ID, NotValidAfter: cCRL},
+		},
+	})
+
+	got := store.AllRevoked()
+	if len(got) != 3 {
+		t.Fatalf("expected 3 revoked entries, got %d: %v", len(got), got)
+	}
+	if !got[pubA.ID].Equal(tA) {
+		t.Errorf("A: got %s, want %s", got[pubA.ID], tA)
+	}
+	if !got[pubB.ID].Equal(tB) {
+		t.Errorf("B: got %s, want %s", got[pubB.ID], tB)
+	}
+	if !got[pubC.ID].Equal(cOp) {
+		t.Errorf("C strictest-wins: got %s, want operator-set %s", got[pubC.ID], cOp)
+	}
+}
+
+// TestAllRevoked_FreshCopy pins that AllRevoked returns a fresh map —
+// a caller may retain or mutate it without affecting the store.
+func TestAllRevoked_FreshCopy(t *testing.T) {
+	pub, _, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewMemoryTrustStore()
+	store.Add(pub)
+	store.Revoke(pub.ID, time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
+
+	snap := store.AllRevoked()
+	delete(snap, pub.ID)
+
+	// Store still has the entry.
+	got, ok := store.RevokedAfter(pub.ID)
+	if !ok {
+		t.Fatal("caller mutation of returned map leaked into store")
+	}
+	if !got.Equal(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("store timestamp altered: %s", got)
+	}
+}
+
+// TestAllRevoked_EmptyStoreReturnsEmpty pins the zero-value path — a
+// brand-new store has no revocations. The cascade engine uses this
+// as the boot baseline.
+func TestAllRevoked_EmptyStoreReturnsEmpty(t *testing.T) {
+	store := NewMemoryTrustStore()
+	got := store.AllRevoked()
+	if len(got) != 0 {
+		t.Errorf("empty store: got %d revoked entries, want 0", len(got))
+	}
+}
+
 // TestApplyCRL_AddDoesNotClearCRLEntry pins that re-Adding a key does
 // not silence an upstream CRL. Operators can re-trust their own
 // revocation, but the CRL is upstream-authoritative.

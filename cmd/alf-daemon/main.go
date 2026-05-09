@@ -740,13 +740,24 @@ func main() {
 		defer func() { _ = wasmRt.Close(context.Background()) }()
 	}
 
+	// #396 deliverable 2: revocation cascade discovery channels.
+	// Wires the runtime cascade engine (Instantiator.RevokeByKey,
+	// shipped in #392 Stage 5) to the operator path (SIGHUP after
+	// `alf trust revoke`) and the upstream-CRL path (Refresher's
+	// OnApply hook). Built BEFORE setupCRL so the first Tick can
+	// already cascade if a CRL revokes a key whose bundles were
+	// loaded by setupWASMLoader in this same boot.
+	cascadeCtx, cascadeCancel := context.WithCancel(context.Background())
+	defer cascadeCancel()
+	_, onApplyCascade := setupRevocationCascade(cascadeCtx, wasmRt, log.Printf)
+
 	// #396 Stage 2: clock-sanity boot check + CRL refresher + skew
 	// monitor. Refuses to boot if system clock is wildly past
 	// (§7.7); applies signed CRLs from ALF_CRL_URL to wasm trust
 	// store on a 6h cycle with 30-day offline fail-safe. Degrades
 	// gracefully when no release pubkey is embedded (dev build).
 	if wasmRt != nil {
-		crlRt, err := setupCRL(context.Background(), dataDir, wasmRt.TrustStore, log.Printf)
+		crlRt, err := setupCRL(context.Background(), dataDir, wasmRt.TrustStore, onApplyCascade, log.Printf)
 		if err != nil {
 			log.Fatalf("crl: %v", err) // refused boot: clock sanity
 		}

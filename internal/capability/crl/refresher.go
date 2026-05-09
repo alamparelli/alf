@@ -82,6 +82,21 @@ type Refresher struct {
 	Now         func() time.Time
 	Logf        func(string, ...any)
 
+	// OnApply is fired after each successful Store.ApplyCRL — both
+	// the source path (fresh fetch) and the cache path (offline
+	// fallback). Daemon wiring points this at the revocation
+	// cascader so newly-revoked keys close their live Instances
+	// without waiting for a SIGHUP. Nil = no-op.
+	//
+	// The callback runs on the Tick goroutine, AFTER the trust
+	// store's revocation map is updated, so callers that snapshot
+	// the store from inside OnApply observe the post-apply state.
+	// Errors / panics from the callback are not caught here — keep
+	// it small and infallible (a typical implementation just calls
+	// cascader.Refresh, which is itself fallible only via the
+	// underlying RevokeByKey, which is concurrency-safe).
+	OnApply func()
+
 	mu sync.Mutex
 
 	// lastIssuedAt is the SEC-001 anti-replay high-water mark — the
@@ -151,6 +166,9 @@ func (r *Refresher) Tick(ctx context.Context) (TickResult, error) {
 		r.Store.ApplyCRL(crl)
 		r.lastIssuedAt = crl.IssuedAt.UTC()
 		logf("[crl] refreshed from source: %d entries, issued_at=%s", len(crl.Entries), crl.IssuedAt.Format(time.RFC3339))
+		if r.OnApply != nil {
+			r.OnApply()
+		}
 		return TickResult{
 			FromSource:  true,
 			LastFetched: now,
@@ -217,6 +235,9 @@ func (r *Refresher) Tick(ctx context.Context) (TickResult, error) {
 
 	r.Store.ApplyCRL(crl)
 	r.lastIssuedAt = crl.IssuedAt.UTC()
+	if r.OnApply != nil {
+		r.OnApply()
+	}
 	return TickResult{
 		FromSource:  false,
 		CacheStale:  stale,

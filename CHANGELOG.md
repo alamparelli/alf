@@ -19,6 +19,107 @@ the milestone ticket map.
 
 ### Added
 
+- **#396 deliverable 2 — provider revocation cascade discovery
+  channels**. The cascade engine (`Instantiator.RevokeByKey`,
+  shipped in #392 Stage 5) closes every Instance signed by — or
+  depending on — a revoked key, but the daemon had no live
+  observation of the trust store: an operator running
+  `alf trust revoke <fp>` had to follow with `alf restart` for
+  the cascade to actually fire, and a CRL-published revocation
+  applied only at the next daemon boot. This drop closes both
+  loops.
+
+  **Why this matters.** D8 (`alf trust revoke` CLI) shipped in
+  #395 Stage 2 chunk 1, but the comment trail explicitly noted
+  that `alf restart` was the required operator workflow because
+  the daemon did not pick up new `.revoked` sidecars at runtime.
+  D2 had been blocked on #392 (provider cascade machinery), which
+  Stage 5 of that ticket landed last week. With both pieces in
+  place, the only remaining work was wiring discovery → cascade.
+
+  **`MemoryTrustStore.AllRevoked()`.** New snapshot method that
+  returns a fresh copy of every revoked key with its strictest
+  (operator-set + CRL-set merged via the same earliest-wins rule
+  as `RevokedAfter`) not-valid-after timestamp. The returned map
+  is safe to mutate or retain — the cascader's diff logic does
+  exactly that across reloads. Companion to `RevokedAfter` for
+  bulk consumers.
+
+  **`runtime.RevocationCascader`.** New type in
+  `internal/runtime/cascade.go` that diffs revoked-set snapshots
+  and calls `Instantiator.RevokeByKey` for keys whose state
+  crossed one of two transitions: newly revoked (not in previous
+  snapshot, present now) or tightened (previously revoked at T1,
+  now revoked at T0 < T1 — the operator override for "compromise
+  actually started earlier"). The first snapshot is taken
+  eagerly at `NewRevocationCascader` time so the boot baseline
+  doesn't fire spurious cascades — keys revoked at boot don't
+  cascade because their bundles never made it past
+  `envelope.Verify` in the first place. Refresh is mutex-
+  serialised so a SIGHUP-driven call and a CRL OnApply-driven
+  call cannot race on the diff.
+
+  **`crl.Refresher.OnApply`.** New optional callback field that
+  fires AFTER each successful `Store.ApplyCRL` (both source and
+  cache paths). Daemon points it at the cascader so a CRL-
+  published revocation closes live Instances within the same
+  Tick. Source-failure and malformed-source paths do NOT fire
+  the callback (nothing was applied — cascading would be wrong).
+  Nil OnApply is a no-op for backward compatibility.
+
+  **SIGHUP handler in `cmd/alf-daemon/revocation_cascade.go`.**
+  `setupRevocationCascade` constructs the cascader against
+  `wasmRt.Inst` + `wasmRt.TrustStore.AllRevoked`, registers a
+  SIGHUP subscriber, and returns a void-shaped onApply callback
+  for `setupCRL` to plug into the Refresher. The handler
+  goroutine exits on context cancellation — daemon shutdown
+  stops it cleanly. On SIGHUP: `TrustStore.Load()` re-reads the
+  dir (operator-set `.revoked` sidecars surface in the in-memory
+  map), then `cascader.Refresh()` cascades for every newly-
+  revoked key. Audit line per SIGHUP: `[cascade] SIGHUP reload:
+  trust dir=… revoked=N cascaded=M`. One-line transition entries
+  per cascaded key: `[cascade] key newly revoked: <fp>
+  not-valid-after=…` or `[cascade] key revocation tightened:
+  <fp> not-valid-after=… (was …)`.
+
+  **Operator workflow after this drop.** `alf trust revoke <fp>`
+  writes the `.revoked` sidecar; `kill -HUP <daemon-pid>` (or
+  `alf restart` for the conservative path) is now sufficient —
+  no restart needed to cascade. CRL-published revocations
+  cascade automatically on the next Tick (≤ 6h by default, no
+  operator action). Both channels share the same audit format
+  so the operator can diff `journalctl -u alf` against the
+  revocation event.
+
+  **What's NOT in this drop.** fsnotify-based directory
+  watching is deferred — the SIGHUP path is sufficient for the
+  v0.8.0 single-host scale and matches the convention already
+  documented in `truststore.go` ("the daemon reloads on SIGHUP /
+  CC action, not on every Lookup"). A fsnotify upgrade lands
+  alongside the CC ratification page (#395 follow-up) so the
+  same channel covers UI-driven trust mutations too.
+
+  **Tests.** 3 new envelope tests in `crl_test.go`
+  (`AllRevoked` merge / fresh-copy / empty), 6 new runtime
+  cascader tests in `cascade_revocation_test.go` (newly-revoked
+  cascades, tightened-boundary cascades, boot-baseline doesn't
+  cascade, softened doesn't cascade, concurrent Refresh
+  serialised, nil-logf no-ops), 5 new CRL Refresher tests
+  (`OnApply` source / cache / source-failure-skips /
+  malformed-skips / nil-no-ops), and 4 new daemon tests in
+  `revocation_cascade_test.go` (nil-wasmRt returns nil,
+  happy-path wires cascader + onApply, SIGHUP triggers
+  reload+cascade, context-cancel stops handler). 18 new tests
+  total. Race detector clean.
+
+  **#396 status after this drop.** Deliverable 2 closed.
+  Deliverable 8 transitions from "shipped, requires `alf
+  restart`" to fully end-to-end (sidecar → SIGHUP → cascade in
+  the same daemon). The §8 revocation pipeline is now complete:
+  bundle signing → trust-store verify → operator-set Revoke
+  OR upstream CRL → ApplyCRL → cascade discovery → RevokeByKey
+  → Instance.Close in <200ms. Closing #396.
+
 - **#392 Stage 5 — provider revocation cascade**. Stages 1-4 shipped
   the schema, registry, forge integration, and scope validation.
   Stage 5 closes the §3.1 security promise that revoking a provider's

@@ -747,3 +747,179 @@ func TestRefresher_EqualIssuedAtIdempotent(t *testing.T) {
 		t.Error("idempotent re-apply did not populate store")
 	}
 }
+
+// TestRefresher_OnApplyFiresAfterSourceApply pins that the OnApply
+// callback fires once after a successful source-path ApplyCRL, and
+// that the callback observes the post-apply trust store state.
+//
+// This is the daemon's hook for cascading revocations down to live
+// Instances without waiting for SIGHUP — wired in #396 D2.
+func TestRefresher_OnApplyFiresAfterSourceApply(t *testing.T) {
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+	keyID := mustKeyID(t, "0000000000000001")
+	pub, raw := signedCRL(t, now, []envelope.CRLEntry{
+		{KeyID: keyID, NotValidAfter: now.Add(-time.Hour)},
+	})
+
+	store := envelope.NewMemoryTrustStore()
+
+	// Capture the store state at the moment OnApply runs — the
+	// invariant under test is that the apply happens BEFORE the
+	// callback, so the snapshot must already include the entry.
+	var observed bool
+	var fireCount int
+	onApply := func() {
+		fireCount++
+		_, observed = store.RevokedAfter(keyID)
+	}
+
+	r := &Refresher{
+		Source:     &mockSource{response: raw},
+		Cache:      &FileCache{Dir: t.TempDir()},
+		ReleasePub: pub,
+		Store:      store,
+		Now:        func() time.Time { return now },
+		OnApply:    onApply,
+	}
+	if _, err := r.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	if fireCount != 1 {
+		t.Errorf("OnApply fired %d times, want 1", fireCount)
+	}
+	if !observed {
+		t.Error("OnApply did not observe post-apply trust store state")
+	}
+}
+
+// TestRefresher_OnApplyFiresAfterCachePath pins that the cache-
+// fallback path also fires OnApply. Operators offline with a fresh
+// CRL in cache must still see Instances cascade.
+func TestRefresher_OnApplyFiresAfterCachePath(t *testing.T) {
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+	keyID := mustKeyID(t, "0000000000000001")
+	pub, raw := signedCRL(t, now, []envelope.CRLEntry{
+		{KeyID: keyID, NotValidAfter: now.Add(-time.Hour)},
+	})
+
+	cacheDir := t.TempDir()
+	cache := &FileCache{Dir: cacheDir}
+
+	// Seed the cache via a successful source tick first.
+	{
+		seedStore := envelope.NewMemoryTrustStore()
+		seed := &Refresher{
+			Source:     &mockSource{response: raw},
+			Cache:      cache,
+			ReleasePub: pub,
+			Store:      seedStore,
+			Now:        func() time.Time { return now },
+		}
+		if _, err := seed.Tick(context.Background()); err != nil {
+			t.Fatalf("seed tick: %v", err)
+		}
+	}
+
+	// Now go offline, fresh refresher, fresh store, cache load only.
+	store := envelope.NewMemoryTrustStore()
+	var fireCount int
+	r := &Refresher{
+		Source:     &mockSource{err: ErrSourceUnavailable},
+		Cache:      &FileCache{Dir: cacheDir},
+		ReleasePub: pub,
+		Store:      store,
+		Now:        func() time.Time { return now.Add(time.Hour) },
+		OnApply:    func() { fireCount++ },
+	}
+	res, err := r.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("offline tick: %v", err)
+	}
+	if res.FromSource {
+		t.Error("expected FromSource=false (cache path)")
+	}
+	if fireCount != 1 {
+		t.Errorf("OnApply fired %d times on cache path, want 1", fireCount)
+	}
+}
+
+// TestRefresher_OnApplyDoesNotFireOnSourceFailure pins that a
+// source error WITHOUT a successful cache fallback does not fire
+// OnApply. Nothing was applied to the store; cascading would be
+// noise (or a defect — looking at a stale snapshot).
+func TestRefresher_OnApplyDoesNotFireOnSourceFailure(t *testing.T) {
+	pub, _, err := envelope.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := envelope.NewMemoryTrustStore()
+
+	var fireCount int
+	r := &Refresher{
+		Source:     &mockSource{err: ErrSourceUnavailable},
+		Cache:      nil,
+		ReleasePub: pub,
+		Store:      store,
+		Now:        func() time.Time { return time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC) },
+		OnApply:    func() { fireCount++ },
+	}
+	if _, err := r.Tick(context.Background()); err == nil {
+		t.Fatal("expected ErrSourceUnavailable")
+	}
+	if fireCount != 0 {
+		t.Errorf("OnApply fired %d times on source failure, want 0", fireCount)
+	}
+}
+
+// TestRefresher_OnApplyDoesNotFireOnMalformedSource pins that an
+// active mis-serve (signature invalid) does not fire OnApply. The
+// store was not touched, so cascading would be wrong.
+func TestRefresher_OnApplyDoesNotFireOnMalformedSource(t *testing.T) {
+	pub, _, err := envelope.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store := envelope.NewMemoryTrustStore()
+	var fireCount int
+	r := &Refresher{
+		Source:     &mockSource{response: []byte("garbage not a CRL")},
+		Cache:      nil,
+		ReleasePub: pub,
+		Store:      store,
+		Now:        func() time.Time { return time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC) },
+		OnApply:    func() { fireCount++ },
+	}
+	if _, err := r.Tick(context.Background()); err == nil {
+		t.Fatal("expected malformed-source error")
+	}
+	if fireCount != 0 {
+		t.Errorf("OnApply fired %d times on malformed source, want 0", fireCount)
+	}
+}
+
+// TestRefresher_NilOnApplyNoOps pins backward compatibility: an
+// existing Refresher with no OnApply set must keep working. This
+// guards the existing daemon-wiring tests against accidental
+// breakage from the new field.
+func TestRefresher_NilOnApplyNoOps(t *testing.T) {
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+	pub, raw := signedCRL(t, now, []envelope.CRLEntry{
+		{KeyID: mustKeyID(t, "0000000000000001"), NotValidAfter: now.Add(-time.Hour)},
+	})
+
+	store := envelope.NewMemoryTrustStore()
+	r := &Refresher{
+		Source:     &mockSource{response: raw},
+		Cache:      &FileCache{Dir: t.TempDir()},
+		ReleasePub: pub,
+		Store:      store,
+		Now:        func() time.Time { return now },
+		// OnApply: nil
+	}
+	if _, err := r.Tick(context.Background()); err != nil {
+		t.Fatalf("tick with nil OnApply: %v", err)
+	}
+	// No assertion needed beyond "did not panic".
+}

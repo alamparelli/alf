@@ -157,6 +157,28 @@ func (m *MemoryTrustStore) RevokedAfter(id KeyID) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// AllRevoked snapshots every revoked key with its strictest
+// not-valid-after timestamp (operator-set + CRL-set channels merged
+// via the same earliest-wins rule as RevokedAfter). The returned
+// map is a fresh copy — caller may retain or mutate it freely.
+//
+// Used by the daemon's revocation cascader to diff revoked sets
+// across SIGHUP reloads and CRL refreshes; #396 deliverable 2.
+func (m *MemoryTrustStore) AllRevoked() map[KeyID]time.Time {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[KeyID]time.Time, len(m.revokedAt)+len(m.crlRevokedAt))
+	for k, t := range m.revokedAt {
+		out[k] = t
+	}
+	for k, t := range m.crlRevokedAt {
+		if existing, ok := out[k]; !ok || t.Before(existing) {
+			out[k] = t
+		}
+	}
+	return out
+}
+
 // ApplyCRL installs the entries of a verified CRL into the store.
 // Replaces (does not merge) the previous CRL state — re-applying the
 // same CRL is idempotent; applying a newer CRL with fewer entries

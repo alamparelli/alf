@@ -19,6 +19,88 @@ the milestone ticket map.
 
 ### Added
 
+- **#392 Stage 4 — scope schema validation (M8 audit finding)**.
+  Stages 1-3 wired the `[[depends]]` namespace + handle resolution.
+  Stage 4 closes the M8 audit finding: per-handle scope schemas
+  declared by the provider, validated Runtime-side against the
+  consumer's `[[depends]].scope` table at forge time. A buggy
+  provider implementation can no longer accept input broader than
+  its manifest declared — the runtime does the type-checking, the
+  guest never sees scope until validation passes.
+
+  **`[[provider.exports]].scope_fields`.** New optional array on
+  each export. Each entry is `{name, type, required}` where:
+  - `name` matches `^[a-z][a-z0-9_]*$` (Go-struct-tag shape — no
+    quoted-keys needed at the consumer side)
+  - `type` is one of a closed enum: `string`, `int`, `bool`,
+    `string-list`, `int-list`. Anything else is
+    `ErrScopeFieldTypeUnknown`. Adding a new type requires a
+    runtime branch in `checkScopeValueType` AND a doc update.
+  - `required` toggles whether the consumer must declare the field
+
+  Within one export, duplicate `name` values are a parse error;
+  different exports may share a field name (independent schemas).
+
+  JSON Schema was rejected as over-engineering. The actual catalogue
+  in #392 (Bluetooth device names, GPU device IDs, IoT topic IDs,
+  HTTP scope hosts) is flat key/value with primitive types — a
+  closed-enum field-list covers it without a schema-validator
+  dependency. If a future need arises for nested objects or regex
+  patterns, the type enum can grow.
+
+  **`handle.HandleKind.ScopeFields`.** New field on the registry
+  entry, populated by `RegisterProviderExports` at install time.
+  `alf:*` core kinds carry `nil` (they're forged from the legacy
+  `[fs]`/`[events]`/`[tools]` blocks, not via the registry's
+  scope-validation path). The runtime registry uses its own
+  `handle.ScopeField` type rather than re-importing
+  `envelope.ScopeField` — preserves the one-way dependency
+  (runtime → envelope, never the reverse).
+
+  **`(*Instantiator).resolveDepends` extension.** After the
+  registry Lookup hit, `validateScopeAgainstSchema` runs the
+  type checks. Failure paths:
+  - `ErrDependsScopeRequiredFieldMissing` — required field not in scope
+  - `ErrDependsScopeUnknownField` — scope key has no matching schema entry
+  - `ErrDependsScopeFieldTypeMismatch` — value type wrong (e.g. int declared, string supplied)
+  - `ErrDependsScopeNonEmptyButNoSchema` — provider declares no fields but consumer passes scope (function with no parameters)
+
+  Type checks accommodate TOML decoder semantics: `int64` / `int` /
+  `int32` for `int`, `[]any` for lists with per-element type checks.
+  The forge runs only after every depends entry validates; failure
+  surfaces before any handle is created.
+
+  **`envelope.translateScopeFields` private helper** in
+  `internal/runtime/instantiator.go` converts
+  `[]envelope.ScopeField` to `[]handle.ScopeField` at the package
+  boundary — the duplication keeps the `handle` package free of
+  envelope imports.
+
+  **What's NOT in Stage 4.** Two original Stage 4 items deferred:
+  - **Raw-imports `CheckImports` pass-through**: today's daemon
+    runs WASI Preview 1 (`wasi_snapshot_preview1` unconditionally
+    allowed for the Go runtime). The Stage 1 `[[raw_imports]]`
+    declarations use Preview 2 syntax (`wasi:clocks/...`) which
+    doesn't map to Preview 1 module names. The forward-looking
+    schema is in place; runtime wiring waits for Preview 2 in
+    wazero — tracked as a follow-up.
+  - **Transitive trust display**: install-UX, naturally lives with
+    the CLI work in Stage 5.
+
+  **Tests.** 13 new envelope tests in `provider_schema_test.go`:
+  scope_fields happy path with all 5 types, absent yields nil,
+  every error sentinel (`NameEmpty`, `NameMalformed`, `TypeEmpty`,
+  `TypeUnknown`, `Duplicate`), per-export name isolation. 14 new
+  runtime tests in `scope_validate_test.go`: validator unit tests
+  (both/empty, non-empty/no-schema, required-missing, optional-absent,
+  unknown-field, type checks for each type via table-driven, multiple
+  required reports first); integration tests through full
+  verify→register→load flow (happy path, required-missing,
+  type-mismatch, unknown-field, scope-for-fieldless-provider,
+  alf-core no-scope accepted, alf-core scope-passed rejected).
+
+  All 29 archtests still green; race detector clean.
+
 - **#392 Stage 3 — forge integration: depends resolution + provider
   exports registration**. Stage 1 shipped the schema, Stage 2 shipped
   the runtime registry. Stage 3 wires them through the verify+forge

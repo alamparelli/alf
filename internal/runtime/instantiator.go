@@ -195,17 +195,23 @@ func (i *Instantiator) SeedHandleRegistry(reg *handle.HandleRegistry) error {
 }
 
 // RegisterProviderExports registers each entry of `exports` into reg
-// under the publisher's fingerprint short namespace (#392 Stage 3).
+// under the publisher's fingerprint short namespace (#392 Stage 3 + 4).
 // Used at install time of a capability-provider bundle: the verify
 // path produces a SignerID + the manifest's [[provider.exports]];
 // this method bridges them into registry entries the forge can later
-// resolve [[depends]] against.
+// resolve [[depends]] against AND validate scope against.
 //
 // signerID is the trust-store KeyID of the bundle's signer — the
 // `<ns>` part of `<ns>:<id>` references in dependent manifests is
 // `signerID.HexLower()`. Two providers signed by different keys can
 // both export the same handle id (e.g. `bluetooth.scan`); a consumer
 // disambiguates by picking which fingerprint to depend on.
+//
+// Stage 4: each export's `ScopeFields` (the typed field schema the
+// consumer's `[[depends]].scope` is validated against) flows through
+// here — translated from envelope.ScopeField to handle.ScopeField at
+// the package boundary. M8 audit finding: scope validation runs
+// Runtime-side, against the schema the manifest declared at sign time.
 //
 // The runtime token never escapes the Instantiator. Returns on the
 // first registry error; partial state (e.g. some exports registered
@@ -218,12 +224,36 @@ func (i *Instantiator) RegisterProviderExports(reg *handle.HandleRegistry, signe
 	}
 	ns := signerID.HexLower()
 	for _, e := range exports {
-		k := handle.HandleKind{Namespace: ns, ID: e.ID}
+		k := handle.HandleKind{
+			Namespace:   ns,
+			ID:          e.ID,
+			ScopeFields: translateScopeFields(e.ScopeFields),
+		}
 		if err := reg.Register(i.token, k); err != nil {
 			return fmt.Errorf("provider %s: register %s: %w", ns, k.FullName(), err)
 		}
 	}
 	return nil
+}
+
+// translateScopeFields converts envelope.ScopeField (the parsed
+// manifest representation) to handle.ScopeField (the registry
+// representation). Two parallel types, identical value shapes — the
+// duplication keeps the runtime registry from importing envelope
+// (one-way dependency: runtime → envelope, never the reverse).
+func translateScopeFields(in []envelope.ScopeField) []handle.ScopeField {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]handle.ScopeField, len(in))
+	for i, f := range in {
+		out[i] = handle.ScopeField{
+			Name:     f.Name,
+			Type:     handle.ScopeFieldType(f.Type),
+			Required: f.Required,
+		}
+	}
+	return out
 }
 
 // Instantiate verifies the signed manifest, forges the handle set it

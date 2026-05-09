@@ -165,6 +165,10 @@ on the same allowlist).
 ```toml
 [[provider.exports]]
 id = "bluetooth.scan"
+scope_fields = [
+    { name = "device", type = "string", required = true },
+    { name = "timeout_ms", type = "int", required = false },
+]
 
 [[provider.exports]]
 id = "bluetooth.connect"
@@ -173,13 +177,23 @@ id = "bluetooth.connect"
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `id` | string | yes | Canonical handle-kind name. Lowercase, digits, dot, hyphen. Namespace + fingerprint scoping is applied at install time, not in the manifest. |
+| `scope_fields` | array of inline-table | no | Typed-field schema the consumer's `[[depends]].scope` table is validated against (#392 Stage 4). Empty / absent means the export takes no scope. |
+
+`scope_fields` entry shape:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | TOML key the consumer uses in `[[depends]].scope`. Pattern `^[a-z][a-z0-9_]*$` — Go-struct-tag shape, no quoted-keys needed at consumer side. |
+| `type` | string | yes | Closed enum: `string` / `int` / `bool` / `string-list` / `int-list`. Anything else is `ErrScopeFieldTypeUnknown`. |
+| `required` | bool | no | When `true`, the consumer's `[[depends]].scope` MUST set the field; otherwise `ErrDependsScopeRequiredFieldMissing` at install. Default `false`. |
 
 Constraints:
 
 - Only valid when `kind = "capability-provider"`. Declaring `[[provider.exports]]` on any other kind is a parse-time error (`ErrProviderBlockNotAllowedHere`).
 - Empty `[provider]` block (no exports) is allowed on any kind — only declared exports trigger the kind check.
 - Duplicate ids in a single block are a parse error.
-- Stage 1 of `#392` ships `id` only; the per-export scope schema (`schema_ref`) lands in Stage 4 alongside Runtime-side scope validation.
+- Within one export, duplicate `scope_fields[].name` values are a parse error; different exports may share a field name (independent schemas).
+- Validation runs **Runtime-side** at consumer install time, against the schema the provider's signed manifest declared (M8 audit finding — a buggy provider implementation cannot accept input broader than declared).
 
 #### depends — declared dependency on registry handles (#392)
 

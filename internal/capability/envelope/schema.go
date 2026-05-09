@@ -44,6 +44,13 @@ var (
 	ErrProviderExportIDEmpty       = errors.New("envelope: provider.exports.id is empty")
 	ErrProviderExportIDMalformed   = errors.New("envelope: provider.exports.id must match ^[a-z0-9][a-z0-9.-]*$")
 	ErrProviderExportDuplicate     = errors.New("envelope: provider.exports contains duplicate id")
+
+	// #392 Stage 4 — scope schema declared on each provider export.
+	ErrScopeFieldNameEmpty     = errors.New("envelope: provider.exports.scope_fields.name is empty")
+	ErrScopeFieldNameMalformed = errors.New("envelope: provider.exports.scope_fields.name must match ^[a-z][a-z0-9_]*$")
+	ErrScopeFieldTypeEmpty     = errors.New("envelope: provider.exports.scope_fields.type is empty")
+	ErrScopeFieldTypeUnknown   = errors.New("envelope: provider.exports.scope_fields.type is not in the closed enum (string|int|bool|string-list|int-list)")
+	ErrScopeFieldDuplicate     = errors.New("envelope: provider.exports.scope_fields contains duplicate name")
 	ErrDependsHandleEmpty          = errors.New("envelope: depends.handle is empty")
 	ErrDependsHandleMalformed      = errors.New("envelope: depends.handle must match ^<ns>:<id>$ where <ns> is [a-z0-9][a-z0-9-]* and <id> is [a-z0-9][a-z0-9.-]*")
 	ErrDependsHandleNamespaceReserved = errors.New("envelope: depends.handle uses reserved namespace alf: but the id is not a known core handle kind")
@@ -136,6 +143,25 @@ var rawImportFunctionPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // providers can match common conventions without forcing a single
 // separator.
 var providerExportIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
+
+// scopeFieldNamePattern enforces the TOML-key shape for scope field
+// names. Lowercase, digits, underscore — matches Go-struct-tag
+// conventions and avoids the dot/hyphen tokens that would force a
+// quoted-key in TOML at the consumer side.
+var scopeFieldNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// validScopeFieldTypes is the closed enum the validator accepts for
+// [[provider.exports.scope_fields]].type. Adding a new type means a
+// new runtime validator branch (see resolveDepends in
+// internal/runtime/instantiator_verified.go) AND an update to
+// MANIFEST-SCHEMA.md §3.4.
+var validScopeFieldTypes = map[string]ScopeFieldType{
+	"string":      ScopeFieldTypeString,
+	"int":         ScopeFieldTypeInt,
+	"bool":        ScopeFieldTypeBool,
+	"string-list": ScopeFieldTypeStringList,
+	"int-list":    ScopeFieldTypeIntList,
+}
 
 // dependsHandlePattern enforces the namespace-scoped handle reference
 // format `<ns>:<id>` per #392 §H2. <ns> is a fingerprint short or the
@@ -425,9 +451,47 @@ func validateProviderBlock(raw tomlProviderBlock, kind ManifestKind) (ProviderBl
 			return ProviderBlock{}, fmt.Errorf("%w: provider.exports[%d].id=%q", ErrProviderExportDuplicate, i, e.ID)
 		}
 		seen[e.ID] = struct{}{}
-		out = append(out, ProviderExport{ID: e.ID})
+		fields, err := validateScopeFields(e.ScopeFields, i)
+		if err != nil {
+			return ProviderBlock{}, err
+		}
+		out = append(out, ProviderExport{ID: e.ID, ScopeFields: fields})
 	}
 	return ProviderBlock{Exports: out}, nil
+}
+
+// validateScopeFields walks the scope_fields array under one provider
+// export and checks each entry's name + type + uniqueness. Empty
+// scope_fields list is legal (the export takes no scope). The
+// exportIdx parameter feeds error messages so authors can find the
+// offending entry by index.
+func validateScopeFields(raw []tomlScopeField, exportIdx int) ([]ScopeField, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make([]ScopeField, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for j, f := range raw {
+		if f.Name == "" {
+			return nil, fmt.Errorf("%w: provider.exports[%d].scope_fields[%d]", ErrScopeFieldNameEmpty, exportIdx, j)
+		}
+		if !scopeFieldNamePattern.MatchString(f.Name) {
+			return nil, fmt.Errorf("%w: provider.exports[%d].scope_fields[%d].name=%q", ErrScopeFieldNameMalformed, exportIdx, j, f.Name)
+		}
+		if f.Type == "" {
+			return nil, fmt.Errorf("%w: provider.exports[%d].scope_fields[%d].name=%q", ErrScopeFieldTypeEmpty, exportIdx, j, f.Name)
+		}
+		typed, ok := validScopeFieldTypes[f.Type]
+		if !ok {
+			return nil, fmt.Errorf("%w: provider.exports[%d].scope_fields[%d].type=%q", ErrScopeFieldTypeUnknown, exportIdx, j, f.Type)
+		}
+		if _, dup := seen[f.Name]; dup {
+			return nil, fmt.Errorf("%w: provider.exports[%d].scope_fields[%d].name=%q", ErrScopeFieldDuplicate, exportIdx, j, f.Name)
+		}
+		seen[f.Name] = struct{}{}
+		out = append(out, ScopeField{Name: f.Name, Type: typed, Required: f.Required})
+	}
+	return out, nil
 }
 
 // validateDependsBlock walks `[[depends]]` and rejects malformed

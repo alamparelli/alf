@@ -12,10 +12,12 @@ import (
 // (Namespace, ID) uniquely identifies the kind across all installed
 // providers + the daemon's bundled core kinds.
 //
-// Stage 2 of #392 ships namespace + id only. Stage 4 will extend this
-// type with a per-kind scope schema (M8 audit finding — Runtime-side
-// scope validation against the schema the provider declared, not
-// against whatever the provider's implementation accepts).
+// #392 Stage 2 shipped (Namespace, ID). Stage 4 added ScopeFields:
+// the per-kind typed-field schema the consumer's `[[depends]].scope`
+// is validated against at forge time. M8 audit finding: validation
+// happens Runtime-side (resolveDepends drives it from the registry),
+// never inside the provider — a buggy provider implementation cannot
+// accept input broader than what its manifest declared.
 type HandleKind struct {
 	// Namespace is either the reserved "alf" string (for the daemon's
 	// bundled core kinds) or a publisher fingerprint short. The empty
@@ -27,6 +29,41 @@ type HandleKind struct {
 	// providerExportIDPattern in envelope/schema.go. Empty string
 	// rejected at Register time.
 	ID string
+
+	// ScopeFields is the closed list of fields a consumer's
+	// `[[depends]].scope` table may carry for this kind. Empty (nil
+	// or zero-length) means the kind takes no scope — depends.scope
+	// must also be empty. See ScopeFieldType for the type enum.
+	//
+	// Stage 4 stores this on alf:* core kinds as nil (the daemon's
+	// bundled handles don't go through this path; they're forged
+	// directly from `[fs]` / `[events]` / `[tools]` blocks). Provider
+	// exports populate this field via RegisterProviderExports.
+	ScopeFields []ScopeField
+}
+
+// ScopeFieldType is the closed enum of types a scope field may carry.
+// Mirrors envelope.ScopeFieldType — the package boundary keeps the
+// runtime registry independent of the envelope package, but the
+// values are identical so callers translating one to the other can
+// rely on string equality.
+type ScopeFieldType string
+
+const (
+	ScopeFieldTypeString     ScopeFieldType = "string"
+	ScopeFieldTypeInt        ScopeFieldType = "int"
+	ScopeFieldTypeBool       ScopeFieldType = "bool"
+	ScopeFieldTypeStringList ScopeFieldType = "string-list"
+	ScopeFieldTypeIntList    ScopeFieldType = "int-list"
+)
+
+// ScopeField is one entry in HandleKind.ScopeFields. Same shape as
+// envelope.ScopeField (different package boundary so the registry
+// doesn't depend on envelope at compile time).
+type ScopeField struct {
+	Name     string
+	Type     ScopeFieldType
+	Required bool
 }
 
 // FullName returns the manifest-syntax form "<ns>:<id>". Used by

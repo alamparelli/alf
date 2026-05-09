@@ -26,6 +26,21 @@ import (
 // format; the registry lookup is the runtime authority.
 var ErrDependsHandleNotRegistered = errors.New("runtime: [[depends]] handle is not registered with the runtime HandleRegistry")
 
+// #392 Stage 4 — scope validation against the schema the provider
+// declared at sign time. M8 audit finding: validation runs
+// Runtime-side, never inside the provider, so a buggy provider
+// implementation cannot accept input broader than declared.
+//
+// Each error wraps the offending handle reference + field name + the
+// type info. Callers (loader, install UX) display them verbatim;
+// instantiation aborts before any forge work runs.
+var (
+	ErrDependsScopeRequiredFieldMissing = errors.New("runtime: [[depends]].scope is missing a field marked required by the provider's schema")
+	ErrDependsScopeUnknownField         = errors.New("runtime: [[depends]].scope contains a field the provider's schema does not declare")
+	ErrDependsScopeFieldTypeMismatch    = errors.New("runtime: [[depends]].scope field has a value whose type does not match the provider's schema")
+	ErrDependsScopeNonEmptyButNoSchema  = errors.New("runtime: [[depends]].scope is non-empty but the registered handle declares no scope fields")
+)
+
 // VerifiedInstantiation is the success payload of InstantiateVerified.
 // It carries the forged handle Instance plus the typed envelope
 // Manifest that produced it. Downstream loaders (WASM engine, skill
@@ -207,19 +222,130 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 }
 
 // resolveDepends checks every [[depends]] entry in m against the
-// HandleRegistry. Returns ErrDependsHandleNotRegistered (wrapped with
-// the offending handle) on the first miss; the manifest must declare
-// every dependency by reference, the registry must agree it exists,
-// and any divergence aborts before the forge runs.
+// HandleRegistry: the handle must be registered AND the consumer's
+// scope table must conform to the registered ScopeFields schema.
+// Returns the wrapped sentinel error on the first miss; the manifest
+// must declare every dependency by reference, the registry must
+// agree the handle exists, the scope must validate, and any
+// divergence aborts before the forge runs.
 //
 // Pre-condition: every DependsEntry came from envelope.Validate so
-// SplitHandle returns two well-formed parts.
+// SplitHandle returns two well-formed parts. Scope is opaque
+// `map[string]any` at the envelope side; resolveDepends drives the
+// type checks here using the registered schema.
 func (i *Instantiator) resolveDepends(m *envelope.Manifest) error {
 	for idx, d := range m.Depends {
 		ns, id := d.SplitHandle()
-		if _, ok := i.handleRegistry.Lookup(ns, id); !ok {
+		k, ok := i.handleRegistry.Lookup(ns, id)
+		if !ok {
 			return fmt.Errorf("%w: depends[%d].handle=%q", ErrDependsHandleNotRegistered, idx, d.Handle)
 		}
+		if err := validateScopeAgainstSchema(d.Scope, k.ScopeFields); err != nil {
+			return fmt.Errorf("depends[%d].handle=%q: %w", idx, d.Handle, err)
+		}
+	}
+	return nil
+}
+
+// validateScopeAgainstSchema enforces the scope schema invariants
+// declared by the provider at sign time:
+//   - every required field is present in scope
+//   - every scope key matches a declared field name
+//   - every scope value's type matches the declared field type
+//
+// A nil schema with a non-empty scope is rejected (the consumer is
+// passing data the provider's interface does not accept) — the spec
+// equivalent of "no parameters" at the function-signature level.
+//
+// This is the M8 audit finding's runtime hook: the provider
+// implementation never sees scope until validation passes, so a
+// buggy provider that "forgets" to validate cannot accept broader
+// input than the manifest declared.
+func validateScopeAgainstSchema(scope map[string]any, schema []handle.ScopeField) error {
+	if len(scope) == 0 && len(schema) == 0 {
+		return nil
+	}
+	if len(schema) == 0 && len(scope) > 0 {
+		return ErrDependsScopeNonEmptyButNoSchema
+	}
+
+	// Build a name → field index for O(1) lookup; also use it to
+	// detect "unknown scope keys" by tracking which schema entries
+	// were matched.
+	byName := make(map[string]handle.ScopeField, len(schema))
+	for _, f := range schema {
+		byName[f.Name] = f
+	}
+
+	// Required fields present.
+	for _, f := range schema {
+		if !f.Required {
+			continue
+		}
+		if _, ok := scope[f.Name]; !ok {
+			return fmt.Errorf("%w: field=%q type=%q", ErrDependsScopeRequiredFieldMissing, f.Name, f.Type)
+		}
+	}
+
+	// Every scope key has a matching field with matching type.
+	for k, v := range scope {
+		f, ok := byName[k]
+		if !ok {
+			return fmt.Errorf("%w: field=%q", ErrDependsScopeUnknownField, k)
+		}
+		if err := checkScopeValueType(v, f.Type); err != nil {
+			return fmt.Errorf("%w: field=%q expected_type=%q: %v", ErrDependsScopeFieldTypeMismatch, k, f.Type, err)
+		}
+	}
+	return nil
+}
+
+// checkScopeValueType returns nil iff value matches the declared type.
+// TOML's pelletier/go-toml/v2 maps int → int64, float → float64, etc.
+// Lists are decoded as []any; we descend per-element for *-list types.
+func checkScopeValueType(value any, t handle.ScopeFieldType) error {
+	switch t {
+	case handle.ScopeFieldTypeString:
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("got %T", value)
+		}
+	case handle.ScopeFieldTypeInt:
+		// TOML decoder uses int64 for whole numbers.
+		switch value.(type) {
+		case int64, int, int32:
+			return nil
+		default:
+			return fmt.Errorf("got %T", value)
+		}
+	case handle.ScopeFieldTypeBool:
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("got %T", value)
+		}
+	case handle.ScopeFieldTypeStringList:
+		list, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("got %T (want list)", value)
+		}
+		for i, e := range list {
+			if _, ok := e.(string); !ok {
+				return fmt.Errorf("item %d: got %T (want string)", i, e)
+			}
+		}
+	case handle.ScopeFieldTypeIntList:
+		list, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("got %T (want list)", value)
+		}
+		for i, e := range list {
+			switch e.(type) {
+			case int64, int, int32:
+				continue
+			default:
+				return fmt.Errorf("item %d: got %T (want int)", i, e)
+			}
+		}
+	default:
+		return fmt.Errorf("unknown scope-field type %q (handle.ScopeFieldType enum drift?)", t)
 	}
 	return nil
 }

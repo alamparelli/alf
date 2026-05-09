@@ -164,3 +164,158 @@ func TestValidate_CapabilityProviderKindAccepted(t *testing.T) {
 		t.Errorf("Kind=%q, want capability-provider", m.Kind)
 	}
 }
+
+// #392 Stage 4 — scope_fields schema on provider exports.
+
+func TestValidate_ProviderScopeFieldsHappyPath(t *testing.T) {
+	input := validCapabilityProviderManifest() + `
+[[provider.exports]]
+id = "bluetooth.scan"
+scope_fields = [
+    { name = "device", type = "string", required = true },
+    { name = "timeout_ms", type = "int", required = false },
+    { name = "verbose", type = "bool", required = false },
+    { name = "tags", type = "string-list", required = false },
+    { name = "ports", type = "int-list", required = false },
+]
+`
+	m, err := Validate([]byte(input))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if len(m.Provider.Exports) != 1 {
+		t.Fatalf("Exports len=%d", len(m.Provider.Exports))
+	}
+	got := m.Provider.Exports[0].ScopeFields
+	want := []ScopeField{
+		{Name: "device", Type: ScopeFieldTypeString, Required: true},
+		{Name: "timeout_ms", Type: ScopeFieldTypeInt, Required: false},
+		{Name: "verbose", Type: ScopeFieldTypeBool, Required: false},
+		{Name: "tags", Type: ScopeFieldTypeStringList, Required: false},
+		{Name: "ports", Type: ScopeFieldTypeIntList, Required: false},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ScopeFields len=%d, want %d", len(got), len(want))
+	}
+	for i, f := range want {
+		if got[i] != f {
+			t.Errorf("ScopeFields[%d]=%+v, want %+v", i, got[i], f)
+		}
+	}
+}
+
+func TestValidate_ProviderScopeFieldsAbsentYieldsNil(t *testing.T) {
+	input := validCapabilityProviderManifest() + `
+[[provider.exports]]
+id = "bluetooth.scan"
+`
+	m, err := Validate([]byte(input))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if m.Provider.Exports[0].ScopeFields != nil {
+		t.Errorf("ScopeFields=%+v, want nil", m.Provider.Exports[0].ScopeFields)
+	}
+}
+
+func TestValidate_ProviderScopeFieldNameEmpty(t *testing.T) {
+	input := validCapabilityProviderManifest() + `
+[[provider.exports]]
+id = "bluetooth.scan"
+scope_fields = [{ name = "", type = "string", required = false }]
+`
+	_, err := Validate([]byte(input))
+	if !errors.Is(err, ErrScopeFieldNameEmpty) {
+		t.Fatalf("want ErrScopeFieldNameEmpty, got %v", err)
+	}
+}
+
+func TestValidate_ProviderScopeFieldNameMalformed(t *testing.T) {
+	bad := []string{
+		"With-Hyphen",
+		"With.Dot",
+		"with space",
+		"UPPER",
+		"1leading-digit",
+		"-leading-dash",
+		"_leading-underscore",
+	}
+	for _, n := range bad {
+		input := validCapabilityProviderManifest() + `
+[[provider.exports]]
+id = "bluetooth.scan"
+scope_fields = [{ name = "` + n + `", type = "string", required = false }]
+`
+		_, err := Validate([]byte(input))
+		if !errors.Is(err, ErrScopeFieldNameMalformed) {
+			t.Errorf("name=%q: want ErrScopeFieldNameMalformed, got %v", n, err)
+		}
+	}
+}
+
+func TestValidate_ProviderScopeFieldTypeEmpty(t *testing.T) {
+	input := validCapabilityProviderManifest() + `
+[[provider.exports]]
+id = "bluetooth.scan"
+scope_fields = [{ name = "device", type = "", required = false }]
+`
+	_, err := Validate([]byte(input))
+	if !errors.Is(err, ErrScopeFieldTypeEmpty) {
+		t.Fatalf("want ErrScopeFieldTypeEmpty, got %v", err)
+	}
+}
+
+func TestValidate_ProviderScopeFieldTypeUnknown(t *testing.T) {
+	bad := []string{"float", "string-array", "object", "any", "i64", "STRING"}
+	for _, ty := range bad {
+		input := validCapabilityProviderManifest() + `
+[[provider.exports]]
+id = "bluetooth.scan"
+scope_fields = [{ name = "field", type = "` + ty + `", required = false }]
+`
+		_, err := Validate([]byte(input))
+		if !errors.Is(err, ErrScopeFieldTypeUnknown) {
+			t.Errorf("type=%q: want ErrScopeFieldTypeUnknown, got %v", ty, err)
+		}
+	}
+}
+
+func TestValidate_ProviderScopeFieldDuplicateName(t *testing.T) {
+	input := validCapabilityProviderManifest() + `
+[[provider.exports]]
+id = "bluetooth.scan"
+scope_fields = [
+    { name = "device", type = "string", required = true },
+    { name = "device", type = "int", required = false },
+]
+`
+	_, err := Validate([]byte(input))
+	if !errors.Is(err, ErrScopeFieldDuplicate) {
+		t.Fatalf("want ErrScopeFieldDuplicate, got %v", err)
+	}
+}
+
+// scope_fields can differ between exports — duplicate-detection is
+// per-export, not per-manifest.
+func TestValidate_ProviderScopeFieldsPerExportIsolation(t *testing.T) {
+	input := validCapabilityProviderManifest() + `
+[[provider.exports]]
+id = "scan"
+scope_fields = [{ name = "device", type = "string", required = true }]
+
+[[provider.exports]]
+id = "connect"
+scope_fields = [{ name = "device", type = "string", required = true }]
+`
+	m, err := Validate([]byte(input))
+	if err != nil {
+		t.Fatalf("Validate: %v (different exports may share a field name)", err)
+	}
+	if len(m.Provider.Exports) != 2 {
+		t.Fatalf("Exports len=%d", len(m.Provider.Exports))
+	}
+	if m.Provider.Exports[0].ScopeFields[0].Name != "device" ||
+		m.Provider.Exports[1].ScopeFields[0].Name != "device" {
+		t.Error("expected both exports to carry a `device` field")
+	}
+}

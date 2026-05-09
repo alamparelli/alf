@@ -144,7 +144,14 @@ type tomlProviderBlock struct {
 }
 
 type tomlProviderExport struct {
-	ID string `toml:"id"`
+	ID          string            `toml:"id"`
+	ScopeFields []tomlScopeField  `toml:"scope_fields"`
+}
+
+type tomlScopeField struct {
+	Name     string `toml:"name"`
+	Type     string `toml:"type"`
+	Required bool   `toml:"required"`
 }
 
 type tomlDependsEntry struct {
@@ -204,10 +211,48 @@ type ProviderBlock struct {
 // ProviderExport is one entry in [[provider.exports]]. The ID is the
 // handle kind name (lowercase, dot-segmented — e.g. "bluetooth.scan",
 // "gpu.compute"); namespace + fingerprint scoping is applied at install
-// time. SchemaRef (the JSON Schema URL or inline schema for the scope
-// argument) is deferred to Stage 4 of #392 — Stage 1 ships id-only.
+// time. ScopeFields declares the typed fields a consumer's
+// `[[depends]].scope` table is allowed to carry — empty means the
+// handle takes no scope (e.g. `bluetooth.scan` may not need any).
+//
+// #392 Stage 4 ships ScopeFields. The full JSON Schema reference
+// (`schema_ref`) variant noted in the original ticket is replaced by
+// this typed-field-list form. Rationale: complex schemas (nested
+// objects, conditionals, regex patterns) are 80% over-engineering
+// for the actual use cases. A flat field-list with five primitive
+// types covers Bluetooth devices, GPU device names, IoT topic IDs,
+// and the rest of the §392 scope catalogue. M8 audit finding holds:
+// validation is Runtime-side (resolveDepends drives it) so a buggy
+// provider implementation cannot accept broader input than declared.
 type ProviderExport struct {
-	ID string
+	ID          string
+	ScopeFields []ScopeField
+}
+
+// ScopeFieldType is the closed set of types a [[depends]].scope field
+// may carry under #392 Stage 4. Each name maps to a TOML/JSON value
+// shape the runtime can verify without delegating to a JSON Schema
+// validator.
+type ScopeFieldType string
+
+const (
+	ScopeFieldTypeString     ScopeFieldType = "string"
+	ScopeFieldTypeInt        ScopeFieldType = "int"
+	ScopeFieldTypeBool       ScopeFieldType = "bool"
+	ScopeFieldTypeStringList ScopeFieldType = "string-list"
+	ScopeFieldTypeIntList    ScopeFieldType = "int-list"
+)
+
+// ScopeField is one entry in `[[provider.exports]].scope_fields`.
+// Name is the TOML key the consumer uses in `[[depends]].scope`;
+// Type is one of the closed enum above; Required toggles whether
+// the consumer manifest must declare the field. Stage 4 has no
+// default-value support — a missing optional field stays absent
+// at the consumer side.
+type ScopeField struct {
+	Name     string
+	Type     ScopeFieldType
+	Required bool
 }
 
 // DependsEntry captures one `[[depends]]` entry per #392. Handle is the

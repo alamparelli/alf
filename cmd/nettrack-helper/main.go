@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alamparelli/alf/internal/platform/socknet"
 	ct "github.com/ti-mo/conntrack"
 	"github.com/ti-mo/netfilter"
 )
@@ -80,16 +81,21 @@ type ctrlMsg struct {
 }
 
 // runControlSocket listens for kill switch commands from the daemon.
+//
+// SEC-080-003: ListenUnix0660 narrows the umask around net.Listen so the
+// socket inode is mode 0660 from byte zero, closing the TOCTOU window
+// between Listen and the legacy os.Chmod where the LLM (uid 1000) could
+// have connected during the kernel-default 0o775 phase and toggled the
+// iptables kill switch.
 func runControlSocket(ctx context.Context) {
 	os.Remove(ctrlSockPath)
-	ln, err := net.Listen("unix", ctrlSockPath)
+	ln, err := socknet.ListenUnix0660(ctrlSockPath, 1001) // chgrp alfd
 	if err != nil {
 		log.Printf("[nettrack] control socket: %v", err)
 		return
 	}
-	// Only the daemon (alfd, uid 1001) should connect.
-	os.Chown(ctrlSockPath, 0, 1001) // root:alfd
-	os.Chmod(ctrlSockPath, 0o660)
+	// chown root:alfd — ListenUnix0660 already chgrp'd to 1001.
+	_ = os.Chown(ctrlSockPath, 0, 1001)
 
 	go func() {
 		<-ctx.Done()
@@ -126,15 +132,17 @@ func main() {
 	// Clean up stale socket.
 	os.Remove(sockPath)
 
-	ln, err := net.Listen("unix", sockPath)
+	// SEC-080-003: same TOCTOU concern as the control socket above —
+	// the events socket carries every outbound conntrack record. A
+	// process that connected during the kernel-default 0o775 phase
+	// could have read every NEW connection the daemon was about to
+	// firewall-classify.
+	ln, err := socknet.ListenUnix0660(sockPath, 1001) // chgrp alfd
 	if err != nil {
 		log.Fatalf("listen %s: %v", sockPath, err)
 	}
 	defer ln.Close()
-
-	// Allow daemon (alfd, gid 1001) to read events. LLM (alf) excluded.
-	os.Chown(sockPath, 0, 1001) // root:alfd
-	os.Chmod(sockPath, 0o660)
+	_ = os.Chown(sockPath, 0, 1001) // root:alfd
 
 	log.Printf("listening on %s", sockPath)
 

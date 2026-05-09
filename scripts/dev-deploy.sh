@@ -198,15 +198,26 @@ services:
     cpus: "2.0"
     runtime: ${ALF_RUNTIME:-runc}
     security_opt:
+      # 0.8.0: apparmor=unconfined is vestigial from the razed sandbox
+      # (chroot+setpriv+bwrap needed mount(2) which AppArmor blocked).
+      # The custom profile at scripts/apparmor-alf.profile (#86 SEC-A01)
+      # is the planned replacement; activate via:
+      #   sudo apparmor_parser -r -W /opt/alf/scripts/apparmor-alf.profile
+      #   # then change this line to: - apparmor=alf
       - apparmor=unconfined
+      # Custom seccomp at scripts/seccomp-alf.json (#86 SEC-A11): activate via
+      #   - seccomp=/opt/alf/scripts/seccomp-alf.json
     cap_drop:
       - ALL
     cap_add:
+      # CHOWN/DAC_OVERRIDE/FOWNER: entrypoint Phase 1 (apt-get, chown, perms).
+      # SETUID/SETGID: entrypoint + daemon (subprocess isolation via setpriv).
+      # NET_ADMIN: nettrack-helper (conntrack events).
+      # SYS_ADMIN + SYS_CHROOT removed in v0.8.0 (#86 + #406): no remaining
+      # callers of syscall.Mount / Chroot / Unshare / PivotRoot.
       - CHOWN
       - SETUID
       - SETGID
-      - SYS_ADMIN
-      - SYS_CHROOT
       - DAC_OVERRIDE
       - FOWNER
       - NET_ADMIN

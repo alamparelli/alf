@@ -172,7 +172,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		stopWatcher: stopWatcher,
 		httpServer: &http.Server{
 			Addr:              addr,
-			Handler:           WithExperimentalHeader(handlers.Main),
+			Handler:           handlers.Main,
 			ReadTimeout:       30 * time.Second,
 			ReadHeaderTimeout: 10 * time.Second,
 			IdleTimeout:       120 * time.Second,

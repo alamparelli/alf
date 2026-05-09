@@ -385,9 +385,9 @@ The production implementation on `release/0.8.0` is a clean rebuild — no direc
 - #86 AppArmor + seccomp (Layer 1 outer)
 - #396 revocation E2E (extends handle lifecycle already in prototype)
 
-**Final gate — tag 0.8.0**
-- `ALF_OCAP_STRICT=1` flip
-- `ALF_EXPERIMENTAL` banner removed
+**Final gate — tag 0.8.0** ✅ shipped
+- Strict ocap posture is now the default — no boot flag required
+- `ALF_EXPERIMENTAL` dev-window gate retired; helper warns once and proceeds
 - SECURITY.md updated to reflect new posture
 
 ### 9.3 Validation gates specific to the WASM layer
@@ -410,7 +410,7 @@ This doc is a snapshot of the implementation state on `release/0.8.0`. It will d
 - **After #391 lands** ✅ — handle type list reconciled; for 0.8.0 only `fs` is in scope (other handles shipped at the API level but the WASM host ABI wires only `fs` for now).
 - **After #398 lands** — update §3.4 safety matrix with the final archtest ruleset (step 11 of #386 already pins the `host_fs.go` memory-access rules; #398 extends to the full capability-package set).
 - **After #386 wiring lands** ✅ — §4.5 rewritten against the real `wasm_build_tool` + loader flow; §7.1 carries the real `Runtime.Instantiate` pipeline.
-- **After daemon boot wiring lands** (follow-up to this #386) — §7.1-bis needs the exact `ALF_EXPERIMENTAL=1` gate name and the boot-log format.
+- **After daemon boot wiring lands** ✅ — `setupWASMLoader` runs unconditionally as of v0.8.0 final; the dev-window `ALF_EXPERIMENTAL=1` gate was retired and is no longer relevant.
 - **At v0.8.0 tag** — §9 rewritten from roadmap to "what actually shipped"; §8 ("what's not included") moves items realised into the rest of the doc, keeps only what's truly deferred to 0.9.0+.
 
 Doc owner for these refreshes: the person closing the corresponding ticket. If you close one of the above without refreshing this doc, you're shipping a lie to future contributors.

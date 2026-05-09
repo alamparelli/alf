@@ -66,11 +66,6 @@ services:
 {{- if .Timezone}}
       - TZ={{.Timezone}}
 {{- end}}
-      # 0.8.0 dev-window gate: daemon refuses to start without this after
-      # ticket #406 razed the legacy sandbox. Removed once ALF_OCAP_STRICT=1
-      # ships post-#391 + #386. See docs/ARCHITECTURE-SECURITY.md §12.
-      # Regenerated templates will drop this block when the dev window closes.
-      - ALF_EXPERIMENTAL=1
     volumes:
       - ./secrets:/opt/alf/secrets-staging:ro
       - ./data:/home/alf/data

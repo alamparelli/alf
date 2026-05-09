@@ -71,9 +71,9 @@ func (w *wasmRuntime) Close(ctx context.Context) error {
 // reserved for stack-init failures (key generation, runtime construction)
 // that mean nothing else can succeed.
 //
-// The runtime is gated by the existing ALF_EXPERIMENTAL=1 boot check
-// (see experimental.go); no separate flag — running the daemon during
-// the 0.8.0 dev window already implies opt-in.
+// The runtime ships unconditionally as of v0.8.0: the dev-window
+// ALF_EXPERIMENTAL gate was retired with the strict-flip. WASM bundles
+// load + verify + register at boot whenever <skillsDir>/wasm exists.
 func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wasm.CapabilityRegistry, logf func(string, ...any)) (*wasmRuntime, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}

@@ -19,6 +19,35 @@ the milestone ticket map.
 
 ### Added
 
+- **Strict-flip — `ALF_EXPERIMENTAL` dev-window gate retired**.
+  v0.8.0 final closes the §12 migration: the daemon now boots into
+  the strict ocap posture by default, with no flag required. Layer 1
+  (#86 cap_drop + AppArmor/seccomp profiles), Layer 2 (#388 + #387 +
+  #397 envelope + trust store + CRL), and Layer 3 (#391 + #392 + #399
+  + #400 + #396 ocap forge + revocation cascade) are all in place;
+  the dev-window requirement that operators set `ALF_EXPERIMENTAL=1`
+  is gone. The boot helper `warnDeprecatedExperimentalEnv`
+  ([`cmd/alf-daemon/experimental.go`](cmd/alf-daemon/experimental.go))
+  emits a one-line `[boot] DEPRECATED:` warning when operators still
+  carry the variable in their `docker-compose.yml`, then proceeds
+  normally — no boot refusal. The `WithExperimentalHeader` middleware
+  that tagged every Control Center response with
+  `X-ALF-Experimental: no-isolation` was removed; the multi-line "NO
+  ISOLATION" banner at boot was removed; `ALF_EXPERIMENTAL=1` was
+  dropped from the generated `docker-compose.yml` template
+  ([`internal/cli/templates/docker-compose.yml.tmpl`](internal/cli/templates/docker-compose.yml.tmpl))
+  and the `scripts/dev-local.sh` dev helper. README §0.8.0 note
+  rewritten to describe the shipped 3-layer model rather than the dev
+  window. CONFIGURATION.md "Boot gates" table replaced with the
+  deprecation note. 2 new tests
+  ([`cmd/alf-daemon/experimental_test.go`](cmd/alf-daemon/experimental_test.go)):
+  `TestWarnDeprecatedExperimentalEnv_NoEnvSilent` (no log output when
+  unset) + `TestWarnDeprecatedExperimentalEnv_PresenceWarns` (warning
+  labels itself DEPRECATED, names the env var, hints at the cleanup
+  location). The deprecation helper is kept until the next minor
+  release as a no-op migration aid for operators upgrading from
+  0.8.0-beta — it can be deleted entirely at 0.9.0.
+
 - **#86 — Layer 1 outer ring hardening**. Custom AppArmor +
   seccomp profiles authored, `CAP_SYS_ADMIN` and `CAP_SYS_CHROOT`
   dropped from the container's `cap_add` (no longer needed

@@ -1,33 +1,35 @@
 package main
 
-import "fmt"
+import "log"
 
-// experimentalBanner prints after the "starting..." line when the boot gate
-// opens. Combined with the gate in requireExperimentalGate, operators cannot
-// unknowingly run a 0.8.0 development build that lacks isolation.
+// The 0.8.0 development-window gate (`ALF_EXPERIMENTAL=1` + the
+// multi-line "NO ISOLATION" banner + the `X-ALF-Experimental`
+// CC response header) was retired at v0.8.0 final. The Layer 1
+// outer ring (#86), Layer 2 trust (#388 + #387 + #397), and
+// Layer 3 ocap forge (#391 + #392 + #399 + #400) are all in
+// place; the daemon now boots into the strict ocap posture by
+// default. Operators no longer need to set any flag.
 //
-// Refs: docs/ARCHITECTURE-SECURITY.md §12 safety rules, ticket #406.
-const experimentalBanner = `
-!! =================================================================== !!
-!!  ALF_EXPERIMENTAL=1 — NO ISOLATION                                   !!
-!!                                                                      !!
-!!  This is a 0.8.0 development snapshot. The legacy sandbox has been   !!
-!!  razed (chroot+setpriv, firewall gate, ctx-borne policy). The ocap   !!
-!!  forge replacement is not in place. Do not run on shared systems.    !!
-!!                                                                      !!
-!!  See: docs/ARCHITECTURE-SECURITY.md §12, ticket #406                  !!
-!! =================================================================== !!
-`
+// We keep the file (rather than deleting it) so the deprecation
+// helper below can WARN — but not refuse boot — for operators
+// who left `ALF_EXPERIMENTAL=1` in their docker-compose.yml from
+// the dev window. The warning fires once at boot, suggests the
+// removal, and the daemon proceeds normally.
+//
+// Refs: docs/ARCHITECTURE-SECURITY.md §12 final-tag transition;
+// commits closing #86 + #396 + #392 + the strict-flip itself.
 
-// requireExperimentalGate returns nil when ALF_EXPERIMENTAL=1 and an error
-// otherwise. Takes a getenv callback so the check is driveable from tests
-// without touching process env.
-//
-// Callers are expected to log.Fatal on non-nil so the daemon exits non-zero
-// at first responsibility: main() before any other init step.
-func requireExperimentalGate(getenv func(string) string) error {
-	if getenv("ALF_EXPERIMENTAL") == "1" {
-		return nil
+// warnDeprecatedExperimentalEnv emits one log line at boot when
+// ALF_EXPERIMENTAL=1 is still set in the environment. The flag is
+// no-op as of v0.8.0 final but operators may still have it in
+// their docker-compose.yml from the dev window. Pointing at the
+// removal step keeps the migration friction low.
+func warnDeprecatedExperimentalEnv(getenv func(string) string) {
+	if getenv("ALF_EXPERIMENTAL") == "" {
+		return
 	}
-	return fmt.Errorf("alf-daemon refuses to boot: set ALF_EXPERIMENTAL=1 to acknowledge the 0.8.0 development window has no sandbox isolation (see ticket #406 and docs/ARCHITECTURE-SECURITY.md §12)")
+	log.Printf("[boot] DEPRECATED: ALF_EXPERIMENTAL is set but no longer used. " +
+		"The 0.8.0 dev window has closed; the daemon now boots into strict ocap " +
+		"by default. Remove the variable from your docker-compose.yml — kept here " +
+		"as a no-op until the next minor release.")
 }

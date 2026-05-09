@@ -7,9 +7,14 @@ README for the happy-path setup.
 
 ## Boot gates
 
-| Variable | Required | Purpose |
-|---|---|---|
-| `ALF_EXPERIMENTAL=1` | yes (0.8.0 dev window) | Acknowledges this build has no legacy sandbox isolation. Daemon refuses to boot without it. Lifted when `ALF_OCAP_STRICT=1` replaces it (post-0.8.0). See [`cmd/alf-daemon/experimental.go`](../cmd/alf-daemon/experimental.go) and [#406](https://github.com/alamparelli/alf/issues/406). |
+The dev-window `ALF_EXPERIMENTAL=1` gate was retired at v0.8.0 final. The
+daemon now boots into the strict ocap posture (3-layer model — see
+[`docs/ARCHITECTURE-SECURITY.md`](ARCHITECTURE-SECURITY.md) §3) with no
+flag required. If `ALF_EXPERIMENTAL` is still set in your environment
+the daemon logs a one-line `[boot] DEPRECATED:` warning and proceeds —
+the variable is otherwise ignored. Remove it from your
+`docker-compose.yml`; the deprecation helper is kept until the next
+minor release.
 
 ## Paths
 

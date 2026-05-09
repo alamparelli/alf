@@ -91,14 +91,11 @@ func collectRecentAllMem(s memory.Store, n int) []memory.Message {
 }
 
 func main() {
-	// 0.8.0 dev-window gate: refuse to boot without explicit acknowledgement
-	// that this build runs without sandbox isolation. Fires before any other
-	// init so an un-gated build never touches disk, network, or vault.
-	// Lifted when ALF_OCAP_STRICT=1 replaces this check in a later ticket.
-	// See ticket #406 and docs/ARCHITECTURE-SECURITY.md §12.
-	if err := requireExperimentalGate(os.Getenv); err != nil {
-		log.Fatal(err)
-	}
+	// 0.8.0 final-tag transition: the dev-window ALF_EXPERIMENTAL gate is
+	// gone — the daemon boots into strict ocap by default. We still warn
+	// when the deprecated var is set so operators see they can clean up
+	// their docker-compose.yml. See docs/ARCHITECTURE-SECURITY.md §12.
+	warnDeprecatedExperimentalEnv(os.Getenv)
 
 	// Ensure daemon-created files are group-writable (umask 002 = rwxrwxr-x).
 	syscall.Umask(0o002)
@@ -192,7 +189,6 @@ func main() {
 	defer logWriter.Close()
 
 	log.Printf("alf-daemon %s starting...", version)
-	log.Print(experimentalBanner)
 
 	// Write version file so Claude -p can read it.
 	os.WriteFile(filepath.Join(dataDir, ".version"), []byte(version), 0o644)

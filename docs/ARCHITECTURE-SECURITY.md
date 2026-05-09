@@ -986,8 +986,8 @@ Phase 3 — Layer 3 completion (depends on Phase 2)
 Phase 4 — independent
   #86 AppArmor/seccomp (Layer 1 outer ring)
 
-Final gate — tag 0.8.0
-  ALF_OCAP_STRICT=1 ── ALF_EXPERIMENTAL banner removed
+Final gate — tag 0.8.0 ✅ shipped
+  Strict ocap is the default boot posture; ALF_EXPERIMENTAL gate retired
 
 #401 IFC research ── post-0.8.0
 ```
@@ -1031,7 +1031,7 @@ Final gate — tag 0.8.0
 ### Intermediate release points
 
 - **v0.8.0-beta** after `#391` + `#386` (wiring) + `#389` + `#399` + `#400` + `#395` + `#396` — Layer 3 complete across all three tiers, admin boundary in place, revocation working, WASM capabilities loading at boot. **Gate met on `release/0.8.0`** as of #396 D2 + D8 closure (commit `5529eeb`). Homelab soak 1–2 weeks under `ALF_OCAP_STRICT=0` with `ALF_EXPERIMENTAL` banner active.
-- **v0.8.0 final** after `#86` landed + `#384` landed + `ALF_OCAP_STRICT=1` enforced — marketplace signing in place, Layer 1 outer ring hardened, experimental banner removed, migration complete.
+- **v0.8.0 final** ✅ — `#86` (cap_drop + AppArmor/seccomp profiles authored), `#384` (marketplace bundle signing daemon-side + cosign + digest pin via #403), `#402` (permission widening → admin ratification queue), `#407` (POSIX audit + 2 critical findings closed). Strict-flip: `ALF_EXPERIMENTAL` boot gate retired (helper warns once and proceeds), `WithExperimentalHeader` middleware removed, `ALF_EXPERIMENTAL=1` dropped from generated docker-compose.yml. Layer 1 outer ring hardened, identity + ocap forge in place across all three layers, migration complete.
 
 ---
 

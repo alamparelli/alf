@@ -8,14 +8,14 @@ import (
 	"syscall"
 )
 
-// 0.8.0-demo: the Linux-specific chroot + setpriv + bwrap implementation was
+// 0.8.0: the Linux-specific chroot + setpriv + bwrap implementation was
 // razed in #406 per the 0.7.9 security audit §13 (chroot escape,
 // CAP_SYS_ADMIN, apparmor=unconfined). Every function in this file now
 // behaves like the old non-Linux fallback did: uid/gid drop only, no
-// namespace isolation. That is deliberate — the ocap forge (#391) will
-// replace process-level isolation with capability-scoped handles. Until
-// then, the daemon refuses to boot without ALF_EXPERIMENTAL=1 and each HTTP
-// response is tagged X-ALF-Experimental: no-isolation.
+// namespace isolation. That is deliberate — the ocap forge (#391) and
+// WASM runtime (#386) replace process-level isolation with handle-scoped
+// capabilities and a wazero wall. The daemon now boots into strict ocap
+// by default; the dev-window ALF_EXPERIMENTAL gate was retired at v0.8.0.
 //
 // Path helpers (ResolvePath, CheckBoundary) continue to live in path.go.
 // They do workspace containment — orthogonal to process isolation — and

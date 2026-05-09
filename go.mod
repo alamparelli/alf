@@ -2,7 +2,7 @@ module github.com/alamparelli/alf
 
 go 1.25.8
 
-toolchain go1.26.2
+toolchain go1.26.3
 
 require github.com/alessandrolamparelli/vault-proxy v0.2.0
 
@@ -17,10 +17,10 @@ require (
 	github.com/ti-mo/conntrack v0.6.0
 	github.com/ti-mo/netfilter v0.5.3
 	github.com/yalue/onnxruntime_go v1.26.0
-	golang.org/x/crypto v0.49.0
+	golang.org/x/crypto v0.51.0
 	golang.org/x/image v0.38.0
-	golang.org/x/term v0.42.0
-	golang.org/x/text v0.35.0
+	golang.org/x/term v0.43.0
+	golang.org/x/text v0.37.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	nhooyr.io/websocket v1.8.17
 )
@@ -31,9 +31,9 @@ require (
 	github.com/mdlayher/netlink v1.7.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	golang.org/x/net v0.51.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 )
 
 replace github.com/alessandrolamparelli/vault-proxy => ./internal/controlcenter/frontend/third_party/vault-proxy

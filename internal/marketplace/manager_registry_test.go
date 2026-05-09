@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alamparelli/alf/internal/capability/envelope"
 )
 
 // Regression lock for step 2 (capability: marketplace + tooling +
@@ -161,7 +164,9 @@ func TestFetchCatalog_MalformedJSON(t *testing.T) {
 // ----- Install with fake registry bundle ------------------------------
 
 // buildBundle returns a ZIP archive containing the given path→content
-// entries, mimicking what alf-marketplace serves.
+// entries, mimicking what alf-marketplace serves. Kept for tests that
+// just need a ZIP shape; signed-bundle tests use signedMarketplaceBundle
+// from bundle_verify_test.go which produces a verifying envelope.
 func buildBundle(t *testing.T, entries map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -177,35 +182,41 @@ func buildBundle(t *testing.T, entries map[string]string) []byte {
 	return buf.Bytes()
 }
 
-func TestInstall_HappyPath_ViaBundle(t *testing.T) {
-	manifest := Manifest{
-		Name:    "TestTodo",
-		Slug:    "todo",
-		Version: "1.0.0",
-	}
-	manifestJSON, _ := json.Marshal(manifest)
-
-	bundle := buildBundle(t, map[string]string{
-		"manifest.json": string(manifestJSON),
-		"index.html":    "<html>todo</html>",
-	})
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/apps/todo/bundle") {
-			t.Errorf("unexpected install path: %s", r.URL.Path)
-		}
+// serveSignedBundle is the test-only marketplace server fixture for
+// the v0.8.0 signed-bundle flow. It serves bundle bytes from
+// /api/apps/<slug>/bundle and bundle.sig bytes from
+// /api/apps/<slug>/bundle.sig — the same wire contract a real
+// alf-marketplace server will implement.
+func serveSignedBundle(t *testing.T, slug string, bundle, sig []byte) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Alf-Instance") != "true" {
-			t.Error("missing X-Alf-Instance on bundle fetch")
+			t.Errorf("missing X-Alf-Instance on %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/zip")
-		w.Write(bundle)
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/apps/"+slug+"/bundle.sig"):
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(sig)
+		case strings.HasPrefix(r.URL.Path, "/api/apps/"+slug+"/bundle"):
+			w.Header().Set("Content-Type", "application/zip")
+			w.Write(bundle)
+		default:
+			http.NotFound(w, r)
+		}
 	}))
+}
+
+func TestInstall_HappyPath_ViaBundle(t *testing.T) {
+	bundle, sig, store := signedMarketplaceBundle(t, "marketplace-app", "todo")
+
+	srv := serveSignedBundle(t, "todo", bundle, sig)
 	defer srv.Close()
 
 	base := t.TempDir()
 	os.MkdirAll(filepath.Join(base, "tools"), 0o755)
 	m := NewManager(base)
 	m.registryURL = srv.URL
+	m.SetTrustStore(store)
 	// Install calls lockAppFiles which chmods files 0o444 — that breaks
 	// t.TempDir cleanup. Restore perms before the test returns.
 	t.Cleanup(func() { m.unlockAppFiles("todo") })
@@ -214,15 +225,17 @@ func TestInstall_HappyPath_ViaBundle(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	// App files must be written.
-	if _, err := os.Stat(filepath.Join(base, "apps", "todo", "manifest.json")); err != nil {
-		t.Errorf("manifest.json missing after install: %v", err)
+	// App files must be written: manifest.toml is the envelope; index.html
+	// is the sample artefact baked into signedMarketplaceBundle.
+	if _, err := os.Stat(filepath.Join(base, "apps", "todo", "manifest.toml")); err != nil {
+		t.Errorf("manifest.toml missing after install: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(base, "apps", "todo", "index.html")); err != nil {
 		t.Errorf("index.html missing after install: %v", err)
 	}
 
-	// State must be installed + trusted (bundle came from registry).
+	// State must be installed; trusted=true is reserved for MarkTrusted
+	// callers under #384 (no longer set by Install on a signed bundle).
 	m.mu.Lock()
 	state, ok := m.states["todo"]
 	trusted := m.trusted["todo"]
@@ -230,8 +243,111 @@ func TestInstall_HappyPath_ViaBundle(t *testing.T) {
 	if !ok || state != StateInstalled {
 		t.Errorf("state after install = %q, want %q", state, StateInstalled)
 	}
-	if !trusted {
-		t.Error("app from registry must be marked trusted (SEC-001)")
+	if trusted {
+		t.Error("marketplace install set trusted=true; #384 requires explicit MarkTrusted only")
+	}
+}
+
+// TestInstall_RejectsUnsignedBundle pins #384's primary acceptance
+// criterion: a registry that does not yet serve bundle.sig (legacy
+// pre-v0.8.0 server) cannot install. The error is typed so the
+// daemon can surface "registry has not yet been upgraded".
+func TestInstall_RejectsUnsignedBundle(t *testing.T) {
+	bundle, _, store := signedMarketplaceBundle(t, "marketplace-app", "legacy")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/apps/legacy/bundle.sig") {
+			http.NotFound(w, r) // legacy server: no signature available
+			return
+		}
+		w.Write(bundle)
+	}))
+	defer srv.Close()
+
+	base := t.TempDir()
+	os.MkdirAll(filepath.Join(base, "tools"), 0o755)
+	m := NewManager(base)
+	m.registryURL = srv.URL
+	m.SetTrustStore(store)
+
+	err := m.Install("legacy")
+	if err == nil {
+		t.Fatal("expected install to refuse unsigned bundle")
+	}
+	if !strings.Contains(err.Error(), "bundle.sig") {
+		t.Errorf("error should reference bundle.sig: %v", err)
+	}
+}
+
+// TestInstall_RejectsUnknownPublisher pins the trust-store gate:
+// a bundle correctly signed but by a key the daemon doesn't trust
+// must be refused. Operators see the typed error and can run
+// `alf trust add` to import the publisher's key.
+func TestInstall_RejectsUnknownPublisher(t *testing.T) {
+	bundle, sig, _ := signedMarketplaceBundle(t, "marketplace-app", "stranger")
+
+	srv := serveSignedBundle(t, "stranger", bundle, sig)
+	defer srv.Close()
+
+	base := t.TempDir()
+	os.MkdirAll(filepath.Join(base, "tools"), 0o755)
+	m := NewManager(base)
+	m.registryURL = srv.URL
+	// Empty store — the publisher is not trusted.
+	m.SetTrustStore(envelope.NewMemoryTrustStore())
+
+	err := m.Install("stranger")
+	if err == nil {
+		t.Fatal("expected install to refuse unknown publisher")
+	}
+	if !errors.Is(err, envelope.ErrSignerNotTrusted) {
+		t.Errorf("got %v, want ErrSignerNotTrusted", err)
+	}
+}
+
+// TestInstall_RejectsTamperedBundle pins that flipping a byte in
+// the served ZIP after the signature was computed breaks the
+// hash-check inside envelope.Verify. The bundle never reaches the
+// extract path.
+func TestInstall_RejectsTamperedBundle(t *testing.T) {
+	bundle, sig, store := signedMarketplaceBundle(t, "marketplace-app", "tampered")
+	tampered := append([]byte(nil), bundle...)
+	tampered[60] ^= 0xff
+
+	srv := serveSignedBundle(t, "tampered", tampered, sig)
+	defer srv.Close()
+
+	base := t.TempDir()
+	os.MkdirAll(filepath.Join(base, "tools"), 0o755)
+	m := NewManager(base)
+	m.registryURL = srv.URL
+	m.SetTrustStore(store)
+
+	if err := m.Install("tampered"); err == nil {
+		t.Fatal("tampered bundle accepted")
+	}
+}
+
+// TestInstall_NoTrustStoreIsAClearError pins the wiring contract:
+// a manager without SetTrustStore wired refuses to run Install with
+// a clear message rather than panicking on a nil reference.
+func TestInstall_NoTrustStoreIsAClearError(t *testing.T) {
+	bundle, sig, _ := signedMarketplaceBundle(t, "marketplace-app", "wired")
+	srv := serveSignedBundle(t, "wired", bundle, sig)
+	defer srv.Close()
+
+	base := t.TempDir()
+	os.MkdirAll(filepath.Join(base, "tools"), 0o755)
+	m := NewManager(base)
+	m.registryURL = srv.URL
+	// Note: SetTrustStore intentionally NOT called.
+
+	err := m.Install("wired")
+	if err == nil {
+		t.Fatal("expected error when trust store not wired")
+	}
+	if !strings.Contains(err.Error(), "trust store") {
+		t.Errorf("error should mention trust store: %v", err)
 	}
 }
 
@@ -257,10 +373,11 @@ func TestInstall_ServerErrorBubbles(t *testing.T) {
 	os.MkdirAll(filepath.Join(base, "tools"), 0o755)
 	m := NewManager(base)
 	m.registryURL = srv.URL
+	m.SetTrustStore(envelope.NewMemoryTrustStore())
 
 	err := m.Install("missing")
 	if err == nil {
-		t.Fatal("expected error when registry returns 404 for both bundle and legacy")
+		t.Fatal("expected error when registry returns 404 for the bundle")
 	}
 }
 
@@ -287,17 +404,8 @@ func TestUpdate_NoRegistry_Errors(t *testing.T) {
 }
 
 func TestUpdate_PreservesDataDir(t *testing.T) {
-	manifest := Manifest{Slug: "persistent", Name: "Persistent", Version: "2.0.0"}
-	mj, _ := json.Marshal(manifest)
-	bundle := buildBundle(t, map[string]string{
-		"manifest.json": string(mj),
-		"new-file":      "from-update",
-	})
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/zip")
-		w.Write(bundle)
-	}))
+	bundle, sig, store := signedMarketplaceBundle(t, "marketplace-app", "persistent")
+	srv := serveSignedBundle(t, "persistent", bundle, sig)
 	defer srv.Close()
 
 	base := t.TempDir()
@@ -307,6 +415,8 @@ func TestUpdate_PreservesDataDir(t *testing.T) {
 	os.MkdirAll(dataDir, 0o755)
 	// Seed the pre-update manifest (required by deactivate → loadManifest),
 	// user data that must survive, and an unrelated file that must be wiped.
+	// Update reads the legacy manifest.json on the deactivate path; this
+	// is the JSON view of the installed app from the v0.7.x flow.
 	oldManifest := Manifest{Slug: "persistent", Name: "Persistent", Version: "1.0.0"}
 	oldMJ, _ := json.Marshal(oldManifest)
 	os.WriteFile(filepath.Join(appDir, "manifest.json"), oldMJ, 0o644)
@@ -315,6 +425,7 @@ func TestUpdate_PreservesDataDir(t *testing.T) {
 
 	m := NewManager(base)
 	m.registryURL = srv.URL
+	m.SetTrustStore(store)
 	m.mu.Lock()
 	m.states["persistent"] = StateInstalled
 	m.mu.Unlock()
@@ -333,8 +444,9 @@ func TestUpdate_PreservesDataDir(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(appDir, "old-file")); !os.IsNotExist(err) {
 		t.Error("old app file was not removed on update")
 	}
-	// New bundle file must exist.
-	if _, err := os.Stat(filepath.Join(appDir, "new-file")); err != nil {
-		t.Errorf("new bundle file missing: %v", err)
+	// New bundle's manifest.toml must exist (sample artefact from
+	// signedMarketplaceBundle includes index.html too).
+	if _, err := os.Stat(filepath.Join(appDir, "manifest.toml")); err != nil {
+		t.Errorf("new bundle manifest.toml missing: %v", err)
 	}
 }

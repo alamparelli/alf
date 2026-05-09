@@ -19,6 +19,135 @@ the milestone ticket map.
 
 ### Added
 
+- **#384 — marketplace bundle signing (Layer 2 distribution)**.
+  Closes the 0.7.9 critical "marketplace integrity" finding by
+  routing every marketplace install through the same
+  `envelope.Verify` pipeline used for WASM tools and skills (#388).
+  No special-case for marketplace; one verify path per the §2.2
+  architecture.
+
+  **Why this matters.** Pre-#384 `Manager.Install` set
+  `m.trusted[slug] = true` on the sole basis that the ZIP came
+  from the configured `ALF_MARKETPLACE_URL`. Once wazero loads
+  third-party code in-process (#386), the chroot blast-radius
+  cap is gone — unsigned bundle execution is qualitatively worse
+  than the v0.7.x model. Bundle provenance MUST chain to a
+  trusted publisher key before the daemon writes a single file
+  to disk.
+
+  **Wire contract** (the marketplace server will need a parallel
+  upgrade):
+  - `GET <registry>/api/apps/<slug>/bundle?arch=<arch>` →
+    bundle.zip (ZIP must contain a top-level `manifest.toml`
+    envelope of `kind = "marketplace-app"` or `"wasm-app"`).
+  - `GET <registry>/api/apps/<slug>/bundle.sig?arch=<arch>` →
+    detached minisign signature over the canonicalised
+    manifest.toml, with the bundle's SHA-256 hash embedded in
+    the trusted comment.
+  - 404 on `bundle.sig` surfaces as `ErrBundleSignatureMissing`
+    so operators see "registry has not yet been upgraded for
+    v0.8.0 signed bundles" rather than a confusing transport
+    error.
+
+  **`internal/marketplace/bundle.go`.** New file carrying:
+  - `readManifestFromZip([]byte) ([]byte, error)` — extracts
+    `manifest.toml` from the in-memory ZIP without writing to
+    disk; bounded by `MaxBundleManifestSize = 64 KiB` against
+    memory bombs.
+  - `verifyBundle(bundle, sig, store)` — the marketplace seam
+    over `envelope.Verify`. On success, returns the parsed
+    manifest with kind discriminator preserved. Refuses any
+    kind other than `marketplace-app` / `wasm-app` (the two
+    share the same envelope shape per MANIFEST-SCHEMA §4.6).
+  - Typed errors: `ErrBundleManifestMissing`,
+    `ErrBundleSignatureMissing`,
+    `ErrBundleManifestNotMarketplace`. Operators branch on
+    these to surface the precise failure cause.
+
+  **`Manager.SetTrustStore` + verify integration.** New setter
+  wires the daemon's shared `envelope.TrustStore` (same set of
+  keys as the WASM loader, skills loader, and CRL refresher)
+  into the manager. `Install` and `Update` both refuse to run
+  if it's nil — there is no fallback to the pre-#384 unsigned
+  path. `downloadAndExtractBundle` now downloads bundle.zip +
+  bundle.sig in parallel, calls `verifyBundle` BEFORE any disk
+  write, and only then extracts via `extractBundle`. The 200
+  MiB bundle ceiling carries over; signature is bounded to
+  `MaxBundleSignatureSize = 4 KiB`.
+
+  **Trust-flag heuristic removed.** `m.trusted[slug] = true` is
+  no longer set by `Install`. The `MarkTrusted` API is reserved
+  for built-in apps (e.g. the `developer` mode app). Marketplace
+  installs are untrusted; the signer-chain check is the install
+  gate, the per-tier permission ceiling (Tier-2 daemon-key vs
+  Tier-3 user-endorsed) is independent — see MANIFEST-SCHEMA §5.
+
+  **`envelope.MarketplacePublicKey`.** New `go:embed`-backed
+  pubkey at `internal/capability/envelope/marketplace_pubkey.minisign`
+  mirroring the release-key pattern. On a fresh checkout the
+  file is empty; `MarketplacePublicKey()` returns
+  `ErrNoMarketplaceKey` and the daemon logs once at boot
+  ("no marketplace pubkey embedded — installs require operator-
+  imported third-party keys"). When populated, the daemon
+  auto-adds the key to `wasmRt.TrustStore` so signed bundles
+  from alf-marketplace flow without operator action.
+
+  **Legacy code retired.** `installLegacy`, `downloadFile`,
+  `downloadBinary`, `downloadSkills`, `downloadWebAsset`, and
+  `httpGet` deleted. They formed a dead-code subgraph rooted
+  at the per-file fallback that pre-dated bundle ZIPs. Update
+  also drops its bundle-then-legacy fallback chain.
+
+  **TLS-pinned registry — note.** `ALF_MARKETPLACE_URL` already
+  enforces HTTPS (rejected at NewManager construction unless
+  `ALF_MARKETPLACE_INSECURE=1`). TLS certificate pinning beyond
+  the system CA bundle is deferred — the marketplace pubkey
+  embed is the trust anchor for bundle authenticity; transport-
+  level pinning would harden against a CA mis-issuance scenario
+  but does not gate authority. Will land alongside the homelab
+  marketplace deployment once the cert hash is stable.
+
+  **Acceptance covered.**
+  - ✅ Unsigned bundle cannot be installed
+    (`TestInstall_RejectsUnsignedBundle`).
+  - ✅ Bundle signed with unknown key cannot be installed
+    (`TestInstall_RejectsUnknownPublisher`,
+    `envelope.ErrSignerNotTrusted`).
+  - ✅ Bundle modified after signing rejected
+    (`TestInstall_RejectsTamperedBundle` flips a byte at offset
+    60).
+  - ✅ Plain-HTTP registry refused at construction
+    (`validateRegistryURL`, pre-existing).
+  - ✅ `Update()` re-verifies signature: `Update` calls the same
+    `downloadAndExtractBundle` so every update transits the
+    verify pipeline.
+  - ✅ Permission widening through ratification: tracked under
+    #402, immediate follow-up.
+
+  **Server-side dependency.** The marketplace server
+  (`alf-marketplace` repo) will need to:
+  - Generate the marketplace keypair; ship the pubkey for embed.
+  - Author a `manifest.toml` envelope per app at publish time.
+  - Sign canonicalised manifest.toml + bundle.zip hash → produce
+    bundle.sig.
+  - Serve `bundle.sig` at the URL above.
+
+  Until that ships, marketplace installs error out with a clear
+  message pointing at `ErrBundleSignatureMissing`. No dev-mode
+  bypass — the security guarantees are stronger as a hard gate
+  than a flag.
+
+  **Tests.** 7 new bundle-verify tests in `bundle_verify_test.go`
+  (happy-path / wasm-app kind / wrong kind / tampered bundle /
+  unknown key / missing manifest.toml / oversized manifest), 5
+  new manager-flow tests in `manager_registry_test.go` (happy
+  signed install / unsigned-bundle refusal / unknown-publisher
+  refusal / tampered-bundle refusal / no-trust-store-wired
+  refusal), 1 new envelope test for the empty-embed dev-build
+  path (`MarketplacePublicKey`). Existing manager tests
+  (`TestUpdate_PreservesDataDir`) updated to use the signed
+  fixture. 13 new tests total. Race detector clean.
+
 - **#396 deliverable 2 — provider revocation cascade discovery
   channels**. The cascade engine (`Instantiator.RevokeByKey`,
   shipped in #392 Stage 5) closes every Instance signed by — or

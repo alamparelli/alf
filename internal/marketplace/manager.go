@@ -2,6 +2,7 @@ package marketplace
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alamparelli/alf/internal/capability/envelope"
 )
 
 // validSkillName restricts bundled skill directory names to the same
@@ -107,10 +110,19 @@ type Manager struct {
 	states      map[string]AppState
 	perms       map[string][]string // slug → declared permissions (nil = all allowed)
 	services    map[string][]string // slug → declared vault services
-	trusted     map[string]bool     // slug → true if installed from registry
+	trusted     map[string]bool     // slug → true ONLY for MarkTrusted (built-in apps); marketplace installs are untrusted (#384)
 	onChange    func()
 	supervisor  AppSupervisor
-	http       *http.Client
+	http        *http.Client
+
+	// trustStore is the daemon's shared envelope trust store. Wired
+	// post-construction via SetTrustStore so the marketplace verify
+	// path (#384) and the WASM loader share the same set of public
+	// keys (auto-bootstrapped daemon key + operator-imported third
+	// parties + alf-marketplace pubkey when embedded). Install / Update
+	// refuse to run if this is nil — there is no fallback to the
+	// pre-#384 unsigned-bundle path.
+	trustStore envelope.TrustStore
 }
 
 type stateFile struct {
@@ -186,10 +198,30 @@ func (m *Manager) IsTracked(slug string) bool {
 
 // MarkTrusted marks a slug as trusted (e.g. bundled/default apps).
 // Trusted apps get their full declared permissions without capping.
+//
+// Marketplace-installed apps do NOT pass through this method any
+// more (#384): the "trusted = came-from-registry" heuristic is
+// gone. A marketplace install passes envelope.Verify against a key
+// in the trust store; that's the install gate. The runtime perm
+// ceiling (Tier-2 for daemon-key, Tier-3 user-endorsed for wider
+// scopes) is independent — see MANIFEST-SCHEMA §5.
 func (m *Manager) MarkTrusted(slug string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.trusted[slug] = true
+}
+
+// SetTrustStore wires the daemon's shared envelope.TrustStore into
+// the manager. Required before Install / Update can run. Daemon
+// boot calls this after setupWASMLoader has constructed the store
+// so every consumer (WASM loader, skills loader, marketplace) sees
+// the same set of trusted publishers — including the embedded
+// daemon key, the embedded alf-marketplace key (when present), and
+// any operator-imported third-party keys under <dataDir>/trust/.
+func (m *Manager) SetTrustStore(s envelope.TrustStore) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.trustStore = s
 }
 
 // GetServices returns the declared vault services for an app.
@@ -751,8 +783,11 @@ func (m *Manager) FetchCatalog() ([]RemoteApp, error) {
 	return apps, nil
 }
 
-// Install downloads an app from the remote registry and installs it locally.
-// Tries bundle (tarball) first, falls back to individual file downloads.
+// Install downloads an app from the remote registry, verifies its
+// signed envelope against the trust store, and installs it locally
+// only on successful verification. The legacy multi-file fallback
+// has been retired — under #384 every marketplace install must
+// chain to a trusted publisher key.
 func (m *Manager) Install(slug string) error {
 	if m.registryURL == "" {
 		return fmt.Errorf("no registry configured")
@@ -765,17 +800,17 @@ func (m *Manager) Install(slug string) error {
 
 	os.MkdirAll(appDir, 0o755)
 
-	// Try bundle download first (single tarball with everything).
+	// Verified bundle download — refuses unsigned, untrusted-key, or
+	// tampered bundles before any file is written to disk.
 	if err := m.downloadAndExtractBundle(slug, appDir); err != nil {
-		log.Printf("marketplace: bundle download for %s failed (%v), trying legacy", slug, err)
-		if err := m.installLegacy(slug, appDir); err != nil {
-			return err
-		}
+		return err
 	}
 
 	m.mu.Lock()
 	m.states[slug] = StateInstalled
-	m.trusted[slug] = true // SEC-001: trust determined by install source, not manifest
+	// trusted=true is reserved for built-in apps via MarkTrusted (#384).
+	// Marketplace installs are untrusted; the signer-chain check is the
+	// install gate, the per-tier permission ceiling is independent.
 
 	// Activate immediately: create symlinks, permissions, start service.
 	if err := m.activate(slug); err != nil {
@@ -797,74 +832,90 @@ func (m *Manager) Install(slug string) error {
 	return nil
 }
 
-// installLegacy downloads app files individually (pre-tarball servers).
-func (m *Manager) installLegacy(slug, appDir string) error {
-	if err := m.downloadFile(slug, "manifest", filepath.Join(appDir, "manifest.json")); err != nil {
-		return fmt.Errorf("download manifest: %w", err)
-	}
+// MaxBundleSize bounds the bundle.zip download (200 MiB). Anything
+// larger is refused before the download completes.
+const MaxBundleSize int64 = 200 << 20
 
-	binDir := filepath.Join(appDir, "bin")
-	os.MkdirAll(binDir, 0o755)
-	binPath := filepath.Join(binDir, slug)
-	if err := m.downloadBinary(slug, runtime.GOARCH, binPath); err != nil {
-		os.Remove(binPath)
-	} else {
-		os.Chmod(binPath, 0o755)
-	}
-
-	webFiles := []string{"index.html", "app.json", "service.json"}
-	for _, f := range webFiles {
-		_ = m.downloadWebAsset(slug, f, filepath.Join(appDir, f))
-	}
-
-	m.downloadSkills(slug, appDir)
-	return nil
-}
-
-// downloadAndExtractBundle downloads a ZIP bundle from the registry and extracts it.
-// Skips data/ entries to preserve user data.
+// downloadAndExtractBundle downloads a signed ZIP bundle from the
+// registry, verifies its envelope against the trust store, then
+// extracts. The verify step happens BEFORE any file is written to
+// disk — a tampered or unsigned bundle never touches the apps dir.
+//
+// Wire-level contract (#384):
+//
+//   GET <registryURL>/api/apps/<slug>/bundle?arch=<arch>   → bundle.zip
+//   GET <registryURL>/api/apps/<slug>/bundle.sig?arch=<arch> → bundle.sig
+//
+// Both responses are required. A 404 on bundle.sig surfaces as
+// ErrBundleSignatureMissing so the operator sees "registry has not
+// yet been upgraded for v0.8.0 signed bundles" rather than a
+// confusing transport error.
+//
+// Failure modes the caller can branch on:
+//   - errors.Is(err, ErrBundleSignatureMissing): server upgrade pending.
+//   - errors.Is(err, envelope.ErrSignerNotTrusted): unknown publisher.
+//   - errors.Is(err, ErrBundleManifestNotMarketplace): wrong kind.
+//   - errors.Is(err, ErrBundleManifestMissing): legacy unsigned bundle.
+//   - any other err: transport / canonicalisation / signature math.
 func (m *Manager) downloadAndExtractBundle(slug, appDir string) error {
-	url := fmt.Sprintf("%s/api/apps/%s/bundle?arch=%s", m.registryURL, slug, runtime.GOARCH)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("X-Alf-Instance", "true")
-	resp, err := m.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	if m.trustStore == nil {
+		return fmt.Errorf("marketplace: trust store not wired — daemon boot must call SetTrustStore before Install")
 	}
 
-	// ZIP requires random access — spool to temp file.
-	tmp, err := os.CreateTemp("", "alf-bundle-*.zip")
+	bundleBytes, err := m.fetchBundleArtefact(slug, "bundle", MaxBundleSize, false)
 	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
+		return fmt.Errorf("download bundle: %w", err)
 	}
-	defer os.Remove(tmp.Name())
-	defer tmp.Close()
-
-	const maxBundleSize int64 = 200 << 20 // 200MB
-	if _, err := io.Copy(tmp, io.LimitReader(resp.Body, maxBundleSize)); err != nil {
-		return fmt.Errorf("download: %w", err)
+	sigBytes, err := m.fetchBundleArtefact(slug, "bundle.sig", MaxBundleSignatureSize, true)
+	if err != nil {
+		return err // already typed as ErrBundleSignatureMissing on 404
 	}
 
-	info, err := tmp.Stat()
-	if err != nil {
+	if _, err := verifyBundle(bundleBytes, sigBytes, m.trustStore); err != nil {
+		return fmt.Errorf("verify bundle: %w", err)
+	}
+
+	// Verify passed — now extract from the in-memory bytes via
+	// *bytes.Reader (implements io.ReaderAt + size). No disk
+	// round-trip; the bundle bytes already live in RAM since we
+	// needed them for the verify hash check.
+	if err := extractBundle(bytes.NewReader(bundleBytes), int64(len(bundleBytes)), appDir); err != nil {
 		return err
 	}
-
-	if err := extractBundle(tmp, info.Size(), appDir); err != nil {
-		return err
-	}
-	// Ensure the service binary is executable, regardless of zip metadata.
 	if err := ensureServiceBinExecutable(appDir); err != nil {
 		log.Printf("marketplace: chmod service binary for %s: %v", slug, err)
 	}
 	return nil
+}
+
+// fetchBundleArtefact issues a GET against the registry and returns
+// the response body bounded by maxSize. When sigArtefact is true a
+// 404 is mapped to ErrBundleSignatureMissing; for the bundle itself
+// we keep the raw HTTP error so the caller distinguishes "wrong
+// slug" (404) from "registry not upgraded" (404 on .sig).
+func (m *Manager) fetchBundleArtefact(slug, kind string, maxSize int64, sigArtefact bool) ([]byte, error) {
+	url := fmt.Sprintf("%s/api/apps/%s/%s?arch=%s", m.registryURL, slug, kind, runtime.GOARCH)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Alf-Instance", "true")
+	resp, err := m.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 404 && sigArtefact {
+		return nil, ErrBundleSignatureMissing
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize))
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	return body, nil
 }
 
 // ensureServiceBinExecutable reads service.json and chmod +x's the declared command.
@@ -960,85 +1011,6 @@ func extractBundle(ra io.ReaderAt, size int64, appDir string) error {
 	return nil
 }
 
-func (m *Manager) downloadFile(slug, endpoint, dst string) error {
-	url := fmt.Sprintf("%s/api/apps/%s/%s", m.registryURL, slug, endpoint)
-	return m.httpGet(url, dst)
-}
-
-func (m *Manager) downloadBinary(slug, arch, dst string) error {
-	url := fmt.Sprintf("%s/api/apps/%s/download?arch=%s", m.registryURL, slug, arch)
-	return m.httpGet(url, dst)
-}
-
-// downloadSkills fetches the skill list from the registry and downloads each skill's files.
-func (m *Manager) downloadSkills(slug, appDir string) {
-	if m.registryURL == "" {
-		return
-	}
-	url := fmt.Sprintf("%s/api/apps/%s/skills", m.registryURL, slug)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return
-	}
-	req.Header.Set("X-Alf-Instance", "true")
-	resp, err := m.http.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		return
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-
-	type skillInfo struct {
-		Name  string   `json:"name"`
-		Files []string `json:"files"`
-	}
-	var skills []skillInfo
-	if json.Unmarshal(body, &skills) != nil || len(skills) == 0 {
-		return
-	}
-
-	for _, sk := range skills {
-		skillDir := filepath.Join(appDir, "skills", sk.Name)
-		os.MkdirAll(skillDir, 0o755)
-		for _, f := range sk.Files {
-			dst := filepath.Join(skillDir, f)
-			fileURL := fmt.Sprintf("%s/api/apps/%s/skill/%s/%s", m.registryURL, slug, sk.Name, f)
-			_ = m.httpGet(fileURL, dst)
-		}
-	}
-}
-
-func (m *Manager) downloadWebAsset(slug, file, dst string) error {
-	url := fmt.Sprintf("%s/api/apps/%s/web/%s", m.registryURL, slug, file)
-	return m.httpGet(url, dst)
-}
-
-func (m *Manager) httpGet(url, dst string) error {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("X-Alf-Instance", "true")
-	resp, err := m.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	f, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = io.Copy(f, io.LimitReader(resp.Body, 256<<20)) // 256MB max
-	return err
-}
-
 // --- Auto-update ---
 
 // UpdateInfo describes an app with a newer version available remotely.
@@ -1125,14 +1097,11 @@ func (m *Manager) Update(slug string) error {
 		os.RemoveAll(filepath.Join(appDir, e.Name()))
 	}
 
-	// Re-download from registry: try bundle first, fallback to legacy.
+	// Re-download from registry: signed-bundle path only (#384).
 	os.MkdirAll(appDir, 0o755)
 
 	if err := m.downloadAndExtractBundle(slug, appDir); err != nil {
-		log.Printf("marketplace: bundle download for %s failed (%v), trying legacy", slug, err)
-		if err := m.installLegacy(slug, appDir); err != nil {
-			return err
-		}
+		return err
 	}
 
 	// Re-activate: restore symlinks, permissions, start service.

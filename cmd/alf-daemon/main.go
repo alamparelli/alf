@@ -17,6 +17,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/ai"
 	"github.com/alamparelli/alf/internal/capability"
+	"github.com/alamparelli/alf/internal/capability/envelope"
 	"github.com/alamparelli/alf/internal/runtime/agents"
 	"github.com/alamparelli/alf/internal/runtime/classifier"
 	"github.com/alamparelli/alf/internal/runtime/llm"
@@ -984,6 +985,23 @@ func main() {
 	var mpManager *marketplace.Manager
 	if os.Getenv("ALF_MARKETPLACE_URL") != "" || os.Getenv("ALF_MARKETPLACE_ENABLED") == "true" {
 		mpManager = marketplace.NewManager(dataDir)
+		// #384: marketplace install + update verify against the daemon's
+		// shared trust store. When wasmRt is nil (degraded boot), the
+		// store is unset and Install/Update will refuse with a clear
+		// "trust store not wired" error rather than silently allowing
+		// unsigned bundles.
+		if wasmRt != nil {
+			mpManager.SetTrustStore(wasmRt.TrustStore)
+			// Auto-add the alf-marketplace publisher key when this build
+			// embedded one. Operators on dev builds with no embed continue
+			// to manually `alf trust add` third-party publishers.
+			if pub, err := envelope.MarketplacePublicKey(); err == nil {
+				wasmRt.TrustStore.Add(pub)
+				log.Printf("[marketplace] trust anchor: alf-marketplace key %s added to trust store", pub.ID.Hex())
+			} else {
+				log.Printf("[marketplace] no marketplace pubkey embedded — installs require operator-imported third-party keys (alf trust add)")
+			}
+		}
 		mpManager.SetOnChange(func() {
 			toolRegistry.Rescan()
 			// #338 C4: re-mirror apps into the unified registry on every

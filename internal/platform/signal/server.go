@@ -8,6 +8,8 @@ import (
 	"net"
 	"os"
 	"strings"
+
+	"github.com/alamparelli/alf/internal/platform/socknet"
 )
 
 const maxSignalRequestSize = 16 * 1024 // 16KB max JSON request
@@ -42,25 +44,16 @@ type Server struct {
 	Notify    Notifier // optional: broadcast to all channels
 }
 
-// ListenUnix creates a Unix socket listener with correct permissions.
+// ListenUnix creates a Unix socket listener with mode 0660 from
+// inode-creation time (no Listen→Chmod TOCTOU window — see
+// SEC-407-002 + internal/platform/socknet).
 // The caller should defer ln.Close() and os.Remove(sockPath).
 func (s *Server) ListenUnix(sockPath string) (net.Listener, error) {
 	os.Remove(sockPath) // remove stale socket
-
-	ln, err := net.Listen("unix", sockPath)
+	ln, err := socknet.ListenUnix0660(sockPath, 1000)
 	if err != nil {
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
 	}
-
-	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
-	// chown/chmod may fail on Docker Desktop volume mounts (VirtioFS) — non-fatal.
-	if err := os.Chown(sockPath, -1, 1000); err != nil {
-		log.Printf("signal: chown %s: %v (non-root?)", sockPath, err)
-	}
-	if err := os.Chmod(sockPath, 0660); err != nil {
-		log.Printf("signal: chmod %s: %v (continuing anyway)", sockPath, err)
-	}
-
 	return ln, nil
 }
 

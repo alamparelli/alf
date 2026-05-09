@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alamparelli/alf/internal/platform/socknet"
+
 	"github.com/alamparelli/alf/internal/memory"
 )
 
@@ -263,24 +265,24 @@ func (s *Server) ServeUnix(sockPath string) error {
 	// Remove stale socket file.
 	_ = os.Remove(sockPath)
 
-	ln, err := net.Listen("unix", sockPath)
+	// SEC-407-002: socknet.ListenUnix0660 uses umask 0o117 around
+	// net.Listen so the socket is mode 0660 from inode-creation
+	// time (no Listen→Chmod TOCTOU).
+	ln, err := socknet.ListenUnix0660(sockPath, 1000)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", sockPath, err)
 	}
-	return s.serveListener(ln, sockPath, true)
+	return s.serveListener(ln, sockPath, false)
 }
 
 // serveListener is the test seam — exposed for server_test.go to pass a
 // pre-configured listener and skip the chown/chmod dance.
+//
+// tuneFileMode is now a no-op kept for compatibility with the test seam;
+// the production path goes through ServeUnix → socknet.ListenUnix0660,
+// which handles mode at creation time.
 func (s *Server) serveListener(ln net.Listener, sockPath string, tuneFileMode bool) error {
-	if tuneFileMode && sockPath != "" {
-		if err := os.Chown(sockPath, -1, 1000); err != nil {
-			log.Printf("[memory-socket] chown %s: %v (non-root?)", sockPath, err)
-		}
-		if err := os.Chmod(sockPath, 0660); err != nil {
-			log.Printf("[memory-socket] chmod %s: %v (continuing)", sockPath, err)
-		}
-	}
+	_ = tuneFileMode // see comment above
 	if sockPath != "" {
 		log.Printf("[memory-socket] listening on %s", sockPath)
 	}

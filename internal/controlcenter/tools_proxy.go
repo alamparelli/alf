@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/alamparelli/alf/internal/platform/socknet"
 )
 
 // allowedToolsPaths are the ONLY CC endpoints accessible via the tools socket.
@@ -154,12 +156,13 @@ func (ap *AppToolsProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func ListenAndServeAppTools(sockPath, slug string, handler http.Handler) (net.Listener, error) {
 	os.Remove(sockPath)
 
-	ln, err := net.Listen("unix", sockPath)
+	// SEC-407-002: socknet.ListenUnix0660 uses umask 0o117 around
+	// net.Listen so the socket is mode 0660 from inode-creation
+	// time — eliminates the TOCTOU window between Listen and Chmod.
+	ln, err := socknet.ListenUnix0660(sockPath, 1000)
 	if err != nil {
 		return nil, err
 	}
-	os.Chown(sockPath, -1, 1000)
-	os.Chmod(sockPath, 0660)
 
 	proxy := &AppToolsProxy{Slug: slug, Handler: handler}
 	go func() {
@@ -177,14 +180,12 @@ func ListenAndServeAppTools(sockPath, slug string, handler http.Handler) (net.Li
 func ListenAndServeTools(sockPath string, handler http.Handler) (net.Listener, error) {
 	os.Remove(sockPath) // remove stale socket
 
-	ln, err := net.Listen("unix", sockPath)
+	// SEC-407-002: same atomic 0660-from-creation as the per-app
+	// proxy variant above.
+	ln, err := socknet.ListenUnix0660(sockPath, 1000)
 	if err != nil {
 		return nil, err
 	}
-
-	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
-	os.Chown(sockPath, -1, 1000)
-	os.Chmod(sockPath, 0660)
 
 	proxy := &ToolsProxy{Handler: handler}
 	go func() {

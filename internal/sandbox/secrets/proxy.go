@@ -9,8 +9,9 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/alamparelli/alf/internal/platform/socknet"
 )
 
 // VaultProxy is an HTTP reverse proxy to vault-server over Unix socket.
@@ -153,19 +154,16 @@ func (p *VaultProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *VaultProxy) ListenAndServe(sockPath string) (net.Listener, error) {
 	os.Remove(sockPath) // clear stale
 
-	// SEC-002: Create socket in a restrictive directory or set umask before Listen
-	// to minimize the TOCTOU window between Listen and Chmod.
-	oldMask := syscall.Umask(0117) // results in 0660
-	ln, err := net.Listen("unix", sockPath)
-	syscall.Umask(oldMask)
+	// SEC-407-002: vault-proxy was the original site of the
+	// umask-around-Listen pattern (SEC-002 from the 0.7.9 audit).
+	// The pattern is now extracted into socknet.ListenUnix0660 so
+	// every Unix-socket creator in the codebase shares one secure
+	// implementation. Errors are non-fatal (e.g. tests without
+	// CAP_CHOWN).
+	ln, err := socknet.ListenUnix0660(sockPath, 1000)
 	if err != nil {
 		return nil, err
 	}
-
-	// Daemon runs as alfd (uid 1001). Set group to alf (1000) for subprocess access.
-	// Errors are non-fatal (e.g. running in tests without root).
-	_ = os.Chown(sockPath, -1, 1000)
-	_ = os.Chmod(sockPath, 0660)
 
 	srv := &http.Server{Handler: p}
 	go func() {

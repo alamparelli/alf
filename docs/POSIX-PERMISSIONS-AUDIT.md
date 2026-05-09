@@ -206,14 +206,91 @@ Once that's done:
   will be the only mechanism — so it must be set up correctly at
   container boot before the daemon drops privs.
 
-## Findings — no immediate fixes required
+## Initial findings — shallow audit
 
-The audit identified **zero violations** of the trust-domain
-boundaries. Every `0o600` / `0o700` site is in the admin
-domain, every `0o660` socket is in the process-isolation domain,
-every `0o644`/`0o644` artefact is in the public-via-CC domain.
+The first-pass audit (categorising `os.Chmod` + `os.MkdirAll(_, mode)`
+sites) reported zero violations. That claim was **incomplete** —
+the deeper audit below surfaced one Critical and one High finding
+the shallow pass missed by not enumerating `os.WriteFile`,
+`os.OpenFile`, and chmod target-vs-symlink semantics.
 
-**Two follow-ups deferred to #86:**
+## Deep audit findings (security-auditor sub-agent)
+
+### SEC-407-001 — Critical — orchestrator symlink swap → keys/
+
+**Location** (pre-fix): `internal/runtime/agents/orchestrator.go:288-300, 885-894`.
+
+The orchestrator's `Run()` chmod-ed `<dataDir>/agents/` 0o775 +
+chowned it 1000:1000 every time a new task started. The LLM
+subprocess (alf, uid 1000) owns that directory tree (entrypoint
+Phase 2.5 chowns it `alf:alf` + `g+ws`) — nothing prevented the
+LLM from `mv agents agents.bak; ln -s /home/alf/data/keys agents`
+between the daemon's previous task end and its next chmod call.
+`os.Chmod` follows terminal symlinks unconditionally, so the
+chmod would land on `<dataDir>/keys/` and flip the daemon
+signing key to 0o775 — group-readable for the LLM itself.
+
+**Trust-domain crossing**: process-isolation domain → admin
+domain. LLM gains read access to the Tier-2 daemon signing key
+→ Layer 2 trust bypass (LLM mints signed envelopes).
+
+**Fix shipped**: pre-chmod `os.Lstat` symlink check at all three
+call sites. A symlink at the chmod target refuses the
+operation with a typed error and an audit log line. Defense in
+depth: the upcoming AppArmor profile (#86) will block the chmod
+syscall at the LSM hook regardless of the path target.
+
+### SEC-407-002 — High — socket Listen → Chmod TOCTOU
+
+**Locations** (pre-fix):
+- `internal/platform/signal/server.go:50-62`
+- `internal/controlcenter/tools_proxy.go:157-162, 180-187`
+- `internal/memory/socketsrv/server.go:266-282`
+- `internal/scheduler/server.go:63-71`
+
+All five sockets used `net.Listen("unix", path)` followed by
+`os.Chmod(path, 0660)`. Between Listen and Chmod the socket was
+reachable at the kernel-default mode (umask 002 → 0775). The
+window was ~microseconds but real: a malicious local process
+could `connect(2)` and observe the protocol's response to
+malformed clients.
+
+The vault proxy (`internal/sandbox/secrets/proxy.go:158-160`)
+already wrapped the listen in `syscall.Umask(0117)` per SEC-002
+from the 0.7.9 audit — that was the secure pattern. The other
+five sites did not adopt it.
+
+**Trust-domain crossing**: process-isolation domain → world (any
+local uid). Probabilistic, low-rate but real.
+
+**Fix shipped**: new `internal/platform/socknet` package exposes
+`ListenUnix0660(path, gid)` — the umask 0o117 wrapper extracted
+into one place and serialised behind a sync.Mutex (the
+process-global `syscall.Umask` cannot tolerate concurrent
+callers). The five sites + the vault proxy now share one
+implementation. 3 new tests pin: inode-mode at creation,
+post-call umask restoration, concurrent-Listen serialisation.
+
+## Trust-store edge case (informational, deferred to #86)
+
+`<dataDir>/trust/` is created with `MkdirAll(_, 0o755)` in
+[`internal/capability/envelope/truststore.go:339,388`](../internal/capability/envelope/truststore.go).
+Pubkey files are written 0o644 ([`atomicWrite` default](../internal/capability/envelope/truststore.go)).
+
+Public keys are **public material by design** — operators import
+them from third parties via `alf trust add`. World-read of the
+pubkey bytes is harmless. The LIST of installed publishers
+(directory listing) is operator metadata; an attacker who can
+read the dir learns who you trust but not what they signed.
+
+**Tightening candidate (deferred to #86)**: under the post-#86
+uid/gid model where the LLM runs in a separate group, the trust
+dir should drop to 0o750 (root group only) so the LLM cannot
+enumerate operator-trusted publishers. Until #86 lands, the alf
+group includes the LLM subprocess and 0o750 would be no
+different from 0o755 in practice.
+
+## Follow-ups still deferred to #86
 
 1. **`<dataDir>/trust/` to 0o750** when the LLM gets its own
    gid (post-#86). Pure POSIX hardening; no functional change

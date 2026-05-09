@@ -287,7 +287,24 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	o.mu.Unlock()
 	agentsParent := filepath.Join(o.dataDir, "agents")
 	taskDir := filepath.Join(agentsParent, taskID)
-	os.MkdirAll(taskDir, 0o775)
+
+	// SEC-407-001: refuse to chmod/chown <dataDir>/agents if the LLM
+	// has swapped it for a symlink. The LLM (alf, uid 1000) owns
+	// the agents/ tree (entrypoint Phase 2.5 chowns it alf:alf with
+	// g+ws); a symlink-to-/home/alf/data/keys would let the
+	// daemon's chmod below follow into the admin domain and flip
+	// the daemon signing key to 0o775.
+	if info, err := os.Lstat(agentsParent); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		log.Printf("[orchestrator] SEC: refusing to chmod/chown %s — replaced with symlink (LLM tampering attempt?)", agentsParent)
+		return "", nil, fmt.Errorf("agents dir is a symlink — refusing to proceed (potential trust-domain breach)")
+	}
+	if err := os.MkdirAll(taskDir, 0o775); err != nil {
+		return "", nil, fmt.Errorf("mkdir agents/%s: %w", taskID, err)
+	}
+	if info, err := os.Lstat(taskDir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		log.Printf("[orchestrator] SEC: refusing to chmod/chown %s — symlink", taskDir)
+		return "", nil, fmt.Errorf("task dir is a symlink — refusing to proceed")
+	}
 	// Ensure the agents/ parent and task dir are owned by alf (subprocess uid 1000)
 	// so the LLM process can write files inside.
 	os.Chmod(agentsParent, 0o775)
@@ -888,6 +905,18 @@ func (o *Orchestrator) invokeAgentWithKey(
 		agentDir = filepath.Join(taskDir, fmt.Sprintf("%s-%s-%s", teamName, agentName, sessionKey[strings.LastIndex(sessionKey, "#")+1:]))
 	}
 	os.MkdirAll(agentDir, 0o775)
+	// SEC-407-001: same symlink guard as the agentsParent / taskDir
+	// path above. The LLM owns the parent (entrypoint g+ws); without
+	// the Lstat refusal, an LLM-planted symlink at agentDir's path
+	// would let the chmod follow into a domain it shouldn't reach.
+	if info, lerr := os.Lstat(agentDir); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+		log.Printf("[orchestrator] SEC: refusing to chmod/chown %s — symlink", agentDir)
+		return AgentResult{
+			Agent:    d.Agent,
+			Error:    fmt.Sprintf("agent dir is a symlink — refusing to proceed (potential trust-domain breach)"),
+			Duration: time.Since(start),
+		}
+	}
 	os.Chmod(agentDir, 0o775)
 	if err := os.Chown(agentDir, 1000, 1000); err != nil {
 		log.Printf("[orchestrator] chown agent dir %s: %v", agentDir, err)

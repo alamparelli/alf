@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alamparelli/alf/internal/platform/socknet"
 )
 
 // socketRequest is the JSON protocol for schedule tool → daemon communication.
@@ -60,15 +62,15 @@ func (s *Server) Listen() error {
 	}
 	os.Remove(s.sockPath)
 
-	ln, err := net.Listen("unix", s.sockPath)
+	// SEC-407-002: socknet.ListenUnix0660 wraps net.Listen in a
+	// umask 0o117 window so the socket is mode 0660 from inode-
+	// creation time — eliminates the TOCTOU race between Listen
+	// and Chmod.
+	ln, err := socknet.ListenUnix0660(s.sockPath, 1000)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", s.sockPath, err)
 	}
 	s.listener = ln
-
-	// Daemon runs as alfd (uid 1001, gid 1001). Set group to alf (1000) for subprocess access.
-	os.Chown(s.sockPath, -1, 1000)
-	os.Chmod(s.sockPath, 0660)
 
 	log.Printf("scheduler: socket server listening on %s", s.sockPath)
 	return nil

@@ -19,6 +19,131 @@ the milestone ticket map.
 
 ### Added
 
+- **#392 Stage 3 — forge integration: depends resolution + provider
+  exports registration**. Stage 1 shipped the schema, Stage 2 shipped
+  the runtime registry. Stage 3 wires them through the verify+forge
+  path so consumer manifests' `[[depends]]` entries actually resolve
+  against the registry, and capability-provider bundles populate it
+  with their `[[provider.exports]]` at install time. The original
+  ticket called for a separate `internal/runtime/providers/manager.go`
+  package; that's replaced by direct integration into
+  `InstantiateVerified` so the registry mutation goes through the
+  one verify path the codebase already pins via `TestOneVerifyCallSite`
+  (#388 deliverable 2).
+
+  **`KeyID.HexLower()`.** New method on `envelope.KeyID` returning
+  the 16-char lowercase hex form. Manifest-syntax references in
+  `[[depends]]` use lowercase per the schema's `dependsHandlePattern`
+  (Stage 1) — uppercase `KeyID.Hex()` wouldn't round-trip. The full
+  16 hex chars are kept as the "fingerprint short" (64 bits, ~280
+  trillion combinations — collision-resistant enough that
+  truncation is unnecessary). Picking "no truncation" once means the
+  N parameter from the §H2 spec note is documented and stable; any
+  future change would invalidate every shipped reference.
+
+  **Instantiator API.** Three additions:
+  - `WithHandleRegistry(*HandleRegistry)` option — stores the
+    registry on the Instantiator. When set, `InstantiateVerified`
+    validates `[[depends]]` and registers capability-provider
+    exports through it. When omitted (tests + legacy callers),
+    both steps are skipped — matches the "no registry, no
+    authority" precedent of `WithEventsBus` / `WithToolInvoker`.
+  - `RegisterProviderExports(reg, signerID, exports)` — sibling to
+    `SeedHandleRegistry`. Iterates exports and registers each as
+    `HandleKind{Namespace: signerID.HexLower(), ID: e.ID}`. Token
+    never escapes the Instantiator. Empty exports → no-op.
+    Returns the registry's first error on duplicate; partial state
+    is intentionally not rolled back (the caller treats install
+    as one transaction).
+  - Helper `(*Instantiator).resolveDepends(*envelope.Manifest)` —
+    private, called by `InstantiateVerified` BEFORE forge. Walks
+    `manifest.Depends`, splits each `<ns>:<id>` via the new
+    `envelope.DependsEntry.SplitHandle()`, looks up in the
+    registry. First miss returns
+    `ErrDependsHandleNotRegistered` wrapped with the offending
+    handle reference. The §3.1 ocap promise holds: a guest with
+    an unresolvable dependency never starts.
+
+  **`envelope.DependsEntry.SplitHandle()`.** Helper that splits
+  `Handle` into `(namespace, id)`. Pre-condition: every
+  `DependsEntry` came from `envelope.Validate`, which already
+  enforced the format via `dependsHandlePattern`. No error return
+  — schema is the authoritative gate, runtime parsing trusts it.
+
+  **`InstantiateVerified` flow.** Two new steps slot into the
+  existing pipeline:
+  1. After `envelope.Verify`, before any forge work: if a
+     registry is wired and `manifest.Depends` is non-empty,
+     `resolveDepends` validates every entry. Failure aborts
+     immediately — no FS / events / tools handles are forged,
+     no `Instance` is created, the guest never sees anything.
+  2. After successful `ForgeInstance`, before
+     `VerifiedInstantiation` returns: if a registry is wired AND
+     the manifest's kind is `KindCapabilityProvider` AND
+     `manifest.Provider.Exports` is non-empty,
+     `RegisterProviderExports` writes one entry per export.
+     Runs AFTER the forge so a forge failure doesn't pollute the
+     registry; runs BEFORE return so a downstream consumer
+     loaded immediately after sees the exports. Stage 5 will
+     add an uninstall path that removes registry entries
+     before re-registration; Stage 3 surfaces a duplicate
+     re-install (same key, same exports) as an instantiation
+     failure so the operator notices.
+
+  **Daemon wiring.** `cmd/alf-daemon/wasm.go::setupWASMLoader`
+  passes the registry to `runtime.NewInstantiator(...,
+  runtime.WithHandleRegistry(handleRegistry))` alongside the
+  existing `WithEventsBus` / `WithCrossFlowRegistry` options.
+  `SeedHandleRegistry` stays as the explicit boot-seed call —
+  the option only stores the registry; seeding is a separate
+  step so a duplicate-seed wiring bug surfaces loudly at boot
+  rather than racing during option processing.
+
+  **Tests.** 11 new runtime tests in `depends_test.go`:
+  - `DependsResolvedAgainstRegistry` — happy path with `alf:fs`
+  - `DependsUnregisteredFails` — load-bearing acceptance criterion
+    #1 of #392, returns `ErrDependsHandleNotRegistered`
+  - `DependsAlfCoreHandleResolves` — Stage 2/3 schema-and-registry
+    agreement pin (every documented core id resolves in a
+    seeded registry)
+  - `NoRegistryNoCheck` — preserves the legacy "no registry, no
+    authority" path
+  - `CapabilityProviderRegistersExports` — provider install
+    populates the registry under SignerID.HexLower()
+  - `ProviderThenConsumer` — full Stage 3 flow with shared trust
+    store, consumer's `[[depends]]` resolves on the
+    provider's just-registered exports (acceptance criterion #2
+    of #392)
+  - `TwoProvidersSameID` — acceptance criterion #3 of #392, two
+    providers signed by different keys both claim the same
+    handle id, distinguished by fingerprint namespace
+  - `LLMProviderDoesNotRegister` — kind discriminates: only
+    `capability-provider` mutates the registry, not
+    `llm-provider`
+  - `RegisterProviderExports_EmptyIsNoop` — nil + empty slices
+    are no-ops, registry untouched
+  - `RegisterProviderExports_FingerprintNamespace` — namespace
+    matches `SignerID.HexLower()` exactly, no uppercase
+    characters (manifest-syntax compatibility)
+  - `DuplicateProviderInstallFails` — same bundle re-signed with
+    a different key succeeds (different fingerprint = different
+    namespace); same-key re-install would fail with the
+    duplicate-rejection error (Stage 5 will add proper
+    uninstall pathway)
+
+  New helper `signBundleWithStore(t, manifest, bundle, store)` adds
+  a fresh signer to a pre-existing trust store rather than creating
+  one — used to build the "load provider, then load consumer trusted
+  by the same daemon" scenario.
+
+  **Stages 4–5 still pending**: `CheckImports` raw-imports
+  pass-through + scope schema validation (M8 audit finding —
+  Runtime-side validation against the provider's exported schema,
+  not the provider's implementation) + transitive trust display
+  (Stage 4); `alf provider list/install/remove` CLI + revocation
+  cascade hook into #396 deliverable 3 + example shipped provider
+  end-to-end (Stage 5).
+
 - **#392 Stage 2 — runtime `HandleRegistry` + core registration**.
   Stage 1 shipped the manifest schema for capability providers. Stage 2
   ships the runtime registry the schema validation already implies: a

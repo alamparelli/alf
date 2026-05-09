@@ -45,6 +45,29 @@ func (k KeyID) Hex() string {
 	return string(out)
 }
 
+// HexLower returns the lowercase hex representation (16 chars).
+// Used as the publisher fingerprint for #392 namespace-scoped handle
+// references — the manifest schema (`dependsHandlePattern` in
+// envelope/schema.go) requires lowercase, so capability provider
+// installs persist their KeyID through this form. The full 16 chars
+// are kept (rather than truncating per the §H2 "first N hex chars"
+// note in the spec) because:
+//   - 16 hex chars = 64 bits = ~280 trillion combinations; collision
+//     risk is negligible even with a billion providers
+//   - Once references like `<short>:bluetooth.scan` ship in any
+//     manifest, changing the truncation length is a breaking schema
+//     change. Picking "no truncation" once means N is documented
+//     and stable.
+func (k KeyID) HexLower() string {
+	const hex = "0123456789abcdef"
+	out := make([]byte, 16)
+	for i, b := range k {
+		out[i*2] = hex[b>>4]
+		out[i*2+1] = hex[b&0x0f]
+	}
+	return string(out)
+}
+
 // PublicKey wraps an Ed25519 public key with its minisign key ID.
 type PublicKey struct {
 	ID  KeyID

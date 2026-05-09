@@ -2,12 +2,29 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/capability/envelope"
 	"github.com/alamparelli/alf/internal/capability/handle"
 )
+
+// ErrDependsHandleNotRegistered is returned by InstantiateVerified
+// when a manifest's [[depends]] entry references a <ns>:<id> that the
+// runtime HandleRegistry does not know — either the namespace is not
+// `alf:` and no provider with that fingerprint short has been loaded
+// yet, or the id is not in that provider's exports.
+//
+// The error wraps the offending handle reference; callers (loader,
+// install UX) display it verbatim. Per the §3.1 ocap promise the
+// guest never runs — instantiation aborts before the forge is reached.
+//
+// #392 Stage 3 invariant: this is the only place a depends-resolution
+// failure surfaces. Schema validation at envelope.Validate accepts the
+// format; the registry lookup is the runtime authority.
+var ErrDependsHandleNotRegistered = errors.New("runtime: [[depends]] handle is not registered with the runtime HandleRegistry")
 
 // VerifiedInstantiation is the success payload of InstantiateVerified.
 // It carries the forged handle Instance plus the typed envelope
@@ -59,6 +76,19 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 	vm, err := envelope.Verify(in)
 	if err != nil {
 		return nil, err
+	}
+
+	// #392 Stage 3 — validate every [[depends]] entry against the
+	// runtime HandleRegistry. Fails closed before any forge work runs:
+	// a manifest referencing an unregistered handle never sees a
+	// handle.Instance and the guest cannot start. Skipped when no
+	// registry is wired (test paths) or the manifest declared no
+	// dependencies (the common case in 0.8.0 until provider bundles
+	// land).
+	if i.handleRegistry != nil && len(vm.Manifest.Depends) > 0 {
+		if err := i.resolveDepends(vm.Manifest); err != nil {
+			return nil, err
+		}
 	}
 
 	// Map envelope.Manifest → capability.Manifest so downstream forge
@@ -149,12 +179,49 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 	// the eventual provider cascade (#392 follow-up).
 	i.trackLive(inst, vm.SignerID, vm.SignedAt)
 
+	// #392 Stage 3 — capability-provider bundles register their
+	// [[provider.exports]] under the publisher's fingerprint short.
+	// Runs AFTER successful instantiation so a forge failure can't
+	// pollute the registry; runs BEFORE returning so a downstream
+	// consumer loaded immediately after sees the exports.
+	//
+	// A duplicate registration (same provider re-loaded across a
+	// SIGHUP, or a re-load by a hot-reload path) is a wiring bug —
+	// surface it as an instantiation failure so the operator notices.
+	// Stage 5 will add a proper uninstall path that removes registry
+	// entries before re-registration.
+	if i.handleRegistry != nil &&
+		vm.Manifest.Kind == envelope.KindCapabilityProvider &&
+		len(vm.Manifest.Provider.Exports) > 0 {
+		if err := i.RegisterProviderExports(i.handleRegistry, vm.SignerID, vm.Manifest.Provider.Exports); err != nil {
+			return nil, fmt.Errorf("capability-provider %q: %w", vm.Manifest.ID, err)
+		}
+	}
+
 	return &VerifiedInstantiation{
 		Instance: inst,
 		Manifest: vm.Manifest,
 		SignerID: vm.SignerID,
 		SignedAt: vm.SignedAt,
 	}, nil
+}
+
+// resolveDepends checks every [[depends]] entry in m against the
+// HandleRegistry. Returns ErrDependsHandleNotRegistered (wrapped with
+// the offending handle) on the first miss; the manifest must declare
+// every dependency by reference, the registry must agree it exists,
+// and any divergence aborts before the forge runs.
+//
+// Pre-condition: every DependsEntry came from envelope.Validate so
+// SplitHandle returns two well-formed parts.
+func (i *Instantiator) resolveDepends(m *envelope.Manifest) error {
+	for idx, d := range m.Depends {
+		ns, id := d.SplitHandle()
+		if _, ok := i.handleRegistry.Lookup(ns, id); !ok {
+			return fmt.Errorf("%w: depends[%d].handle=%q", ErrDependsHandleNotRegistered, idx, d.Handle)
+		}
+	}
+	return nil
 }
 
 // mapEnvelopeKind bridges the envelope.Manifest kind enum (string-typed

@@ -106,18 +106,22 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 	bus := events.New()
 	crossFlow := events.NewMemoryRegistry()
 
+	// #392 Stage 2/3 — runtime handle registry. Seeded with the daemon's
+	// bundled core kinds under the alf: namespace; capability-provider
+	// bundles add their [[provider.exports]] entries under the publisher's
+	// fingerprint short via Instantiator.RegisterProviderExports during
+	// InstantiateVerified. The registry is wired via WithHandleRegistry
+	// so InstantiateVerified can also resolve [[depends]] against it.
+	// SeedHandleRegistry stays as the explicit boot-seed call — the
+	// option only stores the registry; seeding is a separate step so a
+	// duplicate-seed wiring bug surfaces loudly rather than racing
+	// during option processing.
+	handleRegistry := handle.NewHandleRegistry()
 	inst := runtime.NewInstantiator(
 		runtime.WithEventsBus(bus, bus),
 		runtime.WithCrossFlowRegistry(crossFlow),
+		runtime.WithHandleRegistry(handleRegistry),
 	)
-
-	// #392 Stage 2 — runtime handle registry. Seeded with the daemon's
-	// bundled core kinds under the alf: namespace; Stage 3's provider
-	// installer will append [[provider.exports]] entries under each
-	// publisher's fingerprint short. SeedHandleRegistry is the only
-	// path that drives RegisterCore using the Instantiator's runtime
-	// token — the token never escapes Instantiator.
-	handleRegistry := handle.NewHandleRegistry()
 	if err := inst.SeedHandleRegistry(handleRegistry); err != nil {
 		return nil, fmt.Errorf("wasm-loader: seed handle registry: %w", err)
 	}

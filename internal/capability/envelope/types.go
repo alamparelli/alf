@@ -222,6 +222,22 @@ type DependsEntry struct {
 	Scope  map[string]any
 }
 
+// SplitHandle splits Handle into (namespace, id). Pre-condition: this
+// DependsEntry came from Validate, which already enforced the
+// `<ns>:<id>` format via dependsHandlePattern — so the split always
+// returns two non-empty parts. Callers in the runtime (forge,
+// registry resolver) skip the format check; envelope.Validate is the
+// authoritative gate.
+func (d DependsEntry) SplitHandle() (namespace, id string) {
+	for i := 0; i < len(d.Handle); i++ {
+		if d.Handle[i] == ':' {
+			return d.Handle[:i], d.Handle[i+1:]
+		}
+	}
+	// Unreachable for any DependsEntry from Validate; defensive.
+	return d.Handle, ""
+}
+
 // RawImport captures one `[[raw_imports]]` entry per #392. Module +
 // Function name a WASI function the guest needs to import directly
 // (escape hatch — see §3 of #392). The Justification is required so

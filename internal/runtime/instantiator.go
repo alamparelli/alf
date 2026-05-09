@@ -3,9 +3,11 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/alamparelli/alf/internal/capability"
+	"github.com/alamparelli/alf/internal/capability/envelope"
 	"github.com/alamparelli/alf/internal/capability/handle"
 )
 
@@ -74,6 +76,19 @@ type Instantiator struct {
 	// matching the §3.1 invariant "no invoker, no authority".
 	invoker handle.ToolInvoker
 
+	// handleRegistry is the runtime registry populated at boot with
+	// alf: core kinds and at install with each provider's exports
+	// (#392). When non-nil, InstantiateVerified validates every
+	// [[depends]] entry against it (fail closed on unregistered
+	// handle) AND registers a capability-provider's [[provider.exports]]
+	// under the publisher's fingerprint short. When nil (tests +
+	// legacy callers that don't exercise depends), validation +
+	// registration are skipped — manifests with [[depends]] that
+	// reach the forge with no registry wired pass through unchecked,
+	// matching the "no registry, no authority" pattern of the other
+	// optional fields above.
+	handleRegistry *handle.HandleRegistry
+
 	// Live registry — populated by InstantiateVerified after every
 	// successful forge. RevokeByKey walks this list to close every
 	// Instance signed by a given key. Entries self-prune via a
@@ -131,6 +146,22 @@ func WithToolInvoker(inv handle.ToolInvoker) InstantiatorOption {
 	return func(i *Instantiator) { i.invoker = inv }
 }
 
+// WithHandleRegistry wires the runtime handle registry (#392 Stage 3).
+// When set, InstantiateVerified consults the registry on every
+// [[depends]] entry — an unregistered <ns>:<id> reference fails the
+// instantiation with ErrDependsHandleNotRegistered. Capability-provider
+// manifests have their [[provider.exports]] registered under the
+// publisher's fingerprint short before the forge runs, so a downstream
+// capability's [[depends]] resolves on a sibling registration in the
+// same Boot scan IF the provider was loaded first.
+//
+// Tests + legacy callers that don't exercise depends pass nil; the
+// validation + registration steps are skipped, matching the "no
+// registry, no authority" precedent set by WithEventsBus / WithToolInvoker.
+func WithHandleRegistry(reg *handle.HandleRegistry) InstantiatorOption {
+	return func(i *Instantiator) { i.handleRegistry = reg }
+}
+
 // NewInstantiator constructs the singleton forge for a daemon process.
 // Calls handle.MintRuntimeToken exactly once; a second call panics
 // (§4.3 one-shot invariant). Tests construct many Instantiators and
@@ -152,16 +183,47 @@ func NewInstantiator(opts ...InstantiatorOption) *Instantiator {
 // been constructed; one call seeds the entire alf: namespace.
 //
 // The token never escapes the Instantiator: this method is the only
-// way an external caller can drive registry mutation through the
-// runtime's authority. Stage 3 of #392 will add a sibling method
-// for provider-installed exports (RegisterProviderExports) and the
-// providers manager will go through that path.
+// way an external caller can drive RegisterCore through the runtime's
+// authority. Provider-installed exports go through
+// RegisterProviderExports — same gating, different namespace.
 //
 // Returns the registry's first error if RegisterCore fails. The daemon
 // boot path treats any failure as fatal; nothing is recoverable from
 // here (a duplicate-register on first boot is a wiring bug).
 func (i *Instantiator) SeedHandleRegistry(reg *handle.HandleRegistry) error {
 	return reg.RegisterCore(i.token)
+}
+
+// RegisterProviderExports registers each entry of `exports` into reg
+// under the publisher's fingerprint short namespace (#392 Stage 3).
+// Used at install time of a capability-provider bundle: the verify
+// path produces a SignerID + the manifest's [[provider.exports]];
+// this method bridges them into registry entries the forge can later
+// resolve [[depends]] against.
+//
+// signerID is the trust-store KeyID of the bundle's signer — the
+// `<ns>` part of `<ns>:<id>` references in dependent manifests is
+// `signerID.HexLower()`. Two providers signed by different keys can
+// both export the same handle id (e.g. `bluetooth.scan`); a consumer
+// disambiguates by picking which fingerprint to depend on.
+//
+// The runtime token never escapes the Instantiator. Returns on the
+// first registry error; partial state (e.g. some exports registered
+// before a duplicate fires) is left intact — the caller treats
+// install as one transaction and either retries cleanly or rolls
+// back externally.
+func (i *Instantiator) RegisterProviderExports(reg *handle.HandleRegistry, signerID envelope.KeyID, exports []envelope.ProviderExport) error {
+	if len(exports) == 0 {
+		return nil
+	}
+	ns := signerID.HexLower()
+	for _, e := range exports {
+		k := handle.HandleKind{Namespace: ns, ID: e.ID}
+		if err := reg.Register(i.token, k); err != nil {
+			return fmt.Errorf("provider %s: register %s: %w", ns, k.FullName(), err)
+		}
+	}
+	return nil
 }
 
 // Instantiate verifies the signed manifest, forges the handle set it

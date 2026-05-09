@@ -19,12 +19,26 @@ import (
 // envelope package's own tests.
 func signBundle(t *testing.T, manifestTOML string, bundle []byte) (envelope.VerifyInput, *envelope.MemoryTrustStore) {
 	t.Helper()
+	store := envelope.NewMemoryTrustStore()
+	return signBundleWithStore(t, manifestTOML, bundle, store), store
+}
+
+// signBundleWithStore is the depends-test variant that adds the new
+// signer key to a pre-existing trust store rather than creating a
+// fresh one. Used to build "load provider then consumer" scenarios
+// where both bundles must be trusted by the same Instantiator.
+//
+// The function still mints a fresh key per call — the SignerID
+// returned by InstantiateVerified will be different for each bundle,
+// matching the real-world case where provider and consumer come from
+// different publishers but share the operator's trust store.
+func signBundleWithStore(t *testing.T, manifestTOML string, bundle []byte, store *envelope.MemoryTrustStore) envelope.VerifyInput {
+	t.Helper()
 
 	pub, priv, err := envelope.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := envelope.NewMemoryTrustStore()
 	store.Add(pub)
 
 	canonical, err := envelope.Canonicalize([]byte(manifestTOML))
@@ -60,7 +74,7 @@ func signBundle(t *testing.T, manifestTOML string, bundle []byte) (envelope.Veri
 		Signature:    sigFile,
 		Bundle:       bundle,
 		TrustStore:   store,
-	}, store
+	}
 }
 
 const verifiedManifest = `alf_envelope_version = 1

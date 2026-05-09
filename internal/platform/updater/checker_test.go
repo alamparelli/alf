@@ -28,14 +28,25 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-// registryHandler serves both the token endpoint and the tags endpoint.
+// registryHandler serves the token, tags, and manifest endpoints
+// the Checker walks. The manifest HEAD response carries a fixed
+// digest so tests can assert on it; switching to a per-tag digest
+// is overkill for the current coverage.
 func registryHandler(tags []string) http.HandlerFunc {
+	return registryHandlerWithDigest(tags, "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+}
+
+func registryHandlerWithDigest(tags []string, digest string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/token"):
 			json.NewEncoder(w).Encode(map[string]string{"token": "test-token"})
 		case strings.Contains(r.URL.Path, "/tags/list"):
 			json.NewEncoder(w).Encode(map[string]interface{}{"name": "test/repo", "tags": tags})
+		case strings.Contains(r.URL.Path, "/manifests/"):
+			w.Header().Set("Docker-Content-Digest", digest)
+			w.Header().Set("Content-Type", "application/vnd.oci.image.index.v1+json")
+			w.WriteHeader(200)
 		default:
 			w.WriteHeader(404)
 		}
@@ -55,7 +66,7 @@ func TestCheckOnce_NewerVersion(t *testing.T) {
 
 	var notified string
 	c := newTestChecker(t, "1.0.0", srv)
-	c.notify = func(cur, lat string) { notified = lat }
+	c.notify = func(cur, lat, dig string) { notified = lat }
 
 	c.CheckOnce()
 
@@ -218,6 +229,9 @@ func TestCheckOnce_Pagination(t *testing.T) {
 					"tags": []string{"0.9.0", "1.0.0", "abc123"},
 				})
 			}
+		case strings.Contains(r.URL.Path, "/manifests/"):
+			w.Header().Set("Docker-Content-Digest", "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+			w.WriteHeader(200)
 		default:
 			w.WriteHeader(404)
 		}

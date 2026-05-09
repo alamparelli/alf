@@ -94,6 +94,20 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Cosign — used by the daemon's auto-update checker (#403) to
+# verify the Sigstore-signed alf release images before notifying
+# the operator. Without cosign on PATH, the checker logs a
+# "verify failed" line and refuses to notify, which is the safe
+# default. The release pipeline (.github/workflows/release.yml)
+# signs every image via keyless OIDC; the daemon-side verifier
+# checks against the workflow identity.
+ARG COSIGN_VERSION=v2.4.1
+RUN COSIGN_ARCH=$([ "${TARGETARCH}" = "arm64" ] && echo "arm64" || echo "amd64") \
+    && curl -fsSL "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-${COSIGN_ARCH}" \
+       -o /usr/local/bin/cosign \
+    && chmod +x /usr/local/bin/cosign \
+    && cosign version
+
 # Static ffmpeg+ffprobe (~80 MB unpacked vs ~400 MB Debian packages).
 RUN if [ "${TARGETARCH}" = "arm64" ]; then FFARCH="arm64"; else FFARCH="amd64"; fi \
     && curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFARCH}-static.tar.xz" \

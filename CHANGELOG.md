@@ -19,6 +19,113 @@ the milestone ticket map.
 
 ### Added
 
+- **#403 — updater cosign verify + image digest pin**. Closes the
+  v0.7.9 audit finding "auto-update notifies on any tag with no
+  cryptographic check". The daemon's update checker now resolves
+  every candidate tag's manifest digest and runs `cosign verify`
+  against the alf-release identity BEFORE firing the notify; a
+  verification failure aborts the notify with an audit log line.
+
+  **Why this matters.** The release pipeline
+  (`.github/workflows/release.yml`) already signs every published
+  image via cosign keyless OIDC + attests SBOMs. Daemon-side did
+  nothing with those signatures — produced but never consumed. A
+  GHCR token compromise, an Actions secret leak, or a registry-side
+  tag repush would silently propose a malicious image to every
+  daemon that reached the auto-update check. The signed release
+  artefacts make this unnecessarily exposed.
+
+  **`internal/platform/updater/cosign.go`** (new file): exec-based
+  cosign wrapper with an injectable `Run` seam for tests.
+  - `CosignVerifier{Binary, Issuer, IdentityRegex, Run}`. Empty
+    fields fall back to:
+    - `Binary = "cosign"` (resolved on PATH at exec time).
+    - `Issuer = DefaultCosignIssuer = "https://token.actions.githubusercontent.com"`.
+    - `IdentityRegex = DefaultCosignIdentityRegex = "^https://github\\.com/alamparelli/alf/\\.github/workflows/release\\.yml@"`.
+  - `Verify(ctx, repo, digest) error`. Returns:
+    - `nil` on successful verification.
+    - `ErrCosignBinaryNotFound` when cosign is absent — typed so
+      the daemon can log the remediation pointer.
+    - `ErrCosignVerifyFailed` wrapping cosign's stderr otherwise
+      (untrusted signer, missing signature, expired cert, Rekor
+      reach).
+
+  **`Checker.resolveDigest(tag)`**. New helper that issues an OCI
+  HEAD against `/v2/<repo>/manifests/<tag>` with anonymous bearer
+  auth and an `Accept` header negotiating modern OCI manifest
+  media types — covers single-arch manifests AND multi-arch image
+  indexes (GHCR's default for alf since linux/amd64 + linux/arm64
+  builds). The signed digest is the index digest; cosign verifies
+  it transitively for both per-arch manifests.
+
+  **`Checker.SetCosignVerifier(*CosignVerifier)`**. New setter
+  wires the verifier post-construction. When nil (default
+  pre-#403 behaviour), `check()` proceeds without signature
+  gating; when set, the new flow is:
+    1. `latestTag` picks the highest semver.
+    2. `resolveDigest(latest)` returns `sha256:<…>`. A 404 or
+       missing `Docker-Content-Digest` header is fatal: refuse
+       to notify.
+    3. `verifier.Verify(repo+@+digest)` runs cosign with a 60s
+       context. Any error: refuse to notify, log the cosign
+       output for diagnostics.
+    4. Only on success: `c.latestVersion = latest;
+       c.latestDigest = digest; notify(current, latest, digest)`.
+
+  **`NotifyFunc` signature change**. Adds the `latestDigest`
+  parameter so the installer pulls `repo@<digest>` instead of
+  `repo:<tag>` — closing the tag-repush attack at the registry.
+  Single caller in `cmd/alf-daemon/main.go` updated.
+
+  **`Checker.LatestDigest()`**. Mirror of `LatestVersion`; empty
+  when no update was detected OR when verification was
+  disabled/failed.
+
+  **Daemon wiring** (`cmd/alf-daemon/main.go`). After constructing
+  the Checker, the daemon attaches a CosignVerifier with the
+  release defaults — UNLESS `ALF_DISABLE_COSIGN_VERIFY=1` is set
+  (homelab dev only, logged loudly). Operators on a fork override
+  the cert identity via `ALF_COSIGN_IDENTITY_REGEX` /
+  `ALF_COSIGN_ISSUER`.
+
+  **Dockerfile**. Adds cosign v2.4.1 to the runtime image — bare
+  binary download from sigstore/cosign releases with the matching
+  `${TARGETARCH}` for amd64/arm64. Sits next to the GitHub CLI
+  install. Without cosign on PATH the verifier returns
+  `ErrCosignBinaryNotFound` and the auto-update path refuses to
+  notify, which is the safe default.
+
+  **Acceptance covered.**
+  - ✅ `checker.check()` refuses to notify on any tag whose
+    cosign verification fails
+    (`TestCheckOnce_CosignVerifyFailureBlocksNotify`).
+  - ✅ Digest is plumbed through `NotifyFunc` and reaches the
+    installer unchanged
+    (`TestCheckOnce_CosignVerifySuccessFiresNotifyWithDigest`).
+  - ✅ Stubbed registry returns a tag but cosign verify returns
+    an error → `notify` is not called (same test).
+  - ✅ Dockerfile contains cosign and the daemon can exec it
+    (added to image; verified by the verifier's binary-not-found
+    path returning the typed error rather than silently passing).
+
+  **What's NOT in this drop.**
+  - **Rekor transparency log consistency checks.** Cosign already
+    verifies a Rekor entry exists; full inclusion-proof checking
+    against a configured trust root is a later hardening pass.
+  - **Offline verify.** Cosign verify needs Rekor + Fulcio
+    network reach; the homelab daemon's primary defence is
+    `ALF_UPDATE_CHECK=off` if the operator wants no auto-update
+    at all.
+
+  **Tests.** 4 new cosign verifier unit tests
+  (defaults-applied / custom-binary / binary-not-found-typed /
+  verify-failure-captured), 4 new check-flow integration tests
+  (cosign-failure-blocks-notify / cosign-success-fires-with-digest /
+  digest-resolve-failure-blocks-notify / no-verifier-skips-check).
+  Existing `TestCheckOnce_NewerVersion` + `TestCheckOnce_Pagination`
+  updated to mock the new manifest HEAD endpoint. 8 new tests
+  total. Race detector clean.
+
 - **#402 — Update permission-widening goes through ratification**.
   `Manager.Update` now diffs the new manifest's declared
   permissions against the previous install's set and refuses any

@@ -1306,8 +1306,8 @@ func main() {
 		if image == "" {
 			image = "ghcr.io/alamparelli/alf"
 		}
-		notifyFn := func(current, latest string) {
-			log.Printf("update available: %s → %s", current, latest)
+		notifyFn := func(current, latest, digest string) {
+			log.Printf("update available: %s → %s (digest=%s)", current, latest, digest)
 			if cfg.AutoUpdateNotify && telegramEnabled && tg != nil {
 				cid, _ := strconv.ParseInt(chatID, 10, 64)
 				if cid != 0 {
@@ -1320,6 +1320,29 @@ func main() {
 			updateInterval = 21600 * time.Second
 		}
 		uc = updater.New(image, version, updateInterval, notifyFn)
+		// #403: gate the auto-update notify on cosign verification
+		// against the alf-release identity. The defaults match the
+		// release.yml workflow's keyless-OIDC signature; operators
+		// who run a fork override via ALF_COSIGN_IDENTITY_REGEX +
+		// ALF_COSIGN_ISSUER. Verification can be opted out via
+		// ALF_DISABLE_COSIGN_VERIFY=1 (homelab dev only).
+		if os.Getenv("ALF_DISABLE_COSIGN_VERIFY") != "1" {
+			issuer := os.Getenv("ALF_COSIGN_ISSUER")
+			if issuer == "" {
+				issuer = updater.DefaultCosignIssuer
+			}
+			idRe := os.Getenv("ALF_COSIGN_IDENTITY_REGEX")
+			if idRe == "" {
+				idRe = updater.DefaultCosignIdentityRegex
+			}
+			uc.SetCosignVerifier(&updater.CosignVerifier{
+				Issuer:        issuer,
+				IdentityRegex: idRe,
+			})
+			log.Printf("[updater] cosign verify gate active (issuer=%s)", issuer)
+		} else {
+			log.Printf("[updater] ALF_DISABLE_COSIGN_VERIFY=1 — auto-update notify proceeds without signature check (homelab dev only)")
+		}
 	}
 
 	// --- Unified Scheduler ---

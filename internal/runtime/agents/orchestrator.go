@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -10,12 +11,90 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/alamparelli/alf/internal/memory"
 	provider "github.com/alamparelli/alf/internal/ai/provider"
 	"github.com/alamparelli/alf/internal/tooling"
 )
+
+// ErrSymlinkAtPath is returned by chmodChownDirNoFollow when the path
+// being prepared for the LLM subprocess is a symlink — the LLM owns
+// the agents/ tree (entrypoint Phase 2.5 chowns it alf:alf with g+ws),
+// so a symlink at any of these paths would let the daemon's chmod /
+// chown follow into a different trust domain (notably keys/).
+var ErrSymlinkAtPath = errors.New("path is a symlink — refusing to chmod/chown across trust domains")
+
+// chmodChownDirNoFollow opens path with O_NOFOLLOW|O_DIRECTORY and
+// applies chmod + chown via the file descriptor. This eliminates the
+// Lstat→Chmod TOCTOU window that SEC-080-002 surfaced: the previous
+// pattern advisory-checked symlink presence then re-resolved the path
+// in os.Chmod / os.Chown, both of which follow symlinks. Between the
+// two calls the LLM (uid 1000) could `rename agents agents.bak ; ln -s
+// keys agents` and steer the chmod into the admin trust domain.
+//
+// O_NOFOLLOW kernel-refuses the open if the leaf is a symlink (ELOOP);
+// O_DIRECTORY refuses if it is anything other than a directory; the
+// resulting fd is the only handle the daemon uses for the chmod /
+// chown, so the kernel cannot be tricked by a between-syscall
+// rename/symlink swap. The Lstat pre-check is kept for defense in
+// depth against platform drift in O_NOFOLLOW semantics, mirroring the
+// pattern in internal/capability/handle/fs.go::readFileNoFollow.
+func chmodChownDirNoFollow(path string, mode os.FileMode, uid, gid int) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return ErrSymlinkAtPath
+	}
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_DIRECTORY, 0)
+	if err != nil {
+		if isELOOP(err) {
+			return ErrSymlinkAtPath
+		}
+		return err
+	}
+	defer f.Close()
+	if err := f.Chmod(mode); err != nil {
+		return err
+	}
+	if err := f.Chown(uid, gid); err != nil {
+		return err
+	}
+	return nil
+}
+
+// isELOOP detects the errnos that O_NOFOLLOW|O_DIRECTORY raises when
+// the leaf is a symlink. Linux surfaces this as ELOOP. macOS surfaces
+// it as ENOTDIR when the kernel evaluates O_DIRECTORY first against
+// the unfollowed symlink (a symlink is, structurally, not a
+// directory). Both cases are the symlink-refusal we want — the leaf
+// was a symlink and the kernel refused to dereference it. The Lstat
+// post-check inside isELOOP confirms the path actually is a symlink
+// (ruling out the unrelated "regular file passed to a function that
+// expects a directory" use of ENOTDIR).
+func isELOOP(err error) bool {
+	var pe *os.PathError
+	var inner error
+	if errors.As(err, &pe) {
+		inner = pe.Err
+	} else {
+		inner = err
+	}
+	if errors.Is(inner, syscall.ELOOP) {
+		return true
+	}
+	if errors.Is(inner, syscall.ENOTDIR) && pe != nil {
+		// Disambiguate: ENOTDIR can come from a regular file passed
+		// where a directory was expected (not a symlink). Re-Lstat
+		// to confirm the path is currently a symlink. Race-safe
+		// against the swap because a false negative here just falls
+		// through as a generic ENOTDIR error to the caller, which
+		// also blocks the chmod.
+		if info, lerr := os.Lstat(pe.Path); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	defaultMaxIterations     = 20
@@ -288,32 +367,28 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, systemPrompt
 	agentsParent := filepath.Join(o.dataDir, "agents")
 	taskDir := filepath.Join(agentsParent, taskID)
 
-	// SEC-407-001: refuse to chmod/chown <dataDir>/agents if the LLM
-	// has swapped it for a symlink. The LLM (alf, uid 1000) owns
-	// the agents/ tree (entrypoint Phase 2.5 chowns it alf:alf with
-	// g+ws); a symlink-to-/home/alf/data/keys would let the
-	// daemon's chmod below follow into the admin domain and flip
-	// the daemon signing key to 0o775.
-	if info, err := os.Lstat(agentsParent); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		log.Printf("[orchestrator] SEC: refusing to chmod/chown %s — replaced with symlink (LLM tampering attempt?)", agentsParent)
-		return "", nil, fmt.Errorf("agents dir is a symlink — refusing to proceed (potential trust-domain breach)")
-	}
 	if err := os.MkdirAll(taskDir, 0o775); err != nil {
 		return "", nil, fmt.Errorf("mkdir agents/%s: %w", taskID, err)
 	}
-	if info, err := os.Lstat(taskDir); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		log.Printf("[orchestrator] SEC: refusing to chmod/chown %s — symlink", taskDir)
-		return "", nil, fmt.Errorf("task dir is a symlink — refusing to proceed")
+	// SEC-080-002 (extends SEC-407-001): chmod+chown agents/ + task
+	// dir via an O_NOFOLLOW|O_DIRECTORY fd so a symlink-swap race
+	// between the original Lstat advisory check and the path-based
+	// Chmod/Chown can no longer steer the daemon into the admin
+	// trust domain (notably keys/). chmodChownDirNoFollow is defined
+	// at top of this file.
+	if err := chmodChownDirNoFollow(agentsParent, 0o775, 1000, 1000); err != nil {
+		if errors.Is(err, ErrSymlinkAtPath) {
+			log.Printf("[orchestrator] SEC: refusing to chmod/chown %s — symlink (LLM tampering attempt?)", agentsParent)
+			return "", nil, fmt.Errorf("agents dir is a symlink — refusing to proceed (potential trust-domain breach)")
+		}
+		log.Printf("[orchestrator] chmod/chown agents dir: %v", err)
 	}
-	// Ensure the agents/ parent and task dir are owned by alf (subprocess uid 1000)
-	// so the LLM process can write files inside.
-	os.Chmod(agentsParent, 0o775)
-	if err := os.Chown(agentsParent, 1000, 1000); err != nil {
-		log.Printf("[orchestrator] chown agents dir: %v", err)
-	}
-	os.Chmod(taskDir, 0o775)
-	if err := os.Chown(taskDir, 1000, 1000); err != nil {
-		log.Printf("[orchestrator] chown task dir: %v", err)
+	if err := chmodChownDirNoFollow(taskDir, 0o775, 1000, 1000); err != nil {
+		if errors.Is(err, ErrSymlinkAtPath) {
+			log.Printf("[orchestrator] SEC: refusing to chmod/chown %s — symlink", taskDir)
+			return "", nil, fmt.Errorf("task dir is a symlink — refusing to proceed")
+		}
+		log.Printf("[orchestrator] chmod/chown task dir: %v", err)
 	}
 
 	log.Printf("[orchestrator] task %s started | teams=%d | message_len=%d", taskID, len(teams), len(userMessage))
@@ -905,21 +980,20 @@ func (o *Orchestrator) invokeAgentWithKey(
 		agentDir = filepath.Join(taskDir, fmt.Sprintf("%s-%s-%s", teamName, agentName, sessionKey[strings.LastIndex(sessionKey, "#")+1:]))
 	}
 	os.MkdirAll(agentDir, 0o775)
-	// SEC-407-001: same symlink guard as the agentsParent / taskDir
-	// path above. The LLM owns the parent (entrypoint g+ws); without
-	// the Lstat refusal, an LLM-planted symlink at agentDir's path
-	// would let the chmod follow into a domain it shouldn't reach.
-	if info, lerr := os.Lstat(agentDir); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
-		log.Printf("[orchestrator] SEC: refusing to chmod/chown %s — symlink", agentDir)
-		return AgentResult{
-			Agent:    d.Agent,
-			Error:    fmt.Sprintf("agent dir is a symlink — refusing to proceed (potential trust-domain breach)"),
-			Duration: time.Since(start),
+	// SEC-080-002 (extends SEC-407-001): same fd-bound chmod/chown as
+	// the agentsParent / taskDir path above. chmodChownDirNoFollow
+	// kernel-refuses a symlink leaf via O_NOFOLLOW so a Lstat→Chmod
+	// race cannot steer this into another trust domain.
+	if err := chmodChownDirNoFollow(agentDir, 0o775, 1000, 1000); err != nil {
+		if errors.Is(err, ErrSymlinkAtPath) {
+			log.Printf("[orchestrator] SEC: refusing to chmod/chown %s — symlink", agentDir)
+			return AgentResult{
+				Agent:    d.Agent,
+				Error:    fmt.Sprintf("agent dir is a symlink — refusing to proceed (potential trust-domain breach)"),
+				Duration: time.Since(start),
+			}
 		}
-	}
-	os.Chmod(agentDir, 0o775)
-	if err := os.Chown(agentDir, 1000, 1000); err != nil {
-		log.Printf("[orchestrator] chown agent dir %s: %v", agentDir, err)
+		log.Printf("[orchestrator] chmod/chown agent dir %s: %v", agentDir, err)
 	}
 
 	model := tp.Model

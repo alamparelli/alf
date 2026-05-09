@@ -4,8 +4,24 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"strings"
 )
+
+// markerNonceRandReader is the entropy source for newMarkerNonce.
+// Tests rebind this via SetMarkerNonceRandReaderForTest to cover the
+// SEC-080-005 fail-loud path; production uses crypto/rand.
+var markerNonceRandReader io.Reader = rand.Reader
+
+// SetMarkerNonceRandReaderForTest swaps the marker-nonce randReader
+// and returns a closer that restores it. Callers must defer the
+// closer. Mirrors internal/runtime/llm.SetRandReaderForTest.
+func SetMarkerNonceRandReaderForTest(r io.Reader) func() {
+	prev := markerNonceRandReader
+	markerNonceRandReader = r
+	return func() { markerNonceRandReader = prev }
+}
 
 // noncePlaceholder MUST match internal/runtime/llm.NoncePlaceholder.
 // Inlined here because the foundation dependency rule forbids
@@ -19,12 +35,19 @@ const noncePlaceholder = "{NONCE}"
 // used to bind the per-Invoke kernel prompt to the wrap markers
 // surrounding capability content. Mirrors
 // internal/runtime/llm.NewNonce — see the rationale there.
-func newMarkerNonce() string {
+//
+// SEC-080-005: returns an error on crypto/rand failure rather than
+// falling back to a constant 16-zero-hex string. A predictable nonce
+// on the failure path lets a hostile capability output break out of
+// its `<tool_output_NONCE>...</tool_output_NONCE>` wrap by emitting
+// the literal closing tag with the constant value. Aborting the LLM
+// call is the correct outcome when the OS PRNG is broken.
+func newMarkerNonce() (string, error) {
 	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "0000000000000000"
+	if _, err := io.ReadFull(markerNonceRandReader, b[:]); err != nil {
+		return "", fmt.Errorf("kernel-marker nonce: %w", err)
 	}
-	return hex.EncodeToString(b[:])
+	return hex.EncodeToString(b[:]), nil
 }
 
 // substituteMarkerNonce replaces every noncePlaceholder occurrence
@@ -87,7 +110,14 @@ func NewKernelPromptInjector(p Provider, prompt string) *KernelPromptInjector {
 // multi-turn loops AFTER the injector has already substituted) can
 // substitute the same value into their loop-local wraps.
 func (k *KernelPromptInjector) Invoke(ctx context.Context, prompt string, params Params, onProgress OnProgress) (*Result, error) {
-	nonce := newMarkerNonce()
+	nonce, err := newMarkerNonce()
+	if err != nil {
+		// SEC-080-005: the marker nonce is the binding that prevents
+		// capability outputs from breaking out of their wrap tags.
+		// Without a fresh, unguessable value, the kernel-prompt
+		// authority guarantee from §3.2 collapses. Refuse the call.
+		return nil, err
+	}
 	ctx = withMarkerNonce(ctx, nonce)
 
 	prompt = substituteMarkerNonce(prompt, nonce)

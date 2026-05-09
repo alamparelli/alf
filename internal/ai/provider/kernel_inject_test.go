@@ -2,9 +2,47 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 )
+
+// failingMarkerReader pins the SEC-080-005 fail-loud path for the
+// provider-side marker nonce. Mirrors failingReader in
+// internal/runtime/llm/kernel_prompt_test.go.
+type failingMarkerReader struct{ err error }
+
+func (f failingMarkerReader) Read(p []byte) (int, error) { return 0, f.err }
+
+func TestKernelPromptInjector_FailsLoudOnMarkerRandError(t *testing.T) {
+	want := errors.New("simulated entropy exhaustion")
+	restore := SetMarkerNonceRandReaderForTest(failingMarkerReader{err: want})
+	defer restore()
+
+	stub := &stubProvider{}
+	wrapped := NewKernelPromptInjector(stub, "KERNEL")
+	_, err := wrapped.Invoke(context.Background(), "p", Params{}, nil)
+	if err == nil {
+		t.Fatal("Invoke returned no error on rand failure (regression: fallback to constant marker nonce?)")
+	}
+	if !errors.Is(err, want) {
+		t.Fatalf("Invoke error did not wrap rand error: got %v", err)
+	}
+	if stub.gotParams.SystemPrompts != nil {
+		t.Fatal("Invoke proceeded to call inner provider despite rand failure (regression: predictable marker nonce reached the wire)")
+	}
+}
+
+func TestNewMarkerNonce_NoConstantFallbackInSource(t *testing.T) {
+	src, err := os.ReadFile("kernel_inject.go")
+	if err != nil {
+		t.Skipf("source read: %v", err)
+	}
+	if strings.Contains(string(src), `"0000000000000000"`) {
+		t.Fatal("kernel_inject.go reintroduced the SEC-080-005 zero-nonce fallback constant")
+	}
+}
 
 // stubProvider records the params it was invoked with so the test can
 // assert what reached the underlying provider after the wrapper ran.

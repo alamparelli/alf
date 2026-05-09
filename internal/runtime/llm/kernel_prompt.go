@@ -12,8 +12,23 @@ import (
 	"crypto/rand"
 	_ "embed"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"strings"
 )
+
+// randReader is the entropy source for NewNonce. Tests rebind this to
+// a failing reader to cover the SEC-080-005 fail-loud path; production
+// uses crypto/rand. Restore via the returned closer when done.
+var randReader io.Reader = rand.Reader
+
+// SetRandReaderForTest swaps randReader and returns a closer that
+// restores it. Callers must defer the closer.
+func SetRandReaderForTest(r io.Reader) func() {
+	prev := randReader
+	randReader = r
+	return func() { randReader = prev }
+}
 
 //go:embed kernel_prompt.txt
 var kernelPrompt string
@@ -49,17 +64,21 @@ const NoncePlaceholder = "{NONCE}"
 // — crypto/rand backs it. A WASM tool composing its output cannot
 // predict this value because it does not run inside the daemon's
 // PRNG.
-func NewNonce() string {
+//
+// SEC-080-005: returns an error rather than falling back to a constant
+// when crypto/rand fails. The previous fallback to a 16-zero-hex string
+// was predictable, so a malicious capability output that anticipated
+// the failure path could break out of the marker tag with a literal
+// closing-tag-plus-zero-nonce sequence and re-enter the kernel-prompt
+// trust domain. crypto/rand on Linux/Darwin reads from getrandom(2) /
+// /dev/urandom and returning an error from this function means the
+// LLM call is aborted — the right outcome when the OS PRNG is broken.
+func NewNonce() (string, error) {
 	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand failure is catastrophic; fall back to a constant
-		// rather than crash, so the daemon does not lose its LLM
-		// pipeline. The constant still rotates between deployments
-		// (different binary builds) — but a well-funded attacker
-		// who reaches this branch already has bigger problems.
-		return "0000000000000000"
+	if _, err := io.ReadFull(randReader, b[:]); err != nil {
+		return "", fmt.Errorf("kernel-prompt nonce: %w", err)
 	}
-	return hex.EncodeToString(b[:])
+	return hex.EncodeToString(b[:]), nil
 }
 
 // SubstituteNonce replaces every NoncePlaceholder occurrence in s

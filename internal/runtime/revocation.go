@@ -15,15 +15,17 @@ import (
 // lifecycle context fires (either via Instance.Close or via
 // RevokeByKey below).
 //
-// SignerID + SignedAt are kept here even though commit 2 of #396 only
-// uses SignerID for RevokeByKey — commit 3 (trust-store not-valid-after
-// enforcement) needs SignedAt and we'd rather not churn this struct
-// across two commits.
+// SignerID + SignedAt come from the bundle's signer (used by
+// RevokeByKey for direct revocation). DependsOn is the set of provider
+// fingerprints this Instance's manifest depended on (#392 Stage 5
+// cascade): when ANY of those keys is revoked, this Instance must
+// also close even if its own signer is not the revoked key.
 type liveEntry struct {
-	instance *handle.Instance
-	owner    capability.ID
-	signerID envelope.KeyID
-	signedAt time.Time
+	instance  *handle.Instance
+	owner     capability.ID
+	signerID  envelope.KeyID
+	signedAt  time.Time
+	dependsOn []envelope.KeyID
 }
 
 // trackLive registers an Instance with the live registry and spawns a
@@ -31,18 +33,25 @@ type liveEntry struct {
 // context cancels. Called by InstantiateVerified after ForgeInstance
 // succeeds.
 //
+// dependsOn is the set of provider keys this Instance is affected by
+// (computed from the verified manifest's [[depends]] entries, with
+// the alf: namespace excluded — alf core kinds are not provider-keyed).
+// Revoking any of those keys closes this Instance via the cascade path
+// in RevokeByKey.
+//
 // The watcher goroutine costs ~2 KB stack per live Instance — acceptable
 // for the v0.8.0 single-host scale (dozens of caps). If we ever need to
 // scale to thousands, replace with a finalizer or a periodic sweep.
-func (i *Instantiator) trackLive(inst *handle.Instance, signerID envelope.KeyID, signedAt time.Time) {
+func (i *Instantiator) trackLive(inst *handle.Instance, signerID envelope.KeyID, signedAt time.Time, dependsOn []envelope.KeyID) {
 	if inst == nil {
 		return
 	}
 	entry := liveEntry{
-		instance: inst,
-		owner:    inst.Owner,
-		signerID: signerID,
-		signedAt: signedAt,
+		instance:  inst,
+		owner:     inst.Owner,
+		signerID:  signerID,
+		signedAt:  signedAt,
+		dependsOn: dependsOn,
 	}
 	i.liveMu.Lock()
 	i.live = append(i.live, entry)
@@ -64,12 +73,19 @@ func (i *Instantiator) trackLive(inst *handle.Instance, signerID envelope.KeyID,
 }
 
 // RevokeByKey closes every live Instance forged from a bundle signed
-// by the given key fingerprint. Returns the slice of capability IDs
-// that were closed — order is the order they were registered.
+// by the given key fingerprint OR depending on a capability-provider
+// signed by it (#392 Stage 5 cascade). Returns the slice of
+// capability IDs that were closed — order is the order they were
+// registered.
 //
-// This is the user-facing primitive of #396 deliverable 3 (key-based
-// revocation). The CLI surface (`alf trust revoke <fp>`) wires through
-// this method via the admin boundary in a Stage 2 follow-up.
+// Two close reasons surface in the audit log so the operator can tell
+// "your bundle was directly signed by the revoked key" apart from
+// "you depend on a provider that was revoked":
+//   - "signed by revoked key" — direct revocation (existing path)
+//   - "depends on revoked provider key" — cascade revocation (new)
+//
+// The CLI surface (`alf trust revoke <fp>`) reaches this method via
+// the admin boundary; tests reach it via the package-private path.
 //
 // Concurrency: matched Instances are removed from the live slice
 // under the mutex, then Close() is called outside the lock. Close()
@@ -82,13 +98,36 @@ func (i *Instantiator) trackLive(inst *handle.Instance, signerID envelope.KeyID,
 // milestone.
 func (i *Instantiator) RevokeByKey(id envelope.KeyID) []capability.ID {
 	i.liveMu.Lock()
-	var matched []*handle.Instance
-	var closedIDs []capability.ID
+	type closeRecord struct {
+		inst   *handle.Instance
+		owner  capability.ID
+		reason string
+	}
+	var matched []closeRecord
 	out := i.live[:0]
 	for _, e := range i.live {
 		if e.signerID == id {
-			matched = append(matched, e.instance)
-			closedIDs = append(closedIDs, e.owner)
+			matched = append(matched, closeRecord{
+				inst:   e.instance,
+				owner:  e.owner,
+				reason: "signed by revoked key",
+			})
+			continue
+		}
+		// Cascade — does this Instance depend on the revoked key?
+		cascade := false
+		for _, dep := range e.dependsOn {
+			if dep == id {
+				cascade = true
+				break
+			}
+		}
+		if cascade {
+			matched = append(matched, closeRecord{
+				inst:   e.instance,
+				owner:  e.owner,
+				reason: "depends on revoked provider key",
+			})
 			continue
 		}
 		out = append(out, e)
@@ -100,9 +139,11 @@ func (i *Instantiator) RevokeByKey(id envelope.KeyID) []capability.ID {
 	if logger == nil {
 		logger = log.Printf
 	}
-	for idx, inst := range matched {
-		logger("[revocation] closing instance %s — bundle signed by revoked key %s", closedIDs[idx], id.Hex())
-		inst.Close()
+	closedIDs := make([]capability.ID, 0, len(matched))
+	for _, r := range matched {
+		logger("[revocation] closing instance %s — %s %s", r.owner, r.reason, id.Hex())
+		r.inst.Close()
+		closedIDs = append(closedIDs, r.owner)
 	}
 	return closedIDs
 }

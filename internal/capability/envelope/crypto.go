@@ -68,6 +68,38 @@ func (k KeyID) HexLower() string {
 	return string(out)
 }
 
+// ErrKeyIDInvalidHex is returned by KeyIDFromHex when the input is not
+// a 16-char hex string. Used to round-trip
+// `[[depends]].handle = "<ns>:<id>"` namespace strings back into the
+// trust-store KeyID type for revocation cascade lookups (#392 Stage 5).
+var ErrKeyIDInvalidHex = errors.New("envelope: KeyID hex string must be 16 chars of [0-9a-fA-F]")
+
+// KeyIDFromHex parses the 16-char hex form of a KeyID (as produced by
+// Hex / HexLower) back into the typed [8]byte value. Accepts both
+// uppercase and lowercase. Used by the runtime revocation cascade to
+// turn a manifest's `[[depends]].handle = "<ns>:<id>"` namespace into
+// the KeyID needed to track which provider key the consumer depends
+// on. Returns ErrKeyIDInvalidHex on length mismatch or non-hex chars.
+//
+// Reuses the package-private hexNibble helper from crl.go (which
+// returns an error on non-hex bytes — same shape, different error
+// wrap — so callers see ErrKeyIDInvalidHex consistently).
+func KeyIDFromHex(s string) (KeyID, error) {
+	if len(s) != 16 {
+		return KeyID{}, fmt.Errorf("%w: got len=%d", ErrKeyIDInvalidHex, len(s))
+	}
+	var k KeyID
+	for i := 0; i < 8; i++ {
+		hi, hiErr := hexNibble(s[i*2])
+		lo, loErr := hexNibble(s[i*2+1])
+		if hiErr != nil || loErr != nil {
+			return KeyID{}, fmt.Errorf("%w: non-hex char at index %d", ErrKeyIDInvalidHex, i*2)
+		}
+		k[i] = (hi << 4) | lo
+	}
+	return k, nil
+}
+
 // PublicKey wraps an Ed25519 public key with its minisign key ID.
 type PublicKey struct {
 	ID  KeyID

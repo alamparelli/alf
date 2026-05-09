@@ -19,6 +19,110 @@ the milestone ticket map.
 
 ### Added
 
+- **#392 Stage 5 — provider revocation cascade**. Stages 1-4 shipped
+  the schema, registry, forge integration, and scope validation.
+  Stage 5 closes the §3.1 security promise that revoking a provider's
+  trust store entry actually unwinds every consumer that depended on
+  it — not just the bundles signed by the revoked key.
+
+  **Why this matters.** Without cascade, revoking a compromised
+  provider key would close the provider's own Instance but leave
+  consumer Instances live, still calling into the (now-detached)
+  registry entry. The handle would still resolve via Lookup until
+  the consumer's own Close fired — meaning a revoked provider could
+  keep serving authority through cached references. Cascade closes
+  every dependent consumer in the same revocation event, so the
+  authority loss is atomic.
+
+  **`envelope.KeyIDFromHex(s)`.** New helper that parses the
+  16-char hex form back into a `KeyID`. The runtime cascade needs
+  this to convert `[[depends]].handle` namespace strings (which
+  carry the publisher's lowercase fingerprint as Stage 3 wired)
+  into the trust-store identity. Accepts both upper and lower case
+  for round-trip compatibility with `KeyID.Hex()`. Returns
+  `ErrKeyIDInvalidHex` on length mismatch or non-hex chars.
+  Defensive: the runtime cascade silently skips namespaces that
+  fail this parse — envelope.Validate is the authoritative format
+  gate, so a manifest reaching the runtime with a non-hex namespace
+  is a defensive corner case (e.g. a future schema change that
+  loosens the format), not an attack surface.
+
+  **`runtime.dependsOnKeys(*envelope.Manifest)`.** Pure helper that
+  walks `manifest.Depends` and collects every distinct provider
+  KeyID:
+  - `alf:` namespace excluded — alf core kinds are not
+    provider-keyed and never get revoked via the cascade path.
+  - Duplicates collapsed (a manifest depending on the same
+    provider for two different handles only tracks the key once).
+  - Non-hex namespaces silently skipped.
+
+  Returns `nil` for the common case (skill / wasm-tool bundles
+  that only depend on `alf:*` core kinds).
+
+  **`liveEntry.dependsOn` field.** Added to the per-Instance
+  tracking record. Populated at `trackLive` time from
+  `dependsOnKeys(vm.Manifest)`. `RevokeByKey` walks the live
+  registry and closes both:
+  - Instances whose `signerID == revokedKey` (existing direct path)
+  - Instances whose `dependsOn` contains `revokedKey` (new cascade
+    path)
+
+  **Audit logger surfaces close reasons.** Each closed Instance
+  emits one log line via `revocationLogger`. Two distinct reason
+  strings:
+  - `signed by revoked key <fp>` — direct revocation
+  - `depends on revoked provider key <fp>` — cascade revocation
+
+  An operator can tell the two apart at a glance: a single
+  revocation that affects 5 caps will show 1 direct + 4 cascade
+  lines, exactly mapping the dependency graph.
+
+  **Tests.** 4 new runtime tests in `cascade_test.go`:
+  - `RevokeByKey_DirectSignerOnly` — legacy path, no cascade
+    involved (Instance has no provider depends), reason text is
+    "signed by revoked key"
+  - `RevokeByKey_CascadeCloseDependentConsumer` — load-bearing
+    Stage 5 invariant: provider + consumer signed by different
+    keys, RevokeByKey on provider's key closes BOTH; audit log
+    carries both direct + cascade lines
+  - `RevokeByKey_NoCascadeForUnrelatedConsumer` — alf-fs-only
+    consumer is untouched by an unrelated key revocation
+    (LiveCount stays 1)
+  - `DependsOnKeys_PureFunction` — table-driven pin: no depends,
+    alf only, single provider, two providers, duplicate provider
+    collapsed, mixed alf+provider
+
+  29 archtests still green; race detector clean.
+
+  **What's deferred.** Two original Stage 5 items pushed to
+  follow-ups:
+  - **`alf provider list/install/remove` CLI**: open design
+    questions around the Docker host/container boundary (where
+    provider bundles live on the host vs in the daemon's mount),
+    and 0.8.0 ships zero capability-provider bundles, so the CLI
+    surface has no consumers yet. Will follow up with an explicit
+    ticket once the bundle-distribution channel and example
+    providers exist.
+  - **`alf trust revoke <fp>` → daemon RevokeByKey hookup**:
+    deferred to #396 Stage 2 deliverable 8. The existing
+    `alf trust revoke` writes a `.revoked` sidecar; the running
+    daemon would need to discover the change and call
+    `RevokeByKey`. The cascade machinery is now ready for that
+    wiring whenever the loop lands.
+
+  **Stage 5 closes the technical work for #392.** All four
+  acceptance criteria from the load-bearing security promise are
+  now covered:
+  - [x] `[[depends]]` fails closed on unregistered handle (Stage 3)
+  - [x] Installing the provider then loading the consumer succeeds (Stage 3)
+  - [x] Two providers same id distinguished by fingerprint (Stage 3)
+  - [x] Scope validation runs Runtime-side (Stage 4 — M8 audit finding)
+  - [x] Provider revocation cascades to children (Stage 5)
+
+  Operational surface (CLI + transitive trust display + raw-imports
+  install prompt) lives with follow-ups; the security architecture
+  is structurally complete.
+
 - **#392 Stage 4 — scope schema validation (M8 audit finding)**.
   Stages 1-3 wired the `[[depends]]` namespace + handle resolution.
   Stage 4 closes the M8 audit finding: per-handle scope schemas

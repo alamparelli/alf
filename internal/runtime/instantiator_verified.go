@@ -188,11 +188,12 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 	}
 
 	// Track in the live registry so RevokeByKey can find this Instance
-	// later (#396 deliverable 3). The watcher goroutine inside
-	// trackLive prunes the entry when Close() fires the lifecycle ctx,
-	// regardless of whether Close came from the user, RevokeByKey, or
-	// the eventual provider cascade (#392 follow-up).
-	i.trackLive(inst, vm.SignerID, vm.SignedAt)
+	// later (#396 deliverable 3 + #392 Stage 5 cascade). The watcher
+	// goroutine inside trackLive prunes the entry when Close() fires
+	// the lifecycle ctx, regardless of whether Close came from the
+	// user, RevokeByKey on the bundle's signer, or RevokeByKey on a
+	// provider key this Instance depends on.
+	i.trackLive(inst, vm.SignerID, vm.SignedAt, dependsOnKeys(vm.Manifest))
 
 	// #392 Stage 3 — capability-provider bundles register their
 	// [[provider.exports]] under the publisher's fingerprint short.
@@ -219,6 +220,44 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 		SignerID: vm.SignerID,
 		SignedAt: vm.SignedAt,
 	}, nil
+}
+
+// dependsOnKeys collects every distinct provider KeyID this manifest's
+// [[depends]] entries reference (#392 Stage 5 cascade). The alf:
+// namespace is excluded — alf core kinds are not provider-keyed and
+// never get revoked via the cascade path. A namespace string that
+// fails KeyIDFromHex is also skipped silently: the format check at
+// envelope.Validate accepted any lowercase 16-char prefix; if the
+// runtime cannot parse it back, the dependency cannot be a provider
+// install we know about, so it cannot trigger cascade either.
+//
+// Returns nil for manifests with no provider depends (the common case
+// for skill / wasm-tool bundles that only depend on alf:* core kinds).
+func dependsOnKeys(m *envelope.Manifest) []envelope.KeyID {
+	if len(m.Depends) == 0 {
+		return nil
+	}
+	seen := make(map[envelope.KeyID]struct{}, len(m.Depends))
+	out := make([]envelope.KeyID, 0, len(m.Depends))
+	for _, d := range m.Depends {
+		ns, _ := d.SplitHandle()
+		if ns == "alf" {
+			continue
+		}
+		k, err := envelope.KeyIDFromHex(ns)
+		if err != nil {
+			continue
+		}
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // resolveDepends checks every [[depends]] entry in m against the

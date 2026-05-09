@@ -70,3 +70,6 @@ scripts/*
 !scripts/install.sh
 !scripts/dev-local.sh
 !scripts/check-hardcoded-models.sh
+# #86: shipped security profiles (Layer 1 outer ring)
+!scripts/apparmor-alf.profile
+!scripts/seccomp-alf.json

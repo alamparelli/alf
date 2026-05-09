@@ -230,9 +230,17 @@ fi
 # the LLM subprocess (setfsuid via CAP_SETUID was already a concern;
 # CAP_SYS_ADMIN added more on Linux). Keeping CAP_SETUID + CAP_SETGID
 # only — the daemon still needs them to spawn the LLM subprocess as
-# user alf. A follow-up post-beta will drop those too via per-spawn
-# ambient-caps clearing in cli.go / codex.go (defence in depth so the
-# LLM subprocess itself runs with zero caps).
+# user alf.
+#
+# #86 SEC-A02 update: SYS_ADMIN + SYS_CHROOT have now been removed
+# from cap_add in docker-compose.yml.tmpl too — the entrypoint
+# filtering above was belt-and-braces; the top-level container now
+# never sees them either. Code-search verified zero remaining callers
+# of syscall.Mount / Chroot / Unshare / PivotRoot.
+#
+# Follow-up post-#86: drop CAP_SETUID/SETGID via per-spawn ambient-caps
+# clearing in cli.go / codex.go so the LLM subprocess itself runs with
+# zero caps (defence in depth).
 export GOMEMLIMIT=512MiB
 exec setpriv --reuid=1001 --regid=1001 --init-groups \
     --inh-caps=-all,+setuid,+setgid \

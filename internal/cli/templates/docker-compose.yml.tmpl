@@ -112,22 +112,38 @@ services:
 {{- end}}
     runtime: ${ALF_RUNTIME:-runc}
     security_opt:
-      # AppArmor blocks mount(2) even with CAP_SYS_ADMIN — unconfined required
-      # for pivot_root sandbox. Caps are still explicitly limited below.
+      # apparmor=unconfined is the legacy posture from the v0.7.x
+      # sandbox (chroot+setpriv+bwrap needed mount(2) which AppArmor
+      # blocked). #406 razed that layer; apparmor=unconfined is now
+      # vestigial. The custom profile at scripts/apparmor-alf.profile
+      # (#86 SEC-A01) is the planned replacement; activate via
+      #
+      #   sudo apparmor_parser -r -W /opt/alf/scripts/apparmor-alf.profile
+      #   # then change this line to: - apparmor=alf
+      #
+      # Kept as `unconfined` until the profile has been soak-tested
+      # against a full daemon boot — switching prematurely could
+      # block legitimate startup syscalls.
       - apparmor=unconfined
+      # Custom seccomp profile (#86 SEC-A11): activate via
+      #   - seccomp=/opt/alf/scripts/seccomp-alf.json
+      # See scripts/seccomp-alf.json. Same deferral rationale as
+      # AppArmor: shipped, not yet activated by default.
     cap_drop:
       - ALL
     cap_add:
-      # CHOWN/DAC_OVERRIDE/FOWNER: entrypoint (apt-get, chown, file permissions)
-      # SETUID/SETGID: entrypoint + daemon (credential switching for subprocess isolation)
-      # SYS_ADMIN: daemon (mount namespace sandbox for app bash)
-      # SYS_CHROOT: daemon (chroot into sandbox root)
-      # NET_ADMIN: nettrack-helper (conntrack events)
+      # CHOWN/DAC_OVERRIDE/FOWNER: entrypoint Phase 1 (apt-get, chown, perms).
+      # SETUID/SETGID: entrypoint + daemon (subprocess isolation via setpriv).
+      # NET_ADMIN: nettrack-helper (conntrack events).
+      #
+      # Removed in v0.8.0 (#86 SEC-A02 + #406 deferred follow-up):
+      #   - SYS_ADMIN: was daemon's mount-namespace sandbox; razed in #406.
+      #   - SYS_CHROOT: was daemon's chroot into sandbox root; razed in #406.
+      # Code-search verified zero remaining callers of syscall.Mount /
+      # Chroot / Unshare / PivotRoot in the daemon path.
       - CHOWN
       - SETUID
       - SETGID
-      - SYS_ADMIN
-      - SYS_CHROOT
       - DAC_OVERRIDE
       - FOWNER
       - NET_ADMIN

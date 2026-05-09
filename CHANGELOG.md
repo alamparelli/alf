@@ -19,6 +19,82 @@ the milestone ticket map.
 
 ### Added
 
+- **#86 — Layer 1 outer ring hardening**. Custom AppArmor +
+  seccomp profiles authored, `CAP_SYS_ADMIN` and `CAP_SYS_CHROOT`
+  dropped from the container's `cap_add` (no longer needed
+  post-#406). Closes the kernel-ring side of the layered
+  architecture's Layer 1 (see §2.1 — Walls / outer ring).
+
+  **`CAP_SYS_ADMIN` + `CAP_SYS_CHROOT` removed (SEC-A02).**
+  These were granted to the container in `cap_add` so the
+  entrypoint Phase 1 (apt-get, chown) and the legacy daemon
+  sandbox (chroot+setpriv+bwrap, razed by #406) could use them.
+  After #406, code-search confirmed zero remaining callers of
+  `syscall.Mount` / `Chroot` / `Unshare` / `PivotRoot` in the
+  daemon path. The entrypoint already dropped them from the
+  ambient/inheritable set at `setpriv` time (0.8.0-beta soak
+  finding); now the top-level container never sees them either —
+  belt-and-braces removal at the cap_add boundary.
+
+  **AppArmor profile (SEC-A01)**: new
+  [`scripts/apparmor-alf.profile`](scripts/apparmor-alf.profile)
+  defines a narrow-syscall posture aligned with the post-#406
+  daemon: allow normal POSIX file access under `/home/alf/data`,
+  `/opt/alf`, `/tmp`, `/run`; deny `mount` / `umount` /
+  `pivot_root` / `mknod`; deny `CAP_SYS_ADMIN` / `CAP_SYS_CHROOT`
+  / `CAP_SYS_MODULE` / `CAP_SYS_RAWIO` capabilities. Operators
+  load via `sudo apparmor_parser -r -W
+  /opt/alf/scripts/apparmor-alf.profile` then change
+  `apparmor=unconfined` to `apparmor=alf` in
+  `docker-compose.yml`. The default `apparmor=unconfined` is
+  retained until the profile has been soak-tested against a
+  full daemon boot — premature switching could block legitimate
+  startup syscalls.
+
+  **Seccomp profile (SEC-A11)**: new
+  [`scripts/seccomp-alf.json`](scripts/seccomp-alf.json) ships a
+  Docker-default-derived allowlist plus an explicit deny-list
+  for `mount` / `pivot_root` / `chroot` / `init_module` /
+  `kexec_load` / `ptrace` etc. Same activation pattern as
+  AppArmor: the file is shipped, soak-test before flipping
+  `seccomp=/opt/alf/scripts/seccomp-alf.json` in the
+  docker-compose template.
+
+  **SEC-A03 closure**: per-app scoped tokens (replacing
+  Referer-based isolation) **already shipped** via #325
+  (`AppTokenStore` / `ctxKeyAppTokenSlug` /
+  `authMiddlewareWithAppTokens` in
+  `internal/controlcenter/`). Documented here for
+  completeness — the Referer check in `isAppSubResource` is
+  now defense-in-depth on top of the HMAC-signed app token.
+
+  **What's not flipped by default in this drop**. The new
+  AppArmor + seccomp profiles ship as ready-to-load files, but
+  the docker-compose template still references `apparmor=unconfined`
+  and no seccomp profile. This is deliberate: the daemon's
+  startup syscall set is broad (apt-get during Phase 1, Go
+  runtime, npm install, claude/codex CLI installs), and a too-tight
+  profile blocks boot before the operator notices. The
+  homelab-soak step is to `apparmor_parser -r -W` the profile,
+  flip the security_opt line, restart the container, and watch
+  `journalctl` for `apparmor=DENIED` audit lines. Tighten the
+  profile based on observations, then ship a default-on
+  template update.
+
+  **Follow-ups deferred**:
+  - **`CAP_SETUID` / `CAP_SETGID` per-spawn drop**: clear ambient
+    caps at the LLM subprocess spawn site so the LLM itself
+    runs with zero caps (today, the entrypoint's
+    `setpriv --inh-caps=-all,+setuid,+setgid` keeps them in the
+    daemon's ambient set; the LLM subprocess inherits and
+    silently keeps them).
+  - **`<dataDir>/trust/` to 0o750** (deferred from #407): only
+    meaningful once the LLM gets a separate gid, which depends
+    on the cap clearing above.
+  - **chown call sites** for non-root daemon transition (when
+    the daemon eventually drops to a non-root uid for the
+    full CAP_SYS_ADMIN-elimination story).
+
 - **#407 — POSIX file-permission audit**. Full categorisation of
   every `os.Chmod` / `os.MkdirAll` / `os.WriteFile` mode in the
   codebase against the layered architecture's three trust

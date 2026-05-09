@@ -146,6 +146,24 @@ func NewInstantiator(opts ...InstantiatorOption) *Instantiator {
 	return inst
 }
 
+// SeedHandleRegistry registers every alf-namespaced core handle kind
+// into reg using the Instantiator's runtime token. Called from the
+// daemon boot path after both the Instantiator and the registry have
+// been constructed; one call seeds the entire alf: namespace.
+//
+// The token never escapes the Instantiator: this method is the only
+// way an external caller can drive registry mutation through the
+// runtime's authority. Stage 3 of #392 will add a sibling method
+// for provider-installed exports (RegisterProviderExports) and the
+// providers manager will go through that path.
+//
+// Returns the registry's first error if RegisterCore fails. The daemon
+// boot path treats any failure as fatal; nothing is recoverable from
+// here (a duplicate-register on first boot is a wiring bug).
+func (i *Instantiator) SeedHandleRegistry(reg *handle.HandleRegistry) error {
+	return reg.RegisterCore(i.token)
+}
+
 // Instantiate verifies the signed manifest, forges the handle set it
 // requests, and returns an *handle.Instance whose fields carry only
 // the authority the manifest declared. Every other slot is nil — the

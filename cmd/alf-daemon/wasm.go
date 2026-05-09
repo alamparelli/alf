@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/alamparelli/alf/internal/capability/envelope"
+	"github.com/alamparelli/alf/internal/capability/handle"
 	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/alamparelli/alf/internal/runtime/events"
 	"github.com/alamparelli/alf/internal/runtime/wasm"
@@ -41,6 +42,14 @@ type wasmRuntime struct {
 	Inst       *runtime.Instantiator
 	DaemonPriv envelope.PrivateKey
 	TrustStore *envelope.DirTrustStore
+
+	// HandleRegistry carries the live set of registered handle kinds
+	// (#392 Stage 2). At boot it holds the alf: namespace seeded from
+	// AlfCoreHandleIDs; Stage 3 will populate it with installed
+	// providers' [[provider.exports]] under their fingerprint short.
+	// Lookup is concurrent-safe; mutation goes through the Instantiator
+	// (which holds the §4.3 runtime token) via SeedHandleRegistry.
+	HandleRegistry *handle.HandleRegistry
 }
 
 // Close tears down the wazero runtime. Safe on nil receiver so main()
@@ -101,6 +110,19 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 		runtime.WithEventsBus(bus, bus),
 		runtime.WithCrossFlowRegistry(crossFlow),
 	)
+
+	// #392 Stage 2 — runtime handle registry. Seeded with the daemon's
+	// bundled core kinds under the alf: namespace; Stage 3's provider
+	// installer will append [[provider.exports]] entries under each
+	// publisher's fingerprint short. SeedHandleRegistry is the only
+	// path that drives RegisterCore using the Instantiator's runtime
+	// token — the token never escapes Instantiator.
+	handleRegistry := handle.NewHandleRegistry()
+	if err := inst.SeedHandleRegistry(handleRegistry); err != nil {
+		return nil, fmt.Errorf("wasm-loader: seed handle registry: %w", err)
+	}
+	logf("[wasm-loader] handle registry seeded: %d core kinds (alf:*)", handleRegistry.Len())
+
 	rt, err := wasm.NewRuntime(ctx, inst)
 	if err != nil {
 		return nil, fmt.Errorf("wasm-loader: new runtime: %w", err)
@@ -124,12 +146,13 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 	}
 
 	return &wasmRuntime{
-		rt:         rt,
-		loader:     loader,
-		bus:        bus,
-		crossFlow:  crossFlow,
-		Inst:       inst,
-		DaemonPriv: priv,
-		TrustStore: store,
+		rt:             rt,
+		loader:         loader,
+		bus:            bus,
+		crossFlow:      crossFlow,
+		Inst:           inst,
+		DaemonPriv:     priv,
+		TrustStore:     store,
+		HandleRegistry: handleRegistry,
 	}, nil
 }

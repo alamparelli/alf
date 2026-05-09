@@ -19,6 +19,99 @@ the milestone ticket map.
 
 ### Added
 
+- **#392 Stage 2 — runtime `HandleRegistry` + core registration**.
+  Stage 1 shipped the manifest schema for capability providers. Stage 2
+  ships the runtime registry the schema validation already implies: a
+  daemon-wide table of every handle kind the loader can resolve at
+  forge time. At boot, the registry holds the `alf:` namespace seeded
+  from `AlfCoreHandleIDs`; Stage 3 will append installed providers'
+  `[[provider.exports]]` under each publisher's fingerprint short.
+
+  **`internal/capability/handle/registry.go`.** New types:
+  `HandleKind` (Namespace + ID; `FullName()` returns `"<ns>:<id>"` —
+  the manifest-syntax form callers compare against
+  `[[depends]].handle`); `*HandleRegistry` (concurrent-safe via
+  `sync.RWMutex`, many readers run alongside one writer);
+  `AlfNamespace = "alf"` (the reserved namespace constant);
+  `AlfCoreHandleIDs` (the closed allowlist of core kinds —
+  `fs / http / exec / secrets / events.pub / events.sub / tool` —
+  kept verbatim aligned with `envelope.coreHandleIDs`).
+
+  **API surface.** Token-gated mutators: `Register(tok, k)` rejects
+  any of (unminted token, empty namespace, empty id, `alf:`
+  namespace with non-core id, duplicate `<ns>:<id>` already present)
+  with a sentinel error; `RegisterCore(tok)` is a convenience that
+  iterates `AlfCoreHandleIDs` so the daemon's boot path issues a
+  single call to seed the entire alf: namespace. Read-only:
+  `Lookup(ns, id) (HandleKind, bool)`, `List() []HandleKind`
+  (sorted by FullName for deterministic output, returned as a fresh
+  copy so callers cannot mutate registry state), `Len() int` for
+  boot diagnostics. The token check uses
+  `crypto/subtle.ConstantTimeCompare` matching `ForgeInstance`'s
+  existing pattern; both gates draw from the same one-shot
+  `mintedToken`.
+
+  **Token never escapes Instantiator.** The runtime token is the
+  one-shot authority that gates both `ForgeInstance` (handle
+  forging) and `Register` (registry mutation). To drive the registry
+  from outside the handle package without exposing the token, a new
+  method `(*Instantiator).SeedHandleRegistry(*HandleRegistry) error`
+  is the only sanctioned path — it wraps `RegisterCore` using the
+  Instantiator's internal token. Stage 3 will add a sibling method
+  for provider-installed exports (the providers manager will go
+  through that path).
+
+  **Daemon wiring.** `cmd/alf-daemon/wasm.go::setupWASMLoader` now
+  constructs the registry via `handle.NewHandleRegistry()` after
+  building the Instantiator, seeds it via `inst.SeedHandleRegistry`,
+  and stores it on `wasmRuntime.HandleRegistry` so Stage 3's forge
+  integration can consume it without a second mutation channel. Boot
+  surfaces `[wasm-loader] handle registry seeded: 7 core kinds
+  (alf:*)` so an operator can see at a glance whether the registry
+  came up correctly.
+
+  **Tests.** 15 new tests in `registry_test.go`:
+  `RegisterAndLookup`, `LookupMiss`, `TokenGateRejectsZeroToken`
+  (the load-bearing pin: a composite-literal `RuntimeToken` cannot
+  forge authority because the `key` field is unexported),
+  `TokenGateRejectsBeforeMint`, `EmptyNamespaceRejected`,
+  `EmptyIDRejected`, `DuplicateRejected`,
+  `AlfReservedToCoreKinds` (a provider attempting `alf:bluetooth.scan`
+  is the load-bearing #392 invariant — alf: is the daemon's, only
+  `AlfCoreHandleIDs` may register there even with the runtime token),
+  `AlfAcceptsAllCoreIDs` (every documented core id passes),
+  `RegisterCoreSeedsAllAlfKinds`, `RegisterCoreTwiceFails` (idempotence
+  check — second call fails loudly so the boot wiring can't seed
+  twice), `ListSortedByFullName`, `ListReturnsCopy` (caller mutation
+  cannot affect registry state), `ConcurrentReadersWriter`
+  (race-tested via `go test -race`), and
+  `AlfCoreIDsCoverEveryDocumentedKind` (drift pin between
+  `AlfCoreHandleIDs` and the §3.4 documented set — bug class:
+  manifest passes envelope validation, then registry Lookup fails
+  at runtime). Total handle-package suite green; race detector
+  green.
+
+  **Archtests.** 2 new in `internal/archtest/handle_registry_scope_test.go`:
+  `TestNewHandleRegistryImportScopePinned` (only
+  `internal/capability/handle`, `internal/runtime`, `cmd/alf-daemon`,
+  `internal/archtest` may import `handle.NewHandleRegistry`) and
+  `TestRegisterCoreCallerScopePinned` (only those packages may call
+  `.RegisterCore(`). Belt-and-braces alongside the runtime-token
+  check at the call site: even a future refactor that accidentally
+  exposed the token couldn't widen the registry-mutation surface
+  without also updating the allowlist — and that requires a
+  reviewer sign-off in the same diff. Without this archtest, the
+  only check would be the runtime token; with it, both
+  compile-time importers AND runtime authority gate the boundary.
+
+  **Stages 3–5 still pending**: `internal/runtime/providers/manager.go`
+  provider lifecycle (discovery, verify, install) + `forgeGrants`
+  extension to resolve `[[depends]]` via the registry (Stage 3);
+  `CheckImports` raw-imports pass-through + scope schema validation
+  + transitive trust display (Stage 4); `alf provider list/install/
+  remove` CLI + revocation cascade + example shipped provider
+  end-to-end (Stage 5).
+
 - **#392 Stage 1 — manifest schema scaffolding for capability providers**.
   The user-extensible handle registry (#392) needs three pieces in the
   envelope schema before any runtime wiring can land: a way for a

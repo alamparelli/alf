@@ -23,21 +23,36 @@ type Manifest struct {
 	Name            string
 	Description     string
 
-	FS     FSBlock
-	Events EventsBlock
-	Tools  ToolsBlock
+	FS         FSBlock
+	Events     EventsBlock
+	Tools      ToolsBlock
+	Provider   ProviderBlock // only valid when Kind == KindCapabilityProvider
+	Depends    []DependsEntry
+	RawImports []RawImport
 }
 
 // ManifestKind enumerates the capability kinds recognised by the 0.8.0
 // envelope. Ordered to match MANIFEST-SCHEMA §3.3 narrative flow.
+//
+// #392 split: the legacy "provider" kind covered LLM-backend bundles only.
+// Capability providers (Tier 2 of #392 — new authority surfaces like
+// Bluetooth, GPU compute, custom IoT) are a different concept; they SIGN
+// new handle types into the runtime registry rather than provide an LLM
+// API. Conflating them under one kind would force the schema to disambiguate
+// at runtime via the [provider] block's content, which is the exact
+// "schema-tells-you-what-it-means-via-content" anti-pattern §3.3 of
+// MANIFEST-SCHEMA forbids. Solution: rename the LLM-backend kind to
+// "llm-provider" and add "capability-provider". No production manifest
+// used "provider" — the rename is a clean break, no migration burden.
 type ManifestKind string
 
 const (
-	KindWASMTool        ManifestKind = "wasm-tool"
-	KindWASMApp         ManifestKind = "wasm-app"
-	KindSkill           ManifestKind = "skill"
-	KindProvider        ManifestKind = "provider"
-	KindMarketplaceApp  ManifestKind = "marketplace-app" // deprecated; see §3.3
+	KindWASMTool            ManifestKind = "wasm-tool"
+	KindWASMApp             ManifestKind = "wasm-app"
+	KindSkill               ManifestKind = "skill"
+	KindLLMProvider         ManifestKind = "llm-provider"         // LLM backend (Anthropic, OpenAI, ...)
+	KindCapabilityProvider  ManifestKind = "capability-provider"  // §3.1 + #392 — exports new handle kinds
+	KindMarketplaceApp      ManifestKind = "marketplace-app"      // deprecated; see §3.3
 )
 
 // FSBlock captures the [[fs.reads]] / [[fs.writes]] arrays. Empty slices
@@ -109,9 +124,12 @@ type tomlManifest struct {
 	Name               string  `toml:"name"`
 	Description        string  `toml:"description"`
 
-	FS     tomlFSBlock     `toml:"fs"`
-	Events tomlEventsBlock `toml:"events"`
-	Tools  tomlToolsBlock  `toml:"tools"`
+	FS         tomlFSBlock        `toml:"fs"`
+	Events     tomlEventsBlock    `toml:"events"`
+	Tools      tomlToolsBlock     `toml:"tools"`
+	Provider   tomlProviderBlock  `toml:"provider"`
+	Depends    []tomlDependsEntry `toml:"depends"`
+	RawImports []tomlRawImport    `toml:"raw_imports"`
 
 	// Deferred blocks — presence is a validation error. We decode them
 	// to detect presence only; contents are ignored.
@@ -119,6 +137,25 @@ type tomlManifest struct {
 	Exec    *map[string]any `toml:"exec"`
 	Secrets *map[string]any `toml:"secrets"`
 	Memory  *map[string]any `toml:"memory"`
+}
+
+type tomlProviderBlock struct {
+	Exports []tomlProviderExport `toml:"exports"`
+}
+
+type tomlProviderExport struct {
+	ID string `toml:"id"`
+}
+
+type tomlDependsEntry struct {
+	Handle string         `toml:"handle"`
+	Scope  map[string]any `toml:"scope"`
+}
+
+type tomlRawImport struct {
+	Module        string `toml:"module"`
+	Function      string `toml:"function"`
+	Justification string `toml:"justification"`
 }
 
 type tomlFSBlock struct {
@@ -150,4 +187,53 @@ type tomlToolsBlock struct {
 
 type tomlToolDeclaration struct {
 	ID string `toml:"id"`
+}
+
+// ProviderBlock captures `[provider]` per §3.4 of MANIFEST-SCHEMA + #392.
+// Only valid when Kind == KindCapabilityProvider. The block declares the
+// new handle kinds this provider exports into the runtime registry; once
+// installed under a fingerprint-scoped namespace, downstream caps may
+// `[[depends]]` on `<ns>:<id>` to receive a forged handle of that kind.
+//
+// Stage 1 (this commit) ships the schema and validation. Registry +
+// forge wiring lands in subsequent stages of #392.
+type ProviderBlock struct {
+	Exports []ProviderExport
+}
+
+// ProviderExport is one entry in [[provider.exports]]. The ID is the
+// handle kind name (lowercase, dot-segmented — e.g. "bluetooth.scan",
+// "gpu.compute"); namespace + fingerprint scoping is applied at install
+// time. SchemaRef (the JSON Schema URL or inline schema for the scope
+// argument) is deferred to Stage 4 of #392 — Stage 1 ships id-only.
+type ProviderExport struct {
+	ID string
+}
+
+// DependsEntry captures one `[[depends]]` entry per #392. Handle is the
+// fully-qualified `<ns>:<id>` reference: `alf:` (reserved for core
+// kinds — fs, http, exec, secrets, events, tools) or a known-publisher
+// fingerprint short form (Stage 3 will validate against the trust
+// store; Stage 1 ships format check only). Scope is the opaque table the
+// consumer asks for — Runtime-side validation against the provider's
+// exported scope schema is Stage 4 (M8 audit finding).
+type DependsEntry struct {
+	Handle string
+	Scope  map[string]any
+}
+
+// RawImport captures one `[[raw_imports]]` entry per #392. Module +
+// Function name a WASI function the guest needs to import directly
+// (escape hatch — see §3 of #392). The Justification is required so
+// the install UX can surface a human-readable rationale to the operator
+// before approving raw access.
+//
+// Forbidden modules (§4.5 of #392 — must use a scoped handle instead)
+// are rejected at validate time with ErrRawImportForbidden. Allowed
+// modules pass validation; Stage 4 of #392 wires them through
+// CheckImports so the guest can actually link the symbols.
+type RawImport struct {
+	Module        string
+	Function      string
+	Justification string
 }

@@ -19,6 +19,114 @@ the milestone ticket map.
 
 ### Added
 
+- **#392 Stage 1 — manifest schema scaffolding for capability providers**.
+  The user-extensible handle registry (#392) needs three pieces in the
+  envelope schema before any runtime wiring can land: a way for a
+  bundle to declare *what* handle kinds it exports, a way for a
+  consumer to reference an exported kind, and a controlled escape
+  hatch for raw WASI access. Stage 1 ships all three at the parse
+  layer; Stages 2–5 wire the registry, forge integration, raw-imports
+  pass-through, scope schema validation, and the operator CLI.
+
+  **Kind enum split.** The legacy `kind = "provider"` value covered
+  LLM-backend bundles only (claude / openai / ollama). #392's
+  capability providers (Tier 2: Bluetooth, GPU compute, custom IoT —
+  bundles that SIGN new handle types into the runtime registry) are a
+  different concept: different sign-time ceiling, different runtime
+  wiring, different install-UX prompt. Conflating them under one kind
+  would force runtime-content inspection of the `[provider]` block
+  to disambiguate — the exact "schema-tells-you-what-it-means-via-content"
+  anti-pattern §3.3 of MANIFEST-SCHEMA forbids. Solution: rename the
+  LLM-backend kind to `llm-provider` and add `capability-provider`.
+  Manifests carrying the bare `kind = "provider"` are rejected with
+  `ErrKindUnknown` so authors are forced to pick explicitly. No
+  production manifest used the legacy value — the rename is a clean
+  break, no migration burden.
+
+  **`[provider]` block** — `[[provider.exports]].id` declares one
+  handle kind name (lowercase / digits / dot / hyphen — e.g.
+  `bluetooth.scan`, `gpu.compute`). Only valid when `kind =
+  "capability-provider"`; declaring exports on any other kind fails
+  with `ErrProviderBlockNotAllowedHere`. Empty `[provider]` block
+  (no exports) is allowed on any kind so a degenerate scaffold-stage
+  manifest doesn't break. Duplicate ids in a single block are a
+  parse error. Stage 1 ships `id` only; the per-export scope schema
+  (`schema_ref`) lands in Stage 4 alongside Runtime-side scope
+  validation (M8 audit finding — scope checks happen Runtime-side,
+  not in the provider).
+
+  **`[[depends]]` block** — `handle = "<ns>:<id>"` is the namespace-
+  scoped reference to a registry-resident handle kind. `<ns>` is
+  either the reserved `alf` (for daemon-shipped core kinds) or a
+  publisher-fingerprint short. The `alf:` namespace exposes a closed
+  allowlist of `fs / http / exec / secrets / events.pub / events.sub
+  / tool`; `[[depends]].handle = "alf:<other>"` is rejected with
+  `ErrDependsHandleNamespaceReserved` so a manifest can't claim a
+  core kind by collision (the only path to `alf:fs` is via the
+  daemon's bundled forge code, never via a `[[provider.exports]]`
+  declaration). Non-`alf:` namespaces pass format validation in
+  Stage 1; Stage 3 (forge integration) will look up the concrete
+  provider in the runtime registry and fail closed if it's not
+  installed. `scope = {...}` is opaque at Stage 1 — any TOML table
+  copies through unchanged. Duplicate `handle` values in one
+  manifest are a parse error.
+
+  **`[[raw_imports]]` block** — escape-hatch for guests that need a
+  WASI function not exposed via a scoped handle (low-resolution
+  clock for animation timing, exit code, etc.). Each entry carries
+  `module` (`wasi:<package>/<interface>`), `function`, and
+  `justification` (operator-facing string surfaced at install).
+  Empty / whitespace-only justifications are rejected — operators
+  must see a real explanation. The classifier is **default-deny**:
+  - **Forbidden prefixes** (must use a scoped handle instead;
+    `ErrRawImportForbidden`): `wasi:filesystem/` (use `[fs]` /
+    `alf:fs`), `wasi:sockets/` (use a network provider),
+    `wasi:random/random` (future `alf:crypto`), `wasi:io/streams`
+    (scoped fd handle).
+  - **Allowed prefixes** (still surface a warning at install in
+    Stage 5): `wasi:clocks/monotonic-clock`, `wasi:clocks/wall-clock`
+    (daemon clamps resolution to defeat timing channels),
+    `wasi:cli/environment` (explicitly scoped env vars per
+    manifest), `wasi:cli/{exit,stdin,stdout,stderr,terminal-input,
+    terminal-output}` (pure compute / terminal — no host fs reach).
+  - **Anything else**: `ErrRawImportNotInAllowlist`. Adding a new
+    allowed entry is a deliberate schema change requiring an
+    update to MANIFEST-SCHEMA.md §3.4 + the
+    `internal/archtest/raw_imports_classification_test.go` pin
+    alongside the slice. Forbidden takes priority over allowed —
+    if a future allowed prefix incidentally subsumes a forbidden
+    one, the classifier returns forbidden.
+
+  Stage 1 validates the manifest at parse time. Stage 4 will wire
+  the allowed imports through `internal/runtime/wasm/CheckImports`
+  so the guest can link the symbols; until then a guest that
+  imports an allowed-but-not-yet-wired symbol fails at runtime
+  instantiation with `ErrLyingManifest`.
+
+  **Tests.** 24 new envelope tests covering each new validation
+  rule + the kind split + the namespace allowlist (12 happy paths
+  + 12 error sentinels). New archtest
+  `TestRawImportsClassificationPinned` (in `internal/archtest/`)
+  freezes the forbidden + allowed + core-handle-id sets verbatim
+  against the spec — drift in either direction (entry removal or
+  re-wording) fires CI. Source-of-truth pin reads the schema source
+  directly rather than importing the unexported slices, so a
+  contributor can't "fix" a failing archtest by mutating the slice
+  to match what the test expects.
+
+  **Doc updates.** MANIFEST-SCHEMA.md §3.3 (kind enum updated +
+  legacy-rename rationale), §3.4 (three new sub-sections detailing
+  `[provider]`, `[[depends]]`, `[[raw_imports]]` with field tables
+  + reserved namespace allowlist + classifier sets), §4.4 (split
+  into `4.4 capability-provider` example + new `4.5 llm-provider`,
+  marketplace-app renumbered to 4.6). **Stages 2–5 still pending**:
+  `HandleRegistry` interface + core registration (Stage 2);
+  `internal/runtime/providers/manager.go` discovery + forge
+  integration (Stage 3); `CheckImports` raw-imports pass-through +
+  scope schema validation + transitive trust display (Stage 4);
+  `alf provider list/install/remove` CLI + revocation cascade +
+  example shipped provider end-to-end (Stage 5).
+
 - **#395 Stage 2 chunk 4 — `SecretValue` redaction + vault
   user-scope partition**. Closes the secrets-flow isolation gap
   per ticket §3: even within capability-scope, secret values must

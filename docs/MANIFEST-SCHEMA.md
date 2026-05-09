@@ -91,12 +91,15 @@ description = "Reads a file from the capability's scoped data dir."
 ### 3.3 `kind` enumeration
 
 ```
-wasm-tool         — short-lived WASM capability invoked from the LLM tool loop
-wasm-app          — long-running WASM capability with a UI iframe
-skill             — prompt + orchestrated tool calls, no executable code (re-signed)
-provider          — LLM backend (Claude, OpenAI, Ollama, …) bundled as a capability
-marketplace-app   — legacy-Go app bundle; retired when Go-kind is replaced by WASM-kind
+wasm-tool             — short-lived WASM capability invoked from the LLM tool loop
+wasm-app              — long-running WASM capability with a UI iframe
+skill                 — prompt + orchestrated tool calls, no executable code (re-signed)
+llm-provider          — LLM backend (Claude, OpenAI, Ollama, …) bundled as a capability
+capability-provider   — exports new handle kinds into the runtime registry (#392)
+marketplace-app       — legacy-Go app bundle; retired when Go-kind is replaced by WASM-kind
 ```
+
+The legacy bare `provider` value (pre-0.8.0-beta) was split by `#392` into `llm-provider` and `capability-provider` because the two roles drive different sign-time ceilings, different runtime wiring, and different install-UX prompts. Conflating them under one kind would force runtime-content inspection of the `[provider]` block to disambiguate — the exact "schema-tells-you-what-it-means-via-content" anti-pattern this section forbids. Manifests carrying `kind = "provider"` are rejected with `ErrKindUnknown`.
 
 Fields that become required / forbidden based on `kind` are listed in §4.
 
@@ -104,7 +107,9 @@ Fields that become required / forbidden based on `kind` are listed in §4.
 
 Each handle kind (fs / http / exec / secrets / memory / events / tools) has its own block. Blocks are **optional** — a capability that declares no `[[fs.reads]]` cannot read any file.
 
-**0.8.0 only wires `fs`.** Declaring `http`, `exec`, or `secrets` blocks is a parse-time error until the corresponding handle kinds land in 0.9.0+. `events` and `tools.declares` blocks are reserved for `#389` / `#399` — parse-time error in 0.8.0.
+**0.8.0 wires `fs`, `events`, and `tools`.** Declaring `http`, `exec`, or `secrets` blocks is a parse-time error until the corresponding handle kinds land in 0.9.0+. `[memory]` is deferred to `#400` Stage 2.
+
+**Capability-extension blocks (`#392`)**: 0.8.0 also accepts three new top-level blocks for the user-extensible handle registry: `[provider]` (capability-provider only), `[[depends]]` (any kind, references provider-exported handle kinds), and `[[raw_imports]]` (any kind, escape-hatch for direct WASI imports). Stage 1 of `#392` validates them at parse time; runtime forge integration lands in subsequent stages.
 
 #### fs — filesystem (0.8.0 scope)
 
@@ -154,6 +159,104 @@ on the same allowlist).
 - An empty `[[tools.declares]]` array is valid and equivalent to
   omitting `[tools]` entirely — the forge produces a nil `ToolHandle`
   and the capability has no inter-capability invocation surface.
+
+#### provider — exported handle kinds (#392, capability-provider only)
+
+```toml
+[[provider.exports]]
+id = "bluetooth.scan"
+
+[[provider.exports]]
+id = "bluetooth.connect"
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Canonical handle-kind name. Lowercase, digits, dot, hyphen. Namespace + fingerprint scoping is applied at install time, not in the manifest. |
+
+Constraints:
+
+- Only valid when `kind = "capability-provider"`. Declaring `[[provider.exports]]` on any other kind is a parse-time error (`ErrProviderBlockNotAllowedHere`).
+- Empty `[provider]` block (no exports) is allowed on any kind — only declared exports trigger the kind check.
+- Duplicate ids in a single block are a parse error.
+- Stage 1 of `#392` ships `id` only; the per-export scope schema (`schema_ref`) lands in Stage 4 alongside Runtime-side scope validation.
+
+#### depends — declared dependency on registry handles (#392)
+
+```toml
+[[depends]]
+handle = "alf:fs"
+
+[[depends]]
+handle = "alf:tool"
+
+[[depends]]
+handle = "abc123:bluetooth.scan"
+scope  = { devices = ["my-thermostat"] }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `handle` | string | yes | `<ns>:<id>` — namespace + handle kind. `alf` namespace reserved for daemon-shipped core kinds; otherwise a publisher fingerprint short. |
+| `scope` | inline table | no | Opaque parameters consumed by the provider. Validated Runtime-side against the provider's exported scope schema in Stage 4 of `#392`. |
+
+Reserved `alf:` namespace ids (Stage 1 closed allowlist):
+
+```
+alf:fs           — filesystem handle (existing, see §3.4 fs block)
+alf:http         — HTTP client handle (deferred to 0.9.0+)
+alf:exec         — process exec handle (deferred to 0.9.0+)
+alf:secrets      — vault read handle (deferred to 0.9.0+)
+alf:events.pub   — event publish handle
+alf:events.sub   — event subscribe handle
+alf:tool         — inter-capability invocation handle
+```
+
+A `[[depends]].handle = "alf:<id>"` reference where `<id>` is not in this set is rejected with `ErrDependsHandleNamespaceReserved`. A non-`alf:` namespace passes format validation in Stage 1; Stage 3 (forge integration) will look up the provider in the runtime registry and fail closed if it's not installed.
+
+Duplicate `handle` values in one manifest are a parse error.
+
+#### raw_imports — escape-hatch direct WASI access (#392)
+
+```toml
+[[raw_imports]]
+module        = "wasi:clocks/monotonic-clock"
+function      = "now"
+justification = "high-frequency animation timing — clock granularity below 1 ms required"
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `module` | string | yes | WASI Preview 2 interface (e.g. `wasi:clocks/monotonic-clock`). |
+| `function` | string | yes | Function name within the interface. |
+| `justification` | string | yes | Operator-facing explanation. Surfaced at install. Empty / whitespace-only rejected. |
+
+The classifier is **default-deny**: a module that matches neither the forbidden nor the allowed prefix list is rejected with `ErrRawImportNotInAllowlist`. Adding to either list is a deliberate schema change that updates this doc + the `internal/archtest` pin alongside the code.
+
+**Forbidden prefixes** (must use a scoped handle in `[[depends]]` or the existing `[fs]`/`[events]`/`[tools]` blocks instead):
+
+```
+wasi:filesystem/      — host filesystem access; use alf:fs
+wasi:sockets/         — TCP/UDP raw access; use a network provider
+wasi:random/random    — direct RNG; future alf:crypto handle
+wasi:io/streams       — arbitrary fd I/O; use scoped handle
+```
+
+**Allowed prefixes** (still surface a warning at install):
+
+```
+wasi:clocks/monotonic-clock   — daemon clamps resolution to defeat timing channels
+wasi:clocks/wall-clock        — same clamp
+wasi:cli/environment          — explicitly scoped env vars per manifest
+wasi:cli/exit                 — process exit code
+wasi:cli/stdin                — pure compute, no host fs reach
+wasi:cli/stdout               — pure compute, no host fs reach
+wasi:cli/stderr               — pure compute, no host fs reach
+wasi:cli/terminal-input       — tty mode read
+wasi:cli/terminal-output      — tty mode write
+```
+
+Stage 1 of `#392` validates the manifest at parse time. Stage 4 wires the allowed imports through `internal/runtime/wasm/CheckImports` so the guest can actually link the symbols; until then a guest that imports an allowed-but-not-yet-wired symbol fails at runtime instantiation with `ErrLyingManifest`.
 
 #### Deferred blocks — parse error in 0.8.0
 
@@ -277,21 +380,47 @@ Kind-specific rules:
   structural handle even when a skill needs it; the skill calls
   agent-callable memory tools the LLM gates with the kernel prompt.
 
-### 4.4 `provider`
+### 4.4 `capability-provider` (#392)
 
-LLM backend bundle. Reserved; no new provider bundles in 0.8.0 beyond the maintainer-signed ones that ship with the daemon.
+Bundle that exports new handle kinds into the runtime registry. Dependent
+capabilities reference exported kinds via `[[depends]].handle = "<ns>:<id>"`
+where `<ns>` is the publisher's fingerprint short. Stage 1 of `#392` ships
+the manifest schema; Stage 3 wires the runtime forge.
+
+```toml
+alf_envelope_version = 1
+
+id          = "alf-bluetooth-provider"
+kind        = "capability-provider"
+version     = "0.1.0"
+name        = "Bluetooth Provider"
+description = "Exports bluetooth.scan and bluetooth.connect handle kinds."
+
+[[provider.exports]]
+id = "bluetooth.scan"
+
+[[provider.exports]]
+id = "bluetooth.connect"
+```
+
+### 4.5 `llm-provider`
+
+LLM backend bundle (Anthropic, OpenAI, Ollama, …). Reserved; no new LLM
+provider bundles in 0.8.0 beyond the maintainer-signed ones that ship with
+the daemon. The `[provider]` block is rejected on this kind — exporting
+handle kinds is the capability-provider role (§4.4).
 
 ```toml
 alf_envelope_version = 1
 
 id          = "claude"
-kind        = "provider"
+kind        = "llm-provider"
 version     = "1.0.0"
 name        = "Claude"
 description = "Anthropic Claude provider."
 ```
 
-### 4.5 `marketplace-app` (deprecated)
+### 4.6 `marketplace-app` (deprecated)
 
 Identical shape to `wasm-app` for 0.8.0 compatibility. Migration of all existing `marketplace-app` manifests to `wasm-app` is tracked in the migration section of `ARCHITECTURE-SECURITY.md` §12.
 

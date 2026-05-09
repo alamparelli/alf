@@ -38,7 +38,110 @@ var (
 	ErrToolDeclareIDEmpty          = errors.New("envelope: tools.declares.id is empty")
 	ErrToolDeclareIDMalformed      = errors.New("envelope: tools.declares.id must match ^[a-z0-9][a-z0-9-]*$")
 	ErrToolDeclareDuplicate        = errors.New("envelope: tools.declares contains duplicate id")
+
+	// #392 Stage 1 — provider / depends / raw_imports.
+	ErrProviderBlockNotAllowedHere = errors.New("envelope: [provider] block requires kind = \"capability-provider\"")
+	ErrProviderExportIDEmpty       = errors.New("envelope: provider.exports.id is empty")
+	ErrProviderExportIDMalformed   = errors.New("envelope: provider.exports.id must match ^[a-z0-9][a-z0-9.-]*$")
+	ErrProviderExportDuplicate     = errors.New("envelope: provider.exports contains duplicate id")
+	ErrDependsHandleEmpty          = errors.New("envelope: depends.handle is empty")
+	ErrDependsHandleMalformed      = errors.New("envelope: depends.handle must match ^<ns>:<id>$ where <ns> is [a-z0-9][a-z0-9-]* and <id> is [a-z0-9][a-z0-9.-]*")
+	ErrDependsHandleNamespaceReserved = errors.New("envelope: depends.handle uses reserved namespace alf: but the id is not a known core handle kind")
+	ErrDependsDuplicate            = errors.New("envelope: depends contains duplicate handle reference")
+	ErrRawImportModuleEmpty        = errors.New("envelope: raw_imports.module is empty")
+	ErrRawImportModuleMalformed    = errors.New("envelope: raw_imports.module must match ^wasi:[a-z0-9][a-z0-9/_-]*$")
+	ErrRawImportFunctionEmpty      = errors.New("envelope: raw_imports.function is empty")
+	ErrRawImportFunctionMalformed  = errors.New("envelope: raw_imports.function must match ^[a-z0-9][a-z0-9_-]*$")
+	ErrRawImportJustificationEmpty = errors.New("envelope: raw_imports.justification is empty (operators see this string at install)")
+	ErrRawImportForbidden          = errors.New("envelope: raw_imports module is forbidden — use a scoped handle instead")
+	ErrRawImportNotInAllowlist     = errors.New("envelope: raw_imports module is not in the §3.4 allowlist")
 )
+
+// reservedNamespaceALF is the namespace prefix that only the daemon may
+// claim. Capability providers cannot export a handle ID under "alf:";
+// the runtime registry pre-populates "alf:fs", "alf:http", "alf:exec",
+// "alf:secrets", "alf:events.pub", "alf:events.sub", "alf:tool".
+//
+// Stage 1 of #392 only checks that NO provider manifest tries to export
+// under this namespace (provider exports use bare ids, namespacing is
+// applied at install time). Consumer-side `[[depends]]` validation
+// against the registry of known core handles lands in Stage 3 (forge
+// integration); Stage 1 only checks the format `alf:<id>` and a
+// closed allowlist of known core handle ids.
+const reservedNamespaceALF = "alf"
+
+// coreHandleIDs is the closed set of handle kinds the daemon ships with
+// under the `alf:` namespace. Stage 1 of #392 uses this for a static
+// allowlist check on `[[depends]].handle = "alf:<id>"`. Stage 3 will
+// promote this to a runtime-populated registry once HandleRegistry
+// (deliverable 1 of #392) lands; the strings stay the canonical names.
+var coreHandleIDs = map[string]struct{}{
+	"fs":         {},
+	"http":       {},
+	"exec":       {},
+	"secrets":    {},
+	"events.pub": {},
+	"events.sub": {},
+	"tool":       {},
+}
+
+// forbiddenRawImportModules is the §3.4 of MANIFEST-SCHEMA + #392 spec
+// list of WASI Preview 2 modules that MUST be expressed via a scoped
+// handle, never via raw import. A manifest declaring `[[raw_imports]]`
+// with a module starting with one of these prefixes fails validation
+// with ErrRawImportForbidden — there is no override or warning prompt.
+//
+// The list is matched as PREFIX, so e.g. `wasi:filesystem/types` covers
+// `wasi:filesystem/types/descriptor` and any future sub-interface.
+var forbiddenRawImportModules = []string{
+	"wasi:filesystem/",   // must use fs.Handle
+	"wasi:sockets/",      // must use a provider or scoped network handle
+	"wasi:random/random", // must use a future crypto.Handle (safe RNG)
+	"wasi:io/streams",    // arbitrary fd — must go through scoped handle
+}
+
+// allowedRawImportModules is the §3.4 + #392 spec list of WASI modules
+// safe to import directly. The install UX still warns the operator
+// (Stage 5 of #392), but validation accepts them. Matched as PREFIX.
+//
+// Rationale per #392 §M9: the truly dangerous imports have scoped
+// alternatives. The truly harmless ones (low-resolution clock, scoped
+// env vars, pure compute) stay accessible to keep the escape hatch
+// usable.
+var allowedRawImportModules = []string{
+	"wasi:clocks/monotonic-clock", // low-res only — daemon clamps resolution at runtime
+	"wasi:clocks/wall-clock",      // low-res only — same clamp
+	"wasi:cli/environment",        // explicitly scoped env vars per manifest
+	"wasi:cli/exit",               // exit code — pure terminal signal
+	"wasi:cli/stdin",              // pure compute — no host fs
+	"wasi:cli/stdout",             // pure compute — no host fs
+	"wasi:cli/stderr",             // pure compute — no host fs
+	"wasi:cli/terminal-input",     // tty mode — guest can't escalate
+	"wasi:cli/terminal-output",    // tty mode — guest can't escalate
+}
+
+// rawImportModulePattern enforces the WASI Preview 2 module syntax —
+// `wasi:<package>/<interface>` with lowercase alphanumeric, slash, dot,
+// underscore, hyphen. A guest manifest using anything else (e.g. ad-hoc
+// "host:fs", a custom scheme, an empty fragment) fails validation.
+var rawImportModulePattern = regexp.MustCompile(`^wasi:[a-z0-9][a-z0-9/._-]*$`)
+
+// rawImportFunctionPattern enforces the WASI Preview 2 function name
+// syntax — lowercase alphanumeric, underscore, hyphen.
+var rawImportFunctionPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// providerExportIDPattern allows lowercase, digits, dot/hyphen — the
+// canonical handle-kind name shape (e.g. "bluetooth.scan",
+// "gpu.compute", "image-classify"). Hyphens and dots both legal so
+// providers can match common conventions without forcing a single
+// separator.
+var providerExportIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
+
+// dependsHandlePattern enforces the namespace-scoped handle reference
+// format `<ns>:<id>` per #392 §H2. <ns> is a fingerprint short or the
+// reserved "alf"; <id> is the handle kind. Captures both halves so the
+// validator can apply per-namespace rules.
+var dependsHandlePattern = regexp.MustCompile(`^([a-z0-9][a-z0-9-]*):([a-z0-9][a-z0-9.-]*)$`)
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
@@ -49,12 +152,20 @@ var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 var topicPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 // knownKinds is the enum of accepted manifest.kind values (MANIFEST-SCHEMA §3.3).
+//
+// #392 split the legacy "provider" kind into two: "llm-provider" (LLM
+// backend bundles) and "capability-provider" (new authority surfaces
+// via [[provider.exports]]). The bare "provider" string is intentionally
+// absent from this map — it would have been ambiguous and Stage 3
+// onwards (forge integration) needs the kind to disambiguate at parse
+// time, not via post-hoc inspection of the [provider] block.
 var knownKinds = map[string]ManifestKind{
-	"wasm-tool":       KindWASMTool,
-	"wasm-app":        KindWASMApp,
-	"skill":           KindSkill,
-	"provider":        KindProvider,
-	"marketplace-app": KindMarketplaceApp,
+	"wasm-tool":           KindWASMTool,
+	"wasm-app":            KindWASMApp,
+	"skill":               KindSkill,
+	"llm-provider":        KindLLMProvider,
+	"capability-provider": KindCapabilityProvider,
+	"marketplace-app":     KindMarketplaceApp,
 }
 
 // knownTopLevelKeys is the allowlist for unknown-field detection. Any
@@ -69,13 +180,16 @@ var knownTopLevelKeys = map[string]struct{}{
 	"name":                 {},
 	"description":          {},
 	"fs":                   {},
+	"events":               {},
+	"tools":                {},
+	"provider":             {}, // #392 — only valid when kind = capability-provider
+	"depends":              {}, // #392 — namespace-scoped handle deps
+	"raw_imports":          {}, // #392 — escape-hatch raw WASI access
 	// Deferred blocks — recognised so we can produce a helpful error,
 	// but their presence fails validation.
 	"http":    {},
 	"exec":    {},
 	"secrets": {},
-	"events":  {},
-	"tools":   {},
 	"memory":  {},
 }
 
@@ -170,6 +284,27 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		return nil, err
 	}
 
+	// provider block (#392 Stage 1) — only valid when kind ==
+	// capability-provider. We pass the typed kind so the validator
+	// can refuse [provider] in any other context with a clear error
+	// rather than silently ignoring the block.
+	providerBlock, err := validateProviderBlock(t.Provider, kind)
+	if err != nil {
+		return nil, err
+	}
+
+	// depends block (#392 Stage 1).
+	depends, err := validateDependsBlock(t.Depends)
+	if err != nil {
+		return nil, err
+	}
+
+	// raw_imports block (#392 Stage 1).
+	rawImports, err := validateRawImportsBlock(t.RawImports)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Manifest{
 		EnvelopeVersion: *t.AlfEnvelopeVersion,
 		ID:              t.ID,
@@ -180,6 +315,9 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		FS:              fs,
 		Events:          events,
 		Tools:           tools,
+		Provider:        providerBlock,
+		Depends:         depends,
+		RawImports:      rawImports,
 	}, nil
 }
 
@@ -256,6 +394,177 @@ func validateToolsBlock(raw tomlToolsBlock) (ToolsBlock, error) {
 		out = append(out, ToolDeclaration{ID: d.ID})
 	}
 	return ToolsBlock{Declares: out}, nil
+}
+
+// validateProviderBlock walks `[provider]` and rejects malformed
+// entries. The block is only valid when the manifest's kind is
+// `capability-provider`; declaring [[provider.exports]] on any other
+// kind is a parse-time error so the schema doesn't depend on runtime
+// behavior to disambiguate "this is a provider" from "this is a tool
+// that happens to have a [provider] block leftover from a copy-paste".
+func validateProviderBlock(raw tomlProviderBlock, kind ManifestKind) (ProviderBlock, error) {
+	if len(raw.Exports) == 0 {
+		// Empty [provider] block is treated as absent; no error even
+		// for non-provider kinds. Only declared exports trigger the
+		// kind check.
+		return ProviderBlock{}, nil
+	}
+	if kind != KindCapabilityProvider {
+		return ProviderBlock{}, fmt.Errorf("%w: got kind=%q", ErrProviderBlockNotAllowedHere, kind)
+	}
+	out := make([]ProviderExport, 0, len(raw.Exports))
+	seen := make(map[string]struct{}, len(raw.Exports))
+	for i, e := range raw.Exports {
+		if e.ID == "" {
+			return ProviderBlock{}, fmt.Errorf("%w: provider.exports[%d]", ErrProviderExportIDEmpty, i)
+		}
+		if !providerExportIDPattern.MatchString(e.ID) {
+			return ProviderBlock{}, fmt.Errorf("%w: provider.exports[%d].id=%q", ErrProviderExportIDMalformed, i, e.ID)
+		}
+		if _, dup := seen[e.ID]; dup {
+			return ProviderBlock{}, fmt.Errorf("%w: provider.exports[%d].id=%q", ErrProviderExportDuplicate, i, e.ID)
+		}
+		seen[e.ID] = struct{}{}
+		out = append(out, ProviderExport{ID: e.ID})
+	}
+	return ProviderBlock{Exports: out}, nil
+}
+
+// validateDependsBlock walks `[[depends]]` and rejects malformed
+// entries per #392. Each entry's `handle` field must follow the
+// `<ns>:<id>` namespace-scoped format. The reserved `alf:` namespace
+// is restricted to a closed allowlist of known core handle kinds —
+// providers cannot claim a core kind via collision (the only path to
+// `alf:fs` is via the daemon's bundled forge code, not via a
+// `[[provider.exports]]` declaration).
+//
+// Stage 1 only validates format + closed-allowlist for `alf:`; Stage 3
+// (forge integration) will look up the concrete provider behind a
+// non-`alf:` namespace at load time.
+//
+// The Scope map is copied through unchanged — it's opaque at this
+// stage. Stage 4 of #392 will validate the scope against the
+// provider's exported scope schema (M8 audit finding: scope checks
+// happen Runtime-side, not in the provider).
+func validateDependsBlock(raw []tomlDependsEntry) ([]DependsEntry, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make([]DependsEntry, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for i, d := range raw {
+		if d.Handle == "" {
+			return nil, fmt.Errorf("%w: depends[%d]", ErrDependsHandleEmpty, i)
+		}
+		m := dependsHandlePattern.FindStringSubmatch(d.Handle)
+		if m == nil {
+			return nil, fmt.Errorf("%w: depends[%d].handle=%q", ErrDependsHandleMalformed, i, d.Handle)
+		}
+		ns, id := m[1], m[2]
+		if ns == reservedNamespaceALF {
+			if _, ok := coreHandleIDs[id]; !ok {
+				return nil, fmt.Errorf("%w: depends[%d].handle=%q (id %q is not a core handle)", ErrDependsHandleNamespaceReserved, i, d.Handle, id)
+			}
+		}
+		if _, dup := seen[d.Handle]; dup {
+			return nil, fmt.Errorf("%w: depends[%d].handle=%q", ErrDependsDuplicate, i, d.Handle)
+		}
+		seen[d.Handle] = struct{}{}
+
+		entry := DependsEntry{Handle: d.Handle}
+		if len(d.Scope) > 0 {
+			entry.Scope = make(map[string]any, len(d.Scope))
+			for k, v := range d.Scope {
+				entry.Scope[k] = v
+			}
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+// validateRawImportsBlock walks `[[raw_imports]]` and applies the §3.4
+// allowlist. A module that matches forbiddenRawImportModules is
+// rejected with ErrRawImportForbidden (the spec says "must use a
+// scoped handle instead" — there is no override). A module that
+// matches allowedRawImportModules passes; a module in neither list
+// fails with ErrRawImportNotInAllowlist (default-deny — adding a new
+// allowed import is a deliberate schema change).
+//
+// The justification field is required and must be non-empty: operators
+// see it at install time (Stage 5 of #392) before approving raw access.
+// An empty justification means the bundle author either didn't think
+// about why they need raw access or doesn't want to surface it — both
+// are reasons to refuse the manifest.
+func validateRawImportsBlock(raw []tomlRawImport) ([]RawImport, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make([]RawImport, 0, len(raw))
+	for i, r := range raw {
+		if r.Module == "" {
+			return nil, fmt.Errorf("%w: raw_imports[%d]", ErrRawImportModuleEmpty, i)
+		}
+		if !rawImportModulePattern.MatchString(r.Module) {
+			return nil, fmt.Errorf("%w: raw_imports[%d].module=%q", ErrRawImportModuleMalformed, i, r.Module)
+		}
+		if r.Function == "" {
+			return nil, fmt.Errorf("%w: raw_imports[%d]", ErrRawImportFunctionEmpty, i)
+		}
+		if !rawImportFunctionPattern.MatchString(r.Function) {
+			return nil, fmt.Errorf("%w: raw_imports[%d].function=%q", ErrRawImportFunctionMalformed, i, r.Function)
+		}
+		if classifyRawImport(r.Module) == rawImportForbidden {
+			return nil, fmt.Errorf("%w: raw_imports[%d].module=%q (declare a scoped handle in [[depends]] or use [fs]/[events]/[tools] instead)", ErrRawImportForbidden, i, r.Module)
+		}
+		if classifyRawImport(r.Module) == rawImportUnknown {
+			return nil, fmt.Errorf("%w: raw_imports[%d].module=%q (allowed list lives in MANIFEST-SCHEMA §3.4 + #392; new entries require a schema bump)", ErrRawImportNotInAllowlist, i, r.Module)
+		}
+		// Justification: spec says non-empty. Trim incidental
+		// whitespace before checking so a tab-indented multi-line
+		// TOML literal counts as empty and the operator-facing
+		// install prompt isn't filled with "   ".
+		if strings.TrimSpace(r.Justification) == "" {
+			return nil, fmt.Errorf("%w: raw_imports[%d].module=%q", ErrRawImportJustificationEmpty, i, r.Module)
+		}
+		out = append(out, RawImport{
+			Module:        r.Module,
+			Function:      r.Function,
+			Justification: r.Justification,
+		})
+	}
+	return out, nil
+}
+
+// rawImportClass is the classifier output for a manifest-declared
+// raw_import module. Kept as an unexported enum so external callers
+// always go through validateRawImportsBlock — they can't bypass the
+// allowlist by writing a "looks classified" check of their own.
+type rawImportClass int
+
+const (
+	rawImportUnknown rawImportClass = iota
+	rawImportAllowed
+	rawImportForbidden
+)
+
+// classifyRawImport is the prefix-match classifier used by
+// validateRawImportsBlock and the archtest pin (raw_import_classification_test.go).
+// Forbidden takes priority over allowed (defence in depth — a future
+// allowed prefix that incidentally subsumes a forbidden one would
+// otherwise let the forbidden import slip through).
+func classifyRawImport(module string) rawImportClass {
+	for _, p := range forbiddenRawImportModules {
+		if strings.HasPrefix(module, p) {
+			return rawImportForbidden
+		}
+	}
+	for _, p := range allowedRawImportModules {
+		if strings.HasPrefix(module, p) {
+			return rawImportAllowed
+		}
+	}
+	return rawImportUnknown
 }
 
 func validateFSPaths(raw []tomlFSPath, block string) ([]FSPath, error) {

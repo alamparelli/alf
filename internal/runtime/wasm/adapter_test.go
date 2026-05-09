@@ -165,7 +165,8 @@ func TestEnvelopeKindMapping(t *testing.T) {
 		{"wasm-tool", envelope.KindWASMTool, capability.KindTool},
 		{"wasm-app", envelope.KindWASMApp, capability.KindApp},
 		{"skill (unused by adapter but safe default)", envelope.KindSkill, capability.KindTool},
-		{"provider (same)", envelope.KindProvider, capability.KindTool},
+		{"llm-provider (same)", envelope.KindLLMProvider, capability.KindTool},
+		{"capability-provider (same)", envelope.KindCapabilityProvider, capability.KindTool},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

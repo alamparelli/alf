@@ -286,7 +286,7 @@ func resolveBundleArtifact(bundleDir, override string, manifest *envelope.Manife
 			return "", nil, fmt.Errorf("sign: read %s: %w (kind %q expects bundle.zip)", zipPath, err, manifest.Kind)
 		}
 		return zipPath, raw, nil
-	case envelope.KindSkill, envelope.KindProvider:
+	case envelope.KindSkill, envelope.KindLLMProvider, envelope.KindCapabilityProvider:
 		return "", nil, nil
 	default:
 		return "", nil, fmt.Errorf("sign: unsupported manifest kind %q for artefact detection; pass --bundle <path>", manifest.Kind)

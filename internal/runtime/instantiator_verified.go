@@ -161,10 +161,15 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 // per MANIFEST-SCHEMA §3.3) to the legacy capability.Kind enum (int
 // iota from the v0.7.10 rework). Unknown values default to
 // capability.KindTool — the envelope schema validator has already
-// rejected unknowns, so this path is only reached for the 5 known kinds.
+// rejected unknowns, so this path is only reached for the 6 known kinds.
+//
+// Both provider sub-kinds (LLM + capability) map to KindTool because the
+// legacy capability.Kind enum has no provider concept; #392 follow-ups
+// (forge integration in Stage 3) consume envelope.Manifest directly and
+// don't go through this shim.
 func mapEnvelopeKind(k envelope.ManifestKind) capability.Kind {
 	switch k {
-	case envelope.KindWASMTool, envelope.KindSkill, envelope.KindProvider:
+	case envelope.KindWASMTool, envelope.KindSkill, envelope.KindLLMProvider, envelope.KindCapabilityProvider:
 		return capability.KindTool
 	case envelope.KindWASMApp:
 		return capability.KindApp

@@ -19,6 +19,52 @@ the milestone ticket map.
 
 ### Added
 
+- **#407 — POSIX file-permission audit**. Full categorisation of
+  every `os.Chmod` / `os.MkdirAll` / `os.WriteFile` mode in the
+  codebase against the layered architecture's three trust
+  domains, anchored in §2.1 (Layer 1 outer ring) as
+  defense-in-depth below AppArmor (#86, sibling).
+
+  **New doc**:
+  [`docs/POSIX-PERMISSIONS-AUDIT.md`](docs/POSIX-PERMISSIONS-AUDIT.md)
+  — categorises every chmod-like site by trust domain (admin /
+  process-isolation / public-via-CC), maps modes to
+  uid/gid/group expectations, cross-checks against
+  `syscall.Umask(0o002)`, and forward-projects how the modes will
+  intersect with the post-#86 AppArmor profile + non-root daemon
+  uid.
+
+  **Findings: zero violations** of trust-domain boundaries.
+  Every 0o600/0o700 site is in the admin domain (keys, pending
+  queue), every 0o660 socket is in the process-isolation domain
+  (CC tools / memory / signal / scheduler / vault sockets +
+  agents/<task>/ at 0o775 for LLM write), every 0o644/0o664
+  artefact is in the public-via-CC domain (media frames, context
+  files, bootstrap docs). The marketplace install lockdown
+  (0o555/0o444) and the integrity guard's quarantine (0o640 +
+  gid swap to alfd) are documented as load-bearing
+  defense-in-depth.
+
+  **§2.1 Layer 1 outer ring** updated to list "POSIX file-mode
+  hygiene" as a concrete sublayer alongside Docker / AppArmor /
+  seccomp, with a pointer to the audit doc.
+
+  **Two follow-ups deferred to #86** (sibling — Layer 1 outer
+  ring):
+  - Tighten `<dataDir>/trust/` from 0o755 to 0o750 once the LLM
+    gets a separate gid (currently the alf group spans both
+    daemon and LLM, so 0o750 would be no different from 0o755).
+  - Update the chown call sites in
+    `runtime/agents/orchestrator.go` and
+    `sandbox/integrity/guard.go` once the daemon drops to a
+    non-root uid (CAP_SYS_ADMIN drop work).
+
+  **No code changes** required by this audit — the existing
+  modes already match the architecture. The doc is the durable
+  artefact: a reviewer adding a new chmod-like call uses the
+  table at the end ("trust domain → mode") to pick the right
+  permission and updates the doc if a new mode is needed.
+
 - **#403 — updater cosign verify + image digest pin**. Closes the
   v0.7.9 audit finding "auto-update notifies on any tag with no
   cryptographic check". The daemon's update checker now resolves

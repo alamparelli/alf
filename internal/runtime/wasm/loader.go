@@ -200,6 +200,13 @@ func (l *Loader) preLoad(bundleDir, displayName string) (preLoadedBundle, error)
 	if err != nil {
 		return preLoadedBundle{}, fmt.Errorf("validate manifest: %w", err)
 	}
+	// §4.1 structural lockdown: refuse non-WASM kinds at the loader
+	// boundary. See kind_admission.go for the allowlist + doctrine
+	// reference. Verified BEFORE reading the .wasm bytes so a rejected
+	// bundle costs us one TOML parse, not a full file read.
+	if err := checkKindAdmission(manifest); err != nil {
+		return preLoadedBundle{}, err
+	}
 	wasmPath := filepath.Join(bundleDir, manifest.ID+".wasm")
 	wasmBytes, err := os.ReadFile(wasmPath)
 	if err != nil {

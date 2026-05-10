@@ -99,21 +99,23 @@ func signedMarketplaceBundle(t *testing.T, kind, slug string) (bundleBytes, sigB
 	return bundleBytes, sigBytes, store
 }
 
-// TestVerifyBundle_HappyPathMarketplaceApp pins that the canonical
-// happy path — a marketplace-app envelope, signed by a key in the
-// trust store, with bundle hash matching the trusted comment —
-// returns the parsed manifest with kind discriminator preserved.
-func TestVerifyBundle_HappyPathMarketplaceApp(t *testing.T) {
+// TestVerifyBundle_RejectsMarketplaceAppKind pins the §4.1 lockdown
+// (#420): even when a marketplace-app envelope is otherwise validly
+// signed by a trusted key with a matching bundle hash, the install
+// path refuses it. The legacy "marketplace-app" kind is retired per
+// MANIFEST-SCHEMA.md §3.3 and replaced by "wasm-app".
+//
+// Pre-lockdown this test asserted the happy path. Flipping it to a
+// rejection test is the structural delta — the parser still accepts
+// the kind for fixture compatibility, but no install path admits it.
+func TestVerifyBundle_RejectsMarketplaceAppKind(t *testing.T) {
 	bundle, sig, store := signedMarketplaceBundle(t, "marketplace-app", "fixture-app")
-	man, err := verifyBundle(bundle, sig, store)
-	if err != nil {
-		t.Fatalf("verifyBundle: %v", err)
+	_, err := verifyBundle(bundle, sig, store)
+	if err == nil {
+		t.Fatalf("verifyBundle: expected ErrBundleManifestNotMarketplace, got nil")
 	}
-	if man.Kind != envelope.KindMarketplaceApp {
-		t.Errorf("Kind: got %q, want %q", man.Kind, envelope.KindMarketplaceApp)
-	}
-	if man.ID != "fixture-app" {
-		t.Errorf("ID: got %q, want fixture-app", man.ID)
+	if !errors.Is(err, ErrBundleManifestNotMarketplace) {
+		t.Fatalf("verifyBundle: expected ErrBundleManifestNotMarketplace, got %v", err)
 	}
 }
 

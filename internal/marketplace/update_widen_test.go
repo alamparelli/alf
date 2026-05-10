@@ -31,10 +31,13 @@ func signedBundleWithPermissions(t *testing.T, slug string, perms []string) (bun
 	store = envelope.NewMemoryTrustStore()
 	store.Add(pub)
 
+	// #420: marketplace-app retired, use wasm-app for new fixtures. The
+	// update/widen tests are kind-agnostic — they exercise the diff +
+	// ratifier flow, not the kind admission gate.
 	manifestTOML := []byte(fmt.Sprintf(
 		"alf_envelope_version = 1\n"+
 			"id      = %q\n"+
-			"kind    = \"marketplace-app\"\n"+
+			"kind    = \"wasm-app\"\n"+
 			"version = \"0.1.0\"\n"+
 			"name    = %q\n",
 		slug, slug,

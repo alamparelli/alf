@@ -207,7 +207,7 @@ func serveSignedBundle(t *testing.T, slug string, bundle, sig []byte) *httptest.
 }
 
 func TestInstall_HappyPath_ViaBundle(t *testing.T) {
-	bundle, sig, store := signedMarketplaceBundle(t, "marketplace-app", "todo")
+	bundle, sig, store := signedMarketplaceBundle(t, "wasm-app", "todo")
 
 	srv := serveSignedBundle(t, "todo", bundle, sig)
 	defer srv.Close()
@@ -253,7 +253,7 @@ func TestInstall_HappyPath_ViaBundle(t *testing.T) {
 // pre-v0.8.0 server) cannot install. The error is typed so the
 // daemon can surface "registry has not yet been upgraded".
 func TestInstall_RejectsUnsignedBundle(t *testing.T) {
-	bundle, _, store := signedMarketplaceBundle(t, "marketplace-app", "legacy")
+	bundle, _, store := signedMarketplaceBundle(t, "wasm-app", "legacy")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/apps/legacy/bundle.sig") {
@@ -284,7 +284,7 @@ func TestInstall_RejectsUnsignedBundle(t *testing.T) {
 // must be refused. Operators see the typed error and can run
 // `alf trust add` to import the publisher's key.
 func TestInstall_RejectsUnknownPublisher(t *testing.T) {
-	bundle, sig, _ := signedMarketplaceBundle(t, "marketplace-app", "stranger")
+	bundle, sig, _ := signedMarketplaceBundle(t, "wasm-app", "stranger")
 
 	srv := serveSignedBundle(t, "stranger", bundle, sig)
 	defer srv.Close()
@@ -310,7 +310,7 @@ func TestInstall_RejectsUnknownPublisher(t *testing.T) {
 // hash-check inside envelope.Verify. The bundle never reaches the
 // extract path.
 func TestInstall_RejectsTamperedBundle(t *testing.T) {
-	bundle, sig, store := signedMarketplaceBundle(t, "marketplace-app", "tampered")
+	bundle, sig, store := signedMarketplaceBundle(t, "wasm-app", "tampered")
 	tampered := append([]byte(nil), bundle...)
 	tampered[60] ^= 0xff
 
@@ -332,7 +332,7 @@ func TestInstall_RejectsTamperedBundle(t *testing.T) {
 // a manager without SetTrustStore wired refuses to run Install with
 // a clear message rather than panicking on a nil reference.
 func TestInstall_NoTrustStoreIsAClearError(t *testing.T) {
-	bundle, sig, _ := signedMarketplaceBundle(t, "marketplace-app", "wired")
+	bundle, sig, _ := signedMarketplaceBundle(t, "wasm-app", "wired")
 	srv := serveSignedBundle(t, "wired", bundle, sig)
 	defer srv.Close()
 
@@ -404,7 +404,7 @@ func TestUpdate_NoRegistry_Errors(t *testing.T) {
 }
 
 func TestUpdate_PreservesDataDir(t *testing.T) {
-	bundle, sig, store := signedMarketplaceBundle(t, "marketplace-app", "persistent")
+	bundle, sig, store := signedMarketplaceBundle(t, "wasm-app", "persistent")
 	srv := serveSignedBundle(t, "persistent", bundle, sig)
 	defer srv.Close()
 

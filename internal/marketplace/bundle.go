@@ -29,7 +29,7 @@ var ErrBundleSignatureMissing = errors.New("marketplace: registry did not serve 
 // successor wasm-app share an identical envelope shape; both are
 // accepted (per MANIFEST-SCHEMA §4.6). Anything else is rejected
 // at install time.
-var ErrBundleManifestNotMarketplace = errors.New("marketplace: bundle manifest kind must be marketplace-app or wasm-app")
+var ErrBundleManifestNotMarketplace = errors.New("marketplace: bundle manifest kind must be wasm-app (marketplace-app retired per §3.3)")
 
 // MaxBundleManifestSize bounds the in-memory read of manifest.toml
 // from inside the bundle ZIP. The schema's actual ceiling is much
@@ -164,8 +164,15 @@ func readManifestFromZip(zipBytes []byte) ([]byte, error) {
 //   - Bundle signed with unknown key: envelope.ErrSignerNotTrusted.
 //   - Tampered bundle (single byte flip): envelope.ErrSignatureInvalid
 //     (manifest mismatch) or the bundle-hash check inside Verify.
-//   - Manifest declares kind != marketplace-app|wasm-app:
+//   - Manifest declares kind != wasm-app:
 //     ErrBundleManifestNotMarketplace.
+//
+// Doctrine: ARCHITECTURE-SECURITY.md §4.1 + MANIFEST-SCHEMA.md §3.3.
+// The legacy "marketplace-app" kind is retired — marketplace bundles
+// are wasm-app only. Manifests declaring marketplace-app are rejected
+// here even when otherwise validly signed; the parser still accepts
+// the value for legacy fixture compatibility, but the install path
+// refuses it (#420).
 func verifyBundle(bundleBytes, sigBytes []byte, store envelope.TrustStore) (*envelope.Manifest, error) {
 	manifestTOML, err := readManifestFromZip(bundleBytes)
 	if err != nil {
@@ -181,7 +188,7 @@ func verifyBundle(bundleBytes, sigBytes []byte, store envelope.TrustStore) (*env
 	if err != nil {
 		return nil, err
 	}
-	if res.Manifest.Kind != envelope.KindMarketplaceApp && res.Manifest.Kind != envelope.KindWASMApp {
+	if res.Manifest.Kind != envelope.KindWASMApp {
 		return nil, fmt.Errorf("%w: got %q", ErrBundleManifestNotMarketplace, res.Manifest.Kind)
 	}
 	return res.Manifest, nil

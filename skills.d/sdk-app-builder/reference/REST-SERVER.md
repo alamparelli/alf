@@ -46,7 +46,9 @@ The daemon auto-supervises: restart on crash, start on boot, SIGTERM on shutdown
 
 ## Sandbox
 
-App servers run inside a chroot jail. The server process sees:
+App servers run under the 0.8.0 isolation stack: Docker container with `cap_drop: ALL` + narrow `cap_add`, AppArmor `alf` profile, custom seccomp profile (Layer 1 outer ring), and per-app object-capability handles forged from `manifest.json` (Tier 3.1, #391). The pre-0.8.0 chroot+setpriv+bwrap path was razed in #406.
+
+Inside the container, the server process sees:
 
 - System binaries (`/bin`, `/usr`, `/lib`, `/sbin`, `/lib64`) — read-only
 - `/home/alf/data/apps/<slug>/` — full app directory (read-write)
@@ -54,7 +56,7 @@ App servers run inside a chroot jail. The server process sees:
 - `/dev/{null,zero,urandom,random}`, `/proc`, private `/tmp`
 - TLS CA certs and DNS resolution
 
-The server does NOT see other apps, vault data, secrets, or `.claude/` config.
+Other apps' data, vault data, secrets, and `.claude/` config are not reachable: the ocap handle minted from your manifest scopes the server's `fs` access, and the AppArmor profile blocks the dangerous capability/syscall surface (CAP_SYS_ADMIN/CAP_SYS_CHROOT/etc., mount/umount/ptrace/init_module/kexec_*). Full details in [`SANDBOX.md`](SANDBOX.md).
 
 ### Vault proxy (external API access)
 
@@ -63,7 +65,7 @@ If your app needs external APIs (OpenRouter, Google, etc.), declare services in 
 { "services": ["openrouter"] }
 ```
 
-The daemon creates a vault proxy socket at `VAULT_PROXY_SOCK`. Use the SDK:
+The daemon forges a per-app vault proxy handle from your declaration and exposes it via a socket at `VAULT_PROXY_SOCK`. Use the SDK:
 ```go
 import "github.com/alamparelli/alf/pkg/appsdk"
 
@@ -75,6 +77,8 @@ err = vc.ProxyJSON("openrouter", "POST", "/v1/chat/completions", reqBody, &resul
 ```
 
 The proxy injects authentication server-side — your app never sees API keys. Only declared services are allowed; requests to undeclared services return 403.
+
+> `appsdk` is the **Go-kind path** for maintainer-authored apps. WASM-kind capabilities cannot link `appsdk`; they declare permissions in their TOML envelope and receive forged handles via the `alf` host module ABI. See [`skills.d/wasm/SKILL.md`](../../wasm/SKILL.md).
 
 **Do not** hardcode API URLs or tokens. Do not access paths outside your app directory.
 

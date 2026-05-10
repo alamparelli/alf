@@ -30,11 +30,11 @@ If the request is ambiguous (fewer than 2 concrete details), apply the Scope che
 
 **CRITICAL RULES:**
 - **Compatible = SDK + AIG** — an app is only "compatible" when it uses the AlfSDK correctly AND follows AIG design guidelines. Both are required, not optional.
-- **Source-only for marketplace** — published apps ship as source code only (compiled at install time). For local development, compile and run directly.
+- **Source-only for marketplace** — published apps ship as source code only (compiled at install time). For local development, compile and run directly. *Note: this skill produces Go-kind app shells (frontend + backend server). Standalone third-party tools should use WASM-kind instead — see [`skills.d/wasm/SKILL.md`](../wasm/SKILL.md).*
 - **SQLite** for all data storage — no external databases.
 - **Vanilla JS** for frontends — no frameworks, no build step, CSP-safe.
 - **Standalone** — no dependency on shared databases or external processes.
-- **Sandboxed** — all code runs in a chroot jail. No access to vault, secrets, or other apps' data.
+- **Sandboxed** — apps run under the 0.8.0 isolation stack: Docker + AppArmor `alf` profile + custom seccomp at the container boundary (Layer 1 outer ring), and per-app object-capability scoping for vault/http/fs/exec (Tier 3.1 forge, #391). The pre-0.8.0 chroot+setpriv+bwrap path was razed in #406. See [`reference/SANDBOX.md`](reference/SANDBOX.md) for what your app process actually sees, and [`docs/ARCHITECTURE-SECURITY.md`](../../docs/ARCHITECTURE-SECURITY.md) for the full model.
 
 ## Architecture mental model (read first)
 

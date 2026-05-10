@@ -79,8 +79,13 @@
       "action": "SCMP_ACT_ALLOW"
     },
     {
-      "_comment": "Capability-gated syscalls: allow only when the matching CAP is set in the container's bounding set. cap_add in docker-compose.yml.tmpl is the gate; this block prevents a process that has e.g. CAP_NET_ADMIN from using it for unrelated network-tweak syscalls.",
-      "names": ["clone", "clone3"],
+      "_comment": "x86/x86_64-specific syscalls required for thread-local storage and legacy local-descriptor-table operations. arch_prctl sets %fs base for TLS — without it, glibc/Go runtime cannot initialise threads (observed: container restart-loop with 'cannot set %fs base address for thread-local storage' on Ubuntu 6.8 amd64 kernel). Mirrors the architecture-conditional allow in moby/default.json.",
+      "names": ["arch_prctl", "modify_ldt"],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "_comment": "clone(): allow only when no new-namespace flags are set in arg0 (CLONE_NEW{NS,UTS,IPC,USER,PID,NET,CGROUP}). Mirrors Docker's moby/default.json non-CAP_SYS_ADMIN rule. CAP_SYS_ADMIN is dropped at the container boundary, so even bypassing this rule would fail at the kernel-cap check — this is belt-and-braces.",
+      "names": ["clone"],
       "action": "SCMP_ACT_ALLOW",
       "args": [
         {
@@ -90,6 +95,11 @@
           "op": "SCMP_CMP_MASKED_EQ"
         }
       ]
+    },
+    {
+      "_comment": "clone3(): allow unconditionally. The arg0 of clone3 is a pointer to struct clone_args, NOT a flags bitmap — applying the namespace-mask constraint to a pointer makes the rule fail randomly (observed: glibc 2.34+ pthread_create uses clone3 on x86_64, daemon crashed with `runtime/cgo: pthread_create failed: Operation not permitted`). Namespace creation via clone3 is still gated by CAP_SYS_ADMIN (dropped) at the kernel boundary.",
+      "names": ["clone3"],
+      "action": "SCMP_ACT_ALLOW"
     },
     {
       "_comment": "Explicit deny: syscalls the post-#406 daemon never uses. Listed here even though defaultAction=ERRNO would already block them — the explicit list is a forward-looking pin; if a future daemon path tries one of these, the build-time test (TODO) will flag it before merge.",

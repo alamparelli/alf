@@ -193,7 +193,30 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 	// the lifecycle ctx, regardless of whether Close came from the
 	// user, RevokeByKey on the bundle's signer, or RevokeByKey on a
 	// provider key this Instance depends on.
-	i.trackLive(inst, vm.SignerID, vm.SignedAt, dependsOnKeys(vm.Manifest))
+	//
+	// SEC-080-001: trackLive re-checks the trust store under its
+	// liveMu so a SIGHUP-driven Load() that arrived between
+	// envelope.Verify above and here sees the in-flight Instance and
+	// either (a) had its RevokeByKey serialised against this trackLive
+	// — observing our entry, closing it — or (b) ran first and let
+	// trackLive's recheck observe the revocation, returning
+	// ErrRevokedBetweenVerifyAndTrack. The latter aborts the
+	// instantiation and closes the just-forged Instance so its
+	// handles never reach the caller.
+	// in.TrustStore is the same store envelope.Verify consulted; type-
+	// assert to the optional Revoker interface (mirrors verify.go which
+	// does the same dance) so trackLive can re-check under its own lock.
+	// A store without revocation support passes nil, which trackLive
+	// treats as "no recheck possible" — matches the existing semantics
+	// for stores that don't ship a revocation channel.
+	revoker, _ := in.TrustStore.(envelope.Revoker)
+	if i.afterVerifyHook != nil {
+		i.afterVerifyHook()
+	}
+	if err := i.trackLive(inst, revoker, vm.SignerID, vm.SignedAt, dependsOnKeys(vm.Manifest)); err != nil {
+		inst.Close()
+		return nil, err
+	}
 
 	// #392 Stage 3 — capability-provider bundles register their
 	// [[provider.exports]] under the publisher's fingerprint short.

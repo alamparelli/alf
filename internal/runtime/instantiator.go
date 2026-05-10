@@ -97,6 +97,15 @@ type Instantiator struct {
 	liveMu           sync.Mutex
 	live             []liveEntry
 	revocationLogger func(format string, args ...any)
+
+	// afterVerifyHook is a SEC-080-001 race-deterministic test seam:
+	// when set, it fires inside InstantiateVerified between the
+	// envelope.Verify return and the trackLive call. Tests use it to
+	// flip the trust store mid-flight (simulating a SIGHUP-driven
+	// Load() that arrived in the verify→track gap) so the recheck
+	// inside trackLive can be exercised deterministically. Zero cost
+	// in production where the field stays nil.
+	afterVerifyHook func()
 }
 
 // CrossFlowQuerier is the narrow read-side of internal/runtime/events
@@ -144,6 +153,13 @@ func WithCrossFlowRegistry(r CrossFlowQuerier) InstantiatorOption {
 // validated but no Tool handle is forged.
 func WithToolInvoker(inv handle.ToolInvoker) InstantiatorOption {
 	return func(i *Instantiator) { i.invoker = inv }
+}
+
+// WithAfterVerifyHookForTest installs a function that fires inside
+// InstantiateVerified between envelope.Verify and trackLive. SEC-080-001
+// race-deterministic test seam — production code never sets it.
+func WithAfterVerifyHookForTest(fn func()) InstantiatorOption {
+	return func(i *Instantiator) { i.afterVerifyHook = fn }
 }
 
 // WithHandleRegistry wires the runtime handle registry (#392 Stage 3).

@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -8,6 +10,26 @@ import (
 	"github.com/alamparelli/alf/internal/capability/envelope"
 	"github.com/alamparelli/alf/internal/capability/handle"
 )
+
+// ErrRevokedBetweenVerifyAndTrack is returned by trackLive when the
+// trust store says the bundle's signer (or one of its provider
+// dependencies) is revoked with a not-valid-after timestamp at-or-
+// before the bundle's SignedAt. This is the SEC-080-001 race-close:
+// envelope.Verify saw the key as trusted, but a SIGHUP-driven
+// truststore.Load() between Verify and trackLive flipped it. The
+// in-flight Instance never enters the live registry, never receives
+// a forge handle the caller can use, and the caller is responsible
+// for closing the Instance.
+//
+// Why surface this at trackLive rather than re-call Verify: Verify
+// is pure (canonicalisation + signature) and was already correct at
+// the moment it ran; the only thing that changed is the trust store
+// view. Holding liveMu across the recheck guarantees that any
+// concurrent RevokeByKey for this signer either ran BEFORE we took
+// the lock (in which case our recheck observes the revocation and
+// refuses) or runs AFTER we released it (in which case our entry is
+// in i.live and RevokeByKey closes it the normal way).
+var ErrRevokedBetweenVerifyAndTrack = errors.New("runtime: signer revoked between envelope.Verify and trackLive (SEC-080-001 race close)")
 
 // liveEntry binds a forged *handle.Instance back to the verification
 // fact that produced it. The Instantiator keeps one entry per
@@ -39,12 +61,26 @@ type liveEntry struct {
 // Revoking any of those keys closes this Instance via the cascade path
 // in RevokeByKey.
 //
+// SEC-080-001: revoker is the same trust store envelope.Verify
+// consulted; trackLive re-checks the signer + every dependsOn key
+// against it under liveMu. If the signer was revoked with a
+// not-valid-after at-or-before signedAt — i.e. a SIGHUP-driven
+// Load() between Verify and now flipped the key — the Instance is
+// NOT registered and ErrRevokedBetweenVerifyAndTrack is returned.
+// The caller (InstantiateVerified) closes the Instance and
+// propagates the error so the bundle never reaches a live forge
+// handle. The lock ordering closes the race: any concurrent
+// RevokeByKey for this signer either runs BEFORE we take liveMu (in
+// which case our recheck sees the revocation and refuses) or AFTER
+// we release it (in which case our entry is already in i.live and
+// the cascade closes it normally).
+//
 // The watcher goroutine costs ~2 KB stack per live Instance — acceptable
 // for the v0.8.0 single-host scale (dozens of caps). If we ever need to
 // scale to thousands, replace with a finalizer or a periodic sweep.
-func (i *Instantiator) trackLive(inst *handle.Instance, signerID envelope.KeyID, signedAt time.Time, dependsOn []envelope.KeyID) {
+func (i *Instantiator) trackLive(inst *handle.Instance, revoker envelope.Revoker, signerID envelope.KeyID, signedAt time.Time, dependsOn []envelope.KeyID) error {
 	if inst == nil {
-		return
+		return nil
 	}
 	entry := liveEntry{
 		instance:  inst,
@@ -54,6 +90,26 @@ func (i *Instantiator) trackLive(inst *handle.Instance, signerID envelope.KeyID,
 		dependsOn: dependsOn,
 	}
 	i.liveMu.Lock()
+	if revoker != nil {
+		if cutoff, ok := revoker.RevokedAfter(signerID); ok && !signedAt.Before(cutoff) {
+			i.liveMu.Unlock()
+			return fmt.Errorf("%w: signer=%s signed_at=%s revoked_after=%s",
+				ErrRevokedBetweenVerifyAndTrack,
+				signerID.Hex(),
+				signedAt.Format(time.RFC3339),
+				cutoff.Format(time.RFC3339))
+		}
+		for _, dep := range dependsOn {
+			if cutoff, ok := revoker.RevokedAfter(dep); ok && !signedAt.Before(cutoff) {
+				i.liveMu.Unlock()
+				return fmt.Errorf("%w: depends-on provider=%s signed_at=%s revoked_after=%s",
+					ErrRevokedBetweenVerifyAndTrack,
+					dep.Hex(),
+					signedAt.Format(time.RFC3339),
+					cutoff.Format(time.RFC3339))
+			}
+		}
+	}
 	i.live = append(i.live, entry)
 	i.liveMu.Unlock()
 
@@ -70,6 +126,7 @@ func (i *Instantiator) trackLive(inst *handle.Instance, signerID envelope.KeyID,
 		i.live = out
 		i.liveMu.Unlock()
 	}()
+	return nil
 }
 
 // RevokeByKey closes every live Instance forged from a bundle signed

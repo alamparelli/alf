@@ -6,6 +6,10 @@ order: 15
 
 # Building Marketplace Apps
 
+> **⚠️ This doc describes the legacy Go-kind app structure (`manifest.json` + Go binary + supervised service). That path is retired per `MANIFEST-SCHEMA.md §3.3` and `ARCHITECTURE-SECURITY.md §4.1`. New marketplace apps must be `wasm-app` kind. See [Creating WASM Tools](docs:wasm-tools) for the current pattern.**
+>
+> Frontend conventions (HTML + AlfSDK + CSP rules) are unchanged and still apply to WASM-app frontends — those sections below remain authoritative. Backend sections (Go binary, `service.json`, manifest.json schema, `appsdk` Go SDK) are kept for reference while existing apps migrate.
+
 How to build, structure, and publish apps for the ALF marketplace.
 
 ## App structure

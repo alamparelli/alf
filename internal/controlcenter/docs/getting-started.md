@@ -233,9 +233,9 @@ Anything ALF runs for you — tools, apps, skills — passes through 3 layers:
 2. **Identity** — every loadable bundle is signed. ALF refuses to load anything unsigned. There is no dev-mode bypass.
 3. **Authority** — a bundle only gets the permissions its manifest declares. Everything else is unreachable.
 
-When you ask ALF to "create a tool", it picks the right **kind** (bash/Python, Go-kind app, or WASM-kind) based on who's authoring it, writes a minimum manifest, and builds locally. The daemon auto-signs at boot.
+The doctrine (`ARCHITECTURE-SECURITY.md §4.1`): **anything loaded from disk at runtime is WASM-kind.** Bash, Python, and Go tools/apps only exist for code that ships inside the daemon binary itself (the maintainer-built path). When you ask ALF to "create a tool", it produces a WASM bundle in `~/data/tools/<id>/` (or `~/data/apps/<slug>/` for long-running apps), the daemon auto-signs at boot, and the bundle runs isolated.
 
-You don't need to know the internals. You do need to know which kind to ask for and which permissions to grant — see [Isolation Model](docs:isolation-model).
+See [Isolation Model](docs:isolation-model) for the full mental model.
 
 ## Customizing the deployment
 

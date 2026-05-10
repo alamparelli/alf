@@ -8,7 +8,7 @@ order: 11
 
 Teach ALF new abilities by creating skills. A skill is a set of instructions that ALF follows when a topic comes up.
 
-> **Skill vs WASM bundle.** Skills are prompt-based `.md` files living in `~/data/skills/` — no signing, no permissions, just instructions injected into the conversation. They are unrelated to WASM-kind tools, which are signed binary bundles in `~/data/skills.d/wasm/<id>/`. See [Creating WASM Tools](docs:wasm-tools) if you want an isolated tool with declared permissions instead of prompt-only instructions.
+> **Skill vs WASM bundle.** Skills are prompt-based `.md` files living in `~/data/skills/<name>/` — no signing, no permissions, just instructions injected into the conversation. They are unrelated to WASM-kind tools, which are signed binary bundles in `~/data/tools/<id>/` (or `~/data/apps/<slug>/` for long-running apps). See [Creating WASM Tools](docs:wasm-tools) if you want an isolated tool with declared permissions instead of prompt-only instructions.
 
 ## Quick start
 

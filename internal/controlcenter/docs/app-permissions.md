@@ -1,13 +1,17 @@
 # App Permissions & Sandbox Reference
 
+> **⚠️ Legacy Go-kind app reference.** The supervised-Go-backend pattern this doc describes (`manifest.json` permissions, `ALF_TOOLS_SOCK`, per-app process sandbox) is retired per `ARCHITECTURE-SECURITY.md §4.1` and `MANIFEST-SCHEMA.md §3.3`. New apps are `wasm-app` kind — permissions are declared as TOML blocks (`[[fs.reads]]`, `[[events.exports]]`, etc.) and enforced structurally via the Tier 3.1 ocap forge. See [Isolation Model](docs:isolation-model) and [Creating WASM Tools](docs:wasm-tools) for the current model.
+>
+> Iframe + AlfSDK frontend behaviour and CC API isolation (sections below) still apply unchanged to WASM-app frontends.
+
 This page is the source of truth for:
 
-- Manifest permissions and what each grants
-- How iframe apps and compiled apps reach the Control Center (CC) API
+- Manifest permissions and what each grants (legacy Go-kind path)
+- How iframe apps reach the Control Center (CC) API
 - Sandbox boundaries (filesystem, network, env)
 - The per-app tools socket (`ALF_TOOLS_SOCK`) — compiled apps' primary channel to CC
 
-See also `marketplace-apps.md` for manifest schema and `app-sdk.md` for SDK usage.
+See also `marketplace-apps.md` for the legacy manifest schema and `app-sdk.md` for SDK usage.
 
 ---
 

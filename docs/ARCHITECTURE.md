@@ -136,7 +136,7 @@ type Strategy interface {
 **Role.** Enforce per-Capability access policies.
 
 **Sub-packages.**
-- `sandbox/exec/` — chroot + setpriv + per-app namespaces for executing Capabilities.
+- `sandbox/exec/` — wazero-based confinement (Layer 1 inner ring) for executing WASM-kind Capabilities. The pre-0.8.0 chroot+setpriv+per-app-namespace path was razed in #406; see [`ARCHITECTURE-SECURITY.md`](ARCHITECTURE-SECURITY.md) §2.1 for the layered model and [`WASM.md`](WASM.md) for the host-function ABI.
 - `sandbox/integrity/` — hash-based tool/script integrity (TOCTOU-safe via exec-time hash).
 - `sandbox/network/` — firewall proxy + outbound allow/deny rules.
 - `sandbox/secrets/` — vault + per-app proxy socket. **Note:** this is distinct from `internal/envsecrets/` (the env-var / Docker-secret reader at boot).

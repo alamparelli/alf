@@ -42,12 +42,23 @@ profile alf flags=(attach_disconnected,mediate_deleted) {
   # under /home/alf/data, /opt/alf, /tmp, /run. Capabilities are
   # the gate for sensitive paths (keys, admin), POSIX perms +
   # AppArmor's path-based rules are the next layer.
-  /home/alf/** rwlk,
-  /opt/alf/** rwlk,
-  /tmp/** rwlk,
+  # Each parent dir is explicitly allowed for readdir/traverse —
+  # `**` matches descendants but not the dir node itself.
+  # /home/alf/ and /opt/alf/ get `w` because the entrypoint chowns
+  # them to the alf user (CAP_CHOWN gated). The rest are read-only
+  # at the dir node — write permission applies to the contents.
+  /home/alf/ rw,
+  /home/alf/** rwlkix,
+  /opt/alf/ rw,
+  /opt/alf/** rwlkix,
+  /tmp/ r,
+  /tmp/** rwlkix,
+  /run/ r,
   /run/** rwlk,
+  /var/run/ r,
   /var/run/** rwlk,
-  /var/log/** rwl,
+  /var/log/ r,
+  /var/log/** rwlk,
 
   # Read-only system paths — the LLM subprocess (and helpers) need
   # these to function (libc resolution, /etc/passwd lookups, etc.).
@@ -59,10 +70,13 @@ profile alf flags=(attach_disconnected,mediate_deleted) {
   /sbin/** rmix,
 
   # Proc / sys — read-only for self; deny writes that could
-  # influence kernel state.
+  # influence kernel state. /proc/ itself is allowed for readdir
+  # (pgrep / ps walk it).
+  /proc/ r,
   /proc/** r,
   /proc/[0-9]*/fd/* rwk,
   /proc/[0-9]*/task/** rk,
+  /sys/ r,
   /sys/** r,
   deny /sys/kernel/** w,
   deny /sys/fs/cgroup/** w,
@@ -70,14 +84,22 @@ profile alf flags=(attach_disconnected,mediate_deleted) {
   deny /proc/sysrq-trigger w,
 
   # Network — allow IPv4/IPv6/Unix as the daemon needs HTTP
-  # outgoing + Unix socket IPC. Block raw sockets (CAP_NET_RAW
-  # is already dropped in cap_drop=ALL but explicit here).
+  # outgoing + Unix socket IPC. Block raw IP sockets (CAP_NET_RAW
+  # already dropped in cap_drop=ALL — explicit here as belt-and-braces).
+  # Netlink is allowed because:
+  #   - su/PAM uses NETLINK_AUDIT (protocol 9) to write audit records.
+  #   - nettrack-helper uses NETLINK_NETFILTER for conntrack subscribe.
+  #   - Go runtime / glibc use NETLINK_ROUTE for resolver fallbacks.
+  # Netlink is not the same threat as IP raw — kernel→user channel,
+  # gated by per-protocol kernel checks (e.g., NETLINK_AUDIT requires
+  # CAP_AUDIT_WRITE which is NOT in cap_add).
   network inet,
   network inet6,
   network unix,
-  deny network raw,
+  network netlink,
+  deny network inet raw,
+  deny network inet6 raw,
   deny network packet,
-  deny network netlink raw,
 
   # Capabilities — the cap_add list in docker-compose is already
   # narrow (after #86 cap_add drop). Mirror the allowed set here
@@ -102,7 +124,12 @@ profile alf flags=(attach_disconnected,mediate_deleted) {
   deny mount,
   deny umount,
   deny pivot_root,
-  deny mknod,
+  # mknod: not a top-level AppArmor rule (it's a file-mode flag).
+  # Already gated by cap_drop=ALL minus the narrow cap_add list — CAP_MKNOD
+  # is not granted, so device-node creation is blocked at the kernel-cap
+  # boundary. Path-based deny on /dev would over-restrict: legitimate FIFO/
+  # Unix-socket creation under /tmp uses mknod() but does not require
+  # CAP_MKNOD, and we want to keep that working.
   # Note: chroot deny would break legitimate apt-get during Phase 1
   # if it ever needed it — left allowed for now; revisit when
   # CAP_SYS_CHROOT is dropped from cap_add (sibling work).

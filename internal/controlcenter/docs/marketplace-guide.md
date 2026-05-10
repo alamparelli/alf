@@ -73,6 +73,8 @@ After uninstalling, the app reverts to **Available** in the catalog and can be r
 
 All marketplace apps are **source-only** -- no pre-compiled binaries. Source code is auditable before and after installation. Apps are compiled locally inside the container at install time.
 
+Marketplace bundles ship pre-signed by the publisher. To install from a publisher you haven't used before, an admin adds their key once with `alf trust add <publisher-key.pub>`. After that, every bundle from that publisher loads automatically. See [Isolation Model](docs:isolation-model) for the trust model.
+
 ## For developers
 
 This guide covers using the marketplace as an end user. If you want to create and publish your own apps, see [Building Marketplace Apps](marketplace-apps.md) for the developer documentation covering app structure, manifest format, SDK usage, and publishing to the registry.

@@ -87,7 +87,9 @@ Declared in `manifest.json` under `"permissions"`. The sandbox enforces these at
 | `storage` | App can use `AlfSDK.storage` for persistent key-value data |
 | `network` | Sandbox allows outbound network access (DNS, TLS certs, vault proxy socket) |
 
-Apps without `network` run in an isolated network namespace — no outbound connections. Apps with `network` get a per-app vault proxy socket (`VAULT_PROXY_SOCK`) so `vault ssh`, `vault http`, etc. work without direct token access.
+Apps without `network` have no outbound network access — the sandbox blocks egress. Apps with `network` get a per-app vault proxy socket (`VAULT_PROXY_SOCK`) so `vault ssh`, `vault http`, etc. work without ever seeing raw tokens.
+
+For the full isolation model (the 3 layers, signing, and the kind decision tree), see [Isolation Model](docs:isolation-model).
 
 ### Cross-app actions
 
@@ -239,24 +241,22 @@ Load the CC theme stylesheet and init script. Use CSS variables for all colors:
 
 ### Sandbox
 
-All app code runs inside a chroot jail with an allowlist filesystem:
+All app code runs isolated. See [Isolation Model](docs:isolation-model) for the full model (3 layers, signing, permission ceiling). User-visible boundaries:
 
-**What apps see:**
-- System binaries (`/bin`, `/usr`, `/lib`, `/sbin`, `/lib64`) — read-only
-- Platform tools (`/opt/alf/tools.d/`) — read-only (vault, CLI helpers)
-- Minimal devices (`/dev/{null,zero,urandom,random}`), fresh `/proc`, private `/tmp`
-- TLS CA certs and DNS (servers always; bash only with `network` permission)
-- Vault proxy socket (`VAULT_PROXY_SOCK`) — apps with `network` permission get a per-app proxy socket so `vault` CLI works without direct token access
-- Own data: `/home/alf/data/apps/<slug>/data/` (bash) or full app dir (server)
-- Shared tools: `/home/alf/data/tools/` (read-only)
+**What apps can do:**
+- Read/write their own data directory (`/home/alf/data/apps/<slug>/data/` for bash, full app dir for server).
+- Call platform CLI tools (`vault`, `llm`, `task`, etc.) without managing credentials.
+- Make outbound network calls — only if `network` is declared in `permissions`.
+- Use the per-app vault proxy socket (`VAULT_PROXY_SOCK`) — never see raw tokens.
+- Call the Control Center HTTP API scoped to their own slug.
 
-**What apps don't see:**
-- Other apps' directories
-- `/opt/alf/vault-data/`, `/opt/alf/config.d/`, `/home/alf/.claude/`
-- `/home/alf/data/external/` (NFS mounts), `/run/secrets/`
-- No `VAULT_TOKEN` or secrets in environment — vault access is proxied, never direct
+**What apps cannot do:**
+- See or touch other apps' directories or data.
+- Read the vault directly, the daemon's config, or anything outside their declared permissions.
+- Make outbound calls without `network`.
+- Reach `/api/marketplace/*`, `/api/developer/*`, or any write endpoint outside their slug. These return 403.
 
-**HTTP API isolation:** Apps in iframes can only access `/apps/{own-slug}/api/*` (own REST proxy), `/api/apps/{own-slug}/*` (own storage/upload/errors), `/api/bash` (sandboxed, permission checked), and `/api/events` (read-only). All other `/api/*` endpoints return 403.
+**HTTP API isolation:** Apps in iframes can only access `/apps/{own-slug}/api/*` (own REST proxy), `/api/apps/{own-slug}/*` (own storage/upload/errors), `/api/bash` (sandboxed, permission-checked), and `/api/events` (read-only). All other `/api/*` endpoints return 403.
 
 **Static file allowlist:** Only web-safe extensions are served via `/apps/{slug}/`: `.html`, `.css`, `.js`, `.mjs`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.ico`, `.webp`, `.avif`, `.woff`, `.woff2`, `.ttf`, `.otf`, `.eot`, `.mp3`, `.ogg`, `.wav`, `.mp4`, `.webm`, `.json`, `.xml`, `.txt`, `.csv`, `.map`. Source code, databases, and internal files return 404.
 

@@ -23,12 +23,14 @@ Declared in `manifest.json`:
 
 | Permission | Effect |
 |---|---|
-| `bash` | App may call `/api/bash`. Commands run in a per-app sandbox (namespace + chroot, uid 1000). |
+| `bash` | App may call `/api/bash`. Commands run in a sandbox scoped to the app's own data directory. |
 | `network` | Sandbox (both bash and server) allows outbound network. Without this, egress is blocked. |
 | `tool` | App may call `/api/tool` (structured tool invocation). `bash` and `tool` are independent. |
 | `clipboard` | App may call `AlfSDK.clipboard.write/read`. |
 
 Omitted permissions cause a **403** from CC. Permissions are checked server-side on every request — the client cannot self-grant.
+
+For the full isolation model (the 3 layers, signing, and the kind decision tree), see [Isolation Model](docs:isolation-model).
 
 ---
 
@@ -48,7 +50,7 @@ Same iframe as above, plus a long-running `server` process managed by the superv
 
 - Writes the chosen port to `data/port` inside the app dir.
 - Reverse-proxies `/apps/{slug}/api/*` → `localhost:{port}/api/*`.
-- Spawns the server in a chroot+mount-namespace sandbox (see below).
+- Spawns the server inside the sandbox (see below).
 
 The backend has **two independent channels** to CC:
 
@@ -99,23 +101,22 @@ Requests from the per-app socket carry:
 
 ## Sandbox boundaries
 
-Applies to both bash (`/api/bash`) and server processes.
+Applies to both bash (`/api/bash`) and server processes. For the full layered model see [Isolation Model](docs:isolation-model).
 
-**Filesystem (chroot):**
-- `/bin`, `/usr`, `/lib`, `/sbin`, `/lib64` — read-only
-- `/opt/alf/bin`, `/opt/alf/tools.d` — read-only (this is why `llm`/`task` resolve in `PATH`)
-- `/dev/{null,zero,urandom,random}`, `/tmp`, `/proc` — minimal
-- `/etc/{passwd,group,nsswitch.conf,hosts,resolv.conf}`, `/etc/ssl/certs` — minimal + TLS CAs
-- App's own dir at its absolute path — **read-write**
-- `VAULT_PROXY_SOCK` and `ALF_TOOLS_SOCK` (both live inside the app dir → already mounted)
+**Filesystem — what the app can touch:**
+- Its own directory (read-write).
+- Platform CLI tools in `PATH` (read-only) — this is how `llm`, `task`, `vault`, etc. resolve.
+- System binaries and minimal devices needed to run a process.
+- The vault proxy socket (`VAULT_PROXY_SOCK`) when the app has `network`.
+- The per-app tools socket (`ALF_TOOLS_SOCK`).
 
-Not reachable: other apps, the daemon binary, global config, other users' data.
+**Filesystem — what the app cannot touch:** other apps, vault data directly, daemon config, other users' data, the daemon binary itself.
 
 **Network:**
-- Server processes: inherit host network (no netns) — they need to listen on a port.
+- Server processes need to listen on a port and inherit the container's network.
 - Bash (`/api/bash`): gated by the `network` permission. Without it, DNS + egress are blocked.
 
-**Identity:** uid/gid 1000 (`alf`) after entering the namespace, regardless of caller.
+**Identity:** the app runs as the daemon user (uid/gid 1000), with no ambient root.
 
 **Environment** (what the server sees):
 ```
@@ -126,7 +127,7 @@ ALF_TOOLS_SOCK=<appDir>/tools.sock       # set when supervisor has SetAppTools w
 VAULT_PROXY_SOCK=<appDir>/vault.sock     # set when app declares vault services
 TMPDIR=/tmp
 ```
-No daemon secrets, no `CC_AUTH_TOKEN`, no outgoing-token keys. The socket is the only privilege the app holds.
+No daemon secrets, no `CC_AUTH_TOKEN`, no outgoing-token keys. The per-app socket is the only privilege the app holds.
 
 ---
 

@@ -6,7 +6,28 @@ order: 10
 
 # Building Tools & Extensions
 
-How to create tools, apps, and extend ALF's capabilities inside the container.
+How to create tools, apps, and extend ALF's capabilities. ALF has three ways to package executable logic — pick the right one before you start, or you'll fight the system later.
+
+## Pick the right kind
+
+| Kind | Who authors | Best for | Lives in |
+|---|---|---|---|
+| **bash / Python tool** | Maintainer (ships with the daemon, TCB access) | Quick glue scripts, file helpers, wrappers over CLI binaries | `~/data/tools/<name>` |
+| **Go-kind app** | Maintainer (compiled at install) | App shells with frontend + backend, marketplace apps | `~/data/apps/<slug>/` |
+| **WASM-kind tool/app** | Anyone — third-party, LLM-authored, untrusted | Isolated tools, anything ALF writes for you, anything imported from a marketplace | `~/data/skills.d/wasm/<id>/` |
+
+**Decision rule** — when in doubt, pick **WASM-kind**. The 0.8.0 architecture mandates it for any non-maintainer capability. Bash/Python tools are reserved for code shipped as part of the daemon distribution.
+
+**Quick tree:**
+
+1. **ALF is writing this for you?** → **WASM-kind**. Use the `wasm-builder` skill — see [Creating WASM Tools](docs:wasm-tools).
+2. **You're hand-writing a maintainer utility (TCB script)?** → **bash / Python**. Read on.
+3. **You need a full app with a UI tab?** → **Go-kind**. See [Building Marketplace Apps](docs:marketplace-apps).
+4. **Anything else (third-party, untrusted, marketplace-bound)?** → **WASM-kind**.
+
+All three kinds run inside ALF's isolation model — signed bundles, declared permissions, no ambient access beyond what the manifest grants. See [Isolation Model](docs:isolation-model) for the full mental model.
+
+The rest of this page covers **bash / Python tools** and **simple HTML apps**. For WASM tools, see [Creating WASM Tools](docs:wasm-tools). For full marketplace apps, see [Building Marketplace Apps](docs:marketplace-apps).
 
 ## Directory structure
 
@@ -227,5 +248,7 @@ Use `service.json` in app directories instead of `nohup ... &`. See [Apps with b
 
 ## What's next?
 
-- [Creating Skills](docs:creating-skills) - full guide on skill creation
-- [Tools Reference](docs:tools-reference) - built-in CLI tools
+- [Isolation Model](docs:isolation-model) — the 3 layers, trust, and the kind decision tree
+- [Creating WASM Tools](docs:wasm-tools) — for tools ALF writes for you or that you import
+- [Creating Skills](docs:creating-skills) — full guide on skill creation
+- [Tools Reference](docs:tools-reference) — built-in CLI tools

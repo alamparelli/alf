@@ -28,13 +28,13 @@ The SDK auto-handles mobile audio unlock, viewport detection, and parent communi
 
 ## Sandbox
 
-All SDK operations (`bash()`, `tool()`, REST proxy calls) execute inside a chroot jail. Apps are isolated from each other and from system resources:
+All SDK operations (`bash()`, `tool()`, REST proxy calls) execute inside ALF's sandbox. Apps are isolated from each other and from system resources. See [Isolation Model](docs:isolation-model) for the full model — user-visible boundaries:
 
-- `AlfSDK.bash()` runs in a sandbox with access to `/home/alf/data/apps/<slug>/data/` only (read-write)
-- REST server apps see their full app directory but nothing outside it
-- No access to vault, secrets, other apps, or system config
-- HTTP API calls are restricted to own-slug endpoints; other `/api/*` paths return 403
-- Static files served only for web-safe extensions (`.html`, `.css`, `.js`, images, fonts, media, `.json`, `.xml`, `.txt`, `.csv`, `.map`)
+- `AlfSDK.bash()` runs scoped to `/home/alf/data/apps/<slug>/data/` only (read-write).
+- REST server apps see their full app directory but nothing outside it.
+- No access to the vault directly, no access to other apps or system config — vault is mediated by the per-app proxy socket.
+- HTTP API calls are restricted to own-slug endpoints; other `/api/*` paths return 403.
+- Static files served only for web-safe extensions (`.html`, `.css`, `.js`, images, fonts, media, `.json`, `.xml`, `.txt`, `.csv`, `.map`).
 
 ## Core
 
@@ -86,7 +86,7 @@ For `<img>`, `<audio>`, `<video>`, and `@font-face`, you don't need `AlfSDK.api(
 
 ### `AlfSDK.bash(cmd)`
 
-Execute a shell command in a sandboxed chroot. The sandbox exposes only the app's `data/` directory (read-write) and system binaries (read-only). Network access requires the `network` permission. Returns `{ output, exit_code, error }`.
+Execute a shell command in the app sandbox. The sandbox exposes only the app's `data/` directory (read-write) and system binaries (read-only). Network access requires the `network` permission. Returns `{ output, exit_code, error }`.
 
 ```js
 AlfSDK.bash('echo hello').then(function(res) {

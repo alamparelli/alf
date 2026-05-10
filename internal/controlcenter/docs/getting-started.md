@@ -225,6 +225,18 @@ These work in both Telegram and CC Chat:
 | ALF is slow | You might be hitting a powerful tier for simple messages. Check tier setup. |
 | Scheduled job didn't run | Check Logs tab. Verify the cron expression. Use `schedule list` to check next run time. |
 
+## How tools and apps stay safe
+
+Anything ALF runs for you — tools, apps, skills — passes through 3 layers:
+
+1. **Walls** — code runs inside ALF's sandbox; WASM bundles get an extra wall around their own module.
+2. **Identity** — every loadable bundle is signed. ALF refuses to load anything unsigned. There is no dev-mode bypass.
+3. **Authority** — a bundle only gets the permissions its manifest declares. Everything else is unreachable.
+
+When you ask ALF to "create a tool", it picks the right **kind** (bash/Python, Go-kind app, or WASM-kind) based on who's authoring it, writes a minimum manifest, and builds locally. The daemon auto-signs at boot.
+
+You don't need to know the internals. You do need to know which kind to ask for and which permissions to grant — see [Isolation Model](docs:isolation-model).
+
 ## Customizing the deployment
 
 ALF's `docker-compose.yml` is auto-generated and regenerated on upgrades. **Do not edit it directly** - your changes will be overwritten.
@@ -261,3 +273,5 @@ To regenerate the base file manually (e.g. after adding a secret): `alf compose`
 - [Creating Skills](docs:creating-skills) - teach ALF new abilities with auto-injection
 - [Agent Teams](docs:agent-teams) - coordinate multiple agents for complex tasks
 - [Building Tools & Extensions](docs:container-packages) - install packages, create tools, build apps
+- [Isolation Model](docs:isolation-model) - the 3 layers, the kind decision tree, and the trust model
+- [Creating WASM Tools](docs:wasm-tools) - isolated tools and apps for third-party and LLM-authored code

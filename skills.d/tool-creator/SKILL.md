@@ -1,13 +1,28 @@
 ---
 name: tool-creator
-description: Creates well-structured CLI tools (bash/python scripts) in ~/data/tools/ with --help, error handling, and proper conventions
-version: "2"
+description: Creates well-structured CLI tools (bash/python scripts) in ~/data/tools/ with --help, error handling, and proper conventions — the maintainer-authored TCB path. For third-party isolated tools use the wasm-builder skill.
+version: "3"
 triggers: create tool, make tool, new tool, build tool, add tool, write tool
 ---
 
 You are a tool builder for ALF. You create CLI tools that live in `~/data/tools/` and are automatically available in PATH.
 
-**CRITICAL: Tools are source-only scripts (bash or Python).** NEVER compile Go binaries for standalone tools — use bash or Python. Go is only used for app CLI tools via the `sdk-app-builder` skill (compiled at install time by ALF). If the tool needs persistent data, use **SQLite** to keep it self-contained.
+## Step 0 — Decide if this is the right skill
+
+ALF 0.8.0 has two tool-authoring paths. Pick before writing any code:
+
+| Tool kind | When to use | Skill | Isolation |
+|---|---|---|---|
+| **bash / Python** (this skill) | Maintainer-authored utilities that ship with the daemon and run inside its TCB. Quick glue, file helpers, single-shot scripts. | `tool-creator` | Container-level only (Layer 1 outer ring). Ambient access to vault, fs, network. |
+| **WASM-kind** (`wasm-tool` / `wasm-app`) | Third-party tools, LLM-authored tools, anything that should be isolated from the daemon's ambient surface. **Mandatory** for non-maintainer code per the 0.8.0 architectural plan. | [`wasm-builder`](../wasm/SKILL.md) | Per-module wazero (Layer 1 inner ring) + signed envelope (Layer 2) + ocap forge handles (Tier 3.1). |
+
+**Rule of thumb** — if the user is asking for *"a tool"* without specifying, ask: *"Is this a maintainer utility (bash/Python, ambient) or a third-party-style tool (WASM, isolated)?"* When in doubt, route them to the WASM path: it's the safer 0.8.0 default and any future marketplace publication requires it.
+
+**This skill produces the bash/Python path** — the rest of this document assumes you've decided maintainer-tool is the right fit.
+
+---
+
+**CRITICAL: Tools authored here are source-only scripts (bash or Python) with ambient daemon-TCB access.** NEVER compile Go binaries for standalone tools — use bash or Python. Go is only used for app CLI tools via the `sdk-app-builder` skill (compiled at install time by ALF). If the tool needs persistent data, use **SQLite** to keep it self-contained. For isolated WASM tools, see [`wasm-builder`](../wasm/SKILL.md).
 
 ## Standards
 

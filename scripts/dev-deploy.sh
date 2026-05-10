@@ -10,11 +10,13 @@ IMAGE_NAME="alf-homelab"
 
 NO_RESTART=false
 CLEAN=false
+ENFORCE=false
 
 for arg in "$@"; do
   case "$arg" in
     --no-restart) NO_RESTART=true ;;
     --clean)      CLEAN=true ;;
+    --enforce)    ENFORCE=true ;;
     *) echo "Unknown flag: $arg"; exit 1 ;;
   esac
 done
@@ -46,6 +48,19 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
   -ldflags "-s -w -X main.version=${BUILD_VERSION}" \
   -o /tmp/alf-deploy \
   ./cmd/alf/
+
+echo "==> Building bundled WASM skills (wasip1/c-shared)..."
+# Layer 2 reference bundles. Daemon expects <skills.d>/wasm/<id>/<id>.wasm
+# alongside manifest.toml. Daemon auto-signs at boot with daemon-bootstrap key.
+for wasm_skill in skills.d/wasm/*/; do
+  [ -d "${wasm_skill}src" ] || continue
+  id=$(basename "$wasm_skill")
+  out="${wasm_skill}${id}.wasm"
+  echo "    -> ${id}"
+  ( cd "${wasm_skill}src" && CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm \
+      go build -buildmode=c-shared -trimpath -o "../${id}.wasm" . )
+  [ -s "$out" ] || { echo "ERROR: empty wasm output: $out"; exit 1; }
+done
 
 echo "==> Transferring CLI binary to homelab..."
 $SCP /tmp/alf-deploy "${REMOTE_HOST}:/tmp/alf-bin"
@@ -140,6 +155,25 @@ echo "==> Syncing bundled skills..."
 rsync -az --delete -e "ssh -S $SSH_SOCK" \
   ./skills.d/ "${REMOTE_HOST}:${REMOTE_DIR}/skills.d/"
 
+# WASM bundle dirs must be writable by the alf user inside the container
+# (UID 1001) for boot-time auto-signing (manifest.sig persistence).
+# Source perms on the dev machine are 0755 owned by the deploying user
+# (UID 1000), which makes alf user "other" with no write bit.
+$SSH "${REMOTE_HOST}" "chmod -R g+rwX,o+rwX ${REMOTE_DIR}/skills.d/wasm/ 2>/dev/null || true"
+
+echo "==> Syncing security profiles (Layer 1)..."
+$SSH "${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}/scripts"
+$SCP scripts/apparmor-alf.profile "${REMOTE_HOST}:${REMOTE_DIR}/scripts/apparmor-alf.profile"
+$SCP scripts/seccomp-alf.json     "${REMOTE_HOST}:${REMOTE_DIR}/scripts/seccomp-alf.json"
+
+if [ "$ENFORCE" = true ]; then
+  echo "==> --enforce: loading AppArmor profile via apparmor_parser..."
+  # -r reload, -W (write cache). Idempotent — safe to re-run.
+  $SSH "${REMOTE_HOST}" "sudo apparmor_parser -r -W ${REMOTE_DIR}/scripts/apparmor-alf.profile" \
+    || { echo "ERROR: apparmor_parser failed (need passwordless sudo or interactive password)"; exit 1; }
+  $SSH "${REMOTE_HOST}" "sudo aa-status 2>/dev/null | grep -q '^   alf$' && echo '    AppArmor profile alf loaded ✓' || echo '    WARN: alf profile not visible in aa-status'"
+fi
+
 echo "==> Syncing bundled agent teams..."
 rsync -az -e "ssh -S $SSH_SOCK" \
   ./internal/cli/bundled_agents/ "${REMOTE_HOST}:${REMOTE_DIR}/data/agents/teams/"
@@ -152,8 +186,18 @@ fi
 # Always generate docker-compose.yml directly for dev deploys.
 # Avoids inheriting the host's setup profile (which may have HTTPS/traefik enabled).
 # The override adds traefik labels for the external proxy stack.
-echo "==> Generating docker-compose.yml..."
-cat > /tmp/alf-compose-direct.yml <<'COMPOSEOF'
+echo "==> Generating docker-compose.yml (enforce=${ENFORCE})..."
+if [ "$ENFORCE" = true ]; then
+  SECURITY_OPT_BLOCK="    security_opt:
+      - apparmor=alf
+      - seccomp=${REMOTE_DIR}/scripts/seccomp-alf.json"
+else
+  SECURITY_OPT_BLOCK="    security_opt:
+      # 0.8.0: apparmor=unconfined retained pending soak-test of scripts/apparmor-alf.profile.
+      # Re-deploy with --enforce to flip to apparmor=alf + custom seccomp.
+      - apparmor=unconfined"
+fi
+cat > /tmp/alf-compose-direct.yml <<COMPOSEOF
 name: alf-go
 
 services:
@@ -196,17 +240,8 @@ services:
       - /mnt/DATA/ALF:/home/alf/data/external/alf-storage
     mem_limit: 2g
     cpus: "2.0"
-    runtime: ${ALF_RUNTIME:-runc}
-    security_opt:
-      # 0.8.0: apparmor=unconfined is vestigial from the razed sandbox
-      # (chroot+setpriv+bwrap needed mount(2) which AppArmor blocked).
-      # The custom profile at scripts/apparmor-alf.profile (#86 SEC-A01)
-      # is the planned replacement; activate via:
-      #   sudo apparmor_parser -r -W /opt/alf/scripts/apparmor-alf.profile
-      #   # then change this line to: - apparmor=alf
-      - apparmor=unconfined
-      # Custom seccomp at scripts/seccomp-alf.json (#86 SEC-A11): activate via
-      #   - seccomp=/opt/alf/scripts/seccomp-alf.json
+    runtime: \${ALF_RUNTIME:-runc}
+${SECURITY_OPT_BLOCK}
     cap_drop:
       - ALL
     cap_add:

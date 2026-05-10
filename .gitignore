@@ -38,6 +38,11 @@ user-space/
 
 # Local dev (docker compose build+up)
 dev-alf-local/
+
+# WASM bundle build artifacts (built by dev-deploy.sh / wasm_build_tool,
+# auto-signed by daemon at boot — never committed).
+skills.d/wasm/*/*.wasm
+skills.d/wasm/*/manifest.sig
 docker-compose.yml
 dev-alf
 dev-secrets/

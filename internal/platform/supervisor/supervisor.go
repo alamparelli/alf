@@ -315,7 +315,17 @@ func (s *Supervisor) Status() []ServiceStatus {
 	return out
 }
 
-// scan reads all apps/{slug}/service.json files.
+// scan reads all apps/{slug}/service.json files. Under the #420
+// lockdown (ARCHITECTURE-SECURITY.md §4.1), the service.json pattern
+// is reserved for legacy Go-kind apps; wasm-app lifecycle is owned
+// by the WASM runtime, not by spawning external processes. Therefore
+// any service.json found here belongs to a retired Go-kind app and
+// must be refused — the operator sees the warning and migrates the
+// bundle to wasm-app (see docs/wasm-tools.md).
+//
+// The scan still walks the directory so the operator gets a clear
+// log line per refused slug; the returned map is intentionally empty
+// for any slug that has a service.json.
 func (s *Supervisor) scan() map[string]ServiceConfig {
 	entries, err := os.ReadDir(s.appsDir)
 	if err != nil {
@@ -328,30 +338,13 @@ func (s *Supervisor) scan() map[string]ServiceConfig {
 			continue
 		}
 		path := filepath.Join(s.appsDir, e.Name(), "service.json")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue // no service.json — not a service app
+		if _, err := os.Stat(path); err != nil {
+			continue // no service.json — not a service app, not relevant
 		}
-		var cfg ServiceConfig
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			log.Printf("supervisor: [%s] invalid service.json: %v", e.Name(), err)
-			continue
-		}
-		if cfg.Command == "" {
-			log.Printf("supervisor: [%s] service.json missing command", e.Name())
-			continue
-		}
-		if cfg.Name == "" {
-			cfg.Name = e.Name()
-		}
-		if cfg.Restart == "" {
-			cfg.Restart = "always"
-		}
-		// SEC-005: default safety cap to prevent infinite restart loops.
-		if cfg.MaxRestarts == 0 {
-			cfg.MaxRestarts = 100
-		}
-		services[e.Name()] = cfg
+		// #420: legacy Go-kind app detected. Refuse to spawn; the operator
+		// must migrate to wasm-app (the wasm runtime hosts long-running
+		// modules without needing a service.json contract).
+		log.Printf("supervisor: [%s] service.json refused — legacy Go-kind path retired by #420. Migrate to wasm-app (see docs/wasm-tools.md).", e.Name())
 	}
 	return services
 }

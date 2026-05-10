@@ -2,6 +2,7 @@ package marketplace
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,6 +53,23 @@ func setupTestEnv(t *testing.T, slugs ...string) string {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(appDir, "manifest.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		// #420 — write a minimal wasm-app envelope (manifest.toml) so
+		// the §4.1 admission gate in activate() lets the fixture through.
+		// The test isn't exercising the envelope path; it just needs the
+		// gate to be satisfied. Real installs land the envelope via
+		// extractBundle from a signed marketplace bundle.
+		envelopeTOML := []byte(fmt.Sprintf(
+			"alf_envelope_version = 1\n"+
+				"id      = %q\n"+
+				"kind    = \"wasm-app\"\n"+
+				"version = \"0.1.0\"\n"+
+				"name    = %q\n",
+			slug, slug,
+		))
+		if err := os.WriteFile(filepath.Join(appDir, "manifest.toml"), envelopeTOML, 0o644); err != nil {
 			t.Fatal(err)
 		}
 

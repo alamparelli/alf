@@ -176,49 +176,25 @@ func TestAuditToolSource_MultiplePatterns(t *testing.T) {
 	}
 }
 
-func TestRegistry_SecurityWarnings_PopulatedOnScan(t *testing.T) {
+// TestRegistry_SecurityWarnings_RetiredByLockdown documents that the
+// per-user-tool source-audit path is retired under #420 — flat files in
+// ~/data/tools/<name> are refused at discovery, so the auditor has no
+// surface to scan. Pre-lockdown this test asserted that risky source
+// in a user tool produced a warning; the behaviour is now "never any
+// warning from user tools, the file is just ignored and logged once".
+func TestRegistry_SecurityWarnings_RetiredByLockdown(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "tools.d"), 0o755)
 	toolsDir := filepath.Join(dir, "tools")
 	os.MkdirAll(toolsDir, 0o755)
 
-	// Create an unsafe tool in user tools dir
+	// Files that would have tripped the auditor pre-lockdown.
 	os.WriteFile(filepath.Join(toolsDir, "risky"), []byte("#!/bin/bash\nos.popen(x)\n"), 0o755)
-	// Create a safe tool
-	os.WriteFile(filepath.Join(toolsDir, "safe"), []byte("#!/bin/bash\necho hello\n"), 0o755)
+	os.WriteFile(filepath.Join(toolsDir, "fixme"), []byte("subprocess.run(cmd, shell=True)"), 0o755)
 
 	r := NewRegistry(dir)
-	warnings := r.SecurityWarnings()
-
-	if len(warnings) != 1 {
-		t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
-	}
-	if warnings[0].Tool != "risky" {
-		t.Errorf("expected warning for 'risky', got %q", warnings[0].Tool)
-	}
-}
-
-func TestRegistry_SecurityWarnings_ClearedOnRescan(t *testing.T) {
-	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "tools.d"), 0o755)
-	toolsDir := filepath.Join(dir, "tools")
-	os.MkdirAll(toolsDir, 0o755)
-
-	// Start with unsafe tool
-	unsafePath := filepath.Join(toolsDir, "fixme")
-	os.WriteFile(unsafePath, []byte("subprocess.run(cmd, shell=True)"), 0o755)
-
-	r := NewRegistry(dir)
-	if len(r.SecurityWarnings()) != 1 {
-		t.Fatalf("expected 1 warning initially, got %d", len(r.SecurityWarnings()))
-	}
-
-	// Fix the tool and rescan
-	os.WriteFile(unsafePath, []byte("subprocess.run(['cmd', 'arg'])"), 0o755)
-	r.Rescan()
-
-	if len(r.SecurityWarnings()) != 0 {
-		t.Errorf("expected 0 warnings after fix, got %d: %v", len(r.SecurityWarnings()), r.SecurityWarnings())
+	if got := len(r.SecurityWarnings()); got != 0 {
+		t.Errorf("expected 0 warnings (user tools refused, no audit surface), got %d: %v", got, r.SecurityWarnings())
 	}
 }
 

@@ -87,40 +87,49 @@ func (r *Registry) scanFiles(initial bool) {
 		r.schemas = nativeSchemas
 	}
 
+	// #420 — only tools.d/ (image-baked symlinks for maintainer code, TCB)
+	// is scanned by the tooling registry. The legacy ~/data/tools/<name>
+	// user-script path is retired per ARCHITECTURE-SECURITY.md §4.1; user
+	// tools must be wasm-tool bundles in ~/data/tools/<id>/, loaded by the
+	// WASM loader (internal/runtime/wasm/loader.go), not by this scanner.
+	// Flat user-script files left over from the pre-lockdown layout are
+	// logged once at scan time so the operator sees what to migrate.
 	systemDir := filepath.Join(r.dataDir, "tools.d")
-	userDir := filepath.Join(r.dataDir, "tools")
-	dirs := []string{systemDir, userDir}
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".quarantined") {
-				continue
-			}
-			path := filepath.Join(dir, e.Name())
-			data, err := os.ReadFile(path)
-			if err != nil {
-				log.Printf("tooling: failed to read %s: %v", path, err)
-				continue
-			}
-			var schema ToolSchema
-			if err := json.Unmarshal(data, &schema); err != nil {
-				log.Printf("tooling: failed to parse %s: %v", path, err)
-				continue
-			}
-			if schema.Name == "" {
-				schema.Name = strings.TrimSuffix(e.Name(), ".json")
-			}
-			// Prevent user tools from shadowing system tool schemas.
-			if dir == userDir {
-				if _, exists := r.schemas[schema.Name]; exists {
-					log.Printf("tooling: BLOCKED schema shadow: tools/%s (system tool protected)", e.Name())
+	{
+		entries, err := os.ReadDir(systemDir)
+		if err == nil {
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".quarantined") {
 					continue
 				}
+				path := filepath.Join(systemDir, e.Name())
+				data, err := os.ReadFile(path)
+				if err != nil {
+					log.Printf("tooling: failed to read %s: %v", path, err)
+					continue
+				}
+				var schema ToolSchema
+				if err := json.Unmarshal(data, &schema); err != nil {
+					log.Printf("tooling: failed to parse %s: %v", path, err)
+					continue
+				}
+				if schema.Name == "" {
+					schema.Name = strings.TrimSuffix(e.Name(), ".json")
+				}
+				r.schemas[schema.Name] = schema
 			}
-			r.schemas[schema.Name] = schema
+		}
+	}
+	// Log legacy user tools (flat files in ~/data/tools/) so the operator
+	// can migrate or remove them. Subdirectories (wasm-tool bundles) are
+	// ignored here — they are the WASM loader's responsibility.
+	userDir := filepath.Join(r.dataDir, "tools")
+	if entries, err := os.ReadDir(userDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || strings.HasSuffix(e.Name(), ".quarantined") {
+				continue
+			}
+			log.Printf("tooling: ignoring legacy user-tool %s — §4.1 lockdown requires wasm-tool bundles in ~/data/tools/<id>/ (see docs/wasm-tools.md)", e.Name())
 		}
 	}
 	if len(r.schemas) > 0 {
@@ -131,27 +140,13 @@ func (r *Registry) scanFiles(initial bool) {
 		log.Printf("tooling: loaded %d tool schemas: %v", len(r.schemas), names)
 	}
 
-	// Audit user tool source files for dangerous patterns (shell injection, eval, etc.).
+	// #420 — under the §4.1 lockdown user bash/Python tools in
+	// ~/data/tools/<name> are refused at discovery time (the log loop
+	// above flags them). No source-audit is needed because the files
+	// never become invocable. The auditor is retained for the
+	// post-lockdown wasm-builder path (Go sources audit) once #392
+	// stage 3 wires it up.
 	r.secWarnings = nil
-	userToolDir := filepath.Join(r.dataDir, "tools")
-	if entries, err := os.ReadDir(userToolDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() || strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".quarantined") {
-				continue
-			}
-			if r.Integrity != nil && r.Integrity.IsQuarantined(e.Name()) {
-				log.Printf("tooling: skipping quarantined tool: %s", e.Name())
-				continue
-			}
-			path := filepath.Join(userToolDir, e.Name())
-			if warnings := auditToolSource(path, e.Name()); len(warnings) > 0 {
-				for _, w := range warnings {
-					log.Printf("tooling: ⚠ SECURITY WARNING in tools/%s: %s", w.Tool, w.Reason)
-				}
-				r.secWarnings = append(r.secWarnings, warnings...)
-			}
-		}
-	}
 }
 
 // ForTools returns schemas for the named tools. Tools without a JSON manifest
@@ -308,29 +303,28 @@ func ResolveWildcard(dataDir string, reg *Registry) []string {
 	return tools
 }
 
-// DiscoverToolNames returns all executable tool names found in tools.d/ and tools/.
-// This includes tools with and without JSON manifests.
-// Signal tools (react, status) are excluded because they require ALF_SIGNAL_SOCK
-// which is only available in CLI subprocess context.
+// DiscoverToolNames returns all executable tool names found in tools.d/.
+// #420 — the legacy ~/data/tools/<name> user-script discovery is dropped
+// under the §4.1 lockdown. WASM-tool bundles live in ~/data/tools/<id>/
+// and are loaded by the WASM loader, not this scanner.
+//
+// Signal tools (react, status) are excluded because they require
+// ALF_SIGNAL_SOCK which is only available in CLI subprocess context.
 func DiscoverToolNames(dataDir string) []string {
 	seen := make(map[string]bool)
-	for _, dir := range []string{
-		filepath.Join(dataDir, "tools.d"),
-		filepath.Join(dataDir, "tools"),
-	} {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
+	dir := filepath.Join(dataDir, "tools.d")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, e := range entries {
+		if e.IsDir() || strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".quarantined") {
 			continue
 		}
-		for _, e := range entries {
-			if e.IsDir() || strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".quarantined") {
-				continue
-			}
-			if signalTools[e.Name()] {
-				continue
-			}
-			seen[e.Name()] = true
+		if signalTools[e.Name()] {
+			continue
 		}
+		seen[e.Name()] = true
 	}
 	names := make([]string, 0, len(seen))
 	for n := range seen {

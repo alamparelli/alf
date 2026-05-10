@@ -316,6 +316,17 @@ func (m *Manager) List() []AppInfo {
 // activate sets up tool symlinks, skills, permissions and starts the app service.
 // Must be called with m.mu held.
 func (m *Manager) activate(slug string) error {
+	// #420 — §4.1 kind admission gate. User-installed apps must be
+	// wasm-app under the lockdown; the envelope (manifest.toml) is the
+	// source of truth. Trusted apps (built-in / image-baked) bypass the
+	// envelope check because they ship in-binary and are not signed via
+	// the on-disk envelope path.
+	if !m.trusted[slug] {
+		if err := m.checkEnvelopeKind(slug); err != nil {
+			return fmt.Errorf("activate %s: %w", slug, err)
+		}
+	}
+
 	manifest, err := m.loadManifest(slug)
 	if err != nil {
 		return err
@@ -706,6 +717,27 @@ func (m *Manager) unlockAppFiles(slug string) {
 func (m *Manager) loadManifest(slug string) (*Manifest, error) {
 	path := filepath.Join(m.dataDir, "apps", slug, "manifest.json")
 	return LoadManifest(path)
+}
+
+// checkEnvelopeKind enforces the #420 admission rule on the envelope
+// (manifest.toml) of an installed app: only wasm-app may activate via
+// this path. Missing envelope = pre-lockdown app = refused (the
+// operator must reinstall via the wasm-app marketplace flow). The
+// caller skips this check for trusted (built-in) apps.
+func (m *Manager) checkEnvelopeKind(slug string) error {
+	path := filepath.Join(m.dataDir, "apps", slug, "manifest.toml")
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("envelope manifest.toml missing or unreadable (§4.1 lockdown requires wasm-app envelope): %w", err)
+	}
+	man, err := envelope.Validate(bytes)
+	if err != nil {
+		return fmt.Errorf("envelope manifest.toml invalid: %w", err)
+	}
+	if man.Kind != envelope.KindWASMApp {
+		return fmt.Errorf("kind %q refused: §4.1 lockdown allows only wasm-app from the marketplace path (#420)", man.Kind)
+	}
+	return nil
 }
 
 func (m *Manager) writeToolSchema(toolsDir string, tool ToolDecl) error {

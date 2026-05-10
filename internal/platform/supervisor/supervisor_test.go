@@ -32,7 +32,10 @@ func TestScan_NonexistentDir(t *testing.T) {
 	}
 }
 
-func TestScan_ValidServiceJSON(t *testing.T) {
+func TestScan_ValidServiceJSON_RefusedByLockdown(t *testing.T) {
+	// #420 — service.json is the legacy Go-kind contract. Under the §4.1
+	// lockdown the supervisor refuses to honour it; wasm-app lifecycle
+	// is owned by the WASM runtime, not by spawning a process.
 	dir := t.TempDir()
 	appDir := filepath.Join(dir, "myapp")
 	os.MkdirAll(appDir, 0o755)
@@ -47,15 +50,8 @@ func TestScan_ValidServiceJSON(t *testing.T) {
 	s := New(dir)
 	got := s.scan()
 
-	if len(got) != 1 {
-		t.Fatalf("expected 1 service, got %d", len(got))
-	}
-	svc, ok := got["myapp"]
-	if !ok {
-		t.Fatal("expected key 'myapp'")
-	}
-	if svc.Command != "./run.sh" {
-		t.Errorf("command = %q, want ./run.sh", svc.Command)
+	if len(got) != 0 {
+		t.Fatalf("expected service.json to be refused under §4.1 lockdown, got %d services", len(got))
 	}
 }
 
@@ -99,28 +95,23 @@ func TestScan_MissingCommand_Skipped(t *testing.T) {
 	}
 }
 
-func TestScan_Defaults(t *testing.T) {
+func TestScan_Defaults_NoLongerApplicable(t *testing.T) {
+	// #420 — the previous "service.json defaults" behaviour (default
+	// name, restart=always, max_restarts=100) no longer applies because
+	// scan refuses all service.json entries under the §4.1 lockdown.
+	// This stub remains to flag a future regression that re-introduces
+	// the defaults path without re-introducing the contract gate.
 	dir := t.TempDir()
 	appDir := filepath.Join(dir, "defaults-app")
 	os.MkdirAll(appDir, 0o755)
-
-	// Minimal: only command set, no name/restart/max_restarts.
 	cfg := ServiceConfig{Command: "./start"}
 	data, _ := json.Marshal(cfg)
 	os.WriteFile(filepath.Join(appDir, "service.json"), data, 0o644)
 
 	s := New(dir)
 	got := s.scan()
-
-	svc := got["defaults-app"]
-	if svc.Name != "defaults-app" {
-		t.Errorf("name = %q, want 'defaults-app' (default to slug)", svc.Name)
-	}
-	if svc.Restart != "always" {
-		t.Errorf("restart = %q, want 'always'", svc.Restart)
-	}
-	if svc.MaxRestarts != 100 {
-		t.Errorf("max_restarts = %d, want 100", svc.MaxRestarts)
+	if _, ok := got["defaults-app"]; ok {
+		t.Fatalf("expected service.json refused under §4.1 lockdown; defaults must not be applied")
 	}
 }
 
@@ -564,10 +555,13 @@ func TestPrefixWriter_SplitAcrossWrites(t *testing.T) {
 // scan() — multiple apps, mixed validity
 // ---------------------------------------------------------------------------
 
-func TestScan_MixedApps(t *testing.T) {
+func TestScan_MixedApps_AllRefusedByLockdown(t *testing.T) {
+	// #420 — scan refuses every service.json under the §4.1 lockdown
+	// regardless of validity. The only directories that produce no log
+	// line are those without a service.json at all.
 	dir := t.TempDir()
 
-	// Valid app.
+	// Valid app — would have been honoured pre-lockdown.
 	valid := filepath.Join(dir, "valid")
 	os.MkdirAll(valid, 0o755)
 	data, _ := json.Marshal(ServiceConfig{Command: "./run", Enabled: true, Name: "myname"})
@@ -578,7 +572,7 @@ func TestScan_MixedApps(t *testing.T) {
 	os.MkdirAll(bad, 0o755)
 	os.WriteFile(filepath.Join(bad, "service.json"), []byte("nope"), 0o644)
 
-	// No service.json.
+	// No service.json — silently ignored, no log line expected.
 	plain := filepath.Join(dir, "plain")
 	os.MkdirAll(plain, 0o755)
 
@@ -591,12 +585,8 @@ func TestScan_MixedApps(t *testing.T) {
 	s := New(dir)
 	got := s.scan()
 
-	if len(got) != 1 {
-		t.Fatalf("expected 1 valid service, got %d: %+v", len(got), got)
-	}
-	svc := got["valid"]
-	if svc.Name != "myname" {
-		t.Errorf("expected explicit name 'myname', got %q", svc.Name)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 services (all refused under §4.1 lockdown), got %d: %+v", len(got), got)
 	}
 }
 

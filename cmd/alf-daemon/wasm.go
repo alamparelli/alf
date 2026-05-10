@@ -142,9 +142,14 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 		SnapshotDir: dataDir,
 	}
 
-	root := filepath.Join(skillsDir, wasmLoaderRoot)
-	loaded, errs := loader.LoadDir(ctx, root)
-	logf("[wasm-loader] scanned %s: %d bundles loaded, %d errors", root, len(loaded), len(errs))
+	// #420 — under §4.1 the loader scans <dataDir>/tools/<id>/ for
+	// wasm-tool bundles and <dataDir>/apps/<slug>/ for wasm-app bundles.
+	// Any bundle still in the legacy <dataDir>/skills.d/wasm/<id>/
+	// layout is migrated to the new path based on its manifest kind
+	// before the scan runs (LoadAll handles this).
+	_ = skillsDir // legacy path kept in signature for #392 future use
+	loaded, errs := loader.LoadAll(ctx, dataDir)
+	logf("[wasm-loader] scanned %s/{tools,apps}: %d bundles loaded, %d errors", dataDir, len(loaded), len(errs))
 	for _, e := range errs {
 		logf("[wasm-loader] error: %v", e)
 	}

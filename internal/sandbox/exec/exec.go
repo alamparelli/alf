@@ -1,7 +1,6 @@
 package exec
 
 import (
-	"log"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -32,12 +31,13 @@ type SandboxConfig struct {
 	VaultSocket string // optional: per-app vault proxy socket path
 }
 
-// SandboxedCmd attaches a best-effort credential drop (uid 1000) to cmd and
-// logs that isolation is disabled for the 0.8.0 dev window. originalCommand
-// is accepted for signature compatibility but no longer wrapped in a
-// chroot/bwrap script.
+// SandboxedCmd attaches a best-effort credential drop (uid 1000) to cmd
+// and is otherwise a no-op pass-through. The legacy chroot+setpriv+bwrap
+// wrapper was razed by #406; v0.8.0's isolation lives in Layer 1
+// (Docker + AppArmor + seccomp + wazero) and Layer 3 (ocap forge).
+// originalCommand is accepted for signature compatibility but no longer
+// wrapped.
 func SandboxedCmd(cmd *exec.Cmd, originalCommand string, cfg SandboxConfig) {
-	log.Printf("[sandbox] experimental: namespace isolation razed — uid drop only (ticket #406)")
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
 	}
@@ -69,9 +69,10 @@ type ServerSandboxConfig struct {
 }
 
 // SandboxServerCmd is the long-running-server counterpart to SandboxedCmd.
-// Best-effort uid drop only in the dev window.
+// Best-effort uid drop only — the legacy chroot/bwrap layer was razed
+// by #406; isolation lives in the outer (Layer 1) and ocap (Layer 3)
+// rings now.
 func SandboxServerCmd(cmd *exec.Cmd, cfg ServerSandboxConfig) {
-	log.Printf("[sandbox] experimental: server isolation razed — uid drop only (ticket #406)")
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
 	}

@@ -1,0 +1,9 @@
+alf_envelope_version = 1
+id          = "wasm-builder"
+kind        = "skill"
+version     = "1"
+name        = "WASM Capability Builder"
+description = "Author WASM-kind capability bundles (tools and apps) for the 0.8.0 isolation model — host ABI, manifest envelope, build via wasm_build_tool, daemon auto-sign at boot"
+
+[[tools.declares]]
+id = "wasm_build_tool"

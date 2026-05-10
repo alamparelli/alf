@@ -396,9 +396,9 @@ The production implementation on `release/0.8.0` is a clean rebuild — no direc
 |---|---|
 | `#391` | Forge-only path, no `*memory.Store` / `*events.Bus` / `*tooling.Registry` in capability packages |
 | `#398` | Handles non-serializable (`json.Marshal` returns error); WASM import cross-check archtest; no `unsafe` / `reflect` / `go:linkname` in capability packages |
-| `#386` integration | `hello-read` + `notes` loaded at daemon boot from `skills.d/wasm/`; LLM tool-loop sees them; `wasm_build_tool` registered as native tool |
+| `#386` integration | `hello-read` loaded at daemon boot from `skills.d/wasm/`; LLM tool-loop sees it; `wasm_build_tool` registered as native tool |
 | `#384` | Unsigned bundle refused; bundle signed by marketplace key verified through the same `trust.Verify` as local-signed |
-| Tag 0.8.0 | `ALF_OCAP_STRICT=1` enforced in production boot path; regression + `test-wasm-prototype` + archtest all green |
+| Tag 0.8.0 | strict ocap is the default boot posture (no flag required — dev-window `ALF_EXPERIMENTAL` gate retired with the strict-flip); regression + `test-wasm-prototype` + archtest all green |
 
 ---
 

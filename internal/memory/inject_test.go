@@ -206,6 +206,133 @@ func TestGenerateToolbox_NoSchemaFallback(t *testing.T) {
 	}
 }
 
+// TestGenerateToolbox_WASMTools pins #424: wasm-tool bundles in
+// tools/<id>/ surface in toolbox.md with their schema description,
+// inputs summary, and a copy-pasteable wasm-tool example. Without
+// this the CLI-backend LLM never sees they exist and either ignores
+// them or hallucinates explanations about them being "not invocable".
+func TestGenerateToolbox_WASMTools(t *testing.T) {
+	dataDir := t.TempDir()
+	contextDir := t.TempDir()
+
+	bundleDir := filepath.Join(dataDir, "tools", "http-hello")
+	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `alf_envelope_version = 1
+id = "http-hello"
+kind = "wasm-tool"
+version = "0.1.0"
+name = "HTTP Hello"
+description = "smoke tool"
+
+[[http.scopes]]
+host = "httpbin.org"
+
+[tool.schema]
+description = "Fetch a URL via the bundle's scoped HTTP handle."
+
+[tool.schema.parameters]
+type = "object"
+required = ["url"]
+
+[tool.schema.parameters.properties]
+[tool.schema.parameters.properties.url]
+type = "string"
+description = "URL to fetch."
+`
+	if err := os.WriteFile(filepath.Join(bundleDir, "manifest.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	GenerateToolbox(contextDir, dataDir)
+	content, _ := os.ReadFile(filepath.Join(contextDir, "toolbox.md"))
+	s := string(content)
+
+	if !strings.Contains(s, "WASM Tools") {
+		t.Fatalf("missing 'WASM Tools' section header:\n%s", s)
+	}
+	if !strings.Contains(s, "`http-hello`") {
+		t.Errorf("missing http-hello id:\n%s", s)
+	}
+	if !strings.Contains(s, "Fetch a URL via the bundle's scoped HTTP handle.") {
+		t.Errorf("missing description:\n%s", s)
+	}
+	if !strings.Contains(s, "`url` (string, required)") {
+		t.Errorf("missing inputs summary:\n%s", s)
+	}
+	if !strings.Contains(s, `wasm-tool http-hello '{"url":"…"}'`) {
+		t.Errorf("missing copy-paste example:\n%s", s)
+	}
+}
+
+// TestGenerateToolbox_WASMTool_SkipsWithoutSchema pins the "no
+// surface" rule: a wasm-tool bundle that doesn't ship a [tool.schema]
+// block stays invisible to the LLM. The capability still loads in the
+// daemon (chat engine can reach it via direct dispatch) but listing
+// it in toolbox.md without a usage would mislead the LLM into
+// fabricating arguments.
+func TestGenerateToolbox_WASMTool_SkipsWithoutSchema(t *testing.T) {
+	dataDir := t.TempDir()
+	contextDir := t.TempDir()
+
+	bundleDir := filepath.Join(dataDir, "tools", "no-schema")
+	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// kind=wasm-tool but no [tool.schema] block.
+	manifest := `alf_envelope_version = 1
+id = "no-schema"
+kind = "wasm-tool"
+version = "0.1.0"
+name = "Hidden"
+description = "no LLM surface"
+`
+	os.WriteFile(filepath.Join(bundleDir, "manifest.toml"), []byte(manifest), 0o644)
+
+	GenerateToolbox(contextDir, dataDir)
+	content, _ := os.ReadFile(filepath.Join(contextDir, "toolbox.md"))
+
+	if strings.Contains(string(content), "no-schema") {
+		t.Errorf("bundle without [tool.schema] should not appear in toolbox.md:\n%s", content)
+	}
+}
+
+// TestGenerateToolbox_WASMTool_NoArgsExample pins the empty-args
+// shortcut: a tool with no required inputs gets a `{}` example so
+// the LLM doesn't try to fabricate plausible-looking arguments.
+func TestGenerateToolbox_WASMTool_NoArgsExample(t *testing.T) {
+	dataDir := t.TempDir()
+	contextDir := t.TempDir()
+
+	bundleDir := filepath.Join(dataDir, "tools", "ping")
+	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `alf_envelope_version = 1
+id = "ping"
+kind = "wasm-tool"
+version = "0.1.0"
+name = "Ping"
+description = "noarg"
+
+[tool.schema]
+description = "Ping the daemon."
+
+[tool.schema.parameters]
+type = "object"
+`
+	os.WriteFile(filepath.Join(bundleDir, "manifest.toml"), []byte(manifest), 0o644)
+
+	GenerateToolbox(contextDir, dataDir)
+	content, _ := os.ReadFile(filepath.Join(contextDir, "toolbox.md"))
+	s := string(content)
+
+	if !strings.Contains(s, `wasm-tool ping '{}'`) {
+		t.Errorf("expected empty-args example for no-input tool:\n%s", s)
+	}
+}
+
 func TestToolLine_NoSchema(t *testing.T) {
 	dir := t.TempDir()
 	line := toolLine("missing", dir)

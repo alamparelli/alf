@@ -90,6 +90,7 @@ type Deps struct {
 	EventBroker      *EventBroker           // global SSE event bus
 	ScheduleEvents   *ScheduleEventBroker // nil if scheduler unavailable (deprecated, use EventBroker)
 	ToolRegistry     *tooling.Registry    // nil if tool registry unavailable
+	ToolExecutor     *tooling.Executor    // nil if tool execution unavailable (#424 — backs /api/tools/invoke)
 	ErrorJournal     AppErrorJournaler    // nil if error journal unavailable
 	Avatar           *AvatarHandler       // shared with native tool for LLM avatar changes
 	ProviderRegistry *provider.Registry   // nil if provider registry unavailable
@@ -216,6 +217,13 @@ func HandlerFactory(deps Deps) Handlers {
 		Event:       ReloadTools,
 		EventBroker: deps.EventBroker,
 	})
+	// #424: dispatch a tool by name. Mounted at the exact path so the
+	// /api/tools/ prefix handler above (resource CRUD for tools.d/*.json)
+	// stays the catch-all. Reachable only via tools.sock (allowlist in
+	// tools_proxy.go); the TCP path doesn't need it.
+	if deps.ToolExecutor != nil {
+		mux.Handle("/api/tools/invoke", &ToolInvokeHandler{Executor: deps.ToolExecutor})
+	}
 	// Skill catalog (all runtime skills from all directories).
 	if deps.SkillCatalog != nil {
 		mux.Handle("/api/skills/catalog", &SkillsCatalogHandler{

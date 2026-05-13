@@ -23,6 +23,7 @@ var allowedToolsPaths = map[string]bool{
 	"/api/logs":              true, // log list/tail
 	"/api/search":            true, // search
 	"/api/llm/invoke":        true, // LLM invocation (used by system-tools)
+	"/api/tools/invoke":      true, // #424 — wasm-tool CLI dispatch to Executor
 	"/api/settings/avatar":   true, // avatar management
 	"/api/wasm/build":        true, // #386 step 8 — wasm_build_tool dispatch (cli/codex parallel of WASMBuildNativeTool)
 	"/health":                true, // health check

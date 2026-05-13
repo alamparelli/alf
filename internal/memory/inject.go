@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/alamparelli/alf/internal/capability/envelope"
 )
 
 // PromptConfig controls conditional sections in core.md.
@@ -434,6 +436,21 @@ func GenerateToolbox(contextDir, dataDir string) {
 		sb.WriteString("\n")
 	}
 
+	// #424: scan WASM tool bundles in tools/<id>/. scanTools above
+	// only sees files — bundle directories are invisible to it. The
+	// dispatch goes through the daemon's tools.sock + the wasm-tool
+	// shim binary on PATH, so each entry surfaces with its
+	// invocation pattern rather than a bare name.
+	wasmTools := scanWASMTools(userDir)
+	if len(wasmTools) > 0 {
+		sb.WriteString("## WASM Tools (tools/<id>/) — signed, sandboxed bundles\n\n")
+		sb.WriteString("Invoke with `wasm-tool <id> '<json-args>'` (or pipe args on stdin). Output is the tool's JSON payload on stdout; exit 0 on success, 2 on tool error, 3 on transport error.\n\n")
+		for _, wt := range wasmTools {
+			sb.WriteString(wasmToolLine(wt))
+		}
+		sb.WriteString("\n")
+	}
+
 	// Scan system tools (tools.d/).
 	systemDir := filepath.Join(dataDir, "tools.d")
 	systemTools := scanTools(systemDir)
@@ -634,4 +651,161 @@ func scanTools(dir string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// wasmToolEntry is one validated bundle ready to render in toolbox.md.
+// Only the fields the LLM needs end up here: the id (invocation key
+// for `wasm-tool <id>`), the schema description (what the tool does),
+// and a compact representation of its input properties (what the
+// LLM should put in the JSON payload).
+type wasmToolEntry struct {
+	ID          string
+	Description string
+	// Required is the list of required input property names — surfaced
+	// verbatim so the LLM doesn't have to introspect the parameters
+	// map to know which fields are mandatory.
+	Required []string
+	// Properties is the schema's property map (still raw JSON-Schema
+	// shape — type / description / enum / etc.). Rendered compactly in
+	// toolboxLine to keep toolbox.md scannable.
+	Properties map[string]any
+}
+
+// scanWASMTools walks tools/<id>/ and pulls every directory whose
+// manifest.toml parses to kind=wasm-tool and carries a [tool.schema]
+// block. Bundles without a tool.schema are skipped (the loader has
+// already flagged them at boot; an entry in toolbox.md would mislead
+// the LLM into trying to call them when no schema means "no LLM
+// surface" per #423). Errors are swallowed: a half-installed bundle
+// shouldn't break the rest of toolbox.md.
+func scanWASMTools(dir string) []wasmToolEntry {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []wasmToolEntry
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(dir, e.Name(), "manifest.toml")
+		raw, err := os.ReadFile(manifestPath)
+		if err != nil {
+			continue
+		}
+		m, err := envelope.Validate(raw)
+		if err != nil {
+			continue
+		}
+		if m.Kind != envelope.KindWASMTool {
+			continue
+		}
+		if m.Tool.Schema == nil {
+			continue
+		}
+		entry := wasmToolEntry{
+			ID:          string(m.ID),
+			Description: m.Tool.Schema.Description,
+		}
+		if params := m.Tool.Schema.Parameters; params != nil {
+			if req, ok := params["required"].([]any); ok {
+				for _, r := range req {
+					if s, ok := r.(string); ok {
+						entry.Required = append(entry.Required, s)
+					}
+				}
+			}
+			if props, ok := params["properties"].(map[string]any); ok {
+				entry.Properties = props
+			}
+		}
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// wasmToolLine renders one WASM tool as a markdown bullet for
+// toolbox.md. Format mirrors the existing toolLine + buildUsage
+// convention so the LLM sees a uniform "name — description — example"
+// shape across native, CLI, and wasm-backed tools. The example uses
+// the `wasm-tool` shim explicitly so the LLM can copy-paste it into
+// a Bash invocation.
+func wasmToolLine(t wasmToolEntry) string {
+	var b strings.Builder
+	b.WriteString("- `")
+	b.WriteString(t.ID)
+	b.WriteString("` — ")
+	b.WriteString(t.Description)
+	if len(t.Properties) > 0 {
+		b.WriteString(" Inputs: ")
+		b.WriteString(renderWASMProperties(t.Properties, t.Required))
+	}
+	b.WriteString(" Example: `wasm-tool ")
+	b.WriteString(t.ID)
+	b.WriteString(" '")
+	b.WriteString(renderWASMExample(t.Properties, t.Required))
+	b.WriteString("'`\n")
+	return b.String()
+}
+
+// renderWASMProperties produces a `name (type, required)` summary for
+// each property — readable on a single line in toolbox.md. Required
+// fields are marked so the LLM doesn't omit them.
+func renderWASMProperties(props map[string]any, required []string) string {
+	reqSet := make(map[string]bool, len(required))
+	for _, r := range required {
+		reqSet[r] = true
+	}
+	names := make([]string, 0, len(props))
+	for n := range props {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, n := range names {
+		propMap, _ := props[n].(map[string]any)
+		typ, _ := propMap["type"].(string)
+		if typ == "" {
+			typ = "any"
+		}
+		if reqSet[n] {
+			parts = append(parts, fmt.Sprintf("`%s` (%s, required)", n, typ))
+		} else {
+			parts = append(parts, fmt.Sprintf("`%s` (%s)", n, typ))
+		}
+	}
+	return strings.Join(parts, ", ") + "."
+}
+
+// renderWASMExample produces a copy-pasteable JSON snippet so the LLM
+// doesn't have to invent the wire shape. Required string fields get
+// a placeholder; other types/optionals are omitted to keep the
+// example minimal. Returns "{}" for tools without required inputs.
+func renderWASMExample(props map[string]any, required []string) string {
+	if len(required) == 0 {
+		return "{}"
+	}
+	parts := make([]string, 0, len(required))
+	sortedReq := append([]string(nil), required...)
+	sort.Strings(sortedReq)
+	for _, name := range sortedReq {
+		propMap, _ := props[name].(map[string]any)
+		typ, _ := propMap["type"].(string)
+		switch typ {
+		case "string":
+			parts = append(parts, fmt.Sprintf(`"%s":"…"`, name))
+		case "integer", "number":
+			parts = append(parts, fmt.Sprintf(`"%s":0`, name))
+		case "boolean":
+			parts = append(parts, fmt.Sprintf(`"%s":false`, name))
+		case "array":
+			parts = append(parts, fmt.Sprintf(`"%s":[]`, name))
+		case "object":
+			parts = append(parts, fmt.Sprintf(`"%s":{}`, name))
+		default:
+			parts = append(parts, fmt.Sprintf(`"%s":null`, name))
+		}
+	}
+	return "{" + strings.Join(parts, ",") + "}"
 }

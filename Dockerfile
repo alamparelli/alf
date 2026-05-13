@@ -28,7 +28,8 @@ RUN CGO_ENABLED=1 go build -tags fts5 -ldflags="-s -w -X main.version=${BUILD_VE
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /telegram-tools ./cmd/signal \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /schedule-tools ./cmd/schedule-tools \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /system-tools ./cmd/system-tools \
-    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /nettrack-helper ./cmd/nettrack-helper
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /nettrack-helper ./cmd/nettrack-helper \
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /wasm-tool ./cmd/wasm-tool
 
 # Build vault-proxy binaries (secrets vault for AI agents).
 WORKDIR /vault-proxy
@@ -174,6 +175,7 @@ COPY --from=builder /system-tools /opt/alf/bin/system-tools
 COPY --from=builder /vault-server /opt/alf/bin/vault-server
 COPY --from=builder /vault-cli /opt/alf/bin/vault-cli
 COPY --from=builder /nettrack-helper /opt/alf/bin/nettrack-helper
+COPY --from=builder /wasm-tool /opt/alf/bin/wasm-tool
 
 # Tool symlinks: clean names only, pointing to binaries in /opt/alf/bin/.
 RUN mkdir -p /opt/alf/tools.d \
@@ -196,7 +198,8 @@ RUN mkdir -p /opt/alf/tools.d \
     && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/llm \
     && ln -s /opt/alf/bin/system-tools /opt/alf/tools.d/wasm_build_tool \
     && ln -s /opt/alf/bin/vault-cli /opt/alf/tools.d/vault \
-    && ln -s /opt/alf/bin/vault-server /usr/local/bin/vault-server
+    && ln -s /opt/alf/bin/vault-server /usr/local/bin/vault-server \
+    && ln -s /opt/alf/bin/wasm-tool /usr/local/bin/wasm-tool
 
 # Tool schemas for API-tier agentic tool loop.
 COPY tool-schemas/*.json /opt/alf/tools.d/

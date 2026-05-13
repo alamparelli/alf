@@ -117,6 +117,7 @@ func New(dataDir, configDir, skillsDir string, stats *Stats, version string, aut
 		EventBroker:     eventBroker,
 		ScheduleEvents:  schedEventBroker,
 		ToolRegistry:     chatServiceToolRegistry(chatService),
+		ToolExecutor:     chatServiceToolExecutor(chatService),
 		ErrorJournal:     errorJournal,
 		Avatar:           avatarHandler,
 		ProviderRegistry: providerRegistry,
@@ -234,6 +235,17 @@ func chatServiceToolRegistry(cs *ChatService) *tooling.Registry {
 		return nil
 	}
 	return cs.ToolRegistry
+}
+
+// chatServiceToolExecutor extracts the ToolExecutor from a ChatService.
+// Same nil-guard convention as the registry accessor — the executor is
+// optional (e.g. tests with a mock ChatService) and missing simply
+// means /api/tools/invoke won't be registered.
+func chatServiceToolExecutor(cs *ChatService) *tooling.Executor {
+	if cs == nil {
+		return nil
+	}
+	return cs.ToolExecutor
 }
 
 // chatServiceSkillCatalog extracts the skills.Store from a ChatService, or nil.

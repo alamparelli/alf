@@ -21,6 +21,18 @@ import (
 	"github.com/alamparelli/alf/internal/platform/tlsgen"
 )
 
+// daemonContainerUID is the uid the alf-daemon container runs as
+// (the internal `alf` user defined in the Dockerfile). The volume
+// mounts surface files created by the container as this uid on the
+// host filesystem; `alf init` applies a setfacl entry so the host
+// operator and the container daemon can both write to the Tier-3
+// data dirs (data/keys, data/trust, data/apps).
+//
+// Hardcoded for 0.8.x — every shipped Dockerfile uses 1001. A future
+// release that templates the Dockerfile uid (e.g. host-uid match)
+// will lift this into a configurable.
+const daemonContainerUID = 1001
+
 var tokenRegex = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
 
 const configReadme = `# ALF Configuration
@@ -339,6 +351,42 @@ func checkPrerequisites() {
 	}
 }
 
+// grantContainerACL applies a setfacl entry granting rwx to
+// containerUID on each Tier-3 data subdir (keys/, trust/, apps/) under
+// dataDir, plus a matching default ACL so subdirs the operator creates
+// later (e.g. apps/<bundle-id>/) inherit the same grant.
+//
+// Returns an error if setfacl is not on PATH (operator needs `apt
+// install acl` or distro equivalent) or any setfacl call fails. The
+// caller decides whether to fatal or print a warning and continue.
+//
+// Without this ACL, the daemon's first boot creates these dirs as
+// containerUID:containerUID mode 0700 and the host operator (typically
+// uid 1000) cannot write into them — breaking every `alf keygen` /
+// `alf sign` flow. See ticket #422.
+func grantContainerACL(dataDir string, containerUID int) error {
+	if _, err := exec.LookPath("setfacl"); err != nil {
+		return fmt.Errorf("setfacl not on PATH (install `acl` package: sudo apt install acl)")
+	}
+	for _, sub := range []string{"keys", "trust", "apps"} {
+		target := filepath.Join(dataDir, sub)
+		uidSpec := fmt.Sprintf("u:%d:rwx", containerUID)
+		// Existing-entries ACL on the dir itself.
+		out, err := exec.Command("setfacl", "-m", uidSpec, target).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("setfacl -m %s %s: %w (%s)", uidSpec, target, err, strings.TrimSpace(string(out)))
+		}
+		// Default ACL — new sub-entries inherit the container grant.
+		// Matters most for data/apps/<bundle-id>/ where the operator
+		// installs a new bundle and the daemon needs to read it.
+		out, err = exec.Command("setfacl", "-d", "-m", uidSpec, target).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("setfacl -d -m %s %s: %w (%s)", uidSpec, target, err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
 func promptDirectory(reader *bufio.Reader, previous string) string {
 	home, _ := os.UserHomeDir()
 	defaultDir := filepath.Join(home, "alf")
@@ -369,6 +417,36 @@ func promptDirectory(reader *bufio.Reader, previous string) string {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			Fatal(fmt.Sprintf("Failed to create %s: %v", sub, err))
 		}
+	}
+
+	// Tier-3 / shared subdirs (#422). These need write access from BOTH
+	// the host operator (uid `id -u`, for `alf keygen` + `alf sign`) AND
+	// the container daemon (uid 1001, for boot-time daemon.json + trust
+	// store + auto-signed wasm bundle loads). We create them as the host
+	// operator at init time, then apply setfacl for the daemon's uid.
+	//
+	// Without this step, the daemon's first boot creates these dirs as
+	// 1001:1001 mode 0700, which blocks every `alf keygen` / `alf sign`
+	// from the host. See ticket #422 + the smoke test trail of #421
+	// Wave 2.
+	tier3Subdirs := []string{
+		"data/keys",
+		"data/trust",
+		"data/apps",
+	}
+	for _, sub := range tier3Subdirs {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			Fatal(fmt.Sprintf("Failed to create %s: %v", sub, err))
+		}
+	}
+	if err := grantContainerACL(filepath.Join(dir, "data"), daemonContainerUID); err != nil {
+		fmt.Printf("\n  Warning: could not grant container ACL on data/keys, data/trust, data/apps: %v\n", err)
+		fmt.Printf("  The daemon will boot but `alf keygen` / `alf sign` will fail until perms are fixed manually:\n")
+		for _, sub := range []string{"keys", "trust", "apps"} {
+			fmt.Printf("    sudo setfacl -m u:%d:rwx %s\n", daemonContainerUID, filepath.Join(dir, "data", sub))
+			fmt.Printf("    sudo setfacl -d -m u:%d:rwx %s\n", daemonContainerUID, filepath.Join(dir, "data", sub))
+		}
+		fmt.Println("  (Install `acl` package first if setfacl is missing: `sudo apt install acl`)")
 	}
 
 	// Seed bundled skills (e.g. security-audit).

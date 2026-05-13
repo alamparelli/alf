@@ -93,6 +93,21 @@ func NewKernelPromptInjector(p Provider, prompt string) *KernelPromptInjector {
 	return &KernelPromptInjector{inner: p, prompt: prompt}
 }
 
+// Inner returns the wrapped Provider. Exposed so call sites that need
+// to insert a wrapper between the injector and the underlying provider
+// (most notably the agentic ToolLoop wrap at pipeline.go) can unwrap,
+// re-wrap, and reattach the injector without losing the §3.2 invariant
+// that the kernel prompt is the first system-prompt entry. Without this,
+// the type assertion `prov.(*APIProvider)` silently fails whenever a
+// kernel prompt is configured (registry.SetKernelPrompt) — and #425 has
+// shown that's every API-tier chat since #400 landed.
+func (k *KernelPromptInjector) Inner() Provider { return k.inner }
+
+// Prompt returns the kernel prompt the injector was constructed with.
+// Pair with Inner() so a call site can `NewKernelPromptInjector(newInner,
+// inj.Prompt())` to re-wrap a freshly-modified provider chain.
+func (k *KernelPromptInjector) Prompt() string { return k.prompt }
+
 // Invoke implements Provider. Generates a fresh per-Invoke nonce,
 // substitutes it across the kernel prompt + every caller-supplied
 // SystemPrompts entry + the user prompt + every ConvMessage Content,

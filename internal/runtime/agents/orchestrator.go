@@ -1082,8 +1082,17 @@ func (o *Orchestrator) invokeAgentWithKey(
 	agentProv := o.providerFor(tp.Backend, model)
 
 	// Wrap API provider with agentic tool loop when tier has tools.
+	// #425: same unwrap → wrap → rewrap pattern as pipeline.go — direct
+	// type assertion against *APIProvider fails whenever a kernel prompt
+	// is configured (always in production, via main.go:562).
 	if o.toolRegistry != nil && o.toolExecutor != nil && len(tp.Tools) > 0 {
-		if apiProv, ok := agentProv.(*provider.APIProvider); ok {
+		agentUnder := agentProv
+		var agentKernelInj *provider.KernelPromptInjector
+		if inj, isInj := agentUnder.(*provider.KernelPromptInjector); isInj {
+			agentKernelInj = inj
+			agentUnder = inj.Inner()
+		}
+		if apiProv, ok := agentUnder.(*provider.APIProvider); ok {
 			o.toolRegistry.Rescan()
 			// Expand tool wildcards into concrete tool names.
 			resolvedTools := tp.Tools
@@ -1106,7 +1115,12 @@ func (o *Orchestrator) invokeAgentWithKey(
 				if maxTurns <= 0 {
 					maxTurns = 10
 				}
-				agentProv = provider.NewToolLoop(apiProv, &orchestratorToolAdapter{exec: o.toolExecutor}, tools, maxTurns)
+				loop := provider.NewToolLoop(apiProv, &orchestratorToolAdapter{exec: o.toolExecutor}, tools, maxTurns)
+				if agentKernelInj != nil {
+					agentProv = provider.NewKernelPromptInjector(loop, agentKernelInj.Prompt())
+				} else {
+					agentProv = loop
+				}
 				toolNames := make([]string, len(schemas))
 				for i, s := range schemas {
 					toolNames[i] = s.Name

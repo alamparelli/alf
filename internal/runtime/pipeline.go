@@ -589,7 +589,19 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 	// Wrap API provider with agentic tool loop.
 	if isAPITier && e.ToolRegistry != nil && e.ToolExecutor != nil && len(scopedTools) > 0 {
 		e.ToolRegistry.Rescan()
-		if apiProv, ok := prov.(*provider.APIProvider); ok {
+		// #425: every API-tier prov comes back from ForBackend wrapped
+		// in a *KernelPromptInjector when SetKernelPrompt has been
+		// called at boot (which the daemon always does — main.go:562).
+		// A direct `prov.(*APIProvider)` assertion therefore silently
+		// fails, the ToolLoop never wraps, and the LLM sees zero tool
+		// definitions. Unwrap, wrap, re-wrap to preserve §3.2.
+		underlying := prov
+		var kernelInj *provider.KernelPromptInjector
+		if inj, isInj := underlying.(*provider.KernelPromptInjector); isInj {
+			kernelInj = inj
+			underlying = inj.Inner()
+		}
+		if apiProv, ok := underlying.(*provider.APIProvider); ok {
 			schemas := e.ToolRegistry.ForToolsStrict(scopedTools)
 			if len(schemas) > 0 {
 				var tools []map[string]any
@@ -602,7 +614,12 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 				if maxTurns <= 0 {
 					maxTurns = 10
 				}
-				prov = provider.NewToolLoop(apiProv, &toolExecAdapter{exec: e.ToolExecutor, origin: tooling.ChainOrigin{Source: channelID.Prefix(), ConvID: convID}}, tools, maxTurns)
+				loop := provider.NewToolLoop(apiProv, &toolExecAdapter{exec: e.ToolExecutor, origin: tooling.ChainOrigin{Source: channelID.Prefix(), ConvID: convID}}, tools, maxTurns)
+				if kernelInj != nil {
+					prov = provider.NewKernelPromptInjector(loop, kernelInj.Prompt())
+				} else {
+					prov = loop
+				}
 				log.Printf("[comms] tool loop enabled: %d tools, max_turns=%d", len(schemas), maxTurns)
 				toolNames := make([]string, len(schemas))
 				for i, s := range schemas {
@@ -814,9 +831,20 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 			fbScopedTools := skills.NarrowToolsByDeclares(e.SkillDeclaresLookup, activeSkills, fbTP.Tools)
 
 			// Wrap API provider with tool loop if needed.
+			// #425: mirrors the primary tier path — unwrap the
+			// KernelPromptInjector, wrap the underlying APIProvider with
+			// the ToolLoop, then re-apply the injector. Direct
+			// `prov.(*APIProvider)` always fails when a kernel prompt is
+			// configured (which is every boot via main.go:562).
 			if fbIsAPI && e.ToolRegistry != nil && e.ToolExecutor != nil && len(fbScopedTools) > 0 {
 				e.ToolRegistry.Rescan()
-				if apiProv, ok := fbProv.(*provider.APIProvider); ok {
+				fbUnder := fbProv
+				var fbKernelInj *provider.KernelPromptInjector
+				if inj, isInj := fbUnder.(*provider.KernelPromptInjector); isInj {
+					fbKernelInj = inj
+					fbUnder = inj.Inner()
+				}
+				if apiProv, ok := fbUnder.(*provider.APIProvider); ok {
 					schemas := e.ToolRegistry.ForToolsStrict(fbScopedTools)
 					if len(schemas) > 0 {
 						var tools []map[string]any
@@ -829,7 +857,12 @@ func (e *ChatEngine) processStandard(ctx context.Context, msg InMessage, tp Tier
 						if maxT <= 0 {
 							maxT = 10
 						}
-						fbProv = provider.NewToolLoop(apiProv, &toolExecAdapter{exec: e.ToolExecutor, origin: tooling.ChainOrigin{Source: channelID.Prefix(), ConvID: convID}}, tools, maxT)
+						loop := provider.NewToolLoop(apiProv, &toolExecAdapter{exec: e.ToolExecutor, origin: tooling.ChainOrigin{Source: channelID.Prefix(), ConvID: convID}}, tools, maxT)
+						if fbKernelInj != nil {
+							fbProv = provider.NewKernelPromptInjector(loop, fbKernelInj.Prompt())
+						} else {
+							fbProv = loop
+						}
 					}
 				}
 			}

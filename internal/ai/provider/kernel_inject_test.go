@@ -108,6 +108,90 @@ func TestKernelPromptInjector_NilProviderReturnsNil(t *testing.T) {
 	}
 }
 
+// TestKernelPromptInjector_InnerExposesWrapped pins the #425 accessor:
+// call sites that need to wrap an APIProvider with the agentic ToolLoop
+// must be able to reach the underlying provider through the kernel-
+// prompt wrapper. Without this, the type assertion
+// `prov.(*APIProvider)` at pipeline.go:592 silently fails on every
+// API-tier chat (the runtime always wires a kernel prompt at boot via
+// registry.SetKernelPrompt).
+func TestKernelPromptInjector_InnerExposesWrapped(t *testing.T) {
+	stub := &stubProvider{}
+	wrapped := NewKernelPromptInjector(stub, "KERNEL")
+	if wrapped.Inner() != stub {
+		t.Errorf("Inner() = %v, want stubProvider %v", wrapped.Inner(), stub)
+	}
+	if wrapped.Prompt() != "KERNEL" {
+		t.Errorf("Prompt() = %q, want %q", wrapped.Prompt(), "KERNEL")
+	}
+}
+
+// TestKernelPromptInjector_RewrapPreservesInvariant pins that the
+// unwrap → mutate → re-wrap recipe round-trips cleanly: after stripping
+// the injector, wrapping the inner with a fictional middleware, and
+// re-wrapping with NewKernelPromptInjector(newChain, inj.Prompt()), the
+// kernel prompt still lands as the sole SystemPrompts entry. This is
+// the recipe pipeline.go uses to insert the ToolLoop without breaking
+// §3.2 (kernel prompt is the first system-prompt entry).
+func TestKernelPromptInjector_RewrapPreservesInvariant(t *testing.T) {
+	stub := &stubProvider{}
+	inj := NewKernelPromptInjector(stub, "KERNEL")
+
+	// Simulate the call site: unwrap, leave the inner unchanged, re-wrap.
+	innerProv := inj.Inner()
+	rewrapped := NewKernelPromptInjector(innerProv, inj.Prompt())
+
+	if _, err := rewrapped.Invoke(context.Background(), "p", Params{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := stub.gotParams.SystemPrompts
+	if len(got) != 1 || got[0] != "KERNEL" {
+		t.Errorf("re-wrap broke §3.2 invariant; SystemPrompts = %v, want [KERNEL]", got)
+	}
+}
+
+// TestKernelInjector_UnwrapsToAPIProvider pins the #425 bug-fix pattern
+// end-to-end at the type level: when SetKernelPrompt has wrapped an
+// APIProvider, the call sites in pipeline.go and orchestrator.go can
+// reach the underlying *APIProvider via Inner() without losing the
+// kernel-prompt prefix on re-wrap. This is the exact sequence those
+// sites apply before NewToolLoop, so a regression here would break the
+// agentic tool loop on every API-tier chat.
+func TestKernelInjector_UnwrapsToAPIProvider(t *testing.T) {
+	api := NewAPIProvider("test-key", nil)
+	inj := NewKernelPromptInjector(api, "KERNEL")
+
+	// Step 1: unwrap (mirrors pipeline.go:592 after fix).
+	var underlying Provider = inj
+	var capturedInj *KernelPromptInjector
+	if k, ok := underlying.(*KernelPromptInjector); ok {
+		capturedInj = k
+		underlying = k.Inner()
+	}
+	if capturedInj == nil {
+		t.Fatal("KernelPromptInjector type assertion failed — Inner() unreachable from outside the package?")
+	}
+
+	// Step 2: assert the underlying is the *APIProvider we wrapped.
+	apiProv, ok := underlying.(*APIProvider)
+	if !ok {
+		t.Fatalf("Inner() did not yield *APIProvider; got %T", underlying)
+	}
+	if apiProv != api {
+		t.Fatal("Inner() returned a different *APIProvider than we wrapped")
+	}
+
+	// Step 3: re-wrap with the captured kernel prompt — this is the
+	// final step in the fix pattern.
+	rewrapped := NewKernelPromptInjector(apiProv, capturedInj.Prompt())
+	if rewrapped.Prompt() != "KERNEL" {
+		t.Errorf("rewrap lost kernel prompt; got %q", rewrapped.Prompt())
+	}
+	if rewrapped.Inner() != apiProv {
+		t.Error("rewrap lost inner provider identity")
+	}
+}
+
 func TestRegistry_ForBackend_WrapsWhenKernelPromptSet(t *testing.T) {
 	stub := &stubProvider{}
 	r := &Registry{

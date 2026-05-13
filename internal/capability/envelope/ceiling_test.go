@@ -174,3 +174,23 @@ func TestEnforceTier2Ceiling_RejectsRawImports(t *testing.T) {
 		t.Fatalf("got %v, want ErrCeilingExceeded for raw_imports", err)
 	}
 }
+
+// TestEnforceTier2Ceiling_RejectsHTTPScopes pins #421 Wave 1's
+// load-bearing ceiling rule: [[http.scopes]] widens the trust
+// surface (outbound HTTP to an explicit allowlist), and the
+// local daemon key cannot pre-approve that. Only the user-endorsed
+// key (Tier 3) signs manifests that declare http scopes; the
+// signer/loader refuses Tier 2 attempts with ErrCeilingExceeded.
+func TestEnforceTier2Ceiling_RejectsHTTPScopes(t *testing.T) {
+	m := &Manifest{
+		HTTP: HTTPBlock{
+			Scopes: []HTTPScope{
+				{Host: "openlibrary.org"},
+			},
+		},
+	}
+	err := EnforceTier2Ceiling(m)
+	if !errors.Is(err, ErrCeilingExceeded) {
+		t.Fatalf("got %v, want ErrCeilingExceeded for http.scopes", err)
+	}
+}

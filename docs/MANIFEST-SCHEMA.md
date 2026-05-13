@@ -107,7 +107,7 @@ Fields that become required / forbidden based on `kind` are listed in §4.
 
 Each handle kind (fs / http / exec / secrets / memory / events / tools) has its own block. Blocks are **optional** — a capability that declares no `[[fs.reads]]` cannot read any file.
 
-**0.8.0 wires `fs`, `events`, and `tools`.** Declaring `http`, `exec`, or `secrets` blocks is a parse-time error until the corresponding handle kinds land in 0.9.0+. `[memory]` is deferred to `#400` Stage 2.
+**0.8.x wires `fs`, `events`, `tools`, and `http` (schema only — see `[[http.scopes]]` below).** Declaring `exec` or `secrets` blocks is a parse-time error until the corresponding handle kinds land in 0.9.0+. `[memory]` is deferred to `#400` Stage 2.
 
 **Capability-extension blocks (`#392`)**: 0.8.0 also accepts three new top-level blocks for the user-extensible handle registry: `[provider]` (capability-provider only), `[[depends]]` (any kind, references provider-exported handle kinds), and `[[raw_imports]]` (any kind, escape-hatch for direct WASI imports). Stage 1 of `#392` validates them at parse time; runtime forge integration lands in subsequent stages.
 
@@ -272,14 +272,44 @@ wasi:cli/terminal-output      — tty mode write
 
 Stage 1 of `#392` validates the manifest at parse time. Stage 4 wires the allowed imports through `internal/runtime/wasm/CheckImports` so the guest can actually link the symbols; until then a guest that imports an allowed-but-not-yet-wired symbol fails at runtime instantiation with `ErrLyingManifest`.
 
+#### http — outbound HTTP allowlist (#421)
+
+```toml
+[[http.scopes]]
+host = "openlibrary.org"
+
+[[http.scopes]]
+host        = "www.googleapis.com"
+path_prefix = "/books/v1"
+
+[[http.scopes]]
+host = "homelab.local:8443"
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `host` | string | yes | Exact hostname. Lowercase (normalised at parse), DNS-shape labels (letters, digits, hyphens), optional `:port` suffix in 1..65535. **No wildcards, no scheme, no path** — those are programmer errors and rejected at parse time. |
+| `path_prefix` | string | no | Literal path prefix. Empty means "any path under this host". When set, must start with `/` and contain no glob/regex meta characters (`*`, `?`, `[`, `]`, `\`, `{`, `}`). Matching is segment-aware at the forge layer (`/books/v1` matches `/books/v1` and `/books/v1/X` but NOT `/books/v10`). |
+
+**Wave 1 (schema-only):** the parser accepts and validates the block. The runtime is not yet wired to honour the scopes — a manifest declaring `[[http.scopes]]` cannot actually make HTTP calls until Wave 2 (host import `alf_http_request` via vault-proxy) and Wave 3 (forge mints the scoped `http.Handle`) land.
+
+**Permission ceiling.** `[[http.scopes]]` widens the trust surface (outbound HTTP) and is therefore **above the Tier 2 (local daemon key) ceiling** per §7.3 of ARCHITECTURE-SECURITY.md. The signer refuses to sign manifests with non-empty `[[http.scopes]]` using the daemon key; the operator must run `alf keygen` + `alf sign` (Tier 3, user-endorsed). The ceiling is re-checked at load time so a manifest that somehow reached the daemon with a Tier-2 signature over an http-scoped manifest fails verification.
+
+**Runtime semantics (Waves 2-3):**
+
+- Each request URL is matched against the manifest's declared scopes. The first matching scope wins. Out-of-scope requests return `errCode = OUT_OF_SCOPE` to the guest (not a panic — the guest must handle it).
+- The runtime forces HTTPS — a guest issuing an `http://` request gets `errCode = TLS_FAILURE` even if the scope's host would otherwise match. The scope schema does not encode the scheme; it is implicitly HTTPS-only.
+- Redirects are followed only when the redirect target also matches a declared scope (no cross-host redirect handling in 0.8.x; deferred to 0.10+).
+- Request and response bodies are byte-buffered (no streaming in 0.8.x; deferred to 0.10+).
+- The `alf_http_request` host import dereferences guest memory only via wazero `api.Memory.Read/Write`, symmetric with `alf_fs_*` (§3.5 of WASM.md).
+
 #### Deferred blocks — parse error in 0.8.0
 
 ```toml
-# All of the following MUST NOT appear in a 0.8.0 manifest.
+# All of the following MUST NOT appear in a 0.8.x manifest.
 # The parser rejects them at load time with a pointer to the ticket
 # that lands each one.
 
-[[http.scopes]]      # Tier 3.1 http.Handle,        deferred to 0.9.0+
 [[exec.commands]]    # Tier 3.1 exec.Handle,        deferred to 0.9.0+
 [[secrets.scopes]]   # Tier 3.1 secrets.Handle,     deferred to 0.9.0+
 [memory]             # agent-mediated memory,       deferred to #400

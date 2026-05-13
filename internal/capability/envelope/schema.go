@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -62,7 +63,31 @@ var (
 	ErrRawImportJustificationEmpty = errors.New("envelope: raw_imports.justification is empty (operators see this string at install)")
 	ErrRawImportForbidden          = errors.New("envelope: raw_imports module is forbidden — use a scoped handle instead")
 	ErrRawImportNotInAllowlist     = errors.New("envelope: raw_imports module is not in the §3.4 allowlist")
+
+	// #421 Wave 1 — http.scopes.
+	ErrHTTPScopeHostEmpty           = errors.New("envelope: http.scopes.host is empty")
+	ErrHTTPScopeHostMalformed       = errors.New("envelope: http.scopes.host must be a DNS-shape hostname (no wildcards, no scheme, no path); optional :port suffix accepted")
+	ErrHTTPScopePortOutOfRange      = errors.New("envelope: http.scopes.host port must be 1..65535")
+	ErrHTTPScopePathPrefixMalformed = errors.New("envelope: http.scopes.path_prefix must start with '/' and contain no glob/regex meta characters")
+	ErrHTTPScopePathPrefixTraversal = errors.New("envelope: http.scopes.path_prefix contains '..' segment")
+	ErrHTTPScopeDuplicate           = errors.New("envelope: http.scopes contains a duplicate (host, path_prefix) entry")
 )
+
+// httpHostPattern enforces DNS-shape hostnames:
+//   - lowercase letters, digits, hyphens within labels;
+//   - labels separated by dots;
+//   - labels may not start or end with a hyphen;
+//   - no wildcards, no scheme, no path.
+//
+// The optional ":port" suffix is parsed and validated separately because
+// the host/port split is easier to reason about than a single mega-regex.
+var httpHostPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$`)
+
+// httpPathPrefixForbiddenChars are glob/regex meta characters that must
+// not appear in [[http.scopes]].path_prefix. The schema is "literal
+// prefix" — no globbing — so we reject early at parse time rather than
+// letting a manifest sneak meta characters through to the forge.
+var httpPathPrefixForbiddenChars = []rune{'*', '?', '[', ']', '\\', '{', '}'}
 
 // reservedNamespaceALF is the namespace prefix that only the daemon may
 // claim. Capability providers cannot export a handle ID under "alf:";
@@ -250,9 +275,7 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 
 	// Deferred blocks are a parse-time error in 0.8.0. The presence of
 	// the top-level key alone is enough — we don't care what's inside.
-	if t.HTTP != nil {
-		return nil, fmt.Errorf("%w: http (lands in 0.9.0+ alongside http.Handle)", ErrBlockDeferred)
-	}
+	// (`http` was un-deferred by #421 Wave 1 — see validateHTTPBlock.)
 	if t.Exec != nil {
 		return nil, fmt.Errorf("%w: exec (lands in 0.9.0+ alongside exec.Handle)", ErrBlockDeferred)
 	}
@@ -331,6 +354,14 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		return nil, err
 	}
 
+	// http block (#421 Wave 1) — schema only. Runtime wiring lands in
+	// Waves 2-3. Tier 2 ceiling refuses non-empty Scopes; see
+	// EnforceTier2Ceiling.
+	httpBlock, err := validateHTTPBlock(t.HTTP)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Manifest{
 		EnvelopeVersion: *t.AlfEnvelopeVersion,
 		ID:              t.ID,
@@ -339,6 +370,7 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		Name:            t.Name,
 		Description:     t.Description,
 		FS:              fs,
+		HTTP:            httpBlock,
 		Events:          events,
 		Tools:           tools,
 		Provider:        providerBlock,
@@ -357,6 +389,108 @@ func validateFSBlock(raw tomlFSBlock) (FSBlock, error) {
 		return FSBlock{}, err
 	}
 	return FSBlock{Reads: reads, Writes: writes}, nil
+}
+
+// validateHTTPBlock walks [[http.scopes]] and rejects malformed entries.
+// Per #421 Wave 1 and MANIFEST-SCHEMA §3.4:
+//
+//   - host: required, DNS-shape, lowercase (normalised here so the
+//     forge and the runtime compare lowercase end-to-end), optional
+//     ":port" suffix with port in 1..65535.
+//   - path_prefix: optional. If present, must start with "/" and
+//     contain no glob/regex meta characters (`*`, `?`, `[`, `]`, `\`,
+//     `{`, `}`). No `..` segments.
+//   - duplicate (host, path_prefix) pairs are rejected.
+//
+// Empty Scopes is valid and equivalent to omitting the block entirely.
+func validateHTTPBlock(raw tomlHTTPBlock) (HTTPBlock, error) {
+	if len(raw.Scopes) == 0 {
+		return HTTPBlock{}, nil
+	}
+	out := make([]HTTPScope, 0, len(raw.Scopes))
+	seen := make(map[string]struct{}, len(raw.Scopes))
+	for i, s := range raw.Scopes {
+		host, err := validateHTTPHost(s.Host, i)
+		if err != nil {
+			return HTTPBlock{}, err
+		}
+		pathPrefix, err := validateHTTPPathPrefix(s.PathPrefix, i)
+		if err != nil {
+			return HTTPBlock{}, err
+		}
+		key := host + "|" + pathPrefix
+		if _, dup := seen[key]; dup {
+			return HTTPBlock{}, fmt.Errorf("%w: http.scopes[%d] host=%q path_prefix=%q",
+				ErrHTTPScopeDuplicate, i, host, pathPrefix)
+		}
+		seen[key] = struct{}{}
+		out = append(out, HTTPScope{Host: host, PathPrefix: pathPrefix})
+	}
+	return HTTPBlock{Scopes: out}, nil
+}
+
+// validateHTTPHost parses and validates a [[http.scopes]].host entry.
+// Splits on a single ":" if present, validates the bare host against
+// httpHostPattern, and validates the optional port as 1..65535. Returns
+// the canonical lowercase form (host or host:port).
+func validateHTTPHost(raw string, index int) (string, error) {
+	if raw == "" {
+		return "", fmt.Errorf("%w: http.scopes[%d]", ErrHTTPScopeHostEmpty, index)
+	}
+	lower := strings.ToLower(raw)
+	// Reject obvious shape violations early with the most specific
+	// error message — scheme, path, query, fragment, or wildcard.
+	if strings.Contains(lower, "://") || strings.HasPrefix(lower, "/") ||
+		strings.ContainsAny(lower, "*?#") {
+		return "", fmt.Errorf("%w: http.scopes[%d].host=%q",
+			ErrHTTPScopeHostMalformed, index, raw)
+	}
+	host := lower
+	if i := strings.IndexByte(lower, ':'); i >= 0 {
+		host = lower[:i]
+		portStr := lower[i+1:]
+		// strconv.Atoi rejects leading "+", leading "0", empty strings,
+		// non-digit chars — exactly what we want for a port literal.
+		port, perr := strconv.Atoi(portStr)
+		if perr != nil || portStr != strconv.Itoa(port) || port < 1 || port > 65535 {
+			return "", fmt.Errorf("%w: http.scopes[%d].host=%q",
+				ErrHTTPScopePortOutOfRange, index, raw)
+		}
+	}
+	if !httpHostPattern.MatchString(host) {
+		return "", fmt.Errorf("%w: http.scopes[%d].host=%q",
+			ErrHTTPScopeHostMalformed, index, raw)
+	}
+	return lower, nil
+}
+
+// validateHTTPPathPrefix validates a [[http.scopes]].path_prefix entry.
+// Empty is allowed (means "any path"). Otherwise must start with "/"
+// and not contain glob/regex meta characters or ".." segments.
+func validateHTTPPathPrefix(raw string, index int) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(raw, "/") {
+		return "", fmt.Errorf("%w: http.scopes[%d].path_prefix=%q",
+			ErrHTTPScopePathPrefixMalformed, index, raw)
+	}
+	for _, c := range raw {
+		for _, forbidden := range httpPathPrefixForbiddenChars {
+			if c == forbidden {
+				return "", fmt.Errorf("%w: http.scopes[%d].path_prefix=%q",
+					ErrHTTPScopePathPrefixMalformed, index, raw)
+			}
+		}
+	}
+	// Reject ".." segments — symmetric with FS path traversal rule.
+	for _, seg := range strings.Split(raw, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("%w: http.scopes[%d].path_prefix=%q",
+				ErrHTTPScopePathPrefixTraversal, index, raw)
+		}
+	}
+	return raw, nil
 }
 
 // validateEventsBlock walks events.exports + events.subscribes and

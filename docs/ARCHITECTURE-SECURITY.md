@@ -491,7 +491,7 @@ Trust in alf is rooted in the daemon binary the operator installed, not in any s
   - `kind`: `wasm-tool` / `wasm-app` / `skill` / `llm-provider` / `marketplace-app` (NOT `capability-provider` — providers widen the runtime registry's trust surface and require explicit operator endorsement, SEC-080-006)
   - `memory`: agent-mediated
   - `events`: own-topics (exports OK; `[[events.subscribes]]` is cross-flow widening → Tier 3)
-  - `http`: none (deferred block)
+  - `http`: none (schema landed in #421 Wave 1; declaring `[[http.scopes]]` widens the trust surface and requires Tier 3)
   - `exec`: none (deferred block)
   - `secrets`: none (deferred block)
   - `fs`: own-dir
@@ -793,7 +793,7 @@ The reference implementation (`internal/capability/envelope/`, landing under `#3
 - **Idempotency.** `canonicalize(canonicalize(manifest)) == canonicalize(manifest)`. A manifest that is already canonical is a fixed point of the pipeline.
 - **Format-insensitive equivalence.** Two `manifest.toml` files with the same logical content but different whitespace / key order / comment presence produce byte-identical canonical output. Property-tested with `testing/quick`.
 - **Rejection on unknown.** A manifest with any unrecognised top-level key or sub-table is rejected at validation step 3 of the §7.10.2 pipeline. No field is silently discarded.
-- **Rejection on deferred.** A 0.8.0 manifest containing `[[http.scopes]]`, `[[exec.commands]]`, `[[secrets.scopes]]`, `[[events.*]]`, `[[tools.declares]]`, or `[memory]` is rejected. Each has a dedicated error message pointing at the ticket (`#389` / `#399` / `#400` / successor) that will land the block.
+- **Rejection on deferred.** A 0.8.x manifest containing `[[exec.commands]]`, `[[secrets.scopes]]`, or `[memory]` is rejected with `errBlockDeferred`. Each has a dedicated error message pointing at the ticket (`#400` / successor) that will land the block. (`[[http.scopes]]` is un-deferred since `#421` Wave 1; `[[events.*]]` since `#399`; `[[tools.declares]]` since `#389`.)
 
 #### 7.10.6 Parser pinning (archtest rule)
 
@@ -833,7 +833,8 @@ The reference implementation ships with golden test vectors covering every branc
 | Key in trust store but revoked by CRL, `signed_at` before `not_valid_after` | verified |
 | Key in trust store but revoked by CRL, `signed_at` after `not_valid_after` | rejected — `errKeyRevokedAtTime` |
 | Key not in trust store | rejected — `errSignerNotTrusted` |
-| Manifest declares `[[http.scopes]]` in a 0.8.0 envelope | rejected — `errBlockDeferred` |
+| Manifest declares `[[http.scopes]]` signed with the local-daemon key | rejected — `errCeilingExceeded` (Tier-3 user-endorsed key required, #421 Wave 1) |
+| Manifest declares `[[http.scopes]]` with wildcard host `"*.example.com"` | rejected — `errHTTPScopeHostMalformed` (#421 Wave 1) |
 | Manifest has `author` top-level field | rejected — `errUnknownField` |
 
 Vectors live under `internal/capability/envelope/testdata/` alongside the reference implementation.

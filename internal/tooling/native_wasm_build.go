@@ -107,8 +107,10 @@ func (t WASMBuildNativeTool) Run(ctx context.Context, argsJSON string) (string, 
 	}
 
 	// 1. Parse + validate the manifest against the envelope schema.
-	// This rejects deferred blocks (http/exec/secrets/events/tools/
-	// memory) per MANIFEST-SCHEMA §3.4 and enforces required fields.
+	// This rejects deferred blocks (exec/secrets/memory) per
+	// MANIFEST-SCHEMA §3.4 and enforces required fields. (`http` is
+	// un-deferred since #421 Wave 1; `events` and `tools` since
+	// #399/#389.)
 	m, err := envelope.Validate([]byte(args.ManifestTOML))
 	if err != nil {
 		return "", fmt.Errorf("manifest validation: %w", err)

@@ -24,6 +24,7 @@ type Manifest struct {
 	Description     string
 
 	FS         FSBlock
+	HTTP       HTTPBlock
 	Events     EventsBlock
 	Tools      ToolsBlock
 	Provider   ProviderBlock // only valid when Kind == KindCapabilityProvider
@@ -68,6 +69,40 @@ type FSBlock struct {
 // match (consistent with internal/capability/handle/fs.go's semantics).
 type FSPath struct {
 	Path string
+}
+
+// HTTPBlock captures `[[http.scopes]]` per §3.4 of MANIFEST-SCHEMA and
+// #421. Empty Scopes means "no outbound HTTP authority" — the forge
+// does not mint an http.Handle and the WASM host import alf_http_request
+// (Wave 2) fails CheckImports with "extra grants without consumer".
+//
+// Per §7.3, declaring `[[http.scopes]]` exceeds the local-daemon-key
+// (Tier 2) ceiling: the operator must sign with the user-endorsed key
+// (Tier 3) via `alf keygen` + `alf sign`. EnforceTier2Ceiling refuses
+// to sign manifests with a non-empty Scopes slice.
+type HTTPBlock struct {
+	Scopes []HTTPScope
+}
+
+// HTTPScope is a single entry in [[http.scopes]] — one URL pattern the
+// capability is authorised to reach. The shape is intentionally narrow:
+//
+//   - Host is the exact match target. Lowercase (normalised at parse),
+//     DNS-shape labels (letters, digits, hyphens), optional ":port"
+//     suffix (port 1..65535). No wildcards, no globs, no regex.
+//   - PathPrefix is an optional literal prefix. Empty means "any path
+//     under this host". When set, must start with "/" and contain no
+//     glob/regex meta characters. Matching is segment-aware at the
+//     forge layer ("/books/v1" matches "/books/v1" and "/books/v1/X"
+//     but NOT "/books/v10" — defeats the prefix-collision footgun).
+//
+// Wave 1 (this commit) validates the shape at parse time. Wave 2 wires
+// alf_http_request through VAULT_PROXY_SOCK. Wave 3 mints the scoped
+// http.Handle at forge time. Wave 4 migrates real apps and re-runs the
+// soak from #416.
+type HTTPScope struct {
+	Host       string
+	PathPrefix string
 }
 
 // EventsBlock captures the [[events.exports]] / [[events.subscribes]]
@@ -125,6 +160,7 @@ type tomlManifest struct {
 	Description        string  `toml:"description"`
 
 	FS         tomlFSBlock        `toml:"fs"`
+	HTTP       tomlHTTPBlock      `toml:"http"`
 	Events     tomlEventsBlock    `toml:"events"`
 	Tools      tomlToolsBlock     `toml:"tools"`
 	Provider   tomlProviderBlock  `toml:"provider"`
@@ -133,10 +169,18 @@ type tomlManifest struct {
 
 	// Deferred blocks — presence is a validation error. We decode them
 	// to detect presence only; contents are ignored.
-	HTTP    *map[string]any `toml:"http"`
 	Exec    *map[string]any `toml:"exec"`
 	Secrets *map[string]any `toml:"secrets"`
 	Memory  *map[string]any `toml:"memory"`
+}
+
+type tomlHTTPBlock struct {
+	Scopes []tomlHTTPScope `toml:"scopes"`
+}
+
+type tomlHTTPScope struct {
+	Host       string `toml:"host"`
+	PathPrefix string `toml:"path_prefix"`
 }
 
 type tomlProviderBlock struct {

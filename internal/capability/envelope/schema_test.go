@@ -145,8 +145,9 @@ func TestValidate_DeferredBlocksRejected(t *testing.T) {
 	// TestValidate_EventsBlock_* for the events-block coverage.
 	// `tools` no longer deferred — landed under #389. See
 	// TestValidate_ToolsBlock_* for the tools-block coverage.
+	// `http` no longer deferred — Wave 1 of #421. See
+	// TestValidate_HTTPScopes_* for the http-block coverage.
 	cases := map[string]string{
-		"http":    "[[http.scopes]]\nhost = \"x.com\"\n",
 		"exec":    "[[exec.commands]]\npath = \"/bin/x\"\n",
 		"secrets": "[[secrets.scopes]]\nname = \"x\"\n",
 		"memory":  "[memory]\nscope = \"x\"\n",

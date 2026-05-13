@@ -20,7 +20,8 @@ var ErrCeilingExceeded = errors.New("envelope: manifest exceeds Tier-2 ceiling �
 //	memory:       agent-mediated   (no MemoryHandle exists by design)
 //	events:       own topics only   (exports OK; subscribes from another
 //	                                 cap = cross-flow widening, refused)
-//	http:         none              (deferred block — already rejected)
+//	http:         none              ([[http.scopes]] widens trust surface
+//	                                 → Tier 3 only, #421)
 //	exec:         none              (deferred block — already rejected)
 //	secrets:      none              (deferred block — already rejected)
 //	fs:           own-dir           (schema rejects absolute / "..")
@@ -72,6 +73,10 @@ func EnforceTier2Ceiling(m *Manifest) error {
 	if len(m.Events.Subscribes) > 0 {
 		return fmt.Errorf("%w: events.subscribes (cross-flow from %d publisher(s)) requires user-endorsed key — re-sign with `alf sign` after `alf keygen`",
 			ErrCeilingExceeded, len(m.Events.Subscribes))
+	}
+	if len(m.HTTP.Scopes) > 0 {
+		return fmt.Errorf("%w: [[http.scopes]] (%d scope(s)) widens the trust surface (outbound HTTP) — re-sign with `alf sign` after `alf keygen` (Tier 3)",
+			ErrCeilingExceeded, len(m.HTTP.Scopes))
 	}
 	for _, dep := range m.Depends {
 		ns, _ := dep.SplitHandle()

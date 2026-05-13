@@ -38,6 +38,26 @@ var ErrCosignBinaryNotFound = errors.New("cosign: binary not found on PATH")
 // expired cert, etc.) without re-running the command manually.
 var ErrCosignVerifyFailed = errors.New("cosign: verify failed")
 
+// PermissiveCosignVerifier returns a verifier whose Verify always
+// succeeds without spawning cosign. This is the documented escape
+// hatch for operators who explicitly opted out of signature
+// verification via ALF_DISABLE_COSIGN_VERIFY=1 (homelab dev only).
+//
+// Rationale (SEC-080-004): the Checker now refuses to notify when
+// its verifier is nil — fail-closed against a silent wiring
+// regression. The opt-out path must therefore wire an explicit
+// permissive verifier rather than leaving the field nil, so the
+// operator's choice is visible in the wiring and a future refactor
+// that drops the wiring fails closed instead of silently
+// proceeding without verification.
+func PermissiveCosignVerifier() *CosignVerifier {
+	return &CosignVerifier{
+		Run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return nil, nil
+		},
+	}
+}
+
 // CosignVerifier wraps the cosign CLI for image signature
 // verification. The exec seam is injectable so tests stub the
 // command without spawning processes.

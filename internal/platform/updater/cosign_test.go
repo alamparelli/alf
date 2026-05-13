@@ -189,24 +189,53 @@ func TestCheckOnce_DigestResolveFailureBlocksNotify(t *testing.T) {
 	}
 }
 
-// TestCheckOnce_NoVerifierSkipsCheck pins backward-compatibility:
-// when no cosign verifier is wired (development boot or a
-// degradation path), the check still works against the pre-#403
-// behaviour — notify on every newer tag without signature gating.
-// The daemon's production wiring always sets one; this test
-// guards the test fixtures + dev-boot flow.
-func TestCheckOnce_NoVerifierSkipsCheck(t *testing.T) {
+// TestCheckOnce_NoVerifierRefusesNotify pins the SEC-080-004
+// fail-closed posture: a nil verifier is a wiring bug, not a
+// degradation path. The checker refuses to notify and leaves
+// latestVersion empty. The production opt-out path
+// (ALF_DISABLE_COSIGN_VERIFY=1) wires PermissiveCosignVerifier
+// explicitly — see cmd/alf-daemon/main.go — so the nil branch is
+// never reached in a correctly-wired daemon.
+func TestCheckOnce_NoVerifierRefusesNotify(t *testing.T) {
+	srv := httptest.NewServer(registryHandler([]string{"1.0.0", "2.0.0", "latest"}))
+	defer srv.Close()
+
+	notifyCalled := false
+	c := newTestChecker(t, "1.0.0", srv)
+	c.notify = func(cur, lat, dig string) { notifyCalled = true }
+	// Override the test default: clear the verifier to simulate
+	// a daemon-wiring regression that left the field nil.
+	c.SetCosignVerifier(nil)
+
+	c.CheckOnce()
+
+	if notifyCalled {
+		t.Error("notify fired despite nil verifier — SEC-080-004 regression (fail-open)")
+	}
+	if got := c.LatestVersion(); got != "" {
+		t.Errorf("LatestVersion=%q, want empty (nil verifier must refuse to notify)", got)
+	}
+	if got := c.LatestDigest(); got != "" {
+		t.Errorf("LatestDigest=%q, want empty (nil verifier must not commit)", got)
+	}
+}
+
+// TestCheckOnce_PermissiveVerifierNotifies pins the documented
+// opt-out path (ALF_DISABLE_COSIGN_VERIFY=1): PermissiveCosignVerifier
+// makes the check proceed without spawning cosign while keeping the
+// "verifier is always wired" invariant intact.
+func TestCheckOnce_PermissiveVerifierNotifies(t *testing.T) {
 	srv := httptest.NewServer(registryHandler([]string{"1.0.0", "2.0.0", "latest"}))
 	defer srv.Close()
 
 	notifiedTag := ""
 	c := newTestChecker(t, "1.0.0", srv)
 	c.notify = func(cur, lat, dig string) { notifiedTag = lat }
-	// SetCosignVerifier intentionally NOT called.
+	c.SetCosignVerifier(PermissiveCosignVerifier())
 
 	c.CheckOnce()
 
 	if notifiedTag != "2.0.0" {
-		t.Errorf("notify tag=%q, want 2.0.0 (no-verifier path proceeds)", notifiedTag)
+		t.Errorf("notify tag=%q, want 2.0.0 (permissive verifier path)", notifiedTag)
 	}
 }

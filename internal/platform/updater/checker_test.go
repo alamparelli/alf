@@ -9,9 +9,17 @@ import (
 )
 
 // newTestChecker creates a Checker pointing at a test server instead of GHCR.
+//
+// SEC-080-004: production wiring guarantees a verifier is always set
+// (real or permissive). Tests that don't exercise the verifier
+// branch mirror this invariant via PermissiveCosignVerifier so they
+// reach the notify path. Tests that DO exercise the verifier (e.g.
+// TestCheckOnce_CosignVerifyFailureBlocksNotify) override via
+// SetCosignVerifier after construction.
 func newTestChecker(t *testing.T, current string, srv *httptest.Server) *Checker {
 	t.Helper()
 	c := New("ghcr.io/test/repo", current, 0, nil)
+	c.SetCosignVerifier(PermissiveCosignVerifier())
 	// Override registry to route through test server.
 	c.client = srv.Client()
 	c.client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {

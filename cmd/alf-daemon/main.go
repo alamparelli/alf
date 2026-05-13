@@ -1337,6 +1337,11 @@ func main() {
 			})
 			log.Printf("[updater] cosign verify gate active (issuer=%s)", issuer)
 		} else {
+			// SEC-080-004: explicit opt-out wires the permissive
+			// verifier (instead of leaving verifier=nil), so the
+			// checker's refuse-on-nil-verifier posture stays intact.
+			// A future refactor that drops this wiring fails closed.
+			uc.SetCosignVerifier(updater.PermissiveCosignVerifier())
 			log.Printf("[updater] ALF_DISABLE_COSIGN_VERIFY=1 — auto-update notify proceeds without signature check (homelab dev only)")
 		}
 	}

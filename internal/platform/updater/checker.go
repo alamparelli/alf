@@ -31,10 +31,12 @@ type Checker struct {
 	notify   NotifyFunc
 	client   *http.Client
 
-	// verifier is the cosign signature verifier (#403). Empty
-	// means "no verification" — Notify fires on every newer tag,
-	// matching the v0.7.x behaviour. Production daemons set this
-	// via SetCosignVerifier so signature failures abort the notify.
+	// verifier is the cosign signature verifier (#403). Nil means
+	// "no verifier wired" → the checker refuses to notify
+	// (fail-closed posture, SEC-080-004). Production daemons set
+	// this via SetCosignVerifier — either with a real verifier
+	// or with PermissiveCosignVerifier() when the operator
+	// opted out via ALF_DISABLE_COSIGN_VERIFY=1.
 	verifier *CosignVerifier
 
 	mu            sync.Mutex
@@ -133,10 +135,12 @@ func (c *Checker) LatestDigest() string {
 // notification with an audit log line and leaves latestVersion
 // unchanged.
 //
-// When the verifier is nil (default), checker behaviour is the
-// pre-#403 path: notify on every newer tag without signature
-// check. Set this from the daemon's main wiring; tests pass a stub
-// verifier with a deterministic Run hook.
+// When the verifier is nil (default), the checker refuses to
+// notify — fail-closed posture for SEC-080-004. The daemon's main
+// wiring always sets one (real verifier in production, or
+// PermissiveCosignVerifier when the operator opted out via
+// ALF_DISABLE_COSIGN_VERIFY=1). Tests pass a stub verifier with a
+// deterministic Run hook.
 func (c *Checker) SetCosignVerifier(v *CosignVerifier) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -177,24 +181,30 @@ func (c *Checker) check() {
 	// #403: cosign verify the repo@digest pair. A verification
 	// failure aborts the notify so a tag repush with a different
 	// (unsigned or attacker-signed) digest cannot reach the
-	// operator UI. When no verifier is wired, behaviour falls back
-	// to the pre-#403 path (notify on every newer tag) — the
-	// daemon's production wiring always sets one.
+	// operator UI.
+	//
+	// SEC-080-004: a nil verifier is treated as a wiring bug
+	// (fail-closed). Production wiring in cmd/alf-daemon/main.go
+	// always sets one — either a real verifier or
+	// PermissiveCosignVerifier when the operator explicitly opted
+	// out via ALF_DISABLE_COSIGN_VERIFY=1. Reaching the nil branch
+	// here means a future refactor dropped the wiring; refuse to
+	// notify rather than fall back to the pre-#403 fail-open path.
 	c.mu.Lock()
 	verifier := c.verifier
 	c.mu.Unlock()
-	if verifier != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		repo := c.registry + "/" + c.repo
-		if err := verifier.Verify(ctx, repo, digest); err != nil {
-			log.Printf("update-check: cosign verify %s@%s failed: %v — refusing to notify", repo, digest, err)
-			return
-		}
-		log.Printf("update-check: cosign verify %s@%s ok", repo, digest)
-	} else {
-		log.Printf("update-check: no cosign verifier wired — proceeding without signature check (set ALF_DISABLE_COSIGN_VERIFY=1 to silence)")
+	if verifier == nil {
+		log.Printf("update-check: no cosign verifier wired — refusing to notify (programmer wiring bug; production code path always sets one)")
+		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	repo := c.registry + "/" + c.repo
+	if err := verifier.Verify(ctx, repo, digest); err != nil {
+		log.Printf("update-check: cosign verify %s@%s failed: %v — refusing to notify", repo, digest, err)
+		return
+	}
+	log.Printf("update-check: cosign verify %s@%s ok", repo, digest)
 
 	c.mu.Lock()
 	c.latestVersion = latest

@@ -487,7 +487,18 @@ Trust in alf is rooted in the daemon binary the operator installed, not in any s
 - **Private key:** written to vault user-scope (§7.5), encrypted with the user's vault passphrase.
 - **Public key:** added to `trust-store.toml` with `label = "local-daemon"` and `source = "auto-generated"`.
 - **Purpose:** the local daemon uses this key to sign LLM-built WASM capabilities for which the user did not explicitly ratify a wider permission envelope.
-- **Ceiling — enforced at sign time, not just at load time:** a bundle signed by this key may declare only `memory: agent-mediated`, `events: own-topics`, `http: none`, `exec: none`, `secrets: none`, `fs: own-dir`. The signer rejects widening requests with a message pointing the user at `alf keygen` (tier 3). Loading a tier-2-signed bundle that declares anything beyond the ceiling fails verification — the ceiling is re-checked at load time, not only at sign time (`#388`).
+- **Ceiling — enforced at sign time, not just at load time:** a bundle signed by this key may declare only the following surfaces (anything outside requires Tier-3 user-endorsed signing — `alf keygen` + `alf sign`):
+  - `kind`: `wasm-tool` / `wasm-app` / `skill` / `llm-provider` / `marketplace-app` (NOT `capability-provider` — providers widen the runtime registry's trust surface and require explicit operator endorsement, SEC-080-006)
+  - `memory`: agent-mediated
+  - `events`: own-topics (exports OK; `[[events.subscribes]]` is cross-flow widening → Tier 3)
+  - `http`: none (deferred block)
+  - `exec`: none (deferred block)
+  - `secrets`: none (deferred block)
+  - `fs`: own-dir
+  - `tools`: own `[[tools.declares]]` OK
+  - `depends`: `alf:` namespace only (cross-publisher `[[depends]]` widens the trust surface → Tier 3, SEC-080-006)
+  - `raw_imports`: none (even allowlisted WASI escape hatches need explicit operator review → Tier 3, SEC-080-006)
+- Loading a tier-2-signed bundle that declares anything beyond the ceiling fails verification — the ceiling is re-checked at load time, not only at sign time (`#388`). The signer rejects widening requests with a message pointing the user at `alf keygen` (tier 3).
 
 #### Tier 3 — User-endorsed key (`alf keygen`)
 

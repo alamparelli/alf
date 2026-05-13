@@ -91,3 +91,86 @@ func TestEnforceTier2Ceiling_RejectsNilManifest(t *testing.T) {
 		t.Errorf("got %v, want ErrCeilingExceeded for nil manifest", err)
 	}
 }
+
+// TestEnforceTier2Ceiling_RejectsCapabilityProviderKind pins
+// SEC-080-006: a capability-provider manifest registers new
+// handle kinds in the runtime registry under the signer's
+// fingerprint. The local daemon key cannot pre-approve that
+// trust-surface widening — the user-endorsed key (Tier 3) is the
+// only path. Today the daemon-key bootstrap auto-signs anything
+// in <skillsDir>/wasm/; without this gate, an LLM that drops a
+// capability-provider manifest would silently widen the registry
+// once forge wiring for [[depends]] consumption lands (Stage 5+).
+func TestEnforceTier2Ceiling_RejectsCapabilityProviderKind(t *testing.T) {
+	m := &Manifest{Kind: KindCapabilityProvider}
+	err := EnforceTier2Ceiling(m)
+	if !errors.Is(err, ErrCeilingExceeded) {
+		t.Fatalf("got %v, want ErrCeilingExceeded for capability-provider kind", err)
+	}
+}
+
+// TestEnforceTier2Ceiling_AcceptsNonProviderKinds pins that
+// SEC-080-006's kind gate refuses ONLY capability-provider —
+// every other recognised kind is within ceiling.
+func TestEnforceTier2Ceiling_AcceptsNonProviderKinds(t *testing.T) {
+	for _, k := range []ManifestKind{
+		KindWASMTool, KindWASMApp, KindSkill, KindLLMProvider, KindMarketplaceApp,
+	} {
+		m := &Manifest{Kind: k}
+		if err := EnforceTier2Ceiling(m); err != nil {
+			t.Errorf("kind=%q rejected: %v", k, err)
+		}
+	}
+}
+
+// TestEnforceTier2Ceiling_AcceptsAlfNamespaceDepends pins that
+// depends on alf: core kinds (fs, http, exec, secrets, events.pub,
+// events.sub, tool) stay within ceiling — they reference handles
+// the daemon owns end-to-end, not authority pulled from another
+// publisher.
+func TestEnforceTier2Ceiling_AcceptsAlfNamespaceDepends(t *testing.T) {
+	m := &Manifest{
+		Depends: []DependsEntry{
+			{Handle: "alf:fs"},
+			{Handle: "alf:tool"},
+		},
+	}
+	if err := EnforceTier2Ceiling(m); err != nil {
+		t.Errorf("alf: namespace depends rejected: %v", err)
+	}
+}
+
+// TestEnforceTier2Ceiling_RejectsCrossPublisherDepends pins
+// SEC-080-006: a manifest that declares [[depends]] on a non-alf
+// namespace (publisher fingerprint short) is pulling authority
+// from another publisher's exported handle. The daemon key
+// cannot pre-approve cross-publisher trust dependence; the
+// user-endorsed key (Tier 3) is the right signer.
+func TestEnforceTier2Ceiling_RejectsCrossPublisherDepends(t *testing.T) {
+	m := &Manifest{
+		Depends: []DependsEntry{
+			{Handle: "deadbeefdeadbeef:bluetooth.scan"},
+		},
+	}
+	err := EnforceTier2Ceiling(m)
+	if !errors.Is(err, ErrCeilingExceeded) {
+		t.Fatalf("got %v, want ErrCeilingExceeded for cross-publisher depends", err)
+	}
+}
+
+// TestEnforceTier2Ceiling_RejectsRawImports pins SEC-080-006:
+// even allowlisted [[raw_imports]] (wasi:clocks/*, wasi:cli/*)
+// are not ambient defaults. The Tier-2 bootstrap is "LLM authors
+// a tool with the ambient defaults"; raw imports widen the WASI
+// surface and need explicit operator review via Tier 3.
+func TestEnforceTier2Ceiling_RejectsRawImports(t *testing.T) {
+	m := &Manifest{
+		RawImports: []RawImport{
+			{Module: "wasi:clocks/monotonic-clock", Function: "now", Justification: "perf timings"},
+		},
+	}
+	err := EnforceTier2Ceiling(m)
+	if !errors.Is(err, ErrCeilingExceeded) {
+		t.Fatalf("got %v, want ErrCeilingExceeded for raw_imports", err)
+	}
+}

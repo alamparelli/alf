@@ -81,16 +81,27 @@ func auditToolSource(toolPath, toolName string) []SecurityWarning {
 }
 
 func (r *Registry) scanFiles(initial bool) {
-	// Preserve native tool schemas during rescan.
-	nativeSchemas := make(map[string]ToolSchema)
+	// Preserve in-memory registrations across rescans. Both native
+	// tools (RegisterNative) and wasm-tool bundles (RegisterWasmTool,
+	// #423) live in r.schemas alongside file-scanned schemas; if we
+	// only restored natives, a marketplace install / chat-session
+	// Rescan() would silently wipe every registered wasm-tool from
+	// the LLM surface even though their adapters stay in capRegistry.
+	preserved := make(map[string]ToolSchema)
 	if !initial {
 		for _, name := range r.nativeNames {
 			if s, ok := r.schemas[name]; ok {
-				nativeSchemas[name] = s
+				preserved[name] = s
 			}
 		}
-		// Reset to only native schemas.
-		r.schemas = nativeSchemas
+		for name := range r.wasmNames {
+			if s, ok := r.schemas[name]; ok {
+				preserved[name] = s
+			}
+		}
+		// Reset to the preserved set; file-scanned entries below are
+		// re-added from disk on this pass.
+		r.schemas = preserved
 	}
 
 	// #420 — only tools.d/ (image-baked symlinks for maintainer code, TCB)

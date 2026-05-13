@@ -144,3 +144,52 @@ func TestWasmToolNames_EmptyByDefault(t *testing.T) {
 		t.Errorf("WasmToolNames() = %v, want nil", got)
 	}
 }
+
+// TestRegisterWasmTool_SurvivesRescan pins the boot-bug fix: a wasm-tool
+// registered through RegisterWasmTool must survive a subsequent Rescan().
+// Marketplace RestoreInstalled() and chat-session reloads call Rescan
+// after setupWASMLoader has already registered Tier-3-signed bundles —
+// without this guard those schemas would silently disappear from the
+// LLM tool surface even though their capability adapters stay live.
+func TestRegisterWasmTool_SurvivesRescan(t *testing.T) {
+	reg := NewRegistry(t.TempDir())
+	reg.RegisterWasmTool(ToolSchema{
+		Name:        "http-hello",
+		Description: "Fetch a URL via the bundle's scoped HTTP handle",
+		Parameters:  map[string]any{"type": "object"},
+	}, nil)
+
+	if _, ok := reg.Get("http-hello"); !ok {
+		t.Fatal("precondition: http-hello not registered")
+	}
+
+	reg.Rescan()
+
+	got, ok := reg.Get("http-hello")
+	if !ok {
+		t.Fatal("Rescan() wiped wasm-tool http-hello from schemas")
+	}
+	if got.Description != "Fetch a URL via the bundle's scoped HTTP handle" {
+		t.Errorf("Description=%q (mutated by Rescan?)", got.Description)
+	}
+}
+
+// TestRegisterNative_SurvivesRescan pins the pre-existing native-tool
+// preservation behaviour — same guarantee but for the dual-registration
+// path that already existed before #423. Kept alongside the wasm-tool
+// variant so a future refactor can't silently regress one without the
+// other.
+func TestRegisterNative_SurvivesRescan(t *testing.T) {
+	reg := NewRegistry(t.TempDir())
+	reg.RegisterNative(&fakeNativeTool{name: "my-native"})
+
+	if _, ok := reg.Get("my-native"); !ok {
+		t.Fatal("precondition: my-native not registered")
+	}
+
+	reg.Rescan()
+
+	if _, ok := reg.Get("my-native"); !ok {
+		t.Error("Rescan() wiped native tool from schemas")
+	}
+}

@@ -34,17 +34,19 @@ func packResult(err, outLen uint32) uint64 {
 // every guest instantiated on the same runtime imports from the same
 // shared module. Per-guest authority is routed via reg.Lookup(mod.Name()):
 // each host function reads the calling guest's wazero module name and
-// fetches its FSHandle from the registry the loader populated at forge.
+// fetches its *handle.Instance from the registry the loader populated
+// at forge, then reaches into inst.FS / inst.HTTP / etc.
 //
-// Always-export model: alf_fs_read and alf_fs_write are unconditionally
-// exported. The structural gate against ambient access is `CheckImports`
-// (run before InstantiateModule), which fails the guest if it imports a
-// function its manifest did not declare. The previous "conditional
-// export" pattern was belt-and-braces; CheckImports remains the braces.
+// Always-export model: alf_fs_read, alf_fs_write, and alf_http_request
+// are unconditionally exported. The structural gate against ambient
+// access is `CheckImports` (run before InstantiateModule), which fails
+// the guest if it imports a function its manifest did not declare. The
+// previous "conditional export" pattern was belt-and-braces; CheckImports
+// remains the braces.
 //
 // Returns the instantiated host module — the runtime owns its lifetime
 // (closed when the engine closes).
-func BuildHostModule(ctx context.Context, rt wazero.Runtime, reg *hostFSRegistry) (api.Module, error) {
+func BuildHostModule(ctx context.Context, rt wazero.Runtime, reg *hostHandleRegistry) (api.Module, error) {
 	if reg == nil {
 		return nil, fmt.Errorf("wasm: BuildHostModule requires a host registry")
 	}
@@ -57,6 +59,17 @@ func BuildHostModule(ctx context.Context, rt wazero.Runtime, reg *hostFSRegistry
 		WithFunc(makeFSWriteDispatch(reg)).
 		WithParameterNames("path_ptr", "path_len", "data_ptr", "data_len").
 		Export(fnAlfFSWrite)
+	b.NewFunctionBuilder().
+		WithFunc(makeHTTPRequestDispatch(reg)).
+		WithParameterNames(
+			"method_ptr", "method_len",
+			"url_ptr", "url_len",
+			"headers_ptr", "headers_len",
+			"body_ptr", "body_len",
+			"out_status_ptr",
+			"out_body_ptr", "out_body_max",
+		).
+		Export(fnAlfHTTPRequest)
 
 	mod, err := b.Instantiate(ctx)
 	if err != nil {
@@ -66,30 +79,30 @@ func BuildHostModule(ctx context.Context, rt wazero.Runtime, reg *hostFSRegistry
 }
 
 // makeFSReadDispatch returns the alf_fs_read implementation. It looks
-// up the calling guest's FSHandle via mod.Name() — if no handle is
+// up the calling guest's Instance via mod.Name() — if no Instance is
 // registered (guest instantiated outside the forge path, or registered
-// with empty scope), the call returns errIO. Same memory-only access
+// without an FSHandle), the call returns errIO. Same memory-only access
 // pattern as the original makeFSRead — archtest TestWASMHostFSUsesMemoryReadWriteOnly
 // continues to enforce it.
-func makeFSReadDispatch(reg *hostFSRegistry) func(context.Context, api.Module, uint32, uint32, uint32, uint32) uint64 {
+func makeFSReadDispatch(reg *hostHandleRegistry) func(context.Context, api.Module, uint32, uint32, uint32, uint32) uint64 {
 	return func(ctx context.Context, mod api.Module, pathPtr, pathLen, outPtr, outMax uint32) uint64 {
-		fs := reg.Lookup(mod.Name())
-		if fs == nil {
+		inst := reg.Lookup(mod.Name())
+		if inst == nil || inst.FS == nil {
 			return packResult(errIO, 0)
 		}
-		return makeFSRead(fs)(ctx, mod, pathPtr, pathLen, outPtr, outMax)
+		return makeFSRead(inst.FS)(ctx, mod, pathPtr, pathLen, outPtr, outMax)
 	}
 }
 
 // makeFSWriteDispatch is the alf_fs_write counterpart. Returns uint32
 // (err_code only) per WASM.md §3.2.
-func makeFSWriteDispatch(reg *hostFSRegistry) func(context.Context, api.Module, uint32, uint32, uint32, uint32) uint32 {
+func makeFSWriteDispatch(reg *hostHandleRegistry) func(context.Context, api.Module, uint32, uint32, uint32, uint32) uint32 {
 	return func(ctx context.Context, mod api.Module, pathPtr, pathLen, dataPtr, dataLen uint32) uint32 {
-		fs := reg.Lookup(mod.Name())
-		if fs == nil {
+		inst := reg.Lookup(mod.Name())
+		if inst == nil || inst.FS == nil {
 			return errIO
 		}
-		return makeFSWrite(fs)(ctx, mod, pathPtr, pathLen, dataPtr, dataLen)
+		return makeFSWrite(inst.FS)(ctx, mod, pathPtr, pathLen, dataPtr, dataLen)
 	}
 }
 

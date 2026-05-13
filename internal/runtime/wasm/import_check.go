@@ -22,8 +22,8 @@ var ErrLyingManifest = errors.New("wasm: guest imports a symbol not in declared 
 // path — reject before instantiation so the guest never runs.
 var ErrUnknownImportModule = errors.New("wasm: guest imports from unknown module")
 
-// Module + name constants for the 0.8.0 host ABI (alf-fs-v0). See
-// docs/WASM.md §3 for the full ABI reference.
+// Module + name constants for the 0.8.x host ABI. See docs/WASM.md §3
+// for the full ABI reference. `alf_http_request` was added by #421 Wave 2.
 const (
 	hostModuleALF  = "alf"
 	hostModuleWASI = "wasi_snapshot_preview1"
@@ -37,6 +37,8 @@ const (
 //
 //   - alf.alf_fs_read is allowed iff manifest.FS.Reads is non-empty
 //   - alf.alf_fs_write is allowed iff manifest.FS.Writes is non-empty
+//   - alf.alf_http_request is allowed iff manifest.HTTP.Scopes is non-empty
+//     (#421 Wave 2)
 //   - any other name in module "alf" is rejected
 //   - module wasi_snapshot_preview1 is allowed unconditionally (the Go
 //     runtime needs it for clock / random / args / fd_write for panic
@@ -63,6 +65,7 @@ func CheckImports(cm wazero.CompiledModule, m *envelope.Manifest) error {
 
 	allowFSRead := len(m.FS.Reads) > 0
 	allowFSWrite := len(m.FS.Writes) > 0
+	allowHTTP := len(m.HTTP.Scopes) > 0
 
 	for _, def := range cm.ImportedFunctions() {
 		mod, name, _ := def.Import()
@@ -83,8 +86,12 @@ func CheckImports(cm wazero.CompiledModule, m *envelope.Manifest) error {
 				if !allowFSWrite {
 					return fmt.Errorf("%w: imports %s.%s but manifest declares no fs.writes", ErrLyingManifest, mod, name)
 				}
+			case fnAlfHTTPRequest:
+				if !allowHTTP {
+					return fmt.Errorf("%w: imports %s.%s but manifest declares no http.scopes", ErrLyingManifest, mod, name)
+				}
 			default:
-				return fmt.Errorf("%w: imports %s.%s — not in the 0.8.0 host ABI", ErrLyingManifest, mod, name)
+				return fmt.Errorf("%w: imports %s.%s — not in the 0.8.x host ABI", ErrLyingManifest, mod, name)
 			}
 		default:
 			return fmt.Errorf("%w: imports %s.%s", ErrUnknownImportModule, mod, name)

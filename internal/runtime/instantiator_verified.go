@@ -137,6 +137,30 @@ func (i *Instantiator) InstantiateVerified(ctx context.Context, in envelope.Veri
 		})
 	}
 
+	// HTTP block forging (#421 Wave 2). The legacy forgeGrants path
+	// above may have already populated grants.HTTP from the deprecated
+	// capability.PermissionSet.Networks slice; the envelope-typed
+	// pipeline supersedes it here whenever [[http.scopes]] is present
+	// on the manifest. We always override (rather than skip-if-set) so
+	// a stray legacy field cannot leak in alongside the typed scope.
+	// httpClient stays nil in tests + legacy callers that don't
+	// exercise the network — the resulting HTTPHandle is then "minted
+	// shape only", matching the pre-#421 marketplace-app fixture
+	// behaviour.
+	if len(vm.Manifest.HTTP.Scopes) > 0 {
+		patterns := make([]handle.HTTPPattern, 0, len(vm.Manifest.HTTP.Scopes))
+		for _, s := range vm.Manifest.HTTP.Scopes {
+			patterns = append(patterns, handle.HTTPPattern{
+				Host:       s.Host,
+				PathPrefix: s.PathPrefix,
+			})
+		}
+		grants.HTTP = handle.NewHTTPHandle(capManifest.ID, handle.HTTPScope{
+			Patterns:     patterns,
+			RequireHTTPS: true,
+		}, i.httpClient)
+	}
+
 	// Events block forging (#399). Only runs when bus + cross-flow
 	// registry are wired; tests and legacy paths skip this entirely.
 	// EventPub is forged unconditionally for any capability that

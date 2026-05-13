@@ -45,9 +45,9 @@ All host functions live in the wazero host module named `alf`. Function names ar
 
 Imports from `wasi_snapshot_preview1` are allowed unconditionally — the Go runtime needs them for init (clock, random, args, fd_write for panic messages). No filesystem pre-opens are configured; WASI cannot touch the host filesystem ambiently.
 
-### 3.2 Function signatures (0.8.0 subset)
+### 3.2 Function signatures (0.8.x subset)
 
-Only `fs` is supported in 0.8.0. `http`, `exec`, `secrets` handles are scoped to 0.9.0+.
+0.8.x wires `fs` and `http`. `exec`, `secrets` handles are scoped to 0.9.0+.
 
 ```
 alf_fs_read(path_ptr i32, path_len i32, out_ptr i32, out_max i32) → i64
@@ -59,6 +59,42 @@ alf_fs_read(path_ptr i32, path_len i32, out_ptr i32, out_max i32) → i64
 
 alf_fs_write(path_ptr i32, path_len i32, data_ptr i32, data_len i32) → i32
   result = err_code
+
+alf_http_request(                  # #421 Wave 2
+    method_ptr      i32, method_len  i32,
+    url_ptr         i32, url_len     i32,
+    headers_ptr     i32, headers_len i32,
+    body_ptr        i32, body_len    i32,
+    out_status_ptr  i32,
+    out_body_ptr    i32, out_body_max i32,
+) → i64
+  packed result:
+    high 32 bits = err_code (see §3.3)
+    low  32 bits = out_body_len  (bytes written to out_body_ptr;
+                                  when err_code == errBufferTooSmall,
+                                  contains the required size)
+  side effect:
+    *out_status_ptr = response status code (uint32 LE), valid when
+    err_code is 0 or errHTTPStatusNon2xx (the guest still receives
+    the body on non-2xx responses).
+
+  headers buffer format:
+    CRLF-delimited "Name: Value" lines, e.g.
+        "User-Agent: alf/0.8.0\r\nAccept: application/json\r\n"
+    Empty lines skipped. Lines without a colon → errIO at the host.
+
+  method:
+    Upper-cased server-side. Empty string defaults to GET.
+
+  scope enforcement:
+    At handle.HTTPHandle.Do, before any net.Dial. URLs whose host
+    or path_prefix does not match the manifest's [[http.scopes]]
+    return errOutOfScope and never reach the network.
+
+  scheme:
+    HTTPS-only at runtime (handle.HTTPScope.RequireHTTPS = true is
+    set by the forge). An http:// URL is rejected with errOutOfScope
+    even if the host pattern would otherwise match.
 ```
 
 **Why packed i64 returns**: Go's `//go:wasmimport` does not cleanly support multi-return across all target toolchains. Packing `err | len` in a single i64 keeps the host ABI uniform across guests and removes a source of incompatibility. Callers unpack with `(r >> 32)` and `(r & 0xFFFFFFFF)`.
@@ -69,11 +105,13 @@ alf_fs_write(path_ptr i32, path_len i32, data_ptr i32, data_len i32) → i32
 |---|---|---|
 | 0 | errOK | Operation succeeded; check `out_len` for bytes written |
 | 1 | errRevoked | Handle was revoked — Instance.Close() was called |
-| 2 | errOutOfScope | Path is not covered by manifest's fs.reads / fs.writes |
-| 3 | errIO | Underlying filesystem error (permission denied, disk full, not found, etc.) |
-| 4 | errBufferTooSmall | For read only: output buffer smaller than required; `out_len` carries the required size |
+| 2 | errOutOfScope | Path / URL not covered by manifest's `fs.reads`, `fs.writes`, or `http.scopes`; or HTTP scheme is not HTTPS |
+| 3 | errIO | Underlying filesystem or transport error (permission denied, disk full, not found, connection refused, DNS, malformed header, etc.) |
+| 4 | errBufferTooSmall | Output buffer smaller than required; `out_len` carries the required size |
+| 5 | errHTTPStatusNon2xx | Server returned a non-2xx status (3xx/4xx/5xx). The body is still written to the guest buffer and the status is still set; the guest can decide whether to treat this as a success |
+| 6 | errHTTPTLSFailure | TLS handshake failed, certificate validation failed, or required-HTTPS denied a plain-HTTP request |
 
-Error codes are **structural**, not enumerated in the manifest. They flow from the handle layer, not from the host function implementation — a host function cannot invent a new error class.
+Error codes are **structural** — shared across every `alf_*` host import. They flow from the handle layer, not from the host function implementation. A host function cannot invent a new error class.
 
 ### 3.4 Host-function safety matrix
 
@@ -83,8 +121,17 @@ For each host function, the safety responsibilities:
 |---|---|---|---|---|
 | `alf_fs_read` | `Memory.Read(path_ptr, path_len)` returns ok | `handle.FSHandle.Read` via `scopeAllows` | `handle.FSHandle.preflight` (atomic.Bool + lifecycleCtx) | `Memory.Read` (path) + `Memory.Write` (output) — bounds-checked |
 | `alf_fs_write` | Same pattern for path + data | `handle.FSHandle.Write` via `scopeAllows` | Same | `Memory.Read` (path + data) — bounds-checked |
+| `alf_http_request` | `Memory.Read` for method, url, headers, body — bounds-checked. URL parsed via `url.Parse`; malformed headers (no colon) return errIO | `handle.HTTPHandle.Do` via `HTTPScope.Allows` (host + port + path_prefix + RequireHTTPS=true) | `handle.HTTPHandle.revoked` (atomic.Bool) + lifecycle ctx | `Memory.Read` (method/url/headers/body) + `Memory.WriteUint32Le` (status) + `Memory.Write` (response body) — bounds-checked |
 
-**Hard rule** (archtest target for 0.8.0): host functions dereference guest memory *only* via `Memory.Read` / `Memory.Write`. No raw pointer arithmetic from guest-supplied offsets. This closes the audit finding C1 from the 0.7.9 security review.
+**Hard rule** (archtest target for 0.8.x): host functions dereference guest memory *only* via `Memory.Read` / `Memory.Write` / `Memory.WriteUint32Le`. No raw pointer arithmetic from guest-supplied offsets. This closes the audit finding C1 from the 0.7.9 security review. The rule is pinned by `TestWASMHostFSUsesMemoryReadWriteOnly` and `TestWASMHostHTTPUsesMemoryReadWriteOnly` in `internal/archtest/`.
+
+**HTTP egress path** (#421 Wave 2): every `alf_http_request` call goes through `http.DefaultTransport`, which reads `HTTP_PROXY` / `HTTPS_PROXY` env vars set by the daemon at boot (`cmd/alf-daemon/main.go:287`). The proxy is the firewall on `127.0.0.1:4751` (`internal/sandbox/network/proxy.go`) — so every WASM-originated request traverses the operator's domain allow/deny rules and is logged alongside every other daemon-originated request. Three layers of defense:
+
+1. **WASM isolation (wazero):** the guest has no other way to make a network call. `wasi:sockets` is forbidden in `[[raw_imports]]`.
+2. **Scope-at-handle (`HTTPScope.Allows`):** the manifest's declared `[[http.scopes]]` is the per-bundle allowlist. Out-of-scope = `errOutOfScope`, no `net.Dial`.
+3. **Firewall (`HTTP_PROXY`):** the operator's domain-level rules apply globally across every daemon-originated request.
+
+The `TestWasmHTTPScopeAllowlist` archtest pins that `host_http.go` reaches the network *only* through `inst.HTTP.Do` — no `http.Get`, `http.Client{}` literal, or `net.Dial` is allowed in the file.
 
 ### 3.5 Only linked if authorized
 

@@ -105,6 +105,94 @@ func TestWASMHostFSUsesMemoryReadWriteOnly(t *testing.T) {
 	}
 }
 
+// TestWASMHostHTTPUsesMemoryReadWriteOnly mirrors the FS rule for the
+// alf_http_request host import (#421 Wave 2): internal/runtime/wasm/
+// host_http.go must access guest memory ONLY via api.Memory.Read and
+// api.Memory.Write. Raw pointer arithmetic from guest-supplied offsets
+// is a confused-deputy trap — bounds checks in api.Memory are the
+// single invariant that prevents guest offsets from reaching host
+// memory.
+//
+// Forbidden constructs in host_http.go: same set as host_fs.go.
+func TestWASMHostHTTPUsesMemoryReadWriteOnly(t *testing.T) {
+	root := repoRoot()
+	target := filepath.Join(root, "internal", "runtime", "wasm", "host_http.go")
+
+	b, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read %s: %v", target, err)
+	}
+
+	forbidden := []struct {
+		re   *regexp.Regexp
+		name string
+	}{
+		{regexp.MustCompile(`"unsafe"`), "unsafe stdlib import"},
+		{regexp.MustCompile(`\bunsafe\.`), "unsafe package usage"},
+		{regexp.MustCompile(`\breflect\.SliceHeader\b`), "reflect.SliceHeader"},
+		{regexp.MustCompile(`\breflect\.StringHeader\b`), "reflect.StringHeader"},
+		{regexp.MustCompile(`//\s*go:linkname\b`), "go:linkname pragma"},
+	}
+
+	for _, f := range forbidden {
+		if f.re.Match(b) {
+			t.Errorf("host_http.go uses %s — host functions must access guest memory only via api.Memory.Read/Write (WASM.md §3.5 + #421 Wave 2).", f.name)
+		}
+	}
+}
+
+// TestWasmHTTPScopeAllowlist enforces the #421 invariant that no
+// host-side outbound HTTP call inside internal/runtime/wasm/ bypasses
+// the manifest-declared scope. The structural rule: host_http.go must
+// route every guest-originated request through inst.HTTP.Do — never
+// through net/http directly. Direct net/http use would skip
+// HTTPScope.Allows and let a guest reach hosts the manifest never
+// declared.
+//
+// Specifically, host_http.go must NOT call any of:
+//   - http.Get / http.Post / http.PostForm / http.Head
+//   - http.Client{...}.Do  (constructed http.Client, not the field on HTTPHandle)
+//   - http.NewRequest without a subsequent inst.HTTP.Do dispatch
+//
+// The narrow allowed surface is http.NewRequestWithContext (to build
+// the request object passed to inst.HTTP.Do). Every other http.* helper
+// would bypass the scope gate.
+func TestWasmHTTPScopeAllowlist(t *testing.T) {
+	root := repoRoot()
+	target := filepath.Join(root, "internal", "runtime", "wasm", "host_http.go")
+
+	b, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read %s: %v", target, err)
+	}
+
+	forbidden := []struct {
+		re     *regexp.Regexp
+		reason string
+	}{
+		{regexp.MustCompile(`\bhttp\.Get\b`), "http.Get bypasses HTTPHandle.Do (scope gate)"},
+		{regexp.MustCompile(`\bhttp\.Post\b`), "http.Post bypasses HTTPHandle.Do"},
+		{regexp.MustCompile(`\bhttp\.PostForm\b`), "http.PostForm bypasses HTTPHandle.Do"},
+		{regexp.MustCompile(`\bhttp\.Head\b`), "http.Head bypasses HTTPHandle.Do"},
+		{regexp.MustCompile(`\bhttp\.Client\s*\{`), "constructing http.Client directly bypasses HTTPHandle's scope check"},
+		{regexp.MustCompile(`\bhttp\.DefaultClient\b`), "http.DefaultClient bypasses HTTPHandle.Do"},
+		{regexp.MustCompile(`\bnet\.Dial\b`), "net.Dial bypasses every HTTP gate"},
+	}
+
+	for _, f := range forbidden {
+		if f.re.Match(b) {
+			t.Errorf("host_http.go contains %q — %s (#421 invariant: every WASM outbound HTTP call must go through inst.HTTP.Do which enforces HTTPScope.Allows).", f.re.String(), f.reason)
+		}
+	}
+
+	// Positive assertion: the file must call inst.HTTP.Do (or its
+	// receiver-typed variants). Without this, the host_http.go is
+	// either empty or unhooked from the scope gate.
+	if !regexp.MustCompile(`inst\.HTTP\.Do\(`).Match(b) {
+		t.Error("host_http.go must call inst.HTTP.Do — the scope gate. Without it, the host import has no HTTPScope.Allows check.")
+	}
+}
+
 // TestWASMPackageNoUnsafeOrLinkname enforces §4.2 invariant 5 on
 // the WASM subtree as a whole (except _test.go files — tests may
 // need controlled invariant proofs). Mirrors the same rule applied

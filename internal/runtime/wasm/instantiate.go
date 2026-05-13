@@ -76,8 +76,8 @@ func (m *Module) Close(ctx context.Context) error {
 type Runtime struct {
 	engine  *Engine
 	inst    *runtime.Instantiator
-	hostMod api.Module       // the singleton "alf" host module
-	hostReg *hostFSRegistry  // per-guest FSHandle dispatch table
+	hostMod api.Module          // the singleton "alf" host module
+	hostReg *hostHandleRegistry // per-guest *handle.Instance dispatch table
 }
 
 // NewRuntime constructs the daemon-wide WASM runtime. It takes over
@@ -95,7 +95,7 @@ func NewRuntime(ctx context.Context, inst *runtime.Instantiator) (*Runtime, erro
 		_ = e.Close(ctx)
 		return nil, fmt.Errorf("wasm: register WASI preview 1: %w", err)
 	}
-	reg := newHostFSRegistry()
+	reg := newHostHandleRegistry()
 	hostMod, err := BuildHostModule(ctx, e.Runtime(), reg)
 	if err != nil {
 		_ = e.Close(ctx)
@@ -171,12 +171,13 @@ func (r *Runtime) Instantiate(ctx context.Context, in envelope.VerifyInput, wasm
 		return nil, err
 	}
 
-	// 4. Register this guest's FSHandle in the runtime's per-guest
+	// 4. Register this guest's Instance in the runtime's per-guest
 	// dispatch table. The shared "alf" host module (registered at
-	// NewRuntime) routes alf_fs_* calls to this handle by reading
-	// the calling guest's wazero module name.
+	// NewRuntime) routes alf_fs_* and alf_http_request calls to the
+	// relevant handle by reading the calling guest's wazero module
+	// name.
 	guestName := string(vi.Manifest.ID)
-	r.hostReg.Register(guestName, vi.Instance.FS)
+	r.hostReg.Register(guestName, vi.Instance)
 	cleanupHostReg := func() { r.hostReg.Unregister(guestName) }
 
 	// 5. Instantiate guest in reactor mode. WithStartFunctions

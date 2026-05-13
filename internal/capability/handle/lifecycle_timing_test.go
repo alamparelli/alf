@@ -19,6 +19,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -43,7 +44,8 @@ func TestCloseTiming_HTTP(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTPHandle("cap", HTTPScope{Hosts: []string{"127.0.0.1"}}, srv.Client())
+	srvURL, _ := url.Parse(srv.URL)
+	h := NewHTTPHandle("cap", HTTPScope{Patterns: []HTTPPattern{{Host: srvURL.Host}}}, srv.Client())
 	inst := NewInstance(context.Background(), "cap", Grants{HTTP: h})
 
 	type result struct {

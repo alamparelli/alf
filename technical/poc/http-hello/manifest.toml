@@ -1,0 +1,9 @@
+alf_envelope_version = 1
+id      = "http-hello"
+kind    = "wasm-tool"
+version = "0.1.0"
+name    = "HTTP Hello"
+description = "Reference #421 Wave 2 smoke-test tool. Makes a GET request to a host declared in [[http.scopes]] and returns the response body as JSON. Requires Tier 3 signing — placed under technical/poc/ (not skills.d/) precisely because skills.d/wasm/* is auto-signed with the local daemon key at boot, which SEC-080-006 refuses for manifests carrying [[http.scopes]]."
+
+[[http.scopes]]
+host = "httpbin.org"

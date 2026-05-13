@@ -170,6 +170,55 @@ func TestCheckImports_NoImportsAccepted(t *testing.T) {
 	}
 }
 
+// TestCheckImports_HTTPRequest_HappyPath pins #421 Wave 2: a guest
+// that imports alf_http_request is accepted iff its manifest declares
+// at least one [[http.scopes]] entry.
+func TestCheckImports_HTTPRequest_HappyPath(t *testing.T) {
+	e := NewEngine(context.Background())
+	t.Cleanup(func() { _ = e.Close(context.Background()) })
+
+	bin := buildWASMWithImports([][2]string{
+		{hostModuleALF, fnAlfHTTPRequest},
+	})
+	cm, err := e.Compile(context.Background(), bin)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	m := &envelope.Manifest{
+		HTTP: envelope.HTTPBlock{
+			Scopes: []envelope.HTTPScope{{Host: "openlibrary.org"}},
+		},
+	}
+	if err := CheckImports(cm, m); err != nil {
+		t.Errorf("CheckImports: %v", err)
+	}
+}
+
+// TestCheckImports_HTTPRequest_RejectedWithoutScopes pins the inverse:
+// a guest imports alf_http_request but the manifest has no http.scopes
+// → ErrLyingManifest. This is the gate that catches a manifest-vs-
+// guest mismatch; without it, an unauthorised guest could still link
+// the host function because BuildHostModule always exports it.
+func TestCheckImports_HTTPRequest_RejectedWithoutScopes(t *testing.T) {
+	e := NewEngine(context.Background())
+	t.Cleanup(func() { _ = e.Close(context.Background()) })
+
+	bin := buildWASMWithImports([][2]string{
+		{hostModuleALF, fnAlfHTTPRequest},
+	})
+	cm, err := e.Compile(context.Background(), bin)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	m := &envelope.Manifest{} // empty — no http.scopes declared
+	err = CheckImports(cm, m)
+	if !errors.Is(err, ErrLyingManifest) {
+		t.Errorf("got %v, want ErrLyingManifest", err)
+	}
+}
+
 func TestCheckImports_NilCompiledModule(t *testing.T) {
 	err := CheckImports(nil, &envelope.Manifest{})
 	if err == nil {

@@ -44,6 +44,8 @@ dev-alf-local/
 # auto-signed by daemon at boot — never committed).
 skills.d/wasm/*/*.wasm
 skills.d/wasm/*/manifest.sig
+technical/poc/*/*.wasm
+technical/poc/*/manifest.sig
 docker-compose.yml
 dev-alf
 dev-secrets/

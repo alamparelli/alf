@@ -121,6 +121,14 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 		runtime.WithEventsBus(bus, bus),
 		runtime.WithCrossFlowRegistry(crossFlow),
 		runtime.WithHandleRegistry(handleRegistry),
+		// #421 Wave 2: WASM-app HTTP egress. The default client uses
+		// http.DefaultTransport, which honours HTTP_PROXY / HTTPS_PROXY
+		// env vars; the daemon sets these at boot (main.go) to point at
+		// the firewall proxy on 127.0.0.1:4751 — so every WASM-originated
+		// request transparently crosses the operator's domain allow/deny
+		// rules and lands in the firewall request log alongside everything
+		// else the daemon emits.
+		runtime.WithHTTPClient(wasm.NewDefaultHTTPClient()),
 	)
 	if err := inst.SeedHandleRegistry(handleRegistry); err != nil {
 		return nil, fmt.Errorf("wasm-loader: seed handle registry: %w", err)

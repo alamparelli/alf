@@ -47,52 +47,73 @@ func (c cancelOnClose) Close() error {
 	return err
 }
 
+// HTTPPattern is one entry from the manifest's [[http.scopes]] block.
+// Host is the exact-match target. PathPrefix is an optional literal
+// prefix the URL path must satisfy. Matching is segment-aware at
+// HTTPScope.Allows ("/books/v1" matches "/books/v1" and "/books/v1/X"
+// but NOT "/books/v10" — defeats the prefix-collision footgun).
+//
+// The shape is intentionally narrow per #421: no wildcards, no regex,
+// no scheme (HTTPS is implicit when RequireHTTPS is set on the parent
+// scope). The envelope validator already enforces these rules at parse
+// time; the handle layer trusts the inputs it receives because the
+// forge is the only producer.
+type HTTPPattern struct {
+	Host       string // exact match, lowercase, optional ":port" suffix
+	PathPrefix string // "" = any path; otherwise must start with "/"
+}
+
 // HTTPScope describes the outbound HTTP access a capability was granted.
-// Hosts accept either an exact hostname ("api.example.com") or a
-// leading-wildcard pattern ("*.example.com") that matches any subdomain
-// of the suffix. Methods is the upper-cased set of allowed verbs; empty
-// means all methods are allowed on matched hosts.
+// Patterns is the authoritative allowlist — empty means "no outbound
+// HTTP authority". Methods is the upper-cased set of allowed verbs;
+// empty means all methods are allowed on matched hosts. RequireHTTPS,
+// when true, rejects any non-HTTPS request even if a pattern would
+// otherwise match.
 //
 // Scope is enforced by HTTPScope.Allows at each Do() call. A lying
 // manifest cannot expand this at runtime because the scope is compiled
-// once at forge time from the verified manifest.
+// once at forge time from the verified manifest. The #421 forge
+// always sets RequireHTTPS = true; test fixtures may set it to false
+// to exercise the host-import path against httptest servers (which
+// only speak HTTP).
 type HTTPScope struct {
-	Hosts   []string
-	Methods []string
+	Patterns     []HTTPPattern
+	Methods      []string
+	RequireHTTPS bool
 }
 
 // Allows reports whether a request to the given URL with the given method
-// is within scope. Nil URL, empty hostname, and zero-length Hosts are all
-// treated as denials.
+// is within scope. Nil URL, empty Host, zero-length Patterns, and HTTPS
+// requirement mismatch are all treated as denials.
 func (s HTTPScope) Allows(u *url.URL, method string) bool {
 	if u == nil {
 		return false
 	}
-	host := u.Hostname()
-	if host == "" {
-		return false
-	}
-	if !s.allowedHost(host) {
+	if s.RequireHTTPS && !strings.EqualFold(u.Scheme, "https") {
 		return false
 	}
 	if len(s.Methods) > 0 && !s.allowedMethod(method) {
 		return false
 	}
-	return true
-}
-
-func (s HTTPScope) allowedHost(host string) bool {
-	host = strings.ToLower(host)
-	for _, pattern := range s.Hosts {
-		pattern = strings.ToLower(pattern)
-		if pattern == host {
-			return true
+	if len(s.Patterns) == 0 {
+		return false
+	}
+	// u.Host carries "host" or "host:port" — we compare verbatim so a
+	// pattern "homelab.local:8443" matches only when the request URL
+	// also carries the explicit port. A pattern "openlibrary.org"
+	// matches https://openlibrary.org/... but NOT
+	// https://openlibrary.org:8443/... — explicit ports require an
+	// explicit pattern.
+	host := strings.ToLower(u.Host)
+	if host == "" {
+		return false
+	}
+	for _, p := range s.Patterns {
+		if strings.ToLower(p.Host) != host {
+			continue
 		}
-		if strings.HasPrefix(pattern, "*.") {
-			suffix := pattern[1:]
-			if strings.HasSuffix(host, suffix) && len(host) > len(suffix) {
-				return true
-			}
+		if matchesPathPrefix(p.PathPrefix, u.Path) {
+			return true
 		}
 	}
 	return false
@@ -106,6 +127,19 @@ func (s HTTPScope) allowedMethod(m string) bool {
 		}
 	}
 	return false
+}
+
+// matchesPathPrefix returns true iff path is within prefix using
+// segment-aware matching: "/books/v1" matches "/books/v1" and
+// "/books/v1/X" but NOT "/books/v10". Empty prefix matches any path.
+func matchesPathPrefix(prefix, path string) bool {
+	if prefix == "" {
+		return true
+	}
+	if path == prefix {
+		return true
+	}
+	return strings.HasPrefix(path, prefix+"/")
 }
 
 // HTTPHandle grants scoped outbound HTTP access. Non-serializable (via the

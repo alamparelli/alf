@@ -69,7 +69,7 @@ func TestBuildHostModule_AlwaysExportsBothFunctions(t *testing.T) {
 	e := NewEngine(context.Background())
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
-	reg := newHostFSRegistry()
+	reg := newHostHandleRegistry()
 	mod, err := BuildHostModule(context.Background(), e.Runtime(), reg)
 	if err != nil {
 		t.Fatalf("BuildHostModule: %v", err)
@@ -83,8 +83,12 @@ func TestBuildHostModule_AlwaysExportsBothFunctions(t *testing.T) {
 	if _, ok := defs[fnAlfFSWrite]; !ok {
 		t.Errorf("%s not exported", fnAlfFSWrite)
 	}
-	if got := len(defs); got != 2 {
-		t.Errorf("want 2 exports, got %d: %v", got, keys(defs))
+	// Wave 2 of #421 added alf_http_request alongside the two FS imports.
+	if _, ok := defs[fnAlfHTTPRequest]; !ok {
+		t.Errorf("%s not exported", fnAlfHTTPRequest)
+	}
+	if got := len(defs); got != 3 {
+		t.Errorf("want 3 exports, got %d: %v", got, keys(defs))
 	}
 }
 
@@ -110,7 +114,7 @@ func TestBuildHostModule_SameRuntimeTwiceFails(t *testing.T) {
 	e := NewEngine(context.Background())
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
-	reg := newHostFSRegistry()
+	reg := newHostHandleRegistry()
 	mod1, err := BuildHostModule(context.Background(), e.Runtime(), reg)
 	if err != nil {
 		t.Fatalf("first BuildHostModule: %v", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 
 	"github.com/alamparelli/alf/internal/capability"
@@ -89,6 +90,16 @@ type Instantiator struct {
 	// optional fields above.
 	handleRegistry *handle.HandleRegistry
 
+	// httpClient is the *http.Client used to back HTTPHandle when a
+	// manifest declares [[http.scopes]] (#421 Wave 2). Production
+	// daemons wire wasm.NewDefaultHTTPClient(); tests pass an
+	// httptest.Server's Client(). When nil, an HTTPHandle is still
+	// forged for manifests that declare http.scopes — the handle's
+	// Do() will fail on a nil client, matching the existing semantics
+	// for `marketplace-app` legacy tests that mint authority shapes
+	// without an actual network.
+	httpClient *http.Client
+
 	// Live registry — populated by InstantiateVerified after every
 	// successful forge. RevokeByKey walks this list to close every
 	// Instance signed by a given key. Entries self-prune via a
@@ -160,6 +171,24 @@ func WithToolInvoker(inv handle.ToolInvoker) InstantiatorOption {
 // race-deterministic test seam — production code never sets it.
 func WithAfterVerifyHookForTest(fn func()) InstantiatorOption {
 	return func(i *Instantiator) { i.afterVerifyHook = fn }
+}
+
+// WithHTTPClient wires the *http.Client that InstantiateVerified hands
+// to handle.NewHTTPHandle when a manifest declares [[http.scopes]]
+// (#421 Wave 2). Production daemons pass wasm.NewDefaultHTTPClient(),
+// which routes through HTTP_PROXY (= the firewall on 127.0.0.1:4751,
+// internal/sandbox/network/proxy.go) so every WASM-originated request
+// also crosses the operator's domain allow/deny rules. Tests pass an
+// httptest.Server's Client() to exercise the host import without a
+// real proxy.
+//
+// When this option is omitted, manifests with [[http.scopes]] forge an
+// HTTPHandle anyway, but with a nil http.Client. Calls on such a
+// handle return io errors — the legacy `marketplace-app` test path
+// relied on the same pattern (HTTPHandle minted with nil client to
+// assert authority shape without an actual network).
+func WithHTTPClient(client *http.Client) InstantiatorOption {
+	return func(i *Instantiator) { i.httpClient = client }
 }
 
 // WithHandleRegistry wires the runtime handle registry (#392 Stage 3).
@@ -314,12 +343,21 @@ func (i *Instantiator) forgeGrants(signed SignedManifest) handle.Grants {
 		})
 	}
 
-	// Networks: treated as hostname patterns. Exact match or wildcard
-	// subdomain pattern ("*.example.com"). CIDR parsing defer until
-	// #397 specifies the format.
+	// Networks: legacy capability.PermissionSet.Networks → HTTPPattern.
+	// The legacy path was used by marketplace-app bundles pre-#420;
+	// the #420 lockdown retired that pipeline. After #421 Wave 2 the
+	// authoritative source is envelope.Manifest.HTTP.Scopes wired in
+	// instantiator_verified.go. Legacy `*.example.com` wildcards are
+	// not propagated — Patterns is exact-match only per #421's
+	// "no wildcard hosts" rule. Wildcards in legacy manifests become
+	// dead patterns that never match anything.
 	if len(m.Permissions.Networks) > 0 {
+		patterns := make([]handle.HTTPPattern, 0, len(m.Permissions.Networks))
+		for _, h := range m.Permissions.Networks {
+			patterns = append(patterns, handle.HTTPPattern{Host: h})
+		}
 		g.HTTP = handle.NewHTTPHandle(m.ID, handle.HTTPScope{
-			Hosts: m.Permissions.Networks,
+			Patterns: patterns,
 		}, nil)
 	}
 

@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/capability/envelope"
 	"github.com/alamparelli/alf/internal/capability/handle"
 	"github.com/alamparelli/alf/internal/runtime"
 	"github.com/alamparelli/alf/internal/runtime/events"
 	"github.com/alamparelli/alf/internal/runtime/wasm"
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
 // wasmLoaderRoot is the bundle directory layout the daemon scans on
@@ -74,7 +76,22 @@ func (w *wasmRuntime) Close(ctx context.Context) error {
 // The runtime ships unconditionally as of v0.8.0: the dev-window
 // ALF_EXPERIMENTAL gate was retired with the strict-flip. WASM bundles
 // load + verify + register at boot whenever <skillsDir>/wasm exists.
-func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wasm.CapabilityRegistry, logf func(string, ...any)) (*wasmRuntime, error) {
+// toolRegistrarAdapter wraps a *tooling.Registry behind wasm.ToolRegistrar
+// (#423). The narrow interface keeps internal/runtime/wasm/loader.go
+// free of an internal/tooling dependency.
+type toolRegistrarAdapter struct {
+	reg *tooling.Registry
+}
+
+func (a *toolRegistrarAdapter) RegisterWasmTool(name, description string, parameters map[string]any, cap capability.Capability) {
+	a.reg.RegisterWasmTool(tooling.ToolSchema{
+		Name:        name,
+		Description: description,
+		Parameters:  parameters,
+	}, cap)
+}
+
+func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wasm.CapabilityRegistry, toolRegistry *tooling.Registry, logf func(string, ...any)) (*wasmRuntime, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -141,13 +158,14 @@ func setupWASMLoader(ctx context.Context, dataDir, skillsDir string, registry wa
 	}
 
 	loader := &wasm.Loader{
-		Runtime:     rt,
-		Registry:    registry,
-		DaemonPriv:  priv,
-		TrustStore:  store,
-		Logger:      logf,
-		CrossFlow:   crossFlow,
-		SnapshotDir: dataDir,
+		Runtime:       rt,
+		Registry:      registry,
+		ToolRegistrar: &toolRegistrarAdapter{reg: toolRegistry},
+		DaemonPriv:    priv,
+		TrustStore:    store,
+		Logger:        logf,
+		CrossFlow:     crossFlow,
+		SnapshotDir:   dataDir,
 	}
 
 	// #420 — under §4.1 the loader scans <dataDir>/tools/<id>/ for

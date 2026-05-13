@@ -27,6 +27,7 @@ type Manifest struct {
 	HTTP       HTTPBlock
 	Events     EventsBlock
 	Tools      ToolsBlock
+	Tool       ToolBlock // #423 — wasm-tool / skill LLM-surface metadata
 	Provider   ProviderBlock // only valid when Kind == KindCapabilityProvider
 	Depends    []DependsEntry
 	RawImports []RawImport
@@ -69,6 +70,45 @@ type FSBlock struct {
 // match (consistent with internal/capability/handle/fs.go's semantics).
 type FSPath struct {
 	Path string
+}
+
+// ToolBlock carries the [tool.schema] block per MANIFEST-SCHEMA §3.4 and
+// #423. The block is metadata only — it does not widen any authority and
+// is not gated by the Tier 2 ceiling. Its purpose is to describe how the
+// bundle should appear in the LLM tool surface: name (= manifest.id),
+// human description, JSON Schema for input parameters.
+//
+// Schema is the OpenAI-compatible function-calling parameters schema —
+// any JSON-Schema-shaped object the chat engine can pass through to the
+// model's tool definition. Empty Description + nil Schema means "no
+// LLM tool surface for this bundle" (e.g. wasm-app kind, or a wasm-tool
+// the operator wants to keep capability-only).
+//
+// Per-kind applicability:
+//   - wasm-tool: schema, when present, exposes the bundle in
+//     tooling.Registry.schemas — the LLM tool-loop can call it via
+//     tool_use. Without the schema, the bundle stays capability-only.
+//   - skill: same semantics; skills already declare their tools via
+//     [[tools.declares]], the schema describes the skill's own surface.
+//   - any other kind: the schema is rejected at parse time
+//     (ErrToolSchemaNotAllowedHere) — wasm-app / capability-provider /
+//     llm-provider do not have an LLM-callable surface.
+type ToolBlock struct {
+	Schema *ToolSchema
+}
+
+// ToolSchema is the OpenAI-compatible {description, parameters} pair
+// used by tooling.Registry.ToolSchema. Parameters is an arbitrary
+// JSON-Schema-shaped map kept open so future schema versions don't
+// require an envelope schema bump every time the OpenAI spec evolves.
+//
+// Required envelope-level validation today: Description must be
+// non-empty (operators see it at install + the LLM sees it as part of
+// the tool description). Parameters may be nil for a "takes no input"
+// tool but is conventionally `{"type":"object","properties":{}}`.
+type ToolSchema struct {
+	Description string
+	Parameters  map[string]any
 }
 
 // HTTPBlock captures `[[http.scopes]]` per §3.4 of MANIFEST-SCHEMA and
@@ -163,6 +203,7 @@ type tomlManifest struct {
 	HTTP       tomlHTTPBlock      `toml:"http"`
 	Events     tomlEventsBlock    `toml:"events"`
 	Tools      tomlToolsBlock     `toml:"tools"`
+	Tool       tomlToolBlock      `toml:"tool"`
 	Provider   tomlProviderBlock  `toml:"provider"`
 	Depends    []tomlDependsEntry `toml:"depends"`
 	RawImports []tomlRawImport    `toml:"raw_imports"`
@@ -176,6 +217,19 @@ type tomlManifest struct {
 
 type tomlHTTPBlock struct {
 	Scopes []tomlHTTPScope `toml:"scopes"`
+}
+
+type tomlToolBlock struct {
+	// Schema is *tomlToolSchema rather than the value form so the
+	// validator can distinguish "block absent" from "block present
+	// but empty". An absent block is benign; a present-but-empty
+	// block is a programmer error (no description).
+	Schema *tomlToolSchema `toml:"schema"`
+}
+
+type tomlToolSchema struct {
+	Description string         `toml:"description"`
+	Parameters  map[string]any `toml:"parameters"`
 }
 
 type tomlHTTPScope struct {

@@ -64,6 +64,11 @@ var (
 	ErrRawImportForbidden          = errors.New("envelope: raw_imports module is forbidden — use a scoped handle instead")
 	ErrRawImportNotInAllowlist     = errors.New("envelope: raw_imports module is not in the §3.4 allowlist")
 
+	// #423 — [tool.schema] block.
+	ErrToolSchemaNotAllowedHere = errors.New("envelope: [tool.schema] is only valid when kind = \"wasm-tool\" or \"skill\"")
+	ErrToolSchemaDescriptionEmpty = errors.New("envelope: tool.schema.description is required")
+	ErrToolSchemaParametersInvalid = errors.New("envelope: tool.schema.parameters must be a JSON-Schema object (top-level type=object)")
+
 	// #421 Wave 1 — http.scopes.
 	ErrHTTPScopeHostEmpty           = errors.New("envelope: http.scopes.host is empty")
 	ErrHTTPScopeHostMalformed       = errors.New("envelope: http.scopes.host must be a DNS-shape hostname (no wildcards, no scheme, no path); optional :port suffix accepted")
@@ -233,6 +238,7 @@ var knownTopLevelKeys = map[string]struct{}{
 	"fs":                   {},
 	"events":               {},
 	"tools":                {},
+	"tool":                 {}, // #423 — [tool.schema] for wasm-tool / skill LLM surface
 	"provider":             {}, // #392 — only valid when kind = capability-provider
 	"depends":              {}, // #392 — namespace-scoped handle deps
 	"raw_imports":          {}, // #392 — escape-hatch raw WASI access
@@ -362,6 +368,13 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		return nil, err
 	}
 
+	// tool block (#423) — LLM tool surface metadata. Kind-aware:
+	// rejects [tool.schema] on kinds without an LLM-callable surface.
+	toolBlock, err := validateToolBlock(t.Tool, kind)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Manifest{
 		EnvelopeVersion: *t.AlfEnvelopeVersion,
 		ID:              t.ID,
@@ -373,6 +386,7 @@ func Validate(tomlBytes []byte) (*Manifest, error) {
 		HTTP:            httpBlock,
 		Events:          events,
 		Tools:           tools,
+		Tool:            toolBlock,
 		Provider:        providerBlock,
 		Depends:         depends,
 		RawImports:      rawImports,
@@ -491,6 +505,52 @@ func validateHTTPPathPrefix(raw string, index int) (string, error) {
 		}
 	}
 	return raw, nil
+}
+
+// validateToolBlock checks the optional [tool.schema] block per #423.
+// The block is metadata for the LLM tool surface — it does not widen
+// any authority. Validation rules:
+//
+//   - The block is allowed only on kinds with an LLM-callable surface:
+//     wasm-tool and skill. Other kinds (wasm-app, capability-provider,
+//     llm-provider, marketplace-app) get ErrToolSchemaNotAllowedHere.
+//   - When present, description must be non-empty (operators see it at
+//     install + the LLM sees it as part of the tool description).
+//   - Parameters, when set, must declare top-level type "object" — the
+//     OpenAI function-calling tool API requires an object schema. nil
+//     Parameters maps to a "takes no input" tool.
+//
+// Returns ToolBlock{Schema: nil} when the block is absent (allowed for
+// any kind — the bundle stays capability-only and invisible to the LLM
+// surface).
+func validateToolBlock(raw tomlToolBlock, kind ManifestKind) (ToolBlock, error) {
+	if raw.Schema == nil {
+		return ToolBlock{}, nil
+	}
+	if kind != KindWASMTool && kind != KindSkill {
+		return ToolBlock{}, fmt.Errorf("%w: kind=%q", ErrToolSchemaNotAllowedHere, kind)
+	}
+	desc := strings.TrimSpace(raw.Schema.Description)
+	if desc == "" {
+		return ToolBlock{}, ErrToolSchemaDescriptionEmpty
+	}
+	// Parameters validation: nil is allowed (no input). When set, the
+	// top-level "type" must equal "object" per OpenAI's tool schema
+	// contract. We do NOT recurse into properties — JSON Schema is
+	// expressive and the chat engine forwards the raw map to the
+	// model. Schema bugs surface as model behaviour, not as a parse
+	// error.
+	if raw.Schema.Parameters != nil {
+		t, ok := raw.Schema.Parameters["type"].(string)
+		if !ok || t != "object" {
+			return ToolBlock{}, fmt.Errorf("%w: got type=%v",
+				ErrToolSchemaParametersInvalid, raw.Schema.Parameters["type"])
+		}
+	}
+	return ToolBlock{Schema: &ToolSchema{
+		Description: desc,
+		Parameters:  raw.Schema.Parameters,
+	}}, nil
 }
 
 // validateEventsBlock walks events.exports + events.subscribes and

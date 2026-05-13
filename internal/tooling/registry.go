@@ -32,6 +32,12 @@ type Registry struct {
 	// RegisterNative call also registers the tool as a KindTool Capability.
 	// Introduced by #338 C1 (dual-registration). Consumers migrate in C2.
 	capReg *capability.Registry
+
+	// wasmNames is the set of bundle ids registered through
+	// RegisterWasmTool (#423). Tracked separately from natives so
+	// ResolveWildcard can include WASM tools in `*` expansion without
+	// re-categorising the schemas map.
+	wasmNames map[string]bool
 }
 
 // NewRegistry scans tools.d/*.json and tools/*.json under dataDir for tool manifests.
@@ -245,6 +251,59 @@ func (r *Registry) NativeToolNames() []string {
 	return r.nativeNames
 }
 
+// wasmToolNames holds the ids of every wasm-tool / skill bundle the
+// daemon's WASM loader registered through RegisterWasmTool. Tracked
+// separately from native tools so wildcard resolvers can include them
+// alongside the file-scan and native-Go entries. The slice mirrors
+// the natives layout (append-only at registration time).
+//
+// Lookup via r.schemas[name] still works the same way — the registry
+// has no kind discriminator on a fetched ToolSchema.
+
+// RegisterWasmTool adds a WASM-backed tool's schema to the registry
+// and (when a capability.Registry is attached via SetCapabilityRegistry)
+// mirrors the underlying Capability there. Mirrors RegisterNative's
+// dual-registration pattern so the chat engine's wildcard expansion
+// and direct lookup both see the bundle.
+//
+// schema.Name must be the bundle id (matches the manifest's `id`
+// field) — the LLM tool-loop dispatches by Name. cap is the
+// wasm.Adapter (which implements capability.Capability); the
+// registry holds it so wildcard tier resolvers can list it without
+// the daemon's wasm.Runtime reference.
+//
+// Used by the WASM loader after a Tier-3-signed bundle's adapter is
+// constructed. See #423 for context.
+func (r *Registry) RegisterWasmTool(schema ToolSchema, cap capability.Capability) {
+	r.schemas[schema.Name] = schema
+	if r.wasmNames == nil {
+		r.wasmNames = make(map[string]bool, 4)
+	}
+	r.wasmNames[schema.Name] = true
+
+	if r.capReg != nil && cap != nil {
+		if _, exists := r.capReg.Get(capability.ID(schema.Name)); !exists {
+			if err := r.capReg.Register(cap); err != nil {
+				log.Printf("tooling: capability dual-register wasm-tool %q: %v", schema.Name, err)
+			}
+		}
+	}
+}
+
+// WasmToolNames returns the names of every wasm-tool / skill bundle
+// registered via RegisterWasmTool. Used by ResolveWildcard so tier
+// definitions with `tools = ["*"]` include WASM-backed tools.
+func (r *Registry) WasmToolNames() []string {
+	if len(r.wasmNames) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(r.wasmNames))
+	for n := range r.wasmNames {
+		out = append(out, n)
+	}
+	return out
+}
+
 // AllSchemas returns all registered schemas (native + file-based user tools).
 // Use this to build the tool list for API LLMs.
 func (r *Registry) AllSchemas() []ToolSchema {
@@ -278,8 +337,9 @@ var signalTools = map[string]bool{
 	"status": true,
 }
 
-// ResolveWildcard expands a "*" tool wildcard into all CLI + native tools, deduplicated.
-// When a tool name exists both as a CLI binary and a native Go tool, native wins (same schema key).
+// ResolveWildcard expands a "*" tool wildcard into all CLI + native +
+// WASM tools, deduplicated. When a tool name exists in multiple sources
+// the first wins by precedence (CLI → native → wasm).
 func ResolveWildcard(dataDir string, reg *Registry) []string {
 	seen := make(map[string]bool)
 	var tools []string
@@ -291,6 +351,16 @@ func ResolveWildcard(dataDir string, reg *Registry) []string {
 	}
 	if reg != nil {
 		for _, n := range reg.NativeToolNames() {
+			if !seen[n] {
+				seen[n] = true
+				tools = append(tools, n)
+			}
+		}
+		// #423: WASM-backed tools (signed Tier 3 manifests with
+		// [tool.schema]) join wildcard resolution alongside native +
+		// CLI tools. Without this, a tier config of `tools = ["*"]`
+		// would skip them.
+		for _, n := range reg.WasmToolNames() {
 			if !seen[n] {
 				seen[n] = true
 				tools = append(tools, n)

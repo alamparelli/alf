@@ -731,7 +731,7 @@ func main() {
 	// runs verify+forge+instantiate per bundle, registers each adapter into
 	// capRegistry. Per-bundle errors are logged and skipped; init failures
 	// downgrade to a warning so the daemon stays usable for non-WASM flows.
-	wasmRt, err := setupWASMLoader(context.Background(), dataDir, skillsDir, capRegistry, log.Printf)
+	wasmRt, err := setupWASMLoader(context.Background(), dataDir, skillsDir, capRegistry, toolRegistry, log.Printf)
 	if err != nil {
 		log.Printf("wasm-loader: init failed (WASM bundles will not load): %v", err)
 	} else {

@@ -7,3 +7,18 @@ description = "Reference #421 Wave 2 smoke-test tool. Makes a GET request to a h
 
 [[http.scopes]]
 host = "httpbin.org"
+
+# #423 — exposes this bundle to the LLM tool surface. Without this
+# block, the bundle loads as a capability.Capability but is invisible
+# to the chat engine (no tool_use entry).
+[tool.schema]
+description = "Fetch a URL via the bundle's scoped HTTP handle. The URL host must match one of the manifest's [[http.scopes]] entries (httpbin.org for this bundle). Returns the response status and body, or an error code (e.g. out_of_scope, tls_failure)."
+
+[tool.schema.parameters]
+type = "object"
+required = ["url"]
+
+[tool.schema.parameters.properties]
+[tool.schema.parameters.properties.url]
+type = "string"
+description = "Full https://... URL to fetch. Must target a host declared in this bundle's manifest http.scopes."

@@ -24,6 +24,20 @@ type CapabilityRegistry interface {
 	Register(capability.Capability) error
 }
 
+// ToolRegistrar is the minimal surface the loader needs to expose a
+// signed wasm-tool / skill bundle to the LLM tool surface (#423).
+// The daemon wires a real tooling.Registry behind this interface via
+// a thin adapter; tests can supply a no-op or recording stub.
+//
+// RegisterWasmTool is called only when the bundle's manifest carries
+// a non-nil [tool.schema] block AND the kind is invokable by the LLM
+// (wasm-tool or skill). For any other case the loader registers the
+// adapter in CapabilityRegistry only — the bundle stays callable via
+// direct capability.Execute() but is invisible to the LLM tool-loop.
+type ToolRegistrar interface {
+	RegisterWasmTool(name, description string, parameters map[string]any, cap capability.Capability)
+}
+
 // Loader walks a skills.d/wasm/ tree and registers each bundle it
 // can verify through the wasm.Runtime + wasm.Adapter stack.
 //
@@ -41,6 +55,12 @@ type CapabilityRegistry interface {
 type Loader struct {
 	Runtime    *Runtime
 	Registry   CapabilityRegistry
+	// ToolRegistrar is optional. When non-nil, bundles whose manifest
+	// declares [tool.schema] are also exposed to the LLM tool surface
+	// via this seam. When nil (test fixtures, legacy boot paths), the
+	// adapter is still registered as a Capability but stays invisible
+	// to the LLM. See #423.
+	ToolRegistrar ToolRegistrar
 	DaemonPriv envelope.PrivateKey
 	TrustStore envelope.TrustStore
 	Logger     func(format string, args ...any)
@@ -260,6 +280,21 @@ func (l *Loader) instantiateBundle(ctx context.Context, pre preLoadedBundle) (st
 	if err := l.Registry.Register(adapter); err != nil {
 		_ = adapter.Close(ctx)
 		return "", fmt.Errorf("register: %w", err)
+	}
+
+	// #423: surface to the LLM tool registry when the manifest carries
+	// a [tool.schema] block AND a ToolRegistrar is wired. The kind
+	// check happened at envelope.Validate (only wasm-tool / skill can
+	// declare the block), so reaching here with a non-nil schema means
+	// it's an LLM-invokable bundle. Without ToolRegistrar (test paths,
+	// legacy boots), the bundle stays capability-only — no regression.
+	if l.ToolRegistrar != nil && pre.manifest.Tool.Schema != nil {
+		l.ToolRegistrar.RegisterWasmTool(
+			pre.manifest.ID,
+			pre.manifest.Tool.Schema.Description,
+			pre.manifest.Tool.Schema.Parameters,
+			adapter,
+		)
 	}
 	return pre.manifest.ID, nil
 }

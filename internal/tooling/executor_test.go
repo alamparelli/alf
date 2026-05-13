@@ -2,6 +2,8 @@ package tooling
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,8 +12,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/sandbox/integrity"
 )
+
+// capStub implements capability.Capability for the wasm-tool dispatch tests
+// without spinning up a real wasm.Adapter. Captures the last Execute input
+// so the test can assert the args round-tripped intact.
+type capStub struct {
+	id          capability.ID
+	out         capability.Output
+	err         error
+	gotInput    capability.Input
+	gotInputCnt int
+}
+
+func (c *capStub) Manifest() capability.Manifest {
+	return capability.Manifest{ID: c.id, Kind: capability.KindTool, Name: string(c.id)}
+}
+func (c *capStub) Permissions() capability.PermissionSet { return capability.PermissionSet{} }
+func (c *capStub) Execute(_ context.Context, in capability.Input) (capability.Output, error) {
+	c.gotInput = in
+	c.gotInputCnt++
+	return c.out, c.err
+}
 
 func TestExecutor_ToolNotFound(t *testing.T) {
 	dir := t.TempDir()
@@ -315,4 +339,128 @@ func findSubstring(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestExecutor_CapabilityDispatch_DesanitizesName pins the wasm-tool
+// LLM-to-daemon name flip. The LLM sees "http_hello" (sanitised per
+// Anthropic's ^[a-zA-Z0-9_]{1,64}$ rule), but the capability registry
+// holds "http-hello" (the bundle's original id). Without the
+// desanitisation step in lookupCapability, the ToolLoop dispatches
+// http_hello, the executor finds nothing, and returns "not found" —
+// which is exactly what bit #425 smoke.
+func TestExecutor_CapabilityDispatch_DesanitizesName(t *testing.T) {
+	capReg := capability.NewRegistry()
+	stub := &capStub{id: "http-hello", out: capability.Output{Data: map[string]any{"status": 200, "body": "ok"}}}
+	if err := capReg.Register(stub); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	reg := NewRegistry(t.TempDir())
+	reg.SetCapabilityRegistry(capReg)
+	reg.RegisterWasmTool(ToolSchema{Name: "http-hello", Description: "x"}, stub)
+
+	exec := &Executor{
+		DataDir:  t.TempDir(),
+		HomeDir:  t.TempDir(),
+		Registry: reg,
+		Timeout:  5 * time.Second,
+	}
+
+	result := exec.Execute(context.Background(), CallRequest{
+		ID:        "call_1",
+		Name:      "http_hello", // sanitised, as the LLM emits it
+		Arguments: `{"url":"https://httpbin.org/get"}`,
+	})
+
+	if result.IsError {
+		t.Fatalf("dispatch failed: output=%q errMsg=%q", result.Output, result.ErrorMessage)
+	}
+	if stub.gotInputCnt != 1 {
+		t.Errorf("capability.Execute called %d times, want 1", stub.gotInputCnt)
+	}
+	if got := stub.gotInput["url"]; got != "https://httpbin.org/get" {
+		t.Errorf("arguments lost in dispatch; got url=%v", got)
+	}
+	// Output.Data was a map → serialised as JSON.
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(result.Output), &decoded); err != nil {
+		t.Errorf("Output not valid JSON: %v (output=%q)", err, result.Output)
+	}
+	if v := decoded["status"]; v != float64(200) {
+		t.Errorf("Output.status=%v, want 200", v)
+	}
+}
+
+// TestExecutor_CapabilityDispatch_StringOutputPassesThrough pins the
+// string-output shortcut: when a capability returns Output.Data as a
+// string, executor must NOT json-quote it again — the ToolLoop already
+// owns the wrapping. Skills that emit plain reasoning text or pre-
+// formatted markdown would otherwise reach the LLM as `"…"` and break
+// rendering / cache-key alignment.
+func TestExecutor_CapabilityDispatch_StringOutputPassesThrough(t *testing.T) {
+	capReg := capability.NewRegistry()
+	stub := &capStub{id: "echo-tool", out: capability.Output{Data: "hello world"}}
+	if err := capReg.Register(stub); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	reg := NewRegistry(t.TempDir())
+	reg.SetCapabilityRegistry(capReg)
+	reg.RegisterWasmTool(ToolSchema{Name: "echo-tool", Description: "x"}, stub)
+
+	exec := &Executor{
+		DataDir:  t.TempDir(),
+		HomeDir:  t.TempDir(),
+		Registry: reg,
+		Timeout:  5 * time.Second,
+	}
+
+	result := exec.Execute(context.Background(), CallRequest{
+		ID:        "call_2",
+		Name:      "echo_tool",
+		Arguments: "{}",
+	})
+
+	if result.IsError {
+		t.Fatalf("dispatch failed: %v", result.ErrorMessage)
+	}
+	if result.Output != "hello world" {
+		t.Errorf("Output=%q, want %q (string re-quoted by accident?)", result.Output, "hello world")
+	}
+}
+
+// TestExecutor_CapabilityDispatch_ErrorPath pins the error surface:
+// capability.Execute returning a non-nil error or a non-empty
+// Output.Error must bubble up as IsError so the LLM sees a tool failure
+// (not a silent success that hides bugs in the bundle).
+func TestExecutor_CapabilityDispatch_ErrorPath(t *testing.T) {
+	capReg := capability.NewRegistry()
+	stub := &capStub{id: "fail-tool", err: errors.New("boom")}
+	if err := capReg.Register(stub); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	reg := NewRegistry(t.TempDir())
+	reg.SetCapabilityRegistry(capReg)
+	reg.RegisterWasmTool(ToolSchema{Name: "fail-tool", Description: "x"}, stub)
+
+	exec := &Executor{
+		DataDir:  t.TempDir(),
+		HomeDir:  t.TempDir(),
+		Registry: reg,
+		Timeout:  5 * time.Second,
+	}
+
+	result := exec.Execute(context.Background(), CallRequest{
+		ID:        "call_3",
+		Name:      "fail_tool",
+		Arguments: "{}",
+	})
+
+	if !result.IsError {
+		t.Fatal("error from capability.Execute should surface as IsError")
+	}
+	if !strings.Contains(result.ErrorMessage, "boom") {
+		t.Errorf("ErrorMessage should mention the underlying error; got %q", result.ErrorMessage)
+	}
 }

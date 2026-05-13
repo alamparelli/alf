@@ -12,6 +12,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/capability/envelope"
 	"github.com/alamparelli/alf/internal/capability/handle"
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
 // TestSetupRevocationCascade_NilWasmRtReturnsNilCascade pins the
@@ -40,7 +41,7 @@ func TestSetupRevocationCascade_HappyPathWiresCascader(t *testing.T) {
 	reg := &recordingRegistry{}
 	logs := captureLogs()
 
-	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, logs.printf)
+	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, tooling.NewRegistry(dataDir), logs.printf)
 	if err != nil {
 		t.Fatalf("setupWASMLoader: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestSetupRevocationCascade_SIGHUPReloadsAndCascades(t *testing.T) {
 	reg := &recordingRegistry{}
 	logs := captureLogs()
 
-	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, logs.printf)
+	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, tooling.NewRegistry(dataDir), logs.printf)
 	if err != nil {
 		t.Fatalf("setupWASMLoader: %v", err)
 	}
@@ -161,7 +162,7 @@ func TestSetupRevocationCascade_ContextCancelStopsHandler(t *testing.T) {
 	reg := &recordingRegistry{}
 	logs := captureLogs()
 
-	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, logs.printf)
+	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, tooling.NewRegistry(dataDir), logs.printf)
 	if err != nil {
 		t.Fatalf("setupWASMLoader: %v", err)
 	}

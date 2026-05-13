@@ -11,6 +11,7 @@ import (
 
 	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/capability/handle"
+	"github.com/alamparelli/alf/internal/tooling"
 )
 
 type recordingRegistry struct {
@@ -64,7 +65,7 @@ func TestSetupWASMLoader_RegistersBundle(t *testing.T) {
 	reg := &recordingRegistry{}
 	logs := captureLogs()
 
-	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, logs.printf)
+	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, tooling.NewRegistry(dataDir), logs.printf)
 	if err != nil {
 		t.Fatalf("setupWASMLoader: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestSetupWASMLoader_MissingRootIsNotAnError(t *testing.T) {
 	reg := &recordingRegistry{}
 	logs := captureLogs()
 
-	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, logs.printf)
+	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, tooling.NewRegistry(dataDir), logs.printf)
 	if err != nil {
 		t.Fatalf("setupWASMLoader: %v", err)
 	}
@@ -136,7 +137,7 @@ name    = "Wrong"
 	reg := &recordingRegistry{}
 	logs := captureLogs()
 
-	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, logs.printf)
+	wr, err := setupWASMLoader(context.Background(), dataDir, skillsDir, reg, tooling.NewRegistry(dataDir), logs.printf)
 	if err != nil {
 		t.Fatalf("setupWASMLoader: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestSetupWASMLoader_EmptyDataDirIsAnError(t *testing.T) {
 	handle.ResetMintForTesting()
 
 	reg := &recordingRegistry{}
-	_, err := setupWASMLoader(context.Background(), "", t.TempDir(), reg, nil)
+	_, err := setupWASMLoader(context.Background(), "", t.TempDir(), reg, tooling.NewRegistry(t.TempDir()), nil)
 	if err == nil {
 		t.Fatal("expected error for empty dataDir, got nil")
 	}

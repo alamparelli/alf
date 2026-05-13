@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alamparelli/alf/internal/capability"
 	"github.com/alamparelli/alf/internal/sandbox/integrity"
 )
 
@@ -51,7 +52,8 @@ type CallResult struct {
 	ErrorMessage string // short error description (stderr/timeout/launch error), empty on success
 }
 
-// Execute runs a tool. Native Go tools are tried first, then subprocess binaries.
+// Execute runs a tool. Native Go tools are tried first, then capability-
+// backed tools (wasm-tool bundles), then subprocess binaries.
 func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 	log.Printf("tooling: executing tool %s args=%s", call.Name, call.Arguments)
 	if n, ok := e.natives[call.Name]; ok {
@@ -63,6 +65,18 @@ func (e *Executor) Execute(ctx context.Context, call CallRequest) CallResult {
 			out = "(no output)"
 		}
 		return CallResult{ID: call.ID, Output: out}
+	}
+	// #425 follow-up: capability-backed dispatch. WASM tool bundles
+	// registered via tooling.Registry.RegisterWasmTool live in the
+	// unified capability registry under their original (hyphenated)
+	// id. The LLM sees the API-sanitised name (hyphens → underscores
+	// per Anthropic's ^[a-zA-Z0-9_]{1,64}$ rule), so we try both forms.
+	if e.Registry != nil {
+		if capReg := e.Registry.CapabilityRegistry(); capReg != nil {
+			if cap, ok := lookupCapability(capReg, call.Name); ok {
+				return e.executeCapability(ctx, call, cap)
+			}
+		}
 	}
 	timeout := e.Timeout
 	if timeout <= 0 {
@@ -177,6 +191,77 @@ func (e *Executor) resolveTool(name string) string {
 		}
 	}
 	return ""
+}
+
+// lookupCapability resolves a tool name (as the LLM sees it, after
+// SanitizeToolName) into a Capability. Tries the exact name first, then
+// the underscore→hyphen variant — matching the resolveTool convention
+// for subprocess binaries. WASM tool bundles register under their
+// original hyphenated id (e.g. "http-hello") but the API exposes them
+// as "http_hello"; this lookup bridges the gap.
+func lookupCapability(reg *capability.Registry, name string) (capability.Capability, bool) {
+	if c, ok := reg.Get(capability.ID(name)); ok {
+		return c, true
+	}
+	if strings.Contains(name, "_") {
+		alt := strings.ReplaceAll(name, "_", "-")
+		if c, ok := reg.Get(capability.ID(alt)); ok {
+			return c, true
+		}
+	}
+	return nil, false
+}
+
+// executeCapability runs a capability-backed tool (currently used by
+// the wasm-tool dispatch path). Parses the raw JSON Arguments into the
+// Capability.Input map, calls Execute, and marshals the Output back to
+// the CallResult Output string the ToolLoop expects.
+func (e *Executor) executeCapability(ctx context.Context, call CallRequest, cap capability.Capability) CallResult {
+	timeout := e.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var in capability.Input
+	if strings.TrimSpace(call.Arguments) != "" {
+		if err := json.Unmarshal([]byte(call.Arguments), &in); err != nil {
+			msg := fmt.Sprintf("tool %q: parse arguments: %v", call.Name, err)
+			return CallResult{ID: call.ID, Output: msg, IsError: true, ExitCode: -1, ErrorMessage: msg}
+		}
+	}
+
+	out, err := cap.Execute(ctx, in)
+	if err != nil {
+		msg := fmt.Sprintf("tool %q execute: %v", call.Name, err)
+		return CallResult{ID: call.ID, Output: msg, IsError: true, ExitCode: -1, ErrorMessage: msg}
+	}
+	if out.Error != "" {
+		return CallResult{ID: call.ID, Output: out.Error, IsError: true, ExitCode: -1, ErrorMessage: out.Error}
+	}
+
+	// Serialize Output.Data as JSON for the LLM. Strings pass through
+	// as-is so the ToolLoop's text-mode round-tripping (e.g. for skill
+	// reasoning) doesn't get an extra layer of quotes.
+	var payload string
+	switch v := out.Data.(type) {
+	case nil:
+		payload = "(no output)"
+	case string:
+		payload = v
+	default:
+		b, mErr := json.Marshal(v)
+		if mErr != nil {
+			msg := fmt.Sprintf("tool %q marshal output: %v", call.Name, mErr)
+			return CallResult{ID: call.ID, Output: msg, IsError: true, ExitCode: -1, ErrorMessage: msg}
+		}
+		payload = string(b)
+	}
+	if payload == "" {
+		payload = "(no output)"
+	}
+	return CallResult{ID: call.ID, Output: payload}
 }
 
 func (e *Executor) buildEnv() []string {

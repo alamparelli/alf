@@ -209,7 +209,7 @@ All WASM capability builds happen inside ALF via the native tool `wasm_build_too
 
 Flow:
 1. LLM (or CLI) calls `wasm_build_tool` with `{manifest_toml, sources}`. The manifest is authoritative — `id` and `kind` are read from it, not taken as independent inputs.
-2. Tool runs `envelope.Validate` on `manifest_toml` — rejects deferred blocks (http/exec/secrets/events/tools/memory) per MANIFEST-SCHEMA §3.4 and enforces required fields. Kind must be `wasm-tool` or `wasm-app`.
+2. Tool runs `envelope.Validate` on `manifest_toml` — rejects deferred blocks (`exec` / `secrets`; `memory` is gated behind #400 Stage 2) per MANIFEST-SCHEMA §3.4 and enforces required fields. Kind must be `wasm-tool` or `wasm-app`. `[[http.scopes]]` is **accepted** (live since #421 Wave 1+2) but a bundle that declares it cannot use the auto-sign path below — see "Exception for `[[http.scopes]]`" at the end of this section.
 3. Tool runs `internal/runtime/wasm/builder.Build` — materialises sources in an isolated tempdir, runs the Go toolchain with the env from §4.1, returns the `.wasm` bytes. Tempdir removed on every return path. Context cancellation kills the subprocess.
 4. Tool installs `manifest.toml` + `<id>.wasm` under `<DataDir>/skills.d/wasm/<id>/` (0o600 files, 0o700 dir). The bundle ships **unsigned** at this layer.
 5. Tool returns a JSON status report: `{id, kind, bundle_dir, wasm_sha256, wasm_bytes, unsigned: true, signing_note}`.
@@ -217,6 +217,14 @@ Flow:
 **Import cross-check** is NOT run at build time. Running it here would require `internal/tooling` to import `internal/runtime/wasm`, which forms a cycle (`runtime` imports `tooling`). The invariant lives at instantiate time — the same `CheckImports` that gates `Runtime.Instantiate` (§7.1 step 3). The single-source-of-truth architecture holds: the loader is the one authoritative line of defence, and a build-time pre-flight would be developer convenience, not a security boundary.
 
 **Signing** happens at boot-time discovery (§7.1-bis): the `Loader.LoadDir` sees an unsigned bundle, signs the canonicalised manifest + bundle hash with the §7.3 Tier 2 daemon key, persists `manifest.sig` alongside the bundle, and proceeds to the normal signed-load path. Subsequent boots reuse the persisted signature. Third-party bundles (marketplace, step 12 / #384) ship pre-signed and bypass auto-signing.
+
+**Exception for `[[http.scopes]]`.** Per SEC-080-006 (`EnforceTier2Ceiling`), the daemon refuses to auto-sign a manifest carrying any `[[http.scopes]]` entry — outbound HTTPS exceeds the Tier 2 ceiling. A bundle built through `wasm_build_tool` that declares HTTP scopes therefore installs unsigned, fails verification at next boot, and never loads. To ship one:
+
+1. Build the WASM artefact locally (or via the tool — only the signing step changes).
+2. Place it at `<DataDir>/tools/<id>/` (wasm-tool) or `<DataDir>/apps/<slug>/` (wasm-app) alongside the manifest.
+3. Run `alf sign <bundle-dir>` interactively. The operator's user-endorsed key (Tier 3, via `alf keygen`) produces a signature the daemon accepts at load time. The `http-hello` reference bundle under `technical/poc/http-hello/` is the worked example.
+
+Bundles without `[[http.scopes]]` follow the unchanged auto-sign path above.
 
 ---
 
@@ -245,12 +253,13 @@ path = "data/notes.json"
 - `description` (optional): human-readable description (used in LLM tool schemas)
 - `[[fs.reads]]` (repeated): each entry has `path` — relative paths resolve against the bundle's `baseDir`; trailing `/` means directory (prefix match); no trailing `/` means exact file
 - `[[fs.writes]]` (repeated): same semantics as `fs.reads`
+- `[[http.scopes]]` (repeated, **Tier 3 only**): each entry has `host` (exact hostname, optional `:port`) and optional `path_prefix`. HTTPS-only. See MANIFEST-SCHEMA §3.4 http for normalisation rules and the user-endorsed signing requirement. Live since #421 Wave 1+2.
 
 ### 5.2 What's not yet in the canonical form
 
 Deferred to other tickets, **do not add to manifests yet**:
 - Signature block (#387 / #397)
-- `[[http.scopes]]`, `[[exec.commands]]`, `[[secrets.scopes]]` (0.9.0+ Tier 3.1 expansion)
+- `[[exec.commands]]`, `[[secrets.scopes]]` (0.9.0+ Tier 3.1 expansion)
 - `[[events.exports]]`, `[[events.subscribes]]` (#399)
 - `[[tools.declares]]` (#389)
 
@@ -380,7 +389,7 @@ The old `Instance` is orphaned; callers holding it see `ErrRevoked` on next call
 ## 8. What 0.8.0 WASM does not include
 
 - **Threading inside guests.** wazero does not implement WASI threads. Guests are single-threaded.
-- **Tier 3.1 handles beyond `fs`.** `http.Handle`, `exec.Handle`, `secrets.Handle` are designed in the architecture doc but implemented incrementally — 0.8.0 ships `fs` only; 0.9.0+ adds the rest.
+- **`exec.Handle` and `secrets.Handle`.** Designed in the architecture doc, deferred to 0.9.0+. `http.Handle` shipped in 0.8.0 (#421 Wave 2) — see §3.5 host imports for `alf_http_request` and MANIFEST-SCHEMA §3.4 http for the scope rules.
 - **WASI preview 2 / Component Model.** The ecosystem is not mature enough for alf to adopt it in 0.8.0. Revisit in 0.9.0+ — the current host ABI is a Preview 1 reactor.
 - **Performance parity with native.** Each guest is ~2 MB. Instantiate takes ~60 ms. Per-call host overhead is <1 ms. For interactive tools this is fine; for hot-path use (embeddings, dedup, etc.) native stays faster.
 - **Auto-rebuild on source change.** Developer loop is: edit source → call `wasm_build_tool` → `Runtime.Evict` → next invoke rebuilds. No file-watcher. Hot-reload on manifest change is out of scope.

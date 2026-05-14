@@ -107,7 +107,7 @@ Fields that become required / forbidden based on `kind` are listed in §4.
 
 Each handle kind (fs / http / exec / secrets / memory / events / tools) has its own block. Blocks are **optional** — a capability that declares no `[[fs.reads]]` cannot read any file.
 
-**0.8.x wires `fs`, `events`, `tools`, and `http` (schema only — see `[[http.scopes]]` below).** Declaring `exec` or `secrets` blocks is a parse-time error until the corresponding handle kinds land in 0.9.0+. `[memory]` is deferred to `#400` Stage 2.
+**0.8.x wires `fs`, `events`, `tools`, and `http`** — schema, host import, forge, and runtime are all live (#421 Wave 1+2). Declaring `exec` or `secrets` blocks is a parse-time error until the corresponding handle kinds land in 0.9.0+. `[memory]` is deferred to `#400` Stage 2.
 
 **Capability-extension blocks (`#392`)**: 0.8.0 also accepts three new top-level blocks for the user-extensible handle registry: `[provider]` (capability-provider only), `[[depends]]` (any kind, references provider-exported handle kinds), and `[[raw_imports]]` (any kind, escape-hatch for direct WASI imports). Stage 1 of `#392` validates them at parse time; runtime forge integration lands in subsequent stages.
 
@@ -217,8 +217,8 @@ scope  = { devices = ["my-thermostat"] }
 Reserved `alf:` namespace ids (Stage 1 closed allowlist):
 
 ```
-alf:fs           — filesystem handle (existing, see §3.4 fs block)
-alf:http         — HTTP client handle (deferred to 0.9.0+)
+alf:fs           — filesystem handle (live, see §3.4 fs block)
+alf:http         — HTTP client handle (live since #421 Wave 2, see §3.4 http block)
 alf:exec         — process exec handle (deferred to 0.9.0+)
 alf:secrets      — vault read handle (deferred to 0.9.0+)
 alf:events.pub   — event publish handle
@@ -291,11 +291,11 @@ host = "homelab.local:8443"
 | `host` | string | yes | Exact hostname. Lowercase (normalised at parse), DNS-shape labels (letters, digits, hyphens), optional `:port` suffix in 1..65535. **No wildcards, no scheme, no path** — those are programmer errors and rejected at parse time. |
 | `path_prefix` | string | no | Literal path prefix. Empty means "any path under this host". When set, must start with `/` and contain no glob/regex meta characters (`*`, `?`, `[`, `]`, `\`, `{`, `}`). Matching is segment-aware at the forge layer (`/books/v1` matches `/books/v1` and `/books/v1/X` but NOT `/books/v10`). |
 
-**Wave 1 (schema-only):** the parser accepts and validates the block. The runtime is not yet wired to honour the scopes — a manifest declaring `[[http.scopes]]` cannot actually make HTTP calls until Wave 2 (host import `alf_http_request` via vault-proxy) and Wave 3 (forge mints the scoped `http.Handle`) land.
+**Status (#421 closed):** Wave 1 (schema + Tier 2 ceiling gate, commit `4653608`) and Wave 2 (host import `alf_http_request` + forge wiring, commit `3846cd4`) are both live. A manifest declaring `[[http.scopes]]` can issue real HTTPS requests at runtime through the scoped `http.Handle`. Egress is routed through the daemon's firewall proxy (`HTTP_PROXY=127.0.0.1:4751`), so per-domain allow/deny rules apply on top of the manifest scope.
 
 **Permission ceiling.** `[[http.scopes]]` widens the trust surface (outbound HTTP) and is therefore **above the Tier 2 (local daemon key) ceiling** per §7.3 of ARCHITECTURE-SECURITY.md. The signer refuses to sign manifests with non-empty `[[http.scopes]]` using the daemon key; the operator must run `alf keygen` + `alf sign` (Tier 3, user-endorsed). The ceiling is re-checked at load time so a manifest that somehow reached the daemon with a Tier-2 signature over an http-scoped manifest fails verification.
 
-**Runtime semantics (Waves 2-3):**
+**Runtime semantics:**
 
 - Each request URL is matched against the manifest's declared scopes. The first matching scope wins. Out-of-scope requests return `errCode = OUT_OF_SCOPE` to the guest (not a panic — the guest must handle it).
 - The runtime forces HTTPS — a guest issuing an `http://` request gets `errCode = TLS_FAILURE` even if the scope's host would otherwise match. The scope schema does not encode the scheme; it is implicitly HTTPS-only.
@@ -555,20 +555,20 @@ path = "config.toml"
 path = "rules/"
 ```
 
-### Invalid — declares `http` in 0.8.0
+### Invalid — declares `exec` in 0.8.0
 
 ```toml
 alf_envelope_version = 1
-id          = "fetcher"
+id          = "runner"
 kind        = "wasm-tool"
 version     = "0.1.0"
-name        = "Fetcher"
+name        = "Runner"
 
-[[http.scopes]]     # ← parse error: [[http.scopes]] deferred to 0.9.0+
-host = "api.github.com"
+[[exec.commands]]   # ← parse error: [[exec.commands]] deferred to 0.9.0+
+path = "/usr/bin/git"
 ```
 
-Verify flow rejects with an explicit error naming the block and the ticket (`#392` or successor) that will land it.
+Verify flow rejects with an explicit error naming the block and the ticket that will land it. `[[http.scopes]]` is **valid** in 0.8.0 (#421 Wave 1+2) but requires Tier-3 user-endorsed signing — see §3.4 http for the workflow.
 
 ### Invalid — unknown top-level field
 

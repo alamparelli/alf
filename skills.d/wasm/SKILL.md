@@ -66,10 +66,13 @@ path = "data/"
 
 **0.8.0 supports** these permission blocks for `wasm-tool`/`wasm-app`:
 
-- `[[fs.reads]]` — read scope
-- `[[fs.writes]]` — write scope
+- `[[fs.reads]]` — read scope.
+- `[[fs.writes]]` — write scope.
+- `[[http.scopes]]` — outbound HTTPS scope (host + optional path prefix), wired via the `alf_http_request` host import. Egress is routed through the daemon's firewall proxy, so per-domain allow/deny rules apply on top of the manifest scope. Released in #421 Wave 1+2.
 
-`http`, `exec`, `secrets` blocks are **deferred to 0.9.0** ([`MANIFEST-SCHEMA.md`](../../docs/MANIFEST-SCHEMA.md) §5.1) and rejected by the envelope validator if present in 0.8.0 manifests with a daemon-key (Tier 2) ceiling.
+**Tier 3 (user-endorsed) signing is mandatory for `[[http.scopes]]`.** The schema is above the Tier 2 (daemon auto-sign) ceiling per `ARCHITECTURE-SECURITY.md` §7.3 — a manifest carrying `[[http.scopes]]` is refused by the daemon key signer (SEC-080-006) and must be signed via `alf keygen` + `alf sign`. Verified on the homelab `http-hello` smoke (commit `3846cd4`, ticket #421).
+
+`exec`, `secrets` blocks remain **deferred to 0.9.0+** and are rejected by the envelope validator if present in a 0.8.0 manifest.
 
 ---
 
@@ -165,10 +168,12 @@ The daemon registers `wasm_build_tool` as a native tool. Call it with the manife
 ```
 
 The tool ([`internal/tooling/native_wasm_build.go`](../../internal/tooling/native_wasm_build.go)):
-1. Validates the manifest (rejects deferred permission blocks, checks scope).
+1. Validates the manifest (rejects 0.9.0+-deferred blocks like `exec` / `secrets`).
 2. Compiles in an isolated tempdir with the daemon's pinned Go toolchain.
 3. Installs the bundle under `<DataDir>/skills.d/wasm/<id>/`.
-4. Returns `unsigned=true` — the daemon will auto-sign at next boot.
+4. Returns `unsigned=true` — the daemon auto-signs (Tier 2 daemon key) at next boot.
+
+**Exception — `[[http.scopes]]` bundles cannot use this path.** The daemon-key auto-sign is refused by SEC-080-006 (manifests carrying `[[http.scopes]]` exceed the Tier 2 ceiling), so a bundle built through this tool that declares HTTP scopes will install unsigned, fail signature verification at next boot, and never load. For those bundles the operator must instead build locally, install to `<DataDir>/tools/<id>/` (wasm-tool) or `<DataDir>/apps/<slug>/` (wasm-app), and run `alf sign <bundle-dir>` interactively to produce a Tier-3 user-endorsed signature. The `http-hello` reference bundle under `technical/poc/http-hello/` demonstrates this flow (#421 Wave 2).
 
 ### Option B — Operator: manual `go build`
 

@@ -61,10 +61,11 @@ WASM bundles can declare these permission blocks today:
 |---|---|
 | `[[fs.reads]]` | Read access to the listed paths (relative to bundle root) |
 | `[[fs.writes]]` | Write access to the listed paths (relative to bundle root) |
+| `[[http.scopes]]` | Outbound HTTPS to the listed `host` (+ optional `path_prefix`). **Tier 3 only** — see "Trust and signing" below. |
 | `[[events.exports]]` | Topics this capability emits |
 | `[[tools.declares]]` | Other capability ids this capability is authorised to invoke (skill kind) |
 
-`http`, `exec`, and `secrets` blocks are deferred to 0.9.0. A 0.8.0 bundle declaring those is rejected at envelope validation (parse-time error).
+`exec` and `secrets` blocks remain deferred to 0.9.0+. A 0.8.0 bundle declaring those is rejected at envelope validation (parse-time error).
 
 **Path rules:**
 
@@ -103,14 +104,17 @@ path = "data/cache/"
 
 ## Trust and signing
 
-By default the daemon signs your locally-built bundles at boot with the **daemon-bootstrap key** (Tier 2). This is enough for any permission you can declare in 0.8.0 (`fs.reads`, `fs.writes`, `events.exports`).
+By default the daemon signs your locally-built bundles at boot with the **daemon-bootstrap key** (Tier 2). This is enough for `fs.reads`, `fs.writes`, `events.exports`, and `tools.declares` — i.e. anything that doesn't widen the outbound trust surface.
 
-If you want broader permissions (in 0.9.0 once `http`/`exec`/`secrets` land) or want to publish to a marketplace, sign with a **user-endorsed key** (Tier 3):
+**`[[http.scopes]]` requires Tier 3.** The daemon refuses to auto-sign a manifest with outbound HTTPS scopes (SEC-080-006) because that would let any code path producing a bundle in `~/data/skills.d/wasm/` silently mint network egress. You must sign with a **user-endorsed key**:
 
 ```bash
-alf keygen --name my-key                # one-time setup
-alf sign ~/data/tools/<id>/             # sign explicitly
+alf keygen --name my-key                          # one-time setup
+alf sign ~/data/tools/<id>/                       # for a wasm-tool bundle
+alf sign ~/data/apps/<slug>/                      # for a wasm-app bundle
 ```
+
+`exec` and `secrets` scopes — when they land in 0.9.0+ — will also require Tier 3 for the same reason. Until then a manifest declaring them is rejected at parse time.
 
 Bundles you didn't author come signed by a **marketplace key** (Tier 4). Add the publisher's key once:
 

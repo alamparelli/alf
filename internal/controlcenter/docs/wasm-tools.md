@@ -106,7 +106,7 @@ path = "data/cache/"
 
 By default the daemon signs your locally-built bundles at boot with the **daemon-bootstrap key** (Tier 2). This is enough for `fs.reads`, `fs.writes`, `events.exports`, and `tools.declares` — i.e. anything that doesn't widen the outbound trust surface.
 
-**`[[http.scopes]]` requires Tier 3.** The daemon refuses to auto-sign a manifest with outbound HTTPS scopes (SEC-080-006) because that would let any code path producing a bundle in `~/data/skills.d/wasm/` silently mint network egress. You must sign with a **user-endorsed key**:
+**`[[http.scopes]]` requires Tier 3.** The daemon refuses to auto-sign a manifest with outbound HTTPS scopes (SEC-080-006) because that would let any code path producing a bundle in `~/data/tools/<id>/` or `~/data/apps/<id>/` silently mint network egress. You must sign with a **user-endorsed key**:
 
 ```bash
 alf keygen --name my-key                          # one-time setup

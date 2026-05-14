@@ -42,7 +42,10 @@ import (
 // the builder saw.
 type WASMBuildNativeTool struct {
 	// DataDir is the daemon's writable root. Bundles install under
-	// <DataDir>/skills.d/wasm/<id>/.
+	// <DataDir>/tools/<id>/ for kind=wasm-tool and <DataDir>/apps/<id>/
+	// for kind=wasm-app, mirroring the §4.1 structural lockdown (#420).
+	// The legacy <DataDir>/skills.d/wasm/<id>/ layout is migrated by
+	// the boot loader for older installs; new builds skip it entirely.
 	DataDir string
 }
 
@@ -51,10 +54,10 @@ func (WASMBuildNativeTool) ToolName() string { return "wasm_build_tool" }
 func (WASMBuildNativeTool) Schema() ToolSchema {
 	return ToolSchema{
 		Name: "wasm_build_tool",
-		Description: "Compile a Go source tree into a WASM capability bundle and install it under skills.d/wasm/<id>/. " +
+		Description: "Compile a Go source tree into a WASM capability bundle and install it under data/tools/<id>/ (kind=wasm-tool) or data/apps/<id>/ (kind=wasm-app) per the §4.1 lockdown. " +
 			"The manifest_toml must be a valid 0.8.0 envelope manifest (see docs/MANIFEST-SCHEMA.md). " +
 			"The sources map keys are relative paths inside the module root (e.g., go.mod, main.go). " +
-			"The bundle is installed unsigned; the daemon auto-signs at boot discovery.",
+			"The bundle is installed unsigned; the daemon auto-signs at boot discovery — except for manifests carrying [[http.scopes]], which exceed the Tier 2 ceiling (SEC-080-006) and need a manual `alf sign` step before they load.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -132,8 +135,22 @@ func (t WASMBuildNativeTool) Run(ctx context.Context, argsJSON string) (string, 
 		return "", err
 	}
 
-	// 3. Install bundle.
-	bundleDir := filepath.Join(t.DataDir, "skills.d", "wasm", m.ID)
+	// 3. Install bundle at the §4.1 lockdown path for the kind. Both
+	//    roots are scanned by the WASM loader (LoadAll: data/tools +
+	//    data/apps), so the destination depends purely on the manifest's
+	//    kind — never the legacy data/skills.d/wasm/ path. Unsupported
+	//    kinds (skill, capability-provider, llm-provider, marketplace-app)
+	//    refuse here rather than installing into a wasm-loader root.
+	var sub string
+	switch m.Kind {
+	case envelope.KindWASMTool:
+		sub = "tools"
+	case envelope.KindWASMApp:
+		sub = "apps"
+	default:
+		return "", fmt.Errorf("wasm_build_tool: kind %q has no install root (only wasm-tool/wasm-app are supported)", m.Kind)
+	}
+	bundleDir := filepath.Join(t.DataDir, sub, m.ID)
 	if err := os.MkdirAll(bundleDir, 0o700); err != nil {
 		return "", fmt.Errorf("install bundle dir: %w", err)
 	}
@@ -155,7 +172,7 @@ func (t WASMBuildNativeTool) Run(ctx context.Context, argsJSON string) (string, 
 		WasmSHA256:  hex.EncodeToString(sum[:]),
 		WasmBytes:   len(wasmBytes),
 		Unsigned:    true,
-		SigningNote: "Bundle is unsigned; daemon auto-signs at boot discovery (step 9 of #386).",
+		SigningNote: "Bundle is unsigned; daemon auto-signs at next boot discovery — UNLESS the manifest declares [[http.scopes]], in which case SEC-080-006 refuses the auto-sign and the operator must run `alf sign " + bundleDir + "` (Tier 3 user-endorsed key) before the bundle loads.",
 	}
 	out, err := json.Marshal(res)
 	if err != nil {

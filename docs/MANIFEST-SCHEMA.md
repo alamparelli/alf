@@ -82,7 +82,7 @@ description = "Reads a file from the capability's scoped data dir."
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `id` | string | yes | Unique capability ID within the registry. Matches `^[a-z0-9][a-z0-9-]*$`. Also the directory name under `skills.d/wasm/<id>/` or `apps/<id>/`. |
+| `id` | string | yes | Unique capability ID within the registry. Matches `^[a-z0-9][a-z0-9-]*$`. Also the directory name under `<DataDir>/tools/<id>/` (kind=wasm-tool) or `<DataDir>/apps/<id>/` (kind=wasm-app) per §4.1 (#420). |
 | `kind` | string | yes | One of the values in §3.3. |
 | `version` | string | yes | Semver 2.0.0 of this bundle. Verification does not enforce semver ordering; the field is for audit and migration tooling. |
 | `name` | string | yes | Human-readable display name. Surfaced in the Control Center UI and LLM tool schemas. |

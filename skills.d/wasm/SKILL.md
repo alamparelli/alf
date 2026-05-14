@@ -25,10 +25,20 @@ If the user asks for "a tool" without specifying, ask one clarifying question: *
 
 ## 1. Bundle structure (on-disk)
 
+Install path is keyed on manifest `kind` per the §4.1 lockdown (`docs/ARCHITECTURE-SECURITY.md` §4.1, #420):
+
+| Manifest kind | Install path |
+|---|---|
+| `wasm-tool` | `<DataDir>/tools/<id>/` |
+| `wasm-app` | `<DataDir>/apps/<id>/` |
+
+The legacy `<DataDir>/skills.d/wasm/<id>/` is no longer the install target — `wasm_build_tool` writes directly to the kind-keyed path, and the loader migrates pre-#420 installs from skills.d at boot. Documentation, agents, and operators should refer to the new paths.
+
 ```
-skills.d/wasm/<id>/
+<DataDir>/tools/<id>/          (wasm-tool)
+<DataDir>/apps/<id>/           (wasm-app)
 ├── manifest.toml              ← envelope header + permissions (you write)
-├── manifest.sig               ← detached signature (daemon auto-signs at boot)
+├── manifest.sig               ← detached signature (daemon auto-signs at boot, or `alf sign` for Tier-3 [[http.scopes]])
 ├── <id>.wasm                  ← compiled reactor-mode binary (you build, see §4)
 ├── src/                       ← Go module retained for audit (you write)
 │   ├── go.mod
@@ -170,24 +180,27 @@ The daemon registers `wasm_build_tool` as a native tool. Call it with the manife
 The tool ([`internal/tooling/native_wasm_build.go`](../../internal/tooling/native_wasm_build.go)):
 1. Validates the manifest (rejects 0.9.0+-deferred blocks like `exec` / `secrets`).
 2. Compiles in an isolated tempdir with the daemon's pinned Go toolchain.
-3. Installs the bundle under `<DataDir>/skills.d/wasm/<id>/`.
+3. Installs the bundle at the §4.1 lockdown path keyed on `kind`:
+   - `kind = "wasm-tool"` → `<DataDir>/tools/<id>/`
+   - `kind = "wasm-app"`  → `<DataDir>/apps/<id>/`
+   The legacy `<DataDir>/skills.d/wasm/<id>/` layout is **never** written by new builds; older installs there are migrated to the kind-keyed path by the loader's `migrateLegacyBundles` step at boot.
 4. Returns `unsigned=true` — the daemon auto-signs (Tier 2 daemon key) at next boot.
 
-**Exception — `[[http.scopes]]` bundles cannot use this path.** The daemon-key auto-sign is refused by SEC-080-006 (manifests carrying `[[http.scopes]]` exceed the Tier 2 ceiling), so a bundle built through this tool that declares HTTP scopes will install unsigned, fail signature verification at next boot, and never load. For those bundles the operator must instead build locally, install to `<DataDir>/tools/<id>/` (wasm-tool) or `<DataDir>/apps/<slug>/` (wasm-app), and run `alf sign <bundle-dir>` interactively to produce a Tier-3 user-endorsed signature. The `http-hello` reference bundle under `technical/poc/http-hello/` demonstrates this flow (#421 Wave 2).
+**Exception — `[[http.scopes]]` bundles cannot ride the auto-sign path.** SEC-080-006 refuses to auto-sign a manifest carrying outbound HTTPS scopes (it would silently widen Tier 2). The bundle still installs at the correct kind-keyed path, but it stays unsigned, fails signature verification at next boot, and never loads. The operator finishes the install by running `alf sign <bundle-dir>` interactively — Tier 3 user-endorsed key. The `http-hello` reference bundle under `technical/poc/http-hello/` demonstrates this flow (#421 Wave 2).
 
 ### Option B — Operator: manual `go build`
 
 For local development or CI:
 
 ```bash
-cd skills.d/wasm/<id>/src
+cd <bundle-dir>/src                          # bundle-dir = <DataDir>/tools/<id>/ or <DataDir>/apps/<id>/
 GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 \
   go build -buildmode=c-shared -trimpath -o ../<id>.wasm .
 ```
 
 Match the flags exactly — see [`WASM.md`](../../docs/WASM.md) §4.1. Wrong flags produce a binary that fails to instantiate (no `_initialize` export) or a binary the daemon refuses to link.
 
-After the build, the bundle is unsigned. Restart the daemon (or trigger a wasm-loader rescan); the boot loader will auto-sign with the daemon-bootstrap key.
+After the build, the bundle is unsigned. Restart the daemon (or trigger a wasm-loader rescan); the boot loader auto-signs with the daemon-bootstrap key — **except** for manifests carrying `[[http.scopes]]`, which need `alf sign <bundle-dir>` (Tier 3 user-endorsed). See §2 for the ceiling rule.
 
 ---
 

@@ -103,6 +103,56 @@ func TestWASMBuildTool_InvalidKindRejected(t *testing.T) {
 	}
 }
 
+// TestWASMBuildTool_WASMAppInstallsInApps pins the §4.1 lockdown split:
+// kind=wasm-app must land under <DataDir>/apps/<id>/, not the legacy
+// skills.d/wasm/<id>/ path. The loader's LoadAll scans both data/tools
+// and data/apps, so the destination is determined purely by manifest
+// kind. A regression here would silently route apps into the tool
+// surface (and worse, miss the supervisor's per-app layout
+// expectations downstream).
+func TestWASMBuildTool_WASMAppInstallsInApps(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+
+	dataDir := t.TempDir()
+	tool := WASMBuildNativeTool{DataDir: dataDir}
+
+	manifest := strings.Replace(helloReadManifest, `id      = "hello-read"`, `id      = "hello-app"`, 1)
+	manifest = strings.Replace(manifest, `kind    = "wasm-tool"`, `kind    = "wasm-app"`, 1)
+
+	args, _ := json.Marshal(wasmBuildArgs{
+		ManifestTOML: manifest,
+		Sources: map[string]string{
+			"go.mod":  helloReadGoMod,
+			"main.go": helloReadMainGo,
+		},
+	})
+	out, err := tool.Run(context.Background(), string(args))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var res wasmBuildResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	wantDir := filepath.Join(dataDir, "apps", "hello-app")
+	if res.BundleDir != wantDir {
+		t.Errorf("BundleDir=%q, want %q", res.BundleDir, wantDir)
+	}
+	if _, err := os.Stat(filepath.Join(wantDir, "manifest.toml")); err != nil {
+		t.Errorf("manifest.toml missing at apps/ install path: %v", err)
+	}
+
+	// And confirm the legacy path was NOT used — a regression test
+	// for any future code that re-adds the skills.d/wasm fallback.
+	legacy := filepath.Join(dataDir, "skills.d", "wasm", "hello-app")
+	if _, err := os.Stat(legacy); err == nil {
+		t.Errorf("legacy path %s should NOT exist", legacy)
+	}
+}
+
 func TestWASMBuildTool_BadManifestRejected(t *testing.T) {
 	tool := WASMBuildNativeTool{DataDir: t.TempDir()}
 	// Missing alf_envelope_version — schema rejects.
@@ -166,8 +216,12 @@ func TestWASMBuildTool_FullBuildAndInstall(t *testing.T) {
 		t.Errorf("WasmSHA256 length=%d, want 64 hex", len(res.WasmSHA256))
 	}
 
-	// Bundle dir layout.
-	bundleDir := filepath.Join(dataDir, "skills.d", "wasm", "hello-read")
+	// Bundle dir layout — per §4.1 the install path is
+	// data/tools/<id>/ for wasm-tool (hello-read manifest declares
+	// kind=wasm-tool). The legacy skills.d/wasm/<id>/ path is no
+	// longer the install target — the loader's migrateLegacyBundles
+	// only moves pre-#420 installs, it never creates new ones.
+	bundleDir := filepath.Join(dataDir, "tools", "hello-read")
 	if res.BundleDir != bundleDir {
 		t.Errorf("BundleDir=%q, want %q", res.BundleDir, bundleDir)
 	}

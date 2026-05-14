@@ -211,7 +211,7 @@ Flow:
 1. LLM (or CLI) calls `wasm_build_tool` with `{manifest_toml, sources}`. The manifest is authoritative — `id` and `kind` are read from it, not taken as independent inputs.
 2. Tool runs `envelope.Validate` on `manifest_toml` — rejects deferred blocks (`exec` / `secrets`; `memory` is gated behind #400 Stage 2) per MANIFEST-SCHEMA §3.4 and enforces required fields. Kind must be `wasm-tool` or `wasm-app`. `[[http.scopes]]` is **accepted** (live since #421 Wave 1+2) but a bundle that declares it cannot use the auto-sign path below — see "Exception for `[[http.scopes]]`" at the end of this section.
 3. Tool runs `internal/runtime/wasm/builder.Build` — materialises sources in an isolated tempdir, runs the Go toolchain with the env from §4.1, returns the `.wasm` bytes. Tempdir removed on every return path. Context cancellation kills the subprocess.
-4. Tool installs `manifest.toml` + `<id>.wasm` under `<DataDir>/skills.d/wasm/<id>/` (0o600 files, 0o700 dir). The bundle ships **unsigned** at this layer.
+4. Tool installs `manifest.toml` + `<id>.wasm` under `<DataDir>/tools/<id>/` (kind=wasm-tool) or `<DataDir>/apps/<id>/` (kind=wasm-app) per §4.1 (#420 lockdown) — 0o600 files, 0o700 dir. The legacy `skills.d/wasm/<id>/` layout is never written by new builds; older installs there are migrated to the kind-keyed path by the loader's `migrateLegacyBundles` at next boot. The bundle ships **unsigned** at this layer.
 5. Tool returns a JSON status report: `{id, kind, bundle_dir, wasm_sha256, wasm_bytes, unsigned: true, signing_note}`.
 
 **Import cross-check** is NOT run at build time. Running it here would require `internal/tooling` to import `internal/runtime/wasm`, which forms a cycle (`runtime` imports `tooling`). The invariant lives at instantiate time — the same `CheckImports` that gates `Runtime.Instantiate` (§7.1 step 3). The single-source-of-truth architecture holds: the loader is the one authoritative line of defence, and a build-time pre-flight would be developer convenience, not a security boundary.
@@ -247,7 +247,7 @@ path = "data/notes.json"
 
 **Fields:**
 
-- `id` (required): unique capability ID, also the directory name under `skills.d/wasm/<id>/`
+- `id` (required): unique capability ID, also the directory name under `<DataDir>/tools/<id>/` (wasm-tool) or `<DataDir>/apps/<id>/` (wasm-app) per §4.1
 - `kind` (required): `"wasm-tool"` or `"wasm-app"`
 - `name` (optional): display name
 - `description` (optional): human-readable description (used in LLM tool schemas)
@@ -274,7 +274,7 @@ The prototype uses a **minimal hand-written TOML parser** in `internal/runtime/w
 | Kind | 0.8.0 position | Trust model | Sandbox | Migration path |
 |---|---|---|---|---|
 | `KindTool` (native Go) | Maintainer-only code in alf repo | Release pipeline signature on the daemon binary — the tool ships with it | Layer 1 outer ring (#86) + Tier 3.1 discipline in the source | Stays Go. Third-party tools that exist today as Go-kind are rewritten as `KindWASMTool` before 0.8.0 final. |
-| `KindWASMTool` | **New.** Default for all new / third-party tools | Per-bundle signature under Layer 2 | wazero (Layer 1 inner) + forged handles (Tier 3.1) | Authored via `wasm_build_tool`; installed under `skills.d/wasm/<id>/` |
+| `KindWASMTool` | **New.** Default for all new / third-party tools | Per-bundle signature under Layer 2 | wazero (Layer 1 inner) + forged handles (Tier 3.1) | Authored via `wasm_build_tool`; installed under `<DataDir>/tools/<id>/` (§4.1) |
 | `KindSkill` | Stays | Skill bundle signed under Layer 2 | Skills don't execute code — they orchestrate tool calls via the LLM | Skill contents unchanged; tools *referenced* by skills become `KindWASMTool` |
 | `KindApp` (native Go) | Deprecated path for new apps | Per-app signature under Layer 2 | Layer 1 outer + Tier 3.1 discipline | Existing apps (xpost, contacthive) continue to work through 0.8.0; new apps authored as `KindWASMApp` |
 | `KindWASMApp` | **New.** Default for all new apps | Per-bundle signature under Layer 2 | wazero + forged handles | Authored via `wasm_build_app` (sibling to `wasm_build_tool`, same flow) |
@@ -331,7 +331,7 @@ func (r *Runtime) Instantiate(ctx, in envelope.VerifyInput, wasmBytes, baseDir) 
 
 ### 7.1-bis Boot-time loader
 
-`internal/runtime/wasm/loader.go` walks `<DataDir>/skills.d/wasm/<id>/` and registers each bundle it can verify:
+`internal/runtime/wasm/loader.go::LoadAll` walks both `<DataDir>/tools/<id>/` (wasm-tool bundles) and `<DataDir>/apps/<id>/` (wasm-app bundles) per §4.1 (#420) and registers each bundle it can verify. A separate `migrateLegacyBundles` pass moves any pre-#420 install still at `<DataDir>/skills.d/wasm/<id>/` to the kind-keyed root before the scan runs:
 
 ```
 <root>/<id>/manifest.toml   (required)
